@@ -1,21 +1,21 @@
-import { digestCapabilityValueV1 } from '@kite/builtin-runtime/capability';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { isMcpProviderError, mcpProviderFailurePolicyFactsV1 } from '@kite/builtin-runtime/mcp';
+import { isMcpProviderError, mcpProviderFailurePolicyFacts } from '@kite/builtin-runtime/mcp';
 import { type ClassifiedFailure, classifyFailure } from './failures';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
-type ProviderReadinessRuntimeRecordV1 = RuntimeState['providerReadiness'][string];
+type ProviderReadinessRuntimeRecord = RuntimeState['providerReadiness'][string];
 
 const DEFAULT_READINESS_TTL_MS = 30_000;
 const DEFAULT_MAX_ATTEMPTS = 2;
 const CALLABLE_PROVIDER_STATUSES = new Set(['ready', 'degraded'] as const);
 
-export interface ProviderReadinessPersistenceV1 {
+export interface ProviderReadinessPersistence {
   getState(): Readonly<RuntimeState>;
   persistEvent(event: RuntimeEvent): Promise<boolean>;
 }
 
-export interface ProviderReadinessRequestV1 {
+export interface ProviderReadinessRequest {
   providerId: string;
   routeRevision: string;
   executionBoundaryDigest: string;
@@ -25,7 +25,7 @@ export interface ProviderReadinessRequestV1 {
   signal?: AbortSignal;
 }
 
-export interface ProviderReadinessReceiptV1 {
+export interface ProviderReadinessReceipt {
   readinessKey: string;
   lifecycleId: string;
   providerId: string;
@@ -67,18 +67,18 @@ export class ProviderReadinessUnavailableError extends Error {
   }
 }
 
-interface InFlightReadinessV1 {
+interface InFlightReadiness {
   lifecycleId: string;
   intentReady: Promise<void>;
-  result: Promise<ProviderReadinessReceiptV1>;
+  result: Promise<ProviderReadinessReceipt>;
 }
 
-export function providerReadinessKeyV1(input: {
+export function providerReadinessKey(input: {
   providerId: string;
   routeRevision: string;
   executionBoundaryDigest: string;
 }): string {
-  return digestCapabilityValueV1({
+  return digestCapabilityValue({
     schema: 'kite.provider-readiness-key.v1',
     providerId: requiredIdentity(input.providerId, 'providerId'),
     routeRevision: requiredIdentity(input.routeRevision, 'routeRevision'),
@@ -93,8 +93,8 @@ export function providerReadinessKeyV1(input: {
  * Runtime-owned coalescing boundary for provider readiness. The adapter is never
  * called before intent, waiter, and attempt acknowledgements have all succeeded.
  */
-export class ProviderReadinessCoordinatorV1 {
-  private readonly inFlight = new Map<string, InFlightReadinessV1>();
+export class ProviderReadinessCoordinator {
+  private readonly inFlight = new Map<string, InFlightReadiness>();
   private readonly provider: McpRuntimeProvider | undefined;
   private readonly options: {
     now?: () => number;
@@ -115,9 +115,9 @@ export class ProviderReadinessCoordinatorV1 {
   }
 
   async ensureReady(
-    request: ProviderReadinessRequestV1,
-    persistence: ProviderReadinessPersistenceV1,
-  ): Promise<ProviderReadinessReceiptV1> {
+    request: ProviderReadinessRequest,
+    persistence: ProviderReadinessPersistence,
+  ): Promise<ProviderReadinessReceipt> {
     const identity = {
       providerId: requiredIdentity(request.providerId, 'providerId'),
       routeRevision: requiredIdentity(request.routeRevision, 'routeRevision'),
@@ -127,7 +127,7 @@ export class ProviderReadinessCoordinatorV1 {
       ),
     };
     const toolCallId = requiredIdentity(request.toolCallId, 'toolCallId');
-    const readinessKey = providerReadinessKeyV1(identity);
+    const readinessKey = providerReadinessKey(identity);
     const now = this.now();
     const current = persistence.getState().providerReadiness[readinessKey];
     const callable = this.providerIsCallable(identity.providerId);
@@ -174,7 +174,7 @@ export class ProviderReadinessCoordinatorV1 {
     const expiresAt = new Date(now + this.ttlMs()).toISOString();
     const lifecycleId = reuse
       ? current.lifecycleId
-      : digestCapabilityValueV1({
+      : digestCapabilityValue({
           schema: 'kite.provider-readiness-lifecycle.v1',
           readinessKey,
           requestedAt,
@@ -195,7 +195,7 @@ export class ProviderReadinessCoordinatorV1 {
           },
           'Provider readiness intent was not durably acknowledged.',
         );
-    const entry = {} as InFlightReadinessV1;
+    const entry = {} as InFlightReadiness;
     entry.lifecycleId = lifecycleId;
     entry.intentReady = intentReady;
     entry.result = (async () => {
@@ -218,15 +218,15 @@ export class ProviderReadinessCoordinatorV1 {
   }
 
   private async runLifecycle(
-    record: Readonly<ProviderReadinessRuntimeRecordV1>,
+    record: Readonly<ProviderReadinessRuntimeRecord>,
     identity: {
       providerId: string;
       routeRevision: string;
       executionBoundaryDigest: string;
     },
     signal: AbortSignal | undefined,
-    persistence: ProviderReadinessPersistenceV1,
-  ): Promise<ProviderReadinessReceiptV1> {
+    persistence: ProviderReadinessPersistence,
+  ): Promise<ProviderReadinessReceipt> {
     throwIfAborted(signal);
     if (this.providerIsCallable(identity.providerId)) {
       return this.persistSuccess(record, identity, persistence);
@@ -304,14 +304,14 @@ export class ProviderReadinessCoordinatorV1 {
   }
 
   private async persistSuccess(
-    record: Readonly<ProviderReadinessRuntimeRecordV1>,
+    record: Readonly<ProviderReadinessRuntimeRecord>,
     identity: {
       providerId: string;
       routeRevision: string;
       executionBoundaryDigest: string;
     },
-    persistence: ProviderReadinessPersistenceV1,
-  ): Promise<ProviderReadinessReceiptV1> {
+    persistence: ProviderReadinessPersistence,
+  ): Promise<ProviderReadinessReceipt> {
     const readyAt = new Date(this.now()).toISOString();
     const expiresAt = new Date(this.now() + this.ttlMs()).toISOString();
     const providerDirectoryRevision =
@@ -339,12 +339,12 @@ export class ProviderReadinessCoordinatorV1 {
   }
 
   private async registerWaiter(
-    record: Readonly<ProviderReadinessRuntimeRecordV1>,
+    record: Readonly<ProviderReadinessRuntimeRecord>,
     readinessKey: string,
     toolCallId: string,
-    persistence: ProviderReadinessPersistenceV1,
+    persistence: ProviderReadinessPersistence,
   ): Promise<void> {
-    const waiterId = digestCapabilityValueV1({
+    const waiterId = digestCapabilityValue({
       schema: 'kite.provider-readiness-waiter.v1',
       lifecycleId: record.lifecycleId,
       toolCallId,
@@ -372,7 +372,7 @@ export class ProviderReadinessCoordinatorV1 {
   }
 
   private async persist(
-    persistence: ProviderReadinessPersistenceV1,
+    persistence: ProviderReadinessPersistence,
     event: RuntimeEvent,
     message: string,
   ): Promise<void> {
@@ -401,7 +401,7 @@ export class ProviderReadinessCoordinatorV1 {
 function readinessFailure(error: unknown): ClassifiedFailure {
   if (error instanceof ProviderReadinessUnavailableError) return error.failure;
   if (isMcpProviderError(error)) {
-    const facts = mcpProviderFailurePolicyFactsV1(error);
+    const facts = mcpProviderFailurePolicyFacts(error);
     return { ...classifyFailure(facts.kind, facts.message), ...facts };
   }
   return classifyFailure(
@@ -411,8 +411,8 @@ function readinessFailure(error: unknown): ClassifiedFailure {
 }
 
 function receiptFromRecord(
-  record: Readonly<ProviderReadinessRuntimeRecordV1>,
-): ProviderReadinessReceiptV1 {
+  record: Readonly<ProviderReadinessRuntimeRecord>,
+): ProviderReadinessReceipt {
   if (record.status !== 'ready' || !record.providerDirectoryRevision) {
     throw new ProviderReadinessUnknownError(record.readinessKey);
   }

@@ -1,10 +1,10 @@
 import { resolve } from 'node:path';
 import {
-  discoverSandboxBackendCandidateV1,
+  discoverSandboxBackendCandidate,
   resolveSandboxRuntime,
-  resolveWindowsManagedNetworkSetupStatusV1,
-  sandboxSupportsFullModeV1,
-  setupWindowsManagedNetworkV1,
+  resolveWindowsManagedNetworkSetupStatus,
+  sandboxSupportsFullMode,
+  setupWindowsManagedNetwork,
 } from '@kite/builtin-runtime/sandbox';
 import type {
   InteractionMode,
@@ -13,7 +13,7 @@ import type {
 } from '@kite/runtime-contract';
 import {
   type ClientPresentationEvent,
-  RUNTIME_COMMAND_SCHEMA_V1,
+  RUNTIME_COMMAND_SCHEMA_,
   type RuntimeAccess,
   type RuntimeNotification,
 } from '@kite/runtime-contract';
@@ -26,24 +26,21 @@ import {
 } from '#app/config/index';
 import { skillDirs } from '#app/config/paths';
 import { shouldPromptWorkspaceTrust, trustWorkspace } from '#app/config/workspace-trust';
-import { composeAppGitBrokerV1, resolveAppGitExecutableV1 } from '#app/git/composition';
-import { composeObservabilityV1, observeRuntimeFactV1 } from '#app/observability/composition';
-import { resolveTelemetryConsentV1 } from '#app/observability/consent';
+import { composeAppGitBroker, resolveAppGitExecutable } from '#app/git/composition';
+import { composeObservability, observeRuntimeFact } from '#app/observability/composition';
+import { resolveTelemetryConsent } from '#app/observability/consent';
+import { formatObservabilityStatus, projectObservabilityStatus } from '#app/observability/status';
+import { resolveReleaseComposition } from '#app/release/composition-root';
 import {
-  formatObservabilityStatusV1,
-  projectObservabilityStatusV1,
-} from '#app/observability/status';
-import { resolveReleaseCompositionV1 } from '#app/release/composition-root';
-import {
-  formatExecutionStatusV1,
-  formatUnadmittedExecutionStatusV1,
-  tryProjectAdmittedExecutionStatusV1,
+  formatExecutionStatus,
+  formatUnadmittedExecutionStatus,
+  tryProjectAdmittedExecutionStatus,
 } from '#app/release/execution-status';
-import { formatReleaseStatusV1, projectReleaseStatusV1 } from '#app/release/status-projection';
-import { projectTerminalOutcomeV1 } from '#app/runtime-projection';
+import { formatReleaseStatus, projectReleaseStatus } from '#app/release/status-projection';
+import { projectTerminalOutcome } from '#app/runtime-projection';
 import type { SandboxBackend } from '#app/sandbox/types';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '#app/trace/replay';
-import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
+import { composeAppSandboxExecutor } from '@/app/sandbox/composition';
 
 export interface CliRuntimeAccessInput {
   readonly sessionId: string;
@@ -51,8 +48,8 @@ export interface CliRuntimeAccessInput {
   readonly workspace: string;
   readonly checkpointPath: string;
   readonly config: AgentConfig;
-  readonly shellExecutor: ReturnType<typeof composeAppSandboxExecutorV1>;
-  readonly gitBroker?: ReturnType<typeof composeAppGitBrokerV1>;
+  readonly shellExecutor: ReturnType<typeof composeAppSandboxExecutor>;
+  readonly gitBroker?: ReturnType<typeof composeAppGitBroker>;
   readonly interactionMode: InteractionMode;
   readonly authorizationMode?: 'default' | 'full_access';
   readonly authorizationSource?: 'config';
@@ -130,11 +127,11 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     return;
   }
   if (args.command === 'sandbox-status') {
-    console.log(JSON.stringify(await resolveWindowsManagedNetworkSetupStatusV1(), null, 2));
+    console.log(JSON.stringify(await resolveWindowsManagedNetworkSetupStatus(), null, 2));
     return;
   }
   if (args.command === 'sandbox-setup') {
-    const status = await setupWindowsManagedNetworkV1();
+    const status = await setupWindowsManagedNetwork();
     console.log(`Windows network sandbox is ${status.state}.`);
     return;
   }
@@ -173,23 +170,23 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   const interactionMode = args.interactionMode ?? config.interactionMode ?? 'accept_edits';
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
-    detectBackend: discoverSandboxBackendCandidateV1,
+    detectBackend: discoverSandboxBackendCandidate,
   });
-  const executionStatus = tryProjectAdmittedExecutionStatusV1({
+  const executionStatus = tryProjectAdmittedExecutionStatus({
     config,
     sandboxRuntime,
   });
   if (args.telemetryStatus) {
-    const consent = resolveTelemetryConsentV1({
+    const consent = resolveTelemetryConsent({
       releaseChannel: 'development',
       user: config.telemetry?.user,
       project: config.telemetry?.project,
     });
     console.log(
-      formatObservabilityStatusV1(
-        projectObservabilityStatusV1({
+      formatObservabilityStatus(
+        projectObservabilityStatus({
           artifactTelemetryAllowed: false,
-          featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
+          featureEnabled: getFeatureFlags(config).observabilityMetrics,
           consent,
           remoteExporterConfigured: false,
         }),
@@ -198,24 +195,24 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     return;
   }
   if (args.releaseStatus) {
-    const composition = resolveReleaseCompositionV1({
+    const composition = resolveReleaseComposition({
       config,
       artifactReleaseProfileV1Enabled: false,
       profileId: 'internal-dogfood',
       production: false,
     });
-    console.log(formatReleaseStatusV1(projectReleaseStatusV1({ composition, executionStatus })));
+    console.log(formatReleaseStatus(projectReleaseStatus({ composition, executionStatus })));
     return;
   }
   if (args.executionStatus) {
     console.log(
       executionStatus
-        ? formatExecutionStatusV1(executionStatus)
-        : formatUnadmittedExecutionStatusV1(sandboxRuntime),
+        ? formatExecutionStatus(executionStatus)
+        : formatUnadmittedExecutionStatus(sandboxRuntime),
     );
     return;
   }
-  const shellExecutor = composeAppSandboxExecutorV1({
+  const shellExecutor = composeAppSandboxExecutor({
     entrypoint: 'foreground_cli',
     workspace: args.workspace,
     config,
@@ -223,10 +220,10 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     onDiagnostic: (message) => console.warn(`[sandbox] ${message}`),
   });
   const shellRuntime = await shellExecutor.prepare();
-  const gitExecutable = resolveAppGitExecutableV1();
+  const gitExecutable = resolveAppGitExecutable();
   const gitBroker =
     gitExecutable && config.brokeredGitShellDenyEvidence
-      ? composeAppGitBrokerV1({
+      ? composeAppGitBroker({
           workspace: args.workspace,
           executable: gitExecutable,
           config,
@@ -237,7 +234,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     shellRuntime.mode === 'sandbox'
       ? { enabled: true, backend: shellRuntime.backend, available: true }
       : { enabled: false, backend: 'none' as const, available: false };
-  const fullModeAvailable = sandboxSupportsFullModeV1(effectiveSandboxRuntime.backend);
+  const fullModeAvailable = sandboxSupportsFullMode(effectiveSandboxRuntime.backend);
   if (interactionMode === 'full' && !fullModeAvailable) {
     throw new Error('非沙箱环境无法开启full');
   }
@@ -250,10 +247,10 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       sandboxAvailable: fullModeAvailable,
     });
   }
-  const observability = composeObservabilityV1({
+  const observability = composeObservability({
     artifactTelemetryAllowed: false,
-    featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
-    consent: resolveTelemetryConsentV1({
+    featureEnabled: getFeatureFlags(config).observabilityMetrics,
+    consent: resolveTelemetryConsent({
       releaseChannel: 'development',
       user: config.telemetry?.user,
       project: config.telemetry?.project,
@@ -296,7 +293,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   let iterator: AsyncIterator<RuntimeNotification> | undefined;
   try {
     const createReceipt = await access.command({
-      schema: RUNTIME_COMMAND_SCHEMA_V1,
+      schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: `cli-create:${args.threadId}`,
       type: 'create_session',
       workspace: args.workspace,
@@ -310,7 +307,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     const subscription = access.subscribe({ sessionId: args.threadId, afterRevision });
     iterator = subscription[Symbol.asyncIterator]();
     const startReceipt = await access.command({
-      schema: RUNTIME_COMMAND_SCHEMA_V1,
+      schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: `cli-turn:${args.threadId}:1`,
       type: 'start_turn',
       sessionId: args.threadId,
@@ -325,7 +322,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       const next = await iterator.next();
       if (next.done) break;
       const notification = next.value;
-      const event = projectRuntimeNotificationForCliV1(notification);
+      const event = projectRuntimeNotificationForCli(notification);
       if (!event) {
         const status =
           notification.durability === 'durable'
@@ -334,9 +331,9 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
         if (status && ['completed', 'cancelled', 'failed'].includes(status)) break;
         continue;
       }
-      observeRuntimeFactV1(observability, event, new Date().toISOString());
+      observeRuntimeFact(observability, event, new Date().toISOString());
       console.log(
-        JSON.stringify(projectCliRuntimeEventV1(event, getFeatureFlags(config).terminalOutcomeV1)),
+        JSON.stringify(projectCliRuntimeEvent(event, getFeatureFlags(config).terminalOutcome)),
       );
     }
   } finally {
@@ -346,7 +343,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   }
 }
 
-function projectRuntimeNotificationForCliV1(
+function projectRuntimeNotificationForCli(
   notification: RuntimeNotification,
 ): ClientPresentationEvent | undefined {
   if (notification.durability === 'durable') return notification.projection.presentation;
@@ -364,13 +361,13 @@ function projectRuntimeNotificationForCliV1(
   };
 }
 
-export function projectCliRuntimeEventV1(
+export function projectCliRuntimeEvent(
   event: ClientPresentationEvent,
   terminalOutcomeEnabled = true,
 ):
   | ClientPresentationEvent
   | (ClientPresentationEvent & {
-      terminalPresentation: ReturnType<typeof projectTerminalOutcomeV1>;
+      terminalPresentation: ReturnType<typeof projectTerminalOutcome>;
     }) {
   if (
     terminalOutcomeEnabled &&
@@ -379,8 +376,8 @@ export function projectCliRuntimeEventV1(
   ) {
     return {
       ...event,
-      terminalPresentation: projectTerminalOutcomeV1(
-        event.outcome as Parameters<typeof projectTerminalOutcomeV1>[0],
+      terminalPresentation: projectTerminalOutcome(
+        event.outcome as Parameters<typeof projectTerminalOutcome>[0],
       ),
     };
   }
@@ -449,10 +446,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   for (const feature of multi('--feature')) {
     const override = parseFeatureOverride(feature);
     if (
-      override.executionBoundaryV1 === true ||
-      override.networkBoundaryV1 === true ||
-      override.releaseProfileV1 === true ||
-      override.observabilityMetricsV1 === true
+      override.executionBoundary === true ||
+      override.networkBoundary === true ||
+      override.releaseProfile === true ||
+      override.observabilityMetrics === true
     ) {
       throw new Error(
         `Feature flag '${feature.split('=', 1)[0]}' is release-controlled and cannot be enabled by the CLI.`,

@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  computeRuntimeSchedulingPolicyDigestV1,
-  createRuntimeSchedulingPolicyV1,
+  computeRuntimeSchedulingPolicyDigest,
+  createRuntimeSchedulingPolicy,
 } from '@kite/agent-kernel';
 
-describe('RuntimeSchedulingPolicyV1', () => {
+describe('RuntimeSchedulingPolicy', () => {
   test('exports the canonical scheduler snapshot consumed by release tooling', () => {
-    const policy = createRuntimeSchedulingPolicyV1();
+    const policy = createRuntimeSchedulingPolicy();
     expect(policy).toMatchObject({
       version: 1,
       parallelRead: {
@@ -30,9 +30,9 @@ describe('RuntimeSchedulingPolicyV1', () => {
       },
       lateEventPolicy: 'diagnostic_or_reconciliation_only',
     });
-    expect(computeRuntimeSchedulingPolicyDigestV1(policy)).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(computeRuntimeSchedulingPolicyDigestV1()).toBe(
-      computeRuntimeSchedulingPolicyDigestV1(structuredClone(policy)),
+    expect(computeRuntimeSchedulingPolicyDigest(policy)).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(computeRuntimeSchedulingPolicyDigest()).toBe(
+      computeRuntimeSchedulingPolicyDigest(structuredClone(policy)),
     );
   });
 });

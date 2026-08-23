@@ -114,8 +114,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     Required 可通过 `KITE_TUI_SYSTEM_SHARD=<index>/<count>` 在独立 runner 间稳定分片，所有分片通过后
     才能使汇总 `tui-system` 门禁成功。`KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required
     的默认证据模式。
-21. keyless Runtime cutover 场景必须通过真实 TUI startup 使用 canonical Workspace identity 创建 State26/Store5 target
-    database，同时断言 `runtime-authority.key` 未被创建；它还要证明旧 shim/Store4 bytes 未被读取、迁移或
+21. keyless Runtime cutover 场景必须通过真实 TUI startup 使用 canonical Workspace identity 创建 Runtime State/SQLite Store target
+    database，同时断言 `runtime-authority.key` 未被创建；它还要证明旧 shim/SQLite Store bytes 未被读取、迁移或
     改写。普通 startup fixture 不预置安装密钥，缺少该文件不能进入 ErrorBoundary 或阻止会话启动。
 
 ## 分层选择
@@ -125,8 +125,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 - Ink 布局与换行：组件测试；
 - 键盘到 Runtime 再到终端输出：PTY E2E。
 
-同一 thread 的多轮继续由 State26/Store5 与 App `RuntimeSessionCoordinator` 注入所需 Kernel、effect
-coordinator 和 concrete Model 后调用 `executeRuntimeTurnV1()` 恢复；App turn entry 不自行打开第二 Kernel、
+同一 thread 的多轮继续由 Runtime State/SQLite Store 与 App `RuntimeSessionCoordinator` 注入所需 Kernel、effect
+coordinator 和 concrete Model 后调用 `executeRuntimeTurn()` 恢复；App turn entry 不自行打开第二 Kernel、
 创建第二 coordinator 或选择第二 Model。
-RAV1-06 后 TUI persistence observers、startup fixtures 与 file-rewind probes 使用独立 `.runtime-state26-store5.db` target path；旧 Store4 path 与曾由 header shim 占用的 `.runtime-v5.db` 只用于明确的 incompatible-format / cutover negative fixture，不作为生产观察路径，也不阻止新 epoch 初始化。
+RA-06 后 TUI persistence observers、startup fixtures 与 file-rewind probes 使用独立 `.runtime-state-store.db` target path；旧 SQLite Store path 与曾由 header shim 占用的 `.runtime-state-store.db` 只用于明确的 incompatible-format / cutover negative fixture，不作为生产观察路径，也不阻止新 epoch 初始化。
 > 路径同步：TUI system 场景引用当前无版本命名的 runtime state/store 测试路径。

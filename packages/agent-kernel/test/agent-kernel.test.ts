@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
-  AGENT_KERNEL_BOUNDARY_V1,
+  AGENT_KERNEL_BOUNDARY_,
   type AgentState,
   assertCurrentRuntimeEvent,
   authorizeEffect,
@@ -9,7 +9,7 @@ import {
   CURRENT_RUNTIME_EVENT_TYPE_COUNT,
   canForkAgentState,
   createInitialAgentState,
-  createToolRecoveryJournalV1,
+  createToolRecoveryJournal,
   type DecisionFacts,
   decide,
   decodeCurrentAgentStateJson,
@@ -17,27 +17,27 @@ import {
   digestAgentEvent,
   encodeCurrentAgentStateJson,
   isCurrentPendingInteractionRequest,
-  isToolOutcomeV1,
-  isValidSchedulerFactsV1,
+  isToolOutcome,
+  isValidSchedulerFacts,
   type KernelEvent,
   normalizeAgentEvent,
   normalizeAgentToolOutcomeEvent,
   normalizeTerminalAgentEvent,
-  normalizeToolRecoveryJournalV1,
+  normalizeToolRecoveryJournal,
   type RuntimeEventType,
   rebindForkAgentState,
-  recordRecoveryFailureV1,
+  recordRecoveryFailure,
   reduce,
   reduceAgentState,
-  STATE26_DIAGNOSTIC_EVENT_TYPES,
-  STATE26_EVENT_REDUCER_COVERAGE,
-  STATE26_LEGACY_DEFAULT_EVENT_TYPES,
-  selectSchedulableEffectBatchV1,
+  STATE_DEFAULT_EVENT_TYPES,
+  STATE_DIAGNOSTIC_EVENT_TYPES,
+  STATE_EVENT_REDUCER_COVERAGE,
+  selectSchedulableEffectBatch,
   selectScheduledEffects,
-  taskIdentityAllocationKeyV1,
-  toolFailureInstanceIdV1,
-  toolInvocationFingerprintV1,
-  verificationSchemaAdmissionDigestV1,
+  taskIdentityAllocationKey,
+  toolFailureInstanceId,
+  toolInvocationFingerprint,
+  verificationSchemaAdmissionDigest,
 } from '@kite/agent-kernel';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -454,7 +454,7 @@ function minimalEvent(type: RuntimeEventType): KernelEvent {
           toolName: 'fixture',
         },
       };
-    if (field === 'outcomeV1')
+    if (field === 'outcome')
       return {
         schemaVersion: 1,
         status: 'unknown',
@@ -581,7 +581,7 @@ function minimalEvent(type: RuntimeEventType): KernelEvent {
     type === 'tool.retry_recorded' ||
     type === 'approval.rejected'
   ) {
-    fixture.outcomeV1 = {
+    fixture.outcome = {
       schemaVersion: 1,
       status:
         type === 'tool.finished'
@@ -818,14 +818,14 @@ const facts = (count: number): DecisionFacts => ({
 
 describe('agent kernel package boundary', () => {
   test('declares deterministic and I/O-free ownership', () => {
-    expect(AGENT_KERNEL_BOUNDARY_V1).toEqual({
+    expect(AGENT_KERNEL_BOUNDARY_).toEqual({
       deterministic: true,
       externalIo: false,
       revision: 'rmv1-07',
     });
     expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(135);
-    expect(STATE26_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
-    expect(STATE26_LEGACY_DEFAULT_EVENT_TYPES).toHaveLength(7);
+    expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
+    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(7);
   });
 
   test('validates and decodes every current State event discriminant', () => {
@@ -912,12 +912,12 @@ describe('agent kernel package boundary', () => {
   });
 
   test('classifies all 135 events into one static owner or an explicit diagnostic no-op', () => {
-    const covered = Object.values(STATE26_EVENT_REDUCER_COVERAGE).flat();
+    const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
     expect(covered).toHaveLength(135);
     expect(new Set(covered).size).toBe(135);
-    expect(covered.length - STATE26_LEGACY_DEFAULT_EVENT_TYPES.length).toBe(128);
-    expect(new Set([...covered, ...STATE26_DIAGNOSTIC_EVENT_TYPES]).size).toBe(135);
-    expect(STATE26_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
+    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(128);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(135);
+    expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
         covered.includes(type as never),
@@ -926,7 +926,7 @@ describe('agent kernel package boundary', () => {
   });
 
   test('runs the complete 128-case legacy switch corpus and proves seven default diagnostics are no-op', () => {
-    const diagnosticSet = new Set<string>(STATE26_DIAGNOSTIC_EVENT_TYPES);
+    const diagnosticSet = new Set<string>(STATE_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);
       const before = encodeCurrentAgentStateJson(initial);
@@ -962,12 +962,13 @@ describe('agent kernel package boundary', () => {
         leaseFenceRequired: true,
       },
     });
-    expect(selectSchedulableEffectBatchV1([sharedRead('read-a'), sharedRead('read-b')], 2)).toEqual(
-      ['read-a', 'read-b'],
-    );
-    expect(isValidSchedulerFactsV1({ traits: {}, approval: {} })).toBe(true);
+    expect(selectSchedulableEffectBatch([sharedRead('read-a'), sharedRead('read-b')], 2)).toEqual([
+      'read-a',
+      'read-b',
+    ]);
+    expect(isValidSchedulerFacts({ traits: {}, approval: {} })).toBe(true);
     expect(
-      isValidSchedulerFactsV1({
+      isValidSchedulerFacts({
         traits: {
           read: {
             resourceScopes: [],
@@ -1047,7 +1048,7 @@ describe('agent kernel package boundary', () => {
       '2026-08-20T00:00:01.000Z',
     );
     expect(normalized).toMatchObject({
-      outcomeV1: {
+      outcome: {
         schemaVersion: 1,
         status: 'success',
         dispatchState: 'started',
@@ -1072,7 +1073,7 @@ describe('agent kernel package boundary', () => {
       '2026-08-20T00:00:01.000Z',
     );
     expect(approval).toMatchObject({
-      outcomeV1: { status: 'rejected', failure: { detailCode: 'approval_rejected' } },
+      outcome: { status: 'rejected', failure: { detailCode: 'approval_rejected' } },
     });
     const notStartedToolState = {
       ...toolState,
@@ -1104,7 +1105,7 @@ describe('agent kernel package boundary', () => {
       '2026-08-20T00:00:01.000Z',
     );
     expect(operatorAction).toMatchObject({
-      outcomeV1: {
+      outcome: {
         status: 'failed',
         recovery: { disposition: 'user_action', maximumAdditionalCalls: 0 },
       },
@@ -1125,13 +1126,13 @@ describe('agent kernel package boundary', () => {
           journal: true,
         },
         result: { ok: false },
-        classifierAdviceV1: { detailCode: 'approval_rejected' },
+        classifierAdvice: { detailCode: 'approval_rejected' },
       } as unknown as KernelEvent,
       notStartedToolState,
       '2026-08-20T00:00:01.000Z',
     );
     expect(classifierConflict).toMatchObject({
-      outcomeV1: {
+      outcome: {
         status: 'unknown',
         failure: { detailCode: 'classifier_conflict' },
       },
@@ -1196,7 +1197,7 @@ describe('agent kernel package boundary', () => {
     expect(initial.activeTaskId).toBeNull();
     expect(initial.tasks).toEqual({});
 
-    const allocationKey = taskIdentityAllocationKeyV1(0, 'message-1');
+    const allocationKey = taskIdentityAllocationKey(0, 'message-1');
     const allocatedFacts: DecisionFacts = {
       ...facts(1),
       allocatedIds: { [allocationKey]: 'task-host-1' },
@@ -1242,7 +1243,7 @@ describe('agent kernel package boundary', () => {
       expectedRevision: 0,
       events: [event],
     };
-    const allocationKey = taskIdentityAllocationKeyV1(0, 'message-1');
+    const allocationKey = taskIdentityAllocationKey(0, 'message-1');
 
     expect(decide(initial, input, { ...facts(1), allocatedIds: { [allocationKey]: '' } })).toEqual({
       status: 'rejected',
@@ -1303,7 +1304,7 @@ describe('agent kernel package boundary', () => {
       },
       {
         ...facts(2),
-        allocatedIds: { [taskIdentityAllocationKeyV1(0, 'message-1')]: 'task-batch' },
+        allocatedIds: { [taskIdentityAllocationKey(0, 'message-1')]: 'task-batch' },
       },
     );
     expect(batch.status).toBe('applied');
@@ -1374,7 +1375,7 @@ describe('agent kernel package boundary', () => {
           occurredAt: '2026-08-20T00:00:00.000Z',
           verificationSchemaAdmissions: [
             {
-              schemaDigest: verificationSchemaAdmissionDigestV1(schema),
+              schemaDigest: verificationSchemaAdmissionDigest(schema),
               schemaDiagnostic: null,
             },
           ],
@@ -1395,7 +1396,7 @@ describe('agent kernel package boundary', () => {
           occurredAt: '2026-08-20T00:00:00.000Z',
           verificationSchemaAdmissions: [
             {
-              schemaDigest: verificationSchemaAdmissionDigestV1(schema),
+              schemaDigest: verificationSchemaAdmissionDigest(schema),
               schemaDiagnostic: 'Unsupported MCP inputSchema: fixture rejection',
             },
           ],
@@ -1870,7 +1871,7 @@ describe('agent kernel package boundary', () => {
     ).toBe(false);
     const fork = rebindForkAgentState(state, 'session-2', 'b'.repeat(64));
     expect(fork.session.threadId).toBe('session-2');
-    expect(fork.toolRecovery).toEqual(createToolRecoveryJournalV1('b'.repeat(64)));
+    expect(fork.toolRecovery).toEqual(createToolRecoveryJournal('b'.repeat(64)));
     expect(fork.authorization).toEqual({ mode: 'default', commandGrants: {} });
     expect(fork.interactions).toEqual({ kind: 'idle' });
     expect(fork.tools.queue).toEqual([]);
@@ -2010,7 +2011,7 @@ describe('agent kernel package boundary', () => {
 
   test('keeps recovery fingerprint, failure identity, lineage, and malformed-journal blocking exact', () => {
     expect(
-      toolInvocationFingerprintV1({
+      toolInvocationFingerprint({
         toolName: 'read_file',
         parsedArgs: { path: 'a' },
       }),
@@ -2030,17 +2031,17 @@ describe('agent kernel package boundary', () => {
       },
       timing: { source: 'runtime_boundary' },
     } as const;
-    expect(isToolOutcomeV1(outcome)).toBe(true);
-    const fingerprint = toolInvocationFingerprintV1({
+    expect(isToolOutcome(outcome)).toBe(true);
+    const fingerprint = toolInvocationFingerprint({
       toolName: 'read_file',
       parsedArgs: { path: 'a' },
     });
-    const failureId = toolFailureInstanceIdV1({
+    const failureId = toolFailureInstanceId({
       toolCallId: 'tool-1',
       invocationFingerprint: fingerprint,
       outcome,
     });
-    const journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(IDENTITY_KEY), {
+    const journal = recordRecoveryFailure(createToolRecoveryJournal(IDENTITY_KEY), {
       toolCallId: 'tool-1',
       toolName: 'read_file',
       invocationFingerprint: fingerprint,
@@ -2051,7 +2052,7 @@ describe('agent kernel package boundary', () => {
     });
     expect(journal.order).toEqual([failureId]);
     expect(journal.failures[failureId]?.outcome.lineage?.failureInstanceId).toBe(failureId);
-    expect(normalizeToolRecoveryJournalV1(journal, IDENTITY_KEY)).toEqual(journal);
+    expect(normalizeToolRecoveryJournal(journal, IDENTITY_KEY)).toEqual(journal);
     const malformed = {
       ...journal,
       failures: {
@@ -2059,7 +2060,7 @@ describe('agent kernel package boundary', () => {
         [failureId]: { ...journal.failures[failureId], failureInstanceId: 'f'.repeat(64) },
       },
     };
-    expect(normalizeToolRecoveryJournalV1(malformed, IDENTITY_KEY).qualityGuard).toMatchObject({
+    expect(normalizeToolRecoveryJournal(malformed, IDENTITY_KEY).qualityGuard).toMatchObject({
       blocked: true,
       reasonCode: 'journal_invalid',
     });

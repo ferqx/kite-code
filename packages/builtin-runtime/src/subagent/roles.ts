@@ -1,8 +1,8 @@
-import type { SubagentRoleV1 } from '@kite/runtime-spi';
+import type { SubagentRole } from '@kite/runtime-spi';
 import type { SupportedChatModel } from '../model/factory';
 
-export interface BuiltinSubagentRoleConfigV1 {
-  readonly role: SubagentRoleV1;
+export interface BuiltinSubagentRoleConfig {
+  readonly role: SubagentRole;
   readonly systemPrompt: string;
   readonly allowedTools?: Set<string>;
   readonly model?: SupportedChatModel;
@@ -157,7 +157,7 @@ const FULL_TOOLS: Set<string> | undefined = undefined; // undefined = all tools 
 /** All builtin subagent roles share the same default execution deadline. */
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;
 
-const ROLE_CONFIGS: Record<SubagentRoleV1, BuiltinSubagentRoleConfigV1> = {
+const ROLE_CONFIGS: Record<SubagentRole, BuiltinSubagentRoleConfig> = {
   explore: {
     role: 'explore',
     systemPrompt: EXPLORE_SYSTEM_PROMPT,
@@ -185,14 +185,14 @@ const ROLE_CONFIGS: Record<SubagentRoleV1, BuiltinSubagentRoleConfigV1> = {
 };
 
 /** 按角色名获取配置 */
-export function getRoleConfig(role: SubagentRoleV1): BuiltinSubagentRoleConfigV1 {
+export function getRoleConfig(role: SubagentRole): BuiltinSubagentRoleConfig {
   const cfg = ROLE_CONFIGS[role];
   if (!cfg.allowedTools) return cfg; // FULL_TOOLS is undefined, safe to share
   return { ...cfg, allowedTools: new Set(cfg.allowedTools) };
 }
 
 /** 所有内置角色名 */
-export const BUILTIN_ROLES: readonly SubagentRoleV1[] = [
+export const BUILTIN_ROLES: readonly SubagentRole[] = [
   'explore',
   'plan',
   'code',

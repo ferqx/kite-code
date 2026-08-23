@@ -1,13 +1,13 @@
 import type {
-  SandboxExecutionProviderFailureCodeV1,
-  SandboxPreparationLifecycleV1,
+  SandboxExecutionProviderFailureCode,
+  SandboxPreparationLifecycle,
 } from '@kite/runtime-spi';
-import type { NetworkDecisionRecorderV1 } from './network-enforcer';
-import type { NetworkBoundaryPolicyV1 } from './network-policy';
+import type { NetworkDecisionRecorder } from './network-enforcer';
+import type { NetworkBoundaryPolicy } from './network-policy';
 import type { ShellFilesystemMode, ShellNetworkMode } from './types';
 
 /** Runtime identity bound to one governed shell invocation. */
-export interface SandboxInvocationIdentityV1 {
+export interface SandboxInvocationIdentity {
   toolCallId: string;
   capabilityId: string;
   capabilityRevision: string;
@@ -18,14 +18,14 @@ export interface SandboxInvocationIdentityV1 {
   cancellationCorrelation: string;
 }
 
-export interface ShellNetworkBrokerV1 {
-  policy: NetworkBoundaryPolicyV1;
+export interface ShellNetworkBroker {
+  policy: NetworkBoundaryPolicy;
   toolCallId: string;
-  recordDecision: NetworkDecisionRecorderV1;
+  recordDecision: NetworkDecisionRecorder;
 }
 
 /** Generic process-tree result supplied by the Runtime Host. */
-export interface ShellProcessTerminationV1 {
+export interface ShellProcessTermination {
   readonly confirmedExited: boolean;
   readonly gracefulRequested: boolean;
   readonly forced: boolean;
@@ -33,26 +33,26 @@ export interface ShellProcessTerminationV1 {
 }
 
 /** Generic process-tree lifecycle supplied by the Runtime Host. */
-export interface ShellProcessTreeV1 {
-  terminate(): Promise<ShellProcessTerminationV1>;
+export interface ShellProcessTree {
+  terminate(): Promise<ShellProcessTermination>;
   dispose(): void;
 }
 
 /** Generic process handle; Shell semantics never touch Bun.spawn directly. */
-export interface ShellProcessHandleV1 {
+export interface ShellProcessHandle {
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   readonly exited: Promise<number>;
-  readonly processTree: ShellProcessTreeV1;
+  readonly processTree: ShellProcessTree;
 }
 
 /** Host-provided generic process mechanism used by the Builtin Shell executor. */
-export interface ShellProcessPortV1 {
+export interface ShellProcessPort {
   spawn(input: {
     readonly argv: readonly string[];
     readonly cwd: string;
     readonly env?: Readonly<Record<string, string>>;
-  }): ShellProcessHandleV1;
+  }): ShellProcessHandle;
   readOutput(
     stream: ReadableStream<Uint8Array>,
     onLine?: (line: string) => void,
@@ -77,11 +77,11 @@ export interface ShellInput {
   executionTrust?: 'policy_proven_read_only';
   /** Capability-token host broker for an explicit `kite-http` request inside
    * the Windows sandbox. This does not enable descendant direct networking. */
-  networkBroker?: ShellNetworkBrokerV1;
-  /** Runtime-only identity used by the governed SandboxExecutionProviderV1 consumer. */
-  sandboxInvocationIdentity?: SandboxInvocationIdentityV1;
+  networkBroker?: ShellNetworkBroker;
+  /** Runtime-only identity used by the governed SandboxExecutionProvider consumer. */
+  sandboxInvocationIdentity?: SandboxInvocationIdentity;
   /** Runtime-owned durable allocating-preparation lifecycle; never model supplied. */
-  sandboxPreparationLifecycle?: SandboxPreparationLifecycleV1;
+  sandboxPreparationLifecycle?: SandboxPreparationLifecycle;
 }
 
 export interface ShellResult {
@@ -98,7 +98,7 @@ export interface ShellResult {
    * and allocating cleanup was durably confirmed.
    */
   sandboxFailure?: {
-    code: SandboxExecutionProviderFailureCodeV1;
+    code: SandboxExecutionProviderFailureCode;
     stage: 'pre_dispatch' | 'post_dispatch';
     cleanupConfirmed: boolean;
   };

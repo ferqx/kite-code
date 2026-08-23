@@ -1,4 +1,4 @@
-export const STATE26_STATE26_TOP_LEVEL_FIELDS_V1 = Object.freeze([
+export const STATE_STATE_TOP_LEVEL_FIELDS_ = Object.freeze([
   'activeTaskId',
   'appliedEventIds',
   'authorization',
@@ -32,15 +32,15 @@ export const STATE26_STATE26_TOP_LEVEL_FIELDS_V1 = Object.freeze([
 ] as const);
 
 /**
- * RAV1-05 conformance mapping only. Production never opens or migrates a
+ * RA-05 conformance mapping only. Production never opens or migrates a
  * Store4 Session; this explicit mapping proves the target field decision.
  */
-export function mapHistoricalStateToStateV1(input: {
+export function mapHistoricalStateToState(input: {
   readonly state: Readonly<Record<string, unknown>>;
   readonly projectId: `project_${string}`;
   readonly canonicalWorkspaceDigest: `sha256:${string}`;
 }): Readonly<Record<string, unknown>> {
-  const allowed = new Set<string>(STATE26_STATE26_TOP_LEVEL_FIELDS_V1);
+  const allowed = new Set<string>(STATE_STATE_TOP_LEVEL_FIELDS_);
   if (
     input.state.schemaVersion !== 25 ||
     input.state.formatEpoch !== 'kite-runtime-2026-08-18' ||

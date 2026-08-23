@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { decideCompletion, decideCompletionV1, decideCompletionV2 } from '../src/completion';
+import {
+  decideCompletion,
+  decidePlannedCompletion,
+  decideUnplannedCompletion,
+} from '../src/completion';
 import { type AgentState, createInitialAgentState, type PlanDocument } from '../src/state';
 
 const RECOVERY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -75,7 +79,7 @@ describe('State CompletionGuard parity', () => {
       providerAdmission: { pending: [{} as never], waivers: {} },
     } as AgentState;
 
-    expect(decideCompletionV1(withProviderFacts)).toEqual({
+    expect(decideUnplannedCompletion(withProviderFacts)).toEqual({
       status: 'accepted',
       version: 'completion_guard_v1',
     });
@@ -107,7 +111,7 @@ describe('State CompletionGuard parity', () => {
       tools: { ...state.tools, calls: { 'write-1': failedCall }, queue: [], active: [] },
     } as AgentState;
 
-    expect(decideCompletionV2(withFailure)).toMatchObject({
+    expect(decidePlannedCompletion(withFailure)).toMatchObject({
       status: 'blocked',
       version: 'completion_guard_v2',
       code: 'plan_evidence_unresolved',
@@ -138,7 +142,7 @@ describe('State CompletionGuard parity', () => {
       },
     };
 
-    expect(decideCompletionV2(withPreviousGuard)).toMatchObject({
+    expect(decidePlannedCompletion(withPreviousGuard)).toMatchObject({
       status: 'accepted',
       version: 'completion_guard_v2',
     });

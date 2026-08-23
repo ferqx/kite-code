@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { loadReleaseManifestConsistencyV1 } from '../../apps/kite/src/release/manifest-loader';
+import { loadReleaseManifestConsistency } from '../../apps/kite/src/release/manifest-loader';
 import {
-  assembleReleaseManifestV1,
-  generateReleaseManifestV1,
+  assembleReleaseManifest,
+  generateReleaseManifest,
   PRODUCTION_RELEASE_ASSEMBLY_ENABLED,
 } from '../../scripts/release/generate-manifest';
 
@@ -12,9 +12,9 @@ const COMMIT = 'a'.repeat(40);
 
 function fixture() {
   const behaviorInput = JSON.parse(
-    readFileSync(resolve('tests/fixtures/release/behavior-digest/synthetic-input-v1.json'), 'utf8'),
+    readFileSync(resolve('tests/fixtures/release/behavior-digest/synthetic-input.json'), 'utf8'),
   ) as unknown;
-  return generateReleaseManifestV1({
+  return generateReleaseManifest({
     payloadBytes: new TextEncoder().encode('verified synthetic payload'),
     productVersion: '0.0.0-synthetic.2',
     commitSha: COMMIT,
@@ -27,7 +27,7 @@ function fixture() {
   });
 }
 
-describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
+describe('ReleaseManifest generation and Runtime consistency loader', () => {
   test('binds the payload and every resolved behavior component', () => {
     const { manifest, behavior } = fixture();
     expect(manifest.payloadSha256).toMatch(/^sha256:[a-f0-9]{64}$/);
@@ -41,7 +41,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
 
   test('rechecks consistency after pre-exec synthetic verification without claiming authenticity', () => {
     const { manifest, behavior } = fixture();
-    const loaded = loadReleaseManifestConsistencyV1({
+    const loaded = loadReleaseManifestConsistency({
       manifest,
       expectations: {
         payloadSha256: manifest.payloadSha256,
@@ -96,7 +96,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
       realSigstoreSigningEnabled: false,
     };
     expect(() =>
-      loadReleaseManifestConsistencyV1({
+      loadReleaseManifestConsistency({
         manifest,
         expectations: { ...expectations, behaviorDigest: `sha256:${'0'.repeat(64)}` },
         preExecVerification,
@@ -104,7 +104,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
       }),
     ).toThrow('behaviorDigest mismatch');
     expect(() =>
-      loadReleaseManifestConsistencyV1({
+      loadReleaseManifestConsistency({
         manifest,
         expectations: { ...expectations, platform: 'unknown-platform' },
         preExecVerification,
@@ -112,7 +112,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
       }),
     ).toThrow('platform identity');
     expect(() =>
-      loadReleaseManifestConsistencyV1({
+      loadReleaseManifestConsistency({
         manifest,
         expectations: { ...expectations, providerType: 'unknown-provider' },
         preExecVerification,
@@ -124,7 +124,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
   test('cannot turn a synthetic fixture into a production trust root', () => {
     const { manifest, behavior } = fixture();
     expect(() =>
-      loadReleaseManifestConsistencyV1({
+      loadReleaseManifestConsistency({
         manifest,
         expectations: {
           payloadSha256: manifest.payloadSha256,
@@ -155,7 +155,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
     expect(PRODUCTION_RELEASE_ASSEMBLY_ENABLED).toBe(false);
 
     expect(() =>
-      assembleReleaseManifestV1({
+      assembleReleaseManifest({
         payloadBytes: new TextEncoder().encode('not distributable'),
         fields: { ...fields, supportedPlatforms: ['ubuntu-24.04-x64'] },
         distributionMode: 'production',
@@ -164,7 +164,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
     ).toThrow('real signing and distribution qualification');
 
     expect(() =>
-      assembleReleaseManifestV1({
+      assembleReleaseManifest({
         payloadBytes: new TextEncoder().encode('not distributable'),
         fields: { ...fields, supportedPlatforms: ['macos-15-arm64'] },
         distributionMode: 'production',
@@ -173,7 +173,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
     ).toThrow('distribution_target_identity_unsupported');
 
     expect(() =>
-      assembleReleaseManifestV1({
+      assembleReleaseManifest({
         payloadBytes: new TextEncoder().encode('not distributable'),
         fields: { ...fields, supportedPlatforms: ['macos-15-arm64'] },
         distributionMode: 'production',
@@ -186,7 +186,7 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
     const { manifest } = fixture();
     const { version: _version, payloadSha256: _payloadSha256, ...fields } = manifest;
     expect(() =>
-      assembleReleaseManifestV1({
+      assembleReleaseManifest({
         payloadBytes: new TextEncoder().encode('synthetic'),
         fields,
         distributionMode: 'synthetic_non_distributable',

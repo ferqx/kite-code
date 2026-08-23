@@ -1,15 +1,15 @@
 import { sha256Hex } from './hash';
-import type { ToolOutcomeV1 } from './normalization';
-import { isToolOutcomeV1 } from './normalization';
+import type { ToolOutcome } from './normalization';
+import { isToolOutcome } from './normalization';
 
-export type { ToolOutcomeStatusV1, ToolOutcomeV1 } from './normalization';
+export type { ToolOutcome, ToolOutcomeStatus } from './normalization';
 
 export const TOOL_RECOVERY_JOURNAL_SCHEMA_VERSION = 1 as const;
 export const TOOL_RECOVERY_QUALITY_FAILURE_LIMIT = 6;
 const TOOL_RECOVERY_OBSERVATION_CAP = 250;
 
-export type ToolRecoveryAttemptModeV1 = 'model_correction' | 'automatic_retry';
-export const TOOL_RECOVERY_RESOLUTIONS_V1 = [
+export type ToolRecoveryAttemptMode = 'model_correction' | 'automatic_retry';
+export const TOOL_RECOVERY_RESOLUTIONS_ = [
   'recovered',
   'terminal',
   'next_response_elapsed',
@@ -20,13 +20,13 @@ export const TOOL_RECOVERY_RESOLUTIONS_V1 = [
   'user_action',
   'provider_revision',
 ] as const;
-export type ToolRecoveryResolutionV1 = (typeof TOOL_RECOVERY_RESOLUTIONS_V1)[number];
-export function isToolRecoveryResolutionV1(value: unknown): value is ToolRecoveryResolutionV1 {
+export type ToolRecoveryResolution = (typeof TOOL_RECOVERY_RESOLUTIONS_)[number];
+export function isToolRecoveryResolution(value: unknown): value is ToolRecoveryResolution {
   return (
-    typeof value === 'string' && (TOOL_RECOVERY_RESOLUTIONS_V1 as readonly string[]).includes(value)
+    typeof value === 'string' && (TOOL_RECOVERY_RESOLUTIONS_ as readonly string[]).includes(value)
   );
 }
-export interface ToolRecoveryFailureV1 {
+export interface ToolRecoveryFailure {
   readonly failureInstanceId: string;
   readonly toolCallId: string;
   readonly toolName: string;
@@ -38,16 +38,16 @@ export interface ToolRecoveryFailureV1 {
   readonly eligibleModelMessageId?: string;
   readonly eligibleToolCallId?: string;
   readonly status: 'unresolved' | 'recovered' | 'exhausted';
-  readonly resolution?: ToolRecoveryResolutionV1;
-  readonly outcome: ToolOutcomeV1;
+  readonly resolution?: ToolRecoveryResolution;
+  readonly outcome: ToolOutcome;
   readonly modelCorrectionAttempts: number;
   readonly automaticRetryAttempts: number;
   readonly progressRevision: number;
 }
-export interface ToolRecoveryJournalV1 {
+export interface ToolRecoveryJournal {
   readonly schemaVersion: 1;
   readonly identityKey: string;
-  readonly failures: Readonly<Record<string, ToolRecoveryFailureV1>>;
+  readonly failures: Readonly<Record<string, ToolRecoveryFailure>>;
   readonly order: readonly string[];
   readonly progressRevision: number;
   readonly qualityGuard: {
@@ -58,7 +58,7 @@ export interface ToolRecoveryJournalV1 {
     readonly turnId?: string;
   };
 }
-export interface ToolOwnedProgressV1 {
+export interface ToolOwnedProgress {
   readonly kind:
     | 'content_revision'
     | 'plan_revision'
@@ -71,7 +71,7 @@ export interface ToolOwnedProgressV1 {
   readonly referenceId: string;
   readonly resolvesFailureIds?: readonly string[];
 }
-export type RecoveryAdmissionV1 =
+export type RecoveryAdmission =
   | { readonly admitted: true; readonly recoveryOf?: string }
   | {
       readonly admitted: false;
@@ -119,29 +119,29 @@ function numberValue(
 ): number | undefined {
   return typeof value?.[key] === 'number' ? (value[key] as number) : undefined;
 }
-function failureStillBlocks(failure: ToolRecoveryFailureV1): boolean {
+function failureStillBlocks(failure: ToolRecoveryFailure): boolean {
   return (
     failure.status !== 'recovered' &&
     failure.resolution !== 'task_closed' &&
     failure.resolution !== 'turn_closed'
   );
 }
-function blockedFailures(journal: ToolRecoveryJournalV1): ToolRecoveryFailureV1[] {
+function blockedFailures(journal: ToolRecoveryJournal): ToolRecoveryFailure[] {
   return journal.order
     .map((id) => journal.failures[id])
     .filter(
-      (failure): failure is ToolRecoveryFailureV1 => failure != null && failureStillBlocks(failure),
+      (failure): failure is ToolRecoveryFailure => failure != null && failureStillBlocks(failure),
     );
 }
-function canonicalFailureDetail(outcome: ToolOutcomeV1): string {
+function canonicalFailureDetail(outcome: ToolOutcome): string {
   return outcome.failure?.detailCode ?? 'success';
 }
 
 /** Exact State failure identity; the private fingerprint is never projected. */
-export function toolFailureInstanceIdV1(input: {
+export function toolFailureInstanceId(input: {
   readonly toolCallId: string;
   readonly invocationFingerprint: string;
-  readonly outcome: ToolOutcomeV1;
+  readonly outcome: ToolOutcome;
 }): string {
   return sha256Hex(
     stableStringify({
@@ -153,7 +153,7 @@ export function toolFailureInstanceIdV1(input: {
   );
 }
 
-export function toolInvocationFingerprintV1(input: {
+export function toolInvocationFingerprint(input: {
   readonly toolName: string;
   readonly parsedArgs?: unknown;
   readonly parseCode?: 'invalid_json' | 'invalid_arguments' | 'unknown_tool' | 'tool_unavailable';
@@ -178,8 +178,8 @@ export function toolInvocationFingerprintV1(input: {
 }
 
 function rootFailureId(
-  failures: Readonly<Record<string, ToolRecoveryFailureV1>>,
-  failure: ToolRecoveryFailureV1,
+  failures: Readonly<Record<string, ToolRecoveryFailure>>,
+  failure: ToolRecoveryFailure,
 ): string {
   let current = failure;
   const visited = new Set<string>();
@@ -192,8 +192,8 @@ function rootFailureId(
   return current.failureInstanceId;
 }
 function noProgressKey(
-  failures: Readonly<Record<string, ToolRecoveryFailureV1>>,
-  failure: ToolRecoveryFailureV1,
+  failures: Readonly<Record<string, ToolRecoveryFailure>>,
+  failure: ToolRecoveryFailure,
 ): string {
   return [
     failure.taskId ?? '',
@@ -203,24 +203,24 @@ function noProgressKey(
     String(failure.progressRevision),
   ].join('\0');
 }
-function journalInvalid(journal: ToolRecoveryJournalV1): boolean {
+function journalInvalid(journal: ToolRecoveryJournal): boolean {
   return journal.qualityGuard.blocked && journal.qualityGuard.reasonCode === 'journal_invalid';
 }
 /** A corrupt recovery journal is a session-wide correctness block. */
-export function isToolRecoveryJournalInvalidV1(journal: ToolRecoveryJournalV1): boolean {
+export function isToolRecoveryJournalInvalid(journal: ToolRecoveryJournal): boolean {
   return journalInvalid(journal);
 }
 function qualityAfterMutation(
-  journal: ToolRecoveryJournalV1,
-  proposed: ToolRecoveryJournalV1['qualityGuard'],
-): ToolRecoveryJournalV1['qualityGuard'] {
+  journal: ToolRecoveryJournal,
+  proposed: ToolRecoveryJournal['qualityGuard'],
+): ToolRecoveryJournal['qualityGuard'] {
   return journalInvalid(journal) ? journal.qualityGuard : proposed;
 }
 
 function compactFailures(
-  failures: Readonly<Record<string, ToolRecoveryFailureV1>>,
+  failures: Readonly<Record<string, ToolRecoveryFailure>>,
   inputOrder: readonly string[],
-): { failures: Record<string, ToolRecoveryFailureV1>; order: string[] } {
+): { failures: Record<string, ToolRecoveryFailure>; order: string[] } {
   const order = [...new Set(inputOrder)].filter((id) => failures[id] != null);
   if (order.length <= 128) return { failures: { ...failures }, order };
   const prioritized = [
@@ -234,7 +234,7 @@ function compactFailures(
     const seen = new Set<string>();
     let current: string | undefined = candidate;
     while (current && !seen.has(current)) {
-      const failure: ToolRecoveryFailureV1 | undefined = failures[current];
+      const failure: ToolRecoveryFailure | undefined = failures[current];
       if (!failure) break;
       seen.add(current);
       closure.push(current);
@@ -251,25 +251,25 @@ function compactFailures(
   };
 }
 
-export function recordRecoveryFailureV1(
-  journal: ToolRecoveryJournalV1,
+export function recordRecoveryFailure(
+  journal: ToolRecoveryJournal,
   input: {
     readonly toolCallId: string;
     readonly toolName: string;
     readonly invocationFingerprint: string;
     readonly modelMessageId: string;
-    readonly outcome: ToolOutcomeV1;
+    readonly outcome: ToolOutcome;
     readonly taskId?: string;
     readonly turnId?: string;
   },
-): ToolRecoveryJournalV1 {
+): ToolRecoveryJournal {
   if (input.outcome.status === 'success') return journal;
-  const id = toolFailureInstanceIdV1(input);
+  const id = toolFailureInstanceId(input);
   if (journal.failures[id]) return journal;
   const parent = input.outcome.lineage?.recoveryOf
     ? journal.failures[input.outcome.lineage.recoveryOf]
     : undefined;
-  const failure: ToolRecoveryFailureV1 = {
+  const failure: ToolRecoveryFailure = {
     failureInstanceId: id,
     toolCallId: input.toolCallId,
     toolName: input.toolName,
@@ -285,7 +285,7 @@ export function recordRecoveryFailureV1(
     automaticRetryAttempts: parent?.automaticRetryAttempts ?? 0,
     progressRevision: journal.progressRevision,
   };
-  const failures: Record<string, ToolRecoveryFailureV1> = {
+  const failures: Record<string, ToolRecoveryFailure> = {
     ...journal.failures,
     ...(parent
       ? { [parent.failureInstanceId]: { ...parent, status: 'exhausted', resolution: 'terminal' } }
@@ -296,7 +296,7 @@ export function recordRecoveryFailureV1(
   const sameNoProgress = compacted.order
     .map((entry) => compacted.failures[entry])
     .filter(
-      (entry): entry is ToolRecoveryFailureV1 =>
+      (entry): entry is ToolRecoveryFailure =>
         entry != null &&
         failureStillBlocks(entry) &&
         noProgressKey(compacted.failures, entry) === noProgressKey(compacted.failures, failure),
@@ -333,17 +333,17 @@ function alternativeMatches(intent: string | undefined, toolName: string): boole
       : false;
 }
 function candidateFailure(
-  journal: ToolRecoveryJournalV1,
+  journal: ToolRecoveryJournal,
   input: {
     readonly toolCallId: string;
     readonly toolName: string;
     readonly invocationFingerprint: string;
     readonly modelMessageId: string;
-    readonly mode: ToolRecoveryAttemptModeV1;
+    readonly mode: ToolRecoveryAttemptMode;
     readonly taskId?: string;
     readonly turnId?: string;
   },
-): ToolRecoveryFailureV1 | undefined {
+): ToolRecoveryFailure | undefined {
   const candidates = blockedFailures(journal).reverse();
   if (input.mode === 'automatic_retry')
     return candidates.find(
@@ -372,18 +372,18 @@ function candidateFailure(
   );
 }
 
-export function admitRecoveryAttemptV1(
-  journal: ToolRecoveryJournalV1,
+export function admitRecoveryAttempt(
+  journal: ToolRecoveryJournal,
   input: {
     readonly toolCallId: string;
     readonly toolName: string;
     readonly invocationFingerprint: string;
     readonly modelMessageId: string;
-    readonly mode: ToolRecoveryAttemptModeV1;
+    readonly mode: ToolRecoveryAttemptMode;
     readonly taskId?: string;
     readonly turnId?: string;
   },
-): RecoveryAdmissionV1 {
+): RecoveryAdmission {
   if (journalInvalid(journal)) return { admitted: false, detailCode: 'no_progress' };
   const escapeTool = ['write_plan', 'update_plan', 'read_plan', 'ask_user', 'tool_search'].includes(
     input.toolName,
@@ -425,14 +425,14 @@ export function admitRecoveryAttemptV1(
   return { admitted: true, recoveryOf: failure.failureInstanceId };
 }
 
-export function recordRecoveryInvocationV1(
-  journal: ToolRecoveryJournalV1,
+export function recordRecoveryInvocation(
+  journal: ToolRecoveryJournal,
   input: {
     readonly toolCallId: string;
     readonly recoveryOf: string;
-    readonly mode: ToolRecoveryAttemptModeV1;
+    readonly mode: ToolRecoveryAttemptMode;
   },
-): ToolRecoveryJournalV1 {
+): ToolRecoveryJournal {
   const failure = journal.failures[input.recoveryOf];
   if (failure?.status !== 'unresolved') return journal;
   return {
@@ -448,10 +448,10 @@ export function recordRecoveryInvocationV1(
     },
   };
 }
-export function recordToolOwnedProgressV1(
-  journal: ToolRecoveryJournalV1,
-  progress: ToolOwnedProgressV1,
-): ToolRecoveryJournalV1 {
+export function recordToolOwnedProgress(
+  journal: ToolRecoveryJournal,
+  progress: ToolOwnedProgress,
+): ToolRecoveryJournal {
   if (!progress.referenceId) return journal;
   const resolved = new Set(
     (progress.resolvesFailureIds ?? []).filter(
@@ -459,7 +459,7 @@ export function recordToolOwnedProgressV1(
     ),
   );
   if (resolved.size === 0) return journal;
-  const resolution: ToolRecoveryResolutionV1 =
+  const resolution: ToolRecoveryResolution =
     progress.kind === 'skipped'
       ? 'skipped'
       : progress.kind === 'replanned' || progress.kind === 'plan_revision'
@@ -483,11 +483,11 @@ export function recordToolOwnedProgressV1(
     qualityGuard: qualityAfterMutation(journal, { blocked: false, observedFailures: 0 }),
   };
 }
-export function hasUnresolvedToolFailuresV1(journal: ToolRecoveryJournalV1): boolean {
+export function hasUnresolvedToolFailures(journal: ToolRecoveryJournal): boolean {
   return blockedFailures(journal).length > 0;
 }
-export function hasActiveUnresolvedToolFailuresV1(
-  journal: ToolRecoveryJournalV1,
+export function hasActiveUnresolvedToolFailures(
+  journal: ToolRecoveryJournal,
   scope: { readonly taskId?: string | null; readonly turnId?: string },
 ): boolean {
   return blockedFailures(journal).some(
@@ -496,8 +496,8 @@ export function hasActiveUnresolvedToolFailuresV1(
       (scope.turnId == null || failure.turnId === scope.turnId),
   );
 }
-export function isToolRecoveryQualityBlockedV1(
-  journal: ToolRecoveryJournalV1,
+export function isToolRecoveryQualityBlocked(
+  journal: ToolRecoveryJournal,
   scope: { readonly taskId?: string | null; readonly turnId?: string },
 ): boolean {
   return (
@@ -508,10 +508,10 @@ export function isToolRecoveryQualityBlockedV1(
   );
 }
 function closeFailures(
-  journal: ToolRecoveryJournalV1,
-  predicate: (failure: ToolRecoveryFailureV1) => boolean,
-  resolution: ToolRecoveryResolutionV1,
-): ToolRecoveryJournalV1 {
+  journal: ToolRecoveryJournal,
+  predicate: (failure: ToolRecoveryFailure) => boolean,
+  resolution: ToolRecoveryResolution,
+): ToolRecoveryJournal {
   let changed = false;
   const failures = Object.fromEntries(
     Object.entries(journal.failures).map(([id, failure]) => {
@@ -531,17 +531,17 @@ function closeFailures(
       }
     : journal;
 }
-export function closeToolRecoveryScopeV1(
-  journal: ToolRecoveryJournalV1,
+export function closeToolRecoveryScope(
+  journal: ToolRecoveryJournal,
   input:
     | { readonly kind: 'task'; readonly taskId: string }
     | { readonly kind: 'turn'; readonly turnId: string }
     | {
         readonly kind: 'failure';
         readonly failureIds: readonly string[];
-        readonly resolution: ToolRecoveryResolutionV1;
+        readonly resolution: ToolRecoveryResolution;
       },
-): ToolRecoveryJournalV1 {
+): ToolRecoveryJournal {
   return input.kind === 'task'
     ? closeFailures(journal, (failure) => failure.taskId === input.taskId, 'task_closed')
     : input.kind === 'turn'
@@ -554,15 +554,15 @@ export function closeToolRecoveryScopeV1(
 }
 
 /** Bind model-fixable failures to exactly the immediately following response. */
-export function advanceToolRecoveryResponseV1(
-  journal: ToolRecoveryJournalV1,
+export function advanceToolRecoveryResponse(
+  journal: ToolRecoveryJournal,
   input: {
     readonly taskId?: string | null;
     readonly turnId?: string;
     readonly modelMessageId: string;
     readonly toolCalls: readonly { readonly id: string; readonly name: string }[];
   },
-): ToolRecoveryJournalV1 {
+): ToolRecoveryJournal {
   let changed = false;
   const failures = { ...journal.failures };
   const claimed = new Set(
@@ -612,11 +612,11 @@ export function advanceToolRecoveryResponseV1(
 }
 
 /** Legacy exhaustion is a typed, scope-bound quality terminal. */
-export function recordRecoveryExhaustionV1(
-  journal: ToolRecoveryJournalV1,
-  input: Parameters<typeof recordRecoveryFailureV1>[1],
-): ToolRecoveryJournalV1 {
-  const next = recordRecoveryFailureV1(journal, input);
+export function recordRecoveryExhaustion(
+  journal: ToolRecoveryJournal,
+  input: Parameters<typeof recordRecoveryFailure>[1],
+): ToolRecoveryJournal {
+  const next = recordRecoveryFailure(journal, input);
   if (journalInvalid(next)) return next;
   return {
     ...next,
@@ -634,14 +634,14 @@ export function recordRecoveryExhaustionV1(
 }
 
 /** Merge a child journal into the canonical parent while preserving identity and closure. */
-export function mergeToolRecoveryJournalsV1(
-  parent: ToolRecoveryJournalV1,
-  child: ToolRecoveryJournalV1,
+export function mergeToolRecoveryJournals(
+  parent: ToolRecoveryJournal,
+  child: ToolRecoveryJournal,
   hostIdentityKey: string,
   scope?: { readonly taskId?: string; readonly turnId?: string },
-): ToolRecoveryJournalV1 {
+): ToolRecoveryJournal {
   assertCanonicalRecoveryIdentityKey(hostIdentityKey);
-  const normalized = normalizeToolRecoveryJournalV1(child, hostIdentityKey);
+  const normalized = normalizeToolRecoveryJournal(child, hostIdentityKey);
   if (
     journalInvalid(normalized) ||
     hostIdentityKey !== parent.identityKey ||
@@ -662,7 +662,7 @@ export function mergeToolRecoveryJournalsV1(
     };
   }
   const combinedOrder = [...parent.order, ...normalized.order.filter((id) => !parent.failures[id])];
-  const combinedFailures: Record<string, ToolRecoveryFailureV1> = {};
+  const combinedFailures: Record<string, ToolRecoveryFailure> = {};
   for (const id of combinedOrder) {
     const failure = parent.failures[id] ?? normalized.failures[id];
     if (failure)
@@ -702,17 +702,17 @@ export function mergeToolRecoveryJournalsV1(
   };
 }
 
-export function normalizeToolRecoveryJournalV1(
+export function normalizeToolRecoveryJournal(
   value: unknown,
   hostIdentityKey: string,
-): ToolRecoveryJournalV1 {
+): ToolRecoveryJournal {
   assertCanonicalRecoveryIdentityKey(hostIdentityKey);
   const candidate = record(value);
   const identityKey = hostIdentityKey;
   const blocked = (
     observedFailures = 0,
     scope?: { taskId?: string; turnId?: string },
-  ): ToolRecoveryJournalV1 => ({
+  ): ToolRecoveryJournal => ({
     schemaVersion: 1,
     identityKey,
     failures: {},
@@ -778,7 +778,7 @@ export function normalizeToolRecoveryJournalV1(
   )
     return blocked(numberValue(quality, 'observedFailures'));
   const candidateProgressRevision = numberValue(candidate, 'progressRevision') ?? -1;
-  const failures: Record<string, ToolRecoveryFailureV1> = {};
+  const failures: Record<string, ToolRecoveryFailure> = {};
   const claims = new Set<string>();
   for (const id of order as readonly string[]) {
     const failure = record(failuresRecord[id]);
@@ -823,15 +823,15 @@ export function normalizeToolRecoveryJournalV1(
           eligibleToolCallId.length === 0 ||
           eligibleModelMessageId == null)) ||
       !isToolRecoveryFailureStatus(status) ||
-      (failure.resolution != null && !isToolRecoveryResolutionV1(resolution)) ||
-      !isToolOutcomeV1(outcome) ||
+      (failure.resolution != null && !isToolRecoveryResolution(resolution)) ||
+      !isToolOutcome(outcome) ||
       !isNonNegativeInteger(modelCorrectionAttempts) ||
       modelCorrectionAttempts > 1 ||
       !isNonNegativeInteger(automaticRetryAttempts) ||
       automaticRetryAttempts > 1 ||
       !isNonNegativeInteger(progressRevision) ||
       progressRevision > candidateProgressRevision ||
-      toolFailureInstanceIdV1({
+      toolFailureInstanceId({
         toolCallId,
         invocationFingerprint: invocationFingerprint!,
         outcome,
@@ -860,7 +860,7 @@ export function normalizeToolRecoveryJournalV1(
         : turnId == null
           ? { ...failure, status: 'exhausted', resolution: 'terminal' }
           : failure;
-    if (!isToolRecoveryFailureV1(normalizedFailureValue))
+    if (!isToolRecoveryFailure(normalizedFailureValue))
       return blocked(numberValue(quality, 'observedFailures'), { taskId, turnId });
     failures[id] = normalizedFailureValue;
   }
@@ -931,7 +931,7 @@ export function normalizeToolRecoveryJournalV1(
 function validNonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
-function isToolRecoveryFailureStatus(value: unknown): value is ToolRecoveryFailureV1['status'] {
+function isToolRecoveryFailureStatus(value: unknown): value is ToolRecoveryFailure['status'] {
   return ['unresolved', 'recovered', 'exhausted'].includes(String(value));
 }
 function isNonNegativeInteger(value: unknown): value is number {
@@ -958,7 +958,7 @@ function exactFailureKeys(value: Readonly<Record<string, unknown>>): boolean {
   ];
   return Object.keys(value).every((key) => allowed.includes(key));
 }
-function isToolRecoveryFailureV1(value: unknown): value is ToolRecoveryFailureV1 {
+function isToolRecoveryFailure(value: unknown): value is ToolRecoveryFailure {
   const failure = record(value);
   if (!failure || !exactFailureKeys(failure)) return false;
   const resolution = stringValue(failure, 'resolution');
@@ -980,8 +980,8 @@ function isToolRecoveryFailureV1(value: unknown): value is ToolRecoveryFailureV1
         eligibleToolCallId.length > 0 &&
         eligibleModelMessageId != null)) &&
     isToolRecoveryFailureStatus(stringValue(failure, 'status')) &&
-    (failure.resolution === undefined || isToolRecoveryResolutionV1(resolution)) &&
-    isToolOutcomeV1(failure.outcome) &&
+    (failure.resolution === undefined || isToolRecoveryResolution(resolution)) &&
+    isToolOutcome(failure.outcome) &&
     isNonNegativeInteger(numberValue(failure, 'modelCorrectionAttempts')) &&
     numberValue(failure, 'modelCorrectionAttempts')! <= 1 &&
     isNonNegativeInteger(numberValue(failure, 'automaticRetryAttempts')) &&
@@ -990,7 +990,7 @@ function isToolRecoveryFailureV1(value: unknown): value is ToolRecoveryFailureV1
   );
 }
 
-export function createToolRecoveryJournalV1(identityKey: string): ToolRecoveryJournalV1 {
+export function createToolRecoveryJournal(identityKey: string): ToolRecoveryJournal {
   if (!/^[a-f0-9]{64}$/u.test(identityKey))
     throw new Error('Tool recovery identityKey must be a canonical host-supplied key.');
   return {

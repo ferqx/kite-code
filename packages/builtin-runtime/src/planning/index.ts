@@ -5,24 +5,24 @@ export {
   PlanArtifactStore,
 } from './plan-artifacts';
 export {
-  agentPlanTransportMatchesDocumentV2,
+  agentPlanTransportMatchesDocument,
   hasValidPlanRevisionMetadata,
-  isAgentPlanTransportV2,
-  isPlanDocumentV2,
+  isAgentPlanTransport,
+  isPlanDocument,
+  isPlanStep,
   isPlanStepMetadata,
-  isPlanStepV2,
-  planStepsFromAgentPlanUpdateV2,
+  planStepsFromAgentPlanUpdate,
 } from './plan-document';
-export { isPlanCompletionEvidenceV1 } from './plan-evidence';
+export { isPlanCompletionEvidence } from './plan-evidence';
 export { computePlanStructuralDigest } from './plan-hashes';
 export type {
-  BuiltinPlanRevisionInputV1,
-  BuiltinPlanStepInputV1,
-  CreateBuiltinPlanDocumentV2InputV1,
+  BuiltinPlanRevisionInput,
+  BuiltinPlanStepInput,
+  CreateBuiltinPlanDocumentInput,
 } from './plan-semantics';
 export {
-  createBuiltinPlanDocumentV2V1,
-  initialPlanIdV1,
-  isBuiltinSavedReplanRevisionV1,
-  projectBuiltinPublicPlanV2V1,
+  createBuiltinPlanDocument,
+  initialPlanId,
+  isBuiltinSavedReplanRevision,
+  projectBuiltinPublicPlan,
 } from './plan-semantics';

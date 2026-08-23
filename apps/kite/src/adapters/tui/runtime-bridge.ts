@@ -1,8 +1,8 @@
 import {
   type ClientPresentationEvent,
-  RUNTIME_COMMAND_SCHEMA_V1,
-  RUNTIME_NOTIFICATION_SCHEMA_V1,
-  RUNTIME_PROJECTION_SCHEMA_V1,
+  RUNTIME_COMMAND_SCHEMA_,
+  RUNTIME_NOTIFICATION_SCHEMA_,
+  RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeCommand,
   type RuntimeCommandErrorCode,
   type RuntimeCommandReceipt,
@@ -12,17 +12,16 @@ import {
   type RuntimeSessionProjection,
 } from '@kite/runtime-contract';
 import {
-  type RuntimeHostCoordinatorPortV1,
+  type RuntimeHostCoordinatorPort,
   type RuntimeHostExecutionBridge,
   type RuntimeHostKernelInput,
   type RuntimeHostPreparedExecution,
   runtimeCommandFromKernelInput,
 } from '@kite/runtime-host';
-import type { ProjectIdentityV1 } from '@kite/runtime-spi';
-import type { Action } from '#app/tui/reducers/actions';
-import { projectRuntimeEphemeralNotificationV1 } from '../presentation-notification';
-import { type SessionDeps, SessionManager, type SessionRuntime } from './SessionManager';
-import type { RuntimeEvent } from './state-runtime';
+import type { ProjectIdentity } from '@kite/runtime-spi';
+import { projectRuntimeEphemeralNotification } from '../../bootstrap/presentation-notification';
+import type { RuntimeEvent } from '../../bootstrap/runtime/state-runtime';
+import { type SessionDeps, SessionManager, type SessionRuntime } from '../../runtime/session';
 
 interface SessionAuthority {
   revision: number;
@@ -60,17 +59,17 @@ interface PendingRewind {
   result?: RewindResult;
 }
 
-export function createTuiRuntimeClientV1(
+export function createTuiRuntimeClient(
   input: SessionDeps,
-  createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPortV1,
-  resolveProjectIdentity: (workspace: string) => ProjectIdentityV1,
+  createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPort,
+  resolveProjectIdentity: (workspace: string) => ProjectIdentity,
 ): object {
-  return new TuiRuntimeBridgeV1(input, createHost, resolveProjectIdentity).client;
+  return new TuiRuntimeBridge(input, createHost, resolveProjectIdentity).client;
 }
 
-class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
+class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   readonly #manager: SessionManager;
-  readonly #access: RuntimeHostCoordinatorPortV1;
+  readonly #access: RuntimeHostCoordinatorPort;
   readonly #sessions = new Map<string, SessionAuthority>();
   readonly #runtimeClients = new Map<string, object>();
   readonly #managerMembers = new Map<PropertyKey, unknown>();
@@ -78,14 +77,14 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
   readonly #pendingCompactions = new Map<string, PendingCompaction>();
   readonly #pendingRewinds = new Map<string, PendingRewind>();
   readonly #streamSequences = new Map<string, number>();
-  readonly #resolveProjectIdentity: (workspace: string) => ProjectIdentityV1;
+  readonly #resolveProjectIdentity: (workspace: string) => ProjectIdentity;
   #commandSequence = 0;
   readonly client: object;
 
   constructor(
     input: SessionDeps,
-    createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPortV1,
-    resolveProjectIdentity: (workspace: string) => ProjectIdentityV1,
+    createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPort,
+    resolveProjectIdentity: (workspace: string) => ProjectIdentity,
   ) {
     this.#manager = new SessionManager(input);
     this.#access = createHost(this);
@@ -273,7 +272,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
         command.input,
         {
           ...pending.dependencies,
-          dispatch: (action: Action) => {
+          dispatch: (action) => {
             if (action.type === 'RUNTIME_EVENT') {
               this.#publishPresentation(sessionId, action.event, publish);
             }
@@ -319,7 +318,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
       pending.result =
         command.mode === 'reset'
           ? await this.#manager.handleContextResetFromHost(command.sessionId, signal)
-          : await this.#manager.executeHostCompactionV1(
+          : await this.#manager.executeHostCompaction(
               command.sessionId,
               pending.instructions,
               pending.onProgress,
@@ -345,7 +344,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
                 canonicalWorkspaceDigest: project.workspaceDigest,
               });
               void this.#access.command({
-                schema: RUNTIME_COMMAND_SCHEMA_V1,
+                schema: RUNTIME_COMMAND_SCHEMA_,
                 commandId: this.#nextCommandId(sessionId, 'create'),
                 type: 'create_session',
                 workspace,
@@ -370,7 +369,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
             return (sessionId: string, workspace: string): object => {
               const runtime = target.registerSession(sessionId, workspace);
               void this.#access.command({
-                schema: RUNTIME_COMMAND_SCHEMA_V1,
+                schema: RUNTIME_COMMAND_SCHEMA_,
                 commandId: this.#nextCommandId(sessionId, 'resume'),
                 type: 'resume_session',
                 sessionId,
@@ -403,7 +402,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
               const authority = this.#sessions.get(sessionId);
               if (authority) {
                 const receipt = await this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_V1,
+                  schema: RUNTIME_COMMAND_SCHEMA_,
                   commandId: this.#nextCommandId(sessionId, 'close'),
                   type: 'close_session',
                   sessionId,
@@ -435,7 +434,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
               this.#pendingCompactions.set(commandId, pending);
               try {
                 const receipt = await this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_V1,
+                  schema: RUNTIME_COMMAND_SCHEMA_,
                   commandId,
                   type: 'compact_session',
                   sessionId,
@@ -458,7 +457,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
               this.#pendingCompactions.set(commandId, pending);
               try {
                 const receipt = await this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_V1,
+                  schema: RUNTIME_COMMAND_SCHEMA_,
                   commandId,
                   type: 'compact_session',
                   sessionId,
@@ -484,7 +483,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
               const pending: PendingRewind = { workspace: input.workspace };
               this.#pendingRewinds.set(commandId, pending);
               const receipt = await this.#access.command({
-                schema: RUNTIME_COMMAND_SCHEMA_V1,
+                schema: RUNTIME_COMMAND_SCHEMA_,
                 commandId,
                 type: 'rewind_session',
                 sessionId: input.sourceThreadId,
@@ -531,7 +530,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
             this.#pendingRuns.set(commandId, pending);
             try {
               const receipt = await this.#access.command({
-                schema: RUNTIME_COMMAND_SCHEMA_V1,
+                schema: RUNTIME_COMMAND_SCHEMA_,
                 commandId,
                 type: 'start_turn',
                 sessionId: target.threadId,
@@ -553,7 +552,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
         if (property === 'abort') {
           return (): void => {
             void this.#access.command({
-              schema: RUNTIME_COMMAND_SCHEMA_V1,
+              schema: RUNTIME_COMMAND_SCHEMA_,
               commandId: this.#nextCommandId(target.threadId, 'cancel'),
               type: 'cancel_turn',
               sessionId: target.threadId,
@@ -565,7 +564,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
         if (property === 'setInteractionMode') {
           return (mode: 'accept_edits' | 'auto' | 'full'): void => {
             void this.#access.command({
-              schema: RUNTIME_COMMAND_SCHEMA_V1,
+              schema: RUNTIME_COMMAND_SCHEMA_,
               commandId: this.#nextCommandId(target.threadId, 'mode'),
               type: 'set_interaction_mode',
               sessionId: target.threadId,
@@ -593,7 +592,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
     const sequence = (this.#streamSequences.get(sessionId) ?? 0) + 1;
     const workId = authority.activeWork?.workId ?? sessionId;
     const turnId = authority.activeWork?.activeTurn?.turnId ?? workId;
-    const ephemeral = projectRuntimeEphemeralNotificationV1(event, {
+    const ephemeral = projectRuntimeEphemeralNotification(event, {
       sessionId,
       workId,
       turnId,
@@ -624,7 +623,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
   ): Extract<RuntimeNotification, { durability: 'durable' }> {
     const projection = this.#projection(sessionId);
     return {
-      schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+      schema: RUNTIME_NOTIFICATION_SCHEMA_,
       durability: 'durable',
       sessionId,
       revision: projection.revision,
@@ -637,7 +636,7 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
     if (!authority) throw new Error(`Unknown legacy TUI session: ${sessionId}`);
     const runtime = this.#manager.getRuntime(sessionId);
     return {
-      schema: RUNTIME_PROJECTION_SCHEMA_V1,
+      schema: RUNTIME_PROJECTION_SCHEMA_,
       sessionId,
       revision: authority.revision,
       displayName: runtime?.name,

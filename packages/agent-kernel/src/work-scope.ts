@@ -18,7 +18,7 @@ const INTERACTION_OWNED_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
 ]);
 
 /** Canonical State ownership rule for Task- and turn-scoped Tool calls. */
-export function toolCallBelongsToCurrentWorkV1(
+export function toolCallBelongsToCurrentWork(
   state: Readonly<AgentState>,
   call: Pick<AgentToolCallState, 'taskId' | 'createdAtTurnId'>,
 ): boolean {
@@ -26,7 +26,7 @@ export function toolCallBelongsToCurrentWorkV1(
   return call.createdAtTurnId === state.turn.turnId;
 }
 
-export function interactionToolCallV1(state: Readonly<AgentState>): AgentToolCallState | undefined {
+export function interactionToolCall(state: Readonly<AgentState>): AgentToolCallState | undefined {
   const interaction = state.interactions;
   if (
     interaction.kind === 'idle' ||
@@ -38,7 +38,7 @@ export function interactionToolCallV1(state: Readonly<AgentState>): AgentToolCal
   return state.tools.calls[interaction.toolCallId];
 }
 
-export function interactionBelongsToCurrentWorkV1(state: Readonly<AgentState>): boolean {
+export function interactionBelongsToCurrentWork(state: Readonly<AgentState>): boolean {
   if (state.interactions.kind === 'idle') return false;
   if (
     state.interactions.kind === 'awaiting_provider_action' ||
@@ -46,34 +46,33 @@ export function interactionBelongsToCurrentWorkV1(state: Readonly<AgentState>): 
   ) {
     return true;
   }
-  const call = interactionToolCallV1(state);
-  return call != null && toolCallBelongsToCurrentWorkV1(state, call);
+  const call = interactionToolCall(state);
+  return call != null && toolCallBelongsToCurrentWork(state, call);
 }
 
-export function hasCurrentSuspendedSubagentV1(state: Readonly<AgentState>): boolean {
+export function hasCurrentSuspendedSubagent(state: Readonly<AgentState>): boolean {
   return Object.keys(state.suspendedSubagents).some((toolCallId) => {
     const call = state.tools.calls[toolCallId];
     return (
       call?.name === 'task' &&
       !TERMINAL_TOOL_STATUSES.has(call.status) &&
-      toolCallBelongsToCurrentWorkV1(state, call)
+      toolCallBelongsToCurrentWork(state, call)
     );
   });
 }
 
-export function activeSkillFramesForCurrentWorkV1(state: Readonly<AgentState>) {
+export function activeSkillFramesForCurrentWork(state: Readonly<AgentState>) {
   return Object.values(state.skills.frames).filter(
     (frame) => frame.status === 'active' && frame.taskId === state.activeTaskId,
   );
 }
 
-export function findStrandedInteractionToolV1(
+export function findStrandedInteractionTool(
   state: Readonly<AgentState>,
 ): AgentToolCallState | undefined {
   if (state.interactions.kind !== 'idle') return undefined;
   return Object.values(state.tools.calls).find(
     (call) =>
-      toolCallBelongsToCurrentWorkV1(state, call) &&
-      INTERACTION_OWNED_TOOL_STATUSES.has(call.status),
+      toolCallBelongsToCurrentWork(state, call) && INTERACTION_OWNED_TOOL_STATUSES.has(call.status),
   );
 }

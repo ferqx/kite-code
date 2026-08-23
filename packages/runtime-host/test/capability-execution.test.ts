@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createRuntimeHostCapabilityExecutionPortV1,
-  RuntimeHostCapabilityExecutionErrorV1,
+  createRuntimeHostCapabilityExecutionPort,
+  RuntimeHostCapabilityExecutionError,
 } from '@kite/runtime-host';
 import {
-  type CapabilityExecutionInvocationV1,
-  type CapabilityExecutorV1,
-  createRuntimeModuleRegistryV1,
-  defineRuntimeModuleV1,
+  type CapabilityExecutionInvocation,
+  type CapabilityExecutor,
+  createRuntimeModuleRegistry,
+  defineRuntimeModule,
 } from '@kite/runtime-spi';
 
 const CAPABILITY_ID = 'builtin:fixture';
@@ -16,9 +16,9 @@ const PROVIDER_ID = 'fixture-provider';
 const EXECUTOR_REVISION = 'executor-1';
 const SCHEMA_DIGEST = 'schema-1';
 
-function createFixture(execute: CapabilityExecutorV1['execute']) {
-  const registry = createRuntimeModuleRegistryV1([
-    defineRuntimeModuleV1({
+function createFixture(execute: CapabilityExecutor['execute']) {
+  const registry = createRuntimeModuleRegistry([
+    defineRuntimeModule({
       moduleId: 'fixture-module',
       providerId: PROVIDER_ID,
       revision: 'module-1',
@@ -42,12 +42,12 @@ function createFixture(execute: CapabilityExecutorV1['execute']) {
       },
     }),
   ]);
-  return createRuntimeHostCapabilityExecutionPortV1(registry);
+  return createRuntimeHostCapabilityExecutionPort(registry);
 }
 
 function invocation(
-  overrides: Partial<CapabilityExecutionInvocationV1> = {},
-): CapabilityExecutionInvocationV1 {
+  overrides: Partial<CapabilityExecutionInvocation> = {},
+): CapabilityExecutionInvocation {
   return {
     binding: {
       bindingId: 'binding-1',
@@ -78,8 +78,8 @@ function invocation(
 }
 
 function exactReceipt(
-  request: Parameters<CapabilityExecutorV1['execute']>[0],
-  context: Parameters<CapabilityExecutorV1['execute']>[1],
+  request: Parameters<CapabilityExecutor['execute']>[0],
+  context: Parameters<CapabilityExecutor['execute']>[1],
 ) {
   return {
     invocationId: request.invocationId,
@@ -101,7 +101,7 @@ describe('Runtime Host capability execution', () => {
       calls += 1;
       return exactReceipt(request, context);
     });
-    const cases: Array<[CapabilityExecutionInvocationV1, string]> = [
+    const cases: Array<[CapabilityExecutionInvocation, string]> = [
       [
         invocation({ binding: { ...invocation().binding, schemaDigest: 'forged-schema' } }),
         'schema_digest_mismatch',
@@ -143,7 +143,7 @@ describe('Runtime Host capability execution', () => {
       attemptId: 'forged-attempt',
     }));
     await expect(port.invoke(invocation())).rejects.toBeInstanceOf(
-      RuntimeHostCapabilityExecutionErrorV1,
+      RuntimeHostCapabilityExecutionError,
     );
     await expect(
       createFixture(async (request, context) => ({
@@ -185,8 +185,8 @@ describe('Runtime Host capability execution', () => {
   test('forwards the exact RFC Provider context without side-channel fields', async () => {
     const facts = Object.freeze({ catalogRevision: 'catalog-1' });
     const mechanisms = Object.freeze({ fetch: () => undefined });
-    let observedRequest: Parameters<CapabilityExecutorV1['execute']>[0] | undefined;
-    let observedContext: Parameters<CapabilityExecutorV1['execute']>[1] | undefined;
+    let observedRequest: Parameters<CapabilityExecutor['execute']>[0] | undefined;
+    let observedContext: Parameters<CapabilityExecutor['execute']>[1] | undefined;
     const port = createFixture(async (request, context) => {
       observedRequest = request;
       observedContext = context;

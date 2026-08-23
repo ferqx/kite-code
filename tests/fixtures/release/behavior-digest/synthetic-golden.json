@@ -36,7 +36,7 @@
     "defaultConfiguration": {
       "schemaVersion": 1,
       "inputIdentity": "kite.default-configuration.v1",
-      "digest": "sha256:0d64ba17a78ea2dbdf4045a4fba81b7b120c264ca75f0c9eda43ffc3e14f9e66"
+      "digest": "sha256:15e274a7b6fe23538974040a6c79aadef8d0056bde20246641979709e3f2c9e6"
     },
     "providerRoute": {
       "schemaVersion": 1,
@@ -64,5 +64,5 @@
       "digest": "sha256:99b5aafda63ffd5f1e2bc20b5259dde3fbb8fc727d047c77e53833bef00c6348"
     }
   },
-  "aggregateDigest": "sha256:648cc325e9a9eedfb2e88eba82d22825c3620738bb1a12bc627c0a749c9240d6"
+  "aggregateDigest": "sha256:bb329e66f539345f1f633b66291fb98ef9c23f8742101a09167601cd6c522b7e"
 }

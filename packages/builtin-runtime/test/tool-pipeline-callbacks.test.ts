@@ -1,29 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
 import type {
-  CapabilityToolKindV1,
-  NonDynamicOperationIdV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolArgumentOriginV1,
-  ToolCallSnapshotV1,
-  ToolPipelineResolutionContextV1,
+  CapabilityToolKind,
+  NonDynamicOperationId,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolArgumentOrigin,
+  ToolCallSnapshot,
+  ToolPipelineResolutionContext,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from '../src/capability-binding';
-import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjectionV1 } from '../src/index';
-import { createBuiltinToolPipelineCallbacksV1 } from '../src/tool-pipeline-callbacks';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+import { digestCapabilityBindingValue } from '../src/capability-binding';
+import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '../src/index';
+import { createBuiltinToolPipelineCallbacks } from '../src/tool-pipeline-callbacks';
 
 const STAGE_SCHEMA = 'kite.tool-pipeline-stage.v1' as const;
 const DYNAMIC_CATALOG_REVISION = 'c'.repeat(64);
 
 function fixture() {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot(), {
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const projection = createBuiltinToolCatalogProjection(registry.snapshot(), {
     turnContext: { workspace: '/workspace' },
   });
-  const callbacks = createBuiltinToolPipelineCallbacksV1(projection);
-  const context: ToolPipelineResolutionContextV1 = {
+  const callbacks = createBuiltinToolPipelineCallbacks(projection);
+  const context: ToolPipelineResolutionContext = {
     currentTurnId: 'turn-1',
     availabilityContext: { workspace: '/workspace' },
     bindings: [],
@@ -39,14 +39,14 @@ function call(
   name: string,
   rawArguments: unknown,
   createdAtTurnId = 'turn-1',
-  argumentOrigin: ToolArgumentOriginV1 = 'model_public',
-): ToolCallSnapshotV1 {
+  argumentOrigin: ToolArgumentOrigin = 'model_public',
+): ToolCallSnapshot {
   return {
     schema: STAGE_SCHEMA,
     stage: 'snapshot',
     toolCallId: 'call-1',
     name,
-    rawArguments: rawArguments as ToolCallSnapshotV1['rawArguments'],
+    rawArguments: rawArguments as ToolCallSnapshot['rawArguments'],
     argumentOrigin,
     createdAtTurnId,
     modelMessageId: 'message-1',
@@ -68,8 +68,8 @@ function turnFixture(
   input: {
     readonly hasTaskAdapter?: boolean;
     readonly featureFlags?: Readonly<{
-      readonly skillWorkflowV1: true;
-      readonly skillActivationV2: true;
+      readonly skillWorkflow: true;
+      readonly skillActivation: true;
     }>;
     readonly availableSkillIds?: readonly string[];
     readonly descriptors?: readonly CapabilityDescriptor[];
@@ -77,7 +77,7 @@ function turnFixture(
     readonly turnId?: string;
   } = {},
 ) {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
   const turnContext = {
     workspace: '/workspace',
     phase: 'building' as const,
@@ -85,10 +85,10 @@ function turnFixture(
     availableSkillIds: input.availableSkillIds ?? [],
     ...(input.featureFlags ? { featureFlags: input.featureFlags } : {}),
   };
-  const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot(), { turnContext });
-  const callbacks = createBuiltinToolPipelineCallbacksV1(projection);
+  const projection = createBuiltinToolCatalogProjection(registry.snapshot(), { turnContext });
+  const callbacks = createBuiltinToolPipelineCallbacks(projection);
   const currentTurnId = input.turnId ?? 'turn-specialized';
-  const context: ToolPipelineResolutionContextV1 = {
+  const context: ToolPipelineResolutionContext = {
     currentTurnId,
     availabilityContext: turnContext,
     bindings: [],
@@ -116,7 +116,7 @@ function skillDescriptor(overrides: Partial<CapabilityDescriptor> = {}): Capabil
     diagnostics: [],
     ...overrides,
   };
-  return { ...base, revision: digestCapabilityBindingValueV1(base) };
+  return { ...base, revision: digestCapabilityBindingValue(base) };
 }
 
 function skillFixture(
@@ -134,7 +134,7 @@ function skillFixture(
     issuedForTurnId: 'turn-specialized',
   };
   return turnFixture({
-    featureFlags: { skillWorkflowV1: true, skillActivationV2: true },
+    featureFlags: { skillWorkflow: true, skillActivation: true },
     availableSkillIds: [descriptor.capabilityId],
     descriptors: overrides.omitDescriptor ? [] : [descriptor],
     disclosures: overrides.omitDisclosure ? [] : [disclosure],
@@ -161,7 +161,7 @@ function preparedReadFile() {
     modelMessageId: value.resolved.call.modelMessageId,
     argumentOrigin: value.resolved.call.argumentOrigin,
     providerId: entry.providerId,
-    operationId: entry.operationId as NonDynamicOperationIdV1,
+    operationId: entry.operationId as NonDynamicOperationId,
     executionFamily: 'builtin' as const,
     capabilityId: entry.capabilityId,
     capabilityRevision: entry.revision,
@@ -177,7 +177,7 @@ function preparedReadFile() {
     authorizationDigest: null,
     admissionDigest: null,
     executionMechanism: entry.executionMechanism,
-    toolKind: entry.kind as CapabilityToolKindV1,
+    toolKind: entry.kind as CapabilityToolKind,
     bindingId: null,
     visibility: 'model' as const,
     modelVisible: true as const,
@@ -199,7 +199,7 @@ function preparedReadFile() {
       facts: validated.value.domainData,
       binding: null,
     },
-  } as const satisfies PreparedToolInvocationV1;
+  } as const satisfies PreparedToolInvocation;
   return { ...value, validated: validated.value, classified: classified.value, prepared };
 }
 
@@ -207,7 +207,7 @@ function preparedFromTurnFixture(
   value: ReturnType<typeof turnFixture>,
   name: string,
   argumentsValue: Record<string, unknown>,
-  argumentOrigin: ToolArgumentOriginV1 = 'model_public',
+  argumentOrigin: ToolArgumentOrigin = 'model_public',
 ) {
   const resolved = value.callbacks.resolve(
     call(name, argumentsValue, value.context.currentTurnId, argumentOrigin),
@@ -233,7 +233,7 @@ function preparedFromTurnFixture(
     modelMessageId: resolved.value.call.modelMessageId,
     argumentOrigin: resolved.value.call.argumentOrigin,
     providerId: entry.providerId,
-    operationId: entry.operationId as NonDynamicOperationIdV1,
+    operationId: entry.operationId as NonDynamicOperationId,
     executionFamily: resolved.value.target.executionFamily as 'builtin' | 'skill' | 'subagent',
     capabilityId: entry.capabilityId,
     capabilityRevision: entry.revision,
@@ -259,7 +259,7 @@ function preparedFromTurnFixture(
     nestedCapabilityRevision: null,
     nestedCatalogRevision: null,
     isDynamicMcp: false as const,
-    toolKind: entry.kind as CapabilityToolKindV1,
+    toolKind: entry.kind as CapabilityToolKind,
   };
   return {
     identity,
@@ -271,12 +271,12 @@ function preparedFromTurnFixture(
       facts: validated.value.domainData,
       binding: null,
     },
-  } as const satisfies PreparedToolInvocationV1;
+  } as const satisfies PreparedToolInvocation;
 }
 
 function verificationValid(
   result: ReturnType<
-    ReturnType<typeof createBuiltinToolPipelineCallbacksV1>['verifyPreparedIdentity']
+    ReturnType<typeof createBuiltinToolPipelineCallbacks>['verifyPreparedIdentity']
   >,
 ): boolean {
   return typeof result === 'boolean' ? result : result.valid;
@@ -372,7 +372,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
     const classified = value.callbacks.classify(validated.value);
     expect(classified.ok).toBe(true);
     if (!classified.ok) return;
-    const commandDigest = digestCapabilityBindingValueV1('printf   hello');
+    const commandDigest = digestCapabilityBindingValue('printf   hello');
     expect(classified.value.governance.invocation.commandDigest).toBe(commandDigest);
     expect(classified.value.governance.invocation.dynamicCatalogRevision).toBeNull();
     expect(value.callbacks.verifyClassifiedIdentity(classified.value)).toEqual({ valid: true });
@@ -476,10 +476,10 @@ describe('Builtin Tool Pipeline callbacks', () => {
       throw new Error('task entry/parser projection missing');
     }
     expect(publicValidated.value.request.schemaDigest).toBe(
-      digestCapabilityBindingValueV1(taskEntry.modelInputSchema),
+      digestCapabilityBindingValue(taskEntry.modelInputSchema),
     );
     expect(publicValidated.value.request.schemaDigest).not.toBe(
-      digestCapabilityBindingValueV1(taskEntry.inputSchema ?? {}),
+      digestCapabilityBindingValue(taskEntry.inputSchema ?? {}),
     );
     expect(taskEntry.modelParser?.parserRevision).not.toBe(taskEntry.parser.parserRevision);
     const publicPrepared = preparedFromTurnFixture(value, 'task', publicTaskArguments);
@@ -521,7 +521,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
       subagentRole: 'code',
     });
     expect(privateValidated.value.request.schemaDigest).toBe(
-      digestCapabilityBindingValueV1(taskEntry.inputSchema ?? {}),
+      digestCapabilityBindingValue(taskEntry.inputSchema ?? {}),
     );
     expect(privateValidated.value.request.schemaDigest).not.toBe(
       publicValidated.value.request.schemaDigest,
@@ -566,11 +566,11 @@ describe('Builtin Tool Pipeline callbacks', () => {
         input: {
           ...privatePrepared.input,
           facts: {
-            ...(privatePrepared.input.facts as Readonly<Record<string, RuntimeJsonValueV1>>),
+            ...(privatePrepared.input.facts as Readonly<Record<string, RuntimeJsonValue>>),
             argumentOrigin: 'model_public',
           },
         },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
 
     // A valid private envelope remains model input when the origin is public.
@@ -614,24 +614,24 @@ describe('Builtin Tool Pipeline callbacks', () => {
   });
 
   test('keeps the frozen planning projection as the only Task parser context authority', () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot(), {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const projection = createBuiltinToolCatalogProjection(registry.snapshot(), {
       turnContext: {
         workspace: '/workspace',
         phase: 'planning',
-        promptContractV2: false,
+        promptContract: false,
         hasTaskAdapter: true,
       },
     });
-    const callbacks = createBuiltinToolPipelineCallbacksV1(projection);
+    const callbacks = createBuiltinToolPipelineCallbacks(projection);
     // This transported context is deliberately wider than the context that
     // created the projection. It remains a transport fact only.
-    const context: ToolPipelineResolutionContextV1 = {
+    const context: ToolPipelineResolutionContext = {
       currentTurnId: 'turn-planning',
       availabilityContext: {
         workspace: '/workspace',
         phase: 'building',
-        promptContractV2: true,
+        promptContract: true,
         hasTaskAdapter: true,
       },
       bindings: [],
@@ -648,11 +648,11 @@ describe('Builtin Tool Pipeline callbacks', () => {
     };
 
     for (const subagent_type of ['code', 'review']) {
-      const widenedPublic = validateTask({
+      const stablePublic = validateTask({
         subagent_type,
-        task: 'This building-only role must remain unavailable while planning.',
+        task: 'Policy, rather than the parser, owns this planning role decision.',
       });
-      expect(widenedPublic.ok).toBe(false);
+      expect(stablePublic.ok).toBe(true);
     }
     const widenedPrivate = validateTask({
       subagent_type: 'explore',
@@ -679,7 +679,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
       throw new Error('planning task entry missing');
     }
     expect(exact.value.request.schemaDigest).toBe(
-      digestCapabilityBindingValueV1(taskEntry.modelInputSchema),
+      digestCapabilityBindingValue(taskEntry.modelInputSchema),
     );
     expect(exact.value.domainData).not.toHaveProperty('parserContext');
 
@@ -695,15 +695,15 @@ describe('Builtin Tool Pipeline callbacks', () => {
         input: {
           ...prepared.input,
           facts: {
-            ...(prepared.input.facts as Readonly<Record<string, RuntimeJsonValueV1>>),
+            ...(prepared.input.facts as Readonly<Record<string, RuntimeJsonValue>>),
             parserContext: {
               workspace: '/workspace',
               phase: 'building',
-              promptContractV2: true,
+              promptContract: true,
             },
           },
         },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
   });
 
@@ -767,7 +767,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
     );
     if (activateEntry?.visibility !== 'model') throw new Error('activate entry missing');
     const validatedDomainData = validated.value.domainData as Readonly<
-      Record<string, RuntimeJsonValueV1>
+      Record<string, RuntimeJsonValue>
     >;
     const nestedIdentity = {
       invocationId: 'skill-invocation',
@@ -777,7 +777,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
       modelMessageId: resolved.value.call.modelMessageId,
       argumentOrigin: resolved.value.call.argumentOrigin,
       providerId: activateEntry.providerId,
-      operationId: activateEntry.operationId as NonDynamicOperationIdV1,
+      operationId: activateEntry.operationId as NonDynamicOperationId,
       executionFamily: 'skill' as const,
       capabilityId: activateEntry.capabilityId,
       capabilityRevision: activateEntry.revision,
@@ -803,7 +803,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
       nestedCapabilityRevision: valid.context.descriptors[0]?.revision ?? null,
       nestedCatalogRevision: resolved.value.dynamicCatalogRevision,
       isDynamicMcp: false as const,
-      toolKind: activateEntry.kind as CapabilityToolKindV1,
+      toolKind: activateEntry.kind as CapabilityToolKind,
     };
     const outerPrepared = {
       identity: nestedIdentity,
@@ -815,14 +815,14 @@ describe('Builtin Tool Pipeline callbacks', () => {
         facts: validatedDomainData,
         binding: null,
       },
-    } as const satisfies PreparedToolInvocationV1;
+    } as const satisfies PreparedToolInvocation;
     const nestedFacts = validatedDomainData.nestedSkill as Record<string, unknown>;
     expect(valid.callbacks.verifyPreparedIdentity(outerPrepared)).toEqual({ valid: true });
     expect(
       valid.callbacks.verifyPreparedIdentity({
         ...outerPrepared,
         input: { ...outerPrepared.input, facts: nestedFacts },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
     expect(
       valid.callbacks.verifyPreparedIdentity({
@@ -837,7 +837,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
             },
           },
         },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
     for (const patch of [
       { dynamicCatalogRevision: DYNAMIC_CATALOG_REVISION },
@@ -849,7 +849,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
         valid.callbacks.verifyPreparedIdentity({
           ...outerPrepared,
           identity: { ...nestedIdentity, ...patch },
-        } as unknown as PreparedToolInvocationV1),
+        } as unknown as PreparedToolInvocation),
       ).toMatchObject({ valid: false });
     }
     expect(
@@ -857,7 +857,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
         ...outerPrepared,
         identity: {
           ...nestedIdentity,
-          effectiveEffectsDigest: digestCapabilityBindingValueV1(
+          effectiveEffectsDigest: digestCapabilityBindingValue(
             activateEntry.classifyEffects(validated.value.request.arguments).effectiveEffects,
           ),
         },
@@ -873,7 +873,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
             nestedSkill: { ...nestedFacts, descriptor: { skillId: 'only-id' } },
           },
         },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
     expect(
       valid.callbacks.verifyPreparedIdentity({
@@ -891,13 +891,13 @@ describe('Builtin Tool Pipeline callbacks', () => {
             },
           },
         },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
     expect(
       valid.callbacks.verifyPreparedIdentity({
         ...outerPrepared,
         input: { ...outerPrepared.input, facts: undefined },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
 
     const missingDisclosure = skillFixture({ omitDisclosure: true });
@@ -947,7 +947,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
       value.callbacks.verifyPreparedIdentity({
         ...value.prepared,
         identity: { ...value.prepared.identity, ...patch },
-      } as unknown as PreparedToolInvocationV1);
+      } as unknown as PreparedToolInvocation);
     for (const patch of [
       { operationId: 'builtin:write_file' },
       { executionFamily: 'skill' },
@@ -985,7 +985,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
       value.callbacks.verifyPreparedIdentity({
         ...value.prepared,
         input: { ...value.prepared.input, binding: { bindingId: 'forged' } },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
     expect(
       value.callbacks.verifyPreparedIdentity({
@@ -1001,7 +1001,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
           builtinProjectionRevision: null,
           dynamicCatalogRevision: 'mcp-catalog-1',
         },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
   });
 
@@ -1012,8 +1012,8 @@ describe('Builtin Tool Pipeline callbacks', () => {
       path: 'README.md',
       content: 'replacement',
     });
-    const readFacts = readPrepared.input.facts as Readonly<Record<string, RuntimeJsonValueV1>>;
-    const writeFacts = writePrepared.input.facts as Readonly<Record<string, RuntimeJsonValueV1>>;
+    const readFacts = readPrepared.input.facts as Readonly<Record<string, RuntimeJsonValue>>;
+    const writeFacts = writePrepared.input.facts as Readonly<Record<string, RuntimeJsonValue>>;
     const readApprovalSummary = readFacts.approvalSummary;
     const writeApprovalSummary = writeFacts.approvalSummary;
     if (typeof readApprovalSummary !== 'string' || typeof writeApprovalSummary !== 'string') {
@@ -1059,7 +1059,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
 
     const missingSummaryFacts = Object.fromEntries(
       Object.entries(readFacts).filter(([key]) => key !== 'approvalSummary'),
-    ) as Record<string, RuntimeJsonValueV1>;
+    ) as Record<string, RuntimeJsonValue>;
     expect(
       value.callbacks.verifyPreparedIdentity({
         ...readPrepared,
@@ -1097,7 +1097,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
     );
     expect(entry).toBeDefined();
     expect(
-      digestCapabilityBindingValueV1({ schema: 'identity', operation: 'read_file' }),
+      digestCapabilityBindingValue({ schema: 'identity', operation: 'read_file' }),
     ).toHaveLength(64);
   });
 });

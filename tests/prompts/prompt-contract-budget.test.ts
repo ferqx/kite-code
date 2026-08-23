@@ -5,11 +5,11 @@ import {
   countTokens,
 } from '@kite/builtin-runtime/model';
 import type { AgentConfig } from '#app/config';
-import { createTestAgentToolsV1 as createAgentTools } from '../helpers/runtime-model';
+import { createTestAgentTools as createAgentTools } from '../helpers/runtime-model';
 
 function measure(version: 'legacy' | 'v2') {
   const config = {
-    features: { promptContractV2: version === 'v2' },
+    features: { promptContract: version === 'v2' },
   } as AgentConfig;
   const tools = createAgentTools({ workspace: 'D:\\workspace', phase: 'building', config });
   const system = [

@@ -1,80 +1,80 @@
 import {
   type AgentState,
   assertAgentStateInvariants,
-  assertCapabilityToolTerminalBatchV1,
-  attachSuspendedCapabilityTerminalsV1,
+  assertCapabilityToolTerminalBatch,
+  attachSuspendedCapabilityTerminals,
   type DecisionFacts,
   decide,
   digestAgentEvent,
   finalizeAgentEvent,
   getEffectiveInteractionMode,
-  hasLateTerminalEventForCancelledToolV1,
-  isConcurrentShellEffectBatchCurrentV1,
+  hasLateTerminalEventForCancelledTool,
+  isConcurrentShellEffectBatchCurrent,
   type KernelEvent,
   normalizeAgentEvent,
   type RuntimeEffect,
   reduce,
-  type SchedulerFactsV1,
+  type SchedulerFacts,
   selectPendingEffects,
-  suspendedCapabilityTerminalRequirementsV1,
-  taskIdentityAllocationKeyV1,
-  type VerificationSchemaAdmissionFactV1,
+  suspendedCapabilityTerminalRequirements,
+  taskIdentityAllocationKey,
+  type VerificationSchemaAdmissionFact,
 } from '@kite/agent-kernel';
 import type {
   RuntimeHostExecutionServices,
-  RuntimeLeaseRequirementV1,
+  RuntimeLeaseRequirement,
   RuntimeTransactionAcknowledgement,
 } from './effect-supervisor';
 import type {
-  StateRuntimeEffectLeaseV1 as BaseStateRuntimeEffectLeaseV1,
-  StateRuntimeEffectPersistenceAcknowledgementV1,
+  StateRuntimeEffectLease as BaseStateRuntimeEffectLease,
+  StateRuntimeEffectPersistenceAcknowledgement,
 } from './state-effect-runtime';
 import type {
-  RuntimeEventMetadataV1,
-  RuntimeRestoreBoundaryV1,
-  RuntimeTransactionInputV1,
+  RuntimeEventMetadata,
+  RuntimeRestoreBoundary,
+  RuntimeTransactionInput,
 } from './storage';
 
 /** The one State 25 / Store 4 format accepted by this Host session. */
-export const STATE26_RUNTIME_SESSION_FORMAT_V1 = Object.freeze({
+export const STATE_RUNTIME_SESSION_FORMAT_ = Object.freeze({
   schemaVersion: 26 as const,
   storeVersion: 5 as const,
   epoch: 'kite-runtime-modularization-v1-2026-08-19' as const,
 });
 
-export type StateRuntimeSessionClockV1 = () => string;
-export type StateRuntimeSessionIdSourceV1 = (kind: string) => string;
+export type StateRuntimeSessionClock = () => string;
+export type StateRuntimeSessionIdSource = (kind: string) => string;
 
-export type StateRuntimeSessionEffectLeaseV1 = BaseStateRuntimeEffectLeaseV1;
+export type StateRuntimeSessionEffectLease = BaseStateRuntimeEffectLease;
 
-export interface StateRuntimeSessionEventContextV1 {
+export interface StateRuntimeSessionEventContext {
   readonly sessionId: string;
   readonly eventIndex: number;
   readonly state: Readonly<AgentState>;
 }
 
-export type StateRuntimeVerificationAdmissionV1 = (
+export type StateRuntimeVerificationAdmission = (
   event: KernelEvent,
-  context: StateRuntimeSessionEventContextV1,
-) => readonly (VerificationSchemaAdmissionFactV1 | null)[] | undefined;
+  context: StateRuntimeSessionEventContext,
+) => readonly (VerificationSchemaAdmissionFact | null)[] | undefined;
 
-export type StateRuntimeEventBatchPreprocessorV1 = (
+export type StateRuntimeEventBatchPreprocessor = (
   events: readonly KernelEvent[],
   state: Readonly<AgentState>,
 ) => readonly KernelEvent[];
 
-export type StateRuntimeEventBatchAdmissionValidatorV1 = (
+export type StateRuntimeEventBatchAdmissionValidator = (
   events: readonly KernelEvent[],
   state: Readonly<AgentState>,
 ) => undefined | boolean;
 
-export type StateRuntimeToolTerminalBatchValidatorV1 = (
+export type StateRuntimeToolTerminalBatchValidator = (
   effect: Extract<RuntimeEffect, { readonly type: 'run_tools' }>,
   events: readonly KernelEvent[],
   state: Readonly<AgentState>,
 ) => undefined | boolean;
 
-export interface StateRuntimeNamedTurnSnapshotInputV1 {
+export interface StateRuntimeNamedTurnSnapshotInput {
   readonly sessionId: string;
   readonly turnId: string;
   readonly state: Readonly<AgentState>;
@@ -87,8 +87,8 @@ export interface StateRuntimeNamedTurnSnapshotInputV1 {
  * predicate (for example, a shell sibling predicate); Host never inspects a
  * tool name or a model operation.
  */
-export type StateRuntimeConcurrentEffectEventCurrentV1 = (
-  lease: Readonly<StateRuntimeSessionEffectLeaseV1>,
+export type StateRuntimeConcurrentEffectEventCurrent = (
+  lease: Readonly<StateRuntimeSessionEffectLease>,
   event: KernelEvent,
   state: Readonly<AgentState>,
 ) => boolean;
@@ -98,76 +98,76 @@ export type StateRuntimeConcurrentEffectEventCurrentV1 = (
  * omitted, the Kernel reducer is used for the transient validation projection.
  * It is never persisted and never becomes a second reducer authority.
  */
-export type StateRuntimeConcurrentEffectStateProjectorV1 = (
+export type StateRuntimeConcurrentEffectStateProjector = (
   state: Readonly<AgentState>,
   event: KernelEvent,
 ) => AgentState;
 
-export interface StateRuntimeSessionInputV1 {
+export interface StateRuntimeSessionInput {
   readonly state: AgentState;
   readonly services: RuntimeHostExecutionServices<KernelEvent, AgentState>;
-  readonly clock: StateRuntimeSessionClockV1;
-  readonly id: StateRuntimeSessionIdSourceV1;
+  readonly clock: StateRuntimeSessionClock;
+  readonly id: StateRuntimeSessionIdSource;
   readonly sandboxAvailable?: boolean | (() => boolean);
-  readonly verificationSchemaAdmissions?: StateRuntimeVerificationAdmissionV1;
-  readonly eventBatchPreprocessor?: StateRuntimeEventBatchPreprocessorV1;
-  readonly eventBatchAdmissionValidator?: StateRuntimeEventBatchAdmissionValidatorV1;
-  readonly toolTerminalBatchValidator?: StateRuntimeToolTerminalBatchValidatorV1;
-  readonly onNamedTurnSnapshot?: (input: StateRuntimeNamedTurnSnapshotInputV1) => void;
-  readonly isConcurrentEffectEventCurrent?: StateRuntimeConcurrentEffectEventCurrentV1;
-  readonly projectConcurrentEffectState?: StateRuntimeConcurrentEffectStateProjectorV1;
+  readonly verificationSchemaAdmissions?: StateRuntimeVerificationAdmission;
+  readonly eventBatchPreprocessor?: StateRuntimeEventBatchPreprocessor;
+  readonly eventBatchAdmissionValidator?: StateRuntimeEventBatchAdmissionValidator;
+  readonly toolTerminalBatchValidator?: StateRuntimeToolTerminalBatchValidator;
+  readonly onNamedTurnSnapshot?: (input: StateRuntimeNamedTurnSnapshotInput) => void;
+  readonly isConcurrentEffectEventCurrent?: StateRuntimeConcurrentEffectEventCurrent;
+  readonly projectConcurrentEffectState?: StateRuntimeConcurrentEffectStateProjector;
   /** Reject a late result which has become terminal for a cancelled owner. */
   readonly isLateEffectResult?: (
-    lease: Readonly<StateRuntimeSessionEffectLeaseV1>,
+    lease: Readonly<StateRuntimeSessionEffectLease>,
     events: readonly KernelEvent[],
     state: Readonly<AgentState>,
   ) => boolean;
 }
 
-export interface StateRuntimeProcessEventResultV1 {
+export interface StateRuntimeProcessEventResult {
   readonly status: 'applied' | 'duplicate';
   readonly eventId: string;
 }
 
-export interface StateRuntimeProcessEventBatchOptionsV1 {
+export interface StateRuntimeProcessEventBatchOptions {
   readonly acknowledgement?: RuntimeTransactionAcknowledgement;
-  readonly requiredEffectLease?: RuntimeLeaseRequirementV1;
+  readonly requiredEffectLease?: RuntimeLeaseRequirement;
   readonly causationId?: string;
   readonly source?: 'command' | 'receipt' | 'host_fact';
   /** Single-event clock binding used by processEvent. */
   readonly occurredAt?: string;
 }
 
-export interface StateRuntimeSessionV1 {
+export interface StateRuntimeSession {
   readonly sessionId: string;
   getState(): Readonly<AgentState>;
-  processEvent(event: KernelEvent): StateRuntimeProcessEventResultV1;
+  processEvent(event: KernelEvent): StateRuntimeProcessEventResult;
   processEventBatch(
     events: readonly KernelEvent[],
-    options?: StateRuntimeProcessEventBatchOptionsV1,
+    options?: StateRuntimeProcessEventBatchOptions,
   ): readonly KernelEvent[];
   getLastAppliedEvents(): readonly KernelEvent[];
   selectPendingEffects(
     state?: Readonly<AgentState>,
-    facts?: SchedulerFactsV1,
+    facts?: SchedulerFacts,
   ): readonly RuntimeEffect[];
   acquireRunner(): string | null;
   releaseRunner(runnerId: string): void;
-  beginEffect(effect: RuntimeEffect): StateRuntimeSessionEffectLeaseV1;
-  isEffectLeaseCurrent(lease: Readonly<StateRuntimeSessionEffectLeaseV1>): boolean;
+  beginEffect(effect: RuntimeEffect): StateRuntimeSessionEffectLease;
+  isEffectLeaseCurrent(lease: Readonly<StateRuntimeSessionEffectLease>): boolean;
   isEffectEventCurrent(
-    lease: Readonly<StateRuntimeSessionEffectLeaseV1>,
+    lease: Readonly<StateRuntimeSessionEffectLease>,
     event: KernelEvent,
   ): boolean;
   applyResult(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     events: readonly KernelEvent[],
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean;
   applyEffectResult(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     events: readonly KernelEvent[],
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean;
   /**
    * Apply a durable effect batch through one explicit Store 4 acknowledgement
@@ -175,31 +175,31 @@ export interface StateRuntimeSessionV1 {
    * callers fail closed and cannot publish through a successor attempt.
    */
   applyEffectEvents(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     events: readonly KernelEvent[],
-    acknowledgement: StateRuntimeEffectPersistenceAcknowledgementV1,
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    acknowledgement: StateRuntimeEffectPersistenceAcknowledgement,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean;
   applyEvent(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     event: KernelEvent,
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean;
   applyEffectEvent(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     event: KernelEvent,
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean;
   applyLateResourceReconciliation(events: readonly KernelEvent[]): boolean;
-  releaseEffect(lease: Readonly<StateRuntimeSessionEffectLeaseV1>): void;
+  releaseEffect(lease: Readonly<StateRuntimeSessionEffectLease>): void;
 }
 
 interface StateRuntimeSessionDefaults {
-  readonly clock: StateRuntimeSessionClockV1;
-  readonly id: StateRuntimeSessionIdSourceV1;
+  readonly clock: StateRuntimeSessionClock;
+  readonly id: StateRuntimeSessionIdSource;
 }
 
-function assertStateRuntimeSessionStateV1(state: AgentState): void {
+function assertStateRuntimeSessionState(state: AgentState): void {
   if (state.recoveryState.kind === 'normal' || state.turn.status === 'aborted') {
     assertAgentStateInvariants(state);
     return;
@@ -216,31 +216,31 @@ function assertStateRuntimeSessionStateV1(state: AgentState): void {
  * lease boundary around the pure Agent Kernel; it owns no Builtin, Model,
  * Prompt, Tool, or MCP semantics.
  */
-export class StateRuntimeSession implements StateRuntimeSessionV1 {
+class StateRuntimeSessionImpl implements StateRuntimeSession {
   readonly sessionId: string;
   readonly #services: RuntimeHostExecutionServices<KernelEvent, AgentState>;
   readonly #defaults: StateRuntimeSessionDefaults;
   readonly #sandboxAvailable: () => boolean;
-  readonly #verificationSchemaAdmissions?: StateRuntimeVerificationAdmissionV1;
-  readonly #eventBatchPreprocessor?: StateRuntimeEventBatchPreprocessorV1;
-  readonly #eventBatchAdmissionValidator?: StateRuntimeEventBatchAdmissionValidatorV1;
-  readonly #toolTerminalBatchValidator?: StateRuntimeToolTerminalBatchValidatorV1;
-  readonly #onNamedTurnSnapshot?: StateRuntimeSessionInputV1['onNamedTurnSnapshot'];
-  readonly #isConcurrentEffectEventCurrent?: StateRuntimeConcurrentEffectEventCurrentV1;
-  readonly #projectConcurrentEffectState?: StateRuntimeConcurrentEffectStateProjectorV1;
-  readonly #isLateEffectResult?: StateRuntimeSessionInputV1['isLateEffectResult'];
-  readonly #effectLeases = new Map<string, StateRuntimeSessionEffectLeaseV1>();
+  readonly #verificationSchemaAdmissions?: StateRuntimeVerificationAdmission;
+  readonly #eventBatchPreprocessor?: StateRuntimeEventBatchPreprocessor;
+  readonly #eventBatchAdmissionValidator?: StateRuntimeEventBatchAdmissionValidator;
+  readonly #toolTerminalBatchValidator?: StateRuntimeToolTerminalBatchValidator;
+  readonly #onNamedTurnSnapshot?: StateRuntimeSessionInput['onNamedTurnSnapshot'];
+  readonly #isConcurrentEffectEventCurrent?: StateRuntimeConcurrentEffectEventCurrent;
+  readonly #projectConcurrentEffectState?: StateRuntimeConcurrentEffectStateProjector;
+  readonly #isLateEffectResult?: StateRuntimeSessionInput['isLateEffectResult'];
+  readonly #effectLeases = new Map<string, StateRuntimeSessionEffectLease>();
   #state: AgentState;
   #lastAppliedEvents: readonly KernelEvent[] = [];
   #lastProcessedEventId: string | undefined;
   #runnerId: string | null = null;
 
-  constructor(input: StateRuntimeSessionInputV1) {
-    assertStateRuntimeSessionStateV1(input.state);
-    if (input.state.schemaVersion !== STATE26_RUNTIME_SESSION_FORMAT_V1.schemaVersion) {
+  constructor(input: StateRuntimeSessionInput) {
+    assertStateRuntimeSessionState(input.state);
+    if (input.state.schemaVersion !== STATE_RUNTIME_SESSION_FORMAT_.schemaVersion) {
       throw new Error('Runtime Host State session requires schema version 25.');
     }
-    if (input.state.formatEpoch !== STATE26_RUNTIME_SESSION_FORMAT_V1.epoch) {
+    if (input.state.formatEpoch !== STATE_RUNTIME_SESSION_FORMAT_.epoch) {
       throw new Error('Runtime Host State session requires the current compatibility epoch.');
     }
     if (input.state.session.threadId.length === 0) {
@@ -277,7 +277,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
     return this.#state;
   }
 
-  processEvent(event: KernelEvent): StateRuntimeProcessEventResultV1 {
+  processEvent(event: KernelEvent): StateRuntimeProcessEventResult {
     const occurredAt = this.#eventTimestamp();
     this.#lastProcessedEventId = undefined;
     const applied = this.processEventBatch([event], { occurredAt });
@@ -292,7 +292,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
 
   processEventBatch(
     events: readonly KernelEvent[],
-    options: StateRuntimeProcessEventBatchOptionsV1 = {},
+    options: StateRuntimeProcessEventBatchOptions = {},
   ): readonly KernelEvent[] {
     this.#lastProcessedEventId = undefined;
     if (events.length === 0) {
@@ -305,7 +305,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
       return [];
     }
     const previousState = this.#state;
-    assertStateRuntimeSessionStateV1(previousState);
+    assertStateRuntimeSessionState(previousState);
     const facts = this.#decisionFacts(preparedEvents, previousState, options.occurredAt);
     const decision = decide(
       previousState,
@@ -337,14 +337,14 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
     }
     assertAgentStateInvariants(decision.nextState);
     const metadata = decision.envelopes.map(
-      (envelope): RuntimeEventMetadataV1 => ({
+      (envelope): RuntimeEventMetadata => ({
         eventId: envelope.eventId,
         revision: envelope.revision,
         ...(envelope.causationId ? { causationId: envelope.causationId } : {}),
         occurredAt: envelope.occurredAt,
       }),
     );
-    const input: RuntimeTransactionInputV1<KernelEvent, AgentState> = {
+    const input: RuntimeTransactionInput<KernelEvent, AgentState> = {
       sessionId: this.sessionId,
       events: decision.events,
       snapshot: decision.nextState,
@@ -388,9 +388,9 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
 
   selectPendingEffects(
     state: Readonly<AgentState> = this.#state,
-    facts?: SchedulerFactsV1,
+    facts?: SchedulerFacts,
   ): readonly RuntimeEffect[] {
-    assertStateRuntimeSessionStateV1(state);
+    assertStateRuntimeSessionState(state);
     return selectPendingEffects(state, facts);
   }
 
@@ -405,10 +405,10 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
     if (this.#runnerId === runnerId) this.#runnerId = null;
   }
 
-  beginEffect(effect: RuntimeEffect): StateRuntimeSessionEffectLeaseV1 {
-    assertStateRuntimeSessionStateV1(this.#state);
+  beginEffect(effect: RuntimeEffect): StateRuntimeSessionEffectLease {
+    assertStateRuntimeSessionState(this.#state);
     const effectId = this.#nextId('state_effect');
-    const lease: StateRuntimeSessionEffectLeaseV1 = {
+    const lease: StateRuntimeSessionEffectLease = {
       effectId,
       turnId: this.#state.turn.turnId,
       effect,
@@ -418,7 +418,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
     return lease;
   }
 
-  isEffectLeaseCurrent(lease: Readonly<StateRuntimeSessionEffectLeaseV1>): boolean {
+  isEffectLeaseCurrent(lease: Readonly<StateRuntimeSessionEffectLease>): boolean {
     const owned = this.#effectLeases.get(lease.effectId);
     return Boolean(
       owned === lease &&
@@ -429,7 +429,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
   }
 
   isEffectEventCurrent(
-    lease: Readonly<StateRuntimeSessionEffectLeaseV1>,
+    lease: Readonly<StateRuntimeSessionEffectLease>,
     event: KernelEvent,
   ): boolean {
     if (this.isEffectLeaseCurrent(lease)) return true;
@@ -437,13 +437,13 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
   }
 
   applyResult(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     events: readonly KernelEvent[],
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean {
     if (events.length === 0) return false;
     if (
-      hasLateTerminalEventForCancelledToolV1(this.#state, lease, events) ||
+      hasLateTerminalEventForCancelledTool(this.#state, lease, events) ||
       this.#isLateEffectResult?.(lease, events, this.#state)
     ) {
       return false;
@@ -452,7 +452,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
     const current = this.isEffectLeaseCurrent(lease);
     if (!current && !this.#concurrentEventsCurrent(lease, events)) return false;
     if (lease.effect.type === 'run_tools') {
-      assertCapabilityToolTerminalBatchV1(this.#state, lease, events);
+      assertCapabilityToolTerminalBatch(this.#state, lease, events);
     }
     if (lease.effect.type === 'run_tools' && this.#toolTerminalBatchValidator) {
       const accepted = this.#toolTerminalBatchValidator(lease.effect, events, this.#state);
@@ -469,9 +469,9 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
   }
 
   applyEvent(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     event: KernelEvent,
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean {
     if (!this.isEffectEventCurrent(lease, event)) return false;
     const applied = this.processEventBatch([event], {
@@ -485,29 +485,29 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
   }
 
   applyEffectResult(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     events: readonly KernelEvent[],
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean {
     return this.applyResult(lease, events, requiredEffectLease);
   }
 
   applyEffectEvents(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     events: readonly KernelEvent[],
-    acknowledgement: StateRuntimeEffectPersistenceAcknowledgementV1,
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    acknowledgement: StateRuntimeEffectPersistenceAcknowledgement,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean {
     if (events.length === 0 || !this.isEffectLeaseCurrent(lease)) return false;
     if (requiredEffectLease && !this.#validRequiredLease(requiredEffectLease)) return false;
     if (acknowledgement !== 'attempt_start' && lease.effect.type === 'run_tools') {
       if (
-        hasLateTerminalEventForCancelledToolV1(this.#state, lease, events) ||
+        hasLateTerminalEventForCancelledTool(this.#state, lease, events) ||
         this.#isLateEffectResult?.(lease, events, this.#state)
       ) {
         return false;
       }
-      assertCapabilityToolTerminalBatchV1(this.#state, lease, events);
+      assertCapabilityToolTerminalBatch(this.#state, lease, events);
       if (this.#toolTerminalBatchValidator) {
         const accepted = this.#toolTerminalBatchValidator(lease.effect, events, this.#state);
         if (accepted === false) throw new Error('Runtime Tool terminal batch was rejected.');
@@ -524,9 +524,9 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
   }
 
   applyEffectEvent(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     event: KernelEvent,
-    requiredEffectLease?: RuntimeLeaseRequirementV1,
+    requiredEffectLease?: RuntimeLeaseRequirement,
   ): boolean {
     return this.applyEvent(lease, event, requiredEffectLease);
   }
@@ -556,7 +556,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
     return applied.length === events.length;
   }
 
-  releaseEffect(lease: Readonly<StateRuntimeSessionEffectLeaseV1>): void {
+  releaseEffect(lease: Readonly<StateRuntimeSessionEffectLease>): void {
     const owned = this.#effectLeases.get(lease.effectId);
     if (owned !== lease) return;
     this.#effectLeases.delete(lease.effectId);
@@ -567,12 +567,12 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
       ? this.#eventBatchPreprocessor(events, this.#state)
       : events;
     const copied = [...prepared];
-    const requirements = suspendedCapabilityTerminalRequirementsV1(this.#state, copied);
+    const requirements = suspendedCapabilityTerminalRequirements(this.#state, copied);
     const finishedAtByInvocationId: Record<string, string> = {};
     for (const requirement of requirements) {
       finishedAtByInvocationId[requirement.invocationId] = this.#eventTimestamp();
     }
-    const withSuspendedTerminals = attachSuspendedCapabilityTerminalsV1(
+    const withSuspendedTerminals = attachSuspendedCapabilityTerminals(
       this.#state,
       copied,
       finishedAtByInvocationId,
@@ -613,7 +613,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
       }
       if (event.type === 'user.message_appended' && activeTaskId === null) {
         const taskId = this.#nextId('task');
-        allocatedIds[taskIdentityAllocationKeyV1(eventIndex, event.messageId)] = taskId;
+        allocatedIds[taskIdentityAllocationKey(eventIndex, event.messageId)] = taskId;
         activeTaskId = taskId;
       }
     }
@@ -636,13 +636,13 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
   }
 
   #concurrentEventsCurrent(
-    lease: Readonly<StateRuntimeSessionEffectLeaseV1>,
+    lease: Readonly<StateRuntimeSessionEffectLease>,
     events: readonly KernelEvent[],
   ): boolean {
     if (!this.#isConcurrentEffectEventCurrent) {
       if (lease.effect.type !== 'run_tools') return false;
       try {
-        return isConcurrentShellEffectBatchCurrentV1(this.#state, lease, events, () =>
+        return isConcurrentShellEffectBatchCurrent(this.#state, lease, events, () =>
           this.#eventTimestamp(),
         );
       } catch {
@@ -664,7 +664,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
     return true;
   }
 
-  #validRequiredLease(required: RuntimeLeaseRequirementV1): boolean {
+  #validRequiredLease(required: RuntimeLeaseRequirement): boolean {
     return (
       typeof required.sessionId === 'string' &&
       required.sessionId === this.sessionId &&
@@ -675,7 +675,7 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
     );
   }
 
-  #restoreBoundary(): RuntimeRestoreBoundaryV1 {
+  #restoreBoundary(): RuntimeRestoreBoundary {
     const record = this.#services.sessions.loadSnapshotRecord<AgentState>(this.sessionId);
     return {
       snapshot: record?.metadata ?? null,
@@ -714,8 +714,8 @@ export class StateRuntimeSession implements StateRuntimeSessionV1 {
   }
 }
 
-export function createRuntimeHostStateSessionV1(
-  input: StateRuntimeSessionInputV1,
-): StateRuntimeSessionV1 {
-  return new StateRuntimeSession(input);
+export function createRuntimeHostStateSession(
+  input: StateRuntimeSessionInput,
+): StateRuntimeSession {
+  return new StateRuntimeSessionImpl(input);
 }

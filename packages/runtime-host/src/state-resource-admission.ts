@@ -5,19 +5,19 @@ import type {
   KernelEvent as RuntimeEvent,
   AgentState as RuntimeState,
 } from '@kite/agent-kernel';
-import type { ModelInvocationEnvelopeV1 } from '@kite/runtime-spi';
+import type { ModelInvocationEnvelope } from '@kite/runtime-spi';
 import {
-  type ActiveResourceBudgetRuntimeStateV1,
-  type BudgetReservationV1,
-  type ConcurrencyWaiterV1,
-  committedResourceUsageV1,
-  createZeroResourceUsageV1,
-  type ResourceBudgetRuntimeStateV1,
-  type ResourceUsageV1,
-  reduceResourceBudgetStateV1,
+  type ActiveResourceBudgetRuntimeState,
+  type BudgetReservation,
+  type ConcurrencyWaiter,
+  committedResourceUsage,
+  createZeroResourceUsage,
+  type ResourceBudgetRuntimeState,
+  type ResourceUsage,
+  reduceResourceBudgetState,
 } from './state-resource-budget';
 
-export type RuntimeBudgetAdmissionReasonV1 =
+export type RuntimeBudgetAdmissionReason =
   | 'admitted'
   | 'budget_unconfigured'
   | 'persistence_unavailable'
@@ -26,9 +26,9 @@ export type RuntimeBudgetAdmissionReasonV1 =
   | 'tool_concurrency_saturated'
   | 'shell_concurrency_saturated';
 
-export interface RuntimeBudgetAdmissionPlanV1 {
+export interface RuntimeBudgetAdmissionPlan {
   status: 'admitted' | 'waiting' | 'denied' | 'not_required';
-  reason: RuntimeBudgetAdmissionReasonV1;
+  reason: RuntimeBudgetAdmissionReason;
   effect: RuntimeEffect;
   preparationEvents: RuntimeEvent[];
   dispatchEvents: RuntimeEvent[];
@@ -36,8 +36,8 @@ export interface RuntimeBudgetAdmissionPlanV1 {
   waitDeadlineAt?: string;
 }
 
-export interface ModelResourcePreparationPlanV1 {
-  budget: ModelInvocationEnvelopeV1['resource']['budget'];
+export interface ModelResourcePreparationPlan {
+  budget: ModelInvocationEnvelope['resource']['budget'];
   preparationEvents: RuntimeEvent[];
   maxOutputTokens?: number;
 }
@@ -47,7 +47,7 @@ export interface ModelResourcePreparationPlanV1 {
  * frozen. The caller atomically persists these events with
  * model.invocation_prepared; dispatch_started deliberately remains absent.
  */
-export function planModelInvocationResourceV1(
+export function planModelInvocationResource(
   state: RuntimeState,
   input: {
     invocationId: string;
@@ -57,7 +57,7 @@ export function planModelInvocationResourceV1(
     parentReservationId?: string;
     now?: Date;
   },
-): ModelResourcePreparationPlanV1 {
+): ModelResourcePreparationPlan {
   if (!Number.isSafeInteger(input.inputTokens) || input.inputTokens < 0) {
     throw new DescendantResourceAdmissionError(
       'budget_exhausted',
@@ -89,18 +89,18 @@ export function planModelInvocationResourceV1(
       throw new DescendantResourceAdmissionError('reconciliation_required');
     }
   }
-  const committed = committedResourceUsageV1(budget);
+  const committed = committedResourceUsage(budget);
   const remainingOutput = budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
   const maxOutputTokens = Math.min(
     input.requestedMaxOutputTokens ?? remainingOutput,
     remainingOutput,
   );
   if (maxOutputTokens <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
-  const usage = createZeroResourceUsageV1('versioned_upper_bound', 'model-surface-v1');
+  const usage = createZeroResourceUsage('versioned_upper_bound', 'model-surface-v1');
   usage.counters.modelRequests = 1;
   usage.counters.inputTokens = input.inputTokens;
   usage.counters.outputTokens = maxOutputTokens;
-  const reservation: BudgetReservationV1 = {
+  const reservation: BudgetReservation = {
     version: 1,
     reservationId: crypto.randomUUID(),
     runId: budget.runId,
@@ -111,7 +111,7 @@ export function planModelInvocationResourceV1(
     state: 'reserved',
   };
   try {
-    reduceResourceBudgetStateV1(budget, { type: 'resource_budget.reserved', reservation });
+    reduceResourceBudgetState(budget, { type: 'resource_budget.reserved', reservation });
   } catch (error) {
     throw new DescendantResourceAdmissionError(
       'budget_exhausted',
@@ -129,17 +129,17 @@ export function planModelInvocationResourceV1(
   };
 }
 
-export interface DescendantBudgetReservationV1 {
+export interface DescendantBudgetReservation {
   reservationId: string;
   maxOutputTokens?: number;
 }
 
-export interface DescendantResourceAdmissionV1 {
+export interface DescendantResourceAdmission {
   reserveModel(input: {
     invocationKey: string;
     inputTokens: number;
     requestedMaxOutputTokens?: number;
-  }): Promise<DescendantBudgetReservationV1>;
+  }): Promise<DescendantBudgetReservation>;
   reconcileModel(input: {
     reservationId: string;
     inputTokens: number;
@@ -151,17 +151,17 @@ export interface DescendantResourceAdmissionV1 {
     shell: boolean;
     artifactBytes?: number;
     signal?: AbortSignal;
-  }): Promise<DescendantBudgetReservationV1>;
+  }): Promise<DescendantBudgetReservation>;
   reconcileTool(input: { reservationId: string; artifactBytes?: number }): Promise<void>;
   markUnknown(reservationId: string): Promise<void>;
   markLocalProviderAdmissionDenied(reservationId: string): Promise<void>;
 }
 
 export class DescendantResourceAdmissionError extends Error {
-  readonly reason: Exclude<RuntimeBudgetAdmissionReasonV1, 'admitted'>;
+  readonly reason: Exclude<RuntimeBudgetAdmissionReason, 'admitted'>;
 
   constructor(
-    reason: Exclude<RuntimeBudgetAdmissionReasonV1, 'admitted'>,
+    reason: Exclude<RuntimeBudgetAdmissionReason, 'admitted'>,
     message = `Sub-agent resource admission denied: ${reason}.`,
   ) {
     super(message);
@@ -180,9 +180,9 @@ class DescendantAdmissionProjectionConflict extends Error {
 interface PlannedInvocation {
   invocationId: string;
   toolCallId?: string;
-  resourceKind: BudgetReservationV1['resourceKind'];
+  resourceKind: BudgetReservation['resourceKind'];
   requiredPermits: readonly ('tool' | 'shell_invocation')[];
-  upperBound: ResourceUsageV1;
+  upperBound: ResourceUsage;
 }
 
 function workspacePath(state: RuntimeState, path: string): string | undefined {
@@ -194,7 +194,7 @@ function workspacePath(state: RuntimeState, path: string): string | undefined {
 function artifactUpperBound(state: RuntimeState, toolCallId: string): number {
   const call = state.tools.calls[toolCallId];
   if (!call?.sideEffect || state.resourceBudget.status !== 'active') return 0;
-  const committed = committedResourceUsageV1(state.resourceBudget);
+  const committed = committedResourceUsage(state.resourceBudget);
   const remaining = state.resourceBudget.budget.maxArtifactBytes - committed.counters.artifactBytes;
   if (call.name === 'write_file') {
     const content =
@@ -221,8 +221,8 @@ function artifactUpperBound(state: RuntimeState, toolCallId: string): number {
   return remaining;
 }
 
-function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsageV1 {
-  const usage = createZeroResourceUsageV1('versioned_upper_bound', 'runtime-effect-v1');
+function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsage {
+  const usage = createZeroResourceUsage('versioned_upper_bound', 'runtime-effect-v1');
   usage.counters.toolInvocations = 1;
   usage.gauges.activeToolInvocations = 1;
   const call = state.tools.calls[toolCallId];
@@ -241,7 +241,7 @@ function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsa
 
 function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): PlannedInvocation[] {
   // Model-bearing effects reserve from the exact frozen Surface inside
-  // ModelInvocationGatewayV1. The runner must not create a second coarse
+  // ModelInvocationGateway. The runner must not create a second coarse
   // reservation before that Surface exists.
   if (
     effect.type === 'call_model' ||
@@ -251,7 +251,7 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
     return [];
   }
   if (effect.type === 'request_provider_action') {
-    const usage = createZeroResourceUsageV1('versioned_upper_bound', 'runtime-effect-v1');
+    const usage = createZeroResourceUsage('versioned_upper_bound', 'runtime-effect-v1');
     usage.counters.toolInvocations = 1;
     usage.gauges.activeToolInvocations = 1;
     return [
@@ -268,7 +268,7 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
     effect.type === 'repair_verification' ||
     effect.type === 'run_verification_compensation'
   ) {
-    const usage = createZeroResourceUsageV1('versioned_upper_bound', 'runtime-effect-v1');
+    const usage = createZeroResourceUsage('versioned_upper_bound', 'runtime-effect-v1');
     usage.counters.toolInvocations = 1;
     usage.gauges.activeToolInvocations = 1;
     return [
@@ -328,7 +328,7 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
   });
 }
 
-function activeBudget(state: RuntimeState): ActiveResourceBudgetRuntimeStateV1 | undefined {
+function activeBudget(state: RuntimeState): ActiveResourceBudgetRuntimeState | undefined {
   return state.resourceBudget.status === 'active' ? state.resourceBudget : undefined;
 }
 
@@ -337,7 +337,7 @@ function activeBudget(state: RuntimeState): ActiveResourceBudgetRuntimeStateV1 |
  * reservation. Every child model/tool invocation receives its own linked
  * reservation and is persisted before dispatch through `persistEvent`.
  */
-export function createDescendantResourceAdmissionV1(input: {
+export function createDescendantResourceAdmission(input: {
   state: RuntimeState;
   parentReservationId: string;
   getState?(): Readonly<RuntimeState>;
@@ -348,7 +348,7 @@ export function createDescendantResourceAdmissionV1(input: {
   ): Promise<boolean>;
   signal?: AbortSignal;
   now?(): Date;
-}): DescendantResourceAdmissionV1 {
+}): DescendantResourceAdmission {
   if (input.state.resourceBudget.status !== 'active') {
     throw new DescendantResourceAdmissionError(
       'budget_unconfigured',
@@ -373,7 +373,7 @@ export function createDescendantResourceAdmissionV1(input: {
     projectionListeners.clear();
   };
 
-  const refreshProjected = (): ActiveResourceBudgetRuntimeStateV1 => {
+  const refreshProjected = (): ActiveResourceBudgetRuntimeState => {
     const latest = input.getState?.().resourceBudget;
     if (latest?.status === 'active' && latest.runId === projected.runId) projected = latest;
     if (projected.status !== 'active') {
@@ -396,9 +396,9 @@ export function createDescendantResourceAdmissionV1(input: {
 
   const persist = async (event: RuntimeEvent): Promise<void> => {
     refreshProjected();
-    let next: ResourceBudgetRuntimeStateV1;
+    let next: ResourceBudgetRuntimeState;
     try {
-      next = reduceResourceBudgetStateV1(projected, event as never);
+      next = reduceResourceBudgetState(projected, event as never);
     } catch (error) {
       throw new DescendantResourceAdmissionError(
         'budget_exhausted',
@@ -437,9 +437,9 @@ export function createDescendantResourceAdmissionV1(input: {
   const persistBatch = async (events: RuntimeEvent[]): Promise<void> => {
     if (events.length === 0) return;
     refreshProjected();
-    let next: ResourceBudgetRuntimeStateV1 = projected;
+    let next: ResourceBudgetRuntimeState = projected;
     try {
-      for (const event of events) next = reduceResourceBudgetStateV1(next, event as never);
+      for (const event of events) next = reduceResourceBudgetState(next, event as never);
     } catch (error) {
       throw new DescendantResourceAdmissionError(
         'budget_exhausted',
@@ -475,7 +475,7 @@ export function createDescendantResourceAdmissionV1(input: {
     notifyProjectionChange();
   };
 
-  const assertParentDispatchStarted = (budget: ActiveResourceBudgetRuntimeStateV1): void => {
+  const assertParentDispatchStarted = (budget: ActiveResourceBudgetRuntimeState): void => {
     const currentParent = budget.reservations[parent.reservationId];
     if (currentParent?.resourceKind !== 'subagent' || currentParent.state !== 'dispatch_started') {
       throw new DescendantResourceAdmissionError(
@@ -487,7 +487,7 @@ export function createDescendantResourceAdmissionV1(input: {
 
   const now = (): Date => input.now?.() ?? new Date();
 
-  const assertRunDeadline = (budget: ActiveResourceBudgetRuntimeStateV1): void => {
+  const assertRunDeadline = (budget: ActiveResourceBudgetRuntimeState): void => {
     if (now().getTime() >= Date.parse(budget.deadlineAt)) {
       throw new DescendantResourceAdmissionError(
         'budget_exhausted',
@@ -501,16 +501,16 @@ export function createDescendantResourceAdmissionV1(input: {
 
   const reserveDirect = async (
     invocationKey: string,
-    resourceKind: BudgetReservationV1['resourceKind'],
-    upperBound: ResourceUsageV1,
-  ): Promise<DescendantBudgetReservationV1> => {
+    resourceKind: BudgetReservation['resourceKind'],
+    upperBound: ResourceUsage,
+  ): Promise<DescendantBudgetReservation> => {
     while (true) {
       try {
         return await withMutation(async () => {
           const budget = refreshProjected();
           assertParentDispatchStarted(budget);
           assertRunDeadline(budget);
-          const reservation: BudgetReservationV1 = {
+          const reservation: BudgetReservation = {
             version: 1,
             reservationId: crypto.randomUUID(),
             runId: budget.runId,
@@ -569,13 +569,13 @@ export function createDescendantResourceAdmissionV1(input: {
     });
   };
 
-  const reconcile = async (reservationId: string, actual: ResourceUsageV1): Promise<void> => {
+  const reconcile = async (reservationId: string, actual: ResourceUsage): Promise<void> => {
     await withMutation(async () => {
       refreshProjected();
       const event = { type: 'resource_budget.reconciled', reservationId, actual } as const;
-      let next: ResourceBudgetRuntimeStateV1;
+      let next: ResourceBudgetRuntimeState;
       try {
-        next = reduceResourceBudgetStateV1(projected, event);
+        next = reduceResourceBudgetState(projected, event);
       } catch (error) {
         throw new DescendantResourceAdmissionError(
           'reconciliation_required',
@@ -647,7 +647,7 @@ export function createDescendantResourceAdmissionV1(input: {
   const reserveToolWithFifo = async (
     invocation: PlannedInvocation,
     signal: AbortSignal | undefined,
-  ): Promise<DescendantBudgetReservationV1> => {
+  ): Promise<DescendantBudgetReservation> => {
     while (true) {
       const attempt = await withMutation(async () => {
         const budget = refreshProjected();
@@ -670,17 +670,17 @@ export function createDescendantResourceAdmissionV1(input: {
           throw new DescendantResourceAdmissionError(saturationReason(invocation));
         }
         const reservation = reservationFor(budget, invocation, parent.reservationId);
-        let candidate: ActiveResourceBudgetRuntimeStateV1 = budget;
+        let candidate: ActiveResourceBudgetRuntimeState = budget;
         const preparationEvents: RuntimeEvent[] = [];
         if (existingWaiter && isQueueHead(budget, invocation)) {
           const promoted = {
             type: 'resource_budget.waiter_promoted',
             invocationId: invocation.invocationId,
           } as const;
-          candidate = reduceResourceBudgetStateV1(
+          candidate = reduceResourceBudgetState(
             candidate,
             promoted,
-          ) as ActiveResourceBudgetRuntimeStateV1;
+          ) as ActiveResourceBudgetRuntimeState;
           preparationEvents.push(promoted);
         } else if (!isQueueHead(budget, invocation)) {
           const waiter = existingWaiter ?? waiterFor(budget, invocation, attemptTime);
@@ -690,10 +690,10 @@ export function createDescendantResourceAdmissionV1(input: {
           return { status: 'waiting' as const, deadlineAt: waiter.deadlineAt };
         }
         try {
-          candidate = reduceResourceBudgetStateV1(candidate, {
+          candidate = reduceResourceBudgetState(candidate, {
             type: 'resource_budget.reserved',
             reservation,
-          }) as ActiveResourceBudgetRuntimeStateV1;
+          }) as ActiveResourceBudgetRuntimeState;
         } catch {
           if (!canFitWithoutConcurrency(budget, reservation)) {
             throw new DescendantResourceAdmissionError('budget_exhausted');
@@ -738,7 +738,7 @@ export function createDescendantResourceAdmissionV1(input: {
   return {
     async reserveModel(request) {
       const budget = refreshProjected();
-      const committed = committedResourceUsageV1(budget);
+      const committed = committedResourceUsage(budget);
       const remainingOutput = budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
       const outputTokens = Math.min(
         request.requestedMaxOutputTokens ?? remainingOutput,
@@ -750,14 +750,14 @@ export function createDescendantResourceAdmissionV1(input: {
           'Sub-agent model output budget is exhausted.',
         );
       }
-      const usage = createZeroResourceUsageV1('versioned_upper_bound', 'descendant-runtime-v1');
+      const usage = createZeroResourceUsage('versioned_upper_bound', 'descendant-runtime-v1');
       usage.counters.modelRequests = 1;
       usage.counters.inputTokens = request.inputTokens;
       usage.counters.outputTokens = outputTokens;
       return reserveDirect(request.invocationKey, 'model', usage);
     },
     async reconcileModel(request) {
-      const usage = createZeroResourceUsageV1();
+      const usage = createZeroResourceUsage();
       usage.counters.modelRequests = 1;
       usage.counters.inputTokens = request.inputTokens;
       usage.counters.outputTokens = request.outputTokens;
@@ -765,9 +765,9 @@ export function createDescendantResourceAdmissionV1(input: {
     },
     async reserveTool(request) {
       const budget = refreshProjected();
-      const usage = createZeroResourceUsageV1('versioned_upper_bound', 'descendant-runtime-v1');
+      const usage = createZeroResourceUsage('versioned_upper_bound', 'descendant-runtime-v1');
       usage.counters.toolInvocations = 1;
-      const committed = committedResourceUsageV1(budget);
+      const committed = committedResourceUsage(budget);
       const remainingArtifactBytes =
         budget.budget.maxArtifactBytes - committed.counters.artifactBytes;
       usage.counters.artifactBytes =
@@ -788,7 +788,7 @@ export function createDescendantResourceAdmissionV1(input: {
       );
     },
     async reconcileTool(request) {
-      const usage = createZeroResourceUsageV1();
+      const usage = createZeroResourceUsage();
       usage.counters.toolInvocations = 1;
       usage.counters.artifactBytes = request.artifactBytes ?? 0;
       await reconcile(request.reservationId, usage);
@@ -806,14 +806,14 @@ export function createDescendantResourceAdmissionV1(input: {
   };
 }
 
-function waitingInFifoOrder(budget: ActiveResourceBudgetRuntimeStateV1): ConcurrencyWaiterV1[] {
+function waitingInFifoOrder(budget: ActiveResourceBudgetRuntimeState): ConcurrencyWaiter[] {
   return Object.values(budget.waiters ?? {})
     .filter((waiter) => waiter.state === 'waiting')
     .sort((left, right) => left.sequence - right.sequence);
 }
 
 function isQueueHead(
-  budget: ActiveResourceBudgetRuntimeStateV1,
+  budget: ActiveResourceBudgetRuntimeState,
   invocation: PlannedInvocation,
 ): boolean {
   if (invocation.requiredPermits.length === 0) return true;
@@ -829,10 +829,10 @@ function isQueueHead(
 }
 
 function reservationFor(
-  budget: ActiveResourceBudgetRuntimeStateV1,
+  budget: ActiveResourceBudgetRuntimeState,
   invocation: PlannedInvocation,
   parentReservationId?: string,
-): BudgetReservationV1 {
+): BudgetReservation {
   return {
     version: 1,
     reservationId: crypto.randomUUID(),
@@ -846,10 +846,10 @@ function reservationFor(
 }
 
 function canFitWithoutConcurrency(
-  budget: ActiveResourceBudgetRuntimeStateV1,
-  reservation: BudgetReservationV1,
+  budget: ActiveResourceBudgetRuntimeState,
+  reservation: BudgetReservation,
 ): boolean {
-  const withoutConcurrency: BudgetReservationV1 = {
+  const withoutConcurrency: BudgetReservation = {
     ...reservation,
     executableUpperBound: {
       ...reservation.executableUpperBound,
@@ -863,7 +863,7 @@ function canFitWithoutConcurrency(
     },
   };
   try {
-    reduceResourceBudgetStateV1(budget, {
+    reduceResourceBudgetState(budget, {
       type: 'resource_budget.reserved',
       reservation: withoutConcurrency,
     });
@@ -876,7 +876,7 @@ function canFitWithoutConcurrency(
 function saturationReason(
   invocation: PlannedInvocation,
 ): Extract<
-  RuntimeBudgetAdmissionReasonV1,
+  RuntimeBudgetAdmissionReason,
   'tool_concurrency_saturated' | 'shell_concurrency_saturated'
 > {
   return invocation.requiredPermits.length === 2
@@ -885,10 +885,10 @@ function saturationReason(
 }
 
 function waiterFor(
-  budget: ActiveResourceBudgetRuntimeStateV1,
+  budget: ActiveResourceBudgetRuntimeState,
   invocation: PlannedInvocation,
   now: Date,
-): ConcurrencyWaiterV1 {
+): ConcurrencyWaiter {
   const deadline = Math.min(
     now.getTime() + budget.budget.maxConcurrencyWaitMs,
     Date.parse(budget.deadlineAt),
@@ -897,7 +897,7 @@ function waiterFor(
     version: 1,
     runId: budget.runId,
     invocationId: invocation.invocationId,
-    requiredPermits: invocation.requiredPermits as ConcurrencyWaiterV1['requiredPermits'],
+    requiredPermits: invocation.requiredPermits as ConcurrencyWaiter['requiredPermits'],
     sequence: budget.nextWaiterSequence ?? 0,
     enqueuedAt: now.toISOString(),
     deadlineAt: new Date(deadline).toISOString(),
@@ -909,11 +909,11 @@ function waiterFor(
  * Plan an atomic admission transaction. The caller persists preparationEvents
  * together, then persists dispatchEvents before invoking any external code.
  */
-export function planRuntimeBudgetAdmissionV1(
+export function planRuntimeBudgetAdmission(
   state: RuntimeState,
   effect: RuntimeEffect,
   now = new Date(),
-): RuntimeBudgetAdmissionPlanV1 {
+): RuntimeBudgetAdmissionPlan {
   const invocations = plannedInvocations(state, effect);
   if (invocations.length === 0) {
     return {
@@ -947,14 +947,14 @@ export function planRuntimeBudgetAdmissionV1(
     };
   }
 
-  let projected: ResourceBudgetRuntimeStateV1 = initial;
+  let projected: ResourceBudgetRuntimeState = initial;
   const preparationEvents: RuntimeEvent[] = [];
   const dispatchEvents: RuntimeEvent[] = [];
   const reservationIds: string[] = [];
   const admittedToolCallIds: string[] = [];
   let blocked:
     | {
-        reason: RuntimeBudgetAdmissionPlanV1['reason'];
+        reason: RuntimeBudgetAdmissionPlan['reason'];
         deadlineAt?: string;
       }
     | undefined;
@@ -976,7 +976,7 @@ export function planRuntimeBudgetAdmissionV1(
         invocationId: invocation.invocationId,
       } as const;
       preparationEvents.push(timedOutEvent);
-      projected = reduceResourceBudgetStateV1(projected, timedOutEvent);
+      projected = reduceResourceBudgetState(projected, timedOutEvent);
       blocked = { reason: saturationReason(invocation) };
       break;
     }
@@ -985,7 +985,7 @@ export function planRuntimeBudgetAdmissionV1(
       if (!existingWaiter) {
         const event: RuntimeEvent = { type: 'resource_budget.waiter_enqueued', waiter };
         preparationEvents.push(event);
-        projected = reduceResourceBudgetStateV1(projected, event);
+        projected = reduceResourceBudgetState(projected, event);
       }
       blocked = { reason: saturationReason(invocation), deadlineAt: waiter.deadlineAt };
       break;
@@ -994,22 +994,22 @@ export function planRuntimeBudgetAdmissionV1(
     const reservation = reservationFor(projected, invocation);
     const reserveEvent: RuntimeEvent = { type: 'resource_budget.reserved', reservation };
     try {
-      let candidate: ActiveResourceBudgetRuntimeStateV1 = projected;
+      let candidate: ActiveResourceBudgetRuntimeState = projected;
       let promote: RuntimeEvent | undefined;
       if (existingWaiter) {
         promote = {
           type: 'resource_budget.waiter_promoted',
           invocationId: invocation.invocationId,
         };
-        candidate = reduceResourceBudgetStateV1(
+        candidate = reduceResourceBudgetState(
           candidate,
           promote as Extract<RuntimeEvent, { type: 'resource_budget.waiter_promoted' }>,
-        ) as ActiveResourceBudgetRuntimeStateV1;
+        ) as ActiveResourceBudgetRuntimeState;
       }
-      candidate = reduceResourceBudgetStateV1(
+      candidate = reduceResourceBudgetState(
         candidate,
         reserveEvent as Extract<RuntimeEvent, { type: 'resource_budget.reserved' }>,
-      ) as ActiveResourceBudgetRuntimeStateV1;
+      ) as ActiveResourceBudgetRuntimeState;
       if (promote) preparationEvents.push(promote);
       preparationEvents.push(reserveEvent);
       projected = candidate;
@@ -1034,7 +1034,7 @@ export function planRuntimeBudgetAdmissionV1(
       if (!existingWaiter) {
         const enqueue: RuntimeEvent = { type: 'resource_budget.waiter_enqueued', waiter };
         preparationEvents.push(enqueue);
-        projected = reduceResourceBudgetStateV1(activeProjected, enqueue);
+        projected = reduceResourceBudgetState(activeProjected, enqueue);
       }
       blocked = { reason: saturationReason(invocation), deadlineAt: waiter.deadlineAt };
       break;
@@ -1042,7 +1042,7 @@ export function planRuntimeBudgetAdmissionV1(
   }
 
   if (blocked?.deadlineAt && effect.type === 'run_tools' && projected.status === 'active') {
-    let queueState: ActiveResourceBudgetRuntimeStateV1 = projected;
+    let queueState: ActiveResourceBudgetRuntimeState = projected;
     for (const invocation of invocations) {
       if (
         (invocation.toolCallId && admittedToolCallIds.includes(invocation.toolCallId)) ||
@@ -1053,10 +1053,10 @@ export function planRuntimeBudgetAdmissionV1(
       const waiter = waiterFor(queueState, invocation, now);
       const enqueue: RuntimeEvent = { type: 'resource_budget.waiter_enqueued', waiter };
       preparationEvents.push(enqueue);
-      queueState = reduceResourceBudgetStateV1(
+      queueState = reduceResourceBudgetState(
         queueState,
         enqueue,
-      ) as ActiveResourceBudgetRuntimeStateV1;
+      ) as ActiveResourceBudgetRuntimeState;
     }
     projected = queueState;
   }
@@ -1087,12 +1087,12 @@ export function planRuntimeBudgetAdmissionV1(
   };
 }
 
-export function actualUsageForReservationV1(
+export function actualUsageForReservation(
   state: RuntimeState,
-  reservation: BudgetReservationV1,
+  reservation: BudgetReservation,
   terminalEvents: RuntimeEvent[] = [],
-): ResourceUsageV1 {
-  const usage = createZeroResourceUsageV1();
+): ResourceUsage {
+  const usage = createZeroResourceUsage();
   usage.counters.modelRequests =
     reservation.resourceKind === 'model' ||
     reservation.resourceKind === 'compaction' ||
@@ -1136,7 +1136,7 @@ export function actualUsageForReservationV1(
   return usage;
 }
 
-export function reconciliationEventsForReservationsV1(
+export function reconciliationEventsForReservations(
   state: RuntimeState,
   reservationIds: string[],
   terminalEvents: RuntimeEvent[] = [],
@@ -1149,7 +1149,7 @@ export function reconciliationEventsForReservationsV1(
     return {
       type: 'resource_budget.reconciled' as const,
       reservationId,
-      actual: actualUsageForReservationV1(state, reservation, terminalEvents),
+      actual: actualUsageForReservation(state, reservation, terminalEvents),
     };
   });
 }

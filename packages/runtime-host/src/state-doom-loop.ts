@@ -1,16 +1,16 @@
 import {
-  type KernelDoomLoopCheckV1,
-  type KernelDoomLoopRequestV1,
-  type KernelDoomLoopTrackerEntryV1,
-  kernelCheckDoomLoopFingerprintV1,
-  kernelToolDoomLoopFingerprintV1,
-  kernelUpdateDoomLoopTrackerV1,
+  type KernelDoomLoopCheck,
+  type KernelDoomLoopRequest,
+  type KernelDoomLoopTrackerEntry,
+  kernelCheckDoomLoopFingerprint,
+  kernelToolDoomLoopFingerprint,
+  kernelUpdateDoomLoopTracker,
 } from '@kite/agent-kernel';
 
-export type StateDoomLoopCheckV1 = KernelDoomLoopCheckV1;
-export type StateDoomLoopRequestV1 = KernelDoomLoopRequestV1;
-export type StateDoomLoopTrackerEntryV1 = KernelDoomLoopTrackerEntryV1;
+export type StateDoomLoopCheck = KernelDoomLoopCheck;
+export type StateDoomLoopRequest = KernelDoomLoopRequest;
+export type StateDoomLoopTrackerEntry = KernelDoomLoopTrackerEntry;
 
-export const runtimeHostStateToolDoomLoopFingerprintV1 = kernelToolDoomLoopFingerprintV1;
-export const runtimeHostStateCheckDoomLoopFingerprintV1 = kernelCheckDoomLoopFingerprintV1;
-export const runtimeHostStateUpdateDoomLoopTrackerV1 = kernelUpdateDoomLoopTrackerV1;
+export const runtimeHostStateToolDoomLoopFingerprint = kernelToolDoomLoopFingerprint;
+export const runtimeHostStateCheckDoomLoopFingerprint = kernelCheckDoomLoopFingerprint;
+export const runtimeHostStateUpdateDoomLoopTracker = kernelUpdateDoomLoopTracker;

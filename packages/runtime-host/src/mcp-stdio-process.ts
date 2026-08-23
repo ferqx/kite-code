@@ -2,47 +2,47 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  canonicalControlFrameJsonV1,
-  isRuntimeControlFrameV1,
-  type McpStdioCleanupProofV1,
-  type McpStdioProcessHandleV1,
-  type McpStdioProcessLaunchV1,
-  type McpStdioProcessPortV1,
-  type McpStdioReadyProofV1,
-  type McpStdioTerminalProofV1,
-  RUNTIME_CONTROL_FRAME_SCHEMA_V1,
+  canonicalControlFrameJson,
+  isRuntimeControlFrame,
+  type McpStdioCleanupProof,
+  type McpStdioProcessHandle,
+  type McpStdioProcessLaunch,
+  type McpStdioProcessPort,
+  type McpStdioReadyProof,
+  type McpStdioTerminalProof,
+  RUNTIME_CONTROL_FRAME_SCHEMA_,
 } from '@kite/runtime-spi';
-import { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from './control-frame';
-import { spawnRuntimeHostProcessV1 } from './process-spawn';
+import { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-frame';
+import { spawnRuntimeHostProcess } from './process-spawn';
 import { guardProcessTree, type ProcessTreeGuard, processTreeSpawnOptions } from './process-tree';
 
-export const MCP_STDIO_CONTROL_DOMAIN_V1 = 'mcp-stdio-v1';
-export const MCP_STDIO_HOST_PEER_ID_V1 = 'runtime-host';
-export const MCP_STDIO_WRAPPER_PEER_ID_V1 = 'mcp-stdio-wrapper';
-export const MCP_STDIO_WRAPPER_ENTRYPOINT_V1 = '--kite-internal-mcp-stdio-v1';
-export const MCP_STDIO_MAX_LINE_BYTES_V1 = 1024 * 1024;
-export const MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_V1 = 16 * 1024 * 1024;
+export const MCP_STDIO_CONTROL_DOMAIN_ = 'mcp-stdio-v1';
+export const MCP_STDIO_HOST_PEER_ID_ = 'runtime-host';
+export const MCP_STDIO_WRAPPER_PEER_ID_ = 'mcp-stdio-wrapper';
+export const MCP_STDIO_WRAPPER_ENTRYPOINT_ = '--kite-internal-mcp-stdio-v1';
+export const MCP_STDIO_MAX_LINE_BYTES_ = 1024 * 1024;
+export const MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_ = 16 * 1024 * 1024;
 // The wrapper must start its exact MCP child before it can publish ready.
 // Standalone + TypeScript child cold starts routinely exceed five seconds on
 // loaded machines, so retain a finite but realistic startup bound.
-export const MCP_STDIO_STARTUP_TIMEOUT_MS_V1 = 15_000;
+export const MCP_STDIO_STARTUP_TIMEOUT_MS_ = 15_000;
 
-export function isMcpStdioWrapperInvocationV1(argv: readonly string[]): boolean {
-  const markers = argv.filter((argument) => argument === MCP_STDIO_WRAPPER_ENTRYPOINT_V1);
-  if (markers.length !== 1 || argv.at(-1) !== MCP_STDIO_WRAPPER_ENTRYPOINT_V1) return false;
+export function isMcpStdioWrapperInvocation(argv: readonly string[]): boolean {
+  const markers = argv.filter((argument) => argument === MCP_STDIO_WRAPPER_ENTRYPOINT_);
+  if (markers.length !== 1 || argv.at(-1) !== MCP_STDIO_WRAPPER_ENTRYPOINT_) return false;
   return !argv.some(
     (argument) =>
-      argument.startsWith('--kite-internal-') && argument !== MCP_STDIO_WRAPPER_ENTRYPOINT_V1,
+      argument.startsWith('--kite-internal-') && argument !== MCP_STDIO_WRAPPER_ENTRYPOINT_,
   );
 }
 
-const MCP_STDIO_MAX_ARGUMENTS_V1 = 256;
-const MCP_STDIO_MAX_ARGUMENT_BYTES_V1 = 64 * 1024;
-const MCP_STDIO_MAX_CWD_BYTES_V1 = 16 * 1024;
-const MCP_STDIO_MAX_ENV_ENTRIES_V1 = 128;
-const MCP_STDIO_MAX_ENV_VALUE_BYTES_V1 = 64 * 1024;
+const MCP_STDIO_MAX_ARGUMENTS_ = 256;
+const MCP_STDIO_MAX_ARGUMENT_BYTES_ = 64 * 1024;
+const MCP_STDIO_MAX_CWD_BYTES_ = 16 * 1024;
+const MCP_STDIO_MAX_ENV_ENTRIES_ = 128;
+const MCP_STDIO_MAX_ENV_VALUE_BYTES_ = 64 * 1024;
 
-export interface RuntimeHostMcpStdioGoPayloadV1 {
+export interface RuntimeHostMcpStdioGoPayload {
   readonly type: 'go';
   readonly invocationId: string;
   readonly command: string;
@@ -51,7 +51,7 @@ export interface RuntimeHostMcpStdioGoPayloadV1 {
   readonly env: Readonly<Record<string, string>>;
 }
 
-export interface RuntimeHostMcpStdioReadyPayloadV1 {
+export interface RuntimeHostMcpStdioReadyPayload {
   readonly type: 'ready';
   readonly invocationId: string;
   readonly wrapperPid: number;
@@ -59,7 +59,7 @@ export interface RuntimeHostMcpStdioReadyPayloadV1 {
   readonly processStartIdentity: string;
 }
 
-export interface RuntimeHostMcpStdioTerminalPayloadV1 {
+export interface RuntimeHostMcpStdioTerminalPayload {
   readonly type: 'terminal';
   readonly invocationId: string;
   readonly wrapperPid: number;
@@ -69,14 +69,14 @@ export interface RuntimeHostMcpStdioTerminalPayloadV1 {
   readonly cleanup: 'confirmed';
 }
 
-export type RuntimeHostMcpStdioProcessLaunchV1 = McpStdioProcessLaunchV1;
-export type RuntimeHostMcpStdioReadyV1 = McpStdioReadyProofV1;
-export type RuntimeHostMcpStdioTerminalV1 = McpStdioTerminalProofV1;
-export type RuntimeHostMcpStdioCleanupV1 = McpStdioCleanupProofV1;
-export type RuntimeHostMcpStdioProcessHandleV1 = McpStdioProcessHandleV1;
-export type RuntimeHostMcpStdioProcessPortV1 = McpStdioProcessPortV1;
+export type RuntimeHostMcpStdioProcessLaunch = McpStdioProcessLaunch;
+export type RuntimeHostMcpStdioReady = McpStdioReadyProof;
+export type RuntimeHostMcpStdioTerminal = McpStdioTerminalProof;
+export type RuntimeHostMcpStdioCleanup = McpStdioCleanupProof;
+export type RuntimeHostMcpStdioProcessHandle = McpStdioProcessHandle;
+export type RuntimeHostMcpStdioProcessPort = McpStdioProcessPort;
 
-export interface RuntimeHostMcpStdioProcessPortOptionsV1 {
+export interface RuntimeHostMcpStdioProcessPortOptions {
   /** Test/release composition may pin the wrapper entrypoint explicitly. */
   readonly wrapperPath?: string | null;
   /** Packaged qualification may execute an installed standalone wrapper directly. */
@@ -85,9 +85,9 @@ export interface RuntimeHostMcpStdioProcessPortOptionsV1 {
   readonly allowedEnvironmentKeys?: readonly string[];
 }
 
-export function createRuntimeHostMcpStdioProcessPortV1(
-  options: RuntimeHostMcpStdioProcessPortOptionsV1 = {},
-): RuntimeHostMcpStdioProcessPortV1 {
+export function createRuntimeHostMcpStdioProcessPort(
+  options: RuntimeHostMcpStdioProcessPortOptions = {},
+): RuntimeHostMcpStdioProcessPort {
   if (options.wrapperExecutablePath !== undefined && options.wrapperPath !== undefined) {
     throw new Error('MCP stdio wrapper path and executable path are mutually exclusive.');
   }
@@ -99,11 +99,11 @@ export function createRuntimeHostMcpStdioProcessPortV1(
         : null
       : options.wrapperPath;
   const allowedEnvironmentKeys = new Set(
-    options.allowedEnvironmentKeys ?? DEFAULT_MCP_STDIO_ENVIRONMENT_KEYS_V1,
+    options.allowedEnvironmentKeys ?? DEFAULT_MCP_STDIO_ENVIRONMENT_KEYS_,
   );
   return Object.freeze({
-    spawn: (input: RuntimeHostMcpStdioProcessLaunchV1) =>
-      spawnRuntimeHostMcpStdioProcessV1(input, {
+    spawn: (input: RuntimeHostMcpStdioProcessLaunch) =>
+      spawnRuntimeHostMcpStdioProcess(input, {
         wrapperPath,
         wrapperExecutablePath: options.wrapperExecutablePath,
         allowedEnvironmentKeys,
@@ -111,7 +111,7 @@ export function createRuntimeHostMcpStdioProcessPortV1(
   });
 }
 
-export const DEFAULT_MCP_STDIO_ENVIRONMENT_KEYS_V1 = Object.freeze([
+export const DEFAULT_MCP_STDIO_ENVIRONMENT_KEYS_ = Object.freeze([
   'PATH',
   'HOME',
   'LANG',
@@ -131,33 +131,33 @@ export const DEFAULT_MCP_STDIO_ENVIRONMENT_KEYS_V1 = Object.freeze([
   'PROGRAMDATA',
 ] as const);
 
-export function parseMcpStdioJsonLineV1(line: Uint8Array | string): unknown {
-  const text = typeof line === 'string' ? line : decodeUtf8StrictV1(line);
+export function parseMcpStdioJsonLine(line: Uint8Array | string): unknown {
+  const text = typeof line === 'string' ? line : decodeUtf8Strict(line);
   if (!text || text.trim() !== text) throw new Error('MCP stdio JSON line is not exact.');
-  const parser = new StrictJsonParserV1(text);
+  const parser = new StrictJsonParser(text);
   const value = parser.parse();
-  if (!isRecordV1(value)) throw new Error('MCP stdio JSON line must be an object.');
+  if (!isRecord(value)) throw new Error('MCP stdio JSON line must be an object.');
   return value;
 }
 
-export function decodeUtf8StrictV1(bytes: Uint8Array): string {
+export function decodeUtf8Strict(bytes: Uint8Array): string {
   const decoder = new TextDecoder('utf-8', { fatal: true });
   const text = decoder.decode(bytes);
   const encoded = new TextEncoder().encode(text);
-  if (encoded.byteLength !== bytes.byteLength || !bytesEqualV1(encoded, bytes)) {
+  if (encoded.byteLength !== bytes.byteLength || !bytesEqual(encoded, bytes)) {
     throw new Error('MCP stdio JSON line is not canonical UTF-8.');
   }
   return text;
 }
 
-export function sanitizeMcpStdioEnvironmentV1(
+export function sanitizeMcpStdioEnvironment(
   env: Readonly<Record<string, string>> | undefined,
-  allowedKeys: ReadonlySet<string> = new Set(DEFAULT_MCP_STDIO_ENVIRONMENT_KEYS_V1),
+  allowedKeys: ReadonlySet<string> = new Set(DEFAULT_MCP_STDIO_ENVIRONMENT_KEYS_),
 ): Readonly<Record<string, string>> {
   if (!env) return Object.freeze({});
   const output: Record<string, string> = {};
   const entries = Object.entries(env);
-  if (entries.length > MCP_STDIO_MAX_ENV_ENTRIES_V1) {
+  if (entries.length > MCP_STDIO_MAX_ENV_ENTRIES_) {
     throw new Error('MCP stdio environment has too many entries.');
   }
   for (const [name, value] of entries) {
@@ -167,7 +167,7 @@ export function sanitizeMcpStdioEnvironmentV1(
       name.startsWith('KITE_RUNTIME_MCP_STDIO_') ||
       typeof value !== 'string' ||
       value.includes('\0') ||
-      Buffer.byteLength(value, 'utf8') > MCP_STDIO_MAX_ENV_VALUE_BYTES_V1
+      Buffer.byteLength(value, 'utf8') > MCP_STDIO_MAX_ENV_VALUE_BYTES_
     ) {
       throw new Error(`MCP stdio environment key '${name}' is not allowed.`);
     }
@@ -176,26 +176,26 @@ export function sanitizeMcpStdioEnvironmentV1(
   return Object.freeze(output);
 }
 
-interface SpawnOptionsV1 {
+interface SpawnOptions {
   readonly wrapperPath: string | null;
   readonly wrapperExecutablePath?: string;
   readonly allowedEnvironmentKeys: ReadonlySet<string>;
 }
 
-async function spawnRuntimeHostMcpStdioProcessV1(
-  input: RuntimeHostMcpStdioProcessLaunchV1,
-  options: SpawnOptionsV1,
-): Promise<RuntimeHostMcpStdioProcessHandleV1> {
-  validateLaunchInputV1(input);
-  const env = sanitizeMcpStdioEnvironmentV1(input.env, options.allowedEnvironmentKeys);
+async function spawnRuntimeHostMcpStdioProcess(
+  input: RuntimeHostMcpStdioProcessLaunch,
+  options: SpawnOptions,
+): Promise<RuntimeHostMcpStdioProcessHandle> {
+  validateLaunchInput(input);
+  const env = sanitizeMcpStdioEnvironment(input.env, options.allowedEnvironmentKeys);
   const invocationId = randomUUID();
 
   const wrapperCommand = options.wrapperExecutablePath
-    ? [options.wrapperExecutablePath, MCP_STDIO_WRAPPER_ENTRYPOINT_V1]
+    ? [options.wrapperExecutablePath, MCP_STDIO_WRAPPER_ENTRYPOINT_]
     : options.wrapperPath
-      ? [process.execPath, options.wrapperPath, MCP_STDIO_WRAPPER_ENTRYPOINT_V1]
-      : [process.execPath, MCP_STDIO_WRAPPER_ENTRYPOINT_V1];
-  const proc = spawnRuntimeHostProcessV1(wrapperCommand, {
+      ? [process.execPath, options.wrapperPath, MCP_STDIO_WRAPPER_ENTRYPOINT_]
+      : [process.execPath, MCP_STDIO_WRAPPER_ENTRYPOINT_];
+  const proc = spawnRuntimeHostProcess(wrapperCommand, {
     cwd: input.cwd,
     env: Object.freeze({}),
     stdin: 'pipe',
@@ -212,13 +212,13 @@ async function spawnRuntimeHostMcpStdioProcessV1(
       outputController = controller;
     },
   });
-  const readyDeferred = deferred<RuntimeHostMcpStdioReadyV1>();
-  const terminalDeferred = deferred<RuntimeHostMcpStdioTerminalV1>();
+  const readyDeferred = deferred<RuntimeHostMcpStdioReady>();
+  const terminalDeferred = deferred<RuntimeHostMcpStdioTerminal>();
   void terminalDeferred.promise.catch(() => undefined);
-  type ProcessTerminationV1 = Awaited<ReturnType<ProcessTreeGuard['terminate']>>;
-  let processTerminationPromise: Promise<ProcessTerminationV1> | undefined;
-  const terminateOnce = (): Promise<ProcessTerminationV1> => {
-    processTerminationPromise ??= terminateProcessV1(processTree);
+  type ProcessTermination = Awaited<ReturnType<ProcessTreeGuard['terminate']>>;
+  let processTerminationPromise: Promise<ProcessTermination> | undefined;
+  const terminateOnce = (): Promise<ProcessTermination> => {
+    processTerminationPromise ??= terminateProcess(processTree);
     return processTerminationPromise;
   };
   let readySeen = false;
@@ -226,7 +226,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
   let outputClosed = false;
   let inputClosed = false;
   let cleanupStarted = false;
-  let cleanupResult: RuntimeHostMcpStdioCleanupV1 | undefined;
+  let cleanupResult: RuntimeHostMcpStdioCleanup | undefined;
   let forwardedBytes = 0;
 
   const closeOutput = (error?: Error): void => {
@@ -242,7 +242,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
     void terminateOnce().catch(() => undefined);
   };
 
-  const parseTask = consumeWrapperOutputV1(proc.stdout, {
+  const parseTask = consumeWrapperOutput(proc.stdout, {
     invocationId,
     wrapperPid: proc.pid,
     lastSequence: -1,
@@ -260,7 +260,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
         throw new Error('MCP stdio protocol message crossed an invalid lifecycle boundary.');
       }
       forwardedBytes += bytes.byteLength;
-      if (forwardedBytes > MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_V1) {
+      if (forwardedBytes > MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_) {
         throw new Error('MCP stdio output exceeded the bounded process budget.');
       }
       const copy = new Uint8Array(bytes.byteLength);
@@ -292,10 +292,10 @@ async function spawnRuntimeHostMcpStdioProcessV1(
     failProtocol(error instanceof Error ? error : new Error(String(error)));
   });
 
-  const goFrame = createRuntimeControlFrameV1({
-    schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-    domain: MCP_STDIO_CONTROL_DOMAIN_V1,
-    peerId: MCP_STDIO_HOST_PEER_ID_V1,
+  const goFrame = createRuntimeControlFrame({
+    schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
+    domain: MCP_STDIO_CONTROL_DOMAIN_,
+    peerId: MCP_STDIO_HOST_PEER_ID_,
     invocationId,
     sequence: 0,
     payload: {
@@ -308,9 +308,9 @@ async function spawnRuntimeHostMcpStdioProcessV1(
     },
   });
   try {
-    const goBytes = Buffer.from(`${canonicalControlFrameJsonV1(goFrame)}\n`, 'utf8');
+    const goBytes = Buffer.from(`${canonicalControlFrameJson(goFrame)}\n`, 'utf8');
     try {
-      await writeFileSinkV1(proc.stdin, goBytes);
+      await writeFileSink(proc.stdin, goBytes);
     } finally {
       goBytes.fill(0);
     }
@@ -321,7 +321,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
   }
 
   let abortListener: (() => void) | undefined;
-  const cleanup = async (): Promise<RuntimeHostMcpStdioCleanupV1> => {
+  const cleanup = async (): Promise<RuntimeHostMcpStdioCleanup> => {
     if (cleanupResult) return cleanupResult;
     if (cleanupStarted) return await exited.then(() => cleanupResult!);
     cleanupStarted = true;
@@ -342,7 +342,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
     let forced = false;
     let confirmedExited = false;
     let unconfirmedProcessCount = 0;
-    if (terminalSeen && (await waitForExitV1(exited, 1_000))) {
+    if (terminalSeen && (await waitForExit(exited, 1_000))) {
       confirmedExited = true;
     } else {
       const result = await terminateOnce();
@@ -368,11 +368,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
 
   const ready = readyDeferred.promise;
   try {
-    await withTimeoutV1(
-      ready,
-      MCP_STDIO_STARTUP_TIMEOUT_MS_V1,
-      'MCP stdio validated ready timed out.',
-    );
+    await withTimeout(ready, MCP_STDIO_STARTUP_TIMEOUT_MS_, 'MCP stdio validated ready timed out.');
   } catch (error) {
     await terminateOnce();
     if (abortListener) input.signal?.removeEventListener('abort', abortListener);
@@ -387,7 +383,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
     exited,
     async write(data: Uint8Array): Promise<void> {
       if (cleanupStarted || inputClosed) throw new Error('MCP stdio process input is closed.');
-      if (!(data instanceof Uint8Array) || data.byteLength > MCP_STDIO_MAX_LINE_BYTES_V1 + 1) {
+      if (!(data instanceof Uint8Array) || data.byteLength > MCP_STDIO_MAX_LINE_BYTES_ + 1) {
         throw new Error('MCP stdio process input is not bounded.');
       }
       if (data.byteLength < 2 || data[data.byteLength - 1] !== 0x0a) {
@@ -395,7 +391,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
       }
       const inputLine = data.slice(0, data.byteLength - 1);
       try {
-        if (inputLine.includes(0x0a) || !isMcpJsonRpcObjectV1(parseMcpStdioJsonLineV1(inputLine))) {
+        if (inputLine.includes(0x0a) || !isMcpJsonRpcObject(parseMcpStdioJsonLine(inputLine))) {
           throw new Error('MCP stdio process input is not JSON-RPC.');
         }
       } finally {
@@ -404,7 +400,7 @@ async function spawnRuntimeHostMcpStdioProcessV1(
       const copy = new Uint8Array(data.byteLength);
       copy.set(data);
       try {
-        await writeFileSinkV1(proc.stdin, copy);
+        await writeFileSink(proc.stdin, copy);
       } finally {
         copy.fill(0);
       }
@@ -422,21 +418,21 @@ async function spawnRuntimeHostMcpStdioProcessV1(
   });
 }
 
-interface WrapperOutputCallbacksV1 {
+interface WrapperOutputCallbacks {
   readonly invocationId: string;
   readonly wrapperPid: number;
   lastSequence: number;
   readySeen: boolean;
-  onReady(ready: RuntimeHostMcpStdioReadyV1): void;
-  onTerminal(terminal: RuntimeHostMcpStdioTerminalV1): void;
+  onReady(ready: RuntimeHostMcpStdioReady): void;
+  onTerminal(terminal: RuntimeHostMcpStdioTerminal): void;
   onMessage(bytes: Uint8Array): void;
   onError(error: Error): void;
   isClosing(): boolean;
 }
 
-async function consumeWrapperOutputV1(
+async function consumeWrapperOutput(
   stream: ReadableStream<Uint8Array>,
-  callbacks: WrapperOutputCallbacksV1,
+  callbacks: WrapperOutputCallbacks,
 ): Promise<void> {
   const reader = stream.getReader();
   let buffer = Buffer.alloc(0) as Buffer<ArrayBufferLike>;
@@ -447,49 +443,49 @@ async function consumeWrapperOutputV1(
       if (done) break;
       if (!(value instanceof Uint8Array))
         throw new Error('MCP stdio wrapper emitted invalid bytes.');
-      buffer = appendBoundedBufferV1(buffer, value, MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_V1);
+      buffer = appendBoundedBuffer(buffer, value, MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_);
       while (true) {
         const newline = buffer.indexOf(0x0a);
         if (newline < 0) break;
         const line = Buffer.from(buffer.subarray(0, newline));
         buffer = Buffer.from(buffer.subarray(newline + 1));
         try {
-          if (line.byteLength === 0 || line.byteLength > MCP_STDIO_MAX_LINE_BYTES_V1) {
+          if (line.byteLength === 0 || line.byteLength > MCP_STDIO_MAX_LINE_BYTES_) {
             throw new Error('MCP stdio wrapper emitted an empty or oversized line.');
           }
-          const value = parseMcpStdioJsonLineV1(line);
-          if (isRuntimeControlFrameV1(value)) {
-            if (canonicalControlFrameJsonV1(value) !== decodeUtf8StrictV1(line)) {
+          const value = parseMcpStdioJsonLine(line);
+          if (isRuntimeControlFrame(value)) {
+            if (canonicalControlFrameJson(value) !== decodeUtf8Strict(line)) {
               throw new Error('MCP stdio control frame is not canonical JSON.');
             }
-            const payload = verifyRuntimeControlFrameV1({
+            const payload = verifyRuntimeControlFrame({
               frame: value,
-              expectedDomain: MCP_STDIO_CONTROL_DOMAIN_V1,
-              expectedPeerId: MCP_STDIO_WRAPPER_PEER_ID_V1,
+              expectedDomain: MCP_STDIO_CONTROL_DOMAIN_,
+              expectedPeerId: MCP_STDIO_WRAPPER_PEER_ID_,
               expectedInvocationId: callbacks.invocationId,
               lastSequence: callbacks.lastSequence,
             });
             callbacks.lastSequence = value.sequence;
-            if (!isRecordV1(payload)) {
+            if (!isRecord(payload)) {
               throw new Error('MCP stdio control payload is invalid.');
             }
             if (payload.type === 'ready') {
               if (callbacks.readySeen || terminalSeen)
                 throw new Error('Duplicate MCP stdio ready frame.');
-              const ready = parseReadyPayloadV1(payload, callbacks);
+              const ready = parseReadyPayload(payload, callbacks);
               callbacks.readySeen = true;
               callbacks.onReady(ready);
             } else if (payload.type === 'terminal') {
               if (!callbacks.readySeen || terminalSeen)
                 throw new Error('Invalid MCP stdio terminal frame.');
-              const terminal = parseTerminalPayloadV1(payload, callbacks);
+              const terminal = parseTerminalPayload(payload, callbacks);
               terminalSeen = true;
               callbacks.onTerminal(terminal);
             } else {
               throw new Error('Unexpected MCP stdio control frame payload.');
             }
           } else {
-            if (!isMcpJsonRpcObjectV1(value) || terminalSeen || !callbacks.readySeen) {
+            if (!isMcpJsonRpcObject(value) || terminalSeen || !callbacks.readySeen) {
               throw new Error('MCP stdio emitted a protocol message outside validated readiness.');
             }
             const output = Buffer.alloc(line.byteLength + 1);
@@ -519,25 +515,19 @@ async function consumeWrapperOutputV1(
   }
 }
 
-function parseReadyPayloadV1(
+function parseReadyPayload(
   payload: unknown,
-  callbacks: WrapperOutputCallbacksV1,
-): RuntimeHostMcpStdioReadyV1 {
+  callbacks: WrapperOutputCallbacks,
+): RuntimeHostMcpStdioReady {
   if (
-    !isRecordV1(payload) ||
+    !isRecord(payload) ||
     payload.type !== 'ready' ||
     payload.invocationId !== callbacks.invocationId ||
     payload.wrapperPid !== callbacks.wrapperPid ||
-    !isPositiveIntegerV1(payload.childPid) ||
+    !isPositiveInteger(payload.childPid) ||
     typeof payload.processStartIdentity !== 'string' ||
     payload.processStartIdentity.length === 0 ||
-    !exactKeysV1(payload, [
-      'type',
-      'invocationId',
-      'wrapperPid',
-      'childPid',
-      'processStartIdentity',
-    ])
+    !exactKeys(payload, ['type', 'invocationId', 'wrapperPid', 'childPid', 'processStartIdentity'])
   ) {
     throw new Error('MCP stdio ready payload identity mismatch.');
   }
@@ -549,16 +539,16 @@ function parseReadyPayloadV1(
   });
 }
 
-function parseTerminalPayloadV1(
+function parseTerminalPayload(
   payload: unknown,
-  callbacks: WrapperOutputCallbacksV1,
-): RuntimeHostMcpStdioTerminalV1 {
+  callbacks: WrapperOutputCallbacks,
+): RuntimeHostMcpStdioTerminal {
   if (
-    !isRecordV1(payload) ||
+    !isRecord(payload) ||
     payload.type !== 'terminal' ||
     payload.invocationId !== callbacks.invocationId ||
     payload.wrapperPid !== callbacks.wrapperPid ||
-    !isPositiveIntegerV1(payload.childPid) ||
+    !isPositiveInteger(payload.childPid) ||
     typeof payload.processStartIdentity !== 'string' ||
     payload.processStartIdentity.length === 0 ||
     typeof payload.exitCode !== 'number' ||
@@ -566,7 +556,7 @@ function parseTerminalPayloadV1(
     payload.exitCode < 0 ||
     payload.exitCode > 255 ||
     payload.cleanup !== 'confirmed' ||
-    !exactKeysV1(payload, [
+    !exactKeys(payload, [
       'type',
       'invocationId',
       'wrapperPid',
@@ -588,24 +578,24 @@ function parseTerminalPayloadV1(
   });
 }
 
-function validateLaunchInputV1(input: RuntimeHostMcpStdioProcessLaunchV1): void {
-  if (!isSafeTextV1(input.command, MCP_STDIO_MAX_ARGUMENT_BYTES_V1)) {
+function validateLaunchInput(input: RuntimeHostMcpStdioProcessLaunch): void {
+  if (!isSafeText(input.command, MCP_STDIO_MAX_ARGUMENT_BYTES_)) {
     throw new Error('MCP stdio command is invalid.');
   }
-  if (!Array.isArray(input.args) || input.args.length > MCP_STDIO_MAX_ARGUMENTS_V1) {
+  if (!Array.isArray(input.args) || input.args.length > MCP_STDIO_MAX_ARGUMENTS_) {
     throw new Error('MCP stdio argument vector is invalid.');
   }
   for (const arg of input.args) {
-    if (!isSafeTextV1(arg, MCP_STDIO_MAX_ARGUMENT_BYTES_V1)) {
+    if (!isSafeText(arg, MCP_STDIO_MAX_ARGUMENT_BYTES_)) {
       throw new Error('MCP stdio argument is invalid.');
     }
   }
-  if (!isSafeTextV1(input.cwd, MCP_STDIO_MAX_CWD_BYTES_V1)) {
+  if (!isSafeText(input.cwd, MCP_STDIO_MAX_CWD_BYTES_)) {
     throw new Error('MCP stdio cwd is invalid.');
   }
 }
 
-function isSafeTextV1(value: unknown, maxBytes: number): value is string {
+function isSafeText(value: unknown, maxBytes: number): value is string {
   return (
     typeof value === 'string' &&
     value.length > 0 &&
@@ -614,19 +604,19 @@ function isSafeTextV1(value: unknown, maxBytes: number): value is string {
   );
 }
 
-function isMcpJsonRpcObjectV1(value: unknown): value is Record<string, unknown> {
-  return isRecordV1(value) && value.jsonrpc === '2.0';
+function isMcpJsonRpcObject(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && value.jsonrpc === '2.0';
 }
 
-function isRecordV1(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isPositiveIntegerV1(value: unknown): value is number {
+function isPositiveInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
-function exactKeysV1(value: Record<string, unknown>, expected: readonly string[]): boolean {
+function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const sortedExpected = [...expected].sort();
   return (
@@ -635,7 +625,7 @@ function exactKeysV1(value: Record<string, unknown>, expected: readonly string[]
   );
 }
 
-function appendBoundedBufferV1(
+function appendBoundedBuffer(
   buffer: Buffer<ArrayBufferLike>,
   chunk: Uint8Array,
   maximumBytes: number,
@@ -651,12 +641,12 @@ function appendBoundedBufferV1(
   return next;
 }
 
-async function writeFileSinkV1(sink: Bun.FileSink, bytes: Uint8Array): Promise<void> {
+async function writeFileSink(sink: Bun.FileSink, bytes: Uint8Array): Promise<void> {
   await Promise.resolve(sink.write(bytes));
   await Promise.resolve(sink.flush());
 }
 
-async function terminateProcessV1(
+async function terminateProcess(
   processTree: ProcessTreeGuard,
 ): Promise<ReturnType<ProcessTreeGuard['terminate']> extends Promise<infer T> ? T : never> {
   return processTree.terminate();
@@ -676,11 +666,7 @@ function deferred<T>(): {
   return { promise, resolve: resolvePromise, reject: rejectPromise };
 }
 
-async function withTimeoutV1<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  message: string,
-): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -694,16 +680,16 @@ async function withTimeoutV1<T>(
   }
 }
 
-async function waitForExitV1(promise: Promise<number>, timeoutMs: number): Promise<boolean> {
+async function waitForExit(promise: Promise<number>, timeoutMs: number): Promise<boolean> {
   try {
-    await withTimeoutV1(promise, timeoutMs, 'MCP stdio process exit timed out.');
+    await withTimeout(promise, timeoutMs, 'MCP stdio process exit timed out.');
     return true;
   } catch {
     return false;
   }
 }
 
-function bytesEqualV1(left: Uint8Array, right: Uint8Array): boolean {
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   if (left.byteLength !== right.byteLength) return false;
   for (let index = 0; index < left.byteLength; index += 1) {
     if (left[index] !== right[index]) return false;
@@ -711,7 +697,7 @@ function bytesEqualV1(left: Uint8Array, right: Uint8Array): boolean {
   return true;
 }
 
-class StrictJsonParserV1 {
+class StrictJsonParser {
   #index = 0;
   #depth = 0;
   private readonly text: string;

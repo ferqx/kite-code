@@ -28,20 +28,20 @@
 工具声明只让模型表达意图。模型侧不得直接执行工具，TUI 不得绕过 Tool Controller 调用 provider。
 
 Builtin capability 的 schema/parser/canonicalizer、availability、effects、traits、contract 与 operation identity
-只来自一个 frozen `CapabilityRegistrySnapshotV1` 及其 `createBuiltinToolCatalogProjectionV1()`；package tests
+只来自一个 frozen `CapabilityRegistrySnapshot` 及其 `createBuiltinToolCatalogProjection()`；package tests
 机械断言 projection 为 29 entries、20 model-visible、9 internal，不能在文档或 App bridge 中手工复制这些事实。
-对应 package/manifests checks 与 RMV1-16 final manifest/docs/journey/fault/soak Gate 均已通过，并由完成记录绑定
+对应 package/manifests checks 与 RM-16 final manifest/docs/journey/fault/soak Gate 均已通过，并由完成记录绑定
 implementation final SHA。
 Kernel 只拥有纯 governance/admission decision，Host 只拥有该 snapshot 对应的 generic execution port，App 只组合
 一个 Model Gateway、Builtin operation port 与 Tool Pipeline。源码 caller/owner closure 已切到唯一 App/Host/Builtin seams，
-不得在 RAV1 中恢复 central controller、第二 registry 或 fallback。
+不得在 RA 中恢复 central controller、第二 registry 或 fallback。
 
 ## Tool Pipeline V1 迁移状态
 
 Tool Pipeline V1 当前由 Runtime SPI neutral contracts、Host coordinator 与 App composition 接通以下类型状态：
-`ToolCallSnapshotV1 → ResolvedInvocationV1 → ValidatedInvocationV1 → ClassifiedInvocationV1 →
-PolicyEvaluatedInvocationV1 → AuthorizedInvocationV1 → AdmittedInvocationV1 → RecordedInvocationV1 →
-DispatchedOutcomeV1 → NormalizedOutcomeV1 → ReceiptCommittedOutcomeV1`。
+`ToolCallSnapshot → ResolvedInvocation → ValidatedInvocation → ClassifiedInvocation →
+PolicyEvaluatedInvocation → AuthorizedInvocation → AdmittedInvocation → RecordedInvocation →
+DispatchedOutcome → NormalizedOutcome → ReceiptCommittedOutcome`。
 snapshot 只接受严格 JSON value 并深拷贝、冻结模型参数；resolve 只消费调用前捕获的可用性、catalog、
 binding、descriptor 与 disclosure 事实；validate 使用 Builtin catalog entry 的当前上下文 Schema 或 dynamic-MCP binding Schema
 应用默认值，并校验 revision、turn 与 Skill disclosure freshness；classify 从 Builtin catalog entry 的 per-invocation
@@ -55,7 +55,7 @@ approval/auto-review/ask_user 和本地 reservation/freshness admission 接到 p
 early terminal 都是显式 typed branch。Policy/approval 只消费已分类的不可变事实，admission 不允许网络、
 Provider 等待或绕过 reservation。Controller 不再保留这些分支的旧 production fallback。
 
-Provider readiness 由 `ProviderReadinessCoordinatorV1` 作为独立 durable lifecycle 边界治理。稳定 key 覆盖
+Provider readiness 由 `ProviderReadinessCoordinator` 作为独立 durable lifecycle 边界治理。稳定 key 覆盖
 `providerId + route/config revision + execution-boundary digest`；每个 Tool Call 先登记 waiter，同 key 并发
 调用只共享一个 lifecycle。可能建连的 attempt 必须在 `provider.readiness_attempt_started` 获得 Store ack
 之后发生，success/failure receipt 也必须持久化；ack 前调用数为零，attempt 后 receipt 丢失恢复为 unknown，
@@ -63,15 +63,15 @@ Provider readiness 由 `ProviderReadinessCoordinatorV1` 作为独立 durable lif
 on-demand adapter 每次只做一次 reconnect，不在一次 ack 内隐藏 backoff/retry。`tool_search`、inventory 与
 discovery 只读当前 revisioned snapshot，绝不直接调用或等待 readiness。
 
-`createRuntimeHostToolPipelineAttemptCoordinatorV1()` 是 Host generic dispatch lifecycle 的唯一 production coordinator；
+`createRuntimeHostToolPipelineAttemptCoordinator()` 是 Host generic dispatch lifecycle 的唯一 production coordinator；
 Builtin、MCP、Skill 与 Subagent 外层 adapter 均由 App 注入同一 coordinator。每次调用先把 `capability.invocation_recorded` 与带单调 attempt ordinal 的
 `capability.execution_started` 作为一个 RuntimeStore batch 获得 ack；adapter 的 `beforeDispatch` 在该 ack
 完成前不会返回，ack 缺失、失败或 stale 时 provider/adapter 调用数必须为零。相同 invocation 的受限重试
 复用稳定 identity 与 idempotency key，不生成第二份授权权威；Tool Controller、SPI registry 或 Runner 都不得在
 失败时绕回无 intent/旧 executor adapter。Subagent 内部 filesystem tool 在 PS-01 已由 parent
 Runtime 建立 namespaced queue identity，并递归进入同一完整 Tool Pipeline；child terminal durable 提交后
-才交回受治理的 `BuiltinChildRuntimeDriverV1`。Builtin/SPI 已提供 protocol-first `SubagentProviderV1`、sealed single-use
-delegation/resume grant 与唯一生产 `LocalSubagentProviderV1`：normal task、approval resume 与 Skill fork 都在
+才交回受治理的 `BuiltinChildRuntimeDriver`。Builtin/SPI 已提供 protocol-first `SubagentProvider`、sealed single-use
+delegation/resume grant 与唯一生产 `LocalSubagentProvider`：normal task、approval resume 与 Skill fork 都在
 外层 attempt durable ack 后由 Pipeline 注入 runtime，Task adapter 不选择 Provider；Builtin Driver 只调用
 invocation-scoped registration callback，且不存在 precomputed result、
 现场 Model 重建或运行时 fallback。Provider 只拥有 lifecycle、cancel 与 bounded observation
@@ -109,8 +109,8 @@ terminal batch。伪造、失败或缺失 receipt 不能产生 verification。To
 
 `recorded` 与 `dispatched` 同样是进程内 opaque stage authority，而不是可由结构类型自证的 DTO。只有
 Host coordinator 在 invocation 与 attempt batch durable ack 后签发 authentic
-`RecordedInvocationV1`；同一 attempt 只能签发一个绑定 exact recorded/result identity 的
-`DispatchedOutcomeV1`。normalizer、result recorder 与 receipt commit 都重新验证该 authority，因此
+`RecordedInvocation`；同一 attempt 只能签发一个绑定 exact recorded/result identity 的
+`DispatchedOutcome`。normalizer、result recorder 与 receipt commit 都重新验证该 authority，因此
 clone/spread outcome、替换 result/recorded 或手造未 ack record 会在 Artifact 写入与 terminal 形成前失败。
 adapter 在 ack 后抛出且 Controller 能证明为 confirmed failure 时，只能使用 error-only 专用投影：输入固定
 `status=error + command + ClassifiedFailure`，不能携带 success、filesystem observation、Runtime event 或其他
@@ -121,8 +121,8 @@ adapter result 字段；其他 post-dispatch 异常仍按 unknown 收敛。dispa
 Subagent task adapter 与 Builtin catalog/Host dispatch；Provider-neutral MCP contract、readiness 与 Policy metadata 仍可作为
 Pipeline 输入。Verification 读取侧必须复用 production composition 注入的同一 Capability Artifact access，
 不存在模块级默认 store；reader/key/artifact 缺失会在 reviewer 模型 dispatch 前收敛为 `inconclusive`。
-迁移不增加 runtime fallback flag。RAV1-06 已统一切换
-schema v26/Store5/`kite-runtime-modularization-v1-2026-08-19`，旧 dispatch shape 不进入新 epoch。
+迁移不增加 runtime fallback flag。RA-06 已统一切换
+schema v26/SQLite Store/`kite-runtime-modularization-v1-2026-08-19`，旧 dispatch shape 不进入新 epoch。
 
 ### Workspace filesystem Provider（PS-01）
 
@@ -157,11 +157,11 @@ dispatcher 证据才能成为 freshness authority；write/edit 还必须存在�
 mutation-ready，且 intent 与 observation 的 lexical target digest 必须一致。Legacy rewind recorder 只接收
 best-effort 次级投影；其失败不扩大权限，但私有 preimage Artifact 或 ready ack 失败会阻止 commit。
 
-生产 `LocalWorkspaceFilesystemProviderV1` 是唯一 Node filesystem owner。`tests/helpers/` 中的旧 file/search
-实现和 legacy dispatcher 仅用于差分行为 oracle；`ScriptableFakeWorkspaceFilesystemProviderV1` 只返回脚本化
+生产 `LocalWorkspaceFilesystemProvider` 是唯一 Node filesystem owner。`tests/helpers/` 中的旧 file/search
+实现和 legacy dispatcher 仅用于差分行为 oracle；`ScriptableFakeWorkspaceFilesystemProvider` 只返回脚本化
 结果，deny/crash 后没有 Local 或旧 adapter fallback。此迁移没有 feature flag，也没有改变 Runtime format
 epoch；private task request/final task/continuation/handle Artifact、two-phase handle-ready 与
-same/cross-process recovery 均沿当前 State26/Store5 seam，生产执行不存在旧 Provider adapter、raw Task restore
+same/cross-process recovery 均沿当前 Runtime State/SQLite Store seam，生产执行不存在旧 Provider adapter、raw Task restore
 或 Capability Artifact reader fallback。
 
 ### Sandbox execution Provider（PS-02）
@@ -173,7 +173,7 @@ sandbox_preparation_ready ack → single-use Runtime spawn → disposal intent/r
 identity、expiry 或 cancellation 检查失败都保持零 spawn；Fake deny/crash 也不会回退 Local、裸 Shell 或直接
 Windows runner。
 
-`SandboxExecutionProviderV1` 只接受精确 approved argv/command digest 和冻结 execution boundary，返回
+`SandboxExecutionProvider` 只接受精确 approved argv/command digest 和冻结 execution boundary，返回
 data-first prepared plan 与 backend evidence。Runtime consumer 唯一拥有 Seatbelt/bubblewrap shell 与 Windows
 framed restricted-token runner 的 process spawn、output、timeout、cancel、process-tree/Job cleanup；Provider 不
 导入 Policy、approval、Runtime state/event 或 App。ready 后 crash 由 Kernel 从 keyed private Artifact 恢复
@@ -200,7 +200,7 @@ Shell 的 read-only fast path 是 Planning、免审批执行、只读 Subagent �
 file-output action、sort output、uniq output operand、`file` compile/uncompress 与 xargs 均属于非只读。CR/LF 多命令、process
 substitution、command substitution、backtick 和可能把安全参数展开成危险 option 的变量 expansion 同样不得
 走只读 fast path；未加引号的 brace expansion 也必须拒绝，避免它在静态检查后合成危险 option。`file`
-的 `-p/--preserve-date` 会恢复被检查文件的 atime，属于元数据写，同样不得归为只读。Scheduler 只并行已经通过这条分类和 Approval Policy 二次确认的调用；RMV1-09 后它从 Builtin catalog 投影的 `access/resourceScopes/conflictKeys/isolation/causalGroup/interactionBarrier/concurrencyGroup/leaseFenceRequired` 判定 overlap，不读取具体工具名。误分类不能依赖
+的 `-p/--preserve-date` 会恢复被检查文件的 atime，属于元数据写，同样不得归为只读。Scheduler 只并行已经通过这条分类和 Approval Policy 二次确认的调用；RM-09 后它从 Builtin catalog 投影的 `access/resourceScopes/conflictKeys/isolation/causalGroup/interactionBarrier/concurrencyGroup/leaseFenceRequired` 判定 overlap，不读取具体工具名。误分类不能依赖
 Workspace sandbox 兜底，因为 development 的 `workspace_only` capability 仍可能允许 Workspace 写入。
 `rg -f/--file` 保持只读，但其 pattern 文件与搜索路径都是读取目标；任一目标位于 Workspace 外时必须进入
 external-read 审批，不得因 option value 没有被当作普通操作数而漏报。`grep` pattern 文件、`file`
@@ -220,7 +220,7 @@ Generic Shell Git 整体不属于 policy-proven read-only：即使 argv 看似�
 diff/textconv、fsmonitor、external diff 或 filter helper 启动子进程。Git inspection 必须使用 Runtime
 披露的 typed `git_inspect` broker；未披露时不能退回 Shell 的免审批/Planning fast path。
 
-每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`；current reducer
+每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcome`；current reducer
 及其消费者不从其他 result 字段推导 outcome，并且只投影一个成对 ToolMessage。当前 epoch 缺失或
 损坏 outcome 时直接 fail closed，不存在 historical decoder。Builtin catalog entry 只能提供 metadata-only
 result classifier，不能自报 dispatch、external effect 或 timing。Policy/approval deny 一律证明为
@@ -242,7 +242,7 @@ Provider failure 投影给 Agent Kernel，由 Kernel 先构造候选 failure、�
 返回精确 `recoveryOf`；只有该 identity 与待持久化事件完全一致时才允许写 retry fact。admission deny、
 identity mismatch 或 durable ack 失败时第二次 Provider/Host dispatch 都为零。
 
-父 Runtime 与 task Subagent 共用 `ToolRecoveryJournalV1` 语义。journal 以 canonical operation facts
+父 Runtime 与 task Subagent 共用 `ToolRecoveryJournal` 语义。journal 以 canonical operation facts
 生成 deterministic invocation fingerprint，持久化 failure instance、`recoveryOf`、模型修正/
 自动 retry 次数与 tool-owned progress revision；fingerprint 和 lineage 不进入 SessionLog、
 remote telemetry。只有成功 receipt、内容/Plan/capability/provider revision 可以形成进展；
@@ -258,7 +258,7 @@ quality fact 与 CompletionGuard blocker；exhausted 不是 recovered。只有�
 不阻断新 scope。`alternative` 可在下一 eligible response 使用不同 capability，但 Runtime 必须绑定
 `recoveryOf`。quality guard 允许 Plan、询问用户与 capability search 等逃逸工具形成真实替代进展。
 主 Runtime 与 Subagent 的 deny 重提、MCP binding failure、restart 与 parent merge 全部走同一 typed
-terminal/journal 路径，不保留另一套正文或计数旁路。State26 continuation 只携带当前 canonical
+terminal/journal 路径，不保留另一套正文或计数旁路。Runtime State continuation 只携带当前 canonical
 `executionJournal/exhaustedFingerprints`；旧字节不读取、不归一，Kernel journal 是唯一 recovery ceiling。
 Subagent 的正常执行与 approval resume 都只能把 `ToolExecutionResult` 的 canonical public model content
 追加到下一次 Provider context；该内容与 parent reducer 共用唯一 helper，success 选择
@@ -269,12 +269,12 @@ recovery 中，但不得因为未恢复而把已经返回最终模型文本的 c
 中断、超时、Provider/模型服务异常、循环耗尽或没有产生最终模型结果。
 command、path、resultMeta、classifier advice 与 private recovery guidance
 不得通过 `JSON.stringify(result)` 进入 transcript。Builtin classifier advice 仍作为独立 metadata 输入同一
-`classifyToolOutcomeV1`，因此父/子 `read_file` ENOENT 等失败得到相同 detail/recovery，而公开错误文本不重复路径。
+`classifyToolOutcome`，因此父/子 `read_file` ENOENT 等失败得到相同 detail/recovery，而公开错误文本不重复路径。
 生产 task Subagent 继承 parent journal 的非秘密 recovery identity，所以 child failure merge 后的
 fingerprint 与 parent 使用同一 session scope；foreign-session journal 不复制任何 failure/fingerprint，而是
 fail closed quality block。同一 child deny 被 parent 再次提出时，Controller 在 dispatch 前以同一 canonical
 identity 零调用阻断。recovery identity 与 fingerprint 不进入 Provider、SessionLog、metrics 或 TUI。
-State26 的根 recovery identity 由 App 生成、Runtime Host 通过同一 Store5 writer按 Session 持久化；restore
+Runtime State 的根 recovery identity 由 App 生成、Runtime Host 通过同一 SQLite Store writer按 Session 持久化；restore
 只允许采用 snapshot 中已有 identity，metadata 与 snapshot 必须精确一致。conversation fork 与
 recovery-continuation fork 是新 Session：App 分配新的 target identity，Kernel fork projection 清空 source
 recovery journal，SQLite 在同一 transaction 中提交 target snapshot 与 private metadata；source identity/journal
@@ -315,7 +315,7 @@ continuation journal 与父 identity 不一致的恢复，不能先执行外部�
 lineage-aware compaction：优先保留 active/recent failure，并连同完整 `recoveryOf` ancestor closure 一起
 保留或一起裁剪；历史 terminal ToolCall 可引用已裁剪 lineage，live ToolCall 的 parent 则必须 retained。
 
-`promptContractV2` 开启时，phase 不改变 production builtin declaration：Planning 与 Building 使用相同的 edit/write/shell 声明和完整 `task` role schema；当前已绑定动态 MCP 也保持声明稳定，避免 phase 切换破坏 Provider 的工具前缀。动态 Runtime block 和 Builtin catalog description 引导 Planning 只调用只读能力，Runtime Policy/Controller 仍以当前 phase 和 Builtin catalog/dynamic-MCP effective effects 强制裁决：policy-proven read-only Shell、MCP 与 Builtin capability 可运行，edit/write、非只读 Shell、code/review child 和 side-effectful MCP 均不执行、不进入审批，并产生配对的结构化 phase Tool Result。模型可以为有界、自包含、独立且值得额外调用的工作自主选择 `task`；用户明确要求不委派时必须遵守。Capability availability、execution surface、binding、Skill lifecycle 与 flags 仍可改变实际工具面；稳定披露不是授权。
+`promptContract` 开启时，phase 不改变 production builtin declaration：Planning 与 Building 使用相同的 edit/write/shell 声明和完整 `task` role schema；当前已绑定动态 MCP 也保持声明稳定，避免 phase 切换破坏 Provider 的工具前缀。动态 Runtime block 和 Builtin catalog description 引导 Planning 只调用只读能力，Runtime Policy/Controller 仍以当前 phase 和 Builtin catalog/dynamic-MCP effective effects 强制裁决：policy-proven read-only Shell、MCP 与 Builtin capability 可运行，edit/write、非只读 Shell、code/review child 和 side-effectful MCP 均不执行、不进入审批，并产生配对的结构化 phase Tool Result。模型可以为有界、自包含、独立且值得额外调用的工作自主选择 `task`；用户明确要求不委派时必须遵守。Capability availability、execution surface、binding、Skill lifecycle 与 flags 仍可改变实际工具面；稳定披露不是授权。
 
 `ask_user` 只在主 Agent 工具面中可用。主 Agent 必须在派发 `task` 前澄清会阻断执行的用户意图，并把必要事实写入自包含的 delegated task；Subagent 的所有角色都从工具声明中移除 `ask_user`。child 若发现必要前提仍缺失，只能在最终结果中返回 parent，不得创建用户 interaction。Full/Plan 模式可提问仅指主 Agent 可在委派前提问。
 
@@ -354,7 +354,7 @@ Git log revision 使用 broker、Provider schema 与 Builtin catalog 共用的�
 
 V2 写入前还执行项目指令 snapshot guard。edit/write 使用目标路径，shell 与 code task 至少使用已解析 cwd/Workspace 根；若目标首次引入当前模型快照未见的嵌套 `CLAUDE.md`/`AGENTS.md`，或适用文档 digest 已变化，本次副作用以可恢复的 `project_instructions_changed` 拒绝。下一轮重新投影后模型可重新发起，审批与 sandbox 不得绕过此检查。
 
-`resourceBudgetV1` 启用时，策略/审批仍先于 child reservation；只有调用已经可执行时才原子写入
+`resourceBudget` 启用时，策略/审批仍先于 child reservation；只有调用已经可执行时才原子写入
 reservation，再单独写入 `dispatch_started`，最后进入 adapter。Subagent parent 只代表一次
 lifecycle attempt，child 模型及工具/Shell/MCP 调用各自链接独立 reservation；artifact bytes
 计入产出它的 tool/MCP reservation，不另建一个虚构 invocation。延后审批的重新呈现只打开
@@ -362,11 +362,11 @@ interaction，不属于 dispatch 或 lifecycle attempt，因而不进入 resourc
 durable FIFO waiter、原子 promotion + reservation 与有界 wait deadline；超时通过主 Runtime 的
 canonical failure terminal 收敛，不转换成普通 child tool error。
 本地 Provider 最终 gate 明确拒绝且能证明未 dispatch 时可携带证明 release；已经执行部分
-command/MCP check 的组合 Verification 必须转 `unknown`，不能整体退款。`resourceBudgetV1`
-开启但 `boundedCancellationV1` 关闭时，模型不披露 writer、Shell 或 child capability，
+command/MCP check 的组合 Verification 必须转 `unknown`，不能整体退款。`resourceBudget`
+开启但 `boundedCancellation` 关闭时，模型不披露 writer、Shell 或 child capability，
 Controller 也必须拒绝直接执行，不能退回无界副作用路径。
 
-sealed `ExecutionBoundaryV1` 还会在 dispatch 时派生逐调用 network policy。当前 `web_fetch`
+sealed `ExecutionBoundary` 还会在 dispatch 时派生逐调用 network policy。当前 `web_fetch`
 对 robots、正文和每个 redirect hop 分别做 DNS/endpoint admission，并在 socket 前持久化
 `network.admission_decided`；Tool Result 只携带 policy revision、receipt digest 和 typed failure。
 feature 关闭、决定无法持久化或 controller 不可用都 fail closed。因为当前没有可证明的跨进程
@@ -403,19 +403,19 @@ Builtin operation receipt/result projection 只产生模型内容、双流内容
 `write_plan` 已作为 capability-backed `runtime_action` 接入 Builtin catalog：Builtin executor 经注入 mechanism 保持 save→submit 两阶段 Artifact 协议、幂等保存、版本冲突、replan 元数据、review interrupt 和同批后续调用取消；首次 save 后的 save/submit/replan 共用严格 identity 校验，新 write 只产生 PlanDocument V2。当前 epoch 不接受缺少当前 Plan/Runtime 格式身份的历史状态，因此不存在 recovery-only 工具面或 legacy governance 分支。
 
 静态工具的 Schema、契约与副作用分类收敛到 `packages/builtin-runtime/src/tool-catalog.ts` 投影的 Builtin catalog；
-SPI registry 保留 immutable definition/executor identity，App 只保留 composition/request adapter。RMV1-10 至
-RMV1-15 已依次迁移 `tool_search`、Skills/MCP/Web、Filesystem/Git、Shell、Plan/Task 与五类 Model operations。
+SPI registry 保留 immutable definition/executor identity，App 只保留 composition/request adapter。RM-10 至
+RM-15 已依次迁移 `tool_search`、Skills/MCP/Web、Filesystem/Git、Shell、Plan/Task 与五类 Model operations。
 App 的 `read_plan/update_plan/write_plan/task` 没有 concrete executor；Task 的公开模型投影由 Builtin
-`projectSubagentResultV1()` 唯一产生，完整 child journal/continuation 只走私有 Runtime 通道。一致性不变量由
+`projectSubagentResult()` 唯一产生，完整 child journal/continuation 只走私有 Runtime 通道。一致性不变量由
 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`tests/tool-definitions.test.ts`、`tests/tool-parse-error.test.ts`
-与 RMV1 schema parity 测试棘轮守护：Builtin catalog 的 29/20/9、exact schema/revision/executor/effects、model
+与 RM schema parity 测试棘轮守护：Builtin catalog 的 29/20/9、exact schema/revision/executor/effects、model
 ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only dispatch 均机械验证。shell_execute 的
 模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Builtin/Host execution
 path 必须使用 600000ms 默认硬超时，显式正整数可以覆盖；副作用、只读免审和审计 `action.intent` 全部由命令形态
 派生，审批 payload 不接受模型建议授权或 prefix rule。i10 以 `ls`、`pwd`、`rg` 等 policy-proven 语料守护真实
 Approval Policy 的免审命中率；generic Shell Git 不属于该语料，只读 Git 检查必须走 `git_inspect`。
 
-生产静态模型工具面必须直接由 `createBuiltinToolCatalogProjectionV1(snapshot).toolSet` 投影；
+生产静态模型工具面必须直接由 `createBuiltinToolCatalogProjection(snapshot).toolSet` 投影；
 App tool composition 只合并独立 Runtime-issued MCP overlay，不拥有第二 schema/effects table。
 默认开发入口继续暴露完整 projection；production surface 必须逐项按 `network/process/write/shell/skillChild/localStdioMcp`
 独立收窄，并同时检查 Capability Descriptor 的 declared/effective effects。Prepared Runner/Pipeline 在 dispatch 前
@@ -438,12 +438,12 @@ interrupt 只走 `createInterrupt`/Kernel request-user-input seam。Interrupt �
 输入与中断协议输出可以是不同类型，但转换只能发生在 `createInterrupt()`。`ask_user` 不能误入 catalog dispatch；
 Tool Controller 先应用 interaction-mode policy，获准后才可创建 `user_input.requested`。模型只提交 1-3 项的规范
 `questions` 数组，每项提供 2-3 个 `{label, description}` 选项，单问题同样使用数组。Builtin 的
-`normalizeAskUserRequestV1()` 负责生成稳定 ID、将第一项标为推荐并启用客户端自由输入，Controller 不得手工组装中断内容。子 agent 正常执行与
-审批恢复路径都经同一 `builtin:task` executor 和 Builtin `projectSubagentResultV1()`，不存在 Core 或手写的第二份
+`normalizeAskUserRequest()` 负责生成稳定 ID、将第一项标为推荐并启用客户端自由输入，Controller 不得手工组装中断内容。子 agent 正常执行与
+审批恢复路径都经同一 `builtin:task` executor 和 Builtin `projectSubagentResult()`，不存在 Core 或手写的第二份
 task 结果格式。
 
 Prepared production dispatch 在执行前验证 frozen catalog entry 的 parsed arguments、identity、revision、schema、
-availability 与 governance facts，然后只通过 supplied Host `CapabilityExecutionPortV1` 调用对应 Builtin operation；
+availability 与 governance facts，然后只通过 supplied Host `CapabilityExecutionPort` 调用对应 Builtin operation；
 旧 direct dispatch/helper owner 已删除，test-only helper 不得由 production source 导入。filesystem entry 只经 Pipeline
 注入的 dispatcher 取得 observation/preimage 投影，读取 freshness 与 mutation-ready authority 留在 Runtime，permit、
 network mode 和授权来源仍为治理事实。Controller 不得直接 dispatch executor、创建第二 registry/snapshot 或绕过 Host
@@ -451,7 +451,7 @@ port。双路模型文本继续使用 `streams`，单流工具使用 `modelConte
 Runtime-action/coordination execute 输出中的 events 在模型投影之外返回给 Controller 原子提交，展示不由 Builtin contract
 决定。
 
-当 run 携带 sealed `ExecutionBoundaryV1` 时，Builtin catalog entry 还从 capability contract 的
+当 run 携带 sealed `ExecutionBoundary` 时，Builtin catalog entry 还从 capability contract 的
 `protectedPathAccesses()` 取得结构化 `path + operation`。Evaluator 同时匹配未 realpath 的 lexical
 Workspace identity 和 canonical target。按 ADR-0118，文件 read 对任何有效路径 allow，Workspace 内
 write 对所有名称 allow，Workspace 外 write 返回 prompt；只有 execute/process 继续应用 protected name 与
@@ -564,7 +564,7 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 
 ## 工具结果结构化元数据
 
-工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）由 App Tool Pipeline 写入 `State26ToolCallRecordV1`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在 MCP normalization、serialization 和任何模型可见截断前计算 raw digest，并显式传播截断状态；Controller 对模型可见内容计算 model digest，不能把 projected digest 标记成 raw。这些字段用于审计、恢复和摘要输入中的结构化事实；当前模型上下文不执行工具结果投影折叠。行为上不改变权限决策或审批路由。
+工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）由 App Tool Pipeline 写入 Runtime Tool Call record，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在 MCP normalization、serialization 和任何模型可见截断前计算 raw digest，并显式传播截断状态；Controller 对模型可见内容计算 model digest，不能把 projected digest 标记成 raw。这些字段用于审计、恢复和摘要输入中的结构化事实；当前模型上下文不执行工具结果投影折叠。行为上不改变权限决策或审批路由。
 
 ## 子 Agent 阻塞审批请求构造
 
@@ -572,7 +572,7 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 `toolRequestFromCall` parser 获得类型化请求。未知/不可用工具只产生最小失败 request；App adapter 不执行 executor、不提供 schema/effects/authority，
 也不是 production executor fallback。不再手工 `as PendingToolRequest` 强转。失败分类的 `parseFailureCode`
 （`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`）通过 `InvalidToolRequest` 透传到 `ClassifiedFailure`；
-前两类参数错误映射为 `tool_invalid_args`，`unknown_tool`/`tool_unavailable` 映射为 `tool_not_found`，父 Runtime 与 Subagent 使用同一恢复策略。Builtin `projectSubagentResultV1()` 只序列化显式 model allowlist（ok、summary、error、toolCallCount、durationMs 与 planning continuation action）；Controller 在私有事件通道合并 child journal，`toolRecovery`、execution journal、exhausted fingerprints、steps/args 与 continuation 不得进入 parent transcript 或下一次 Provider payload。
+前两类参数错误映射为 `tool_invalid_args`，`unknown_tool`/`tool_unavailable` 映射为 `tool_not_found`，父 Runtime 与 Subagent 使用同一恢复策略。Builtin `projectSubagentResult()` 只序列化显式 model allowlist（ok、summary、error、toolCallCount、durationMs 与 planning continuation action）；Controller 在私有事件通道合并 child journal，`toolRecovery`、execution journal、exhausted fingerprints、steps/args 与 continuation 不得进入 parent transcript 或下一次 Provider payload。
 
 Subagent 的执行上下文由父 Runtime 显式传递：`interactionMode` 使用当前 live state，恢复不复用挂起时的过期模式；Workspace 先 canonicalize，再同源用于模型 `Workspace`/`CWD` 与工具路径解析。文件编辑的 read-before-edit freshness 使用 Runtime-issued child id 作 actor scope，正常 child loop、阻塞工具获批与恢复后续 loop 必须保持同一 id；Parent 或 sibling 的读取不能为当前 child 授权编辑。
 > Test path synchronization: tool pipeline qualification suites now use domain-neutral filenames; the tested acknowledgement, receipt, and terminal ordering remains unchanged.

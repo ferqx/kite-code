@@ -1,13 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type {
-  ToolGovernanceInvocationFactV1,
-  ToolGovernancePolicyFactV1,
-} from '@kite/agent-kernel';
+import type { ToolGovernanceInvocationFact, ToolGovernancePolicyFact } from '@kite/agent-kernel';
 import {
-  classifyToolOutcomeV1,
-  createToolApprovalBindingDigestV1,
-  createToolRecoveryJournalV1,
-  recordRecoveryFailureV1,
+  classifyToolOutcome,
+  createToolApprovalBindingDigest,
+  createToolRecoveryJournal,
+  recordRecoveryFailure,
 } from '@kite/agent-kernel';
 import { getRoleConfig } from '@kite/builtin-runtime';
 import type { AIMessage } from '@kite/builtin-runtime/model';
@@ -30,13 +27,13 @@ import type { SubAgentContinuation } from '#app/bootstrap/runtime/subagent/types
 
 const TEST_RECOVERY_IDENTITY_KEY = '1'.repeat(64);
 
-const failedOutcome = classifyToolOutcomeV1({
+const failedOutcome = classifyToolOutcome({
   status: 'failed',
   failure: classifyFailure('tool_runtime_error', 'redacted'),
   authority: { dispatchState: 'unknown', externalEffects: 'unknown' },
 });
 
-const bindingInvocationFact: ToolGovernanceInvocationFactV1 = {
+const bindingInvocationFact: ToolGovernanceInvocationFact = {
   workspace: '/workspace',
   threadId: 'thread-binding',
   turnId: 'turn-binding',
@@ -61,7 +58,7 @@ const bindingInvocationFact: ToolGovernanceInvocationFactV1 = {
   commandDigest: '8'.repeat(64),
 };
 
-const bindingPolicyFact: ToolGovernancePolicyFactV1 = {
+const bindingPolicyFact: ToolGovernancePolicyFact = {
   operationId: 'builtin:shell_execute',
   capabilityRevision: '1'.repeat(64),
   parserRevision: '3'.repeat(64),
@@ -81,23 +78,23 @@ const bindingPolicyFact: ToolGovernancePolicyFactV1 = {
 
 const exactApprovalBinding = {
   schema: 'kite.app-approval-binding.v1' as const,
-  digest: createToolApprovalBindingDigestV1(bindingInvocationFact, bindingPolicyFact),
+  digest: createToolApprovalBindingDigest(bindingInvocationFact, bindingPolicyFact),
   invocationFact: bindingInvocationFact,
   policyFact: bindingPolicyFact,
   childToolCallId: 'call-2',
 };
 
 function recomputeApprovalBindingDigest(binding: Record<string, unknown>): void {
-  binding.digest = createToolApprovalBindingDigestV1(
-    binding.invocationFact as ToolGovernanceInvocationFactV1,
-    binding.policyFact as ToolGovernancePolicyFactV1,
+  binding.digest = createToolApprovalBindingDigest(
+    binding.invocationFact as ToolGovernanceInvocationFact,
+    binding.policyFact as ToolGovernancePolicyFact,
   );
 }
 
 describe('sub-agent continuation codec', () => {
   test('round-trips JSON-safe continuation snapshots with LangChain message details', () => {
-    const childRecovery = recordRecoveryFailureV1(
-      createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+    const childRecovery = recordRecoveryFailure(
+      createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
       {
         toolCallId: 'child-failure',
         toolName: 'read_file',
@@ -326,7 +323,7 @@ describe('sub-agent continuation codec', () => {
       messages: [humanMessage('continue')],
       toolCallCount: 1,
       steps: [],
-      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };
     const snapshot = serializeSubagentContinuation(continuation, {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
@@ -356,7 +353,7 @@ describe('sub-agent continuation codec', () => {
       messages: [humanMessage('continue')],
       toolCallCount: 1,
       steps: [],
-      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };
     const snapshot = serializeSubagentContinuation(continuation, {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
@@ -371,17 +368,14 @@ describe('sub-agent continuation codec', () => {
   });
 
   test('fails closed when a current continuation forges internally matching failure ids', () => {
-    const journal = recordRecoveryFailureV1(
-      createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
-      {
-        toolCallId: 'child-forged',
-        toolName: 'read_file',
-        invocationFingerprint: 'a'.repeat(64),
-        modelMessageId: 'child-model',
-        outcome: failedOutcome,
-        turnId: 'child-turn',
-      },
-    );
+    const journal = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
+      toolCallId: 'child-forged',
+      toolName: 'read_file',
+      invocationFingerprint: 'a'.repeat(64),
+      modelMessageId: 'child-model',
+      outcome: failedOutcome,
+      turnId: 'child-turn',
+    });
     const continuation: SubAgentContinuation = {
       id: 'sub-current-forged-journal',
       role: getRoleConfig('code'),
@@ -450,7 +444,7 @@ describe('sub-agent continuation codec', () => {
           status: 'awaiting_approval',
         },
       ],
-      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };
     const snapshot = serializeSubagentContinuation(continuation, {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
@@ -492,7 +486,7 @@ describe('sub-agent continuation codec', () => {
       ],
       toolCallCount: 1,
       steps: [],
-      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -550,7 +544,7 @@ describe('sub-agent continuation codec', () => {
       messages: [],
       toolCallCount: 0,
       steps: [],
-      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };
     Reflect.set(continuation, 'messages', [{ type: 'function' }]);
 
@@ -597,7 +591,7 @@ describe('resume-specific safety invariants', () => {
           status: 'awaiting_approval',
         },
       ],
-      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -648,7 +642,7 @@ describe('resume-specific safety invariants', () => {
       ],
       toolCallCount: 0,
       steps: [],
-      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -697,7 +691,7 @@ describe('resume-specific safety invariants', () => {
       steps: [
         { toolName: 'shell_execute', toolArgs: { command: 'ls' }, status: 'awaiting_approval' },
       ],
-      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {

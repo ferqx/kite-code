@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
-  SubagentDelegationGrantV1,
-  SubagentGrantBindingV1,
-  SubagentHandleV1,
-  SubagentProviderFailureCodeV1,
-  SubagentResumeGrantV1,
+  SubagentDelegationGrant,
+  SubagentGrantBinding,
+  SubagentHandle,
+  SubagentProviderFailureCode,
+  SubagentResumeGrant,
 } from '@kite/runtime-spi';
-import { SUBAGENT_PROVIDER_SCHEMA_V1 } from '@kite/runtime-spi';
+import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
 
 const DEFAULT_TTL_MS = 5 * 60_000;
 const MAX_CONSUMED_GRANT_TOMBSTONES = 4_096;
@@ -14,40 +14,40 @@ const DOMAIN = 'kite.subagent-provider-grant.v1\0';
 const HANDLE_DOMAIN = 'kite.subagent-provider-handle.v1\0';
 const CHILD_ID_DOMAIN = 'kite.subagent-provider-child-id.v1\0';
 
-export class SubagentGrantErrorV1 extends Error {
+export class SubagentGrantError extends Error {
   readonly code: Extract<
-    SubagentProviderFailureCodeV1,
+    SubagentProviderFailureCode,
     'invalid_grant' | 'expired_grant' | 'consumed_grant'
   >;
   constructor(
     code: Extract<
-      SubagentProviderFailureCodeV1,
+      SubagentProviderFailureCode,
       'invalid_grant' | 'expired_grant' | 'consumed_grant'
     >,
     message: string,
   ) {
     super(message);
-    this.name = 'SubagentGrantErrorV1';
+    this.name = 'SubagentGrantError';
     this.code = code;
   }
 }
 
-export interface SubagentGrantVerifierV1 {
-  verifyAndConsumeStart(grant: SubagentDelegationGrantV1): Readonly<SubagentDelegationGrantV1>;
-  verifyAndConsumeResume(grant: SubagentResumeGrantV1): Readonly<SubagentResumeGrantV1>;
+export interface SubagentGrantVerifier {
+  verifyAndConsumeStart(grant: SubagentDelegationGrant): Readonly<SubagentDelegationGrant>;
+  verifyAndConsumeResume(grant: SubagentResumeGrant): Readonly<SubagentResumeGrant>;
   issueHandle(
-    grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>,
+    grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>,
     local: {
       readonly handleId: string;
       readonly ownerProcessId: number;
       readonly ownerProcessStartIdentity: string;
       readonly providerInstanceId: string;
     },
-  ): Readonly<SubagentHandleV1>;
-  verifyHandle(handle: SubagentHandleV1): Readonly<SubagentHandleV1>;
+  ): Readonly<SubagentHandle>;
+  verifyHandle(handle: SubagentHandle): Readonly<SubagentHandle>;
 }
 
-export class SubagentGrantAuthorityV1 {
+export class SubagentGrantAuthority {
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #idSource: () => string;
@@ -87,11 +87,11 @@ export class SubagentGrantAuthorityV1 {
     }
   }
 
-  issueStart(binding: SubagentGrantBindingV1): Readonly<SubagentDelegationGrantV1> {
+  issueStart(binding: SubagentGrantBinding): Readonly<SubagentDelegationGrant> {
     exactKeys(binding, BINDING_KEYS);
     const timing = this.#timing();
     const unsigned = {
-      schema: SUBAGENT_PROVIDER_SCHEMA_V1,
+      schema: SUBAGENT_PROVIDER_SCHEMA_,
       purpose: 'start' as const,
       grantId: required(this.#idSource(), 'grantId'),
       ...validateBinding(binding),
@@ -104,7 +104,7 @@ export class SubagentGrantAuthorityV1 {
     readonly parentModelInvocationId: string;
     readonly parentToolCallId: string;
     readonly parentAttempt: number;
-    readonly role: SubagentGrantBindingV1['role'];
+    readonly role: SubagentGrantBinding['role'];
   }): string {
     exactKeys(input, ['parentModelInvocationId', 'parentToolCallId', 'parentAttempt', 'role']);
     required(input.parentModelInvocationId, 'parentModelInvocationId');
@@ -118,18 +118,18 @@ export class SubagentGrantAuthorityV1 {
   }
 
   issueResume(
-    input: SubagentGrantBindingV1 & {
+    input: SubagentGrantBinding & {
       continuationId: string;
       continuationDigest: string;
       blockedToolCallId: string;
       blockedRuntimeToolCallId: string;
       resumeAttempt: number;
     },
-  ): Readonly<SubagentResumeGrantV1> {
+  ): Readonly<SubagentResumeGrant> {
     exactKeys(input, [...BINDING_KEYS, ...RESUME_KEYS]);
     const timing = this.#timing();
     const unsigned = {
-      schema: SUBAGENT_PROVIDER_SCHEMA_V1,
+      schema: SUBAGENT_PROVIDER_SCHEMA_,
       purpose: 'resume' as const,
       grantId: required(this.#idSource(), 'grantId'),
       ...validateBinding(input),
@@ -146,12 +146,12 @@ export class SubagentGrantAuthorityV1 {
     return freeze({ ...unsigned, seal: this.#seal(unsigned) });
   }
 
-  verifier(): SubagentGrantVerifierV1 {
+  verifier(): SubagentGrantVerifier {
     return Object.freeze({
-      verifyAndConsumeStart: (grant: SubagentDelegationGrantV1) => this.#verify(grant, 'start'),
-      verifyAndConsumeResume: (grant: SubagentResumeGrantV1) => this.#verify(grant, 'resume'),
+      verifyAndConsumeStart: (grant: SubagentDelegationGrant) => this.#verify(grant, 'start'),
+      verifyAndConsumeResume: (grant: SubagentResumeGrant) => this.#verify(grant, 'resume'),
       issueHandle: (
-        grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>,
+        grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>,
         local: {
           readonly handleId: string;
           readonly ownerProcessId: number;
@@ -159,25 +159,25 @@ export class SubagentGrantAuthorityV1 {
           readonly providerInstanceId: string;
         },
       ) => this.#issueHandle(grant, local),
-      verifyHandle: (handle: SubagentHandleV1) => this.#verifyHandle(handle),
+      verifyHandle: (handle: SubagentHandle) => this.#verifyHandle(handle),
     });
   }
 
   #issueHandle(
-    grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>,
+    grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>,
     local: {
       readonly handleId: string;
       readonly ownerProcessId: number;
       readonly ownerProcessStartIdentity: string;
       readonly providerInstanceId: string;
     },
-  ): Readonly<SubagentHandleV1> {
+  ): Readonly<SubagentHandle> {
     required(local.handleId, 'handleId');
     positive(local.ownerProcessId, 'ownerProcessId');
     required(local.ownerProcessStartIdentity, 'ownerProcessStartIdentity');
     required(local.providerInstanceId, 'providerInstanceId');
     const unsigned = {
-      schema: SUBAGENT_PROVIDER_SCHEMA_V1,
+      schema: SUBAGENT_PROVIDER_SCHEMA_,
       handleId: local.handleId,
       grantId: grant.grantId,
       purpose: grant.purpose,
@@ -201,7 +201,7 @@ export class SubagentGrantAuthorityV1 {
     return freeze({ ...unsigned, integrityIdentifier: this.#handleSeal(unsigned) });
   }
 
-  #verifyHandle(handle: SubagentHandleV1): Readonly<SubagentHandleV1> {
+  #verifyHandle(handle: SubagentHandle): Readonly<SubagentHandle> {
     try {
       const copy = structuredClone(handle);
       exactKeys(copy, HANDLE_KEYS);
@@ -239,7 +239,7 @@ export class SubagentGrantAuthorityV1 {
       }
       return freeze(copy);
     } catch {
-      throw new SubagentGrantErrorV1('invalid_grant', 'Subagent handle identity is invalid.');
+      throw new SubagentGrantError('invalid_grant', 'Subagent handle identity is invalid.');
     }
   }
 
@@ -260,7 +260,7 @@ export class SubagentGrantAuthorityV1 {
     return `sha256:${createHash('sha256').update(DOMAIN).update(canonical(value)).digest('hex')}`;
   }
 
-  #verify<T extends SubagentDelegationGrantV1 | SubagentResumeGrantV1>(
+  #verify<T extends SubagentDelegationGrant | SubagentResumeGrant>(
     grant: T,
     purpose: T['purpose'],
   ): Readonly<T> {
@@ -269,7 +269,7 @@ export class SubagentGrantAuthorityV1 {
       this.#pruneConsumed(now);
       const copy = structuredClone(grant);
       exactKeys(copy, purpose === 'start' ? START_GRANT_KEYS : RESUME_GRANT_KEYS);
-      if (copy.schema !== SUBAGENT_PROVIDER_SCHEMA_V1 || copy.purpose !== purpose) invalid();
+      if (copy.schema !== SUBAGENT_PROVIDER_SCHEMA_ || copy.purpose !== purpose) invalid();
       validateBinding(copy);
       const { seal, ...unsigned } = copy;
       if (!safeEqual(seal, this.#seal(unsigned))) invalid();
@@ -282,17 +282,17 @@ export class SubagentGrantAuthorityV1 {
         invalid();
       }
       if (copy.issuedAtMs > now || copy.expiresAtMs <= now) {
-        throw new SubagentGrantErrorV1(
+        throw new SubagentGrantError(
           'expired_grant',
           'Subagent grant expired before lifecycle start.',
         );
       }
       if (copy.expiresAtMs - copy.issuedAtMs > this.#ttlMs) invalid();
       if (this.#consumed.has(copy.grantId)) {
-        throw new SubagentGrantErrorV1('consumed_grant', 'Subagent grant was already consumed.');
+        throw new SubagentGrantError('consumed_grant', 'Subagent grant was already consumed.');
       }
       if (purpose === 'resume') {
-        const resume = copy as SubagentResumeGrantV1;
+        const resume = copy as SubagentResumeGrant;
         required(resume.continuationId, 'continuationId');
         canonicalDigest(resume.continuationDigest, 'continuationDigest');
         required(resume.blockedToolCallId, 'blockedToolCallId');
@@ -302,7 +302,7 @@ export class SubagentGrantAuthorityV1 {
       if (this.#consumed.size >= this.#maxConsumedGrantTombstones) {
         // Dropping a still-valid tombstone would make a replayable grant look
         // fresh.  Refuse the new lifecycle instead of weakening single-use.
-        throw new SubagentGrantErrorV1(
+        throw new SubagentGrantError(
           'invalid_grant',
           'Subagent consumed-grant tombstone capacity is exhausted.',
         );
@@ -310,8 +310,8 @@ export class SubagentGrantAuthorityV1 {
       this.#consumed.set(copy.grantId, copy.expiresAtMs);
       return freeze(copy);
     } catch (error) {
-      if (error instanceof SubagentGrantErrorV1) throw error;
-      throw new SubagentGrantErrorV1('invalid_grant', 'Subagent grant identity is invalid.');
+      if (error instanceof SubagentGrantError) throw error;
+      throw new SubagentGrantError('invalid_grant', 'Subagent grant identity is invalid.');
     }
   }
 
@@ -329,7 +329,7 @@ export class SubagentGrantAuthorityV1 {
   }
 }
 
-function validateBinding<T extends SubagentGrantBindingV1>(value: T): T {
+function validateBinding<T extends SubagentGrantBinding>(value: T): T {
   required(value.parentInvocationId, 'parentInvocationId');
   required(value.parentToolCallId, 'parentToolCallId');
   positive(value.parentAttempt, 'parentAttempt');
@@ -476,7 +476,7 @@ const HANDLE_KEYS = [
   'integrityIdentifier',
 ] as const;
 
-function validateTaskArtifact(value: SubagentGrantBindingV1['taskArtifact']): void {
+function validateTaskArtifact(value: SubagentGrantBinding['taskArtifact']): void {
   exactKeys(value, ['artifactId', 'kind', 'integrityIdentifier', 'byteLength']);
   if (!/^pa_[0-9a-f]{64}$/u.test(value.artifactId)) invalid();
   if (value.kind !== 'subagent_task') invalid();

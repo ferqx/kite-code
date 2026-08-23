@@ -24,14 +24,11 @@ import type {
   McpServerKey,
   McpToolControlState,
 } from './control-types';
-import {
-  type BuiltinCredentialBrokerV1,
-  createBuiltinCredentialBrokerV1,
-} from './credential-broker';
+import { type BuiltinCredentialBroker, createBuiltinCredentialBroker } from './credential-broker';
 import type { McpCredentialStore } from './credential-store';
 import type { McpDiagnostic } from './diagnostics';
 import { McpConnectionManager, type McpConnectionManagerOptions } from './manager';
-import { canonicalWorkspaceKeyV1 } from './mechanism-ports';
+import { canonicalWorkspaceKey } from './mechanism-ports';
 import { revokeMcpOAuthToken } from './oauth-revocation';
 import { McpProviderError, providerErrorFromDiagnostic } from './provider-errors';
 import type {
@@ -47,7 +44,7 @@ import {
   hasConfiguredMcpToolPolicy,
   resolveMcpToolPolicy,
 } from './tool-policy';
-import type { McpTransportInvocationBindingV1 } from './transport-boundary';
+import type { McpTransportInvocationBinding } from './transport-boundary';
 import type { McpServerConfig, McpServerState } from './types';
 
 const EMPTY_SNAPSHOT: McpControlSnapshot = Object.freeze({
@@ -96,14 +93,14 @@ export interface McpConnectionManagerControlPlane {
   ): import('./capability-domain').CapabilityDescriptor | undefined;
   getCapabilityRoute?(
     capabilityId: string,
-  ): import('./argument-inspection').McpCapabilityRouteV1 | undefined;
+  ): import('./argument-inspection').McpCapabilityRoute | undefined;
   assertTransportBoundaryWorkspace?(workspace: string): void;
   callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;
   readResource(
     serverName: string,
     uri: string,
     signal?: AbortSignal,
-    transportBoundary?: McpTransportInvocationBindingV1,
+    transportBoundary?: McpTransportInvocationBinding,
   ): Promise<string>;
   beginOAuth?(
     name: string,
@@ -119,7 +116,7 @@ export interface McpSupervisorOptions {
   manager?: McpConnectionManagerControlPlane;
   connectionManagerOptions?: Omit<McpConnectionManagerOptions, 'credentialBroker'>;
   /** One Builtin credential authority shared by Manager and AuthCoordinator. */
-  credentialBroker?: BuiltinCredentialBrokerV1;
+  credentialBroker?: BuiltinCredentialBroker;
   /** Test-only mechanism injected into the sole Supervisor-owned broker. */
   credentialStore?: McpCredentialStore;
   repository?: McpConfigRepository;
@@ -132,7 +129,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private readonly manager: McpConnectionManagerControlPlane;
   private readonly repository: McpConfigRepository;
   private readonly authCoordinator: McpAuthCoordinator;
-  private readonly credentialBroker: BuiltinCredentialBrokerV1;
+  private readonly credentialBroker: BuiltinCredentialBroker;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => number;
   private readonly listeners = new Set<() => void>();
@@ -151,7 +148,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   constructor(options: McpSupervisorOptions) {
     const credentialBroker =
       options.credentialBroker ??
-      createBuiltinCredentialBrokerV1({
+      createBuiltinCredentialBroker({
         store: options.credentialStore,
       });
     this.credentialBroker = credentialBroker;
@@ -555,7 +552,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     server: string,
     uri: string,
     signal?: AbortSignal,
-    transportBoundary?: McpTransportInvocationBindingV1,
+    transportBoundary?: McpTransportInvocationBinding,
   ): Promise<string> {
     this.assertProviderAvailable(server);
     return this.manager.readResource(server, uri, signal, transportBoundary);
@@ -729,7 +726,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     if (!this.manager.beginOAuth || !this.manager.finishOAuth || !this.manager.clearOAuth) return;
     let workspaceKey: string;
     try {
-      workspaceKey = canonicalWorkspaceKeyV1(catalog.workspace);
+      workspaceKey = canonicalWorkspaceKey(catalog.workspace);
     } catch {
       return;
     }
@@ -846,7 +843,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   ): Promise<McpServerConfig> {
     if (config.auth?.type !== 'credential') return config;
     const credentialKey = {
-      workspaceKey: canonicalWorkspaceKeyV1(entry.source.workspace),
+      workspaceKey: canonicalWorkspaceKey(entry.source.workspace),
       source: entry.source.kind,
       server: entry.name,
       profile: config.auth.credentialRef,

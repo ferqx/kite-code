@@ -1,21 +1,21 @@
 import type {
-  ObservabilityFailureFactV1,
-  ObservabilityFailureKindV1,
-  ObservabilityMetricDraftV1,
-  ObservabilityModelFactV1,
-  ObservabilityReceiptFactV1,
-  ObservabilityReleaseFactV1,
-  ObservabilityResourceFactV1,
-  ObservabilityRuntimeFactV1,
-  ObservabilityTaskStageFactV1,
-  ObservabilityToolStatusV1,
+  ObservabilityFailureFact,
+  ObservabilityFailureKind,
+  ObservabilityMetricDraft,
+  ObservabilityModelFact,
+  ObservabilityReceiptFact,
+  ObservabilityReleaseFact,
+  ObservabilityResourceFact,
+  ObservabilityRuntimeFact,
+  ObservabilityTaskStageFact,
+  ObservabilityToolStatus,
 } from '@kite/runtime-contract';
-import { OBSERVABILITY_METRIC_DRAFT_SCHEMA_V1 } from '@kite/runtime-contract';
+import { OBSERVABILITY_METRIC_DRAFT_SCHEMA_ } from '@kite/runtime-contract';
 
 const SAFE_ALIAS_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,47}$/;
 
 /** Only release-controlled aliases can ever be emitted. Arbitrary names collapse. */
-export class LowCardinalityAliasMapperV1 {
+export class LowCardinalityAliasMapper {
   readonly #allowed: ReadonlySet<string>;
   readonly #retained: ReadonlySet<string>;
 
@@ -34,40 +34,40 @@ export class LowCardinalityAliasMapperV1 {
   }
 }
 
-export interface BuiltinObservabilityProjectorV1 {
-  mapRuntimeFact(fact: ObservabilityRuntimeFactV1): readonly ObservabilityMetricDraftV1[];
+export interface BuiltinObservabilityProjector {
+  mapRuntimeFact(fact: ObservabilityRuntimeFact): readonly ObservabilityMetricDraft[];
   mapFailure(
-    failure: ObservabilityFailureFactV1,
+    failure: ObservabilityFailureFact,
     observedAt: string,
-  ): readonly ObservabilityMetricDraftV1[];
+  ): readonly ObservabilityMetricDraft[];
   mapExecutionReceipt(
-    receipt: ObservabilityReceiptFactV1,
+    receipt: ObservabilityReceiptFact,
     observedAt: string,
-  ): readonly ObservabilityMetricDraftV1[];
-  mapModelObservation(input: ObservabilityModelFactV1): readonly ObservabilityMetricDraftV1[];
-  mapAppResource(input: ObservabilityResourceFactV1): readonly ObservabilityMetricDraftV1[];
-  mapReleaseProjection(input: ObservabilityReleaseFactV1): readonly ObservabilityMetricDraftV1[];
-  mapAgentTaskStage(input: ObservabilityTaskStageFactV1): readonly ObservabilityMetricDraftV1[];
+  ): readonly ObservabilityMetricDraft[];
+  mapModelObservation(input: ObservabilityModelFact): readonly ObservabilityMetricDraft[];
+  mapAppResource(input: ObservabilityResourceFact): readonly ObservabilityMetricDraft[];
+  mapReleaseProjection(input: ObservabilityReleaseFact): readonly ObservabilityMetricDraft[];
+  mapAgentTaskStage(input: ObservabilityTaskStageFact): readonly ObservabilityMetricDraft[];
 }
 
-export function createBuiltinObservabilityProjectorV1(
+export function createBuiltinObservabilityProjector(
   input: {
     releaseRouteAliases?: readonly string[];
     modelVisibleCapabilityAliases?: readonly string[];
     routeCardinalityLimit?: number;
     capabilityCardinalityLimit?: number;
   } = {},
-): BuiltinObservabilityProjectorV1 {
-  const routes = new LowCardinalityAliasMapperV1(
+): BuiltinObservabilityProjector {
+  const routes = new LowCardinalityAliasMapper(
     input.releaseRouteAliases ?? [],
     input.routeCardinalityLimit ?? 16,
   );
-  const capabilities = new LowCardinalityAliasMapperV1(
+  const capabilities = new LowCardinalityAliasMapper(
     input.modelVisibleCapabilityAliases ?? [],
     input.capabilityCardinalityLimit ?? 32,
   );
 
-  const projector: BuiltinObservabilityProjectorV1 = {
+  const projector: BuiltinObservabilityProjector = {
     mapRuntimeFact(fact) {
       switch (fact.type) {
         case 'turn.completed':
@@ -227,7 +227,7 @@ export function createBuiltinObservabilityProjectorV1(
 
     mapModelObservation(input) {
       const route = routes.map(input.routeAlias);
-      const samples: ObservabilityMetricDraftV1[] = [
+      const samples: ObservabilityMetricDraft[] = [
         draft('model_request_total', input.observedAt, { outcome: input.outcome, route }),
       ];
       if (input.durationMs !== undefined) {
@@ -264,7 +264,7 @@ export function createBuiltinObservabilityProjectorV1(
     },
 
     mapAppResource(input) {
-      const samples: ObservabilityMetricDraftV1[] = [];
+      const samples: ObservabilityMetricDraft[] = [];
       const gauge = (
         name: 'resource_active_invocations' | 'resource_reserved_invocations',
         value: number | undefined,
@@ -391,11 +391,11 @@ export function createBuiltinObservabilityProjectorV1(
 
 function toolSamples(
   observedAt: string,
-  outcome: ObservabilityToolStatusV1,
+  outcome: ObservabilityToolStatus,
   capability: string,
   durationMs?: number,
-  failureKind?: ObservabilityFailureKindV1,
-): readonly ObservabilityMetricDraftV1[] {
+  failureKind?: ObservabilityFailureKind,
+): readonly ObservabilityMetricDraft[] {
   return [
     draft('tool_total', observedAt, { outcome, capability }),
     ...(durationMs === undefined
@@ -406,9 +406,9 @@ function toolSamples(
 }
 
 function createFailureDrafts(
-  failureKind: ObservabilityFailureKindV1,
+  failureKind: ObservabilityFailureKind,
   observedAt: string,
-): readonly ObservabilityMetricDraftV1[] {
+): readonly ObservabilityMetricDraft[] {
   switch (failureKind) {
     case 'process_limit_exceeded':
       return [draft('process_tree_limit_termination_total', observedAt, { outcome: 'terminated' })];
@@ -425,7 +425,7 @@ function compactionSamples(
   observedAt: string,
   outcome: 'completed' | 'failed',
   durationMs?: number,
-): readonly ObservabilityMetricDraftV1[] {
+): readonly ObservabilityMetricDraft[] {
   return [
     draft('compaction_total', observedAt, {
       outcome,
@@ -442,9 +442,9 @@ function draft(
   observedAt: string,
   attributes?: Readonly<Record<string, string>>,
   value?: number,
-): ObservabilityMetricDraftV1 {
+): ObservabilityMetricDraft {
   return Object.freeze({
-    schema: OBSERVABILITY_METRIC_DRAFT_SCHEMA_V1,
+    schema: OBSERVABILITY_METRIC_DRAFT_SCHEMA_,
     name,
     ...(value === undefined ? {} : { value }),
     observedAt,

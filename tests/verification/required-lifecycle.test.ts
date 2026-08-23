@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { resolveKernelVerificationModeV1 as resolveVerificationMode } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
-import type { VerificationSpecV1 } from '@kite/runtime-spi';
+import { resolveKernelVerificationMode as resolveVerificationMode } from '@kite/agent-kernel';
+import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import type { VerificationSpec } from '@kite/runtime-spi';
 import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeVerificationEffect } from '../../apps/kite/src/bootstrap/runtime/verification-effect';
-import { projectCompletionSemanticsV1 } from '../../apps/kite/src/release/capability-status';
+import { projectCompletionSemantics } from '../../apps/kite/src/release/capability-status';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 function initialState(): RuntimeState {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread',
     userId: 'user',
@@ -21,10 +21,10 @@ function initialState(): RuntimeState {
 }
 
 function spec(input: {
-  checks: VerificationSpecV1['checks'];
+  checks: VerificationSpec['checks'];
   maxAttempts?: number;
-  compensation?: VerificationSpecV1['compensation'];
-}): VerificationSpecV1 {
+  compensation?: VerificationSpec['compensation'];
+}): VerificationSpec {
   return {
     schemaVersion: 1,
     verificationId: 'verification-1',
@@ -36,7 +36,7 @@ function spec(input: {
 }
 
 function request(
-  value: VerificationSpecV1,
+  value: VerificationSpec,
   mode: 'not_required' | 'best_effort' | 'required' = 'required',
 ): RuntimeEvent {
   return {
@@ -82,7 +82,7 @@ describe('required Verification lifecycle conformance', () => {
       ],
     });
     let state = reduceRuntimeState(initialState(), request(value));
-    const rolledBack = projectCompletionSemanticsV1({
+    const rolledBack = projectCompletionSemantics({
       state,
       verificationFeatureEnabled: false,
     });
@@ -216,7 +216,7 @@ describe('required Verification lifecycle conformance', () => {
     });
     expect(decideNextEffect(state).type).toBe('request_verification_decision');
     expect(
-      projectCompletionSemanticsV1({ state, verificationFeatureEnabled: false }).verification,
+      projectCompletionSemantics({ state, verificationFeatureEnabled: false }).verification,
     ).toMatchObject({
       newAdmission: 'disabled',
       requiredFactsRetained: true,

@@ -42,13 +42,13 @@
 
 工具描述是 ACI（Agent-Computer Interaction）一等 UX，投资程度应与 HCI 等同。每份工具描述必须是可验证的契约，而不仅仅是功能说明。
 
-当前单一事实源是已冻结的 `CapabilityRegistrySnapshotV1`：
-`createBuiltinToolCatalogProjectionV1()` 从同一 SPI snapshot 投影模型 ToolSet、parser/canonicalizer、
+当前单一事实源是已冻结的 `CapabilityRegistrySnapshot`：
+`createBuiltinToolCatalogProjection()` 从同一 SPI snapshot 投影模型 ToolSet、parser/canonicalizer、
 availability、effects、traits、descriptor 与 operation/executor revision。包测试机械断言该 projection 的 29
 个 operation 中恰有 20 个 `visibility: model` 和 9 个 `visibility: internal`，并逐项比较 schema、revision、
 executor revision 与 effects；这些数字不是手工文档事实。App Tool Pipeline 与 Tool Controller 只消费 projection，不能重新声明
 schema、parser、effects 或 executor owner。旧 Core Tool Runner 已物理删除；Kernel 只拥有 governance/admission decision。
-源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，RMV1-16 final
+源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，RM-16 final
 manifest/docs/journey/fault/soak Gate 已完成；本节 owner transfer 是当前生产事实。
 
 机械证据来自 Builtin/SPI package tests 与 Runtime manifest checks；schema parity 与 App/Host 行为测试另行执行，不能用手工数字替代。
@@ -57,12 +57,12 @@ manifest/docs/journey/fault/soak Gate 已完成；本节 owner transfer 是当�
 
 Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen`、`returns`、`constraints`、`recovery` 五类独立事实。`returns.format` 必须是模型实际看到的 `text | json | interrupt`，其 description 和 fields 必须与 Builtin operation result projection 或 Kernel-owned user-input normalization 一致；禁止为了统一外观虚构 `{ok, content, error}`。
 
-20 个 model-visible Builtin catalog entry 已全部绑定规范结构化事实。旧四段式 `LegacyToolContractSection` 只保留给外部/测试 registry 的读取兼容；`normalizeToolContract()` 是唯一兼容层，不得把 legacy 输入重新写入 Builtin，也不得维护 legacy/V2 两套互相独立的工具事实。
+20 个 model-visible Builtin catalog entry 已全部绑定规范结构化事实。旧四段式 `LegacyToolContractSection` 只保留给外部/测试 registry 的读取兼容；`toolContractSection()` 是唯一兼容层，不得把 legacy 输入重新写入 Builtin，也不得维护 legacy/V2 两套互相独立的工具事实。
 
 ### 契约存放与绑定
 
 - `BUILTIN_TOOL_CONTRACTS`（`packages/builtin-runtime/src/tool-contracts.ts`）是当前 20 个 model-visible builtin 的规范事实表；各 Builtin definition 直接或通过兼容命名常量绑定其中同一对象，Skill runtime 三工具同样不得另写契约。
-- `buildDescription(contract, version)` 从同一组独立事实生成 legacy 或 V2 文本。被拒绝的 candidate 文案及其恒等 production profile 已移除；后续文案实验必须在 evaluator 内显式注入，不得把无行为差异的 profile 贯穿 Builtin contract、SPI registry 与生产上下文。ADR-0098 默认启用已发布 V2，legacy 可用 `promptContractV2=false` 回滚。V2 逐项投影 selection、参数约束、真实返回格式与恢复语义，不再靠截取旧文案第一句保存关键规则。
+- `buildDescription(contract, version)` 从同一组独立事实生成 legacy 或 V2 文本。被拒绝的 candidate 文案及其恒等 production profile 已移除；后续文案实验必须在 evaluator 内显式注入，不得把无行为差异的 profile 贯穿 Builtin contract、SPI registry 与生产上下文。ADR-0098 默认启用已发布 V2，legacy 可用 `promptContract=false` 回滚。V2 逐项投影 selection、参数约束、真实返回格式与恢复语义，不再靠截取旧文案第一句保存关键规则。
 - App composition bridge 只能投影 Builtin catalog 与独立 dynamic-MCP overlay，不得硬编码另一份 description；它不是 schema authority。
 - 任何失败指导投影都只能读取 Builtin contract 的规范化 `recovery` 结果；禁止维护按工具名分支的第二份 recovery guidance。test-only 兼容体也必须遵守同一规则。
 - V2 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
@@ -77,8 +77,8 @@ Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen
 ### Builtin catalog 迁移边界（ADR-0043）
 
 工具契约由 `packages/builtin-runtime/src/tool-contracts.ts` 与 Builtin operation definition 绑定，并由
-`createRuntimeModuleRegistryV1(createBuiltinRuntimeModules()).snapshot()` →
-`createBuiltinToolCatalogProjectionV1()` 投影；新增 builtin 必须先在 Builtin definition 注册完整结构化事实，再进入
+`createRuntimeModuleRegistry(createBuiltinRuntimeModules()).snapshot()` →
+`createBuiltinToolCatalogProjection()` 投影；新增 builtin 必须先在 Builtin definition 注册完整结构化事实，再进入
 SPI registry。模型 surface、Runner recovery guidance 与 capability descriptor 必须来自同一 frozen projection。
 `apps/kite/src/bootstrap/runtime/tool-pipeline-composition.ts` 只是 App composition bridge，不能成为第二 authority。
 确定性由 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`tests/tool-definitions.test.ts` 与 schema-parity 测试守护。
@@ -90,7 +90,7 @@ planning/building 的合法 availability context 中验证 Skill catalog、activ
 结果互相比较。dynamic MCP 仍是独立的 binding/descriptor route，不计入 Builtin 20 个 model tools。
 
 20 个 model-visible entry 还必须逐一执行真实 Builtin projection/result path；`ask_user` 必须验证
-`normalizeAskUserRequestV1()` 的 Kernel-owned interrupt 输入路径并保持 catalog dispatch 零调用，再经过 Controller 的 canonical `tool.finished` 投影、Runtime reducer 与 provider context
+`normalizeAskUserRequest()` 的 Kernel-owned interrupt 输入路径并保持 catalog dispatch 零调用，再经过 Controller 的 canonical `tool.finished` 投影、Runtime reducer 与 provider context
 projection。`returns.format=json` 的真实顶层 key 必须全部位于 contract fields；`text` 不得虚构
 `ok/stdout/stderr/resultMeta` 字段。Builtin classifier advice 必须随统一执行结果进入同一个 canonical terminal，
 不能在 Runner 重建或丢失。父 Runtime reducer 与 Subagent provider context 必须调用唯一的 Runtime-owned
@@ -120,7 +120,7 @@ Builtin result projection 的完整文本（含 marker）都必须保持在 64 K
 
 `ask_user` 的模型参数只有一种规范形态：顶层必须且只能使用 `questions` 数组，单问题也是长度为 1 的数组。每次调用包含 1-3 个问题，每个问题包含 `question` 和 2-3 个 `{label, description, recommended}` 选项，且必须有且仅有一个选项设置 `recommended: true`，其余选项设置为 `recommended: false`。模型不得提交顶层 `question`/`options`、`recommended` 或 `allow_free_text`，也不得显式添加 `Other` 选项。
 
-Builtin catalog 的输入 schema/parser 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`normalizeAskUserRequestV1()` 在 schema 校验后生成稳定的问题/选项 ID，并根据选项上的 `recommended: true` 派生内部推荐项，再为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
+Builtin catalog 的输入 schema/parser 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`normalizeAskUserRequest()` 在 schema 校验后生成稳定的问题/选项 ID，并根据选项上的 `recommended: true` 派生内部推荐项，再为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
 
 `ask_user` 只属于主 Agent 的模型工具面。`task` 必须在派发前携带已澄清的自包含指令；所有 child role 都从工具声明中移除 `ask_user`。若仍缺少必要前提，child 必须在最终结果中报告给 parent，不得打开或转交用户交互。Full/Plan 模式允许提问仅指主 Agent 可在委派前调用 `ask_user`。
 

@@ -15,13 +15,9 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { PlanArtifactRef, PlanDocument } from '@kite/runtime-contract';
-import { userKiteCodeDirV1 } from '../model/artifact-paths';
+import { userKiteCodeDir } from '../model/artifact-paths';
 import { planArtifactPath, planArtifactRoot } from './plan-artifact-paths';
-import {
-  hasValidPlanRevisionMetadata,
-  isPlanDocumentV2,
-  isPlanStepMetadata,
-} from './plan-document';
+import { hasValidPlanRevisionMetadata, isPlanDocument, isPlanStepMetadata } from './plan-document';
 import { computePlanStructuralDigest } from './plan-hashes';
 
 const ARTIFACT_FORMAT_VERSION = 1;
@@ -86,11 +82,11 @@ function assertSafeVersion(version: number): void {
   }
 }
 
-function assertPlanDocumentV2(
+function assertPlanDocument(
   plan: PlanDocument,
   code: 'invalid_reference' | 'artifact_corrupt',
 ): void {
-  if (!isPlanDocumentV2(plan)) {
+  if (!isPlanDocument(plan)) {
     throw new PlanArtifactError('PlanDocument V2 schema validation failed.', code);
   }
 }
@@ -100,7 +96,7 @@ function artifactId(planId: string, version: number): string {
 }
 
 function toRelativePath(target: string): string {
-  return relative(userKiteCodeDirV1(), target).replaceAll('\\', '/');
+  return relative(userKiteCodeDir(), target).replaceAll('\\', '/');
 }
 
 function assertInsideRoot(target: string): void {
@@ -416,7 +412,7 @@ function parse(
       : { supersedesPlanVersion: metadata.supersedesPlanVersion }),
     ...(metadata.replanReason === undefined ? {} : { replanReason: metadata.replanReason }),
   };
-  assertPlanDocumentV2(plan, 'artifact_corrupt');
+  assertPlanDocument(plan, 'artifact_corrupt');
   if (computePlanStructuralDigest(plan) !== plan.structuralDigest) {
     throw new PlanArtifactError(
       'Plan Artifact content does not match its structural digest.',
@@ -560,7 +556,7 @@ export class PlanArtifactStore {
     assertSafeSegment(taskId, 'taskId');
     assertSafeSegment(plan.planId, 'planId');
     assertSafeVersion(plan.version);
-    assertPlanDocumentV2(plan, 'invalid_reference');
+    assertPlanDocument(plan, 'invalid_reference');
     assertInsideRoot(planArtifactPath(taskId, plan.version));
 
     const target = planArtifactPath(taskId, plan.version);

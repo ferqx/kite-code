@@ -1,5 +1,5 @@
 import { findSafeCompactionBoundary } from './compaction';
-import type { ModelRuntimeConfigV1 } from './config';
+import type { ModelRuntimeConfig } from './config';
 import type { ContextPreflight, ContextTokenEstimate } from './context-budget';
 import { preflightModelContext } from './context-budget';
 import {
@@ -8,10 +8,10 @@ import {
   type ContextProjectionEnvironment,
 } from './context-projection';
 import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
-import type { BuiltinRuntimeStateViewV1 } from './runtime-view';
+import type { BuiltinRuntimeStateView } from './runtime-view';
 import { countTokens } from './token-counter';
 
-export interface ContextCompactionRequestedEventV1 {
+export interface ContextCompactionRequestedEvent {
   type: 'context.compaction_requested';
   compactionId: string;
   reason: 'manual';
@@ -23,7 +23,7 @@ export interface ContextCompactionRequestedEventV1 {
 }
 
 // Legacy callers without a live projection environment retain a conservative fallback.
-function fallbackEstimate(state: Readonly<BuiltinRuntimeStateViewV1>): ContextTokenEstimate {
+function fallbackEstimate(state: Readonly<BuiltinRuntimeStateView>): ContextTokenEstimate {
   const checkpoint = state.context.activeCheckpoint;
   // When a checkpoint is active, only count transcript messages past the checkpoint;
   // pre-checkpoint messages are covered by the summary and must not be double-counted.
@@ -49,8 +49,8 @@ function fallbackEstimate(state: Readonly<BuiltinRuntimeStateViewV1>): ContextTo
 }
 
 export function currentContextPreflight(
-  state: Readonly<BuiltinRuntimeStateViewV1>,
-  config: ModelRuntimeConfigV1,
+  state: Readonly<BuiltinRuntimeStateView>,
+  config: ModelRuntimeConfig,
   capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
   environment?: ContextProjectionEnvironment,
 ) {
@@ -81,12 +81,12 @@ export interface ManualCompactionStatus {
   coveredThroughMessageId?: string;
   inputTokensBefore?: number;
   inputTokensAfter?: number;
-  lastFailure?: BuiltinRuntimeStateViewV1['context']['lastFailure'];
+  lastFailure?: BuiltinRuntimeStateView['context']['lastFailure'];
 }
 
 export function inspectManualContextCompaction(
-  state: Readonly<BuiltinRuntimeStateViewV1>,
-  config: ModelRuntimeConfigV1,
+  state: Readonly<BuiltinRuntimeStateView>,
+  config: ModelRuntimeConfig,
   capabilities?: ResolvedModelCapabilities,
   environment?: ContextProjectionEnvironment,
 ): ManualCompactionStatus {
@@ -110,13 +110,13 @@ export function inspectManualContextCompaction(
 }
 
 export function manualContextCompactionEvent(input: {
-  state: Readonly<BuiltinRuntimeStateViewV1>;
-  config: ModelRuntimeConfigV1;
+  state: Readonly<BuiltinRuntimeStateView>;
+  config: ModelRuntimeConfig;
   /** Optional user-supplied instructions for the summary model. */
   customInstructions?: string;
   capabilities?: ResolvedModelCapabilities;
   projectionEnvironment?: ContextProjectionEnvironment;
-}): ContextCompactionRequestedEventV1 | null {
+}): ContextCompactionRequestedEvent | null {
   if (input.state.context.pendingCompaction) return null;
   return {
     type: 'context.compaction_requested',
@@ -140,8 +140,8 @@ export function manualContextCompactionEvent(input: {
  * Returns a formatted string suitable for TUI display.
  */
 export function buildContextStatusReport(
-  state: Readonly<BuiltinRuntimeStateViewV1>,
-  config: ModelRuntimeConfigV1,
+  state: Readonly<BuiltinRuntimeStateView>,
+  config: ModelRuntimeConfig,
   environment?: ContextProjectionEnvironment,
   capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
 ): {
@@ -178,12 +178,12 @@ export function buildContextStatusReport(
   const lastCp = checkpoint
     ? `Active checkpoint: ${checkpoint.compactionId.slice(0, 12)}...  Covered through: ${checkpoint.coveredThroughTurnId}`
     : 'No active checkpoint';
-  const contextCompactionV2 = config.features?.contextCompactionV2 ?? true;
-  const contextCompactionAutoV1 = config.features?.contextCompactionAutoV1 ?? false;
+  const contextCompaction = config.features?.contextCompaction ?? true;
+  const contextCompactionAuto = config.features?.contextCompactionAuto ?? false;
   const autoMode =
-    contextCompactionV2 && contextCompactionAutoV1 ? (config.compaction?.autoMode ?? 'off') : 'off';
+    contextCompaction && contextCompactionAuto ? (config.compaction?.autoMode ?? 'off') : 'off';
   const autoStatus =
-    !contextCompactionV2 || !contextCompactionAutoV1
+    !contextCompaction || !contextCompactionAuto
       ? 'disabled by feature flag'
       : autoMode === 'off'
         ? 'off'
@@ -230,8 +230,8 @@ export function buildContextStatusReport(
  * admission is decided by the next real request.
  */
 export function compactResetPreflight(
-  _state: Readonly<BuiltinRuntimeStateViewV1>,
-  _config: ModelRuntimeConfigV1,
+  _state: Readonly<BuiltinRuntimeStateView>,
+  _config: ModelRuntimeConfig,
   _environment?: ContextProjectionEnvironment,
   _capabilities?: ResolvedModelCapabilities,
 ):

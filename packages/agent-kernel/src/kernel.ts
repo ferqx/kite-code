@@ -2,7 +2,7 @@ import { assertCurrentRuntimeEvent } from './codec';
 import type { KernelEvent, KernelEventEnvelope } from './events';
 import { sha256Hex } from './hash';
 import {
-  type AgentReducerFactsV1,
+  type AgentReducerFacts,
   digestAgentEvent,
   finalizeAgentEvent,
   normalizeAgentEvent,
@@ -10,15 +10,15 @@ import {
   reduceAgentState,
   selectPendingEffects as selectStatePendingEffects,
 } from './reducer';
-import type { SchedulerFactsV1 } from './scheduler';
+import type { SchedulerFacts } from './scheduler';
 import type { AgentState } from './state';
-import type { VerificationSchemaAdmissionFactV1 } from './verification-schema-facts';
+import type { VerificationSchemaAdmissionFact } from './verification-schema-facts';
 
 export type { KernelEvent, KernelEventEnvelope, RuntimeEvent } from './events';
-export type { SchedulerFactsV1 } from './scheduler';
+export type { SchedulerFacts } from './scheduler';
 export type { AgentState, RuntimeState } from './state';
 
-/** Minimal RMV1 single-use execution identity. */
+/** Minimal RM single-use execution identity. */
 export interface AuthorizedEffect {
   readonly schema: 'kite.authorized-effect.rmv1';
   readonly sessionId: string;
@@ -52,7 +52,7 @@ export type KernelInput<Event = KernelEvent> = {
 export interface DecisionEventFact {
   readonly occurredAt: string;
   /** Host-compiled schema admissions for one verification.requested payload. */
-  readonly verificationSchemaAdmissions?: readonly (VerificationSchemaAdmissionFactV1 | null)[];
+  readonly verificationSchemaAdmissions?: readonly (VerificationSchemaAdmissionFact | null)[];
 }
 
 /** Canonical, JSON-safe facts projected by Host; never callbacks or handles. */
@@ -69,11 +69,11 @@ export interface DecisionFacts {
   readonly executionBoundary: Readonly<Record<string, unknown>>;
   readonly attempt: Readonly<Record<string, unknown>>;
   /** Host-projected, immutable scheduling facts; never persisted in State. */
-  readonly scheduler?: SchedulerFactsV1;
+  readonly scheduler?: SchedulerFacts;
 }
 
 /** Stable transient-fact key for a Task identity allocated for one user event. */
-export function taskIdentityAllocationKeyV1(eventIndex: number, messageId: string): string {
+export function taskIdentityAllocationKey(eventIndex: number, messageId: string): string {
   if (!Number.isSafeInteger(eventIndex) || eventIndex < 0 || !messageId) {
     throw new Error('Task identity allocation key input is invalid.');
   }
@@ -247,7 +247,7 @@ export function decide<
     const eventId = digestAgentEvent(normalized);
     if (seen.has(eventId)) continue;
     const payload = finalizeAgentEvent(normalized, eventFact.occurredAt) as Event;
-    let reducerFacts: AgentReducerFactsV1 =
+    let reducerFacts: AgentReducerFacts =
       payload.type === 'verification.requested'
         ? { verificationSchemaAdmissions: eventFact.verificationSchemaAdmissions }
         : {};
@@ -262,7 +262,7 @@ export function decide<
       if (typeof messageId !== 'string' || messageId.length === 0) {
         return { status: 'rejected', code: 'allocated_task_identity_invalid' };
       }
-      const allocationKey = taskIdentityAllocationKeyV1(index, messageId);
+      const allocationKey = taskIdentityAllocationKey(index, messageId);
       const allocatedTaskId = facts.allocatedIds[allocationKey];
       if (!allocatedTaskId) {
         return { status: 'rejected', code: 'allocated_task_identity_missing' };
@@ -320,7 +320,7 @@ export function reduce<
 
 export function selectPendingEffects<State extends AgentState = AgentState>(
   state: Readonly<State>,
-  facts?: SchedulerFactsV1,
+  facts?: SchedulerFacts,
 ): readonly PendingEffect[] {
   return selectStatePendingEffects(state, facts);
 }

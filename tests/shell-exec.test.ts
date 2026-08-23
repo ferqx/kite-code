@@ -9,7 +9,7 @@ import {
 } from '@kite/builtin-runtime/sandbox';
 import { guardProcessTree } from '@kite/runtime-host';
 import { createSandboxExecutor } from './helpers/sandbox-executor';
-import { buildHostShellInvocationsV1 } from './helpers/shell-executor';
+import { buildHostShellInvocations } from './helpers/shell-executor';
 
 describe('shell execute integration', () => {
   const workspace = join(tmpdir(), 'kite-code-e2e-shell');
@@ -346,7 +346,7 @@ describe('findSystemBash — candidate selection logic', () => {
 
 describe('host Shell candidate resolution', () => {
   test('Windows uses Bash, cmd, then PowerShell candidates', () => {
-    const candidates = buildHostShellInvocationsV1('echo ok', {
+    const candidates = buildHostShellInvocations('echo ok', {
       platform: 'win32',
       systemRoot: 'C:\\Windows',
       systemBash: 'C:\\Git\\bin\\bash.exe',
@@ -366,7 +366,7 @@ describe('host Shell candidate resolution', () => {
 
   test('macOS and Linux use the same ordered resolver with available interpreters', () => {
     for (const platform of ['darwin', 'linux'] as const) {
-      const candidates = buildHostShellInvocationsV1('echo ok', {
+      const candidates = buildHostShellInvocations('echo ok', {
         platform,
         systemRoot: '',
         configuredShell: '/bin/zsh',

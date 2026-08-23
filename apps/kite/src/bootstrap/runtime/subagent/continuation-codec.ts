@@ -1,7 +1,7 @@
 import type { AIMessage, BaseMessage, ToolMessage } from '@kite/builtin-runtime/model';
 import { aiMessage, humanMessage, systemMessage, toolMessage } from '@kite/builtin-runtime/model';
 import { getRoleConfig } from '@kite/builtin-runtime/subagent';
-import { runtimeHostStateNormalizeToolRecoveryJournalV1 } from '@kite/runtime-host';
+import { runtimeHostStateNormalizeToolRecoveryJournal } from '@kite/runtime-host';
 import type {
   JsonObject,
   JsonValue,
@@ -11,11 +11,11 @@ import type {
   SuspendedSubagentSnapshot,
 } from '@kite/runtime-spi';
 import {
-  decodeSubagentContinuationSnapshotV1,
-  encodeSubagentContinuationSnapshotV1,
-  subagentContinuationCursorIdV1,
+  decodeSubagentContinuationSnapshot,
+  encodeSubagentContinuationSnapshot,
+  subagentContinuationCursorId,
 } from '#builtin-runtime';
-import { decodeAppApprovalBindingV1 } from '../approval-binding';
+import { decodeAppApprovalBinding } from '../approval-binding';
 import type {
   RestoredSubAgentContinuation,
   SubAgentBlockedTool,
@@ -28,12 +28,12 @@ export function serializeSubagentContinuation(
   blockedTool: SubAgentBlockedTool,
 ): SuspendedSubagentSnapshot {
   const approvalBinding = blockedTool.approvalBinding
-    ? decodeAppApprovalBindingV1(blockedTool.approvalBinding)
+    ? decodeAppApprovalBinding(blockedTool.approvalBinding)
     : undefined;
   if (blockedTool.approvalBinding && !approvalBinding) {
     throw new Error('Subagent continuation approval binding is malformed.');
   }
-  return encodeSubagentContinuationSnapshotV1({
+  return encodeSubagentContinuationSnapshot({
     subagentId: continuation.id,
     role: continuation.role.role,
     task: continuation.task,
@@ -50,7 +50,7 @@ export function serializeSubagentContinuation(
       ? { exhaustedFingerprints: { ...continuation.exhaustedFingerprints } }
       : {}),
     toolRecovery: toJsonObject(
-      runtimeHostStateNormalizeToolRecoveryJournalV1(
+      runtimeHostStateNormalizeToolRecoveryJournal(
         continuation.toolRecovery,
         continuation.toolRecovery.identityKey,
       ),
@@ -78,9 +78,9 @@ export function deserializeSubagentContinuation(
   input: SuspendedSubagentSnapshot,
   expectedRecoveryIdentityKey: string,
 ): RestoredSubAgentContinuation {
-  const snapshot = decodeSubagentContinuationSnapshotV1(input);
+  const snapshot = decodeSubagentContinuationSnapshot(input);
   const approvalBinding = snapshot.blockedTool.approvalBinding
-    ? decodeAppApprovalBindingV1(snapshot.blockedTool.approvalBinding)
+    ? decodeAppApprovalBinding(snapshot.blockedTool.approvalBinding)
     : undefined;
   if (snapshot.blockedTool.approvalBinding && !approvalBinding) {
     throw new Error('Subagent continuation approval binding is malformed.');
@@ -103,7 +103,7 @@ export function deserializeSubagentContinuation(
     ...(snapshot.exhaustedFingerprints
       ? { exhaustedFingerprints: { ...snapshot.exhaustedFingerprints } }
       : {}),
-    toolRecovery: runtimeHostStateNormalizeToolRecoveryJournalV1(
+    toolRecovery: runtimeHostStateNormalizeToolRecoveryJournal(
       cloneJsonObject(snapshot.toolRecovery),
       expectedRecoveryIdentityKey,
     ),
@@ -123,7 +123,7 @@ export function deserializeSubagentContinuation(
   };
 }
 
-export { subagentContinuationCursorIdV1 };
+export { subagentContinuationCursorId };
 
 function serializeMessage(message: BaseMessage): PersistedSubagentMessage {
   const base = {

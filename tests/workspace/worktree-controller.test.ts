@@ -13,11 +13,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createChangeHandoffV1 } from '@/app/workspace/change-handoff';
+import { createChangeHandoff } from '@/app/workspace/change-handoff';
 import {
-  resolveWriterWorkspaceAdmissionV1,
-  WorktreeControllerErrorV1,
-  WorktreeControllerV1,
+  resolveWriterWorkspaceAdmission,
+  WorktreeController,
+  WorktreeControllerError,
 } from '@/app/workspace/worktree-controller';
 
 const roots: string[] = [];
@@ -40,7 +40,7 @@ function fixture(): {
   repo: string;
   state: string;
   baselineCommit: string;
-  controller: WorktreeControllerV1;
+  controller: WorktreeController;
 } {
   const root = mkdtempSync(join(tmpdir(), 'openpx-worktree-controller-'));
   roots.push(root);
@@ -61,13 +61,13 @@ function fixture(): {
     'baseline',
   ]);
   const baselineCommit = git(repo, ['rev-parse', 'HEAD']);
-  const controller = new WorktreeControllerV1({ stateRoot: state });
+  const controller = new WorktreeController({ stateRoot: state });
   return { root, repo, state, baselineCommit, controller };
 }
 
 function acquire(
   item: ReturnType<typeof fixture>,
-  overrides: Partial<Parameters<WorktreeControllerV1['acquire']>[0]> = {},
+  overrides: Partial<Parameters<WorktreeController['acquire']>[0]> = {},
 ) {
   return item.controller.acquire({
     baselineRepoRoot: item.repo,
@@ -86,14 +86,14 @@ afterEach(() => {
 describe('writer workspace admission', () => {
   test('keeps shared checkout read-only except an explicitly selected foreground TUI writer', () => {
     expect(
-      resolveWriterWorkspaceAdmissionV1({
+      resolveWriterWorkspaceAdmission({
         featureEnabled: false,
         mode: 'delegated',
         access: 'read_only',
       }),
     ).toEqual({ allowed: true, workspace: 'shared_read_only' });
     expect(
-      resolveWriterWorkspaceAdmissionV1({
+      resolveWriterWorkspaceAdmission({
         featureEnabled: false,
         mode: 'foreground_tui',
         access: 'write',
@@ -101,7 +101,7 @@ describe('writer workspace admission', () => {
       }),
     ).toEqual({ allowed: true, workspace: 'shared_foreground_writer' });
     expect(
-      resolveWriterWorkspaceAdmissionV1({
+      resolveWriterWorkspaceAdmission({
         featureEnabled: true,
         mode: 'foreground_headless_cli',
         access: 'write',
@@ -112,7 +112,7 @@ describe('writer workspace admission', () => {
       reason: 'foreground_headless_write_excluded',
     });
     expect(
-      resolveWriterWorkspaceAdmissionV1({
+      resolveWriterWorkspaceAdmission({
         featureEnabled: false,
         mode: 'foreground_headless_cli',
         access: 'write',
@@ -133,10 +133,10 @@ describe('writer workspace admission', () => {
       'delegated',
     ] as const) {
       expect(
-        resolveWriterWorkspaceAdmissionV1({ featureEnabled: true, mode, access: 'write' }),
+        resolveWriterWorkspaceAdmission({ featureEnabled: true, mode, access: 'write' }),
       ).toEqual({ allowed: true, workspace: 'worktree' });
       expect(
-        resolveWriterWorkspaceAdmissionV1({ featureEnabled: false, mode, access: 'write' }),
+        resolveWriterWorkspaceAdmission({ featureEnabled: false, mode, access: 'write' }),
       ).toEqual({
         allowed: false,
         workspace: 'none',
@@ -150,7 +150,7 @@ describe('App-owned worktree controller', () => {
   test('routes a delegated writer through an isolated review handoff', () => {
     const item = fixture();
     expect(
-      resolveWriterWorkspaceAdmissionV1({
+      resolveWriterWorkspaceAdmission({
         featureEnabled: true,
         mode: 'delegated',
         access: 'write',
@@ -159,7 +159,7 @@ describe('App-owned worktree controller', () => {
     const lease = acquire(item, { runIdentity: 'run-headless' });
     expect(lease.workspaceRoot).not.toBe(item.repo);
     writeFileSync(join(lease.workspaceRoot, 'tracked.txt'), 'headless change\n');
-    const handoff = createChangeHandoffV1({ controller: item.controller, lease });
+    const handoff = createChangeHandoff({ controller: item.controller, lease });
     expect(handoff.runIdentity).toBe('run-headless');
     expect(handoff.writerIdentity).toBe('writer-001');
     expect(handoff.changedFiles).toEqual([{ path: 'tracked.txt', tracked: true }]);
@@ -183,7 +183,7 @@ describe('App-owned worktree controller', () => {
 
     writeFileSync(join(lease.workspaceRoot, 'tracked.txt'), 'changed\n');
     writeFileSync(join(lease.workspaceRoot, 'new.txt'), 'new\n');
-    const handoff = createChangeHandoffV1({ controller: item.controller, lease });
+    const handoff = createChangeHandoff({ controller: item.controller, lease });
     expect(handoff.worktreeIdentity).toBe(lease.worktreeIdentity);
     expect(handoff.baselineCommit).toBe(item.baselineCommit);
     expect(handoff.hasUncommittedChanges).toBe(true);
@@ -193,7 +193,7 @@ describe('App-owned worktree controller', () => {
     ]);
     expect(handoff.diff).toContain('-baseline');
     expect(handoff.diff).toContain('+changed');
-    expect(handoff.diff).toContain('KITE_UNTRACKED_FILE_V1');
+    expect(handoff.diff).toContain('KITE_UNTRACKED_FILE_');
     expect(handoff.diff).toContain('"path":"new.txt"');
     expect(handoff.diff).toContain('"content":"bmV3Cg=="');
     expect(handoff.status).toContain('tracked.txt');
@@ -207,7 +207,7 @@ describe('App-owned worktree controller', () => {
     const outside = join(item.root, 'outside-secret.txt');
     writeFileSync(outside, 'must-not-leak\n');
     symlinkSync(outside, join(lease.workspaceRoot, 'linked.txt'));
-    expect(() => createChangeHandoffV1({ controller: item.controller, lease })).toThrow(
+    expect(() => createChangeHandoff({ controller: item.controller, lease })).toThrow(
       'bounded, owned regular files',
     );
   });
@@ -227,18 +227,18 @@ describe('App-owned worktree controller', () => {
       'writer change',
     ]);
 
-    const recoveredController = new WorktreeControllerV1({ stateRoot: item.state });
+    const recoveredController = new WorktreeController({ stateRoot: item.state });
     const recovered = recoveredController.recover(lease.worktreeIdentity);
     expect(() => item.controller.inspect(lease)).toThrow('does not match its ownership record');
     const branch = git(recovered.workspaceRoot, ['branch', '--show-current']);
-    const handoff = createChangeHandoffV1({ controller: recoveredController, lease: recovered });
+    const handoff = createChangeHandoff({ controller: recoveredController, lease: recovered });
     expect(handoff.hasUncommittedChanges).toBe(false);
     expect(handoff.changedFiles).toEqual([{ path: 'tracked.txt', tracked: true }]);
 
     recoveredController.cleanup(recovered);
     expect(git(item.repo, ['show-ref', '--verify', `refs/heads/${branch}`])).not.toBe('');
     expect(() => recoveredController.recover(lease.worktreeIdentity)).toThrow(
-      WorktreeControllerErrorV1,
+      WorktreeControllerError,
     );
   });
 
@@ -285,7 +285,7 @@ describe('App-owned worktree controller', () => {
     if (process.platform !== 'win32') {
       const stateAlias = join(item.root, 'state-alias');
       symlinkSync(item.state, stateAlias, 'dir');
-      expect(() => new WorktreeControllerV1({ stateRoot: stateAlias })).toThrow(
+      expect(() => new WorktreeController({ stateRoot: stateAlias })).toThrow(
         'state root is unavailable or unsafe',
       );
     }
@@ -322,7 +322,7 @@ describe('App-owned worktree controller', () => {
       [1],
     );
 
-    expect(() => createChangeHandoffV1({ controller: item.controller, lease })).toThrow(
+    expect(() => createChangeHandoff({ controller: item.controller, lease })).toThrow(
       'unresolved conflicts',
     );
     expect(() => item.controller.cleanup(lease)).toThrow('unresolved conflicts');
@@ -345,20 +345,20 @@ describe('App-owned worktree controller', () => {
     const operationPath = join(item.state, 'locks', `${lease.worktreeIdentity}.operation`);
     writeFileSync(operationPath, '{"simulated":"crash"}\n', { mode: 0o600 });
 
-    expect(() => createChangeHandoffV1({ controller: item.controller, lease })).toThrow(
+    expect(() => createChangeHandoff({ controller: item.controller, lease })).toThrow(
       'requires manual recovery',
     );
     expect(git(lease.workspaceRoot, ['rev-parse', 'HEAD'])).toBe(item.baselineCommit);
     rmSync(operationPath);
-    expect(createChangeHandoffV1({ controller: item.controller, lease }).changedFiles).toEqual([]);
+    expect(createChangeHandoff({ controller: item.controller, lease }).changedFiles).toEqual([]);
   });
 
   test('contains Git startup failures instead of falling back to the shared checkout', () => {
     const item = fixture();
     expect(
-      () => new WorktreeControllerV1({ stateRoot: item.state, gitBinary: 'missing-openpx-git' }),
+      () => new WorktreeController({ stateRoot: item.state, gitBinary: 'missing-openpx-git' }),
     ).not.toThrow();
-    const failedController = new WorktreeControllerV1({
+    const failedController = new WorktreeController({
       stateRoot: item.state,
       gitBinary: 'missing-openpx-git',
     });
@@ -370,7 +370,7 @@ describe('App-owned worktree controller', () => {
         runIdentity: 'run-git-failure',
         writerIdentity: 'writer-001',
       }),
-    ).toThrow(WorktreeControllerErrorV1);
+    ).toThrow(WorktreeControllerError);
     expect(git(item.repo, ['status', '--porcelain'])).toBe('');
   });
 
@@ -396,7 +396,7 @@ describe('App-owned worktree controller', () => {
       { mode: 0o700 },
     );
     chmodSync(wrapper, 0o700);
-    const controller = new WorktreeControllerV1({ stateRoot: item.state, gitBinary: wrapper });
+    const controller = new WorktreeController({ stateRoot: item.state, gitBinary: wrapper });
 
     expect(() =>
       controller.acquire({
@@ -527,7 +527,7 @@ describe('App-owned worktree controller', () => {
     const previous = process.env.KITE_TEST_CREDENTIAL_SECRET;
     process.env.KITE_TEST_CREDENTIAL_SECRET = 'must-not-cross-boundary';
     try {
-      const controller = new WorktreeControllerV1({
+      const controller = new WorktreeController({
         stateRoot: isolatedState,
         gitBinary: wrapper,
       });

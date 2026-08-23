@@ -49,7 +49,7 @@ const RESP3_FILES = [
   'apps/kite/src/tui/App.tsx',
   'apps/kite/src/tui/reducers/index.ts',
   'apps/kite/src/tui/reducers/actions.ts',
-  'apps/kite/src/bootstrap/runtime/SessionManager.ts',
+  'apps/kite/src/runtime/session/runtime-session.ts',
   'apps/kite/src/bootstrap/runtime/runtime-agent-input.ts',
 ];
 const RESP4_FILES = [

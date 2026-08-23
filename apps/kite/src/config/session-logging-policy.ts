@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const SESSION_LOGGING_POLICY_VERSION = 1 as const;
 
-export const sessionLoggingPolicyV1Schema = z
+export const sessionLoggingPolicySchema = z
   .object({
     version: z.literal(SESSION_LOGGING_POLICY_VERSION),
     mode: z.enum(['off', 'metadata', 'content']),
@@ -24,14 +24,14 @@ export const sessionLoggingPolicyV1Schema = z
     }
   });
 
-export type SessionLoggingPolicyV1 = z.infer<typeof sessionLoggingPolicyV1Schema>;
-export type SessionLoggingMode = SessionLoggingPolicyV1['mode'];
+export type SessionLoggingPolicy = z.infer<typeof sessionLoggingPolicySchema>;
+export type SessionLoggingMode = SessionLoggingPolicy['mode'];
 
 export type SessionLoggingPolicyTightening = Partial<
-  Pick<SessionLoggingPolicyV1, 'mode' | 'retentionDays' | 'maxTotalBytes' | 'maxSessionBytes'>
+  Pick<SessionLoggingPolicy, 'mode' | 'retentionDays' | 'maxTotalBytes' | 'maxSessionBytes'>
 >;
 
-export const DEFAULT_SESSION_LOGGING_POLICY_V1: Readonly<SessionLoggingPolicyV1> = Object.freeze({
+export const DEFAULT_SESSION_LOGGING_POLICY_: Readonly<SessionLoggingPolicy> = Object.freeze({
   version: SESSION_LOGGING_POLICY_VERSION,
   mode: 'metadata',
   retentionDays: 7,
@@ -48,19 +48,19 @@ const MODE_RANK: Readonly<Record<SessionLoggingMode, number>> = Object.freeze({
   content: 2,
 });
 
-export function parseSessionLoggingPolicyV1(value: unknown): SessionLoggingPolicyV1 {
-  return sessionLoggingPolicyV1Schema.parse(value);
+export function parseSessionLoggingPolicy(value: unknown): SessionLoggingPolicy {
+  return sessionLoggingPolicySchema.parse(value);
 }
 
 /**
  * Apply a user, project, or administrative restriction without allowing it to
  * make the artifact policy more permissive.
  */
-export function tightenSessionLoggingPolicyV1(
-  base: SessionLoggingPolicyV1,
+export function tightenSessionLoggingPolicy(
+  base: SessionLoggingPolicy,
   tightening: SessionLoggingPolicyTightening,
-): SessionLoggingPolicyV1 {
-  const parsedBase = parseSessionLoggingPolicyV1(base);
+): SessionLoggingPolicy {
+  const parsedBase = parseSessionLoggingPolicy(base);
   const mode = tightening.mode ?? parsedBase.mode;
   if (MODE_RANK[mode] > MODE_RANK[parsedBase.mode]) {
     throw new Error(`Session logging mode cannot be widened from ${parsedBase.mode} to ${mode}.`);
@@ -73,7 +73,7 @@ export function tightenSessionLoggingPolicyV1(
     }
   }
 
-  return parseSessionLoggingPolicyV1({
+  return parseSessionLoggingPolicy({
     ...parsedBase,
     ...tightening,
     mode,
@@ -83,25 +83,23 @@ export function tightenSessionLoggingPolicyV1(
   });
 }
 
-export function resolveSessionLoggingPolicyV1(input: {
+export function resolveSessionLoggingPolicy(input: {
   enabled: boolean;
-  artifactPolicy?: SessionLoggingPolicyV1;
+  artifactPolicy?: SessionLoggingPolicy;
   user?: SessionLoggingPolicyTightening;
   project?: SessionLoggingPolicyTightening;
-}): SessionLoggingPolicyV1 {
+}): SessionLoggingPolicy {
   if (input.project?.mode === 'content') {
     throw new Error('Project config cannot enable content session logging.');
   }
-  let resolved = parseSessionLoggingPolicyV1(
-    input.artifactPolicy ?? DEFAULT_SESSION_LOGGING_POLICY_V1,
-  );
+  let resolved = parseSessionLoggingPolicy(input.artifactPolicy ?? DEFAULT_SESSION_LOGGING_POLICY_);
   if (!input.enabled) {
-    resolved = tightenSessionLoggingPolicyV1(resolved, { mode: 'off' });
+    resolved = tightenSessionLoggingPolicy(resolved, { mode: 'off' });
   } else if (resolved.mode === 'content' && input.user?.mode !== 'content') {
     // An artifact may permit content logging, but it never opts the user in.
-    resolved = tightenSessionLoggingPolicyV1(resolved, { mode: 'metadata' });
+    resolved = tightenSessionLoggingPolicy(resolved, { mode: 'metadata' });
   }
-  if (input.user) resolved = tightenSessionLoggingPolicyV1(resolved, input.user);
-  if (input.project) resolved = tightenSessionLoggingPolicyV1(resolved, input.project);
+  if (input.user) resolved = tightenSessionLoggingPolicy(resolved, input.user);
+  if (input.project) resolved = tightenSessionLoggingPolicy(resolved, input.project);
   return resolved;
 }

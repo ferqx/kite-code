@@ -3,37 +3,37 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   createBuiltinRuntimeModules,
-  RMV1_15_CAPABILITY_REVISIONS_V1,
-  RMV1_15_OPERATION_IDS_V1,
-  RMV1_15_PROVIDER_ID_V1,
+  VERIFICATION_CAPABILITY_REVISIONS_,
+  VERIFICATION_OPERATION_IDS_,
+  VERIFICATION_PROVIDER_ID_,
 } from '#builtin-runtime';
-import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
-import { KITE_RUNTIME_OPERATION_IDS_V1 } from '../../apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule';
+import { createRuntimeModuleRegistry } from '#runtime-spi';
+import { KITE_RUNTIME_OPERATION_IDS_ } from '../../apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule';
 
 const root = resolve(import.meta.dir, '../..');
 
-describe('RMV1-15 Model, Context, Compaction, and Reviewer closure', () => {
+describe('RM-15 Model, Context, Compaction, and Reviewer closure', () => {
   test('registers exactly one Builtin Runtime owner and executor for every Model purpose', () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    for (const operationId of RMV1_15_OPERATION_IDS_V1) {
-      expect(registry.operationOwner(operationId), operationId).toBe(RMV1_15_PROVIDER_ID_V1);
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    for (const operationId of VERIFICATION_OPERATION_IDS_) {
+      expect(registry.operationOwner(operationId), operationId).toBe(VERIFICATION_PROVIDER_ID_);
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        revision: RMV1_15_CAPABILITY_REVISIONS_V1[operationId],
-        providerId: RMV1_15_PROVIDER_ID_V1,
+        revision: VERIFICATION_CAPABILITY_REVISIONS_[operationId],
+        providerId: VERIFICATION_PROVIDER_ID_,
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        capabilityRevision: RMV1_15_CAPABILITY_REVISIONS_V1[operationId],
-        providerId: RMV1_15_PROVIDER_ID_V1,
+        capabilityRevision: VERIFICATION_CAPABILITY_REVISIONS_[operationId],
+        providerId: VERIFICATION_PROVIDER_ID_,
       });
     }
   });
 
   test('leaves no Model purpose in the App execution module', () => {
-    expect(KITE_RUNTIME_OPERATION_IDS_V1).toEqual([]);
-    for (const operationId of RMV1_15_OPERATION_IDS_V1) {
-      expect(KITE_RUNTIME_OPERATION_IDS_V1).not.toContain(operationId);
+    expect(KITE_RUNTIME_OPERATION_IDS_).toEqual([]);
+    for (const operationId of VERIFICATION_OPERATION_IDS_) {
+      expect(KITE_RUNTIME_OPERATION_IDS_).not.toContain(operationId);
     }
   });
 
@@ -45,7 +45,7 @@ describe('RMV1-15 Model, Context, Compaction, and Reviewer closure', () => {
     for (const name of modelCompatibilityFiles) {
       if (name === 'invocation-gateway.ts') continue;
       const source = readFileSync(resolve(coreModelDirectory, name), 'utf8');
-      expect(source, name).toContain('RMV1-15 compatibility surface');
+      expect(source, name).toContain('RM-15 compatibility surface');
       expect(source, name).toContain("from '#builtin-runtime/model'");
       expect(source.trim().split('\n'), name).toHaveLength(2);
     }

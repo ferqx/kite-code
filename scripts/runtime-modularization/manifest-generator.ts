@@ -13,13 +13,13 @@ import { join, relative, resolve, sep } from 'node:path';
 import { RUNTIME_STATE_FORMAT_EPOCH, RUNTIME_STATE_SCHEMA_VERSION } from '@kite/agent-kernel';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
+  createBuiltinToolCatalogProjection,
 } from '@kite/builtin-runtime';
-import { createRuntimeHostStateStorageBindingV1 } from '@kite/runtime-host';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 import {
-  createSqliteRuntimeStorageBoundaryV5V1,
-  createSqliteRuntimeStorageV5,
+  createSqliteRuntimeStorage,
+  createSqliteRuntimeStorageBoundary,
 } from '@kite/runtime-storage-sqlite';
 import ts from 'typescript';
 import {
@@ -35,14 +35,12 @@ export const RUNTIME_MODULARIZATION_GENERATOR_REVISION = 'rmv1-01-generator-v1' 
 const RUNTIME_MODULARIZATION_GENERATOR_SOURCE =
   'scripts/runtime-modularization/manifest-generator.ts' as const;
 
-const BUILTIN_RUNTIME_MODULES_V1 = Object.freeze(createBuiltinRuntimeModules());
-const BUILTIN_RUNTIME_REGISTRY_V1 = createRuntimeModuleRegistryV1(BUILTIN_RUNTIME_MODULES_V1);
-const BUILTIN_REGISTRY_SNAPSHOT_V1 = BUILTIN_RUNTIME_REGISTRY_V1.snapshot();
-const BUILTIN_CATALOG_SNAPSHOT_V1 = createBuiltinToolCatalogProjectionV1(
-  BUILTIN_REGISTRY_SNAPSHOT_V1,
-);
+const BUILTIN_RUNTIME_MODULES_ = Object.freeze(createBuiltinRuntimeModules());
+const BUILTIN_RUNTIME_REGISTRY_ = createRuntimeModuleRegistry(BUILTIN_RUNTIME_MODULES_);
+const BUILTIN_REGISTRY_SNAPSHOT_ = BUILTIN_RUNTIME_REGISTRY_.snapshot();
+const BUILTIN_CATALOG_SNAPSHOT_ = createBuiltinToolCatalogProjection(BUILTIN_REGISTRY_SNAPSHOT_);
 
-export interface RuntimeModularizationBuiltinFactsV1 {
+export interface RuntimeModularizationBuiltinFacts {
   readonly moduleCount: number;
   readonly operationCount: number;
   readonly operationIds: readonly string[];
@@ -57,29 +55,29 @@ export interface RuntimeModularizationBuiltinFactsV1 {
  * Builtin projection.  It must not reconstruct a Core registry or maintain a
  * second operation list for manifest validation.
  */
-export const RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1: RuntimeModularizationBuiltinFactsV1 =
+export const RUNTIME_MODULARIZATION_BUILTIN_FACTS_: RuntimeModularizationBuiltinFacts =
   Object.freeze({
-    moduleCount: BUILTIN_REGISTRY_SNAPSHOT_V1.modules.length,
-    operationCount: BUILTIN_REGISTRY_SNAPSHOT_V1.capabilities.length,
+    moduleCount: BUILTIN_REGISTRY_SNAPSHOT_.modules.length,
+    operationCount: BUILTIN_REGISTRY_SNAPSHOT_.capabilities.length,
     operationIds: Object.freeze(
-      BUILTIN_REGISTRY_SNAPSHOT_V1.capabilities.map(({ definition }) => definition.capabilityId),
+      BUILTIN_REGISTRY_SNAPSHOT_.capabilities.map(({ definition }) => definition.capabilityId),
     ),
-    catalogEntryCount: BUILTIN_CATALOG_SNAPSHOT_V1.entries.length,
-    modelVisibleCount: BUILTIN_CATALOG_SNAPSHOT_V1.entries.filter(
+    catalogEntryCount: BUILTIN_CATALOG_SNAPSHOT_.entries.length,
+    modelVisibleCount: BUILTIN_CATALOG_SNAPSHOT_.entries.filter(
       (entry) => entry.visibility === 'model',
     ).length,
-    internalCount: BUILTIN_CATALOG_SNAPSHOT_V1.entries.filter(
+    internalCount: BUILTIN_CATALOG_SNAPSHOT_.entries.filter(
       (entry) => entry.visibility === 'internal',
     ).length,
     modelToolNames: Object.freeze(
-      BUILTIN_CATALOG_SNAPSHOT_V1.entries.flatMap((entry) =>
+      BUILTIN_CATALOG_SNAPSHOT_.entries.flatMap((entry) =>
         entry.visibility === 'model' ? [entry.name] : [],
       ),
     ),
   });
 
 function assertBuiltinManifestFacts(): void {
-  const facts = RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1;
+  const facts = RUNTIME_MODULARIZATION_BUILTIN_FACTS_;
   if (
     facts.moduleCount !== 6 ||
     facts.operationCount !== 29 ||
@@ -88,7 +86,7 @@ function assertBuiltinManifestFacts(): void {
     facts.internalCount !== 9
   ) {
     throw new Error(
-      `RMV1 Builtin registry facts drifted (modules=${facts.moduleCount}, operations=${facts.operationCount}, entries=${facts.catalogEntryCount}, model=${facts.modelVisibleCount}, internal=${facts.internalCount}).`,
+      `RM Builtin registry facts drifted (modules=${facts.moduleCount}, operations=${facts.operationCount}, entries=${facts.catalogEntryCount}, model=${facts.modelVisibleCount}, internal=${facts.internalCount}).`,
     );
   }
 }
@@ -239,7 +237,8 @@ export function generateRuntimeModularizationManifests(
       [
         'packages/runtime-host/src/state-storage.ts',
         'packages/runtime-storage-sqlite/src/index.ts',
-        'packages/runtime-storage-sqlite/src/sqlite-store.ts',
+        'packages/runtime-storage-sqlite/src/adapter.ts',
+        'packages/runtime-storage-sqlite/src/preflight.ts',
         'packages/runtime-storage-sqlite/src/store.ts',
       ],
       store,
@@ -348,12 +347,10 @@ function generateRuntimeStateShape(
   const declarationSources = declarations.map((entry) => entry.path);
 
   if (RUNTIME_STATE_SCHEMA_VERSION !== 26) {
-    throw new Error(
-      `RAV1 requires Runtime State schema 26, found ${RUNTIME_STATE_SCHEMA_VERSION}.`,
-    );
+    throw new Error(`RA requires Runtime State schema 26, found ${RUNTIME_STATE_SCHEMA_VERSION}.`);
   }
   if (RUNTIME_STATE_FORMAT_EPOCH !== 'kite-runtime-modularization-v1-2026-08-19') {
-    throw new Error(`RAV1 requires the target epoch, found ${RUNTIME_STATE_FORMAT_EPOCH}.`);
+    throw new Error(`RA requires the target epoch, found ${RUNTIME_STATE_FORMAT_EPOCH}.`);
   }
 
   return {
@@ -600,15 +597,15 @@ function propertyName(name: ts.PropertyName, source: ts.SourceFile): string {
 }
 
 function generateRuntimeStoreShape(): JsonObject {
-  const boundary = createSqliteRuntimeStorageBoundaryV5V1();
+  const boundary = createSqliteRuntimeStorageBoundary();
   if (
     boundary.adapterId !== 'sqlite' ||
     boundary.stateSchemaVersion !== 26 ||
     boundary.storeSchemaVersion !== 5 ||
-    boundary.compatibilityEpoch !== 'kite-runtime-modularization-v1-2026-08-19'
+    boundary.formatEpoch !== 'kite-runtime-modularization-v1-2026-08-19'
   ) {
     throw new Error(
-      `RAV1 requires SQLite adapter facts sqlite/26/5/kite-runtime-modularization-v1-2026-08-19, found ${JSON.stringify(boundary)}.`,
+      `RA requires SQLite adapter facts sqlite/26/5/kite-runtime-modularization-v1-2026-08-19, found ${JSON.stringify(boundary)}.`,
     );
   }
   const canonicalTemporaryParent = realpathSync(tmpdir());
@@ -617,8 +614,8 @@ function generateRuntimeStoreShape(): JsonObject {
   let facts: JsonObject | undefined;
   let generationError: unknown;
   try {
-    const state = createRuntimeHostStateStorageBindingV1();
-    const store = createSqliteRuntimeStorageV5({
+    const state = createRuntimeHostStateStorageBinding();
+    const store = createSqliteRuntimeStorage({
       databasePath,
       codec: state.codec,
       options: { journalMode: 'delete' },
@@ -627,7 +624,7 @@ function generateRuntimeStoreShape(): JsonObject {
       store.adapterId !== boundary.adapterId ||
       store.stateSchemaVersion !== boundary.stateSchemaVersion ||
       store.storeSchemaVersion !== boundary.storeSchemaVersion ||
-      store.compatibilityEpoch !== boundary.compatibilityEpoch
+      store.formatEpoch !== boundary.formatEpoch
     ) {
       throw new Error('SQLite Runtime adapter facts disagree with its public boundary.');
     }
@@ -686,15 +683,15 @@ function generateRuntimeStoreShape(): JsonObject {
       );
       if (
         markers.format_version !== String(store.storeSchemaVersion) ||
-        markers.runtime_format_epoch !== store.compatibilityEpoch
+        markers.runtime_format_epoch !== store.formatEpoch
       ) {
-        throw new Error('Runtime Store marker does not match the RAV1 frozen format.');
+        throw new Error('Runtime Store marker does not match the RA frozen format.');
       }
       facts = {
         adapterId: store.adapterId,
         storeSchemaVersion: store.storeSchemaVersion,
         runtimeStateSchemaVersion: store.stateSchemaVersion,
-        formatEpoch: store.compatibilityEpoch,
+        formatEpoch: store.formatEpoch,
         markers,
         tableCount: tables.length,
         tables,
@@ -1106,8 +1103,7 @@ export function validateRuntimeModularizationManualManifests(
       requiredString(manifest.currentTask, 'manual manifest current task'),
     ),
   );
-  if (currentTasks.size !== 1)
-    throw new Error('Manual manifests disagree on the current RMV1 task.');
+  if (currentTasks.size !== 1) throw new Error('Manual manifests disagree on the current RM task.');
 
   const operationResult = validateOperationOwner(root, operationOwner);
   const legacyRuleCount = validateLegacyDelete(root, legacyDelete);
@@ -1174,7 +1170,7 @@ function validateOperationOwner(
       operations.add(operation);
     }
   }
-  const expected = new Set(RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1.operationIds);
+  const expected = new Set(RUNTIME_MODULARIZATION_BUILTIN_FACTS_.operationIds);
   const missing = [...expected].filter((operation) => !operations.has(operation));
   const stale = [...operations].filter((operation) => !expected.has(operation));
   if (missing.length > 0 || stale.length > 0) {
@@ -1257,7 +1253,7 @@ function discoverLegacyFacts(root: string): LegacyDiscovery[] {
   for (const [file, symbol] of [
     ['src/core/runtime/scheduler.ts', 'PARALLEL_READ_TOOL_NAMES'],
     ['src/core/runtime/agent.ts', 'RuntimeKernelControl'],
-    ['src/core/runtime/agent.ts', 'executeRuntimeTurnV1'],
+    ['src/core/runtime/agent.ts', 'executeRuntimeTurn'],
   ] as const) {
     if (sourceDeclaresSymbol(join(root, file), symbol)) {
       discoveries.push({ kind: 'symbol', file, value: symbol });
@@ -1413,7 +1409,7 @@ function validateArchitectureExceptions(manifest: Record<string, unknown>): numb
 
 function requireRuntimeTask(value: unknown, label: string): string {
   const task = requiredString(value, label);
-  if (!/^(?:RMV1-(?:0[1-9]|1[0-6])|RAV1-0[0-6])$/u.test(task)) {
+  if (!/^(?:RM-(?:0[1-9]|1[0-6])|RA-0[0-6])$/u.test(task)) {
     throw new Error(`${label} is not a Runtime Modularization task.`);
   }
   return task;

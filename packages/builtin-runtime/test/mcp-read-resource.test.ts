@@ -1,24 +1,24 @@
 import { describe, expect, test } from 'bun:test';
-import type { CapabilityExecutionContextV1, ExecutionReceiptV1 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import type { CapabilityExecutionContext, ExecutionReceipt } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 import { McpProviderError, type McpProviderFailureKind } from '../src/mcp/provider-errors';
 import {
-  BuiltinMcpExecutionUnknownErrorV1,
-  type BuiltinMcpRuntimePortV1,
+  BuiltinMcpExecutionUnknownError,
+  type BuiltinMcpRuntimePort,
   createModelRuntimeModule,
-  isBuiltinOperationExecutionValueV1,
-  RMV1_11_CAPABILITY_REVISIONS_V1,
-  RMV1_11_EXECUTOR_REVISIONS_V1,
-  RMV1_11_PROVIDER_ID_V1,
+  isBuiltinOperationExecutionValue,
+  MODEL_CAPABILITY_REVISIONS_,
+  MODEL_EXECUTOR_REVISIONS_,
+  MODEL_PROVIDER_ID_,
 } from '../src/model-operations';
 
 const OPERATION_ID = 'builtin:read_mcp_resource' as const;
-const CAPABILITY_REVISION = RMV1_11_CAPABILITY_REVISIONS_V1[OPERATION_ID];
-const EXECUTOR_REVISION = RMV1_11_EXECUTOR_REVISIONS_V1[OPERATION_ID];
+const CAPABILITY_REVISION = MODEL_CAPABILITY_REVISIONS_[OPERATION_ID];
+const EXECUTOR_REVISION = MODEL_EXECUTOR_REVISIONS_[OPERATION_ID];
 
-const registry = createRuntimeModuleRegistryV1([createModelRuntimeModule()]);
+const registry = createRuntimeModuleRegistry([createModelRuntimeModule()]);
 
-function runtime(readResource: BuiltinMcpRuntimePortV1['readResource']): BuiltinMcpRuntimePortV1 {
+function runtime(readResource: BuiltinMcpRuntimePort['readResource']): BuiltinMcpRuntimePort {
   return Object.freeze({
     getCapabilitySnapshot: () => Object.freeze({}),
     getProviderDirectorySnapshot: () => Object.freeze({}),
@@ -32,7 +32,7 @@ function runtime(readResource: BuiltinMcpRuntimePortV1['readResource']): Builtin
 function context(
   invocationId: string,
   attemptId: string,
-  readResource: BuiltinMcpRuntimePortV1['readResource'],
+  readResource: BuiltinMcpRuntimePort['readResource'],
 ): {
   readonly request: {
     readonly invocationId: string;
@@ -40,7 +40,7 @@ function context(
     readonly capabilityRevision: string;
     readonly input: { readonly server: string; readonly uri: string };
   };
-  readonly context: CapabilityExecutionContextV1;
+  readonly context: CapabilityExecutionContext;
 } {
   const request = {
     invocationId,
@@ -73,20 +73,20 @@ function context(
 
 function readExecutor() {
   const executor = registry.executor(OPERATION_ID);
-  if (!executor) throw new Error('RMV1-11 MCP read executor is missing.');
+  if (!executor) throw new Error('RM-11 MCP read executor is missing.');
   return executor;
 }
 
 async function executeRead(
-  readResource: BuiltinMcpRuntimePortV1['readResource'],
+  readResource: BuiltinMcpRuntimePort['readResource'],
   invocationId = 'invocation-1',
   attemptId = 'attempt-1',
-): Promise<ExecutionReceiptV1> {
+): Promise<ExecutionReceipt> {
   const fixture = context(invocationId, attemptId, readResource);
   return readExecutor().execute(fixture.request, fixture.context);
 }
 
-describe('RMV1-11 MCP read provider failure boundary', () => {
+describe('RM-11 MCP read provider failure boundary', () => {
   test('returns identity-exact attempted failed receipts for the four closed provider kinds', async () => {
     const cases: readonly [McpProviderFailureKind, boolean][] = [
       ['provider_auth_required', false],
@@ -116,7 +116,7 @@ describe('RMV1-11 MCP read provider failure boundary', () => {
       expect(receipt).toMatchObject({
         invocationId: `invocation-${kind}`,
         attemptId: `attempt-${kind}`,
-        providerId: RMV1_11_PROVIDER_ID_V1,
+        providerId: MODEL_PROVIDER_ID_,
         executorRevision: EXECUTOR_REVISION,
         requestDigest: 'request-digest-1',
         status: 'failed',
@@ -146,13 +146,13 @@ describe('RMV1-11 MCP read provider failure boundary', () => {
     expect(receipt).toMatchObject({
       invocationId: 'invocation-1',
       attemptId: 'attempt-1',
-      providerId: RMV1_11_PROVIDER_ID_V1,
+      providerId: MODEL_PROVIDER_ID_,
       executorRevision: EXECUTOR_REVISION,
       requestDigest: 'request-digest-1',
       status: 'succeeded',
       dispatchCertainty: 'attempted',
     });
-    expect(isBuiltinOperationExecutionValueV1(receipt.value)).toBe(true);
+    expect(isBuiltinOperationExecutionValue(receipt.value)).toBe(true);
     expect(receipt.value).toMatchObject({
       schema: 'kite.builtin-operation-result.v1',
       ok: false,
@@ -174,7 +174,7 @@ describe('RMV1-11 MCP read provider failure boundary', () => {
       'attempt-unknown-kind',
     );
     expect(unknownTypedError.status).toBe('succeeded');
-    expect(isBuiltinOperationExecutionValueV1(unknownTypedError.value)).toBe(true);
+    expect(isBuiltinOperationExecutionValue(unknownTypedError.value)).toBe(true);
     expect(unknownTypedError.failure).toBeUndefined();
 
     const forgedKnownKind = await executeRead(
@@ -190,12 +190,12 @@ describe('RMV1-11 MCP read provider failure boundary', () => {
       'attempt-forged-kind',
     );
     expect(forgedKnownKind.status).toBe('succeeded');
-    expect(isBuiltinOperationExecutionValueV1(forgedKnownKind.value)).toBe(true);
+    expect(isBuiltinOperationExecutionValue(forgedKnownKind.value)).toBe(true);
     expect(forgedKnownKind.failure).toBeUndefined();
   });
 
   test('rethrows the exact coordination-unknown marker for Host recovery', async () => {
-    const unknown = new BuiltinMcpExecutionUnknownErrorV1('readiness receipt drifted');
+    const unknown = new BuiltinMcpExecutionUnknownError('readiness receipt drifted');
     await expect(
       executeRead(async () => {
         throw unknown;
@@ -207,8 +207,8 @@ describe('RMV1-11 MCP read provider failure boundary', () => {
     const exact = 'x'.repeat(128 * 1024);
     const exactReceipt = await executeRead(async () => exact);
     expect(exactReceipt.status).toBe('succeeded');
-    expect(isBuiltinOperationExecutionValueV1(exactReceipt.value)).toBe(true);
-    if (!isBuiltinOperationExecutionValueV1(exactReceipt.value)) {
+    expect(isBuiltinOperationExecutionValue(exactReceipt.value)).toBe(true);
+    if (!isBuiltinOperationExecutionValue(exactReceipt.value)) {
       throw new Error('exact MCP read result is not a Builtin value');
     }
     expect(exactReceipt.value.ok).toBe(true);
@@ -218,8 +218,8 @@ describe('RMV1-11 MCP read provider failure boundary', () => {
     const oversized = 'x'.repeat(128 * 1024 + 20);
     const partialReceipt = await executeRead(async () => oversized, 'invocation-2', 'attempt-2');
     expect(partialReceipt.status).toBe('succeeded');
-    expect(isBuiltinOperationExecutionValueV1(partialReceipt.value)).toBe(true);
-    if (!isBuiltinOperationExecutionValueV1(partialReceipt.value)) {
+    expect(isBuiltinOperationExecutionValue(partialReceipt.value)).toBe(true);
+    if (!isBuiltinOperationExecutionValue(partialReceipt.value)) {
       throw new Error('partial MCP read result is not a Builtin value');
     }
     const partial = JSON.parse(partialReceipt.value.stdout) as Record<string, unknown>;

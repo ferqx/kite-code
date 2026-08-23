@@ -4,7 +4,7 @@ import type {
   RuntimeQuery,
   RuntimeQueryResult,
 } from '@kite/runtime-contract';
-import type { CapabilityExecutionPortV1, CapabilityRegistrySnapshotV1 } from '@kite/runtime-spi';
+import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite/runtime-spi';
 import type { RuntimeHostExecutionServices } from './effect-supervisor';
 import type { RuntimeHostKernelInput } from './kernel-input';
 
@@ -22,7 +22,7 @@ export interface RuntimeHostPreparedExecution {
 }
 
 /**
- * Temporary RMV1 execution seam for work whose production owner has not moved
+ * Temporary RM execution seam for work whose production owner has not moved
  * into Runtime Host yet. One Host receives exactly one bridge and never falls
  * back to a second implementation.
  */
@@ -44,11 +44,11 @@ export interface RuntimeHostExecutionBridge {
   close(): Promise<void>;
 }
 
-export const RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1 = 'kite.runtime-host.execution-bridge.v1';
+export const RUNTIME_HOST_EXECUTION_ADAPTER_ID_ = 'kite.runtime-host.execution-bridge.v1';
 
 export interface RuntimeHostExecutionAdapterContext<Event = unknown, State = unknown> {
   readonly services: RuntimeHostExecutionServices<Event, State>;
-  readonly capabilities: CapabilityExecutionPortV1;
+  readonly capabilities: CapabilityExecutionPort;
   /** Exact frozen snapshot shared by Host execution and the App catalog projection. */
-  readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
+  readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
 }

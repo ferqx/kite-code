@@ -1,6 +1,6 @@
 import type { KernelEvent } from './events';
 import { assertAgentStateInvariants } from './invariants';
-import { createToolRecoveryJournalV1 } from './recovery';
+import { createToolRecoveryJournal } from './recovery';
 import { eventRecord, recordField, stringField } from './reducer-utils';
 import { type AgentState, RUNTIME_STATE_FORMAT_EPOCH, RUNTIME_STATE_SCHEMA_VERSION } from './state';
 
@@ -83,7 +83,7 @@ export function rebindForkAgentState(
     active: [],
   };
   forkState.suspendedSubagents = {};
-  forkState.toolRecovery = createToolRecoveryJournalV1(targetRecoveryIdentityKey);
+  forkState.toolRecovery = createToolRecoveryJournal(targetRecoveryIdentityKey);
   const rebound = forkState as unknown as AgentState;
   assertAgentStateInvariants(rebound);
   return rebound;

@@ -150,7 +150,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     modelServer.setResponses([{ message: { content: 'continued after provider waiver' } }]);
     workspace = createTestWorkspace({
       configOverrides: {
-        features: { mcpProviderActionV1: true },
+        features: { mcpProviderAction: true },
         mcpServers: {
           oauth: {
             type: 'http',
@@ -275,9 +275,9 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     workspace = createTestWorkspace({
       configOverrides: {
         features: {
-          capabilityCatalogV1: true,
-          mcpRuntimeBindingV1: true,
-          mcpProviderActionV1: true,
+          capabilityCatalog: true,
+          mcpRuntimeBinding: true,
+          mcpProviderAction: true,
         },
         mcpServers: {
           recoverable: {

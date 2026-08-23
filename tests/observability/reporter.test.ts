@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  BoundedMetricQueueV1,
-  BufferedMetricReporterV1,
-  createMetricSampleV1,
-  type MetricExporterV1,
-  NoopMetricReporterV1,
+  BoundedMetricQueue,
+  BufferedMetricReporter,
+  createMetricSample,
+  type MetricExporter,
+  NoopMetricReporter,
 } from '@kite/runtime-host';
 
 const NOW = '2026-08-02T00:00:00.000Z';
 const sample = (name: 'read_batch_size' | 'run_total' | 'runtime_hard_block_total') =>
-  createMetricSampleV1({
+  createMetricSample({
     name,
     observedAt: NOW,
     ...(name === 'run_total' ? { attributes: { outcome: 'completed', reason: 'completed' } } : {}),
@@ -18,7 +18,7 @@ const sample = (name: 'read_batch_size' | 'run_total' | 'runtime_hard_block_tota
 
 describe('bounded metric reporter', () => {
   test('evicts the oldest lowest-priority sample and records a local drop', () => {
-    const queue = new BoundedMetricQueueV1(2);
+    const queue = new BoundedMetricQueue(2);
     queue.enqueue(sample('read_batch_size'));
     queue.enqueue(sample('runtime_hard_block_total'));
     queue.enqueue(sample('run_total'));
@@ -30,10 +30,10 @@ describe('bounded metric reporter', () => {
   });
 
   test('exporter rejection and timeout never propagate to Runtime callers', async () => {
-    const rejecting: MetricExporterV1 = {
+    const rejecting: MetricExporter = {
       export: async () => Promise.reject(new Error('network secret')),
     };
-    const reporter = new BufferedMetricReporterV1({
+    const reporter = new BufferedMetricReporter({
       enabled: true,
       capacity: 4,
       exporter: rejecting,
@@ -48,7 +48,7 @@ describe('bounded metric reporter', () => {
     });
     expect(reporter.localDropMetric(NOW)?.attributes.reason).toBe('exporter_failure');
 
-    const hanging = new BufferedMetricReporterV1({
+    const hanging = new BufferedMetricReporter({
       enabled: true,
       capacity: 4,
       exporter: { export: () => new Promise(() => {}) },
@@ -60,7 +60,7 @@ describe('bounded metric reporter', () => {
 
   test('consent withdrawal clears memory and permanently stops new samples', async () => {
     const exported: string[] = [];
-    const reporter = new BufferedMetricReporterV1({
+    const reporter = new BufferedMetricReporter({
       enabled: true,
       capacity: 4,
       exporter: {
@@ -78,9 +78,9 @@ describe('bounded metric reporter', () => {
   });
 
   test('folds unknown aliases and enforces the per-metric series budget at export', async () => {
-    const exported: Array<ReturnType<typeof createMetricSampleV1>> = [];
+    const exported: Array<ReturnType<typeof createMetricSample>> = [];
     const aliases = Array.from({ length: 65 }, (_, index) => `route-${index}`);
-    const reporter = new BufferedMetricReporterV1({
+    const reporter = new BufferedMetricReporter({
       enabled: true,
       capacity: 128,
       exporter: {
@@ -92,7 +92,7 @@ describe('bounded metric reporter', () => {
     });
     for (const route of aliases) {
       reporter.report(
-        createMetricSampleV1({
+        createMetricSample({
           name: 'model_request_total',
           observedAt: NOW,
           attributes: { outcome: 'success', route },
@@ -101,7 +101,7 @@ describe('bounded metric reporter', () => {
     }
     for (let index = 0; index < 1_000; index += 1) {
       reporter.report(
-        createMetricSampleV1({
+        createMetricSample({
           name: 'model_request_total',
           observedAt: NOW,
           attributes: { outcome: 'failed', route: `secret-customer-${index}` },
@@ -115,7 +115,7 @@ describe('bounded metric reporter', () => {
   });
 
   test('no-op reporter has no storage, exporter, or failure path', async () => {
-    const reporter = new NoopMetricReporterV1();
+    const reporter = new NoopMetricReporter();
     reporter.report(sample('runtime_hard_block_total'));
     await reporter.shutdown(1);
     expect(reporter.status()).toEqual({

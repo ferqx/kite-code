@@ -5,7 +5,7 @@
 // tool inputs/outputs, plans, paths, errors, and arbitrary RuntimeEvent fields
 // have no serializer here.
 
-import type { StateRuntimeEventV1 as RuntimeEvent } from '@kite/runtime-host';
+import type { StateRuntimeEvent as RuntimeEvent } from '@kite/runtime-host';
 import { genSpanId } from './ids';
 import type { TraceRecord } from './types';
 

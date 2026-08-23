@@ -5,11 +5,11 @@ import {
   type RuntimeEventType,
 } from './events';
 import {
-  isValidFilesystemIntentV1,
-  isValidFilesystemObservationV1,
-  isValidFilesystemReadyV1,
-  isValidSandboxIntentV1,
-  isValidSandboxReadyV1,
+  isValidFilesystemIntent,
+  isValidFilesystemObservation,
+  isValidFilesystemReady,
+  isValidSandboxIntent,
+  isValidSandboxReady,
 } from './invariants';
 
 export { CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS, CURRENT_RUNTIME_EVENT_TYPE_COUNT };
@@ -90,7 +90,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
     case 'capability.execution_succeeded':
       if (
         value.filesystemObservation !== undefined &&
-        !isValidFilesystemObservationV1(value.filesystemObservation)
+        !isValidFilesystemObservation(value.filesystemObservation)
       )
         throw new Error('Filesystem observation evidence is invalid.');
       break;
@@ -103,7 +103,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
       requireNonEmptyString(value, 'invocationId');
       const { type: _type, invocationId: _invocationId, ...intent } = value;
-      if (!isValidFilesystemIntentV1(intent)) {
+      if (!isValidFilesystemIntent(intent)) {
         throw new Error('Filesystem intent evidence digest mismatch or identity invalid.');
       }
       break;
@@ -120,22 +120,21 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         throw new Error('Invalid Artifact byteLength.');
       }
       if (!validTimestamp(ready.readyAt)) throw new Error('Invalid readyAt.');
-      if (!isValidFilesystemReadyV1(ready)) throw new Error('Invalid ready intentDigest.');
+      if (!isValidFilesystemReady(ready)) throw new Error('Invalid ready intentDigest.');
       break;
     }
     case 'capability.sandbox_preparation_intent_recorded': {
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
       requireNonEmptyString(value, 'invocationId');
       const { type: _type, invocationId: _invocationId, ...intent } = value;
-      if (!isValidSandboxIntentV1(intent))
-        throw new Error('Sandbox preparation intent is invalid.');
+      if (!isValidSandboxIntent(intent)) throw new Error('Sandbox preparation intent is invalid.');
       break;
     }
     case 'capability.sandbox_preparation_ready': {
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
       requireNonEmptyString(value, 'invocationId');
       const { type: _type, invocationId: _invocationId, ...ready } = value;
-      if (!isValidSandboxReadyV1(ready))
+      if (!isValidSandboxReady(ready))
         throw new Error('Sandbox preparation ready record is invalid.');
       break;
     }

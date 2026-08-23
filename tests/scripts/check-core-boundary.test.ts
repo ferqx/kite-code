@@ -78,7 +78,7 @@ describe('check-core-boundary', () => {
   test('rejects production imports of the test-only Tool helper', () => {
     const result = fixture({
       'src/core/controllers/invalid.ts':
-        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -89,7 +89,7 @@ describe('check-core-boundary', () => {
   test('rejects extension-qualified test-only Tool helper imports', () => {
     const result = fixture({
       'src/core/controllers/invalid.ts':
-        "export { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool.ts';\n",
+        "export { invokeTestGovernedTool } from '@/tests/helpers/governed-tool.ts';\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -100,7 +100,7 @@ describe('check-core-boundary', () => {
   test('rejects test-only Tool helper imports in the Pipeline dispatch adapter', () => {
     const result = fixture({
       'src/core/execution/tool-pipeline/dispatch.ts':
-        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nexport const dispatch = invokeTestGovernedToolV1;\n",
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nexport const dispatch = invokeTestGovernedTool;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -111,7 +111,7 @@ describe('check-core-boundary', () => {
   test('rejects the test-only Tool helper in Tool Controller', () => {
     const result = fixture({
       'src/core/controllers/tool-controller.ts':
-        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -122,7 +122,7 @@ describe('check-core-boundary', () => {
   test('rejects type-only test helper imports from production Tool Controller', () => {
     const result = fixture({
       'src/core/controllers/tool-controller.ts':
-        "import type { GovernedToolInvocationInput } from '@/tests/helpers/governed-tool';\nimport { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+        "import type { GovernedToolInvocationInput } from '@/tests/helpers/governed-tool';\nimport { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -133,7 +133,7 @@ describe('check-core-boundary', () => {
   test('rejects mixed test helper runtime imports in Tool Controller', () => {
     const result = fixture({
       'src/core/controllers/tool-controller.ts':
-        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -143,8 +143,8 @@ describe('check-core-boundary', () => {
 
   test('rejects aliased, default, and namespace test helper imports in Tool Controller', () => {
     for (const importStatement of [
-      "import { invokeTestGovernedToolV1 as governed } from '@/tests/helpers/governed-tool';\nvoid governed;\n",
-      "import runner, { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid runner;\nvoid invokeTestGovernedToolV1;\n",
+      "import { invokeTestGovernedTool as governed } from '@/tests/helpers/governed-tool';\nvoid governed;\n",
+      "import runner, { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid runner;\nvoid invokeTestGovernedTool;\n",
       "import * as runner from '@/tests/helpers/governed-tool';\nvoid runner;\n",
       "import '@/tests/helpers/governed-tool';\n",
     ]) {
@@ -161,7 +161,7 @@ describe('check-core-boundary', () => {
   test('rejects other test helper imports in Tool Controller', () => {
     const result = fixture({
       'src/core/controllers/tool-controller.ts':
-        "import { containsBrokeredGitInvocationForTestV1 } from '@/tests/helpers/governed-tool';\nvoid containsBrokeredGitInvocationForTestV1;\n",
+        "import { containsBrokeredGitInvocationForTest } from '@/tests/helpers/governed-tool';\nvoid containsBrokeredGitInvocationForTest;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -172,11 +172,11 @@ describe('check-core-boundary', () => {
   test('rejects test helper imports from App, package, and script production roots', () => {
     const result = fixture({
       'apps/kite/src/invalid.ts':
-        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
       'packages/runtime-spi/src/invalid.ts':
-        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
       'scripts/invalid.ts':
-        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+        "import { invokeTestGovernedTool } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedTool;\n",
     });
     expect(result.exitCode).toBe(1);
     const stderr = result.stderr.toString();
@@ -189,8 +189,7 @@ describe('check-core-boundary', () => {
     const result = fixture({
       'src/core/invalid.ts': 'export const invokeGovernedTool = true;\n',
       'apps/kite/src/invalid.ts': 'export const completedTaskExecutionResult = true;\n',
-      'packages/runtime-spi/src/invalid.ts':
-        'export const containsBrokeredGitInvocationV1 = true;\n',
+      'packages/runtime-spi/src/invalid.ts': 'export const containsBrokeredGitInvocation = true;\n',
       'scripts/invalid.ts': 'export const invokeGovernedTool = true;\n',
     });
     expect(result.exitCode).toBe(1);
@@ -237,11 +236,11 @@ describe('check-core-boundary', () => {
   test('accepts LocalFilesystemProvider imports of protocol and Node filesystem primitives', () => {
     const result = fixture({
       'src/protocol/workspace-filesystem-provider.ts':
-        'export interface WorkspaceFilesystemProviderV1 {}\n',
+        'export interface WorkspaceFilesystemProvider {}\n',
       'src/core/execution/workspace-filesystem/local-provider.ts':
         "import { readFile } from 'node:fs/promises';\n" +
-        "import type { WorkspaceFilesystemProviderV1 } from '@kite/runtime-spi';\n" +
-        'export const provider: WorkspaceFilesystemProviderV1 = {};\nvoid readFile;\n',
+        "import type { WorkspaceFilesystemProvider } from '@kite/runtime-spi';\n" +
+        'export const provider: WorkspaceFilesystemProvider = {};\nvoid readFile;\n',
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain('Core boundary checks passed.');
@@ -271,9 +270,9 @@ describe('check-core-boundary', () => {
       'src/core/execution/sandbox-execution/allocating-helper.ts':
         "export const allocate = () => Bun.spawn(['forbidden']);\n",
       'src/core/controllers/sandbox-bypass.ts':
-        "import { LocalSandboxExecutionProviderV1 } from '@kite/builtin-runtime/sandbox';\n" +
+        "import { LocalSandboxExecutionProvider } from '@kite/builtin-runtime/sandbox';\n" +
         "import { shellTool } from '@/core/tools/shell';\n" +
-        'export const createSandboxExecutor = () => new LocalSandboxExecutionProviderV1(shellTool);\n',
+        'export const createSandboxExecutor = () => new LocalSandboxExecutionProvider(shellTool);\n',
       'src/core/tools/shell.ts': 'export const shellTool = true;\n',
     });
     expect(result.exitCode).toBe(1);
@@ -288,22 +287,22 @@ describe('check-core-boundary', () => {
   test('requires the acknowledged host Shell factory to use Builtin semantics', () => {
     const allowed = fixture({
       'src/app/sandbox/acknowledged-host-shell.ts':
-        "import { createBuiltinShellExecutorV1 } from '@kite/builtin-runtime/sandbox';\n" +
-        "import { createRuntimeHostProcessExecutionPortV1 } from '@kite/runtime-host';\n" +
-        'export const createAcknowledgedHostShellExecutorV1 = () =>\n' +
-        '  createBuiltinShellExecutorV1(createRuntimeHostProcessExecutionPortV1());\n',
+        "import { createBuiltinShellExecutor } from '@kite/builtin-runtime/sandbox';\n" +
+        "import { createRuntimeHostProcessExecutionPort } from '@kite/runtime-host';\n" +
+        'export const createAcknowledgedHostShellExecutor = () =>\n' +
+        '  createBuiltinShellExecutor(createRuntimeHostProcessExecutionPort());\n',
       'src/app/sandbox/composition.ts':
-        "import { createAcknowledgedHostShellExecutorV1 } from './acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutorV1;\n",
+        "import { createAcknowledgedHostShellExecutor } from './acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutor;\n",
     });
     expect(allowed.exitCode).toBe(0);
 
     const bypass = fixture({
       'src/app/sandbox/acknowledged-host-shell.ts':
-        "import { shellTool } from '@/core/tools/shell';\nexport const createAcknowledgedHostShellExecutorV1 = () => shellTool;\n",
+        "import { shellTool } from '@/core/tools/shell';\nexport const createAcknowledgedHostShellExecutor = () => shellTool;\n",
       'src/app/sandbox/composition.ts':
-        "import { createAcknowledgedHostShellExecutorV1 } from './acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutorV1;\n",
+        "import { createAcknowledgedHostShellExecutor } from './acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutor;\n",
       'src/core/controllers/sandbox-bypass.ts':
-        "import { createAcknowledgedHostShellExecutorV1 } from '@/app/sandbox/acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutorV1;\n",
+        "import { createAcknowledgedHostShellExecutor } from '@/app/sandbox/acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutor;\n",
       'src/core/tools/shell.ts': 'export const shellTool = true;\n',
     });
     expect(bypass.exitCode).toBe(1);
@@ -319,7 +318,7 @@ describe('check-core-boundary', () => {
     const result = fixture({
       'src/core/sandbox/legacy.ts':
         'export const createWindowsRestrictedTokenExecutor = true;\n' +
-        'executeWindowsRestrictedTokenPreparedV1(input, prepared);\n',
+        'executeWindowsRestrictedTokenPrepared(input, prepared);\n',
     });
     expect(result.exitCode).toBe(1);
     const stderr = result.stderr.toString();
@@ -330,7 +329,7 @@ describe('check-core-boundary', () => {
   test('rejects Runtime authority shapes retired by CUT-01', () => {
     const result = fixture({
       'src/protocol/capabilities.ts':
-        'export interface LegacyCapabilityArtifactRefV1 { relativePath: string }\n',
+        'export interface LegacyCapabilityArtifactRef { relativePath: string }\n',
       'src/core/controllers/legacy-task.ts': "export const source = 'legacy_v24';\n",
       'src/core/runtime/kernel.ts':
         "export const normalize = (state: object) => 'modelInvocations' in state;\n",
@@ -362,9 +361,9 @@ describe('check-core-boundary', () => {
   test('rejects concrete WorkspaceFilesystemProvider imports outside composition and Pipeline', () => {
     const result = fixture({
       'src/core/execution/workspace-filesystem/index.ts':
-        'export const LocalWorkspaceFilesystemProviderV1 = {};\n',
+        'export const LocalWorkspaceFilesystemProvider = {};\n',
       'src/core/controllers/invalid.ts':
-        "import { LocalWorkspaceFilesystemProviderV1 } from '../execution/workspace-filesystem/index';\nvoid LocalWorkspaceFilesystemProviderV1;\n",
+        "import { LocalWorkspaceFilesystemProvider } from '../execution/workspace-filesystem/index';\nvoid LocalWorkspaceFilesystemProvider;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -375,9 +374,9 @@ describe('check-core-boundary', () => {
   test('allows concrete WorkspaceFilesystemProvider only in production composition', () => {
     const result = fixture({
       'src/core/execution/workspace-filesystem/index.ts':
-        'export const LocalWorkspaceFilesystemProviderV1 = {};\n',
+        'export const LocalWorkspaceFilesystemProvider = {};\n',
       'src/core/model/invocation-composition.ts':
-        "import { LocalWorkspaceFilesystemProviderV1 } from '@kite/builtin-runtime/filesystem';\nvoid LocalWorkspaceFilesystemProviderV1;\n",
+        "import { LocalWorkspaceFilesystemProvider } from '@kite/builtin-runtime/filesystem';\nvoid LocalWorkspaceFilesystemProvider;\n",
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain('Core boundary checks passed.');
@@ -386,9 +385,9 @@ describe('check-core-boundary', () => {
   test('keeps filesystem observation authority inside the issuer and receipt verifier', () => {
     const accepted = fixture({
       'src/core/execution/tool-pipeline/filesystem-observation-authority.ts':
-        'export const issueWorkspaceFilesystemObservationAuthorityV1 = true;\nexport const assertAuthority = true;\n',
+        'export const issueWorkspaceFilesystemObservationAuthority = true;\nexport const assertAuthority = true;\n',
       'src/core/execution/tool-pipeline/workspace-filesystem.ts':
-        "import { issueWorkspaceFilesystemObservationAuthorityV1 } from './filesystem-observation-authority';\nvoid issueWorkspaceFilesystemObservationAuthorityV1;\n",
+        "import { issueWorkspaceFilesystemObservationAuthority } from './filesystem-observation-authority';\nvoid issueWorkspaceFilesystemObservationAuthority;\n",
       'src/core/execution/tool-pipeline/dispatch.ts':
         "import { assertAuthority } from './filesystem-observation-authority';\nvoid assertAuthority;\n",
       'src/core/execution/tool-pipeline/receipt.ts':
@@ -409,9 +408,9 @@ describe('check-core-boundary', () => {
 
     const receiptIssuer = fixture({
       'src/core/execution/tool-pipeline/filesystem-observation-authority.ts':
-        'export const issueWorkspaceFilesystemObservationAuthorityV1 = true;\n',
+        'export const issueWorkspaceFilesystemObservationAuthority = true;\n',
       'src/core/execution/tool-pipeline/receipt.ts':
-        "import { issueWorkspaceFilesystemObservationAuthorityV1 } from './filesystem-observation-authority';\nvoid issueWorkspaceFilesystemObservationAuthorityV1;\n",
+        "import { issueWorkspaceFilesystemObservationAuthority } from './filesystem-observation-authority';\nvoid issueWorkspaceFilesystemObservationAuthority;\n",
     });
     expect(receiptIssuer.exitCode).toBe(1);
     expect(receiptIssuer.stderr.toString()).toContain(
@@ -422,9 +421,9 @@ describe('check-core-boundary', () => {
   test('keeps Tool dispatch stage authority inside the dispatch issuer and receipt verifier', () => {
     const accepted = fixture({
       'src/core/execution/tool-pipeline/dispatch-authority.ts':
-        'export const issueAcknowledgedRecordedInvocationV1 = true;\nexport const assertAuthority = true;\n',
+        'export const issueAcknowledgedRecordedInvocation = true;\nexport const assertAuthority = true;\n',
       'src/core/execution/tool-pipeline/dispatch.ts':
-        "import { issueAcknowledgedRecordedInvocationV1 } from './dispatch-authority';\nvoid issueAcknowledgedRecordedInvocationV1;\n",
+        "import { issueAcknowledgedRecordedInvocation } from './dispatch-authority';\nvoid issueAcknowledgedRecordedInvocation;\n",
       'src/core/execution/tool-pipeline/receipt.ts':
         "import { assertAuthority } from './dispatch-authority';\nvoid assertAuthority;\n",
     });
@@ -443,9 +442,9 @@ describe('check-core-boundary', () => {
 
     const rejectedIssuer = fixture({
       'src/core/execution/tool-pipeline/dispatch-authority.ts':
-        'export const issueAdapterDispatchedOutcomeV1 = true;\n',
+        'export const issueAdapterDispatchedOutcome = true;\n',
       'src/core/execution/tool-pipeline/receipt.ts':
-        "import { issueAdapterDispatchedOutcomeV1 } from './dispatch-authority';\nvoid issueAdapterDispatchedOutcomeV1;\n",
+        "import { issueAdapterDispatchedOutcome } from './dispatch-authority';\nvoid issueAdapterDispatchedOutcome;\n",
     });
     expect(rejectedIssuer.exitCode).toBe(1);
     expect(rejectedIssuer.stderr.toString()).toContain(

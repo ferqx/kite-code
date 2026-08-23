@@ -44,7 +44,7 @@
   `replanReason` 仍必须是至多 500 字符的字符串，不能让未知 JSON 伪装成类型正确的历史正文；
 - 同一 Task 内版本递增，新顶层目标创建新的 Task 和 Plan ID；
 - 审核取消保留草稿，Artifact 缺失或 digest 不匹配不得提前清除审核 interaction；
-- V2 Artifact metadata 可保存 `PlanCompletionEvidenceV1`，但只允许 verification ID/outcome、
+- V2 Artifact metadata 可保存 `PlanCompletionEvidence`，但只允许 verification ID/outcome、
   terminal tool-call ID/outcome、skipped step ID/reason code 和 unresolved kind/reference ID；不得保存
   prompt/tool body、路径、命令、stdout 或任意错误正文；
 - 当前 Runtime 只创建和接受 PlanDocument V2；Runtime snapshot 还必须具有精确 schema version 与 format

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import type { CapabilityBindingV1 } from '@kite/runtime-spi';
+import type { CapabilityBinding } from '@kite/runtime-spi';
 
-export interface CreateCapabilityBindingInputV1 {
+export interface CreateCapabilityBindingInput {
   readonly capabilityId: string;
   readonly capabilityRevision: string;
   readonly exposedToolName: string;
@@ -10,15 +10,13 @@ export interface CreateCapabilityBindingInputV1 {
 }
 
 /**
- * The one RMV1 binding constructor. Its canonicalization intentionally
+ * The one RM binding constructor. Its canonicalization intentionally
  * preserves the State 25 digest produced by the legacy catalog helper.
  */
-export function createCapabilityBindingV1(
-  input: CreateCapabilityBindingInputV1,
-): CapabilityBindingV1 {
-  const schemaDigest = digestCapabilityBindingValueV1(input.inputSchema ?? {});
+export function createCapabilityBinding(input: CreateCapabilityBindingInput): CapabilityBinding {
+  const schemaDigest = digestCapabilityBindingValue(input.inputSchema ?? {});
   return Object.freeze({
-    bindingId: digestCapabilityBindingValueV1({
+    bindingId: digestCapabilityBindingValue({
       capabilityId: input.capabilityId,
       revision: input.capabilityRevision,
       exposedToolName: input.exposedToolName,
@@ -33,16 +31,16 @@ export function createCapabilityBindingV1(
   });
 }
 
-export function digestCapabilityBindingValueV1(value: unknown): string {
-  return createHash('sha256').update(stableBindingStringifyV1(value)).digest('hex');
+export function digestCapabilityBindingValue(value: unknown): string {
+  return createHash('sha256').update(stableBindingStringify(value)).digest('hex');
 }
 
-function stableBindingStringifyV1(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableBindingStringifyV1).join(',')}]`;
+function stableBindingStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableBindingStringify).join(',')}]`;
   if (value && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableBindingStringifyV1(item)}`)
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableBindingStringify(item)}`)
       .join(',')}}`;
   }
   return JSON.stringify(value);

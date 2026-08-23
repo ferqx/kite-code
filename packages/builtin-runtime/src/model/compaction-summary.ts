@@ -5,22 +5,22 @@ import {
   type SafeCompactionBoundary,
 } from './compaction';
 import { normalizeCompactionSummary, serializeCompactionSummary } from './compaction-summary-frame';
-import type { ModelRuntimeConfigV1 } from './config';
+import type { ModelRuntimeConfig } from './config';
 import { buildContextProjection, type ContextProjectionEnvironment } from './context-projection';
 import type { SupportedChatModel } from './factory';
 import {
-  computeModelInvocationPrivateDigestV1,
-  type NormalizedModelResponseV1,
-  normalizedModelResponseToAIMessageV1,
+  computeModelInvocationPrivateDigest,
+  type NormalizedModelResponse,
+  normalizedModelResponseToAIMessage,
 } from './invocation-gateway';
 import { humanMessage, systemMessage } from './messages';
-import type { ProviderDataAdmissionGateV1 } from './provider-data-admission';
+import type { ProviderDataAdmissionGate } from './provider-data-admission';
 import type {
-  BuiltinContextCheckpointViewV1,
-  BuiltinRuntimeStateViewV1,
-  BuiltinTranscriptMessageV1,
+  BuiltinContextCheckpointView,
+  BuiltinRuntimeStateView,
+  BuiltinTranscriptMessage,
 } from './runtime-view';
-import { compileModelSurfaceV1 } from './surface-compiler';
+import { compileModelSurface } from './surface-compiler';
 import { countTokens } from './token-counter';
 
 export { normalizeCompactionSummary, serializeCompactionSummary };
@@ -42,10 +42,10 @@ export type ContextCompactionErrorKind =
   | 'invalid_candidate'
   | 'insufficient_reduction';
 
-interface ContextSummaryGatewayV1 {
+interface ContextSummaryGateway {
   invoke(input: any): Promise<{
     readonly invocationId: string;
-    commit(): Promise<NormalizedModelResponseV1>;
+    commit(): Promise<NormalizedModelResponse>;
   }>;
 }
 
@@ -79,14 +79,14 @@ export type ContextSummaryGenerator = (
 
 /** One provider request, no tools and no SDK retries. */
 export function createModelContextSummaryGenerator(input: {
-  config?: ModelRuntimeConfigV1;
+  config?: ModelRuntimeConfig;
   model: SupportedChatModel;
-  gateway?: ContextSummaryGatewayV1;
+  gateway?: ContextSummaryGateway;
   persistence?: unknown;
-  state?: Readonly<BuiltinRuntimeStateViewV1>;
+  state?: Readonly<BuiltinRuntimeStateView>;
   projectionEnvironmentDigest?: string;
   signal?: AbortSignal;
-  providerDataAdmission: ProviderDataAdmissionGateV1;
+  providerDataAdmission: ProviderDataAdmissionGate;
 }): ContextSummaryGenerator {
   return async (request) => {
     if (
@@ -98,7 +98,7 @@ export function createModelContextSummaryGenerator(input: {
     ) {
       throw new Error('ModelInvocationGateway execution context is unavailable.');
     }
-    const compiled = compileModelSurfaceV1({
+    const compiled = compileModelSurface({
       purpose: 'context_compaction',
       config: input.config,
       model: input.model,
@@ -115,11 +115,11 @@ export function createModelContextSummaryGenerator(input: {
       provenance: {
         contextCheckpointId: input.state.context.activeCheckpoint?.sourceDigest ?? null,
         promptContractVersion: 'compaction-summary-v1',
-        projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+        projectionEnvironmentDigest: computeModelInvocationPrivateDigest(
           'kite.model-projection-environment.v1',
           input.projectionEnvironmentDigest,
         ),
-        capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+        capabilityBindingDigest: computeModelInvocationPrivateDigest(
           'kite.model-capability-bindings.v1',
           [],
         ),
@@ -128,7 +128,7 @@ export function createModelContextSummaryGenerator(input: {
       resourceKind: 'compaction',
       signal: input.signal,
     });
-    const response = normalizedModelResponseToAIMessageV1(await pending.commit());
+    const response = normalizedModelResponseToAIMessage(await pending.commit());
     const summary =
       typeof response.content === 'string'
         ? response.content
@@ -154,7 +154,7 @@ export class ContextCompactionValidationError extends Error {
 
 export function expectedCompactionSourceDigest(
   baseDigest: string | undefined,
-  messages: readonly BuiltinTranscriptMessageV1[],
+  messages: readonly BuiltinTranscriptMessage[],
 ): string {
   const tailDigest = digestCompactionSource(messages);
   if (!baseDigest) return tailDigest;
@@ -165,7 +165,7 @@ export function expectedCompactionSourceDigest(
 
 function summaryInput(input: {
   baseSummary?: string;
-  messages: readonly BuiltinTranscriptMessageV1[];
+  messages: readonly BuiltinTranscriptMessage[];
   customInstructions?: string;
 }): string {
   return [
@@ -189,8 +189,8 @@ function normalizeResult(
 
 function incrementalBoundary(
   boundary: SafeCompactionBoundary,
-  state: Readonly<BuiltinRuntimeStateViewV1>,
-  checkpoint: BuiltinContextCheckpointViewV1,
+  state: Readonly<BuiltinRuntimeStateView>,
+  checkpoint: BuiltinContextCheckpointView,
 ): SafeCompactionBoundary {
   const checkpointIndex = state.transcript.messages.findIndex(
     (message) => message.messageId === checkpoint.coveredThroughMessageId,
@@ -236,11 +236,11 @@ export function createNarrativeContextCompactor(options: {
   }
 
   return async (input: {
-    state: Readonly<BuiltinRuntimeStateViewV1>;
-    pending: Readonly<NonNullable<BuiltinRuntimeStateViewV1['context']['pendingCompaction']>>;
+    state: Readonly<BuiltinRuntimeStateView>;
+    pending: Readonly<NonNullable<BuiltinRuntimeStateView['context']['pendingCompaction']>>;
     sourceRevision: number;
     projectionEnvironment?: ContextProjectionEnvironment;
-  }): Promise<BuiltinContextCheckpointViewV1> => {
+  }): Promise<BuiltinContextCheckpointView> => {
     // Manual compaction summarizes every settled turn. Automatic compaction runs
     // before the current turn is complete, so it protects that one live turn.
     const currentTurnHasMessages = input.state.transcript.messages.some(
@@ -281,7 +281,7 @@ export function createNarrativeContextCompactor(options: {
     // Use the smallest valid narrative to calculate an upper bound on possible
     // savings. If even that best case cannot clear the acceptance threshold,
     // a Provider call can only waste time and tokens.
-    const bestCaseCheckpoint: BuiltinContextCheckpointViewV1 = {
+    const bestCaseCheckpoint: BuiltinContextCheckpointView = {
       compactionId: input.pending.compactionId,
       version: 1,
       sourceRevision: input.sourceRevision,
@@ -365,7 +365,7 @@ export function createNarrativeContextCompactor(options: {
       );
     }
 
-    const checkpoint: BuiltinContextCheckpointViewV1 = {
+    const checkpoint: BuiltinContextCheckpointView = {
       compactionId: input.pending.compactionId,
       ...(generated.modelInvocationId ? { modelInvocationId: generated.modelInvocationId } : {}),
       version: 1,

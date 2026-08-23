@@ -4,23 +4,19 @@
  * This is deliberately not a persisted state schema and owns no Kernel authority. The
  * Core State 25 object satisfies this view structurally at the Builtin invocation seam.
  */
-export type BuiltinToolEffectClassV1 =
+export type BuiltinToolEffectClass =
   | 'read_only'
   | 'plan_only'
   | 'workspace_write'
   | 'external_side_effect'
   | 'unknown';
 
-export type BuiltinAgentPhaseV1 = 'planning' | 'building';
-export type BuiltinInteractionModeV1 = 'accept_edits' | 'auto' | 'full';
-export type BuiltinAuthorizationModeV1 = 'default' | 'full_access';
-export type BuiltinSandboxBackendV1 =
-  | 'seatbelt'
-  | 'bubblewrap'
-  | 'windows_restricted_token'
-  | 'none';
+export type BuiltinAgentPhase = 'planning' | 'building';
+export type BuiltinInteractionMode = 'accept_edits' | 'auto' | 'full';
+export type BuiltinAuthorizationMode = 'default' | 'full_access';
+export type BuiltinSandboxBackend = 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
 
-export interface BuiltinPlanDocumentViewV1 {
+export interface BuiltinPlanDocumentView {
   readonly planId: string;
   readonly version: number;
   readonly structuralDigest: string;
@@ -30,21 +26,21 @@ export interface BuiltinPlanDocumentViewV1 {
   }[];
 }
 
-export type BuiltinPlanningStateViewV1 =
+export type BuiltinPlanningStateView =
   | { readonly kind: 'building_without_plan' }
   | { readonly kind: 'planning_empty' }
   | {
       readonly kind: 'planning_draft' | 'replanning_draft';
-      readonly document: BuiltinPlanDocumentViewV1;
+      readonly document: BuiltinPlanDocumentView;
       readonly revisionFeedback?: string;
     }
   | {
       readonly kind: 'awaiting_review' | 'executing' | 'completed';
-      readonly document: BuiltinPlanDocumentViewV1;
+      readonly document: BuiltinPlanDocumentView;
     }
-  | { readonly kind: 'cancelled'; readonly document?: BuiltinPlanDocumentViewV1 };
+  | { readonly kind: 'cancelled'; readonly document?: BuiltinPlanDocumentView };
 
-export interface BuiltinContextCheckpointViewV1 {
+export interface BuiltinContextCheckpointView {
   readonly compactionId: string;
   readonly modelInvocationId?: string;
   readonly version: 1;
@@ -60,7 +56,7 @@ export interface BuiltinContextCheckpointViewV1 {
   readonly baseCheckpointId?: string;
 }
 
-export interface BuiltinContextTokenEstimateViewV1 {
+export interface BuiltinContextTokenEstimateView {
   readonly systemTokens: number;
   readonly toolSchemaTokens: number;
   readonly transcriptTokens: number;
@@ -70,24 +66,24 @@ export interface BuiltinContextTokenEstimateViewV1 {
   readonly totalInputTokens: number;
 }
 
-export interface BuiltinContextFailureViewV1 {
+export interface BuiltinContextFailureView {
   readonly reason?: 'manual' | 'auto';
   readonly retryable: boolean;
   readonly requestedAtTurnId?: string;
 }
 
-export interface BuiltinContextRuntimeViewV1 {
-  readonly activeCheckpoint?: BuiltinContextCheckpointViewV1;
+export interface BuiltinContextRuntimeView {
+  readonly activeCheckpoint?: BuiltinContextCheckpointView;
   readonly pendingCompaction?: {
     readonly compactionId: string;
     readonly reason: 'manual' | 'auto';
     readonly requestedAtRevision: number;
     readonly requestedAtTurnId: string;
     readonly force: boolean;
-    readonly estimate: BuiltinContextTokenEstimateViewV1;
+    readonly estimate: BuiltinContextTokenEstimateView;
     readonly customInstructions?: string;
   };
-  readonly lastFailure?: BuiltinContextFailureViewV1;
+  readonly lastFailure?: BuiltinContextFailureView;
   readonly lastCompactionTurnIndex?: number;
   readonly autoGuard: {
     readonly recentAutomaticCompactions: readonly {
@@ -101,17 +97,17 @@ export interface BuiltinContextRuntimeViewV1 {
   };
 }
 
-export interface BuiltinTranscriptMessageMetaV1 {
+export interface BuiltinTranscriptMessageMeta {
   readonly messageId: string;
   readonly turnId: string;
   readonly ordinal: number;
   readonly createdAt: string;
 }
 
-export type BuiltinTranscriptMessageV1 =
-  | (BuiltinTranscriptMessageMetaV1 & { readonly kind: 'user'; readonly content: string })
-  | (BuiltinTranscriptMessageMetaV1 & { readonly kind: 'runtime'; readonly content: string })
-  | (BuiltinTranscriptMessageMetaV1 & {
+export type BuiltinTranscriptMessage =
+  | (BuiltinTranscriptMessageMeta & { readonly kind: 'user'; readonly content: string })
+  | (BuiltinTranscriptMessageMeta & { readonly kind: 'runtime'; readonly content: string })
+  | (BuiltinTranscriptMessageMeta & {
       readonly kind: 'assistant';
       readonly content?: string;
       readonly reasoningText?: string;
@@ -122,7 +118,7 @@ export type BuiltinTranscriptMessageV1 =
         readonly canonicalInvocationFingerprint?: string;
       }[];
     })
-  | (BuiltinTranscriptMessageMetaV1 & {
+  | (BuiltinTranscriptMessageMeta & {
       readonly kind: 'tool';
       readonly toolCallId: string;
       readonly name: string;
@@ -131,7 +127,7 @@ export type BuiltinTranscriptMessageV1 =
       readonly resultMeta?: object;
     });
 
-export interface BuiltinRuntimeStateViewV1 {
+export interface BuiltinRuntimeStateView {
   readonly activeTaskId: string | null;
   readonly tasks: Readonly<
     Record<
@@ -139,7 +135,7 @@ export interface BuiltinRuntimeStateViewV1 {
       {
         readonly taskId: string;
         readonly sideEffectsStarted: boolean;
-        readonly planning: BuiltinPlanningStateViewV1;
+        readonly planning: BuiltinPlanningStateView;
         readonly executionMode?: 'auto' | 'accept_edits';
       }
     >
@@ -151,8 +147,8 @@ export interface BuiltinRuntimeStateViewV1 {
     readonly turnIndex: number;
     readonly status?: 'active' | 'completed' | 'aborted';
   };
-  readonly transcript: { readonly messages: readonly BuiltinTranscriptMessageV1[] };
-  readonly context: BuiltinContextRuntimeViewV1;
+  readonly transcript: { readonly messages: readonly BuiltinTranscriptMessage[] };
+  readonly context: BuiltinContextRuntimeView;
   readonly interactions: { readonly kind: string };
   readonly tools: {
     readonly calls: Readonly<
@@ -163,32 +159,30 @@ export interface BuiltinRuntimeStateViewV1 {
           readonly modelMessageId: string;
           readonly args: unknown;
           readonly status: string;
-          readonly effectClass?: BuiltinToolEffectClassV1;
+          readonly effectClass?: BuiltinToolEffectClass;
         }
       >
     >;
   };
-  readonly authorization?: { readonly mode: BuiltinAuthorizationModeV1 };
-  readonly mode: BuiltinInteractionModeV1;
+  readonly authorization?: { readonly mode: BuiltinAuthorizationMode };
+  readonly mode: BuiltinInteractionMode;
 }
 
-export function getBuiltinActiveTaskV1(state: BuiltinRuntimeStateViewV1) {
+export function getBuiltinActiveTask(state: BuiltinRuntimeStateView) {
   return state.activeTaskId ? (state.tasks[state.activeTaskId] ?? null) : null;
 }
 
-export function getBuiltinActivePlanningV1(
-  state: BuiltinRuntimeStateViewV1,
-): BuiltinPlanningStateViewV1 {
-  return getBuiltinActiveTaskV1(state)?.planning ?? { kind: 'building_without_plan' };
+export function getBuiltinActivePlanning(state: BuiltinRuntimeStateView): BuiltinPlanningStateView {
+  return getBuiltinActiveTask(state)?.planning ?? { kind: 'building_without_plan' };
 }
 
-export function getBuiltinEffectiveInteractionModeV1(
-  state: BuiltinRuntimeStateViewV1,
-): BuiltinInteractionModeV1 {
-  return getBuiltinActiveTaskV1(state)?.executionMode ?? state.mode;
+export function getBuiltinEffectiveInteractionMode(
+  state: BuiltinRuntimeStateView,
+): BuiltinInteractionMode {
+  return getBuiltinActiveTask(state)?.executionMode ?? state.mode;
 }
 
-export function getBuiltinAgentPhaseV1(planning: BuiltinPlanningStateViewV1): BuiltinAgentPhaseV1 {
+export function getBuiltinAgentPhase(planning: BuiltinPlanningStateView): BuiltinAgentPhase {
   return planning.kind === 'planning_empty' ||
     planning.kind === 'planning_draft' ||
     planning.kind === 'replanning_draft' ||

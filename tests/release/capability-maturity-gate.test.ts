@@ -1,19 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  type CapabilityMaturityEvidenceMaterialV1,
-  type CapabilityMaturityEvidenceV1,
-  type CapabilityMaturityIdentityV1,
-  type CapabilityMaturityStageV1,
-  computeCapabilityMaturityEvidenceDigestV1,
-  evaluateCapabilityMaturityGateV1,
-  verifyCapabilityMaturityEvidenceV1,
+  type CapabilityMaturityEvidence,
+  type CapabilityMaturityEvidenceMaterial,
+  type CapabilityMaturityIdentity,
+  type CapabilityMaturityStage,
+  computeCapabilityMaturityEvidenceDigest,
+  evaluateCapabilityMaturityGate,
+  verifyCapabilityMaturityEvidence,
 } from '../../scripts/release/capability-maturity-gate';
 
 function digest(character: string): `sha256:${string}` {
   return `sha256:${character.repeat(64)}`;
 }
 
-const identity: CapabilityMaturityIdentityV1 = {
+const identity: CapabilityMaturityIdentity = {
   payloadDigest: digest('1'),
   profileDigest: digest('2'),
   routeDigest: digest('3'),
@@ -28,11 +28,11 @@ const identity: CapabilityMaturityIdentityV1 = {
 };
 
 function material(
-  targetStage: CapabilityMaturityStageV1 = 'stable',
-): CapabilityMaturityEvidenceMaterialV1 {
+  targetStage: CapabilityMaturityStage = 'stable',
+): CapabilityMaturityEvidenceMaterial {
   const previousStage = targetStage === 'stable' ? 'beta' : 'canary';
   return {
-    schema: 'CapabilityMaturityEvidenceMaterialV1',
+    schema: 'CapabilityMaturityEvidenceMaterial',
     decisionId: `${targetStage}-decision-003`,
     windowId: `${targetStage}-window-003`,
     targetStage,
@@ -41,7 +41,7 @@ function material(
       targetStage === 'canary'
         ? null
         : {
-            schema: 'CapabilityMaturityPreviousDecisionV1',
+            schema: 'CapabilityMaturityPreviousDecision',
             stage: previousStage,
             status: 'passed',
             decisionId: `${previousStage}-decision-002`,
@@ -101,12 +101,12 @@ function material(
 }
 
 function evidence(
-  evidenceMaterial: CapabilityMaturityEvidenceMaterialV1 = material(),
+  evidenceMaterial: CapabilityMaturityEvidenceMaterial = material(),
   authentication: 'configured' | 'unconfigured' = 'configured',
-): CapabilityMaturityEvidenceV1 {
-  const materialDigest = computeCapabilityMaturityEvidenceDigestV1(evidenceMaterial);
+): CapabilityMaturityEvidence {
+  const materialDigest = computeCapabilityMaturityEvidenceDigest(evidenceMaterial);
   return {
-    schema: 'CapabilityMaturityEvidenceV1',
+    schema: 'CapabilityMaturityEvidence',
     material: evidenceMaterial,
     materialDigest,
     authentication:
@@ -128,12 +128,12 @@ function evidence(
 }
 
 function evaluate(
-  candidate: CapabilityMaturityEvidenceV1 | undefined,
-  expectedIdentity: CapabilityMaturityIdentityV1 = identity,
-  targetStage: CapabilityMaturityStageV1 = 'stable',
+  candidate: CapabilityMaturityEvidence | undefined,
+  expectedIdentity: CapabilityMaturityIdentity = identity,
+  targetStage: CapabilityMaturityStage = 'stable',
   evaluatedAt = '2026-08-03T04:00:00.000Z',
 ) {
-  return evaluateCapabilityMaturityGateV1({
+  return evaluateCapabilityMaturityGate({
     targetStage,
     expectedIdentity,
     evaluatedAt,
@@ -174,17 +174,17 @@ describe('capability maturity Gate', () => {
 
   test('strictly rebuilds the canonical subject and rejects schema injection', () => {
     const candidate = evidence();
-    expect(verifyCapabilityMaturityEvidenceV1(candidate)).toEqual(candidate);
+    expect(verifyCapabilityMaturityEvidence(candidate)).toEqual(candidate);
     expect(() =>
-      verifyCapabilityMaturityEvidenceV1({ ...candidate, materialDigest: digest('d') }),
+      verifyCapabilityMaturityEvidence({ ...candidate, materialDigest: digest('d') }),
     ).toThrow('material digest mismatch');
     expect(() =>
-      verifyCapabilityMaturityEvidenceV1({
+      verifyCapabilityMaturityEvidence({
         ...candidate,
         authentication: { ...candidate.authentication, subjectDigest: digest('e') },
       }),
     ).toThrow('authentication subject');
-    expect(() => verifyCapabilityMaturityEvidenceV1({ ...candidate, hiddenGrant: true })).toThrow();
+    expect(() => verifyCapabilityMaturityEvidence({ ...candidate, hiddenGrant: true })).toThrow();
   });
 
   test('enforces canary to beta to stable ordering and unique decision windows', () => {
@@ -212,7 +212,7 @@ describe('capability maturity Gate', () => {
 
     const canaryWithHistory = material('canary');
     canaryWithHistory.previousDecision = {
-      schema: 'CapabilityMaturityPreviousDecisionV1',
+      schema: 'CapabilityMaturityPreviousDecision',
       stage: 'canary',
       status: 'passed',
       decisionId: 'prior-canary',
@@ -326,7 +326,7 @@ describe('capability maturity Gate', () => {
       humanApprovals: Array<{ approverIdentity: string }>;
     };
     observation.humanApprovals[0]!.approverIdentity = 'github:@someone-else';
-    expect(() => evidence(impostor as unknown as CapabilityMaturityEvidenceMaterialV1)).toThrow();
+    expect(() => evidence(impostor as unknown as CapabilityMaturityEvidenceMaterial)).toThrow();
 
     expect(evaluate(evidence(material(), 'unconfigured')).reasonCodes).toEqual(
       expect.arrayContaining([

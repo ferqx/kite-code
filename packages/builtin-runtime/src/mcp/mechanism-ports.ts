@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-export interface ProtectedPathEvaluatorV1 {
+export interface ProtectedPathEvaluator {
   readonly workspaceRoot: string;
   evaluate(access: { path: string; operation: 'read' | 'write' | 'execute' }): Readonly<{
     outcome: 'allow' | 'deny' | 'prompt';
@@ -11,7 +11,7 @@ export interface ProtectedPathEvaluatorV1 {
   }>;
 }
 
-export interface NetworkBoundaryPolicyV1 {
+export interface NetworkBoundaryPolicy {
   version: 1;
   mode: 'off' | 'allowlist';
   allowedHosts: readonly string[];
@@ -19,7 +19,7 @@ export interface NetworkBoundaryPolicyV1 {
   revision: string;
 }
 
-export interface NetworkResolvedAddressV1 {
+export interface NetworkResolvedAddress {
   address: string;
   family: 4 | 6;
 }
@@ -39,8 +39,8 @@ export type NetworkBoundaryFailureCode =
   | 'response_body_too_large'
   | 'controller_unavailable';
 
-export type NetworkResolverV1 = (hostname: string) => Promise<readonly NetworkResolvedAddressV1[]>;
-export interface NetworkAdmissionReceiptV1 {
+export type NetworkResolver = (hostname: string) => Promise<readonly NetworkResolvedAddress[]>;
+export interface NetworkAdmissionReceipt {
   version: 1;
   outcome: 'allowed';
   toolCallId: string;
@@ -56,7 +56,7 @@ export interface NetworkAdmissionReceiptV1 {
   receiptDigest: string;
 }
 
-export interface NetworkDenialReceiptV1 {
+export interface NetworkDenialReceipt {
   version: 1;
   outcome: 'denied';
   toolCallId: string;
@@ -70,33 +70,31 @@ export interface NetworkDenialReceiptV1 {
   receiptDigest: string;
 }
 
-export type NetworkDecisionReceiptV1 = NetworkAdmissionReceiptV1 | NetworkDenialReceiptV1;
-export type NetworkDecisionRecorderV1 = (
-  decision: NetworkDecisionReceiptV1,
-) => void | Promise<void>;
-export type PinnedNetworkRequestV1 = (input: {
+export type NetworkDecisionReceipt = NetworkAdmissionReceipt | NetworkDenialReceipt;
+export type NetworkDecisionRecorder = (decision: NetworkDecisionReceipt) => void | Promise<void>;
+export type PinnedNetworkRequest = (input: {
   url: URL;
   method: string;
   headers: Headers;
   body?: Uint8Array;
   signal?: AbortSignal;
-  admission: NetworkAdmissionReceiptV1;
+  admission: NetworkAdmissionReceipt;
 }) => Promise<Response>;
 
-export interface NetworkBoundaryFetchOptionsV1 {
-  resolver?: NetworkResolverV1;
-  recordDecision?: NetworkDecisionRecorderV1;
+export interface NetworkBoundaryFetchOptions {
+  resolver?: NetworkResolver;
+  recordDecision?: NetworkDecisionRecorder;
   toolCallId?: string;
   invocationIdFactory?: () => string;
-  request?: PinnedNetworkRequestV1;
+  request?: PinnedNetworkRequest;
 }
 
-export type NetworkBoundaryFetchFactoryV1 = (
-  policy: NetworkBoundaryPolicyV1,
-  options: NetworkBoundaryFetchOptionsV1,
+export type NetworkBoundaryFetchFactory = (
+  policy: NetworkBoundaryPolicy,
+  options: NetworkBoundaryFetchOptions,
 ) => typeof fetch;
 
-export interface ExecutionBoundaryV1 {
+export interface ExecutionBoundary {
   filesystemScope: 'read_only' | 'workspace_write' | 'full_access';
   workspaceRoot: string;
   networkMode: 'off' | 'allowlist';
@@ -108,7 +106,7 @@ export interface ExecutionBoundaryV1 {
   sandboxUnavailable: 'fail' | 'verified_in_process_read_only';
 }
 
-export interface ExecutionCapabilitySurfaceV1 {
+export interface ExecutionCapabilitySurface {
   inProcessReadOnlyTools?: unknown;
   network: boolean;
   process?: boolean;
@@ -121,7 +119,7 @@ export interface ExecutionCapabilitySurfaceV1 {
   brokeredGitFeatureRevision?: string | null;
 }
 
-export function canonicalWorkspaceKeyV1(workspace: string): string {
+export function canonicalWorkspaceKey(workspace: string): string {
   const canonical = realpathSync.native(resolve(workspace));
   let normalized = canonical.replaceAll('\\', '/');
   if (/^[A-Z]:\//.test(normalized)) normalized = normalized[0]!.toLowerCase() + normalized.slice(1);
@@ -129,7 +127,7 @@ export function canonicalWorkspaceKeyV1(workspace: string): string {
   return createHash('sha256').update(`kite-mcp-workspace-v1\0${normalized}`).digest('hex');
 }
 
-export function computeExecutionBoundaryDigestV1(boundary: ExecutionBoundaryV1): string {
+export function computeExecutionBoundaryDigest(boundary: ExecutionBoundary): string {
   const canonical = JSON.stringify({
     filesystemScope: boundary.filesystemScope,
     workspaceRoot: boundary.workspaceRoot,

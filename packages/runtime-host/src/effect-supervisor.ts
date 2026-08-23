@@ -1,8 +1,8 @@
 import type {
   CheckpointPort,
-  RuntimeRecoveryIdentityPortV1,
+  RuntimeRecoveryIdentityPort,
   RuntimeStorage,
-  RuntimeTransactionInputV1,
+  RuntimeTransactionInput,
   SessionStore,
 } from './storage';
 
@@ -12,7 +12,7 @@ export type RuntimeTransactionAcknowledgement =
   | 'receipt_evidence'
   | 'terminal_recovery';
 
-export interface RuntimeLeaseRequirementV1 {
+export interface RuntimeLeaseRequirement {
   readonly sessionId: string;
   readonly effectId: string;
   readonly ownerId: string;
@@ -21,8 +21,8 @@ export interface RuntimeLeaseRequirementV1 {
 export interface RuntimeHostTransactionPort<Event = unknown, State = unknown> {
   commit(
     acknowledgement: RuntimeTransactionAcknowledgement,
-    input: RuntimeTransactionInputV1<Event, State>,
-    requiredLease?: RuntimeLeaseRequirementV1,
+    input: RuntimeTransactionInput<Event, State>,
+    requiredLease?: RuntimeLeaseRequirement,
   ): void;
 }
 
@@ -38,7 +38,7 @@ export interface RuntimeHostExecutionServices<Event = unknown, State = unknown> 
   readonly transactions: RuntimeHostTransactionPort<Event, State>;
   readonly leases: RuntimeHostLeasePort;
   readonly checkpoints: CheckpointPort<State>;
-  readonly recoveryIdentities: RuntimeRecoveryIdentityPortV1;
+  readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
 }
 
 interface ActiveLease {
@@ -69,8 +69,8 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
       transactions: Object.freeze({
         commit: (
           acknowledgement: RuntimeTransactionAcknowledgement,
-          input: RuntimeTransactionInputV1<Event, State>,
-          requiredLease?: RuntimeLeaseRequirementV1,
+          input: RuntimeTransactionInput<Event, State>,
+          requiredLease?: RuntimeLeaseRequirement,
         ) => this.commit(acknowledgement, input, requiredLease),
       }),
       leases: Object.freeze({
@@ -87,8 +87,8 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
 
   commit(
     acknowledgement: RuntimeTransactionAcknowledgement,
-    input: RuntimeTransactionInputV1<Event, State>,
-    requiredLease?: RuntimeLeaseRequirementV1,
+    input: RuntimeTransactionInput<Event, State>,
+    requiredLease?: RuntimeLeaseRequirement,
   ): void {
     if (requiredLease && requiredLease.sessionId !== input.sessionId) {
       throw new Error('Runtime effect lease session does not match the transaction session');
@@ -149,7 +149,7 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
     return this.#leases.has(leaseKey(sessionId, effectId));
   }
 
-  #currentLeaseExpectation(requirement: RuntimeLeaseRequirementV1) {
+  #currentLeaseExpectation(requirement: RuntimeLeaseRequirement) {
     const key = leaseKey(requirement.sessionId, requirement.effectId);
     const active = this.#leases.get(key);
     if (!active || active.ownerId !== requirement.ownerId || active.expiresAtMs <= this.#now()) {

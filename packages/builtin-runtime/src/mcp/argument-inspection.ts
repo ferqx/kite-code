@@ -1,8 +1,8 @@
 import { digestCapability } from './capability-domain';
-import { inspectRuntimeSecretV1 } from './secret-inspector';
+import { inspectRuntimeSecret } from './secret-inspector';
 
-export type McpArgumentInspectionV1 = 'clear' | 'secret' | 'unknown';
-export type McpArgumentSnapshotV1 =
+export type McpArgumentInspection = 'clear' | 'secret' | 'unknown';
+export type McpArgumentSnapshot =
   | { ok: true; arguments: Readonly<Record<string, unknown>> }
   | { ok: false };
 const REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS = 1_000_000;
@@ -12,14 +12,14 @@ const REMOTE_MCP_SECRET_FIELD =
   /^(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|auth(?:orization)?|client[_-]?secret|credential|password|secret)$/i;
 
 /** Redacted transport identity resolved from effective runtime configuration. */
-export interface McpCapabilityRouteV1 {
+export interface McpCapabilityRoute {
   transport: 'stdio' | 'http';
   serverIdentity: string;
   endpointRevision: string;
   toolRevision: string;
 }
 
-export function mcpArgumentDigestV1(argumentsValue: Record<string, unknown>): string {
+export function mcpArgumentDigest(argumentsValue: Record<string, unknown>): string {
   return digestCapability(argumentsValue);
 }
 
@@ -28,9 +28,7 @@ export function mcpArgumentDigestV1(argumentsValue: Record<string, unknown>): st
  * authorization work. Accessors, custom serialization and non-JSON values are
  * rejected so the signed digest and SDK payload cannot diverge.
  */
-export function snapshotMcpArgumentsV1(
-  argumentsValue: Record<string, unknown>,
-): McpArgumentSnapshotV1 {
+export function snapshotMcpArguments(argumentsValue: Record<string, unknown>): McpArgumentSnapshot {
   const seen = new Set<object>();
   let capturedChars = 0;
   let capturedNodes = 0;
@@ -121,18 +119,18 @@ export function snapshotMcpArgumentsV1(
  * as a sendable permit classification; unsupported or over-budget input is
  * unknown and therefore fail closed.
  */
-export function inspectMcpArgumentsV1(
+export function inspectMcpArguments(
   argumentsValue: Record<string, unknown>,
   options: { knownSecrets?: Iterable<string | undefined> } = {},
-): McpArgumentInspectionV1 {
+): McpArgumentInspection {
   const seen = new Set<object>();
   let inspectedChars = 0;
   let inspectedNodes = 0;
 
-  const inspectText = (text: string, field?: string): McpArgumentInspectionV1 => {
+  const inspectText = (text: string, field?: string): McpArgumentInspection => {
     inspectedChars += text.length;
     if (inspectedChars > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS) return 'unknown';
-    return inspectRuntimeSecretV1({
+    return inspectRuntimeSecret({
       text: field ? `${field}=${text}` : text,
       knownSecrets: options.knownSecrets,
       maxInspectionChars: REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS,
@@ -143,7 +141,7 @@ export function inspectMcpArgumentsV1(
     value: unknown,
     field: string | undefined,
     depth: number,
-  ): McpArgumentInspectionV1 => {
+  ): McpArgumentInspection => {
     inspectedNodes += 1;
     if (
       inspectedNodes > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_NODES ||

@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { METRIC_DEFINITIONS_V1 } from '@kite/runtime-host';
-import { composeObservabilityV1 } from '../../apps/kite/src/observability/composition';
+import { METRIC_DEFINITIONS_ } from '@kite/runtime-host';
+import { composeObservability } from '../../apps/kite/src/observability/composition';
 import {
-  projectTelemetryStatusV1,
-  resolveTelemetryConsentV1,
-  TELEMETRY_METRICS_BY_CATEGORY_V1,
-  type TelemetryConsentGrantV1,
+  projectTelemetryStatus,
+  resolveTelemetryConsent,
+  TELEMETRY_METRICS_BY_CATEGORY_,
+  type TelemetryConsentGrant,
 } from '../../apps/kite/src/observability/consent';
 import {
-  formatObservabilityStatusV1,
-  projectObservabilityStatusV1,
+  formatObservabilityStatus,
+  projectObservabilityStatus,
 } from '../../apps/kite/src/observability/status';
 
-const grant: TelemetryConsentGrantV1 = {
+const grant: TelemetryConsentGrant = {
   state: 'granted',
   metricCategories: ['run_turn', 'runtime_resource'],
   receiver: 'Kite Operations',
@@ -23,20 +23,18 @@ const grant: TelemetryConsentGrantV1 = {
 
 describe('telemetry consent and composition', () => {
   test('maps every metric to exactly one consent category', () => {
-    const categorized = Object.values(TELEMETRY_METRICS_BY_CATEGORY_V1).flat();
-    expect(Array.from(categorized, String).sort()).toEqual(
-      Object.keys(METRIC_DEFINITIONS_V1).sort(),
-    );
+    const categorized = Object.values(TELEMETRY_METRICS_BY_CATEGORY_).flat();
+    expect(Array.from(categorized, String).sort()).toEqual(Object.keys(METRIC_DEFINITIONS_).sort());
     expect(new Set(categorized).size).toBe(categorized.length);
   });
 
   test('is remote-off by default and project configuration can never enable it', () => {
-    expect(resolveTelemetryConsentV1({ releaseChannel: 'limited' })).toMatchObject({
+    expect(resolveTelemetryConsent({ releaseChannel: 'limited' })).toMatchObject({
       enabled: false,
       reason: 'default_off',
     });
     expect(
-      resolveTelemetryConsentV1({
+      resolveTelemetryConsent({
         releaseChannel: 'limited',
         project: { enabled: true },
         user: { enabled: true, endpointPolicy: 'vendor_managed', consent: grant },
@@ -46,13 +44,13 @@ describe('telemetry consent and composition', () => {
 
   test('requires explicit consent and a separate canary opt-in', () => {
     expect(
-      resolveTelemetryConsentV1({
+      resolveTelemetryConsent({
         releaseChannel: 'limited',
         user: { enabled: true, endpointPolicy: 'vendor_managed' },
       }).reason,
     ).toBe('consent_missing');
     expect(
-      resolveTelemetryConsentV1({
+      resolveTelemetryConsent({
         releaseChannel: 'canary',
         user: {
           enabled: true,
@@ -62,7 +60,7 @@ describe('telemetry consent and composition', () => {
       }).reason,
     ).toBe('canary_opt_in_missing');
     expect(
-      resolveTelemetryConsentV1({
+      resolveTelemetryConsent({
         releaseChannel: 'canary',
         user: { enabled: true, endpointPolicy: 'vendor_managed', consent: grant },
       }),
@@ -78,18 +76,18 @@ describe('telemetry consent and composition', () => {
   test('admin/project disable and withdrawal are monotonic', () => {
     const user = { enabled: true, endpointPolicy: 'vendor_managed' as const, consent: grant };
     expect(
-      resolveTelemetryConsentV1({
+      resolveTelemetryConsent({
         releaseChannel: 'limited',
         user,
         admin: { forceTelemetryDisabled: true },
       }).reason,
     ).toBe('admin_forced_off');
     expect(
-      resolveTelemetryConsentV1({ releaseChannel: 'limited', user, project: { enabled: false } })
+      resolveTelemetryConsent({ releaseChannel: 'limited', user, project: { enabled: false } })
         .reason,
     ).toBe('project_disabled');
     expect(
-      resolveTelemetryConsentV1({
+      resolveTelemetryConsent({
         releaseChannel: 'limited',
         user: { ...user, consent: { ...grant, state: 'withdrawn' } },
       }),
@@ -97,7 +95,7 @@ describe('telemetry consent and composition', () => {
   });
 
   test('content logging and provider consent never imply telemetry consent or leak secrets in status', () => {
-    const status = resolveTelemetryConsentV1({
+    const status = resolveTelemetryConsent({
       releaseChannel: 'limited',
       user: {
         contentLoggingConsent: true,
@@ -106,11 +104,11 @@ describe('telemetry consent and composition', () => {
       },
     });
     expect(status.enabled).toBeFalse();
-    expect(JSON.stringify(projectTelemetryStatusV1(status))).not.toContain('SECRET-ENDPOINT-TOKEN');
+    expect(JSON.stringify(projectTelemetryStatus(status))).not.toContain('SECRET-ENDPOINT-TOKEN');
   });
 
   test('mandatory enterprise audit is separate and unavailable audit denies managed sessions', () => {
-    const status = resolveTelemetryConsentV1({
+    const status = resolveTelemetryConsent({
       releaseChannel: 'internal',
       admin: { mandatoryAudit: { required: true, available: false } },
     });
@@ -122,16 +120,16 @@ describe('telemetry consent and composition', () => {
   });
 
   test('composition injects no-op unless flag, consent, and exporter are all present', () => {
-    const consent = resolveTelemetryConsentV1({
+    const consent = resolveTelemetryConsent({
       releaseChannel: 'limited',
       user: { enabled: true, endpointPolicy: 'vendor_managed', consent: grant },
     });
-    expect(composeObservabilityV1({ consent }).telemetryEnabled).toBeFalse();
+    expect(composeObservability({ consent }).telemetryEnabled).toBeFalse();
     const exporter = { export: async () => {} };
-    expect(composeObservabilityV1({ consent, exporter, queueCapacity: 2 }).telemetryEnabled).toBe(
+    expect(composeObservability({ consent, exporter, queueCapacity: 2 }).telemetryEnabled).toBe(
       false,
     );
-    const composed = composeObservabilityV1({
+    const composed = composeObservability({
       artifactTelemetryAllowed: true,
       featureEnabled: true,
       consent,
@@ -145,7 +143,7 @@ describe('telemetry consent and composition', () => {
       diskSpool: false,
     });
 
-    const auditDenied = composeObservabilityV1({
+    const auditDenied = composeObservability({
       artifactTelemetryAllowed: true,
       featureEnabled: true,
       consent: { ...consent, managedSessionAdmission: 'denied' },
@@ -156,7 +154,7 @@ describe('telemetry consent and composition', () => {
   });
 
   test('status keeps ordinary entrypoints inactive and redacts endpoint material', () => {
-    const consent = resolveTelemetryConsentV1({
+    const consent = resolveTelemetryConsent({
       releaseChannel: 'limited',
       user: {
         enabled: true,
@@ -165,7 +163,7 @@ describe('telemetry consent and composition', () => {
         consent: grant,
       },
     });
-    const status = projectObservabilityStatusV1({
+    const status = projectObservabilityStatus({
       artifactTelemetryAllowed: false,
       featureEnabled: true,
       consent,
@@ -173,6 +171,6 @@ describe('telemetry consent and composition', () => {
     });
     expect(status).toMatchObject({ active: false, reason: 'artifact_disabled' });
     expect(JSON.stringify(status)).not.toContain('DO-NOT-PRINT-THIS');
-    expect(formatObservabilityStatusV1(status)).toContain('Artifact authority: absent');
+    expect(formatObservabilityStatus(status)).toContain('Artifact authority: absent');
   });
 });

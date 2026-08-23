@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { CredentialBrokerV1, CredentialHandleV1 } from '@kite/runtime-spi';
+import type { CredentialBroker, CredentialHandle } from '@kite/runtime-spi';
 import type {
   McpCredentialKey,
   McpCredentialMaterial,
@@ -18,41 +18,41 @@ const MAX_HANDLE_TTL_MS = 15 * 60 * 1000;
  * `store` is an explicit test seam. Production composition omits it and this
  * is the only place that constructs the native OS-vault implementation.
  */
-export interface BuiltinCredentialBrokerV1 extends CredentialBrokerV1 {
+export interface BuiltinCredentialBroker extends CredentialBroker {
   status(): Promise<McpCredentialStoreStatus>;
   issueForKey(
     key: McpCredentialKey,
     input: { purpose: string; expiresAt?: string; revocationRevision?: number },
-  ): Promise<CredentialHandleV1>;
+  ): Promise<CredentialHandle>;
   hasForKey(key: McpCredentialKey): Promise<boolean>;
-  hasForHandle(handle: CredentialHandleV1, purpose: string): Promise<boolean>;
-  validateHandle(handle: CredentialHandleV1, purpose: string): void;
+  hasForHandle(handle: CredentialHandle, purpose: string): Promise<boolean>;
+  validateHandle(handle: CredentialHandle, purpose: string): void;
   withMaterialForKey<T>(
     key: McpCredentialKey,
     purpose: string,
     operation: (material: McpCredentialMaterial) => Promise<T> | T,
   ): Promise<T>;
   withHandleMaterial<T>(
-    handle: CredentialHandleV1,
+    handle: CredentialHandle,
     purpose: string,
     operation: (material: McpCredentialMaterial) => Promise<T> | T,
   ): Promise<T>;
   authorizationHeadersForHandle(
-    handle: CredentialHandleV1,
+    handle: CredentialHandle,
     purpose: string,
     input: { header: string; scheme?: string; base?: Readonly<Record<string, string>> },
   ): Promise<Record<string, string>>;
   putForKey(key: McpCredentialKey, purpose: string, material: McpCredentialMaterial): Promise<void>;
   deleteForKey(key: McpCredentialKey, purpose: string): Promise<void>;
   putForHandle(
-    handle: CredentialHandleV1,
+    handle: CredentialHandle,
     purpose: string,
     material: McpCredentialMaterial,
   ): Promise<void>;
-  deleteForHandle(handle: CredentialHandleV1, purpose: string): Promise<void>;
+  deleteForHandle(handle: CredentialHandle, purpose: string): Promise<void>;
 }
 
-export interface BuiltinCredentialBrokerOptionsV1 {
+export interface BuiltinCredentialBrokerOptions {
   /** Test-only in-memory store injection; production must omit this option. */
   store?: McpCredentialStore;
   now?: () => number;
@@ -60,19 +60,19 @@ export interface BuiltinCredentialBrokerOptionsV1 {
 
 interface BoundHandle {
   readonly key: McpCredentialKey;
-  readonly handle: CredentialHandleV1;
+  readonly handle: CredentialHandle;
 }
 
-export function createBuiltinCredentialBrokerV1(
-  options: BuiltinCredentialBrokerOptionsV1 = {},
-): BuiltinCredentialBrokerV1 {
-  return new BuiltinCredentialBrokerV1Impl(
+export function createBuiltinCredentialBroker(
+  options: BuiltinCredentialBrokerOptions = {},
+): BuiltinCredentialBroker {
+  return new BuiltinCredentialBrokerImpl(
     options.store ?? new NativeMcpCredentialStore(),
     options.now ?? Date.now,
   );
 }
 
-class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
+class BuiltinCredentialBrokerImpl implements BuiltinCredentialBroker {
   private readonly handles = new Map<string, BoundHandle>();
   private readonly revoked = new Map<string, number>();
   private readonly store: McpCredentialStore;
@@ -90,7 +90,7 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
   async issueForKey(
     key: McpCredentialKey,
     input: { purpose: string; expiresAt?: string; revocationRevision?: number },
-  ): Promise<CredentialHandleV1> {
+  ): Promise<CredentialHandle> {
     assertPurpose(input.purpose);
     const now = this.now();
     const requestedExpiry = input.expiresAt ? Date.parse(input.expiresAt) : NaN;
@@ -113,7 +113,7 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
   }
 
   /** SPI entry point. Handles issued without a key are intentionally unusable. */
-  async issue(input: Omit<CredentialHandleV1, 'handleId'>): Promise<CredentialHandleV1> {
+  async issue(input: Omit<CredentialHandle, 'handleId'>): Promise<CredentialHandle> {
     assertPurpose(input.purpose);
     const handle = Object.freeze({ handleId: `cred_${randomUUID()}`, ...input });
     // Do not create a synthetic store binding. A caller must use issueForKey,
@@ -121,7 +121,7 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
     return handle;
   }
 
-  async use(handle: CredentialHandleV1, purpose: string): Promise<Uint8Array> {
+  async use(handle: CredentialHandle, purpose: string): Promise<Uint8Array> {
     return this.withHandleMaterial(handle, purpose, (material) =>
       new TextEncoder().encode(JSON.stringify(material)),
     );
@@ -140,7 +140,7 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
     return material !== null;
   }
 
-  async hasForHandle(handle: CredentialHandleV1, purpose: string): Promise<boolean> {
+  async hasForHandle(handle: CredentialHandle, purpose: string): Promise<boolean> {
     try {
       await this.withHandleMaterial(handle, purpose, () => undefined);
       return true;
@@ -152,7 +152,7 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
     }
   }
 
-  validateHandle(handle: CredentialHandleV1, purpose: string): void {
+  validateHandle(handle: CredentialHandle, purpose: string): void {
     this.assertHandle(handle, purpose);
   }
 
@@ -166,7 +166,7 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
   }
 
   async withHandleMaterial<T>(
-    handle: CredentialHandleV1,
+    handle: CredentialHandle,
     purpose: string,
     operation: (material: McpCredentialMaterial) => Promise<T> | T,
   ): Promise<T> {
@@ -181,7 +181,7 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
   }
 
   async authorizationHeadersForHandle(
-    handle: CredentialHandleV1,
+    handle: CredentialHandle,
     purpose: string,
     input: { header: string; scheme?: string; base?: Readonly<Record<string, string>> },
   ): Promise<Record<string, string>> {
@@ -211,7 +211,7 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
   }
 
   async putForHandle(
-    handle: CredentialHandleV1,
+    handle: CredentialHandle,
     purpose: string,
     material: McpCredentialMaterial,
   ): Promise<void> {
@@ -223,12 +223,12 @@ class BuiltinCredentialBrokerV1Impl implements BuiltinCredentialBrokerV1 {
     }
   }
 
-  async deleteForHandle(handle: CredentialHandleV1, purpose: string): Promise<void> {
+  async deleteForHandle(handle: CredentialHandle, purpose: string): Promise<void> {
     const bound = this.assertHandle(handle, purpose);
     await this.store.delete(bound.key);
   }
 
-  private assertHandle(handle: CredentialHandleV1, purpose: string): BoundHandle {
+  private assertHandle(handle: CredentialHandle, purpose: string): BoundHandle {
     if (!handle || typeof handle !== 'object') throw new Error('Credential handle is invalid.');
     assertPurpose(purpose);
     const bound = this.handles.get(handle.handleId);
@@ -253,7 +253,7 @@ function assertPurpose(purpose: string): void {
   }
 }
 
-function sameHandle(left: CredentialHandleV1, right: CredentialHandleV1): boolean {
+function sameHandle(left: CredentialHandle, right: CredentialHandle): boolean {
   return (
     left.handleId === right.handleId &&
     left.projectId === right.projectId &&

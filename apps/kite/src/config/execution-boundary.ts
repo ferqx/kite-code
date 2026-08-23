@@ -3,21 +3,21 @@ import { realpathSync, statSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 import type {
-  ExecutionBackendCapabilitiesV1,
-  ExecutionBoundaryAdmissionReasonV1,
-  ExecutionBoundaryAdmissionV1,
-  ExecutionBoundaryV1,
-  ExecutionCapabilitySurfaceV1,
+  ExecutionBackendCapabilities,
+  ExecutionBoundary,
+  ExecutionBoundaryAdmission,
+  ExecutionBoundaryAdmissionReason,
+  ExecutionCapabilitySurface,
   FilesystemScope,
-  ProductionExecutionEntrypointV1,
-  ProductionExecutionQualificationRegistryV1,
-  ProductionExecutionQualificationV1,
+  ProductionExecutionEntrypoint,
+  ProductionExecutionQualification,
+  ProductionExecutionQualificationRegistry,
 } from '@kite/builtin-runtime/sandbox';
 import { z } from 'zod';
 import {
-  loadApprovedProductionExecutionQualificationRegistryV1,
-  parseProductionExecutionQualificationV1,
-  resolveProductionExecutionQualificationFromRegistryV1,
+  loadApprovedProductionExecutionQualificationRegistry,
+  parseProductionExecutionQualification,
+  resolveProductionExecutionQualificationFromRegistry,
 } from './execution-qualification';
 import { canonicalWorkspaceKey } from './mcp-project-approvals';
 
@@ -36,7 +36,7 @@ const networkHostSchema = z
       .refine((host) => isIP(host) === 0, 'networkAllowlist does not accept IP literals'),
   );
 
-const executionBoundaryObjectV1Schema = z
+const executionBoundaryObjectSchema = z
   .object({
     filesystemScope: z.enum(['read_only', 'workspace_write', 'full_access']),
     workspaceRoot: z.string().trim().min(1),
@@ -76,7 +76,7 @@ const executionBoundaryObjectV1Schema = z
     }
   })
   .transform(
-    (boundary): ExecutionBoundaryV1 => ({
+    (boundary): ExecutionBoundary => ({
       ...boundary,
       workspaceRoot: realpathSync.native(resolve(boundary.workspaceRoot)),
       networkAllowlist: [...new Set(boundary.networkAllowlist)].sort(),
@@ -84,31 +84,31 @@ const executionBoundaryObjectV1Schema = z
   );
 
 /** Strict parser for the release-owned execution boundary. */
-export const executionBoundaryV1Schema = executionBoundaryObjectV1Schema;
+export const executionBoundarySchema = executionBoundaryObjectSchema;
 
-export { executionBackendCapabilitiesV1Schema } from './execution-qualification';
+export { executionBackendCapabilitiesSchema } from './execution-qualification';
 
-export interface TightenExecutionBoundaryInputV1 {
+export interface TightenExecutionBoundaryInput {
   ceiling: unknown;
   tightening: unknown;
 }
 
-export interface ExecutionBoundaryAdmissionInputV1 {
+export interface ExecutionBoundaryAdmissionInput {
   featureEnabled: boolean;
   boundary?: unknown;
   workspaceRoot: string;
-  entrypoint: ProductionExecutionEntrypointV1;
+  entrypoint: ProductionExecutionEntrypoint;
   sandboxEnabled: boolean;
 }
 
-export interface ExecutionBoundaryQualificationEvaluationInputV1 {
+export interface ExecutionBoundaryQualificationEvaluationInput {
   featureEnabled: boolean;
   boundary?: unknown;
   workspaceRoot: string;
   qualification?: unknown;
 }
 
-const NO_CAPABILITIES: Readonly<ExecutionCapabilitySurfaceV1> = Object.freeze({
+const NO_CAPABILITIES: Readonly<ExecutionCapabilitySurface> = Object.freeze({
   inProcessReadOnlyTools: null,
   network: false,
   process: false,
@@ -121,12 +121,12 @@ const NO_CAPABILITIES: Readonly<ExecutionCapabilitySurfaceV1> = Object.freeze({
   brokeredGitFeatureRevision: null,
 });
 
-function denied(reason: ExecutionBoundaryAdmissionReasonV1): ExecutionBoundaryAdmissionV1 {
+function denied(reason: ExecutionBoundaryAdmissionReason): ExecutionBoundaryAdmission {
   return { allowed: false, admissionKind: 'denied', reason, surface: { ...NO_CAPABILITIES } };
 }
 
-export function parseExecutionBoundaryV1(value: unknown): ExecutionBoundaryV1 {
-  return executionBoundaryV1Schema.parse(value);
+export function parseExecutionBoundary(value: unknown): ExecutionBoundary {
+  return executionBoundarySchema.parse(value);
 }
 
 function tighterFilesystemScope(left: FilesystemScope, right: FilesystemScope): FilesystemScope {
@@ -142,11 +142,9 @@ function tighterFilesystemScope(left: FilesystemScope, right: FilesystemScope): 
  * Apply a second boundary as a tightening only: scope/min limits shrink,
  * allowlists intersect, deny wins, and unavailable fallback can only close.
  */
-export function tightenExecutionBoundaryV1(
-  input: TightenExecutionBoundaryInputV1,
-): ExecutionBoundaryV1 {
-  const ceiling = parseExecutionBoundaryV1(input.ceiling);
-  const tightening = parseExecutionBoundaryV1(input.tightening);
+export function tightenExecutionBoundary(input: TightenExecutionBoundaryInput): ExecutionBoundary {
+  const ceiling = parseExecutionBoundary(input.ceiling);
+  const tightening = parseExecutionBoundary(input.tightening);
   if (
     canonicalWorkspaceKey(ceiling.workspaceRoot) !== canonicalWorkspaceKey(tightening.workspaceRoot)
   ) {
@@ -163,7 +161,7 @@ export function tightenExecutionBoundaryV1(
   if (networkMode === 'allowlist' && networkAllowlist.length === 0) {
     // An empty host intersection is semantically network-off, not an ambiguous
     // allowlist that another layer could reinterpret as unrestricted.
-    return parseExecutionBoundaryV1({
+    return parseExecutionBoundary({
       ...ceiling,
       filesystemScope: tighterFilesystemScope(ceiling.filesystemScope, tightening.filesystemScope),
       networkMode: 'off',
@@ -184,7 +182,7 @@ export function tightenExecutionBoundaryV1(
     });
   }
 
-  return parseExecutionBoundaryV1({
+  return parseExecutionBoundary({
     ...ceiling,
     filesystemScope: tighterFilesystemScope(ceiling.filesystemScope, tightening.filesystemScope),
     networkMode,
@@ -205,8 +203,8 @@ export function tightenExecutionBoundaryV1(
   });
 }
 
-export function computeExecutionBoundaryDigestV1(value: unknown): string {
-  const boundary = parseExecutionBoundaryV1(value);
+export function computeExecutionBoundaryDigest(value: unknown): string {
+  const boundary = parseExecutionBoundary(value);
   const canonical = JSON.stringify({
     filesystemScope: boundary.filesystemScope,
     workspaceRoot: boundary.workspaceRoot,
@@ -229,15 +227,15 @@ export function computeExecutionBoundaryDigestV1(value: unknown): string {
  * and CLI development runs do not call this until a 2A release profile exists;
  * any future production root must pass this gate before starting processes.
  */
-export function admitProductionExecutionBoundaryV1(
-  input: ExecutionBoundaryAdmissionInputV1,
-): ExecutionBoundaryAdmissionV1 {
+export function admitProductionExecutionBoundary(
+  input: ExecutionBoundaryAdmissionInput,
+): ExecutionBoundaryAdmission {
   if (!input.featureEnabled) return denied('feature_disabled');
   if (!input.sandboxEnabled) return denied('sandbox_disabled');
 
-  let registry: ProductionExecutionQualificationRegistryV1;
+  let registry: ProductionExecutionQualificationRegistry;
   try {
-    registry = loadApprovedProductionExecutionQualificationRegistryV1();
+    registry = loadApprovedProductionExecutionQualificationRegistry();
   } catch {
     return denied('approved_qualification_unavailable');
   }
@@ -245,13 +243,13 @@ export function admitProductionExecutionBoundaryV1(
     return denied('platform_excluded');
   }
 
-  const qualification = resolveProductionExecutionQualificationFromRegistryV1({
+  const qualification = resolveProductionExecutionQualificationFromRegistry({
     registry,
     entrypoint: input.entrypoint,
   });
   if (!qualification) return denied('qualification_environment_mismatch');
 
-  const evaluation = evaluateExecutionBoundaryQualificationV1({ ...input, qualification });
+  const evaluation = evaluateExecutionBoundaryQualification({ ...input, qualification });
   if (!evaluation.allowed) return evaluation;
   return {
     ...evaluation,
@@ -273,18 +271,18 @@ export function admitProductionExecutionBoundaryV1(
 
 /**
  * Pure technical evaluator used to validate future release qualification
- * artifacts. Production callers must use admitProductionExecutionBoundaryV1,
+ * artifacts. Production callers must use admitProductionExecutionBoundary,
  * which seals registry loading and exact-environment resolution.
  */
-export function evaluateExecutionBoundaryQualificationV1(
-  input: ExecutionBoundaryQualificationEvaluationInputV1,
-): ExecutionBoundaryAdmissionV1 {
+export function evaluateExecutionBoundaryQualification(
+  input: ExecutionBoundaryQualificationEvaluationInput,
+): ExecutionBoundaryAdmission {
   if (!input.featureEnabled) return denied('feature_disabled');
   if (input.boundary === undefined) return denied('boundary_missing');
 
-  let boundary: ExecutionBoundaryV1;
+  let boundary: ExecutionBoundary;
   try {
-    boundary = parseExecutionBoundaryV1(input.boundary);
+    boundary = parseExecutionBoundary(input.boundary);
   } catch {
     return denied('boundary_invalid');
   }
@@ -299,13 +297,13 @@ export function evaluateExecutionBoundaryQualificationV1(
     return denied('workspace_mismatch');
   }
 
-  let qualification: ProductionExecutionQualificationV1;
+  let qualification: ProductionExecutionQualification;
   try {
-    qualification = parseProductionExecutionQualificationV1(input.qualification);
+    qualification = parseProductionExecutionQualification(input.qualification);
   } catch {
     return denied('approved_qualification_unavailable');
   }
-  const backend: ExecutionBackendCapabilitiesV1 = qualification.backendCapabilities;
+  const backend: ExecutionBackendCapabilities = qualification.backendCapabilities;
 
   if (boundary.filesystemScope === 'full_access') return denied('full_access_not_qualified');
   if (boundary.networkMode !== qualification.selectedNetworkMode) {

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "profileId": "verification-v1",
+  "profileId": "verification",
   "capability": "verification",
-  "requiredFeatureFlags": ["verificationV1"],
+  "requiredFeatureFlags": ["verification"],
   "state": {
     "maturity": "under_development",
     "maxRollout": "off"

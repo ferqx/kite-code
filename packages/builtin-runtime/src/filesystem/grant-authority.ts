@@ -1,33 +1,33 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type {
-  FilesystemCommitGrantV1,
-  FilesystemObserveGrantV1,
-  FilesystemPreimageArtifactRefV1,
-  FilesystemPrepareGrantV1,
-  WorkspaceFilesystemGrantBindingV1,
-  WorkspaceFilesystemGrantVerifierV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemMutationReadyRecordV1,
-  WorkspaceFilesystemObserveOperationV1,
-  WorkspaceFilesystemOperationV1,
-  WorkspaceFilesystemPreparedMutationV1,
-  WorkspaceFilesystemProtectedBoundaryV1,
-  WorkspaceFilesystemProviderFailureCodeV1,
-  WorkspaceFilesystemTargetEvidenceV1,
-  WorkspaceFilesystemTargetIdentityV1,
+  FilesystemCommitGrant,
+  FilesystemObserveGrant,
+  FilesystemPreimageArtifactRef,
+  FilesystemPrepareGrant,
+  WorkspaceFilesystemGrantBinding,
+  WorkspaceFilesystemGrantVerifier,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemMutationReadyRecord,
+  WorkspaceFilesystemObserveOperation,
+  WorkspaceFilesystemOperation,
+  WorkspaceFilesystemPreparedMutation,
+  WorkspaceFilesystemProtectedBoundary,
+  WorkspaceFilesystemProviderFailureCode,
+  WorkspaceFilesystemTargetEvidence,
+  WorkspaceFilesystemTargetIdentity,
 } from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1 } from '@kite/runtime-spi';
-import { validateWorkspaceFilesystemMutationReadyRecordV1 } from './evidence';
+import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+import { validateWorkspaceFilesystemMutationReadyRecord } from './evidence';
 
-export type { WorkspaceFilesystemGrantVerifierV1 } from '@kite/runtime-spi';
+export type { WorkspaceFilesystemGrantVerifier } from '@kite/runtime-spi';
 
 export {
-  validateWorkspaceFilesystemIntentRecordV1,
-  validateWorkspaceFilesystemMutationReadyRecordV1,
-  validateWorkspaceFilesystemObservationRecordV1,
-  workspaceFilesystemIntentDigestV1,
-  workspaceFilesystemMutationReadyDigestV1,
+  validateWorkspaceFilesystemIntentRecord,
+  validateWorkspaceFilesystemMutationReadyRecord,
+  validateWorkspaceFilesystemObservationRecord,
+  workspaceFilesystemIntentDigest,
+  workspaceFilesystemMutationReadyDigest,
 } from './evidence';
 
 const MAX_GRANT_TTL_MS = 5 * 60_000;
@@ -38,34 +38,34 @@ const MAX_IDENTITY_CHARS = 4_096;
 type JsonPrimitive = null | boolean | number | string;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-export class WorkspaceFilesystemGrantErrorV1 extends Error {
+export class WorkspaceFilesystemGrantError extends Error {
   readonly code: Extract<
-    WorkspaceFilesystemProviderFailureCodeV1,
+    WorkspaceFilesystemProviderFailureCode,
     'invalid_grant' | 'expired_grant' | 'consumed_grant'
   >;
 
   constructor(
-    code: WorkspaceFilesystemGrantErrorV1['code'],
+    code: WorkspaceFilesystemGrantError['code'],
     message = 'Workspace filesystem grant was rejected.',
   ) {
     super(message);
-    this.name = 'WorkspaceFilesystemGrantErrorV1';
+    this.name = 'WorkspaceFilesystemGrantError';
     this.code = code;
   }
 }
 
-export interface WorkspaceFilesystemGrantAuthorityOptionsV1 {
+export interface WorkspaceFilesystemGrantAuthorityOptions {
   readonly now?: () => number;
   readonly idSource?: () => string;
   readonly maximumTtlMs?: number;
 }
 
 /** Opaque authority-owned proof that Pipeline confirmed an exact durable ready record. */
-export interface WorkspaceFilesystemMutationReadyAuthorizationV1 {
+export interface WorkspaceFilesystemMutationReadyAuthorization {
   readonly schema: 'kite.workspace-filesystem-ready-authorization.v1';
 }
 
-export class WorkspaceFilesystemGrantAuthorityV1 {
+export class WorkspaceFilesystemGrantAuthority {
   readonly #now: () => number;
   readonly #idSource: () => string;
   readonly #maximumTtlMs: number;
@@ -73,26 +73,26 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
   readonly #readyAuthorizations = new WeakMap<
     object,
     {
-      binding: WorkspaceFilesystemGrantBindingV1;
-      operation: WorkspaceFilesystemMutationOperationV1;
-      protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1;
-      prepared: WorkspaceFilesystemPreparedMutationV1;
-      ready: WorkspaceFilesystemMutationReadyRecordV1;
+      binding: WorkspaceFilesystemGrantBinding;
+      operation: WorkspaceFilesystemMutationOperation;
+      protectedBoundary: WorkspaceFilesystemProtectedBoundary;
+      prepared: WorkspaceFilesystemPreparedMutation;
+      ready: WorkspaceFilesystemMutationReadyRecord;
     }
   >();
-  readonly #verifier: WorkspaceFilesystemGrantVerifierV1;
+  readonly #verifier: WorkspaceFilesystemGrantVerifier;
 
-  constructor(options: WorkspaceFilesystemGrantAuthorityOptionsV1 = {}) {
+  constructor(options: WorkspaceFilesystemGrantAuthorityOptions = {}) {
     this.#now = options.now ?? Date.now;
     this.#idSource = options.idSource ?? randomUUID;
     this.#maximumTtlMs = positiveInteger(options.maximumTtlMs ?? MAX_GRANT_TTL_MS, 'maximumTtlMs');
     this.#verifier = Object.freeze({
-      verifyObserve: (grant: FilesystemObserveGrantV1) => this.#verify(grant, 'observe'),
-      verifyPrepare: (grant: FilesystemPrepareGrantV1) => this.#verify(grant, 'prepare_mutation'),
-      verifyAndConsumeCommit: (grant: FilesystemCommitGrantV1) => {
+      verifyObserve: (grant: FilesystemObserveGrant) => this.#verify(grant, 'observe'),
+      verifyPrepare: (grant: FilesystemPrepareGrant) => this.#verify(grant, 'prepare_mutation'),
+      verifyAndConsumeCommit: (grant: FilesystemCommitGrant) => {
         const verified = this.#verify(grant, 'commit_mutation');
         if (this.#consumedCommitGrantIds.has(verified.grantId)) {
-          throw new WorkspaceFilesystemGrantErrorV1(
+          throw new WorkspaceFilesystemGrantError(
             'consumed_grant',
             'Workspace filesystem commit grant was already consumed.',
           );
@@ -103,59 +103,59 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
     });
   }
 
-  verifier(): WorkspaceFilesystemGrantVerifierV1 {
+  verifier(): WorkspaceFilesystemGrantVerifier {
     return this.#verifier;
   }
 
   issueObserveGrant(input: {
-    readonly binding: WorkspaceFilesystemGrantBindingV1;
-    readonly operation: WorkspaceFilesystemObserveOperationV1;
-    readonly protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1;
+    readonly binding: WorkspaceFilesystemGrantBinding;
+    readonly operation: WorkspaceFilesystemObserveOperation;
+    readonly protectedBoundary: WorkspaceFilesystemProtectedBoundary;
     readonly ttlMs: number;
-  }): Readonly<FilesystemObserveGrantV1> {
+  }): Readonly<FilesystemObserveGrant> {
     return this.#issue(
       'observe',
       input.binding,
       input.operation,
       input.ttlMs,
       input.protectedBoundary,
-    ) as Readonly<FilesystemObserveGrantV1>;
+    ) as Readonly<FilesystemObserveGrant>;
   }
 
   issuePrepareGrant(input: {
-    readonly binding: WorkspaceFilesystemGrantBindingV1;
-    readonly operation: WorkspaceFilesystemMutationOperationV1;
-    readonly protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1;
+    readonly binding: WorkspaceFilesystemGrantBinding;
+    readonly operation: WorkspaceFilesystemMutationOperation;
+    readonly protectedBoundary: WorkspaceFilesystemProtectedBoundary;
     readonly ttlMs: number;
-  }): Readonly<FilesystemPrepareGrantV1> {
+  }): Readonly<FilesystemPrepareGrant> {
     return this.#issue(
       'prepare_mutation',
       input.binding,
       input.operation,
       input.ttlMs,
       input.protectedBoundary,
-    ) as Readonly<FilesystemPrepareGrantV1>;
+    ) as Readonly<FilesystemPrepareGrant>;
   }
 
   acknowledgeMutationReady(input: {
-    readonly binding: WorkspaceFilesystemGrantBindingV1;
-    readonly operation: WorkspaceFilesystemMutationOperationV1;
-    readonly protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1;
-    readonly prepared: WorkspaceFilesystemPreparedMutationV1;
-    readonly ready: WorkspaceFilesystemMutationReadyRecordV1;
-  }): Readonly<WorkspaceFilesystemMutationReadyAuthorizationV1> {
+    readonly binding: WorkspaceFilesystemGrantBinding;
+    readonly operation: WorkspaceFilesystemMutationOperation;
+    readonly protectedBoundary: WorkspaceFilesystemProtectedBoundary;
+    readonly prepared: WorkspaceFilesystemPreparedMutation;
+    readonly ready: WorkspaceFilesystemMutationReadyRecord;
+  }): Readonly<WorkspaceFilesystemMutationReadyAuthorization> {
     const binding = validatedBinding(input.binding);
     const operation = validatedOperation(input.operation, 'mutation');
-    const protectedBoundary = validatedProtectedBoundaryV1(input.protectedBoundary);
+    const protectedBoundary = validatedProtectedBoundary(input.protectedBoundary);
     assertProtectedBoundaryBinding(binding, protectedBoundary);
-    const operationDigest = workspaceFilesystemOperationDigestV1(operation);
+    const operationDigest = workspaceFilesystemOperationDigest(operation);
     const prepared = validatedPreparedMutation(input.prepared);
     if (
       prepared.operationKind !== operation.kind ||
       prepared.operationDigest !== operationDigest ||
       prepared.target.lexicalPath !== operation.path
     ) {
-      throw new WorkspaceFilesystemGrantErrorV1(
+      throw new WorkspaceFilesystemGrantError(
         'invalid_grant',
         'Prepared filesystem mutation does not match the commit operation.',
       );
@@ -168,7 +168,7 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
       ready.targetIdentityDigest !== prepared.targetIdentityDigest ||
       ready.preimageDigest !== prepared.preimageDigest
     ) {
-      throw new WorkspaceFilesystemGrantErrorV1(
+      throw new WorkspaceFilesystemGrantError(
         'invalid_grant',
         'Mutation-ready record does not match the prepared filesystem mutation.',
       );
@@ -187,12 +187,12 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
   }
 
   issueCommitGrant(input: {
-    readonly authorization: WorkspaceFilesystemMutationReadyAuthorizationV1;
+    readonly authorization: WorkspaceFilesystemMutationReadyAuthorization;
     readonly ttlMs: number;
-  }): Readonly<FilesystemCommitGrantV1> {
+  }): Readonly<FilesystemCommitGrant> {
     const acknowledged = this.#readyAuthorizations.get(input.authorization);
     if (!acknowledged) {
-      throw new WorkspaceFilesystemGrantErrorV1(
+      throw new WorkspaceFilesystemGrantError(
         'invalid_grant',
         'Mutation-ready authorization was not issued by this grant authority.',
       );
@@ -202,13 +202,13 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
     const operation = validatedOperation(
       acknowledged.operation,
       'mutation',
-    ) as WorkspaceFilesystemMutationOperationV1;
-    const operationDigest = workspaceFilesystemOperationDigestV1(operation);
+    ) as WorkspaceFilesystemMutationOperation;
+    const operationDigest = workspaceFilesystemOperationDigest(operation);
     const prepared = validatedPreparedMutation(acknowledged.prepared);
     const ready = validatedMutationReadyRecord(acknowledged.ready);
     const timing = this.#timing(input.ttlMs);
     const unsigned = {
-      schema: WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_,
       purpose: 'commit_mutation' as const,
       grantId: requiredString(this.#idSource(), 'grantId', MAX_IDENTITY_CHARS),
       ...binding,
@@ -228,28 +228,28 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
 
   #issue(
     purpose: 'observe' | 'prepare_mutation',
-    binding: WorkspaceFilesystemGrantBindingV1,
-    operation: WorkspaceFilesystemOperationV1,
+    binding: WorkspaceFilesystemGrantBinding,
+    operation: WorkspaceFilesystemOperation,
     ttlMs: number,
-    protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1,
-  ): Readonly<FilesystemObserveGrantV1 | FilesystemPrepareGrantV1> {
+    protectedBoundary: WorkspaceFilesystemProtectedBoundary,
+  ): Readonly<FilesystemObserveGrant | FilesystemPrepareGrant> {
     const validated = validatedOperation(operation, purpose === 'observe' ? 'observe' : 'mutation');
     const validatedBindingValue = validatedBinding(binding);
-    const boundary = validatedProtectedBoundaryV1(protectedBoundary);
+    const boundary = validatedProtectedBoundary(protectedBoundary);
     assertProtectedBoundaryBinding(validatedBindingValue, boundary);
     const timing = this.#timing(ttlMs);
     const unsigned = {
-      schema: WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_,
       purpose,
       grantId: requiredString(this.#idSource(), 'grantId', MAX_IDENTITY_CHARS),
       ...validatedBindingValue,
       operation: validated,
-      operationDigest: workspaceFilesystemOperationDigestV1(validated),
+      operationDigest: workspaceFilesystemOperationDigest(validated),
       protectedBoundary: boundary,
       ...timing,
     };
     return frozenClone({ ...unsigned, seal: this.#seal(unsigned) }) as Readonly<
-      FilesystemObserveGrantV1 | FilesystemPrepareGrantV1
+      FilesystemObserveGrant | FilesystemPrepareGrant
     >;
   }
 
@@ -270,9 +270,10 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
       .digest('hex')}`;
   }
 
-  #verify<
-    Grant extends FilesystemObserveGrantV1 | FilesystemPrepareGrantV1 | FilesystemCommitGrantV1,
-  >(value: Grant, expectedPurpose: Grant['purpose']): Readonly<Grant> {
+  #verify<Grant extends FilesystemObserveGrant | FilesystemPrepareGrant | FilesystemCommitGrant>(
+    value: Grant,
+    expectedPurpose: Grant['purpose'],
+  ): Readonly<Grant> {
     try {
       assertGrantShape(value, expectedPurpose);
       const { seal, ...unsigned } = value;
@@ -280,7 +281,7 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
       if (!safeEqual(seal, expected)) throw new Error('seal mismatch');
       const now = safeTimestamp(this.#now(), 'now');
       if (now >= value.expiresAtMs) {
-        throw new WorkspaceFilesystemGrantErrorV1(
+        throw new WorkspaceFilesystemGrantError(
           'expired_grant',
           'Workspace filesystem grant expired before Provider I/O.',
         );
@@ -290,8 +291,8 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
       }
       return frozenClone(value);
     } catch (error) {
-      if (error instanceof WorkspaceFilesystemGrantErrorV1) throw error;
-      throw new WorkspaceFilesystemGrantErrorV1(
+      if (error instanceof WorkspaceFilesystemGrantError) throw error;
+      throw new WorkspaceFilesystemGrantError(
         'invalid_grant',
         'Workspace filesystem grant failed structural or integrity validation.',
       );
@@ -300,9 +301,9 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
 }
 
 function validatedPreparedMutation(value: unknown): {
-  operationKind: WorkspaceFilesystemMutationOperationV1['kind'];
+  operationKind: WorkspaceFilesystemMutationOperation['kind'];
   operationDigest: string;
-  target: WorkspaceFilesystemTargetIdentityV1;
+  target: WorkspaceFilesystemTargetIdentity;
   targetIdentityDigest: string;
   preimageDigest: string | null;
 } {
@@ -331,7 +332,7 @@ function validatedPreparedMutation(value: unknown): {
     'targetIdentityDigest',
     256,
   );
-  if (targetIdentityDigest !== workspaceFilesystemTargetIdentityDigestV1(target)) {
+  if (targetIdentityDigest !== workspaceFilesystemTargetIdentityDigest(target)) {
     throw new Error('prepared target digest mismatch');
   }
   const evidence = plainRecord(prepared.targetEvidence, 'target evidence');
@@ -340,7 +341,7 @@ function validatedPreparedMutation(value: unknown): {
     ['lexicalTargetDigest', 'canonicalTargetDigest', 'targetIdentityDigest'],
     'target evidence',
   );
-  const expectedEvidence = workspaceFilesystemTargetEvidenceV1(target);
+  const expectedEvidence = workspaceFilesystemTargetEvidence(target);
   if (
     evidence.lexicalTargetDigest !== expectedEvidence.lexicalTargetDigest ||
     evidence.canonicalTargetDigest !== expectedEvidence.canonicalTargetDigest ||
@@ -362,7 +363,7 @@ function validatedPreparedMutation(value: unknown): {
     );
     preimageDigest = requiredString(preimage.contentDigest, 'preimage digest', 256);
     if (
-      preimageDigest !== workspaceFilesystemStringDigestV1(content) ||
+      preimageDigest !== workspaceFilesystemStringDigest(content) ||
       byteLength !== Buffer.byteLength(content)
     ) {
       throw new Error('preimage integrity mismatch');
@@ -382,7 +383,7 @@ function validatedPreparedMutation(value: unknown): {
   };
 }
 
-function validatedPreimageArtifact(value: unknown): FilesystemPreimageArtifactRefV1 {
+function validatedPreimageArtifact(value: unknown): FilesystemPreimageArtifactRef {
   const artifact = plainRecord(value, 'preimage Artifact');
   exactKeys(
     artifact,
@@ -408,7 +409,7 @@ function validatedPreimageArtifact(value: unknown): FilesystemPreimageArtifactRe
   };
 }
 
-function validatedProtectedBoundaryV1(value: unknown): WorkspaceFilesystemProtectedBoundaryV1 {
+function validatedProtectedBoundary(value: unknown): WorkspaceFilesystemProtectedBoundary {
   const boundary = plainRecord(value, 'protected boundary');
   exactKeys(
     boundary,
@@ -456,9 +457,9 @@ function validatedProtectedBoundaryV1(value: unknown): WorkspaceFilesystemProtec
       'allowedCanonicalPaths',
     ),
     boundaryDigest: requiredString(boundary.boundaryDigest, 'boundaryDigest', 256),
-  } satisfies WorkspaceFilesystemProtectedBoundaryV1;
+  } satisfies WorkspaceFilesystemProtectedBoundary;
   const { boundaryDigest, ...unsigned } = result;
-  if (boundaryDigest !== workspaceFilesystemProtectedBoundaryDigestV1(unsigned)) {
+  if (boundaryDigest !== workspaceFilesystemProtectedBoundaryDigest(unsigned)) {
     throw new Error('protected boundary digest mismatch');
   }
   return result;
@@ -498,56 +499,56 @@ function validatedAbsolutePathList(value: unknown, name: string): string[] {
   return result;
 }
 
-const validatedMutationReadyRecord = validateWorkspaceFilesystemMutationReadyRecordV1;
+const validatedMutationReadyRecord = validateWorkspaceFilesystemMutationReadyRecord;
 
-export function workspaceFilesystemOperationDigestV1(
-  operation: WorkspaceFilesystemOperationV1,
+export function workspaceFilesystemOperationDigest(
+  operation: WorkspaceFilesystemOperation,
 ): string {
   return `sha256:${createHash('sha256').update(canonicalJson(operation)).digest('hex')}`;
 }
 
-export function validateWorkspaceFilesystemOperationV1(
-  operation: WorkspaceFilesystemOperationV1,
+export function validateWorkspaceFilesystemOperation(
+  operation: WorkspaceFilesystemOperation,
   family: 'observe' | 'mutation',
-): Readonly<WorkspaceFilesystemOperationV1> {
+): Readonly<WorkspaceFilesystemOperation> {
   return frozenClone(validatedOperation(operation, family));
 }
 
-export function workspaceFilesystemProtectedBoundaryDigestV1(
-  boundary: Omit<WorkspaceFilesystemProtectedBoundaryV1, 'boundaryDigest'>,
+export function workspaceFilesystemProtectedBoundaryDigest(
+  boundary: Omit<WorkspaceFilesystemProtectedBoundary, 'boundaryDigest'>,
 ): string {
   return `sha256:${createHash('sha256').update(canonicalJson(boundary)).digest('hex')}`;
 }
 
-export function workspaceFilesystemTargetIdentityDigestV1(
-  target: WorkspaceFilesystemTargetIdentityV1,
+export function workspaceFilesystemTargetIdentityDigest(
+  target: WorkspaceFilesystemTargetIdentity,
 ): string {
   return `sha256:${createHash('sha256').update(canonicalJson(target)).digest('hex')}`;
 }
 
-export function workspaceFilesystemStringDigestV1(value: string): string {
+export function workspaceFilesystemStringDigest(value: string): string {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
 
 /** Stable postimage compatibility hash for normalized Workspace file content. */
-export function workspaceFilesystemContentHashV1(value: string): string {
-  return workspaceFilesystemStringDigestV1(value).slice('sha256:'.length);
+export function workspaceFilesystemContentHash(value: string): string {
+  return workspaceFilesystemStringDigest(value).slice('sha256:'.length);
 }
 
-export function workspaceFilesystemTargetEvidenceV1(
-  target: WorkspaceFilesystemTargetIdentityV1,
-): Readonly<WorkspaceFilesystemTargetEvidenceV1> {
+export function workspaceFilesystemTargetEvidence(
+  target: WorkspaceFilesystemTargetIdentity,
+): Readonly<WorkspaceFilesystemTargetEvidence> {
   return deepFreeze({
-    lexicalTargetDigest: workspaceFilesystemStringDigestV1(target.lexicalPath),
-    canonicalTargetDigest: workspaceFilesystemStringDigestV1(target.canonicalPath),
-    targetIdentityDigest: workspaceFilesystemTargetIdentityDigestV1(target),
+    lexicalTargetDigest: workspaceFilesystemStringDigest(target.lexicalPath),
+    canonicalTargetDigest: workspaceFilesystemStringDigest(target.canonicalPath),
+    targetIdentityDigest: workspaceFilesystemTargetIdentityDigest(target),
   });
 }
 
 function assertGrantShape(
   value: unknown,
   expectedPurpose: 'observe' | 'prepare_mutation' | 'commit_mutation',
-): asserts value is FilesystemObserveGrantV1 | FilesystemPrepareGrantV1 | FilesystemCommitGrantV1 {
+): asserts value is FilesystemObserveGrant | FilesystemPrepareGrant | FilesystemCommitGrant {
   const grant = plainRecord(value, 'grant');
   const baseKeys = [
     'schema',
@@ -585,10 +586,7 @@ function assertGrantShape(
         ]
       : baseKeys;
   exactKeys(grant, expectedKeys, 'grant');
-  if (
-    grant.schema !== WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1 ||
-    grant.purpose !== expectedPurpose
-  ) {
+  if (grant.schema !== WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_ || grant.purpose !== expectedPurpose) {
     throw new Error('purpose mismatch');
   }
   validatedBinding({
@@ -610,10 +608,10 @@ function assertGrantShape(
     grant.operation,
     expectedPurpose === 'observe' ? 'observe' : 'mutation',
   );
-  if (grant.operationDigest !== workspaceFilesystemOperationDigestV1(operation)) {
+  if (grant.operationDigest !== workspaceFilesystemOperationDigest(operation)) {
     throw new Error('operation digest mismatch');
   }
-  const protectedBoundary = validatedProtectedBoundaryV1(grant.protectedBoundary);
+  const protectedBoundary = validatedProtectedBoundary(grant.protectedBoundary);
   if (
     protectedBoundary.boundaryDigest !== grant.searchBoundaryDigest ||
     !sameCanonicalWorkspaceIdentity(
@@ -628,7 +626,7 @@ function assertGrantShape(
   requiredString(grant.seal, 'seal', 256);
   if (expectedPurpose === 'commit_mutation') {
     const target = validatedTargetIdentity(grant.preparedTargetIdentity);
-    if (grant.preparedTargetIdentityDigest !== workspaceFilesystemTargetIdentityDigestV1(target)) {
+    if (grant.preparedTargetIdentityDigest !== workspaceFilesystemTargetIdentityDigest(target)) {
       throw new Error('target digest mismatch');
     }
     if (grant.preimageDigest !== null) requiredString(grant.preimageDigest, 'preimageDigest', 256);
@@ -651,14 +649,14 @@ function assertGrantShape(
 }
 
 function assertProtectedBoundaryBinding(
-  binding: WorkspaceFilesystemGrantBindingV1,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  binding: WorkspaceFilesystemGrantBinding,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): void {
   if (
     binding.searchBoundaryDigest !== boundary.boundaryDigest ||
     !sameCanonicalWorkspaceIdentity(binding.canonicalWorkspace, boundary.canonicalWorkspace)
   ) {
-    throw new WorkspaceFilesystemGrantErrorV1(
+    throw new WorkspaceFilesystemGrantError(
       'invalid_grant',
       'Filesystem protected boundary does not match the admitted grant binding.',
     );
@@ -671,9 +669,7 @@ function sameCanonicalWorkspaceIdentity(left: string, right: string): boolean {
   return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
-function validatedBinding(
-  value: WorkspaceFilesystemGrantBindingV1,
-): WorkspaceFilesystemGrantBindingV1 {
+function validatedBinding(value: WorkspaceFilesystemGrantBinding): WorkspaceFilesystemGrantBinding {
   const binding = plainRecord(value, 'binding');
   exactKeys(
     binding,
@@ -729,7 +725,7 @@ function validatedBinding(
 function validatedOperation(
   value: unknown,
   family: 'observe' | 'mutation',
-): WorkspaceFilesystemOperationV1 {
+): WorkspaceFilesystemOperation {
   const operation = plainRecord(value, 'operation');
   const kind = operation.kind;
   const common = () => {
@@ -809,7 +805,7 @@ function validatedOperation(
   throw new Error('operation purpose mismatch');
 }
 
-function validatedTargetIdentity(value: unknown): WorkspaceFilesystemTargetIdentityV1 {
+function validatedTargetIdentity(value: unknown): WorkspaceFilesystemTargetIdentity {
   const target = plainRecord(value, 'target identity');
   exactKeys(
     target,
@@ -826,10 +822,10 @@ function validatedTargetIdentity(value: unknown): WorkspaceFilesystemTargetIdent
     ],
     'target identity',
   );
-  if (target.schema !== WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1) throw new Error('target schema');
+  if (target.schema !== WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_) throw new Error('target schema');
   if (typeof target.exists !== 'boolean') throw new Error('target exists');
-  const result: WorkspaceFilesystemTargetIdentityV1 = {
-    schema: WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1,
+  const result: WorkspaceFilesystemTargetIdentity = {
+    schema: WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_,
     lexicalPath: requiredString(target.lexicalPath, 'lexicalPath', MAX_PATH_CHARS, true),
     resolvedPath: requiredString(target.resolvedPath, 'resolvedPath', MAX_PATH_CHARS),
     canonicalPath: requiredString(target.canonicalPath, 'canonicalPath', MAX_PATH_CHARS),
@@ -850,7 +846,7 @@ function validatedTargetIdentity(value: unknown): WorkspaceFilesystemTargetIdent
 
 function validatedStatIdentity(
   value: unknown,
-): WorkspaceFilesystemTargetIdentityV1['nearestExistingNoFollow'] {
+): WorkspaceFilesystemTargetIdentity['nearestExistingNoFollow'] {
   const stat = plainRecord(value, 'stat identity');
   exactKeys(stat, ['device', 'inode', 'mode', 'size', 'modifiedAtMs', 'type'], 'stat identity');
   if (!['file', 'directory', 'symlink', 'other'].includes(String(stat.type))) {

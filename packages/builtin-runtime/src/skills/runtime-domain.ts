@@ -1,13 +1,13 @@
 import { dirname, relative } from 'node:path';
-import { digestCapabilityValueV1 } from './capability-domain';
+import { digestCapabilityValue } from './capability-domain';
 import type { SkillWorkflowContract } from './workflow';
 
-export interface SkillFeatureFlagsV1 {
-  skillActivationV2: boolean;
-  skillWorkflowV1: boolean;
+export interface SkillFeatureFlags {
+  skillActivation: boolean;
+  skillWorkflow: boolean;
 }
 
-export interface SkillActivationV1 {
+export interface SkillActivation {
   activationId: string;
   skillId: string;
   skillRevision: string;
@@ -21,29 +21,29 @@ export interface SkillActivationV1 {
   activatedAt: string;
 }
 
-export interface SkillFrameV1 extends SkillActivationV1 {
+export interface SkillFrame extends SkillActivation {
   status: 'active' | 'closed' | 'invalidated';
   closedAt?: string;
   closeReason?: string;
   output?: Readonly<Record<string, unknown>>;
 }
 
-export interface SkillRuntimeStateViewV1 {
+export interface SkillRuntimeStateView {
   activeTaskId: string | null;
   session: { workspace: string };
   skills: {
     catalogRevision: string;
-    frames: Record<string, SkillFrameV1>;
+    frames: Record<string, SkillFrame>;
   };
 }
 
-export interface SkillForkResultV1 {
+export interface SkillForkResult {
   ok: boolean;
   summary: string;
   error?: string;
 }
 
-type SkillVerificationCheckV1 =
+type SkillVerificationCheck =
   | {
       checkId: string;
       type: 'command';
@@ -61,19 +61,19 @@ type SkillVerificationCheckV1 =
       instructions: string;
     };
 
-interface SkillVerificationSpecV1 {
+interface SkillVerificationSpec {
   schemaVersion: 1;
   verificationId: string;
   taskId?: string;
   subject: string;
-  checks: SkillVerificationCheckV1[];
+  checks: SkillVerificationCheck[];
   repair: { maxAttempts: number };
   compensation?: { command: string; cwd?: string; timeoutMs?: number };
 }
 
-export type SkillRuntimeEventV1 =
+export type SkillRuntimeEvent =
   | { type: 'skill.catalog_refreshed'; catalogRevision: string }
-  | { type: 'skill.activation_started'; activation: SkillActivationV1 }
+  | { type: 'skill.activation_started'; activation: SkillActivation }
   | {
       type: 'skill.frame_closed';
       activationId: string;
@@ -87,32 +87,32 @@ export type SkillRuntimeEventV1 =
       verificationId: string;
       taskId: string;
       mode: 'best_effort' | 'required';
-      spec: SkillVerificationSpecV1;
+      spec: SkillVerificationSpec;
       requestedAt: string;
     };
 
-export function verificationRequestForSkillV1(input: {
-  activation: SkillActivationV1;
+export function verificationRequestForSkill(input: {
+  activation: SkillActivation;
   contract: SkillWorkflowContract;
   sourcePath: string;
   workspace: string;
   requestedAt?: string;
-}): Extract<SkillRuntimeEventV1, { type: 'verification.requested' }> | undefined {
-  const mode = resolveVerificationModeV1(input.contract);
+}): Extract<SkillRuntimeEvent, { type: 'verification.requested' }> | undefined {
+  const mode = resolveVerificationMode(input.contract);
   if (mode === 'not_required') return undefined;
-  const verificationId = digestCapabilityValueV1({
+  const verificationId = digestCapabilityValue({
     type: 'skill-verification',
     activationId: input.activation.activationId,
     skillRevision: input.activation.skillRevision,
   });
-  const checks: SkillVerificationCheckV1[] = [];
+  const checks: SkillVerificationCheck[] = [];
   if (input.contract.verification.strategy === 'script' && input.contract.verification.entrypoint) {
     const skillDirectory = dirname(input.sourcePath);
     checks.push({
       checkId: 'skill-script',
       type: 'command',
       description: 'Run the Workflow Contract verification entrypoint.',
-      command: `bun run ${shellQuoteV1(input.contract.verification.entrypoint)}`,
+      command: `bun run ${shellQuote(input.contract.verification.entrypoint)}`,
       cwd: relative(input.workspace, skillDirectory).replaceAll('\\', '/'),
       timeoutMs: input.contract.verification.timeoutMs,
       expectedExitCode: 0,
@@ -126,7 +126,7 @@ export function verificationRequestForSkillV1(input: {
       instructions: `Determine whether the structured output establishes completion of ${input.activation.skillId}.`,
     });
   }
-  const spec: SkillVerificationSpecV1 = {
+  const spec: SkillVerificationSpec = {
     schemaVersion: 1,
     verificationId,
     taskId: input.activation.taskId,
@@ -136,7 +136,7 @@ export function verificationRequestForSkillV1(input: {
     ...(input.contract.recovery.compensation
       ? {
           compensation: {
-            command: `bun run ${shellQuoteV1(input.contract.recovery.compensation)}`,
+            command: `bun run ${shellQuote(input.contract.recovery.compensation)}`,
             cwd: relative(input.workspace, dirname(input.sourcePath)).replaceAll('\\', '/'),
             timeoutMs: input.contract.execution.timeoutMs,
           },
@@ -153,7 +153,7 @@ export function verificationRequestForSkillV1(input: {
   };
 }
 
-function resolveVerificationModeV1(
+function resolveVerificationMode(
   contract: SkillWorkflowContract,
 ): 'not_required' | 'best_effort' | 'required' {
   if (
@@ -168,6 +168,6 @@ function resolveVerificationModeV1(
   return contract.verification.mode;
 }
 
-function shellQuoteV1(value: string): string {
+function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }

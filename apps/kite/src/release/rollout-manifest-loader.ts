@@ -1,20 +1,20 @@
 import { createPublicKey, verify } from 'node:crypto';
 import { z } from 'zod';
 import {
-  composeReleaseProfileV1,
+  composeReleaseProfile,
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
-  type ReleaseProfileRestrictionLayerV1,
-  type ReleaseProfileV1,
+  type ReleaseProfile,
+  type ReleaseProfileRestrictionLayer,
   type RolloutStage,
 } from '#app/config';
 import { canonicalJsonBytes, parseCanonicalJson, sha256Digest } from './canonical-json';
 import {
-  createRolloutCacheRecordV1,
-  decodeIdentityBoundRolloutCacheV1,
-  type RolloutArtifactIdentityV1,
-  type RolloutCacheRecordV1,
-  rolloutArtifactIdentityV1Schema,
+  createRolloutCacheRecord,
+  decodeIdentityBoundRolloutCache,
+  type RolloutArtifactIdentity,
+  type RolloutCacheRecord,
+  rolloutArtifactIdentitySchema,
 } from './rollout-cache';
 
 export const ROLLOUT_MANIFEST_ENABLED_BY_DEFAULT = false as const;
@@ -80,11 +80,11 @@ const sortedUniqueCapabilityListSchema = z
     }
   });
 
-export const disableOnlyRolloutManifestV1Schema = z
+export const disableOnlyRolloutManifestSchema = z
   .object({
     version: z.literal(1),
     kind: z.literal('disable-only-rollout-manifest-v1'),
-    artifactIdentity: rolloutArtifactIdentityV1Schema,
+    artifactIdentity: rolloutArtifactIdentitySchema,
     sequence: z.number().int().positive().safe(),
     issuedAt: timestampSchema,
     expiresAt: timestampSchema,
@@ -105,9 +105,9 @@ export const disableOnlyRolloutManifestV1Schema = z
   })
   .strict();
 
-export type DisableOnlyRolloutManifestV1 = z.infer<typeof disableOnlyRolloutManifestV1Schema>;
+export type DisableOnlyRolloutManifest = z.infer<typeof disableOnlyRolloutManifestSchema>;
 
-export const syntheticRolloutSignatureV1Schema = z
+export const syntheticRolloutSignatureSchema = z
   .object({
     version: z.literal(1),
     kind: z.literal('synthetic-rollout-ed25519-fixture-v1'),
@@ -119,15 +119,15 @@ export const syntheticRolloutSignatureV1Schema = z
   })
   .strict();
 
-export type SyntheticRolloutSignatureV1 = z.infer<typeof syntheticRolloutSignatureV1Schema>;
+export type SyntheticRolloutSignature = z.infer<typeof syntheticRolloutSignatureSchema>;
 
-export interface VerifiedDisableOnlyRolloutV1 {
-  manifest: DisableOnlyRolloutManifestV1;
-  signature: SyntheticRolloutSignatureV1;
+export interface VerifiedDisableOnlyRollout {
+  manifest: DisableOnlyRolloutManifest;
+  signature: SyntheticRolloutSignature;
   manifestBytes: Uint8Array;
   signatureBytes: Uint8Array;
-  restrictionLayer: ReleaseProfileRestrictionLayerV1;
-  effectiveProfile: ReleaseProfileV1;
+  restrictionLayer: ReleaseProfileRestrictionLayer;
+  effectiveProfile: ReleaseProfile;
 }
 
 export class DisableOnlyRolloutError extends Error {
@@ -146,21 +146,21 @@ export class DisableOnlyRolloutError extends Error {
   }
 }
 
-export type DisableOnlyRolloutResolutionV1 =
+export type DisableOnlyRolloutResolution =
   | {
       status: 'disabled' | 'embedded_ceiling';
       source: 'embedded';
-      effectiveProfile: ReleaseProfileV1;
+      effectiveProfile: ReleaseProfile;
       cohortPercent: number;
     }
   | {
       status: 'applied';
       source: 'remote' | 'cache';
-      effectiveProfile: ReleaseProfileV1;
+      effectiveProfile: ReleaseProfile;
       cohortPercent: number;
       sequence: number;
-      restrictionLayer: ReleaseProfileRestrictionLayerV1;
-      cacheRecord: RolloutCacheRecordV1;
+      restrictionLayer: ReleaseProfileRestrictionLayer;
+      cacheRecord: RolloutCacheRecord;
     }
   | {
       status: 'denied';
@@ -168,44 +168,44 @@ export type DisableOnlyRolloutResolutionV1 =
       reason: 'valid_identity_bound_rollout_unavailable';
     };
 
-export function encodeDisableOnlyRolloutManifestV1(value: unknown): Uint8Array {
-  return canonicalJsonBytes(disableOnlyRolloutManifestV1Schema.parse(value));
+export function encodeDisableOnlyRolloutManifest(value: unknown): Uint8Array {
+  return canonicalJsonBytes(disableOnlyRolloutManifestSchema.parse(value));
 }
 
-export function encodeSyntheticRolloutSignatureV1(value: unknown): Uint8Array {
-  return canonicalJsonBytes(syntheticRolloutSignatureV1Schema.parse(value));
+export function encodeSyntheticRolloutSignature(value: unknown): Uint8Array {
+  return canonicalJsonBytes(syntheticRolloutSignatureSchema.parse(value));
 }
 
-export function verifyDisableOnlyRolloutManifestV1(input: {
+export function verifyDisableOnlyRolloutManifest(input: {
   manifestBytes: Uint8Array;
   signatureBytes: Uint8Array;
-  expectedIdentity: RolloutArtifactIdentityV1;
-  embeddedProfile: ReleaseProfileV1;
+  expectedIdentity: RolloutArtifactIdentity;
+  embeddedProfile: ReleaseProfile;
   embeddedCohortPercent: number;
   now: Date;
-}): VerifiedDisableOnlyRolloutV1 {
-  return verifyDisableOnlyRolloutManifestInternalV1(input, false);
+}): VerifiedDisableOnlyRollout {
+  return verifyDisableOnlyRolloutManifestInternal(input, false);
 }
 
-function verifyDisableOnlyRolloutManifestInternalV1(
+function verifyDisableOnlyRolloutManifestInternal(
   input: {
     manifestBytes: Uint8Array;
     signatureBytes: Uint8Array;
-    expectedIdentity: RolloutArtifactIdentityV1;
-    embeddedProfile: ReleaseProfileV1;
+    expectedIdentity: RolloutArtifactIdentity;
+    embeddedProfile: ReleaseProfile;
     embeddedCohortPercent: number;
     now: Date;
   },
   allowExpiredForReplayCheck: boolean,
-): VerifiedDisableOnlyRolloutV1 {
+): VerifiedDisableOnlyRollout {
   if (input.manifestBytes.byteLength > 256 * 1024 || input.signatureBytes.byteLength > 32 * 1024) {
     throw new DisableOnlyRolloutError('schema_invalid');
   }
-  let manifest: DisableOnlyRolloutManifestV1;
-  let signature: SyntheticRolloutSignatureV1;
+  let manifest: DisableOnlyRolloutManifest;
+  let signature: SyntheticRolloutSignature;
   try {
-    manifest = disableOnlyRolloutManifestV1Schema.parse(parseCanonicalJson(input.manifestBytes));
-    signature = syntheticRolloutSignatureV1Schema.parse(parseCanonicalJson(input.signatureBytes));
+    manifest = disableOnlyRolloutManifestSchema.parse(parseCanonicalJson(input.manifestBytes));
+    signature = syntheticRolloutSignatureSchema.parse(parseCanonicalJson(input.signatureBytes));
   } catch {
     throw new DisableOnlyRolloutError('schema_invalid');
   }
@@ -237,9 +237,9 @@ function verifyDisableOnlyRolloutManifestInternalV1(
   }
 
   const restrictionLayer = restrictionLayerFromManifest(manifest);
-  let effectiveProfile: ReleaseProfileV1;
+  let effectiveProfile: ReleaseProfile;
   try {
-    effectiveProfile = composeReleaseProfileV1({
+    effectiveProfile = composeReleaseProfile({
       embedded: input.embeddedProfile,
       layers: [restrictionLayer],
     });
@@ -256,18 +256,18 @@ function verifyDisableOnlyRolloutManifestInternalV1(
   };
 }
 
-export function resolveDisableOnlyRolloutV1(input: {
+export function resolveDisableOnlyRollout(input: {
   enabled?: boolean;
   mandatoryAdmin: boolean;
-  embeddedProfile: ReleaseProfileV1;
+  embeddedProfile: ReleaseProfile;
   embeddedCohortPercent: number;
-  expectedIdentity: RolloutArtifactIdentityV1;
+  expectedIdentity: RolloutArtifactIdentity;
   now: Date;
   remote?:
     | { status: 'unavailable' }
     | { status: 'available'; manifestBytes: Uint8Array; signatureBytes: Uint8Array };
   cachedRecord?: unknown;
-}): DisableOnlyRolloutResolutionV1 {
+}): DisableOnlyRolloutResolution {
   if (!(input.enabled ?? ROLLOUT_MANIFEST_ENABLED_BY_DEFAULT)) {
     if (input.mandatoryAdmin) {
       return {
@@ -282,7 +282,7 @@ export function resolveDisableOnlyRolloutV1(input: {
   const cached = inspectCached(input);
   if (input.remote?.status === 'available') {
     try {
-      const remote = verifyDisableOnlyRolloutManifestV1({
+      const remote = verifyDisableOnlyRolloutManifest({
         manifestBytes: input.remote.manifestBytes,
         signatureBytes: input.remote.signatureBytes,
         expectedIdentity: input.expectedIdentity,
@@ -311,24 +311,24 @@ export function resolveDisableOnlyRolloutV1(input: {
 
 function inspectCached(input: {
   cachedRecord?: unknown;
-  expectedIdentity: RolloutArtifactIdentityV1;
-  embeddedProfile: ReleaseProfileV1;
+  expectedIdentity: RolloutArtifactIdentity;
+  embeddedProfile: ReleaseProfile;
   embeddedCohortPercent: number;
   now: Date;
 }):
   | {
-      verified: VerifiedDisableOnlyRolloutV1;
+      verified: VerifiedDisableOnlyRollout;
       highWaterSequence: number;
       applicable: boolean;
     }
   | undefined {
   if (!input.cachedRecord) return undefined;
   try {
-    const cached = decodeIdentityBoundRolloutCacheV1({
+    const cached = decodeIdentityBoundRolloutCache({
       record: input.cachedRecord,
       expectedIdentity: input.expectedIdentity,
     });
-    const verified = verifyDisableOnlyRolloutManifestInternalV1(
+    const verified = verifyDisableOnlyRolloutManifestInternal(
       {
         manifestBytes: cached.manifestBytes,
         signatureBytes: cached.signatureBytes,
@@ -357,9 +357,9 @@ function inspectCached(input: {
 
 function appliedResolution(
   source: 'remote' | 'cache',
-  verified: VerifiedDisableOnlyRolloutV1,
-  artifactIdentity: RolloutArtifactIdentityV1,
-): Extract<DisableOnlyRolloutResolutionV1, { status: 'applied' }> {
+  verified: VerifiedDisableOnlyRollout,
+  artifactIdentity: RolloutArtifactIdentity,
+): Extract<DisableOnlyRolloutResolution, { status: 'applied' }> {
   return {
     status: 'applied',
     source,
@@ -367,7 +367,7 @@ function appliedResolution(
     cohortPercent: verified.manifest.restrictions.cohortPercent,
     sequence: verified.manifest.sequence,
     restrictionLayer: verified.restrictionLayer,
-    cacheRecord: createRolloutCacheRecordV1({
+    cacheRecord: createRolloutCacheRecord({
       artifactIdentity,
       sequence: verified.manifest.sequence,
       expiresAt: verified.manifest.expiresAt,
@@ -379,15 +379,15 @@ function appliedResolution(
 
 function embeddedResolution(
   status: 'disabled' | 'embedded_ceiling',
-  profile: ReleaseProfileV1,
+  profile: ReleaseProfile,
   cohortPercent: number,
-): Extract<DisableOnlyRolloutResolutionV1, { status: 'disabled' | 'embedded_ceiling' }> {
+): Extract<DisableOnlyRolloutResolution, { status: 'disabled' | 'embedded_ceiling' }> {
   return { status, source: 'embedded', effectiveProfile: profile, cohortPercent };
 }
 
 function restrictionLayerFromManifest(
-  manifest: DisableOnlyRolloutManifestV1,
-): ReleaseProfileRestrictionLayerV1 {
+  manifest: DisableOnlyRolloutManifest,
+): ReleaseProfileRestrictionLayer {
   const maxRollout = { ...manifest.restrictions.maxRollout } as Partial<
     Record<ReleaseCapability, RolloutStage>
   >;
@@ -413,8 +413,8 @@ function restrictionLayerFromManifest(
 }
 
 function verifyManifestTime(
-  manifest: DisableOnlyRolloutManifestV1,
-  trust: (typeof SYNTHETIC_ROLLOUT_TRUST_BUNDLE)[DisableOnlyRolloutManifestV1['keyId']],
+  manifest: DisableOnlyRolloutManifest,
+  trust: (typeof SYNTHETIC_ROLLOUT_TRUST_BUNDLE)[DisableOnlyRolloutManifest['keyId']],
   now: Date,
   allowExpiredForReplayCheck: boolean,
 ): void {
@@ -436,8 +436,8 @@ function verifyManifestTime(
 }
 
 function sameArtifactIdentity(
-  left: RolloutArtifactIdentityV1,
-  right: RolloutArtifactIdentityV1,
+  left: RolloutArtifactIdentity,
+  right: RolloutArtifactIdentity,
 ): boolean {
   return (
     left.canonicalRepository === right.canonicalRepository &&

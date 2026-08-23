@@ -1,21 +1,21 @@
 import type { AgentState } from './state';
 
-export const PLAN_REVIEW_SIBLING_CANCELLATION_REASON_V1 =
+export const PLAN_REVIEW_SIBLING_CANCELLATION_REASON_ =
   'Cancelled because an earlier tool call opened an interaction.' as const;
 
-export interface PlanReviewSiblingCancellationDecisionV1 {
+export interface PlanReviewSiblingCancellationDecision {
   readonly toolCallId: string;
-  readonly reason: typeof PLAN_REVIEW_SIBLING_CANCELLATION_REASON_V1;
+  readonly reason: typeof PLAN_REVIEW_SIBLING_CANCELLATION_REASON_;
 }
 
 /**
  * Pure State decision for queued calls hidden behind a Plan review barrier.
  * It reads only committed Tool facts and performs no persistence or event IO.
  */
-export function decidePlanReviewSiblingCancellationsV1(
+export function decidePlanReviewSiblingCancellations(
   state: Readonly<AgentState>,
   openingToolCallId: string,
-): readonly Readonly<PlanReviewSiblingCancellationDecisionV1>[] {
+): readonly Readonly<PlanReviewSiblingCancellationDecision>[] {
   const opening = state.tools.calls[openingToolCallId];
   if (!opening) return Object.freeze([]);
   const openingOrdinal = opening.ordinal ?? 0;
@@ -31,7 +31,7 @@ export function decidePlanReviewSiblingCancellationsV1(
       .map((candidate) =>
         Object.freeze({
           toolCallId: candidate.toolCallId,
-          reason: PLAN_REVIEW_SIBLING_CANCELLATION_REASON_V1,
+          reason: PLAN_REVIEW_SIBLING_CANCELLATION_REASON_,
         }),
       ),
   );

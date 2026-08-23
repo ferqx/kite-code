@@ -1,16 +1,16 @@
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import {
   createChatModel,
-  createModelSecretDetectorV1,
+  createModelSecretDetector,
   type SupportedChatModel,
 } from '@kite/builtin-runtime/model';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
-import type { StateAuthorizationSourceV1 } from '@kite/runtime-host';
+import type { StateAuthorizationSource } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config/index';
 import { defaultCheckpointPath } from '#app/config/paths';
 import type { SandboxBackend } from '#app/sandbox/types';
-import type { RuntimeTurnInputV1 } from './turn-coordinator';
+import type { RuntimeTurnInput } from './turn-coordinator';
 
 export interface BuildRunTaskParams {
   task: string;
@@ -18,7 +18,7 @@ export interface BuildRunTaskParams {
   workspace: string;
   config: AgentConfig;
   shellExecutor: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   signal: AbortSignal;
   thinkingLevel: string | null;
   skills: SkillManifest[];
@@ -28,7 +28,7 @@ export interface BuildRunTaskParams {
   shellContext: string;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   authorizationMode?: import('@kite/runtime-contract').AuthorizationMode;
-  authorizationSource?: StateAuthorizationSourceV1;
+  authorizationSource?: StateAuthorizationSource;
   phase?: 'planning' | 'building';
   sandboxBackend?: SandboxBackend | 'unknown';
   model?: SupportedChatModel;
@@ -36,7 +36,7 @@ export interface BuildRunTaskParams {
 
 /** Compatibility field is retained only for the TUI token-stat database path. */
 export type TuiRuntimeInput = Omit<
-  RuntimeTurnInputV1,
+  RuntimeTurnInput,
   'modelInvocationRuntime' | 'runtimeSession' | 'createRuntimeEffectPort' | 'recoveryIdentityKey'
 > & {
   checkpointPath: string;
@@ -73,7 +73,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
     signal: p.signal,
     frontend: 'tui',
     sessionLoggingPolicy: p.config.sessionLoggingPolicy,
-    sessionLoggingContentInspector: createModelSecretDetectorV1({
+    sessionLoggingContentInspector: createModelSecretDetector({
       knownSecrets: [p.config.apiKey],
     }),
   };

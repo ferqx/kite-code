@@ -1,20 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  RUNTIME_COMMAND_SCHEMA_V1,
-  RUNTIME_QUERY_SCHEMA_V1,
+  RUNTIME_COMMAND_SCHEMA_,
+  RUNTIME_QUERY_SCHEMA_,
   type RuntimeCommand,
 } from '@kite/runtime-contract';
 import {
-  RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+  RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionBridge,
   type RuntimeHostPreparedExecution,
   runtimeCommandFromKernelInput,
   translateRuntimeCommandToKernelInput,
 } from '@kite/runtime-host';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 import {
   createKiteRuntimeExecutionModule,
-  KITE_RUNTIME_OPERATION_IDS_V1,
+  KITE_RUNTIME_OPERATION_IDS_,
 } from '../src/bootstrap/runtime/KiteRuntimeExecutionModule';
 
 function createBridge(handler: {
@@ -52,22 +52,22 @@ describe('Kite Runtime execution bridge', () => {
       close: async () => undefined,
     });
     const module = createKiteRuntimeExecutionModule({
-      executionAdapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+      executionAdapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
       createBridge: (_context: { readonly marker: true }) => bridge,
     });
-    const registry = createRuntimeModuleRegistryV1([module]);
+    const registry = createRuntimeModuleRegistry([module]);
 
     expect(module.manifest).toMatchObject({
       moduleId: 'kite-runtime-execution',
       providerId: 'kite-runtime-execution',
       revision: 'rmv1-16',
       contractRevision: 'rmv1-03',
-      operationIds: KITE_RUNTIME_OPERATION_IDS_V1,
+      operationIds: KITE_RUNTIME_OPERATION_IDS_,
     });
     expect(
       registry
         .requireExecutionAdapter<{ readonly marker: true }, RuntimeHostExecutionBridge>(
-          RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+          RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
         )
         .create({ marker: true }),
     ).toBe(bridge);
@@ -114,7 +114,7 @@ describe('Kite Runtime execution bridge', () => {
     expect(
       await bridge.prepare(
         translateRuntimeCommandToKernelInput({
-          schema: RUNTIME_COMMAND_SCHEMA_V1,
+          schema: RUNTIME_COMMAND_SCHEMA_,
           commandId: 'command-1',
           type: 'create_session',
           workspace: '/workspace',
@@ -143,7 +143,7 @@ describe('Kite Runtime execution bridge', () => {
       shutdownSession: async () => undefined,
       close: async () => undefined,
     });
-    expect(await bridge.query({ schema: RUNTIME_QUERY_SCHEMA_V1, type: 'list_sessions' })).toEqual({
+    expect(await bridge.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' })).toEqual({
       status: 'ok',
       queryType: 'list_sessions',
       sessions: [],
@@ -184,7 +184,7 @@ describe('Kite Runtime execution bridge', () => {
     });
     const result = await bridge.prepare(
       translateRuntimeCommandToKernelInput({
-        schema: RUNTIME_COMMAND_SCHEMA_V1,
+        schema: RUNTIME_COMMAND_SCHEMA_,
         commandId: 'command-1',
         type: 'start_turn',
         sessionId: 'session-1',

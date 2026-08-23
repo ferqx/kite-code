@@ -1,7 +1,7 @@
 import type { CompletionGuardBlocked } from './completion';
 
-export type McpProviderRecoveryActionV1 = 'login' | 'approve' | 'retry';
-export type McpProviderDirectoryStatusV1 =
+export type McpProviderRecoveryAction = 'login' | 'approve' | 'retry';
+export type McpProviderDirectoryStatus =
   | 'pending_approval'
   | 'rejected'
   | 'disabled'
@@ -47,14 +47,14 @@ export type RuntimeEffect =
       readonly type: 'request_provider_action';
       readonly interactionId: string;
       readonly providerId: string;
-      readonly action: McpProviderRecoveryActionV1;
+      readonly action: McpProviderRecoveryAction;
       readonly originatingToolCallId: string;
     }
   | {
       readonly type: 'request_provider_admission';
       readonly interactionId: string;
       readonly providerId: string;
-      readonly providerStatus: McpProviderDirectoryStatusV1;
+      readonly providerStatus: McpProviderDirectoryStatus;
       readonly retryable: boolean;
     }
   | { readonly type: 'run_auto_review'; readonly reviewId: string; readonly toolCallId: string }

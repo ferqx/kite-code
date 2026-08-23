@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { ToolApprovalPayload, UserInputPayload } from '@kite/runtime-contract';
-import type { DurableSuspendedSubagentV1 } from '@kite/runtime-spi';
+import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
 import type { Action } from '../apps/kite/src/tui/App';
 import {
   eventReducer as canonicalEventReducer,
@@ -37,7 +37,7 @@ function privateSuspensionSnapshot(input: {
   blockedToolId: string;
   toolName: string;
   reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
-}): DurableSuspendedSubagentV1 {
+}): DurableSuspendedSubagent {
   return {
     storage: 'private_artifact_v1',
     subagentId: input.subagentId,
@@ -5070,7 +5070,7 @@ describe('eventReducer (blocks model)', () => {
         interactionId: 'canonical-approval',
         toolCallId: 'canonical-approval-rejected',
         reason: 'redacted',
-        outcomeV1: rejectedOutcome,
+        outcome: rejectedOutcome,
       });
       expect(
         flatBlocks(approvalState).find(
@@ -5094,7 +5094,7 @@ describe('eventReducer (blocks model)', () => {
           reviewerModelName: 'test',
           durationMs: 1,
         },
-        outcomeV1: {
+        outcome: {
           ...rejectedOutcome,
           failure: {
             kind: 'auto_review_rejected' as const,
@@ -6504,7 +6504,7 @@ describe('context compaction RuntimeEvent rendering', () => {
     expect(state.status.contextSnapshot?.inputTokensBefore).toBeUndefined();
   });
 
-  test('projects terminal tool status from ToolOutcomeV1 instead of the legacy result status', () => {
+  test('projects terminal tool status from ToolOutcome instead of the legacy result status', () => {
     let state = handleRuntimeEventAction(fresh(), {
       type: 'tool.queued',
       toolCallId: 'timeout-tool',
@@ -6524,7 +6524,7 @@ describe('context compaction RuntimeEvent rendering', () => {
         stderr: 'private',
         status: 'error',
       },
-      outcomeV1: {
+      outcome: {
         schemaVersion: 1,
         status: 'timed_out',
         failure: { kind: 'tool_timeout', detailCode: 'timed_out' },

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseDocument } from 'yaml';
-import { buildCapabilityKillSwitchDecisionV1 } from '@/app/release/capability-kill-switch';
+import { buildCapabilityKillSwitchDecision } from '@/app/release/capability-kill-switch';
 
 describe('operations alerts and disable-only containment', () => {
   test('routes no-data and G0 to the real single-maintainer owner', () => {
@@ -32,7 +32,7 @@ describe('operations alerts and disable-only containment', () => {
   });
 
   test('can only disable capabilities, zero the cohort, and preserve evidence', () => {
-    const decision = buildCapabilityKillSwitchDecisionV1({
+    const decision = buildCapabilityKillSwitchDecision({
       version: 1,
       reason: 'g0_incident',
       disableCapabilities: ['mcp_write', 'shell', 'mcp_write'],
@@ -52,7 +52,7 @@ describe('operations alerts and disable-only containment', () => {
 
   test('rejects malformed artifact identity and unknown capability input', () => {
     expect(() =>
-      buildCapabilityKillSwitchDecisionV1({
+      buildCapabilityKillSwitchDecision({
         version: 1,
         reason: 'operator_containment',
         disableCapabilities: ['shell'],
@@ -62,7 +62,7 @@ describe('operations alerts and disable-only containment', () => {
       }),
     ).toThrow('canonical sha256');
     expect(() =>
-      buildCapabilityKillSwitchDecisionV1({
+      buildCapabilityKillSwitchDecision({
         version: 1,
         reason: 'operator_containment',
         disableCapabilities: ['unknown' as 'shell'],

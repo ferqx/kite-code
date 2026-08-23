@@ -1,13 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite/agent-kernel';
 import type { RuntimeHostExecutionServices } from '@kite/runtime-host';
-import {
-  createRuntimeHostStateSessionV1,
-  type StateRuntimeSessionInputV1,
-} from '@kite/runtime-host';
+import { createRuntimeHostStateSession, type StateRuntimeSessionInput } from '@kite/runtime-host';
 import type {
   CheckpointPort,
-  RuntimeTransactionInputV1,
+  RuntimeTransactionInput,
   SessionStore,
 } from '@kite/runtime-host/storage';
 
@@ -25,8 +22,8 @@ function initialState(): AgentState {
 }
 
 interface Fixture {
-  input: StateRuntimeSessionInputV1;
-  readonly writes: RuntimeTransactionInputV1<KernelEvent, AgentState>[];
+  input: StateRuntimeSessionInput;
+  readonly writes: RuntimeTransactionInput<KernelEvent, AgentState>[];
   readonly requiredLeases: {
     readonly sessionId: string;
     readonly effectId: string;
@@ -39,7 +36,7 @@ interface Fixture {
 }
 
 function fixture(state: AgentState = initialState()): Fixture {
-  const writes: RuntimeTransactionInputV1<KernelEvent, AgentState>[] = [];
+  const writes: RuntimeTransactionInput<KernelEvent, AgentState>[] = [];
   const acknowledgements: string[] = [];
   const requiredLeases: Fixture['requiredLeases'] = [];
   const leaseCalls: string[] = [];
@@ -130,7 +127,7 @@ function message(messageId: string, content = 'hello'): KernelEvent {
 describe('Runtime Host State session', () => {
   test('commits before publishing state and makes duplicate replay a no-write', () => {
     const f = fixture();
-    const session = createRuntimeHostStateSessionV1(f.input);
+    const session = createRuntimeHostStateSession(f.input);
     f.failCommit = true;
     expect(() => session.processEvent(message('message-1'))).toThrow('commit refused');
     expect(session.getState().revision).toBe(0);
@@ -148,7 +145,7 @@ describe('Runtime Host State session', () => {
   test('binds one Host timestamp to the returned and persisted event identity', () => {
     const f = fixture();
     let tick = 0;
-    const session = createRuntimeHostStateSessionV1({
+    const session = createRuntimeHostStateSession({
       ...f.input,
       clock: () => {
         tick += 1;
@@ -162,7 +159,7 @@ describe('Runtime Host State session', () => {
 
   test('fails closed on invalid facts, admission, and invariant input without a write', () => {
     const invalidClock = fixture();
-    const invalidSession = createRuntimeHostStateSessionV1({
+    const invalidSession = createRuntimeHostStateSession({
       ...invalidClock.input,
       clock: () => 'not-a-state-time',
     });
@@ -170,7 +167,7 @@ describe('Runtime Host State session', () => {
     expect(invalidClock.writes).toHaveLength(0);
 
     const rejected = fixture();
-    const admitted = createRuntimeHostStateSessionV1({
+    const admitted = createRuntimeHostStateSession({
       ...rejected.input,
       eventBatchAdmissionValidator: () => false,
     });
@@ -178,7 +175,7 @@ describe('Runtime Host State session', () => {
     expect(rejected.writes).toHaveLength(0);
 
     expect(() =>
-      createRuntimeHostStateSessionV1({
+      createRuntimeHostStateSession({
         ...fixture().input,
         state: { ...initialState(), revision: -1 },
       }),
@@ -191,7 +188,7 @@ describe('Runtime Host State session', () => {
       recoveryState: { kind: 'corrupted', reason: 'snapshot checksum mismatch' },
     };
     const f = fixture(blockedState);
-    const session = createRuntimeHostStateSessionV1(f.input);
+    const session = createRuntimeHostStateSession(f.input);
     expect(session.selectPendingEffects()[0]).toMatchObject({
       type: 'recovery_blocked',
       failureKind: 'persistence_unavailable',
@@ -201,7 +198,7 @@ describe('Runtime Host State session', () => {
 
   test('keeps one runner and fences effect transactions to the exact lease owner', () => {
     const f = fixture();
-    const session = createRuntimeHostStateSessionV1(f.input);
+    const session = createRuntimeHostStateSession(f.input);
     const runner = session.acquireRunner();
     expect(runner).toBeString();
     expect(session.acquireRunner()).toBeNull();
@@ -236,7 +233,7 @@ describe('Runtime Host State session', () => {
 
   test('routes explicit effect acknowledgements and rejects stale or failed publication', () => {
     const f = fixture();
-    const session = createRuntimeHostStateSessionV1(f.input);
+    const session = createRuntimeHostStateSession(f.input);
     const attemptLease = session.beginEffect({ type: 'call_model' });
 
     expect(
@@ -285,7 +282,7 @@ describe('Runtime Host State session', () => {
   test('does not run run_tools terminal validation for attempt-start facts', () => {
     const f = fixture();
     let terminalValidationCalls = 0;
-    const session = createRuntimeHostStateSessionV1({
+    const session = createRuntimeHostStateSession({
       ...f.input,
       toolTerminalBatchValidator: () => {
         terminalValidationCalls += 1;
@@ -314,7 +311,7 @@ describe('Runtime Host State session', () => {
 
   test('only reconciles active dispatch_started or unknown resource reservations', () => {
     const f = fixture();
-    const session = createRuntimeHostStateSessionV1(f.input);
+    const session = createRuntimeHostStateSession(f.input);
     expect(
       session.applyLateResourceReconciliation([
         {

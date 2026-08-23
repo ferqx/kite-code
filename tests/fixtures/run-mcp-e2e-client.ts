@@ -4,15 +4,15 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import {
-  createBuiltinCredentialBrokerV1,
+  createBuiltinCredentialBroker,
   McpConnectionManager,
   MemoryMcpCredentialStore,
 } from '@kite/builtin-runtime/mcp';
 import { aiMessage } from '@kite/builtin-runtime/model';
 import { loadMcpConfig } from '#app/config';
 import { decideProjectMcpServer } from '#app/config/mcp-project-approvals';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
-import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const serverName = process.env.MCP_E2E_SERVER_NAME;
@@ -47,7 +47,7 @@ const serverConfig = loaded.servers[serverName];
 if (!serverConfig) throw new Error(`MCP server '${serverName}' was not loaded from config.`);
 
 const credentialStore = new MemoryMcpCredentialStore();
-const credentialBroker = createBuiltinCredentialBrokerV1({ store: credentialStore });
+const credentialBroker = createBuiltinCredentialBroker({ store: credentialStore });
 let connectionConfig = serverConfig;
 if (serverConfig.type === 'http' && secret) {
   const key = {
@@ -110,13 +110,13 @@ try {
     { message: aiMessage({ content: `Authenticated ${expectedScope} MCP call completed.` }) },
   ]);
   const events: RuntimeEvent[] = [];
-  for await (const event of runTestRuntimeAgentV1(
+  for await (const event of runTestRuntimeAgent(
     {
       task: `Call the authenticated ${expectedScope} MCP server.`,
       threadId: `mcp-e2e-${serverName}`,
       userId: 'e2e',
       workspace,
-      openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+      openStateSessionStorage: () => openStateStoreForTest(storePath),
       model,
       mcpManager: manager,
       config: {
@@ -127,10 +127,10 @@ try {
         modelName: 'test',
         sandbox: { enabled: true },
         features: {
-          capabilityCatalogV1: true,
-          mcpRuntimeBindingV1: true,
-          toolSearchV1: true,
-          mcpExecutionRecordV1: true,
+          capabilityCatalog: true,
+          mcpRuntimeBinding: true,
+          toolSearch: true,
+          mcpExecutionRecord: true,
         },
       },
     },
@@ -144,7 +144,7 @@ try {
     events.push(event);
   }
 
-  const store = openStateStoreForTestV1(storePath);
+  const store = openStateStoreForTest(storePath);
   const persisted = store.loadEventsStrict(`mcp-e2e-${serverName}`).map((entry) => entry.event);
   store.close();
   const serialized = JSON.stringify({ events, persisted });

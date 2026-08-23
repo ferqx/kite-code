@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { resolveWindowsSandboxRunnerV1 } from './windows-runner';
+import { resolveWindowsSandboxRunner } from './windows-runner';
 
 /** 沙箱后端类型 / Sandbox backend type */
 export type SandboxBackend = 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
@@ -23,7 +23,7 @@ export interface ResolveSandboxRuntimeOptions {
  * command process boundary. Windows remains development-only for release
  * qualification; this product mode must not be read as that separate claim.
  */
-export function sandboxSupportsFullModeV1(backend: SandboxBackend): boolean {
+export function sandboxSupportsFullMode(backend: SandboxBackend): boolean {
   return (
     backend === 'seatbelt' || backend === 'bubblewrap' || backend === 'windows_restricted_token'
   );
@@ -84,7 +84,7 @@ export function findUsableBubblewrap(): string | null {
 /** 检测当前平台可用的沙箱后端 / Detect available sandbox backend on current platform */
 export function detectSandboxBackend(): SandboxBackend {
   const windowsRunnerAvailable =
-    process.platform === 'win32' && resolveWindowsSandboxRunnerV1() !== null;
+    process.platform === 'win32' && resolveWindowsSandboxRunner() !== null;
   return selectSandboxBackend({
     platform: process.platform,
     seatbeltAvailable: existsSync('/usr/bin/sandbox-exec'),
@@ -94,9 +94,9 @@ export function detectSandboxBackend(): SandboxBackend {
 }
 
 /** Pure binary/manifest discovery. It never launches a usability probe. */
-export function discoverSandboxBackendCandidateV1(): SandboxBackend {
+export function discoverSandboxBackendCandidate(): SandboxBackend {
   const windowsRunnerAvailable =
-    process.platform === 'win32' && resolveWindowsSandboxRunnerV1() !== null;
+    process.platform === 'win32' && resolveWindowsSandboxRunner() !== null;
   return selectSandboxBackend({
     platform: process.platform,
     seatbeltAvailable: existsSync('/usr/bin/sandbox-exec'),
@@ -111,7 +111,7 @@ export function resolveSandboxRuntime(options: ResolveSandboxRuntimeOptions = {}
     return { enabled: false, backend: 'none', available: false };
   }
 
-  const backend = (options.detectBackend ?? discoverSandboxBackendCandidateV1)();
+  const backend = (options.detectBackend ?? discoverSandboxBackendCandidate)();
   return { enabled: true, backend, available: backend !== 'none' };
 }
 

@@ -1,7 +1,7 @@
-import { BROKERED_GIT_FEATURE_REVISION_V1, type GitShellDenyEvidenceV1 } from '@kite/runtime-spi';
+import { BROKERED_GIT_FEATURE_REVISION_, type GitShellDenyEvidence } from '@kite/runtime-spi';
 
-export type BrokeredGitQualificationDecisionV1 =
-  | { outcome: 'qualified'; evidence: GitShellDenyEvidenceV1 }
+export type BrokeredGitQualificationDecision =
+  | { outcome: 'qualified'; evidence: GitShellDenyEvidence }
   | {
       outcome: 'excluded';
       reason:
@@ -12,10 +12,10 @@ export type BrokeredGitQualificationDecisionV1 =
         | 'evidence_excluded';
     };
 
-export function qualifyBrokeredGitNativeDenyV1(
-  evidence: GitShellDenyEvidenceV1,
-): BrokeredGitQualificationDecisionV1 {
-  if (evidence.featureRevision !== BROKERED_GIT_FEATURE_REVISION_V1) {
+export function qualifyBrokeredGitNativeDeny(
+  evidence: GitShellDenyEvidence,
+): BrokeredGitQualificationDecision {
+  if (evidence.featureRevision !== BROKERED_GIT_FEATURE_REVISION_) {
     return { outcome: 'excluded', reason: 'feature_revision_mismatch' };
   }
   if (evidence.outcome !== 'qualified') {

@@ -21,7 +21,7 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 许可与用户显式 opt-in 的披露。Logger 失败只显示一次脱敏诊断，不改变当前 Agent run。
 
 TUI production composition 在进入 Agent run 或 standalone compaction 前解析 private content-addressed
-Model Artifact store 与唯一 `ModelInvocationGatewayV1`。Artifact 缺失或损坏时，已确认的历史
+Model Artifact store 与唯一 `ModelInvocationGateway`。Artifact 缺失或损坏时，已确认的历史
 transcript 仍可恢复并标记 evidence unavailable，但需要该 evidence 的新 dispatch 在 Provider 前 fail closed；
 SessionManager 不回退到 transport、旧 invoke 或 runtime flag。
 同一 composition 还向 Tool receipt 与 Verification 注入一份 Capability Artifact read/write access；
@@ -46,7 +46,7 @@ Subagent 内部工具审批由 parent `task` Tool Call 持有 Runtime interactio
 消息区的 Subagent block 将 suspended 阶段显示为“等待自动审查”“自动审查中”或“等待你的批准”；
 前两种不弹出人工 Footer，只有最后一种表示用户必须作出决定。自动或人工批准后 block 回到 running。
 
-工具终态的颜色、状态、恢复提示与耗时统一读取 Runtime 投影的 `ToolOutcomeV1`，不再从错误正文、
+工具终态的颜色、状态、恢复提示与耗时统一读取 Runtime 投影的 `ToolOutcome`，不再从错误正文、
 退出文本或交互类型猜测。人工审批拒绝、auto-review 拒绝、timeout、cancel 与普通执行失败保留各自
 稳定语义；同一 terminal event 只生成一张 Tool Card 和一条模型 Tool Result。私有 recovery key、
 fingerprint、lineage、工具参数和错误正文不会进入 TUI metadata 或下一次 Provider 请求。
@@ -113,7 +113,7 @@ MCP Overlay 订阅 Core control snapshot。Server List 按“数量/配置范围
 
 HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，Detail 提供“认证”。认证页只有选择“打开浏览器”才启动 loopback callback 并调用系统 browser opener；authorizing 时 Esc/“取消认证”取消当前 flow。页面不显示 token、scope、authorization code 或 secret，成功认证只影响后续 discovery 与新 model turn，不重放旧 Tool Call。
 
-开启 `mcpProviderActionV1` 后，Runtime 可在 Tool 失败后请求固定的 Login、Approve 或 Retry Provider Action。TUI 复用既有 input interrupt 收集决定并委托 MCP controller；成功恢复只开始新 turn，Later 或恢复失败都不会重放旧 Tool Call。新任务首次模型调用前还会对 unavailable required Provider 逐个显示 Retry、Session Waive 或 Cancel Run，waiver 只解除当前 session 的准入门禁。
+开启 `mcpProviderAction` 后，Runtime 可在 Tool 失败后请求固定的 Login、Approve 或 Retry Provider Action。TUI 复用既有 input interrupt 收集决定并委托 MCP controller；成功恢复只开始新 turn，Later 或恢复失败都不会重放旧 Tool Call。新任务首次模型调用前还会对 unavailable required Provider 逐个显示 Retry、Session Waive 或 Cancel Run，waiver 只解除当前 session 的准入门禁。
 
 Add Wizard 只收集 transport、name、URL/command 和 availability；选择式步骤的问题与首个选项之间保留一个空白行，选项组内部保持紧凑。Current project 写 `<project>/.kite-code/mcp.json`，All projects 写 `~/.kite-code/mcp.json`。Detail 可 retry/reconnect、enable/disable 和 remove；disable/remove 使用安全默认确认，remove 同时尝试清理对应本地 OAuth credential。高级配置、legacy migrate、Tool policy 和手动 reload 不进入 TUI。
 

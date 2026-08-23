@@ -7,9 +7,9 @@
 
 ## 凭据持久化
 
-生产只在一个 `BuiltinCredentialBrokerV1` composition 内构造 `NativeMcpCredentialStore`；Manager、AuthCoordinator 与 OAuth provider 都必须接收同一个 broker，不得各自创建 store。Native store 只调用 `@napi-rs/keyring` 原生 API，不执行 keychain CLI，不保存明文/加密 JSON fallback。backend 状态为 `available`、`locked` 或 `unavailable`；后两者必须 fail closed。测试与 CI 可显式注入 `MemoryMcpCredentialStore`，生产默认构造不得使用 fake。
+生产只在一个 `BuiltinCredentialBroker` composition 内构造 `NativeMcpCredentialStore`；Manager、AuthCoordinator 与 OAuth provider 都必须接收同一个 broker，不得各自创建 store。Native store 只调用 `@napi-rs/keyring` 原生 API，不执行 keychain CLI，不保存明文/加密 JSON fallback。backend 状态为 `available`、`locked` 或 `unavailable`；后两者必须 fail closed。测试与 CI 可显式注入 `MemoryMcpCredentialStore`，生产默认构造不得使用 fake。
 
-Credential key 由 canonical workspace key、配置 source、Server 名称和 auth profile 组成，并经过 domain-separated SHA-256 后作为 OS vault account。跨 operation 只传 project/provider/profile/purpose/expiry/revocation 绑定的 opaque `CredentialHandleV1`；material 可包含静态 secret 或 OAuth tokens、dynamic client information、PKCE verifier、discovery state 与更新时间，但只在 broker-local header materialization 中短暂读取。Runtime control/TUI 只投影是否存在，不投影 material。原生读取返回的缓冲在解析后清零；普通配置、Runtime Event、session log 和诊断不得包含 material。
+Credential key 由 canonical workspace key、配置 source、Server 名称和 auth profile 组成，并经过 domain-separated SHA-256 后作为 OS vault account。跨 operation 只传 project/provider/profile/purpose/expiry/revocation 绑定的 opaque `CredentialHandle`；material 可包含静态 secret 或 OAuth tokens、dynamic client information、PKCE verifier、discovery state 与更新时间，但只在 broker-local header materialization 中短暂读取。Runtime control/TUI 只投影是否存在，不投影 material。原生读取返回的缓冲在解析后清零；普通配置、Runtime Event、session log 和诊断不得包含 material。
 
 `disable`、source shadow、reconfigure 或直接 Repository mutation 不删除 credential。TUI Remove 通过 Supervisor 在删除配置后对仍注册的 OAuth target 执行本地 logout/clear；不默认 remote revoke。credential cleanup 失败时配置删除仍已生效，TUI 必须报告部分完成，不能宣称凭据也已清理。其他调用方仍需显式 logout/clear；remote revoke 只有在授权服务器提供 revocation endpoint 且调用方明确请求时执行。
 

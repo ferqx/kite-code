@@ -1,10 +1,10 @@
-import type { SubagentDelegationGrantV1, SubagentResumeGrantV1 } from '@kite/runtime-spi';
-import type { LocalSubagentDriverResultV1, LocalSubagentLifecycleDriverV1 } from './local-provider';
+import type { SubagentDelegationGrant, SubagentResumeGrant } from '@kite/runtime-spi';
+import type { LocalSubagentDriverResult, LocalSubagentLifecycleDriver } from './local-provider';
 
 const DEFAULT_PENDING_REGISTRATION_TTL_MS = 5 * 60_000;
 const MAX_PENDING_REGISTRATIONS = 256;
 
-interface ChildRuntimeRegistrationIdentityV1 {
+interface ChildRuntimeRegistrationIdentity {
   readonly childInvocationId: string;
   readonly parentInvocationId: string;
   readonly parentToolCallId: string;
@@ -12,42 +12,35 @@ interface ChildRuntimeRegistrationIdentityV1 {
   readonly expiresAtMs?: number;
 }
 
-export interface BuiltinChildRuntimeStartRegistrationV1 extends ChildRuntimeRegistrationIdentityV1 {
+export interface BuiltinChildRuntimeStartRegistration extends ChildRuntimeRegistrationIdentity {
   readonly run: (
-    grant: Readonly<SubagentDelegationGrantV1>,
+    grant: Readonly<SubagentDelegationGrant>,
     task: string,
     signal: AbortSignal,
-  ) => Promise<LocalSubagentDriverResultV1>;
+  ) => Promise<LocalSubagentDriverResult>;
 }
 
-export interface BuiltinChildRuntimeResumeRegistrationV1
-  extends ChildRuntimeRegistrationIdentityV1 {
+export interface BuiltinChildRuntimeResumeRegistration extends ChildRuntimeRegistrationIdentity {
   readonly run: (
-    grant: Readonly<SubagentResumeGrantV1>,
+    grant: Readonly<SubagentResumeGrant>,
     task: string,
     signal: AbortSignal,
-  ) => Promise<LocalSubagentDriverResultV1>;
+  ) => Promise<LocalSubagentDriverResult>;
 }
 
-interface StoredRegistrationV1<T> {
+interface StoredRegistration<T> {
   readonly registration: T;
   readonly expiresAtMs: number;
 }
 
 /**
  * Builtin-owned child lifecycle Driver. Model execution stays behind the
- * invocation-scoped callback until RMV1-15; registration, expiry, single-use
+ * invocation-scoped callback until RM-15; registration, expiry, single-use
  * dispatch and abandon ownership live here.
  */
-export class BuiltinChildRuntimeDriverV1 implements LocalSubagentLifecycleDriverV1 {
-  readonly #starts = new Map<
-    string,
-    StoredRegistrationV1<BuiltinChildRuntimeStartRegistrationV1>
-  >();
-  readonly #resumes = new Map<
-    string,
-    StoredRegistrationV1<BuiltinChildRuntimeResumeRegistrationV1>
-  >();
+export class BuiltinChildRuntimeDriver implements LocalSubagentLifecycleDriver {
+  readonly #starts = new Map<string, StoredRegistration<BuiltinChildRuntimeStartRegistration>>();
+  readonly #resumes = new Map<string, StoredRegistration<BuiltinChildRuntimeResumeRegistration>>();
   readonly #now: () => number;
   readonly #maxPendingRegistrations: number;
   #clockHighWaterMs = -1;
@@ -67,58 +60,58 @@ export class BuiltinChildRuntimeDriverV1 implements LocalSubagentLifecycleDriver
     this.#effectiveNow();
   }
 
-  registerStart(grantId: string, registration: BuiltinChildRuntimeStartRegistrationV1): void {
+  registerStart(grantId: string, registration: BuiltinChildRuntimeStartRegistration): void {
     this.#register(this.#starts, grantId, registration);
   }
 
-  registerResume(grantId: string, registration: BuiltinChildRuntimeResumeRegistrationV1): void {
+  registerResume(grantId: string, registration: BuiltinChildRuntimeResumeRegistration): void {
     this.#register(this.#resumes, grantId, registration);
   }
 
-  abandon(grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>): boolean {
+  abandon(grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>): boolean {
     this.#pruneExpired();
     const registrations = grant.purpose === 'start' ? this.#starts : this.#resumes;
     const stored = registrations.get(grant.grantId);
-    if (!stored || !matchesGrantV1(stored.registration, grant)) return false;
+    if (!stored || !matchesGrant(stored.registration, grant)) return false;
     registrations.delete(grant.grantId);
     return true;
   }
 
-  pendingRegistrationCountV1(): number {
+  pendingRegistrationCount(): number {
     this.#pruneExpired();
     return this.#starts.size + this.#resumes.size;
   }
 
   async start(
-    grant: Readonly<SubagentDelegationGrantV1>,
+    grant: Readonly<SubagentDelegationGrant>,
     task: string,
     signal: AbortSignal,
-  ): Promise<LocalSubagentDriverResultV1> {
+  ): Promise<LocalSubagentDriverResult> {
     this.#pruneExpired();
     const stored = this.#starts.get(grant.grantId);
     this.#starts.delete(grant.grantId);
-    if (!stored || !matchesGrantV1(stored.registration, grant)) {
+    if (!stored || !matchesGrant(stored.registration, grant)) {
       throw new Error('Child Runtime start context is unavailable.');
     }
     return stored.registration.run(grant, task, signal);
   }
 
   async resume(
-    grant: Readonly<SubagentResumeGrantV1>,
+    grant: Readonly<SubagentResumeGrant>,
     task: string,
     signal: AbortSignal,
-  ): Promise<LocalSubagentDriverResultV1> {
+  ): Promise<LocalSubagentDriverResult> {
     this.#pruneExpired();
     const stored = this.#resumes.get(grant.grantId);
     this.#resumes.delete(grant.grantId);
-    if (!stored || !matchesGrantV1(stored.registration, grant)) {
+    if (!stored || !matchesGrant(stored.registration, grant)) {
       throw new Error('Child Runtime resume context is stale.');
     }
     return stored.registration.run(grant, task, signal);
   }
 
-  #register<T extends ChildRuntimeRegistrationIdentityV1>(
-    target: Map<string, StoredRegistrationV1<T>>,
+  #register<T extends ChildRuntimeRegistrationIdentity>(
+    target: Map<string, StoredRegistration<T>>,
     grantId: string,
     registration: T,
   ): void {
@@ -160,9 +153,9 @@ export class BuiltinChildRuntimeDriverV1 implements LocalSubagentLifecycleDriver
   }
 }
 
-function matchesGrantV1(
-  registration: ChildRuntimeRegistrationIdentityV1,
-  grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>,
+function matchesGrant(
+  registration: ChildRuntimeRegistrationIdentity,
+  grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>,
 ): boolean {
   return (
     registration.childInvocationId === grant.childInvocationId &&

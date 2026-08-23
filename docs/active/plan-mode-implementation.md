@@ -14,7 +14,7 @@ Plan 是 Runtime Kernel 管理的版本化 Artifact，不是模型消息中的�
 
 Builtin frozen catalog 已把 `read_plan`、`write_plan`、`update_plan` 的 model schema、parser、effects、
 availability、revision 与 operation owner 收口到 `@kite/builtin-runtime`，并通过唯一 SPI snapshot 投影；
-`apps/kite/src/bootstrap/runtime/plan-runtime.ts` 是 App 的 State26/Store5 persistence/effect bridge，不是第二 schema authority。
+`apps/kite/src/bootstrap/runtime/plan-runtime.ts` 是 App 的 Runtime State/SQLite Store persistence/effect bridge，不是第二 schema authority。
 Runtime Action 使用统一发射协议：成功结果携带按提交顺序排列的
 `RuntimeEvent[]`，拒绝结果不得携带领域事件。`read_plan`、`write_plan` 与 `update_plan`
 均只通过该门面读取状态、访问 Artifact 并产生领域事件；各 Builtin catalog entry 只保留 schema、contract、
@@ -23,7 +23,7 @@ effects 与结果投影。新写入的 Plan 是 `planSchemaVersion=2`，Artifact
 但不能继续进度更新，必须先以原 identity 创建 V2 replan/save。
 
 App Tool Pipeline/Host coordinator 负责把 prepared invocation 与 Plan mechanism 接入统一执行链；Kernel 只拥有
-governance/admission decision，Builtin 拥有 Plan schema/parser/effects/operation semantics。RMV1-16 已完成源码
+governance/admission decision，Builtin 拥有 Plan schema/parser/effects/operation semantics。RM-16 已完成源码
 caller/owner closure、manifest、文档、journey、fault 与 soak Gate，生产路径只保留唯一 App/Host/Builtin seams。
 
 ```text
@@ -65,7 +65,7 @@ title、正文、steps 或已保存的 Artifact。V2 `plan.drafted` recovery 不
 唯一合法 ID、status、completion evidence、从原始事件正文重算的 digest，以及 Artifact 的
 task/plan/version/digest identity；任一缺失、畸形或不一致都忽略该事件。
 
-`PlanCompletionEvidenceV1` 由 Runtime 从已经归约的事实投影，而不是从模型参数接受：passed/waived
+`PlanCompletionEvidence` 由 Runtime 从已经归约的事实投影，而不是从模型参数接受：passed/waived
 verification、带成功 Runtime result 的 terminal side-effect tool call、带 reason code 的 skipped step，及
 unresolved failure/approval。`update_plan` 的 schema 严格拒绝模型提供的 command、path、stdout、
 `completion_evidence` 或 success self-report。`complete_plan=true` 还要求所有 required verification 已
@@ -80,7 +80,7 @@ Plan live/replay 只处理当前 format epoch 的 PlanDocument V2 事实。缺�
 不能被静默 drop 后再通过 V2 validator，而是直接忽略整个 replay event。
 V2 `plan.progress_updated` 与 `plan.completed` 复用同一 transport validator，但要求每个 step 都有合法且唯一
 ID，并与当前 V2 文档的完整 ID、顺序、标题集合精确一致；missing/duplicate/unknown ID、未知 status 或任意
-额外键均 fail closed。映射并合并 status/note 后还必须再次通过完整 `isPlanDocumentV2` schema/digest/artifact
+额外键均 fail closed。映射并合并 status/note 后还必须再次通过完整 `isPlanDocument` schema/digest/artifact
 validator；completion event 的顶层 plan status 必须是 `completed`。
 
 ## 工具与策略

@@ -1,18 +1,18 @@
 import { z } from 'zod';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
-import { verifyReleaseEvidenceBundleV1 } from './evidence-bundle';
+import { verifyReleaseEvidenceBundle } from './evidence-bundle';
 import {
   RELEASE_EVIDENCE_KINDS,
   RELEASE_GATES,
-  type ReleaseArtifactIdentityV1,
-  type ReleaseEvidenceExceptionV1,
-  type ReleaseEvidenceResultV1,
-  type ReleaseEvidenceV1,
-  type ReleaseGateV1,
-  releaseArtifactIdentityV1Schema,
+  type ReleaseArtifactIdentity,
+  type ReleaseEvidence,
+  type ReleaseEvidenceException,
+  type ReleaseEvidenceResult,
+  type ReleaseGate,
+  releaseArtifactIdentitySchema,
 } from './evidence-schema';
 
-const GATE_POLICY_SCHEMA = 'ReleaseGatePolicyV1' as const;
+const GATE_POLICY_SCHEMA = 'ReleaseGatePolicy' as const;
 const GATE_POLICY_DIGEST_DOMAIN = 'release-gate-policy-v1';
 const GATE_DECISION_DIGEST_DOMAIN = 'release-gate-decision-v1';
 const SINGLE_MAINTAINER_IDENTITY = 'github:@ferqx';
@@ -20,7 +20,7 @@ const MAINTAINER_SECURITY_APPROVAL = 'candidate_bound_maintainer_security_review
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const nonEmptySchema = z.string().trim().min(1);
 
-export const releaseGateRequirementV1Schema = z
+export const releaseGateRequirementSchema = z
   .object({
     requirementId: nonEmptySchema,
     evidenceId: nonEmptySchema,
@@ -33,7 +33,7 @@ export const releaseGateRequirementV1Schema = z
   })
   .strict();
 
-export const releaseGatePolicyV1Schema = z
+export const releaseGatePolicySchema = z
   .object({
     schema: z.literal(GATE_POLICY_SCHEMA),
     policyId: nonEmptySchema,
@@ -45,7 +45,7 @@ export const releaseGatePolicyV1Schema = z
     oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
     allowedRefPrefixes: z.array(nonEmptySchema).min(1),
     capabilities: z.array(nonEmptySchema),
-    requirements: z.array(releaseGateRequirementV1Schema),
+    requirements: z.array(releaseGateRequirementSchema),
     policyDigest: digestSchema,
   })
   .strict()
@@ -124,27 +124,27 @@ export const releaseGatePolicyV1Schema = z
     }
   });
 
-export type ReleaseGatePolicyV1 = z.infer<typeof releaseGatePolicyV1Schema>;
-export type ReleaseGatePolicyInputV1 = Omit<ReleaseGatePolicyV1, 'policyDigest'>;
+export type ReleaseGatePolicy = z.infer<typeof releaseGatePolicySchema>;
+export type ReleaseGatePolicyInput = Omit<ReleaseGatePolicy, 'policyDigest'>;
 
-export interface ReleaseGateDecisionItemV1 {
+export interface ReleaseGateDecisionItem {
   requirementId: string;
   evidenceId: string;
-  gate: ReleaseGateV1;
+  gate: ReleaseGate;
   capability?: string;
   status: 'passed' | 'blocked' | 'waived';
   reasons: string[];
 }
 
-export interface ReleaseGateDecisionV1 {
-  schema: 'ReleaseGateDecisionV1';
+export interface ReleaseGateDecision {
+  schema: 'ReleaseGateDecision';
   evaluatedAt: string;
   policyDigest: string;
   evidenceBundleDigest: string;
-  artifactIdentity: ReleaseArtifactIdentityV1;
+  artifactIdentity: ReleaseArtifactIdentity;
   overall: 'approved_foundation' | 'approved_candidate' | 'blocked';
   gates: Array<{
-    gate: ReleaseGateV1;
+    gate: ReleaseGate;
     status: 'passed' | 'blocked' | 'not_applicable';
     reasons: string[];
   }>;
@@ -153,18 +153,18 @@ export interface ReleaseGateDecisionV1 {
     status: 'enabled' | 'disabled';
     reasons: string[];
   }>;
-  requirements: ReleaseGateDecisionItemV1[];
+  requirements: ReleaseGateDecisionItem[];
   requiredManualApprovals: string[];
   decisionDigest: string;
 }
 
-export const releaseGateDecisionV1Schema = z
+export const releaseGateDecisionSchema = z
   .object({
-    schema: z.literal('ReleaseGateDecisionV1'),
+    schema: z.literal('ReleaseGateDecision'),
     evaluatedAt: z.iso.datetime({ offset: true }),
     policyDigest: digestSchema,
     evidenceBundleDigest: digestSchema,
-    artifactIdentity: releaseArtifactIdentityV1Schema,
+    artifactIdentity: releaseArtifactIdentitySchema,
     overall: z.enum(['approved_foundation', 'approved_candidate', 'blocked']),
     gates: z
       .array(
@@ -203,47 +203,45 @@ export const releaseGateDecisionV1Schema = z
   })
   .strict();
 
-export function verifyReleaseGateDecisionV1(value: unknown): ReleaseGateDecisionV1 {
-  const parsed = releaseGateDecisionV1Schema.parse(value);
+export function verifyReleaseGateDecision(value: unknown): ReleaseGateDecision {
+  const parsed = releaseGateDecisionSchema.parse(value);
   const { decisionDigest, ...material } = parsed;
   const expected = sha256DomainSeparated(GATE_DECISION_DIGEST_DOMAIN, canonicalJsonBytes(material));
   if (decisionDigest !== expected) {
     throw new Error(`Release Gate decision digest mismatch: expected ${expected}.`);
   }
-  return parsed as ReleaseGateDecisionV1;
+  return parsed as ReleaseGateDecision;
 }
 
-export function computeReleaseGatePolicyDigestV1(
-  input: ReleaseGatePolicyInputV1,
-): `sha256:${string}` {
+export function computeReleaseGatePolicyDigest(input: ReleaseGatePolicyInput): `sha256:${string}` {
   return sha256DomainSeparated(GATE_POLICY_DIGEST_DOMAIN, canonicalJsonBytes(input));
 }
 
-export function buildReleaseGatePolicyV1(input: ReleaseGatePolicyInputV1): ReleaseGatePolicyV1 {
-  return releaseGatePolicyV1Schema.parse({
+export function buildReleaseGatePolicy(input: ReleaseGatePolicyInput): ReleaseGatePolicy {
+  return releaseGatePolicySchema.parse({
     ...input,
-    policyDigest: computeReleaseGatePolicyDigestV1(input),
+    policyDigest: computeReleaseGatePolicyDigest(input),
   });
 }
 
-export function verifyReleaseGatePolicyV1(value: unknown): ReleaseGatePolicyV1 {
-  const parsed = releaseGatePolicyV1Schema.parse(value);
+export function verifyReleaseGatePolicy(value: unknown): ReleaseGatePolicy {
+  const parsed = releaseGatePolicySchema.parse(value);
   const { policyDigest, ...material } = parsed;
-  const expected = computeReleaseGatePolicyDigestV1(material);
+  const expected = computeReleaseGatePolicyDigest(material);
   if (policyDigest !== expected) {
     throw new Error(`Release Gate policy digest mismatch: expected ${expected}.`);
   }
   return parsed;
 }
 
-export function evaluateReleaseGateV1(input: {
+export function evaluateReleaseGate(input: {
   policy: unknown;
   evidence: unknown;
-  artifactIdentity: ReleaseArtifactIdentityV1;
+  artifactIdentity: ReleaseArtifactIdentity;
   evaluatedAt: string;
-}): ReleaseGateDecisionV1 {
-  const policy = verifyReleaseGatePolicyV1(input.policy);
-  const evidence = verifyReleaseEvidenceBundleV1(input.evidence);
+}): ReleaseGateDecision {
+  const policy = verifyReleaseGatePolicy(input.policy);
+  const evidence = verifyReleaseEvidenceBundle(input.evidence);
   const evaluatedAtMs = Date.parse(input.evaluatedAt);
   if (!Number.isFinite(evaluatedAtMs)) throw new Error('Gate evaluation time must be ISO-8601.');
 
@@ -277,7 +275,7 @@ export function evaluateReleaseGateV1(input: {
       globalReasons.push(`unexpected_evidence:${result.evidenceId}`);
     }
   }
-  const requirements = policy.requirements.map((requirement): ReleaseGateDecisionItemV1 => {
+  const requirements = policy.requirements.map((requirement): ReleaseGateDecisionItem => {
     const result = resultsById.get(requirement.evidenceId);
     const reasons: string[] = [];
     if (!result) {
@@ -395,7 +393,7 @@ export function evaluateReleaseGateV1(input: {
 
   const globallyBlocked = gates.some(({ status }) => status === 'blocked');
   const material = {
-    schema: 'ReleaseGateDecisionV1' as const,
+    schema: 'ReleaseGateDecision' as const,
     evaluatedAt: input.evaluatedAt,
     policyDigest: policy.policyDigest,
     evidenceBundleDigest: evidence.bundleDigest,
@@ -420,10 +418,10 @@ export function evaluateReleaseGateV1(input: {
 }
 
 function validateRequirementIdentity(input: {
-  policy: ReleaseGatePolicyV1;
-  evidence: ReleaseEvidenceV1;
-  requirement: ReleaseGatePolicyV1['requirements'][number];
-  result: ReleaseEvidenceResultV1;
+  policy: ReleaseGatePolicy;
+  evidence: ReleaseEvidence;
+  requirement: ReleaseGatePolicy['requirements'][number];
+  result: ReleaseEvidenceResult;
   evaluatedAtMs: number;
   reasons: string[];
 }): void {
@@ -491,10 +489,10 @@ function validateRequirementIdentity(input: {
 
 function matchesGithubReleaseExecutionIdentity(
   execution: Extract<
-    ReleaseEvidenceResultV1['executionIdentity'],
+    ReleaseEvidenceResult['executionIdentity'],
     { source: 'github_actions' | 'github_maintainer_review' }
   >,
-  policy: ReleaseGatePolicyV1,
+  policy: ReleaseGatePolicy,
 ): boolean {
   return (
     execution.canonicalRepository === policy.canonicalRepository &&
@@ -509,10 +507,10 @@ function matchesGithubReleaseExecutionIdentity(
 }
 
 function matchingException(
-  evidence: ReleaseEvidenceV1,
-  result: ReleaseEvidenceResultV1,
+  evidence: ReleaseEvidence,
+  result: ReleaseEvidenceResult,
   evaluatedAtMs: number,
-): ReleaseEvidenceExceptionV1 | undefined {
+): ReleaseEvidenceException | undefined {
   return evidence.exceptions.find(
     (exception) =>
       exception.evidenceId === result.evidenceId &&
@@ -524,8 +522,8 @@ function matchingException(
 }
 
 function collectRequiredManualApprovals(
-  policy: ReleaseGatePolicyV1,
-  requirements: ReleaseGateDecisionItemV1[],
+  policy: ReleaseGatePolicy,
+  requirements: ReleaseGateDecisionItem[],
   globalReasons: string[],
 ): string[] {
   if (policy.mode === 'synthetic_foundation') return [];
@@ -541,8 +539,8 @@ function collectRequiredManualApprovals(
 }
 
 function sameArtifactIdentity(
-  left: ReleaseArtifactIdentityV1,
-  right: ReleaseArtifactIdentityV1,
+  left: ReleaseArtifactIdentity,
+  right: ReleaseArtifactIdentity,
 ): boolean {
   return (
     left.canonicalRepository === right.canonicalRepository &&

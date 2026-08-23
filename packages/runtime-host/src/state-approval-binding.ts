@@ -1,25 +1,25 @@
 import {
-  createToolApprovalBindingDigestV1,
-  isValidToolApprovalBindingFactsV1,
-  type ToolGovernanceInvocationFactV1,
-  type ToolGovernancePolicyFactV1,
+  createToolApprovalBindingDigest,
+  isValidToolApprovalBindingFacts,
+  type ToolGovernanceInvocationFact,
+  type ToolGovernancePolicyFact,
 } from '@kite/agent-kernel';
 
-export type StateToolGovernanceInvocationFactV1 = ToolGovernanceInvocationFactV1;
-export type StateToolGovernancePolicyFactV1 = ToolGovernancePolicyFactV1;
+export type StateToolGovernanceInvocationFact = ToolGovernanceInvocationFact;
+export type StateToolGovernancePolicyFact = ToolGovernancePolicyFact;
 
-export interface RuntimeHostStateVerifiedApprovalBindingInputV1 {
+export interface RuntimeHostStateVerifiedApprovalBindingInput {
   readonly digest: string;
-  readonly invocationFact: Readonly<ToolGovernanceInvocationFactV1>;
-  readonly policyFact: Readonly<ToolGovernancePolicyFactV1>;
+  readonly invocationFact: Readonly<ToolGovernanceInvocationFact>;
+  readonly policyFact: Readonly<ToolGovernancePolicyFact>;
 }
 
 /** Sole State 25 verifier for a transported Kernel approval binding. */
-export function runtimeHostStateVerifyApprovalBindingDigestV1(input: {
+export function runtimeHostStateVerifyApprovalBindingDigest(input: {
   readonly digest: unknown;
   readonly invocationFact: unknown;
   readonly policyFact: unknown;
-}): input is RuntimeHostStateVerifiedApprovalBindingInputV1 {
+}): input is RuntimeHostStateVerifiedApprovalBindingInput {
   const facts = {
     invocation: input.invocationFact,
     policy: input.policyFact,
@@ -27,16 +27,16 @@ export function runtimeHostStateVerifyApprovalBindingDigestV1(input: {
   if (
     typeof input.digest !== 'string' ||
     !/^[0-9a-f]{64}$/u.test(input.digest) ||
-    !isValidToolApprovalBindingFactsV1(facts)
+    !isValidToolApprovalBindingFacts(facts)
   ) {
     return false;
   }
-  return createToolApprovalBindingDigestV1(facts.invocation, facts.policy) === input.digest;
+  return createToolApprovalBindingDigest(facts.invocation, facts.policy) === input.digest;
 }
 
-export function runtimeHostStateCreateApprovalBindingDigestV1(
-  invocationFact: Readonly<ToolGovernanceInvocationFactV1>,
-  policyFact: Readonly<ToolGovernancePolicyFactV1>,
+export function runtimeHostStateCreateApprovalBindingDigest(
+  invocationFact: Readonly<ToolGovernanceInvocationFact>,
+  policyFact: Readonly<ToolGovernancePolicyFact>,
 ): string {
-  return createToolApprovalBindingDigestV1(invocationFact, policyFact);
+  return createToolApprovalBindingDigest(invocationFact, policyFact);
 }

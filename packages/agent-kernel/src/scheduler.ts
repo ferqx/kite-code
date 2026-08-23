@@ -1,20 +1,20 @@
 import { decideCompletion } from './completion';
 import type {
-  McpProviderDirectoryStatusV1,
-  McpProviderRecoveryActionV1,
+  McpProviderDirectoryStatus,
+  McpProviderRecoveryAction,
   RuntimeEffect,
 } from './effects';
 import {
-  type ExecutionTraitsV1,
-  executionTraitsMayOverlapV1,
-  selectSchedulableEffectBatchV1,
+  type ExecutionTraits,
+  executionTraitsMayOverlap,
+  selectSchedulableEffectBatch,
 } from './execution-traits';
-import { isToolRecoveryQualityBlockedV1 } from './recovery';
+import { isToolRecoveryQualityBlocked } from './recovery';
 import { booleanField, isRecord, numberField, recordField, stringField } from './reducer-utils';
 import type { AgentState } from './state';
 
-export interface SchedulerFactsV1 {
-  readonly traits: Readonly<Record<string, ExecutionTraitsV1>>;
+export interface SchedulerFacts {
+  readonly traits: Readonly<Record<string, ExecutionTraits>>;
   readonly approval: Readonly<
     Record<string, { readonly allowed: boolean; readonly requiresApproval: boolean }>
   >;
@@ -65,7 +65,7 @@ function uniqueStrings(value: unknown): value is readonly string[] {
   );
 }
 
-function validExecutionTraits(value: unknown): value is ExecutionTraitsV1 {
+function validExecutionTraits(value: unknown): value is ExecutionTraits {
   if (!plainRecord(value)) return false;
   if (
     !exactKeys(
@@ -118,7 +118,7 @@ function validApprovalFact(value: unknown): value is {
 }
 
 /** Validate the non-persisted Host projection before it can influence batching. */
-export function isValidSchedulerFactsV1(value: unknown): value is SchedulerFactsV1 {
+export function isValidSchedulerFacts(value: unknown): value is SchedulerFacts {
   if (!plainRecord(value) || !exactKeys(value, ['traits', 'approval'])) return false;
   const traits = value.traits;
   const approval = value.approval;
@@ -185,15 +185,15 @@ function runnableToolIds(state: AgentState): string[] {
 
 function schedulerTraits(
   call: AgentState['tools']['calls'][string],
-  facts: SchedulerFactsV1 | undefined,
-): ExecutionTraitsV1 | undefined {
+  facts: SchedulerFacts | undefined,
+): ExecutionTraits | undefined {
   return facts?.traits[call.toolCallId];
 }
 
 function approvalFree(
   call: AgentState['tools']['calls'][string],
   group: string,
-  facts: SchedulerFactsV1 | undefined,
+  facts: SchedulerFacts | undefined,
 ): boolean {
   const traits = schedulerTraits(call, facts);
   const approval = facts?.approval[call.toolCallId];
@@ -211,12 +211,12 @@ function parallelBatch(
   first: string,
   group: string,
   ceiling: number,
-  facts: SchedulerFactsV1 | undefined,
+  facts: SchedulerFacts | undefined,
 ): readonly string[] {
   const firstCall = state.tools.calls[first];
   const firstTraits = firstCall ? schedulerTraits(firstCall, facts) : undefined;
   if (!firstCall || !firstTraits || !approvalFree(firstCall, group, facts)) return [first];
-  const candidates: Array<{ effectId: string; traits: ExecutionTraitsV1 }> = [
+  const candidates: Array<{ effectId: string; traits: ExecutionTraits }> = [
     { effectId: first, traits: firstTraits },
   ];
   for (const toolCallId of runnableToolIds(state)) {
@@ -227,16 +227,16 @@ function parallelBatch(
       !call ||
       !traits ||
       !approvalFree(call, group, facts) ||
-      !candidates.every((candidate) => executionTraitsMayOverlapV1(candidate.traits, traits))
+      !candidates.every((candidate) => executionTraitsMayOverlap(candidate.traits, traits))
     )
       break;
     candidates.push({ effectId: toolCallId, traits });
   }
-  return selectSchedulableEffectBatchV1(candidates, ceiling);
+  return selectSchedulableEffectBatch(candidates, ceiling);
 }
 
 /** The single pure State scheduler. Every branch is a RuntimeEffect union member. */
-export function decideNextEffect(state: AgentState, facts?: SchedulerFactsV1): RuntimeEffect {
+export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): RuntimeEffect {
   if (state.recoveryState.kind !== 'normal')
     return {
       type: 'recovery_blocked',
@@ -262,7 +262,7 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFactsV1): R
       recoveryCause: 'journal_invalid',
     };
   if (state.turn.status !== 'active') return { type: 'stop' };
-  if (facts !== undefined && !isValidSchedulerFactsV1(facts))
+  if (facts !== undefined && !isValidSchedulerFacts(facts))
     return {
       type: 'recovery_blocked',
       reason: 'Host scheduling facts are malformed or contain executable data.',
@@ -331,7 +331,7 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFactsV1): R
         type: 'request_provider_action',
         interactionId: stringField(interaction, 'interactionId') ?? '',
         providerId: stringField(interaction, 'providerId') ?? '',
-        action: action as McpProviderRecoveryActionV1,
+        action: action as McpProviderRecoveryAction,
         originatingToolCallId: stringField(interaction, 'originatingToolCallId') ?? '',
       };
     }
@@ -359,7 +359,7 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFactsV1): R
         type: 'request_provider_admission',
         interactionId: stringField(interaction, 'interactionId') ?? '',
         providerId: stringField(interaction, 'providerId') ?? '',
-        providerStatus: providerStatus as McpProviderDirectoryStatusV1,
+        providerStatus: providerStatus as McpProviderDirectoryStatus,
         retryable: booleanField(interaction, 'retryable') === true,
       };
     }
@@ -503,7 +503,7 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFactsV1): R
       failureKind: 'compaction_failed',
     };
   if (
-    isToolRecoveryQualityBlockedV1(state.toolRecovery, {
+    isToolRecoveryQualityBlocked(state.toolRecovery, {
       taskId: state.activeTaskId,
       turnId: state.turn.turnId,
     })
@@ -541,7 +541,7 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFactsV1): R
 
 export function selectPendingEffects(
   state: AgentState,
-  facts?: SchedulerFactsV1,
+  facts?: SchedulerFacts,
 ): readonly RuntimeEffect[] {
   return Object.freeze([decideNextEffect(state, facts)]);
 }

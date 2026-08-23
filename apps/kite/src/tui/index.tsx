@@ -19,20 +19,20 @@ import { sessionExportPath } from '#app/config/paths';
 import { defaultCheckpointPath } from '#app/config/paths.js';
 import { shouldPromptWorkspaceTrust } from '#app/config/workspace-trust';
 import type { SandboxBackend } from '#app/sandbox/types';
-import { type AppShellExecutorV1, composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
-import { composeObservabilityV1 } from '../observability/composition';
-import { resolveTelemetryConsentV1 } from '../observability/consent';
-import { formatObservabilityStatusV1, projectObservabilityStatusV1 } from '../observability/status';
-import { resolveReleaseCompositionV1 } from '../release/composition-root';
-import { tryProjectAdmittedExecutionStatusV1 } from '../release/execution-status';
-import { formatReleaseStatusV1, projectReleaseStatusV1 } from '../release/status-projection';
+import { type AppShellExecutor, composeAppSandboxExecutor } from '@/app/sandbox/composition';
+import { composeObservability } from '../observability/composition';
+import { resolveTelemetryConsent } from '../observability/consent';
+import { formatObservabilityStatus, projectObservabilityStatus } from '../observability/status';
+import { resolveReleaseComposition } from '../release/composition-root';
+import { tryProjectAdmittedExecutionStatus } from '../release/execution-status';
+import { formatReleaseStatus, projectReleaseStatus } from '../release/status-projection';
 import App, { type Action, shouldDisablePromptInput, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
 import FirstRunFlow from './components/first-run/FirstRunFlow';
 import InputLine from './components/InputLine';
 import WorkspaceTrustGate from './components/WorkspaceTrustGate';
-import { createTuiExitCoordinatorV1 } from './exit-coordinator';
+import { createTuiExitCoordinator } from './exit-coordinator';
 import { useMcpController } from './hooks/useMcpController';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
 import { useSkillsLoader } from './hooks/useSkillsLoader';
@@ -54,7 +54,7 @@ import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } f
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
 /** 退出时用于中止静默启动预热的执行器引用 / Executor reference used to abort the silent startup prewarm on exit */
-let _appShellExecutorForExit: AppShellExecutorV1 | null = null;
+let _appShellExecutorForExit: AppShellExecutor | null = null;
 let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
 function toErrorMessage(error: unknown): string {
@@ -110,7 +110,7 @@ export interface TuiBootstrapProps {
   model?: import('@kite/builtin-runtime/model').SupportedChatModel;
   /** App-owned authorization source; omitted production composition remains fail closed. */
   /** Optional App-owned Shell runtime injection used by composition and system tests. */
-  shellExecutor?: AppShellExecutorV1;
+  shellExecutor?: AppShellExecutor;
 }
 
 interface TuiAppProps {
@@ -120,7 +120,7 @@ interface TuiAppProps {
   onLanguageSelect: (language: LanguagePreference) => boolean;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   injectModel?: import('@kite/builtin-runtime/model').SupportedChatModel;
-  shellExecutor?: AppShellExecutorV1;
+  shellExecutor?: AppShellExecutor;
 }
 
 export function TuiBootstrap({
@@ -176,7 +176,7 @@ export function TuiBootstrap({
   const bootstrapShellExecutor = React.useMemo(() => {
     if (shellExecutor) return shellExecutor;
     if (!readyConfig) return undefined;
-    return composeAppSandboxExecutorV1({
+    return composeAppSandboxExecutor({
       entrypoint: 'tui',
       workspace,
       config: readyConfig,
@@ -397,10 +397,10 @@ function TuiApp({
 
   const observability = React.useMemo(
     () =>
-      composeObservabilityV1({
+      composeObservability({
         artifactTelemetryAllowed: false,
-        featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
-        consent: resolveTelemetryConsentV1({
+        featureEnabled: getFeatureFlags(config).observabilityMetrics,
+        consent: resolveTelemetryConsent({
           releaseChannel: 'development',
           user: config.telemetry?.user,
           project: config.telemetry?.project,
@@ -411,7 +411,7 @@ function TuiApp({
   const appShellExecutor = React.useMemo(
     () =>
       shellExecutor ??
-      composeAppSandboxExecutorV1({
+      composeAppSandboxExecutor({
         entrypoint: 'tui',
         workspace,
         config,
@@ -487,28 +487,28 @@ function TuiApp({
     [sandboxBackend],
   );
   const releaseStatusText = React.useMemo(() => {
-    const executionStatus = tryProjectAdmittedExecutionStatusV1({
+    const executionStatus = tryProjectAdmittedExecutionStatus({
       config,
       sandboxRuntime: effectiveSandboxRuntime,
     });
-    const composition = resolveReleaseCompositionV1({
+    const composition = resolveReleaseComposition({
       config,
       artifactReleaseProfileV1Enabled: false,
       profileId: 'internal-dogfood',
       production: false,
     });
-    return formatReleaseStatusV1(projectReleaseStatusV1({ composition, executionStatus }));
+    return formatReleaseStatus(projectReleaseStatus({ composition, executionStatus }));
   }, [config, effectiveSandboxRuntime]);
   const telemetryStatusText = React.useMemo(() => {
-    const consent = resolveTelemetryConsentV1({
+    const consent = resolveTelemetryConsent({
       releaseChannel: 'development',
       user: config.telemetry?.user,
       project: config.telemetry?.project,
     });
-    return formatObservabilityStatusV1(
-      projectObservabilityStatusV1({
+    return formatObservabilityStatus(
+      projectObservabilityStatus({
         artifactTelemetryAllowed: false,
-        featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
+        featureEnabled: getFeatureFlags(config).observabilityMetrics,
         consent,
         remoteExporterConfigured: false,
       }),
@@ -1496,7 +1496,7 @@ export function runTui(props: TuiBootstrapProps): void {
   // The manual approach enabled Kitty at the terminal level but Ink's parser didn't
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
   let unmountTui: (() => void) | null = null;
-  const exitCoordinator = createTuiExitCoordinatorV1({
+  const exitCoordinator = createTuiExitCoordinator({
     getSessionLifecycle: () => _sessionManagerForExit,
     getShellExecutor: () => _appShellExecutorForExit,
     unmount: () => unmountTui?.(),

@@ -1,14 +1,14 @@
-import type { RuntimeBudgetAdmissionReasonV1 } from '@kite/runtime-host';
-import { resolveFailureModeV1 } from './failure-mode-conformance';
+import type { RuntimeBudgetAdmissionReason } from '@kite/runtime-host';
+import { resolveFailureMode } from './failure-mode-conformance';
 import { classifyFailure } from './failures';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
-import { failedTerminalOutcomeV1, type RunTerminalOutcomeV1 } from './terminal-outcome';
+import { failedTerminalOutcome, type RunTerminalOutcome } from './terminal-outcome';
 
 /** Canonical production projection for both parent and descendant admission failures. */
-export function resolveResourceAdmissionFailureOutcomeV1(
-  reason: RuntimeBudgetAdmissionReasonV1,
+export function resolveResourceAdmissionFailureOutcome(
+  reason: RuntimeBudgetAdmissionReason,
   state: RuntimeState,
-): RunTerminalOutcomeV1 {
+): RunTerminalOutcome {
   const reservationStates =
     state.resourceBudget.status === 'active'
       ? Object.values(state.resourceBudget.reservations).map((reservation) => reservation.state)
@@ -35,11 +35,11 @@ export function resolveResourceAdmissionFailureOutcomeV1(
             ? 'shell_permit_timeout'
             : undefined;
   const conformanceOutcome = conformanceMode
-    ? resolveFailureModeV1(conformanceMode, { knownExternalEffects }).terminalOutcome
+    ? resolveFailureMode(conformanceMode, { knownExternalEffects }).terminalOutcome
     : null;
   if (conformanceOutcome) return conformanceOutcome;
   if (reason === 'persistence_unavailable') {
-    return failedTerminalOutcomeV1(
+    return failedTerminalOutcome(
       classifyFailure(
         'persistence_unavailable',
         'Runtime resource admission could not be persisted.',
@@ -47,14 +47,14 @@ export function resolveResourceAdmissionFailureOutcomeV1(
       { knownExternalEffects },
     );
   }
-  return failedTerminalOutcomeV1(
+  return failedTerminalOutcome(
     classifyFailure('unknown', `Runtime resource admission denied: ${reason}.`),
     { knownExternalEffects: 'unknown' },
   );
 }
 
-export function resourceAdmissionFailureEventV1(
-  reason: RuntimeBudgetAdmissionReasonV1,
+export function resourceAdmissionFailureEvent(
+  reason: RuntimeBudgetAdmissionReason,
   state: RuntimeState,
 ): Extract<RuntimeEvent, { type: 'run.error' }> {
   const failureKind =
@@ -74,15 +74,15 @@ export function resourceAdmissionFailureEventV1(
     recoverable: false,
     failure,
     turnId: state.turn.turnId,
-    outcome: resolveResourceAdmissionFailureOutcomeV1(reason, state),
+    outcome: resolveResourceAdmissionFailureOutcome(reason, state),
   };
 }
 
-export function resourceAdmissionTerminalEventsV1(
+export function resourceAdmissionTerminalEvents(
   state: RuntimeState,
-  reason: RuntimeBudgetAdmissionReasonV1,
+  reason: RuntimeBudgetAdmissionReason,
 ): RuntimeEvent[] {
-  const failure = resourceAdmissionFailureEventV1(reason, state);
+  const failure = resourceAdmissionFailureEvent(reason, state);
   const waiterCancellations: RuntimeEvent[] =
     state.resourceBudget.status === 'active'
       ? Object.values(state.resourceBudget.waiters)

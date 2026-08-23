@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { BuiltinMcpExecutionUnknownErrorV1 } from '@kite/builtin-runtime';
+import { BuiltinMcpExecutionUnknownError } from '@kite/builtin-runtime';
 import { McpProviderError, type McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
-import { createAppMcpReadinessRuntimeV1 } from '#app/bootstrap/runtime/mcp-readiness-runtime';
-import { ProviderReadinessCoordinatorV1 } from '#app/bootstrap/runtime/provider-readiness';
+import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import { createAppMcpReadinessRuntime } from '#app/bootstrap/runtime/mcp-readiness-runtime';
+import { ProviderReadinessCoordinator } from '#app/bootstrap/runtime/provider-readiness';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function stateHarness(input?: {
   readonly reject?: (event: RuntimeEvent) => boolean;
   readonly afterPersist?: (event: RuntimeEvent) => void;
 }) {
-  let state: RuntimeState = createRuntimeHostStateInitialStateV1({
+  let state: RuntimeState = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'mcp-readiness-runtime',
     userId: 'user',
@@ -69,9 +69,9 @@ function providerFixture(input?: {
 }
 
 function readinessRuntime(provider: McpRuntimeProvider, state: ReturnType<typeof stateHarness>) {
-  return createAppMcpReadinessRuntimeV1({
+  return createAppMcpReadinessRuntime({
     runtime: provider,
-    readinessCoordinator: new ProviderReadinessCoordinatorV1(provider),
+    readinessCoordinator: new ProviderReadinessCoordinator(provider),
     getState: state.getState,
     persistEvent: state.persistEvent,
     toolCallId: 'call-1',
@@ -115,7 +115,7 @@ describe('App MCP readiness runtime', () => {
     });
     await expect(
       readinessRuntime(provider, rejected).readResource('docs', 'docs://one'),
-    ).rejects.toBeInstanceOf(BuiltinMcpExecutionUnknownErrorV1);
+    ).rejects.toBeInstanceOf(BuiltinMcpExecutionUnknownError);
     expect(reads).toBe(0);
 
     let drift = false;
@@ -132,7 +132,7 @@ describe('App MCP readiness runtime', () => {
     });
     await expect(
       readinessRuntime(driftedProvider, driftedState).readResource('docs', 'docs://one'),
-    ).rejects.toBeInstanceOf(BuiltinMcpExecutionUnknownErrorV1);
+    ).rejects.toBeInstanceOf(BuiltinMcpExecutionUnknownError);
     expect(reads).toBe(0);
   });
 

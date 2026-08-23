@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { parseCanonicalJson } from '../../scripts/release/canonical-json';
 import {
-  computePlatformCapabilityEvidenceDigestV1,
-  encodePlatformCapabilityEvidenceV1,
-  type GithubHostedRunnerClassV1,
+  computePlatformCapabilityEvidenceDigest,
+  encodePlatformCapabilityEvidence,
+  type GithubHostedRunnerClass,
   githubEvidenceSource,
-  type PlatformCapabilityEvidenceV1,
+  type PlatformCapabilityEvidence,
   runPlatformCapabilityProbe,
 } from '../../scripts/release/platform-capability-probe';
-import { verifyPlatformCapabilityEvidenceV1 } from '../../scripts/release/verify-platform-capability-evidence';
+import { verifyPlatformCapabilityEvidence } from '../../scripts/release/verify-platform-capability-evidence';
 
 const runnerClassByRuntime: Partial<
-  Record<NodeJS.Platform, Partial<Record<string, GithubHostedRunnerClassV1>>>
+  Record<NodeJS.Platform, Partial<Record<string, GithubHostedRunnerClass>>>
 > = {
   darwin: { arm64: 'macos-15-arm64-github-hosted' },
   linux: { x64: 'ubuntu-24.04-x64-github-hosted' },
@@ -41,16 +41,16 @@ describe('independent platform capability artifact verifier', () => {
     const local = await runPlatformCapabilityProbe();
     const { digest: _localDigest, ...localWithoutDigest } = local;
     const withoutDigest = { ...localWithoutDigest, source };
-    const evidence: PlatformCapabilityEvidenceV1 = {
+    const evidence: PlatformCapabilityEvidence = {
       ...withoutDigest,
-      digest: computePlatformCapabilityEvidenceDigestV1(withoutDigest),
+      digest: computePlatformCapabilityEvidenceDigest(withoutDigest),
     };
 
-    const encoded = encodePlatformCapabilityEvidenceV1(evidence);
+    const encoded = encodePlatformCapabilityEvidence(evidence);
     expect(parseCanonicalJson(encoded)).toEqual(evidence);
     expect(new TextDecoder().decode(encoded)).not.toEndWith('\n');
 
-    expect(verifyPlatformCapabilityEvidenceV1({ evidence, expectedSource: source })).toMatchObject({
+    expect(verifyPlatformCapabilityEvidence({ evidence, expectedSource: source })).toMatchObject({
       status: 'verified_non_production_candidate',
       source,
       productionSupported: false,
@@ -60,10 +60,10 @@ describe('independent platform capability artifact verifier', () => {
     const attackerWithoutDigest = { ...withoutDigest, source: attackerSource };
     const attackerEvidence = {
       ...attackerWithoutDigest,
-      digest: computePlatformCapabilityEvidenceDigestV1(attackerWithoutDigest),
+      digest: computePlatformCapabilityEvidenceDigest(attackerWithoutDigest),
     };
     expect(() =>
-      verifyPlatformCapabilityEvidenceV1({ evidence: attackerEvidence, expectedSource: source }),
+      verifyPlatformCapabilityEvidence({ evidence: attackerEvidence, expectedSource: source }),
     ).toThrow('source identity mismatch');
     expect(() =>
       githubEvidenceSource(
@@ -84,7 +84,7 @@ describe('independent platform capability artifact verifier', () => {
       ),
     ).toThrow('does not match the source ref');
     expect(() =>
-      verifyPlatformCapabilityEvidenceV1({
+      verifyPlatformCapabilityEvidence({
         evidence: { ...evidence, prompt: 'SECRET' },
         expectedSource: source,
       }),
@@ -94,17 +94,17 @@ describe('independent platform capability artifact verifier', () => {
       unknown
     >;
     const { digest: _invalidDigest, ...invalidMaterial } = invalidPrimitive;
-    invalidPrimitive.digest = computePlatformCapabilityEvidenceDigestV1(invalidMaterial as never);
+    invalidPrimitive.digest = computePlatformCapabilityEvidenceDigest(invalidMaterial as never);
     expect(() =>
-      verifyPlatformCapabilityEvidenceV1({ evidence: invalidPrimitive, expectedSource: source }),
+      verifyPlatformCapabilityEvidence({ evidence: invalidPrimitive, expectedSource: source }),
     ).toThrow('schema is invalid');
     const falseConclusionWithoutDigest = { ...withoutDigest, outcome: 'supported' as const };
     const falseConclusion = {
       ...falseConclusionWithoutDigest,
-      digest: computePlatformCapabilityEvidenceDigestV1(falseConclusionWithoutDigest),
+      digest: computePlatformCapabilityEvidenceDigest(falseConclusionWithoutDigest),
     };
     expect(() =>
-      verifyPlatformCapabilityEvidenceV1({ evidence: falseConclusion, expectedSource: source }),
+      verifyPlatformCapabilityEvidence({ evidence: falseConclusion, expectedSource: source }),
     ).toThrow('outcome mismatch');
   }, 30_000);
 });

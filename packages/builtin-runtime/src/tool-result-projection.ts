@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 /** Sole model-visible text projection for a completed Builtin Tool execution. */
-export function toolExecutionModelContentV1(result: {
+export function toolExecutionModelContent(result: {
   readonly ok: boolean;
   readonly status?: 'success' | 'error' | 'rejected' | 'exhausted';
   readonly stdout?: string;
@@ -11,7 +11,7 @@ export function toolExecutionModelContentV1(result: {
   return succeeded ? result.stdout || result.stderr || '' : result.stderr || result.stdout || '';
 }
 
-export interface BuiltinToolResultDigestProjectionV1 {
+export interface BuiltinToolResultDigestProjection {
   readonly contentDigest: string;
   readonly rawResultDigest?: string;
   readonly modelContentDigest: string;
@@ -23,7 +23,7 @@ export interface BuiltinToolResultDigestProjectionV1 {
  * result. This preserves the accepted pre-cutover result envelope while
  * keeping model-content semantics in Builtin Runtime.
  */
-export function projectBuiltinToolResultDigestsV1(input: {
+export function projectBuiltinToolResultDigests(input: {
   readonly ok: boolean;
   readonly stdout: string;
   readonly stderr: string;
@@ -31,9 +31,9 @@ export function projectBuiltinToolResultDigestsV1(input: {
   readonly status?: 'success' | 'error' | 'rejected' | 'exhausted';
   readonly rawResultDigest?: string;
   readonly truncated?: boolean;
-}): Readonly<BuiltinToolResultDigestProjectionV1> {
+}): Readonly<BuiltinToolResultDigestProjection> {
   const modelContentDigest = createHash('sha256')
-    .update(toolExecutionModelContentV1(input))
+    .update(toolExecutionModelContent(input))
     .digest('hex');
   const completeResultDigest = createHash('sha256')
     .update(

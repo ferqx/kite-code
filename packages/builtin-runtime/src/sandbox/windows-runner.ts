@@ -6,7 +6,7 @@ import { z } from 'zod';
 /** Matches the native runner's `PROTOCOL_VERSION`. */
 export const WINDOWS_SANDBOX_PROTOCOL_VERSION = 6 as const;
 
-const WINDOWS_RUNNER_MANIFEST_V1_SCHEMA = z
+const WINDOWS_RUNNER_MANIFEST_SCHEMA = z
   .object({
     version: z.literal(1),
     protocolVersion: z.literal(WINDOWS_SANDBOX_PROTOCOL_VERSION),
@@ -29,7 +29,7 @@ const WINDOWS_RUNNER_MANIFEST_V1_SCHEMA = z
   })
   .strict();
 
-export interface WindowsSandboxRunnerManifestV1 {
+export interface WindowsSandboxRunnerManifest {
   version: 1;
   protocolVersion: typeof WINDOWS_SANDBOX_PROTOCOL_VERSION;
   runnerVersion: string;
@@ -43,19 +43,19 @@ export interface WindowsSandboxRunnerManifestV1 {
 }
 
 /** A verified, usable native runner plus the pinned Shell runtime identity. */
-export interface WindowsSandboxRunnerV1 {
+export interface WindowsSandboxRunner {
   path: string;
   version: string;
   digest: string;
   minimumWindowsVersion: '10.0.19045';
   protocolVersion: typeof WINDOWS_SANDBOX_PROTOCOL_VERSION;
   shellRuntimePath: string;
-  shellRuntime: WindowsSandboxRunnerManifestV1['shellRuntime'];
+  shellRuntime: WindowsSandboxRunnerManifest['shellRuntime'];
   shellRuntimeDigest: string;
   coreutilsDigest: string;
 }
 
-const MANIFEST_RELATIVE_PATH = 'release/platform-capabilities/windows-runner-v1.json';
+const MANIFEST_RELATIVE_PATH = 'release/platform-capabilities/windows-runner.json';
 const DEV_BUILD_RELATIVE_PATH =
   'native/windows-sandbox-runner/target/release/kite-windows-runner.exe';
 
@@ -65,7 +65,7 @@ function resolveProjectRoot(): string {
 
 const INSTALLED_CANDIDATE_MARKER = '.kite-code-managed.json';
 
-export interface RunnerManifestLocationV1 {
+export interface RunnerManifestLocation {
   path: string;
   base: string;
 }
@@ -76,9 +76,9 @@ export interface RunnerManifestLocationV1 {
  * remains in `<prefix>/releases/<candidateId>`, where the manifest's existing
  * repository-relative paths stay valid.
  */
-export function resolveInstalledWindowsRunnerManifestLocationV1(
+export function resolveInstalledWindowsRunnerManifestLocation(
   input: { executablePath?: string; readFile?: (path: string, encoding: 'utf8') => string } = {},
-): RunnerManifestLocationV1 | null {
+): RunnerManifestLocation | null {
   const executablePath = input.executablePath ?? process.execPath;
   const executable = win32.basename(executablePath).toLowerCase();
   if (!['kite.exe', 'kite', 'kite-tui.exe', 'kite-tui'].includes(executable)) {
@@ -102,7 +102,7 @@ export function resolveInstalledWindowsRunnerManifestLocationV1(
   }
 }
 
-export interface ResolveWindowsSandboxRunnerOptionsV1 {
+export interface ResolveWindowsSandboxRunnerOptions {
   /** Test hook: override the pinned manifest location. */
   manifestPath?: string;
 }
@@ -115,19 +115,19 @@ function sha256File(path: string): string | null {
   }
 }
 
-function loadManifest(manifestPath?: string): WindowsSandboxRunnerManifestV1 | null {
+function loadManifest(manifestPath?: string): WindowsSandboxRunnerManifest | null {
   try {
     const raw = readFileSync(
       manifestPath ?? join(resolveProjectRoot(), MANIFEST_RELATIVE_PATH),
       'utf8',
     );
-    return WINDOWS_RUNNER_MANIFEST_V1_SCHEMA.parse(JSON.parse(raw));
+    return WINDOWS_RUNNER_MANIFEST_SCHEMA.parse(JSON.parse(raw));
   } catch {
     return null;
   }
 }
 
-function candidateRunnerPaths(manifest: WindowsSandboxRunnerManifestV1, base: string): string[] {
+function candidateRunnerPaths(manifest: WindowsSandboxRunnerManifest, base: string): string[] {
   const candidates: string[] = [];
   const override = process.env.KITE_WINDOWS_RUNNER_PATH;
   if (override) candidates.push(resolve(override));
@@ -138,20 +138,20 @@ function candidateRunnerPaths(manifest: WindowsSandboxRunnerManifestV1, base: st
   return candidates;
 }
 
-let cachedRunner: WindowsSandboxRunnerV1 | null | undefined;
+let cachedRunner: WindowsSandboxRunner | null | undefined;
 
 /**
  * Locate and verify the native runner against the release-pinned manifest.
  * Missing runner, missing/invalid manifest, digest mismatch, or a missing
  * Shell runtime all resolve to `null` — the caller must fail closed.
  */
-export function resolveWindowsSandboxRunnerV1(
-  options?: ResolveWindowsSandboxRunnerOptionsV1,
-): WindowsSandboxRunnerV1 | null {
+export function resolveWindowsSandboxRunner(
+  options?: ResolveWindowsSandboxRunnerOptions,
+): WindowsSandboxRunner | null {
   const cacheable = options?.manifestPath === undefined;
   if (cachedRunner !== undefined && cacheable) return cachedRunner;
   const installed =
-    options?.manifestPath === undefined ? resolveInstalledWindowsRunnerManifestLocationV1() : null;
+    options?.manifestPath === undefined ? resolveInstalledWindowsRunnerManifestLocation() : null;
   const manifestPath = options?.manifestPath ?? installed?.path;
   const manifest = loadManifest(manifestPath);
   if (!manifest) {
@@ -179,7 +179,7 @@ export function resolveWindowsSandboxRunnerV1(
   for (const candidate of candidateRunnerPaths(manifest, base)) {
     if (!existsSync(candidate)) continue;
     if (sha256File(candidate) !== manifest.runnerDigest) continue;
-    const resolved: WindowsSandboxRunnerV1 = {
+    const resolved: WindowsSandboxRunner = {
       path: candidate,
       version: manifest.runnerVersion,
       digest: manifest.runnerDigest,
@@ -197,7 +197,7 @@ export function resolveWindowsSandboxRunnerV1(
   return null;
 }
 
-function shellRuntimeExecutable(runtime: WindowsSandboxRunnerManifestV1['shellRuntime']): string {
+function shellRuntimeExecutable(runtime: WindowsSandboxRunnerManifest['shellRuntime']): string {
   switch (runtime) {
     case 'isksh':
       return 'isksh.exe';
@@ -209,7 +209,7 @@ function shellRuntimeExecutable(runtime: WindowsSandboxRunnerManifestV1['shellRu
 }
 
 /** Test hook: invalidate the cached runner resolution. */
-export function clearWindowsSandboxRunnerCacheV1(): void {
+export function clearWindowsSandboxRunnerCache(): void {
   cachedRunner = undefined;
 }
 
@@ -217,9 +217,9 @@ export function clearWindowsSandboxRunnerCacheV1(): void {
  * Parse a release-pinned runner manifest (used by the evidence producer and
  * tests). Returns null when the manifest is not a valid V1 pin.
  */
-export function parseWindowsSandboxRunnerManifestV1(
+export function parseWindowsSandboxRunnerManifest(
   value: unknown,
-): WindowsSandboxRunnerManifestV1 | null {
-  const parsed = WINDOWS_RUNNER_MANIFEST_V1_SCHEMA.safeParse(value);
+): WindowsSandboxRunnerManifest | null {
+  const parsed = WINDOWS_RUNNER_MANIFEST_SCHEMA.safeParse(value);
   return parsed.success ? parsed.data : null;
 }

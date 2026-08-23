@@ -14,7 +14,7 @@ interface BunLockPackageEntry {
   integrity?: string;
 }
 
-export interface SyntheticCycloneDxComponentV1 {
+export interface SyntheticCycloneDxComponent {
   type: 'library';
   name: string;
   version: string;
@@ -26,7 +26,7 @@ export interface SyntheticCycloneDxComponentV1 {
   ];
 }
 
-export interface SyntheticCycloneDxSbomV1 {
+export interface SyntheticCycloneDxSbom {
   bomFormat: 'CycloneDX';
   specVersion: '1.6';
   version: 1;
@@ -40,14 +40,14 @@ export interface SyntheticCycloneDxSbomV1 {
       { name: 'kite-code:source-lockfile-sha256'; value: `sha256:${string}` },
     ];
   };
-  components: SyntheticCycloneDxComponentV1[];
+  components: SyntheticCycloneDxComponent[];
 }
 
 /** Deterministic SBOM contract; it does not claim vulnerability or license evidence. */
-export function generateSyntheticCycloneDxSbomV1(input: {
+export function generateSyntheticCycloneDxSbom(input: {
   packageJsonBytes: Uint8Array;
   bunLockBytes: Uint8Array;
-}): SyntheticCycloneDxSbomV1 {
+}): SyntheticCycloneDxSbom {
   const packageJson = expectObject(parseStrictJson(input.packageJsonBytes), 'package.json');
   const lock = expectObject(parseBunLock(input.bunLockBytes), 'bun.lock');
   const rootName = expectString(packageJson.name, 'package.json.name');
@@ -58,18 +58,18 @@ export function generateSyntheticCycloneDxSbomV1(input: {
   const developmentDependencies = dependencyNames(rootWorkspace.devDependencies);
   const packages = expectObject(lock.packages, 'bun.lock.packages');
 
-  const componentsByPurl = new Map<string, SyntheticCycloneDxComponentV1>();
+  const componentsByPurl = new Map<string, SyntheticCycloneDxComponent>();
   for (const [key, rawEntry] of Object.entries(packages)) {
     const entry = parseBunLockPackageEntry(rawEntry, key);
     const { name, version } = packageIdentity(entry.resolution, key);
-    const scope: SyntheticCycloneDxComponentV1['properties'][0]['value'] =
+    const scope: SyntheticCycloneDxComponent['properties'][0]['value'] =
       key === name && productionDependencies.has(name)
         ? 'production'
         : key === name && developmentDependencies.has(name)
           ? 'development'
           : 'transitive';
     const integrity = entry.integrity ? integrityHash(entry.integrity, key) : undefined;
-    const hashes: SyntheticCycloneDxComponentV1['hashes'] = integrity
+    const hashes: SyntheticCycloneDxComponent['hashes'] = integrity
       ? [{ alg: 'SHA-512', content: integrity }]
       : undefined;
     const purl = npmPurl(name, version);
@@ -82,7 +82,7 @@ export function generateSyntheticCycloneDxSbomV1(input: {
       existing.properties[0].value = tighterDependencyScope(existingScope, scope);
       continue;
     }
-    const properties: SyntheticCycloneDxComponentV1['properties'] = [
+    const properties: SyntheticCycloneDxComponent['properties'] = [
       { name: 'kite-code:dependency-scope', value: scope },
       { name: 'kite-code:license-evidence', value: 'not_collected' },
     ];
@@ -117,7 +117,7 @@ export function generateSyntheticCycloneDxSbomV1(input: {
   };
 }
 
-export function encodeSyntheticCycloneDxSbomV1(sbom: SyntheticCycloneDxSbomV1): Uint8Array {
+export function encodeSyntheticCycloneDxSbom(sbom: SyntheticCycloneDxSbom): Uint8Array {
   return canonicalJsonBytes(sbom);
 }
 
@@ -208,9 +208,9 @@ function dependencyNames(value: unknown): Set<string> {
 }
 
 function tighterDependencyScope(
-  left: SyntheticCycloneDxComponentV1['properties'][0]['value'],
-  right: SyntheticCycloneDxComponentV1['properties'][0]['value'],
-): SyntheticCycloneDxComponentV1['properties'][0]['value'] {
+  left: SyntheticCycloneDxComponent['properties'][0]['value'],
+  right: SyntheticCycloneDxComponent['properties'][0]['value'],
+): SyntheticCycloneDxComponent['properties'][0]['value'] {
   const rank = { transitive: 0, development: 1, production: 2 } as const;
   return rank[left] >= rank[right] ? left : right;
 }
@@ -236,10 +236,10 @@ function compareStrings(left: string, right: string): number {
 if (import.meta.main) {
   const root = resolve(process.argv[2] ?? '.');
   const output = resolve(process.argv[3] ?? 'dist/release-synthetic/sbom.cdx.json');
-  const sbom = generateSyntheticCycloneDxSbomV1({
+  const sbom = generateSyntheticCycloneDxSbom({
     packageJsonBytes: readFileSync(resolve(root, 'package.json')),
     bunLockBytes: readFileSync(resolve(root, 'bun.lock')),
   });
   mkdirSync(dirname(output), { recursive: true, mode: 0o700 });
-  writeFileSync(output, encodeSyntheticCycloneDxSbomV1(sbom), { mode: 0o600 });
+  writeFileSync(output, encodeSyntheticCycloneDxSbom(sbom), { mode: 0o600 });
 }

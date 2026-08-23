@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createRuntimeHostToolCallSnapshotV1,
-  type RuntimeHostToolCallSnapshotInputV1,
+  createRuntimeHostToolCallSnapshot,
+  type RuntimeHostToolCallSnapshotInput,
 } from '@kite/runtime-host';
-import type { ToolArgumentOriginV1 } from '@kite/runtime-spi';
+import type { ToolArgumentOrigin } from '@kite/runtime-spi';
 
-const BASE: RuntimeHostToolCallSnapshotInputV1 = {
+const BASE: RuntimeHostToolCallSnapshotInput = {
   toolCallId: 'call-1',
   name: 'read_file',
   rawArguments: {
@@ -21,13 +21,13 @@ const BASE: RuntimeHostToolCallSnapshotInputV1 = {
 };
 
 function snapshot(
-  overrides: Partial<RuntimeHostToolCallSnapshotInputV1> = {},
-): RuntimeHostToolCallSnapshotInputV1 {
+  overrides: Partial<RuntimeHostToolCallSnapshotInput> = {},
+): RuntimeHostToolCallSnapshotInput {
   return { ...BASE, ...overrides };
 }
 
 function expectFailure(
-  result: ReturnType<typeof createRuntimeHostToolCallSnapshotV1>,
+  result: ReturnType<typeof createRuntimeHostToolCallSnapshot>,
   code: 'invalid_identity' | 'arguments_not_canonical_json',
 ): void {
   expect(result.ok).toBe(false);
@@ -46,7 +46,7 @@ describe('Runtime Host ToolCall snapshot seam', () => {
       path: 'README.md',
       nested: { limit: 10 },
     };
-    const result = createRuntimeHostToolCallSnapshotV1(
+    const result = createRuntimeHostToolCallSnapshot(
       snapshot({ rawArguments: source, argumentOrigin: 'model_public' }),
     );
     expect(result.ok).toBe(true);
@@ -69,13 +69,13 @@ describe('Runtime Host ToolCall snapshot seam', () => {
 
   test('preserves model_public and runtime_private as explicit provenance', () => {
     for (const argumentOrigin of ['model_public', 'runtime_private'] as const) {
-      const result = createRuntimeHostToolCallSnapshotV1(snapshot({ argumentOrigin }));
+      const result = createRuntimeHostToolCallSnapshot(snapshot({ argumentOrigin }));
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.value.argumentOrigin).toBe(argumentOrigin);
     }
     expectFailure(
-      createRuntimeHostToolCallSnapshotV1(
-        snapshot({ argumentOrigin: 'forged' as unknown as ToolArgumentOriginV1 }),
+      createRuntimeHostToolCallSnapshot(
+        snapshot({ argumentOrigin: 'forged' as unknown as ToolArgumentOrigin }),
       ),
       'invalid_identity',
     );
@@ -84,7 +84,7 @@ describe('Runtime Host ToolCall snapshot seam', () => {
   test('accepts ordinary and null-prototype JSON objects and dense arrays', () => {
     const nullPrototype = Object.create(null) as Record<string, unknown>;
     nullPrototype.path = 'README.md';
-    const result = createRuntimeHostToolCallSnapshotV1(
+    const result = createRuntimeHostToolCallSnapshot(
       snapshot({ rawArguments: { nullPrototype, values: ['a', 2, false] } }),
     );
     expect(result.ok).toBe(true);
@@ -97,7 +97,7 @@ describe('Runtime Host ToolCall snapshot seam', () => {
   test('copies shared subobjects without retaining caller references', () => {
     const shared = { value: 'shared' };
     const source = { left: shared, right: shared };
-    const result = createRuntimeHostToolCallSnapshotV1(snapshot({ rawArguments: source }));
+    const result = createRuntimeHostToolCallSnapshot(snapshot({ rawArguments: source }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const copied = result.value.rawArguments as Record<string, Record<string, unknown>>;
@@ -107,7 +107,7 @@ describe('Runtime Host ToolCall snapshot seam', () => {
   });
 
   test('rejects identity omissions, wrong origins, and oversized identity values', () => {
-    const invalidInputs: readonly Partial<RuntimeHostToolCallSnapshotInputV1>[] = [
+    const invalidInputs: readonly Partial<RuntimeHostToolCallSnapshotInput>[] = [
       { toolCallId: '' },
       { name: '' },
       { createdAtTurnId: '' },
@@ -120,10 +120,10 @@ describe('Runtime Host ToolCall snapshot seam', () => {
       { bindingId: 'x'.repeat(257) },
       { capabilityId: 'x'.repeat(257) },
       { capabilityRevision: 'x'.repeat(257) },
-      { argumentOrigin: 'other' as unknown as ToolArgumentOriginV1 },
+      { argumentOrigin: 'other' as unknown as ToolArgumentOrigin },
     ];
     for (const overrides of invalidInputs) {
-      const result = createRuntimeHostToolCallSnapshotV1(snapshot(overrides));
+      const result = createRuntimeHostToolCallSnapshot(snapshot(overrides));
       expectFailure(result, 'invalid_identity');
     }
   });
@@ -139,7 +139,7 @@ describe('Runtime Host ToolCall snapshot seam', () => {
       },
     });
     expectFailure(
-      createRuntimeHostToolCallSnapshotV1(snapshot({ rawArguments: argumentsWithGetter })),
+      createRuntimeHostToolCallSnapshot(snapshot({ rawArguments: argumentsWithGetter })),
       'arguments_not_canonical_json',
     );
     expect(getterCalls).toBe(0);
@@ -154,7 +154,7 @@ describe('Runtime Host ToolCall snapshot seam', () => {
       },
     });
     expectFailure(
-      createRuntimeHostToolCallSnapshotV1(input as unknown as RuntimeHostToolCallSnapshotInputV1),
+      createRuntimeHostToolCallSnapshot(input as unknown as RuntimeHostToolCallSnapshotInput),
       'invalid_identity',
     );
     expect(inputGetterCalls).toBe(0);
@@ -164,21 +164,21 @@ describe('Runtime Host ToolCall snapshot seam', () => {
     const withSymbol = { path: 'README.md' } as Record<string | symbol, unknown>;
     withSymbol[Symbol('secret')] = 'hidden';
     expectFailure(
-      createRuntimeHostToolCallSnapshotV1(snapshot({ rawArguments: withSymbol })),
+      createRuntimeHostToolCallSnapshot(snapshot({ rawArguments: withSymbol })),
       'arguments_not_canonical_json',
     );
 
     const withPrototype = Object.create({ inherited: true }) as Record<string, unknown>;
     withPrototype.path = 'README.md';
     expectFailure(
-      createRuntimeHostToolCallSnapshotV1(snapshot({ rawArguments: withPrototype })),
+      createRuntimeHostToolCallSnapshot(snapshot({ rawArguments: withPrototype })),
       'arguments_not_canonical_json',
     );
 
     const cycle = {} as Record<string, unknown>;
     cycle.self = cycle;
     expectFailure(
-      createRuntimeHostToolCallSnapshotV1(snapshot({ rawArguments: cycle })),
+      createRuntimeHostToolCallSnapshot(snapshot({ rawArguments: cycle })),
       'arguments_not_canonical_json',
     );
   });
@@ -187,14 +187,14 @@ describe('Runtime Host ToolCall snapshot seam', () => {
     const sparse: unknown[] = [];
     sparse.length = 1;
     expectFailure(
-      createRuntimeHostToolCallSnapshotV1(snapshot({ rawArguments: sparse })),
+      createRuntimeHostToolCallSnapshot(snapshot({ rawArguments: sparse })),
       'arguments_not_canonical_json',
     );
 
     const extended = ['value'] as unknown[] & { extra?: string };
     extended.extra = 'not-json-array-data';
     expectFailure(
-      createRuntimeHostToolCallSnapshotV1(snapshot({ rawArguments: extended })),
+      createRuntimeHostToolCallSnapshot(snapshot({ rawArguments: extended })),
       'arguments_not_canonical_json',
     );
   });
@@ -213,7 +213,7 @@ describe('Runtime Host ToolCall snapshot seam', () => {
     ];
     for (const rawArguments of invalidValues) {
       expectFailure(
-        createRuntimeHostToolCallSnapshotV1(snapshot({ rawArguments })),
+        createRuntimeHostToolCallSnapshot(snapshot({ rawArguments })),
         'arguments_not_canonical_json',
       );
     }

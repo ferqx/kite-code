@@ -1,10 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import {
-  createRuntimeHostMcpStdioProcessPortV1,
-  parseMcpStdioJsonLineV1,
-} from '@kite/runtime-host';
+import { createRuntimeHostMcpStdioProcessPort, parseMcpStdioJsonLine } from '@kite/runtime-host';
 import { cleanupTuiSystemFixtures } from '../../tests/tui-system/harness/fixture-lifecycle';
 import { createMockModelServer } from '../../tests/tui-system/harness/fixtures';
 import { spawnReadyTui } from '../../tests/tui-system/harness/pty-process';
@@ -95,7 +92,7 @@ async function runInstalledSmokes(prefix: string, windows: boolean): Promise<voi
 }
 
 async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise<void> {
-  const port = createRuntimeHostMcpStdioProcessPortV1({
+  const port = createRuntimeHostMcpStdioProcessPort({
     wrapperExecutablePath: executablePath,
   });
   const handle = await port.spawn({
@@ -126,7 +123,7 @@ async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise
       throw new Error('Installed MCP stdio wrapper closed before initialize response.');
     }
     const line = new TextDecoder().decode(response.value).split('\n', 1)[0];
-    const decoded = parseMcpStdioJsonLineV1(line) as { id?: unknown };
+    const decoded = parseMcpStdioJsonLine(line) as { id?: unknown };
     if (decoded.id !== 1) throw new Error('Installed MCP stdio wrapper response identity drifted.');
   } catch (error) {
     failure = error;

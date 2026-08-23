@@ -4,7 +4,7 @@
 
 终态范围（ADR-0069）：1B.0–1B.9 的 Workspace、network、protected path、worktree 与 MCP transport
 fail-closed 边界全部保留并记为 `completed`。三平台普通 TUI/CLI 发行不要求 effectful execution support
-set 非空；能力准入继续独立关闭。当前状态见 `release/oss-first-release/task-status-v2.json`。
+set 非空；能力准入继续独立关闭。当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：

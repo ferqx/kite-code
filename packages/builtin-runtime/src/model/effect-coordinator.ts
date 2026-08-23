@@ -3,23 +3,23 @@ import {
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
 } from './compaction-summary';
-import type { ModelInvocationGatewayV1 } from './invocation-gateway';
+import type { ModelInvocationGateway } from './invocation-gateway';
 import {
-  type BuiltinPrimaryModelEffectInputV1,
-  type BuiltinPrimaryModelEffectResultV1,
-  type BuiltinPrimaryModelStateV1,
-  executeBuiltinPrimaryModelEffectV1,
+  type BuiltinPrimaryModelEffectInput,
+  type BuiltinPrimaryModelEffectResult,
+  type BuiltinPrimaryModelState,
+  executeBuiltinPrimaryModelEffect,
 } from './primary-effect';
 import {
   type AutoReviewResult,
   createAutoReviewModel,
-  reviewToolApproval as reviewToolApprovalV1,
-  reviewVerificationEvidence as reviewVerificationEvidenceV1,
+  reviewToolApproval,
+  reviewVerificationEvidence,
 } from './reviewer';
 import {
-  type BuiltinSubagentModelStepInputV1,
-  type BuiltinSubagentModelStepResultV1,
-  executeBuiltinSubagentModelStepV1,
+  type BuiltinSubagentModelStepInput,
+  type BuiltinSubagentModelStepResult,
+  executeBuiltinSubagentModelStep,
 } from './subagent-effect';
 
 /**
@@ -27,50 +27,48 @@ import {
  * Builtin model effect. Callers receive no gateway injection point of their
  * own, so review semantics cannot silently create a second execution owner.
  */
-export type BuiltinToolApprovalReviewInputV1 = Omit<
-  Parameters<typeof reviewToolApprovalV1>[0],
+export type BuiltinToolApprovalReviewInput = Omit<
+  Parameters<typeof reviewToolApproval>[0],
   'gateway'
 >;
 
-export type BuiltinVerificationReviewInputV1 = Omit<
-  Parameters<typeof reviewVerificationEvidenceV1>[0],
+export type BuiltinVerificationReviewInput = Omit<
+  Parameters<typeof reviewVerificationEvidence>[0],
   'gateway'
 >;
 
-type ContextSummaryGeneratorInputV1 = Parameters<typeof createModelContextSummaryGenerator>[0];
-type NarrativeContextCompactorOptionsV1 = Parameters<typeof createNarrativeContextCompactor>[0];
+type ContextSummaryGeneratorInput = Parameters<typeof createModelContextSummaryGenerator>[0];
+type NarrativeContextCompactorOptions = Parameters<typeof createNarrativeContextCompactor>[0];
 
-export type BuiltinContextCompactorInputV1 = Omit<ContextSummaryGeneratorInputV1, 'gateway'> &
-  Omit<NarrativeContextCompactorOptionsV1, 'generate'>;
+export type BuiltinContextCompactorInput = Omit<ContextSummaryGeneratorInput, 'gateway'> &
+  Omit<NarrativeContextCompactorOptions, 'generate'>;
 
-export class BuiltinModelEffectCoordinatorV1 {
-  readonly #gateway: ModelInvocationGatewayV1;
+export class BuiltinModelEffectCoordinator {
+  readonly #gateway: ModelInvocationGateway;
 
-  constructor(gateway: ModelInvocationGatewayV1) {
+  constructor(gateway: ModelInvocationGateway) {
     this.#gateway = gateway;
   }
 
-  executePrimaryModelEffectV1<
-    State extends BuiltinPrimaryModelStateV1,
-    Event extends import('./invocation-gateway').BuiltinModelEventV1,
+  executePrimaryModelEffect<
+    State extends BuiltinPrimaryModelState,
+    Event extends import('./invocation-gateway').BuiltinModelEvent,
     Value,
   >(
-    input: BuiltinPrimaryModelEffectInputV1<State, Event, Value>,
-  ): Promise<BuiltinPrimaryModelEffectResultV1<Value>> {
-    return executeBuiltinPrimaryModelEffectV1(this.#gateway, input);
+    input: BuiltinPrimaryModelEffectInput<State, Event, Value>,
+  ): Promise<BuiltinPrimaryModelEffectResult<Value>> {
+    return executeBuiltinPrimaryModelEffect(this.#gateway, input);
   }
 
-  executeSubagentModelStepV1<
-    State extends import('./invocation-gateway').ModelInvocationStateViewV1,
-    Event extends import('./invocation-gateway').BuiltinModelEventV1,
-  >(
-    input: BuiltinSubagentModelStepInputV1<State, Event>,
-  ): Promise<BuiltinSubagentModelStepResultV1> {
-    return executeBuiltinSubagentModelStepV1(this.#gateway, input);
+  executeSubagentModelStep<
+    State extends import('./invocation-gateway').ModelInvocationStateView,
+    Event extends import('./invocation-gateway').BuiltinModelEvent,
+  >(input: BuiltinSubagentModelStepInput<State, Event>): Promise<BuiltinSubagentModelStepResult> {
+    return executeBuiltinSubagentModelStep(this.#gateway, input);
   }
 
-  reviewToolApproval(input: BuiltinToolApprovalReviewInputV1): Promise<AutoReviewResult> {
-    return reviewToolApprovalV1({
+  reviewToolApproval(input: BuiltinToolApprovalReviewInput): Promise<AutoReviewResult> {
+    return reviewToolApproval({
       ...input,
       ...(input.model || !input.config ? {} : { model: createAutoReviewModel(input.config) }),
       gateway: this.#gateway,
@@ -78,9 +76,9 @@ export class BuiltinModelEffectCoordinatorV1 {
   }
 
   reviewVerificationEvidence(
-    input: BuiltinVerificationReviewInputV1,
+    input: BuiltinVerificationReviewInput,
   ): Promise<VerificationReviewerResult> {
-    return reviewVerificationEvidenceV1({
+    return reviewVerificationEvidence({
       ...input,
       ...(input.model || !input.config ? {} : { model: createAutoReviewModel(input.config) }),
       gateway: this.#gateway,
@@ -88,7 +86,7 @@ export class BuiltinModelEffectCoordinatorV1 {
   }
 
   createContextCompactor(
-    input: BuiltinContextCompactorInputV1,
+    input: BuiltinContextCompactorInput,
   ): ReturnType<typeof createNarrativeContextCompactor> {
     const generate = createModelContextSummaryGenerator({
       config: input.config,

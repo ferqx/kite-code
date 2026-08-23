@@ -1,17 +1,17 @@
 import type { SkillActivationContext } from '@kite/builtin-runtime';
-import type { NetworkBoundaryPolicyV1 } from '@kite/builtin-runtime/sandbox';
+import type { NetworkBoundaryPolicy } from '@kite/builtin-runtime/sandbox';
 import {
-  createNetworkBoundaryFetchV1,
-  type NetworkDecisionRecorderV1,
+  createNetworkBoundaryFetch,
+  type NetworkDecisionRecorder,
 } from '@kite/builtin-runtime/sandbox';
 import type {
-  BuiltinSkillExecutionMechanismV1,
-  BuiltinWebExecutionMechanismV1,
+  BuiltinSkillExecutionMechanism,
+  BuiltinWebExecutionMechanism,
 } from '#builtin-runtime';
 
 export function createSkillMechanismPort(
   runtime: SkillActivationContext | undefined,
-): BuiltinSkillExecutionMechanismV1 | undefined {
+): BuiltinSkillExecutionMechanism | undefined {
   if (!runtime) return undefined;
   const frames = Object.fromEntries(
     Object.entries(runtime.state.skills.frames).map(([activationId, frame]) => [
@@ -48,8 +48,8 @@ export function createSkillMechanismPort(
     ...(runtime.flags
       ? {
           flags: Object.freeze({
-            skillActivationV2: runtime.flags.skillActivationV2,
-            skillWorkflowV1: runtime.flags.skillWorkflowV1,
+            skillActivation: runtime.flags.skillActivation,
+            skillWorkflow: runtime.flags.skillWorkflow,
           }),
         }
       : {}),
@@ -60,9 +60,9 @@ export function createSkillMechanismPort(
 
 export function createWebMechanismPort(input: {
   readonly toolCallId?: string;
-  readonly networkBoundaryPolicy?: NetworkBoundaryPolicyV1;
-  readonly recordNetworkDecision?: NetworkDecisionRecorderV1;
-}): BuiltinWebExecutionMechanismV1 {
+  readonly networkBoundaryPolicy?: NetworkBoundaryPolicy;
+  readonly recordNetworkDecision?: NetworkDecisionRecorder;
+}): BuiltinWebExecutionMechanism {
   const boundary = input.networkBoundaryPolicy;
   if (!boundary) {
     return Object.freeze({
@@ -88,7 +88,7 @@ export function createWebMechanismPort(input: {
       }),
     });
   }
-  const fetch = createNetworkBoundaryFetchV1(boundary, {
+  const fetch = createNetworkBoundaryFetch(boundary, {
     toolCallId: input.toolCallId,
     recordDecision: async (decision) => {
       await input.recordNetworkDecision!(decision);

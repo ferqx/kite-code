@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 
-export const RUNTIME_ID_SOURCE_REVISION_V1 = 'kite.runtime-id-source.v1' as const;
+export const RUNTIME_ID_SOURCE_REVISION_ = 'kite.runtime-id-source.v1' as const;
 
-export type RuntimeIdScopeV1 =
+export type RuntimeIdScope =
   | 'turn'
   | 'task'
   | 'kernel_runner'
@@ -10,16 +10,16 @@ export type RuntimeIdScopeV1 =
   | 'model_invocation';
 
 /** Process-local identity and clock source. It is never persisted as authority. */
-export interface RuntimeIdSourceV1 {
-  readonly revision: typeof RUNTIME_ID_SOURCE_REVISION_V1;
-  next(scope: RuntimeIdScopeV1): string;
+export interface RuntimeIdSource {
+  readonly revision: typeof RUNTIME_ID_SOURCE_REVISION_;
+  next(scope: RuntimeIdScope): string;
   now(): number;
 }
 
-export function createLiveRuntimeIdSourceV1(): RuntimeIdSourceV1 {
+export function createLiveRuntimeIdSource(): RuntimeIdSource {
   return Object.freeze({
-    revision: RUNTIME_ID_SOURCE_REVISION_V1,
-    next: (_scope: RuntimeIdScopeV1) => randomUUID(),
+    revision: RUNTIME_ID_SOURCE_REVISION_,
+    next: (_scope: RuntimeIdScope) => randomUUID(),
     now: () => Date.now(),
   });
 }
@@ -28,11 +28,11 @@ export function createLiveRuntimeIdSourceV1(): RuntimeIdSourceV1 {
  * Test-only deterministic source. Per-scope counters keep concurrent
  * actor scheduling from changing unrelated identities.
  */
-export function createDeterministicRuntimeIdSourceV1(input: {
+export function createDeterministicRuntimeIdSource(input: {
   seed: string;
   epochMs: number;
   clockStepMs?: number;
-}): RuntimeIdSourceV1 {
+}): RuntimeIdSource {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(input.seed)) {
     throw new Error('Deterministic Runtime ID seed is invalid.');
   }
@@ -43,11 +43,11 @@ export function createDeterministicRuntimeIdSourceV1(input: {
   if (!Number.isSafeInteger(clockStepMs) || clockStepMs < 1) {
     throw new Error('Deterministic Runtime clock step is invalid.');
   }
-  const counters = new Map<RuntimeIdScopeV1, number>();
+  const counters = new Map<RuntimeIdScope, number>();
   let clockOrdinal = 0;
   return Object.freeze({
-    revision: RUNTIME_ID_SOURCE_REVISION_V1,
-    next: (scope: RuntimeIdScopeV1) => {
+    revision: RUNTIME_ID_SOURCE_REVISION_,
+    next: (scope: RuntimeIdScope) => {
       const ordinal = (counters.get(scope) ?? 0) + 1;
       counters.set(scope, ordinal);
       return `${input.seed}-${scope.replaceAll('_', '-')}-${String(ordinal).padStart(4, '0')}`;

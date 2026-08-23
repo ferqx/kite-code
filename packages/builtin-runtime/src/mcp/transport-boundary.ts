@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
-  canonicalWorkspaceKeyV1,
-  computeExecutionBoundaryDigestV1,
-  type ExecutionBoundaryV1,
-  type ExecutionCapabilitySurfaceV1,
+  canonicalWorkspaceKey,
+  computeExecutionBoundaryDigest,
+  type ExecutionBoundary,
+  type ExecutionCapabilitySurface,
 } from './mechanism-ports';
 import type { McpServerConfig, McpTransportType } from './types';
 
-export type McpTransportOperationV1 =
+export type McpTransportOperation =
   | 'connect'
   | 'tool_call'
   | 'resource_read'
@@ -16,7 +16,7 @@ export type McpTransportOperationV1 =
   | 'resource_list'
   | 'oauth_finish';
 
-export interface McpTransportBoundaryIdentityV1 {
+export interface McpTransportBoundaryIdentity {
   version: 1;
   workspaceKey: string;
   executionBoundaryRevision: string;
@@ -28,16 +28,16 @@ export interface McpTransportBoundaryIdentityV1 {
   identityDigest: string;
 }
 
-export interface McpTransportInvocationBindingV1 {
+export interface McpTransportInvocationBinding {
   boundaryIdentityDigest: string;
   invocationId: string;
   toolCallId: string;
   endpointRevision: string;
 }
 
-export interface McpTransportAdmissionRequestV1 extends McpTransportInvocationBindingV1 {
+export interface McpTransportAdmissionRequest extends McpTransportInvocationBinding {
   version: 1;
-  operation: McpTransportOperationV1;
+  operation: McpTransportOperation;
   transport: McpTransportType;
   serverIdentity: string;
   workspaceKey: string;
@@ -49,17 +49,17 @@ export interface McpTransportAdmissionRequestV1 extends McpTransportInvocationBi
   endpointIdentityDigest: string;
 }
 
-export interface McpTransportAdmissionReceiptV1 extends McpTransportAdmissionRequestV1 {
+export interface McpTransportAdmissionReceipt extends McpTransportAdmissionRequest {
   outcome: 'allowed';
   receiptDigest: string;
 }
 
-export interface McpTransportBoundaryControllerV1 {
-  readonly identity: McpTransportBoundaryIdentityV1;
-  admit(request: McpTransportAdmissionRequestV1): Promise<McpTransportAdmissionReceiptV1>;
+export interface McpTransportBoundaryController {
+  readonly identity: McpTransportBoundaryIdentity;
+  admit(request: McpTransportAdmissionRequest): Promise<McpTransportAdmissionReceipt>;
 }
 
-export type McpTransportBoundaryFailureCodeV1 =
+export type McpTransportBoundaryFailureCode =
   | 'boundary_unavailable'
   | 'workspace_mismatch'
   | 'transport_denied'
@@ -68,28 +68,28 @@ export type McpTransportBoundaryFailureCodeV1 =
   | 'endpoint_revision_mismatch'
   | 'admission_receipt_mismatch';
 
-export class McpTransportBoundaryErrorV1 extends Error {
-  readonly code: McpTransportBoundaryFailureCodeV1;
+export class McpTransportBoundaryError extends Error {
+  readonly code: McpTransportBoundaryFailureCode;
 
-  constructor(code: McpTransportBoundaryFailureCodeV1, message: string, options?: ErrorOptions) {
+  constructor(code: McpTransportBoundaryFailureCode, message: string, options?: ErrorOptions) {
     super(message, options);
-    this.name = 'McpTransportBoundaryErrorV1';
+    this.name = 'McpTransportBoundaryError';
     this.code = code;
   }
 }
 
-export function createMcpTransportBoundaryIdentityV1(input: {
+export function createMcpTransportBoundaryIdentity(input: {
   workspaceRoot: string;
-  executionBoundary: ExecutionBoundaryV1;
-  executionSurface: ExecutionCapabilitySurfaceV1;
+  executionBoundary: ExecutionBoundary;
+  executionSurface: ExecutionCapabilitySurface;
   runIdentity: string;
   profileIdentity: string;
   networkPolicyRevision: string;
-}): McpTransportBoundaryIdentityV1 {
+}): McpTransportBoundaryIdentity {
   const canonical = {
     version: 1 as const,
-    workspaceKey: canonicalWorkspaceKeyV1(input.workspaceRoot),
-    executionBoundaryRevision: computeExecutionBoundaryDigestV1(input.executionBoundary),
+    workspaceKey: canonicalWorkspaceKey(input.workspaceRoot),
+    executionBoundaryRevision: computeExecutionBoundaryDigest(input.executionBoundary),
     runIdentity: nonEmptyIdentity(input.runIdentity, 'runIdentity'),
     profileIdentity: nonEmptyIdentity(input.profileIdentity, 'profileIdentity'),
     networkPolicyRevision: nonEmptyIdentity(input.networkPolicyRevision, 'networkPolicyRevision'),
@@ -99,18 +99,18 @@ export function createMcpTransportBoundaryIdentityV1(input: {
   return Object.freeze({ ...canonical, identityDigest: digest(canonical) });
 }
 
-export function createMcpTransportAdmissionReceiptV1(
-  request: McpTransportAdmissionRequestV1,
-): McpTransportAdmissionReceiptV1 {
+export function createMcpTransportAdmissionReceipt(
+  request: McpTransportAdmissionRequest,
+): McpTransportAdmissionReceipt {
   const receipt = { ...request, outcome: 'allowed' as const };
   return Object.freeze({ ...receipt, receiptDigest: digest(receipt) });
 }
 
-export function assertMcpTransportAdmissionReceiptV1(
-  request: McpTransportAdmissionRequestV1,
-  receipt: McpTransportAdmissionReceiptV1,
+export function assertMcpTransportAdmissionReceipt(
+  request: McpTransportAdmissionRequest,
+  receipt: McpTransportAdmissionReceipt,
 ): void {
-  const expected = createMcpTransportAdmissionReceiptV1(request);
+  const expected = createMcpTransportAdmissionReceipt(request);
   if (
     receipt.version !== expected.version ||
     receipt.outcome !== 'allowed' ||
@@ -130,19 +130,19 @@ export function assertMcpTransportAdmissionReceiptV1(
     receipt.endpointRevision !== expected.endpointRevision ||
     receipt.receiptDigest !== expected.receiptDigest
   ) {
-    throw new McpTransportBoundaryErrorV1(
+    throw new McpTransportBoundaryError(
       'admission_receipt_mismatch',
       'MCP transport admission receipt did not match this invocation.',
     );
   }
 }
 
-export function canonicalMcpHttpEndpointIdentityV1(config: McpServerConfig): {
+export function canonicalMcpHttpEndpointIdentity(config: McpServerConfig): {
   canonicalEndpoint: string;
   endpointIdentityDigest: string;
 } {
   if (config.type !== 'http' || !config.url) {
-    throw new McpTransportBoundaryErrorV1(
+    throw new McpTransportBoundaryError(
       'transport_denied',
       'A sealed HTTP MCP transport requires an explicit endpoint URL.',
     );
@@ -151,7 +151,7 @@ export function canonicalMcpHttpEndpointIdentityV1(config: McpServerConfig): {
   try {
     url = new URL(config.url);
   } catch (error) {
-    throw new McpTransportBoundaryErrorV1(
+    throw new McpTransportBoundaryError(
       'transport_denied',
       'The MCP HTTP endpoint URL is invalid.',
       { cause: error },
@@ -164,7 +164,7 @@ export function canonicalMcpHttpEndpointIdentityV1(config: McpServerConfig): {
     url.search ||
     url.hash
   ) {
-    throw new McpTransportBoundaryErrorV1(
+    throw new McpTransportBoundaryError(
       'transport_denied',
       'The MCP HTTP endpoint must be credential-free and cannot contain query or fragment data.',
     );

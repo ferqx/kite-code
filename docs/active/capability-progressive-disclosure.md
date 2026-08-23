@@ -5,22 +5,22 @@
 读取时机：修改 MCP/Skill catalog、模型工具披露、`tool_search`、Runtime binding、Skill activation 或模型上下文预算策略时。
 
 验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime`、`bun run typecheck`。
-29/20/9 parity 由 Builtin/SPI package tests 与当前 Runtime manifest checks 机械验证；RMV1-16 final Gate、完成记录
-与 implementation final SHA 已闭合，RAV1 不得重新引入第二 catalog/schema authority。
+29/20/9 parity 由 Builtin/SPI package tests 与当前 Runtime manifest checks 机械验证；RM-16 final Gate、完成记录
+与 implementation final SHA 已闭合，RA 不得重新引入第二 catalog/schema authority。
 
-Builtin disclosure 的唯一事实源是一次 `createRuntimeModuleRegistryV1(createBuiltinRuntimeModules()).snapshot()`
-产生的 `CapabilityRegistrySnapshotV1`，再由 `createBuiltinToolCatalogProjectionV1()` 投影 `toolSet` 与 entry。
+Builtin disclosure 的唯一事实源是一次 `createRuntimeModuleRegistry(createBuiltinRuntimeModules()).snapshot()`
+产生的 `CapabilityRegistrySnapshot`，再由 `createBuiltinToolCatalogProjection()` 投影 `toolSet` 与 entry。
 Builtin parser/schema、availability、effects、traits、descriptor、operation/executor revision 均来自该 frozen
 snapshot；package tests 机械断言 29 entries、20 model-visible、9 internal 及 identity/effects/schema parity。
 App Tool Pipeline 只接收该 projection 与独立 dynamic-MCP overlay，不能创建第二 registry、snapshot 或
 schema/effects authority。Kernel 只做 governance/admission decision，Host 只提供 generic execution port；源码 caller/owner
-closure 已切到唯一 App/Builtin/Host seams，RMV1-16 final manifest/docs/journey/fault/soak Gate 已通过。
+closure 已切到唯一 App/Builtin/Host seams，RM-16 final manifest/docs/journey/fault/soak Gate 已通过。
 
-`capabilityCatalogV1`、`mcpRuntimeBindingV1` 与 `toolSearchV1` 已完成迁移并默认开启。MCP Tool ≤20 且 token budget 充足时直接绑定，跳过 `tool_search` 往返；Skill 使用扣除 MCP 后的剩余预算独立判断，防止各自不超预算的小目录合计撑爆上下文窗口。显式关闭任一 MCP flag 只用于 fail-closed 诊断，不恢复旧 adapter。
+`capabilityCatalog`、`mcpRuntimeBinding` 与 `toolSearch` 已完成迁移并默认开启。MCP Tool ≤20 且 token budget 充足时直接绑定，跳过 `tool_search` 往返；Skill 使用扣除 MCP 后的剩余预算独立判断，防止各自不超预算的小目录合计撑爆上下文窗口。显式关闭任一 MCP flag 只用于 fail-closed 诊断，不恢复旧 adapter。
 
 Capability disclosure 的 token budget 使用与 context preflight 相同的 `ResolvedModelCapabilities.contextWindowTokens`。模型名称和默认模型列表不提供窗口能力；没有显式 disclosure budget 时采用保守的 1024-token catalog budget，直到模型条目、adapter runtime metadata 或兼容字段提供可验证窗口。
 
-Per-tool 名称注入（`## Available MCP Tool Names` 段落）已移除。模型初始只通过 system prompt 中的固定 MCP Capability Usage 规则和工具列表中的 `list_mcp_tools`、`tool_search`、`list_mcp_resources` 三个内置工具发现 MCP 能力。`tool_search` 在 `toolSearchV1` 开启且 provider 支持工具调用时始终可用，不受 disclosure mode 影响；小目录直绑场景中 `tool_search` 仍保持可用，作为模型的 fallback 发现路径。规则明确禁止将 Resource 列表为空推断为 MCP Tool 不存在，并将三种用户意图路由到对应工具。
+Per-tool 名称注入（`## Available MCP Tool Names` 段落）已移除。模型初始只通过 system prompt 中的固定 MCP Capability Usage 规则和工具列表中的 `list_mcp_tools`、`tool_search`、`list_mcp_resources` 三个内置工具发现 MCP 能力。`tool_search` 在 `toolSearch` 开启且 provider 支持工具调用时始终可用，不受 disclosure mode 影响；小目录直绑场景中 `tool_search` 仍保持可用，作为模型的 fallback 发现路径。规则明确禁止将 Resource 列表为空推断为 MCP Tool 不存在，并将三种用户意图路由到对应工具。
 
 上述可用性只适用于未携带 sealed production execution boundary 的路径。当前 sealed boundary
 只在 App 提供匹配 boundary/run/profile/network/endpoint/invocation identity 的单次 transport
@@ -33,7 +33,7 @@ inventory/resource 和动态 Tool 继续 fail closed。local stdio 在 native co
 
 `tool_search` 只负责按意图发现能力（"哪个 Capability 可以完成这个动作"），不再承担全量 Tool inventory。包含 MCP 清单意图的查询（中英文均支持，中文不依赖空格分词）会被重定向为 `inventory_query` + `next_tool: list_mcp_tools`，提醒模型使用正确的盘点工具。这是错误恢复机制，不作为 inventory 的主要实现。包含业务关键词的 query 继续使用相关性排序。
 
-RMV1-11 后，`list_mcp_tools`、`list_mcp_resources`、`read_mcp_resource` 与动态 MCP Tool 的 schema 由
+RM-11 后，`list_mcp_tools`、`list_mcp_resources`、`read_mcp_resource` 与动态 MCP Tool 的 schema 由
 Builtin frozen catalog 或独立 dynamic-MCP descriptor route 暴露；concrete execution 与 inventory/resource semantics
 只由 `@kite/builtin-runtime` module 拥有。App Tool Pipeline 与 `tool_search` 一样只保留调用所需的
 availability/Policy/result projection，不再拥有另一份 schema/effect authority。Controller
@@ -58,15 +58,15 @@ environment 的受限 MCP mechanism。搜索与 inventory 不调用或等待 Pro
 
 搜索只负责发现，不负责授权。MCP 调用仍必须携带 Runtime-issued binding，并继续经过 schema、policy、approval、execution record 和 verification；Skill activation 在该 flag 开启时必须匹配本轮 disclosure，猜测 Skill ID 会被拒绝。关闭 flag 只恢复现有的治理型全量 binding 路径，不恢复旧 MCP adapter 或 Prompt Skill 正文注入。
 
-RMV1-09 起，turn-scoped binding 的精确 DTO 位于私有 `@kite/runtime-spi`，唯一构造者是
-`@kite/builtin-runtime#createCapabilityBindingV1`。它保留既有 `bindingId/schemaDigest` canonical SHA-256 字节和
-State26 字段；不读取 Policy、approval 或 Provider。RMV1-10 的 Host execution port 只从启动时冻结的 Registry
+RM-09 起，turn-scoped binding 的精确 DTO 位于私有 `@kite/runtime-spi`，唯一构造者是
+`@kite/builtin-runtime#createCapabilityBinding`。它保留既有 `bindingId/schemaDigest` canonical SHA-256 字节和
+Runtime State 字段；不读取 Policy、approval 或 Provider。RM-10 的 Host execution port 只从启动时冻结的 Registry
 snapshot 核对 capability/provider/executor/revision/schema、request、grant、attempt 与 receipt identity，并对
 `invocationId + attemptId` 做单次 claim；它不解释搜索 facts，也不签发额外授权。`tool_search` 必须先经过既有
-Proposal/Policy/Intent、Store5 的 invocation+attempt 原子 ack，才进入唯一 Builtin executor；返回的 SPI Receipt
+Proposal/Policy/Intent、SQLite Store 的 invocation+attempt 原子 ack，才进入唯一 Builtin executor；返回的 SPI Receipt
 经 Host identity 验证后仍由既有 Tool Pipeline 写 Capability Artifact、提交 terminal receipt，并把同一
 `capability.search_completed`/stdout 投影给 Kernel 与 Client。App bridge 不注册 concrete operation；Builtin frozen snapshot
-是唯一 operation owner，不存在 try-new-catch-old、第二 handler 或 fallback。当前使用 State26、Store5 与 epoch
+是唯一 operation owner，不存在 try-new-catch-old、第二 handler 或 fallback。当前使用 Runtime State、SQLite Store 与 epoch
 `kite-runtime-modularization-v1-2026-08-19`。
 
 `capability.bindings_issued.catalogRevision` 继续只表示 dynamic MCP + Skills 的 disclosure/catalog revision，不能

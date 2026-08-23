@@ -1,15 +1,15 @@
 import { expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import {
-  mapHistoricalStateToStateV1,
-  STATE26_STATE26_TOP_LEVEL_FIELDS_V1,
+  mapHistoricalStateToState,
+  STATE_STATE_TOP_LEVEL_FIELDS_,
 } from '../reliability-harness/runtime-authority/state-format-mapping';
 import stateShape from '../reliability-harness/runtime-modularization/manifests/runtime-state-shape.generated.json';
 
-test('RAV1-05 maps every State field into the exact State target without a production decoder', () => {
+test('RA-05 maps every State field into the exact State target without a production decoder', () => {
   const projectId = 'project_mapping_fixture' as const;
   const canonicalWorkspaceDigest = `sha256:${'1'.repeat(64)}` as const;
-  const target = createRuntimeHostStateInitialStateV1({
+  const target = createRuntimeHostStateInitialState({
     threadId: 'mapping-session',
     userId: 'mapping-user',
     workspace: '/workspace',
@@ -28,18 +28,18 @@ test('RAV1-05 maps every State field into the exact State target without a produ
     formatEpoch: 'kite-runtime-2026-08-18',
     session: stateSession,
   };
-  const mapped = mapHistoricalStateToStateV1({
+  const mapped = mapHistoricalStateToState({
     state,
     projectId,
     canonicalWorkspaceDigest,
   });
 
   expect(mapped).toEqual(target);
-  expect([...STATE26_STATE26_TOP_LEVEL_FIELDS_V1].map(String).sort()).toEqual(
+  expect([...STATE_STATE_TOP_LEVEL_FIELDS_].map(String).sort()).toEqual(
     stateShape.facts.fields.map((field) => field.name).sort(),
   );
   expect(() =>
-    mapHistoricalStateToStateV1({
+    mapHistoricalStateToState({
       state: { ...state, unknownAuthority: true },
       projectId,
       canonicalWorkspaceDigest,

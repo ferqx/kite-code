@@ -1,31 +1,31 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import {
-  createRuntimeHostMcpStdioProcessPortV1,
-  isMcpStdioWrapperInvocationV1,
-  MCP_STDIO_WRAPPER_ENTRYPOINT_V1,
-  parseMcpStdioJsonLineV1,
+  createRuntimeHostMcpStdioProcessPort,
+  isMcpStdioWrapperInvocation,
+  MCP_STDIO_WRAPPER_ENTRYPOINT_,
+  parseMcpStdioJsonLine,
 } from '../src/mcp-stdio-process';
 
 const workspace = join(import.meta.dir, '../..', '..');
 const fixture = join(workspace, 'tests/fixtures/mcp-governance-server.ts');
 
 function createPort(wrapperPath?: string) {
-  return createRuntimeHostMcpStdioProcessPortV1({
+  return createRuntimeHostMcpStdioProcessPort({
     ...(wrapperPath ? { wrapperPath } : {}),
   });
 }
 
 describe('Runtime Host MCP stdio process port', () => {
   test('admits only one final private wrapper marker with no competing internal mode', () => {
-    expect(isMcpStdioWrapperInvocationV1(['kite', MCP_STDIO_WRAPPER_ENTRYPOINT_V1])).toBe(true);
+    expect(isMcpStdioWrapperInvocation(['kite', MCP_STDIO_WRAPPER_ENTRYPOINT_])).toBe(true);
     for (const argv of [
       ['kite'],
-      ['kite', MCP_STDIO_WRAPPER_ENTRYPOINT_V1, '--version'],
-      ['kite', MCP_STDIO_WRAPPER_ENTRYPOINT_V1, MCP_STDIO_WRAPPER_ENTRYPOINT_V1],
-      ['kite', '--kite-internal-posix-supervisor-v1', MCP_STDIO_WRAPPER_ENTRYPOINT_V1],
+      ['kite', MCP_STDIO_WRAPPER_ENTRYPOINT_, '--version'],
+      ['kite', MCP_STDIO_WRAPPER_ENTRYPOINT_, MCP_STDIO_WRAPPER_ENTRYPOINT_],
+      ['kite', '--kite-internal-posix-supervisor-v1', MCP_STDIO_WRAPPER_ENTRYPOINT_],
     ]) {
-      expect(isMcpStdioWrapperInvocationV1(argv)).toBe(false);
+      expect(isMcpStdioWrapperInvocation(argv)).toBe(false);
     }
   });
 
@@ -54,7 +54,7 @@ describe('Runtime Host MCP stdio process port', () => {
     const first = await reader.read();
     expect(first.done).toBe(false);
     expect(
-      parseMcpStdioJsonLineV1(new TextDecoder().decode(first.value).replace(/\n$/u, '')),
+      parseMcpStdioJsonLine(new TextDecoder().decode(first.value).replace(/\n$/u, '')),
     ).toMatchObject({
       jsonrpc: '2.0',
       id: 1,
@@ -107,7 +107,7 @@ describe('Runtime Host MCP stdio process port', () => {
   });
 
   test('rejects duplicate JSON object keys before control-frame validation', () => {
-    expect(() => parseMcpStdioJsonLineV1('{"jsonrpc":"2.0","jsonrpc":"2.0"}')).toThrow(
+    expect(() => parseMcpStdioJsonLine('{"jsonrpc":"2.0","jsonrpc":"2.0"}')).toThrow(
       /Duplicate JSON object key/u,
     );
   });

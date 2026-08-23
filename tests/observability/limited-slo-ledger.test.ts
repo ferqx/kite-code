@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  buildLimitedSloAdmissionV1,
-  buildLimitedSloSampleLedgerV1,
-  buildLimitedSloTerminalReceiptV1,
-  type LimitedSloSampleLedgerV1,
-  rebuildLimitedSloObservationV1,
-  verifyLimitedSloSampleLedgerV1,
+  buildLimitedSloAdmission,
+  buildLimitedSloSampleLedger,
+  buildLimitedSloTerminalReceipt,
+  type LimitedSloSampleLedger,
+  rebuildLimitedSloObservation,
+  verifyLimitedSloSampleLedger,
 } from '../../scripts/operations/limited-slo-ledger';
-import { qualifyLimitedSloV1 } from '../../scripts/operations/qualify-limited-slo';
-import { verifyLimitedSloQualificationV1 } from '../../scripts/operations/verify-limited-slo-qualification';
+import { qualifyLimitedSlo } from '../../scripts/operations/qualify-limited-slo';
+import { verifyLimitedSloQualification } from '../../scripts/operations/verify-limited-slo-qualification';
 import { canonicalJson, sha256DomainSeparated } from '../../scripts/release/canonical-json';
 
 const digest = (marker: string): `sha256:${string}` =>
@@ -51,7 +51,7 @@ const zeroG0 = {
 } as const;
 
 const policy = {
-  schema: 'AgentProductionSloV1',
+  schema: 'AgentProductionSlo',
   policyId: 'agent-production-test-v1',
   status: 'approved',
   approvalMilestone: 'MS:LIM-APPROVED',
@@ -80,14 +80,14 @@ const policyDigest = sha256DomainSeparated(
   canonicalJson(policy),
 );
 
-function ledger(): LimitedSloSampleLedgerV1 {
+function ledger(): LimitedSloSampleLedger {
   let previousAdmission: `sha256:${string}` | null = null;
   let previousTerminal: `sha256:${string}` | null = null;
   const admissions = [];
   const terminalReceipts = [];
   for (let index = 0; index < 4; index += 1) {
-    const admission = buildLimitedSloAdmissionV1({
-      schema: 'LimitedSloAdmissionV1',
+    const admission = buildLimitedSloAdmission({
+      schema: 'LimitedSloAdmission',
       sequence: index + 1,
       admissionId: `admission_${(index + 1).toString(16).padStart(32, '0')}`,
       previousAdmissionDigest: previousAdmission,
@@ -96,8 +96,8 @@ function ledger(): LimitedSloSampleLedgerV1 {
     });
     admissions.push(admission);
     previousAdmission = admission.admissionDigest as `sha256:${string}`;
-    const terminal = buildLimitedSloTerminalReceiptV1({
-      schema: 'LimitedSloTerminalReceiptV1',
+    const terminal = buildLimitedSloTerminalReceipt({
+      schema: 'LimitedSloTerminalReceipt',
       sequence: index + 1,
       terminalReceiptId: `terminal_${(index + 1).toString(16).padStart(32, '0')}`,
       admissionId: admission.admissionId,
@@ -119,8 +119,8 @@ function ledger(): LimitedSloSampleLedgerV1 {
     terminalReceipts.push(terminal);
     previousTerminal = terminal.terminalDigest as `sha256:${string}`;
   }
-  return buildLimitedSloSampleLedgerV1({
-    schema: 'LimitedSloSampleLedgerV1',
+  return buildLimitedSloSampleLedger({
+    schema: 'LimitedSloSampleLedger',
     policyDigest,
     limitedApprovalDecisionDigest: digest('l'),
     artifactIdentity,
@@ -140,7 +140,7 @@ function ledger(): LimitedSloSampleLedgerV1 {
   });
 }
 
-function expectation(value: LimitedSloSampleLedgerV1) {
+function expectation(value: LimitedSloSampleLedger) {
   return {
     policyDigest: value.policyDigest,
     limitedApprovalDecisionDigest: value.limitedApprovalDecisionDigest,
@@ -156,7 +156,7 @@ function expectation(value: LimitedSloSampleLedgerV1) {
 describe('limited SLO retained ledger and independent verifier', () => {
   test('rebuilds every aggregate from a complete digest-chained admission set', () => {
     const value = ledger();
-    const rebuilt = rebuildLimitedSloObservationV1(value);
+    const rebuilt = rebuildLimitedSloObservation(value);
     expect(rebuilt).toMatchObject({
       sampleCount: 4,
       noData: false,
@@ -173,7 +173,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
         reverted: 0.5,
       },
     });
-    expect(rebuildLimitedSloObservationV1(value)).toEqual(rebuilt);
+    expect(rebuildLimitedSloObservation(value)).toEqual(rebuilt);
   });
 
   test('rejects orphan admissions, duplicate terminals, reordering, and tampering', () => {
@@ -181,13 +181,13 @@ describe('limited SLO retained ledger and independent verifier', () => {
     const firstTerminal = value.terminalReceipts[0]!;
     const secondTerminal = value.terminalReceipts[1]!;
     expect(() =>
-      verifyLimitedSloSampleLedgerV1({
+      verifyLimitedSloSampleLedger({
         ...value,
         terminalReceipts: value.terminalReceipts.slice(0, -1),
       }),
     ).toThrow('orphan admission');
     expect(() =>
-      verifyLimitedSloSampleLedgerV1({
+      verifyLimitedSloSampleLedger({
         ...value,
         terminalReceipts: [
           firstTerminal,
@@ -201,13 +201,13 @@ describe('limited SLO retained ledger and independent verifier', () => {
       }),
     ).toThrow('duplicate terminal receipts');
     expect(() =>
-      verifyLimitedSloSampleLedgerV1({
+      verifyLimitedSloSampleLedger({
         ...value,
         admissions: [...value.admissions].reverse(),
       }),
     ).toThrow('sequence');
     expect(() =>
-      verifyLimitedSloSampleLedgerV1({
+      verifyLimitedSloSampleLedger({
         ...value,
         terminalReceipts: [
           { ...value.terminalReceipts[0], checksPassed: false },
@@ -219,7 +219,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
 
   test('binds expected GitHub and candidate identity but keeps production trust empty', () => {
     const value = ledger();
-    const result = verifyLimitedSloQualificationV1({
+    const result = verifyLimitedSloQualification({
       ledger: value,
       expected: expectation(value),
     });
@@ -229,7 +229,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
       trustRegistryConfigured: false,
       reasonCodes: ['authenticated_observation_verifier_not_configured'],
     });
-    const spliced = verifyLimitedSloQualificationV1({
+    const spliced = verifyLimitedSloQualification({
       ledger: value,
       expected: {
         ...expectation(value),
@@ -243,7 +243,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
       ['artifactId', '9999'],
       ['attestationSubjectDigest', digest('x')],
     ] as const) {
-      const result = verifyLimitedSloQualificationV1({
+      const result = verifyLimitedSloQualification({
         ledger: value,
         expected: {
           ...expectation(value),
@@ -259,7 +259,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
       { ...value.source, oidcIssuer: 'https://issuer.invalid' },
     ]) {
       expect(() =>
-        verifyLimitedSloQualificationV1({
+        verifyLimitedSloQualification({
           ledger: value,
           expected: { ...expectation(value), source: sourceSplice },
         }),
@@ -268,7 +268,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
 
     const { ledgerDigest: _ledgerDigest, ...material } = value;
     expect(() =>
-      buildLimitedSloSampleLedgerV1({
+      buildLimitedSloSampleLedger({
         ...material,
         source: { ...value.source, artifactDigest: digest('x') },
       }),
@@ -277,9 +277,9 @@ describe('limited SLO retained ledger and independent verifier', () => {
 
   test('compares the supplied summary to the retained rebuild and never mints a milestone', () => {
     const value = ledger();
-    const rebuilt = rebuildLimitedSloObservationV1(value);
+    const rebuilt = rebuildLimitedSloObservation(value);
     const observation = {
-      schema: 'LimitedCohortObservationV1',
+      schema: 'LimitedCohortObservation',
       artifactIdentity: value.artifactIdentity,
       routeDigest: value.routeDigest,
       cohortDigest: value.cohortDigest,
@@ -301,7 +301,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
       errorBudgetBurn: rebuilt.errorBudgetBurn,
       metrics: rebuilt.metrics,
     } as const;
-    const result = qualifyLimitedSloV1({
+    const result = qualifyLimitedSlo({
       policy,
       observation,
       retainedLedger: value,
@@ -315,7 +315,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
       retainedRebuildDigest: rebuilt.rebuildDigest,
       reasonCodes: ['authenticated_observation_verifier_not_configured'],
     });
-    const forged = qualifyLimitedSloV1({
+    const forged = qualifyLimitedSlo({
       policy,
       observation: { ...observation, metrics: { ...observation.metrics, integrated: 1 } },
       retainedLedger: value,
@@ -324,7 +324,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
     expect(forged.reasonCodes).toContain('retained_sample_rebuild_mismatch');
     expect(forged.milestone).toBeNull();
 
-    const candidateSplice = qualifyLimitedSloV1({
+    const candidateSplice = qualifyLimitedSlo({
       policy,
       observation: {
         ...observation,
@@ -349,10 +349,10 @@ describe('limited SLO retained ledger and independent verifier', () => {
 
   test('rejects hidden fields and samples outside the retained observation window', () => {
     const value = ledger();
-    expect(() => verifyLimitedSloSampleLedgerV1({ ...value, hiddenGrant: true })).toThrow();
+    expect(() => verifyLimitedSloSampleLedger({ ...value, hiddenGrant: true })).toThrow();
     const { ledgerDigest: _ledgerDigest, ...material } = value;
     expect(() =>
-      buildLimitedSloSampleLedgerV1({
+      buildLimitedSloSampleLedger({
         ...material,
         startedAt: '2026-08-01T00:01:00.000Z',
       }),
@@ -365,7 +365,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
     let previousAdmission: `sha256:${string}` | null = null;
     const admissions = value.admissions.map((admission, index) => {
       const { admissionDigest: _admissionDigest, ...admissionMaterial } = admission;
-      const rebuilt = buildLimitedSloAdmissionV1({
+      const rebuilt = buildLimitedSloAdmission({
         ...admissionMaterial,
         previousAdmissionDigest: previousAdmission,
         admittedAt: index === 3 ? '2026-08-01T01:30:00.000Z' : admission.admittedAt,
@@ -376,7 +376,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
     let previousTerminal: `sha256:${string}` | null = null;
     const relinkedTerminals = value.terminalReceipts.map((terminal, index) => {
       const { terminalDigest: _terminalDigest, ...terminalMaterial } = terminal;
-      const rebuilt = buildLimitedSloTerminalReceiptV1({
+      const rebuilt = buildLimitedSloTerminalReceipt({
         ...terminalMaterial,
         admissionDigest: admissions[index]!.admissionDigest,
         previousTerminalDigest: previousTerminal,
@@ -385,7 +385,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
       return rebuilt;
     });
     expect(() =>
-      buildLimitedSloSampleLedgerV1({
+      buildLimitedSloSampleLedger({
         ...material,
         admissions,
         terminalReceipts: relinkedTerminals,
@@ -395,7 +395,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
     previousTerminal = null;
     const terminalReceipts = value.terminalReceipts.map((terminal, index) => {
       const { terminalDigest: _terminalDigest, ...terminalMaterial } = terminal;
-      const rebuilt = buildLimitedSloTerminalReceiptV1({
+      const rebuilt = buildLimitedSloTerminalReceipt({
         ...terminalMaterial,
         previousTerminalDigest: previousTerminal,
         finalizedAt: index === 1 ? '2026-08-01T02:45:00.000Z' : terminal.finalizedAt,
@@ -403,7 +403,7 @@ describe('limited SLO retained ledger and independent verifier', () => {
       previousTerminal = rebuilt.terminalDigest as `sha256:${string}`;
       return rebuilt;
     });
-    expect(() => buildLimitedSloSampleLedgerV1({ ...material, terminalReceipts })).toThrow(
+    expect(() => buildLimitedSloSampleLedger({ ...material, terminalReceipts })).toThrow(
       'terminal receipt timestamps are not non-decreasing',
     );
   });

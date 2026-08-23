@@ -1,21 +1,18 @@
 import {
-  type BuiltinChildRuntimeDriverV1,
-  type GovernedSubagentCompositionV1 as BuiltinGovernedSubagentCompositionV1,
-  subagentDispatchIntentDigestV1,
+  type BuiltinChildRuntimeDriver,
+  type GovernedSubagentComposition as BuiltinGovernedSubagentComposition,
+  subagentDispatchIntentDigest,
 } from '@kite/builtin-runtime';
-import type {
-  SubagentLifecycleArtifactAccessV1,
-  SubagentTaskArtifactAccessV1,
-} from '#builtin-runtime';
+import type { SubagentLifecycleArtifactAccess, SubagentTaskArtifactAccess } from '#builtin-runtime';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
-type GovernedSubagentCompositionV1 = BuiltinGovernedSubagentCompositionV1<
-  SubagentLifecycleArtifactAccessV1,
-  BuiltinChildRuntimeDriverV1,
-  SubagentTaskArtifactAccessV1
+type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<
+  SubagentLifecycleArtifactAccess,
+  BuiltinChildRuntimeDriver,
+  SubagentTaskArtifactAccess
 >;
 
-export function hasPendingSubagentProviderRecoveryV1(state: Readonly<RuntimeState>): boolean {
+export function hasPendingSubagentProviderRecovery(state: Readonly<RuntimeState>): boolean {
   return Object.values(state.capabilities.invocations).some(
     (invocation) =>
       invocation.subagentProviderLifecycle !== undefined &&
@@ -24,8 +21,8 @@ export function hasPendingSubagentProviderRecoveryV1(state: Readonly<RuntimeStat
 }
 
 /** App restore adapter for the Builtin-owned Subagent Provider lifecycle. */
-export async function reconcilePendingSubagentProvidersAfterCrashV1(input: {
-  readonly composition: GovernedSubagentCompositionV1;
+export async function reconcilePendingSubagentProvidersAfterCrash(input: {
+  readonly composition: GovernedSubagentComposition;
   readonly persistence: {
     getState(): Readonly<RuntimeState>;
     persistEvents(events: RuntimeEvent[]): Promise<boolean>;
@@ -69,7 +66,7 @@ export async function reconcilePendingSubagentProvidersAfterCrashV1(input: {
     if (!pending.handleArtifact) {
       cleanupConfirmed = true;
     } else {
-      let handle: Readonly<import('@kite/runtime-spi').SubagentHandleV1>;
+      let handle: Readonly<import('@kite/runtime-spi').SubagentHandle>;
       try {
         handle = input.composition.lifecycleArtifacts.read(
           pending.handleArtifact,
@@ -88,7 +85,7 @@ export async function reconcilePendingSubagentProvidersAfterCrashV1(input: {
         handle.taskArtifact.integrityIdentifier !== pending.taskArtifact.integrityIdentifier ||
         handle.taskArtifact.byteLength !== pending.taskArtifact.byteLength ||
         handle.integrityIdentifier !== pending.handleIntegrityIdentifier ||
-        subagentDispatchIntentDigestV1(handle) !== pending.dispatchIntentDigest
+        subagentDispatchIntentDigest(handle) !== pending.dispatchIntentDigest
       ) {
         return false;
       }

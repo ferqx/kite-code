@@ -2,43 +2,37 @@
  * Test-only Runtime composition.
  *
  * Production callers must provide an already-owned Kernel and effect port to
- * `executeRuntimeTurnV1`. This root-only helper is the only place that
+ * `executeRuntimeTurn`. This root-only helper is the only place that
  * deliberately composes the State 25 App coordinator for existing corpus
  * tests and fixtures.
  */
 
 import { createHash } from 'node:crypto';
 import { createChatModel, type SupportedChatModel } from '@kite/builtin-runtime/model';
-import { sandboxSupportsFullModeV1 } from '@kite/builtin-runtime/sandbox';
+import { sandboxSupportsFullMode } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
-import type { StateSessionStorageV1 } from '#app/bootstrap/runtime/state-runtime';
-import {
-  executeRuntimeTurnV1,
-  type RuntimeTurnInputV1,
-} from '#app/bootstrap/runtime/turn-coordinator';
-import type { AuthorizedExecutionControlV1 } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
+import type { StateSessionStorage } from '#app/bootstrap/runtime/state-runtime';
+import { executeRuntimeTurn, type RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
+import type { AuthorizedExecutionControl } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
 import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
-import {
-  restoreStateHostSessionHarnessV1,
-  type StateHostSessionHarnessV1,
-} from './runtime-host-state';
+import { restoreStateHostSessionHarness, type StateHostSessionHarness } from './runtime-host-state';
 
-export type TestRuntimeAgentInputV1 = Omit<
-  RuntimeTurnInputV1,
+export type TestRuntimeAgentInput = Omit<
+  RuntimeTurnInput,
   | 'runtimeSession'
   | 'createRuntimeEffectPort'
   | 'model'
   | 'recoveryIdentityKey'
   | 'registerRunCancellation'
 > & {
-  readonly openStateSessionStorage: (threadId?: string) => StateSessionStorageV1;
+  readonly openStateSessionStorage: (threadId?: string) => StateSessionStorage;
   readonly model?: SupportedChatModel;
   readonly recoveryIdentityKey?: string;
-  readonly onTestExecutionControl?: (control: AuthorizedExecutionControlV1 | null) => void;
+  readonly onTestExecutionControl?: (control: AuthorizedExecutionControl | null) => void;
 };
 
-const TEST_RUNTIME_RECOVERY_IDENTITY_KEY_V1 =
+const TEST_RUNTIME_RECOVERY_IDENTITY_KEY_ =
   '0000000000000000000000000000000000000000000000000000000000000000';
 
 /**
@@ -46,15 +40,15 @@ const TEST_RUNTIME_RECOVERY_IDENTITY_KEY_V1 =
  * The helper owns exactly this Kernel and closes it exactly once after the
  * test entry returns or throws.
  */
-export async function* runTestRuntimeAgentV1(
-  input: TestRuntimeAgentInputV1,
+export async function* runTestRuntimeAgent(
+  input: TestRuntimeAgentInput,
   provider: RuntimeActionProvider,
   createRuntimeEffectPort: (dependencies: RuntimeExecutorDependencies) => RuntimeEffectExecutor,
 ): AsyncGenerator<import('@kite/agent-kernel').RuntimeEvent> {
   const store = input.openStateSessionStorage(input.threadId);
-  const recoveryIdentityKey = input.recoveryIdentityKey ?? TEST_RUNTIME_RECOVERY_IDENTITY_KEY_V1;
+  const recoveryIdentityKey = input.recoveryIdentityKey ?? TEST_RUNTIME_RECOVERY_IDENTITY_KEY_;
   const { onTestExecutionControl, ...turnInput } = input;
-  const kernel: StateHostSessionHarnessV1 = restoreStateHostSessionHarnessV1({
+  const kernel: StateHostSessionHarness = restoreStateHostSessionHarness({
     threadId: input.threadId,
     userId: input.userId,
     workspace: input.workspace,
@@ -71,13 +65,13 @@ export async function* runTestRuntimeAgentV1(
     sandboxAvailable:
       input.sandboxBackend === 'unknown'
         ? false
-        : sandboxSupportsFullModeV1(input.sandboxBackend ?? 'none'),
+        : sandboxSupportsFullMode(input.sandboxBackend ?? 'none'),
     modelArtifactEvidence: input.modelInvocationRuntime.evidence,
     capabilityArtifactEvidence: input.modelInvocationRuntime.capabilityArtifacts,
   });
 
   try {
-    yield* executeRuntimeTurnV1(
+    yield* executeRuntimeTurn(
       {
         ...turnInput,
         recoveryIdentityKey,

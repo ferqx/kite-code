@@ -2,21 +2,21 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
-  ExecutionBackendCapabilitiesV1,
-  PreparedSandboxExecutionV1,
-  SandboxExecutionDispatchIntentAcknowledgementV1,
-  SandboxExecutionProviderV1,
-  SandboxPreparationArtifactPortV1,
-  SandboxPreparationArtifactRefV1,
-  SandboxPreparationLifecycleV1,
-  SandboxPreparationV1,
-  SandboxPreparedProcessExecutionPortV1,
-  SandboxPreparedProcessExecutionResultV1,
-  SandboxPreparedProcessUnknownResultV1,
+  ExecutionBackendCapabilities,
+  PreparedSandboxExecution,
+  SandboxExecutionDispatchIntentAcknowledgement,
+  SandboxExecutionProvider,
+  SandboxPreparation,
+  SandboxPreparationArtifactPort,
+  SandboxPreparationArtifactRef,
+  SandboxPreparationLifecycle,
+  SandboxPreparedProcessExecutionPort,
+  SandboxPreparedProcessExecutionResult,
+  SandboxPreparedProcessUnknownResult,
 } from '../src/sandbox-execution-provider';
-import { SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1 } from '../src/sandbox-execution-provider';
+import { SANDBOX_EXECUTION_PROVIDER_SCHEMA_ } from '../src/sandbox-execution-provider';
 
-const backendCapabilities: ExecutionBackendCapabilitiesV1 = {
+const backendCapabilities: ExecutionBackendCapabilities = {
   backend: 'seatbelt',
   filesystem: {
     read_only: 'enforced',
@@ -30,8 +30,8 @@ const backendCapabilities: ExecutionBackendCapabilitiesV1 = {
   verifiedInProcessReadOnly: 'enforced',
 };
 
-const preparation: SandboxPreparationV1 = {
-  schema: SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1,
+const preparation: SandboxPreparation = {
+  schema: SANDBOX_EXECUTION_PROVIDER_SCHEMA_,
   toolCallId: 'tool-call-1',
   capabilityId: 'builtin:shell_execute',
   capabilityRevision: 'shell-v1',
@@ -59,8 +59,8 @@ const preparation: SandboxPreparationV1 = {
   cancellationCorrelation: 'cancel-1',
 };
 
-const prepared: PreparedSandboxExecutionV1 = {
-  schema: SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1,
+const prepared: PreparedSandboxExecution = {
+  schema: SANDBOX_EXECUTION_PROVIDER_SCHEMA_,
   kind: 'prepared_sandbox_execution',
   planId: 'plan-1',
   toolCallId: preparation.toolCallId,
@@ -87,7 +87,7 @@ const prepared: PreparedSandboxExecutionV1 = {
   cleanup: { kind: 'none', resourceId: 'none', recoveryPayload: {} },
 };
 
-const artifactRef: SandboxPreparationArtifactRefV1 = {
+const artifactRef: SandboxPreparationArtifactRef = {
   artifactId: 'artifact-1',
   kind: 'sandbox_preparation',
   integrityIdentifier: 'integrity-1',
@@ -106,7 +106,7 @@ function cleanup() {
 describe('runtime SPI sandbox execution provider contract', () => {
   test('carries exact preparation objects through a closed typed lifecycle', async () => {
     const seen: unknown[] = [];
-    const lifecycle: SandboxPreparationLifecycleV1 = {
+    const lifecycle: SandboxPreparationLifecycle = {
       recordPreparationIntent: async (candidate) => {
         seen.push(candidate);
         return { acknowledged: true, stage: 'preparation_intent', intentDigest: 'intent-1' };
@@ -192,7 +192,7 @@ describe('runtime SPI sandbox execution provider contract', () => {
   });
 
   test('keeps artifact transport neutral and exact', () => {
-    const port: SandboxPreparationArtifactPortV1 = {
+    const port: SandboxPreparationArtifactPort = {
       write: (candidate) => {
         expect(candidate).toBe(prepared);
         return artifactRef;
@@ -209,15 +209,15 @@ describe('runtime SPI sandbox execution provider contract', () => {
   });
 
   test('requires a dispatch acknowledgement before neutral process execution', async () => {
-    const lifecycle = {} as SandboxPreparationLifecycleV1;
-    const dispatchIntent: SandboxExecutionDispatchIntentAcknowledgementV1 = {
+    const lifecycle = {} as SandboxPreparationLifecycle;
+    const dispatchIntent: SandboxExecutionDispatchIntentAcknowledgement = {
       acknowledged: true,
       stage: 'execution_dispatch_intent',
       dispatchId: 'dispatch-1',
       supervisorNonce: 'nonce-1',
       dispatchIntentDigest: 'dispatch-intent-1',
     };
-    const port: SandboxPreparedProcessExecutionPortV1 = {
+    const port: SandboxPreparedProcessExecutionPort = {
       execute: async (input) => {
         expect(input.prepared).toBe(prepared);
         expect(input.dispatchIntent).toBe(dispatchIntent);
@@ -242,7 +242,7 @@ describe('runtime SPI sandbox execution provider contract', () => {
   });
 
   test('keeps post-GO unknown terminally distinct and JSON-safe', () => {
-    const unknown: SandboxPreparedProcessUnknownResultV1 = {
+    const unknown: SandboxPreparedProcessUnknownResult = {
       kind: 'unknown',
       executionPhase: 'unknown_after_go',
       exitCode: null,
@@ -264,12 +264,11 @@ describe('runtime SPI sandbox execution provider contract', () => {
     expect(unknown.processCleanup.unconfirmedDescendantCount).toBe(1);
 
     // @ts-expect-error a post-GO unknown cannot be represented as a failure result
-    const downgraded: Extract<SandboxPreparedProcessExecutionResultV1, { kind: 'failed' }> =
-      unknown;
+    const downgraded: Extract<SandboxPreparedProcessExecutionResult, { kind: 'failed' }> = unknown;
     expect((downgraded as unknown as { readonly kind: string }).kind).toBe('unknown');
 
     const postGoFailure: Extract<
-      SandboxPreparedProcessExecutionResultV1,
+      SandboxPreparedProcessExecutionResult,
       { readonly kind: 'failed' }
     > = {
       kind: 'failed',
@@ -286,7 +285,7 @@ describe('runtime SPI sandbox execution provider contract', () => {
     );
 
     // @ts-expect-error cleanup evidence is mandatory on every terminal result
-    const missingCleanup: SandboxPreparedProcessExecutionResultV1 = {
+    const missingCleanup: SandboxPreparedProcessExecutionResult = {
       kind: 'completed',
       executionPhase: 'go_started',
       exitCode: 0,
@@ -297,7 +296,7 @@ describe('runtime SPI sandbox execution provider contract', () => {
   });
 
   test('does not admit bare booleans as lifecycle acknowledgements', () => {
-    const invalidLifecycle: SandboxPreparationLifecycleV1 = {
+    const invalidLifecycle: SandboxPreparationLifecycle = {
       // @ts-expect-error a durable lifecycle acknowledgement is never a bare boolean
       recordPreparationIntent: async () => true,
       // @ts-expect-error a durable lifecycle acknowledgement is never a bare boolean
@@ -315,7 +314,7 @@ describe('runtime SPI sandbox execution provider contract', () => {
   });
 
   test('preserves the existing provider API', async () => {
-    const provider: SandboxExecutionProviderV1 = {
+    const provider: SandboxExecutionProvider = {
       resourceSemantics: 'pure',
       prepare: async () => ({ ok: true, observation: prepared }),
       dispose: async () => ({ ok: true, observation: { disposed: true } }),

@@ -4,17 +4,17 @@ import { reduce } from './kernel';
 import { normalizeAgentEvent } from './normalization';
 import type { AgentState } from './state';
 
-export interface AgentEffectLeaseIdentityV1 {
+export interface AgentEffectLeaseIdentity {
   readonly turnId: string;
   readonly effect: RuntimeEffect;
 }
 
-export interface SuspendedCapabilityTerminalRequirementV1 {
+export interface SuspendedCapabilityTerminalRequirement {
   readonly invocationId: string;
   readonly toolCallId: string;
 }
 
-type CapabilityTerminalEventV1 = Extract<
+type CapabilityTerminalEvent = Extract<
   RuntimeEvent,
   {
     type:
@@ -24,7 +24,7 @@ type CapabilityTerminalEventV1 = Extract<
   }
 >;
 
-function isCapabilityTerminalEventV1(event: RuntimeEvent): event is CapabilityTerminalEventV1 {
+function isCapabilityTerminalEvent(event: RuntimeEvent): event is CapabilityTerminalEvent {
   return (
     event.type === 'capability.execution_succeeded' ||
     event.type === 'capability.execution_failed' ||
@@ -32,7 +32,7 @@ function isCapabilityTerminalEventV1(event: RuntimeEvent): event is CapabilityTe
   );
 }
 
-function isToolTerminalEventV1(
+function isToolTerminalEvent(
   event: RuntimeEvent,
 ): event is Extract<
   RuntimeEvent,
@@ -50,16 +50,16 @@ function isToolTerminalEventV1(
  * Determine which suspended capability receipts require Host-supplied terminal timestamps.
  * The Kernel never reads a clock; callers must bind every returned invocation exactly once.
  */
-export function suspendedCapabilityTerminalRequirementsV1(
+export function suspendedCapabilityTerminalRequirements(
   state: Readonly<AgentState>,
   events: readonly RuntimeEvent[],
-): readonly SuspendedCapabilityTerminalRequirementV1[] {
+): readonly SuspendedCapabilityTerminalRequirement[] {
   const terminalInvocationIds = new Set(
-    events.filter(isCapabilityTerminalEventV1).map((event) => event.invocationId),
+    events.filter(isCapabilityTerminalEvent).map((event) => event.invocationId),
   );
-  const requirements: SuspendedCapabilityTerminalRequirementV1[] = [];
+  const requirements: SuspendedCapabilityTerminalRequirement[] = [];
   for (const event of events) {
-    if (!isToolTerminalEventV1(event)) continue;
+    if (!isToolTerminalEvent(event)) continue;
     const invocation = Object.values(state.capabilities.invocations).find(
       (candidate) =>
         candidate.toolCallId === event.toolCallId &&
@@ -77,14 +77,14 @@ export function suspendedCapabilityTerminalRequirementsV1(
 }
 
 /** Close a suspended governed capability receipt in the same atomic Tool-terminal batch. */
-export function attachSuspendedCapabilityTerminalsV1(
+export function attachSuspendedCapabilityTerminals(
   state: Readonly<AgentState>,
   events: readonly RuntimeEvent[],
   finishedAtByInvocationId: Readonly<Record<string, string>>,
 ): readonly RuntimeEvent[] {
   const output: RuntimeEvent[] = [];
   for (const event of events) {
-    if (!isToolTerminalEventV1(event)) {
+    if (!isToolTerminalEvent(event)) {
       output.push(event);
       continue;
     }
@@ -98,7 +98,7 @@ export function attachSuspendedCapabilityTerminalsV1(
       !invocation ||
       output.some(
         (candidate) =>
-          isCapabilityTerminalEventV1(candidate) &&
+          isCapabilityTerminalEvent(candidate) &&
           candidate.invocationId === invocation.invocationId,
       )
     ) {
@@ -153,13 +153,13 @@ export function attachSuspendedCapabilityTerminalsV1(
 }
 
 /** Enforce governed capability receipt + Tool terminal atomicity. */
-export function assertCapabilityToolTerminalBatchV1(
+export function assertCapabilityToolTerminalBatch(
   state: Readonly<AgentState>,
-  lease: AgentEffectLeaseIdentityV1,
+  lease: AgentEffectLeaseIdentity,
   events: readonly RuntimeEvent[],
 ): void {
   if (lease.effect.type !== 'run_tools') return;
-  const capabilityTerminals = events.filter(isCapabilityTerminalEventV1);
+  const capabilityTerminals = events.filter(isCapabilityTerminalEvent);
   for (const terminal of capabilityTerminals) {
     const invocation = state.capabilities.invocations[terminal.invocationId];
     if (!invocation?.receiptRequirement) continue;
@@ -171,7 +171,7 @@ export function assertCapabilityToolTerminalBatchV1(
       throw new Error('Governed capability terminal requires a private result Artifact.');
     }
     const matchingToolTerminal = events.some(
-      (event) => isToolTerminalEventV1(event) && event.toolCallId === invocation.toolCallId,
+      (event) => isToolTerminalEvent(event) && event.toolCallId === invocation.toolCallId,
     );
     if (!matchingToolTerminal) {
       throw new Error('Capability receipt and Tool terminal must commit in one atomic batch.');
@@ -205,9 +205,9 @@ export function assertCapabilityToolTerminalBatchV1(
 }
 
 /** Reject late success/failure/rejection for a Tool already durably cancelled. */
-export function hasLateTerminalEventForCancelledToolV1(
+export function hasLateTerminalEventForCancelledTool(
   state: Readonly<AgentState>,
-  lease: AgentEffectLeaseIdentityV1,
+  lease: AgentEffectLeaseIdentity,
   events: readonly RuntimeEvent[],
 ): boolean {
   if (lease.effect.type !== 'run_tools') return false;
@@ -224,9 +224,9 @@ export function hasLateTerminalEventForCancelledToolV1(
  * Shell siblings from one response may finish across unrelated revisions, but
  * only while the exact Tool/capability identity is still live.
  */
-export function isConcurrentShellEffectEventCurrentV1(
+export function isConcurrentShellEffectEventCurrent(
   state: Readonly<AgentState>,
-  lease: AgentEffectLeaseIdentityV1,
+  lease: AgentEffectLeaseIdentity,
   event: RuntimeEvent,
 ): boolean {
   if (lease.turnId !== state.turn.turnId || lease.effect.type !== 'run_tools') return false;
@@ -278,15 +278,15 @@ export function isConcurrentShellEffectEventCurrentV1(
 }
 
 /** Validate a concurrent Shell batch against each projected intermediate State value. */
-export function isConcurrentShellEffectBatchCurrentV1(
+export function isConcurrentShellEffectBatchCurrent(
   state: Readonly<AgentState>,
-  lease: AgentEffectLeaseIdentityV1,
+  lease: AgentEffectLeaseIdentity,
   events: readonly RuntimeEvent[],
   occurredAtForEvent: (index: number) => string,
 ): boolean {
   let projectedState = state;
   for (const [index, event] of events.entries()) {
-    if (!isConcurrentShellEffectEventCurrentV1(projectedState, lease, event)) return false;
+    if (!isConcurrentShellEffectEventCurrent(projectedState, lease, event)) return false;
     const occurredAt = occurredAtForEvent(index);
     if (!occurredAt || !Number.isFinite(Date.parse(occurredAt))) return false;
     const canonicalEvent = normalizeAgentEvent(event, projectedState, occurredAt);

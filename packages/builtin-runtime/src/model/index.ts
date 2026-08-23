@@ -41,7 +41,7 @@ export {
   type AutoReviewResult,
   type AutoReviewSuggestion,
   createAutoReviewModel,
-  type PendingToolRequestViewV1,
+  type PendingToolRequestView,
   type ReviewContext,
   resolveAutoReviewConfig,
   type ShellApprovalGrant,
@@ -49,8 +49,8 @@ export {
 } from './reviewer';
 export * from './runtime-context';
 export {
-  createModelSecretDetectorV1,
-  type ModelSecretInspectionV1,
+  createModelSecretDetector,
+  type ModelSecretInspection,
 } from './secret-detector';
 export * from './secure-storage';
 export { secureWindowsOwnerOnlyPath } from './secure-storage';

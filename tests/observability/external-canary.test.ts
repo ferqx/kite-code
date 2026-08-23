@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { createMetricSampleV1 } from '@kite/runtime-host';
-import { type AgentConfig, EMBEDDED_RELEASE_PROFILES_V1 } from '#app/config';
-import type { TelemetryConsentGrantV1 } from '@/app/observability/consent';
-import { composeExternalCanaryObservabilityV1 } from '@/app/observability/external-canary';
-import { resolveReleaseCompositionV1 } from '@/app/release/composition-root';
+import { createMetricSample } from '@kite/runtime-host';
+import { type AgentConfig, EMBEDDED_RELEASE_PROFILES_ } from '#app/config';
+import type { TelemetryConsentGrant } from '@/app/observability/consent';
+import { composeExternalCanaryObservability } from '@/app/observability/external-canary';
+import { resolveReleaseComposition } from '@/app/release/composition-root';
 
-const grant: TelemetryConsentGrantV1 = {
+const grant: TelemetryConsentGrant = {
   state: 'granted',
   metricCategories: ['run_turn', 'runtime_resource'],
   receiver: 'Kite Operations',
@@ -21,10 +21,10 @@ describe('external canary telemetry admission', () => {
     providerName: 'test',
     providerType: 'openai-compatible',
     modelName: 'test',
-    features: { releaseProfileV1: true },
+    features: { releaseProfile: true },
     sandbox: { enabled: true },
   };
-  const unavailableCanary = resolveReleaseCompositionV1({
+  const unavailableCanary = resolveReleaseComposition({
     config,
     artifactReleaseProfileV1Enabled: true,
     profileId: 'capability-canary',
@@ -37,14 +37,14 @@ describe('external canary telemetry admission', () => {
       exporter: { export: async () => {} },
       user: { enabled: true, endpointPolicy: 'vendor_managed' as const, consent: grant },
     };
-    expect(composeExternalCanaryObservabilityV1(common)).toMatchObject({
+    expect(composeExternalCanaryObservability(common)).toMatchObject({
       cohortAdmission: 'blocked',
       blockReason: 'artifact_authority_missing',
     });
     expect(
-      composeExternalCanaryObservabilityV1({ ...common, releaseComposition: unavailableCanary }),
+      composeExternalCanaryObservability({ ...common, releaseComposition: unavailableCanary }),
     ).toMatchObject({ cohortAdmission: 'blocked', blockReason: 'artifact_authority_missing' });
-    const missingOptIn = composeExternalCanaryObservabilityV1({
+    const missingOptIn = composeExternalCanaryObservability({
       ...common,
       user: { ...common.user, consent: { ...grant, canaryOptIn: false } },
     });
@@ -54,11 +54,11 @@ describe('external canary telemetry admission', () => {
     });
     expect(missingOptIn.consent.reason).toBe('canary_opt_in_missing');
 
-    const forgedProfile = structuredClone(EMBEDDED_RELEASE_PROFILES_V1['capability-canary']);
+    const forgedProfile = structuredClone(EMBEDDED_RELEASE_PROFILES_['capability-canary']);
     forgedProfile.capabilities.builtin_read_tools.maxRollout = 'canary';
     forgedProfile.telemetry.allowed = true;
     expect(
-      composeExternalCanaryObservabilityV1({
+      composeExternalCanaryObservability({
         ...common,
         releaseComposition: {
           version: 1,
@@ -76,15 +76,13 @@ describe('external canary telemetry admission', () => {
       exporter: { export: async () => {} },
       user: { enabled: true, endpointPolicy: 'vendor_managed' as const, consent: grant },
     };
-    expect(composeExternalCanaryObservabilityV1(base).blockReason).toBe(
-      'artifact_authority_missing',
-    );
-    const projectBlocked = composeExternalCanaryObservabilityV1({
+    expect(composeExternalCanaryObservability(base).blockReason).toBe('artifact_authority_missing');
+    const projectBlocked = composeExternalCanaryObservability({
       ...base,
       project: { enabled: true },
     }).blockReason;
     expect(projectBlocked).toBe('artifact_authority_missing');
-    const auditBlocked = composeExternalCanaryObservabilityV1({
+    const auditBlocked = composeExternalCanaryObservability({
       ...base,
       admin: { mandatoryAudit: { required: true, available: false } },
     });
@@ -97,7 +95,7 @@ describe('external canary telemetry admission', () => {
 
   test('rebuilds samples strictly and enforces consented metric categories before export', async () => {
     const exported: unknown[] = [];
-    const composition = composeExternalCanaryObservabilityV1({
+    const composition = composeExternalCanaryObservability({
       exporter: {
         export: async (samples) => {
           exported.push(...samples);
@@ -109,13 +107,13 @@ describe('external canary telemetry admission', () => {
         consent: { ...grant, metricCategories: ['run_turn'] },
       },
     });
-    const run = createMetricSampleV1({
+    const run = createMetricSample({
       name: 'run_total',
       observedAt: '2026-08-02T00:00:00.000Z',
     });
     composition.reporter.report({ ...run, prompt: 'SECRET' } as never);
     composition.reporter.report(
-      createMetricSampleV1({
+      createMetricSample({
         name: 'model_request_total',
         observedAt: '2026-08-02T00:00:00.000Z',
       }),

@@ -9,7 +9,7 @@
 ## 测试边界
 
 PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、App `RuntimeSessionCoordinator`、
-`executeRuntimeTurnV1()`、State26/Store5、RuntimeEvent reducer 和 Ink 渲染。只允许 mock
+`executeRuntimeTurn()`、Runtime State/SQLite Store、RuntimeEvent reducer 和 Ink 渲染。只允许 mock
 模型服务及必要的外部 provider；不得 mock TUI、Kernel 或 reducer 主链路。
 
 ## Harness 结构
@@ -248,7 +248,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     场景应使用显式 opt-in smoke，并在运行时确认后端存在；默认 suite 只验证可人为固定的
     负向/降级路径。授权、policy 和 reducer 的完整分支必须由注入能力状态的确定性单元或
     Runtime 集成测试覆盖，不能让 GitHub runner 是否预装 `bwrap` 改变默认测试结果。若默认
-    scenario 不验证 Shell，fixture 必须显式注入 `mode=denied` 的 `AppShellExecutorV1`，并
+    scenario 不验证 Shell，fixture 必须显式注入 `mode=denied` 的 `AppShellExecutor`，并
     保持零底层命令。需要验证 Shell 审批或展示链路时，必须注入 test-owned 的完整
     sandbox preparation lifecycle/Runtime consumer 或显式 native oracle，并从真实 Tool result 校验唯一
     marker；关闭 native sandbox 只能得到 `denied`，不得恢复裸 host command。不得让

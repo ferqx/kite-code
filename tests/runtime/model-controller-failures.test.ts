@@ -1,33 +1,30 @@
 import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { projectRuntimeEventToObservabilityFactV1 } from '@kite/agent-kernel';
-import {
-  createBuiltinObservabilityProjectorV1,
-  digestCapabilityValueV1,
-} from '@kite/builtin-runtime';
+import { projectRuntimeEventToObservabilityFact } from '@kite/agent-kernel';
+import { createBuiltinObservabilityProjector, digestCapabilityValue } from '@kite/builtin-runtime';
 import { aiMessage, buildContextProjection } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import type { SuspendedSubagentSnapshot } from '@kite/runtime-spi';
 import { eventsForInvalidModelToolCalls } from '#app/bootstrap/runtime/model-effect';
-import { mapRuntimeMetadataV1 } from '#app/session-logger';
-import { subagentTaskDigestV1 } from '#builtin-runtime';
+import { mapRuntimeMetadata } from '#app/session-logger';
+import { subagentTaskDigest } from '#builtin-runtime';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1 } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
-import { createTestModelInvocationHarnessV1 } from '../helpers/model-invocation';
+import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { createTestModelInvocationHarness } from '../helpers/model-invocation';
 import {
-  executeTestRuntimeToolsV1,
-  projectTestPrimaryModelEffectV1,
-  testSubagentContinuationArtifactsV1,
-  testSubagentTaskRequestsV1,
+  executeTestRuntimeTools,
+  projectTestPrimaryModelEffect,
+  testSubagentContinuationArtifacts,
+  testSubagentTaskRequests,
 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function projectObservabilityMetrics(events: readonly unknown[]) {
-  const projector = createBuiltinObservabilityProjectorV1();
+  const projector = createBuiltinObservabilityProjector();
   return events.flatMap((event) => {
-    const fact = projectRuntimeEventToObservabilityFactV1(event, new Date(0).toISOString());
+    const fact = projectRuntimeEventToObservabilityFact(event, new Date(0).toISOString());
     return fact ? projector.mapRuntimeFact(fact) : [];
   });
 }
@@ -94,12 +91,12 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
     const queued = events.find((event) => event.type === 'tool.queued');
     expect(queued?.type).toBe('tool.queued');
     if (queued?.type !== 'tool.queued') throw new Error('expected queued invalid call');
-    const kernel = restoreStateKernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'user',
       workspace: '/workspace',
-      store: openStateStoreForTestV1(storePath),
+      store: openStateStoreForTest(storePath),
     });
     kernel.processEvent({
       type: 'model.responded',
@@ -127,7 +124,7 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
     expect(providerJson).not.toContain(kernel.getState().toolRecovery.identityKey);
     kernel.close();
 
-    const store = openStateStoreForTestV1(storePath);
+    const store = openStateStoreForTest(storePath);
     const stored = JSON.stringify(store.loadEventsStrict(threadId));
     store.close();
     expect(stored).not.toContain('store-secret');
@@ -139,9 +136,9 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
 
 test('keeps a new Task body and raw digests out of every Runtime and diagnostic projection', async () => {
   const task = 'PRIVATE_TASK_SENTINEL_3d95445c review the exact runtime privacy boundary';
-  const rawTaskDigest = subagentTaskDigestV1(task);
-  const rawArgumentsDigest = digestCapabilityValueV1({ subagent_type: 'review', task });
-  const state = createRuntimeHostStateInitialStateV1({
+  const rawTaskDigest = subagentTaskDigest(task);
+  const rawArgumentsDigest = digestCapabilityValue({ subagent_type: 'review', task });
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'private-task-runtime-projection',
     userId: 'user',
@@ -158,7 +155,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
     },
   ]);
   model.supportsToolCalls = true;
-  const events = await projectTestPrimaryModelEffectV1({
+  const events = await projectTestPrimaryModelEffect({
     model,
     state,
     config: {
@@ -197,7 +194,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
   });
   let restored = state;
   for (const event of events) restored = reduceRuntimeState(restored, event);
-  const sessionProjection = events.map(mapRuntimeMetadataV1);
+  const sessionProjection = events.map(mapRuntimeMetadata);
   const metricProjection = projectObservabilityMetrics(events);
   const publicJson = JSON.stringify({ events, restored, sessionProjection, metricProjection });
   expect(publicJson).not.toContain(task);
@@ -206,14 +203,14 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
 });
 
 test('omits absent optional model response fields so live reduction matches replay', async () => {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'canonical-model-response',
     userId: 'user',
     workspace: process.cwd(),
   });
   const model = createMockModel([{ message: aiMessage({ content: 'done' }) }]);
-  const events = await projectTestPrimaryModelEffectV1({
+  const events = await projectTestPrimaryModelEffect({
     model,
     state,
     config: {
@@ -240,7 +237,7 @@ test('omits absent optional model response fields so live reduction matches repl
 });
 
 test('interrupts duplicate provider tool-call ids before publishing or queueing either Task', async () => {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'duplicate-provider-tool-call-id',
     userId: 'user',
@@ -266,11 +263,11 @@ test('interrupts duplicate provider tool-call ids before publishing or queueing 
     },
   ]);
   model.supportsToolCalls = true;
-  const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd(), state });
-  const delegate = testSubagentTaskRequestsV1();
+  const harness = createTestModelInvocationHarness({ workspace: process.cwd(), state });
+  const delegate = testSubagentTaskRequests();
   let artifactWrites = 0;
   await expect(
-    projectTestPrimaryModelEffectV1({
+    projectTestPrimaryModelEffect({
       model,
       state,
       config: {
@@ -323,7 +320,7 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
   const task = 'PRIVATE_CONTINUATION_TASK_SENTINEL_7541';
   const message = 'PRIVATE_CONTINUATION_MESSAGE_SENTINEL_7541';
   try {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'private-continuation-db',
       userId: 'user',
@@ -354,9 +351,9 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
         }),
       },
     ]);
-    const continuationArtifacts = testSubagentContinuationArtifactsV1();
+    const continuationArtifacts = testSubagentContinuationArtifacts();
     let capturedContinuation: SuspendedSubagentSnapshot | undefined;
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['task-private-db'],
       taskConfig: {
@@ -378,7 +375,7 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
     });
     expect(events.some((event) => event.type === 'subagent.suspended')).toBe(true);
     expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
-    let restored = createRuntimeHostStateInitialStateV1({
+    let restored = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'private-continuation-db',
       userId: 'user',
@@ -391,9 +388,9 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
     restored.tools.queue = [...restored.tools.queue, 'task-private-db'];
     for (const event of events) restored = reduceRuntimeState(restored, event);
     restored = { ...restored, revision: events.length };
-    const sessionJson = JSON.stringify(events.map(mapRuntimeMetadataV1));
+    const sessionJson = JSON.stringify(events.map(mapRuntimeMetadata));
     const metricJson = JSON.stringify(projectObservabilityMetrics(events));
-    const db = openStateStoreForTestV1(storePath);
+    const db = openStateStoreForTest(storePath);
     db.appendEventsAndSnapshot(
       'private-continuation-db',
       events,
@@ -407,11 +404,11 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
     db.close();
     const publicJson = JSON.stringify({ events, restored, sessionJson, metricJson, storedJson });
     expect(capturedContinuation).toBeDefined();
-    const rawContinuationDigest = digestCapabilityValueV1({
+    const rawContinuationDigest = digestCapabilityValue({
       schema: 'kite.subagent-continuation.v1',
       snapshot: capturedContinuation!,
     });
-    for (const secret of [task, message, subagentTaskDigestV1(task), rawContinuationDigest]) {
+    for (const secret of [task, message, subagentTaskDigest(task), rawContinuationDigest]) {
       expect(publicJson).not.toContain(secret);
     }
   } finally {

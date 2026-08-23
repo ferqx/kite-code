@@ -15,7 +15,7 @@ tests/execution/sandbox-execution-provider.test.ts`、
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、`release/platform-capabilities/support-matrix-v1.json`、
+相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、`release/platform-capabilities/support-matrix.json`、
 `docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
 
 ## 当前支持集合
@@ -116,7 +116,7 @@ ADR-0101 将 native invocation protocol 提升到 V6。adapter 与 runner 必须
 字段。只有带 `full_access` 的 `allow_all` 必须使用当前登录用户 token；更窄 scope fail closed，非网络
 approved filesystem invocation 使用 guard SID。
 V1-V5 runner 必须在 user script 前 fail closed。
-`windows-runner-v1.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
+`windows-runner.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
 仓库当前 release pin 已由 canonical Windows build 固定为 0.8.3/V6 及其对应 binary digest；adapter
 仍必须拒绝 V1-V5 或 digest 不一致的 runner。native runner 改动后，只有同一可复现 Windows 构建重新
 生成并提交匹配 pin，才能恢复可用性；不得回退旧协议或手工复用旧 digest。
@@ -151,7 +151,7 @@ Workspace-bound 只读工具、network-off 和两个入口组合证据；当前�
 
 backend discovery、sandbox 命令成功、顶层 shell invocation permit、PID namespace、
 `--die-with-parent`、child 自然退出或 proxy 环境变量都不是对应能力的 enforcement evidence。
-`ProcessTreeCapabilityEvidenceV1` 把 hard-count limiter 与 termination cleanup 分开投影；只有具名的
+`ProcessTreeCapabilityEvidence` 把 hard-count limiter 与 termination cleanup 分开投影；只有具名的
 cgroup pids、Windows Job active-process limit 或已接受等价机制同时通过 native conformance，
 前者才能为 `enforced`。成功清理 process group/Job descendants 不会提升 hard-count verdict。
 探针无法执行或不能证明时按 `unavailable/unsupported` 处理，最终结论为 `excluded`。
@@ -222,9 +222,9 @@ conformance、probe、独立 verifier 与 artifact upload，因此 PS-02 的实�
 `waiting_ci`，不改变空 support set。当前版本已移除 evaluation-only Linux diagnostics；平台支持只消费本页列出的
 production contract tests、原生 probe 与 verifier artifact。未来诊断必须重新建立独立计划，不能恢复旧评测脚本。
 
-## ExecutionBoundaryV1 schema 与 composition gate
+## ExecutionBoundary schema 与 composition gate
 
-`ExecutionBoundaryV1` 由 Builtin sandbox contract 冻结，App config 只负责 production 解析：filesystem 只允许
+`ExecutionBoundary` 由 Builtin sandbox contract 冻结，App config 只负责 production 解析：filesystem 只允许
 `read_only | workspace_write | full_access`，network 只允许 `off | allowlist`，local/private
 network 固定为 `false`，process-tree 上限必须是有限正整数。Workspace root 在解析时使用真实
 路径 canonicalize，并与 Workspace Trust 共用 `canonicalWorkspaceKey()`；allowlist 只接受精确
@@ -236,7 +236,7 @@ fallback 取 fail。不同 canonical Workspace 的边界禁止组合。
 
 production composition gate 不接受单一 `sandboxAvailable`，也不接受调用方传入 raw
 `supported | read_only_only`。它只读取
-`release/platform-capabilities/approved-execution-qualifications-v1.json`，校验固定 revision/digest，
+`release/platform-capabilities/approved-execution-qualifications.json`，校验固定 revision/digest，
 再按实际 OS release/version、architecture、Bun、backend、network mode 和 TUI/foreground CLI
 入口精确解析 qualification。probe 与 resolver 共用 canonical environment identity producer，且
 Windows identity 直接读取 Runtime 的 OS version API，不启动 PowerShell/CIM 子进程，避免冷启动或
@@ -271,10 +271,10 @@ CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enab
 `--no-sandbox` 等价 restriction 必须在 composition 阶段拒绝，不能获得 shell/process surface；
 成功的 production config 固定 `sandbox.enabled=true`，后续入口必须直接消费该 sealed config。
 
-PS-02 后三种 native backend 共享 `SandboxExecutionProviderV1` 协议，但共享协议不代表三者当前都可进入
+PS-02 后三种 native backend 共享 `SandboxExecutionProvider` 协议，但共享协议不代表三者当前都可进入
 production execution。composition 的 startup discovery 只解析静态候选；bubblewrap/cgroup 等会启动进程或申请
 资源的 usability probe 必须等 allocating preparation intent durable ack 后才由 Runtime lifecycle consumer
-执行。RMV1-13 后 consumer 只验证 durable identity 并调用 `@kite/runtime-host` 的唯一 process supervisor；
+执行。RM-13 后 consumer 只验证 durable identity 并调用 `@kite/runtime-host` 的唯一 process supervisor；
 Provider 不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
 
 当前 Local Provider 对 Darwin Seatbelt 返回 `seatbelt_descendant_containment_unproven`：process group 无法覆盖
@@ -391,5 +391,5 @@ Git replacement objects 在最小环境中固定禁用；common-dir replacement 
 重新创建，只有已经 active 的 worktree 才能轮换 recovery lease。
 
 Review handoff 对 tracked 内容使用 binary diff，对 untracked owned regular file 生成有界、SHA-256
-绑定、base64 binary-safe 的 `KITE_UNTRACKED_FILE_V1` 内容记录。symlink、特殊文件、硬链接、超限、
+绑定、base64 binary-safe 的 `KITE_UNTRACKED_FILE_` 内容记录。symlink、特殊文件、硬链接、超限、
 owner/path/前后快照变化全部 fail closed；changed-files 只有文件名而没有内容的 handoff 不再成立。

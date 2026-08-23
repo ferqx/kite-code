@@ -4,7 +4,7 @@
 
 终态范围（ADR-0069）：3.1–3.9 的本地结构化无正文日志、status、kill switch、runbook 和本地 rehearsal
 记为 `completed`；3.10 的 external cohort 长期 SLO Gate 已被取代，不再属于产品规则或未来路线图。
-当前状态见 `release/oss-first-release/task-status-v2.json`。
+当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：

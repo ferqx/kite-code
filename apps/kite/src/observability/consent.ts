@@ -1,15 +1,15 @@
-import type { MetricNameV1 } from '@kite/runtime-host';
+import type { MetricName } from '@kite/runtime-host';
 
-export const TELEMETRY_METRIC_CATEGORIES_V1 = [
+export const TELEMETRY_METRIC_CATEGORIES_ = [
   'run_turn',
   'model_usage',
   'tool_mcp_skill',
   'runtime_resource',
   'release_rollout',
 ] as const;
-export type TelemetryMetricCategoryV1 = (typeof TELEMETRY_METRIC_CATEGORIES_V1)[number];
+export type TelemetryMetricCategory = (typeof TELEMETRY_METRIC_CATEGORIES_)[number];
 
-export const TELEMETRY_METRICS_BY_CATEGORY_V1 = Object.freeze({
+export const TELEMETRY_METRICS_BY_CATEGORY_ = Object.freeze({
   run_turn: Object.freeze(['run_total', 'run_duration_ms', 'turn_total']),
   model_usage: Object.freeze(['model_request_total', 'model_duration_ms', 'model_tokens_total']),
   tool_mcp_skill: Object.freeze([
@@ -48,39 +48,39 @@ export const TELEMETRY_METRICS_BY_CATEGORY_V1 = Object.freeze({
     'telemetry_dropped_total',
   ]),
   release_rollout: Object.freeze(['release_rollout_total']),
-} satisfies Readonly<Record<TelemetryMetricCategoryV1, readonly MetricNameV1[]>>);
+} satisfies Readonly<Record<TelemetryMetricCategory, readonly MetricName[]>>);
 
-export function allowedMetricNamesForConsentV1(
-  categories: readonly TelemetryMetricCategoryV1[],
-): ReadonlySet<MetricNameV1> {
-  return new Set(categories.flatMap((category) => TELEMETRY_METRICS_BY_CATEGORY_V1[category]));
+export function allowedMetricNamesForConsent(
+  categories: readonly TelemetryMetricCategory[],
+): ReadonlySet<MetricName> {
+  return new Set(categories.flatMap((category) => TELEMETRY_METRICS_BY_CATEGORY_[category]));
 }
-export type TelemetryEndpointPolicyV1 = 'disabled' | 'vendor_managed' | 'admin_managed';
+export type TelemetryEndpointPolicy = 'disabled' | 'vendor_managed' | 'admin_managed';
 
-export interface TelemetryConsentGrantV1 {
+export interface TelemetryConsentGrant {
   state: 'granted' | 'withdrawn';
-  metricCategories: readonly TelemetryMetricCategoryV1[];
+  metricCategories: readonly TelemetryMetricCategory[];
   receiver: string;
   retentionDays: number;
   withdrawalMethod: string;
   canaryOptIn: boolean;
 }
 
-export interface UserTelemetryConfigV1 {
+export interface UserTelemetryConfig {
   enabled?: boolean;
-  endpointPolicy?: TelemetryEndpointPolicyV1;
+  endpointPolicy?: TelemetryEndpointPolicy;
   /** Accepted by the transport composition but never exposed by status. */
   endpointSecret?: string;
-  consent?: TelemetryConsentGrantV1;
+  consent?: TelemetryConsentGrant;
   contentLoggingConsent?: boolean;
   modelProviderConsent?: boolean;
 }
 
-export interface ProjectTelemetryConfigV1 {
+export interface ProjectTelemetryConfig {
   enabled?: boolean;
 }
 
-export interface AdminObservabilityPolicyV1 {
+export interface AdminObservabilityPolicy {
   forceTelemetryDisabled?: boolean;
   endpointPolicy?: 'disabled' | 'admin_managed';
   mandatoryAudit?: {
@@ -89,11 +89,11 @@ export interface AdminObservabilityPolicyV1 {
   };
 }
 
-export interface TelemetryConsentStatusV1 {
+export interface TelemetryConsentStatus {
   enabled: boolean;
   consent: 'granted' | 'not_granted' | 'withdrawn';
-  endpointPolicy: TelemetryEndpointPolicyV1;
-  metricCategories: readonly TelemetryMetricCategoryV1[];
+  endpointPolicy: TelemetryEndpointPolicy;
+  metricCategories: readonly TelemetryMetricCategory[];
   receiver?: string;
   retentionDays?: number;
   withdrawalMethod?: string;
@@ -112,12 +112,12 @@ export interface TelemetryConsentStatusV1 {
   mandatoryAudit: 'not_required' | 'available' | 'unavailable';
 }
 
-export function resolveTelemetryConsentV1(input: {
+export function resolveTelemetryConsent(input: {
   releaseChannel: 'development' | 'internal' | 'limited' | 'canary' | 'ga';
-  user?: UserTelemetryConfigV1;
-  project?: ProjectTelemetryConfigV1;
-  admin?: AdminObservabilityPolicyV1;
-}): TelemetryConsentStatusV1 {
+  user?: UserTelemetryConfig;
+  project?: ProjectTelemetryConfig;
+  admin?: AdminObservabilityPolicy;
+}): TelemetryConsentStatus {
   const audit = input.admin?.mandatoryAudit;
   const mandatoryAudit = !audit?.required
     ? 'not_required'
@@ -126,9 +126,9 @@ export function resolveTelemetryConsentV1(input: {
       : 'unavailable';
   const managedSessionAdmission = mandatoryAudit === 'unavailable' ? 'denied' : 'admitted';
   const disabled = (
-    reason: Exclude<TelemetryConsentStatusV1['reason'], 'enabled'>,
-    consent: TelemetryConsentStatusV1['consent'] = 'not_granted',
-  ): TelemetryConsentStatusV1 => ({
+    reason: Exclude<TelemetryConsentStatus['reason'], 'enabled'>,
+    consent: TelemetryConsentStatus['consent'] = 'not_granted',
+  ): TelemetryConsentStatus => ({
     enabled: false,
     consent,
     endpointPolicy: input.admin?.endpointPolicy ?? input.user?.endpointPolicy ?? 'disabled',
@@ -163,7 +163,7 @@ export function resolveTelemetryConsentV1(input: {
   const categories = [...new Set(consent.metricCategories)];
   if (
     categories.length === 0 ||
-    categories.some((category) => !TELEMETRY_METRIC_CATEGORIES_V1.includes(category))
+    categories.some((category) => !TELEMETRY_METRIC_CATEGORIES_.includes(category))
   ) {
     throw new Error('Telemetry consent contains unknown or empty metric categories.');
   }
@@ -182,17 +182,17 @@ export function resolveTelemetryConsentV1(input: {
 }
 
 /** Safe CLI/TUI projection: endpoint material and unrelated consents are absent by construction. */
-export function projectTelemetryStatusV1(status: TelemetryConsentStatusV1): Readonly<{
+export function projectTelemetryStatus(status: TelemetryConsentStatus): Readonly<{
   enabled: boolean;
-  consent: TelemetryConsentStatusV1['consent'];
-  endpointPolicy: TelemetryEndpointPolicyV1;
-  metricCategories: readonly TelemetryMetricCategoryV1[];
+  consent: TelemetryConsentStatus['consent'];
+  endpointPolicy: TelemetryEndpointPolicy;
+  metricCategories: readonly TelemetryMetricCategory[];
   receiver?: string;
   retentionDays?: number;
   withdrawalMethod?: string;
-  reason: TelemetryConsentStatusV1['reason'];
-  managedSessionAdmission: TelemetryConsentStatusV1['managedSessionAdmission'];
-  mandatoryAudit: TelemetryConsentStatusV1['mandatoryAudit'];
+  reason: TelemetryConsentStatus['reason'];
+  managedSessionAdmission: TelemetryConsentStatus['managedSessionAdmission'];
+  mandatoryAudit: TelemetryConsentStatus['mandatoryAudit'];
 }> {
   return Object.freeze({
     enabled: status.enabled,

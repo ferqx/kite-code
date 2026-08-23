@@ -1,14 +1,14 @@
-export interface TuiExitSessionLifecycleV1 {
+export interface TuiExitSessionLifecycle {
   abortAll(): void | Promise<void>;
   shutdownObservability(timeoutMs: number): Promise<void>;
   dispose(): void | Promise<void>;
 }
 
-export interface TuiExitShellExecutorV1 {
+export interface TuiExitShellExecutor {
   abortPreparation?(): void;
 }
 
-export interface TuiExitCoordinatorV1 {
+export interface TuiExitCoordinator {
   requestExit(code?: number): Promise<void>;
 }
 
@@ -17,20 +17,20 @@ export interface TuiExitCoordinatorV1 {
  * Observability is non-critical, but every exit path gives its bounded shutdown
  * a chance to settle before terminal teardown and process exit.
  */
-export function createTuiExitCoordinatorV1(input: {
-  getSessionLifecycle: () => TuiExitSessionLifecycleV1 | null;
+export function createTuiExitCoordinator(input: {
+  getSessionLifecycle: () => TuiExitSessionLifecycle | null;
   /** Optional App Shell executor whose in-flight startup prewarm is aborted. */
-  getShellExecutor?: () => TuiExitShellExecutorV1 | null;
+  getShellExecutor?: () => TuiExitShellExecutor | null;
   unmount: () => void;
   exit: (code: number) => void;
   observabilityTimeoutMs?: number;
-}): TuiExitCoordinatorV1 {
+}): TuiExitCoordinator {
   let exitPromise: Promise<void> | null = null;
   return Object.freeze({
     requestExit(code = 0): Promise<void> {
       if (exitPromise) return exitPromise;
       exitPromise = (async () => {
-        let lifecycle: TuiExitSessionLifecycleV1 | null = null;
+        let lifecycle: TuiExitSessionLifecycle | null = null;
         try {
           lifecycle = input.getSessionLifecycle();
         } catch {

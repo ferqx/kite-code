@@ -1,27 +1,26 @@
 import {
-  type CapabilityApprovalV1,
-  type CapabilityDescriptorV1,
-  type CapabilityEffectLevelV1,
-  type CapabilitySnapshotV1,
-  type CompiledCapabilitySchemaV1,
-  canonicalizeCapabilityArgumentsV1,
-  compileCapabilitySchemaV1,
-  createCapabilitySnapshotV1,
-  descriptorRevisionV1,
-  digestCapabilityValueV1,
-  type EffectProfileV1,
-  type JsonSchemaV1,
-  validateCapabilityArgumentsV1,
+  type CapabilityDescriptor,
+  createCapabilitySnapshot,
+  digestCapabilityValue,
+  type EffectProfile,
 } from '../skills/capability-domain';
 
-export type CapabilityApproval = CapabilityApprovalV1;
-export type CapabilityAvailability = CapabilityDescriptorV1['availability'];
-export type CapabilityEffectLevel = CapabilityEffectLevelV1;
-export type CapabilityDescriptor = CapabilityDescriptorV1;
-export type CapabilitySnapshot = CapabilitySnapshotV1;
-export type CompiledCapabilitySchema = CompiledCapabilitySchemaV1;
-export type EffectProfile = EffectProfileV1;
-export type JsonSchema = JsonSchemaV1;
+export type {
+  CapabilityApproval,
+  CapabilityDescriptor,
+  CapabilityEffectLevel,
+  CapabilitySnapshot,
+  CompiledCapabilitySchema,
+  EffectProfile,
+  JsonSchema,
+} from '../skills/capability-domain';
+export {
+  canonicalizeCapabilityArguments,
+  compileCapabilitySchema,
+  descriptorRevision,
+  validateCapabilityArguments,
+} from '../skills/capability-domain';
+export type CapabilityAvailability = CapabilityDescriptor['availability'];
 
 export interface CapabilityFailure {
   kind: string;
@@ -48,12 +47,8 @@ export const UNKNOWN_EXTERNAL_EFFECTS: EffectProfile = Object.freeze({
   externalState: 'unknown',
 });
 
-export const compileCapabilitySchema = compileCapabilitySchemaV1;
-export const canonicalizeCapabilityArguments = canonicalizeCapabilityArgumentsV1;
-export const createSnapshot = createCapabilitySnapshotV1;
-export const descriptorRevision = descriptorRevisionV1;
-export const digestCapability = digestCapabilityValueV1;
-export const validateCapabilityArguments = validateCapabilityArgumentsV1;
+export const createSnapshot = createCapabilitySnapshot;
+export const digestCapability = digestCapabilityValue;
 
 export function toolInvalidArgumentsFailure(message: string): CapabilityFailure {
   return {

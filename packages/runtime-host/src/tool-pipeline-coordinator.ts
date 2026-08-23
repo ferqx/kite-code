@@ -1,14 +1,14 @@
 import type {
-  CapabilityToolTerminalResultV1,
-  PreparedToolInvocationIdentityV1,
-  PreparedToolInvocationInputV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineDispatchOutcomeV1,
-  ToolPipelineOutcomeDispatchV1,
-  ToolPipelinePersistenceV1,
-  ToolPipelineSuspensionV1,
+  CapabilityToolTerminalResult,
+  PreparedToolInvocation,
+  PreparedToolInvocationIdentity,
+  PreparedToolInvocationInput,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineDispatchOutcome,
+  ToolPipelineOutcomeDispatch,
+  ToolPipelinePersistence,
+  ToolPipelineSuspension,
 } from '@kite/runtime-spi';
 
 /**
@@ -17,10 +17,10 @@ import type {
  * file. The injected persistence callbacks own the durable receipt boundary;
  * Host owns their ordering and the post-ack uncertainty transition.
  */
-export const RUNTIME_HOST_TOOL_PIPELINE_ATTEMPT_COORDINATOR_SCHEMA_V1 =
+export const RUNTIME_HOST_TOOL_PIPELINE_ATTEMPT_COORDINATOR_SCHEMA_ =
   'kite.runtime-host.tool-pipeline-attempt-coordinator.v1' as const;
 
-export type RuntimeHostToolPipelineAttemptCoordinatorFailureCodeV1 =
+export type RuntimeHostToolPipelineAttemptCoordinatorFailureCode =
   | 'invalid_prepared_input'
   | 'identity_mismatch'
   | 'duplicate_attempt'
@@ -37,62 +37,62 @@ export type RuntimeHostToolPipelineAttemptCoordinatorFailureCodeV1 =
  * Public errors intentionally use bounded, owner-neutral messages. Verifier,
  * provider, and result diagnostics never cross this error boundary.
  */
-export class RuntimeHostToolPipelineAttemptCoordinatorErrorV1 extends Error {
-  readonly code: RuntimeHostToolPipelineAttemptCoordinatorFailureCodeV1;
+export class RuntimeHostToolPipelineAttemptCoordinatorError extends Error {
+  readonly code: RuntimeHostToolPipelineAttemptCoordinatorFailureCode;
 
-  constructor(code: RuntimeHostToolPipelineAttemptCoordinatorFailureCodeV1) {
-    super(runtimeHostToolPipelineAttemptCoordinatorMessageV1(code));
-    this.name = 'RuntimeHostToolPipelineAttemptCoordinatorErrorV1';
+  constructor(code: RuntimeHostToolPipelineAttemptCoordinatorFailureCode) {
+    super(runtimeHostToolPipelineAttemptCoordinatorMessage(code));
+    this.name = 'RuntimeHostToolPipelineAttemptCoordinatorError';
     this.code = code;
   }
 }
 
-export type RuntimeHostPreparedToolInvocationAuthorityV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = Readonly<PreparedToolInvocationV1<TArguments, TRequest>>;
+export type RuntimeHostPreparedToolInvocationAuthority<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
+> = Readonly<PreparedToolInvocation<TArguments, TRequest>>;
 
 /** Process-local proof that this coordinator durably committed the result. */
-export interface RuntimeHostCommittedToolInvocationAuthorityV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface RuntimeHostCommittedToolInvocationAuthority<
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-  readonly result: Readonly<CapabilityToolTerminalResultV1<TValue>>;
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+  readonly result: Readonly<CapabilityToolTerminalResult<TValue>>;
 }
 
 /** Process-local proof that this coordinator durably committed a non-terminal suspension. */
-export interface RuntimeHostSuspendedToolInvocationAuthorityV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface RuntimeHostSuspendedToolInvocationAuthority<
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-  readonly suspension: Readonly<ToolPipelineSuspensionV1>;
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+  readonly suspension: Readonly<ToolPipelineSuspension>;
   readonly result: Readonly<
-    Extract<ToolPipelineDispatchOutcomeV1<TValue>, { readonly kind: 'suspended' }>['result']
+    Extract<ToolPipelineDispatchOutcome<TValue>, { readonly kind: 'suspended' }>['result']
   >;
 }
 
 /** Process-local proof that Kernel/App durably admitted one safe-read retry. */
-export interface RuntimeHostRetryableToolInvocationAuthorityV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface RuntimeHostRetryableToolInvocationAuthority<
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
   readonly replaySafety: 'safe_read';
-  readonly result: Readonly<CapabilityToolTerminalResultV1<TValue>>;
+  readonly result: Readonly<CapabilityToolTerminalResult<TValue>>;
 }
 
-export type RuntimeHostToolInvocationOutcomeAuthorityV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export type RuntimeHostToolInvocationOutcomeAuthority<
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > =
-  | ({ readonly kind: 'committed' } & RuntimeHostCommittedToolInvocationAuthorityV1<TValue>)
-  | ({ readonly kind: 'suspended' } & RuntimeHostSuspendedToolInvocationAuthorityV1<TValue>)
-  | ({ readonly kind: 'retryable' } & RuntimeHostRetryableToolInvocationAuthorityV1<TValue>);
+  | ({ readonly kind: 'committed' } & RuntimeHostCommittedToolInvocationAuthority<TValue>)
+  | ({ readonly kind: 'suspended' } & RuntimeHostSuspendedToolInvocationAuthority<TValue>)
+  | ({ readonly kind: 'retryable' } & RuntimeHostRetryableToolInvocationAuthority<TValue>);
 
-export interface RuntimeHostToolPipelineAttemptCoordinatorOptionsV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface RuntimeHostToolPipelineAttemptCoordinatorOptions<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly persistence: ToolPipelinePersistenceV1<TValue>;
-  readonly dispatch: ToolPipelineOutcomeDispatchV1<TArguments, TValue>;
+  readonly persistence: ToolPipelinePersistence<TValue>;
+  readonly dispatch: ToolPipelineOutcomeDispatch<TArguments, TValue>;
 }
 
 /**
@@ -100,42 +100,42 @@ export interface RuntimeHostToolPipelineAttemptCoordinatorOptionsV1<
  * acknowledgement ordering, and post-ack uncertainty. It does not own a
  * Store, registry, executor, or Builtin/domain receipt semantics.
  */
-export interface RuntimeHostToolPipelineAttemptCoordinatorV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface RuntimeHostToolPipelineAttemptCoordinator<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
   readonly prepare: <
     TPreparedArguments extends TArguments = TArguments,
     TPreparedRequest extends TRequest = TRequest,
   >(
-    identity: Readonly<PreparedToolInvocationIdentityV1>,
-    input: Readonly<PreparedToolInvocationInputV1<TPreparedArguments, TPreparedRequest>>,
-  ) => RuntimeHostPreparedToolInvocationAuthorityV1<TPreparedArguments, TPreparedRequest>;
+    identity: Readonly<PreparedToolInvocationIdentity>,
+    input: Readonly<PreparedToolInvocationInput<TPreparedArguments, TPreparedRequest>>,
+  ) => RuntimeHostPreparedToolInvocationAuthority<TPreparedArguments, TPreparedRequest>;
   readonly execute: <
     TPreparedArguments extends TArguments = TArguments,
     TPreparedRequest extends TRequest = TRequest,
   >(
-    prepared: Readonly<PreparedToolInvocationV1<TPreparedArguments, TPreparedRequest>>,
-  ) => Promise<Readonly<RuntimeHostToolInvocationOutcomeAuthorityV1<TValue>>>;
+    prepared: Readonly<PreparedToolInvocation<TPreparedArguments, TPreparedRequest>>,
+  ) => Promise<Readonly<RuntimeHostToolInvocationOutcomeAuthority<TValue>>>;
   readonly assertCommitted: (
     value: unknown,
-  ) => asserts value is Readonly<RuntimeHostCommittedToolInvocationAuthorityV1<TValue>>;
+  ) => asserts value is Readonly<RuntimeHostCommittedToolInvocationAuthority<TValue>>;
   readonly assertSuspended: (
     value: unknown,
-  ) => asserts value is Readonly<RuntimeHostSuspendedToolInvocationAuthorityV1<TValue>>;
+  ) => asserts value is Readonly<RuntimeHostSuspendedToolInvocationAuthority<TValue>>;
   readonly assertRetryable: (
     value: unknown,
-  ) => asserts value is Readonly<RuntimeHostRetryableToolInvocationAuthorityV1<TValue>>;
+  ) => asserts value is Readonly<RuntimeHostRetryableToolInvocationAuthority<TValue>>;
 }
 
-export function createRuntimeHostToolPipelineAttemptCoordinatorV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export function createRuntimeHostToolPipelineAttemptCoordinator<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 >(
-  options: RuntimeHostToolPipelineAttemptCoordinatorOptionsV1<TArguments, TValue>,
-): RuntimeHostToolPipelineAttemptCoordinatorV1<TArguments, TRequest, TValue> {
+  options: RuntimeHostToolPipelineAttemptCoordinatorOptions<TArguments, TValue>,
+): RuntimeHostToolPipelineAttemptCoordinator<TArguments, TRequest, TValue> {
   const { persistence, dispatch } = options;
 
   const authenticPrepared = new WeakSet<object>();
@@ -146,46 +146,46 @@ export function createRuntimeHostToolPipelineAttemptCoordinatorV1<
   const claimedAttemptKeys = new Set<string>();
 
   function prepare<TPreparedArguments extends TArguments, TPreparedRequest extends TRequest>(
-    identity: Readonly<PreparedToolInvocationIdentityV1>,
-    input: Readonly<PreparedToolInvocationInputV1<TPreparedArguments, TPreparedRequest>>,
-  ): RuntimeHostPreparedToolInvocationAuthorityV1<TPreparedArguments, TPreparedRequest> {
+    identity: Readonly<PreparedToolInvocationIdentity>,
+    input: Readonly<PreparedToolInvocationInput<TPreparedArguments, TPreparedRequest>>,
+  ): RuntimeHostPreparedToolInvocationAuthority<TPreparedArguments, TPreparedRequest> {
     try {
-      if (!isRecordObjectV1(identity) || !isRecordObjectV1(input)) {
-        throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('invalid_prepared_input');
+      if (!isRecordObject(identity) || !isRecordObject(input)) {
+        throw new RuntimeHostToolPipelineAttemptCoordinatorError('invalid_prepared_input');
       }
 
       const candidate = {
         identity,
         input,
-      } as Readonly<PreparedToolInvocationV1<TPreparedArguments, TPreparedRequest>>;
+      } as Readonly<PreparedToolInvocation<TPreparedArguments, TPreparedRequest>>;
 
-      deepFreezeV1(candidate.identity);
-      deepFreezeV1(candidate.input);
-      deepFreezeV1(candidate);
+      deepFreeze(candidate.identity);
+      deepFreeze(candidate.input);
+      deepFreeze(candidate);
 
-      const authority = candidate as RuntimeHostPreparedToolInvocationAuthorityV1<
+      const authority = candidate as RuntimeHostPreparedToolInvocationAuthority<
         TPreparedArguments,
         TPreparedRequest
       >;
       authenticPrepared.add(authority);
       return authority;
     } catch (error) {
-      if (error instanceof RuntimeHostToolPipelineAttemptCoordinatorErrorV1) throw error;
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('invalid_prepared_input');
+      if (error instanceof RuntimeHostToolPipelineAttemptCoordinatorError) throw error;
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('invalid_prepared_input');
     }
   }
 
   async function execute<TPreparedArguments extends TArguments, TPreparedRequest extends TRequest>(
-    prepared: Readonly<PreparedToolInvocationV1<TPreparedArguments, TPreparedRequest>>,
-  ): Promise<Readonly<RuntimeHostToolInvocationOutcomeAuthorityV1<TValue>>> {
-    assertAuthenticPreparedV1(prepared, authenticPrepared);
+    prepared: Readonly<PreparedToolInvocation<TPreparedArguments, TPreparedRequest>>,
+  ): Promise<Readonly<RuntimeHostToolInvocationOutcomeAuthority<TValue>>> {
+    assertAuthenticPrepared(prepared, authenticPrepared);
 
     try {
-      assertPreparedShapeV1(prepared);
-      assertPreparedIdentityWithInputV1(prepared);
+      assertPreparedShape(prepared);
+      assertPreparedIdentityWithInput(prepared);
     } catch (error) {
-      if (error instanceof RuntimeHostToolPipelineAttemptCoordinatorErrorV1) throw error;
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('invalid_prepared_input');
+      if (error instanceof RuntimeHostToolPipelineAttemptCoordinatorError) throw error;
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('invalid_prepared_input');
     }
 
     const claimKey = JSON.stringify([
@@ -195,17 +195,17 @@ export function createRuntimeHostToolPipelineAttemptCoordinatorV1<
       prepared.identity.modelMessageId,
     ]);
     if (claimedPrepared.has(prepared) || claimedAttemptKeys.has(claimKey)) {
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('duplicate_attempt');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('duplicate_attempt');
     }
 
     let verification: unknown;
     try {
       verification = dispatch.verifyPreparedIdentity(prepared);
     } catch {
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('verification_failed');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('verification_failed');
     }
-    if (!isVerificationAcceptedV1(verification)) {
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('verification_failed');
+    if (!isVerificationAccepted(verification)) {
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('verification_failed');
     }
 
     // Claim before the first await. No persistence or dispatch failure may
@@ -213,52 +213,52 @@ export function createRuntimeHostToolPipelineAttemptCoordinatorV1<
     claimedPrepared.add(prepared);
     claimedAttemptKeys.add(claimKey);
 
-    let acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
+    let acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
     try {
       acknowledgement = await persistence.recordAttempt(prepared);
     } catch {
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('persistence_unavailable');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('persistence_unavailable');
     }
 
-    if (!isAcknowledgementForPreparedV1(acknowledgement, prepared.identity)) {
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('acknowledgement_failed');
+    if (!isAcknowledgementForPrepared(acknowledgement, prepared.identity)) {
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('acknowledgement_failed');
     }
 
-    let outcome: Readonly<ToolPipelineDispatchOutcomeV1<TValue>>;
+    let outcome: Readonly<ToolPipelineDispatchOutcome<TValue>>;
     try {
       outcome = await dispatch.dispatch(prepared);
     } catch {
-      await recordUnknownOrThrowV1(persistence, acknowledgement, 'dispatch_failed');
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('unknown_outcome');
+      await recordUnknownOrThrow(persistence, acknowledgement, 'dispatch_failed');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('unknown_outcome');
     }
 
     let dispatchOutcomeValid = false;
     try {
-      dispatchOutcomeValid = isValidDispatchOutcomeV1(outcome, acknowledgement);
+      dispatchOutcomeValid = isValidDispatchOutcome(outcome, acknowledgement);
     } catch {
       dispatchOutcomeValid = false;
     }
     if (!dispatchOutcomeValid) {
-      await recordUnknownOrThrowV1(persistence, acknowledgement, 'dispatch_result_invalid');
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('unknown_outcome');
+      await recordUnknownOrThrow(persistence, acknowledgement, 'dispatch_result_invalid');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('unknown_outcome');
     }
 
     if (outcome.kind === 'retryable') {
       try {
         if (!persistence.commitRetryable) {
-          throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('persistence_unavailable');
+          throw new RuntimeHostToolPipelineAttemptCoordinatorError('persistence_unavailable');
         }
-        deepFreezeV1(outcome.result);
+        deepFreeze(outcome.result);
         await persistence.commitRetryable({
           acknowledgement,
           replaySafety: outcome.replaySafety,
           result: outcome.result,
         });
       } catch {
-        await recordUnknownOrThrowV1(persistence, acknowledgement, 'retryable_commit_failed');
-        throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('unknown_outcome');
+        await recordUnknownOrThrow(persistence, acknowledgement, 'retryable_commit_failed');
+        throw new RuntimeHostToolPipelineAttemptCoordinatorError('unknown_outcome');
       }
-      const retryable = deepFreezeV1({
+      const retryable = deepFreeze({
         kind: 'retryable' as const,
         acknowledgement,
         replaySafety: outcome.replaySafety,
@@ -270,18 +270,18 @@ export function createRuntimeHostToolPipelineAttemptCoordinatorV1<
 
     if (outcome.kind === 'suspended') {
       try {
-        deepFreezeV1(outcome.suspension);
-        deepFreezeV1(outcome.result);
+        deepFreeze(outcome.suspension);
+        deepFreeze(outcome.result);
         await persistence.commitSuspension({
           acknowledgement,
           suspension: outcome.suspension,
           result: outcome.result,
         });
       } catch {
-        await recordUnknownOrThrowV1(persistence, acknowledgement, 'suspension_commit_failed');
-        throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('unknown_outcome');
+        await recordUnknownOrThrow(persistence, acknowledgement, 'suspension_commit_failed');
+        throw new RuntimeHostToolPipelineAttemptCoordinatorError('unknown_outcome');
       }
-      const suspended = deepFreezeV1({
+      const suspended = deepFreeze({
         kind: 'suspended' as const,
         acknowledgement,
         suspension: outcome.suspension,
@@ -293,65 +293,65 @@ export function createRuntimeHostToolPipelineAttemptCoordinatorV1<
 
     const result = outcome.terminal;
     try {
-      deepFreezeV1(result);
+      deepFreeze(result);
       await persistence.commitTerminal({ acknowledgement, result });
     } catch {
-      await recordUnknownOrThrowV1(persistence, acknowledgement, 'terminal_commit_failed');
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('unknown_outcome');
+      await recordUnknownOrThrow(persistence, acknowledgement, 'terminal_commit_failed');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('unknown_outcome');
     }
 
-    const committed = deepFreezeV1({ kind: 'committed' as const, acknowledgement, result });
+    const committed = deepFreeze({ kind: 'committed' as const, acknowledgement, result });
     authenticCommitted.add(committed);
     return committed;
   }
 
   function assertSuspended(
     value: unknown,
-  ): asserts value is Readonly<RuntimeHostSuspendedToolInvocationAuthorityV1<TValue>> {
+  ): asserts value is Readonly<RuntimeHostSuspendedToolInvocationAuthority<TValue>> {
     if (
-      !isRecordObjectV1(value) ||
+      !isRecordObject(value) ||
       value.kind !== 'suspended' ||
       !authenticSuspended.has(value) ||
-      !isDeepFrozenV1(value) ||
-      !isDeepFrozenV1(value.acknowledgement) ||
-      !isDeepFrozenV1(value.suspension) ||
-      !isDeepFrozenV1(value.result)
+      !isDeepFrozen(value) ||
+      !isDeepFrozen(value.acknowledgement) ||
+      !isDeepFrozen(value.suspension) ||
+      !isDeepFrozen(value.result)
     ) {
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('suspended_authority_invalid');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('suspended_authority_invalid');
     }
   }
 
   function assertCommitted(
     value: unknown,
-  ): asserts value is Readonly<RuntimeHostCommittedToolInvocationAuthorityV1<TValue>> {
+  ): asserts value is Readonly<RuntimeHostCommittedToolInvocationAuthority<TValue>> {
     if (
-      !isRecordObjectV1(value) ||
+      !isRecordObject(value) ||
       !authenticCommitted.has(value) ||
-      !isDeepFrozenV1(value) ||
-      !isDeepFrozenV1(value.acknowledgement) ||
-      !isDeepFrozenV1(value.result)
+      !isDeepFrozen(value) ||
+      !isDeepFrozen(value.acknowledgement) ||
+      !isDeepFrozen(value.result)
     ) {
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('retryable_authority_invalid');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('retryable_authority_invalid');
     }
   }
 
   function assertRetryable(
     value: unknown,
-  ): asserts value is Readonly<RuntimeHostRetryableToolInvocationAuthorityV1<TValue>> {
+  ): asserts value is Readonly<RuntimeHostRetryableToolInvocationAuthority<TValue>> {
     if (
-      !isRecordObjectV1(value) ||
+      !isRecordObject(value) ||
       value.kind !== 'retryable' ||
       !authenticRetryable.has(value) ||
-      !isDeepFrozenV1(value) ||
-      !isDeepFrozenV1(value.acknowledgement) ||
-      !isDeepFrozenV1(value.result) ||
+      !isDeepFrozen(value) ||
+      !isDeepFrozen(value.acknowledgement) ||
+      !isDeepFrozen(value.result) ||
       value.replaySafety !== 'safe_read'
     ) {
-      throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('committed_authority_invalid');
+      throw new RuntimeHostToolPipelineAttemptCoordinatorError('committed_authority_invalid');
     }
   }
 
-  const coordinator: RuntimeHostToolPipelineAttemptCoordinatorV1<TArguments, TRequest, TValue> = {
+  const coordinator: RuntimeHostToolPipelineAttemptCoordinator<TArguments, TRequest, TValue> = {
     prepare,
     execute,
     assertCommitted,
@@ -361,9 +361,9 @@ export function createRuntimeHostToolPipelineAttemptCoordinatorV1<
   return Object.freeze(coordinator);
 }
 
-async function recordUnknownOrThrowV1<TValue extends RuntimeJsonValueV1>(
-  persistence: ToolPipelinePersistenceV1<TValue>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+async function recordUnknownOrThrow<TValue extends RuntimeJsonValue>(
+  persistence: ToolPipelinePersistence<TValue>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
   code:
     | 'dispatch_failed'
     | 'dispatch_result_invalid'
@@ -377,12 +377,12 @@ async function recordUnknownOrThrowV1<TValue extends RuntimeJsonValueV1>(
     // The attempt was already claimed and an external effect may have
     // happened. A failed unknown write must remain a distinct bounded Host
     // failure; it must never be converted into success or a replayable retry.
-    throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('unknown_persistence_failed');
+    throw new RuntimeHostToolPipelineAttemptCoordinatorError('unknown_persistence_failed');
   }
 }
 
-function runtimeHostToolPipelineAttemptCoordinatorMessageV1(
-  code: RuntimeHostToolPipelineAttemptCoordinatorFailureCodeV1,
+function runtimeHostToolPipelineAttemptCoordinatorMessage(
+  code: RuntimeHostToolPipelineAttemptCoordinatorFailureCode,
 ): string {
   switch (code) {
     case 'invalid_prepared_input':
@@ -410,15 +410,15 @@ function runtimeHostToolPipelineAttemptCoordinatorMessageV1(
   }
 }
 
-function isRecordObjectV1(value: unknown): value is Record<PropertyKey, unknown> {
+function isRecordObject(value: unknown): value is Record<PropertyKey, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isBoundedIdentityStringV1(value: unknown): value is string {
+function isBoundedIdentityString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 256;
 }
 
-function deepFreezeV1<T>(value: T, seen = new WeakSet<object>()): T {
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return value;
   const object = value as object;
   if (seen.has(object)) return value;
@@ -427,12 +427,12 @@ function deepFreezeV1<T>(value: T, seen = new WeakSet<object>()): T {
     const descriptor = Object.getOwnPropertyDescriptor(object, key);
     if (!descriptor) continue;
     if (!('value' in descriptor)) throw new TypeError('Prepared DTO accessors are not supported.');
-    deepFreezeV1(descriptor.value, seen);
+    deepFreeze(descriptor.value, seen);
   }
   return Object.freeze(value);
 }
 
-function isDeepFrozenV1(value: unknown, seen = new WeakSet<object>()): boolean {
+function isDeepFrozen(value: unknown, seen = new WeakSet<object>()): boolean {
   if ((typeof value !== 'object' && typeof value !== 'function') || value === null) return true;
   const object = value as object;
   if (seen.has(object)) return true;
@@ -440,17 +440,14 @@ function isDeepFrozenV1(value: unknown, seen = new WeakSet<object>()): boolean {
   seen.add(object);
   for (const key of Reflect.ownKeys(object)) {
     const descriptor = Object.getOwnPropertyDescriptor(object, key);
-    if (!descriptor || !('value' in descriptor) || !isDeepFrozenV1(descriptor.value, seen)) {
+    if (!descriptor || !('value' in descriptor) || !isDeepFrozen(descriptor.value, seen)) {
       return false;
     }
   }
   return true;
 }
 
-function isJsonValueV1(
-  value: unknown,
-  active = new WeakSet<object>(),
-): value is RuntimeJsonValueV1 {
+function isJsonValue(value: unknown, active = new WeakSet<object>()): value is RuntimeJsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
   if (typeof value !== 'object') return false;
@@ -460,7 +457,7 @@ function isJsonValueV1(
   try {
     if (Array.isArray(value)) {
       const ownKeys = Reflect.ownKeys(value);
-      const lengthDescriptor = ownDataDescriptorV1(value, 'length');
+      const lengthDescriptor = ownDataDescriptor(value, 'length');
       const length = lengthDescriptor?.value;
       if (
         typeof length !== 'number' ||
@@ -471,8 +468,8 @@ function isJsonValueV1(
         return false;
       }
       for (let index = 0; index < length; index += 1) {
-        const descriptor = ownDataDescriptorV1(value, String(index));
-        if (!descriptor || !isJsonValueV1(descriptor.value, active)) {
+        const descriptor = ownDataDescriptor(value, String(index));
+        if (!descriptor || !isJsonValue(descriptor.value, active)) {
           return false;
         }
       }
@@ -493,7 +490,7 @@ function isJsonValueV1(
     for (const key of Reflect.ownKeys(value)) {
       if (typeof key !== 'string') return false;
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (!descriptor || !('value' in descriptor) || !isJsonValueV1(descriptor.value, active)) {
+      if (!descriptor || !('value' in descriptor) || !isJsonValue(descriptor.value, active)) {
         return false;
       }
     }
@@ -505,46 +502,46 @@ function isJsonValueV1(
   }
 }
 
-function assertAuthenticPreparedV1<
-  TArguments extends RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1,
+function assertAuthenticPrepared<
+  TArguments extends RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue,
 >(
   prepared: unknown,
   authenticPrepared: WeakSet<object>,
-): asserts prepared is Readonly<PreparedToolInvocationV1<TArguments, TRequest>> {
-  if (!isRecordObjectV1(prepared) || !authenticPrepared.has(prepared)) {
-    throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('invalid_prepared_input');
+): asserts prepared is Readonly<PreparedToolInvocation<TArguments, TRequest>> {
+  if (!isRecordObject(prepared) || !authenticPrepared.has(prepared)) {
+    throw new RuntimeHostToolPipelineAttemptCoordinatorError('invalid_prepared_input');
   }
 }
 
-function assertPreparedShapeV1<
-  TArguments extends RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1,
->(prepared: Readonly<PreparedToolInvocationV1<TArguments, TRequest>>): void {
+function assertPreparedShape<
+  TArguments extends RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue,
+>(prepared: Readonly<PreparedToolInvocation<TArguments, TRequest>>): void {
   if (
-    !isDeepFrozenV1(prepared) ||
-    !isRecordObjectV1(prepared.identity) ||
-    !isRecordObjectV1(prepared.input) ||
-    !isDeepFrozenV1(prepared.identity) ||
-    !isDeepFrozenV1(prepared.input) ||
-    !isDeepFrozenV1(prepared.input.arguments) ||
-    !isJsonValueV1(prepared.input.arguments) ||
+    !isDeepFrozen(prepared) ||
+    !isRecordObject(prepared.identity) ||
+    !isRecordObject(prepared.input) ||
+    !isDeepFrozen(prepared.identity) ||
+    !isDeepFrozen(prepared.input) ||
+    !isDeepFrozen(prepared.input.arguments) ||
+    !isJsonValue(prepared.input.arguments) ||
     (prepared.input.request !== undefined &&
-      (!isDeepFrozenV1(prepared.input.request) || !isJsonValueV1(prepared.input.request))) ||
+      (!isDeepFrozen(prepared.input.request) || !isJsonValue(prepared.input.request))) ||
     (prepared.input.facts !== undefined &&
-      (!isDeepFrozenV1(prepared.input.facts) || !isJsonValueV1(prepared.input.facts))) ||
+      (!isDeepFrozen(prepared.input.facts) || !isJsonValue(prepared.input.facts))) ||
     (prepared.input.binding !== null &&
-      (!isRecordObjectV1(prepared.input.binding) || !isDeepFrozenV1(prepared.input.binding)))
+      (!isRecordObject(prepared.input.binding) || !isDeepFrozen(prepared.input.binding)))
   ) {
-    throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('invalid_prepared_input');
+    throw new RuntimeHostToolPipelineAttemptCoordinatorError('invalid_prepared_input');
   }
-  assertPreparedGenericShapeV1(prepared);
+  assertPreparedGenericShape(prepared);
 }
 
-function assertPreparedGenericShapeV1<
-  TArguments extends RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1,
->(prepared: Readonly<PreparedToolInvocationV1<TArguments, TRequest>>): void {
+function assertPreparedGenericShape<
+  TArguments extends RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue,
+>(prepared: Readonly<PreparedToolInvocation<TArguments, TRequest>>): void {
   const identity = prepared.identity as unknown as Record<string, unknown>;
   const identityStringKeys = [
     'invocationId',
@@ -577,10 +574,10 @@ function assertPreparedGenericShapeV1<
     'dynamicCatalogRevision',
   ] as const;
   if (
-    !identityStringKeys.every((key) => isBoundedIdentityStringV1(identity[key])) ||
+    !identityStringKeys.every((key) => isBoundedIdentityString(identity[key])) ||
     (identity.argumentOrigin !== 'model_public' && identity.argumentOrigin !== 'runtime_private') ||
     !nullableIdentityStringKeys.every(
-      (key) => identity[key] === null || isBoundedIdentityStringV1(identity[key]),
+      (key) => identity[key] === null || isBoundedIdentityString(identity[key]),
     ) ||
     typeof identity.modelVisible !== 'boolean' ||
     typeof identity.isDynamicMcp !== 'boolean' ||
@@ -593,10 +590,10 @@ function assertPreparedGenericShapeV1<
         identity.modelVisible !== false ||
         identity.exposedToolName !== null ||
         identity.builtinProjectionRevision !== null ||
-        !isBoundedIdentityStringV1(identity.dynamicCatalogRevision) ||
-        !isDynamicSubjectShapeV1(identity.subject) ||
-        !isDynamicWrapperShapeV1(identity.runtimeWrapper) ||
-        !isDynamicIdentityRelationV1(identity))) ||
+        !isBoundedIdentityString(identity.dynamicCatalogRevision) ||
+        !isDynamicSubjectShape(identity.subject) ||
+        !isDynamicWrapperShape(identity.runtimeWrapper) ||
+        !isDynamicIdentityRelation(identity))) ||
     (identity.isDynamicMcp === false &&
       (identity.operationId === 'mcp:dynamic_tool' ||
         (identity.executionFamily !== 'builtin' &&
@@ -604,29 +601,29 @@ function assertPreparedGenericShapeV1<
           identity.executionFamily !== 'subagent') ||
         identity.visibility !== 'model' ||
         identity.modelVisible !== true ||
-        !isBoundedIdentityStringV1(identity.exposedToolName) ||
+        !isBoundedIdentityString(identity.exposedToolName) ||
         (identity.toolKind !== 'computer' &&
           identity.toolKind !== 'coordination' &&
           identity.toolKind !== 'runtime_action' &&
           identity.toolKind !== 'interrupt') ||
-        !isBoundedIdentityStringV1(identity.builtinProjectionRevision) ||
+        !isBoundedIdentityString(identity.builtinProjectionRevision) ||
         (identity.dynamicCatalogRevision !== null &&
-          !isBoundedIdentityStringV1(identity.dynamicCatalogRevision)))) ||
-    !isBoundedIdentityStringV1(prepared.input.invocationId) ||
-    !isBoundedIdentityStringV1(prepared.input.attemptId) ||
-    !isBoundedIdentityStringV1(prepared.input.toolCallId) ||
+          !isBoundedIdentityString(identity.dynamicCatalogRevision)))) ||
+    !isBoundedIdentityString(prepared.input.invocationId) ||
+    !isBoundedIdentityString(prepared.input.attemptId) ||
+    !isBoundedIdentityString(prepared.input.toolCallId) ||
     !Object.hasOwn(prepared.input, 'arguments') ||
     !Object.hasOwn(prepared.input, 'binding') ||
-    (prepared.input.binding !== null && !isRecordObjectV1(prepared.input.binding))
+    (prepared.input.binding !== null && !isRecordObject(prepared.input.binding))
   ) {
-    throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('invalid_prepared_input');
+    throw new RuntimeHostToolPipelineAttemptCoordinatorError('invalid_prepared_input');
   }
 }
 
-function assertPreparedIdentityWithInputV1<
-  TArguments extends RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1,
->(prepared: Readonly<PreparedToolInvocationV1<TArguments, TRequest>>): void {
+function assertPreparedIdentityWithInput<
+  TArguments extends RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue,
+>(prepared: Readonly<PreparedToolInvocation<TArguments, TRequest>>): void {
   const binding = prepared.input.binding;
   const bindingCapabilityId = prepared.identity.capabilityId;
   const bindingCapabilityRevision = prepared.identity.capabilityRevision;
@@ -640,12 +637,12 @@ function assertPreparedIdentityWithInputV1<
     prepared.input.toolCallId !== prepared.identity.toolCallId ||
     (binding === null) !== (prepared.identity.bindingId === null) ||
     (binding !== null &&
-      (!isBoundedIdentityStringV1(binding.bindingId) ||
-        !isBoundedIdentityStringV1(binding.capabilityId) ||
-        !isBoundedIdentityStringV1(binding.capabilityRevision) ||
-        !isBoundedIdentityStringV1(binding.schemaDigest) ||
-        !isBoundedIdentityStringV1(binding.exposedToolName) ||
-        !isBoundedIdentityStringV1(binding.issuedForTurnId) ||
+      (!isBoundedIdentityString(binding.bindingId) ||
+        !isBoundedIdentityString(binding.capabilityId) ||
+        !isBoundedIdentityString(binding.capabilityRevision) ||
+        !isBoundedIdentityString(binding.schemaDigest) ||
+        !isBoundedIdentityString(binding.exposedToolName) ||
+        !isBoundedIdentityString(binding.issuedForTurnId) ||
         binding.bindingId !== prepared.identity.bindingId ||
         binding.capabilityId !== bindingCapabilityId ||
         binding.capabilityRevision !== bindingCapabilityRevision ||
@@ -653,44 +650,41 @@ function assertPreparedIdentityWithInputV1<
         binding.exposedToolName !== bindingExposedToolName ||
         binding.issuedForTurnId !== prepared.identity.turnId))
   ) {
-    throw new RuntimeHostToolPipelineAttemptCoordinatorErrorV1('identity_mismatch');
+    throw new RuntimeHostToolPipelineAttemptCoordinatorError('identity_mismatch');
   }
 }
 
-function isDynamicSubjectShapeV1(value: unknown): boolean {
-  if (!isRecordObjectV1(value)) return false;
+function isDynamicSubjectShape(value: unknown): boolean {
+  if (!isRecordObject(value)) return false;
   const subject = value as Record<string, unknown>;
   return (
-    isBoundedIdentityStringV1(subject.capabilityId) &&
-    isBoundedIdentityStringV1(subject.capabilityRevision) &&
-    isBoundedIdentityStringV1(subject.descriptorRevision) &&
-    isBoundedIdentityStringV1(subject.providerId) &&
-    isBoundedIdentityStringV1(subject.exposedToolName) &&
+    isBoundedIdentityString(subject.capabilityId) &&
+    isBoundedIdentityString(subject.capabilityRevision) &&
+    isBoundedIdentityString(subject.descriptorRevision) &&
+    isBoundedIdentityString(subject.providerId) &&
+    isBoundedIdentityString(subject.exposedToolName) &&
     subject.exposedToolName.startsWith('mcp__') &&
-    isBoundedIdentityStringV1(subject.dynamicCatalogRevision) &&
-    (subject.bindingId === null || isBoundedIdentityStringV1(subject.bindingId))
+    isBoundedIdentityString(subject.dynamicCatalogRevision) &&
+    (subject.bindingId === null || isBoundedIdentityString(subject.bindingId))
   );
 }
 
-function isDynamicWrapperShapeV1(value: unknown): boolean {
-  if (!isRecordObjectV1(value)) return false;
+function isDynamicWrapperShape(value: unknown): boolean {
+  if (!isRecordObject(value)) return false;
   const wrapper = value as Record<string, unknown>;
   return (
     wrapper.operationId === 'mcp:dynamic_tool' &&
     wrapper.capabilityId === 'mcp:dynamic_tool' &&
-    isBoundedIdentityStringV1(wrapper.providerId) &&
-    isBoundedIdentityStringV1(wrapper.capabilityRevision) &&
-    isBoundedIdentityStringV1(wrapper.executorRevision) &&
-    isBoundedIdentityStringV1(wrapper.schemaDigest) &&
-    isBoundedIdentityStringV1(wrapper.builtinProjectionRevision)
+    isBoundedIdentityString(wrapper.providerId) &&
+    isBoundedIdentityString(wrapper.capabilityRevision) &&
+    isBoundedIdentityString(wrapper.executorRevision) &&
+    isBoundedIdentityString(wrapper.schemaDigest) &&
+    isBoundedIdentityString(wrapper.builtinProjectionRevision)
   );
 }
 
-function isDynamicIdentityRelationV1(identity: Record<string, unknown>): boolean {
-  if (
-    !isDynamicSubjectShapeV1(identity.subject) ||
-    !isDynamicWrapperShapeV1(identity.runtimeWrapper)
-  ) {
+function isDynamicIdentityRelation(identity: Record<string, unknown>): boolean {
+  if (!isDynamicSubjectShape(identity.subject) || !isDynamicWrapperShape(identity.runtimeWrapper)) {
     return false;
   }
   const subject = identity.subject as Record<string, unknown>;
@@ -706,18 +700,18 @@ function isDynamicIdentityRelationV1(identity: Record<string, unknown>): boolean
   );
 }
 
-function isAcknowledgementForPreparedV1(
+function isAcknowledgementForPrepared(
   value: unknown,
-  identity: Readonly<PreparedToolInvocationIdentityV1>,
-): value is Readonly<ToolPipelineAttemptAcknowledgementV1> {
+  identity: Readonly<PreparedToolInvocationIdentity>,
+): value is Readonly<ToolPipelineAttemptAcknowledgement> {
   try {
     if (
-      !isRecordObjectV1(value) ||
-      !hasOwnDataPropertyV1(value, 'acknowledged') ||
-      !hasOwnDataPropertyV1(value, 'attempt') ||
+      !isRecordObject(value) ||
+      !hasOwnDataProperty(value, 'acknowledged') ||
+      !hasOwnDataProperty(value, 'attempt') ||
       value.acknowledged !== true ||
-      !isRecordObjectV1(value.attempt) ||
-      !isValidAttemptShapeV1(value.attempt)
+      !isRecordObject(value.attempt) ||
+      !isValidAttemptShape(value.attempt)
     ) {
       return false;
     }
@@ -771,14 +765,14 @@ function isAcknowledgementForPreparedV1(
       return false;
     }
 
-    deepFreezeV1(value);
+    deepFreeze(value);
     return true;
   } catch {
     return false;
   }
 }
 
-function isValidAttemptShapeV1(value: Record<PropertyKey, unknown>): boolean {
+function isValidAttemptShape(value: Record<PropertyKey, unknown>): boolean {
   const attempt = value as Record<string, unknown>;
   const requiredStringKeys = [
     'invocationId',
@@ -815,31 +809,31 @@ function isValidAttemptShapeV1(value: Record<PropertyKey, unknown>): boolean {
   ] as const;
   return (
     requiredStringKeys.every(
-      (key) => hasOwnDataPropertyV1(attempt, key) && isBoundedIdentityStringV1(attempt[key]),
+      (key) => hasOwnDataProperty(attempt, key) && isBoundedIdentityString(attempt[key]),
     ) &&
     (attempt.argumentOrigin === 'model_public' || attempt.argumentOrigin === 'runtime_private') &&
     nullableStringKeys.every(
       (key) =>
-        hasOwnDataPropertyV1(attempt, key) &&
-        (attempt[key] === null || isBoundedIdentityStringV1(attempt[key])),
+        hasOwnDataProperty(attempt, key) &&
+        (attempt[key] === null || isBoundedIdentityString(attempt[key])),
     ) &&
-    hasOwnDataPropertyV1(attempt, 'attempt') &&
+    hasOwnDataProperty(attempt, 'attempt') &&
     typeof attempt.attempt === 'number' &&
     Number.isSafeInteger(attempt.attempt) &&
     attempt.attempt >= 1
   );
 }
 
-function isVerificationAcceptedV1(value: unknown): boolean {
+function isVerificationAccepted(value: unknown): boolean {
   if (value === true) return true;
-  return isRecordObjectV1(value) && value.valid === true;
+  return isRecordObject(value) && value.valid === true;
 }
 
-function hasOwnDataPropertyV1(value: object, key: PropertyKey): boolean {
-  return ownDataDescriptorV1(value, key) !== null;
+function hasOwnDataProperty(value: object, key: PropertyKey): boolean {
+  return ownDataDescriptor(value, key) !== null;
 }
 
-function ownDataDescriptorV1(
+function ownDataDescriptor(
   value: object,
   key: PropertyKey,
 ): (PropertyDescriptor & { readonly value: unknown }) | null {
@@ -849,13 +843,11 @@ function ownDataDescriptorV1(
     : null;
 }
 
-function isValidTerminalResultV1(
-  value: unknown,
-): value is Readonly<CapabilityToolTerminalResultV1> {
+function isValidTerminalResult(value: unknown): value is Readonly<CapabilityToolTerminalResult> {
   try {
-    if (!isRecordObjectV1(value)) return false;
-    const status = ownDataDescriptorV1(value, 'status');
-    const content = ownDataDescriptorV1(value, 'content');
+    if (!isRecordObject(value)) return false;
+    const status = ownDataDescriptor(value, 'status');
+    const content = ownDataDescriptor(value, 'content');
     if (!status || !content) return false;
     if (
       status.value !== 'success' &&
@@ -866,21 +858,21 @@ function isValidTerminalResultV1(
     ) {
       return false;
     }
-    if (!Array.isArray(content.value) || !isJsonValueV1(content.value)) return false;
+    if (!Array.isArray(content.value) || !isJsonValue(content.value)) return false;
 
-    const structuredContent = ownDataDescriptorV1(value, 'structuredContent');
+    const structuredContent = ownDataDescriptor(value, 'structuredContent');
     if (Object.hasOwn(value, 'structuredContent') && !structuredContent) return false;
-    if (structuredContent?.value !== undefined && !isJsonValueV1(structuredContent.value)) {
+    if (structuredContent?.value !== undefined && !isJsonValue(structuredContent.value)) {
       return false;
     }
-    const providerMeta = ownDataDescriptorV1(value, 'providerMeta');
+    const providerMeta = ownDataDescriptor(value, 'providerMeta');
     if (Object.hasOwn(value, 'providerMeta') && !providerMeta) return false;
-    if (providerMeta?.value !== undefined && !isJsonValueV1(providerMeta.value)) {
+    if (providerMeta?.value !== undefined && !isJsonValue(providerMeta.value)) {
       return false;
     }
-    const failure = ownDataDescriptorV1(value, 'failure');
+    const failure = ownDataDescriptor(value, 'failure');
     if (Object.hasOwn(value, 'failure') && !failure) return false;
-    if (failure?.value !== undefined && !isValidTerminalFailureV1(failure.value)) {
+    if (failure?.value !== undefined && !isValidTerminalFailure(failure.value)) {
       return false;
     }
     return true;
@@ -889,70 +881,70 @@ function isValidTerminalResultV1(
   }
 }
 
-function isValidDispatchOutcomeV1<TValue extends RuntimeJsonValueV1>(
+function isValidDispatchOutcome<TValue extends RuntimeJsonValue>(
   value: unknown,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
-): value is Readonly<ToolPipelineDispatchOutcomeV1<TValue>> {
-  if (!isRecordObjectV1(value)) return false;
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
+): value is Readonly<ToolPipelineDispatchOutcome<TValue>> {
+  if (!isRecordObject(value)) return false;
   if (value.kind === 'committed') {
     return (
-      hasExactOwnDataKeysV1(value, ['kind', 'terminal']) && isValidTerminalResultV1(value.terminal)
+      hasExactOwnDataKeys(value, ['kind', 'terminal']) && isValidTerminalResult(value.terminal)
     );
   }
   if (value.kind === 'retryable') {
     return (
-      hasExactOwnDataKeysV1(value, ['kind', 'replaySafety', 'result']) &&
+      hasExactOwnDataKeys(value, ['kind', 'replaySafety', 'result']) &&
       value.replaySafety === 'safe_read' &&
-      isValidTerminalResultV1(value.result) &&
+      isValidTerminalResult(value.result) &&
       value.result.status === 'error' &&
-      isRecordObjectV1(value.result.failure) &&
+      isRecordObject(value.result.failure) &&
       value.result.failure.retryable === true
     );
   }
   if (value.kind !== 'suspended') return false;
-  if (!hasExactOwnDataKeysV1(value, ['kind', 'suspension', 'result'])) return false;
+  if (!hasExactOwnDataKeys(value, ['kind', 'suspension', 'result'])) return false;
   if (
-    !isValidSuspensionV1(
+    !isValidSuspension(
       value.suspension,
       acknowledgement.attempt as unknown as Record<string, unknown>,
     )
   ) {
     return false;
   }
-  if (!isValidTerminalResultV1(value.result)) return false;
+  if (!isValidTerminalResult(value.result)) return false;
   return (
     value.result.status === 'success' &&
-    hasOwnDataPropertyV1(value.result, 'structuredContent') &&
-    !hasOwnDataPropertyV1(value.result, 'failure')
+    hasOwnDataProperty(value.result, 'structuredContent') &&
+    !hasOwnDataProperty(value.result, 'failure')
   );
 }
 
-function isValidSuspensionV1(value: unknown, acknowledgement: Record<string, unknown>): boolean {
-  if (!isRecordObjectV1(value)) return false;
-  const kind = ownDataDescriptorV1(value, 'kind')?.value;
+function isValidSuspension(value: unknown, acknowledgement: Record<string, unknown>): boolean {
+  if (!isRecordObject(value)) return false;
+  const kind = ownDataDescriptor(value, 'kind')?.value;
   if (kind === 'plan_review') {
-    return isValidPlanReviewSuspensionV1(value, acknowledgement.toolCallId);
+    return isValidPlanReviewSuspension(value, acknowledgement.toolCallId);
   }
   if (kind === 'skill_fork') {
-    return isValidSkillForkSuspensionV1(value, acknowledgement);
+    return isValidSkillForkSuspension(value, acknowledgement);
   }
   if (kind === 'task_subagent') {
-    return isValidTaskSubagentSuspensionV1(value, acknowledgement);
+    return isValidTaskSubagentSuspension(value, acknowledgement);
   }
   return false;
 }
 
-function isValidPlanReviewSuspensionV1(
+function isValidPlanReviewSuspension(
   value: unknown,
   acknowledgedToolCallId: unknown,
-): value is Readonly<ToolPipelineSuspensionV1> {
+): value is Readonly<ToolPipelineSuspension> {
   if (
-    !isRecordObjectV1(value) ||
-    !hasExactOwnDataKeysV1(value, ['schema', 'kind', 'toolCallId', 'event']) ||
+    !isRecordObject(value) ||
+    !hasExactOwnDataKeys(value, ['schema', 'kind', 'toolCallId', 'event']) ||
     value.schema !== 'kite.tool-pipeline-stage.v1' ||
     value.kind !== 'plan_review' ||
     value.toolCallId !== acknowledgedToolCallId ||
-    !isRecordObjectV1(value.event)
+    !isRecordObject(value.event)
   ) {
     return false;
   }
@@ -970,29 +962,29 @@ function isValidPlanReviewSuspensionV1(
     'artifact',
   ] as const;
   return (
-    hasExactOwnDataKeysV1(event, eventKeys) &&
+    hasExactOwnDataKeys(event, eventKeys) &&
     event.type === 'plan.review_requested' &&
     event.toolCallId === acknowledgedToolCallId &&
-    isBoundedIdentityStringV1(event.interactionId) &&
-    isBoundedIdentityStringV1(event.taskId) &&
-    isBoundedIdentityStringV1(event.planId) &&
-    isBoundedIdentityStringV1(event.structuralDigest) &&
+    isBoundedIdentityString(event.interactionId) &&
+    isBoundedIdentityString(event.taskId) &&
+    isBoundedIdentityString(event.planId) &&
+    isBoundedIdentityString(event.structuralDigest) &&
     typeof event.planSummary === 'string' &&
     event.planSummary.length > 0 &&
     event.planSummary.length <= 65_536 &&
     Number.isSafeInteger(event.version) &&
     (event.version as number) > 0 &&
-    isJsonValueV1(event.plan) &&
-    isJsonValueV1(event.artifact)
+    isJsonValue(event.plan) &&
+    isJsonValue(event.artifact)
   );
 }
 
-function isValidSkillForkSuspensionV1(
+function isValidSkillForkSuspension(
   value: Record<PropertyKey, unknown>,
   acknowledgement: Record<string, unknown>,
 ): boolean {
   if (
-    !hasExactOwnDataKeysV1(value, [
+    !hasExactOwnDataKeys(value, [
       'schema',
       'kind',
       'operationId',
@@ -1008,19 +1000,19 @@ function isValidSkillForkSuspensionV1(
     value.operationId !== 'builtin:activate_skill' ||
     value.toolCallId !== acknowledgement.toolCallId ||
     acknowledgement.operationId !== 'builtin:activate_skill' ||
-    !isBoundedIdentityStringV1(value.toolCallId)
+    !isBoundedIdentityString(value.toolCallId)
   ) {
     return false;
   }
 
   const parent = value.parent;
   if (
-    !isRecordObjectV1(parent) ||
-    !hasExactOwnDataKeysV1(parent, ['toolCallId', 'invocationId', 'attemptId', 'attempt']) ||
-    !isBoundedIdentityStringV1(parent.toolCallId) ||
-    !isBoundedIdentityStringV1(parent.invocationId) ||
-    !isBoundedIdentityStringV1(parent.attemptId) ||
-    !isPositiveSafeIntegerV1(parent.attempt) ||
+    !isRecordObject(parent) ||
+    !hasExactOwnDataKeys(parent, ['toolCallId', 'invocationId', 'attemptId', 'attempt']) ||
+    !isBoundedIdentityString(parent.toolCallId) ||
+    !isBoundedIdentityString(parent.invocationId) ||
+    !isBoundedIdentityString(parent.attemptId) ||
+    !isPositiveSafeInteger(parent.attempt) ||
     parent.toolCallId !== acknowledgement.toolCallId ||
     parent.invocationId !== acknowledgement.invocationId ||
     parent.attemptId !== acknowledgement.attemptId ||
@@ -1031,25 +1023,25 @@ function isValidSkillForkSuspensionV1(
 
   const activation = value.activation;
   if (
-    !isRecordObjectV1(activation) ||
-    !hasExactOwnDataKeysV1(activation, [
+    !isRecordObject(activation) ||
+    !hasExactOwnDataKeys(activation, [
       'activationId',
       'skillId',
       'skillRevision',
       'taskId',
       'contextMode',
     ]) ||
-    !isBoundedIdentityStringV1(activation.activationId) ||
-    !isBoundedIdentityStringV1(activation.skillId) ||
-    !isBoundedIdentityStringV1(activation.skillRevision) ||
-    !isBoundedIdentityStringV1(activation.taskId) ||
+    !isBoundedIdentityString(activation.activationId) ||
+    !isBoundedIdentityString(activation.skillId) ||
+    !isBoundedIdentityString(activation.skillRevision) ||
+    !isBoundedIdentityString(activation.taskId) ||
     activation.contextMode !== 'fork'
   ) {
     return false;
   }
 
-  if (!isValidPrivateSuspendedSubagentRecordV1(value.subagent, parent)) return false;
-  if (!isValidSubagentBlockedToolIdentityV1(value.blockedTool)) return false;
+  if (!isValidPrivateSuspendedSubagentRecord(value.subagent, parent)) return false;
+  if (!isValidSubagentBlockedToolIdentity(value.blockedTool)) return false;
 
   const blockedTool = value.blockedTool as Record<string, unknown>;
   const subagent = value.subagent as Record<string, unknown>;
@@ -1064,7 +1056,7 @@ function isValidSkillForkSuspensionV1(
     return false;
   }
 
-  return isValidSubagentSuspensionEventV1(
+  return isValidSubagentSuspensionEvent(
     value.event,
     value.toolCallId,
     blockedTool,
@@ -1073,12 +1065,12 @@ function isValidSkillForkSuspensionV1(
   );
 }
 
-function isValidTaskSubagentSuspensionV1(
+function isValidTaskSubagentSuspension(
   value: Record<PropertyKey, unknown>,
   acknowledgement: Record<string, unknown>,
 ): boolean {
   if (
-    !hasExactOwnDataKeysV1(value, [
+    !hasExactOwnDataKeys(value, [
       'schema',
       'kind',
       'operationId',
@@ -1095,15 +1087,15 @@ function isValidTaskSubagentSuspensionV1(
     (value.executionMode !== 'start' && value.executionMode !== 'resume') ||
     value.toolCallId !== acknowledgement.toolCallId ||
     acknowledgement.operationId !== 'builtin:task' ||
-    !isBoundedIdentityStringV1(value.toolCallId)
+    !isBoundedIdentityString(value.toolCallId)
   ) {
     return false;
   }
 
   const parent = value.parent;
-  if (!isValidSubagentSuspensionParentV1(parent, acknowledgement)) return false;
-  if (!isValidPrivateSuspendedSubagentRecordV1(value.subagent, parent)) return false;
-  if (!isValidSubagentBlockedToolIdentityV1(value.blockedTool)) return false;
+  if (!isValidSubagentSuspensionParent(parent, acknowledgement)) return false;
+  if (!isValidPrivateSuspendedSubagentRecord(value.subagent, parent)) return false;
+  if (!isValidSubagentBlockedToolIdentity(value.blockedTool)) return false;
 
   const blockedTool = value.blockedTool as Record<string, unknown>;
   const subagent = value.subagent as Record<string, unknown>;
@@ -1118,7 +1110,7 @@ function isValidTaskSubagentSuspensionV1(
     return false;
   }
 
-  return isValidSubagentSuspensionEventV1(
+  return isValidSubagentSuspensionEvent(
     value.event,
     value.toolCallId,
     blockedTool,
@@ -1127,17 +1119,17 @@ function isValidTaskSubagentSuspensionV1(
   );
 }
 
-function isValidSubagentSuspensionParentV1(
+function isValidSubagentSuspensionParent(
   value: unknown,
   acknowledgement: Record<string, unknown>,
 ): value is Record<PropertyKey, unknown> {
   return (
-    isRecordObjectV1(value) &&
-    hasExactOwnDataKeysV1(value, ['toolCallId', 'invocationId', 'attemptId', 'attempt']) &&
-    isBoundedIdentityStringV1(value.toolCallId) &&
-    isBoundedIdentityStringV1(value.invocationId) &&
-    isBoundedIdentityStringV1(value.attemptId) &&
-    isPositiveSafeIntegerV1(value.attempt) &&
+    isRecordObject(value) &&
+    hasExactOwnDataKeys(value, ['toolCallId', 'invocationId', 'attemptId', 'attempt']) &&
+    isBoundedIdentityString(value.toolCallId) &&
+    isBoundedIdentityString(value.invocationId) &&
+    isBoundedIdentityString(value.attemptId) &&
+    isPositiveSafeInteger(value.attempt) &&
     value.toolCallId === acknowledgement.toolCallId &&
     value.invocationId === acknowledgement.invocationId &&
     value.attemptId === acknowledgement.attemptId &&
@@ -1145,13 +1137,13 @@ function isValidSubagentSuspensionParentV1(
   );
 }
 
-function isValidPrivateSuspendedSubagentRecordV1(
+function isValidPrivateSuspendedSubagentRecord(
   value: unknown,
   parent: Record<PropertyKey, unknown>,
 ): boolean {
   if (
-    !isRecordObjectV1(value) ||
-    !hasExactOwnDataKeysV1(value, [
+    !isRecordObject(value) ||
+    !hasExactOwnDataKeys(value, [
       'storage',
       'subagentId',
       'role',
@@ -1163,40 +1155,40 @@ function isValidPrivateSuspendedSubagentRecordV1(
       'blockedTool',
     ]) ||
     value.storage !== 'private_artifact_v1' ||
-    !isBoundedIdentityStringV1(value.subagentId) ||
+    !isBoundedIdentityString(value.subagentId) ||
     (value.role !== 'explore' &&
       value.role !== 'plan' &&
       value.role !== 'code' &&
       value.role !== 'review') ||
-    !isBoundedIdentityStringV1(value.continuationId) ||
-    !isNonNegativeSafeIntegerV1(value.modelInvocationOrdinal) ||
-    !isValidSubagentContinuationArtifactV1(value.continuationArtifact) ||
+    !isBoundedIdentityString(value.continuationId) ||
+    !isNonNegativeSafeInteger(value.modelInvocationOrdinal) ||
+    !isValidSubagentContinuationArtifact(value.continuationArtifact) ||
     value.parentInvocationId !== parent.invocationId ||
     value.parentAttempt !== parent.attempt ||
-    !isValidPrivateSuspendedSubagentBlockedToolV1(value.blockedTool)
+    !isValidPrivateSuspendedSubagentBlockedTool(value.blockedTool)
   ) {
     return false;
   }
   return true;
 }
 
-function isValidSubagentContinuationArtifactV1(value: unknown): boolean {
+function isValidSubagentContinuationArtifact(value: unknown): boolean {
   if (
-    !isRecordObjectV1(value) ||
-    !hasExactOwnDataKeysV1(value, ['artifactId', 'kind', 'integrityIdentifier', 'byteLength'])
+    !isRecordObject(value) ||
+    !hasExactOwnDataKeys(value, ['artifactId', 'kind', 'integrityIdentifier', 'byteLength'])
   ) {
     return false;
   }
   return (
-    isBoundedIdentityStringV1(value.artifactId) &&
+    isBoundedIdentityString(value.artifactId) &&
     value.kind === 'subagent_continuation' &&
-    isBoundedIdentityStringV1(value.integrityIdentifier) &&
-    isPositiveSafeIntegerV1(value.byteLength)
+    isBoundedIdentityString(value.integrityIdentifier) &&
+    isPositiveSafeInteger(value.byteLength)
   );
 }
 
-function isValidPrivateSuspendedSubagentBlockedToolV1(value: unknown): boolean {
-  if (!isRecordObjectV1(value)) return false;
+function isValidPrivateSuspendedSubagentBlockedTool(value: unknown): boolean {
+  if (!isRecordObject(value)) return false;
   const keys = Reflect.ownKeys(value);
   const hasRuntimeToolCallId = Object.hasOwn(value, 'runtimeToolCallId');
   const expectedKeys = [
@@ -1207,97 +1199,97 @@ function isValidPrivateSuspendedSubagentBlockedToolV1(value: unknown): boolean {
   ];
   if (
     keys.length !== expectedKeys.length ||
-    !expectedKeys.every((key) => hasOwnDataPropertyV1(value, key)) ||
+    !expectedKeys.every((key) => hasOwnDataProperty(value, key)) ||
     (value.reasonCode !== 'SUBAGENT_TOOL_REQUIRES_APPROVAL' &&
       value.reasonCode !== 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW') ||
-    !isBoundedIdentityStringV1(value.toolCallId) ||
-    !isBoundedIdentityStringV1(value.toolName)
+    !isBoundedIdentityString(value.toolCallId) ||
+    !isBoundedIdentityString(value.toolName)
   ) {
     return false;
   }
-  return !hasRuntimeToolCallId || isBoundedIdentityStringV1(value.runtimeToolCallId);
+  return !hasRuntimeToolCallId || isBoundedIdentityString(value.runtimeToolCallId);
 }
 
-function isValidSubagentBlockedToolIdentityV1(value: unknown): boolean {
+function isValidSubagentBlockedToolIdentity(value: unknown): boolean {
   if (
-    !isRecordObjectV1(value) ||
-    !hasExactOwnDataKeysV1(value, [
+    !isRecordObject(value) ||
+    !hasExactOwnDataKeys(value, [
       'toolCallId',
       'runtimeToolCallId',
       'toolName',
       'argumentsDigest',
       'commandDigest',
     ]) ||
-    !isBoundedIdentityStringV1(value.toolCallId) ||
-    (value.runtimeToolCallId !== null && !isBoundedIdentityStringV1(value.runtimeToolCallId)) ||
-    !isBoundedIdentityStringV1(value.toolName) ||
-    !isBoundedIdentityStringV1(value.argumentsDigest) ||
-    (value.commandDigest !== null && !isBoundedIdentityStringV1(value.commandDigest))
+    !isBoundedIdentityString(value.toolCallId) ||
+    (value.runtimeToolCallId !== null && !isBoundedIdentityString(value.runtimeToolCallId)) ||
+    !isBoundedIdentityString(value.toolName) ||
+    !isBoundedIdentityString(value.argumentsDigest) ||
+    (value.commandDigest !== null && !isBoundedIdentityString(value.commandDigest))
   ) {
     return false;
   }
   return true;
 }
 
-function isValidSubagentSuspensionEventV1(
+function isValidSubagentSuspensionEvent(
   value: unknown,
   parentToolCallId: unknown,
   blockedTool: Record<string, unknown>,
   subagentBlockedReasonCode: unknown,
   expectedApprovalCallId = blockedTool.toolCallId,
 ): boolean {
-  if (!isRecordObjectV1(value)) return false;
-  const type = ownDataDescriptorV1(value, 'type')?.value;
+  if (!isRecordObject(value)) return false;
+  const type = ownDataDescriptor(value, 'type')?.value;
   if (type === 'approval.requested') {
     if (
-      !hasExactOptionalDataKeysV1(
+      !hasExactOptionalDataKeys(
         value,
         ['type', 'interactionId', 'toolCallId', 'approval'],
         ['createdAt'],
       ) ||
       value.toolCallId !== parentToolCallId ||
-      !isBoundedIdentityStringV1(value.interactionId) ||
-      (Object.hasOwn(value, 'createdAt') && !isBoundedTextStringV1(value.createdAt))
+      !isBoundedIdentityString(value.interactionId) ||
+      (Object.hasOwn(value, 'createdAt') && !isBoundedTextString(value.createdAt))
     ) {
       return false;
     }
     return (
       subagentBlockedReasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' &&
-      isValidSubagentApprovalV1(value.approval, blockedTool, expectedApprovalCallId)
+      isValidSubagentApproval(value.approval, blockedTool, expectedApprovalCallId)
     );
   }
   if (value.type !== 'auto_review.requested') return false;
   if (
-    !hasExactOptionalDataKeysV1(
+    !hasExactOptionalDataKeys(
       value,
       ['type', 'reviewId', 'toolCallId', 'toolName', 'reason', 'approval'],
       ['requestFingerprint', 'createdAt'],
     ) ||
     value.toolCallId !== parentToolCallId ||
-    !isBoundedIdentityStringV1(value.reviewId) ||
-    !isBoundedIdentityStringV1(value.toolName) ||
+    !isBoundedIdentityString(value.reviewId) ||
+    !isBoundedIdentityString(value.toolName) ||
     value.toolName !== blockedTool.toolName ||
-    !isBoundedTextStringV1(value.reason) ||
+    !isBoundedTextString(value.reason) ||
     (Object.hasOwn(value, 'requestFingerprint') &&
-      !isBoundedIdentityStringV1(value.requestFingerprint)) ||
-    (Object.hasOwn(value, 'createdAt') && !isBoundedTextStringV1(value.createdAt))
+      !isBoundedIdentityString(value.requestFingerprint)) ||
+    (Object.hasOwn(value, 'createdAt') && !isBoundedTextString(value.createdAt))
   ) {
     return false;
   }
   return (
     subagentBlockedReasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' &&
-    isValidSubagentApprovalV1(value.approval, blockedTool, expectedApprovalCallId)
+    isValidSubagentApproval(value.approval, blockedTool, expectedApprovalCallId)
   );
 }
 
-function isValidSubagentApprovalV1(
+function isValidSubagentApproval(
   value: unknown,
   blockedTool: Record<string, unknown>,
   expectedCallId = blockedTool.toolCallId,
 ): boolean {
   if (
-    !isRecordObjectV1(value) ||
-    !hasExactOptionalDataKeysV1(
+    !isRecordObject(value) ||
+    !hasExactOptionalDataKeys(
       value,
       [
         'scope',
@@ -1318,28 +1310,28 @@ function isValidSubagentApprovalV1(
     ) ||
     value.scope !== 'once' ||
     value.callId !== expectedCallId ||
-    !isBoundedTextStringV1(value.cwd, 4_096) ||
-    !isBoundedIdentityStringV1(value.threadId) ||
-    !isBoundedTextStringV1(value.tool) ||
+    !isBoundedTextString(value.cwd, 4_096) ||
+    !isBoundedIdentityString(value.threadId) ||
+    !isBoundedTextString(value.tool) ||
     value.tool !== blockedTool.toolName ||
-    !isBoundedTextStringV1(value.command, 65_536) ||
-    !isValidApprovalRiskV1(value.risk) ||
-    !isBoundedIdentityStringV1(value.approvalHash) ||
-    !isBoundedTextStringV1(value.summary) ||
-    !isBoundedTextStringV1(value.reason) ||
-    !isBoundedStringArrayV1(value.expectedEffects, 256) ||
-    !isValidGrantArrayV1(value.grantOptions) ||
-    !isValidGrantV1(value.recommendedGrant) ||
-    (Object.hasOwn(value, 'plan') && !isJsonValueV1(value.plan)) ||
-    (Object.hasOwn(value, 'subagentId') && !isBoundedIdentityStringV1(value.subagentId)) ||
-    (Object.hasOwn(value, 'reviewFailure') && !isBoundedTextStringV1(value.reviewFailure))
+    !isBoundedTextString(value.command, 65_536) ||
+    !isValidApprovalRisk(value.risk) ||
+    !isBoundedIdentityString(value.approvalHash) ||
+    !isBoundedTextString(value.summary) ||
+    !isBoundedTextString(value.reason) ||
+    !isBoundedStringArray(value.expectedEffects, 256) ||
+    !isValidGrantArray(value.grantOptions) ||
+    !isValidGrant(value.recommendedGrant) ||
+    (Object.hasOwn(value, 'plan') && !isJsonValue(value.plan)) ||
+    (Object.hasOwn(value, 'subagentId') && !isBoundedIdentityString(value.subagentId)) ||
+    (Object.hasOwn(value, 'reviewFailure') && !isBoundedTextString(value.reviewFailure))
   ) {
     return false;
   }
   return true;
 }
 
-function hasExactOptionalDataKeysV1(
+function hasExactOptionalDataKeys(
   value: object,
   requiredKeys: readonly string[],
   optionalKeys: readonly string[],
@@ -1351,37 +1343,37 @@ function hasExactOptionalDataKeysV1(
   ) {
     return false;
   }
-  if (!requiredKeys.every((key) => hasOwnDataPropertyV1(value, key))) return false;
+  if (!requiredKeys.every((key) => hasOwnDataProperty(value, key))) return false;
   return keys.every(
     (key) =>
       typeof key === 'string' &&
       (requiredKeys.includes(key) || optionalKeys.includes(key)) &&
-      hasOwnDataPropertyV1(value, key),
+      hasOwnDataProperty(value, key),
   );
 }
 
-function isPositiveSafeIntegerV1(value: unknown): value is number {
+function isPositiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 1;
 }
 
-function isNonNegativeSafeIntegerV1(value: unknown): value is number {
+function isNonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
-function isBoundedTextStringV1(value: unknown, maxLength = 65_536): value is string {
+function isBoundedTextString(value: unknown, maxLength = 65_536): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= maxLength;
 }
 
-function isBoundedStringArrayV1(value: unknown, maxLength: number): value is readonly string[] {
-  if (!Array.isArray(value) || value.length > maxLength || !isJsonValueV1(value)) return false;
-  return value.every((entry) => isBoundedTextStringV1(entry));
+function isBoundedStringArray(value: unknown, maxLength: number): value is readonly string[] {
+  if (!Array.isArray(value) || value.length > maxLength || !isJsonValue(value)) return false;
+  return value.every((entry) => isBoundedTextString(entry));
 }
 
-function isValidGrantV1(value: unknown): boolean {
+function isValidGrant(value: unknown): boolean {
   return value === 'approve_once' || value === 'same_command' || value === 'full_access';
 }
 
-function isValidApprovalRiskV1(value: unknown): boolean {
+function isValidApprovalRisk(value: unknown): boolean {
   return (
     value === 'read' ||
     value === 'plan' ||
@@ -1395,31 +1387,31 @@ function isValidApprovalRiskV1(value: unknown): boolean {
   );
 }
 
-function isValidGrantArrayV1(value: unknown): boolean {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 3 || !isJsonValueV1(value))
+function isValidGrantArray(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 3 || !isJsonValue(value))
     return false;
-  return value.every((entry) => isValidGrantV1(entry));
+  return value.every((entry) => isValidGrant(entry));
 }
 
-function hasExactOwnDataKeysV1(value: object, expectedKeys: readonly string[]): boolean {
+function hasExactOwnDataKeys(value: object, expectedKeys: readonly string[]): boolean {
   const keys = Reflect.ownKeys(value);
   return (
     keys.length === expectedKeys.length &&
-    expectedKeys.every((key) => hasOwnDataPropertyV1(value, key))
+    expectedKeys.every((key) => hasOwnDataProperty(value, key))
   );
 }
 
-function isValidTerminalFailureV1(value: unknown): boolean {
-  if (!isRecordObjectV1(value)) return false;
-  const code = ownDataDescriptorV1(value, 'code');
-  const message = ownDataDescriptorV1(value, 'message');
-  const retryable = ownDataDescriptorV1(value, 'retryable');
-  const modelFixable = ownDataDescriptorV1(value, 'modelFixable');
-  const needsUserIntervention = ownDataDescriptorV1(value, 'needsUserIntervention');
-  const terminatesTurn = ownDataDescriptorV1(value, 'terminatesTurn');
-  const journal = ownDataDescriptorV1(value, 'journal');
-  const parseFailureCode = ownDataDescriptorV1(value, 'parseFailureCode');
-  const details = ownDataDescriptorV1(value, 'details');
+function isValidTerminalFailure(value: unknown): boolean {
+  if (!isRecordObject(value)) return false;
+  const code = ownDataDescriptor(value, 'code');
+  const message = ownDataDescriptor(value, 'message');
+  const retryable = ownDataDescriptor(value, 'retryable');
+  const modelFixable = ownDataDescriptor(value, 'modelFixable');
+  const needsUserIntervention = ownDataDescriptor(value, 'needsUserIntervention');
+  const terminatesTurn = ownDataDescriptor(value, 'terminatesTurn');
+  const journal = ownDataDescriptor(value, 'journal');
+  const parseFailureCode = ownDataDescriptor(value, 'parseFailureCode');
+  const details = ownDataDescriptor(value, 'details');
   return (
     typeof code?.value === 'string' &&
     typeof message?.value === 'string' &&
@@ -1432,6 +1424,6 @@ function isValidTerminalFailureV1(value: unknown): boolean {
       (parseFailureCode !== null &&
         (parseFailureCode.value === undefined || typeof parseFailureCode.value === 'string'))) &&
     (!Object.hasOwn(value, 'details') ||
-      (details !== null && (details.value === undefined || isJsonValueV1(details.value))))
+      (details !== null && (details.value === undefined || isJsonValue(details.value))))
   );
 }

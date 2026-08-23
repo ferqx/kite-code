@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  RUNTIME_NOTIFICATION_SCHEMA_V1,
-  RUNTIME_PROJECTION_SCHEMA_V1,
+  RUNTIME_NOTIFICATION_SCHEMA_,
+  RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeNotification,
   type RuntimeSessionProjection,
 } from '@kite/runtime-contract';
@@ -160,7 +160,7 @@ describe('NotificationProjector ephemeral streams', () => {
 
 function sessionProjection(sessionId: string, revision: number): RuntimeSessionProjection {
   return {
-    schema: RUNTIME_PROJECTION_SCHEMA_V1,
+    schema: RUNTIME_PROJECTION_SCHEMA_,
     sessionId,
     revision,
     lifecycle: 'open',
@@ -184,7 +184,7 @@ function durable(
   revision: number,
 ): Extract<RuntimeNotification, { durability: 'durable' }> {
   return {
-    schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+    schema: RUNTIME_NOTIFICATION_SCHEMA_,
     durability: 'durable',
     sessionId,
     revision,
@@ -194,7 +194,7 @@ function durable(
 
 function ephemeral(sequence: number): Extract<RuntimeNotification, { durability: 'ephemeral' }> {
   return {
-    schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+    schema: RUNTIME_NOTIFICATION_SCHEMA_,
     durability: 'ephemeral',
     sessionId: 'session-1',
     workId: 'work-1',

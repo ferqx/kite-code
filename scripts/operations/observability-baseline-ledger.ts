@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from '../release/canonical-json';
-import { releaseArtifactIdentityV1Schema } from '../release/evidence-schema';
+import { releaseArtifactIdentitySchema } from '../release/evidence-schema';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const commitSchema = z.string().regex(/^[a-f0-9]{40}$/);
@@ -8,7 +8,7 @@ const timestampSchema = z.iso.datetime({ offset: true });
 const controlledAliasSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,63}$/);
 const MAX_RETAINED_SAMPLES = 10_000;
 
-export const OBSERVABILITY_BASELINE_METRICS_V1 = Object.freeze([
+export const OBSERVABILITY_BASELINE_METRICS_ = Object.freeze([
   'task_checks_passed',
   'human_accepted',
   'recovery_success',
@@ -18,11 +18,11 @@ export const OBSERVABILITY_BASELINE_METRICS_V1 = Object.freeze([
   'reverted',
 ] as const);
 
-export type ObservabilityBaselineMetricV1 = (typeof OBSERVABILITY_BASELINE_METRICS_V1)[number];
+export type ObservabilityBaselineMetric = (typeof OBSERVABILITY_BASELINE_METRICS_)[number];
 
-export const observabilityBaselinePolicyIdentityV1Schema = z
+export const observabilityBaselinePolicyIdentitySchema = z
   .object({
-    schema: z.literal('ObservabilityBaselinePolicyIdentityV1'),
+    schema: z.literal('ObservabilityBaselinePolicyIdentity'),
     policyId: controlledAliasSchema,
     revision: z.number().int().positive(),
     policyDigest: digestSchema,
@@ -33,18 +33,18 @@ export const observabilityBaselinePolicyIdentityV1Schema = z
   })
   .strict();
 
-export const observabilityBaselineRouteIdentityV1Schema = z
+export const observabilityBaselineRouteIdentitySchema = z
   .object({
-    schema: z.literal('ObservabilityBaselineRouteIdentityV1'),
+    schema: z.literal('ObservabilityBaselineRouteIdentity'),
     routeAlias: controlledAliasSchema,
     routeDigest: digestSchema,
     providerRouteDigest: digestSchema,
   })
   .strict();
 
-export const observabilityBaselineGithubSourceV1Schema = z
+export const observabilityBaselineGithubSourceSchema = z
   .object({
-    schema: z.literal('ObservabilityBaselineGithubSourceV1'),
+    schema: z.literal('ObservabilityBaselineGithubSource'),
     repository: z.literal('ferqx/kite-code'),
     repositoryId: z.literal('R_kgDOSKbi8g'),
     headSha: commitSchema,
@@ -75,7 +75,7 @@ export const observabilityBaselineGithubSourceV1Schema = z
     }
   });
 
-export const observabilityBaselineG0V1Schema = z
+export const observabilityBaselineG0Schema = z
   .object({
     unauthorized_side_effects: z.number().int().nonnegative(),
     secret_or_content_egress: z.number().int().nonnegative(),
@@ -87,7 +87,7 @@ export const observabilityBaselineG0V1Schema = z
 
 const baselineSampleMaterialSchema = z
   .object({
-    schema: z.literal('ObservabilityBaselineSampleReceiptV1'),
+    schema: z.literal('ObservabilityBaselineSampleReceipt'),
     sequence: z.number().int().positive().max(MAX_RETAINED_SAMPLES),
     sampleId: z.string().regex(/^baseline_sample_[a-f0-9]{32}$/),
     previousReceiptDigest: digestSchema.nullable(),
@@ -101,7 +101,7 @@ const baselineSampleMaterialSchema = z
     falseCompletion: z.boolean().nullable(),
     integrated: z.boolean().nullable(),
     reverted: z.boolean().nullable(),
-    g0: observabilityBaselineG0V1Schema,
+    g0: observabilityBaselineG0Schema,
     g1Failures: z.number().int().nonnegative(),
   })
   .strict()
@@ -129,82 +129,82 @@ const baselineSampleMaterialSchema = z
     }
   });
 
-export const observabilityBaselineSampleReceiptV1Schema = baselineSampleMaterialSchema.safeExtend({
+export const observabilityBaselineSampleReceiptSchema = baselineSampleMaterialSchema.safeExtend({
   receiptDigest: digestSchema,
 });
 
 const baselineLedgerMaterialSchema = z
   .object({
-    schema: z.literal('ObservabilityBaselineLedgerV1'),
-    artifactIdentity: releaseArtifactIdentityV1Schema,
-    routeIdentity: observabilityBaselineRouteIdentityV1Schema,
-    policyIdentity: observabilityBaselinePolicyIdentityV1Schema,
-    source: observabilityBaselineGithubSourceV1Schema,
+    schema: z.literal('ObservabilityBaselineLedger'),
+    artifactIdentity: releaseArtifactIdentitySchema,
+    routeIdentity: observabilityBaselineRouteIdentitySchema,
+    policyIdentity: observabilityBaselinePolicyIdentitySchema,
+    source: observabilityBaselineGithubSourceSchema,
     startedAt: timestampSchema,
     endedAt: timestampSchema,
     declaredSampleCount: z.number().int().nonnegative().max(MAX_RETAINED_SAMPLES),
     droppedSampleCount: z.literal(0),
-    samples: z.array(observabilityBaselineSampleReceiptV1Schema).max(MAX_RETAINED_SAMPLES),
+    samples: z.array(observabilityBaselineSampleReceiptSchema).max(MAX_RETAINED_SAMPLES),
   })
   .strict();
 
-export const observabilityBaselineLedgerV1Schema = baselineLedgerMaterialSchema.extend({
+export const observabilityBaselineLedgerSchema = baselineLedgerMaterialSchema.extend({
   ledgerDigest: digestSchema,
 });
 
-export const observabilityBaselineExpectationV1Schema = z
+export const observabilityBaselineExpectationSchema = z
   .object({
-    schema: z.literal('ObservabilityBaselineExpectationV1'),
-    artifactIdentity: releaseArtifactIdentityV1Schema,
-    routeIdentity: observabilityBaselineRouteIdentityV1Schema,
-    policyIdentity: observabilityBaselinePolicyIdentityV1Schema,
-    source: observabilityBaselineGithubSourceV1Schema,
+    schema: z.literal('ObservabilityBaselineExpectation'),
+    artifactIdentity: releaseArtifactIdentitySchema,
+    routeIdentity: observabilityBaselineRouteIdentitySchema,
+    policyIdentity: observabilityBaselinePolicyIdentitySchema,
+    source: observabilityBaselineGithubSourceSchema,
   })
   .strict();
 
-export type ObservabilityBaselinePolicyIdentityV1 = z.infer<
-  typeof observabilityBaselinePolicyIdentityV1Schema
+export type ObservabilityBaselinePolicyIdentity = z.infer<
+  typeof observabilityBaselinePolicyIdentitySchema
 >;
-export type ObservabilityBaselineRouteIdentityV1 = z.infer<
-  typeof observabilityBaselineRouteIdentityV1Schema
+export type ObservabilityBaselineRouteIdentity = z.infer<
+  typeof observabilityBaselineRouteIdentitySchema
 >;
-export type ObservabilityBaselineGithubSourceV1 = z.infer<
-  typeof observabilityBaselineGithubSourceV1Schema
+export type ObservabilityBaselineGithubSource = z.infer<
+  typeof observabilityBaselineGithubSourceSchema
 >;
-export type ObservabilityBaselineSampleMaterialV1 = z.infer<typeof baselineSampleMaterialSchema>;
-export type ObservabilityBaselineSampleReceiptV1 = z.infer<
-  typeof observabilityBaselineSampleReceiptV1Schema
+export type ObservabilityBaselineSampleMaterial = z.infer<typeof baselineSampleMaterialSchema>;
+export type ObservabilityBaselineSampleReceipt = z.infer<
+  typeof observabilityBaselineSampleReceiptSchema
 >;
-export type ObservabilityBaselineLedgerMaterialV1 = z.infer<typeof baselineLedgerMaterialSchema>;
-export type ObservabilityBaselineLedgerV1 = z.infer<typeof observabilityBaselineLedgerV1Schema>;
-export type ObservabilityBaselineExpectationV1 = z.infer<
-  typeof observabilityBaselineExpectationV1Schema
+export type ObservabilityBaselineLedgerMaterial = z.infer<typeof baselineLedgerMaterialSchema>;
+export type ObservabilityBaselineLedger = z.infer<typeof observabilityBaselineLedgerSchema>;
+export type ObservabilityBaselineExpectation = z.infer<
+  typeof observabilityBaselineExpectationSchema
 >;
 
-export interface ObservabilityBaselineRateV1 {
+export interface ObservabilityBaselineRate {
   observedCount: number;
   positiveCount: number;
   rate: number | null;
 }
 
-export interface ObservabilityBaselineRebuildV1 {
-  schema: 'ObservabilityBaselineRebuildV1';
+export interface ObservabilityBaselineRebuild {
+  schema: 'ObservabilityBaselineRebuild';
   startedAt: string;
   endedAt: string;
   durationSeconds: number;
   sampleCount: number;
   noData: boolean;
   droppedSampleCount: 0;
-  unknownMetrics: ObservabilityBaselineMetricV1[];
-  metrics: Record<ObservabilityBaselineMetricV1, ObservabilityBaselineRateV1>;
-  g0: z.infer<typeof observabilityBaselineG0V1Schema>;
+  unknownMetrics: ObservabilityBaselineMetric[];
+  metrics: Record<ObservabilityBaselineMetric, ObservabilityBaselineRate>;
+  g0: z.infer<typeof observabilityBaselineG0Schema>;
   g1Failures: number;
   ledgerDigest: `sha256:${string}`;
   rebuildDigest: `sha256:${string}`;
 }
 
-export function computeObservabilityBaselineSampleDigestV1(
-  input: ObservabilityBaselineSampleMaterialV1,
+export function computeObservabilityBaselineSampleDigest(
+  input: ObservabilityBaselineSampleMaterial,
 ): `sha256:${string}` {
   return sha256DomainSeparated(
     'kite.operations.observability-baseline-sample.v1',
@@ -212,18 +212,18 @@ export function computeObservabilityBaselineSampleDigestV1(
   );
 }
 
-export function buildObservabilityBaselineSampleReceiptV1(
-  input: ObservabilityBaselineSampleMaterialV1,
-): ObservabilityBaselineSampleReceiptV1 {
+export function buildObservabilityBaselineSampleReceipt(
+  input: ObservabilityBaselineSampleMaterial,
+): ObservabilityBaselineSampleReceipt {
   const material = baselineSampleMaterialSchema.parse(input);
-  return observabilityBaselineSampleReceiptV1Schema.parse({
+  return observabilityBaselineSampleReceiptSchema.parse({
     ...material,
-    receiptDigest: computeObservabilityBaselineSampleDigestV1(material),
+    receiptDigest: computeObservabilityBaselineSampleDigest(material),
   });
 }
 
-export function computeObservabilityBaselineLedgerDigestV1(
-  input: ObservabilityBaselineLedgerMaterialV1,
+export function computeObservabilityBaselineLedgerDigest(
+  input: ObservabilityBaselineLedgerMaterial,
 ): `sha256:${string}` {
   return sha256DomainSeparated(
     'kite.operations.observability-baseline-ledger.v1',
@@ -231,19 +231,19 @@ export function computeObservabilityBaselineLedgerDigestV1(
   );
 }
 
-export function buildObservabilityBaselineLedgerV1(
-  input: ObservabilityBaselineLedgerMaterialV1,
-): ObservabilityBaselineLedgerV1 {
+export function buildObservabilityBaselineLedger(
+  input: ObservabilityBaselineLedgerMaterial,
+): ObservabilityBaselineLedger {
   const material = baselineLedgerMaterialSchema.parse(input);
-  const ledger = observabilityBaselineLedgerV1Schema.parse({
+  const ledger = observabilityBaselineLedgerSchema.parse({
     ...material,
-    ledgerDigest: computeObservabilityBaselineLedgerDigestV1(material),
+    ledgerDigest: computeObservabilityBaselineLedgerDigest(material),
   });
-  return verifyObservabilityBaselineLedgerV1(ledger);
+  return verifyObservabilityBaselineLedger(ledger);
 }
 
-export function verifyObservabilityBaselineLedgerV1(raw: unknown): ObservabilityBaselineLedgerV1 {
-  const ledger = observabilityBaselineLedgerV1Schema.parse(raw);
+export function verifyObservabilityBaselineLedger(raw: unknown): ObservabilityBaselineLedger {
+  const ledger = observabilityBaselineLedgerSchema.parse(raw);
   const startedAt = Date.parse(ledger.startedAt);
   const endedAt = Date.parse(ledger.endedAt);
   if (endedAt < startedAt) throw new Error('Observability baseline window is invalid.');
@@ -272,7 +272,7 @@ export function verifyObservabilityBaselineLedgerV1(raw: unknown): Observability
     }
     sampleIds.add(sample.sampleId);
     const { receiptDigest, ...material } = sample;
-    if (receiptDigest !== computeObservabilityBaselineSampleDigestV1(material)) {
+    if (receiptDigest !== computeObservabilityBaselineSampleDigest(material)) {
       throw new Error('Observability baseline sample digest mismatch.');
     }
     const observedAt = Date.parse(sample.observedAt);
@@ -287,14 +287,14 @@ export function verifyObservabilityBaselineLedgerV1(raw: unknown): Observability
   }
 
   const { ledgerDigest, ...material } = ledger;
-  if (ledgerDigest !== computeObservabilityBaselineLedgerDigestV1(material)) {
+  if (ledgerDigest !== computeObservabilityBaselineLedgerDigest(material)) {
     throw new Error('Observability baseline ledger digest mismatch.');
   }
   return ledger;
 }
 
-export function rebuildObservabilityBaselineV1(raw: unknown): ObservabilityBaselineRebuildV1 {
-  const ledger = verifyObservabilityBaselineLedgerV1(raw);
+export function rebuildObservabilityBaseline(raw: unknown): ObservabilityBaselineRebuild {
+  const ledger = verifyObservabilityBaselineLedger(raw);
   const metrics = {
     task_checks_passed: aggregate(ledger.samples.map((sample) => sample.taskChecksPassed)),
     human_accepted: aggregate(ledger.samples.map((sample) => sample.humanAccepted)),
@@ -307,7 +307,7 @@ export function rebuildObservabilityBaselineV1(raw: unknown): ObservabilityBasel
     false_completion: aggregate(ledger.samples.map((sample) => sample.falseCompletion)),
     integrated: aggregate(ledger.samples.map((sample) => sample.integrated)),
     reverted: aggregate(ledger.samples.map((sample) => sample.reverted)),
-  } satisfies Record<ObservabilityBaselineMetricV1, ObservabilityBaselineRateV1>;
+  } satisfies Record<ObservabilityBaselineMetric, ObservabilityBaselineRate>;
   const g0 = {
     unauthorized_side_effects: 0,
     secret_or_content_egress: 0,
@@ -321,14 +321,14 @@ export function rebuildObservabilityBaselineV1(raw: unknown): ObservabilityBasel
     g1Failures += sample.g1Failures;
   }
   const withoutDigest = {
-    schema: 'ObservabilityBaselineRebuildV1' as const,
+    schema: 'ObservabilityBaselineRebuild' as const,
     startedAt: ledger.startedAt,
     endedAt: ledger.endedAt,
     durationSeconds: Math.floor((Date.parse(ledger.endedAt) - Date.parse(ledger.startedAt)) / 1000),
     sampleCount: ledger.samples.length,
     noData: ledger.samples.length === 0,
     droppedSampleCount: ledger.droppedSampleCount,
-    unknownMetrics: OBSERVABILITY_BASELINE_METRICS_V1.filter(
+    unknownMetrics: OBSERVABILITY_BASELINE_METRICS_.filter(
       (metric) => metrics[metric].rate === null,
     ),
     metrics,
@@ -345,7 +345,7 @@ export function rebuildObservabilityBaselineV1(raw: unknown): ObservabilityBasel
   };
 }
 
-function aggregate(values: Array<boolean | null>): ObservabilityBaselineRateV1 {
+function aggregate(values: Array<boolean | null>): ObservabilityBaselineRate {
   const observed = values.filter((value): value is boolean => value !== null);
   const positiveCount = observed.filter(Boolean).length;
   return {
@@ -355,7 +355,7 @@ function aggregate(values: Array<boolean | null>): ObservabilityBaselineRateV1 {
   };
 }
 
-function assertSourceArtifactBinding(ledger: ObservabilityBaselineLedgerV1): void {
+function assertSourceArtifactBinding(ledger: ObservabilityBaselineLedger): void {
   const { artifactIdentity, source } = ledger;
   if (
     source.repository !== artifactIdentity.canonicalRepository ||

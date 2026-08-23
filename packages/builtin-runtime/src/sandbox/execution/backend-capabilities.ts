@@ -1,9 +1,9 @@
-import type { ExecutionBackendCapabilitiesV1, SandboxExecutionBackendV1 } from '@kite/runtime-spi';
+import type { ExecutionBackendCapabilities, SandboxExecutionBackend } from '@kite/runtime-spi';
 
 /** Conservative, accepted evidence projection. Discovery never upgrades an unsupported dimension. */
-export function sandboxBackendCapabilitiesV1(
-  backend: Exclude<SandboxExecutionBackendV1, 'none'>,
-): Readonly<ExecutionBackendCapabilitiesV1> {
+export function sandboxBackendCapabilities(
+  backend: Exclude<SandboxExecutionBackend, 'none'>,
+): Readonly<ExecutionBackendCapabilities> {
   if (backend === 'windows_restricted_token') {
     return deepFreeze({
       backend,

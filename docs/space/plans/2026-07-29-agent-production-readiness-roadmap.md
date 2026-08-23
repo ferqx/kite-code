@@ -6,7 +6,7 @@
 完成：2026-08-04
 优先级：P0
 权威决策：ADR-0068、ADR-0069
-Task 状态：`release/oss-first-release/task-status-v2.json`
+Task 状态：`release/oss-first-release/task-status.json`
 完成记录：[`2026-08-04-single-maintainer-open-source-first-release.md`](../execution/completed/2026-08-04-single-maintainer-open-source-first-release.md)
 
 ## 目标

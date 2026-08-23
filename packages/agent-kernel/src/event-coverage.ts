@@ -18,7 +18,7 @@ export type StateReducerOwner =
  * reducer implementation may observe a fact in a secondary journal reducer,
  * but this table names the single primary state owner for replay review.
  */
-export const STATE26_EVENT_REDUCER_COVERAGE: Readonly<
+export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
   Record<StateReducerOwner, readonly RuntimeEventType[]>
 > = Object.freeze({
   'core/authorization': [
@@ -180,7 +180,7 @@ export const STATE26_EVENT_REDUCER_COVERAGE: Readonly<
   ],
 });
 
-const COVERED_EVENT_TYPES = Object.freeze(Object.values(STATE26_EVENT_REDUCER_COVERAGE).flat());
+const COVERED_EVENT_TYPES = Object.freeze(Object.values(STATE_EVENT_REDUCER_COVERAGE).flat());
 
 if (
   COVERED_EVENT_TYPES.length !== Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length ||

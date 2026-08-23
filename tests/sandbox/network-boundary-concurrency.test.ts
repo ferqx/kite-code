@@ -3,30 +3,30 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { exposedMcpToolName, McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import type { ExecutionBoundaryV1, ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import type { ExecutionBoundary, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import {
-  type BuiltinPreparedShellExecutionInputV1,
-  createNetworkBoundaryFetchV1,
-  type NetworkAdmissionReceiptV1,
-  type NetworkDecisionReceiptV1,
-  type NetworkResolvedAddressV1,
-  networkBoundaryPolicyFromExecutionBoundaryV1,
-  SandboxPreparationArtifactStoreV1,
+  type BuiltinPreparedShellExecutionInput,
+  createNetworkBoundaryFetch,
+  type NetworkAdmissionReceipt,
+  type NetworkDecisionReceipt,
+  type NetworkResolvedAddress,
+  networkBoundaryPolicyFromExecutionBoundary,
+  SandboxPreparationArtifactStore,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import {
-  APP_PREPARED_SHELL_EXECUTION_V1,
-  projectAppHostShellResultV1,
+  APP_PREPARED_SHELL_EXECUTION_,
+  projectAppHostShellResult,
 } from '../../apps/kite/src/sandbox/prepared-tool-pipeline';
-import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
-import { createTestRuntimeEffectExecutorV1 } from '../helpers/runtime-model';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { createTestRuntimeEffectExecutor } from '../helpers/runtime-model';
 
-const publicAddress: NetworkResolvedAddressV1 = { address: '93.184.216.34', family: 4 };
-const privateAddress: NetworkResolvedAddressV1 = { address: '127.0.0.1', family: 4 };
+const publicAddress: NetworkResolvedAddress = { address: '93.184.216.34', family: 4 };
+const privateAddress: NetworkResolvedAddress = { address: '127.0.0.1', family: 4 };
 
 function allowlist(hosts: string[]) {
-  const boundary: ExecutionBoundaryV1 = {
+  const boundary: ExecutionBoundary = {
     filesystemScope: 'workspace_write',
     workspaceRoot: process.cwd(),
     networkMode: 'allowlist',
@@ -37,25 +37,25 @@ function allowlist(hosts: string[]) {
     sandboxRequired: true,
     sandboxUnavailable: 'fail',
   };
-  return networkBoundaryPolicyFromExecutionBoundaryV1(boundary, true);
+  return networkBoundaryPolicyFromExecutionBoundary(boundary, true);
 }
 
-function testSandboxPreparationArtifactsV1(label: string) {
-  return new SandboxPreparationArtifactStoreV1({
+function testSandboxPreparationArtifacts(label: string) {
+  return new SandboxPreparationArtifactStore({
     root: join(mkdtempSync(join('/tmp', `kite-network-${label}-`)), 'sandbox-preparations'),
   });
 }
 
-function preparedShellExecutorV1(executor: ShellExecutor): ShellExecutor {
+function preparedShellExecutor(executor: ShellExecutor): ShellExecutor {
   const wrapped = ((input) => executor(input)) as ShellExecutor &
-    Partial<Record<typeof APP_PREPARED_SHELL_EXECUTION_V1, unknown>>;
-  Object.defineProperty(wrapped, APP_PREPARED_SHELL_EXECUTION_V1, {
+    Partial<Record<typeof APP_PREPARED_SHELL_EXECUTION_, unknown>>;
+  Object.defineProperty(wrapped, APP_PREPARED_SHELL_EXECUTION_, {
     configurable: false,
     enumerable: false,
     writable: false,
     value: Object.freeze({
-      execute: async (input: BuiltinPreparedShellExecutionInputV1) =>
-        projectAppHostShellResultV1(
+      execute: async (input: BuiltinPreparedShellExecutionInput) =>
+        projectAppHostShellResult(
           await executor({
             workspace: input.workspace,
             command: input.command,
@@ -75,11 +75,11 @@ function preparedShellExecutorV1(executor: ShellExecutor): ShellExecutor {
 
 describe('network boundary concurrent invocation isolation', () => {
   test('keeps public, private, redirect, and rebinding decisions independent', async () => {
-    const receipts: NetworkAdmissionReceiptV1[] = [];
-    const decisions: NetworkDecisionReceiptV1[] = [];
+    const receipts: NetworkAdmissionReceipt[] = [];
+    const decisions: NetworkDecisionReceipt[] = [];
     const requests: string[] = [];
     const resolutionCounts = new Map<string, number>();
-    const fetchImpl = createNetworkBoundaryFetchV1(
+    const fetchImpl = createNetworkBoundaryFetch(
       allowlist([
         'public.example',
         'private.example',
@@ -147,9 +147,9 @@ describe('network boundary concurrent invocation isolation', () => {
   });
 
   test('a controller failure does not cancel or rewrite a public sibling receipt', async () => {
-    const receipts: NetworkAdmissionReceiptV1[] = [];
-    const decisions: NetworkDecisionReceiptV1[] = [];
-    const fetchImpl = createNetworkBoundaryFetchV1(allowlist(['public.example', 'crash.example']), {
+    const receipts: NetworkAdmissionReceipt[] = [];
+    const decisions: NetworkDecisionReceipt[] = [];
+    const fetchImpl = createNetworkBoundaryFetch(allowlist(['public.example', 'crash.example']), {
       resolver: async (hostname) => {
         if (hostname === 'crash.example') throw new Error('controller crash');
         return [publicAddress];
@@ -182,8 +182,8 @@ describe('network boundary concurrent invocation isolation', () => {
   });
 
   test('forwards a pre-dispatch approval from the Tool Pipeline through the effect adapter', async () => {
-    const store = openStateStoreForTestV1(':memory:');
-    const state = createRuntimeHostStateInitialStateV1({
+    const store = openStateStoreForTest(':memory:');
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'network-approval-forwarding',
       userId: 'user',
@@ -200,7 +200,7 @@ describe('network boundary concurrent invocation isolation', () => {
     };
     state.tools.queue = [...state.tools.queue, 'web'];
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
-    const executor = createTestRuntimeEffectExecutorV1({
+    const executor = createTestRuntimeEffectExecutor({
       config: {
         apiKey: 'test',
         baseURL: 'http://localhost',
@@ -263,8 +263,8 @@ describe('network boundary concurrent invocation isolation', () => {
   });
 
   test('persists independent outcomes for a mixed Runtime network batch before provider access', async () => {
-    const store = openStateStoreForTestV1(':memory:');
-    const state = createRuntimeHostStateInitialStateV1({
+    const store = openStateStoreForTest(':memory:');
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'mixed-network-batch',
       userId: 'user',
@@ -377,7 +377,7 @@ describe('network boundary concurrent invocation isolation', () => {
     const receiptPersisted = new Promise<void>((resolve) => {
       reportReceiptPersisted = resolve;
     });
-    const executor = createTestRuntimeEffectExecutorV1({
+    const executor = createTestRuntimeEffectExecutor({
       config: {
         apiKey: 'test',
         baseURL: 'http://localhost',
@@ -386,9 +386,9 @@ describe('network boundary concurrent invocation isolation', () => {
         providerType: 'openai-compatible',
         sandbox: { enabled: true },
         features: {
-          capabilityCatalogV1: true,
-          mcpRuntimeBindingV1: true,
-          networkBoundaryV1: false,
+          capabilityCatalog: true,
+          mcpRuntimeBinding: true,
+          networkBoundary: false,
         },
         executionBoundary: {
           filesystemScope: 'workspace_write',
@@ -403,11 +403,11 @@ describe('network boundary concurrent invocation isolation', () => {
         },
       },
       model: {} as never,
-      sandboxPreparationArtifacts: testSandboxPreparationArtifactsV1('mixed-batch'),
+      sandboxPreparationArtifacts: testSandboxPreparationArtifacts('mixed-batch'),
       mcpManager: runtimeManager,
       runtimeStore: store,
       sandboxBackend: 'seatbelt',
-      shellExecutor: preparedShellExecutorV1(async (input) => {
+      shellExecutor: preparedShellExecutor(async (input) => {
         observedShellNetworkMode = input.networkMode;
         reportShellEntered();
         await shellRelease;
@@ -496,7 +496,7 @@ describe('network boundary concurrent invocation isolation', () => {
     expect(new Set(webDecisions.map((decision) => decision.invocationId)).size).toBe(2);
     expect(new Set(webDecisions.map((decision) => decision.receiptDigest)).size).toBe(2);
     expect(
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>(
         'mixed-network-batch',
       )?.tools.calls.web?.networkDecisions,
     ).toEqual(webDecisions);

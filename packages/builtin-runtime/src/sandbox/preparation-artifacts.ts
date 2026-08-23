@@ -1,22 +1,19 @@
 import { join } from 'node:path';
-import type {
-  PreparedSandboxExecutionV1,
-  SandboxPreparationArtifactRefV1,
-} from '@kite/runtime-spi';
+import type { PreparedSandboxExecution, SandboxPreparationArtifactRef } from '@kite/runtime-spi';
 import {
-  canonicalModelJsonV1,
+  canonicalModelJson,
   PrivateArtifactStorageError,
-  type PrivateArtifactWriteFaultPointV1,
-  PrivateImmutableArtifactStorageV1,
+  type PrivateArtifactWriteFaultPoint,
+  PrivateImmutableArtifactStorage,
 } from '../model';
-import { userKiteCodeDirV1 } from '../model/artifact-paths';
+import { userKiteCodeDir } from '../model/artifact-paths';
 
-export interface SandboxPreparationArtifactStoreOptionsV1 {
+export interface SandboxPreparationArtifactStoreOptions {
   readonly root?: string;
-  readonly faultInjector?: (point: PrivateArtifactWriteFaultPointV1) => void;
+  readonly faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
 }
 
-export type SandboxPreparationArtifactErrorCodeV1 =
+export type SandboxPreparationArtifactErrorCode =
   | 'invalid_preparation'
   | 'artifact_missing'
   | 'artifact_corrupt'
@@ -24,28 +21,28 @@ export type SandboxPreparationArtifactErrorCodeV1 =
   | 'storage_boundary_violation'
   | 'publish_failed';
 
-export class SandboxPreparationArtifactErrorV1 extends Error {
-  readonly code: SandboxPreparationArtifactErrorCodeV1;
+export class SandboxPreparationArtifactError extends Error {
+  readonly code: SandboxPreparationArtifactErrorCode;
 
-  constructor(code: SandboxPreparationArtifactErrorCodeV1, message: string) {
+  constructor(code: SandboxPreparationArtifactErrorCode, message: string) {
     super(message);
-    this.name = 'SandboxPreparationArtifactErrorV1';
+    this.name = 'SandboxPreparationArtifactError';
     this.code = code;
   }
 }
 
 /** Installation-private root for durable Sandbox preparation evidence. */
-export function sandboxPreparationArtifactRootV1(): string {
-  return join(userKiteCodeDirV1(), 'sandbox-preparations');
+export function sandboxPreparationArtifactRoot(): string {
+  return join(userKiteCodeDir(), 'sandbox-preparations');
 }
 
 /** Private immutable evidence used both for ready ack and post-crash disposal. */
-export class SandboxPreparationArtifactStoreV1 {
-  readonly #storage: PrivateImmutableArtifactStorageV1<'sandbox_preparation'>;
+export class SandboxPreparationArtifactStore {
+  readonly #storage: PrivateImmutableArtifactStorage<'sandbox_preparation'>;
 
-  constructor(options: SandboxPreparationArtifactStoreOptionsV1) {
-    this.#storage = new PrivateImmutableArtifactStorageV1({
-      root: options.root ?? sandboxPreparationArtifactRootV1(),
+  constructor(options: SandboxPreparationArtifactStoreOptions) {
+    this.#storage = new PrivateImmutableArtifactStorage({
+      root: options.root ?? sandboxPreparationArtifactRoot(),
       namespace: 'sandbox-preparations',
       partitions: [
         { kind: 'sandbox_preparation', directory: 'plans', extension: '.json' },
@@ -55,11 +52,11 @@ export class SandboxPreparationArtifactStoreV1 {
     });
   }
 
-  write(prepared: Readonly<PreparedSandboxExecutionV1>): SandboxPreparationArtifactRefV1 {
+  write(prepared: Readonly<PreparedSandboxExecution>): SandboxPreparationArtifactRef {
     try {
-      if (!isPreparedSandboxExecutionV1(prepared)) invalidPreparation();
+      if (!isPreparedSandboxExecution(prepared)) invalidPreparation();
       const payload = Buffer.from(
-        canonicalModelJsonV1({ artifactFormatVersion: 1, prepared }),
+        canonicalModelJson({ artifactFormatVersion: 1, prepared }),
         'utf8',
       );
       return this.#storage.write('sandbox_preparation', payload);
@@ -68,20 +65,20 @@ export class SandboxPreparationArtifactStoreV1 {
     }
   }
 
-  read(ref: SandboxPreparationArtifactRefV1): Readonly<PreparedSandboxExecutionV1> {
+  read(ref: SandboxPreparationArtifactRef): Readonly<PreparedSandboxExecution> {
     try {
       const bytes = this.#storage.read(ref);
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const parsed: unknown = JSON.parse(text);
       if (
-        canonicalModelJsonV1(parsed) !== text ||
+        canonicalModelJson(parsed) !== text ||
         !isRecord(parsed) ||
         !hasExactKeys(parsed, ['artifactFormatVersion', 'prepared'])
       ) {
         artifactCorrupt();
       }
       const prepared = parsed.prepared;
-      if (parsed.artifactFormatVersion !== 1 || !isPreparedSandboxExecutionV1(prepared)) {
+      if (parsed.artifactFormatVersion !== 1 || !isPreparedSandboxExecution(prepared)) {
         artifactCorrupt();
       }
       return deepFreeze(prepared);
@@ -119,7 +116,7 @@ const PREPARED_KEYS = [
   'cleanup',
 ] as const;
 
-function isPreparedSandboxExecutionV1(value: unknown): value is PreparedSandboxExecutionV1 {
+function isPreparedSandboxExecution(value: unknown): value is PreparedSandboxExecution {
   if (!isRecord(value) || !hasExactKeys(value, PREPARED_KEYS)) return false;
   if (
     value.schema !== 'kite.sandbox-execution-provider.v1' ||
@@ -195,7 +192,7 @@ function isBackendCapabilities(value: unknown, backend: string): boolean {
   ].every((entry) => entry === 'enforced' || entry === 'unsupported');
 }
 
-function isCleanup(value: unknown): value is PreparedSandboxExecutionV1['cleanup'] {
+function isCleanup(value: unknown): value is PreparedSandboxExecution['cleanup'] {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['kind', 'resourceId', 'recoveryPayload']) ||
@@ -267,14 +264,14 @@ function deepFreeze<T>(value: T): Readonly<T> {
 }
 
 function invalidPreparation(): never {
-  throw new SandboxPreparationArtifactErrorV1(
+  throw new SandboxPreparationArtifactError(
     'invalid_preparation',
     'Sandbox preparation Artifact payload is invalid.',
   );
 }
 
 function artifactCorrupt(): never {
-  throw new SandboxPreparationArtifactErrorV1(
+  throw new SandboxPreparationArtifactError(
     'artifact_corrupt',
     'Sandbox preparation Artifact is corrupt.',
   );
@@ -282,11 +279,11 @@ function artifactCorrupt(): never {
 
 function mapArtifactError(
   error: unknown,
-  fallback: SandboxPreparationArtifactErrorCodeV1,
-): SandboxPreparationArtifactErrorV1 {
-  if (error instanceof SandboxPreparationArtifactErrorV1) return error;
+  fallback: SandboxPreparationArtifactErrorCode,
+): SandboxPreparationArtifactError {
+  if (error instanceof SandboxPreparationArtifactError) return error;
   if (error instanceof PrivateArtifactStorageError) {
-    const code: SandboxPreparationArtifactErrorCodeV1 =
+    const code: SandboxPreparationArtifactErrorCode =
       error.code === 'artifact_missing'
         ? 'artifact_missing'
         : error.code === 'artifact_corrupt' || error.code === 'invalid_reference'
@@ -296,9 +293,9 @@ function mapArtifactError(
             : error.code === 'publish_failed'
               ? 'publish_failed'
               : 'storage_boundary_violation';
-    return new SandboxPreparationArtifactErrorV1(code, error.message);
+    return new SandboxPreparationArtifactError(code, error.message);
   }
-  return new SandboxPreparationArtifactErrorV1(
+  return new SandboxPreparationArtifactError(
     fallback,
     fallback === 'artifact_corrupt'
       ? 'Sandbox preparation Artifact is corrupt.'

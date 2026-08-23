@@ -1,28 +1,28 @@
-import { projectTelemetryStatusV1, type TelemetryConsentStatusV1 } from './consent';
+import { projectTelemetryStatus, type TelemetryConsentStatus } from './consent';
 
-export interface ObservabilityStatusV1 {
+export interface ObservabilityStatus {
   version: 1;
   active: boolean;
-  reason: 'enabled' | 'artifact_disabled' | 'feature_disabled' | TelemetryConsentStatusV1['reason'];
+  reason: 'enabled' | 'artifact_disabled' | 'feature_disabled' | TelemetryConsentStatus['reason'];
   artifactAuthority: boolean;
   featureEnabled: boolean;
-  consent: ReturnType<typeof projectTelemetryStatusV1>;
+  consent: ReturnType<typeof projectTelemetryStatus>;
   remoteExporterConfigured: boolean;
   diskSpool: false;
 }
 
-export function projectObservabilityStatusV1(input: {
+export function projectObservabilityStatus(input: {
   artifactTelemetryAllowed: boolean;
   featureEnabled: boolean;
-  consent: TelemetryConsentStatusV1;
+  consent: TelemetryConsentStatus;
   remoteExporterConfigured: boolean;
-}): ObservabilityStatusV1 {
+}): ObservabilityStatus {
   const active =
     input.artifactTelemetryAllowed &&
     input.featureEnabled &&
     input.consent.enabled &&
     input.remoteExporterConfigured;
-  const reason: ObservabilityStatusV1['reason'] = !input.artifactTelemetryAllowed
+  const reason: ObservabilityStatus['reason'] = !input.artifactTelemetryAllowed
     ? 'artifact_disabled'
     : !input.featureEnabled
       ? 'feature_disabled'
@@ -37,13 +37,13 @@ export function projectObservabilityStatusV1(input: {
     reason,
     artifactAuthority: input.artifactTelemetryAllowed,
     featureEnabled: input.featureEnabled,
-    consent: projectTelemetryStatusV1(input.consent),
+    consent: projectTelemetryStatus(input.consent),
     remoteExporterConfigured: input.remoteExporterConfigured,
     diskSpool: false as const,
   });
 }
 
-export function formatObservabilityStatusV1(status: ObservabilityStatusV1): string {
+export function formatObservabilityStatus(status: ObservabilityStatus): string {
   return [
     `Observability: ${status.active ? 'active' : `inactive (${status.reason})`}`,
     `Artifact authority: ${status.artifactAuthority ? 'present' : 'absent'}`,

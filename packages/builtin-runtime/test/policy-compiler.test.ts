@@ -1,21 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
-  BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
-  type BuiltinModelToolCatalogEntryV1,
-  compileBuiltinDynamicMcpPolicyV1,
+  BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
+  type BuiltinModelToolCatalogEntry,
+  compileBuiltinDynamicMcpPolicy,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  hasBrokeredGitExecutableTokenV1,
+  createBuiltinToolCatalogProjection,
+  hasBrokeredGitExecutableToken,
 } from '@kite/builtin-runtime';
 import {
-  BROKERED_GIT_FEATURE_REVISION_V1,
-  type CapabilityPolicyCompilationV1,
-  type CapabilityPolicyContextV1,
-  createRuntimeModuleRegistryV1,
+  BROKERED_GIT_FEATURE_REVISION_,
+  type CapabilityPolicyCompilation,
+  type CapabilityPolicyContext,
+  createRuntimeModuleRegistry,
 } from '@kite/runtime-spi';
 
-const CONTEXT: CapabilityPolicyContextV1 = Object.freeze({
+const CONTEXT: CapabilityPolicyContext = Object.freeze({
   workspace: '/tmp/kite-policy-workspace',
   phase: 'building',
   threadId: 'thread-policy',
@@ -27,22 +27,22 @@ const CONTEXT: CapabilityPolicyContextV1 = Object.freeze({
   activeSkillFrameIds: Object.freeze(['skill-frame']),
   availableSkillIds: Object.freeze(['skill']),
   featureFlags: Object.freeze({
-    brokeredGitV1: true,
-    skillWorkflowV1: true,
-    skillActivationV2: true,
+    brokeredGit: true,
+    skillWorkflow: true,
+    skillActivation: true,
   }),
 });
 
 function projection() {
-  return createBuiltinToolCatalogProjectionV1(
-    createRuntimeModuleRegistryV1(createBuiltinRuntimeModules()),
+  return createBuiltinToolCatalogProjection(
+    createRuntimeModuleRegistry(createBuiltinRuntimeModules()),
     { turnContext: CONTEXT },
   );
 }
 
-function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
+function modelEntry(name: string): BuiltinModelToolCatalogEntry {
   const entry = projection().entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.name === name,
   );
   if (!entry) throw new Error(`missing model entry: ${name}`);
@@ -51,17 +51,17 @@ function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
 
 function compile(
   name: string,
-  input: Parameters<BuiltinModelToolCatalogEntryV1['compilePolicy']>[0],
-  context: CapabilityPolicyContextV1 = CONTEXT,
-): CapabilityPolicyCompilationV1 {
+  input: Parameters<BuiltinModelToolCatalogEntry['compilePolicy']>[0],
+  context: CapabilityPolicyContext = CONTEXT,
+): CapabilityPolicyCompilation {
   return modelEntry(name).compilePolicy(input, context);
 }
 
 function dynamicMcpPolicyInput(
-  overrides: Partial<Parameters<typeof compileBuiltinDynamicMcpPolicyV1>[0]> = {},
-): Parameters<typeof compileBuiltinDynamicMcpPolicyV1>[0] {
+  overrides: Partial<Parameters<typeof compileBuiltinDynamicMcpPolicy>[0]> = {},
+): Parameters<typeof compileBuiltinDynamicMcpPolicy>[0] {
   return {
-    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
     capabilityRevision: 'a'.repeat(64),
     parserRevision: 'b'.repeat(64),
     exposedToolName: 'mcp__fixture__search',
@@ -75,7 +75,7 @@ function dynamicMcpPolicyInput(
 
 describe('Builtin dynamic MCP policy compiler', () => {
   test('allows only a locally classified read-only capability without approval', () => {
-    const compiled = compileBuiltinDynamicMcpPolicyV1(dynamicMcpPolicyInput());
+    const compiled = compileBuiltinDynamicMcpPolicy(dynamicMcpPolicyInput());
     expect(compiled).toMatchObject({
       schema: 'kite.capability-policy-compilation.v1',
       operationId: 'mcp:dynamic_tool',
@@ -93,7 +93,7 @@ describe('Builtin dynamic MCP policy compiler', () => {
   });
 
   test('requires user approval for non-read-only MCP effects while building', () => {
-    const compiled = compileBuiltinDynamicMcpPolicyV1(
+    const compiled = compileBuiltinDynamicMcpPolicy(
       dynamicMcpPolicyInput({
         effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
         minimumApproval: 'user',
@@ -110,7 +110,7 @@ describe('Builtin dynamic MCP policy compiler', () => {
   });
 
   test('denies non-read-only MCP effects during planning', () => {
-    const compiled = compileBuiltinDynamicMcpPolicyV1(
+    const compiled = compileBuiltinDynamicMcpPolicy(
       dynamicMcpPolicyInput({
         effectiveEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
         phase: 'planning',
@@ -127,9 +127,9 @@ describe('Builtin dynamic MCP policy compiler', () => {
 
   test('rejects wrapper identity drift and contains no external execution authority', () => {
     expect(() =>
-      compileBuiltinDynamicMcpPolicyV1(
+      compileBuiltinDynamicMcpPolicy(
         dynamicMcpPolicyInput({
-          operationId: 'mcp:wrong' as typeof BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+          operationId: 'mcp:wrong' as typeof BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
         }),
       ),
     ).toThrow('Dynamic MCP policy compiler identity is invalid.');
@@ -231,7 +231,7 @@ describe('Builtin operation policy compiler', () => {
       'env PATH=/usr/bin command git.exe status',
       'C:\\Tools\\Git\\bin\\git.exe status',
     ]) {
-      expect(hasBrokeredGitExecutableTokenV1(command)).toBe(true);
+      expect(hasBrokeredGitExecutableToken(command)).toBe(true);
     }
     for (const command of [
       'printf .git/config',
@@ -239,7 +239,7 @@ describe('Builtin operation policy compiler', () => {
       'legit status',
       'gitoxide status',
     ]) {
-      expect(hasBrokeredGitExecutableTokenV1(command)).toBe(false);
+      expect(hasBrokeredGitExecutableToken(command)).toBe(false);
     }
   });
 
@@ -273,7 +273,7 @@ describe('Builtin operation policy compiler', () => {
       { command: 'git status --short' },
       {
         ...CONTEXT,
-        featureFlags: { ...CONTEXT.featureFlags, brokeredGitV1: false },
+        featureFlags: { ...CONTEXT.featureFlags, brokeredGit: false },
       },
     );
     expect(disabled.decision).toBe('ask');
@@ -284,7 +284,7 @@ describe('Builtin operation policy compiler', () => {
       { command: 'git status --short' },
       {
         ...CONTEXT,
-        brokeredGitFeatureRevision: `${BROKERED_GIT_FEATURE_REVISION_V1}-stale`,
+        brokeredGitFeatureRevision: `${BROKERED_GIT_FEATURE_REVISION_}-stale`,
       },
     );
     expect(staleRevision.decision).toBe('ask');
@@ -351,7 +351,7 @@ describe('Builtin operation policy compiler', () => {
     ] as const;
     const legacyShellContext = {
       ...CONTEXT,
-      featureFlags: { ...CONTEXT.featureFlags, brokeredGitV1: false },
+      featureFlags: { ...CONTEXT.featureFlags, brokeredGit: false },
     };
     for (const vector of corpus) {
       expect(compile('shell_execute', vector.input, legacyShellContext)).toMatchObject(

@@ -1,33 +1,33 @@
 import { createHash } from 'node:crypto';
 import type {
-  CapabilityEffectsV1,
-  CapabilityExecutionContextV1,
-  CapabilityExecutionMechanismV1,
-  CapabilityExecutorV1,
-  ExecutionReceiptV1,
-  RuntimeJsonValueV1,
-  RuntimeModuleRegistryWriterV1,
-  RuntimeModuleV1,
+  CapabilityEffects,
+  CapabilityExecutionContext,
+  CapabilityExecutionMechanism,
+  CapabilityExecutor,
+  ExecutionReceipt,
+  RuntimeJsonValue,
+  RuntimeModule,
+  RuntimeModuleRegistryWriter,
 } from '@kite/runtime-spi';
-import { defineRuntimeModuleV1 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
+import { defineRuntimeModule } from '@kite/runtime-spi';
+import { digestCapabilityBindingValue } from './capability-binding';
 import {
-  activateSkillAvailabilityV1,
-  builtinExecutionTraitsV1,
-  defineBuiltinCapabilityContractV1,
-  parserForBuiltinOperationV1,
-  readSkillAvailabilityV1,
-  staticEffectsClassifierV1,
+  activateSkillAvailability,
+  builtinExecutionTraits,
+  defineBuiltinCapabilityContract,
+  parserForBuiltinOperation,
+  readSkillAvailability,
+  staticEffectsClassifier,
 } from './catalog-contract';
 import { isMcpProviderError } from './mcp/provider-errors';
-import { registerBuiltinContextSourcesV1 } from './model-context';
+import { registerBuiltinContextSources } from './model-context';
 import {
-  activateSkillBuiltinPolicyRuleV1,
-  createBuiltinPolicyCompilerV1,
-  readOnlyBuiltinPolicyRuleV1,
-  webFetchBuiltinPolicyRuleV1,
+  activateSkillBuiltinPolicyRule,
+  createBuiltinPolicyCompiler,
+  readOnlyBuiltinPolicyRule,
+  webFetchBuiltinPolicyRule,
 } from './policy-compiler';
-import { compileCapabilitySchemaV1 } from './skills/capability-domain';
+import { compileCapabilitySchema } from './skills/capability-domain';
 import {
   activateSkillLifecycle,
   completeSkillLifecycle,
@@ -35,13 +35,13 @@ import {
   type SkillActivationContext,
   type SkillLifecycleEmission,
 } from './skills/lifecycle';
-import { builtinToolDescriptionV1 } from './tool-contracts';
-import { BUILTIN_JSON_SCHEMAS_V1, BUILTIN_ZOD_SCHEMAS_V1 } from './tool-schemas';
+import { builtinToolDescription } from './tool-contracts';
+import { BUILTIN_JSON_SCHEMAS_, BUILTIN_ZOD_SCHEMAS_ } from './tool-schemas';
 import { fetchAndExtract } from './web/extractor';
 
-export const RMV1_11_PROVIDER_ID_V1 = 'kite-builtin-runtime-rmv1-11' as const;
+export const MODEL_PROVIDER_ID_ = 'kite-builtin-runtime-rmv1-11' as const;
 
-export const RMV1_11_OPERATION_IDS_V1 = Object.freeze([
+export const MODEL_OPERATION_IDS_ = Object.freeze([
   'builtin:web_fetch',
   'builtin:list_mcp_resources',
   'builtin:list_mcp_tools',
@@ -52,34 +52,32 @@ export const RMV1_11_OPERATION_IDS_V1 = Object.freeze([
   'builtin:activate_skill',
 ] as const);
 
-export type Rmv111OperationIdV1 = (typeof RMV1_11_OPERATION_IDS_V1)[number];
+export type ModelOperationId = (typeof MODEL_OPERATION_IDS_)[number];
 
-export const WEB_FETCH_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:web_fetch'];
-export const LIST_MCP_RESOURCES_INPUT_SCHEMA_V1 =
-  BUILTIN_JSON_SCHEMAS_V1['builtin:list_mcp_resources'];
-export const LIST_MCP_TOOLS_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:list_mcp_tools'];
-export const READ_MCP_RESOURCE_INPUT_SCHEMA_V1 =
-  BUILTIN_JSON_SCHEMAS_V1['builtin:read_mcp_resource'];
-export const ACTIVATE_SKILL_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:activate_skill'];
-export const READ_SKILL_REFERENCE_INPUT_SCHEMA_V1 =
-  BUILTIN_JSON_SCHEMAS_V1['builtin:read_skill_reference'];
-export const COMPLETE_SKILL_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:complete_skill'];
-export const DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['mcp:dynamic_tool'];
+export const WEB_FETCH_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:web_fetch'];
+export const LIST_MCP_RESOURCES_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:list_mcp_resources'];
+export const LIST_MCP_TOOLS_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:list_mcp_tools'];
+export const READ_MCP_RESOURCE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:read_mcp_resource'];
+export const ACTIVATE_SKILL_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:activate_skill'];
+export const READ_SKILL_REFERENCE_INPUT_SCHEMA_ =
+  BUILTIN_JSON_SCHEMAS_['builtin:read_skill_reference'];
+export const COMPLETE_SKILL_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:complete_skill'];
+export const DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['mcp:dynamic_tool'];
 
-const INPUT_SCHEMAS_V1: Readonly<
-  Record<Rmv111OperationIdV1, Readonly<Record<string, RuntimeJsonValueV1>>>
+const INPUT_SCHEMAS_: Readonly<
+  Record<ModelOperationId, Readonly<Record<string, RuntimeJsonValue>>>
 > = Object.freeze({
-  'builtin:web_fetch': WEB_FETCH_INPUT_SCHEMA_V1,
-  'builtin:list_mcp_resources': LIST_MCP_RESOURCES_INPUT_SCHEMA_V1,
-  'builtin:list_mcp_tools': LIST_MCP_TOOLS_INPUT_SCHEMA_V1,
-  'builtin:read_mcp_resource': READ_MCP_RESOURCE_INPUT_SCHEMA_V1,
-  'mcp:dynamic_tool': DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1,
-  'builtin:read_skill_reference': READ_SKILL_REFERENCE_INPUT_SCHEMA_V1,
-  'builtin:complete_skill': COMPLETE_SKILL_INPUT_SCHEMA_V1,
-  'builtin:activate_skill': ACTIVATE_SKILL_INPUT_SCHEMA_V1,
+  'builtin:web_fetch': WEB_FETCH_INPUT_SCHEMA_,
+  'builtin:list_mcp_resources': LIST_MCP_RESOURCES_INPUT_SCHEMA_,
+  'builtin:list_mcp_tools': LIST_MCP_TOOLS_INPUT_SCHEMA_,
+  'builtin:read_mcp_resource': READ_MCP_RESOURCE_INPUT_SCHEMA_,
+  'mcp:dynamic_tool': DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_,
+  'builtin:read_skill_reference': READ_SKILL_REFERENCE_INPUT_SCHEMA_,
+  'builtin:complete_skill': COMPLETE_SKILL_INPUT_SCHEMA_,
+  'builtin:activate_skill': ACTIVATE_SKILL_INPUT_SCHEMA_,
 });
 
-const EFFECTS_V1: Readonly<Record<Rmv111OperationIdV1, CapabilityEffectsV1>> = Object.freeze({
+const EFFECTS_: Readonly<Record<ModelOperationId, CapabilityEffects>> = Object.freeze({
   'builtin:web_fetch': Object.freeze({
     filesystem: 'none',
     network: 'read',
@@ -122,84 +120,82 @@ const EFFECTS_V1: Readonly<Record<Rmv111OperationIdV1, CapabilityEffectsV1>> = O
   }),
 });
 
-const EXECUTION_MECHANISMS_V1: Readonly<
-  Record<Rmv111OperationIdV1, CapabilityExecutionMechanismV1>
-> = Object.freeze({
-  'builtin:web_fetch': 'web',
-  'builtin:list_mcp_resources': 'mcp',
-  'builtin:list_mcp_tools': 'mcp',
-  'builtin:read_mcp_resource': 'mcp',
-  'mcp:dynamic_tool': 'mcp',
-  'builtin:read_skill_reference': 'skill',
-  'builtin:complete_skill': 'skill',
-  'builtin:activate_skill': 'skill',
-});
+const EXECUTION_MECHANISMS_: Readonly<Record<ModelOperationId, CapabilityExecutionMechanism>> =
+  Object.freeze({
+    'builtin:web_fetch': 'web',
+    'builtin:list_mcp_resources': 'mcp',
+    'builtin:list_mcp_tools': 'mcp',
+    'builtin:read_mcp_resource': 'mcp',
+    'mcp:dynamic_tool': 'mcp',
+    'builtin:read_skill_reference': 'skill',
+    'builtin:complete_skill': 'skill',
+    'builtin:activate_skill': 'skill',
+  });
 
-export const RMV1_11_CAPABILITY_REVISIONS_V1: Readonly<Record<Rmv111OperationIdV1, string>> =
+export const MODEL_CAPABILITY_REVISIONS_: Readonly<Record<ModelOperationId, string>> =
   Object.freeze(
     Object.fromEntries(
-      RMV1_11_OPERATION_IDS_V1.map((operationId) => [
+      MODEL_OPERATION_IDS_.map((operationId) => [
         operationId,
-        digestCapabilityBindingValueV1({
+        digestCapabilityBindingValue({
           schema: 'kite.rmv1-11-operation-capability.v1',
           operationId,
-          inputSchema: INPUT_SCHEMAS_V1[operationId],
-          effects: EFFECTS_V1[operationId],
+          inputSchema: INPUT_SCHEMAS_[operationId],
+          effects: EFFECTS_[operationId],
         }),
       ]),
-    ) as Record<Rmv111OperationIdV1, string>,
+    ) as Record<ModelOperationId, string>,
   );
 
-export const RMV1_11_EXECUTOR_REVISIONS_V1: Readonly<Record<Rmv111OperationIdV1, string>> =
-  Object.freeze(
-    Object.fromEntries(
-      RMV1_11_OPERATION_IDS_V1.map((operationId) => [
+export const MODEL_EXECUTOR_REVISIONS_: Readonly<Record<ModelOperationId, string>> = Object.freeze(
+  Object.fromEntries(
+    MODEL_OPERATION_IDS_.map((operationId) => [
+      operationId,
+      digestCapabilityBindingValue({
+        schema: 'kite.rmv1-11-operation-executor.v1',
         operationId,
-        digestCapabilityBindingValueV1({
-          schema: 'kite.rmv1-11-operation-executor.v1',
-          operationId,
-          capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1[operationId],
-        }),
-      ]),
-    ) as Record<Rmv111OperationIdV1, string>,
-  );
+        capabilityRevision: MODEL_CAPABILITY_REVISIONS_[operationId],
+      }),
+    ]),
+  ) as Record<ModelOperationId, string>,
+);
 
-export type BuiltinRuntimeEventValueV1 = RuntimeJsonValueV1 &
-  Readonly<{ type: string; [key: string]: RuntimeJsonValueV1 }>;
+export type BuiltinRuntimeEventValue = RuntimeJsonValue &
+  Readonly<{ type: string; [key: string]: RuntimeJsonValue }>;
 
-export type BuiltinOperationExecutionValueV1 = RuntimeJsonValueV1 &
+export type BuiltinOperationExecutionValue = RuntimeJsonValue &
   Readonly<{
     schema: 'kite.builtin-operation-result.v1';
     ok: boolean;
     stdout: string;
     stderr: string;
-    resultMeta?: Readonly<Record<string, RuntimeJsonValueV1>>;
-    runtimeEvents?: readonly BuiltinRuntimeEventValueV1[];
-    capabilityResult?: RuntimeJsonValueV1;
-    subagentResult?: RuntimeJsonValueV1;
-    filesystemObservation?: Readonly<Record<string, RuntimeJsonValueV1>>;
-    classifierAdviceV1?: Readonly<Record<string, RuntimeJsonValueV1>>;
+    resultMeta?: Readonly<Record<string, RuntimeJsonValue>>;
+    runtimeEvents?: readonly BuiltinRuntimeEventValue[];
+    capabilityResult?: RuntimeJsonValue;
+    subagentResult?: RuntimeJsonValue;
+    filesystemObservation?: Readonly<Record<string, RuntimeJsonValue>>;
+    classifierAdvice?: Readonly<Record<string, RuntimeJsonValue>>;
     terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
     path?: string;
     totalLines?: number;
   }>;
 
-const RMV1_11_MCP_PROVIDER_FAILURE_CODES_V1 = Object.freeze([
+const MODEL_MCP_PROVIDER_FAILURE_CODES_ = Object.freeze([
   'provider_auth_required',
   'provider_approval_required',
   'provider_unavailable',
   'provider_capability_changed',
 ] as const);
 
-type Rmv111McpProviderFailureCodeV1 = (typeof RMV1_11_MCP_PROVIDER_FAILURE_CODES_V1)[number];
+type ModelMcpProviderFailureCode = (typeof MODEL_MCP_PROVIDER_FAILURE_CODES_)[number];
 
-interface Rmv111McpProviderFailureV1 {
-  readonly code: Rmv111McpProviderFailureCodeV1;
+interface ModelMcpProviderFailure {
+  readonly code: ModelMcpProviderFailureCode;
   readonly message: string;
   readonly retryable: boolean;
 }
 
-export interface BuiltinMcpRuntimePortV1 {
+export interface BuiltinMcpRuntimePort {
   getCapabilitySnapshot(): unknown;
   getProviderDirectorySnapshot(): unknown;
   getResourceDirectorySnapshot(): unknown;
@@ -218,17 +214,17 @@ export interface BuiltinMcpRuntimePortV1 {
  * readiness/transport outcome is uncertain and therefore cannot be projected
  * as a confirmed Builtin domain failure.
  */
-export class BuiltinMcpExecutionUnknownErrorV1 extends Error {
+export class BuiltinMcpExecutionUnknownError extends Error {
   readonly code = 'BUILTIN_MCP_EXECUTION_UNKNOWN' as const;
 
   constructor(message = 'MCP execution outcome is unknown.') {
     super(safeMetadata(message, 256) || 'MCP execution outcome is unknown.');
-    this.name = 'BuiltinMcpExecutionUnknownErrorV1';
+    this.name = 'BuiltinMcpExecutionUnknownError';
   }
 }
 
-export interface BuiltinMcpExecutionMechanismV1 {
-  readonly runtime: BuiltinMcpRuntimePortV1;
+export interface BuiltinMcpExecutionMechanism {
+  readonly runtime: BuiltinMcpRuntimePort;
   readonly invocation?: Readonly<{
     capabilityId: string;
     expectedRevision: string;
@@ -238,9 +234,9 @@ export interface BuiltinMcpExecutionMechanismV1 {
 }
 
 /** Invocation-scoped State view and fork mechanism; all Skill semantics stay in Builtin Runtime. */
-export type BuiltinSkillExecutionMechanismV1 = SkillActivationContext;
+export type BuiltinSkillExecutionMechanism = SkillActivationContext;
 
-export interface BuiltinWebExecutionMechanismV1 {
+export interface BuiltinWebExecutionMechanism {
   readonly fetch?: typeof fetch;
   readonly networkBoundary?: Readonly<{
     policyRevision: string;
@@ -249,15 +245,15 @@ export interface BuiltinWebExecutionMechanismV1 {
   readonly unavailable?: Readonly<{ code: string; message: string }>;
 }
 
-export interface Rmv111ExecutionMechanismsV1 extends Readonly<Record<string, unknown>> {
-  readonly mcp?: BuiltinMcpExecutionMechanismV1;
-  readonly skill?: BuiltinSkillExecutionMechanismV1;
-  readonly web?: BuiltinWebExecutionMechanismV1;
+export interface ModelExecutionMechanisms extends Readonly<Record<string, unknown>> {
+  readonly mcp?: BuiltinMcpExecutionMechanism;
+  readonly skill?: BuiltinSkillExecutionMechanism;
+  readonly web?: BuiltinWebExecutionMechanism;
 }
 
-export function isBuiltinOperationExecutionValueV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is BuiltinOperationExecutionValueV1 {
+export function isBuiltinOperationExecutionValue(
+  value: RuntimeJsonValue | undefined,
+): value is BuiltinOperationExecutionValue {
   const record = asRecord(value);
   return Boolean(
     record &&
@@ -268,60 +264,60 @@ export function isBuiltinOperationExecutionValueV1(
   );
 }
 
-export function createModelRuntimeModule(): RuntimeModuleV1 {
-  return defineRuntimeModuleV1({
+export function createModelRuntimeModule(): RuntimeModule {
+  return defineRuntimeModule({
     moduleId: 'kite-builtin-runtime-rmv1-11',
-    providerId: RMV1_11_PROVIDER_ID_V1,
+    providerId: MODEL_PROVIDER_ID_,
     revision: 'rmv1-11',
-    operationIds: RMV1_11_OPERATION_IDS_V1,
-    register: (registry) => registerRmv111OperationsV1(registry),
+    operationIds: MODEL_OPERATION_IDS_,
+    register: (registry) => registerModelOperations(registry),
   });
 }
 
-function registerRmv111OperationsV1(registry: RuntimeModuleRegistryWriterV1): void {
-  registerBuiltinContextSourcesV1(registry);
-  for (const operationId of RMV1_11_OPERATION_IDS_V1) {
-    const capabilityRevision = RMV1_11_CAPABILITY_REVISIONS_V1[operationId];
-    const executorRevision = RMV1_11_EXECUTOR_REVISIONS_V1[operationId];
+function registerModelOperations(registry: RuntimeModuleRegistryWriter): void {
+  registerBuiltinContextSources(registry);
+  for (const operationId of MODEL_OPERATION_IDS_) {
+    const capabilityRevision = MODEL_CAPABILITY_REVISIONS_[operationId];
+    const executorRevision = MODEL_EXECUTOR_REVISIONS_[operationId];
     registry.registerCapability(
-      defineBuiltinCapabilityContractV1(
+      defineBuiltinCapabilityContract(
         {
           capabilityId: operationId,
           revision: capabilityRevision,
-          providerId: RMV1_11_PROVIDER_ID_V1,
+          providerId: MODEL_PROVIDER_ID_,
           title: `Builtin Runtime operation ${operationId}`,
-          executionMechanism: EXECUTION_MECHANISMS_V1[operationId],
+          executionMechanism: EXECUTION_MECHANISMS_[operationId],
           ...(operationId.startsWith('builtin:')
             ? {
                 toolName: operationId.slice('builtin:'.length),
-                description: builtinToolDescriptionV1(operationId.slice('builtin:'.length)),
+                description: builtinToolDescription(operationId.slice('builtin:'.length)),
                 visibility: 'model' as const,
               }
             : { visibility: 'internal' as const }),
-          effects: EFFECTS_V1[operationId],
-          inputSchema: INPUT_SCHEMAS_V1[operationId],
-          inputSchemaDigest: digestCapabilityBindingValueV1(INPUT_SCHEMAS_V1[operationId]),
+          effects: EFFECTS_[operationId],
+          inputSchema: INPUT_SCHEMAS_[operationId],
+          inputSchemaDigest: digestCapabilityBindingValue(INPUT_SCHEMAS_[operationId]),
         },
-        rmv111ContractOptionsV1(operationId, capabilityRevision, EFFECTS_V1[operationId]),
+        modelContractOptions(operationId, capabilityRevision, EFFECTS_[operationId]),
       ),
     );
     registry.registerExecutor({
-      providerId: RMV1_11_PROVIDER_ID_V1,
+      providerId: MODEL_PROVIDER_ID_,
       capabilityId: operationId,
       capabilityRevision,
       executorRevision,
-      execute: (request, context) => executeRmv111OperationV1(operationId, request, context),
-    } satisfies CapabilityExecutorV1);
+      execute: (request, context) => executeModelOperation(operationId, request, context),
+    } satisfies CapabilityExecutor);
   }
 }
 
-function rmv111ContractOptionsV1(
-  operationId: Rmv111OperationIdV1,
+function modelContractOptions(
+  operationId: ModelOperationId,
   revision: string,
-  effects: CapabilityEffectsV1,
+  effects: CapabilityEffects,
 ) {
   const modelVisible = operationId.startsWith('builtin:');
-  const parser = parserForBuiltinOperationV1(operationId, revision);
+  const parser = parserForBuiltinOperation(operationId, revision);
   const readOnly =
     operationId === 'builtin:web_fetch' ||
     operationId === 'builtin:list_mcp_resources' ||
@@ -336,10 +332,10 @@ function rmv111ContractOptionsV1(
     operationId === 'builtin:read_mcp_resource';
   const policyRule =
     operationId === 'builtin:web_fetch'
-      ? webFetchBuiltinPolicyRuleV1
+      ? webFetchBuiltinPolicyRule
       : operationId === 'builtin:activate_skill'
-        ? activateSkillBuiltinPolicyRuleV1
-        : readOnlyBuiltinPolicyRuleV1;
+        ? activateSkillBuiltinPolicyRule
+        : readOnlyBuiltinPolicyRule;
   return {
     parser,
     kind:
@@ -351,11 +347,11 @@ function rmv111ContractOptionsV1(
     minimumApproval:
       operationId === 'builtin:activate_skill' ? ('user' as const) : ('none' as const),
     ...(operationId === 'builtin:activate_skill'
-      ? { availability: activateSkillAvailabilityV1 }
+      ? { availability: activateSkillAvailability }
       : operationId === 'builtin:read_skill_reference' || operationId === 'builtin:complete_skill'
-        ? { availability: readSkillAvailabilityV1 }
+        ? { availability: readSkillAvailability }
         : {}),
-    effectsClassifier: staticEffectsClassifierV1(
+    effectsClassifier: staticEffectsClassifier(
       readOnly
         ? 'read_only'
         : operationId === 'builtin:activate_skill'
@@ -378,7 +374,7 @@ function rmv111ContractOptionsV1(
     ),
     ...(modelVisible
       ? {
-          policyCompiler: createBuiltinPolicyCompilerV1({
+          policyCompiler: createBuiltinPolicyCompiler({
             operationId,
             capabilityRevision: revision,
             parserRevision: parser.parserRevision,
@@ -390,7 +386,7 @@ function rmv111ContractOptionsV1(
       : {}),
     ...(networkRead
       ? {
-          executionTraitsDeclaration: builtinExecutionTraitsV1({
+          executionTraitsDeclaration: builtinExecutionTraits({
             resourceScopes: [{ kind: 'network', key: 'governed-network' }],
             interactionBarrier: false,
             concurrencyGroup: 'parallel-read',
@@ -401,49 +397,49 @@ function rmv111ContractOptionsV1(
   };
 }
 
-async function executeRmv111OperationV1(
-  operationId: Rmv111OperationIdV1,
-  request: Parameters<CapabilityExecutorV1['execute']>[0],
-  context: CapabilityExecutionContextV1,
-): Promise<ExecutionReceiptV1> {
-  const parsed = BUILTIN_ZOD_SCHEMAS_V1[operationId].safeParse(request.input);
+async function executeModelOperation(
+  operationId: ModelOperationId,
+  request: Parameters<CapabilityExecutor['execute']>[0],
+  context: CapabilityExecutionContext,
+): Promise<ExecutionReceipt> {
+  const parsed = BUILTIN_ZOD_SCHEMAS_[operationId].safeParse(request.input);
   const input = parsed.success ? asRecord(parsed.data) : undefined;
   if (!input) return failedReceipt(operationId, request.invocationId, context, 'invalid_input');
-  const mechanisms = context.environment.mechanisms as Rmv111ExecutionMechanismsV1 | undefined;
-  let value: BuiltinOperationExecutionValueV1;
+  const mechanisms = context.environment.mechanisms as ModelExecutionMechanisms | undefined;
+  let value: BuiltinOperationExecutionValue;
   switch (operationId) {
     case 'builtin:list_mcp_resources':
-      value = executeListMcpResourcesV1(input, mechanisms?.mcp?.runtime);
+      value = executeListMcpResources(input, mechanisms?.mcp?.runtime);
       break;
     case 'builtin:list_mcp_tools':
-      value = executeListMcpToolsV1(input, mechanisms?.mcp?.runtime);
+      value = executeListMcpTools(input, mechanisms?.mcp?.runtime);
       break;
     case 'builtin:read_mcp_resource': {
-      const readResult = await executeReadMcpResourceV1(
+      const readResult = await executeReadMcpResource(
         input,
         request.invocationId,
         context,
         mechanisms?.mcp,
       );
-      if (isExecutionReceiptV1(readResult)) return readResult;
+      if (isExecutionReceipt(readResult)) return readResult;
       value = readResult;
       break;
     }
     case 'mcp:dynamic_tool': {
-      const dynamicResult = await executeDynamicMcpToolV1(input, context, mechanisms?.mcp);
-      if (isExecutionReceiptV1(dynamicResult)) return dynamicResult;
+      const dynamicResult = await executeDynamicMcpTool(input, context, mechanisms?.mcp);
+      if (isExecutionReceipt(dynamicResult)) return dynamicResult;
       value = dynamicResult;
       break;
     }
     case 'builtin:web_fetch':
       if (!mechanisms?.web)
         return failedReceipt(operationId, request.invocationId, context, 'web_port_missing');
-      value = await executeWebFetchV1(input, context, mechanisms.web);
+      value = await executeWebFetch(input, context, mechanisms.web);
       break;
     case 'builtin:activate_skill':
       if (!mechanisms?.skill)
         return failedReceipt(operationId, request.invocationId, context, 'skill_port_missing');
-      value = skillEmissionValueV1(
+      value = skillEmissionValue(
         await activateSkillLifecycle(mechanisms.skill, {
           skill_id: stringValue(input.skill_id),
           input: asRecord(input.input) ?? {},
@@ -453,7 +449,7 @@ async function executeRmv111OperationV1(
     case 'builtin:read_skill_reference':
       if (!mechanisms?.skill)
         return failedReceipt(operationId, request.invocationId, context, 'skill_port_missing');
-      value = skillEmissionValueV1(
+      value = skillEmissionValue(
         readSkillReference(mechanisms.skill, {
           activation_id: stringValue(input.activation_id),
           path: stringValue(input.path),
@@ -463,7 +459,7 @@ async function executeRmv111OperationV1(
     case 'builtin:complete_skill':
       if (!mechanisms?.skill)
         return failedReceipt(operationId, request.invocationId, context, 'skill_port_missing');
-      value = skillEmissionValueV1(
+      value = skillEmissionValue(
         completeSkillLifecycle(mechanisms.skill, {
           activation_id: stringValue(input.activation_id),
           output: asRecord(input.output) ?? {},
@@ -474,11 +470,11 @@ async function executeRmv111OperationV1(
   return succeededReceipt(operationId, request.invocationId, context, value);
 }
 
-async function executeWebFetchV1(
+async function executeWebFetch(
   input: Readonly<Record<string, unknown>>,
-  context: CapabilityExecutionContextV1,
-  mechanism: BuiltinWebExecutionMechanismV1,
-): Promise<BuiltinOperationExecutionValueV1> {
+  context: CapabilityExecutionContext,
+  mechanism: BuiltinWebExecutionMechanism,
+): Promise<BuiltinOperationExecutionValue> {
   const url = stringValue(input.url);
   const maxChars = optionalIntegerValue(input.max_chars);
   const timeoutMs = optionalIntegerValue(input.timeout_ms);
@@ -527,7 +523,7 @@ async function executeWebFetchV1(
           : error instanceof Error
             ? error.message
             : String(error),
-      ...(networkFailureCodeV1(error) ? { networkFailureCode: networkFailureCodeV1(error) } : {}),
+      ...(networkFailureCode(error) ? { networkFailureCode: networkFailureCode(error) } : {}),
     };
   }
   const rawContent = output.ok
@@ -541,7 +537,7 @@ async function executeWebFetchV1(
         .filter(Boolean)
         .join('\n')
     : `Failed to fetch ${url}: ${output.error ?? 'unknown error'}`;
-  const modelContent = truncateProjectedOutputV1(
+  const modelContent = truncateProjectedOutput(
     rawContent,
     Math.max(8000, (maxChars ?? 8000) + 500),
   );
@@ -552,7 +548,7 @@ async function executeWebFetchV1(
     stderr: output.ok ? '' : modelContent,
     resultMeta: Object.freeze({
       ...(output.ok && !output.truncated
-        ? { rawResultDigest: projectionDigestV1(rawContent, '', 0) }
+        ? { rawResultDigest: projectionDigest(rawContent, '', 0) }
         : {}),
       truncated: modelContent !== rawContent || (output.ok && output.truncated),
       ...(boundary
@@ -563,13 +559,13 @@ async function executeWebFetchV1(
           }
         : {}),
     }),
-  }) as BuiltinOperationExecutionValueV1;
+  }) as BuiltinOperationExecutionValue;
 }
 
-function executeListMcpResourcesV1(
+function executeListMcpResources(
   input: Readonly<Record<string, unknown>>,
-  provider: BuiltinMcpRuntimePortV1 | undefined,
-): BuiltinOperationExecutionValueV1 {
+  provider: BuiltinMcpRuntimePort | undefined,
+): BuiltinOperationExecutionValue {
   if (
     input.server !== undefined &&
     (typeof input.server !== 'string' || input.server.length === 0)
@@ -625,10 +621,10 @@ function executeListMcpResourcesV1(
   );
 }
 
-function executeListMcpToolsV1(
+function executeListMcpTools(
   input: Readonly<Record<string, unknown>>,
-  provider: BuiltinMcpRuntimePortV1 | undefined,
-): BuiltinOperationExecutionValueV1 {
+  provider: BuiltinMcpRuntimePort | undefined,
+): BuiltinOperationExecutionValue {
   if (!provider) {
     return operationSuccess(
       JSON.stringify({
@@ -642,7 +638,7 @@ function executeListMcpToolsV1(
       }),
     );
   }
-  const result = buildMcpInventoryV1(
+  const result = buildMcpInventory(
     provider.getCapabilitySnapshot(),
     provider.getProviderDirectorySnapshot(),
     input,
@@ -650,12 +646,12 @@ function executeListMcpToolsV1(
   return operationSuccess(JSON.stringify(result));
 }
 
-async function executeReadMcpResourceV1(
+async function executeReadMcpResource(
   input: Readonly<Record<string, unknown>>,
   invocationId: string,
-  context: CapabilityExecutionContextV1,
-  service: BuiltinMcpExecutionMechanismV1 | undefined,
-): Promise<BuiltinOperationExecutionValueV1 | ExecutionReceiptV1> {
+  context: CapabilityExecutionContext,
+  service: BuiltinMcpExecutionMechanism | undefined,
+): Promise<BuiltinOperationExecutionValue | ExecutionReceipt> {
   const server = typeof input.server === 'string' ? input.server : '';
   const uri = typeof input.uri === 'string' ? input.uri : '';
   if (!server || !uri) return operationFailure('server and uri are required');
@@ -673,10 +669,10 @@ async function executeReadMcpResourceV1(
       service.invocation?.transportBoundary,
     );
   } catch (error) {
-    if (error instanceof BuiltinMcpExecutionUnknownErrorV1) throw error;
-    const providerFailure = classifyRmv111McpProviderFailureV1(error);
+    if (error instanceof BuiltinMcpExecutionUnknownError) throw error;
+    const providerFailure = classifyModelMcpProviderFailure(error);
     if (providerFailure) {
-      return providerFailureReceiptV1(
+      return providerFailureReceipt(
         'builtin:read_mcp_resource',
         invocationId,
         context,
@@ -688,7 +684,7 @@ async function executeReadMcpResourceV1(
   const limit = 128 * 1024;
   if (content.length <= limit) {
     return operationSuccess(content, {
-      rawResultDigest: projectionDigestV1(content, '', 0),
+      rawResultDigest: projectionDigest(content, '', 0),
       truncated: false,
     });
   }
@@ -700,15 +696,15 @@ async function executeReadMcpResourceV1(
       original_characters: content.length,
       message: 'The MCP resource exceeded the model-facing output limit.',
     }),
-    { rawResultDigest: projectionDigestV1(content, '', 0), truncated: true },
+    { rawResultDigest: projectionDigest(content, '', 0), truncated: true },
   );
 }
 
-async function executeDynamicMcpToolV1(
+async function executeDynamicMcpTool(
   input: Readonly<Record<string, unknown>>,
-  context: CapabilityExecutionContextV1,
-  service: BuiltinMcpExecutionMechanismV1 | undefined,
-): Promise<BuiltinOperationExecutionValueV1 | ExecutionReceiptV1> {
+  context: CapabilityExecutionContext,
+  service: BuiltinMcpExecutionMechanism | undefined,
+): Promise<BuiltinOperationExecutionValue | ExecutionReceipt> {
   const capabilityId = typeof input.capability_id === 'string' ? input.capability_id : '';
   const capabilityRevision =
     typeof input.capability_revision === 'string' ? input.capability_revision : '';
@@ -744,10 +740,10 @@ async function executeDynamicMcpToolV1(
       }),
     );
   } catch (error) {
-    if (error instanceof BuiltinMcpExecutionUnknownErrorV1) throw error;
-    const providerFailure = classifyRmv111McpProviderFailureV1(error);
+    if (error instanceof BuiltinMcpExecutionUnknownError) throw error;
+    const providerFailure = classifyModelMcpProviderFailure(error);
     if (providerFailure) {
-      return providerFailureReceiptV1(
+      return providerFailureReceipt(
         'mcp:dynamic_tool',
         context.attempt.invocationId,
         context,
@@ -757,16 +753,16 @@ async function executeDynamicMcpToolV1(
     return operationFailure(error instanceof Error ? error.message : String(error));
   }
   if (!raw) return operationFailure('MCP Provider returned an invalid result envelope.');
-  const normalized: Record<string, RuntimeJsonValueV1> = {
+  const normalized: Record<string, RuntimeJsonValue> = {
     status: raw.isError === true ? 'error' : 'success',
-    content: (Array.isArray(raw.content) ? raw.content : []) as RuntimeJsonValueV1[],
+    content: (Array.isArray(raw.content) ? raw.content : []) as RuntimeJsonValue[],
     ...(raw.structuredContent === undefined
       ? {}
-      : { structuredContent: raw.structuredContent as RuntimeJsonValueV1 }),
+      : { structuredContent: raw.structuredContent as RuntimeJsonValue }),
   };
   const outputSchema = asRecord(descriptor.outputSchema);
   if (outputSchema && raw.structuredContent !== undefined) {
-    const compiled = compileCapabilitySchemaV1(outputSchema);
+    const compiled = compileCapabilitySchema(outputSchema);
     if (!compiled.ok || !compiled.compiled.validate(raw.structuredContent)) {
       normalized.status = 'partial';
       normalized.error = {
@@ -801,18 +797,18 @@ async function executeDynamicMcpToolV1(
     stdout: output,
     stderr: '',
     resultMeta: Object.freeze({
-      rawResultDigest: projectionDigestV1(JSON.stringify(raw), '', 0),
+      rawResultDigest: projectionDigest(JSON.stringify(raw), '', 0),
       truncated: serialized.length > limit,
     }),
     capabilityResult: normalized,
-  }) as BuiltinOperationExecutionValueV1;
+  }) as BuiltinOperationExecutionValue;
 }
 
-function buildMcpInventoryV1(
+function buildMcpInventory(
   capabilityValue: unknown,
   providerValue: unknown,
   query: Readonly<Record<string, unknown>>,
-): RuntimeJsonValueV1 {
+): RuntimeJsonValue {
   const capabilities = asRecord(capabilityValue);
   const providers = asRecord(providerValue);
   const descriptors = arrayOfRecords(capabilities?.descriptors);
@@ -830,7 +826,7 @@ function buildMcpInventoryV1(
   const limit = requestedLimit ?? 50;
   let offset = 0;
   if (typeof query.cursor === 'string') {
-    const cursor = decodeInventoryCursorV1(query.cursor);
+    const cursor = decodeInventoryCursor(query.cursor);
     if (!cursor) return { ok: false, code: 'invalid_cursor', message: 'Invalid cursor.' };
     if (
       cursor.catalogRevision !== catalogRevision ||
@@ -958,7 +954,7 @@ function buildMcpInventoryV1(
   };
 }
 
-function decodeInventoryCursorV1(raw: string):
+function decodeInventoryCursor(raw: string):
   | Readonly<{
       catalogRevision: string;
       providerDirectoryRevision: string;
@@ -1019,16 +1015,16 @@ function inventoryNextAction(status: string): Readonly<Record<string, string>> {
 }
 
 function succeededReceipt(
-  operationId: Rmv111OperationIdV1,
+  operationId: ModelOperationId,
   invocationId: string,
-  context: CapabilityExecutionContextV1,
-  value: BuiltinOperationExecutionValueV1,
-): ExecutionReceiptV1 {
+  context: CapabilityExecutionContext,
+  value: BuiltinOperationExecutionValue,
+): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: RMV1_11_PROVIDER_ID_V1,
-    executorRevision: RMV1_11_EXECUTOR_REVISIONS_V1[operationId],
+    providerId: MODEL_PROVIDER_ID_,
+    executorRevision: MODEL_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'succeeded',
     dispatchCertainty: 'attempted',
@@ -1038,16 +1034,16 @@ function succeededReceipt(
 }
 
 function failedReceipt(
-  operationId: Rmv111OperationIdV1,
+  operationId: ModelOperationId,
   invocationId: string,
-  context: CapabilityExecutionContextV1,
+  context: CapabilityExecutionContext,
   code: string,
-): ExecutionReceiptV1 {
+): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: RMV1_11_PROVIDER_ID_V1,
-    executorRevision: RMV1_11_EXECUTOR_REVISIONS_V1[operationId],
+    providerId: MODEL_PROVIDER_ID_,
+    executorRevision: MODEL_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'failed',
     dispatchCertainty: 'none',
@@ -1060,17 +1056,17 @@ function failedReceipt(
   });
 }
 
-function providerFailureReceiptV1(
+function providerFailureReceipt(
   operationId: 'builtin:read_mcp_resource' | 'mcp:dynamic_tool',
   invocationId: string,
-  context: CapabilityExecutionContextV1,
-  failure: Readonly<Rmv111McpProviderFailureV1>,
-): ExecutionReceiptV1 {
+  context: CapabilityExecutionContext,
+  failure: Readonly<ModelMcpProviderFailure>,
+): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: RMV1_11_PROVIDER_ID_V1,
-    executorRevision: RMV1_11_EXECUTOR_REVISIONS_V1[operationId],
+    providerId: MODEL_PROVIDER_ID_,
+    executorRevision: MODEL_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'failed' as const,
     // The Builtin executor was entered.  The injected readiness wrapper may
@@ -1087,28 +1083,28 @@ function providerFailureReceiptV1(
 
 function operationSuccess(
   stdout: string,
-  resultMeta: Readonly<Record<string, RuntimeJsonValueV1>> = {},
-): BuiltinOperationExecutionValueV1 {
+  resultMeta: Readonly<Record<string, RuntimeJsonValue>> = {},
+): BuiltinOperationExecutionValue {
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok: true,
     stdout,
     stderr: '',
     resultMeta: Object.freeze(resultMeta),
-  }) as BuiltinOperationExecutionValueV1;
+  }) as BuiltinOperationExecutionValue;
 }
 
-function operationFailure(stderr: string): BuiltinOperationExecutionValueV1 {
+function operationFailure(stderr: string): BuiltinOperationExecutionValue {
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok: false,
     stdout: '',
     stderr,
     resultMeta: Object.freeze({}),
-  }) as BuiltinOperationExecutionValueV1;
+  }) as BuiltinOperationExecutionValue;
 }
 
-function skillEmissionValueV1(emission: SkillLifecycleEmission): BuiltinOperationExecutionValueV1 {
+function skillEmissionValue(emission: SkillLifecycleEmission): BuiltinOperationExecutionValue {
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok: emission.ok,
@@ -1116,9 +1112,9 @@ function skillEmissionValueV1(emission: SkillLifecycleEmission): BuiltinOperatio
     stderr: emission.stderr,
     resultMeta: Object.freeze({}),
     ...(emission.runtimeEvents
-      ? { runtimeEvents: emission.runtimeEvents as unknown as BuiltinRuntimeEventValueV1[] }
+      ? { runtimeEvents: emission.runtimeEvents as unknown as BuiltinRuntimeEventValue[] }
       : {}),
-  }) as BuiltinOperationExecutionValueV1;
+  }) as BuiltinOperationExecutionValue;
 }
 
 function safeMetadata(value: string, maximum = 96): string {
@@ -1160,7 +1156,7 @@ function optionalIntegerValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
 }
 
-function truncateProjectedOutputV1(output: string, maxLength: number): string {
+function truncateProjectedOutput(output: string, maxLength: number): string {
   if (output.length <= maxLength) return output;
   const keep = Math.floor(maxLength / 2);
   const head = output.slice(0, keep);
@@ -1169,29 +1165,29 @@ function truncateProjectedOutputV1(output: string, maxLength: number): string {
   return `${head}\n... [${omittedLines} lines omitted, ${output.length - 2 * keep} total chars truncated]\n${tail}`;
 }
 
-function networkFailureCodeV1(error: unknown): string | undefined {
+function networkFailureCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object' || !('code' in error)) return undefined;
   return typeof error.code === 'string' ? error.code : undefined;
 }
 
-function projectionDigestV1(stdout: string, stderr: string, exitCode: number): string {
+function projectionDigest(stdout: string, stderr: string, exitCode: number): string {
   return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
 }
 
-function classifyRmv111McpProviderFailureV1(
+function classifyModelMcpProviderFailure(
   error: unknown,
-): Readonly<Rmv111McpProviderFailureV1> | undefined {
+): Readonly<ModelMcpProviderFailure> | undefined {
   if (!isMcpProviderError(error)) return undefined;
   const kind = error.kind;
   const message = safeMetadata(error.message, 256);
   return Object.freeze({
     code: kind,
-    message: message || defaultMcpProviderFailureMessageV1(kind),
+    message: message || defaultMcpProviderFailureMessage(kind),
     retryable: error.retryable,
   });
 }
 
-function defaultMcpProviderFailureMessageV1(code: Rmv111McpProviderFailureCodeV1): string {
+function defaultMcpProviderFailureMessage(code: ModelMcpProviderFailureCode): string {
   switch (code) {
     case 'provider_auth_required':
       return 'MCP provider authentication is required.';
@@ -1204,7 +1200,7 @@ function defaultMcpProviderFailureMessageV1(code: Rmv111McpProviderFailureCodeV1
   }
 }
 
-function isExecutionReceiptV1(value: unknown): value is ExecutionReceiptV1 {
+function isExecutionReceipt(value: unknown): value is ExecutionReceipt {
   const record = asRecord(value);
   return Boolean(
     record &&

@@ -3,55 +3,55 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import {
-  admitRecoveryAttemptV1,
-  advanceToolRecoveryResponseV1,
-  classifyToolOutcomeV1,
-  closeToolRecoveryScopeV1,
-  createToolRecoveryJournalV1,
-  decideCompletionV2,
-  isToolOutcomeV1,
-  isToolRecoveryQualityBlockedV1,
-  mergeToolRecoveryJournalsV1,
-  normalizeToolRecoveryJournalV1,
+  admitRecoveryAttempt,
+  advanceToolRecoveryResponse,
+  classifyToolOutcome,
+  closeToolRecoveryScope,
+  createToolRecoveryJournal,
+  decidePlannedCompletion,
+  isToolOutcome,
+  isToolRecoveryQualityBlocked,
+  mergeToolRecoveryJournals,
+  normalizeToolRecoveryJournal,
   planCompletionBlocker,
-  projectPlanCompletionEvidenceV1,
-  recordRecoveryExhaustionV1,
-  recordRecoveryFailureV1,
-  recordRecoveryInvocationV1,
-  recordToolOwnedProgressV1,
-  type ToolOutcomeV1,
-  toolFailureInstanceIdV1,
-  toolInvocationFingerprintV1,
+  projectPlanCompletionEvidence,
+  recordRecoveryExhaustion,
+  recordRecoveryFailure,
+  recordRecoveryInvocation,
+  recordToolOwnedProgress,
+  type ToolOutcome,
+  toolFailureInstanceId,
+  toolInvocationFingerprint,
 } from '@kite/agent-kernel';
 import {
-  canonicalizeCapabilityArgumentsV1,
-  createCapabilityBindingV1,
-  descriptorRevisionV1,
-  projectBuiltinUnknownToolFieldsObservationV1,
+  canonicalizeCapabilityArguments,
+  createCapabilityBinding,
+  descriptorRevision,
+  projectBuiltinUnknownToolFieldsObservation,
 } from '@kite/builtin-runtime';
 import { McpConnectionManager, McpProviderError } from '@kite/builtin-runtime/mcp';
 import { buildContextProjection } from '@kite/builtin-runtime/model';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { runStateRuntimeLoopV1 } from '#app/bootstrap/runtime/state-runner';
-import { projectSubagentResultV1 } from '#builtin-runtime';
+import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
+import { projectSubagentResult } from '#builtin-runtime';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
-  StateHostSessionHarnessV1 as AgentKernel,
-  restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1,
+  StateHostSessionHarness as AgentKernel,
+  restoreStateHostSessionHarness as restoreStateKernelCoordinator,
 } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
-import { createProviderReadinessTestHarnessV1 } from '../helpers/provider-readiness';
+import { createProviderReadinessTestHarness } from '../helpers/provider-readiness';
 import {
-  createTestRuntimeEffectExecutorV1,
-  executeTestRuntimeToolsV1,
-  testBuiltinToolCatalogV1,
-  testCapabilityArtifactWriterV1,
-  testRuntimeCapabilityExecutionPortV1,
+  createTestRuntimeEffectExecutor,
+  executeTestRuntimeTools,
+  testBuiltinToolCatalog,
+  testCapabilityArtifactWriter,
+  testRuntimeCapabilityExecutionPort,
 } from '../helpers/runtime-model';
 import { shellTool } from '../helpers/shell-executor';
 
@@ -61,15 +61,15 @@ function canonicalMcpDescriptor(
   input: Omit<CapabilityDescriptor, 'revision'> & { revision?: string },
 ): CapabilityDescriptor {
   const { revision: _ignored, ...withoutRevision } = input;
-  return { ...withoutRevision, revision: descriptorRevisionV1(withoutRevision) };
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
 }
 
 function issueMcpBinding(
-  state: ReturnType<typeof createRuntimeHostStateInitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostStateInitialState>,
   descriptor: CapabilityDescriptor,
   exposedToolName: string,
 ) {
-  const binding = createCapabilityBindingV1({
+  const binding = createCapabilityBinding({
     capabilityId: descriptor.capabilityId,
     capabilityRevision: descriptor.revision,
     exposedToolName,
@@ -80,15 +80,15 @@ function issueMcpBinding(
   return binding;
 }
 
-const correctArgsOutcome = classifyToolOutcomeV1({
+const correctArgsOutcome = classifyToolOutcome({
   status: 'failed',
   failure: classifyFailure('tool_invalid_args', 'private args'),
   authority: { dispatchState: 'not_started', externalEffects: 'none' },
 });
 
-describe('ToolOutcomeV1', () => {
+describe('ToolOutcome', () => {
   test('rejects a non-canonical current terminal before reducer consumption', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'non-canonical-current-terminal',
       userId: 'user',
@@ -104,7 +104,7 @@ describe('ToolOutcomeV1', () => {
   });
 
   test('records a business rejection after tool.started as started authority', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'started-business-rejection',
       userId: 'user',
@@ -120,7 +120,7 @@ describe('ToolOutcomeV1', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue = [...state.tools.queue, 'call'];
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
 
     kernel.processEventBatch([
@@ -128,7 +128,7 @@ describe('ToolOutcomeV1', () => {
       { type: 'tool.rejected', toolCallId: 'call', reason: 'plan_identity_required' },
     ]);
 
-    expect(kernel.getState().tools.calls.call?.outcomeV1).toMatchObject({
+    expect(kernel.getState().tools.calls.call?.outcome).toMatchObject({
       status: 'rejected',
       dispatchState: 'started',
       externalEffects: 'unknown',
@@ -139,7 +139,7 @@ describe('ToolOutcomeV1', () => {
 
   test('policy and approval authority force zero-dispatch never regardless of tool advice', () => {
     for (const kind of ['policy_denied', 'approval_rejected'] as const) {
-      const outcome = classifyToolOutcomeV1({
+      const outcome = classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure(kind, 'sensitive detail'),
         authority: { policyDenied: true, dispatchState: 'not_started', externalEffects: 'none' },
@@ -159,7 +159,7 @@ describe('ToolOutcomeV1', () => {
   });
 
   test('fails closed when globally valid ToolSpec detail advice belongs to another failure kind', () => {
-    const outcome = classifyToolOutcomeV1({
+    const outcome = classifyToolOutcome({
       status: 'failed',
       failure: classifyFailure('tool_runtime_error', 'private runtime failure'),
       authority: { dispatchState: 'started', externalEffects: 'none', replaySafety: 'safe_read' },
@@ -176,11 +176,11 @@ describe('ToolOutcomeV1', () => {
       },
       diagnosticCodes: ['classifier_conflict'],
     });
-    expect(isToolOutcomeV1(outcome)).toBe(true);
+    expect(isToolOutcome(outcome)).toBe(true);
   });
 
   test('classifier conflict and unknown detail fail closed', () => {
-    const outcome = classifyToolOutcomeV1({
+    const outcome = classifyToolOutcome({
       status: 'failed',
       failure: classifyFailure('tool_runtime_error', 'raw error'),
       authority: { dispatchState: 'started', externalEffects: 'unknown' },
@@ -198,7 +198,7 @@ describe('ToolOutcomeV1', () => {
       diagnosticCodes: ['classifier_invalid'],
     });
 
-    const conflicting = classifyToolOutcomeV1({
+    const conflicting = classifyToolOutcome({
       status: 'failed',
       failure: classifyFailure('provider_unavailable', 'redacted'),
       authority: { dispatchState: 'started', externalEffects: 'unknown' },
@@ -218,7 +218,7 @@ describe('ToolOutcomeV1', () => {
   });
 
   test('only a pre-dispatch or proven safe-read/idempotency receipt permits one auto retry', () => {
-    const candidates: Array<[Partial<ToolOutcomeV1>, boolean]> = [
+    const candidates: Array<[Partial<ToolOutcome>, boolean]> = [
       [{ dispatchState: 'not_started', externalEffects: 'none' }, true],
       [{ dispatchState: 'started', externalEffects: 'none', replaySafety: 'safe_read' }, true],
       [
@@ -229,7 +229,7 @@ describe('ToolOutcomeV1', () => {
       [{ dispatchState: 'unknown', externalEffects: 'unknown' }, false],
     ];
     for (const [candidate, expected] of candidates) {
-      const outcome = classifyToolOutcomeV1({
+      const outcome = classifyToolOutcome({
         status: 'failed',
         failure: classifyFailure('provider_unavailable', 'not persisted'),
         authority: {
@@ -249,7 +249,7 @@ describe('ToolOutcomeV1', () => {
   });
 
   test('unknown-field observation is low cardinality and never retains names or values', () => {
-    const observation = projectBuiltinUnknownToolFieldsObservationV1({
+    const observation = projectBuiltinUnknownToolFieldsObservation({
       toolName: 'read_file',
       unknownFieldCount: 2,
       schemaRevision: 'builtin-v3',
@@ -263,7 +263,7 @@ describe('ToolOutcomeV1', () => {
     expect(JSON.stringify(observation)).not.toContain('unexpected_secret');
     expect(JSON.stringify(observation)).not.toContain('hunter2');
     expect(
-      projectBuiltinUnknownToolFieldsObservationV1({
+      projectBuiltinUnknownToolFieldsObservation({
         toolName: 'mcp__private__send',
         unknownFieldCount: 1,
         schemaRevision: 'dynamic',
@@ -272,7 +272,7 @@ describe('ToolOutcomeV1', () => {
   });
 
   test('rejects persisted envelopes whose recovery semantics conflict with status or certainty', () => {
-    const failed = classifyToolOutcomeV1({
+    const failed = classifyToolOutcome({
       status: 'failed',
       failure: classifyFailure('provider_unavailable', 'private'),
       authority: { dispatchState: 'started', externalEffects: 'none', replaySafety: 'safe_read' },
@@ -310,30 +310,30 @@ describe('ToolOutcomeV1', () => {
         },
       },
     ];
-    for (const candidate of contradictory) expect(isToolOutcomeV1(candidate)).toBe(false);
+    for (const candidate of contradictory) expect(isToolOutcome(candidate)).toBe(false);
   });
 
   test('rejects rejected retry and kind/detail/recovery authority contradictions', () => {
-    const rejectedRetry = classifyToolOutcomeV1({
+    const rejectedRetry = classifyToolOutcome({
       status: 'failed',
       failure: classifyFailure('provider_unavailable', 'redacted'),
       authority: { dispatchState: 'not_started', externalEffects: 'none' },
       toolAdvice: { disposition: 'retry_once', maximumAdditionalCalls: 1 },
     });
     expect(
-      isToolOutcomeV1({
+      isToolOutcome({
         ...rejectedRetry,
         status: 'rejected',
       }),
     ).toBe(false);
     expect(
-      isToolOutcomeV1({
+      isToolOutcome({
         ...correctArgsOutcome,
         failure: { kind: 'policy_denied', detailCode: 'invalid_arguments' },
       }),
     ).toBe(false);
     expect(
-      isToolOutcomeV1({
+      isToolOutcome({
         ...correctArgsOutcome,
         failure: { kind: 'policy_denied', detailCode: 'policy_denied' },
       }),
@@ -342,7 +342,7 @@ describe('ToolOutcomeV1', () => {
 
   test('accepts Runtime-authoritative phase rejection envelopes without losing phase detail', () => {
     for (const kind of ['phase_deferred', 'phase_denied'] as const) {
-      const outcome = classifyToolOutcomeV1({
+      const outcome = classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure(kind, 'redacted'),
         authority: {
@@ -356,7 +356,7 @@ describe('ToolOutcomeV1', () => {
         failure: { kind, detailCode: kind },
         recovery: { disposition: 'correct_args', maximumAdditionalCalls: 1 },
       });
-      expect(isToolOutcomeV1(outcome)).toBe(true);
+      expect(isToolOutcome(outcome)).toBe(true);
     }
   });
 
@@ -414,7 +414,7 @@ describe('ToolOutcomeV1', () => {
         'approval_rejected',
         'auto_review_rejected',
       ].includes(kind);
-      const outcome = classifyToolOutcomeV1({
+      const outcome = classifyToolOutcome({
         status: authoritativeDeny ? 'rejected' : 'failed',
         failure: classifyFailure(kind, 'redacted'),
         authority: {
@@ -425,10 +425,10 @@ describe('ToolOutcomeV1', () => {
           approvalDenied: kind === 'approval_rejected' || kind === 'auto_review_rejected',
         },
       });
-      expect(isToolOutcomeV1(outcome)).toBe(true);
+      expect(isToolOutcome(outcome)).toBe(true);
       if (kind !== 'approval_rejected') {
         expect(
-          isToolOutcomeV1({
+          isToolOutcome({
             ...outcome,
             failure: { kind, detailCode: 'approval_rejected' },
           }),
@@ -440,7 +440,7 @@ describe('ToolOutcomeV1', () => {
 
 describe('ToolOutcome controller recovery integration', () => {
   test('persists safe-read retry evidence before the one authorized replay', async () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-outcome-safe-read-retry',
       userId: 'user',
@@ -510,13 +510,13 @@ describe('ToolOutcome controller recovery integration', () => {
       order.push(`dispatch-${calls}`);
       return { content: [] };
     };
-    const readiness = createProviderReadinessTestHarnessV1(runtimeManager, state, (event) => {
+    const readiness = createProviderReadinessTestHarness(runtimeManager, state, (event) => {
       order.push(`persist:${event.type}`);
       persisted.push(event.type);
       return true;
     });
 
-    await executeTestRuntimeToolsV1({
+    await executeTestRuntimeTools({
       state,
       toolCallIds: ['read'],
       mcpManager: runtimeManager,
@@ -535,7 +535,7 @@ describe('ToolOutcome controller recovery integration', () => {
         providerName: 'test',
         providerType: 'openai-compatible',
         sandbox: { enabled: false },
-        features: { capabilityCatalogV1: true, mcpRuntimeBindingV1: true },
+        features: { capabilityCatalog: true, mcpRuntimeBinding: true },
       },
     });
 
@@ -571,7 +571,7 @@ describe('ToolOutcome controller recovery integration', () => {
   });
 
   test('does not perform the second provider dispatch when retry evidence is not durably acked', async () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-outcome-safe-read-persist-failure',
       userId: 'user',
@@ -631,8 +631,8 @@ describe('ToolOutcome controller recovery integration', () => {
       calls += 1;
       return { content: [] };
     };
-    const readiness = createProviderReadinessTestHarnessV1(runtimeManager, state, () => false);
-    const events = await executeTestRuntimeToolsV1({
+    const readiness = createProviderReadinessTestHarness(runtimeManager, state, () => false);
+    const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['read'],
       mcpManager: runtimeManager,
@@ -647,7 +647,7 @@ describe('ToolOutcome controller recovery integration', () => {
         providerName: 'test',
         providerType: 'openai-compatible',
         sandbox: { enabled: false },
-        features: { capabilityCatalogV1: true, mcpRuntimeBindingV1: true },
+        features: { capabilityCatalog: true, mcpRuntimeBinding: true },
       },
     });
     expect(calls).toBe(0);
@@ -687,10 +687,10 @@ describe('ToolOutcome controller recovery integration', () => {
       providerName: 'test',
       providerType: 'openai-compatible' as const,
       sandbox: { enabled: false },
-      features: { capabilityCatalogV1: true, mcpRuntimeBindingV1: true },
+      features: { capabilityCatalog: true, mcpRuntimeBinding: true },
     };
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
@@ -709,7 +709,7 @@ describe('ToolOutcome controller recovery integration', () => {
         createdAtTurnId: state.turn.turnId,
       };
       state.tools.queue = [...state.tools.queue, 'read'];
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       const persistedBatches: string[][] = [];
       const append = store.appendEventsAndSnapshot.bind(store);
       let retryAcked = false;
@@ -744,18 +744,18 @@ describe('ToolOutcome controller recovery integration', () => {
           retryable: dispatches === 1,
         });
       };
-      const executor = createTestRuntimeEffectExecutorV1({
+      const executor = createTestRuntimeEffectExecutor({
         config,
         model: {} as never,
         mcpManager: runtimeManager,
         runtimeStore: store,
-        builtinToolCatalog: testBuiltinToolCatalogV1(),
-        capabilityArtifactStore: testCapabilityArtifactWriterV1(),
-        capabilityExecution: testRuntimeCapabilityExecutionPortV1(),
+        builtinToolCatalog: testBuiltinToolCatalog(),
+        capabilityArtifactStore: testCapabilityArtifactWriter(),
+        capabilityExecution: testRuntimeCapabilityExecutionPort(),
       });
       let crashed = false;
       try {
-        for await (const _event of runStateRuntimeLoopV1(kernel, executor, {
+        for await (const _event of runStateRuntimeLoop(kernel, executor, {
           requestAction: async () => ({ type: 'cancel', interactionId: 'none' }),
         })) {
           // Drain until the injected Store fault aborts the effect.
@@ -775,12 +775,12 @@ describe('ToolOutcome controller recovery integration', () => {
       });
       kernel.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: directory,
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState().toolRecovery.failures[retryFailureId!]).toMatchObject({
         automaticRetryAttempts: 1,
@@ -800,7 +800,7 @@ describe('ToolOutcome controller recovery integration', () => {
       expect(restoredState.tools.calls['read-after-restart']?.recoveryAdmission).toBe(
         'recovery_exhausted',
       );
-      const blocked = await executeTestRuntimeToolsV1({
+      const blocked = await executeTestRuntimeTools({
         state: restoredState,
         toolCallIds: ['read-after-restart'],
         mcpManager: runtimeManager,
@@ -817,7 +817,7 @@ describe('ToolOutcome controller recovery integration', () => {
 
 describe('durable recovery journal', () => {
   test('keeps journal_invalid absorbing across every recovery mutator', () => {
-    const invalid = normalizeToolRecoveryJournalV1(undefined, TEST_RECOVERY_IDENTITY_KEY);
+    const invalid = normalizeToolRecoveryJournal(undefined, TEST_RECOVERY_IDENTITY_KEY);
     const failureInput = {
       toolCallId: 'after-invalid',
       toolName: 'read_file',
@@ -827,19 +827,19 @@ describe('durable recovery journal', () => {
       taskId: 'invalid-task',
       turnId: 'invalid-turn',
     };
-    const recorded = recordRecoveryFailureV1(invalid, failureInput);
+    const recorded = recordRecoveryFailure(invalid, failureInput);
     const failureId = recorded.order.at(-1)!;
-    const progressed = recordToolOwnedProgressV1(recorded, {
+    const progressed = recordToolOwnedProgress(recorded, {
       kind: 'receipt',
       referenceId: 'success-receipt',
       resolvesFailureIds: [failureId],
     });
-    const closed = closeToolRecoveryScopeV1(progressed, {
+    const closed = closeToolRecoveryScope(progressed, {
       kind: 'failure',
       failureIds: [failureId],
       resolution: 'skipped',
     });
-    const exhausted = recordRecoveryExhaustionV1(closed, {
+    const exhausted = recordRecoveryExhaustion(closed, {
       ...failureInput,
       toolCallId: 'exhaustion-after-invalid',
     });
@@ -849,7 +849,7 @@ describe('durable recovery journal', () => {
         reasonCode: 'journal_invalid',
       });
       expect(
-        admitRecoveryAttemptV1(journal, {
+        admitRecoveryAttempt(journal, {
           toolCallId: 'escape-after-invalid',
           toolName: 'write_plan',
           invocationFingerprint: 'f'.repeat(64),
@@ -860,13 +860,13 @@ describe('durable recovery journal', () => {
         }),
       ).toMatchObject({ admitted: false });
       expect(
-        isToolRecoveryQualityBlockedV1(journal, {
+        isToolRecoveryQualityBlocked(journal, {
           taskId: 'different-task',
           turnId: 'different-turn',
         }),
       ).toBe(true);
       expect(
-        admitRecoveryAttemptV1(journal, {
+        admitRecoveryAttempt(journal, {
           toolCallId: 'cross-turn-after-invalid',
           toolName: 'read_file',
           invocationFingerprint: '1'.repeat(64),
@@ -880,9 +880,9 @@ describe('durable recovery journal', () => {
   });
 
   test('prunes the 129th record with its recovery lineage intact', () => {
-    let journal = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
+    let journal = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
     for (let index = 0; index < 127; index += 1) {
-      journal = recordRecoveryFailureV1(journal, {
+      journal = recordRecoveryFailure(journal, {
         toolCallId: `old-${index}`,
         toolName: 'read_file',
         invocationFingerprint: index.toString(16).padStart(64, '0'),
@@ -892,7 +892,7 @@ describe('durable recovery journal', () => {
         turnId: 'bounded-turn',
       });
     }
-    journal = recordRecoveryFailureV1(journal, {
+    journal = recordRecoveryFailure(journal, {
       toolCallId: 'lineage-parent',
       toolName: 'read_file',
       invocationFingerprint: 'a'.repeat(64),
@@ -902,12 +902,12 @@ describe('durable recovery journal', () => {
       turnId: 'bounded-turn',
     });
     const parentId = journal.order.at(-1)!;
-    journal = recordRecoveryFailureV1(journal, {
+    journal = recordRecoveryFailure(journal, {
       toolCallId: 'lineage-child',
       toolName: 'read_file',
       invocationFingerprint: 'b'.repeat(64),
       modelMessageId: 'lineage-child-model',
-      outcome: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'failed',
         failure: classifyFailure('tool_invalid_args', 'redacted'),
         authority: { dispatchState: 'not_started', externalEffects: 'none' },
@@ -922,25 +922,22 @@ describe('durable recovery journal', () => {
     expect(journal.failures[parentId]).toBeDefined();
     expect(journal.failures[childId]?.outcome.lineage?.recoveryOf).toBe(parentId);
     expect(
-      normalizeToolRecoveryJournalV1(
-        JSON.parse(JSON.stringify(journal)),
-        TEST_RECOVERY_IDENTITY_KEY,
-      ),
+      normalizeToolRecoveryJournal(JSON.parse(JSON.stringify(journal)), TEST_RECOVERY_IDENTITY_KEY),
     ).toEqual(journal);
   });
 
   test('canonical identity preserves malformed raw equality and MCP schema defaults', () => {
-    const malformedOne = toolInvocationFingerprintV1({
+    const malformedOne = toolInvocationFingerprint({
       toolName: 'read_file',
       parseCode: 'invalid_arguments',
       unparsedArgs: { path: 1 },
     });
-    const malformedOneAgain = toolInvocationFingerprintV1({
+    const malformedOneAgain = toolInvocationFingerprint({
       toolName: 'read_file',
       parseCode: 'invalid_arguments',
       unparsedArgs: { path: 1 },
     });
-    const malformedTwo = toolInvocationFingerprintV1({
+    const malformedTwo = toolInvocationFingerprint({
       toolName: 'read_file',
       parseCode: 'invalid_arguments',
       unparsedArgs: { path: 2 },
@@ -953,25 +950,25 @@ describe('durable recovery journal', () => {
       properties: { limit: { type: 'integer', default: 10 } },
       additionalProperties: false,
     };
-    expect(canonicalizeCapabilityArgumentsV1(schema, {})).toEqual({
+    expect(canonicalizeCapabilityArguments(schema, {})).toEqual({
       ok: true,
       args: { limit: 10 },
     });
-    expect(canonicalizeCapabilityArgumentsV1(schema, { limit: 10 })).toEqual({
+    expect(canonicalizeCapabilityArguments(schema, { limit: 10 })).toEqual({
       ok: true,
       args: { limit: 10 },
     });
   });
 
   test('fails closed instead of resetting the ceiling when persisted journal data is malformed', () => {
-    expect(normalizeToolRecoveryJournalV1(undefined, TEST_RECOVERY_IDENTITY_KEY)).toMatchObject({
+    expect(normalizeToolRecoveryJournal(undefined, TEST_RECOVERY_IDENTITY_KEY)).toMatchObject({
       schemaVersion: 1,
       failures: {},
       order: [],
       progressRevision: 0,
       qualityGuard: { blocked: true, reasonCode: 'journal_invalid', observedFailures: 0 },
     });
-    const malformed = normalizeToolRecoveryJournalV1(
+    const malformed = normalizeToolRecoveryJournal(
       {
         schemaVersion: 1,
         identityKey: 'a'.repeat(64),
@@ -988,7 +985,7 @@ describe('durable recovery journal', () => {
       observedFailures: 1,
     });
     expect(
-      admitRecoveryAttemptV1(malformed, {
+      admitRecoveryAttempt(malformed, {
         toolCallId: 'next',
         toolName: 'read_file',
         invocationFingerprint: 'b'.repeat(64),
@@ -997,21 +994,18 @@ describe('durable recovery journal', () => {
       }),
     ).toEqual({ admitted: false, detailCode: 'no_progress' });
 
-    const scoped = recordRecoveryFailureV1(
-      createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
-      {
-        toolCallId: 'scoped',
-        toolName: 'read_file',
-        invocationFingerprint: 'c'.repeat(64),
-        modelMessageId: 'model-scoped',
-        outcome: correctArgsOutcome,
-        taskId: 'task-scoped',
-        turnId: 'turn-scoped',
-      },
-    );
+    const scoped = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
+      toolCallId: 'scoped',
+      toolName: 'read_file',
+      invocationFingerprint: 'c'.repeat(64),
+      modelMessageId: 'model-scoped',
+      outcome: correctArgsOutcome,
+      taskId: 'task-scoped',
+      turnId: 'turn-scoped',
+    });
     const unknownTopLevel = { ...scoped, private_body: 'must not be accepted' };
     expect(
-      normalizeToolRecoveryJournalV1(unknownTopLevel, TEST_RECOVERY_IDENTITY_KEY).qualityGuard,
+      normalizeToolRecoveryJournal(unknownTopLevel, TEST_RECOVERY_IDENTITY_KEY).qualityGuard,
     ).toMatchObject({
       blocked: true,
       reasonCode: 'journal_invalid',
@@ -1029,7 +1023,7 @@ describe('durable recovery journal', () => {
       },
     };
     expect(
-      normalizeToolRecoveryJournalV1(contradictoryResolution, TEST_RECOVERY_IDENTITY_KEY)
+      normalizeToolRecoveryJournal(contradictoryResolution, TEST_RECOVERY_IDENTITY_KEY)
         .qualityGuard,
     ).toMatchObject({
       blocked: true,
@@ -1053,14 +1047,14 @@ describe('durable recovery journal', () => {
       order: [forgedId],
     };
     expect(
-      normalizeToolRecoveryJournalV1(forgedConsistentIds, TEST_RECOVERY_IDENTITY_KEY).qualityGuard,
+      normalizeToolRecoveryJournal(forgedConsistentIds, TEST_RECOVERY_IDENTITY_KEY).qualityGuard,
     ).toMatchObject({
       blocked: true,
       reasonCode: 'journal_invalid',
     });
 
     expect(
-      toolFailureInstanceIdV1({
+      toolFailureInstanceId({
         toolCallId: original.toolCallId,
         invocationFingerprint: original.invocationFingerprint,
         outcome: original.outcome,
@@ -1080,7 +1074,7 @@ describe('durable recovery journal', () => {
       },
     };
     expect(
-      normalizeToolRecoveryJournalV1(danglingRecovery, TEST_RECOVERY_IDENTITY_KEY).qualityGuard,
+      normalizeToolRecoveryJournal(danglingRecovery, TEST_RECOVERY_IDENTITY_KEY).qualityGuard,
     ).toMatchObject({
       blocked: true,
       reasonCode: 'journal_invalid',
@@ -1088,8 +1082,8 @@ describe('durable recovery journal', () => {
   });
 
   test('binds the next eligible model correction and enforces exactly one attempt after restore', () => {
-    let journal = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
-    journal = recordRecoveryFailureV1(journal, {
+    let journal = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
+    journal = recordRecoveryFailure(journal, {
       toolCallId: 'first',
       toolName: 'read_file',
       invocationFingerprint: 'private-fingerprint',
@@ -1097,11 +1091,11 @@ describe('durable recovery journal', () => {
       outcome: correctArgsOutcome,
     });
     const failureId = journal.order[0]!;
-    journal = advanceToolRecoveryResponseV1(journal, {
+    journal = advanceToolRecoveryResponse(journal, {
       modelMessageId: 'model-2',
       toolCalls: [{ id: 'second', name: 'read_file' }],
     });
-    const admitted = admitRecoveryAttemptV1(journal, {
+    const admitted = admitRecoveryAttempt(journal, {
       toolCallId: 'second',
       toolName: 'read_file',
       invocationFingerprint: 'changed-private-fingerprint',
@@ -1109,17 +1103,17 @@ describe('durable recovery journal', () => {
       mode: 'model_correction',
     });
     expect(admitted).toEqual({ admitted: true, recoveryOf: failureId });
-    journal = recordRecoveryInvocationV1(journal, {
+    journal = recordRecoveryInvocation(journal, {
       toolCallId: 'second',
       recoveryOf: failureId,
       mode: 'model_correction',
     });
-    journal = recordRecoveryFailureV1(journal, {
+    journal = recordRecoveryFailure(journal, {
       toolCallId: 'second',
       toolName: 'read_file',
       invocationFingerprint: 'changed-private-fingerprint',
       modelMessageId: 'model-2',
-      outcome: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'failed',
         failure: classifyFailure('tool_invalid_args', 'still invalid'),
         authority: { dispatchState: 'not_started', externalEffects: 'none' },
@@ -1130,11 +1124,11 @@ describe('durable recovery journal', () => {
 
     // JSON round-trip models a process restart; the ceiling must not reset.
     let restored = JSON.parse(JSON.stringify(journal)) as typeof journal;
-    restored = advanceToolRecoveryResponseV1(restored, {
+    restored = advanceToolRecoveryResponse(restored, {
       modelMessageId: 'model-3',
       toolCalls: [{ id: 'third', name: 'read_file' }],
     });
-    const exhaustedAdmission = admitRecoveryAttemptV1(restored, {
+    const exhaustedAdmission = admitRecoveryAttempt(restored, {
       toolCallId: 'third',
       toolName: 'read_file',
       invocationFingerprint: 'third-private-fingerprint',
@@ -1146,12 +1140,12 @@ describe('durable recovery journal', () => {
       recoveryOf: childFailureId,
       detailCode: 'recovery_exhausted',
     });
-    restored = recordRecoveryFailureV1(restored, {
+    restored = recordRecoveryFailure(restored, {
       toolCallId: 'third',
       toolName: 'read_file',
       invocationFingerprint: 'third-private-fingerprint',
       modelMessageId: 'model-3',
-      outcome: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'exhausted',
         failure: classifyFailure('loop_exhausted', 'redacted'),
         authority: { dispatchState: 'not_started', externalEffects: 'none' },
@@ -1164,12 +1158,12 @@ describe('durable recovery journal', () => {
       }),
     });
     const suppressionFailureId = restored.order.at(-1)!;
-    restored = advanceToolRecoveryResponseV1(restored, {
+    restored = advanceToolRecoveryResponse(restored, {
       modelMessageId: 'model-4',
       toolCalls: [{ id: 'fourth', name: 'read_file' }],
     });
     expect(
-      admitRecoveryAttemptV1(restored, {
+      admitRecoveryAttempt(restored, {
         toolCallId: 'fourth',
         toolName: 'read_file',
         invocationFingerprint: 'fourth-different-private-fingerprint',
@@ -1184,7 +1178,7 @@ describe('durable recovery journal', () => {
   });
 
   test('retains changed-argument deny suppression and blocks only the sixth same-tool failure', () => {
-    const denied = classifyToolOutcomeV1({
+    const denied = classifyToolOutcome({
       status: 'rejected',
       failure: classifyFailure('policy_denied', 'redacted'),
       authority: {
@@ -1194,7 +1188,7 @@ describe('durable recovery journal', () => {
         policyDenied: true,
       },
     });
-    let journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY), {
+    let journal = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
       toolCallId: 'denied-1',
       toolName: 'shell_execute',
       invocationFingerprint: 'd'.repeat(64),
@@ -1203,13 +1197,13 @@ describe('durable recovery journal', () => {
       taskId: 'task-1',
       turnId: 'turn-1',
     });
-    journal = advanceToolRecoveryResponseV1(journal, {
+    journal = advanceToolRecoveryResponse(journal, {
       taskId: 'task-1',
       turnId: 'turn-1',
       modelMessageId: 'model-2',
       toolCalls: [{ id: 'denied-2', name: 'shell_execute' }],
     });
-    const admission = admitRecoveryAttemptV1(journal, {
+    const admission = admitRecoveryAttempt(journal, {
       toolCallId: 'denied-2',
       toolName: 'shell_execute',
       invocationFingerprint: 'd'.repeat(64),
@@ -1226,13 +1220,13 @@ describe('durable recovery journal', () => {
     let recoveryOf = journal.order[0]!;
     for (let index = 2; index <= 6; index += 1) {
       const fingerprint = index === 2 ? 'd'.repeat(64) : index.toString(16).padStart(64, '0');
-      journal = advanceToolRecoveryResponseV1(journal, {
+      journal = advanceToolRecoveryResponse(journal, {
         taskId: 'task-1',
         turnId: 'turn-1',
         modelMessageId: `model-${index}`,
         toolCalls: [{ id: `denied-${index}`, name: 'shell_execute' }],
       });
-      const repeatedAdmission = admitRecoveryAttemptV1(journal, {
+      const repeatedAdmission = admitRecoveryAttempt(journal, {
         toolCallId: `denied-${index}`,
         toolName: 'shell_execute',
         invocationFingerprint: fingerprint,
@@ -1246,12 +1240,12 @@ describe('durable recovery journal', () => {
         recoveryOf,
         detailCode: 'recovery_not_allowed',
       });
-      journal = recordRecoveryFailureV1(journal, {
+      journal = recordRecoveryFailure(journal, {
         toolCallId: `denied-${index}`,
         toolName: 'shell_execute',
         invocationFingerprint: fingerprint,
         modelMessageId: `model-${index}`,
-        outcome: classifyToolOutcomeV1({
+        outcome: classifyToolOutcome({
           status: 'exhausted',
           failure: classifyFailure('loop_exhausted', 'redacted'),
           authority: { dispatchState: 'not_started', externalEffects: 'none' },
@@ -1279,7 +1273,7 @@ describe('durable recovery journal', () => {
   });
 
   test('admits one Runtime-owned alternative capability on the next eligible response', () => {
-    const alternative = classifyToolOutcomeV1({
+    const alternative = classifyToolOutcome({
       status: 'failed',
       failure: classifyFailure('tool_invalid_args', 'redacted'),
       authority: { dispatchState: 'not_started', externalEffects: 'none' },
@@ -1290,7 +1284,7 @@ describe('durable recovery journal', () => {
       maximumAdditionalCalls: 1,
       requiresNewModelResponse: true,
     });
-    let journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY), {
+    let journal = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
       toolCallId: 'failed-read',
       toolName: 'read_file',
       invocationFingerprint: 'e'.repeat(64),
@@ -1299,14 +1293,14 @@ describe('durable recovery journal', () => {
       taskId: 'task-1',
       turnId: 'turn-1',
     });
-    journal = advanceToolRecoveryResponseV1(journal, {
+    journal = advanceToolRecoveryResponse(journal, {
       taskId: 'task-1',
       turnId: 'turn-1',
       modelMessageId: 'model-2',
       toolCalls: [{ id: 'alternative-search', name: 'search_files' }],
     });
     expect(
-      admitRecoveryAttemptV1(journal, {
+      admitRecoveryAttempt(journal, {
         toolCallId: 'alternative-search',
         toolName: 'search_files',
         invocationFingerprint: 'f'.repeat(64),
@@ -1319,13 +1313,13 @@ describe('durable recovery journal', () => {
   });
 
   test('binds one alternative call without consuming an unrelated sibling in the same response', () => {
-    const alternative = classifyToolOutcomeV1({
+    const alternative = classifyToolOutcome({
       status: 'failed',
       failure: classifyFailure('tool_runtime_error', 'missing file'),
       authority: { dispatchState: 'started', externalEffects: 'none' },
       toolAdvice: { disposition: 'alternative', capabilityIntent: 'workspace.search' },
     });
-    let journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY), {
+    let journal = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
       toolCallId: 'failed-read',
       toolName: 'read_file',
       invocationFingerprint: 'a'.repeat(64),
@@ -1335,7 +1329,7 @@ describe('durable recovery journal', () => {
       turnId: 'turn-1',
     });
     const failureId = journal.order[0]!;
-    journal = advanceToolRecoveryResponseV1(journal, {
+    journal = advanceToolRecoveryResponse(journal, {
       taskId: 'task-1',
       turnId: 'turn-1',
       modelMessageId: 'model-2',
@@ -1350,7 +1344,7 @@ describe('durable recovery journal', () => {
       eligibleToolCallId: 'alternative-search',
     });
     expect(
-      admitRecoveryAttemptV1(journal, {
+      admitRecoveryAttempt(journal, {
         toolCallId: 'alternative-search',
         toolName: 'search_files',
         invocationFingerprint: 'b'.repeat(64),
@@ -1360,13 +1354,13 @@ describe('durable recovery journal', () => {
         turnId: 'turn-1',
       }),
     ).toEqual({ admitted: true, recoveryOf: failureId });
-    journal = recordRecoveryInvocationV1(journal, {
+    journal = recordRecoveryInvocation(journal, {
       toolCallId: 'alternative-search',
       recoveryOf: failureId,
       mode: 'model_correction',
     });
     expect(
-      admitRecoveryAttemptV1(journal, {
+      admitRecoveryAttempt(journal, {
         toolCallId: 'unrelated-read',
         toolName: 'read_file',
         invocationFingerprint: 'c'.repeat(64),
@@ -1380,7 +1374,7 @@ describe('durable recovery journal', () => {
   });
 
   test('safely expires a legacy eligible response that lacks a concrete call binding', () => {
-    let current = recordRecoveryFailureV1(createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY), {
+    let current = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
       toolCallId: 'legacy-failure',
       toolName: 'read_file',
       invocationFingerprint: 'a'.repeat(64),
@@ -1390,7 +1384,7 @@ describe('durable recovery journal', () => {
       turnId: 'turn-1',
     });
     const failureId = current.order[0]!;
-    current = advanceToolRecoveryResponseV1(current, {
+    current = advanceToolRecoveryResponse(current, {
       taskId: 'task-1',
       turnId: 'turn-1',
       modelMessageId: 'model-2',
@@ -1404,7 +1398,7 @@ describe('durable recovery journal', () => {
       failures: { ...structuredClone(current.failures), [failureId]: legacyFailure },
     };
 
-    const normalized = normalizeToolRecoveryJournalV1(legacy, TEST_RECOVERY_IDENTITY_KEY);
+    const normalized = normalizeToolRecoveryJournal(legacy, TEST_RECOVERY_IDENTITY_KEY);
     expect(normalized.qualityGuard).toEqual({ blocked: false, observedFailures: 1 });
     expect(normalized.failures[failureId]).toMatchObject({
       status: 'exhausted',
@@ -1413,7 +1407,7 @@ describe('durable recovery journal', () => {
   });
 
   test('binds only one same-name correction sibling', () => {
-    let journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY), {
+    let journal = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
       toolCallId: 'failed-read',
       toolName: 'read_file',
       invocationFingerprint: 'a'.repeat(64),
@@ -1423,7 +1417,7 @@ describe('durable recovery journal', () => {
       turnId: 'turn-1',
     });
     const failureId = journal.order[0]!;
-    journal = advanceToolRecoveryResponseV1(journal, {
+    journal = advanceToolRecoveryResponse(journal, {
       taskId: 'task-1',
       turnId: 'turn-1',
       modelMessageId: 'model-2',
@@ -1434,7 +1428,7 @@ describe('durable recovery journal', () => {
     });
 
     expect(
-      admitRecoveryAttemptV1(journal, {
+      admitRecoveryAttempt(journal, {
         toolCallId: 'corrected-read',
         toolName: 'read_file',
         invocationFingerprint: 'b'.repeat(64),
@@ -1445,7 +1439,7 @@ describe('durable recovery journal', () => {
       }),
     ).toEqual({ admitted: true, recoveryOf: failureId });
     expect(
-      admitRecoveryAttemptV1(journal, {
+      admitRecoveryAttempt(journal, {
         toolCallId: 'independent-read',
         toolName: 'read_file',
         invocationFingerprint: 'c'.repeat(64),
@@ -1458,13 +1452,13 @@ describe('durable recovery journal', () => {
   });
 
   test('never outcomes are terminal records and cannot acquire retry lineage', () => {
-    let journal = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
-    journal = recordRecoveryFailureV1(journal, {
+    let journal = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
+    journal = recordRecoveryFailure(journal, {
       toolCallId: 'denied',
       toolName: 'shell_execute',
       invocationFingerprint: 'private-deny',
       modelMessageId: 'model-1',
-      outcome: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure('policy_denied', 'private'),
         authority: { policyDenied: true, dispatchState: 'not_started', externalEffects: 'none' },
@@ -1475,7 +1469,7 @@ describe('durable recovery journal', () => {
       resolution: 'terminal',
     });
     expect(
-      admitRecoveryAttemptV1(journal, {
+      admitRecoveryAttempt(journal, {
         toolCallId: 'retry',
         toolName: 'shell_execute',
         invocationFingerprint: 'private-deny',
@@ -1490,8 +1484,8 @@ describe('durable recovery journal', () => {
   });
 
   test('tool-owned progress closes unresolved failures while unrelated revision does not', () => {
-    let journal = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
-    journal = recordRecoveryFailureV1(journal, {
+    let journal = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
+    journal = recordRecoveryFailure(journal, {
       toolCallId: 'failed',
       toolName: 'edit_file',
       invocationFingerprint: 'private-edit',
@@ -1501,7 +1495,7 @@ describe('durable recovery journal', () => {
     const failureId = journal.order[0]!;
     const unchanged = JSON.parse(JSON.stringify(journal)) as typeof journal;
     expect(unchanged.failures[failureId]?.status).toBe('unresolved');
-    journal = recordToolOwnedProgressV1(journal, {
+    journal = recordToolOwnedProgress(journal, {
       kind: 'content_revision',
       referenceId: 'content-revision-id',
       resolvesFailureIds: [failureId],
@@ -1510,18 +1504,18 @@ describe('durable recovery journal', () => {
   });
 
   test('plan evidence excludes a recovered historical failure but retains its successful receipt', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'recovered-plan-evidence',
       userId: 'user',
       workspace: '/workspace',
     });
-    const failureOutcome = classifyToolOutcomeV1({
+    const failureOutcome = classifyToolOutcome({
       status: 'failed',
       failure: classifyFailure('tool_invalid_args', 'private'),
       authority: { dispatchState: 'not_started', externalEffects: 'none' },
     });
-    let journal = recordRecoveryFailureV1(state.toolRecovery, {
+    let journal = recordRecoveryFailure(state.toolRecovery, {
       toolCallId: 'failed-write',
       toolName: 'write_file',
       invocationFingerprint: 'c'.repeat(64),
@@ -1529,7 +1523,7 @@ describe('durable recovery journal', () => {
       outcome: failureOutcome,
     });
     const failureId = journal.order[0]!;
-    journal = recordToolOwnedProgressV1(journal, {
+    journal = recordToolOwnedProgress(journal, {
       kind: 'receipt',
       referenceId: 'successful-write',
       resolvesFailureIds: [failureId],
@@ -1543,7 +1537,7 @@ describe('durable recovery journal', () => {
       status: 'failed',
       sideEffect: true,
       createdAtTurnId: state.turn.turnId,
-      outcomeV1: journal.failures[failureId]!.outcome,
+      outcome: journal.failures[failureId]!.outcome,
     };
     state.tools.calls['successful-write'] = {
       toolCallId: 'successful-write',
@@ -1556,23 +1550,23 @@ describe('durable recovery journal', () => {
       result: { ok: true, summary: 'private' },
     };
 
-    expect(projectPlanCompletionEvidenceV1(state, [])).toMatchObject({
+    expect(projectPlanCompletionEvidence(state, [])).toMatchObject({
       execution: [{ toolCallId: 'successful-write', outcome: 'succeeded' }],
       unresolved: [],
     });
   });
 
   test('quality guard counts one same-tool recovery chain, not independent identical calls', () => {
-    let journal = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
+    let journal = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
     let recoveryOf: string | undefined;
     for (let index = 0; index < 6; index += 1) {
-      const outcome = classifyToolOutcomeV1({
+      const outcome = classifyToolOutcome({
         status: 'failed',
         failure: classifyFailure('tool_invalid_args', 'private args'),
         authority: { dispatchState: 'not_started', externalEffects: 'none' },
         ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
       });
-      journal = recordRecoveryFailureV1(journal, {
+      journal = recordRecoveryFailure(journal, {
         toolCallId: `failure-${index}`,
         toolName: 'read_file',
         invocationFingerprint: index.toString(16).padStart(64, '0'),
@@ -1584,7 +1578,7 @@ describe('durable recovery journal', () => {
       recoveryOf = journal.order.at(-1)!;
       if (index === 4) {
         const beforeUnrelatedSuccess = journal;
-        journal = recordToolOwnedProgressV1(journal, {
+        journal = recordToolOwnedProgress(journal, {
           kind: 'receipt',
           referenceId: 'unrelated-success',
         });
@@ -1595,14 +1589,14 @@ describe('durable recovery journal', () => {
     expect(journal.qualityGuard).toMatchObject({ blocked: true, reasonCode: 'no_progress' });
     expect(journal.qualityGuard.observedFailures).toBeLessThan(250);
     expect(
-      normalizeToolRecoveryJournalV1(structuredClone(journal), TEST_RECOVERY_IDENTITY_KEY)
+      normalizeToolRecoveryJournal(structuredClone(journal), TEST_RECOVERY_IDENTITY_KEY)
         .qualityGuard,
     ).toEqual(journal.qualityGuard);
     const persistedWithoutDerivedBlock = {
       ...structuredClone(journal),
       qualityGuard: { blocked: false, observedFailures: 6 },
     };
-    const restoredDerivedBlock = normalizeToolRecoveryJournalV1(
+    const restoredDerivedBlock = normalizeToolRecoveryJournal(
       persistedWithoutDerivedBlock,
       TEST_RECOVERY_IDENTITY_KEY,
     );
@@ -1613,22 +1607,22 @@ describe('durable recovery journal', () => {
       turnId: 'quality-turn',
     });
     expect(
-      isToolRecoveryQualityBlockedV1(restoredDerivedBlock, {
+      isToolRecoveryQualityBlocked(restoredDerivedBlock, {
         taskId: 'other-task',
         turnId: 'other-turn',
       }),
     ).toBe(false);
 
-    let mixedTools = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
+    let mixedTools = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
     recoveryOf = undefined;
     for (let index = 0; index < 8; index += 1) {
-      const outcome = classifyToolOutcomeV1({
+      const outcome = classifyToolOutcome({
         status: 'failed',
         failure: classifyFailure('tool_invalid_args', 'private args'),
         authority: { dispatchState: 'not_started', externalEffects: 'none' },
         ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
       });
-      mixedTools = recordRecoveryFailureV1(mixedTools, {
+      mixedTools = recordRecoveryFailure(mixedTools, {
         toolCallId: `mixed-${index}`,
         toolName: index % 2 === 0 ? 'read_file' : 'search_files',
         invocationFingerprint: index.toString(16).padStart(64, '0'),
@@ -1641,9 +1635,9 @@ describe('durable recovery journal', () => {
     }
     expect(mixedTools.qualityGuard).toEqual({ blocked: false, observedFailures: 8 });
 
-    let independent = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
+    let independent = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
     for (let index = 0; index < 12; index += 1) {
-      independent = recordRecoveryFailureV1(independent, {
+      independent = recordRecoveryFailure(independent, {
         toolCallId: `independent-${index}`,
         toolName: 'read_file',
         invocationFingerprint: 'f'.repeat(64),
@@ -1656,7 +1650,7 @@ describe('durable recovery journal', () => {
     expect(independent.qualityGuard).toEqual({ blocked: false, observedFailures: 12 });
 
     expect(
-      admitRecoveryAttemptV1(independent, {
+      admitRecoveryAttempt(independent, {
         toolCallId: 'escape-replan',
         toolName: 'write_plan',
         invocationFingerprint: 'f'.repeat(64),
@@ -1671,7 +1665,7 @@ describe('durable recovery journal', () => {
 
 describe('ToolOutcome Runtime event integration', () => {
   test('keeps an unrelated sibling admitted after binding one alternative recovery call', () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'alternative-sibling',
       userId: 'user',
@@ -1692,7 +1686,7 @@ describe('ToolOutcome Runtime event integration', () => {
       taskId,
     });
     const missingFileFailure = classifyFailure('tool_runtime_error', 'missing file');
-    const alternativeOutcome = classifyToolOutcomeV1({
+    const alternativeOutcome = classifyToolOutcome({
       status: 'failed',
       failure: missingFileFailure,
       authority: { dispatchState: 'started', externalEffects: 'none' },
@@ -1702,7 +1696,7 @@ describe('ToolOutcome Runtime event integration', () => {
       type: 'tool.failed',
       toolCallId: 'failed-read',
       failure: missingFileFailure,
-      outcomeV1: alternativeOutcome,
+      outcome: alternativeOutcome,
     });
     state = reduceRuntimeState(state, {
       type: 'model.responded',
@@ -1739,14 +1733,14 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('prioritizes a foreign child journal block over queued siblings, verification, and compaction', async () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'invalid-child-priority',
       userId: 'user',
       workspace: '/workspace',
     });
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -1834,7 +1828,7 @@ describe('ToolOutcome Runtime event integration', () => {
       {
         type: 'subagent.recovery_journal_merged',
         toolCallId: 'task-child',
-        journal: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+        journal: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
       },
     ]);
 
@@ -1858,7 +1852,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('rechecks journal_invalid after Runner preparation before using a stale tool effect lease', async () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'invalid-after-prepare',
       userId: 'user',
@@ -1885,14 +1879,14 @@ describe('ToolOutcome Runtime event integration', () => {
     };
     state.tools.active = [...state.tools.active, 'task'];
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
     let dispatches = 0;
     let prepared = false;
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async () => {
         dispatches += 1;
@@ -1906,7 +1900,7 @@ describe('ToolOutcome Runtime event integration', () => {
           kernel.processEvent({
             type: 'subagent.recovery_journal_merged',
             toolCallId: 'task',
-            journal: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+            journal: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
           });
         }
         return effect;
@@ -1925,7 +1919,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('rechecks scoped no_progress after Runner preparation before using a stale tool effect lease', async () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'no-progress-after-prepare',
       userId: 'user',
@@ -1946,12 +1940,12 @@ describe('ToolOutcome Runtime event integration', () => {
       createdAtTurnId: state.turn.turnId,
     };
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
     const childJournal = {
-      ...createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+      ...createToolRecoveryJournal(state.toolRecovery.identityKey),
       qualityGuard: {
         blocked: true,
         reasonCode: 'no_progress' as const,
@@ -1963,7 +1957,7 @@ describe('ToolOutcome Runtime event integration', () => {
     let dispatches = 0;
     let prepared = false;
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async () => {
         dispatches += 1;
@@ -1996,7 +1990,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('defensively rejects direct and stale leased Controller execution when the journal is invalid', async () => {
-    const valid = createRuntimeHostStateInitialStateV1({
+    const valid = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'invalid-controller-entry',
       userId: 'user',
@@ -2012,7 +2006,7 @@ describe('ToolOutcome Runtime event integration', () => {
     };
     valid.tools.queue = [...valid.tools.queue, 'shell'];
     const invalid = structuredClone(valid);
-    invalid.toolRecovery = normalizeToolRecoveryJournalV1(undefined, TEST_RECOVERY_IDENTITY_KEY);
+    invalid.toolRecovery = normalizeToolRecoveryJournal(undefined, TEST_RECOVERY_IDENTITY_KEY);
     let dispatches = 0;
     const shellExecutor: ShellExecutor = async (input) => {
       dispatches += 1;
@@ -2024,7 +2018,7 @@ describe('ToolOutcome Runtime event integration', () => {
         stderr: '',
       };
     };
-    const direct = await executeTestRuntimeToolsV1({
+    const direct = await executeTestRuntimeTools({
       state: invalid,
       toolCallIds: ['shell'],
       shellExecutor,
@@ -2038,7 +2032,7 @@ describe('ToolOutcome Runtime event integration', () => {
       }),
     );
 
-    const executor = createTestRuntimeEffectExecutorV1({
+    const executor = createTestRuntimeEffectExecutor({
       config: {
         apiKey: '',
         baseURL: 'http://localhost',
@@ -2049,8 +2043,8 @@ describe('ToolOutcome Runtime event integration', () => {
       },
       model: {} as never,
       shellExecutor,
-      capabilityArtifactStore: testCapabilityArtifactWriterV1(),
-      builtinToolCatalog: testBuiltinToolCatalogV1(),
+      capabilityArtifactStore: testCapabilityArtifactWriter(),
+      builtinToolCatalog: testBuiltinToolCatalog(),
     });
     const stale = await executor({ type: 'run_tools', toolCallIds: ['shell'] }, valid, undefined, {
       reservationIds: [],
@@ -2069,7 +2063,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps ordinary no_progress scoped so a different task and turn can call the model', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'scoped-no-progress',
       userId: 'user',
@@ -2089,13 +2083,13 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps a foreign child merge globally blocked after task close, next turn, and a new task', async () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'invalid-child-next-task',
       userId: 'user',
       workspace: '/workspace',
     });
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
     kernel.processEvent({
       type: 'user.message_appended',
@@ -2117,7 +2111,7 @@ describe('ToolOutcome Runtime event integration', () => {
       {
         type: 'subagent.recovery_journal_merged',
         toolCallId: 'task-child',
-        journal: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+        journal: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
       },
       {
         type: 'tool.finished',
@@ -2172,12 +2166,12 @@ describe('ToolOutcome Runtime event integration', () => {
     const storePath = join(directory, 'runtime.db');
     const threadId = 'invalid-child-sqlite-next-turn';
     try {
-      const kernel = restoreStateKernelCoordinatorV1({
+      const kernel = restoreStateKernelCoordinator({
         recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       kernel.processEvent({
         type: 'user.message_appended',
@@ -2199,7 +2193,7 @@ describe('ToolOutcome Runtime event integration', () => {
         {
           type: 'subagent.recovery_journal_merged',
           toolCallId: 'task-child',
-          journal: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+          journal: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
         },
         {
           type: 'tool.finished',
@@ -2220,12 +2214,12 @@ describe('ToolOutcome Runtime event integration', () => {
       ]);
       kernel.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(decideNextEffect(restored.getState())).toMatchObject({
         type: 'recovery_blocked',
@@ -2251,7 +2245,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps a corrupt resumed child merge blocked after the same Kernel batch succeeds the task', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'resume-invalid-child-batch',
       userId: 'user',
@@ -2266,8 +2260,8 @@ describe('ToolOutcome Runtime event integration', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.active = [...state.tools.active, 'task'];
-    const foreign = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
-    const store = openStateStoreForTestV1(':memory:');
+    const foreign = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
 
     kernel.processEventBatch([
@@ -2305,7 +2299,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('merges an overflowed child lineage without dropping its retained parent or crashing Kernel', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'merge-lineage-overflow',
       userId: 'user',
@@ -2320,10 +2314,10 @@ describe('ToolOutcome Runtime event integration', () => {
       taskId: 'merge-task',
       turnId: state.turn.turnId,
     };
-    state.toolRecovery = recordRecoveryFailureV1(state.toolRecovery, lineageParentInput);
+    state.toolRecovery = recordRecoveryFailure(state.toolRecovery, lineageParentInput);
     const parentId = state.toolRecovery.order[0]!;
     for (let index = 0; index < 127; index += 1) {
-      state.toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
+      state.toolRecovery = recordRecoveryFailure(state.toolRecovery, {
         toolCallId: `parent-old-${index}`,
         toolName: 'read_file',
         invocationFingerprint: (index + 1).toString(16).padStart(64, '0'),
@@ -2336,14 +2330,14 @@ describe('ToolOutcome Runtime event integration', () => {
     expect(state.toolRecovery.order).toHaveLength(128);
     expect(state.toolRecovery.order[0]).toBe(parentId);
     const historicalRecoveryOf = state.toolRecovery.order[1]!;
-    let child = createToolRecoveryJournalV1(state.toolRecovery.identityKey);
-    child = recordRecoveryFailureV1(child, lineageParentInput);
-    child = recordRecoveryFailureV1(child, {
+    let child = createToolRecoveryJournal(state.toolRecovery.identityKey);
+    child = recordRecoveryFailure(child, lineageParentInput);
+    child = recordRecoveryFailure(child, {
       toolCallId: 'merged-lineage-child',
       toolName: 'read_file',
       invocationFingerprint: 'b'.repeat(64),
       modelMessageId: 'merged-child-model',
-      outcome: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'failed',
         failure: classifyFailure('tool_invalid_args', 'redacted'),
         authority: { dispatchState: 'not_started', externalEffects: 'none' },
@@ -2373,7 +2367,7 @@ describe('ToolOutcome Runtime event integration', () => {
       createdAtTurnId: state.turn.turnId,
       result: { ok: true, summary: 'historical success' },
     };
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
 
     expect(() =>
@@ -2393,7 +2387,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps delegated recovery internals private while merging them into parent state', () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'task-result-privacy',
       userId: 'user',
@@ -2418,18 +2412,15 @@ describe('ToolOutcome Runtime event integration', () => {
       modelMessageId: 'parent-model',
     });
     state = reduceRuntimeState(state, { type: 'tool.started', toolCallId: 'task-private' });
-    const child = recordRecoveryFailureV1(
-      createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-      {
-        toolCallId: 'child-private',
-        toolName: 'read_file',
-        invocationFingerprint: 'd'.repeat(64),
-        modelMessageId: 'child-model',
-        outcome: correctArgsOutcome,
-        turnId: state.turn.turnId,
-      },
-    );
-    const projected = projectSubagentResultV1({
+    const child = recordRecoveryFailure(createToolRecoveryJournal(state.toolRecovery.identityKey), {
+      toolCallId: 'child-private',
+      toolName: 'read_file',
+      invocationFingerprint: 'd'.repeat(64),
+      modelMessageId: 'child-model',
+      outcome: correctArgsOutcome,
+      turnId: state.turn.turnId,
+    });
+    const projected = projectSubagentResult({
       input: { subagent_type: 'explore', task: 'inspect metadata' },
       phase: 'building',
       result: {
@@ -2497,12 +2488,12 @@ describe('ToolOutcome Runtime event integration', () => {
         resultMeta: projected.resultMeta ?? {},
         status: projected.ok ? 'success' : 'error',
       },
-      outcomeV1: projected.ok
-        ? classifyToolOutcomeV1({
+      outcome: projected.ok
+        ? classifyToolOutcome({
             status: 'success',
             authority: { dispatchState: 'started', externalEffects: 'unknown' },
           })
-        : classifyToolOutcomeV1({
+        : classifyToolOutcome({
             status: 'failed',
             failure: classifyFailure('tool_runtime_error', 'redacted'),
             authority: { dispatchState: 'started', externalEffects: 'unknown' },
@@ -2528,7 +2519,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('controller keeps a same-scope deny suppressed without prematurely hard-blocking', async () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'deny-controller-suppression',
       userId: 'user',
@@ -2546,7 +2537,7 @@ describe('ToolOutcome Runtime event integration', () => {
       toolCallId: 'denied-1',
       reason: 'redacted',
       failure: classifyFailure('policy_denied', 'redacted'),
-      outcomeV1: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure('policy_denied', 'redacted'),
         authority: {
@@ -2573,7 +2564,7 @@ describe('ToolOutcome Runtime event integration', () => {
       recoveryAdmission: 'recovery_not_allowed',
     });
     let dispatches = 0;
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['denied-2'],
       shellExecutor: async (input) => {
@@ -2591,7 +2582,7 @@ describe('ToolOutcome Runtime event integration', () => {
     const rejected = events.find((event) => event.type === 'tool.rejected');
     expect(rejected).toBeDefined();
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -2604,7 +2595,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('appends exactly one auto-review rejection ToolMessage and preserves next-model pairing', () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'auto-review-pairing',
       userId: 'user',
@@ -2640,7 +2631,7 @@ describe('ToolOutcome Runtime event integration', () => {
         reviewerModelName: 'test',
         durationMs: 1,
       },
-      outcomeV1: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure('auto_review_rejected', 'redacted'),
         authority: {
@@ -2672,7 +2663,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps exhausted deny/timeout/cancel/unknown failures in plan evidence until explicit resolution', () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'exhausted-evidence',
       userId: 'user',
@@ -2692,7 +2683,7 @@ describe('ToolOutcome Runtime event integration', () => {
       toolCallId: 'denied-effect',
       reason: 'redacted',
       failure: classifyFailure('policy_denied', 'redacted'),
-      outcomeV1: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure('policy_denied', 'redacted'),
         authority: {
@@ -2705,8 +2696,8 @@ describe('ToolOutcome Runtime event integration', () => {
     });
     const failureId = state.toolRecovery.order[0]!;
     expect(state.toolRecovery.failures[failureId]?.status).toBe('exhausted');
-    state.tools.calls['denied-effect']!.outcomeV1 = state.toolRecovery.failures[failureId]!.outcome;
-    const evidence = projectPlanCompletionEvidenceV1(state, []);
+    state.tools.calls['denied-effect']!.outcome = state.toolRecovery.failures[failureId]!.outcome;
+    const evidence = projectPlanCompletionEvidence(state, []);
     expect(evidence.unresolved).toContainEqual({
       kind: 'failure',
       referenceId: 'denied-effect',
@@ -2716,12 +2707,12 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('current terminal event persists one canonical outcome and projects one ToolMessage', () => {
     const path = join(process.cwd(), `.kite-tool-outcome-${crypto.randomUUID()}.db`);
-    const kernel = restoreStateKernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-outcome-current',
       userId: 'user',
       workspace: '/workspace',
-      store: openStateStoreForTestV1(path),
+      store: openStateStoreForTest(path),
     });
     try {
       kernel.processEvent({
@@ -2740,10 +2731,10 @@ describe('ToolOutcome Runtime event integration', () => {
       ]);
       expect(canonical[0]).toMatchObject({
         type: 'tool.failed',
-        outcomeV1: { schemaVersion: 1, failure: { detailCode: 'invalid_arguments' } },
+        outcome: { schemaVersion: 1, failure: { detailCode: 'invalid_arguments' } },
       });
       const state = kernel.getState();
-      expect(state.tools.calls['call-1']?.outcomeV1).toMatchObject({
+      expect(state.tools.calls['call-1']?.outcome).toMatchObject({
         schemaVersion: 1,
         status: 'failed',
         failure: { kind: 'tool_invalid_args', detailCode: 'invalid_arguments' },
@@ -2767,8 +2758,8 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('Runner publishes the canonical event returned by Kernel persistence', async () => {
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
-      initialState: createRuntimeHostStateInitialStateV1({
+      store: openStateStoreForTest(':memory:'),
+      initialState: createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'canonical-runner-stream',
         userId: 'user',
@@ -2786,7 +2777,7 @@ describe('ToolOutcome Runtime event integration', () => {
       sideEffect: false,
     });
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async (effect) => {
         if (effect.type === 'run_tools') {
@@ -2826,7 +2817,7 @@ describe('ToolOutcome Runtime event integration', () => {
       (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>
         event.type === 'tool.finished',
     );
-    expect(terminal?.outcomeV1).toMatchObject({
+    expect(terminal?.outcome).toMatchObject({
       status: 'success',
       dispatchState: 'started',
       externalEffects: 'none',
@@ -2836,12 +2827,12 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('persists a strict Registry tool_unavailable outcome through Controller and Kernel replay', async () => {
     const path = join(process.cwd(), `.kite-tool-unavailable-${crypto.randomUUID()}.db`);
-    let kernel = restoreStateKernelCoordinatorV1({
+    let kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'registry-tool-unavailable',
       userId: 'user',
       workspace: '/workspace',
-      store: openStateStoreForTestV1(path),
+      store: openStateStoreForTest(path),
     });
     try {
       kernel.processEvent({
@@ -2851,7 +2842,7 @@ describe('ToolOutcome Runtime event integration', () => {
         args: { query: 'database capability' },
         modelMessageId: 'model-search-disabled',
       });
-      const controllerEvents = await executeTestRuntimeToolsV1({
+      const controllerEvents = await executeTestRuntimeTools({
         state: kernel.getState(),
         toolCallIds: ['search-disabled'],
       });
@@ -2869,10 +2860,10 @@ describe('ToolOutcome Runtime event integration', () => {
       const persisted = kernel.processEventBatch(controllerEvents);
       const terminal = persisted.find((event) => event.type === 'tool.failed');
       expect(terminal?.type).toBe('tool.failed');
-      expect(terminal?.type === 'tool.failed' && isToolOutcomeV1(terminal.outcomeV1)).toBe(true);
+      expect(terminal?.type === 'tool.failed' && isToolOutcome(terminal.outcome)).toBe(true);
       expect(terminal).toMatchObject({
         type: 'tool.failed',
-        outcomeV1: {
+        outcome: {
           status: 'failed',
           failure: { kind: 'tool_not_found', detailCode: 'tool_unavailable' },
           dispatchState: 'not_started',
@@ -2886,15 +2877,15 @@ describe('ToolOutcome Runtime event integration', () => {
       });
 
       kernel.close();
-      kernel = restoreStateKernelCoordinatorV1({
+      kernel = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'registry-tool-unavailable',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(path),
+        store: openStateStoreForTest(path),
       });
-      const restored = kernel.getState().tools.calls['search-disabled']?.outcomeV1;
-      expect(isToolOutcomeV1(restored)).toBe(true);
+      const restored = kernel.getState().tools.calls['search-disabled']?.outcome;
+      expect(isToolOutcome(restored)).toBe(true);
       expect(restored).toMatchObject({
         failure: { kind: 'tool_not_found', detailCode: 'tool_unavailable' },
         recovery: { disposition: 'user_action', maximumAdditionalCalls: 0 },
@@ -2908,7 +2899,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('model recovery guidance is projected from the canonical outcome rather than legacy flags', () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-model-parity',
       userId: 'user',
@@ -2925,7 +2916,7 @@ describe('ToolOutcome Runtime event integration', () => {
       type: 'tool.failed',
       toolCallId: 'parity',
       failure: classifyFailure('policy_denied', 'legacy flags say never'),
-      outcomeV1: correctArgsOutcome,
+      outcome: correctArgsOutcome,
     });
     const projection = JSON.parse(String(state.transcript.messages.at(-1)?.content));
     expect(projection).toMatchObject({
@@ -2941,12 +2932,12 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('normalizes each terminal in an atomic batch against the preceding next state', () => {
     const path = join(process.cwd(), `.kite-tool-batch-outcome-${crypto.randomUUID()}.db`);
-    const kernel = restoreStateKernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-batch-next-state',
       userId: 'user',
       workspace: '/workspace',
-      store: openStateStoreForTestV1(path),
+      store: openStateStoreForTest(path),
     });
     try {
       kernel.processEvent({
@@ -2968,7 +2959,7 @@ describe('ToolOutcome Runtime event integration', () => {
       ]);
       expect(events[1]).toMatchObject({
         type: 'tool.finished',
-        outcomeV1: { status: 'success', dispatchState: 'started', externalEffects: 'none' },
+        outcome: { status: 'success', dispatchState: 'started', externalEffects: 'none' },
       });
     } finally {
       kernel.close();
@@ -2987,12 +2978,12 @@ describe('ToolOutcome Runtime event integration', () => {
     expect(timed).toMatchObject({ ok: false, terminationReason: 'timed_out' });
 
     const path = join(process.cwd(), `.kite-tool-timing-${crypto.randomUUID()}.db`);
-    const kernel = restoreStateKernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-timing',
       userId: 'user',
       workspace: '/workspace',
-      store: openStateStoreForTestV1(path),
+      store: openStateStoreForTest(path),
     });
     try {
       kernel.processEvent({
@@ -3033,7 +3024,7 @@ describe('ToolOutcome Runtime event integration', () => {
         },
       ]);
       expect(rejected[0]).toMatchObject({
-        outcomeV1: { timing: { approvalWaitMs: 25, totalActiveMs: 35 } },
+        outcome: { timing: { approvalWaitMs: 25, totalActiveMs: 35 } },
       });
 
       kernel.processEvent({
@@ -3086,7 +3077,7 @@ describe('ToolOutcome Runtime event integration', () => {
         },
       ]);
       expect(approvedTerminal[0]).toMatchObject({
-        outcomeV1: {
+        outcome: {
           status: 'success',
           timing: {
             queueMs: 40,
@@ -3152,7 +3143,7 @@ describe('ToolOutcome Runtime event integration', () => {
         },
       ]);
       expect(autoApprovedTerminal[0]).toMatchObject({
-        outcomeV1: {
+        outcome: {
           status: 'success',
           timing: { approvalWaitMs: 20, totalActiveMs: 50 },
         },
@@ -3182,14 +3173,14 @@ describe('ToolOutcome Runtime event integration', () => {
         } as never,
       ]);
       expect(terminal[0]).toMatchObject({
-        outcomeV1: {
+        outcome: {
           status: 'timed_out',
           failure: { kind: 'tool_timeout', detailCode: 'timed_out' },
         },
       });
       expect(kernel.getState().tools.calls['timeout-call']).toMatchObject({
         status: 'failed',
-        outcomeV1: { status: 'timed_out' },
+        outcome: { status: 'timed_out' },
       });
     } finally {
       kernel.close();
@@ -3201,12 +3192,12 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('tool-returned failure without a ToolSpec classifier fails closed', () => {
     const path = join(process.cwd(), `.kite-tool-classifier-${crypto.randomUUID()}.db`);
-    const kernel = restoreStateKernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-classifier-missing',
       userId: 'user',
       workspace: '/workspace',
-      store: openStateStoreForTestV1(path),
+      store: openStateStoreForTest(path),
     });
     try {
       kernel.processEvent({
@@ -3229,7 +3220,7 @@ describe('ToolOutcome Runtime event integration', () => {
           stderr: 'private failure body',
         },
       });
-      expect(kernel.getState().tools.calls.call?.outcomeV1).toMatchObject({
+      expect(kernel.getState().tools.calls.call?.outcome).toMatchObject({
         status: 'unknown',
         failure: { kind: 'unknown', detailCode: 'classifier_missing' },
         recovery: { disposition: 'never', safeAutomaticRetry: false },
@@ -3246,12 +3237,12 @@ describe('ToolOutcome Runtime event integration', () => {
   test('restart preserves a concrete correction binding without charging a sibling call', () => {
     const path = join(process.cwd(), `.kite-tool-recovery-restart-${crypto.randomUUID()}.db`);
     try {
-      const first = restoreStateKernelCoordinatorV1({
+      const first = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'tool-recovery-restart',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(path),
+        store: openStateStoreForTest(path),
       });
       first.processEvent({
         type: 'tool.queued',
@@ -3267,12 +3258,12 @@ describe('ToolOutcome Runtime event integration', () => {
       });
       first.close();
 
-      const second = restoreStateKernelCoordinatorV1({
+      const second = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'tool-recovery-restart',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(path),
+        store: openStateStoreForTest(path),
       });
       second.processEvent({
         type: 'model.responded',
@@ -3292,12 +3283,12 @@ describe('ToolOutcome Runtime event integration', () => {
       });
       second.close();
 
-      const third = restoreStateKernelCoordinatorV1({
+      const third = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'tool-recovery-restart',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(path),
+        store: openStateStoreForTest(path),
       });
       third.processEvent({
         type: 'model.responded',
@@ -3322,7 +3313,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('scopes correction lineage to the owning task, turn, and immediately next model response', () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-recovery-scope',
       userId: 'user',
@@ -3353,7 +3344,7 @@ describe('ToolOutcome Runtime event integration', () => {
       type: 'tool.failed',
       toolCallId: 'old-failure',
       failure: classifyFailure('tool_invalid_args', 'private'),
-      outcomeV1: correctArgsOutcome,
+      outcome: correctArgsOutcome,
     });
     const oldFailureId = state.toolRecovery.order.at(-1)!;
     expect(state.toolRecovery.failures[oldFailureId]).toMatchObject({
@@ -3404,20 +3395,17 @@ describe('ToolOutcome Runtime event integration', () => {
     expect(state.tools.calls['new-call']).toMatchObject({ recoveryAdmission: 'admitted' });
     expect(state.tools.calls['new-call']?.recoveryOf).toBeUndefined();
 
-    let unrelated = recordRecoveryFailureV1(
-      createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
-      {
-        toolCallId: 'needs-read',
-        toolName: 'read_file',
-        invocationFingerprint: 'f'.repeat(64),
-        modelMessageId: 'model-before',
-        taskId: newTaskId,
-        turnId: state.turn.turnId,
-        outcome: correctArgsOutcome,
-      },
-    );
+    let unrelated = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
+      toolCallId: 'needs-read',
+      toolName: 'read_file',
+      invocationFingerprint: 'f'.repeat(64),
+      modelMessageId: 'model-before',
+      taskId: newTaskId,
+      turnId: state.turn.turnId,
+      outcome: correctArgsOutcome,
+    });
     const unrelatedId = unrelated.order[0]!;
-    unrelated = advanceToolRecoveryResponseV1(unrelated, {
+    unrelated = advanceToolRecoveryResponse(unrelated, {
       taskId: newTaskId,
       turnId: state.turn.turnId,
       modelMessageId: 'model-unrelated',
@@ -3430,15 +3418,15 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('never and explicit plan/provider progress terminally resolve instead of blocking completion forever', () => {
-    let journal = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
-    journal = recordRecoveryFailureV1(journal, {
+    let journal = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
+    journal = recordRecoveryFailure(journal, {
       toolCallId: 'deny',
       toolName: 'shell_execute',
       invocationFingerprint: 'd'.repeat(64),
       modelMessageId: 'model-deny',
       taskId: 'task',
       turnId: 'turn',
-      outcome: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure('approval_rejected', 'private'),
         authority: { approvalDenied: true, dispatchState: 'not_started', externalEffects: 'none' },
@@ -3447,21 +3435,21 @@ describe('ToolOutcome Runtime event integration', () => {
     const denyId = journal.order.at(-1)!;
     expect(journal.failures[denyId]).toMatchObject({ status: 'exhausted', resolution: 'terminal' });
 
-    journal = recordRecoveryFailureV1(journal, {
+    journal = recordRecoveryFailure(journal, {
       toolCallId: 'provider',
       toolName: 'mcp__fixture__read',
       invocationFingerprint: 'e'.repeat(64),
       modelMessageId: 'model-provider',
       taskId: 'task',
       turnId: 'turn',
-      outcome: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'failed',
         failure: classifyFailure('provider_unavailable', 'private'),
         authority: { dispatchState: 'started', externalEffects: 'none', replaySafety: 'safe_read' },
       }),
     } as never);
     const providerId = journal.order.at(-1)!;
-    journal = recordToolOwnedProgressV1(journal, {
+    journal = recordToolOwnedProgress(journal, {
       kind: 'provider_revision',
       referenceId: 'provider-revision-2',
       resolvesFailureIds: [providerId],
@@ -3473,7 +3461,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('merges a delegated child journal into the same canonical parent state', () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'parent-child-journal',
       userId: 'user',
@@ -3493,16 +3481,16 @@ describe('ToolOutcome Runtime event integration', () => {
     });
     const parentIdentityKey = state.toolRecovery.identityKey;
     const childArgs = { command: 'private-child-command' };
-    const childFingerprint = toolInvocationFingerprintV1({
+    const childFingerprint = toolInvocationFingerprint({
       toolName: 'shell_execute',
       parsedArgs: childArgs,
     });
-    const child = recordRecoveryFailureV1(createToolRecoveryJournalV1(parentIdentityKey), {
+    const child = recordRecoveryFailure(createToolRecoveryJournal(parentIdentityKey), {
       toolCallId: 'child-failure',
       toolName: 'shell_execute',
       invocationFingerprint: childFingerprint,
       modelMessageId: 'child-model',
-      outcome: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'rejected',
         failure: classifyFailure('policy_denied', 'redacted'),
         authority: {
@@ -3542,16 +3530,13 @@ describe('ToolOutcome Runtime event integration', () => {
     expect(state.tools.calls['parent-repeat']?.recoveryAdmission).toBe('recovery_not_allowed');
     expect(JSON.stringify(state.toolRecovery)).not.toContain('private-child-command');
 
-    const foreign = recordRecoveryFailureV1(
-      createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
-      {
-        toolCallId: 'foreign-child',
-        toolName: 'read_file',
-        invocationFingerprint: 'f'.repeat(64),
-        modelMessageId: 'foreign-model',
-        outcome: correctArgsOutcome,
-      },
-    );
+    const foreign = recordRecoveryFailure(createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY), {
+      toolCallId: 'foreign-child',
+      toolName: 'read_file',
+      invocationFingerprint: 'f'.repeat(64),
+      modelMessageId: 'foreign-model',
+      outcome: correctArgsOutcome,
+    });
     const beforeForeignOrder = [...state.toolRecovery.order];
     state = reduceRuntimeState(state, {
       type: 'subagent.recovery_journal_merged',
@@ -3567,14 +3552,14 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('fails closed structurally when a same-key child recovery journal is malformed', () => {
-    const parent = createToolRecoveryJournalV1('a'.repeat(64));
+    const parent = createToolRecoveryJournal('a'.repeat(64));
     const malformed = {
-      ...createToolRecoveryJournalV1(parent.identityKey),
+      ...createToolRecoveryJournal(parent.identityKey),
       failures: { invalid: { not: 'a recovery failure' } },
       order: ['invalid'],
     } as unknown as typeof parent;
 
-    const merged = mergeToolRecoveryJournalsV1(parent, malformed, parent.identityKey);
+    const merged = mergeToolRecoveryJournals(parent, malformed, parent.identityKey);
     expect(merged.failures).toEqual({});
     expect(merged.order).toEqual([]);
     expect(merged.qualityGuard).toMatchObject({
@@ -3584,8 +3569,8 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('preserves a healthy parent identity across a completed child merge and next-kernel normalization', () => {
-    const parent = createToolRecoveryJournalV1('b'.repeat(64));
-    const child = recordRecoveryFailureV1(createToolRecoveryJournalV1(parent.identityKey), {
+    const parent = createToolRecoveryJournal('b'.repeat(64));
+    const child = recordRecoveryFailure(createToolRecoveryJournal(parent.identityKey), {
       toolCallId: 'child-read',
       toolName: 'read_file',
       invocationFingerprint: 'c'.repeat(64),
@@ -3593,12 +3578,12 @@ describe('ToolOutcome Runtime event integration', () => {
       outcome: correctArgsOutcome,
     });
 
-    const merged = mergeToolRecoveryJournalsV1(parent, child, parent.identityKey, {
+    const merged = mergeToolRecoveryJournals(parent, child, parent.identityKey, {
       taskId: 'parent-task',
       turnId: 'parent-turn',
     });
     expect(merged.qualityGuard).toEqual({ blocked: false, observedFailures: 1 });
-    const restored = normalizeToolRecoveryJournalV1(
+    const restored = normalizeToolRecoveryJournal(
       JSON.parse(JSON.stringify(merged)),
       parent.identityKey,
     );
@@ -3607,7 +3592,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('CompletionGuard V2 rejects a completed plan while typed failures remain unresolved', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'guard-unresolved-tool',
       userId: 'user',
@@ -3655,7 +3640,7 @@ describe('ToolOutcome Runtime event integration', () => {
       planning: { kind: 'completed', document, completedAtTurnId: state.turn.turnId },
       planHistory: [],
     };
-    state.toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
+    state.toolRecovery = recordRecoveryFailure(state.toolRecovery, {
       toolCallId: 'failed',
       toolName: 'read_file',
       invocationFingerprint: 'private',
@@ -3664,7 +3649,7 @@ describe('ToolOutcome Runtime event integration', () => {
       taskId: 'task',
       turnId: state.turn.turnId,
     });
-    expect(decideCompletionV2(state)).toMatchObject({
+    expect(decidePlannedCompletion(state)).toMatchObject({
       status: 'blocked',
       code: 'plan_evidence_unresolved',
       nextAction: 'resolve_plan_evidence',

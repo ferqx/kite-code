@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { projectCompletionSemanticsV1 } from '../../apps/kite/src/release/capability-status';
+import { projectCompletionSemantics } from '../../apps/kite/src/release/capability-status';
 
 function request(): RuntimeEvent {
   return {
@@ -30,7 +30,7 @@ function request(): RuntimeEvent {
 
 function stateWithRequest(): RuntimeState {
   return reduceRuntimeState(
-    createRuntimeHostStateInitialStateV1({
+    createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'thread',
       userId: 'user',
@@ -59,7 +59,7 @@ describe('Verification completion semantics', () => {
   test('does not equate Agent final, Runtime end, Plan state, checks, or Verification', () => {
     const state = stateWithRequest();
     state.transcript.final = 'done';
-    const projection = projectCompletionSemanticsV1({
+    const projection = projectCompletionSemantics({
       state: markRuntimeCompleted(state),
       verificationFeatureEnabled: false,
     });
@@ -103,7 +103,7 @@ describe('Verification completion semantics', () => {
       outcome: 'failed',
       completedAt: '2026-08-01T00:00:02.000Z',
     });
-    const projection = projectCompletionSemanticsV1({
+    const projection = projectCompletionSemantics({
       state: markRuntimeCompleted(state),
       verificationFeatureEnabled: true,
     });
@@ -121,7 +121,7 @@ describe('Verification completion semantics', () => {
       reason: 'User accepted residual risk.',
       waivedAt: '2026-08-01T00:00:03.000Z',
     });
-    const projection = projectCompletionSemanticsV1({
+    const projection = projectCompletionSemantics({
       state: markRuntimeCompleted(state),
       verificationFeatureEnabled: false,
     });

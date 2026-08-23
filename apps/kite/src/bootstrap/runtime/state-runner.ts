@@ -1,25 +1,25 @@
 import {
   DescendantResourceAdmissionError,
-  runtimeHostStateDecideCompletionV1 as decideCompletion,
-  type StateRuntimeEffectExecutorV1 as HostStateRuntimeEffectExecutorV1,
-  isRuntimeHostStateToolRecoveryInvalidV1,
-  isStateRuntimeEffectDeferredV1,
-  planRuntimeBudgetAdmissionV1,
-  type StateRuntimeEffectV1 as RuntimeEffect,
-  reconciliationEventsForReservationsV1,
-  type StateRuntimeSchedulerFactsV1 as SchedulerFactsV1,
-  type StateRuntimeEffectLeaseV1,
-  type StateRuntimeEffectPersistenceAcknowledgementV1,
+  runtimeHostStateDecideCompletion as decideCompletion,
+  type StateRuntimeEffectExecutor as HostStateRuntimeEffectExecutor,
+  isRuntimeHostStateToolRecoveryInvalid,
+  isStateRuntimeEffectDeferred,
+  planRuntimeBudgetAdmission,
+  type StateRuntimeEffect as RuntimeEffect,
+  reconciliationEventsForReservations,
+  type StateRuntimeSchedulerFacts as SchedulerFacts,
+  type StateRuntimeEffectLease,
+  type StateRuntimeEffectPersistenceAcknowledgement,
 } from '@kite/runtime-host';
-import type { RuntimeEffectLeaseExpectationV1 } from '@kite/runtime-host/storage';
+import type { RuntimeEffectLeaseExpectation } from '@kite/runtime-host/storage';
 import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import { classifyFailure } from './failures';
-import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
+import { resourceAdmissionTerminalEvents } from './resource-admission-terminal';
 import type { RuntimeActionResult, RuntimeUserAction } from './state-actions';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
-import { completedTerminalOutcomeV1, failedTerminalOutcomeV1 } from './terminal-outcome';
+import { completedTerminalOutcome, failedTerminalOutcome } from './terminal-outcome';
 
-type RuntimeEffectExecutorV1 = HostStateRuntimeEffectExecutorV1<
+type RuntimeEffectExecutor = HostStateRuntimeEffectExecutor<
   RuntimeState,
   RuntimeEvent,
   RuntimeEffect
@@ -29,40 +29,40 @@ type RuntimeEffectExecutorV1 = HostStateRuntimeEffectExecutorV1<
  * Transitional State runner port. Production is backed by the one Host
  * session; Core's historical AgentKernel only remains a test migration source.
  */
-export interface RuntimeStateSessionPortV1 {
+export interface RuntimeStateSessionPort {
   getState(): Readonly<RuntimeState>;
   processEvent(event: RuntimeEvent): { status: 'applied' | 'duplicate'; eventId: string };
   processEventBatch(events: RuntimeEvent[]): readonly RuntimeEvent[];
   getLastAppliedEvents(): readonly RuntimeEvent[];
   selectPendingEffects(
     state?: Readonly<RuntimeState>,
-    facts?: SchedulerFactsV1,
+    facts?: SchedulerFacts,
   ): readonly RuntimeEffect[];
   acquireRunner(): string | null;
   releaseRunner(runnerId: string): void;
-  beginEffect(effect: RuntimeEffect): StateRuntimeEffectLeaseV1;
-  isEffectEventCurrent(lease: StateRuntimeEffectLeaseV1, event: RuntimeEvent): boolean;
-  applyEffectEvent(lease: StateRuntimeEffectLeaseV1, event: RuntimeEvent): boolean;
+  beginEffect(effect: RuntimeEffect): StateRuntimeEffectLease;
+  isEffectEventCurrent(lease: StateRuntimeEffectLease, event: RuntimeEvent): boolean;
+  applyEffectEvent(lease: StateRuntimeEffectLease, event: RuntimeEvent): boolean;
   applyEffectResult(
-    lease: StateRuntimeEffectLeaseV1,
+    lease: StateRuntimeEffectLease,
     events: RuntimeEvent[],
-    requiredEffectLease?: RuntimeEffectLeaseExpectationV1,
+    requiredEffectLease?: RuntimeEffectLeaseExpectation,
   ): boolean;
   /** Explicit Store 4 acknowledgement route; absent legacy ports can only
    * retain the receipt_evidence compatibility path below. */
   applyEffectEvents?(
-    lease: StateRuntimeEffectLeaseV1,
+    lease: StateRuntimeEffectLease,
     events: RuntimeEvent[],
-    acknowledgement: StateRuntimeEffectPersistenceAcknowledgementV1,
-    requiredEffectLease?: RuntimeEffectLeaseExpectationV1,
+    acknowledgement: StateRuntimeEffectPersistenceAcknowledgement,
+    requiredEffectLease?: RuntimeEffectLeaseExpectation,
   ): boolean;
   applyLateResourceReconciliation(events: readonly RuntimeEvent[]): boolean;
   applyAction(action: RuntimeUserAction, additionalEvents?: RuntimeEvent[]): RuntimeActionResult;
   /** Host sessions release in-process ownership after every attempt. */
-  releaseEffect?(lease: Readonly<StateRuntimeEffectLeaseV1>): void;
+  releaseEffect?(lease: Readonly<StateRuntimeEffectLease>): void;
 }
 
-export { resolveResourceAdmissionFailureOutcomeV1 } from './resource-admission-terminal';
+export { resolveResourceAdmissionFailureOutcome } from './resource-admission-terminal';
 
 export interface RuntimeActionProvider {
   requestAction(
@@ -199,22 +199,22 @@ function mergeToolProgress(
 
 /** Execute an effect while forwarding events produced during the effect. */
 async function* executeEffectWithStreaming(
-  kernel: RuntimeStateSessionPortV1,
-  executor: RuntimeEffectExecutorV1,
-  lease: StateRuntimeEffectLeaseV1,
+  kernel: RuntimeStateSessionPort,
+  executor: RuntimeEffectExecutor,
+  lease: StateRuntimeEffectLease,
   reservationIds: string[] = [],
   signal?: AbortSignal,
 ): AsyncGenerator<RuntimeEvent, EffectExecutionOutcome> {
   // A lease can become stale after async preparation or while another durable
   // fact is applied. Never enter any executor once the journal is corrupt;
   // report a non-applied attempt so the outer loop schedules the hard block.
-  if (isRuntimeHostStateToolRecoveryInvalidV1(kernel.getState())) {
+  if (isRuntimeHostStateToolRecoveryInvalid(kernel.getState())) {
     return { applied: false, emitted: true };
   }
   const pending: Array<{
     events: RuntimeEvent[];
-    requiredEffectLease?: RuntimeEffectLeaseExpectationV1;
-    acknowledgement?: StateRuntimeEffectPersistenceAcknowledgementV1;
+    requiredEffectLease?: RuntimeEffectLeaseExpectation;
+    acknowledgement?: StateRuntimeEffectPersistenceAcknowledgement;
     mode?: 'late_resource_reconciliation';
     resolve?: (applied: boolean) => void;
     reject?: (error: unknown) => void;
@@ -231,8 +231,8 @@ async function* executeEffectWithStreaming(
     resolve?: (applied: boolean) => void,
     reject?: (error: unknown) => void,
     mode?: 'late_resource_reconciliation',
-    requiredEffectLease?: RuntimeEffectLeaseExpectationV1,
-    acknowledgement?: StateRuntimeEffectPersistenceAcknowledgementV1,
+    requiredEffectLease?: RuntimeEffectLeaseExpectation,
+    acknowledgement?: StateRuntimeEffectPersistenceAcknowledgement,
   ) => {
     const event = events.length === 1 ? events[0] : undefined;
     if (!resolve && !reject && !mode && event?.type === 'tool.progress') {
@@ -290,7 +290,7 @@ async function* executeEffectWithStreaming(
     },
   ).then(
     (events) => {
-      if (isStateRuntimeEffectDeferredV1(events)) {
+      if (isStateRuntimeEffectDeferred(events)) {
         deferred = events.deferred;
       } else {
         result = events;
@@ -388,7 +388,7 @@ async function* executeEffectWithStreaming(
   if (deferred) return { applied: false, emitted: false, deferred };
   if (failure) {
     if (failure instanceof DescendantResourceAdmissionError) {
-      const terminalEvents = resourceAdmissionTerminalEventsV1(kernel.getState(), failure.reason);
+      const terminalEvents = resourceAdmissionTerminalEvents(kernel.getState(), failure.reason);
       kernel.applyEffectResult(lease, terminalEvents);
       yield* kernel.getLastAppliedEvents();
       return { applied: true, emitted: true };
@@ -411,11 +411,7 @@ async function* executeEffectWithStreaming(
     throw failure;
   }
 
-  const reconciled = reconciliationEventsForReservationsV1(
-    kernel.getState(),
-    reservationIds,
-    result,
-  );
+  const reconciled = reconciliationEventsForReservations(kernel.getState(), reservationIds, result);
   const terminalResult = [...result, ...reconciled];
   if (terminalResult.length > 0) {
     emitted = true;
@@ -449,7 +445,7 @@ async function* executeEffectWithStreaming(
 
 function shellConcurrencyGroup(
   effect: Extract<RuntimeEffect, { type: 'run_tools' }>,
-  facts: SchedulerFactsV1 | undefined,
+  facts: SchedulerFacts | undefined,
 ): string | undefined {
   let group: string | undefined;
   for (const toolCallId of effect.toolCallIds) {
@@ -468,9 +464,9 @@ function shellConcurrencyGroup(
  * checkpoint concepts so application runners can adopt it as a
  * single, testable replacement boundary.
  */
-export async function* runStateRuntimeLoopV1(
-  kernel: RuntimeStateSessionPortV1,
-  executor: RuntimeEffectExecutorV1,
+export async function* runStateRuntimeLoop(
+  kernel: RuntimeStateSessionPort,
+  executor: RuntimeEffectExecutor,
   provider: RuntimeActionProvider,
   maxEffects = 10_000,
   prepareEffect?: (
@@ -478,7 +474,7 @@ export async function* runStateRuntimeLoopV1(
     state: Readonly<RuntimeState>,
   ) => Promise<RuntimeEffect> | RuntimeEffect,
   signal?: AbortSignal,
-  schedulerFacts?: (state: Readonly<RuntimeState>) => SchedulerFactsV1,
+  schedulerFacts?: (state: Readonly<RuntimeState>) => SchedulerFacts,
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
   if (!runnerId) return;
@@ -617,7 +613,7 @@ export async function* runStateRuntimeLoopV1(
           failure,
           effectId: lease.effectId,
           turnId: lease.turnId,
-          outcome: failedTerminalOutcomeV1(failure, {
+          outcome: failedTerminalOutcome(failure, {
             knownExternalEffects: effect.failureKind === 'unknown' ? 'unknown' : 'none',
           }),
         };
@@ -648,7 +644,7 @@ export async function* runStateRuntimeLoopV1(
           ...(decision.version === 'completion_guard_v2'
             ? { planIdentity: decision.planIdentity }
             : {}),
-          outcome: completedTerminalOutcomeV1(),
+          outcome: completedTerminalOutcome(),
         };
         const turnCompleted: RuntimeEvent = {
           type: 'turn.completed',
@@ -711,7 +707,7 @@ export async function* runStateRuntimeLoopV1(
           recoverable: false,
           failure,
           turnId: kernel.getState().turn.turnId,
-          outcome: failedTerminalOutcomeV1({ ...failure, kind: 'unknown' }),
+          outcome: failedTerminalOutcome({ ...failure, kind: 'unknown' }),
         };
         // The non-correctable blocker and both terminal facts are one durable
         // boundary. A consumer that stops after observing attempt two must
@@ -724,7 +720,7 @@ export async function* runStateRuntimeLoopV1(
       }
       let reservationIds: string[] = [];
       if (kernel.getState().resourceBudget.status === 'active') {
-        const admission = planRuntimeBudgetAdmissionV1(kernel.getState(), effect);
+        const admission = planRuntimeBudgetAdmission(kernel.getState(), effect);
         if (admission.preparationEvents.length > 0) {
           kernel.processEventBatch(admission.preparationEvents);
           yield* admission.preparationEvents;
@@ -752,7 +748,7 @@ export async function* runStateRuntimeLoopV1(
             if (signal?.aborted) return;
             continue;
           }
-          const terminalEvents = resourceAdmissionTerminalEventsV1(
+          const terminalEvents = resourceAdmissionTerminalEvents(
             kernel.getState(),
             admission.reason,
           );
@@ -761,7 +757,7 @@ export async function* runStateRuntimeLoopV1(
           return;
         }
         if (admission.status === 'denied') {
-          const terminalEvents = resourceAdmissionTerminalEventsV1(
+          const terminalEvents = resourceAdmissionTerminalEvents(
             kernel.getState(),
             admission.reason,
           );
@@ -779,7 +775,7 @@ export async function* runStateRuntimeLoopV1(
       // Recheck after all async/preparation admission boundaries and before a
       // prepared effect can request UI, Provider, verification, compaction or
       // tool execution. The leased executor repeats this check once more.
-      if (isRuntimeHostStateToolRecoveryInvalidV1(kernel.getState())) {
+      if (isRuntimeHostStateToolRecoveryInvalid(kernel.getState())) {
         continue;
       }
       if (
@@ -864,7 +860,7 @@ export async function* runStateRuntimeLoopV1(
         const actionResult = kernel.applyAction(
           action,
           effect.type === 'request_provider_action'
-            ? reconciliationEventsForReservationsV1(kernel.getState(), reservationIds)
+            ? reconciliationEventsForReservations(kernel.getState(), reservationIds)
             : [],
         );
         if (actionResult.status !== 'applied') {
@@ -896,7 +892,7 @@ export async function* runStateRuntimeLoopV1(
               recoverable: false,
               failure,
               turnId: kernel.getState().turn.turnId,
-              outcome: failedTerminalOutcomeV1(failure, {
+              outcome: failedTerminalOutcome(failure, {
                 knownExternalEffects: 'unknown',
               }),
             };

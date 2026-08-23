@@ -18,14 +18,14 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import {
-  directoryNamesAtV1,
-  openDirectoryAtV1,
-  removeDirectoryTreeAtV1,
-  removeEmptyDirectoryAtV1,
+  directoryNamesAt,
+  openDirectoryAt,
+  removeDirectoryTreeAt,
+  removeEmptyDirectoryAt,
 } from './descriptor-relative-cleanup';
 
 /** Deterministic Provider allocation recoverable from a durable preparation intent. */
-export function sandboxRuntimeDirForPreparationV1(
+export function sandboxRuntimeDirForPreparation(
   workspace: string,
   preparationDigest: string,
 ): string {
@@ -39,28 +39,28 @@ export function sandboxRuntimeDirForPreparationV1(
   return join(tmpdir(), 'openpx-sandbox-runtime', `${workspaceKey}-${preparationKey}`);
 }
 
-export interface PosixSandboxRuntimeRootsV1 {
+export interface PosixSandboxRuntimeRoots {
   readonly controlRoot: string;
   readonly dataRoot: string;
 }
 
 /** Host-only control state and sandbox-writable data are disjoint identities. */
-export function sandboxRuntimeRootsForPreparationV1(
+export function sandboxRuntimeRootsForPreparation(
   workspace: string,
   preparationDigest: string,
-): PosixSandboxRuntimeRootsV1 {
-  const allocationRoot = sandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+): PosixSandboxRuntimeRoots {
+  const allocationRoot = sandboxRuntimeDirForPreparation(workspace, preparationDigest);
   return Object.freeze({
     controlRoot: join(allocationRoot, 'control'),
     dataRoot: join(allocationRoot, 'data'),
   });
 }
 
-export function createPosixSandboxRuntimeRootsForPreparationV1(
+export function createPosixSandboxRuntimeRootsForPreparation(
   workspace: string,
   preparationDigest: string,
-): PosixSandboxRuntimeRootsV1 {
-  const roots = sandboxRuntimeRootsForPreparationV1(workspace, preparationDigest);
+): PosixSandboxRuntimeRoots {
+  const roots = sandboxRuntimeRootsForPreparation(workspace, preparationDigest);
   const allocationRoot = dirname(roots.controlRoot);
   const base = dirname(allocationRoot);
   ensurePrivateDirectory(base, true);
@@ -74,8 +74,8 @@ export function createPosixSandboxRuntimeRootsForPreparationV1(
 }
 
 /** Descendant exit must already be proven. Remove writable data before host control state. */
-export function cleanupPosixSandboxRuntimeRootsNoSpawnV1(
-  roots: Readonly<PosixSandboxRuntimeRootsV1>,
+export function cleanupPosixSandboxRuntimeRootsNoSpawn(
+  roots: Readonly<PosixSandboxRuntimeRoots>,
 ): boolean {
   if (dirname(roots.controlRoot) !== dirname(roots.dataRoot)) return false;
   const allocationRoot = dirname(roots.controlRoot);
@@ -97,25 +97,25 @@ export function cleanupPosixSandboxRuntimeRootsNoSpawnV1(
     // after the operation, then let the descriptor-relative remover perform
     // the authoritative traversal and unlink.
     if (process.platform === 'darwin') {
-      if (!prepareDarwinTreeForDescriptorCleanupV1(roots.dataRoot)) return false;
-      if (!prepareDarwinTreeForDescriptorCleanupV1(roots.controlRoot)) return false;
+      if (!prepareDarwinTreeForDescriptorCleanup(roots.dataRoot)) return false;
+      if (!prepareDarwinTreeForDescriptorCleanup(roots.controlRoot)) return false;
     }
     baseFd = openVerified(
       base,
       constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),
     );
-    const baseNames = directoryNamesAtV1(baseFd);
+    const baseNames = directoryNamesAt(baseFd);
     if (!baseNames) return false;
     if (!baseNames.includes(basename(allocationRoot))) return true;
-    allocationFd = openDirectoryAtV1(baseFd, basename(allocationRoot));
+    allocationFd = openDirectoryAt(baseFd, basename(allocationRoot));
     if (allocationFd < 0) return false;
     // Writable sandbox data is always reclaimed before host-only control state.
-    if (!removeDirectoryTreeAtV1(allocationFd, 'data')) return false;
-    if (!removeDirectoryTreeAtV1(allocationFd, 'control')) return false;
-    if (directoryNamesAtV1(allocationFd)?.length !== 0) return false;
+    if (!removeDirectoryTreeAt(allocationFd, 'data')) return false;
+    if (!removeDirectoryTreeAt(allocationFd, 'control')) return false;
+    if (directoryNamesAt(allocationFd)?.length !== 0) return false;
     closeSync(allocationFd);
     allocationFd = undefined;
-    return removeEmptyDirectoryAtV1(baseFd, basename(allocationRoot));
+    return removeEmptyDirectoryAt(baseFd, basename(allocationRoot));
   } catch {
     return false;
   } finally {
@@ -124,25 +124,25 @@ export function cleanupPosixSandboxRuntimeRootsNoSpawnV1(
   }
 }
 
-function prepareDarwinTreeForDescriptorCleanupV1(path: string): boolean {
+function prepareDarwinTreeForDescriptorCleanup(path: string): boolean {
   const before = lstatOrNull(path);
   if (!before) return true;
   const currentUid = process.getuid?.();
   if (typeof currentUid === 'number' && before.uid !== currentUid) return false;
   if (before.isSymbolicLink()) {
-    clearDarwinFileFlagsAtPathV1(path);
+    clearDarwinFileFlagsAtPath(path);
     const after = lstatOrNull(path);
     return Boolean(after?.isSymbolicLink() && before.dev === after.dev && before.ino === after.ino);
   }
   if (before.isFile()) {
     if (before.nlink !== 1) return true;
-    clearDarwinFileFlagsAtPathV1(path);
+    clearDarwinFileFlagsAtPath(path);
     chmodSync(path, 0o600);
     const after = lstatOrNull(path);
     return Boolean(after?.isFile() && before.dev === after.dev && before.ino === after.ino);
   }
   if (!before.isDirectory()) return true;
-  clearDarwinFileFlagsAtPathV1(path);
+  clearDarwinFileFlagsAtPath(path);
   chmodSync(path, 0o700);
   const pinned = openVerified(
     path,
@@ -150,7 +150,7 @@ function prepareDarwinTreeForDescriptorCleanupV1(path: string): boolean {
   );
   try {
     for (const child of readdirSync(path)) {
-      if (!prepareDarwinTreeForDescriptorCleanupV1(join(path, child))) return false;
+      if (!prepareDarwinTreeForDescriptorCleanup(join(path, child))) return false;
     }
     const after = fstatSync(pinned);
     return before.dev === after.dev && before.ino === after.ino;
@@ -159,11 +159,11 @@ function prepareDarwinTreeForDescriptorCleanupV1(path: string): boolean {
   }
 }
 
-export function createSandboxRuntimeDirForPreparationV1(
+export function createSandboxRuntimeDirForPreparation(
   workspace: string,
   preparationDigest: string,
 ): string {
-  const target = sandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+  const target = sandboxRuntimeDirForPreparation(workspace, preparationDigest);
   const base = dirname(target);
   ensurePrivateDirectory(base, true);
   mkdirSync(target, { mode: 0o700 });
@@ -177,11 +177,11 @@ export function createSandboxRuntimeDirForPreparationV1(
  * and rejected on every unexpected existing identity so recovery can address
  * exactly one invocation without scanning the shared temp root.
  */
-export function createWindowsSandboxRuntimeDirForPreparationV1(
+export function createWindowsSandboxRuntimeDirForPreparation(
   workspace: string,
   preparationDigest: string,
 ): string {
-  const target = sandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+  const target = sandboxRuntimeDirForPreparation(workspace, preparationDigest);
   const base = dirname(target);
   mkdirSync(base, { recursive: true, mode: 0o700 });
   const baseEntry = lstatSync(base);
@@ -197,7 +197,7 @@ export function createWindowsSandboxRuntimeDirForPreparationV1(
 }
 
 /** Windows no-spawn cleanup constrained to the exact digest-addressed runtime entry. */
-export function cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeDir: string): boolean {
+export function cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeDir: string): boolean {
   const configuredBase = resolve(tmpdir(), 'openpx-sandbox-runtime');
   const requestedTarget = resolve(runtimeDir);
   try {
@@ -229,7 +229,7 @@ export function cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeDir: string): bo
 }
 
 /** Provider-safe no-follow cleanup. This dependency closure never spawns. */
-export function cleanupSandboxRuntimeDirNoSpawnV1(
+export function cleanupSandboxRuntimeDirNoSpawn(
   runtimeDir: string,
   allowAllocationChild = false,
 ): boolean {
@@ -265,14 +265,14 @@ function restoreAndRemovePhysicalEntryNoFollow(path: string): void {
   const entry = lstatOrNull(path);
   if (!entry) return;
   if (entry.isSymbolicLink()) {
-    clearDarwinFileFlagsAtPathV1(path);
+    clearDarwinFileFlagsAtPath(path);
     unlinkSync(path);
     return;
   }
   if (!entry.isDirectory()) {
-    restoreEntryModeAtPinnedParentV1(path, 0o600);
+    restoreEntryModeAtPinnedParent(path, 0o600);
     const fd = openVerified(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    clearDarwinFileFlagsAtFdV1(fd);
+    clearDarwinFileFlagsAtFd(fd);
     fchmodSync(fd, 0o600);
     fsyncSync(fd);
     closeSync(fd);
@@ -327,12 +327,12 @@ function hardenAndVerifyDirectory(path: string, required = true): number | null 
     throw new Error('Sandbox runtime identity is not a directory.');
   }
   try {
-    restoreEntryModeAtPinnedParentV1(path, 0o700);
+    restoreEntryModeAtPinnedParent(path, 0o700);
     const fd = openVerified(
       path,
       constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),
     );
-    clearDarwinFileFlagsAtFdV1(fd);
+    clearDarwinFileFlagsAtFd(fd);
     fchmodSync(fd, 0o700);
     fsyncSync(fd);
     return fd;
@@ -345,18 +345,18 @@ function hardenAndVerifyDirectory(path: string, required = true): number | null 
 }
 
 /** Restore an entry mode through its pinned parent before opening it. */
-function restoreEntryModeAtPinnedParentV1(path: string, mode: number): void {
-  clearDarwinFileFlagsAtPathV1(path);
+function restoreEntryModeAtPinnedParent(path: string, mode: number): void {
+  clearDarwinFileFlagsAtPath(path);
   const parentFd = openVerified(
     dirname(path),
     constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),
   );
   try {
-    const result = posixRuntimeApiV1().fchmodat(
+    const result = posixRuntimeApi().fchmodat(
       parentFd,
       ptr(Buffer.from(`${basename(path)}\0`)),
       mode,
-      AT_SYMLINK_NOFOLLOW_V1,
+      AT_SYMLINK_NOFOLLOW_,
     );
     if (result !== 0) throw new Error('Sandbox runtime directory mode could not be restored.');
   } finally {
@@ -410,43 +410,43 @@ function lstatOrNull(path: string) {
   }
 }
 
-interface DarwinFileFlagsApiV1 {
+interface DarwinFileFlagsApi {
   fchmodat(parentFd: number, path: Pointer, mode: number, flags: number): number;
   fchflags(fd: number, flags: number): number;
   lchflags(path: Pointer, flags: number): number;
 }
 
-const AT_SYMLINK_NOFOLLOW_V1 = process.platform === 'darwin' ? 0x20 : 0x100;
-let posixRuntimeApiV1Cache: DarwinFileFlagsApiV1 | undefined;
+const AT_SYMLINK_NOFOLLOW_ = process.platform === 'darwin' ? 0x20 : 0x100;
+let posixRuntimeApiCache: DarwinFileFlagsApi | undefined;
 
 /** Clear user immutable/append flags without spawning a cleanup process. */
-function clearDarwinFileFlagsAtFdV1(fd: number): void {
+function clearDarwinFileFlagsAtFd(fd: number): void {
   if (process.platform !== 'darwin') return;
-  const result = posixRuntimeApiV1().fchflags(fd, 0);
+  const result = posixRuntimeApi().fchflags(fd, 0);
   if (result !== 0) throw new Error('Sandbox runtime flags could not be cleared.');
 }
 
 /** Clear flags on a symlink itself; this call deliberately does not follow it. */
-function clearDarwinFileFlagsAtPathV1(path: string): void {
+function clearDarwinFileFlagsAtPath(path: string): void {
   if (process.platform !== 'darwin') return;
-  const result = posixRuntimeApiV1().lchflags(ptr(Buffer.from(`${path}\0`)), 0);
+  const result = posixRuntimeApi().lchflags(ptr(Buffer.from(`${path}\0`)), 0);
   if (result !== 0) throw new Error('Sandbox runtime link flags could not be cleared.');
 }
 
-function posixRuntimeApiV1(): DarwinFileFlagsApiV1 {
-  if (posixRuntimeApiV1Cache) return posixRuntimeApiV1Cache;
+function posixRuntimeApi(): DarwinFileFlagsApi {
+  if (posixRuntimeApiCache) return posixRuntimeApiCache;
   if (process.platform === 'darwin') {
-    posixRuntimeApiV1Cache = dlopen('/usr/lib/libSystem.B.dylib', {
+    posixRuntimeApiCache = dlopen('/usr/lib/libSystem.B.dylib', {
       fchmodat: { args: ['i32', 'ptr', 'u32', 'i32'], returns: 'i32' },
       fchflags: { args: ['i32', 'u32'], returns: 'i32' },
       lchflags: { args: ['ptr', 'u32'], returns: 'i32' },
-    }).symbols as unknown as DarwinFileFlagsApiV1;
+    }).symbols as unknown as DarwinFileFlagsApi;
   } else {
-    posixRuntimeApiV1Cache = dlopen('libc.so.6', {
+    posixRuntimeApiCache = dlopen('libc.so.6', {
       fchmodat: { args: ['i32', 'ptr', 'u32', 'i32'], returns: 'i32' },
-    }).symbols as unknown as DarwinFileFlagsApiV1;
+    }).symbols as unknown as DarwinFileFlagsApi;
   }
-  return posixRuntimeApiV1Cache;
+  return posixRuntimeApiCache;
 }
 
 /** Canonicalize aliases without requiring a just-cleaned runtime tail to exist. */

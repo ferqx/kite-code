@@ -1,2 +1,2 @@
-export { createCapabilityBindingV1, digestCapabilityBindingValueV1 } from './capability-binding';
-export { digestCapabilityValueV1 } from './skills/capability-domain';
+export { createCapabilityBinding, digestCapabilityBindingValue } from './capability-binding';
+export { digestCapabilityValue } from './skills/capability-domain';

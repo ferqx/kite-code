@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "profileId": "skills-readonly-v1",
+  "profileId": "skills-readonly",
   "capability": "skills_readonly",
-  "requiredFeatureFlags": ["skillActivationV2", "skillWorkflowV1"],
+  "requiredFeatureFlags": ["skillActivation", "skillWorkflow"],
   "state": {
     "maturity": "under_development",
     "maxRollout": "off"

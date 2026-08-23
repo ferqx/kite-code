@@ -9,17 +9,17 @@ import {
   systemMessage,
 } from '../model';
 
-export interface BuiltinSubagentModelContextInputV1 {
+export interface BuiltinSubagentModelContextInput {
   readonly workspace: string;
   readonly task: string;
   readonly role: 'explore' | 'plan' | 'code' | 'review';
   readonly systemPrompt: string;
-  readonly promptContractV2: boolean;
+  readonly promptContract: boolean;
   readonly projectInstructions?: ProjectInstructionSnapshot;
   readonly skills?: readonly Readonly<{ name: string; description: string }>[];
 }
 
-export interface BuiltinSubagentModelContextV1 {
+export interface BuiltinSubagentModelContext {
   readonly workspace: string;
   readonly projectInstructions?: ProjectInstructionSnapshot;
   readonly messages: readonly BaseMessage[];
@@ -30,9 +30,9 @@ export interface BuiltinSubagentModelContextV1 {
  * The caller supplies only canonical App facts; the result carries no Runtime
  * State, Store, Kernel, Gateway, registry, or execution authority.
  */
-export function createBuiltinSubagentModelContextV1(
-  input: BuiltinSubagentModelContextInputV1,
-): BuiltinSubagentModelContextV1 {
+export function createBuiltinSubagentModelContext(
+  input: BuiltinSubagentModelContextInput,
+): BuiltinSubagentModelContext {
   const workspace = resolve(input.workspace);
   const cacheableRuntimeContext = buildCacheableRuntimeContext({ workspace });
   const taskWithCwd = `<runtime-state source="harness.subagent">
@@ -52,7 +52,7 @@ ${input.task}`;
   }
   systemPrompt += `\n\n${cacheableRuntimeContext}`;
 
-  const projectInstructions = input.promptContractV2
+  const projectInstructions = input.promptContract
     ? (input.projectInstructions ?? resolveProjectInstructionSnapshot({ workspace }))
     : undefined;
   const messages: BaseMessage[] = [systemMessage(systemPrompt), humanMessage(taskWithCwd)];

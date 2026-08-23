@@ -9,7 +9,7 @@ export type McpProviderFailureKind =
 
 export type McpProviderRecoveryAction = 'login' | 'approve' | 'retry';
 
-export interface McpProviderFailurePolicyFactsV1 {
+export interface McpProviderFailurePolicyFacts {
   readonly kind: McpProviderFailureKind;
   readonly message: string;
   readonly retryable: boolean;
@@ -122,9 +122,9 @@ export function isMcpProviderError(error: unknown): error is McpProviderError {
 }
 
 /** Builtin-owned MCP facts consumed by the Kernel-owned failure strategy. */
-export function mcpProviderFailurePolicyFactsV1(
+export function mcpProviderFailurePolicyFacts(
   error: McpProviderError,
-): McpProviderFailurePolicyFactsV1 {
+): McpProviderFailurePolicyFacts {
   return Object.freeze({
     kind: error.kind,
     message: error.message,

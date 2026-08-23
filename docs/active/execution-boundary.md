@@ -2,7 +2,7 @@
 
 状态：active
 
-读取时机：修改 `ExecutionBoundaryV1`、production composition root、sandbox capability
+读取时机：修改 `ExecutionBoundary`、production composition root、sandbox capability
 projection、release-controlled execution policy 或对应 feature flag 时。
 
 验证：`bun test tests/sandbox/execution-boundary.test.ts tests/sandbox/network-boundary.test.ts
@@ -19,7 +19,7 @@ tests/execution/sandbox-execution-provider.test.ts`、
 
 ## Schema ownership
 
-RMV1-13 后 `packages/builtin-runtime/src/sandbox/types.ts` 是 `ExecutionBoundaryV1`、逐维 backend capability strength、
+RM-13 后 `packages/builtin-runtime/src/sandbox/types.ts` 是 `ExecutionBoundary`、逐维 backend capability strength、
 qualification registry 和只读工具 effect contract 的类型来源。
 `apps/kite/src/config/execution-boundary.ts` 是 App 配置的严格解析、canonical digest、单调收紧和技术能力评估实现。
 `apps/kite/src/config/execution-qualification.ts` 只从仓库固定路径读取 release-pinned
@@ -39,23 +39,23 @@ canonical Workspace 加载 project config，不使用进程启动目录代替该
 ## Fail-closed admission
 
 production root 在创建 Runtime、Shell、writer、Skill child 或 local stdio MCP 之前必须通过
-`loadProductionAgentConfig()`；它内部调用 sealed `admitProductionExecutionBoundaryV1()`。
+`loadProductionAgentConfig()`；它内部调用 sealed `admitProductionExecutionBoundary()`。
 准入同时要求：
 
 - flag 开启且 boundary 严格有效；
 - boundary 与实际 Workspace 的 canonical key 一致；
 - 仓库固定的批准 registry 对实际 OS release/version、architecture、Bun、backend 和入口给出
   精确 qualification；
-- native probe 与 runtime resolver 共用 `readExecutionEnvironmentIdentityV1()`，并要求同一
+- native probe 与 runtime resolver 共用 `readExecutionEnvironmentIdentity()`，并要求同一
   qualification 同时绑定 TUI 与 foreground CLI 入口证据；
 - backend 按 filesystem、network、process-tree、child inheritance 逐维报告 `enforced`；Linux
   候选还单独报告 syscall-filter strength。该字段进入 sealed
-  `ExecutionBackendCapabilitiesV1` 与 registry canonical digest；缺少 native negative
+  `ExecutionBackendCapabilities` 与 registry canonical digest；缺少 native negative
   conformance 或不是 `enforced` 时 admission 以 `backend_syscall_filter_unsupported` fail
   closed。Seatbelt 使用独立 policy 机制，该字段可为 `unsupported`。旧 raw
-  `PlatformCapabilityEvidenceV1` 缺少新增可选字段时规范化为 `unsupported`，不得抛错或推断为已执行；
+  `PlatformCapabilityEvidence` 缺少新增可选字段时规范化为 `unsupported`，不得抛错或推断为已执行；
 - production boundary 要求 sandbox 配置和 CLI/App runtime restriction 均未关闭，且当前不接受
-  `full_access`；成功返回的 `ProductionAgentConfigV1` 把 sandbox 固定为 enabled，并携带
+  `full_access`；成功返回的 `ProductionAgentConfig` 把 sandbox 固定为 enabled，并携带
   release-approved qualification proof。
 
 任一条件失败返回全 false capability surface，不进入审批。审批、`full` interaction mode 或
@@ -86,19 +86,19 @@ registry 是空支持集，因此所有 production 配置加载都在返回可�
 
 ## 单调组合与 identity
 
-`tightenExecutionBoundaryV1()` 只执行权限交集/限制收紧；不同 Workspace 禁止组合。解析后的
+`tightenExecutionBoundary()` 只执行权限交集/限制收紧；不同 Workspace 禁止组合。解析后的
 Workspace realpath、排序去重后的 host allowlist 和所有安全字段进入
-`computeExecutionBoundaryDigestV1()`。字段、Workspace identity 或有效 allowlist 变化都会改变
+`computeExecutionBoundaryDigest()`。字段、Workspace identity 或有效 allowlist 变化都会改变
 digest，使旧 release evidence 失效。
 
 ## Network projection and durable admission
 
-存在 sealed `ExecutionBoundaryV1` 时，Runner 总是派生不可变 `NetworkBoundaryPolicyV1`。
-`networkBoundaryV1=false` 只会把 policy 收紧为 `off`，不会回到开发期 `allow_all`。开启后，当前
+存在 sealed `ExecutionBoundary` 时，Runner 总是派生不可变 `NetworkBoundaryPolicy`。
+`networkBoundary=false` 只会把 policy 收紧为 `off`，不会回到开发期 `allow_all`。开启后，当前
 唯一具备透明逐调用执行层的网络工具是进程内 `web_fetch`：每次 robots、正文和 redirect hop
 都重新校验精确 allowlisted DNS host，解析全部实际地址并拒绝 IP literal、loopback、private、
 link-local、metadata 与 reserved range；transport 使用已批准地址的 pinned lookup，且不消费
-proxy environment。RMV1-11 后 SSRF、robots、正文提取与 worker 实现由
+proxy environment。RM-11 后 SSRF、robots、正文提取与 worker 实现由
 `packages/builtin-runtime/src/web/` 拥有，App 只注入既有 network boundary fetch mechanism。
 这里只承诺 host 级 admission，不承诺 URL path 隔离。
 
@@ -178,7 +178,7 @@ operation 必须走下述 broker，通用 Shell 不能直接访问 `.git`，但�
 ### Governed Workspace filesystem seam
 
 PS-01 将进程内文件工具的 production filesystem authority 固定到
-`LocalWorkspaceFilesystemProviderV1`。Execution boundary 与 Policy 先确定 canonical Workspace、path-policy
+`LocalWorkspaceFilesystemProvider`。Execution boundary 与 Policy 先确定 canonical Workspace、path-policy
 revision、effective effect 和 mutation 批准范围；Tool Pipeline 在 invocation/attempt durable ack 后把这些
 事实密封进短时 grant。Provider 验证 `workspace_only | external_read | approved_external` operation scope 与
 target identity；`external_read` 只允许 observe，`approved_external` 只来自 durable approved mutation。
@@ -195,7 +195,7 @@ certainty 则属于 commit-unknown。Windows 在 handle-relative backend 验收�
 
 ### Governed Sandbox execution seam
 
-PS-02 将 confinement preparation 固定到 protocol-first `SandboxExecutionProviderV1`。RMV1-13 后该私有
+PS-02 将 confinement preparation 固定到 protocol-first `SandboxExecutionProvider`。RM-13 后该私有
 Provider contract 的物理 owner 是 `packages/runtime-spi/src/sandbox-execution-provider.ts`；
 `packages/builtin-runtime/src/sandbox/` 拥有 backend、protected-path、network、grant 与 Local Provider
 领域语义，`packages/runtime-host/src/` 拥有唯一异步进程创建 primitive、POSIX supervisor、进程树终止和
@@ -265,7 +265,7 @@ kernel/launchd/descriptor-owned descendant authority 前，Seatbelt allocating �
 
 ### Brokered Git access（ADR-0097）
 
-`ExecutionCapabilitySurfaceV1` 只投影只读 `gitInspect`，并绑定精确
+`ExecutionCapabilitySurface` 只投影只读 `gitInspect`，并绑定精确
 `brokered-git-r1` feature revision。Builtin catalog disclosure、Controller dispatch 与 native `.git`
 deny/mask 必须以同一 revision 原子切换；只打开 feature boolean、只披露 Tool 或只改 sandbox
 profile都 fail closed，generic process/read-only fallback 也不能隐式产生 Git capability。
@@ -291,7 +291,7 @@ qualification 明确为 excluded；开发 fixture 通过不产生 production sup
 
 `createSandboxExecutor()` 已从 production 入口删除；同名函数只存在于
 `tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。Builtin catalog entry 也不接受裸 `shellTool`
-fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutorV1()`；按 ADR-0119，其决策为
+fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutor()`；按 ADR-0119，其决策为
 `sandbox | host_shell | denied`。`host_shell` 只接受已经过 Policy/approval、durable Tool attempt ack 的调用，
 并且只能在用户命令启动前的 startup unavailable，或 typed `backend_unavailable + pre_dispatch +
 cleanupConfirmed` 后选择；缺 Runtime identity/lifecycle 的 App executor 直调继续拒绝。
@@ -347,7 +347,7 @@ policy、controller worktree 状态以及 capability 的 typed disabled reasons�
 路径、host 名、process limit、qualification proof 或完整安全 profile，也不产生 capability。
 TUI 的 `/permissions` 只用于选择 interaction mode，不显示或授予 production boundary；CLI
 `--execution-status` 在创建 Runtime、MCP 或 Skill 前输出状态并退出。CLI 直接启用
-`executionBoundaryV1`/`networkBoundaryV1` 会在参数解析阶段拒绝，显式 `false` 仍可单调收紧。
+`executionBoundary`/`networkBoundary` 会在参数解析阶段拒绝，显式 `false` 仍可单调收紧。
 
 运行中的 `/permissions full` 仍不构成 production boundary admission。它必须在 Kernel 的 live-control
 事件入口重新验证 Full-qualified sandbox；失败时不改变 Runtime authorization 或 interaction mode。

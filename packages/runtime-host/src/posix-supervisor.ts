@@ -2,22 +2,22 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
-import type { PreparedSandboxExecutionV1, RuntimeControlFrameV1 } from '@kite/runtime-spi';
-import { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from './control-frame';
+import type { PreparedSandboxExecution, RuntimeControlFrame } from '@kite/runtime-spi';
+import { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-frame';
 import {
-  type PosixSupervisorIdentityV1,
-  posixSupervisorIdentityPathV1,
-  readComparablePosixProcessStartIdentityV1,
-  readPosixSupervisorIdentityV1,
+  type PosixSupervisorIdentity,
+  posixSupervisorIdentityPath,
+  readComparablePosixProcessStartIdentity,
+  readPosixSupervisorIdentity,
 } from './posix-supervisor-identity';
 import {
-  confirmPosixSupervisorLockReleasedV1,
-  createPosixSupervisorLockV1,
-  type PosixSupervisorLockHandleV1,
-  type PosixSupervisorLockIdentityV1,
+  confirmPosixSupervisorLockReleased,
+  createPosixSupervisorLock,
+  type PosixSupervisorLockHandle,
+  type PosixSupervisorLockIdentity,
 } from './posix-supervisor-lock';
-import { readRuntimeHostProcessOutputV1 } from './process-output';
-import { spawnRuntimeHostProcessV1 } from './process-spawn';
+import { readRuntimeHostProcessOutput } from './process-output';
+import { spawnRuntimeHostProcess } from './process-spawn';
 
 // A standalone release executable cold-starts the full bundled graph before
 // connecting. Five seconds is not reliable under normal CI or loaded-user
@@ -27,13 +27,13 @@ const SUPERVISOR_HANDSHAKE_TIMEOUT_MS = 15_000;
 const SUPERVISOR_GRACEFUL_EXIT_MS = 500;
 const SUPERVISOR_FORCED_EXIT_MS = 2_000;
 const SUPERVISOR_OUTPUT_DRAIN_MS = 2_000;
-const POSIX_CONTROL_FRAME_DOMAIN_V1 = 'sandbox-posix-v1';
-const POSIX_HOST_PEER_ID_V1 = 'runtime-host';
-const POSIX_CHILD_PEER_ID_V1 = 'posix-supervisor-child';
-const RUNTIME_CONTROL_FRAME_SCHEMA_V1 = 'kite.runtime-control-frame.v1' as const;
+const POSIX_CONTROL_FRAME_DOMAIN_ = 'sandbox-posix-v1';
+const POSIX_HOST_PEER_ID_ = 'runtime-host';
+const POSIX_CHILD_PEER_ID_ = 'posix-supervisor-child';
+const RUNTIME_CONTROL_FRAME_SCHEMA_ = 'kite.runtime-control-frame.v1' as const;
 
-export interface RuntimeHostPreparedProcessInputV1 {
-  readonly prepared: Readonly<PreparedSandboxExecutionV1>;
+export interface RuntimeHostPreparedProcessInput {
+  readonly prepared: Readonly<PreparedSandboxExecution>;
   readonly dispatchId: string;
   readonly supervisorNonce: string;
   readonly dispatchIntentDigest: string;
@@ -42,14 +42,14 @@ export interface RuntimeHostPreparedProcessInputV1 {
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** Caller-owned ephemeral environment facts; never persisted. */
   readonly ephemeralEnvironment?: Readonly<Record<string, string>>;
-  readonly lifecycle: RuntimeHostSandboxPreparationLifecycleV1;
+  readonly lifecycle: RuntimeHostSandboxPreparationLifecycle;
   /** Host-internal phase marker invoked immediately before the GO frame write. */
   readonly onGoStarted?: () => void;
   /** Test-only proof that the packaged release entrypoint embeds supervisor mode. */
   readonly supervisorExecutablePath?: string;
 }
 
-export interface RuntimeHostPreparedProcessResultV1 {
+export interface RuntimeHostPreparedProcessResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
@@ -62,9 +62,9 @@ export interface RuntimeHostPreparedProcessResultV1 {
   };
 }
 
-export interface RuntimeHostSandboxPreparationLifecycleV1 {
+export interface RuntimeHostSandboxPreparationLifecycle {
   recordExecutionSupervisorStarted(
-    prepared: Readonly<PreparedSandboxExecutionV1>,
+    prepared: Readonly<PreparedSandboxExecution>,
     input: {
       readonly dispatchId: string;
       readonly dispatchIntentDigest: string;
@@ -75,7 +75,7 @@ export interface RuntimeHostSandboxPreparationLifecycleV1 {
   ): Promise<boolean>;
 }
 
-export interface RuntimeHostSandboxExecutionDispatchRecordV1 {
+export interface RuntimeHostSandboxExecutionDispatchRecord {
   readonly attempt: number;
   readonly readyDigest: string;
   readonly planDigest: string;
@@ -90,11 +90,11 @@ export interface RuntimeHostSandboxExecutionDispatchRecordV1 {
   readonly supervisorStartedAt?: string;
 }
 
-export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcessInputV1): Promise<{
-  readonly outcome: RuntimeHostPreparedProcessResultV1;
+export async function executePosixSupervised(input: RuntimeHostPreparedProcessInput): Promise<{
+  readonly outcome: RuntimeHostPreparedProcessResult;
   readonly cleanupConfirmed: boolean;
 }> {
-  if (!isValidDispatchIdV1(input.dispatchId)) {
+  if (!isValidDispatchId(input.dispatchId)) {
     return failed('POSIX supervisor dispatch identity is invalid.', true);
   }
   // Capture the exact prepared object once. The SPI is not a hostile-process
@@ -102,7 +102,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   // validation would reintroduce a prepared-plan TOCTOU before GO.
   const prepared = input.prepared;
   try {
-    assertPreparedProcessPlanV1(prepared);
+    assertPreparedProcessPlan(prepared);
   } catch (error) {
     return failed(error instanceof Error ? error.message : String(error), true);
   }
@@ -118,7 +118,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   }
   let commandEnvironment: Readonly<Record<string, string>> | null;
   try {
-    commandEnvironment = mergePreparedProcessEnvironmentV1(
+    commandEnvironment = mergePreparedProcessEnvironment(
       prepared.env,
       input.ephemeralEnvironment,
       dataRoot,
@@ -127,13 +127,13 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     return failed(error instanceof Error ? error.message : String(error), true);
   }
   const socketPath = controlSocketPath(controlRoot, input.dispatchId);
-  const identityPath = posixSupervisorIdentityPathV1(controlRoot, input.dispatchId);
+  const identityPath = posixSupervisorIdentityPath(controlRoot, input.dispatchId);
   let server: ReturnType<typeof createServer> | undefined;
   let socket: Socket | undefined;
   let proc: Bun.Subprocess<'inherit', 'pipe', 'pipe'> | undefined;
-  let identity: PosixSupervisorIdentityV1 | undefined;
-  let supervisorLock: PosixSupervisorLockHandleV1 | undefined;
-  const lockIdentity: PosixSupervisorLockIdentityV1 = {
+  let identity: PosixSupervisorIdentity | undefined;
+  let supervisorLock: PosixSupervisorLockHandle | undefined;
+  const lockIdentity: PosixSupervisorLockIdentity = {
     version: 1,
     dispatchId: input.dispatchId,
     supervisorNonce: input.supervisorNonce,
@@ -152,8 +152,8 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
       : process.env.KITE_STANDALONE_EXECUTABLE === '1'
         ? [process.execPath, '--kite-internal-posix-supervisor-v1']
         : [process.execPath, childPath];
-    supervisorLock = createPosixSupervisorLockV1(controlRoot, lockIdentity);
-    proc = spawnRuntimeHostProcessV1(
+    supervisorLock = createPosixSupervisorLock(controlRoot, lockIdentity);
+    proc = spawnRuntimeHostProcess(
       [
         ...supervisorCommand,
         socketPath,
@@ -171,7 +171,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
         // ephemeral overlay is merged into the GO frame for the actual child
         // after durable preparation; it never enters the prepared plan or
         // recovery artifact.
-        env: buildPosixSupervisorEnvironmentV1(dataRoot),
+        env: buildPosixSupervisorEnvironment(dataRoot),
       },
     );
     supervisorLock.close();
@@ -182,7 +182,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     server.close();
     const frames = createFrameReader(socket, input.dispatchId);
     const ready = await withTimeout(frames.next(), SUPERVISOR_HANDSHAKE_TIMEOUT_MS);
-    identity = readPosixSupervisorIdentityV1(identityPath);
+    identity = readPosixSupervisorIdentity(identityPath);
     if (
       !identity ||
       ready.type !== 'ready' ||
@@ -194,7 +194,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
       ready.processStartIdentity !== identity.processStartIdentity ||
       identity.pid !== proc.pid ||
       identity.dispatchIntentDigest !== input.dispatchIntentDigest ||
-      readComparablePosixProcessStartIdentityV1(proc.pid) !== identity.processStartIdentity
+      readComparablePosixProcessStartIdentity(proc.pid) !== identity.processStartIdentity
     ) {
       throw new Error('POSIX supervisor handshake identity mismatch.');
     }
@@ -209,12 +209,12 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
       throw new Error('POSIX supervisor start acknowledgement failed.');
     }
     const outputAbort = new AbortController();
-    const stdoutPromise = readRuntimeHostProcessOutputV1(
+    const stdoutPromise = readRuntimeHostProcessOutput(
       proc.stdout,
       input.onProgress ? (line) => input.onProgress!(line, 'stdout') : undefined,
       outputAbort.signal,
     );
-    const stderrPromise = readRuntimeHostProcessOutputV1(
+    const stderrPromise = readRuntimeHostProcessOutput(
       proc.stderr,
       input.onProgress ? (line) => input.onProgress!(line, 'stderr') : undefined,
       outputAbort.signal,
@@ -225,10 +225,10 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     input.onGoStarted?.();
     socket.write(
       `${JSON.stringify(
-        createRuntimeControlFrameV1({
-          schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-          domain: POSIX_CONTROL_FRAME_DOMAIN_V1,
-          peerId: POSIX_HOST_PEER_ID_V1,
+        createRuntimeControlFrame({
+          schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
+          domain: POSIX_CONTROL_FRAME_DOMAIN_,
+          peerId: POSIX_HOST_PEER_ID_,
           invocationId: input.dispatchId,
           sequence: 0,
           payload: {
@@ -254,8 +254,8 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
       throw new Error('POSIX supervisor terminal identity mismatch.');
     }
     const termination =
-      (await terminatePosixSupervisorV1(identity)) &&
-      (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
+      (await terminatePosixSupervisor(identity)) &&
+      (await confirmPosixSupervisorLockReleased(controlRoot, lockIdentity));
     socket.destroy();
     let stdout: string;
     let stderr: string;
@@ -326,8 +326,8 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     let cleanupConfirmed = true;
     if (identity) {
       cleanupConfirmed =
-        (await terminatePosixSupervisorV1(identity)) &&
-        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
+        (await terminatePosixSupervisor(identity)) &&
+        (await confirmPosixSupervisorLockReleased(controlRoot, lockIdentity));
     } else if (proc) {
       // GO is never sent before an exact identity and durable start record.
       try {
@@ -337,9 +337,9 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
       }
       cleanupConfirmed =
         (await confirmUnidentifiedSupervisorExit(proc)) &&
-        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
+        (await confirmPosixSupervisorLockReleased(controlRoot, lockIdentity));
     } else {
-      cleanupConfirmed = await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity);
+      cleanupConfirmed = await confirmPosixSupervisorLockReleased(controlRoot, lockIdentity);
     }
     return failed(error instanceof Error ? error.message : String(error), cleanupConfirmed);
   } finally {
@@ -349,13 +349,13 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   }
 }
 
-function mergePreparedProcessEnvironmentV1(
+function mergePreparedProcessEnvironment(
   preparedEnvironment: Readonly<Record<string, string>> | null,
   ephemeralEnvironment: Readonly<Record<string, string>> | undefined,
   dataRoot: string,
 ): Readonly<Record<string, string>> | null {
   const overlay = ephemeralEnvironment ?? Object.freeze({});
-  const fixedAndOverlay = buildPosixSupervisorEnvironmentV1(dataRoot, overlay);
+  const fixedAndOverlay = buildPosixSupervisorEnvironment(dataRoot, overlay);
   if (preparedEnvironment === null) {
     return Object.keys(overlay).length === 0 ? null : Object.freeze(fixedAndOverlay);
   }
@@ -379,30 +379,30 @@ function mergePreparedProcessEnvironmentV1(
   return Object.freeze({ ...preparedEnvironment, ...overlay });
 }
 
-function assertPreparedProcessPlanV1(
+function assertPreparedProcessPlan(
   prepared: unknown,
-): asserts prepared is Readonly<PreparedSandboxExecutionV1> {
-  const record = assertFrozenRecordV1(prepared, 'prepared process plan');
-  assertFrozenStringArrayV1(record.argv, 'prepared process argv');
-  assertFrozenStringArrayV1(record.approvedArgv, 'prepared approved argv');
+): asserts prepared is Readonly<PreparedSandboxExecution> {
+  const record = assertFrozenRecord(prepared, 'prepared process plan');
+  assertFrozenStringArray(record.argv, 'prepared process argv');
+  assertFrozenStringArray(record.approvedArgv, 'prepared approved argv');
   if (typeof record.cwd !== 'string') {
     throw new Error('Prepared process plan cwd is invalid.');
   }
   if (record.stdin !== null && typeof record.stdin !== 'string') {
     throw new Error('Prepared process plan stdin is invalid.');
   }
-  const capabilities = assertFrozenRecordV1(
+  const capabilities = assertFrozenRecord(
     record.backendCapabilities,
     'prepared backend capabilities',
   );
-  assertFrozenStringRecordV1(capabilities.filesystem, 'prepared filesystem capabilities');
-  assertFrozenStringRecordV1(capabilities.network, 'prepared network capabilities');
-  const cleanup = assertFrozenRecordV1(record.cleanup, 'prepared cleanup handle');
-  assertFrozenPrimitiveRecordV1(cleanup.recoveryPayload, 'prepared cleanup recovery payload');
-  if (record.env !== null) assertFrozenStringRecordV1(record.env, 'prepared process environment');
+  assertFrozenStringRecord(capabilities.filesystem, 'prepared filesystem capabilities');
+  assertFrozenStringRecord(capabilities.network, 'prepared network capabilities');
+  const cleanup = assertFrozenRecord(record.cleanup, 'prepared cleanup handle');
+  assertFrozenPrimitiveRecord(cleanup.recoveryPayload, 'prepared cleanup recovery payload');
+  if (record.env !== null) assertFrozenStringRecord(record.env, 'prepared process environment');
 }
 
-function assertFrozenRecordV1(value: unknown, label: string): Readonly<Record<string, unknown>> {
+function assertFrozenRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (
     value === null ||
     typeof value !== 'object' ||
@@ -414,7 +414,7 @@ function assertFrozenRecordV1(value: unknown, label: string): Readonly<Record<st
   return value as Readonly<Record<string, unknown>>;
 }
 
-function assertFrozenStringArrayV1(value: unknown, label: string): void {
+function assertFrozenStringArray(value: unknown, label: string): void {
   if (
     !Array.isArray(value) ||
     !Object.isFrozen(value) ||
@@ -424,15 +424,15 @@ function assertFrozenStringArrayV1(value: unknown, label: string): void {
   }
 }
 
-function assertFrozenStringRecordV1(value: unknown, label: string): void {
-  const record = assertFrozenRecordV1(value, label);
+function assertFrozenStringRecord(value: unknown, label: string): void {
+  const record = assertFrozenRecord(value, label);
   if (Object.values(record).some((part) => typeof part !== 'string')) {
     throw new Error(`${label} must contain only strings.`);
   }
 }
 
-function assertFrozenPrimitiveRecordV1(value: unknown, label: string): void {
-  const record = assertFrozenRecordV1(value, label);
+function assertFrozenPrimitiveRecord(value: unknown, label: string): void {
+  const record = assertFrozenRecord(value, label);
   if (
     Object.values(record).some(
       (part) =>
@@ -447,7 +447,7 @@ function assertFrozenPrimitiveRecordV1(value: unknown, label: string): void {
 }
 
 /** Supervisors start with fixed infrastructure values plus one ephemeral overlay. */
-export function buildPosixSupervisorEnvironmentV1(
+export function buildPosixSupervisorEnvironment(
   dataRoot: string,
   ephemeralEnvironment: Readonly<Record<string, string>> = Object.freeze({}),
 ): Record<string, string> {
@@ -480,9 +480,9 @@ export function buildPosixSupervisorEnvironmentV1(
 const FIXED_PROCESS_ENVIRONMENT_KEYS = new Set(['PATH', 'LANG', 'LC_ALL', 'TMPDIR']);
 const ENVIRONMENT_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-export async function reconcilePosixSupervisorV1(input: {
+export async function reconcilePosixSupervisor(input: {
   readonly runtimePath: string;
-  readonly dispatch: Readonly<RuntimeHostSandboxExecutionDispatchRecordV1>;
+  readonly dispatch: Readonly<RuntimeHostSandboxExecutionDispatchRecord>;
   /**
    * Process-group termination is not descendant containment. Every caller
    * must explicitly state whether an OS-owned containment for detached/session
@@ -492,9 +492,9 @@ export async function reconcilePosixSupervisorV1(input: {
    */
   readonly descendantContainmentProven: boolean;
 }): Promise<boolean> {
-  const identityPath = posixSupervisorIdentityPathV1(input.runtimePath, input.dispatch.dispatchId);
-  const identity = readPosixSupervisorIdentityV1(identityPath);
-  const lockIdentity: PosixSupervisorLockIdentityV1 = {
+  const identityPath = posixSupervisorIdentityPath(input.runtimePath, input.dispatch.dispatchId);
+  const identity = readPosixSupervisorIdentity(identityPath);
+  const lockIdentity: PosixSupervisorLockIdentity = {
     version: 1,
     dispatchId: input.dispatch.dispatchId,
     supervisorNonce: input.dispatch.supervisorNonce,
@@ -504,7 +504,7 @@ export async function reconcilePosixSupervisorV1(input: {
     // No supervisor identity means GO was never durably acknowledged; once
     // the inherited pre-spawn lock is re-acquired there is no descendant to
     // contain, so the explicit proof flag is intentionally irrelevant here.
-    return confirmPosixSupervisorLockReleasedV1(input.runtimePath, lockIdentity);
+    return confirmPosixSupervisorLockReleased(input.runtimePath, lockIdentity);
   }
   if (
     !identity ||
@@ -523,17 +523,17 @@ export async function reconcilePosixSupervisorV1(input: {
     return false;
   }
   const groupCleanupConfirmed =
-    (await terminatePosixSupervisorV1(identity)) &&
-    (await confirmPosixSupervisorLockReleasedV1(input.runtimePath, lockIdentity));
+    (await terminatePosixSupervisor(identity)) &&
+    (await confirmPosixSupervisorLockReleased(input.runtimePath, lockIdentity));
   return groupCleanupConfirmed && input.descendantContainmentProven;
 }
 
-export async function terminatePosixSupervisorV1(
-  identity: Readonly<PosixSupervisorIdentityV1>,
+export async function terminatePosixSupervisor(
+  identity: Readonly<PosixSupervisorIdentity>,
 ): Promise<boolean> {
   const groupAlive = isProcessGroupAlive(identity.processGroupId);
   if (!groupAlive) return true;
-  const observed = readComparablePosixProcessStartIdentityV1(identity.pid);
+  const observed = readComparablePosixProcessStartIdentity(identity.pid);
   if (observed !== identity.processStartIdentity) {
     // The PID may have been reused. Never signal a group without its exact leader identity.
     return !(await waitForProcessGroupExit(identity.processGroupId, SUPERVISOR_FORCED_EXIT_MS));
@@ -600,11 +600,11 @@ function createFrameReader(
       let frame: SupervisorFrame;
       try {
         const encoded = JSON.parse(line) as Record<string, unknown>;
-        const wire = encoded as unknown as RuntimeControlFrameV1<SupervisorFrame>;
-        const payload = verifyRuntimeControlFrameV1<SupervisorFrame>({
+        const wire = encoded as unknown as RuntimeControlFrame<SupervisorFrame>;
+        const payload = verifyRuntimeControlFrame<SupervisorFrame>({
           frame: wire,
-          expectedDomain: POSIX_CONTROL_FRAME_DOMAIN_V1,
-          expectedPeerId: POSIX_CHILD_PEER_ID_V1,
+          expectedDomain: POSIX_CONTROL_FRAME_DOMAIN_,
+          expectedPeerId: POSIX_CHILD_PEER_ID_,
           expectedInvocationId: invocationId,
           lastSequence,
         });
@@ -740,7 +740,7 @@ function controlSocketPath(runtimePath: string, dispatchId: string): string {
   return join(runtimePath, `.s-${key.slice(0, 8)}`);
 }
 
-function isValidDispatchIdV1(dispatchId: string): boolean {
+function isValidDispatchId(dispatchId: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f-]{27,}$/iu.test(dispatchId);
 }
 
@@ -850,7 +850,7 @@ function failed(
   stderr: string,
   cleanupConfirmed: boolean,
 ): {
-  readonly outcome: RuntimeHostPreparedProcessResultV1;
+  readonly outcome: RuntimeHostPreparedProcessResult;
   readonly cleanupConfirmed: boolean;
 } {
   return {

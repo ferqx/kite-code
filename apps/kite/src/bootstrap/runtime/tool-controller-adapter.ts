@@ -1,18 +1,17 @@
-import { isAbsolute, resolve } from 'node:path';
 import type {
-  BuiltinModelToolCatalogEntryV1,
-  BuiltinOperationExecutionValueV1,
-  CapabilityArtifactWriterV1,
+  BuiltinModelToolCatalogEntry,
+  BuiltinOperationExecutionValue,
+  CapabilityArtifactWriter,
   SkillCatalogSnapshot,
   SkillManifest,
   SkillScanOptions,
 } from '@kite/builtin-runtime';
 import {
-  createCapabilitySnapshotV1,
-  digestCapabilityValueV1,
+  createCapabilitySnapshot,
+  digestCapabilityValue,
   type PendingToolRequest,
-  pendingToolRequestFromValidatedInvocationV1,
-  rejectShellOutsideSubAgentRoleCeilingV1,
+  pendingToolRequestFromValidatedInvocation,
+  rejectShellOutsideSubAgentRoleCeiling,
   toolRequestFromCall,
 } from '@kite/builtin-runtime';
 import {
@@ -24,125 +23,125 @@ import {
   providerErrorFromDirectoryEntry,
 } from '@kite/builtin-runtime/mcp';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
-import {
-  checkProjectInstructionSnapshotFreshnessV1,
-  projectProjectInstructionGuardTargetV1,
-  resolveProjectInstructionSnapshot,
-} from '@kite/builtin-runtime/model';
 import type { PlanArtifactStore } from '@kite/builtin-runtime/planning';
-import type { NetworkDecisionRecorderV1, ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import type { NetworkDecisionRecorder, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import {
-  createProtectedPathEvaluatorV1,
-  expandHomeRelativePath,
-  isDescriptorAdmittedByExecutionCapabilitySurfaceV1,
-  isPathInsideWorkspace,
-  msys2ToWindowsPath,
-  networkBoundaryPolicyFromExecutionBoundaryV1,
+  createProtectedPathEvaluator,
+  networkBoundaryPolicyFromExecutionBoundary,
 } from '@kite/builtin-runtime/sandbox';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import { type CapabilityDescriptor, getAgentPhase } from '@kite/runtime-contract';
 import {
-  runtimeHostStateActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
-  bestEffortRegularFileSizeV1,
-  createRuntimeHostToolCallSnapshotV1,
+  runtimeHostStateActiveSkillFrames as activeSkillFramesForCurrentWork,
+  bestEffortRegularFileSize,
+  createRuntimeHostToolCallSnapshot,
   DescendantResourceAdmissionError,
-  createRuntimeHostInteractionIdV1 as genInteractionId,
-  runtimeHostStateActivePlanningV1 as getActivePlanning,
-  runtimeHostStateEffectiveInteractionModeV1 as getEffectiveInteractionMode,
-  runtimeHostStateToolRecoveryJournalInvalidV1 as isToolRecoveryJournalInvalidV1,
-  runtimeHostStateNormalizeToolRecoveryJournalV1 as normalizeToolRecoveryJournalV1,
-  runtimeHostStateClassifyToolOutcomeV1,
-  runtimeHostStateCreateApprovalBindingDigestV1,
-  type StateToolGovernancePolicyFactV1,
-  runtimeHostStateToolFailureInstanceIdV1 as toolFailureInstanceIdV1,
-  runtimeHostStateToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  createRuntimeHostInteractionId as genInteractionId,
+  runtimeHostStateActivePlanning as getActivePlanning,
+  runtimeHostStateEffectiveInteractionMode as getEffectiveInteractionMode,
+  runtimeHostStateToolRecoveryJournalInvalid as isToolRecoveryJournalInvalid,
+  runtimeHostStateNormalizeToolRecoveryJournal as normalizeToolRecoveryJournal,
+  runtimeHostStateClassifyToolOutcome,
+  runtimeHostStateCreateApprovalBindingDigest,
+  type StateToolGovernancePolicyFact,
+  runtimeHostStateToolFailureInstanceId as toolFailureInstanceId,
+  runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
 } from '@kite/runtime-host';
-import type { RuntimeHostFilePreimageRecorderV1 as FilePreimageRecorder } from '@kite/runtime-host/storage';
+import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite/runtime-host/storage';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
-  subagentContinuationCursorIdV1,
+  subagentContinuationCursorId,
 } from '#app/bootstrap/runtime/subagent/continuation-codec';
 import type {
-  SubagentInvocationIdentityV1,
-  SubagentInvocationRuntimeV1,
+  SubagentInvocationIdentity,
+  SubagentInvocationRuntime,
   TaskToolDeps,
 } from '#app/bootstrap/runtime/subagent/task-tool';
 import type {
   RestoredSubAgentContinuation,
   SubAgentResult,
-  SubAgentToolDispatcherV1,
+  SubAgentToolDispatcher,
 } from '#app/bootstrap/runtime/subagent/types';
 import { getFeatureFlags } from '#app/config/features';
 import {
   type AgentConfig,
-  computeExecutionBoundaryDigestV1,
+  computeExecutionBoundaryDigest,
   ProviderDataAdmissionError,
 } from '#app/config/index';
-import { appPreparedShellExecutionPortV1 } from '#app/sandbox/prepared-tool-pipeline';
 import {
-  type BuiltinMcpRuntimePortV1,
-  createCapabilityBindingV1,
-  createToolSearchProviderFactsV1,
-  isBuiltinSubagentTaskToolNameV1,
-  normalizeAskUserRequestV1,
+  policyRecoveryTerminal,
+  productionExecutionSurfaceFailure,
+  sealedMcpNetworkTerminal,
+} from '#app/runtime/tool-execution/execution-surface-guard';
+import {
+  projectInstructionGuardFailure,
+  visibleProjectInstructions,
+} from '#app/runtime/tool-execution/project-instruction-guard';
+import { appPreparedShellExecutionPort } from '#app/sandbox/prepared-tool-pipeline';
+import {
+  type BuiltinMcpRuntimePort,
+  createCapabilityBinding,
+  createToolSearchProviderFacts,
+  isBuiltinSubagentTaskToolName,
+  normalizeAskUserRequest,
 } from '#builtin-runtime';
 import type {
-  CapabilityExecutionPortV1,
-  CapabilityToolTerminalResultV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineTaskSubagentSuspensionV1,
+  CapabilityExecutionPort,
+  CapabilityToolTerminalResult,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineTaskSubagentSuspension,
 } from '#runtime-spi';
 import {
-  type AppApprovalBindingV1,
-  appApprovalBindingForPresentationV1,
-  bindAppApprovalBindingV1,
-  isAuthenticAppApprovalBindingV1,
+  type AppApprovalBinding,
+  appApprovalBindingForPresentation,
+  bindAppApprovalBinding,
+  isAuthenticAppApprovalBinding,
 } from './approval-binding';
 import {
   classifyFailure,
   classifyMcpProviderError,
   failureKindForToolParseFailure,
 } from './failures';
-import { createAppMcpReadinessRuntimeV1 } from './mcp-readiness-runtime';
-import { createPlanRuntimeV1 } from './plan-runtime';
+import { createAppMcpReadinessRuntime } from './mcp-readiness-runtime';
+import { createPlanRuntime } from './plan-runtime';
 import {
-  type ProviderReadinessCoordinatorV1,
+  type ProviderReadinessCoordinator,
   ProviderReadinessPersistenceError,
   ProviderReadinessUnknownError,
 } from './provider-readiness';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
-import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
+import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 import {
-  type AppOrdinaryToolPipelineAttemptRuntimeV1,
-  isAppOrdinaryToolPipelineOperationIdV1,
+  type AppOrdinaryToolPipelineAttemptRuntime,
+  isAppOrdinaryToolPipelineOperationId,
 } from './tool-pipeline-ordinary-attempt';
-import type { AppTaskToolPipelineAttemptRuntimeV1 } from './tool-pipeline-task-attempt';
+import type { AppTaskToolPipelineAttemptRuntime } from './tool-pipeline-task-attempt';
 import { buildToolApproval } from './tool-policy';
 import { createSkillMechanismPort, createWebMechanismPort } from './tool-provider-services';
 import type { ToolExecutionResult } from './tool-result';
-import { type AppToolTurnContextV1, createAppToolTurnContextV1 } from './tool-turn-context';
+import { type AppToolTurnContext, createAppToolTurnContext } from './tool-turn-context';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
 
-type PrivateSubagentTaskV1 = {
+type PrivateSubagentTask = {
   readonly source: 'private_artifact_v1';
-  readonly requestArtifact: import('@kite/runtime-spi').SubagentTaskRequestArtifactV1;
+  readonly requestArtifact: import('@kite/runtime-spi').SubagentTaskRequestArtifact;
   readonly payload: {
     readonly subagent_type: 'explore' | 'plan' | 'code' | 'review';
     readonly task: string;
   };
 };
 
-type AppTaskAttemptInputV1 = Parameters<AppTaskToolPipelineAttemptRuntimeV1['execute']>[0];
+type AppTaskAttemptInput = Parameters<AppTaskToolPipelineAttemptRuntime['execute']>[0];
 
-function modelBuiltinEntryV1(
-  catalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1,
+function modelBuiltinEntry(
+  catalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection,
   name: string,
-): BuiltinModelToolCatalogEntryV1 | undefined {
+): BuiltinModelToolCatalogEntry | undefined {
   return catalog.entries.find(
-    (entry): entry is BuiltinModelToolCatalogEntryV1 =>
+    (entry): entry is BuiltinModelToolCatalogEntry =>
       entry.visibility === 'model' && entry.name === name,
   );
 }
@@ -178,11 +177,11 @@ function providerActionRequiredEvent(input: {
  * the pre-dispatch side of the one Host coordinator; the Builtin executor
  * receives only the resulting immutable mechanism facts.
  */
-async function prepareDynamicMcpMechanismV1(input: {
+async function prepareDynamicMcpMechanism(input: {
   readonly descriptor: Readonly<CapabilityDescriptor>;
   readonly manager: McpRuntimeProvider;
   readonly flags: ReturnType<typeof getFeatureFlags>;
-  readonly providerReadinessCoordinator?: ProviderReadinessCoordinatorV1;
+  readonly providerReadinessCoordinator?: ProviderReadinessCoordinator;
   readonly getRuntimeState?: () => Readonly<RuntimeState>;
   readonly persistRuntimeEvent?: (event: RuntimeEvent) => Promise<boolean>;
   readonly taskConfig?: AgentConfig;
@@ -190,10 +189,10 @@ async function prepareDynamicMcpMechanismV1(input: {
   readonly toolCallId: string;
   readonly signal: AbortSignal;
   readonly workspace: string;
-  readonly canonicalArguments: RuntimeJsonValueV1;
+  readonly canonicalArguments: RuntimeJsonValue;
   readonly retryAuthorized?: boolean;
 }) {
-  if (!isPlainRecordV1(input.canonicalArguments)) {
+  if (!isPlainRecord(input.canonicalArguments)) {
     throw new Error('Dynamic MCP canonical arguments are not an object.');
   }
   const route = input.manager.getCapabilityRoute?.(input.descriptor.capabilityId);
@@ -202,15 +201,15 @@ async function prepareDynamicMcpMechanismV1(input: {
   const persistEvent = input.persistRuntimeEvent;
   if (!readinessCoordinator || !getState || !persistEvent) {
     throw new ProviderReadinessPersistenceError(
-      'Provider readiness coordinator and StateSessionStorageV1 acknowledgement are required.',
+      'Provider readiness coordinator and StateSessionStorage acknowledgement are required.',
     );
   }
   const providerDirectoryRevision = input.manager.getProviderDirectorySnapshot().revision;
   const routeRevision =
     route?.endpointRevision ?? providerDirectoryRevision ?? 'provider-directory-unavailable';
   const executionBoundaryDigest = input.taskConfig?.executionBoundary
-    ? computeExecutionBoundaryDigestV1(input.taskConfig.executionBoundary)
-    : digestCapabilityValueV1({ schema: 'kite.unsealed-execution-boundary.v1' });
+    ? computeExecutionBoundaryDigest(input.taskConfig.executionBoundary)
+    : digestCapabilityValue({ schema: 'kite.unsealed-execution-boundary.v1' });
   await readinessCoordinator.ensureReady(
     {
       providerId: input.descriptor.provider.id,
@@ -230,7 +229,7 @@ async function prepareDynamicMcpMechanismV1(input: {
     workspace: input.workspace,
     preassembledMechanism: Object.freeze({
       mcp: Object.freeze({
-        runtime: input.manager as unknown as BuiltinMcpRuntimePortV1,
+        runtime: input.manager as unknown as BuiltinMcpRuntimePort,
         invocation: Object.freeze({
           capabilityId: input.descriptor.capabilityId,
           expectedRevision: input.descriptor.revision,
@@ -240,7 +239,7 @@ async function prepareDynamicMcpMechanismV1(input: {
   });
 }
 
-function isPlainRecordV1(value: unknown): value is Record<string, unknown> {
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -251,7 +250,7 @@ function isPlainRecordV1(value: unknown): value is Record<string, unknown> {
 
 function forkToolCeiling(input: {
   capabilityCeiling: readonly string[];
-  builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1;
+  builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
   mcpManager?: McpRuntimeProvider;
   turnId: string;
 }): {
@@ -268,7 +267,7 @@ function forkToolCeiling(input: {
   }> = [];
   for (const capabilityId of input.capabilityCeiling) {
     const builtinEntry = input.builtinToolCatalog.entries.find(
-      (entry): entry is BuiltinModelToolCatalogEntryV1 =>
+      (entry): entry is BuiltinModelToolCatalogEntry =>
         entry.visibility === 'model' &&
         entry.availability === 'available' &&
         entry.capabilityId === capabilityId,
@@ -284,7 +283,7 @@ function forkToolCeiling(input: {
       !descriptor.inputSchema
     )
       return null;
-    const binding = createCapabilityBindingV1({
+    const binding = createCapabilityBinding({
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       exposedToolName: exposedMcpToolName(descriptor.provider.id, descriptor.displayName),
@@ -301,7 +300,7 @@ function forkRole(agent: string): 'explore' | 'plan' | 'code' | 'review' {
   return agent === 'explore' || agent === 'plan' || agent === 'review' ? agent : 'code';
 }
 
-function childRuntimeToolCallIdV1(input: {
+function childRuntimeToolCallId(input: {
   parentToolCallId: string;
   subagentId: string;
   modelInvocationId: string;
@@ -309,7 +308,7 @@ function childRuntimeToolCallIdV1(input: {
   toolName: string;
   args: Record<string, unknown>;
 }): string {
-  return `subagent-tool:${digestCapabilityValueV1({
+  return `subagent-tool:${digestCapabilityValue({
     schema: 'kite.subagent-runtime-tool-identity.v1',
     parentToolCallId: input.parentToolCallId,
     subagentId: input.subagentId,
@@ -320,7 +319,7 @@ function childRuntimeToolCallIdV1(input: {
   })}`;
 }
 
-function isCurrentExactChildToolReservationV1(
+function isCurrentExactChildToolReservation(
   state: Readonly<RuntimeState>,
   reservationId: string,
   toolName: string,
@@ -349,7 +348,7 @@ function isCurrentExactChildToolReservationV1(
  * review path; this view only removes the restored-only blockedTool backlink
  * and converts the role's local Set before Builtin projection.
  */
-function taskResultForBuiltinProjectionV1(
+function taskResultForBuiltinProjection(
   result: Readonly<SubAgentResult>,
 ): Readonly<Record<string, unknown>> {
   if (!result.blocked) return Object.freeze({ ...result });
@@ -378,8 +377,8 @@ function taskResultForBuiltinProjectionV1(
  * omit private continuation payloads, but its identity, argument/command and
  * recovery facts must remain mechanically bound to that result.
  */
-function isExactTaskBlockedTerminalProjectionV1(
-  terminal: Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>>,
+function isExactTaskBlockedTerminalProjection(
+  terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>,
   captured: Readonly<SubAgentResult>,
 ): boolean {
   const structured = terminal.structuredContent;
@@ -387,10 +386,10 @@ function isExactTaskBlockedTerminalProjectionV1(
     structured && typeof structured === 'object' && !Array.isArray(structured)
       ? (structured as Record<string, unknown>).subagentResult
       : undefined;
-  const projectedResultRecord = isRecordObjectV1(projectedResult) ? projectedResult : undefined;
+  const projectedResultRecord = isRecordObject(projectedResult) ? projectedResult : undefined;
   const projectedBlocked = projectedResultRecord?.blocked;
   const expectedBlocked = captured.blocked;
-  if (!projectedResultRecord || !isRecordObjectV1(projectedBlocked) || !expectedBlocked) {
+  if (!projectedResultRecord || !isRecordObject(projectedBlocked) || !expectedBlocked) {
     return false;
   }
   if (
@@ -398,34 +397,32 @@ function isExactTaskBlockedTerminalProjectionV1(
     projectedBlocked.toolCallId !== expectedBlocked.toolCallId ||
     (projectedBlocked.runtimeToolCallId ?? null) !== (expectedBlocked.runtimeToolCallId ?? null) ||
     projectedBlocked.toolName !== expectedBlocked.toolName ||
-    !isRecordObjectV1(projectedBlocked.args) ||
-    digestCapabilityValueV1(projectedBlocked.args) !==
-      digestCapabilityValueV1(expectedBlocked.args) ||
+    !isRecordObject(projectedBlocked.args) ||
+    digestCapabilityValue(projectedBlocked.args) !== digestCapabilityValue(expectedBlocked.args) ||
     typeof projectedBlocked.command !== 'string' ||
-    digestCapabilityValueV1(projectedBlocked.command.trim()) !==
-      digestCapabilityValueV1(expectedBlocked.command.trim())
+    digestCapabilityValue(projectedBlocked.command.trim()) !==
+      digestCapabilityValue(expectedBlocked.command.trim())
   ) {
     return false;
   }
 
   const projectedRecovery = projectedResultRecord.toolRecovery;
   if (
-    !isRecordObjectV1(projectedRecovery) ||
-    digestCapabilityValueV1(projectedRecovery) !==
-      digestCapabilityValueV1(captured.toolRecovery ?? {})
+    !isRecordObject(projectedRecovery) ||
+    digestCapabilityValue(projectedRecovery) !== digestCapabilityValue(captured.toolRecovery ?? {})
   ) {
     return false;
   }
 
   const projectedContinuation = projectedBlocked.continuation;
   const expectedContinuation = expectedBlocked.continuation;
-  if (!isRecordObjectV1(projectedContinuation) || !isRecordObjectV1(expectedContinuation)) {
+  if (!isRecordObject(projectedContinuation) || !isRecordObject(expectedContinuation)) {
     return false;
   }
   const projectedRole =
     typeof projectedContinuation.role === 'string'
       ? projectedContinuation.role
-      : isRecordObjectV1(projectedContinuation.role) &&
+      : isRecordObject(projectedContinuation.role) &&
           typeof projectedContinuation.role.role === 'string'
         ? projectedContinuation.role.role
         : undefined;
@@ -439,7 +436,7 @@ function isExactTaskBlockedTerminalProjectionV1(
   }
   const projectedContinuationBlocked = projectedContinuation.blockedTool;
   return (
-    isRecordObjectV1(projectedContinuationBlocked) &&
+    isRecordObject(projectedContinuationBlocked) &&
     projectedContinuationBlocked.toolCallId === expectedBlocked.toolCallId &&
     (projectedContinuationBlocked.runtimeToolCallId ?? null) ===
       (expectedBlocked.runtimeToolCallId ?? null) &&
@@ -447,7 +444,7 @@ function isExactTaskBlockedTerminalProjectionV1(
   );
 }
 
-function isRecordObjectV1(value: unknown): value is Readonly<Record<string, unknown>> {
+function isRecordObject(value: unknown): value is Readonly<Record<string, unknown>> {
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -464,8 +461,8 @@ function isRecordObjectV1(value: unknown): value is Readonly<Record<string, unkn
  */
 export function buildBlockedToolRequest(
   blocked: { toolCallId: string; toolName: string; args: Record<string, unknown>; command: string },
-  availCtx: AppToolTurnContextV1,
-  builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1,
+  availCtx: AppToolTurnContext,
+  builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection,
 ): PendingToolRequest {
   const parsed = toolRequestFromCall(
     { id: blocked.toolCallId, name: blocked.toolName, args: blocked.args },
@@ -499,12 +496,12 @@ export function blockedSubagentReviewEvent(input: {
   state: RuntimeState;
   parentToolCallId: string;
   blocked: NonNullable<import('#app/bootstrap/runtime/subagent/types').SubAgentResult['blocked']>;
-  availCtx: AppToolTurnContextV1;
-  toolPipelineComposition: AppToolPipelineCompositionV1;
+  availCtx: AppToolTurnContext;
+  toolPipelineComposition: AppToolPipelineComposition;
   descriptors?: readonly Readonly<CapabilityDescriptor>[];
 }): RuntimeEvent {
   const { blocked, state } = input;
-  const exact = exactBlockedSubagentPolicyV1(input);
+  const exact = exactBlockedSubagentPolicy(input);
   if (!exact) {
     throw new Error('Sub-agent approval requires the exact Kernel approval binding digest.');
   }
@@ -532,7 +529,7 @@ export function blockedSubagentReviewEvent(input: {
       toolName: blocked.toolName,
       reason: exact.decision.reason,
       approval,
-      requestFingerprint: toolInvocationFingerprintV1({
+      requestFingerprint: toolInvocationFingerprint({
         toolName: blocked.toolName,
         parsedArgs: blocked.args,
         identityRevision: 'subagent-blocked-v1',
@@ -547,20 +544,20 @@ export function blockedSubagentReviewEvent(input: {
   };
 }
 
-function exactBlockedSubagentPolicyV1(input: {
+function exactBlockedSubagentPolicy(input: {
   state: RuntimeState;
   parentToolCallId: string;
   blocked: NonNullable<import('#app/bootstrap/runtime/subagent/types').SubAgentResult['blocked']>;
-  availCtx: AppToolTurnContextV1;
-  toolPipelineComposition: AppToolPipelineCompositionV1;
+  availCtx: AppToolTurnContext;
+  toolPipelineComposition: AppToolPipelineComposition;
   descriptors?: readonly Readonly<CapabilityDescriptor>[];
   allowMissingBinding?: boolean;
 }):
   | {
       readonly request: PendingToolRequest;
-      readonly decision: Readonly<StateToolGovernancePolicyFactV1>;
+      readonly decision: Readonly<StateToolGovernancePolicyFact>;
       readonly approvalBindingDigest: string;
-      readonly approvalBinding: AppApprovalBindingV1;
+      readonly approvalBinding: AppApprovalBinding;
       readonly route: 'user' | 'auto_review';
     }
   | undefined {
@@ -568,7 +565,7 @@ function exactBlockedSubagentPolicyV1(input: {
   const approvalBinding = blocked.approvalBinding;
   if (
     (!approvalBinding && input.allowMissingBinding !== true) ||
-    (approvalBinding && !isAuthenticAppApprovalBindingV1({ binding: approvalBinding, blocked }))
+    (approvalBinding && !isAuthenticAppApprovalBinding({ binding: approvalBinding, blocked }))
   ) {
     return undefined;
   }
@@ -581,7 +578,7 @@ function exactBlockedSubagentPolicyV1(input: {
     (call !== undefined &&
       (call.toolCallId !== runtimeChildCallId ||
         call.name !== blocked.toolName ||
-        digestCapabilityValueV1(call.args) !== digestCapabilityValueV1(blocked.args)))
+        digestCapabilityValue(call.args) !== digestCapabilityValue(blocked.args)))
   ) {
     return undefined;
   }
@@ -601,7 +598,7 @@ function exactBlockedSubagentPolicyV1(input: {
       toolCallId,
     }),
   );
-  const snapshot = createRuntimeHostToolCallSnapshotV1({
+  const snapshot = createRuntimeHostToolCallSnapshot({
     toolCallId,
     name: call?.name ?? blocked.toolName,
     rawArguments: call?.args ?? blocked.args,
@@ -624,7 +621,7 @@ function exactBlockedSubagentPolicyV1(input: {
   });
   if (!snapshot.ok) return undefined;
   const descriptors = input.descriptors ?? [];
-  const dynamicCatalogRevision = createCapabilitySnapshotV1([...descriptors]).revision;
+  const dynamicCatalogRevision = createCapabilitySnapshot([...descriptors]).revision;
   const resolved = turnPipeline.callbacks.resolve(snapshot.value, {
     currentTurnId: state.turn.turnId,
     builtinProjectionRevision: turnPipeline.projection.revision,
@@ -693,11 +690,11 @@ function exactBlockedSubagentPolicyV1(input: {
   if (authorization.value.kind !== 'authorized' && !reviewTerminal) {
     return undefined;
   }
-  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
     facts.value.invocation,
     facts.value.policy,
   );
-  const derivedApprovalBinding: AppApprovalBindingV1 = Object.freeze({
+  const derivedApprovalBinding: AppApprovalBinding = Object.freeze({
     schema: 'kite.app-approval-binding.v1',
     digest: approvalBindingDigest,
     invocationFact: facts.value.invocation,
@@ -708,10 +705,10 @@ function exactBlockedSubagentPolicyV1(input: {
   if (
     approvalBinding &&
     (approvalBinding.digest !== derivedApprovalBinding.digest ||
-      digestCapabilityValueV1(approvalBinding.invocationFact) !==
-        digestCapabilityValueV1(derivedApprovalBinding.invocationFact) ||
-      digestCapabilityValueV1(approvalBinding.policyFact) !==
-        digestCapabilityValueV1(derivedApprovalBinding.policyFact))
+      digestCapabilityValue(approvalBinding.invocationFact) !==
+        digestCapabilityValue(derivedApprovalBinding.invocationFact) ||
+      digestCapabilityValue(approvalBinding.policyFact) !==
+        digestCapabilityValue(derivedApprovalBinding.policyFact))
   ) {
     return undefined;
   }
@@ -720,7 +717,7 @@ function exactBlockedSubagentPolicyV1(input: {
     getEffectiveInteractionMode(state) === 'auto' &&
     !state.autoReview.circuitBreakerTripped;
   return {
-    request: pendingToolRequestFromValidatedInvocationV1(validated.value, turnPipeline.projection),
+    request: pendingToolRequestFromValidatedInvocation(validated.value, turnPipeline.projection),
     decision: reviewTerminal?.decision ?? facts.value.policy,
     approvalBindingDigest: derivedApprovalBinding.digest,
     approvalBinding: approvalBinding ?? derivedApprovalBinding,
@@ -735,15 +732,15 @@ function exactBlockedSubagentPolicyV1(input: {
 }
 
 /** Test fixture builder; facts and digest come directly from Kernel stages. */
-export function createKernelApprovalBindingForBlockedSubagentV1(input: {
+export function createKernelApprovalBindingForBlockedSubagent(input: {
   state: RuntimeState;
   parentToolCallId: string;
   blocked: NonNullable<import('#app/bootstrap/runtime/subagent/types').SubAgentResult['blocked']>;
-  availCtx: AppToolTurnContextV1;
-  toolPipelineComposition: AppToolPipelineCompositionV1;
+  availCtx: AppToolTurnContext;
+  toolPipelineComposition: AppToolPipelineComposition;
   descriptors?: readonly Readonly<CapabilityDescriptor>[];
-}): AppApprovalBindingV1 | undefined {
-  return exactBlockedSubagentPolicyV1({ ...input, allowMissingBinding: true })?.approvalBinding;
+}): AppApprovalBinding | undefined {
+  return exactBlockedSubagentPolicy({ ...input, allowMissingBinding: true })?.approvalBinding;
 }
 
 /** Convert the subagent runner's private callback payload into a durable public fact. */
@@ -770,29 +767,29 @@ export function toRuntimeSubagentEvent(
   }
 }
 
-class AppToolPipelinePersistenceErrorV1 extends Error {
+class AppToolPipelinePersistenceError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'AppToolPipelinePersistenceErrorV1';
+    this.name = 'AppToolPipelinePersistenceError';
   }
 }
 
-class SubagentContinuationPersistenceErrorV1 extends AppToolPipelinePersistenceErrorV1 {
+class SubagentContinuationPersistenceError extends AppToolPipelinePersistenceError {
   constructor(message: string) {
     super(message);
-    this.name = 'SubagentContinuationPersistenceErrorV1';
+    this.name = 'SubagentContinuationPersistenceError';
   }
 }
 
-function privateSuspendedSubagentRecordV1(input: {
-  artifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccessV1;
+function privateSuspendedSubagentRecord(input: {
+  artifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccess;
   parentInvocationId: string;
   parentAttempt: number;
   parentToolCallId: string;
   blocked: NonNullable<import('#app/bootstrap/runtime/subagent/types').SubAgentResult['blocked']>;
-}): import('@kite/runtime-spi').PrivateSuspendedSubagentRecordV1 {
+}): import('@kite/runtime-spi').PrivateSuspendedSubagentRecord {
   if (!input.artifacts) {
-    throw new SubagentContinuationPersistenceErrorV1(
+    throw new SubagentContinuationPersistenceError(
       'Private Subagent continuation Artifact storage is unavailable.',
     );
   }
@@ -807,8 +804,8 @@ function privateSuspendedSubagentRecordV1(input: {
     command: input.blocked.command,
     ...(input.blocked.approvalBinding ? { approvalBinding: input.blocked.approvalBinding } : {}),
   });
-  const continuationId = subagentContinuationCursorIdV1(snapshot);
-  let continuationArtifact: import('@kite/runtime-spi').SubagentContinuationArtifactRefV1;
+  const continuationId = subagentContinuationCursorId(snapshot);
+  let continuationArtifact: import('@kite/runtime-spi').SubagentContinuationArtifactRef;
   try {
     continuationArtifact = input.artifacts.write({
       owner: {
@@ -821,7 +818,7 @@ function privateSuspendedSubagentRecordV1(input: {
       snapshot,
     });
   } catch {
-    throw new SubagentContinuationPersistenceErrorV1(
+    throw new SubagentContinuationPersistenceError(
       'Private Subagent continuation Artifact publication failed.',
     );
   }
@@ -845,14 +842,14 @@ function privateSuspendedSubagentRecordV1(input: {
   };
 }
 
-export function readPrivateSuspendedSubagentV1(
-  suspended: import('@kite/runtime-spi').DurableSuspendedSubagentV1,
+export function readPrivateSuspendedSubagent(
+  suspended: import('@kite/runtime-spi').DurableSuspendedSubagent,
   parentToolCallId: string,
   state: Readonly<RuntimeState>,
-  artifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccessV1,
+  artifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccess,
 ): import('@kite/runtime-spi').SuspendedSubagentSnapshot {
   if (!artifacts) {
-    throw new SubagentContinuationPersistenceErrorV1(
+    throw new SubagentContinuationPersistenceError(
       'Private Subagent continuation Artifact reader is unavailable.',
     );
   }
@@ -872,7 +869,7 @@ export function readPrivateSuspendedSubagentV1(
     lifecycle.observationStatus !== 'blocked' ||
     lifecycle.cleanupConfirmed !== true
   ) {
-    throw new SubagentContinuationPersistenceErrorV1(
+    throw new SubagentContinuationPersistenceError(
       'Private Subagent continuation has no exact live parent authority.',
     );
   }
@@ -886,7 +883,7 @@ export function readPrivateSuspendedSubagentV1(
       continuationId: suspended.continuationId,
     });
   } catch {
-    throw new SubagentContinuationPersistenceErrorV1(
+    throw new SubagentContinuationPersistenceError(
       'Private Subagent continuation Artifact failed exact readback.',
     );
   }
@@ -894,14 +891,14 @@ export function readPrivateSuspendedSubagentV1(
     snapshot.subagentId !== suspended.subagentId ||
     snapshot.role !== suspended.role ||
     (snapshot.modelInvocationOrdinal ?? 0) !== suspended.modelInvocationOrdinal ||
-    subagentContinuationCursorIdV1(snapshot) !== suspended.continuationId ||
+    subagentContinuationCursorId(snapshot) !== suspended.continuationId ||
     snapshot.blockedTool.reasonCode !== suspended.blockedTool.reasonCode ||
     snapshot.blockedTool.toolCallId !== suspended.blockedTool.toolCallId ||
     (snapshot.blockedTool.runtimeToolCallId ?? undefined) !==
       suspended.blockedTool.runtimeToolCallId ||
     snapshot.blockedTool.toolName !== suspended.blockedTool.toolName
   ) {
-    throw new SubagentContinuationPersistenceErrorV1(
+    throw new SubagentContinuationPersistenceError(
       'Private Subagent continuation Artifact is cross-bound.',
     );
   }
@@ -931,22 +928,22 @@ export function serializeConcurrentSubagentApprovalEvents(
   });
 }
 
-type AppRuntimeToolExecutionInputV1 = Parameters<typeof executeAppRuntimeToolsV1>[0];
+type AppRuntimeToolExecutionInput = Parameters<typeof executeAppRuntimeTools>[0];
 
 /**
  * Single App-owned child Tool dispatcher shared by Skill forks and legacy
  * `builtin:task`. It recursively re-enters the App runtime and never
  * selects a second Host, registry, or fallback dispatcher.
  */
-function createAppSharedChildToolDispatcherV1(input: {
-  readonly params: AppRuntimeToolExecutionInputV1;
+function createAppSharedChildToolDispatcher(input: {
+  readonly params: AppRuntimeToolExecutionInput;
   readonly parentToolCallId: string;
   readonly parentTaskId?: string;
-}): SubAgentToolDispatcherV1 {
+}): SubAgentToolDispatcher {
   const { params, parentToolCallId, parentTaskId } = input;
   return {
     dispatch: async (childInput) => {
-      const runtimeToolCallId = childRuntimeToolCallIdV1({
+      const runtimeToolCallId = childRuntimeToolCallId({
         parentToolCallId,
         subagentId: childInput.subagentId,
         modelInvocationId: childInput.modelInvocationId,
@@ -961,7 +958,7 @@ function createAppSharedChildToolDispatcherV1(input: {
         stdout: '',
         stderr: message,
         status: 'error',
-        classifierAdviceV1: {
+        classifierAdvice: {
           detailCode: 'persistence_unavailable',
           disposition: 'never',
           maximumAdditionalCalls: 0,
@@ -988,7 +985,7 @@ function createAppSharedChildToolDispatcherV1(input: {
         const durableBinding = beforeQueue.capabilities.bindings[childInput.binding.bindingId];
         if (
           !durableBinding ||
-          digestCapabilityValueV1(durableBinding) !== digestCapabilityValueV1(childInput.binding)
+          digestCapabilityValue(durableBinding) !== digestCapabilityValue(childInput.binding)
         ) {
           return {
             runtimeToolCallId,
@@ -1003,8 +1000,7 @@ function createAppSharedChildToolDispatcherV1(input: {
       if (existing) {
         const sameCall =
           existing.name === childInput.request.name &&
-          digestCapabilityValueV1(existing.args) ===
-            digestCapabilityValueV1(childInput.request.args);
+          digestCapabilityValue(existing.args) === digestCapabilityValue(childInput.request.args);
         if (!sameCall || existing.status !== 'approved') {
           return {
             runtimeToolCallId,
@@ -1047,7 +1043,7 @@ function createAppSharedChildToolDispatcherV1(input: {
       }
 
       let committedOrdinaryResult: ToolExecutionResult | undefined;
-      const childEvents = await executeAppRuntimeToolsV1({
+      const childEvents = await executeAppRuntimeTools({
         ...params,
         state: executionState as RuntimeState,
         toolCallIds: [runtimeToolCallId],
@@ -1086,14 +1082,14 @@ function createAppSharedChildToolDispatcherV1(input: {
         (event) => event.type === 'approval.requested' || event.type === 'auto_review.requested',
       );
       if (approval) {
-        const approvalBinding = appApprovalBindingForPresentationV1(approval.approval);
+        const approvalBinding = appApprovalBindingForPresentation(approval.approval);
         if (!approvalBinding) {
           return {
             runtimeToolCallId,
             result: failClosed('Child approval is missing its Kernel governance facts.'),
           };
         }
-        const childApprovalBinding: AppApprovalBindingV1 = Object.freeze({
+        const childApprovalBinding: AppApprovalBinding = Object.freeze({
           ...approvalBinding,
           childToolCallId: childInput.modelToolCallId,
           runtimeToolCallId,
@@ -1128,7 +1124,7 @@ function createAppSharedChildToolDispatcherV1(input: {
         ) {
           return { runtimeToolCallId, result: committedOrdinaryResult };
         }
-        throw new AppToolPipelinePersistenceErrorV1(
+        throw new AppToolPipelinePersistenceError(
           'Child ordinary Tool Pipeline result lacks its exact durable terminal acknowledgement.',
         );
       }
@@ -1139,7 +1135,7 @@ function createAppSharedChildToolDispatcherV1(input: {
         };
       }
       if (childEvents.some((event) => event.type === 'capability.execution_unknown')) {
-        throw new AppToolPipelinePersistenceErrorV1(
+        throw new AppToolPipelinePersistenceError(
           'Child tool effect is unknown after its acknowledged dispatch attempt.',
         );
       }
@@ -1160,7 +1156,7 @@ function createAppSharedChildToolDispatcherV1(input: {
             ...(typeof finished.result.resultMeta?.path === 'string'
               ? { path: finished.result.resultMeta.path }
               : {}),
-            classifierAdviceV1: finished.classifierAdviceV1,
+            classifierAdvice: finished.classifierAdvice,
             classifierDiagnostic: finished.classifierDiagnostic,
           },
         };
@@ -1199,7 +1195,7 @@ function createAppSharedChildToolDispatcherV1(input: {
   };
 }
 
-interface AppSkillForkRequestV1 {
+interface AppSkillForkRequest {
   readonly agent: string;
   readonly capabilityCeiling: readonly string[];
   readonly instructions: string;
@@ -1213,16 +1209,16 @@ interface AppSkillForkRequestV1 {
  * one App-issued runtime; this helper never creates a coordinator or falls
  * back to Core dispatch.
  */
-async function runAppSkillForkV1(input: {
-  readonly params: AppRuntimeToolExecutionInputV1;
-  readonly call: Readonly<import('@kite/runtime-host').StateToolCallRecordV1>;
+async function runAppSkillFork(input: {
+  readonly params: AppRuntimeToolExecutionInput;
+  readonly call: Readonly<import('@kite/runtime-host').StateToolCallRecord>;
   readonly toolCallId: string;
-  readonly builtinProjection: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1;
-  readonly childToolDispatcher: SubAgentToolDispatcherV1;
+  readonly builtinProjection: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
+  readonly childToolDispatcher: SubAgentToolDispatcher;
   readonly eventSink: SubAgentEventSink;
-  readonly subagentRuntime: SubagentInvocationRuntimeV1;
-  readonly subagentInvocationIdentity: SubagentInvocationIdentityV1;
-  readonly fork: AppSkillForkRequestV1;
+  readonly subagentRuntime: SubagentInvocationRuntime;
+  readonly subagentInvocationIdentity: SubagentInvocationIdentity;
+  readonly fork: AppSkillForkRequest;
 }): Promise<SubAgentResult | null> {
   const { params, call, toolCallId, fork, subagentInvocationIdentity } = input;
   if (
@@ -1259,7 +1255,7 @@ async function runAppSkillForkV1(input: {
     );
     for (const { binding } of ceiling.mcpBindings) {
       const existing = mergedBindings.get(binding.bindingId);
-      if (existing && digestCapabilityValueV1(existing) !== digestCapabilityValueV1(binding)) {
+      if (existing && digestCapabilityValue(existing) !== digestCapabilityValue(binding)) {
         return null;
       }
       mergedBindings.set(binding.bindingId, binding);
@@ -1282,7 +1278,7 @@ async function runAppSkillForkV1(input: {
         const durableBinding = durableState.capabilities.bindings[binding.bindingId];
         return (
           !durableBinding ||
-          digestCapabilityValueV1(durableBinding) !== digestCapabilityValueV1(binding)
+          digestCapabilityValue(durableBinding) !== digestCapabilityValue(binding)
         );
       })
     ) {
@@ -1305,11 +1301,7 @@ async function runAppSkillForkV1(input: {
       workspaceAccess: currentState.workspaceAccess,
       phase: getAgentPhase(getActivePlanning(currentState)),
       interactionMode: getEffectiveInteractionMode(currentState),
-      projectInstructions: visibleProjectInstructions(
-        currentState,
-        call.modelMessageId,
-        params.taskConfig,
-      ),
+      projectInstructions: visibleProjectInstructions(currentState, call.modelMessageId),
       threadId: currentState.session.threadId,
       recoveryIdentityKey: currentState.toolRecovery.identityKey,
       eventSink: input.eventSink,
@@ -1346,7 +1338,7 @@ async function runAppSkillForkV1(input: {
   );
 }
 
-interface AppTaskResumeChildPreparationV1 {
+interface AppTaskResumeChildPreparation {
   readonly continuation: RestoredSubAgentContinuation;
   readonly toolResult: ToolExecutionResult;
   readonly mcpBindings: readonly {
@@ -1361,32 +1353,32 @@ interface AppTaskResumeChildPreparationV1 {
  * child-only helper: it never claims the parent Host attempt or invokes the
  * subagent Provider.
  */
-async function prepareAppTaskResumeChildV1(input: {
-  readonly params: AppRuntimeToolExecutionInputV1;
+async function prepareAppTaskResumeChild(input: {
+  readonly params: AppRuntimeToolExecutionInput;
   readonly state: RuntimeState;
   readonly toolCallId: string;
   readonly continuation: RestoredSubAgentContinuation;
-  readonly availCtx: AppToolTurnContextV1;
-  readonly toolPipelineComposition: AppToolPipelineCompositionV1;
-  readonly builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1;
-  readonly childToolDispatcher: SubAgentToolDispatcherV1;
+  readonly availCtx: AppToolTurnContext;
+  readonly toolPipelineComposition: AppToolPipelineComposition;
+  readonly builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
+  readonly childToolDispatcher: SubAgentToolDispatcher;
   readonly signal: AbortSignal;
 }): Promise<
-  | { readonly ok: true; readonly value: AppTaskResumeChildPreparationV1 }
+  | { readonly ok: true; readonly value: AppTaskResumeChildPreparation }
   | { readonly ok: false; readonly events: RuntimeEvent[] }
 > {
   const { params, continuation, toolCallId } = input;
   const state = params.getRuntimeState?.() ?? input.state;
-  const recovery = normalizeToolRecoveryJournalV1(
+  const recovery = normalizeToolRecoveryJournal(
     continuation.toolRecovery,
     state.toolRecovery.identityKey,
   );
   if (
-    isToolRecoveryJournalInvalidV1(state.toolRecovery) ||
-    isToolRecoveryJournalInvalidV1(recovery) ||
+    isToolRecoveryJournalInvalid(state.toolRecovery) ||
+    isToolRecoveryJournalInvalid(recovery) ||
     recovery.identityKey !== state.toolRecovery.identityKey
   ) {
-    return taskResumeRejectedEventsV1(
+    return taskResumeRejectedEvents(
       toolCallId,
       'Sub-agent continuation recovery journal no longer matches the live runtime.',
     );
@@ -1394,7 +1386,7 @@ async function prepareAppTaskResumeChildV1(input: {
 
   const call = state.tools.calls[toolCallId];
   if (call?.status !== 'approved' || !call.approvalGrant) {
-    return taskResumeRejectedEventsV1(
+    return taskResumeRejectedEvents(
       toolCallId,
       'The approved parent Task call is no longer live before child resume.',
     );
@@ -1407,7 +1399,7 @@ async function prepareAppTaskResumeChildV1(input: {
     ? state.capabilities.bindings[childCall.bindingId]
     : undefined;
   const expectedRuntimeToolCallId = childCall?.modelInvocationId
-    ? childRuntimeToolCallIdV1({
+    ? childRuntimeToolCallId({
         parentToolCallId: toolCallId,
         subagentId: continuation.id,
         modelInvocationId: childCall.modelInvocationId,
@@ -1440,26 +1432,24 @@ async function prepareAppTaskResumeChildV1(input: {
     !childCall.modelInvocationId ||
     runtimeToolCallId !== expectedRuntimeToolCallId ||
     childCall.name !== blocked.toolName ||
-    digestCapabilityValueV1(childCall.args) !== digestCapabilityValueV1(blocked.args) ||
+    digestCapabilityValue(childCall.args) !== digestCapabilityValue(blocked.args) ||
     !bindingMatches ||
     mcpBindings.length !== (continuation.mcpBindingIds?.length ?? 0)
   ) {
-    return taskResumeRejectedEventsV1(
+    return taskResumeRejectedEvents(
       toolCallId,
       'Sub-agent child Runtime identity or its operation-bound approval is unavailable.',
     );
   }
 
   const resumeProjection = input.builtinToolCatalog.forTurn(
-    createAppToolTurnContextV1({
+    createAppToolTurnContext({
       workspace: state.session.workspace,
       threadId: state.session.threadId,
       config: params.taskConfig,
       hasGitBroker: Boolean(params.gitBroker),
       hasTaskAdapter: true,
-      toolSearchEnabled: params.taskConfig
-        ? getFeatureFlags(params.taskConfig).toolSearchV1
-        : false,
+      toolSearchEnabled: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearch : false,
       skillCatalog: params.skillCatalog,
       activeSkillFrames: activeSkillFramesForCurrentWork(state).filter(
         (frame) => frame.contextMode === 'inline',
@@ -1474,13 +1464,13 @@ async function prepareAppTaskResumeChildV1(input: {
   const blockedRequest = buildBlockedToolRequest(blocked, input.availCtx, resumeProjection);
   const blockedEntry =
     blockedRequest.source === 'builtin'
-      ? modelBuiltinEntryV1(resumeProjection, blockedRequest.name)
+      ? modelBuiltinEntry(resumeProjection, blockedRequest.name)
       : undefined;
   const approvalDescriptors = [
     ...mcpBindings.map(({ descriptor }) => descriptor),
     ...(params.skillCatalog?.capabilities.descriptors ?? []),
   ];
-  const exactApproval = exactBlockedSubagentPolicyV1({
+  const exactApproval = exactBlockedSubagentPolicy({
     state,
     parentToolCallId: toolCallId,
     blocked: {
@@ -1493,14 +1483,14 @@ async function prepareAppTaskResumeChildV1(input: {
     descriptors: approvalDescriptors,
   });
   if (!exactApproval || call.approvalHash !== exactApproval.approvalBindingDigest) {
-    return taskResumeRejectedEventsV1(
+    return taskResumeRejectedEvents(
       toolCallId,
       'Sub-agent child approval binding no longer matches the exact blocked operation.',
     );
   }
   const roleDenial =
     blockedEntry?.executionMechanism === 'shell'
-      ? rejectShellOutsideSubAgentRoleCeilingV1(
+      ? rejectShellOutsideSubAgentRoleCeiling(
           continuation.role,
           String((blockedRequest.args as Record<string, unknown>).command ?? ''),
         )
@@ -1512,11 +1502,11 @@ async function prepareAppTaskResumeChildV1(input: {
     const dispatchState = params.getRuntimeState?.() ?? state;
     const dispatchCall = dispatchState.tools.calls[toolCallId];
     if (
-      isToolRecoveryJournalInvalidV1(dispatchState.toolRecovery) ||
+      isToolRecoveryJournalInvalid(dispatchState.toolRecovery) ||
       dispatchState.toolRecovery.identityKey !== recovery.identityKey ||
       dispatchCall?.status !== 'approved'
     ) {
-      return taskResumeRejectedEventsV1(
+      return taskResumeRejectedEvents(
         toolCallId,
         'Sub-agent approval became stale before its blocked child could be dispatched.',
       );
@@ -1534,13 +1524,13 @@ async function prepareAppTaskResumeChildV1(input: {
       descriptors: approvalDescriptors,
     });
     if (review.type !== 'approval.requested' && review.type !== 'auto_review.requested') {
-      return taskResumeRejectedEventsV1(
+      return taskResumeRejectedEvents(
         toolCallId,
         'Child approval policy did not produce an operation-bound review fact.',
       );
     }
     if (!params.persistRuntimeEvents || !params.getRuntimeState) {
-      return taskResumeRejectedEventsV1(
+      return taskResumeRejectedEvents(
         toolCallId,
         'Child approval persistence is unavailable before resume dispatch.',
       );
@@ -1564,7 +1554,7 @@ async function prepareAppTaskResumeChildV1(input: {
       !approvalAcknowledged ||
       params.getRuntimeState().tools.calls[runtimeToolCallId]?.status !== 'approved'
     ) {
-      return taskResumeRejectedEventsV1(
+      return taskResumeRejectedEvents(
         toolCallId,
         'Child operation-bound approval could not be durably acknowledged.',
       );
@@ -1612,7 +1602,7 @@ async function prepareAppTaskResumeChildV1(input: {
                   artifactBytes:
                     (blocked.toolName === 'write_file' || blocked.toolName === 'edit_file') &&
                     attemptResult?.path
-                      ? bestEffortRegularFileSizeV1(attemptResult.path)
+                      ? bestEffortRegularFileSize(attemptResult.path)
                       : 0,
                 });
               } catch (settlementError) {
@@ -1625,7 +1615,7 @@ async function prepareAppTaskResumeChildV1(input: {
       ...(childBinding ? { binding: childBinding } : {}),
     });
     if (dispatched.runtimeToolCallId !== runtimeToolCallId) {
-      return taskResumeRejectedEventsV1(
+      return taskResumeRejectedEvents(
         toolCallId,
         'Resumed child tool identity no longer matches its approved Runtime fact.',
       );
@@ -1638,7 +1628,7 @@ async function prepareAppTaskResumeChildV1(input: {
   });
 }
 
-function taskResumeRejectedEventsV1(
+function taskResumeRejectedEvents(
   toolCallId: string,
   reason: string,
 ): { readonly ok: false; readonly events: RuntimeEvent[] } {
@@ -1660,12 +1650,12 @@ function taskResumeRejectedEventsV1(
  * the effect-scoped Host coordinator through taskRuntime; no Core dispatcher,
  * direct executor, or fallback is reachable from this function.
  */
-async function executeAppTaskToolPipelineV1(input: {
-  readonly params: AppRuntimeToolExecutionInputV1;
-  readonly taskRuntime: AppTaskToolPipelineAttemptRuntimeV1;
+async function executeAppTaskToolPipeline(input: {
+  readonly params: AppRuntimeToolExecutionInput;
+  readonly taskRuntime: AppTaskToolPipelineAttemptRuntime;
   readonly toolCallId: string;
   readonly call: NonNullable<RuntimeState['tools']['calls'][string]>;
-  readonly privateTask: PrivateSubagentTaskV1;
+  readonly privateTask: PrivateSubagentTask;
 }): Promise<RuntimeEvent[]> {
   const { params, taskRuntime, toolCallId, privateTask } = input;
   const capabilityExecution = params.capabilityExecution;
@@ -1698,19 +1688,19 @@ async function executeAppTaskToolPipelineV1(input: {
   const makeState = () => (params.getRuntimeState?.() ?? currentState) as RuntimeState;
   let state = makeState();
   let call = state.tools.calls[toolCallId] ?? input.call;
-  let taskChildToolDispatcher = createAppSharedChildToolDispatcherV1({
+  let taskChildToolDispatcher = createAppSharedChildToolDispatcher({
     params,
     parentToolCallId: toolCallId,
     ...(call.taskId ? { parentTaskId: call.taskId } : {}),
   });
   let productionFlags = getFeatureFlags(params.taskConfig);
-  let turnContext = createAppToolTurnContextV1({
+  let turnContext = createAppToolTurnContext({
     workspace: state.session.workspace,
     threadId: state.session.threadId,
     config: params.taskConfig,
     hasGitBroker: Boolean(params.gitBroker),
     hasTaskAdapter: true,
-    toolSearchEnabled: productionFlags.toolSearchV1 === true,
+    toolSearchEnabled: productionFlags.toolSearch === true,
     skillCatalog: params.skillCatalog,
     activeSkillFrames: activeSkillFramesForCurrentWork(state).filter(
       (frame) => frame.contextMode === 'inline',
@@ -1723,7 +1713,7 @@ async function executeAppTaskToolPipelineV1(input: {
     toolCallId,
   });
   let turn = params.toolPipelineComposition.forTurn(turnContext);
-  let snapshotResult = createRuntimeHostToolCallSnapshotV1({
+  let snapshotResult = createRuntimeHostToolCallSnapshot({
     toolCallId,
     name: 'task',
     rawArguments: call.args,
@@ -1762,12 +1752,12 @@ async function executeAppTaskToolPipelineV1(input: {
   let suspended = state.suspendedSubagents[toolCallId];
   const executionMode: 'start' | 'resume' =
     suspended && call.status === 'approved' ? 'resume' : 'start';
-  let resumePreparation: AppTaskResumeChildPreparationV1 | undefined;
+  let resumePreparation: AppTaskResumeChildPreparation | undefined;
   if (suspended && call.status === 'approved') {
     let continuation: RestoredSubAgentContinuation;
     try {
       continuation = deserializeSubagentContinuation(
-        readPrivateSuspendedSubagentV1(
+        readPrivateSuspendedSubagent(
           suspended,
           toolCallId,
           state,
@@ -1776,12 +1766,12 @@ async function executeAppTaskToolPipelineV1(input: {
         state.toolRecovery.identityKey,
       );
     } catch (error) {
-      return taskResumeRejectedEventsV1(
+      return taskResumeRejectedEvents(
         toolCallId,
         error instanceof Error ? error.message : 'Private continuation readback failed.',
       ).events;
     }
-    const prepared = await prepareAppTaskResumeChildV1({
+    const prepared = await prepareAppTaskResumeChild({
       params,
       state,
       toolCallId,
@@ -1797,7 +1787,7 @@ async function executeAppTaskToolPipelineV1(input: {
   } else if (suspended && call.status === 'queued') {
     try {
       const continuation = deserializeSubagentContinuation(
-        readPrivateSuspendedSubagentV1(
+        readPrivateSuspendedSubagent(
           suspended,
           toolCallId,
           state,
@@ -1819,7 +1809,7 @@ async function executeAppTaskToolPipelineV1(input: {
       });
       return [review];
     } catch (error) {
-      return taskResumeRejectedEventsV1(
+      return taskResumeRejectedEvents(
         toolCallId,
         error instanceof Error ? error.message : 'Private continuation readback failed.',
       ).events;
@@ -1837,24 +1827,24 @@ async function executeAppTaskToolPipelineV1(input: {
     call = state.tools.calls[toolCallId] ?? call;
     suspended = state.suspendedSubagents[toolCallId];
     if (call.status !== 'approved' || !suspended) {
-      return taskResumeRejectedEventsV1(
+      return taskResumeRejectedEvents(
         toolCallId,
         'The approved parent Task continuation changed before its live resume attempt.',
       ).events;
     }
-    taskChildToolDispatcher = createAppSharedChildToolDispatcherV1({
+    taskChildToolDispatcher = createAppSharedChildToolDispatcher({
       params,
       parentToolCallId: toolCallId,
       ...(call.taskId ? { parentTaskId: call.taskId } : {}),
     });
     productionFlags = getFeatureFlags(params.taskConfig);
-    turnContext = createAppToolTurnContextV1({
+    turnContext = createAppToolTurnContext({
       workspace: state.session.workspace,
       threadId: state.session.threadId,
       config: params.taskConfig,
       hasGitBroker: Boolean(params.gitBroker),
       hasTaskAdapter: true,
-      toolSearchEnabled: productionFlags.toolSearchV1 === true,
+      toolSearchEnabled: productionFlags.toolSearch === true,
       skillCatalog: params.skillCatalog,
       activeSkillFrames: activeSkillFramesForCurrentWork(state).filter(
         (frame) => frame.contextMode === 'inline',
@@ -1867,7 +1857,7 @@ async function executeAppTaskToolPipelineV1(input: {
       toolCallId,
     });
     turn = params.toolPipelineComposition.forTurn(turnContext);
-    snapshotResult = createRuntimeHostToolCallSnapshotV1({
+    snapshotResult = createRuntimeHostToolCallSnapshot({
       toolCallId,
       name: 'task',
       rawArguments: call.args,
@@ -1914,7 +1904,7 @@ async function executeAppTaskToolPipelineV1(input: {
       state.capabilities.invocations[resumedParent.parentInvocationId]?.attemptsStarted !==
         resumedParent.parentAttempt)
   ) {
-    return taskResumeRejectedEventsV1(
+    return taskResumeRejectedEvents(
       toolCallId,
       'The suspended parent invocation is no longer the exact live State attempt.',
     ).events;
@@ -1969,7 +1959,7 @@ async function executeAppTaskToolPipelineV1(input: {
             approvalBindingDigest: call.status === 'approved' ? (call.approvalHash ?? null) : null,
           }),
   });
-  const taskInput = (prepared: Readonly<PreparedToolInvocationV1>): TaskToolDeps => {
+  const taskInput = (prepared: Readonly<PreparedToolInvocation>): TaskToolDeps => {
     const identity = prepared.identity;
     if (
       identity.operationId !== 'builtin:task' ||
@@ -2006,11 +1996,7 @@ async function executeAppTaskToolPipelineV1(input: {
       workspaceAccess: makeState().workspaceAccess,
       phase: getAgentPhase(getActivePlanning(makeState())),
       interactionMode: getEffectiveInteractionMode(makeState()),
-      projectInstructions: visibleProjectInstructions(
-        makeState(),
-        call.modelMessageId,
-        params.taskConfig,
-      ),
+      projectInstructions: visibleProjectInstructions(makeState(), call.modelMessageId),
       threadId: makeState().session.threadId,
       recoveryIdentityKey: makeState().toolRecovery.identityKey,
       eventSink: emitSubagentEventForTask(params),
@@ -2047,8 +2033,8 @@ async function executeAppTaskToolPipelineV1(input: {
     prepared,
   }: {
     readonly executionMode: 'start' | 'resume';
-    readonly prepared: Readonly<PreparedToolInvocationV1>;
-    readonly arguments: Readonly<RuntimeJsonValueV1>;
+    readonly prepared: Readonly<PreparedToolInvocation>;
+    readonly arguments: Readonly<RuntimeJsonValue>;
     readonly signal: AbortSignal;
   }): Promise<Readonly<Record<string, unknown>>> => {
     if (taskExecutionCaptured) {
@@ -2067,21 +2053,21 @@ async function executeAppTaskToolPipelineV1(input: {
         result: resume.toolResult,
       });
       capturedSubagentResult = result;
-      return taskResultForBuiltinProjectionV1(result);
+      return taskResultForBuiltinProjection(result);
     }
     const result = await runtime.start(deps, privateTask.payload);
     capturedSubagentResult = result;
-    return taskResultForBuiltinProjectionV1(result);
+    return taskResultForBuiltinProjection(result);
   };
   const projectSuspension = ({
     executionMode: mode,
     prepared,
     terminal,
   }: Parameters<
-    AppTaskAttemptInputV1['projectSuspension']
-  >[0]): Readonly<ToolPipelineTaskSubagentSuspensionV1> | null => {
+    AppTaskAttemptInput['projectSuspension']
+  >[0]): Readonly<ToolPipelineTaskSubagentSuspension> | null => {
     const captured = capturedSubagentResult;
-    if (!captured?.blocked || !isExactTaskBlockedTerminalProjectionV1(terminal, captured)) {
+    if (!captured?.blocked || !isExactTaskBlockedTerminalProjection(terminal, captured)) {
       return null;
     }
     // The terminal is a neutral JSON-safe projection. Use the exact typed
@@ -2101,7 +2087,7 @@ async function executeAppTaskToolPipelineV1(input: {
     if (review.type !== 'approval.requested' && review.type !== 'auto_review.requested') {
       return null;
     }
-    const subagent = privateSuspendedSubagentRecordV1({
+    const subagent = privateSuspendedSubagentRecord({
       artifacts: params.subagentContinuationArtifacts,
       parentInvocationId: prepared.identity.invocationId,
       parentAttempt: expectedAttempt,
@@ -2125,10 +2111,10 @@ async function executeAppTaskToolPipelineV1(input: {
         toolCallId: blockedValue.toolCallId,
         runtimeToolCallId: blockedValue.runtimeToolCallId ?? null,
         toolName: blockedValue.toolName,
-        argumentsDigest: digestCapabilityValueV1(blockedValue.args),
+        argumentsDigest: digestCapabilityValue(blockedValue.args),
         commandDigest:
           blockedValue.command.trim().length > 0
-            ? digestCapabilityValueV1(blockedValue.command.trim())
+            ? digestCapabilityValue(blockedValue.command.trim())
             : null,
       }),
       event: review,
@@ -2209,11 +2195,11 @@ async function executeAppTaskToolPipelineV1(input: {
       result.decision.kind === 'request_approval' ||
       result.decision.kind === 'request_auto_review'
     ) {
-      const request = pendingToolRequestFromValidatedInvocationV1(
+      const request = pendingToolRequestFromValidatedInvocation(
         result.classified.validated,
         turn.projection,
       );
-      const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+      const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
         result.facts.invocation,
         result.facts.policy,
       );
@@ -2224,7 +2210,7 @@ async function executeAppTaskToolPipelineV1(input: {
         decision: result.decision.decision,
         approvalBindingDigest,
       });
-      bindAppApprovalBindingV1(approval, {
+      bindAppApprovalBinding(approval, {
         digest: approvalBindingDigest,
         invocationFact: result.facts.invocation,
         policyFact: result.facts.policy,
@@ -2270,7 +2256,7 @@ async function executeAppTaskToolPipelineV1(input: {
   ];
 }
 
-function emitSubagentEventForTask(params: AppRuntimeToolExecutionInputV1): SubAgentEventSink {
+function emitSubagentEventForTask(params: AppRuntimeToolExecutionInput): SubAgentEventSink {
   return (event) => {
     params.subagentEventSink?.(event);
     params.emitRuntimeEvent?.(toRuntimeSubagentEvent(event, params.subagentConcurrencyGroupId));
@@ -2282,32 +2268,32 @@ function emitSubagentEventForTask(params: AppRuntimeToolExecutionInputV1): SubAg
  * persisted call record and returns facts only; it never creates a ToolMessage
  * or mutates a graph channel.
  */
-export async function executeAppRuntimeToolsV1(params: {
+export async function executeAppRuntimeTools(params: {
   state: RuntimeState;
   toolCallIds: string[];
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   /** Host-owned registry execution port for Runtime SPI capability owners. */
-  capabilityExecution?: CapabilityExecutionPortV1;
-  builtinToolCatalog?: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1;
+  capabilityExecution?: CapabilityExecutionPort;
+  builtinToolCatalog?: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
   /** Stable App composition derived from the same frozen Builtin projection. */
-  toolPipelineComposition: AppToolPipelineCompositionV1;
+  toolPipelineComposition: AppToolPipelineComposition;
   /** The one effect-scoped Host/Builtin attempt runtime for ordinary cutover operations. */
-  ordinaryToolPipelineAttemptRuntime?: AppOrdinaryToolPipelineAttemptRuntimeV1;
+  ordinaryToolPipelineAttemptRuntime?: AppOrdinaryToolPipelineAttemptRuntime;
   /** The dedicated private Task runtime sharing the same effect-scoped Host coordinator. */
-  taskToolPipelineAttemptRuntime?: AppTaskToolPipelineAttemptRuntimeV1;
-  providerReadinessCoordinator?: ProviderReadinessCoordinatorV1;
+  taskToolPipelineAttemptRuntime?: AppTaskToolPipelineAttemptRuntime;
+  providerReadinessCoordinator?: ProviderReadinessCoordinator;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
-  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGateV1;
-  descendantResourceAdmission?: import('@kite/runtime-host').DescendantResourceAdmissionV1;
-  modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinatorV1;
-  modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistenceV1<
+  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGate;
+  descendantResourceAdmission?: import('@kite/runtime-host').DescendantResourceAdmission;
+  modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
+  modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
     RuntimeState,
     RuntimeEvent
   >;
@@ -2317,9 +2303,9 @@ export async function executeAppRuntimeToolsV1(params: {
   /** Identity supplied by the scheduler/executor only for one admitted parallel task batch. */
   subagentConcurrencyGroupId?: string;
   planArtifactStore?: PlanArtifactStore;
-  capabilityArtifactStore?: CapabilityArtifactWriterV1;
-  workspaceFilesystemRuntime?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntimeV1;
-  sandboxPreparationArtifacts?: import('@kite/builtin-runtime/sandbox').SandboxPreparationArtifactStoreV1;
+  capabilityArtifactStore?: CapabilityArtifactWriter;
+  workspaceFilesystemRuntime?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
+  sandboxPreparationArtifacts?: import('@kite/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
   /** Exact sandbox qualification fact captured by the App/Core coordinator. */
   sandboxAvailable?: boolean;
   /** Deterministic observation used only for persisted same-command expiry. */
@@ -2328,14 +2314,14 @@ export async function executeAppRuntimeToolsV1(params: {
   authorizationFromAutoReview?: boolean;
   authorizationFromLoopMode?: boolean;
   /** Explicit qualification seam; production omits it and uses the sole Local Provider composition. */
-  subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactoryV1;
-  subagentContinuationArtifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccessV1;
-  subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccessV1;
+  subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactory;
+  subagentContinuationArtifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccess;
+  subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccess;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
-  /** StateSessionStorageV1-backed acknowledgement required before an automatic provider replay. */
+  /** StateSessionStorage-backed acknowledgement required before an automatic provider replay. */
   persistRuntimeEvent?: (event: RuntimeEvent) => Promise<boolean>;
-  /** Atomic StateSessionStorageV1 acknowledgement for invocation intent + attempt. */
+  /** Atomic StateSessionStorage acknowledgement for invocation intent + attempt. */
   persistRuntimeEvents?: (events: RuntimeEvent[]) => Promise<boolean>;
   /** Defers a complete terminal batch to the Kernel's atomic effect commit. */
   emitTerminalEventBatch?: (events: RuntimeEvent[]) => void;
@@ -2343,12 +2329,12 @@ export async function executeAppRuntimeToolsV1(params: {
   getRuntimeState?: () => Readonly<RuntimeState>;
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
   recordFilePreimage?: FilePreimageRecorder;
-  recordNetworkDecision?: NetworkDecisionRecorderV1;
+  recordNetworkDecision?: NetworkDecisionRecorder;
   /** Actor identities for nested child calls; absent top-level calls use parent. */
   toolActorIds?: Readonly<Record<string, string>>;
   /** Child-only exact reservation prepared after authorization and before admission. */
   beforeAdmissionByToolCallId?: Readonly<
-    Record<string, () => Promise<import('@kite/runtime-host').DescendantBudgetReservationV1>>
+    Record<string, () => Promise<import('@kite/runtime-host').DescendantBudgetReservation>>
   >;
   /** Child resource admission hook entered only after invocation acknowledgement. */
   beforeDispatchByToolCallId?: Readonly<
@@ -2374,7 +2360,7 @@ export async function executeAppRuntimeToolsV1(params: {
       const call = params.state.tools.calls[toolCallId];
       const entry =
         call && params.builtinToolCatalog
-          ? modelBuiltinEntryV1(params.builtinToolCatalog, call.name)
+          ? modelBuiltinEntry(params.builtinToolCatalog, call.name)
           : undefined;
       return entry?.executionMechanism === 'shell' && call?.status === 'approved';
     });
@@ -2384,14 +2370,14 @@ export async function executeAppRuntimeToolsV1(params: {
       const call = params.state.tools.calls[toolCallId];
       const entry =
         call && params.builtinToolCatalog
-          ? modelBuiltinEntryV1(params.builtinToolCatalog, call.name)
+          ? modelBuiltinEntry(params.builtinToolCatalog, call.name)
           : undefined;
       return entry?.executionMechanism === 'subagent' && call?.status === 'queued';
     });
   if (approvedParallelShellBatch) {
     const batches = await Promise.all(
       params.toolCallIds.map((toolCallId) =>
-        executeAppRuntimeToolsV1({
+        executeAppRuntimeTools({
           ...params,
           toolCallIds: [toolCallId],
         }),
@@ -2405,7 +2391,7 @@ export async function executeAppRuntimeToolsV1(params: {
     const deferredInteractions = params.toolCallIds.map(() => [] as RuntimeEvent[]);
     const batches = await Promise.all(
       params.toolCallIds.map((toolCallId, index) =>
-        executeAppRuntimeToolsV1({
+        executeAppRuntimeTools({
           ...params,
           toolCallIds: [toolCallId],
           subagentConcurrencyGroupId: concurrencyGroupId,
@@ -2458,7 +2444,7 @@ export async function executeAppRuntimeToolsV1(params: {
     };
   }
   const currentState = params.getRuntimeState?.() ?? params.state;
-  if (isToolRecoveryJournalInvalidV1(currentState.toolRecovery)) {
+  if (isToolRecoveryJournalInvalid(currentState.toolRecovery)) {
     const reason = 'Runtime tool recovery journal is invalid; tool dispatch is blocked.';
     for (const toolCallId of params.toolCallIds) {
       const call = currentState.tools.calls[toolCallId] ?? params.state.tools.calls[toolCallId];
@@ -2480,8 +2466,8 @@ export async function executeAppRuntimeToolsV1(params: {
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
-    let privateSubagentTask: PrivateSubagentTaskV1 | undefined;
-    if (isBuiltinSubagentTaskToolNameV1(call.name)) {
+    let privateSubagentTask: PrivateSubagentTask | undefined;
+    if (isBuiltinSubagentTaskToolName(call.name)) {
       const args = call.args;
       const taskArtifact =
         args && typeof args === 'object' && !Array.isArray(args) && 'taskArtifact' in args
@@ -2511,7 +2497,7 @@ export async function executeAppRuntimeToolsV1(params: {
       }
       try {
         const privateTask = params.subagentTaskRequests.read(
-          taskArtifact as import('@kite/runtime-spi').SubagentTaskRequestArtifactV1,
+          taskArtifact as import('@kite/runtime-spi').SubagentTaskRequestArtifact,
           {
             parentModelInvocationId: call.modelInvocationId,
             parentToolCallId: toolCallId,
@@ -2520,8 +2506,7 @@ export async function executeAppRuntimeToolsV1(params: {
         if (privateTask.role !== role) throw new Error('Subagent role is cross-bound.');
         privateSubagentTask = {
           source: 'private_artifact_v1',
-          requestArtifact:
-            taskArtifact as import('@kite/runtime-spi').SubagentTaskRequestArtifactV1,
+          requestArtifact: taskArtifact as import('@kite/runtime-spi').SubagentTaskRequestArtifact,
           payload: { subagent_type: privateTask.role, task: privateTask.task },
         };
       } catch {
@@ -2536,7 +2521,7 @@ export async function executeAppRuntimeToolsV1(params: {
         continue;
       }
     }
-    const childToolDispatcher = createAppSharedChildToolDispatcherV1({
+    const childToolDispatcher = createAppSharedChildToolDispatcher({
       params,
       parentToolCallId: toolCallId,
       ...(call.taskId ? { parentTaskId: call.taskId } : {}),
@@ -2565,7 +2550,7 @@ export async function executeAppRuntimeToolsV1(params: {
     }
     if (
       call.name.startsWith('mcp__') &&
-      (!productionFlags?.capabilityCatalogV1 || !productionFlags.mcpRuntimeBindingV1)
+      (!productionFlags?.capabilityCatalog || !productionFlags.mcpRuntimeBinding)
     ) {
       events.push({
         type: 'tool.failed',
@@ -2578,7 +2563,7 @@ export async function executeAppRuntimeToolsV1(params: {
       continue;
     }
     const ordinaryCutoverEntry = params.builtinToolCatalog
-      ? modelBuiltinEntryV1(params.builtinToolCatalog, call.name)
+      ? modelBuiltinEntry(params.builtinToolCatalog, call.name)
       : undefined;
     const taskCutover =
       ordinaryCutoverEntry?.operationId === 'builtin:task' &&
@@ -2587,7 +2572,7 @@ export async function executeAppRuntimeToolsV1(params: {
       Boolean(params.taskConfig && 'productionExecution' in params.taskConfig) &&
       (!params.taskConfig?.executionBoundary || !params.taskConfig.executionCapabilitySurface);
     if (productionBoundaryIncomplete) {
-      const reason = productionExecutionSurfaceFailureV1({
+      const reason = productionExecutionSurfaceFailure({
         config: params.taskConfig,
         workspace: currentState.session.workspace,
         descriptor: ordinaryCutoverEntry?.descriptor,
@@ -2609,7 +2594,7 @@ export async function executeAppRuntimeToolsV1(params: {
       continue;
     }
     if (ordinaryCutoverEntry) {
-      const surfaceFailure = productionExecutionSurfaceFailureV1({
+      const surfaceFailure = productionExecutionSurfaceFailure({
         config: params.taskConfig,
         workspace: currentState.session.workspace,
         descriptor: ordinaryCutoverEntry.descriptor,
@@ -2626,7 +2611,7 @@ export async function executeAppRuntimeToolsV1(params: {
         continue;
       }
     }
-    if (isBuiltinSubagentTaskToolNameV1(call.name) && !taskCutover) {
+    if (isBuiltinSubagentTaskToolName(call.name) && !taskCutover) {
       events.push({
         type: 'tool.failed',
         toolCallId,
@@ -2638,10 +2623,9 @@ export async function executeAppRuntimeToolsV1(params: {
       continue;
     }
     if (taskCutover) {
-      const instructionFailure = projectInstructionGuardFailureV1({
+      const instructionFailure = projectInstructionGuardFailure({
         state: (params.getRuntimeState?.() ?? currentState) as RuntimeState,
         modelMessageId: call.modelMessageId,
-        config: params.taskConfig,
         entry: ordinaryCutoverEntry,
         argumentOrigin: 'runtime_private',
         rawArguments: call.args,
@@ -2667,7 +2651,7 @@ export async function executeAppRuntimeToolsV1(params: {
         continue;
       }
       try {
-        const taskEvents = await executeAppTaskToolPipelineV1({
+        const taskEvents = await executeAppTaskToolPipeline({
           params,
           taskRuntime: params.taskToolPipelineAttemptRuntime,
           toolCallId,
@@ -2694,12 +2678,12 @@ export async function executeAppRuntimeToolsV1(params: {
     }
     const dynamicMcpCutover =
       call.name.startsWith('mcp__') &&
-      productionFlags?.capabilityCatalogV1 === true &&
-      productionFlags.mcpRuntimeBindingV1 === true;
+      productionFlags?.capabilityCatalog === true &&
+      productionFlags.mcpRuntimeBinding === true;
     const sealedMcpTerminal =
       (dynamicMcpCutover || ordinaryCutoverEntry?.executionMechanism === 'mcp') &&
       params.taskConfig?.executionBoundary
-        ? sealedMcpNetworkTerminalV1({
+        ? sealedMcpNetworkTerminal({
             config: params.taskConfig,
             toolCallId,
             toolName: call.name,
@@ -2719,7 +2703,7 @@ export async function executeAppRuntimeToolsV1(params: {
             (descriptor) => descriptor.capabilityId === call.capabilityId,
           ) ?? params.mcpManager?.findCapability(call.capabilityId));
     if (dynamicMcpCutover && dynamicMcpCutoverDescriptor) {
-      const surfaceFailure = productionExecutionSurfaceFailureV1({
+      const surfaceFailure = productionExecutionSurfaceFailure({
         config: params.taskConfig,
         workspace: currentState.session.workspace,
         descriptor: dynamicMcpCutoverDescriptor,
@@ -2738,7 +2722,7 @@ export async function executeAppRuntimeToolsV1(params: {
     }
     if (
       (ordinaryCutoverEntry &&
-        isAppOrdinaryToolPipelineOperationIdV1(ordinaryCutoverEntry.operationId)) ||
+        isAppOrdinaryToolPipelineOperationId(ordinaryCutoverEntry.operationId)) ||
       dynamicMcpCutover
     ) {
       if (dynamicMcpCutover && !dynamicMcpCutoverDescriptor) {
@@ -2759,7 +2743,7 @@ export async function executeAppRuntimeToolsV1(params: {
           : classifyFailure('tool_not_found', `Unsupported tool '${call.name}'.`);
         events.push({ type: 'tool.failed', toolCallId, failure });
         const providerAction = providerActionRequiredEvent({
-          enabled: productionFlags?.mcpProviderActionV1 === true,
+          enabled: productionFlags?.mcpProviderAction === true,
           providerId: providerId ?? 'unknown',
           toolCallId,
           action: recoveryActionForFailure(failure),
@@ -2790,13 +2774,13 @@ export async function executeAppRuntimeToolsV1(params: {
         continue;
       }
       const liveState = (params.getRuntimeState?.() ?? currentState) as RuntimeState;
-      const turnContext = createAppToolTurnContextV1({
+      const turnContext = createAppToolTurnContext({
         workspace: liveState.session.workspace,
         threadId: liveState.session.threadId,
         config: params.taskConfig,
         hasGitBroker: Boolean(params.gitBroker),
         hasTaskAdapter: true,
-        toolSearchEnabled: productionFlags?.toolSearchV1 === true,
+        toolSearchEnabled: productionFlags?.toolSearch === true,
         skillCatalog: params.skillCatalog,
         activeSkillFrames: activeSkillFramesForCurrentWork(liveState).filter(
           (frame) => frame.contextMode === 'inline',
@@ -2809,10 +2793,9 @@ export async function executeAppRuntimeToolsV1(params: {
         toolCallId,
       });
       if (ordinaryCutoverEntry) {
-        const instructionFailure = projectInstructionGuardFailureV1({
+        const instructionFailure = projectInstructionGuardFailure({
           state: liveState,
           modelMessageId: call.modelMessageId,
-          config: params.taskConfig,
           entry: ordinaryCutoverEntry,
           argumentOrigin: 'model_public',
           rawArguments: call.args,
@@ -2828,7 +2811,7 @@ export async function executeAppRuntimeToolsV1(params: {
         }
       }
       const turn = params.toolPipelineComposition.forTurn(turnContext);
-      const snapshot = createRuntimeHostToolCallSnapshotV1({
+      const snapshot = createRuntimeHostToolCallSnapshot({
         toolCallId,
         name: call.name,
         rawArguments: call.args,
@@ -2917,7 +2900,7 @@ export async function executeAppRuntimeToolsV1(params: {
       const signal = params.signal ?? new AbortController().signal;
       const preparedShellExecution =
         cutoverExecutionMechanism === 'shell'
-          ? appPreparedShellExecutionPortV1(params.shellExecutor)
+          ? appPreparedShellExecutionPort(params.shellExecutor)
           : undefined;
       try {
         let ordinaryAttempt = (existingInvocation?.attemptsStarted ?? 0) + 1;
@@ -2927,7 +2910,7 @@ export async function executeAppRuntimeToolsV1(params: {
         const preDispatchStartedAt = Date.now();
         let acknowledgedSkillAttempt:
           | Readonly<{
-              readonly prepared: Readonly<PreparedToolInvocationV1>;
+              readonly prepared: Readonly<PreparedToolInvocation>;
               readonly attempt: number;
             }>
           | undefined;
@@ -2944,7 +2927,7 @@ export async function executeAppRuntimeToolsV1(params: {
             cutoverExecutionMechanism === 'skill' &&
             params.taskConfig &&
             params.taskModel
-              ? async (fork: AppSkillForkRequestV1): Promise<SubAgentResult | null> => {
+              ? async (fork: AppSkillForkRequest): Promise<SubAgentResult | null> => {
                   const acknowledged = acknowledgedSkillAttempt;
                   if (!acknowledged || !ordinaryAttemptAcknowledged || skillForkRuntimeIssued) {
                     return null;
@@ -2966,7 +2949,7 @@ export async function executeAppRuntimeToolsV1(params: {
                   ) {
                     return null;
                   }
-                  return runAppSkillForkV1({
+                  return runAppSkillFork({
                     params,
                     call,
                     toolCallId,
@@ -2992,7 +2975,7 @@ export async function executeAppRuntimeToolsV1(params: {
             resolution: Object.freeze({
               currentTurnId: liveState.turn.turnId,
               builtinProjectionRevision: turn.projection.revision,
-              dynamicCatalogRevision: createCapabilitySnapshotV1(descriptors).revision,
+              dynamicCatalogRevision: createCapabilitySnapshot(descriptors).revision,
               availabilityContext: turnContext,
               bindings: Object.freeze([...Object.values(liveState.capabilities.bindings)]),
               descriptors: Object.freeze([...descriptors]),
@@ -3050,7 +3033,7 @@ export async function executeAppRuntimeToolsV1(params: {
             planStepId: null,
             capabilityRequestFacts:
               cutoverOperationId === 'builtin:tool_search'
-                ? createToolSearchProviderFactsV1({
+                ? createToolSearchProviderFacts({
                     threadId: liveState.session.threadId,
                     turnId: liveState.turn.turnId,
                     toolCallId,
@@ -3083,22 +3066,22 @@ export async function executeAppRuntimeToolsV1(params: {
                       mcp: Object.freeze({
                         runtime:
                           cutoverOperationId === 'builtin:read_mcp_resource'
-                            ? createAppMcpReadinessRuntimeV1({
-                                runtime: params.mcpManager as unknown as BuiltinMcpRuntimePortV1,
+                            ? createAppMcpReadinessRuntime({
+                                runtime: params.mcpManager as unknown as BuiltinMcpRuntimePort,
                                 readinessCoordinator: params.providerReadinessCoordinator,
                                 getState: params.getRuntimeState,
                                 persistEvent: params.persistRuntimeEvent,
                                 toolCallId,
                                 executionBoundaryDigest: params.taskConfig?.executionBoundary
-                                  ? computeExecutionBoundaryDigestV1(
+                                  ? computeExecutionBoundaryDigest(
                                       params.taskConfig.executionBoundary,
                                     )
-                                  : digestCapabilityValueV1({
+                                  : digestCapabilityValue({
                                       schema: 'kite.unsealed-execution-boundary.v1',
                                     }),
                                 signal,
                               })
-                            : (params.mcpManager as unknown as BuiltinMcpRuntimePortV1),
+                            : (params.mcpManager as unknown as BuiltinMcpRuntimePort),
                       }),
                     }),
                   }
@@ -3113,7 +3096,7 @@ export async function executeAppRuntimeToolsV1(params: {
                         verificationEnabled:
                           cutoverOperationId !== 'builtin:read_skill_reference' &&
                           Boolean(params.taskConfig) &&
-                          productionFlags?.verificationV1 === true,
+                          productionFlags?.verification === true,
                         ...(skillFork ? { runFork: skillFork } : {}),
                       }),
                     }),
@@ -3126,9 +3109,9 @@ export async function executeAppRuntimeToolsV1(params: {
                         toolCallId,
                         ...(params.taskConfig?.executionBoundary
                           ? {
-                              networkBoundaryPolicy: networkBoundaryPolicyFromExecutionBoundaryV1(
+                              networkBoundaryPolicy: networkBoundaryPolicyFromExecutionBoundary(
                                 params.taskConfig.executionBoundary,
-                                productionFlags?.networkBoundaryV1 === true,
+                                productionFlags?.networkBoundary === true,
                               ),
                             }
                           : {}),
@@ -3142,7 +3125,7 @@ export async function executeAppRuntimeToolsV1(params: {
               ...(cutoverExecutionMechanism === 'planning' && planArtifacts
                 ? {
                     preassembledMechanism: Object.freeze({
-                      planning: createPlanRuntimeV1({
+                      planning: createPlanRuntime({
                         state: liveState,
                         artifacts: planArtifacts,
                         modelMessageId: call.modelMessageId,
@@ -3158,14 +3141,12 @@ export async function executeAppRuntimeToolsV1(params: {
                   prepareMechanism: async ({
                     canonicalArguments,
                   }: {
-                    readonly canonicalArguments: RuntimeJsonValueV1;
+                    readonly canonicalArguments: RuntimeJsonValue;
                   }) => {
-                    let mechanismResources: Awaited<
-                      ReturnType<typeof prepareDynamicMcpMechanismV1>
-                    >;
+                    let mechanismResources: Awaited<ReturnType<typeof prepareDynamicMcpMechanism>>;
                     while (true) {
                       try {
-                        mechanismResources = await prepareDynamicMcpMechanismV1({
+                        mechanismResources = await prepareDynamicMcpMechanism({
                           descriptor: dynamicMcpCutoverDescriptor,
                           manager: params.mcpManager!,
                           flags: productionFlags ?? getFeatureFlags(),
@@ -3198,11 +3179,11 @@ export async function executeAppRuntimeToolsV1(params: {
                         const failure = classifyMcpProviderError(error);
                         const invocationFingerprint =
                           call.invocationFingerprint ??
-                          toolInvocationFingerprintV1({
+                          toolInvocationFingerprint({
                             toolName: call.name,
                             parsedArgs: call.args,
                           });
-                        const baseOutcome = runtimeHostStateClassifyToolOutcomeV1({
+                        const baseOutcome = runtimeHostStateClassifyToolOutcome({
                           status: 'failed',
                           failure,
                           authority: {
@@ -3221,7 +3202,7 @@ export async function executeAppRuntimeToolsV1(params: {
                           },
                         });
                         if (!baseOutcome.recovery.safeAutomaticRetry) throw error;
-                        const recoveryOf = toolFailureInstanceIdV1({
+                        const recoveryOf = toolFailureInstanceId({
                           toolCallId,
                           invocationFingerprint,
                           outcome: baseOutcome,
@@ -3230,7 +3211,7 @@ export async function executeAppRuntimeToolsV1(params: {
                           type: 'tool.retry_recorded',
                           toolCallId,
                           failure,
-                          outcomeV1: {
+                          outcome: {
                             ...baseOutcome,
                             lineage: { failureInstanceId: recoveryOf },
                           },
@@ -3260,12 +3241,12 @@ export async function executeAppRuntimeToolsV1(params: {
                           createdAt: new Date().toISOString(),
                         });
                         if (!persisted) {
-                          throw new AppToolPipelinePersistenceErrorV1(
+                          throw new AppToolPipelinePersistenceError(
                             'Dynamic MCP tool start acknowledgement became stale before dispatch.',
                           );
                         }
                       } else if (readinessCall?.status !== 'running') {
-                        throw new AppToolPipelinePersistenceErrorV1(
+                        throw new AppToolPipelinePersistenceError(
                           'Dynamic MCP tool lifecycle changed before dispatch.',
                         );
                       }
@@ -3278,14 +3259,14 @@ export async function executeAppRuntimeToolsV1(params: {
               ? {
                   workspaceFilesystem: Object.freeze({
                     runtime: params.workspaceFilesystemRuntime,
-                    protectedPathEvaluator: createProtectedPathEvaluatorV1({
+                    protectedPathEvaluator: createProtectedPathEvaluator({
                       workspaceRoot:
                         params.taskConfig?.executionBoundary?.workspaceRoot ??
                         params.workspaceFilesystemRuntime.canonicalWorkspace,
                       mode: params.taskConfig?.executionBoundary?.protectedPathPolicy ?? 'deny',
                     }),
                     protectedPathRevision: params.taskConfig?.executionBoundary
-                      ? computeExecutionBoundaryDigestV1(params.taskConfig.executionBoundary)
+                      ? computeExecutionBoundaryDigest(params.taskConfig.executionBoundary)
                       : 'protected-path-unconfigured-v1',
                     actorIdentity: Object.freeze({
                       threadId: liveState.session.threadId,
@@ -3331,7 +3312,7 @@ export async function executeAppRuntimeToolsV1(params: {
                             const admissionBudget = admissionState.resourceBudget;
                             if (
                               admissionBudget.status === 'active' &&
-                              !isCurrentExactChildToolReservationV1(
+                              !isCurrentExactChildToolReservation(
                                 admissionState,
                                 prepared.reservationId,
                                 call.name,
@@ -3364,7 +3345,7 @@ export async function executeAppRuntimeToolsV1(params: {
                             prepared,
                           }: {
                             readonly attempt: number;
-                            readonly prepared: Readonly<PreparedToolInvocationV1>;
+                            readonly prepared: Readonly<PreparedToolInvocation>;
                           }) => {
                             acknowledgedSkillAttempt = Object.freeze({ prepared, attempt });
                           },
@@ -3375,7 +3356,7 @@ export async function executeAppRuntimeToolsV1(params: {
                           afterDispatch: async (settlement: {
                             readonly attempt: number;
                             readonly result?: Readonly<
-                              import('@kite/builtin-runtime').BuiltinOperationExecutionValueV1
+                              import('@kite/builtin-runtime').BuiltinOperationExecutionValue
                             >;
                             readonly error?: unknown;
                           }) => {
@@ -3434,7 +3415,7 @@ export async function executeAppRuntimeToolsV1(params: {
             const recovery = outcome.classified.policyCompilation.recovery;
             events.push(
               recovery
-                ? policyRecoveryTerminalV1({
+                ? policyRecoveryTerminal({
                     toolCallId,
                     toolName: call.name,
                     rawArguments: call.args,
@@ -3466,7 +3447,7 @@ export async function executeAppRuntimeToolsV1(params: {
               type: 'user_input.requested',
               interactionId: genInteractionId(),
               toolCallId,
-              request: normalizeAskUserRequestV1(outcome.classified.validated.request.arguments),
+              request: normalizeAskUserRequest(outcome.classified.validated.request.arguments),
             });
             continue;
           }
@@ -3474,11 +3455,11 @@ export async function executeAppRuntimeToolsV1(params: {
             outcome.decision.kind === 'request_approval' ||
             outcome.decision.kind === 'request_auto_review'
           ) {
-            const request = pendingToolRequestFromValidatedInvocationV1(
+            const request = pendingToolRequestFromValidatedInvocation(
               outcome.classified.validated,
               turn.projection,
             );
-            const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+            const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
               outcome.facts.invocation,
               outcome.facts.policy,
             );
@@ -3503,7 +3484,7 @@ export async function executeAppRuntimeToolsV1(params: {
                   }
                 : {}),
             });
-            bindAppApprovalBindingV1(approval, {
+            bindAppApprovalBinding(approval, {
               digest: approvalBindingDigest,
               invocationFact: outcome.facts.invocation,
               policyFact: outcome.facts.policy,
@@ -3616,209 +3597,4 @@ export async function executeAppRuntimeToolsV1(params: {
     });
   }
   return events;
-}
-
-function projectInstructionGuardFailureV1(input: {
-  readonly state: RuntimeState;
-  readonly modelMessageId: string | undefined;
-  readonly config: AgentConfig | undefined;
-  readonly entry: BuiltinModelToolCatalogEntryV1;
-  readonly argumentOrigin: 'model_public' | 'runtime_private';
-  readonly rawArguments: unknown;
-}): string | null {
-  if (!input.config || !getFeatureFlags(input.config).promptContractV2) return null;
-  const parsed =
-    input.argumentOrigin === 'runtime_private'
-      ? input.entry.parse(input.rawArguments)
-      : input.entry.parseModelInput(input.rawArguments);
-  if (!parsed.success) return null;
-  const parser =
-    input.argumentOrigin === 'runtime_private'
-      ? input.entry.parser
-      : (input.entry.modelParser ?? input.entry.parser);
-  const canonicalArguments = parser.canonicalize(parsed.data);
-  if (!isRuntimeJsonRecordV1(canonicalArguments)) return null;
-  const classifiedEffects = input.entry.classifyEffects(canonicalArguments);
-  const target = projectProjectInstructionGuardTargetV1({
-    executionMechanism: input.entry.executionMechanism,
-    declaredFilesystemEffect: input.entry.descriptor.declaredEffects.filesystem,
-    effectiveFilesystemEffect: classifiedEffects.effectiveEffects.filesystem,
-    canonicalArguments,
-  });
-  if (!target) return null;
-  const visibleSnapshot = visibleProjectInstructions(
-    input.state,
-    input.modelMessageId,
-    input.config,
-  );
-  if (!visibleSnapshot) return null;
-  const guard = checkProjectInstructionSnapshotFreshnessV1({
-    workspace: input.state.session.workspace,
-    visibleSnapshot,
-    target,
-  });
-  return guard.status === 'changed' ? guard.message : null;
-}
-
-/**
- * App-side composition check for the release-pinned execution surface.  The
- * descriptor/effect decision remains owned by Builtin; this bridge only binds
- * that decision to the exact production config before a Host attempt or
- * Provider lookup can occur.
- */
-function productionExecutionSurfaceFailureV1(input: {
-  readonly config: AgentConfig | undefined;
-  readonly workspace: string;
-  readonly descriptor: Readonly<CapabilityDescriptor> | undefined;
-  readonly executionMechanism: string;
-  readonly rawArguments: unknown;
-}): string | null {
-  const config = input.config;
-  if (!config) return null;
-  const surface = config.executionCapabilitySurface;
-  if ('productionExecution' in config && (!config.executionBoundary || !surface)) {
-    return 'Rejected by production execution boundary: protected-path gate is unavailable.';
-  }
-  if (!surface) return null;
-  if (!input.descriptor) {
-    return 'Rejected by production execution boundary: capability descriptor is unavailable.';
-  }
-
-  const argumentsRecord = isPlainRecordV1(input.rawArguments) ? input.rawArguments : undefined;
-  const pathArgument = typeof argumentsRecord?.path === 'string' ? argumentsRecord.path : '';
-  const outsideWorkspace = pathArgument
-    ? isOutsideProductionWorkspaceV1(input.workspace, pathArgument)
-    : false;
-  if (
-    (outsideWorkspace && input.executionMechanism !== 'filesystem') ||
-    !isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
-      surface,
-      descriptor: input.descriptor,
-    })
-  ) {
-    const reason =
-      surface.process === false && surface.write === false
-        ? 'tool is not in the sealed read-only catalog'
-        : 'capability is outside the admitted execution surface';
-    return `Rejected by production execution boundary: ${reason}.`;
-  }
-  return null;
-}
-
-function isOutsideProductionWorkspaceV1(workspace: string, pathArgument: string): boolean {
-  const normalized = expandHomeRelativePath(msys2ToWindowsPath(pathArgument));
-  const target = isAbsolute(normalized) ? resolve(normalized) : resolve(workspace, normalized);
-  return !isPathInsideWorkspace(workspace, target);
-}
-
-/** Preserve the existing State MCP network terminal without consulting the
- * Provider or inventing a new serialized event shape. */
-function sealedMcpNetworkTerminalV1(input: {
-  readonly config: AgentConfig | undefined;
-  readonly toolCallId: string;
-  readonly toolName: string;
-}): RuntimeEvent | null {
-  const boundary = input.config?.executionBoundary;
-  if (!boundary) return null;
-  const policy = networkBoundaryPolicyFromExecutionBoundaryV1(
-    boundary,
-    getFeatureFlags(input.config).networkBoundaryV1 === true,
-  );
-  const message =
-    'MCP execution is unavailable under the sealed network boundary until its transport uses per-invocation endpoint admission.';
-  return {
-    type: 'tool.finished',
-    toolCallId: input.toolCallId,
-    name: input.toolName,
-    result: {
-      ok: false,
-      command: input.toolName,
-      exitCode: -1,
-      stdout: '',
-      stderr: message,
-      status: 'error',
-      resultMeta: {
-        networkPolicyRevision: policy.revision,
-        networkAdmissionDigests: [],
-        networkFailureCode: 'controller_unavailable',
-      },
-    },
-    classifierAdviceV1: {
-      detailCode: 'controller_unavailable',
-      disposition: 'never',
-      maximumAdditionalCalls: 0,
-      safeAutomaticRetry: false,
-    },
-  };
-}
-
-/** Mechanically retain recovery facts emitted by the Builtin policy owner.
- * This is a failed terminal, not a dispatch or a fallback. */
-function policyRecoveryTerminalV1(input: {
-  readonly toolCallId: string;
-  readonly toolName: string;
-  readonly rawArguments: unknown;
-  readonly reason: string;
-  readonly recovery: Readonly<import('@kite/runtime-spi').CapabilityPolicyRecoveryV1>;
-}): RuntimeEvent {
-  const argumentsRecord = isPlainRecordV1(input.rawArguments) ? input.rawArguments : undefined;
-  const command =
-    typeof argumentsRecord?.command === 'string' ? argumentsRecord.command : input.toolName;
-  const nextCapability =
-    input.recovery.capabilityIntent === 'git_inspect' ? ('git_inspect' as const) : undefined;
-  const disposition =
-    input.recovery.disposition === 'never'
-      ? ('never' as const)
-      : input.recovery.disposition === 'retry'
-        ? ('retry_once' as const)
-        : input.recovery.disposition === 'redirect'
-          ? ('alternative' as const)
-          : ('user_action' as const);
-  const maximumAdditionalCalls = input.recovery.maximumAdditionalCalls === 1 ? 1 : 0;
-  return {
-    type: 'tool.finished',
-    toolCallId: input.toolCallId,
-    name: input.toolName,
-    result: {
-      ok: false,
-      command,
-      exitCode: -1,
-      stdout: '',
-      stderr: input.reason,
-      status: 'error',
-      ...(nextCapability ? { resultMeta: { nextCapability } } : {}),
-    },
-    classifierAdviceV1: {
-      disposition,
-      maximumAdditionalCalls,
-      safeAutomaticRetry: input.recovery.safeAutomaticRetry,
-      ...(input.recovery.capabilityIntent
-        ? { capabilityIntent: input.recovery.capabilityIntent }
-        : {}),
-    },
-  };
-}
-
-function isRuntimeJsonRecordV1(
-  value: RuntimeJsonValueV1,
-): value is Readonly<Record<string, RuntimeJsonValueV1>> {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
-  );
-}
-
-function visibleProjectInstructions(
-  state: RuntimeState,
-  modelMessageId: string | undefined,
-  config: AgentConfig | undefined,
-) {
-  if (!config || !getFeatureFlags(config).promptContractV2) return undefined;
-  return resolveProjectInstructionSnapshot({
-    workspace: state.session.workspace,
-    state,
-    excludeModelMessageId: modelMessageId,
-  });
 }

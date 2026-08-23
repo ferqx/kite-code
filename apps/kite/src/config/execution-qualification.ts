@@ -2,23 +2,23 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type {
-  InProcessReadOnlyToolCatalogV1,
-  ProductionExecutionEntrypointV1,
-  ProductionExecutionQualificationRegistryV1,
-  ProductionExecutionQualificationV1,
+  InProcessReadOnlyToolCatalog,
+  ProductionExecutionEntrypoint,
+  ProductionExecutionQualification,
+  ProductionExecutionQualificationRegistry,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  discoverSandboxBackendCandidateV1,
-  type ExecutionEnvironmentIdentityV1,
-  readExecutionEnvironmentIdentityV1,
+  discoverSandboxBackendCandidate,
+  type ExecutionEnvironmentIdentity,
+  readExecutionEnvironmentIdentity,
 } from '@kite/builtin-runtime/sandbox';
-import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@kite/runtime-spi';
+import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite/runtime-spi';
 import { z } from 'zod';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const enforcementSchema = z.enum(['enforced', 'unsupported']);
 
-export const executionBackendCapabilitiesV1Schema = z
+export const executionBackendCapabilitiesSchema = z
   .object({
     backend: z.enum(['seatbelt', 'bubblewrap', 'windows_restricted_token', 'none']),
     filesystem: z
@@ -41,7 +41,7 @@ export const executionBackendCapabilitiesV1Schema = z
   })
   .strict();
 
-const inProcessReadOnlyToolContractV1Schema = z
+const inProcessReadOnlyToolContractSchema = z
   .object({
     toolId: z.string().trim().min(1),
     descriptorRevision: z.string().trim().min(1),
@@ -53,18 +53,18 @@ const inProcessReadOnlyToolContractV1Schema = z
   })
   .strict();
 
-const processCapabilitySurfaceV1Schema = z
+const processCapabilitySurfaceSchema = z
   .object({
     shell: z.boolean(),
     skillChild: z.boolean(),
     localStdioMcp: z.boolean(),
     brokeredGit: z
       .object({
-        featureRevision: z.literal(BROKERED_GIT_FEATURE_REVISION_V1),
+        featureRevision: z.literal(BROKERED_GIT_FEATURE_REVISION_),
         inspect: z.boolean(),
         shellDenyEvidence: z
           .object({
-            featureRevision: z.literal(BROKERED_GIT_FEATURE_REVISION_V1),
+            featureRevision: z.literal(BROKERED_GIT_FEATURE_REVISION_),
             platform: z.enum(['darwin', 'linux', 'win32']),
             backend: z.enum(['seatbelt', 'bubblewrap', 'windows_restricted_token', 'none']),
             outcome: z.enum(['qualified', 'excluded']),
@@ -105,12 +105,12 @@ const processCapabilitySurfaceV1Schema = z
     }
   });
 
-const inProcessReadOnlyToolCatalogObjectV1Schema = z
+const inProcessReadOnlyToolCatalogObjectSchema = z
   .object({
     version: z.literal(1),
     revision: z.string().trim().min(1),
     digest: digestSchema,
-    tools: z.array(inProcessReadOnlyToolContractV1Schema),
+    tools: z.array(inProcessReadOnlyToolContractSchema),
   })
   .strict();
 
@@ -118,7 +118,7 @@ function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function catalogCanonicalValue(catalog: Omit<InProcessReadOnlyToolCatalogV1, 'digest'>): unknown {
+function catalogCanonicalValue(catalog: Omit<InProcessReadOnlyToolCatalog, 'digest'>): unknown {
   return {
     version: catalog.version,
     revision: catalog.revision,
@@ -136,8 +136,8 @@ function catalogCanonicalValue(catalog: Omit<InProcessReadOnlyToolCatalogV1, 'di
   };
 }
 
-export function computeInProcessReadOnlyToolCatalogDigestV1(
-  value: Omit<InProcessReadOnlyToolCatalogV1, 'digest'>,
+export function computeInProcessReadOnlyToolCatalogDigest(
+  value: Omit<InProcessReadOnlyToolCatalog, 'digest'>,
 ): string {
   return `sha256:${createHash('sha256')
     .update('kite.in-process-read-only-tool-catalog.v1\0')
@@ -145,8 +145,8 @@ export function computeInProcessReadOnlyToolCatalogDigestV1(
     .digest('hex')}`;
 }
 
-export const inProcessReadOnlyToolCatalogV1Schema =
-  inProcessReadOnlyToolCatalogObjectV1Schema.superRefine((catalog, context) => {
+export const inProcessReadOnlyToolCatalogSchema =
+  inProcessReadOnlyToolCatalogObjectSchema.superRefine((catalog, context) => {
     if (new Set(catalog.tools.map((tool) => tool.toolId)).size !== catalog.tools.length) {
       context.addIssue({
         code: 'custom',
@@ -154,7 +154,7 @@ export const inProcessReadOnlyToolCatalogV1Schema =
         message: 'toolId values must be unique',
       });
     }
-    if (computeInProcessReadOnlyToolCatalogDigestV1(catalog) !== catalog.digest) {
+    if (computeInProcessReadOnlyToolCatalogDigest(catalog) !== catalog.digest) {
       context.addIssue({ code: 'custom', path: ['digest'], message: 'catalog digest mismatch' });
     }
   });
@@ -175,9 +175,9 @@ const qualificationSchema = z
     entrypoints: z.array(z.enum(['tui', 'foreground_cli'])).min(1),
     evidenceDigest: digestSchema,
     evidenceCommit: z.string().regex(/^[a-f0-9]{40}$/),
-    backendCapabilities: executionBackendCapabilitiesV1Schema,
-    processCapabilitySurface: processCapabilitySurfaceV1Schema,
-    inProcessReadOnlyTools: inProcessReadOnlyToolCatalogV1Schema,
+    backendCapabilities: executionBackendCapabilitiesSchema,
+    processCapabilitySurface: processCapabilitySurfaceSchema,
+    inProcessReadOnlyTools: inProcessReadOnlyToolCatalogSchema,
   })
   .strict()
   .superRefine((qualification, context) => {
@@ -223,9 +223,9 @@ const qualificationSchema = z
     }
   });
 
-export function parseProductionExecutionQualificationV1(
+export function parseProductionExecutionQualification(
   value: unknown,
-): ProductionExecutionQualificationV1 {
+): ProductionExecutionQualification {
   return qualificationSchema.parse(value);
 }
 
@@ -242,7 +242,7 @@ const registryObjectSchema = z
   })
   .strict();
 
-function qualificationAdmissionKey(qualification: ProductionExecutionQualificationV1): string {
+function qualificationAdmissionKey(qualification: ProductionExecutionQualification): string {
   return JSON.stringify([
     qualification.platform,
     qualification.osRelease,
@@ -255,7 +255,7 @@ function qualificationAdmissionKey(qualification: ProductionExecutionQualificati
 }
 
 function registryCanonicalValue(
-  registry: Omit<ProductionExecutionQualificationRegistryV1, 'digest'>,
+  registry: Omit<ProductionExecutionQualificationRegistry, 'digest'>,
 ): unknown {
   return {
     version: registry.version,
@@ -325,8 +325,8 @@ function registryCanonicalValue(
   };
 }
 
-export function computeProductionExecutionQualificationRegistryDigestV1(
-  value: Omit<ProductionExecutionQualificationRegistryV1, 'digest'>,
+export function computeProductionExecutionQualificationRegistryDigest(
+  value: Omit<ProductionExecutionQualificationRegistry, 'digest'>,
 ): string {
   return `sha256:${createHash('sha256')
     .update('kite.production-execution-qualification-registry.v1\0')
@@ -334,7 +334,7 @@ export function computeProductionExecutionQualificationRegistryDigestV1(
     .digest('hex')}`;
 }
 
-export const productionExecutionQualificationRegistryV1Schema = registryObjectSchema.superRefine(
+export const productionExecutionQualificationRegistrySchema = registryObjectSchema.superRefine(
   (registry, context) => {
     const expectsEmpty = registry.status === 'accepted_empty_support_set';
     if (expectsEmpty !== (registry.qualifications.length === 0)) {
@@ -377,20 +377,20 @@ export const productionExecutionQualificationRegistryV1Schema = registryObjectSc
         message: 'production environment admission keys must be unique',
       });
     }
-    if (computeProductionExecutionQualificationRegistryDigestV1(registry) !== registry.digest) {
+    if (computeProductionExecutionQualificationRegistryDigest(registry) !== registry.digest) {
       context.addIssue({ code: 'custom', path: ['digest'], message: 'registry digest mismatch' });
     }
   },
 );
 
-export function parseProductionExecutionQualificationRegistryV1(
+export function parseProductionExecutionQualificationRegistry(
   value: unknown,
-): ProductionExecutionQualificationRegistryV1 {
-  return productionExecutionQualificationRegistryV1Schema.parse(value);
+): ProductionExecutionQualificationRegistry {
+  return productionExecutionQualificationRegistrySchema.parse(value);
 }
 
-export const APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_REVISION_V1 = 'd04-empty-2026-07-31';
-export const APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_V1 =
+export const APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_REVISION_ = 'd04-empty-2026-07-31';
+export const APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_ =
   'sha256:6c33ab090cd138d0eb26cdcbdc97ef92bc794adb3b1690fd7e8d2d24a4510656';
 
 function deepFreeze<T>(value: T): T {
@@ -401,17 +401,17 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-export function loadApprovedProductionExecutionQualificationRegistryV1(): ProductionExecutionQualificationRegistryV1 {
+export function loadApprovedProductionExecutionQualificationRegistry(): ProductionExecutionQualificationRegistry {
   const approvedPath = new URL(
-    '../../../../release/platform-capabilities/approved-execution-qualifications-v1.json',
+    '../../../../release/platform-capabilities/approved-execution-qualifications.json',
     import.meta.url,
   );
-  const registry = parseProductionExecutionQualificationRegistryV1(
+  const registry = parseProductionExecutionQualificationRegistry(
     JSON.parse(readFileSync(fileURLToPath(approvedPath), 'utf8')),
   );
   if (
-    registry.revision !== APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_REVISION_V1 ||
-    registry.digest !== APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_V1
+    registry.revision !== APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_REVISION_ ||
+    registry.digest !== APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_
   ) {
     throw new Error(
       'Approved production execution qualification artifact does not match release pin.',
@@ -420,16 +420,16 @@ export function loadApprovedProductionExecutionQualificationRegistryV1(): Produc
   return deepFreeze(registry);
 }
 
-export interface ResolveApprovedProductionExecutionQualificationInputV1 {
-  registry: ProductionExecutionQualificationRegistryV1;
-  entrypoint: ProductionExecutionEntrypointV1;
+export interface ResolveApprovedProductionExecutionQualificationInput {
+  registry: ProductionExecutionQualificationRegistry;
+  entrypoint: ProductionExecutionEntrypoint;
 }
 
-export function qualificationMatchesExecutionEnvironmentV1(input: {
-  qualification: ProductionExecutionQualificationV1;
-  environment: ExecutionEnvironmentIdentityV1;
-  backend: ProductionExecutionQualificationV1['backend'];
-  entrypoint: ProductionExecutionEntrypointV1;
+export function qualificationMatchesExecutionEnvironment(input: {
+  qualification: ProductionExecutionQualification;
+  environment: ExecutionEnvironmentIdentity;
+  backend: ProductionExecutionQualification['backend'];
+  entrypoint: ProductionExecutionEntrypoint;
 }): boolean {
   const { qualification, environment, backend, entrypoint } = input;
   return (
@@ -444,14 +444,14 @@ export function qualificationMatchesExecutionEnvironmentV1(input: {
 }
 
 /** Match only the exact native environment admitted by release evidence. */
-export function resolveProductionExecutionQualificationFromRegistryV1(
-  input: ResolveApprovedProductionExecutionQualificationInputV1,
-): ProductionExecutionQualificationV1 | undefined {
-  const backend = discoverSandboxBackendCandidateV1();
-  const environment = readExecutionEnvironmentIdentityV1();
+export function resolveProductionExecutionQualificationFromRegistry(
+  input: ResolveApprovedProductionExecutionQualificationInput,
+): ProductionExecutionQualification | undefined {
+  const backend = discoverSandboxBackendCandidate();
+  const environment = readExecutionEnvironmentIdentity();
   const matches = input.registry.qualifications.filter(
     (qualification) =>
-      qualificationMatchesExecutionEnvironmentV1({
+      qualificationMatchesExecutionEnvironment({
         qualification,
         environment,
         backend,

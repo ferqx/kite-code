@@ -1,18 +1,15 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   createSqliteRuntimeStorage,
-  SqliteRuntimeFormatIncompatibleError,
-} from '../src/sqlite-store';
-import {
-  createSqliteRuntimeStorageV5,
-  SQLITE_RUNTIME_FORMAT_EPOCH_V2,
-  SQLITE_RUNTIME_STATE26_SCHEMA_VERSION,
-  SQLITE_RUNTIME_STORE5_SCHEMA_VERSION,
-  sqliteRuntimeStorePathForV2,
-} from '../src/store';
+  SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+  SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+  SqliteRuntimeFormatMismatchError,
+  sqliteRuntimeStorePath,
+} from '../src/index';
 
 type Event = { type: string };
 type State = {
@@ -46,7 +43,7 @@ const codec = {
     if (
       input.state.session.threadId !== input.sessionId ||
       input.state.schemaVersion !== 26 ||
-      input.state.formatEpoch !== SQLITE_RUNTIME_FORMAT_EPOCH_V2 ||
+      input.state.formatEpoch !== SQLITE_RUNTIME_FORMAT_EPOCH ||
       input.stateRevision !== input.state.revision ||
       input.schemaVersion !== 26 ||
       input.eventRevision !== input.state.revision
@@ -63,7 +60,7 @@ const codec = {
 function state(threadId: string, revision = 1): State {
   return {
     schemaVersion: 26,
-    formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH_V2,
+    formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
     revision,
     session: {
       threadId,
@@ -83,10 +80,10 @@ function temporaryDatabase(): { path: string; cleanup(): void } {
 
 describe('State/Store production format', () => {
   test('publishes the current profile and a separate path', () => {
-    expect(SQLITE_RUNTIME_STATE26_SCHEMA_VERSION).toBe(26);
-    expect(SQLITE_RUNTIME_STORE5_SCHEMA_VERSION).toBe(5);
-    expect(SQLITE_RUNTIME_FORMAT_EPOCH_V2).toBe('kite-runtime-modularization-v1-2026-08-19');
-    expect(sqliteRuntimeStorePathForV2('/tmp/checkpoints.sqlite')).toBe(
+    expect(SQLITE_RUNTIME_STATE_SCHEMA_VERSION).toBe(26);
+    expect(SQLITE_RUNTIME_STORE_SCHEMA_VERSION).toBe(5);
+    expect(SQLITE_RUNTIME_FORMAT_EPOCH).toBe('kite-runtime-modularization-v1-2026-08-19');
+    expect(sqliteRuntimeStorePath('/tmp/checkpoints.sqlite')).toBe(
       '/tmp/checkpoints.runtime-state-store.db',
     );
   });
@@ -94,7 +91,7 @@ describe('State/Store production format', () => {
   test('creates only the seven runtime tables and two indexes', () => {
     const fixture = temporaryDatabase();
     try {
-      const storage = createSqliteRuntimeStorageV5<Event, State>({
+      const storage = createSqliteRuntimeStorage<Event, State>({
         databasePath: fixture.path,
         codec,
         options: { journalMode: 'delete' },
@@ -135,7 +132,7 @@ describe('State/Store production format', () => {
   test('persists, reopens and forks current state without authority side tables', () => {
     const fixture = temporaryDatabase();
     try {
-      const first = createSqliteRuntimeStorageV5<Event, State>({
+      const first = createSqliteRuntimeStorage<Event, State>({
         databasePath: fixture.path,
         codec,
         options: { journalMode: 'delete' },
@@ -153,7 +150,7 @@ describe('State/Store production format', () => {
       );
       first.close();
 
-      const reopened = createSqliteRuntimeStorageV5<Event, State>({
+      const reopened = createSqliteRuntimeStorage<Event, State>({
         databasePath: fixture.path,
         codec,
         options: { journalMode: 'delete' },
@@ -170,7 +167,7 @@ describe('State/Store production format', () => {
   });
 
   test('rejects legacy metadata before a transaction creates current rows', () => {
-    const storage = createSqliteRuntimeStorageV5<Event, State>({ databasePath: ':memory:', codec });
+    const storage = createSqliteRuntimeStorage<Event, State>({ databasePath: ':memory:', codec });
     expect(() =>
       storage.transactions.commitDecision({
         sessionId: 'legacy-metadata',
@@ -191,7 +188,7 @@ describe('State/Store production format', () => {
   test('distinguishes a truly fresh database from corrupt or missing current snapshots', () => {
     const fixture = temporaryDatabase();
     try {
-      const first = createSqliteRuntimeStorageV5<Event, State>({
+      const first = createSqliteRuntimeStorage<Event, State>({
         databasePath: fixture.path,
         codec,
         options: { journalMode: 'delete' },
@@ -209,19 +206,19 @@ describe('State/Store production format', () => {
       );
       database.close();
       expect(() =>
-        createSqliteRuntimeStorageV5({
+        createSqliteRuntimeStorage({
           databasePath: fixture.path,
           codec,
           options: { journalMode: 'delete' },
         }),
-      ).toThrow(SqliteRuntimeFormatIncompatibleError);
+      ).toThrow(SqliteRuntimeFormatMismatchError);
     } finally {
       fixture.cleanup();
     }
 
     const missing = temporaryDatabase();
     try {
-      const first = createSqliteRuntimeStorageV5<Event, State>({
+      const first = createSqliteRuntimeStorage<Event, State>({
         databasePath: missing.path,
         codec,
         options: { journalMode: 'delete' },
@@ -237,37 +234,14 @@ describe('State/Store production format', () => {
       database.run("DELETE FROM runtime_snapshots WHERE session_id = 'missing'");
       database.close();
       expect(() =>
-        createSqliteRuntimeStorageV5({
+        createSqliteRuntimeStorage({
           databasePath: missing.path,
           codec,
           options: { journalMode: 'delete' },
         }),
-      ).toThrow(SqliteRuntimeFormatIncompatibleError);
+      ).toThrow(SqliteRuntimeFormatMismatchError);
     } finally {
       missing.cleanup();
-    }
-  });
-
-  test('does not read, migrate or modify a Store4 database', () => {
-    const fixture = temporaryDatabase();
-    try {
-      const legacy = createSqliteRuntimeStorage<Event, State>({
-        databasePath: fixture.path,
-        codec: { ...codec, snapshotMetadata: () => ({ stateRevision: 0, schemaVersion: 25 }) },
-        options: { journalMode: 'delete' },
-      });
-      legacy.close();
-      const before = readFileSync(fixture.path);
-      expect(() =>
-        createSqliteRuntimeStorageV5({
-          databasePath: fixture.path,
-          codec,
-          options: { journalMode: 'delete' },
-        }),
-      ).toThrow(SqliteRuntimeFormatIncompatibleError);
-      expect(readFileSync(fixture.path)).toEqual(before);
-    } finally {
-      fixture.cleanup();
     }
   });
 });

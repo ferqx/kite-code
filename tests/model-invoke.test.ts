@@ -1,19 +1,19 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   type BaseMessage,
-  compileModelSurfaceV1,
+  compileModelSurface,
   createChatModel,
   createModelContextSummaryGenerator,
   humanMessage,
   type ModelProviderOptions,
-  normalizedModelResponseToAIMessageV1,
+  normalizedModelResponseToAIMessage,
   type SupportedChatModel,
 } from '@kite/builtin-runtime/model';
 import { jsonSchema, type ToolSet, tool } from 'ai';
 import { z } from 'zod';
 import type { AgentConfig } from '#app/config';
-import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
-import { testProviderDataAdmissionV1 } from './helpers/runtime-model';
+import { createTestModelInvocationHarness } from './helpers/model-invocation';
+import { testProviderDataAdmission } from './helpers/runtime-model';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 
 const servers: Array<ReturnType<typeof createMockModelServer>> = [];
@@ -81,7 +81,7 @@ async function invokeGatewayModel(params: {
       ];
     }),
   ) as ToolSet;
-  const compiled = compileModelSurfaceV1({
+  const compiled = compileModelSurface({
     purpose: 'primary_agent',
     config,
     model: params.model,
@@ -91,7 +91,7 @@ async function invokeGatewayModel(params: {
     providerOptions: params.providerOptions,
     transport: params.streaming ? 'stream' : 'generate',
   });
-  const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
+  const harness = createTestModelInvocationHarness({ workspace: process.cwd() });
   const pending = await harness.gateway.invoke({
     model: params.model,
     compiled,
@@ -120,7 +120,7 @@ async function invokeGatewayModel(params: {
       }
     },
   });
-  const response = normalizedModelResponseToAIMessageV1(await pending.commit());
+  const response = normalizedModelResponseToAIMessage(await pending.commit());
   for (const event of harness.events) {
     if (event.type === 'model.retry') {
       params.onRetry?.(event.attempt, event.maxAttempts, event.error, event.delayMs);
@@ -226,7 +226,7 @@ describe('ModelInvocationGateway transport', () => {
     model.compactionProviderOptions = { deepseek: { thinking: { type: 'disabled' } } };
     server.setResponses([{ message: { content: 'bounded summary' } }]);
 
-    const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
+    const harness = createTestModelInvocationHarness({ workspace: process.cwd() });
     const generate = createModelContextSummaryGenerator({
       config,
       model,
@@ -234,7 +234,7 @@ describe('ModelInvocationGateway transport', () => {
       persistence: harness.persistence,
       state: harness.getState(),
       projectionEnvironmentDigest: 'compaction-test',
-      providerDataAdmission: testProviderDataAdmissionV1,
+      providerDataAdmission: testProviderDataAdmission,
     });
     await expect(
       generate({ systemPrompt: 'summarize', input: 'settled history', maxOutputTokens: 600 }),

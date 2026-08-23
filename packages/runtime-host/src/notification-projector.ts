@@ -1,5 +1,5 @@
 import {
-  RUNTIME_NOTIFICATION_SCHEMA_V1,
+  RUNTIME_NOTIFICATION_SCHEMA_,
   type RuntimeNotification,
   type RuntimeSubscription,
 } from '@kite/runtime-contract';
@@ -39,7 +39,7 @@ export class NotificationProjector {
     if (this.#closed) return;
     if (notification.durability === 'durable') {
       if (
-        notification.schema !== RUNTIME_NOTIFICATION_SCHEMA_V1 ||
+        notification.schema !== RUNTIME_NOTIFICATION_SCHEMA_ ||
         notification.sessionId !== notification.projection.session.sessionId ||
         notification.revision !== notification.projection.session.revision
       ) {
@@ -242,7 +242,7 @@ function snapshotNotification(
   projection: NonNullable<ReturnType<SessionRegistry['projection']>>,
 ): Extract<RuntimeNotification, { durability: 'durable' }> {
   return {
-    schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+    schema: RUNTIME_NOTIFICATION_SCHEMA_,
     durability: 'durable',
     sessionId: projection.sessionId,
     revision: projection.revision,

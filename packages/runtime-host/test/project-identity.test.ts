@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveProjectIdentityV1 } from '../src/project-identity';
+import { resolveProjectIdentity } from '../src/project-identity';
 
 describe('Workspace project identity', () => {
   test('is deterministic across canonical path aliases without persistent authority state', async () => {
@@ -12,8 +12,8 @@ describe('Workspace project identity', () => {
       const alias = join(root, 'alias');
       await mkdir(workspace);
       await symlink(workspace, alias);
-      const first = resolveProjectIdentityV1(workspace);
-      const second = resolveProjectIdentityV1(alias);
+      const first = resolveProjectIdentity(workspace);
+      const second = resolveProjectIdentity(alias);
       expect(second).toEqual(first);
       expect(first.projectId).toBe(`project_${first.workspaceDigest.slice('sha256:'.length)}`);
     } finally {

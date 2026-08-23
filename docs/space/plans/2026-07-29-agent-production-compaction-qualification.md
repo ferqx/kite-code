@@ -4,7 +4,7 @@
 
 终态范围（ADR-0069）：4.1–4.8、4.12 的结构/语义/continuation、本地 route/handoff、真实最小 Provider
 兼容 smoke 与文档记为 `completed`；4.9–4.11 的 rollout/maturity 路线已被取代。Auto Compaction 首版
-不受支持并默认关闭。当前状态见 `release/oss-first-release/task-status-v2.json`。
+不受支持并默认关闭。当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P1
 依赖：

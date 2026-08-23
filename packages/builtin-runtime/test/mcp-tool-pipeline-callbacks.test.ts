@@ -1,23 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import type {
-  DynamicMcpPreparedToolInvocationIdentityV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolCallSnapshotV1,
-  ToolPipelineResolutionContextV1,
+  DynamicMcpPreparedToolInvocationIdentity,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolCallSnapshot,
+  ToolPipelineResolutionContext,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+import { createCapabilityBinding, digestCapabilityBindingValue } from '../src/capability-binding';
+import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '../src/index';
 import {
-  createCapabilityBindingV1,
-  digestCapabilityBindingValueV1,
-} from '../src/capability-binding';
-import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjectionV1 } from '../src/index';
-import {
-  BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1,
-  createBuiltinDynamicMcpSubjectFactsV1,
-  createBuiltinDynamicMcpToolPipelineCallbacksV1,
+  BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_,
+  createBuiltinDynamicMcpSubjectFacts,
+  createBuiltinDynamicMcpToolPipelineCallbacks,
 } from '../src/mcp/tool-pipeline-callbacks';
 
 const STAGE_SCHEMA = 'kite.tool-pipeline-stage.v1' as const;
@@ -48,23 +45,23 @@ function descriptor(
     diagnostics: [],
   };
   const candidate = { ...base, ...overrides };
-  return { ...candidate, revision: digestCapabilityBindingValueV1(candidate) };
+  return { ...candidate, revision: digestCapabilityBindingValue(candidate) };
 }
 
 function fixture(subject = descriptor()) {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot(), {
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const projection = createBuiltinToolCatalogProjection(registry.snapshot(), {
     turnContext: { workspace: '/workspace', phase: 'building' },
   });
   if (!subject.inputSchema) throw new Error('subject schema missing');
-  const binding = createCapabilityBindingV1({
+  const binding = createCapabilityBinding({
     capabilityId: subject.capabilityId,
     capabilityRevision: subject.revision,
     exposedToolName: MCP_NAME,
     inputSchema: subject.inputSchema,
     turnId: TURN_ID,
   });
-  const context: ToolPipelineResolutionContextV1 = {
+  const context: ToolPipelineResolutionContext = {
     currentTurnId: TURN_ID,
     availabilityContext: { workspace: '/workspace', phase: 'building' },
     bindings: [binding],
@@ -73,8 +70,8 @@ function fixture(subject = descriptor()) {
     builtinProjectionRevision: projection.revision,
     dynamicCatalogRevision: 'd'.repeat(64),
   };
-  const callbacks = createBuiltinDynamicMcpToolPipelineCallbacksV1(projection);
-  const call: ToolCallSnapshotV1 = {
+  const callbacks = createBuiltinDynamicMcpToolPipelineCallbacks(projection);
+  const call: ToolCallSnapshot = {
     schema: STAGE_SCHEMA,
     stage: 'snapshot',
     toolCallId: 'tool-call-1',
@@ -90,7 +87,7 @@ function fixture(subject = descriptor()) {
   return { projection, subject, binding, context, callbacks, call };
 }
 
-function prepareDynamic(value: ReturnType<typeof fixture>): PreparedToolInvocationV1 {
+function prepareDynamic(value: ReturnType<typeof fixture>): PreparedToolInvocation {
   const resolved = value.callbacks.resolve(value.call, value.context);
   expect(resolved.ok).toBe(true);
   if (!resolved.ok) throw new Error(resolved.failure.code);
@@ -104,9 +101,9 @@ function prepareDynamic(value: ReturnType<typeof fixture>): PreparedToolInvocati
     (entry) => entry.visibility === 'internal' && entry.operationId === 'mcp:dynamic_tool',
   );
   if (wrapperEntry?.visibility !== 'internal') throw new Error('wrapper missing');
-  const target = resolved.value.target as import('@kite/runtime-spi').DynamicMcpToolTargetV1;
+  const target = resolved.value.target as import('@kite/runtime-spi').DynamicMcpToolTarget;
   if (!target.isDynamicMcp) throw new Error('dynamic target missing');
-  const identity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+  const identity: DynamicMcpPreparedToolInvocationIdentity = {
     invocationId: 'invocation-1',
     attemptId: 'attempt-1',
     toolCallId: value.call.toolCallId,
@@ -170,7 +167,7 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       capabilityId: value.subject.capabilityId,
       providerId: value.subject.provider.id,
     });
-    const target = result.value.target as import('@kite/runtime-spi').DynamicMcpToolTargetV1;
+    const target = result.value.target as import('@kite/runtime-spi').DynamicMcpToolTarget;
     expect(target.subject.exposedToolName).toBe(MCP_NAME);
     expect(target.runtimeWrapper.capabilityId).toBe('mcp:dynamic_tool');
     expect(target.runtimeWrapper.builtinProjectionRevision).toBe(value.projection.revision);
@@ -196,7 +193,7 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       source: 'mcp',
       operationId: 'mcp:dynamic_tool',
       name: MCP_NAME,
-      schemaDigest: digestCapabilityBindingValueV1(value.subject.inputSchema),
+      schemaDigest: digestCapabilityBindingValue(value.subject.inputSchema),
     });
     const classified = value.callbacks.classify(validated.value);
     expect(classified.ok).toBe(true);
@@ -298,7 +295,7 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
     expect(Object.isFrozen(result)).toBe(true);
 
     const tamperedFacts = {
-      ...(prepared.input.facts as Record<string, RuntimeJsonValueV1>),
+      ...(prepared.input.facts as Record<string, RuntimeJsonValue>),
       providerId: 'forged-provider',
     };
     expect(
@@ -308,7 +305,7 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       }),
     ).toMatchObject({ valid: false, code: 'subject_mismatch' });
 
-    const dynamicIdentity = prepared.identity as DynamicMcpPreparedToolInvocationIdentityV1;
+    const dynamicIdentity = prepared.identity as DynamicMcpPreparedToolInvocationIdentity;
     const tamperedWrapper = {
       ...dynamicIdentity.runtimeWrapper,
       executorRevision: 'forged-executor',
@@ -333,7 +330,7 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       }),
     ).toMatchObject({ valid: false, code: 'subject_mismatch' });
     const factsWithStaleCatalog = {
-      ...(prepared.input.facts as Record<string, RuntimeJsonValueV1>),
+      ...(prepared.input.facts as Record<string, RuntimeJsonValue>),
       dynamicCatalogRevision: 'stale-catalog',
     };
     expect(
@@ -343,7 +340,7 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       }),
     ).toMatchObject({ valid: false, code: 'subject_mismatch' });
     const factsWithStaleTurn = {
-      ...(prepared.input.facts as Record<string, RuntimeJsonValueV1>),
+      ...(prepared.input.facts as Record<string, RuntimeJsonValue>),
       issuedForTurnId: 'stale-turn',
     };
     expect(
@@ -356,10 +353,10 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       value.callbacks.verifyPreparedIdentity({
         ...prepared,
         identity: { ...dynamicIdentity, argumentOrigin: 'runtime_private' },
-      } as unknown as PreparedToolInvocationV1),
+      } as unknown as PreparedToolInvocation),
     ).toMatchObject({ valid: false, code: 'visibility_mismatch' });
     const factsWithPrivateOrigin = {
-      ...(prepared.input.facts as Record<string, RuntimeJsonValueV1>),
+      ...(prepared.input.facts as Record<string, RuntimeJsonValue>),
       argumentOrigin: 'runtime_private',
     };
     expect(
@@ -397,7 +394,7 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
         descriptors: [
           {
             ...unavailableBase,
-            revision: digestCapabilityBindingValueV1(
+            revision: digestCapabilityBindingValue(
               unavailableBase as Omit<CapabilityDescriptor, 'revision'>,
             ),
           },
@@ -410,18 +407,18 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       visibility: 'model',
       modelVisible: true,
       exposedToolName: MCP_NAME,
-    } as unknown as NonDynamicPreparedToolInvocationIdentityV1;
+    } as unknown as NonDynamicPreparedToolInvocationIdentity;
     expect(
       value.callbacks.verifyPreparedIdentity({
         ...prepareDynamic(value),
         identity: ordinaryIdentity,
-      } as PreparedToolInvocationV1),
+      } as PreparedToolInvocation),
     ).toMatchObject({ valid: false });
   });
 
   test('facts use a stable JSON-safe schema and never expose executor or dispatch handles', () => {
     const value = fixture();
-    const facts = createBuiltinDynamicMcpSubjectFactsV1(value.subject, MCP_NAME, {
+    const facts = createBuiltinDynamicMcpSubjectFacts(value.subject, MCP_NAME, {
       dynamicCatalogRevision: value.context.dynamicCatalogRevision!,
       bindingId: value.binding.bindingId,
       issuedForTurnId: value.binding.issuedForTurnId,
@@ -429,11 +426,11 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       modelMessageId: 'message-1',
       argumentOrigin: 'model_public',
     });
-    expect(facts.schema).toBe(BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1);
+    expect(facts.schema).toBe(BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_);
     expect(facts.kind).toBe('mcp_tool');
     expect(facts.providerType).toBe('mcp');
     expect(facts.exposedToolName).toBe(MCP_NAME);
-    expect(facts.descriptorDigest).toBe(digestCapabilityBindingValueV1(value.subject));
+    expect(facts.descriptorDigest).toBe(digestCapabilityBindingValue(value.subject));
     expect(Object.isFrozen(facts)).toBe(true);
     expect('executor' in facts).toBe(false);
     expect('dispatch' in facts).toBe(false);

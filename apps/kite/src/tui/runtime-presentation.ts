@@ -1,7 +1,7 @@
 import type { ClientPresentationEvent } from '@kite/runtime-contract';
 
-/** Presentation-only RMV1 compatibility payload; it carries no Runtime authority. */
-// biome-ignore lint/suspicious/noExplicitAny: removed with the temporary RMV1 legacy presentation adapter in RMV1-16.
+/** Presentation-only RM compatibility payload; it carries no Runtime authority. */
+// biome-ignore lint/suspicious/noExplicitAny: removed with the temporary RM legacy presentation adapter in RM-16.
 export type RuntimePresentationEvent = ClientPresentationEvent & any;
 
 export type ContextCompactionProgressPhase = 'preparing' | 'summarizing' | 'validating';

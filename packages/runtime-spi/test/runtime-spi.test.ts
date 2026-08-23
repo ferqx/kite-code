@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  arbitrateCapabilityV1,
-  CAPABILITY_EXECUTION_MECHANISMS_V1,
-  type CapabilityDefinitionV1,
-  createRuntimeModuleRegistryV1,
-  defineRuntimeModuleV1,
-  type RuntimeModuleRegistryWriterV1,
+  arbitrateCapability,
+  CAPABILITY_EXECUTION_MECHANISMS_,
+  type CapabilityDefinition,
+  createRuntimeModuleRegistry,
+  defineRuntimeModule,
+  type RuntimeModuleRegistryWriter,
 } from '@kite/runtime-spi';
 
-const capability: CapabilityDefinitionV1 = {
+const capability: CapabilityDefinition = {
   capabilityId: 'builtin:test',
   revision: '1',
   providerId: 'provider-a',
@@ -17,7 +17,7 @@ const capability: CapabilityDefinitionV1 = {
 
 describe('runtime SPI registry ownership', () => {
   test('exports the closed execution-mechanism vocabulary', () => {
-    expect(CAPABILITY_EXECUTION_MECHANISMS_V1).toEqual([
+    expect(CAPABILITY_EXECUTION_MECHANISMS_).toEqual([
       'catalog',
       'filesystem',
       'git',
@@ -31,12 +31,12 @@ describe('runtime SPI registry ownership', () => {
       'verification',
       'model',
     ]);
-    expect(Object.isFrozen(CAPABILITY_EXECUTION_MECHANISMS_V1)).toBe(true);
+    expect(Object.isFrozen(CAPABILITY_EXECUTION_MECHANISMS_)).toBe(true);
   });
 
   test('freezes exact module, provider, operation, capability, and adapter owners', () => {
-    let capturedWriter: RuntimeModuleRegistryWriterV1 | undefined;
-    const module = defineRuntimeModuleV1({
+    let capturedWriter: RuntimeModuleRegistryWriter | undefined;
+    const module = defineRuntimeModule({
       moduleId: 'module-a',
       providerId: 'provider-a',
       revision: '1',
@@ -68,7 +68,7 @@ describe('runtime SPI registry ownership', () => {
         });
       },
     });
-    const registry = createRuntimeModuleRegistryV1([module]);
+    const registry = createRuntimeModuleRegistry([module]);
 
     expect(registry.moduleIds).toEqual(['module-a']);
     expect(registry.get('module-a')).toBe(module);
@@ -84,19 +84,19 @@ describe('runtime SPI registry ownership', () => {
   });
 
   test('rejects duplicate module, provider, and operation owners', () => {
-    const module = defineRuntimeModuleV1({
+    const module = defineRuntimeModule({
       moduleId: 'module-a',
       providerId: 'provider-a',
       revision: '1',
       operationIds: ['builtin:test'],
     });
-    expect(() => createRuntimeModuleRegistryV1([module, module])).toThrow(
+    expect(() => createRuntimeModuleRegistry([module, module])).toThrow(
       'duplicate runtime module: module-a',
     );
     expect(() =>
-      createRuntimeModuleRegistryV1([
+      createRuntimeModuleRegistry([
         module,
-        defineRuntimeModuleV1({
+        defineRuntimeModule({
           moduleId: 'module-b',
           providerId: 'provider-a',
           revision: '1',
@@ -104,9 +104,9 @@ describe('runtime SPI registry ownership', () => {
       ]),
     ).toThrow('duplicate runtime provider: provider-a');
     expect(() =>
-      createRuntimeModuleRegistryV1([
+      createRuntimeModuleRegistry([
         module,
-        defineRuntimeModuleV1({
+        defineRuntimeModule({
           moduleId: 'module-b',
           revision: '1',
           operationIds: ['builtin:test'],
@@ -116,15 +116,15 @@ describe('runtime SPI registry ownership', () => {
   });
 
   test('rejects duplicate registrations and invalid executor bindings', () => {
-    const duplicate = (register: (registry: RuntimeModuleRegistryWriterV1) => void) =>
-      defineRuntimeModuleV1({
+    const duplicate = (register: (registry: RuntimeModuleRegistryWriter) => void) =>
+      defineRuntimeModule({
         moduleId: 'module-a',
         providerId: 'provider-a',
         revision: '1',
         register,
       });
     expect(() =>
-      createRuntimeModuleRegistryV1([
+      createRuntimeModuleRegistry([
         duplicate((registry) => {
           registry.registerCapability(capability);
           registry.registerCapability(capability);
@@ -132,7 +132,7 @@ describe('runtime SPI registry ownership', () => {
       ]),
     ).toThrow('duplicate runtime capability: builtin:test');
     expect(() =>
-      createRuntimeModuleRegistryV1([
+      createRuntimeModuleRegistry([
         duplicate((registry) => {
           registry.registerExecutor({
             providerId: 'provider-a',
@@ -147,7 +147,7 @@ describe('runtime SPI registry ownership', () => {
       ]),
     ).toThrow('runtime executor has no capability definition: missing');
     expect(() =>
-      createRuntimeModuleRegistryV1([
+      createRuntimeModuleRegistry([
         duplicate((registry) => {
           registry.registerExecutionAdapter({
             adapterId: 'bridge',
@@ -165,8 +165,8 @@ describe('runtime SPI registry ownership', () => {
   });
 
   test('rejects ambiguous visibility metadata and freezes effect facts', () => {
-    const moduleWith = (definition: CapabilityDefinitionV1) =>
-      defineRuntimeModuleV1({
+    const moduleWith = (definition: CapabilityDefinition) =>
+      defineRuntimeModule({
         moduleId: 'metadata-module',
         providerId: 'provider-a',
         revision: '1',
@@ -174,14 +174,14 @@ describe('runtime SPI registry ownership', () => {
         register: (writer) => writer.registerCapability(definition),
       });
     expect(() =>
-      createRuntimeModuleRegistryV1([moduleWith({ ...capability, visibility: 'model' })]),
+      createRuntimeModuleRegistry([moduleWith({ ...capability, visibility: 'model' })]),
     ).toThrow('requires a tool name');
     expect(() =>
-      createRuntimeModuleRegistryV1([
+      createRuntimeModuleRegistry([
         moduleWith({ ...capability, visibility: 'internal', toolName: 'test' }),
       ]),
     ).toThrow('cannot declare a tool name');
-    const registry = createRuntimeModuleRegistryV1([
+    const registry = createRuntimeModuleRegistry([
       moduleWith({
         ...capability,
         visibility: 'model',
@@ -232,8 +232,8 @@ describe('runtime SPI registry ownership', () => {
       availability: 'available' as const,
       diagnostics: [],
     };
-    const registry = createRuntimeModuleRegistryV1([
-      defineRuntimeModuleV1({
+    const registry = createRuntimeModuleRegistry([
+      defineRuntimeModule({
         moduleId: 'metadata-module',
         providerId: 'provider-a',
         revision: '1',
@@ -277,8 +277,8 @@ describe('runtime SPI registry ownership', () => {
       sideEffect: false,
     });
     expect(() =>
-      createRuntimeModuleRegistryV1([
-        defineRuntimeModuleV1({
+      createRuntimeModuleRegistry([
+        defineRuntimeModule({
           moduleId: 'invalid-descriptor',
           providerId: 'provider-b',
           revision: '1',
@@ -301,8 +301,8 @@ describe('runtime SPI registry ownership', () => {
 
   test('arbitrates exact bindings from an immutable snapshot without granting or executing', () => {
     let executions = 0;
-    const registry = createRuntimeModuleRegistryV1([
-      defineRuntimeModuleV1({
+    const registry = createRuntimeModuleRegistry([
+      defineRuntimeModule({
         moduleId: 'module-a',
         providerId: 'provider-a',
         revision: 'module-1',
@@ -344,17 +344,17 @@ describe('runtime SPI registry ownership', () => {
       true,
     );
     expect(Object.isFrozen(snapshot.capabilities[0]?.definition.effects)).toBe(true);
-    expect(arbitrateCapabilityV1(snapshot, binding)).toMatchObject({
+    expect(arbitrateCapability(snapshot, binding)).toMatchObject({
       status: 'resolved',
       binding,
       definition: { capabilityId: capability.capabilityId },
       executor: { executorRevision: 'executor-1' },
     });
-    expect(arbitrateCapabilityV1(snapshot, { ...binding, schemaDigest: 'stale' })).toEqual({
+    expect(arbitrateCapability(snapshot, { ...binding, schemaDigest: 'stale' })).toEqual({
       status: 'failed',
       code: 'schema_digest_mismatch',
     });
-    expect(arbitrateCapabilityV1(snapshot, { ...binding, exposedToolName: 'other' })).toEqual({
+    expect(arbitrateCapability(snapshot, { ...binding, exposedToolName: 'other' })).toEqual({
       status: 'failed',
       code: 'exposed_tool_name_mismatch',
     });
@@ -366,7 +366,7 @@ describe('runtime SPI module lifecycle', () => {
   test('starts in declaration order and disposes in reverse order exactly once', async () => {
     const calls: string[] = [];
     const module = (id: string) =>
-      defineRuntimeModuleV1({
+      defineRuntimeModule({
         moduleId: id,
         revision: '1',
         start: async () => {
@@ -376,7 +376,7 @@ describe('runtime SPI module lifecycle', () => {
           calls.push(`dispose:${id}`);
         },
       });
-    const registry = createRuntimeModuleRegistryV1([module('a'), module('b')]);
+    const registry = createRuntimeModuleRegistry([module('a'), module('b')]);
     await registry.start();
     await registry.start();
     expect(registry.state).toBe('started');
@@ -388,7 +388,7 @@ describe('runtime SPI module lifecycle', () => {
 
   test('fails closed and rolls every module back after partial startup', async () => {
     const calls: string[] = [];
-    const first = defineRuntimeModuleV1({
+    const first = defineRuntimeModule({
       moduleId: 'first',
       revision: '1',
       start: async () => {
@@ -398,7 +398,7 @@ describe('runtime SPI module lifecycle', () => {
         calls.push('dispose:first');
       },
     });
-    const second = defineRuntimeModuleV1({
+    const second = defineRuntimeModule({
       moduleId: 'second',
       revision: '1',
       start: async () => {
@@ -409,16 +409,16 @@ describe('runtime SPI module lifecycle', () => {
         calls.push('dispose:second');
       },
     });
-    const registry = createRuntimeModuleRegistryV1([first, second]);
+    const registry = createRuntimeModuleRegistry([first, second]);
     await expect(registry.start()).rejects.toThrow('startup failed');
     expect(registry.state).toBe('disposed');
     expect(calls).toEqual(['start:first', 'start:second', 'dispose:second', 'dispose:first']);
   });
 
   test('bounds module disposal', async () => {
-    const registry = createRuntimeModuleRegistryV1(
+    const registry = createRuntimeModuleRegistry(
       [
-        defineRuntimeModuleV1({
+        defineRuntimeModule({
           moduleId: 'never-disposes',
           revision: '1',
           dispose: () => new Promise<void>(() => undefined),

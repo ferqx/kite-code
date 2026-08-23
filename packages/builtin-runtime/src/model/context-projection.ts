@@ -27,13 +27,13 @@ import {
 } from './project-instructions';
 import { buildCacheableRuntimeContext, buildRuntimeModeSnapshot } from './runtime-context';
 import {
-  type BuiltinContextCheckpointViewV1,
-  type BuiltinRuntimeStateViewV1,
-  type BuiltinSandboxBackendV1,
-  getBuiltinActivePlanningV1,
-  getBuiltinActiveTaskV1,
-  getBuiltinAgentPhaseV1,
-  getBuiltinEffectiveInteractionModeV1,
+  type BuiltinContextCheckpointView,
+  type BuiltinRuntimeStateView,
+  type BuiltinSandboxBackend,
+  getBuiltinActivePlanning,
+  getBuiltinActiveTask,
+  getBuiltinAgentPhase,
+  getBuiltinEffectiveInteractionMode,
 } from './runtime-view';
 
 // ── Types ──
@@ -65,7 +65,7 @@ export interface ContextProjectionEnvironment {
   }>;
   promptContractVersion?: PromptContractVersion;
   projectInstructions?: ProjectInstructionSnapshot;
-  sandboxBackend?: BuiltinSandboxBackendV1 | 'unknown';
+  sandboxBackend?: BuiltinSandboxBackend | 'unknown';
   /** Inputs that can change projection/summary semantics without changing tool schemas. */
   leaseMetadata?: {
     providerName: string;
@@ -147,11 +147,11 @@ export function digestProjectionEnvironment(env: ContextProjectionEnvironment): 
 export interface BuildContextProjectionInput {
   role: AgentRole;
   /** Full RuntimeState — the function derives all needed fields internally. */
-  state: Readonly<BuiltinRuntimeStateViewV1>;
+  state: Readonly<BuiltinRuntimeStateView>;
   /** Serialized tool descriptors for token estimation (PR 1 — pure data, no runtime objects). */
   serializedTools?: SerializedToolDescriptor[];
   /** Override the active checkpoint for candidate validation (PR 5). */
-  candidateCheckpoint?: BuiltinContextCheckpointViewV1;
+  candidateCheckpoint?: BuiltinContextCheckpointView;
   /** Active skill instructions injected into the system prompt. */
   activeSkillInstructions?: string;
   /** Skill manifests for the system prompt. */
@@ -160,7 +160,7 @@ export interface BuildContextProjectionInput {
   workflowSkills?: Array<{ capabilityId: string; description: string }>;
   promptContractVersion?: PromptContractVersion;
   projectInstructions?: ProjectInstructionSnapshot;
-  sandboxBackend?: BuiltinSandboxBackendV1 | 'unknown';
+  sandboxBackend?: BuiltinSandboxBackend | 'unknown';
 }
 
 /** Complete context projection — all components assembled and validated. */
@@ -183,7 +183,7 @@ export interface ContextProjection {
 
 // ── Internal helpers ──
 
-function runtimeTranscriptMessages(state: Readonly<BuiltinRuntimeStateViewV1>): BaseMessage[] {
+function runtimeTranscriptMessages(state: Readonly<BuiltinRuntimeStateView>): BaseMessage[] {
   return state.transcript.messages.map((message) => {
     const identity: Record<string, unknown> = {
       messageId: message.messageId,
@@ -240,7 +240,7 @@ function runtimeTranscriptMessages(state: Readonly<BuiltinRuntimeStateViewV1>): 
   });
 }
 
-function checkpointSummaryMessage(checkpoint: BuiltinContextCheckpointViewV1): BaseMessage {
+function checkpointSummaryMessage(checkpoint: BuiltinContextCheckpointView): BaseMessage {
   return aiMessage({
     content: serializeCompactionSummary(checkpoint.summary),
     tool_calls: [],
@@ -330,10 +330,10 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
       : [];
 
   // ── 7. Build dynamic runtime messages ──
-  const planning = getBuiltinActivePlanningV1(input.state);
-  const phase = getBuiltinAgentPhaseV1(planning);
-  const interactionMode = getBuiltinEffectiveInteractionModeV1(input.state);
-  const activeTask = getBuiltinActiveTaskV1(input.state);
+  const planning = getBuiltinActivePlanning(input.state);
+  const phase = getBuiltinAgentPhase(planning);
+  const interactionMode = getBuiltinEffectiveInteractionMode(input.state);
+  const activeTask = getBuiltinActiveTask(input.state);
 
   const modeSnapshot = humanMessage(
     buildRuntimeModeSnapshot({

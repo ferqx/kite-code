@@ -1,42 +1,42 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinRuntimeToolPipelineCallbacksV1,
-  createBuiltinToolCatalogProjectionV1,
-  createCapabilityBindingV1,
-  digestCapabilityBindingValueV1,
-  pendingToolRequestFromValidatedInvocationV1,
+  createBuiltinRuntimeToolPipelineCallbacks,
+  createBuiltinToolCatalogProjection,
+  createCapabilityBinding,
+  digestCapabilityBindingValue,
+  pendingToolRequestFromValidatedInvocation,
 } from '@kite/builtin-runtime';
 import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
-import { createRuntimeHostStateToolGovernanceV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateToolGovernance } from '@kite/runtime-host';
 import {
-  type ClassifiedInvocationV1,
-  createRuntimeModuleRegistryV1,
-  type ToolCallSnapshotV1,
-  type ToolPipelineResolutionContextV1,
+  type ClassifiedInvocation,
+  createRuntimeModuleRegistry,
+  type ToolCallSnapshot,
+  type ToolPipelineResolutionContext,
 } from '@kite/runtime-spi';
 
-const STAGE_SCHEMA_V1 = 'kite.tool-pipeline-stage.v1' as const;
+const STAGE_SCHEMA_ = 'kite.tool-pipeline-stage.v1' as const;
 const TURN_ID = 'turn-governance-integration';
 const MODEL_MESSAGE_ID = 'message-governance-integration';
 const DYNAMIC_CATALOG_REVISION = 'd'.repeat(64);
 const DYNAMIC_TOOL_NAME = 'mcp__fixture__search' as const;
 
 function capabilityDescriptor(value: Omit<CapabilityDescriptor, 'revision'>): CapabilityDescriptor {
-  return { ...value, revision: digestCapabilityBindingValueV1(value) };
+  return { ...value, revision: digestCapabilityBindingValue(value) };
 }
 
 function snapshot(
   name: string,
-  rawArguments: ToolCallSnapshotV1['rawArguments'],
+  rawArguments: ToolCallSnapshot['rawArguments'],
   binding: {
     readonly bindingId: string;
     readonly capabilityId: string;
     readonly capabilityRevision: string;
   } | null = null,
-): ToolCallSnapshotV1 {
+): ToolCallSnapshot {
   return Object.freeze({
-    schema: STAGE_SCHEMA_V1,
+    schema: STAGE_SCHEMA_,
     stage: 'snapshot' as const,
     toolCallId: `call-${name}`,
     name,
@@ -51,10 +51,10 @@ function snapshot(
 }
 
 function classify(
-  callbacks: ReturnType<typeof createBuiltinRuntimeToolPipelineCallbacksV1>,
-  call: ToolCallSnapshotV1,
-  context: ToolPipelineResolutionContextV1,
-): Readonly<ClassifiedInvocationV1> {
+  callbacks: ReturnType<typeof createBuiltinRuntimeToolPipelineCallbacks>,
+  call: ToolCallSnapshot,
+  context: ToolPipelineResolutionContext,
+): Readonly<ClassifiedInvocation> {
   const resolved = callbacks.resolve(call, context);
   expect(resolved.ok).toBe(true);
   if (!resolved.ok) throw new Error(resolved.failure.code);
@@ -67,7 +67,7 @@ function classify(
   return classified.value;
 }
 
-describe('RMV1-16 Builtin to Host governance bridge', () => {
+describe('RM-16 Builtin to Host governance bridge', () => {
   test('uses one frozen projection for ordinary MCP, nested Skill, and dynamic MCP facts', () => {
     const skill = capabilityDescriptor({
       capabilityId: 'skill:fixture',
@@ -103,7 +103,7 @@ describe('RMV1-16 Builtin to Host governance bridge', () => {
       diagnostics: [],
     });
     if (!dynamic.inputSchema) throw new Error('dynamic schema missing');
-    const dynamicBinding = createCapabilityBindingV1({
+    const dynamicBinding = createCapabilityBinding({
       capabilityId: dynamic.capabilityId,
       capabilityRevision: dynamic.revision,
       exposedToolName: DYNAMIC_TOOL_NAME,
@@ -119,16 +119,16 @@ describe('RMV1-16 Builtin to Host governance bridge', () => {
       workspace: '/workspace',
       phase: 'building' as const,
       featureFlags: Object.freeze({
-        skillWorkflowV1: true as const,
-        skillActivationV2: true as const,
+        skillWorkflow: true as const,
+        skillActivation: true as const,
       }),
       availableSkillIds: Object.freeze([skill.capabilityId]),
     });
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const registrySnapshot = registry.snapshot();
-    const projection = createBuiltinToolCatalogProjectionV1(registrySnapshot, { turnContext });
-    const callbacks = createBuiltinRuntimeToolPipelineCallbacksV1(projection);
-    const context: ToolPipelineResolutionContextV1 = Object.freeze({
+    const projection = createBuiltinToolCatalogProjection(registrySnapshot, { turnContext });
+    const callbacks = createBuiltinRuntimeToolPipelineCallbacks(projection);
+    const context: ToolPipelineResolutionContext = Object.freeze({
       currentTurnId: TURN_ID,
       availabilityContext: turnContext,
       bindings: Object.freeze([dynamicBinding]),
@@ -137,7 +137,7 @@ describe('RMV1-16 Builtin to Host governance bridge', () => {
       builtinProjectionRevision: projection.revision,
       dynamicCatalogRevision: DYNAMIC_CATALOG_REVISION,
     });
-    const host = createRuntimeHostStateToolGovernanceV1({
+    const host = createRuntimeHostStateToolGovernance({
       verifyClassifiedIdentity: callbacks.verifyClassifiedIdentity,
     });
     const admission = Object.freeze({
@@ -145,7 +145,7 @@ describe('RMV1-16 Builtin to Host governance bridge', () => {
       reservationRequired: false,
       reservationIds: Object.freeze([]),
     });
-    const project = (classified: Readonly<ClassifiedInvocationV1>) =>
+    const project = (classified: Readonly<ClassifiedInvocation>) =>
       host.project(
         Object.freeze({
           classified,
@@ -188,15 +188,15 @@ describe('RMV1-16 Builtin to Host governance bridge', () => {
       },
       context: { executionMechanism: 'other' },
     });
-    expect(
-      pendingToolRequestFromValidatedInvocationV1(ordinary.validated, projection),
-    ).toMatchObject({
-      source: 'builtin',
-      id: 'call-list_mcp_tools',
-      name: 'list_mcp_tools',
-      operationId: 'builtin:list_mcp_tools',
-      catalogRevision: projection.revision,
-    });
+    expect(pendingToolRequestFromValidatedInvocation(ordinary.validated, projection)).toMatchObject(
+      {
+        source: 'builtin',
+        id: 'call-list_mcp_tools',
+        name: 'list_mcp_tools',
+        operationId: 'builtin:list_mcp_tools',
+        catalogRevision: projection.revision,
+      },
+    );
 
     const nested = classify(
       callbacks,

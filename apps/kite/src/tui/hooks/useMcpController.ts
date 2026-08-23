@@ -1,18 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
-  createMcpTransportAdmissionReceiptV1,
-  createMcpTransportBoundaryIdentityV1,
+  createMcpTransportAdmissionReceipt,
+  createMcpTransportBoundaryIdentity,
   DefaultMcpSupervisor,
   type McpRuntimeProvider,
-  type McpTransportAdmissionRequestV1,
+  type McpTransportAdmissionRequest,
   MemoryMcpCredentialStore,
 } from '@kite/builtin-runtime/mcp';
 import {
-  createProtectedPathEvaluatorV1,
-  networkBoundaryPolicyFromExecutionBoundaryV1,
+  createProtectedPathEvaluator,
+  networkBoundaryPolicyFromExecutionBoundary,
 } from '@kite/builtin-runtime/sandbox';
 import React, { useSyncExternalStore } from 'react';
-import { createInstalledMcpStdioProcessPortV1 } from '#app/bootstrap/mcp-stdio-composition';
+import { createInstalledMcpStdioProcessPort } from '#app/bootstrap/mcp-stdio-composition';
 import { type AgentConfig, DefaultMcpConfigRepository } from '#app/config';
 import { TuiMcpController } from '../mcp/controller';
 
@@ -77,8 +77,8 @@ function createSupervisor(config: AgentConfig, workspace: string): DefaultMcpSup
   const localStdioOptions =
     config.executionBoundary && config.executionCapabilitySurface?.localStdioMcp === true
       ? {
-          stdioProcessPort: createInstalledMcpStdioProcessPortV1(),
-          protectedPathEvaluator: createProtectedPathEvaluatorV1({
+          stdioProcessPort: createInstalledMcpStdioProcessPort(),
+          protectedPathEvaluator: createProtectedPathEvaluator({
             workspaceRoot: config.executionBoundary.workspaceRoot,
             mode: config.executionBoundary.protectedPathPolicy,
           }),
@@ -103,7 +103,7 @@ function createSupervisor(config: AgentConfig, workspace: string): DefaultMcpSup
 }
 
 function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) {
-  // Remote HTTP keeps its independent TLS/OAuth + RAV1 egress authority when
+  // Remote HTTP keeps its independent TLS/OAuth + RA egress authority when
   // no release execution boundary exists. Local stdio still has no Host
   // process port in this branch and therefore remains spawn=0/fail-closed.
   if (!config.executionBoundary) return { transportBoundaryRequired: false as const };
@@ -118,11 +118,11 @@ function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) 
       ...(productionExecution ? { mcpWriteGovernanceRequired: true as const } : {}),
     };
   }
-  const networkPolicy = networkBoundaryPolicyFromExecutionBoundaryV1(
+  const networkPolicy = networkBoundaryPolicyFromExecutionBoundary(
     config.executionBoundary,
-    config.features?.networkBoundaryV1 === true,
+    config.features?.networkBoundary === true,
   );
-  const identity = createMcpTransportBoundaryIdentityV1({
+  const identity = createMcpTransportBoundaryIdentity({
     workspaceRoot: workspace,
     executionBoundary: config.executionBoundary,
     executionSurface: config.executionCapabilitySurface,
@@ -135,8 +135,8 @@ function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) 
     ...(productionExecution ? { mcpWriteGovernanceRequired: true as const } : {}),
     transportBoundary: {
       identity,
-      async admit(request: McpTransportAdmissionRequestV1) {
-        return createMcpTransportAdmissionReceiptV1(request);
+      async admit(request: McpTransportAdmissionRequest) {
+        return createMcpTransportAdmissionReceipt(request);
       },
     },
   };

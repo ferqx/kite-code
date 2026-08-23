@@ -1,31 +1,31 @@
 import type {
-  CapabilityEffectsV1,
-  CapabilityExecutionContextV1,
-  CapabilityExecutionMechanismV1,
-  CapabilityExecutorV1,
-  ExecutionReceiptV1,
-  GitBrokerFailureCodeV1,
-  GitBrokerResultV1,
-  GitInspectRequestV1,
-  RuntimeJsonValueV1,
-  RuntimeModuleRegistryWriterV1,
-  RuntimeModuleV1,
-  WorkspaceFilesystemCommittedMutationV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemObservationRecordV1,
-  WorkspaceFilesystemObserveObservationV1,
-  WorkspaceFilesystemOperationV1,
-  WorkspaceFilesystemPreimageObservationV1,
-  WorkspaceFilesystemProviderFailureV1,
+  CapabilityEffects,
+  CapabilityExecutionContext,
+  CapabilityExecutionMechanism,
+  CapabilityExecutor,
+  ExecutionReceipt,
+  GitBrokerFailureCode,
+  GitBrokerResult,
+  GitInspectRequest,
+  RuntimeJsonValue,
+  RuntimeModule,
+  RuntimeModuleRegistryWriter,
+  WorkspaceFilesystemCommittedMutation,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemObservationRecord,
+  WorkspaceFilesystemObserveObservation,
+  WorkspaceFilesystemOperation,
+  WorkspaceFilesystemPreimageObservation,
+  WorkspaceFilesystemProviderFailure,
 } from '@kite/runtime-spi';
-import { defineRuntimeModuleV1 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
+import { defineRuntimeModule } from '@kite/runtime-spi';
+import { digestCapabilityBindingValue } from './capability-binding';
 import {
-  builtinExecutionTraitsV1,
-  defineBuiltinCapabilityContractV1,
-  gitAvailabilityV1,
-  parserForBuiltinOperationV1,
-  staticEffectsClassifierV1,
+  builtinExecutionTraits,
+  defineBuiltinCapabilityContract,
+  gitAvailability,
+  parserForBuiltinOperation,
+  staticEffectsClassifier,
 } from './catalog-contract';
 import {
   computeLineDiff,
@@ -38,18 +38,18 @@ import {
   truncateProjectedLines,
   truncateProjectedStreams,
 } from './filesystem/projection';
-import type { BuiltinOperationExecutionValueV1 } from './model-operations';
+import type { BuiltinOperationExecutionValue } from './model-operations';
 import {
-  createBuiltinPolicyCompilerV1,
-  fileBuiltinPolicyRuleV1,
-  readOnlyBuiltinPolicyRuleV1,
+  createBuiltinPolicyCompiler,
+  fileBuiltinPolicyRule,
+  readOnlyBuiltinPolicyRule,
 } from './policy-compiler';
-import { builtinToolDescriptionV1 } from './tool-contracts';
-import { BUILTIN_JSON_SCHEMAS_V1, BUILTIN_ZOD_SCHEMAS_V1 } from './tool-schemas';
+import { builtinToolDescription } from './tool-contracts';
+import { BUILTIN_JSON_SCHEMAS_, BUILTIN_ZOD_SCHEMAS_ } from './tool-schemas';
 
-export const RMV1_12_PROVIDER_ID_V1 = 'kite-builtin-runtime-rmv1-12' as const;
+export const GIT_PROVIDER_ID_ = 'kite-builtin-runtime-rmv1-12' as const;
 
-export const RMV1_12_OPERATION_IDS_V1 = Object.freeze([
+export const GIT_OPERATION_IDS_ = Object.freeze([
   'builtin:read_file',
   'builtin:search_content',
   'builtin:search_files',
@@ -58,27 +58,26 @@ export const RMV1_12_OPERATION_IDS_V1 = Object.freeze([
   'builtin:git_inspect',
 ] as const);
 
-export type Rmv112OperationIdV1 = (typeof RMV1_12_OPERATION_IDS_V1)[number];
+export type GitOperationId = (typeof GIT_OPERATION_IDS_)[number];
 
-export const READ_FILE_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:read_file'];
-export const SEARCH_CONTENT_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:search_content'];
-export const SEARCH_FILES_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:search_files'];
-export const WRITE_FILE_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:write_file'];
-export const EDIT_FILE_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:edit_file'];
-export const GIT_INSPECT_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:git_inspect'];
+export const READ_FILE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:read_file'];
+export const SEARCH_CONTENT_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:search_content'];
+export const SEARCH_FILES_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:search_files'];
+export const WRITE_FILE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:write_file'];
+export const EDIT_FILE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:edit_file'];
+export const GIT_INSPECT_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:git_inspect'];
 
-const INPUT_SCHEMAS_V1: Readonly<
-  Record<Rmv112OperationIdV1, Readonly<Record<string, RuntimeJsonValueV1>>>
-> = Object.freeze({
-  'builtin:read_file': READ_FILE_INPUT_SCHEMA_V1,
-  'builtin:search_content': SEARCH_CONTENT_INPUT_SCHEMA_V1,
-  'builtin:search_files': SEARCH_FILES_INPUT_SCHEMA_V1,
-  'builtin:write_file': WRITE_FILE_INPUT_SCHEMA_V1,
-  'builtin:edit_file': EDIT_FILE_INPUT_SCHEMA_V1,
-  'builtin:git_inspect': GIT_INSPECT_INPUT_SCHEMA_V1,
-});
+const INPUT_SCHEMAS_: Readonly<Record<GitOperationId, Readonly<Record<string, RuntimeJsonValue>>>> =
+  Object.freeze({
+    'builtin:read_file': READ_FILE_INPUT_SCHEMA_,
+    'builtin:search_content': SEARCH_CONTENT_INPUT_SCHEMA_,
+    'builtin:search_files': SEARCH_FILES_INPUT_SCHEMA_,
+    'builtin:write_file': WRITE_FILE_INPUT_SCHEMA_,
+    'builtin:edit_file': EDIT_FILE_INPUT_SCHEMA_,
+    'builtin:git_inspect': GIT_INSPECT_INPUT_SCHEMA_,
+  });
 
-const EFFECTS_V1 = Object.freeze({
+const EFFECTS_ = Object.freeze({
   'builtin:read_file': Object.freeze({
     filesystem: 'read',
     network: 'none',
@@ -111,120 +110,117 @@ const EFFECTS_V1 = Object.freeze({
   }),
 });
 
-const EXECUTION_MECHANISMS_V1: Readonly<
-  Record<Rmv112OperationIdV1, CapabilityExecutionMechanismV1>
-> = Object.freeze({
-  'builtin:read_file': 'filesystem',
-  'builtin:search_content': 'filesystem',
-  'builtin:search_files': 'filesystem',
-  'builtin:write_file': 'filesystem',
-  'builtin:edit_file': 'filesystem',
-  'builtin:git_inspect': 'git',
-});
+const EXECUTION_MECHANISMS_: Readonly<Record<GitOperationId, CapabilityExecutionMechanism>> =
+  Object.freeze({
+    'builtin:read_file': 'filesystem',
+    'builtin:search_content': 'filesystem',
+    'builtin:search_files': 'filesystem',
+    'builtin:write_file': 'filesystem',
+    'builtin:edit_file': 'filesystem',
+    'builtin:git_inspect': 'git',
+  });
 
-export const RMV1_12_CAPABILITY_REVISIONS_V1: Readonly<Record<Rmv112OperationIdV1, string>> =
-  Object.freeze(
-    Object.fromEntries(
-      RMV1_12_OPERATION_IDS_V1.map((operationId) => [
+export const GIT_CAPABILITY_REVISIONS_: Readonly<Record<GitOperationId, string>> = Object.freeze(
+  Object.fromEntries(
+    GIT_OPERATION_IDS_.map((operationId) => [
+      operationId,
+      digestCapabilityBindingValue({
+        schema: 'kite.rmv1-12-operation-capability.v1',
         operationId,
-        digestCapabilityBindingValueV1({
-          schema: 'kite.rmv1-12-operation-capability.v1',
-          operationId,
-          inputSchema: INPUT_SCHEMAS_V1[operationId],
-          effects: EFFECTS_V1[operationId],
-        }),
-      ]),
-    ) as Record<Rmv112OperationIdV1, string>,
-  );
+        inputSchema: INPUT_SCHEMAS_[operationId],
+        effects: EFFECTS_[operationId],
+      }),
+    ]),
+  ) as Record<GitOperationId, string>,
+);
 
-export const RMV1_12_EXECUTOR_REVISIONS_V1: Readonly<Record<Rmv112OperationIdV1, string>> =
-  Object.freeze(
-    Object.fromEntries(
-      RMV1_12_OPERATION_IDS_V1.map((operationId) => [
+export const GIT_EXECUTOR_REVISIONS_: Readonly<Record<GitOperationId, string>> = Object.freeze(
+  Object.fromEntries(
+    GIT_OPERATION_IDS_.map((operationId) => [
+      operationId,
+      digestCapabilityBindingValue({
+        schema: 'kite.rmv1-12-operation-executor.v1',
         operationId,
-        digestCapabilityBindingValueV1({
-          schema: 'kite.rmv1-12-operation-executor.v1',
-          operationId,
-          capabilityRevision: RMV1_12_CAPABILITY_REVISIONS_V1[operationId],
-        }),
-      ]),
-    ) as Record<Rmv112OperationIdV1, string>,
-  );
+        capabilityRevision: GIT_CAPABILITY_REVISIONS_[operationId],
+      }),
+    ]),
+  ) as Record<GitOperationId, string>,
+);
 
-export interface BuiltinFilesystemPipelineResultV1 {
+export interface BuiltinFilesystemPipelineResult {
   readonly ok: boolean;
   readonly observation?:
-    | WorkspaceFilesystemObserveObservationV1
-    | WorkspaceFilesystemCommittedMutationV1;
-  readonly filesystemObservation?: WorkspaceFilesystemObservationRecordV1;
-  readonly preimage?: WorkspaceFilesystemPreimageObservationV1;
-  readonly failure?: WorkspaceFilesystemProviderFailureV1;
+    | WorkspaceFilesystemObserveObservation
+    | WorkspaceFilesystemCommittedMutation;
+  readonly filesystemObservation?: WorkspaceFilesystemObservationRecord;
+  readonly preimage?: WorkspaceFilesystemPreimageObservation;
+  readonly failure?: WorkspaceFilesystemProviderFailure;
 }
 
-export interface BuiltinFilesystemExecutionMechanismV1 {
+export interface BuiltinFilesystemExecutionMechanism {
   readonly allowExternalPaths: boolean;
-  dispatch(operation: WorkspaceFilesystemOperationV1): Promise<BuiltinFilesystemPipelineResultV1>;
+  dispatch(operation: WorkspaceFilesystemOperation): Promise<BuiltinFilesystemPipelineResult>;
 }
 
-export interface BuiltinGitExecutionMechanismV1 {
-  inspect(request: GitInspectRequestV1, signal?: AbortSignal): Promise<GitBrokerResultV1>;
+export interface BuiltinGitExecutionMechanism {
+  inspect(request: GitInspectRequest, signal?: AbortSignal): Promise<GitBrokerResult>;
 }
 
-export interface Rmv112ExecutionMechanismsV1 extends Readonly<Record<string, unknown>> {
-  readonly filesystem?: BuiltinFilesystemExecutionMechanismV1;
-  readonly git?: BuiltinGitExecutionMechanismV1;
+export interface GitExecutionMechanisms extends Readonly<Record<string, unknown>> {
+  readonly filesystem?: BuiltinFilesystemExecutionMechanism;
+  readonly git?: BuiltinGitExecutionMechanism;
 }
 
-export function createGitRuntimeModule(): RuntimeModuleV1 {
-  return defineRuntimeModuleV1({
+export function createGitRuntimeModule(): RuntimeModule {
+  return defineRuntimeModule({
     moduleId: 'kite-builtin-runtime-rmv1-12',
-    providerId: RMV1_12_PROVIDER_ID_V1,
+    providerId: GIT_PROVIDER_ID_,
     revision: 'rmv1-12',
-    operationIds: RMV1_12_OPERATION_IDS_V1,
-    register: (registry) => registerRmv112OperationsV1(registry),
+    operationIds: GIT_OPERATION_IDS_,
+    register: (registry) => registerGitOperations(registry),
   });
 }
 
-function registerRmv112OperationsV1(registry: RuntimeModuleRegistryWriterV1): void {
-  for (const operationId of RMV1_12_OPERATION_IDS_V1) {
-    const capabilityRevision = RMV1_12_CAPABILITY_REVISIONS_V1[operationId];
-    const executorRevision = RMV1_12_EXECUTOR_REVISIONS_V1[operationId];
+function registerGitOperations(registry: RuntimeModuleRegistryWriter): void {
+  for (const operationId of GIT_OPERATION_IDS_) {
+    const capabilityRevision = GIT_CAPABILITY_REVISIONS_[operationId];
+    const executorRevision = GIT_EXECUTOR_REVISIONS_[operationId];
     registry.registerCapability(
-      defineBuiltinCapabilityContractV1(
+      defineBuiltinCapabilityContract(
         {
           capabilityId: operationId,
           revision: capabilityRevision,
-          providerId: RMV1_12_PROVIDER_ID_V1,
+          providerId: GIT_PROVIDER_ID_,
           title: `Builtin Runtime operation ${operationId}`,
-          executionMechanism: EXECUTION_MECHANISMS_V1[operationId],
+          executionMechanism: EXECUTION_MECHANISMS_[operationId],
           ...(operationId.startsWith('builtin:')
             ? {
                 toolName: operationId.slice('builtin:'.length),
-                description: builtinToolDescriptionV1(operationId.slice('builtin:'.length)),
+                description: builtinToolDescription(operationId.slice('builtin:'.length)),
                 visibility: 'model' as const,
               }
             : { visibility: 'internal' as const }),
-          effects: EFFECTS_V1[operationId],
-          inputSchema: INPUT_SCHEMAS_V1[operationId],
-          inputSchemaDigest: digestCapabilityBindingValueV1(INPUT_SCHEMAS_V1[operationId]),
+          effects: EFFECTS_[operationId],
+          inputSchema: INPUT_SCHEMAS_[operationId],
+          inputSchemaDigest: digestCapabilityBindingValue(INPUT_SCHEMAS_[operationId]),
         },
-        rmv112ContractOptionsV1(operationId, capabilityRevision, EFFECTS_V1[operationId]),
+        gitContractOptions(operationId, capabilityRevision, EFFECTS_[operationId]),
       ),
     );
     registry.registerExecutor({
-      providerId: RMV1_12_PROVIDER_ID_V1,
+      providerId: GIT_PROVIDER_ID_,
       capabilityId: operationId,
       capabilityRevision,
       executorRevision,
-      execute: (request, context) => executeRmv112OperationV1(operationId, request, context),
-    } satisfies CapabilityExecutorV1);
+      execute: (request, context) => executeGitOperation(operationId, request, context),
+    } satisfies CapabilityExecutor);
   }
 }
 
-function rmv112ContractOptionsV1(
-  operationId: Rmv112OperationIdV1,
+function gitContractOptions(
+  operationId: GitOperationId,
   revision: string,
-  effects: CapabilityEffectsV1,
+  effects: CapabilityEffects,
 ) {
   const readOnly =
     operationId === 'builtin:read_file' ||
@@ -243,14 +239,14 @@ function rmv112ContractOptionsV1(
     operationId === 'builtin:search_files' ||
     operationId === 'builtin:write_file' ||
     operationId === 'builtin:edit_file'
-      ? fileBuiltinPolicyRuleV1
-      : readOnlyBuiltinPolicyRuleV1;
-  const parser = parserForBuiltinOperationV1(operationId, revision);
+      ? fileBuiltinPolicyRule
+      : readOnlyBuiltinPolicyRule;
+  const parser = parserForBuiltinOperation(operationId, revision);
   return {
     parser,
     kind: 'computer' as const,
     minimumApproval: 'none' as const,
-    ...(operationId === 'builtin:git_inspect' ? { availability: gitAvailabilityV1 } : {}),
+    ...(operationId === 'builtin:git_inspect' ? { availability: gitAvailability } : {}),
     ...(operationId === 'builtin:git_inspect'
       ? { governanceRevision: 'git-inspect-v1' }
       : operationId === 'builtin:read_file' ||
@@ -260,7 +256,7 @@ function rmv112ContractOptionsV1(
           operationId === 'builtin:edit_file'
         ? { governanceRevision: 'trusted-workspace-file-access-v1' }
         : {}),
-    effectsClassifier: staticEffectsClassifierV1(
+    effectsClassifier: staticEffectsClassifier(
       readOnly ? 'read_only' : workspaceWrite ? 'workspace_write' : 'unknown',
       workspaceWrite,
       operationId === 'builtin:read_file'
@@ -276,7 +272,7 @@ function rmv112ContractOptionsV1(
                 : 'edit_file modifies workspace files.',
       effects,
     ),
-    policyCompiler: createBuiltinPolicyCompilerV1({
+    policyCompiler: createBuiltinPolicyCompiler({
       operationId,
       capabilityRevision: revision,
       parserRevision: parser.parserRevision,
@@ -286,7 +282,7 @@ function rmv112ContractOptionsV1(
     }),
     ...(workspaceRead
       ? {
-          executionTraitsDeclaration: builtinExecutionTraitsV1({
+          executionTraitsDeclaration: builtinExecutionTraits({
             resourceScopes: [{ kind: 'workspace', key: 'workspace' }],
             interactionBarrier: false,
             concurrencyGroup: 'parallel-read',
@@ -297,38 +293,38 @@ function rmv112ContractOptionsV1(
   };
 }
 
-async function executeRmv112OperationV1(
-  operationId: Rmv112OperationIdV1,
-  request: Parameters<CapabilityExecutorV1['execute']>[0],
-  context: CapabilityExecutionContextV1,
-): Promise<ExecutionReceiptV1> {
-  const parsed = BUILTIN_ZOD_SCHEMAS_V1[operationId].safeParse(request.input);
+async function executeGitOperation(
+  operationId: GitOperationId,
+  request: Parameters<CapabilityExecutor['execute']>[0],
+  context: CapabilityExecutionContext,
+): Promise<ExecutionReceipt> {
+  const parsed = BUILTIN_ZOD_SCHEMAS_[operationId].safeParse(request.input);
   const input = parsed.success ? asRecord(parsed.data) : undefined;
   if (!input) {
     return failedReceipt(operationId, request.invocationId, context, 'invalid_input');
   }
-  const mechanisms = context.environment.mechanisms as Rmv112ExecutionMechanismsV1 | undefined;
-  let value: BuiltinOperationExecutionValueV1;
+  const mechanisms = context.environment.mechanisms as GitExecutionMechanisms | undefined;
+  let value: BuiltinOperationExecutionValue;
   if (operationId === 'builtin:git_inspect') {
-    value = await executeGitInspectV1(input, context, mechanisms?.git);
+    value = await executeGitInspect(input, context, mechanisms?.git);
   } else {
-    value = await executeFilesystemOperationV1(operationId, input, mechanisms?.filesystem);
+    value = await executeFilesystemOperation(operationId, input, mechanisms?.filesystem);
   }
   return succeededReceipt(operationId, request.invocationId, context, value);
 }
 
-async function executeFilesystemOperationV1(
-  operationId: Exclude<Rmv112OperationIdV1, 'builtin:git_inspect'>,
+async function executeFilesystemOperation(
+  operationId: Exclude<GitOperationId, 'builtin:git_inspect'>,
   input: Readonly<Record<string, unknown>>,
-  mechanism: BuiltinFilesystemExecutionMechanismV1 | undefined,
-): Promise<BuiltinOperationExecutionValueV1> {
+  mechanism: BuiltinFilesystemExecutionMechanism | undefined,
+): Promise<BuiltinOperationExecutionValue> {
   if (!mechanism) return operationFailure('Workspace filesystem Provider is unavailable.');
   const pathScope = mechanism.allowExternalPaths
     ? operationId === 'builtin:write_file' || operationId === 'builtin:edit_file'
       ? 'approved_external'
       : 'external_read'
     : 'workspace_only';
-  let operation: WorkspaceFilesystemOperationV1;
+  let operation: WorkspaceFilesystemOperation;
   switch (operationId) {
     case 'builtin:read_file':
       operation = {
@@ -384,24 +380,24 @@ async function executeFilesystemOperationV1(
   const result = await mechanism.dispatch(operation);
   switch (operation.kind) {
     case 'read_file':
-      return projectReadFileV1(operation.path, result);
+      return projectReadFile(operation.path, result);
     case 'search_content':
-      return projectSearchContentV1(operation.path, result);
+      return projectSearchContent(operation.path, result);
     case 'search_files':
-      return projectSearchFilesV1(operation.path, result);
+      return projectSearchFiles(operation.path, result);
     case 'write_file':
-      return projectWriteFileV1(operation.path, operation.content, result);
+      return projectWriteFile(operation.path, operation.content, result);
     case 'edit_file':
-      return projectEditFileV1(operation, result);
+      return projectEditFile(operation, result);
   }
 }
 
-export const MAX_MODEL_READ_FILE_CHARS_V1 = 64 * 1024;
+export const MAX_MODEL_READ_FILE_CHARS_ = 64 * 1024;
 
-function projectReadFileV1(
+function projectReadFile(
   path: string,
-  result: BuiltinFilesystemPipelineResultV1,
-): BuiltinOperationExecutionValueV1 {
+  result: BuiltinFilesystemPipelineResult,
+): BuiltinOperationExecutionValue {
   if (!result.ok || !result.observation) {
     const notFound = /(?:not found|no such file|enoent)/iu.test(result.failure?.message ?? '');
     return operationFailure(
@@ -419,7 +415,7 @@ function projectReadFileV1(
     return operationFailure('File could not be read.', { path, totalLines: 0, truncated: false });
   }
   const observation = result.observation;
-  const projected = projectReadContentV1(observation);
+  const projected = projectReadContent(observation);
   return operationSuccess(
     projected.content,
     {
@@ -438,13 +434,13 @@ function projectReadFileV1(
   );
 }
 
-function projectReadContentV1(
-  output: Extract<WorkspaceFilesystemObserveObservationV1, { kind: 'read_file' }>,
+function projectReadContent(
+  output: Extract<WorkspaceFilesystemObserveObservation, { kind: 'read_file' }>,
 ): { content: string; truncated: boolean } {
   const fromLine = output.fromLine ?? 1;
   const toLine = output.toLine ?? fromLine;
   const sourceHasMore = toLine < output.totalLines;
-  if (!sourceHasMore && output.content.length <= MAX_MODEL_READ_FILE_CHARS_V1) {
+  if (!sourceHasMore && output.content.length <= MAX_MODEL_READ_FILE_CHARS_) {
     return { content: output.content, truncated: false };
   }
   const lines = output.content.split('\n');
@@ -457,8 +453,7 @@ function projectReadContentV1(
     const candidateLength = keptLength + (kept.length > 0 ? 1 : 0) + line.length;
     const marker = continuationMarker(output.totalLines, sourceLine + 1);
     if (
-      (hasMore ? candidateLength + marker.length + 1 : candidateLength) >
-      MAX_MODEL_READ_FILE_CHARS_V1
+      (hasMore ? candidateLength + marker.length + 1 : candidateLength) > MAX_MODEL_READ_FILE_CHARS_
     ) {
       break;
     }
@@ -472,7 +467,7 @@ function projectReadContentV1(
     };
   }
   const marker = `... [read_file truncated; total_lines=${output.totalLines}; line ${fromLine} clipped; line offset cannot continue within this line]`;
-  const available = Math.max(0, MAX_MODEL_READ_FILE_CHARS_V1 - marker.length - 1);
+  const available = Math.max(0, MAX_MODEL_READ_FILE_CHARS_ - marker.length - 1);
   const prefix = safePrefix(lines[0] ?? '', available);
   return { content: prefix ? `${prefix}\n${marker}` : marker, truncated: true };
 }
@@ -488,10 +483,10 @@ function safePrefix(value: string, maximum: number): string {
   return last >= 0xd800 && last <= 0xdbff ? prefix.slice(0, -1) : prefix;
 }
 
-function projectSearchFilesV1(
+function projectSearchFiles(
   path: string,
-  result: BuiltinFilesystemPipelineResultV1,
-): BuiltinOperationExecutionValueV1 {
+  result: BuiltinFilesystemPipelineResult,
+): BuiltinOperationExecutionValue {
   if (!result.ok || !result.observation) {
     return operationFailure(
       result.failure?.message ?? 'Workspace filesystem Provider failed.',
@@ -518,10 +513,10 @@ function projectSearchFilesV1(
   });
 }
 
-function projectSearchContentV1(
+function projectSearchContent(
   path: string,
-  result: BuiltinFilesystemPipelineResultV1,
-): BuiltinOperationExecutionValueV1 {
+  result: BuiltinFilesystemPipelineResult,
+): BuiltinOperationExecutionValue {
   if (!result.ok || !result.observation) {
     return operationFailure(
       result.failure?.message ?? 'Workspace filesystem Provider failed.',
@@ -550,11 +545,11 @@ function projectSearchContentV1(
   });
 }
 
-function projectWriteFileV1(
+function projectWriteFile(
   path: string,
   content: string,
-  result: BuiltinFilesystemPipelineResultV1,
-): BuiltinOperationExecutionValueV1 {
+  result: BuiltinFilesystemPipelineResult,
+): BuiltinOperationExecutionValue {
   if (!result.ok || !result.observation) {
     return operationFailure(result.failure?.message ?? 'Workspace filesystem Provider failed.', {
       path,
@@ -595,10 +590,10 @@ function projectWriteFileV1(
   );
 }
 
-function projectEditFileV1(
-  operation: Extract<WorkspaceFilesystemMutationOperationV1, { kind: 'edit_file' }>,
-  result: BuiltinFilesystemPipelineResultV1,
-): BuiltinOperationExecutionValueV1 {
+function projectEditFile(
+  operation: Extract<WorkspaceFilesystemMutationOperation, { kind: 'edit_file' }>,
+  result: BuiltinFilesystemPipelineResult,
+): BuiltinOperationExecutionValue {
   if (!result.ok || !result.observation) {
     const message =
       result.failure?.code === 'read_required'
@@ -656,24 +651,24 @@ function projectEditFileV1(
   );
 }
 
-async function executeGitInspectV1(
+async function executeGitInspect(
   input: Readonly<Record<string, unknown>>,
-  context: CapabilityExecutionContextV1,
-  mechanism: BuiltinGitExecutionMechanismV1 | undefined,
-): Promise<BuiltinOperationExecutionValueV1> {
+  context: CapabilityExecutionContext,
+  mechanism: BuiltinGitExecutionMechanism | undefined,
+): Promise<BuiltinOperationExecutionValue> {
   if (!mechanism) {
-    return projectGitResultV1({
+    return projectGitResult({
       ok: false,
       output: 'Typed Git inspect broker is unavailable.',
       failureCode: 'sandbox_capability_missing',
     });
   }
-  const request = gitRequestV1(input);
+  const request = gitRequest(input);
   if (!request) return operationFailure('Git inspect input is invalid.');
-  return projectGitResultV1(await mechanism.inspect(request, context.signal));
+  return projectGitResult(await mechanism.inspect(request, context.signal));
 }
 
-function gitRequestV1(input: Readonly<Record<string, unknown>>): GitInspectRequestV1 | undefined {
+function gitRequest(input: Readonly<Record<string, unknown>>): GitInspectRequest | undefined {
   const operation = input.operation;
   if (
     operation !== 'status' &&
@@ -700,7 +695,7 @@ function gitRequestV1(input: Readonly<Record<string, unknown>>): GitInspectReque
   };
 }
 
-function projectGitResultV1(output: GitBrokerResultV1): BuiltinOperationExecutionValueV1 {
+function projectGitResult(output: GitBrokerResult): BuiltinOperationExecutionValue {
   const modelContent = JSON.stringify({
     ok: output.ok,
     output: output.output,
@@ -708,14 +703,14 @@ function projectGitResultV1(output: GitBrokerResultV1): BuiltinOperationExecutio
     ...(output.nextCapability ? { next_capability: output.nextCapability } : {}),
     ...(output.receipt ? { receipt: output.receipt } : {}),
   });
-  const resultMeta: Record<string, RuntimeJsonValueV1> = {
+  const resultMeta: Record<string, RuntimeJsonValue> = {
     ...(output.failureCode ? { gitFailureCode: output.failureCode } : {}),
     ...(output.nextCapability ? { nextCapability: output.nextCapability } : {}),
     ...(output.receipt
       ? {
           invocationId: output.receipt.invocationId,
           capabilityRevision: output.receipt.featureRevision,
-          gitReceipt: output.receipt as unknown as RuntimeJsonValueV1,
+          gitReceipt: output.receipt as unknown as RuntimeJsonValue,
         }
       : {}),
   };
@@ -726,7 +721,7 @@ function projectGitResultV1(output: GitBrokerResultV1): BuiltinOperationExecutio
     resultMeta,
     {
       ...(output.failureCode
-        ? { classifierAdviceV1: gitClassifierAdviceV1(output.failureCode, output.nextCapability) }
+        ? { classifierAdvice: gitClassifierAdvice(output.failureCode, output.nextCapability) }
         : {}),
       ...(output.failureCode === 'timed_out'
         ? { terminationReason: 'timed_out' }
@@ -737,10 +732,10 @@ function projectGitResultV1(output: GitBrokerResultV1): BuiltinOperationExecutio
   );
 }
 
-function gitClassifierAdviceV1(
-  failureCode: GitBrokerFailureCodeV1,
+function gitClassifierAdvice(
+  failureCode: GitBrokerFailureCode,
   nextCapability?: 'git_inspect',
-): Readonly<Record<string, RuntimeJsonValueV1>> {
+): Readonly<Record<string, RuntimeJsonValue>> {
   const detailCode = {
     sandbox_capability_missing: 'sandbox_capability_missing',
     protected_path_denied: 'protected_path_denied',
@@ -765,16 +760,16 @@ function gitClassifierAdviceV1(
 }
 
 function succeededReceipt(
-  operationId: Rmv112OperationIdV1,
+  operationId: GitOperationId,
   invocationId: string,
-  context: CapabilityExecutionContextV1,
-  value: BuiltinOperationExecutionValueV1,
-): ExecutionReceiptV1 {
+  context: CapabilityExecutionContext,
+  value: BuiltinOperationExecutionValue,
+): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: RMV1_12_PROVIDER_ID_V1,
-    executorRevision: RMV1_12_EXECUTOR_REVISIONS_V1[operationId],
+    providerId: GIT_PROVIDER_ID_,
+    executorRevision: GIT_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'succeeded',
     dispatchCertainty: 'attempted',
@@ -784,16 +779,16 @@ function succeededReceipt(
 }
 
 function failedReceipt(
-  operationId: Rmv112OperationIdV1,
+  operationId: GitOperationId,
   invocationId: string,
-  context: CapabilityExecutionContextV1,
+  context: CapabilityExecutionContext,
   code: string,
-): ExecutionReceiptV1 {
+): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: RMV1_12_PROVIDER_ID_V1,
-    executorRevision: RMV1_12_EXECUTOR_REVISIONS_V1[operationId],
+    providerId: GIT_PROVIDER_ID_,
+    executorRevision: GIT_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'failed',
     dispatchCertainty: 'none',
@@ -808,19 +803,19 @@ function failedReceipt(
 
 function operationSuccess(
   stdout: string,
-  resultMeta: Readonly<Record<string, RuntimeJsonValueV1>>,
+  resultMeta: Readonly<Record<string, RuntimeJsonValue>>,
   extra: Readonly<Record<string, unknown>> = {},
-): BuiltinOperationExecutionValueV1 {
+): BuiltinOperationExecutionValue {
   return operationEnvelope(true, stdout, '', resultMeta, extra);
 }
 
 function operationFailure(
   stderr: string,
-  resultMeta: Readonly<Record<string, RuntimeJsonValueV1>> = {},
-  classifierAdviceV1?: Readonly<Record<string, RuntimeJsonValueV1>>,
-): BuiltinOperationExecutionValueV1 {
+  resultMeta: Readonly<Record<string, RuntimeJsonValue>> = {},
+  classifierAdvice?: Readonly<Record<string, RuntimeJsonValue>>,
+): BuiltinOperationExecutionValue {
   return operationEnvelope(false, '', stderr, resultMeta, {
-    ...(classifierAdviceV1 ? { classifierAdviceV1 } : {}),
+    ...(classifierAdvice ? { classifierAdvice } : {}),
   });
 }
 
@@ -828,9 +823,9 @@ function operationEnvelope(
   ok: boolean,
   stdout: string,
   stderr: string,
-  resultMeta: Readonly<Record<string, RuntimeJsonValueV1>>,
+  resultMeta: Readonly<Record<string, RuntimeJsonValue>>,
   extra: Readonly<Record<string, unknown>>,
-): BuiltinOperationExecutionValueV1 {
+): BuiltinOperationExecutionValue {
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok,
@@ -838,10 +833,10 @@ function operationEnvelope(
     stderr,
     resultMeta: Object.freeze(resultMeta),
     ...extra,
-  }) as BuiltinOperationExecutionValueV1;
+  }) as BuiltinOperationExecutionValue;
 }
 
-function correctArgsAdvice(): Readonly<Record<string, RuntimeJsonValueV1>> {
+function correctArgsAdvice(): Readonly<Record<string, RuntimeJsonValue>> {
   return Object.freeze({
     detailCode: 'tool_reported_failure',
     disposition: 'correct_args',
@@ -851,7 +846,7 @@ function correctArgsAdvice(): Readonly<Record<string, RuntimeJsonValueV1>> {
   });
 }
 
-function alternativeSearchAdvice(): Readonly<Record<string, RuntimeJsonValueV1>> {
+function alternativeSearchAdvice(): Readonly<Record<string, RuntimeJsonValue>> {
   return Object.freeze({
     detailCode: 'tool_reported_failure',
     disposition: 'alternative',
@@ -862,7 +857,7 @@ function alternativeSearchAdvice(): Readonly<Record<string, RuntimeJsonValueV1>>
   });
 }
 
-function userActionAdvice(): Readonly<Record<string, RuntimeJsonValueV1>> {
+function userActionAdvice(): Readonly<Record<string, RuntimeJsonValue>> {
   return Object.freeze({
     detailCode: 'tool_reported_failure',
     disposition: 'user_action',

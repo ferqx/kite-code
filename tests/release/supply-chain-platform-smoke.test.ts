@@ -6,9 +6,9 @@ import { RELEASE_MANIFEST_FILE, RELEASE_PAYLOAD_FILE } from '../../scripts/relea
 import { buildSyntheticArtifact } from '../../scripts/release/build-artifact';
 import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
 import {
-  createSyntheticPlatformLauncherIdentityV1,
+  createSyntheticPlatformLauncherIdentity,
   PlatformArtifactSmokeError,
-  runPlatformArtifactSmokeV1,
+  runPlatformArtifactSmoke,
 } from '../../scripts/release/platform-smoke';
 
 const roots: string[] = [];
@@ -21,7 +21,7 @@ afterEach(() => {
 describe('platform artifact supply-chain smoke', () => {
   test('verifies synthetic bytes but remains blocked by the empty production support set', () => {
     const { directory, identity } = fixture();
-    const result = runPlatformArtifactSmokeV1({
+    const result = runPlatformArtifactSmoke({
       artifactDirectory: directory,
       launcherBytes,
       launcherIdentity: identity,
@@ -46,7 +46,7 @@ describe('platform artifact supply-chain smoke', () => {
     const { directory, identity } = fixture();
     writeFileSync(join(directory, RELEASE_PAYLOAD_FILE), 'tampered payload');
     expect(() =>
-      runPlatformArtifactSmokeV1({
+      runPlatformArtifactSmoke({
         artifactDirectory: directory,
         launcherBytes,
         launcherIdentity: identity,
@@ -61,7 +61,7 @@ describe('platform artifact supply-chain smoke', () => {
     manifest.productVersion = '0.0.0-tampered';
     writeFileSync(manifestPath, canonicalJsonBytes(manifest));
     expect(() =>
-      runPlatformArtifactSmokeV1({
+      runPlatformArtifactSmoke({
         artifactDirectory: directory,
         launcherBytes,
         launcherIdentity: identity,
@@ -72,7 +72,7 @@ describe('platform artifact supply-chain smoke', () => {
   test('detects launcher bytes and production-looking platform-signature substitution', () => {
     const { directory, identity } = fixture();
     expect(() =>
-      runPlatformArtifactSmokeV1({
+      runPlatformArtifactSmoke({
         artifactDirectory: directory,
         launcherBytes: new TextEncoder().encode('tampered launcher'),
         launcherIdentity: identity,
@@ -87,7 +87,7 @@ describe('platform artifact supply-chain smoke', () => {
       realPlatformSigningEnabled: true,
     };
     expect(() =>
-      runPlatformArtifactSmokeV1({
+      runPlatformArtifactSmoke({
         artifactDirectory: directory,
         launcherBytes,
         launcherIdentity: productionLooking,
@@ -100,7 +100,7 @@ function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'kite-platform-smoke-'));
   roots.push(directory);
   const artifact = buildSyntheticArtifact({ directory });
-  const identity = createSyntheticPlatformLauncherIdentityV1({
+  const identity = createSyntheticPlatformLauncherIdentity({
     platform: 'ubuntu-24.04-bubblewrap',
     launcherBytes,
     canonicalManifestDigest: artifact.signature.manifestSha256,

@@ -1,21 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  decideCompletionV2,
-  decideReadPlanCommandV1,
-  decideUpdatePlanCommandV1,
-  decideWritePlanCommandV1,
-  type PlanCommandStateFactsV1,
-  planCommandPhaseV1,
+  decidePlannedCompletion,
+  decideReadPlanCommand,
+  decideUpdatePlanCommand,
+  decideWritePlanCommand,
+  type PlanCommandStateFacts,
+  planCommandPhase,
 } from '@kite/agent-kernel';
 import {
-  createBuiltinPlanDocumentV2V1,
+  createBuiltinPlanDocument,
   type PlanArtifactContent,
   type PlanArtifactStore,
-  projectBuiltinPublicPlanV2V1,
+  projectBuiltinPublicPlan,
 } from '@kite/builtin-runtime/planning';
 import type { PlanDocument, PlanningState } from '@kite/runtime-contract';
 import type { RuntimeState } from '@kite/runtime-host';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import {
   readPlanAction,
   updatePlanAction,
@@ -25,7 +25,7 @@ import {
 const recoveryIdentityKey = '0'.repeat(64);
 
 function stateWithPlanning(planning: PlanningState, sideEffectsStarted = false): RuntimeState {
-  const base = createRuntimeHostStateInitialStateV1({
+  const base = createRuntimeHostStateInitialState({
     recoveryIdentityKey,
     threadId: 'plan-parity',
     userId: 'user',
@@ -50,7 +50,7 @@ function stateWithPlanning(planning: PlanningState, sideEffectsStarted = false):
 }
 
 function stateWithoutTask(): RuntimeState {
-  const base = createRuntimeHostStateInitialStateV1({
+  const base = createRuntimeHostStateInitialState({
     recoveryIdentityKey,
     threadId: 'plan-parity-no-task',
     userId: 'user',
@@ -60,7 +60,7 @@ function stateWithoutTask(): RuntimeState {
 }
 
 function planDocument(): PlanDocument {
-  return createBuiltinPlanDocumentV2V1({
+  return createBuiltinPlanDocument({
     taskId: 'task-parity',
     turnId: 'turn-1',
     title: saveCommand.title,
@@ -87,14 +87,14 @@ function compareLegacyDecision(
   }
 }
 
-function facts(state: RuntimeState): PlanCommandStateFactsV1 {
+function facts(state: RuntimeState): PlanCommandStateFacts {
   const taskId = state.activeTaskId == null ? undefined : state.activeTaskId;
   const planning =
     taskId == null ? ({ kind: 'building_without_plan' } as const) : state.tasks[taskId]!.planning;
   return {
     taskId,
     planning,
-    phase: planCommandPhaseV1(planning),
+    phase: planCommandPhase(planning),
     sideEffectsStarted: taskId == null ? false : state.tasks[taskId]!.sideEffectsStarted,
   };
 }
@@ -136,12 +136,12 @@ const saveCommand = {
   steps: [{ id: 'inspect', title: 'Inspect the current behavior' }],
 };
 
-describe('RMV1 plan package candidate differential', () => {
+describe('RM plan package candidate differential', () => {
   test('Builtin document/public projection matches the legacy facade save corpus', () => {
     const state = stateWithPlanning({ kind: 'planning_empty' });
     const store = artifactStore();
     const legacy = writePlanAction({ state, artifacts: store }, 'save-1', saveCommand);
-    const candidateDocument = createBuiltinPlanDocumentV2V1({
+    const candidateDocument = createBuiltinPlanDocument({
       taskId: state.activeTaskId!,
       turnId: state.turn.turnId,
       title: saveCommand.title,
@@ -153,7 +153,7 @@ describe('RMV1 plan package candidate differential', () => {
     const drafted = legacy.runtimeEvents.find((event) => event.type === 'plan.drafted');
     expect(drafted?.type).toBe('plan.drafted');
     if (drafted?.type !== 'plan.drafted') return;
-    expect(drafted.plan).toEqual(projectBuiltinPublicPlanV2V1(candidateDocument));
+    expect(drafted.plan).toEqual(projectBuiltinPublicPlan(candidateDocument));
     expect(drafted.planId).toBe(candidateDocument.planId);
     expect(drafted.version).toBe(candidateDocument.version);
     expect(drafted.structuralHash).toBe(candidateDocument.structuralDigest);
@@ -162,7 +162,7 @@ describe('RMV1 plan package candidate differential', () => {
       ...candidateDocument,
       steps: candidateDocument.steps.map((step) => ({ ...step, status: 'completed' as const })),
     };
-    const kernelCompletion = decideCompletionV2(
+    const kernelCompletion = decidePlannedCompletion(
       stateWithPlanning({
         kind: 'completed',
         document: completedDocument,
@@ -209,7 +209,7 @@ describe('RMV1 plan package candidate differential', () => {
       const store = artifactStore();
       store.saved = draft;
       const legacy = readPlanAction({ state: entry.state, artifacts: store }, entry.command);
-      const candidate = decideReadPlanCommandV1(facts(entry.state), entry.command);
+      const candidate = decideReadPlanCommand(facts(entry.state), entry.command);
       compareLegacyDecision(legacy, candidate, entry.expectedMode);
     }
 
@@ -320,7 +320,7 @@ describe('RMV1 plan package candidate differential', () => {
         'write-corpus',
         entry.command,
       );
-      const candidate = decideWritePlanCommandV1(facts(entry.state), entry.command);
+      const candidate = decideWritePlanCommand(facts(entry.state), entry.command);
       compareLegacyDecision(legacy, candidate, entry.expectedMode);
     }
   });
@@ -328,7 +328,7 @@ describe('RMV1 plan package candidate differential', () => {
   test('keeps legacy read rejection diagnostic for digest drift', () => {
     const planning: PlanningState = {
       kind: 'planning_draft',
-      document: createBuiltinPlanDocumentV2V1({
+      document: createBuiltinPlanDocument({
         taskId: 'task-parity',
         turnId: 'turn-1',
         title: saveCommand.title,
@@ -341,7 +341,7 @@ describe('RMV1 plan package candidate differential', () => {
       { state, artifacts: artifactStore() },
       { plan_id: planning.document.planId, version: 1, structural_digest: 'b'.repeat(64) },
     );
-    const candidate = decideReadPlanCommandV1(facts(state), {
+    const candidate = decideReadPlanCommand(facts(state), {
       plan_id: planning.document.planId,
       version: 1,
       structural_digest: 'b'.repeat(64),
@@ -357,7 +357,7 @@ describe('RMV1 plan package candidate differential', () => {
       state: () =>
         stateWithPlanning({
           kind: 'planning_draft',
-          document: createBuiltinPlanDocumentV2V1({
+          document: createBuiltinPlanDocument({
             ...saveCommand,
             taskId: 'task-parity',
             turnId: 'turn-1',
@@ -367,13 +367,13 @@ describe('RMV1 plan package candidate differential', () => {
           }),
         }),
       command: { ...saveCommand, title: 'Changed after save' },
-      decide: decideWritePlanCommandV1,
+      decide: decideWritePlanCommand,
     },
     {
       name: 'side effects started',
       state: () => stateWithPlanning({ kind: 'planning_empty' }, true),
       command: saveCommand,
-      decide: decideWritePlanCommandV1,
+      decide: decideWritePlanCommand,
     },
   ])('keeps legacy write rejection diagnostic for $name', ({ state, command, decide }) => {
     const current = state();
@@ -389,7 +389,7 @@ describe('RMV1 plan package candidate differential', () => {
   });
 
   test('keeps update_plan pending-completion diagnostic and mode decision aligned', () => {
-    const document = createBuiltinPlanDocumentV2V1({
+    const document = createBuiltinPlanDocument({
       ...saveCommand,
       taskId: 'task-parity',
       turnId: 'turn-1',
@@ -412,7 +412,7 @@ describe('RMV1 plan package candidate differential', () => {
       complete_plan: true,
     };
     const legacy = updatePlanAction({ state, artifacts: artifactStore() }, 'update-1', command);
-    const candidate = decideUpdatePlanCommandV1(facts(state), command);
+    const candidate = decideUpdatePlanCommand(facts(state), command);
     expect(candidate).toMatchObject({ accepted: false, code: 'plan_pending_steps' });
     expect(legacy).toMatchObject({
       ok: false,
@@ -530,7 +530,7 @@ describe('RMV1 plan package candidate differential', () => {
         'update-corpus',
         entry.command,
       );
-      const candidate = decideUpdatePlanCommandV1(facts(entry.state), entry.command);
+      const candidate = decideUpdatePlanCommand(facts(entry.state), entry.command);
       compareLegacyDecision(legacy, candidate, entry.expectedMode);
     }
 
@@ -544,7 +544,7 @@ describe('RMV1 plan package candidate differential', () => {
       'update-progress',
       progressCommand,
     );
-    const candidateProgress = decideUpdatePlanCommandV1(facts(progressState), progressCommand);
+    const candidateProgress = decideUpdatePlanCommand(facts(progressState), progressCommand);
     compareLegacyDecision(legacyProgress, candidateProgress, 'progress_update');
     if (legacyProgress.ok && candidateProgress.accepted) {
       const event = legacyProgress.runtimeEvents.find(
@@ -592,7 +592,7 @@ describe('RMV1 plan package candidate differential', () => {
       'update-completion-blocked',
       completionCommand,
     );
-    const candidateCompletion = decideUpdatePlanCommandV1(
+    const candidateCompletion = decideUpdatePlanCommand(
       { ...facts(withRequiredVerification), completionBlocker: 'plan_verification_required' },
       completionCommand,
     );

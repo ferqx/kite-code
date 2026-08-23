@@ -1,34 +1,34 @@
 import {
-  MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
-  MODEL_RESPONSE_RECORD_SCHEMA_V1,
-  type ModelInvocationEnvelopeV1,
-  type ModelResponseRecordV1,
-  type Sha256DigestV1,
+  MODEL_INVOCATION_ENVELOPE_SCHEMA_,
+  MODEL_RESPONSE_RECORD_SCHEMA_,
+  type ModelInvocationEnvelope,
+  type ModelResponseRecord,
+  type Sha256Digest,
 } from '@kite/runtime-spi';
-import type { ModelArtifactStoreV1 } from './artifacts';
+import type { ModelArtifactStore } from './artifacts';
 import type { SupportedChatModel } from './factory';
 import { type AIMessage, aiMessage } from './messages';
 import {
-  BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1,
-  type BuiltinModelOperationExecutionPortV1,
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
+  type BuiltinModelOperationExecutionPort,
 } from './operation';
 import {
   ProviderDataAdmissionError,
-  type ProviderDataAdmissionGateV1,
-  type ProviderPayloadPartV1,
-  providerPayloadFromModelPromptV1,
+  type ProviderDataAdmissionGate,
+  type ProviderPayloadPart,
+  providerPayloadFromModelPrompt,
 } from './provider-data-admission';
-import { ModelAttemptFailureErrorV1, type ModelResponseSourceV1 } from './response-source';
+import { ModelAttemptFailureError, type ModelResponseSource } from './response-source';
 import {
-  computeModelSurfaceDigestLayersV1,
-  computeModelSurfaceDigestV1,
-  computePrivateModelEvidenceDigestV1,
+  computeModelSurfaceDigest,
+  computeModelSurfaceDigestLayers,
+  computePrivateModelEvidenceDigest,
 } from './surface-canonicalizer';
-import type { CompiledModelSurfaceV1 } from './surface-compiler';
+import type { CompiledModelSurface } from './surface-compiler';
 
-export type { SingleAttemptTransportV1 } from './response-source';
+export type { SingleAttemptTransport } from './response-source';
 
-export type ModelInvocationInterruptReasonV1 =
+export type ModelInvocationInterruptReason =
   | 'runtime_restored'
   | 'attempts_exhausted'
   | 'cancelled'
@@ -37,28 +37,28 @@ export type ModelInvocationInterruptReasonV1 =
   | 'surface_identity_changed'
   | 'persistence_unavailable';
 
-export type BuiltinModelEventV1 = Readonly<{ type: string; [key: string]: any }>;
+export type BuiltinModelEvent = Readonly<{ type: string; [key: string]: any }>;
 
-export interface ModelInvocationStateViewV1 {
+export interface ModelInvocationStateView {
   readonly revision: number;
   readonly session: { readonly threadId: string; readonly projectId?: string };
   readonly turn: { readonly turnId: string };
   readonly resourceBudget?: { readonly status: string };
 }
 
-export interface ModelRuntimeIdSourceV1 {
+export interface ModelRuntimeIdSource {
   next(scope: 'model_invocation'): string;
   now(): number;
 }
 
-export interface ModelResourcePreparationPlanV1 {
-  budget: ModelInvocationEnvelopeV1['resource']['budget'];
-  preparationEvents: BuiltinModelEventV1[];
+export interface ModelResourcePreparationPlan {
+  budget: ModelInvocationEnvelope['resource']['budget'];
+  preparationEvents: BuiltinModelEvent[];
   maxOutputTokens?: number;
 }
 
-export type ModelResourcePlannerV1 = (
-  state: Readonly<ModelInvocationStateViewV1>,
+export type ModelResourcePlanner = (
+  state: Readonly<ModelInvocationStateView>,
   input: {
     invocationId: string;
     inputTokens: number;
@@ -66,7 +66,7 @@ export type ModelResourcePlannerV1 = (
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
   },
-) => ModelResourcePreparationPlanV1;
+) => ModelResourcePreparationPlan;
 
 const DEFAULT_LIMITS = Object.freeze({
   maxAttempts: 5,
@@ -74,17 +74,17 @@ const DEFAULT_LIMITS = Object.freeze({
   totalTimeBudgetMs: 60_000,
 });
 
-function createLiveModelRuntimeIdSourceV1(): ModelRuntimeIdSourceV1 {
+function createLiveModelRuntimeIdSource(): ModelRuntimeIdSource {
   return Object.freeze({
     next: (_scope: 'model_invocation') => crypto.randomUUID(),
     now: () => Date.now(),
   });
 }
 
-function planUnconfiguredModelResourceV1(
-  state: Readonly<ModelInvocationStateViewV1>,
-  input: Parameters<ModelResourcePlannerV1>[1],
-): ModelResourcePreparationPlanV1 {
+function planUnconfiguredModelResource(
+  state: Readonly<ModelInvocationStateView>,
+  input: Parameters<ModelResourcePlanner>[1],
+): ModelResourcePreparationPlan {
   if (state.resourceBudget?.status && state.resourceBudget.status !== 'unconfigured') {
     throw new Error('Active resource budgets require a Host-owned Model resource planner.');
   }
@@ -95,7 +95,7 @@ function planUnconfiguredModelResourceV1(
   };
 }
 
-function createZeroModelResourceUsageV1() {
+function createZeroModelResourceUsage() {
   return {
     counters: {
       turns: 0,
@@ -116,93 +116,93 @@ function createZeroModelResourceUsageV1() {
   };
 }
 
-export interface ModelInvocationPersistenceV1<
-  State extends ModelInvocationStateViewV1 = ModelInvocationStateViewV1,
-  Event extends BuiltinModelEventV1 = BuiltinModelEventV1,
+export interface ModelInvocationPersistence<
+  State extends ModelInvocationStateView = ModelInvocationStateView,
+  Event extends BuiltinModelEvent = BuiltinModelEvent,
 > {
   getState(): Readonly<State>;
   persistEvents(events: Event[]): Promise<boolean>;
 }
 
-export interface ModelInvocationProvenanceInputV1 {
+export interface ModelInvocationProvenanceInput {
   parentInvocationId?: string | null;
   parentToolCallId?: string | null;
   contextCheckpointId?: string | null;
   promptContractVersion: string;
-  projectionEnvironmentDigest: Sha256DigestV1;
-  capabilityBindingDigest: Sha256DigestV1;
+  projectionEnvironmentDigest: Sha256Digest;
+  capabilityBindingDigest: Sha256Digest;
 }
 
-export interface NormalizedModelResponseV1 {
+export interface NormalizedModelResponse {
   readonly invocationId: string;
-  readonly message: ModelResponseRecordV1['response']['message'];
-  readonly finishReason: ModelResponseRecordV1['response']['finishReason'];
-  readonly usage: ModelResponseRecordV1['response']['usage'];
-  readonly providerMetadata: ModelResponseRecordV1['response']['providerMetadata'];
+  readonly message: ModelResponseRecord['response']['message'];
+  readonly finishReason: ModelResponseRecord['response']['finishReason'];
+  readonly usage: ModelResponseRecord['response']['usage'];
+  readonly providerMetadata: ModelResponseRecord['response']['providerMetadata'];
 }
 
-export interface ModelCompletionFinalizationV1<
+export interface ModelCompletionFinalization<
   T,
-  Event extends BuiltinModelEventV1 = BuiltinModelEventV1,
+  Event extends BuiltinModelEvent = BuiltinModelEvent,
 > {
   events: Event[];
   value: T;
 }
 
-export interface PendingModelCompletionV1<Event extends BuiltinModelEventV1 = BuiltinModelEventV1> {
+export interface PendingModelCompletion<Event extends BuiltinModelEvent = BuiltinModelEvent> {
   readonly invocationId: string;
-  commit(): Promise<NormalizedModelResponseV1>;
+  commit(): Promise<NormalizedModelResponse>;
   commitWith<T>(
     finalizer: (
-      response: Readonly<NormalizedModelResponseV1>,
-    ) => ModelCompletionFinalizationV1<T, Event>,
+      response: Readonly<NormalizedModelResponse>,
+    ) => ModelCompletionFinalization<T, Event>,
   ): Promise<T>;
 }
 
-export type ModelArtifactWriterV1 = Pick<ModelArtifactStoreV1, 'writeSurface' | 'writeResponse'>;
+export type ModelArtifactWriter = Pick<ModelArtifactStore, 'writeSurface' | 'writeResponse'>;
 
-export class ModelInvocationGatewayV1 {
-  readonly #artifacts: ModelArtifactWriterV1;
-  readonly #source: ModelResponseSourceV1;
+export class ModelInvocationGateway {
+  readonly #artifacts: ModelArtifactWriter;
+  readonly #source: ModelResponseSource;
   readonly #now: () => number;
   readonly #sleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
-  readonly #runtimeIdSource: ModelRuntimeIdSourceV1;
-  readonly #planResource: ModelResourcePlannerV1;
-  readonly #operationExecution: BuiltinModelOperationExecutionPortV1;
+  readonly #runtimeIdSource: ModelRuntimeIdSource;
+  readonly #planResource: ModelResourcePlanner;
+  readonly #operationExecution: BuiltinModelOperationExecutionPort;
 
   constructor(input: {
-    artifacts: ModelArtifactWriterV1;
-    source: ModelResponseSourceV1;
+    artifacts: ModelArtifactWriter;
+    source: ModelResponseSource;
     now?: () => number;
     sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
-    runtimeIdSource?: ModelRuntimeIdSourceV1;
-    planResource?: ModelResourcePlannerV1;
-    operationExecution: BuiltinModelOperationExecutionPortV1;
+    runtimeIdSource?: ModelRuntimeIdSource;
+    planResource?: ModelResourcePlanner;
+    operationExecution: BuiltinModelOperationExecutionPort;
   }) {
     this.#artifacts = input.artifacts;
     this.#source = input.source;
-    this.#runtimeIdSource = input.runtimeIdSource ?? createLiveModelRuntimeIdSourceV1();
-    this.#planResource = input.planResource ?? planUnconfiguredModelResourceV1;
+    this.#runtimeIdSource = input.runtimeIdSource ?? createLiveModelRuntimeIdSource();
+    this.#planResource = input.planResource ?? planUnconfiguredModelResource;
     this.#operationExecution = input.operationExecution;
     this.#now = input.now ?? (() => this.#runtimeIdSource.now());
     this.#sleep = input.sleep ?? abortableSleep;
   }
 
-  async invoke<State extends ModelInvocationStateViewV1, Event extends BuiltinModelEventV1>(input: {
+  async invoke<State extends ModelInvocationStateView, Event extends BuiltinModelEvent>(input: {
     model: SupportedChatModel;
-    compiled: CompiledModelSurfaceV1;
-    persistence: ModelInvocationPersistenceV1<State, Event>;
-    provenance: ModelInvocationProvenanceInputV1;
-    providerDataAdmission: ProviderDataAdmissionGateV1;
+    compiled: CompiledModelSurface;
+    persistence: ModelInvocationPersistence<State, Event>;
+    provenance: ModelInvocationProvenanceInput;
+    providerDataAdmission: ProviderDataAdmissionGate;
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
-    limits?: Partial<ModelInvocationEnvelopeV1['resource']['limits']>;
+    limits?: Partial<ModelInvocationEnvelope['resource']['limits']>;
     signal?: AbortSignal;
     emitEphemeral?: (event: Event) => void;
-  }): Promise<PendingModelCompletionV1<Event>> {
+  }): Promise<PendingModelCompletion<Event>> {
     const invocationId = this.#runtimeIdSource.next('model_invocation');
     const limits = normalizeLimits(input.limits);
-    const initialSurfaceDigest = computeModelSurfaceDigestV1(input.compiled.surface);
+    const initialSurfaceDigest = computeModelSurfaceDigest(input.compiled.surface);
     if (initialSurfaceDigest !== input.compiled.surfaceDigest) {
       throw new Error('Frozen Model Surface identity changed before admission.');
     }
@@ -235,9 +235,9 @@ export class ModelInvocationGatewayV1 {
       ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
     });
     assertResourceMatchesSurface(resource, input.compiled);
-    const layers = computeModelSurfaceDigestLayersV1(input.compiled.surface);
-    const envelope: ModelInvocationEnvelopeV1 = {
-      schema: MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
+    const layers = computeModelSurfaceDigestLayers(input.compiled.surface);
+    const envelope: ModelInvocationEnvelope = {
+      schema: MODEL_INVOCATION_ENVELOPE_SCHEMA_,
       surface: {
         artifact: surfaceArtifact,
         surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
@@ -262,7 +262,7 @@ export class ModelInvocationGatewayV1 {
       },
       resource: { budget: resource.budget, limits },
     };
-    const prepared: BuiltinModelEventV1 = {
+    const prepared: BuiltinModelEvent = {
       type: 'model.invocation_prepared',
       invocationId,
       purpose: input.compiled.surface.purpose,
@@ -288,7 +288,7 @@ export class ModelInvocationGatewayV1 {
     let retryBaselineReasoning = '';
     let attemptText = '';
     let attemptReasoning = '';
-    let interruptionReason: ModelInvocationInterruptReasonV1 = 'attempts_exhausted';
+    let interruptionReason: ModelInvocationInterruptReason = 'attempts_exhausted';
     for (let attempt = 1; attempt <= limits.maxAttempts; attempt += 1) {
       if (input.signal?.aborted) {
         await this.#interrupt(input.persistence, envelope, 'cancelled_before_dispatch', 'none');
@@ -314,7 +314,7 @@ export class ModelInvocationGatewayV1 {
         this.#now(),
       );
       if (attempt > 1 && remainingMs <= 0) break;
-      const attemptEvents: BuiltinModelEventV1[] = [];
+      const attemptEvents: BuiltinModelEvent[] = [];
       if (attempt === 1 && resource.budget.kind === 'reservation') {
         attemptEvents.push({
           type: 'resource_budget.dispatch_started',
@@ -331,7 +331,7 @@ export class ModelInvocationGatewayV1 {
         attemptEvents.push({ type: 'model.requested', requestId: invocationId, invocationId });
       }
       await persistAck(input.persistence, asModelEvents<Event>(attemptEvents));
-      if (computeModelSurfaceDigestV1(input.compiled.surface) !== initialSurfaceDigest) {
+      if (computeModelSurfaceDigest(input.compiled.surface) !== initialSurfaceDigest) {
         await this.#interrupt(input.persistence, envelope, 'surface_identity_changed', 'none');
         throw new Error('Frozen Model Surface changed after attempt acknowledgement.');
       }
@@ -346,10 +346,10 @@ export class ModelInvocationGatewayV1 {
           ? limits.perAttemptTimeoutMs
           : Math.min(limits.perAttemptTimeoutMs, remainingMs),
       );
-      let outcome: Awaited<ReturnType<ModelResponseSourceV1['attempt']>>;
+      let outcome: Awaited<ReturnType<ModelResponseSource['attempt']>>;
       try {
         outcome = await this.#operationExecution.execute({
-          operationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1[input.compiled.surface.purpose],
+          operationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_[input.compiled.surface.purpose],
           purpose: input.compiled.surface.purpose,
           invocationId,
           attemptOrdinal: attempt,
@@ -417,8 +417,8 @@ export class ModelInvocationGatewayV1 {
       }
       attemptAbort.dispose();
       if (outcome.kind === 'success') {
-        const responseRecord: ModelResponseRecordV1 = {
-          schema: MODEL_RESPONSE_RECORD_SCHEMA_V1,
+        const responseRecord: ModelResponseRecord = {
+          schema: MODEL_RESPONSE_RECORD_SCHEMA_,
           invocationId,
           surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
           route: input.compiled.surface.route,
@@ -429,7 +429,7 @@ export class ModelInvocationGatewayV1 {
         const normalized = deepFreeze({ invocationId, ...outcome.response });
         return this.#pendingCompletion(input.persistence, envelope, responseArtifact, normalized);
       }
-      priorError = new ModelAttemptFailureErrorV1(outcome, this.#source.failureError?.(outcome));
+      priorError = new ModelAttemptFailureError(outcome, this.#source.failureError?.(outcome));
       retryBaselineText = attemptText;
       retryBaselineReasoning = attemptReasoning;
       const transient = outcome.kind === 'retryable_failure';
@@ -466,21 +466,21 @@ export class ModelInvocationGatewayV1 {
     throw priorError ?? new Error('Model invocation attempt budget was exhausted.');
   }
 
-  #pendingCompletion<Event extends BuiltinModelEventV1>(
-    persistence: ModelInvocationPersistenceV1<ModelInvocationStateViewV1, Event>,
-    envelope: ModelInvocationEnvelopeV1,
-    responseArtifact: ReturnType<ModelArtifactWriterV1['writeResponse']>,
-    response: Readonly<NormalizedModelResponseV1>,
-  ): PendingModelCompletionV1<Event> {
+  #pendingCompletion<Event extends BuiltinModelEvent>(
+    persistence: ModelInvocationPersistence<ModelInvocationStateView, Event>,
+    envelope: ModelInvocationEnvelope,
+    responseArtifact: ReturnType<ModelArtifactWriter['writeResponse']>,
+    response: Readonly<NormalizedModelResponse>,
+  ): PendingModelCompletion<Event> {
     let committed = false;
     const commitWith = async <T>(
       finalizer: (
-        value: Readonly<NormalizedModelResponseV1>,
-      ) => ModelCompletionFinalizationV1<T, Event>,
+        value: Readonly<NormalizedModelResponse>,
+      ) => ModelCompletionFinalization<T, Event>,
     ): Promise<T> => {
       if (committed) throw new Error('Model completion handle is single-use.');
       committed = true;
-      let finalized: ModelCompletionFinalizationV1<T, Event>;
+      let finalized: ModelCompletionFinalization<T, Event>;
       try {
         finalized = finalizer(response);
         if (finalized && typeof (finalized as { then?: unknown }).then === 'function') {
@@ -493,7 +493,7 @@ export class ModelInvocationGatewayV1 {
         await this.#interrupt(persistence, envelope, 'persistence_unavailable', 'attempted');
         throw error;
       }
-      const events: BuiltinModelEventV1[] = [
+      const events: BuiltinModelEvent[] = [
         {
           type: 'model.invocation_completed',
           invocationId: envelope.provenance.invocationId,
@@ -503,7 +503,7 @@ export class ModelInvocationGatewayV1 {
         ...finalized.events,
       ];
       if (envelope.resource.budget.kind === 'reservation') {
-        const usage = createZeroModelResourceUsageV1();
+        const usage = createZeroModelResourceUsage();
         usage.counters.modelRequests = 1;
         usage.counters.inputTokens = response.usage.inputTokens ?? 0;
         usage.counters.outputTokens = response.usage.outputTokens ?? 0;
@@ -523,13 +523,13 @@ export class ModelInvocationGatewayV1 {
     });
   }
 
-  async #interrupt<Event extends BuiltinModelEventV1>(
-    persistence: ModelInvocationPersistenceV1<ModelInvocationStateViewV1, Event>,
-    envelope: ModelInvocationEnvelopeV1,
-    reasonCode: ModelInvocationInterruptReasonV1,
+  async #interrupt<Event extends BuiltinModelEvent>(
+    persistence: ModelInvocationPersistence<ModelInvocationStateView, Event>,
+    envelope: ModelInvocationEnvelope,
+    reasonCode: ModelInvocationInterruptReason,
     dispatchCertainty: 'none' | 'attempted' | 'unknown',
   ): Promise<void> {
-    const events: BuiltinModelEventV1[] = [
+    const events: BuiltinModelEvent[] = [
       {
         type: 'model.invocation_interrupted',
         invocationId: envelope.provenance.invocationId,
@@ -555,8 +555,8 @@ export class ModelInvocationGatewayV1 {
   }
 }
 
-export function normalizedModelResponseToAIMessageV1(
-  response: Readonly<NormalizedModelResponseV1>,
+export function normalizedModelResponseToAIMessage(
+  response: Readonly<NormalizedModelResponse>,
 ): AIMessage {
   const text = response.message.content
     .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
@@ -598,14 +598,11 @@ export function normalizedModelResponseToAIMessageV1(
   });
 }
 
-export function computeModelInvocationPrivateDigestV1(
-  domain: string,
-  value: unknown,
-): Sha256DigestV1 {
-  return computePrivateModelEvidenceDigestV1(domain, value);
+export function computeModelInvocationPrivateDigest(domain: string, value: unknown): Sha256Digest {
+  return computePrivateModelEvidenceDigest(domain, value);
 }
 
-function providerPayloadFromSurface(compiled: CompiledModelSurfaceV1): ProviderPayloadPartV1[] {
+function providerPayloadFromSurface(compiled: CompiledModelSurface): ProviderPayloadPart[] {
   const prompt = [
     ...(compiled.surface.request.system
       ? [{ role: 'system', content: compiled.surface.request.system }]
@@ -619,19 +616,19 @@ function providerPayloadFromSurface(compiled: CompiledModelSurfaceV1): ProviderP
       }),
     })),
   ];
-  return providerPayloadFromModelPromptV1(prompt);
+  return providerPayloadFromModelPrompt(prompt);
 }
 
-function classificationDigest(payload: readonly ProviderPayloadPartV1[]): Sha256DigestV1 {
-  return computeModelInvocationPrivateDigestV1(
+function classificationDigest(payload: readonly ProviderPayloadPart[]): Sha256Digest {
+  return computeModelInvocationPrivateDigest(
     'kite.model-payload-classification.v1',
     payload.map((part) => ({ kind: part.kind, label: part.label })),
   );
 }
 
 function assertResourceMatchesSurface(
-  resource: ModelResourcePreparationPlanV1,
-  compiled: CompiledModelSurfaceV1,
+  resource: ModelResourcePreparationPlan,
+  compiled: CompiledModelSurface,
 ): void {
   const requested = compiled.surface.request.maxOutputTokens;
   if (
@@ -644,8 +641,8 @@ function assertResourceMatchesSurface(
 }
 
 function normalizeLimits(
-  input: Partial<ModelInvocationEnvelopeV1['resource']['limits']> | undefined,
-): ModelInvocationEnvelopeV1['resource']['limits'] {
+  input: Partial<ModelInvocationEnvelope['resource']['limits']> | undefined,
+): ModelInvocationEnvelope['resource']['limits'] {
   const limits = { ...DEFAULT_LIMITS, ...input };
   for (const [key, value] of Object.entries(limits)) {
     if (!Number.isSafeInteger(value) || value < 1) {
@@ -658,20 +655,20 @@ function normalizeLimits(
   return limits;
 }
 
-function asModelEvent<Event extends BuiltinModelEventV1>(event: BuiltinModelEventV1): Event {
+function asModelEvent<Event extends BuiltinModelEvent>(event: BuiltinModelEvent): Event {
   return event as Event;
 }
 
-function asModelEvents<Event extends BuiltinModelEventV1>(
-  events: readonly BuiltinModelEventV1[],
+function asModelEvents<Event extends BuiltinModelEvent>(
+  events: readonly BuiltinModelEvent[],
 ): Event[] {
   return events as Event[];
 }
 
-async function persistAck<
-  State extends ModelInvocationStateViewV1,
-  Event extends BuiltinModelEventV1,
->(persistence: ModelInvocationPersistenceV1<State, Event>, events: Event[]): Promise<void> {
+async function persistAck<State extends ModelInvocationStateView, Event extends BuiltinModelEvent>(
+  persistence: ModelInvocationPersistence<State, Event>,
+  events: Event[],
+): Promise<void> {
   if (events.length === 0) return;
   let applied: boolean;
   try {

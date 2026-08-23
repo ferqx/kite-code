@@ -25,15 +25,15 @@ export {
   SESSION_LOG_OPERATION_RESERVE_BYTES,
   SESSION_LOG_TERMINAL_FILE,
   type SessionLogLeaseInspection,
-  type SessionLogLeaseRecordV1,
+  type SessionLogLeaseRecord,
   tryAcquireSessionLogAdmission,
   tryAcquireSessionOperation,
 } from './active-session-lease';
 export { SessionLogCollector, type SessionLogCollectorOptions } from './collector';
 export {
-  mapRuntimeMetadataV1,
-  mapSessionBoundaryMetadataV1,
-  metadataToolKindV1,
+  mapRuntimeMetadata,
+  mapSessionBoundaryMetadata,
+  metadataToolKind,
 } from './metadata-mapper';
 export { recordContentRuntimeEvent } from './recorder';
 export {
@@ -42,13 +42,13 @@ export {
   type SessionLogMaintenanceReport,
 } from './retention';
 export type {
-  MetadataEventRecordV1,
-  MetadataFieldsV1,
-  SessionLoggingContentInspectionV1,
-  SessionLoggingContentInspectorV1,
-  SessionLoggingContentProvenanceV1,
-  SessionLoggingDiagnosticV1,
-  SessionMetadataContextV1,
+  MetadataEventRecord,
+  MetadataFields,
+  SessionLoggingContentInspection,
+  SessionLoggingContentInspector,
+  SessionLoggingContentProvenance,
+  SessionLoggingDiagnostic,
+  SessionMetadataContext,
   TraceEvent,
   TraceRecord,
 } from './types';

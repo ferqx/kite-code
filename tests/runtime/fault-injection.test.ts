@@ -3,11 +3,11 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertAgentStateInvariants } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialStateV1, getActivePlanning } from '@kite/runtime-host';
-import { restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1 } from '../../scripts/support/runtime-host-state';
+import { createRuntimeHostStateInitialState, getActivePlanning } from '@kite/runtime-host';
+import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
 import {
-  openStateStoreForTestV1,
-  testStateProjectIdentityForWorkspaceV1,
+  openStateStoreForTest,
+  testStateProjectIdentityForWorkspace,
 } from '../../scripts/support/runtime-storage';
 
 const childFixture = join(import.meta.dir, '..', 'fixtures', 'runtime-fault-soak-child.ts');
@@ -56,17 +56,17 @@ async function waitForExit(proc: ReturnType<typeof Bun.spawn>, timeoutMs = 7000)
 
 describe('Runtime production fault injection', () => {
   const seedStoreSession = (storePath: string, sessionId: string, journalMode?: 'delete'): void => {
-    const store = openStateStoreForTestV1(storePath, {
+    const store = openStateStoreForTest(storePath, {
       ...(journalMode ? { options: { journalMode } } : {}),
     });
     store.saveSnapshot(
       sessionId,
-      createRuntimeHostStateInitialStateV1({
+      createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: sessionId,
         userId: 'fault-soak',
         workspace: process.cwd(),
-        ...testStateProjectIdentityForWorkspaceV1(process.cwd()),
+        ...testStateProjectIdentityForWorkspace(process.cwd()),
       }),
     );
     store.close();
@@ -85,12 +85,12 @@ describe('Runtime production fault injection', () => {
       proc.kill('SIGKILL');
       await proc.exited;
 
-      const recovered = restoreStateKernelCoordinatorV1({
+      const recovered = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'crash-recovery',
         userId: 'fault-soak',
         workspace: process.cwd(),
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       const state = recovered.getState();
       expect(state.resourceBudget).toMatchObject({
@@ -133,7 +133,7 @@ describe('Runtime production fault injection', () => {
       blocker = undefined;
       expect(await waitForExit(proc)).toBe(0);
 
-      const reopened = openStateStoreForTestV1(storePath);
+      const reopened = openStateStoreForTest(storePath);
       expect(reopened.loadEventsStrict('sqlite-busy')).toHaveLength(1);
       reopened.close();
     } finally {
@@ -158,7 +158,7 @@ describe('Runtime production fault injection', () => {
       database.run(`PRAGMA max_page_count = ${pageCount.page_count}`);
       database.close();
 
-      const store = openStateStoreForTestV1(storePath, {
+      const store = openStateStoreForTest(storePath, {
         options: {
           journalMode: 'delete',
           faultInjectionMaxPageCount: pageCount.page_count,
@@ -175,17 +175,17 @@ describe('Runtime production fault injection', () => {
       ).toThrow(/database or disk is full/i);
       store.close();
 
-      const reopened = openStateStoreForTestV1(storePath, {
+      const reopened = openStateStoreForTest(storePath, {
         options: { journalMode: 'delete' },
       });
       expect(reopened.loadEventsStrict('sqlite-full')).toEqual([]);
       reopened.close();
-      const recovered = restoreStateKernelCoordinatorV1({
+      const recovered = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'sqlite-full',
         userId: 'fault-soak',
         workspace: process.cwd(),
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(recovered.getState().recoveryState).toEqual({ kind: 'normal' });
       recovered.close();

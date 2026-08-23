@@ -1,4 +1,4 @@
-type ContextCompactionTerminalEventV1 =
+type ContextCompactionTerminalEvent =
   | {
       type: 'context.compaction_completed';
       compactionId: string;
@@ -34,7 +34,7 @@ export interface ContextCompactionTerminalNotice {
 
 /** One redacted user-facing terminal notice for a durable compaction result. */
 export function contextCompactionTerminalNotice(
-  event: ContextCompactionTerminalEventV1,
+  event: ContextCompactionTerminalEvent,
 ): ContextCompactionTerminalNotice {
   if (event.type === 'context.compaction_completed') {
     return {

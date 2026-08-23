@@ -13,19 +13,19 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
-  workspaceFilesystemMutationReadyDigestV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
+  workspaceFilesystemMutationReadyDigest,
+  workspaceFilesystemProtectedBoundaryDigest,
 } from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import type {
-  WorkspaceFilesystemGrantBindingV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemObserveOperationV1,
-  WorkspaceFilesystemPreparedMutationV1,
-  WorkspaceFilesystemProtectedBoundaryV1,
-  WorkspaceFilesystemProviderResultV1,
+  WorkspaceFilesystemGrantBinding,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemObserveOperation,
+  WorkspaceFilesystemPreparedMutation,
+  WorkspaceFilesystemProtectedBoundary,
+  WorkspaceFilesystemProviderResult,
 } from '@kite/runtime-spi';
 
 const PREIMAGE_ARTIFACT = Object.freeze({
@@ -50,7 +50,7 @@ afterEach(() => {
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
 });
 
-describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
+describe('LocalWorkspaceFilesystemProvider race and search parity', () => {
   test('rejects a replaced parent directory even when the target inode and preimage are unchanged', async () => {
     if (process.platform === 'win32') return;
     const harness = createHarness();
@@ -58,7 +58,7 @@ describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
     const displacedParent = join(harness.workspace, 'parent-before');
     mkdirSync(parent);
     writeFileSync(join(parent, 'file.txt'), 'before\n', 'utf8');
-    const operation: WorkspaceFilesystemMutationOperationV1 = {
+    const operation: WorkspaceFilesystemMutationOperation = {
       kind: 'write_file',
       path: 'parent/file.txt',
       pathScope: 'workspace_only',
@@ -87,7 +87,7 @@ describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
     mkdirSync(parent);
     writeFileSync(join(parent, 'file.txt'), 'before\n', 'utf8');
     writeFileSync(join(external, 'file.txt'), 'outside\n', 'utf8');
-    const operation: WorkspaceFilesystemMutationOperationV1 = {
+    const operation: WorkspaceFilesystemMutationOperation = {
       kind: 'write_file',
       path: 'parent/file.txt',
       pathScope: 'workspace_only',
@@ -134,7 +134,7 @@ describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
 
   test('retains recursive parent creation while pinning the prepared existing ancestor', async () => {
     const harness = createHarness();
-    const operation: WorkspaceFilesystemMutationOperationV1 = {
+    const operation: WorkspaceFilesystemMutationOperation = {
       kind: 'write_file',
       path: 'new/deep/file.txt',
       pathScope: 'workspace_only',
@@ -157,7 +157,7 @@ describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
     const harness = createHarness();
     put(harness.workspace, 'mode.txt', 'before\n');
     const target = join(harness.workspace, 'mode.txt');
-    const operation: WorkspaceFilesystemMutationOperationV1 = {
+    const operation: WorkspaceFilesystemMutationOperation = {
       kind: 'write_file',
       path: 'mode.txt',
       pathScope: 'workspace_only',
@@ -266,19 +266,19 @@ describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
 
 function createHarness(): {
   workspace: string;
-  binding: WorkspaceFilesystemGrantBindingV1;
-  protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1;
-  authority: WorkspaceFilesystemGrantAuthorityV1;
-  local: LocalWorkspaceFilesystemProviderV1;
+  binding: WorkspaceFilesystemGrantBinding;
+  protectedBoundary: WorkspaceFilesystemProtectedBoundary;
+  authority: WorkspaceFilesystemGrantAuthority;
+  local: LocalWorkspaceFilesystemProvider;
 } {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-workspace-provider-race-'));
   workspaces.push(workspace);
   let id = 0;
-  const authority = new WorkspaceFilesystemGrantAuthorityV1({
+  const authority = new WorkspaceFilesystemGrantAuthority({
     now: () => 1_000,
     idSource: () => `race-grant-${++id}`,
   });
-  const projection = createProtectedPathEvaluatorV1({
+  const projection = createProtectedPathEvaluator({
     workspaceRoot: workspace,
     mode: 'deny',
   }).projectFilesystemBoundary();
@@ -288,9 +288,9 @@ function createHarness(): {
   };
   const protectedBoundary = {
     ...unsignedBoundary,
-    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsignedBoundary),
   };
-  const binding: WorkspaceFilesystemGrantBindingV1 = {
+  const binding: WorkspaceFilesystemGrantBinding = {
     threadId: 'thread-race',
     turnId: 'turn-race',
     toolCallId: 'tool-call-race',
@@ -312,13 +312,13 @@ function createHarness(): {
     binding,
     protectedBoundary,
     authority,
-    local: new LocalWorkspaceFilesystemProviderV1(authority.verifier()),
+    local: new LocalWorkspaceFilesystemProvider(authority.verifier()),
   };
 }
 
 async function observe(
   harness: ReturnType<typeof createHarness>,
-  operation: WorkspaceFilesystemObserveOperationV1,
+  operation: WorkspaceFilesystemObserveOperation,
 ) {
   return harness.local.observe({
     grant: harness.authority.issueObserveGrant({
@@ -332,8 +332,8 @@ async function observe(
 
 async function prepareMutation(
   harness: ReturnType<typeof createHarness>,
-  operation: WorkspaceFilesystemMutationOperationV1,
-): Promise<WorkspaceFilesystemPreparedMutationV1> {
+  operation: WorkspaceFilesystemMutationOperation,
+): Promise<WorkspaceFilesystemPreparedMutation> {
   const result = await harness.local.prepareMutation({
     grant: harness.authority.issuePrepareGrant({
       binding: harness.binding,
@@ -348,8 +348,8 @@ async function prepareMutation(
 
 function issueCommitGrant(
   harness: ReturnType<typeof createHarness>,
-  operation: WorkspaceFilesystemMutationOperationV1,
-  prepared: WorkspaceFilesystemPreparedMutationV1,
+  operation: WorkspaceFilesystemMutationOperation,
+  prepared: WorkspaceFilesystemPreparedMutation,
 ) {
   const unsigned = {
     attempt: harness.binding.attempt,
@@ -367,7 +367,7 @@ function issueCommitGrant(
     prepared,
     ready: {
       ...unsigned,
-      readyDigest: workspaceFilesystemMutationReadyDigestV1(unsigned),
+      readyDigest: workspaceFilesystemMutationReadyDigest(unsigned),
     },
   });
   return harness.authority.issueCommitGrant({ authorization, ttlMs: 1_000 });
@@ -380,7 +380,7 @@ function put(workspace: string, path: string, content = 'needle\n'): void {
 }
 
 function expectFailure(
-  result: WorkspaceFilesystemProviderResultV1<unknown>,
+  result: WorkspaceFilesystemProviderResult<unknown>,
   code: 'path_invalid' | 'stale_preimage',
 ): void {
   expect(result.ok).toBe(false);

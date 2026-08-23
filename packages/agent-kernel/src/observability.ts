@@ -4,11 +4,11 @@ import {
   type RuntimeEvent,
   type RuntimeEventType,
 } from './events';
-import { isToolOutcomeV1, toolOutcomeMetricStatusV1 } from './normalization';
+import { isToolOutcome, toolOutcomeMetricStatus } from './normalization';
 
-export const OBSERVABILITY_RUNTIME_FACT_SCHEMA_V1 = 'kite.observability-runtime-fact.v1' as const;
+export const OBSERVABILITY_RUNTIME_FACT_SCHEMA_ = 'kite.observability-runtime-fact.v1' as const;
 
-export type KernelObservabilityToolStatusV1 =
+export type KernelObservabilityToolStatus =
   | 'success'
   | 'failed'
   | 'rejected'
@@ -17,12 +17,12 @@ export type KernelObservabilityToolStatusV1 =
   | 'exhausted'
   | 'unknown';
 
-export type KernelObservabilityFailureKindV1 =
+export type KernelObservabilityFailureKind =
   | 'process_limit_exceeded'
   | 'cancel_incomplete'
   | 'resource_saturated';
 
-export type KernelObservabilityReasonV1 =
+export type KernelObservabilityReason =
   | 'completed'
   | 'model'
   | 'policy'
@@ -37,85 +37,85 @@ export type KernelObservabilityReasonV1 =
   | 'cancellation'
   | 'unknown';
 
-interface KernelObservabilityFactBaseV1 {
-  readonly schema: typeof OBSERVABILITY_RUNTIME_FACT_SCHEMA_V1;
+interface KernelObservabilityFactBase {
+  readonly schema: typeof OBSERVABILITY_RUNTIME_FACT_SCHEMA_;
   readonly observedAt: string;
 }
 
-export interface KernelObservabilityToolOutcomeFactV1 {
-  readonly status: KernelObservabilityToolStatusV1;
+export interface KernelObservabilityToolOutcomeFact {
+  readonly status: KernelObservabilityToolStatus;
   readonly totalActiveMs?: number;
-  readonly failureKind?: KernelObservabilityFailureKindV1;
+  readonly failureKind?: KernelObservabilityFailureKind;
 }
 
-export type KernelObservabilityRuntimeFactV1 =
-  | (KernelObservabilityFactBaseV1 & { readonly type: 'turn.completed' })
-  | (KernelObservabilityFactBaseV1 & {
+export type KernelObservabilityRuntimeFact =
+  | (KernelObservabilityFactBase & { readonly type: 'turn.completed' })
+  | (KernelObservabilityFactBase & {
       readonly type: 'turn.aborted';
       readonly cause: 'user' | 'runtime';
     })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & {
       readonly type: 'model.responded';
       readonly durationMs?: number;
       readonly inputTokens?: number;
       readonly outputTokens?: number;
     })
-  | (KernelObservabilityFactBaseV1 & { readonly type: 'model.retry' })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & { readonly type: 'model.retry' })
+  | (KernelObservabilityFactBase & {
       readonly type: 'tool.finished';
       readonly capabilityAlias?: string;
-      readonly outcome: KernelObservabilityToolOutcomeFactV1;
+      readonly outcome: KernelObservabilityToolOutcomeFact;
     })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & {
       readonly type: 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
-      readonly outcome: KernelObservabilityToolOutcomeFactV1;
+      readonly outcome: KernelObservabilityToolOutcomeFact;
     })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & {
       readonly type: 'approval.rejected' | 'auto_review.completed';
-      readonly outcome: KernelObservabilityToolOutcomeFactV1;
+      readonly outcome: KernelObservabilityToolOutcomeFact;
     })
-  | (KernelObservabilityFactBaseV1 & { readonly type: 'skill.activation_started' })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & { readonly type: 'skill.activation_started' })
+  | (KernelObservabilityFactBase & {
       readonly type: 'skill.frame_closed';
       readonly status: 'closed' | 'invalidated';
     })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & {
       readonly type: 'plan.drafted' | 'plan.completed';
     })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & {
       readonly type: 'verification.completed';
       readonly outcome: 'passed' | 'failed' | 'inconclusive';
     })
-  | (KernelObservabilityFactBaseV1 & { readonly type: 'verification.waived' })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & { readonly type: 'verification.waived' })
+  | (KernelObservabilityFactBase & {
       readonly type: 'context.compaction_completed' | 'context.compaction_failed';
       readonly durationMs?: number;
     })
-  | (KernelObservabilityFactBaseV1 & { readonly type: 'context.hard_blocked' })
-  | (KernelObservabilityFactBaseV1 & { readonly type: 'context.compaction_reset' })
-  | (KernelObservabilityFactBaseV1 & { readonly type: 'context.hard_block_cleared' })
-  | (KernelObservabilityFactBaseV1 & { readonly type: 'runtime.action_ignored' })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & { readonly type: 'context.hard_blocked' })
+  | (KernelObservabilityFactBase & { readonly type: 'context.compaction_reset' })
+  | (KernelObservabilityFactBase & { readonly type: 'context.hard_block_cleared' })
+  | (KernelObservabilityFactBase & { readonly type: 'runtime.action_ignored' })
+  | (KernelObservabilityFactBase & {
       readonly type: 'runtime.cancellation_diagnostic';
       readonly unconfirmedDescendantCount: number;
     })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & {
       readonly type: 'run.completed' | 'run.error';
       readonly outcome: 'completed' | 'failed' | 'cancelled' | 'unknown';
-      readonly reason: KernelObservabilityReasonV1;
-      readonly failureKind?: KernelObservabilityFailureKindV1;
+      readonly reason: KernelObservabilityReason;
+      readonly failureKind?: KernelObservabilityFailureKind;
     })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & {
       readonly type: 'resource_budget.reconciled';
       readonly activeToolInvocations: number;
       readonly activeShellInvocations: number;
     })
-  | (KernelObservabilityFactBaseV1 & {
+  | (KernelObservabilityFactBase & {
       readonly type: 'resource_budget.waiter_timed_out';
     });
 
 /** Event discriminants with an explicit zero-metric decision. */
-const IGNORED_RUNTIME_EVENT_TYPES_V1 = [
+const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'resource_budget.configured',
   'resource_budget.reserved',
   'resource_budget.dispatch_started',
@@ -226,12 +226,12 @@ const IGNORED_RUNTIME_EVENT_TYPES_V1 = [
   'subagent.recovery_journal_merged',
 ] as const satisfies readonly RuntimeEventType[];
 
-export const OBSERVABILITY_IGNORED_RUNTIME_EVENT_TYPES_V1 = Object.freeze(
-  IGNORED_RUNTIME_EVENT_TYPES_V1,
+export const OBSERVABILITY_IGNORED_RUNTIME_EVENT_TYPES_ = Object.freeze(
+  IGNORED_RUNTIME_EVENT_TYPES_,
 );
 
 /** Every current State event must have one explicit observability decision. */
-export const OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_V1 = Object.freeze([
+export const OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_ = Object.freeze([
   'turn.completed',
   'turn.aborted',
   'model.responded',
@@ -261,10 +261,10 @@ export const OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_V1 = Object.freeze([
   'resource_budget.waiter_timed_out',
 ] as const satisfies readonly RuntimeEventType[]);
 
-export function assertObservabilityEventCoverageV1(): void {
+export function assertObservabilityEventCoverage(): void {
   const declared = [
-    ...OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_V1,
-    ...OBSERVABILITY_IGNORED_RUNTIME_EVENT_TYPES_V1,
+    ...OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_,
+    ...OBSERVABILITY_IGNORED_RUNTIME_EVENT_TYPES_,
   ];
   if (declared.length !== Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length) {
     throw new Error('Observability RuntimeEvent coverage count is out of date.');
@@ -279,7 +279,7 @@ export function assertObservabilityEventCoverageV1(): void {
   }
 }
 
-assertObservabilityEventCoverageV1();
+assertObservabilityEventCoverage();
 
 const FAILURE_KINDS: ReadonlySet<string> = new Set([
   'process_limit_exceeded',
@@ -293,10 +293,10 @@ const FAILURE_KINDS: ReadonlySet<string> = new Set([
  * a fallback for an un-enveloped event. No State, Store, receipt identity or
  * free-form content is copied into the returned fact.
  */
-export function projectRuntimeEventToObservabilityFactV1(
+export function projectRuntimeEventToObservabilityFact(
   input: unknown,
   fallbackObservedAt: string,
-): KernelObservabilityRuntimeFactV1 | undefined {
+): KernelObservabilityRuntimeFact | undefined {
   const envelope = isEventEnvelopeInput(input) ? input : undefined;
   const event = envelope?.payload ?? (isRuntimeEventShape(input) ? input : undefined);
   if (!event) return undefined;
@@ -304,7 +304,7 @@ export function projectRuntimeEventToObservabilityFactV1(
   const type = event.type;
   const value = record(event);
   if (!value) return undefined;
-  const base = { schema: OBSERVABILITY_RUNTIME_FACT_SCHEMA_V1, observedAt } as const;
+  const base = { schema: OBSERVABILITY_RUNTIME_FACT_SCHEMA_, observedAt } as const;
 
   switch (type) {
     case 'turn.completed':
@@ -427,12 +427,12 @@ export function projectRuntimeEventToObservabilityFactV1(
   }
 }
 
-export interface KernelObservabilityEventEnvelopeV1 {
+export interface KernelObservabilityEventEnvelope {
   readonly payload: RuntimeEvent;
   readonly occurredAt: string;
 }
 
-function isEventEnvelopeInput(value: unknown): value is KernelObservabilityEventEnvelopeV1 {
+function isEventEnvelopeInput(value: unknown): value is KernelObservabilityEventEnvelope {
   const candidate = record(value);
   return Boolean(
     candidate && typeof candidate.occurredAt === 'string' && isRuntimeEventShape(candidate.payload),
@@ -454,7 +454,7 @@ function isRuntimeEventShape(value: unknown): value is RuntimeEvent {
 
 function toolFact(
   base: {
-    readonly schema: typeof OBSERVABILITY_RUNTIME_FACT_SCHEMA_V1;
+    readonly schema: typeof OBSERVABILITY_RUNTIME_FACT_SCHEMA_;
     readonly observedAt: string;
   },
   type:
@@ -466,9 +466,9 @@ function toolFact(
     | 'auto_review.completed',
   value: Readonly<Record<string, unknown>>,
   includeCapabilityAlias: boolean,
-): KernelObservabilityRuntimeFactV1 | undefined {
-  const outcome = value.outcomeV1;
-  if (!isToolOutcomeV1(outcome)) return undefined;
+): KernelObservabilityRuntimeFact | undefined {
+  const outcome = value.outcome;
+  if (!isToolOutcome(outcome)) return undefined;
   const failureKind = failureKindValue(outcome.failure?.kind);
   return {
     ...base,
@@ -477,7 +477,7 @@ function toolFact(
       ? { capabilityAlias: boundedAlias(value.name) }
       : {}),
     outcome: {
-      status: toolOutcomeMetricStatusV1(outcome),
+      status: toolOutcomeMetricStatus(outcome),
       ...(outcome.timing.totalActiveMs === undefined
         ? {}
         : { totalActiveMs: outcome.timing.totalActiveMs }),
@@ -486,13 +486,13 @@ function toolFact(
   };
 }
 
-function failureKindValue(value: unknown): KernelObservabilityFailureKindV1 | undefined {
+function failureKindValue(value: unknown): KernelObservabilityFailureKind | undefined {
   return typeof value === 'string' && FAILURE_KINDS.has(value)
-    ? (value as KernelObservabilityFailureKindV1)
+    ? (value as KernelObservabilityFailureKind)
     : undefined;
 }
 
-function reasonValue(value: string | undefined): KernelObservabilityReasonV1 {
+function reasonValue(value: string | undefined): KernelObservabilityReason {
   if (!value) return 'unknown';
   if (value === 'completed') return 'completed';
   if (value.includes('model')) return 'model';

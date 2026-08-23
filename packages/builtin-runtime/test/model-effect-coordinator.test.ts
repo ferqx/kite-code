@@ -1,29 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1,
-  BuiltinModelEffectCoordinatorV1,
-  type BuiltinModelOperationAttemptV1,
-  type BuiltinModelOperationExecutionPortV1,
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
+  BuiltinModelEffectCoordinator,
+  type BuiltinModelOperationAttempt,
+  type BuiltinModelOperationExecutionPort,
   createChatModel,
-  type ModelArtifactWriterV1,
-  ModelInvocationGatewayV1,
-  type ModelInvocationPersistenceV1,
-  type ModelInvocationStateViewV1,
-  type ModelResponseSourceV1,
-  type ModelRuntimeConfigV1,
+  type ModelArtifactWriter,
+  ModelInvocationGateway,
+  type ModelInvocationPersistence,
+  type ModelInvocationStateView,
+  type ModelResponseSource,
+  type ModelRuntimeConfig,
 } from '@kite/builtin-runtime/model';
 import {
-  MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
-  type ModelAttemptOutcomeV1,
-  type PrivateArtifactRefV1,
+  MODEL_ATTEMPT_OUTCOME_SCHEMA_,
+  type ModelAttemptOutcome,
+  type PrivateArtifactRef,
   type VerificationReviewerInput,
 } from '@kite/runtime-spi';
 import type {
-  BuiltinContextTokenEstimateViewV1,
-  BuiltinRuntimeStateViewV1,
+  BuiltinContextTokenEstimateView,
+  BuiltinRuntimeStateView,
 } from '../src/model/runtime-view';
 
-const CONFIG: ModelRuntimeConfigV1 = Object.freeze({
+const CONFIG: ModelRuntimeConfig = Object.freeze({
   apiKey: 'coordinator-fixture-key',
   baseURL: 'https://coordinator-fixture.invalid/v1',
   modelName: 'coordinator-fixture',
@@ -40,7 +40,7 @@ const PROVIDER_DATA_ADMISSION = () => ({
   maxWorkspaceDataClassification: 'confidential' as const,
 });
 
-type ReviewStateV1 = ModelInvocationStateViewV1 & {
+type ReviewState = ModelInvocationStateView & {
   readonly context: { readonly activeCheckpoint?: { readonly sourceDigest: string } };
 };
 
@@ -51,8 +51,8 @@ const EVIDENCE: VerificationReviewerInput = {
   skillOutputs: [],
 };
 
-function createPersistence(): ModelInvocationPersistenceV1<ReviewStateV1> {
-  const state: ReviewStateV1 = Object.freeze({
+function createPersistence(): ModelInvocationPersistence<ReviewState> {
+  const state: ReviewState = Object.freeze({
     revision: 1,
     session: { threadId: 'coordinator-thread', projectId: 'project_coordinator_test' },
     turn: { turnId: 'coordinator-turn' },
@@ -67,7 +67,7 @@ function createPersistence(): ModelInvocationPersistenceV1<ReviewStateV1> {
 
 function artifactRef<K extends 'model_surface' | 'model_response'>(
   kind: K,
-): PrivateArtifactRefV1 & { kind: K } {
+): PrivateArtifactRef & { kind: K } {
   return {
     artifactId: `coordinator-${kind}`,
     kind,
@@ -76,9 +76,9 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
   };
 }
 
-function successfulOutcome(text: string): ModelAttemptOutcomeV1 {
+function successfulOutcome(text: string): ModelAttemptOutcome {
   return {
-    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
     kind: 'success',
     response: {
       message: {
@@ -97,12 +97,12 @@ function createGatewayFixture(input?: { invalidVerificationResponse?: boolean })
   let gatewayInvocations = 0;
   let sourceInvocations = 0;
   let invocationOrdinal = 0;
-  let purpose: BuiltinModelOperationAttemptV1['purpose'] | undefined;
-  const artifacts: ModelArtifactWriterV1 = {
+  let purpose: BuiltinModelOperationAttempt['purpose'] | undefined;
+  const artifacts: ModelArtifactWriter = {
     writeSurface: () => artifactRef('model_surface'),
     writeResponse: () => artifactRef('model_response'),
   };
-  const source: ModelResponseSourceV1 = Object.freeze({
+  const source: ModelResponseSource = Object.freeze({
     attempt: async () => {
       sourceInvocations += 1;
       const text =
@@ -116,15 +116,15 @@ function createGatewayFixture(input?: { invalidVerificationResponse?: boolean })
       return successfulOutcome(text);
     },
   });
-  const operationExecution: BuiltinModelOperationExecutionPortV1 = Object.freeze({
-    execute: async (attempt: BuiltinModelOperationAttemptV1) => {
+  const operationExecution: BuiltinModelOperationExecutionPort = Object.freeze({
+    execute: async (attempt: BuiltinModelOperationAttempt) => {
       gatewayInvocations += 1;
       purpose = attempt.purpose;
-      expect(attempt.operationId).toBe(BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1[attempt.purpose]);
+      expect(attempt.operationId).toBe(BUILTIN_MODEL_OPERATION_BY_PURPOSE_[attempt.purpose]);
       return attempt.attempt();
     },
   });
-  const gateway = new ModelInvocationGatewayV1({
+  const gateway = new ModelInvocationGateway({
     artifacts,
     source,
     operationExecution,
@@ -153,7 +153,7 @@ const TOOL_INPUT = {
   request: { id: 'tool-call-fixture', name: 'read_file', args: { path: 'README.md' } },
 };
 
-const COMPACTION_ESTIMATE: BuiltinContextTokenEstimateViewV1 = {
+const COMPACTION_ESTIMATE: BuiltinContextTokenEstimateView = {
   systemTokens: 100,
   toolSchemaTokens: 0,
   transcriptTokens: 20_000,
@@ -167,7 +167,7 @@ function contextStateWithHistory(
   turns = 6,
   content: string | ((index: number) => string) = 'historical context '.repeat(500),
   interactionKind = 'idle',
-): BuiltinRuntimeStateViewV1 {
+): BuiltinRuntimeStateView {
   return {
     activeTaskId: null,
     tasks: {},
@@ -199,7 +199,7 @@ function contextStateWithHistory(
   };
 }
 
-function pendingCompaction(state: BuiltinRuntimeStateViewV1) {
+function pendingCompaction(state: BuiltinRuntimeStateView) {
   return {
     compactionId: 'coordinator-compaction',
     reason: 'manual' as const,
@@ -210,10 +210,10 @@ function pendingCompaction(state: BuiltinRuntimeStateViewV1) {
   };
 }
 
-describe('BuiltinModelEffectCoordinatorV1', () => {
+describe('BuiltinModelEffectCoordinator', () => {
   test('routes both reviewer semantics through the one injected Gateway', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     const approval = await coordinator.reviewToolApproval({
       ...TOOL_INPUT,
@@ -235,7 +235,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
 
   test('returns typed unavailable results before the Gateway when context is incomplete', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     const approval = await coordinator.reviewToolApproval({
       ...TOOL_INPUT,
@@ -259,7 +259,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
 
   test('propagates provider denial without invoking the Gateway attempt', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     await expect(
       coordinator.reviewVerificationEvidence({
@@ -279,7 +279,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
 
   test('preserves inconclusive semantics for an invalid verification response', async () => {
     const fixture = createGatewayFixture({ invalidVerificationResponse: true });
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     const result = await coordinator.reviewVerificationEvidence({
       config: CONFIG,
@@ -298,7 +298,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
 
   test('creates one context compactor that uses the injected Gateway once', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
     const state = contextStateWithHistory();
     const compact = coordinator.createContextCompactor({
       config: CONFIG,
@@ -323,7 +323,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
 
   test('fails without context or on provider denial before any summary attempt', async () => {
     const missingContextFixture = createGatewayFixture();
-    const missingContextCoordinator = new BuiltinModelEffectCoordinatorV1(
+    const missingContextCoordinator = new BuiltinModelEffectCoordinator(
       missingContextFixture.gateway,
     );
     const state = contextStateWithHistory();
@@ -348,7 +348,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
     });
 
     const deniedFixture = createGatewayFixture();
-    const deniedCoordinator = new BuiltinModelEffectCoordinatorV1(deniedFixture.gateway);
+    const deniedCoordinator = new BuiltinModelEffectCoordinator(deniedFixture.gateway);
     const deniedCompactor = deniedCoordinator.createContextCompactor({
       config: CONFIG,
       model: MODEL,
@@ -374,7 +374,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
 
   test('rejects low-gain and unsafe boundaries before invoking the summary source', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
     const makeCompactor = () =>
       coordinator.createContextCompactor({
         config: CONFIG,

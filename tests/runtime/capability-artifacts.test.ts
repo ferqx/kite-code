@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import {
   CapabilityArtifactError,
   CapabilityArtifactStore,
-  capabilityResultDigestV1,
-  capabilityResultEvidenceDigestV1,
-  readBoundCapabilityArtifactV1,
+  capabilityResultDigest,
+  capabilityResultEvidenceDigest,
+  readBoundCapabilityArtifact,
 } from '@kite/builtin-runtime';
 import type { CapabilityArtifactRef } from '@kite/runtime-contract';
 
@@ -65,35 +65,35 @@ describe('CapabilityArtifactStore', () => {
     const ref = store.write(invocationId, result);
     const binding = {
       invocationId,
-      resultDigest: capabilityResultDigestV1(result),
-      evidenceDigest: capabilityResultEvidenceDigestV1(result),
+      resultDigest: capabilityResultDigest(result),
+      evidenceDigest: capabilityResultEvidenceDigest(result),
       filesystemObservation: observation,
     };
 
-    expect(readBoundCapabilityArtifactV1(store, ref, binding)).toEqual(result);
+    expect(readBoundCapabilityArtifact(store, ref, binding)).toEqual(result);
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, { ...binding, invocationId: 'wrong-owner' }),
+      readBoundCapabilityArtifact(store, ref, { ...binding, invocationId: 'wrong-owner' }),
     ).toThrow('does not match its Runtime receipt');
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, {
+      readBoundCapabilityArtifact(store, ref, {
         ...binding,
         resultDigest: 'f'.repeat(64),
       }),
     ).toThrow('does not match its Runtime receipt');
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, {
+      readBoundCapabilityArtifact(store, ref, {
         ...binding,
         evidenceDigest: 'f'.repeat(64),
       }),
     ).toThrow('does not match its Runtime receipt');
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, {
+      readBoundCapabilityArtifact(store, ref, {
         ...binding,
         filesystemObservation: { ...observation, contentDigest: `sha256:${'f'.repeat(64)}` },
       }),
     ).toThrow('filesystem observation');
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, {
+      readBoundCapabilityArtifact(store, ref, {
         invocationId,
         resultDigest: binding.resultDigest,
         evidenceDigest: binding.evidenceDigest,

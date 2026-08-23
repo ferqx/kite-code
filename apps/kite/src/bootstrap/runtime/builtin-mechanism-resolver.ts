@@ -1,26 +1,22 @@
-import type { BuiltinWorkspaceFilesystemInvocationDispatcherV1 } from '@kite/builtin-runtime/filesystem';
+import type { BuiltinWorkspaceFilesystemInvocationDispatcher } from '@kite/builtin-runtime/filesystem';
 import {
-  type BuiltinGitExecutionMechanismV1,
-  type BuiltinMechanismRecordV1,
-  type BuiltinShellExecutionResultV1,
-  isReadOnlyShellCommandV1,
-  mergeBuiltinMechanismBundleV1,
+  type BuiltinGitExecutionMechanism,
+  type BuiltinMechanismRecord,
+  type BuiltinShellExecutionResult,
+  isReadOnlyShellCommand,
+  mergeBuiltinMechanismBundle,
 } from '#builtin-runtime';
 import type {
-  CapabilityExecutionMechanismV1,
-  CapabilityPolicyEffectsV1,
-  GitInspectRequestV1,
-  RuntimeJsonValueV1,
-  WorkspaceFilesystemOperationV1,
+  CapabilityExecutionMechanism,
+  CapabilityPolicyEffects,
+  GitInspectRequest,
+  RuntimeJsonValue,
+  WorkspaceFilesystemOperation,
 } from '#runtime-spi';
 
-export type AppBuiltinMechanismGrantUsedV1 =
-  | 'none'
-  | 'approve_once'
-  | 'same_command'
-  | 'full_access';
+export type AppBuiltinMechanismGrantUsed = 'none' | 'approve_once' | 'same_command' | 'full_access';
 
-export interface AppBuiltinShellExecutorInputV1 {
+export interface AppBuiltinShellExecutorInput {
   readonly workspace: string;
   readonly command: string;
   readonly timeoutMs: number;
@@ -31,34 +27,34 @@ export interface AppBuiltinShellExecutorInputV1 {
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
 }
 
-export interface AppBuiltinShellExecutorV1 {
+export interface AppBuiltinShellExecutor {
   readonly execute: (
-    input: Readonly<AppBuiltinShellExecutorInputV1>,
-  ) => Promise<Readonly<BuiltinShellExecutionResultV1>>;
+    input: Readonly<AppBuiltinShellExecutorInput>,
+  ) => Promise<Readonly<BuiltinShellExecutionResult>>;
 }
 
-export interface AppBuiltinPreassembledMechanismResolverInputV1 {
-  readonly executionMechanism: CapabilityExecutionMechanismV1;
+export interface AppBuiltinPreassembledMechanismResolverInput {
+  readonly executionMechanism: CapabilityExecutionMechanism;
   readonly workspace: string;
-  readonly canonicalArguments: Readonly<RuntimeJsonValueV1>;
-  readonly grantUsed: AppBuiltinMechanismGrantUsedV1;
+  readonly canonicalArguments: Readonly<RuntimeJsonValue>;
+  readonly grantUsed: AppBuiltinMechanismGrantUsed;
   /** Optional for legacy policy-allow calls; mandatory for approve_once. */
   readonly authorizationKind?: 'policy_allow' | 'approved_call';
-  readonly policyEffects: Readonly<CapabilityPolicyEffectsV1>;
+  readonly policyEffects: Readonly<CapabilityPolicyEffects>;
   readonly signal: AbortSignal;
-  readonly filesystemRuntime?: Readonly<BuiltinWorkspaceFilesystemInvocationDispatcherV1>;
-  readonly gitBroker?: Readonly<BuiltinGitExecutionMechanismV1>;
-  readonly shellExecutor?: Readonly<AppBuiltinShellExecutorV1>;
+  readonly filesystemRuntime?: Readonly<BuiltinWorkspaceFilesystemInvocationDispatcher>;
+  readonly gitBroker?: Readonly<BuiltinGitExecutionMechanism>;
+  readonly shellExecutor?: Readonly<AppBuiltinShellExecutor>;
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** One exact wrapper for web, MCP, Skill, or planning. */
-  readonly preassembledMechanism?: BuiltinMechanismRecordV1;
+  readonly preassembledMechanism?: BuiltinMechanismRecord;
 }
 
-export type AppBuiltinMechanismResolverV1 = (
-  input: Readonly<AppBuiltinPreassembledMechanismResolverInputV1>,
-) => BuiltinMechanismRecordV1;
+export type AppBuiltinMechanismResolver = (
+  input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
+) => BuiltinMechanismRecord;
 
-export type AppBuiltinMechanismResolverFailureCodeV1 =
+export type AppBuiltinMechanismResolverFailureCode =
   | 'invalid_facts'
   | 'mechanism_missing'
   | 'mechanism_wrapper_invalid'
@@ -66,12 +62,12 @@ export type AppBuiltinMechanismResolverFailureCodeV1 =
   | 'filesystem_path_invalid'
   | 'signal_aborted';
 
-export class AppBuiltinMechanismResolverErrorV1 extends Error {
-  readonly code: AppBuiltinMechanismResolverFailureCodeV1;
+export class AppBuiltinMechanismResolverError extends Error {
+  readonly code: AppBuiltinMechanismResolverFailureCode;
 
-  constructor(code: AppBuiltinMechanismResolverFailureCodeV1) {
+  constructor(code: AppBuiltinMechanismResolverFailureCode) {
     super(`Builtin mechanism resolver failed closed: ${code}.`);
-    this.name = 'AppBuiltinMechanismResolverErrorV1';
+    this.name = 'AppBuiltinMechanismResolverError';
     this.code = code;
   }
 }
@@ -81,43 +77,43 @@ export class AppBuiltinMechanismResolverErrorV1 extends Error {
  * already-canonical, already-authorized facts and contributes only the one
  * mechanism map required by the selected Builtin operation.
  */
-export function createAppBuiltinMechanismResolverV1(): AppBuiltinMechanismResolverV1 {
-  return (input) => resolveBuiltinMechanismsV1(input);
+export function createAppBuiltinMechanismResolver(): AppBuiltinMechanismResolver {
+  return (input) => resolveBuiltinMechanisms(input);
 }
 
-function resolveBuiltinMechanismsV1(
-  input: Readonly<AppBuiltinPreassembledMechanismResolverInputV1>,
-): BuiltinMechanismRecordV1 {
-  assertFactsV1(input);
+function resolveBuiltinMechanisms(
+  input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
+): BuiltinMechanismRecord {
+  assertFacts(input);
 
   switch (input.executionMechanism) {
     case 'catalog':
-      if (input.preassembledMechanism !== undefined) failV1('mechanism_wrapper_invalid');
-      return mergeBuiltinMechanismBundleV1({ executionMechanism: 'catalog' });
+      if (input.preassembledMechanism !== undefined) fail('mechanism_wrapper_invalid');
+      return mergeBuiltinMechanismBundle({ executionMechanism: 'catalog' });
     case 'filesystem':
-      return filesystemMechanismV1(input);
+      return filesystemMechanism(input);
     case 'git':
-      return gitMechanismV1(input);
+      return gitMechanism(input);
     case 'shell':
-      return shellMechanismV1(input);
+      return shellMechanism(input);
     case 'web':
     case 'mcp':
     case 'skill':
     case 'planning':
-      return preassembledMechanismV1(input);
+      return preassembledMechanism(input);
     case 'subagent':
     case 'user_input':
     case 'model':
     case 'verification':
-      failV1('unsupported_mechanism');
+      fail('unsupported_mechanism');
   }
 }
 
-function filesystemMechanismV1(
-  input: Readonly<AppBuiltinPreassembledMechanismResolverInputV1>,
-): BuiltinMechanismRecordV1 {
+function filesystemMechanism(
+  input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
+): BuiltinMechanismRecord {
   if (input.preassembledMechanism !== undefined || !input.filesystemRuntime) {
-    failV1('mechanism_missing');
+    fail('mechanism_missing');
   }
   const externalReadAllowed =
     input.policyEffects.externalRead === true && input.policyEffects.externalWrite !== true;
@@ -126,27 +122,27 @@ function filesystemMechanismV1(
   const allowExternalPaths = externalReadAllowed || externalWriteAllowed;
   const mechanism = Object.freeze({
     allowExternalPaths,
-    dispatch: async (operation: WorkspaceFilesystemOperationV1) => {
-      const scoped = scopeFilesystemOperationV1(operation, {
+    dispatch: async (operation: WorkspaceFilesystemOperation) => {
+      const scoped = scopeFilesystemOperation(operation, {
         externalReadAllowed,
         externalWriteAllowed,
       });
       return input.filesystemRuntime!.dispatch(scoped);
     },
   });
-  return mergeBuiltinMechanismBundleV1({
+  return mergeBuiltinMechanismBundle({
     executionMechanism: 'filesystem',
     prepared: Object.freeze({ filesystem: mechanism }),
   });
 }
 
-function scopeFilesystemOperationV1(
-  operation: WorkspaceFilesystemOperationV1,
+function scopeFilesystemOperation(
+  operation: WorkspaceFilesystemOperation,
   policy: Readonly<{
     readonly externalReadAllowed: boolean;
     readonly externalWriteAllowed: boolean;
   }>,
-): WorkspaceFilesystemOperationV1 {
+): WorkspaceFilesystemOperation {
   if (
     !operation ||
     typeof operation !== 'object' ||
@@ -155,7 +151,7 @@ function scopeFilesystemOperationV1(
     operation.path.length > 16_384 ||
     /\p{Cc}/u.test(operation.path)
   ) {
-    failV1('filesystem_path_invalid');
+    fail('filesystem_path_invalid');
   }
   const mutation = operation.kind === 'write_file' || operation.kind === 'edit_file';
   const pathScope = mutation
@@ -171,31 +167,31 @@ function scopeFilesystemOperationV1(
   return Object.freeze({ ...operation, pathScope });
 }
 
-function gitMechanismV1(
-  input: Readonly<AppBuiltinPreassembledMechanismResolverInputV1>,
-): BuiltinMechanismRecordV1 {
+function gitMechanism(
+  input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
+): BuiltinMechanismRecord {
   if (input.preassembledMechanism !== undefined || !input.gitBroker) {
-    failV1('mechanism_missing');
+    fail('mechanism_missing');
   }
   const broker = input.gitBroker;
   const mechanism = Object.freeze({
-    inspect: (request: GitInspectRequestV1, signal?: AbortSignal) =>
+    inspect: (request: GitInspectRequest, signal?: AbortSignal) =>
       broker.inspect(request, signal ?? input.signal),
   });
-  return mergeBuiltinMechanismBundleV1({
+  return mergeBuiltinMechanismBundle({
     executionMechanism: 'git',
     prepared: Object.freeze({ git: mechanism }),
   });
 }
 
-function shellMechanismV1(
-  input: Readonly<AppBuiltinPreassembledMechanismResolverInputV1>,
-): BuiltinMechanismRecordV1 {
+function shellMechanism(
+  input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
+): BuiltinMechanismRecord {
   if (input.preassembledMechanism !== undefined || !input.shellExecutor) {
-    failV1('mechanism_missing');
+    fail('mechanism_missing');
   }
-  const command = recordStringV1(input.canonicalArguments, 'command');
-  const readOnly = isReadOnlyShellCommandV1(command);
+  const command = recordString(input.canonicalArguments, 'command');
+  const readOnly = isReadOnlyShellCommand(command);
   // Preserve the accepted State grant semantics: any durable Shell grant
   // authorizes the already-governed network mode. App does not reinterpret
   // the command or narrow a Builtin policy compilation a second time.
@@ -210,14 +206,14 @@ function shellMechanismV1(
   const executor = input.shellExecutor;
   const mechanism = Object.freeze({
     execute: (shellInput: Readonly<{ command: string; timeoutMs: number }>) => {
-      if (input.signal.aborted) failV1('signal_aborted');
+      if (input.signal.aborted) fail('signal_aborted');
       if (
         typeof shellInput.command !== 'string' ||
         shellInput.command !== command ||
         !Number.isSafeInteger(shellInput.timeoutMs) ||
         shellInput.timeoutMs <= 0
       ) {
-        failV1('invalid_facts');
+        fail('invalid_facts');
       }
       return executor.execute({
         workspace: input.workspace,
@@ -231,27 +227,27 @@ function shellMechanismV1(
       });
     },
   });
-  return mergeBuiltinMechanismBundleV1({
+  return mergeBuiltinMechanismBundle({
     executionMechanism: 'shell',
     prepared: Object.freeze({ shell: mechanism }),
   });
 }
 
-function preassembledMechanismV1(
-  input: Readonly<AppBuiltinPreassembledMechanismResolverInputV1>,
-): BuiltinMechanismRecordV1 {
-  if (!input.preassembledMechanism) failV1('mechanism_missing');
+function preassembledMechanism(
+  input: Readonly<AppBuiltinPreassembledMechanismResolverInput>,
+): BuiltinMechanismRecord {
+  if (!input.preassembledMechanism) fail('mechanism_missing');
   try {
-    return mergeBuiltinMechanismBundleV1({
+    return mergeBuiltinMechanismBundle({
       executionMechanism: input.executionMechanism,
       prepared: input.preassembledMechanism,
     });
   } catch {
-    failV1('mechanism_wrapper_invalid');
+    fail('mechanism_wrapper_invalid');
   }
 }
 
-function assertFactsV1(input: Readonly<AppBuiltinPreassembledMechanismResolverInputV1>): void {
+function assertFacts(input: Readonly<AppBuiltinPreassembledMechanismResolverInput>): void {
   if (
     !input ||
     typeof input !== 'object' ||
@@ -262,50 +258,50 @@ function assertFactsV1(input: Readonly<AppBuiltinPreassembledMechanismResolverIn
     typeof input.signal.addEventListener !== 'function' ||
     !['none', 'approve_once', 'same_command', 'full_access'].includes(input.grantUsed)
   ) {
-    failV1('invalid_facts');
+    fail('invalid_facts');
   }
   if (
     input.authorizationKind !== undefined &&
     input.authorizationKind !== 'policy_allow' &&
     input.authorizationKind !== 'approved_call'
   ) {
-    failV1('invalid_facts');
+    fail('invalid_facts');
   }
   if (input.grantUsed === 'approve_once' && input.authorizationKind !== 'approved_call') {
-    failV1('invalid_facts');
+    fail('invalid_facts');
   }
-  assertFrozenJsonV1(input.canonicalArguments, 'canonical arguments');
+  assertFrozenJson(input.canonicalArguments, 'canonical arguments');
   if (!input.policyEffects || !Object.isFrozen(input.policyEffects)) {
-    failV1('invalid_facts');
+    fail('invalid_facts');
   }
   if (input.preassembledMechanism !== undefined) {
     if (
       !Object.isFrozen(input.preassembledMechanism) ||
       Array.isArray(input.preassembledMechanism)
     ) {
-      failV1('mechanism_wrapper_invalid');
+      fail('mechanism_wrapper_invalid');
     }
   }
 }
 
-function assertFrozenJsonV1(value: unknown, label: string): asserts value is RuntimeJsonValueV1 {
+function assertFrozenJson(value: unknown, label: string): asserts value is RuntimeJsonValue {
   const seen = new WeakSet<object>();
   const visit = (candidate: unknown): void => {
     if (candidate === null || typeof candidate === 'string' || typeof candidate === 'boolean')
       return;
     if (typeof candidate === 'number') {
-      if (!Number.isFinite(candidate)) failV1('invalid_facts');
+      if (!Number.isFinite(candidate)) fail('invalid_facts');
       return;
     }
     if (typeof candidate !== 'object' || !Object.isFrozen(candidate) || seen.has(candidate)) {
-      failV1('invalid_facts');
+      fail('invalid_facts');
     }
     seen.add(candidate);
     if (Array.isArray(candidate)) {
       for (const item of candidate) visit(item);
     } else {
       const prototype = Object.getPrototypeOf(candidate);
-      if (prototype !== Object.prototype && prototype !== null) failV1('invalid_facts');
+      if (prototype !== Object.prototype && prototype !== null) fail('invalid_facts');
       for (const item of Object.values(candidate)) visit(item);
     }
     seen.delete(candidate);
@@ -313,23 +309,23 @@ function assertFrozenJsonV1(value: unknown, label: string): asserts value is Run
   try {
     visit(value);
   } catch (error) {
-    if (error instanceof AppBuiltinMechanismResolverErrorV1) throw error;
-    throw new AppBuiltinMechanismResolverErrorV1('invalid_facts');
+    if (error instanceof AppBuiltinMechanismResolverError) throw error;
+    throw new AppBuiltinMechanismResolverError('invalid_facts');
   }
   void label;
 }
 
-function recordStringV1(value: RuntimeJsonValueV1, key: string): string {
+function recordString(value: RuntimeJsonValue, key: string): string {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    failV1('invalid_facts');
+    fail('invalid_facts');
   }
-  const record = value as { readonly [key: string]: RuntimeJsonValueV1 };
+  const record = value as { readonly [key: string]: RuntimeJsonValue };
   if (typeof record[key] !== 'string' || record[key].length === 0) {
-    failV1('invalid_facts');
+    fail('invalid_facts');
   }
   return record[key] as string;
 }
 
-function failV1(code: AppBuiltinMechanismResolverFailureCodeV1): never {
-  throw new AppBuiltinMechanismResolverErrorV1(code);
+function fail(code: AppBuiltinMechanismResolverFailureCode): never {
+  throw new AppBuiltinMechanismResolverError(code);
 }

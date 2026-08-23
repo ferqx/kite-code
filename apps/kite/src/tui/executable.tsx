@@ -1,6 +1,6 @@
 import packageJson from '../../package.json' with { type: 'json' };
 import { createKiteTuiSessionManager } from '../bootstrap';
-import { runKiteInternalMcpStdioChildV1 } from '../bootstrap/mcp-stdio-composition';
+import { runKiteInternalMcpStdioChild } from '../bootstrap/mcp-stdio-composition';
 import { runTui as runTuiClient, type TuiBootstrapProps } from './index';
 import type { SessionManager } from './session-manager';
 
@@ -15,7 +15,7 @@ export function runTui(props: KiteTuiProps = {}): void {
 }
 
 if (import.meta.main) {
-  if (runKiteInternalMcpStdioChildV1()) {
+  if (runKiteInternalMcpStdioChild()) {
     // The private wrapper owns stdin/stdout until its authenticated terminal.
   } else if (process.argv.includes('--version')) {
     console.log(`Kite Code TUI ${packageJson.version}`);

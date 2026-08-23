@@ -1,9 +1,9 @@
 import {
-  runtimeHostStateCanonicalToolOutcomeV1 as canonicalToolOutcomeV1,
-  type StateRuntimeEventV1 as RuntimeEvent,
-  type StateToolOutcomeV1 as ToolOutcomeV1,
+  runtimeHostStateCanonicalToolOutcome as canonicalToolOutcome,
+  type StateRuntimeEvent as RuntimeEvent,
+  type StateToolOutcome as ToolOutcome,
 } from '@kite/runtime-host';
-import type { MetadataEventRecordV1, MetadataFieldsV1, SessionMetadataContextV1 } from './types';
+import type { MetadataEventRecord, MetadataFields, SessionMetadataContext } from './types';
 
 const BUILTIN_TOOL_KINDS = new Set([
   'ask_user',
@@ -43,13 +43,13 @@ function timestamp(): string {
  * dynamic MCP tools collapse to one category, and everything else becomes
  * `other` so a malicious/provider-defined name cannot smuggle content.
  */
-export function metadataToolKindV1(name: string): string {
+export function metadataToolKind(name: string): string {
   if (name.startsWith('mcp__')) return 'mcp_tool';
   return BUILTIN_TOOL_KINDS.has(name) ? name : 'other';
 }
 
-function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['status'] {
-  const outcomeStatus = (outcome: ToolOutcomeV1): MetadataEventRecordV1['status'] => {
+function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecord['status'] {
+  const outcomeStatus = (outcome: ToolOutcome): MetadataEventRecord['status'] => {
     switch (outcome.status) {
       case 'success':
         return 'ok';
@@ -68,10 +68,10 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['stat
     case 'tool.retry_recorded':
     case 'tool.cancelled':
     case 'approval.rejected':
-      return outcomeStatus(canonicalToolOutcomeV1(event));
+      return outcomeStatus(canonicalToolOutcome(event));
     case 'auto_review.completed':
       return event.result.ok && !event.result.approved && !event.result.escalatedToUser
-        ? outcomeStatus(canonicalToolOutcomeV1(event))
+        ? outcomeStatus(canonicalToolOutcome(event))
         : 'ok';
     case 'run.error':
     case 'context.compaction_failed':
@@ -112,8 +112,8 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['stat
   }
 }
 
-function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
-  const toolOutcomeMetadata = (outcome: ToolOutcomeV1): MetadataFieldsV1 => ({
+function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFields {
+  const toolOutcomeMetadata = (outcome: ToolOutcome): MetadataFields => ({
     toolOutcomeStatus: outcome.status,
     ...(outcome.failure ? { toolOutcomeDetailCode: outcome.failure.detailCode } : {}),
     toolDispatchState: outcome.dispatchState,
@@ -139,36 +139,34 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
     case 'tool.queued':
     case 'tool.finished':
       return {
-        toolKind: metadataToolKindV1(event.name),
+        toolKind: metadataToolKind(event.name),
         ...(event.type === 'tool.finished' && event.result.toolTokenCount != null
           ? { outputTokens: event.result.toolTokenCount }
           : {}),
-        ...(event.type === 'tool.finished'
-          ? toolOutcomeMetadata(canonicalToolOutcomeV1(event))
-          : {}),
+        ...(event.type === 'tool.finished' ? toolOutcomeMetadata(canonicalToolOutcome(event)) : {}),
       };
     case 'tool.failed':
       return {
         ...(event.failure ? { failureKind: event.failure.kind } : {}),
-        ...toolOutcomeMetadata(canonicalToolOutcomeV1(event)),
+        ...toolOutcomeMetadata(canonicalToolOutcome(event)),
       };
     case 'tool.rejected':
       return {
         ...(event.failure ? { failureKind: event.failure.kind } : {}),
-        ...toolOutcomeMetadata(canonicalToolOutcomeV1(event)),
+        ...toolOutcomeMetadata(canonicalToolOutcome(event)),
       };
     case 'tool.cancelled':
-      return toolOutcomeMetadata(canonicalToolOutcomeV1(event));
+      return toolOutcomeMetadata(canonicalToolOutcome(event));
     case 'tool.retry_recorded':
       return {
         failureKind: event.failure.kind,
         retryAttempt: event.retryAttempt,
         retryMaxAttempts: 1,
-        ...toolOutcomeMetadata(canonicalToolOutcomeV1(event)),
+        ...toolOutcomeMetadata(canonicalToolOutcome(event)),
       };
     case 'approval.requested':
       return {
-        toolKind: metadataToolKindV1(event.approval.tool),
+        toolKind: metadataToolKind(event.approval.tool),
         approvalType: event.approval.risk,
       };
     case 'approval.granted':
@@ -178,11 +176,11 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
         approvalType: 'tool',
         approvalResult: 'rejected',
         ...(event.failure ? { failureKind: event.failure.kind } : {}),
-        ...toolOutcomeMetadata(canonicalToolOutcomeV1(event)),
+        ...toolOutcomeMetadata(canonicalToolOutcome(event)),
       };
     case 'auto_review.requested':
       return {
-        toolKind: metadataToolKindV1(event.toolName),
+        toolKind: metadataToolKind(event.toolName),
         approvalType: 'auto_review',
       };
     case 'auto_review.completed':
@@ -195,7 +193,7 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
             : 'rejected',
         durationMs: event.result.durationMs,
         ...(event.result.ok && !event.result.approved && !event.result.escalatedToUser
-          ? toolOutcomeMetadata(canonicalToolOutcomeV1(event))
+          ? toolOutcomeMetadata(canonicalToolOutcome(event))
           : {}),
       };
     case 'verification.requested':
@@ -299,7 +297,7 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
       return { capabilityKind: 'runtime_capability' };
     case 'subagent.step':
     case 'subagent.tool_result':
-      return { toolKind: metadataToolKindV1(event.subagent.toolName) };
+      return { toolKind: metadataToolKind(event.subagent.toolName) };
     case 'subagent.completed':
     case 'subagent.failed':
       return { durationMs: event.subagent.durationMs };
@@ -318,7 +316,7 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
  * Build a production record directly from typed Runtime fields. Do not replace
  * this with JSON serialization/scrubbing: omission is the security boundary.
  */
-export function mapRuntimeMetadataV1(event: RuntimeEvent): MetadataEventRecordV1 {
+export function mapRuntimeMetadata(event: RuntimeEvent): MetadataEventRecord {
   return {
     schemaVersion: 1,
     eventType: event.type,
@@ -328,11 +326,11 @@ export function mapRuntimeMetadataV1(event: RuntimeEvent): MetadataEventRecordV1
   };
 }
 
-export function mapSessionBoundaryMetadataV1(
+export function mapSessionBoundaryMetadata(
   eventType: 'session.start' | 'session.end',
-  status: MetadataEventRecordV1['status'],
-  context: SessionMetadataContextV1 = {},
-): MetadataEventRecordV1 {
+  status: MetadataEventRecord['status'],
+  context: SessionMetadataContext = {},
+): MetadataEventRecord {
   const releaseVersion = safeReleaseVersion(context.releaseVersion);
   const releaseCohort = safeIdentifier(context.releaseCohort);
   const releaseProfile = SAFE_RELEASE_PROFILES.has(context.releaseProfile ?? '')

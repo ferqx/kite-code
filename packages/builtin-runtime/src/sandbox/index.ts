@@ -1,64 +1,64 @@
-export type { SandboxPreparationLifecycleV1 } from '@kite/runtime-spi';
-export { projectApprovedProxyEnvironmentV1 } from './approved-proxy-environment';
+export type { SandboxPreparationLifecycle } from '@kite/runtime-spi';
+export { projectApprovedProxyEnvironment } from './approved-proxy-environment';
 export { generateBwrapArgs } from './bwrap';
-export { findUsableCgroupPidsRunnerV1 } from './cgroup-pids';
+export { findUsableCgroupPidsRunner } from './cgroup-pids';
 export {
-  buildCgroupPidsInvocationV1,
-  type CgroupPidsRunnerV1,
-  type CgroupPidsScopeIdentityV1,
-  createCgroupPidsUnitNameV1,
-  isCgroupPidsExecutablePathV1,
-  isCgroupPidsPathV1,
-  isCgroupPidsUnitNameV1,
+  buildCgroupPidsInvocation,
+  type CgroupPidsRunner,
+  type CgroupPidsScopeIdentity,
+  createCgroupPidsUnitName,
+  isCgroupPidsExecutablePath,
+  isCgroupPidsPath,
+  isCgroupPidsUnitName,
 } from './cgroup-pids-contract';
 export {
-  checkDangerousCanonicalPathV1,
+  checkDangerousCanonicalPath,
   checkDangerousPaths,
-  type FixedDangerousPathIdentityV1,
-  resolveFixedDangerousPathIdentitiesV1,
+  type FixedDangerousPathIdentity,
+  resolveFixedDangerousPathIdentities,
 } from './dangerous-paths';
-export type { ExecutionEnvironmentIdentityV1 } from './environment-identity';
-export { readExecutionEnvironmentIdentityV1 } from './environment-identity';
-export { sandboxBackendCapabilitiesV1 } from './execution/backend-capabilities';
+export type { ExecutionEnvironmentIdentity } from './environment-identity';
+export { readExecutionEnvironmentIdentity } from './environment-identity';
+export { sandboxBackendCapabilities } from './execution/backend-capabilities';
 export {
-  directoryNamesAtV1,
-  openDirectoryAtV1,
-  removeDirectoryTreeAtV1,
-  removeEmptyDirectoryAtV1,
+  directoryNamesAt,
+  openDirectoryAt,
+  removeDirectoryTreeAt,
+  removeEmptyDirectoryAt,
 } from './execution/descriptor-relative-cleanup';
 export {
-  SandboxExecutionGrantAuthorityV1,
-  SandboxExecutionGrantErrorV1,
-  type SandboxExecutionGrantVerifierV1,
-  type SandboxPreparationIntentRecordV1,
-  sandboxCleanupDigestV1,
-  sandboxCommandDigestV1,
-  sandboxPreparationDigestV1,
-  sandboxPreparedPlanDigestV1,
+  SandboxExecutionGrantAuthority,
+  SandboxExecutionGrantError,
+  type SandboxExecutionGrantVerifier,
+  type SandboxPreparationIntentRecord,
+  sandboxCleanupDigest,
+  sandboxCommandDigest,
+  sandboxPreparationDigest,
+  sandboxPreparedPlanDigest,
 } from './execution/grant-authority';
 export {
-  buildCgroupPidsKillInvocationV1,
-  cgroupPidsUnitFromArgvV1,
-  LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_V1,
-  type LinuxCgroupScopeCandidateV1,
-  parseCgroupPidsEmptyV1,
-  parseCgroupPidsPopulatedV1,
-  parseLinuxCgroupScopeIdentityV1,
+  buildCgroupPidsKillInvocation,
+  cgroupPidsUnitFromArgv,
+  LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_,
+  type LinuxCgroupScopeCandidate,
+  parseCgroupPidsEmpty,
+  parseCgroupPidsPopulated,
+  parseLinuxCgroupScopeIdentity,
 } from './execution/linux-cgroup-scope';
 export {
-  type LocalSandboxExecutionProviderOptionsV1,
-  LocalSandboxExecutionProviderV1,
+  LocalSandboxExecutionProvider,
+  type LocalSandboxExecutionProviderOptions,
 } from './execution/local-provider';
 export {
-  cleanupPosixSandboxRuntimeRootsNoSpawnV1,
-  cleanupSandboxRuntimeDirNoSpawnV1,
-  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
-  createPosixSandboxRuntimeRootsForPreparationV1,
-  createSandboxRuntimeDirForPreparationV1,
-  createWindowsSandboxRuntimeDirForPreparationV1,
-  type PosixSandboxRuntimeRootsV1,
-  sandboxRuntimeDirForPreparationV1,
-  sandboxRuntimeRootsForPreparationV1,
+  cleanupPosixSandboxRuntimeRootsNoSpawn,
+  cleanupSandboxRuntimeDirNoSpawn,
+  cleanupWindowsSandboxRuntimeDirNoSpawn,
+  createPosixSandboxRuntimeRootsForPreparation,
+  createSandboxRuntimeDirForPreparation,
+  createWindowsSandboxRuntimeDirForPreparation,
+  type PosixSandboxRuntimeRoots,
+  sandboxRuntimeDirForPreparation,
+  sandboxRuntimeRootsForPreparation,
 } from './execution/local-runtime-filesystem';
 export {
   buildEnvExportSnippet,
@@ -68,51 +68,51 @@ export {
 } from './execution/local-shell-preparation';
 export {
   buildWindowsRestrictedTokenEnvForTest,
-  createWindowsRestrictedTokenCapabilitySidV1,
-  createWindowsRestrictedTokenDirectWorkspaceV1,
+  createWindowsRestrictedTokenCapabilitySid,
+  createWindowsRestrictedTokenDirectWorkspace,
   createWindowsRestrictedTokenInvocationName,
   DEFAULT_WINDOWS_RESTRICTED_TOKEN_MAX_PROCESSES,
-  decodeWindowsRestrictedTokenPreparedTransportV1,
-  prepareWindowsRestrictedTokenTransportV1,
-  type RestrictedTokenInvocationRequestV1,
-  resolveBunExecutableForWindowsRestrictedTokenV1,
-  resolveWindowsRestrictedTokenFilesystemScopeV1,
-  resolveWindowsRestrictedTokenNetworkModeV1,
-  restrictedTokenNetworkUnsupportedReasonV1,
-  type SandboxShellPreparationInputV1,
+  decodeWindowsRestrictedTokenPreparedTransport,
+  prepareWindowsRestrictedTokenTransport,
+  type RestrictedTokenInvocationRequest,
+  resolveBunExecutableForWindowsRestrictedToken,
+  resolveWindowsRestrictedTokenFilesystemScope,
+  resolveWindowsRestrictedTokenNetworkMode,
+  restrictedTokenNetworkUnsupportedReason,
+  type SandboxShellPreparationInput,
   WINDOWS_RESTRICTED_TOKEN_ENV_ALLOWLIST,
-  type WindowsRestrictedTokenDirectWorkspaceV1,
-  type WindowsRestrictedTokenExecutorOptionsV1,
-  type WindowsRestrictedTokenPreparationResultV1,
-  type WindowsRestrictedTokenPreparedTransportV1,
-  windowsApprovedNetworkScopeErrorV1,
-  wrapWindowsRestrictedTokenCommandV1,
+  type WindowsRestrictedTokenDirectWorkspace,
+  type WindowsRestrictedTokenExecutorOptions,
+  type WindowsRestrictedTokenPreparationResult,
+  type WindowsRestrictedTokenPreparedTransport,
+  windowsApprovedNetworkScopeError,
+  wrapWindowsRestrictedTokenCommand,
 } from './execution/windows-preparation';
 export {
-  isDescriptorAdmittedByExecutionCapabilitySurfaceV1,
-  type SandboxCapabilityDescriptorV1,
+  isDescriptorAdmittedByExecutionCapabilitySurface,
+  type SandboxCapabilityDescriptor,
 } from './execution-capability-surface';
 export { resolveSandboxExitCode } from './executor';
-export { isDescriptorAdmittedByInProcessReadOnlyCatalogV1 } from './in-process-read-only';
+export { isDescriptorAdmittedByInProcessReadOnlyCatalog } from './in-process-read-only';
 export type {
-  NetworkAdmissionReceiptV1,
-  NetworkBoundaryEnforcerV1,
+  NetworkAdmissionReceipt,
+  NetworkBoundaryEnforcer,
   NetworkBoundaryFailureCode,
-  NetworkDecisionReceiptV1,
-  NetworkDecisionRecorderV1,
-  NetworkResolvedAddressV1,
-  NetworkResolverV1,
+  NetworkDecisionReceipt,
+  NetworkDecisionRecorder,
+  NetworkResolvedAddress,
+  NetworkResolver,
 } from './network-enforcer';
 export {
-  createNetworkBoundaryEnforcerV1,
-  createNetworkBoundaryFetchV1,
+  createNetworkBoundaryEnforcer,
+  createNetworkBoundaryFetch,
   isPublicNetworkAddress,
   NetworkBoundaryError,
 } from './network-enforcer';
-export type { NetworkBoundaryPolicyV1 } from './network-policy';
+export type { NetworkBoundaryPolicy } from './network-policy';
 export {
   canonicalNetworkHostname,
-  networkBoundaryPolicyFromExecutionBoundaryV1,
+  networkBoundaryPolicyFromExecutionBoundary,
 } from './network-policy';
 export {
   canonicalPathForComparison,
@@ -126,48 +126,48 @@ export type { ResolveSandboxRuntimeOptions, SandboxBackend, SandboxRuntime } fro
 export {
   BUBBLEWRAP_USABILITY_PROBE_ARGS,
   detectSandboxBackend,
-  discoverSandboxBackendCandidateV1,
+  discoverSandboxBackendCandidate,
   findUsableBubblewrap,
   isSandboxAvailable,
   resolveSandboxRuntime,
-  sandboxSupportsFullModeV1,
+  sandboxSupportsFullMode,
   selectSandboxBackend,
   usableBubblewrapPath,
 } from './platform';
 export {
-  type SandboxPreparationArtifactErrorCodeV1,
-  SandboxPreparationArtifactErrorV1,
-  type SandboxPreparationArtifactStoreOptionsV1,
-  SandboxPreparationArtifactStoreV1,
-  sandboxPreparationArtifactRootV1,
+  SandboxPreparationArtifactError,
+  type SandboxPreparationArtifactErrorCode,
+  SandboxPreparationArtifactStore,
+  type SandboxPreparationArtifactStoreOptions,
+  sandboxPreparationArtifactRoot,
 } from './preparation-artifacts';
 export {
-  type BuiltinSandboxPreparationErrorCodeV1,
-  BuiltinSandboxPreparationErrorV1,
-  type BuiltinSandboxPreparationInputV1,
-  type BuiltinSandboxPreparationResultV1,
-  createBuiltinSandboxPreparationV1,
+  BuiltinSandboxPreparationError,
+  type BuiltinSandboxPreparationErrorCode,
+  type BuiltinSandboxPreparationInput,
+  type BuiltinSandboxPreparationResult,
+  createBuiltinSandboxPreparation,
 } from './preparation-authority';
 export {
-  sandboxAbandonmentLifecycleIntentDigestV1,
-  sandboxDisposalLifecycleIntentDigestV1,
-  sandboxPreparationIntentDigestV1,
-  sandboxPreparationReadyDigestV1,
-  validateSandboxPreparationIntentRecordV1,
-  validateSandboxPreparationReadyRecordV1,
+  sandboxAbandonmentLifecycleIntentDigest,
+  sandboxDisposalLifecycleIntentDigest,
+  sandboxPreparationIntentDigest,
+  sandboxPreparationReadyDigest,
+  validateSandboxPreparationIntentRecord,
+  validateSandboxPreparationReadyRecord,
 } from './preparation-evidence';
 export type {
-  BuiltinPreparedShellDisposalEvidenceV1,
-  BuiltinPreparedShellExecutionConsumerOptionsV1,
-  BuiltinPreparedShellExecutionInputV1,
-  BuiltinPreparedShellExecutionKindV1,
-  BuiltinPreparedShellExecutionResultV1,
+  BuiltinPreparedShellDisposalEvidence,
+  BuiltinPreparedShellExecutionConsumerOptions,
+  BuiltinPreparedShellExecutionInput,
+  BuiltinPreparedShellExecutionKind,
+  BuiltinPreparedShellExecutionResult,
 } from './prepared-execution-consumer';
-export { createBuiltinPreparedShellExecutionConsumerV1 } from './prepared-execution-consumer';
+export { createBuiltinPreparedShellExecutionConsumer } from './prepared-execution-consumer';
 export {
-  currentProcessTreeCapabilityV1,
-  type ProcessTreeCapabilityEvidenceV1,
-  type ProcessTreeHardLimitMechanismV1,
+  currentProcessTreeCapability,
+  type ProcessTreeCapabilityEvidence,
+  type ProcessTreeHardLimitMechanism,
 } from './process-tree-capability';
 export {
   canonicalExistingPath,
@@ -177,16 +177,16 @@ export {
   type SandboxProfileOptions,
 } from './profile';
 export {
-  type CreateProtectedPathEvaluatorV1Input,
-  createProtectedPathEvaluatorV1,
-  PROTECTED_WORKSPACE_DIRECTORIES_V1,
-  PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
-  PROTECTED_WORKSPACE_FILES_V1,
-  type ProtectedPathAccessV1,
-  type ProtectedPathDecisionReasonV1,
-  type ProtectedPathDecisionV1,
-  type ProtectedPathEvaluatorV1,
-  type ProtectedPathOperationV1,
+  type CreateProtectedPathEvaluatorInput,
+  createProtectedPathEvaluator,
+  PROTECTED_WORKSPACE_DIRECTORIES_,
+  PROTECTED_WORKSPACE_FILE_PREFIXES_,
+  PROTECTED_WORKSPACE_FILES_,
+  type ProtectedPathAccess,
+  type ProtectedPathDecision,
+  type ProtectedPathDecisionReason,
+  type ProtectedPathEvaluator,
+  type ProtectedPathOperation,
 } from './protected-path';
 export { findApplySeccomp, resolveSeccompPath } from './seccomp';
 export {
@@ -194,29 +194,29 @@ export {
   findSystemBash,
   gatherSystemBashCandidates,
   isWslStubPath,
-  type SystemBashCandidatesV1,
+  type SystemBashCandidates,
 } from './shell-bash-path';
 export type {
-  SandboxInvocationIdentityV1,
+  SandboxInvocationIdentity,
   ShellExecutor,
   ShellInput,
-  ShellNetworkBrokerV1,
-  ShellProcessHandleV1,
-  ShellProcessPortV1,
-  ShellProcessTerminationV1,
-  ShellProcessTreeV1,
+  ShellNetworkBroker,
+  ShellProcessHandle,
+  ShellProcessPort,
+  ShellProcessTermination,
+  ShellProcessTree,
   ShellResult,
 } from './shell-contract';
 export {
   appendTimeoutMessage,
   assertInsideWorkspace,
-  buildHostShellInvocationsV1,
-  buildPolicyProvenReadOnlyHostShellInvocationsV1,
-  createBuiltinShellExecutorV1,
+  buildHostShellInvocations,
+  buildPolicyProvenReadOnlyHostShellInvocations,
+  createBuiltinShellExecutor,
   DEFAULT_SHELL_TIMEOUT_MS,
-  type HostShellInvocationV1,
-  type HostShellKindV1,
-  type HostShellResolutionDepsV1,
+  type HostShellInvocation,
+  type HostShellKind,
+  type HostShellResolutionDeps,
   resolveShellTimeoutMs,
   timeoutMessage,
 } from './shell-executor';
@@ -226,20 +226,20 @@ export {
   POLICY_PROVEN_READ_ONLY_EXECUTION,
 } from './trusted-readonly-environment';
 export type {
-  BoundaryEnforcementV1,
-  ExecutionBackendCapabilitiesV1,
-  ExecutionBoundaryAdmissionReasonV1,
-  ExecutionBoundaryAdmissionV1,
-  ExecutionBoundaryV1,
-  ExecutionCapabilitySurfaceV1,
+  BoundaryEnforcement,
+  ExecutionBackendCapabilities,
+  ExecutionBoundary,
+  ExecutionBoundaryAdmission,
+  ExecutionBoundaryAdmissionReason,
+  ExecutionCapabilitySurface,
   ExecutionNetworkMode,
   FilesystemScope,
-  InProcessReadOnlyToolCatalogV1,
-  InProcessReadOnlyToolContractV1,
-  ProductionExecutionEntrypointV1,
-  ProductionExecutionQualificationRegistryV1,
-  ProductionExecutionQualificationV1,
-  ProductionPlatformQualificationV1,
+  InProcessReadOnlyToolCatalog,
+  InProcessReadOnlyToolContract,
+  ProductionExecutionEntrypoint,
+  ProductionExecutionQualification,
+  ProductionExecutionQualificationRegistry,
+  ProductionPlatformQualification,
   ProtectedPathPolicy,
   ResourceLimits,
   SandboxUnavailablePolicy,
@@ -248,19 +248,19 @@ export type {
 } from './types';
 export { DEFAULT_RESOURCE_LIMITS } from './types';
 export {
-  resolveWindowsManagedNetworkSetupStatusV1,
-  setupWindowsManagedNetworkV1,
-  type WindowsManagedNetworkSetupDependenciesV1,
-  type WindowsManagedNetworkSetupStateV1,
-  type WindowsManagedNetworkSetupStatusV1,
+  resolveWindowsManagedNetworkSetupStatus,
+  setupWindowsManagedNetwork,
+  type WindowsManagedNetworkSetupDependencies,
+  type WindowsManagedNetworkSetupState,
+  type WindowsManagedNetworkSetupStatus,
 } from './windows-network-setup';
 export {
-  clearWindowsSandboxRunnerCacheV1,
-  parseWindowsSandboxRunnerManifestV1,
-  type ResolveWindowsSandboxRunnerOptionsV1,
-  resolveInstalledWindowsRunnerManifestLocationV1,
-  resolveWindowsSandboxRunnerV1,
+  clearWindowsSandboxRunnerCache,
+  parseWindowsSandboxRunnerManifest,
+  type ResolveWindowsSandboxRunnerOptions,
+  resolveInstalledWindowsRunnerManifestLocation,
+  resolveWindowsSandboxRunner,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
-  type WindowsSandboxRunnerManifestV1,
-  type WindowsSandboxRunnerV1,
+  type WindowsSandboxRunner,
+  type WindowsSandboxRunnerManifest,
 } from './windows-runner';

@@ -5,7 +5,7 @@ import {
   GENERATED_MANIFEST_FILES,
   generatedManifestPath,
   generateRuntimeModularizationManifests,
-  RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1,
+  RUNTIME_MODULARIZATION_BUILTIN_FACTS_,
   serializeGeneratedManifest,
   validateRuntimeModularizationManualManifests,
 } from '../../scripts/runtime-modularization/manifest-generator';
@@ -13,7 +13,7 @@ import {
 const root = resolve(import.meta.dir, '../..');
 
 describe('Runtime modularization manifests', () => {
-  test('freeze the RMV1 State, Event, Store, package, and public-export baseline', () => {
+  test('freeze the RM State, Event, Store, package, and public-export baseline', () => {
     const generated = generateRuntimeModularizationManifests(root);
 
     expect(generated['runtime-state-shape.generated.json'].facts).toMatchObject({
@@ -38,22 +38,23 @@ describe('Runtime modularization manifests', () => {
     const storeSources = generated['store-schema.generated.json'].sources.map(
       (source) => source.path,
     );
-    expect(storeSources).toContain('packages/runtime-storage-sqlite/src/sqlite-store.ts');
+    expect(storeSources).toContain('packages/runtime-storage-sqlite/src/adapter.ts');
+    expect(storeSources).toContain('packages/runtime-storage-sqlite/src/preflight.ts');
     expect(storeSources).not.toContain('src/core/runtime/store.ts');
     expect(generated['package-graph.generated.json'].facts.packages).toHaveLength(8);
   });
 
-  test('freezes the one Builtin SPI snapshot at the RMV1 6/29/20/9 boundary', () => {
-    expect(RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1).toMatchObject({
+  test('freezes the one Builtin SPI snapshot at the RM 6/29/20/9 boundary', () => {
+    expect(RUNTIME_MODULARIZATION_BUILTIN_FACTS_).toMatchObject({
       moduleCount: 6,
       operationCount: 29,
       catalogEntryCount: 29,
       modelVisibleCount: 20,
       internalCount: 9,
     });
-    expect(RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1.operationIds).toHaveLength(29);
-    expect(new Set(RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1.operationIds).size).toBe(29);
-    expect(RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1.modelToolNames).toHaveLength(20);
+    expect(RUNTIME_MODULARIZATION_BUILTIN_FACTS_.operationIds).toHaveLength(29);
+    expect(new Set(RUNTIME_MODULARIZATION_BUILTIN_FACTS_.operationIds).size).toBe(29);
+    expect(RUNTIME_MODULARIZATION_BUILTIN_FACTS_.modelToolNames).toHaveLength(20);
   });
 
   test('reproduces checked-in facts and closes owner/delete/source manifests', () => {
@@ -97,7 +98,7 @@ describe('Runtime modularization manifests', () => {
 
   test('keeps the Kernel scheduler free of concrete Tool names', () => {
     const scheduler = readFileSync(resolve(root, 'packages/agent-kernel/src/scheduler.ts'), 'utf8');
-    for (const name of RUNTIME_MODULARIZATION_BUILTIN_FACTS_V1.modelToolNames) {
+    for (const name of RUNTIME_MODULARIZATION_BUILTIN_FACTS_.modelToolNames) {
       expect(scheduler).not.toContain(`'${name}'`);
     }
     expect(existsSync(resolve(root, 'src/core/runtime/runner.ts'))).toBeFalse();
@@ -109,7 +110,7 @@ describe('Runtime modularization manifests', () => {
       'utf8',
     );
     expect(generator).not.toContain('builtinToolRegistry');
-    expect(generator).not.toContain('KITE_RUNTIME_OPERATION_IDS_V1');
+    expect(generator).not.toContain('KITE_RUNTIME_OPERATION_IDS_');
     expect(generator).not.toContain('openLegacyV4StorageDriver');
   });
 });

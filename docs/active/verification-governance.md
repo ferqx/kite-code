@@ -7,36 +7,36 @@
 
 ## 当前行为
 
-`verificationV1` 默认关闭。关闭时不会为新的 MCP 调用、filesystem write/edit 或 Skill completion 创建验证任务；已经持久化的验证任务仍须继续收敛，不能通过关闭 flag 绕过 required 验证。
+`verification` 默认关闭。关闭时不会为新的 MCP 调用、filesystem write/edit 或 Skill completion 创建验证任务；已经持久化的验证任务仍须继续收敛，不能通过关闭 flag 绕过 required 验证。
 
 有效强度为 `not_required`、`best_effort`、`required` 的单调最大值。Capability effects、Skill contract 和用户明确要求只能提高强度，不能降低既有要求。包含 write、destructive 或 unknown effect 的治理 capability 自动提升为 `required`。
 
-`VerificationSpecV1` 是持久化、版本化且严格校验的协议。支持文件断言、命令、对象根 JSON Schema、MCP read-after-write、外部引用和独立 reviewer。检查按声明顺序运行；确定性检查应排在 reviewer 之前。MCP read-after-write 必须命中当前 capability revision，变化或不可用时返回 `inconclusive`。Reviewer 收到原始 `ExecutionReceipt`、受限 Artifact Store 内容和结构化 Skill output，不接收主模型的完成结论。
+`VerificationSpec` 是持久化、版本化且严格校验的协议。支持文件断言、命令、对象根 JSON Schema、MCP read-after-write、外部引用和独立 reviewer。检查按声明顺序运行；确定性检查应排在 reviewer 之前。MCP read-after-write 必须命中当前 capability revision，变化或不可用时返回 `inconclusive`。Reviewer 收到原始 `ExecutionReceipt`、受限 Artifact Store 内容和结构化 Skill output，不接收主模型的完成结论。
 
 独立 reviewer 使用封闭的 `verification_review` Model Surface purpose，并与 primary、compaction、auto review、
-subagent 共用 `ModelInvocationGatewayV1`。Surface Artifact、Provider data admission、resource reservation 与
+subagent 共用 `ModelInvocationGateway`。Surface Artifact、Provider data admission、resource reservation 与
 每次 attempt intent 都必须在 transport dispatch 前 durable ack；Response Artifact 与
 `model.invocation_completed` ack 成功前 reviewer 不能解析或消费 response。reviewer terminal 继续引用
 invocation id，Provider admission/ack/key/Artifact failure 不得降级为旧模型调用或被包装成可信
 `inconclusive` 后退款。production reviewer composition 只接当前 Gateway 的 live Source；任何恢复都必须
-复用同一 State26 identity、Artifact receipt 与 provider admission，不得引入旁路验证器或 fallback。
+复用同一 Runtime State identity、Artifact receipt 与 provider admission，不得引入旁路验证器或 fallback。
 
 当 V2 Plan 通过 `update_plan complete_plan=true` 收敛时，每个 `required` verification 必须已经是
 `passed` 或用户 `waived`，并由 Runtime 投影为只含 `verificationId + outcome` 的
-`PlanCompletionEvidenceV1` reference。模型不能通过 `update_plan` 自报 verification、命令、路径、stdout
+`PlanCompletionEvidence` reference。模型不能通过 `update_plan` 自报 verification、命令、路径、stdout
 或 success；缺失 required reference 会稳定拒绝为 `plan_verification_required`。该 Plan 门禁不改变当前
-CompletionGuard 的 State26 recovery；PlanDocument V2 的 final candidate 由 CompletionGuard V2 再次读取同一
+CompletionGuard 的 Runtime State recovery；PlanDocument V2 的 final candidate 由 CompletionGuard V2 再次读取同一
 canonical verification record/evidence。required verification 缺失时 `completion.blocked` 使用低基数
 `verification_required`，而不是保存检查命令、路径、stdout、prompt 或模型正文。verification 已通过但副作用
 receipt reference 缺失时使用 `effect_evidence_required`；两者都绑定完整 Plan identity。
 
 Verification executor 通过 Runtime 中立的 `McpRuntimeProvider` 查找当前 descriptor 并执行 MCP read-after-write，不依赖 Supervisor control snapshot 或 TUI。`/mcp` 状态列表显示 ready 不能替代 verification 的 revision 复核。
 
-RMV1-14 后，确定性检查的物理 owner 是
-`@kite/builtin-runtime#executeDeterministicVerificationChecksV1`。它只接收 JSON-safe State view 与显式注入的
+RM-14 后，确定性检查的物理 owner 是
+`@kite/builtin-runtime#executeDeterministicVerificationChecks`。它只接收 JSON-safe State view 与显式注入的
 Shell、MCP、Artifact reader、reviewer、AbortSignal/clock port，拥有文件断言、命令、Schema budget validation、
 read-after-write、外部引用、reviewer evidence assembly、逐项 digest 与 outcome aggregation。它不导入 AgentState、
-Runtime Event/Store、Kernel、Host 或 App。App verification effect adapter 负责 State26
+Runtime Event/Store、Kernel、Host 或 App。App verification effect adapter 负责 Runtime State
 effect/event projection：投影已有 receipt/Skill output，注入同 installation Artifact reader，把 check results 映射回
 既有 `verification.*` event，并保留 repair/compensation lifecycle。Provider data admission denial 是 Host 分类的
 fatal dispatch failure；若先前检查已经执行外部机制，仍以 `knownExternalEffects=unknown` 抛出，不能被吞成可信
@@ -44,15 +44,15 @@ fatal dispatch failure；若先前检查已经执行外部机制，仍以 `known
 
 Verification Policy、required 单调强度、repair/waive/compensation 选择与 Completion 仍由 Kernel/Runtime 唯一
 决定。Builtin executor 不能发出 completion、waive 或 authorization，也没有旧 check executor fallback。
-当前 owner 使用 State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`，并保持检查顺序、evidence digest、Artifact
-binding 与 Model Gateway reviewer 行为不变。RMV1-15 已把 reviewer 的具体 Model/Context/Gateway 实现迁到
+当前 owner 使用 Runtime State、SQLite Store、epoch `kite-runtime-modularization-v1-2026-08-19`，并保持检查顺序、evidence digest、Artifact
+binding 与 Model Gateway reviewer 行为不变。RM-15 已把 reviewer 的具体 Model/Context/Gateway 实现迁到
 `@kite/builtin-runtime/model`，`model:verification_review` 由 `kite-builtin-runtime-rmv1-15` 唯一注册；Verification
 effect adapter 仍只注入 reviewer port 并保持同一 failure/unknown-effects 传播，不存在 reviewer fallback。
 Builtin package 的公开 Model surface 已移除可自行注入 Gateway 的 verification reviewer helper；production 与测试均
-通过 `BuiltinModelEffectCoordinatorV1`，由它基于 reviewer 配置创建模型并使用构造时绑定的唯一 Gateway。Reviewer
+通过 `BuiltinModelEffectCoordinator`，由它基于 reviewer 配置创建模型并使用构造时绑定的唯一 Gateway。Reviewer
 结果仍只回到 Verification effect adapter 和 Kernel state，不能直接发出 completion、waive、repair 或 authorization。
 Schema 与 MCP `outputSchema` admission 只调用 Builtin 的唯一 schema compiler，再以 digest-bound transient facts 交给
-Kernel；真实 Host decision path 与 State26 adapter 复用同一投影函数。缺失、错位或 digest mismatch 继续
+Kernel；真实 Host decision path 与 Runtime State adapter 复用同一投影函数。缺失、错位或 digest mismatch 继续
 fail closed 为 spec corruption，Kernel 不编译 schema，也不保存第二份 validator/diagnostic authority。
 
 TP-04 后，Tool-side `verification.requested` 只能与已提交的

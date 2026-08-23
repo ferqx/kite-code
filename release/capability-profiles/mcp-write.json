@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "profileId": "mcp-write-v1",
+  "profileId": "mcp-write",
   "capability": "mcp_write",
-  "requiredFeatureFlags": ["mcpExecutionRecordV1", "mcpProviderActionV1"],
+  "requiredFeatureFlags": ["mcpExecutionRecord", "mcpProviderAction"],
   "state": {
     "maturity": "under_development",
     "maxRollout": "off"

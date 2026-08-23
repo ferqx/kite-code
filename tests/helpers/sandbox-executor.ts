@@ -1,35 +1,35 @@
 import { randomUUID } from 'node:crypto';
 import type {
-  BuiltinPreparedShellExecutionConsumerOptionsV1,
+  BuiltinPreparedShellExecutionConsumerOptions,
   ResourceLimits,
   SandboxBackend,
   ShellExecutor,
   ShellResult,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  createBuiltinPreparedShellExecutionConsumerV1,
+  createBuiltinPreparedShellExecutionConsumer,
   detectSandboxBackend,
   findUsableBubblewrap,
-  findUsableCgroupPidsRunnerV1,
-  LocalSandboxExecutionProviderV1,
-  sandboxPreparationIntentDigestV1,
+  findUsableCgroupPidsRunner,
+  LocalSandboxExecutionProvider,
+  sandboxPreparationIntentDigest,
 } from '@kite/builtin-runtime/sandbox';
-import { executePosixSupervisedV1 } from '@kite/runtime-host';
+import { executePosixSupervised } from '@kite/runtime-host';
 import type {
-  PreparedSandboxExecutionV1,
-  SandboxPreparationLifecycleV1,
-  SandboxPreparationV1,
-  SandboxPreparedProcessCleanupV1,
-  SandboxPreparedProcessExecutionPortV1,
-  SandboxPreparedProcessExecutionResultV1,
+  PreparedSandboxExecution,
+  SandboxPreparation,
+  SandboxPreparationLifecycle,
+  SandboxPreparedProcessCleanup,
+  SandboxPreparedProcessExecutionPort,
+  SandboxPreparedProcessExecutionResult,
 } from '@kite/runtime-spi';
 import {
-  SandboxExecutionGrantAuthorityV1,
-  sandboxPreparationDigestV1,
+  SandboxExecutionGrantAuthority,
+  sandboxPreparationDigest,
 } from '#app/sandbox/runtime-execution';
 import { shellTool } from './shell-executor';
 
-export type TestSandboxLifecycleTransitionV1 =
+export type TestSandboxLifecycleTransition =
   | 'preparation_intent_recorded'
   | 'preparation_ready_recorded'
   | 'execution_dispatch_intent_recorded'
@@ -39,8 +39,8 @@ export type TestSandboxLifecycleTransitionV1 =
   | 'disposal_receipt_confirmed'
   | 'disposal_receipt_unconfirmed';
 
-export interface TestSandboxDisposalReceiptV1 {
-  readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
+export interface TestSandboxDisposalReceipt {
+  readonly prepared: Readonly<PreparedSandboxExecution> | null;
   readonly purpose: 'dispose' | 'reconcile_preparation_intent';
   readonly lifecycleIntentDigest: string;
   readonly cleanupAttempt: number;
@@ -53,14 +53,14 @@ export interface TestSandboxDisposalReceiptV1 {
  * tests use the same Builtin consumer with a small in-memory SPI lifecycle
  * and the generic Host POSIX supervisor.
  */
-export function createBuiltinSandboxExecutionConsumerForTestV1(
-  options: Omit<BuiltinPreparedShellExecutionConsumerOptionsV1, 'preparedProcess'> & {
-    readonly preparedProcess?: SandboxPreparedProcessExecutionPortV1;
+export function createBuiltinSandboxExecutionConsumerForTest(
+  options: Omit<BuiltinPreparedShellExecutionConsumerOptions, 'preparedProcess'> & {
+    readonly preparedProcess?: SandboxPreparedProcessExecutionPort;
   },
 ): ShellExecutor {
-  const preparedConsumer = createBuiltinPreparedShellExecutionConsumerV1({
+  const preparedConsumer = createBuiltinPreparedShellExecutionConsumer({
     ...options,
-    preparedProcess: options.preparedProcess ?? createTestPreparedProcessExecutionPortV1(),
+    preparedProcess: options.preparedProcess ?? createTestPreparedProcessExecutionPort(),
   });
   const consumer: ShellExecutor = async (input) => {
     const result = await preparedConsumer({
@@ -100,7 +100,7 @@ export function createBuiltinSandboxExecutionConsumerForTestV1(
   return consumer;
 }
 
-export function createCompletedPreparedProcessPortForTestV1(): SandboxPreparedProcessExecutionPortV1 {
+export function createCompletedPreparedProcessPortForTest(): SandboxPreparedProcessExecutionPort {
   return Object.freeze({
     execute: async () =>
       Object.freeze({
@@ -109,14 +109,14 @@ export function createCompletedPreparedProcessPortForTestV1(): SandboxPreparedPr
         exitCode: 0,
         stdout: '',
         stderr: '',
-        processCleanup: cleanNoProcessV1(),
+        processCleanup: cleanNoProcess(),
       }),
   });
 }
 
-function createTestPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecutionPortV1 {
+function createTestPreparedProcessExecutionPort(): SandboxPreparedProcessExecutionPort {
   return Object.freeze({
-    execute: async (input: Parameters<SandboxPreparedProcessExecutionPortV1['execute']>[0]) => {
+    execute: async (input: Parameters<SandboxPreparedProcessExecutionPort['execute']>[0]) => {
       if (input.prepared.backend === 'windows_restricted_token') {
         return Object.freeze({
           kind: 'failed' as const,
@@ -129,13 +129,13 @@ function createTestPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecu
             message:
               'Windows prepared process execution is not available in the POSIX test adapter.',
           }),
-          processCleanup: cleanNoProcessV1(),
+          processCleanup: cleanNoProcess(),
         });
       }
 
       let supervisorStartAttempted = false;
       let goStarted = false;
-      const supervised = await executePosixSupervisedV1({
+      const supervised = await executePosixSupervised({
         prepared: input.prepared,
         dispatchId: input.dispatchIntent.dispatchId,
         supervisorNonce: input.dispatchIntent.supervisorNonce,
@@ -165,9 +165,9 @@ function createTestPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecu
           goStarted = true;
         },
       });
-      const cleanup = normalizeCleanupV1(supervised.outcome.processCleanup);
+      const cleanup = normalizeCleanup(supervised.outcome.processCleanup);
       if (!goStarted) {
-        return failedProcessV1(
+        return failedProcess(
           supervisorStartAttempted ? 'supervisor_start_not_acknowledged' : 'spawn_failed',
           supervised.outcome.stderr || 'Supervisor failed before GO.',
           supervisorStartAttempted ? 'supervisor_started_before_go' : 'not_started',
@@ -175,7 +175,7 @@ function createTestPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecu
         );
       }
       if (!supervised.cleanupConfirmed || !cleanup.confirmedExited) {
-        return unknownProcessV1(
+        return unknownProcess(
           'post_go_cleanup_unknown',
           supervised.outcome.stderr || 'Process-tree cleanup could not be confirmed.',
           cleanup,
@@ -198,7 +198,7 @@ function createTestPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecu
         });
       }
       if (supervised.outcome.exitCode === -1) {
-        return unknownProcessV1(
+        return unknownProcess(
           'post_go_terminal_unknown',
           supervised.outcome.stderr || 'A trustworthy process terminal is unavailable.',
           cleanup,
@@ -218,12 +218,12 @@ function createTestPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecu
   });
 }
 
-function failedProcessV1(
+function failedProcess(
   code: 'supervisor_start_not_acknowledged' | 'spawn_failed' | 'invalid_prepared_execution',
   message: string,
   executionPhase: 'not_started' | 'supervisor_started_before_go' = 'not_started',
-  processCleanup: Readonly<SandboxPreparedProcessCleanupV1> = cleanNoProcessV1(),
-): Readonly<SandboxPreparedProcessExecutionResultV1> {
+  processCleanup: Readonly<SandboxPreparedProcessCleanup> = cleanNoProcess(),
+): Readonly<SandboxPreparedProcessExecutionResult> {
   return Object.freeze({
     kind: 'failed' as const,
     executionPhase,
@@ -235,13 +235,13 @@ function failedProcessV1(
   });
 }
 
-function unknownProcessV1(
+function unknownProcess(
   code: 'post_go_terminal_unknown' | 'post_go_transport_lost' | 'post_go_cleanup_unknown',
   message: string,
-  processCleanup: Readonly<SandboxPreparedProcessCleanupV1>,
+  processCleanup: Readonly<SandboxPreparedProcessCleanup>,
   stdout = '',
   stderr = message,
-): Readonly<SandboxPreparedProcessExecutionResultV1> {
+): Readonly<SandboxPreparedProcessExecutionResult> {
   return Object.freeze({
     kind: 'unknown' as const,
     executionPhase: 'unknown_after_go' as const,
@@ -254,9 +254,9 @@ function unknownProcessV1(
   });
 }
 
-function normalizeCleanupV1(
+function normalizeCleanup(
   cleanup: Readonly<NonNullable<ShellResult['processCleanup']>> | undefined,
-): Readonly<SandboxPreparedProcessCleanupV1> {
+): Readonly<SandboxPreparedProcessCleanup> {
   return Object.freeze({
     confirmedExited: cleanup?.confirmedExited === true,
     gracefulRequested: cleanup?.gracefulRequested === true,
@@ -269,7 +269,7 @@ function normalizeCleanupV1(
   });
 }
 
-function cleanNoProcessV1(): Readonly<SandboxPreparedProcessCleanupV1> {
+function cleanNoProcess(): Readonly<SandboxPreparedProcessCleanup> {
   return Object.freeze({
     confirmedExited: true,
     gracefulRequested: false,
@@ -290,7 +290,7 @@ export function createSandboxExecutor(
     maxProcessTreeTasks?: number;
     startupProbe?: boolean;
     selectedBackend?: SandboxBackend;
-    brokeredGitFeatureRevision?: typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_V1;
+    brokeredGitFeatureRevision?: typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
     executionBoundaryDigest?: string;
     protectedPathRevision?: string;
   },
@@ -307,8 +307,8 @@ export function createSandboxExecutor(
       ? deniedExecutor('sandbox_backend_unavailable')
       : bareShellFallback;
   }
-  const grants = new SandboxExecutionGrantAuthorityV1();
-  const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
+  const grants = new SandboxExecutionGrantAuthority();
+  const provider = new LocalSandboxExecutionProvider(grants.verifier(), {
     backend,
     canonicalWorkspace: options.workspace,
     filesystemScope: options.filesystemScope,
@@ -318,10 +318,10 @@ export function createSandboxExecutor(
     bubblewrapPath: backend === 'bubblewrap' ? (findUsableBubblewrap() ?? undefined) : undefined,
     cgroupPidsRunner:
       backend === 'bubblewrap' && options.maxProcessTreeTasks
-        ? (findUsableCgroupPidsRunnerV1() ?? undefined)
+        ? (findUsableCgroupPidsRunner() ?? undefined)
         : undefined,
   });
-  const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
+  const consumer = createBuiltinSandboxExecutionConsumerForTest({
     provider,
     backend,
     grants,
@@ -331,18 +331,18 @@ export function createSandboxExecutor(
     maxProcessTreeTasks: options.maxProcessTreeTasks,
     resourceLimits: options.resourceLimits,
   });
-  return withAcknowledgedSandboxLifecycleForTestV1(consumer);
+  return withAcknowledgedSandboxLifecycleForTest(consumer);
 }
 
 /**
  * Test-only Runtime lifecycle oracle for native App-composition tests.
  * Production callers must receive these facts from the durable Tool Pipeline.
  */
-export function withAcknowledgedSandboxLifecycleForTestV1(
+export function withAcknowledgedSandboxLifecycleForTest(
   executor: ShellExecutor,
   options: {
-    readonly onTransition?: (transition: TestSandboxLifecycleTransitionV1) => void;
-    readonly onDisposalReceipt?: (receipt: TestSandboxDisposalReceiptV1) => void;
+    readonly onTransition?: (transition: TestSandboxLifecycleTransition) => void;
+    readonly onDisposalReceipt?: (receipt: TestSandboxDisposalReceipt) => void;
   } = {},
 ): ShellExecutor {
   return async (input) => {
@@ -355,8 +355,8 @@ export function withAcknowledgedSandboxLifecycleForTestV1(
       | 'supervisor_started'
       | 'disposal_intent_recorded'
       | 'disposal_receipt_recorded' = 'empty';
-    let preparation: Readonly<SandboxPreparationV1> | undefined;
-    let prepared: Readonly<PreparedSandboxExecutionV1> | undefined;
+    let preparation: Readonly<SandboxPreparation> | undefined;
+    let prepared: Readonly<PreparedSandboxExecution> | undefined;
     let dispatch:
       | {
           readonly dispatchId: string;
@@ -367,16 +367,16 @@ export function withAcknowledgedSandboxLifecycleForTestV1(
       | {
           readonly purpose: 'dispose' | 'reconcile_preparation_intent';
           readonly lifecycleIntentDigest: string;
-          readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
+          readonly prepared: Readonly<PreparedSandboxExecution> | null;
         }
       | undefined;
-    const transition = (next: TestSandboxLifecycleTransitionV1): void => {
+    const transition = (next: TestSandboxLifecycleTransition): void => {
       options.onTransition?.(next);
     };
-    const samePrepared = (candidate: Readonly<PreparedSandboxExecutionV1>): boolean =>
+    const samePrepared = (candidate: Readonly<PreparedSandboxExecution>): boolean =>
       Boolean(
         preparation &&
-          candidate.preparationDigest === sandboxPreparationDigestV1(preparation) &&
+          candidate.preparationDigest === sandboxPreparationDigest(preparation) &&
           candidate.toolCallId === preparation.toolCallId &&
           candidate.capabilityId === preparation.capabilityId &&
           candidate.capabilityRevision === preparation.capabilityRevision &&
@@ -385,7 +385,7 @@ export function withAcknowledgedSandboxLifecycleForTestV1(
           candidate.canonicalWorkspace === preparation.canonicalWorkspace &&
           candidate.commandDigest === preparation.commandDigest,
       );
-    const lifecycle: SandboxPreparationLifecycleV1 = {
+    const lifecycle: SandboxPreparationLifecycle = {
       async recordPreparationIntent(candidate) {
         if (phase !== 'empty') throw new Error('duplicate preparation intent');
         preparation = candidate;
@@ -394,7 +394,7 @@ export function withAcknowledgedSandboxLifecycleForTestV1(
         return Object.freeze({
           acknowledged: true as const,
           stage: 'preparation_intent' as const,
-          intentDigest: sandboxPreparationIntentDigestV1({
+          intentDigest: sandboxPreparationIntentDigest({
             attempt: candidate.attempt,
             toolCallId: candidate.toolCallId,
             capabilityId: candidate.capabilityId,
@@ -402,7 +402,7 @@ export function withAcknowledgedSandboxLifecycleForTestV1(
             canonicalWorkspace: candidate.canonicalWorkspace,
             effectiveEffectsDigest: candidate.effectiveEffectsDigest,
             admissionDigest: candidate.admissionDigest,
-            preparationDigest: sandboxPreparationDigestV1(candidate),
+            preparationDigest: sandboxPreparationDigest(candidate),
             commandDigest: candidate.commandDigest,
             executionBoundaryDigest: candidate.executionBoundaryDigest,
             resourceSemantics: 'allocating',

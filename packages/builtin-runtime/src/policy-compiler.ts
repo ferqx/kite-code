@@ -1,26 +1,26 @@
 import { isAbsolute, resolve } from 'node:path';
 import type {
-  CapabilityApprovalV1,
-  CapabilityEffectsV1,
-  CapabilityPolicyCompilationV1,
-  CapabilityPolicyCompilerV1,
-  CapabilityPolicyContextV1,
-  CapabilityPolicyEffectsV1,
-  CapabilityPolicyRecoveryV1,
-  CapabilityPolicyRiskV1,
-  CapabilityRiskClassV1,
-  RuntimeJsonValueV1,
+  CapabilityApproval,
+  CapabilityEffects,
+  CapabilityPolicyCompilation,
+  CapabilityPolicyCompiler,
+  CapabilityPolicyContext,
+  CapabilityPolicyEffects,
+  CapabilityPolicyRecovery,
+  CapabilityPolicyRisk,
+  CapabilityRiskClass,
+  RuntimeJsonValue,
 } from '@kite/runtime-spi';
-import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@kite/runtime-spi';
+import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite/runtime-spi';
 import {
-  hasBrokeredGitExecutableTokenV1,
-  isDestructiveShellCommandV1,
-  isNetworkShellCommandV1,
-  isReadOnlyShellCommandV1,
-  isVcsMutationShellCommandV1,
-  isWriteShellCommandV1,
-  shellEffectsClassifierV1,
-  taskEffectsClassifierV1,
+  hasBrokeredGitExecutableToken,
+  isDestructiveShellCommand,
+  isNetworkShellCommand,
+  isReadOnlyShellCommand,
+  isVcsMutationShellCommand,
+  isWriteShellCommand,
+  shellEffectsClassifier,
+  taskEffectsClassifier,
 } from './catalog-contract';
 import {
   checkDangerousPaths,
@@ -29,38 +29,38 @@ import {
   msys2ToWindowsPath,
 } from './sandbox';
 
-export interface BuiltinPolicyRuleResultV1 {
-  readonly decision: CapabilityPolicyCompilationV1['decision'];
+export interface BuiltinPolicyRuleResult {
+  readonly decision: CapabilityPolicyCompilation['decision'];
   readonly allowed: boolean;
   readonly requiresApproval: boolean;
-  readonly risk: CapabilityPolicyRiskV1;
-  readonly effects?: Readonly<CapabilityPolicyEffectsV1>;
+  readonly risk: CapabilityPolicyRisk;
+  readonly effects?: Readonly<CapabilityPolicyEffects>;
   readonly reason: string;
   readonly userVisibleSummary: string;
   readonly expectedEffects: readonly string[];
   readonly phaseConstraint?: 'planning';
-  readonly effectiveEffects: CapabilityEffectsV1;
+  readonly effectiveEffects: CapabilityEffects;
   readonly fullAccessMayBypassApproval: boolean;
   readonly sameCommandMayBypassApproval: boolean;
-  readonly recovery?: Readonly<CapabilityPolicyRecoveryV1>;
+  readonly recovery?: Readonly<CapabilityPolicyRecovery>;
 }
 
-export interface CreateBuiltinPolicyCompilerInputV1 {
+export interface CreateBuiltinPolicyCompilerInput {
   readonly operationId: string;
   readonly capabilityRevision: string;
   readonly parserRevision: string;
-  readonly declaredEffects: CapabilityEffectsV1;
-  readonly minimumApproval: CapabilityApprovalV1;
+  readonly declaredEffects: CapabilityEffects;
+  readonly minimumApproval: CapabilityApproval;
   readonly rule: (
-    input: RuntimeJsonValueV1,
-    context: CapabilityPolicyContextV1,
-    declaredEffects: CapabilityEffectsV1,
-    minimumApproval: CapabilityApprovalV1,
+    input: RuntimeJsonValue,
+    context: CapabilityPolicyContext,
+    declaredEffects: CapabilityEffects,
+    minimumApproval: CapabilityApproval,
     operationId: string,
-  ) => BuiltinPolicyRuleResultV1;
+  ) => BuiltinPolicyRuleResult;
 }
 
-export const BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 = 'mcp:dynamic_tool' as const;
+export const BUILTIN_DYNAMIC_MCP_OPERATION_ID_ = 'mcp:dynamic_tool' as const;
 
 /**
  * The dynamic MCP wrapper has no model-owned schema or executor semantics.
@@ -68,14 +68,14 @@ export const BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 = 'mcp:dynamic_tool' as const;
  * current turn facts only. Authorization, grant matching, and admission stay
  * in Agent Kernel.
  */
-export interface BuiltinDynamicMcpPolicyInputV1 {
-  readonly operationId: typeof BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1;
+export interface BuiltinDynamicMcpPolicyInput {
+  readonly operationId: typeof BUILTIN_DYNAMIC_MCP_OPERATION_ID_;
   readonly capabilityRevision: string;
   readonly parserRevision: string;
   readonly exposedToolName: `mcp__${string}`;
-  readonly effectiveEffects: CapabilityEffectsV1;
-  readonly minimumApproval: CapabilityApprovalV1;
-  readonly phase: CapabilityPolicyContextV1['phase'];
+  readonly effectiveEffects: CapabilityEffects;
+  readonly minimumApproval: CapabilityApproval;
+  readonly phase: CapabilityPolicyContext['phase'];
   readonly workspace: string;
 }
 
@@ -87,11 +87,11 @@ export interface BuiltinDynamicMcpPolicyInputV1 {
  * sole source of effects/minimum approval; Kernel consumes the returned facts
  * for authorization and admission.
  */
-export function compileBuiltinDynamicMcpPolicyV1(
-  input: BuiltinDynamicMcpPolicyInputV1,
-): CapabilityPolicyCompilationV1 {
+export function compileBuiltinDynamicMcpPolicy(
+  input: BuiltinDynamicMcpPolicyInput,
+): CapabilityPolicyCompilation {
   if (
-    input.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 ||
+    input.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_ ||
     input.capabilityRevision.length === 0 ||
     input.parserRevision.length === 0 ||
     input.exposedToolName.length === 0
@@ -108,9 +108,9 @@ export function compileBuiltinDynamicMcpPolicyV1(
     ].every((effect) => effect === 'none' || effect === 'read');
 
   if (readOnly) {
-    return freezeCompilationV1({
+    return freezeCompilation({
       schema: 'kite.capability-policy-compilation.v1',
-      operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+      operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
       capabilityRevision: input.capabilityRevision,
       parserRevision: input.parserRevision,
       decision: 'allow',
@@ -128,9 +128,9 @@ export function compileBuiltinDynamicMcpPolicyV1(
   }
 
   if (input.phase === 'planning') {
-    return freezeCompilationV1({
+    return freezeCompilation({
       schema: 'kite.capability-policy-compilation.v1',
-      operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+      operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
       capabilityRevision: input.capabilityRevision,
       parserRevision: input.parserRevision,
       decision: 'deny',
@@ -149,9 +149,9 @@ export function compileBuiltinDynamicMcpPolicyV1(
     });
   }
 
-  return freezeCompilationV1({
+  return freezeCompilation({
     schema: 'kite.capability-policy-compilation.v1',
-    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
     capabilityRevision: input.capabilityRevision,
     parserRevision: input.parserRevision,
     decision: 'ask',
@@ -174,9 +174,9 @@ export function compileBuiltinDynamicMcpPolicyV1(
  * catalog calls this callback only after the same Builtin parser has produced
  * canonical input; no authorization state or execution handle is accepted.
  */
-export function createBuiltinPolicyCompilerV1(
-  input: CreateBuiltinPolicyCompilerInputV1,
-): CapabilityPolicyCompilerV1 {
+export function createBuiltinPolicyCompiler(
+  input: CreateBuiltinPolicyCompilerInput,
+): CapabilityPolicyCompiler {
   return (value, context) => {
     const result = input.rule(
       value,
@@ -185,7 +185,7 @@ export function createBuiltinPolicyCompilerV1(
       input.minimumApproval,
       input.operationId,
     );
-    return freezeCompilationV1({
+    return freezeCompilation({
       schema: 'kite.capability-policy-compilation.v1',
       operationId: input.operationId,
       capabilityRevision: input.capabilityRevision,
@@ -196,17 +196,17 @@ export function createBuiltinPolicyCompilerV1(
   };
 }
 
-export function readOnlyBuiltinPolicyRuleV1(
-  input: RuntimeJsonValueV1,
-  _context: CapabilityPolicyContextV1,
-  declaredEffects: CapabilityEffectsV1,
-  _minimumApproval: CapabilityApprovalV1,
+export function readOnlyBuiltinPolicyRule(
+  input: RuntimeJsonValue,
+  _context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
   operationId: string,
-): BuiltinPolicyRuleResultV1 {
-  const field = (name: string): string => stringFieldV1(input, name) ?? '';
+): BuiltinPolicyRuleResult {
+  const field = (name: string): string => stringField(input, name) ?? '';
   if (operationId === 'builtin:list_mcp_tools') {
     const provider = field('provider');
-    return allowRuleV1({
+    return allowRule({
       risk: 'read',
       reason: 'MCP tool inventory reads in-memory capability and provider snapshots.',
       userVisibleSummary: `List MCP tools${provider ? ` from ${provider}` : ''}.`,
@@ -215,12 +215,12 @@ export function readOnlyBuiltinPolicyRuleV1(
         'Does not mutate workspace files',
         'Does not access remote MCP servers',
       ],
-      effectiveEffects: readOnlyEffectsV1(declaredEffects),
+      effectiveEffects: readOnlyEffects(declaredEffects),
     });
   }
   if (operationId === 'builtin:list_mcp_resources') {
     const server = field('server');
-    return allowRuleV1({
+    return allowRule({
       risk: 'read',
       reason: 'MCP resource metadata and content may be remote or externally managed.',
       userVisibleSummary: `List MCP resources${server ? ` from ${server}` : ''}.`,
@@ -228,13 +228,13 @@ export function readOnlyBuiltinPolicyRuleV1(
         'Reads cached resource metadata from connected MCP servers',
         'Does not mutate workspace files',
       ],
-      effectiveEffects: readOnlyEffectsV1(declaredEffects),
+      effectiveEffects: readOnlyEffects(declaredEffects),
     });
   }
   if (operationId === 'builtin:read_mcp_resource') {
     const server = field('server') || 'MCP server';
     const uri = field('uri') || '?';
-    return allowRuleV1({
+    return allowRule({
       risk: 'read',
       reason: 'MCP resource metadata and content may be remote or externally managed.',
       userVisibleSummary: `Read MCP resource from ${server}: ${uri}`,
@@ -242,16 +242,16 @@ export function readOnlyBuiltinPolicyRuleV1(
         'Reads content from external MCP server',
         'Does not mutate workspace files',
       ],
-      effectiveEffects: readOnlyEffectsV1(declaredEffects),
+      effectiveEffects: readOnlyEffects(declaredEffects),
     });
   }
   if (operationId === 'builtin:tool_search') {
-    return allowRuleV1({
+    return allowRule({
       risk: 'read',
       reason: 'Registry classifies tool_search as read-only.',
       userVisibleSummary: 'Run tool_search',
       expectedEffects: ['Reads data without mutating workspace or external state'],
-      effectiveEffects: readOnlyEffectsV1(declaredEffects),
+      effectiveEffects: readOnlyEffects(declaredEffects),
     });
   }
   if (
@@ -260,15 +260,15 @@ export function readOnlyBuiltinPolicyRuleV1(
     operationId === 'builtin:git_inspect'
   ) {
     const toolName = operationId.slice('builtin:'.length);
-    return allowRuleV1({
+    return allowRule({
       risk: 'read',
       reason: `Registry classifies ${toolName} as read-only.`,
       userVisibleSummary: `Run ${toolName}`,
       expectedEffects: ['Reads data without mutating workspace or external state'],
-      effectiveEffects: readOnlyEffectsV1(declaredEffects),
+      effectiveEffects: readOnlyEffects(declaredEffects),
     });
   }
-  return allowRuleV1({
+  return allowRule({
     risk: 'read',
     reason: 'Builtin capability is classified as read-only.',
     userVisibleSummary: 'Run the read-only Builtin capability.',
@@ -276,28 +276,28 @@ export function readOnlyBuiltinPolicyRuleV1(
       'Reads governed Runtime data',
       'Does not intentionally mutate workspace files',
     ],
-    effectiveEffects: readOnlyEffectsV1(declaredEffects),
+    effectiveEffects: readOnlyEffects(declaredEffects),
   });
 }
 
-export function planBuiltinPolicyRuleV1(
-  _input: RuntimeJsonValueV1,
-  _context: CapabilityPolicyContextV1,
-  declaredEffects: CapabilityEffectsV1,
-  _minimumApproval: CapabilityApprovalV1,
+export function planBuiltinPolicyRule(
+  _input: RuntimeJsonValue,
+  _context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
   operationId: string,
-): BuiltinPolicyRuleResultV1 {
+): BuiltinPolicyRuleResult {
   if (operationId === 'builtin:read_plan') {
-    return allowRuleV1({
+    return allowRule({
       risk: 'read',
       reason: 'Registry classifies read_plan as read-only.',
       userVisibleSummary: 'Run read_plan',
       expectedEffects: ['Reads data without mutating workspace or external state'],
-      effectiveEffects: readOnlyEffectsV1(declaredEffects),
+      effectiveEffects: readOnlyEffects(declaredEffects),
     });
   }
   if (operationId === 'builtin:update_plan') {
-    return allowRuleV1({
+    return allowRule({
       risk: 'plan',
       reason: 'Plan progress updates do not mutate the workspace.',
       userVisibleSummary: 'Update plan step progress.',
@@ -305,7 +305,7 @@ export function planBuiltinPolicyRuleV1(
       effectiveEffects: declaredEffects,
     });
   }
-  return allowRuleV1({
+  return allowRule({
     risk: 'plan',
     reason: 'Plan draft writes do not mutate the workspace.',
     userVisibleSummary: 'Save plan draft.',
@@ -314,13 +314,13 @@ export function planBuiltinPolicyRuleV1(
   });
 }
 
-export function askUserBuiltinPolicyRuleV1(
-  _input: RuntimeJsonValueV1,
-  _context: CapabilityPolicyContextV1,
-  declaredEffects: CapabilityEffectsV1,
-  _minimumApproval: CapabilityApprovalV1,
-): BuiltinPolicyRuleResultV1 {
-  return allowRuleV1({
+export function askUserBuiltinPolicyRule(
+  _input: RuntimeJsonValue,
+  _context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
+): BuiltinPolicyRuleResult {
+  return allowRule({
     risk: 'plan',
     reason: 'User clarification interrupts do not mutate the workspace.',
     userVisibleSummary: 'Ask the user a focused clarification question.',
@@ -330,19 +330,16 @@ export function askUserBuiltinPolicyRuleV1(
 }
 
 /** Preserve the existing planning role ceiling while keeping child approval independent. */
-export function taskBuiltinPolicyRuleV1(
-  input: RuntimeJsonValueV1,
-  context: CapabilityPolicyContextV1,
-  declaredEffects: CapabilityEffectsV1,
-  _minimumApproval: CapabilityApprovalV1,
-): BuiltinPolicyRuleResultV1 {
-  const role = stringFieldV1(input, 'subagent_type');
-  const effectiveEffects = taskEffectsClassifierV1(declaredEffects)(
-    input,
-    context,
-  ).effectiveEffects;
+export function taskBuiltinPolicyRule(
+  input: RuntimeJsonValue,
+  context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
+): BuiltinPolicyRuleResult {
+  const role = stringField(input, 'subagent_type');
+  const effectiveEffects = taskEffectsClassifier(declaredEffects)(input, context).effectiveEffects;
   if (context.phase === 'planning' && role !== 'explore' && role !== 'plan') {
-    return denyRuleV1({
+    return denyRule({
       risk: 'execute_code',
       reason: 'planning phase allows read-only sub-agents only.',
       userVisibleSummary: `Plan mode did not start the ${role ?? 'unknown'} sub-agent. Use an explore or plan sub-agent, or describe the implementation in the plan for execution after plan approval.`,
@@ -351,7 +348,7 @@ export function taskBuiltinPolicyRuleV1(
       effectiveEffects,
     });
   }
-  return allowRuleV1({
+  return allowRule({
     risk: 'plan',
     reason:
       'Sub-agent dispatch is a coordination tool; sub-agent actions have their own approval flow.',
@@ -364,14 +361,14 @@ export function taskBuiltinPolicyRuleV1(
   });
 }
 
-export function activateSkillBuiltinPolicyRuleV1(
-  _input: RuntimeJsonValueV1,
-  context: CapabilityPolicyContextV1,
-  declaredEffects: CapabilityEffectsV1,
-  _minimumApproval: CapabilityApprovalV1,
-): BuiltinPolicyRuleResultV1 {
+export function activateSkillBuiltinPolicyRule(
+  _input: RuntimeJsonValue,
+  context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
+): BuiltinPolicyRuleResult {
   if (context.phase === 'planning') {
-    return denyRuleV1({
+    return denyRule({
       risk: 'unknown',
       reason: 'planning phase rejects external side effects (activate_skill).',
       userVisibleSummary: 'Rejected activate_skill during planning phase.',
@@ -380,7 +377,7 @@ export function activateSkillBuiltinPolicyRuleV1(
       effectiveEffects: declaredEffects,
     });
   }
-  return askRuleV1({
+  return askRule({
     risk: 'unknown',
     effects: { uncertainEffects: true },
     reason: 'activate_skill may have external side effects.',
@@ -392,15 +389,15 @@ export function activateSkillBuiltinPolicyRuleV1(
   });
 }
 
-export function shellBuiltinPolicyRuleV1(
-  input: RuntimeJsonValueV1,
-  context: CapabilityPolicyContextV1,
-  declaredEffects: CapabilityEffectsV1,
-  _minimumApproval: CapabilityApprovalV1,
-): BuiltinPolicyRuleResultV1 {
-  const command = stringFieldV1(input, 'command')?.trim() ?? '';
+export function shellBuiltinPolicyRule(
+  input: RuntimeJsonValue,
+  context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
+): BuiltinPolicyRuleResult {
+  const command = stringField(input, 'command')?.trim() ?? '';
   if (!command) {
-    return denyRuleV1({
+    return denyRule({
       risk: 'unknown',
       reason: 'shell_execute requires a non-empty command.',
       userVisibleSummary: 'Rejected empty shell command.',
@@ -410,11 +407,11 @@ export function shellBuiltinPolicyRuleV1(
   }
 
   if (
-    context.featureFlags?.brokeredGitV1 === true &&
-    context.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1 &&
-    hasBrokeredGitExecutableTokenV1(command)
+    context.featureFlags?.brokeredGit === true &&
+    context.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_ &&
+    hasBrokeredGitExecutableToken(command)
   ) {
-    return denyRuleV1({
+    return denyRule({
       risk: 'vcs_mutation',
       reason: 'Git commands are denied through shell_execute by the brokered Git boundary.',
       userVisibleSummary: 'Use git_inspect for local Git status, diff, log, or branch inspection.',
@@ -422,7 +419,7 @@ export function shellBuiltinPolicyRuleV1(
         'No shell command will be executed',
         'Use the governed git_inspect capability for local Git inspection',
       ],
-      effectiveEffects: shellEffectiveEffectsV1(command, context.workspace, declaredEffects)
+      effectiveEffects: shellEffectiveEffects(command, context.workspace, declaredEffects)
         .effectiveEffects,
       recovery: {
         disposition: 'never',
@@ -435,7 +432,7 @@ export function shellBuiltinPolicyRuleV1(
 
   const dangerousPath = checkDangerousPaths(command);
   if (dangerousPath) {
-    return denyRuleV1({
+    return denyRule({
       risk: 'destructive',
       reason: `Protected path '${dangerousPath}' cannot be accessed by model-driven Shell.`,
       userVisibleSummary: `Blocked protected path access: ${dangerousPath}`,
@@ -444,10 +441,10 @@ export function shellBuiltinPolicyRuleV1(
     });
   }
 
-  const destructive = isDestructiveShellCommandV1(command.toLowerCase());
+  const destructive = isDestructiveShellCommand(command.toLowerCase());
   if (destructive) {
-    if (isWorkspaceRootRemovalV1(command, context.workspace)) {
-      return denyRuleV1({
+    if (isWorkspaceRootRemoval(command, context.workspace)) {
+      return denyRule({
         risk: 'destructive',
         reason: 'rm -rf must not delete workspace code.',
         userVisibleSummary: `Rejected destructive rm targeting workspace: ${command}`,
@@ -455,8 +452,8 @@ export function shellBuiltinPolicyRuleV1(
         effectiveEffects: declaredEffects,
       });
     }
-    if (isCriticalSystemRemovalV1(command)) {
-      return denyRuleV1({
+    if (isCriticalSystemRemoval(command)) {
+      return denyRule({
         risk: 'destructive',
         reason: 'rm -rf must not delete critical system paths.',
         userVisibleSummary: `Rejected destructive rm targeting critical system paths: ${command}`,
@@ -465,7 +462,7 @@ export function shellBuiltinPolicyRuleV1(
       });
     }
     if (context.phase === 'planning') {
-      return denyRuleV1({
+      return denyRule({
         risk: 'write_file',
         reason:
           'planning phase allows read-only inspection and plan updates only; rejected shell_execute.',
@@ -473,27 +470,27 @@ export function shellBuiltinPolicyRuleV1(
           'Plan mode is read-only. This operation did not run and cannot be approved while planning. Use read-only inspection or describe the intended implementation in the plan, then run it after plan approval.',
         expectedEffects: ['No workspace mutation or code execution will run'],
         phaseConstraint: 'planning',
-        effectiveEffects: shellEffectiveEffectsV1(command, context.workspace, declaredEffects)
+        effectiveEffects: shellEffectiveEffects(command, context.workspace, declaredEffects)
           .effectiveEffects,
       });
     }
-    return askRuleV1({
+    return askRule({
       risk: 'write_file',
-      effects: shellPolicyEffectsV1(command, context.workspace),
+      effects: shellPolicyEffects(command, context.workspace),
       reason: 'rm -rf on non-critical paths; downgraded to write_file risk.',
       userVisibleSummary: `Remove files: ${command}`,
       expectedEffects: ['Deletes files and directories outside workspace and system paths'],
-      effectiveEffects: shellEffectiveEffectsV1(command, context.workspace, declaredEffects)
+      effectiveEffects: shellEffectiveEffects(command, context.workspace, declaredEffects)
         .effectiveEffects,
       fullAccessMayBypassApproval: false,
       sameCommandMayBypassApproval: false,
     });
   }
 
-  const shellEffects = shellEffectiveEffectsV1(command, context.workspace, declaredEffects);
-  if (isReadOnlyShellCommandV1(command)) {
+  const shellEffects = shellEffectiveEffects(command, context.workspace, declaredEffects);
+  if (isReadOnlyShellCommand(command)) {
     if (shellEffects.policyEffects?.externalRead) {
-      return askRuleV1({
+      return askRule({
         risk: 'read',
         effects: shellEffects.policyEffects,
         reason: 'This shell command reads files outside the workspace.',
@@ -504,7 +501,7 @@ export function shellBuiltinPolicyRuleV1(
         sameCommandMayBypassApproval: false,
       });
     }
-    return allowRuleV1({
+    return allowRule({
       risk: 'read',
       reason: 'Command is classified as read-only.',
       userVisibleSummary: `Run read-only shell command: ${command}`,
@@ -517,8 +514,8 @@ export function shellBuiltinPolicyRuleV1(
   }
 
   if (context.phase === 'planning') {
-    return denyRuleV1({
-      risk: shellRiskV1(command),
+    return denyRule({
+      risk: shellRisk(command),
       reason:
         'planning phase allows read-only inspection and plan updates only; rejected shell_execute.',
       userVisibleSummary:
@@ -529,8 +526,8 @@ export function shellBuiltinPolicyRuleV1(
     });
   }
 
-  const risk = shellRiskV1(command);
-  return askRuleV1({
+  const risk = shellRisk(command);
+  return askRule({
     risk,
     effects: shellEffects.policyEffects,
     reason:
@@ -566,21 +563,21 @@ export function shellBuiltinPolicyRuleV1(
   });
 }
 
-export function fileBuiltinPolicyRuleV1(
-  input: RuntimeJsonValueV1,
-  context: CapabilityPolicyContextV1,
-  declaredEffects: CapabilityEffectsV1,
-  _minimumApproval: CapabilityApprovalV1,
+export function fileBuiltinPolicyRule(
+  input: RuntimeJsonValue,
+  context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
   operationId: string,
-): BuiltinPolicyRuleResultV1 {
+): BuiltinPolicyRuleResult {
   const isRead =
     operationId === 'builtin:read_file' ||
     operationId === 'builtin:search_content' ||
     operationId === 'builtin:search_files';
-  const path = stringFieldV1(input, 'path') ?? (isRead ? '.' : '<unknown>');
+  const path = stringField(input, 'path') ?? (isRead ? '.' : '<unknown>');
   if (isRead) {
-    const external = isExternalPathV1(path, context.workspace);
-    return allowRuleV1({
+    const external = isExternalPath(path, context.workspace);
+    return allowRule({
       risk: 'read',
       ...(external ? { effects: { externalRead: true } } : {}),
       reason: external
@@ -592,13 +589,13 @@ export function fileBuiltinPolicyRuleV1(
       expectedEffects: external
         ? ['Reads files outside the workspace boundary']
         : ['Reads workspace files', 'Does not intentionally mutate files'],
-      effectiveEffects: readOnlyEffectsV1(declaredEffects),
+      effectiveEffects: readOnlyEffects(declaredEffects),
     });
   }
   if (context.phase === 'planning') {
     const outcome =
       operationId === 'builtin:write_file' ? 'No file was written.' : 'No file was edited.';
-    return denyRuleV1({
+    return denyRule({
       risk: 'write_file',
       reason:
         'Plan mode is read-only. Workspace edits must be described in the plan and applied only after plan approval.',
@@ -608,8 +605,8 @@ export function fileBuiltinPolicyRuleV1(
       effectiveEffects: declaredEffects,
     });
   }
-  const external = isExternalPathV1(path, context.workspace);
-  return askRuleV1({
+  const external = isExternalPath(path, context.workspace);
+  return askRule({
     risk: 'write_file',
     ...(external ? { effects: { externalWrite: true } } : {}),
     reason: external
@@ -625,18 +622,18 @@ export function fileBuiltinPolicyRuleV1(
   });
 }
 
-export function webFetchBuiltinPolicyRuleV1(
-  input: RuntimeJsonValueV1,
-  _context: CapabilityPolicyContextV1,
-  declaredEffects: CapabilityEffectsV1,
-  _minimumApproval: CapabilityApprovalV1,
-): BuiltinPolicyRuleResultV1 {
-  const rawUrl = stringFieldV1(input, 'url')?.trim() ?? '';
+export function webFetchBuiltinPolicyRule(
+  input: RuntimeJsonValue,
+  _context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
+): BuiltinPolicyRuleResult {
+  const rawUrl = stringField(input, 'url')?.trim() ?? '';
   let url: URL;
   try {
     url = new URL(rawUrl);
   } catch {
-    return denyRuleV1({
+    return denyRule({
       risk: 'network',
       reason: 'Invalid URL format.',
       userVisibleSummary: 'Blocked a web fetch with an invalid URL.',
@@ -645,7 +642,7 @@ export function webFetchBuiltinPolicyRuleV1(
     });
   }
   if (url.username || url.password) {
-    return denyRuleV1({
+    return denyRule({
       risk: 'network',
       reason: 'URL must not contain embedded credentials (userinfo).',
       userVisibleSummary: 'Blocked a web fetch to a URL with embedded credentials.',
@@ -654,7 +651,7 @@ export function webFetchBuiltinPolicyRuleV1(
     });
   }
   if (/[?&](?:token|key|secret|password|auth|api_key)=[^&]{20,}/i.test(rawUrl)) {
-    return denyRuleV1({
+    return denyRule({
       risk: 'network',
       reason: 'URL query parameters appear to contain credentials.',
       userVisibleSummary: 'Blocked a web fetch to a URL containing credentials in query.',
@@ -662,7 +659,7 @@ export function webFetchBuiltinPolicyRuleV1(
       effectiveEffects: declaredEffects,
     });
   }
-  return allowRuleV1({
+  return allowRule({
     risk: 'network',
     effects: { network: true },
     reason: 'Read-only web fetch with SSRF and privacy protection.',
@@ -675,17 +672,17 @@ export function webFetchBuiltinPolicyRuleV1(
   });
 }
 
-function allowRuleV1(input: {
-  readonly risk: CapabilityPolicyRiskV1;
-  readonly effects?: Readonly<CapabilityPolicyEffectsV1>;
+function allowRule(input: {
+  readonly risk: CapabilityPolicyRisk;
+  readonly effects?: Readonly<CapabilityPolicyEffects>;
   readonly reason: string;
   readonly userVisibleSummary: string;
   readonly expectedEffects: readonly string[];
-  readonly effectiveEffects: CapabilityEffectsV1;
+  readonly effectiveEffects: CapabilityEffects;
   readonly fullAccessMayBypassApproval?: boolean;
   readonly sameCommandMayBypassApproval?: boolean;
-  readonly recovery?: Readonly<CapabilityPolicyRecoveryV1>;
-}): BuiltinPolicyRuleResultV1 {
+  readonly recovery?: Readonly<CapabilityPolicyRecovery>;
+}): BuiltinPolicyRuleResult {
   return {
     decision: 'allow',
     allowed: true,
@@ -696,18 +693,18 @@ function allowRuleV1(input: {
   };
 }
 
-function askRuleV1(input: {
-  readonly risk: CapabilityPolicyRiskV1;
-  readonly effects?: Readonly<CapabilityPolicyEffectsV1>;
+function askRule(input: {
+  readonly risk: CapabilityPolicyRisk;
+  readonly effects?: Readonly<CapabilityPolicyEffects>;
   readonly reason: string;
   readonly userVisibleSummary: string;
   readonly expectedEffects: readonly string[];
-  readonly effectiveEffects: CapabilityEffectsV1;
+  readonly effectiveEffects: CapabilityEffects;
   readonly phaseConstraint?: 'planning';
   readonly fullAccessMayBypassApproval?: boolean;
   readonly sameCommandMayBypassApproval?: boolean;
-  readonly recovery?: Readonly<CapabilityPolicyRecoveryV1>;
-}): BuiltinPolicyRuleResultV1 {
+  readonly recovery?: Readonly<CapabilityPolicyRecovery>;
+}): BuiltinPolicyRuleResult {
   return {
     decision: 'ask',
     allowed: true,
@@ -718,16 +715,16 @@ function askRuleV1(input: {
   };
 }
 
-function denyRuleV1(input: {
-  readonly risk: CapabilityPolicyRiskV1;
-  readonly effects?: Readonly<CapabilityPolicyEffectsV1>;
+function denyRule(input: {
+  readonly risk: CapabilityPolicyRisk;
+  readonly effects?: Readonly<CapabilityPolicyEffects>;
   readonly reason: string;
   readonly userVisibleSummary: string;
   readonly expectedEffects: readonly string[];
-  readonly effectiveEffects: CapabilityEffectsV1;
+  readonly effectiveEffects: CapabilityEffects;
   readonly phaseConstraint?: 'planning';
-  readonly recovery?: Readonly<CapabilityPolicyRecoveryV1>;
-}): BuiltinPolicyRuleResultV1 {
+  readonly recovery?: Readonly<CapabilityPolicyRecovery>;
+}): BuiltinPolicyRuleResult {
   return {
     decision: 'deny',
     allowed: false,
@@ -738,7 +735,7 @@ function denyRuleV1(input: {
   };
 }
 
-function readOnlyEffectsV1(effects: CapabilityEffectsV1): CapabilityEffectsV1 {
+function readOnlyEffects(effects: CapabilityEffects): CapabilityEffects {
   return Object.freeze({
     filesystem: effects.filesystem === 'none' ? 'none' : 'read',
     network: effects.network === 'none' ? 'none' : 'read',
@@ -746,23 +743,23 @@ function readOnlyEffectsV1(effects: CapabilityEffectsV1): CapabilityEffectsV1 {
   });
 }
 
-function stringFieldV1(input: RuntimeJsonValueV1, key: string): string | undefined {
+function stringField(input: RuntimeJsonValue, key: string): string | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
-  const value = (input as Readonly<Record<string, RuntimeJsonValueV1>>)[key];
+  const value = (input as Readonly<Record<string, RuntimeJsonValue>>)[key];
   return typeof value === 'string' ? value : undefined;
 }
 
-function shellRiskV1(command: string): CapabilityPolicyRiskV1 {
-  if (isVcsMutationShellCommandV1(command.toLowerCase())) return 'vcs_mutation';
-  if (isWriteShellCommandV1(command.toLowerCase())) return 'write_file';
-  if (isNetworkShellCommandV1(command.toLowerCase())) return 'network';
+function shellRisk(command: string): CapabilityPolicyRisk {
+  if (isVcsMutationShellCommand(command.toLowerCase())) return 'vcs_mutation';
+  if (isWriteShellCommand(command.toLowerCase())) return 'write_file';
+  if (isNetworkShellCommand(command.toLowerCase())) return 'network';
   return 'execute_code';
 }
 
-function shellPolicyEffectsV1(
+function shellPolicyEffects(
   command: string,
   workspace: string,
-): CapabilityPolicyEffectsV1 | undefined {
+): CapabilityPolicyEffects | undefined {
   const effects: {
     network?: true;
     externalRead?: true;
@@ -770,36 +767,35 @@ function shellPolicyEffectsV1(
     uncertainEffects?: true;
   } = {};
   const normalized = command.toLowerCase();
-  const readOnly = isReadOnlyShellCommandV1(command);
-  if (isNetworkShellCommandV1(normalized)) effects.network = true;
+  const readOnly = isReadOnlyShellCommand(command);
+  if (isNetworkShellCommand(normalized)) effects.network = true;
   const writeTargets = readOnly
     ? []
-    : isVcsMutationShellCommandV1(normalized)
-      ? shellGitWriteTargetsV1(command)
-      : shellWriteTargetsV1(command);
+    : isVcsMutationShellCommand(normalized)
+      ? shellGitWriteTargets(command)
+      : shellWriteTargets(command);
   if (writeTargets === null) effects.uncertainEffects = true;
-  else if (writeTargets.some((target) => isExternalPathV1(target, workspace)))
+  else if (writeTargets.some((target) => isExternalPath(target, workspace)))
     effects.externalWrite = true;
   const readTargets = [
-    ...(readOnly ? shellReadTargetsV1(command) : []),
-    ...(isNetworkShellCommandV1(normalized) ? shellNetworkReadTargetsV1(command) : []),
+    ...(readOnly ? shellReadTargets(command) : []),
+    ...(isNetworkShellCommand(normalized) ? shellNetworkReadTargets(command) : []),
   ];
-  if (readTargets.some((target) => isExternalPathV1(target, workspace)))
-    effects.externalRead = true;
+  if (readTargets.some((target) => isExternalPath(target, workspace))) effects.externalRead = true;
   if (Object.keys(effects).length > 0) return Object.freeze(effects);
-  return isVcsMutationShellCommandV1(normalized) ? Object.freeze({}) : undefined;
+  return isVcsMutationShellCommand(normalized) ? Object.freeze({}) : undefined;
 }
 
-function shellEffectiveEffectsV1(
+function shellEffectiveEffects(
   command: string,
   workspace: string,
-  declaredEffects: CapabilityEffectsV1,
+  declaredEffects: CapabilityEffects,
 ): {
-  readonly policyEffects?: Readonly<CapabilityPolicyEffectsV1>;
-  readonly effectiveEffects: CapabilityEffectsV1;
+  readonly policyEffects?: Readonly<CapabilityPolicyEffects>;
+  readonly effectiveEffects: CapabilityEffects;
 } {
-  const effects = shellPolicyEffectsV1(command, workspace);
-  const effectiveEffects = shellEffectsClassifierV1(declaredEffects)(
+  const effects = shellPolicyEffects(command, workspace);
+  const effectiveEffects = shellEffectsClassifier(declaredEffects)(
     { command },
     {},
   ).effectiveEffects;
@@ -809,8 +805,8 @@ function shellEffectiveEffectsV1(
   });
 }
 
-function isExternalPathV1(value: string, workspace: string): boolean {
-  const normalized = expandHomeRelativePath(msys2ToWindowsPath(stripQuotesV1(value)));
+function isExternalPath(value: string, workspace: string): boolean {
+  const normalized = expandHomeRelativePath(msys2ToWindowsPath(stripQuotes(value)));
   try {
     const target = isAbsolute(normalized) ? resolve(normalized) : resolve(workspace, normalized);
     return !isPathInsideWorkspace(workspace, target);
@@ -819,7 +815,7 @@ function isExternalPathV1(value: string, workspace: string): boolean {
   }
 }
 
-function shellWriteTargetsV1(command: string): string[] | null {
+function shellWriteTargets(command: string): string[] | null {
   const trimmed = command.trim();
   if (!trimmed || /[;&|`$(){}[\]*?]/.test(trimmed)) return null;
   const redirect = /(?:^|[^>])>{1,2}\s*([^\s]+)/.exec(trimmed);
@@ -845,10 +841,10 @@ function shellWriteTargetsV1(command: string): string[] | null {
   return null;
 }
 
-function shellGitWriteTargetsV1(command: string): string[] | null {
+function shellGitWriteTargets(command: string): string[] | null {
   const trimmed = command.trim();
   if (!trimmed || /[;&|`$(){}[\]*?]/.test(trimmed)) return null;
-  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map(stripQuotesV1) ?? [];
+  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map(stripQuotes) ?? [];
   const gitIndex = tokens.findIndex(
     (token) => token.toLowerCase().replace(/\.(?:cmd|exe)$/iu, '') === 'git',
   );
@@ -872,16 +868,16 @@ function shellGitWriteTargetsV1(command: string): string[] | null {
   return targets;
 }
 
-function shellReadTargetsV1(command: string): string[] {
+function shellReadTargets(command: string): string[] {
   const targets: string[] = [];
   for (const segment of command.split(/\s*(?:\|\||&&|[|;])\s*/g)) {
     const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
-    const program = stripQuotesV1(tokens[0] ?? '')
+    const program = stripQuotes(tokens[0] ?? '')
       .toLowerCase()
       .replace(/\.(?:cmd|exe)$/iu, '');
     if (!program) continue;
     for (let index = 1; index < tokens.length; index += 1) {
-      const token = stripQuotesV1(tokens[index]!);
+      const token = stripQuotes(tokens[index]!);
       if (token === '<' && tokens[index + 1]) {
         targets.push(tokens[index + 1]!);
         index += 1;
@@ -890,12 +886,12 @@ function shellReadTargetsV1(command: string): string[] {
       }
     }
     const operands = tokens.slice(1).filter((token) => {
-      const value = stripQuotesV1(token);
+      const value = stripQuotes(token);
       return value !== '<' && !value.startsWith('<') && !value.startsWith('-');
     });
     if (program === 'rg' || program === 'grep') {
       for (let index = 1; index < tokens.length; index += 1) {
-        const token = stripQuotesV1(tokens[index]!);
+        const token = stripQuotes(tokens[index]!);
         if (['-f', '--file', '--ignore-file'].includes(token) && tokens[index + 1]) {
           targets.push(tokens[index + 1]!);
           index += 1;
@@ -910,10 +906,10 @@ function shellReadTargetsV1(command: string): string[] {
   return targets;
 }
 
-function shellNetworkReadTargetsV1(command: string): string[] {
+function shellNetworkReadTargets(command: string): string[] {
   const trimmed = command.trim();
   if (!trimmed || /[;&|`$(){}[\]*?]/.test(trimmed)) return [];
-  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map(stripQuotesV1) ?? [];
+  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map(stripQuotes) ?? [];
   const program = (tokens[0] ?? '').toLowerCase().replace(/\.(?:cmd|exe)$/iu, '');
   const targets: string[] = [];
   const optionValues = (names: readonly string[]): void => {
@@ -935,11 +931,11 @@ function shellNetworkReadTargetsV1(command: string): string[] {
   return targets;
 }
 
-function stripQuotesV1(value: string): string {
+function stripQuotes(value: string): string {
   return value.replace(/^["']|["']$/g, '');
 }
 
-function shellTargetsV1(command: string): readonly string[] {
+function shellTargets(command: string): readonly string[] {
   const withoutPrefix = command.replace(/^(?:sudo|runas)\s+/i, '').trim();
   const tokens = withoutPrefix.split(/\s+/);
   const rmIndex = tokens.findIndex((token) => token.toLowerCase() === 'rm');
@@ -947,9 +943,9 @@ function shellTargetsV1(command: string): readonly string[] {
   return tokens.slice(rmIndex + 1).filter((token) => !token.startsWith('-'));
 }
 
-function isWorkspaceRootRemovalV1(command: string, workspace: string): boolean {
-  return shellTargetsV1(command).some((target) => {
-    const clean = stripQuotesV1(target);
+function isWorkspaceRootRemoval(command: string, workspace: string): boolean {
+  return shellTargets(command).some((target) => {
+    const clean = stripQuotes(target);
     if (clean === '.') return true;
     try {
       const resolvedTarget = isAbsolute(clean) ? resolve(clean) : resolve(workspace, clean);
@@ -960,7 +956,7 @@ function isWorkspaceRootRemovalV1(command: string, workspace: string): boolean {
   });
 }
 
-function isCriticalSystemRemovalV1(command: string): boolean {
+function isCriticalSystemRemoval(command: string): boolean {
   const critical = [
     '/',
     '/etc',
@@ -975,14 +971,14 @@ function isCriticalSystemRemovalV1(command: string): boolean {
     'c:/windows',
     'c:/windows/system32',
   ];
-  return shellTargetsV1(command).some((target) => {
-    const lexicalTarget = stripQuotesV1(target).replace(/\\/g, '/').toLowerCase();
+  return shellTargets(command).some((target) => {
+    const lexicalTarget = stripQuotes(target).replace(/\\/g, '/').toLowerCase();
     const normalized = lexicalTarget === '/' ? '/' : lexicalTarget.replace(/\/$/u, '');
     return critical.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
   });
 }
 
-function freezeCompilationV1(value: CapabilityPolicyCompilationV1): CapabilityPolicyCompilationV1 {
+function freezeCompilation(value: CapabilityPolicyCompilation): CapabilityPolicyCompilation {
   const effects = value.effects ? Object.freeze({ ...value.effects }) : undefined;
   const effectiveEffects = Object.freeze({ ...value.effectiveEffects });
   const expectedEffects = Object.freeze([...value.expectedEffects]);
@@ -995,10 +991,10 @@ function freezeCompilationV1(value: CapabilityPolicyCompilationV1): CapabilityPo
   });
 }
 
-export function capabilityRiskFromEffectsV1(
-  effectClass: CapabilityRiskClassV1,
-  effects: CapabilityEffectsV1,
-): CapabilityPolicyRiskV1 {
+export function capabilityRiskFromEffects(
+  effectClass: CapabilityRiskClass,
+  effects: CapabilityEffects,
+): CapabilityPolicyRisk {
   if (
     effects.filesystem === 'destructive' ||
     effects.network === 'destructive' ||

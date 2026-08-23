@@ -10,7 +10,7 @@ import {
   RUNTIME_FAULT_SOAK_REPORT_VERSION,
   RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS,
   RUNTIME_FAULT_SOAK_RUNNER_REVISION,
-  type RuntimeFaultSoakReportV2,
+  type RuntimeFaultSoakReport,
 } from './fault-soak-report';
 
 const FORMAL_QUALIFICATION_SEED = 1729;
@@ -285,9 +285,9 @@ export function verifyRuntimeFaultSoakQualification(
         perCaseTimeoutMs: Number(config?.perCaseTimeoutMs),
         startedAt: String(report.startedAt),
         finishedAt: String(report.finishedAt),
-        environment: report.environment as RuntimeFaultSoakReportV2['environment'],
-        source: report.source as RuntimeFaultSoakReportV2['source'],
-        attempts: report.attempts as RuntimeFaultSoakReportV2['attempts'],
+        environment: report.environment as RuntimeFaultSoakReport['environment'],
+        source: report.source as RuntimeFaultSoakReport['source'],
+        attempts: report.attempts as RuntimeFaultSoakReport['attempts'],
       });
       if (canonicalRuntimeFaultSoakJson(rebuilt) !== canonicalRuntimeFaultSoakJson(report)) {
         errors.push('report summaries do not rebuild from the retained attempt evidence');
@@ -304,7 +304,7 @@ export function verifyRuntimeFaultSoakQualification(
     errors.push('reportDigest must be a string');
   } else {
     const computed = computeRuntimeFaultSoakReportDigest(
-      withoutDigest as Omit<RuntimeFaultSoakReportV2, 'reportDigest'>,
+      withoutDigest as Omit<RuntimeFaultSoakReport, 'reportDigest'>,
     );
     addMismatch(errors, 'reportDigest', reportDigest, computed);
   }

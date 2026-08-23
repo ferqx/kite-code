@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import type { CredentialHandleV1 } from '@kite/runtime-spi';
+import type { CredentialHandle } from '@kite/runtime-spi';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { BrowserOpener } from './browser-opener';
 import { NativeBrowserOpener } from './browser-opener';
 import type { McpServerKey } from './control-types';
-import type { BuiltinCredentialBrokerV1 } from './credential-broker';
+import type { BuiltinCredentialBroker } from './credential-broker';
 import type { McpCredentialKey, McpCredentialStoreStatus } from './credential-store';
 import { KiteMcpOAuthProvider } from './oauth-provider';
 
@@ -43,12 +43,12 @@ export type McpAuthResult =
 export interface McpAuthTarget {
   key: McpServerKey;
   credentialKey: McpCredentialKey;
-  credentialHandle?: CredentialHandleV1;
+  credentialHandle?: CredentialHandle;
   serverUrl: URL;
   scopes?: readonly string[];
   clientId?: string;
   clientSecretKey?: McpCredentialKey;
-  clientSecretHandle?: CredentialHandleV1;
+  clientSecretHandle?: CredentialHandle;
   begin(provider: OAuthClientProvider): Promise<'authorization_required' | 'connected'>;
   complete(authorizationCode: string): Promise<void>;
   logout(): Promise<void>;
@@ -70,14 +70,14 @@ export interface McpAuthCoordinator {
 
 export interface DefaultMcpAuthCoordinatorOptions {
   /** Shared Builtin credential authority. */
-  credentialBroker: BuiltinCredentialBrokerV1;
+  credentialBroker: BuiltinCredentialBroker;
   browserOpener?: BrowserOpener;
   callbackTimeoutMs?: number;
   startCallbackServer?: CallbackServerFactory;
 }
 
 export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
-  private readonly credentialBroker: BuiltinCredentialBrokerV1;
+  private readonly credentialBroker: BuiltinCredentialBroker;
   private readonly browserOpener: BrowserOpener;
   private readonly callbackTimeoutMs: number;
   private readonly startCallbackServer: CallbackServerFactory;

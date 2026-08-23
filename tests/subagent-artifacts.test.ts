@@ -3,30 +3,30 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createToolRecoveryJournalV1 } from '@kite/agent-kernel';
+import { createToolRecoveryJournal } from '@kite/agent-kernel';
 import {
-  BuiltinChildRuntimeDriverV1,
-  digestCapabilityValueV1,
+  BuiltinChildRuntimeDriver,
+  digestCapabilityValue,
   getRoleConfig,
-  LocalSubagentProviderV1,
-  SubagentGrantAuthorityV1,
-  subagentDispatchIntentDigestV1,
+  LocalSubagentProvider,
+  SubagentGrantAuthority,
+  subagentDispatchIntentDigest,
 } from '@kite/builtin-runtime';
-import { aiMessage, PrivateImmutableArtifactStorageV1 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
-import type { SubagentHandleV1 } from '@kite/runtime-spi';
+import { aiMessage, PrivateImmutableArtifactStorage } from '@kite/builtin-runtime/model';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import type { SubagentHandle } from '@kite/runtime-spi';
 import {
   serializeSubagentContinuation,
-  subagentContinuationCursorIdV1,
+  subagentContinuationCursorId,
 } from '#app/bootstrap/runtime/subagent/continuation-codec';
-import { reconcilePendingSubagentProvidersAfterCrashV1 } from '#app/bootstrap/runtime/subagent-provider-recovery';
+import { reconcilePendingSubagentProvidersAfterCrash } from '#app/bootstrap/runtime/subagent-provider-recovery';
 import {
-  SubagentContinuationArtifactStoreV1,
-  SubagentLifecycleArtifactStoreV1,
-  SubagentTaskArtifactErrorV1,
-  SubagentTaskArtifactStoreV1,
-  SubagentTaskRequestArtifactStoreV1,
-  subagentTaskDigestV1,
+  SubagentContinuationArtifactStore,
+  SubagentLifecycleArtifactStore,
+  SubagentTaskArtifactError,
+  SubagentTaskArtifactStore,
+  SubagentTaskRequestArtifactStore,
+  subagentTaskDigest,
 } from '#builtin-runtime';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
@@ -42,8 +42,8 @@ function fixture() {
   const taskRoot = join(root, 'subagent-tasks');
   const lifecycleRoot = join(root, 'subagent-lifecycles');
   const continuationRoot = join(root, 'subagent-continuations');
-  const taskStore = new SubagentTaskArtifactStoreV1({ root: taskRoot });
-  const lifecycleStore = new SubagentLifecycleArtifactStoreV1({
+  const taskStore = new SubagentTaskArtifactStore({ root: taskRoot });
+  const lifecycleStore = new SubagentLifecycleArtifactStore({
     root: lifecycleRoot,
   });
   const owner = {
@@ -57,10 +57,10 @@ function fixture() {
 
 function issueHandle(input: ReturnType<typeof fixture>) {
   const published = input.taskStore.write({ owner: input.owner, task: 'sentinel private task' });
-  const authority = new SubagentGrantAuthorityV1({
+  const authority = new SubagentGrantAuthority({
     idSource: () => 'grant-private',
   });
-  const hash = (value: string) => digestCapabilityValueV1({ value });
+  const hash = (value: string) => digestCapabilityValue({ value });
   const grant = authority.issueStart({
     ...input.owner,
     capabilityRevision: hash('capability'),
@@ -113,14 +113,14 @@ describe('private Subagent Artifact namespaces', () => {
       byteLength: expect.any(Number),
     });
     expect(JSON.stringify(published.ref)).not.toContain(task);
-    expect(JSON.stringify(published.ref)).not.toContain(subagentTaskDigestV1(task));
+    expect(JSON.stringify(published.ref)).not.toContain(subagentTaskDigest(task));
     expect(
       value.taskStore.read(published.ref, { ...value.owner, taskDigest: published.taskDigest }),
     ).toMatchObject({ task, taskByteLength: Buffer.byteLength(task, 'utf8') });
     for (const expected of [
       { ...value.owner, parentAttempt: 3, taskDigest: published.taskDigest },
       { ...value.owner, childInvocationId: 'other-child', taskDigest: published.taskDigest },
-      { ...value.owner, taskDigest: subagentTaskDigestV1('other task') },
+      { ...value.owner, taskDigest: subagentTaskDigest('other task') },
     ]) {
       expect(() => value.taskStore.read(published.ref, expected)).toThrow(
         expect.objectContaining({ code: 'artifact_corrupt' }),
@@ -137,12 +137,12 @@ describe('private Subagent Artifact namespaces', () => {
   test('reopens refs without a key and rejects canonical payload corruption', () => {
     const value = fixture();
     const published = value.taskStore.write({ owner: value.owner, task: 'private task' });
-    const reopened = new SubagentTaskArtifactStoreV1({ root: value.taskRoot });
+    const reopened = new SubagentTaskArtifactStore({ root: value.taskRoot });
     expect(
       reopened.read(published.ref, { ...value.owner, taskDigest: published.taskDigest }).task,
     ).toBe('private task');
 
-    const primitive = new PrivateImmutableArtifactStorageV1({
+    const primitive = new PrivateImmutableArtifactStorage({
       root: value.taskRoot,
       namespace: 'subagent-tasks',
       partitions: [{ kind: 'subagent_task' as const, directory: 'tasks', extension: '.json' }],
@@ -164,7 +164,7 @@ describe('private Subagent Artifact namespaces', () => {
     expect(JSON.stringify(ref)).not.toContain(handle.handleId);
     expect(value.lifecycleStore.read(ref, authority.verifier())).toEqual(handle);
 
-    const wrongAuthority = new SubagentGrantAuthorityV1();
+    const wrongAuthority = new SubagentGrantAuthority();
     expect(value.lifecycleStore.read(ref, wrongAuthority.verifier())).toEqual(handle);
     expect(() =>
       value.lifecycleStore.read(
@@ -177,13 +177,13 @@ describe('private Subagent Artifact namespaces', () => {
   test('classifies invalid caller task separately from persisted corruption', () => {
     const value = fixture();
     expect(() => value.taskStore.write({ owner: value.owner, task: '' })).toThrow(
-      SubagentTaskArtifactErrorV1,
+      SubagentTaskArtifactError,
     );
   });
 
   test('queue-time task requests require the exact model invocation and tool-call owner', () => {
     const value = fixture();
-    const store = new SubagentTaskRequestArtifactStoreV1({
+    const store = new SubagentTaskRequestArtifactStore({
       root: value.taskRoot,
     });
     const task = 'queue-only privacy sentinel';
@@ -194,7 +194,7 @@ describe('private Subagent Artifact namespaces', () => {
       task,
     });
     expect(JSON.stringify(ref)).not.toContain(task);
-    expect(JSON.stringify(ref)).not.toContain(subagentTaskDigestV1(task));
+    expect(JSON.stringify(ref)).not.toContain(subagentTaskDigest(task));
     expect(
       store.read(ref, {
         parentModelInvocationId: 'model-parent',
@@ -209,7 +209,7 @@ describe('private Subagent Artifact namespaces', () => {
         expect.objectContaining({ code: 'artifact_corrupt' }),
       );
     }
-    const reopened = new SubagentTaskRequestArtifactStoreV1({ root: value.taskRoot });
+    const reopened = new SubagentTaskRequestArtifactStore({ root: value.taskRoot });
     expect(
       reopened.read(ref, {
         parentModelInvocationId: 'model-parent',
@@ -220,7 +220,7 @@ describe('private Subagent Artifact namespaces', () => {
 
   test('continuations are private immutable payloads with exact parent, child, and cursor binding', () => {
     const value = fixture();
-    const store = new SubagentContinuationArtifactStoreV1({
+    const store = new SubagentContinuationArtifactStore({
       root: value.continuationRoot,
     });
     const snapshot = serializeSubagentContinuation(
@@ -238,7 +238,7 @@ describe('private Subagent Artifact namespaces', () => {
             status: 'awaiting_approval',
           },
         ],
-        toolRecovery: createToolRecoveryJournalV1('1'.repeat(64)),
+        toolRecovery: createToolRecoveryJournal('1'.repeat(64)),
       },
       {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
@@ -250,7 +250,7 @@ describe('private Subagent Artifact namespaces', () => {
     );
     const owner = {
       ...value.owner,
-      continuationId: subagentContinuationCursorIdV1(snapshot),
+      continuationId: subagentContinuationCursorId(snapshot),
     };
     const ref = store.write({ owner, snapshot });
     expect(JSON.stringify(ref)).not.toContain('continuation privacy sentinel');
@@ -262,13 +262,13 @@ describe('private Subagent Artifact namespaces', () => {
     expect(() => store.read(ref, { ...owner, childInvocationId: 'other-child' })).toThrow(
       expect.objectContaining({ code: 'artifact_corrupt' }),
     );
-    const reopened = new SubagentContinuationArtifactStoreV1({ root: value.continuationRoot });
+    const reopened = new SubagentContinuationArtifactStore({ root: value.continuationRoot });
     expect(reopened.read(ref, owner)).toEqual(snapshot);
   });
 });
 
 function runningInvocation(invocationId: string, attempt: number) {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `thread-${invocationId}`,
     userId: 'test',
@@ -278,11 +278,11 @@ function runningInvocation(invocationId: string, attempt: number) {
     invocationId,
     toolCallId: 'parent-tool',
     capabilityId: 'builtin:task',
-    capabilityRevision: digestCapabilityValueV1({ value: 'capability' }),
-    argumentsDigest: digestCapabilityValueV1({ value: 'arguments' }),
-    authorizationDigest: digestCapabilityValueV1({ value: 'authorization' }),
-    admissionDigest: digestCapabilityValueV1({ value: 'admission' }),
-    effectiveEffectsDigest: digestCapabilityValueV1({ value: 'effects' }),
+    capabilityRevision: digestCapabilityValue({ value: 'capability' }),
+    argumentsDigest: digestCapabilityValue({ value: 'arguments' }),
+    authorizationDigest: digestCapabilityValue({ value: 'authorization' }),
+    admissionDigest: digestCapabilityValue({ value: 'admission' }),
+    effectiveEffectsDigest: digestCapabilityValue({ value: 'effects' }),
     status: 'running',
     recordedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
@@ -293,12 +293,12 @@ function runningInvocation(invocationId: string, attempt: number) {
 
 function stateWithHandle(
   value: ReturnType<typeof fixture>,
-  handle: SubagentHandleV1,
-  published: ReturnType<SubagentTaskArtifactStoreV1['write']>,
-  authority: SubagentGrantAuthorityV1,
+  handle: SubagentHandle,
+  published: ReturnType<SubagentTaskArtifactStore['write']>,
+  authority: SubagentGrantAuthority,
 ) {
   const handleRef = value.lifecycleStore.write(handle, authority.verifier());
-  const dispatchIntentDigest = subagentDispatchIntentDigestV1(handle);
+  const dispatchIntentDigest = subagentDispatchIntentDigest(handle);
   let state = runningInvocation(value.owner.parentInvocationId, value.owner.parentAttempt);
   state = reduceRuntimeState(state, {
     type: 'capability.subagent_dispatch_intent_recorded',
@@ -325,12 +325,12 @@ function stateWithHandle(
 describe('durable Subagent lifecycle recovery', () => {
   test('intent-only restore records explicit undispatched cleanup before unknown', async () => {
     const value = fixture();
-    const authority = new SubagentGrantAuthorityV1();
-    const driver = new BuiltinChildRuntimeDriverV1();
-    const provider = new LocalSubagentProviderV1(authority.verifier(), driver, value.taskStore);
+    const authority = new SubagentGrantAuthority();
+    const driver = new BuiltinChildRuntimeDriver();
+    const provider = new LocalSubagentProvider(authority.verifier(), driver, value.taskStore);
     let state = runningInvocation(value.owner.parentInvocationId, value.owner.parentAttempt);
     const published = value.taskStore.write({ owner: value.owner, task: 'never dispatched' });
-    const dispatchIntentDigest = `sha256:${digestCapabilityValueV1({ value: 'dispatch-intent' })}`;
+    const dispatchIntentDigest = `sha256:${digestCapabilityValue({ value: 'dispatch-intent' })}`;
     state = reduceRuntimeState(state, {
       type: 'capability.subagent_dispatch_intent_recorded',
       invocationId: value.owner.parentInvocationId,
@@ -342,7 +342,7 @@ describe('durable Subagent lifecycle recovery', () => {
       recordedAt: new Date().toISOString(),
     });
     const events: RuntimeEvent[] = [];
-    const recovered = await reconcilePendingSubagentProvidersAfterCrashV1({
+    const recovered = await reconcilePendingSubagentProvidersAfterCrash({
       composition: {
         grants: authority,
         driver,
@@ -381,7 +381,7 @@ describe('durable Subagent lifecycle recovery', () => {
     const value = fixture();
     const { authority, handle, published } = issueHandle(value);
     const handleRef = value.lifecycleStore.write(handle, authority.verifier());
-    const dispatchIntentDigest = subagentDispatchIntentDigestV1(handle);
+    const dispatchIntentDigest = subagentDispatchIntentDigest(handle);
     let state = runningInvocation(value.owner.parentInvocationId, value.owner.parentAttempt);
     for (const event of [
       {
@@ -406,14 +406,14 @@ describe('durable Subagent lifecycle recovery', () => {
     ]) {
       state = reduceRuntimeState(state, event);
     }
-    const restartedAuthority = new SubagentGrantAuthorityV1();
-    const restartedDriver = new BuiltinChildRuntimeDriverV1();
-    const restartedProvider = new LocalSubagentProviderV1(
+    const restartedAuthority = new SubagentGrantAuthority();
+    const restartedDriver = new BuiltinChildRuntimeDriver();
+    const restartedProvider = new LocalSubagentProvider(
       restartedAuthority.verifier(),
       restartedDriver,
       value.taskStore,
     );
-    const recovered = await reconcilePendingSubagentProvidersAfterCrashV1({
+    const recovered = await reconcilePendingSubagentProvidersAfterCrash({
       composition: {
         grants: restartedAuthority,
         driver: restartedDriver,
@@ -444,7 +444,7 @@ describe('durable Subagent lifecycle recovery', () => {
     const value = fixture();
     const { authority, grant } = issueHandle(value);
     let driverStarts = 0;
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       {
         abandon: () => true,
@@ -483,7 +483,7 @@ describe('durable Subagent lifecycle recovery', () => {
   test('same-process restore abandons a prepared handle without Driver dispatch', async () => {
     const value = fixture();
     const { authority, grant, published } = issueHandle(value);
-    const driver = new BuiltinChildRuntimeDriverV1();
+    const driver = new BuiltinChildRuntimeDriver();
     driver.registerStart(grant.grantId, {
       childInvocationId: grant.childInvocationId,
       parentInvocationId: grant.parentInvocationId,
@@ -498,7 +498,7 @@ describe('durable Subagent lifecycle recovery', () => {
         privatePayload: {},
       }),
     });
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       driver,
       value.taskStore,
@@ -506,10 +506,10 @@ describe('durable Subagent lifecycle recovery', () => {
     );
     const prepared = await provider.start({ grant });
     expect(prepared.ok).toBe(true);
-    expect(driver.pendingRegistrationCountV1()).toBe(1);
+    expect(driver.pendingRegistrationCount()).toBe(1);
     if (!prepared.ok) return;
     let state = stateWithHandle(value, prepared.value, published, authority);
-    const recovered = await reconcilePendingSubagentProvidersAfterCrashV1({
+    const recovered = await reconcilePendingSubagentProvidersAfterCrash({
       composition: {
         grants: authority,
         driver,
@@ -526,7 +526,7 @@ describe('durable Subagent lifecycle recovery', () => {
       },
     });
     expect(recovered).toBe(true);
-    expect(driver.pendingRegistrationCountV1()).toBe(0);
+    expect(driver.pendingRegistrationCount()).toBe(0);
     expect(state.capabilities.invocations[value.owner.parentInvocationId]?.status).toBe('unknown');
   });
 
@@ -554,7 +554,7 @@ describe('durable Subagent lifecycle recovery', () => {
         throw new Error('unexpected resume');
       },
     };
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       driver,
       value.taskStore,
@@ -567,10 +567,10 @@ describe('durable Subagent lifecycle recovery', () => {
     expect(await provider.activate({ handle: prepared.value })).toMatchObject({ ok: true });
     expect(driverStarts).toBe(1);
     let state = stateWithHandle(value, prepared.value, published, authority);
-    const recovered = await reconcilePendingSubagentProvidersAfterCrashV1({
+    const recovered = await reconcilePendingSubagentProvidersAfterCrash({
       composition: {
         grants: authority,
-        driver: new BuiltinChildRuntimeDriverV1(),
+        driver: new BuiltinChildRuntimeDriver(),
         provider,
         taskArtifacts: value.taskStore,
         lifecycleArtifacts: value.lifecycleStore,

@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { refreshSkillCatalog } from '@kite/builtin-runtime';
 import { skillDirs } from '#app/config/paths';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
-import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgent } from '../helpers/runtime-model';
 
 const skillName = process.env.SKILL_E2E_NAME;
 const expectedScope = process.env.SKILL_E2E_EXPECTED_SCOPE;
@@ -106,14 +106,14 @@ const runtimeDir = join(workspace, '.kite-code');
 mkdirSync(runtimeDir, { recursive: true });
 const adaptive = createAdaptiveSkillModel();
 const events: RuntimeEvent[] = [];
-for await (const event of runTestRuntimeAgentV1(
+for await (const event of runTestRuntimeAgent(
   {
     task: `Run the ${expectedScope} scoped Skill.`,
     threadId: `skill-e2e-${expectedScope}`,
     userId: 'e2e',
     workspace,
     openStateSessionStorage: () =>
-      openStateStoreForTestV1(join(runtimeDir, `skill-e2e-${expectedScope}.db`)),
+      openStateStoreForTest(join(runtimeDir, `skill-e2e-${expectedScope}.db`)),
     // This fixture exercises Skill activation and completion, not plan authoring.
     // Keep its final answer outside an incomplete planning lifecycle.
     phase: 'building',
@@ -127,7 +127,7 @@ for await (const event of runTestRuntimeAgentV1(
       baseURL: 'http://localhost:1',
       modelName: 'test',
       sandbox: { enabled: true },
-      features: { skillWorkflowV1: true, skillActivationV2: true },
+      features: { skillWorkflow: true, skillActivation: true },
     },
   },
   { requestAction: async () => ({ type: 'cancel', interactionId: 'unexpected' }) },

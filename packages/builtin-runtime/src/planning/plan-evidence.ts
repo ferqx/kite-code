@@ -1,4 +1,4 @@
-import type { PlanCompletionEvidenceV1 } from '@kite/runtime-contract';
+import type { PlanCompletionEvidence } from '@kite/runtime-contract';
 
 const SAFE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const SAFE_REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/;
@@ -14,8 +14,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Canonical pure validator for PlanCompletionEvidenceV1. */
-export function isPlanCompletionEvidenceV1(value: unknown): value is PlanCompletionEvidenceV1 {
+/** Canonical pure validator for PlanCompletionEvidence. */
+export function isPlanCompletionEvidence(value: unknown): value is PlanCompletionEvidence {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['schemaVersion', 'verification', 'execution', 'skipped', 'unresolved'])

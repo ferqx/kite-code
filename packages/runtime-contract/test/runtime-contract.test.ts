@@ -2,27 +2,27 @@ import { describe, expect, test } from 'bun:test';
 import {
   assertRuntimeCommand,
   isRuntimeCommand,
-  RUNTIME_COMMAND_SCHEMA_V1,
-  RUNTIME_CONTRACT_BOUNDARY_V1,
-  RUNTIME_CONTRACT_SCHEMA_V1,
+  RUNTIME_COMMAND_SCHEMA_,
+  RUNTIME_CONTRACT_BOUNDARY_,
+  RUNTIME_CONTRACT_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
 } from '@kite/runtime-contract';
 
 describe('runtime contract package boundary', () => {
   test('is a frozen private in-process Contract', () => {
-    expect(RUNTIME_CONTRACT_BOUNDARY_V1).toEqual({
+    expect(RUNTIME_CONTRACT_BOUNDARY_).toEqual({
       audience: 'kite-app',
       transport: 'in-process',
       revision: 'rmv1-03',
-      schema: RUNTIME_CONTRACT_SCHEMA_V1,
+      schema: RUNTIME_CONTRACT_SCHEMA_,
     });
-    expect(Object.isFrozen(RUNTIME_CONTRACT_BOUNDARY_V1)).toBe(true);
+    expect(Object.isFrozen(RUNTIME_CONTRACT_BOUNDARY_)).toBe(true);
   });
 
-  test('accepts only the RMV1 command envelope', () => {
+  test('accepts only the RM command envelope', () => {
     const command: RuntimeCommand = {
-      schema: RUNTIME_COMMAND_SCHEMA_V1,
+      schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'command-1',
       type: 'create_session',
       workspace: '/workspace',

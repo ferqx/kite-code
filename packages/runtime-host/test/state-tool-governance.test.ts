@@ -1,19 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type AgentAuthorizationState,
-  applyApprovalGrantV1,
-  createToolApprovalBindingDigestV1,
-  createToolGovernanceCommandDigestV1,
+  applyApprovalGrant,
+  createToolApprovalBindingDigest,
+  createToolGovernanceCommandDigest,
 } from '@kite/agent-kernel';
 import {
-  createRuntimeHostStateToolGovernanceV1,
-  type RuntimeHostStateToolGovernanceAuthorizationInputV1,
+  createRuntimeHostStateToolGovernance,
+  type RuntimeHostStateToolGovernanceAuthorizationInput,
 } from '@kite/runtime-host';
 import {
-  CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
-  type CapabilityEffectsV1,
-  type ClassifiedInvocationV1,
-  type ToolPipelineGovernanceProjectionV1,
+  CAPABILITY_POLICY_COMPILATION_SCHEMA_,
+  type CapabilityEffects,
+  type ClassifiedInvocation,
+  type ToolPipelineGovernanceProjection,
 } from '@kite/runtime-spi';
 
 const A = 'a'.repeat(64);
@@ -22,17 +22,17 @@ const C = 'c'.repeat(64);
 const D = 'd'.repeat(64);
 const E = 'e'.repeat(64);
 const F = 'f'.repeat(64);
-const COMMAND_DIGEST = createToolGovernanceCommandDigestV1('echo hello')!;
+const COMMAND_DIGEST = createToolGovernanceCommandDigest('echo hello')!;
 
-const effects: CapabilityEffectsV1 = Object.freeze({
+const effects: CapabilityEffects = Object.freeze({
   filesystem: 'write',
   network: 'none',
   externalState: 'none',
 });
 
-function ordinaryClassified(): ClassifiedInvocationV1 {
+function ordinaryClassified(): ClassifiedInvocation {
   const policy = Object.freeze({
-    schema: CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
+    schema: CAPABILITY_POLICY_COMPILATION_SCHEMA_,
     operationId: 'builtin:shell_execute',
     capabilityRevision: A,
     parserRevision: B,
@@ -79,8 +79,8 @@ function ordinaryClassified(): ClassifiedInvocationV1 {
     builtinProjectionRevision: E,
     dynamicCatalogRevision: null,
   });
-  const governance: ToolPipelineGovernanceProjectionV1 = Object.freeze({
-    invocation: invocation as ToolPipelineGovernanceProjectionV1['invocation'],
+  const governance: ToolPipelineGovernanceProjection = Object.freeze({
+    invocation: invocation as ToolPipelineGovernanceProjection['invocation'],
     policy,
     effectiveEffects: effects,
     effectiveEffectsDigest: C,
@@ -94,10 +94,10 @@ function ordinaryClassified(): ClassifiedInvocationV1 {
     governance,
     effectiveEffects: effects,
     effectiveEffectsDigest: C,
-  } as unknown as ClassifiedInvocationV1;
+  } as unknown as ClassifiedInvocation;
 }
 
-function dynamicClassified(): ClassifiedInvocationV1 {
+function dynamicClassified(): ClassifiedInvocation {
   const subject = Object.freeze({
     capabilityId: 'mcp:server/tool',
     capabilityRevision: A,
@@ -117,7 +117,7 @@ function dynamicClassified(): ClassifiedInvocationV1 {
     builtinProjectionRevision: E,
   });
   const policy = Object.freeze({
-    schema: CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
+    schema: CAPABILITY_POLICY_COMPILATION_SCHEMA_,
     operationId: 'mcp:dynamic_tool',
     capabilityRevision: A,
     parserRevision: B,
@@ -165,7 +165,7 @@ function dynamicClassified(): ClassifiedInvocationV1 {
     subject,
     runtimeWrapper,
   });
-  const governance: ToolPipelineGovernanceProjectionV1 = Object.freeze({
+  const governance: ToolPipelineGovernanceProjection = Object.freeze({
     invocation,
     policy,
     effectiveEffects: effects,
@@ -186,12 +186,12 @@ function dynamicClassified(): ClassifiedInvocationV1 {
     governance,
     effectiveEffects: effects,
     effectiveEffectsDigest: C,
-  } as unknown as ClassifiedInvocationV1;
+  } as unknown as ClassifiedInvocation;
 }
 
-function ordinaryMcpClassified(): ClassifiedInvocationV1 {
+function ordinaryMcpClassified(): ClassifiedInvocation {
   const base = ordinaryClassified();
-  const governance = base.governance as ToolPipelineGovernanceProjectionV1;
+  const governance = base.governance as ToolPipelineGovernanceProjection;
   const policy = Object.freeze({
     ...governance.policy,
     operationId: 'builtin:list_mcp_resources',
@@ -210,19 +210,19 @@ function ordinaryMcpClassified(): ClassifiedInvocationV1 {
   });
   const projected = Object.freeze({
     ...governance,
-    invocation: invocation as ToolPipelineGovernanceProjectionV1['invocation'],
+    invocation: invocation as ToolPipelineGovernanceProjection['invocation'],
     policy,
-  }) as ToolPipelineGovernanceProjectionV1;
+  }) as ToolPipelineGovernanceProjection;
   return {
     ...base,
     policyCompilation: policy,
     governance: projected,
-  } as unknown as ClassifiedInvocationV1;
+  } as unknown as ClassifiedInvocation;
 }
 
-function nestedSkillClassified(): ClassifiedInvocationV1 {
+function nestedSkillClassified(): ClassifiedInvocation {
   const base = ordinaryClassified();
-  const governance = base.governance as ToolPipelineGovernanceProjectionV1;
+  const governance = base.governance as ToolPipelineGovernanceProjection;
   const policy = Object.freeze({
     ...governance.policy,
     operationId: 'builtin:activate_skill',
@@ -254,18 +254,18 @@ function nestedSkillClassified(): ClassifiedInvocationV1 {
   });
   const projected = Object.freeze({
     ...governance,
-    invocation: invocation as ToolPipelineGovernanceProjectionV1['invocation'],
+    invocation: invocation as ToolPipelineGovernanceProjection['invocation'],
     policy,
     nestedSkill,
-  }) as ToolPipelineGovernanceProjectionV1;
+  }) as ToolPipelineGovernanceProjection;
   return {
     ...base,
     policyCompilation: policy,
     governance: projected,
-  } as unknown as ClassifiedInvocationV1;
+  } as unknown as ClassifiedInvocation;
 }
 
-function context(): RuntimeHostStateToolGovernanceAuthorizationInputV1['context'] {
+function context(): RuntimeHostStateToolGovernanceAuthorizationInput['context'] {
   return {
     phase: 'building',
     interactionMode: 'accept_edits',
@@ -287,9 +287,9 @@ function authorization(): AgentAuthorizationState {
 }
 
 function input(
-  classified: ClassifiedInvocationV1 = ordinaryClassified(),
-  overrides: Partial<RuntimeHostStateToolGovernanceAuthorizationInputV1> = {},
-): RuntimeHostStateToolGovernanceAuthorizationInputV1 {
+  classified: ClassifiedInvocation = ordinaryClassified(),
+  overrides: Partial<RuntimeHostStateToolGovernanceAuthorizationInput> = {},
+): RuntimeHostStateToolGovernanceAuthorizationInput {
   return {
     classified,
     workspace: '/workspace',
@@ -317,8 +317,8 @@ function reservedAdmission(): {
   return { freshness: 'current', reservationRequired: true, reservationIds: ['reservation-1'] };
 }
 
-function bridge(verifier: (value: ClassifiedInvocationV1) => boolean = () => true) {
-  return createRuntimeHostStateToolGovernanceV1({
+function bridge(verifier: (value: ClassifiedInvocation) => boolean = () => true) {
+  return createRuntimeHostStateToolGovernance({
     verifyClassifiedIdentity: verifier,
   });
 }
@@ -383,15 +383,15 @@ describe('Runtime Host State tool governance bridge', () => {
 
   test('projects a verified user-input interrupt to the pure Kernel decision', () => {
     const base = ordinaryClassified();
-    const governance = base.governance as ToolPipelineGovernanceProjectionV1;
+    const governance = base.governance as ToolPipelineGovernanceProjection;
     const forged = Object.freeze({
       ...governance,
       invocation: Object.freeze({
         ...governance.invocation,
         executionMechanism: 'user_input' as const,
-      }) as ToolPipelineGovernanceProjectionV1['invocation'],
-    }) as ToolPipelineGovernanceProjectionV1;
-    const classified = { ...base, governance: forged } as ClassifiedInvocationV1;
+      }) as ToolPipelineGovernanceProjection['invocation'],
+    }) as ToolPipelineGovernanceProjection;
+    const classified = { ...base, governance: forged } as ClassifiedInvocation;
     const projected = bridge().project(input(classified), admission());
     expect(projected.ok).toBe(true);
     if (!projected.ok) return;
@@ -421,13 +421,13 @@ describe('Runtime Host State tool governance bridge', () => {
 
   test('rejects a forged clone or cross-branch governance projection', () => {
     const forged = ordinaryClassified();
-    const governance = forged.governance as ToolPipelineGovernanceProjectionV1;
+    const governance = forged.governance as ToolPipelineGovernanceProjection;
     const forgedGovernance = {
       ...governance,
       invocation: { ...governance.invocation, dynamicCatalogRevision: D },
-    } as ToolPipelineGovernanceProjectionV1;
+    } as ToolPipelineGovernanceProjection;
     const result = bridge().project(
-      input({ ...forged, governance: forgedGovernance } as ClassifiedInvocationV1),
+      input({ ...forged, governance: forgedGovernance } as ClassifiedInvocation),
       admission(),
     );
     expect(result).toMatchObject({ ok: false, failure: { code: 'governance_projection_invalid' } });
@@ -435,7 +435,7 @@ describe('Runtime Host State tool governance bridge', () => {
 
   test('rejects nested identity drift before Kernel facts are admitted', () => {
     const forged = ordinaryClassified();
-    const governance = forged.governance as ToolPipelineGovernanceProjectionV1;
+    const governance = forged.governance as ToolPipelineGovernanceProjection;
     const nested = {
       operationId: 'builtin:activate_skill' as const,
       capabilityId: 'skill:fixture',
@@ -447,16 +447,16 @@ describe('Runtime Host State tool governance bridge', () => {
     const forgedGovernance = {
       ...governance,
       nestedSkill: nested,
-    } as ToolPipelineGovernanceProjectionV1;
+    } as ToolPipelineGovernanceProjection;
     const result = bridge().project(
-      input({ ...forged, governance: forgedGovernance } as ClassifiedInvocationV1),
+      input({ ...forged, governance: forgedGovernance } as ClassifiedInvocation),
       admission(),
     );
     expect(result).toMatchObject({ ok: false, failure: { code: 'governance_projection_invalid' } });
   });
 
   test('uses only an exact persisted State same-command grant', () => {
-    const granted = applyApprovalGrantV1({
+    const granted = applyApprovalGrant({
       authorization: authorization(),
       grant: 'same_command',
       workspace: '/workspace',
@@ -523,7 +523,7 @@ describe('Runtime Host State tool governance bridge', () => {
         status: 'approved',
         grant: 'approve_once',
         approvedToolCallId: projected.value.invocation.toolCallId,
-        approvalBindingDigest: createToolApprovalBindingDigestV1(
+        approvalBindingDigest: createToolApprovalBindingDigest(
           projected.value.invocation,
           projected.value.policy,
         ),

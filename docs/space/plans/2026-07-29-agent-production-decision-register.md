@@ -13,7 +13,7 @@
 
 ADR-0069 自 2026-08-04 起把 ADR-0068 的精简首发进一步收敛为终态。下方 D-01–D-14、bindings 与
 Revision 1–44 保留为历史事实，不得据此要求签名、attestation、独立 authority、external rollout 或
-promotion evidence。当前 108 Task 状态只以 `release/oss-first-release/task-status-v2.json` 为准：
+promotion evidence。当前 108 Task 状态只以 `release/oss-first-release/task-status.json` 为准：
 83 `completed`、25 `superseded`、0 optional。发布只使用 G0/G1 和普通维护者检查清单。
 
 - 本文是 `D-01`–`D-14`、责任角色和 execution binding 的规范登记入口。
@@ -466,4 +466,4 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 42 | 2026-08-03 | 按单人开源维护现实采用 candidate-bound maintainer security review；第三方评审由硬门禁改为可选增强 | 用户直接决策、ADR-0067；G0/G1、artifact/signature/attestation identity、真实 evidence、P0/P1、rollback 与 fail-closed 门禁保持不变；Task/milestone 计数不因治理规则调整自动提升 |
 | 43 | 2026-08-03 | 收紧单维护者复核正向路径：共享 canonical review record、strict Gate policy/evidence/decision replay、GitHub run/actor/真实时间验证与十一 subject attestation | 复核绑定 exact candidate/route/platform/ref/workflow/run/attempt/verifier/rollback/compatibility/scope/P0–P2；rollback/compatibility 消费 strict candidate-bound report + verifier receipt；producer/review 与 admission 分 run，后者只验证已完成前序 run；GA replay authority 使用不可拆分 exact record；review digest/freshness/replay ordering 与 maturity approval time 继续 fail closed；production authority registry 仍为空，不产生 Task/milestone |
 | 44 | 2026-08-04 | 批准单维护者开源首发模型；首发 Gate 收敛为 G0 本地正确性/安全与 G1 普通三平台/真实 Provider 验证；重新分类全部 108 Task | 用户直接决策、ADR-0068、`release/oss-first-release/task-status-v1.json`；83 completed、21 optional_post_release、4 superseded；未取得的签名、attestation、external cohort、maturity 或第三方评审均未登记为通过 |
-| 45 | 2026-08-04 | 将 G0/G1 确立为首发路线终态；取消 Limited cohort SLO、长期服务等级/error-budget、dogfood/canary/maturity、Auto Compaction rollout 与 GA observation 后续路线 | 用户直接决策、ADR-0069、`release/oss-first-release/task-status-v2.json`；83 completed、25 superseded、0 optional；原 21 个 optional 均真实标记为 superseded，未伪造外部运营或 promotion 证据 |
+| 45 | 2026-08-04 | 将 G0/G1 确立为首发路线终态；取消 Limited cohort SLO、长期服务等级/error-budget、dogfood/canary/maturity、Auto Compaction rollout 与 GA observation 后续路线 | 用户直接决策、ADR-0069、`release/oss-first-release/task-status.json`；83 completed、25 superseded、0 optional；原 21 个 optional 均真实标记为 superseded，未伪造外部运营或 promotion 证据 |

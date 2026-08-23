@@ -1,37 +1,34 @@
 import type { CapabilityArtifactRef } from '@kite/runtime-contract';
-import type { RuntimeJsonValueV1 } from './contracts';
+import type { RuntimeJsonValue } from './contracts';
+import type { PreparedToolInvocation, ToolPipelineAttemptAcknowledgement } from './tool-pipeline';
 import type {
-  PreparedToolInvocationV1,
-  ToolPipelineAttemptAcknowledgementV1,
-} from './tool-pipeline';
-import type {
-  FilesystemPreimageArtifactRefV1,
-  WorkspaceEditFileOperationV1,
-  WorkspaceFilesystemIntentRecordV1,
-  WorkspaceFilesystemMutationReadyRecordV1,
-  WorkspaceFilesystemObservationRecordV1,
-  WorkspaceReadFileOperationV1,
-  WorkspaceSearchContentOperationV1,
-  WorkspaceSearchFilesOperationV1,
-  WorkspaceWriteFileOperationV1,
+  FilesystemPreimageArtifactRef,
+  WorkspaceEditFileOperation,
+  WorkspaceFilesystemIntentRecord,
+  WorkspaceFilesystemMutationReadyRecord,
+  WorkspaceFilesystemObservationRecord,
+  WorkspaceReadFileOperation,
+  WorkspaceSearchContentOperation,
+  WorkspaceSearchFilesOperation,
+  WorkspaceWriteFileOperation,
 } from './workspace-filesystem-provider';
 
 /** Neutral post-ack contract for durable Workspace filesystem intent evidence. */
-export const WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 =
+export const WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ =
   'kite.workspace-filesystem-pipeline.v1' as const;
 
 /** Read operations are cut over before mutation; this union cannot admit a write. */
-export type WorkspaceFilesystemReadOperationIdV1 =
+export type WorkspaceFilesystemReadOperationId =
   | 'builtin:read_file'
   | 'builtin:search_files'
   | 'builtin:search_content';
 
-export type WorkspaceFilesystemReadOperationV1 =
-  | (Readonly<WorkspaceReadFileOperationV1> & { readonly operationId: 'builtin:read_file' })
-  | (Readonly<WorkspaceSearchFilesOperationV1> & {
+export type WorkspaceFilesystemReadOperation =
+  | (Readonly<WorkspaceReadFileOperation> & { readonly operationId: 'builtin:read_file' })
+  | (Readonly<WorkspaceSearchFilesOperation> & {
       readonly operationId: 'builtin:search_files';
     })
-  | (Readonly<WorkspaceSearchContentOperationV1> & {
+  | (Readonly<WorkspaceSearchContentOperation> & {
       readonly operationId: 'builtin:search_content';
     });
 
@@ -40,33 +37,33 @@ export type WorkspaceFilesystemReadOperationV1 =
  * accepted the exact Host-issued object. The raw lexical path remains solely
  * in `operation.path`; App must not resolve or canonicalize it.
  */
-export interface WorkspaceFilesystemIntentDraftV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface WorkspaceFilesystemIntentDraft<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1;
-  readonly prepared: Readonly<PreparedToolInvocationV1<TArguments, TRequest>>;
-  readonly operation: Readonly<WorkspaceFilesystemReadOperationV1>;
-  readonly record: Readonly<WorkspaceFilesystemIntentRecordV1>;
+  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_;
+  readonly prepared: Readonly<PreparedToolInvocation<TArguments, TRequest>>;
+  readonly operation: Readonly<WorkspaceFilesystemReadOperation>;
+  readonly record: Readonly<WorkspaceFilesystemIntentRecord>;
 }
 
 /**
  * Process-local result issued only by the persistence instance that recorded
  * this exact prepared attempt. Its JSON shape is never sufficient authority.
  */
-export interface WorkspaceFilesystemPersistedIntentV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface WorkspaceFilesystemPersistedIntent<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1;
+  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_;
   readonly status: 'durably_persisted';
-  readonly prepared: Readonly<PreparedToolInvocationV1<TArguments, TRequest>>;
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-  readonly operation: Readonly<WorkspaceFilesystemReadOperationV1>;
-  readonly record: Readonly<WorkspaceFilesystemIntentRecordV1>;
+  readonly prepared: Readonly<PreparedToolInvocation<TArguments, TRequest>>;
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+  readonly operation: Readonly<WorkspaceFilesystemReadOperation>;
+  readonly record: Readonly<WorkspaceFilesystemIntentRecord>;
 }
 
-export type WorkspaceFilesystemPersistedIntentVerificationResultV1 =
+export type WorkspaceFilesystemPersistedIntentVerificationResult =
   | { readonly valid: true }
   | {
       readonly valid: false;
@@ -80,21 +77,21 @@ export type WorkspaceFilesystemPersistedIntentVerificationResultV1 =
 
 /**
  * App implements this port with the same prepared-to-ack map used by
- * `ToolPipelinePersistenceV1.recordAttempt`. `persistIntent` must throw on a
+ * `ToolPipelinePersistence.recordAttempt`. `persistIntent` must throw on a
  * false, thrown, or stale State write so Host records the acknowledged
  * attempt as unknown. Builtin must call `verifyPersistedIntent` immediately
  * before issuing a Provider grant; clones and cross-instance values fail.
  */
-export interface WorkspaceFilesystemDurableEvidencePortV1 {
+export interface WorkspaceFilesystemDurableEvidencePort {
   readonly persistIntent: <
-    TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-    TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+    TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+    TRequest extends RuntimeJsonValue = RuntimeJsonValue,
   >(
-    draft: Readonly<WorkspaceFilesystemIntentDraftV1<TArguments, TRequest>>,
-  ) => Promise<Readonly<WorkspaceFilesystemPersistedIntentV1<TArguments, TRequest>>>;
+    draft: Readonly<WorkspaceFilesystemIntentDraft<TArguments, TRequest>>,
+  ) => Promise<Readonly<WorkspaceFilesystemPersistedIntent<TArguments, TRequest>>>;
   readonly verifyPersistedIntent: (
-    intent: Readonly<WorkspaceFilesystemPersistedIntentV1>,
-  ) => WorkspaceFilesystemPersistedIntentVerificationResultV1;
+    intent: Readonly<WorkspaceFilesystemPersistedIntent>,
+  ) => WorkspaceFilesystemPersistedIntentVerificationResult;
 }
 
 /**
@@ -102,25 +99,25 @@ export interface WorkspaceFilesystemDurableEvidencePortV1 {
  * ready/terminal route is connected. In particular, adding these ids here
  * cannot accidentally widen the read evidence port above.
  */
-export type WorkspaceFilesystemMutationOperationIdV1 = 'builtin:write_file' | 'builtin:edit_file';
+export type WorkspaceFilesystemMutationOperationId = 'builtin:write_file' | 'builtin:edit_file';
 
-export type WorkspaceFilesystemMutationPipelineOperationV1 =
-  | (Readonly<WorkspaceWriteFileOperationV1> & {
+export type WorkspaceFilesystemMutationPipelineOperation =
+  | (Readonly<WorkspaceWriteFileOperation> & {
       readonly operationId: 'builtin:write_file';
     })
-  | (Readonly<WorkspaceEditFileOperationV1> & {
+  | (Readonly<WorkspaceEditFileOperation> & {
       readonly operationId: 'builtin:edit_file';
     });
 
 /** The mutation intent draft is created only after the exact Host attempt ack. */
-export interface WorkspaceFilesystemMutationIntentDraftV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface WorkspaceFilesystemMutationIntentDraft<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1;
-  readonly prepared: Readonly<PreparedToolInvocationV1<TArguments, TRequest>>;
-  readonly operation: Readonly<WorkspaceFilesystemMutationPipelineOperationV1>;
-  readonly record: Readonly<WorkspaceFilesystemIntentRecordV1>;
+  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_;
+  readonly prepared: Readonly<PreparedToolInvocation<TArguments, TRequest>>;
+  readonly operation: Readonly<WorkspaceFilesystemMutationPipelineOperation>;
+  readonly record: Readonly<WorkspaceFilesystemIntentRecord>;
 }
 
 /**
@@ -129,19 +126,19 @@ export interface WorkspaceFilesystemMutationIntentDraftV1<
  * that already owns the exact prepared object; JSON-equivalent clones must be
  * rejected by that owner.
  */
-export interface WorkspaceFilesystemPersistedMutationIntentV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface WorkspaceFilesystemPersistedMutationIntent<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1;
+  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_;
   readonly status: 'durably_persisted';
-  readonly prepared: Readonly<PreparedToolInvocationV1<TArguments, TRequest>>;
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-  readonly operation: Readonly<WorkspaceFilesystemMutationPipelineOperationV1>;
-  readonly record: Readonly<WorkspaceFilesystemIntentRecordV1>;
+  readonly prepared: Readonly<PreparedToolInvocation<TArguments, TRequest>>;
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+  readonly operation: Readonly<WorkspaceFilesystemMutationPipelineOperation>;
+  readonly record: Readonly<WorkspaceFilesystemIntentRecord>;
 }
 
-export type WorkspaceFilesystemPersistedMutationIntentVerificationResultV1 =
+export type WorkspaceFilesystemPersistedMutationIntentVerificationResult =
   | { readonly valid: true }
   | {
       readonly valid: false;
@@ -160,8 +157,8 @@ export type WorkspaceFilesystemPersistedMutationIntentVerificationResultV1 =
  * mutation. The full Provider DTO (target object and preimage content) never
  * crosses the App/SPI durable evidence boundary.
  */
-export interface WorkspaceFilesystemPreparedMutationEvidenceV1 {
-  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1;
+export interface WorkspaceFilesystemPreparedMutationEvidence {
+  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_;
   readonly operationKind: 'write_file' | 'edit_file';
   readonly operationDigest: string;
   readonly lexicalTargetDigest: string;
@@ -178,30 +175,30 @@ export interface WorkspaceFilesystemPreparedMutationEvidenceV1 {
  * Artifact ref, intent, acknowledgement, and ready record in one process-local
  * authority; structural or digest-equivalent clones are not sufficient.
  */
-export interface WorkspaceFilesystemMutationReadyDraftV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface WorkspaceFilesystemMutationReadyDraft<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1;
-  readonly intent: Readonly<WorkspaceFilesystemPersistedMutationIntentV1<TArguments, TRequest>>;
-  readonly preparedEvidence: Readonly<WorkspaceFilesystemPreparedMutationEvidenceV1>;
-  readonly preimageArtifact: Readonly<FilesystemPreimageArtifactRefV1>;
-  readonly record: Readonly<WorkspaceFilesystemMutationReadyRecordV1>;
+  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_;
+  readonly intent: Readonly<WorkspaceFilesystemPersistedMutationIntent<TArguments, TRequest>>;
+  readonly preparedEvidence: Readonly<WorkspaceFilesystemPreparedMutationEvidence>;
+  readonly preimageArtifact: Readonly<FilesystemPreimageArtifactRef>;
+  readonly record: Readonly<WorkspaceFilesystemMutationReadyRecord>;
 }
 
-export interface WorkspaceFilesystemPersistedMutationReadyV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface WorkspaceFilesystemPersistedMutationReady<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1;
+  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_;
   readonly status: 'durably_persisted';
-  readonly intent: Readonly<WorkspaceFilesystemPersistedMutationIntentV1<TArguments, TRequest>>;
+  readonly intent: Readonly<WorkspaceFilesystemPersistedMutationIntent<TArguments, TRequest>>;
   /** Opaque identity only; the Artifact contains no preimage content here. */
-  readonly preimageArtifact: Readonly<FilesystemPreimageArtifactRefV1>;
-  readonly record: Readonly<WorkspaceFilesystemMutationReadyRecordV1>;
+  readonly preimageArtifact: Readonly<FilesystemPreimageArtifactRef>;
+  readonly record: Readonly<WorkspaceFilesystemMutationReadyRecord>;
 }
 
-export type WorkspaceFilesystemPersistedMutationReadyVerificationResultV1 =
+export type WorkspaceFilesystemPersistedMutationReadyVerificationResult =
   | { readonly valid: true }
   | {
       readonly valid: false;
@@ -219,53 +216,53 @@ export type WorkspaceFilesystemPersistedMutationReadyVerificationResultV1 =
     };
 
 /** Mutation intent and ready persistence remain a callback surface, not Store authority. */
-export interface WorkspaceFilesystemMutationDurableEvidencePortV1 {
+export interface WorkspaceFilesystemMutationDurableEvidencePort {
   readonly persistIntent: <
-    TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-    TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+    TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+    TRequest extends RuntimeJsonValue = RuntimeJsonValue,
   >(
-    draft: Readonly<WorkspaceFilesystemMutationIntentDraftV1<TArguments, TRequest>>,
-  ) => Promise<Readonly<WorkspaceFilesystemPersistedMutationIntentV1<TArguments, TRequest>>>;
+    draft: Readonly<WorkspaceFilesystemMutationIntentDraft<TArguments, TRequest>>,
+  ) => Promise<Readonly<WorkspaceFilesystemPersistedMutationIntent<TArguments, TRequest>>>;
   readonly verifyPersistedIntent: (
-    intent: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>,
-  ) => WorkspaceFilesystemPersistedMutationIntentVerificationResultV1;
+    intent: Readonly<WorkspaceFilesystemPersistedMutationIntent>,
+  ) => WorkspaceFilesystemPersistedMutationIntentVerificationResult;
   readonly persistMutationReady: <
-    TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-    TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+    TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+    TRequest extends RuntimeJsonValue = RuntimeJsonValue,
   >(
-    draft: Readonly<WorkspaceFilesystemMutationReadyDraftV1<TArguments, TRequest>>,
-  ) => Promise<Readonly<WorkspaceFilesystemPersistedMutationReadyV1<TArguments, TRequest>>>;
+    draft: Readonly<WorkspaceFilesystemMutationReadyDraft<TArguments, TRequest>>,
+  ) => Promise<Readonly<WorkspaceFilesystemPersistedMutationReady<TArguments, TRequest>>>;
   readonly verifyPersistedMutationReady: (
-    ready: Readonly<WorkspaceFilesystemPersistedMutationReadyV1>,
-  ) => WorkspaceFilesystemPersistedMutationReadyVerificationResultV1;
+    ready: Readonly<WorkspaceFilesystemPersistedMutationReady>,
+  ) => WorkspaceFilesystemPersistedMutationReadyVerificationResult;
 }
 
 /** Digest-only query facts used to bind edit_file to one authentic prior read. */
-export interface WorkspaceFilesystemEditObservationQueryV1 {
-  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1;
+export interface WorkspaceFilesystemEditObservationQuery {
+  readonly schema: typeof WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_;
   readonly actorIdentityDigest: string;
   readonly lexicalTargetDigest: string;
 }
 
-export type WorkspaceFilesystemEditObservationQueryResultV1 =
+export type WorkspaceFilesystemEditObservationQueryResult =
   | {
       readonly status: 'found';
-      readonly query: Readonly<WorkspaceFilesystemEditObservationQueryV1>;
+      readonly query: Readonly<WorkspaceFilesystemEditObservationQuery>;
       readonly invocationId: string;
       readonly attempt: number;
       readonly capabilityRevision: string;
       readonly resultDigest: string;
       readonly evidenceDigest: string;
       readonly artifact: Readonly<CapabilityArtifactRef>;
-      readonly observation: Readonly<WorkspaceFilesystemObservationRecordV1>;
+      readonly observation: Readonly<WorkspaceFilesystemObservationRecord>;
     }
   | {
       readonly status: 'missing';
       readonly code: 'read_required';
-      readonly query: Readonly<WorkspaceFilesystemEditObservationQueryV1>;
+      readonly query: Readonly<WorkspaceFilesystemEditObservationQuery>;
     };
 
-export type WorkspaceFilesystemEditObservationQueryVerificationResultV1 =
+export type WorkspaceFilesystemEditObservationQueryVerificationResult =
   | { readonly valid: true }
   | {
       readonly valid: false;
@@ -282,11 +279,11 @@ export type WorkspaceFilesystemEditObservationQueryVerificationResultV1 =
  * private Artifact and applying edit semantics. The returned object is
  * process-local authority and must be checked before use.
  */
-export interface WorkspaceFilesystemEditObservationPortV1 {
+export interface WorkspaceFilesystemEditObservationPort {
   readonly findLatestAuthenticRead: (
-    query: Readonly<WorkspaceFilesystemEditObservationQueryV1>,
-  ) => Promise<Readonly<WorkspaceFilesystemEditObservationQueryResultV1>>;
+    query: Readonly<WorkspaceFilesystemEditObservationQuery>,
+  ) => Promise<Readonly<WorkspaceFilesystemEditObservationQueryResult>>;
   readonly verifyLatestAuthenticRead: (
-    result: Readonly<WorkspaceFilesystemEditObservationQueryResultV1>,
-  ) => WorkspaceFilesystemEditObservationQueryVerificationResultV1;
+    result: Readonly<WorkspaceFilesystemEditObservationQueryResult>,
+  ) => WorkspaceFilesystemEditObservationQueryVerificationResult;
 }

@@ -1,65 +1,64 @@
 import type {
-  CapabilityApprovalSummaryProjectorV1,
-  CapabilityApprovalV1,
-  CapabilityAvailabilityResolverV1,
-  CapabilityDefinitionV1,
-  CapabilityDescriptorV1,
-  CapabilityEffectsClassifierV1,
-  CapabilityEffectsV1,
-  CapabilityExecutionPolicyV1,
-  CapabilityExecutionTraitsDeclarationV1,
-  CapabilityExecutionTraitsProjectorV1,
-  CapabilityExecutionTraitsV1,
-  CapabilityInternalDescriptorV1,
-  CapabilityInvocationEffectsV1,
-  CapabilityParseResultV1,
-  CapabilityParserV1,
-  CapabilityPolicyCompilerV1,
-  CapabilityResourceScopeV1,
-  CapabilityTurnContextV1,
-  CapabilityUnknownFieldObservationV1,
-  RuntimeJsonValueV1,
+  CapabilityApproval,
+  CapabilityApprovalSummaryProjector,
+  CapabilityAvailabilityResolver,
+  CapabilityDefinition,
+  CapabilityDescriptor,
+  CapabilityEffects,
+  CapabilityEffectsClassifier,
+  CapabilityExecutionPolicy,
+  CapabilityExecutionTraits,
+  CapabilityExecutionTraitsDeclaration,
+  CapabilityExecutionTraitsProjector,
+  CapabilityInternalDescriptor,
+  CapabilityInvocationEffects,
+  CapabilityParseResult,
+  CapabilityParser,
+  CapabilityPolicyCompiler,
+  CapabilityResourceScope,
+  CapabilityTurnContext,
+  CapabilityUnknownFieldObservation,
+  RuntimeJsonValue,
 } from '@kite/runtime-spi';
 import { z } from 'zod';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
-import { buildDescription, getToolContract, normalizeToolContract } from './tool-contracts';
+import { digestCapabilityBindingValue } from './capability-binding';
+import { buildDescription, getToolContract, toolContractSection } from './tool-contracts';
 import {
-  BUILTIN_JSON_SCHEMAS_V1,
-  BUILTIN_TASK_LEGACY_PLANNING_SCHEMA_V1,
-  BUILTIN_TASK_PUBLIC_SCHEMA_V1,
-  BUILTIN_TASK_RUNTIME_SCHEMA_V1,
-  BUILTIN_ZOD_SCHEMAS_V1,
-  type BuiltinOperationIdV1,
-  builtinJsonSchemaV1,
+  BUILTIN_JSON_SCHEMAS_,
+  BUILTIN_TASK_PUBLIC_SCHEMA_,
+  BUILTIN_TASK_RUNTIME_SCHEMA_,
+  BUILTIN_ZOD_SCHEMAS_,
+  type BuiltinOperationId,
+  builtinJsonSchema,
 } from './tool-schemas';
 
-export type BuiltinToolTurnContextV1 = CapabilityTurnContextV1;
+export type BuiltinToolTurnContext = CapabilityTurnContext;
 
-export interface BuiltinToolContractOptionsV1 {
-  readonly parser: CapabilityParserV1;
-  readonly modelParser?: CapabilityParserV1;
+export interface BuiltinToolContractOptions {
+  readonly parser: CapabilityParser;
+  readonly modelParser?: CapabilityParser;
   /** Zod source for the model-facing parser; it may differ from runtime input. */
   readonly modelSchema?: z.ZodType;
   /** Context-selected Zod source for model-facing schema variants. */
-  readonly modelSchemaForContext?: (context: CapabilityTurnContextV1) => z.ZodType;
-  readonly modelInputSchema?: Readonly<Record<string, RuntimeJsonValueV1>>;
+  readonly modelSchemaForContext?: (context: CapabilityTurnContext) => z.ZodType;
+  readonly modelInputSchema?: Readonly<Record<string, RuntimeJsonValue>>;
   readonly modelInputSchemaForContext?: (
-    context: CapabilityTurnContextV1,
-  ) => Readonly<Record<string, RuntimeJsonValueV1>>;
-  readonly kind?: CapabilityDefinitionV1['kind'];
+    context: CapabilityTurnContext,
+  ) => Readonly<Record<string, RuntimeJsonValue>>;
+  readonly kind?: CapabilityDefinition['kind'];
   /** Runtime-backed descriptors reuse the capability revision; static descriptors use content. */
   readonly descriptorRevisionSource?: 'capability' | 'content';
-  readonly minimumApproval?: CapabilityApprovalV1;
+  readonly minimumApproval?: CapabilityApproval;
   readonly workspaceTrustRequired?: boolean;
   readonly governanceRevision?: string;
-  readonly executionTraitsDeclaration?: CapabilityExecutionTraitsDeclarationV1;
-  readonly executionTraitsProjector?: CapabilityExecutionTraitsProjectorV1;
-  readonly effectsClassifier?: CapabilityEffectsClassifierV1;
-  readonly approvalSummary?: CapabilityApprovalSummaryProjectorV1;
-  readonly availability?: CapabilityAvailabilityResolverV1;
-  readonly execution?: CapabilityExecutionPolicyV1;
+  readonly executionTraitsDeclaration?: CapabilityExecutionTraitsDeclaration;
+  readonly executionTraitsProjector?: CapabilityExecutionTraitsProjector;
+  readonly effectsClassifier?: CapabilityEffectsClassifier;
+  readonly approvalSummary?: CapabilityApprovalSummaryProjector;
+  readonly availability?: CapabilityAvailabilityResolver;
+  readonly execution?: CapabilityExecutionPolicy;
   /** Operation-specific policy facts; authorization is intentionally absent. */
-  readonly policyCompiler?: CapabilityPolicyCompilerV1;
+  readonly policyCompiler?: CapabilityPolicyCompiler;
 }
 
 /**
@@ -70,19 +69,19 @@ export interface BuiltinToolContractOptionsV1 {
  * disclosed Builtin schema; MCP and unknown names are handled by the generic
  * formatter without importing or inspecting their provider schema.
  */
-export interface BuiltinToolSchemaHintEntryV1 {
+export interface BuiltinToolSchemaHintEntry {
   readonly name: string;
-  readonly inputSchema?: Readonly<Record<string, RuntimeJsonValueV1>>;
-  readonly modelInputSchema?: Readonly<Record<string, RuntimeJsonValueV1>>;
+  readonly inputSchema?: Readonly<Record<string, RuntimeJsonValue>>;
+  readonly modelInputSchema?: Readonly<Record<string, RuntimeJsonValue>>;
 }
 
 /** Format the model-facing schema and contract constraints from one catalog entry. */
-export function formatBuiltinToolSchemaHintV1(entry: BuiltinToolSchemaHintEntryV1): string {
+export function formatBuiltinToolSchemaHint(entry: BuiltinToolSchemaHintEntry): string {
   const schema = entry.modelInputSchema ?? entry.inputSchema;
-  const properties = schemaRecordFieldV1(schema, 'properties');
-  const required = schemaStringArrayFieldV1(schema, 'required');
+  const properties = schemaRecordField(schema, 'properties');
+  const required = schemaStringArrayField(schema, 'required');
   const contract = getToolContract(entry.name);
-  const constraints = contract ? normalizeToolContract(contract.sections).constraints : '';
+  const constraints = contract ? toolContractSection(contract.sections).constraints : '';
   return [
     `Arguments must match the disclosed JSON schema fields: ${Object.keys(properties).join(', ') || '(none)'}.`,
     required.length > 0 ? `Required fields: ${required.join(', ')}.` : '',
@@ -99,14 +98,14 @@ export function formatBuiltinToolSchemaHintV1(entry: BuiltinToolSchemaHintEntryV
  * immutable projection entry without coupling this formatter to the catalog
  * implementation.  No fallback parser or schema is selected here.
  */
-export function formatBuiltinToolParseErrorV1(input: {
+export function formatBuiltinToolParseError(input: {
   readonly toolName: string;
   readonly rawArgs: string;
   readonly parseError: string;
-  readonly entry?: BuiltinToolSchemaHintEntryV1;
+  readonly entry?: BuiltinToolSchemaHintEntry;
 }): string {
   const schemaHint = input.entry
-    ? formatBuiltinToolSchemaHintV1(input.entry)
+    ? formatBuiltinToolSchemaHint(input.entry)
     : input.toolName.startsWith('mcp__')
       ? "MCP tool — check the Available MCP Tools section in the system prompt for this tool's JSON schema. Arguments must be a valid JSON object."
       : 'Unknown tool. Arguments must be a valid JSON object with tool-specific fields.';
@@ -128,18 +127,18 @@ export function formatBuiltinToolParseErrorV1(input: {
   ].join('\n');
 }
 
-function schemaRecordFieldV1(
-  schema: Readonly<Record<string, RuntimeJsonValueV1>> | undefined,
+function schemaRecordField(
+  schema: Readonly<Record<string, RuntimeJsonValue>> | undefined,
   field: string,
-): Readonly<Record<string, RuntimeJsonValueV1>> {
+): Readonly<Record<string, RuntimeJsonValue>> {
   const value = schema?.[field];
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Readonly<Record<string, RuntimeJsonValueV1>>)
+    ? (value as Readonly<Record<string, RuntimeJsonValue>>)
     : {};
 }
 
-function schemaStringArrayFieldV1(
-  schema: Readonly<Record<string, RuntimeJsonValueV1>> | undefined,
+function schemaStringArrayField(
+  schema: Readonly<Record<string, RuntimeJsonValue>> | undefined,
   field: string,
 ): readonly string[] {
   const value = schema?.[field];
@@ -148,18 +147,18 @@ function schemaStringArrayFieldV1(
     : [];
 }
 
-export interface BuiltinExecutionTraitsInputV1 {
-  readonly resourceScopes: readonly CapabilityResourceScopeV1[];
+export interface BuiltinExecutionTraitsInput {
+  readonly resourceScopes: readonly CapabilityResourceScope[];
   readonly conflictKeys?: readonly string[];
-  readonly isolation?: CapabilityExecutionTraitsDeclarationV1['isolation'];
+  readonly isolation?: CapabilityExecutionTraitsDeclaration['isolation'];
   readonly interactionBarrier?: boolean;
   readonly concurrencyGroup?: string;
   readonly leaseFenceRequired?: boolean;
 }
 
-export function builtinExecutionTraitsV1(
-  input: BuiltinExecutionTraitsInputV1,
-): CapabilityExecutionTraitsDeclarationV1 {
+export function builtinExecutionTraits(
+  input: BuiltinExecutionTraitsInput,
+): CapabilityExecutionTraitsDeclaration {
   return Object.freeze({
     resourceScopes: Object.freeze(input.resourceScopes.map((scope) => Object.freeze({ ...scope }))),
     ...(input.conflictKeys ? { conflictKeys: Object.freeze([...input.conflictKeys]) } : {}),
@@ -171,12 +170,12 @@ export function builtinExecutionTraitsV1(
 }
 
 /** Project full scheduler identity from the same invocation effects and turn facts. */
-export function projectBuiltinExecutionTraitsV1(
-  declaration: CapabilityExecutionTraitsDeclarationV1 | undefined,
-  _input: RuntimeJsonValueV1,
-  context: CapabilityTurnContextV1,
-  effects: import('@kite/runtime-spi').CapabilityInvocationEffectsV1,
-): CapabilityExecutionTraitsV1 {
+export function projectBuiltinExecutionTraits(
+  declaration: CapabilityExecutionTraitsDeclaration | undefined,
+  _input: RuntimeJsonValue,
+  context: CapabilityTurnContext,
+  effects: import('@kite/runtime-spi').CapabilityInvocationEffects,
+): CapabilityExecutionTraits {
   const access =
     effects.effectClass === 'read_only' && effects.sideEffect === false
       ? 'read'
@@ -216,10 +215,10 @@ export function projectBuiltinExecutionTraitsV1(
  * `tool-schemas.ts`; the parity assertion below proves that the parser and
  * registration consume the same source and preserve the existing digest.
  */
-export function defineBuiltinCapabilityContractV1(
-  definition: CapabilityDefinitionV1,
-  options: BuiltinToolContractOptionsV1,
-): CapabilityDefinitionV1 {
+export function defineBuiltinCapabilityContract(
+  definition: CapabilityDefinition,
+  options: BuiltinToolContractOptions,
+): CapabilityDefinition {
   if (!definition.executionMechanism) {
     throw new Error(
       `Builtin capability is missing its execution mechanism: ${definition.capabilityId}`,
@@ -228,9 +227,9 @@ export function defineBuiltinCapabilityContractV1(
   if (!definition.inputSchema) {
     throw new Error(`Builtin capability is missing an input schema: ${definition.capabilityId}`);
   }
-  assertParserSchemaParityV1(definition, options.parser);
+  assertParserSchemaParity(definition, options.parser);
   if (options.modelParser) {
-    assertModelSchemaParityV1(definition, options);
+    assertModelSchemaParity(definition, options);
   }
   const parser = Object.freeze({
     ...options.parser,
@@ -249,7 +248,7 @@ export function defineBuiltinCapabilityContractV1(
   const modelDescription =
     definition.modelDescription ??
     (definition.toolName && getToolContract(definition.toolName)
-      ? buildDescription(getToolContract(definition.toolName)!.sections, 'v2')
+      ? buildDescription(getToolContract(definition.toolName)!.sections, 'catalog')
       : description);
   const descriptorRevisionBase = {
     capabilityId: definition.capabilityId,
@@ -275,19 +274,19 @@ export function defineBuiltinCapabilityContractV1(
     availability: 'available',
     diagnostics: [],
   } satisfies
-    | Omit<CapabilityDescriptorV1, 'revision'>
-    | Omit<CapabilityInternalDescriptorV1, 'revision'>;
+    | Omit<CapabilityDescriptor, 'revision'>
+    | Omit<CapabilityInternalDescriptor, 'revision'>;
   const descriptorBase = {
     ...descriptorRevisionBase,
     executionMechanism: definition.executionMechanism,
   } satisfies
-    | Omit<CapabilityDescriptorV1, 'revision'>
-    | Omit<CapabilityInternalDescriptorV1, 'revision'>;
+    | Omit<CapabilityDescriptor, 'revision'>
+    | Omit<CapabilityInternalDescriptor, 'revision'>;
   const descriptor = {
     ...descriptorBase,
     revision:
       options.descriptorRevisionSource === 'content'
-        ? digestCapabilityBindingValueV1(descriptorRevisionBase)
+        ? digestCapabilityBindingValue(descriptorRevisionBase)
         : definition.revision,
   };
   // Mechanism metadata is a projection fact and must not perturb the
@@ -299,8 +298,8 @@ export function defineBuiltinCapabilityContractV1(
     writable: false,
   });
   const frozenDescriptor = Object.freeze(descriptor) as
-    | CapabilityDescriptorV1
-    | CapabilityInternalDescriptorV1;
+    | CapabilityDescriptor
+    | CapabilityInternalDescriptor;
   return Object.freeze({
     ...definition,
     kind,
@@ -314,18 +313,18 @@ export function defineBuiltinCapabilityContractV1(
     ...(options.availability ? { availability: options.availability } : {}),
     ...(options.effectsClassifier ? { effectsClassifier: options.effectsClassifier } : {}),
     approvalSummary:
-      options.approvalSummary ?? builtinApprovalSummaryProjectorV1(definition.capabilityId),
+      options.approvalSummary ?? builtinApprovalSummaryProjector(definition.capabilityId),
     ...(options.executionTraitsDeclaration
       ? { executionTraitsDeclaration: options.executionTraitsDeclaration }
       : {}),
     executionTraitsProjector:
       options.executionTraitsProjector ??
       ((
-        input: RuntimeJsonValueV1,
-        context: CapabilityTurnContextV1,
-        invocationEffects: CapabilityInvocationEffectsV1,
+        input: RuntimeJsonValue,
+        context: CapabilityTurnContext,
+        invocationEffects: CapabilityInvocationEffects,
       ) =>
-        projectBuiltinExecutionTraitsV1(
+        projectBuiltinExecutionTraits(
           options.executionTraitsDeclaration,
           input,
           context,
@@ -340,28 +339,26 @@ export function defineBuiltinCapabilityContractV1(
   });
 }
 
-export interface CreateBuiltinZodParserOptionsV1 {
+export interface CreateBuiltinZodParserOptions {
   readonly parserRevision: string;
   readonly schemaDigest?: string;
   readonly schema?: z.ZodType;
-  readonly schemaForContext?: (context: CapabilityTurnContextV1 | undefined) => z.ZodType;
+  readonly schemaForContext?: (context: CapabilityTurnContext | undefined) => z.ZodType;
   readonly knownFields: readonly string[];
   readonly knownFieldsForContext?: (
-    context: CapabilityTurnContextV1 | undefined,
+    context: CapabilityTurnContext | undefined,
   ) => readonly string[];
 }
 
-export function createBuiltinZodParserV1(
-  options: CreateBuiltinZodParserOptionsV1,
-): CapabilityParserV1 {
+export function createBuiltinZodParser(options: CreateBuiltinZodParserOptions): CapabilityParser {
   if (!options.schema && !options.schemaForContext) {
     throw new Error('Builtin parser requires a schema');
   }
-  const selectSchema = (context?: CapabilityTurnContextV1): z.ZodType =>
+  const selectSchema = (context?: CapabilityTurnContext): z.ZodType =>
     options.schemaForContext?.(context) ?? options.schema!;
-  const selectKnownFields = (context?: CapabilityTurnContextV1): readonly string[] =>
+  const selectKnownFields = (context?: CapabilityTurnContext): readonly string[] =>
     options.knownFieldsForContext?.(context) ?? options.knownFields;
-  const parse = (value: unknown, context?: CapabilityTurnContextV1): CapabilityParseResultV1 => {
+  const parse = (value: unknown, context?: CapabilityTurnContext): CapabilityParseResult => {
     const parsed = selectSchema(context).safeParse(value);
     if (!parsed.success) {
       return Object.freeze({
@@ -383,16 +380,16 @@ export function createBuiltinZodParserV1(
     }
     return Object.freeze({
       success: true,
-      data: freezeRuntimeJsonV1(toRuntimeJsonV1(parsed.data)),
+      data: freezeRuntimeJson(toRuntimeJson(parsed.data)),
     });
   };
   return Object.freeze({
     parserRevision: options.parserRevision,
     schemaDigest:
-      options.schemaDigest ?? digestCapabilityBindingValueV1(z.toJSONSchema(selectSchema())),
+      options.schemaDigest ?? digestCapabilityBindingValue(z.toJSONSchema(selectSchema())),
     knownFields: Object.freeze([...options.knownFields]),
     parse,
-    canonicalize(value: unknown, context?: CapabilityTurnContextV1): RuntimeJsonValueV1 {
+    canonicalize(value: unknown, context?: CapabilityTurnContext): RuntimeJsonValue {
       const result = parse(value, context);
       if (!result.success) {
         const issue = result.issues[0];
@@ -404,8 +401,8 @@ export function createBuiltinZodParserV1(
     },
     observeUnknownFields(
       value: unknown,
-      context?: CapabilityTurnContextV1,
-    ): CapabilityUnknownFieldObservationV1 {
+      context?: CapabilityTurnContext,
+    ): CapabilityUnknownFieldObservation {
       const record =
         value && typeof value === 'object' && !Array.isArray(value)
           ? (value as Readonly<Record<string, unknown>>)
@@ -423,18 +420,18 @@ export function createBuiltinZodParserV1(
   });
 }
 
-function assertParserSchemaParityV1(
-  definition: CapabilityDefinitionV1,
-  parser: CapabilityParserV1,
+function assertParserSchemaParity(
+  definition: CapabilityDefinition,
+  parser: CapabilityParser,
 ): void {
-  const operationId = definition.capabilityId as BuiltinOperationIdV1;
-  const schema = BUILTIN_ZOD_SCHEMAS_V1[operationId];
+  const operationId = definition.capabilityId as BuiltinOperationId;
+  const schema = BUILTIN_ZOD_SCHEMAS_[operationId];
   if (!schema) return;
-  const generated = BUILTIN_JSON_SCHEMAS_V1[operationId];
-  const generatedDigest = digestCapabilityBindingValueV1(generated);
+  const generated = BUILTIN_JSON_SCHEMAS_[operationId];
+  const generatedDigest = digestCapabilityBindingValue(generated);
   if (
     definition.inputSchema &&
-    generatedDigest !== digestCapabilityBindingValueV1(definition.inputSchema)
+    generatedDigest !== digestCapabilityBindingValue(definition.inputSchema)
   ) {
     throw new Error(`Builtin parser/schema parity mismatch: ${definition.capabilityId}`);
   }
@@ -446,7 +443,7 @@ function assertParserSchemaParityV1(
   }
 }
 
-function assertParserContractV1(parser: CapabilityParserV1, capabilityId: string): void {
+function assertParserContract(parser: CapabilityParser, capabilityId: string): void {
   if (
     parser.parserRevision.trim() !== parser.parserRevision ||
     parser.parserRevision.length === 0
@@ -458,13 +455,13 @@ function assertParserContractV1(parser: CapabilityParserV1, capabilityId: string
   }
 }
 
-function assertModelSchemaParityV1(
-  definition: CapabilityDefinitionV1,
-  options: BuiltinToolContractOptionsV1,
+function assertModelSchemaParity(
+  definition: CapabilityDefinition,
+  options: BuiltinToolContractOptions,
 ): void {
   const parser = options.modelParser;
   if (!parser) throw new Error(`Builtin model parser is missing: ${definition.capabilityId}`);
-  assertParserContractV1(parser, definition.capabilityId);
+  assertParserContract(parser, definition.capabilityId);
   const sourceSchemaForContext = options.modelSchemaForContext
     ? options.modelSchemaForContext
     : options.modelSchema
@@ -479,75 +476,74 @@ function assertModelSchemaParityV1(
     throw new Error(`Builtin model schema projection is missing: ${definition.capabilityId}`);
   }
 
-  const contexts: readonly CapabilityTurnContextV1[] = [
-    Object.freeze({ phase: 'building', promptContractV2: true }),
-    Object.freeze({ phase: 'planning', promptContractV2: false }),
+  const contexts: readonly CapabilityTurnContext[] = [
+    Object.freeze({ phase: 'building', promptContract: true }),
+    Object.freeze({ phase: 'planning', promptContract: false }),
   ];
   for (const context of contexts) {
-    const source = builtinJsonSchemaV1(sourceSchemaForContext(context));
+    const source = builtinJsonSchema(sourceSchemaForContext(context));
     const projected = projectedSchemaForContext(context);
-    if (digestCapabilityBindingValueV1(source) !== digestCapabilityBindingValueV1(projected)) {
+    if (digestCapabilityBindingValue(source) !== digestCapabilityBindingValue(projected)) {
       throw new Error(`Builtin model parser/schema parity mismatch: ${definition.capabilityId}`);
     }
   }
-  const publicSchema = builtinJsonSchemaV1(sourceSchemaForContext(contexts[0]!));
-  if (parser.schemaDigest !== digestCapabilityBindingValueV1(publicSchema)) {
+  const publicSchema = builtinJsonSchema(sourceSchemaForContext(contexts[0]!));
+  if (parser.schemaDigest !== digestCapabilityBindingValue(publicSchema)) {
     throw new Error(`Builtin model parser digest mismatch: ${definition.capabilityId}`);
   }
 }
 
-export function parserForBuiltinOperationV1(
-  operationId: BuiltinOperationIdV1,
+export function parserForBuiltinOperation(
+  operationId: BuiltinOperationId,
   revision: string,
-): CapabilityParserV1 {
-  const schema = BUILTIN_ZOD_SCHEMAS_V1[operationId];
+): CapabilityParser {
+  const schema = BUILTIN_ZOD_SCHEMAS_[operationId];
   if (!schema) throw new Error(`Builtin parser schema is missing: ${operationId}`);
-  const knownFields = topLevelSchemaFieldsV1(schema);
-  return createBuiltinZodParserV1({
+  const knownFields = topLevelSchemaFields(schema);
+  return createBuiltinZodParser({
     schema,
     parserRevision: revision,
     knownFields,
-    schemaDigest: digestCapabilityBindingValueV1(BUILTIN_JSON_SCHEMAS_V1[operationId]),
+    schemaDigest: digestCapabilityBindingValue(BUILTIN_JSON_SCHEMAS_[operationId]),
   });
 }
 
-export function taskRuntimeParserV1(revision: string): CapabilityParserV1 {
-  return createBuiltinZodParserV1({
-    schema: BUILTIN_TASK_RUNTIME_SCHEMA_V1,
+export function taskRuntimeParser(revision: string): CapabilityParser {
+  return createBuiltinZodParser({
+    schema: BUILTIN_TASK_RUNTIME_SCHEMA_,
     parserRevision: revision,
     knownFields: ['subagent_type', 'task', 'taskArtifact'],
-    schemaDigest: digestCapabilityBindingValueV1(BUILTIN_JSON_SCHEMAS_V1['builtin:task']),
+    schemaDigest: digestCapabilityBindingValue(BUILTIN_JSON_SCHEMAS_['builtin:task']),
   });
 }
 
-export function taskModelParserV1(revision: string): CapabilityParserV1 {
-  return createBuiltinZodParserV1({
+export function taskModelParser(revision: string): CapabilityParser {
+  return createBuiltinZodParser({
     parserRevision: revision,
-    schemaForContext: taskModelSchemaV1,
+    schemaForContext: taskModelSchema,
     knownFields: ['subagent_type', 'task'],
-    schemaDigest: digestCapabilityBindingValueV1(z.toJSONSchema(BUILTIN_TASK_PUBLIC_SCHEMA_V1)),
+    schemaDigest: digestCapabilityBindingValue(z.toJSONSchema(BUILTIN_TASK_PUBLIC_SCHEMA_)),
   });
 }
 
-export function taskModelSchemaV1(context?: CapabilityTurnContextV1): z.ZodType {
-  return !context?.promptContractV2 && context?.phase === 'planning'
-    ? BUILTIN_TASK_LEGACY_PLANNING_SCHEMA_V1
-    : BUILTIN_TASK_PUBLIC_SCHEMA_V1;
+export function taskModelSchema(context?: CapabilityTurnContext): z.ZodType {
+  void context;
+  return BUILTIN_TASK_PUBLIC_SCHEMA_;
 }
 
-export function taskModelInputSchemaV1(
-  context: CapabilityTurnContextV1,
-): Readonly<Record<string, RuntimeJsonValueV1>> {
-  const schema = taskModelSchemaV1(context);
-  return builtinJsonSchemaV1(schema);
+export function taskModelInputSchema(
+  context: CapabilityTurnContext,
+): Readonly<Record<string, RuntimeJsonValue>> {
+  const schema = taskModelSchema(context);
+  return builtinJsonSchema(schema);
 }
 
-export function staticEffectsClassifierV1(
+export function staticEffectsClassifier(
   effectClass: 'read_only' | 'plan_only' | 'workspace_write' | 'external_side_effect' | 'unknown',
   sideEffect: boolean,
   classificationReason: string,
-  effectiveEffects: CapabilityDefinitionV1['effects'],
-): CapabilityEffectsClassifierV1 {
+  effectiveEffects: CapabilityDefinition['effects'],
+): CapabilityEffectsClassifier {
   const effects = effectiveEffects ?? {
     filesystem: 'unknown' as const,
     network: 'unknown' as const,
@@ -558,46 +554,46 @@ export function staticEffectsClassifierV1(
       effectClass,
       sideEffect,
       classificationReason,
-      risk: riskFromInvocationEffectsV1(effectClass, effects),
+      risk: riskFromInvocationEffects(effectClass, effects),
       effectiveEffects: effects,
     });
 }
 
-export const alwaysAvailableV1: CapabilityAvailabilityResolverV1 = () =>
+export const alwaysAvailable: CapabilityAvailabilityResolver = () =>
   Object.freeze({ status: 'available' as const });
 
-export const toolSearchAvailabilityV1: CapabilityAvailabilityResolverV1 = (context) =>
+export const toolSearchAvailability: CapabilityAvailabilityResolver = (context) =>
   context.toolSearchEnabled === true
     ? Object.freeze({ status: 'available' as const })
     : Object.freeze({ status: 'hidden' as const, reason: 'tool_search_disabled' });
 
-export const gitAvailabilityV1: CapabilityAvailabilityResolverV1 = (context) =>
-  context.featureFlags?.brokeredGitV1 === true &&
+export const gitAvailability: CapabilityAvailabilityResolver = (context) =>
+  context.featureFlags?.brokeredGit === true &&
   context.hasGitBroker === true &&
   context.brokeredGitFeatureRevision === 'brokered-git-r1'
     ? Object.freeze({ status: 'available' as const })
     : Object.freeze({ status: 'hidden' as const, reason: 'brokered_git_unavailable' });
 
-export const taskAvailabilityV1: CapabilityAvailabilityResolverV1 = (context) =>
+export const taskAvailability: CapabilityAvailabilityResolver = (context) =>
   context.hasTaskAdapter === true
     ? Object.freeze({ status: 'available' as const })
     : Object.freeze({ status: 'hidden' as const, reason: 'task_adapter_unavailable' });
 
-export const readSkillAvailabilityV1: CapabilityAvailabilityResolverV1 = (context) =>
+export const readSkillAvailability: CapabilityAvailabilityResolver = (context) =>
   (context.activeSkillFrameIds?.length ?? 0) > 0
     ? Object.freeze({ status: 'available' as const })
     : Object.freeze({ status: 'hidden' as const, reason: 'no_active_skill_frame' });
 
-export const activateSkillAvailabilityV1: CapabilityAvailabilityResolverV1 = (context) =>
-  context.featureFlags?.skillWorkflowV1 === true &&
-  context.featureFlags?.skillActivationV2 === true &&
+export const activateSkillAvailability: CapabilityAvailabilityResolver = (context) =>
+  context.featureFlags?.skillWorkflow === true &&
+  context.featureFlags?.skillActivation === true &&
   (context.availableSkillIds?.length ?? 0) > 0
     ? Object.freeze({ status: 'available' as const })
     : Object.freeze({ status: 'hidden' as const, reason: 'skill_activation_unavailable' });
 
-export function taskEffectsClassifierV1(
-  declaredEffects: CapabilityDefinitionV1['effects'],
-): CapabilityEffectsClassifierV1 {
+export function taskEffectsClassifier(
+  declaredEffects: CapabilityDefinition['effects'],
+): CapabilityEffectsClassifier {
   const effects = declaredEffects ?? {
     filesystem: 'unknown' as const,
     network: 'unknown' as const,
@@ -627,7 +623,7 @@ export function taskEffectsClassifierV1(
         sideEffect: false,
         classificationReason: `${String(role)} sub-agent is read-only by role.`,
         risk: 'read' as const,
-        effectiveEffects: readOnlyEffectsV1(effects),
+        effectiveEffects: readOnlyEffects(effects),
       });
     }
     return Object.freeze({
@@ -640,9 +636,9 @@ export function taskEffectsClassifierV1(
   };
 }
 
-export function shellEffectsClassifierV1(
-  declaredEffects: CapabilityDefinitionV1['effects'],
-): CapabilityEffectsClassifierV1 {
+export function shellEffectsClassifier(
+  declaredEffects: CapabilityDefinition['effects'],
+): CapabilityEffectsClassifier {
   const effects = declaredEffects ?? {
     filesystem: 'unknown' as const,
     network: 'unknown' as const,
@@ -655,38 +651,38 @@ export function shellEffectsClassifierV1(
         : '';
     const canonicalCommand = command.trim().replace(/\s+/g, ' ');
     const normalized = canonicalCommand.toLowerCase();
-    if (isReadOnlyShellCommandV1(canonicalCommand)) {
+    if (isReadOnlyShellCommand(canonicalCommand)) {
       return Object.freeze({
         effectClass: 'read_only' as const,
         sideEffect: false,
         classificationReason: 'Shell command matches the conservative read-only allowlist.',
         risk: 'read' as const,
-        effectiveEffects: readOnlyEffectsV1(effects),
+        effectiveEffects: readOnlyEffects(effects),
       });
     }
-    if (isNetworkShellCommandV1(normalized)) {
+    if (isNetworkShellCommand(normalized)) {
       return Object.freeze({
         effectClass: 'external_side_effect' as const,
         sideEffect: true,
         classificationReason: 'Shell command may access the network.',
-        risk: isDestructiveShellCommandV1(normalized)
+        risk: isDestructiveShellCommand(normalized)
           ? ('destructive' as const)
           : ('network' as const),
         effectiveEffects: effects,
       });
     }
     if (
-      isDestructiveShellCommandV1(normalized) ||
-      isVcsMutationShellCommandV1(normalized) ||
-      isWriteShellCommandV1(normalized)
+      isDestructiveShellCommand(normalized) ||
+      isVcsMutationShellCommand(normalized) ||
+      isWriteShellCommand(normalized)
     ) {
       return Object.freeze({
         effectClass: 'workspace_write' as const,
         sideEffect: true,
         classificationReason: 'Shell command may mutate files or version-control state.',
-        risk: isDestructiveShellCommandV1(normalized)
+        risk: isDestructiveShellCommand(normalized)
           ? ('destructive' as const)
-          : isVcsMutationShellCommandV1(normalized)
+          : isVcsMutationShellCommand(normalized)
             ? ('external_state' as const)
             : ('workspace_write' as const),
         effectiveEffects: Object.freeze({
@@ -706,7 +702,7 @@ export function shellEffectsClassifierV1(
   };
 }
 
-const READ_ONLY_SHELL_COMMANDS_V1 = new Set([
+const READ_ONLY_SHELL_COMMANDS_ = new Set([
   'awk',
   'cat',
   'cut',
@@ -729,8 +725,8 @@ const READ_ONLY_SHELL_COMMANDS_V1 = new Set([
   'uniq',
   'wc',
 ]);
-const LOCAL_RUNTIME_VERSION_COMMANDS_V1 = new Set(['bun', 'node', 'npm', 'pnpm', 'yarn']);
-const FILE_FLAG_OPTIONS_V1 = new Set([
+const LOCAL_RUNTIME_VERSION_COMMANDS_ = new Set(['bun', 'node', 'npm', 'pnpm', 'yarn']);
+const FILE_FLAG_OPTIONS_ = new Set([
   '--brief',
   '--checking-printout',
   '--exclude-quiet',
@@ -745,7 +741,7 @@ const FILE_FLAG_OPTIONS_V1 = new Set([
   '--raw',
   '--special-files',
 ]);
-const FILE_VALUE_OPTIONS_V1 = new Set([
+const FILE_VALUE_OPTIONS_ = new Set([
   '--apple',
   '--exclude',
   '--magic-file',
@@ -753,14 +749,14 @@ const FILE_VALUE_OPTIONS_V1 = new Set([
   '--separator',
 ]);
 
-function isReadOnlyFileV1(tokens: string[]): boolean {
+function isReadOnlyFile(tokens: string[]): boolean {
   for (let index = 1; index < tokens.length; index += 1) {
-    const token = stripShellQuotesV1(tokens[index] ?? '');
+    const token = stripShellQuotes(tokens[index] ?? '');
     if (token === '--') return true;
     if (!token.startsWith('-') || token === '-') continue;
-    if (FILE_FLAG_OPTIONS_V1.has(token)) continue;
+    if (FILE_FLAG_OPTIONS_.has(token)) continue;
     const longName = token.split('=', 1)[0]!;
-    if (FILE_VALUE_OPTIONS_V1.has(longName)) {
+    if (FILE_VALUE_OPTIONS_.has(longName)) {
       if (!token.includes('=') && !tokens[index + 1]) return false;
       if (!token.includes('=')) index += 1;
       continue;
@@ -777,7 +773,7 @@ function isReadOnlyFileV1(tokens: string[]): boolean {
   return true;
 }
 
-const FIND_BOOLEAN_TOKENS_V1 = new Set([
+const FIND_BOOLEAN_TOKENS_ = new Set([
   '!',
   '(',
   ')',
@@ -806,7 +802,7 @@ const FIND_BOOLEAN_TOKENS_V1 = new Set([
   '-writable',
   '-xdev',
 ]);
-const FIND_ONE_VALUE_TOKENS_V1 = new Set([
+const FIND_ONE_VALUE_TOKENS_ = new Set([
   '-amin',
   '-anewer',
   '-atime',
@@ -844,10 +840,10 @@ const FIND_ONE_VALUE_TOKENS_V1 = new Set([
   '-xtype',
 ]);
 
-function isReadOnlyFindV1(tokens: string[]): boolean {
+function isReadOnlyFind(tokens: string[]): boolean {
   let expressionStarted = false;
   for (let index = 1; index < tokens.length; index += 1) {
-    const token = stripShellQuotesV1(tokens[index] ?? '');
+    const token = stripShellQuotes(tokens[index] ?? '');
     if (!expressionStarted && (/^-[HLP]$/.test(token) || /^-O\d+$/.test(token))) continue;
     if (!expressionStarted && token === '-D') {
       if (!tokens[index + 1]) return false;
@@ -856,8 +852,8 @@ function isReadOnlyFindV1(tokens: string[]): boolean {
     }
     if (!expressionStarted && !token.startsWith('-') && !['!', '(', ')'].includes(token)) continue;
     expressionStarted = true;
-    if (FIND_BOOLEAN_TOKENS_V1.has(token)) continue;
-    if (/^-newer[A-Za-z]{2}$/.test(token) || FIND_ONE_VALUE_TOKENS_V1.has(token)) {
+    if (FIND_BOOLEAN_TOKENS_.has(token)) continue;
+    if (/^-newer[A-Za-z]{2}$/.test(token) || FIND_ONE_VALUE_TOKENS_.has(token)) {
       if (!tokens[index + 1]) return false;
       index += 1;
       continue;
@@ -867,8 +863,8 @@ function isReadOnlyFindV1(tokens: string[]): boolean {
   return true;
 }
 
-function isReadOnlySedScriptV1(script: string): boolean {
-  const value = stripShellQuotesV1(script).trim();
+function isReadOnlySedScript(script: string): boolean {
+  const value = stripShellQuotes(script).trim();
   if (value.length < 4 || value[0] !== 's') return false;
   const delimiter = value[1]!;
   if (/\s|[A-Za-z0-9\\]/.test(delimiter)) return false;
@@ -896,12 +892,12 @@ function isReadOnlySedScriptV1(script: string): boolean {
   return /^[0-9gimpIM]*$/.test(value.slice(cursor));
 }
 
-function isReadOnlySedV1(tokens: string[]): boolean {
+function isReadOnlySed(tokens: string[]): boolean {
   const scripts: string[] = [];
   let sawBareScript = false;
   let optionsEnded = false;
   for (let index = 1; index < tokens.length; index += 1) {
-    const token = stripShellQuotesV1(tokens[index] ?? '');
+    const token = stripShellQuotes(tokens[index] ?? '');
     if (!optionsEnded && token === '--') {
       optionsEnded = true;
       continue;
@@ -950,10 +946,10 @@ function isReadOnlySedV1(tokens: string[]): boolean {
     }
     sawBareScript = true;
   }
-  return scripts.length > 0 && scripts.every(isReadOnlySedScriptV1);
+  return scripts.length > 0 && scripts.every(isReadOnlySedScript);
 }
 
-const SORT_FLAG_OPTIONS_V1 = new Set([
+const SORT_FLAG_OPTIONS_ = new Set([
   '--check',
   '--debug',
   '--dictionary-order',
@@ -972,7 +968,7 @@ const SORT_FLAG_OPTIONS_V1 = new Set([
   '--version-sort',
   '--zero-terminated',
 ]);
-const SORT_VALUE_OPTIONS_V1 = new Set([
+const SORT_VALUE_OPTIONS_ = new Set([
   '--batch-size',
   '--field-separator',
   '--key',
@@ -981,14 +977,14 @@ const SORT_VALUE_OPTIONS_V1 = new Set([
   '--sort',
 ]);
 
-function isReadOnlySortV1(tokens: string[]): boolean {
+function isReadOnlySort(tokens: string[]): boolean {
   for (let index = 1; index < tokens.length; index += 1) {
-    const token = stripShellQuotesV1(tokens[index] ?? '');
+    const token = stripShellQuotes(tokens[index] ?? '');
     if (token === '--') return true;
     if (!token.startsWith('-') || token === '-') continue;
-    if (SORT_FLAG_OPTIONS_V1.has(token)) continue;
+    if (SORT_FLAG_OPTIONS_.has(token)) continue;
     const longName = token.split('=', 1)[0]!;
-    if (SORT_VALUE_OPTIONS_V1.has(longName)) {
+    if (SORT_VALUE_OPTIONS_.has(longName)) {
       if (!token.includes('=') && !tokens[index + 1]) return false;
       if (!token.includes('=')) index += 1;
       continue;
@@ -1005,7 +1001,7 @@ function isReadOnlySortV1(tokens: string[]): boolean {
   return true;
 }
 
-const UNIQ_FLAG_OPTIONS_V1 = new Set([
+const UNIQ_FLAG_OPTIONS_ = new Set([
   '--all-repeated',
   '--count',
   '--group',
@@ -1014,21 +1010,21 @@ const UNIQ_FLAG_OPTIONS_V1 = new Set([
   '--unique',
   '--zero-terminated',
 ]);
-const UNIQ_VALUE_OPTIONS_V1 = new Set(['--check-chars', '--skip-chars', '--skip-fields']);
+const UNIQ_VALUE_OPTIONS_ = new Set(['--check-chars', '--skip-chars', '--skip-fields']);
 
-function isReadOnlyUniqV1(tokens: string[]): boolean {
+function isReadOnlyUniq(tokens: string[]): boolean {
   let operands = 0;
   let optionsEnded = false;
   for (let index = 1; index < tokens.length; index += 1) {
-    const token = stripShellQuotesV1(tokens[index] ?? '');
+    const token = stripShellQuotes(tokens[index] ?? '');
     if (!optionsEnded && token === '--') {
       optionsEnded = true;
       continue;
     }
-    if (!optionsEnded && UNIQ_FLAG_OPTIONS_V1.has(token)) continue;
+    if (!optionsEnded && UNIQ_FLAG_OPTIONS_.has(token)) continue;
     if (!optionsEnded) {
       const longName = token.split('=', 1)[0]!;
-      if (UNIQ_VALUE_OPTIONS_V1.has(longName)) {
+      if (UNIQ_VALUE_OPTIONS_.has(longName)) {
         if (!token.includes('=') && !tokens[index + 1]) return false;
         if (!token.includes('=')) index += 1;
         continue;
@@ -1049,7 +1045,7 @@ function isReadOnlyUniqV1(tokens: string[]): boolean {
   return true;
 }
 
-const RG_FLAG_OPTIONS_V1 = new Set([
+const RG_FLAG_OPTIONS_ = new Set([
   '--binary',
   '--case-sensitive',
   '--column',
@@ -1097,7 +1093,7 @@ const RG_FLAG_OPTIONS_V1 = new Set([
   '--with-filename',
   '--word-regexp',
 ]);
-const RG_VALUE_OPTIONS_V1 = new Set([
+const RG_VALUE_OPTIONS_ = new Set([
   '--after-context',
   '--before-context',
   '--color',
@@ -1127,16 +1123,16 @@ const RG_VALUE_OPTIONS_V1 = new Set([
   '--type-not',
 ]);
 
-function isReadOnlyRipgrepV1(tokens: string[]): boolean {
+function isReadOnlyRipgrep(tokens: string[]): boolean {
   const shortFlags = new Set('0acHhIiLlnoqSUuvwx'.split(''));
   const shortWithValue = new Set('ABCEefgMmrTt'.split(''));
   for (let index = 1; index < tokens.length; index += 1) {
-    const token = stripShellQuotesV1(tokens[index] ?? '');
+    const token = stripShellQuotes(tokens[index] ?? '');
     if (token === '--') return true;
     if (!token.startsWith('-') || token === '-') continue;
-    if (RG_FLAG_OPTIONS_V1.has(token)) continue;
+    if (RG_FLAG_OPTIONS_.has(token)) continue;
     const longName = token.split('=', 1)[0]!;
-    if (RG_VALUE_OPTIONS_V1.has(longName)) {
+    if (RG_VALUE_OPTIONS_.has(longName)) {
       if (!token.includes('=') && !tokens[index + 1]) return false;
       if (!token.includes('=')) index += 1;
       continue;
@@ -1157,17 +1153,17 @@ function isReadOnlyRipgrepV1(tokens: string[]): boolean {
   return true;
 }
 
-export function isReadOnlyShellCommandV1(command: string): boolean {
+export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = command.trim();
-  if (!trimmed || /[\r\n]/.test(trimmed) || hasUnsafeOutputRedirectV1(trimmed)) return false;
+  if (!trimmed || /[\r\n]/.test(trimmed) || hasUnsafeOutputRedirect(trimmed)) return false;
   if (/[$`]/.test(trimmed) || /[<>]\(/.test(trimmed)) return false;
-  if (hasUnquotedBraceExpansionV1(trimmed)) return false;
+  if (hasUnquotedBraceExpansion(trimmed)) return false;
   const stripped = trimmed.replace(/&&/g, '').replace(/\d?>&\d?/g, '');
   if (stripped.includes('&')) return false;
-  return splitReadOnlySegmentsV1(trimmed).every(isReadOnlySegmentV1);
+  return splitReadOnlySegments(trimmed).every(isReadOnlySegment);
 }
 
-const BROKERED_GIT_EXECUTABLE_TOKEN_V1 =
+const BROKERED_GIT_EXECUTABLE_TOKEN_ =
   /(?:^|[\s"'`;&|()=,])(?:(?:[a-z]:)?[\\/][^\s"'`;&|()=,]*[\\/])?git(?:\.exe)?(?=$|[\s"'`;&|()=,])/iu;
 
 /**
@@ -1175,11 +1171,11 @@ const BROKERED_GIT_EXECUTABLE_TOKEN_V1 =
  * tokens in nested/indirect command text and fails closed before a process
  * can start; dotted path substrings such as `.git/config` do not match.
  */
-export function hasBrokeredGitExecutableTokenV1(command: string): boolean {
-  return BROKERED_GIT_EXECUTABLE_TOKEN_V1.test(command);
+export function hasBrokeredGitExecutableToken(command: string): boolean {
+  return BROKERED_GIT_EXECUTABLE_TOKEN_.test(command);
 }
 
-function hasUnquotedBraceExpansionV1(command: string): boolean {
+function hasUnquotedBraceExpansion(command: string): boolean {
   let quote: "'" | '"' | null = null;
   let escaped = false;
   for (const char of command) {
@@ -1204,7 +1200,7 @@ function hasUnquotedBraceExpansionV1(command: string): boolean {
   return false;
 }
 
-function hasUnsafeOutputRedirectV1(command: string): boolean {
+function hasUnsafeOutputRedirect(command: string): boolean {
   const tokens = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
   for (let index = 0; index < tokens.length; index += 1) {
     const rawToken = tokens[index] ?? '';
@@ -1215,10 +1211,7 @@ function hasUnsafeOutputRedirectV1(command: string): boolean {
       continue;
     }
     if (/^\d?>&\d?$/.test(rawToken) || /^\d?>{1,2}\/dev\/null$/.test(rawToken)) continue;
-    if (
-      /^\d?>{1,2}$/.test(rawToken) &&
-      stripShellQuotesV1(tokens[index + 1] ?? '') === '/dev/null'
-    ) {
+    if (/^\d?>{1,2}$/.test(rawToken) && stripShellQuotes(tokens[index + 1] ?? '') === '/dev/null') {
       index += 1;
       continue;
     }
@@ -1227,19 +1220,19 @@ function hasUnsafeOutputRedirectV1(command: string): boolean {
   return false;
 }
 
-function splitReadOnlySegmentsV1(command: string): string[] {
+function splitReadOnlySegments(command: string): string[] {
   return command
     .split(/\s*(?:\|\||&&|[|;])\s*/g)
     .map((segment) => segment.trim())
     .filter(Boolean);
 }
 
-function withoutHarmlessOutputRedirectsV1(tokens: string[]): string[] {
+function withoutHarmlessOutputRedirects(tokens: string[]): string[] {
   const result: string[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
-    const token = stripShellQuotesV1(tokens[index] ?? '');
+    const token = stripShellQuotes(tokens[index] ?? '');
     if (/^\d?>&\d?$/.test(token) || /^\d?>{1,2}\/dev\/null$/.test(token)) continue;
-    if (/^\d?>{1,2}$/.test(token) && stripShellQuotesV1(tokens[index + 1] ?? '') === '/dev/null') {
+    if (/^\d?>{1,2}$/.test(token) && stripShellQuotes(tokens[index + 1] ?? '') === '/dev/null') {
       index += 1;
       continue;
     }
@@ -1248,32 +1241,32 @@ function withoutHarmlessOutputRedirectsV1(tokens: string[]): string[] {
   return result;
 }
 
-function isReadOnlySegmentV1(segment: string): boolean {
-  const tokens = withoutHarmlessOutputRedirectsV1(
+function isReadOnlySegment(segment: string): boolean {
+  const tokens = withoutHarmlessOutputRedirects(
     segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [],
   );
-  const command = stripShellQuotesV1(tokens[0] ?? '').toLowerCase();
+  const command = stripShellQuotes(tokens[0] ?? '').toLowerCase();
   if (!command) return false;
   const portableCommand = command.replace(/\.(?:cmd|exe)$/i, '');
-  if (LOCAL_RUNTIME_VERSION_COMMANDS_V1.has(portableCommand)) {
-    return tokens.length === 2 && ['--version', '-v'].includes(stripShellQuotesV1(tokens[1] ?? ''));
+  if (LOCAL_RUNTIME_VERSION_COMMANDS_.has(portableCommand)) {
+    return tokens.length === 2 && ['--version', '-v'].includes(stripShellQuotes(tokens[1] ?? ''));
   }
   if (portableCommand === 'git') return false;
-  if (portableCommand === 'file') return isReadOnlyFileV1(tokens);
-  if (portableCommand === 'rg') return isReadOnlyRipgrepV1(tokens);
-  if (portableCommand === 'sed') return isReadOnlySedV1(tokens);
-  if (portableCommand === 'find') return isReadOnlyFindV1(tokens);
-  if (portableCommand === 'sort') return isReadOnlySortV1(tokens);
-  if (portableCommand === 'uniq') return isReadOnlyUniqV1(tokens);
+  if (portableCommand === 'file') return isReadOnlyFile(tokens);
+  if (portableCommand === 'rg') return isReadOnlyRipgrep(tokens);
+  if (portableCommand === 'sed') return isReadOnlySed(tokens);
+  if (portableCommand === 'find') return isReadOnlyFind(tokens);
+  if (portableCommand === 'sort') return isReadOnlySort(tokens);
+  if (portableCommand === 'uniq') return isReadOnlyUniq(tokens);
   if (portableCommand === 'awk' || portableCommand === 'xargs') return false;
-  return READ_ONLY_SHELL_COMMANDS_V1.has(portableCommand);
+  return READ_ONLY_SHELL_COMMANDS_.has(portableCommand);
 }
 
-function stripShellQuotesV1(value: string): string {
+function stripShellQuotes(value: string): string {
   return value.replace(/^["']|["']$/g, '');
 }
 
-export function isNetworkShellCommandV1(command: string): boolean {
+export function isNetworkShellCommand(command: string): boolean {
   return (
     /\b(?:curl|wget|ssh|scp|sftp|rsync|ftp|nc|ncat|telnet)\b/.test(command) ||
     /\bgit\s+(?:clone|fetch|pull|push|ls-remote)\b/.test(command) ||
@@ -1284,7 +1277,7 @@ export function isNetworkShellCommandV1(command: string): boolean {
   );
 }
 
-export function isWriteShellCommandV1(command: string): boolean {
+export function isWriteShellCommand(command: string): boolean {
   return (
     /(^|[^>])>{1,2}(?!&[12])(?:$|[^>])/.test(command) ||
     /(?:^|[;&|]\s*)(?:cp|mv|mkdir|touch|tee|rm|unlink)\b/.test(command) ||
@@ -1293,7 +1286,7 @@ export function isWriteShellCommandV1(command: string): boolean {
   );
 }
 
-export function isDestructiveShellCommandV1(command: string): boolean {
+export function isDestructiveShellCommand(command: string): boolean {
   return (
     /(?:(?:^|[;&|]\s*)|\/)(?:sudo|runas)\b/.test(command) ||
     /\brm\s+(?:-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r|-r\s+-f|-f\s+-r|--recursive.*--force|--force.*--recursive)\b/.test(
@@ -1316,15 +1309,13 @@ export function isDestructiveShellCommandV1(command: string): boolean {
   );
 }
 
-export function isVcsMutationShellCommandV1(command: string): boolean {
+export function isVcsMutationShellCommand(command: string): boolean {
   return /\bgit\s+(?:add|branch|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
     command,
   );
 }
 
-function readOnlyEffectsV1(
-  effects: NonNullable<CapabilityDefinitionV1['effects']>,
-): CapabilityEffectsV1 {
+function readOnlyEffects(effects: NonNullable<CapabilityDefinition['effects']>): CapabilityEffects {
   return Object.freeze({
     filesystem: effects.filesystem === 'none' ? 'none' : 'read',
     network: effects.network === 'none' ? 'none' : 'read',
@@ -1332,10 +1323,10 @@ function readOnlyEffectsV1(
   });
 }
 
-function riskFromInvocationEffectsV1(
+function riskFromInvocationEffects(
   effectClass: 'read_only' | 'plan_only' | 'workspace_write' | 'external_side_effect' | 'unknown',
-  effects: CapabilityEffectsV1,
-): import('@kite/runtime-spi').CapabilityRiskClassV1 {
+  effects: CapabilityEffects,
+): import('@kite/runtime-spi').CapabilityRiskClass {
   if (
     effects.filesystem === 'destructive' ||
     effects.network === 'destructive' ||
@@ -1355,13 +1346,11 @@ function riskFromInvocationEffectsV1(
   return 'unknown';
 }
 
-function builtinApprovalSummaryProjectorV1(
-  operationId: string,
-): CapabilityApprovalSummaryProjectorV1 {
+function builtinApprovalSummaryProjector(operationId: string): CapabilityApprovalSummaryProjector {
   return (input) => {
     const record =
       input && typeof input === 'object' && !Array.isArray(input)
-        ? (input as Readonly<Record<string, RuntimeJsonValueV1>>)
+        ? (input as Readonly<Record<string, RuntimeJsonValue>>)
         : {};
     const text = (field: string): string =>
       typeof record[field] === 'string' ? record[field] : '';
@@ -1392,7 +1381,7 @@ function builtinApprovalSummaryProjectorV1(
   };
 }
 
-function topLevelSchemaFieldsV1(schema: z.ZodType): readonly string[] {
+function topLevelSchemaFields(schema: z.ZodType): readonly string[] {
   const json = z.toJSONSchema(schema) as {
     properties?: Record<string, unknown>;
     anyOf?: unknown[];
@@ -1401,27 +1390,27 @@ function topLevelSchemaFieldsV1(schema: z.ZodType): readonly string[] {
   return Object.freeze([]);
 }
 
-function toRuntimeJsonV1(value: unknown): RuntimeJsonValueV1 {
+function toRuntimeJson(value: unknown): RuntimeJsonValue {
   if (value === null) return null;
   if (typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (Array.isArray(value)) return value.map(toRuntimeJsonV1);
+  if (Array.isArray(value)) return value.map(toRuntimeJson);
   if (value && typeof value === 'object') {
-    const result: Record<string, RuntimeJsonValueV1> = {};
+    const result: Record<string, RuntimeJsonValue> = {};
     for (const [key, item] of Object.entries(value)) {
-      if (item !== undefined) result[key] = toRuntimeJsonV1(item);
+      if (item !== undefined) result[key] = toRuntimeJson(item);
     }
     return result;
   }
   throw new Error('Builtin parser produced a non-JSON value');
 }
 
-function freezeRuntimeJsonV1(value: RuntimeJsonValueV1): RuntimeJsonValueV1 {
-  if (Array.isArray(value)) return Object.freeze(value.map(freezeRuntimeJsonV1));
+function freezeRuntimeJson(value: RuntimeJsonValue): RuntimeJsonValue {
+  if (Array.isArray(value)) return Object.freeze(value.map(freezeRuntimeJson));
   if (value && typeof value === 'object') {
     return Object.freeze(
       Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [key, freezeRuntimeJsonV1(item)]),
+        Object.entries(value).map(([key, item]) => [key, freezeRuntimeJson(item)]),
       ),
     );
   }

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
-  STANDALONE_WORKSPACE_ENTRYPOINTS_V1,
+  STANDALONE_WORKSPACE_ENTRYPOINTS_,
   verifyOssCandidate,
   writeOssCandidateArchive,
 } from '../../scripts/release/oss-candidate';
@@ -35,7 +35,7 @@ describe('ordinary open-source candidate archive', () => {
         const specifier =
           subpath === '.' ? packageJson.name : `${packageJson.name}/${subpath.slice(2)}`;
         const expected = `${packageRoot}/${target.slice(2)}`;
-        expect(STANDALONE_WORKSPACE_ENTRYPOINTS_V1[specifier]).toBe(expected);
+        expect(STANDALONE_WORKSPACE_ENTRYPOINTS_[specifier]).toBe(expected);
         expect(expected).not.toContain('\\');
         expect(existsSync(expected)).toBe(true);
       }

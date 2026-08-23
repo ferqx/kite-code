@@ -1,61 +1,61 @@
 import type {
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelinePreparedIdentityVerifierV1,
-  WorkspaceFilesystemDurableEvidencePortV1,
-  WorkspaceFilesystemIntentDraftV1,
-  WorkspaceFilesystemIntentRecordV1,
-  WorkspaceFilesystemObserveOperationV1,
-  WorkspaceFilesystemOperationV1,
-  WorkspaceFilesystemProtectedBoundaryV1,
-  WorkspaceFilesystemReadOperationV1,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelinePreparedIdentityVerifier,
+  WorkspaceFilesystemDurableEvidencePort,
+  WorkspaceFilesystemIntentDraft,
+  WorkspaceFilesystemIntentRecord,
+  WorkspaceFilesystemObserveOperation,
+  WorkspaceFilesystemOperation,
+  WorkspaceFilesystemProtectedBoundary,
+  WorkspaceFilesystemReadOperation,
 } from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from '../capability-binding';
-import type { ProtectedPathEvaluatorV1 } from '../sandbox/protected-path';
+import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite/runtime-spi';
+import { digestCapabilityBindingValue } from '../capability-binding';
+import type { ProtectedPathEvaluator } from '../sandbox/protected-path';
 import {
-  validateWorkspaceFilesystemIntentRecordV1,
-  workspaceFilesystemIntentDigestV1,
+  validateWorkspaceFilesystemIntentRecord,
+  workspaceFilesystemIntentDigest,
 } from './evidence';
 import {
-  validateWorkspaceFilesystemOperationV1,
-  workspaceFilesystemOperationDigestV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
-  workspaceFilesystemStringDigestV1,
+  validateWorkspaceFilesystemOperation,
+  workspaceFilesystemOperationDigest,
+  workspaceFilesystemProtectedBoundaryDigest,
+  workspaceFilesystemStringDigest,
 } from './grant-authority';
-import { issueBuiltinWorkspaceFilesystemReadObservationV1 } from './observation-authority';
+import { issueBuiltinWorkspaceFilesystemReadObservation } from './observation-authority';
 import type {
-  BuiltinWorkspaceFilesystemInvocationDispatcherV1,
-  BuiltinWorkspaceFilesystemPipelineResultV1,
-  BuiltinWorkspaceFilesystemRuntimeV1,
+  BuiltinWorkspaceFilesystemInvocationDispatcher,
+  BuiltinWorkspaceFilesystemPipelineResult,
+  BuiltinWorkspaceFilesystemRuntime,
 } from './runtime-composition';
 
-const DEFAULT_GRANT_TTL_MS_V1 = 30_000;
-const READ_EFFECTS_DIGEST_V1 = digestCapabilityBindingValueV1({
+const DEFAULT_GRANT_TTL_MS_ = 30_000;
+const READ_EFFECTS_DIGEST_ = digestCapabilityBindingValue({
   filesystem: 'read',
   network: 'none',
   externalState: 'none',
 });
 
-export interface BuiltinWorkspaceFilesystemActorIdentityV1 {
+export interface BuiltinWorkspaceFilesystemActorIdentity {
   readonly threadId: string;
   readonly actorId: string;
 }
 
-export interface CreateBuiltinWorkspaceFilesystemReadDispatcherInputV1 {
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
+export interface CreateBuiltinWorkspaceFilesystemReadDispatcherInput {
+  readonly prepared: Readonly<PreparedToolInvocation>;
   /** Exact verifier from the same frozen Builtin callback bundle. */
-  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1;
-  readonly runtime: Readonly<BuiltinWorkspaceFilesystemRuntimeV1>;
-  readonly durableEvidence: WorkspaceFilesystemDurableEvidencePortV1;
-  readonly protectedPathEvaluator: ProtectedPathEvaluatorV1;
+  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier;
+  readonly runtime: Readonly<BuiltinWorkspaceFilesystemRuntime>;
+  readonly durableEvidence: WorkspaceFilesystemDurableEvidencePort;
+  readonly protectedPathEvaluator: ProtectedPathEvaluator;
   readonly protectedPathRevision: string;
-  readonly actorIdentity: Readonly<BuiltinWorkspaceFilesystemActorIdentityV1>;
+  readonly actorIdentity: Readonly<BuiltinWorkspaceFilesystemActorIdentity>;
   readonly signal?: AbortSignal;
   readonly now?: () => Date;
 }
 
-export type BuiltinWorkspaceFilesystemReadDispatchErrorCodeV1 =
+export type BuiltinWorkspaceFilesystemReadDispatchErrorCode =
   | 'invalid_composition'
   | 'prepared_identity_invalid'
   | 'unsupported_operation'
@@ -65,56 +65,56 @@ export type BuiltinWorkspaceFilesystemReadDispatchErrorCodeV1 =
   | 'intent_verification_failed'
   | 'provider_observation_invalid';
 
-export class BuiltinWorkspaceFilesystemReadDispatchErrorV1 extends Error {
-  readonly code: BuiltinWorkspaceFilesystemReadDispatchErrorCodeV1;
+export class BuiltinWorkspaceFilesystemReadDispatchError extends Error {
+  readonly code: BuiltinWorkspaceFilesystemReadDispatchErrorCode;
 
-  constructor(code: BuiltinWorkspaceFilesystemReadDispatchErrorCodeV1) {
+  constructor(code: BuiltinWorkspaceFilesystemReadDispatchErrorCode) {
     super(`Builtin Workspace filesystem read dispatcher rejected '${code}'.`);
-    this.name = 'BuiltinWorkspaceFilesystemReadDispatchErrorV1';
+    this.name = 'BuiltinWorkspaceFilesystemReadDispatchError';
     this.code = code;
   }
 }
 
 /**
- * Read-only Workspace filesystem mechanism for the RMV1-16 FSR tranche.
+ * Read-only Workspace filesystem mechanism for the RM-16 FSR tranche.
  * State persistence and Host attempt ownership stay behind the injected
  * durable-evidence port; this dispatcher owns only Builtin filesystem
  * semantics and the existing grant/Provider route.
  */
-export function createBuiltinWorkspaceFilesystemReadDispatcherV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInputV1>,
-): BuiltinWorkspaceFilesystemInvocationDispatcherV1 {
-  assertCompositionV1(input);
+export function createBuiltinWorkspaceFilesystemReadDispatcher(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInput>,
+): BuiltinWorkspaceFilesystemInvocationDispatcher {
+  assertComposition(input);
   return Object.freeze({
-    dispatch: (operation: WorkspaceFilesystemOperationV1) => dispatchReadV1(input, operation),
+    dispatch: (operation: WorkspaceFilesystemOperation) => dispatchRead(input, operation),
   });
 }
 
-async function dispatchReadV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInputV1>,
-  operation: WorkspaceFilesystemOperationV1,
-): Promise<BuiltinWorkspaceFilesystemPipelineResultV1> {
-  assertPreparedIdentityV1(input.prepared, input.verifyPreparedIdentity);
-  const validated = readOperationForPreparedV1(
+async function dispatchRead(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInput>,
+  operation: WorkspaceFilesystemOperation,
+): Promise<BuiltinWorkspaceFilesystemPipelineResult> {
+  assertPreparedIdentity(input.prepared, input.verifyPreparedIdentity);
+  const validated = readOperationForPrepared(
     input.prepared,
     operation,
     input.protectedPathEvaluator,
   );
-  const protectedBoundary = protectedBoundaryV1(input);
-  const intent = intentRecordV1(input, validated, protectedBoundary);
-  const evidenceOperation = evidenceOperationV1(input.prepared, validated);
-  const draft = deepFreezeV1({
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+  const boundary = protectedBoundary(input);
+  const intent = intentRecord(input, validated, boundary);
+  const pipelineOperation = evidenceOperation(input.prepared, validated);
+  const draft = deepFreeze({
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     prepared: input.prepared,
-    operation: evidenceOperation,
+    operation: pipelineOperation,
     record: intent,
-  } satisfies WorkspaceFilesystemIntentDraftV1);
+  } satisfies WorkspaceFilesystemIntentDraft);
 
-  let persisted: Awaited<ReturnType<WorkspaceFilesystemDurableEvidencePortV1['persistIntent']>>;
+  let persisted: Awaited<ReturnType<WorkspaceFilesystemDurableEvidencePort['persistIntent']>>;
   try {
     persisted = await input.durableEvidence.persistIntent(draft);
   } catch {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('intent_persistence_failed');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('intent_persistence_failed');
   }
   let verified = false;
   try {
@@ -122,11 +122,8 @@ async function dispatchReadV1(
   } catch {
     verified = false;
   }
-  if (
-    !verified ||
-    !persistedIntentMatchesV1(input.prepared, evidenceOperation, intent, persisted)
-  ) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('intent_verification_failed');
+  if (!verified || !persistedIntentMatches(input.prepared, pipelineOperation, intent, persisted)) {
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('intent_verification_failed');
   }
 
   const grant = input.runtime.grants.issueObserveGrant({
@@ -140,34 +137,34 @@ async function dispatchReadV1(
       searchBoundaryDigest: persisted.record.searchBoundaryDigest,
       capabilityRevision: persisted.acknowledgement.attempt.capabilityRevision,
       effectDigest: persisted.acknowledgement.attempt.effectiveEffectsDigest,
-      canonicalWorkspace: protectedBoundary.canonicalWorkspace,
+      canonicalWorkspace: boundary.canonicalWorkspace,
       protectedPathRevision: input.protectedPathRevision,
-      approvalSummary: approvalSummaryV1(input.prepared),
+      approvalSummary: approvalSummary(input.prepared),
     }),
     operation: validated,
-    protectedBoundary,
-    ttlMs: input.runtime.grantTtlMs ?? DEFAULT_GRANT_TTL_MS_V1,
+    protectedBoundary: boundary,
+    ttlMs: input.runtime.grantTtlMs ?? DEFAULT_GRANT_TTL_MS_,
   });
   const result = await input.runtime.provider.observe({ grant, signal: input.signal });
   if (!result.ok) {
     return Object.freeze({ ok: false, failure: Object.freeze({ ...result.failure }) });
   }
   if (result.observation.kind !== validated.kind) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('provider_observation_invalid');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('provider_observation_invalid');
   }
   if (validated.kind !== 'read_file') {
     return Object.freeze({ ok: true, observation: result.observation });
   }
   if (result.observation.kind !== 'read_file') {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('provider_observation_invalid');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('provider_observation_invalid');
   }
   const providerEvidence = result.observation.targetEvidence;
-  const filesystemObservation = issueBuiltinWorkspaceFilesystemReadObservationV1({
+  const filesystemObservation = issueBuiltinWorkspaceFilesystemReadObservation({
     prepared: input.prepared,
     persisted,
     providerObservation: result.observation,
     observation: Object.freeze({
-      actorIdentityDigest: digestCapabilityBindingValueV1({
+      actorIdentityDigest: digestCapabilityBindingValue({
         schema: 'kite.workspace-filesystem-actor.v1',
         threadId: input.actorIdentity.threadId,
         actorIdentity: input.actorIdentity.actorId,
@@ -185,8 +182,8 @@ async function dispatchReadV1(
   });
 }
 
-function assertCompositionV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInputV1>,
+function assertComposition(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInput>,
 ): void {
   if (
     !input ||
@@ -197,18 +194,18 @@ function assertCompositionV1(
     typeof input.runtime?.grants?.issueObserveGrant !== 'function' ||
     typeof input.protectedPathEvaluator?.evaluate !== 'function' ||
     typeof input.protectedPathEvaluator?.projectFilesystemBoundary !== 'function' ||
-    !nonEmptyV1(input.protectedPathRevision) ||
-    !nonEmptyV1(input.actorIdentity?.threadId) ||
-    !nonEmptyV1(input.actorIdentity?.actorId) ||
-    !sameWorkspaceV1(input.runtime.canonicalWorkspace, input.protectedPathEvaluator.workspaceRoot)
+    !nonEmpty(input.protectedPathRevision) ||
+    !nonEmpty(input.actorIdentity?.threadId) ||
+    !nonEmpty(input.actorIdentity?.actorId) ||
+    !sameWorkspace(input.runtime.canonicalWorkspace, input.protectedPathEvaluator.workspaceRoot)
   ) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('invalid_composition');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('invalid_composition');
   }
 }
 
-function assertPreparedIdentityV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  verifier: ToolPipelinePreparedIdentityVerifierV1,
+function assertPreparedIdentity(
+  prepared: Readonly<PreparedToolInvocation>,
+  verifier: ToolPipelinePreparedIdentityVerifier,
 ): void {
   let valid = false;
   try {
@@ -227,101 +224,101 @@ function assertPreparedIdentityV1(
     !identity.modelVisible ||
     identity.dynamicCatalogRevision !== null ||
     identity.admissionDigest === null ||
-    identity.effectiveEffectsDigest !== READ_EFFECTS_DIGEST_V1 ||
-    !isReadOperationIdV1(identity.operationId)
+    identity.effectiveEffectsDigest !== READ_EFFECTS_DIGEST_ ||
+    !isReadOperationId(identity.operationId)
   ) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('prepared_identity_invalid');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('prepared_identity_invalid');
   }
 }
 
-function readOperationForPreparedV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  operation: WorkspaceFilesystemOperationV1,
-  evaluator: ProtectedPathEvaluatorV1,
-): Readonly<WorkspaceFilesystemObserveOperationV1> {
-  if (!isReadOperationV1(operation)) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('unsupported_operation');
+function readOperationForPrepared(
+  prepared: Readonly<PreparedToolInvocation>,
+  operation: WorkspaceFilesystemOperation,
+  evaluator: ProtectedPathEvaluator,
+): Readonly<WorkspaceFilesystemObserveOperation> {
+  if (!isReadOperation(operation)) {
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('unsupported_operation');
   }
-  let validated: Readonly<WorkspaceFilesystemOperationV1>;
+  let validated: Readonly<WorkspaceFilesystemOperation>;
   try {
-    validated = validateWorkspaceFilesystemOperationV1(operation, 'observe');
+    validated = validateWorkspaceFilesystemOperation(operation, 'observe');
   } catch {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('operation_identity_mismatch');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('operation_identity_mismatch');
   }
-  if (!isReadOperationV1(validated)) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('unsupported_operation');
+  if (!isReadOperation(validated)) {
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('unsupported_operation');
   }
   const identity = prepared.identity;
   if (identity.isDynamicMcp || identity.operationId !== `builtin:${validated.kind}`) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('operation_identity_mismatch');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('operation_identity_mismatch');
   }
-  const args = jsonRecordV1(prepared.input.arguments);
-  if (!argumentsMatchOperationV1(args, validated)) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('operation_identity_mismatch');
+  const args = jsonRecord(prepared.input.arguments);
+  if (!argumentsMatchOperation(args, validated)) {
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('operation_identity_mismatch');
   }
   const decision = evaluator.evaluate({ path: validated.path, operation: 'read' });
   const expectedScope = decision.relativePath === null ? 'external_read' : 'workspace_only';
   if (decision.outcome !== 'allow' || validated.pathScope !== expectedScope) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('protected_boundary_invalid');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('protected_boundary_invalid');
   }
   return validated;
 }
 
-function protectedBoundaryV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInputV1>,
-): Readonly<WorkspaceFilesystemProtectedBoundaryV1> {
+function protectedBoundary(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInput>,
+): Readonly<WorkspaceFilesystemProtectedBoundary> {
   try {
     const projection = input.protectedPathEvaluator.projectFilesystemBoundary();
     if (
-      !sameWorkspaceV1(projection.canonicalWorkspace, input.runtime.canonicalWorkspace) ||
-      !sameWorkspaceV1(input.protectedPathEvaluator.workspaceRoot, input.runtime.canonicalWorkspace)
+      !sameWorkspace(projection.canonicalWorkspace, input.runtime.canonicalWorkspace) ||
+      !sameWorkspace(input.protectedPathEvaluator.workspaceRoot, input.runtime.canonicalWorkspace)
     ) {
       throw new Error('workspace mismatch');
     }
-    const unsigned = deepFreezeV1({
+    const unsigned = deepFreeze({
       schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
       ...structuredClone(projection),
     });
-    return deepFreezeV1({
+    return deepFreeze({
       ...unsigned,
-      boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsigned),
+      boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsigned),
     });
   } catch {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('protected_boundary_invalid');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('protected_boundary_invalid');
   }
 }
 
-function intentRecordV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInputV1>,
-  operation: Readonly<WorkspaceFilesystemObserveOperationV1>,
-  boundary: Readonly<WorkspaceFilesystemProtectedBoundaryV1>,
-): Readonly<WorkspaceFilesystemIntentRecordV1> {
+function intentRecord(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemReadDispatcherInput>,
+  operation: Readonly<WorkspaceFilesystemObserveOperation>,
+  boundary: Readonly<WorkspaceFilesystemProtectedBoundary>,
+): Readonly<WorkspaceFilesystemIntentRecord> {
   const identity = input.prepared.identity;
-  const recordedAt = timestampV1(input.now?.() ?? new Date());
+  const recordedAt = timestamp(input.now?.() ?? new Date());
   const unsigned = {
-    attempt: attemptV1(identity.invocationId, identity.attemptId),
+    attempt: attempt(identity.invocationId, identity.attemptId),
     capabilityRevision: identity.capabilityRevision,
     argumentsDigest: identity.argumentsDigest,
-    admissionDigest: requiredV1(identity.admissionDigest),
-    operationDigest: workspaceFilesystemOperationDigestV1(operation),
+    admissionDigest: required(identity.admissionDigest),
+    operationDigest: workspaceFilesystemOperationDigest(operation),
     searchBoundaryDigest: boundary.boundaryDigest,
-    lexicalTargetDigest: workspaceFilesystemStringDigestV1(operation.path),
-    canonicalWorkspaceDigest: workspaceFilesystemStringDigestV1(boundary.canonicalWorkspace),
+    lexicalTargetDigest: workspaceFilesystemStringDigest(operation.path),
+    canonicalWorkspaceDigest: workspaceFilesystemStringDigest(boundary.canonicalWorkspace),
     protectedPathRevision: input.protectedPathRevision,
-    approvalSummaryDigest: workspaceFilesystemStringDigestV1(approvalSummaryV1(input.prepared)),
+    approvalSummaryDigest: workspaceFilesystemStringDigest(approvalSummary(input.prepared)),
     effectiveEffectsDigest: identity.effectiveEffectsDigest,
     recordedAt,
-  } satisfies Omit<WorkspaceFilesystemIntentRecordV1, 'intentDigest'>;
-  return validateWorkspaceFilesystemIntentRecordV1({
+  } satisfies Omit<WorkspaceFilesystemIntentRecord, 'intentDigest'>;
+  return validateWorkspaceFilesystemIntentRecord({
     ...unsigned,
-    intentDigest: workspaceFilesystemIntentDigestV1(unsigned),
+    intentDigest: workspaceFilesystemIntentDigest(unsigned),
   });
 }
 
-function evidenceOperationV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  operation: Readonly<WorkspaceFilesystemObserveOperationV1>,
-): Readonly<WorkspaceFilesystemReadOperationV1> {
+function evidenceOperation(
+  prepared: Readonly<PreparedToolInvocation>,
+  operation: Readonly<WorkspaceFilesystemObserveOperation>,
+): Readonly<WorkspaceFilesystemReadOperation> {
   const operationId = prepared.identity.operationId;
   if (operation.kind === 'read_file' && operationId === 'builtin:read_file') {
     return Object.freeze({ ...operation, operationId: 'builtin:read_file' as const });
@@ -332,27 +329,27 @@ function evidenceOperationV1(
   if (operation.kind === 'search_content' && operationId === 'builtin:search_content') {
     return Object.freeze({ ...operation, operationId: 'builtin:search_content' as const });
   }
-  throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('operation_identity_mismatch');
+  throw new BuiltinWorkspaceFilesystemReadDispatchError('operation_identity_mismatch');
 }
 
-function persistedIntentMatchesV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  operation: Readonly<WorkspaceFilesystemReadOperationV1>,
-  record: Readonly<WorkspaceFilesystemIntentRecordV1>,
-  persisted: Awaited<ReturnType<WorkspaceFilesystemDurableEvidencePortV1['persistIntent']>>,
+function persistedIntentMatches(
+  prepared: Readonly<PreparedToolInvocation>,
+  operation: Readonly<WorkspaceFilesystemReadOperation>,
+  record: Readonly<WorkspaceFilesystemIntentRecord>,
+  persisted: Awaited<ReturnType<WorkspaceFilesystemDurableEvidencePort['persistIntent']>>,
 ): boolean {
   const acknowledged = persisted.acknowledgement?.attempt;
   const identity = prepared.identity;
   try {
     return (
-      persisted.schema === WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 &&
+      persisted.schema === WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ &&
       persisted.status === 'durably_persisted' &&
       persisted.prepared === prepared &&
       persisted.operation === operation &&
       persisted.record === record &&
-      digestCapabilityBindingValueV1(persisted.operation) ===
-        digestCapabilityBindingValueV1(operation) &&
-      digestCapabilityBindingValueV1(persisted.record) === digestCapabilityBindingValueV1(record) &&
+      digestCapabilityBindingValue(persisted.operation) ===
+        digestCapabilityBindingValue(operation) &&
+      digestCapabilityBindingValue(persisted.record) === digestCapabilityBindingValue(record) &&
       acknowledged.invocationId === identity.invocationId &&
       acknowledged.attemptId === identity.attemptId &&
       acknowledged.attempt === record.attempt &&
@@ -382,9 +379,9 @@ function persistedIntentMatchesV1(
   }
 }
 
-function argumentsMatchOperationV1(
-  args: Readonly<Record<string, RuntimeJsonValueV1>>,
-  operation: Readonly<WorkspaceFilesystemObserveOperationV1>,
+function argumentsMatchOperation(
+  args: Readonly<Record<string, RuntimeJsonValue>>,
+  operation: Readonly<WorkspaceFilesystemObserveOperation>,
 ): boolean {
   if (operation.kind === 'read_file') {
     return (
@@ -403,35 +400,35 @@ function argumentsMatchOperationV1(
   );
 }
 
-function approvalSummaryV1(prepared: Readonly<PreparedToolInvocationV1>): string {
-  const facts = jsonRecordV1(prepared.input.facts);
+function approvalSummary(prepared: Readonly<PreparedToolInvocation>): string {
+  const facts = jsonRecord(prepared.input.facts);
   const summary = facts.approvalSummary;
   if (typeof summary !== 'string' || summary.length > 1024) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('prepared_identity_invalid');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('prepared_identity_invalid');
   }
   return summary;
 }
 
-function attemptV1(invocationId: string, attemptId: string): number {
+function attempt(invocationId: string, attemptId: string): number {
   const prefix = `${invocationId}:attempt:`;
   const suffix = attemptId.startsWith(prefix) ? attemptId.slice(prefix.length) : '';
   const attempt = Number(suffix);
   if (!/^[1-9]\d*$/u.test(suffix) || !Number.isSafeInteger(attempt)) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('prepared_identity_invalid');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('prepared_identity_invalid');
   }
   return attempt;
 }
 
-function timestampV1(value: Date): string {
+function timestamp(value: Date): string {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('invalid_composition');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('invalid_composition');
   }
   return value.toISOString();
 }
 
-function jsonRecordV1(
-  value: RuntimeJsonValueV1 | undefined,
-): Readonly<Record<string, RuntimeJsonValueV1>> {
+function jsonRecord(
+  value: RuntimeJsonValue | undefined,
+): Readonly<Record<string, RuntimeJsonValue>> {
   if (
     value === undefined ||
     value === null ||
@@ -439,12 +436,12 @@ function jsonRecordV1(
     Array.isArray(value) ||
     Object.getPrototypeOf(value) !== Object.prototype
   ) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('prepared_identity_invalid');
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('prepared_identity_invalid');
   }
-  return value as Readonly<Record<string, RuntimeJsonValueV1>>;
+  return value as Readonly<Record<string, RuntimeJsonValue>>;
 }
 
-function isReadOperationIdV1(value: string): boolean {
+function isReadOperationId(value: string): boolean {
   return (
     value === 'builtin:read_file' ||
     value === 'builtin:search_files' ||
@@ -452,9 +449,9 @@ function isReadOperationIdV1(value: string): boolean {
   );
 }
 
-function isReadOperationV1(
-  operation: Readonly<WorkspaceFilesystemOperationV1>,
-): operation is Readonly<WorkspaceFilesystemObserveOperationV1> {
+function isReadOperation(
+  operation: Readonly<WorkspaceFilesystemOperation>,
+): operation is Readonly<WorkspaceFilesystemObserveOperation> {
   return (
     operation.kind === 'read_file' ||
     operation.kind === 'search_files' ||
@@ -462,25 +459,25 @@ function isReadOperationV1(
   );
 }
 
-function sameWorkspaceV1(left: string, right: string): boolean {
+function sameWorkspace(left: string, right: string): boolean {
   return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
-function requiredV1(value: string | null): string {
-  if (!nonEmptyV1(value)) {
-    throw new BuiltinWorkspaceFilesystemReadDispatchErrorV1('prepared_identity_invalid');
+function required(value: string | null): string {
+  if (!nonEmpty(value)) {
+    throw new BuiltinWorkspaceFilesystemReadDispatchError('prepared_identity_invalid');
   }
   return value;
 }
 
-function nonEmptyV1(value: unknown): value is string {
+function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && !value.includes('\0');
 }
 
-function deepFreezeV1<Value>(value: Value): Readonly<Value> {
+function deepFreeze<Value>(value: Value): Readonly<Value> {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     Object.freeze(value);
-    for (const nested of Object.values(value as Record<string, unknown>)) deepFreezeV1(nested);
+    for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
   }
   return value;
 }

@@ -2,7 +2,7 @@
  * Deterministic scheduling facts. Providers may describe concrete resources,
  * but the Kernel never receives a Capability or Tool name.
  */
-export interface ResourceScopeV1 {
+export interface ResourceScope {
   readonly kind:
     | 'runtime'
     | 'workspace'
@@ -14,8 +14,8 @@ export interface ResourceScopeV1 {
   readonly key: string;
 }
 
-export interface ExecutionTraitsV1 {
-  readonly resourceScopes: readonly ResourceScopeV1[];
+export interface ExecutionTraits {
+  readonly resourceScopes: readonly ResourceScope[];
   readonly access: 'read' | 'write' | 'unknown';
   readonly conflictKeys: readonly string[];
   readonly isolation: 'shared' | 'exclusive_workspace' | 'worktree';
@@ -25,9 +25,9 @@ export interface ExecutionTraitsV1 {
   readonly leaseFenceRequired: boolean;
 }
 
-export interface SchedulableEffectV1 {
+export interface SchedulableEffect {
   readonly effectId: string;
-  readonly traits: ExecutionTraitsV1;
+  readonly traits: ExecutionTraits;
 }
 
 /**
@@ -35,8 +35,8 @@ export interface SchedulableEffectV1 {
  * effect. Queue order remains authoritative and the caller supplies the
  * bounded ceiling for the first effect's concurrency group.
  */
-export function selectSchedulableEffectBatchV1(
-  candidates: readonly SchedulableEffectV1[],
+export function selectSchedulableEffectBatch(
+  candidates: readonly SchedulableEffect[],
   ceiling: number,
 ): readonly string[] {
   if (!Number.isSafeInteger(ceiling) || ceiling <= 0) {
@@ -44,11 +44,11 @@ export function selectSchedulableEffectBatchV1(
   }
   const first = candidates[0];
   if (!first) return Object.freeze([]);
-  const selected: SchedulableEffectV1[] = [first];
+  const selected: SchedulableEffect[] = [first];
   for (const candidate of candidates.slice(1)) {
     if (selected.length >= ceiling) break;
     if (
-      !selected.every((accepted) => executionTraitsMayOverlapV1(accepted.traits, candidate.traits))
+      !selected.every((accepted) => executionTraitsMayOverlap(accepted.traits, candidate.traits))
     ) {
       break;
     }
@@ -58,9 +58,9 @@ export function selectSchedulableEffectBatchV1(
 }
 
 /** Pure symmetric overlap rule. Unknown or conflicting work fails closed. */
-export function executionTraitsMayOverlapV1(
-  left: Readonly<ExecutionTraitsV1>,
-  right: Readonly<ExecutionTraitsV1>,
+export function executionTraitsMayOverlap(
+  left: Readonly<ExecutionTraits>,
+  right: Readonly<ExecutionTraits>,
 ): boolean {
   if (left.interactionBarrier || right.interactionBarrier) return false;
   if (!left.concurrencyGroup || left.concurrencyGroup !== right.concurrencyGroup) return false;
@@ -73,7 +73,7 @@ export function executionTraitsMayOverlapV1(
     left.isolation !== 'worktree' ||
     right.isolation !== 'worktree' ||
     left.causalGroup !== right.causalGroup ||
-    !resourceScopesAreProvablyDisjointV1(left.resourceScopes, right.resourceScopes)
+    !resourceScopesAreProvablyDisjoint(left.resourceScopes, right.resourceScopes)
   ) {
     return false;
   }
@@ -81,9 +81,9 @@ export function executionTraitsMayOverlapV1(
   return !right.conflictKeys.some((key) => conflicts.has(key));
 }
 
-function resourceScopesAreProvablyDisjointV1(
-  left: readonly ResourceScopeV1[],
-  right: readonly ResourceScopeV1[],
+function resourceScopesAreProvablyDisjoint(
+  left: readonly ResourceScope[],
+  right: readonly ResourceScope[],
 ): boolean {
   if (left.length === 0 || right.length === 0) return false;
   const occupied = new Set(left.map((scope) => `${scope.kind}\0${scope.key}`));

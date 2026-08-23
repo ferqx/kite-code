@@ -1,14 +1,14 @@
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createRuntimeHostStateInitialStateV1,
-  createZeroResourceUsageV1,
-  LIMITED_RESOURCE_BUDGET_V1,
+  createRuntimeHostStateInitialState,
+  createZeroResourceUsage,
+  LIMITED_RESOURCE_BUDGET_,
 } from '@kite/runtime-host';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
-  openStateStoreForTestV1,
-  testStateProjectIdentityForWorkspaceV1,
+  openStateStoreForTest,
+  testStateProjectIdentityForWorkspace,
 } from '../../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
@@ -23,15 +23,15 @@ if (mode === 'append-event') {
     messageId: 'after-lock',
     content: 'durable after bounded lock wait',
   };
-  const initial = createRuntimeHostStateInitialStateV1({
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'sqlite-busy',
     userId: 'fault-soak',
     workspace: process.cwd(),
-    ...testStateProjectIdentityForWorkspaceV1(process.cwd()),
+    ...testStateProjectIdentityForWorkspace(process.cwd()),
   });
   const next = { ...reduceRuntimeState(initial, event), revision: 1 };
-  const store = openStateStoreForTestV1(storePath);
+  const store = openStateStoreForTest(storePath);
   store.appendEventsAndSnapshot('sqlite-busy', [event], next, [
     { eventId: 'sqlite-busy-event-1', revision: 1 },
   ]);
@@ -54,7 +54,7 @@ const plan: AgentPlan = {
     },
   ],
 };
-const upperBound = createZeroResourceUsageV1('versioned_upper_bound', 'fault-soak-v1');
+const upperBound = createZeroResourceUsage('versioned_upper_bound', 'fault-soak-v1');
 upperBound.counters.toolInvocations = 1;
 upperBound.gauges.activeToolInvocations = 1;
 const drafted = currentPlanDraftedEvent({
@@ -77,7 +77,7 @@ const events: RuntimeEvent[] = [
     runId: 'fault-run',
     startedAt: '2026-08-01T00:00:00.000Z',
     deadlineAt: '2026-08-01T00:30:00.000Z',
-    budget: LIMITED_RESOURCE_BUDGET_V1,
+    budget: LIMITED_RESOURCE_BUDGET_,
   },
   {
     type: 'resource_budget.reserved',
@@ -134,12 +134,12 @@ const events: RuntimeEvent[] = [
     requestedAt: '2026-08-01T00:00:00.000Z',
   },
 ];
-const initial = createRuntimeHostStateInitialStateV1({
+const initial = createRuntimeHostStateInitialState({
   recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
   threadId: 'crash-recovery',
   userId: 'fault-soak',
   workspace: process.cwd(),
-  ...testStateProjectIdentityForWorkspaceV1(process.cwd()),
+  ...testStateProjectIdentityForWorkspace(process.cwd()),
   phase: 'planning',
 });
 initial.activeTaskId = 'crash-task';
@@ -153,7 +153,7 @@ initial.tasks['crash-task'] = {
   planHistory: [],
 };
 const next = { ...events.reduce(reduceRuntimeState, initial), revision: events.length };
-const store = openStateStoreForTestV1(storePath);
+const store = openStateStoreForTest(storePath);
 store.appendEventsAndSnapshot(
   'crash-recovery',
   events,

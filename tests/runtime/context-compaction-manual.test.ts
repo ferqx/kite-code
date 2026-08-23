@@ -5,7 +5,7 @@ import {
   inspectManualContextCompaction,
   manualContextCompactionEvent,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
@@ -22,7 +22,7 @@ const config: AgentConfig = {
 
 describe('manual context compaction service', () => {
   test('preview/status inspection is read-only and reports a safe historical range', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'manual',
       userId: 'user',
@@ -47,7 +47,7 @@ describe('manual context compaction service', () => {
   });
 
   test('manual compaction request produces correct event shape', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'manual-request',
       userId: 'user',
@@ -61,7 +61,7 @@ describe('manual context compaction service', () => {
   });
 
   test('custom instructions are carried through the request event', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'manual-custom',
       userId: 'user',
@@ -84,7 +84,7 @@ describe('manual context compaction service', () => {
   });
 
   test('manual requests never gain force semantics from a correctness hard block', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'manual-recovery',
       userId: 'user',
@@ -101,7 +101,7 @@ describe('manual context compaction service', () => {
   });
 
   test('keeps context metrics informational and recomputes inspection state', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'manual-metrics',
       userId: 'user',
@@ -134,7 +134,7 @@ describe('manual context compaction service', () => {
   });
 
   test('uses the live adapter capability view when config has no model window', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'adapter-capabilities',
       userId: 'user',
@@ -155,7 +155,7 @@ describe('manual context compaction service', () => {
   });
 
   test('uses the full projection environment for durable manual request estimates', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'manual-projection',
       userId: 'user',
@@ -185,7 +185,7 @@ describe('manual context compaction service', () => {
   });
 
   test('reset is not blocked by local token pressure', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'reset-capacity',
       userId: 'user',

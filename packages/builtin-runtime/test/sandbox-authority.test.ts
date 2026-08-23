@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
-import { projectApprovedProxyEnvironmentV1 } from '../src/sandbox/approved-proxy-environment';
+import { projectApprovedProxyEnvironment } from '../src/sandbox/approved-proxy-environment';
 
 const retiredShellModule = ['shell', 'wrapper'].join('-');
 const shellWrapperPath = new URL(`../src/sandbox/${retiredShellModule}.ts`, import.meta.url);
@@ -38,7 +38,7 @@ describe('Builtin sandbox authority', () => {
     const filesystem = source(runtimeFilesystemPath);
     expect(
       filesystem.match(
-        /export function (?:createSandboxRuntimeDirForPreparationV1|cleanupSandboxRuntimeDirNoSpawnV1)/g,
+        /export function (?:createSandboxRuntimeDirForPreparation|cleanupSandboxRuntimeDirNoSpawn)/g,
       ) ?? [],
     ).toHaveLength(2);
 
@@ -60,33 +60,33 @@ describe('Builtin sandbox authority', () => {
     expect(contract).toContain('export interface ShellInput');
     expect(contract).toContain('export interface ShellResult');
     expect(contract).toContain('export type ShellExecutor');
-    expect(contract).toContain('export interface ShellNetworkBrokerV1');
-    expect(contract).toContain('export interface SandboxInvocationIdentityV1');
-    expect(contract).toContain('SandboxPreparationLifecycleV1,');
+    expect(contract).toContain('export interface ShellNetworkBroker');
+    expect(contract).toContain('export interface SandboxInvocationIdentity');
+    expect(contract).toContain('SandboxPreparationLifecycle,');
     expect(source(sandboxIndexPath)).toContain(
-      "export type { SandboxPreparationLifecycleV1 } from '@kite/runtime-spi';",
+      "export type { SandboxPreparationLifecycle } from '@kite/runtime-spi';",
     );
-    expect(contract).not.toContain('export interface SandboxPreparationLifecycleV1');
+    expect(contract).not.toContain('export interface SandboxPreparationLifecycle');
     expect(contract).not.toMatch(/@\/core|@kite\/runtime-host/);
   });
 
   test('owns Shell semantics over a generic injected process port', () => {
     const executor = source(shellExecutorPath);
-    expect(executor).toContain('export function createBuiltinShellExecutorV1');
-    expect(executor).toContain('ShellProcessPortV1');
+    expect(executor).toContain('export function createBuiltinShellExecutor');
+    expect(executor).toContain('ShellProcessPort');
     expect(executor).not.toContain('@kite/runtime-host');
     expect(executor).not.toContain('@/core/');
     expect(executor).not.toMatch(/Bun\.spawn(?:Sync)?\s*\(/);
     expect(executor).not.toContain('node:child_process');
 
     const contract = source(shellContractPath);
-    expect(contract).toContain('export interface ShellProcessPortV1');
-    expect(contract).toContain('readonly processTree: ShellProcessTreeV1');
+    expect(contract).toContain('export interface ShellProcessPort');
+    expect(contract).toContain('readonly processTree: ShellProcessTree');
   });
 
   test('preparation authority is pure and cannot import Core or Host lifecycle', () => {
     const preparation = source(preparationAuthorityPath);
-    expect(preparation).toContain('export function createBuiltinSandboxPreparationV1');
+    expect(preparation).toContain('export function createBuiltinSandboxPreparation');
     expect(preparation).not.toMatch(/@\/core|@kite\/runtime-host/);
     expect(preparation).not.toMatch(/Runtime(?:Event|State)|persistEvents|recordPreparation/);
     expect(preparation).not.toMatch(/Bun\.spawn(?:Sync)?\s*\(/);
@@ -99,11 +99,11 @@ describe('Builtin sandbox authority', () => {
       PATH: '/workspace/bin',
       OPENAI_API_KEY: 'must-not-cross-the-seam',
     };
-    const offline = projectApprovedProxyEnvironmentV1({
+    const offline = projectApprovedProxyEnvironment({
       networkMode: 'disabled',
       source,
     });
-    const approved = projectApprovedProxyEnvironmentV1({
+    const approved = projectApprovedProxyEnvironment({
       networkMode: 'allow_all',
       source,
     });

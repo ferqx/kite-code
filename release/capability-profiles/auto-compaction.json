@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "profileId": "auto-compaction-v1",
+  "profileId": "auto-compaction",
   "capability": "auto_compaction",
-  "requiredFeatureFlags": ["contextCompactionAutoV1", "contextCompactionV2"],
+  "requiredFeatureFlags": ["contextCompaction", "contextCompactionAuto"],
   "state": {
     "maturity": "under_development",
     "maxRollout": "off"

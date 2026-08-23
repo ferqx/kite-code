@@ -9,12 +9,12 @@ import {
   MAX_PROJECT_INSTRUCTION_TOKENS,
   resolveProjectInstructionSnapshot,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
-  executeTestRuntimeToolsV1,
-  testRuntimeCapabilityExecutionPortV1,
+  executeTestRuntimeTools,
+  testRuntimeCapabilityExecutionPort,
 } from './helpers/runtime-model';
 
 const roots: string[] = [];
@@ -103,7 +103,7 @@ describe('project instruction snapshot', () => {
   test('projects refreshed instructions after the durable transcript and before runtime state', () => {
     const root = workspace();
     writeFileSync(join(root, 'AGENTS.md'), 'project rule');
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -147,7 +147,7 @@ describe('project instruction snapshot', () => {
     mkdirSync(join(root, 'src'));
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'thread-target',
       userId: 'user',
@@ -171,7 +171,7 @@ describe('project instruction snapshot', () => {
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
     const createState = (visibleTarget: boolean) => {
-      let state = createRuntimeHostStateInitialStateV1({
+      let state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0'.repeat(64),
         threadId: visibleTarget ? 'instruction-refreshed' : 'instruction-unseen',
         userId: 'user',
@@ -204,9 +204,9 @@ describe('project instruction snapshot', () => {
       modelName: 'fixture',
       providerType: 'openai-compatible',
       sandbox: { enabled: false },
-      features: { promptContractV2: true },
+      features: { promptContract: true },
     } as AgentConfig;
-    const host = testRuntimeCapabilityExecutionPortV1();
+    const host = testRuntimeCapabilityExecutionPort();
     let hostCalls = 0;
     const capabilityExecution = Object.freeze({
       invoke: async (invocation: Parameters<typeof host.invoke>[0]) => {
@@ -215,7 +215,7 @@ describe('project instruction snapshot', () => {
       },
     });
 
-    const rejected = await executeTestRuntimeToolsV1({
+    const rejected = await executeTestRuntimeTools({
       state: createState(false),
       toolCallIds: ['write'],
       taskConfig: config,
@@ -238,7 +238,7 @@ describe('project instruction snapshot', () => {
     expect(hostCalls).toBe(0);
     expect(existsSync(join(root, 'src', 'new.ts'))).toBe(false);
 
-    const retried = await executeTestRuntimeToolsV1({
+    const retried = await executeTestRuntimeTools({
       state: createState(true),
       toolCallIds: ['write'],
       taskConfig: config,
@@ -250,11 +250,11 @@ describe('project instruction snapshot', () => {
     expect(existsSync(join(root, 'src', 'new.ts'))).toBe(true);
   });
 
-  test('does not run the snapshot guard when promptContractV2 is disabled', async () => {
+  test('always runs the snapshot guard after the prompt contract clean cutover', async () => {
     const root = workspace();
     mkdirSync(join(root, 'src'));
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'instruction-guard-disabled',
       userId: 'user',
@@ -271,9 +271,9 @@ describe('project instruction snapshot', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue = [...state.tools.queue, 'write'];
-    const host = testRuntimeCapabilityExecutionPortV1();
+    const host = testRuntimeCapabilityExecutionPort();
     let hostCalls = 0;
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['write'],
       taskConfig: {
@@ -283,7 +283,6 @@ describe('project instruction snapshot', () => {
         modelName: 'fixture',
         providerType: 'openai-compatible',
         sandbox: { enabled: false },
-        features: { promptContractV2: false },
       } as AgentConfig,
       capabilityExecution: Object.freeze({
         invoke: async (invocation: Parameters<typeof host.invoke>[0]) => {
@@ -292,9 +291,9 @@ describe('project instruction snapshot', () => {
         },
       }),
     });
-    expect(events.filter((event) => event.type === 'tool.rejected')).toEqual([]);
-    expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(1);
-    expect(hostCalls).toBe(1);
-    expect(existsSync(join(root, 'src', 'disabled.ts'))).toBe(true);
+    expect(events.filter((event) => event.type === 'tool.rejected')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'tool.finished')).toEqual([]);
+    expect(hostCalls).toBe(0);
+    expect(existsSync(join(root, 'src', 'disabled.ts'))).toBe(false);
   });
 });

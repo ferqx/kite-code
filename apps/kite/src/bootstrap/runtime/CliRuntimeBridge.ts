@@ -1,11 +1,11 @@
-import type { GitBrokerV1 } from '@kite/builtin-runtime/git';
-import { createChatModel, createModelSecretDetectorV1 } from '@kite/builtin-runtime/model';
+import type { GitBroker } from '@kite/builtin-runtime/git';
+import { createChatModel, createModelSecretDetector } from '@kite/builtin-runtime/model';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { AuthorizationMode, InteractionMode, SkillScanOptions } from '@kite/runtime-contract';
 import {
   type ClientPresentationEvent,
-  RUNTIME_NOTIFICATION_SCHEMA_V1,
-  RUNTIME_PROJECTION_SCHEMA_V1,
+  RUNTIME_NOTIFICATION_SCHEMA_,
+  RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeCommand,
   type RuntimeCommandErrorCode,
   type RuntimeCommandReceipt,
@@ -20,27 +20,27 @@ import {
   type RuntimeHostPreparedExecution,
   runtimeCommandFromKernelInput,
 } from '@kite/runtime-host';
-import type { ProjectIdentityV1 } from '@kite/runtime-spi';
+import type { ProjectIdentity } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
-import { type SandboxBackend, sandboxSupportsFullModeV1 } from '#app/sandbox/types';
-import { projectRuntimeEphemeralNotificationV1 } from '../presentation-notification';
+import { type SandboxBackend, sandboxSupportsFullMode } from '#app/sandbox/types';
+import { projectRuntimeEphemeralNotification } from '../presentation-notification';
 import type {
-  RuntimeSessionCoordinatorAccessV1,
-  RuntimeSessionCoordinatorV1,
+  RuntimeSessionCoordinator,
+  RuntimeSessionCoordinatorAccess,
 } from './RuntimeSessionCoordinator';
 import type { RuntimeUserAction } from './state-actions';
 import type { RuntimeActionProvider } from './state-runner';
-import type { RuntimeTurnInputV1 } from './turn-coordinator';
+import type { RuntimeTurnInput } from './turn-coordinator';
 
-export interface CliRuntimeBridgeInputV1 {
+export interface CliRuntimeBridgeInput {
   readonly sessionId: string;
   readonly userId: string;
   readonly workspace: string;
-  readonly projectIdentity: ProjectIdentityV1;
+  readonly projectIdentity: ProjectIdentity;
   readonly checkpointPath: string;
   readonly config: AgentConfig;
   readonly shellExecutor: ShellExecutor;
-  readonly gitBroker?: GitBrokerV1;
+  readonly gitBroker?: GitBroker;
   readonly interactionMode: InteractionMode;
   readonly authorizationMode?: AuthorizationMode;
   readonly authorizationSource?: 'config';
@@ -56,16 +56,14 @@ export interface CliRuntimeBridgeInputV1 {
   readonly onSessionLoggingDiagnostic?: (message: string) => void;
 }
 
-export function createCliRuntimeBridgeV1(
-  input: CliRuntimeBridgeInputV1,
-  capabilityExecution: NonNullable<RuntimeTurnInputV1['capabilityExecution']>,
-  modelInvocationRuntimeFactory: (
-    workspace: string,
-  ) => RuntimeTurnInputV1['modelInvocationRuntime'],
+export function createCliRuntimeBridge(
+  input: CliRuntimeBridgeInput,
+  capabilityExecution: NonNullable<RuntimeTurnInput['capabilityExecution']>,
+  modelInvocationRuntimeFactory: (workspace: string) => RuntimeTurnInput['modelInvocationRuntime'],
   resolveRecoveryIdentity: (sessionId: string) => string,
-  runtimeSessionCoordinator: RuntimeSessionCoordinatorAccessV1,
+  runtimeSessionCoordinator: RuntimeSessionCoordinatorAccess,
 ): RuntimeHostExecutionBridge {
-  return new CliRuntimeBridgeV1(
+  return new CliRuntimeBridge(
     input,
     capabilityExecution,
     modelInvocationRuntimeFactory,
@@ -74,14 +72,14 @@ export function createCliRuntimeBridgeV1(
   );
 }
 
-class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
-  readonly #input: CliRuntimeBridgeInputV1;
-  readonly #capabilityExecution: NonNullable<RuntimeTurnInputV1['capabilityExecution']>;
+class CliRuntimeBridge implements RuntimeHostExecutionBridge {
+  readonly #input: CliRuntimeBridgeInput;
+  readonly #capabilityExecution: NonNullable<RuntimeTurnInput['capabilityExecution']>;
   readonly #modelInvocationRuntimeFactory: (
     workspace: string,
-  ) => RuntimeTurnInputV1['modelInvocationRuntime'];
+  ) => RuntimeTurnInput['modelInvocationRuntime'];
   readonly #resolveRecoveryIdentity: (sessionId: string) => string;
-  readonly #runtimeSessionCoordinator: RuntimeSessionCoordinatorAccessV1;
+  readonly #runtimeSessionCoordinator: RuntimeSessionCoordinatorAccess;
   #revision = 0;
   #created = false;
   #running = false;
@@ -90,13 +88,13 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
   #activeWork: RuntimeSessionProjection['activeWork'];
 
   constructor(
-    input: CliRuntimeBridgeInputV1,
-    capabilityExecution: NonNullable<RuntimeTurnInputV1['capabilityExecution']>,
+    input: CliRuntimeBridgeInput,
+    capabilityExecution: NonNullable<RuntimeTurnInput['capabilityExecution']>,
     modelInvocationRuntimeFactory: (
       workspace: string,
-    ) => RuntimeTurnInputV1['modelInvocationRuntime'],
+    ) => RuntimeTurnInput['modelInvocationRuntime'],
     resolveRecoveryIdentity: (sessionId: string) => string,
-    runtimeSessionCoordinator: RuntimeSessionCoordinatorAccessV1,
+    runtimeSessionCoordinator: RuntimeSessionCoordinatorAccess,
   ) {
     this.#input = input;
     this.#capabilityExecution = capabilityExecution;
@@ -113,7 +111,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
     if (!this.#ensureCoordinator().recoveryChanged) return;
     this.#revision += 1;
     publish({
-      schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+      schema: RUNTIME_NOTIFICATION_SCHEMA_,
       durability: 'durable',
       sessionId,
       revision: this.#revision,
@@ -235,7 +233,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
     this.#activePublish = publish;
     const coordinator = this.#ensureCoordinator();
     coordinator.updateInteractionMode(this.#input.interactionMode);
-    coordinator.updateSandboxAvailable(sandboxSupportsFullModeV1(this.#input.sandboxBackend));
+    coordinator.updateSandboxAvailable(sandboxSupportsFullMode(this.#input.sandboxBackend));
     let status: NonNullable<RuntimeSessionProjection['activeWork']>['status'] = 'completed';
     try {
       const generator = coordinator.executeTurn(
@@ -260,7 +258,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
           signal,
           abortExecution: requestAbort,
           sessionLoggingPolicy: this.#input.config.sessionLoggingPolicy,
-          sessionLoggingContentInspector: createModelSecretDetectorV1({
+          sessionLoggingContentInspector: createModelSecretDetector({
             knownSecrets: [this.#input.config.apiKey],
           }),
           onSessionLoggingStatus: this.#input.onSessionLoggingStatus,
@@ -272,7 +270,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
       );
       let sequence = 0;
       for await (const event of generator) {
-        const ephemeral = projectRuntimeEphemeralNotificationV1(event, {
+        const ephemeral = projectRuntimeEphemeralNotification(event, {
           sessionId: this.#input.sessionId,
           workId: command.commandId,
           turnId: command.commandId,
@@ -288,7 +286,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
         }
         this.#revision += 1;
         publish({
-          schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+          schema: RUNTIME_NOTIFICATION_SCHEMA_,
           durability: 'durable',
           sessionId: this.#input.sessionId,
           revision: this.#revision,
@@ -305,7 +303,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
       status = signal.aborted ? 'cancelled' : 'failed';
       this.#revision += 1;
       publish({
-        schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+        schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
         sessionId: this.#input.sessionId,
         revision: this.#revision,
@@ -330,7 +328,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
         activeTurn: { turnId: command.commandId, status },
       };
       publish({
-        schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+        schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
         sessionId: this.#input.sessionId,
         revision: this.#revision,
@@ -339,7 +337,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
     }
   }
 
-  #ensureCoordinator(): RuntimeSessionCoordinatorV1 {
+  #ensureCoordinator(): RuntimeSessionCoordinator {
     const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
     return this.#runtimeSessionCoordinator.ensure({
       sessionId: this.#input.sessionId,
@@ -349,7 +347,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
       canonicalWorkspaceDigest: this.#input.projectIdentity.workspaceDigest,
       interactionMode: this.#input.interactionMode,
       recoveryIdentityKey: this.#resolveRecoveryIdentity(this.#input.sessionId),
-      sandboxAvailable: sandboxSupportsFullModeV1(this.#input.sandboxBackend),
+      sandboxAvailable: sandboxSupportsFullMode(this.#input.sandboxBackend),
       modelArtifactEvidence: modelRuntime.evidence,
       capabilityArtifactEvidence:
         'capabilityArtifacts' in modelRuntime ? modelRuntime.capabilityArtifacts : undefined,
@@ -365,7 +363,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
     for (const event of events) {
       this.#revision += 1;
       publish({
-        schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+        schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
         sessionId: this.#input.sessionId,
         revision: this.#revision,
@@ -380,7 +378,7 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
 
   #projection(): RuntimeSessionProjection {
     return {
-      schema: RUNTIME_PROJECTION_SCHEMA_V1,
+      schema: RUNTIME_PROJECTION_SCHEMA_,
       sessionId: this.#input.sessionId,
       revision: this.#revision,
       workspace: this.#input.workspace,

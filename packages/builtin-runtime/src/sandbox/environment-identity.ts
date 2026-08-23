@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { arch, version as nodeOsVersion, release } from 'node:os';
 
-export interface ExecutionEnvironmentIdentityV1 {
+export interface ExecutionEnvironmentIdentity {
   platform: NodeJS.Platform;
   osRelease: string;
   osVersion: string;
@@ -12,7 +12,7 @@ export interface ExecutionEnvironmentIdentityV1 {
 }
 
 /** Shared canonical identity producer for native evidence and runtime admission. */
-export function readExecutionEnvironmentIdentityV1(): ExecutionEnvironmentIdentityV1 {
+export function readExecutionEnvironmentIdentity(): ExecutionEnvironmentIdentity {
   const exactOsVersion = readExactOsVersion();
   return {
     platform: process.platform,

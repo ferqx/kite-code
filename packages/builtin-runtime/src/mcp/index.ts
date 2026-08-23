@@ -1,22 +1,28 @@
 // Builtin Runtime MCP public surface.
 
 export type {
-  McpStdioCleanupProofV1,
-  McpStdioProcessHandleV1,
-  McpStdioProcessLaunchV1,
-  McpStdioProcessPortV1,
-  McpStdioReadyProofV1,
-  McpStdioTerminalProofV1,
+  McpStdioCleanupProof,
+  McpStdioProcessHandle,
+  McpStdioProcessLaunch,
+  McpStdioProcessPort,
+  McpStdioReadyProof,
+  McpStdioTerminalProof,
 } from '@kite/runtime-spi';
+export type { CompiledCapabilitySchema, JsonSchema } from '../skills/capability-domain';
+export {
+  canonicalizeCapabilityArguments,
+  compileCapabilitySchema,
+  validateCapabilityArguments,
+} from '../skills/capability-domain';
 export type {
-  McpArgumentInspectionV1,
-  McpArgumentSnapshotV1,
-  McpCapabilityRouteV1,
+  McpArgumentInspection,
+  McpArgumentSnapshot,
+  McpCapabilityRoute,
 } from './argument-inspection';
 export {
-  inspectMcpArgumentsV1,
-  mcpArgumentDigestV1,
-  snapshotMcpArgumentsV1,
+  inspectMcpArguments,
+  mcpArgumentDigest,
+  snapshotMcpArguments,
 } from './argument-inspection';
 export type {
   CallbackServerFactory,
@@ -30,13 +36,7 @@ export type {
 export { DefaultMcpAuthCoordinator } from './auth-coordinator';
 export type { BrowserOpener } from './browser-opener';
 export { NativeBrowserOpener } from './browser-opener';
-export type { CompiledCapabilitySchema, JsonSchema } from './capability-domain';
-export {
-  canonicalizeCapabilityArguments,
-  compileCapabilitySchema,
-  safeCapabilityMetadata,
-  validateCapabilityArguments,
-} from './capability-domain';
+export { safeCapabilityMetadata } from './capability-domain';
 export type {
   McpApprovalControlState,
   McpAuthStatus,
@@ -47,10 +47,10 @@ export type {
   McpToolControlState,
 } from './control-types';
 export type {
-  BuiltinCredentialBrokerOptionsV1,
-  BuiltinCredentialBrokerV1,
+  BuiltinCredentialBroker,
+  BuiltinCredentialBrokerOptions,
 } from './credential-broker';
-export { createBuiltinCredentialBrokerV1 } from './credential-broker';
+export { createBuiltinCredentialBroker } from './credential-broker';
 export type {
   McpBearerCredentialMaterial,
   McpCredentialKey,
@@ -85,23 +85,23 @@ export { KiteMcpOAuthProvider } from './oauth-provider';
 export { revokeMcpOAuthToken } from './oauth-revocation';
 export type {
   McpProviderFailureKind,
-  McpProviderFailurePolicyFactsV1,
+  McpProviderFailurePolicyFacts,
   McpProviderRecoveryAction,
 } from './provider-errors';
 export {
   capabilityChangedProviderError,
   isMcpProviderError,
   McpProviderError,
-  mcpProviderFailurePolicyFactsV1,
+  mcpProviderFailurePolicyFacts,
   providerErrorFromDiagnostic,
   providerErrorFromDirectoryEntry,
 } from './provider-errors';
 export {
-  isMcpProviderCallableV1,
-  isMcpProviderHealthyV1,
-  isMcpProviderUnavailableV1,
-  mcpProviderInventoryNextActionV1,
-  mcpProviderSearchNextActionV1,
+  isMcpProviderCallable,
+  isMcpProviderHealthy,
+  isMcpProviderUnavailable,
+  mcpProviderInventoryNextAction,
+  mcpProviderSearchNextAction,
 } from './provider-status';
 export { normalizeMcpToolResult } from './result-normalizer';
 export type {
@@ -113,7 +113,7 @@ export type {
   McpResourceDirectorySnapshot,
   McpRuntimeProvider,
 } from './runtime-provider';
-export { createMcpStdioTransportV1 } from './stdio-transport';
+export { createMcpStdioTransport } from './stdio-transport';
 export {
   DefaultMcpSupervisor,
   type McpConnectionManagerControlPlane,
@@ -122,14 +122,14 @@ export {
 } from './supervisor';
 export { exposedMcpToolName } from './tool-adapter';
 export type {
-  BuiltinDynamicMcpSubjectFactsIdentityV1,
-  BuiltinDynamicMcpSubjectFactsV1,
-  BuiltinDynamicMcpToolPipelineCallbacksV1,
+  BuiltinDynamicMcpSubjectFacts,
+  BuiltinDynamicMcpSubjectFactsIdentity,
+  BuiltinDynamicMcpToolPipelineCallbacks,
 } from './tool-pipeline-callbacks';
 export {
-  BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1,
-  createBuiltinDynamicMcpSubjectFactsV1,
-  createBuiltinDynamicMcpToolPipelineCallbacksV1,
+  BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_,
+  createBuiltinDynamicMcpSubjectFacts,
+  createBuiltinDynamicMcpToolPipelineCallbacks,
 } from './tool-pipeline-callbacks';
 export {
   configuredMcpToolNames,
@@ -139,20 +139,20 @@ export {
   resolveMcpToolPolicy,
 } from './tool-policy';
 export type {
-  McpTransportAdmissionReceiptV1,
-  McpTransportAdmissionRequestV1,
-  McpTransportBoundaryControllerV1,
-  McpTransportBoundaryFailureCodeV1,
-  McpTransportBoundaryIdentityV1,
-  McpTransportInvocationBindingV1,
-  McpTransportOperationV1,
+  McpTransportAdmissionReceipt,
+  McpTransportAdmissionRequest,
+  McpTransportBoundaryController,
+  McpTransportBoundaryFailureCode,
+  McpTransportBoundaryIdentity,
+  McpTransportInvocationBinding,
+  McpTransportOperation,
 } from './transport-boundary';
 export {
-  assertMcpTransportAdmissionReceiptV1,
-  canonicalMcpHttpEndpointIdentityV1,
-  createMcpTransportAdmissionReceiptV1,
-  createMcpTransportBoundaryIdentityV1,
-  McpTransportBoundaryErrorV1,
+  assertMcpTransportAdmissionReceipt,
+  canonicalMcpHttpEndpointIdentity,
+  createMcpTransportAdmissionReceipt,
+  createMcpTransportBoundaryIdentity,
+  McpTransportBoundaryError,
 } from './transport-boundary';
 export type {
   McpAuthConfig,
@@ -166,23 +166,23 @@ export type {
   McpToolRetryPolicy,
 } from './types';
 export type {
-  McpWriteAdmissionDecisionV1,
-  McpWriteDispatchAdmissionV1,
-  McpWriteDispatchGuardV1,
-  McpWriteDispatchRequestV1,
-  McpWriteIntentV1,
-  McpWriteInvocationFactsV1,
-  McpWriteReceiptV1,
-  McpWriteRouteContractV1,
-  McpWriteRouteRegistryV1,
+  McpWriteAdmissionDecision,
+  McpWriteDispatchAdmission,
+  McpWriteDispatchGuard,
+  McpWriteDispatchRequest,
+  McpWriteIntent,
+  McpWriteInvocationFacts,
+  McpWriteReceipt,
+  McpWriteRouteContract,
+  McpWriteRouteRegistry,
 } from './write-governance';
 export {
-  classifyMcpWriteRecoveryV1,
-  contractDigestV1,
-  evaluateMcpWriteAdmissionV1,
-  McpWriteGovernanceErrorV1,
-  parseMcpWriteRouteRegistryV1,
-  qualifyMcpWriteRouteV1,
-  routeContractDigestV1,
-  validateMcpWriteRouteContractV1,
+  classifyMcpWriteRecovery,
+  contractDigest,
+  evaluateMcpWriteAdmission,
+  McpWriteGovernanceError,
+  parseMcpWriteRouteRegistry,
+  qualifyMcpWriteRoute,
+  routeContractDigest,
+  validateMcpWriteRouteContract,
 } from './write-governance';

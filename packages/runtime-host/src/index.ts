@@ -1,41 +1,41 @@
-import { AGENT_KERNEL_BOUNDARY_V1 } from '@kite/agent-kernel';
-import { RUNTIME_CONTRACT_BOUNDARY_V1 } from '@kite/runtime-contract';
+import { AGENT_KERNEL_BOUNDARY_ } from '@kite/agent-kernel';
+import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite/runtime-contract';
 import {
-  type CapabilityRegistrySnapshotV1,
-  type ContextCompilerPortV1,
-  createRuntimeModuleRegistryV1,
-  type RuntimeModuleRegistryV1,
-  type RuntimeModuleV1,
+  type CapabilityRegistrySnapshot,
+  type ContextCompilerPort,
+  createRuntimeModuleRegistry,
+  type RuntimeModule,
+  type RuntimeModuleRegistry,
 } from '@kite/runtime-spi';
 import { DefaultRuntimeHost, type RuntimeHost } from './runtime-host';
-import type { RuntimeStorage, RuntimeStorageBoundaryV1 } from './storage';
+import type { RuntimeStorage, RuntimeStorageBoundary } from './storage';
 
 export type {
-  AgentToolCallState as StateToolCallRecordV1,
-  AuthorizationSourceV1 as StateAuthorizationSourceV1,
-  ExecutionTraitsV1 as StateExecutionTraitsV1,
-  RuntimeEffect as StateRuntimeEffectV1,
-  RuntimeEvent as StateRuntimeEventV1,
-  RuntimeState as StateRuntimeStateV1,
-  SchedulerFactsV1 as StateRuntimeSchedulerFactsV1,
+  AgentToolCallState as StateToolCallRecord,
+  AuthorizationSource as StateAuthorizationSource,
+  ExecutionTraits as StateExecutionTraits,
+  RuntimeEffect as StateRuntimeEffect,
+  RuntimeEvent as StateRuntimeEvent,
+  RuntimeState as StateRuntimeState,
+  SchedulerFacts as StateRuntimeSchedulerFacts,
 } from '@kite/agent-kernel';
-export { bestEffortRegularFileSizeV1 } from './artifact-metadata';
-export type { RuntimeHostCapabilityExecutionFailureCodeV1 } from './capability-execution';
+export { bestEffortRegularFileSize } from './artifact-metadata';
+export type { RuntimeHostCapabilityExecutionFailureCode } from './capability-execution';
 export {
-  createRuntimeHostCapabilityExecutionPortV1,
-  RuntimeHostCapabilityExecutionErrorV1,
+  createRuntimeHostCapabilityExecutionPort,
+  RuntimeHostCapabilityExecutionError,
 } from './capability-execution';
 export type {
-  RuntimeHostContextCompilationPortV1,
-  RuntimeHostContextCompilationRequestV1,
+  RuntimeHostContextCompilationPort,
+  RuntimeHostContextCompilationRequest,
 } from './context-compilation';
-export { createRuntimeHostContextCompilationPortV1 } from './context-compilation';
-export { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from './control-frame';
+export { createRuntimeHostContextCompilationPort } from './context-compilation';
+export { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-frame';
 export type {
   RuntimeHostExecutionServices,
   RuntimeHostLeasePort,
   RuntimeHostTransactionPort,
-  RuntimeLeaseRequirementV1,
+  RuntimeLeaseRequirement,
   RuntimeTransactionAcknowledgement,
 } from './effect-supervisor';
 export type {
@@ -43,200 +43,200 @@ export type {
   RuntimeHostExecutionBridge,
   RuntimeHostPreparedExecution,
 } from './execution-bridge';
-export { RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1 } from './execution-bridge';
+export { RUNTIME_HOST_EXECUTION_ADAPTER_ID_ } from './execution-bridge';
 export type { RuntimeCommandKernelEvent, RuntimeHostKernelInput } from './kernel-input';
 export {
   runtimeCommandFromKernelInput,
   runtimeCommandSessionId,
   translateRuntimeCommandToKernelInput,
 } from './kernel-input';
-export { runMcpStdioChildRuntimeV1 } from './mcp-stdio-child-runtime';
+export { runMcpStdioChildRuntime } from './mcp-stdio-child-runtime';
 export {
-  createRuntimeHostMcpStdioProcessPortV1,
-  decodeUtf8StrictV1,
-  isMcpStdioWrapperInvocationV1,
-  MCP_STDIO_CONTROL_DOMAIN_V1,
-  MCP_STDIO_HOST_PEER_ID_V1,
-  MCP_STDIO_MAX_LINE_BYTES_V1,
-  MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_V1,
-  MCP_STDIO_STARTUP_TIMEOUT_MS_V1,
-  MCP_STDIO_WRAPPER_ENTRYPOINT_V1,
-  MCP_STDIO_WRAPPER_PEER_ID_V1,
-  parseMcpStdioJsonLineV1,
-  type RuntimeHostMcpStdioCleanupV1,
-  type RuntimeHostMcpStdioProcessHandleV1,
-  type RuntimeHostMcpStdioProcessLaunchV1,
-  type RuntimeHostMcpStdioProcessPortOptionsV1,
-  type RuntimeHostMcpStdioProcessPortV1,
-  type RuntimeHostMcpStdioReadyV1,
-  type RuntimeHostMcpStdioTerminalV1,
-  sanitizeMcpStdioEnvironmentV1,
+  createRuntimeHostMcpStdioProcessPort,
+  decodeUtf8Strict,
+  isMcpStdioWrapperInvocation,
+  MCP_STDIO_CONTROL_DOMAIN_,
+  MCP_STDIO_HOST_PEER_ID_,
+  MCP_STDIO_MAX_LINE_BYTES_,
+  MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_,
+  MCP_STDIO_STARTUP_TIMEOUT_MS_,
+  MCP_STDIO_WRAPPER_ENTRYPOINT_,
+  MCP_STDIO_WRAPPER_PEER_ID_,
+  parseMcpStdioJsonLine,
+  type RuntimeHostMcpStdioCleanup,
+  type RuntimeHostMcpStdioProcessHandle,
+  type RuntimeHostMcpStdioProcessLaunch,
+  type RuntimeHostMcpStdioProcessPort,
+  type RuntimeHostMcpStdioProcessPortOptions,
+  type RuntimeHostMcpStdioReady,
+  type RuntimeHostMcpStdioTerminal,
+  sanitizeMcpStdioEnvironment,
 } from './mcp-stdio-process';
 export type {
-  MetricAttributeKeyV1,
-  MetricAttributesV1,
-  MetricControlledAliasRegistryV1,
-  MetricDefinitionV1,
-  MetricDynamicAliasKeyV1,
-  MetricKindV1,
-  MetricNameV1,
-  MetricPriorityV1,
-  MetricPrivacyV1,
-  MetricSampleV1,
+  MetricAttributeKey,
+  MetricAttributes,
+  MetricControlledAliasRegistry,
+  MetricDefinition,
+  MetricDynamicAliasKey,
+  MetricKind,
+  MetricName,
+  MetricPriority,
+  MetricPrivacy,
+  MetricSample,
 } from './observability/metrics';
 export {
-  createMetricSampleV1,
-  MAX_METRIC_SAMPLE_BYTES_V1,
+  createMetricSample,
+  MAX_METRIC_SAMPLE_BYTES_,
   METRIC_ATTRIBUTE_KEYS,
-  METRIC_DEFINITIONS_V1,
-  metricPriorityV1,
+  METRIC_DEFINITIONS_,
+  metricPriority,
   OBSERVABILITY_METRICS_VERSION,
-  parseMetricSampleV1,
+  parseMetricSample,
 } from './observability/metrics';
 export type {
-  MetricExporterV1,
-  MetricReporterStatusV1,
-  MetricReporterV1,
+  MetricExporter,
+  MetricReporter,
+  MetricReporterStatus,
 } from './observability/reporter';
 export {
-  BoundedMetricQueueV1,
-  BufferedMetricReporterV1,
-  NoopMetricReporterV1,
+  BoundedMetricQueue,
+  BufferedMetricReporter,
+  NoopMetricReporter,
 } from './observability/reporter';
 export {
-  buildPosixSupervisorEnvironmentV1,
-  executePosixSupervisedV1,
-  type RuntimeHostPreparedProcessInputV1,
-  type RuntimeHostPreparedProcessResultV1,
-  type RuntimeHostSandboxExecutionDispatchRecordV1,
-  type RuntimeHostSandboxPreparationLifecycleV1,
-  reconcilePosixSupervisorV1,
-  terminatePosixSupervisorV1,
+  buildPosixSupervisorEnvironment,
+  executePosixSupervised,
+  type RuntimeHostPreparedProcessInput,
+  type RuntimeHostPreparedProcessResult,
+  type RuntimeHostSandboxExecutionDispatchRecord,
+  type RuntimeHostSandboxPreparationLifecycle,
+  reconcilePosixSupervisor,
+  terminatePosixSupervisor,
 } from './posix-supervisor';
-export { runPosixSupervisorChildV1 } from './posix-supervisor-child-runtime';
+export { runPosixSupervisorChild } from './posix-supervisor-child-runtime';
 export {
-  type PosixSupervisorIdentityV1,
-  posixProcessIdentityBindsGroupV1,
-  posixSupervisorIdentityPathV1,
-  readComparablePosixProcessStartIdentityV1,
-  readPosixSupervisorIdentityV1,
-  writePosixSupervisorIdentityV1,
+  type PosixSupervisorIdentity,
+  posixProcessIdentityBindsGroup,
+  posixSupervisorIdentityPath,
+  readComparablePosixProcessStartIdentity,
+  readPosixSupervisorIdentity,
+  writePosixSupervisorIdentity,
 } from './posix-supervisor-identity';
 export {
-  confirmPosixSupervisorLockReleasedV1,
-  createPosixSupervisorLockV1,
-  type PosixSupervisorLockHandleV1,
-  type PosixSupervisorLockIdentityV1,
-  posixSupervisorLockPathV1,
-  verifyInheritedPosixSupervisorLockV1,
+  confirmPosixSupervisorLockReleased,
+  createPosixSupervisorLock,
+  type PosixSupervisorLockHandle,
+  type PosixSupervisorLockIdentity,
+  posixSupervisorLockPath,
+  verifyInheritedPosixSupervisorLock,
 } from './posix-supervisor-lock';
 export {
-  createRuntimeHostProcessExecutionPortV1,
-  type RuntimeHostProcessExecutionPortV1,
-  type RuntimeHostProcessHandleV1,
-  type RuntimeHostProcessTerminationV1,
-  type RuntimeHostProcessTreeV1,
+  createRuntimeHostProcessExecutionPort,
+  type RuntimeHostProcessExecutionPort,
+  type RuntimeHostProcessHandle,
+  type RuntimeHostProcessTermination,
+  type RuntimeHostProcessTree,
 } from './process-execution-port';
-export { readRuntimeHostProcessOutputV1 } from './process-output';
-export { spawnRuntimeHostProcessV1 } from './process-spawn';
+export { readRuntimeHostProcessOutput } from './process-output';
+export { spawnRuntimeHostProcess } from './process-spawn';
 export {
   guardProcessTree,
   type ProcessTreeGuard,
   type ProcessTreeTerminationResult,
   processTreeSpawnOptions,
 } from './process-tree';
-export { resolveProjectIdentityV1 } from './project-identity';
-export type { RuntimeHost, RuntimeHostCoordinatorPortV1 } from './runtime-host';
-export type { RuntimeIdScopeV1, RuntimeIdSourceV1 } from './runtime-id-source';
+export { resolveProjectIdentity } from './project-identity';
+export type { RuntimeHost, RuntimeHostCoordinatorPort } from './runtime-host';
+export type { RuntimeIdScope, RuntimeIdSource } from './runtime-id-source';
 export {
-  createDeterministicRuntimeIdSourceV1,
-  createLiveRuntimeIdSourceV1,
-  RUNTIME_ID_SOURCE_REVISION_V1,
+  createDeterministicRuntimeIdSource,
+  createLiveRuntimeIdSource,
+  RUNTIME_ID_SOURCE_REVISION_,
 } from './runtime-id-source';
 export {
-  createRuntimeHostInteractionIdV1,
-  createRuntimeHostTurnIdV1,
+  createRuntimeHostInteractionId,
+  createRuntimeHostTurnId,
 } from './runtime-identity';
-export type { RuntimeAuthorizationElevationFactsV1 } from './runtime-policy';
+export type { RuntimeAuthorizationElevationFacts } from './runtime-policy';
 export {
-  assertRuntimeAuthorizationElevationV1,
-  projectRuntimeObservabilityFactV1,
+  assertRuntimeAuthorizationElevation,
+  projectRuntimeObservabilityFact,
 } from './runtime-policy';
 export {
-  createRuntimeHostSandboxPreparationLifecycleV1,
-  createRuntimeHostSandboxPreparedProcessExecutionPortV1,
-  RuntimeHostSandboxLifecycleErrorV1,
-  type RuntimeHostSandboxLifecycleEvidencePortV1,
-  type RuntimeHostSandboxLifecycleEvidenceV1,
-  type RuntimeHostSandboxLifecycleEvidenceVerificationResultV1,
-  type RuntimeHostSandboxLifecycleFailureCodeV1,
-  type RuntimeHostSandboxLifecyclePersistenceV1,
-  type RuntimeHostSandboxSupervisorPortV1,
+  createRuntimeHostSandboxPreparationLifecycle,
+  createRuntimeHostSandboxPreparedProcessExecutionPort,
+  RuntimeHostSandboxLifecycleError,
+  type RuntimeHostSandboxLifecycleEvidence,
+  type RuntimeHostSandboxLifecycleEvidencePort,
+  type RuntimeHostSandboxLifecycleEvidenceVerificationResult,
+  type RuntimeHostSandboxLifecycleFailureCode,
+  type RuntimeHostSandboxLifecyclePersistence,
+  type RuntimeHostSandboxSupervisorPort,
 } from './sandbox-preparation-lifecycle';
 export type { RuntimeActionEmission } from './state-action-emission';
 export { acceptRuntimeAction, rejectRuntimeAction } from './state-action-emission';
 export type {
-  RuntimeHostStateVerifiedApprovalBindingInputV1,
-  StateToolGovernanceInvocationFactV1,
-  StateToolGovernancePolicyFactV1,
+  RuntimeHostStateVerifiedApprovalBindingInput,
+  StateToolGovernanceInvocationFact,
+  StateToolGovernancePolicyFact,
 } from './state-approval-binding';
 export {
-  runtimeHostStateCreateApprovalBindingDigestV1,
-  runtimeHostStateVerifyApprovalBindingDigestV1,
+  runtimeHostStateCreateApprovalBindingDigest,
+  runtimeHostStateVerifyApprovalBindingDigest,
 } from './state-approval-binding';
 export type {
-  StateApprovalGrantV1,
-  StateAuthorizationStateV1,
+  StateApprovalGrant,
+  StateAuthorizationState,
 } from './state-authorization';
 export {
-  runtimeHostStateApplyApprovalGrantV1,
-  runtimeHostStateAuthorizationCommandGrantKeyV1,
-  runtimeHostStateDefaultAuthorizationV1,
-  runtimeHostStateDefaultPhaseForWorkspaceAccessV1,
-  runtimeHostStateGrantSameCommandV1,
-  runtimeHostStateHasSameCommandGrantV1,
-  runtimeHostStateNormalizeAuthorizationV1,
+  runtimeHostStateApplyApprovalGrant,
+  runtimeHostStateAuthorizationCommandGrantKey,
+  runtimeHostStateDefaultAuthorization,
+  runtimeHostStateDefaultPhaseForWorkspaceAccess,
+  runtimeHostStateGrantSameCommand,
+  runtimeHostStateHasSameCommandGrant,
+  runtimeHostStateNormalizeAuthorization,
 } from './state-authorization';
 export type {
-  StateDoomLoopCheckV1,
-  StateDoomLoopRequestV1,
-  StateDoomLoopTrackerEntryV1,
+  StateDoomLoopCheck,
+  StateDoomLoopRequest,
+  StateDoomLoopTrackerEntry,
 } from './state-doom-loop';
 export {
-  runtimeHostStateCheckDoomLoopFingerprintV1,
-  runtimeHostStateToolDoomLoopFingerprintV1,
-  runtimeHostStateUpdateDoomLoopTrackerV1,
+  runtimeHostStateCheckDoomLoopFingerprint,
+  runtimeHostStateToolDoomLoopFingerprint,
+  runtimeHostStateUpdateDoomLoopTracker,
 } from './state-doom-loop';
 export type {
-  StateRuntimeEffectDeferredV1,
-  StateRuntimeEffectEventSinkV1,
-  StateRuntimeEffectExecutionContextV1,
-  StateRuntimeEffectExecutorV1,
-  StateRuntimeEffectLeaseV1,
-  StateRuntimeEffectPersistenceAcknowledgementV1,
+  StateRuntimeEffectDeferred,
+  StateRuntimeEffectEventSink,
+  StateRuntimeEffectExecutionContext,
+  StateRuntimeEffectExecutor,
+  StateRuntimeEffectLease,
+  StateRuntimeEffectPersistenceAcknowledgement,
 } from './state-effect-runtime';
 export {
-  deferredStateRuntimeEffectV1,
-  isStateRuntimeEffectDeferredV1,
+  deferredStateRuntimeEffect,
+  isStateRuntimeEffectDeferred,
 } from './state-effect-runtime';
 export {
-  runtimeHostStateAdmitCurrentRuntimeEventV1,
-  runtimeHostStateAssertCurrentRuntimeEventV1,
+  runtimeHostStateAdmitCurrentRuntimeEvent,
+  runtimeHostStateAssertCurrentRuntimeEvent,
 } from './state-event-codec';
 export type {
-  StateClassifiedFailureV1,
-  StateFailureKindV1,
-  StateTerminalReasonCodeV1,
-  StateToolParseFailureCodeV1,
+  StateClassifiedFailure,
+  StateFailureKind,
+  StateTerminalReasonCode,
+  StateToolParseFailureCode,
 } from './state-failure';
 export {
-  runtimeHostStateClassifyFailureV1,
-  runtimeHostStateFailureKindForToolParseFailureV1,
-  runtimeHostStateIsFailureKindV1,
-  runtimeHostStateTerminalReasonForFailureV1,
+  runtimeHostStateClassifyFailure,
+  runtimeHostStateFailureKindForToolParseFailure,
+  runtimeHostStateIsFailureKind,
+  runtimeHostStateTerminalReasonForFailure,
 } from './state-failure';
 export type {
-  RuntimeHostStateInitialStateInputV1,
+  RuntimeHostStateInitialStateInput,
   RuntimeState,
   TaskState,
   ToolCallRecord,
@@ -244,7 +244,7 @@ export type {
   ToolResultMeta,
 } from './state-initial';
 export {
-  createRuntimeHostStateInitialStateV1,
+  createRuntimeHostStateInitialState,
   getActivePlanning,
   getActiveTask,
   getEffectiveInteractionMode,
@@ -253,174 +253,173 @@ export {
   setActivePlanning,
 } from './state-initial';
 export {
-  runtimeHostStateDecideReadPlanCommandV1,
-  runtimeHostStateDecideUpdatePlanCommandV1,
-  runtimeHostStateDecideWritePlanCommandV1,
-  runtimeHostStateEmptyPlanCompletionEvidenceV1,
-  runtimeHostStatePlanCommandFactsV1,
-  runtimeHostStatePlanCompletionBlockerV1,
-  runtimeHostStatePlanReviewSiblingCancellationsV1,
-  runtimeHostStateProjectPlanCompletionEvidenceV1,
+  runtimeHostStateDecideReadPlanCommand,
+  runtimeHostStateDecideUpdatePlanCommand,
+  runtimeHostStateDecideWritePlanCommand,
+  runtimeHostStateEmptyPlanCompletionEvidence,
+  runtimeHostStatePlanCommandFacts,
+  runtimeHostStatePlanCompletionBlocker,
+  runtimeHostStatePlanReviewSiblingCancellations,
+  runtimeHostStateProjectPlanCompletionEvidence,
 } from './state-plan-command';
 export type {
-  RuntimeHostStateRestartRecoveryFactsV1,
-  StateToolRecoveryJournalV1,
+  RuntimeHostStateRestartRecoveryFacts,
+  StateToolRecoveryJournal,
 } from './state-recovery';
 export {
-  isRuntimeHostStateToolRecoveryInvalidV1,
-  projectRuntimeHostStateRestartRecoveryEventsV1,
-  runtimeHostStateAdmitRecoveryAttemptV1,
-  runtimeHostStateAdvanceToolRecoveryResponseV1,
-  runtimeHostStateCreateToolRecoveryJournalV1,
-  runtimeHostStateDecideAutoReviewV1,
-  runtimeHostStateNormalizeToolRecoveryJournalV1,
-  runtimeHostStateRecordRecoveryFailureV1,
-  runtimeHostStateRecordRecoveryInvocationV1,
-  runtimeHostStateRecordToolOwnedProgressV1,
-  runtimeHostStateRestartRecoveryCapabilityInvocationIdsV1,
-  runtimeHostStateToolFailureInstanceIdV1,
-  runtimeHostStateToolInvocationFingerprintV1,
-  runtimeHostStateToolRecoveryJournalInvalidV1,
+  isRuntimeHostStateToolRecoveryInvalid,
+  projectRuntimeHostStateRestartRecoveryEvents,
+  runtimeHostStateAdmitRecoveryAttempt,
+  runtimeHostStateAdvanceToolRecoveryResponse,
+  runtimeHostStateCreateToolRecoveryJournal,
+  runtimeHostStateDecideAutoReview,
+  runtimeHostStateNormalizeToolRecoveryJournal,
+  runtimeHostStateRecordRecoveryFailure,
+  runtimeHostStateRecordRecoveryInvocation,
+  runtimeHostStateRecordToolOwnedProgress,
+  runtimeHostStateRestartRecoveryCapabilityInvocationIds,
+  runtimeHostStateToolFailureInstanceId,
+  runtimeHostStateToolInvocationFingerprint,
+  runtimeHostStateToolRecoveryJournalInvalid,
 } from './state-recovery';
 export type {
-  DescendantBudgetReservationV1,
-  DescendantResourceAdmissionV1,
-  ModelResourcePreparationPlanV1,
-  RuntimeBudgetAdmissionPlanV1,
-  RuntimeBudgetAdmissionReasonV1,
+  DescendantBudgetReservation,
+  DescendantResourceAdmission,
+  ModelResourcePreparationPlan,
+  RuntimeBudgetAdmissionPlan,
+  RuntimeBudgetAdmissionReason,
 } from './state-resource-admission';
 export {
-  actualUsageForReservationV1,
-  createDescendantResourceAdmissionV1,
+  actualUsageForReservation,
+  createDescendantResourceAdmission,
   DescendantResourceAdmissionError,
-  planModelInvocationResourceV1,
-  planRuntimeBudgetAdmissionV1,
-  reconciliationEventsForReservationsV1,
+  planModelInvocationResource,
+  planRuntimeBudgetAdmission,
+  reconciliationEventsForReservations,
 } from './state-resource-admission';
 export type {
-  ActiveResourceBudgetRuntimeStateV1,
+  ActiveResourceBudgetRuntimeState,
+  BudgetReservation,
   BudgetReservationState,
-  BudgetReservationV1,
-  ConcurrencyWaiterV1,
+  ConcurrencyWaiter,
+  ResourceBudget,
   ResourceBudgetConfiguredEvent,
   ResourceBudgetDispatchStartedEvent,
   ResourceBudgetEvent,
   ResourceBudgetReconciledEvent,
   ResourceBudgetReleasedEvent,
   ResourceBudgetReservedEvent,
-  ResourceBudgetRuntimeStateV1,
+  ResourceBudgetRuntimeState,
   ResourceBudgetUnknownEvent,
-  ResourceBudgetV1,
   ResourceBudgetWaiterCancelledEvent,
   ResourceBudgetWaiterEnqueuedEvent,
   ResourceBudgetWaiterPromotedEvent,
   ResourceBudgetWaiterTimedOutEvent,
-  ResourceUsageV1,
+  ResourceUsage,
 } from './state-resource-budget';
 export {
-  assertResourceBudgetRuntimeStateV1,
-  assertResourceBudgetV1,
-  assertResourceUsageV1,
-  committedResourceUsageV1,
-  createUnconfiguredResourceBudgetStateV1,
-  createZeroResourceUsageV1,
-  INTERNAL_RESOURCE_BUDGET_V1,
-  LIMITED_RESOURCE_BUDGET_V1,
+  assertResourceBudget,
+  assertResourceBudgetRuntimeState,
+  assertResourceUsage,
+  committedResourceUsage,
+  createUnconfiguredResourceBudgetState,
+  createZeroResourceUsage,
+  INTERNAL_RESOURCE_BUDGET_,
+  LIMITED_RESOURCE_BUDGET_,
   RESOURCE_BUDGET_VERSION,
-  reduceResourceBudgetStateV1,
-  tightenResourceBudgetV1,
+  reduceResourceBudgetState,
+  tightenResourceBudget,
 } from './state-resource-budget';
 export type {
-  StateRuntimeRestoreInputV1,
-  StateRuntimeRestoreResultV1,
-  StateRuntimeRestoreSourceV1,
+  StateRuntimeRestoreInput,
+  StateRuntimeRestoreResult,
+  StateRuntimeRestoreSource,
 } from './state-restore';
-export { restoreRuntimeHostStateSessionV1 } from './state-restore';
+export { restoreRuntimeHostStateSession } from './state-restore';
 export type {
-  StateRuntimeConcurrentEffectEventCurrentV1,
-  StateRuntimeConcurrentEffectStateProjectorV1,
-  StateRuntimeEventBatchAdmissionValidatorV1,
-  StateRuntimeEventBatchPreprocessorV1,
-  StateRuntimeNamedTurnSnapshotInputV1,
-  StateRuntimeProcessEventBatchOptionsV1,
-  StateRuntimeProcessEventResultV1,
-  StateRuntimeSessionClockV1,
-  StateRuntimeSessionEffectLeaseV1,
-  StateRuntimeSessionEventContextV1,
-  StateRuntimeSessionIdSourceV1,
-  StateRuntimeSessionInputV1,
-  StateRuntimeSessionV1,
-  StateRuntimeToolTerminalBatchValidatorV1,
-  StateRuntimeVerificationAdmissionV1,
-} from './state-session';
-export {
-  createRuntimeHostStateSessionV1,
-  STATE26_RUNTIME_SESSION_FORMAT_V1,
+  StateRuntimeConcurrentEffectEventCurrent,
+  StateRuntimeConcurrentEffectStateProjector,
+  StateRuntimeEventBatchAdmissionValidator,
+  StateRuntimeEventBatchPreprocessor,
+  StateRuntimeNamedTurnSnapshotInput,
+  StateRuntimeProcessEventBatchOptions,
+  StateRuntimeProcessEventResult,
   StateRuntimeSession,
+  StateRuntimeSessionClock,
+  StateRuntimeSessionEffectLease,
+  StateRuntimeSessionEventContext,
+  StateRuntimeSessionIdSource,
+  StateRuntimeSessionInput,
+  StateRuntimeToolTerminalBatchValidator,
+  StateRuntimeVerificationAdmission,
 } from './state-session';
-export type { RuntimeHostStateStorageBindingV1 } from './state-storage';
-export { createRuntimeHostStateStorageBindingV1 } from './state-storage';
+export {
+  createRuntimeHostStateSession,
+  STATE_RUNTIME_SESSION_FORMAT_,
+} from './state-session';
+export type { RuntimeHostStateStorageBinding } from './state-storage';
+export { createRuntimeHostStateStorageBinding } from './state-storage';
 export type {
-  StateFailureModeContextV1,
-  StateFailureModeDispositionV1,
-  StateFailureModeDurableStateV1,
-  StateFailureModeFallbackV1,
-  StateFailureModeResolutionV1,
-  StateRunTerminalOutcomeV1,
-  StateRuntimeFailureModeV1,
-  StateRuntimeTerminalStatusV1,
+  StateFailureModeContext,
+  StateFailureModeDisposition,
+  StateFailureModeDurableState,
+  StateFailureModeFallback,
+  StateFailureModeResolution,
+  StateRunTerminalOutcome,
+  StateRuntimeFailureMode,
+  StateRuntimeTerminalStatus,
 } from './state-terminal';
 export {
-  runtimeHostStateCompletedTerminalOutcomeV1,
-  runtimeHostStateFailedTerminalOutcomeV1,
-  runtimeHostStateNormalizeTerminalRuntimeEventV1,
-  runtimeHostStateResolveFailureModeV1,
-  STATE26_RUNTIME_FAILURE_MODES_V1,
+  runtimeHostStateCompletedTerminalOutcome,
+  runtimeHostStateFailedTerminalOutcome,
+  runtimeHostStateNormalizeTerminalRuntimeEvent,
+  runtimeHostStateResolveFailureMode,
+  STATE_RUNTIME_FAILURE_MODES_,
 } from './state-terminal';
 export type {
-  RuntimeHostStateSameCommandGrantInputV1,
-  RuntimeHostStateToolGovernanceAuthorizationInputV1,
-  RuntimeHostStateToolGovernanceDecisionV1,
-  RuntimeHostStateToolGovernanceFactsV1,
-  RuntimeHostStateToolGovernanceFailureCodeV1,
-  RuntimeHostStateToolGovernanceFailureV1,
-  RuntimeHostStateToolGovernanceInputV1,
-  RuntimeHostStateToolGovernancePortV1,
-  RuntimeHostStateToolGovernanceResultV1,
+  RuntimeHostStateSameCommandGrantInput,
+  RuntimeHostStateToolGovernanceAuthorizationInput,
+  RuntimeHostStateToolGovernanceDecision,
+  RuntimeHostStateToolGovernanceFacts,
+  RuntimeHostStateToolGovernanceFailure,
+  RuntimeHostStateToolGovernanceFailureCode,
+  RuntimeHostStateToolGovernanceInput,
+  RuntimeHostStateToolGovernancePort,
+  RuntimeHostStateToolGovernanceResult,
 } from './state-tool-governance';
-export { createRuntimeHostStateToolGovernanceV1 } from './state-tool-governance';
+export { createRuntimeHostStateToolGovernance } from './state-tool-governance';
 export type {
-  StateToolDispatchStateV1,
-  StateToolExternalEffectsV1,
-  StateToolOutcomeDetailCodeV1,
-  StateToolOutcomeEventV1,
-  StateToolOutcomeStatusV1,
-  StateToolOutcomeV1,
-  StateToolRecoveryDispositionV1,
-  StateUnknownToolFieldsObservationV1,
+  StateToolDispatchState,
+  StateToolExternalEffects,
+  StateToolOutcome,
+  StateToolOutcomeDetailCode,
+  StateToolOutcomeEvent,
+  StateToolOutcomeStatus,
+  StateToolRecoveryDisposition,
+  StateUnknownToolFieldsObservation,
 } from './state-tool-outcome';
 export {
-  runtimeHostStateCanonicalToolOutcomeV1,
-  runtimeHostStateClassifyToolOutcomeV1,
-  runtimeHostStateNormalizeToolOutcomeEventV1,
+  runtimeHostStateCanonicalToolOutcome,
+  runtimeHostStateClassifyToolOutcome,
+  runtimeHostStateNormalizeToolOutcomeEvent,
 } from './state-tool-outcome';
 export type {
-  RuntimeHostShellResultV1,
-  RuntimeHostToolExecutionResultV1,
-  RuntimeHostToolExecutionSideEffectsV1,
-  RuntimeHostToolFailureV1,
+  RuntimeHostShellResult,
+  RuntimeHostToolExecutionResult,
+  RuntimeHostToolExecutionSideEffects,
+  RuntimeHostToolFailure,
 } from './state-tool-result';
-export type { RuntimeHostStateVerificationSchemaAdmissionsV1 } from './state-verification';
-export { runtimeHostStateVerificationSchemaAdmissionDigestV1 } from './state-verification';
+export type { RuntimeHostStateVerificationSchemaAdmissions } from './state-verification';
+export { runtimeHostStateVerificationSchemaAdmissionDigest } from './state-verification';
 export {
-  runtimeHostStateActivePlanningV1,
-  runtimeHostStateActiveSkillFramesV1,
-  runtimeHostStateActiveTaskV1,
-  runtimeHostStateDecideCompletionV1,
-  runtimeHostStateEffectiveInteractionModeV1,
-  runtimeHostStateInteractionBelongsToCurrentWorkV1,
-  runtimeHostStateInteractionToolCallV1,
-  runtimeHostStateToolCallBelongsToCurrentWorkV1,
+  runtimeHostStateActivePlanning,
+  runtimeHostStateActiveSkillFrames,
+  runtimeHostStateActiveTask,
+  runtimeHostStateDecideCompletion,
+  runtimeHostStateEffectiveInteractionMode,
+  runtimeHostStateInteractionBelongsToCurrentWork,
+  runtimeHostStateInteractionToolCall,
+  runtimeHostStateToolCallBelongsToCurrentWork,
 } from './state-view';
 export {
   BoundedOutputBuffer,
@@ -428,59 +427,59 @@ export {
   SHELL_CAPTURE_MAX_CHARS,
   SHELL_PROGRESS_LINE_MAX_CHARS,
 } from './stream-output';
-export type { RuntimeHostToolCallSnapshotInputV1 } from './tool-call-snapshot';
-export { createRuntimeHostToolCallSnapshotV1 } from './tool-call-snapshot';
+export type { RuntimeHostToolCallSnapshotInput } from './tool-call-snapshot';
+export { createRuntimeHostToolCallSnapshot } from './tool-call-snapshot';
 export type {
-  RuntimeHostCommittedToolInvocationAuthorityV1,
-  RuntimeHostPreparedToolInvocationAuthorityV1,
-  RuntimeHostRetryableToolInvocationAuthorityV1,
-  RuntimeHostSuspendedToolInvocationAuthorityV1,
-  RuntimeHostToolInvocationOutcomeAuthorityV1,
-  RuntimeHostToolPipelineAttemptCoordinatorFailureCodeV1,
-  RuntimeHostToolPipelineAttemptCoordinatorOptionsV1,
-  RuntimeHostToolPipelineAttemptCoordinatorV1,
+  RuntimeHostCommittedToolInvocationAuthority,
+  RuntimeHostPreparedToolInvocationAuthority,
+  RuntimeHostRetryableToolInvocationAuthority,
+  RuntimeHostSuspendedToolInvocationAuthority,
+  RuntimeHostToolInvocationOutcomeAuthority,
+  RuntimeHostToolPipelineAttemptCoordinator,
+  RuntimeHostToolPipelineAttemptCoordinatorFailureCode,
+  RuntimeHostToolPipelineAttemptCoordinatorOptions,
 } from './tool-pipeline-coordinator';
 export {
-  createRuntimeHostToolPipelineAttemptCoordinatorV1,
-  RUNTIME_HOST_TOOL_PIPELINE_ATTEMPT_COORDINATOR_SCHEMA_V1,
-  RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+  createRuntimeHostToolPipelineAttemptCoordinator,
+  RUNTIME_HOST_TOOL_PIPELINE_ATTEMPT_COORDINATOR_SCHEMA_,
+  RuntimeHostToolPipelineAttemptCoordinatorError,
 } from './tool-pipeline-coordinator';
 
-export interface RuntimeHostBoundaryV1 {
-  readonly contractRevision: typeof RUNTIME_CONTRACT_BOUNDARY_V1.revision;
-  readonly deterministicKernel: typeof AGENT_KERNEL_BOUNDARY_V1.deterministic;
-  readonly storage: RuntimeStorageBoundaryV1;
+export interface RuntimeHostBoundary {
+  readonly contractRevision: typeof RUNTIME_CONTRACT_BOUNDARY_.revision;
+  readonly deterministicKernel: typeof AGENT_KERNEL_BOUNDARY_.deterministic;
+  readonly storage: RuntimeStorageBoundary;
   readonly moduleIds: readonly string[];
 }
 
-export interface RuntimeHostModuleCompositionInputV1<Event = unknown, State = unknown> {
+export interface RuntimeHostModuleCompositionInput<Event = unknown, State = unknown> {
   readonly storage: RuntimeStorage<Event, State>;
-  readonly modules: readonly RuntimeModuleV1[];
-  readonly contextCompiler?: ContextCompilerPortV1;
+  readonly modules: readonly RuntimeModule[];
+  readonly contextCompiler?: ContextCompilerPort;
   readonly moduleRegistry?: never;
   readonly capabilityRegistrySnapshot?: never;
 }
 
-export interface RuntimeHostPrebuiltRegistryInputV1<Event = unknown, State = unknown> {
+export interface RuntimeHostPrebuiltRegistryInput<Event = unknown, State = unknown> {
   readonly storage: RuntimeStorage<Event, State>;
-  readonly moduleRegistry: RuntimeModuleRegistryV1;
-  readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
-  readonly contextCompiler?: ContextCompilerPortV1;
+  readonly moduleRegistry: RuntimeModuleRegistry;
+  readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+  readonly contextCompiler?: ContextCompilerPort;
   readonly modules?: never;
 }
 
-export type RuntimeHostCompositionInputV1<Event = unknown, State = unknown> =
-  | RuntimeHostModuleCompositionInputV1<Event, State>
-  | RuntimeHostPrebuiltRegistryInputV1<Event, State>;
+export type RuntimeHostCompositionInput<Event = unknown, State = unknown> =
+  | RuntimeHostModuleCompositionInput<Event, State>
+  | RuntimeHostPrebuiltRegistryInput<Event, State>;
 
-export function createRuntimeHostBoundaryV1(input: {
-  readonly storage: RuntimeStorageBoundaryV1;
-  readonly modules: readonly RuntimeModuleV1[];
-}): RuntimeHostBoundaryV1 {
-  const registry = createRuntimeModuleRegistryV1(input.modules);
+export function createRuntimeHostBoundary(input: {
+  readonly storage: RuntimeStorageBoundary;
+  readonly modules: readonly RuntimeModule[];
+}): RuntimeHostBoundary {
+  const registry = createRuntimeModuleRegistry(input.modules);
   return Object.freeze({
-    contractRevision: RUNTIME_CONTRACT_BOUNDARY_V1.revision,
-    deterministicKernel: AGENT_KERNEL_BOUNDARY_V1.deterministic,
+    contractRevision: RUNTIME_CONTRACT_BOUNDARY_.revision,
+    deterministicKernel: AGENT_KERNEL_BOUNDARY_.deterministic,
     storage: input.storage,
     moduleIds: registry.moduleIds,
   });
@@ -489,14 +488,14 @@ export function createRuntimeHostBoundaryV1(input: {
 /** Runtime Host composition seam. Modules are registered exactly once and never hot-swapped. */
 export function createRuntimeHost<Event = unknown, State = unknown>(input: {
   readonly storage: RuntimeStorage<Event, State>;
-  readonly modules: readonly RuntimeModuleV1[];
-  readonly contextCompiler?: ContextCompilerPortV1;
+  readonly modules: readonly RuntimeModule[];
+  readonly contextCompiler?: ContextCompilerPort;
 }): RuntimeHost<Event, State>;
 export function createRuntimeHost<Event = unknown, State = unknown>(
-  input: RuntimeHostPrebuiltRegistryInputV1<Event, State>,
+  input: RuntimeHostPrebuiltRegistryInput<Event, State>,
 ): RuntimeHost<Event, State>;
 export function createRuntimeHost<Event = unknown, State = unknown>(
-  input: RuntimeHostCompositionInputV1<Event, State>,
+  input: RuntimeHostCompositionInput<Event, State>,
 ): RuntimeHost<Event, State> {
   if ('modules' in input) {
     if ('moduleRegistry' in input || 'capabilityRegistrySnapshot' in input) {
@@ -505,7 +504,7 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
     if (!input.modules) {
       throw new Error('Runtime Host module composition requires modules.');
     }
-    const moduleRegistry = createRuntimeModuleRegistryV1(input.modules);
+    const moduleRegistry = createRuntimeModuleRegistry(input.modules);
     return new DefaultRuntimeHost({
       storage: input.storage,
       moduleRegistry,
@@ -533,8 +532,8 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
 }
 
 /** Compose a Host from the one registry and immutable snapshot owned by App. */
-export function createRuntimeHostFromRegistryV1<Event = unknown, State = unknown>(
-  input: RuntimeHostPrebuiltRegistryInputV1<Event, State>,
+export function createRuntimeHostFromRegistry<Event = unknown, State = unknown>(
+  input: RuntimeHostPrebuiltRegistryInput<Event, State>,
 ): RuntimeHost<Event, State> {
   return createRuntimeHost(input);
 }

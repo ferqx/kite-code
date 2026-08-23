@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { resolveMcpToolPolicy } from '@kite/builtin-runtime/mcp';
 import {
-  classifyMcpWriteRecoveryV1,
-  type McpWriteIntentV1,
-  type McpWriteReceiptV1,
+  classifyMcpWriteRecovery,
+  type McpWriteIntent,
+  type McpWriteReceipt,
 } from './write-contract-fixtures';
 
-const intent: McpWriteIntentV1 = {
+const intent: McpWriteIntent = {
   invocationId: 'invocation-1',
   routeDigest: 'route-v1',
   argumentsDigest: 'arguments-v1',
@@ -16,7 +16,7 @@ const intent: McpWriteIntentV1 = {
 describe('MCP write recovery contract', () => {
   test('blocks before dispatch when durable intent is missing', () => {
     expect(
-      classifyMcpWriteRecoveryV1({
+      classifyMcpWriteRecovery({
         retryPolicy: 'never',
         providerActionRecovered: false,
       }),
@@ -35,7 +35,7 @@ describe('MCP write recovery contract', () => {
     );
     expect(policy.effectiveEffects.externalState).toBe('unknown');
     expect(policy.retry).toBe('never');
-    const decision = classifyMcpWriteRecoveryV1({
+    const decision = classifyMcpWriteRecovery({
       intent,
       receipt: {
         invocationId: intent.invocationId,
@@ -71,7 +71,7 @@ describe('MCP write recovery contract', () => {
     expect(policy.retry).toBe('idempotency_key');
     const keyedIntent = { ...intent, idempotencyKey: 'provider-key-1' };
     expect(
-      classifyMcpWriteRecoveryV1({
+      classifyMcpWriteRecovery({
         intent: keyedIntent,
         retryPolicy: policy.retry,
         idempotencyKeyArgument: policy.idempotencyKeyArgument,
@@ -86,7 +86,7 @@ describe('MCP write recovery contract', () => {
   });
 
   test('preserves intent and receipt through reconciliation and compensation', () => {
-    const receipt: McpWriteReceiptV1 = {
+    const receipt: McpWriteReceipt = {
       invocationId: intent.invocationId,
       status: 'succeeded',
       providerReceiptDigest: 'receipt-v1',
@@ -94,7 +94,7 @@ describe('MCP write recovery contract', () => {
       compensation: 'not_observed',
     };
     expect(
-      classifyMcpWriteRecoveryV1({
+      classifyMcpWriteRecovery({
         intent,
         receipt,
         retryPolicy: 'never',

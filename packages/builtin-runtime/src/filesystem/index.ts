@@ -1,13 +1,13 @@
-export type { WorkspaceFilesystemGrantVerifierV1 } from '@kite/runtime-spi';
+export type { WorkspaceFilesystemGrantVerifier } from '@kite/runtime-spi';
 export {
-  assertDescriptorRelativeMutationSupportedV1,
-  atomicReplaceInLockedWindowsDirectoryV1,
-  closeOpenedDirectoryChainV1,
-  type DescriptorRelativeDirectoryChainV1,
-  openExclusiveFileAtV1,
-  openOrCreateDirectoryChainAtV1,
-  renameAtV1,
-  unlinkAtV1,
+  assertDescriptorRelativeMutationSupported,
+  atomicReplaceInLockedWindowsDirectory,
+  closeOpenedDirectoryChain,
+  type DescriptorRelativeDirectoryChain,
+  openExclusiveFileAt,
+  openOrCreateDirectoryChainAt,
+  renameAt,
+  unlinkAt,
 } from './descriptor-relative';
 export {
   computeLineDiff,
@@ -18,55 +18,55 @@ export {
   formatMultiHunkDiff,
 } from './diff';
 export {
-  validateWorkspaceFilesystemIntentRecordV1,
-  validateWorkspaceFilesystemMutationReadyRecordV1,
-  validateWorkspaceFilesystemObservationRecordV1,
-  workspaceFilesystemIntentDigestV1,
-  workspaceFilesystemMutationReadyDigestV1,
+  validateWorkspaceFilesystemIntentRecord,
+  validateWorkspaceFilesystemMutationReadyRecord,
+  validateWorkspaceFilesystemObservationRecord,
+  workspaceFilesystemIntentDigest,
+  workspaceFilesystemMutationReadyDigest,
 } from './evidence';
 export {
-  validateWorkspaceFilesystemOperationV1,
-  type WorkspaceFilesystemGrantAuthorityOptionsV1,
-  WorkspaceFilesystemGrantAuthorityV1,
-  WorkspaceFilesystemGrantErrorV1,
-  workspaceFilesystemContentHashV1,
-  workspaceFilesystemOperationDigestV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
-  workspaceFilesystemStringDigestV1,
-  workspaceFilesystemTargetEvidenceV1,
-  workspaceFilesystemTargetIdentityDigestV1,
+  validateWorkspaceFilesystemOperation,
+  WorkspaceFilesystemGrantAuthority,
+  type WorkspaceFilesystemGrantAuthorityOptions,
+  WorkspaceFilesystemGrantError,
+  workspaceFilesystemContentHash,
+  workspaceFilesystemOperationDigest,
+  workspaceFilesystemProtectedBoundaryDigest,
+  workspaceFilesystemStringDigest,
+  workspaceFilesystemTargetEvidence,
+  workspaceFilesystemTargetIdentityDigest,
 } from './grant-authority';
 export {
-  type LocalWorkspaceFilesystemProviderOptionsV1,
-  LocalWorkspaceFilesystemProviderV1,
+  LocalWorkspaceFilesystemProvider,
+  type LocalWorkspaceFilesystemProviderOptions,
 } from './local-provider';
 export type {
-  BuiltinWorkspaceFilesystemCheckpointProjectionV1,
-  BuiltinWorkspaceFilesystemMutationDispatchErrorCodeV1,
-  CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1,
+  BuiltinWorkspaceFilesystemCheckpointProjection,
+  BuiltinWorkspaceFilesystemMutationDispatchErrorCode,
+  CreateBuiltinWorkspaceFilesystemMutationDispatcherInput,
 } from './mutation-dispatcher';
 export {
-  BuiltinWorkspaceFilesystemMutationCommitUnknownErrorV1,
-  BuiltinWorkspaceFilesystemMutationDispatchErrorV1,
-  createBuiltinWorkspaceFilesystemMutationDispatcherV1,
+  BuiltinWorkspaceFilesystemMutationCommitUnknownError,
+  BuiltinWorkspaceFilesystemMutationDispatchError,
+  createBuiltinWorkspaceFilesystemMutationDispatcher,
 } from './mutation-dispatcher';
 export type {
-  BuiltinWorkspaceFilesystemObservationAuthorityErrorCodeV1,
-  BuiltinWorkspaceFilesystemTerminalVerificationResultV1,
-  BuiltinWorkspaceFilesystemTerminalVerifierV1,
+  BuiltinWorkspaceFilesystemObservationAuthorityErrorCode,
+  BuiltinWorkspaceFilesystemTerminalVerificationResult,
+  BuiltinWorkspaceFilesystemTerminalVerifier,
 } from './observation-authority';
 export {
-  BuiltinWorkspaceFilesystemObservationAuthorityErrorV1,
-  verifyBuiltinWorkspaceFilesystemTerminalV1,
+  BuiltinWorkspaceFilesystemObservationAuthorityError,
+  verifyBuiltinWorkspaceFilesystemTerminal,
 } from './observation-authority';
 export {
-  type FilesystemPreimageArtifactErrorCodeV1,
-  FilesystemPreimageArtifactErrorV1,
-  type FilesystemPreimageArtifactPayloadV1,
-  type FilesystemPreimageArtifactStoreOptionsV1,
-  FilesystemPreimageArtifactStoreV1,
-  type FilesystemPreimageArtifactWriterV1,
-  filesystemPreimageArtifactRootV1,
+  FilesystemPreimageArtifactError,
+  type FilesystemPreimageArtifactErrorCode,
+  type FilesystemPreimageArtifactPayload,
+  FilesystemPreimageArtifactStore,
+  type FilesystemPreimageArtifactStoreOptions,
+  type FilesystemPreimageArtifactWriter,
+  filesystemPreimageArtifactRoot,
 } from './preimage-artifacts';
 export {
   projectionDigest,
@@ -75,17 +75,17 @@ export {
   truncateProjectedStreams,
 } from './projection';
 export type {
-  BuiltinWorkspaceFilesystemActorIdentityV1,
-  BuiltinWorkspaceFilesystemReadDispatchErrorCodeV1,
-  CreateBuiltinWorkspaceFilesystemReadDispatcherInputV1,
+  BuiltinWorkspaceFilesystemActorIdentity,
+  BuiltinWorkspaceFilesystemReadDispatchErrorCode,
+  CreateBuiltinWorkspaceFilesystemReadDispatcherInput,
 } from './read-dispatcher';
 export {
-  BuiltinWorkspaceFilesystemReadDispatchErrorV1,
-  createBuiltinWorkspaceFilesystemReadDispatcherV1,
+  BuiltinWorkspaceFilesystemReadDispatchError,
+  createBuiltinWorkspaceFilesystemReadDispatcher,
 } from './read-dispatcher';
 export type {
-  BuiltinWorkspaceFilesystemInvocationDispatcherV1,
-  BuiltinWorkspaceFilesystemPipelineObservationV1,
-  BuiltinWorkspaceFilesystemPipelineResultV1,
-  BuiltinWorkspaceFilesystemRuntimeV1,
+  BuiltinWorkspaceFilesystemInvocationDispatcher,
+  BuiltinWorkspaceFilesystemPipelineObservation,
+  BuiltinWorkspaceFilesystemPipelineResult,
+  BuiltinWorkspaceFilesystemRuntime,
 } from './runtime-composition';

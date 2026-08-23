@@ -1,15 +1,15 @@
 import type {
-  SubagentDelegationGrantV1,
-  SubagentHandleV1,
-  SubagentResumeGrantV1,
+  SubagentDelegationGrant,
+  SubagentHandle,
+  SubagentResumeGrant,
 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from '../capability-binding';
+import { digestCapabilityBindingValue } from '../capability-binding';
 
 /** One canonical identity shared by dispatch intent publication and restore verification. */
-export function subagentDispatchIntentDigestV1(
-  value: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1 | SubagentHandleV1>,
+export function subagentDispatchIntentDigest(
+  value: Readonly<SubagentDelegationGrant | SubagentResumeGrant | SubagentHandle>,
 ): string {
-  return `sha256:${digestCapabilityBindingValueV1({
+  return `sha256:${digestCapabilityBindingValue({
     schema: 'kite.subagent-dispatch-intent.v1',
     purpose: value.purpose,
     grantId: value.grantId,

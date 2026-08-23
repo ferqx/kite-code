@@ -9,32 +9,32 @@
 import { sha256Hex } from './hash';
 import type { AgentAuthorizationState } from './state';
 
-export type AuthorizationSourceV1 = 'user' | 'config' | 'test' | 'system';
+export type AuthorizationSource = 'user' | 'config' | 'test' | 'system';
 
-export interface AuthorizationElevationFactsV1 {
+export interface AuthorizationElevationFacts {
   readonly mode: 'default' | 'full_access';
-  readonly source?: AuthorizationSourceV1;
+  readonly source?: AuthorizationSource;
   readonly sandboxAvailable: boolean;
   readonly autoReview?: boolean;
   readonly loopMode?: boolean;
 }
 
-export type ApprovalGrantV1 = 'approve_once' | 'same_command' | 'full_access';
+export type ApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
 
-function stableAuthorizationJsonV1(value: Readonly<Record<string, string>>): string {
+function stableAuthorizationJson(value: Readonly<Record<string, string>>): string {
   return `{${Object.entries(value)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, item]) => `${JSON.stringify(key)}:${JSON.stringify(item)}`)
     .join(',')}}`;
 }
 
-export function authorizationCommandGrantKeyV1(input: {
+export function authorizationCommandGrantKey(input: {
   readonly workspace: string;
   readonly threadId: string;
   readonly command: string;
 }): string {
   return sha256Hex(
-    `same_command:${stableAuthorizationJsonV1({
+    `same_command:${stableAuthorizationJson({
       workspace: input.workspace,
       threadId: input.threadId,
       command: input.command.trim(),
@@ -43,13 +43,13 @@ export function authorizationCommandGrantKeyV1(input: {
 }
 
 /** Apply one canonical approval grant using only Host-supplied time and facts. */
-export function applyApprovalGrantV1(input: {
+export function applyApprovalGrant(input: {
   readonly authorization: Readonly<AgentAuthorizationState>;
-  readonly grant: ApprovalGrantV1;
+  readonly grant: ApprovalGrant;
   readonly workspace: string;
   readonly threadId: string;
   readonly command: string;
-  readonly source: AuthorizationSourceV1;
+  readonly source: AuthorizationSource;
   readonly grantedAt: string;
 }): AgentAuthorizationState {
   if (input.grant === 'full_access') {
@@ -62,7 +62,7 @@ export function applyApprovalGrantV1(input: {
   }
   const command = input.command.trim();
   if (input.grant !== 'same_command' || command.length === 0) return input.authorization;
-  const key = authorizationCommandGrantKeyV1({ ...input, command });
+  const key = authorizationCommandGrantKey({ ...input, command });
   return {
     ...input.authorization,
     commandGrants: {
@@ -79,7 +79,7 @@ export function applyApprovalGrantV1(input: {
 }
 
 /** Enforce every State authorization elevation invariant. */
-export function assertAuthorizationElevation(input: AuthorizationElevationFactsV1): void {
+export function assertAuthorizationElevation(input: AuthorizationElevationFacts): void {
   if (input.mode === 'full_access' && !input.sandboxAvailable) {
     throw new Error('full_access requires an available workspace sandbox.');
   }

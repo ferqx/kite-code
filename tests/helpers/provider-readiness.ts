@@ -1,15 +1,15 @@
 import { normalizeAgentEvent, type RuntimeEvent } from '@kite/agent-kernel';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { RuntimeState } from '@kite/runtime-host';
-import { ProviderReadinessCoordinatorV1 } from '#app/bootstrap/runtime/provider-readiness';
+import { ProviderReadinessCoordinator } from '#app/bootstrap/runtime/provider-readiness';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
-export function createProviderReadinessTestHarnessV1(
+export function createProviderReadinessTestHarness(
   provider: McpRuntimeProvider,
   initialState: RuntimeState,
   beforePersist?: (event: RuntimeEvent) => boolean | undefined,
 ): {
-  providerReadinessCoordinator: ProviderReadinessCoordinatorV1;
+  providerReadinessCoordinator: ProviderReadinessCoordinator;
   getRuntimeState: () => Readonly<RuntimeState>;
   persistRuntimeEvent: (event: RuntimeEvent) => Promise<boolean>;
   persistRuntimeEvents: (events: RuntimeEvent[]) => Promise<boolean>;
@@ -30,7 +30,7 @@ export function createProviderReadinessTestHarnessV1(
     return true;
   };
   return {
-    providerReadinessCoordinator: new ProviderReadinessCoordinatorV1(provider),
+    providerReadinessCoordinator: new ProviderReadinessCoordinator(provider),
     getRuntimeState: () => state,
     persistRuntimeEvent: async (event) => persistRuntimeEvents([event]),
     persistRuntimeEvents,

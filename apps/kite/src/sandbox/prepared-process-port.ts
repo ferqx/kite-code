@@ -1,31 +1,31 @@
 import {
-  decodeWindowsRestrictedTokenPreparedTransportV1,
+  decodeWindowsRestrictedTokenPreparedTransport,
   type ShellInput,
   type ShellResult,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostSandboxPreparedProcessExecutionPortV1 } from '@kite/runtime-host';
+import { createRuntimeHostSandboxPreparedProcessExecutionPort } from '@kite/runtime-host';
 import type {
-  SandboxExecutionBackendV1,
-  SandboxPreparedProcessCleanupV1,
-  SandboxPreparedProcessExecutionPortV1,
-  SandboxPreparedProcessExecutionResultV1,
+  SandboxExecutionBackend,
+  SandboxPreparedProcessCleanup,
+  SandboxPreparedProcessExecutionPort,
+  SandboxPreparedProcessExecutionResult,
 } from '@kite/runtime-spi';
-import { executeWindowsRestrictedTokenPreparedV1 } from './windows-restricted-token-runtime';
+import { executeWindowsRestrictedTokenPrepared } from './windows-restricted-token-runtime';
 
 /** App selects the platform adapter; Host remains the generic process owner. */
-export function createAppSandboxPreparedProcessExecutionPortV1(
-  backend: Exclude<SandboxExecutionBackendV1, 'none'>,
-): SandboxPreparedProcessExecutionPortV1 {
+export function createAppSandboxPreparedProcessExecutionPort(
+  backend: Exclude<SandboxExecutionBackend, 'none'>,
+): SandboxPreparedProcessExecutionPort {
   return backend === 'windows_restricted_token'
-    ? createWindowsPreparedProcessExecutionPortV1()
-    : createRuntimeHostSandboxPreparedProcessExecutionPortV1();
+    ? createWindowsPreparedProcessExecutionPort()
+    : createRuntimeHostSandboxPreparedProcessExecutionPort();
 }
 
-function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecutionPortV1 {
+function createWindowsPreparedProcessExecutionPort(): SandboxPreparedProcessExecutionPort {
   return Object.freeze({
     execute: async (
-      input: Parameters<SandboxPreparedProcessExecutionPortV1['execute']>[0],
-    ): Promise<Readonly<SandboxPreparedProcessExecutionResultV1>> => {
+      input: Parameters<SandboxPreparedProcessExecutionPort['execute']>[0],
+    ): Promise<Readonly<SandboxPreparedProcessExecutionResult>> => {
       const prepared = input.prepared;
       if (
         prepared.backend !== 'windows_restricted_token' ||
@@ -33,13 +33,13 @@ function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessEx
         prepared.stdin === null ||
         !Object.isFrozen(prepared)
       ) {
-        return failedV1('invalid_prepared_execution', 'Windows prepared identity is invalid.');
+        return failed('invalid_prepared_execution', 'Windows prepared identity is invalid.');
       }
-      let transport: ReturnType<typeof decodeWindowsRestrictedTokenPreparedTransportV1>;
+      let transport: ReturnType<typeof decodeWindowsRestrictedTokenPreparedTransport>;
       try {
-        transport = decodeWindowsRestrictedTokenPreparedTransportV1(prepared.stdin);
+        transport = decodeWindowsRestrictedTokenPreparedTransport(prepared.stdin);
       } catch (error) {
-        return failedV1(
+        return failed(
           'invalid_prepared_execution',
           error instanceof Error ? error.message : 'Windows prepared transport is invalid.',
         );
@@ -54,7 +54,7 @@ function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessEx
         transport.request.runtimeRoot !== transport.runtimeRoot ||
         transport.request.invocationName !== prepared.cleanup.resourceId
       ) {
-        return failedV1('invalid_prepared_execution', 'Windows prepared transport is cross-bound.');
+        return failed('invalid_prepared_execution', 'Windows prepared transport is cross-bound.');
       }
 
       let supervisorAttempted = false;
@@ -67,7 +67,7 @@ function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessEx
         ...(input.onProgress ? { onProgress: input.onProgress } : {}),
       };
       try {
-        const outcome = await executeWindowsRestrictedTokenPreparedV1(
+        const outcome = await executeWindowsRestrictedTokenPrepared(
           shellInput,
           transport,
           {
@@ -100,9 +100,9 @@ function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessEx
             supervisorNonce: input.dispatchIntent.supervisorNonce,
           },
         );
-        const cleanup = cleanupV1(outcome.processCleanup);
+        const cleanup = projectProcessCleanup(outcome.processCleanup);
         if (!goStarted) {
-          return failedV1(
+          return failed(
             supervisorAttempted ? 'supervisor_start_not_acknowledged' : 'spawn_failed',
             outcome.stderr || 'Windows supervisor failed before GO.',
             supervisorAttempted ? 'supervisor_started_before_go' : 'not_started',
@@ -110,7 +110,7 @@ function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessEx
           );
         }
         if (!cleanup.confirmedExited) {
-          return unknownV1(
+          return unknown(
             'post_go_cleanup_unknown',
             outcome.stderr || 'Windows process cleanup is unknown.',
             cleanup,
@@ -132,7 +132,7 @@ function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessEx
           });
         }
         if (outcome.exitCode === -1) {
-          return unknownV1(
+          return unknown(
             'post_go_terminal_unknown',
             outcome.stderr || 'Windows process terminal is unknown.',
             cleanup,
@@ -150,24 +150,24 @@ function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessEx
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return goStarted
-          ? unknownV1('post_go_transport_lost', message, unknownCleanupV1())
-          : failedV1(
+          ? unknown('post_go_transport_lost', message, unknownCleanup())
+          : failed(
               supervisorAttempted ? 'supervisor_start_not_acknowledged' : 'spawn_failed',
               message,
               supervisorAttempted ? 'supervisor_started_before_go' : 'not_started',
-              supervisorAttempted ? unknownCleanupV1() : cleanNoProcessV1(),
+              supervisorAttempted ? unknownCleanup() : cleanNoProcess(),
             );
       }
     },
   });
 }
 
-function failedV1(
+function failed(
   code: 'invalid_prepared_execution' | 'supervisor_start_not_acknowledged' | 'spawn_failed',
   message: string,
   executionPhase: 'not_started' | 'supervisor_started_before_go' = 'not_started',
-  processCleanup: Readonly<SandboxPreparedProcessCleanupV1> = cleanNoProcessV1(),
-): Readonly<SandboxPreparedProcessExecutionResultV1> {
+  processCleanup: Readonly<SandboxPreparedProcessCleanup> = cleanNoProcess(),
+): Readonly<SandboxPreparedProcessExecutionResult> {
   return Object.freeze({
     kind: 'failed' as const,
     executionPhase,
@@ -179,12 +179,12 @@ function failedV1(
   });
 }
 
-function unknownV1(
+function unknown(
   code: 'post_go_terminal_unknown' | 'post_go_transport_lost' | 'post_go_cleanup_unknown',
   message: string,
-  processCleanup: Readonly<SandboxPreparedProcessCleanupV1>,
+  processCleanup: Readonly<SandboxPreparedProcessCleanup>,
   stdout = '',
-): Readonly<SandboxPreparedProcessExecutionResultV1> {
+): Readonly<SandboxPreparedProcessExecutionResult> {
   return Object.freeze({
     kind: 'unknown' as const,
     executionPhase: 'unknown_after_go' as const,
@@ -197,9 +197,9 @@ function unknownV1(
   });
 }
 
-function cleanupV1(
+function projectProcessCleanup(
   cleanup: Readonly<NonNullable<ShellResult['processCleanup']>> | undefined,
-): Readonly<SandboxPreparedProcessCleanupV1> {
+): Readonly<SandboxPreparedProcessCleanup> {
   return Object.freeze({
     confirmedExited: cleanup?.confirmedExited === true,
     gracefulRequested: cleanup?.gracefulRequested === true,
@@ -212,7 +212,7 @@ function cleanupV1(
   });
 }
 
-function cleanNoProcessV1(): Readonly<SandboxPreparedProcessCleanupV1> {
+function cleanNoProcess(): Readonly<SandboxPreparedProcessCleanup> {
   return Object.freeze({
     confirmedExited: true,
     gracefulRequested: false,
@@ -221,7 +221,7 @@ function cleanNoProcessV1(): Readonly<SandboxPreparedProcessCleanupV1> {
   });
 }
 
-function unknownCleanupV1(): Readonly<SandboxPreparedProcessCleanupV1> {
+function unknownCleanup(): Readonly<SandboxPreparedProcessCleanup> {
   return Object.freeze({
     confirmedExited: false,
     gracefulRequested: false,

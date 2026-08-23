@@ -1,25 +1,25 @@
 import type {
-  CapabilityToolTerminalResultV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineReceiptCommitV1,
-  WorkspaceFilesystemCommittedMutationV1,
-  WorkspaceFilesystemMutationReadyRecordV1,
-  WorkspaceFilesystemObservationRecordV1,
-  WorkspaceFilesystemPersistedIntentV1,
-  WorkspaceFilesystemPersistedMutationIntentV1,
-  WorkspaceReadFileObservationV1,
+  CapabilityToolTerminalResult,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineReceiptCommit,
+  WorkspaceFilesystemCommittedMutation,
+  WorkspaceFilesystemMutationReadyRecord,
+  WorkspaceFilesystemObservationRecord,
+  WorkspaceFilesystemPersistedIntent,
+  WorkspaceFilesystemPersistedMutationIntent,
+  WorkspaceReadFileObservation,
 } from '@kite/runtime-spi';
-import type { BuiltinOperationExecutionValueV1 } from '../model-operations';
-import { validateWorkspaceFilesystemMutationReadyRecordV1 } from './evidence';
+import type { BuiltinOperationExecutionValue } from '../model-operations';
+import { validateWorkspaceFilesystemMutationReadyRecord } from './evidence';
 import {
-  workspaceFilesystemOperationDigestV1,
-  workspaceFilesystemStringDigestV1,
-  workspaceFilesystemTargetEvidenceV1,
+  workspaceFilesystemOperationDigest,
+  workspaceFilesystemStringDigest,
+  workspaceFilesystemTargetEvidence,
 } from './grant-authority';
 
-export type BuiltinWorkspaceFilesystemObservationAuthorityErrorCodeV1 =
+export type BuiltinWorkspaceFilesystemObservationAuthorityErrorCode =
   | 'observation_missing'
   | 'observation_not_issued'
   | 'prepared_identity_mismatch'
@@ -27,20 +27,20 @@ export type BuiltinWorkspaceFilesystemObservationAuthorityErrorCodeV1 =
   | 'provider_evidence_mismatch'
   | 'terminal_clone_mismatch';
 
-export class BuiltinWorkspaceFilesystemObservationAuthorityErrorV1 extends Error {
-  readonly code: BuiltinWorkspaceFilesystemObservationAuthorityErrorCodeV1;
+export class BuiltinWorkspaceFilesystemObservationAuthorityError extends Error {
+  readonly code: BuiltinWorkspaceFilesystemObservationAuthorityErrorCode;
 
-  constructor(code: BuiltinWorkspaceFilesystemObservationAuthorityErrorCodeV1) {
+  constructor(code: BuiltinWorkspaceFilesystemObservationAuthorityErrorCode) {
     super(`Builtin Workspace filesystem observation authority rejected '${code}'.`);
-    this.name = 'BuiltinWorkspaceFilesystemObservationAuthorityErrorV1';
+    this.name = 'BuiltinWorkspaceFilesystemObservationAuthorityError';
     this.code = code;
   }
 }
 
-export type BuiltinWorkspaceFilesystemTerminalVerificationResultV1 =
+export type BuiltinWorkspaceFilesystemTerminalVerificationResult =
   | {
       readonly valid: true;
-      readonly observation: Readonly<WorkspaceFilesystemObservationRecordV1>;
+      readonly observation: Readonly<WorkspaceFilesystemObservationRecord>;
     }
   | {
       readonly valid: false;
@@ -51,44 +51,44 @@ export type BuiltinWorkspaceFilesystemTerminalVerificationResultV1 =
     };
 
 /** App may call this exact SPI-only seam before committing a State receipt. */
-export type BuiltinWorkspaceFilesystemTerminalVerifierV1 = (
-  input: Readonly<ToolPipelineReceiptCommitV1>,
-) => Readonly<BuiltinWorkspaceFilesystemTerminalVerificationResultV1>;
+export type BuiltinWorkspaceFilesystemTerminalVerifier = (
+  input: Readonly<ToolPipelineReceiptCommit>,
+) => Readonly<BuiltinWorkspaceFilesystemTerminalVerificationResult>;
 
-interface IssuedObservationV1 {
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-  readonly observation: Readonly<WorkspaceFilesystemObservationRecordV1>;
+interface IssuedObservation {
+  readonly prepared: Readonly<PreparedToolInvocation>;
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+  readonly observation: Readonly<WorkspaceFilesystemObservationRecord>;
   readonly operationId: 'builtin:read_file' | 'builtin:write_file' | 'builtin:edit_file';
   readonly operationPath: string;
 }
 
-interface CloneAuthorizationV1 {
+interface CloneAuthorization {
   readonly schema: 'kite.builtin-workspace-filesystem-clone-authorization.v1';
 }
 
-interface BoundTerminalV1 extends IssuedObservationV1 {
-  readonly terminal: Readonly<CapabilityToolTerminalResultV1>;
-  readonly clonedObservation: Readonly<WorkspaceFilesystemObservationRecordV1>;
+interface BoundTerminal extends IssuedObservation {
+  readonly terminal: Readonly<CapabilityToolTerminalResult>;
+  readonly clonedObservation: Readonly<WorkspaceFilesystemObservationRecord>;
 }
 
-const issuedObservationsV1 = new WeakMap<object, IssuedObservationV1>();
-const cloneAuthorizationsV1 = new WeakMap<object, IssuedObservationV1>();
-const boundTerminalsV1 = new WeakMap<object, BoundTerminalV1>();
+const issuedObservations = new WeakMap<object, IssuedObservation>();
+const cloneAuthorizations = new WeakMap<object, IssuedObservation>();
+const boundTerminals = new WeakMap<object, BoundTerminal>();
 
 /** Package-internal issuer called only after durable intent and Provider evidence checks. */
-export function issueBuiltinWorkspaceFilesystemReadObservationV1(input: {
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
-  readonly persisted: Readonly<WorkspaceFilesystemPersistedIntentV1>;
-  readonly providerObservation: Readonly<WorkspaceReadFileObservationV1>;
-  readonly observation: Readonly<WorkspaceFilesystemObservationRecordV1>;
-}): Readonly<WorkspaceFilesystemObservationRecordV1> {
-  assertPreparedAndPersistedIntentV1(input.prepared, input.persisted);
-  assertProviderReadEvidenceV1(input.persisted, input.providerObservation, input.observation);
+export function issueBuiltinWorkspaceFilesystemReadObservation(input: {
+  readonly prepared: Readonly<PreparedToolInvocation>;
+  readonly persisted: Readonly<WorkspaceFilesystemPersistedIntent>;
+  readonly providerObservation: Readonly<WorkspaceReadFileObservation>;
+  readonly observation: Readonly<WorkspaceFilesystemObservationRecord>;
+}): Readonly<WorkspaceFilesystemObservationRecord> {
+  assertPreparedAndPersistedIntent(input.prepared, input.persisted);
+  assertProviderReadEvidence(input.persisted, input.providerObservation, input.observation);
   if (!Object.isFrozen(input.observation)) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('provider_evidence_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('provider_evidence_mismatch');
   }
-  issuedObservationsV1.set(input.observation, {
+  issuedObservations.set(input.observation, {
     prepared: input.prepared,
     acknowledgement: input.persisted.acknowledgement,
     observation: input.observation,
@@ -104,29 +104,29 @@ export function issueBuiltinWorkspaceFilesystemReadObservationV1(input: {
  * Provider DTO remains Builtin-private; only this process-local proof crosses
  * into terminal cloning.
  */
-export function issueBuiltinWorkspaceFilesystemMutationObservationV1(input: {
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
-  readonly persisted: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>;
-  readonly mutationReady: Readonly<WorkspaceFilesystemMutationReadyRecordV1>;
-  readonly providerObservation: Readonly<WorkspaceFilesystemCommittedMutationV1>;
-  readonly observation: Readonly<WorkspaceFilesystemObservationRecordV1>;
-}): Readonly<WorkspaceFilesystemObservationRecordV1> {
-  assertPreparedAndPersistedMutationIntentV1(input.prepared, input.persisted);
-  assertMutationReadyMatchesV1(input.persisted, input.mutationReady);
-  assertProviderMutationEvidenceV1(
+export function issueBuiltinWorkspaceFilesystemMutationObservation(input: {
+  readonly prepared: Readonly<PreparedToolInvocation>;
+  readonly persisted: Readonly<WorkspaceFilesystemPersistedMutationIntent>;
+  readonly mutationReady: Readonly<WorkspaceFilesystemMutationReadyRecord>;
+  readonly providerObservation: Readonly<WorkspaceFilesystemCommittedMutation>;
+  readonly observation: Readonly<WorkspaceFilesystemObservationRecord>;
+}): Readonly<WorkspaceFilesystemObservationRecord> {
+  assertPreparedAndPersistedMutationIntent(input.prepared, input.persisted);
+  assertMutationReadyMatches(input.persisted, input.mutationReady);
+  assertProviderMutationEvidence(
     input.persisted,
     input.mutationReady,
     input.providerObservation,
     input.observation,
   );
   if (!Object.isFrozen(input.observation)) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('provider_evidence_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('provider_evidence_mismatch');
   }
   const operationId = input.prepared.identity.operationId;
   if (operationId !== 'builtin:write_file' && operationId !== 'builtin:edit_file') {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('persisted_intent_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('persisted_intent_mismatch');
   }
-  issuedObservationsV1.set(input.observation, {
+  issuedObservations.set(input.observation, {
     prepared: input.prepared,
     acknowledgement: input.persisted.acknowledgement,
     observation: input.observation,
@@ -140,10 +140,10 @@ export function issueBuiltinWorkspaceFilesystemMutationObservationV1(input: {
  * Validate the source observation before the adapter performs its JSON clone.
  * The returned token is process-local and can bind exactly one cloned terminal.
  */
-export function authorizeBuiltinWorkspaceFilesystemTerminalCloneV1(input: {
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
-  readonly value: Readonly<BuiltinOperationExecutionValueV1>;
-}): Readonly<CloneAuthorizationV1> | null {
+export function authorizeBuiltinWorkspaceFilesystemTerminalClone(input: {
+  readonly prepared: Readonly<PreparedToolInvocation>;
+  readonly value: Readonly<BuiltinOperationExecutionValue>;
+}): Readonly<CloneAuthorization> | null {
   const filesystemObservation = input.value.filesystemObservation;
   const operationId = input.prepared.identity.operationId;
   const filesystemOperation =
@@ -152,74 +152,74 @@ export function authorizeBuiltinWorkspaceFilesystemTerminalCloneV1(input: {
     operationId === 'builtin:edit_file';
   if (filesystemObservation === undefined) {
     if (filesystemOperation && input.value.ok) {
-      throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('observation_missing');
+      throw new BuiltinWorkspaceFilesystemObservationAuthorityError('observation_missing');
     }
     return null;
   }
-  if (!filesystemOperation || !input.value.ok || !isObservationRecordV1(filesystemObservation)) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('observation_not_issued');
+  if (!filesystemOperation || !input.value.ok || !isObservationRecord(filesystemObservation)) {
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('observation_not_issued');
   }
-  const issued = issuedObservationsV1.get(filesystemObservation);
+  const issued = issuedObservations.get(filesystemObservation);
   if (!issued) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('observation_not_issued');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('observation_not_issued');
   }
   if (issued.prepared !== input.prepared) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('prepared_identity_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('prepared_identity_mismatch');
   }
   if (issued.operationId !== operationId) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('prepared_identity_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('prepared_identity_mismatch');
   }
-  assertObservationRecordMatchesV1(filesystemObservation, issued.observation);
+  assertObservationRecordMatches(filesystemObservation, issued.observation);
   if (input.value.path !== issued.operationPath) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('provider_evidence_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('provider_evidence_mismatch');
   }
   const authorization = Object.freeze({
     schema: 'kite.builtin-workspace-filesystem-clone-authorization.v1' as const,
   });
-  cloneAuthorizationsV1.set(authorization, issued);
+  cloneAuthorizations.set(authorization, issued);
   return authorization;
 }
 
 /** Bind one source proof to the exact deeply frozen JSON clone returned to Host. */
-export function bindBuiltinWorkspaceFilesystemClonedTerminalV1(input: {
-  readonly authorization: Readonly<CloneAuthorizationV1>;
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
-  readonly terminal: Readonly<CapabilityToolTerminalResultV1>;
+export function bindBuiltinWorkspaceFilesystemClonedTerminal(input: {
+  readonly authorization: Readonly<CloneAuthorization>;
+  readonly prepared: Readonly<PreparedToolInvocation>;
+  readonly terminal: Readonly<CapabilityToolTerminalResult>;
 }): void {
-  const issued = cloneAuthorizationsV1.get(input.authorization);
-  cloneAuthorizationsV1.delete(input.authorization);
+  const issued = cloneAuthorizations.get(input.authorization);
+  cloneAuthorizations.delete(input.authorization);
   if (!issued || issued.prepared !== input.prepared) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('prepared_identity_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('prepared_identity_mismatch');
   }
   const structured = input.terminal.structuredContent;
   if (
     input.terminal.status !== 'success' ||
     !Object.isFrozen(input.terminal) ||
-    !isRecordV1(structured) ||
+    !isRecord(structured) ||
     !Object.isFrozen(structured) ||
     structured.path !== issued.operationPath
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('terminal_clone_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('terminal_clone_mismatch');
   }
   const clonedObservation = structured.filesystemObservation;
   if (
-    !isObservationRecordV1(clonedObservation) ||
+    !isObservationRecord(clonedObservation) ||
     clonedObservation === issued.observation ||
     !Object.isFrozen(clonedObservation)
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('terminal_clone_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('terminal_clone_mismatch');
   }
-  assertObservationRecordMatchesV1(clonedObservation, issued.observation);
-  boundTerminalsV1.set(input.terminal, {
+  assertObservationRecordMatches(clonedObservation, issued.observation);
+  boundTerminals.set(input.terminal, {
     ...issued,
     terminal: input.terminal,
     clonedObservation,
   });
 }
 
-export const verifyBuiltinWorkspaceFilesystemTerminalV1: BuiltinWorkspaceFilesystemTerminalVerifierV1 =
+export const verifyBuiltinWorkspaceFilesystemTerminal: BuiltinWorkspaceFilesystemTerminalVerifier =
   (input) => {
-    const bound = boundTerminalsV1.get(input.result);
+    const bound = boundTerminals.get(input.result);
     if (!bound) return Object.freeze({ valid: false, code: 'terminal_not_issued' });
     if (input.acknowledgement !== bound.acknowledgement) {
       return Object.freeze({ valid: false, code: 'acknowledgement_mismatch' });
@@ -228,9 +228,9 @@ export const verifyBuiltinWorkspaceFilesystemTerminalV1: BuiltinWorkspaceFilesys
     if (
       input.result !== bound.terminal ||
       !Object.isFrozen(input.result) ||
-      !isRecordV1(structured) ||
+      !isRecord(structured) ||
       structured.filesystemObservation !== bound.clonedObservation ||
-      !acknowledgementMatchesPreparedV1(
+      !acknowledgementMatchesPrepared(
         bound.acknowledgement,
         bound.prepared,
         bound.acknowledgement.attempt.attempt,
@@ -239,16 +239,16 @@ export const verifyBuiltinWorkspaceFilesystemTerminalV1: BuiltinWorkspaceFilesys
       return Object.freeze({ valid: false, code: 'terminal_identity_mismatch' });
     }
     try {
-      assertObservationRecordMatchesV1(bound.clonedObservation, bound.observation);
+      assertObservationRecordMatches(bound.clonedObservation, bound.observation);
     } catch {
       return Object.freeze({ valid: false, code: 'terminal_identity_mismatch' });
     }
     return Object.freeze({ valid: true, observation: bound.clonedObservation });
   };
 
-function assertPreparedAndPersistedIntentV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  persisted: Readonly<WorkspaceFilesystemPersistedIntentV1>,
+function assertPreparedAndPersistedIntent(
+  prepared: Readonly<PreparedToolInvocation>,
+  persisted: Readonly<WorkspaceFilesystemPersistedIntent>,
 ): void {
   const identity = prepared.identity;
   if (
@@ -258,25 +258,25 @@ function assertPreparedAndPersistedIntentV1(
     persisted.operation.operationId !== 'builtin:read_file' ||
     persisted.operation.kind !== 'read_file'
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('persisted_intent_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('persisted_intent_mismatch');
   }
   if (
     persisted.record.operationDigest !==
-      workspaceFilesystemOperationDigestV1(providerOperationV1(persisted.operation)) ||
+      workspaceFilesystemOperationDigest(providerOperation(persisted.operation)) ||
     persisted.record.lexicalTargetDigest !==
-      workspaceFilesystemStringDigestV1(persisted.operation.path) ||
+      workspaceFilesystemStringDigest(persisted.operation.path) ||
     persisted.record.argumentsDigest !== identity.argumentsDigest ||
     persisted.record.admissionDigest !== identity.admissionDigest ||
     persisted.record.effectiveEffectsDigest !== identity.effectiveEffectsDigest ||
-    !acknowledgementMatchesPreparedV1(persisted.acknowledgement, prepared, persisted.record.attempt)
+    !acknowledgementMatchesPrepared(persisted.acknowledgement, prepared, persisted.record.attempt)
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('persisted_intent_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('persisted_intent_mismatch');
   }
 }
 
-function assertPreparedAndPersistedMutationIntentV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>,
+function assertPreparedAndPersistedMutationIntent(
+  prepared: Readonly<PreparedToolInvocation>,
+  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntent>,
 ): void {
   const identity = prepared.identity;
   const operationId = identity.operationId;
@@ -287,30 +287,30 @@ function assertPreparedAndPersistedMutationIntentV1(
     persisted.operation.operationId !== operationId ||
     persisted.operation.kind !== operationId.slice('builtin:'.length)
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('persisted_intent_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('persisted_intent_mismatch');
   }
   if (
     persisted.record.operationDigest !==
-      workspaceFilesystemOperationDigestV1(providerOperationV1(persisted.operation)) ||
+      workspaceFilesystemOperationDigest(providerOperation(persisted.operation)) ||
     persisted.record.lexicalTargetDigest !==
-      workspaceFilesystemStringDigestV1(persisted.operation.path) ||
+      workspaceFilesystemStringDigest(persisted.operation.path) ||
     persisted.record.argumentsDigest !== identity.argumentsDigest ||
     persisted.record.admissionDigest !== identity.admissionDigest ||
     persisted.record.effectiveEffectsDigest !== identity.effectiveEffectsDigest ||
-    !acknowledgementMatchesPreparedV1(persisted.acknowledgement, prepared, persisted.record.attempt)
+    !acknowledgementMatchesPrepared(persisted.acknowledgement, prepared, persisted.record.attempt)
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('persisted_intent_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('persisted_intent_mismatch');
   }
 }
 
-function assertMutationReadyMatchesV1(
-  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>,
-  ready: Readonly<WorkspaceFilesystemMutationReadyRecordV1>,
+function assertMutationReadyMatches(
+  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntent>,
+  ready: Readonly<WorkspaceFilesystemMutationReadyRecord>,
 ): void {
   try {
-    validateWorkspaceFilesystemMutationReadyRecordV1(ready);
+    validateWorkspaceFilesystemMutationReadyRecord(ready);
   } catch {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('provider_evidence_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('provider_evidence_mismatch');
   }
   if (
     !Object.isFrozen(ready) ||
@@ -318,23 +318,22 @@ function assertMutationReadyMatchesV1(
     ready.intentDigest !== persisted.record.intentDigest ||
     ready.operationDigest !== persisted.record.operationDigest
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('persisted_intent_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('persisted_intent_mismatch');
   }
 }
 
-function assertProviderMutationEvidenceV1(
-  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>,
-  ready: Readonly<WorkspaceFilesystemMutationReadyRecordV1>,
-  provider: Readonly<WorkspaceFilesystemCommittedMutationV1>,
-  observation: Readonly<WorkspaceFilesystemObservationRecordV1>,
+function assertProviderMutationEvidence(
+  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntent>,
+  ready: Readonly<WorkspaceFilesystemMutationReadyRecord>,
+  provider: Readonly<WorkspaceFilesystemCommittedMutation>,
+  observation: Readonly<WorkspaceFilesystemObservationRecord>,
 ): void {
   const operation = persisted.operation;
-  const targetEvidence = workspaceFilesystemTargetEvidenceV1(provider.target);
+  const targetEvidence = workspaceFilesystemTargetEvidence(provider.target);
   if (
     provider.kind !== 'committed_mutation' ||
     provider.operationKind !== operation.kind ||
-    provider.operationDigest !==
-      workspaceFilesystemOperationDigestV1(providerOperationV1(operation)) ||
+    provider.operationDigest !== workspaceFilesystemOperationDigest(providerOperation(operation)) ||
     provider.target.lexicalPath !== operation.path ||
     provider.targetEvidence.lexicalTargetDigest !== targetEvidence.lexicalTargetDigest ||
     provider.targetEvidence.canonicalTargetDigest !== targetEvidence.canonicalTargetDigest ||
@@ -348,36 +347,36 @@ function assertProviderMutationEvidenceV1(
     observation.targetIdentityDigest !== provider.targetEvidence.targetIdentityDigest ||
     observation.contentDigest !== provider.afterContentDigest
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('provider_evidence_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('provider_evidence_mismatch');
   }
 }
 
-function assertProviderReadEvidenceV1(
-  persisted: Readonly<WorkspaceFilesystemPersistedIntentV1>,
-  provider: Readonly<WorkspaceReadFileObservationV1>,
-  observation: Readonly<WorkspaceFilesystemObservationRecordV1>,
+function assertProviderReadEvidence(
+  persisted: Readonly<WorkspaceFilesystemPersistedIntent>,
+  provider: Readonly<WorkspaceReadFileObservation>,
+  observation: Readonly<WorkspaceFilesystemObservationRecord>,
 ): void {
-  const targetEvidence = workspaceFilesystemTargetEvidenceV1(provider.target);
+  const targetEvidence = workspaceFilesystemTargetEvidence(provider.target);
   if (
     provider.kind !== 'read_file' ||
     provider.target.lexicalPath !== persisted.operation.path ||
     provider.targetEvidence.lexicalTargetDigest !== targetEvidence.lexicalTargetDigest ||
     provider.targetEvidence.canonicalTargetDigest !== targetEvidence.canonicalTargetDigest ||
     provider.targetEvidence.targetIdentityDigest !== targetEvidence.targetIdentityDigest ||
-    provider.contentDigest !== workspaceFilesystemStringDigestV1(provider.rawContent) ||
+    provider.contentDigest !== workspaceFilesystemStringDigest(provider.rawContent) ||
     persisted.record.lexicalTargetDigest !== provider.targetEvidence.lexicalTargetDigest ||
     observation.lexicalTargetDigest !== provider.targetEvidence.lexicalTargetDigest ||
     observation.canonicalTargetDigest !== provider.targetEvidence.canonicalTargetDigest ||
     observation.targetIdentityDigest !== provider.targetEvidence.targetIdentityDigest ||
     observation.contentDigest !== provider.contentDigest
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('provider_evidence_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('provider_evidence_mismatch');
   }
 }
 
-function acknowledgementMatchesPreparedV1(
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
+function acknowledgementMatchesPrepared(
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
+  prepared: Readonly<PreparedToolInvocation>,
   attempt: number,
 ): boolean {
   const recorded = acknowledgement.attempt;
@@ -410,19 +409,19 @@ function acknowledgementMatchesPreparedV1(
   );
 }
 
-function providerOperationV1(
+function providerOperation(
   operation: Readonly<
-    | WorkspaceFilesystemPersistedIntentV1['operation']
-    | WorkspaceFilesystemPersistedMutationIntentV1['operation']
+    | WorkspaceFilesystemPersistedIntent['operation']
+    | WorkspaceFilesystemPersistedMutationIntent['operation']
   >,
 ) {
   const { operationId: _operationId, ...providerOperation } = operation;
   return providerOperation;
 }
 
-function assertObservationRecordMatchesV1(
-  left: Readonly<WorkspaceFilesystemObservationRecordV1>,
-  right: Readonly<WorkspaceFilesystemObservationRecordV1>,
+function assertObservationRecordMatches(
+  left: Readonly<WorkspaceFilesystemObservationRecord>,
+  right: Readonly<WorkspaceFilesystemObservationRecord>,
 ): void {
   if (
     left.actorIdentityDigest !== right.actorIdentityDigest ||
@@ -431,15 +430,15 @@ function assertObservationRecordMatchesV1(
     left.targetIdentityDigest !== right.targetIdentityDigest ||
     left.contentDigest !== right.contentDigest
   ) {
-    throw new BuiltinWorkspaceFilesystemObservationAuthorityErrorV1('terminal_clone_mismatch');
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('terminal_clone_mismatch');
   }
 }
 
-function isObservationRecordV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is Readonly<WorkspaceFilesystemObservationRecordV1> {
+function isObservationRecord(
+  value: RuntimeJsonValue | undefined,
+): value is Readonly<WorkspaceFilesystemObservationRecord> {
   return (
-    isRecordV1(value) &&
+    isRecord(value) &&
     typeof value.actorIdentityDigest === 'string' &&
     typeof value.lexicalTargetDigest === 'string' &&
     typeof value.canonicalTargetDigest === 'string' &&
@@ -448,7 +447,7 @@ function isObservationRecordV1(
   );
 }
 
-function isRecordV1(value: unknown): value is Readonly<Record<string, RuntimeJsonValueV1>> {
+function isRecord(value: unknown): value is Readonly<Record<string, RuntimeJsonValue>> {
   return (
     value !== null &&
     typeof value === 'object' &&

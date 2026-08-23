@@ -1,9 +1,9 @@
 import {
-  type BuiltinModelToolSetV1,
-  type BuiltinToolCatalogProjectionV1,
-  createBuiltinModelToolSurfaceFromProjectionV1,
+  type BuiltinModelToolSet,
+  type BuiltinToolCatalogProjection,
+  createBuiltinModelToolSurfaceFromProjection,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
+  createBuiltinToolCatalogProjection,
   type SkillCatalogSnapshot,
 } from '@kite/builtin-runtime';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
@@ -13,17 +13,17 @@ import type {
   CapabilityDescriptor,
   SubAgentEventSink,
 } from '@kite/runtime-contract';
-import { type CapabilityTurnContextV1, createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { type CapabilityTurnContext, createRuntimeModuleRegistry } from '@kite/runtime-spi';
 import {
-  type AppToolTurnContextV1,
-  createAppToolTurnContextV1,
+  type AppToolTurnContext,
+  createAppToolTurnContext,
 } from '#app/bootstrap/runtime/tool-turn-context';
 import type { AgentConfig } from '#app/config/index';
 
 export interface CreateAgentToolsInput {
   workspace: string;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
   mcpBindings?: Array<{ binding: CapabilityBinding; descriptor: CapabilityDescriptor }>;
   toolSearch?: boolean;
@@ -35,7 +35,7 @@ export interface CreateAgentToolsInput {
   subagentEventSink?: SubAgentEventSink;
   model?: SupportedChatModel;
   threadId?: string;
-  authorization?: import('@kite/runtime-host').StateAuthorizationStateV1;
+  authorization?: import('@kite/runtime-host').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   interactionMode?: import('@kite/runtime-contract').InteractionMode;
@@ -44,13 +44,13 @@ export interface CreateAgentToolsInput {
   activeTaskId?: string;
   modelMessageId?: string;
   toolCallId?: string;
-  workspaceTrust?: CapabilityTurnContextV1['workspaceTrust'];
+  workspaceTrust?: CapabilityTurnContext['workspaceTrust'];
 }
 
-export type ToolAvailabilityContext = AppToolTurnContextV1;
+export type ToolAvailabilityContext = AppToolTurnContext;
 
 export function toolAvailabilityContext(input: CreateAgentToolsInput): ToolAvailabilityContext {
-  return createAppToolTurnContextV1({
+  return createAppToolTurnContext({
     workspace: input.workspace,
     config: input.config,
     threadId: input.threadId,
@@ -70,7 +70,7 @@ export function toolAvailabilityContext(input: CreateAgentToolsInput): ToolAvail
   });
 }
 
-export function builtinCapabilityTurnContextV1(
+export function builtinCapabilityTurnContext(
   input: CreateAgentToolsInput,
   context: ToolAvailabilityContext = toolAvailabilityContext(input),
 ): ToolAvailabilityContext {
@@ -84,12 +84,12 @@ export function builtinCapabilityTurnContextV1(
   });
 }
 
-export function createAgentToolsFromBuiltinProjectionV1(
+export function createAgentToolsFromBuiltinProjection(
   input: CreateAgentToolsInput,
-  projection: BuiltinToolCatalogProjectionV1,
-): BuiltinModelToolSetV1 {
-  const turnContext = builtinCapabilityTurnContextV1(input);
-  return createBuiltinModelToolSurfaceFromProjectionV1({
+  projection: BuiltinToolCatalogProjection,
+): BuiltinModelToolSet {
+  const turnContext = builtinCapabilityTurnContext(input);
+  return createBuiltinModelToolSurfaceFromProjection({
     projection,
     turnContext,
     ...(input.config?.executionCapabilitySurface
@@ -101,29 +101,29 @@ export function createAgentToolsFromBuiltinProjectionV1(
   }).tools;
 }
 
-const TEST_RUNTIME_REGISTRY_SNAPSHOT_V1 = createRuntimeModuleRegistryV1(
+const TEST_RUNTIME_REGISTRY_SNAPSHOT_ = createRuntimeModuleRegistry(
   createBuiltinRuntimeModules(),
 ).snapshot();
-const TEST_BUILTIN_TOOL_CATALOG_V1 = createBuiltinToolCatalogProjectionV1(
-  TEST_RUNTIME_REGISTRY_SNAPSHOT_V1,
+const TEST_BUILTIN_TOOL_CATALOG_ = createBuiltinToolCatalogProjection(
+  TEST_RUNTIME_REGISTRY_SNAPSHOT_,
 );
 
-export function projectTestAgentToolsV1(
+export function projectTestAgentTools(
   input: CreateAgentToolsInput,
   context: ToolAvailabilityContext = toolAvailabilityContext(input),
 ) {
-  const projection = TEST_BUILTIN_TOOL_CATALOG_V1.forTurn(
-    builtinCapabilityTurnContextV1(input, context),
+  const projection = TEST_BUILTIN_TOOL_CATALOG_.forTurn(
+    builtinCapabilityTurnContext(input, context),
   );
   return Object.freeze({
     projection,
-    tools: createAgentToolsFromBuiltinProjectionV1(input, projection),
+    tools: createAgentToolsFromBuiltinProjection(input, projection),
   });
 }
 
-export function createTestAgentToolsV1(
+export function createTestAgentTools(
   input: CreateAgentToolsInput,
   context: ToolAvailabilityContext = toolAvailabilityContext(input),
 ) {
-  return projectTestAgentToolsV1(input, context).tools;
+  return projectTestAgentTools(input, context).tools;
 }

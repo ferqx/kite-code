@@ -1,34 +1,30 @@
 import { createHash } from 'node:crypto';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { ModelResponseSourceV1 } from '@kite/builtin-runtime/model';
+import type { ModelResponseSource } from '@kite/builtin-runtime/model';
 import {
-  type BuiltinModelOperationAttemptV1,
-  type BuiltinModelOperationExecutionPortV1,
-  canonicalModelJsonV1,
-  createLiveModelResponseSourceV1,
-  type ModelArtifactWriterV1,
-  ModelInvocationGatewayV1,
-  type ModelInvocationPersistenceV1,
-  type SingleAttemptTransportV1,
+  type BuiltinModelOperationAttempt,
+  type BuiltinModelOperationExecutionPort,
+  canonicalModelJson,
+  createLiveModelResponseSource,
+  type ModelArtifactWriter,
+  ModelInvocationGateway,
+  type ModelInvocationPersistence,
+  type SingleAttemptTransport,
 } from '@kite/builtin-runtime/model';
-import type { RuntimeIdSourceV1 } from '@kite/runtime-host';
+import type { RuntimeIdSource } from '@kite/runtime-host';
 import {
-  createRuntimeHostStateInitialStateV1,
-  planModelInvocationResourceV1,
+  createRuntimeHostStateInitialState,
+  planModelInvocationResource,
   type RuntimeState,
 } from '@kite/runtime-host';
-import type {
-  ModelResponseRecordV1,
-  ModelSurfaceV1,
-  PrivateArtifactRefV1,
-} from '@kite/runtime-spi';
+import type { ModelResponseRecord, ModelSurface, PrivateArtifactRef } from '@kite/runtime-spi';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function artifactRef<K extends 'model_surface' | 'model_response'>(
   kind: K,
-  value: ModelSurfaceV1 | ModelResponseRecordV1,
-): PrivateArtifactRefV1 & { kind: K } {
-  const bytes = Buffer.from(canonicalModelJsonV1(value), 'utf8');
+  value: ModelSurface | ModelResponseRecord,
+): PrivateArtifactRef & { kind: K } {
+  const bytes = Buffer.from(canonicalModelJson(value), 'utf8');
   const digest = createHash('sha256').update(bytes).digest('hex');
   return {
     artifactId: `artifact-${digest}`,
@@ -39,35 +35,35 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
 }
 
 /** Test-only direct mechanism. Production must use the App-composed Host port. */
-export function testBuiltinModelOperationExecutionPortV1(): BuiltinModelOperationExecutionPortV1 {
+export function testBuiltinModelOperationExecutionPort(): BuiltinModelOperationExecutionPort {
   return Object.freeze({
-    execute: (input: BuiltinModelOperationAttemptV1) => input.attempt(),
+    execute: (input: BuiltinModelOperationAttempt) => input.attempt(),
   });
 }
 
 /** Explicit, in-memory test composition. It is never used by production code. */
-export function createTestModelInvocationHarnessV1(input: {
+export function createTestModelInvocationHarness(input: {
   workspace: string;
   threadId?: string;
   state?: RuntimeState;
   persist?: (events: RuntimeEvent[]) => boolean | Promise<boolean>;
-  artifacts?: ModelArtifactWriterV1;
-  transport?: SingleAttemptTransportV1;
-  source?: ModelResponseSourceV1;
-  operationExecution?: BuiltinModelOperationExecutionPortV1;
+  artifacts?: ModelArtifactWriter;
+  transport?: SingleAttemptTransport;
+  source?: ModelResponseSource;
+  operationExecution?: BuiltinModelOperationExecutionPort;
   now?: () => number;
   sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
-  runtimeIdSource?: RuntimeIdSourceV1;
+  runtimeIdSource?: RuntimeIdSource;
   preserveMissingProjectIdentity?: boolean;
 }): {
-  gateway: ModelInvocationGatewayV1;
-  persistence: ModelInvocationPersistenceV1<RuntimeState, RuntimeEvent>;
+  gateway: ModelInvocationGateway;
+  persistence: ModelInvocationPersistence<RuntimeState, RuntimeEvent>;
   events: RuntimeEvent[];
   getState(): RuntimeState;
 } {
   let state =
     input.state ??
-    createRuntimeHostStateInitialStateV1({
+    createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: input.threadId ?? 'test-model-invocation',
       userId: 'test',
@@ -89,7 +85,7 @@ export function createTestModelInvocationHarnessV1(input: {
     };
   }
   const events: RuntimeEvent[] = [];
-  const persistence: ModelInvocationPersistenceV1<RuntimeState, RuntimeEvent> = {
+  const persistence: ModelInvocationPersistence<RuntimeState, RuntimeEvent> = {
     getState: () => state,
     persistEvents: async (batch) => {
       if (input.persist && !(await input.persist(batch))) return false;
@@ -100,18 +96,18 @@ export function createTestModelInvocationHarnessV1(input: {
       return true;
     },
   };
-  const gateway = new ModelInvocationGatewayV1({
+  const gateway = new ModelInvocationGateway({
     artifacts:
       input.artifacts ??
       ({
         writeSurface: (surface) => artifactRef('model_surface', surface),
         writeResponse: (record) => artifactRef('model_response', record),
-      } satisfies ModelArtifactWriterV1),
-    source: input.source ?? createLiveModelResponseSourceV1(input.transport),
-    operationExecution: input.operationExecution ?? testBuiltinModelOperationExecutionPortV1(),
+      } satisfies ModelArtifactWriter),
+    source: input.source ?? createLiveModelResponseSource(input.transport),
+    operationExecution: input.operationExecution ?? testBuiltinModelOperationExecutionPort(),
     ...(input.now ? { now: input.now } : {}),
     ...(input.runtimeIdSource ? { runtimeIdSource: input.runtimeIdSource } : {}),
-    planResource: (state, request) => planModelInvocationResourceV1(state as RuntimeState, request),
+    planResource: (state, request) => planModelInvocationResource(state as RuntimeState, request),
     sleep: input.sleep ?? (async () => {}),
   });
   return { gateway, persistence, events, getState: () => state };

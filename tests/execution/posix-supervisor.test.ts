@@ -2,21 +2,21 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { projectApprovedProxyEnvironmentV1 } from '@kite/builtin-runtime/sandbox';
-import type { RuntimeHostSandboxPreparationLifecycleV1 } from '@kite/runtime-host';
+import { projectApprovedProxyEnvironment } from '@kite/builtin-runtime/sandbox';
+import type { RuntimeHostSandboxPreparationLifecycle } from '@kite/runtime-host';
 import {
-  buildPosixSupervisorEnvironmentV1,
-  createPosixSupervisorLockV1,
-  executePosixSupervisedV1,
-  type PosixSupervisorIdentityV1,
-  type PosixSupervisorLockIdentityV1,
-  readComparablePosixProcessStartIdentityV1,
-  reconcilePosixSupervisorV1,
-  terminatePosixSupervisorV1,
+  buildPosixSupervisorEnvironment,
+  createPosixSupervisorLock,
+  executePosixSupervised,
+  type PosixSupervisorIdentity,
+  type PosixSupervisorLockIdentity,
+  readComparablePosixProcessStartIdentity,
+  reconcilePosixSupervisor,
+  terminatePosixSupervisor,
 } from '@kite/runtime-host';
-import type { PreparedSandboxExecutionV1, SandboxPreparationLifecycleV1 } from '@kite/runtime-spi';
-import { sandboxBackendCapabilitiesV1 } from '#app/sandbox/runtime-execution';
-import { compileOssReleaseExecutableV1 } from '../../scripts/release/oss-candidate';
+import type { PreparedSandboxExecution, SandboxPreparationLifecycle } from '@kite/runtime-spi';
+import { sandboxBackendCapabilities } from '#app/sandbox/runtime-execution';
+import { compileOssReleaseExecutable } from '../../scripts/release/oss-candidate';
 
 const POSIX = process.platform === 'darwin' || process.platform === 'linux';
 
@@ -25,7 +25,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-supervisor-standalone-'));
     const executable = join(root, 'kite');
     try {
-      await compileOssReleaseExecutableV1('scripts/release/entrypoints/cli.ts', executable);
+      await compileOssReleaseExecutable('scripts/release/entrypoints/cli.ts', executable);
       // An installed Kite process has already faulted the standalone image in
       // before it self-spawns supervisor mode. Mirror that production shape;
       // otherwise a highly parallel Bun suite measures cold code-sign/dyld
@@ -41,7 +41,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         'printf packaged-ok; env | grep -E "^(NODE_OPTIONS|BUN_OPTIONS|OPENAI_API_KEY)=" || true',
       ]);
       let startedIdentity = '';
-      const result = await executePosixSupervisedV1({
+      const result = await executePosixSupervised({
         prepared,
         lifecycle: supervisorLifecycle(
           spiLifecycle((identity) => {
@@ -71,7 +71,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
 
   test('restore waits for the inherited pre-spawn lock before confirming no-spawn cleanup', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-supervisor-lock-'));
-    const lockIdentity: PosixSupervisorLockIdentityV1 = {
+    const lockIdentity: PosixSupervisorLockIdentity = {
       version: 1,
       dispatchId: '22345678-1234-4234-8234-123456789abc',
       supervisorNonce: 'restore-nonce',
@@ -79,7 +79,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     };
     let child: Bun.Subprocess | undefined;
     try {
-      const lock = createPosixSupervisorLockV1(root, lockIdentity);
+      const lock = createPosixSupervisorLock(root, lockIdentity);
       child = Bun.spawn(['/bin/sleep', '60'], {
         detached: true,
         stdio: ['ignore', 'ignore', 'ignore', lock.fd],
@@ -87,7 +87,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       });
       lock.close();
       let settled = false;
-      const reconciliation = reconcilePosixSupervisorV1({
+      const reconciliation = reconcilePosixSupervisor({
         runtimePath: root,
         dispatch: {
           attempt: 1,
@@ -135,7 +135,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         }
       | undefined;
     try {
-      const execution = executePosixSupervisedV1({
+      const execution = executePosixSupervised({
         prepared: plan(root, [
           '/bin/sh',
           '-c',
@@ -159,7 +159,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       expect(() => process.kill(descendantPid, 0)).not.toThrow();
 
       expect(
-        await reconcilePosixSupervisorV1({
+        await reconcilePosixSupervisor({
           runtimePath: join(root, 'control'),
           dispatch: {
             attempt: 1,
@@ -200,7 +200,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     try {
       const exact = await waitForIdentity(child.pid);
       const forged = forgeStartIdentity(exact);
-      const forgedRecord: PosixSupervisorIdentityV1 = {
+      const forgedRecord: PosixSupervisorIdentity = {
         version: 1,
         dispatchId: '32345678-1234-4234-8234-123456789abc',
         supervisorNonce: 'identity-nonce',
@@ -209,10 +209,10 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         processGroupId: child.pid,
         processStartIdentity: forged,
       };
-      expect(await terminatePosixSupervisorV1(forgedRecord)).toBe(false);
+      expect(await terminatePosixSupervisor(forgedRecord)).toBe(false);
       expect(() => process.kill(child.pid, 0)).not.toThrow();
       expect(
-        await terminatePosixSupervisorV1({
+        await terminatePosixSupervisor({
           ...forgedRecord,
           processStartIdentity: exact,
         }),
@@ -231,19 +231,19 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     const fixedKeys = ['PATH', 'LANG', 'LC_ALL', 'TMPDIR'] as const;
     for (const key of fixedKeys) {
       expect(() =>
-        buildPosixSupervisorEnvironmentV1(
+        buildPosixSupervisorEnvironment(
           '/tmp/runtime-host-overlay-test',
           Object.freeze({ [key]: 'forged' }),
         ),
       ).toThrow(`cannot override '${key}'`);
     }
     expect(() =>
-      buildPosixSupervisorEnvironmentV1('/tmp/runtime-host-overlay-test', {
+      buildPosixSupervisorEnvironment('/tmp/runtime-host-overlay-test', {
         HTTP_PROXY: 'http://proxy.example.test:8080',
       }),
     ).toThrow('must be a frozen object');
     expect(
-      buildPosixSupervisorEnvironmentV1(
+      buildPosixSupervisorEnvironment(
         '/tmp/runtime-host-overlay-test',
         Object.freeze({ HTTP_PROXY: 'http://proxy.example.test:8080' }),
       ),
@@ -254,7 +254,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-supervisor-no-go-'));
     const marker = join(root, 'started.marker');
     try {
-      const result = await executePosixSupervisedV1({
+      const result = await executePosixSupervised({
         prepared: plan(root, ['/bin/sh', '-c', `printf started > ${JSON.stringify(marker)}`]),
         lifecycle: {
           ...supervisorLifecycle(spiLifecycle(() => {})),
@@ -279,7 +279,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     const run = async (label: string, overlay: Readonly<Record<string, string>>) => {
       const root = mkdtempSync(join(tmpdir(), `kite-supervisor-overlay-${label}-`));
       try {
-        return await executePosixSupervisedV1({
+        return await executePosixSupervised({
           prepared: plan(root, [
             '/bin/sh',
             '-c',
@@ -303,11 +303,11 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     };
     const approved = await run(
       'approved',
-      projectApprovedProxyEnvironmentV1({ networkMode: 'allow_all', source: proxySource }),
+      projectApprovedProxyEnvironment({ networkMode: 'allow_all', source: proxySource }),
     );
     const disabled = await run(
       'disabled',
-      projectApprovedProxyEnvironmentV1({ networkMode: 'disabled', source: proxySource }),
+      projectApprovedProxyEnvironment({ networkMode: 'disabled', source: proxySource }),
     );
     expect(approved.outcome.stdout).toBe('http://proxy.example.test:8080|localhost,127.0.0.1');
     expect(disabled.outcome.stdout).toBe('|');
@@ -342,7 +342,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       );
       const marker = join(root, 'started.marker');
       try {
-        const result = await executePosixSupervisedV1({
+        const result = await executePosixSupervised({
           prepared: plan(
             root,
             ['/bin/sh', '-c', `printf started > ${JSON.stringify(marker)}`],
@@ -368,26 +368,26 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     const cases = [
       {
         label: 'top-level',
-        prepare: (base: PreparedSandboxExecutionV1) => ({ ...base }),
+        prepare: (base: PreparedSandboxExecution) => ({ ...base }),
       },
       {
         label: 'argv',
-        prepare: (base: PreparedSandboxExecutionV1) =>
+        prepare: (base: PreparedSandboxExecution) =>
           Object.freeze({ ...base, argv: [...base.argv] }),
       },
       {
         label: 'approved-argv',
-        prepare: (base: PreparedSandboxExecutionV1) =>
+        prepare: (base: PreparedSandboxExecution) =>
           Object.freeze({ ...base, approvedArgv: [...base.approvedArgv] }),
       },
       {
         label: 'environment',
-        prepare: (base: PreparedSandboxExecutionV1) =>
+        prepare: (base: PreparedSandboxExecution) =>
           Object.freeze({ ...base, env: { HTTP_PROXY: 'prepared' } }),
       },
       {
         label: 'backend-capabilities',
-        prepare: (base: PreparedSandboxExecutionV1) =>
+        prepare: (base: PreparedSandboxExecution) =>
           Object.freeze({
             ...base,
             backendCapabilities: {
@@ -398,7 +398,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       },
       {
         label: 'backend-network',
-        prepare: (base: PreparedSandboxExecutionV1) =>
+        prepare: (base: PreparedSandboxExecution) =>
           Object.freeze({
             ...base,
             backendCapabilities: {
@@ -409,12 +409,12 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       },
       {
         label: 'cleanup',
-        prepare: (base: PreparedSandboxExecutionV1) =>
+        prepare: (base: PreparedSandboxExecution) =>
           Object.freeze({ ...base, cleanup: { ...base.cleanup } }),
       },
       {
         label: 'recovery-payload',
-        prepare: (base: PreparedSandboxExecutionV1) =>
+        prepare: (base: PreparedSandboxExecution) =>
           Object.freeze({
             ...base,
             cleanup: Object.freeze({
@@ -431,7 +431,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         const prepared = testCase.prepare(
           plan(root, ['/bin/sh', '-c', `printf started > ${JSON.stringify(marker)}`]),
         );
-        const result = await executePosixSupervisedV1({
+        const result = await executePosixSupervised({
           prepared,
           lifecycle: supervisorLifecycle(spiLifecycle(() => {})),
           dispatchId: `${String(index + 1).padStart(8, '0')}-1234-4234-8234-123456789abc`,
@@ -458,7 +458,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       argv: Object.freeze(['/bin/sh', '-c', `printf forged > ${JSON.stringify(marker)}`]),
     });
     try {
-      await executePosixSupervisedV1({
+      await executePosixSupervised({
         get prepared() {
           return current;
         },
@@ -495,7 +495,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
   test('fails closed before spawning on zero dispatch identity', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-supervisor-invalid-bootstrap-'));
     try {
-      const result = await executePosixSupervisedV1({
+      const result = await executePosixSupervised({
         prepared: plan(root, ['/bin/true']),
         lifecycle: supervisorLifecycle(spiLifecycle(() => {})),
         dispatchId: '',
@@ -523,7 +523,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       const root = mkdtempSync(join(tmpdir(), `kite-supervisor-frame-${mode}-`));
       const script = writeForgedSupervisorScript(root, mode);
       try {
-        const result = await executePosixSupervisedV1({
+        const result = await executePosixSupervised({
           prepared: plan(root, ['/bin/true']),
           lifecycle: supervisorLifecycle(spiLifecycle(() => {})),
           dispatchId: 'f2345678-1234-4234-8234-123456789abc',
@@ -552,7 +552,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       let descendantPid = 0;
       try {
         const startedAt = Date.now();
-        const result = await executePosixSupervisedV1({
+        const result = await executePosixSupervised({
           prepared: plan(root, [
             '/bin/sh',
             '-c',
@@ -596,9 +596,9 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       const dispatchIntentDigest = 'sha256:darwin-detached-negative-dispatch';
       let descendantPid = 0;
       let descendantIdentity: string | undefined;
-      let supervisorIdentity: PosixSupervisorIdentityV1 | undefined;
+      let supervisorIdentity: PosixSupervisorIdentity | undefined;
       const abort = new AbortController();
-      let execution: Promise<Awaited<ReturnType<typeof executePosixSupervisedV1>>> | undefined;
+      let execution: Promise<Awaited<ReturnType<typeof executePosixSupervised>>> | undefined;
       try {
         writeFileSync(
           fixturePath,
@@ -623,7 +623,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           ].join('\n'),
           { mode: 0o700 },
         );
-        execution = executePosixSupervisedV1({
+        execution = executePosixSupervised({
           signal: abort.signal,
           prepared: plan(root, [
             '/bin/sh',
@@ -657,7 +657,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         const result = await execution;
         expect(result.cleanupConfirmed).toBe(false);
         expect(result.outcome.processCleanup?.confirmedExited).toBe(false);
-        expect(readComparablePosixProcessStartIdentityV1(descendantPid)).toBe(descendantIdentity);
+        expect(readComparablePosixProcessStartIdentity(descendantPid)).toBe(descendantIdentity);
       } finally {
         abort.abort();
         await execution?.catch(() => undefined);
@@ -675,7 +675,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           try {
             if (
               descendantIdentity &&
-              readComparablePosixProcessStartIdentityV1(descendantPid) === descendantIdentity
+              readComparablePosixProcessStartIdentity(descendantPid) === descendantIdentity
             ) {
               process.kill(descendantPid, 'SIGKILL');
             }
@@ -684,7 +684,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           }
           expect(await waitForPidExit(descendantPid)).toBe(true);
         }
-        if (supervisorIdentity) await terminatePosixSupervisorV1(supervisorIdentity);
+        if (supervisorIdentity) await terminatePosixSupervisor(supervisorIdentity);
         rmSync(root, { recursive: true, force: true });
       }
     },
@@ -696,12 +696,12 @@ function plan(
   runtimePath: string,
   argv: readonly string[],
   env: Readonly<Record<string, string>> | null = null,
-): PreparedSandboxExecutionV1 {
+): PreparedSandboxExecution {
   const controlRoot = join(runtimePath, 'control');
   const dataRoot = join(runtimePath, 'data');
   mkdirSync(controlRoot, { recursive: true, mode: 0o700 });
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 });
-  const backendCapabilities = sandboxBackendCapabilitiesV1(
+  const backendCapabilities = sandboxBackendCapabilities(
     process.platform === 'linux' ? 'bubblewrap' : 'seatbelt',
   );
   return Object.freeze({
@@ -753,8 +753,8 @@ function writeForgedSupervisorScript(
   const source = `#!${process.execPath}
 import { connect } from 'node:net';
 import {
-  readComparablePosixProcessStartIdentityV1,
-  writePosixSupervisorIdentityV1,
+  readComparablePosixProcessStartIdentity,
+  writePosixSupervisorIdentity,
 } from '${identityModule}';
 
 const mode = '${mode}';
@@ -784,7 +784,7 @@ const ready = {
   dispatchIntentDigest,
   pid: process.pid,
   processGroupId: process.pid,
-  processStartIdentity: readComparablePosixProcessStartIdentityV1(process.pid),
+  processStartIdentity: readComparablePosixProcessStartIdentity(process.pid),
 };
 const socket = connect(socketPath, () => {
   if (mode === 'unknown-field') {
@@ -803,7 +803,7 @@ const socket = connect(socketPath, () => {
     socket.write(wire('posix-supervisor-child', 0, { ...ready, dispatchIntentDigest: undefined }));
     return;
   }
-  writePosixSupervisorIdentityV1(identityPath, {
+  writePosixSupervisorIdentity(identityPath, {
     version: 1,
     dispatchId,
     supervisorNonce,
@@ -823,7 +823,7 @@ socket.on('error', () => process.exit(125));
   return target;
 }
 
-function spiLifecycle(onStarted: (identity: string) => void): SandboxPreparationLifecycleV1 {
+function spiLifecycle(onStarted: (identity: string) => void): SandboxPreparationLifecycle {
   return {
     async recordPreparationIntent() {
       throw new Error('not used');
@@ -869,8 +869,8 @@ function spiLifecycle(onStarted: (identity: string) => void): SandboxPreparation
 }
 
 function supervisorLifecycle(
-  lifecycle: SandboxPreparationLifecycleV1,
-): RuntimeHostSandboxPreparationLifecycleV1 {
+  lifecycle: SandboxPreparationLifecycle,
+): RuntimeHostSandboxPreparationLifecycle {
   return {
     recordExecutionSupervisorStarted: async (prepared, input) => {
       const acknowledgement = await lifecycle.recordExecutionSupervisorStarted(prepared, input);
@@ -889,7 +889,7 @@ function supervisorLifecycle(
 
 async function waitForIdentity(pid: number): Promise<string> {
   for (let attempt = 0; attempt < 100; attempt++) {
-    const identity = readComparablePosixProcessStartIdentityV1(pid);
+    const identity = readComparablePosixProcessStartIdentity(pid);
     if (identity) return identity;
     await Bun.sleep(10);
   }

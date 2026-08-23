@@ -12,7 +12,7 @@
 
 MCP 的 connect/discovery/read、Manager/Supervisor、auth/credential、transport、write governance 与结果归一化都由 `packages/builtin-runtime/src/mcp/` 拥有。App 只组合配置、execution/network boundary、共享 CredentialBroker 和 neutral Host process port；Host 只拥有 generic process/network mechanism。不存在 Core/SDK direct caller、第二 Manager 或 App-side Tool decision。
 
-动态能力只有在 `capabilityCatalogV1` 与 `mcpRuntimeBindingV1` 都开启时才可执行。Model-visible name 必须匹配当前 capability binding、turn、descriptor revision 与 input schema；Runtime 调用 `McpRuntimeProvider.callCapability()`，Supervisor/Manager 在 transport 前再次核对 current generation、availability、revision 和 schema。展示名永远不被解析为执行身份。
+动态能力只有在 `capabilityCatalog` 与 `mcpRuntimeBinding` 都开启时才可执行。Model-visible name 必须匹配当前 capability binding、turn、descriptor revision 与 input schema；Runtime 调用 `McpRuntimeProvider.callCapability()`，Supervisor/Manager 在 transport 前再次核对 current generation、availability、revision 和 schema。展示名永远不被解析为执行身份。
 
 Catalog snapshot 是不可变、版本化的。`list_changed`、disable/remove、config/approval drift 或成功 rediscovery 会替换 snapshot；旧 binding 不原地更新并 fail closed。Tool Search/inventory/resource discovery 只读 snapshot，不触发 readiness 或 transport。
 
@@ -22,13 +22,13 @@ Remote HTTP connect、discovery、resource、Tool 与 OAuth operation 使用逐 
 
 HTTP Tool dispatch 对最终 arguments 只执行一次深冻结 JSON-safe bounded snapshot。schema validation、secret inspection、argument digest 与 SDK wire 都消费同一 snapshot；accessor、custom `toJSON`、symbol、sparse/extended array、cycle、unsupported prototype、超 depth/node/character 或 credential-shaped content 在 transport 前拒绝。此检查用于阻止 secret 泄漏和 TOCTOU，不签发 DataOrigin、EgressAuthority、permit、receipt 或 nonce ledger。
 
-空或非空合法参数都不需要第二套 content-egress authority。Tool effects approval、execution boundary、HTTP endpoint/TLS 与 credential broker 已分别覆盖真实边界；不得恢复 `RemoteMcpEgressPermitV1`、`mcp.egress_decided` 或相关 feature flag。
+空或非空合法参数都不需要第二套 content-egress authority。Tool effects approval、execution boundary、HTTP endpoint/TLS 与 credential broker 已分别覆盖真实边界；不得恢复 `RemoteMcpEgressPermit`、`mcp.egress_decided` 或相关 feature flag。
 
 ## stdio transport
 
-Builtin Manager 不导入 `StdioClientTransport`、`cross-spawn`，也不展开 `process.env`。它只把 exact server/revision/command/args/cwd 与显式 safe env 交给 `McpStdioProcessPortV1`；Host-owned wrapper 是唯一 spawn owner。Production composition 未提供合格 process port 时 local stdio fail closed，spawn=0。
+Builtin Manager 不导入 `StdioClientTransport`、`cross-spawn`，也不展开 `process.env`。它只把 exact server/revision/command/args/cwd 与显式 safe env 交给 `McpStdioProcessPort`；Host-owned wrapper 是唯一 spawn owner。Production composition 未提供合格 process port 时 local stdio fail closed，spawn=0。
 
-Host wrapper 先验证 strict `RuntimeControlFrameV1`，再启动 exact MCP child；ready/terminal control frame 绑定 domain、peer、invocation 与 monotonic sequence。control channel 不包含 secret/HMAC/bootstrap key，也不传给实际 child。JSON-RPC line/read/write/backpressure 都有固定 bounds；wrong peer/invocation、replay、unknown/truncated/oversized、child pre-ready exit 或 cleanup unknown 都 fail closed。
+Host wrapper 先验证 strict `RuntimeControlFrame`，再启动 exact MCP child；ready/terminal control frame 绑定 domain、peer、invocation 与 monotonic sequence。control channel 不包含 secret/HMAC/bootstrap key，也不传给实际 child。JSON-RPC line/read/write/backpressure 都有固定 bounds；wrong peer/invocation、replay、unknown/truncated/oversized、child pre-ready exit 或 cleanup unknown 都 fail closed。
 
 command、path-like argv 与 cwd 在 Host port 前经过 protected-path/effective Workspace 检查。未批准路径、Workspace drift 或 config revision drift 必须保持 Host spawn 为 0。HTTP 不套用 stdio control frame；其真实性来自真实 TLS/OAuth/network boundary。
 

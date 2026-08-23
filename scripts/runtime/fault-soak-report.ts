@@ -41,7 +41,7 @@ export type RuntimeFaultSoakCaseId = (typeof RUNTIME_FAULT_SOAK_CASE_IDS)[number
 export type RuntimeFaultSoakProfile = 'ci' | 'qualification';
 export type RuntimeFaultSoakStatus = 'passed' | 'failed' | 'inconclusive';
 
-export type RuntimeFaultSoakSourceV2 =
+export type RuntimeFaultSoakSource =
   | {
       kind: 'local';
     }
@@ -81,7 +81,7 @@ export interface UnsupportedMetric {
 
 export type OptionalMetric<T> = SupportedMetric<T> | UnsupportedMetric;
 
-export interface RuntimeFaultSoakLifecyclePointV2 {
+export interface RuntimeFaultSoakLifecyclePoint {
   sequence: number;
   before: number;
   after: number;
@@ -90,7 +90,7 @@ export interface RuntimeFaultSoakLifecyclePointV2 {
   cleanupConfirmed: boolean;
 }
 
-export type RuntimeFaultSoakMetricEvidenceV2 =
+export type RuntimeFaultSoakMetricEvidence =
   | {
       kind: 'fresh_process_diagnostic';
       before: number;
@@ -106,8 +106,8 @@ export type RuntimeFaultSoakMetricEvidenceV2 =
           lifecycleId: string;
           lifecycleGroupNonce: string;
         };
-        warmup: RuntimeFaultSoakLifecyclePointV2;
-        lifecycles: readonly RuntimeFaultSoakLifecyclePointV2[];
+        warmup: RuntimeFaultSoakLifecyclePoint;
+        lifecycles: readonly RuntimeFaultSoakLifecyclePoint[];
       }>;
     };
 
@@ -127,7 +127,7 @@ export type RuntimeFaultSoakMetricSummary =
       reasons: readonly string[];
     };
 
-export interface RuntimeBudgetUsageEvidenceV2 {
+export interface RuntimeBudgetUsageEvidence {
   source: 'actual_runtime_ledger';
   provenance?: {
     caseId: RuntimeFaultSoakCaseId;
@@ -164,7 +164,7 @@ export type RuntimeBudgetUsageSummary =
     }
   | UnsupportedMetric;
 
-export interface RuntimeFaultSoakAttemptV2 {
+export interface RuntimeFaultSoakAttempt {
   caseId: RuntimeFaultSoakCaseId;
   iteration: number;
   status: 'passed' | 'failed' | 'timed_out';
@@ -174,8 +174,8 @@ export interface RuntimeFaultSoakAttemptV2 {
   stateInvariantAssertions: number;
   /** Passing probe invocations that asserted each terminal taxonomy outcome. */
   terminalTaxonomyAssertions: Readonly<Record<string, number>>;
-  /** Actual reconciled/committed ResourceBudgetV1 ledger receipts, when this probe runs Runtime. */
-  runtimeBudgetUsage: OptionalMetric<readonly RuntimeBudgetUsageEvidenceV2[]>;
+  /** Actual reconciled/committed ResourceBudget ledger receipts, when this probe runs Runtime. */
+  runtimeBudgetUsage: OptionalMetric<readonly RuntimeBudgetUsageEvidence[]>;
   cleanup: {
     confirmed: boolean;
     orphanPids: OptionalMetric<readonly number[]>;
@@ -183,15 +183,15 @@ export interface RuntimeFaultSoakAttemptV2 {
     residualPaths: readonly string[];
   };
   resources: {
-    rssBytes: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
-    activeResources: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
-    fileDescriptors: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
-    listeners: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
-    handles: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
+    rssBytes: OptionalMetric<RuntimeFaultSoakMetricEvidence>;
+    activeResources: OptionalMetric<RuntimeFaultSoakMetricEvidence>;
+    fileDescriptors: OptionalMetric<RuntimeFaultSoakMetricEvidence>;
+    listeners: OptionalMetric<RuntimeFaultSoakMetricEvidence>;
+    handles: OptionalMetric<RuntimeFaultSoakMetricEvidence>;
   };
 }
 
-export interface RuntimeFaultSoakReportV2 {
+export interface RuntimeFaultSoakReport {
   version: typeof RUNTIME_FAULT_SOAK_REPORT_VERSION;
   runnerRevision: string;
   seed: number;
@@ -207,12 +207,12 @@ export interface RuntimeFaultSoakReportV2 {
     arch: string;
     bunVersion: string;
   };
-  source: RuntimeFaultSoakSourceV2;
+  source: RuntimeFaultSoakSource;
   startedAt: string;
   finishedAt: string;
   status: RuntimeFaultSoakStatus;
   failureCodes: readonly string[];
-  attempts: readonly RuntimeFaultSoakAttemptV2[];
+  attempts: readonly RuntimeFaultSoakAttempt[];
   cases: ReadonlyArray<{
     id: RuntimeFaultSoakCaseId;
     attempts: number;
@@ -268,9 +268,9 @@ export interface BuildRuntimeFaultSoakReportInput {
   perCaseTimeoutMs: number;
   startedAt: string;
   finishedAt: string;
-  environment: RuntimeFaultSoakReportV2['environment'];
-  source?: RuntimeFaultSoakSourceV2;
-  attempts: readonly RuntimeFaultSoakAttemptV2[];
+  environment: RuntimeFaultSoakReport['environment'];
+  source?: RuntimeFaultSoakSource;
+  attempts: readonly RuntimeFaultSoakAttempt[];
 }
 
 export function nearestRankPercentile(values: readonly number[], percentile: number): number {
@@ -298,14 +298,14 @@ export function canonicalRuntimeFaultSoakJson(value: unknown): string {
 }
 
 export function computeRuntimeFaultSoakReportDigest(
-  report: Omit<RuntimeFaultSoakReportV2, 'reportDigest'>,
+  report: Omit<RuntimeFaultSoakReport, 'reportDigest'>,
 ): string {
   return `sha256:${createHash('sha256')
     .update(canonicalRuntimeFaultSoakJson(report))
     .digest('hex')}`;
 }
 
-function isValidGithubActionsSource(source: RuntimeFaultSoakSourceV2): boolean {
+function isValidGithubActionsSource(source: RuntimeFaultSoakSource): boolean {
   return (
     source.kind === 'github_actions' &&
     /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.repository) &&
@@ -322,7 +322,7 @@ function isValidGithubActionsSource(source: RuntimeFaultSoakSourceV2): boolean {
 }
 
 function isEligibleLifecycleMetric(
-  metric: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>,
+  metric: OptionalMetric<RuntimeFaultSoakMetricEvidence>,
 ): boolean {
   if (!metric.supported || metric.value.kind !== 'same_process_lifecycle') return false;
   if (metric.value.series.length === 0) return false;
@@ -355,7 +355,7 @@ function isEligibleLifecycleMetric(
   );
 }
 
-function qualificationMetricsSupported(attempt: RuntimeFaultSoakAttemptV2): boolean {
+function qualificationMetricsSupported(attempt: RuntimeFaultSoakAttempt): boolean {
   return (
     attempt.cleanup.orphanPids.supported &&
     attempt.cleanup.orphanWorktrees.supported &&
@@ -365,7 +365,7 @@ function qualificationMetricsSupported(attempt: RuntimeFaultSoakAttemptV2): bool
 }
 
 function resourceSeriesSignature(
-  metric: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>,
+  metric: OptionalMetric<RuntimeFaultSoakMetricEvidence>,
 ): string[] | undefined {
   if (!metric.supported || metric.value.kind !== 'same_process_lifecycle') return undefined;
   return metric.value.series
@@ -381,7 +381,7 @@ function resourceSeriesSignature(
     .sort();
 }
 
-function hasExpectedResourceProvenance(attempt: RuntimeFaultSoakAttemptV2): boolean {
+function hasExpectedResourceProvenance(attempt: RuntimeFaultSoakAttempt): boolean {
   const metrics = Object.values(attempt.resources);
   const signatures = metrics.map(resourceSeriesSignature);
   if (signatures.some((value) => value === undefined)) return false;
@@ -411,7 +411,7 @@ function isFiniteNumberRecord(value: Readonly<Record<string, number>>): boolean 
   return Object.values(value).every((amount) => Number.isFinite(amount) && amount >= 0);
 }
 
-function hasCompleteRuntimeBudgetProvenance(attempt: RuntimeFaultSoakAttemptV2): boolean {
+function hasCompleteRuntimeBudgetProvenance(attempt: RuntimeFaultSoakAttempt): boolean {
   if (!attempt.runtimeBudgetUsage.supported || attempt.runtimeBudgetUsage.value.length !== 9) {
     return false;
   }
@@ -504,7 +504,7 @@ function sumFields(
 }
 
 function summarizeRuntimeBudgetUsage(
-  metrics: readonly OptionalMetric<readonly RuntimeBudgetUsageEvidenceV2[]>[],
+  metrics: readonly OptionalMetric<readonly RuntimeBudgetUsageEvidence[]>[],
 ): RuntimeBudgetUsageSummary {
   const samples = metrics.flatMap((metric) => (metric.supported ? metric.value : []));
   if (samples.length === 0) {
@@ -527,8 +527,8 @@ function summarizeRuntimeBudgetUsage(
 }
 
 function summarizeMetric(
-  attempts: readonly RuntimeFaultSoakAttemptV2[],
-  select: (attempt: RuntimeFaultSoakAttemptV2) => OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>,
+  attempts: readonly RuntimeFaultSoakAttempt[],
+  select: (attempt: RuntimeFaultSoakAttempt) => OptionalMetric<RuntimeFaultSoakMetricEvidence>,
   growthLimit: number,
 ): RuntimeFaultSoakMetricSummary {
   const metrics = attempts.map(select);
@@ -602,7 +602,7 @@ export function hasSustainedPositiveSlope(
 
 export function buildRuntimeFaultSoakReport(
   input: BuildRuntimeFaultSoakReportInput,
-): RuntimeFaultSoakReportV2 {
+): RuntimeFaultSoakReport {
   if (!Number.isInteger(input.iterations) || input.iterations <= 0) {
     throw new Error('iterations must be a positive integer');
   }
@@ -613,7 +613,7 @@ export function buildRuntimeFaultSoakReport(
   const source = input.source ?? { kind: 'local' as const };
   const expectedAttempts = input.iterations * RUNTIME_FAULT_SOAK_CASE_IDS.length;
   const failureCodes = new Set<string>();
-  const grouped = new Map<RuntimeFaultSoakCaseId, RuntimeFaultSoakAttemptV2[]>();
+  const grouped = new Map<RuntimeFaultSoakCaseId, RuntimeFaultSoakAttempt[]>();
   for (const id of RUNTIME_FAULT_SOAK_CASE_IDS) grouped.set(id, []);
   for (const attempt of input.attempts) {
     grouped.get(attempt.caseId)?.push(attempt);
@@ -808,7 +808,7 @@ export function buildRuntimeFaultSoakReport(
       ? 'inconclusive'
       : 'passed';
 
-  const withoutDigest: Omit<RuntimeFaultSoakReportV2, 'reportDigest'> = {
+  const withoutDigest: Omit<RuntimeFaultSoakReport, 'reportDigest'> = {
     version: RUNTIME_FAULT_SOAK_REPORT_VERSION,
     runnerRevision: input.runnerRevision,
     seed: input.seed,

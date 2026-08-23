@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
-import { testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
+import { testBuiltinToolCatalog } from '../helpers/runtime-model';
 
 test('full mode allows ask_user across planning and building phases', () => {
-  const entry = testBuiltinToolCatalogV1().entries.find(
+  const entry = testBuiltinToolCatalog().entries.find(
     (candidate) => candidate.visibility === 'model' && candidate.name === 'ask_user',
   );
   if (entry?.visibility !== 'model') throw new Error('ask_user Builtin entry missing');

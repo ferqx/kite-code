@@ -45,8 +45,8 @@ termination 只由 Runtime Host primitive 执行。Builtin 通过 invocation-sco
 访问 Host、异常回退到旧 executor 或形成第二个 handler。
 
 这里的 Builtin authority 来自冻结 SPI registry snapshot 的 catalog entry。Kernel 只裁决 governance/admission facts，Host 只提供通用
-process/lifecycle mechanism；源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，但 RMV1-16 final manifest/docs/journey/fault/soak
-Gate 尚未完成，不能把 scoped closure 误称为 RMV1-16 completed。
+process/lifecycle mechanism；源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，但 RM-16 final manifest/docs/journey/fault/soak
+Gate 尚未完成，不能把 scoped closure 误称为 RM-16 completed。
 
 TUI 与 foreground
 CLI 的 startup discovery 只返回静态 candidate；Windows restricted-token 由 Local allocating Provider 在 durable
@@ -182,7 +182,7 @@ Bash/cmd/PowerShell 上 replay。
 
 ADR-0088 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V6
 direct Workspace request；runner 和 vendored isksh/coreutils digest 继续固定在
-`release/platform-capabilities/windows-runner-v1.json`。
+`release/platform-capabilities/windows-runner.json`。
 
 ## 7. 超时必须终止整棵进程树
 

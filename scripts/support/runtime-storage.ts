@@ -1,36 +1,23 @@
-/**
- * Root-only Store 4 composition for tests and fixtures.
- *
- * This module is deliberately outside every production package. It wires the
- * one Host State codec to the one SQLite Store 4 adapter and exposes the
- * temporary flat view still consumed by root test seams. The
- * view owns no database and contains no persistence, codec, receipt, or fork
- * implementation of its own.
- */
+/** Root-only composition of the current Host State codec and SQLite Store. */
 
 import { createHash } from 'node:crypto';
 import type { AgentState, RuntimeEvent } from '@kite/agent-kernel';
-import { assertCurrentRuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBindingV1 } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  createRuntimeHostStateStorageBinding,
+} from '@kite/runtime-host';
 import type {
-  RuntimeSessionStoragePortV1,
-  RuntimeSnapshotCodecV1,
+  RuntimeSessionStoragePort,
+  RuntimeSnapshotCodec,
   RuntimeStorage,
 } from '@kite/runtime-host/storage';
 import {
-  createSqliteRuntimeStorageV5,
-  type SqliteRuntimeStorageOptionsV1,
-  sqliteRuntimeStorePathForV2,
-} from '@kite/runtime-storage-sqlite';
-import {
-  assertSqliteRuntimeStorageCanOpen,
   createSqliteRuntimeStorage,
-} from '../../packages/runtime-storage-sqlite/src/sqlite-store';
+  type SqliteRuntimeStorageOptions,
+  sqliteRuntimeStorePath,
+} from '@kite/runtime-storage-sqlite';
 
-const CURRENT_STORAGE_BINDING_V1 = createRuntimeHostStateStorageBindingV1();
-const STATE25_CODEC = createState25CodecForTestV1(CURRENT_STORAGE_BINDING_V1.codec);
-const LEGACY_STATE25_SCHEMA_VERSION_V1 = 25;
-const LEGACY_STATE25_FORMAT_EPOCH_V1 = 'kite-runtime-2026-08-18';
+const CURRENT_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
 
 /**
  * Give root-only State fixtures a deterministic Project identity.
@@ -38,7 +25,7 @@ const LEGACY_STATE25_FORMAT_EPOCH_V1 = 'kite-runtime-2026-08-18';
  * Production never calls this helper. The projection keeps old root fixtures
  * honest while they exercise the real Store codec, DDL and reopen rules.
  */
-export function withTestStateProjectIdentityV1<State>(state: State): State {
+export function withTestStateProjectIdentity<State>(state: State): State {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return state;
   const record = state as Readonly<Record<string, unknown>>;
   const session = record.session;
@@ -54,7 +41,7 @@ export function withTestStateProjectIdentityV1<State>(state: State): State {
   }
   const workspace =
     typeof sessionRecord.workspace === 'string' ? sessionRecord.workspace : 'root-test-workspace';
-  const identity = testStateProjectIdentityForWorkspaceV1(workspace);
+  const identity = testStateProjectIdentityForWorkspace(workspace);
   return {
     ...record,
     session: {
@@ -64,7 +51,7 @@ export function withTestStateProjectIdentityV1<State>(state: State): State {
   } as State;
 }
 
-export function testStateProjectIdentityForWorkspaceV1(workspace: string): {
+export function testStateProjectIdentityForWorkspace(workspace: string): {
   readonly projectId: string;
   readonly canonicalWorkspaceDigest: `sha256:${string}`;
 } {
@@ -75,179 +62,119 @@ export function testStateProjectIdentityForWorkspaceV1(workspace: string): {
   });
 }
 
-/** Bind an opaque Host codec only when its complete State contract is present. */
-export function createState25CodecForTestV1<State = unknown>(
-  codec: RuntimeSnapshotCodecV1<unknown, State>,
-): RuntimeSnapshotCodecV1<RuntimeEvent, State> {
-  const eventSummary = codec.eventSummary;
-  const recoveryIdentity = codec.recoveryIdentity;
-  const validateSnapshot = codec.validateSnapshot;
-  const canFork = codec.canFork;
-  const isCurrentPendingInteractionRequest = codec.isCurrentPendingInteractionRequest;
-  if (
-    !eventSummary ||
-    !recoveryIdentity ||
-    !validateSnapshot ||
-    !canFork ||
-    !isCurrentPendingInteractionRequest
-  ) {
-    throw new Error('State test storage requires the complete Host codec contract.');
-  }
-  return Object.freeze({
-    encodeEvent: (event: RuntimeEvent) => codec.encodeEvent(event),
-    decodeEvent: (json: string): RuntimeEvent => {
-      const event = codec.decodeEvent(json);
-      assertStateRuntimeEvent(event);
-      return event;
-    },
-    encodeState: (state: State) =>
-      JSON.stringify(
-        projectTestStateFormatV1(
-          JSON.parse(codec.encodeState(state)) as Readonly<Record<string, unknown>>,
-          LEGACY_STATE25_SCHEMA_VERSION_V1,
-          LEGACY_STATE25_FORMAT_EPOCH_V1,
-        ),
-      ),
-    decodeState: <T = State>(json: string) => {
-      const parsed = JSON.parse(json) as Readonly<Record<string, unknown>>;
-      return codec.decodeState<T>(
-        JSON.stringify(
-          projectTestStateFormatV1(parsed, 26, 'kite-runtime-modularization-v1-2026-08-19'),
-        ),
-      );
-    },
-    eventSummary: (event: RuntimeEvent) => eventSummary(event),
-    snapshotMetadata: (state: State) => ({
-      ...codec.snapshotMetadata(state),
-      schemaVersion: LEGACY_STATE25_SCHEMA_VERSION_V1,
-    }),
-    recoveryIdentity: (state: State) => recoveryIdentity(state),
-    validateSnapshot: (input: Parameters<typeof validateSnapshot>[0]) =>
-      validateSnapshot({ ...input, schemaVersion: 26 }),
-    rebindForkState: (state: State, targetSessionId: string, targetRecoveryIdentityKey: string) =>
-      codec.rebindForkState(state, targetSessionId, targetRecoveryIdentityKey),
-    canFork: (state: State) => canFork(state),
-    isCurrentPendingInteractionRequest: (state: State, event: RuntimeEvent) =>
-      isCurrentPendingInteractionRequest(state, event),
-  });
-}
-
-function projectTestStateFormatV1(
-  state: Readonly<Record<string, unknown>>,
-  schemaVersion: number,
-  formatEpoch: string,
-): Readonly<Record<string, unknown>> {
-  return { ...state, schemaVersion, formatEpoch };
-}
-
-function assertStateRuntimeEvent(value: unknown): asserts value is RuntimeEvent {
-  assertCurrentRuntimeEvent(value);
-}
-
-/** Resolve the Store 4 sidecar path for a test checkpoint path. */
-export function state25Store4PathForTestV1(checkpointPath: string): string {
-  if (checkpointPath === ':memory:') return ':memory:';
-  return `${checkpointPath.replace(/\.sqlite$/u, '')}.runtime.db`;
-}
-
-export const assertState25Store4CanOpenForTestV1 = assertSqliteRuntimeStorageCanOpen;
-
-/** Root-test-only access to the retired full Store4 adapter. */
-export function createState25Store4StorageForTestV1<Event = unknown, State = unknown>(
+/** Root-test-only access to the current full Store adapter. */
+export function createStateStorageForTest<Event = unknown, State = unknown>(
   input: Parameters<typeof createSqliteRuntimeStorage<Event, State>>[0],
 ): RuntimeStorage<Event, State> {
   return createSqliteRuntimeStorage<Event, State>(input);
 }
 
 /** Resolve the current Store sidecar path for a test checkpoint path. */
-export function stateStorePathForTestV1(checkpointPath: string): string {
-  return sqliteRuntimeStorePathForV2(checkpointPath);
+export function stateStorePathForTest(checkpointPath: string): string {
+  return sqliteRuntimeStorePath(checkpointPath);
 }
 
-export interface State25Store4TestOptionsV1 {
+export interface StateStoreTestOptions {
   readonly sessionId?: string;
-  readonly options?: SqliteRuntimeStorageOptionsV1;
-}
-
-/**
- * Open one State/Store4 adapter for a root test or fixture.
- *
- * The returned flat view is only a compatibility projection. The SQLite
- * adapter is the sole owner and is closed exactly once by the view.
- */
-export function openState25Store4ForTestV1(
-  databasePath: string,
-  input: State25Store4TestOptionsV1 = {},
-): RuntimeSessionStoragePortV1<RuntimeEvent, unknown> {
-  const storage = createState25Store4StorageForTestV1<RuntimeEvent, unknown>({
-    databasePath,
-    codec: STATE25_CODEC,
-    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-    ...(input.options ? { options: input.options } : {}),
-  });
-  return createFlatRuntimeStoreView(storage);
+  readonly options?: SqliteRuntimeStorageOptions;
+  readonly bootstrapMissingSessions?: boolean;
 }
 
 /** Open the production State/Store adapter with root-test-only key custody. */
-export function openStateStoreForTestV1(
+export function openStateStoreForTest(
   databasePath: string,
-  input: State25Store4TestOptionsV1 = {},
-): RuntimeSessionStoragePortV1<RuntimeEvent, AgentState> {
-  const targetCodec: RuntimeSnapshotCodecV1<RuntimeEvent, AgentState> = Object.freeze({
-    ...CURRENT_STORAGE_BINDING_V1.codec,
+  input: StateStoreTestOptions = {},
+): RuntimeSessionStoragePort<RuntimeEvent, unknown> {
+  const targetCodec: RuntimeSnapshotCodec<RuntimeEvent, AgentState> = Object.freeze({
+    ...CURRENT_STORAGE_BINDING_.codec,
     encodeState: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.encodeState(withTestStateProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_.codec.encodeState(withTestStateProjectIdentity(state)),
     decodeState: <T = unknown>(json: string) =>
-      withTestStateProjectIdentityV1(CURRENT_STORAGE_BINDING_V1.codec.decodeState<T>(json)),
+      withTestStateProjectIdentity(CURRENT_STORAGE_BINDING_.codec.decodeState<T>(json)),
     snapshotMetadata: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.snapshotMetadata(withTestStateProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_.codec.snapshotMetadata(withTestStateProjectIdentity(state)),
     sessionIdentity: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.sessionIdentity!(withTestStateProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_.codec.sessionIdentity!(withTestStateProjectIdentity(state)),
     recoveryIdentity: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.recoveryIdentity!(withTestStateProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_.codec.recoveryIdentity!(withTestStateProjectIdentity(state)),
     validateSnapshot: (
-      input: Parameters<NonNullable<typeof CURRENT_STORAGE_BINDING_V1.codec.validateSnapshot>>[0],
+      input: Parameters<NonNullable<typeof CURRENT_STORAGE_BINDING_.codec.validateSnapshot>>[0],
     ) =>
-      CURRENT_STORAGE_BINDING_V1.codec.validateSnapshot!({
+      CURRENT_STORAGE_BINDING_.codec.validateSnapshot!({
         ...input,
-        state: withTestStateProjectIdentityV1(input.state),
+        state: withTestStateProjectIdentity(input.state),
       }),
     rebindForkState: (
       state: AgentState,
       targetSessionId: string,
       targetRecoveryIdentityKey: string,
     ) =>
-      withTestStateProjectIdentityV1(
-        CURRENT_STORAGE_BINDING_V1.codec.rebindForkState(
-          withTestStateProjectIdentityV1(state),
+      withTestStateProjectIdentity(
+        CURRENT_STORAGE_BINDING_.codec.rebindForkState(
+          withTestStateProjectIdentity(state),
           targetSessionId,
           targetRecoveryIdentityKey,
         ),
       ),
     canFork: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.canFork!(withTestStateProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_.codec.canFork!(withTestStateProjectIdentity(state)),
     isCurrentPendingInteractionRequest: (state: AgentState, event: RuntimeEvent) =>
-      CURRENT_STORAGE_BINDING_V1.codec.isCurrentPendingInteractionRequest!(
-        withTestStateProjectIdentityV1(state),
+      CURRENT_STORAGE_BINDING_.codec.isCurrentPendingInteractionRequest!(
+        withTestStateProjectIdentity(state),
         event,
       ),
   });
-  const storage = createSqliteRuntimeStorageV5<RuntimeEvent, AgentState>({
+  const storage = createSqliteRuntimeStorage<RuntimeEvent, AgentState>({
     databasePath,
     codec: targetCodec,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input.options ? { options: input.options } : {}),
   });
-  return createFlatRuntimeStoreView(storage);
+  return createFlatRuntimeStoreView(
+    storage as RuntimeStorage<RuntimeEvent, unknown>,
+    input.bootstrapMissingSessions ?? false,
+  );
 }
 
 function createFlatRuntimeStoreView(
   storage: RuntimeStorage<RuntimeEvent, unknown>,
-): RuntimeSessionStoragePortV1<RuntimeEvent, unknown> {
+  bootstrapMissingSessions: boolean,
+): RuntimeSessionStoragePort<RuntimeEvent, unknown> {
   let closed = false;
+  const ensureTestSession = (sessionId: string): void => {
+    if (!bootstrapMissingSessions || storage.sessions.loadSnapshot(sessionId)) return;
+    const workspace = '/workspace';
+    storage.sessions.saveSnapshot(
+      sessionId,
+      createRuntimeHostStateInitialState({
+        threadId: sessionId,
+        userId: 'root-test-user',
+        workspace,
+        ...testStateProjectIdentityForWorkspace(workspace),
+        recoveryIdentityKey: createHash('sha256')
+          .update(`root-test-recovery:${sessionId}`)
+          .digest('hex'),
+      }),
+    );
+  };
+  const stateAtEventPosition = (
+    sessionId: string,
+    state: unknown,
+    eventPosition?: number,
+  ): unknown => {
+    if (!bootstrapMissingSessions || !state || typeof state !== 'object' || Array.isArray(state)) {
+      return state;
+    }
+    return {
+      ...(state as Readonly<Record<string, unknown>>),
+      revision: eventPosition ?? storage.sessions.getLastEventPosition(sessionId),
+    };
+  };
   return {
-    appendEvents: (threadId, events, metadata) =>
-      storage.sessions.appendEvents(threadId, events, metadata),
+    appendEvents: (threadId, events, metadata) => {
+      if (events.length > 0) ensureTestSession(threadId);
+      storage.sessions.appendEvents(threadId, events, metadata);
+    },
     appendEventsAndSnapshot: (
       threadId,
       events,
@@ -267,20 +194,31 @@ function createFlatRuntimeStoreView(
         ...(requiredEffectLease ? { requiredEffectLease } : {}),
       }),
     loadEventsStrict: (threadId, since) => storage.sessions.loadEventsStrict(threadId, since),
-    saveSnapshot: (threadId, state) => storage.sessions.saveSnapshot(threadId, state),
+    saveSnapshot: (threadId, state) =>
+      storage.sessions.saveSnapshot(threadId, stateAtEventPosition(threadId, state)),
     loadSnapshot: <T = unknown>(threadId: string) => storage.sessions.loadSnapshot<T>(threadId),
     loadSnapshotRecord: <T = unknown>(threadId: string) =>
       storage.sessions.loadSnapshotRecord<T>(threadId),
     saveNamedSnapshot: (threadId, name, state, eventPosition) =>
-      storage.checkpoints.saveNamedSnapshot(threadId, name, state, eventPosition),
+      storage.checkpoints.saveNamedSnapshot(
+        threadId,
+        name,
+        stateAtEventPosition(threadId, state, eventPosition),
+        eventPosition,
+      ),
     loadNamedSnapshot: <T = unknown>(threadId: string, name: string) =>
       storage.checkpoints.loadNamedSnapshot<T>(threadId, name),
     getLastEventPosition: (threadId) => storage.sessions.getLastEventPosition(threadId),
     listSessions: (query, limit) => storage.sessions.listSessions(query, limit),
-    setSessionName: (threadId, name) => storage.sessions.setSessionName(threadId, name),
+    setSessionName: (threadId, name) => {
+      ensureTestSession(threadId);
+      storage.sessions.setSessionName(threadId, name);
+    },
     getSessionModelRoute: (threadId) => storage.sessions.getSessionModelRoute(threadId),
-    setSessionModelRoute: (threadId, route) =>
-      storage.sessions.setSessionModelRoute(threadId, route),
+    setSessionModelRoute: (threadId, route) => {
+      ensureTestSession(threadId);
+      storage.sessions.setSessionModelRoute(threadId, route);
+    },
     deleteSession: (threadId) => storage.sessions.deleteSession(threadId),
     tryAcquireEffectLease: (threadId, effectId, ownerId, expiresAtMs) =>
       storage.effects.tryAcquireEffectLease(threadId, effectId, ownerId, expiresAtMs),

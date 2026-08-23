@@ -1,33 +1,33 @@
 import {
-  CAPABILITY_EXECUTION_MECHANISMS_V1,
-  type CapabilityBindingV1,
-  type CapabilityDefinitionV1,
-  type CapabilityDescriptorV1,
-  type CapabilityExecutionTraitsDeclarationV1,
-  type CapabilityExecutorV1,
-  type CapabilityInternalDescriptorV1,
-  type CapabilityParserV1,
-  type ContextSourceV1,
-  normalizeRuntimeIdentifierV1,
-  type RuntimeExecutionAdapterRegistrationV1,
-  type RuntimeJsonValueV1,
-  type RuntimeModuleRegistryWriterV1,
-  type RuntimeModuleV1,
-  type RuntimeReceiptNormalizerV1,
+  CAPABILITY_EXECUTION_MECHANISMS_,
+  type CapabilityBinding,
+  type CapabilityDefinition,
+  type CapabilityDescriptor,
+  type CapabilityExecutionTraitsDeclaration,
+  type CapabilityExecutor,
+  type CapabilityInternalDescriptor,
+  type CapabilityParser,
+  type ContextSource,
+  normalizeRuntimeIdentifier,
+  type RuntimeExecutionAdapterRegistration,
+  type RuntimeJsonValue,
+  type RuntimeModule,
+  type RuntimeModuleRegistryWriter,
+  type RuntimeReceiptNormalizer,
 } from './contracts';
 
-export interface CapabilityRegistrySnapshotEntryV1 {
-  readonly definition: CapabilityDefinitionV1;
-  readonly executor?: CapabilityExecutorV1;
+export interface CapabilityRegistrySnapshotEntry {
+  readonly definition: CapabilityDefinition;
+  readonly executor?: CapabilityExecutor;
 }
 
-export interface CapabilityRegistrySnapshotV1 {
+export interface CapabilityRegistrySnapshot {
   readonly modules: readonly Readonly<{
     moduleId: string;
     providerId: string;
     revision: string;
   }>[];
-  readonly capabilities: readonly CapabilityRegistrySnapshotEntryV1[];
+  readonly capabilities: readonly CapabilityRegistrySnapshotEntry[];
   readonly contextSources: readonly Readonly<{
     sourceId: string;
     providerId: string;
@@ -35,7 +35,7 @@ export interface CapabilityRegistrySnapshotV1 {
   }>[];
 }
 
-export type CapabilityArbitrationFailureCodeV1 =
+export type CapabilityArbitrationFailureCode =
   | 'binding_invalid'
   | 'capability_missing'
   | 'capability_revision_mismatch'
@@ -44,26 +44,26 @@ export type CapabilityArbitrationFailureCodeV1 =
   | 'executor_missing'
   | 'executor_binding_mismatch';
 
-export type CapabilityBindingIdentityFailureCodeV1 =
+export type CapabilityBindingIdentityFailureCode =
   | 'binding_invalid'
   | 'capability_id_mismatch'
   | 'capability_revision_mismatch'
   | 'schema_digest_mismatch'
   | 'exposed_tool_name_mismatch';
 
-export type CapabilityArbitrationResultV1 =
+export type CapabilityArbitrationResult =
   | {
       readonly status: 'resolved';
-      readonly binding: CapabilityBindingV1;
-      readonly definition: CapabilityDefinitionV1;
-      readonly executor: CapabilityExecutorV1;
+      readonly binding: CapabilityBinding;
+      readonly definition: CapabilityDefinition;
+      readonly executor: CapabilityExecutor;
     }
   | {
       readonly status: 'failed';
-      readonly code: CapabilityArbitrationFailureCodeV1;
+      readonly code: CapabilityArbitrationFailureCode;
     };
 
-export type RuntimeModuleRegistryStateV1 =
+export type RuntimeModuleRegistryState =
   | 'registered'
   | 'starting'
   | 'started'
@@ -71,61 +71,61 @@ export type RuntimeModuleRegistryStateV1 =
   | 'disposing'
   | 'disposed';
 
-export interface RuntimeModuleRegistryV1 extends AsyncDisposable {
+export interface RuntimeModuleRegistry extends AsyncDisposable {
   readonly size: number;
   readonly moduleIds: readonly string[];
-  readonly state: RuntimeModuleRegistryStateV1;
-  get(moduleId: string): RuntimeModuleV1 | undefined;
+  readonly state: RuntimeModuleRegistryState;
+  get(moduleId: string): RuntimeModule | undefined;
   keys(): IterableIterator<string>;
   operationOwner(operationId: string): string | undefined;
-  snapshot(): CapabilityRegistrySnapshotV1;
-  capability(capabilityId: string): CapabilityDefinitionV1 | undefined;
-  executor(capabilityId: string): CapabilityExecutorV1 | undefined;
-  contextSource(sourceId: string): ContextSourceV1 | undefined;
-  receiptNormalizer(normalizerId: string): RuntimeReceiptNormalizerV1 | undefined;
+  snapshot(): CapabilityRegistrySnapshot;
+  capability(capabilityId: string): CapabilityDefinition | undefined;
+  executor(capabilityId: string): CapabilityExecutor | undefined;
+  contextSource(sourceId: string): ContextSource | undefined;
+  receiptNormalizer(normalizerId: string): RuntimeReceiptNormalizer | undefined;
   executionAdapter<TContext, TAdapter>(
     adapterId: string,
-  ): RuntimeExecutionAdapterRegistrationV1<TContext, TAdapter> | undefined;
+  ): RuntimeExecutionAdapterRegistration<TContext, TAdapter> | undefined;
   requireExecutionAdapter<TContext, TAdapter>(
     adapterId: string,
-  ): RuntimeExecutionAdapterRegistrationV1<TContext, TAdapter>;
+  ): RuntimeExecutionAdapterRegistration<TContext, TAdapter>;
   start(): Promise<void>;
   dispose(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
 }
 
-export interface RuntimeModuleRegistryOptionsV1 {
+export interface RuntimeModuleRegistryOptions {
   readonly lifecycleTimeoutMs?: number;
 }
 
 const DEFAULT_LIFECYCLE_TIMEOUT_MS = 5_000;
 
-export function createRuntimeModuleRegistryV1(
-  modules: readonly RuntimeModuleV1[],
-  options: RuntimeModuleRegistryOptionsV1 = {},
-): RuntimeModuleRegistryV1 {
-  return new FrozenRuntimeModuleRegistryV1(modules, options);
+export function createRuntimeModuleRegistry(
+  modules: readonly RuntimeModule[],
+  options: RuntimeModuleRegistryOptions = {},
+): RuntimeModuleRegistry {
+  return new FrozenRuntimeModuleRegistry(modules, options);
 }
 
-class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
-  readonly #modules = new Map<string, RuntimeModuleV1>();
+class FrozenRuntimeModuleRegistry implements RuntimeModuleRegistry {
+  readonly #modules = new Map<string, RuntimeModule>();
   readonly #providers = new Map<string, string>();
   readonly #operationOwners = new Map<string, string>();
-  readonly #capabilities = new Map<string, CapabilityDefinitionV1>();
-  readonly #executors = new Map<string, CapabilityExecutorV1>();
-  readonly #contextSources = new Map<string, ContextSourceV1>();
-  readonly #normalizers = new Map<string, RuntimeReceiptNormalizerV1>();
+  readonly #capabilities = new Map<string, CapabilityDefinition>();
+  readonly #executors = new Map<string, CapabilityExecutor>();
+  readonly #contextSources = new Map<string, ContextSource>();
+  readonly #normalizers = new Map<string, RuntimeReceiptNormalizer>();
   readonly #executionAdapters = new Map<
     string,
-    RuntimeExecutionAdapterRegistrationV1<unknown, unknown>
+    RuntimeExecutionAdapterRegistration<unknown, unknown>
   >();
   readonly #moduleIds: readonly string[];
   readonly #lifecycleTimeoutMs: number;
-  #state: RuntimeModuleRegistryStateV1 = 'registered';
+  #state: RuntimeModuleRegistryState = 'registered';
   #startPromise: Promise<void> | undefined;
   #disposePromise: Promise<void> | undefined;
 
-  constructor(modules: readonly RuntimeModuleV1[], options: RuntimeModuleRegistryOptionsV1) {
+  constructor(modules: readonly RuntimeModule[], options: RuntimeModuleRegistryOptions) {
     const timeout = options.lifecycleTimeoutMs ?? DEFAULT_LIFECYCLE_TIMEOUT_MS;
     if (!Number.isSafeInteger(timeout) || timeout <= 0) {
       throw new Error('runtime module lifecycle timeout must be a positive integer');
@@ -133,7 +133,7 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
     this.#lifecycleTimeoutMs = timeout;
     for (const module of modules) this.#declareModule(module);
     for (const module of this.#modules.values()) {
-      const writer = new ScopedRuntimeModuleRegistryWriterV1(this, module);
+      const writer = new ScopedRuntimeModuleRegistryWriter(this, module);
       try {
         module.register(writer);
       } finally {
@@ -152,11 +152,11 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
     return this.#moduleIds;
   }
 
-  get state(): RuntimeModuleRegistryStateV1 {
+  get state(): RuntimeModuleRegistryState {
     return this.#state;
   }
 
-  get(moduleId: string): RuntimeModuleV1 | undefined {
+  get(moduleId: string): RuntimeModule | undefined {
     return this.#modules.get(moduleId);
   }
 
@@ -168,7 +168,7 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
     return this.#operationOwners.get(operationId);
   }
 
-  snapshot(): CapabilityRegistrySnapshotV1 {
+  snapshot(): CapabilityRegistrySnapshot {
     return Object.freeze({
       modules: Object.freeze(
         [...this.#modules.values()].map((module) =>
@@ -201,33 +201,33 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
     });
   }
 
-  capability(capabilityId: string): CapabilityDefinitionV1 | undefined {
+  capability(capabilityId: string): CapabilityDefinition | undefined {
     return this.#capabilities.get(capabilityId);
   }
 
-  executor(capabilityId: string): CapabilityExecutorV1 | undefined {
+  executor(capabilityId: string): CapabilityExecutor | undefined {
     return this.#executors.get(capabilityId);
   }
 
-  contextSource(sourceId: string): ContextSourceV1 | undefined {
+  contextSource(sourceId: string): ContextSource | undefined {
     return this.#contextSources.get(sourceId);
   }
 
-  receiptNormalizer(normalizerId: string): RuntimeReceiptNormalizerV1 | undefined {
+  receiptNormalizer(normalizerId: string): RuntimeReceiptNormalizer | undefined {
     return this.#normalizers.get(normalizerId);
   }
 
   executionAdapter<TContext, TAdapter>(
     adapterId: string,
-  ): RuntimeExecutionAdapterRegistrationV1<TContext, TAdapter> | undefined {
+  ): RuntimeExecutionAdapterRegistration<TContext, TAdapter> | undefined {
     return this.#executionAdapters.get(adapterId) as
-      | RuntimeExecutionAdapterRegistrationV1<TContext, TAdapter>
+      | RuntimeExecutionAdapterRegistration<TContext, TAdapter>
       | undefined;
   }
 
   requireExecutionAdapter<TContext, TAdapter>(
     adapterId: string,
-  ): RuntimeExecutionAdapterRegistrationV1<TContext, TAdapter> {
+  ): RuntimeExecutionAdapterRegistration<TContext, TAdapter> {
     const adapter = this.executionAdapter<TContext, TAdapter>(adapterId);
     if (!adapter) throw new Error(`runtime execution adapter is not registered: ${adapterId}`);
     return adapter;
@@ -253,16 +253,16 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
     return this.dispose();
   }
 
-  declareCapability(module: RuntimeModuleV1, definition: CapabilityDefinitionV1): void {
+  declareCapability(module: RuntimeModule, definition: CapabilityDefinition): void {
     this.#assertProvider(module, definition.providerId);
-    const capabilityId = normalizeRuntimeIdentifierV1(
+    const capabilityId = normalizeRuntimeIdentifier(
       'runtime capability id',
       definition.capabilityId,
     );
-    normalizeRuntimeIdentifierV1('runtime capability revision', definition.revision);
+    normalizeRuntimeIdentifier('runtime capability revision', definition.revision);
     if (
       definition.executionMechanism !== undefined &&
-      !CAPABILITY_EXECUTION_MECHANISMS_V1.includes(definition.executionMechanism)
+      !CAPABILITY_EXECUTION_MECHANISMS_.includes(definition.executionMechanism)
     ) {
       throw new Error(`runtime capability execution mechanism is invalid: ${capabilityId}`);
     }
@@ -280,13 +280,13 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
       throw new Error(`internal runtime capability cannot declare a tool name: ${capabilityId}`);
     }
     if (definition.toolName) {
-      normalizeRuntimeIdentifierV1('runtime capability tool name', definition.toolName);
+      normalizeRuntimeIdentifier('runtime capability tool name', definition.toolName);
       if (definition.visibility !== 'model') {
         throw new Error(`runtime capability tool name requires model visibility: ${capabilityId}`);
       }
     }
     if (definition.description !== undefined) {
-      normalizeRuntimeIdentifierV1('runtime capability description', definition.description);
+      normalizeRuntimeIdentifier('runtime capability description', definition.description);
     }
     if (definition.effects) {
       for (const value of Object.values(definition.effects)) {
@@ -310,25 +310,22 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
       throw new Error(`runtime capability approval is invalid: ${capabilityId}`);
     }
     if (definition.modelDescription !== undefined) {
-      normalizeRuntimeIdentifierV1(
+      normalizeRuntimeIdentifier(
         'runtime capability model description',
         definition.modelDescription,
       );
     }
     if (definition.governanceRevision !== undefined) {
-      normalizeRuntimeIdentifierV1(
+      normalizeRuntimeIdentifier(
         'runtime capability governance revision',
         definition.governanceRevision,
       );
     }
     for (const parser of [definition.parser, definition.modelParser]) {
       if (!parser) continue;
-      normalizeRuntimeIdentifierV1('runtime capability parser revision', parser.parserRevision);
+      normalizeRuntimeIdentifier('runtime capability parser revision', parser.parserRevision);
       if (parser.schemaDigest !== undefined) {
-        normalizeRuntimeIdentifierV1(
-          'runtime capability parser schema digest',
-          parser.schemaDigest,
-        );
+        normalizeRuntimeIdentifier('runtime capability parser schema digest', parser.schemaDigest);
       }
       if (
         typeof parser.parse !== 'function' ||
@@ -355,14 +352,14 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
       throw new Error(`runtime capability policy compiler is invalid: ${capabilityId}`);
     }
     if (definition.executionTraitsDeclaration) {
-      validateExecutionTraitsDeclarationV1(capabilityId, definition.executionTraitsDeclaration);
+      validateExecutionTraitsDeclaration(capabilityId, definition.executionTraitsDeclaration);
     }
     if (definition.execution) {
       if (!['never', 'safe_read', 'idempotency_key'].includes(definition.execution.retry)) {
         throw new Error(`runtime capability execution policy is invalid: ${capabilityId}`);
       }
       if (definition.execution.idempotencyKeyArgument !== undefined) {
-        normalizeRuntimeIdentifierV1(
+        normalizeRuntimeIdentifier(
           'runtime capability idempotency key argument',
           definition.execution.idempotencyKeyArgument,
         );
@@ -388,7 +385,7 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
       }
       if (
         definition.descriptor.executionMechanism !== undefined &&
-        !CAPABILITY_EXECUTION_MECHANISMS_V1.includes(definition.descriptor.executionMechanism)
+        !CAPABILITY_EXECUTION_MECHANISMS_.includes(definition.descriptor.executionMechanism)
       ) {
         throw new Error(
           `runtime capability descriptor execution mechanism is invalid: ${capabilityId}`,
@@ -405,7 +402,7 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
       }
     }
     if (definition.inputSchemaDigest) {
-      normalizeRuntimeIdentifierV1(
+      normalizeRuntimeIdentifier(
         'runtime capability input schema digest',
         definition.inputSchemaDigest,
       );
@@ -419,64 +416,64 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
         ...definition,
         capabilityId,
         ...(definition.inputSchema
-          ? { inputSchema: freezeRuntimeJsonRecordV1(definition.inputSchema) }
+          ? { inputSchema: freezeRuntimeJsonRecord(definition.inputSchema) }
           : {}),
         ...(definition.outputSchema
-          ? { outputSchema: freezeRuntimeJsonRecordV1(definition.outputSchema) }
+          ? { outputSchema: freezeRuntimeJsonRecord(definition.outputSchema) }
           : {}),
         ...(definition.modelInputSchema
-          ? { modelInputSchema: freezeRuntimeJsonRecordV1(definition.modelInputSchema) }
+          ? { modelInputSchema: freezeRuntimeJsonRecord(definition.modelInputSchema) }
           : {}),
         ...(definition.effects ? { effects: Object.freeze({ ...definition.effects }) } : {}),
         ...(definition.executionTraitsDeclaration
           ? {
-              executionTraitsDeclaration: freezeExecutionTraitsDeclarationV1(
+              executionTraitsDeclaration: freezeExecutionTraitsDeclaration(
                 definition.executionTraitsDeclaration,
               ),
             }
           : {}),
         ...(definition.execution ? { execution: Object.freeze({ ...definition.execution }) } : {}),
-        ...(definition.parser ? { parser: freezeCapabilityParserV1(definition.parser) } : {}),
+        ...(definition.parser ? { parser: freezeCapabilityParser(definition.parser) } : {}),
         ...(definition.modelParser
-          ? { modelParser: freezeCapabilityParserV1(definition.modelParser) }
+          ? { modelParser: freezeCapabilityParser(definition.modelParser) }
           : {}),
         ...(definition.descriptor
-          ? { descriptor: freezeCapabilityDescriptorV1(definition.descriptor) }
+          ? { descriptor: freezeCapabilityDescriptor(definition.descriptor) }
           : {}),
       }),
     );
   }
 
-  declareExecutor(module: RuntimeModuleV1, executor: CapabilityExecutorV1): void {
+  declareExecutor(module: RuntimeModule, executor: CapabilityExecutor): void {
     this.#assertProvider(module, executor.providerId);
-    const capabilityId = normalizeRuntimeIdentifierV1(
+    const capabilityId = normalizeRuntimeIdentifier(
       'runtime executor capability id',
       executor.capabilityId,
     );
-    normalizeRuntimeIdentifierV1('runtime executor revision', executor.executorRevision);
-    normalizeRuntimeIdentifierV1('runtime capability revision', executor.capabilityRevision);
+    normalizeRuntimeIdentifier('runtime executor revision', executor.executorRevision);
+    normalizeRuntimeIdentifier('runtime capability revision', executor.capabilityRevision);
     if (this.#executors.has(capabilityId)) {
       throw new Error(`duplicate runtime executor: ${capabilityId}`);
     }
     this.#executors.set(capabilityId, Object.freeze(executor));
   }
 
-  declareContextSource(module: RuntimeModuleV1, source: ContextSourceV1): void {
+  declareContextSource(module: RuntimeModule, source: ContextSource): void {
     this.#assertProvider(module, source.providerId);
-    const sourceId = normalizeRuntimeIdentifierV1('runtime context source id', source.sourceId);
-    normalizeRuntimeIdentifierV1('runtime context source revision', source.revision);
+    const sourceId = normalizeRuntimeIdentifier('runtime context source id', source.sourceId);
+    normalizeRuntimeIdentifier('runtime context source revision', source.revision);
     if (this.#contextSources.has(sourceId)) {
       throw new Error(`duplicate runtime context source: ${sourceId}`);
     }
     this.#contextSources.set(sourceId, Object.freeze(source));
   }
 
-  declareNormalizer(_module: RuntimeModuleV1, normalizer: RuntimeReceiptNormalizerV1): void {
-    const normalizerId = normalizeRuntimeIdentifierV1(
+  declareNormalizer(_module: RuntimeModule, normalizer: RuntimeReceiptNormalizer): void {
+    const normalizerId = normalizeRuntimeIdentifier(
       'runtime receipt normalizer id',
       normalizer.normalizerId,
     );
-    normalizeRuntimeIdentifierV1('runtime receipt normalizer revision', normalizer.revision);
+    normalizeRuntimeIdentifier('runtime receipt normalizer revision', normalizer.revision);
     if (this.#normalizers.has(normalizerId)) {
       throw new Error(`duplicate runtime receipt normalizer: ${normalizerId}`);
     }
@@ -484,28 +481,25 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
   }
 
   declareExecutionAdapter<TContext, TAdapter>(
-    _module: RuntimeModuleV1,
-    adapter: RuntimeExecutionAdapterRegistrationV1<TContext, TAdapter>,
+    _module: RuntimeModule,
+    adapter: RuntimeExecutionAdapterRegistration<TContext, TAdapter>,
   ): void {
-    const adapterId = normalizeRuntimeIdentifierV1(
-      'runtime execution adapter id',
-      adapter.adapterId,
-    );
-    normalizeRuntimeIdentifierV1('runtime execution adapter revision', adapter.revision);
+    const adapterId = normalizeRuntimeIdentifier('runtime execution adapter id', adapter.adapterId);
+    normalizeRuntimeIdentifier('runtime execution adapter revision', adapter.revision);
     if (this.#executionAdapters.has(adapterId)) {
       throw new Error(`duplicate runtime execution adapter: ${adapterId}`);
     }
     this.#executionAdapters.set(
       adapterId,
-      Object.freeze(adapter) as RuntimeExecutionAdapterRegistrationV1<unknown, unknown>,
+      Object.freeze(adapter) as RuntimeExecutionAdapterRegistration<unknown, unknown>,
     );
   }
 
-  #declareModule(module: RuntimeModuleV1): void {
+  #declareModule(module: RuntimeModule): void {
     const manifest = module.manifest;
-    const moduleId = normalizeRuntimeIdentifierV1('runtime module id', manifest.moduleId);
-    const providerId = normalizeRuntimeIdentifierV1('runtime provider id', manifest.providerId);
-    normalizeRuntimeIdentifierV1('runtime module revision', manifest.revision);
+    const moduleId = normalizeRuntimeIdentifier('runtime module id', manifest.moduleId);
+    const providerId = normalizeRuntimeIdentifier('runtime provider id', manifest.providerId);
+    normalizeRuntimeIdentifier('runtime module revision', manifest.revision);
     if (manifest.contractRevision !== 'rmv1-03') {
       throw new Error(`runtime module contract revision mismatch: ${moduleId}`);
     }
@@ -517,7 +511,7 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
     this.#modules.set(moduleId, module);
     this.#providers.set(providerId, moduleId);
     for (const operationId of manifest.operationIds) {
-      normalizeRuntimeIdentifierV1('runtime operation id', operationId);
+      normalizeRuntimeIdentifier('runtime operation id', operationId);
       const priorOwner = this.#operationOwners.get(operationId);
       if (priorOwner) {
         throw new Error(
@@ -528,7 +522,7 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
     }
   }
 
-  #assertProvider(module: RuntimeModuleV1, providerId: string): void {
+  #assertProvider(module: RuntimeModule, providerId: string): void {
     if (providerId !== module.manifest.providerId) {
       throw new Error(
         `runtime registration provider mismatch: ${providerId} != ${module.manifest.providerId}`,
@@ -605,16 +599,16 @@ class FrozenRuntimeModuleRegistryV1 implements RuntimeModuleRegistryV1 {
  * Pure registry arbitration. It resolves identity only: no Policy state,
  * Provider call, approval decision, or ExecutionGrant can enter this step.
  */
-export function arbitrateCapabilityV1(
-  snapshot: Readonly<CapabilityRegistrySnapshotV1>,
-  binding: Readonly<CapabilityBindingV1>,
-): CapabilityArbitrationResultV1 {
+export function arbitrateCapability(
+  snapshot: Readonly<CapabilityRegistrySnapshot>,
+  binding: Readonly<CapabilityBinding>,
+): CapabilityArbitrationResult {
   if (!binding.capabilityId) return { status: 'failed', code: 'binding_invalid' };
   const entry = snapshot.capabilities.find(
     (candidate) => candidate.definition.capabilityId === binding.capabilityId,
   );
   if (!entry) return { status: 'failed', code: 'capability_missing' };
-  const identityFailure = capabilityBindingIdentityFailureV1(entry.definition, binding);
+  const identityFailure = capabilityBindingIdentityFailure(entry.definition, binding);
   if (identityFailure) {
     return {
       status: 'failed',
@@ -638,10 +632,10 @@ export function arbitrateCapabilityV1(
 }
 
 /** Pure, ordered comparison shared by Registry arbitration and catalog dispatch. */
-export function capabilityBindingIdentityFailureV1(
-  definition: Readonly<CapabilityDefinitionV1>,
-  binding: Readonly<CapabilityBindingV1>,
-): CapabilityBindingIdentityFailureCodeV1 | undefined {
+export function capabilityBindingIdentityFailure(
+  definition: Readonly<CapabilityDefinition>,
+  binding: Readonly<CapabilityBinding>,
+): CapabilityBindingIdentityFailureCode | undefined {
   if (
     !binding.bindingId ||
     !binding.capabilityId ||
@@ -671,29 +665,27 @@ export function capabilityBindingIdentityFailureV1(
   return undefined;
 }
 
-function freezeRuntimeJsonRecordV1(
-  value: Readonly<Record<string, RuntimeJsonValueV1>>,
-): Readonly<Record<string, RuntimeJsonValueV1>> {
+function freezeRuntimeJsonRecord(
+  value: Readonly<Record<string, RuntimeJsonValue>>,
+): Readonly<Record<string, RuntimeJsonValue>> {
   return Object.freeze(
-    Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, freezeRuntimeJsonV1(item)]),
-    ),
+    Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeRuntimeJson(item)])),
   );
 }
 
-function freezeRuntimeJsonV1(value: RuntimeJsonValueV1): RuntimeJsonValueV1 {
-  if (isRuntimeJsonArrayV1(value)) return Object.freeze(value.map(freezeRuntimeJsonV1));
-  if (value && typeof value === 'object') return freezeRuntimeJsonRecordV1(value);
+function freezeRuntimeJson(value: RuntimeJsonValue): RuntimeJsonValue {
+  if (isRuntimeJsonArray(value)) return Object.freeze(value.map(freezeRuntimeJson));
+  if (value && typeof value === 'object') return freezeRuntimeJsonRecord(value);
   return value;
 }
 
-function isRuntimeJsonArrayV1(value: RuntimeJsonValueV1): value is readonly RuntimeJsonValueV1[] {
+function isRuntimeJsonArray(value: RuntimeJsonValue): value is readonly RuntimeJsonValue[] {
   return Array.isArray(value);
 }
 
-function validateExecutionTraitsDeclarationV1(
+function validateExecutionTraitsDeclaration(
   capabilityId: string,
-  traits: CapabilityExecutionTraitsDeclarationV1,
+  traits: CapabilityExecutionTraitsDeclaration,
 ): void {
   if (!Array.isArray(traits.resourceScopes)) {
     throw new Error(`runtime capability execution traits are invalid: ${capabilityId}`);
@@ -745,9 +737,9 @@ function validateExecutionTraitsDeclarationV1(
   }
 }
 
-function freezeExecutionTraitsDeclarationV1(
-  traits: CapabilityExecutionTraitsDeclarationV1,
-): CapabilityExecutionTraitsDeclarationV1 {
+function freezeExecutionTraitsDeclaration(
+  traits: CapabilityExecutionTraitsDeclaration,
+): CapabilityExecutionTraitsDeclaration {
   return Object.freeze({
     ...traits,
     resourceScopes: Object.freeze(
@@ -757,26 +749,26 @@ function freezeExecutionTraitsDeclarationV1(
   });
 }
 
-function freezeCapabilityParserV1(parser: CapabilityParserV1): CapabilityParserV1 {
+function freezeCapabilityParser(parser: CapabilityParser): CapabilityParser {
   return Object.freeze({
     ...parser,
     knownFields: Object.freeze([...parser.knownFields]),
   });
 }
 
-function freezeCapabilityDescriptorV1(
-  descriptor: CapabilityDescriptorV1 | CapabilityInternalDescriptorV1,
-): CapabilityDescriptorV1 | CapabilityInternalDescriptorV1 {
+function freezeCapabilityDescriptor(
+  descriptor: CapabilityDescriptor | CapabilityInternalDescriptor,
+): CapabilityDescriptor | CapabilityInternalDescriptor {
   const diagnostics = [...descriptor.diagnostics];
   Object.freeze(diagnostics);
   const copy = {
     ...descriptor,
     provider: Object.freeze({ ...descriptor.provider }),
     ...(descriptor.inputSchema
-      ? { inputSchema: freezeRuntimeJsonRecordV1(descriptor.inputSchema) }
+      ? { inputSchema: freezeRuntimeJsonRecord(descriptor.inputSchema) }
       : {}),
     ...(descriptor.outputSchema
-      ? { outputSchema: freezeRuntimeJsonRecordV1(descriptor.outputSchema) }
+      ? { outputSchema: freezeRuntimeJsonRecord(descriptor.outputSchema) }
       : {}),
     declaredEffects: Object.freeze({ ...descriptor.declaredEffects }),
     effectiveEffects: Object.freeze({ ...descriptor.effectiveEffects }),
@@ -792,41 +784,41 @@ function freezeCapabilityDescriptorV1(
       writable: false,
     });
   }
-  return Object.freeze(copy) as CapabilityDescriptorV1 | CapabilityInternalDescriptorV1;
+  return Object.freeze(copy) as CapabilityDescriptor | CapabilityInternalDescriptor;
 }
 
-class ScopedRuntimeModuleRegistryWriterV1 implements RuntimeModuleRegistryWriterV1 {
-  readonly #registry: FrozenRuntimeModuleRegistryV1;
-  readonly #module: RuntimeModuleV1;
+class ScopedRuntimeModuleRegistryWriter implements RuntimeModuleRegistryWriter {
+  readonly #registry: FrozenRuntimeModuleRegistry;
+  readonly #module: RuntimeModule;
   #sealed = false;
 
-  constructor(registry: FrozenRuntimeModuleRegistryV1, module: RuntimeModuleV1) {
+  constructor(registry: FrozenRuntimeModuleRegistry, module: RuntimeModule) {
     this.#registry = registry;
     this.#module = module;
   }
 
-  registerCapability(definition: CapabilityDefinitionV1): void {
+  registerCapability(definition: CapabilityDefinition): void {
     this.#assertOpen();
     this.#registry.declareCapability(this.#module, definition);
   }
 
-  registerExecutor(executor: CapabilityExecutorV1): void {
+  registerExecutor(executor: CapabilityExecutor): void {
     this.#assertOpen();
     this.#registry.declareExecutor(this.#module, executor);
   }
 
-  registerContextSource(source: ContextSourceV1): void {
+  registerContextSource(source: ContextSource): void {
     this.#assertOpen();
     this.#registry.declareContextSource(this.#module, source);
   }
 
-  registerReceiptNormalizer(normalizer: RuntimeReceiptNormalizerV1): void {
+  registerReceiptNormalizer(normalizer: RuntimeReceiptNormalizer): void {
     this.#assertOpen();
     this.#registry.declareNormalizer(this.#module, normalizer);
   }
 
   registerExecutionAdapter<TContext, TAdapter>(
-    adapter: RuntimeExecutionAdapterRegistrationV1<TContext, TAdapter>,
+    adapter: RuntimeExecutionAdapterRegistration<TContext, TAdapter>,
   ): void {
     this.#assertOpen();
     this.#registry.declareExecutionAdapter(this.#module, adapter);

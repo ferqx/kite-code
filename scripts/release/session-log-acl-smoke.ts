@@ -23,11 +23,11 @@ import {
   sessionLogRoot,
   userKiteCodeDir,
 } from '#app/config/paths';
-import type { SessionLoggingPolicyV1 } from '#app/config/session-logging-policy';
+import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
 import { SESSION_LOG_LEASE_FILE } from '../../apps/kite/src/session-logger/active-session-lease';
 import { SessionLogWriter } from '../../apps/kite/src/session-logger/writer';
 
-const SMOKE_POLICY: SessionLoggingPolicyV1 = {
+const SMOKE_POLICY: SessionLoggingPolicy = {
   version: 1,
   mode: 'metadata',
   retentionDays: 7,
@@ -38,7 +38,7 @@ const SMOKE_POLICY: SessionLoggingPolicyV1 = {
   includeToolContent: false,
 };
 
-export interface SessionLogAclSmokeEvidenceV1 {
+export interface SessionLogAclSmokeEvidence {
   version: 1;
   evidenceId: string;
   capturedAt: string;
@@ -53,7 +53,7 @@ export interface SessionLogAclSmokeEvidenceV1 {
   atomicTerminal: 'verified';
 }
 
-export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidenceV1> {
+export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidence> {
   const root = mkdtempSync(join(tmpdir(), 'kite-session-log-acl-smoke-'));
   const previousHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = root;

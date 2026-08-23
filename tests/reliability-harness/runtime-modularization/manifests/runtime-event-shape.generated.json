@@ -5,11 +5,11 @@
   "sources": [
     {
       "path": "packages/agent-kernel/src/events.ts",
-      "sha256": "sha256:88b569d78ce9ff8454cdeb08662c732ec823c701e37d1a6c52ec409163876316"
+      "sha256": "sha256:e216bfc67775db68e6bac8b5ca97d86aa495fe75c40363cabb9499bd9cbfd2ac"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:bb09efe9fdec25b4dfc49012ac43aa6b5e40a1756150354f969a043270ebe959"
+      "sha256": "sha256:344bb993aca5941cf3109d0f4ca8e38f9f4b3ba3742726599e7943da5a9174cd"
     }
   ],
   "facts": {
@@ -89,7 +89,7 @@
           {
             "name": "failure",
             "optional": true,
-            "type": "ClassifiedFailureV1 | undefined"
+            "type": "ClassifiedFailure | undefined"
           },
           {
             "name": "interactionId",
@@ -97,9 +97,9 @@
             "type": "string"
           },
           {
-            "name": "outcomeV1",
+            "name": "outcome",
             "optional": true,
-            "type": "ToolOutcomeV1 | undefined"
+            "type": "ToolOutcome | undefined"
           },
           {
             "name": "reason",
@@ -206,9 +206,9 @@
             "type": "string | undefined"
           },
           {
-            "name": "outcomeV1",
+            "name": "outcome",
             "optional": true,
-            "type": "ToolOutcomeV1 | undefined"
+            "type": "ToolOutcome | undefined"
           },
           {
             "name": "result",
@@ -3465,7 +3465,7 @@
           {
             "name": "failure",
             "optional": false,
-            "type": "ClassifiedFailureV1"
+            "type": "ClassifiedFailure"
           },
           {
             "name": "lifecycleId",
@@ -3903,7 +3903,7 @@
           {
             "name": "failure",
             "optional": true,
-            "type": "ClassifiedFailureV1 | undefined"
+            "type": "ClassifiedFailure | undefined"
           },
           {
             "name": "message",
@@ -3964,7 +3964,7 @@
           {
             "name": "failure",
             "optional": false,
-            "type": "ClassifiedFailureV1"
+            "type": "ClassifiedFailure"
           },
           {
             "name": "toolCallId",
@@ -4140,7 +4140,7 @@
           {
             "name": "journal",
             "optional": false,
-            "type": "ToolRecoveryJournalV1"
+            "type": "ToolRecoveryJournal"
           },
           {
             "name": "toolCallId",
@@ -4321,9 +4321,9 @@
             "type": "string | undefined"
           },
           {
-            "name": "outcomeV1",
+            "name": "outcome",
             "optional": true,
-            "type": "ToolOutcomeV1 | undefined"
+            "type": "ToolOutcome | undefined"
           },
           {
             "name": "reason",
@@ -4357,12 +4357,12 @@
           {
             "name": "failure",
             "optional": false,
-            "type": "ClassifiedFailureV1"
+            "type": "ClassifiedFailure"
           },
           {
-            "name": "outcomeV1",
+            "name": "outcome",
             "optional": true,
-            "type": "ToolOutcomeV1 | undefined"
+            "type": "ToolOutcome | undefined"
           },
           {
             "name": "toolCallId",
@@ -4430,9 +4430,9 @@
         "declaration": "__type",
         "fields": [
           {
-            "name": "classifierAdviceV1",
+            "name": "classifierAdvice",
             "optional": true,
-            "type": "ToolOutcomeClassifierAdviceV1 | undefined"
+            "type": "ToolOutcomeClassifierAdvice | undefined"
           },
           {
             "name": "classifierDiagnostic",
@@ -4450,9 +4450,9 @@
             "type": "string"
           },
           {
-            "name": "outcomeV1",
+            "name": "outcome",
             "optional": true,
-            "type": "ToolOutcomeV1 | undefined"
+            "type": "ToolOutcome | undefined"
           },
           {
             "name": "result",
@@ -4579,7 +4579,7 @@
           {
             "name": "recoveryMode",
             "optional": true,
-            "type": "ToolRecoveryAttemptModeV1 | undefined"
+            "type": "ToolRecoveryAttemptMode | undefined"
           },
           {
             "name": "recoveryOf",
@@ -4604,7 +4604,7 @@
           {
             "name": "unknownFields",
             "optional": true,
-            "type": "{ hasUnknown: boolean; count: number; toolClass: \"builtin_read\" | \"builtin_write\" | \"builtin_execute\" | \"builtin_other\" | \"mcp_tool\"; schemaRevision: string; } | undefined"
+            "type": "UnknownToolFieldsObservation | undefined"
           }
         ],
         "requiredFields": [
@@ -4630,12 +4630,12 @@
           {
             "name": "failure",
             "optional": true,
-            "type": "ClassifiedFailureV1 | undefined"
+            "type": "ClassifiedFailure | undefined"
           },
           {
-            "name": "outcomeV1",
+            "name": "outcome",
             "optional": true,
-            "type": "ToolOutcomeV1 | undefined"
+            "type": "ToolOutcome | undefined"
           },
           {
             "name": "reason",
@@ -4664,12 +4664,12 @@
           {
             "name": "failure",
             "optional": false,
-            "type": "ClassifiedFailureV1"
+            "type": "ClassifiedFailure"
           },
           {
-            "name": "outcomeV1",
+            "name": "outcome",
             "optional": false,
-            "type": "ToolOutcomeV1"
+            "type": "ToolOutcome"
           },
           {
             "name": "recoveryOf",
@@ -4689,7 +4689,7 @@
         ],
         "requiredFields": [
           "failure",
-          "outcomeV1",
+          "outcome",
           "recoveryOf",
           "retryAttempt",
           "toolCallId"
@@ -4697,7 +4697,7 @@
         "codecRequiredFields": [
           "toolCallId",
           "failure",
-          "outcomeV1",
+          "outcome",
           "recoveryOf",
           "retryAttempt"
         ]
@@ -5243,5 +5243,5 @@
       }
     ]
   },
-  "digest": "sha256:42da8c501114787167f8e4f23f9c212039a6eb58501d6f35ec95da376d6a1656"
+  "digest": "sha256:20b6bc0c0dc407ecee5501e89892025bf9f2c82640cfbbea11775d19669af21b"
 }

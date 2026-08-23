@@ -1,11 +1,11 @@
 import { platform as osPlatformFn, type as osTypeFn, release } from 'node:os';
 import type { BaseMessage } from './messages';
 import type {
-  BuiltinAgentPhaseV1,
-  BuiltinAuthorizationModeV1,
-  BuiltinInteractionModeV1,
-  BuiltinPlanningStateViewV1,
-  BuiltinSandboxBackendV1,
+  BuiltinAgentPhase,
+  BuiltinAuthorizationMode,
+  BuiltinInteractionMode,
+  BuiltinPlanningStateView,
+  BuiltinSandboxBackend,
 } from './runtime-view';
 
 /** 将 Windows 路径转为 MSYS2/POSIX 格式（D:\app → /d/app），避免反斜杠在 bash 中被当作转义符吃掉 */
@@ -44,12 +44,12 @@ export interface RuntimeContextInput {
 
 /** 动态模式快照输入。该数据随轮次变化，不能进入 cacheable runtime context。 */
 export interface RuntimeModeSnapshotInput {
-  phase: BuiltinAgentPhaseV1;
-  interactionMode: BuiltinInteractionModeV1;
-  authorizationMode: BuiltinAuthorizationModeV1;
-  sandboxBackend: BuiltinSandboxBackendV1 | 'unknown';
+  phase: BuiltinAgentPhase;
+  interactionMode: BuiltinInteractionMode;
+  authorizationMode: BuiltinAuthorizationMode;
+  sandboxBackend: BuiltinSandboxBackend | 'unknown';
   /** v2: PlanningState for dynamic runtime-state block */
-  planningState?: BuiltinPlanningStateViewV1;
+  planningState?: BuiltinPlanningStateView;
   taskId?: string;
   sideEffectsStarted?: boolean;
 }

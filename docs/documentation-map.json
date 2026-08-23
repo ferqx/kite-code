@@ -2,6 +2,20 @@
   "version": 1,
   "rules": [
     {
+      "id": "pre-release-architecture",
+      "sources": [
+        "scripts/check-pre-release-architecture.ts",
+        "apps/kite/src/runtime/**",
+        "apps/kite/src/adapters/**",
+        "packages/**/src/**"
+      ],
+      "documents": [
+        "docs/active/pre-release-architecture.md",
+        "docs/active/layer-boundary-enforcement.md",
+        "docs/active/six-concept-runtime-architecture.md"
+      ]
+    },
+    {
       "id": "protected-branch-governance",
       "sources": [
         "lefthook.yml",
@@ -20,7 +34,7 @@
       "sources": [
         "scripts/check-plan-execution-matrix.ts",
         ".github/workflows/required.yml",
-        "release/oss-first-release/task-status-v2.json"
+        "release/oss-first-release/task-status.json"
       ],
       "documents": [
         "docs/active/open-source-first-release.md",
@@ -454,7 +468,7 @@
         "packages/runtime-storage-sqlite/src/**",
         "tests/runtime/storage-adapter.test.ts",
         "apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts",
-        "apps/kite/src/bootstrap/runtime/SessionManager.ts",
+        "apps/kite/src/runtime/session/**",
         "apps/kite/src/bootstrap/runtime/session-persistence.ts",
         "apps/kite/src/bootstrap/runtime/state-runtime.ts"
       ],
@@ -527,7 +541,8 @@
         "packages/runtime-host/src/control-frame.ts",
         "packages/runtime-host/src/mcp-stdio-*.ts",
         "packages/runtime-storage-sqlite/src/store.ts",
-        "packages/runtime-storage-sqlite/src/sqlite-store.ts",
+        "packages/runtime-storage-sqlite/src/adapter.ts",
+        "packages/runtime-storage-sqlite/src/preflight.ts",
         "apps/kite/src/bootstrap.ts",
         "apps/kite/test/keyless-runtime-cutover.test.ts",
         "packages/runtime-spi/src/identity.ts",
@@ -731,7 +746,7 @@
         "tests/mcp/write-*.test.ts",
         "tests/mcp/write-contract-fixtures.ts",
         "packages/builtin-runtime/src/mcp/write-governance.ts",
-        "release/mcp-write-routes-v1.json",
+        "release/mcp-write-routes.json",
         "tests/skills/conformance-fixtures.ts",
         "tests/skills/effect-classification.test.ts",
         "tests/skills/workflow-contract.test.ts",

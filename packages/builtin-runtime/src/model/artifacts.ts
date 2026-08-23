@@ -1,28 +1,28 @@
 import type {
-  CanonicalJsonObjectV1,
-  ModelResponseRecordV1,
-  ModelSurfaceV1,
-  PrivateArtifactKindV1,
-  PrivateArtifactRefV1,
-  Sha256DigestV1,
+  CanonicalJsonObject,
+  ModelResponseRecord,
+  ModelSurface,
+  PrivateArtifactKind,
+  PrivateArtifactRef,
+  Sha256Digest,
 } from '@kite/runtime-spi';
-import { MODEL_RESPONSE_RECORD_SCHEMA_V1 } from '@kite/runtime-spi';
+import { MODEL_RESPONSE_RECORD_SCHEMA_ } from '@kite/runtime-spi';
 import { modelArtifactRoot } from './artifact-paths';
 import {
-  type PrivateArtifactGarbageCollectionOptionsV1,
-  type PrivateArtifactGarbageCollectionResultV1,
+  type PrivateArtifactGarbageCollectionOptions,
+  type PrivateArtifactGarbageCollectionResult,
   PrivateArtifactStorageError,
-  type PrivateArtifactWriteFaultPointV1,
-  PrivateImmutableArtifactStorageV1,
+  type PrivateArtifactWriteFaultPoint,
+  PrivateImmutableArtifactStorage,
 } from './private-immutable-artifacts';
 import {
-  assertCanonicalModelMessageV1,
-  assertModelAdapterReplayOwnerV1,
-  assertModelRouteIdentityV1,
-  assertModelSurfaceV1,
-  canonicalModelJsonV1,
-  computeCanonicalProviderOptionsDigestV1,
-  computeModelSurfaceDigestV1,
+  assertCanonicalModelMessage,
+  assertModelAdapterReplayOwner,
+  assertModelRouteIdentity,
+  assertModelSurface,
+  canonicalModelJson,
+  computeCanonicalProviderOptionsDigest,
+  computeModelSurfaceDigest,
 } from './surface-canonicalizer';
 
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
@@ -45,39 +45,39 @@ const MODEL_ARTIFACT_PARTITIONS = Object.freeze([
   { kind: 'provider_options', directory: 'provider-options', extension: '.json' },
 ] as const);
 
-export interface ModelArtifactStoreOptionsV1 {
+export interface ModelArtifactStoreOptions {
   root?: string;
   maxArtifactBytes?: number;
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
-  faultInjector?: (point: PrivateArtifactWriteFaultPointV1) => void;
+  faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
 }
 
-export interface ModelArtifactGarbageCollectionOptionsV1 {
+export interface ModelArtifactGarbageCollectionOptions {
   /** Must be a complete union of references from every retained session and fork. */
   reachability: {
     complete: boolean;
-    reachable: readonly PrivateArtifactRefV1[];
+    reachable: readonly PrivateArtifactRef[];
   };
   minimumRetentionMs: number;
   nowMs?: number;
   maxEntries?: number;
 }
 
-export interface StoredProviderOptionsV1 {
-  artifact: PrivateArtifactRefV1 & { kind: 'provider_options' };
-  contentDigest: Sha256DigestV1;
+export interface StoredProviderOptions {
+  artifact: PrivateArtifactRef & { kind: 'provider_options' };
+  contentDigest: Sha256Digest;
 }
 
 /**
  * Schema-aware private store for canonical model request and response evidence.
  * It is intentionally not wired to production dispatch until MS-03/MS-04.
  */
-export class ModelArtifactStoreV1 {
-  private readonly storage: PrivateImmutableArtifactStorageV1<PrivateArtifactKindV1>;
+export class ModelArtifactStore {
+  private readonly storage: PrivateImmutableArtifactStorage<PrivateArtifactKind>;
 
-  constructor(options: ModelArtifactStoreOptionsV1) {
-    this.storage = new PrivateImmutableArtifactStorageV1({
+  constructor(options: ModelArtifactStoreOptions) {
+    this.storage = new PrivateImmutableArtifactStorage({
       root: options.root ?? modelArtifactRoot(),
       namespace: 'model-artifacts',
       partitions: MODEL_ARTIFACT_PARTITIONS,
@@ -88,70 +88,70 @@ export class ModelArtifactStoreV1 {
     });
   }
 
-  writeSurface(surface: ModelSurfaceV1): PrivateArtifactRefV1 & { kind: 'model_surface' } {
-    computeModelSurfaceDigestV1(surface);
-    return this.storage.write('model_surface', Buffer.from(canonicalModelJsonV1(surface), 'utf8'));
+  writeSurface(surface: ModelSurface): PrivateArtifactRef & { kind: 'model_surface' } {
+    computeModelSurfaceDigest(surface);
+    return this.storage.write('model_surface', Buffer.from(canonicalModelJson(surface), 'utf8'));
   }
 
-  readSurface(ref: PrivateArtifactRefV1 & { kind: 'model_surface' }): ModelSurfaceV1 {
+  readSurface(ref: PrivateArtifactRef & { kind: 'model_surface' }): ModelSurface {
     const value = this.parseCanonicalArtifact(this.storage.read(ref));
     try {
-      assertModelSurfaceV1(value as ModelSurfaceV1);
-      computeModelSurfaceDigestV1(value as ModelSurfaceV1);
+      assertModelSurface(value as ModelSurface);
+      computeModelSurfaceDigest(value as ModelSurface);
     } catch {
       this.corrupt('Model Surface Artifact schema validation failed.');
     }
-    return value as ModelSurfaceV1;
+    return value as ModelSurface;
   }
 
-  writeResponse(record: ModelResponseRecordV1): PrivateArtifactRefV1 & { kind: 'model_response' } {
-    assertModelResponseRecordV1(record);
-    return this.storage.write('model_response', Buffer.from(canonicalModelJsonV1(record), 'utf8'));
+  writeResponse(record: ModelResponseRecord): PrivateArtifactRef & { kind: 'model_response' } {
+    assertModelResponseRecord(record);
+    return this.storage.write('model_response', Buffer.from(canonicalModelJson(record), 'utf8'));
   }
 
-  readResponse(ref: PrivateArtifactRefV1 & { kind: 'model_response' }): ModelResponseRecordV1 {
+  readResponse(ref: PrivateArtifactRef & { kind: 'model_response' }): ModelResponseRecord {
     const value = this.parseCanonicalArtifact(this.storage.read(ref));
     try {
-      assertModelResponseRecordV1(value);
+      assertModelResponseRecord(value);
     } catch (error) {
       if (error instanceof PrivateArtifactStorageError) throw error;
       this.corrupt('Model Response Artifact schema validation failed.');
     }
-    return value as ModelResponseRecordV1;
+    return value as ModelResponseRecord;
   }
 
-  writeProviderOptions(value: CanonicalJsonObjectV1): StoredProviderOptionsV1 {
-    const contentDigest = computeCanonicalProviderOptionsDigestV1(value);
+  writeProviderOptions(value: CanonicalJsonObject): StoredProviderOptions {
+    const contentDigest = computeCanonicalProviderOptionsDigest(value);
     const artifact = this.storage.write(
       'provider_options',
-      Buffer.from(canonicalModelJsonV1(value), 'utf8'),
+      Buffer.from(canonicalModelJson(value), 'utf8'),
     );
     return { artifact, contentDigest };
   }
 
   readProviderOptions(
-    ref: PrivateArtifactRefV1 & { kind: 'provider_options' },
-    expectedContentDigest: Sha256DigestV1,
-  ): CanonicalJsonObjectV1 {
+    ref: PrivateArtifactRef & { kind: 'provider_options' },
+    expectedContentDigest: Sha256Digest,
+  ): CanonicalJsonObject {
     const value = this.parseCanonicalArtifact(this.storage.read(ref));
     if (!isObject(value)) this.corrupt('Provider Options Artifact must contain an object.');
-    let actualDigest: Sha256DigestV1;
+    let actualDigest: Sha256Digest;
     try {
-      actualDigest = computeCanonicalProviderOptionsDigestV1(value as CanonicalJsonObjectV1);
+      actualDigest = computeCanonicalProviderOptionsDigest(value as CanonicalJsonObject);
     } catch {
       this.corrupt('Provider Options Artifact schema validation failed.');
     }
     if (actualDigest! !== expectedContentDigest) {
       this.corrupt('Provider Options Artifact digest does not match its Surface reference.');
     }
-    return value as CanonicalJsonObjectV1;
+    return value as CanonicalJsonObject;
   }
 
   collectGarbage(
-    options: ModelArtifactGarbageCollectionOptionsV1,
-  ): PrivateArtifactGarbageCollectionResultV1 {
+    options: ModelArtifactGarbageCollectionOptions,
+  ): PrivateArtifactGarbageCollectionResult {
     return this.storage.collectGarbage(
-      options as PrivateArtifactGarbageCollectionOptionsV1<PrivateArtifactKindV1>,
+      options as PrivateArtifactGarbageCollectionOptions<PrivateArtifactKind>,
     );
   }
 
@@ -161,7 +161,7 @@ export class ModelArtifactStoreV1 {
     try {
       text = UTF8_DECODER.decode(bytes);
       value = JSON.parse(text);
-      if (canonicalModelJsonV1(value) !== text) {
+      if (canonicalModelJson(value) !== text) {
         this.corrupt('Private model Artifact is not canonical JSON.');
       }
     } catch (error) {
@@ -176,8 +176,8 @@ export class ModelArtifactStoreV1 {
   }
 }
 
-function assertModelResponseRecordV1(value: unknown): asserts value is ModelResponseRecordV1 {
-  canonicalModelJsonV1(value);
+function assertModelResponseRecord(value: unknown): asserts value is ModelResponseRecord {
+  canonicalModelJson(value);
   assertExactKeys(value, [
     'schema',
     'invocationId',
@@ -190,9 +190,9 @@ function assertModelResponseRecordV1(value: unknown): asserts value is ModelResp
   assertExactKeys(record.schema, ['name', 'canonicalizerVersion', 'version']);
   const schema = record.schema as Record<string, unknown>;
   if (
-    schema.name !== MODEL_RESPONSE_RECORD_SCHEMA_V1.name ||
-    schema.canonicalizerVersion !== MODEL_RESPONSE_RECORD_SCHEMA_V1.canonicalizerVersion ||
-    schema.version !== MODEL_RESPONSE_RECORD_SCHEMA_V1.version
+    schema.name !== MODEL_RESPONSE_RECORD_SCHEMA_.name ||
+    schema.canonicalizerVersion !== MODEL_RESPONSE_RECORD_SCHEMA_.canonicalizerVersion ||
+    schema.version !== MODEL_RESPONSE_RECORD_SCHEMA_.version
   ) {
     throw new Error('unsupported response schema');
   }
@@ -205,11 +205,11 @@ function assertModelResponseRecordV1(value: unknown): asserts value is ModelResp
   ) {
     throw new Error('invalid surface integrity identity');
   }
-  assertModelRouteIdentityV1(record.route);
+  assertModelRouteIdentity(record.route);
 
   assertExactKeys(record.response, ['message', 'finishReason', 'usage', 'providerMetadata']);
   const response = record.response as Record<string, unknown>;
-  assertCanonicalModelMessageV1(response.message);
+  assertCanonicalModelMessage(response.message);
   if ((response.message as { role: string }).role !== 'assistant') {
     throw new Error('response message must be assistant');
   }
@@ -231,16 +231,16 @@ function assertModelResponseRecordV1(value: unknown): asserts value is ModelResp
     }
   }
   if (!isObject(response.providerMetadata)) throw new Error('invalid provider metadata');
-  canonicalModelJsonV1(response.providerMetadata);
+  canonicalModelJson(response.providerMetadata);
 
   if (record.nativeReplayState !== null) {
     assertExactKeys(record.nativeReplayState, ['owner', 'value']);
     const nativeReplayState = record.nativeReplayState as Record<string, unknown>;
-    assertModelAdapterReplayOwnerV1(nativeReplayState.owner);
-    canonicalModelJsonV1(nativeReplayState.value);
+    assertModelAdapterReplayOwner(nativeReplayState.owner);
+    canonicalModelJson(nativeReplayState.value);
     if (
-      canonicalModelJsonV1(nativeReplayState.owner) !==
-      canonicalModelJsonV1((record.route as ModelResponseRecordV1['route']).replayOwner)
+      canonicalModelJson(nativeReplayState.owner) !==
+      canonicalModelJson((record.route as ModelResponseRecord['route']).replayOwner)
     ) {
       throw new Error('native replay owner does not match route owner');
     }

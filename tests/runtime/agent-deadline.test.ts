@@ -3,15 +3,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { aiMessage } from '@kite/builtin-runtime/model';
-import {
-  createRuntimeHostStateInitialStateV1,
-  LIMITED_RESOURCE_BUDGET_V1,
-} from '@kite/runtime-host';
-import { resolveFailureModeV1 } from '#app/bootstrap/runtime/failure-mode-conformance';
+import { createRuntimeHostStateInitialState, LIMITED_RESOURCE_BUDGET_ } from '@kite/runtime-host';
+import { resolveFailureMode } from '#app/bootstrap/runtime/failure-mode-conformance';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
-import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const DEADLINE_TEST_MARGIN_MS = process.platform === 'win32' ? 15_000 : 1_500;
@@ -30,7 +27,7 @@ describe('Runtime run deadline', () => {
       // scheduling margin so the intended boundary is deterministic.
       const deadlineAt = new Date(startedAt.getTime() + DEADLINE_TEST_MARGIN_MS);
       const state = reduceRuntimeState(
-        createRuntimeHostStateInitialStateV1({
+        createRuntimeHostStateInitialState({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'u',
@@ -41,10 +38,10 @@ describe('Runtime run deadline', () => {
           runId: 'deadline-budget',
           startedAt: startedAt.toISOString(),
           deadlineAt: deadlineAt.toISOString(),
-          budget: LIMITED_RESOURCE_BUDGET_V1,
+          budget: LIMITED_RESOURCE_BUDGET_,
         },
       );
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
 
@@ -72,20 +69,20 @@ describe('Runtime run deadline', () => {
         providerName: 'fixture',
         providerType: 'openai-compatible',
         features: {
-          resourceBudgetV1: true,
-          boundedCancellationV1: true,
+          resourceBudget: true,
+          boundedCancellation: true,
         },
         sandbox: { enabled: false },
       };
       const events: RuntimeEvent[] = [];
 
-      for await (const event of runTestRuntimeAgentV1(
+      for await (const event of runTestRuntimeAgent(
         {
           task: 'Wait until the bounded deadline.',
           userId: 'u',
           threadId,
           workspace: directory,
-          openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+          openStateSessionStorage: () => openStateStoreForTest(storePath),
           config,
           model,
           sandboxBackend: 'unknown',
@@ -109,7 +106,7 @@ describe('Runtime run deadline', () => {
       );
       const deadlineTerminal = events.find((event) => event.type === 'run.error');
       expect(deadlineTerminal?.type === 'run.error' ? deadlineTerminal.outcome : undefined).toEqual(
-        resolveFailureModeV1('budget_exhausted', {
+        resolveFailureMode('budget_exhausted', {
           knownExternalEffects: 'unknown',
         }).terminalOutcome!,
       );
@@ -140,7 +137,7 @@ describe('Runtime run deadline', () => {
       // earlier model-stage deadline path covered by the previous test.
       const deadlineAt = new Date(startedAt.getTime() + DEADLINE_TEST_MARGIN_MS);
       const state = reduceRuntimeState(
-        createRuntimeHostStateInitialStateV1({
+        createRuntimeHostStateInitialState({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'u',
@@ -151,10 +148,10 @@ describe('Runtime run deadline', () => {
           runId: 'deadline-interaction-budget',
           startedAt: startedAt.toISOString(),
           deadlineAt: deadlineAt.toISOString(),
-          budget: LIMITED_RESOURCE_BUDGET_V1,
+          budget: LIMITED_RESOURCE_BUDGET_,
         },
       );
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
 
@@ -189,21 +186,21 @@ describe('Runtime run deadline', () => {
         providerName: 'fixture',
         providerType: 'openai-compatible',
         features: {
-          resourceBudgetV1: true,
-          boundedCancellationV1: true,
+          resourceBudget: true,
+          boundedCancellation: true,
         },
         sandbox: { enabled: false },
       };
       let waiting = false;
       const events: RuntimeEvent[] = [];
       const consume = async () => {
-        for await (const event of runTestRuntimeAgentV1(
+        for await (const event of runTestRuntimeAgent(
           {
             task: 'Ask and wait.',
             userId: 'u',
             threadId,
             workspace: directory,
-            openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+            openStateSessionStorage: () => openStateStoreForTest(storePath),
             config,
             model,
             sandboxBackend: 'unknown',
@@ -250,7 +247,7 @@ describe('Runtime run deadline', () => {
     try {
       const startedAt = new Date();
       const state = reduceRuntimeState(
-        createRuntimeHostStateInitialStateV1({
+        createRuntimeHostStateInitialState({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'u',
@@ -265,10 +262,10 @@ describe('Runtime run deadline', () => {
           // scheduling margin as the other deadline fixtures so host load
           // cannot turn this into an admission-race test.
           deadlineAt: new Date(startedAt.getTime() + DEADLINE_TEST_MARGIN_MS).toISOString(),
-          budget: LIMITED_RESOURCE_BUDGET_V1,
+          budget: LIMITED_RESOURCE_BUDGET_,
         },
       );
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
       const config: AgentConfig = {
@@ -278,20 +275,20 @@ describe('Runtime run deadline', () => {
         providerName: 'fixture',
         providerType: 'openai-compatible',
         features: {
-          resourceBudgetV1: true,
-          boundedCancellationV1: true,
+          resourceBudget: true,
+          boundedCancellation: true,
         },
         sandbox: { enabled: false },
       };
       const events: RuntimeEvent[] = [];
 
-      for await (const event of runTestRuntimeAgentV1(
+      for await (const event of runTestRuntimeAgent(
         {
           task: 'Finish before the deadline.',
           userId: 'u',
           threadId,
           workspace: directory,
-          openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+          openStateSessionStorage: () => openStateStoreForTest(storePath),
           config,
           model: createMockModel([{ message: aiMessage({ content: 'Done.' }) }]),
           sandboxBackend: 'unknown',

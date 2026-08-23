@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { ExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
+import type { ExecutionBoundary } from '@kite/builtin-runtime/sandbox';
 import {
-  createNetworkBoundaryEnforcerV1,
-  createNetworkBoundaryFetchV1,
+  createNetworkBoundaryEnforcer,
+  createNetworkBoundaryFetch,
   isPublicNetworkAddress,
   NetworkBoundaryError,
-  type NetworkResolvedAddressV1,
-  networkBoundaryPolicyFromExecutionBoundaryV1,
+  type NetworkResolvedAddress,
+  networkBoundaryPolicyFromExecutionBoundary,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
-import type { RuntimeJsonValueV1 } from '@kite/runtime-spi';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import type { RuntimeJsonValue } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
-import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
-import { executeTestRuntimeToolV1 } from '../helpers/runtime-model';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { executeTestRuntimeTool } from '../helpers/runtime-model';
 
 function policy(mode: 'off' | 'allowlist', hosts: string[] = []) {
-  const boundary: ExecutionBoundaryV1 = {
+  const boundary: ExecutionBoundary = {
     filesystemScope: 'workspace_write',
     workspaceRoot: process.cwd(),
     networkMode: mode,
@@ -28,16 +28,16 @@ function policy(mode: 'off' | 'allowlist', hosts: string[] = []) {
     sandboxRequired: true,
     sandboxUnavailable: 'fail',
   };
-  return networkBoundaryPolicyFromExecutionBoundaryV1(boundary, true);
+  return networkBoundaryPolicyFromExecutionBoundary(boundary, true);
 }
 
 function taskConfig(
   mode: 'off' | 'allowlist',
   hosts: string[] = [],
-  networkBoundaryV1 = true,
+  networkBoundary = true,
 ): AgentConfig {
   return {
-    features: { networkBoundaryV1 },
+    features: { networkBoundary },
     executionBoundary: {
       filesystemScope: 'workspace_write',
       workspaceRoot: process.cwd(),
@@ -52,24 +52,24 @@ function taskConfig(
   } as AgentConfig;
 }
 
-function request(name: string, args: Readonly<Record<string, RuntimeJsonValueV1>>) {
+function request(name: string, args: Readonly<Record<string, RuntimeJsonValue>>) {
   return {
     name,
     args,
   };
 }
 
-type TestToolExecutionInputV1 = NonNullable<
-  Parameters<typeof executeTestRuntimeToolV1>[0]['execution']
+type TestToolExecutionInput = NonNullable<
+  Parameters<typeof executeTestRuntimeTool>[0]['execution']
 >;
 
-async function executeApprovedRuntimeToolV1(input: {
+async function executeApprovedRuntimeTool(input: {
   readonly workspace: string;
   readonly toolName: string;
-  readonly args: Readonly<Record<string, RuntimeJsonValueV1>>;
-  readonly execution: TestToolExecutionInputV1;
+  readonly args: Readonly<Record<string, RuntimeJsonValue>>;
+  readonly execution: TestToolExecutionInput;
 }) {
-  const first = await executeTestRuntimeToolV1({
+  const first = await executeTestRuntimeTool({
     workspace: input.workspace,
     toolName: input.toolName,
     args: input.args,
@@ -79,7 +79,7 @@ async function executeApprovedRuntimeToolV1(input: {
   if (!first.events.some((event) => event.type === 'approval.requested')) return first;
   const approvalHash = first.state.tools.calls[first.toolCallId]?.approvalHash;
   if (!approvalHash) throw new Error('Approved Runtime fixture did not persist an approval hash.');
-  return executeTestRuntimeToolV1({
+  return executeTestRuntimeTool({
     workspace: input.workspace,
     toolName: input.toolName,
     args: input.args,
@@ -90,12 +90,12 @@ async function executeApprovedRuntimeToolV1(input: {
   });
 }
 
-const publicAddress: NetworkResolvedAddressV1 = { address: '93.184.216.34', family: 4 };
+const publicAddress: NetworkResolvedAddress = { address: '93.184.216.34', family: 4 };
 
 describe('network boundary endpoint admission', () => {
   test('network off rejects before DNS resolution', async () => {
     let resolutions = 0;
-    const enforcer = createNetworkBoundaryEnforcerV1(policy('off'), async () => {
+    const enforcer = createNetworkBoundaryEnforcer(policy('off'), async () => {
       resolutions += 1;
       return [publicAddress];
     });
@@ -111,7 +111,7 @@ describe('network boundary endpoint admission', () => {
   });
 
   test('requires an exact allowlisted DNS host and rejects IP literals', async () => {
-    const enforcer = createNetworkBoundaryEnforcerV1(
+    const enforcer = createNetworkBoundaryEnforcer(
       policy('allowlist', ['api.example.com']),
       async () => [publicAddress],
     );
@@ -150,7 +150,7 @@ describe('network boundary endpoint admission', () => {
   });
 
   test('rejects known metadata hostnames even if DNS claims a public address', async () => {
-    const enforcer = createNetworkBoundaryEnforcerV1(
+    const enforcer = createNetworkBoundaryEnforcer(
       policy('allowlist', ['metadata.google.internal']),
       async () => [publicAddress],
     );
@@ -178,9 +178,9 @@ describe('network boundary endpoint admission', () => {
       '::ffff:127.0.0.1',
     ]) {
       const family = address.includes(':') ? 6 : 4;
-      const enforcer = createNetworkBoundaryEnforcerV1(
+      const enforcer = createNetworkBoundaryEnforcer(
         policy('allowlist', ['api.example.com']),
-        async () => [{ address, family } as NetworkResolvedAddressV1],
+        async () => [{ address, family } as NetworkResolvedAddress],
       );
       await expect(
         enforcer.admit({
@@ -192,7 +192,7 @@ describe('network boundary endpoint admission', () => {
       ).rejects.toMatchObject({ code: 'private_or_reserved_address' });
     }
 
-    const mixed = createNetworkBoundaryEnforcerV1(
+    const mixed = createNetworkBoundaryEnforcer(
       policy('allowlist', ['api.example.com']),
       async () => [publicAddress, { address: '127.0.0.1', family: 4 }],
     );
@@ -212,7 +212,7 @@ describe('network boundary endpoint admission', () => {
       publicAddress,
     ];
     let reverse = false;
-    const enforcer = createNetworkBoundaryEnforcerV1(
+    const enforcer = createNetworkBoundaryEnforcer(
       policy('allowlist', ['api.example.com']),
       async () => {
         reverse = !reverse;
@@ -238,7 +238,7 @@ describe('network boundary endpoint admission', () => {
 
   test('checks and pins every redirect hop before issuing the next request', async () => {
     const requests: string[] = [];
-    const fetchImpl = createNetworkBoundaryFetchV1(
+    const fetchImpl = createNetworkBoundaryFetch(
       policy('allowlist', ['public.example', 'private.example']),
       {
         resolver: async (hostname) =>
@@ -262,7 +262,7 @@ describe('network boundary endpoint admission', () => {
   test('re-resolves the same host on redirect and stops DNS rebinding before the socket', async () => {
     let resolutions = 0;
     let requests = 0;
-    const fetchImpl = createNetworkBoundaryFetchV1(policy('allowlist', ['rebind.example']), {
+    const fetchImpl = createNetworkBoundaryFetch(policy('allowlist', ['rebind.example']), {
       resolver: async () => {
         resolutions += 1;
         return resolutions === 1 ? [publicAddress] : [{ address: '127.0.0.1', family: 4 }];
@@ -289,7 +289,7 @@ describe('network boundary endpoint admission', () => {
   });
 
   test('returns a typed unavailable failure when the controller crashes', async () => {
-    const enforcer = createNetworkBoundaryEnforcerV1(
+    const enforcer = createNetworkBoundaryEnforcer(
       policy('allowlist', ['api.example.com']),
       async () => {
         throw new Error('resolver crashed');
@@ -319,7 +319,7 @@ describe('network boundary endpoint admission', () => {
       releaseRecorder = resolve;
     });
     let requestStarted = false;
-    const fetchImpl = createNetworkBoundaryFetchV1(policy('allowlist', ['api.example.com']), {
+    const fetchImpl = createNetworkBoundaryFetch(policy('allowlist', ['api.example.com']), {
       resolver: async () => [publicAddress],
       recordDecision: async () => {
         recorderStarted?.();
@@ -341,7 +341,7 @@ describe('network boundary endpoint admission', () => {
 
   test('fails closed when allow or denial receipt persistence is unavailable', async () => {
     let requestCount = 0;
-    const allowFetch = createNetworkBoundaryFetchV1(policy('allowlist', ['api.example.com']), {
+    const allowFetch = createNetworkBoundaryFetch(policy('allowlist', ['api.example.com']), {
       resolver: async () => [publicAddress],
       recordDecision: async () => {
         throw new Error('store unavailable');
@@ -356,7 +356,7 @@ describe('network boundary endpoint admission', () => {
     });
     expect(requestCount).toBe(0);
 
-    const denyEnforcer = createNetworkBoundaryEnforcerV1(
+    const denyEnforcer = createNetworkBoundaryEnforcer(
       policy('allowlist', ['api.example.com']),
       async () => [{ address: '127.0.0.1', family: 4 }],
       async () => {
@@ -375,7 +375,7 @@ describe('network boundary endpoint admission', () => {
 
   test('bounds redirect configuration before any admission occurs', () => {
     expect(() =>
-      createNetworkBoundaryFetchV1(policy('allowlist', ['api.example.com']), {
+      createNetworkBoundaryFetch(policy('allowlist', ['api.example.com']), {
         maxRedirects: Number.POSITIVE_INFINITY,
       }),
     ).toThrow('integer between 0 and 20');
@@ -385,7 +385,7 @@ describe('network boundary endpoint admission', () => {
 describe('network boundary tool integration', () => {
   test('rolls a disabled feature back to network off and persists the denial receipt', async () => {
     const decisions: Array<{ outcome: string; failureCode?: string }> = [];
-    const result = await executeApprovedRuntimeToolV1({
+    const result = await executeApprovedRuntimeTool({
       workspace: process.cwd(),
       toolName: 'web_fetch',
       args: { url: 'https://api.example.com/data' },
@@ -421,7 +421,7 @@ describe('network boundary tool integration', () => {
     const shellRequest = request('shell_execute', {
       command: 'curl https://api.example.com',
     });
-    const result = await executeApprovedRuntimeToolV1({
+    const result = await executeApprovedRuntimeTool({
       workspace: process.cwd(),
       toolName: shellRequest.name,
       args: shellRequest.args,
@@ -459,10 +459,10 @@ describe('network boundary tool integration', () => {
       request('read_mcp_resource', { server: 'docs', uri: 'docs://one' }),
       request('mcp__docs__search', { query: 'one' }),
     ]) {
-      let result: Awaited<ReturnType<typeof executeApprovedRuntimeToolV1>> | undefined;
+      let result: Awaited<ReturnType<typeof executeApprovedRuntimeTool>> | undefined;
       let thrown: unknown;
       try {
-        result = await executeApprovedRuntimeToolV1({
+        result = await executeApprovedRuntimeTool({
           workspace: process.cwd(),
           toolName: networkRequest.name,
           args: networkRequest.args,
@@ -490,7 +490,7 @@ describe('network boundary tool integration', () => {
   });
 
   test('persists per-hop network decisions into the Runtime snapshot idempotently', async () => {
-    const decision = await createNetworkBoundaryEnforcerV1(
+    const decision = await createNetworkBoundaryEnforcer(
       policy('allowlist', ['api.example.com']),
       async () => [publicAddress],
     ).admit({
@@ -499,10 +499,10 @@ describe('network boundary tool integration', () => {
       invocationId: 'runtime-invocation',
       hop: 0,
     });
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: createRuntimeHostStateInitialStateV1({
+      initialState: createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'network-runtime',
         userId: 'user',
@@ -528,9 +528,7 @@ describe('network boundary tool integration', () => {
     });
 
     const snapshot =
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(
-        'network-runtime',
-      );
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>('network-runtime');
     expect(snapshot?.tools.calls['runtime-fetch']?.networkDecisions).toEqual([decision]);
     kernel.close();
   });

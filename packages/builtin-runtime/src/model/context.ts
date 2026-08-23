@@ -12,14 +12,14 @@ import {
   systemMessage,
 } from './messages';
 import systemPrompt from './prompts/system-prompt.txt';
-import systemPromptCurrent from './prompts/system-prompt.txt';
+import systemPromptCurrent from './prompts/system-prompt-current.txt';
 import { buildCacheableRuntimeContext, buildRuntimeModeSnapshot } from './runtime-context';
 import type {
-  BuiltinAgentPhaseV1,
-  BuiltinAuthorizationModeV1,
-  BuiltinInteractionModeV1,
-  BuiltinPlanningStateViewV1,
-  BuiltinSandboxBackendV1,
+  BuiltinAgentPhase,
+  BuiltinAuthorizationMode,
+  BuiltinInteractionMode,
+  BuiltinPlanningStateView,
+  BuiltinSandboxBackend,
 } from './runtime-view';
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = 'agent';
@@ -33,13 +33,13 @@ export interface ModelContextState {
   summaryMessages?: BaseMessage[];
   final: string;
   workspaceAccess?: 'write';
-  phase?: BuiltinAgentPhaseV1;
-  interactionMode?: BuiltinInteractionModeV1;
-  authorization?: { mode: BuiltinAuthorizationModeV1 };
-  sandboxBackend?: BuiltinSandboxBackendV1 | 'unknown';
+  phase?: BuiltinAgentPhase;
+  interactionMode?: BuiltinInteractionMode;
+  authorization?: { mode: BuiltinAuthorizationMode };
+  sandboxBackend?: BuiltinSandboxBackend | 'unknown';
   activeSkillInstructions?: string;
   /** PlanningState for dynamic runtime-state block */
-  planningState?: BuiltinPlanningStateViewV1;
+  planningState?: BuiltinPlanningStateView;
   taskId?: string;
   sideEffectsStarted?: boolean;
   workflowSkills?: Array<{ capabilityId: string; description: string }>;

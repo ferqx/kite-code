@@ -1,13 +1,13 @@
 import {
-  type BuiltinRuntimeToolPipelineCallbacksV1,
-  type BuiltinToolCatalogProjectionV1,
-  createBuiltinRuntimeToolPipelineCallbacksV1,
+  type BuiltinRuntimeToolPipelineCallbacks,
+  type BuiltinToolCatalogProjection,
+  createBuiltinRuntimeToolPipelineCallbacks,
 } from '@kite/builtin-runtime';
 import {
-  createRuntimeHostStateToolGovernanceV1,
-  type RuntimeHostStateToolGovernancePortV1,
+  createRuntimeHostStateToolGovernance,
+  type RuntimeHostStateToolGovernancePort,
 } from '@kite/runtime-host';
-import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
+import type { CapabilityTurnContext } from '@kite/runtime-spi';
 
 /**
  * The per-turn App projection of the one frozen Builtin catalog.
@@ -17,45 +17,41 @@ import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
  * port, or turn bundle is cached here: a different turn context must produce
  * a different, identity-preserving bundle.
  */
-export interface AppToolPipelineTurnCompositionV1 {
-  readonly projection: BuiltinToolCatalogProjectionV1;
-  readonly callbacks: BuiltinRuntimeToolPipelineCallbacksV1;
-  readonly governance: RuntimeHostStateToolGovernancePortV1;
+export interface AppToolPipelineTurnComposition {
+  readonly projection: BuiltinToolCatalogProjection;
+  readonly callbacks: BuiltinRuntimeToolPipelineCallbacks;
+  readonly governance: RuntimeHostStateToolGovernancePort;
 }
 
 /** Stable App-owned seam shared by model, tool, and runtime paths. */
-export interface AppToolPipelineCompositionV1 {
+export interface AppToolPipelineComposition {
   /** The exact frozen projection from which all turn projections derive. */
-  readonly baseProjection: BuiltinToolCatalogProjectionV1;
+  readonly baseProjection: BuiltinToolCatalogProjection;
   /**
    * Create one turn-local callback/governance bundle.  `baseProjection.forTurn`
    * is called exactly once for each invocation.
    */
-  readonly forTurn: (
-    context: Readonly<CapabilityTurnContextV1>,
-  ) => AppToolPipelineTurnCompositionV1;
+  readonly forTurn: (context: Readonly<CapabilityTurnContext>) => AppToolPipelineTurnComposition;
 }
 
 /**
  * Compose the App pipeline seam from the already-created Builtin projection.
  * This function creates no registry, snapshot, or capability execution port.
  */
-export function createAppToolPipelineCompositionV1(
-  baseProjection: BuiltinToolCatalogProjectionV1,
-): AppToolPipelineCompositionV1 {
-  assertFrozenBuiltinProjectionV1(baseProjection);
+export function createAppToolPipelineComposition(
+  baseProjection: BuiltinToolCatalogProjection,
+): AppToolPipelineComposition {
+  assertFrozenBuiltinProjection(baseProjection);
 
-  const forTurn = (
-    context: Readonly<CapabilityTurnContextV1>,
-  ): AppToolPipelineTurnCompositionV1 => {
+  const forTurn = (context: Readonly<CapabilityTurnContext>): AppToolPipelineTurnComposition => {
     const projection = baseProjection.forTurn(context);
     if (!projection || projection === baseProjection) {
       // A turn projection may legitimately share immutable internals, but it
       // must be an actual projection result owned by the Builtin catalog.
       throw new Error('Builtin turn projection was not created from the base catalog.');
     }
-    const callbacks = createBuiltinRuntimeToolPipelineCallbacksV1(projection);
-    const governance = createRuntimeHostStateToolGovernanceV1({
+    const callbacks = createBuiltinRuntimeToolPipelineCallbacks(projection);
+    const governance = createRuntimeHostStateToolGovernance({
       verifyClassifiedIdentity: callbacks.verifyClassifiedIdentity,
     });
     return Object.freeze({ projection, callbacks, governance });
@@ -64,9 +60,7 @@ export function createAppToolPipelineCompositionV1(
   return Object.freeze({ baseProjection, forTurn });
 }
 
-function assertFrozenBuiltinProjectionV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-): void {
+function assertFrozenBuiltinProjection(projection: Readonly<BuiltinToolCatalogProjection>): void {
   if (
     !Object.isFrozen(projection) ||
     !Object.isFrozen(projection.entries) ||

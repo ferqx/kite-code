@@ -44,7 +44,7 @@ type WindowsProcessIdentityApi = {
 
 let windowsProcessIdentityApi: WindowsProcessIdentityApi | undefined;
 
-export interface SessionLogLeaseRecordV1 {
+export interface SessionLogLeaseRecord {
   version: 1;
   pid: number;
   processStartIdentity: string;
@@ -55,7 +55,7 @@ export interface SessionLogLeaseRecordV1 {
   heartbeatAt: string;
 }
 
-interface SessionLogOperationLockV1 {
+interface SessionLogOperationLock {
   version: 1;
   pid: number;
   processStartIdentity: string;
@@ -65,8 +65,8 @@ interface SessionLogOperationLockV1 {
 
 export type SessionLogLeaseInspection =
   | { status: 'absent' }
-  | { status: 'active'; record: SessionLogLeaseRecordV1 }
-  | { status: 'stale'; record: SessionLogLeaseRecordV1 }
+  | { status: 'active'; record: SessionLogLeaseRecord }
+  | { status: 'stale'; record: SessionLogLeaseRecord }
   | { status: 'unknown'; reason: string };
 
 export interface ActiveSessionLeaseOptions extends SecureSessionStorageOptions {
@@ -81,7 +81,7 @@ export interface ActiveSessionLeaseOptions extends SecureSessionStorageOptions {
 export class ActiveSessionLease {
   private readonly leasePath: string;
   private readonly terminalPath: string;
-  private readonly record: SessionLogLeaseRecordV1;
+  private readonly record: SessionLogLeaseRecord;
   private readonly options: ActiveSessionLeaseOptions;
   private readonly sessionDir: string;
   private readonly directoryBindings: readonly SecureSessionLogDirectoryBinding[];
@@ -92,7 +92,7 @@ export class ActiveSessionLease {
 
   private constructor(
     sessionDir: string,
-    record: SessionLogLeaseRecordV1,
+    record: SessionLogLeaseRecord,
     directoryBindings: readonly SecureSessionLogDirectoryBinding[],
     options: ActiveSessionLeaseOptions,
   ) {
@@ -136,7 +136,7 @@ export class ActiveSessionLease {
       const directoryIdentity = readDirectoryIdentity(sessionDir);
       if (!directoryIdentity)
         throw new Error('Cannot establish the session-log directory identity.');
-      const record: SessionLogLeaseRecordV1 = {
+      const record: SessionLogLeaseRecord = {
         version: 1,
         pid: process.pid,
         processStartIdentity: identity,
@@ -451,11 +451,11 @@ function getWindowsProcessIdentityApi(): WindowsProcessIdentityApi {
   return windowsProcessIdentityApi;
 }
 
-function readLeaseRecord(path: string): SessionLogLeaseRecordV1 | undefined {
+function readLeaseRecord(path: string): SessionLogLeaseRecord | undefined {
   try {
     const metadata = lstatSync(path);
     if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) return undefined;
-    const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<SessionLogLeaseRecordV1>;
+    const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<SessionLogLeaseRecord>;
     if (
       value.version !== 1 ||
       !Number.isInteger(value.pid) ||
@@ -468,7 +468,7 @@ function readLeaseRecord(path: string): SessionLogLeaseRecordV1 | undefined {
     ) {
       return undefined;
     }
-    return value as SessionLogLeaseRecordV1;
+    return value as SessionLogLeaseRecord;
   } catch {
     return undefined;
   }
@@ -483,7 +483,7 @@ function tryAcquireStorageOperation(
   const now = (options.now ?? (() => new Date()))();
   const processStartIdentity = (options.processIdentity ?? readProcessStartIdentity)(process.pid);
   if (!Number.isFinite(now.getTime()) || !processStartIdentity) return undefined;
-  const record: SessionLogOperationLockV1 = {
+  const record: SessionLogOperationLock = {
     version: 1,
     pid: process.pid,
     processStartIdentity,
@@ -535,11 +535,11 @@ function tryAcquireStorageOperation(
   }
 }
 
-function readOperationLock(path: string): SessionLogOperationLockV1 | undefined {
+function readOperationLock(path: string): SessionLogOperationLock | undefined {
   try {
     const metadata = lstatSync(path);
     if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) return undefined;
-    const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<SessionLogOperationLockV1>;
+    const value = JSON.parse(readFileSync(path, 'utf8')) as Partial<SessionLogOperationLock>;
     if (
       value.version !== 1 ||
       !Number.isInteger(value.pid) ||
@@ -549,7 +549,7 @@ function readOperationLock(path: string): SessionLogOperationLockV1 | undefined 
     ) {
       return undefined;
     }
-    return value as SessionLogOperationLockV1;
+    return value as SessionLogOperationLock;
   } catch {
     return undefined;
   }

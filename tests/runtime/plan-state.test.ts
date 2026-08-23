@@ -5,7 +5,7 @@ import type { RuntimeEvent } from '@kite/agent-kernel';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type { AgentPlan, PlanDocument, PlanningState } from '@kite/runtime-contract';
 import {
-  createRuntimeHostStateInitialStateV1,
+  createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
 } from '@kite/runtime-host';
@@ -41,7 +41,7 @@ function makePlan(name = 'Test Plan', steps: string[] = ['step 1', 'step 2']): A
 }
 
 function makeState() {
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread-1',
     userId: 'user-1',

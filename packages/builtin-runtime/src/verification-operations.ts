@@ -1,38 +1,38 @@
 import type {
-  CapabilityExecutionContextV1,
-  CapabilityExecutionMechanismV1,
-  CapabilityExecutorV1,
-  ExecutionReceiptV1,
-  RuntimeModuleRegistryWriterV1,
-  RuntimeModuleV1,
+  CapabilityExecutionContext,
+  CapabilityExecutionMechanism,
+  CapabilityExecutor,
+  ExecutionReceipt,
+  RuntimeModule,
+  RuntimeModuleRegistryWriter,
 } from '@kite/runtime-spi';
-import { defineRuntimeModuleV1 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
+import { defineRuntimeModule } from '@kite/runtime-spi';
+import { digestCapabilityBindingValue } from './capability-binding';
 import {
-  defineBuiltinCapabilityContractV1,
-  parserForBuiltinOperationV1,
-  staticEffectsClassifierV1,
+  defineBuiltinCapabilityContract,
+  parserForBuiltinOperation,
+  staticEffectsClassifier,
 } from './catalog-contract';
-import { BUILTIN_MODEL_OPERATION_IDS_V1, type BuiltinModelOperationIdV1 } from './model/operation';
-import type { BuiltinOperationExecutionValueV1 } from './model-operations';
-import { BUILTIN_JSON_SCHEMAS_V1 } from './tool-schemas';
+import { BUILTIN_MODEL_OPERATION_IDS_, type BuiltinModelOperationId } from './model/operation';
+import type { BuiltinOperationExecutionValue } from './model-operations';
+import { BUILTIN_JSON_SCHEMAS_ } from './tool-schemas';
 
-export const RMV1_15_PROVIDER_ID_V1 = 'kite-builtin-runtime-rmv1-15' as const;
+export const VERIFICATION_PROVIDER_ID_ = 'kite-builtin-runtime-rmv1-15' as const;
 
-export const RMV1_15_OPERATION_IDS_V1 = BUILTIN_MODEL_OPERATION_IDS_V1;
+export const VERIFICATION_OPERATION_IDS_ = BUILTIN_MODEL_OPERATION_IDS_;
 
-export type Rmv115OperationIdV1 = BuiltinModelOperationIdV1;
+export type VerificationOperationId = BuiltinModelOperationId;
 
-const MODEL_OPERATION_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['model:primary'];
+const MODEL_OPERATION_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['model:primary'];
 
-const MODEL_OPERATION_EFFECTS_V1 = Object.freeze({
+const MODEL_OPERATION_EFFECTS_ = Object.freeze({
   filesystem: 'none',
   network: 'write',
   externalState: 'none',
 });
 
-const EXECUTION_MECHANISMS_V1: Readonly<
-  Record<Rmv115OperationIdV1, CapabilityExecutionMechanismV1>
+const EXECUTION_MECHANISMS_: Readonly<
+  Record<VerificationOperationId, CapabilityExecutionMechanism>
 > = Object.freeze({
   'model:primary': 'model',
   'model:compaction': 'model',
@@ -41,106 +41,106 @@ const EXECUTION_MECHANISMS_V1: Readonly<
   'model:subagent': 'model',
 });
 
-export const RMV1_15_CAPABILITY_REVISIONS_V1: Readonly<Record<Rmv115OperationIdV1, string>> =
+export const VERIFICATION_CAPABILITY_REVISIONS_: Readonly<Record<VerificationOperationId, string>> =
   Object.freeze(
     Object.fromEntries(
-      RMV1_15_OPERATION_IDS_V1.map((operationId) => [
+      VERIFICATION_OPERATION_IDS_.map((operationId) => [
         operationId,
-        digestCapabilityBindingValueV1({
+        digestCapabilityBindingValue({
           schema: 'kite.rmv1-15-model-operation-capability.v1',
           operationId,
-          inputSchema: MODEL_OPERATION_INPUT_SCHEMA_V1,
-          effects: MODEL_OPERATION_EFFECTS_V1,
+          inputSchema: MODEL_OPERATION_INPUT_SCHEMA_,
+          effects: MODEL_OPERATION_EFFECTS_,
         }),
       ]),
-    ) as Record<Rmv115OperationIdV1, string>,
+    ) as Record<VerificationOperationId, string>,
   );
 
-export const RMV1_15_EXECUTOR_REVISIONS_V1: Readonly<Record<Rmv115OperationIdV1, string>> =
+export const VERIFICATION_EXECUTOR_REVISIONS_: Readonly<Record<VerificationOperationId, string>> =
   Object.freeze(
     Object.fromEntries(
-      RMV1_15_OPERATION_IDS_V1.map((operationId) => [
+      VERIFICATION_OPERATION_IDS_.map((operationId) => [
         operationId,
-        digestCapabilityBindingValueV1({
+        digestCapabilityBindingValue({
           schema: 'kite.rmv1-15-model-operation-executor.v1',
           operationId,
-          capabilityRevision: RMV1_15_CAPABILITY_REVISIONS_V1[operationId],
+          capabilityRevision: VERIFICATION_CAPABILITY_REVISIONS_[operationId],
           gateway: 'kite.model-invocation-gateway.v1',
         }),
       ]),
-    ) as Record<Rmv115OperationIdV1, string>,
+    ) as Record<VerificationOperationId, string>,
   );
 
 /** Host-provided effect lifecycle around the Builtin-owned Model invocation semantics. */
-export interface BuiltinModelExecutionMechanismV1 {
+export interface BuiltinModelExecutionMechanism {
   execute(
-    operationId: Rmv115OperationIdV1,
+    operationId: VerificationOperationId,
     input: Readonly<Record<string, unknown>>,
-  ): Promise<BuiltinOperationExecutionValueV1>;
+  ): Promise<BuiltinOperationExecutionValue>;
 }
 
-export interface Rmv115ExecutionMechanismsV1 extends Readonly<Record<string, unknown>> {
-  readonly model?: BuiltinModelExecutionMechanismV1;
+export interface VerificationExecutionMechanisms extends Readonly<Record<string, unknown>> {
+  readonly model?: BuiltinModelExecutionMechanism;
 }
 
-export function createVerificationRuntimeModule(): RuntimeModuleV1 {
-  return defineRuntimeModuleV1({
-    moduleId: RMV1_15_PROVIDER_ID_V1,
-    providerId: RMV1_15_PROVIDER_ID_V1,
+export function createVerificationRuntimeModule(): RuntimeModule {
+  return defineRuntimeModule({
+    moduleId: VERIFICATION_PROVIDER_ID_,
+    providerId: VERIFICATION_PROVIDER_ID_,
     revision: 'rmv1-15',
-    operationIds: RMV1_15_OPERATION_IDS_V1,
-    register: registerRmv115OperationsV1,
+    operationIds: VERIFICATION_OPERATION_IDS_,
+    register: registerVerificationOperations,
   });
 }
 
-function registerRmv115OperationsV1(registry: RuntimeModuleRegistryWriterV1): void {
-  for (const operationId of RMV1_15_OPERATION_IDS_V1) {
-    const capabilityRevision = RMV1_15_CAPABILITY_REVISIONS_V1[operationId];
+function registerVerificationOperations(registry: RuntimeModuleRegistryWriter): void {
+  for (const operationId of VERIFICATION_OPERATION_IDS_) {
+    const capabilityRevision = VERIFICATION_CAPABILITY_REVISIONS_[operationId];
     registry.registerCapability(
-      defineBuiltinCapabilityContractV1(
+      defineBuiltinCapabilityContract(
         {
           capabilityId: operationId,
           revision: capabilityRevision,
-          providerId: RMV1_15_PROVIDER_ID_V1,
+          providerId: VERIFICATION_PROVIDER_ID_,
           title: `Builtin Runtime Model operation ${operationId}`,
-          executionMechanism: EXECUTION_MECHANISMS_V1[operationId],
+          executionMechanism: EXECUTION_MECHANISMS_[operationId],
           visibility: 'internal',
-          effects: MODEL_OPERATION_EFFECTS_V1,
-          inputSchema: MODEL_OPERATION_INPUT_SCHEMA_V1,
-          inputSchemaDigest: digestCapabilityBindingValueV1(MODEL_OPERATION_INPUT_SCHEMA_V1),
+          effects: MODEL_OPERATION_EFFECTS_,
+          inputSchema: MODEL_OPERATION_INPUT_SCHEMA_,
+          inputSchemaDigest: digestCapabilityBindingValue(MODEL_OPERATION_INPUT_SCHEMA_),
         },
         {
-          parser: parserForBuiltinOperationV1(operationId, capabilityRevision),
+          parser: parserForBuiltinOperation(operationId, capabilityRevision),
           kind: 'internal_runtime',
           minimumApproval: 'none',
-          effectsClassifier: staticEffectsClassifierV1(
+          effectsClassifier: staticEffectsClassifier(
             'unknown',
             true,
             'Model gateway lifecycle is an internal Host-routed operation.',
-            MODEL_OPERATION_EFFECTS_V1,
+            MODEL_OPERATION_EFFECTS_,
           ),
           execution: { retry: 'never' },
         },
       ),
     );
     registry.registerExecutor({
-      providerId: RMV1_15_PROVIDER_ID_V1,
+      providerId: VERIFICATION_PROVIDER_ID_,
       capabilityId: operationId,
       capabilityRevision,
-      executorRevision: RMV1_15_EXECUTOR_REVISIONS_V1[operationId],
-      execute: (request, context) => executeRmv115OperationV1(operationId, request, context),
-    } satisfies CapabilityExecutorV1);
+      executorRevision: VERIFICATION_EXECUTOR_REVISIONS_[operationId],
+      execute: (request, context) => executeVerificationOperation(operationId, request, context),
+    } satisfies CapabilityExecutor);
   }
 }
 
-async function executeRmv115OperationV1(
-  operationId: Rmv115OperationIdV1,
-  request: Parameters<CapabilityExecutorV1['execute']>[0],
-  context: CapabilityExecutionContextV1,
-): Promise<ExecutionReceiptV1> {
+async function executeVerificationOperation(
+  operationId: VerificationOperationId,
+  request: Parameters<CapabilityExecutor['execute']>[0],
+  context: CapabilityExecutionContext,
+): Promise<ExecutionReceipt> {
   const input = asRecord(request.input);
   if (!input) return failedReceipt(operationId, request.invocationId, context, 'invalid_input');
-  const mechanisms = context.environment.mechanisms as Rmv115ExecutionMechanismsV1 | undefined;
+  const mechanisms = context.environment.mechanisms as VerificationExecutionMechanisms | undefined;
   if (!mechanisms?.model) {
     return failedReceipt(
       operationId,
@@ -153,8 +153,8 @@ async function executeRmv115OperationV1(
   return Object.freeze({
     invocationId: request.invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: RMV1_15_PROVIDER_ID_V1,
-    executorRevision: RMV1_15_EXECUTOR_REVISIONS_V1[operationId],
+    providerId: VERIFICATION_PROVIDER_ID_,
+    executorRevision: VERIFICATION_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'succeeded',
     dispatchCertainty: 'attempted',
@@ -164,16 +164,16 @@ async function executeRmv115OperationV1(
 }
 
 function failedReceipt(
-  operationId: Rmv115OperationIdV1,
+  operationId: VerificationOperationId,
   invocationId: string,
-  context: CapabilityExecutionContextV1,
+  context: CapabilityExecutionContext,
   code: string,
-): ExecutionReceiptV1 {
+): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: RMV1_15_PROVIDER_ID_V1,
-    executorRevision: RMV1_15_EXECUTOR_REVISIONS_V1[operationId],
+    providerId: VERIFICATION_PROVIDER_ID_,
+    executorRevision: VERIFICATION_EXECUTOR_REVISIONS_[operationId],
     requestDigest: context.requestDigest,
     status: 'failed',
     dispatchCertainty: 'none',

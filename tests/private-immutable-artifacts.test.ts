@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   PrivateArtifactStorageError,
-  PrivateImmutableArtifactStorageV1,
+  PrivateImmutableArtifactStorage,
 } from '@kite/builtin-runtime/model';
 
 type FixtureKind = 'surface' | 'response';
@@ -46,11 +46,11 @@ function store(
   options: {
     maxArtifactBytes?: number;
     faultInjector?: ConstructorParameters<
-      typeof PrivateImmutableArtifactStorageV1<FixtureKind>
+      typeof PrivateImmutableArtifactStorage<FixtureKind>
     >[0]['faultInjector'];
   } = {},
-): PrivateImmutableArtifactStorageV1<FixtureKind> {
-  return new PrivateImmutableArtifactStorageV1({
+): PrivateImmutableArtifactStorage<FixtureKind> {
+  return new PrivateImmutableArtifactStorage({
     root: storageRoot,
     namespace: 'private-store',
     partitions: PARTITIONS,
@@ -64,7 +64,7 @@ function artifactPath(storageRoot: string, kind: FixtureKind, artifactId: string
   return join(storageRoot, directory, `${artifactId}.json`);
 }
 
-describe('PrivateImmutableArtifactStorageV1', () => {
+describe('PrivateImmutableArtifactStorage', () => {
   test('publishes owner-only immutable content under content-addressed identities', () => {
     const storageRoot = root();
     const artifacts = store(storageRoot);

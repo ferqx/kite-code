@@ -1,7 +1,7 @@
-import type { ReleaseCompositionV1 } from './composition-root';
-import type { ExecutionStatusProjectionV1 } from './execution-status';
+import type { ReleaseComposition } from './composition-root';
+import type { ExecutionStatusProjection } from './execution-status';
 
-export interface ReleaseStatusProjectionV1 {
+export interface ReleaseStatusProjection {
   version: 1;
   active: boolean;
   production: boolean;
@@ -31,10 +31,10 @@ export interface ReleaseStatusProjectionV1 {
 }
 
 /** User-facing, non-model status projection with no paths, route names, or cohort identity. */
-export function projectReleaseStatusV1(input: {
-  composition: ReleaseCompositionV1;
-  executionStatus?: ExecutionStatusProjectionV1 | null;
-}): ReleaseStatusProjectionV1 {
+export function projectReleaseStatus(input: {
+  composition: ReleaseComposition;
+  executionStatus?: ExecutionStatusProjection | null;
+}): ReleaseStatusProjection {
   const execution = input.executionStatus
     ? {
         admitted: true,
@@ -80,7 +80,7 @@ export function projectReleaseStatusV1(input: {
   };
 }
 
-export function formatReleaseStatusV1(status: ReleaseStatusProjectionV1): string {
+export function formatReleaseStatus(status: ReleaseStatusProjection): string {
   if (!status.active) {
     return [
       `Release control: inactive (${status.inactiveReason ?? 'unknown'})`,

@@ -1,24 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
+  createBuiltinToolCatalogProjection,
 } from '@kite/builtin-runtime';
 import {
-  BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1,
-  type BuiltinModelOperationAttemptV1,
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
+  type BuiltinModelOperationAttempt,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostCapabilityExecutionPortV1 } from '@kite/runtime-host';
+import { createRuntimeHostCapabilityExecutionPort } from '@kite/runtime-host';
 import {
-  type CapabilityExecutionPortV1,
-  createRuntimeModuleRegistryV1,
-  MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
-  MODEL_INVOCATION_PURPOSES_V1,
-  type ModelAttemptOutcomeV1,
+  type CapabilityExecutionPort,
+  createRuntimeModuleRegistry,
+  MODEL_ATTEMPT_OUTCOME_SCHEMA_,
+  MODEL_INVOCATION_PURPOSES_,
+  type ModelAttemptOutcome,
 } from '@kite/runtime-spi';
-import { createKiteModelOperationExecutionPortV1 } from '#app/bootstrap/model-operation-execution';
+import { createKiteModelOperationExecutionPort } from '#app/bootstrap/model-operation-execution';
 
-const OUTCOME: ModelAttemptOutcomeV1 = Object.freeze({
-  schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+const OUTCOME: ModelAttemptOutcome = Object.freeze({
+  schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
   kind: 'success',
   response: Object.freeze({
     message: Object.freeze({
@@ -41,12 +41,12 @@ const OUTCOME: ModelAttemptOutcomeV1 = Object.freeze({
 });
 
 function attempt(
-  purpose: (typeof MODEL_INVOCATION_PURPOSES_V1)[number],
+  purpose: (typeof MODEL_INVOCATION_PURPOSES_)[number],
   ordinal: number,
-  invoke: () => Promise<ModelAttemptOutcomeV1>,
-): BuiltinModelOperationAttemptV1 {
+  invoke: () => Promise<ModelAttemptOutcome>,
+): BuiltinModelOperationAttempt {
   return Object.freeze({
-    operationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1[purpose],
+    operationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_[purpose],
     purpose,
     invocationId: `model-invocation-${ordinal}`,
     attemptOrdinal: 1,
@@ -69,18 +69,18 @@ function attempt(
 }
 
 function composition() {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot());
-  const host = createRuntimeHostCapabilityExecutionPortV1(registry);
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const projection = createBuiltinToolCatalogProjection(registry.snapshot());
+  const host = createRuntimeHostCapabilityExecutionPort(registry);
   let hostCalls = 0;
-  const countedHost: CapabilityExecutionPortV1 = Object.freeze({
-    invoke: (invocation: Parameters<CapabilityExecutionPortV1['invoke']>[0]) => {
+  const countedHost: CapabilityExecutionPort = Object.freeze({
+    invoke: (invocation: Parameters<CapabilityExecutionPort['invoke']>[0]) => {
       hostCalls += 1;
       return host.invoke(invocation);
     },
   });
   return {
-    execution: createKiteModelOperationExecutionPortV1(countedHost, projection),
+    execution: createKiteModelOperationExecutionPort(countedHost, projection),
     hostCalls: () => hostCalls,
   };
 }
@@ -89,7 +89,7 @@ describe('Kite Builtin Model operation execution composition', () => {
   test('routes all five purposes through one supplied Host port exactly once', async () => {
     const composed = composition();
     let sourceCalls = 0;
-    for (const [index, purpose] of MODEL_INVOCATION_PURPOSES_V1.entries()) {
+    for (const [index, purpose] of MODEL_INVOCATION_PURPOSES_.entries()) {
       const outcome = await composed.execution.execute(
         attempt(purpose, index + 1, async () => {
           sourceCalls += 1;
@@ -121,7 +121,7 @@ describe('Kite Builtin Model operation execution composition', () => {
     await expect(
       composed.execution.execute({
         ...primary,
-        input: [] as unknown as BuiltinModelOperationAttemptV1['input'],
+        input: [] as unknown as BuiltinModelOperationAttempt['input'],
       }),
     ).rejects.toThrow('input is invalid');
     expect(composed.hostCalls()).toBe(0);

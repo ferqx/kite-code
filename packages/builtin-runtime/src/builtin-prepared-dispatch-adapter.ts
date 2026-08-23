@@ -1,29 +1,29 @@
 import type {
-  CapabilityExecutionMechanismV1,
-  CapabilityToolTerminalResultV1,
-  ClassifiedProviderFailureV1,
-  ExecutionReceiptV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineDispatchV1,
-  ToolPipelinePreparedIdentityVerifierV1,
+  CapabilityExecutionMechanism,
+  CapabilityToolTerminalResult,
+  ClassifiedProviderFailure,
+  ExecutionReceipt,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineDispatch,
+  ToolPipelinePreparedIdentityVerifier,
 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
+import { digestCapabilityBindingValue } from './capability-binding';
 import {
-  authorizeBuiltinWorkspaceFilesystemTerminalCloneV1,
-  bindBuiltinWorkspaceFilesystemClonedTerminalV1,
+  authorizeBuiltinWorkspaceFilesystemTerminalClone,
+  bindBuiltinWorkspaceFilesystemClonedTerminal,
 } from './filesystem/observation-authority';
-import type { BuiltinOperationExecutionValueV1 } from './model-operations';
+import type { BuiltinOperationExecutionValue } from './model-operations';
 import type {
-  BuiltinInternalOperationCatalogEntryV1,
-  BuiltinModelToolCatalogEntryV1,
-  BuiltinToolCatalogEntryV1,
-  BuiltinToolCatalogProjectionV1,
+  BuiltinInternalOperationCatalogEntry,
+  BuiltinModelToolCatalogEntry,
+  BuiltinToolCatalogEntry,
+  BuiltinToolCatalogProjection,
 } from './tool-catalog';
-import { BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1 } from './tool-pipeline-callbacks';
-import { toolExecutionModelContentV1 } from './tool-result-projection';
-import { isToolSearchExecutionValueV1 } from './tool-search';
+import { BUILTIN_PREPARED_CALL_FACTS_SCHEMA_ } from './tool-pipeline-callbacks';
+import { toolExecutionModelContent } from './tool-result-projection';
+import { isToolSearchExecutionValue } from './tool-search';
 
 /**
  * The neutral input handed to the App/Host-composed dispatch port.
@@ -33,11 +33,11 @@ import { isToolSearchExecutionValueV1 } from './tool-search';
  * callbacks, or a persistence handle. The App composition owns the concrete
  * mechanism map behind this port.
  */
-export interface BuiltinPreparedToolDispatchInputV1 {
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
+export interface BuiltinPreparedToolDispatchInput {
+  readonly prepared: Readonly<PreparedToolInvocation>;
   readonly operationId: string;
-  readonly executionMechanism: CapabilityExecutionMechanismV1;
-  readonly arguments: RuntimeJsonValueV1;
+  readonly executionMechanism: CapabilityExecutionMechanism;
+  readonly arguments: RuntimeJsonValue;
 }
 
 /**
@@ -50,13 +50,13 @@ export interface BuiltinPreparedToolDispatchInputV1 {
  * supplied Host capability port and exact invocation; it must not be a second
  * executor, registry, handler, or fallback.
  */
-export interface BuiltinPreparedToolDispatchPortV1 {
+export interface BuiltinPreparedToolDispatchPort {
   readonly dispatch: (
-    input: Readonly<BuiltinPreparedToolDispatchInputV1>,
-  ) => Promise<Readonly<ExecutionReceiptV1<RuntimeJsonValueV1>>>;
+    input: Readonly<BuiltinPreparedToolDispatchInput>,
+  ) => Promise<Readonly<ExecutionReceipt<RuntimeJsonValue>>>;
 }
 
-export type BuiltinPreparedToolDispatchFailureCodeV1 =
+export type BuiltinPreparedToolDispatchFailureCode =
   | 'invalid_prepared_input'
   | 'identity_mismatch'
   | 'unsupported_operation'
@@ -65,23 +65,23 @@ export type BuiltinPreparedToolDispatchFailureCodeV1 =
   | 'invalid_result';
 
 /** Bounded, package-local error; no Provider/Host diagnostic crosses it. */
-export class BuiltinPreparedToolDispatchErrorV1 extends Error {
-  readonly code: BuiltinPreparedToolDispatchFailureCodeV1;
+export class BuiltinPreparedToolDispatchError extends Error {
+  readonly code: BuiltinPreparedToolDispatchFailureCode;
 
-  constructor(code: BuiltinPreparedToolDispatchFailureCodeV1) {
-    super(builtinPreparedToolDispatchMessageV1(code));
-    this.name = 'BuiltinPreparedToolDispatchErrorV1';
+  constructor(code: BuiltinPreparedToolDispatchFailureCode) {
+    super(builtinPreparedToolDispatchMessage(code));
+    this.name = 'BuiltinPreparedToolDispatchError';
     this.code = code;
   }
 }
 
-export interface CreateBuiltinPreparedToolDispatchAdapterInputV1 {
+export interface CreateBuiltinPreparedToolDispatchAdapterInput {
   /** The exact frozen projection captured by the App composition root. */
-  readonly projection: Readonly<BuiltinToolCatalogProjectionV1>;
+  readonly projection: Readonly<BuiltinToolCatalogProjection>;
   /** Must be the verifier supplied by the exact projection callback bundle. */
-  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1;
+  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier;
   /** The sole injected mechanism/dispatch port for this adapter instance. */
-  readonly port: BuiltinPreparedToolDispatchPortV1;
+  readonly port: BuiltinPreparedToolDispatchPort;
 }
 
 /**
@@ -92,33 +92,33 @@ export interface CreateBuiltinPreparedToolDispatchAdapterInputV1 {
  * acknowledgement ordering, and exact-once claim; this adapter owns only
  * mechanical projection-entry and operation-boundary checks.
  */
-export type BuiltinPreparedToolDispatchAdapterV1 = ToolPipelineDispatchV1<
-  RuntimeJsonValueV1,
-  BuiltinOperationExecutionValueV1
+export type BuiltinPreparedToolDispatchAdapter = ToolPipelineDispatch<
+  RuntimeJsonValue,
+  BuiltinOperationExecutionValue
 >;
 
-export function createBuiltinPreparedToolDispatchAdapterV1(
-  input: CreateBuiltinPreparedToolDispatchAdapterInputV1,
-): BuiltinPreparedToolDispatchAdapterV1 {
-  assertFrozenProjectionV1(input.projection);
+export function createBuiltinPreparedToolDispatchAdapter(
+  input: CreateBuiltinPreparedToolDispatchAdapterInput,
+): BuiltinPreparedToolDispatchAdapter {
+  assertFrozenProjection(input.projection);
   if (!input.port || typeof input.port.dispatch !== 'function') {
-    throw new BuiltinPreparedToolDispatchErrorV1('dispatch_unavailable');
+    throw new BuiltinPreparedToolDispatchError('dispatch_unavailable');
   }
   if (typeof input.verifyPreparedIdentity !== 'function') {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_prepared_input');
+    throw new BuiltinPreparedToolDispatchError('invalid_prepared_input');
   }
 
   const verifyPreparedIdentity = input.verifyPreparedIdentity;
 
   const dispatch = async (
-    prepared: Readonly<PreparedToolInvocationV1<RuntimeJsonValueV1, RuntimeJsonValueV1>>,
-  ): Promise<Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>>> => {
-    if (!isDeepFrozenPreparedV1(prepared)) {
-      throw new BuiltinPreparedToolDispatchErrorV1('invalid_prepared_input');
+    prepared: Readonly<PreparedToolInvocation<RuntimeJsonValue, RuntimeJsonValue>>,
+  ): Promise<Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>> => {
+    if (!isDeepFrozenPrepared(prepared)) {
+      throw new BuiltinPreparedToolDispatchError('invalid_prepared_input');
     }
 
-    const entry = exactModelEntryForPreparedV1(input.projection, prepared);
-    assertSupportedEntryV1(entry);
+    const entry = exactModelEntryForPrepared(input.projection, prepared);
+    assertSupportedEntry(entry);
 
     // Host has already performed the exact verifier and claim before calling
     // this callback. A thrown neutral-port result remains an attempted
@@ -131,8 +131,8 @@ export function createBuiltinPreparedToolDispatchAdapterV1(
         arguments: prepared.input.arguments,
       }),
     );
-    assertReceiptIdentityV1(receipt, entry, prepared);
-    return projectBuiltinExecutionReceiptTerminalResultForEntryV1(receipt, entry, prepared);
+    assertReceiptIdentity(receipt, entry, prepared);
+    return projectBuiltinExecutionReceiptTerminalResultForEntry(receipt, entry, prepared);
   };
 
   return Object.freeze({ verifyPreparedIdentity, dispatch });
@@ -147,18 +147,18 @@ export function createBuiltinPreparedToolDispatchAdapterV1(
  * projection; it never creates a child runtime, persists a continuation, or
  * interprets a suspension.
  */
-export interface CreateBuiltinPreparedTaskDispatchAdapterInputV1 {
+export interface CreateBuiltinPreparedTaskDispatchAdapterInput {
   /** The one frozen Builtin catalog projection captured by App composition. */
-  readonly projection: Readonly<BuiltinToolCatalogProjectionV1>;
+  readonly projection: Readonly<BuiltinToolCatalogProjection>;
   /** Retained by reference for the Host coordinator's exact identity check. */
-  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1;
+  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier;
   /** The sole supplied port for the already admitted Builtin operation. */
-  readonly port: BuiltinPreparedToolDispatchPortV1;
+  readonly port: BuiltinPreparedToolDispatchPort;
 }
 
-export type BuiltinPreparedTaskDispatchAdapterV1 = ToolPipelineDispatchV1<
-  RuntimeJsonValueV1,
-  BuiltinOperationExecutionValueV1
+export type BuiltinPreparedTaskDispatchAdapter = ToolPipelineDispatch<
+  RuntimeJsonValue,
+  BuiltinOperationExecutionValue
 >;
 
 /**
@@ -169,22 +169,22 @@ export type BuiltinPreparedTaskDispatchAdapterV1 = ToolPipelineDispatchV1<
  * missing/invalid task artifacts, the model parser revision, and any drift in
  * the frozen task entry are rejected before the injected port is reached.
  */
-export function createBuiltinPreparedTaskDispatchAdapterV1(
-  input: CreateBuiltinPreparedTaskDispatchAdapterInputV1,
-): BuiltinPreparedTaskDispatchAdapterV1 {
-  assertFrozenProjectionV1(input.projection);
+export function createBuiltinPreparedTaskDispatchAdapter(
+  input: CreateBuiltinPreparedTaskDispatchAdapterInput,
+): BuiltinPreparedTaskDispatchAdapter {
+  assertFrozenProjection(input.projection);
   if (!input.port || typeof input.port.dispatch !== 'function') {
-    throw new BuiltinPreparedToolDispatchErrorV1('dispatch_unavailable');
+    throw new BuiltinPreparedToolDispatchError('dispatch_unavailable');
   }
   if (typeof input.verifyPreparedIdentity !== 'function') {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_prepared_input');
+    throw new BuiltinPreparedToolDispatchError('invalid_prepared_input');
   }
 
   const verifyPreparedIdentity = input.verifyPreparedIdentity;
   const dispatch = async (
-    prepared: Readonly<PreparedToolInvocationV1<RuntimeJsonValueV1, RuntimeJsonValueV1>>,
-  ): Promise<Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>>> => {
-    const entry = exactPrivateTaskEntryForPreparedV1(input.projection, prepared);
+    prepared: Readonly<PreparedToolInvocation<RuntimeJsonValue, RuntimeJsonValue>>,
+  ): Promise<Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>> => {
+    const entry = exactPrivateTaskEntryForPrepared(input.projection, prepared);
     const receipt = await input.port.dispatch(
       Object.freeze({
         prepared,
@@ -193,8 +193,8 @@ export function createBuiltinPreparedTaskDispatchAdapterV1(
         arguments: prepared.input.arguments,
       }),
     );
-    assertReceiptIdentityV1(receipt, entry, prepared);
-    return projectBuiltinExecutionReceiptTerminalResultForEntryV1(receipt, entry, prepared);
+    assertReceiptIdentity(receipt, entry, prepared);
+    return projectBuiltinExecutionReceiptTerminalResultForEntry(receipt, entry, prepared);
   };
 
   // Preserve the exact callback reference. Host owns the verification call and
@@ -207,10 +207,10 @@ export function createBuiltinPreparedTaskDispatchAdapterV1(
  * terminal envelope. No parser, schema, effect, policy, or Provider facts are
  * reconstructed here; the operation result already owns those semantics.
  */
-export function projectBuiltinOperationTerminalResultV1(
-  value: BuiltinOperationExecutionValueV1,
-): Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>> {
-  return projectBuiltinOperationTerminalResultForEntryV1(value);
+export function projectBuiltinOperationTerminalResult(
+  value: BuiltinOperationExecutionValue,
+): Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>> {
+  return projectBuiltinOperationTerminalResultForEntry(value);
 }
 
 /**
@@ -220,17 +220,17 @@ export function projectBuiltinOperationTerminalResultV1(
  * with `ok: false`; the standalone projector above intentionally has no entry
  * context and retains its historical `builtin_operation_failed` behavior.
  */
-function projectBuiltinOperationTerminalResultForEntryV1(
-  value: BuiltinOperationExecutionValueV1,
-  entryKind?: BuiltinModelToolCatalogEntryV1['kind'],
-): Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>> {
-  if (!isBuiltinOperationResultV1(value)) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_result');
+function projectBuiltinOperationTerminalResultForEntry(
+  value: BuiltinOperationExecutionValue,
+  entryKind?: BuiltinModelToolCatalogEntry['kind'],
+): Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>> {
+  if (!isBuiltinOperationResult(value)) {
+    throw new BuiltinPreparedToolDispatchError('invalid_result');
   }
 
-  const text = toolExecutionModelContentV1(value);
-  const structuredContent = cloneBuiltinOperationValueV1(value);
-  const content: readonly RuntimeJsonValueV1[] =
+  const text = toolExecutionModelContent(value);
+  const structuredContent = cloneBuiltinOperationValue(value);
+  const content: readonly RuntimeJsonValue[] =
     text.length === 0 ? Object.freeze([]) : Object.freeze([{ type: 'text' as const, text }]);
   if (value.ok) {
     return Object.freeze({
@@ -268,10 +268,10 @@ function projectBuiltinOperationTerminalResultForEntryV1(
  * converted into Host unknown exceptions merely because no Builtin value is
  * present.
  */
-export function projectBuiltinExecutionReceiptTerminalResultV1(
-  receipt: Readonly<ExecutionReceiptV1<RuntimeJsonValueV1>>,
-): Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>> {
-  return projectBuiltinExecutionReceiptTerminalResultForEntryV1(receipt);
+export function projectBuiltinExecutionReceiptTerminalResult(
+  receipt: Readonly<ExecutionReceipt<RuntimeJsonValue>>,
+): Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>> {
+  return projectBuiltinExecutionReceiptTerminalResultForEntry(receipt);
 }
 
 /**
@@ -281,33 +281,33 @@ export function projectBuiltinExecutionReceiptTerminalResultV1(
  * MCP provider semantics. The exact frozen prepared identity and wrapper entry
  * must agree before a canonical provider-failure value is emitted.
  */
-export function projectBuiltinDynamicMcpExecutionReceiptTerminalResultV1(
-  receipt: Readonly<ExecutionReceiptV1<RuntimeJsonValueV1>>,
-  entry: Readonly<BuiltinInternalOperationCatalogEntryV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>> {
-  assertDynamicMcpProjectionContextV1(entry, prepared);
-  assertReceiptIdentityV1(receipt, entry, prepared);
-  return projectBuiltinExecutionReceiptTerminalResultForEntryV1(receipt, entry, prepared);
+export function projectBuiltinDynamicMcpExecutionReceiptTerminalResult(
+  receipt: Readonly<ExecutionReceipt<RuntimeJsonValue>>,
+  entry: Readonly<BuiltinInternalOperationCatalogEntry>,
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>> {
+  assertDynamicMcpProjectionContext(entry, prepared);
+  assertReceiptIdentity(receipt, entry, prepared);
+  return projectBuiltinExecutionReceiptTerminalResultForEntry(receipt, entry, prepared);
 }
 
-function projectBuiltinExecutionReceiptTerminalResultForEntryV1(
-  receipt: Readonly<ExecutionReceiptV1<RuntimeJsonValueV1>>,
-  entry?: Readonly<BuiltinToolCatalogEntryV1>,
-  prepared?: Readonly<PreparedToolInvocationV1>,
-): Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>> {
+function projectBuiltinExecutionReceiptTerminalResultForEntry(
+  receipt: Readonly<ExecutionReceipt<RuntimeJsonValue>>,
+  entry?: Readonly<BuiltinToolCatalogEntry>,
+  prepared?: Readonly<PreparedToolInvocation>,
+): Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>> {
   if (receipt.status === 'succeeded') {
-    const value = normalizeBuiltinExecutionValueV1(receipt.value);
+    const value = normalizeBuiltinExecutionValue(receipt.value);
     if (!value) {
-      throw new BuiltinPreparedToolDispatchErrorV1('invalid_result');
+      throw new BuiltinPreparedToolDispatchError('invalid_result');
     }
     const cloneAuthorization =
       entry && prepared
-        ? authorizeBuiltinWorkspaceFilesystemTerminalCloneV1({ prepared, value })
+        ? authorizeBuiltinWorkspaceFilesystemTerminalClone({ prepared, value })
         : null;
-    const terminal = projectBuiltinOperationTerminalResultForEntryV1(value, entry?.kind);
+    const terminal = projectBuiltinOperationTerminalResultForEntry(value, entry?.kind);
     if (cloneAuthorization && prepared) {
-      bindBuiltinWorkspaceFilesystemClonedTerminalV1({
+      bindBuiltinWorkspaceFilesystemClonedTerminal({
         authorization: cloneAuthorization,
         prepared,
         terminal,
@@ -316,8 +316,8 @@ function projectBuiltinExecutionReceiptTerminalResultForEntryV1(
     return terminal;
   }
 
-  const providerFailure = boundedProviderFailureV1(receipt.failure, receipt.status);
-  const structuredContent = confirmedProviderFailureValueV1(entry, providerFailure);
+  const providerFailure = boundedProviderFailure(receipt.failure, receipt.status);
+  const structuredContent = confirmedProviderFailureValue(entry, providerFailure);
   const status =
     receipt.status === 'cancelled'
       ? ('cancelled' as const)
@@ -341,10 +341,10 @@ function projectBuiltinExecutionReceiptTerminalResultForEntryV1(
   });
 }
 
-function confirmedProviderFailureValueV1(
-  entry: Readonly<BuiltinToolCatalogEntryV1> | undefined,
-  failure: Readonly<ClassifiedProviderFailureV1>,
-): BuiltinOperationExecutionValueV1 | undefined {
+function confirmedProviderFailureValue(
+  entry: Readonly<BuiltinToolCatalogEntry> | undefined,
+  failure: Readonly<ClassifiedProviderFailure>,
+): BuiltinOperationExecutionValue | undefined {
   if (
     (entry?.operationId !== 'builtin:read_mcp_resource' &&
       entry?.operationId !== 'mcp:dynamic_tool') ||
@@ -368,15 +368,15 @@ function confirmedProviderFailureValueV1(
         retryable: failure.retryable,
       }),
     }),
-  }) as BuiltinOperationExecutionValueV1;
+  }) as BuiltinOperationExecutionValue;
 }
 
-function assertDynamicMcpProjectionContextV1(
-  entry: Readonly<BuiltinInternalOperationCatalogEntryV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
+function assertDynamicMcpProjectionContext(
+  entry: Readonly<BuiltinInternalOperationCatalogEntry>,
+  prepared: Readonly<PreparedToolInvocation>,
 ): void {
-  if (!Object.isFrozen(entry) || !isDeepFrozenPreparedV1(prepared)) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_prepared_input');
+  if (!Object.isFrozen(entry) || !isDeepFrozenPrepared(prepared)) {
+    throw new BuiltinPreparedToolDispatchError('invalid_prepared_input');
   }
   const identity = prepared.identity;
   if (
@@ -404,27 +404,27 @@ function assertDynamicMcpProjectionContextV1(
     entry.executorRevision !== identity.runtimeWrapper.executorRevision ||
     entry.inputSchemaDigest !== identity.runtimeWrapper.schemaDigest
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 }
 
-function exactModelEntryForPreparedV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<BuiltinModelToolCatalogEntryV1> {
+function exactModelEntryForPrepared(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<BuiltinModelToolCatalogEntry> {
   const identity = prepared.identity;
   if (identity.isDynamicMcp || identity.operationId === 'mcp:dynamic_tool') {
-    throw new BuiltinPreparedToolDispatchErrorV1('unsupported_operation');
+    throw new BuiltinPreparedToolDispatchError('unsupported_operation');
   }
   if (identity.builtinProjectionRevision !== projection.revision) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 
   const entry = projection.entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.operationId === identity.operationId,
   );
-  if (!entry) throw new BuiltinPreparedToolDispatchErrorV1('unsupported_operation');
+  if (!entry) throw new BuiltinPreparedToolDispatchError('unsupported_operation');
   if (
     entry.name !== identity.exposedToolName ||
     entry.capabilityId !== identity.capabilityId ||
@@ -432,11 +432,11 @@ function exactModelEntryForPreparedV1(
     entry.revision !== identity.capabilityRevision ||
     entry.executorRevision !== identity.executorRevision ||
     entry.descriptor.revision !== identity.descriptorRevision ||
-    !preparedParserRevisionMatchesV1(entry, identity.parserRevision) ||
+    !preparedParserRevisionMatches(entry, identity.parserRevision) ||
     entry.executionMechanism !== identity.executionMechanism ||
-    !nestedIdentityMatchesEntryV1(entry, identity)
+    !nestedIdentityMatchesEntry(entry, identity)
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
   return entry;
 }
@@ -447,12 +447,12 @@ function exactModelEntryForPreparedV1(
  * lookup: the ordinary route may recognize the public Task parser, while this
  * route accepts only the runtime parser and a complete private artifact.
  */
-function exactPrivateTaskEntryForPreparedV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<BuiltinModelToolCatalogEntryV1> {
-  if (!isDeepFrozenPreparedV1(prepared)) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_prepared_input');
+function exactPrivateTaskEntryForPrepared(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<BuiltinModelToolCatalogEntry> {
+  if (!isDeepFrozenPrepared(prepared)) {
+    throw new BuiltinPreparedToolDispatchError('invalid_prepared_input');
   }
 
   const identity = prepared.identity;
@@ -477,22 +477,22 @@ function exactPrivateTaskEntryForPreparedV1(
     prepared.input.attemptId !== identity.attemptId ||
     prepared.input.toolCallId !== identity.toolCallId
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 
   const entry = projection.entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.operationId === 'builtin:task',
   );
   if (!entry) {
-    throw new BuiltinPreparedToolDispatchErrorV1('unsupported_operation');
+    throw new BuiltinPreparedToolDispatchError('unsupported_operation');
   }
   if (
     entry.kind !== 'coordination' ||
     entry.executionMechanism !== 'subagent' ||
     entry.availability !== 'available'
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('tool_unavailable');
+    throw new BuiltinPreparedToolDispatchError('tool_unavailable');
   }
 
   const parserSchemaDigest = entry.parser.schemaDigest;
@@ -511,16 +511,16 @@ function exactPrivateTaskEntryForPreparedV1(
     identity.executorRevision !== entry.executorRevision ||
     identity.exposedToolName !== entry.name
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 
   const argumentsValue = prepared.input.arguments;
-  if (!isPlainRecordV1(argumentsValue) || !Object.hasOwn(argumentsValue, 'taskArtifact')) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+  if (!isPlainRecord(argumentsValue) || !Object.hasOwn(argumentsValue, 'taskArtifact')) {
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 
-  let canonicalArguments: RuntimeJsonValueV1;
-  let classification: ReturnType<BuiltinModelToolCatalogEntryV1['classifyEffects']>;
+  let canonicalArguments: RuntimeJsonValue;
+  let classification: ReturnType<BuiltinModelToolCatalogEntry['classifyEffects']>;
   try {
     const parsed = entry.parse(argumentsValue);
     if (!parsed.success) {
@@ -529,50 +529,50 @@ function exactPrivateTaskEntryForPreparedV1(
     canonicalArguments = entry.parser.canonicalize(parsed.data);
     classification = entry.classifyEffects(canonicalArguments);
   } catch (error) {
-    if (error instanceof BuiltinPreparedToolDispatchErrorV1) {
-      throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    if (error instanceof BuiltinPreparedToolDispatchError) {
+      throw new BuiltinPreparedToolDispatchError('identity_mismatch');
     }
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 
   if (
-    !isJsonSafeValueV1(canonicalArguments, new WeakSet<object>()) ||
-    digestCapabilityBindingValueV1(canonicalArguments) !== identity.argumentsDigest ||
-    digestCapabilityBindingValueV1(classification.effectiveEffects) !==
+    !isJsonSafeValue(canonicalArguments, new WeakSet<object>()) ||
+    digestCapabilityBindingValue(canonicalArguments) !== identity.argumentsDigest ||
+    digestCapabilityBindingValue(classification.effectiveEffects) !==
       identity.effectiveEffectsDigest
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 
   const expectedIdempotencyArgument = entry.execution?.idempotencyKeyArgument ?? null;
   const expectedIdempotencyKey = expectedIdempotencyArgument
-    ? idempotencyKeyFromPreparedTaskArgumentsV1(canonicalArguments, expectedIdempotencyArgument)
+    ? idempotencyKeyFromPreparedTaskArguments(canonicalArguments, expectedIdempotencyArgument)
     : null;
   if (
     identity.idempotencyKeyArgument !== expectedIdempotencyArgument ||
     identity.idempotencyKey !== expectedIdempotencyKey
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 
-  assertPrivateTaskFactsV1(prepared, canonicalArguments, entry);
+  assertPrivateTaskFacts(prepared, canonicalArguments, entry);
   return entry;
 }
 
-function assertPrivateTaskFactsV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  canonicalArguments: RuntimeJsonValueV1,
-  entry: Readonly<BuiltinModelToolCatalogEntryV1>,
+function assertPrivateTaskFacts(
+  prepared: Readonly<PreparedToolInvocation>,
+  canonicalArguments: RuntimeJsonValue,
+  entry: Readonly<BuiltinModelToolCatalogEntry>,
 ): void {
   const facts = prepared.input.facts;
-  if (!isPlainRecordV1(facts)) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+  if (!isPlainRecord(facts)) {
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
   let approvalSummary: string;
   try {
     approvalSummary = entry.projectApprovalSummary(canonicalArguments);
   } catch {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
   const allowedKeys = new Set([
     'schema',
@@ -590,7 +590,7 @@ function assertPrivateTaskFactsV1(
   ]);
   if (
     Object.keys(facts).some((key) => !allowedKeys.has(key)) ||
-    facts.schema !== BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1 ||
+    facts.schema !== BUILTIN_PREPARED_CALL_FACTS_SCHEMA_ ||
     facts.toolCallId !== prepared.identity.toolCallId ||
     facts.callCreatedAtTurnId !== prepared.identity.turnId ||
     facts.modelMessageId !== prepared.identity.modelMessageId ||
@@ -601,24 +601,24 @@ function assertPrivateTaskFactsV1(
     facts.nestedCapabilityRevision !== null ||
     facts.nestedSkill !== null ||
     facts.subagentRole !==
-      (isPlainRecordV1(canonicalArguments) ? canonicalArguments.subagent_type : undefined) ||
+      (isPlainRecord(canonicalArguments) ? canonicalArguments.subagent_type : undefined) ||
     facts.approvalSummary !== approvalSummary
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
 }
 
-function idempotencyKeyFromPreparedTaskArgumentsV1(
-  argumentsValue: RuntimeJsonValueV1,
+function idempotencyKeyFromPreparedTaskArguments(
+  argumentsValue: RuntimeJsonValue,
   field: string,
 ): string | null {
-  if (!isPlainRecordV1(argumentsValue)) return null;
+  if (!isPlainRecord(argumentsValue)) return null;
   const value = argumentsValue[field];
   return typeof value === 'string' ? value : null;
 }
 
-function preparedParserRevisionMatchesV1(
-  entry: Readonly<BuiltinModelToolCatalogEntryV1>,
+function preparedParserRevisionMatches(
+  entry: Readonly<BuiltinModelToolCatalogEntry>,
   parserRevision: string | null,
 ): boolean {
   if (entry.operationId === 'builtin:task') {
@@ -630,9 +630,9 @@ function preparedParserRevisionMatchesV1(
   return parserRevision === entry.parser.parserRevision;
 }
 
-function nestedIdentityMatchesEntryV1(
-  entry: Readonly<BuiltinModelToolCatalogEntryV1>,
-  identity: Readonly<NonDynamicPreparedToolInvocationIdentityV1>,
+function nestedIdentityMatchesEntry(
+  entry: Readonly<BuiltinModelToolCatalogEntry>,
+  identity: Readonly<NonDynamicPreparedToolInvocationIdentity>,
 ): boolean {
   const populated =
     identity.nestedCapabilityId !== null ||
@@ -648,25 +648,25 @@ function nestedIdentityMatchesEntryV1(
   return !populated;
 }
 
-function assertSupportedEntryV1(entry: Readonly<BuiltinModelToolCatalogEntryV1>): void {
+function assertSupportedEntry(entry: Readonly<BuiltinModelToolCatalogEntry>): void {
   if (entry.availability !== 'available') {
-    throw new BuiltinPreparedToolDispatchErrorV1('tool_unavailable');
+    throw new BuiltinPreparedToolDispatchError('tool_unavailable');
   }
   if (entry.kind === 'interrupt' || entry.executionMechanism === 'user_input') {
-    throw new BuiltinPreparedToolDispatchErrorV1('unsupported_operation');
+    throw new BuiltinPreparedToolDispatchError('unsupported_operation');
   }
   if (entry.executionMechanism === 'subagent') {
-    throw new BuiltinPreparedToolDispatchErrorV1('unsupported_operation');
+    throw new BuiltinPreparedToolDispatchError('unsupported_operation');
   }
 }
 
-function assertReceiptIdentityV1(
-  receipt: Readonly<ExecutionReceiptV1<RuntimeJsonValueV1>>,
-  entry: Readonly<BuiltinToolCatalogEntryV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
+function assertReceiptIdentity(
+  receipt: Readonly<ExecutionReceipt<RuntimeJsonValue>>,
+  entry: Readonly<BuiltinToolCatalogEntry>,
+  prepared: Readonly<PreparedToolInvocation>,
 ): void {
-  if (!isRecordObjectV1(receipt)) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_result');
+  if (!isRecordObject(receipt)) {
+    throw new BuiltinPreparedToolDispatchError('invalid_result');
   }
   if (
     receipt.invocationId !== prepared.identity.invocationId ||
@@ -674,7 +674,7 @@ function assertReceiptIdentityV1(
     receipt.providerId !== entry.providerId ||
     receipt.executorRevision !== entry.executorRevision
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('identity_mismatch');
+    throw new BuiltinPreparedToolDispatchError('identity_mismatch');
   }
   if (
     receipt.status !== 'succeeded' &&
@@ -683,18 +683,18 @@ function assertReceiptIdentityV1(
     receipt.status !== 'timed_out' &&
     receipt.status !== 'unknown'
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_result');
+    throw new BuiltinPreparedToolDispatchError('invalid_result');
   }
   if (typeof receipt.requestDigest !== 'string' || receipt.requestDigest.length === 0) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_result');
+    throw new BuiltinPreparedToolDispatchError('invalid_result');
   }
 }
 
-function normalizeBuiltinExecutionValueV1(
-  value: RuntimeJsonValueV1 | undefined,
-): BuiltinOperationExecutionValueV1 | null {
-  if (isBuiltinOperationResultV1(value)) return value;
-  if (!isToolSearchExecutionValueV1(value)) return null;
+function normalizeBuiltinExecutionValue(
+  value: RuntimeJsonValue | undefined,
+): BuiltinOperationExecutionValue | null {
+  if (isBuiltinOperationResult(value)) return value;
+  if (!isToolSearchExecutionValue(value)) return null;
   const searchResult = value.searchResult;
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1' as const,
@@ -715,13 +715,13 @@ function normalizeBuiltinExecutionValueV1(
   });
 }
 
-function boundedProviderFailureV1(
+function boundedProviderFailure(
   failure: unknown,
-  status: Exclude<ExecutionReceiptV1['status'], 'succeeded'>,
-): Readonly<ClassifiedProviderFailureV1> {
-  const record = isPlainRecordV1(failure) ? failure : undefined;
-  const code = boundedProviderCodeV1(record?.code, status);
-  const message = boundedProviderTextV1(record?.message, defaultReceiptFailureMessageV1(status));
+  status: Exclude<ExecutionReceipt['status'], 'succeeded'>,
+): Readonly<ClassifiedProviderFailure> {
+  const record = isPlainRecord(failure) ? failure : undefined;
+  const code = boundedProviderCode(record?.code, status);
+  const message = boundedProviderText(record?.message, defaultReceiptFailureMessage(status));
   return Object.freeze({
     code,
     message,
@@ -729,13 +729,13 @@ function boundedProviderFailureV1(
   });
 }
 
-function boundedProviderCodeV1(value: unknown, status: string): string {
+function boundedProviderCode(value: unknown, status: string): string {
   if (typeof value !== 'string') return `builtin_${status}`;
   const normalized = value.replace(/[^a-zA-Z0-9_.:-]/gu, '_').slice(0, 128);
   return normalized || `builtin_${status}`;
 }
 
-function boundedProviderTextV1(value: unknown, fallback: string): string {
+function boundedProviderText(value: unknown, fallback: string): string {
   if (typeof value !== 'string') return fallback;
   const normalized = value
     .replace(/\p{Cc}/gu, ' ')
@@ -744,8 +744,8 @@ function boundedProviderTextV1(value: unknown, fallback: string): string {
   return normalized || fallback;
 }
 
-function defaultReceiptFailureMessageV1(
-  status: Exclude<ExecutionReceiptV1['status'], 'succeeded'>,
+function defaultReceiptFailureMessage(
+  status: Exclude<ExecutionReceipt['status'], 'succeeded'>,
 ): string {
   switch (status) {
     case 'failed':
@@ -759,11 +759,11 @@ function defaultReceiptFailureMessageV1(
   }
 }
 
-function isRecordObjectV1(value: unknown): value is Readonly<Record<string, unknown>> {
-  return isPlainRecordV1(value);
+function isRecordObject(value: unknown): value is Readonly<Record<string, unknown>> {
+  return isPlainRecord(value);
 }
 
-function isPlainRecordV1(value: unknown): value is Readonly<Record<string, unknown>> {
+function isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -772,7 +772,7 @@ function isPlainRecordV1(value: unknown): value is Readonly<Record<string, unkno
   );
 }
 
-function isBuiltinOperationResultV1(value: unknown): value is BuiltinOperationExecutionValueV1 {
+function isBuiltinOperationResult(value: unknown): value is BuiltinOperationExecutionValue {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Readonly<Record<string, unknown>>;
   return (
@@ -780,37 +780,37 @@ function isBuiltinOperationResultV1(value: unknown): value is BuiltinOperationEx
     typeof record.ok === 'boolean' &&
     typeof record.stdout === 'string' &&
     typeof record.stderr === 'string' &&
-    isJsonSafeValueV1(value, new WeakSet<object>())
+    isJsonSafeValue(value, new WeakSet<object>())
   );
 }
 
-function cloneBuiltinOperationValueV1(
-  value: BuiltinOperationExecutionValueV1,
-): BuiltinOperationExecutionValueV1 {
-  const cloned = cloneJsonValueV1(value);
-  if (!isBuiltinOperationResultV1(cloned)) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_result');
+function cloneBuiltinOperationValue(
+  value: BuiltinOperationExecutionValue,
+): BuiltinOperationExecutionValue {
+  const cloned = cloneJsonValue(value);
+  if (!isBuiltinOperationResult(cloned)) {
+    throw new BuiltinPreparedToolDispatchError('invalid_result');
   }
   return cloned;
 }
 
-function cloneJsonValueV1(value: unknown): RuntimeJsonValueV1 {
+function cloneJsonValue(value: unknown): RuntimeJsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (Array.isArray(value)) {
-    return Object.freeze(value.map((item) => cloneJsonValueV1(item)));
+    return Object.freeze(value.map((item) => cloneJsonValue(item)));
   }
-  if (!isPlainRecordV1(value)) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_result');
+  if (!isPlainRecord(value)) {
+    throw new BuiltinPreparedToolDispatchError('invalid_result');
   }
-  const result: Record<string, RuntimeJsonValueV1> = {};
+  const result: Record<string, RuntimeJsonValue> = {};
   for (const [key, item] of Object.entries(value)) {
-    result[key] = cloneJsonValueV1(item);
+    result[key] = cloneJsonValue(item);
   }
   return Object.freeze(result);
 }
 
-function isJsonSafeValueV1(value: unknown, seen: WeakSet<object>): boolean {
+function isJsonSafeValue(value: unknown, seen: WeakSet<object>): boolean {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
   if (typeof value !== 'object') return false;
@@ -819,7 +819,7 @@ function isJsonSafeValueV1(value: unknown, seen: WeakSet<object>): boolean {
   try {
     if (Array.isArray(value)) {
       for (let index = 0; index < value.length; index += 1) {
-        if (!Object.hasOwn(value, index) || !isJsonSafeValueV1(value[index], seen)) return false;
+        if (!Object.hasOwn(value, index) || !isJsonSafeValue(value[index], seen)) return false;
       }
       return Reflect.ownKeys(value).every(
         (key) =>
@@ -833,7 +833,7 @@ function isJsonSafeValueV1(value: unknown, seen: WeakSet<object>): boolean {
       if (typeof key !== 'string') return false;
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor?.enumerable || !('value' in descriptor)) return false;
-      if (!isJsonSafeValueV1(descriptor.value, seen)) return false;
+      if (!isJsonSafeValue(descriptor.value, seen)) return false;
     }
     return true;
   } finally {
@@ -841,7 +841,7 @@ function isJsonSafeValueV1(value: unknown, seen: WeakSet<object>): boolean {
   }
 }
 
-function assertFrozenProjectionV1(projection: Readonly<BuiltinToolCatalogProjectionV1>): void {
+function assertFrozenProjection(projection: Readonly<BuiltinToolCatalogProjection>): void {
   if (
     !projection ||
     typeof projection !== 'object' ||
@@ -849,21 +849,21 @@ function assertFrozenProjectionV1(projection: Readonly<BuiltinToolCatalogProject
     !Object.isFrozen(projection.entries) ||
     !Object.isFrozen(projection.toolSet)
   ) {
-    throw new BuiltinPreparedToolDispatchErrorV1('invalid_prepared_input');
+    throw new BuiltinPreparedToolDispatchError('invalid_prepared_input');
   }
 }
 
-function isDeepFrozenPreparedV1(
-  prepared: Readonly<PreparedToolInvocationV1> | null | undefined,
-): prepared is Readonly<PreparedToolInvocationV1> {
+function isDeepFrozenPrepared(
+  prepared: Readonly<PreparedToolInvocation> | null | undefined,
+): prepared is Readonly<PreparedToolInvocation> {
   return (
     prepared !== null &&
     typeof prepared === 'object' &&
-    isDeepFrozenValueV1(prepared, new WeakSet<object>())
+    isDeepFrozenValue(prepared, new WeakSet<object>())
   );
 }
 
-function isDeepFrozenValueV1(value: unknown, seen: WeakSet<object>): boolean {
+function isDeepFrozenValue(value: unknown, seen: WeakSet<object>): boolean {
   if (value === null || typeof value !== 'object') return true;
   if (seen.has(value)) return true;
   seen.add(value);
@@ -885,7 +885,7 @@ function isDeepFrozenValueV1(value: unknown, seen: WeakSet<object>): boolean {
       if (
         !descriptor?.enumerable ||
         !('value' in descriptor) ||
-        !isDeepFrozenValueV1(descriptor.value, seen)
+        !isDeepFrozenValue(descriptor.value, seen)
       ) {
         return false;
       }
@@ -902,14 +902,12 @@ function isDeepFrozenValueV1(value: unknown, seen: WeakSet<object>): boolean {
     if (typeof key !== 'string') return false;
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor?.enumerable || !('value' in descriptor)) return false;
-    if (!isDeepFrozenValueV1(descriptor.value, seen)) return false;
+    if (!isDeepFrozenValue(descriptor.value, seen)) return false;
   }
   return true;
 }
 
-function builtinPreparedToolDispatchMessageV1(
-  code: BuiltinPreparedToolDispatchFailureCodeV1,
-): string {
+function builtinPreparedToolDispatchMessage(code: BuiltinPreparedToolDispatchFailureCode): string {
   switch (code) {
     case 'invalid_prepared_input':
       return 'Builtin prepared input is invalid or not deeply frozen.';

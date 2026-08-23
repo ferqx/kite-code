@@ -83,31 +83,6 @@ describe('ResolvedModelCapabilities', () => {
     expect(usableInputBudget(result).reservedOutputTokens).toBeUndefined();
   });
 
-  test('compatibility fields retain compatibility_config source', () => {
-    const result = resolveModelCapabilities({
-      config: config({
-        modelKwargs: {
-          contextWindowTokens: 12_000,
-          maxTokens: 1_000,
-          tokenizerFamily: 'compatible-tokenizer',
-          supportsUsageMetadata: false,
-          streaming: true,
-        },
-      }),
-    });
-    expect(result).toMatchObject({
-      contextWindowTokens: 12_000,
-      contextWindowSource: 'compatibility_config',
-      maxOutputTokens: 1_000,
-      maxOutputTokensSource: 'compatibility_config',
-      tokenizerSource: 'compatibility_config',
-      supportsUsageMetadata: false,
-      supportsUsageMetadataSource: 'compatibility_config',
-      streaming: true,
-      streamingSource: 'compatibility_config',
-    });
-  });
-
   test('computes usable input from output reservation and provider safety margin', () => {
     const result = usableInputBudget(
       resolveModelCapabilities({

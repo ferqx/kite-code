@@ -33,14 +33,14 @@ Task 5.1/5.2 的本地 Profile、admission 与状态 foundation 已完成。
 
 ## Verification
 
-`verificationV1=false` 只关闭新 admission；Runtime 中已有 required facts 继续执行和 replay。risk source
+`verification=false` 只关闭新 admission；Runtime 中已有 required facts 继续执行和 replay。risk source
 只能提高 verification mode；failed/inconclusive、repair pending、budget exhausted 和 compensation 都不
 是 passed。只有结构化用户 waiver 可以在预算耗尽后形成独立 waived 状态，模型不能自发 waiver。
 Task 5A.1/5A.2 的 completion semantics 与 required lifecycle 本地 conformance 已完成。
 
 ## MCP write
 
-MCP write 同时要求 `mcpExecutionRecordV1` 与 `mcpProviderActionV1`、精确 binding/schema/revision、
+MCP write 同时要求 `mcpExecutionRecord` 与 `mcpProviderAction`、精确 binding/schema/revision、
 Tool policy/approval、execution boundary、exact endpoint/network admission、qualified route 和 stable Verification dependency。所有 write 保留
 intent/receipt；只有带 idempotency 的同 invocation replay 可返回已有 receipt。unknown external effect
 只能 reconciliation，不能重放；Provider action 只恢复 control plane。当前 production write route 为空，
@@ -48,7 +48,7 @@ formal adversarial/task evidence=`not_observed`，所以轨道 blocked/off。
 
 admission、intent/receipt/idempotency/reconciliation/compensation、route qualification/drift/safety/staleness
 现由 production-owned `packages/builtin-runtime/src/mcp/write-governance.ts` 实现，不再由测试 fixture 拥有规则；测试只复用
-该模块。`release/mcp-write-routes-v1.json` 是 source-owned strict registry，当前显式为空。实际 MCP
+该模块。`release/mcp-write-routes.json` 是 source-owned strict registry，当前显式为空。实际 MCP
 dispatch 尚未获得非空 production route 或 stable Verification evidence，因此任何 write capability 仍
 保持 off。旧 production stable milestone 已被取代；5B 本地 conformance、安全 Gate 与默认关闭状态
 已经完成。

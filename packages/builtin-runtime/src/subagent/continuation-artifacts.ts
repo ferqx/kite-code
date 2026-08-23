@@ -1,19 +1,16 @@
-import type {
-  SubagentContinuationArtifactRefV1,
-  SuspendedSubagentSnapshot,
-} from '@kite/runtime-spi';
+import type { SubagentContinuationArtifactRef, SuspendedSubagentSnapshot } from '@kite/runtime-spi';
 import {
-  canonicalModelJsonV1,
+  canonicalModelJson,
   PrivateArtifactStorageError,
-  PrivateImmutableArtifactStorageV1,
+  PrivateImmutableArtifactStorage,
 } from '../model';
-import { subagentContinuationArtifactRootV1 } from './artifact-paths';
+import { subagentContinuationArtifactRoot } from './artifact-paths';
 import {
-  decodeSubagentContinuationSnapshotV1,
-  subagentContinuationCursorIdV1,
+  decodeSubagentContinuationSnapshot,
+  subagentContinuationCursorId,
 } from './continuation-codec';
 
-export interface SubagentContinuationArtifactOwnerV1 {
+export interface SubagentContinuationArtifactOwner {
   parentInvocationId: string;
   parentAttempt: number;
   parentToolCallId: string;
@@ -21,18 +18,18 @@ export interface SubagentContinuationArtifactOwnerV1 {
   continuationId: string;
 }
 
-export interface SubagentContinuationArtifactAccessV1 {
+export interface SubagentContinuationArtifactAccess {
   write(input: {
-    owner: SubagentContinuationArtifactOwnerV1;
+    owner: SubagentContinuationArtifactOwner;
     snapshot: SuspendedSubagentSnapshot;
-  }): SubagentContinuationArtifactRefV1;
+  }): SubagentContinuationArtifactRef;
   read(
-    ref: SubagentContinuationArtifactRefV1,
-    expected: SubagentContinuationArtifactOwnerV1,
+    ref: SubagentContinuationArtifactRef,
+    expected: SubagentContinuationArtifactOwner,
   ): Readonly<SuspendedSubagentSnapshot>;
 }
 
-export class SubagentContinuationArtifactErrorV1 extends Error {
+export class SubagentContinuationArtifactError extends Error {
   readonly code:
     | 'invalid_continuation'
     | 'artifact_missing'
@@ -40,20 +37,20 @@ export class SubagentContinuationArtifactErrorV1 extends Error {
     | 'artifact_too_large'
     | 'storage_boundary_violation'
     | 'publish_failed';
-  constructor(code: SubagentContinuationArtifactErrorV1['code']) {
+  constructor(code: SubagentContinuationArtifactError['code']) {
     super('Subagent continuation Artifact operation failed.');
-    this.name = 'SubagentContinuationArtifactErrorV1';
+    this.name = 'SubagentContinuationArtifactError';
     this.code = code;
   }
 }
 
-export class SubagentContinuationArtifactStoreV1 implements SubagentContinuationArtifactAccessV1 {
-  readonly #storage: PrivateImmutableArtifactStorageV1<'subagent_continuation'>;
+export class SubagentContinuationArtifactStore implements SubagentContinuationArtifactAccess {
+  readonly #storage: PrivateImmutableArtifactStorage<'subagent_continuation'>;
 
   constructor(options: { root?: string } = {}) {
     try {
-      this.#storage = new PrivateImmutableArtifactStorageV1({
-        root: options.root ?? subagentContinuationArtifactRootV1(),
+      this.#storage = new PrivateImmutableArtifactStorage({
+        root: options.root ?? subagentContinuationArtifactRoot(),
         namespace: 'subagent-continuations',
         partitions: [
           { kind: 'subagent_continuation', directory: 'continuations', extension: '.json' },
@@ -66,21 +63,21 @@ export class SubagentContinuationArtifactStoreV1 implements SubagentContinuation
   }
 
   write(input: {
-    owner: SubagentContinuationArtifactOwnerV1;
+    owner: SubagentContinuationArtifactOwner;
     snapshot: SuspendedSubagentSnapshot;
-  }): SubagentContinuationArtifactRefV1 {
+  }): SubagentContinuationArtifactRef {
     try {
       const owner = validateOwner(input.owner);
       const snapshot = validateSnapshot(input.snapshot);
       if (
         owner.childInvocationId !== snapshot.subagentId ||
-        owner.continuationId !== subagentContinuationCursorIdV1(snapshot)
+        owner.continuationId !== subagentContinuationCursorId(snapshot)
       ) {
         corrupt('invalid_continuation');
       }
       return this.#storage.write(
         'subagent_continuation',
-        Buffer.from(canonicalModelJsonV1({ artifactFormatVersion: 1, owner, snapshot }), 'utf8'),
+        Buffer.from(canonicalModelJson({ artifactFormatVersion: 1, owner, snapshot }), 'utf8'),
       );
     } catch (error) {
       throw map(error, 'invalid_continuation');
@@ -88,27 +85,27 @@ export class SubagentContinuationArtifactStoreV1 implements SubagentContinuation
   }
 
   read(
-    ref: SubagentContinuationArtifactRefV1,
-    expected: SubagentContinuationArtifactOwnerV1,
+    ref: SubagentContinuationArtifactRef,
+    expected: SubagentContinuationArtifactOwner,
   ): Readonly<SuspendedSubagentSnapshot> {
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(this.#storage.read(ref));
       const parsed: unknown = JSON.parse(text);
       if (!plain(parsed) || !exact(parsed, ['artifactFormatVersion', 'owner', 'snapshot']))
         corrupt();
-      if (parsed.artifactFormatVersion !== 1 || canonicalModelJsonV1(parsed) !== text) corrupt();
+      if (parsed.artifactFormatVersion !== 1 || canonicalModelJson(parsed) !== text) corrupt();
       const owner = validateOwner(parsed.owner);
-      if (canonicalModelJsonV1(owner) !== canonicalModelJsonV1(validateOwner(expected))) corrupt();
+      if (canonicalModelJson(owner) !== canonicalModelJson(validateOwner(expected))) corrupt();
       const snapshot = validateSnapshot(parsed.snapshot);
       if (
         owner.childInvocationId !== snapshot.subagentId ||
-        owner.continuationId !== subagentContinuationCursorIdV1(snapshot)
+        owner.continuationId !== subagentContinuationCursorId(snapshot)
       ) {
         corrupt();
       }
       return Object.freeze(structuredClone(snapshot));
     } catch (error) {
-      if (error instanceof SubagentContinuationArtifactErrorV1) {
+      if (error instanceof SubagentContinuationArtifactError) {
         if (error.code === 'invalid_continuation') corrupt();
         throw error;
       }
@@ -117,7 +114,7 @@ export class SubagentContinuationArtifactStoreV1 implements SubagentContinuation
   }
 }
 
-function validateOwner(value: unknown): SubagentContinuationArtifactOwnerV1 {
+function validateOwner(value: unknown): SubagentContinuationArtifactOwner {
   if (
     !plain(value) ||
     !exact(value, [
@@ -142,21 +139,21 @@ function validateOwner(value: unknown): SubagentContinuationArtifactOwnerV1 {
       corrupt('invalid_continuation');
     }
   }
-  return structuredClone(value) as unknown as SubagentContinuationArtifactOwnerV1;
+  return structuredClone(value) as unknown as SubagentContinuationArtifactOwner;
 }
 
 function validateSnapshot(value: unknown): SuspendedSubagentSnapshot {
   try {
     if (!plain(value) || !hasContinuationSnapshotKeys(value)) corrupt('invalid_continuation');
-    const canonical = decodeSubagentContinuationSnapshotV1(
+    const canonical = decodeSubagentContinuationSnapshot(
       value as unknown as SuspendedSubagentSnapshot,
     );
-    if (canonicalModelJsonV1(canonical) !== canonicalModelJsonV1(value)) {
+    if (canonicalModelJson(canonical) !== canonicalModelJson(value)) {
       corrupt('invalid_continuation');
     }
     return canonical;
   } catch (error) {
-    if (error instanceof SubagentContinuationArtifactErrorV1) throw error;
+    if (error instanceof SubagentContinuationArtifactError) throw error;
     corrupt('invalid_continuation');
   }
 }
@@ -194,19 +191,17 @@ function exact(value: Record<string, unknown>, keys: readonly string[]): boolean
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
-function corrupt(code: SubagentContinuationArtifactErrorV1['code'] = 'artifact_corrupt'): never {
-  throw new SubagentContinuationArtifactErrorV1(code);
+function corrupt(code: SubagentContinuationArtifactError['code'] = 'artifact_corrupt'): never {
+  throw new SubagentContinuationArtifactError(code);
 }
 function map(
   error: unknown,
-  fallback: SubagentContinuationArtifactErrorV1['code'],
-): SubagentContinuationArtifactErrorV1 {
-  if (error instanceof SubagentContinuationArtifactErrorV1) return error;
+  fallback: SubagentContinuationArtifactError['code'],
+): SubagentContinuationArtifactError {
+  if (error instanceof SubagentContinuationArtifactError) return error;
   if (error instanceof PrivateArtifactStorageError) {
     const code = error.code === 'invalid_reference' ? 'artifact_corrupt' : error.code;
-    return new SubagentContinuationArtifactErrorV1(
-      code as SubagentContinuationArtifactErrorV1['code'],
-    );
+    return new SubagentContinuationArtifactError(code as SubagentContinuationArtifactError['code']);
   }
-  return new SubagentContinuationArtifactErrorV1(fallback);
+  return new SubagentContinuationArtifactError(fallback);
 }

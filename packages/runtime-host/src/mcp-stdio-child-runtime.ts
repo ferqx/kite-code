@@ -1,26 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import {
-  canonicalControlFrameJsonV1,
-  isRuntimeControlFrameV1,
-  RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-  type RuntimeControlFrameInputV1,
+  canonicalControlFrameJson,
+  isRuntimeControlFrame,
+  RUNTIME_CONTROL_FRAME_SCHEMA_,
+  type RuntimeControlFrameInput,
 } from '@kite/runtime-spi';
-import { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from './control-frame';
+import { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-frame';
 import {
-  decodeUtf8StrictV1,
-  MCP_STDIO_CONTROL_DOMAIN_V1,
-  MCP_STDIO_HOST_PEER_ID_V1,
-  MCP_STDIO_MAX_LINE_BYTES_V1,
-  MCP_STDIO_WRAPPER_ENTRYPOINT_V1,
-  MCP_STDIO_WRAPPER_PEER_ID_V1,
-  parseMcpStdioJsonLineV1,
+  decodeUtf8Strict,
+  MCP_STDIO_CONTROL_DOMAIN_,
+  MCP_STDIO_HOST_PEER_ID_,
+  MCP_STDIO_MAX_LINE_BYTES_,
+  MCP_STDIO_WRAPPER_ENTRYPOINT_,
+  MCP_STDIO_WRAPPER_PEER_ID_,
+  parseMcpStdioJsonLine,
 } from './mcp-stdio-process';
-import { spawnRuntimeHostProcessV1 } from './process-spawn';
+import { spawnRuntimeHostProcess } from './process-spawn';
 
-const MAX_BOOTSTRAP_BUFFER_BYTES_V1 = 1024 * 1024;
-const CHILD_ENV_MAX_ENTRIES_V1 = 128;
+const MAX_BOOTSTRAP_BUFFER_BYTES_ = 1024 * 1024;
+const CHILD_ENV_MAX_ENTRIES_ = 128;
 
-type GoPayloadV1 = {
+type GoPayload = {
   readonly type: 'go';
   readonly invocationId: string;
   readonly command: string;
@@ -29,7 +29,7 @@ type GoPayloadV1 = {
   readonly env: Readonly<Record<string, string>>;
 };
 
-type ReadyPayloadV1 = {
+type ReadyPayload = {
   readonly type: 'ready';
   readonly invocationId: string;
   readonly wrapperPid: number;
@@ -37,7 +37,7 @@ type ReadyPayloadV1 = {
   readonly processStartIdentity: string;
 };
 
-type TerminalPayloadV1 = {
+type TerminalPayload = {
   readonly type: 'terminal';
   readonly invocationId: string;
   readonly wrapperPid: number;
@@ -47,8 +47,8 @@ type TerminalPayloadV1 = {
   readonly cleanup: 'confirmed';
 };
 
-export function runMcpStdioChildRuntimeV1(args: readonly string[] = process.argv.slice(2)): void {
-  if (args.length !== 1 || args[0] !== MCP_STDIO_WRAPPER_ENTRYPOINT_V1) {
+export function runMcpStdioChildRuntime(args: readonly string[] = process.argv.slice(2)): void {
+  if (args.length !== 1 || args[0] !== MCP_STDIO_WRAPPER_ENTRYPOINT_) {
     process.exitCode = 125;
     return;
   }
@@ -106,33 +106,33 @@ export function runMcpStdioChildRuntimeV1(args: readonly string[] = process.argv
       return;
     }
     try {
-      buffer = appendBoundedBufferV1(buffer, chunk);
+      buffer = appendBoundedBuffer(buffer, chunk);
       if (!goSeen) {
-        const line = takeLineV1(buffer);
+        const line = takeLine(buffer);
         if (!line) return;
         buffer = line.rest;
-        const parsed = parseMcpStdioJsonLineV1(line.line);
-        if (!isRuntimeControlFrameV1(parsed)) {
+        const parsed = parseMcpStdioJsonLine(line.line);
+        if (!isRuntimeControlFrame(parsed)) {
           throw new Error('MCP stdio wrapper expected a GO control frame.');
         }
-        if (canonicalControlFrameJsonV1(parsed) !== decodeLineForCanonicalCheckV1(line.line)) {
+        if (canonicalControlFrameJson(parsed) !== decodeLineForCanonicalCheck(line.line)) {
           throw new Error('MCP stdio GO frame is not canonical JSON.');
         }
         const frameInvocationId = parsed.invocationId;
         if (typeof frameInvocationId !== 'string' || frameInvocationId.length === 0) {
           throw new Error('MCP stdio GO frame invocation identity is invalid.');
         }
-        const payload = verifyRuntimeControlFrameV1({
+        const payload = verifyRuntimeControlFrame({
           frame: parsed,
-          expectedDomain: MCP_STDIO_CONTROL_DOMAIN_V1,
-          expectedPeerId: MCP_STDIO_HOST_PEER_ID_V1,
+          expectedDomain: MCP_STDIO_CONTROL_DOMAIN_,
+          expectedPeerId: MCP_STDIO_HOST_PEER_ID_,
           expectedInvocationId: frameInvocationId,
           lastSequence: hostSequence,
         });
         hostSequence = parsed.sequence;
-        const go = parseGoPayloadV1(payload, frameInvocationId);
+        const go = parseGoPayload(payload, frameInvocationId);
         goSeen = true;
-        void startChildV1(go).catch(failClosed);
+        void startChild(go).catch(failClosed);
       }
       if (goSeen && buffer.byteLength > 0 && child?.stdin) {
         const pending = buffer;
@@ -159,9 +159,9 @@ export function runMcpStdioChildRuntimeV1(args: readonly string[] = process.argv
   process.stdin.on('error', failClosed);
   process.stdin.resume();
 
-  async function startChildV1(go: GoPayloadV1): Promise<void> {
+  async function startChild(go: GoPayload): Promise<void> {
     if (child || failed) throw new Error('MCP stdio wrapper child lifecycle is invalid.');
-    child = spawnRuntimeHostProcessV1([go.command, ...go.args], {
+    child = spawnRuntimeHostProcess([go.command, ...go.args], {
       cwd: go.cwd,
       env: go.env,
       stdin: 'pipe',
@@ -171,10 +171,10 @@ export function runMcpStdioChildRuntimeV1(args: readonly string[] = process.argv
     });
     childPid = child.pid;
     processStartIdentity = `${childPid}:${Date.now()}:${randomUUID()}`;
-    await writeRuntimeControlFrameV1({
-      schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-      domain: MCP_STDIO_CONTROL_DOMAIN_V1,
-      peerId: MCP_STDIO_WRAPPER_PEER_ID_V1,
+    await writeRuntimeControlFrame({
+      schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
+      domain: MCP_STDIO_CONTROL_DOMAIN_,
+      peerId: MCP_STDIO_WRAPPER_PEER_ID_,
       invocationId: go.invocationId,
       sequence: childSequence++,
       payload: {
@@ -183,17 +183,17 @@ export function runMcpStdioChildRuntimeV1(args: readonly string[] = process.argv
         wrapperPid: process.pid,
         childPid,
         processStartIdentity,
-      } satisfies ReadyPayloadV1,
+      } satisfies ReadyPayload,
     });
 
-    const stdoutPump = forwardChildStreamV1(child.stdout, process.stdout);
-    const stderrPump = forwardChildStreamV1(child.stderr, process.stderr);
+    const stdoutPump = forwardChildStream(child.stdout, process.stdout);
+    const stderrPump = forwardChildStream(child.stderr, process.stderr);
     const [exitCode] = await Promise.all([child.exited, stdoutPump, stderrPump]);
     if (failed) return;
-    await writeRuntimeControlFrameV1({
-      schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-      domain: MCP_STDIO_CONTROL_DOMAIN_V1,
-      peerId: MCP_STDIO_WRAPPER_PEER_ID_V1,
+    await writeRuntimeControlFrame({
+      schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
+      domain: MCP_STDIO_CONTROL_DOMAIN_,
+      peerId: MCP_STDIO_WRAPPER_PEER_ID_,
       invocationId: go.invocationId,
       sequence: childSequence++,
       payload: {
@@ -202,20 +202,20 @@ export function runMcpStdioChildRuntimeV1(args: readonly string[] = process.argv
         wrapperPid: process.pid,
         childPid,
         processStartIdentity,
-        exitCode: normalizeExitCodeV1(exitCode),
+        exitCode: normalizeExitCode(exitCode),
         cleanup: 'confirmed',
-      } satisfies TerminalPayloadV1,
+      } satisfies TerminalPayload,
     });
     try {
       process.stdin.destroy();
     } catch {
       // The parent may have already closed stdin.
     }
-    process.exitCode = normalizeExitCodeV1(exitCode);
+    process.exitCode = normalizeExitCode(exitCode);
   }
 }
 
-async function forwardChildStreamV1(
+async function forwardChildStream(
   stream: ReadableStream<Uint8Array> | null,
   target: NodeJS.WritableStream,
 ): Promise<void> {
@@ -226,35 +226,35 @@ async function forwardChildStreamV1(
       const { done, value } = await reader.read();
       if (done) return;
       if (!(value instanceof Uint8Array)) throw new Error('MCP stdio child emitted invalid bytes.');
-      await writeWritableV1(target, value);
+      await writeWritable(target, value);
     }
   } finally {
     reader.releaseLock();
   }
 }
 
-async function writeRuntimeControlFrameV1<T>(frame: RuntimeControlFrameInputV1<T>): Promise<void> {
-  const controlFrame = createRuntimeControlFrameV1(frame);
-  const bytes = Buffer.from(`${canonicalControlFrameJsonV1(controlFrame)}\n`, 'utf8');
+async function writeRuntimeControlFrame<T>(frame: RuntimeControlFrameInput<T>): Promise<void> {
+  const controlFrame = createRuntimeControlFrame(frame);
+  const bytes = Buffer.from(`${canonicalControlFrameJson(controlFrame)}\n`, 'utf8');
   try {
-    await writeWritableV1(process.stdout, bytes);
+    await writeWritable(process.stdout, bytes);
   } finally {
     bytes.fill(0);
   }
 }
 
-function parseGoPayloadV1(payload: unknown, invocationId: string): GoPayloadV1 {
+function parseGoPayload(payload: unknown, invocationId: string): GoPayload {
   if (
-    !isRecordV1(payload) ||
+    !isRecord(payload) ||
     payload.type !== 'go' ||
     payload.invocationId !== invocationId ||
-    !isSafeTextV1(payload.command) ||
+    !isSafeText(payload.command) ||
     !Array.isArray(payload.args) ||
     payload.args.length > 256 ||
-    payload.args.some((arg) => !isSafeTextV1(arg)) ||
-    !isSafeTextV1(payload.cwd) ||
-    !isEnvironmentV1(payload.env) ||
-    !exactKeysV1(payload, ['type', 'invocationId', 'command', 'args', 'cwd', 'env'])
+    payload.args.some((arg) => !isSafeText(arg)) ||
+    !isSafeText(payload.cwd) ||
+    !isEnvironment(payload.env) ||
+    !exactKeys(payload, ['type', 'invocationId', 'command', 'args', 'cwd', 'env'])
   ) {
     throw new Error('MCP stdio GO payload identity or shape mismatch.');
   }
@@ -268,19 +268,19 @@ function parseGoPayloadV1(payload: unknown, invocationId: string): GoPayloadV1 {
   };
 }
 
-function decodeLineForCanonicalCheckV1(line: Uint8Array): string {
-  return decodeUtf8StrictV1(line);
+function decodeLineForCanonicalCheck(line: Uint8Array): string {
+  return decodeUtf8Strict(line);
 }
 
-function takeLineV1(buffer: Buffer): { line: Buffer; rest: Buffer } | undefined {
+function takeLine(buffer: Buffer): { line: Buffer; rest: Buffer } | undefined {
   const newline = buffer.indexOf(0x0a);
   if (newline < 0) {
-    if (buffer.byteLength > MCP_STDIO_MAX_LINE_BYTES_V1) {
+    if (buffer.byteLength > MCP_STDIO_MAX_LINE_BYTES_) {
       throw new Error('MCP stdio control line exceeds the bounded limit.');
     }
     return undefined;
   }
-  if (newline === 0 || newline > MCP_STDIO_MAX_LINE_BYTES_V1) {
+  if (newline === 0 || newline > MCP_STDIO_MAX_LINE_BYTES_) {
     throw new Error('MCP stdio control line is empty or oversized.');
   }
   const line = Buffer.from(buffer.subarray(0, newline));
@@ -289,11 +289,11 @@ function takeLineV1(buffer: Buffer): { line: Buffer; rest: Buffer } | undefined 
   return { line, rest };
 }
 
-function appendBoundedBufferV1(
+function appendBoundedBuffer(
   buffer: Buffer<ArrayBufferLike>,
   chunk: Uint8Array,
 ): Buffer<ArrayBufferLike> {
-  if (buffer.byteLength + chunk.byteLength > MAX_BOOTSTRAP_BUFFER_BYTES_V1) {
+  if (buffer.byteLength + chunk.byteLength > MAX_BOOTSTRAP_BUFFER_BYTES_) {
     throw new Error('MCP stdio wrapper stdin exceeds the bounded bootstrap limit.');
   }
   const result = Buffer.alloc(buffer.byteLength + chunk.byteLength) as Buffer<ArrayBufferLike>;
@@ -303,11 +303,11 @@ function appendBoundedBufferV1(
   return result;
 }
 
-function isEnvironmentV1(value: unknown): value is Record<string, string> {
-  if (!isRecordV1(value)) return false;
+function isEnvironment(value: unknown): value is Record<string, string> {
+  if (!isRecord(value)) return false;
   const entries = Object.entries(value);
   return (
-    entries.length <= CHILD_ENV_MAX_ENTRIES_V1 &&
+    entries.length <= CHILD_ENV_MAX_ENTRIES_ &&
     entries.every(
       ([name, part]) =>
         /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u.test(name) &&
@@ -318,7 +318,7 @@ function isEnvironmentV1(value: unknown): value is Record<string, string> {
   );
 }
 
-function isSafeTextV1(value: unknown): value is string {
+function isSafeText(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value.length > 0 &&
@@ -327,11 +327,11 @@ function isSafeTextV1(value: unknown): value is string {
   );
 }
 
-function isRecordV1(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function exactKeysV1(value: Record<string, unknown>, expected: readonly string[]): boolean {
+function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const sortedExpected = [...expected].sort();
   return (
@@ -340,15 +340,15 @@ function exactKeysV1(value: Record<string, unknown>, expected: readonly string[]
   );
 }
 
-function normalizeExitCodeV1(value: number): number {
+function normalizeExitCode(value: number): number {
   return Number.isSafeInteger(value) && value >= 0 && value <= 255 ? value : 125;
 }
 
-async function writeWritableV1(target: NodeJS.WritableStream, data: Uint8Array): Promise<void> {
+async function writeWritable(target: NodeJS.WritableStream, data: Uint8Array): Promise<void> {
   if (target.write(data)) return;
   await new Promise<void>((resolve) => target.once('drain', resolve));
 }
 
 if (import.meta.main) {
-  void runMcpStdioChildRuntimeV1();
+  void runMcpStdioChildRuntime();
 }

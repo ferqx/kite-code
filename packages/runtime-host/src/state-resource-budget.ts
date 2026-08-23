@@ -2,28 +2,28 @@ import type {
   AgentResourceBudgetActiveState,
   AgentResourceBudgetState,
   KernelEvent,
-  ResourceBudgetV1 as KernelResourceBudgetV1,
-  ResourceUsageV1 as KernelResourceUsageV1,
+  ResourceBudget as KernelResourceBudget,
+  ResourceUsage as KernelResourceUsage,
+  ResourceReservation,
   ResourceReservationState,
-  ResourceReservationV1,
-  ResourceWaiterV1,
+  ResourceWaiter,
 } from '@kite/agent-kernel';
 
 export const RESOURCE_BUDGET_VERSION = 1 as const;
 
 /** Host accounting mechanics consume the exact Kernel-owned State DTOs. */
-export type ResourceBudgetV1 = KernelResourceBudgetV1;
-export type ResourceUsageV1 = KernelResourceUsageV1;
+export type ResourceBudget = KernelResourceBudget;
+export type ResourceUsage = KernelResourceUsage;
 export type BudgetReservationState = ResourceReservationState;
-export type BudgetReservationV1 = ResourceReservationV1;
-export type ConcurrencyWaiterV1 = ResourceWaiterV1;
-export type ActiveResourceBudgetRuntimeStateV1 = AgentResourceBudgetActiveState;
-export type ResourceBudgetRuntimeStateV1 = AgentResourceBudgetState;
+export type BudgetReservation = ResourceReservation;
+export type ConcurrencyWaiter = ResourceWaiter;
+export type ActiveResourceBudgetRuntimeState = AgentResourceBudgetActiveState;
+export type ResourceBudgetRuntimeState = AgentResourceBudgetState;
 
-type MutableResourceUsageV1 = {
-  -readonly [K in keyof ResourceUsageV1]: K extends 'counters' | 'gauges'
-    ? { -readonly [P in keyof ResourceUsageV1[K]]: ResourceUsageV1[K][P] }
-    : ResourceUsageV1[K];
+type MutableResourceUsage = {
+  -readonly [K in keyof ResourceUsage]: K extends 'counters' | 'gauges'
+    ? { -readonly [P in keyof ResourceUsage[K]]: ResourceUsage[K][P] }
+    : ResourceUsage[K];
 };
 
 type ResourceBudgetEventOf<T extends KernelEvent['type']> = Extract<KernelEvent, { type: T }>;
@@ -54,7 +54,7 @@ export type ResourceBudgetEvent =
   | ResourceBudgetWaiterCancelledEvent
   | ResourceBudgetWaiterTimedOutEvent;
 
-export const LIMITED_RESOURCE_BUDGET_V1: Readonly<ResourceBudgetV1> = Object.freeze({
+export const LIMITED_RESOURCE_BUDGET_: Readonly<ResourceBudget> = Object.freeze({
   version: 1,
   maxRunDurationMs: 30 * 60 * 1000,
   maxTurns: 30,
@@ -70,7 +70,7 @@ export const LIMITED_RESOURCE_BUDGET_V1: Readonly<ResourceBudgetV1> = Object.fre
   maxArtifactBytes: 256 * 1024 * 1024,
 });
 
-export const INTERNAL_RESOURCE_BUDGET_V1: Readonly<ResourceBudgetV1> = Object.freeze({
+export const INTERNAL_RESOURCE_BUDGET_: Readonly<ResourceBudget> = Object.freeze({
   version: 1,
   maxRunDurationMs: 60 * 60 * 1000,
   maxTurns: 50,
@@ -125,7 +125,7 @@ function nonEmpty(value: string, field: string): void {
   if (value.trim().length === 0) throw new Error(`${field} must be non-empty.`);
 }
 
-export function assertResourceBudgetV1(value: ResourceBudgetV1): void {
+export function assertResourceBudget(value: ResourceBudget): void {
   if (value.version !== 1) throw new Error(`Unsupported ResourceBudget version.`);
   for (const field of BUDGET_FIELDS) {
     if (!Number.isSafeInteger(value[field]) || value[field] <= 0)
@@ -137,7 +137,7 @@ export function assertResourceBudgetV1(value: ResourceBudgetV1): void {
     throw new Error('Writer concurrency must not exceed tool concurrency.');
 }
 
-export function assertResourceUsageV1(value: ResourceUsageV1): void {
+export function assertResourceUsage(value: ResourceUsage): void {
   for (const field of COUNTER_FIELDS) nonNegativeInteger(value.counters[field], field);
   for (const field of GAUGE_FIELDS) nonNegativeInteger(value.gauges[field], field);
   if (value.source === 'versioned_upper_bound')
@@ -146,10 +146,10 @@ export function assertResourceUsageV1(value: ResourceUsageV1): void {
     throw new Error('Actual usage must not declare estimatorVersion.');
 }
 
-export function createZeroResourceUsageV1(
-  source: ResourceUsageV1['source'] = 'actual',
+export function createZeroResourceUsage(
+  source: ResourceUsage['source'] = 'actual',
   estimatorVersion = 'resource-budget-zero-v1',
-): MutableResourceUsageV1 {
+): MutableResourceUsage {
   return {
     counters: {
       turns: 0,
@@ -171,26 +171,26 @@ export function createZeroResourceUsageV1(
   };
 }
 
-export function createUnconfiguredResourceBudgetStateV1(): ResourceBudgetRuntimeStateV1 {
+export function createUnconfiguredResourceBudgetState(): ResourceBudgetRuntimeState {
   return { status: 'unconfigured', reservations: {} };
 }
 
-export function tightenResourceBudgetV1(
-  base: ResourceBudgetV1,
-  tightening: Partial<Omit<ResourceBudgetV1, 'version'>>,
-): ResourceBudgetV1 {
-  assertResourceBudgetV1(base);
+export function tightenResourceBudget(
+  base: ResourceBudget,
+  tightening: Partial<Omit<ResourceBudget, 'version'>>,
+): ResourceBudget {
+  assertResourceBudget(base);
   for (const field of BUDGET_FIELDS) {
     const requested = tightening[field];
     if (requested != null && requested > base[field])
       throw new Error(`${field} can only be lowered from the effective release budget.`);
   }
   const result = { ...base, ...tightening, version: 1 as const };
-  assertResourceBudgetV1(result);
+  assertResourceBudget(result);
   return result;
 }
 
-function addUsage(left: ResourceUsageV1, right: ResourceUsageV1): ResourceUsageV1 {
+function addUsage(left: ResourceUsage, right: ResourceUsage): ResourceUsage {
   const source =
     left.source === 'actual' && right.source === 'actual'
       ? ('actual' as const)
@@ -219,14 +219,14 @@ function addUsage(left: ResourceUsageV1, right: ResourceUsageV1): ResourceUsageV
   };
 }
 
-function withinUpperBound(actual: ResourceUsageV1, upper: ResourceUsageV1): boolean {
+function withinUpperBound(actual: ResourceUsage, upper: ResourceUsage): boolean {
   return (
     COUNTER_FIELDS.every((field) => actual.counters[field] <= upper.counters[field]) &&
     GAUGE_FIELDS.every((field) => actual.gauges[field] <= upper.gauges[field])
   );
 }
 
-function withinBudget(usage: ResourceUsageV1, budget: ResourceBudgetV1): boolean {
+function withinBudget(usage: ResourceUsage, budget: ResourceBudget): boolean {
   return (
     usage.counters.turns <= budget.maxTurns &&
     usage.counters.modelRequests <= budget.maxModelRequests &&
@@ -242,9 +242,7 @@ function withinBudget(usage: ResourceUsageV1, budget: ResourceBudgetV1): boolean
   );
 }
 
-export function committedResourceUsageV1(
-  state: ActiveResourceBudgetRuntimeStateV1,
-): ResourceUsageV1 {
+export function committedResourceUsage(state: ActiveResourceBudgetRuntimeState): ResourceUsage {
   let usage = state.reconciledUsage;
   for (const reservation of Object.values(state.reservations)) {
     if (['reserved', 'dispatch_started', 'unknown'].includes(reservation.state))
@@ -253,18 +251,18 @@ export function committedResourceUsageV1(
   return usage;
 }
 
-function assertReservation(value: BudgetReservationV1): void {
+function assertReservation(value: BudgetReservation): void {
   if (value.version !== 1) throw new Error('Unsupported BudgetReservation version.');
   nonEmpty(value.reservationId, 'reservationId');
   nonEmpty(value.runId, 'runId');
   nonEmpty(value.invocationId, 'invocationId');
   if (value.parentReservationId === value.reservationId)
     throw new Error('A reservation cannot be its own parent.');
-  assertResourceUsageV1(value.executableUpperBound);
+  assertResourceUsage(value.executableUpperBound);
   if (value.executableUpperBound.source !== 'versioned_upper_bound')
     throw new Error('executableUpperBound must use versioned_upper_bound usage.');
   if (value.actual) {
-    assertResourceUsageV1(value.actual);
+    assertResourceUsage(value.actual);
     if (
       value.actual.source !== 'actual' ||
       !withinUpperBound(value.actual, value.executableUpperBound)
@@ -273,28 +271,28 @@ function assertReservation(value: BudgetReservationV1): void {
   }
 }
 
-function activeState(state: ResourceBudgetRuntimeStateV1): ActiveResourceBudgetRuntimeStateV1 {
+function activeState(state: ResourceBudgetRuntimeState): ActiveResourceBudgetRuntimeState {
   if (state.status !== 'active')
     throw new Error(`Resource budget ledger is ${state.status}; execution is blocked.`);
   return state;
 }
 
 function replaceReservation(
-  state: ActiveResourceBudgetRuntimeStateV1,
-  reservation: BudgetReservationV1,
-): ActiveResourceBudgetRuntimeStateV1 {
+  state: ActiveResourceBudgetRuntimeState,
+  reservation: BudgetReservation,
+): ActiveResourceBudgetRuntimeState {
   return {
     ...state,
     reservations: { ...state.reservations, [reservation.reservationId]: reservation },
   };
 }
 
-export function reduceResourceBudgetStateV1(
-  state: ResourceBudgetRuntimeStateV1,
+export function reduceResourceBudgetState(
+  state: ResourceBudgetRuntimeState,
   event: ResourceBudgetEvent,
-): ResourceBudgetRuntimeStateV1 {
+): ResourceBudgetRuntimeState {
   if (event.type === 'resource_budget.configured') {
-    assertResourceBudgetV1(event.budget);
+    assertResourceBudget(event.budget);
     nonEmpty(event.runId, 'runId');
     const started = Date.parse(event.startedAt);
     const deadline = Date.parse(event.deadlineAt);
@@ -318,7 +316,7 @@ export function reduceResourceBudgetStateV1(
       startedAt: event.startedAt,
       deadlineAt: event.deadlineAt,
       budget: event.budget,
-      reconciledUsage: createZeroResourceUsageV1(),
+      reconciledUsage: createZeroResourceUsage(),
       reservations: {},
       waiters: {},
       nextWaiterSequence: 0,
@@ -392,7 +390,7 @@ export function reduceResourceBudgetStateV1(
     )
       throw new Error('Invocation already has a non-released reservation.');
     const next = replaceReservation(active, candidate);
-    if (!withinBudget(committedResourceUsageV1(next), active.budget))
+    if (!withinBudget(committedResourceUsage(next), active.budget))
       throw new Error('Resource budget exhausted before dispatch.');
     return next;
   }
@@ -406,7 +404,7 @@ export function reduceResourceBudgetStateV1(
         throw new Error(`Cannot dispatch a ${reservation.state} reservation.`);
       return replaceReservation(active, { ...reservation, state: 'dispatch_started' });
     case 'resource_budget.reconciled': {
-      assertResourceUsageV1(event.actual);
+      assertResourceUsage(event.actual);
       if (
         event.actual.source !== 'actual' ||
         !withinUpperBound(event.actual, reservation.executableUpperBound)
@@ -426,7 +424,7 @@ export function reduceResourceBudgetStateV1(
         }),
         reconciledUsage: addUsage(active.reconciledUsage, event.actual),
       };
-      if (!withinBudget(committedResourceUsageV1(next), active.budget))
+      if (!withinBudget(committedResourceUsage(next), active.budget))
         throw new Error('Reconciled usage exceeds the effective resource budget.');
       return next;
     }
@@ -450,11 +448,11 @@ export function reduceResourceBudgetStateV1(
   }
 }
 
-export function assertResourceBudgetRuntimeStateV1(state: ResourceBudgetRuntimeStateV1): void {
+export function assertResourceBudgetRuntimeState(state: ResourceBudgetRuntimeState): void {
   if (state.status === 'unconfigured') return;
-  assertResourceBudgetV1(state.budget);
+  assertResourceBudget(state.budget);
   nonEmpty(state.runId, 'runId');
-  assertResourceUsageV1(state.reconciledUsage);
+  assertResourceUsage(state.reconciledUsage);
   if (state.reconciledUsage.source !== 'actual')
     throw new Error('reconciledUsage must contain actual usage.');
   for (const reservation of Object.values(state.reservations)) {
@@ -473,6 +471,6 @@ export function assertResourceBudgetRuntimeStateV1(state: ResourceBudgetRuntimeS
     sequences.add(waiter.sequence);
   }
   nonNegativeInteger(state.nextWaiterSequence ?? 0, 'nextWaiterSequence');
-  if (!withinBudget(committedResourceUsageV1(state), state.budget))
+  if (!withinBudget(committedResourceUsage(state), state.budget))
     throw new Error('Committed resource usage exceeds the effective budget.');
 }

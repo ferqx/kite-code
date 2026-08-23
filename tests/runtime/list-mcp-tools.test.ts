@@ -7,12 +7,12 @@ import type {
   McpRuntimeProvider,
 } from '@kite/builtin-runtime/mcp';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
-import { createCapabilityBindingV1 } from '#builtin-runtime';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createCapabilityBinding } from '#builtin-runtime';
 import {
-  createTestAgentToolsV1 as createAgentTools,
-  executeTestRuntimeToolsV1,
-  testBuiltinToolCatalogV1,
+  createTestAgentTools as createAgentTools,
+  executeTestRuntimeTools,
+  testBuiltinToolCatalog,
 } from '../helpers/runtime-model';
 
 // ── helpers ──
@@ -88,7 +88,7 @@ function makeListMcpToolsRequest(args: Record<string, unknown> = {}) {
   const result = toolRequestFromCall(
     { id: 'list-tools', name: 'list_mcp_tools', args },
     process.cwd(),
-    testBuiltinToolCatalogV1(),
+    testBuiltinToolCatalog(),
   );
   if (!result?.ok) throw new Error('Failed to construct list_mcp_tools request.');
   return result.request;
@@ -99,7 +99,7 @@ async function invokeGovernedTool(input: {
   request: ReturnType<typeof makeListMcpToolsRequest>;
   mcpManager?: McpRuntimeProvider;
 }) {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'list-mcp-tools-test',
     userId: 'test',
@@ -115,7 +115,7 @@ async function invokeGovernedTool(input: {
     createdAtTurnId: state.turn.turnId,
   };
   state.tools.queue = [...state.tools.queue, 'list-tools'];
-  const events = await executeTestRuntimeToolsV1({
+  const events = await executeTestRuntimeTools({
     state,
     toolCallIds: ['list-tools'],
     sandboxAvailable: true,
@@ -457,7 +457,7 @@ describe('list_mcp_tools in tool set completeness', () => {
       workspace: '/tmp',
       mcpBindings: [
         {
-          binding: createCapabilityBindingV1({
+          binding: createCapabilityBinding({
             capabilityId: descriptor.capabilityId,
             capabilityRevision: descriptor.revision,
             exposedToolName: 'mcp__gh__create_issue',

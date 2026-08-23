@@ -1,52 +1,52 @@
 import type {
-  BuiltinPreparedShellExecutionInputV1,
-  ExecutionBoundaryV1,
-  ExecutionCapabilitySurfaceV1,
-  ProductionExecutionEntrypointV1,
+  BuiltinPreparedShellExecutionInput,
+  ExecutionBoundary,
+  ExecutionCapabilitySurface,
+  ProductionExecutionEntrypoint,
   ShellExecutor,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  discoverSandboxBackendCandidateV1,
+  discoverSandboxBackendCandidate,
   type SandboxBackend,
 } from '@kite/builtin-runtime/sandbox';
-import { computeExecutionBoundaryDigestV1 } from '#app/config/execution-boundary';
-import { createAcknowledgedHostShellExecutorV1 } from './acknowledged-host-shell';
-import { createGovernedLocalSandboxExecutorV1 } from './governed-local-sandbox';
+import { computeExecutionBoundaryDigest } from '#app/config/execution-boundary';
+import { createAcknowledgedHostShellExecutor } from './acknowledged-host-shell';
+import { createGovernedLocalSandboxExecutor } from './governed-local-sandbox';
 import {
-  APP_PREPARED_SHELL_EXECUTION_V1,
-  type AppPreparedShellExecutionCarrierV1,
-  type AppPreparedShellExecutionPortV1,
-  appPreparedShellExecutionPortV1,
-  projectAppHostShellResultV1,
+  APP_PREPARED_SHELL_EXECUTION_,
+  type AppPreparedShellExecutionCarrier,
+  type AppPreparedShellExecutionPort,
+  appPreparedShellExecutionPort,
+  projectAppHostShellResult,
 } from './prepared-tool-pipeline';
 import {
-  hasPendingSandboxPreparationRecoveryV1,
-  SANDBOX_PREPARATION_RECOVERY_V1,
-  type SandboxPreparationRecoveryConsumerV1,
+  hasPendingSandboxPreparationRecovery,
+  SANDBOX_PREPARATION_RECOVERY_,
+  type SandboxPreparationRecoveryConsumer,
 } from './runtime-execution';
 
-export interface AppSandboxCompositionConfigV1 {
+export interface AppSandboxCompositionConfig {
   sandbox: { enabled: boolean };
-  executionBoundary?: ExecutionBoundaryV1;
-  executionCapabilitySurface?: ExecutionCapabilitySurfaceV1;
+  executionBoundary?: ExecutionBoundary;
+  executionCapabilitySurface?: ExecutionCapabilitySurface;
 }
 
-export type AppShellRuntimeModeV1 = 'sandbox' | 'host_shell' | 'denied';
+export type AppShellRuntimeMode = 'sandbox' | 'host_shell' | 'denied';
 
-export interface AppShellRuntimeDecisionV1 {
-  mode: AppShellRuntimeModeV1;
+export interface AppShellRuntimeDecision {
+  mode: AppShellRuntimeMode;
   backend: SandboxBackend;
   reason?: string;
 }
 
-export interface AppSandboxBackendResolutionV1 {
+export interface AppSandboxBackendResolution {
   backend: SandboxBackend;
   /** Stable availability diagnostic used only when no backend was selected. */
   unavailableReason?: string;
 }
-export type AppShellExecutorV1 = AppPreparedShellExecutionCarrierV1 & {
+export type AppShellExecutor = AppPreparedShellExecutionCarrier & {
   /** Resolve and cache one allocation-free sandbox decision before Tool dispatch. */
-  prepare(): Promise<AppShellRuntimeDecisionV1>;
+  prepare(): Promise<AppShellRuntimeDecision>;
   /**
    * Cancel an in-flight preparation (TUI exit while the silent startup
    * discovery is still running). The aborted attempt is not cached; the next
@@ -72,13 +72,13 @@ function unavailableExecutor(reason: string): ShellExecutor {
   });
 }
 
-export function createPreparedAppShellExecutorV1(input: {
+export function createPreparedAppShellExecutor(input: {
   workspace: string;
   sandboxEnabled: boolean;
   resolveBackend: () =>
     | SandboxBackend
-    | AppSandboxBackendResolutionV1
-    | Promise<SandboxBackend | AppSandboxBackendResolutionV1>;
+    | AppSandboxBackendResolution
+    | Promise<SandboxBackend | AppSandboxBackendResolution>;
   createNativeExecutor: (
     workspace: string,
     backend: Exclude<SandboxBackend, 'none'>,
@@ -91,20 +91,20 @@ export function createPreparedAppShellExecutorV1(input: {
   deniedReason?: string;
   /** Test seam for proving backend discovery happens only after an event-loop turn. */
   yieldBeforeResolve?: () => Promise<void>;
-}): AppShellExecutorV1 {
+}): AppShellExecutor {
   let selectedExecutor: ShellExecutor | undefined;
-  let preparation: Promise<AppShellRuntimeDecisionV1> | undefined;
+  let preparation: Promise<AppShellRuntimeDecision> | undefined;
   let warmAbort = new AbortController();
   let hostExecutor: ShellExecutor | undefined;
   let rawHostExecutor: ShellExecutor | undefined;
-  let preparedExecutionPort: AppPreparedShellExecutionPortV1 | undefined;
+  let preparedExecutionPort: AppPreparedShellExecutionPort | undefined;
 
-  const selectStartupFailure = (reason: string): AppShellRuntimeDecisionV1 => {
+  const selectStartupFailure = (reason: string): AppShellRuntimeDecision => {
     selectedExecutor = unavailableExecutor(reason);
     return { mode: 'denied', backend: 'none', reason };
   };
 
-  const selectHostFallback = (reason: string): AppShellRuntimeDecisionV1 => {
+  const selectHostFallback = (reason: string): AppShellRuntimeDecision => {
     if (!input.createHostExecutor) return selectStartupFailure(reason);
     try {
       if (!hostExecutor) {
@@ -138,7 +138,7 @@ export function createPreparedAppShellExecutorV1(input: {
     preparation = undefined;
   };
 
-  const prepare = (): Promise<AppShellRuntimeDecisionV1> => {
+  const prepare = (): Promise<AppShellRuntimeDecision> => {
     preparation ??= (async () => {
       // Snapshot the controller for this attempt: abortPreparation() rotates
       // it, and the in-flight attempt must observe its own abort only.
@@ -187,7 +187,7 @@ export function createPreparedAppShellExecutorV1(input: {
         // Construction is allocation-free. Native usability checks and any
         // allocating Provider prepare are deferred to an acknowledged Tool attempt.
         const nativeExecutor = input.createNativeExecutor(input.workspace, backend);
-        preparedExecutionPort = appPreparedShellExecutionPortV1(nativeExecutor);
+        preparedExecutionPort = appPreparedShellExecutionPort(nativeExecutor);
         selectedExecutor = nativeExecutor;
       } catch (error) {
         return selectHostFallback(
@@ -204,52 +204,52 @@ export function createPreparedAppShellExecutorV1(input: {
   const executor = (async (shellInput) => {
     await prepare();
     return selectedExecutor!(shellInput);
-  }) as AppShellExecutorV1;
+  }) as AppShellExecutor;
   executor.prepare = prepare;
   executor.abortPreparation = abortPreparation;
-  Object.defineProperty(executor, APP_PREPARED_SHELL_EXECUTION_V1, {
+  Object.defineProperty(executor, APP_PREPARED_SHELL_EXECUTION_, {
     enumerable: false,
     value: Object.freeze({
-      execute: async (preparedInput: Readonly<BuiltinPreparedShellExecutionInputV1>) => {
+      execute: async (preparedInput: Readonly<BuiltinPreparedShellExecutionInput>) => {
         const decision = await prepare();
         if (decision.mode === 'sandbox' && preparedExecutionPort) {
           return preparedExecutionPort.execute(preparedInput);
         }
         if (decision.mode === 'host_shell' && rawHostExecutor) {
-          return projectAppHostShellResultV1(
-            await rawHostExecutor(shellInputFromPreparedV1(preparedInput)),
+          return projectAppHostShellResult(
+            await rawHostExecutor(shellInputFromPrepared(preparedInput)),
           );
         }
-        return projectAppHostShellResultV1(
+        return projectAppHostShellResult(
           await unavailableExecutor(decision.reason ?? 'prepared_shell_execution_unavailable')(
-            shellInputFromPreparedV1(preparedInput),
+            shellInputFromPrepared(preparedInput),
           ),
         );
       },
-    } satisfies AppPreparedShellExecutionPortV1),
+    } satisfies AppPreparedShellExecutionPort),
   });
-  Object.defineProperty(executor, SANDBOX_PREPARATION_RECOVERY_V1, {
+  Object.defineProperty(executor, SANDBOX_PREPARATION_RECOVERY_, {
     enumerable: false,
     value: async (
       recoveryInput: Parameters<
-        SandboxPreparationRecoveryConsumerV1[typeof SANDBOX_PREPARATION_RECOVERY_V1]
+        SandboxPreparationRecoveryConsumer[typeof SANDBOX_PREPARATION_RECOVERY_]
       >[0],
     ) => {
-      if (!hasPendingSandboxPreparationRecoveryV1(recoveryInput.persistence.getState())) {
+      if (!hasPendingSandboxPreparationRecovery(recoveryInput.persistence.getState())) {
         return true;
       }
       await prepare();
       const recovery = (
-        selectedExecutor as ShellExecutor & Partial<SandboxPreparationRecoveryConsumerV1>
-      )?.[SANDBOX_PREPARATION_RECOVERY_V1];
+        selectedExecutor as ShellExecutor & Partial<SandboxPreparationRecoveryConsumer>
+      )?.[SANDBOX_PREPARATION_RECOVERY_];
       return recovery ? recovery.call(selectedExecutor, recoveryInput) : false;
     },
   });
   return executor;
 }
 
-function shellInputFromPreparedV1(
-  input: Readonly<BuiltinPreparedShellExecutionInputV1>,
+function shellInputFromPrepared(
+  input: Readonly<BuiltinPreparedShellExecutionInput>,
 ): Parameters<ShellExecutor>[0] {
   return {
     workspace: input.workspace,
@@ -264,17 +264,17 @@ function shellInputFromPreparedV1(
 }
 
 /** Shared TUI/foreground-CLI composition for native qualification and runtime use. */
-export function composeAppSandboxExecutorV1(input: {
-  entrypoint: ProductionExecutionEntrypointV1;
+export function composeAppSandboxExecutor(input: {
+  entrypoint: ProductionExecutionEntrypoint;
   workspace: string;
-  config: AppSandboxCompositionConfigV1;
+  config: AppSandboxCompositionConfig;
   /** Effective App-level switch after CLI/config composition. */
   sandboxEnabled?: boolean;
   /** Optional diagnostic sink for non-TUI callers. */
   onDiagnostic?: (message: string) => void;
   /** Native conformance seam; production callers must keep the acknowledged default. */
   hostFallbackPolicy?: 'acknowledged' | 'deny';
-}): AppShellExecutorV1 {
+}): AppShellExecutor {
   const boundary = input.config.executionBoundary;
   const surface = input.config.executionCapabilitySurface;
   const sandboxEnabled = input.sandboxEnabled ?? input.config.sandbox.enabled;
@@ -287,7 +287,7 @@ export function composeAppSandboxExecutorV1(input: {
           ? 'sandbox_does_not_admit_network_allowlist'
           : undefined;
 
-  return createPreparedAppShellExecutorV1({
+  return createPreparedAppShellExecutor({
     workspace: input.workspace,
     sandboxEnabled,
     deniedReason,
@@ -295,7 +295,7 @@ export function composeAppSandboxExecutorV1(input: {
       // The normal Windows backend is the no-UAC restricted-token runner.
       // The managed projection status remains a stricter production profile,
       // not a prerequisite for interactive direct-workspace development.
-      const backend = discoverSandboxBackendCandidateV1();
+      const backend = discoverSandboxBackendCandidate();
       if (backend !== 'none' || process.platform !== 'win32') return backend;
       return {
         backend: 'none',
@@ -303,15 +303,15 @@ export function composeAppSandboxExecutorV1(input: {
       };
     },
     createNativeExecutor: (workspace, backend) =>
-      createGovernedLocalSandboxExecutorV1({
+      createGovernedLocalSandboxExecutor({
         backend,
         canonicalWorkspace: workspace,
         brokeredGitFeatureRevision: surface?.brokeredGitFeatureRevision ?? undefined,
         executionBoundaryDigest: boundary
-          ? computeExecutionBoundaryDigestV1(boundary)
+          ? computeExecutionBoundaryDigest(boundary)
           : 'development-sandbox-boundary-v1',
         protectedPathRevision: boundary
-          ? computeExecutionBoundaryDigestV1(boundary)
+          ? computeExecutionBoundaryDigest(boundary)
           : 'development-protected-path-boundary-v1',
         ...(boundary && boundary.filesystemScope !== 'full_access'
           ? {
@@ -323,6 +323,6 @@ export function composeAppSandboxExecutorV1(input: {
       }),
     ...(input.hostFallbackPolicy === 'deny'
       ? {}
-      : { createHostExecutor: createAcknowledgedHostShellExecutorV1 }),
+      : { createHostExecutor: createAcknowledgedHostShellExecutor }),
   });
 }

@@ -1,5 +1,5 @@
 import type { KernelEvent } from '../../events';
-import { recordToolOwnedProgressV1 } from '../../recovery';
+import { recordToolOwnedProgress } from '../../recovery';
 import {
   arrayField,
   asJsonObject,
@@ -462,7 +462,7 @@ export function reduceInteractionState(state: AgentState, event: KernelEvent): A
       const failureIds = activeProviderFailureIds(state, originatingToolCallId);
       const toolRecovery =
         event.type === 'provider.action_completed' && failureIds.length > 0
-          ? recordToolOwnedProgressV1(state.toolRecovery, {
+          ? recordToolOwnedProgress(state.toolRecovery, {
               kind: 'provider_revision',
               referenceId: interactionId,
               resolvesFailureIds: failureIds,

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
   computePlanStructuralDigest,
-  createBuiltinPlanDocumentV2V1,
-  initialPlanIdV1,
-  isBuiltinSavedReplanRevisionV1,
-  isPlanDocumentV2,
-  projectBuiltinPublicPlanV2V1,
+  createBuiltinPlanDocument,
+  initialPlanId,
+  isBuiltinSavedReplanRevision,
+  isPlanDocument,
+  projectBuiltinPublicPlan,
 } from '../src/planning';
 
 const input = {
@@ -21,12 +21,12 @@ const input = {
 
 describe('Builtin plan document semantics', () => {
   test('keeps the task-derived identity and State V2 structural digest', () => {
-    const plan = createBuiltinPlanDocumentV2V1(input);
+    const plan = createBuiltinPlanDocument(input);
     expect(plan.planId).toBe('plan-4ad62e8d9a7ab27b18abe5deba5fddcf');
     expect(plan.version).toBe(1);
     expect(plan.planSchemaVersion).toBe(2);
     expect(plan.structuralDigest).toBe(computePlanStructuralDigest(plan));
-    expect(isPlanDocumentV2(plan)).toBe(true);
+    expect(isPlanDocument(plan)).toBe(true);
     expect(plan.completionEvidence).toEqual({
       schemaVersion: 1,
       verification: [],
@@ -37,12 +37,12 @@ describe('Builtin plan document semantics', () => {
   });
 
   test('projects only the public plan shape and preserves notes/statuses', () => {
-    const plan = createBuiltinPlanDocumentV2V1(input);
+    const plan = createBuiltinPlanDocument(input);
     const progressed = {
       ...plan,
       steps: [{ ...plan.steps[0]!, status: 'completed' as const, note: 'done' }, plan.steps[1]!],
     };
-    expect(projectBuiltinPublicPlanV2V1(progressed)).toEqual({
+    expect(projectBuiltinPublicPlan(progressed)).toEqual({
       name: input.title,
       description: input.bodyMarkdown,
       status: 'pending',
@@ -54,8 +54,8 @@ describe('Builtin plan document semantics', () => {
   });
 
   test('preserves explicit replan metadata and idempotently reuses a saved canonical revision', () => {
-    const first = createBuiltinPlanDocumentV2V1(input);
-    const replan = createBuiltinPlanDocumentV2V1({
+    const first = createBuiltinPlanDocument(input);
+    const replan = createBuiltinPlanDocument({
       ...input,
       turnId: 'turn-2',
       previous: first,
@@ -68,13 +68,13 @@ describe('Builtin plan document semantics', () => {
       replanReason: 'address-review',
     });
     expect(
-      isBuiltinSavedReplanRevisionV1(replan, {
+      isBuiltinSavedReplanRevision(replan, {
         supersedesPlanVersion: 1,
         replanReason: 'address-review',
       }),
     ).toBe(true);
 
-    const retried = createBuiltinPlanDocumentV2V1({
+    const retried = createBuiltinPlanDocument({
       ...input,
       turnId: 'turn-3',
       previous: first,
@@ -85,11 +85,11 @@ describe('Builtin plan document semantics', () => {
 
   test('rejects malformed candidate documents before artifact-facing code', () => {
     expect(() =>
-      createBuiltinPlanDocumentV2V1({
+      createBuiltinPlanDocument({
         ...input,
         title: '',
       }),
     ).toThrow('PlanDocument V2 schema validation failed.');
-    expect(initialPlanIdV1(input.taskId)).toBe('plan-4ad62e8d9a7ab27b18abe5deba5fddcf');
+    expect(initialPlanId(input.taskId)).toBe('plan-4ad62e8d9a7ab27b18abe5deba5fddcf');
   });
 });

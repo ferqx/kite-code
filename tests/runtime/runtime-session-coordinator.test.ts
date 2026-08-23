@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContextCompactionCheckpoint, RuntimeEvent } from '@kite/agent-kernel';
 import {
-  BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1,
-  BuiltinModelEffectCoordinatorV1,
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
+  BuiltinModelEffectCoordinator,
   buildContextProjection,
   type ContextProjectionEnvironment,
   createChatModel,
@@ -13,33 +13,30 @@ import {
 } from '@kite/builtin-runtime/model';
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeHostExecutionServices } from '@kite/runtime-host';
-import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
-import type { VerificationSpecV1 } from '@kite/runtime-spi';
-import {
-  createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-} from '#builtin-runtime';
-import { createRuntimeHostStateStorageBindingV1 } from '#runtime-host';
-import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
+import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import type { VerificationSpec } from '@kite/runtime-spi';
+import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '#builtin-runtime';
+import { createRuntimeHostStateStorageBinding } from '#runtime-host';
+import { createRuntimeModuleRegistry } from '#runtime-spi';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import type { InstalledKiteRuntimeCompositionV1 } from '../../apps/kite/src/bootstrap/model-runtime-composition';
+import type { InstalledKiteRuntimeComposition } from '../../apps/kite/src/bootstrap/model-runtime-composition';
 import {
-  createRuntimeSessionCoordinatorBindingV1,
-  type RuntimeSessionCoordinatorIdentityV1,
+  createRuntimeSessionCoordinatorBinding,
+  type RuntimeSessionCoordinatorIdentity,
 } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
-import { createAppRuntimeEffectExecutorV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
+import { createAppRuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { StateSessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
-import { createRuntimeHostCapabilityExecutionPortFromSnapshotV1 } from '../../packages/runtime-host/src/capability-execution';
-import type { RuntimeSnapshotCodecV1 } from '../../packages/runtime-host/src/storage';
-import { createState25Store4StorageForTestV1 } from '../../scripts/support/runtime-storage';
-import { createTestModelInvocationHarnessV1 } from '../helpers/model-invocation';
-import { testProviderDataAdmissionV1 } from '../helpers/runtime-model';
+import type { StateSessionStorage } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
+import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '../../packages/runtime-host/src/capability-execution';
+import type { RuntimeSnapshotCodec } from '../../packages/runtime-host/src/storage';
+import { createStateStorageForTest } from '../../scripts/support/runtime-storage';
+import { createTestModelInvocationHarness } from '../helpers/model-invocation';
+import { testProviderDataAdmission } from '../helpers/runtime-model';
 
-const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
 const snapshot = registry.snapshot();
-const builtinToolCatalog = createBuiltinToolCatalogProjectionV1(snapshot);
-const capabilityExecution = createRuntimeHostCapabilityExecutionPortFromSnapshotV1(snapshot);
+const builtinToolCatalog = createBuiltinToolCatalogProjection(snapshot);
+const capabilityExecution = createRuntimeHostCapabilityExecutionPortFromSnapshot(snapshot);
 
 function projectIdentityForWorkspace(workspace: string) {
   return {
@@ -52,7 +49,7 @@ function projectIdentityForWorkspace(workspace: string) {
 
 function runtimeStoreView(
   services: RuntimeHostExecutionServices<RuntimeEvent, unknown>,
-): StateSessionStorageV1 {
+): StateSessionStorage {
   return {
     appendEvents: (sessionId, events, metadata) =>
       services.sessions.appendEvents(sessionId, events, metadata),
@@ -118,17 +115,17 @@ function runtimeStoreView(
   };
 }
 
-function modelRuntime(workspace: string, state: RuntimeState): InstalledKiteRuntimeCompositionV1 {
-  const runtime = createTestModelInvocationHarnessV1({ workspace, state });
-  const modelEffects = new BuiltinModelEffectCoordinatorV1(runtime.gateway);
+function modelRuntime(workspace: string, state: RuntimeState): InstalledKiteRuntimeComposition {
+  const runtime = createTestModelInvocationHarness({ workspace, state });
+  const modelEffects = new BuiltinModelEffectCoordinator(runtime.gateway);
   return {
     status: 'available',
     gateway: runtime.gateway,
     modelEffects,
-  } as unknown as InstalledKiteRuntimeCompositionV1;
+  } as unknown as InstalledKiteRuntimeComposition;
 }
 
-function identity(sessionId: string): RuntimeSessionCoordinatorIdentityV1 {
+function identity(sessionId: string): RuntimeSessionCoordinatorIdentity {
   const workspace = '/tmp/retained-coordinator';
   return {
     sessionId,
@@ -152,7 +149,7 @@ function config() {
 }
 
 function requestedState(sessionId: string) {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
@@ -201,7 +198,7 @@ function autoReviewState(
   options: { toolName?: string; subagentId?: string } = {},
 ) {
   const toolName = options.toolName ?? 'shell_execute';
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
@@ -239,7 +236,7 @@ function autoReviewState(
 }
 
 function verificationState(sessionId: string) {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
@@ -257,7 +254,7 @@ function verificationState(sessionId: string) {
     planHistory: [],
   };
   state.transcript.final = 'ready for verification';
-  const spec: VerificationSpecV1 = {
+  const spec: VerificationSpec = {
     schemaVersion: 1,
     verificationId: 'retained-verification-1',
     taskId: 'verification-task',
@@ -312,7 +309,7 @@ function checkpointFor(
 
 function createFixture(
   sessionId: string,
-  state = createRuntimeHostStateInitialStateV1({
+  state = createRuntimeHostStateInitialState({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
@@ -322,9 +319,9 @@ function createFixture(
 ) {
   const root = mkdtempSync(join(process.cwd(), '.kite-retained-coordinator-'));
   const databasePath = join(root, 'runtime.db');
-  const stateStorage = createRuntimeHostStateStorageBindingV1();
-  const codec = stateStorage.codec as RuntimeSnapshotCodecV1<RuntimeEvent, unknown>;
-  const storage = createState25Store4StorageForTestV1<RuntimeEvent, unknown>({
+  const stateStorage = createRuntimeHostStateStorageBinding();
+  const codec = stateStorage.codec as RuntimeSnapshotCodec<RuntimeEvent, unknown>;
+  const storage = createStateStorageForTest<RuntimeEvent, unknown>({
     databasePath,
     codec,
     sessionId,
@@ -363,7 +360,7 @@ function createFixture(
     snapshot: state,
   });
   const runtime = modelRuntime('/tmp/retained-coordinator', state);
-  const binding = createRuntimeSessionCoordinatorBindingV1();
+  const binding = createRuntimeSessionCoordinatorBinding();
   let factoryCalls = 0;
   const factory = (workspace: string) => {
     factoryCalls += 1;
@@ -391,8 +388,8 @@ function createFixture(
 }
 
 function dependencies(
-  store: StateSessionStorageV1,
-  runtime: InstalledKiteRuntimeCompositionV1,
+  store: StateSessionStorage,
+  runtime: InstalledKiteRuntimeComposition,
   contextCompactor?: RuntimeExecutorDependencies['testContextCompactor'],
 ): RuntimeExecutorDependencies {
   if (runtime.status !== 'available') throw new Error('test model runtime unavailable');
@@ -401,7 +398,7 @@ function dependencies(
     model: createChatModel(config()),
     builtinToolCatalog,
     capabilityExecution,
-    providerDataAdmission: testProviderDataAdmissionV1,
+    providerDataAdmission: testProviderDataAdmission,
     runtimeStore: store,
     modelInvocationGateway: runtime.gateway,
     modelEffectCoordinator: runtime.modelEffects,
@@ -594,18 +591,18 @@ describe('retained TUI session coordinator', () => {
       throw new Error('test model runtime unavailable');
     }
     const modelEffects = primaryFixture.runtime.modelEffects as unknown as {
-      executePrimaryModelEffectV1: (...args: never[]) => Promise<unknown>;
+      executePrimaryModelEffect: (...args: never[]) => Promise<unknown>;
     };
-    const originalPrimaryEffect = modelEffects.executePrimaryModelEffectV1;
+    const originalPrimaryEffect = modelEffects.executePrimaryModelEffect;
     let primaryCalls = 0;
-    modelEffects.executePrimaryModelEffectV1 = async () => {
+    modelEffects.executePrimaryModelEffect = async () => {
       primaryCalls += 1;
       return { kind: 'completed', value: [] };
     };
     try {
       const primaryDependencies = dependencies(primaryFixture.store, primaryFixture.runtime);
       await expect(
-        createAppRuntimeEffectExecutorV1({
+        createAppRuntimeEffectExecutor({
           ...primaryDependencies,
           modelEffectCoordinator: undefined,
         })({ type: 'call_model' }, primaryCoordinator.getState(), undefined, {
@@ -631,19 +628,19 @@ describe('retained TUI session coordinator', () => {
       ).resolves.toEqual([]);
       expect(primaryCalls).toBe(1);
 
-      modelEffects.executePrimaryModelEffectV1 = originalPrimaryEffect;
+      modelEffects.executePrimaryModelEffect = originalPrimaryEffect;
       await expect(
         retainedExecutor({ type: 'call_model' }, primaryCoordinator.getState()),
       ).rejects.toThrow('execution context is unavailable');
       expect(primaryCalls).toBe(1);
-      modelEffects.executePrimaryModelEffectV1 = async () => {
+      modelEffects.executePrimaryModelEffect = async () => {
         primaryCalls += 1;
         return { kind: 'completed', value: [] };
       };
 
       expect(primaryCalls).toBe(1);
     } finally {
-      modelEffects.executePrimaryModelEffectV1 = originalPrimaryEffect;
+      modelEffects.executePrimaryModelEffect = originalPrimaryEffect;
       await primaryAccess.close();
       primaryFixture.storage.close();
       rmSync(primaryFixture.root, { recursive: true, force: true });
@@ -657,11 +654,11 @@ describe('retained TUI session coordinator', () => {
       throw new Error('test model runtime unavailable');
     }
     const remainingModelEffects = remainingFixture.runtime.modelEffects as unknown as {
-      executePrimaryModelEffectV1: (...args: never[]) => Promise<unknown>;
+      executePrimaryModelEffect: (...args: never[]) => Promise<unknown>;
     };
-    const originalRemainingPrimary = remainingModelEffects.executePrimaryModelEffectV1;
+    const originalRemainingPrimary = remainingModelEffects.executePrimaryModelEffect;
     let remainingPrimaryCalls = 0;
-    remainingModelEffects.executePrimaryModelEffectV1 = async () => {
+    remainingModelEffects.executePrimaryModelEffect = async () => {
       remainingPrimaryCalls += 1;
       return { kind: 'completed', value: [] };
     };
@@ -684,7 +681,7 @@ describe('retained TUI session coordinator', () => {
       ).toBe(true);
       expect(remainingPrimaryCalls).toBe(0);
     } finally {
-      remainingModelEffects.executePrimaryModelEffectV1 = originalRemainingPrimary;
+      remainingModelEffects.executePrimaryModelEffect = originalRemainingPrimary;
       await remainingAccess.close();
       remainingFixture.storage.close();
       rmSync(remainingFixture.root, { recursive: true, force: true });
@@ -695,7 +692,7 @@ describe('retained TUI session coordinator', () => {
     const state = autoReviewState('retained-auto-review-owner');
     let gatewayCalls = 0;
     const model = createChatModel(config());
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: state.session.workspace,
       state,
       transport: async () => ({
@@ -715,13 +712,13 @@ describe('retained TUI session coordinator', () => {
       operationExecution: {
         execute: async (attempt) => {
           gatewayCalls += 1;
-          expect(attempt.operationId).toBe(BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1.auto_review);
+          expect(attempt.operationId).toBe(BUILTIN_MODEL_OPERATION_BY_PURPOSE_.auto_review);
           expect(attempt.purpose).toBe('auto_review');
           return attempt.attempt();
         },
       },
     });
-    const modelEffectCoordinator = new BuiltinModelEffectCoordinatorV1(harness.gateway);
+    const modelEffectCoordinator = new BuiltinModelEffectCoordinator(harness.gateway);
     const dependencies: RuntimeExecutorDependencies = {
       config: config(),
       model,
@@ -729,9 +726,9 @@ describe('retained TUI session coordinator', () => {
       modelEffectCoordinator,
       builtinToolCatalog,
       capabilityExecution,
-      providerDataAdmission: testProviderDataAdmissionV1,
+      providerDataAdmission: testProviderDataAdmission,
     };
-    const retainedExecutor = createAppRuntimeEffectExecutorV1(dependencies);
+    const retainedExecutor = createAppRuntimeEffectExecutor(dependencies);
     const events = await retainedExecutor(
       { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
       state,
@@ -759,7 +756,7 @@ describe('retained TUI session coordinator', () => {
     const state = verificationState('retained-verification-owner');
     let gatewayCalls = 0;
     let responseSourceCalls = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: state.session.workspace,
       state,
       transport: async () => {
@@ -782,15 +779,13 @@ describe('retained TUI session coordinator', () => {
       operationExecution: {
         execute: async (attempt) => {
           gatewayCalls += 1;
-          expect(attempt.operationId).toBe(
-            BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1.verification_review,
-          );
+          expect(attempt.operationId).toBe(BUILTIN_MODEL_OPERATION_BY_PURPOSE_.verification_review);
           expect(attempt.purpose).toBe('verification_review');
           return attempt.attempt();
         },
       },
     });
-    const modelEffectCoordinator = new BuiltinModelEffectCoordinatorV1(harness.gateway);
+    const modelEffectCoordinator = new BuiltinModelEffectCoordinator(harness.gateway);
     const dependencies: RuntimeExecutorDependencies = {
       config: config(),
       model: createChatModel(config()),
@@ -798,9 +793,9 @@ describe('retained TUI session coordinator', () => {
       modelEffectCoordinator,
       builtinToolCatalog,
       capabilityExecution,
-      providerDataAdmission: testProviderDataAdmissionV1,
+      providerDataAdmission: testProviderDataAdmission,
     };
-    const retainedExecutor = createAppRuntimeEffectExecutorV1(dependencies);
+    const retainedExecutor = createAppRuntimeEffectExecutor(dependencies);
     const effect = {
       type: 'run_verification' as const,
       verificationId: 'retained-verification-1',
@@ -854,7 +849,7 @@ describe('retained TUI session coordinator', () => {
       capabilityExecution,
     };
 
-    const events = await createAppRuntimeEffectExecutorV1(dependencies)(
+    const events = await createAppRuntimeEffectExecutor(dependencies)(
       { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
       state,
     );

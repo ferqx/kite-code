@@ -34,7 +34,7 @@ export interface McpProjectApprovalRecord {
   decidedAt: string;
 }
 
-interface McpProjectApprovalFileV1 {
+interface McpProjectApprovalFile {
   version: 1;
   records: Record<string, McpProjectApprovalRecord>;
 }
@@ -183,7 +183,7 @@ export function readProjectMcpApprovalStore(
   return { status: 'ready', records: records as Record<string, McpProjectApprovalRecord> };
 }
 
-function writeStore(path: string, file: McpProjectApprovalFileV1): void {
+function writeStore(path: string, file: McpProjectApprovalFile): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let fd: number | undefined;

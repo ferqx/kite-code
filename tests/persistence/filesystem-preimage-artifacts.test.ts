@@ -4,8 +4,8 @@ import { chmodSync, mkdtempSync, rmSync, statSync, unlinkSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  FilesystemPreimageArtifactErrorV1,
-  FilesystemPreimageArtifactStoreV1,
+  FilesystemPreimageArtifactError,
+  FilesystemPreimageArtifactStore,
 } from '@kite/builtin-runtime/filesystem';
 
 const roots: string[] = [];
@@ -14,10 +14,10 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe('FilesystemPreimageArtifactStoreV1', () => {
+describe('FilesystemPreimageArtifactStore', () => {
   test('publishes owner-only immutable evidence under path-free content references', () => {
     const storageRoot = root();
-    const store = new FilesystemPreimageArtifactStoreV1({
+    const store = new FilesystemPreimageArtifactStore({
       root: storageRoot,
     });
     const input = artifactInput('private preimage');
@@ -43,7 +43,7 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
 
   test('fails closed for missing and tampered immutable evidence', () => {
     const storageRoot = root();
-    const store = new FilesystemPreimageArtifactStoreV1({
+    const store = new FilesystemPreimageArtifactStore({
       root: storageRoot,
     });
     const missing = store.write(artifactInput('missing evidence'));
@@ -59,11 +59,11 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
 
   test('rejects wrong owners, malformed preimages, and broad storage roots', () => {
     const storageRoot = root();
-    const store = new FilesystemPreimageArtifactStoreV1({
+    const store = new FilesystemPreimageArtifactStore({
       root: storageRoot,
     });
     const ref = store.write(artifactInput('owned evidence'));
-    const otherOwner = new FilesystemPreimageArtifactStoreV1({
+    const otherOwner = new FilesystemPreimageArtifactStore({
       root: storageRoot,
     });
     expect(otherOwner.read(ref)).toEqual(store.read(ref));
@@ -82,8 +82,7 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
 
     const broad = join(storageRoot, '..');
     expectArtifactError(
-      () =>
-        new FilesystemPreimageArtifactStoreV1({ root: broad }).write(artifactInput('broad root')),
+      () => new FilesystemPreimageArtifactStore({ root: broad }).write(artifactInput('broad root')),
       'storage_boundary_violation',
     );
   });
@@ -116,14 +115,14 @@ function root(): string {
 
 function expectArtifactError(
   operation: () => unknown,
-  code: FilesystemPreimageArtifactErrorV1['code'],
+  code: FilesystemPreimageArtifactError['code'],
 ): void {
   try {
     operation();
-    throw new Error('expected FilesystemPreimageArtifactErrorV1');
+    throw new Error('expected FilesystemPreimageArtifactError');
   } catch (error) {
-    expect(error).toBeInstanceOf(FilesystemPreimageArtifactErrorV1);
-    if (!(error instanceof FilesystemPreimageArtifactErrorV1)) throw error;
+    expect(error).toBeInstanceOf(FilesystemPreimageArtifactError);
+    if (!(error instanceof FilesystemPreimageArtifactError)) throw error;
     expect(error.code).toBe(code);
   }
 }

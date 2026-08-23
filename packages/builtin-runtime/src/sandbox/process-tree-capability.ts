@@ -1,16 +1,16 @@
 import type { SandboxBackend } from './platform';
-import type { BoundaryEnforcementV1 } from './types';
+import type { BoundaryEnforcement } from './types';
 
-export type ProcessTreeHardLimitMechanismV1 =
+export type ProcessTreeHardLimitMechanism =
   | 'none'
   | 'cgroup_pids'
   | 'windows_job_active_process_limit'
   | 'accepted_equivalent';
 
-export interface ProcessTreeCapabilityEvidenceV1 {
-  hardCountMechanism: ProcessTreeHardLimitMechanismV1;
-  hardCountLimit: BoundaryEnforcementV1;
-  terminationCleanup: BoundaryEnforcementV1;
+export interface ProcessTreeCapabilityEvidence {
+  hardCountMechanism: ProcessTreeHardLimitMechanism;
+  hardCountLimit: BoundaryEnforcement;
+  terminationCleanup: BoundaryEnforcement;
 }
 
 /**
@@ -18,11 +18,11 @@ export interface ProcessTreeCapabilityEvidenceV1 {
  * group, PID namespace, Job Object termination, or successful descendant
  * cleanup cannot by itself satisfy the per-invocation hard-count contract.
  */
-export function projectProcessTreeCapabilityV1(input: {
-  hardLimitMechanism: ProcessTreeHardLimitMechanismV1;
+export function projectProcessTreeCapability(input: {
+  hardLimitMechanism: ProcessTreeHardLimitMechanism;
   hardLimitConformancePassed: boolean;
   terminationCleanupConformancePassed: boolean;
-}): ProcessTreeCapabilityEvidenceV1 {
+}): ProcessTreeCapabilityEvidence {
   return {
     hardCountMechanism: input.hardLimitMechanism,
     hardCountLimit:
@@ -37,16 +37,16 @@ export function projectProcessTreeCapabilityV1(input: {
  * Project only independently observed native conformance. Callers must not
  * infer enforcement from binary discovery or a configured numeric limit.
  */
-export function currentProcessTreeCapabilityV1(
+export function currentProcessTreeCapability(
   backend: SandboxBackend,
   conformance: {
-    hardLimitMechanism?: ProcessTreeHardLimitMechanismV1;
+    hardLimitMechanism?: ProcessTreeHardLimitMechanism;
     hardLimitConformancePassed?: boolean;
     terminationCleanupConformancePassed?: boolean;
   } = {},
-): ProcessTreeCapabilityEvidenceV1 {
+): ProcessTreeCapabilityEvidence {
   if (backend === 'bubblewrap' && conformance.hardLimitMechanism === 'cgroup_pids') {
-    return projectProcessTreeCapabilityV1({
+    return projectProcessTreeCapability({
       hardLimitMechanism: 'cgroup_pids',
       hardLimitConformancePassed: conformance.hardLimitConformancePassed === true,
       terminationCleanupConformancePassed: conformance.terminationCleanupConformancePassed === true,
@@ -56,13 +56,13 @@ export function currentProcessTreeCapabilityV1(
     backend === 'windows_restricted_token' &&
     conformance.hardLimitMechanism === 'windows_job_active_process_limit'
   ) {
-    return projectProcessTreeCapabilityV1({
+    return projectProcessTreeCapability({
       hardLimitMechanism: 'windows_job_active_process_limit',
       hardLimitConformancePassed: conformance.hardLimitConformancePassed === true,
       terminationCleanupConformancePassed: conformance.terminationCleanupConformancePassed === true,
     });
   }
-  return projectProcessTreeCapabilityV1({
+  return projectProcessTreeCapability({
     hardLimitMechanism: 'none',
     hardLimitConformancePassed: false,
     terminationCleanupConformancePassed: false,

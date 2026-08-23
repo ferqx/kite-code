@@ -11,7 +11,7 @@ export function findBashBinary(): string | null {
   return existsSync(path) ? path : null;
 }
 
-export interface SystemBashCandidatesV1 {
+export interface SystemBashCandidates {
   /** Paths derived from git installation, if git is found. */
   gitDerived: string[];
   /** Bash found directly in PATH (may include a WSL stub). */
@@ -22,7 +22,7 @@ export interface SystemBashCandidatesV1 {
 export function gatherSystemBashCandidates(
   which: (name: string) => string | null,
   _systemRoot: string,
-): SystemBashCandidatesV1 {
+): SystemBashCandidates {
   const gitDerived: string[] = [];
   const gitPath = which('git');
   if (gitPath) {

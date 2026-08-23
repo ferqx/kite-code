@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
-import { resolveFixedDangerousPathIdentitiesV1 } from './dangerous-paths';
+import { resolveFixedDangerousPathIdentities } from './dangerous-paths';
 import type { FilesystemScope } from './types';
 
 /**
@@ -102,7 +102,7 @@ function resolveExistingProtectedMounts(
 }> {
   const candidates: Array<{ path: string; access: 'read_write' | 'write_only' }> = [];
   const workspaceGit = resolve(workspace, '.git');
-  for (const identity of resolveFixedDangerousPathIdentitiesV1({ workspace })) {
+  for (const identity of resolveFixedDangerousPathIdentities({ workspace })) {
     if (allowWorkspaceGit && realpathOrSelf(identity.path) === realpathOrSelf(workspaceGit)) {
       continue;
     }

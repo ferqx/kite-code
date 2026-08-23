@@ -782,7 +782,7 @@ const violations = [
   ...find(
     'CUT-01 forbids legacy Runtime authority shapes in production source',
     sourceRoot,
-    /\b(?:LegacyCapabilityArtifactRefV1|legacy_v24)\b/,
+    /\b(?:LegacyCapabilityArtifactRef|legacy_v24)\b/,
   ),
   ...find(
     'CUT-01 forbids same-epoch Model invocation index normalization',
@@ -793,14 +793,14 @@ const violations = [
     find(
       'retired Core Tool Runner symbols must not exist in production source',
       productionRoot,
-      /\b(?:invokeGovernedTool|completedTaskExecutionResult|containsBrokeredGitInvocationV1)\b/,
+      /\b(?:invokeGovernedTool|completedTaskExecutionResult|containsBrokeredGitInvocation)\b/,
       (file) => resolve(file) === checkerFile,
     ),
   ),
   ...find(
     'Windows sandbox process adapters are Runtime-consumer-only',
     sourceRoot,
-    /\b(?:executeWindowsRestrictedTokenPreparedV1|reconcileWindowsRestrictedTokenPreparedV1)\b/,
+    /\b(?:executeWindowsRestrictedTokenPrepared|reconcileWindowsRestrictedTokenPrepared)\b/,
     (file) =>
       file.endsWith(`${sep}sandbox-execution${sep}windows-runtime.ts`) ||
       file.endsWith(`${sep}sandbox-execution${sep}consumer.ts`) ||
@@ -812,7 +812,7 @@ const violations = [
   ...find(
     'Tool dispatch stage authority issuers must only be called by the dispatch adapter',
     sourceRoot,
-    /\b(?:issueAcknowledgedRecordedInvocationV1|issueAdapterDispatchedOutcomeV1|issueConfirmedFailureDispatchedOutcomeV1)\b/,
+    /\b(?:issueAcknowledgedRecordedInvocation|issueAdapterDispatchedOutcome|issueConfirmedFailureDispatchedOutcome)\b/,
     (file) =>
       normalizedModulePath(file) ===
         normalizedModulePath(
@@ -824,7 +824,7 @@ const violations = [
   ...find(
     'filesystem observation authority issuer must only be called by the Workspace Pipeline dispatcher',
     sourceRoot,
-    /\bissueWorkspaceFilesystemObservationAuthorityV1\b/,
+    /\bissueWorkspaceFilesystemObservationAuthority\b/,
     (file) =>
       normalizedModulePath(file) ===
         normalizedModulePath(

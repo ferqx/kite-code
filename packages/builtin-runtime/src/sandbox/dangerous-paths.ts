@@ -3,9 +3,9 @@ import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalPathForComparison, msys2ToWindowsPath } from './path-utils';
 import {
-  PROTECTED_WORKSPACE_DIRECTORIES_V1,
-  PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
-  PROTECTED_WORKSPACE_FILES_V1,
+  PROTECTED_WORKSPACE_DIRECTORIES_,
+  PROTECTED_WORKSPACE_FILE_PREFIXES_,
+  PROTECTED_WORKSPACE_FILES_,
 } from './protected-path';
 
 /**
@@ -112,7 +112,7 @@ export function checkDangerousPaths(value: string): string | null {
   return null;
 }
 
-export interface FixedDangerousPathIdentityV1 {
+export interface FixedDangerousPathIdentity {
   path: string;
   kind: 'directory' | 'file' | 'prefix';
   access: 'read_write' | 'write_only';
@@ -193,17 +193,17 @@ const UNIX_PROTECTED_DIRECTORIES = [
  * Canonical fixed identities that stay unavailable even when one invocation
  * receives broad external-filesystem authority.
  */
-export function resolveFixedDangerousPathIdentitiesV1(input: {
+export function resolveFixedDangerousPathIdentities(input: {
   workspace: string;
   home?: string;
-}): FixedDangerousPathIdentityV1[] {
+}): FixedDangerousPathIdentity[] {
   const home = resolve(input.home ?? homedir());
   const workspace = resolve(input.workspace);
-  const identities: FixedDangerousPathIdentityV1[] = [];
+  const identities: FixedDangerousPathIdentity[] = [];
   const push = (
     path: string,
-    kind: FixedDangerousPathIdentityV1['kind'],
-    access: FixedDangerousPathIdentityV1['access'] = 'read_write',
+    kind: FixedDangerousPathIdentity['kind'],
+    access: FixedDangerousPathIdentity['access'] = 'read_write',
   ) => {
     identities.push({ path: resolve(path), kind, access });
     if (existsSync(path)) {
@@ -215,11 +215,11 @@ export function resolveFixedDangerousPathIdentitiesV1(input: {
     }
   };
 
-  for (const path of PROTECTED_WORKSPACE_DIRECTORIES_V1) {
+  for (const path of PROTECTED_WORKSPACE_DIRECTORIES_) {
     push(resolve(workspace, path), 'directory');
   }
-  for (const path of PROTECTED_WORKSPACE_FILES_V1) push(resolve(workspace, path), 'file');
-  for (const path of PROTECTED_WORKSPACE_FILE_PREFIXES_V1) {
+  for (const path of PROTECTED_WORKSPACE_FILES_) push(resolve(workspace, path), 'file');
+  for (const path of PROTECTED_WORKSPACE_FILE_PREFIXES_) {
     push(resolve(workspace, path), 'prefix');
   }
   for (const path of HOME_PROTECTED_DIRECTORIES) push(resolve(home, path), 'directory');
@@ -232,7 +232,7 @@ export function resolveFixedDangerousPathIdentitiesV1(input: {
     for (const path of UNIX_PROTECTED_FILES) push(path, 'file', 'write_only');
   }
 
-  const unique = new Map<string, FixedDangerousPathIdentityV1>();
+  const unique = new Map<string, FixedDangerousPathIdentity>();
   for (const identity of identities) {
     const key = `${process.platform === 'win32' ? identity.path.toLowerCase() : identity.path}\0${identity.kind}\0${identity.access}`;
     unique.set(key, identity);
@@ -241,7 +241,7 @@ export function resolveFixedDangerousPathIdentitiesV1(input: {
 }
 
 /** Resolve aliases before applying fixed-path policy to built-in file tools. */
-export function checkDangerousCanonicalPathV1(value: string, workspace: string): string | null {
+export function checkDangerousCanonicalPath(value: string, workspace: string): string | null {
   try {
     const normalized = msys2ToWindowsPath(value);
     const expanded =
@@ -253,7 +253,7 @@ export function checkDangerousCanonicalPathV1(value: string, workspace: string):
             ? normalized
             : resolve(workspace, normalized);
     const candidate = canonicalPathForComparison(expanded);
-    for (const identity of resolveFixedDangerousPathIdentitiesV1({ workspace })) {
+    for (const identity of resolveFixedDangerousPathIdentities({ workspace })) {
       const protectedPath = canonicalPathForComparison(identity.path);
       const rel = relative(protectedPath, candidate);
       const same = rel === '';

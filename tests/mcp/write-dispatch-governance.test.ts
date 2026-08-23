@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import type { McpWriteDispatchGuardV1, McpWriteDispatchRequestV1 } from '@kite/builtin-runtime/mcp';
+import type { McpWriteDispatchGuard, McpWriteDispatchRequest } from '@kite/builtin-runtime/mcp';
 import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
@@ -26,7 +26,7 @@ describe('MCP write dispatch governance integration', () => {
     await expect(
       manager.callTool('fixture', 'write_fixture', { value: 'secret-free' }),
     ).rejects.toMatchObject({
-      name: 'McpWriteGovernanceErrorV1',
+      name: 'McpWriteGovernanceError',
       reasonCode: 'production_write_guard_unconfigured',
     });
     expect(providerCalls).toBe(0);
@@ -34,9 +34,9 @@ describe('MCP write dispatch governance integration', () => {
 
   test('persists admission before dispatch and records only a digest after success', async () => {
     const order: string[] = [];
-    const requests: McpWriteDispatchRequestV1[] = [];
+    const requests: McpWriteDispatchRequest[] = [];
     const outcomes: Array<{ outcome: string; providerReceiptDigest: string | null }> = [];
-    const guard: McpWriteDispatchGuardV1 = {
+    const guard: McpWriteDispatchGuard = {
       async beforeDispatch(request) {
         order.push('intent');
         requests.push(request);
@@ -82,7 +82,7 @@ describe('MCP write dispatch governance integration', () => {
 
   test('records an unknown external outcome and fails closed when receipt persistence fails', async () => {
     const outcomes: string[] = [];
-    const guard: McpWriteDispatchGuardV1 = {
+    const guard: McpWriteDispatchGuard = {
       async beforeDispatch() {
         return {
           admitted: true,
@@ -106,7 +106,7 @@ describe('MCP write dispatch governance integration', () => {
     await connect(manager);
 
     await expect(callGovernedWrite(manager, {})).rejects.toMatchObject({
-      name: 'McpWriteGovernanceErrorV1',
+      name: 'McpWriteGovernanceError',
       reasonCode: 'write_receipt_persistence_failed',
     });
     expect(outcomes).toEqual(['unknown']);
@@ -114,7 +114,7 @@ describe('MCP write dispatch governance integration', () => {
 
   test('records protocol-level tool errors as unknown external outcomes', async () => {
     const outcomes: string[] = [];
-    const guard: McpWriteDispatchGuardV1 = {
+    const guard: McpWriteDispatchGuard = {
       async beforeDispatch() {
         return {
           admitted: true,
@@ -140,7 +140,7 @@ describe('MCP write dispatch governance integration', () => {
 
   test('blocks before provider dispatch when required invocation facts are absent', async () => {
     let providerCalls = 0;
-    const guard: McpWriteDispatchGuardV1 = {
+    const guard: McpWriteDispatchGuard = {
       async beforeDispatch() {
         throw new Error('must not be reached');
       },
@@ -157,7 +157,7 @@ describe('MCP write dispatch governance integration', () => {
     await connect(manager);
 
     await expect(manager.callTool('fixture', 'write_fixture', {})).rejects.toMatchObject({
-      name: 'McpWriteGovernanceErrorV1',
+      name: 'McpWriteGovernanceError',
       reasonCode: 'write_governance_facts_missing',
     });
     expect(providerCalls).toBe(0);
@@ -171,7 +171,7 @@ function managerWithWriteTool(
   }>,
   options: {
     mcpWriteGovernanceRequired: true;
-    mcpWriteDispatchGuard?: McpWriteDispatchGuardV1;
+    mcpWriteDispatchGuard?: McpWriteDispatchGuard;
   },
 ): McpConnectionManager {
   const client = {

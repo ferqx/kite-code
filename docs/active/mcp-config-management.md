@@ -38,7 +38,7 @@ Watcher 只把文件事件视为 reload 提示，debounce 后重新读取全部�
 
 ## Schema 与 secret 边界
 
-Schema、Repository 与手工 JSONC 支持 stdio/HTTP transport 以及 `enabled`、`required`、`cwd`、timeout、args、env/header 配置。`enabled: false` 保留完整配置和环境引用，但不连接、不发布未来 capability。默认关闭的 `mcpProviderActionV1` 开启后，`required` 进入 Runtime 首次模型调用前的持久准入门禁；不可用 Provider 必须 Retry、当前 session waiver 或 Cancel Run。该语义不改变配置、连接状态或 capability 可见性，`/mcp` 也不展示该字段。
+Schema、Repository 与手工 JSONC 支持 stdio/HTTP transport 以及 `enabled`、`required`、`cwd`、timeout、args、env/header 配置。`enabled: false` 保留完整配置和环境引用，但不连接、不发布未来 capability。默认关闭的 `mcpProviderAction` 开启后，`required` 进入 Runtime 首次模型调用前的持久准入门禁；不可用 Provider 必须 Retry、当前 session waiver 或 Cancel Run。该语义不改变配置、连接状态或 capability 可见性，`/mcp` 也不展示该字段。
 
 Tool 可见性按以下顺序解析：
 

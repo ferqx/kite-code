@@ -1,10 +1,10 @@
-export const BROKERED_GIT_FEATURE_REVISION_V1 = 'brokered-git-r1' as const;
-export const GIT_BROKER_REVISION_V1 = 'git-broker-v1' as const;
-export const GIT_OPERATION_SCHEMA_REVISION_V1 = 'git-operation-schema-v1' as const;
+export const BROKERED_GIT_FEATURE_REVISION_ = 'brokered-git-r1' as const;
+export const GIT_BROKER_REVISION_ = 'git-broker-v1' as const;
+export const GIT_OPERATION_SCHEMA_REVISION_ = 'git-operation-schema-v1' as const;
 
-export type GitInspectOperationV1 = 'status' | 'diff' | 'log' | 'branch_list';
+export type GitInspectOperation = 'status' | 'diff' | 'log' | 'branch_list';
 
-export type GitBrokerFailureCodeV1 =
+export type GitBrokerFailureCode =
   | 'sandbox_capability_missing'
   | 'protected_path_denied'
   | 'git_operation_unsupported'
@@ -18,17 +18,17 @@ export type GitBrokerFailureCodeV1 =
   | 'process_failed'
   | 'receipt_invalid';
 
-export interface GitCapabilityEvidenceV1 {
-  featureRevision: typeof BROKERED_GIT_FEATURE_REVISION_V1;
-  brokerRevision: typeof GIT_BROKER_REVISION_V1;
-  operationSchemaRevision: typeof GIT_OPERATION_SCHEMA_REVISION_V1;
+export interface GitCapabilityEvidence {
+  featureRevision: typeof BROKERED_GIT_FEATURE_REVISION_;
+  brokerRevision: typeof GIT_BROKER_REVISION_;
+  operationSchemaRevision: typeof GIT_OPERATION_SCHEMA_REVISION_;
   repositoryBinding: string;
   executableIdentity: string;
   nativeDenyEvidenceIdentity: string;
 }
 
-export interface GitShellDenyEvidenceV1 {
-  featureRevision: typeof BROKERED_GIT_FEATURE_REVISION_V1;
+export interface GitShellDenyEvidence {
+  featureRevision: typeof BROKERED_GIT_FEATURE_REVISION_;
   platform: 'darwin' | 'linux' | 'win32';
   backend: 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
   outcome: 'qualified' | 'excluded';
@@ -39,25 +39,25 @@ export interface GitShellDenyEvidenceV1 {
   protectedRulesDigest: string;
 }
 
-export interface GitInvocationReceiptV1 extends GitCapabilityEvidenceV1 {
+export interface GitInvocationReceipt extends GitCapabilityEvidence {
   invocationId: string;
-  operation: GitInspectOperationV1;
+  operation: GitInspectOperation;
   effect: 'git_inspect';
   startedAtMs: number;
   finishedAtMs: number;
   exitCode: number;
 }
 
-export interface GitBrokerResultV1 {
+export interface GitBrokerResult {
   ok: boolean;
   output: string;
-  failureCode?: GitBrokerFailureCodeV1;
+  failureCode?: GitBrokerFailureCode;
   nextCapability?: 'git_inspect';
-  receipt?: GitInvocationReceiptV1;
+  receipt?: GitInvocationReceipt;
 }
 
-export interface GitInspectRequestV1 {
-  operation: GitInspectOperationV1;
+export interface GitInspectRequest {
+  operation: GitInspectOperation;
   paths?: readonly string[];
   revision?: string;
   maxRecords?: number;

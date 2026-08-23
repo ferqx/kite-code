@@ -1,23 +1,23 @@
 import { createHash } from 'node:crypto';
 import {
-  type CanonicalJsonObjectV1,
-  type CanonicalJsonValueV1,
-  type CanonicalModelMessageV1,
-  type CanonicalProviderOptionsV1,
-  type CanonicalToolDeclarationV1,
-  MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1,
-  MODEL_SURFACE_SCHEMA_V1,
-  type ModelInvocationPurposeV1,
-  type ModelProviderDispatchPurposeV1,
-  type ModelSurfaceV1,
-  type ResolvedModelCapabilitiesValueV1,
-  type Sha256DigestV1,
+  type CanonicalJsonObject,
+  type CanonicalJsonValue,
+  type CanonicalModelMessage,
+  type CanonicalProviderOptions,
+  type CanonicalToolDeclaration,
+  MODEL_PURPOSE_TO_PROVIDER_DISPATCH_,
+  MODEL_SURFACE_SCHEMA_,
+  type ModelInvocationPurpose,
+  type ModelProviderDispatchPurpose,
+  type ModelSurface,
+  type ResolvedModelCapabilitiesValue,
+  type Sha256Digest,
 } from '@kite/runtime-spi';
 import type { ToolSet } from 'ai';
-import type { ModelRuntimeConfigV1 } from './config';
+import type { ModelRuntimeConfig } from './config';
 import {
-  computeProviderEndpointIdentityDigestV1,
-  providerRouteIdentityFromModelConfigV1,
+  computeProviderEndpointIdentityDigest,
+  providerRouteIdentityFromModelConfig,
 } from './config';
 import type { ModelProviderOptions, SupportedChatModel } from './factory';
 import {
@@ -32,10 +32,10 @@ import {
 import type { ResolvedModelCapabilities } from './model-capabilities';
 import { resolveModelCapabilities } from './model-capabilities';
 import {
-  canonicalModelJsonV1,
-  computeCanonicalProviderOptionsDigestV1,
-  computeModelSurfaceDigestV1,
-  computeResolvedModelCapabilitiesDigestV1,
+  canonicalModelJson,
+  computeCanonicalProviderOptionsDigest,
+  computeModelSurfaceDigest,
+  computeResolvedModelCapabilitiesDigest,
 } from './surface-canonicalizer';
 import { countTokens } from './token-counter';
 
@@ -48,17 +48,17 @@ export class ModelSurfaceCompilationError extends Error {
   }
 }
 
-export interface CompiledModelSurfaceV1 {
+export interface CompiledModelSurface {
   /** Deep-frozen, canonical clone. This is the only request object admitted and dispatched. */
-  surface: ModelSurfaceV1;
-  surfaceDigest: Sha256DigestV1;
-  providerDispatchPurpose: ModelProviderDispatchPurposeV1;
+  surface: ModelSurface;
+  surfaceDigest: Sha256Digest;
+  providerDispatchPurpose: ModelProviderDispatchPurpose;
   estimatedInputTokens: number;
 }
 
-export function compileModelSurfaceV1(input: {
-  purpose: ModelInvocationPurposeV1;
-  config: ModelRuntimeConfigV1;
+export function compileModelSurface(input: {
+  purpose: ModelInvocationPurpose;
+  config: ModelRuntimeConfig;
   model: SupportedChatModel;
   messages: readonly BaseMessage[];
   tools: ToolSet;
@@ -67,7 +67,7 @@ export function compileModelSurfaceV1(input: {
   transport?: 'stream' | 'generate';
   /** Existing projection estimator result, bound to this frozen compilation. */
   estimatedInputTokens?: number;
-}): CompiledModelSurfaceV1 {
+}): CompiledModelSurface {
   const canonicalMessages = input.messages.map((message, index) => compileMessage(message, index));
   const system = canonicalMessages
     .filter((entry): entry is { system: string } => 'system' in entry)
@@ -87,8 +87,8 @@ export function compileModelSurfaceV1(input: {
   });
   const capabilities = canonicalCapabilities(resolved);
   const providerOptions = canonicalProviderOptions(input.providerOptions);
-  const routeIdentity = providerRouteIdentityFromModelConfigV1(input.config);
-  const routeFingerprint = computeProviderEndpointIdentityDigestV1(routeIdentity) as Sha256DigestV1;
+  const routeIdentity = providerRouteIdentityFromModelConfig(input.config);
+  const routeFingerprint = computeProviderEndpointIdentityDigest(routeIdentity) as Sha256Digest;
   const replayOwnerFingerprint = privateDigest('kite.model-adapter-replay-owner.v1', {
     adapterKind: input.config.providerType,
     adapterProtocolVersion: ADAPTER_PROTOCOL_VERSION,
@@ -96,8 +96,8 @@ export function compileModelSurfaceV1(input: {
     routeFingerprint,
   });
   const maxOutputTokens = positiveIntegerOrNull(input.maxOutputTokens ?? resolved.maxOutputTokens);
-  const surface: ModelSurfaceV1 = {
-    schema: MODEL_SURFACE_SCHEMA_V1,
+  const surface: ModelSurface = {
+    schema: MODEL_SURFACE_SCHEMA_,
     purpose: input.purpose,
     route: {
       providerKind: input.config.providerType,
@@ -121,21 +121,21 @@ export function compileModelSurfaceV1(input: {
       sdkRetry: { maxRetries: 0 },
       resolvedCapabilities: {
         value: capabilities,
-        digest: computeResolvedModelCapabilitiesDigestV1(capabilities),
+        digest: computeResolvedModelCapabilitiesDigest(capabilities),
       },
       providerOptions,
     },
   };
-  const canonicalClone = JSON.parse(canonicalModelJsonV1(surface)) as ModelSurfaceV1;
+  const canonicalClone = JSON.parse(canonicalModelJson(surface)) as ModelSurface;
   const frozen = deepFreeze(canonicalClone);
-  const surfaceDigest = computeModelSurfaceDigestV1(frozen);
+  const surfaceDigest = computeModelSurfaceDigest(frozen);
   const estimatedInputTokens =
     input.estimatedInputTokens != null
       ? requirePositiveInteger(input.estimatedInputTokens, 'estimatedInputTokens')
       : Math.max(
           1,
           countTokens(
-            canonicalModelJsonV1({
+            canonicalModelJson({
               system: frozen.request.system,
               messages: frozen.request.messages,
               tools: frozen.request.tools,
@@ -145,12 +145,12 @@ export function compileModelSurfaceV1(input: {
   return Object.freeze({
     surface: frozen,
     surfaceDigest,
-    providerDispatchPurpose: MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1[input.purpose],
+    providerDispatchPurpose: MODEL_PURPOSE_TO_PROVIDER_DISPATCH_[input.purpose],
     estimatedInputTokens,
   });
 }
 
-type CompiledMessage = { system: string } | { message: CanonicalModelMessageV1 };
+type CompiledMessage = { system: string } | { message: CanonicalModelMessage };
 
 function compileMessage(message: BaseMessage, index: number): CompiledMessage {
   const path = `messages[${index}]`;
@@ -182,8 +182,8 @@ function compileTextContent(content: BaseMessage['content'], path: string): stri
     .join('');
 }
 
-function compileAssistantMessage(message: AIMessage, path: string): CanonicalModelMessageV1 {
-  const content: Extract<CanonicalModelMessageV1, { role: 'assistant' }>['content'][number][] = [];
+function compileAssistantMessage(message: AIMessage, path: string): CanonicalModelMessage {
+  const content: Extract<CanonicalModelMessage, { role: 'assistant' }>['content'][number][] = [];
   if (typeof message.content === 'string') {
     if (message.content) content.push({ type: 'text', text: message.content });
   } else if (Array.isArray(message.content)) {
@@ -247,11 +247,11 @@ function compileAssistantMessage(message: AIMessage, path: string): CanonicalMod
   return { role: 'assistant', content };
 }
 
-function compileToolMessage(message: ToolMessage, path: string): CanonicalModelMessageV1 {
+function compileToolMessage(message: ToolMessage, path: string): CanonicalModelMessage {
   const output =
     typeof message.content === 'string'
       ? message.content
-      : canonicalModelJsonV1(canonicalJsonValue(message.content, `${path}.content`));
+      : canonicalModelJson(canonicalJsonValue(message.content, `${path}.content`));
   return {
     role: 'tool',
     content: [
@@ -265,7 +265,7 @@ function compileToolMessage(message: ToolMessage, path: string): CanonicalModelM
   };
 }
 
-function compileTools(tools: ToolSet): CanonicalToolDeclarationV1[] {
+function compileTools(tools: ToolSet): CanonicalToolDeclaration[] {
   return Object.entries(tools).map(([name, definition], index) => {
     const path = `tools[${index}]`;
     if (!definition || typeof definition !== 'object') {
@@ -287,7 +287,7 @@ function compileTools(tools: ToolSet): CanonicalToolDeclarationV1[] {
   });
 }
 
-function canonicalProviderToolSchema(value: unknown, path: string): CanonicalJsonObjectV1 {
+function canonicalProviderToolSchema(value: unknown, path: string): CanonicalJsonObject {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ModelSurfaceCompilationError(`${path} must be a JSON object.`);
   }
@@ -310,16 +310,16 @@ function canonicalProviderToolSchema(value: unknown, path: string): CanonicalJso
 
 function canonicalProviderOptions(
   options: ModelProviderOptions | undefined,
-): CanonicalProviderOptionsV1 {
+): CanonicalProviderOptions {
   const value = canonicalJsonObject(options ?? {}, 'providerOptions');
   return {
     kind: 'inline',
     value,
-    digest: computeCanonicalProviderOptionsDigestV1(value),
+    digest: computeCanonicalProviderOptionsDigest(value),
   };
 }
 
-function canonicalCapabilities(value: ResolvedModelCapabilities): ResolvedModelCapabilitiesValueV1 {
+function canonicalCapabilities(value: ResolvedModelCapabilities): ResolvedModelCapabilitiesValue {
   return {
     providerName: value.providerName,
     modelName: value.modelName,
@@ -340,24 +340,24 @@ function canonicalCapabilities(value: ResolvedModelCapabilities): ResolvedModelC
   };
 }
 
-function canonicalJsonObject(value: unknown, path: string): CanonicalJsonObjectV1 {
+function canonicalJsonObject(value: unknown, path: string): CanonicalJsonObject {
   const canonical = canonicalJsonValue(value, path);
   if (!canonical || typeof canonical !== 'object' || Array.isArray(canonical)) {
     throw new ModelSurfaceCompilationError(`${path} must be a JSON object.`);
   }
-  return canonical as CanonicalJsonObjectV1;
+  return canonical as CanonicalJsonObject;
 }
 
-function canonicalJsonValue(value: unknown, path: string): CanonicalJsonValueV1 {
+function canonicalJsonValue(value: unknown, path: string): CanonicalJsonValue {
   let text: string;
   try {
-    text = canonicalModelJsonV1(value);
+    text = canonicalModelJson(value);
   } catch (error) {
     throw new ModelSurfaceCompilationError(
       `${path} is not canonical JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  return JSON.parse(text) as CanonicalJsonValueV1;
+  return JSON.parse(text) as CanonicalJsonValue;
 }
 
 function assertExactPlainObject(
@@ -400,12 +400,12 @@ function positiveIntegerOrNull(value: number | undefined): number | null {
   return value == null ? null : requirePositiveInteger(Math.floor(value), 'maxOutputTokens');
 }
 
-function privateDigest(domain: string, value: unknown): Sha256DigestV1 {
+function privateDigest(domain: string, value: unknown): Sha256Digest {
   return `sha256:${createHash('sha256')
     .update('kite-code-private-model-evidence-v1\0')
     .update(domain)
     .update('\0')
-    .update(canonicalModelJsonV1(value))
+    .update(canonicalModelJson(value))
     .digest('hex')}`;
 }
 

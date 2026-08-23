@@ -8,29 +8,30 @@
  * persistence and presentation work.
  */
 
+import type { PlanCompletionBlocker } from './completion';
 import type { PlanDocument, PlanningState, PlanStep } from './state';
 
-export type PlanCommandPhaseV1 = 'planning' | 'building';
+export type PlanCommandPhase = 'planning' | 'building';
 
-export interface PlanIdentityInputV1 {
+export interface PlanIdentityInput {
   readonly plan_id?: string;
   readonly version?: number;
   readonly structural_digest?: string;
 }
 
-export interface PlanCommandStateFactsV1 {
+export interface PlanCommandStateFacts {
   /** Absent means that no active Task owns the command. */
   readonly taskId?: string;
   readonly planning: PlanningState;
-  readonly phase: PlanCommandPhaseV1;
+  readonly phase: PlanCommandPhase;
   readonly sideEffectsStarted: boolean;
 }
 
-export interface ReadPlanCommandV1 extends PlanIdentityInputV1 {
+export interface ReadPlanCommand extends PlanIdentityInput {
   readonly plan_id: string;
 }
 
-export interface WritePlanCommandV1 extends PlanIdentityInputV1 {
+export interface WritePlanCommand extends PlanIdentityInput {
   readonly title?: string;
   readonly body_markdown?: string;
   readonly steps?: readonly { readonly id: string; readonly title: string }[];
@@ -39,7 +40,7 @@ export interface WritePlanCommandV1 extends PlanIdentityInputV1 {
   readonly action?: 'save' | 'submit';
 }
 
-export interface UpdatePlanCommandV1 extends PlanIdentityInputV1 {
+export interface UpdatePlanCommand extends PlanIdentityInput {
   readonly updates: readonly {
     readonly step_id: string;
     readonly status: PlanStep['status'];
@@ -49,30 +50,24 @@ export interface UpdatePlanCommandV1 extends PlanIdentityInputV1 {
   readonly complete_plan?: boolean;
 }
 
-export type PlanCompletionBlockerV1 =
-  | 'plan_verification_required'
-  | 'plan_effect_evidence_required'
-  | 'plan_unresolved_blocker'
-  | 'plan_skipped_reason_required';
-
-export interface PlanDecisionRejectedV1 {
+export interface PlanDecisionRejected {
   readonly accepted: false;
-  readonly code: PlanDecisionCodeV1;
-  /** Stable legacy diagnostic retained for the RMV1 compatibility adapter. */
+  readonly code: PlanDecisionCode;
+  /** Stable diagnostic for command adapters. */
   readonly diagnostic: string;
 }
 
-export interface PlanDecisionAcceptedV1<Mode extends string = string> {
+export interface PlanDecisionAccepted<Mode extends string = string> {
   readonly accepted: true;
   readonly mode: Mode;
   readonly code: 'admitted';
 }
 
-export type PlanDecisionV1<Mode extends string = string> =
-  | PlanDecisionAcceptedV1<Mode>
-  | PlanDecisionRejectedV1;
+export type PlanDecision<Mode extends string = string> =
+  | PlanDecisionAccepted<Mode>
+  | PlanDecisionRejected;
 
-export type PlanDecisionCodeV1 =
+export type PlanDecisionCode =
   | 'task_required'
   | 'read_plan_identity_mismatch'
   | 'read_plan_structural_digest_mismatch'
@@ -89,24 +84,22 @@ export type PlanDecisionCodeV1 =
   | 'plan_terminal_step_rollback'
   | 'plan_pending_steps'
   | 'plan_all_steps_skipped'
-  | PlanCompletionBlockerV1;
+  | PlanCompletionBlocker;
 
-export type ReadPlanDecisionV1 = PlanDecisionV1<'read_artifact'>;
-export type WritePlanDecisionModeV1 =
+export type ReadPlanDecision = PlanDecision<'read_artifact'>;
+export type WritePlanDecisionMode =
   | 'auto_enter'
   | 'draft_save'
   | 'replan_save'
   | 'replanning_save'
   | 'submit_existing';
-export type WritePlanDecisionV1 =
-  | PlanDecisionAcceptedV1<WritePlanDecisionModeV1>
-  | PlanDecisionRejectedV1;
-export type UpdatePlanDecisionModeV1 = 'progress_update' | 'complete';
-export type UpdatePlanDecisionV1 =
-  | (PlanDecisionAcceptedV1<UpdatePlanDecisionModeV1> & {
+export type WritePlanDecision = PlanDecisionAccepted<WritePlanDecisionMode> | PlanDecisionRejected;
+export type UpdatePlanDecisionMode = 'progress_update' | 'complete';
+export type UpdatePlanDecision =
+  | (PlanDecisionAccepted<UpdatePlanDecisionMode> & {
       readonly nextSteps: readonly PlanStep[];
     })
-  | PlanDecisionRejectedV1;
+  | PlanDecisionRejected;
 
 function documentForPlanning(planning: PlanningState): PlanDocument | undefined {
   switch (planning.kind) {
@@ -132,7 +125,7 @@ function activeWriteDocument(planning: PlanningState): PlanDocument | undefined 
   }
 }
 
-function phaseForPlanning(planning: PlanningState): PlanCommandPhaseV1 {
+function phaseForPlanning(planning: PlanningState): PlanCommandPhase {
   switch (planning.kind) {
     case 'planning_empty':
     case 'planning_draft':
@@ -144,14 +137,14 @@ function phaseForPlanning(planning: PlanningState): PlanCommandPhaseV1 {
   }
 }
 
-function rejected(code: PlanDecisionCodeV1, diagnostic: string): PlanDecisionRejectedV1 {
+function rejected(code: PlanDecisionCode, diagnostic: string): PlanDecisionRejected {
   return { accepted: false, code, diagnostic };
 }
 
 function identityError(
-  input: PlanIdentityInputV1,
+  input: PlanIdentityInput,
   document: PlanDocument,
-): PlanDecisionRejectedV1 | null {
+): PlanDecisionRejected | null {
   if (
     input.plan_id === undefined ||
     input.version === undefined ||
@@ -178,10 +171,10 @@ function identityError(
 }
 
 /** Admit a read_plan request. Artifact lookup remains outside the Kernel. */
-export function decideReadPlanCommandV1(
-  facts: PlanCommandStateFactsV1,
-  command: ReadPlanCommandV1,
-): ReadPlanDecisionV1 {
+export function decideReadPlanCommand(
+  facts: PlanCommandStateFacts,
+  command: ReadPlanCommand,
+): ReadPlanDecision {
   if (facts.taskId === undefined) {
     return rejected('task_required', 'No active Task owns this Plan.');
   }
@@ -210,10 +203,10 @@ export function decideReadPlanCommandV1(
  * the App/Builtin adapter may execute; it never writes an Artifact or emits a
  * planning event.
  */
-export function decideWritePlanCommandV1(
-  facts: PlanCommandStateFactsV1,
-  command: WritePlanCommandV1,
-): WritePlanDecisionV1 {
+export function decideWritePlanCommand(
+  facts: PlanCommandStateFacts,
+  command: WritePlanCommand,
+): WritePlanDecision {
   if (facts.taskId === undefined) {
     return rejected('task_required', 'write_plan requires an active Task.');
   }
@@ -293,7 +286,7 @@ export function decideWritePlanCommandV1(
     );
   }
 
-  const mode: WritePlanDecisionModeV1 = autoEnter
+  const mode: WritePlanDecisionMode = autoEnter
     ? 'auto_enter'
     : draftWrite
       ? 'draft_save'
@@ -310,12 +303,12 @@ export function decideWritePlanCommandV1(
  * supplied as canonical Kernel facts; this function never inspects a Host
  * receipt, Artifact, or provider result itself.
  */
-export function decideUpdatePlanCommandV1(
-  facts: PlanCommandStateFactsV1 & {
-    readonly completionBlocker?: PlanCompletionBlockerV1 | null;
+export function decideUpdatePlanCommand(
+  facts: PlanCommandStateFacts & {
+    readonly completionBlocker?: PlanCompletionBlocker | null;
   },
-  command: UpdatePlanCommandV1,
-): UpdatePlanDecisionV1 {
+  command: UpdatePlanCommand,
+): UpdatePlanDecision {
   if (facts.taskId === undefined) {
     return rejected('task_required', 'No active Task owns this Plan.');
   }
@@ -388,6 +381,6 @@ export function decideUpdatePlanCommandV1(
 }
 
 /** State phase selector kept local so the decision remains Kernel-owned. */
-export function planCommandPhaseV1(planning: PlanningState): PlanCommandPhaseV1 {
+export function planCommandPhase(planning: PlanningState): PlanCommandPhase {
   return phaseForPlanning(planning);
 }

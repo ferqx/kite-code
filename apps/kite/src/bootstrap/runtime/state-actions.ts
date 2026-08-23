@@ -1,10 +1,10 @@
 import {
-  runtimeHostStateApplyApprovalGrantV1 as applyApprovalGrant,
-  assertRuntimeAuthorizationElevationV1 as assertAuthorizationElevation,
-  runtimeHostStateActivePlanningV1 as getActivePlanning,
-  runtimeHostStateActiveTaskV1 as getActiveTask,
-  runtimeHostStateInteractionToolCallV1 as interactionToolCall,
-  runtimeHostStateToolCallBelongsToCurrentWorkV1 as toolCallBelongsToCurrentWork,
+  runtimeHostStateApplyApprovalGrant as applyApprovalGrant,
+  assertRuntimeAuthorizationElevation as assertAuthorizationElevation,
+  runtimeHostStateActivePlanning as getActivePlanning,
+  runtimeHostStateActiveTask as getActiveTask,
+  runtimeHostStateInteractionToolCall as interactionToolCall,
+  runtimeHostStateToolCallBelongsToCurrentWork as toolCallBelongsToCurrentWork,
 } from '@kite/runtime-host';
 import { classifyFailure } from './failures';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';

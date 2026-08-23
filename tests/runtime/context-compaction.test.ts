@@ -12,26 +12,26 @@ import {
   ContextCompactionValidationError,
   type ContextProjectionEnvironment,
   digestProjectionEnvironment,
-  executeBuiltinContextCompactionV1,
+  executeBuiltinContextCompaction,
   expectedCompactionSourceDigest,
   ProviderDataAdmissionError,
   serializeToolDescriptors,
 } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostStateInitialStateV1,
-  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostStateInitialState,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
 } from '@kite/runtime-host';
 import { executeContextCompaction } from '#app/bootstrap/runtime/context-compaction-effect';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
   return reduceCanonicalRuntimeState(
     state,
-    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+    normalizeCurrentToolOutcomeEvent(event, state, '2026-08-11T00:00:00.000Z'),
   );
 }
 
@@ -50,7 +50,7 @@ function summary(sourceDigest: string, firstMessageId = 'message-1', lastMessage
 }
 
 function requestedState() {
-  const initial = createRuntimeHostStateInitialStateV1({
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'compaction',
     userId: 'user',
@@ -244,7 +244,7 @@ describe('eventized context compaction', () => {
             recordFailed: () => coreReports.push('failed'),
           },
         });
-        const builtinEvents = await executeBuiltinContextCompactionV1({
+        const builtinEvents = await executeBuiltinContextCompaction({
           state: builtinState,
           compactionId: 'compact-1',
           compact: scenario.compact?.(builtinState),
@@ -431,7 +431,7 @@ describe('eventized context compaction', () => {
     expect(failed.context.pendingCompaction).toBeUndefined();
     expect(failed.context.lastFailure?.errorKind).toBe('invalid_candidate');
 
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: state,

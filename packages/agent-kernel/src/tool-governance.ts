@@ -9,20 +9,20 @@
 
 import { assertAuthorizationElevation } from './authorization';
 
-export const TOOL_GOVERNANCE_FACTS_SCHEMA_V1 = 'kite.tool-governance-facts.v1' as const;
+export const TOOL_GOVERNANCE_FACTS_SCHEMA_ = 'kite.tool-governance-facts.v1' as const;
 
 const MAX_IDENTITY_LENGTH = 256;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 
-export type ToolGovernanceInteractionModeV1 = 'auto' | 'accept_edits' | 'full';
-export type ToolGovernanceAuthorizationModeV1 = 'default' | 'full_access';
-export type ToolGovernanceAuthorizationSourceV1 = 'user' | 'config' | 'test' | 'system';
-export type ToolGovernancePhaseV1 = 'planning' | 'building';
+export type ToolGovernanceInteractionMode = 'auto' | 'accept_edits' | 'full';
+export type ToolGovernanceAuthorizationMode = 'default' | 'full_access';
+export type ToolGovernanceAuthorizationSource = 'user' | 'config' | 'test' | 'system';
+export type ToolGovernancePhase = 'planning' | 'building';
 /** Compatibility type only; call status is no longer a context authority. */
-export type ToolGovernanceCallStatusV1 = 'queued' | 'approved';
-export type ToolGovernanceApprovalStatusV1 = 'queued' | 'approved';
-export type ToolGovernanceExecutionMechanismV1 = 'user_input' | 'shell' | 'other';
-export type ToolGovernanceRiskV1 =
+export type ToolGovernanceCallStatus = 'queued' | 'approved';
+export type ToolGovernanceApprovalStatus = 'queued' | 'approved';
+export type ToolGovernanceExecutionMechanism = 'user_input' | 'shell' | 'other';
+export type ToolGovernanceRisk =
   | 'read'
   | 'plan'
   | 'write_file'
@@ -32,10 +32,10 @@ export type ToolGovernanceRiskV1 =
   | 'vcs_mutation'
   | 'mcp'
   | 'unknown';
-export type ToolGovernanceGrantV1 = 'none' | 'approve_once' | 'same_command' | 'full_access';
-export type ToolGovernanceMinimumApprovalV1 = 'none' | 'auto_review' | 'user';
+export type ToolGovernanceGrant = 'none' | 'approve_once' | 'same_command' | 'full_access';
+export type ToolGovernanceMinimumApproval = 'none' | 'auto_review' | 'user';
 
-export interface ToolGovernanceEffectsV1 {
+export interface ToolGovernanceEffects {
   readonly network?: true;
   readonly externalRead?: true;
   readonly externalWrite?: true;
@@ -43,7 +43,7 @@ export interface ToolGovernanceEffectsV1 {
 }
 
 /** Exact invocation identity and digest facts captured for one proposal. */
-export interface ToolGovernanceInvocationFactV1 {
+export interface ToolGovernanceInvocationFact {
   readonly workspace: string;
   readonly threadId: string;
   readonly turnId: string;
@@ -69,19 +69,19 @@ export interface ToolGovernanceInvocationFactV1 {
 }
 
 /** Immutable operation policy facts compiled by Builtin. */
-export interface ToolGovernancePolicyFactV1 {
+export interface ToolGovernancePolicyFact {
   readonly operationId: string;
   readonly capabilityRevision: string;
   readonly parserRevision: string;
   readonly effectiveEffectsDigest: string;
-  readonly minimumApproval: ToolGovernanceMinimumApprovalV1;
+  readonly minimumApproval: ToolGovernanceMinimumApproval;
   readonly fullAccessMayBypassApproval: boolean;
   readonly sameCommandMayBypassApproval: boolean;
   readonly decision: 'allow' | 'ask' | 'deny';
   readonly allowed: boolean;
   readonly requiresApproval: boolean;
-  readonly risk: ToolGovernanceRiskV1;
-  readonly effects?: Readonly<ToolGovernanceEffectsV1>;
+  readonly risk: ToolGovernanceRisk;
+  readonly effects?: Readonly<ToolGovernanceEffects>;
   readonly reason: string;
   readonly userVisibleSummary: string;
   readonly expectedEffects: readonly string[];
@@ -94,80 +94,80 @@ export interface ToolGovernancePolicyFactV1 {
  * is intentionally separate from the full governance envelope so a private
  * continuation can carry only the identity needed to resume one blocked tool.
  */
-export interface ToolApprovalBindingFactsV1 {
-  readonly invocation: Readonly<ToolGovernanceInvocationFactV1>;
-  readonly policy: Readonly<ToolGovernancePolicyFactV1>;
+export interface ToolApprovalBindingFacts {
+  readonly invocation: Readonly<ToolGovernanceInvocationFact>;
+  readonly policy: Readonly<ToolGovernancePolicyFact>;
 }
 
-export interface ToolGovernanceApprovalFactV1 {
-  readonly status: ToolGovernanceApprovalStatusV1;
-  readonly grant: ToolGovernanceGrantV1;
+export interface ToolGovernanceApprovalFact {
+  readonly status: ToolGovernanceApprovalStatus;
+  readonly grant: ToolGovernanceGrant;
   readonly approvedToolCallId: string | null;
   readonly approvalBindingDigest: string | null;
 }
 
-export interface ToolGovernanceSameCommandGrantFactV1 {
+export interface ToolGovernanceSameCommandGrantFact {
   readonly workspace: string;
   readonly threadId: string;
   readonly commandDigest: string;
-  readonly source: ToolGovernanceAuthorizationSourceV1;
+  readonly source: ToolGovernanceAuthorizationSource;
   readonly grantedAt: number;
   readonly expiresAt?: number;
 }
 
 /** Dynamic MCP policy is intentionally separate from Builtin policy. */
-export interface ToolGovernanceDynamicMcpFactV1 {
-  readonly minimumApproval: ToolGovernanceMinimumApprovalV1;
+export interface ToolGovernanceDynamicMcpFact {
+  readonly minimumApproval: ToolGovernanceMinimumApproval;
   readonly readOnly: boolean;
 }
 
 /** Compatibility alias for existing package exports; the field is dynamicMcp. */
-export type ToolGovernanceMcpFactV1 = ToolGovernanceDynamicMcpFactV1;
+export type ToolGovernanceMcpFact = ToolGovernanceDynamicMcpFact;
 
 /** Nested Skill facts may only tighten Builtin activation. */
-export interface ToolGovernanceNestedSkillFactV1 {
+export interface ToolGovernanceNestedSkillFact {
   readonly decision: 'allow' | 'ask' | 'deny';
-  readonly minimumApproval: ToolGovernanceMinimumApprovalV1;
+  readonly minimumApproval: ToolGovernanceMinimumApproval;
 }
 
-export interface ToolGovernanceGateFactsV1 {
+export interface ToolGovernanceGateFacts {
   readonly recoveryAdmission: 'admitted' | 'blocked';
   readonly boundedCancellation: 'admitted' | 'blocked';
   readonly executionBoundary: 'admitted' | 'blocked';
   readonly skillCapabilityCeiling: 'admitted' | 'blocked';
 }
 
-export interface ToolGovernanceContextFactsV1 {
-  readonly phase: ToolGovernancePhaseV1;
-  readonly interactionMode: ToolGovernanceInteractionModeV1;
-  readonly authorizationMode: ToolGovernanceAuthorizationModeV1;
+export interface ToolGovernanceContextFacts {
+  readonly phase: ToolGovernancePhase;
+  readonly interactionMode: ToolGovernanceInteractionMode;
+  readonly authorizationMode: ToolGovernanceAuthorizationMode;
   readonly sandboxAvailable: boolean;
   readonly circuitBreakerTripped: boolean;
-  readonly executionMechanism: ToolGovernanceExecutionMechanismV1;
-  readonly gates: Readonly<ToolGovernanceGateFactsV1>;
-  readonly authorizationSource?: ToolGovernanceAuthorizationSourceV1;
+  readonly executionMechanism: ToolGovernanceExecutionMechanism;
+  readonly gates: Readonly<ToolGovernanceGateFacts>;
+  readonly authorizationSource?: ToolGovernanceAuthorizationSource;
   readonly autoReview?: boolean;
   readonly loopMode?: boolean;
   /** Supplied observation time used only for same-command expiry checks. */
   readonly observedAt?: number;
 }
 
-export interface ToolGovernanceAdmissionFactsV1 {
+export interface ToolGovernanceAdmissionFacts {
   readonly freshness: 'current' | 'stale';
   readonly reservationRequired: boolean;
   readonly reservationIds: readonly string[];
 }
 
-export interface ToolGovernanceFactsV1 {
-  readonly schema: typeof TOOL_GOVERNANCE_FACTS_SCHEMA_V1;
-  readonly invocation: Readonly<ToolGovernanceInvocationFactV1>;
-  readonly policy: Readonly<ToolGovernancePolicyFactV1>;
-  readonly context: Readonly<ToolGovernanceContextFactsV1>;
-  readonly admission: Readonly<ToolGovernanceAdmissionFactsV1>;
-  readonly approval: Readonly<ToolGovernanceApprovalFactV1>;
-  readonly sameCommandGrant?: Readonly<ToolGovernanceSameCommandGrantFactV1>;
-  readonly dynamicMcp?: Readonly<ToolGovernanceDynamicMcpFactV1>;
-  readonly nestedSkill?: Readonly<ToolGovernanceNestedSkillFactV1>;
+export interface ToolGovernanceFacts {
+  readonly schema: typeof TOOL_GOVERNANCE_FACTS_SCHEMA_;
+  readonly invocation: Readonly<ToolGovernanceInvocationFact>;
+  readonly policy: Readonly<ToolGovernancePolicyFact>;
+  readonly context: Readonly<ToolGovernanceContextFacts>;
+  readonly admission: Readonly<ToolGovernanceAdmissionFacts>;
+  readonly approval: Readonly<ToolGovernanceApprovalFact>;
+  readonly sameCommandGrant?: Readonly<ToolGovernanceSameCommandGrantFact>;
+  readonly dynamicMcp?: Readonly<ToolGovernanceDynamicMcpFact>;
+  readonly nestedSkill?: Readonly<ToolGovernanceNestedSkillFact>;
 }
 
 /**
@@ -178,74 +178,74 @@ export interface ToolGovernanceFactsV1 {
  * command names that same subject; it must not normalize internal whitespace
  * or infer Shell semantics.
  */
-export function createToolGovernanceCommandDigestV1(command: string): string | null {
+export function createToolGovernanceCommandDigest(command: string): string | null {
   const canonicalCommand = command.trim();
-  return canonicalCommand.length === 0 ? null : sha256HexV1(stableSerializeV1(canonicalCommand));
+  return canonicalCommand.length === 0 ? null : sha256Hex(stableSerialize(canonicalCommand));
 }
 
-export type ToolGovernanceRejectFailureV1 =
+export type ToolGovernanceRejectFailure =
   | 'loop_exhausted'
   | 'mandatory_policy_unavailable'
   | 'policy_denied'
   | 'phase_deferred'
   | 'phase_denied';
 
-export type ToolGovernanceRejectCodeV1 =
+export type ToolGovernanceRejectCode =
   | 'invalid_facts'
   | 'authorization_elevation_denied'
   | 'approval_identity_mismatch'
   | 'admission_stale'
   | 'reservation_invalid';
 
-export type ToolGovernanceRejectDecisionV1 = {
+export type ToolGovernanceRejectDecision = {
   readonly kind: 'reject';
-  readonly failureKind: ToolGovernanceRejectFailureV1;
+  readonly failureKind: ToolGovernanceRejectFailure;
   readonly reason: string;
-  readonly code?: ToolGovernanceRejectCodeV1;
+  readonly code?: ToolGovernanceRejectCode;
 };
 
-export type ToolGovernanceDecisionV1 =
+export type ToolGovernanceDecision =
   | {
       readonly kind: 'allow';
       readonly authorizationKind: 'policy_allow' | 'approved_call';
-      readonly grantUsed: ToolGovernanceGrantV1;
+      readonly grantUsed: ToolGovernanceGrant;
       readonly reservationIds: readonly string[];
     }
-  | ToolGovernanceRejectDecisionV1
+  | ToolGovernanceRejectDecision
   | {
       readonly kind: 'request_approval';
-      readonly decision: Readonly<ToolGovernancePolicyFactV1>;
+      readonly decision: Readonly<ToolGovernancePolicyFact>;
     }
   | {
       readonly kind: 'request_auto_review';
-      readonly decision: Readonly<ToolGovernancePolicyFactV1>;
+      readonly decision: Readonly<ToolGovernancePolicyFact>;
     }
   | { readonly kind: 'request_user_input' };
 
-export type ToolGovernanceAuthorizationDecisionV1 =
+export type ToolGovernanceAuthorizationDecision =
   | {
       readonly kind: 'authorized';
       readonly authorizationKind: 'policy_allow' | 'approved_call';
-      readonly grantUsed: ToolGovernanceGrantV1;
+      readonly grantUsed: ToolGovernanceGrant;
     }
-  | ToolGovernanceRejectDecisionV1
+  | ToolGovernanceRejectDecision
   | {
       readonly kind: 'request_approval';
-      readonly decision: Readonly<ToolGovernancePolicyFactV1>;
+      readonly decision: Readonly<ToolGovernancePolicyFact>;
     }
   | {
       readonly kind: 'request_auto_review';
-      readonly decision: Readonly<ToolGovernancePolicyFactV1>;
+      readonly decision: Readonly<ToolGovernancePolicyFact>;
     }
   | { readonly kind: 'request_user_input' };
 
 /** Pure SHA-256 binding over stable invocation and policy identity fields. */
-export function createToolApprovalBindingDigestV1(
-  invocation: Readonly<ToolGovernanceInvocationFactV1>,
-  policy: Readonly<ToolGovernancePolicyFactV1>,
+export function createToolApprovalBindingDigest(
+  invocation: Readonly<ToolGovernanceInvocationFact>,
+  policy: Readonly<ToolGovernancePolicyFact>,
 ): string {
-  return sha256HexV1(
-    stableSerializeV1({
+  return sha256Hex(
+    stableSerialize({
       schema: 'kite.tool-approval-binding.v1',
       invocation,
       policy,
@@ -253,33 +253,33 @@ export function createToolApprovalBindingDigestV1(
   );
 }
 
-export function decideToolGovernanceV1(value: unknown): ToolGovernanceDecisionV1 {
-  if (!isValidToolGovernanceFactsV1(value)) {
+export function decideToolGovernance(value: unknown): ToolGovernanceDecision {
+  if (!isValidToolGovernanceFacts(value)) {
     return reject(
       'mandatory_policy_unavailable',
       'Tool governance facts are malformed.',
       'invalid_facts',
     );
   }
-  const authorization = authorizeValidToolGovernanceFactsV1(value);
-  return admitToolGovernanceV1(authorization, value.admission);
+  const authorization = authorizeValidToolGovernanceFacts(value);
+  return admitToolGovernance(authorization, value.admission);
 }
 
-export function authorizeToolGovernanceV1(value: unknown): ToolGovernanceAuthorizationDecisionV1 {
-  if (!isValidToolGovernanceFactsV1(value)) {
+export function authorizeToolGovernance(value: unknown): ToolGovernanceAuthorizationDecision {
+  if (!isValidToolGovernanceFacts(value)) {
     return reject(
       'mandatory_policy_unavailable',
       'Tool governance facts are malformed.',
       'invalid_facts',
     );
   }
-  return authorizeValidToolGovernanceFactsV1(value);
+  return authorizeValidToolGovernanceFacts(value);
 }
 
-export function admitToolGovernanceV1(
-  authorization: ToolGovernanceAuthorizationDecisionV1,
+export function admitToolGovernance(
+  authorization: ToolGovernanceAuthorizationDecision,
   admission: unknown,
-): ToolGovernanceDecisionV1 {
+): ToolGovernanceDecision {
   if (authorization.kind !== 'authorized') return authorization;
   if (!validAdmission(admission)) {
     return reject(
@@ -314,9 +314,9 @@ export function admitToolGovernanceV1(
   });
 }
 
-function authorizeValidToolGovernanceFactsV1(
-  facts: ToolGovernanceFactsV1,
-): ToolGovernanceAuthorizationDecisionV1 {
+function authorizeValidToolGovernanceFacts(
+  facts: ToolGovernanceFacts,
+): ToolGovernanceAuthorizationDecision {
   const { context, invocation, policy } = facts;
   const gates = context.gates;
 
@@ -496,7 +496,7 @@ function authorizeValidToolGovernanceFactsV1(
 }
 
 /** Runtime validation for the Host-to-Kernel canonical DTO boundary. */
-export function isValidToolGovernanceFactsV1(value: unknown): value is ToolGovernanceFactsV1 {
+export function isValidToolGovernanceFacts(value: unknown): value is ToolGovernanceFacts {
   if (!plainRecord(value)) return false;
   if (
     !exactKeys(
@@ -507,7 +507,7 @@ export function isValidToolGovernanceFactsV1(value: unknown): value is ToolGover
   ) {
     return false;
   }
-  if (value.schema !== TOOL_GOVERNANCE_FACTS_SCHEMA_V1) return false;
+  if (value.schema !== TOOL_GOVERNANCE_FACTS_SCHEMA_) return false;
   if (!validInvocation(value.invocation)) return false;
   if (!validPolicy(value.policy)) return false;
   if (!validContext(value.context)) return false;
@@ -549,9 +549,7 @@ export function isValidToolGovernanceFactsV1(value: unknown): value is ToolGover
 }
 
 /** Runtime validation for the exact Kernel facts transported in a binding. */
-export function isValidToolApprovalBindingFactsV1(
-  value: unknown,
-): value is ToolApprovalBindingFactsV1 {
+export function isValidToolApprovalBindingFacts(value: unknown): value is ToolApprovalBindingFacts {
   if (!plainRecord(value) || !exactKeys(value, ['invocation', 'policy'])) return false;
   if (!validInvocation(value.invocation) || !validPolicy(value.policy)) return false;
   return (
@@ -563,8 +561,8 @@ export function isValidToolApprovalBindingFactsV1(
 }
 
 function decideMode(
-  context: Readonly<ToolGovernanceContextFactsV1>,
-  policy: Readonly<ToolGovernancePolicyFactV1>,
+  context: Readonly<ToolGovernanceContextFacts>,
+  policy: Readonly<ToolGovernancePolicyFact>,
 ): 'allow' | 'deny' | 'approval' | 'auto_review' {
   if (context.interactionMode === 'full') {
     if (policy.risk === 'destructive') return 'deny';
@@ -578,7 +576,7 @@ function decideMode(
 }
 
 function decideAcceptEdits(
-  policy: Readonly<ToolGovernancePolicyFactV1>,
+  policy: Readonly<ToolGovernancePolicyFact>,
 ): 'allow' | 'deny' | 'approval' {
   if (policy.risk === 'destructive') return 'deny';
   if (hasModeReviewEffect(policy.effects)) return 'approval';
@@ -589,12 +587,12 @@ function decideAcceptEdits(
 }
 
 function hasAuthorizationReviewEffect(
-  effects: Readonly<ToolGovernanceEffectsV1> | undefined,
+  effects: Readonly<ToolGovernanceEffects> | undefined,
 ): boolean {
   return Boolean(effects?.network || effects?.externalWrite || effects?.uncertainEffects);
 }
 
-function hasModeReviewEffect(effects: Readonly<ToolGovernanceEffectsV1> | undefined): boolean {
+function hasModeReviewEffect(effects: Readonly<ToolGovernanceEffects> | undefined): boolean {
   return Boolean(
     effects?.network ||
       effects?.externalRead ||
@@ -604,19 +602,19 @@ function hasModeReviewEffect(effects: Readonly<ToolGovernanceEffectsV1> | undefi
 }
 
 function approvalIdentityMatches(
-  approval: Readonly<ToolGovernanceApprovalFactV1>,
-  invocation: Readonly<ToolGovernanceInvocationFactV1>,
-  policy: Readonly<ToolGovernancePolicyFactV1>,
+  approval: Readonly<ToolGovernanceApprovalFact>,
+  invocation: Readonly<ToolGovernanceInvocationFact>,
+  policy: Readonly<ToolGovernancePolicyFact>,
 ): boolean {
   return (
     approval.status === 'approved' &&
     approval.grant !== 'none' &&
     approval.approvedToolCallId === invocation.toolCallId &&
-    approval.approvalBindingDigest === createToolApprovalBindingDigestV1(invocation, policy)
+    approval.approvalBindingDigest === createToolApprovalBindingDigest(invocation, policy)
   );
 }
 
-function sameCommandGrantMatches(facts: ToolGovernanceFactsV1): boolean {
+function sameCommandGrantMatches(facts: ToolGovernanceFacts): boolean {
   const grant = facts.sameCommandGrant;
   const invocation = facts.invocation;
   if (!grant || !facts.policy.sameCommandMayBypassApproval || !invocation.commandDigest) {
@@ -640,10 +638,10 @@ function sameCommandGrantMatches(facts: ToolGovernanceFactsV1): boolean {
 }
 
 function reject(
-  failureKind: ToolGovernanceRejectFailureV1,
+  failureKind: ToolGovernanceRejectFailure,
   reason: string,
-  code?: ToolGovernanceRejectCodeV1,
-): ToolGovernanceRejectDecisionV1 {
+  code?: ToolGovernanceRejectCode,
+): ToolGovernanceRejectDecision {
   return freezeAuthorizationDecision({
     kind: 'reject',
     failureKind,
@@ -653,8 +651,8 @@ function reject(
 }
 
 function clonePolicy(
-  policy: Readonly<ToolGovernancePolicyFactV1>,
-): Readonly<ToolGovernancePolicyFactV1> {
+  policy: Readonly<ToolGovernancePolicyFact>,
+): Readonly<ToolGovernancePolicyFact> {
   return {
     ...policy,
     ...(policy.effects ? { effects: { ...policy.effects } } : {}),
@@ -663,7 +661,7 @@ function clonePolicy(
 }
 
 function freezeAuthorizationDecision<
-  T extends ToolGovernanceAuthorizationDecisionV1 | ToolGovernanceDecisionV1,
+  T extends ToolGovernanceAuthorizationDecision | ToolGovernanceDecision,
 >(value: T): T {
   if (value.kind === 'request_approval' || value.kind === 'request_auto_review') {
     deepFreeze(value.decision);
@@ -672,7 +670,7 @@ function freezeAuthorizationDecision<
   return value;
 }
 
-function freezeDecision<T extends ToolGovernanceDecisionV1>(value: T): T {
+function freezeDecision<T extends ToolGovernanceDecision>(value: T): T {
   return freezeAuthorizationDecision(value);
 }
 
@@ -718,7 +716,7 @@ function nullableDigest(value: unknown): value is string | null {
   return value === null || digest64(value);
 }
 
-function validEffects(value: unknown): value is ToolGovernanceEffectsV1 {
+function validEffects(value: unknown): value is ToolGovernanceEffects {
   if (
     !plainRecord(value) ||
     !exactKeys(value, [], ['network', 'externalRead', 'externalWrite', 'uncertainEffects'])
@@ -728,7 +726,7 @@ function validEffects(value: unknown): value is ToolGovernanceEffectsV1 {
   return Object.values(value).every((entry) => entry === true);
 }
 
-function validInvocation(value: unknown): value is ToolGovernanceInvocationFactV1 {
+function validInvocation(value: unknown): value is ToolGovernanceInvocationFact {
   if (
     !plainRecord(value) ||
     !exactKeys(value, [
@@ -788,7 +786,7 @@ function validInvocation(value: unknown): value is ToolGovernanceInvocationFactV
   );
 }
 
-function validPolicy(value: unknown): value is ToolGovernancePolicyFactV1 {
+function validPolicy(value: unknown): value is ToolGovernancePolicyFact {
   if (
     !plainRecord(value) ||
     !exactKeys(
@@ -854,7 +852,7 @@ function validPolicy(value: unknown): value is ToolGovernancePolicyFactV1 {
   return value.phaseConstraint === undefined || value.phaseConstraint === 'planning';
 }
 
-function validApproval(value: unknown): value is ToolGovernanceApprovalFactV1 {
+function validApproval(value: unknown): value is ToolGovernanceApprovalFact {
   if (
     !plainRecord(value) ||
     !exactKeys(value, ['status', 'grant', 'approvedToolCallId', 'approvalBindingDigest'])
@@ -883,7 +881,7 @@ function validApproval(value: unknown): value is ToolGovernanceApprovalFactV1 {
   );
 }
 
-function validSameCommandGrant(value: unknown): value is ToolGovernanceSameCommandGrantFactV1 {
+function validSameCommandGrant(value: unknown): value is ToolGovernanceSameCommandGrantFact {
   if (
     !plainRecord(value) ||
     !exactKeys(
@@ -905,7 +903,7 @@ function validSameCommandGrant(value: unknown): value is ToolGovernanceSameComma
   );
 }
 
-function validDynamicMcp(value: unknown): value is ToolGovernanceDynamicMcpFactV1 {
+function validDynamicMcp(value: unknown): value is ToolGovernanceDynamicMcpFact {
   return (
     plainRecord(value) &&
     exactKeys(value, ['minimumApproval', 'readOnly']) &&
@@ -914,7 +912,7 @@ function validDynamicMcp(value: unknown): value is ToolGovernanceDynamicMcpFactV
   );
 }
 
-function validNestedSkill(value: unknown): value is ToolGovernanceNestedSkillFactV1 {
+function validNestedSkill(value: unknown): value is ToolGovernanceNestedSkillFact {
   return (
     plainRecord(value) &&
     exactKeys(value, ['decision', 'minimumApproval']) &&
@@ -923,7 +921,7 @@ function validNestedSkill(value: unknown): value is ToolGovernanceNestedSkillFac
   );
 }
 
-function validGates(value: unknown): value is ToolGovernanceGateFactsV1 {
+function validGates(value: unknown): value is ToolGovernanceGateFacts {
   return (
     plainRecord(value) &&
     exactKeys(value, [
@@ -936,7 +934,7 @@ function validGates(value: unknown): value is ToolGovernanceGateFactsV1 {
   );
 }
 
-function validContext(value: unknown): value is ToolGovernanceContextFactsV1 {
+function validContext(value: unknown): value is ToolGovernanceContextFacts {
   if (
     !plainRecord(value) ||
     !exactKeys(
@@ -971,7 +969,7 @@ function validContext(value: unknown): value is ToolGovernanceContextFactsV1 {
   );
 }
 
-function validAdmission(value: unknown): value is ToolGovernanceAdmissionFactsV1 {
+function validAdmission(value: unknown): value is ToolGovernanceAdmissionFacts {
   return (
     plainRecord(value) &&
     exactKeys(value, ['freshness', 'reservationRequired', 'reservationIds']) &&
@@ -986,31 +984,31 @@ function validTimestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isDynamicInvocation(invocation: Readonly<ToolGovernanceInvocationFactV1>): boolean {
+function isDynamicInvocation(invocation: Readonly<ToolGovernanceInvocationFact>): boolean {
   return invocation.operationId === 'mcp:dynamic_tool';
 }
 
-function stableSerializeV1(value: unknown): string {
+function stableSerialize(value: unknown): string {
   if (value === null) return 'null';
   if (typeof value === 'string' || typeof value === 'boolean') return JSON.stringify(value);
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new Error('Cannot serialize non-finite number.');
     return JSON.stringify(value);
   }
-  if (Array.isArray(value)) return `[${value.map(stableSerializeV1).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`;
   if (typeof value === 'object') {
     const record = value as Record<string, unknown>;
     const keys = Object.keys(record).sort();
     return `{${keys
       .filter((key) => record[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${stableSerializeV1(record[key])}`)
+      .map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`)
       .join(',')}}`;
   }
   throw new Error('Cannot serialize unsupported approval binding value.');
 }
 
-function sha256HexV1(value: string): string {
-  const bytes = utf8BytesV1(value);
+function sha256Hex(value: string): string {
+  const bytes = utf8Bytes(value);
   const bitLength = bytes.length * 8;
   const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
   const padded = new Uint8Array(paddedLength);
@@ -1057,7 +1055,7 @@ function sha256HexV1(value: string): string {
     for (let index = 0; index < 64; index += 1) {
       const sigma1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
       const choose = (e & f) ^ (~e & g);
-      const temporary1 = add32(h, sigma1, choose, SHA256_CONSTANTS_V1[index]!, words[index]!);
+      const temporary1 = add32(h, sigma1, choose, SHA256_CONSTANTS_[index]!, words[index]!);
       const sigma0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
       const majority = (a & b) ^ (a & c) ^ (b & c);
       const temporary2 = add32(sigma0, majority);
@@ -1084,7 +1082,7 @@ function sha256HexV1(value: string): string {
     .join('');
 }
 
-function utf8BytesV1(value: string): Uint8Array {
+function utf8Bytes(value: string): Uint8Array {
   const bytes: number[] = [];
   for (let index = 0; index < value.length; index += 1) {
     let codePoint = value.charCodeAt(index);
@@ -1126,7 +1124,7 @@ function rotr32(value: number, bits: number): number {
   return (value >>> bits) | (value << (32 - bits));
 }
 
-const SHA256_CONSTANTS_V1 = Object.freeze([
+const SHA256_CONSTANTS_ = Object.freeze([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
   0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,

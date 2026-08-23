@@ -11,40 +11,40 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
-  ExecutionBackendCapabilitiesV1,
-  ExecutionBoundaryAdmissionReasonV1,
-  ExecutionBoundaryV1,
-  InProcessReadOnlyToolCatalogV1,
-  ProductionExecutionQualificationV1,
+  ExecutionBackendCapabilities,
+  ExecutionBoundary,
+  ExecutionBoundaryAdmissionReason,
+  InProcessReadOnlyToolCatalog,
+  ProductionExecutionQualification,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  isDescriptorAdmittedByInProcessReadOnlyCatalogV1,
-  readExecutionEnvironmentIdentityV1,
+  isDescriptorAdmittedByInProcessReadOnlyCatalog,
+  readExecutionEnvironmentIdentity,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_V1,
-  admitProductionExecutionBoundaryV1,
-  composeExecutionBoundaryRolloutV1,
-  computeExecutionBoundaryDigestV1,
-  computeInProcessReadOnlyToolCatalogDigestV1,
-  computeProductionExecutionQualificationRegistryDigestV1,
-  executionBackendCapabilitiesV1Schema,
-  executionBoundaryV1Schema,
+  APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_,
+  admitProductionExecutionBoundary,
+  composeExecutionBoundaryRollout,
+  computeExecutionBoundaryDigest,
+  computeInProcessReadOnlyToolCatalogDigest,
+  computeProductionExecutionQualificationRegistryDigest,
+  executionBackendCapabilitiesSchema,
+  executionBoundarySchema,
   loadAgentConfig,
-  loadApprovedProductionExecutionQualificationRegistryV1,
+  loadApprovedProductionExecutionQualificationRegistry,
   loadProductionAgentConfig,
   ProductionExecutionAdmissionError,
-  parseExecutionBoundaryV1,
-  parseProductionExecutionQualificationRegistryV1,
-  qualificationMatchesExecutionEnvironmentV1,
-  tightenExecutionBoundaryV1,
+  parseExecutionBoundary,
+  parseProductionExecutionQualificationRegistry,
+  qualificationMatchesExecutionEnvironment,
+  tightenExecutionBoundary,
 } from '#app/config';
-import { evaluateExecutionBoundaryQualificationV1 } from '#app/config/execution-boundary';
-import type { RuntimeJsonValueV1 } from '#runtime-spi';
+import { evaluateExecutionBoundaryQualification } from '#app/config/execution-boundary';
+import type { RuntimeJsonValue } from '#runtime-spi';
 import {
-  createTestAgentToolsV1 as createAgentTools,
-  executeTestRuntimeToolV1,
-  testBuiltinToolCatalogV1,
+  createTestAgentTools as createAgentTools,
+  executeTestRuntimeTool,
+  testBuiltinToolCatalog,
 } from '../helpers/runtime-model';
 
 const temporaryDirectories: string[] = [];
@@ -58,8 +58,8 @@ function temporaryWorkspace(): string {
 
 function boundary(
   workspaceRoot: string,
-  overrides: Partial<ExecutionBoundaryV1> = {},
-): ExecutionBoundaryV1 {
+  overrides: Partial<ExecutionBoundary> = {},
+): ExecutionBoundary {
   return {
     filesystemScope: 'workspace_write',
     workspaceRoot,
@@ -75,8 +75,8 @@ function boundary(
 }
 
 function supportedBackend(
-  overrides: Partial<ExecutionBackendCapabilitiesV1> = {},
-): ExecutionBackendCapabilitiesV1 {
+  overrides: Partial<ExecutionBackendCapabilities> = {},
+): ExecutionBackendCapabilities {
   return {
     backend: 'seatbelt',
     filesystem: {
@@ -93,7 +93,7 @@ function supportedBackend(
   };
 }
 
-function toolCatalog(toolIds: string[] = []): InProcessReadOnlyToolCatalogV1 {
+function toolCatalog(toolIds: string[] = []): InProcessReadOnlyToolCatalog {
   const catalog = {
     version: 1 as const,
     revision: 'fixture-v1',
@@ -107,10 +107,10 @@ function toolCatalog(toolIds: string[] = []): InProcessReadOnlyToolCatalogV1 {
       externalPath: false as const,
     })),
   };
-  return { ...catalog, digest: computeInProcessReadOnlyToolCatalogDigestV1(catalog) };
+  return { ...catalog, digest: computeInProcessReadOnlyToolCatalogDigest(catalog) };
 }
 
-function descriptorCatalog(toolName: string): InProcessReadOnlyToolCatalogV1 {
+function descriptorCatalog(toolName: string): InProcessReadOnlyToolCatalog {
   const descriptor = builtinDescriptor(toolName);
   const catalog = {
     version: 1 as const,
@@ -127,11 +127,11 @@ function descriptorCatalog(toolName: string): InProcessReadOnlyToolCatalogV1 {
       },
     ],
   };
-  return { ...catalog, digest: computeInProcessReadOnlyToolCatalogDigestV1(catalog) };
+  return { ...catalog, digest: computeInProcessReadOnlyToolCatalogDigest(catalog) };
 }
 
 function builtinDescriptor(toolName: string) {
-  const entry = testBuiltinToolCatalogV1().entries.find(
+  const entry = testBuiltinToolCatalog().entries.find(
     (candidate) => candidate.visibility === 'model' && candidate.name === toolName,
   );
   if (!entry) throw new Error(`Missing builtin fixture ${toolName}`);
@@ -139,9 +139,9 @@ function builtinDescriptor(toolName: string) {
 }
 
 function qualification(
-  outcome: ProductionExecutionQualificationV1['outcome'] = 'supported',
-  overrides: Partial<ProductionExecutionQualificationV1> = {},
-): ProductionExecutionQualificationV1 {
+  outcome: ProductionExecutionQualification['outcome'] = 'supported',
+  overrides: Partial<ProductionExecutionQualification> = {},
+): ProductionExecutionQualification {
   const backendCapabilities = overrides.backendCapabilities ?? supportedBackend();
   return {
     version: 1,
@@ -183,7 +183,7 @@ function reverseObjectInsertionOrder<T>(value: T): T {
 
 function expectProductionRejection(
   load: () => unknown,
-  reason: ExecutionBoundaryAdmissionReasonV1,
+  reason: ExecutionBoundaryAdmissionReason,
 ): void {
   let thrown: unknown;
   try {
@@ -203,7 +203,7 @@ afterEach(() => {
   }
 });
 
-describe('ExecutionBoundaryV1 schema', () => {
+describe('ExecutionBoundary schema', () => {
   test('canonicalizes Workspace Trust identity and exact host allowlists', () => {
     const workspace = temporaryWorkspace();
     const nested = join(workspace, 'nested');
@@ -211,7 +211,7 @@ describe('ExecutionBoundaryV1 schema', () => {
     const alias = join(workspace, 'workspace-alias');
     symlinkSync(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
 
-    const parsed = parseExecutionBoundaryV1(
+    const parsed = parseExecutionBoundary(
       boundary(join(alias, 'nested', '..'), {
         networkMode: 'allowlist',
         networkAllowlist: ['API.Example.COM.', 'api.example.com', 'cdn.example.com'],
@@ -240,7 +240,7 @@ describe('ExecutionBoundaryV1 schema', () => {
     ];
 
     for (const value of invalid) {
-      expect(executionBoundaryV1Schema.safeParse(value).success).toBe(false);
+      expect(executionBoundarySchema.safeParse(value).success).toBe(false);
     }
   });
 
@@ -257,15 +257,15 @@ describe('ExecutionBoundaryV1 schema', () => {
       networkAllowlist: ['A.EXAMPLE.COM', 'b.example.com', 'a.example.com'],
     });
 
-    expect(computeExecutionBoundaryDigestV1(first)).toBe(computeExecutionBoundaryDigestV1(second));
-    expect(computeExecutionBoundaryDigestV1(first)).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(computeExecutionBoundaryDigest(first)).toBe(computeExecutionBoundaryDigest(second));
+    expect(computeExecutionBoundaryDigest(first)).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 });
 
-describe('ExecutionBoundaryV1 monotonic composition', () => {
+describe('ExecutionBoundary monotonic composition', () => {
   test('only tightens scopes, hosts, protected paths, process limits, and fallback', () => {
     const workspace = temporaryWorkspace();
-    const result = tightenExecutionBoundaryV1({
+    const result = tightenExecutionBoundary({
       ceiling: boundary(workspace, {
         filesystemScope: 'full_access',
         networkMode: 'allowlist',
@@ -296,7 +296,7 @@ describe('ExecutionBoundaryV1 monotonic composition', () => {
 
   test('collapses an empty allowlist intersection to network off', () => {
     const workspace = temporaryWorkspace();
-    const result = tightenExecutionBoundaryV1({
+    const result = tightenExecutionBoundary({
       ceiling: boundary(workspace, {
         networkMode: 'allowlist',
         networkAllowlist: ['a.example.com'],
@@ -314,7 +314,7 @@ describe('ExecutionBoundaryV1 monotonic composition', () => {
     const first = temporaryWorkspace();
     const second = temporaryWorkspace();
     expect(() =>
-      tightenExecutionBoundaryV1({ ceiling: boundary(first), tightening: boundary(second) }),
+      tightenExecutionBoundary({ ceiling: boundary(first), tightening: boundary(second) }),
     ).toThrow('different canonical workspaces');
   });
 
@@ -336,8 +336,8 @@ describe('ExecutionBoundaryV1 monotonic composition', () => {
               filesystemScope: rightScope,
               maxProcessTreeSizePerShellInvocation: rightLimit,
             });
-            const leftRight = tightenExecutionBoundaryV1({ ceiling: left, tightening: right });
-            const rightLeft = tightenExecutionBoundaryV1({ ceiling: right, tightening: left });
+            const leftRight = tightenExecutionBoundary({ ceiling: left, tightening: right });
+            const rightLeft = tightenExecutionBoundary({ ceiling: right, tightening: left });
 
             expect(leftRight).toEqual(rightLeft);
             expect(scopeRank[leftRight.filesystemScope]).toBeLessThanOrEqual(scopeRank[leftScope]);
@@ -355,15 +355,15 @@ describe('ExecutionBoundaryV1 monotonic composition', () => {
 describe('production execution admission', () => {
   test('uses the release-pinned empty registry and cannot accept caller-created support', () => {
     const workspace = temporaryWorkspace();
-    const registry = loadApprovedProductionExecutionQualificationRegistryV1();
-    expect(registry.digest).toBe(APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_V1);
+    const registry = loadApprovedProductionExecutionQualificationRegistry();
+    expect(registry.digest).toBe(APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_);
     expect(registry.status).toBe('accepted_empty_support_set');
     expect(registry.qualifications).toEqual([]);
     expect(Object.isFrozen(registry)).toBe(true);
     expect(Object.isFrozen(registry.qualifications)).toBe(true);
 
     expect(
-      admitProductionExecutionBoundaryV1({
+      admitProductionExecutionBoundary({
         featureEnabled: false,
         boundary: boundary(workspace),
         workspaceRoot: workspace,
@@ -371,7 +371,7 @@ describe('production execution admission', () => {
         sandboxEnabled: true,
       }).reason,
     ).toBe('feature_disabled');
-    const decision = admitProductionExecutionBoundaryV1({
+    const decision = admitProductionExecutionBoundary({
       featureEnabled: true,
       boundary: boundary(workspace),
       workspaceRoot: workspace,
@@ -392,7 +392,7 @@ describe('production execution admission', () => {
       brokeredGitFeatureRevision: null,
     });
     expect(
-      admitProductionExecutionBoundaryV1({
+      admitProductionExecutionBoundary({
         featureEnabled: true,
         boundary: boundary(workspace),
         workspaceRoot: workspace,
@@ -403,17 +403,17 @@ describe('production execution admission', () => {
   });
 
   test('uses the same canonical environment identity as native evidence', () => {
-    const environment = readExecutionEnvironmentIdentityV1();
+    const environment = readExecutionEnvironmentIdentity();
     expect(['darwin', 'linux', 'win32']).toContain(environment.platform);
     const exactQualification = qualification('supported', {
-      platform: environment.platform as ProductionExecutionQualificationV1['platform'],
+      platform: environment.platform as ProductionExecutionQualification['platform'],
       osRelease: environment.osRelease,
       osVersion: environment.osVersion,
       arch: environment.arch,
       bunVersion: environment.bunVersion,
     });
     expect(
-      qualificationMatchesExecutionEnvironmentV1({
+      qualificationMatchesExecutionEnvironment({
         qualification: exactQualification,
         environment,
         backend: exactQualification.backend,
@@ -421,7 +421,7 @@ describe('production execution admission', () => {
       }),
     ).toBe(true);
     expect(
-      qualificationMatchesExecutionEnvironmentV1({
+      qualificationMatchesExecutionEnvironment({
         qualification: { ...exactQualification, osVersion: `${environment.osVersion}-drift` },
         environment,
         backend: exactQualification.backend,
@@ -446,18 +446,18 @@ describe('production execution admission', () => {
       ...registryWithoutDigest,
       qualifications: [second, first],
     };
-    const digest = computeProductionExecutionQualificationRegistryDigestV1(registryWithoutDigest);
-    expect(computeProductionExecutionQualificationRegistryDigestV1(reversedWithoutDigest)).toBe(
+    const digest = computeProductionExecutionQualificationRegistryDigest(registryWithoutDigest);
+    expect(computeProductionExecutionQualificationRegistryDigest(reversedWithoutDigest)).toBe(
       digest,
     );
     expect(() =>
-      parseProductionExecutionQualificationRegistryV1({
+      parseProductionExecutionQualificationRegistry({
         ...registryWithoutDigest,
         digest,
       }),
     ).toThrow('production environment admission keys must be unique');
     expect(() =>
-      parseProductionExecutionQualificationRegistryV1({
+      parseProductionExecutionQualificationRegistry({
         ...reversedWithoutDigest,
         digest,
       }),
@@ -489,11 +489,9 @@ describe('production execution admission', () => {
         },
       ],
     };
-    const catalogDigest = computeInProcessReadOnlyToolCatalogDigestV1(catalogWithoutDigest);
+    const catalogDigest = computeInProcessReadOnlyToolCatalogDigest(catalogWithoutDigest);
     expect(
-      computeInProcessReadOnlyToolCatalogDigestV1(
-        reverseObjectInsertionOrder(catalogWithoutDigest),
-      ),
+      computeInProcessReadOnlyToolCatalogDigest(reverseObjectInsertionOrder(catalogWithoutDigest)),
     ).toBe(catalogDigest);
 
     const registryWithoutDigest = {
@@ -511,10 +509,10 @@ describe('production execution admission', () => {
       ],
     };
     expect(
-      computeProductionExecutionQualificationRegistryDigestV1(
+      computeProductionExecutionQualificationRegistryDigest(
         reverseObjectInsertionOrder(registryWithoutDigest),
       ),
-    ).toBe(computeProductionExecutionQualificationRegistryDigestV1(registryWithoutDigest));
+    ).toBe(computeProductionExecutionQualificationRegistryDigest(registryWithoutDigest));
   });
 
   test('the fixture-only technical evaluator fails closed on identity and scope', () => {
@@ -526,23 +524,23 @@ describe('production execution admission', () => {
       workspaceRoot: workspace,
       qualification: qualification(),
     };
-    expect(
-      evaluateExecutionBoundaryQualificationV1({ ...common, boundary: undefined }).reason,
-    ).toBe('boundary_missing');
-    expect(evaluateExecutionBoundaryQualificationV1({ ...common, boundary: {} }).reason).toBe(
+    expect(evaluateExecutionBoundaryQualification({ ...common, boundary: undefined }).reason).toBe(
+      'boundary_missing',
+    );
+    expect(evaluateExecutionBoundaryQualification({ ...common, boundary: {} }).reason).toBe(
       'boundary_invalid',
     );
     expect(
-      evaluateExecutionBoundaryQualificationV1({ ...common, workspaceRoot: otherWorkspace }).reason,
+      evaluateExecutionBoundaryQualification({ ...common, workspaceRoot: otherWorkspace }).reason,
     ).toBe('workspace_mismatch');
     expect(
-      evaluateExecutionBoundaryQualificationV1({
+      evaluateExecutionBoundaryQualification({
         ...common,
         boundary: boundary(workspace, { filesystemScope: 'full_access' }),
       }).reason,
     ).toBe('full_access_not_qualified');
     expect(
-      evaluateExecutionBoundaryQualificationV1({
+      evaluateExecutionBoundaryQualification({
         ...common,
         qualification: qualification('supported', { entrypoints: ['tui'] }),
       }).reason,
@@ -551,7 +549,7 @@ describe('production execution admission', () => {
 
   test('requires every declared backend strength instead of sandboxAvailable', () => {
     const workspace = temporaryWorkspace();
-    const cases: Array<[ExecutionBackendCapabilitiesV1, ExecutionBoundaryAdmissionReasonV1]> = [
+    const cases: Array<[ExecutionBackendCapabilities, ExecutionBoundaryAdmissionReason]> = [
       [supportedBackend({ backend: 'none' }), 'sandbox_required'],
       [
         supportedBackend({
@@ -579,7 +577,7 @@ describe('production execution admission', () => {
     ];
 
     for (const [backendCapabilities, reason] of cases) {
-      const decision = evaluateExecutionBoundaryQualificationV1({
+      const decision = evaluateExecutionBoundaryQualification({
         featureEnabled: true,
         boundary: boundary(workspace),
         workspaceRoot: workspace,
@@ -599,7 +597,7 @@ describe('production execution admission', () => {
 
   test('technical evaluation admits only the capability surface represented by a valid fixture', () => {
     const workspace = temporaryWorkspace();
-    const decision = evaluateExecutionBoundaryQualificationV1({
+    const decision = evaluateExecutionBoundaryQualification({
       featureEnabled: true,
       boundary: boundary(workspace),
       workspaceRoot: workspace,
@@ -626,7 +624,7 @@ describe('production execution admission', () => {
   test('never exposes process capabilities omitted by the qualification surface', () => {
     const workspace = temporaryWorkspace();
     const base = qualification();
-    const expanded = evaluateExecutionBoundaryQualificationV1({
+    const expanded = evaluateExecutionBoundaryQualification({
       featureEnabled: true,
       boundary: boundary(workspace),
       workspaceRoot: workspace,
@@ -642,7 +640,7 @@ describe('production execution admission', () => {
     expect(expanded.allowed).toBe(true);
     expect(expanded.surface).toMatchObject({ shell: true, skillChild: true, localStdioMcp: false });
 
-    const brokered = evaluateExecutionBoundaryQualificationV1({
+    const brokered = evaluateExecutionBoundaryQualification({
       featureEnabled: true,
       boundary: boundary(workspace),
       workspaceRoot: workspace,
@@ -677,7 +675,7 @@ describe('production execution admission', () => {
     });
 
     expect(
-      evaluateExecutionBoundaryQualificationV1({
+      evaluateExecutionBoundaryQualification({
         featureEnabled: true,
         boundary: boundary(workspace),
         workspaceRoot: workspace,
@@ -697,7 +695,7 @@ describe('production execution admission', () => {
     const workspace = temporaryWorkspace();
     const configPath = join(workspace, 'kite-code.jsonc');
     writeFileSync(configPath, JSON.stringify({ provider: { ollama: { type: 'ollama' } } }));
-    const decision = evaluateExecutionBoundaryQualificationV1({
+    const decision = evaluateExecutionBoundaryQualification({
       featureEnabled: true,
       boundary: boundary(workspace, { filesystemScope: 'read_only' }),
       workspaceRoot: workspace,
@@ -725,7 +723,7 @@ describe('production execution admission', () => {
     const target = join(workspace, 'should-not-exist.txt');
     const requests: ReadonlyArray<{
       readonly name: 'write_file' | 'edit_file';
-      readonly args: Readonly<Record<string, RuntimeJsonValueV1>>;
+      readonly args: Readonly<Record<string, RuntimeJsonValue>>;
     }> = [
       {
         name: 'write_file' as const,
@@ -741,7 +739,7 @@ describe('production execution admission', () => {
       },
     ];
     for (const request of requests) {
-      const rejected = await executeTestRuntimeToolV1({
+      const rejected = await executeTestRuntimeTool({
         workspace,
         toolName: request.name,
         args: request.args,
@@ -762,7 +760,7 @@ describe('production execution admission', () => {
       process.platform === 'win32' ? 'junction' : 'dir',
     );
     for (const path of [join(outsideWorkspace, 'secret.txt'), 'escape/secret.txt']) {
-      const externalRead = await executeTestRuntimeToolV1({
+      const externalRead = await executeTestRuntimeTool({
         workspace,
         toolName: 'read_file',
         args: { path },
@@ -792,7 +790,7 @@ describe('production execution admission', () => {
       backendCapabilities: fallbackBackend,
       inProcessReadOnlyTools: descriptorCatalog('read_file'),
     });
-    const decision = evaluateExecutionBoundaryQualificationV1({
+    const decision = evaluateExecutionBoundaryQualification({
       featureEnabled: true,
       boundary: boundary(workspace, {
         filesystemScope: 'read_only',
@@ -817,7 +815,7 @@ describe('production execution admission', () => {
       brokeredGitFeatureRevision: null,
     });
     expect(
-      evaluateExecutionBoundaryQualificationV1({
+      evaluateExecutionBoundaryQualification({
         featureEnabled: true,
         boundary: boundary(workspace),
         workspaceRoot: workspace,
@@ -835,7 +833,7 @@ describe('production execution admission', () => {
       ],
     };
     expect(
-      evaluateExecutionBoundaryQualificationV1({
+      evaluateExecutionBoundaryQualification({
         featureEnabled: true,
         boundary: boundary(workspace, {
           filesystemScope: 'read_only',
@@ -857,13 +855,13 @@ describe('production execution admission', () => {
     const catalog = descriptorCatalog('read_file');
     const readFileDescriptor = builtinDescriptor('read_file');
     expect(
-      isDescriptorAdmittedByInProcessReadOnlyCatalogV1({
+      isDescriptorAdmittedByInProcessReadOnlyCatalog({
         catalog,
         descriptor: readFileDescriptor,
       }),
     ).toBe(true);
     expect(
-      isDescriptorAdmittedByInProcessReadOnlyCatalogV1({
+      isDescriptorAdmittedByInProcessReadOnlyCatalog({
         catalog,
         descriptor: { ...readFileDescriptor, revision: `${readFileDescriptor.revision}-drift` },
       }),
@@ -887,7 +885,7 @@ describe('production execution admission', () => {
     const disclosed = createAgentTools({ workspace, config });
     expect(Object.keys(disclosed)).toEqual(['read_file']);
 
-    const rejected = await executeTestRuntimeToolV1({
+    const rejected = await executeTestRuntimeTool({
       workspace,
       toolName: 'search_files',
       args: { pattern: '*.ts' },
@@ -902,11 +900,11 @@ describe('production execution admission', () => {
 
 describe('execution boundary config injection', () => {
   test('composes every rollout source monotonically with deny wins', () => {
-    expect(composeExecutionBoundaryRolloutV1([])).toBe(false);
-    expect(composeExecutionBoundaryRolloutV1([undefined, true, undefined])).toBe(true);
-    expect(composeExecutionBoundaryRolloutV1([false, true])).toBe(false); // user false, project true
-    expect(composeExecutionBoundaryRolloutV1([true, false])).toBe(false); // config true, CLI false
-    expect(composeExecutionBoundaryRolloutV1([false, true])).toBe(false); // config false, CLI true
+    expect(composeExecutionBoundaryRollout([])).toBe(false);
+    expect(composeExecutionBoundaryRollout([undefined, true, undefined])).toBe(true);
+    expect(composeExecutionBoundaryRollout([false, true])).toBe(false); // user false, project true
+    expect(composeExecutionBoundaryRollout([true, false])).toBe(false); // config true, CLI false
+    expect(composeExecutionBoundaryRollout([false, true])).toBe(false); // config false, CLI true
   });
 
   test('ordinary config cannot attach a boundary and production requires both flag layers', () => {
@@ -917,7 +915,7 @@ describe('execution boundary config injection', () => {
       configPath,
       JSON.stringify({
         provider: { ollama: { type: 'ollama' } },
-        features: { executionBoundaryV1: true },
+        features: { executionBoundary: true },
         executionBoundary: { ...artifactBoundary, filesystemScope: 'full_access' },
       }),
     );
@@ -928,7 +926,7 @@ describe('execution boundary config injection', () => {
 
     const production = (
       artifactExecutionBoundaryV1Enabled: boolean,
-      featureOverrides?: { executionBoundaryV1: boolean },
+      featureOverrides?: { executionBoundary: boolean },
       sandboxEnabled?: boolean,
     ) =>
       loadProductionAgentConfig({
@@ -944,7 +942,7 @@ describe('execution boundary config injection', () => {
     expectProductionRejection(() => production(false), 'feature_disabled');
     expectProductionRejection(() => production(true), 'platform_excluded');
     expectProductionRejection(
-      () => production(true, { executionBoundaryV1: false }),
+      () => production(true, { executionBoundary: false }),
       'feature_disabled',
     );
     expectProductionRejection(() => production(true, undefined, false), 'sandbox_disabled');
@@ -955,11 +953,11 @@ describe('execution boundary config injection', () => {
     );
     expectProductionRejection(() => production(true), 'feature_disabled');
     expectProductionRejection(
-      () => production(false, { executionBoundaryV1: true }),
+      () => production(false, { executionBoundary: true }),
       'feature_disabled',
     );
     expectProductionRejection(
-      () => production(true, { executionBoundaryV1: true }),
+      () => production(true, { executionBoundary: true }),
       'platform_excluded',
     );
 
@@ -967,7 +965,7 @@ describe('execution boundary config injection', () => {
       configPath,
       JSON.stringify({
         provider: { ollama: { type: 'ollama' } },
-        features: { executionBoundaryV1: false },
+        features: { executionBoundary: false },
       }),
     );
     expectProductionRejection(() => production(true), 'feature_disabled');
@@ -976,7 +974,7 @@ describe('execution boundary config injection', () => {
       configPath,
       JSON.stringify({
         provider: { ollama: { type: 'ollama' } },
-        features: { executionBoundaryV1: true },
+        features: { executionBoundary: true },
         sandbox: { enabled: false },
       }),
     );
@@ -991,11 +989,11 @@ describe('execution boundary config injection', () => {
       join(configDirectory, 'kite-code.jsonc'),
       JSON.stringify({
         provider: { ollama: { type: 'ollama' } },
-        features: { executionBoundaryV1: true },
+        features: { executionBoundary: true },
       }),
     );
     const config = loadAgentConfig({ workspace, providerName: 'ollama' });
-    expect(config.features?.executionBoundaryV1).toBe(true);
+    expect(config.features?.executionBoundary).toBe(true);
   });
 
   test('does not let project true elevate an explicit user false', () => {
@@ -1007,13 +1005,13 @@ describe('execution boundary config injection', () => {
       join(userHome, '.kite-code', 'kite-code.jsonc'),
       JSON.stringify({
         provider: { ollama: { type: 'ollama' } },
-        features: { executionBoundaryV1: false },
+        features: { executionBoundary: false },
       }),
     );
     mkdirSync(join(workspace, '.kite-code'));
     writeFileSync(
       join(workspace, '.kite-code', 'kite-code.jsonc'),
-      JSON.stringify({ features: { executionBoundaryV1: true } }),
+      JSON.stringify({ features: { executionBoundary: true } }),
     );
 
     const load = () =>
@@ -1029,7 +1027,7 @@ describe('execution boundary config injection', () => {
 
   test('rejects malformed backend strength projections', () => {
     expect(
-      executionBackendCapabilitiesV1Schema.safeParse({
+      executionBackendCapabilitiesSchema.safeParse({
         ...supportedBackend(),
         processTreeLimit: true,
       }).success,

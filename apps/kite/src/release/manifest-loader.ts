@@ -1,13 +1,13 @@
-import type { ReleaseManifestV1 } from './artifact-layout';
+import type { ReleaseManifest } from './artifact-layout';
 
-export interface PreExecReleaseVerificationV1 {
+export interface PreExecReleaseVerification {
   verified: true;
   signatureKind: 'synthetic-ed25519-fixture-v1' | 'sigstore-keyless-v1';
   distributable: boolean;
   realSigstoreSigningEnabled: boolean;
 }
 
-export interface ReleaseManifestConsistencyExpectationsV1 {
+export interface ReleaseManifestConsistencyExpectations {
   payloadSha256: string;
   releaseProfileDigest: string;
   behaviorDigest: string;
@@ -20,7 +20,7 @@ export interface ReleaseManifestConsistencyExpectationsV1 {
   providerType: string;
 }
 
-export interface LoadedReleaseManifestV1 {
+export interface LoadedReleaseManifest {
   version: 1;
   productVersion: string;
   commitSha: string;
@@ -35,12 +35,12 @@ export interface LoadedReleaseManifestV1 {
  * Runtime-side consistency recheck. Supply-chain authenticity belongs to the
  * launcher/bootstrap verifier and cannot be established by this loader.
  */
-export function loadReleaseManifestConsistencyV1(input: {
-  manifest: ReleaseManifestV1;
-  expectations: ReleaseManifestConsistencyExpectationsV1;
-  preExecVerification: PreExecReleaseVerificationV1;
+export function loadReleaseManifestConsistency(input: {
+  manifest: ReleaseManifest;
+  expectations: ReleaseManifestConsistencyExpectations;
+  preExecVerification: PreExecReleaseVerification;
   production: boolean;
-}): LoadedReleaseManifestV1 {
+}): LoadedReleaseManifest {
   if (!input.preExecVerification.verified) {
     throw new Error('Release payload reached the Runtime without pre-exec verification.');
   }

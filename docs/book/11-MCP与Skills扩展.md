@@ -42,7 +42,7 @@ Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circ
 
 Provider directory 让 Agent 区分不存在、等待项目批准、被拒绝、disabled、需要登录、连接中、失败和 quarantine。调用边界使用 typed provider failure，不从 SDK 错误字符串猜测恢复策略。Directory 和公共搜索摘要不包含 URL、command、secret、raw error、schema、capability ID 或调用句柄。
 
-默认关闭的 `mcpProviderActionV1` 把可恢复 failure 转成独立 Runtime 交互：原 Tool Call 先终结，随后才请求 App shell 执行 login、approve 或 retry。Runtime 只保存固定动作与结果码，不保存旧参数、binding、approval 或认证材料。成功恢复后必须进入新 turn 再从当前 catalog 签发 binding；defer/failure 不会重放旧调用。TUI 使用既有 foreground/background interrupt surface 收集决定，并由 App controller 复用 Supervisor 的 login、project approval 与 retry。
+默认关闭的 `mcpProviderAction` 把可恢复 failure 转成独立 Runtime 交互：原 Tool Call 先终结，随后才请求 App shell 执行 login、approve 或 retry。Runtime 只保存固定动作与结果码，不保存旧参数、binding、approval 或认证材料。成功恢复后必须进入新 turn 再从当前 catalog 签发 binding；defer/failure 不会重放旧调用。TUI 使用既有 foreground/background interrupt surface 收集决定，并由 App controller 复用 Supervisor 的 login、project approval 与 retry。
 
 同一 flag 让 `required` 获得任务准入语义。新 Agent run 在模型执行前接受 ready/degraded，其他 required Provider 进入稳定排序的持久 gate。Retry 由 App shell 执行；用户可以为当前 session 记录 waiver，或取消 run。Waiver 包含 provider/source/固定 reason/time，但不使任何 Tool 可见或可调用。
 
@@ -58,7 +58,7 @@ ADR-0018 替代 ADR-0012 的 UI 结论：`/mcp` 承担显式 Login 恢复，但�
 
 ## 11.5 Skill Workflow
 
-Skill Workflow 的实现与契约已存在，但默认 fail closed：`skillActivationV2` 和 `skillWorkflowV1` 都必须显式开启，缺少任一 flag 时 activation 被拒绝。因此下面描述的是两个 flag 同时启用后的生命周期，不应把默认安装视为已经可激活 Skill。
+Skill Workflow 的实现与契约已存在，但默认 fail closed：`skillActivation` 和 `skillWorkflow` 都必须显式开启，缺少任一 flag 时 activation 被拒绝。因此下面描述的是两个 flag 同时启用后的生命周期，不应把默认安装视为已经可激活 Skill。
 
 Kite Skill 是严格 YAML frontmatter 加正文/资源组成的版本化 Workflow Contract，而不是普通 Prompt 片段。编译结果声明：
 

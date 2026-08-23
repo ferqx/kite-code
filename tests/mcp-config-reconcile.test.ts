@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createCapabilitySnapshotV1, descriptorRevisionV1 } from '@kite/builtin-runtime';
+import { createCapabilitySnapshot, descriptorRevision } from '@kite/builtin-runtime';
 import type { McpServerConfig, McpServerState } from '@kite/builtin-runtime/mcp';
 import {
   DefaultMcpSupervisor,
@@ -67,7 +67,7 @@ class RecordingManager implements McpConnectionManagerControlPlane {
   readonly operations: string[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly states = new Map<string, McpServerState>();
-  private snapshot: CapabilitySnapshot = createCapabilitySnapshotV1([]);
+  private snapshot: CapabilitySnapshot = createCapabilitySnapshot([]);
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -110,7 +110,7 @@ class RecordingManager implements McpConnectionManagerControlPlane {
   readResource = async () => '';
 
   private publish(): void {
-    this.snapshot = createCapabilitySnapshotV1(
+    this.snapshot = createCapabilitySnapshot(
       [...this.states].map(([name, state]) => descriptor(name, state.config.providerVersion)),
     );
     for (const listener of this.listeners) listener();
@@ -175,5 +175,5 @@ function descriptor(name: string, version: string | undefined): CapabilityDescri
     availability: 'available',
     diagnostics: [],
   };
-  return { ...withoutRevision, revision: descriptorRevisionV1(withoutRevision) };
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
 }

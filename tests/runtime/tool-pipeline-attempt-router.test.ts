@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import type {
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineOutcomeDispatchV1,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineOutcomeDispatch,
 } from '@kite/runtime-spi';
 import {
-  APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_V1,
-  AppToolPipelineAttemptRouterErrorV1,
-  createAppToolPipelineAttemptRouterV1,
+  APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_,
+  AppToolPipelineAttemptRouterError,
+  createAppToolPipelineAttemptRouter,
 } from '#app/bootstrap/runtime/tool-pipeline-attempt-router';
 
 function deepFreeze<T>(value: T): T {
@@ -18,8 +18,8 @@ function deepFreeze<T>(value: T): T {
   return Object.freeze(value);
 }
 
-function prepared(id: string): Readonly<PreparedToolInvocationV1> {
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+function prepared(id: string): Readonly<PreparedToolInvocation> {
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     invocationId: `invocation-${id}`,
     attemptId: `invocation-${id}:attempt:1`,
     toolCallId: `call-${id}`,
@@ -27,7 +27,7 @@ function prepared(id: string): Readonly<PreparedToolInvocationV1> {
     modelMessageId: 'message-1',
     argumentOrigin: 'model_public',
     providerId: 'builtin-runtime',
-    operationId: 'builtin:read_plan' as NonDynamicOperationIdV1,
+    operationId: 'builtin:read_plan' as NonDynamicOperationId,
     executionFamily: 'builtin',
     executionMechanism: 'planning',
     capabilityId: 'builtin:read_plan',
@@ -68,9 +68,9 @@ function prepared(id: string): Readonly<PreparedToolInvocationV1> {
   });
 }
 
-function exactDispatch(calls: string[], id: string): ToolPipelineOutcomeDispatchV1 {
+function exactDispatch(calls: string[], id: string): ToolPipelineOutcomeDispatch {
   return Object.freeze({
-    verifyPreparedIdentity: (candidate: Readonly<PreparedToolInvocationV1>) => {
+    verifyPreparedIdentity: (candidate: Readonly<PreparedToolInvocation>) => {
       calls.push(`verify:${id}`);
       return candidate.identity.invocationId === `invocation-${id}`;
     },
@@ -80,7 +80,7 @@ function exactDispatch(calls: string[], id: string): ToolPipelineOutcomeDispatch
         kind: 'committed' as const,
         terminal: Object.freeze({
           status: 'success' as const,
-          content: Object.freeze([] as RuntimeJsonValueV1[]),
+          content: Object.freeze([] as RuntimeJsonValue[]),
           structuredContent: Object.freeze({ id }),
         }),
       });
@@ -91,13 +91,13 @@ function exactDispatch(calls: string[], id: string): ToolPipelineOutcomeDispatch
 describe('App Tool Pipeline effect-scoped attempt router', () => {
   test('binds two prepared authorities to their exact callbacks without cross-routing', async () => {
     const calls: string[] = [];
-    const router = createAppToolPipelineAttemptRouterV1();
+    const router = createAppToolPipelineAttemptRouter();
     const first = prepared('one');
     const second = prepared('two');
     router.bind(first, exactDispatch(calls, 'one'));
     router.bind(second, exactDispatch(calls, 'two'));
 
-    expect(router.schema).toBe(APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_V1);
+    expect(router.schema).toBe(APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_);
     expect(router.dispatch.verifyPreparedIdentity(first)).toBe(true);
     expect(router.dispatch.verifyPreparedIdentity(second)).toBe(true);
     const firstOutcome = await router.dispatch.dispatch(first);
@@ -113,7 +113,7 @@ describe('App Tool Pipeline effect-scoped attempt router', () => {
 
   test('fails closed for unbound, duplicate, unverified, and post-dispatch use', async () => {
     const calls: string[] = [];
-    const router = createAppToolPipelineAttemptRouterV1();
+    const router = createAppToolPipelineAttemptRouter();
     const authority = prepared('one');
     const dispatch = exactDispatch(calls, 'one');
     expect(router.dispatch.verifyPreparedIdentity(authority)).toEqual({
@@ -125,7 +125,7 @@ describe('App Tool Pipeline effect-scoped attempt router', () => {
     });
 
     router.bind(authority, dispatch);
-    expect(() => router.bind(authority, dispatch)).toThrow(AppToolPipelineAttemptRouterErrorV1);
+    expect(() => router.bind(authority, dispatch)).toThrow(AppToolPipelineAttemptRouterError);
     await expect(router.dispatch.dispatch(authority)).rejects.toMatchObject({
       code: 'unverified_dispatch',
     });
@@ -142,7 +142,7 @@ describe('App Tool Pipeline effect-scoped attempt router', () => {
   });
 
   test('rejects mutable prepared packets and never invokes an alternate callback after throw', async () => {
-    const router = createAppToolPipelineAttemptRouterV1();
+    const router = createAppToolPipelineAttemptRouter();
     expect(() =>
       router.bind(
         {
@@ -151,7 +151,7 @@ describe('App Tool Pipeline effect-scoped attempt router', () => {
         },
         exactDispatch([], 'one'),
       ),
-    ).toThrow(AppToolPipelineAttemptRouterErrorV1);
+    ).toThrow(AppToolPipelineAttemptRouterError);
 
     const calls: string[] = [];
     const authority = prepared('one');

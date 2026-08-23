@@ -16,28 +16,28 @@ import {
   computeLineDiff,
   formatDiffOutput,
   formatMultiHunkDiff,
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
-  workspaceFilesystemMutationReadyDigestV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
+  workspaceFilesystemMutationReadyDigest,
+  workspaceFilesystemProtectedBoundaryDigest,
 } from '@kite/builtin-runtime/filesystem';
 import {
-  createProtectedPathEvaluatorV1,
+  createProtectedPathEvaluator,
   isPathInsideWorkspace,
   msys2ToWindowsPath,
   normalizeMsys2PathsInText,
 } from '@kite/builtin-runtime/sandbox';
 import type {
-  WorkspaceFilesystemCommittedMutationV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemObserveObservationV1,
-  WorkspaceFilesystemObserveOperationV1,
-  WorkspaceFilesystemPreparedMutationV1,
-  WorkspaceFilesystemProviderResultV1,
+  WorkspaceFilesystemCommittedMutation,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemObserveObservation,
+  WorkspaceFilesystemObserveOperation,
+  WorkspaceFilesystemPreparedMutation,
+  WorkspaceFilesystemProviderResult,
 } from '@kite/runtime-spi';
 import {
   assertInsideWorkspace,
-  buildPolicyProvenReadOnlyHostShellInvocationsV1,
+  buildPolicyProvenReadOnlyHostShellInvocations,
   DEFAULT_SHELL_TIMEOUT_MS,
   resolveShellTimeoutMs,
   shellTool,
@@ -45,23 +45,23 @@ import {
 
 const DEFAULT_READ_FILE_LINE_LIMIT = 2_000;
 
-type FilesystemResult<Observation> = WorkspaceFilesystemProviderResultV1<Observation>;
+type FilesystemResult<Observation> = WorkspaceFilesystemProviderResult<Observation>;
 
 function builtinFilesystemFixture(workspace: string) {
-  const authority = new WorkspaceFilesystemGrantAuthorityV1({
+  const authority = new WorkspaceFilesystemGrantAuthority({
     idSource: (() => {
       let id = 0;
       return () => `tools-grant-${++id}`;
     })(),
   });
-  const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+  const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
   const unsignedBoundary = {
     schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
     ...structuredClone(evaluator.projectFilesystemBoundary()),
   };
   const protectedBoundary = {
     ...unsignedBoundary,
-    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsignedBoundary),
   };
   const binding = {
     threadId: 'tools-test-thread',
@@ -77,11 +77,11 @@ function builtinFilesystemFixture(workspace: string) {
     protectedPathRevision: 'tools-test-protected-path',
     approvalSummary: 'tools test fixture',
   };
-  const provider = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+  const provider = new LocalWorkspaceFilesystemProvider(authority.verifier());
 
   async function observe(
-    operation: WorkspaceFilesystemObserveOperationV1,
-  ): Promise<FilesystemResult<WorkspaceFilesystemObserveObservationV1>> {
+    operation: WorkspaceFilesystemObserveOperation,
+  ): Promise<FilesystemResult<WorkspaceFilesystemObserveObservation>> {
     return provider.observe({
       grant: authority.issueObserveGrant({
         binding,
@@ -93,8 +93,8 @@ function builtinFilesystemFixture(workspace: string) {
   }
 
   async function mutate(
-    operation: WorkspaceFilesystemMutationOperationV1,
-  ): Promise<FilesystemResult<WorkspaceFilesystemCommittedMutationV1>> {
+    operation: WorkspaceFilesystemMutationOperation,
+  ): Promise<FilesystemResult<WorkspaceFilesystemCommittedMutation>> {
     const prepared = await provider.prepareMutation({
       grant: authority.issuePrepareGrant({
         binding,
@@ -105,7 +105,7 @@ function builtinFilesystemFixture(workspace: string) {
     });
     if (!prepared.ok) return prepared;
 
-    const preparedMutation: WorkspaceFilesystemPreparedMutationV1 = prepared.observation;
+    const preparedMutation: WorkspaceFilesystemPreparedMutation = prepared.observation;
     const preimageArtifact = {
       artifactId: `pa_${'0'.repeat(64)}`,
       kind: 'filesystem_preimage' as const,
@@ -123,7 +123,7 @@ function builtinFilesystemFixture(workspace: string) {
     };
     const ready = {
       ...readyWithoutDigest,
-      readyDigest: workspaceFilesystemMutationReadyDigestV1(readyWithoutDigest),
+      readyDigest: workspaceFilesystemMutationReadyDigest(readyWithoutDigest),
     };
     const authorization = authority.acknowledgeMutationReady({
       binding,
@@ -141,8 +141,8 @@ function builtinFilesystemFixture(workspace: string) {
 }
 
 function readObservation(
-  result: FilesystemResult<WorkspaceFilesystemObserveObservationV1>,
-): Extract<WorkspaceFilesystemObserveObservationV1, { kind: 'read_file' }> {
+  result: FilesystemResult<WorkspaceFilesystemObserveObservation>,
+): Extract<WorkspaceFilesystemObserveObservation, { kind: 'read_file' }> {
   if (!result.ok || result.observation.kind !== 'read_file') {
     throw new Error(result.ok ? 'Expected read_file observation.' : result.failure.message);
   }
@@ -172,7 +172,7 @@ function msys2Win(p: string): string {
 describe('tool safety', () => {
   test('policy-proven reads use a non-login fixed POSIX shell', () => {
     expect(
-      buildPolicyProvenReadOnlyHostShellInvocationsV1('ls', '/workspace', {
+      buildPolicyProvenReadOnlyHostShellInvocations('ls', '/workspace', {
         platform: 'darwin',
         systemRoot: '',
       }),

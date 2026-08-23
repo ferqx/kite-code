@@ -6,11 +6,11 @@
 
 验证：`bun test packages/agent-kernel/test packages/runtime-host/test packages/runtime-storage-sqlite/test packages/builtin-runtime/test tests/runtime tests/tui-system`、`bun run typecheck`。
 
-App `RuntimeSessionCoordinator`、Kernel State26 与同一 Host Store5 adapter 共享唯一 persistence/abort seam；
+App `RuntimeSessionCoordinator`、Kernel Runtime State 与同一 Host SQLite Store adapter 共享唯一 persistence/abort seam；
 Session、effect coordinator 与 turn coordinator 不按路径自行创建第二 Store。取消顺序、cleanup barrier、effect lease、
-unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持；RMV1-16 final Gate 已完成。
+unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持；RM-16 final Gate 已完成。
 
-RMV1-06 已把 production execution lifecycle 原子切到 Runtime Host。Host 为每个长期 turn/compaction 创建唯一
+RM-06 已把 production execution lifecycle 原子切到 Runtime Host。Host 为每个长期 turn/compaction 创建唯一
 root `AbortController`，同一 Session 同时最多一个活动 operation；只有当前 operation 已收到 abort 后才允许保留
 一条 successor，且 successor 必须等待旧 operation 的完整 cleanup promise 后才能进入执行桥。第三条并发请求
 返回 `runtime_busy`，close/dispose 立即关闭 admission，并在关闭 bridge 与 Store 前等待所有已接收请求和 lifecycle
@@ -18,14 +18,14 @@ barrier。CLI/TUI compatibility path 只消费 Host signal，并把内部 deadli
 拥有 production root controller。
 
 `cancel_turn` 与 Host shutdown 仍先通过唯一 live Kernel control plane 提交 durable cancellation facts，再由 Host
-触发 root signal。Host `EffectSupervisor` 是四类 Store5 transaction acknowledgement 与单-Store effect lease 的
+触发 root signal。Host `EffectSupervisor` 是四类 SQLite Store transaction acknowledgement 与单-Store effect lease 的
 production owner：intent/attempt ack 失败时外部调用为零，lease 必须在 dispatch 前取得并在运行中续租，terminal
 commit 在释放 lease 前完成且由同一 SQLite transaction 原子核对 owner/expiry。续租失败或 stale owner 会中止同
 Session lifecycle，拒绝后续 dispatch/commit；dispatch 后没有 receipt 的事实仍按既有 unknown/reconciliation 规则
 收敛。terminal persist 必须携带执行者取得的 caller-bound owner token；Host 不允许旧执行者从相同 effectId 的
 replacement claim 反查并借用新 owner。Host 在 hydrate 后、首次 resume/start/compact 前对每个 Session 恰好运行一次 restart recovery，失败时在
 execution bridge 前 fail closed。当前没有进程级 single-Host global lock；SQLite transaction、revision 与
-effect lease 负责真实 writer fencing。State26、Store5 与 epoch `kite-runtime-modularization-v1-2026-08-19`
+effect lease 负责真实 writer fencing。Runtime State、SQLite Store 与 epoch `kite-runtime-modularization-v1-2026-08-19`
 是唯一 production format。
 
 ## Runtime 取消语义
@@ -53,7 +53,7 @@ drain 或 cleanup receipt 任一未确认时，Tool 与 run 保留 unknown/pendi
 
 TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名称、关键参数和已有输出并显示 `cancelled`；从未开始的 queued 探索工具不计入 `read N files` 等统计；不追加独立的整轮取消提示。实时 Ctrl+C/Esc、durable `tool.cancelled` 与 `turn.aborted(cause=user)` 必须共用同一套纯函数取消投影；该投影必须幂等，且晚到取消不得覆盖 `done/error/timeout/exhausted` 等既有终态。运行中的独立工具卡可能显式携带 `expanded=false`；`expanded` 只控制 Shell/Web Fetch 输出正文，`⎿ cancelled` 等 terminal footer 必须独立于折叠状态始终可见，本地取消不得再通过强制展开正文来换取 footer 可见性。实时取消和 event-log replay 必须得到相同视觉状态与渲染结果。取消后的旧 TUI run 仍可能在后台完成清理；键盘取消必须在 ESC/Ctrl+C 同一输入轮同步触达 SessionRuntime，不能等待 reducer 的 `running=false` effect，否则下一条 prompt 可能在旧 run 仍被视为活动时被静默拒绝。旧 run 的 finally 不得把新 run 的 `running` 状态重置为 idle，下一条 prompt 必须立即显示在消息列表中，并在清理完成后继续执行；RuntimeStore 的单飞等待不得隐藏用户已经提交的消息。正常完成已发出终态 `SET_EXITED` 后，不得再由停止 effect 反向 abort 已完成的 run。取消已请求但清理尚未完成时，输入层必须接受至多一条 successor prompt 并排队等待同一 cleanup barrier；普通仍在运行的 turn 不能借此接受并丢弃并发 prompt，successor run 获得 runtime lease 后必须继续进入模型调度并产生可见响应。 实时 reducer 在插入用户 prompt 时必须同步建立新的 turn 边界，不能把 successor 追加到已取消 turn；输入层先进入 running 再插入 prompt，避免短暂 idle 渲染把旧 turn 与 successor 一起提交到 Ink 的不可变 Static 区。取消后的 successor 若快速连续收到 reasoning completed 与回答增量，仍必须遵守 Thought presentation boundary：在消费回答前等待 Ink 已把运行态 Thought 单独提交并写入终端，不能让取消恢复路径重新把 Thought 与最终文本合并到同一帧。最新 turn 在 running 时可以把连续不可变前缀渐进提交到 Static，但收到终态进入 idle 后必须冻结该分割点：已提交前缀保持不变，新结算的 dynamic tail 继续作为 live tail，直到下一条用户消息建立更新的 turn（或会话 remount）。取消纯思考阶段时尤其不得把刚结算的 Thought 与已经显示的用户提示词在同一终止帧再次提升到 append-only Static；否则 Windows 主屏 scrollback 会留下重复提示词。 运行时事件循环在每次路由前检查本轮 AbortSignal；取消后由 provider 或 generator 排出的迟到 model/tool 事件不得投影到 successor。generator 自己产生 `turn.aborted(cause=user)` 时必须视为已取消；即使 generator 在 AbortSignal 触发后没有再 yield 取消事件、而是直接正常关闭，该 run 的 signal 仍是权威取消事实，必须跳过 `SET_EXITED`，避免旧 run 的终态投影覆盖新 run 的 running 状态。终态响应如果只比已流式文本多出标点或短后缀，必须并回已有文本 block，不得新增一个可见的重复行。只要当前 `model.requested` 的 request ID 仍有效，`model.text_delta` 就必须继续按流式累计事件处理，即使旧 run 的终态竞态曾把全局 `running` 短暂置为 false；不得把 cumulative delta 降级为普通文本事件逐条追加，否则终态协调虽能收敛 reducer 状态，Ink 主屏仍会留下已发布的重复帧。
 
-`boundedCancellationV1` 启用后，持久化 ResourceBudget deadline 触发同一 execution
+`boundedCancellation` 启用后，持久化 ResourceBudget deadline 触发同一 execution
 AbortSignal；普通模型、compaction、tool/MCP、Subagent 和 Verification 都继承该信号。deadline
 首先在一个 transaction 中取消未完成工具、将未 dispatch reservation release、将
 `dispatch_started` reservation 标记 `unknown`、取消所有 durable waiter，并写入
@@ -104,7 +104,7 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。App 读取会话时必须把 rolling snapshot 之后的持久化事件尾部归并后再投影交互；已经出现 `approval.granted` 或 `approval.rejected` 的审批不得从旧快照或事件重放中复活。回放层留下的 `approval.requested` 展示投影也不能单独判定为 pending：若持久化 RuntimeState 已无 interaction（例如后续已有 `tool.started`），不得 fork 一份重复的 recovery 会话。`tool.started` 必须同步清理同一 call 的旧审批投影，否则它会阻塞后续 `approval.requested`，使真实的 `approval.rejected` 工具卡在回放中丢失。Subagent 审批的展示交互以 parent `task` call 为 owner；child Tool Call id 只标识实际待执行工具，不能导致批准或拒绝后的 Footer interrupt 残留。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
-Runtime recovery journal identity 由 Host 的同一 Store5 owner 按 session 恢复并与 State26 snapshot
+Runtime recovery journal identity 由 Host 的同一 SQLite Store owner 按 session 恢复并与 Runtime State snapshot
 交叉验证。conversation/recovery fork 必须为 target session 原子写入新的 private identity，并由 Kernel
 清空 source journal lineage；source session 保持不变。code-only rewind 保持原 session/identity。identity
 缺失、格式错误或 metadata/snapshot 不一致时，model、tool 与 Provider 调用均为零。
@@ -119,7 +119,7 @@ canonical interaction 已为 idle，说明持久化终态不完整；Scheduler �
 
 用户在旧 run 已结束后发送下一条消息时，Runtime 必须先收敛当前 Task 遗留的非终态 Tool，再创建新 turn。
 这些 Tool 的内存 executor 不可能跨 run/进程继承；由 App `RuntimeSessionCoordinator` 注入全部必需 port 的
-`executeRuntimeTurnV1` 因而先以同一 durable batch 写入
+`executeRuntimeTurn` 因而先以同一 durable batch 写入
 `tool.cancelled`，并释放 reservation、取消 waiter，必要时关闭仍为 active 的旧 turn。只有 canonical
 interaction 仍存在时才走原 interaction resume；不得把孤立的 `running/queued/approved` Tool 直接带入新
 turn，否则它会永久触发 CompletionGuard 的 `tool_pending → wait_for_tool`。
@@ -205,13 +205,13 @@ wall-clock 回拨不能复活旧 hint；hint 被驱逐或过期只能返回
 
 以上协议与生命周期的物理 owner 已切到 Builtin Runtime：`@kite/runtime-spi` 定义 JSON-safe
 Subagent/Provider/continuation contract，`@kite/builtin-runtime` 拥有 sealed grant、Local Provider、唯一 composition、
-continuation JSON/cursor、role ceiling、replay binding 与 `BuiltinChildRuntimeDriverV1`。App composition root 只构造一个
-Builtin Driver/composition，`apps/kite/src/bootstrap/runtime/subagent/task-tool.ts` 的 State26 registration adapter
+continuation JSON/cursor、role ceiling、replay binding 与 `BuiltinChildRuntimeDriver`。App composition root 只构造一个
+Builtin Driver/composition，`apps/kite/src/bootstrap/runtime/subagent/task-tool.ts` 的 Runtime State registration adapter
 仅以 invocation-scoped callback 注入 tool/receipt translation。缺少调用者已经解析的 Model 或同一
-`BuiltinModelEffectCoordinatorV1` 时立即 fail closed，
+`BuiltinModelEffectCoordinator` 时立即 fail closed，
 不得现场 `createChatModel()`、重建 Driver/composition 或 fallback。pending registration、single-use start/resume、
 expiry、capacity、abandon 与 non-decreasing clock 都只由 Builtin Driver 裁决。该物理迁移保持
-private suspended ref、Artifact schema/key、approval resume、cancel grace、cleanup/reconcile 与 unknown recovery 语义，并由 State26/Store5 持久化。
+private suspended ref、Artifact schema/key、approval resume、cancel grace、cleanup/reconcile 与 unknown recovery 语义，并由 Runtime State/SQLite Store 持久化。
 
 并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
 可见的 suspended 状态并停止 spinner 与计时；后续 Runtime 事实将其区分为“等待自动审查”、

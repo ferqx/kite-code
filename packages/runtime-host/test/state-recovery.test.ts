@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { createInitialAgentState } from '@kite/agent-kernel';
 import {
-  isRuntimeHostStateToolRecoveryInvalidV1,
-  projectRuntimeHostStateRestartRecoveryEventsV1,
-  runtimeHostStateRestartRecoveryCapabilityInvocationIdsV1,
+  isRuntimeHostStateToolRecoveryInvalid,
+  projectRuntimeHostStateRestartRecoveryEvents,
+  runtimeHostStateRestartRecoveryCapabilityInvocationIds,
 } from '@kite/runtime-host';
 
 const RECOVERY_KEY = 'a'.repeat(64);
@@ -21,9 +21,9 @@ function freshState() {
 describe('Runtime Host State recovery port', () => {
   test('projects the Kernel-owned restart policy without ambient evidence', () => {
     const state = freshState();
-    expect(runtimeHostStateRestartRecoveryCapabilityInvocationIdsV1(state)).toEqual([]);
+    expect(runtimeHostStateRestartRecoveryCapabilityInvocationIds(state)).toEqual([]);
     expect(
-      projectRuntimeHostStateRestartRecoveryEventsV1(state, {
+      projectRuntimeHostStateRestartRecoveryEvents(state, {
         capabilityFinishedAtByInvocationId: {},
         pendingModelEvidenceFailures: {},
         completedModelEvidenceFailures: {},
@@ -33,9 +33,9 @@ describe('Runtime Host State recovery port', () => {
 
   test('fails closed on the exact durable journal-invalid marker', () => {
     const state = freshState();
-    expect(isRuntimeHostStateToolRecoveryInvalidV1(state)).toBe(false);
+    expect(isRuntimeHostStateToolRecoveryInvalid(state)).toBe(false);
     expect(
-      isRuntimeHostStateToolRecoveryInvalidV1({
+      isRuntimeHostStateToolRecoveryInvalid({
         ...state,
         toolRecovery: {
           ...state.toolRecovery,

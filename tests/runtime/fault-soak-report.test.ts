@@ -6,15 +6,15 @@ import {
   RUNTIME_FAULT_SOAK_CASE_IDS,
   RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS,
   RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS,
-  type RuntimeFaultSoakAttemptV2,
-  type RuntimeFaultSoakMetricEvidenceV2,
+  type RuntimeFaultSoakAttempt,
+  type RuntimeFaultSoakMetricEvidence,
 } from '../../scripts/runtime/fault-soak-report';
 
 function unsupported(reason: string) {
   return { supported: false as const, reason };
 }
 
-function attempts(iterations = 1): RuntimeFaultSoakAttemptV2[] {
+function attempts(iterations = 1): RuntimeFaultSoakAttempt[] {
   return RUNTIME_FAULT_SOAK_CASE_IDS.flatMap((caseId) =>
     Array.from({ length: iterations }, (_, index) => ({
       caseId,
@@ -62,8 +62,8 @@ function attempts(iterations = 1): RuntimeFaultSoakAttemptV2[] {
 
 function lifecycleMetric(
   values: ReadonlyArray<{ before: number; after: number }>,
-  attempt: RuntimeFaultSoakAttemptV2,
-): { supported: true; value: RuntimeFaultSoakMetricEvidenceV2 } {
+  attempt: RuntimeFaultSoakAttempt,
+): { supported: true; value: RuntimeFaultSoakMetricEvidence } {
   const point = (sequence: number, value: { before: number; after: number }) => ({
     sequence,
     ...value,
@@ -93,8 +93,8 @@ function lifecycleMetric(
 }
 
 function qualificationBudget(
-  attempt: RuntimeFaultSoakAttemptV2,
-): RuntimeFaultSoakAttemptV2['runtimeBudgetUsage'] {
+  attempt: RuntimeFaultSoakAttempt,
+): RuntimeFaultSoakAttempt['runtimeBudgetUsage'] {
   if (attempt.caseId !== 'long_runtime_replay' || !attempt.runtimeBudgetUsage.supported) {
     return attempt.runtimeBudgetUsage;
   }
@@ -187,7 +187,7 @@ describe('runtime fault soak report', () => {
             attempt,
           ),
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -240,7 +240,7 @@ describe('runtime fault soak report', () => {
             attempt,
           ),
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -272,7 +272,7 @@ describe('runtime fault soak report', () => {
             attempt,
           ),
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -300,7 +300,7 @@ describe('runtime fault soak report', () => {
             attempt,
           ),
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -331,7 +331,7 @@ describe('runtime fault soak report', () => {
             attempt,
           ),
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -360,7 +360,7 @@ describe('runtime fault soak report', () => {
             },
           },
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);

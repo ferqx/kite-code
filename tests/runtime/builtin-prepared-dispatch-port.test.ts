@@ -1,51 +1,51 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  APP_BUILTIN_PREPARED_DISPATCH_PORT_SCHEMA_V1,
-  AppBuiltinPreparedDispatchPortErrorV1,
-  createAppBuiltinPreparedDispatchPortV1,
-  createAppDynamicMcpPreparedDispatchAdapterV1,
+  APP_BUILTIN_PREPARED_DISPATCH_PORT_SCHEMA_,
+  AppBuiltinPreparedDispatchPortError,
+  createAppBuiltinPreparedDispatchPort,
+  createAppDynamicMcpPreparedDispatchAdapter,
 } from '#app/bootstrap/runtime/builtin-prepared-dispatch-port';
 import type {
-  AppPreparedToolInvocationPacketV1,
-  AppToolPipelinePreparedRequestV1,
+  AppPreparedToolInvocationPacket,
+  AppToolPipelinePreparedRequest,
 } from '#app/bootstrap/runtime/tool-pipeline-prepared';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  createCapabilityBindingV1,
-  digestCapabilityValueV1,
+  createBuiltinToolCatalogProjection,
+  createCapabilityBinding,
+  digestCapabilityValue,
 } from '#builtin-runtime';
 import type {
-  CapabilityExecutionInvocationV1,
-  CapabilityExecutionPortV1,
-  CapabilityTurnContextV1,
-  DynamicMcpPreparedToolInvocationIdentityV1,
-  ExecutionReceiptV1,
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
+  CapabilityExecutionInvocation,
+  CapabilityExecutionPort,
+  CapabilityTurnContext,
+  DynamicMcpPreparedToolInvocationIdentity,
+  ExecutionReceipt,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
 } from '#runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
+import { createRuntimeModuleRegistry } from '#runtime-spi';
 
-const turnContext: CapabilityTurnContextV1 = Object.freeze({
+const turnContext: CapabilityTurnContext = Object.freeze({
   hasTaskAdapter: true,
   hasGitBroker: true,
   brokeredGitFeatureRevision: 'brokered-git-r1',
   toolSearchEnabled: true,
-  promptContractV2: true,
+  promptContract: true,
   activeSkillFrameIds: ['frame-1'],
   availableSkillIds: ['skill-1'],
   featureFlags: {
-    brokeredGitV1: true,
-    skillWorkflowV1: true,
-    skillActivationV2: true,
+    brokeredGit: true,
+    skillWorkflow: true,
+    skillActivation: true,
   },
 });
 
-type PreparedPacket = AppPreparedToolInvocationPacketV1<RuntimeJsonValueV1>;
+type PreparedPacket = AppPreparedToolInvocationPacket<RuntimeJsonValue>;
 type DynamicPreparedPacket = PreparedPacket & {
-  readonly identity: Readonly<DynamicMcpPreparedToolInvocationIdentityV1>;
+  readonly identity: Readonly<DynamicMcpPreparedToolInvocationIdentity>;
 };
 
 type DynamicWrapperEntry = Extract<
@@ -54,8 +54,8 @@ type DynamicWrapperEntry = Extract<
 >;
 
 function projection() {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  return createBuiltinToolCatalogProjectionV1(registry, { turnContext });
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  return createBuiltinToolCatalogProjection(registry, { turnContext });
 }
 
 function freezeDeep<T>(value: T, seen = new WeakSet<object>()): T {
@@ -71,7 +71,7 @@ function freezeDeep<T>(value: T, seen = new WeakSet<object>()): T {
 
 function requestEnvelope(
   entry: ReturnType<typeof projection>['entries'][number],
-): AppToolPipelinePreparedRequestV1 {
+): AppToolPipelinePreparedRequest {
   return freezeDeep({
     schema: 'kite.tool-pipeline-prepared-request.v1' as const,
     authorizationKind: 'policy_allow' as const,
@@ -91,10 +91,10 @@ function preparedFor(
   catalog: ReturnType<typeof projection>,
   operationId: string,
   options: {
-    readonly binding?: ReturnType<typeof createCapabilityBindingV1> | null;
+    readonly binding?: ReturnType<typeof createCapabilityBinding> | null;
     readonly projectionRevision?: string;
-    readonly request?: AppToolPipelinePreparedRequestV1;
-    readonly arguments?: RuntimeJsonValueV1;
+    readonly request?: AppToolPipelinePreparedRequest;
+    readonly arguments?: RuntimeJsonValue;
     readonly argumentOrigin?: 'model_public' | 'runtime_private';
     readonly schemaDigest?: string;
   } = {},
@@ -112,7 +112,7 @@ function preparedFor(
       : entry.executionMechanism === 'subagent'
         ? ('subagent' as const)
         : ('builtin' as const);
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     invocationId: 'invocation-1',
     attemptId: 'attempt-1',
     toolCallId: 'call-1',
@@ -120,7 +120,7 @@ function preparedFor(
     modelMessageId: 'message-1',
     argumentOrigin: options.argumentOrigin ?? 'model_public',
     providerId: entry.providerId,
-    operationId: entry.operationId as NonDynamicOperationIdV1,
+    operationId: entry.operationId as NonDynamicOperationId,
     executionFamily: family,
     executionMechanism: entry.executionMechanism,
     capabilityId: entry.capabilityId,
@@ -164,11 +164,11 @@ function preparedFor(
 
 function dynamicPrepared(
   catalog: ReturnType<typeof projection>,
-): Readonly<AppPreparedToolInvocationPacketV1<RuntimeJsonValueV1>> {
+): Readonly<AppPreparedToolInvocationPacket<RuntimeJsonValue>> {
   const request = requestEnvelope(
     catalog.entries.find((entry) => entry.operationId === 'builtin:read_file')!,
   );
-  const identity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+  const identity: DynamicMcpPreparedToolInvocationIdentity = {
     invocationId: 'invocation-1',
     attemptId: 'attempt-1',
     toolCallId: 'call-1',
@@ -235,9 +235,9 @@ function dynamicPrepared(
 function dynamicPreparedForAdapter(
   catalog: ReturnType<typeof projection>,
   overrides: {
-    readonly identity?: Partial<DynamicMcpPreparedToolInvocationIdentityV1>;
-    readonly subject?: Partial<DynamicMcpPreparedToolInvocationIdentityV1['subject']>;
-    readonly runtimeWrapper?: Partial<DynamicMcpPreparedToolInvocationIdentityV1['runtimeWrapper']>;
+    readonly identity?: Partial<DynamicMcpPreparedToolInvocationIdentity>;
+    readonly subject?: Partial<DynamicMcpPreparedToolInvocationIdentity['subject']>;
+    readonly runtimeWrapper?: Partial<DynamicMcpPreparedToolInvocationIdentity['runtimeWrapper']>;
   } = {},
 ): DynamicPreparedPacket {
   const wrapper = catalog.entries.find(
@@ -257,7 +257,7 @@ function dynamicPreparedForAdapter(
     providerId: 'fixture-provider',
     exposedToolName: 'mcp__fixture__search' as const,
     dynamicCatalogRevision: 'd'.repeat(64),
-    bindingId: createCapabilityBindingV1({
+    bindingId: createCapabilityBinding({
       capabilityId: 'mcp:fixture/search',
       capabilityRevision: 'subject-revision',
       exposedToolName: 'mcp__fixture__search',
@@ -265,14 +265,14 @@ function dynamicPreparedForAdapter(
       turnId: 'turn-1',
     }).bindingId,
   } as const;
-  const binding = createCapabilityBindingV1({
+  const binding = createCapabilityBinding({
     capabilityId: subject.capabilityId,
     capabilityRevision: subject.capabilityRevision,
     exposedToolName: subject.exposedToolName,
     inputSchema: subjectSchema,
     turnId: 'turn-1',
   });
-  const wrapperSchemaDigest = digestCapabilityValueV1(wrapper.inputSchema);
+  const wrapperSchemaDigest = digestCapabilityValue(wrapper.inputSchema);
   const runtimeWrapper = {
     operationId: 'mcp:dynamic_tool' as const,
     capabilityId: 'mcp:dynamic_tool',
@@ -283,7 +283,7 @@ function dynamicPreparedForAdapter(
     builtinProjectionRevision: catalog.revision,
   } as const;
   const argumentsValue = Object.freeze({ query: 'fixture' });
-  const identity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+  const identity: DynamicMcpPreparedToolInvocationIdentity = {
     invocationId: 'dynamic-invocation',
     attemptId: 'dynamic-invocation:attempt:1',
     toolCallId: 'dynamic-call',
@@ -299,9 +299,9 @@ function dynamicPreparedForAdapter(
     descriptorRevision: subject.descriptorRevision,
     parserRevision: 'subject-parser',
     executorRevision: null,
-    argumentsDigest: digestCapabilityValueV1(argumentsValue),
-    schemaDigest: digestCapabilityValueV1(subjectSchema),
-    effectiveEffectsDigest: digestCapabilityValueV1({
+    argumentsDigest: digestCapabilityValue(argumentsValue),
+    schemaDigest: digestCapabilityValue(subjectSchema),
+    effectiveEffectsDigest: digestCapabilityValue({
       filesystem: 'none',
       network: 'read',
       externalState: 'read',
@@ -342,10 +342,10 @@ function dynamicPreparedForAdapter(
 
 function dynamicHostPort(
   entry: DynamicWrapperEntry,
-  calls: CapabilityExecutionInvocationV1[],
-): CapabilityExecutionPortV1 {
+  calls: CapabilityExecutionInvocation[],
+): CapabilityExecutionPort {
   return Object.freeze({
-    invoke: async (invocation: CapabilityExecutionInvocationV1): Promise<ExecutionReceiptV1> => {
+    invoke: async (invocation: CapabilityExecutionInvocation): Promise<ExecutionReceipt> => {
       calls.push(invocation);
       return Object.freeze({
         invocationId: invocation.request.invocationId,
@@ -382,12 +382,12 @@ function dynamicAdapterFixture(
         entry.visibility === 'internal' && entry.operationId === 'mcp:dynamic_tool',
     );
   if (!wrapper) throw new Error('dynamic wrapper entry missing');
-  const calls: CapabilityExecutionInvocationV1[] = [];
+  const calls: CapabilityExecutionInvocation[] = [];
   let resolverCalls = 0;
   const signal = new AbortController().signal;
   const host = dynamicHostPort(wrapper, calls);
   const expected = dynamicPreparedForAdapter(catalog);
-  const verifyPreparedIdentity = (candidate: Readonly<PreparedToolInvocationV1>) => {
+  const verifyPreparedIdentity = (candidate: Readonly<PreparedToolInvocation>) => {
     const identity = candidate.identity;
     const valid =
       identity.isDynamicMcp === true &&
@@ -422,7 +422,7 @@ function dynamicAdapterFixture(
         : { valid: false as const, code: 'identity_mismatch' as const },
     );
   };
-  const adapter = createAppDynamicMcpPreparedDispatchAdapterV1({
+  const adapter = createAppDynamicMcpPreparedDispatchAdapter({
     projection: projectionOverride,
     capabilityExecution: host,
     verifyPreparedIdentity,
@@ -464,10 +464,10 @@ function hostPortFor(
   entry: Readonly<
     Extract<ReturnType<typeof projection>['entries'][number], { visibility: 'model' }>
   >,
-  calls: CapabilityExecutionInvocationV1[],
-): CapabilityExecutionPortV1 {
+  calls: CapabilityExecutionInvocation[],
+): CapabilityExecutionPort {
   return Object.freeze({
-    invoke: async (invocation: CapabilityExecutionInvocationV1): Promise<ExecutionReceiptV1> => {
+    invoke: async (invocation: CapabilityExecutionInvocation): Promise<ExecutionReceipt> => {
       calls.push(invocation);
       return Object.freeze({
         invocationId: invocation.request.invocationId,
@@ -520,11 +520,11 @@ function bridgeFixture(
       : candidate.operationId === packet.identity.operationId,
   );
   if (entry?.visibility !== 'model') throw new Error('fixture entry missing');
-  const calls: CapabilityExecutionInvocationV1[] = [];
+  const calls: CapabilityExecutionInvocation[] = [];
   const signal = new AbortController().signal;
   const host = hostPortFor(entry, calls);
   let resolverCalls = 0;
-  const bridge = createAppBuiltinPreparedDispatchPortV1({
+  const bridge = createAppBuiltinPreparedDispatchPort({
     projection: catalog,
     capabilityExecution: host,
     resolveMechanisms: () => {
@@ -633,7 +633,7 @@ describe('App Builtin prepared dispatch port', () => {
           identity: {
             visibility: 'model',
             modelVisible: true,
-          } as unknown as Partial<DynamicMcpPreparedToolInvocationIdentityV1>,
+          } as unknown as Partial<DynamicMcpPreparedToolInvocationIdentity>,
         }),
       },
       {
@@ -662,7 +662,7 @@ describe('App Builtin prepared dispatch port', () => {
         continue;
       }
       await expect(fixture.adapter.dispatch(candidate.packet)).rejects.toBeInstanceOf(
-        AppBuiltinPreparedDispatchPortErrorV1,
+        AppBuiltinPreparedDispatchPortError,
       );
       expect(fixture.calls).toHaveLength(0);
       expect(fixture.resolverCalls()).toBe(0);
@@ -672,7 +672,7 @@ describe('App Builtin prepared dispatch port', () => {
   test('builds one exact invocation and enters projection.dispatch with the supplied Host port', async () => {
     const catalog = projection();
     const packet = preparedFor(catalog, 'builtin:read_file');
-    const calls: CapabilityExecutionInvocationV1[] = [];
+    const calls: CapabilityExecutionInvocation[] = [];
     const entry = catalog.entries.find(
       (candidate) => candidate.operationId === 'builtin:read_file',
     );
@@ -682,11 +682,11 @@ describe('App Builtin prepared dispatch port', () => {
     let resolverInput:
       | Parameters<
           NonNullable<
-            Parameters<typeof createAppBuiltinPreparedDispatchPortV1>[0]['resolveMechanisms']
+            Parameters<typeof createAppBuiltinPreparedDispatchPort>[0]['resolveMechanisms']
           >
         >[0]
       | undefined;
-    const bridge = createAppBuiltinPreparedDispatchPortV1({
+    const bridge = createAppBuiltinPreparedDispatchPort({
       projection: catalog,
       capabilityExecution: host,
       resolveMechanisms: (input) => {
@@ -702,7 +702,7 @@ describe('App Builtin prepared dispatch port', () => {
       arguments: packet.input.arguments,
     });
 
-    expect(bridge.schema).toBe(APP_BUILTIN_PREPARED_DISPATCH_PORT_SCHEMA_V1);
+    expect(bridge.schema).toBe(APP_BUILTIN_PREPARED_DISPATCH_PORT_SCHEMA_);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.binding.bindingId).toBeDefined();
     expect(calls[0]?.binding.bindingId).not.toBe(packet.identity.bindingId);
@@ -736,7 +736,7 @@ describe('App Builtin prepared dispatch port', () => {
     });
     expect(valid.calls).toHaveLength(1);
 
-    const forgedBinding = createCapabilityBindingV1({
+    const forgedBinding = createCapabilityBinding({
       capabilityId: 'builtin:read_file',
       capabilityRevision: 'forged',
       exposedToolName: 'read_file',
@@ -761,7 +761,7 @@ describe('App Builtin prepared dispatch port', () => {
     const taskCases: ReadonlyArray<{
       readonly argumentOrigin: 'model_public' | 'runtime_private';
       readonly schemaDigest: string;
-      readonly arguments: RuntimeJsonValueV1;
+      readonly arguments: RuntimeJsonValue;
     }> = [
       {
         argumentOrigin: 'model_public' as const,
@@ -817,7 +817,7 @@ describe('App Builtin prepared dispatch port', () => {
               catalog.entries.find((entry) => entry.operationId === 'builtin:read_file')!,
             ),
             schema: 'bad',
-          } as unknown as AppToolPipelinePreparedRequestV1,
+          } as unknown as AppToolPipelinePreparedRequest,
         }),
         input: (packet: PreparedPacket) => ({
           prepared: packet,
@@ -834,7 +834,7 @@ describe('App Builtin prepared dispatch port', () => {
               catalog.entries.find((entry) => entry.operationId === 'builtin:read_file')!,
             ),
             grantUsed: 'approve_once',
-          } as unknown as AppToolPipelinePreparedRequestV1,
+          } as unknown as AppToolPipelinePreparedRequest,
         }),
         input: (packet: PreparedPacket) => ({
           prepared: packet,
@@ -851,7 +851,7 @@ describe('App Builtin prepared dispatch port', () => {
               catalog.entries.find((entry) => entry.operationId === 'builtin:read_file')!,
             ),
             policyEffects: { network: false },
-          } as unknown as AppToolPipelinePreparedRequestV1,
+          } as unknown as AppToolPipelinePreparedRequest,
         }),
         input: (packet: PreparedPacket) => ({
           prepared: packet,
@@ -912,7 +912,7 @@ describe('App Builtin prepared dispatch port', () => {
     const catalog = projection();
     const ordinary = preparedFor(catalog, 'builtin:read_file');
     const dynamic = dynamicPrepared(catalog);
-    const cases: Readonly<PreparedToolInvocationV1>[] = [
+    const cases: Readonly<PreparedToolInvocation>[] = [
       ordinary,
       dynamic,
       preparedFor(catalog, 'builtin:ask_user'),
@@ -926,7 +926,7 @@ describe('App Builtin prepared dispatch port', () => {
           executionMechanism: packet.identity.executionMechanism,
           arguments: packet.input.arguments,
         }),
-      ).rejects.toBeInstanceOf(AppBuiltinPreparedDispatchPortErrorV1);
+      ).rejects.toBeInstanceOf(AppBuiltinPreparedDispatchPortError);
       expect(fixture.calls).toHaveLength(0);
       expect(fixture.resolverCalls).toBe(0);
     }
@@ -941,7 +941,7 @@ describe('App Builtin prepared dispatch port', () => {
     ).text();
     expect(source).toContain('input.projection.dispatch');
     expect(source).not.toContain('capabilityExecution.invoke(');
-    expect(source).not.toContain('createRuntimeModuleRegistryV1');
+    expect(source).not.toContain('createRuntimeModuleRegistry');
     expect(source).not.toContain('createRuntimeHost');
   });
 });

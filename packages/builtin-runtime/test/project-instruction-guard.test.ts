@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  checkProjectInstructionSnapshotFreshnessV1,
-  projectProjectInstructionGuardTargetV1,
+  checkProjectInstructionSnapshotFreshness,
+  projectProjectInstructionGuardTarget,
   resolveProjectInstructionSnapshot,
 } from '../src/model/project-instructions';
 
@@ -23,7 +23,7 @@ afterEach(() => {
 describe('Builtin project instruction snapshot guard', () => {
   test('projects write, shell, and code-subagent targets from catalog facts', () => {
     expect(
-      projectProjectInstructionGuardTargetV1({
+      projectProjectInstructionGuardTarget({
         executionMechanism: 'filesystem',
         declaredFilesystemEffect: 'write',
         effectiveFilesystemEffect: 'write',
@@ -31,7 +31,7 @@ describe('Builtin project instruction snapshot guard', () => {
       }),
     ).toEqual({ targetPath: 'src/new.ts', reason: 'filesystem_write' });
     expect(
-      projectProjectInstructionGuardTargetV1({
+      projectProjectInstructionGuardTarget({
         executionMechanism: 'shell',
         declaredFilesystemEffect: 'unknown',
         effectiveFilesystemEffect: 'unknown',
@@ -39,7 +39,7 @@ describe('Builtin project instruction snapshot guard', () => {
       }),
     ).toEqual({ targetPath: '.', reason: 'shell' });
     expect(
-      projectProjectInstructionGuardTargetV1({
+      projectProjectInstructionGuardTarget({
         executionMechanism: 'subagent',
         declaredFilesystemEffect: 'unknown',
         effectiveFilesystemEffect: 'unknown',
@@ -47,7 +47,7 @@ describe('Builtin project instruction snapshot guard', () => {
       }),
     ).toEqual({ targetPath: '.', reason: 'code_subagent' });
     expect(
-      projectProjectInstructionGuardTargetV1({
+      projectProjectInstructionGuardTarget({
         executionMechanism: 'subagent',
         declaredFilesystemEffect: 'unknown',
         effectiveFilesystemEffect: 'unknown',
@@ -62,7 +62,7 @@ describe('Builtin project instruction snapshot guard', () => {
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     const visible = resolveProjectInstructionSnapshot({ workspace: root });
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
-    const target = projectProjectInstructionGuardTargetV1({
+    const target = projectProjectInstructionGuardTarget({
       executionMechanism: 'filesystem',
       declaredFilesystemEffect: 'write',
       effectiveFilesystemEffect: 'write',
@@ -71,7 +71,7 @@ describe('Builtin project instruction snapshot guard', () => {
     if (!target) throw new Error('missing guard target');
 
     expect(
-      checkProjectInstructionSnapshotFreshnessV1({
+      checkProjectInstructionSnapshotFreshness({
         workspace: root,
         visibleSnapshot: visible,
         target,
@@ -86,7 +86,7 @@ describe('Builtin project instruction snapshot guard', () => {
       targetPaths: [target.targetPath],
     });
     expect(
-      checkProjectInstructionSnapshotFreshnessV1({
+      checkProjectInstructionSnapshotFreshness({
         workspace: root,
         visibleSnapshot: refreshed,
         target,
@@ -99,7 +99,7 @@ describe('Builtin project instruction snapshot guard', () => {
     writeFileSync(join(root, 'AGENTS.md'), 'old rule');
     const visible = resolveProjectInstructionSnapshot({ workspace: root });
     writeFileSync(join(root, 'AGENTS.md'), 'new rule');
-    const target = projectProjectInstructionGuardTargetV1({
+    const target = projectProjectInstructionGuardTarget({
       executionMechanism: 'shell',
       declaredFilesystemEffect: 'unknown',
       effectiveFilesystemEffect: 'unknown',
@@ -108,7 +108,7 @@ describe('Builtin project instruction snapshot guard', () => {
     if (!target) throw new Error('missing guard target');
 
     expect(
-      checkProjectInstructionSnapshotFreshnessV1({
+      checkProjectInstructionSnapshotFreshness({
         workspace: root,
         visibleSnapshot: visible,
         target,

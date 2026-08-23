@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import {
-  createBuiltinCredentialBrokerV1,
+  createBuiltinCredentialBroker,
   McpConnectionManager,
   type McpConnectionManagerOptions,
   type McpCredentialKey,
@@ -9,7 +9,7 @@ import {
   MemoryMcpCredentialStore,
   normalizeMcpToolResult,
 } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostMcpStdioProcessPortV1 } from '@kite/runtime-host';
+import { createRuntimeHostMcpStdioProcessPort } from '@kite/runtime-host';
 import {
   type OAuthClientProvider,
   UnauthorizedError,
@@ -51,7 +51,7 @@ describe('McpConnectionManager governance fixture', () => {
     });
   });
 
-  const stdioProcessPort = createRuntimeHostMcpStdioProcessPortV1();
+  const stdioProcessPort = createRuntimeHostMcpStdioProcessPort();
   const manager = createManager({ stdioProcessPort });
 
   afterEach(async () => {
@@ -532,7 +532,7 @@ describe('McpConnectionManager governance fixture', () => {
         return Response.json({ jsonrpc: '2.0', id: message.id, result });
       },
     });
-    const credentialBroker = createBuiltinCredentialBrokerV1({ store });
+    const credentialBroker = createBuiltinCredentialBroker({ store });
     const credentialHandle = await credentialBroker.issueForKey(key, {
       purpose: 'mcp.transport',
     });

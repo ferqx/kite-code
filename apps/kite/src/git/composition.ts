@@ -1,17 +1,17 @@
 import { existsSync } from 'node:fs';
 import {
-  createGitBrokerV1,
-  type GitBrokerV1,
-  qualifyBrokeredGitNativeDenyV1,
+  createGitBroker,
+  type GitBroker,
+  qualifyBrokeredGitNativeDeny,
 } from '@kite/builtin-runtime/git';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
-import { BROKERED_GIT_FEATURE_REVISION_V1, type GitShellDenyEvidenceV1 } from '@kite/runtime-spi';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+import { BROKERED_GIT_FEATURE_REVISION_, type GitShellDenyEvidence } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
-import { createAppGitProcessAdapterV1 } from './process-adapter';
+import { createAppGitProcessAdapter } from './process-adapter';
 
 /** Release-owned executable selection. There is no PATH/model fallback. */
-export function resolveAppGitExecutableV1(): string | undefined {
+export function resolveAppGitExecutable(): string | undefined {
   if (process.platform === 'darwin' || process.platform === 'linux') {
     return existsSync('/usr/bin/git') ? '/usr/bin/git' : undefined;
   }
@@ -24,33 +24,33 @@ export function resolveAppGitExecutableV1(): string | undefined {
  * the exact same revision.  The executable is release/App-owned, never model
  * input or PATH lookup.
  */
-export function composeAppGitBrokerV1(input: {
+export function composeAppGitBroker(input: {
   workspace: string;
   executable: string;
   config: AgentConfig;
-  shellDenyEvidence: GitShellDenyEvidenceV1;
-}): GitBrokerV1 | undefined {
+  shellDenyEvidence: GitShellDenyEvidence;
+}): GitBroker | undefined {
   const surface = input.config.executionCapabilitySurface;
-  const qualification = qualifyBrokeredGitNativeDenyV1(input.shellDenyEvidence);
+  const qualification = qualifyBrokeredGitNativeDeny(input.shellDenyEvidence);
   if (
-    !getFeatureFlags(input.config).brokeredGitV1 ||
+    !getFeatureFlags(input.config).brokeredGit ||
     !input.config.executionBoundary ||
-    surface?.brokeredGitFeatureRevision !== BROKERED_GIT_FEATURE_REVISION_V1 ||
+    surface?.brokeredGitFeatureRevision !== BROKERED_GIT_FEATURE_REVISION_ ||
     !surface.gitInspect ||
     qualification.outcome !== 'qualified'
   ) {
     return undefined;
   }
-  return createGitBrokerV1({
+  return createGitBroker({
     workspace: input.workspace,
     authorizedRepositoryRoot: input.config.executionBoundary.workspaceRoot,
     executable: input.executable,
-    featureRevision: BROKERED_GIT_FEATURE_REVISION_V1,
+    featureRevision: BROKERED_GIT_FEATURE_REVISION_,
     shellDenyEvidence: qualification.evidence,
-    protectedPathEvaluator: createProtectedPathEvaluatorV1({
+    protectedPathEvaluator: createProtectedPathEvaluator({
       workspaceRoot: input.config.executionBoundary.workspaceRoot,
       mode: input.config.executionBoundary.protectedPathPolicy,
     }),
-    processAdapter: createAppGitProcessAdapterV1(),
+    processAdapter: createAppGitProcessAdapter(),
   });
 }

@@ -1,111 +1,111 @@
 import type {
-  PreparedSandboxExecutionV1,
-  SandboxDisposalIntentAcknowledgementV1,
-  SandboxDisposalReceiptAcknowledgementV1,
-  SandboxExecutionDispatchIntentAcknowledgementV1,
-  SandboxExecutionSupervisorStartedAcknowledgementV1,
-  SandboxPreparationArtifactPortV1,
-  SandboxPreparationIntentAcknowledgementV1,
-  SandboxPreparationLifecycleV1,
-  SandboxPreparationReadyAcknowledgementV1,
-  SandboxPreparationV1,
-  SandboxPreparedProcessCleanupV1,
-  SandboxPreparedProcessExecutionPortV1,
-  SandboxPreparedProcessExecutionResultV1,
+  PreparedSandboxExecution,
+  SandboxDisposalIntentAcknowledgement,
+  SandboxDisposalReceiptAcknowledgement,
+  SandboxExecutionDispatchIntentAcknowledgement,
+  SandboxExecutionSupervisorStartedAcknowledgement,
+  SandboxPreparation,
+  SandboxPreparationArtifactPort,
+  SandboxPreparationIntentAcknowledgement,
+  SandboxPreparationLifecycle,
+  SandboxPreparationReadyAcknowledgement,
+  SandboxPreparedProcessCleanup,
+  SandboxPreparedProcessExecutionPort,
+  SandboxPreparedProcessExecutionResult,
 } from '@kite/runtime-spi';
 import {
-  executePosixSupervisedV1,
-  type RuntimeHostPreparedProcessInputV1,
-  type RuntimeHostPreparedProcessResultV1,
+  executePosixSupervised,
+  type RuntimeHostPreparedProcessInput,
+  type RuntimeHostPreparedProcessResult,
 } from './posix-supervisor';
 
-export type RuntimeHostSandboxLifecycleEvidenceV1 =
+export type RuntimeHostSandboxLifecycleEvidence =
   | {
       readonly stage: 'preparation_intent';
-      readonly preparation: Readonly<SandboxPreparationV1>;
-      readonly acknowledgement: Readonly<SandboxPreparationIntentAcknowledgementV1>;
+      readonly preparation: Readonly<SandboxPreparation>;
+      readonly acknowledgement: Readonly<SandboxPreparationIntentAcknowledgement>;
     }
   | {
       readonly stage: 'preparation_ready';
-      readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgementV1>;
-      readonly prepared: Readonly<PreparedSandboxExecutionV1>;
-      readonly acknowledgement: Readonly<SandboxPreparationReadyAcknowledgementV1>;
+      readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgement>;
+      readonly prepared: Readonly<PreparedSandboxExecution>;
+      readonly acknowledgement: Readonly<SandboxPreparationReadyAcknowledgement>;
     }
   | {
       readonly stage: 'execution_dispatch_intent';
-      readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgementV1>;
-      readonly prepared: Readonly<PreparedSandboxExecutionV1>;
-      readonly acknowledgement: Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>;
+      readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgement>;
+      readonly prepared: Readonly<PreparedSandboxExecution>;
+      readonly acknowledgement: Readonly<SandboxExecutionDispatchIntentAcknowledgement>;
     }
   | {
       readonly stage: 'execution_supervisor_started';
-      readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>;
-      readonly prepared: Readonly<PreparedSandboxExecutionV1>;
-      readonly acknowledgement: Readonly<SandboxExecutionSupervisorStartedAcknowledgementV1>;
+      readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgement>;
+      readonly prepared: Readonly<PreparedSandboxExecution>;
+      readonly acknowledgement: Readonly<SandboxExecutionSupervisorStartedAcknowledgement>;
     }
   | {
       readonly stage: 'disposal_intent';
-      readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgementV1>;
-      readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgementV1> | null;
-      readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
-      readonly acknowledgement: Readonly<SandboxDisposalIntentAcknowledgementV1>;
+      readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgement>;
+      readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgement> | null;
+      readonly prepared: Readonly<PreparedSandboxExecution> | null;
+      readonly acknowledgement: Readonly<SandboxDisposalIntentAcknowledgement>;
     }
   | {
       readonly stage: 'disposal_receipt';
-      readonly disposalIntent: Readonly<SandboxDisposalIntentAcknowledgementV1>;
-      readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
-      readonly acknowledgement: Readonly<SandboxDisposalReceiptAcknowledgementV1>;
+      readonly disposalIntent: Readonly<SandboxDisposalIntentAcknowledgement>;
+      readonly prepared: Readonly<PreparedSandboxExecution> | null;
+      readonly acknowledgement: Readonly<SandboxDisposalReceiptAcknowledgement>;
     };
 
-export type RuntimeHostSandboxLifecycleEvidenceVerificationResultV1 =
+export type RuntimeHostSandboxLifecycleEvidenceVerificationResult =
   | { readonly valid: true }
   | {
       readonly valid: false;
       readonly code: 'not_reflected' | 'identity_mismatch' | 'stale_stage';
     };
 
-/** App-owned durable callbacks. Host owns ordering, never State/event encoding. */
-export interface RuntimeHostSandboxLifecyclePersistenceV1 {
+/** App-owned durable callbacks. Host owns ordering, never domain-state or event encoding. */
+export interface RuntimeHostSandboxLifecyclePersistence {
   persistPreparationIntent(input: {
-    readonly preparation: Readonly<SandboxPreparationV1>;
-  }): Promise<Readonly<SandboxPreparationIntentAcknowledgementV1>>;
+    readonly preparation: Readonly<SandboxPreparation>;
+  }): Promise<Readonly<SandboxPreparationIntentAcknowledgement>>;
   persistPreparationReady(input: {
-    readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgementV1>;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1>;
-    readonly preparationArtifact: ReturnType<SandboxPreparationArtifactPortV1['write']>;
-  }): Promise<Readonly<SandboxPreparationReadyAcknowledgementV1>>;
+    readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgement>;
+    readonly prepared: Readonly<PreparedSandboxExecution>;
+    readonly preparationArtifact: ReturnType<SandboxPreparationArtifactPort['write']>;
+  }): Promise<Readonly<SandboxPreparationReadyAcknowledgement>>;
   persistExecutionDispatchIntent(input: {
-    readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgementV1>;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1>;
+    readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgement>;
+    readonly prepared: Readonly<PreparedSandboxExecution>;
     readonly dispatchId: string;
     readonly supervisorNonce: string;
-  }): Promise<Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>>;
+  }): Promise<Readonly<SandboxExecutionDispatchIntentAcknowledgement>>;
   persistExecutionSupervisorStarted(input: {
-    readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1>;
+    readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgement>;
+    readonly prepared: Readonly<PreparedSandboxExecution>;
     readonly supervisorPid: number;
     readonly processGroupId: number;
     readonly processStartIdentity: string;
-  }): Promise<Readonly<SandboxExecutionSupervisorStartedAcknowledgementV1>>;
+  }): Promise<Readonly<SandboxExecutionSupervisorStartedAcknowledgement>>;
   persistDisposalIntent(input: {
-    readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgementV1>;
-    readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgementV1> | null;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
-  }): Promise<Readonly<SandboxDisposalIntentAcknowledgementV1>>;
+    readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgement>;
+    readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgement> | null;
+    readonly prepared: Readonly<PreparedSandboxExecution> | null;
+  }): Promise<Readonly<SandboxDisposalIntentAcknowledgement>>;
   persistDisposalReceipt(input: {
-    readonly disposalIntent: Readonly<SandboxDisposalIntentAcknowledgementV1>;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
+    readonly disposalIntent: Readonly<SandboxDisposalIntentAcknowledgement>;
+    readonly prepared: Readonly<PreparedSandboxExecution> | null;
     readonly disposed: boolean;
-  }): Promise<Readonly<SandboxDisposalReceiptAcknowledgementV1>>;
+  }): Promise<Readonly<SandboxDisposalReceiptAcknowledgement>>;
 }
 
-export interface RuntimeHostSandboxLifecycleEvidencePortV1 {
+export interface RuntimeHostSandboxLifecycleEvidencePort {
   verify(
-    evidence: Readonly<RuntimeHostSandboxLifecycleEvidenceV1>,
-  ): RuntimeHostSandboxLifecycleEvidenceVerificationResultV1;
+    evidence: Readonly<RuntimeHostSandboxLifecycleEvidence>,
+  ): RuntimeHostSandboxLifecycleEvidenceVerificationResult;
 }
 
-export type RuntimeHostSandboxLifecycleFailureCodeV1 =
+export type RuntimeHostSandboxLifecycleFailureCode =
   | 'invalid_input'
   | 'invalid_stage'
   | 'invalid_acknowledgement'
@@ -113,54 +113,54 @@ export type RuntimeHostSandboxLifecycleFailureCodeV1 =
   | 'artifact_identity_mismatch'
   | 'already_consumed';
 
-export class RuntimeHostSandboxLifecycleErrorV1 extends Error {
-  readonly code: RuntimeHostSandboxLifecycleFailureCodeV1;
+export class RuntimeHostSandboxLifecycleError extends Error {
+  readonly code: RuntimeHostSandboxLifecycleFailureCode;
 
-  constructor(code: RuntimeHostSandboxLifecycleFailureCodeV1, message: string) {
+  constructor(code: RuntimeHostSandboxLifecycleFailureCode, message: string) {
     super(message);
-    this.name = 'RuntimeHostSandboxLifecycleErrorV1';
+    this.name = 'RuntimeHostSandboxLifecycleError';
     this.code = code;
   }
 }
 
-interface RuntimeHostSandboxLifecycleAuthorityV1 {
-  preparation?: Readonly<SandboxPreparationV1>;
-  preparationIntent?: Readonly<SandboxPreparationIntentAcknowledgementV1>;
-  prepared?: Readonly<PreparedSandboxExecutionV1>;
-  preparationReady?: Readonly<SandboxPreparationReadyAcknowledgementV1>;
-  dispatchIntent?: Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>;
-  supervisorStarted?: Readonly<SandboxExecutionSupervisorStartedAcknowledgementV1>;
-  disposalIntent?: Readonly<SandboxDisposalIntentAcknowledgementV1>;
+interface RuntimeHostSandboxLifecycleAuthority {
+  preparation?: Readonly<SandboxPreparation>;
+  preparationIntent?: Readonly<SandboxPreparationIntentAcknowledgement>;
+  prepared?: Readonly<PreparedSandboxExecution>;
+  preparationReady?: Readonly<SandboxPreparationReadyAcknowledgement>;
+  dispatchIntent?: Readonly<SandboxExecutionDispatchIntentAcknowledgement>;
+  supervisorStarted?: Readonly<SandboxExecutionSupervisorStartedAcknowledgement>;
+  disposalIntent?: Readonly<SandboxDisposalIntentAcknowledgement>;
   disposed: boolean;
   processConsumed: boolean;
 }
 
-const sandboxLifecycleAuthoritiesV1 = new WeakMap<
-  SandboxPreparationLifecycleV1,
-  RuntimeHostSandboxLifecycleAuthorityV1
+const sandboxLifecycleAuthorities = new WeakMap<
+  SandboxPreparationLifecycle,
+  RuntimeHostSandboxLifecycleAuthority
 >();
 
 /**
  * Generic durable lifecycle coordinator. Persistence supplies opaque digests
  * and evidence; Host enforces exact-object, single-owner stage ordering only.
  */
-export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
-  readonly persistence: RuntimeHostSandboxLifecyclePersistenceV1;
-  readonly evidence: RuntimeHostSandboxLifecycleEvidencePortV1;
-  readonly artifacts: SandboxPreparationArtifactPortV1;
-}): SandboxPreparationLifecycleV1 {
-  const authority: RuntimeHostSandboxLifecycleAuthorityV1 = {
+export function createRuntimeHostSandboxPreparationLifecycle(input: {
+  readonly persistence: RuntimeHostSandboxLifecyclePersistence;
+  readonly evidence: RuntimeHostSandboxLifecycleEvidencePort;
+  readonly artifacts: SandboxPreparationArtifactPort;
+}): SandboxPreparationLifecycle {
+  const authority: RuntimeHostSandboxLifecycleAuthority = {
     disposed: false,
     processConsumed: false,
   };
-  const lifecycle = Object.freeze<SandboxPreparationLifecycleV1>({
+  const lifecycle = Object.freeze<SandboxPreparationLifecycle>({
     recordPreparationIntent: async (preparation) => {
-      assertFrozenObjectV1(preparation, 'preparation');
+      assertFrozenObject(preparation, 'preparation');
       if (authority.preparationIntent)
         fail('already_consumed', 'Preparation intent already exists.');
       const acknowledgement = await input.persistence.persistPreparationIntent({ preparation });
-      assertAcknowledgementV1(acknowledgement, 'preparation_intent');
-      verifyEvidenceV1(input.evidence, {
+      assertAcknowledgement(acknowledgement, 'preparation_intent');
+      verifyEvidence(input.evidence, {
         stage: 'preparation_intent',
         preparation,
         acknowledgement,
@@ -170,14 +170,14 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
       return acknowledgement;
     },
     recordPreparationReady: async (prepared) => {
-      assertFrozenObjectV1(prepared, 'prepared execution');
+      assertFrozenObject(prepared, 'prepared execution');
       const preparationIntent = required(
         authority.preparationIntent,
         'Preparation intent must be acknowledged before ready.',
       );
       if (authority.preparationReady) fail('already_consumed', 'Preparation ready already exists.');
       const preparationArtifact = input.artifacts.write(prepared);
-      assertFrozenObjectV1(preparationArtifact, 'preparation artifact reference');
+      assertFrozenObject(preparationArtifact, 'preparation artifact reference');
       if (input.artifacts.read(preparationArtifact) !== prepared) {
         fail('artifact_identity_mismatch', 'Preparation Artifact did not return the exact plan.');
       }
@@ -186,11 +186,11 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
         prepared,
         preparationArtifact,
       });
-      assertAcknowledgementV1(acknowledgement, 'preparation_ready');
+      assertAcknowledgement(acknowledgement, 'preparation_ready');
       if (acknowledgement.preparationArtifact !== preparationArtifact) {
         fail('artifact_identity_mismatch', 'Ready acknowledgement changed the Artifact identity.');
       }
-      verifyEvidenceV1(input.evidence, {
+      verifyEvidence(input.evidence, {
         stage: 'preparation_ready',
         preparationIntent,
         prepared,
@@ -201,7 +201,7 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
       return acknowledgement;
     },
     recordExecutionDispatchIntent: async (prepared, dispatch) => {
-      assertExactPreparedV1(authority, prepared);
+      assertExactPrepared(authority, prepared);
       const preparationReady = required(
         authority.preparationReady,
         'Preparation ready must be acknowledged before dispatch intent.',
@@ -215,14 +215,14 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
         prepared,
         ...dispatch,
       });
-      assertAcknowledgementV1(acknowledgement, 'execution_dispatch_intent');
+      assertAcknowledgement(acknowledgement, 'execution_dispatch_intent');
       if (
         acknowledgement.dispatchId !== dispatch.dispatchId ||
         acknowledgement.supervisorNonce !== dispatch.supervisorNonce
       ) {
         fail('invalid_acknowledgement', 'Dispatch acknowledgement changed its identity.');
       }
-      verifyEvidenceV1(input.evidence, {
+      verifyEvidence(input.evidence, {
         stage: 'execution_dispatch_intent',
         preparationReady,
         prepared,
@@ -232,7 +232,7 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
       return acknowledgement;
     },
     recordExecutionSupervisorStarted: async (prepared, supervisor) => {
-      assertExactPreparedV1(authority, prepared);
+      assertExactPrepared(authority, prepared);
       const dispatchIntent = required(
         authority.dispatchIntent,
         'Dispatch intent must be acknowledged before supervisor start.',
@@ -253,7 +253,7 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
         processGroupId: supervisor.processGroupId,
         processStartIdentity: supervisor.processStartIdentity,
       });
-      assertAcknowledgementV1(acknowledgement, 'execution_supervisor_started');
+      assertAcknowledgement(acknowledgement, 'execution_supervisor_started');
       if (
         acknowledgement.dispatchId !== supervisor.dispatchId ||
         acknowledgement.dispatchIntentDigest !== supervisor.dispatchIntentDigest ||
@@ -263,7 +263,7 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
       ) {
         fail('invalid_acknowledgement', 'Supervisor acknowledgement changed its identity.');
       }
-      verifyEvidenceV1(input.evidence, {
+      verifyEvidence(input.evidence, {
         stage: 'execution_supervisor_started',
         dispatchIntent,
         prepared,
@@ -285,14 +285,14 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
           fail('invalid_stage', 'Ready preparation requires exact-plan disposal.');
         }
       } else {
-        assertExactPreparedV1(authority, prepared);
+        assertExactPrepared(authority, prepared);
       }
       const acknowledgement = await input.persistence.persistDisposalIntent({
         preparationIntent,
         preparationReady,
         prepared,
       });
-      assertAcknowledgementV1(acknowledgement, 'disposal_intent');
+      assertAcknowledgement(acknowledgement, 'disposal_intent');
       const expectedPurpose = prepared === null ? 'reconcile_preparation_intent' : 'dispose';
       if (
         acknowledgement.purpose !== expectedPurpose ||
@@ -301,7 +301,7 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
       ) {
         fail('invalid_acknowledgement', 'Disposal acknowledgement changed its identity.');
       }
-      verifyEvidenceV1(input.evidence, {
+      verifyEvidence(input.evidence, {
         stage: 'disposal_intent',
         preparationIntent,
         preparationReady,
@@ -330,13 +330,13 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
       ) {
         fail('invalid_input', 'Disposal receipt does not match its intent.');
       }
-      if (prepared !== null) assertExactPreparedV1(authority, prepared);
+      if (prepared !== null) assertExactPrepared(authority, prepared);
       const acknowledgement = await input.persistence.persistDisposalReceipt({
         disposalIntent,
         prepared,
         disposed,
       });
-      assertAcknowledgementV1(acknowledgement, 'disposal_receipt');
+      assertAcknowledgement(acknowledgement, 'disposal_receipt');
       if (
         acknowledgement.purpose !== purpose ||
         acknowledgement.lifecycleIntentDigest !== lifecycleIntentDigest ||
@@ -345,7 +345,7 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
       ) {
         fail('invalid_acknowledgement', 'Disposal receipt acknowledgement changed its identity.');
       }
-      verifyEvidenceV1(input.evidence, {
+      verifyEvidence(input.evidence, {
         stage: 'disposal_receipt',
         disposalIntent,
         prepared,
@@ -356,13 +356,13 @@ export function createRuntimeHostSandboxPreparationLifecycleV1(input: {
       return acknowledgement;
     },
   });
-  sandboxLifecycleAuthoritiesV1.set(lifecycle, authority);
+  sandboxLifecycleAuthorities.set(lifecycle, authority);
   return lifecycle;
 }
 
-export interface RuntimeHostSandboxSupervisorPortV1 {
-  execute(input: RuntimeHostPreparedProcessInputV1): Promise<{
-    readonly outcome: RuntimeHostPreparedProcessResultV1;
+export interface RuntimeHostSandboxSupervisorPort {
+  execute(input: RuntimeHostPreparedProcessInput): Promise<{
+    readonly outcome: RuntimeHostPreparedProcessResult;
     readonly cleanupConfirmed: boolean;
   }>;
 }
@@ -371,24 +371,24 @@ export interface RuntimeHostSandboxSupervisorPortV1 {
  * Adapts the generic POSIX supervisor into the neutral SPI process result.
  * It deliberately treats every unconfirmed post-GO result as unknown.
  */
-export function createRuntimeHostSandboxPreparedProcessExecutionPortV1(input?: {
-  readonly supervisor?: RuntimeHostSandboxSupervisorPortV1;
-}): SandboxPreparedProcessExecutionPortV1 {
-  const supervisor = input?.supervisor ?? { execute: executePosixSupervisedV1 };
-  return Object.freeze<SandboxPreparedProcessExecutionPortV1>({
+export function createRuntimeHostSandboxPreparedProcessExecutionPort(input?: {
+  readonly supervisor?: RuntimeHostSandboxSupervisorPort;
+}): SandboxPreparedProcessExecutionPort {
+  const supervisor = input?.supervisor ?? { execute: executePosixSupervised };
+  return Object.freeze<SandboxPreparedProcessExecutionPort>({
     execute: async (executionInput) => {
-      const authority = sandboxLifecycleAuthoritiesV1.get(executionInput.lifecycle);
+      const authority = sandboxLifecycleAuthorities.get(executionInput.lifecycle);
       if (
         !authority ||
         authority.prepared !== executionInput.prepared ||
         authority.dispatchIntent !== executionInput.dispatchIntent ||
         authority.processConsumed
       ) {
-        return failedProcessV1(
+        return failedProcess(
           'dispatch_not_acknowledged',
           'The exact prepared dispatch acknowledgement is unavailable or already consumed.',
           'not_started',
-          noProcessCleanupV1(),
+          noProcessCleanup(),
         );
       }
       authority.processConsumed = true;
@@ -422,7 +422,7 @@ export function createRuntimeHostSandboxPreparedProcessExecutionPortV1(input?: {
             goStarted = true;
           },
         });
-        return projectSupervisedResultV1({
+        return projectSupervisedResult({
           supervised,
           goStarted,
           supervisorRecordAttempted,
@@ -430,30 +430,30 @@ export function createRuntimeHostSandboxPreparedProcessExecutionPortV1(input?: {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (goStarted) {
-          return unknownProcessV1('post_go_transport_lost', message, unknownCleanupV1());
+          return unknownProcess('post_go_transport_lost', message, unknownCleanup());
         }
-        return failedProcessV1(
+        return failedProcess(
           supervisorRecordAttempted ? 'supervisor_start_not_acknowledged' : 'spawn_failed',
           message,
           supervisorRecordAttempted ? 'supervisor_started_before_go' : 'not_started',
-          supervisorRecordAttempted ? unknownCleanupV1() : noProcessCleanupV1(),
+          supervisorRecordAttempted ? unknownCleanup() : noProcessCleanup(),
         );
       }
     },
   });
 }
 
-function projectSupervisedResultV1(input: {
+function projectSupervisedResult(input: {
   readonly supervised: {
-    readonly outcome: RuntimeHostPreparedProcessResultV1;
+    readonly outcome: RuntimeHostPreparedProcessResult;
     readonly cleanupConfirmed: boolean;
   };
   readonly goStarted: boolean;
   readonly supervisorRecordAttempted: boolean;
-}): Readonly<SandboxPreparedProcessExecutionResultV1> {
-  const cleanup = normalizeCleanupV1(input.supervised.outcome.processCleanup);
+}): Readonly<SandboxPreparedProcessExecutionResult> {
+  const cleanup = normalizeCleanup(input.supervised.outcome.processCleanup);
   if (!input.goStarted) {
-    return failedProcessV1(
+    return failedProcess(
       input.supervisorRecordAttempted ? 'supervisor_start_not_acknowledged' : 'spawn_failed',
       input.supervised.outcome.stderr || 'Supervisor failed before GO.',
       input.supervisorRecordAttempted ? 'supervisor_started_before_go' : 'not_started',
@@ -461,7 +461,7 @@ function projectSupervisedResultV1(input: {
     );
   }
   if (!input.supervised.cleanupConfirmed || !cleanup.confirmedExited) {
-    return unknownProcessV1(
+    return unknownProcess(
       'post_go_cleanup_unknown',
       input.supervised.outcome.stderr || 'Process-tree cleanup could not be confirmed.',
       cleanup,
@@ -481,7 +481,7 @@ function projectSupervisedResultV1(input: {
     });
   }
   if (input.supervised.outcome.exitCode === -1) {
-    return unknownProcessV1(
+    return unknownProcess(
       'post_go_terminal_unknown',
       input.supervised.outcome.stderr || 'A trustworthy process terminal is unavailable.',
       cleanup,
@@ -499,12 +499,12 @@ function projectSupervisedResultV1(input: {
   });
 }
 
-function failedProcessV1(
+function failedProcess(
   code: 'dispatch_not_acknowledged' | 'supervisor_start_not_acknowledged' | 'spawn_failed',
   message: string,
   executionPhase: 'not_started' | 'supervisor_started_before_go',
-  processCleanup: Readonly<SandboxPreparedProcessCleanupV1>,
-): Readonly<SandboxPreparedProcessExecutionResultV1> {
+  processCleanup: Readonly<SandboxPreparedProcessCleanup>,
+): Readonly<SandboxPreparedProcessExecutionResult> {
   return Object.freeze({
     kind: 'failed',
     executionPhase,
@@ -516,13 +516,13 @@ function failedProcessV1(
   });
 }
 
-function unknownProcessV1(
+function unknownProcess(
   code: 'post_go_terminal_unknown' | 'post_go_transport_lost' | 'post_go_cleanup_unknown',
   message: string,
-  processCleanup: Readonly<SandboxPreparedProcessCleanupV1>,
+  processCleanup: Readonly<SandboxPreparedProcessCleanup>,
   stdout = '',
   stderr = message,
-): Readonly<SandboxPreparedProcessExecutionResultV1> {
+): Readonly<SandboxPreparedProcessExecutionResult> {
   return Object.freeze({
     kind: 'unknown',
     executionPhase: 'unknown_after_go',
@@ -535,9 +535,9 @@ function unknownProcessV1(
   });
 }
 
-function normalizeCleanupV1(
-  cleanup: RuntimeHostPreparedProcessResultV1['processCleanup'],
-): Readonly<SandboxPreparedProcessCleanupV1> {
+function normalizeCleanup(
+  cleanup: RuntimeHostPreparedProcessResult['processCleanup'],
+): Readonly<SandboxPreparedProcessCleanup> {
   return Object.freeze({
     confirmedExited: cleanup?.confirmedExited === true,
     gracefulRequested: cleanup?.gracefulRequested === true,
@@ -551,7 +551,7 @@ function normalizeCleanupV1(
   });
 }
 
-function noProcessCleanupV1(): Readonly<SandboxPreparedProcessCleanupV1> {
+function noProcessCleanup(): Readonly<SandboxPreparedProcessCleanup> {
   return Object.freeze({
     confirmedExited: true,
     gracefulRequested: false,
@@ -560,7 +560,7 @@ function noProcessCleanupV1(): Readonly<SandboxPreparedProcessCleanupV1> {
   });
 }
 
-function unknownCleanupV1(): Readonly<SandboxPreparedProcessCleanupV1> {
+function unknownCleanup(): Readonly<SandboxPreparedProcessCleanup> {
   return Object.freeze({
     confirmedExited: false,
     gracefulRequested: true,
@@ -569,19 +569,19 @@ function unknownCleanupV1(): Readonly<SandboxPreparedProcessCleanupV1> {
   });
 }
 
-function assertAcknowledgementV1(
+function assertAcknowledgement(
   acknowledgement: Readonly<{ readonly acknowledged: true; readonly stage: string }>,
-  stage: RuntimeHostSandboxLifecycleEvidenceV1['stage'],
+  stage: RuntimeHostSandboxLifecycleEvidence['stage'],
 ): void {
-  assertFrozenObjectV1(acknowledgement, `${stage} acknowledgement`);
+  assertFrozenObject(acknowledgement, `${stage} acknowledgement`);
   if (acknowledgement.acknowledged !== true || acknowledgement.stage !== stage) {
     fail('invalid_acknowledgement', `${stage} acknowledgement has an invalid shape.`);
   }
 }
 
-function verifyEvidenceV1(
-  evidencePort: RuntimeHostSandboxLifecycleEvidencePortV1,
-  evidence: RuntimeHostSandboxLifecycleEvidenceV1,
+function verifyEvidence(
+  evidencePort: RuntimeHostSandboxLifecycleEvidencePort,
+  evidence: RuntimeHostSandboxLifecycleEvidence,
 ): void {
   const result = evidencePort.verify(Object.freeze(evidence));
   if (result.valid !== true) {
@@ -589,16 +589,16 @@ function verifyEvidenceV1(
   }
 }
 
-function assertExactPreparedV1(
-  authority: RuntimeHostSandboxLifecycleAuthorityV1,
-  prepared: Readonly<PreparedSandboxExecutionV1>,
+function assertExactPrepared(
+  authority: RuntimeHostSandboxLifecycleAuthority,
+  prepared: Readonly<PreparedSandboxExecution>,
 ): void {
   if (authority.prepared !== prepared) {
     fail('invalid_input', 'Prepared execution is not the exact acknowledged plan.');
   }
 }
 
-function assertFrozenObjectV1(value: object, label: string): void {
+function assertFrozenObject(value: object, label: string): void {
   if (!Object.isFrozen(value)) fail('invalid_input', `${label} must be frozen.`);
 }
 
@@ -607,6 +607,6 @@ function required<T>(value: T | undefined, message: string): T {
   return value;
 }
 
-function fail(code: RuntimeHostSandboxLifecycleFailureCodeV1, message: string): never {
-  throw new RuntimeHostSandboxLifecycleErrorV1(code, message);
+function fail(code: RuntimeHostSandboxLifecycleFailureCode, message: string): never {
+  throw new RuntimeHostSandboxLifecycleError(code, message);
 }

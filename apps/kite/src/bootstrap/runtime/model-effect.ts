@@ -6,32 +6,32 @@
 // No LangGraph state dependency, no side effects.
 
 import type {
-  BuiltinModelToolCatalogEntryV1,
-  BuiltinModelToolSetV1,
-  BuiltinToolCatalogProjectionV1,
+  BuiltinModelToolCatalogEntry,
+  BuiltinModelToolSet,
+  BuiltinToolCatalogProjection,
   SkillCatalogSnapshot,
   SkillManifest,
   SkillScanOptions,
 } from '@kite/builtin-runtime';
 import {
-  canonicalizeCapabilityArgumentsV1,
-  chooseCapabilityDisclosureV1,
-  createBuiltinModelToolSurfaceFromProjectionV1,
-  createCapabilityBindingV1,
-  failClosedBuiltinToolCapabilityV1 as failClosedToolCapabilityV1,
-  projectBuiltinUnknownToolFieldsObservationV1,
-  searchableCapabilitySnapshotV1,
+  canonicalizeCapabilityArguments,
+  chooseCapabilityDisclosure,
+  createBuiltinModelToolSurfaceFromProjection,
+  createCapabilityBinding,
+  failClosedBuiltinToolCapability as failClosedToolCapability,
+  projectBuiltinUnknownToolFieldsObservation,
+  searchableCapabilitySnapshot,
   skillFrameInvalidationReason,
 } from '@kite/builtin-runtime';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type {
-  BuiltinModelEffectCoordinatorV1,
+  BuiltinModelEffectCoordinator,
   CompactionReporter,
   SupportedChatModel,
 } from '@kite/builtin-runtime/model';
 import {
   type ContextProjectionEnvironment,
-  type ModelInvocationPersistenceV1,
+  type ModelInvocationPersistence,
   resolveModelCapabilities,
   resolveProjectInstructionSnapshot,
   serializeToolDescriptors,
@@ -39,29 +39,29 @@ import {
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import { getAgentPhase, type SubAgentEventSink } from '@kite/runtime-contract';
 import {
-  runtimeHostStateActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
-  runtimeHostStateClassifyFailureV1 as classifyFailure,
-  runtimeHostStateActivePlanningV1 as getActivePlanning,
-  runtimeHostStateEffectiveInteractionModeV1 as getEffectiveInteractionMode,
-  runtimeHostStateToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostStateActiveSkillFrames as activeSkillFramesForCurrentWork,
+  runtimeHostStateClassifyFailure as classifyFailure,
+  runtimeHostStateActivePlanning as getActivePlanning,
+  runtimeHostStateEffectiveInteractionMode as getEffectiveInteractionMode,
+  runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
 } from '@kite/runtime-host';
-import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
+import type { CapabilityTurnContext } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
 import {
-  denyMissingProviderDataAdmissionV1,
-  type ProviderDataAdmissionGateV1,
+  denyMissingProviderDataAdmission,
+  type ProviderDataAdmissionGate,
 } from '#app/config/provider-data-admission';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
-import { createAppToolTurnContextV1 } from './tool-turn-context';
+import { createAppToolTurnContext } from './tool-turn-context';
 
 function boundedCancellationTools<T extends Record<string, unknown>>(
   tools: T,
   config: AgentConfig,
-  entries: readonly BuiltinModelToolCatalogEntryV1[],
+  entries: readonly BuiltinModelToolCatalogEntry[],
 ): T {
   const flags = getFeatureFlags(config);
-  if (!flags.resourceBudgetV1 || flags.boundedCancellationV1) return tools;
+  if (!flags.resourceBudget || flags.boundedCancellation) return tools;
   // The cancellation surface is derived from the immutable Builtin catalog.
   // It must not grow a second name-based policy table in Core.  Planning
   // reads remain available; planning writes and filesystem writes are bounded
@@ -82,14 +82,14 @@ function boundedCancellationTools<T extends Record<string, unknown>>(
   return Object.fromEntries(Object.entries(tools).filter(([name]) => !boundedNames.has(name))) as T;
 }
 
-function projectBuiltinUnknownFieldsV1(
-  entry: BuiltinModelToolCatalogEntryV1 | undefined,
+function projectBuiltinUnknownFields(
+  entry: BuiltinModelToolCatalogEntry | undefined,
   toolName: string,
   args: unknown,
-  context: CapabilityTurnContextV1,
+  context: CapabilityTurnContext,
 ) {
   if (!entry) {
-    return projectBuiltinUnknownToolFieldsObservationV1({
+    return projectBuiltinUnknownToolFieldsObservation({
       toolName,
       unknownFieldCount:
         args && typeof args === 'object' && !Array.isArray(args) ? Object.keys(args).length : 0,
@@ -97,7 +97,7 @@ function projectBuiltinUnknownFieldsV1(
     });
   }
   const observed = entry.observeUnknownFields(args, context);
-  return projectBuiltinUnknownToolFieldsObservationV1({
+  return projectBuiltinUnknownToolFieldsObservation({
     toolName,
     unknownFieldCount: observed.count,
     schemaRevision: entry.descriptor.revision.slice(0, 64),
@@ -125,7 +125,7 @@ export function eventsForInvalidModelToolCalls(
   for (const [index, call] of calls.entries()) {
     const invocationFingerprint =
       call.canonicalInvocationFingerprint ??
-      toolInvocationFingerprintV1({
+      toolInvocationFingerprint({
         toolName: call.name,
         parseCode: 'invalid_json',
         pathCategory: 'unknown',
@@ -198,7 +198,7 @@ export function resolveContextProjectionEnvironment(input: {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -211,8 +211,8 @@ export function resolveContextProjectionEnvironment(input: {
   }>;
   disclosedDescriptors?: import('@kite/runtime-contract').CapabilityDescriptor[];
   sandboxBackend?: SandboxBackend | 'unknown';
-  builtinToolCatalog: BuiltinToolCatalogProjectionV1;
-  projectedTools?: BuiltinModelToolSetV1;
+  builtinToolCatalog: BuiltinToolCatalogProjection;
+  projectedTools?: BuiltinModelToolSet;
 }): ContextProjectionEnvironment {
   const flags = getFeatureFlags(input.config);
   const descriptors = [
@@ -241,8 +241,7 @@ export function resolveContextProjectionEnvironment(input: {
     gitBroker: input.gitBroker,
     mcpManager: input.mcpManager,
     mcpBindings: persistedBindings,
-    toolSearch:
-      getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
+    toolSearch: getFeatureFlags(input.config).toolSearch && input.model.supportsToolCalls !== false,
     skills: input.skills,
     skillOptions: input.skillOptions,
     skillCatalog: input.skillCatalog,
@@ -262,7 +261,7 @@ export function resolveContextProjectionEnvironment(input: {
     turnId: input.state.turn.turnId,
     activeTaskId: input.state.activeTaskId ?? undefined,
   };
-  const builtinTurnContext = createAppToolTurnContextV1({
+  const builtinTurnContext = createAppToolTurnContext({
     workspace: toolInput.workspace,
     config: toolInput.config,
     threadId: toolInput.threadId,
@@ -280,7 +279,7 @@ export function resolveContextProjectionEnvironment(input: {
   const tools =
     input.projectedTools ??
     boundedCancellationTools(
-      createBuiltinModelToolSurfaceFromProjectionV1({
+      createBuiltinModelToolSurfaceFromProjection({
         projection: builtinProjection,
         turnContext: builtinTurnContext,
         executionCapabilitySurface: input.config.executionCapabilitySurface,
@@ -290,7 +289,7 @@ export function resolveContextProjectionEnvironment(input: {
       }).tools,
       input.config,
       builtinProjection.entries.filter(
-        (entry): entry is BuiltinModelToolCatalogEntryV1 => entry.visibility === 'model',
+        (entry): entry is BuiltinModelToolCatalogEntry => entry.visibility === 'model',
       ),
     );
   return {
@@ -302,8 +301,8 @@ export function resolveContextProjectionEnvironment(input: {
         capabilityId: descriptor.capabilityId,
         description: descriptor.description,
       })),
-    promptContractVersion: flags.promptContractV2 ? 'v2' : 'legacy',
-    projectInstructions: flags.promptContractV2
+    promptContractVersion: flags.promptContract ? 'v2' : 'legacy',
+    projectInstructions: flags.promptContract
       ? resolveProjectInstructionSnapshot({
           workspace: input.state.session.workspace,
           state: input.state,
@@ -334,12 +333,12 @@ function positiveConfigNumber(value: unknown): number | undefined {
  * disclosure and RuntimeEvent projection remain explicit compatibility facts;
  * Context, Prompt, Surface, admission, and dispatch are owned by the coordinator.
  */
-export async function projectPrimaryModelEffectV1(params: {
+export async function projectPrimaryModelEffect(params: {
   model: SupportedChatModel;
   state: RuntimeState;
   config: AgentConfig;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
@@ -351,13 +350,13 @@ export async function projectPrimaryModelEffectV1(params: {
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
   /** Production composition must supply the immutable route-policy gate. */
-  providerDataAdmission?: ProviderDataAdmissionGateV1;
+  providerDataAdmission?: ProviderDataAdmissionGate;
   resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
   /** App-owned coordinator bound to the one Gateway for every Model effect. */
-  modelEffectCoordinator: BuiltinModelEffectCoordinatorV1;
-  modelInvocationPersistence?: ModelInvocationPersistenceV1<RuntimeState, RuntimeEvent>;
-  subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccessV1;
-  builtinToolCatalog: BuiltinToolCatalogProjectionV1;
+  modelEffectCoordinator: BuiltinModelEffectCoordinator;
+  modelInvocationPersistence?: ModelInvocationPersistence<RuntimeState, RuntimeEvent>;
+  subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccess;
+  builtinToolCatalog: BuiltinToolCatalogProjection;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const flags = getFeatureFlags(params.config);
@@ -382,7 +381,7 @@ export async function projectPrimaryModelEffectV1(params: {
       }
     }
   }
-  const capabilitySnapshot = searchableCapabilitySnapshotV1({
+  const capabilitySnapshot = searchableCapabilitySnapshot({
     mcp: params.mcpManager?.getCapabilitySnapshot(),
     skills: params.skillCatalog?.capabilities,
   });
@@ -390,8 +389,8 @@ export async function projectPrimaryModelEffectV1(params: {
     config: params.config,
     adapter: params.model.capabilityMetadata,
   });
-  const disclosure = chooseCapabilityDisclosureV1({
-    featureEnabled: flags.toolSearchV1,
+  const disclosure = chooseCapabilityDisclosure({
+    featureEnabled: flags.toolSearch,
     providerSupportsToolCalls: params.model.supportsToolCalls !== false,
     descriptors: capabilitySnapshot.descriptors,
     contextWindowTokens: modelCapabilities.contextWindowTokens,
@@ -405,7 +404,7 @@ export async function projectPrimaryModelEffectV1(params: {
       ? pendingSearch
       : undefined;
   const searchedDescriptors =
-    flags.toolSearchV1 && currentSearch
+    flags.toolSearch && currentSearch
       ? currentSearch.candidates.flatMap((candidate) => {
           const descriptor = capabilitySnapshot.descriptors.find(
             (item) =>
@@ -430,7 +429,7 @@ export async function projectPrimaryModelEffectV1(params: {
     (descriptor) => descriptor.kind === 'mcp_tool',
   );
   const disclosedMcpDescriptors = (
-    flags.toolSearchV1
+    flags.toolSearch
       ? disclosure.mode === 'all'
         ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
         : [...loadedMcpDescriptors, ...searchedMcpDescriptors]
@@ -448,7 +447,7 @@ export async function projectPrimaryModelEffectV1(params: {
         : [];
   const disclosedDescriptors = [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
   const previousLoadedCapabilities = Object.values(state.capabilities.loadedCapabilities ?? {});
-  const loadedCapabilities = flags.toolSearchV1
+  const loadedCapabilities = flags.toolSearch
     ? disclosedMcpDescriptors.map((descriptor) => {
         const existing = state.capabilities.loadedCapabilities?.[descriptor.capabilityId];
         return {
@@ -465,7 +464,7 @@ export async function projectPrimaryModelEffectV1(params: {
       return previous?.capabilityRevision !== loaded.capabilityRevision;
     });
   const mcpBindings =
-    flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1
+    flags.capabilityCatalog && flags.mcpRuntimeBinding
       ? disclosedDescriptors
           .filter(
             (descriptor) =>
@@ -473,7 +472,7 @@ export async function projectPrimaryModelEffectV1(params: {
           )
           .map((descriptor) => ({
             descriptor,
-            binding: createCapabilityBindingV1({
+            binding: createCapabilityBinding({
               capabilityId: descriptor.capabilityId,
               capabilityRevision: descriptor.revision,
               exposedToolName: exposedMcpToolName(descriptor.provider.id, descriptor.displayName),
@@ -482,7 +481,7 @@ export async function projectPrimaryModelEffectV1(params: {
             }),
           }))
       : [];
-  const capabilityDisclosures = flags.toolSearchV1
+  const capabilityDisclosures = flags.toolSearch
     ? disclosedDescriptors.map((descriptor) => ({
         capabilityId: descriptor.capabilityId,
         capabilityRevision: descriptor.revision,
@@ -510,7 +509,7 @@ export async function projectPrimaryModelEffectV1(params: {
     gitBroker: params.gitBroker,
     mcpManager: params.mcpManager,
     mcpBindings,
-    toolSearch: flags.toolSearchV1 && params.model.supportsToolCalls !== false,
+    toolSearch: flags.toolSearch && params.model.supportsToolCalls !== false,
     skills: params.skills,
     skillOptions: params.skillOptions,
     skillCatalog: params.skillCatalog,
@@ -530,7 +529,7 @@ export async function projectPrimaryModelEffectV1(params: {
     turnId: state.turn.turnId,
     activeTaskId: state.activeTaskId ?? undefined,
   };
-  const builtinTurnContext = createAppToolTurnContextV1({
+  const builtinTurnContext = createAppToolTurnContext({
     workspace: toolInput.workspace,
     config: toolInput.config,
     threadId: toolInput.threadId,
@@ -546,7 +545,7 @@ export async function projectPrimaryModelEffectV1(params: {
   });
   const builtinProjection = params.builtinToolCatalog.forTurn(builtinTurnContext);
   const tools = boundedCancellationTools(
-    createBuiltinModelToolSurfaceFromProjectionV1({
+    createBuiltinModelToolSurfaceFromProjection({
       projection: builtinProjection,
       turnContext: builtinTurnContext,
       executionCapabilitySurface: params.config.executionCapabilitySurface,
@@ -556,10 +555,10 @@ export async function projectPrimaryModelEffectV1(params: {
     }).tools,
     params.config,
     builtinProjection.entries.filter(
-      (entry): entry is BuiltinModelToolCatalogEntryV1 => entry.visibility === 'model',
+      (entry): entry is BuiltinModelToolCatalogEntry => entry.visibility === 'model',
     ),
   );
-  const builtinEntriesByName = new Map<string, BuiltinModelToolCatalogEntryV1>(
+  const builtinEntriesByName = new Map<string, BuiltinModelToolCatalogEntry>(
     builtinProjection.entries.flatMap((entry) =>
       entry.visibility === 'model' ? ([[entry.name, entry]] as const) : [],
     ),
@@ -582,7 +581,7 @@ export async function projectPrimaryModelEffectV1(params: {
     builtinToolCatalog: params.builtinToolCatalog,
     projectedTools: tools,
   });
-  const result = await params.modelEffectCoordinator.executePrimaryModelEffectV1({
+  const result = await params.modelEffectCoordinator.executePrimaryModelEffect({
     state,
     config: params.config,
     model: params.model,
@@ -594,17 +593,17 @@ export async function projectPrimaryModelEffectV1(params: {
       disclosures: capabilityDisclosures,
     },
     autoCompaction: {
-      masterEnabled: flags.contextCompactionV2 && flags.contextCompactionAutoV1,
+      masterEnabled: flags.contextCompaction && flags.contextCompactionAuto,
     },
     resourceAdmission: params.resourceAdmission,
     persistence: params.modelInvocationPersistence,
-    providerDataAdmission: params.providerDataAdmission ?? denyMissingProviderDataAdmissionV1,
+    providerDataAdmission: params.providerDataAdmission ?? denyMissingProviderDataAdmission,
     compactionReporter: params.compactionReporter,
     signal: params.signal,
     emitEphemeral: params.emitRuntimeEvent,
     finalize: (completion, contextMetricsEvent) => {
       const invalidToolCalls = completion.invalidToolCalls.map((call) => {
-        const invocationFingerprint = toolInvocationFingerprintV1({
+        const invocationFingerprint = toolInvocationFingerprint({
           toolName: call.name,
           parseCode: 'invalid_json',
           pathCategory: 'unknown',
@@ -684,7 +683,7 @@ export async function projectPrimaryModelEffectV1(params: {
         );
         const binding = bindingEntry?.binding;
         const dynamicIdentity = bindingEntry
-          ? canonicalizeCapabilityArgumentsV1(bindingEntry.descriptor.inputSchema, call.args)
+          ? canonicalizeCapabilityArguments(bindingEntry.descriptor.inputSchema, call.args)
           : undefined;
         const builtinEntry = bindingEntry ? undefined : builtinEntriesByName.get(call.name);
         const parsedIdentity =
@@ -694,8 +693,8 @@ export async function projectPrimaryModelEffectV1(params: {
         const capability =
           parsedIdentity?.success && builtinEntry
             ? builtinEntry.classifyEffects(parsedIdentity.data, builtinTurnContext)
-            : failClosedToolCapabilityV1(call.name);
-        const invocationFingerprint = toolInvocationFingerprintV1({
+            : failClosedToolCapability(call.name);
+        const invocationFingerprint = toolInvocationFingerprint({
           toolName: call.name,
           identityRevision:
             binding?.capabilityRevision ?? builtinEntry?.descriptor.revision ?? 'unknown',
@@ -725,13 +724,13 @@ export async function projectPrimaryModelEffectV1(params: {
                   ? Object.keys(call.args)
                   : [];
               const knownFields = new Set(Object.keys(schema?.properties ?? {}));
-              return projectBuiltinUnknownToolFieldsObservationV1({
+              return projectBuiltinUnknownToolFieldsObservation({
                 toolName: call.name,
                 unknownFieldCount: suppliedFields.filter((field) => !knownFields.has(field)).length,
                 schemaRevision: binding?.capabilityRevision.slice(0, 64) ?? 'dynamic',
               });
             })()
-          : projectBuiltinUnknownFieldsV1(builtinEntry, call.name, call.args, builtinTurnContext);
+          : projectBuiltinUnknownFields(builtinEntry, call.name, call.args, builtinTurnContext);
         events.push({
           type: 'tool.queued',
           toolCallId: call.id,

@@ -1,26 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import type { ModelArtifactWriterV1 } from '@kite/builtin-runtime/model';
+import type { ModelArtifactWriter } from '@kite/builtin-runtime/model';
 import {
-  BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1,
-  type CompiledModelSurfaceV1,
-  compileModelSurfaceV1,
-  computeModelSurfaceDigestV1,
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
+  type CompiledModelSurface,
+  compileModelSurface,
+  computeModelSurfaceDigest,
   humanMessage,
 } from '@kite/builtin-runtime/model';
+import { createRuntimeHostStateInitialState, LIMITED_RESOURCE_BUDGET_ } from '@kite/runtime-host';
 import {
-  createRuntimeHostStateInitialStateV1,
-  LIMITED_RESOURCE_BUDGET_V1,
-} from '@kite/runtime-host';
-import {
-  MODEL_INVOCATION_PURPOSES_V1,
-  MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1,
-  type ModelInvocationPurposeV1,
-  type ModelResponseRecordV1,
-  type PrivateArtifactRefV1,
+  MODEL_INVOCATION_PURPOSES_,
+  MODEL_PURPOSE_TO_PROVIDER_DISPATCH_,
+  type ModelInvocationPurpose,
+  type ModelResponseRecord,
+  type PrivateArtifactRef,
 } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
+import { createTestModelInvocationHarness } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
 const CONFIG: AgentConfig = {
@@ -39,11 +36,11 @@ const RESPONSE = Object.freeze({
   providerMetadata: { responseId: 'response-fixture', rawFinishReason: 'stop' },
 });
 
-function compiled(purpose: ModelInvocationPurposeV1 = 'primary_agent') {
+function compiled(purpose: ModelInvocationPurpose = 'primary_agent') {
   const model = createMockModel([]);
   return {
     model,
-    compiled: compileModelSurfaceV1({
+    compiled: compileModelSurface({
       purpose,
       config: CONFIG,
       model,
@@ -56,8 +53,8 @@ function compiled(purpose: ModelInvocationPurposeV1 = 'primary_agent') {
 
 function invokeInput(
   model: ReturnType<typeof createMockModel>,
-  surface: CompiledModelSurfaceV1,
-  persistence: ReturnType<typeof createTestModelInvocationHarnessV1>['persistence'],
+  surface: CompiledModelSurface,
+  persistence: ReturnType<typeof createTestModelInvocationHarness>['persistence'],
 ) {
   return {
     model,
@@ -81,7 +78,7 @@ function invokeInput(
 function ref<K extends 'model_surface' | 'model_response'>(
   kind: K,
   suffix: string,
-): PrivateArtifactRefV1 & { kind: K } {
+): PrivateArtifactRef & { kind: K } {
   return {
     artifactId: `artifact-${suffix}`,
     kind,
@@ -90,10 +87,10 @@ function ref<K extends 'model_surface' | 'model_response'>(
   };
 }
 
-describe('ModelInvocationGatewayV1', () => {
+describe('ModelInvocationGateway', () => {
   test('does not require the retired State Project identity authority', async () => {
     let dispatches = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-missing-project',
       preserveMissingProjectIdentity: true,
       transport: async () => {
@@ -111,13 +108,13 @@ describe('ModelInvocationGatewayV1', () => {
 
   test('does not dispatch when Surface artifact publication fails', async () => {
     let dispatches = 0;
-    const artifacts: ModelArtifactWriterV1 = {
+    const artifacts: ModelArtifactWriter = {
       writeSurface: () => {
         throw new Error('surface storage unavailable');
       },
       writeResponse: () => ref('model_response', 'b'),
     };
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-artifact-failure',
       artifacts,
       transport: async () => {
@@ -137,7 +134,7 @@ describe('ModelInvocationGatewayV1', () => {
   test('does not dispatch when prepared evidence is not acknowledged', async () => {
     let dispatches = 0;
     const persistedTypes: string[][] = [];
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-prepared-rejection',
       persist: (events) => {
         persistedTypes.push(events.map((event) => event.type));
@@ -160,7 +157,7 @@ describe('ModelInvocationGatewayV1', () => {
   test('acknowledges every retry attempt before the corresponding dispatch', async () => {
     const order: string[] = [];
     let dispatches = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-retry-order',
       persist: (events) => {
         for (const event of events) {
@@ -200,7 +197,7 @@ describe('ModelInvocationGatewayV1', () => {
   test('starts the retry time budget at the first transient failure', async () => {
     let now = 0;
     let dispatches = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-retry-budget',
       now: () => now,
       transport: async () => {
@@ -225,7 +222,7 @@ describe('ModelInvocationGatewayV1', () => {
 
   test('keeps an active streaming attempt alive beyond the inactivity timeout', async () => {
     let dispatches = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-stream-activity',
       transport: async (input) => {
         dispatches += 1;
@@ -252,7 +249,7 @@ describe('ModelInvocationGatewayV1', () => {
 
   test('keeps cumulative retry suppression separate from reasoning segment identity', async () => {
     const ephemeral: Array<{ type: string; segmentId?: string; text?: string }> = [];
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-reasoning-segments',
       transport: async (input) => {
         input.onReasoningCumulative?.('first', 'segment-a');
@@ -288,7 +285,7 @@ describe('ModelInvocationGatewayV1', () => {
       [401, 1, 'provider_failure', 'MODEL_ATTEMPT_FATAL_FAILURE:provider_rejected'],
     ] as const) {
       let dispatches = 0;
-      const harness = createTestModelInvocationHarnessV1({
+      const harness = createTestModelInvocationHarness({
         workspace: `/tmp/model-gateway-http-${statusCode}`,
         transport: async () => {
           dispatches += 1;
@@ -315,14 +312,14 @@ describe('ModelInvocationGatewayV1', () => {
     let dispatches = 0;
     const fixture = compiled();
     const mutableSurface = structuredClone(fixture.compiled.surface);
-    const mutableCompiled: CompiledModelSurfaceV1 = {
+    const mutableCompiled: CompiledModelSurface = {
       ...fixture.compiled,
       surface: mutableSurface,
-      surfaceDigest: computeModelSurfaceDigestV1(mutableSurface),
+      surfaceDigest: computeModelSurfaceDigest(mutableSurface),
     };
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createRuntimeHostStateInitialStateV1({
+      createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-drift',
         userId: 'test',
@@ -332,11 +329,11 @@ describe('ModelInvocationGatewayV1', () => {
         type: 'resource_budget.configured',
         runId: 'gateway-drift-run',
         startedAt: new Date(startedAt).toISOString(),
-        deadlineAt: new Date(startedAt + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs).toISOString(),
-        budget: LIMITED_RESOURCE_BUDGET_V1,
+        deadlineAt: new Date(startedAt + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs).toISOString(),
+        budget: LIMITED_RESOURCE_BUDGET_,
       },
     );
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-drift',
       state: initial,
       persist: (events) => {
@@ -376,11 +373,11 @@ describe('ModelInvocationGatewayV1', () => {
   test('does not expose a response when the completion receipt batch is rejected', async () => {
     let responseWritten = false;
     const rejectedBatches: string[][] = [];
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-terminal-rejection',
       artifacts: {
         writeSurface: () => ref('model_surface', 'a'),
-        writeResponse: (_record: ModelResponseRecordV1) => {
+        writeResponse: (_record: ModelResponseRecord) => {
           responseWritten = true;
           return ref('model_response', 'b');
         },
@@ -422,7 +419,7 @@ describe('ModelInvocationGatewayV1', () => {
     const batches: string[][] = [];
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createRuntimeHostStateInitialStateV1({
+      createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-budget',
         userId: 'test',
@@ -432,11 +429,11 @@ describe('ModelInvocationGatewayV1', () => {
         type: 'resource_budget.configured',
         runId: 'gateway-run',
         startedAt: new Date(startedAt).toISOString(),
-        deadlineAt: new Date(startedAt + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs).toISOString(),
-        budget: LIMITED_RESOURCE_BUDGET_V1,
+        deadlineAt: new Date(startedAt + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs).toISOString(),
+        budget: LIMITED_RESOURCE_BUDGET_,
       },
     );
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-atomic',
       state: initial,
       persist: (events) => {
@@ -484,7 +481,7 @@ describe('ModelInvocationGatewayV1', () => {
 
   test('terminalizes an attempted invocation when synchronous completion finalization fails', async () => {
     let dispatches = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-finalizer-fault',
       transport: async () => {
         dispatches += 1;
@@ -518,8 +515,8 @@ describe('ModelInvocationGatewayV1', () => {
   test('routes all five closed purposes through the same Gateway contract', async () => {
     const observed: string[] = [];
     const operations: string[] = [];
-    for (const purpose of MODEL_INVOCATION_PURPOSES_V1) {
-      const harness = createTestModelInvocationHarnessV1({
+    for (const purpose of MODEL_INVOCATION_PURPOSES_) {
+      const harness = createTestModelInvocationHarness({
         workspace: `/tmp/model-gateway-${purpose}`,
         transport: async () => RESPONSE,
         operationExecution: {
@@ -556,22 +553,22 @@ describe('ModelInvocationGatewayV1', () => {
     }
 
     expect(observed).toEqual(
-      MODEL_INVOCATION_PURPOSES_V1.map(
-        (purpose) => `${purpose}:${MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1[purpose]}`,
+      MODEL_INVOCATION_PURPOSES_.map(
+        (purpose) => `${purpose}:${MODEL_PURPOSE_TO_PROVIDER_DISPATCH_[purpose]}`,
       ),
     );
     expect(operations).toEqual(
-      MODEL_INVOCATION_PURPOSES_V1.map(
-        (purpose) => `${purpose}:${BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1[purpose]}`,
+      MODEL_INVOCATION_PURPOSES_.map(
+        (purpose) => `${purpose}:${BUILTIN_MODEL_OPERATION_BY_PURPOSE_[purpose]}`,
       ),
     );
   });
 
   test('denies all five purposes when the configured Provider admission seam is missing', async () => {
-    for (const purpose of MODEL_INVOCATION_PURPOSES_V1) {
+    for (const purpose of MODEL_INVOCATION_PURPOSES_) {
       let operations = 0;
       let transports = 0;
-      const harness = createTestModelInvocationHarnessV1({
+      const harness = createTestModelInvocationHarness({
         workspace: `/tmp/model-gateway-missing-admission-${purpose}`,
         transport: async () => {
           transports += 1;
@@ -599,7 +596,7 @@ describe('ModelInvocationGatewayV1', () => {
 
   test('fails closed before the response source when Model operation selection rejects', async () => {
     let sourceCalls = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-operation-rejected',
       transport: async () => {
         sourceCalls += 1;

@@ -6,13 +6,13 @@ import {
   deniedReadVerdict,
   evaluatePlatformSupport,
   githubEvidenceSource,
-  type PlatformCapabilityEvidenceV1,
-  platformCapabilityEvidenceV1Schema,
+  type PlatformCapabilityEvidence,
+  platformCapabilityEvidenceSchema,
   probeBrokeredGit,
 } from '../../scripts/release/platform-capability-probe';
 
 type ProbeInput = Omit<
-  Omit<PlatformCapabilityEvidenceV1, 'digest'>,
+  Omit<PlatformCapabilityEvidence, 'digest'>,
   'outcome' | 'productionSupported' | 'limitations'
 >;
 
@@ -126,7 +126,7 @@ describe('platform capability probe admission', () => {
       limitations: ['fixture'],
       digest: `sha256:${'a'.repeat(64)}`,
     };
-    expect(platformCapabilityEvidenceV1Schema.safeParse(candidate).success).toBe(false);
+    expect(platformCapabilityEvidenceSchema.safeParse(candidate).success).toBe(false);
   });
   const githubSource = {
     QUALIFICATION_REPOSITORY: 'ferqx/kite-code',

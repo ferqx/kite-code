@@ -20,7 +20,7 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
   → Runtime/Policy 校验
   → Pipeline 签发 child grant 并启动 Subagent Provider
   → Builtin Runtime 构造独立模型上下文、工具 Surface 与多轮模型循环
-  → child 工具调用通过 State26 App/Host adapter 重入完整执行与策略边界
+  → child 工具调用通过 Runtime State App/Host adapter 重入完整执行与策略边界
   → 生命周期事件投影给主 Runtime/TUI
   → 返回结构化结果或 continuation
 ```
@@ -43,7 +43,7 @@ Builtin child loop 只通过父 Runtime 传入的 `McpRuntimeProvider` 事实访
 
 continuation codec 保存消息、步骤、journal 和阻塞请求，并在恢复时严格校验。它不是让子 Agent绕过审批的离线执行通道；批准也不能扩大 role ceiling，explore/plan/review 的恢复工具仍使用与首次执行相同的只读 Shell executor。
 
-这里的 current journal 是与父 Runtime 同构的 `ToolRecoveryJournalV1`：包含非秘密 recovery identity、
+这里的 current journal 是与父 Runtime 同构的 `ToolRecoveryJournal`：包含非秘密 recovery identity、
 failure instance、`recoveryOf`、一次模型修正/自动重放 ceiling 和 tool-owned progress。continuation
 恢复不会重置次数；child 返回时父 Runtime 通过单一 merge event 合并 journal，而不是解析 child
 summary 或旧 stderr/path journal。fingerprint 与 lineage 不投影到 SessionLog/telemetry。
@@ -62,8 +62,8 @@ parent 对同一 canonical invocation 的重提仍会在 dispatch 前零调用�
 ## 6.5 调度与边界
 
 Task Tool 按 Runtime/线程限制活动数量。外层 Tool attempt durable ack 后，Pipeline 签发 exact、短时、single-use
-delegation/resume grant并注入 `SubagentProviderV1` runtime；唯一生产 `LocalSubagentProviderV1` 只管理 child
-lifecycle、cancel 与 observation transport；`BuiltinChildRuntimeDriverV1` 只消费 single-use registration callback，
+delegation/resume grant并注入 `SubagentProvider` runtime；唯一生产 `LocalSubagentProvider` 只管理 child
+lifecycle、cancel 与 observation transport；`BuiltinChildRuntimeDriver` 只消费 single-use registration callback，
 模型/工具分别经唯一 Gateway 和完整 Tool Pipeline 完成。Task adapter 不选择 Provider，旧 Core Driver、composition
 与 runner 都已删除，缺失已解析 Model 时 fail closed。取消通过 AbortController 传播。
 子 Agent 不递归无限派生，也不能修改主 RuntimeState；其结果必须通过主 Runtime Event 合并。
@@ -74,7 +74,7 @@ durable ready 后才 activate。blocked continuation 同样私有化，resume �
 attempt/child/cursor 交叉回读。正文、child messages、完整 continuation、raw digest 与 full handle 不进入 Runtime
 Event、Session Logger 或 telemetry；审批所需的最小 command 展示仍受原 approval authority 治理。
 
-同一模型响应中的独立 read-only sibling `task` calls 可以有界并发。RMV1-09 后 ToolSpec 将其投影为
+同一模型响应中的独立 read-only sibling `task` calls 可以有界并发。RM-09 后 ToolSpec 将其投影为
 `parallel-subagent` concurrency group、workspace/subagent resource scopes 和 causal group，name-free Scheduler
 只组合同一 causal group、连续、尚未暂停且无需审批且 conflict-free 的调用；workspace-write sibling 使用
 exclusive workspace/conflict facts，即使 Full Policy 已放行也保持串行。只读单批最多 4 个；Resource Runtime 可按
@@ -89,7 +89,7 @@ Runtime 为实际并发派发的 sibling 附加稳定的批次 identity；TUI �
 
 ## 6.6 累计预算、取消与恢复
 
-父 Agent 与全部 Subagent 共用同一个 run-scoped `ResourceBudgetV1` ledger，子 Agent 不获得独立
+父 Agent 与全部 Subagent 共用同一个 run-scoped `ResourceBudget` ledger，子 Agent 不获得独立
 余额。Task parent reservation 只覆盖本次 lifecycle/concurrency attempt；子模型及 Builtin、
 Shell、MCP invocation 分别建立带 `parentReservationId` 的 child reservation，并在 dispatch 前
 持久化。artifact bytes 计入产出它的 tool/MCP reservation，不重复计算一次 invocation。暂停后
@@ -108,7 +108,7 @@ resource-only bounded reconciliation 提交，child tool/model terminal 本身�
 已取消 turn、释放未知额度或启动后继调用。
 
 子 Agent 的失败、资源饱和与终态使用主 Runtime 的同一 failure-mode policy 和
-`RunTerminalOutcomeV1` 投影。模型 final、子进程零退出码或 parent task 的表面成功都不能绕过
+`RunTerminalOutcome` 投影。模型 final、子进程零退出码或 parent task 的表面成功都不能绕过
 required Verification，也不能把 `unknown`、`budget_exhausted` 或 `resource_saturated` 显示为
 完成。
 

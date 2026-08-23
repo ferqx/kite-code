@@ -1,42 +1,42 @@
-import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime';
 import type { ToolApprovalPayload } from '@kite/runtime-contract';
 import {
-  runtimeHostStateVerifyApprovalBindingDigestV1,
-  type StateToolGovernanceInvocationFactV1,
-  type StateToolGovernancePolicyFactV1,
+  runtimeHostStateVerifyApprovalBindingDigest,
+  type StateToolGovernanceInvocationFact,
+  type StateToolGovernancePolicyFact,
 } from '@kite/runtime-host';
 
-export const APP_APPROVAL_BINDING_SCHEMA_V1 = 'kite.app-approval-binding.v1' as const;
+export const APP_APPROVAL_BINDING_SCHEMA_ = 'kite.app-approval-binding.v1' as const;
 
 /**
  * App-only transport wrapper for Kernel governance facts.  App may carry this
  * value across a private child continuation, but it never computes policy or
  * changes either Kernel fact.
  */
-export interface AppApprovalBindingV1 {
-  readonly schema: typeof APP_APPROVAL_BINDING_SCHEMA_V1;
+export interface AppApprovalBinding {
+  readonly schema: typeof APP_APPROVAL_BINDING_SCHEMA_;
   readonly digest: string;
-  readonly invocationFact: Readonly<StateToolGovernanceInvocationFactV1>;
-  readonly policyFact: Readonly<StateToolGovernancePolicyFactV1>;
+  readonly invocationFact: Readonly<StateToolGovernanceInvocationFact>;
+  readonly policyFact: Readonly<StateToolGovernancePolicyFact>;
   readonly childToolCallId?: string;
   readonly runtimeToolCallId?: string;
 }
 
-const approvalBindings = new WeakMap<object, AppApprovalBindingV1>();
+const approvalBindings = new WeakMap<object, AppApprovalBinding>();
 
-export function bindAppApprovalBindingV1(
+export function bindAppApprovalBinding(
   presentation: ToolApprovalPayload,
-  input: Omit<AppApprovalBindingV1, 'schema'>,
+  input: Omit<AppApprovalBinding, 'schema'>,
 ): void {
   approvalBindings.set(
     presentation,
-    Object.freeze({ schema: APP_APPROVAL_BINDING_SCHEMA_V1, ...input }),
+    Object.freeze({ schema: APP_APPROVAL_BINDING_SCHEMA_, ...input }),
   );
 }
 
-export function appApprovalBindingForPresentationV1(
+export function appApprovalBindingForPresentation(
   presentation: ToolApprovalPayload,
-): AppApprovalBindingV1 | undefined {
+): AppApprovalBinding | undefined {
   return approvalBindings.get(presentation);
 }
 
@@ -46,7 +46,7 @@ export function appApprovalBindingForPresentationV1(
  * only owns the App transport envelope and rejects unknown fields before any
  * caller can treat an untrusted JSON object as a binding.
  */
-export function decodeAppApprovalBindingV1(value: unknown): AppApprovalBindingV1 | undefined {
+export function decodeAppApprovalBinding(value: unknown): AppApprovalBinding | undefined {
   if (!plainRecord(value)) return undefined;
   const childToolCallId = value.childToolCallId;
   const runtimeToolCallId = value.runtimeToolCallId;
@@ -61,17 +61,17 @@ export function decodeAppApprovalBindingV1(value: unknown): AppApprovalBindingV1
       ['schema', 'digest', 'invocationFact', 'policyFact'],
       ['childToolCallId', 'runtimeToolCallId'],
     ) ||
-    value.schema !== APP_APPROVAL_BINDING_SCHEMA_V1 ||
+    value.schema !== APP_APPROVAL_BINDING_SCHEMA_ ||
     (childToolCallId !== undefined && !nonEmptyString(childToolCallId)) ||
     (runtimeToolCallId !== undefined && !nonEmptyString(runtimeToolCallId)) ||
-    !runtimeHostStateVerifyApprovalBindingDigestV1(verifiedInput)
+    !runtimeHostStateVerifyApprovalBindingDigest(verifiedInput)
   ) {
     return undefined;
   }
 
   const { digest, invocationFact, policyFact } = verifiedInput;
   return Object.freeze({
-    schema: APP_APPROVAL_BINDING_SCHEMA_V1,
+    schema: APP_APPROVAL_BINDING_SCHEMA_,
     digest,
     invocationFact: Object.freeze({ ...invocationFact }),
     policyFact: Object.freeze({
@@ -85,8 +85,8 @@ export function decodeAppApprovalBindingV1(value: unknown): AppApprovalBindingV1
 }
 
 /** Validate the exact Kernel facts and child identity before any interaction. */
-export function isAuthenticAppApprovalBindingV1(input: {
-  readonly binding: AppApprovalBindingV1;
+export function isAuthenticAppApprovalBinding(input: {
+  readonly binding: AppApprovalBinding;
   readonly blocked: {
     readonly toolCallId: string;
     readonly runtimeToolCallId?: string;
@@ -95,13 +95,13 @@ export function isAuthenticAppApprovalBindingV1(input: {
   };
 }): boolean {
   const { blocked } = input;
-  const binding = decodeAppApprovalBindingV1(input.binding);
+  const binding = decodeAppApprovalBinding(input.binding);
   if (!binding) return false;
   if (
     binding.childToolCallId !== blocked.toolCallId ||
     binding.runtimeToolCallId !== blocked.runtimeToolCallId ||
     binding.invocationFact.exposedToolName !== blocked.toolName ||
-    binding.invocationFact.argumentsDigest !== digestCapabilityValueV1(blocked.args)
+    binding.invocationFact.argumentsDigest !== digestCapabilityValue(blocked.args)
   ) {
     return false;
   }

@@ -6,22 +6,25 @@ import {
 } from '@kite/builtin-runtime';
 import {
   digestProjectionEnvironment,
-  type ModelInvocationPersistenceV1,
+  type ModelInvocationPersistence,
   resolveAutoReviewConfig,
   resolveModelCapabilities,
 } from '@kite/builtin-runtime/model';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import {
-  runtimeHostStateDecideAutoReviewV1 as decideAutoReviewV1,
-  deferredStateRuntimeEffectV1,
-  runtimeHostStateCheckDoomLoopFingerprintV1,
-  runtimeHostStateToolDoomLoopFingerprintV1,
-  runtimeHostStateToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostStateDecideAutoReview as decideAutoReview,
+  deferredStateRuntimeEffect,
+  runtimeHostStateCheckDoomLoopFingerprint,
+  runtimeHostStateToolDoomLoopFingerprint,
+  runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
 import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
-import { type ContextCompactor, executeContextCompaction } from './context-compaction-effect';
-import { projectPrimaryModelEffectV1 } from './model-effect';
+import {
+  type ContextCompactor,
+  executeContextCompaction as runContextCompaction,
+} from './context-compaction-effect';
+import { projectPrimaryModelEffect } from './model-effect';
 import {
   type RuntimeExecutorDependencies,
   resolveAutoReviewTimeout,
@@ -29,15 +32,15 @@ import {
   reviewerProviderDataAdmission,
   runtimeProviderDataAdmission,
 } from './runtime-effect-dependencies';
-import { executeAppRuntimeToolsEffectV1 } from './runtime-tool-effect';
+import { executeAppRuntimeToolsEffect } from './runtime-tool-effect';
 import type {
   RuntimeEffect,
   RuntimeEffectExecutor,
   RuntimeEvent,
   RuntimeState,
 } from './state-runtime';
-import { readPrivateSuspendedSubagentV1 } from './tool-controller-adapter';
-import { createAppToolTurnContextV1 } from './tool-turn-context';
+import { readPrivateSuspendedSubagent } from './tool-controller-adapter';
+import { createAppToolTurnContext } from './tool-turn-context';
 import { executeVerificationEffect } from './verification-effect';
 
 function requireModelCoordinatorDependencies(dependencies: RuntimeExecutorDependencies): {
@@ -68,8 +71,8 @@ function currentSkillCatalog(
   dependencies: RuntimeExecutorDependencies,
 ): SkillCatalogSnapshot | undefined {
   return dependencies.skillOptions &&
-    getFeatureFlags(dependencies.config).skillWorkflowV1 &&
-    getFeatureFlags(dependencies.config).skillActivationV2
+    getFeatureFlags(dependencies.config).skillWorkflow &&
+    getFeatureFlags(dependencies.config).skillActivation
     ? refreshSkillCatalog(dependencies.skillOptions, {
         resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
       })
@@ -84,12 +87,12 @@ function currentSkillCatalog(
  * before that executor is called, so none can fall through to a second owner or
  * be retried by the remaining-effect path.
  */
-export function createAppRuntimeEffectExecutorV1(
+export function createAppRuntimeEffectExecutor(
   dependencies: RuntimeExecutorDependencies,
 ): RuntimeEffectExecutor {
   const subagentEventSink: SubAgentEventSink = dependencies.subagentEventSink ?? (() => {});
 
-  const executeContextCompactionV1 = async (
+  const executeContextCompaction = async (
     effect: Extract<RuntimeEffect, { type: 'compact_context' }>,
     state: RuntimeState,
     executionContext?: Parameters<RuntimeEffectExecutor>[3],
@@ -107,7 +110,7 @@ export function createAppRuntimeEffectExecutorV1(
         Date.now() + leaseTtlMs,
       )
     ) {
-      return deferredStateRuntimeEffectV1(
+      return deferredStateRuntimeEffect(
         'Context compaction is already owned by another runtime.',
         100,
       );
@@ -153,7 +156,7 @@ export function createAppRuntimeEffectExecutorV1(
           persistence: {
             getState: () =>
               (executionContext.getState?.() ??
-                state) as import('@kite/runtime-host').StateRuntimeStateV1,
+                state) as import('@kite/runtime-host').StateRuntimeState,
             persistEvents: executionContext.persistEvents,
           },
           state,
@@ -177,7 +180,7 @@ export function createAppRuntimeEffectExecutorV1(
         if (!renewLease()) throw new Error('Runtime effect lease was lost before dispatch.');
         return contextCompactor(input);
       };
-      const events = await executeContextCompaction({
+      const events = await runContextCompaction({
         state,
         compactionId: effect.compactionId,
         compact: leasedCompactor,
@@ -202,7 +205,7 @@ export function createAppRuntimeEffectExecutorV1(
 
   return async (effect, state, emit, executionContext) => {
     if (effect.type === 'run_tools') {
-      return executeAppRuntimeToolsEffectV1(
+      return executeAppRuntimeToolsEffect(
         effect,
         state,
         dependencies,
@@ -212,12 +215,12 @@ export function createAppRuntimeEffectExecutorV1(
       );
     }
     if (effect.type === 'compact_context') {
-      return executeContextCompactionV1(effect, state, executionContext);
+      return executeContextCompaction(effect, state, executionContext);
     }
     if (effect.type === 'run_auto_review') {
       const { modelEffectCoordinator, builtinToolCatalog } =
         requireModelCoordinatorDependencies(dependencies);
-      return projectAutoReviewEffectV1(
+      return projectAutoReviewEffect(
         effect,
         state,
         dependencies,
@@ -274,7 +277,7 @@ export function createAppRuntimeEffectExecutorV1(
         }
       : undefined;
 
-    return projectPrimaryModelEffectV1({
+    return projectPrimaryModelEffect({
       model: dependencies.model,
       state,
       config: dependencies.config,
@@ -300,11 +303,11 @@ export function createAppRuntimeEffectExecutorV1(
 }
 
 /** State adapter around the Kernel decision and Builtin reviewer coordinator. */
-async function projectAutoReviewEffectV1(
+async function projectAutoReviewEffect(
   effect: Extract<RuntimeEffect, { type: 'run_auto_review' }>,
   state: Readonly<RuntimeState>,
   dependencies: RuntimeExecutorDependencies,
-  modelInvocationPersistence: ModelInvocationPersistenceV1<RuntimeState, RuntimeEvent> | undefined,
+  modelInvocationPersistence: ModelInvocationPersistence<RuntimeState, RuntimeEvent> | undefined,
   builtinToolCatalog: NonNullable<RuntimeExecutorDependencies['builtinToolCatalog']>,
   modelEffectCoordinator: NonNullable<RuntimeExecutorDependencies['modelEffectCoordinator']>,
 ): Promise<RuntimeEvent[]> {
@@ -332,7 +335,7 @@ async function projectAutoReviewEffectV1(
   let reviewedCall: { id: string; name: string; args: unknown };
   if (subagentId && suspended) {
     try {
-      const snapshot = readPrivateSuspendedSubagentV1(
+      const snapshot = readPrivateSuspendedSubagent(
         suspended,
         effect.toolCallId,
         state,
@@ -364,7 +367,7 @@ async function projectAutoReviewEffectV1(
   }
   const parsed = toolRequestFromCall(
     reviewedCall,
-    createAppToolTurnContextV1({
+    createAppToolTurnContext({
       workspace: state.session.workspace,
       threadId: state.session.threadId,
       config: dependencies.config,
@@ -394,9 +397,9 @@ async function projectAutoReviewEffectV1(
   const request = parsed.request;
   const observedAt = Date.now();
   const doomLoop = suspended
-    ? runtimeHostStateCheckDoomLoopFingerprintV1(
+    ? runtimeHostStateCheckDoomLoopFingerprint(
         state.doomLoop,
-        toolInvocationFingerprintV1({
+        toolInvocationFingerprint({
           toolName: request.name,
           parsedArgs: request.args,
           identityRevision: 'subagent-blocked-v1',
@@ -405,9 +408,9 @@ async function projectAutoReviewEffectV1(
         60_000,
         observedAt,
       )
-    : runtimeHostStateCheckDoomLoopFingerprintV1(
+    : runtimeHostStateCheckDoomLoopFingerprint(
         state.doomLoop,
-        runtimeHostStateToolDoomLoopFingerprintV1(request),
+        runtimeHostStateToolDoomLoopFingerprint(request),
         dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
         60_000,
         observedAt,
@@ -444,7 +447,7 @@ async function projectAutoReviewEffectV1(
       parentInvocationId: call.modelInvocationId,
     });
     const reviewReason = result.suggestion?.reason ?? result.reason;
-    const decision = decideAutoReviewV1({
+    const decision = decideAutoReview({
       reviewId: effect.reviewId,
       toolCallId: effect.toolCallId,
       ok: result.ok,
@@ -497,7 +500,7 @@ async function projectAutoReviewEffectV1(
   } catch (error) {
     if (error instanceof ProviderDataAdmissionError) throw error;
     const reason = error instanceof Error ? error.message : String(error);
-    const decision = decideAutoReviewV1({
+    const decision = decideAutoReview({
       reviewId: effect.reviewId,
       toolCallId: effect.toolCallId,
       ok: false,

@@ -17,20 +17,20 @@ import { join } from 'node:path';
 const LOCK_EXCLUSIVE_NONBLOCKING = 2 | 4;
 const LOCK_WAIT_MS = 2_000;
 
-export interface PosixSupervisorLockIdentityV1 {
+export interface PosixSupervisorLockIdentity {
   readonly version: 1;
   readonly dispatchId: string;
   readonly supervisorNonce: string;
   readonly dispatchIntentDigest: string;
 }
 
-export interface PosixSupervisorLockHandleV1 {
+export interface PosixSupervisorLockHandle {
   readonly fd: number;
   readonly path: string;
   close(): void;
 }
 
-export function posixSupervisorLockPathV1(runtimePath: string, dispatchId: string): string {
+export function posixSupervisorLockPath(runtimePath: string, dispatchId: string): string {
   const key = createHash('sha256').update(dispatchId).digest('hex').slice(0, 24);
   return join(runtimePath, `.dispatch-${key}.lock`);
 }
@@ -40,11 +40,11 @@ export function posixSupervisorLockPathV1(runtimePath: string, dispatchId: strin
  * supervisor. A restored Runtime can therefore prove the supervisor exited
  * even if its host died before the child published a PID/start identity.
  */
-export function createPosixSupervisorLockV1(
+export function createPosixSupervisorLock(
   runtimePath: string,
-  identity: Readonly<PosixSupervisorLockIdentityV1>,
-): PosixSupervisorLockHandleV1 {
-  const path = posixSupervisorLockPathV1(runtimePath, identity.dispatchId);
+  identity: Readonly<PosixSupervisorLockIdentity>,
+): PosixSupervisorLockHandle {
+  const path = posixSupervisorLockPath(runtimePath, identity.dispatchId);
   const fd = openSync(
     path,
     constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0),
@@ -75,13 +75,13 @@ export function createPosixSupervisorLockV1(
 }
 
 /** Verify fd 3 is the exact pre-spawn lock inherited by this supervisor. */
-export function verifyInheritedPosixSupervisorLockV1(
+export function verifyInheritedPosixSupervisorLock(
   fd: number,
   runtimePath: string,
-  expected: Readonly<PosixSupervisorLockIdentityV1>,
+  expected: Readonly<PosixSupervisorLockIdentity>,
 ): boolean {
   try {
-    const path = posixSupervisorLockPathV1(runtimePath, expected.dispatchId);
+    const path = posixSupervisorLockPath(runtimePath, expected.dispatchId);
     const descriptor = fstatSync(fd);
     const target = lstatSync(path);
     return (
@@ -98,11 +98,11 @@ export function verifyInheritedPosixSupervisorLockV1(
 }
 
 /** True only once no process retains the inherited pre-spawn lock. */
-export async function confirmPosixSupervisorLockReleasedV1(
+export async function confirmPosixSupervisorLockReleased(
   runtimePath: string,
-  expected: Readonly<PosixSupervisorLockIdentityV1>,
+  expected: Readonly<PosixSupervisorLockIdentity>,
 ): Promise<boolean> {
-  const path = posixSupervisorLockPathV1(runtimePath, expected.dispatchId);
+  const path = posixSupervisorLockPath(runtimePath, expected.dispatchId);
   if (!existsSync(path)) {
     // The lock is created before spawn. Absence proves dispatch did not reach spawn.
     return true;
@@ -135,10 +135,7 @@ export async function confirmPosixSupervisorLockReleasedV1(
   return false;
 }
 
-function readExactIdentity(
-  path: string,
-  expected: Readonly<PosixSupervisorLockIdentityV1>,
-): boolean {
+function readExactIdentity(path: string, expected: Readonly<PosixSupervisorLockIdentity>): boolean {
   try {
     return readFileSync(path, 'utf8') === encodeIdentity(expected);
   } catch {
@@ -146,7 +143,7 @@ function readExactIdentity(
   }
 }
 
-function encodeIdentity(identity: Readonly<PosixSupervisorLockIdentityV1>): string {
+function encodeIdentity(identity: Readonly<PosixSupervisorLockIdentity>): string {
   if (
     identity.version !== 1 ||
     !identity.dispatchId ||

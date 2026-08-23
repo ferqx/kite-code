@@ -1,9 +1,9 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import type { McpCapabilityRouteV1 } from './argument-inspection';
+import type { McpCapabilityRoute } from './argument-inspection';
 import type { CapabilityDescriptor, CapabilitySnapshot } from './capability-domain';
 import type { McpConfigSourceKind } from './config-domain';
 import type { McpDiagnosticCode } from './diagnostics';
-import type { McpTransportInvocationBindingV1 } from './transport-boundary';
+import type { McpTransportInvocationBinding } from './transport-boundary';
 
 export type McpProviderDirectoryStatus =
   | 'pending_approval'
@@ -48,7 +48,7 @@ export interface McpCapabilityInvocation {
   capabilityId: string;
   expectedRevision: string;
   arguments: Record<string, unknown>;
-  transportBoundary?: McpTransportInvocationBindingV1;
+  transportBoundary?: McpTransportInvocationBinding;
   /** Durable release-owned facts required before any production MCP write dispatch. */
   writeGovernance?: Readonly<{
     userApprovalReceiptDigest: string;
@@ -63,7 +63,7 @@ export interface McpRuntimeProvider {
   getResourceDirectorySnapshot(): McpResourceDirectorySnapshot;
   findCapability(capabilityId: string): CapabilityDescriptor | undefined;
   /** Redacted transport identity used by the independent remote-content gate. */
-  getCapabilityRoute?(capabilityId: string): McpCapabilityRouteV1 | undefined;
+  getCapabilityRoute?(capabilityId: string): McpCapabilityRoute | undefined;
   /** Wait for an already-configured remote provider to become executable. */
   ensureProviderReady?(providerId: string, timeoutMs?: number, signal?: AbortSignal): Promise<void>;
   callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;
@@ -71,6 +71,6 @@ export interface McpRuntimeProvider {
     serverName: string,
     uri: string,
     signal?: AbortSignal,
-    transportBoundary?: McpTransportInvocationBindingV1,
+    transportBoundary?: McpTransportInvocationBinding,
   ): Promise<string>;
 }

@@ -1,4 +1,4 @@
-export type ModelSecretInspectionV1 = Readonly<{
+export type ModelSecretInspection = Readonly<{
   schemaVersion: 1;
   detector: 'runtime_secret_detector';
   verdict: 'clear' | 'secret' | 'unknown';
@@ -14,13 +14,13 @@ const SECRET_SHAPE_PATTERNS = [
   /(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|\.ssh|\.aws|\.kube|credentials?|secrets?)(?:$|[/\\])/i,
 ] as const;
 
-export function createModelSecretDetectorV1(
+export function createModelSecretDetector(
   options: {
     readonly knownSecrets?: Iterable<string | undefined>;
     readonly environment?: Readonly<Record<string, string | undefined>>;
     readonly maxInspectionChars?: number;
   } = {},
-): (input: Readonly<{ text: string; provenance?: string }>) => ModelSecretInspectionV1 {
+): (input: Readonly<{ text: string; provenance?: string }>) => ModelSecretInspection {
   const knownSecrets = new Set<string>();
   for (const value of options.knownSecrets ?? []) if (value) knownSecrets.add(value);
   for (const [name, value] of Object.entries(options.environment ?? process.env)) {
@@ -36,6 +36,6 @@ export function createModelSecretDetectorV1(
   };
 }
 
-function inspection(verdict: ModelSecretInspectionV1['verdict']): ModelSecretInspectionV1 {
+function inspection(verdict: ModelSecretInspection['verdict']): ModelSecretInspection {
   return { schemaVersion: 1, detector: 'runtime_secret_detector', verdict };
 }

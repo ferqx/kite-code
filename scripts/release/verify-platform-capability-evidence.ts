@@ -3,15 +3,15 @@ import { resolve } from 'node:path';
 import { canonicalJsonBytes, parseCanonicalJson } from './canonical-json';
 import {
   collectLimitations,
-  computePlatformCapabilityEvidenceDigestV1,
+  computePlatformCapabilityEvidenceDigest,
   evaluatePlatformSupport,
   githubEvidenceSource,
-  type PlatformCapabilityEvidenceV1,
-  platformCapabilityEvidenceV1Schema,
-  platformCapabilitySourceV1Schema,
+  type PlatformCapabilityEvidence,
+  platformCapabilityEvidenceSchema,
+  platformCapabilitySourceSchema,
 } from './platform-capability-probe';
 
-type FormalSourceV1 = NonNullable<PlatformCapabilityEvidenceV1['source']>;
+type FormalSource = NonNullable<PlatformCapabilityEvidence['source']>;
 
 const SOURCE_KEYS = [
   'headSha',
@@ -26,12 +26,12 @@ const SOURCE_KEYS = [
   'workflowSha',
 ] as const;
 
-export interface VerifiedPlatformCapabilityEvidenceV1 {
+export interface VerifiedPlatformCapabilityEvidence {
   version: 1;
   status: 'verified_non_production_candidate';
-  source: FormalSourceV1;
+  source: FormalSource;
   evidenceDigest: string;
-  outcome: PlatformCapabilityEvidenceV1['outcome'];
+  outcome: PlatformCapabilityEvidence['outcome'];
   productionSupported: false;
 }
 
@@ -40,27 +40,27 @@ export interface VerifiedPlatformCapabilityEvidenceV1 {
  * from GitHub run/job metadata after download; no self-reported source field
  * is accepted as its own authority.
  */
-export function verifyPlatformCapabilityEvidenceV1(input: {
+export function verifyPlatformCapabilityEvidence(input: {
   evidence: unknown;
-  expectedSource: FormalSourceV1;
-}): VerifiedPlatformCapabilityEvidenceV1 {
+  expectedSource: FormalSource;
+}): VerifiedPlatformCapabilityEvidence {
   const evidence = strictEvidence(input.evidence);
-  const expectedSource = platformCapabilitySourceV1Schema.parse(input.expectedSource);
+  const expectedSource = platformCapabilitySourceSchema.parse(input.expectedSource);
   if (canonical(expectedSource) !== canonical(evidence.source)) {
     throw new Error('Platform capability evidence source identity mismatch.');
   }
-  const withoutDigest = { ...evidence } as Omit<PlatformCapabilityEvidenceV1, 'digest'> & {
+  const withoutDigest = { ...evidence } as Omit<PlatformCapabilityEvidence, 'digest'> & {
     digest?: string;
   };
   delete withoutDigest.digest;
-  if (computePlatformCapabilityEvidenceDigestV1(withoutDigest) !== evidence.digest) {
+  if (computePlatformCapabilityEvidenceDigest(withoutDigest) !== evidence.digest) {
     throw new Error('Platform capability evidence digest mismatch.');
   }
   const probeInput = { ...withoutDigest } as Omit<
     typeof withoutDigest,
     'outcome' | 'productionSupported' | 'limitations'
   > & {
-    outcome?: PlatformCapabilityEvidenceV1['outcome'];
+    outcome?: PlatformCapabilityEvidence['outcome'];
     productionSupported?: false;
     limitations?: string[];
   };
@@ -88,14 +88,14 @@ export function verifyPlatformCapabilityEvidenceV1(input: {
   });
 }
 
-function strictEvidence(value: unknown): PlatformCapabilityEvidenceV1 & { source: FormalSourceV1 } {
-  const parsed = platformCapabilityEvidenceV1Schema.safeParse(value);
+function strictEvidence(value: unknown): PlatformCapabilityEvidence & { source: FormalSource } {
+  const parsed = platformCapabilityEvidenceSchema.safeParse(value);
   if (!parsed.success || !parsed.data.source) {
     throw new Error(
       `Platform capability evidence schema is invalid: ${parsed.success ? 'source missing' : parsed.error.issues.map((issue) => issue.message).join('; ')}`,
     );
   }
-  const evidence: PlatformCapabilityEvidenceV1 & { source: FormalSourceV1 } = {
+  const evidence: PlatformCapabilityEvidence & { source: FormalSource } = {
     ...parsed.data,
     source: parsed.data.source,
   };
@@ -166,7 +166,7 @@ function strictEvidence(value: unknown): PlatformCapabilityEvidenceV1 & { source
   return evidence;
 }
 
-function sourceEnvironment(source: FormalSourceV1): NodeJS.ProcessEnv {
+function sourceEnvironment(source: FormalSource): NodeJS.ProcessEnv {
   return {
     QUALIFICATION_REPOSITORY: source.repository,
     QUALIFICATION_REPOSITORY_ID: source.repositoryId,
@@ -206,16 +206,16 @@ if (import.meta.main) {
   const evidence = parseCanonicalJson(readFileSync(evidencePath));
   const expectedPath = process.argv[4];
   const expectedSource = expectedPath
-    ? (parseCanonicalJson(readFileSync(resolve(expectedPath))) as FormalSourceV1)
+    ? (parseCanonicalJson(readFileSync(resolve(expectedPath))) as FormalSource)
     : githubEvidenceSource(
         {
-          platform: (evidence as PlatformCapabilityEvidenceV1).platform,
-          arch: (evidence as PlatformCapabilityEvidenceV1).arch,
+          platform: (evidence as PlatformCapabilityEvidence).platform,
+          arch: (evidence as PlatformCapabilityEvidence).arch,
         },
         process.env,
       ).source;
   if (!expectedSource) throw new Error('Expected GitHub source identity is required.');
-  const report = verifyPlatformCapabilityEvidenceV1({ evidence, expectedSource });
+  const report = verifyPlatformCapabilityEvidence({ evidence, expectedSource });
   const encoded = canonicalJsonBytes(report);
   if (outputPath) writeFileSync(outputPath, encoded, { flag: 'wx', mode: 0o600 });
   process.stdout.write(`${new TextDecoder().decode(encoded)}\n`);

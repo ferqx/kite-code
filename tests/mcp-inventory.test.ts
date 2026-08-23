@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createCapabilitySnapshotV1 } from '@kite/builtin-runtime';
+import { createCapabilitySnapshot } from '@kite/builtin-runtime';
 import type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
@@ -9,7 +9,7 @@ import {
   buildMcpInventory,
   type McpInventoryResult,
   type McpInventorySuccess,
-  mcpProviderInventoryNextActionV1,
+  mcpProviderInventoryNextAction,
 } from '@kite/builtin-runtime/mcp';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 
@@ -92,7 +92,7 @@ describe('buildMcpInventory', () => {
   // 1. no providers, no tools
   test('returns empty inventory when nothing is configured', () => {
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers: directorySnapshot([]),
       query: {},
     });
@@ -107,7 +107,7 @@ describe('buildMcpInventory', () => {
 
   // 2. one ready provider with multiple tools
   test('returns tools for a single ready provider', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 't1', name: 'create_issue', providerId: 'github' }),
       toolDescriptor({ id: 't2', name: 'get_pr', providerId: 'github' }),
       toolDescriptor({ id: 't3', name: 'list_repos', providerId: 'github' }),
@@ -134,7 +134,7 @@ describe('buildMcpInventory', () => {
 
   // 3. provider ready, but resource count is 0 (irrelevant — inventory shouldn't care)
   test('lists tools even when provider has zero resources', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 't1', name: 'search', providerId: 'db' }),
     ]);
     const providers = directorySnapshot([
@@ -150,7 +150,7 @@ describe('buildMcpInventory', () => {
   test('reports login_required provider with next_action', () => {
     const providers = directorySnapshot([providerEntry({ id: 'db', status: 'login_required' })]);
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers,
       query: {},
     });
@@ -170,7 +170,7 @@ describe('buildMcpInventory', () => {
       providerEntry({ id: 'github', status: 'pending_approval' }),
     ]);
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers,
       query: {},
     });
@@ -183,7 +183,7 @@ describe('buildMcpInventory', () => {
 
   // 6. degraded
   test('counts degraded provider as callable', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 't1', name: 'search', providerId: 'db' }),
     ]);
     const providers = directorySnapshot([
@@ -202,7 +202,7 @@ describe('buildMcpInventory', () => {
   test('reports disabled provider with enable action', () => {
     const providers = directorySnapshot([providerEntry({ id: 'db', status: 'disabled' })]);
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers,
       query: {},
     });
@@ -220,7 +220,7 @@ describe('buildMcpInventory', () => {
       providerEntry({ id: 'db', status: 'ready', toolNames: [] }),
     ]);
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers,
       query: {},
     });
@@ -233,7 +233,7 @@ describe('buildMcpInventory', () => {
 
   // 9. provider in Capability Snapshot but not in Directory (defensive backfill)
   test('backfills provider from capability snapshot when directory is missing it', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 't1', name: 'run', providerId: 'orphan' }),
     ]);
     const result = buildMcpInventory({
@@ -257,7 +257,7 @@ describe('buildMcpInventory', () => {
       providerEntry({ id: 'db', status: 'ready', toolNames: ['search', 'insert'] }),
     ]);
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers,
       query: {},
     });
@@ -269,7 +269,7 @@ describe('buildMcpInventory', () => {
 
   // 11. provider exact filter
   test('filters tools by provider name', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 't1', name: 'a', providerId: 'github' }),
       toolDescriptor({ id: 't2', name: 'b', providerId: 'db' }),
     ]);
@@ -288,7 +288,7 @@ describe('buildMcpInventory', () => {
   // 12. unknown provider
   test('fails with unknown_provider for nonexistent name', () => {
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers: directorySnapshot([]),
       query: { provider: 'nonexistent' },
     });
@@ -300,7 +300,7 @@ describe('buildMcpInventory', () => {
 
   // 13. stable sorting
   test('sorts providers and tools stably', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 'z', name: 'zeta', providerId: 'b-provider' }),
       toolDescriptor({ id: 'a', name: 'alpha', providerId: 'b-provider' }),
       toolDescriptor({ id: 'm', name: 'middle', providerId: 'a-provider' }),
@@ -328,7 +328,7 @@ describe('buildMcpInventory', () => {
       providerEntry({ id: 'p', status: 'ready', toolNames: descriptors.map((d) => d.displayName) }),
     ]);
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1(descriptors),
+      capabilities: createCapabilitySnapshot(descriptors),
       providers,
       query: { limit: 3 },
     });
@@ -345,7 +345,7 @@ describe('buildMcpInventory', () => {
     const providers = directorySnapshot([
       providerEntry({ id: 'p', status: 'ready', toolNames: descriptors.map((d) => d.displayName) }),
     ]);
-    const capabilities = createCapabilitySnapshotV1(descriptors);
+    const capabilities = createCapabilitySnapshot(descriptors);
 
     // page 1
     const page1 = buildMcpInventory({ capabilities, providers, query: { limit: 3 } });
@@ -378,12 +378,12 @@ describe('buildMcpInventory', () => {
     const providers = directorySnapshot([
       providerEntry({ id: 'p', status: 'ready', toolNames: descriptors.map((d) => d.displayName) }),
     ]);
-    const cap1 = createCapabilitySnapshotV1(descriptors);
+    const cap1 = createCapabilitySnapshot(descriptors);
     const page1 = buildMcpInventory({ capabilities: cap1, providers, query: { limit: 3 } });
     success(page1);
 
     // mutate the snapshot
-    const cap2 = createCapabilitySnapshotV1([
+    const cap2 = createCapabilitySnapshot([
       ...descriptors,
       toolDescriptor({ id: 't99', name: 'new_tool', providerId: 'p' }),
     ]);
@@ -400,7 +400,7 @@ describe('buildMcpInventory', () => {
   // 17. invalid cursor
   test('rejects malformed cursor', () => {
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers: directorySnapshot([]),
       query: { cursor: 'not-valid-base64!!!' },
     });
@@ -411,7 +411,7 @@ describe('buildMcpInventory', () => {
   // 18. duplicate descriptor dedup
   test('deduplicates identical tools from same provider', () => {
     const t = toolDescriptor({ id: 'dup', name: 'run', providerId: 'p' });
-    const capabilities = createCapabilitySnapshotV1([t, { ...t }]); // same capabilityId, different object
+    const capabilities = createCapabilitySnapshot([t, { ...t }]); // same capabilityId, different object
     const providers = directorySnapshot([
       providerEntry({ id: 'p', status: 'ready', toolNames: ['run'] }),
     ]);
@@ -423,7 +423,7 @@ describe('buildMcpInventory', () => {
 
   // 19. quarantined tool excluded
   test('excludes quarantined tools from available count', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 'ok', name: 'safe', providerId: 'p', availability: 'available' }),
       toolDescriptor({ id: 'bad', name: 'unsafe', providerId: 'p', availability: 'quarantined' }),
     ]);
@@ -438,7 +438,7 @@ describe('buildMcpInventory', () => {
 
   // 20. skill excluded from inventory
   test('excludes skills from MCP inventory', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 'mcp1', name: 'mcp_tool', providerId: 'p' }),
       skillDescriptor({ id: 's1', name: 'my_skill' }),
     ]);
@@ -454,26 +454,26 @@ describe('buildMcpInventory', () => {
   });
 });
 
-describe('mcpProviderInventoryNextActionV1', () => {
+describe('mcpProviderInventoryNextAction', () => {
   test('maps all non-ready statuses to actions', () => {
-    expect(mcpProviderInventoryNextActionV1('pending_approval')).toBe('approve_project_provider');
-    expect(mcpProviderInventoryNextActionV1('rejected')).toBe('review_project_approval');
-    expect(mcpProviderInventoryNextActionV1('disabled')).toBe('enable_provider');
-    expect(mcpProviderInventoryNextActionV1('login_required')).toBe('authenticate');
-    expect(mcpProviderInventoryNextActionV1('connecting')).toBe('wait_or_retry');
-    expect(mcpProviderInventoryNextActionV1('failed')).toBe('retry_connection');
-    expect(mcpProviderInventoryNextActionV1('degraded')).toBe('retry_if_needed');
-    expect(mcpProviderInventoryNextActionV1('quarantined')).toBe('fix_configuration_or_schema');
+    expect(mcpProviderInventoryNextAction('pending_approval')).toBe('approve_project_provider');
+    expect(mcpProviderInventoryNextAction('rejected')).toBe('review_project_approval');
+    expect(mcpProviderInventoryNextAction('disabled')).toBe('enable_provider');
+    expect(mcpProviderInventoryNextAction('login_required')).toBe('authenticate');
+    expect(mcpProviderInventoryNextAction('connecting')).toBe('wait_or_retry');
+    expect(mcpProviderInventoryNextAction('failed')).toBe('retry_connection');
+    expect(mcpProviderInventoryNextAction('degraded')).toBe('retry_if_needed');
+    expect(mcpProviderInventoryNextAction('quarantined')).toBe('fix_configuration_or_schema');
   });
 
   test('returns undefined for ready', () => {
-    expect(mcpProviderInventoryNextActionV1('ready')).toBeUndefined();
+    expect(mcpProviderInventoryNextAction('ready')).toBeUndefined();
   });
 });
 
 describe('McpInventoryResult serialization safety', () => {
   test('does not leak capabilityId, revision, or schema in output', () => {
-    const capabilities = createCapabilitySnapshotV1([
+    const capabilities = createCapabilitySnapshot([
       toolDescriptor({ id: 'sensitive', name: 'public_name', providerId: 'p' }),
     ]);
     const providers = directorySnapshot([
@@ -495,7 +495,7 @@ describe('McpInventoryResult serialization safety', () => {
 describe('McpInventoryResult invalid_limit', () => {
   test('rejects limit < 1', () => {
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers: directorySnapshot([]),
       query: { limit: 0 },
     });
@@ -505,7 +505,7 @@ describe('McpInventoryResult invalid_limit', () => {
 
   test('rejects limit > 100', () => {
     const result = buildMcpInventory({
-      capabilities: createCapabilitySnapshotV1([]),
+      capabilities: createCapabilitySnapshot([]),
       providers: directorySnapshot([]),
       query: { limit: 101 },
     });

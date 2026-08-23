@@ -1,4 +1,4 @@
-import { kernelToolDoomLoopFingerprintV1, kernelUpdateDoomLoopTrackerV1 } from '../../doom-loop';
+import { kernelToolDoomLoopFingerprint, kernelUpdateDoomLoopTracker } from '../../doom-loop';
 import type { KernelEvent } from '../../events';
 import {
   asJsonObject,
@@ -224,10 +224,10 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
               failure: failure as unknown as NonNullable<
                 AgentState['tools']['calls'][string]['failure']
               >,
-              ...(recordField(payload, 'outcomeV1')
+              ...(recordField(payload, 'outcome')
                 ? {
-                    outcomeV1: recordField(payload, 'outcomeV1') as unknown as NonNullable<
-                      AgentState['tools']['calls'][string]['outcomeV1']
+                    outcome: recordField(payload, 'outcome') as unknown as NonNullable<
+                      AgentState['tools']['calls'][string]['outcome']
                     >,
                   }
                 : {}),
@@ -259,14 +259,14 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
       const suppliedFingerprint = nonEmptyStringField(payload, 'requestFingerprint');
       const fingerprint =
         suppliedFingerprint ??
-        (call ? kernelToolDoomLoopFingerprintV1({ name: call.name, args: call.args }) : undefined);
+        (call ? kernelToolDoomLoopFingerprint({ name: call.name, args: call.args }) : undefined);
       const createdAt = stringField(payload, 'createdAt');
       const observedAt = createdAt ? Date.parse(createdAt) : Number.NaN;
       return {
         ...next,
         ...(fingerprint
           ? {
-              doomLoop: kernelUpdateDoomLoopTrackerV1(
+              doomLoop: kernelUpdateDoomLoopTracker(
                 next.doomLoop,
                 fingerprint,
                 Number.isFinite(observedAt) ? observedAt : 0,
@@ -333,10 +333,10 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
                         terminatesTurn: false,
                         journal: true,
                       },
-                      ...(recordField(payload, 'outcomeV1')
+                      ...(recordField(payload, 'outcome')
                         ? {
-                            outcomeV1: recordField(payload, 'outcomeV1') as unknown as NonNullable<
-                              AgentState['tools']['calls'][string]['outcomeV1']
+                            outcome: recordField(payload, 'outcome') as unknown as NonNullable<
+                              AgentState['tools']['calls'][string]['outcome']
                             >,
                           }
                         : {}),

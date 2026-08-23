@@ -2,18 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBuiltinSubagentModelContextV1 } from '@kite/builtin-runtime';
+import { createBuiltinSubagentModelContext } from '@kite/builtin-runtime';
 
 describe('Builtin subagent model context', () => {
   test('owns the canonical Workspace/CWD and code-role Skill disclosure', () => {
     const workspace = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-subagent-context-')));
     try {
-      const context = createBuiltinSubagentModelContextV1({
+      const context = createBuiltinSubagentModelContext({
         workspace,
         task: 'Inspect the bounded implementation.',
         role: 'code',
         systemPrompt: 'Code role prompt.',
-        promptContractV2: false,
+        promptContract: false,
         skills: [{ name: 'test-skill', description: 'A bounded test workflow.' }],
       });
 
@@ -47,12 +47,12 @@ describe('Builtin subagent model context', () => {
         ]),
         warnings: Object.freeze([]),
       });
-      const context = createBuiltinSubagentModelContextV1({
+      const context = createBuiltinSubagentModelContext({
         workspace,
         task: 'Read only.',
         role: 'explore',
         systemPrompt: 'Explore role prompt.',
-        promptContractV2: true,
+        promptContract: true,
         projectInstructions,
         skills: [{ name: 'hidden-skill', description: 'Must not be disclosed.' }],
       });

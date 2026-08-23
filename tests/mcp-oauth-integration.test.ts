@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { CallbackServerFactory } from '@kite/builtin-runtime/mcp';
 import {
-  createBuiltinCredentialBrokerV1,
+  createBuiltinCredentialBroker,
   DefaultMcpAuthCoordinator,
   DefaultMcpSupervisor,
   MemoryMcpCredentialStore,
 } from '@kite/builtin-runtime/mcp';
 import type { McpConfigCatalog } from '#app/config';
-import { createInMemoryMcpConfigRepositoryV1 } from './helpers/mcp-test-composition';
+import { createInMemoryMcpConfigRepository } from './helpers/mcp-test-composition';
 import { startTestHttpServer } from './helpers/test-http-server';
 
 describe('HTTP MCP OAuth integration', () => {
@@ -127,7 +127,7 @@ describe('HTTP MCP OAuth integration', () => {
         close: async () => {},
       };
     };
-    const credentialBroker = createBuiltinCredentialBrokerV1({
+    const credentialBroker = createBuiltinCredentialBroker({
       store: new MemoryMcpCredentialStore(),
     });
     const authCoordinator = new DefaultMcpAuthCoordinator({
@@ -142,7 +142,7 @@ describe('HTTP MCP OAuth integration', () => {
     const supervisor = new DefaultMcpSupervisor({
       credentialBroker,
       authCoordinator,
-      repository: createInMemoryMcpConfigRepositoryV1(() => catalog(`${fixture.url.origin}/mcp`)),
+      repository: createInMemoryMcpConfigRepository(() => catalog(`${fixture.url.origin}/mcp`)),
     });
 
     await supervisor.start(process.cwd());

@@ -115,7 +115,7 @@ jobs:
         run: bun run scripts/release/windows-runner-evidence.ts
       - if: runner.os == 'Windows'
         name: Verify committed Windows runner pin
-        run: git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json
+        run: git diff --exit-code -- release/platform-capabilities/windows-runner.json
       - if: runner.os == 'Windows'
         name: Windows restricted-token native fail-closed conformance
         env:

@@ -5,7 +5,7 @@ export const PRODUCTION_RELEASE_WORKFLOW_PATH = '.github/workflows/release-candi
 export const GITHUB_ACTIONS_OIDC_ISSUER = 'https://token.actions.githubusercontent.com' as const;
 export const SLSA_PROVENANCE_V1_PREDICATE = 'https://slsa.dev/provenance/v1' as const;
 
-export interface ProductionReleaseExpectedIdentityV1 {
+export interface ProductionReleaseExpectedIdentity {
   repository: typeof PRODUCTION_RELEASE_REPOSITORY;
   repositoryNumericId: typeof PRODUCTION_RELEASE_REPOSITORY_NUMERIC_ID;
   repositoryNodeId: typeof PRODUCTION_RELEASE_REPOSITORY_NODE_ID;
@@ -19,24 +19,24 @@ export interface ProductionReleaseExpectedIdentityV1 {
   runAttempt: number;
 }
 
-export function productionReleaseCertificateIdentityV1(
-  expected: ProductionReleaseExpectedIdentityV1,
+export function productionReleaseCertificateIdentity(
+  expected: ProductionReleaseExpectedIdentity,
 ): string {
   return `https://github.com/${expected.repository}/${expected.workflowPath}@${expected.ref}`;
 }
 
-export function productionReleaseRunInvocationUriV1(
-  expected: ProductionReleaseExpectedIdentityV1,
+export function productionReleaseRunInvocationUri(
+  expected: ProductionReleaseExpectedIdentity,
 ): string {
   return `https://github.com/${expected.repository}/actions/runs/${expected.runId}/attempts/${expected.runAttempt}`;
 }
 
 /** Exact keyless verification of the signed canonical manifest bytes. */
-export function buildCosignKeylessBlobVerificationCommandV1(input: {
+export function buildCosignKeylessBlobVerificationCommand(input: {
   cosignPath: string;
   subjectPath: string;
   bundlePath: string;
-  expected: ProductionReleaseExpectedIdentityV1;
+  expected: ProductionReleaseExpectedIdentity;
 }): string[] {
   return [
     input.cosignPath,
@@ -44,7 +44,7 @@ export function buildCosignKeylessBlobVerificationCommandV1(input: {
     '--bundle',
     input.bundlePath,
     '--certificate-identity',
-    productionReleaseCertificateIdentityV1(input.expected),
+    productionReleaseCertificateIdentity(input.expected),
     '--certificate-oidc-issuer',
     GITHUB_ACTIONS_OIDC_ISSUER,
     input.subjectPath,
@@ -56,11 +56,11 @@ export function buildCosignKeylessBlobVerificationCommandV1(input: {
  * Run/attempt and numeric repository identity are additionally checked from the
  * verified certificate output; they are intentionally not read from provenance.
  */
-export function buildGithubArtifactAttestationVerificationCommandV1(input: {
+export function buildGithubArtifactAttestationVerificationCommand(input: {
   ghPath: string;
   subjectPath: string;
   bundlePath: string;
-  expected: ProductionReleaseExpectedIdentityV1;
+  expected: ProductionReleaseExpectedIdentity;
 }): string[] {
   const expected = input.expected;
   return [
@@ -73,7 +73,7 @@ export function buildGithubArtifactAttestationVerificationCommandV1(input: {
     '--bundle',
     input.bundlePath,
     '--cert-identity',
-    productionReleaseCertificateIdentityV1(expected),
+    productionReleaseCertificateIdentity(expected),
     '--cert-oidc-issuer',
     GITHUB_ACTIONS_OIDC_ISSUER,
     '--signer-workflow',
@@ -92,16 +92,16 @@ export function buildGithubArtifactAttestationVerificationCommandV1(input: {
   ];
 }
 
-export type ProductionArtifactPlatformV1 = 'linux-x64' | 'macos-arm64' | 'windows-x64';
-export const PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1: Readonly<
-  Record<ProductionArtifactPlatformV1, string>
+export type ProductionArtifactPlatform = 'linux-x64' | 'macos-arm64' | 'windows-x64';
+export const PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_: Readonly<
+  Record<ProductionArtifactPlatform, string>
 > = Object.freeze({
   'linux-x64': 'kite/bin/kite',
   'macos-arm64': 'Kite.app/Contents/MacOS/kite',
   'windows-x64': 'kite/bin/kite.exe',
 });
 
-export type ProductionNativeSignerExpectationV1 =
+export type ProductionNativeSignerExpectation =
   | { platform: 'linux-x64'; kind: 'github_actions_keyless' }
   | {
       platform: 'macos-arm64';
@@ -121,11 +121,11 @@ export type ProductionNativeSignerExpectationV1 =
     };
 
 /** Native/platform signing verification remains argv-only and fail closed. */
-export function buildPlatformSignatureVerificationCommandsV1(input: {
-  platform: ProductionArtifactPlatformV1;
+export function buildPlatformSignatureVerificationCommands(input: {
+  platform: ProductionArtifactPlatform;
   subjectPath: string;
-  expected: ProductionReleaseExpectedIdentityV1;
-  signer: ProductionNativeSignerExpectationV1;
+  expected: ProductionReleaseExpectedIdentity;
+  signer: ProductionNativeSignerExpectation;
   cosignPath?: string;
   platformVerifierPath?: string;
   macosPolicyVerifierPath?: string;
@@ -140,7 +140,7 @@ export function buildPlatformSignatureVerificationCommandsV1(input: {
       throw new Error('Linux platform signing requires cosign and a keyless signature bundle.');
     }
     return [
-      buildCosignKeylessBlobVerificationCommandV1({
+      buildCosignKeylessBlobVerificationCommand({
         cosignPath: input.cosignPath,
         subjectPath: input.subjectPath,
         bundlePath: input.platformSignatureBundlePath,
@@ -231,7 +231,7 @@ export function buildPlatformSignatureVerificationCommandsV1(input: {
   ];
 }
 
-export function buildCosignKeyVerificationCommandV1(input: {
+export function buildCosignKeyVerificationCommand(input: {
   cosignPath: string;
   subjectPath: string;
   bundlePath: string;

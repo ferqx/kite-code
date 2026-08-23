@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import type { ExecutionBoundaryV1, ExecutionNetworkMode } from './types';
+import type { ExecutionBoundary, ExecutionNetworkMode } from './types';
 
 /** Immutable, release-derived network ceiling consumed by each invocation. */
-export interface NetworkBoundaryPolicyV1 {
+export interface NetworkBoundaryPolicy {
   version: 1;
   mode: ExecutionNetworkMode;
   allowedHosts: readonly string[];
@@ -10,15 +10,15 @@ export interface NetworkBoundaryPolicyV1 {
   revision: string;
 }
 
-export function networkBoundaryPolicyFromExecutionBoundaryV1(
-  boundary: ExecutionBoundaryV1,
+export function networkBoundaryPolicyFromExecutionBoundary(
+  boundary: ExecutionBoundary,
   enabled: boolean,
-): NetworkBoundaryPolicyV1 {
+): NetworkBoundaryPolicy {
   const mode = enabled ? boundary.networkMode : 'off';
   const allowedHosts = mode === 'allowlist' ? [...boundary.networkAllowlist] : [];
   const canonical = {
     version: 1 as const,
-    executionBoundaryDigest: computeExecutionBoundaryDigestV1(boundary),
+    executionBoundaryDigest: computeExecutionBoundaryDigest(boundary),
     mode,
     allowedHosts,
     allowLocalAndPrivateNetwork: false as const,
@@ -34,7 +34,7 @@ export function canonicalNetworkHostname(hostname: string): string {
   return hostname.toLowerCase().replace(/\.$/, '');
 }
 
-function computeExecutionBoundaryDigestV1(boundary: ExecutionBoundaryV1): string {
+function computeExecutionBoundaryDigest(boundary: ExecutionBoundary): string {
   const canonical = JSON.stringify({
     filesystemScope: boundary.filesystemScope,
     workspaceRoot: boundary.workspaceRoot,

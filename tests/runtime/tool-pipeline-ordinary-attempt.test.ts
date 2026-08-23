@@ -2,48 +2,48 @@ import { describe, expect, test } from 'bun:test';
 import { realpathSync } from 'node:fs';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  createToolSearchProviderFactsV1,
-  digestCapabilityValueV1,
-  verifyBuiltinWorkspaceFilesystemTerminalV1,
+  createBuiltinToolCatalogProjection,
+  createToolSearchProviderFacts,
+  digestCapabilityValue,
+  verifyBuiltinWorkspaceFilesystemTerminal,
 } from '@kite/builtin-runtime';
 import {
-  type BuiltinWorkspaceFilesystemRuntimeV1,
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
+  type BuiltinWorkspaceFilesystemRuntime,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
 } from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import {
-  createRuntimeHostCapabilityExecutionPortV1,
-  createRuntimeHostToolCallSnapshotV1,
-  runtimeHostStateCreateApprovalBindingDigestV1,
+  createRuntimeHostCapabilityExecutionPort,
+  createRuntimeHostToolCallSnapshot,
+  runtimeHostStateCreateApprovalBindingDigest,
 } from '@kite/runtime-host';
 import type {
-  CapabilityExecutionInvocationV1,
-  CapabilityExecutionPortV1,
-  CapabilityToolTerminalResultV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineReceiptCommitV1,
-  WorkspaceFilesystemEditObservationQueryV1,
-  WorkspaceFilesystemIntentDraftV1,
-  WorkspaceFilesystemPersistedIntentV1,
+  CapabilityExecutionInvocation,
+  CapabilityExecutionPort,
+  CapabilityToolTerminalResult,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineReceiptCommit,
+  WorkspaceFilesystemEditObservationQuery,
+  WorkspaceFilesystemIntentDraft,
+  WorkspaceFilesystemPersistedIntent,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
-import { createAppToolPipelineCompositionV1 } from '#app/bootstrap/runtime/tool-pipeline-composition';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+import { createAppToolPipelineComposition } from '#app/bootstrap/runtime/tool-pipeline-composition';
 import {
-  APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1,
-  type AppOrdinaryWorkspaceFilesystemCompositionV1,
-  createAppOrdinaryToolPipelineAttemptRuntimeV1,
-  createAppToolPipelineAttemptScopeV1,
+  APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_,
+  type AppOrdinaryWorkspaceFilesystemComposition,
+  createAppOrdinaryToolPipelineAttemptRuntime,
+  createAppToolPipelineAttemptScope,
 } from '#app/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import type { AppStateToolPipelinePersistenceV1 } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
-import { createAppTaskToolPipelineAttemptRuntimeV1 } from '#app/bootstrap/runtime/tool-pipeline-task-attempt';
+import type { AppStateToolPipelinePersistence } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
+import { createAppTaskToolPipelineAttemptRuntime } from '#app/bootstrap/runtime/tool-pipeline-task-attempt';
 
 function acknowledgement(
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<ToolPipelineAttemptAcknowledgementV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<ToolPipelineAttemptAcknowledgement> {
   const identity = prepared.identity;
   return Object.freeze({
     acknowledged: true,
@@ -83,9 +83,9 @@ function acknowledgement(
 }
 
 function harness() {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot());
-  const composition = createAppToolPipelineCompositionV1(projection);
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const projection = createBuiltinToolCatalogProjection(registry.snapshot());
+  const composition = createAppToolPipelineComposition(projection);
   const turn = composition.forTurn(
     Object.freeze({
       workspace: '/workspace',
@@ -99,14 +99,14 @@ function harness() {
       hasTaskAdapter: true,
       hasGitBroker: true,
       brokeredGitFeatureRevision: 'brokered-git-r1',
-      featureFlags: Object.freeze({ brokeredGitV1: true }),
+      featureFlags: Object.freeze({ brokeredGit: true }),
     }),
   );
   const calls = { record: 0, host: 0, commit: 0, suspend: 0, unknown: 0 };
-  const acknowledgements = new WeakMap<object, Readonly<ToolPipelineAttemptAcknowledgementV1>>();
+  const acknowledgements = new WeakMap<object, Readonly<ToolPipelineAttemptAcknowledgement>>();
   const issuedFilesystemIntents = new WeakSet<object>();
-  const persistence: AppStateToolPipelinePersistenceV1 = Object.freeze({
-    recordAttempt: async (prepared: Readonly<PreparedToolInvocationV1>) => {
+  const persistence: AppStateToolPipelinePersistence = Object.freeze({
+    recordAttempt: async (prepared: Readonly<PreparedToolInvocation>) => {
       calls.record += 1;
       const recorded = acknowledgement(prepared);
       acknowledgements.set(prepared, recorded);
@@ -115,7 +115,7 @@ function harness() {
     recordUnknown: async () => {
       calls.unknown += 1;
     },
-    commitTerminal: async (commit: Readonly<ToolPipelineReceiptCommitV1>) => {
+    commitTerminal: async (commit: Readonly<ToolPipelineReceiptCommit>) => {
       calls.commit += 1;
       const structured = commit.result.structuredContent;
       if (
@@ -124,7 +124,7 @@ function harness() {
         !Array.isArray(structured) &&
         Object.hasOwn(structured, 'filesystemObservation')
       ) {
-        expect(verifyBuiltinWorkspaceFilesystemTerminalV1(commit).valid).toBe(true);
+        expect(verifyBuiltinWorkspaceFilesystemTerminal(commit).valid).toBe(true);
       }
     },
     commitSuspension: async () => {
@@ -135,11 +135,11 @@ function harness() {
     },
     workspaceFilesystemEvidence: Object.freeze({
       persistIntent: async <
-        TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-        TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+        TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+        TRequest extends RuntimeJsonValue = RuntimeJsonValue,
       >(
-        draft: Readonly<WorkspaceFilesystemIntentDraftV1<TArguments, TRequest>>,
-      ): Promise<Readonly<WorkspaceFilesystemPersistedIntentV1<TArguments, TRequest>>> => {
+        draft: Readonly<WorkspaceFilesystemIntentDraft<TArguments, TRequest>>,
+      ): Promise<Readonly<WorkspaceFilesystemPersistedIntent<TArguments, TRequest>>> => {
         const recorded = acknowledgements.get(draft.prepared);
         if (!recorded) throw new Error('attempt not acknowledged');
         const persisted = Object.freeze({
@@ -153,7 +153,7 @@ function harness() {
         issuedFilesystemIntents.add(persisted);
         return persisted;
       },
-      verifyPersistedIntent: (persisted: Readonly<WorkspaceFilesystemPersistedIntentV1>) =>
+      verifyPersistedIntent: (persisted: Readonly<WorkspaceFilesystemPersistedIntent>) =>
         issuedFilesystemIntents.has(persisted)
           ? Object.freeze({ valid: true as const })
           : Object.freeze({ valid: false as const, code: 'intent_not_issued' as const }),
@@ -171,21 +171,21 @@ function harness() {
         Object.freeze({ valid: false as const, code: 'ready_not_issued' as const }),
     }),
     workspaceFilesystemEditObservation: Object.freeze({
-      findLatestAuthenticRead: async (query: Readonly<WorkspaceFilesystemEditObservationQueryV1>) =>
+      findLatestAuthenticRead: async (query: Readonly<WorkspaceFilesystemEditObservationQuery>) =>
         Object.freeze({ status: 'missing' as const, code: 'read_required' as const, query }),
       verifyLatestAuthenticRead: () =>
         Object.freeze({ valid: false as const, code: 'query_result_not_issued' as const }),
     }),
   });
-  const host = createRuntimeHostCapabilityExecutionPortV1(registry);
-  const countedHost: CapabilityExecutionPortV1 = Object.freeze({
-    invoke: (invocation: CapabilityExecutionInvocationV1) => {
+  const host = createRuntimeHostCapabilityExecutionPort(registry);
+  const countedHost: CapabilityExecutionPort = Object.freeze({
+    invoke: (invocation: CapabilityExecutionInvocation) => {
       calls.host += 1;
       return host.invoke(invocation);
     },
   });
-  const scope = createAppToolPipelineAttemptScopeV1({ persistence });
-  const runtime = createAppOrdinaryToolPipelineAttemptRuntimeV1({ persistence, scope });
+  const scope = createAppToolPipelineAttemptScope({ persistence });
+  const runtime = createAppOrdinaryToolPipelineAttemptRuntime({ persistence, scope });
   return { projection, turn, calls, countedHost, runtime, persistence, scope };
 }
 
@@ -197,11 +197,11 @@ function input(
     readonly rawArguments?: Readonly<Record<string, unknown>>;
     readonly argumentOrigin?: 'model_public' | 'runtime_private';
     readonly mechanismResources?: Readonly<Record<string, unknown>>;
-    readonly workspaceFilesystem?: Readonly<AppOrdinaryWorkspaceFilesystemCompositionV1>;
+    readonly workspaceFilesystem?: Readonly<AppOrdinaryWorkspaceFilesystemComposition>;
   } = {},
 ) {
   const name = options.name ?? 'tool_search';
-  const snapshot = createRuntimeHostToolCallSnapshotV1({
+  const snapshot = createRuntimeHostToolCallSnapshot({
     toolCallId: 'call-1',
     name,
     rawArguments: options.rawArguments ?? (name === 'tool_search' ? { query: 'calendar' } : {}),
@@ -230,7 +230,7 @@ function input(
         toolSearchEnabled: true,
         hasGitBroker: true,
         brokeredGitFeatureRevision: 'brokered-git-r1',
-        featureFlags: Object.freeze({ brokeredGitV1: true }),
+        featureFlags: Object.freeze({ brokeredGit: true }),
       }),
       bindings: Object.freeze([]),
       descriptors: Object.freeze([]),
@@ -271,7 +271,7 @@ function input(
     planStepId: null,
     capabilityRequestFacts:
       name === 'tool_search'
-        ? createToolSearchProviderFactsV1({
+        ? createToolSearchProviderFacts({
             threadId: 'thread-1',
             turnId: 'turn-1',
             toolCallId: 'call-1',
@@ -289,10 +289,10 @@ function input(
 
 function filesystemComposition() {
   const workspace = realpathSync(process.cwd());
-  const grants = new WorkspaceFilesystemGrantAuthorityV1();
-  const provider = new LocalWorkspaceFilesystemProviderV1(grants.verifier());
+  const grants = new WorkspaceFilesystemGrantAuthority();
+  const provider = new LocalWorkspaceFilesystemProvider(grants.verifier());
   let providerCalls = 0;
-  const runtime: BuiltinWorkspaceFilesystemRuntimeV1 = Object.freeze({
+  const runtime: BuiltinWorkspaceFilesystemRuntime = Object.freeze({
     canonicalWorkspace: workspace,
     grants,
     provider: Object.freeze({
@@ -314,25 +314,25 @@ function filesystemComposition() {
   return {
     composition: Object.freeze({
       runtime,
-      protectedPathEvaluator: createProtectedPathEvaluatorV1({
+      protectedPathEvaluator: createProtectedPathEvaluator({
         workspaceRoot: workspace,
         mode: 'deny',
       }),
       protectedPathRevision: 'ordinary-fsr-v1',
       actorIdentity: Object.freeze({ threadId: 'thread-1', actorId: 'parent' }),
-    }) satisfies Readonly<AppOrdinaryWorkspaceFilesystemCompositionV1>,
+    }) satisfies Readonly<AppOrdinaryWorkspaceFilesystemComposition>,
     get providerCalls() {
       return providerCalls;
     },
   };
 }
 
-describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
+describe('RM-16 App ordinary Tool Pipeline attempt runtime', () => {
   test('executes tool_search through one Host acknowledgement and one registry call', async () => {
     const fixture = harness();
     const result = await fixture.runtime.execute(input(fixture));
 
-    expect(fixture.runtime.schema).toBe(APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1);
+    expect(fixture.runtime.schema).toBe(APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_);
     expect(result.kind).toBe('committed');
     if (result.kind !== 'committed') throw new Error(result.kind);
     expect(result.committed.result.status).toBe('success');
@@ -560,7 +560,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
       candidate.admission,
     );
     if (!projected.ok) throw new Error(projected.failure.code);
-    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
       projected.value.invocation,
       projected.value.policy,
     );
@@ -578,7 +578,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
     });
     let childCalls = 0;
     let suspensionCalls = 0;
-    const taskRuntime = createAppTaskToolPipelineAttemptRuntimeV1({
+    const taskRuntime = createAppTaskToolPipelineAttemptRuntime({
       persistence: fixture.persistence,
       scope: fixture.scope,
     });
@@ -641,7 +641,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
       candidate.admission,
     );
     if (!projected.ok) throw new Error(projected.failure.code);
-    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
       projected.value.invocation,
       projected.value.policy,
     );
@@ -677,11 +677,11 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
         modelInvocationOrdinal: 0,
       }),
     });
-    const taskRuntime = createAppTaskToolPipelineAttemptRuntimeV1({
+    const taskRuntime = createAppTaskToolPipelineAttemptRuntime({
       persistence: fixture.persistence,
       scope: fixture.scope,
     });
-    let observedTerminal: CapabilityToolTerminalResultV1 | undefined;
+    let observedTerminal: CapabilityToolTerminalResult | undefined;
     const result = await taskRuntime.execute({
       ...approved,
       phase: 'building',
@@ -735,8 +735,8 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
             toolCallId: blockedTool.toolCallId,
             runtimeToolCallId: blockedTool.runtimeToolCallId,
             toolName: blockedTool.toolName,
-            argumentsDigest: digestCapabilityValueV1(blockedTool.args),
-            commandDigest: digestCapabilityValueV1(blockedTool.command.trim()),
+            argumentsDigest: digestCapabilityValue(blockedTool.args),
+            commandDigest: digestCapabilityValue(blockedTool.command.trim()),
           }),
           event: Object.freeze({
             type: 'approval.requested' as const,
@@ -795,7 +795,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
       candidate.admission,
     );
     if (!projected.ok) throw new Error(projected.failure.code);
-    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
       projected.value.invocation,
       projected.value.policy,
     );
@@ -811,7 +811,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
         }),
       }),
     });
-    const taskRuntime = createAppTaskToolPipelineAttemptRuntimeV1({
+    const taskRuntime = createAppTaskToolPipelineAttemptRuntime({
       persistence: failureFixture.persistence,
       scope: failureFixture.scope,
     });
@@ -855,11 +855,11 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
       malformedCandidate.admission,
     );
     if (!malformedProjected.ok) throw new Error(malformedProjected.failure.code);
-    const malformedApprovalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+    const malformedApprovalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
       malformedProjected.value.invocation,
       malformedProjected.value.policy,
     );
-    const malformedRuntime = createAppTaskToolPipelineAttemptRuntimeV1({
+    const malformedRuntime = createAppTaskToolPipelineAttemptRuntime({
       persistence: malformedFixture.persistence,
       scope: malformedFixture.scope,
     });

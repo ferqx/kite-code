@@ -5,10 +5,10 @@ import type {
   AgentResourceBudgetActiveState,
   AgentResourceBudgetState,
   AgentState,
-  ResourceBudgetV1,
-  ResourceReservationV1,
-  ResourceUsageV1,
-  ResourceWaiterV1,
+  ResourceBudget,
+  ResourceReservation,
+  ResourceUsage,
+  ResourceWaiter,
 } from '../../state';
 
 const BUDGET_FIELDS = [
@@ -69,7 +69,7 @@ function positiveInteger(value: unknown, field: string): asserts value is number
     throw new Error(`${field} must be a positive safe integer.`);
 }
 
-function assertResourceBudget(value: ResourceBudgetV1): void {
+function assertResourceBudget(value: ResourceBudget): void {
   if (value == null || typeof value !== 'object' || value.version !== 1)
     throw new Error('Unsupported ResourceBudget version.');
   const candidate = value as unknown as Record<string, unknown>;
@@ -80,7 +80,7 @@ function assertResourceBudget(value: ResourceBudgetV1): void {
     throw new Error('Writer concurrency must not exceed tool concurrency.');
 }
 
-function assertResourceUsage(value: ResourceUsageV1): void {
+function assertResourceUsage(value: ResourceUsage): void {
   if (value == null || typeof value !== 'object') throw new Error('Resource usage is invalid.');
   const candidate = value as unknown as Record<string, unknown>;
   const counters = candidate.counters;
@@ -101,14 +101,14 @@ function assertResourceUsage(value: ResourceUsageV1): void {
     throw new Error('Resource usage source is invalid.');
 }
 
-function withinUpperBound(actual: ResourceUsageV1, upper: ResourceUsageV1): boolean {
+function withinUpperBound(actual: ResourceUsage, upper: ResourceUsage): boolean {
   return (
     COUNTER_FIELDS.every((field) => actual.counters[field] <= upper.counters[field]) &&
     GAUGE_FIELDS.every((field) => actual.gauges[field] <= upper.gauges[field])
   );
 }
 
-function withinBudget(usage: ResourceUsageV1, budget: ResourceBudgetV1): boolean {
+function withinBudget(usage: ResourceUsage, budget: ResourceBudget): boolean {
   return (
     usage.counters.turns <= budget.maxTurns &&
     usage.counters.modelRequests <= budget.maxModelRequests &&
@@ -124,7 +124,7 @@ function withinBudget(usage: ResourceUsageV1, budget: ResourceBudgetV1): boolean
   );
 }
 
-function zeroUsage(): ResourceUsageV1 {
+function zeroUsage(): ResourceUsage {
   return {
     counters: {
       turns: 0,
@@ -145,7 +145,7 @@ function zeroUsage(): ResourceUsageV1 {
   };
 }
 
-function addUsage(left: ResourceUsageV1, right: ResourceUsageV1): ResourceUsageV1 {
+function addUsage(left: ResourceUsage, right: ResourceUsage): ResourceUsage {
   const source =
     left.source === 'actual' && right.source === 'actual'
       ? ('actual' as const)
@@ -174,7 +174,7 @@ function addUsage(left: ResourceUsageV1, right: ResourceUsageV1): ResourceUsageV
   };
 }
 
-function committedUsage(state: AgentResourceBudgetActiveState): ResourceUsageV1 {
+function committedUsage(state: AgentResourceBudgetActiveState): ResourceUsage {
   let usage = state.reconciledUsage;
   for (const reservation of Object.values(state.reservations)) {
     if (['reserved', 'dispatch_started', 'unknown'].includes(reservation.state))
@@ -183,7 +183,7 @@ function committedUsage(state: AgentResourceBudgetActiveState): ResourceUsageV1 
   return usage;
 }
 
-function assertReservation(value: ResourceReservationV1): void {
+function assertReservation(value: ResourceReservation): void {
   if (value == null || typeof value !== 'object' || value.version !== 1)
     throw new Error('Unsupported ResourceReservation version.');
   nonEmpty(value.reservationId, 'reservationId');
@@ -214,7 +214,7 @@ function activeState(state: AgentResourceBudgetState): AgentResourceBudgetActive
 
 function replaceReservation(
   state: AgentResourceBudgetActiveState,
-  reservation: ResourceReservationV1,
+  reservation: ResourceReservation,
 ): AgentResourceBudgetActiveState {
   return {
     ...state,
@@ -239,7 +239,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       const runId = payload.runId;
       const startedAt = payload.startedAt;
       const deadlineAt = payload.deadlineAt;
-      const budget = payload.budget as ResourceBudgetV1;
+      const budget = payload.budget as ResourceBudget;
       assertResourceBudget(budget);
       nonEmpty(runId, 'runId');
       if (typeof startedAt !== 'string' || typeof deadlineAt !== 'string')
@@ -278,7 +278,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
 
     const active = activeState(state.resourceBudget);
     if (event.type === 'resource_budget.waiter_enqueued') {
-      const waiter = payload.waiter as ResourceWaiterV1;
+      const waiter = payload.waiter as ResourceWaiter;
       if (waiter == null || typeof waiter !== 'object')
         throw new Error('Concurrency waiter is invalid.');
       nonEmpty(waiter.runId, 'runId');
@@ -337,7 +337,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
     }
 
     if (event.type === 'resource_budget.reserved') {
-      const candidate = payload.reservation as ResourceReservationV1;
+      const candidate = payload.reservation as ResourceReservation;
       assertReservation(candidate);
       if (candidate.state !== 'reserved') throw new Error('A new reservation must be reserved.');
       if (candidate.runId !== active.runId) throw new Error('Reservation runId mismatch.');
@@ -373,7 +373,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
         next = replaceReservation(active, { ...reservation, state: 'dispatch_started' });
         break;
       case 'resource_budget.reconciled': {
-        const actual = payload.actual as ResourceUsageV1;
+        const actual = payload.actual as ResourceUsage;
         assertResourceUsage(actual);
         if (
           actual.source !== 'actual' ||

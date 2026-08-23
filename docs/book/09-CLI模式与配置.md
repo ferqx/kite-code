@@ -11,7 +11,7 @@ bun run agent sandbox status
 bun run agent sandbox setup
 ```
 
-CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundaryV1`、`networkBoundaryV1`、`releaseProfileV1` 或 `observabilityMetricsV1` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions`、`/release` 与 `/telemetry`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
+CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundary`、`networkBoundary`、`releaseProfile` 或 `observabilityMetrics` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions`、`/release` 与 `/telemetry`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
 
 Headless CLI 不支持恢复旧 checkpoint 会话：`agent resume` 会明确拒绝，因为 legacy checkpoint 与 Runtime Kernel 不兼容。需要继续持久化 Runtime 会话时，使用 TUI 的会话选择与恢复入口；不能把该 legacy CLI 命令当作可用恢复路径。
 
@@ -91,7 +91,7 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 
 模型 capability 的每个字段只按显式模型条目、adapter runtime metadata 和兼容 `modelKwargs` 依次解析。模型名称和默认模型列表不提供能力；未知窗口仍允许 Runtime 调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
 
-自动会话总结需要默认关闭的 `features.contextCompactionAutoV1` 与 `compaction.autoMode` 共同开启。`autoMode` 只允许 `off | shadow | live`；未配置时为 `off`。`shadow` 只计算 trigger eligibility 术语（触发资格），不调用摘要模型、不写 checkpoint 术语（检查点）；`live` 默认在完整请求达到可用输入预算的 90% 时产生 `reason=auto`，也可由 `triggerRatio` 覆盖或使用显式 `compactAfterEstimatedTokens` 绝对策略。自动压缩失败或取消时当前用户请求不会继续调用普通模型；下一用户 turn 会重新预检并在仍超阈值时重试。Summary Provider 请求失败按脱敏类别提示检查模型、credential、连接与 context/output limits 或执行 `/clear`，不自动清理、分块或重试。`compaction` 可配置 `warningRatio`、`compactRatio`、`hardRatio`、`minimumReductionRatio`、`cooldownTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`maxNarrativeTokens` 和 `providerSafetyRatio`；`recentTurns`、`minimumIncrementalHeadroomTokens`、`softRatio`、`targetRatio` 与未消费的 breaker 配置已删除。模型 capability 只来自所选模型的显式字段、adapter runtime metadata 或 `modelKwargs` 兼容字段，并按字段记录 source；模型名称和默认列表不提供窗口、tokenizer、usage 或 cache 能力。未知窗口不显示百分比、不触发 ratio auto。当前 summary request 复用主模型（`tools: {}`，temperature 0，SDK retry 0），自定义指令作为数据字段传入，但只有存在新 safe history 时才会 dispatch。
+自动会话总结需要默认关闭的 `features.contextCompactionAuto` 与 `compaction.autoMode` 共同开启。`autoMode` 只允许 `off | shadow | live`；未配置时为 `off`。`shadow` 只计算 trigger eligibility 术语（触发资格），不调用摘要模型、不写 checkpoint 术语（检查点）；`live` 默认在完整请求达到可用输入预算的 90% 时产生 `reason=auto`，也可由 `triggerRatio` 覆盖或使用显式 `compactAfterEstimatedTokens` 绝对策略。自动压缩失败或取消时当前用户请求不会继续调用普通模型；下一用户 turn 会重新预检并在仍超阈值时重试。Summary Provider 请求失败按脱敏类别提示检查模型、credential、连接与 context/output limits 或执行 `/clear`，不自动清理、分块或重试。`compaction` 可配置 `warningRatio`、`compactRatio`、`hardRatio`、`minimumReductionRatio`、`cooldownTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`maxNarrativeTokens` 和 `providerSafetyRatio`；`recentTurns`、`minimumIncrementalHeadroomTokens`、`softRatio`、`targetRatio` 与未消费的 breaker 配置已删除。模型 capability 只来自所选模型的显式字段、adapter runtime metadata 或 `modelKwargs` 兼容字段，并按字段记录 source；模型名称和默认列表不提供窗口、tokenizer、usage 或 cache 能力。未知窗口不显示百分比、不触发 ratio auto。当前 summary request 复用主模型（`tools: {}`，temperature 0，SDK retry 0），自定义指令作为数据字段传入，但只有存在新 safe history 时才会 dispatch。
 
 Rollout 可额外配置 `cohortSalt` 与 `livePercentage`：相同 salt/session 始终进入相同 bucket，live 百分比外按 shadow 执行，master flag 关闭恒为 off。显式 `localDebug: { enabled: true, directory }` 只写脱敏压缩元数据；未启用时不创建文件。
 
@@ -99,7 +99,7 @@ TUI 启动时执行 workspace 信任门禁：首次打开未信任目录会显�
 
 ### Session logging
 
-`sessionLogging.mode` 只允许 `off | metadata | content`。`sessionLoggingPolicyV1` 默认开启并使用
+`sessionLogging.mode` 只允许 `off | metadata | content`。`sessionLoggingPolicy` 默认开启并使用
 release artifact 的 metadata policy；显式关闭时 resolved mode 恒为 `off`。用户和项目配置只能收紧
 retention/容量与 mode，项目配置不得开启 `content`。
 
@@ -117,7 +117,7 @@ owner、目录 identity 与 heartbeat 的 durable lease 防止并发回收；无
 
 ## 9.4 MCP 配置
 
-MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、timeout、trust 和逐工具 policy override。`enabledTools` 是 allowlist，`disabledTools` 随后应用，最后由 `tools.<name>.enabled` 精确覆盖。逐工具配置还使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。开启默认关闭的 `mcpProviderActionV1` 后，非 ready/degraded 的 required Provider 会在首次模型调用前要求 Retry、当前 session waiver 或 Cancel Run；waiver 不会恢复该 Provider 的 capability 可见性。
+MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、timeout、trust 和逐工具 policy override。`enabledTools` 是 allowlist，`disabledTools` 随后应用，最后由 `tools.<name>.enabled` 精确覆盖。逐工具配置还使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。开启默认关闭的 `mcpProviderAction` 后，非 ready/degraded 的 required Provider 会在首次模型调用前要求 Retry、当前 session waiver 或 Cancel Run；waiver 不会恢复该 Provider 的 capability 可见性。
 
 stdio 与远程 HTTP 的真实边界不同。HTTP Tool 依赖 exact endpoint/TLS/network admission，并对最终参数
 建立一次 immutable JSON-safe bounded snapshot；credential 字段/形状、受保护 credential path、accessor/cycle
@@ -132,14 +132,14 @@ EgressAuthority 或 nonce permit。stdio 则只通过 Host-owned wrapper/process
 
 Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时按各 active 规则 fail closed 或回到当前受治理路径，不允许恢复已删除的旧 MCP adapter、Prompt Skill 或旧状态机。
 
-`toolSearchV1`（原 `capabilitySearchV1`）控制能力渐进披露：MCP Tool 数量在 1–20 之间且其 schema 估算 token 未超过 disclosure budget 时可直接 binding；否则只有在整体 catalog 仍适合该预算时才直接披露，超出预算则通过 `tool_search` 搜索发现。Skill 依 Provider tool-call 支持与剩余上下文预算独立决策。
+`toolSearch`（原 `capabilitySearch`）控制能力渐进披露：MCP Tool 数量在 1–20 之间且其 schema 估算 token 未超过 disclosure budget 时可直接 binding；否则只有在整体 catalog 仍适合该预算时才直接披露，超出预算则通过 `tool_search` 搜索发现。Skill 依 Provider tool-call 支持与剩余上下文预算独立决策。
 
 Builtin capability registry 的六个计算原语已按 ADR-0027 完成单路径切换；`@kite/runtime-spi` 只保存
 neutral registry/descriptor contract，具体 schema、availability、effects 与 executor owner 位于
-`@kite/builtin-runtime`，不再接受 `toolSpecRegistryV1` 配置。
+`@kite/builtin-runtime`，不再接受 `toolSpecRegistry` 配置。
 
-生产治理的 `resourceBudgetV1`、`boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1`、
-`networkBoundaryV1`、`releaseProfileV1` 和 `observabilityMetricsV1` 均默认关闭。Logger flag 开启时 Runtime 只写
+生产治理的 `resourceBudget`、`boundedCancellation`、`terminalOutcome`、`executionBoundary`、
+`networkBoundary`、`releaseProfile` 和 `observabilityMetrics` 均默认关闭。Logger flag 开启时 Runtime 只写
 显式 allowlist metadata，关闭时不创建日志目录。Provider configured admission 与 HTTP MCP argument
 inspection 是固定 production path，不受 feature flag 控制；已删除的 provider/egress flags 不能从配置恢复。
 Resource flag 只为新 run 建立 Runtime
@@ -159,16 +159,16 @@ Remote observability 不属于当前产品路线；flag 单独开启不生效。
 `enabled=false` 的收紧语义，不能提供 endpoint secret、network transport 或发布 authority。Reporter 只有
 有界内存 queue，无磁盘 spool；正文和 secret 永远不进入结构化状态。
 
-`releaseProfileV1` 仍要求独立的 capability artifact authority；user/project/CLI 的 true 不能创建该
+`releaseProfile` 仍要求独立的 capability artifact authority；user/project/CLI 的 true 不能创建该
 authority。当前 embedded effectful profile 保持关闭，D-04 effectful execution 支持集为空，因此 Shell、
 writer、MCP write 与 effectful Skill 不会因普通候选包存在而开放。这不阻止 unsigned TUI/CLI tar 的
 构建、安装或启动。Release status 不显示完整 profile、credential、Workspace path 或 route 名称。
 
-`networkBoundaryV1` 关闭时 production network 收紧为 off，不能恢复旧 `allow_all`。开启时只
+`networkBoundary` 关闭时 production network 收紧为 off，不能恢复旧 `allow_all`。开启时只
 使密封 boundary 内的 `web_fetch` 获得逐 invocation DNS/redirect/endpoint admission；Shell/Skill
 descendant 仍为 network-off。Remote HTTP MCP 还要求 App 签发绑定 boundary/run/profile/endpoint/
 invocation 的单次 transport receipt；当前 production TUI 没有该 controller，local stdio 也明确
 排除，因此 Provider readiness 继续拒绝。该 flag 不定义 allowlist、不提供 URL path isolation，
 也不改变当前空 production platform 支持集。
 
-上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManualV1` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。
+上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompaction` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAuto` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManual` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。

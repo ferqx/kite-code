@@ -3,81 +3,81 @@ import {
   type AgentState,
   assertAuthorizationElevation,
   type KernelEvent,
-  projectStateRestartRecoveryEventsV1,
+  projectStateRestartRecoveryEvents,
   type RuntimeEffect,
-  stateRestartRecoveryCapabilityInvocationIdsV1,
+  stateRestartRecoveryCapabilityInvocationIds,
 } from '@kite/agent-kernel';
 import {
-  assertRestoredCapabilityArtifactEvidenceV1,
-  type CapabilityArtifactReaderV1,
+  assertRestoredCapabilityArtifactEvidence,
+  type CapabilityArtifactReader,
 } from '@kite/builtin-runtime';
 import {
-  type ModelArtifactEvidenceAvailabilityV1,
-  verifyCompletedModelInvocationEvidenceV1,
-  verifyPendingModelInvocationEvidenceV1,
+  type ModelArtifactEvidenceAvailability,
+  verifyCompletedModelInvocationEvidence,
+  verifyPendingModelInvocationEvidence,
 } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostStateSessionV1,
-  isStateRuntimeEffectDeferredV1,
+  createRuntimeHostStateSession,
+  isStateRuntimeEffectDeferred,
   type RuntimeHostExecutionServices,
-  restoreRuntimeHostStateSessionV1,
-  type StateRuntimeEffectExecutorV1,
-  type StateRuntimeEffectPersistenceAcknowledgementV1,
-  type StateRuntimeSessionEffectLeaseV1,
-  type StateRuntimeSessionV1,
+  restoreRuntimeHostStateSession,
+  type StateRuntimeEffectExecutor,
+  type StateRuntimeEffectPersistenceAcknowledgement,
+  type StateRuntimeSession,
+  type StateRuntimeSessionEffectLease,
 } from '@kite/runtime-host';
 import type {
-  RuntimeEffectLeaseExpectationV1,
-  RuntimeRestoreBoundaryV1,
-  RuntimeSessionStoragePortV1,
+  RuntimeEffectLeaseExpectation,
+  RuntimeRestoreBoundary,
+  RuntimeSessionStoragePort,
 } from '@kite/runtime-host/storage';
 import {
   eventsForRuntimeAction,
   type RuntimeActionResult,
   type RuntimeUserAction,
 } from '#app/bootstrap/runtime/state-actions';
-import { projectVerificationSchemaAdmissionsV1 } from '#app/bootstrap/runtime/verification-schema-admission';
-import { withTestStateProjectIdentityV1 } from './runtime-storage';
+import { projectVerificationSchemaAdmissions } from '#app/bootstrap/runtime/verification-schema-admission';
+import { withTestStateProjectIdentity } from './runtime-storage';
 
-type StateStore = RuntimeSessionStoragePortV1<KernelEvent, AgentState>;
+type StateStore = RuntimeSessionStoragePort<KernelEvent, AgentState>;
 
-export interface StateHarnessIdSourceV1 {
+export interface StateHarnessIdSource {
   next(scope: 'turn' | 'task' | 'kernel_runner' | 'kernel_effect' | 'model_invocation'): string;
   now(): number;
 }
 
-function liveIdSource(): StateHarnessIdSourceV1 {
+function liveIdSource(): StateHarnessIdSource {
   return Object.freeze({
     next: () => randomUUID(),
     now: () => Date.now(),
   });
 }
 
-export interface StateHostSessionHarnessInputV1 {
+export interface StateHostSessionHarnessInput {
   readonly store: StateStore;
   readonly initialState: AgentState;
   readonly interactionMode: AgentState['mode'];
   readonly sandboxAvailable?: boolean;
-  readonly runtimeIdSource?: StateHarnessIdSourceV1;
+  readonly runtimeIdSource?: StateHarnessIdSource;
 }
 
-export class StateHostSessionHarnessV1 {
+export class StateHostSessionHarness {
   readonly runtimeStore: StateStore;
-  readonly #session: StateRuntimeSessionV1;
-  readonly #runtimeIdSource: StateHarnessIdSourceV1;
+  readonly #session: StateRuntimeSession;
+  readonly #runtimeIdSource: StateHarnessIdSource;
   #sandboxAvailable: boolean;
 
-  constructor(input: StateHostSessionHarnessInputV1) {
+  constructor(input: StateHostSessionHarnessInput) {
     this.runtimeStore = input.store;
     this.#runtimeIdSource = input.runtimeIdSource ?? liveIdSource();
     this.#sandboxAvailable = input.sandboxAvailable ?? false;
-    this.#session = createRuntimeHostStateSessionV1({
-      state: withTestStateProjectIdentityV1(input.initialState),
+    this.#session = createRuntimeHostStateSession({
+      state: withTestStateProjectIdentity(input.initialState),
       services: compatibilityServices(input.store, this.#runtimeIdSource),
       clock: () => new Date(this.#runtimeIdSource.now()).toISOString(),
       id: (kind) => this.#id(kind),
       sandboxAvailable: () => this.#sandboxAvailable,
-      verificationSchemaAdmissions: (event) => projectVerificationSchemaAdmissionsV1(event),
+      verificationSchemaAdmissions: (event) => projectVerificationSchemaAdmissions(event),
       eventBatchAdmissionValidator: (events) => {
         for (const event of events) {
           if (event.type !== 'interaction_mode.changed') continue;
@@ -114,7 +114,7 @@ export class StateHostSessionHarnessV1 {
 
   processEventBatch(
     events: KernelEvent[],
-    requiredEffectLease?: RuntimeEffectLeaseExpectationV1,
+    requiredEffectLease?: RuntimeEffectLeaseExpectation,
     source: 'command' | 'receipt' | 'host_fact' = 'host_fact',
   ): KernelEvent[] {
     return [
@@ -143,7 +143,7 @@ export class StateHostSessionHarnessV1 {
 
   selectPendingEffects(
     state: Readonly<AgentState> = this.#session.getState(),
-    facts?: Parameters<StateRuntimeSessionV1['selectPendingEffects']>[1],
+    facts?: Parameters<StateRuntimeSession['selectPendingEffects']>[1],
   ): readonly RuntimeEffect[] {
     return this.#session.selectPendingEffects(state, facts);
   }
@@ -156,22 +156,22 @@ export class StateHostSessionHarnessV1 {
     this.#session.releaseRunner(runnerId);
   }
 
-  beginEffect(effect: RuntimeEffect): StateRuntimeSessionEffectLeaseV1 {
+  beginEffect(effect: RuntimeEffect): StateRuntimeSessionEffectLease {
     return this.#session.beginEffect(effect);
   }
 
-  isEffectEventCurrent(lease: StateRuntimeSessionEffectLeaseV1, event: KernelEvent): boolean {
+  isEffectEventCurrent(lease: StateRuntimeSessionEffectLease, event: KernelEvent): boolean {
     return this.#session.isEffectEventCurrent(lease, event);
   }
 
-  applyEffectEvent(lease: StateRuntimeSessionEffectLeaseV1, event: KernelEvent): boolean {
+  applyEffectEvent(lease: StateRuntimeSessionEffectLease, event: KernelEvent): boolean {
     return this.#session.applyEffectEvent(lease, event);
   }
 
   applyEffectResult(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     events: KernelEvent[],
-    requiredEffectLease?: RuntimeEffectLeaseExpectationV1,
+    requiredEffectLease?: RuntimeEffectLeaseExpectation,
   ): boolean {
     return this.#session.applyEffectResult(
       lease,
@@ -187,10 +187,10 @@ export class StateHostSessionHarnessV1 {
   }
 
   applyEffectEvents(
-    lease: StateRuntimeSessionEffectLeaseV1,
+    lease: StateRuntimeSessionEffectLease,
     events: KernelEvent[],
-    acknowledgement: StateRuntimeEffectPersistenceAcknowledgementV1,
-    requiredEffectLease?: RuntimeEffectLeaseExpectationV1,
+    acknowledgement: StateRuntimeEffectPersistenceAcknowledgement,
+    requiredEffectLease?: RuntimeEffectLeaseExpectation,
   ): boolean {
     return this.#session.applyEffectEvents(
       lease,
@@ -243,7 +243,7 @@ export class StateHostSessionHarnessV1 {
   }
 
   async run(
-    executor: StateRuntimeEffectExecutorV1<AgentState, KernelEvent, RuntimeEffect>,
+    executor: StateRuntimeEffectExecutor<AgentState, KernelEvent, RuntimeEffect>,
     maxEffects = 10_000,
   ): Promise<RuntimeEffect> {
     const runnerId = this.acquireRunner();
@@ -269,7 +269,7 @@ export class StateHostSessionHarnessV1 {
         const lease = this.beginEffect(effect);
         try {
           const events = await executor(effect, this.getState());
-          if (isStateRuntimeEffectDeferredV1(events)) {
+          if (isStateRuntimeEffectDeferred(events)) {
             return { type: 'busy', reason: events.deferred.reason };
           }
           if (events.length === 0) return { type: 'stop' };
@@ -296,7 +296,7 @@ export class StateHostSessionHarnessV1 {
   }
 }
 
-export interface RestoreStateHostSessionHarnessInputV1 {
+export interface RestoreStateHostSessionHarnessInput {
   readonly threadId: string;
   readonly userId: string;
   readonly workspace: string;
@@ -309,17 +309,17 @@ export interface RestoreStateHostSessionHarnessInputV1 {
   readonly authorizationSource?: NonNullable<AgentState['authorization']['modeSource']>;
   readonly phase?: 'planning' | 'building';
   readonly sandboxAvailable?: boolean;
-  readonly modelArtifactEvidence?: ModelArtifactEvidenceAvailabilityV1;
-  readonly capabilityArtifactEvidence?: CapabilityArtifactReaderV1;
-  readonly runtimeIdSource?: StateHarnessIdSourceV1;
+  readonly modelArtifactEvidence?: ModelArtifactEvidenceAvailability;
+  readonly capabilityArtifactEvidence?: CapabilityArtifactReader;
+  readonly runtimeIdSource?: StateHarnessIdSource;
 }
 
-export function restoreStateHostSessionHarnessV1(
-  input: RestoreStateHostSessionHarnessInputV1,
-): StateHostSessionHarnessV1 {
+export function restoreStateHostSessionHarness(
+  input: RestoreStateHostSessionHarnessInput,
+): StateHostSessionHarness {
   const source = input.runtimeIdSource ?? liveIdSource();
-  const restored = restoreStateStateFromStoreV1({ ...input, runtimeIdSource: source });
-  const harness = new StateHostSessionHarnessV1({
+  const restored = restoreStateStateFromStore({ ...input, runtimeIdSource: source });
+  const harness = new StateHostSessionHarness({
     store: input.store,
     initialState: restored.state,
     interactionMode: input.interactionMode ?? 'accept_edits',
@@ -327,9 +327,9 @@ export function restoreStateHostSessionHarnessV1(
     runtimeIdSource: source,
   });
   if (restored.state.recoveryState.kind !== 'normal') return harness;
-  const recoveryEvents = projectStateRestartRecoveryEventsV1(restored.state, {
+  const recoveryEvents = projectStateRestartRecoveryEvents(restored.state, {
     capabilityFinishedAtByInvocationId: Object.fromEntries(
-      stateRestartRecoveryCapabilityInvocationIdsV1(restored.state).map((invocationId) => [
+      stateRestartRecoveryCapabilityInvocationIds(restored.state).map((invocationId) => [
         invocationId,
         new Date(source.now()).toISOString(),
       ]),
@@ -341,7 +341,7 @@ export function restoreStateHostSessionHarnessV1(
         )
         .map((invocation) => [
           invocation.invocationId,
-          verifyPendingModelInvocationEvidenceV1(invocation, input.modelArtifactEvidence),
+          verifyPendingModelInvocationEvidence(invocation, input.modelArtifactEvidence),
         ]),
     ),
     completedModelEvidenceFailures: Object.fromEntries(
@@ -349,7 +349,7 @@ export function restoreStateHostSessionHarnessV1(
         .filter((invocation) => invocation.status === 'completed')
         .map((invocation) => [
           invocation.invocationId,
-          verifyCompletedModelInvocationEvidenceV1(invocation, input.modelArtifactEvidence),
+          verifyCompletedModelInvocationEvidence(invocation, input.modelArtifactEvidence),
         ]),
     ),
   });
@@ -357,9 +357,9 @@ export function restoreStateHostSessionHarnessV1(
   return harness;
 }
 
-export function restoreStateStateFromStoreV1(input: RestoreStateHostSessionHarnessInputV1): {
+export function restoreStateStateFromStore(input: RestoreStateHostSessionHarnessInput): {
   readonly state: AgentState;
-  readonly restoreBoundary: RuntimeRestoreBoundaryV1;
+  readonly restoreBoundary: RuntimeRestoreBoundary;
 } {
   const source = input.runtimeIdSource ?? liveIdSource();
   const capabilityArtifactEvidence = input.capabilityArtifactEvidence;
@@ -376,18 +376,18 @@ export function restoreStateStateFromStoreV1(input: RestoreStateHostSessionHarne
     phase: input.phase,
     validateRestoredState: capabilityArtifactEvidence
       ? (state: Readonly<AgentState>) =>
-          assertRestoredCapabilityArtifactEvidenceV1(state, capabilityArtifactEvidence)
+          assertRestoredCapabilityArtifactEvidence(state, capabilityArtifactEvidence)
       : undefined,
   };
   const restored =
     input.authorizationMode === 'full_access'
-      ? restoreRuntimeHostStateSessionV1({
+      ? restoreRuntimeHostStateSession({
           ...common,
           authorizationMode: 'full_access',
           authorizationSource: input.authorizationSource ?? 'system',
           modeGrantedAt: new Date(source.now()).toISOString(),
         })
-      : restoreRuntimeHostStateSessionV1({
+      : restoreRuntimeHostStateSession({
           ...common,
           authorizationMode: input.authorizationMode,
           authorizationSource: input.authorizationSource,
@@ -397,7 +397,7 @@ export function restoreStateStateFromStoreV1(input: RestoreStateHostSessionHarne
 
 function compatibilityServices(
   store: StateStore,
-  source: StateHarnessIdSourceV1,
+  source: StateHarnessIdSource,
 ): RuntimeHostExecutionServices<KernelEvent, AgentState> {
   return {
     sessions: store,

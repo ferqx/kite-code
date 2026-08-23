@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  type BuiltinModelToolCatalogEntryV1,
+  type BuiltinModelToolCatalogEntry,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  digestCapabilityBindingValueV1,
+  createBuiltinToolCatalogProjection,
+  digestCapabilityBindingValue,
 } from '@kite/builtin-runtime';
 import {
-  type CapabilityExecutionInvocationV1,
-  type CapabilityExecutionPortV1,
-  type CapabilityPolicyCompilationV1,
-  type CapabilityPolicyContextV1,
-  createRuntimeModuleRegistryV1,
-  type ExecutionReceiptV1,
-  type RuntimeJsonValueV1,
+  type CapabilityExecutionInvocation,
+  type CapabilityExecutionPort,
+  type CapabilityPolicyCompilation,
+  type CapabilityPolicyContext,
+  createRuntimeModuleRegistry,
+  type ExecutionReceipt,
+  type RuntimeJsonValue,
 } from '@kite/runtime-spi';
 
 const WORKSPACE = '/tmp/kite-rmv1-s7b-policy-workspace';
 
-const TURN_CONTEXT: CapabilityPolicyContextV1 = Object.freeze({
+const TURN_CONTEXT: CapabilityPolicyContext = Object.freeze({
   workspace: WORKSPACE,
   phase: 'building',
   threadId: 's7b-policy-thread',
@@ -29,9 +29,9 @@ const TURN_CONTEXT: CapabilityPolicyContextV1 = Object.freeze({
   activeSkillFrameIds: Object.freeze(['skill-frame']),
   availableSkillIds: Object.freeze(['skill']),
   featureFlags: Object.freeze({
-    brokeredGitV1: true,
-    skillWorkflowV1: true,
-    skillActivationV2: true,
+    brokeredGit: true,
+    skillWorkflow: true,
+    skillActivation: true,
   }),
 });
 
@@ -61,7 +61,7 @@ const EXPECTED_MODEL_TOOL_NAMES = Object.freeze([
 interface DifferentialVector {
   readonly label: string;
   readonly toolName: (typeof EXPECTED_MODEL_TOOL_NAMES)[number];
-  readonly input: RuntimeJsonValueV1;
+  readonly input: RuntimeJsonValue;
   readonly phase: 'planning' | 'building';
 }
 
@@ -355,8 +355,8 @@ const EXTRA_VECTORS: readonly DifferentialVector[] = [
 ];
 Object.freeze(EXTRA_VECTORS);
 
-function expectedAuthorizationEligibilityV1(vector: DifferentialVector): Readonly<{
-  minimumApproval: CapabilityPolicyCompilationV1['minimumApproval'];
+function expectedAuthorizationEligibility(vector: DifferentialVector): Readonly<{
+  minimumApproval: CapabilityPolicyCompilation['minimumApproval'];
   fullAccessMayBypassApproval: boolean;
   sameCommandMayBypassApproval: boolean;
 }> {
@@ -401,16 +401,16 @@ function expectedAuthorizationEligibilityV1(vector: DifferentialVector): Readonl
   };
 }
 
-function contextForPhase(phase: DifferentialVector['phase']): CapabilityPolicyContextV1 {
+function contextForPhase(phase: DifferentialVector['phase']): CapabilityPolicyContext {
   return Object.freeze({ ...TURN_CONTEXT, phase });
 }
 
 function modelEntry(
-  projection: ReturnType<typeof createBuiltinToolCatalogProjectionV1>,
+  projection: ReturnType<typeof createBuiltinToolCatalogProjection>,
   name: DifferentialVector['toolName'],
-): BuiltinModelToolCatalogEntryV1 {
+): BuiltinModelToolCatalogEntry {
   const entry = projection.entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.name === name,
   );
   if (!entry) throw new Error(`missing model catalog entry: ${name}`);
@@ -418,10 +418,10 @@ function modelEntry(
 }
 
 function canonicalInputForVector(
-  entry: BuiltinModelToolCatalogEntryV1,
+  entry: BuiltinModelToolCatalogEntry,
   vector: DifferentialVector,
-  context: CapabilityPolicyContextV1,
-): RuntimeJsonValueV1 {
+  context: CapabilityPolicyContext,
+): RuntimeJsonValue {
   const parsed = entry.parse(vector.input, context);
   if (!parsed.success) {
     throw new Error(
@@ -431,10 +431,10 @@ function canonicalInputForVector(
   return parsed.data;
 }
 
-function askUserInvocation(entry: BuiltinModelToolCatalogEntryV1): CapabilityExecutionInvocationV1 {
+function askUserInvocation(entry: BuiltinModelToolCatalogEntry): CapabilityExecutionInvocation {
   const schemaDigest = entry.inputSchemaDigest;
   if (!schemaDigest) throw new Error('ask_user schema digest is missing');
-  const bindingId = digestCapabilityBindingValueV1({
+  const bindingId = digestCapabilityBindingValue({
     capabilityId: entry.operationId,
     revision: entry.revision,
     exposedToolName: entry.name,
@@ -472,15 +472,15 @@ function askUserInvocation(entry: BuiltinModelToolCatalogEntryV1): CapabilityExe
   };
 }
 
-describe('RMV1-16 S7B Builtin policy corpus', () => {
+describe('RM-16 S7B Builtin policy corpus', () => {
   test('compiles one frozen snapshot, all 20 model operations, and fixed policy corpus', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const snapshot = registry.snapshot();
-    const projection = createBuiltinToolCatalogProjectionV1(snapshot, {
+    const projection = createBuiltinToolCatalogProjection(snapshot, {
       turnContext: TURN_CONTEXT,
     });
     const modelEntries = projection.entries.filter(
-      (entry): entry is BuiltinModelToolCatalogEntryV1 => entry.visibility === 'model',
+      (entry): entry is BuiltinModelToolCatalogEntry => entry.visibility === 'model',
     );
     const internalEntries = projection.entries.filter((entry) => entry.visibility === 'internal');
 
@@ -504,7 +504,7 @@ describe('RMV1-16 S7B Builtin policy corpus', () => {
       expect(compiled.operationId, vector.label).toBe(entry.operationId);
       expect(compiled.capabilityRevision, vector.label).toBe(entry.revision);
       expect(compiled.parserRevision, vector.label).toBe(entry.parser.parserRevision);
-      expect(compiled, vector.label).toMatchObject(expectedAuthorizationEligibilityV1(vector));
+      expect(compiled, vector.label).toMatchObject(expectedAuthorizationEligibility(vector));
       expect(compiled.minimumApproval, vector.label).toBe(entry.descriptor.policy.minimumApproval);
       expect(Object.isFrozen(compiled), vector.label).toBe(true);
       expect(Object.isFrozen(compiled.expectedEffects), vector.label).toBe(true);
@@ -520,8 +520,8 @@ describe('RMV1-16 S7B Builtin policy corpus', () => {
     );
     expect(askUserFacts.decision).toBe('allow');
     let interruptCalls = 0;
-    const interruptPort: CapabilityExecutionPortV1 = {
-      invoke: async (): Promise<ExecutionReceiptV1> => {
+    const interruptPort: CapabilityExecutionPort = {
+      invoke: async (): Promise<ExecutionReceipt> => {
         interruptCalls += 1;
         throw new Error('ask_user dispatch must not call Host port');
       },

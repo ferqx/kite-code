@@ -1,25 +1,25 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  authorizeToolGovernanceV1,
-  createToolApprovalBindingDigestV1,
-  createToolGovernanceCommandDigestV1,
-  decideToolGovernanceV1,
-  isValidToolGovernanceFactsV1,
-  TOOL_GOVERNANCE_FACTS_SCHEMA_V1,
-  type ToolGovernanceAdmissionFactsV1,
-  type ToolGovernanceApprovalFactV1,
-  type ToolGovernanceContextFactsV1,
-  type ToolGovernanceFactsV1,
-  type ToolGovernanceGateFactsV1,
-  type ToolGovernanceInvocationFactV1,
-  type ToolGovernancePolicyFactV1,
+  authorizeToolGovernance,
+  createToolApprovalBindingDigest,
+  createToolGovernanceCommandDigest,
+  decideToolGovernance,
+  isValidToolGovernanceFacts,
+  TOOL_GOVERNANCE_FACTS_SCHEMA_,
+  type ToolGovernanceAdmissionFacts,
+  type ToolGovernanceApprovalFact,
+  type ToolGovernanceContextFacts,
+  type ToolGovernanceFacts,
+  type ToolGovernanceGateFacts,
+  type ToolGovernanceInvocationFact,
+  type ToolGovernancePolicyFact,
 } from '../src/tool-governance';
 
 const D = 'a'.repeat(64);
 const E = 'b'.repeat(64);
 const F = 'c'.repeat(64);
 
-const BASE_INVOCATION: ToolGovernanceInvocationFactV1 = {
+const BASE_INVOCATION: ToolGovernanceInvocationFact = {
   workspace: '/workspace',
   threadId: 'thread-1',
   turnId: 'turn-1',
@@ -44,7 +44,7 @@ const BASE_INVOCATION: ToolGovernanceInvocationFactV1 = {
   commandDigest: null,
 };
 
-const BASE_POLICY: ToolGovernancePolicyFactV1 = {
+const BASE_POLICY: ToolGovernancePolicyFact = {
   operationId: 'builtin:test_tool',
   capabilityRevision: D,
   parserRevision: D,
@@ -61,14 +61,14 @@ const BASE_POLICY: ToolGovernancePolicyFactV1 = {
   expectedEffects: ['Reads fixture data'],
 };
 
-const BASE_GATES: ToolGovernanceGateFactsV1 = {
+const BASE_GATES: ToolGovernanceGateFacts = {
   recoveryAdmission: 'admitted',
   boundedCancellation: 'admitted',
   executionBoundary: 'admitted',
   skillCapabilityCeiling: 'admitted',
 };
 
-const BASE_CONTEXT: ToolGovernanceContextFactsV1 = {
+const BASE_CONTEXT: ToolGovernanceContextFacts = {
   phase: 'building',
   interactionMode: 'accept_edits',
   authorizationMode: 'default',
@@ -79,13 +79,13 @@ const BASE_CONTEXT: ToolGovernanceContextFactsV1 = {
   observedAt: 100,
 };
 
-const BASE_ADMISSION: ToolGovernanceAdmissionFactsV1 = {
+const BASE_ADMISSION: ToolGovernanceAdmissionFacts = {
   freshness: 'current',
   reservationRequired: false,
   reservationIds: [],
 };
 
-const QUEUED_APPROVAL: ToolGovernanceApprovalFactV1 = {
+const QUEUED_APPROVAL: ToolGovernanceApprovalFact = {
   status: 'queued',
   grant: 'none',
   approvedToolCallId: null,
@@ -93,19 +93,19 @@ const QUEUED_APPROVAL: ToolGovernanceApprovalFactV1 = {
 };
 
 type FactOverrides = {
-  readonly invocation?: Partial<ToolGovernanceInvocationFactV1>;
-  readonly policy?: Partial<ToolGovernancePolicyFactV1>;
-  readonly context?: Partial<Omit<ToolGovernanceContextFactsV1, 'gates'>> & {
-    readonly gates?: Partial<ToolGovernanceGateFactsV1>;
+  readonly invocation?: Partial<ToolGovernanceInvocationFact>;
+  readonly policy?: Partial<ToolGovernancePolicyFact>;
+  readonly context?: Partial<Omit<ToolGovernanceContextFacts, 'gates'>> & {
+    readonly gates?: Partial<ToolGovernanceGateFacts>;
   };
-  readonly admission?: Partial<ToolGovernanceAdmissionFactsV1>;
-  readonly approval?: Partial<ToolGovernanceApprovalFactV1>;
-  readonly sameCommandGrant?: ToolGovernanceFactsV1['sameCommandGrant'];
-  readonly dynamicMcp?: ToolGovernanceFactsV1['dynamicMcp'];
-  readonly nestedSkill?: ToolGovernanceFactsV1['nestedSkill'];
+  readonly admission?: Partial<ToolGovernanceAdmissionFacts>;
+  readonly approval?: Partial<ToolGovernanceApprovalFact>;
+  readonly sameCommandGrant?: ToolGovernanceFacts['sameCommandGrant'];
+  readonly dynamicMcp?: ToolGovernanceFacts['dynamicMcp'];
+  readonly nestedSkill?: ToolGovernanceFacts['nestedSkill'];
 };
 
-function facts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
+function facts(overrides: FactOverrides = {}): ToolGovernanceFacts {
   const invocation = { ...BASE_INVOCATION, ...overrides.invocation };
   const context = {
     ...BASE_CONTEXT,
@@ -113,7 +113,7 @@ function facts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
     gates: { ...BASE_GATES, ...overrides.context?.gates },
   };
   return {
-    schema: TOOL_GOVERNANCE_FACTS_SCHEMA_V1,
+    schema: TOOL_GOVERNANCE_FACTS_SCHEMA_,
     invocation,
     policy: { ...BASE_POLICY, ...overrides.policy },
     context,
@@ -130,7 +130,7 @@ function facts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
 function approvedFacts(
   grant: 'approve_once' | 'same_command' | 'full_access' = 'approve_once',
   overrides: FactOverrides = {},
-): ToolGovernanceFactsV1 {
+): ToolGovernanceFacts {
   const pending = facts(overrides);
   return {
     ...pending,
@@ -138,12 +138,12 @@ function approvedFacts(
       status: 'approved',
       grant,
       approvedToolCallId: pending.invocation.toolCallId,
-      approvalBindingDigest: createToolApprovalBindingDigestV1(pending.invocation, pending.policy),
+      approvalBindingDigest: createToolApprovalBindingDigest(pending.invocation, pending.policy),
     },
   };
 }
 
-function shellFacts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
+function shellFacts(overrides: FactOverrides = {}): ToolGovernanceFacts {
   return facts({
     ...overrides,
     invocation: {
@@ -172,7 +172,7 @@ function shellFacts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
   });
 }
 
-function activationFacts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
+function activationFacts(overrides: FactOverrides = {}): ToolGovernanceFacts {
   return facts({
     ...overrides,
     invocation: {
@@ -198,7 +198,7 @@ function activationFacts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
   });
 }
 
-function dynamicMcpFacts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
+function dynamicMcpFacts(overrides: FactOverrides = {}): ToolGovernanceFacts {
   return facts({
     ...overrides,
     invocation: {
@@ -226,69 +226,69 @@ function dynamicMcpFacts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
 
 describe('State tool governance authorization facts', () => {
   test('binds same-command grants to trimmed text without collapsing internal whitespace', () => {
-    expect(createToolGovernanceCommandDigestV1('  echo hello  ')).toBe(
+    expect(createToolGovernanceCommandDigest('  echo hello  ')).toBe(
       '40a497646523116499ac8d2aeb78ce0c3c6643ce6f09805c21db3909fc614d3e',
     );
-    expect(createToolGovernanceCommandDigestV1('echo  hello')).toBe(
+    expect(createToolGovernanceCommandDigest('echo  hello')).toBe(
       '37b2f209ba15e46cc8f5ad68fb665df968549d78c7983ba307a7ae34c7d3a949',
     );
-    expect(createToolGovernanceCommandDigestV1('   ')).toBeNull();
+    expect(createToolGovernanceCommandDigest('   ')).toBeNull();
   });
 
   test('requires complete invocation/policy identity and rejects legacy authority fields', () => {
-    expect(isValidToolGovernanceFactsV1(facts())).toBe(true);
+    expect(isValidToolGovernanceFacts(facts())).toBe(true);
     expect(
-      isValidToolGovernanceFactsV1({
+      isValidToolGovernanceFacts({
         ...facts(),
         context: { ...facts().context, callStatus: 'queued' },
       }),
     ).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1({
+      isValidToolGovernanceFacts({
         ...facts(),
         policy: { ...facts().policy, grantUsed: 'full_access' },
       }),
     ).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1(facts({ invocation: { capabilityRevision: 'A'.repeat(64) } })),
+      isValidToolGovernanceFacts(facts({ invocation: { capabilityRevision: 'A'.repeat(64) } })),
     ).toBe(false);
-    expect(isValidToolGovernanceFactsV1(facts({ invocation: { toolCallId: '' } }))).toBe(false);
-    expect(isValidToolGovernanceFactsV1(facts({ policy: { parserRevision: E } }))).toBe(false);
+    expect(isValidToolGovernanceFacts(facts({ invocation: { toolCallId: '' } }))).toBe(false);
+    expect(isValidToolGovernanceFacts(facts({ policy: { parserRevision: E } }))).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1(
+      isValidToolGovernanceFacts(
         facts({
           invocation: { builtinCatalogRevision: null, dynamicCatalogRevision: D },
         }),
       ),
     ).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1(
+      isValidToolGovernanceFacts(
         facts({
           invocation: { builtinCatalogRevision: D, dynamicCatalogRevision: D },
         }),
       ),
     ).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1(facts({ invocation: { exposedToolName: 'mcp__server__tool' } })),
+      isValidToolGovernanceFacts(facts({ invocation: { exposedToolName: 'mcp__server__tool' } })),
     ).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1(
+      isValidToolGovernanceFacts(
         dynamicMcpFacts({ invocation: { exposedToolName: 'ordinary_tool' } }),
       ),
     ).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1(
+      isValidToolGovernanceFacts(
         dynamicMcpFacts({ invocation: { capabilityId: 'mcp:dynamic_tool' } }),
       ),
     ).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1({
+      isValidToolGovernanceFacts({
         ...dynamicMcpFacts(),
         dynamicMcp: undefined,
       }),
     ).toBe(false);
     expect(
-      isValidToolGovernanceFactsV1(
+      isValidToolGovernanceFacts(
         facts({
           dynamicMcp: { minimumApproval: 'none', readOnly: true },
         }),
@@ -297,21 +297,21 @@ describe('State tool governance authorization facts', () => {
   });
 
   test('binds deterministic approval digest to every identity and policy field', () => {
-    const first = createToolApprovalBindingDigestV1(BASE_INVOCATION, BASE_POLICY);
-    const second = createToolApprovalBindingDigestV1(BASE_INVOCATION, BASE_POLICY);
+    const first = createToolApprovalBindingDigest(BASE_INVOCATION, BASE_POLICY);
+    const second = createToolApprovalBindingDigest(BASE_INVOCATION, BASE_POLICY);
     expect(first).toMatch(/^[0-9a-f]{64}$/u);
     expect(first).toBe(second);
     expect(
-      createToolApprovalBindingDigestV1({ ...BASE_INVOCATION, toolCallId: 'call-2' }, BASE_POLICY),
+      createToolApprovalBindingDigest({ ...BASE_INVOCATION, toolCallId: 'call-2' }, BASE_POLICY),
     ).not.toBe(first);
     expect(
-      createToolApprovalBindingDigestV1(BASE_INVOCATION, {
+      createToolApprovalBindingDigest(BASE_INVOCATION, {
         ...BASE_POLICY,
         reason: 'Different policy fact.',
       }),
     ).not.toBe(first);
     expect(
-      createToolApprovalBindingDigestV1(
+      createToolApprovalBindingDigest(
         { ...BASE_INVOCATION, nestedCapabilityRevision: E },
         BASE_POLICY,
       ),
@@ -319,7 +319,7 @@ describe('State tool governance authorization facts', () => {
   });
 
   test('authorizes only an exact approved call and carries Kernel grantUsed', () => {
-    expect(authorizeToolGovernanceV1(approvedFacts())).toEqual({
+    expect(authorizeToolGovernance(approvedFacts())).toEqual({
       kind: 'authorized',
       authorizationKind: 'approved_call',
       grantUsed: 'approve_once',
@@ -336,13 +336,13 @@ describe('State tool governance authorization facts', () => {
         { invocation: { effectiveEffectsDigest: E }, policy: { effectiveEffectsDigest: E } },
       ] as FactOverrides[]
     ).entries()) {
-      const forged: ToolGovernanceFactsV1 = {
+      const forged: ToolGovernanceFacts = {
         ...approved,
         invocation: { ...approved.invocation, ...override.invocation },
         policy: { ...approved.policy, ...override.policy },
         approval: { ...approved.approval, ...override.approval },
       };
-      const result = authorizeToolGovernanceV1(forged);
+      const result = authorizeToolGovernance(forged);
       expect(result, `forged approval case ${index}`).toMatchObject({
         kind: 'reject',
         code: 'approval_identity_mismatch',
@@ -350,7 +350,7 @@ describe('State tool governance authorization facts', () => {
       expect(result.kind).not.toBe('request_approval');
     }
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         facts({
           approval: {
             status: 'approved',
@@ -364,7 +364,7 @@ describe('State tool governance authorization facts', () => {
   });
 
   test('returns deep-frozen policy copies for approval and auto-review', () => {
-    const manual = authorizeToolGovernanceV1(
+    const manual = authorizeToolGovernance(
       facts({
         policy: {
           decision: 'ask',
@@ -380,7 +380,7 @@ describe('State tool governance authorization facts', () => {
     expect(Object.isFrozen(manual.decision)).toBe(true);
     expect(Object.isFrozen(manual.decision.effects)).toBe(true);
     expect(Object.isFrozen(manual.decision.expectedEffects)).toBe(true);
-    const auto = authorizeToolGovernanceV1(
+    const auto = authorizeToolGovernance(
       facts({
         policy: {
           decision: 'ask',
@@ -396,7 +396,7 @@ describe('State tool governance authorization facts', () => {
 
   test('keeps deny and planning phase denial ahead of full_access', () => {
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           policy: {
             decision: 'deny',
@@ -410,7 +410,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'reject', failureKind: 'phase_deferred' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           policy: {
             decision: 'deny',
@@ -423,12 +423,12 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'reject', failureKind: 'policy_denied' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({ context: { authorizationMode: 'full_access', sandboxAvailable: false } }),
       ),
     ).toMatchObject({ code: 'authorization_elevation_denied' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           context: {
             authorizationMode: 'full_access',
@@ -439,7 +439,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ code: 'authorization_elevation_denied' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           context: {
             authorizationMode: 'full_access',
@@ -453,7 +453,7 @@ describe('State tool governance authorization facts', () => {
 
   test('full_access and interaction full are separate, and static minimum user does not re-upgrade safe facts', () => {
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           policy: {
             decision: 'allow',
@@ -467,7 +467,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           policy: {
             decision: 'ask',
@@ -481,7 +481,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           policy: {
             decision: 'allow',
@@ -495,7 +495,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toEqual({ kind: 'authorized', authorizationKind: 'approved_call', grantUsed: 'full_access' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           policy: {
             decision: 'ask',
@@ -509,7 +509,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_approval' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           policy: {
             decision: 'ask',
@@ -525,7 +525,7 @@ describe('State tool governance authorization facts', () => {
 
   test('requires a sandbox whenever the compiled policy requires one', () => {
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           policy: {
             decision: 'allow',
@@ -552,7 +552,7 @@ describe('State tool governance authorization facts', () => {
       expiresAt: 200,
     };
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           sameCommandGrant: grant,
           policy: { requiresApproval: true, sameCommandMayBypassApproval: true },
@@ -570,7 +570,7 @@ describe('State tool governance authorization facts', () => {
       { expiresAt: 100 },
     ] as const) {
       expect(
-        authorizeToolGovernanceV1(
+        authorizeToolGovernance(
           shellFacts({
             sameCommandGrant: { ...grant, ...change },
             policy: { requiresApproval: true, sameCommandMayBypassApproval: true },
@@ -579,7 +579,7 @@ describe('State tool governance authorization facts', () => {
       ).toMatchObject({ kind: 'request_approval' });
     }
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           sameCommandGrant: grant,
           policy: { requiresApproval: true, sameCommandMayBypassApproval: false },
@@ -587,7 +587,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_approval' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           sameCommandGrant: { ...grant, expiresAt: 200 },
           context: { observedAt: undefined },
@@ -596,7 +596,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_approval' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           sameCommandGrant: { ...grant, grantedAt: 150 },
           policy: { requiresApproval: true, sameCommandMayBypassApproval: true },
@@ -604,7 +604,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_approval' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         shellFacts({
           sameCommandGrant: { ...grant, expiresAt: undefined },
           context: { observedAt: undefined },
@@ -613,7 +613,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_approval' });
     expect(
-      isValidToolGovernanceFactsV1(
+      isValidToolGovernanceFacts(
         shellFacts({ sameCommandGrant: { ...grant, expiresAt: grant.grantedAt } }),
       ),
     ).toBe(false);
@@ -621,10 +621,10 @@ describe('State tool governance authorization facts', () => {
 
   test('dynamic MCP minimum user remains manual under full_access, while read-only stays fast', () => {
     expect(
-      authorizeToolGovernanceV1(dynamicMcpFacts({ context: { authorizationMode: 'full_access' } })),
+      authorizeToolGovernance(dynamicMcpFacts({ context: { authorizationMode: 'full_access' } })),
     ).toMatchObject({ kind: 'request_approval' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         dynamicMcpFacts({
           dynamicMcp: { minimumApproval: 'none', readOnly: true },
           policy: {
@@ -637,7 +637,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         dynamicMcpFacts({
           dynamicMcp: { minimumApproval: 'auto_review', readOnly: true },
           policy: {
@@ -651,13 +651,13 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_auto_review' });
     expect(
-      isValidToolGovernanceFactsV1(dynamicMcpFacts({ invocation: { builtinCatalogRevision: D } })),
+      isValidToolGovernanceFacts(dynamicMcpFacts({ invocation: { builtinCatalogRevision: D } })),
     ).toBe(false);
   });
 
   test('nested Skill facts can only tighten activation and never lower it', () => {
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         activationFacts({
           policy: {
             decision: 'allow',
@@ -671,7 +671,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_approval' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         activationFacts({
           policy: {
             decision: 'allow',
@@ -686,12 +686,12 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_approval' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         activationFacts({ nestedSkill: { decision: 'deny', minimumApproval: 'none' } }),
       ),
     ).toMatchObject({ kind: 'reject', failureKind: 'policy_denied' });
     expect(
-      authorizeToolGovernanceV1(
+      authorizeToolGovernance(
         activationFacts({
           policy: {
             decision: 'allow',
@@ -704,7 +704,7 @@ describe('State tool governance authorization facts', () => {
       ),
     ).toMatchObject({ kind: 'request_auto_review' });
     expect(
-      isValidToolGovernanceFactsV1(
+      isValidToolGovernanceFacts(
         facts({ nestedSkill: { decision: 'ask', minimumApproval: 'user' } }),
       ),
     ).toBe(false);
@@ -727,9 +727,9 @@ describe('State tool governance authorization facts', () => {
       context: { executionMechanism: 'user_input' },
       admission: { freshness: 'stale', reservationRequired: true },
     });
-    expect(decideToolGovernanceV1(input)).toEqual({ kind: 'request_user_input' });
-    const authorization = authorizeToolGovernanceV1(facts());
-    expect(decideToolGovernanceV1(facts({ admission: { freshness: 'stale' } }))).toMatchObject({
+    expect(decideToolGovernance(input)).toEqual({ kind: 'request_user_input' });
+    const authorization = authorizeToolGovernance(facts());
+    expect(decideToolGovernance(facts({ admission: { freshness: 'stale' } }))).toMatchObject({
       kind: 'reject',
       code: 'admission_stale',
     });
@@ -752,14 +752,14 @@ describe('State tool governance authorization facts', () => {
       context: { interactionMode: 'auto' },
     });
     const before = JSON.stringify(input);
-    const first = decideToolGovernanceV1(input);
-    const second = decideToolGovernanceV1(input);
+    const first = decideToolGovernance(input);
+    const second = decideToolGovernance(input);
     expect(JSON.stringify(input)).toBe(before);
     expect(first).toEqual(second);
     expect(Object.isFrozen(first)).toBe(true);
-    expect(decideToolGovernanceV1({})).toMatchObject({ code: 'invalid_facts' });
+    expect(decideToolGovernance({})).toMatchObject({ code: 'invalid_facts' });
     expect(
-      isValidToolGovernanceFactsV1(
+      isValidToolGovernanceFacts(
         facts({ context: { gates: { recoveryAdmission: 'bad' as never } } }),
       ),
     ).toBe(false);

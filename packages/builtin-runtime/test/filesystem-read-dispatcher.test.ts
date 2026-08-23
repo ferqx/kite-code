@@ -2,35 +2,35 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  type BuiltinOperationExecutionValueV1,
-  createBuiltinPreparedToolDispatchAdapterV1,
+  type BuiltinOperationExecutionValue,
+  createBuiltinPreparedToolDispatchAdapter,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  createBuiltinToolPipelineCallbacksV1,
-  digestCapabilityBindingValueV1,
-  verifyBuiltinWorkspaceFilesystemTerminalV1,
+  createBuiltinToolCatalogProjection,
+  createBuiltinToolPipelineCallbacks,
+  digestCapabilityBindingValue,
+  verifyBuiltinWorkspaceFilesystemTerminal,
 } from '@kite/builtin-runtime';
 import {
-  type BuiltinWorkspaceFilesystemRuntimeV1,
-  createBuiltinWorkspaceFilesystemReadDispatcherV1,
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
+  type BuiltinWorkspaceFilesystemRuntime,
+  createBuiltinWorkspaceFilesystemReadDispatcher,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
 } from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import type {
-  CapabilityToolKindV1,
-  ExecutionReceiptV1,
-  NonDynamicOperationIdV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineResolutionContextV1,
-  WorkspaceFilesystemDurableEvidencePortV1,
-  WorkspaceFilesystemIntentDraftV1,
-  WorkspaceFilesystemPersistedIntentV1,
-  WorkspaceFilesystemProviderV1,
+  CapabilityToolKind,
+  ExecutionReceipt,
+  NonDynamicOperationId,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineResolutionContext,
+  WorkspaceFilesystemDurableEvidencePort,
+  WorkspaceFilesystemIntentDraft,
+  WorkspaceFilesystemPersistedIntent,
+  WorkspaceFilesystemProvider,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 
 const FIXED_NOW = new Date('2026-08-22T00:00:00.000Z');
 const DYNAMIC_REVISION = 'd'.repeat(64);
@@ -50,12 +50,12 @@ function freezeDeep<Value>(value: Value, seen = new WeakSet<object>()): Value {
 
 function preparedFixture(name: 'read_file' | 'search_files' | 'search_content', args: object) {
   const workspace = realpathSync(process.cwd());
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot(), {
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const projection = createBuiltinToolCatalogProjection(registry.snapshot(), {
     turnContext: { workspace },
   });
-  const callbacks = createBuiltinToolPipelineCallbacksV1(projection);
-  const context: ToolPipelineResolutionContextV1 = {
+  const callbacks = createBuiltinToolPipelineCallbacks(projection);
+  const context: ToolPipelineResolutionContext = {
     currentTurnId: 'turn-fsr',
     availabilityContext: { workspace },
     bindings: [],
@@ -70,7 +70,7 @@ function preparedFixture(name: 'read_file' | 'search_files' | 'search_content', 
       stage: 'snapshot',
       toolCallId: `call-${name}`,
       name,
-      rawArguments: args as RuntimeJsonValueV1,
+      rawArguments: args as RuntimeJsonValue,
       argumentOrigin: 'model_public',
       createdAtTurnId: 'turn-fsr',
       modelMessageId: 'message-fsr',
@@ -98,7 +98,7 @@ function preparedFixture(name: 'read_file' | 'search_files' | 'search_content', 
     modelMessageId: resolved.value.call.modelMessageId,
     argumentOrigin: resolved.value.call.argumentOrigin,
     providerId: entry.providerId,
-    operationId: entry.operationId as NonDynamicOperationIdV1,
+    operationId: entry.operationId as NonDynamicOperationId,
     executionFamily: 'builtin' as const,
     executionMechanism: entry.executionMechanism,
     capabilityId: entry.capabilityId,
@@ -109,9 +109,9 @@ function preparedFixture(name: 'read_file' | 'search_files' | 'search_content', 
     argumentsDigest: validated.value.request.argumentsDigest,
     schemaDigest: validated.value.request.schemaDigest,
     effectiveEffectsDigest: classified.value.effectiveEffectsDigest,
-    policyDigest: digestCapabilityBindingValueV1({ name, kind: 'policy' }),
-    authorizationDigest: digestCapabilityBindingValueV1({ name, kind: 'authorization' }),
-    admissionDigest: digestCapabilityBindingValueV1({ name, kind: 'admission' }),
+    policyDigest: digestCapabilityBindingValue({ name, kind: 'policy' }),
+    authorizationDigest: digestCapabilityBindingValue({ name, kind: 'authorization' }),
+    admissionDigest: digestCapabilityBindingValue({ name, kind: 'admission' }),
     idempotencyKeyArgument: null,
     idempotencyKey: null,
     bindingId: null,
@@ -124,7 +124,7 @@ function preparedFixture(name: 'read_file' | 'search_files' | 'search_content', 
     nestedCapabilityRevision: null,
     nestedCatalogRevision: null,
     isDynamicMcp: false as const,
-    toolKind: entry.kind as CapabilityToolKindV1,
+    toolKind: entry.kind as CapabilityToolKind,
   };
   const prepared = freezeDeep({
     identity,
@@ -136,15 +136,15 @@ function preparedFixture(name: 'read_file' | 'search_files' | 'search_content', 
       facts: validated.value.domainData,
       binding: null,
     },
-  }) satisfies Readonly<PreparedToolInvocationV1>;
+  }) satisfies Readonly<PreparedToolInvocation>;
   expect(callbacks.verifyPreparedIdentity(prepared)).toEqual({ valid: true });
   return { workspace, projection, callbacks, prepared };
 }
 
 function acknowledgement(
-  prepared: Readonly<PreparedToolInvocationV1>,
+  prepared: Readonly<PreparedToolInvocation>,
   attempt: number,
-): Readonly<ToolPipelineAttemptAcknowledgementV1> {
+): Readonly<ToolPipelineAttemptAcknowledgement> {
   const identity = prepared.identity;
   return freezeDeep({
     acknowledged: true as const,
@@ -185,12 +185,12 @@ function acknowledgement(
 
 function durableEvidence(
   mode: 'valid' | 'throw' | 'invalid' | 'clone' = 'valid',
-): WorkspaceFilesystemDurableEvidencePortV1 & {
+): WorkspaceFilesystemDurableEvidencePort & {
   readonly calls: number;
-  readonly last: Readonly<WorkspaceFilesystemPersistedIntentV1> | undefined;
+  readonly last: Readonly<WorkspaceFilesystemPersistedIntent> | undefined;
 } {
   let calls = 0;
-  let last: Readonly<WorkspaceFilesystemPersistedIntentV1> | undefined;
+  let last: Readonly<WorkspaceFilesystemPersistedIntent> | undefined;
   const issued = new WeakSet<object>();
   return {
     get calls() {
@@ -200,11 +200,11 @@ function durableEvidence(
       return last;
     },
     persistIntent: async <
-      TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-      TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+      TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+      TRequest extends RuntimeJsonValue = RuntimeJsonValue,
     >(
-      draft: Readonly<WorkspaceFilesystemIntentDraftV1<TArguments, TRequest>>,
-    ): Promise<Readonly<WorkspaceFilesystemPersistedIntentV1<TArguments, TRequest>>> => {
+      draft: Readonly<WorkspaceFilesystemIntentDraft<TArguments, TRequest>>,
+    ): Promise<Readonly<WorkspaceFilesystemPersistedIntent<TArguments, TRequest>>> => {
       calls += 1;
       if (mode === 'throw') throw new Error('State intent persistence uncertain');
       const persisted = freezeDeep({
@@ -230,12 +230,12 @@ function durableEvidence(
 function runtimeFixture(workspace: string) {
   let providerCalls = 0;
   let grantId = 0;
-  const grants = new WorkspaceFilesystemGrantAuthorityV1({
+  const grants = new WorkspaceFilesystemGrantAuthority({
     now: () => FIXED_NOW.getTime(),
     idSource: () => `grant-${++grantId}`,
   });
-  const local = new LocalWorkspaceFilesystemProviderV1(grants.verifier());
-  const provider: WorkspaceFilesystemProviderV1 = {
+  const local = new LocalWorkspaceFilesystemProvider(grants.verifier());
+  const provider: WorkspaceFilesystemProvider = {
     observe: async (input) => {
       providerCalls += 1;
       return local.observe(input);
@@ -243,7 +243,7 @@ function runtimeFixture(workspace: string) {
     prepareMutation: (input) => local.prepareMutation(input),
     commitMutation: (input) => local.commitMutation(input),
   };
-  const runtime: BuiltinWorkspaceFilesystemRuntimeV1 = {
+  const runtime: BuiltinWorkspaceFilesystemRuntime = {
     canonicalWorkspace: workspace,
     provider,
     grants,
@@ -263,14 +263,14 @@ function runtimeFixture(workspace: string) {
 
 function createDispatcher(
   fixture: ReturnType<typeof preparedFixture>,
-  runtime: BuiltinWorkspaceFilesystemRuntimeV1,
-  durable: WorkspaceFilesystemDurableEvidencePortV1,
+  runtime: BuiltinWorkspaceFilesystemRuntime,
+  durable: WorkspaceFilesystemDurableEvidencePort,
 ) {
-  const protectedPathEvaluator = createProtectedPathEvaluatorV1({
+  const protectedPathEvaluator = createProtectedPathEvaluator({
     workspaceRoot: fixture.workspace,
     mode: 'deny',
   });
-  return createBuiltinWorkspaceFilesystemReadDispatcherV1({
+  return createBuiltinWorkspaceFilesystemReadDispatcher({
     prepared: fixture.prepared,
     verifyPreparedIdentity: fixture.callbacks.verifyPreparedIdentity,
     runtime,
@@ -285,7 +285,7 @@ function createDispatcher(
 function executionValue(
   path: string,
   result: Awaited<ReturnType<ReturnType<typeof createDispatcher>['dispatch']>>,
-): BuiltinOperationExecutionValueV1 {
+): BuiltinOperationExecutionValue {
   if (!result.ok || result.observation.kind !== 'read_file' || !result.filesystemObservation) {
     throw new Error('authentic read result missing');
   }
@@ -298,13 +298,13 @@ function executionValue(
     filesystemObservation: result.filesystemObservation,
     path,
     totalLines: result.observation.totalLines,
-  }) as unknown as BuiltinOperationExecutionValueV1;
+  }) as unknown as BuiltinOperationExecutionValue;
 }
 
 function receipt(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  value: BuiltinOperationExecutionValueV1,
-): ExecutionReceiptV1<BuiltinOperationExecutionValueV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+  value: BuiltinOperationExecutionValue,
+): ExecutionReceipt<BuiltinOperationExecutionValue> {
   return {
     invocationId: prepared.identity.invocationId,
     attemptId: prepared.identity.attemptId,
@@ -339,7 +339,7 @@ describe('Builtin Workspace filesystem read dispatcher', () => {
     expect(read.filesystemObservation).toBeDefined();
 
     const sourceValue = executionValue(operation.path, read);
-    const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+    const adapter = createBuiltinPreparedToolDispatchAdapter({
       projection: fixture.projection,
       verifyPreparedIdentity: fixture.callbacks.verifyPreparedIdentity,
       port: { dispatch: async () => receipt(fixture.prepared, sourceValue) },
@@ -351,24 +351,24 @@ describe('Builtin Workspace filesystem read dispatcher', () => {
     });
     const sourceObservation = sourceValue.filesystemObservation;
     const clonedObservation = (
-      terminal.structuredContent as Readonly<Record<string, RuntimeJsonValueV1>>
+      terminal.structuredContent as Readonly<Record<string, RuntimeJsonValue>>
     ).filesystemObservation;
     expect(clonedObservation).toEqual(sourceObservation);
     expect(clonedObservation).not.toBe(sourceObservation);
     expect(
-      verifyBuiltinWorkspaceFilesystemTerminalV1({
+      verifyBuiltinWorkspaceFilesystemTerminal({
         acknowledgement: durable.last!.acknowledgement,
         result: terminal,
       }),
     ).toMatchObject({ valid: true, observation: clonedObservation });
     expect(
-      verifyBuiltinWorkspaceFilesystemTerminalV1({
+      verifyBuiltinWorkspaceFilesystemTerminal({
         acknowledgement: freezeDeep(structuredClone(durable.last!.acknowledgement)),
         result: terminal,
       }),
     ).toEqual({ valid: false, code: 'acknowledgement_mismatch' });
     expect(
-      verifyBuiltinWorkspaceFilesystemTerminalV1({
+      verifyBuiltinWorkspaceFilesystemTerminal({
         acknowledgement: durable.last!.acknowledgement,
         result: freezeDeep(structuredClone(terminal)),
       }),
@@ -441,29 +441,29 @@ describe('Builtin Workspace filesystem read dispatcher', () => {
     if (!read.ok) throw new Error(read.failure.code);
     const authentic = executionValue('README.md', read);
     const dispatchValue = async (
-      prepared: Readonly<PreparedToolInvocationV1>,
-      value: BuiltinOperationExecutionValueV1,
+      prepared: Readonly<PreparedToolInvocation>,
+      value: BuiltinOperationExecutionValue,
     ) =>
-      createBuiltinPreparedToolDispatchAdapterV1({
+      createBuiltinPreparedToolDispatchAdapter({
         projection: fixture.projection,
         verifyPreparedIdentity: fixture.callbacks.verifyPreparedIdentity,
         port: { dispatch: async () => receipt(prepared, value) },
       }).dispatch(prepared);
 
-    const authenticRecord = authentic as unknown as Readonly<Record<string, RuntimeJsonValueV1>>;
+    const authenticRecord = authentic as unknown as Readonly<Record<string, RuntimeJsonValue>>;
     const { filesystemObservation: _missing, ...withoutObservation } = authenticRecord;
     void _missing;
     await expect(
       dispatchValue(
         fixture.prepared,
-        freezeDeep(withoutObservation) as unknown as BuiltinOperationExecutionValueV1,
+        freezeDeep(withoutObservation) as unknown as BuiltinOperationExecutionValue,
       ),
     ).rejects.toMatchObject({ code: 'observation_missing' });
 
     const forged = freezeDeep({
       ...authenticRecord,
       filesystemObservation: structuredClone(authenticRecord.filesystemObservation),
-    }) as unknown as BuiltinOperationExecutionValueV1;
+    }) as unknown as BuiltinOperationExecutionValue;
     await expect(dispatchValue(fixture.prepared, forged)).rejects.toMatchObject({
       code: 'observation_not_issued',
     });
@@ -479,12 +479,12 @@ describe('Builtin Workspace filesystem read dispatcher', () => {
         freezeDeep({
           ...authenticRecord,
           path: 'other.md',
-        }) as unknown as BuiltinOperationExecutionValueV1,
+        }) as unknown as BuiltinOperationExecutionValue,
       ),
     ).rejects.toMatchObject({ code: 'provider_evidence_mismatch' });
 
     let cloneEnumerationCount = 0;
-    const cloneBomb = new Proxy<Record<string, RuntimeJsonValueV1>>(
+    const cloneBomb = new Proxy<Record<string, RuntimeJsonValue>>(
       {},
       {
         ownKeys: () => {
@@ -497,7 +497,7 @@ describe('Builtin Workspace filesystem read dispatcher', () => {
     const cloneFailingValue = {
       ...authenticRecord,
       resultMeta: cloneBomb,
-    } as unknown as BuiltinOperationExecutionValueV1;
+    } as unknown as BuiltinOperationExecutionValue;
     await expect(dispatchValue(fixture.prepared, cloneFailingValue)).rejects.toThrow(
       'clone failed',
     );
@@ -511,7 +511,7 @@ describe('Builtin Workspace filesystem read dispatcher', () => {
     ]) {
       const source = await Bun.file(new URL(relative, import.meta.url)).text();
       expect(source).not.toMatch(/@kite\/(?:runtime-host|agent-kernel)|#app|@\/core/u);
-      expect(source).not.toContain('createRuntimeModuleRegistryV1');
+      expect(source).not.toContain('createRuntimeModuleRegistry');
       expect(source).not.toContain('RuntimeStore');
     }
   });

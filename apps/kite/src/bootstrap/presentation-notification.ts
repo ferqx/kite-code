@@ -1,7 +1,7 @@
-import { RUNTIME_NOTIFICATION_SCHEMA_V1, type RuntimeNotification } from '@kite/runtime-contract';
+import { RUNTIME_NOTIFICATION_SCHEMA_, type RuntimeNotification } from '@kite/runtime-contract';
 import type { RuntimeEvent } from './runtime/state-runtime';
 
-interface LegacyStreamIdentity {
+interface RuntimeStreamIdentity {
   readonly sessionId: string;
   readonly workId: string;
   readonly turnId: string;
@@ -11,14 +11,14 @@ interface LegacyStreamIdentity {
   readonly sequence: number;
 }
 
-export function projectRuntimeEphemeralNotificationV1(
+export function projectRuntimeEphemeralNotification(
   event: RuntimeEvent,
-  identity: LegacyStreamIdentity,
+  identity: RuntimeStreamIdentity,
 ): Extract<RuntimeNotification, { durability: 'ephemeral' }> | undefined {
   const envelope = {
-    schema: RUNTIME_NOTIFICATION_SCHEMA_V1,
+    schema: RUNTIME_NOTIFICATION_SCHEMA_,
     durability: 'ephemeral' as const,
-    compositionRevision: 'rav1-state-store',
+    compositionRevision: 'runtime-state-store',
     ...identity,
   };
   if (event.type === 'model.text_delta') {

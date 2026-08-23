@@ -5,23 +5,27 @@
   "sources": [
     {
       "path": "packages/runtime-host/src/state-storage.ts",
-      "sha256": "sha256:c6b8aafa05335bf554dd89bbe052917b8e197e707b7e74d082a2928039a1e3ad"
+      "sha256": "sha256:64e68da0eb6e6f7ff0c805bf53f2dbd804dfe4d5c9a207fe2dc60fbe0dea8424"
+    },
+    {
+      "path": "packages/runtime-storage-sqlite/src/adapter.ts",
+      "sha256": "sha256:62571d55e1cae722918364e7e72736e2810602b7e6867da14daded7c64be4213"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/index.ts",
-      "sha256": "sha256:b8255159134a5670a6a2882340be9ba2bce1ead0c45223fa26abe7030adbed95"
+      "sha256": "sha256:540f040f9355a57852e0c55c752f8872bba086a5f4e5a297e463fe6ab00a1600"
     },
     {
-      "path": "packages/runtime-storage-sqlite/src/sqlite-store.ts",
-      "sha256": "sha256:43e3b5859cbb5ebbd5732e11c719e78f02d4d9145dc83a8c75c6469f2e8794be"
+      "path": "packages/runtime-storage-sqlite/src/preflight.ts",
+      "sha256": "sha256:f5a744a7e0ce976eb1345f3e81befc7c15f8c32aed3a05755be76b68a2edbee4"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/store.ts",
-      "sha256": "sha256:3e027810098660d6e848e99912e49a4b1efb7f76b2c4683b3593ad5e238b4baa"
+      "sha256": "sha256:7a7d30560b1f09922cbe43be5677ef94f052224df001ef0dd2acda65de23741d"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:bb09efe9fdec25b4dfc49012ac43aa6b5e40a1756150354f969a043270ebe959"
+      "sha256": "sha256:344bb993aca5941cf3109d0f4ca8e38f9f4b3ba3742726599e7943da5a9174cd"
     }
   ],
   "facts": {
@@ -500,5 +504,5 @@
       }
     ]
   },
-  "digest": "sha256:1d815a7bd714293e1fb51d060a5a5ff2f091fb6540db67e5b7f45e157a42da0b"
+  "digest": "sha256:d52c8308a709f2afc782189c5556748fd89235cf9a49d41f1a2e1c7c2c5f4345"
 }

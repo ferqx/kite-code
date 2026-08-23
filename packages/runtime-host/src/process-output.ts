@@ -5,7 +5,7 @@ import { BoundedOutputBuffer, BoundedProgressLineBuffer } from './stream-output'
  * progress-line buffering. Runtime Host owns the generic process lifecycle;
  * callers retain only domain projection callbacks.
  */
-export async function readRuntimeHostProcessOutputV1(
+export async function readRuntimeHostProcessOutput(
   stream: ReadableStream<Uint8Array>,
   onLine?: (line: string) => void,
   stopSignal?: AbortSignal,

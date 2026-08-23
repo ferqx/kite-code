@@ -1,12 +1,12 @@
-import type { BuiltinShellIntentV1 } from '@kite/builtin-runtime';
-import type { RuntimeHostToolExecutionResultV1 } from '@kite/runtime-host';
-import type { AppApprovalBindingV1 } from './approval-binding';
+import type { BuiltinShellIntent } from '@kite/builtin-runtime';
+import type { RuntimeHostToolExecutionResult } from '@kite/runtime-host';
+import type { AppApprovalBinding } from './approval-binding';
 import type { SubAgentResult } from './subagent/types';
 
 /** App-narrowed result; Host owns the generic structural transport shape. */
-export type ToolExecutionResult = RuntimeHostToolExecutionResultV1<
+export type ToolExecutionResult = RuntimeHostToolExecutionResult<
   SubAgentResult,
-  BuiltinShellIntentV1
+  BuiltinShellIntent
 > & {
-  readonly approvalBinding?: AppApprovalBindingV1;
+  readonly approvalBinding?: AppApprovalBinding;
 };

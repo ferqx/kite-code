@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import type { SkillCatalogSnapshot } from '@kite/builtin-runtime';
 import {
-  createCapabilitySnapshotV1,
-  descriptorRevisionV1,
+  createCapabilitySnapshot,
+  descriptorRevision,
   evaluateSkillActivation,
   skillFrameInvalidationReason,
 } from '@kite/builtin-runtime';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { executeTestRuntimeToolsV1 } from '../helpers/runtime-model';
+import { executeTestRuntimeTools } from '../helpers/runtime-model';
 
 const catalog: SkillCatalogSnapshot = {
   revision: 'catalog-r1',
@@ -96,7 +96,7 @@ const catalog: SkillCatalogSnapshot = {
 };
 
 function activeState() {
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread',
     userId: 'user',
@@ -134,7 +134,7 @@ describe('Skill Workflow activation', () => {
     const result = evaluateSkillActivation({
       state: activeState(),
       catalog,
-      flags: getFeatureFlags({ features: { skillWorkflowV1: true, skillActivationV2: true } }),
+      flags: getFeatureFlags({ features: { skillWorkflow: true, skillActivation: true } }),
       request: {
         skillId: 'skill:read-report',
         input: { report: 'daily' },
@@ -157,7 +157,7 @@ describe('Skill Workflow activation', () => {
   });
 
   it('rejects malformed input and invalidates frames after revision drift', () => {
-    const flags = getFeatureFlags({ features: { skillWorkflowV1: true, skillActivationV2: true } });
+    const flags = getFeatureFlags({ features: { skillWorkflow: true, skillActivation: true } });
     const invalid = evaluateSkillActivation({
       state: activeState(),
       catalog,
@@ -204,7 +204,7 @@ describe('Skill Workflow activation', () => {
     };
     const descriptor = {
       ...descriptorWithoutRevision,
-      revision: descriptorRevisionV1(descriptorWithoutRevision),
+      revision: descriptorRevision(descriptorWithoutRevision),
     };
     state.capabilities.disclosures[descriptor.capabilityId] = {
       capabilityId: descriptor.capabilityId,
@@ -220,12 +220,12 @@ describe('Skill Workflow activation', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue = [...state.tools.queue, 'activate'];
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['activate'],
       skillCatalog: {
         ...catalog,
-        capabilities: createCapabilitySnapshotV1([descriptor]),
+        capabilities: createCapabilitySnapshot([descriptor]),
         entries: catalog.entries.map((entry) => ({ ...entry, descriptor })),
       },
       taskConfig: {
@@ -236,9 +236,9 @@ describe('Skill Workflow activation', () => {
         providerType: 'openai-compatible',
         sandbox: { enabled: false },
         features: {
-          toolSearchV1: true,
-          skillWorkflowV1: true,
-          skillActivationV2: true,
+          toolSearch: true,
+          skillWorkflow: true,
+          skillActivation: true,
         },
       },
     });

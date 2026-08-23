@@ -1,10 +1,10 @@
-import type { SandboxCapabilityDescriptorV1 } from './execution-capability-surface';
-import type { InProcessReadOnlyToolCatalogV1 } from './types';
+import type { SandboxCapabilityDescriptor } from './execution-capability-surface';
+import type { InProcessReadOnlyToolCatalog } from './types';
 
 /** Exact descriptor/effect binding required by a verified no-process fallback. */
-export function isDescriptorAdmittedByInProcessReadOnlyCatalogV1(input: {
-  catalog: InProcessReadOnlyToolCatalogV1;
-  descriptor: SandboxCapabilityDescriptorV1;
+export function isDescriptorAdmittedByInProcessReadOnlyCatalog(input: {
+  catalog: InProcessReadOnlyToolCatalog;
+  descriptor: SandboxCapabilityDescriptor;
 }): boolean {
   const { catalog, descriptor } = input;
   const contract = catalog.tools.find((tool) => tool.toolId === descriptor.capabilityId);

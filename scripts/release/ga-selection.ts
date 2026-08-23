@@ -8,7 +8,7 @@ import { canonicalJson, sha256DomainSeparated } from './canonical-json';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
-export const GA_STABLE_MILESTONE_BY_CAPABILITY_V1: Readonly<Record<ReleaseCapability, string>> =
+export const GA_STABLE_MILESTONE_BY_CAPABILITY_: Readonly<Record<ReleaseCapability, string>> =
   Object.freeze({
     builtin_read_tools: 'MS:LIMITED-SLO',
     builtin_write_tools: 'MS:LIMITED-SLO',
@@ -27,7 +27,7 @@ export const GA_STABLE_MILESTONE_BY_CAPABILITY_V1: Readonly<Record<ReleaseCapabi
     remote_telemetry: 'MS:LIMITED-SLO',
   });
 
-export const gaSelectionV1Schema = z
+export const gaSelectionSchema = z
   .object({
     version: z.literal(1),
     selectionId: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
@@ -45,9 +45,9 @@ export const gaSelectionV1Schema = z
   })
   .strict();
 
-export type GASelectionV1 = z.infer<typeof gaSelectionV1Schema>;
+export type GASelection = z.infer<typeof gaSelectionSchema>;
 
-export interface StableCapabilityDecisionV1 {
+export interface StableCapabilityDecision {
   capability: ReleaseCapability;
   stableMilestone: string;
   decisionDigest: `sha256:${string}`;
@@ -55,7 +55,7 @@ export interface StableCapabilityDecisionV1 {
   fresh: true;
 }
 
-const stableCapabilityDecisionV1Schema = z
+const stableCapabilityDecisionSchema = z
   .object({
     capability: releaseCapabilitySchema,
     stableMilestone: z.string().regex(/^MS:[A-Z0-9.-]+$/),
@@ -65,24 +65,24 @@ const stableCapabilityDecisionV1Schema = z
   })
   .strict();
 
-export interface GASelectionValidationV1 {
-  selection: GASelectionV1;
+export interface GASelectionValidation {
+  selection: GASelection;
   selectionDigest: `sha256:${string}`;
 }
 
-export interface GAGateRecordV1 {
-  schema: 'GAGateRecordV1';
+export interface GAGateRecord {
+  schema: 'GAGateRecord';
   status: 'blocked' | 'passed';
   gaEligible: boolean;
   selectionDigest: `sha256:${string}`;
-  candidate: GACandidateIdentityV1;
+  candidate: GACandidateIdentity;
   dependencyDecisionDigests: `sha256:${string}`[];
   reasonCodes: string[];
   forcedOffCapabilities: ReleaseCapability[];
   recordDigest: `sha256:${string}`;
 }
 
-const GA_DEPENDENCY_IDS_V1 = [
+const GA_DEPENDENCY_IDS_ = [
   'ms_limited_approved',
   'ms_limited_slo',
   'ms_2a_rc',
@@ -93,10 +93,10 @@ const GA_DEPENDENCY_IDS_V1 = [
   'maintainer_security_review',
   'production_support_set',
 ] as const;
-type GADependencyIdV1 = (typeof GA_DEPENDENCY_IDS_V1)[number];
+type GADependencyId = (typeof GA_DEPENDENCY_IDS_)[number];
 
-interface TrustedGADependencyVerifierV1 {
-  dependency: GADependencyIdV1;
+interface TrustedGADependencyVerifier {
+  dependency: GADependencyId;
   verifierIdentity: string;
   decisionDigest: `sha256:${string}`;
   artifactDigest: `sha256:${string}`;
@@ -107,27 +107,25 @@ interface TrustedGADependencyVerifierV1 {
   selectionDigest: `sha256:${string}`;
 }
 
-const TRUSTED_GA_DEPENDENCY_VERIFIERS_V1: readonly TrustedGADependencyVerifierV1[] = Object.freeze(
-  [],
-);
+const TRUSTED_GA_DEPENDENCY_VERIFIERS_: readonly TrustedGADependencyVerifier[] = Object.freeze([]);
 
-export interface GACandidateIdentityV1 {
+export interface GACandidateIdentity {
   artifactDigest: `sha256:${string}`;
   profileDigest: `sha256:${string}`;
   routeDigest: `sha256:${string}`;
   cohortDigest: `sha256:${string}`;
 }
 
-export interface GADependencyDecisionV1 extends GACandidateIdentityV1 {
-  schema: 'GADependencyDecisionV1';
-  dependency: GADependencyIdV1;
+export interface GADependencyDecision extends GACandidateIdentity {
+  schema: 'GADependencyDecision';
+  dependency: GADependencyId;
   status: 'passed';
   verifierIdentity: string;
   verifiedAt: string;
   decisionDigest: `sha256:${string}`;
 }
 
-const gaCandidateIdentityV1Schema = z
+const gaCandidateIdentitySchema = z
   .object({
     artifactDigest: digestSchema,
     profileDigest: digestSchema,
@@ -136,26 +134,26 @@ const gaCandidateIdentityV1Schema = z
   })
   .strict();
 
-const gaDependencyDecisionV1Schema = gaCandidateIdentityV1Schema.extend({
-  schema: z.literal('GADependencyDecisionV1'),
-  dependency: z.enum(GA_DEPENDENCY_IDS_V1),
+const gaDependencyDecisionSchema = gaCandidateIdentitySchema.extend({
+  schema: z.literal('GADependencyDecision'),
+  dependency: z.enum(GA_DEPENDENCY_IDS_),
   status: z.literal('passed'),
   verifierIdentity: z.string().min(1).max(256),
   verifiedAt: z.iso.datetime({ offset: true }),
   decisionDigest: digestSchema,
 });
 
-export function validateGaSelectionV1(
+export function validateGaSelection(
   rawSelection: unknown,
-  stableDecisions: readonly StableCapabilityDecisionV1[],
-): GASelectionValidationV1 {
-  const selection = gaSelectionV1Schema.parse(rawSelection);
+  stableDecisions: readonly StableCapabilityDecision[],
+): GASelectionValidation {
+  const selection = gaSelectionSchema.parse(rawSelection);
   const selected = new Set<ReleaseCapability>();
   const forcedOff = new Set(selection.forcedOffCapabilities);
   if (forcedOff.size !== selection.forcedOffCapabilities.length) {
     throw new Error('GA selection repeats a forced-off capability.');
   }
-  const parsedDecisions = z.array(stableCapabilityDecisionV1Schema).parse(stableDecisions);
+  const parsedDecisions = z.array(stableCapabilityDecisionSchema).parse(stableDecisions);
   const decisions = new Map(parsedDecisions.map((decision) => [decision.capability, decision]));
   if (decisions.size !== stableDecisions.length) {
     throw new Error('Stable capability decision registry repeats a capability.');
@@ -168,7 +166,7 @@ export function validateGaSelectionV1(
       );
     }
     selected.add(entry.capability);
-    if (entry.stableMilestone !== GA_STABLE_MILESTONE_BY_CAPABILITY_V1[entry.capability]) {
+    if (entry.stableMilestone !== GA_STABLE_MILESTONE_BY_CAPABILITY_[entry.capability]) {
       throw new Error(`GA capability ${entry.capability} cites an unregistered stable milestone.`);
     }
     const decision = decisions.get(entry.capability);
@@ -191,7 +189,7 @@ export function validateGaSelectionV1(
   if (selection.approvedBy.length !== new Set(selection.approvedBy).size) {
     throw new Error('GA selection repeats an approver identity.');
   }
-  const canonicalSelection: GASelectionV1 = {
+  const canonicalSelection: GASelection = {
     ...selection,
     selectedCapabilities: [...selection.selectedCapabilities].sort((left, right) =>
       left.capability.localeCompare(right.capability),
@@ -209,26 +207,26 @@ export function validateGaSelectionV1(
 }
 
 /** Gate-only projection. It cannot assemble or publish an artifact. */
-export function evaluateGaSelectionGateV1(input: {
-  validation: GASelectionValidationV1;
-  candidate: GACandidateIdentityV1;
-  dependencies: readonly GADependencyDecisionV1[];
-}): GAGateRecordV1 {
-  const candidate = gaCandidateIdentityV1Schema.parse(input.candidate) as GACandidateIdentityV1;
-  const dependencies = z.array(gaDependencyDecisionV1Schema).parse(input.dependencies);
+export function evaluateGaSelectionGate(input: {
+  validation: GASelectionValidation;
+  candidate: GACandidateIdentity;
+  dependencies: readonly GADependencyDecision[];
+}): GAGateRecord {
+  const candidate = gaCandidateIdentitySchema.parse(input.candidate) as GACandidateIdentity;
+  const dependencies = z.array(gaDependencyDecisionSchema).parse(input.dependencies);
   const reasons: string[] = [];
-  if (TRUSTED_GA_DEPENDENCY_VERIFIERS_V1.length === 0) {
+  if (TRUSTED_GA_DEPENDENCY_VERIFIERS_.length === 0) {
     reasons.push('authenticated_ga_dependency_verifier_not_configured');
   }
-  const decisions = new Map<GADependencyIdV1, GADependencyDecisionV1>();
+  const decisions = new Map<GADependencyId, GADependencyDecision>();
   for (const dependency of dependencies) {
     if (decisions.has(dependency.dependency)) {
       throw new Error(`GA dependency ${dependency.dependency} is duplicated.`);
     }
-    decisions.set(dependency.dependency, dependency as GADependencyDecisionV1);
+    decisions.set(dependency.dependency, dependency as GADependencyDecision);
     if (
-      TRUSTED_GA_DEPENDENCY_VERIFIERS_V1.length > 0 &&
-      !TRUSTED_GA_DEPENDENCY_VERIFIERS_V1.some(
+      TRUSTED_GA_DEPENDENCY_VERIFIERS_.length > 0 &&
+      !TRUSTED_GA_DEPENDENCY_VERIFIERS_.some(
         (trusted) =>
           trusted.dependency === dependency.dependency &&
           trusted.verifierIdentity === dependency.verifierIdentity &&
@@ -252,7 +250,7 @@ export function evaluateGaSelectionGateV1(input: {
       reasons.push(`dependency_identity_mismatch:${dependency.dependency}`);
     }
   }
-  const requireDependency = (dependency: GADependencyIdV1, missingReason: string): void => {
+  const requireDependency = (dependency: GADependencyId, missingReason: string): void => {
     if (!decisions.has(dependency)) reasons.push(missingReason);
   };
   requireDependency('ms_limited_approved', 'ms_limited_approved_missing');
@@ -278,9 +276,9 @@ export function evaluateGaSelectionGateV1(input: {
   if (input.validation.selection.approvedBy.length === 0)
     reasons.push('selection_approval_missing');
   reasons.sort();
-  const status: GAGateRecordV1['status'] = reasons.length === 0 ? 'passed' : 'blocked';
-  const withoutDigest: Omit<GAGateRecordV1, 'recordDigest'> = {
-    schema: 'GAGateRecordV1',
+  const status: GAGateRecord['status'] = reasons.length === 0 ? 'passed' : 'blocked';
+  const withoutDigest: Omit<GAGateRecord, 'recordDigest'> = {
+    schema: 'GAGateRecord',
     status,
     gaEligible: status === 'passed',
     selectionDigest: input.validation.selectionDigest,

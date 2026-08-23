@@ -401,25 +401,8 @@ export function loadMcpConfigCatalog(
         sourceKind: entry.source.kind,
         sourcePathDigest: pathDigest,
       });
-      const legacyKind =
-        entry.source.kind === 'project_mcp_json' ? 'project_mcp_json' : 'project_kite_code';
-      const legacyDigest = computeProjectMcpConfigDigest({
-        serverName: entry.name,
-        sourceKind: legacyKind,
-        rawConfig: entry.rawConfig,
-      });
-      const legacyId = projectApprovalRecordId({
-        workspaceKey,
-        serverName: entry.name,
-        sourceKind: legacyKind,
-        sourcePathDigest: pathDigest,
-      });
       const record =
-        store.records[id]?.configDigest === entry.configDigest
-          ? store.records[id]
-          : store.records[legacyId]?.configDigest === legacyDigest
-            ? store.records[legacyId]
-            : undefined;
+        store.records[id]?.configDigest === entry.configDigest ? store.records[id] : undefined;
       if (!record) {
         entry.approvalStatus = 'pending_approval';
       } else {

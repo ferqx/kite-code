@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   type AgentState,
   createInitialAgentState,
-  createToolRecoveryJournalV1,
+  createToolRecoveryJournal,
   type KernelEvent,
   type PlanDocument,
-  recordRecoveryFailureV1,
+  recordRecoveryFailure,
   reduceAgentState,
-  type ToolOutcomeV1,
+  type ToolOutcome,
 } from '../src';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -15,7 +15,7 @@ const EPOCH = '1970-01-01T00:00:00.000Z';
 const PLAN_DIGEST = '1ce84d5af6c0ef23c61c0dedc03f9bf007006af20e078c94a394898df1e033c2';
 const ROOT_STATE_MODULE = '@kite/runtime-host';
 const ROOT_ID_SOURCE_MODULE = '@kite/runtime-host';
-const STATE26_TEST_REDUCER_MODULE = '../../../scripts/support/runtime-state-reducer.ts';
+const STATE_TEST_REDUCER_MODULE = '../../../scripts/support/runtime-state-reducer.ts';
 const TOKEN_ESTIMATE = {
   systemTokens: 256,
   toolSchemaTokens: 128,
@@ -211,7 +211,7 @@ describe('State context and interaction reducer parity', () => {
       toolCalls: [{ id: 'call-1', name: 'read_file', args: { path: 'a' } }],
     });
 
-    const outcome: ToolOutcomeV1 = {
+    const outcome: ToolOutcome = {
       schemaVersion: 1,
       status: 'failed',
       failure: { kind: 'tool_invalid_args', detailCode: 'invalid_arguments' },
@@ -228,7 +228,7 @@ describe('State context and interaction reducer parity', () => {
     };
     state = {
       ...state,
-      toolRecovery: recordRecoveryFailureV1(createToolRecoveryJournalV1(IDENTITY_KEY), {
+      toolRecovery: recordRecoveryFailure(createToolRecoveryJournal(IDENTITY_KEY), {
         toolCallId: 'failed-call',
         toolName: 'read_file',
         invocationFingerprint: 'a'.repeat(64),
@@ -659,7 +659,7 @@ describe('State context and interaction reducer parity', () => {
         terminatesTurn: false,
         journal: true,
       },
-      outcomeV1: {
+      outcome: {
         schemaVersion: 1,
         status: 'failed',
         failure: { kind: 'provider_auth_required', detailCode: 'unknown' },
@@ -715,14 +715,14 @@ describe('State context and interaction reducer parity', () => {
   test('canonical model and provider-admission sequences match the State test adapter', async () => {
     const rootStateModule = await import(ROOT_STATE_MODULE);
     const rootIdSourceModule = await import(ROOT_ID_SOURCE_MODULE);
-    const rootReducerModule = await import(STATE26_TEST_REDUCER_MODULE);
-    const rootInitial = rootStateModule.createRuntimeHostStateInitialStateV1({
+    const rootReducerModule = await import(STATE_TEST_REDUCER_MODULE);
+    const rootInitial = rootStateModule.createRuntimeHostStateInitialState({
       threadId: 'thread-1',
       userId: 'user-1',
       workspace: '/workspace',
       interactionMode: 'accept_edits',
       recoveryIdentityKey: IDENTITY_KEY,
-      runtimeIdSource: rootIdSourceModule.createDeterministicRuntimeIdSourceV1({
+      runtimeIdSource: rootIdSourceModule.createDeterministicRuntimeIdSource({
         seed: 'context-interaction-parity',
         epochMs: 0,
       }),

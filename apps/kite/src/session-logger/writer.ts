@@ -26,8 +26,8 @@ import {
   sessionLogRoot,
   userKiteCodeDir,
 } from '#app/config/paths';
-import type { SessionLoggingPolicyV1 } from '#app/config/session-logging-policy';
-import { DEFAULT_SESSION_LOGGING_POLICY_V1 } from '#app/config/session-logging-policy';
+import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
+import { DEFAULT_SESSION_LOGGING_POLICY_ } from '#app/config/session-logging-policy';
 import {
   ActiveSessionLease,
   type ActiveSessionLeaseOptions,
@@ -36,7 +36,7 @@ import {
   tryAcquireSessionLogAdmission,
 } from './active-session-lease';
 import { runSessionLogMaintenance } from './retention';
-import type { SessionLoggingDiagnosticV1 } from './types';
+import type { SessionLoggingDiagnostic } from './types';
 
 // 每批次最多缓存的记录数
 const BATCH_SIZE = 50;
@@ -49,7 +49,7 @@ export interface SessionLogWriterOptions
       ActiveSessionLeaseOptions,
       'now' | 'processIdentity' | 'heartbeatIntervalMs' | 'staleAfterMs'
     > {
-  policy?: SessionLoggingPolicyV1;
+  policy?: SessionLoggingPolicy;
   maintenanceMaxEntries?: number;
   maintenanceDeadlineMs?: number;
 }
@@ -89,10 +89,10 @@ export class SessionLogWriter {
   private _bytesWritten = 0;
   private _createdFile = false;
   private _fileIdentity?: { dev: number; ino: number };
-  private readonly reportedDiagnostics = new Set<SessionLoggingDiagnosticV1['code']>();
-  private readonly onDiagnostic?: (diagnostic: SessionLoggingDiagnosticV1) => void;
+  private readonly reportedDiagnostics = new Set<SessionLoggingDiagnostic['code']>();
+  private readonly onDiagnostic?: (diagnostic: SessionLoggingDiagnostic) => void;
   private readonly append: AppendSessionLog;
-  private readonly policy: SessionLoggingPolicyV1;
+  private readonly policy: SessionLoggingPolicy;
   private readonly options: SessionLogWriterOptions;
   private readonly lease: ActiveSessionLease;
   private readonly leaseBytes: number;
@@ -102,7 +102,7 @@ export class SessionLogWriter {
     frontend: string,
     threadId: string,
     basename = 'events',
-    onDiagnostic?: (diagnostic: SessionLoggingDiagnosticV1) => void,
+    onDiagnostic?: (diagnostic: SessionLoggingDiagnostic) => void,
     append: AppendSessionLog = appendToDescriptor,
     options: SessionLogWriterOptions = {},
   ) {
@@ -112,7 +112,7 @@ export class SessionLogWriter {
     this.onDiagnostic = onDiagnostic;
     this.append = append;
     this.options = options;
-    this.policy = options.policy ?? DEFAULT_SESSION_LOGGING_POLICY_V1;
+    this.policy = options.policy ?? DEFAULT_SESSION_LOGGING_POLICY_;
     ensureSecureSessionLogDirectoryChain([userKiteCodeDir()], options);
     const root = sessionLogRoot();
     ensureSecureSessionLogDirectoryChain([root], options);
@@ -319,7 +319,7 @@ export class SessionLogWriter {
     });
   }
 
-  private reportDiagnostic(diagnostic: SessionLoggingDiagnosticV1): void {
+  private reportDiagnostic(diagnostic: SessionLoggingDiagnostic): void {
     if (this.reportedDiagnostics.has(diagnostic.code)) return;
     this.reportedDiagnostics.add(diagnostic.code);
     try {

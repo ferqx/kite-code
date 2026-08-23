@@ -1,9 +1,9 @@
 import type {
-  CanonicalJsonObjectV1,
-  CanonicalJsonValueV1,
-  CanonicalModelMessageV1,
-  ModelFinishReasonV1,
-  ModelSurfaceV1,
+  CanonicalJsonObject,
+  CanonicalJsonValue,
+  CanonicalModelMessage,
+  ModelFinishReason,
+  ModelSurface,
 } from '@kite/runtime-spi';
 import {
   generateText,
@@ -15,36 +15,36 @@ import {
   tool,
 } from 'ai';
 import type { SupportedChatModel } from './factory';
-import { canonicalModelJsonV1, computeModelSurfaceDigestV1 } from './surface-canonicalizer';
+import { canonicalModelJson, computeModelSurfaceDigest } from './surface-canonicalizer';
 
-export interface ModelTransportResponseV1 {
-  message: Extract<CanonicalModelMessageV1, { role: 'assistant' }>;
-  finishReason: ModelFinishReasonV1;
+export interface ModelTransportResponse {
+  message: Extract<CanonicalModelMessage, { role: 'assistant' }>;
+  finishReason: ModelFinishReason;
   usage: {
     inputTokens: number | null;
     outputTokens: number | null;
     totalTokens: number | null;
     cacheReadTokens: number | null;
   };
-  providerMetadata: CanonicalJsonObjectV1;
+  providerMetadata: CanonicalJsonObject;
 }
 
 /**
  * Exactly one Provider attempt compiled from the already-frozen Surface.
  * It owns no retry loop, admission decision, artifact write, or Runtime event.
  */
-export async function invokeModelTransportSingleAttemptV1(input: {
+export async function invokeModelTransportSingleAttempt(input: {
   model: SupportedChatModel;
-  surface: ModelSurfaceV1;
+  surface: ModelSurface;
   signal?: AbortSignal;
   onActivity?: () => void;
   onTextCumulative?: (text: string) => void;
   onReasoningCumulative?: (text: string, segmentId: string) => void;
   onReasoningCompleted?: (text: string, segmentId: string) => void;
-}): Promise<ModelTransportResponseV1> {
+}): Promise<ModelTransportResponse> {
   // Revalidate at the final boundary. A mutable caller cannot drift after
   // admission and still reach the Provider under the earlier identity.
-  computeModelSurfaceDigestV1(input.surface);
+  computeModelSurfaceDigest(input.surface);
   const request = requestFromSurface(input.surface, input.model, input.signal);
   if (input.surface.request.transport === 'generate') {
     return normalizeTransportResult(await generateText(request));
@@ -109,13 +109,13 @@ export async function invokeModelTransportSingleAttemptV1(input: {
 }
 
 function requestFromSurface(
-  surface: ModelSurfaceV1,
+  surface: ModelSurface,
   model: SupportedChatModel,
   signal: AbortSignal | undefined,
 ) {
   const providerOptions =
     surface.request.providerOptions.kind === 'inline'
-      ? (JSON.parse(canonicalModelJsonV1(surface.request.providerOptions.value)) as NonNullable<
+      ? (JSON.parse(canonicalModelJson(surface.request.providerOptions.value)) as NonNullable<
           Parameters<typeof generateText>[0]['providerOptions']
         >)
       : undefined;
@@ -147,7 +147,7 @@ function requestFromSurface(
   };
 }
 
-function toSdkMessage(message: CanonicalModelMessageV1): ModelMessage {
+function toSdkMessage(message: CanonicalModelMessage): ModelMessage {
   if (message.role === 'user') {
     return { role: 'user', content: message.content.map((part) => part.text).join('') || ' ' };
   }
@@ -194,8 +194,8 @@ function normalizeTransportResult(result: {
   finishReason?: string;
   reasoningText?: string;
   response?: { id?: string };
-}): ModelTransportResponseV1 {
-  const content: Extract<CanonicalModelMessageV1, { role: 'assistant' }>['content'][number][] = [];
+}): ModelTransportResponse {
+  const content: Extract<CanonicalModelMessage, { role: 'assistant' }>['content'][number][] = [];
   if (result.text) content.push({ type: 'text', text: result.text });
   for (const call of result.toolCalls ?? []) {
     content.push({
@@ -222,11 +222,11 @@ function normalizeTransportResult(result: {
   };
 }
 
-function canonicalJsonValue(value: unknown): CanonicalJsonValueV1 {
-  return JSON.parse(canonicalModelJsonV1(value)) as CanonicalJsonValueV1;
+function canonicalJsonValue(value: unknown): CanonicalJsonValue {
+  return JSON.parse(canonicalModelJson(value)) as CanonicalJsonValue;
 }
 
-function normalizeFinishReason(value: string | undefined): ModelFinishReasonV1 {
+function normalizeFinishReason(value: string | undefined): ModelFinishReason {
   switch (value) {
     case 'stop':
       return 'stop';

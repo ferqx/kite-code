@@ -1,6 +1,6 @@
 {
   "format": "kite.runtime-modularization-manifest.v1",
-  "currentTask": "RAV1-06",
+  "currentTask": "RA-06",
   "kind": "legacy-delete",
   "rules": [
     {
@@ -10,7 +10,7 @@
       "specifier": "@/core/",
       "match": "prefix",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "app-direct-sqlite",
@@ -19,7 +19,7 @@
       "specifier": "bun:sqlite",
       "match": "exact",
       "status": "deleted",
-      "deleteTask": "RMV1-04"
+      "deleteTask": "RM-04"
     },
     {
       "id": "root-runtime-exports",
@@ -28,35 +28,35 @@
       "specifier": "./core/runtime/",
       "match": "prefix",
       "status": "deleted",
-      "deleteTask": "RMV1-03"
+      "deleteTask": "RM-03"
     },
     {
       "id": "root-runtime-shim",
       "kind": "file",
       "file": "src/index.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "tui-session-runtime",
       "kind": "file",
       "file": "src/app/tui/session-manager.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-03"
+      "deleteTask": "RM-03"
     },
     {
       "id": "tui-rewind-direct-store",
       "kind": "file",
       "file": "src/app/tui/hooks/useRewindHandler.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-03"
+      "deleteTask": "RM-03"
     },
     {
       "id": "tui-run-agent-composition",
       "kind": "file",
       "file": "src/app/tui/run-agent.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-03"
+      "deleteTask": "RM-03"
     },
     {
       "id": "runtime-kernel-control",
@@ -64,7 +64,7 @@
       "file": "src/core/runtime/agent.ts",
       "symbol": "RuntimeKernelControl",
       "status": "deleted",
-      "deleteTask": "RMV1-07"
+      "deleteTask": "RM-07"
     },
     {
       "id": "runtime-agent-loop",
@@ -72,7 +72,7 @@
       "file": "src/core/runtime/agent.ts",
       "symbol": "runRuntimeAgent",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "concrete-agent-kernel-factory",
@@ -80,7 +80,7 @@
       "file": "src/core/runtime/kernel.ts",
       "symbol": "createAgentKernel",
       "status": "deleted",
-      "deleteTask": "RMV1-07"
+      "deleteTask": "RM-07"
     },
     {
       "id": "concrete-runtime-store-factory",
@@ -88,7 +88,7 @@
       "file": "src/core/runtime/store.ts",
       "symbol": "createRuntimeStore",
       "status": "deleted",
-      "deleteTask": "RMV1-04"
+      "deleteTask": "RM-04"
     },
     {
       "id": "legacy-v4-storage-driver",
@@ -96,7 +96,7 @@
       "file": "src/core/runtime/store.ts",
       "symbol": "openLegacyV4StorageDriver",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "central-runtime-effect-executor",
@@ -104,14 +104,14 @@
       "file": "src/core/runtime/executor.ts",
       "symbol": "createRuntimeEffectExecutor",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "central-tool-controller",
       "kind": "file",
       "file": "src/core/controllers/tool-controller.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "central-tool-executor-symbol",
@@ -119,14 +119,14 @@
       "file": "src/core/controllers/tool-controller.ts",
       "symbol": "executeRuntimeTools",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-tool-runner",
       "kind": "file",
       "file": "src/core/harness/tool-runner.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-tool-runner-symbol",
@@ -134,14 +134,14 @@
       "file": "src/core/harness/tool-runner.ts",
       "symbol": "invokeGovernedTool",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "central-builtin-registry",
       "kind": "file",
       "file": "src/core/tools/registry/builtins.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "concrete-tool-dispatch",
@@ -149,7 +149,7 @@
       "file": "src/core/tools/registry/dispatch.ts",
       "symbol": "dispatchRegisteredTool",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "central-agent-tools",
@@ -157,7 +157,7 @@
       "file": "src/core/tools/definitions.ts",
       "symbol": "createAgentTools",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "code-agent-tools-alias",
@@ -165,7 +165,7 @@
       "file": "src/core/tools/definitions.ts",
       "symbol": "createCodeAgentTools",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "plan-agent-tools-alias",
@@ -173,7 +173,7 @@
       "file": "src/core/tools/definitions.ts",
       "symbol": "createPlanAgentTools",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "scheduler-tool-name-allowlist",
@@ -181,7 +181,7 @@
       "file": "src/core/runtime/scheduler.ts",
       "symbol": "PARALLEL_READ_TOOL_NAMES",
       "status": "deleted",
-      "deleteTask": "RMV1-09"
+      "deleteTask": "RM-09"
     },
     {
       "id": "scheduler-task-name-branch",
@@ -189,7 +189,7 @@
       "file": "src/core/runtime/scheduler.ts",
       "contains": "call.name !== 'task'",
       "status": "deleted",
-      "deleteTask": "RMV1-09"
+      "deleteTask": "RM-09"
     },
     {
       "id": "runner-shell-name-branch",
@@ -197,7 +197,7 @@
       "file": "src/core/runtime/runner.ts",
       "contains": "call?.name !== 'shell_execute'",
       "status": "deleted",
-      "deleteTask": "RMV1-09"
+      "deleteTask": "RM-09"
     },
     {
       "id": "core-tool-search-concrete-executor",
@@ -205,7 +205,7 @@
       "file": "src/core/tools/registry/builtins/tool-search.ts",
       "contains": "execute: async",
       "status": "deleted",
-      "deleteTask": "RMV1-10"
+      "deleteTask": "RM-10"
     },
     {
       "id": "core-tool-search-live-catalog-import",
@@ -214,7 +214,7 @@
       "specifier": "@/core/capabilities/search",
       "match": "exact",
       "status": "deleted",
-      "deleteTask": "RMV1-10"
+      "deleteTask": "RM-10"
     },
     {
       "id": "core-tool-search-live-execution-context",
@@ -222,7 +222,7 @@
       "file": "src/core/tools/registry/spec.ts",
       "contains": "toolSearch?: {",
       "status": "deleted",
-      "deleteTask": "RMV1-10"
+      "deleteTask": "RM-10"
     },
     {
       "id": "legacy-runtime-tool-search-operation",
@@ -230,7 +230,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:tool_search'",
       "status": "deleted",
-      "deleteTask": "RMV1-10"
+      "deleteTask": "RM-10"
     },
     {
       "id": "executor-task-name-branch",
@@ -238,7 +238,7 @@
       "file": "src/core/runtime/executor.ts",
       "contains": "?.name === 'task'",
       "status": "deleted",
-      "deleteTask": "RMV1-14"
+      "deleteTask": "RM-14"
     },
     {
       "id": "controller-task-name-branch",
@@ -246,111 +246,111 @@
       "file": "src/core/controllers/tool-controller.ts",
       "contains": "call.name === 'task'",
       "status": "deleted",
-      "deleteTask": "RMV1-14"
+      "deleteTask": "RM-14"
     },
     {
       "id": "installed-model-composition",
       "kind": "symbol",
       "file": "src/core/model/invocation-composition.ts",
-      "symbol": "resolveInstalledModelInvocationRuntimeV1",
+      "symbol": "resolveInstalledModelInvocationRuntime",
       "status": "deleted",
-      "deleteTask": "RMV1-15"
+      "deleteTask": "RM-15"
     },
     {
       "id": "local-subagent-composition",
       "kind": "symbol",
       "file": "src/core/subagent/composition.ts",
-      "symbol": "createGovernedLocalSubagentCompositionV1",
+      "symbol": "createGovernedLocalSubagentComposition",
       "status": "deleted",
-      "deleteTask": "RMV1-14"
+      "deleteTask": "RM-14"
     },
     {
       "id": "local-sandbox-composition",
       "kind": "symbol",
       "file": "src/core/execution/sandbox-execution/composition.ts",
-      "symbol": "createGovernedLocalSandboxExecutorV1",
+      "symbol": "createGovernedLocalSandboxExecutor",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "legacy-runtime-access",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeAccess.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-cli-runtime-handler",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/legacy/LegacyCliRuntimeHandler.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-tui-runtime-handler",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/legacy/LegacyTuiRuntimeHandler.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-session-manager",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/legacy/LegacySessionManager.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-run-agent",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/legacy/legacy-run-agent.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-presentation-notification",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/legacy/LegacyPresentationNotification.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "planned-legacy-authorized-execution-adapter",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/legacy/LegacyAuthorizedExecutionAdapter.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-runtime-module",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "placeholder-runtime-module-boundary-type",
       "kind": "symbol",
       "file": "packages/runtime-spi/src/index.ts",
-      "symbol": "RuntimeModuleBoundaryV1",
+      "symbol": "RuntimeModuleBoundary",
       "status": "deleted",
-      "deleteTask": "RMV1-08"
+      "deleteTask": "RM-08"
     },
     {
       "id": "placeholder-runtime-module-boundary-factory",
       "kind": "symbol",
       "file": "packages/runtime-spi/src/index.ts",
-      "symbol": "defineRuntimeModuleBoundaryV1",
+      "symbol": "defineRuntimeModuleBoundary",
       "status": "deleted",
-      "deleteTask": "RMV1-08"
+      "deleteTask": "RM-08"
     },
     {
       "id": "placeholder-builtin-runtime-boundary-factory",
       "kind": "symbol",
       "file": "packages/builtin-runtime/src/index.ts",
-      "symbol": "createBuiltinRuntimeBoundaryModuleV1",
+      "symbol": "createBuiltinRuntimeBoundaryModule",
       "status": "deleted",
-      "deleteTask": "RMV1-08"
+      "deleteTask": "RM-08"
     },
     {
       "id": "host-legacy-bridge-factory-bypass",
@@ -358,7 +358,7 @@
       "file": "packages/runtime-host/src/execution-bridge.ts",
       "symbol": "RuntimeHostExecutionBridgeFactory",
       "status": "deleted",
-      "deleteTask": "RMV1-08"
+      "deleteTask": "RM-08"
     },
     {
       "id": "host-create-legacy-access-bypass",
@@ -366,7 +366,7 @@
       "file": "packages/runtime-host/src/**",
       "contains": "createLegacyAccess",
       "status": "deleted",
-      "deleteTask": "RMV1-08"
+      "deleteTask": "RM-08"
     },
     {
       "id": "legacy-runtime-rmv1-11-web-operation",
@@ -374,7 +374,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:web_fetch'",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-runtime-rmv1-11-list-resources-operation",
@@ -382,7 +382,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:list_mcp_resources'",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-runtime-rmv1-11-list-tools-operation",
@@ -390,7 +390,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:list_mcp_tools'",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-runtime-rmv1-11-read-resource-operation",
@@ -398,7 +398,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:read_mcp_resource'",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-runtime-rmv1-11-dynamic-mcp-operation",
@@ -406,7 +406,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'mcp:dynamic_tool'",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-runtime-rmv1-11-read-skill-operation",
@@ -414,7 +414,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:read_skill_reference'",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-runtime-rmv1-11-complete-skill-operation",
@@ -422,7 +422,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:complete_skill'",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-runtime-rmv1-11-activate-skill-operation",
@@ -430,7 +430,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:activate_skill'",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-direct-mcp-runner-handler",
@@ -438,7 +438,7 @@
       "file": "src/core/harness/tool-runner.ts",
       "contains": "if (isMcpRequest(request) && !input.runtimeCapability)",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-mcp-invocation-runner-shape",
@@ -446,7 +446,7 @@
       "file": "src/core/harness/tool-runner.ts",
       "contains": "mcpInvocation?: {",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-web-fetch-concrete-executor",
@@ -454,7 +454,7 @@
       "file": "src/core/tools/registry/builtins/web-fetch.ts",
       "contains": "execute: async",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-mcp-inventory-concrete-executors",
@@ -462,7 +462,7 @@
       "file": "src/core/tools/registry/builtins/mcp-inventory.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-skill-tool-concrete-executors",
@@ -470,7 +470,7 @@
       "file": "src/core/tools/registry/builtins/skill-runtime.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-skill-workflow-implementation",
@@ -478,7 +478,7 @@
       "file": "src/core/skills/workflow.ts",
       "contains": "parseDocument",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-skill-lifecycle-implementation",
@@ -486,7 +486,7 @@
       "file": "src/core/skills/lifecycle.ts",
       "contains": "lstatSync",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-mcp-manager-implementation",
@@ -494,7 +494,7 @@
       "file": "src/core/mcp/manager.ts",
       "contains": "private readonly records",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-mcp-supervisor-implementation",
@@ -502,7 +502,7 @@
       "file": "src/core/mcp/supervisor.ts",
       "contains": "private readonly entries",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-mcp-auth-implementation",
@@ -510,7 +510,7 @@
       "file": "src/core/mcp/auth-coordinator.ts",
       "contains": "async authenticate(",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-mcp-sdk-imports",
@@ -519,7 +519,7 @@
       "specifier": "@modelcontextprotocol/sdk",
       "match": "prefix",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-web-extractor-implementation",
@@ -527,7 +527,7 @@
       "file": "src/core/web/extractor.ts",
       "contains": "async function parseInWorker(",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-web-ssrf-implementation",
@@ -535,14 +535,14 @@
       "file": "src/core/web/ssrf.ts",
       "contains": "const BLOCKED_HOSTS",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "core-web-worker-implementation",
       "kind": "file",
       "file": "src/core/web/extractor-worker.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-11"
+      "deleteTask": "RM-11"
     },
     {
       "id": "legacy-runtime-rmv1-12-read-file-operation",
@@ -550,7 +550,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:read_file'",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "legacy-runtime-rmv1-12-search-content-operation",
@@ -558,7 +558,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:search_content'",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "legacy-runtime-rmv1-12-search-files-operation",
@@ -566,7 +566,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:search_files'",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "legacy-runtime-rmv1-12-write-file-operation",
@@ -574,7 +574,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:write_file'",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "legacy-runtime-rmv1-12-edit-file-operation",
@@ -582,7 +582,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:edit_file'",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "legacy-runtime-rmv1-12-git-inspect-operation",
@@ -590,7 +590,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:git_inspect'",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-read-file-concrete-executor",
@@ -598,7 +598,7 @@
       "file": "src/core/tools/registry/builtins/read-file.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-search-content-concrete-executor",
@@ -606,7 +606,7 @@
       "file": "src/core/tools/registry/builtins/search-content.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-search-files-concrete-executor",
@@ -614,7 +614,7 @@
       "file": "src/core/tools/registry/builtins/search-files.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-write-file-concrete-executor",
@@ -622,7 +622,7 @@
       "file": "src/core/tools/registry/builtins/write-file.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-edit-file-concrete-executor",
@@ -630,7 +630,7 @@
       "file": "src/core/tools/registry/builtins/edit-file.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-git-inspect-concrete-executor",
@@ -638,55 +638,55 @@
       "file": "src/core/tools/registry/builtins/git.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "protocol-filesystem-provider-implementation",
       "kind": "text",
       "file": "src/protocol/workspace-filesystem-provider.ts",
-      "contains": "interface WorkspaceFilesystemProviderV1",
+      "contains": "interface WorkspaceFilesystemProvider",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "protocol-git-contract-implementation",
       "kind": "text",
       "file": "src/protocol/git.ts",
-      "contains": "interface GitInspectRequestV1",
+      "contains": "interface GitInspectRequest",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-descriptor-relative-implementation",
       "kind": "text",
       "file": "src/core/execution/workspace-filesystem/descriptor-relative.ts",
-      "contains": "function openOrCreateDirectoryChainAtV1",
+      "contains": "function openOrCreateDirectoryChainAt",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-local-filesystem-provider-implementation",
       "kind": "text",
       "file": "src/core/execution/workspace-filesystem/local-provider.ts",
-      "contains": "class LocalWorkspaceFilesystemProviderV1",
+      "contains": "class LocalWorkspaceFilesystemProvider",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-filesystem-evidence-implementation",
       "kind": "text",
       "file": "src/core/capabilities/workspace-filesystem-evidence.ts",
-      "contains": "function validateWorkspaceFilesystemIntentRecordV1",
+      "contains": "function validateWorkspaceFilesystemIntentRecord",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-filesystem-grant-authority-implementation",
       "kind": "text",
       "file": "src/core/execution/workspace-filesystem/grant-authority.ts",
-      "contains": "class WorkspaceFilesystemGrantAuthorityV1",
+      "contains": "class WorkspaceFilesystemGrantAuthority",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-filesystem-diff-implementation",
@@ -694,23 +694,23 @@
       "file": "src/core/tools/diff.ts",
       "contains": "function computeLineDiff",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-git-broker-implementation",
       "kind": "text",
       "file": "src/core/git/broker.ts",
-      "contains": "function createGitBrokerV1",
+      "contains": "function createGitBroker",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "core-git-qualification-implementation",
       "kind": "text",
       "file": "src/core/git/qualification.ts",
-      "contains": "function qualifyBrokeredGitNativeDenyV1",
+      "contains": "function qualifyBrokeredGitNativeDeny",
       "status": "deleted",
-      "deleteTask": "RMV1-12"
+      "deleteTask": "RM-12"
     },
     {
       "id": "legacy-runtime-rmv1-13-shell-operation",
@@ -718,7 +718,7 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:shell_execute'",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "core-shell-concrete-executor",
@@ -726,31 +726,31 @@
       "file": "src/core/tools/registry/builtins/shell-execute.ts",
       "contains": "defineExecutableTool",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "core-local-sandbox-provider-implementation",
       "kind": "text",
       "file": "src/core/execution/sandbox-execution/local-provider.ts",
-      "contains": "class LocalSandboxExecutionProviderV1",
+      "contains": "class LocalSandboxExecutionProvider",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "core-sandbox-grant-authority-implementation",
       "kind": "text",
       "file": "src/core/execution/sandbox-execution/grant-authority.ts",
-      "contains": "class SandboxExecutionGrantAuthorityV1",
+      "contains": "class SandboxExecutionGrantAuthority",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "protocol-sandbox-provider-implementation",
       "kind": "text",
       "file": "src/protocol/sandbox-execution-provider.ts",
-      "contains": "interface SandboxExecutionProviderV1",
+      "contains": "interface SandboxExecutionProvider",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "core-shell-process-spawn-owner",
@@ -758,7 +758,7 @@
       "file": "src/core/tools/shell.ts",
       "contains": "Bun.spawn(",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "core-posix-supervisor-spawn-owner",
@@ -766,7 +766,7 @@
       "file": "src/core/execution/sandbox-execution/posix-supervisor.ts",
       "contains": "Bun.spawn(",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "core-windows-supervisor-spawn-owner",
@@ -774,51 +774,51 @@
       "file": "src/core/execution/sandbox-execution/windows-runtime.ts",
       "contains": "Bun.spawn(",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "legacy-app-sandbox-composition-source",
       "kind": "file",
       "file": "src/app/sandbox/composition.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "legacy-app-acknowledged-host-shell-source",
       "kind": "file",
       "file": "src/app/sandbox/acknowledged-host-shell.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-13"
+      "deleteTask": "RM-13"
     },
     {
       "id": "retained-runtime-agent-loop",
       "kind": "symbol",
       "file": "src/core/runtime/agent.ts",
-      "symbol": "executeRetainedRuntimeTurnV1",
+      "symbol": "executeRetainedRuntimeTurn",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "state25-core-kernel-coordinator",
       "kind": "symbol",
       "file": "src/core/runtime/kernel.ts",
-      "symbol": "openLegacyKernelCoordinatorV1",
+      "symbol": "openLegacyKernelCoordinator",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "retained-app-session-coordinator",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/runtime/RetainedSessionCoordinator.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "retained-app-effect-coordinator",
       "kind": "file",
       "file": "apps/kite/src/bootstrap/runtime/retained-effect-coordinator.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "legacy-tui-context-compaction-bridge",
@@ -826,21 +826,21 @@
       "file": "apps/kite/src/bootstrap/legacy/LegacySessionManager.ts",
       "contains": "handleContextCompactionFromHost",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "core-tool-outcome-compatibility",
       "kind": "file",
       "file": "src/core/runtime/tool-outcome.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     },
     {
       "id": "core-tool-recovery-compatibility",
       "kind": "file",
       "file": "src/core/runtime/tool-recovery-journal.ts",
       "status": "deleted",
-      "deleteTask": "RMV1-16"
+      "deleteTask": "RM-16"
     }
   ]
 }

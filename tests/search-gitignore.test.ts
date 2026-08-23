@@ -11,31 +11,31 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
+  workspaceFilesystemProtectedBoundaryDigest,
 } from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import type {
-  WorkspaceFilesystemObserveObservationV1,
-  WorkspaceFilesystemObserveOperationV1,
+  WorkspaceFilesystemObserveObservation,
+  WorkspaceFilesystemObserveOperation,
 } from '@kite/runtime-spi';
 
 async function builtinFilesystemFixture(workspace: string) {
-  const authority = new WorkspaceFilesystemGrantAuthorityV1({
+  const authority = new WorkspaceFilesystemGrantAuthority({
     idSource: (() => {
       let id = 0;
       return () => `search-ignore-grant-${++id}`;
     })(),
   });
-  const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+  const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
   const unsignedBoundary = {
     schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
     ...structuredClone(evaluator.projectFilesystemBoundary()),
   };
   const protectedBoundary = {
     ...unsignedBoundary,
-    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsignedBoundary),
   };
   const binding = {
     threadId: 'search-ignore-thread',
@@ -51,11 +51,11 @@ async function builtinFilesystemFixture(workspace: string) {
     protectedPathRevision: 'search-ignore-protected-path',
     approvalSummary: 'search ignore test fixture',
   };
-  const provider = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+  const provider = new LocalWorkspaceFilesystemProvider(authority.verifier());
   return async (
-    operation: WorkspaceFilesystemObserveOperationV1,
+    operation: WorkspaceFilesystemObserveOperation,
   ): Promise<
-    | { readonly ok: true; readonly observation: WorkspaceFilesystemObserveObservationV1 }
+    | { readonly ok: true; readonly observation: WorkspaceFilesystemObserveObservation }
     | { readonly ok: false; readonly failure: { readonly code: string; readonly message: string } }
   > =>
     provider.observe({
@@ -70,7 +70,7 @@ async function builtinFilesystemFixture(workspace: string) {
 
 async function observeWorkspaceFilesystem(
   workspace: string,
-  operation: WorkspaceFilesystemObserveOperationV1,
+  operation: WorkspaceFilesystemObserveOperation,
 ) {
   const observe = await builtinFilesystemFixture(workspace);
   return observe(operation);

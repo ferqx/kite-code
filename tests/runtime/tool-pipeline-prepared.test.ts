@@ -1,46 +1,46 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinRuntimeToolPipelineCallbacksV1,
-  createBuiltinToolCatalogProjectionV1,
-  createCapabilityBindingV1,
-  digestCapabilityBindingValueV1,
-  digestCapabilityValueV1,
+  createBuiltinRuntimeToolPipelineCallbacks,
+  createBuiltinToolCatalogProjection,
+  createCapabilityBinding,
+  digestCapabilityBindingValue,
+  digestCapabilityValue,
 } from '@kite/builtin-runtime';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
-  createRuntimeHostStateToolGovernanceV1,
-  runtimeHostStateCreateApprovalBindingDigestV1,
+  createRuntimeHostStateToolGovernance,
+  runtimeHostStateCreateApprovalBindingDigest,
 } from '@kite/runtime-host';
 import type {
-  CapabilityEffectsV1,
-  CapabilityPolicyEffectsV1,
-  ClassifiedInvocationV1,
-  DynamicMcpSubjectIdentityV1,
-  DynamicMcpToolTargetV1,
-  NonDynamicOperationIdV1,
-  NonDynamicToolTargetV1,
-  ToolCallSnapshotV1,
-  ToolPipelineCapabilityBindingV1,
-  ToolPipelineGovernanceProjectionV1,
-  ToolPipelineResolutionContextV1,
+  CapabilityEffects,
+  CapabilityPolicyEffects,
+  ClassifiedInvocation,
+  DynamicMcpSubjectIdentity,
+  DynamicMcpToolTarget,
+  NonDynamicOperationId,
+  NonDynamicToolTarget,
+  ToolCallSnapshot,
+  ToolPipelineCapabilityBinding,
+  ToolPipelineGovernanceProjection,
+  ToolPipelineResolutionContext,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 import {
-  APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
-  type AppPreparedToolInvocationBuilderInputV1,
-  type AppPreparedToolInvocationBuildV1,
-  type AppToolPipelineGovernanceDecisionV1,
-  type AppToolPipelineGovernanceFactsV1,
-  createAppPreparedToolInvocationV1,
+  APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
+  type AppPreparedToolInvocationBuild,
+  type AppPreparedToolInvocationBuilderInput,
+  type AppToolPipelineGovernanceDecision,
+  type AppToolPipelineGovernanceFacts,
+  createAppPreparedToolInvocation,
 } from '#app/bootstrap/runtime/tool-pipeline-prepared';
 
-const EFFECTS: CapabilityEffectsV1 = Object.freeze({
+const EFFECTS: CapabilityEffects = Object.freeze({
   filesystem: 'write',
   network: 'none',
   externalState: 'none',
 });
-const EFFECTS_DIGEST = digestCapabilityValueV1(EFFECTS);
+const EFFECTS_DIGEST = digestCapabilityValue(EFFECTS);
 const CAPABILITY_REVISION = 'capability-revision-1';
 const DESCRIPTOR_REVISION = 'descriptor-revision-1';
 const PARSER_REVISION = 'parser-revision-1';
@@ -49,28 +49,28 @@ const SCHEMA_DIGEST = 'schema-digest-1';
 const BUILTIN_REVISION = 'builtin-projection-revision-1';
 const DYNAMIC_REVISION = 'dynamic-catalog-revision-1';
 
-type ArgumentsV1 = Record<string, string>;
-type FixtureV1 = {
-  readonly input: AppPreparedToolInvocationBuilderInputV1<ArgumentsV1>;
-  readonly originalArguments: ArgumentsV1;
-  readonly target: Readonly<DynamicMcpToolTargetV1 | NonDynamicToolTargetV1>;
+type Arguments = Record<string, string>;
+type Fixture = {
+  readonly input: AppPreparedToolInvocationBuilderInput<Arguments>;
+  readonly originalArguments: Arguments;
+  readonly target: Readonly<DynamicMcpToolTarget | NonDynamicToolTarget>;
 };
 
 function fixture(
   options: {
     readonly dynamic?: boolean;
     readonly idempotency?: boolean;
-    readonly policyEffects?: Readonly<CapabilityPolicyEffectsV1>;
+    readonly policyEffects?: Readonly<CapabilityPolicyEffects>;
   } = {},
-): FixtureV1 {
+): Fixture {
   const dynamic = options.dynamic === true;
   const idempotency = options.idempotency === true;
   const policyEffects = options.policyEffects ?? {};
-  const operationId = 'builtin:write_file' as NonDynamicOperationIdV1;
+  const operationId = 'builtin:write_file' as NonDynamicOperationId;
   const capabilityId = dynamic ? 'mcp:server/write_file' : 'builtin:write_file';
   const exposedToolName = dynamic ? 'mcp__server__write_file' : 'write_file';
-  const originalArguments: ArgumentsV1 = dynamic ? { query: 'hello' } : { path: 'README.md' };
-  const binding: ToolPipelineCapabilityBindingV1 | null = dynamic
+  const originalArguments: Arguments = dynamic ? { query: 'hello' } : { path: 'README.md' };
+  const binding: ToolPipelineCapabilityBinding | null = dynamic
     ? {
         bindingId: 'subject-binding-1',
         capabilityId,
@@ -80,7 +80,7 @@ function fixture(
         issuedForTurnId: 'turn-1',
       }
     : null;
-  const subject: DynamicMcpSubjectIdentityV1 = {
+  const subject: DynamicMcpSubjectIdentity = {
     capabilityId,
     capabilityRevision: CAPABILITY_REVISION,
     descriptorRevision: DESCRIPTOR_REVISION,
@@ -155,7 +155,7 @@ function fixture(
         toolKind: 'computer' as const,
         binding,
         descriptor,
-      }) as unknown as DynamicMcpToolTargetV1 | NonDynamicToolTargetV1;
+      }) as unknown as DynamicMcpToolTarget | NonDynamicToolTarget;
   const call = {
     schema: 'kite.tool-pipeline-stage.v1' as const,
     stage: 'snapshot' as const,
@@ -183,7 +183,7 @@ function fixture(
     operationId: target.operationId,
     name: exposedToolName,
     arguments: originalArguments,
-    argumentsDigest: digestCapabilityValueV1(originalArguments),
+    argumentsDigest: digestCapabilityValue(originalArguments),
     schemaDigest: SCHEMA_DIGEST,
     approvalSummary: 'fixture request',
   };
@@ -284,7 +284,7 @@ function fixture(
         builtinProjectionRevision: BUILTIN_REVISION,
         dynamicCatalogRevision: null,
       };
-  const governanceProjection: ToolPipelineGovernanceProjectionV1 = {
+  const governanceProjection: ToolPipelineGovernanceProjection = {
     invocation: governanceInvocation,
     policy: policyCompilation,
     effectiveEffects: EFFECTS,
@@ -299,7 +299,7 @@ function fixture(
         }
       : null,
     nestedSkill: null,
-  } as ToolPipelineGovernanceProjectionV1;
+  } as ToolPipelineGovernanceProjection;
   const classified = {
     schema: 'kite.tool-pipeline-stage.v1' as const,
     stage: 'classified' as const,
@@ -321,8 +321,8 @@ function fixture(
       idempotencyKeyArgument: idempotency ? 'request_id' : null,
       verification: 'after_committed_receipt' as const,
     },
-  } as unknown as ClassifiedInvocationV1<ArgumentsV1>;
-  const governance: AppToolPipelineGovernanceFactsV1 = {
+  } as unknown as ClassifiedInvocation<Arguments>;
+  const governance: AppToolPipelineGovernanceFacts = {
     schema: 'kite.tool-governance-facts.v1',
     invocation: {
       workspace: '/workspace',
@@ -388,14 +388,14 @@ function fixture(
     },
     ...(dynamic ? { dynamicMcp: { minimumApproval: 'none' as const, readOnly: true } } : {}),
   };
-  const decision: Extract<AppToolPipelineGovernanceDecisionV1, { readonly kind: 'allow' }> = {
+  const decision: Extract<AppToolPipelineGovernanceDecision, { readonly kind: 'allow' }> = {
     kind: 'allow',
     authorizationKind: 'policy_allow',
     grantUsed: 'none',
     reservationIds: [],
   };
   const request = {
-    schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
+    schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
     authorizationKind: 'policy_allow' as const,
     grantUsed: 'none' as const,
     policyEffects,
@@ -426,17 +426,17 @@ function fixture(
   };
 }
 
-function build(fixtureValue: FixtureV1): Readonly<AppPreparedToolInvocationBuildV1<ArgumentsV1>> {
-  return createAppPreparedToolInvocationV1(fixtureValue.input);
+function build(fixtureValue: Fixture): Readonly<AppPreparedToolInvocationBuild<Arguments>> {
+  return createAppPreparedToolInvocation(fixtureValue.input);
 }
 
-function approveOnceFixture(): FixtureV1 {
+function approveOnceFixture(): Fixture {
   const base = fixture();
-  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
     base.input.governance.invocation,
     base.input.governance.policy,
   );
-  const governance: AppToolPipelineGovernanceFactsV1 = {
+  const governance: AppToolPipelineGovernanceFacts = {
     ...base.input.governance,
     approval: {
       status: 'approved',
@@ -445,7 +445,7 @@ function approveOnceFixture(): FixtureV1 {
       approvalBindingDigest,
     },
   };
-  const decision: AppToolPipelineGovernanceDecisionV1 = {
+  const decision: AppToolPipelineGovernanceDecision = {
     kind: 'allow',
     authorizationKind: 'approved_call',
     grantUsed: 'approve_once',
@@ -462,7 +462,7 @@ function approveOnceFixture(): FixtureV1 {
   };
 }
 
-function fullAccessFixture(): FixtureV1 {
+function fullAccessFixture(): Fixture {
   const base = fixture();
   const policyCompilation = {
     ...base.input.classified.policyCompilation,
@@ -475,13 +475,13 @@ function fullAccessFixture(): FixtureV1 {
       ...base.input.classified.governance,
       policy: policyCompilation,
     },
-  } as unknown as ClassifiedInvocationV1<ArgumentsV1>;
-  const governance: AppToolPipelineGovernanceFactsV1 = {
+  } as unknown as ClassifiedInvocation<Arguments>;
+  const governance: AppToolPipelineGovernanceFacts = {
     ...base.input.governance,
     policy: { ...base.input.governance.policy, fullAccessMayBypassApproval: true },
     context: { ...base.input.governance.context, authorizationMode: 'full_access' },
   };
-  const decision: AppToolPipelineGovernanceDecisionV1 = {
+  const decision: AppToolPipelineGovernanceDecision = {
     kind: 'allow',
     authorizationKind: 'approved_call',
     grantUsed: 'full_access',
@@ -498,41 +498,41 @@ function fullAccessFixture(): FixtureV1 {
   };
 }
 
-describe('RMV1-16 App prepared tool invocation builder', () => {
+describe('RM-16 App prepared tool invocation builder', () => {
   test('binds ordinary identity to the original legacy digest and freezes request facts', () => {
     const value = build(fixture());
     const identity = value.prepared.identity;
     const facts = fixture().input.governance;
-    const policyDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+    const policyDigest = runtimeHostStateCreateApprovalBindingDigest(
       facts.invocation,
       facts.policy,
     );
-    const authorizationDigest = digestCapabilityValueV1({
+    const authorizationDigest = digestCapabilityValue({
       policyDigest,
       authorizationKind: 'policy_allow',
       grantUsed: 'none',
       authorizationMode: 'default',
     });
-    const admissionDigest = digestCapabilityValueV1({
+    const admissionDigest = digestCapabilityValue({
       authorizationDigest,
       reservationIds: [],
       freshness: 'current',
     });
     expect(identity.invocationId).toBe(
-      digestCapabilityValueV1({
+      digestCapabilityValue({
         schema: 'kite.tool-invocation-identity.v1',
         threadId: 'thread-1',
         toolCallId: 'call-1',
         capabilityId: 'builtin:write_file',
         capabilityRevision: CAPABILITY_REVISION,
-        argumentsDigest: digestCapabilityValueV1(fixture().originalArguments),
+        argumentsDigest: digestCapabilityValue(fixture().originalArguments),
         authorizationDigest,
         admissionDigest,
       }),
     );
-    expect(identity.argumentsDigest).toBe(digestCapabilityValueV1(fixture().originalArguments));
+    expect(identity.argumentsDigest).toBe(digestCapabilityValue(fixture().originalArguments));
     expect(identity.attemptId).toBe(`${identity.invocationId}:attempt:2`);
-    expect(value.prepared.input.request.schema).toBe(APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1);
+    expect(value.prepared.input.request.schema).toBe(APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_);
     expect(value.prepared.input.request.authorizationKind).toBe('policy_allow');
     expect(value.prepared.input.request.grantUsed).toBe('none');
     expect(value.prepared.input.request.policyEffects).toEqual({});
@@ -556,7 +556,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
     expect(value.prepared.input.request.grantUsed).toBe('approve_once');
     expect(value.prepared.identity.policyDigest).toBe(approvalBindingDigest);
     expect(value.prepared.identity.authorizationDigest).toBe(
-      digestCapabilityValueV1({
+      digestCapabilityValue({
         policyDigest: approvalBindingDigest,
         authorizationKind: 'approved_call',
         grantUsed: 'approve_once',
@@ -698,7 +698,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
         ...base.input.governance.invocation,
         capabilityRevision: 'stale-revision',
       },
-    } as AppToolPipelineGovernanceFactsV1;
+    } as AppToolPipelineGovernanceFacts;
     expect(() =>
       build({
         ...base,
@@ -773,16 +773,16 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
     expect(identity.idempotencyKeyArgument).toBe('request_id');
     expect(identity.idempotencyKey).toBe('explicit-idempotency-key');
     expect(identity.argumentsDigest).toBe(
-      digestCapabilityValueV1({ path: 'README.md', request_id: 'explicit-idempotency-key' }),
+      digestCapabilityValue({ path: 'README.md', request_id: 'explicit-idempotency-key' }),
     );
     expect(identity.invocationId).toBe(
-      digestCapabilityValueV1({
+      digestCapabilityValue({
         schema: 'kite.tool-invocation-identity.v1',
         threadId: 'thread-1',
         toolCallId: 'call-1',
         capabilityId: 'builtin:write_file',
         capabilityRevision: CAPABILITY_REVISION,
-        argumentsDigest: digestCapabilityValueV1(fixture({ idempotency: true }).originalArguments),
+        argumentsDigest: digestCapabilityValue(fixture({ idempotency: true }).originalArguments),
         authorizationDigest: identity.authorizationDigest,
         admissionDigest: identity.admissionDigest,
       }),
@@ -815,7 +815,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
   test('rejects a missing typed request envelope before producing a packet', () => {
     const base = fixture();
     expect(() =>
-      createAppPreparedToolInvocationV1({
+      createAppPreparedToolInvocation({
         ...base.input,
         request: undefined as never,
       }),
@@ -823,13 +823,13 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
   });
 
   test('completes the real frozen-registry ordinary chain and rejects prepared tampering', () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const registrySnapshot = registry.snapshot();
-    const projection = createBuiltinToolCatalogProjectionV1(registrySnapshot);
-    const callbacks = createBuiltinRuntimeToolPipelineCallbacksV1(projection);
+    const projection = createBuiltinToolCatalogProjection(registrySnapshot);
+    const callbacks = createBuiltinRuntimeToolPipelineCallbacks(projection);
     const turnId = 'turn-real-prepared';
     const threadId = 'thread-real-prepared';
-    const call: ToolCallSnapshotV1 = Object.freeze({
+    const call: ToolCallSnapshot = Object.freeze({
       schema: 'kite.tool-pipeline-stage.v1',
       stage: 'snapshot',
       toolCallId: 'call-real-prepared',
@@ -842,7 +842,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
       capabilityId: null,
       capabilityRevision: null,
     });
-    const resolutionContext: ToolPipelineResolutionContextV1 = Object.freeze({
+    const resolutionContext: ToolPipelineResolutionContext = Object.freeze({
       currentTurnId: turnId,
       availabilityContext: Object.freeze({
         workspace: '/workspace',
@@ -868,7 +868,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
     expect(classified.ok).toBe(true);
     if (!classified.ok) throw new Error(classified.failure.code);
 
-    const governance = createRuntimeHostStateToolGovernanceV1({
+    const governance = createRuntimeHostStateToolGovernance({
       verifyClassifiedIdentity: callbacks.verifyClassifiedIdentity,
     });
     const governanceInput = Object.freeze({
@@ -909,7 +909,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
     expect(decided.value.kind).toBe('allow');
     if (decided.value.kind !== 'allow') throw new Error('Expected allow decision.');
 
-    const prepared = createAppPreparedToolInvocationV1({
+    const prepared = createAppPreparedToolInvocation({
       classified: classified.value,
       governance: projected.value,
       decision: decided.value,
@@ -917,7 +917,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
       attempt: 1,
       preparedArguments: validated.value.request.arguments,
       request: {
-        schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
+        schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
         authorizationKind: 'policy_allow',
         grantUsed: 'none',
         policyEffects: {},
@@ -982,16 +982,16 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
     };
     const dynamicDescriptor: CapabilityDescriptor = {
       ...dynamicDescriptorBase,
-      revision: digestCapabilityBindingValueV1(dynamicDescriptorBase),
+      revision: digestCapabilityBindingValue(dynamicDescriptorBase),
     };
-    const dynamicBinding = createCapabilityBindingV1({
+    const dynamicBinding = createCapabilityBinding({
       capabilityId: dynamicDescriptor.capabilityId,
       capabilityRevision: dynamicDescriptor.revision,
       exposedToolName: 'mcp__fixture__search',
       inputSchema: dynamicDescriptor.inputSchema,
       turnId,
     });
-    const dynamicCall: ToolCallSnapshotV1 = Object.freeze({
+    const dynamicCall: ToolCallSnapshot = Object.freeze({
       schema: 'kite.tool-pipeline-stage.v1',
       stage: 'snapshot',
       toolCallId: 'call-real-dynamic-prepared',
@@ -1004,7 +1004,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
       capabilityId: dynamicBinding.capabilityId,
       capabilityRevision: dynamicBinding.capabilityRevision,
     });
-    const dynamicContext: ToolPipelineResolutionContextV1 = Object.freeze({
+    const dynamicContext: ToolPipelineResolutionContext = Object.freeze({
       ...resolutionContext,
       availabilityContext: Object.freeze({
         ...resolutionContext.availabilityContext,
@@ -1037,7 +1037,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
     if (dynamicDecided.value.kind !== 'allow') {
       throw new Error('Expected dynamic MCP allow decision.');
     }
-    const dynamicPrepared = createAppPreparedToolInvocationV1({
+    const dynamicPrepared = createAppPreparedToolInvocation({
       classified: dynamicClassified.value,
       governance: dynamicProjected.value,
       decision: dynamicDecided.value,
@@ -1045,7 +1045,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
       attempt: 1,
       preparedArguments: dynamicValidated.value.request.arguments,
       request: {
-        schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
+        schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
         authorizationKind: 'policy_allow',
         grantUsed: 'none',
         policyEffects: {},

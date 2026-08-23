@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { RUNTIME_COMMAND_SCHEMA_V1, RUNTIME_QUERY_SCHEMA_V1 } from '@kite/runtime-contract';
+import { RUNTIME_COMMAND_SCHEMA_, RUNTIME_QUERY_SCHEMA_ } from '@kite/runtime-contract';
 import { createKiteCliRuntimeAccess } from '../../apps/kite/src/bootstrap';
 import { createMockModelServer } from '../tui-system/harness/fixtures';
 
@@ -45,7 +45,7 @@ test('CLI start_turn uses one Host coordinator and the configured Provider route
 
   try {
     const created = await access.command({
-      schema: RUNTIME_COMMAND_SCHEMA_V1,
+      schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'cli-retained-create',
       type: 'create_session',
       workspace,
@@ -54,7 +54,7 @@ test('CLI start_turn uses one Host coordinator and the configured Provider route
     expect(created).toMatchObject({ status: 'applied', sessionId, revision: 0 });
 
     const started = await access.command({
-      schema: RUNTIME_COMMAND_SCHEMA_V1,
+      schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'cli-retained-turn',
       type: 'start_turn',
       sessionId,
@@ -66,7 +66,7 @@ test('CLI start_turn uses one Host coordinator and the configured Provider route
     expect(server.getRequestCount()).toBe(1);
 
     const projection = await access.query({
-      schema: RUNTIME_QUERY_SCHEMA_V1,
+      schema: RUNTIME_QUERY_SCHEMA_,
       type: 'get_session_projection',
       sessionId,
     });
@@ -77,7 +77,7 @@ test('CLI start_turn uses one Host coordinator and the configured Provider route
 
     expect(
       await access.command({
-        schema: RUNTIME_COMMAND_SCHEMA_V1,
+        schema: RUNTIME_COMMAND_SCHEMA_,
         commandId: 'cli-retained-turn',
         type: 'start_turn',
         sessionId,
@@ -92,7 +92,7 @@ test('CLI start_turn uses one Host coordinator and the configured Provider route
     });
     expect(
       await access.command({
-        schema: RUNTIME_COMMAND_SCHEMA_V1,
+        schema: RUNTIME_COMMAND_SCHEMA_,
         commandId: 'cli-retained-turn',
         type: 'start_turn',
         sessionId,

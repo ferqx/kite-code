@@ -1,13 +1,13 @@
-import type { SubagentHandleArtifactRefV1, SubagentHandleV1 } from '@kite/runtime-spi';
+import type { SubagentHandle, SubagentHandleArtifactRef } from '@kite/runtime-spi';
 import {
-  canonicalModelJsonV1,
+  canonicalModelJson,
   PrivateArtifactStorageError,
-  PrivateImmutableArtifactStorageV1,
+  PrivateImmutableArtifactStorage,
 } from '../model';
-import { subagentLifecycleArtifactRootV1 } from './artifact-paths';
-import type { SubagentGrantVerifierV1 } from './grant-authority';
+import { subagentLifecycleArtifactRoot } from './artifact-paths';
+import type { SubagentGrantVerifier } from './grant-authority';
 
-export class SubagentLifecycleArtifactErrorV1 extends Error {
+export class SubagentLifecycleArtifactError extends Error {
   readonly code:
     | 'invalid_handle'
     | 'artifact_missing'
@@ -15,29 +15,26 @@ export class SubagentLifecycleArtifactErrorV1 extends Error {
     | 'artifact_too_large'
     | 'storage_boundary_violation'
     | 'publish_failed';
-  constructor(code: SubagentLifecycleArtifactErrorV1['code'], message: string) {
+  constructor(code: SubagentLifecycleArtifactError['code'], message: string) {
     super(message);
-    this.name = 'SubagentLifecycleArtifactErrorV1';
+    this.name = 'SubagentLifecycleArtifactError';
     this.code = code;
   }
 }
 
-export interface SubagentLifecycleArtifactAccessV1 {
-  write(handle: SubagentHandleV1, verifier: SubagentGrantVerifierV1): SubagentHandleArtifactRefV1;
-  read(
-    ref: SubagentHandleArtifactRefV1,
-    verifier: SubagentGrantVerifierV1,
-  ): Readonly<SubagentHandleV1>;
+export interface SubagentLifecycleArtifactAccess {
+  write(handle: SubagentHandle, verifier: SubagentGrantVerifier): SubagentHandleArtifactRef;
+  read(ref: SubagentHandleArtifactRef, verifier: SubagentGrantVerifier): Readonly<SubagentHandle>;
 }
 
 /** Provider-owned full handle store; Runtime facts retain only its path-free content ref. */
-export class SubagentLifecycleArtifactStoreV1 implements SubagentLifecycleArtifactAccessV1 {
-  readonly #storage: PrivateImmutableArtifactStorageV1<'subagent_handle'>;
+export class SubagentLifecycleArtifactStore implements SubagentLifecycleArtifactAccess {
+  readonly #storage: PrivateImmutableArtifactStorage<'subagent_handle'>;
 
   constructor(options: { readonly root?: string } = {}) {
     try {
-      this.#storage = new PrivateImmutableArtifactStorageV1({
-        root: options.root ?? subagentLifecycleArtifactRootV1(),
+      this.#storage = new PrivateImmutableArtifactStorage({
+        root: options.root ?? subagentLifecycleArtifactRoot(),
         namespace: 'subagent-lifecycles',
         partitions: [{ kind: 'subagent_handle', directory: 'handles', extension: '.json' }],
         maxArtifactBytes: 64 * 1024,
@@ -47,30 +44,27 @@ export class SubagentLifecycleArtifactStoreV1 implements SubagentLifecycleArtifa
     }
   }
 
-  write(handle: SubagentHandleV1, verifier: SubagentGrantVerifierV1): SubagentHandleArtifactRefV1 {
+  write(handle: SubagentHandle, verifier: SubagentGrantVerifier): SubagentHandleArtifactRef {
     try {
       const verified = verifier.verifyHandle(handle);
       return this.#storage.write(
         'subagent_handle',
-        Buffer.from(canonicalModelJsonV1({ artifactFormatVersion: 1, handle: verified }), 'utf8'),
+        Buffer.from(canonicalModelJson({ artifactFormatVersion: 1, handle: verified }), 'utf8'),
       );
     } catch (error) {
       throw map(error, 'invalid_handle');
     }
   }
 
-  read(
-    ref: SubagentHandleArtifactRefV1,
-    verifier: SubagentGrantVerifierV1,
-  ): Readonly<SubagentHandleV1> {
+  read(ref: SubagentHandleArtifactRef, verifier: SubagentGrantVerifier): Readonly<SubagentHandle> {
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(this.#storage.read(ref));
       const parsed: unknown = JSON.parse(text);
       if (!plain(parsed) || !exact(parsed, ['artifactFormatVersion', 'handle'])) corrupt();
-      if (parsed.artifactFormatVersion !== 1 || canonicalModelJsonV1(parsed) !== text) corrupt();
-      return verifier.verifyHandle(parsed.handle as SubagentHandleV1);
+      if (parsed.artifactFormatVersion !== 1 || canonicalModelJson(parsed) !== text) corrupt();
+      return verifier.verifyHandle(parsed.handle as SubagentHandle);
     } catch (error) {
-      if (error instanceof SubagentLifecycleArtifactErrorV1) throw error;
+      if (error instanceof SubagentLifecycleArtifactError) throw error;
       throw map(error, 'artifact_corrupt');
     }
   }
@@ -90,21 +84,21 @@ function plain(value: unknown): value is Record<string, unknown> {
   );
 }
 function corrupt(): never {
-  throw new SubagentLifecycleArtifactErrorV1(
+  throw new SubagentLifecycleArtifactError(
     'artifact_corrupt',
     'Subagent lifecycle Artifact is corrupt.',
   );
 }
-function map(error: unknown, fallback: SubagentLifecycleArtifactErrorV1['code']) {
-  if (error instanceof SubagentLifecycleArtifactErrorV1) return error;
+function map(error: unknown, fallback: SubagentLifecycleArtifactError['code']) {
+  if (error instanceof SubagentLifecycleArtifactError) return error;
   if (error instanceof PrivateArtifactStorageError) {
     const code = error.code === 'invalid_reference' ? 'artifact_corrupt' : error.code;
-    return new SubagentLifecycleArtifactErrorV1(
-      code as SubagentLifecycleArtifactErrorV1['code'],
+    return new SubagentLifecycleArtifactError(
+      code as SubagentLifecycleArtifactError['code'],
       'Subagent lifecycle Artifact operation failed.',
     );
   }
-  return new SubagentLifecycleArtifactErrorV1(
+  return new SubagentLifecycleArtifactError(
     fallback,
     'Subagent lifecycle Artifact operation failed.',
   );

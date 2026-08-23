@@ -1,5 +1,5 @@
 /** Opaque reference to credential material held inside Builtin Runtime. */
-export interface CredentialHandleV1 {
+export interface CredentialHandle {
   readonly handleId: string;
   readonly projectId: string;
   readonly provider: string;
@@ -9,8 +9,8 @@ export interface CredentialHandleV1 {
   readonly revocationRevision: number;
 }
 
-export interface CredentialBrokerV1 {
-  issue(input: Omit<CredentialHandleV1, 'handleId'>): Promise<CredentialHandleV1>;
-  use(handle: CredentialHandleV1, purpose: string): Promise<Uint8Array>;
+export interface CredentialBroker {
+  issue(input: Omit<CredentialHandle, 'handleId'>): Promise<CredentialHandle>;
+  use(handle: CredentialHandle, purpose: string): Promise<Uint8Array>;
   revoke(handleId: string, revision: number): void;
 }

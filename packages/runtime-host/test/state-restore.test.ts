@@ -2,17 +2,17 @@ import { describe, expect, test } from 'bun:test';
 import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite/agent-kernel';
 import {
   type RuntimeHostExecutionServices,
-  restoreRuntimeHostStateSessionV1,
+  restoreRuntimeHostStateSession,
 } from '@kite/runtime-host';
 import type {
   CheckpointPort,
-  RuntimeSnapshotMetadataV1,
+  RuntimeSnapshotMetadata,
   SessionStore,
-  StoredRuntimeEventV1,
+  StoredRuntimeEvent,
 } from '@kite/runtime-host/storage';
 
 const RECOVERY_KEY = 'a'.repeat(64);
-const SNAPSHOT_METADATA: RuntimeSnapshotMetadataV1 = {
+const SNAPSHOT_METADATA: RuntimeSnapshotMetadata = {
   eventPosition: 0,
   stateRevision: 0,
   stateChecksum: 'checksum',
@@ -34,9 +34,9 @@ function state(overrides: Partial<AgentState> = {}): AgentState {
 
 function services(
   input: {
-    readonly snapshot?: { readonly state: unknown; readonly metadata: RuntimeSnapshotMetadataV1 };
+    readonly snapshot?: { readonly state: unknown; readonly metadata: RuntimeSnapshotMetadata };
     readonly lastEventPosition?: number;
-    readonly tail?: readonly StoredRuntimeEventV1<KernelEvent>[];
+    readonly tail?: readonly StoredRuntimeEvent<KernelEvent>[];
   } = {},
 ): RuntimeHostExecutionServices<KernelEvent, AgentState> {
   const sessions: SessionStore<KernelEvent, AgentState> = {
@@ -91,10 +91,10 @@ function checkpointPort(): CheckpointPort<AgentState> {
 function restore(
   runtimeServices: RuntimeHostExecutionServices<KernelEvent, AgentState>,
   extra: Partial<
-    Pick<Parameters<typeof restoreRuntimeHostStateSessionV1>[0], 'validateRestoredState'>
+    Pick<Parameters<typeof restoreRuntimeHostStateSession>[0], 'validateRestoredState'>
   > = {},
 ) {
-  return restoreRuntimeHostStateSessionV1({
+  return restoreRuntimeHostStateSession({
     sessions: runtimeServices.sessions,
     sessionId: 'session-1',
     userId: 'user-1',

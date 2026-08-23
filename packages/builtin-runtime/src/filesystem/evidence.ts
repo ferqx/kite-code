@@ -1,16 +1,16 @@
 import { createHash } from 'node:crypto';
 import type {
-  FilesystemPreimageArtifactRefV1,
-  WorkspaceFilesystemIntentRecordV1,
-  WorkspaceFilesystemMutationReadyRecordV1,
-  WorkspaceFilesystemObservationRecordV1,
+  FilesystemPreimageArtifactRef,
+  WorkspaceFilesystemIntentRecord,
+  WorkspaceFilesystemMutationReadyRecord,
+  WorkspaceFilesystemObservationRecord,
 } from '@kite/runtime-spi';
 
 const MAX_IDENTITY_CHARS = 4_096;
 
-export function validateWorkspaceFilesystemIntentRecordV1(
+export function validateWorkspaceFilesystemIntentRecord(
   value: unknown,
-): WorkspaceFilesystemIntentRecordV1 {
+): WorkspaceFilesystemIntentRecord {
   const intent = plainRecord(value, 'filesystem intent');
   exactKeys(
     intent,
@@ -55,17 +55,17 @@ export function validateWorkspaceFilesystemIntentRecordV1(
     effectiveEffectsDigest: bareDigest(intent.effectiveEffectsDigest, 'effectiveEffectsDigest'),
     intentDigest: prefixedDigest(intent.intentDigest, 'intentDigest'),
     recordedAt: canonicalTimestamp(intent.recordedAt, 'filesystem intent recordedAt'),
-  } satisfies WorkspaceFilesystemIntentRecordV1;
+  } satisfies WorkspaceFilesystemIntentRecord;
   const { intentDigest, ...unsigned } = result;
-  if (intentDigest !== workspaceFilesystemIntentDigestV1(unsigned)) {
+  if (intentDigest !== workspaceFilesystemIntentDigest(unsigned)) {
     throw new Error('filesystem intent digest mismatch');
   }
   return frozenClone(result);
 }
 
-export function validateWorkspaceFilesystemObservationRecordV1(
+export function validateWorkspaceFilesystemObservationRecord(
   value: unknown,
-): WorkspaceFilesystemObservationRecordV1 {
+): WorkspaceFilesystemObservationRecord {
   const observation = plainRecord(value, 'filesystem observation');
   exactKeys(
     observation,
@@ -90,9 +90,9 @@ export function validateWorkspaceFilesystemObservationRecordV1(
   });
 }
 
-export function validateWorkspaceFilesystemMutationReadyRecordV1(
+export function validateWorkspaceFilesystemMutationReadyRecord(
   value: unknown,
-): WorkspaceFilesystemMutationReadyRecordV1 {
+): WorkspaceFilesystemMutationReadyRecord {
   const ready = plainRecord(value, 'mutation ready');
   exactKeys(
     ready,
@@ -120,27 +120,27 @@ export function validateWorkspaceFilesystemMutationReadyRecordV1(
     preimageArtifact: validatePreimageArtifact(ready.preimageArtifact),
     readyDigest: prefixedDigest(ready.readyDigest, 'readyDigest'),
     readyAt: canonicalTimestamp(ready.readyAt, 'readyAt'),
-  } satisfies WorkspaceFilesystemMutationReadyRecordV1;
+  } satisfies WorkspaceFilesystemMutationReadyRecord;
   const { readyDigest, ...unsigned } = result;
-  if (readyDigest !== workspaceFilesystemMutationReadyDigestV1(unsigned)) {
+  if (readyDigest !== workspaceFilesystemMutationReadyDigest(unsigned)) {
     throw new Error('mutation ready digest mismatch');
   }
   return frozenClone(result);
 }
 
-export function workspaceFilesystemIntentDigestV1(
-  intent: Omit<WorkspaceFilesystemIntentRecordV1, 'intentDigest'>,
+export function workspaceFilesystemIntentDigest(
+  intent: Omit<WorkspaceFilesystemIntentRecord, 'intentDigest'>,
 ): string {
   return sha256Canonical(intent);
 }
 
-export function workspaceFilesystemMutationReadyDigestV1(
-  ready: Omit<WorkspaceFilesystemMutationReadyRecordV1, 'readyDigest'>,
+export function workspaceFilesystemMutationReadyDigest(
+  ready: Omit<WorkspaceFilesystemMutationReadyRecord, 'readyDigest'>,
 ): string {
   return sha256Canonical(ready);
 }
 
-function validatePreimageArtifact(value: unknown): FilesystemPreimageArtifactRefV1 {
+function validatePreimageArtifact(value: unknown): FilesystemPreimageArtifactRef {
   const artifact = plainRecord(value, 'preimage Artifact');
   exactKeys(
     artifact,

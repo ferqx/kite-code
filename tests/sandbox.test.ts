@@ -21,21 +21,21 @@ import {
   buildUlimitPreamble,
   buildWorkspaceExcludedPath,
   checkDangerousPaths,
-  cleanupSandboxRuntimeDirNoSpawnV1,
-  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
-  createSandboxRuntimeDirForPreparationV1,
-  createWindowsSandboxRuntimeDirForPreparationV1,
+  cleanupSandboxRuntimeDirNoSpawn,
+  cleanupWindowsSandboxRuntimeDirNoSpawn,
+  createSandboxRuntimeDirForPreparation,
+  createWindowsSandboxRuntimeDirForPreparation,
   DEFAULT_RESOURCE_LIMITS,
   detectSandboxBackend,
   findApplySeccomp,
   generateBwrapArgs,
   generateSandboxProfile,
   isSandboxAvailable,
-  projectApprovedProxyEnvironmentV1,
+  projectApprovedProxyEnvironment,
   resolveSandboxExitCode,
   resolveSeccompPath,
 } from '@kite/builtin-runtime/sandbox';
-import { buildPosixSupervisorEnvironmentV1 } from '@kite/runtime-host';
+import { buildPosixSupervisorEnvironment } from '@kite/runtime-host';
 import { parseArgs } from '../apps/kite/src/cli/index';
 import { createSandboxExecutor } from './helpers/sandbox-executor';
 import { shellTool } from './helpers/shell-executor';
@@ -43,14 +43,14 @@ import { shellTool } from './helpers/shell-executor';
 function createTestRuntimeDir(workspace: string, label: string): string {
   const preparationDigest = `sandbox-test:${label}:${randomUUID()}`;
   return process.platform === 'win32'
-    ? createWindowsSandboxRuntimeDirForPreparationV1(workspace, preparationDigest)
-    : createSandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+    ? createWindowsSandboxRuntimeDirForPreparation(workspace, preparationDigest)
+    : createSandboxRuntimeDirForPreparation(workspace, preparationDigest);
 }
 
 function cleanupTestRuntimeDir(runtimeDir: string): boolean {
   return process.platform === 'win32'
-    ? cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeDir)
-    : cleanupSandboxRuntimeDirNoSpawnV1(runtimeDir);
+    ? cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeDir)
+    : cleanupSandboxRuntimeDirNoSpawn(runtimeDir);
 }
 
 function seatbeltString(path: string): string {
@@ -282,13 +282,13 @@ describe('shell wrapper utilities', () => {
         HTTP_PROXY: 'http://proxy.example.test:8080',
         no_proxy: 'localhost,127.0.0.1',
       };
-      const offline = buildPosixSupervisorEnvironmentV1(
+      const offline = buildPosixSupervisorEnvironment(
         runtimeDir,
-        projectApprovedProxyEnvironmentV1({ networkMode: 'disabled', source }),
+        projectApprovedProxyEnvironment({ networkMode: 'disabled', source }),
       );
-      const approved = buildPosixSupervisorEnvironmentV1(
+      const approved = buildPosixSupervisorEnvironment(
         runtimeDir,
-        projectApprovedProxyEnvironmentV1({ networkMode: 'allow_all', source }),
+        projectApprovedProxyEnvironment({ networkMode: 'allow_all', source }),
       );
       expect(offline.HTTP_PROXY).toBeUndefined();
       expect(offline.no_proxy).toBeUndefined();

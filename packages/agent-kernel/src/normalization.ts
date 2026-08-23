@@ -3,7 +3,7 @@ import { sha256Hex } from './hash';
 import { eventRecord, recordField, stringField } from './reducer-utils';
 import type { AgentState, AgentTerminalReasonCode } from './state';
 
-/** State ToolOutcome format identity within the Store RAV1 epoch. */
+/** State ToolOutcome format identity within the Store RA epoch. */
 export const TOOL_OUTCOME_SCHEMA_VERSION = 1 as const;
 
 const FAILURE_KINDS = [
@@ -53,7 +53,7 @@ const FAILURE_KINDS = [
   'unknown',
 ] as const;
 /** Canonical State failure-kind vocabulary owned by agent-kernel. */
-export const TOOL_OUTCOME_FAILURE_KINDS_V1 = FAILURE_KINDS;
+export const TOOL_OUTCOME_FAILURE_KINDS_ = FAILURE_KINDS;
 const DETAIL_CODES = [
   'success',
   'legacy_unclassified',
@@ -98,42 +98,40 @@ const DETAIL_CODES = [
   'unknown',
 ] as const;
 /** Canonical State low-cardinality detail-code vocabulary owned by agent-kernel. */
-export const TOOL_OUTCOME_DETAIL_CODES_V1 = DETAIL_CODES;
+export const TOOL_OUTCOME_DETAIL_CODES_ = DETAIL_CODES;
 
-export type FailureKindV1 = (typeof FAILURE_KINDS)[number];
-type FailureKind = FailureKindV1;
-export type ToolOutcomeDetailCodeV1 = (typeof DETAIL_CODES)[number];
-type DetailCode = ToolOutcomeDetailCodeV1;
-export type FailureStrategyV1 = {
+export type FailureKind = (typeof FAILURE_KINDS)[number];
+export type ToolOutcomeDetailCode = (typeof DETAIL_CODES)[number];
+type DetailCode = ToolOutcomeDetailCode;
+export type FailureStrategy = {
   readonly retryable: boolean;
   readonly modelFixable: boolean;
   readonly needsUserIntervention: boolean;
   readonly terminatesTurn: boolean;
   readonly journal: boolean;
 };
-export type ClassifiedFailureV1 = FailureStrategyV1 & {
+export type ClassifiedFailure = FailureStrategy & {
   readonly kind: FailureKind;
   readonly message: string;
-  readonly parseFailureCode?: ToolParseFailureCodeV1;
+  readonly parseFailureCode?: ToolParseFailureCode;
 };
-export type ToolParseFailureCodeV1 =
+export type ToolParseFailureCode =
   | 'invalid_json'
   | 'invalid_arguments'
   | 'unknown_tool'
   | 'tool_unavailable';
-export type TerminalReasonCodeV1 = AgentTerminalReasonCode;
-type ClassifiedFailure = ClassifiedFailureV1;
-export interface ToolOutcomeClassifierAdviceV1 {
+export type TerminalReasonCode = AgentTerminalReasonCode;
+export interface ToolOutcomeClassifierAdvice {
   readonly detailCode?: string;
-  readonly disposition?: ToolRecoveryDispositionV1;
+  readonly disposition?: ToolRecoveryDisposition;
   readonly maximumAdditionalCalls?: number;
   readonly safeAutomaticRetry?: boolean;
   readonly requiresNewModelResponse?: boolean;
   readonly retryAfterMs?: number;
   readonly capabilityIntent?: string;
 }
-type ToolAdvice = ToolOutcomeClassifierAdviceV1;
-export type ToolOutcomeStatusV1 =
+type ToolAdvice = ToolOutcomeClassifierAdvice;
+export type ToolOutcomeStatus =
   | 'success'
   | 'failed'
   | 'rejected'
@@ -141,48 +139,47 @@ export type ToolOutcomeStatusV1 =
   | 'timed_out'
   | 'exhausted'
   | 'unknown';
-type ToolOutcomeStatus = ToolOutcomeStatusV1;
-export type ToolDispatchStateV1 = 'not_started' | 'started' | 'unknown';
-export type ToolExternalEffectsV1 = 'none' | 'known' | 'unknown';
-export type ToolReplaySafetyV1 = 'none' | 'pre_dispatch' | 'safe_read' | 'idempotency_receipt';
-export type ToolRecoveryDispositionV1 =
+export type ToolDispatchState = 'not_started' | 'started' | 'unknown';
+export type ToolExternalEffects = 'none' | 'known' | 'unknown';
+export type ToolReplaySafety = 'none' | 'pre_dispatch' | 'safe_read' | 'idempotency_receipt';
+export type ToolRecoveryDisposition =
   | 'never'
   | 'correct_args'
   | 'retry_once'
   | 'alternative'
   | 'user_action';
-export interface ToolRecoveryV1 {
-  disposition: ToolRecoveryDispositionV1;
+export interface ToolRecovery {
+  disposition: ToolRecoveryDisposition;
   maximumAdditionalCalls: 0 | 1;
   requiresNewModelResponse: boolean;
   safeAutomaticRetry: boolean;
   retryAfterMs?: number;
   capabilityIntent?: string;
 }
-export interface ToolOutcomeTimingV1 {
+export interface ToolOutcomeTiming {
   source: 'runtime_boundary' | 'legacy_unknown';
   queueMs?: number;
   executionMs?: number;
   approvalWaitMs?: number;
   totalActiveMs?: number;
 }
-export interface UnknownToolFieldsObservationV1 {
+export interface UnknownToolFieldsObservation {
   hasUnknown: boolean;
   count: number;
   toolClass: 'builtin_read' | 'builtin_write' | 'builtin_execute' | 'builtin_other' | 'mcp_tool';
   schemaRevision: string;
 }
-export interface ToolOutcomeV1 {
+export interface ToolOutcome {
   schemaVersion: typeof TOOL_OUTCOME_SCHEMA_VERSION;
-  status: ToolOutcomeStatusV1;
-  failure?: { kind: FailureKindV1; detailCode: ToolOutcomeDetailCodeV1 };
-  dispatchState: ToolDispatchStateV1;
-  externalEffects: ToolExternalEffectsV1;
-  replaySafety?: ToolReplaySafetyV1;
-  recovery: ToolRecoveryV1;
+  status: ToolOutcomeStatus;
+  failure?: { kind: FailureKind; detailCode: ToolOutcomeDetailCode };
+  dispatchState: ToolDispatchState;
+  externalEffects: ToolExternalEffects;
+  replaySafety?: ToolReplaySafety;
+  recovery: ToolRecovery;
   lineage?: { failureInstanceId?: string; recoveryOf?: string };
-  timing: ToolOutcomeTimingV1;
-  unknownFields?: UnknownToolFieldsObservationV1;
+  timing: ToolOutcomeTiming;
+  unknownFields?: UnknownToolFieldsObservation;
   diagnosticCodes?: readonly (
     | 'classifier_missing'
     | 'classifier_threw'
@@ -190,50 +187,49 @@ export interface ToolOutcomeV1 {
     | 'classifier_invalid'
   )[];
 }
-export interface ToolOutcomeAuthorityV1 {
-  readonly dispatchState: ToolDispatchStateV1;
-  readonly externalEffects: ToolExternalEffectsV1;
-  readonly replaySafety?: ToolReplaySafetyV1;
+export interface ToolOutcomeAuthority {
+  readonly dispatchState: ToolDispatchState;
+  readonly externalEffects: ToolExternalEffects;
+  readonly replaySafety?: ToolReplaySafety;
   readonly policyDenied?: boolean;
   readonly approvalDenied?: boolean;
 }
-export type ToolOutcomeClassifierDiagnosticV1 =
+export type ToolOutcomeClassifierDiagnostic =
   | 'classifier_missing'
   | 'classifier_threw'
   | 'classifier_conflict'
   | 'classifier_invalid';
-export interface ToolOutcomeClassificationInputV1 {
-  readonly status: ToolOutcomeStatusV1;
-  readonly failure?: ClassifiedFailureV1;
-  readonly authority: ToolOutcomeAuthorityV1;
-  readonly toolAdvice?: ToolOutcomeClassifierAdviceV1;
-  readonly lineage?: ToolOutcomeV1['lineage'];
-  readonly timing?: Partial<Omit<ToolOutcomeTimingV1, 'source'>>;
-  readonly unknownFields?: UnknownToolFieldsObservationV1;
-  readonly classifierDiagnostic?: ToolOutcomeClassifierDiagnosticV1;
+export interface ToolOutcomeClassificationInput {
+  readonly status: ToolOutcomeStatus;
+  readonly failure?: ClassifiedFailure;
+  readonly authority: ToolOutcomeAuthority;
+  readonly toolAdvice?: ToolOutcomeClassifierAdvice;
+  readonly lineage?: ToolOutcome['lineage'];
+  readonly timing?: Partial<Omit<ToolOutcomeTiming, 'source'>>;
+  readonly unknownFields?: UnknownToolFieldsObservation;
+  readonly classifierDiagnostic?: ToolOutcomeClassifierDiagnostic;
 }
-type ToolAuthority = ToolOutcomeAuthorityV1;
-type UnknownOutcome = ToolOutcomeV1;
+type ToolAuthority = ToolOutcomeAuthority;
+type UnknownOutcome = ToolOutcome;
 
-export const TOOL_OUTCOME_NEVER_RECOVERY_V1: ToolRecoveryV1 = Object.freeze({
+export const TOOL_OUTCOME_NEVER_RECOVERY_: ToolRecovery = Object.freeze({
   disposition: 'never',
   maximumAdditionalCalls: 0,
   requiresNewModelResponse: false,
   safeAutomaticRetry: false,
 });
-const NEVER_RECOVERY = TOOL_OUTCOME_NEVER_RECOVERY_V1;
+const NEVER_RECOVERY = TOOL_OUTCOME_NEVER_RECOVERY_;
 
 /* The aliases below keep the reducer's existing private vocabulary pointed at
  * the public State types; they do not define a second outcome contract. */
-type FailureStrategy = FailureStrategyV1;
 
 /** Pure projections for protocol, metrics, and UI adapters. */
-export function toolOutcomeSucceededV1(outcome: ToolOutcomeV1): boolean {
+export function toolOutcomeSucceeded(outcome: ToolOutcome): boolean {
   return outcome.status === 'success';
 }
 
-export function toolOutcomeProtocolStatusV1(
-  outcome: ToolOutcomeV1,
+export function toolOutcomeProtocolStatus(
+  outcome: ToolOutcome,
 ): 'success' | 'error' | 'cancelled' | 'timeout' | 'exhausted' {
   switch (outcome.status) {
     case 'success':
@@ -249,7 +245,7 @@ export function toolOutcomeProtocolStatusV1(
   }
 }
 
-export function toolOutcomeMetricStatusV1(outcome: ToolOutcomeV1): ToolOutcomeStatusV1 {
+export function toolOutcomeMetricStatus(outcome: ToolOutcome): ToolOutcomeStatus {
   return outcome.status;
 }
 
@@ -632,14 +628,14 @@ const DETAIL_BY_KIND: Readonly<Record<FailureKind, readonly DetailCode[]>> = {
   unknown: ['unknown'],
 };
 
-export function isToolFailureKindV1(value: unknown): value is FailureKindV1 {
+export function isToolFailureKind(value: unknown): value is FailureKind {
   return typeof value === 'string' && (FAILURE_KINDS as readonly string[]).includes(value);
 }
-export const isRuntimeFailureKindV1 = isToolFailureKindV1;
-export function isToolOutcomeDetailCodeV1(value: unknown): value is ToolOutcomeDetailCodeV1 {
+export const isRuntimeFailureKind = isToolFailureKind;
+export function isToolOutcomeDetailCode(value: unknown): value is ToolOutcomeDetailCode {
   return typeof value === 'string' && (DETAIL_CODES as readonly string[]).includes(value);
 }
-export function isToolParseFailureCodeV1(value: unknown): value is ToolParseFailureCodeV1 {
+export function isToolParseFailureCode(value: unknown): value is ToolParseFailureCode {
   return (
     value === 'invalid_json' ||
     value === 'invalid_arguments' ||
@@ -647,53 +643,52 @@ export function isToolParseFailureCodeV1(value: unknown): value is ToolParseFail
     value === 'tool_unavailable'
   );
 }
-const isFailureKind = isToolFailureKindV1;
-const isDetailCode = isToolOutcomeDetailCodeV1;
-export function classifyRuntimeFailureV1(
+const isFailureKind = isToolFailureKind;
+const isDetailCode = isToolOutcomeDetailCode;
+export function classifyRuntimeFailure(
   kind: FailureKind,
   message: string,
-  parseFailureCode?: ToolParseFailureCodeV1,
+  parseFailureCode?: ToolParseFailureCode,
 ): ClassifiedFailure {
   return { kind, message, ...STRATEGIES[kind], ...(parseFailureCode ? { parseFailureCode } : {}) };
 }
-const classifyFailure = classifyRuntimeFailureV1;
+const classifyFailure = classifyRuntimeFailure;
 
-export function failureKindForToolParseFailureV1(
-  code: ToolParseFailureCodeV1,
+export function failureKindForToolParseFailure(
+  code: ToolParseFailureCode,
 ): 'tool_invalid_args' | 'tool_not_found' {
   return code === 'unknown_tool' || code === 'tool_unavailable'
     ? 'tool_not_found'
     : 'tool_invalid_args';
 }
 
-const TERMINAL_REASON_BY_FAILURE_V1: Readonly<
-  Partial<Record<FailureKindV1, TerminalReasonCodeV1>>
-> = Object.freeze({
-  artifact_invalid: 'artifact_invalid',
-  profile_invalid: 'profile_invalid',
-  digest_invalid: 'digest_invalid',
-  workspace_untrusted: 'workspace_untrusted',
-  sandbox_error: 'sandbox_unavailable',
-  network_unavailable: 'network_unavailable',
-  worktree_unavailable: 'worktree_unavailable',
-  model_retry_exhausted: 'model_retry_exhausted',
-  provider_unavailable: 'provider_unavailable',
-  mcp_unavailable: 'mcp_unavailable',
-  persistence_unavailable: 'persistence_unavailable',
-  budget_exceeded: 'budget_exhausted',
-  resource_saturated: 'resource_saturated',
-  process_limit_exceeded: 'process_limit_exceeded',
-  cancel_incomplete: 'cancel_incomplete',
-  compaction_unqualified: 'compaction_unqualified',
-  compaction_failed: 'compaction_failed',
-  verification_failed: 'verification_failed',
-  verification_inconclusive: 'verification_inconclusive',
-  mandatory_policy_unavailable: 'mandatory_policy_unavailable',
-  unknown: 'unknown',
-});
+const TERMINAL_REASON_BY_FAILURE_: Readonly<Partial<Record<FailureKind, TerminalReasonCode>>> =
+  Object.freeze({
+    artifact_invalid: 'artifact_invalid',
+    profile_invalid: 'profile_invalid',
+    digest_invalid: 'digest_invalid',
+    workspace_untrusted: 'workspace_untrusted',
+    sandbox_error: 'sandbox_unavailable',
+    network_unavailable: 'network_unavailable',
+    worktree_unavailable: 'worktree_unavailable',
+    model_retry_exhausted: 'model_retry_exhausted',
+    provider_unavailable: 'provider_unavailable',
+    mcp_unavailable: 'mcp_unavailable',
+    persistence_unavailable: 'persistence_unavailable',
+    budget_exceeded: 'budget_exhausted',
+    resource_saturated: 'resource_saturated',
+    process_limit_exceeded: 'process_limit_exceeded',
+    cancel_incomplete: 'cancel_incomplete',
+    compaction_unqualified: 'compaction_unqualified',
+    compaction_failed: 'compaction_failed',
+    verification_failed: 'verification_failed',
+    verification_inconclusive: 'verification_inconclusive',
+    mandatory_policy_unavailable: 'mandatory_policy_unavailable',
+    unknown: 'unknown',
+  });
 
-export function terminalReasonForRuntimeFailureV1(kind: FailureKindV1): TerminalReasonCodeV1 {
-  return TERMINAL_REASON_BY_FAILURE_V1[kind] ?? 'blocked';
+export function terminalReasonForRuntimeFailure(kind: FailureKind): TerminalReasonCode {
+  return TERMINAL_REASON_BY_FAILURE_[kind] ?? 'blocked';
 }
 function suppliedFailure(
   value: Readonly<Record<string, unknown>> | undefined,
@@ -715,7 +710,7 @@ function suppliedFailure(
     terminatesTurn:
       typeof value?.terminatesTurn === 'boolean' ? value.terminatesTurn : strategy.terminatesTurn,
     journal: typeof value?.journal === 'boolean' ? value.journal : strategy.journal,
-    ...(isToolParseFailureCodeV1(parseFailureCode) ? { parseFailureCode } : {}),
+    ...(isToolParseFailureCode(parseFailureCode) ? { parseFailureCode } : {}),
   };
 }
 function failureFor(event: KernelEvent): ClassifiedFailure | undefined {
@@ -807,7 +802,7 @@ function finiteDuration(value: unknown): number | undefined {
     ? Math.round(value)
     : undefined;
 }
-function baseRecovery(failure: ClassifiedFailure): ToolRecoveryV1 {
+function baseRecovery(failure: ClassifiedFailure): ToolRecovery {
   if (failure.modelFixable)
     return {
       disposition: 'correct_args',
@@ -871,9 +866,9 @@ function detailForFailure(failure: ClassifiedFailure): DetailCode {
   };
   return mapped[failure.kind] ?? 'unknown';
 }
-export function trustedToolTimingV1(
-  input?: Partial<Omit<ToolOutcomeTimingV1, 'source'>>,
-): ToolOutcomeTimingV1 {
+export function trustedToolTiming(
+  input?: Partial<Omit<ToolOutcomeTiming, 'source'>>,
+): ToolOutcomeTiming {
   if (!input) return { source: 'legacy_unknown' };
   const queueMs = finiteDuration(input.queueMs);
   const executionMs = finiteDuration(input.executionMs);
@@ -887,9 +882,9 @@ export function trustedToolTimingV1(
     ...(totalActiveMs != null ? { totalActiveMs } : {}),
   };
 }
-const trustedTiming = trustedToolTimingV1;
+const trustedTiming = trustedToolTiming;
 
-export function classifyToolOutcomeV1(input: ToolOutcomeClassificationInputV1): ToolOutcomeV1 {
+export function classifyToolOutcome(input: ToolOutcomeClassificationInput): ToolOutcome {
   if (input.status === 'success')
     return {
       schemaVersion: 1,
@@ -1023,8 +1018,6 @@ export function classifyToolOutcomeV1(input: ToolOutcomeClassificationInputV1): 
     ...(input.unknownFields ? { unknownFields: input.unknownFields } : {}),
   };
 }
-const classifyToolOutcome = classifyToolOutcomeV1;
-
 function exactKeys(value: Readonly<Record<string, unknown>>, allowed: readonly string[]): boolean {
   return Object.keys(value).every((key) => allowed.includes(key));
 }
@@ -1033,7 +1026,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 /** Strict persisted-envelope validator. Unknown V1 fields fail closed. */
-export function isToolOutcomeV1(value: unknown): value is ToolOutcomeV1 {
+export function isToolOutcome(value: unknown): value is ToolOutcome {
   if (
     !isRecord(value) ||
     !exactKeys(value, [
@@ -1267,7 +1260,7 @@ export function isToolOutcomeV1(value: unknown): value is ToolOutcomeV1 {
   return true;
 }
 function assertCanonicalOutcome(value: unknown, eventType: string): void {
-  if (!isToolOutcomeV1(value)) throw new Error(`${eventType} has invalid canonical ToolOutcomeV1.`);
+  if (!isToolOutcome(value)) throw new Error(`${eventType} has invalid canonical ToolOutcome.`);
 }
 
 /** Reject non-canonical terminal evidence before the pure reducer consumes it. */
@@ -1280,14 +1273,14 @@ export function assertCanonicalToolOutcomeEvent(event: KernelEvent): void {
     case 'tool.cancelled':
     case 'tool.retry_recorded':
     case 'approval.rejected':
-      assertCanonicalOutcome(payload.outcomeV1, event.type);
+      assertCanonicalOutcome(payload.outcome, event.type);
       return;
     case 'auto_review.completed': {
       const result = recordField(payload, 'result');
       if (result?.ok === true && result.approved !== true && result.escalatedToUser !== true)
-        assertCanonicalOutcome(payload.outcomeV1, event.type);
-      else if (Object.hasOwn(payload, 'outcomeV1'))
-        throw new Error('Non-terminal auto_review.completed cannot carry ToolOutcomeV1.');
+        assertCanonicalOutcome(payload.outcome, event.type);
+      else if (Object.hasOwn(payload, 'outcome'))
+        throw new Error('Non-terminal auto_review.completed cannot carry ToolOutcome.');
       return;
     }
     default:
@@ -1368,7 +1361,7 @@ function normalizeToolTerminalEvent(
         safeAutomaticRetry: false,
       }
     : event.type === 'tool.finished' && result?.ok === false
-      ? (recordField(payload, 'classifierAdviceV1') as ToolAdvice | undefined)
+      ? (recordField(payload, 'classifierAdvice') as ToolAdvice | undefined)
       : undefined;
   const classifierDiagnostic =
     event.type === 'tool.finished' &&
@@ -1419,7 +1412,7 @@ function normalizeToolTerminalEvent(
           },
         }
       : outcome;
-  return { ...event, createdAt, outcomeV1: outcomeWithLineage } as unknown as KernelEvent;
+  return { ...event, createdAt, outcome: outcomeWithLineage } as unknown as KernelEvent;
 }
 function normalizeApprovalRejected(
   event: KernelEvent,
@@ -1433,7 +1426,7 @@ function normalizeApprovalRejected(
   return {
     ...event,
     createdAt,
-    outcomeV1: classifyToolOutcome({
+    outcome: classifyToolOutcome({
       status: 'rejected',
       failure:
         suppliedFailure(recordField(payload, 'failure')) ??
@@ -1464,7 +1457,7 @@ function normalizeAutoReviewCompleted(
   const payload = eventRecord(event);
   const result = recordField(payload, 'result');
   if (result?.ok !== true || result.approved === true || result.escalatedToUser === true) {
-    const { outcomeV1: _outcomeV1, ...nonTerminal } = payload;
+    const { outcome: _outcome, ...nonTerminal } = payload;
     return { type: event.type, ...nonTerminal } as unknown as KernelEvent;
   }
   const toolCallId = stringField(payload, 'toolCallId');
@@ -1476,7 +1469,7 @@ function normalizeAutoReviewCompleted(
   return {
     ...event,
     createdAt,
-    outcomeV1: classifyToolOutcome({
+    outcome: classifyToolOutcome({
       status: 'rejected',
       failure: classifyFailure('auto_review_rejected', 'Auto-review rejected the tool.'),
       authority: {

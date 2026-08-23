@@ -1,14 +1,14 @@
 import {
   type AgentAuthorizationState,
-  type ApprovalGrantV1,
-  applyApprovalGrantV1,
-  authorizationCommandGrantKeyV1,
+  type ApprovalGrant,
+  applyApprovalGrant,
+  authorizationCommandGrantKey,
 } from '@kite/agent-kernel';
 import type { WorkspaceAccess } from '@kite/runtime-contract';
 
-export type StateAuthorizationStateV1 = AgentAuthorizationState;
-export type StateApprovalGrantV1 = ApprovalGrantV1;
-export type StateAuthorizationSourceV1 = 'user' | 'config' | 'test' | 'system';
+export type StateAuthorizationState = AgentAuthorizationState;
+export type StateApprovalGrant = ApprovalGrant;
+export type StateAuthorizationSource = 'user' | 'config' | 'test' | 'system';
 
 /**
  * Canonical State 25 authorization normalization owned by Runtime Host.
@@ -17,13 +17,13 @@ export type StateAuthorizationSourceV1 = 'user' | 'config' | 'test' | 'system';
  * authorization shape.  It does not calculate policy or create a second
  * authorization identity.
  */
-export function runtimeHostStateDefaultAuthorizationV1(): StateAuthorizationStateV1 {
+export function runtimeHostStateDefaultAuthorization(): StateAuthorizationState {
   return { mode: 'default', commandGrants: {} };
 }
 
-export function runtimeHostStateNormalizeAuthorizationV1(
-  authorization?: Readonly<StateAuthorizationStateV1> | null,
-): StateAuthorizationStateV1 {
+export function runtimeHostStateNormalizeAuthorization(
+  authorization?: Readonly<StateAuthorizationState> | null,
+): StateAuthorizationState {
   return {
     mode: authorization?.mode === 'full_access' ? 'full_access' : 'default',
     ...(authorization?.modeSource ? { modeSource: authorization.modeSource } : {}),
@@ -33,18 +33,18 @@ export function runtimeHostStateNormalizeAuthorizationV1(
 }
 
 /** Apply a same-command grant through the sole Kernel authorization owner. */
-export function runtimeHostStateGrantSameCommandV1(input: {
-  readonly authorization?: Readonly<StateAuthorizationStateV1> | null;
+export function runtimeHostStateGrantSameCommand(input: {
+  readonly authorization?: Readonly<StateAuthorizationState> | null;
   readonly workspace: string;
   readonly threadId: string;
   readonly command: string;
-  readonly source?: StateAuthorizationSourceV1;
+  readonly source?: StateAuthorizationSource;
   readonly grantedAt?: string;
-}): StateAuthorizationStateV1 {
+}): StateAuthorizationState {
   const command = input.command.trim();
-  const authorization = runtimeHostStateNormalizeAuthorizationV1(input.authorization);
+  const authorization = runtimeHostStateNormalizeAuthorization(input.authorization);
   if (!command) return authorization;
-  return applyApprovalGrantV1({
+  return applyApprovalGrant({
     authorization,
     grant: 'same_command',
     workspace: input.workspace,
@@ -55,16 +55,16 @@ export function runtimeHostStateGrantSameCommandV1(input: {
   });
 }
 
-export function runtimeHostStateHasSameCommandGrantV1(input: {
-  readonly authorization?: Readonly<StateAuthorizationStateV1> | null;
+export function runtimeHostStateHasSameCommandGrant(input: {
+  readonly authorization?: Readonly<StateAuthorizationState> | null;
   readonly workspace: string;
   readonly threadId: string;
   readonly command: string;
 }): boolean {
-  const authorization = runtimeHostStateNormalizeAuthorizationV1(input.authorization);
+  const authorization = runtimeHostStateNormalizeAuthorization(input.authorization);
   const command = input.command.trim();
   if (!command) return false;
-  const key = authorizationCommandGrantKeyV1({
+  const key = authorizationCommandGrantKey({
     workspace: input.workspace,
     threadId: input.threadId,
     command,
@@ -79,11 +79,11 @@ export function runtimeHostStateHasSameCommandGrantV1(input: {
 }
 
 /** State 25 compatibility projection used when a caller has no explicit phase fact. */
-export function runtimeHostStateDefaultPhaseForWorkspaceAccessV1(
+export function runtimeHostStateDefaultPhaseForWorkspaceAccess(
   _workspaceAccess: WorkspaceAccess,
 ): 'planning' | 'building' {
   return 'building';
 }
 
-export const runtimeHostStateApplyApprovalGrantV1 = applyApprovalGrantV1;
-export const runtimeHostStateAuthorizationCommandGrantKeyV1 = authorizationCommandGrantKeyV1;
+export const runtimeHostStateApplyApprovalGrant = applyApprovalGrant;
+export const runtimeHostStateAuthorizationCommandGrantKey = authorizationCommandGrantKey;

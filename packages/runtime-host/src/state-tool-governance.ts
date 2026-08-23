@@ -1,120 +1,120 @@
 import {
   type AgentAuthorizationState,
-  admitToolGovernanceV1,
-  authorizationCommandGrantKeyV1,
-  authorizeToolGovernanceV1,
-  createToolGovernanceCommandDigestV1,
-  isValidToolGovernanceFactsV1,
-  TOOL_GOVERNANCE_FACTS_SCHEMA_V1,
-  type ToolGovernanceAdmissionFactsV1,
-  type ToolGovernanceApprovalFactV1,
-  type ToolGovernanceAuthorizationDecisionV1,
-  type ToolGovernanceContextFactsV1,
-  type ToolGovernanceDecisionV1,
-  type ToolGovernanceFactsV1,
-  type ToolGovernanceInvocationFactV1,
-  type ToolGovernanceNestedSkillFactV1,
-  type ToolGovernancePolicyFactV1,
-  type ToolGovernanceSameCommandGrantFactV1,
+  admitToolGovernance,
+  authorizationCommandGrantKey,
+  authorizeToolGovernance,
+  createToolGovernanceCommandDigest,
+  isValidToolGovernanceFacts,
+  TOOL_GOVERNANCE_FACTS_SCHEMA_,
+  type ToolGovernanceAdmissionFacts,
+  type ToolGovernanceApprovalFact,
+  type ToolGovernanceAuthorizationDecision,
+  type ToolGovernanceContextFacts,
+  type ToolGovernanceDecision,
+  type ToolGovernanceFacts,
+  type ToolGovernanceInvocationFact,
+  type ToolGovernanceNestedSkillFact,
+  type ToolGovernancePolicyFact,
+  type ToolGovernanceSameCommandGrantFact,
 } from '@kite/agent-kernel';
 import {
-  CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
-  type ClassifiedInvocationV1,
-  type RuntimeJsonValueV1,
-  type ToolPipelineClassifiedIdentityVerificationResultV1,
-  type ToolPipelineClassifiedIdentityVerifierV1,
-  type ToolPipelineGovernanceDynamicInvocationProjectionV1,
-  type ToolPipelineGovernanceNestedSkillProjectionV1,
-  type ToolPipelineGovernanceOrdinaryInvocationProjectionV1,
-  type ToolPipelineGovernanceProjectionV1,
+  CAPABILITY_POLICY_COMPILATION_SCHEMA_,
+  type ClassifiedInvocation,
+  type RuntimeJsonValue,
+  type ToolPipelineClassifiedIdentityVerificationResult,
+  type ToolPipelineClassifiedIdentityVerifier,
+  type ToolPipelineGovernanceDynamicInvocationProjection,
+  type ToolPipelineGovernanceNestedSkillProjection,
+  type ToolPipelineGovernanceOrdinaryInvocationProjection,
+  type ToolPipelineGovernanceProjection,
 } from '@kite/runtime-spi';
 
 /** Host-facing aliases keep App composition from depending on Agent Kernel directly. */
-export type RuntimeHostStateToolGovernanceFactsV1 = ToolGovernanceFactsV1;
-export type RuntimeHostStateToolGovernanceDecisionV1 = ToolGovernanceDecisionV1;
+export type RuntimeHostStateToolGovernanceFacts = ToolGovernanceFacts;
+export type RuntimeHostStateToolGovernanceDecision = ToolGovernanceDecision;
 
 /**
  * State 25 authorization facts supplied by Host around one Builtin-owned
  * classification. Workspace and thread identity are deliberately supplied
  * here: Builtin governance must not manufacture Host session identity.
  */
-export interface RuntimeHostStateToolGovernanceAuthorizationInputV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface RuntimeHostStateToolGovernanceAuthorizationInput<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly classified: Readonly<ClassifiedInvocationV1<TArguments>>;
+  readonly classified: Readonly<ClassifiedInvocation<TArguments>>;
   readonly workspace: string;
   readonly threadId: string;
   readonly context: Readonly<
-    Omit<ToolGovernanceContextFactsV1, 'executionMechanism' | 'gates'> & {
-      readonly gates: Readonly<ToolGovernanceContextFactsV1['gates']>;
+    Omit<ToolGovernanceContextFacts, 'executionMechanism' | 'gates'> & {
+      readonly gates: Readonly<ToolGovernanceContextFacts['gates']>;
     }
   >;
-  readonly approval: Readonly<ToolGovernanceApprovalFactV1>;
+  readonly approval: Readonly<ToolGovernanceApprovalFact>;
   /**
    * A private State 25 authorization lookup. The command is used only to
    * select the exact persisted grant; its digest must already be present in
    * the authentic Builtin governance projection.
    */
-  readonly sameCommandGrant?: Readonly<RuntimeHostStateSameCommandGrantInputV1>;
+  readonly sameCommandGrant?: Readonly<RuntimeHostStateSameCommandGrantInput>;
 }
 
 /** Full projection input; admission is deliberately supplied only at admit. */
-export interface RuntimeHostStateToolGovernanceInputV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> extends RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments> {
-  readonly admission: Readonly<ToolGovernanceAdmissionFactsV1>;
+export interface RuntimeHostStateToolGovernanceInput<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+> extends RuntimeHostStateToolGovernanceAuthorizationInput<TArguments> {
+  readonly admission: Readonly<ToolGovernanceAdmissionFacts>;
 }
 
-export interface RuntimeHostStateSameCommandGrantInputV1 {
+export interface RuntimeHostStateSameCommandGrantInput {
   readonly authorization: Readonly<AgentAuthorizationState>;
   readonly command: string;
 }
 
-const AUTHORIZATION_ADMISSION_V1: Readonly<ToolGovernanceAdmissionFactsV1> = Object.freeze({
+const AUTHORIZATION_ADMISSION_: Readonly<ToolGovernanceAdmissionFacts> = Object.freeze({
   freshness: 'current',
   reservationRequired: false,
   reservationIds: [],
 });
 
-export type RuntimeHostStateToolGovernanceFailureCodeV1 =
+export type RuntimeHostStateToolGovernanceFailureCode =
   | 'classified_identity_invalid'
   | 'governance_missing'
   | 'governance_projection_invalid'
   | 'authorization_identity_invalid'
   | 'kernel_facts_invalid';
 
-export interface RuntimeHostStateToolGovernanceFailureV1 {
-  readonly code: RuntimeHostStateToolGovernanceFailureCodeV1;
+export interface RuntimeHostStateToolGovernanceFailure {
+  readonly code: RuntimeHostStateToolGovernanceFailureCode;
   /** Bounded, secret-free diagnostic. */
   readonly diagnostic: string;
 }
 
-export type RuntimeHostStateToolGovernanceResultV1<T> =
+export type RuntimeHostStateToolGovernanceResult<T> =
   | { readonly ok: true; readonly value: Readonly<T> }
   | {
       readonly ok: false;
-      readonly failure: Readonly<RuntimeHostStateToolGovernanceFailureV1>;
+      readonly failure: Readonly<RuntimeHostStateToolGovernanceFailure>;
     };
 
-export interface RuntimeHostStateToolGovernancePortV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface RuntimeHostStateToolGovernancePort<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 > {
   readonly project: (
-    input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-    admission: Readonly<ToolGovernanceAdmissionFactsV1>,
-  ) => RuntimeHostStateToolGovernanceResultV1<ToolGovernanceFactsV1>;
+    input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+    admission: Readonly<ToolGovernanceAdmissionFacts>,
+  ) => RuntimeHostStateToolGovernanceResult<ToolGovernanceFacts>;
   readonly authorize: (
-    input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-  ) => RuntimeHostStateToolGovernanceResultV1<ToolGovernanceAuthorizationDecisionV1>;
+    input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+  ) => RuntimeHostStateToolGovernanceResult<ToolGovernanceAuthorizationDecision>;
   readonly admit: (
-    input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-    authorization: Readonly<ToolGovernanceAuthorizationDecisionV1>,
-    admission: Readonly<ToolGovernanceAdmissionFactsV1>,
-  ) => RuntimeHostStateToolGovernanceResultV1<ToolGovernanceDecisionV1>;
+    input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+    authorization: Readonly<ToolGovernanceAuthorizationDecision>,
+    admission: Readonly<ToolGovernanceAdmissionFacts>,
+  ) => RuntimeHostStateToolGovernanceResult<ToolGovernanceDecision>;
   readonly decide: (
-    input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-    admission: Readonly<ToolGovernanceAdmissionFactsV1>,
-  ) => RuntimeHostStateToolGovernanceResultV1<ToolGovernanceDecisionV1>;
+    input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+    admission: Readonly<ToolGovernanceAdmissionFacts>,
+  ) => RuntimeHostStateToolGovernanceResult<ToolGovernanceDecision>;
 }
 
 /**
@@ -123,73 +123,73 @@ export interface RuntimeHostStateToolGovernancePortV1<
  * no raw arguments, domainData, parser, effects compiler, or executor is
  * consulted here.
  */
-export function createRuntimeHostStateToolGovernanceV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export function createRuntimeHostStateToolGovernance<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 >(input: {
-  readonly verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifierV1<TArguments>;
-}): RuntimeHostStateToolGovernancePortV1<TArguments> {
+  readonly verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifier<TArguments>;
+}): RuntimeHostStateToolGovernancePort<TArguments> {
   const verifyClassifiedIdentity = input.verifyClassifiedIdentity;
   const authorizationAuthority = new WeakMap<
     object,
     Readonly<{
       readonly input: object;
       readonly classified: object;
-      readonly facts: Readonly<ToolGovernanceFactsV1>;
+      readonly facts: Readonly<ToolGovernanceFacts>;
     }>
   >();
 
   const project = (
-    governanceInput: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-    admission: Readonly<ToolGovernanceAdmissionFactsV1>,
-  ): RuntimeHostStateToolGovernanceResultV1<ToolGovernanceFactsV1> => {
-    return projectStateFactsV1(governanceInput, admission, verifyClassifiedIdentity);
+    governanceInput: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+    admission: Readonly<ToolGovernanceAdmissionFacts>,
+  ): RuntimeHostStateToolGovernanceResult<ToolGovernanceFacts> => {
+    return projectStateFacts(governanceInput, admission, verifyClassifiedIdentity);
   };
 
   const authorize = (
-    governanceInput: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-  ): RuntimeHostStateToolGovernanceResultV1<ToolGovernanceAuthorizationDecisionV1> => {
-    const projected = project(governanceInput, AUTHORIZATION_ADMISSION_V1);
+    governanceInput: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+  ): RuntimeHostStateToolGovernanceResult<ToolGovernanceAuthorizationDecision> => {
+    const projected = project(governanceInput, AUTHORIZATION_ADMISSION_);
     if (!projected.ok) return projected;
-    const authorization = authorizeToolGovernanceV1(projected.value);
+    const authorization = authorizeToolGovernance(projected.value);
     authorizationAuthority.set(authorization as object, {
       input: governanceInput as object,
       classified: governanceInput.classified as object,
       facts: projected.value,
     });
-    return successV1(authorization);
+    return success(authorization);
   };
 
   const admit = (
-    governanceInput: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-    authorization: Readonly<ToolGovernanceAuthorizationDecisionV1>,
-    admission: Readonly<ToolGovernanceAdmissionFactsV1>,
-  ): RuntimeHostStateToolGovernanceResultV1<ToolGovernanceDecisionV1> => {
+    governanceInput: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+    authorization: Readonly<ToolGovernanceAuthorizationDecision>,
+    admission: Readonly<ToolGovernanceAdmissionFacts>,
+  ): RuntimeHostStateToolGovernanceResult<ToolGovernanceDecision> => {
     const authority = authorizationAuthority.get(authorization as object);
     if (
       !authority ||
       authority.input !== (governanceInput as object) ||
       authority.classified !== (governanceInput.classified as object)
     ) {
-      return failureV1(
+      return failure(
         'authorization_identity_invalid',
         'Authorization is not bound to this Host governance input.',
       );
     }
     const projected = project(governanceInput, admission);
     if (!projected.ok) return projected;
-    if (!sameAuthorizationFactsV1(projected.value, authority.facts)) {
-      return failureV1(
+    if (!sameAuthorizationFacts(projected.value, authority.facts)) {
+      return failure(
         'authorization_identity_invalid',
         'Authorization facts no longer match the projected invocation.',
       );
     }
-    return successV1(admitToolGovernanceV1(authorization, projected.value.admission));
+    return success(admitToolGovernance(authorization, projected.value.admission));
   };
 
   const decide = (
-    governanceInput: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-    admission: Readonly<ToolGovernanceAdmissionFactsV1>,
-  ): RuntimeHostStateToolGovernanceResultV1<ToolGovernanceDecisionV1> => {
+    governanceInput: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+    admission: Readonly<ToolGovernanceAdmissionFacts>,
+  ): RuntimeHostStateToolGovernanceResult<ToolGovernanceDecision> => {
     const authorization = authorize(governanceInput);
     if (!authorization.ok) return authorization;
     return admit(governanceInput, authorization.value, admission);
@@ -198,60 +198,60 @@ export function createRuntimeHostStateToolGovernanceV1<
   return Object.freeze({ project, authorize, admit, decide });
 }
 
-function projectStateFactsV1<TArguments extends RuntimeJsonValueV1>(
-  input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1<TArguments>>,
-  admission: Readonly<ToolGovernanceAdmissionFactsV1>,
-  verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifierV1<TArguments>,
-): RuntimeHostStateToolGovernanceResultV1<ToolGovernanceFactsV1> {
-  let verification: boolean | ToolPipelineClassifiedIdentityVerificationResultV1;
+function projectStateFacts<TArguments extends RuntimeJsonValue>(
+  input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput<TArguments>>,
+  admission: Readonly<ToolGovernanceAdmissionFacts>,
+  verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifier<TArguments>,
+): RuntimeHostStateToolGovernanceResult<ToolGovernanceFacts> {
+  let verification: boolean | ToolPipelineClassifiedIdentityVerificationResult;
   try {
     verification = verifyClassifiedIdentity(input.classified);
   } catch {
-    return failureV1('classified_identity_invalid', 'Builtin identity verification failed.');
+    return failure('classified_identity_invalid', 'Builtin identity verification failed.');
   }
-  if (!classifiedIdentityAcceptedV1(verification)) {
-    return failureV1('classified_identity_invalid', 'Builtin classified identity was rejected.');
+  if (!classifiedIdentityAccepted(verification)) {
+    return failure('classified_identity_invalid', 'Builtin classified identity was rejected.');
   }
 
   const classified = input.classified;
   try {
     const governance = classified.governance;
     if (!governance)
-      return failureV1('governance_missing', 'Builtin governance projection is missing.');
-    if (!validGovernanceProjectionV1(classified, governance)) {
-      return failureV1(
+      return failure('governance_missing', 'Builtin governance projection is missing.');
+    if (!validGovernanceProjection(classified, governance)) {
+      return failure(
         'governance_projection_invalid',
         'Builtin governance projection identity is inconsistent.',
       );
     }
 
-    const invocation = invocationFactV1(input, governance.invocation);
-    const policy = policyFactV1(governance);
-    const context = contextFactsV1(input.context, governance.invocation.executionMechanism);
-    const sameCommandGrant = sameCommandGrantFactV1(input, invocation, policy);
-    const facts: ToolGovernanceFactsV1 = {
-      schema: TOOL_GOVERNANCE_FACTS_SCHEMA_V1,
+    const invocation = invocationFact(input, governance.invocation);
+    const policy = policyFact(governance);
+    const context = contextFacts(input.context, governance.invocation.executionMechanism);
+    const sameCommandGrant = sameCommandGrantFact(input, invocation, policy);
+    const facts: ToolGovernanceFacts = {
+      schema: TOOL_GOVERNANCE_FACTS_SCHEMA_,
       invocation,
       policy,
       context,
-      admission: admissionFactV1(admission),
-      approval: approvalFactV1(input.approval),
+      admission: admissionFact(admission),
+      approval: approvalFact(input.approval),
       ...(sameCommandGrant ? { sameCommandGrant } : {}),
-      ...(governance.dynamicMcp ? { dynamicMcp: dynamicMcpFactV1(governance) } : {}),
-      ...(governance.nestedSkill ? { nestedSkill: nestedSkillFactV1(governance) } : {}),
+      ...(governance.dynamicMcp ? { dynamicMcp: dynamicMcpFact(governance) } : {}),
+      ...(governance.nestedSkill ? { nestedSkill: nestedSkillFact(governance) } : {}),
     };
-    if (!isValidToolGovernanceFactsV1(facts)) {
-      return failureV1('kernel_facts_invalid', 'Projected State 25 governance facts are invalid.');
+    if (!isValidToolGovernanceFacts(facts)) {
+      return failure('kernel_facts_invalid', 'Projected State 25 governance facts are invalid.');
     }
-    return successV1(deepFreezeV1(facts));
+    return success(deepFreeze(facts));
   } catch {
-    return failureV1('kernel_facts_invalid', 'Projected State 25 governance facts are invalid.');
+    return failure('kernel_facts_invalid', 'Projected State 25 governance facts are invalid.');
   }
 }
 
-function validGovernanceProjectionV1<TArguments extends RuntimeJsonValueV1>(
-  classified: Readonly<ClassifiedInvocationV1<TArguments>>,
-  governance: Readonly<ToolPipelineGovernanceProjectionV1>,
+function validGovernanceProjection<TArguments extends RuntimeJsonValue>(
+  classified: Readonly<ClassifiedInvocation<TArguments>>,
+  governance: Readonly<ToolPipelineGovernanceProjection>,
 ): boolean {
   if (
     classified.schema !== 'kite.tool-pipeline-stage.v1' ||
@@ -259,7 +259,7 @@ function validGovernanceProjectionV1<TArguments extends RuntimeJsonValueV1>(
     !Object.is(classified.policyCompilation, governance.policy) ||
     !Object.is(classified.effectiveEffects, governance.effectiveEffects) ||
     classified.effectiveEffectsDigest !== governance.effectiveEffectsDigest ||
-    governance.policy.schema !== CAPABILITY_POLICY_COMPILATION_SCHEMA_V1 ||
+    governance.policy.schema !== CAPABILITY_POLICY_COMPILATION_SCHEMA_ ||
     governance.policy.operationId !== governance.invocation.operationId ||
     governance.policy.capabilityRevision !== governance.invocation.capabilityRevision ||
     governance.policy.parserRevision !== governance.invocation.parserRevision
@@ -268,14 +268,14 @@ function validGovernanceProjectionV1<TArguments extends RuntimeJsonValueV1>(
   }
 
   if (governance.invocation.isDynamicMcp) {
-    return validDynamicGovernanceProjectionV1(governance);
+    return validDynamicGovernanceProjection(governance);
   }
-  return validOrdinaryGovernanceProjectionV1(governance);
+  return validOrdinaryGovernanceProjection(governance);
 }
 
-function sameAuthorizationFactsV1(
-  current: Readonly<ToolGovernanceFactsV1>,
-  authorized: Readonly<ToolGovernanceFactsV1>,
+function sameAuthorizationFacts(
+  current: Readonly<ToolGovernanceFacts>,
+  authorized: Readonly<ToolGovernanceFacts>,
 ): boolean {
   return (
     JSON.stringify({ ...current, admission: undefined }) ===
@@ -283,11 +283,11 @@ function sameAuthorizationFactsV1(
   );
 }
 
-function validOrdinaryGovernanceProjectionV1(
-  governance: Readonly<ToolPipelineGovernanceProjectionV1>,
+function validOrdinaryGovernanceProjection(
+  governance: Readonly<ToolPipelineGovernanceProjection>,
 ): governance is Readonly<
-  ToolPipelineGovernanceProjectionV1 & {
-    readonly invocation: Readonly<ToolPipelineGovernanceOrdinaryInvocationProjectionV1>;
+  ToolPipelineGovernanceProjection & {
+    readonly invocation: Readonly<ToolPipelineGovernanceOrdinaryInvocationProjection>;
   }
 > {
   const invocation = governance.invocation;
@@ -312,14 +312,14 @@ function validOrdinaryGovernanceProjectionV1(
       invocation.nestedCatalogRevision === null
     );
   }
-  return validNestedSkillProjectionV1(invocation, governance.nestedSkill);
+  return validNestedSkillProjection(invocation, governance.nestedSkill);
 }
 
-function validDynamicGovernanceProjectionV1(
-  governance: Readonly<ToolPipelineGovernanceProjectionV1>,
+function validDynamicGovernanceProjection(
+  governance: Readonly<ToolPipelineGovernanceProjection>,
 ): governance is Readonly<
-  ToolPipelineGovernanceProjectionV1 & {
-    readonly invocation: Readonly<ToolPipelineGovernanceDynamicInvocationProjectionV1>;
+  ToolPipelineGovernanceProjection & {
+    readonly invocation: Readonly<ToolPipelineGovernanceDynamicInvocationProjection>;
   }
 > {
   const invocation = governance.invocation;
@@ -355,9 +355,9 @@ function validDynamicGovernanceProjectionV1(
   );
 }
 
-function validNestedSkillProjectionV1(
-  invocation: Readonly<ToolPipelineGovernanceProjectionV1['invocation']>,
-  nestedSkill: Readonly<ToolPipelineGovernanceNestedSkillProjectionV1>,
+function validNestedSkillProjection(
+  invocation: Readonly<ToolPipelineGovernanceProjection['invocation']>,
+  nestedSkill: Readonly<ToolPipelineGovernanceNestedSkillProjection>,
 ): boolean {
   return (
     invocation.operationId === 'builtin:activate_skill' &&
@@ -368,10 +368,10 @@ function validNestedSkillProjectionV1(
   );
 }
 
-function invocationFactV1(
-  input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1>,
-  invocation: Readonly<ToolPipelineGovernanceProjectionV1['invocation']>,
-): ToolGovernanceInvocationFactV1 {
+function invocationFact(
+  input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput>,
+  invocation: Readonly<ToolPipelineGovernanceProjection['invocation']>,
+): ToolGovernanceInvocationFact {
   return {
     workspace: input.workspace,
     threadId: input.threadId,
@@ -398,9 +398,9 @@ function invocationFactV1(
   };
 }
 
-function policyFactV1(
-  governance: Readonly<ToolPipelineGovernanceProjectionV1>,
-): ToolGovernancePolicyFactV1 {
+function policyFact(
+  governance: Readonly<ToolPipelineGovernanceProjection>,
+): ToolGovernancePolicyFact {
   const policy = governance.policy;
   return {
     operationId: policy.operationId,
@@ -423,17 +423,17 @@ function policyFactV1(
   };
 }
 
-function contextFactsV1(
-  context: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1['context']>,
-  executionMechanism: ToolPipelineGovernanceProjectionV1['invocation']['executionMechanism'],
-): ToolGovernanceContextFactsV1 {
-  const projected: ToolGovernanceContextFactsV1 = {
+function contextFacts(
+  context: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput['context']>,
+  executionMechanism: ToolPipelineGovernanceProjection['invocation']['executionMechanism'],
+): ToolGovernanceContextFacts {
+  const projected: ToolGovernanceContextFacts = {
     phase: context.phase,
     interactionMode: context.interactionMode,
     authorizationMode: context.authorizationMode,
     sandboxAvailable: context.sandboxAvailable,
     circuitBreakerTripped: context.circuitBreakerTripped,
-    executionMechanism: executionMechanismV1(executionMechanism),
+    executionMechanism: projectExecutionMechanism(executionMechanism),
     gates: {
       recoveryAdmission: context.gates.recoveryAdmission,
       boundedCancellation: context.gates.boundedCancellation,
@@ -450,17 +450,17 @@ function contextFactsV1(
   return projected;
 }
 
-function executionMechanismV1(
-  mechanism: ToolPipelineGovernanceProjectionV1['invocation']['executionMechanism'],
-): ToolGovernanceContextFactsV1['executionMechanism'] {
+function projectExecutionMechanism(
+  mechanism: ToolPipelineGovernanceProjection['invocation']['executionMechanism'],
+): ToolGovernanceContextFacts['executionMechanism'] {
   if (mechanism === 'user_input') return 'user_input';
   if (mechanism === 'shell') return 'shell';
   return 'other';
 }
 
-function admissionFactV1(
-  admission: Readonly<ToolGovernanceAdmissionFactsV1>,
-): ToolGovernanceAdmissionFactsV1 {
+function admissionFact(
+  admission: Readonly<ToolGovernanceAdmissionFacts>,
+): ToolGovernanceAdmissionFacts {
   return {
     freshness: admission.freshness,
     reservationRequired: admission.reservationRequired,
@@ -468,9 +468,7 @@ function admissionFactV1(
   };
 }
 
-function approvalFactV1(
-  approval: Readonly<ToolGovernanceApprovalFactV1>,
-): ToolGovernanceApprovalFactV1 {
+function approvalFact(approval: Readonly<ToolGovernanceApprovalFact>): ToolGovernanceApprovalFact {
   return {
     status: approval.status,
     grant: approval.grant,
@@ -479,9 +477,9 @@ function approvalFactV1(
   };
 }
 
-function dynamicMcpFactV1(
-  governance: Readonly<ToolPipelineGovernanceProjectionV1>,
-): NonNullable<ToolGovernanceFactsV1['dynamicMcp']> {
+function dynamicMcpFact(
+  governance: Readonly<ToolPipelineGovernanceProjection>,
+): NonNullable<ToolGovernanceFacts['dynamicMcp']> {
   const dynamicMcp = governance.dynamicMcp;
   if (!dynamicMcp) throw new Error('Dynamic MCP governance projection is missing.');
   return {
@@ -490,9 +488,9 @@ function dynamicMcpFactV1(
   };
 }
 
-function nestedSkillFactV1(
-  governance: Readonly<ToolPipelineGovernanceProjectionV1>,
-): ToolGovernanceNestedSkillFactV1 {
+function nestedSkillFact(
+  governance: Readonly<ToolPipelineGovernanceProjection>,
+): ToolGovernanceNestedSkillFact {
   const nestedSkill = governance.nestedSkill;
   if (!nestedSkill) throw new Error('Nested Skill governance projection is missing.');
   return {
@@ -501,11 +499,11 @@ function nestedSkillFactV1(
   };
 }
 
-function sameCommandGrantFactV1(
-  input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInputV1>,
-  invocation: Readonly<ToolGovernanceInvocationFactV1>,
-  policy: Readonly<ToolGovernancePolicyFactV1>,
-): ToolGovernanceSameCommandGrantFactV1 | undefined {
+function sameCommandGrantFact(
+  input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput>,
+  invocation: Readonly<ToolGovernanceInvocationFact>,
+  policy: Readonly<ToolGovernancePolicyFact>,
+): ToolGovernanceSameCommandGrantFact | undefined {
   const candidate = input.sameCommandGrant;
   if (!candidate || !policy.sameCommandMayBypassApproval || !invocation.commandDigest) {
     return undefined;
@@ -513,13 +511,13 @@ function sameCommandGrantFactV1(
   if (typeof candidate.command !== 'string') return undefined;
   const command = candidate.command.trim();
   if (!command) return undefined;
-  if (createToolGovernanceCommandDigestV1(command) !== invocation.commandDigest) {
+  if (createToolGovernanceCommandDigest(command) !== invocation.commandDigest) {
     return undefined;
   }
   const authorization = candidate.authorization;
   const commandGrants = authorization?.commandGrants;
   if (!commandGrants || typeof commandGrants !== 'object') return undefined;
-  const key = authorizationCommandGrantKeyV1({
+  const key = authorizationCommandGrantKey({
     workspace: input.workspace,
     threadId: input.threadId,
     command,
@@ -551,27 +549,27 @@ function sameCommandGrantFactV1(
   };
 }
 
-function classifiedIdentityAcceptedV1(
-  result: boolean | ToolPipelineClassifiedIdentityVerificationResultV1,
+function classifiedIdentityAccepted(
+  result: boolean | ToolPipelineClassifiedIdentityVerificationResult,
 ): boolean {
   return (
     result === true || (typeof result === 'object' && result !== null && result.valid === true)
   );
 }
 
-function successV1<T>(value: T): RuntimeHostStateToolGovernanceResultV1<T> {
+function success<T>(value: T): RuntimeHostStateToolGovernanceResult<T> {
   return { ok: true, value };
 }
 
-function failureV1(
-  code: RuntimeHostStateToolGovernanceFailureCodeV1,
+function failure(
+  code: RuntimeHostStateToolGovernanceFailureCode,
   diagnostic: string,
-): RuntimeHostStateToolGovernanceResultV1<never> {
+): RuntimeHostStateToolGovernanceResult<never> {
   return { ok: false, failure: { code, diagnostic } };
 }
 
-function deepFreezeV1<T>(value: T): T {
+function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
-  for (const child of Object.values(value as Record<string, unknown>)) deepFreezeV1(child);
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
   return Object.freeze(value);
 }

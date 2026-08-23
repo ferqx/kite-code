@@ -1,16 +1,16 @@
 import { createHash } from 'node:crypto';
 import {
-  type CanonicalJsonObjectV1,
-  type CanonicalModelMessageV1,
-  type CanonicalProviderOptionsV1,
-  type CanonicalToolDeclarationV1,
-  MODEL_INVOCATION_PURPOSES_V1,
-  MODEL_SURFACE_SCHEMA_V1,
-  type ModelAdapterReplayOwnerV1,
-  type ModelRouteIdentityV1,
-  type ModelSurfaceV1,
-  type ResolvedModelCapabilitiesValueV1,
-  type Sha256DigestV1,
+  type CanonicalJsonObject,
+  type CanonicalModelMessage,
+  type CanonicalProviderOptions,
+  type CanonicalToolDeclaration,
+  MODEL_INVOCATION_PURPOSES_,
+  MODEL_SURFACE_SCHEMA_,
+  type ModelAdapterReplayOwner,
+  type ModelRouteIdentity,
+  type ModelSurface,
+  type ResolvedModelCapabilitiesValue,
+  type Sha256Digest,
 } from '@kite/runtime-spi';
 
 const UTF8_ENCODER = new TextEncoder();
@@ -22,10 +22,10 @@ const SAFE_MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
 const ENDPOINT_LIKE_ROUTE_PATTERN =
   /^(?:(?:[a-z0-9-]+\.)+[a-z]{2,}|localhost|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?:\/|$)/iu;
 
-const MODEL_SURFACE_DIGEST_DOMAIN_V1 = 'kite.model-surface.v1';
-const MODEL_ROUTE_DIGEST_DOMAIN_V1 = 'kite.model-route-identity.v1';
-const MODEL_CAPABILITY_DIGEST_DOMAIN_V1 = 'kite.model-resolved-capabilities.v1';
-const MODEL_PROVIDER_OPTIONS_DIGEST_DOMAIN_V1 = 'kite.model-provider-options.v1';
+const MODEL_SURFACE_DIGEST_DOMAIN_ = 'kite.model-surface.v1';
+const MODEL_ROUTE_DIGEST_DOMAIN_ = 'kite.model-route-identity.v1';
+const MODEL_CAPABILITY_DIGEST_DOMAIN_ = 'kite.model-resolved-capabilities.v1';
+const MODEL_PROVIDER_OPTIONS_DIGEST_DOMAIN_ = 'kite.model-provider-options.v1';
 
 const FORBIDDEN_PROVIDER_OPTION_KEYS = new Set([
   'authorization',
@@ -59,11 +59,11 @@ const SECRET_BEARING_VALUE_PATTERNS = [
   /(?:^|\s)[a-z][a-z0-9+.-]*:\/\//iu,
 ] as const;
 
-export interface ModelSurfaceDigestLayersV1 {
-  routeIdentityDigest: Sha256DigestV1;
-  resolvedCapabilitiesDigest: Sha256DigestV1;
-  providerOptionsDigest: Sha256DigestV1;
-  surfaceDigest: Sha256DigestV1;
+export interface ModelSurfaceDigestLayers {
+  routeIdentityDigest: Sha256Digest;
+  resolvedCapabilitiesDigest: Sha256Digest;
+  providerOptionsDigest: Sha256Digest;
+  surfaceDigest: Sha256Digest;
 }
 
 export class ModelSurfaceCanonicalizationError extends Error {
@@ -79,61 +79,54 @@ export class ModelSurfaceCanonicalizationError extends Error {
  * Arrays retain their semantic order. Objects are ordered by UTF-16 code units.
  * Values outside the JSON data model fail closed rather than being omitted.
  */
-export function canonicalModelJsonV1(value: unknown): string {
+export function canonicalModelJson(value: unknown): string {
   return serializeCanonical(value, new Set<object>(), '$');
 }
 
-export function canonicalModelJsonBytesV1(value: unknown): Uint8Array {
-  return UTF8_ENCODER.encode(canonicalModelJsonV1(value));
+export function canonicalModelJsonBytes(value: unknown): Uint8Array {
+  return UTF8_ENCODER.encode(canonicalModelJson(value));
 }
 
 /** Domain-separated digest for strict JSON-safe private model evidence contracts. */
-export function computePrivateModelEvidenceDigestV1(
-  domain: string,
-  value: unknown,
-): Sha256DigestV1 {
-  return digestPrivateModelEvidence(domain, canonicalModelJsonBytesV1(value));
+export function computePrivateModelEvidenceDigest(domain: string, value: unknown): Sha256Digest {
+  return digestPrivateModelEvidence(domain, canonicalModelJsonBytes(value));
 }
 
-export function computeResolvedModelCapabilitiesDigestV1(
-  value: ResolvedModelCapabilitiesValueV1,
-): Sha256DigestV1 {
-  const canonicalBytes = canonicalModelJsonBytesV1(value);
+export function computeResolvedModelCapabilitiesDigest(
+  value: ResolvedModelCapabilitiesValue,
+): Sha256Digest {
+  const canonicalBytes = canonicalModelJsonBytes(value);
   assertResolvedCapabilities(value, '$');
-  return digestPrivateModelEvidence(MODEL_CAPABILITY_DIGEST_DOMAIN_V1, canonicalBytes);
+  return digestPrivateModelEvidence(MODEL_CAPABILITY_DIGEST_DOMAIN_, canonicalBytes);
 }
 
-export function computeCanonicalProviderOptionsDigestV1(
-  value: CanonicalJsonObjectV1,
-): Sha256DigestV1 {
-  const canonicalBytes = canonicalModelJsonBytesV1(value);
+export function computeCanonicalProviderOptionsDigest(value: CanonicalJsonObject): Sha256Digest {
+  const canonicalBytes = canonicalModelJsonBytes(value);
   assertObject(value, '$.providerOptions');
   assertNoSecretBearingOptionKeys(value);
-  return digestPrivateModelEvidence(MODEL_PROVIDER_OPTIONS_DIGEST_DOMAIN_V1, canonicalBytes);
+  return digestPrivateModelEvidence(MODEL_PROVIDER_OPTIONS_DIGEST_DOMAIN_, canonicalBytes);
 }
 
-export function computeModelRouteIdentityDigestV1(route: ModelRouteIdentityV1): Sha256DigestV1 {
-  const canonicalBytes = canonicalModelJsonBytesV1(route);
+export function computeModelRouteIdentityDigest(route: ModelRouteIdentity): Sha256Digest {
+  const canonicalBytes = canonicalModelJsonBytes(route);
   assertRoute(route, '$');
-  return digestPrivateModelEvidence(MODEL_ROUTE_DIGEST_DOMAIN_V1, canonicalBytes);
+  return digestPrivateModelEvidence(MODEL_ROUTE_DIGEST_DOMAIN_, canonicalBytes);
 }
 
-export function computeModelSurfaceDigestV1(surface: ModelSurfaceV1): Sha256DigestV1 {
-  canonicalModelJsonV1(surface);
-  assertModelSurfaceV1(surface);
-  const canonicalBytes = canonicalModelJsonBytesV1(modelSurfaceDigestMaterial(surface));
-  return digestPrivateModelEvidence(MODEL_SURFACE_DIGEST_DOMAIN_V1, canonicalBytes);
+export function computeModelSurfaceDigest(surface: ModelSurface): Sha256Digest {
+  canonicalModelJson(surface);
+  assertModelSurface(surface);
+  const canonicalBytes = canonicalModelJsonBytes(modelSurfaceDigestMaterial(surface));
+  return digestPrivateModelEvidence(MODEL_SURFACE_DIGEST_DOMAIN_, canonicalBytes);
 }
 
-export function computeModelSurfaceDigestLayersV1(
-  surface: ModelSurfaceV1,
-): ModelSurfaceDigestLayersV1 {
-  const routeIdentityDigest = computeModelRouteIdentityDigestV1(surface.route);
-  const resolvedCapabilitiesDigest = computeResolvedModelCapabilitiesDigestV1(
+export function computeModelSurfaceDigestLayers(surface: ModelSurface): ModelSurfaceDigestLayers {
+  const routeIdentityDigest = computeModelRouteIdentityDigest(surface.route);
+  const resolvedCapabilitiesDigest = computeResolvedModelCapabilitiesDigest(
     surface.request.resolvedCapabilities.value,
   );
   const providerOptionsIdentityDigest = providerOptionsDigest(surface.request.providerOptions);
-  const surfaceDigest = computeModelSurfaceDigestV1(surface);
+  const surfaceDigest = computeModelSurfaceDigest(surface);
   return {
     routeIdentityDigest,
     resolvedCapabilitiesDigest,
@@ -143,7 +136,7 @@ export function computeModelSurfaceDigestLayersV1(
 }
 
 /** Runtime validation rejects extra fields even when callers bypass TypeScript. */
-export function assertModelSurfaceV1(surface: ModelSurfaceV1): void {
+export function assertModelSurface(surface: ModelSurface): void {
   assertExactKeys(surface, ['schema', 'purpose', 'route', 'request'], '$');
   assertExactKeys(
     surface.schema,
@@ -151,39 +144,39 @@ export function assertModelSurfaceV1(surface: ModelSurfaceV1): void {
     '$.schema',
   );
   if (
-    surface.schema.name !== MODEL_SURFACE_SCHEMA_V1.name ||
-    surface.schema.canonicalizerVersion !== MODEL_SURFACE_SCHEMA_V1.canonicalizerVersion ||
-    surface.schema.surfaceFormatVersion !== MODEL_SURFACE_SCHEMA_V1.surfaceFormatVersion
+    surface.schema.name !== MODEL_SURFACE_SCHEMA_.name ||
+    surface.schema.canonicalizerVersion !== MODEL_SURFACE_SCHEMA_.canonicalizerVersion ||
+    surface.schema.surfaceFormatVersion !== MODEL_SURFACE_SCHEMA_.surfaceFormatVersion
   ) {
     fail('Model Surface schema identity is unsupported.');
   }
-  if (!MODEL_INVOCATION_PURPOSES_V1.includes(surface.purpose)) {
+  if (!MODEL_INVOCATION_PURPOSES_.includes(surface.purpose)) {
     fail('Model Surface purpose is unsupported.');
   }
   assertRoute(surface.route, '$.route');
   assertSemanticRequest(surface.request);
 }
 
-export function assertCanonicalModelMessageV1(
+export function assertCanonicalModelMessage(
   message: unknown,
-): asserts message is CanonicalModelMessageV1 {
-  canonicalModelJsonV1(message);
-  assertMessage(message as CanonicalModelMessageV1, '$');
+): asserts message is CanonicalModelMessage {
+  canonicalModelJson(message);
+  assertMessage(message as CanonicalModelMessage, '$');
 }
 
-export function assertModelRouteIdentityV1(route: unknown): asserts route is ModelRouteIdentityV1 {
-  canonicalModelJsonV1(route);
-  assertRoute(route as ModelRouteIdentityV1, '$');
+export function assertModelRouteIdentity(route: unknown): asserts route is ModelRouteIdentity {
+  canonicalModelJson(route);
+  assertRoute(route as ModelRouteIdentity, '$');
 }
 
-export function assertModelAdapterReplayOwnerV1(
+export function assertModelAdapterReplayOwner(
   owner: unknown,
-): asserts owner is ModelAdapterReplayOwnerV1 {
-  canonicalModelJsonV1(owner);
-  assertReplayOwner(owner as ModelAdapterReplayOwnerV1, '$');
+): asserts owner is ModelAdapterReplayOwner {
+  canonicalModelJson(owner);
+  assertReplayOwner(owner as ModelAdapterReplayOwner, '$');
 }
 
-function assertSemanticRequest(request: ModelSurfaceV1['request']): void {
+function assertSemanticRequest(request: ModelSurface['request']): void {
   assertExactKeys(
     request,
     [
@@ -234,7 +227,7 @@ function assertSemanticRequest(request: ModelSurfaceV1['request']): void {
     '$.request.resolvedCapabilities.value',
   );
   assertDigest(request.resolvedCapabilities.digest, '$.request.resolvedCapabilities.digest');
-  const expectedCapabilityDigest = computeResolvedModelCapabilitiesDigestV1(
+  const expectedCapabilityDigest = computeResolvedModelCapabilitiesDigest(
     request.resolvedCapabilities.value,
   );
   if (request.resolvedCapabilities.digest !== expectedCapabilityDigest) {
@@ -243,7 +236,7 @@ function assertSemanticRequest(request: ModelSurfaceV1['request']): void {
   assertProviderOptions(request.providerOptions);
 }
 
-function assertRoute(route: ModelRouteIdentityV1, path: string): void {
+function assertRoute(route: ModelRouteIdentity, path: string): void {
   assertExactKeys(
     route,
     ['providerKind', 'modelName', 'adapterProtocolVersion', 'routeFingerprint', 'replayOwner'],
@@ -259,14 +252,14 @@ function assertRoute(route: ModelRouteIdentityV1, path: string): void {
   }
 }
 
-function assertReplayOwner(owner: ModelAdapterReplayOwnerV1, path: string): void {
+function assertReplayOwner(owner: ModelAdapterReplayOwner, path: string): void {
   assertExactKeys(owner, ['adapterKind', 'adapterProtocolVersion', 'ownerFingerprint'], path);
   assertRouteKind(owner.adapterKind, `${path}.adapterKind`);
   assertRouteKind(owner.adapterProtocolVersion, `${path}.adapterProtocolVersion`);
   assertDigest(owner.ownerFingerprint, `${path}.ownerFingerprint`);
 }
 
-function assertMessage(message: CanonicalModelMessageV1, path: string): void {
+function assertMessage(message: CanonicalModelMessage, path: string): void {
   assertExactKeys(message, ['role', 'content'], path);
   if (!Array.isArray(message.content)) fail('Canonical model message content must be an array.');
   if (message.role === 'user') {
@@ -315,7 +308,7 @@ function assertToolCallPart(part: unknown, path: string): void {
   if (record.type !== 'tool_call') fail('Canonical tool call part is invalid.');
   assertBoundedString(record.toolCallId, `${path}.toolCallId`);
   assertBoundedString(record.toolName, `${path}.toolName`);
-  canonicalModelJsonV1(record.input);
+  canonicalModelJson(record.input);
 }
 
 function assertToolResultPart(part: unknown, path: string): void {
@@ -330,15 +323,15 @@ function assertToolResultPart(part: unknown, path: string): void {
   assertString(output.value, `${path}.output.value`);
 }
 
-function assertTool(tool: CanonicalToolDeclarationV1, path: string): void {
+function assertTool(tool: CanonicalToolDeclaration, path: string): void {
   assertExactKeys(tool, ['name', 'description', 'inputSchema'], path);
   assertBoundedString(tool.name, `${path}.name`);
   if (tool.description !== null) assertString(tool.description, `${path}.description`);
   assertObject(tool.inputSchema, `${path}.inputSchema`);
-  canonicalModelJsonV1(tool.inputSchema);
+  canonicalModelJson(tool.inputSchema);
 }
 
-function assertResolvedCapabilities(value: ResolvedModelCapabilitiesValueV1, path: string): void {
+function assertResolvedCapabilities(value: ResolvedModelCapabilitiesValue, path: string): void {
   assertExactKeys(
     value,
     [
@@ -381,12 +374,12 @@ function assertResolvedCapabilities(value: ResolvedModelCapabilitiesValueV1, pat
   assertCapabilitySource(value.streamingSource, `${path}.streamingSource`);
 }
 
-function assertProviderOptions(options: CanonicalProviderOptionsV1): void {
+function assertProviderOptions(options: CanonicalProviderOptions): void {
   assertObject(options, '$.request.providerOptions');
   if (options.kind === 'inline') {
     assertExactKeys(options, ['kind', 'value', 'digest'], '$.request.providerOptions');
     assertDigest(options.digest, '$.request.providerOptions.digest');
-    const expected = computeCanonicalProviderOptionsDigestV1(options.value);
+    const expected = computeCanonicalProviderOptionsDigest(options.value);
     if (options.digest !== expected) {
       fail('Provider options digest does not match its canonical value.');
     }
@@ -405,14 +398,14 @@ function assertProviderOptions(options: CanonicalProviderOptionsV1): void {
   fail('Provider options representation is unsupported.');
 }
 
-function providerOptionsDigest(options: CanonicalProviderOptionsV1): Sha256DigestV1 {
+function providerOptionsDigest(options: CanonicalProviderOptions): Sha256Digest {
   assertObject(options, '$.request.providerOptions');
-  if (options.kind === 'inline') return computeCanonicalProviderOptionsDigestV1(options.value);
+  if (options.kind === 'inline') return computeCanonicalProviderOptionsDigest(options.value);
   assertDigest(options.contentDigest, '$.request.providerOptions.contentDigest');
   return options.contentDigest;
 }
 
-function modelSurfaceDigestMaterial(surface: ModelSurfaceV1): unknown {
+function modelSurfaceDigestMaterial(surface: ModelSurface): unknown {
   return {
     schema: surface.schema,
     purpose: surface.purpose,
@@ -557,7 +550,7 @@ function assertModelName(value: unknown, path: string): asserts value is string 
   }
 }
 
-function assertDigest(value: unknown, path: string): asserts value is Sha256DigestV1 {
+function assertDigest(value: unknown, path: string): asserts value is Sha256Digest {
   if (typeof value !== 'string' || !SHA256_PATTERN.test(value)) {
     fail(`${path} must be a sha256 digest.`);
   }
@@ -584,17 +577,12 @@ function assertNullableBoolean(value: unknown, path: string): void {
 }
 
 function assertCapabilitySource(value: unknown, path: string): void {
-  if (
-    value !== null &&
-    value !== 'explicit_config' &&
-    value !== 'adapter_runtime' &&
-    value !== 'compatibility_config'
-  ) {
+  if (value !== null && value !== 'explicit_config' && value !== 'adapter_runtime') {
     fail(`${path} is not a supported capability source.`);
   }
 }
 
-function digestPrivateModelEvidence(domain: string, input: Uint8Array): Sha256DigestV1 {
+function digestPrivateModelEvidence(domain: string, input: Uint8Array): Sha256Digest {
   if (!domain || domain.includes('\0')) fail('Model evidence digest domain is invalid.');
   const hash = createHash('sha256');
   hash.update(PRIVATE_MODEL_DIGEST_PREFIX);

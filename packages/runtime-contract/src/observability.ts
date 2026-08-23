@@ -5,11 +5,11 @@
  * free-form content.
  */
 
-export const OBSERVABILITY_METRIC_DRAFT_SCHEMA_V1 = 'kite.observability-metric-draft.v1' as const;
+export const OBSERVABILITY_METRIC_DRAFT_SCHEMA_ = 'kite.observability-metric-draft.v1' as const;
 
-type ObservabilityRuntimeFactSchemaV1 = 'kite.observability-runtime-fact.v1';
+type ObservabilityRuntimeFactSchema = 'kite.observability-runtime-fact.v1';
 
-export type ObservabilityToolStatusV1 =
+export type ObservabilityToolStatus =
   | 'success'
   | 'failed'
   | 'rejected'
@@ -18,12 +18,12 @@ export type ObservabilityToolStatusV1 =
   | 'exhausted'
   | 'unknown';
 
-export type ObservabilityFailureKindV1 =
+export type ObservabilityFailureKind =
   | 'process_limit_exceeded'
   | 'cancel_incomplete'
   | 'resource_saturated';
 
-export type ObservabilityReasonV1 =
+export type ObservabilityReason =
   | 'completed'
   | 'model'
   | 'policy'
@@ -38,108 +38,108 @@ export type ObservabilityReasonV1 =
   | 'cancellation'
   | 'unknown';
 
-export type ObservabilityMetricDraftAttributesV1 = Readonly<Record<string, string>>;
+export type ObservabilityMetricDraftAttributes = Readonly<Record<string, string>>;
 
 /** Host owns the metric-name allowlist and validates this draft at creation. */
-export interface ObservabilityMetricDraftV1 {
-  readonly schema: typeof OBSERVABILITY_METRIC_DRAFT_SCHEMA_V1;
+export interface ObservabilityMetricDraft {
+  readonly schema: typeof OBSERVABILITY_METRIC_DRAFT_SCHEMA_;
   readonly name: string;
   readonly value?: number;
   readonly observedAt: string;
-  readonly attributes?: ObservabilityMetricDraftAttributesV1;
+  readonly attributes?: ObservabilityMetricDraftAttributes;
 }
 
-interface ObservabilityFactBaseV1 {
-  readonly schema: ObservabilityRuntimeFactSchemaV1;
+interface ObservabilityFactBase {
+  readonly schema: ObservabilityRuntimeFactSchema;
   readonly observedAt: string;
 }
 
-export interface ObservabilityToolOutcomeFactV1 {
-  readonly status: ObservabilityToolStatusV1;
+export interface ObservabilityToolOutcomeFact {
+  readonly status: ObservabilityToolStatus;
   readonly totalActiveMs?: number;
-  readonly failureKind?: ObservabilityFailureKindV1;
+  readonly failureKind?: ObservabilityFailureKind;
 }
 
-export type ObservabilityRuntimeFactV1 =
-  | (ObservabilityFactBaseV1 & { readonly type: 'turn.completed' })
-  | (ObservabilityFactBaseV1 & {
+export type ObservabilityRuntimeFact =
+  | (ObservabilityFactBase & { readonly type: 'turn.completed' })
+  | (ObservabilityFactBase & {
       readonly type: 'turn.aborted';
       readonly cause: 'user' | 'runtime';
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'model.responded';
       readonly durationMs?: number;
       readonly inputTokens?: number;
       readonly outputTokens?: number;
     })
-  | (ObservabilityFactBaseV1 & { readonly type: 'model.retry' })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & { readonly type: 'model.retry' })
+  | (ObservabilityFactBase & {
       readonly type: 'tool.finished';
       readonly capabilityAlias?: string;
-      readonly outcome: ObservabilityToolOutcomeFactV1;
+      readonly outcome: ObservabilityToolOutcomeFact;
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
-      readonly outcome: ObservabilityToolOutcomeFactV1;
+      readonly outcome: ObservabilityToolOutcomeFact;
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'approval.rejected' | 'auto_review.completed';
-      readonly outcome: ObservabilityToolOutcomeFactV1;
+      readonly outcome: ObservabilityToolOutcomeFact;
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'skill.activation_started';
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'skill.frame_closed';
       readonly status: 'closed' | 'invalidated';
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'plan.drafted' | 'plan.completed';
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'verification.completed';
       readonly outcome: 'passed' | 'failed' | 'inconclusive';
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'verification.waived';
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'context.compaction_completed' | 'context.compaction_failed';
       readonly durationMs?: number;
     })
-  | (ObservabilityFactBaseV1 & { readonly type: 'context.hard_blocked' })
-  | (ObservabilityFactBaseV1 & { readonly type: 'context.compaction_reset' })
-  | (ObservabilityFactBaseV1 & { readonly type: 'context.hard_block_cleared' })
-  | (ObservabilityFactBaseV1 & { readonly type: 'runtime.action_ignored' })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & { readonly type: 'context.hard_blocked' })
+  | (ObservabilityFactBase & { readonly type: 'context.compaction_reset' })
+  | (ObservabilityFactBase & { readonly type: 'context.hard_block_cleared' })
+  | (ObservabilityFactBase & { readonly type: 'runtime.action_ignored' })
+  | (ObservabilityFactBase & {
       readonly type: 'runtime.cancellation_diagnostic';
       readonly unconfirmedDescendantCount: number;
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'run.completed' | 'run.error';
       readonly outcome: 'completed' | 'failed' | 'cancelled' | 'unknown';
-      readonly reason: ObservabilityReasonV1;
-      readonly failureKind?: ObservabilityFailureKindV1;
+      readonly reason: ObservabilityReason;
+      readonly failureKind?: ObservabilityFailureKind;
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'resource_budget.reconciled';
       readonly activeToolInvocations: number;
       readonly activeShellInvocations: number;
     })
-  | (ObservabilityFactBaseV1 & {
+  | (ObservabilityFactBase & {
       readonly type: 'resource_budget.waiter_timed_out';
     });
 
-export interface ObservabilityFailureFactV1 {
-  readonly kind: ObservabilityFailureKindV1;
+export interface ObservabilityFailureFact {
+  readonly kind: ObservabilityFailureKind;
 }
 
-export interface ObservabilityReceiptFactV1 {
+export interface ObservabilityReceiptFact {
   readonly status: 'recorded' | 'running' | 'succeeded' | 'failed' | 'unknown';
   readonly capabilityAlias?: string;
 }
 
-export interface ObservabilityModelFactV1 {
+export interface ObservabilityModelFact {
   readonly observedAt: string;
   readonly routeAlias?: string;
   readonly outcome: 'success' | 'failed' | 'retry' | 'timeout';
@@ -148,7 +148,7 @@ export interface ObservabilityModelFactV1 {
   readonly outputTokens?: number;
 }
 
-export interface ObservabilityResourceFactV1 {
+export interface ObservabilityResourceFact {
   readonly observedAt: string;
   readonly activeToolInvocations?: number;
   readonly activeShellInvocations?: number;
@@ -177,14 +177,14 @@ export interface ObservabilityResourceFactV1 {
     | 'artifact';
 }
 
-export interface ObservabilityReleaseFactV1 {
+export interface ObservabilityReleaseFact {
   readonly observedAt: string;
   readonly profile: 'internal' | 'limited' | 'canary' | 'ga';
   readonly cohort: 'internal' | 'limited' | 'canary' | 'general' | 'unknown';
   readonly outcome: 'admitted' | 'blocked' | 'rolled_back';
 }
 
-export interface ObservabilityTaskStageFactV1 {
+export interface ObservabilityTaskStageFact {
   readonly observedAt: string;
   readonly stage: 'checks' | 'human_accepted' | 'integrated' | 'reverted';
   readonly outcome: 'passed' | 'failed' | 'completed';

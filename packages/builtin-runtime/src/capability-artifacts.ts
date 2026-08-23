@@ -2,17 +2,17 @@ import { join } from 'node:path';
 import type {
   CapabilityArtifactRef,
   CapabilityResult,
-  PrivateCapabilityArtifactRefV1,
-  WorkspaceFilesystemObservationRecordV1,
+  PrivateCapabilityArtifactRef,
+  WorkspaceFilesystemObservationRecord,
 } from '@kite/runtime-contract';
-import { digestCapabilityBindingValueV1 as digestCapability } from './capability-binding';
+import { digestCapabilityBindingValue as digestCapability } from './capability-binding';
 import {
-  canonicalModelJsonV1,
+  canonicalModelJson,
   PrivateArtifactStorageError,
-  type PrivateArtifactWriteFaultPointV1,
-  PrivateImmutableArtifactStorageV1,
+  type PrivateArtifactWriteFaultPoint,
+  PrivateImmutableArtifactStorage,
 } from './model';
-import { userKiteCodeDirV1 } from './model/artifact-paths';
+import { userKiteCodeDir } from './model/artifact-paths';
 
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const SAFE_INVOCATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -20,7 +20,7 @@ const CAPABILITY_ARTIFACT_PARTITIONS = Object.freeze([
   { kind: 'capability_result', directory: 'results', extension: '.json' },
 ] as const);
 
-export type CapabilityArtifactErrorCodeV1 =
+export type CapabilityArtifactErrorCode =
   | 'invalid_reference'
   | 'artifact_missing'
   | 'artifact_corrupt'
@@ -29,9 +29,9 @@ export type CapabilityArtifactErrorCodeV1 =
   | 'publish_failed';
 
 export class CapabilityArtifactError extends Error {
-  readonly code: CapabilityArtifactErrorCodeV1;
+  readonly code: CapabilityArtifactErrorCode;
 
-  constructor(message: string, code: CapabilityArtifactErrorCodeV1) {
+  constructor(message: string, code: CapabilityArtifactErrorCode) {
     super(message);
     this.name = 'CapabilityArtifactError';
     this.code = code;
@@ -39,56 +39,56 @@ export class CapabilityArtifactError extends Error {
 }
 
 /** Installation-private root for canonical capability result evidence. */
-export function capabilityArtifactRootV1(): string {
-  return join(userKiteCodeDirV1(), 'capability-artifacts');
+export function capabilityArtifactRoot(): string {
+  return join(userKiteCodeDir(), 'capability-artifacts');
 }
 
-export interface CapabilityArtifactStoreOptionsV1 {
+export interface CapabilityArtifactStoreOptions {
   root?: string;
   maxArtifactBytes?: number;
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
-  faultInjector?: (point: PrivateArtifactWriteFaultPointV1) => void;
+  faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
 }
 
-export interface CapabilityArtifactEnvelopeV1 {
+export interface CapabilityArtifactEnvelope {
   readonly artifactFormatVersion: 2;
   readonly invocationId: string;
   readonly result: CapabilityResult;
 }
 
-export type CapabilityArtifactWriterV1 = Pick<CapabilityArtifactStore, 'write'>;
-export type CapabilityArtifactReaderV1 = Pick<CapabilityArtifactStore, 'read' | 'readEnvelope'>;
-export type CapabilityArtifactAccessV1 = CapabilityArtifactWriterV1 & CapabilityArtifactReaderV1;
+export type CapabilityArtifactWriter = Pick<CapabilityArtifactStore, 'write'>;
+export type CapabilityArtifactReader = Pick<CapabilityArtifactStore, 'read' | 'readEnvelope'>;
+export type CapabilityArtifactAccess = CapabilityArtifactWriter & CapabilityArtifactReader;
 
-export interface CapabilityArtifactBindingV1 {
+export interface CapabilityArtifactBinding {
   readonly invocationId: string;
   readonly resultDigest: string;
   readonly evidenceDigest: string;
-  readonly filesystemObservation?: import('@kite/runtime-contract').WorkspaceFilesystemObservationRecordV1;
+  readonly filesystemObservation?: import('@kite/runtime-contract').WorkspaceFilesystemObservationRecord;
 }
 
-export interface CapabilityArtifactEvidenceInvocationV1 {
+export interface CapabilityArtifactEvidenceInvocation {
   readonly invocationId: string;
   readonly status: 'recorded' | 'running' | 'succeeded' | 'failed' | 'unknown';
   readonly artifact?: CapabilityArtifactRef;
   readonly resultDigest?: string;
   readonly evidenceDigest?: string;
-  readonly filesystemObservation?: WorkspaceFilesystemObservationRecordV1;
+  readonly filesystemObservation?: WorkspaceFilesystemObservationRecord;
 }
 
 /** Minimal State projection consumed by the Builtin Artifact owner. */
-export interface CapabilityArtifactEvidenceStateV1 {
+export interface CapabilityArtifactEvidenceState {
   readonly capabilities: {
-    readonly invocations: Readonly<Record<string, CapabilityArtifactEvidenceInvocationV1>>;
+    readonly invocations: Readonly<Record<string, CapabilityArtifactEvidenceInvocation>>;
   };
 }
 
-export function capabilityResultDigestV1(result: Readonly<CapabilityResult>): string {
+export function capabilityResultDigest(result: Readonly<CapabilityResult>): string {
   return digestCapability(result);
 }
 
-export function capabilityResultEvidenceDigestV1(result: Readonly<CapabilityResult>): string {
+export function capabilityResultEvidenceDigest(result: Readonly<CapabilityResult>): string {
   return digestCapability({
     content: result.content,
     structuredContent: result.structuredContent ?? null,
@@ -103,19 +103,19 @@ export function capabilityResultEvidenceDigestV1(result: Readonly<CapabilityResu
  * existing callers.
  */
 export class CapabilityArtifactStore {
-  private readonly options: CapabilityArtifactStoreOptionsV1;
-  private storage: PrivateImmutableArtifactStorageV1<'capability_result'> | undefined;
+  private readonly options: CapabilityArtifactStoreOptions;
+  private storage: PrivateImmutableArtifactStorage<'capability_result'> | undefined;
 
-  constructor(options: CapabilityArtifactStoreOptionsV1 | number = {}) {
+  constructor(options: CapabilityArtifactStoreOptions | number = {}) {
     this.options =
       typeof options === 'number' ? { maxArtifactBytes: options } : Object.freeze({ ...options });
   }
 
-  write(invocationId: string, result: CapabilityResult): PrivateCapabilityArtifactRefV1 {
+  write(invocationId: string, result: CapabilityResult): PrivateCapabilityArtifactRef {
     assertInvocationId(invocationId);
     assertCapabilityResult(result);
     const payload = Buffer.from(
-      canonicalModelJsonV1({ artifactFormatVersion: 2, invocationId, result }),
+      canonicalModelJson({ artifactFormatVersion: 2, invocationId, result }),
       'utf8',
     );
     try {
@@ -129,12 +129,12 @@ export class CapabilityArtifactStore {
     return this.readEnvelope(ref).result;
   }
 
-  readEnvelope(ref: CapabilityArtifactRef): CapabilityArtifactEnvelopeV1 {
+  readEnvelope(ref: CapabilityArtifactRef): CapabilityArtifactEnvelope {
     try {
       const bytes = this.resolveStorage().read(ref);
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const parsed: unknown = JSON.parse(text);
-      if (canonicalModelJsonV1(parsed) !== text || !isPlainObject(parsed)) {
+      if (canonicalModelJson(parsed) !== text || !isPlainObject(parsed)) {
         throw new CapabilityArtifactError(
           'Capability Artifact is not canonical JSON.',
           'artifact_corrupt',
@@ -160,11 +160,11 @@ export class CapabilityArtifactStore {
     }
   }
 
-  private resolveStorage(): PrivateImmutableArtifactStorageV1<'capability_result'> {
+  private resolveStorage(): PrivateImmutableArtifactStorage<'capability_result'> {
     if (this.storage) return this.storage;
     try {
-      this.storage = new PrivateImmutableArtifactStorageV1({
-        root: this.options.root ?? capabilityArtifactRootV1(),
+      this.storage = new PrivateImmutableArtifactStorage({
+        root: this.options.root ?? capabilityArtifactRoot(),
         namespace: 'capability-artifacts',
         partitions: CAPABILITY_ARTIFACT_PARTITIONS,
         maxArtifactBytes: this.options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,
@@ -182,17 +182,17 @@ export class CapabilityArtifactStore {
 }
 
 /** Read immutable capability evidence only when it is exactly bound to its Runtime receipt. */
-export function readBoundCapabilityArtifactV1(
-  reader: CapabilityArtifactReaderV1,
+export function readBoundCapabilityArtifact(
+  reader: CapabilityArtifactReader,
   ref: CapabilityArtifactRef,
-  binding: CapabilityArtifactBindingV1,
+  binding: CapabilityArtifactBinding,
 ): CapabilityResult {
   const envelope = reader.readEnvelope(ref);
   const result = envelope.result;
   if (
     envelope.invocationId !== binding.invocationId ||
-    capabilityResultDigestV1(result) !== binding.resultDigest ||
-    capabilityResultEvidenceDigestV1(result) !== binding.evidenceDigest
+    capabilityResultDigest(result) !== binding.resultDigest ||
+    capabilityResultEvidenceDigest(result) !== binding.evidenceDigest
   ) {
     throw new CapabilityArtifactError(
       'Capability Artifact does not match its Runtime receipt.',
@@ -218,9 +218,9 @@ export function readBoundCapabilityArtifactV1(
 }
 
 /** Validate every persisted filesystem receipt against Builtin-owned Artifact evidence. */
-export function assertRestoredCapabilityArtifactEvidenceV1(
-  state: CapabilityArtifactEvidenceStateV1,
-  reader: CapabilityArtifactReaderV1,
+export function assertRestoredCapabilityArtifactEvidence(
+  state: CapabilityArtifactEvidenceState,
+  reader: CapabilityArtifactReader,
 ): void {
   for (const invocation of Object.values(state.capabilities.invocations)) {
     if (!invocation.filesystemObservation) continue;
@@ -234,7 +234,7 @@ export function assertRestoredCapabilityArtifactEvidenceV1(
         `Filesystem invocation ${invocation.invocationId} has incomplete Artifact evidence.`,
       );
     }
-    readBoundCapabilityArtifactV1(reader, invocation.artifact, {
+    readBoundCapabilityArtifact(reader, invocation.artifact, {
       invocationId: invocation.invocationId,
       resultDigest: invocation.resultDigest,
       evidenceDigest: invocation.evidenceDigest,
@@ -244,7 +244,7 @@ export function assertRestoredCapabilityArtifactEvidenceV1(
 }
 
 function assertCapabilityResult(value: unknown): asserts value is CapabilityResult {
-  canonicalModelJsonV1(value);
+  canonicalModelJson(value);
   if (!isPlainObject(value)) corrupt('Capability result must be an object.');
   const allowed = ['status', 'content', 'structuredContent', 'error', 'providerMeta'];
   if (Object.keys(value).some((key) => !allowed.includes(key))) {
@@ -316,7 +316,7 @@ function corrupt(message: string): never {
 function mapStorageError(error: unknown): CapabilityArtifactError {
   if (error instanceof CapabilityArtifactError) return error;
   if (error instanceof PrivateArtifactStorageError) {
-    const code: CapabilityArtifactErrorCodeV1 =
+    const code: CapabilityArtifactErrorCode =
       error.code === 'artifact_corrupt' || error.code === 'artifact_missing'
         ? error.code
         : error.code === 'artifact_too_large'

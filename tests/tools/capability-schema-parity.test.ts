@@ -1,43 +1,43 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
-  RMV1_13_CAPABILITY_REVISION_V1,
-  RMV1_13_OPERATION_ID_V1,
+  PLANNING_CAPABILITY_REVISION_,
+  PLANNING_OPERATION_ID_,
 } from '#builtin-runtime';
-import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
+import { createRuntimeModuleRegistry } from '#runtime-spi';
 
-describe('RMV1-13 Builtin Runtime closure', () => {
+describe('RM-13 Builtin Runtime closure', () => {
   test('binds shell_execute to the sole registered owner and executor', () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    expect(registry.capability(RMV1_13_OPERATION_ID_V1)).toMatchObject({
-      capabilityId: RMV1_13_OPERATION_ID_V1,
-      revision: RMV1_13_CAPABILITY_REVISION_V1,
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    expect(registry.capability(PLANNING_OPERATION_ID_)).toMatchObject({
+      capabilityId: PLANNING_OPERATION_ID_,
+      revision: PLANNING_CAPABILITY_REVISION_,
       providerId: 'kite-builtin-runtime-rmv1-13',
     });
-    expect(registry.executor(RMV1_13_OPERATION_ID_V1)).toMatchObject({
-      capabilityId: RMV1_13_OPERATION_ID_V1,
-      capabilityRevision: RMV1_13_CAPABILITY_REVISION_V1,
+    expect(registry.executor(PLANNING_OPERATION_ID_)).toMatchObject({
+      capabilityId: PLANNING_OPERATION_ID_,
+      capabilityRevision: PLANNING_CAPABILITY_REVISION_,
       providerId: 'kite-builtin-runtime-rmv1-13',
     });
   });
 
   test('rejects forged input before invoking the Shell mechanism', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const executor = registry.executor(RMV1_13_OPERATION_ID_V1);
-    if (!executor) throw new Error('RMV1-13 executor is missing.');
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const executor = registry.executor(PLANNING_OPERATION_ID_);
+    if (!executor) throw new Error('RM-13 executor is missing.');
     let mechanismCalls = 0;
     const receipt = await executor.execute(
       {
         invocationId: 'invocation',
-        capabilityId: RMV1_13_OPERATION_ID_V1,
-        capabilityRevision: RMV1_13_CAPABILITY_REVISION_V1,
+        capabilityId: PLANNING_OPERATION_ID_,
+        capabilityRevision: PLANNING_CAPABILITY_REVISION_,
         input: { command: 'pwd', timeout_ms: 0, extra: true },
       },
       {
         grant: {
           grantId: 'grant',
-          capabilityId: RMV1_13_OPERATION_ID_V1,
-          capabilityRevision: RMV1_13_CAPABILITY_REVISION_V1,
+          capabilityId: PLANNING_OPERATION_ID_,
+          capabilityRevision: PLANNING_CAPABILITY_REVISION_,
           authority: {},
         },
         requestDigest: 'request-digest',

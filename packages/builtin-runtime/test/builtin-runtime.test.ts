@@ -1,45 +1,45 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
-  BUILTIN_CONTEXT_SOURCE_IDS_V1,
-  BUILTIN_RUNTIME_DOMAINS_V1,
-  BUILTIN_TASK_PUBLIC_SCHEMA_V1,
+  BUILTIN_CONTEXT_SOURCE_IDS_,
+  BUILTIN_RUNTIME_DOMAINS_,
+  BUILTIN_TASK_PUBLIC_SCHEMA_,
   BUILTIN_TOOL_CONTRACTS,
   buildDescription,
-  createBuiltinContextCompilerPortV1,
+  createBuiltinContextCompilerPort,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  createCapabilityBindingV1,
-  createToolSearchProviderFactsV1,
-  DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1,
-  digestCapabilityBindingValueV1,
-  isBuiltinOperationExecutionValueV1,
-  isToolSearchExecutionValueV1,
-  normalizeAskUserRequestV1,
-  RMV1_11_CAPABILITY_REVISIONS_V1,
-  RMV1_11_OPERATION_IDS_V1,
-  RMV1_12_CAPABILITY_REVISIONS_V1,
-  RMV1_12_EXECUTOR_REVISIONS_V1,
-  RMV1_12_OPERATION_IDS_V1,
-  RMV1_13_CAPABILITY_REVISION_V1,
-  RMV1_13_OPERATION_ID_V1,
-  RMV1_14_CAPABILITY_REVISIONS_V1,
-  RMV1_14_OPERATION_IDS_V1,
-  RMV1_15_CAPABILITY_REVISIONS_V1,
-  RMV1_15_OPERATION_IDS_V1,
-  TOOL_SEARCH_CAPABILITY_ID_V1,
-  TOOL_SEARCH_CAPABILITY_REVISION_V1,
-  TOOL_SEARCH_EXECUTOR_REVISION_V1,
+  createBuiltinToolCatalogProjection,
+  createCapabilityBinding,
+  createToolSearchProviderFacts,
+  DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_,
+  digestCapabilityBindingValue,
+  GIT_CAPABILITY_REVISIONS_,
+  GIT_EXECUTOR_REVISIONS_,
+  GIT_OPERATION_IDS_,
+  isBuiltinOperationExecutionValue,
+  isToolSearchExecutionValue,
+  MODEL_CAPABILITY_REVISIONS_,
+  MODEL_OPERATION_IDS_,
+  normalizeAskUserRequest,
+  PLANNING_CAPABILITY_REVISION_,
+  PLANNING_OPERATION_ID_,
+  SUBAGENT_CAPABILITY_REVISIONS_,
+  SUBAGENT_OPERATION_IDS_,
+  TOOL_SEARCH_CAPABILITY_ID_,
+  TOOL_SEARCH_CAPABILITY_REVISION_,
+  TOOL_SEARCH_EXECUTOR_REVISION_,
+  VERIFICATION_CAPABILITY_REVISIONS_,
+  VERIFICATION_OPERATION_IDS_,
 } from '@kite/builtin-runtime';
 import { McpProviderError } from '@kite/builtin-runtime/mcp';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
-  type CapabilityExecutionInvocationV1,
-  type CapabilityExecutionMechanismV1,
-  type CapabilityExecutionPortV1,
-  type CapabilityTurnContextV1,
-  createRuntimeModuleRegistryV1,
-  type RuntimeJsonValueV1,
+  type CapabilityExecutionInvocation,
+  type CapabilityExecutionMechanism,
+  type CapabilityExecutionPort,
+  type CapabilityTurnContext,
+  createRuntimeModuleRegistry,
+  type RuntimeJsonValue,
 } from '@kite/runtime-spi';
 
 function catalogInvocation(input: {
@@ -48,8 +48,8 @@ function catalogInvocation(input: {
   schemaDigest: string;
   exposedToolName: string;
   attemptId?: string;
-}): CapabilityExecutionInvocationV1 {
-  const bindingId = digestCapabilityBindingValueV1({
+}): CapabilityExecutionInvocation {
+  const bindingId = digestCapabilityBindingValue({
     capabilityId: input.operationId,
     revision: input.revision,
     exposedToolName: input.exposedToolName,
@@ -90,7 +90,7 @@ function catalogInvocation(input: {
 describe('builtin runtime package boundary', () => {
   test('owns canonical ask_user interrupt payload normalization', () => {
     expect(
-      normalizeAskUserRequestV1({
+      normalizeAskUserRequest({
         questions: [
           {
             question: 'Continue?',
@@ -125,20 +125,20 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('owns the accepted Kite-specific domain vocabulary', () => {
-    expect(BUILTIN_RUNTIME_DOMAINS_V1).toContain('context');
+    expect(BUILTIN_RUNTIME_DOMAINS_).toContain('context');
     const modules = createBuiltinRuntimeModules();
     expect(modules).toHaveLength(6);
     expect(modules[0]?.manifest).toMatchObject({
       moduleId: 'kite-builtin-runtime',
       providerId: 'kite-code',
       revision: 'rmv1-10',
-      operationIds: [TOOL_SEARCH_CAPABILITY_ID_V1],
+      operationIds: [TOOL_SEARCH_CAPABILITY_ID_],
     });
     expect(Object.isFrozen(modules)).toBe(true);
   });
 
   test('creates the exact frozen State 25 turn binding without authorization', () => {
-    const binding = createCapabilityBindingV1({
+    const binding = createCapabilityBinding({
       capabilityId: 'mcp:docs:search',
       capabilityRevision: 'revision-1',
       exposedToolName: 'mcp__docs__search',
@@ -156,99 +156,99 @@ describe('builtin runtime package boundary', () => {
     expect(Object.isFrozen(binding)).toBe(true);
   });
 
-  test('registers the exact RMV1-10 through RMV1-15 owners and executors', () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    expect(registry.operationOwner(TOOL_SEARCH_CAPABILITY_ID_V1)).toBe('kite-builtin-runtime');
+  test('registers the exact RM-10 through RM-15 owners and executors', () => {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    expect(registry.operationOwner(TOOL_SEARCH_CAPABILITY_ID_)).toBe('kite-builtin-runtime');
     expect(registry.snapshot().capabilities).toHaveLength(29);
-    expect(registry.capability(TOOL_SEARCH_CAPABILITY_ID_V1)).toMatchObject({
-      capabilityId: TOOL_SEARCH_CAPABILITY_ID_V1,
-      revision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
+    expect(registry.capability(TOOL_SEARCH_CAPABILITY_ID_)).toMatchObject({
+      capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
+      revision: TOOL_SEARCH_CAPABILITY_REVISION_,
       providerId: 'kite-code',
     });
-    expect(registry.executor(TOOL_SEARCH_CAPABILITY_ID_V1)).toMatchObject({
-      capabilityId: TOOL_SEARCH_CAPABILITY_ID_V1,
-      capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
-      executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_V1,
+    expect(registry.executor(TOOL_SEARCH_CAPABILITY_ID_)).toMatchObject({
+      capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
+      capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_,
+      executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_,
     });
     expect(registry.snapshot().contextSources.map(({ sourceId }) => sourceId)).toEqual([
-      ...BUILTIN_CONTEXT_SOURCE_IDS_V1,
+      ...BUILTIN_CONTEXT_SOURCE_IDS_,
     ]);
-    for (const operationId of RMV1_11_OPERATION_IDS_V1) {
+    for (const operationId of MODEL_OPERATION_IDS_) {
       expect(registry.operationOwner(operationId), operationId).toBe(
         'kite-builtin-runtime-rmv1-11',
       );
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        revision: RMV1_11_CAPABILITY_REVISIONS_V1[operationId],
+        revision: MODEL_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-rmv1-11',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1[operationId],
+        capabilityRevision: MODEL_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-rmv1-11',
       });
     }
-    for (const operationId of RMV1_12_OPERATION_IDS_V1) {
+    for (const operationId of GIT_OPERATION_IDS_) {
       expect(registry.operationOwner(operationId), operationId).toBe(
         'kite-builtin-runtime-rmv1-12',
       );
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        revision: RMV1_12_CAPABILITY_REVISIONS_V1[operationId],
+        revision: GIT_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-rmv1-12',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        capabilityRevision: RMV1_12_CAPABILITY_REVISIONS_V1[operationId],
+        capabilityRevision: GIT_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-rmv1-12',
       });
     }
-    for (const operationId of RMV1_14_OPERATION_IDS_V1) {
+    for (const operationId of SUBAGENT_OPERATION_IDS_) {
       expect(registry.operationOwner(operationId), operationId).toBe(
         'kite-builtin-runtime-rmv1-14',
       );
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        revision: RMV1_14_CAPABILITY_REVISIONS_V1[operationId],
+        revision: SUBAGENT_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-rmv1-14',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        capabilityRevision: RMV1_14_CAPABILITY_REVISIONS_V1[operationId],
+        capabilityRevision: SUBAGENT_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-rmv1-14',
       });
     }
-    for (const operationId of RMV1_15_OPERATION_IDS_V1) {
+    for (const operationId of VERIFICATION_OPERATION_IDS_) {
       expect(registry.operationOwner(operationId), operationId).toBe(
         'kite-builtin-runtime-rmv1-15',
       );
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        revision: RMV1_15_CAPABILITY_REVISIONS_V1[operationId],
+        revision: VERIFICATION_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-rmv1-15',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
-        capabilityRevision: RMV1_15_CAPABILITY_REVISIONS_V1[operationId],
+        capabilityRevision: VERIFICATION_CAPABILITY_REVISIONS_[operationId],
         providerId: 'kite-builtin-runtime-rmv1-15',
       });
     }
-    expect(registry.operationOwner(RMV1_13_OPERATION_ID_V1)).toBe('kite-builtin-runtime-rmv1-13');
-    expect(registry.capability(RMV1_13_OPERATION_ID_V1)).toMatchObject({
-      capabilityId: RMV1_13_OPERATION_ID_V1,
-      revision: RMV1_13_CAPABILITY_REVISION_V1,
+    expect(registry.operationOwner(PLANNING_OPERATION_ID_)).toBe('kite-builtin-runtime-rmv1-13');
+    expect(registry.capability(PLANNING_OPERATION_ID_)).toMatchObject({
+      capabilityId: PLANNING_OPERATION_ID_,
+      revision: PLANNING_CAPABILITY_REVISION_,
       providerId: 'kite-builtin-runtime-rmv1-13',
     });
-    expect(registry.executor(RMV1_13_OPERATION_ID_V1)).toMatchObject({
-      capabilityId: RMV1_13_OPERATION_ID_V1,
-      capabilityRevision: RMV1_13_CAPABILITY_REVISION_V1,
+    expect(registry.executor(PLANNING_OPERATION_ID_)).toMatchObject({
+      capabilityId: PLANNING_OPERATION_ID_,
+      capabilityRevision: PLANNING_CAPABILITY_REVISION_,
       providerId: 'kite-builtin-runtime-rmv1-13',
     });
   });
 
   test('projects all 29 registered operations and exactly 20 model tools', () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const projection = createBuiltinToolCatalogProjectionV1(registry, {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
         toolSearchEnabled: true,
         hasTaskAdapter: true,
@@ -256,13 +256,13 @@ describe('builtin runtime package boundary', () => {
         brokeredGitFeatureRevision: 'brokered-git-r1',
         activeSkillFrameIds: ['skill-frame'],
         availableSkillIds: ['skill'],
-        featureFlags: { brokeredGitV1: true, skillWorkflowV1: true, skillActivationV2: true },
+        featureFlags: { brokeredGit: true, skillWorkflow: true, skillActivation: true },
       },
     });
     expect(projection.entries).toHaveLength(29);
     expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(20);
     expect(projection.entries.filter((entry) => entry.visibility === 'internal')).toHaveLength(9);
-    const expectedMechanisms: Readonly<Record<string, CapabilityExecutionMechanismV1>> = {
+    const expectedMechanisms: Readonly<Record<string, CapabilityExecutionMechanism>> = {
       'builtin:tool_search': 'catalog',
       'builtin:web_fetch': 'web',
       'builtin:list_mcp_resources': 'mcp',
@@ -330,7 +330,7 @@ describe('builtin runtime package boundary', () => {
       name: 'read_file',
       visibility: 'model',
       availability: 'available',
-      revision: RMV1_12_CAPABILITY_REVISIONS_V1['builtin:read_file'],
+      revision: GIT_CAPABILITY_REVISIONS_['builtin:read_file'],
       effects: { filesystem: 'read', network: 'none', externalState: 'none' },
     });
     expect(readFile?.inputSchema).toEqual(registry.capability('builtin:read_file')?.inputSchema);
@@ -370,10 +370,10 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('rejects mutable or nested-forged registry snapshots before catalog projection', () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const snapshot = registry.snapshot();
     expect(() =>
-      createBuiltinToolCatalogProjectionV1({
+      createBuiltinToolCatalogProjection({
         ...snapshot,
       }),
     ).toThrow('requires a frozen Runtime SPI registry snapshot');
@@ -387,14 +387,14 @@ describe('builtin runtime package boundary', () => {
         ...snapshot.capabilities.slice(1),
       ]),
     });
-    expect(() => createBuiltinToolCatalogProjectionV1(forged)).toThrow(
+    expect(() => createBuiltinToolCatalogProjection(forged)).toThrow(
       'capability snapshot is invalid',
     );
   });
 
   test('binds execution-mechanism routing facts into the independent catalog revision', () => {
-    const snapshot = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules()).snapshot();
-    const baseline = createBuiltinToolCatalogProjectionV1(snapshot);
+    const snapshot = createRuntimeModuleRegistry(createBuiltinRuntimeModules()).snapshot();
+    const baseline = createBuiltinToolCatalogProjection(snapshot);
     const capabilities = snapshot.capabilities.map((entry) => {
       if (entry.definition.capabilityId !== 'builtin:read_file') return entry;
       const descriptor = entry.definition.descriptor;
@@ -408,15 +408,15 @@ describe('builtin runtime package boundary', () => {
         }),
       });
     });
-    const changed = createBuiltinToolCatalogProjectionV1(
+    const changed = createBuiltinToolCatalogProjection(
       Object.freeze({ ...snapshot, capabilities: Object.freeze(capabilities) }),
     );
     expect(changed.revision).not.toBe(baseline.revision);
   });
 
   test('projects strict parser, descriptor, availability, effects, and traits facts from one snapshot', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const projection = createBuiltinToolCatalogProjectionV1(registry, {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
         toolSearchEnabled: true,
         hasTaskAdapter: true,
@@ -425,9 +425,9 @@ describe('builtin runtime package boundary', () => {
         activeSkillFrameIds: ['frame-1'],
         availableSkillIds: ['skill-1'],
         featureFlags: {
-          brokeredGitV1: true,
-          skillWorkflowV1: true,
-          skillActivationV2: true,
+          brokeredGit: true,
+          skillWorkflow: true,
+          skillActivation: true,
         },
       },
     });
@@ -458,7 +458,7 @@ describe('builtin runtime package boundary', () => {
     const runtimeContractDescriptor: CapabilityDescriptor = readFile.descriptor;
     expect(runtimeContractDescriptor.kind).toBe('builtin_tool');
     expect(readFile.modelDescription).toBe(
-      buildDescription(BUILTIN_TOOL_CONTRACTS.read_file, 'v2'),
+      buildDescription(BUILTIN_TOOL_CONTRACTS.read_file, 'catalog'),
     );
     expect(readFile.executionTraitsDeclaration).toMatchObject({
       resourceScopes: [{ kind: 'workspace', key: 'workspace' }],
@@ -569,7 +569,7 @@ describe('builtin runtime package boundary', () => {
       expect(entry.modelDescription, entry.name).toBe(
         buildDescription(
           BUILTIN_TOOL_CONTRACTS[entry.name as keyof typeof BUILTIN_TOOL_CONTRACTS],
-          'v2',
+          'catalog',
         ),
       );
       expect(entry.descriptor.kind, entry.name).toBe('builtin_tool');
@@ -582,7 +582,7 @@ describe('builtin runtime package boundary', () => {
       throw new Error('ask_user descriptor is missing');
     }
     const { revision: askDescriptorRevision, ...askDescriptorContent } = askDescriptor.descriptor;
-    expect(askDescriptorRevision).toBe(digestCapabilityBindingValueV1(askDescriptorContent));
+    expect(askDescriptorRevision).toBe(digestCapabilityBindingValue(askDescriptorContent));
     const expectedEffects: Readonly<
       Record<string, Readonly<{ effectClass: string; sideEffect: boolean; reason: string }>>
     > = {
@@ -691,7 +691,7 @@ describe('builtin runtime package boundary', () => {
       (candidate) => candidate.visibility === 'model',
     )) {
       if (!entry.name) throw new Error(`missing model tool name: ${entry.operationId}`);
-      let input: RuntimeJsonValueV1 = {};
+      let input: RuntimeJsonValue = {};
       if (entry.name === 'task') {
         input = { subagent_type: 'explore', task: 'inspect the repository' };
       } else if (entry.name === 'shell_execute') {
@@ -770,9 +770,9 @@ describe('builtin runtime package boundary', () => {
         externalState: 'none',
       },
     });
-    expect(BUILTIN_TASK_PUBLIC_SCHEMA_V1).toBeDefined();
+    expect(BUILTIN_TASK_PUBLIC_SCHEMA_).toBeDefined();
     let interruptCalls = 0;
-    const interruptPort: CapabilityExecutionPortV1 = {
+    const interruptPort: CapabilityExecutionPort = {
       invoke: async () => {
         interruptCalls += 1;
         throw new Error('interrupt port must not be called');
@@ -796,8 +796,8 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('keeps task private artifacts runtime-only and fails closed without turn context', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const hidden = createBuiltinToolCatalogProjectionV1(registry);
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const hidden = createBuiltinToolCatalogProjection(registry);
     const task = hidden.entries.find((entry) => entry.operationId === 'builtin:task');
     const toolSearch = hidden.entries.find((entry) => entry.operationId === 'builtin:tool_search');
     const git = hidden.entries.find((entry) => entry.operationId === 'builtin:git_inspect');
@@ -809,18 +809,18 @@ describe('builtin runtime package boundary', () => {
       brokeredGitFeatureRevision: 'brokered-git-r1',
       activeSkillFrameIds: ['frame-1'],
       availableSkillIds: ['skill-1'],
-      featureFlags: { brokeredGitV1: true, skillWorkflowV1: true, skillActivationV2: true },
+      featureFlags: { brokeredGit: true, skillWorkflow: true, skillActivation: true },
     });
     expect(hidden.revision).toBe(fullTurn.revision);
     expect(Object.keys(hidden.toolSet)).toHaveLength(14);
     expect(Object.keys(fullTurn.toolSet)).toHaveLength(20);
     expect(git.availability).toBe('hidden');
-    const forgedGitTopLevel = createBuiltinToolCatalogProjectionV1(registry.snapshot(), {
+    const forgedGitTopLevel = createBuiltinToolCatalogProjection(registry.snapshot(), {
       turnContext: {
         hasGitBroker: true,
         brokeredGitFeatureRevision: 'brokered-git-r1',
-        brokeredGitV1: true,
-      } as unknown as CapabilityTurnContextV1,
+        brokeredGit: true,
+      } as unknown as CapabilityTurnContext,
     });
     expect(
       forgedGitTopLevel.entries.find((entry) => entry.operationId === 'builtin:git_inspect')
@@ -833,8 +833,8 @@ describe('builtin runtime package boundary', () => {
     expect(
       fullTurn.entries.find((entry) => entry.operationId === 'builtin:task')?.availability,
     ).toBe('available');
-    const publicProjection = createBuiltinToolCatalogProjectionV1(registry, {
-      turnContext: { hasTaskAdapter: true, promptContractV2: true },
+    const publicProjection = createBuiltinToolCatalogProjection(registry, {
+      turnContext: { hasTaskAdapter: true, promptContract: true },
     });
     const publicTask = publicProjection.entries.find(
       (entry) => entry.operationId === 'builtin:task',
@@ -846,8 +846,8 @@ describe('builtin runtime package boundary', () => {
     ).toMatchObject({
       enum: ['explore', 'plan', 'code', 'review'],
     });
-    const planningProjection = createBuiltinToolCatalogProjectionV1(registry, {
-      turnContext: { hasTaskAdapter: true, phase: 'planning', promptContractV2: false },
+    const planningProjection = createBuiltinToolCatalogProjection(registry, {
+      turnContext: { hasTaskAdapter: true, phase: 'planning', promptContract: false },
     });
     const planningTask = planningProjection.entries.find(
       (entry) => entry.operationId === 'builtin:task',
@@ -856,7 +856,7 @@ describe('builtin runtime package boundary', () => {
       (planningTask?.modelInputSchema?.properties as Record<string, unknown> | undefined)
         ?.subagent_type,
     ).toMatchObject({
-      enum: ['explore', 'plan'],
+      enum: ['explore', 'plan', 'code', 'review'],
     });
     const privateInput = {
       subagent_type: 'explore',
@@ -871,24 +871,15 @@ describe('builtin runtime package boundary', () => {
     expect(task.parseModelInput(privateInput).success).toBe(false);
     expect(
       task.parseModelInput(
-        { subagent_type: 'code', task: 'implement a bounded change' },
-        {
-          phase: 'planning',
-          promptContractV2: false,
-        },
-      ).success,
-    ).toBe(false);
-    expect(
-      task.parseModelInput(
         { subagent_type: 'plan', task: 'inspect the architecture' },
         {
           phase: 'planning',
-          promptContractV2: false,
+          promptContract: false,
         },
       ).success,
     ).toBe(true);
     let calls = 0;
-    const port: CapabilityExecutionPortV1 = {
+    const port: CapabilityExecutionPort = {
       invoke: async () => {
         calls += 1;
         throw new Error('must not be called');
@@ -941,13 +932,13 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('fails closed on model-name, visibility, availability, and receipt identity mismatches', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot());
-    const unavailable = createBuiltinToolCatalogProjectionV1(registry.snapshot(), {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const projection = createBuiltinToolCatalogProjection(registry.snapshot());
+    const unavailable = createBuiltinToolCatalogProjection(registry.snapshot(), {
       turnContext: { toolSearchEnabled: false },
     });
     let portCalls = 0;
-    const port: CapabilityExecutionPortV1 = {
+    const port: CapabilityExecutionPort = {
       invoke: async (invocation) => {
         portCalls += 1;
         const definition = registry.capability(invocation.request.capabilityId);
@@ -966,7 +957,7 @@ describe('builtin runtime package boundary', () => {
         };
       },
     };
-    const readRevision = RMV1_12_CAPABILITY_REVISIONS_V1['builtin:read_file'];
+    const readRevision = GIT_CAPABILITY_REVISIONS_['builtin:read_file'];
     const readSchemaDigest = registry.capability('builtin:read_file')?.inputSchemaDigest;
     if (!readSchemaDigest) throw new Error('read_file schema digest is missing');
     await expect(
@@ -1005,7 +996,7 @@ describe('builtin runtime package boundary', () => {
         port,
         catalogInvocation({
           operationId: 'builtin:tool_search',
-          revision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
+          revision: TOOL_SEARCH_CAPABILITY_REVISION_,
           schemaDigest: toolSearchSchemaDigest,
           exposedToolName: 'tool_search',
         }),
@@ -1014,7 +1005,7 @@ describe('builtin runtime package boundary', () => {
     expect(portCalls).toBe(0);
 
     const internalOperation = 'model:primary';
-    const internalRevision = RMV1_15_CAPABILITY_REVISIONS_V1[internalOperation];
+    const internalRevision = VERIFICATION_CAPABILITY_REVISIONS_[internalOperation];
     const internalSchemaDigest = registry.capability(internalOperation)?.inputSchemaDigest;
     if (!internalSchemaDigest) throw new Error('internal Model schema digest is missing');
     await expect(
@@ -1044,7 +1035,7 @@ describe('builtin runtime package boundary', () => {
     expect(accepted.providerId).toBe('kite-builtin-runtime-rmv1-15');
     expect(portCalls).toBe(1);
 
-    const forgedReceiptPort: CapabilityExecutionPortV1 = {
+    const forgedReceiptPort: CapabilityExecutionPort = {
       invoke: async (invocation) => ({
         invocationId: invocation.request.invocationId,
         attemptId: invocation.attempt.attemptId,
@@ -1073,17 +1064,17 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('dispatches only through the supplied Host execution port', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const projection = createBuiltinToolCatalogProjectionV1(registry);
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const projection = createBuiltinToolCatalogProjection(registry);
     const calls: string[] = [];
-    const port: CapabilityExecutionPortV1 = {
+    const port: CapabilityExecutionPort = {
       invoke: async (invocation) => {
         calls.push(invocation.request.capabilityId);
         return {
           invocationId: invocation.request.invocationId,
           attemptId: invocation.attempt.attemptId,
           providerId: 'kite-builtin-runtime-rmv1-12',
-          executorRevision: RMV1_12_EXECUTOR_REVISIONS_V1['builtin:read_file'],
+          executorRevision: GIT_EXECUTOR_REVISIONS_['builtin:read_file'],
           requestDigest: invocation.requestDigest,
           status: 'succeeded',
           dispatchCertainty: 'attempted',
@@ -1092,10 +1083,10 @@ describe('builtin runtime package boundary', () => {
         };
       },
     };
-    const revision = RMV1_12_CAPABILITY_REVISIONS_V1['builtin:read_file'];
+    const revision = GIT_CAPABILITY_REVISIONS_['builtin:read_file'];
     const schemaDigest = registry.capability('builtin:read_file')?.inputSchemaDigest;
     if (!schemaDigest) throw new Error('read_file schema digest is missing');
-    const bindingId = digestCapabilityBindingValueV1({
+    const bindingId = digestCapabilityBindingValue({
       capabilityId: 'builtin:read_file',
       revision,
       exposedToolName: 'read_file',
@@ -1143,7 +1134,7 @@ describe('builtin runtime package boundary', () => {
         request: {
           invocationId: 'invocation-1',
           capabilityId: 'builtin:read_file',
-          capabilityRevision: RMV1_13_CAPABILITY_REVISION_V1,
+          capabilityRevision: PLANNING_CAPABILITY_REVISION_,
           input: {},
         },
         grant: {
@@ -1162,7 +1153,7 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('fails closed before calling MCP when the exact inner identity is unavailable', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const executor = registry.executor('mcp:dynamic_tool');
     if (!executor) throw new Error('dynamic MCP executor missing');
     let calls = 0;
@@ -1170,7 +1161,7 @@ describe('builtin runtime package boundary', () => {
       {
         invocationId: 'invocation-1',
         capabilityId: 'mcp:dynamic_tool',
-        capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1['mcp:dynamic_tool'],
+        capabilityRevision: MODEL_CAPABILITY_REVISIONS_['mcp:dynamic_tool'],
         input: {
           capability_id: 'mcp:docs:search',
           capability_revision: 'tool-revision-1',
@@ -1181,7 +1172,7 @@ describe('builtin runtime package boundary', () => {
         grant: {
           grantId: 'grant-1',
           capabilityId: 'mcp:dynamic_tool',
-          capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1['mcp:dynamic_tool'],
+          capabilityRevision: MODEL_CAPABILITY_REVISIONS_['mcp:dynamic_tool'],
           authority: {},
         },
         requestDigest: 'request-digest-1',
@@ -1216,14 +1207,14 @@ describe('builtin runtime package boundary', () => {
       },
     );
     expect(receipt.status).toBe('succeeded');
-    expect(isBuiltinOperationExecutionValueV1(receipt.value)).toBe(true);
-    if (!isBuiltinOperationExecutionValueV1(receipt.value)) throw new Error('invalid result');
+    expect(isBuiltinOperationExecutionValue(receipt.value)).toBe(true);
+    if (!isBuiltinOperationExecutionValue(receipt.value)) throw new Error('invalid result');
     expect(receipt.value).toMatchObject({
       ok: false,
       stderr: 'Dynamic MCP invocation identity is unavailable or changed.',
     });
     expect(calls).toBe(0);
-    expect(DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1.required).toEqual([
+    expect(DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_.required).toEqual([
       'capability_id',
       'capability_revision',
       'arguments',
@@ -1231,7 +1222,7 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('projects a typed Dynamic MCP provider failure into a retry-classifiable receipt', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const executor = registry.executor('mcp:dynamic_tool');
     if (!executor) throw new Error('dynamic MCP executor missing');
     let providerCalls = 0;
@@ -1239,7 +1230,7 @@ describe('builtin runtime package boundary', () => {
       {
         invocationId: 'invocation-retry-1',
         capabilityId: 'mcp:dynamic_tool',
-        capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1['mcp:dynamic_tool'],
+        capabilityRevision: MODEL_CAPABILITY_REVISIONS_['mcp:dynamic_tool'],
         input: {
           capability_id: 'mcp:docs:search',
           capability_revision: 'tool-revision-1',
@@ -1250,7 +1241,7 @@ describe('builtin runtime package boundary', () => {
         grant: {
           grantId: 'grant-retry-1',
           capabilityId: 'mcp:dynamic_tool',
-          capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1['mcp:dynamic_tool'],
+          capabilityRevision: MODEL_CAPABILITY_REVISIONS_['mcp:dynamic_tool'],
           authority: {},
         },
         requestDigest: 'request-retry-1',
@@ -1300,7 +1291,7 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('uses the outer Tool identity for planning events and rejects a missing identity', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const executor = registry.executor('builtin:write_plan');
     if (!executor) throw new Error('write_plan executor missing');
     const observedToolCallIds: string[] = [];
@@ -1308,7 +1299,7 @@ describe('builtin runtime package boundary', () => {
       grant: {
         grantId: 'plan-grant-1',
         capabilityId: 'builtin:write_plan',
-        capabilityRevision: RMV1_14_CAPABILITY_REVISIONS_V1['builtin:write_plan'],
+        capabilityRevision: SUBAGENT_CAPABILITY_REVISIONS_['builtin:write_plan'],
         authority: {},
       },
       requestDigest: 'plan-request-1',
@@ -1332,7 +1323,7 @@ describe('builtin runtime package boundary', () => {
     const request = {
       invocationId: 'capability-invocation',
       capabilityId: 'builtin:write_plan',
-      capabilityRevision: RMV1_14_CAPABILITY_REVISIONS_V1['builtin:write_plan'],
+      capabilityRevision: SUBAGENT_CAPABILITY_REVISIONS_['builtin:write_plan'],
       input: {
         title: 'Inspect',
         body_markdown: 'Inspect the Runtime identity boundary.',
@@ -1363,21 +1354,21 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('fails closed when web execution has neither an injected fetch nor an unavailable decision', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const executor = registry.executor('builtin:web_fetch');
     if (!executor) throw new Error('web executor missing');
     const receipt = await executor.execute(
       {
         invocationId: 'web-invocation-1',
         capabilityId: 'builtin:web_fetch',
-        capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1['builtin:web_fetch'],
+        capabilityRevision: MODEL_CAPABILITY_REVISIONS_['builtin:web_fetch'],
         input: { url: 'https://example.com' },
       },
       {
         grant: {
           grantId: 'web-grant-1',
           capabilityId: 'builtin:web_fetch',
-          capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1['builtin:web_fetch'],
+          capabilityRevision: MODEL_CAPABILITY_REVISIONS_['builtin:web_fetch'],
           authority: {},
         },
         requestDigest: 'web-request-1',
@@ -1391,8 +1382,8 @@ describe('builtin runtime package boundary', () => {
       },
     );
     expect(receipt.status).toBe('succeeded');
-    expect(isBuiltinOperationExecutionValueV1(receipt.value)).toBe(true);
-    if (!isBuiltinOperationExecutionValueV1(receipt.value)) throw new Error('invalid result');
+    expect(isBuiltinOperationExecutionValue(receipt.value)).toBe(true);
+    if (!isBuiltinOperationExecutionValue(receipt.value)) throw new Error('invalid result');
     expect(receipt.value).toMatchObject({
       ok: false,
       stderr: 'Builtin web execution requires an explicit fetch port or unavailable decision.',
@@ -1400,7 +1391,7 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('projects Context candidates only from immutable committed facts with fixed authority', () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const facts = Object.freeze({
       projectInstructionFragments: Object.freeze([
         Object.freeze({
@@ -1467,7 +1458,7 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('owns deterministic Context selection and fails closed for required overflow', async () => {
-    const compiler = createBuiltinContextCompilerPortV1();
+    const compiler = createBuiltinContextCompilerPort();
     const candidates = [
       {
         fragmentId: 'always-1',
@@ -1516,7 +1507,7 @@ describe('builtin runtime package boundary', () => {
   });
 
   test('searches only immutable projected facts and returns bounded public metadata', async () => {
-    const facts = createToolSearchProviderFactsV1({
+    const facts = createToolSearchProviderFacts({
       threadId: 'thread-1',
       turnId: 'turn-1',
       toolCallId: 'call-1',
@@ -1544,22 +1535,22 @@ describe('builtin runtime package boundary', () => {
     expect(Object.isFrozen(facts.descriptors)).toBe(true);
     expect(Object.isFrozen(facts.descriptors[0])).toBe(true);
 
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const executor = registry.executor(TOOL_SEARCH_CAPABILITY_ID_V1);
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const executor = registry.executor(TOOL_SEARCH_CAPABILITY_ID_);
     if (!executor) throw new Error('tool_search executor missing');
     const receipt = await executor.execute(
       {
         invocationId: 'invocation-1',
-        capabilityId: TOOL_SEARCH_CAPABILITY_ID_V1,
-        capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
+        capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
+        capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_,
         input: { query: 'publish release' },
         facts,
       },
       {
         grant: {
           grantId: 'grant-1',
-          capabilityId: TOOL_SEARCH_CAPABILITY_ID_V1,
-          capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
+          capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
+          capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_,
           authority: {},
         },
         requestDigest: 'request-digest-1',
@@ -1574,8 +1565,8 @@ describe('builtin runtime package boundary', () => {
       attemptId: 'attempt-1',
       requestDigest: 'request-digest-1',
     });
-    expect(isToolSearchExecutionValueV1(receipt.value)).toBe(true);
-    if (!isToolSearchExecutionValueV1(receipt.value)) throw new Error('invalid result');
+    expect(isToolSearchExecutionValue(receipt.value)).toBe(true);
+    if (!isToolSearchExecutionValue(receipt.value)) throw new Error('invalid result');
     const visible = JSON.parse(receipt.value.stdout) as Record<string, unknown>;
     expect(visible).toMatchObject({
       candidate_count: 1,

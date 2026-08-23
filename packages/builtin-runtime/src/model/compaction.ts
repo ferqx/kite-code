@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { BuiltinRuntimeStateViewV1, BuiltinTranscriptMessageV1 } from './runtime-view';
+import type { BuiltinRuntimeStateView, BuiltinTranscriptMessage } from './runtime-view';
 
 const TERMINAL_TOOL_STATUSES = new Set([
   'succeeded',
@@ -16,16 +16,16 @@ export interface SafeCompactionBoundary {
   lastMessageId?: string;
   coveredThroughTurnId?: string;
   protectedMessageIds: string[];
-  coveredMessages: BuiltinTranscriptMessageV1[];
+  coveredMessages: BuiltinTranscriptMessage[];
 }
 
-function stableMessageId(message: BuiltinTranscriptMessageV1): string | undefined {
+function stableMessageId(message: BuiltinTranscriptMessage): string | undefined {
   return message.messageId;
 }
 
 /** Select complete settled turns, optionally protecting the latest active turn. */
 export function findSafeCompactionBoundary(
-  state: Readonly<BuiltinRuntimeStateViewV1>,
+  state: Readonly<BuiltinRuntimeStateView>,
   options: { protectLatestTurn?: boolean } = {},
 ): SafeCompactionBoundary {
   if (state.interactions.kind !== 'idle') {
@@ -88,7 +88,7 @@ export function findSafeCompactionBoundary(
     }
   }
   for (const assistant of coveredMessages.filter(
-    (message): message is Extract<BuiltinTranscriptMessageV1, { kind: 'assistant' }> =>
+    (message): message is Extract<BuiltinTranscriptMessage, { kind: 'assistant' }> =>
       message.kind === 'assistant',
   )) {
     for (const call of assistant.toolCalls) {
@@ -108,7 +108,7 @@ export function findSafeCompactionBoundary(
     }
   }
   for (const tool of coveredMessages.filter(
-    (message): message is Extract<BuiltinTranscriptMessageV1, { kind: 'tool' }> =>
+    (message): message is Extract<BuiltinTranscriptMessage, { kind: 'tool' }> =>
       message.kind === 'tool',
   )) {
     if (
@@ -150,7 +150,7 @@ export function findSafeCompactionBoundary(
   };
 }
 
-export function digestCompactionSource(messages: readonly BuiltinTranscriptMessageV1[]): string {
+export function digestCompactionSource(messages: readonly BuiltinTranscriptMessage[]): string {
   return createHash('sha256')
     .update(
       JSON.stringify(

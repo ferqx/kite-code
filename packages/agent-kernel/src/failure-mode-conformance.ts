@@ -1,17 +1,17 @@
 import {
-  classifyRuntimeFailureV1 as classifyFailure,
-  type FailureKindV1 as FailureKind,
-  type TerminalReasonCodeV1,
+  classifyRuntimeFailure as classifyFailure,
+  type FailureKind,
+  type TerminalReasonCode,
 } from './normalization';
 import {
-  failedTerminalOutcomeV1,
-  type RunTerminalOutcomeV1,
-  type RuntimeTerminalStatusV1,
+  failedTerminalOutcome,
+  type RunTerminalOutcome,
+  type RuntimeTerminalStatus,
 } from './terminal-outcome';
 
 /** Kernel-owned State conformance policy; it creates no Provider or effect fallback. */
 
-export const RUNTIME_FAILURE_MODES_V1 = Object.freeze([
+export const RUNTIME_FAILURE_MODES_ = Object.freeze([
   'artifact_invalid',
   'profile_invalid',
   'digest_invalid',
@@ -45,19 +45,19 @@ export const RUNTIME_FAILURE_MODES_V1 = Object.freeze([
   'optional_rollout_unavailable',
 ] as const);
 
-export type RuntimeFailureModeV1 = (typeof RUNTIME_FAILURE_MODES_V1)[number];
+export type RuntimeFailureMode = (typeof RUNTIME_FAILURE_MODES_)[number];
 
-export type FailureModeDispositionV1 = 'continue' | 'block' | 'degrade';
+export type FailureModeDisposition = 'continue' | 'block' | 'degrade';
 
-export type FailureModeDurableStateV1 =
-  | RuntimeTerminalStatusV1
+export type FailureModeDurableState =
+  | RuntimeTerminalStatus
   | 'preserved'
   | 'capability_disabled'
   | 'verification_required'
   | 'diagnostic_channel_disabled'
   | 'rollout_fallback';
 
-export type FailureModeFallbackV1 =
+export type FailureModeFallback =
   | 'none'
   | 'bounded_model_retry'
   | 'disable_process_and_write'
@@ -70,25 +70,25 @@ export type FailureModeFallbackV1 =
   | 'embedded_profile'
   | 'disable_only_cache';
 
-export interface FailureModeResolutionV1 {
+export interface FailureModeResolution {
   version: 1;
-  mode: RuntimeFailureModeV1;
-  disposition: FailureModeDispositionV1;
+  mode: RuntimeFailureMode;
+  disposition: FailureModeDisposition;
   /** Automatic effectful invocations admitted in response to this failure. */
   newInvocationCount: 0 | 1;
-  durableState: FailureModeDurableStateV1;
-  externalSideEffects: RunTerminalOutcomeV1['knownExternalEffects'];
-  reasonCode: RuntimeFailureModeV1;
-  terminalReason: TerminalReasonCodeV1 | null;
+  durableState: FailureModeDurableState;
+  externalSideEffects: RunTerminalOutcome['knownExternalEffects'];
+  reasonCode: RuntimeFailureMode;
+  terminalReason: TerminalReasonCode | null;
   userMessage: string;
   safeRetry: boolean;
-  recoveryEntry: RunTerminalOutcomeV1['recoveryEntry'];
+  recoveryEntry: RunTerminalOutcome['recoveryEntry'];
   pendingVerification: boolean;
-  fallback: FailureModeFallbackV1;
-  terminalOutcome: RunTerminalOutcomeV1 | null;
+  fallback: FailureModeFallback;
+  terminalOutcome: RunTerminalOutcome | null;
 }
 
-export interface FailureModeContextV1 {
+export interface FailureModeContext {
   remainingModelRetryAttempts?: number;
   requiredMcpStep?: boolean;
   processCleanupConfirmed?: boolean;
@@ -96,24 +96,24 @@ export interface FailureModeContextV1 {
   sandboxReadOnlyConformancePassed?: boolean;
   validDisableOnlyCache?: boolean;
   /** Evidence already recorded for the run before this failure was resolved. */
-  knownExternalEffects?: RunTerminalOutcomeV1['knownExternalEffects'];
+  knownExternalEffects?: RunTerminalOutcome['knownExternalEffects'];
 }
 
 interface TerminalSpec {
   failureKind: FailureKind;
-  reasonCode?: TerminalReasonCodeV1;
-  externalSideEffects?: RunTerminalOutcomeV1['knownExternalEffects'];
+  reasonCode?: TerminalReasonCode;
+  externalSideEffects?: RunTerminalOutcome['knownExternalEffects'];
   pendingVerification?: boolean;
-  fallback?: FailureModeFallbackV1;
-  status?: RuntimeTerminalStatusV1;
+  fallback?: FailureModeFallback;
+  status?: RuntimeTerminalStatus;
   safeRetry?: boolean;
-  recoveryEntry?: RunTerminalOutcomeV1['recoveryEntry'];
+  recoveryEntry?: RunTerminalOutcome['recoveryEntry'];
 }
 
 function joinExternalEffects(
-  local: RunTerminalOutcomeV1['knownExternalEffects'] | undefined,
-  existing: RunTerminalOutcomeV1['knownExternalEffects'] | undefined,
-): RunTerminalOutcomeV1['knownExternalEffects'] {
+  local: RunTerminalOutcome['knownExternalEffects'] | undefined,
+  existing: RunTerminalOutcome['knownExternalEffects'] | undefined,
+): RunTerminalOutcome['knownExternalEffects'] {
   if (local === undefined) return existing ?? 'unknown';
   if (existing === undefined) return local;
   if (local === 'unknown' || existing === 'unknown') return 'unknown';
@@ -122,18 +122,18 @@ function joinExternalEffects(
 }
 
 function terminalResolution(
-  mode: RuntimeFailureModeV1,
+  mode: RuntimeFailureMode,
   spec: TerminalSpec,
-  knownExternalEffects?: RunTerminalOutcomeV1['knownExternalEffects'],
-): FailureModeResolutionV1 {
+  knownExternalEffects?: RunTerminalOutcome['knownExternalEffects'],
+): FailureModeResolution {
   const failure = classifyFailure(spec.failureKind, mode);
   const externalSideEffects = joinExternalEffects(spec.externalSideEffects, knownExternalEffects);
-  const projectedOutcome = failedTerminalOutcomeV1(failure, {
+  const projectedOutcome = failedTerminalOutcome(failure, {
     knownExternalEffects: externalSideEffects,
     pendingVerification: spec.pendingVerification,
     reasonCode: spec.reasonCode,
   });
-  const terminalOutcome: RunTerminalOutcomeV1 = {
+  const terminalOutcome: RunTerminalOutcome = {
     ...projectedOutcome,
     status:
       externalSideEffects === 'unknown'
@@ -166,9 +166,9 @@ function terminalResolution(
 }
 
 function degradedResolution(
-  mode: RuntimeFailureModeV1,
+  mode: RuntimeFailureMode,
   input: Pick<
-    FailureModeResolutionV1,
+    FailureModeResolution,
     | 'durableState'
     | 'externalSideEffects'
     | 'userMessage'
@@ -177,8 +177,8 @@ function degradedResolution(
     | 'pendingVerification'
     | 'fallback'
   >,
-  knownExternalEffects?: RunTerminalOutcomeV1['knownExternalEffects'],
-): FailureModeResolutionV1 {
+  knownExternalEffects?: RunTerminalOutcome['knownExternalEffects'],
+): FailureModeResolution {
   return {
     version: 1,
     mode,
@@ -243,20 +243,20 @@ const TERMINAL_FAILURE_MODES = Object.freeze({
     failureKind: 'mandatory_policy_unavailable',
     externalSideEffects: 'none',
   },
-} as const satisfies Partial<Record<RuntimeFailureModeV1, TerminalSpec>>);
+} as const satisfies Partial<Record<RuntimeFailureMode, TerminalSpec>>);
 
 const MCP_FAILURE_KIND = Object.freeze({
   mcp_discovery_failure: 'mcp_unavailable',
   mcp_auth_failure: 'provider_auth_required',
   mcp_revision_failure: 'provider_capability_changed',
   mcp_transport_failure: 'mcp_unavailable',
-} as const satisfies Partial<Record<RuntimeFailureModeV1, FailureKind>>);
+} as const satisfies Partial<Record<RuntimeFailureMode, FailureKind>>);
 
 function modelFailureResolution(
-  mode: Extract<RuntimeFailureModeV1, 'model_timeout' | 'model_rate_limit' | 'model_server_error'>,
+  mode: Extract<RuntimeFailureMode, 'model_timeout' | 'model_rate_limit' | 'model_server_error'>,
   remainingModelRetryAttempts: number,
-  knownExternalEffects?: RunTerminalOutcomeV1['knownExternalEffects'],
-): FailureModeResolutionV1 {
+  knownExternalEffects?: RunTerminalOutcome['knownExternalEffects'],
+): FailureModeResolution {
   if (remainingModelRetryAttempts <= 0) {
     return terminalResolution(mode, { failureKind: 'model_retry_exhausted' }, knownExternalEffects);
   }
@@ -290,10 +290,10 @@ function modelFailureResolution(
  * Resolve the minimum RFC failure-mode contract without parsing display text.
  * Callers may narrow capabilities further, but cannot admit more invocations or a weaker fallback.
  */
-export function resolveFailureModeV1(
-  mode: RuntimeFailureModeV1,
-  context: FailureModeContextV1 = {},
-): FailureModeResolutionV1 {
+export function resolveFailureMode(
+  mode: RuntimeFailureMode,
+  context: FailureModeContext = {},
+): FailureModeResolution {
   if (mode === 'model_timeout' || mode === 'model_rate_limit' || mode === 'model_server_error') {
     return modelFailureResolution(
       mode,

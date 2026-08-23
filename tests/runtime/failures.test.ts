@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyToolOutcomeV1 } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { classifyToolOutcome } from '@kite/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import { classifyFailure, type FailureKind } from '#app/bootstrap/runtime/failures';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
@@ -91,7 +91,7 @@ describe('failure classification', () => {
 
   test('persists structured metadata on the failed tool record', () => {
     const queued = reduceRuntimeState(
-      createRuntimeHostStateInitialStateV1({
+      createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'failure',
         userId: 'u',
@@ -104,7 +104,7 @@ describe('failure classification', () => {
       type: 'tool.failed',
       toolCallId: 'call',
       failure,
-      outcomeV1: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'failed',
         failure,
         authority: { dispatchState: 'not_started', externalEffects: 'none' },
@@ -133,7 +133,7 @@ describe('failure classification', () => {
       type: 'tool.failed',
       toolCallId: 'call',
       failure,
-      outcomeV1: state.tools.calls.call!.outcomeV1!,
+      outcome: state.tools.calls.call!.outcome!,
     });
     expect(replayed.transcript.messages).toHaveLength(state.transcript.messages.length);
   });

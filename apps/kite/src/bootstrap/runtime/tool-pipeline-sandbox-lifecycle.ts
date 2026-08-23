@@ -1,57 +1,57 @@
-import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime';
 import {
-  type SandboxPreparationArtifactStoreV1,
-  sandboxAbandonmentLifecycleIntentDigestV1,
-  sandboxDisposalLifecycleIntentDigestV1,
-  sandboxPreparationDigestV1,
-  sandboxPreparationIntentDigestV1,
-  sandboxPreparationReadyDigestV1,
-  sandboxPreparedPlanDigestV1,
+  type SandboxPreparationArtifactStore,
+  sandboxAbandonmentLifecycleIntentDigest,
+  sandboxDisposalLifecycleIntentDigest,
+  sandboxPreparationDigest,
+  sandboxPreparationIntentDigest,
+  sandboxPreparationReadyDigest,
+  sandboxPreparedPlanDigest,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  createRuntimeHostSandboxPreparationLifecycleV1,
-  type RuntimeHostSandboxLifecycleEvidenceV1,
-  type RuntimeHostSandboxLifecycleEvidenceVerificationResultV1,
-  type StateRuntimeEventV1,
-  type StateRuntimeStateV1,
+  createRuntimeHostSandboxPreparationLifecycle,
+  type RuntimeHostSandboxLifecycleEvidence,
+  type RuntimeHostSandboxLifecycleEvidenceVerificationResult,
+  type StateRuntimeEvent,
+  type StateRuntimeState,
 } from '@kite/runtime-host';
 import type {
-  PreparedSandboxExecutionV1,
-  PreparedToolInvocationV1,
-  SandboxDisposalIntentAcknowledgementV1,
-  SandboxDisposalReceiptAcknowledgementV1,
-  SandboxExecutionDispatchIntentAcknowledgementV1,
-  SandboxExecutionSupervisorStartedAcknowledgementV1,
-  SandboxPreparationArtifactPortV1,
-  SandboxPreparationIntentAcknowledgementV1,
-  SandboxPreparationLifecycleV1,
-  SandboxPreparationReadyAcknowledgementV1,
-  SandboxPreparationV1,
-  ToolPipelineAttemptAcknowledgementV1,
+  PreparedSandboxExecution,
+  PreparedToolInvocation,
+  SandboxDisposalIntentAcknowledgement,
+  SandboxDisposalReceiptAcknowledgement,
+  SandboxExecutionDispatchIntentAcknowledgement,
+  SandboxExecutionSupervisorStartedAcknowledgement,
+  SandboxPreparation,
+  SandboxPreparationArtifactPort,
+  SandboxPreparationIntentAcknowledgement,
+  SandboxPreparationLifecycle,
+  SandboxPreparationReadyAcknowledgement,
+  ToolPipelineAttemptAcknowledgement,
 } from '@kite/runtime-spi';
 
-export const APP_TOOL_PIPELINE_SANDBOX_LIFECYCLE_SCHEMA_V1 =
+export const APP_TOOL_PIPELINE_SANDBOX_LIFECYCLE_SCHEMA_ =
   'kite.app.tool-pipeline-sandbox-lifecycle.v1' as const;
 
-export interface AppToolPipelineSandboxLifecyclePersistenceV1 {
-  readonly getState: () => Readonly<StateRuntimeStateV1>;
-  readonly persistEvents: (events: StateRuntimeEventV1[]) => Promise<boolean>;
+export interface AppToolPipelineSandboxLifecyclePersistence {
+  readonly getState: () => Readonly<StateRuntimeState>;
+  readonly persistEvents: (events: StateRuntimeEvent[]) => Promise<boolean>;
   readonly now: () => string;
 }
 
-export interface CreateAppToolPipelineSandboxLifecycleInputV1
-  extends AppToolPipelineSandboxLifecyclePersistenceV1 {
+export interface CreateAppToolPipelineSandboxLifecycleInput
+  extends AppToolPipelineSandboxLifecyclePersistence {
   /** Exact packet emitted by the App prepared-attempt composition. */
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
+  readonly prepared: Readonly<PreparedToolInvocation>;
   /** Returns the exact open State acknowledgement for this packet. */
   readonly resolveOpenAcknowledgement: (
-    prepared: Readonly<PreparedToolInvocationV1>,
-  ) => Readonly<ToolPipelineAttemptAcknowledgementV1> | null | undefined;
+    prepared: Readonly<PreparedToolInvocation>,
+  ) => Readonly<ToolPipelineAttemptAcknowledgement> | null | undefined;
   /** Existing Builtin-owned durable Artifact store; App only wraps identity. */
-  readonly artifacts: Pick<SandboxPreparationArtifactStoreV1, 'write' | 'read'>;
+  readonly artifacts: Pick<SandboxPreparationArtifactStore, 'write' | 'read'>;
 }
 
-export type AppToolPipelineSandboxLifecycleErrorCodeV1 =
+export type AppToolPipelineSandboxLifecycleErrorCode =
   | 'invalid_composition'
   | 'attempt_not_acknowledged'
   | 'prepared_identity_mismatch'
@@ -61,35 +61,35 @@ export type AppToolPipelineSandboxLifecycleErrorCodeV1 =
   | 'state_mismatch'
   | 'artifact_identity_mismatch';
 
-export class AppToolPipelineSandboxLifecycleErrorV1 extends Error {
-  readonly code: AppToolPipelineSandboxLifecycleErrorCodeV1;
+export class AppToolPipelineSandboxLifecycleError extends Error {
+  readonly code: AppToolPipelineSandboxLifecycleErrorCode;
 
-  constructor(code: AppToolPipelineSandboxLifecycleErrorCodeV1, message: string) {
+  constructor(code: AppToolPipelineSandboxLifecycleErrorCode, message: string) {
     super(message);
-    this.name = 'AppToolPipelineSandboxLifecycleErrorV1';
+    this.name = 'AppToolPipelineSandboxLifecycleError';
     this.code = code;
   }
 }
 
 type StageAck =
-  | SandboxPreparationIntentAcknowledgementV1
-  | SandboxPreparationReadyAcknowledgementV1
-  | SandboxExecutionDispatchIntentAcknowledgementV1
-  | SandboxExecutionSupervisorStartedAcknowledgementV1
-  | SandboxDisposalIntentAcknowledgementV1
-  | SandboxDisposalReceiptAcknowledgementV1;
+  | SandboxPreparationIntentAcknowledgement
+  | SandboxPreparationReadyAcknowledgement
+  | SandboxExecutionDispatchIntentAcknowledgement
+  | SandboxExecutionSupervisorStartedAcknowledgement
+  | SandboxDisposalIntentAcknowledgement
+  | SandboxDisposalReceiptAcknowledgement;
 
-type InvocationState = Readonly<StateRuntimeStateV1['capabilities']['invocations'][string]>;
+type InvocationState = Readonly<StateRuntimeState['capabilities']['invocations'][string]>;
 
 interface StageBinding {
   readonly stage: StageAck['stage'];
   readonly acknowledgement: Readonly<StageAck>;
-  readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
-  readonly preparation?: Readonly<SandboxPreparationV1>;
-  readonly preparationIntent?: Readonly<SandboxPreparationIntentAcknowledgementV1>;
-  readonly preparationReady?: Readonly<SandboxPreparationReadyAcknowledgementV1> | null;
-  readonly dispatchIntent?: Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>;
-  readonly disposalIntent?: Readonly<SandboxDisposalIntentAcknowledgementV1>;
+  readonly prepared: Readonly<PreparedSandboxExecution> | null;
+  readonly preparation?: Readonly<SandboxPreparation>;
+  readonly preparationIntent?: Readonly<SandboxPreparationIntentAcknowledgement>;
+  readonly preparationReady?: Readonly<SandboxPreparationReadyAcknowledgement> | null;
+  readonly dispatchIntent?: Readonly<SandboxExecutionDispatchIntentAcknowledgement>;
+  readonly disposalIntent?: Readonly<SandboxDisposalIntentAcknowledgement>;
 }
 
 /**
@@ -97,19 +97,19 @@ interface StageBinding {
  * lifecycle.  State event encoding and acknowledgement evidence stay here;
  * Host owns stage ordering and the process-facing exact-object authority.
  */
-export function createAppToolPipelineSandboxLifecycleV1(
-  input: Readonly<CreateAppToolPipelineSandboxLifecycleInputV1>,
-): SandboxPreparationLifecycleV1 {
-  assertCompositionInputV1(input);
+export function createAppToolPipelineSandboxLifecycle(
+  input: Readonly<CreateAppToolPipelineSandboxLifecycleInput>,
+): SandboxPreparationLifecycle {
+  assertCompositionInput(input);
   const prepared = input.prepared;
   const openAcknowledgement = input.resolveOpenAcknowledgement(prepared);
-  assertOpenAcknowledgementV1(prepared, openAcknowledgement);
+  assertOpenAcknowledgement(prepared, openAcknowledgement);
 
   const stageBindings = new WeakMap<object, StageBinding>();
-  const artifactPort = createExactArtifactPortV1(input.artifacts, prepared);
-  const persistence = createHostPersistenceV1(input, prepared, openAcknowledgement, stageBindings);
-  const evidence = createEvidencePortV1(input, prepared, openAcknowledgement, stageBindings);
-  const lifecycle = createRuntimeHostSandboxPreparationLifecycleV1({
+  const artifactPort = createExactArtifactPort(input.artifacts, prepared);
+  const persistence = createHostPersistence(input, prepared, openAcknowledgement, stageBindings);
+  const evidence = createEvidencePort(input, prepared, openAcknowledgement, stageBindings);
+  const lifecycle = createRuntimeHostSandboxPreparationLifecycle({
     persistence,
     evidence,
     artifacts: artifactPort,
@@ -117,30 +117,30 @@ export function createAppToolPipelineSandboxLifecycleV1(
   return Object.freeze(lifecycle);
 }
 
-function createHostPersistenceV1(
-  input: Readonly<CreateAppToolPipelineSandboxLifecycleInputV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
-  openAcknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+function createHostPersistence(
+  input: Readonly<CreateAppToolPipelineSandboxLifecycleInput>,
+  prepared: Readonly<PreparedToolInvocation>,
+  openAcknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
   stageBindings: WeakMap<object, StageBinding>,
 ) {
-  let preparationIntent: Readonly<SandboxPreparationIntentAcknowledgementV1> | undefined;
-  let preparationReady: Readonly<SandboxPreparationReadyAcknowledgementV1> | undefined;
-  let preparedSandbox: Readonly<PreparedSandboxExecutionV1> | undefined;
-  let dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgementV1> | undefined;
-  let disposalIntent: Readonly<SandboxDisposalIntentAcknowledgementV1> | undefined;
+  let preparationIntent: Readonly<SandboxPreparationIntentAcknowledgement> | undefined;
+  let preparationReady: Readonly<SandboxPreparationReadyAcknowledgement> | undefined;
+  let preparedSandbox: Readonly<PreparedSandboxExecution> | undefined;
+  let dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgement> | undefined;
+  let disposalIntent: Readonly<SandboxDisposalIntentAcknowledgement> | undefined;
 
   const persistPreparationIntent = async ({
     preparation,
   }: {
-    readonly preparation: Readonly<SandboxPreparationV1>;
-  }): Promise<Readonly<SandboxPreparationIntentAcknowledgementV1>> => {
-    if (preparationIntent) failV1('invalid_stage', 'Preparation intent already exists.');
-    assertPreparationMatchesPreparedV1(preparation, prepared, openAcknowledgement);
-    const before = currentInvocationV1(input, openAcknowledgement, 'preparation intent');
+    readonly preparation: Readonly<SandboxPreparation>;
+  }): Promise<Readonly<SandboxPreparationIntentAcknowledgement>> => {
+    if (preparationIntent) fail('invalid_stage', 'Preparation intent already exists.');
+    assertPreparationMatchesPrepared(preparation, prepared, openAcknowledgement);
+    const before = currentInvocation(input, openAcknowledgement, 'preparation intent');
     if (before.sandboxPreparationIntent) {
-      failV1('state_mismatch', 'State already contains a sandbox preparation intent.');
+      fail('state_mismatch', 'State already contains a sandbox preparation intent.');
     }
-    const recordedAt = timestampV1(input.now());
+    const recordedAt = timestamp(input.now());
     const body = {
       attempt: openAcknowledgement.attempt.attempt,
       toolCallId: preparation.toolCallId,
@@ -149,22 +149,22 @@ function createHostPersistenceV1(
       canonicalWorkspace: preparation.canonicalWorkspace,
       effectiveEffectsDigest: preparation.effectiveEffectsDigest,
       admissionDigest: preparation.admissionDigest,
-      preparationDigest: sandboxPreparationDigestV1(preparation),
+      preparationDigest: sandboxPreparationDigest(preparation),
       commandDigest: preparation.commandDigest,
       executionBoundaryDigest: preparation.executionBoundaryDigest,
       resourceSemantics: 'allocating' as const,
     };
-    const intentDigest = sandboxPreparationIntentDigestV1(body);
-    const event: StateRuntimeEventV1 = Object.freeze({
+    const intentDigest = sandboxPreparationIntentDigest(body);
+    const event: StateRuntimeEvent = Object.freeze({
       type: 'capability.sandbox_preparation_intent_recorded',
       invocationId: openAcknowledgement.attempt.invocationId,
       ...body,
       intentDigest,
       recordedAt,
     });
-    await persistStateEventsV1(input, [event], 'preparation intent');
-    const after = currentInvocationV1(input, openAcknowledgement, 'preparation intent');
-    assertPreparationIntentStateV1(after, body, intentDigest, recordedAt);
+    await persistStateEvents(input, [event], 'preparation intent');
+    const after = currentInvocation(input, openAcknowledgement, 'preparation intent');
+    assertPreparationIntentState(after, body, intentDigest, recordedAt);
     preparationIntent = Object.freeze({
       acknowledged: true,
       stage: 'preparation_intent',
@@ -184,48 +184,48 @@ function createHostPersistenceV1(
     prepared: candidate,
     preparationArtifact,
   }: {
-    readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgementV1>;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1>;
-    readonly preparationArtifact: ReturnType<SandboxPreparationArtifactPortV1['write']>;
-  }): Promise<Readonly<SandboxPreparationReadyAcknowledgementV1>> => {
+    readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgement>;
+    readonly prepared: Readonly<PreparedSandboxExecution>;
+    readonly preparationArtifact: ReturnType<SandboxPreparationArtifactPort['write']>;
+  }): Promise<Readonly<SandboxPreparationReadyAcknowledgement>> => {
     if (!preparationIntent || intentAck !== preparationIntent) {
-      failV1('acknowledgement_mismatch', 'Preparation ready did not receive the exact intent ack.');
+      fail('acknowledgement_mismatch', 'Preparation ready did not receive the exact intent ack.');
     }
-    if (preparationReady) failV1('invalid_stage', 'Preparation ready already exists.');
-    assertPreparedSandboxAttemptMatchesV1(candidate, openAcknowledgement);
-    const before = currentInvocationV1(input, openAcknowledgement, 'preparation ready');
+    if (preparationReady) fail('invalid_stage', 'Preparation ready already exists.');
+    assertPreparedSandboxAttemptMatches(candidate, openAcknowledgement);
+    const before = currentInvocation(input, openAcknowledgement, 'preparation ready');
     if (
       !before.sandboxPreparationIntent ||
       before.sandboxPreparationIntent.intentDigest !== intentAck.intentDigest ||
       before.sandboxPreparationReady
     ) {
-      failV1('state_mismatch', 'State is not open for sandbox preparation ready.');
+      fail('state_mismatch', 'State is not open for sandbox preparation ready.');
     }
     const body = {
       attempt: openAcknowledgement.attempt.attempt,
       intentDigest: intentAck.intentDigest,
       preparationDigest: candidate.preparationDigest,
       commandDigest: candidate.commandDigest,
-      planDigest: sandboxPreparedPlanDigestV1(candidate),
+      planDigest: sandboxPreparedPlanDigest(candidate),
       backend: candidate.backend,
-      backendCapabilitiesDigest: digestCapabilityValueV1(candidate.backendCapabilities),
+      backendCapabilitiesDigest: digestCapabilityValue(candidate.backendCapabilities),
       enforcement: candidate.enforcement,
       resourceSemantics: candidate.resourceSemantics,
-      cleanupDigest: digestCapabilityValueV1(candidate.cleanup),
+      cleanupDigest: digestCapabilityValue(candidate.cleanup),
       preparationArtifact,
     };
-    const readyDigest = sandboxPreparationReadyDigestV1(body);
-    const readyAt = timestampV1(input.now());
-    const event: StateRuntimeEventV1 = Object.freeze({
+    const readyDigest = sandboxPreparationReadyDigest(body);
+    const readyAt = timestamp(input.now());
+    const event: StateRuntimeEvent = Object.freeze({
       type: 'capability.sandbox_preparation_ready',
       invocationId: openAcknowledgement.attempt.invocationId,
       ...body,
       readyDigest,
       readyAt,
     });
-    await persistStateEventsV1(input, [event], 'preparation ready');
-    const after = currentInvocationV1(input, openAcknowledgement, 'preparation ready');
-    assertPreparationReadyStateV1(after, body, readyDigest, readyAt);
+    await persistStateEvents(input, [event], 'preparation ready');
+    const after = currentInvocation(input, openAcknowledgement, 'preparation ready');
+    assertPreparationReadyState(after, body, readyDigest, readyAt);
     preparationReady = Object.freeze({
       acknowledged: true,
       stage: 'preparation_ready',
@@ -249,33 +249,33 @@ function createHostPersistenceV1(
     dispatchId,
     supervisorNonce,
   }: {
-    readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgementV1>;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1>;
+    readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgement>;
+    readonly prepared: Readonly<PreparedSandboxExecution>;
     readonly dispatchId: string;
     readonly supervisorNonce: string;
-  }): Promise<Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>> => {
+  }): Promise<Readonly<SandboxExecutionDispatchIntentAcknowledgement>> => {
     if (!preparationReady || readyAck !== preparationReady) {
-      failV1('acknowledgement_mismatch', 'Dispatch did not receive the exact ready ack.');
+      fail('acknowledgement_mismatch', 'Dispatch did not receive the exact ready ack.');
     }
-    if (dispatchIntent) failV1('invalid_stage', 'Dispatch intent already exists.');
-    assertPreparedSandboxMatchesV1(
+    if (dispatchIntent) fail('invalid_stage', 'Dispatch intent already exists.');
+    assertPreparedSandboxMatches(
       candidate,
-      requiredPreparedSandboxV1(preparedSandbox),
+      requiredPreparedSandbox(preparedSandbox),
       openAcknowledgement,
     );
-    if (!nonEmptyV1(dispatchId) || !nonEmptyV1(supervisorNonce)) {
-      failV1('invalid_stage', 'Dispatch identity must be non-empty.');
+    if (!nonEmpty(dispatchId) || !nonEmpty(supervisorNonce)) {
+      fail('invalid_stage', 'Dispatch identity must be non-empty.');
     }
-    const before = currentInvocationV1(input, openAcknowledgement, 'dispatch intent');
+    const before = currentInvocation(input, openAcknowledgement, 'dispatch intent');
     if (
       before.sandboxPreparationReady?.readyDigest !== readyAck.readyDigest ||
       before.sandboxExecutionDispatch
     ) {
-      failV1('state_mismatch', 'State is not open for sandbox dispatch intent.');
+      fail('state_mismatch', 'State is not open for sandbox dispatch intent.');
     }
-    const recordedAt = timestampV1(input.now());
-    const planDigest = sandboxPreparedPlanDigestV1(candidate);
-    const dispatchIntentDigest = digestCapabilityValueV1({
+    const recordedAt = timestamp(input.now());
+    const planDigest = sandboxPreparedPlanDigest(candidate);
+    const dispatchIntentDigest = digestCapabilityValue({
       kind: 'sandbox_execution_dispatch_intent_v1',
       invocationId: openAcknowledgement.attempt.invocationId,
       attempt: openAcknowledgement.attempt.attempt,
@@ -284,7 +284,7 @@ function createHostPersistenceV1(
       dispatchId,
       supervisorNonce,
     });
-    const event: StateRuntimeEventV1 = Object.freeze({
+    const event: StateRuntimeEvent = Object.freeze({
       type: 'capability.sandbox_execution_dispatch_intent_recorded',
       invocationId: openAcknowledgement.attempt.invocationId,
       attempt: openAcknowledgement.attempt.attempt,
@@ -295,9 +295,9 @@ function createHostPersistenceV1(
       dispatchIntentDigest,
       recordedAt,
     });
-    await persistStateEventsV1(input, [event], 'dispatch intent');
-    const after = currentInvocationV1(input, openAcknowledgement, 'dispatch intent');
-    assertDispatchIntentStateV1(after, event);
+    await persistStateEvents(input, [event], 'dispatch intent');
+    const after = currentInvocation(input, openAcknowledgement, 'dispatch intent');
+    assertDispatchIntentState(after, event);
     dispatchIntent = Object.freeze({
       acknowledged: true,
       stage: 'execution_dispatch_intent',
@@ -322,40 +322,37 @@ function createHostPersistenceV1(
     processGroupId,
     processStartIdentity,
   }: {
-    readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1>;
+    readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgement>;
+    readonly prepared: Readonly<PreparedSandboxExecution>;
     readonly supervisorPid: number;
     readonly processGroupId: number;
     readonly processStartIdentity: string;
-  }): Promise<Readonly<SandboxExecutionSupervisorStartedAcknowledgementV1>> => {
+  }): Promise<Readonly<SandboxExecutionSupervisorStartedAcknowledgement>> => {
     if (!dispatchIntent || dispatchAck !== dispatchIntent) {
-      failV1(
-        'acknowledgement_mismatch',
-        'Supervisor start did not receive the exact dispatch ack.',
-      );
+      fail('acknowledgement_mismatch', 'Supervisor start did not receive the exact dispatch ack.');
     }
-    assertPreparedSandboxMatchesV1(
+    assertPreparedSandboxMatches(
       candidate,
-      requiredPreparedSandboxV1(preparedSandbox),
+      requiredPreparedSandbox(preparedSandbox),
       openAcknowledgement,
     );
     if (
       !Number.isSafeInteger(supervisorPid) ||
       !Number.isSafeInteger(processGroupId) ||
-      !nonEmptyV1(processStartIdentity)
+      !nonEmpty(processStartIdentity)
     ) {
-      failV1('invalid_stage', 'Supervisor identity is invalid.');
+      fail('invalid_stage', 'Supervisor identity is invalid.');
     }
-    const before = currentInvocationV1(input, openAcknowledgement, 'supervisor start');
+    const before = currentInvocation(input, openAcknowledgement, 'supervisor start');
     if (
       before.sandboxExecutionDispatch?.status !== 'intent_recorded' ||
       before.sandboxExecutionDispatch.dispatchId !== dispatchAck.dispatchId ||
       before.sandboxExecutionDispatch.dispatchIntentDigest !== dispatchAck.dispatchIntentDigest
     ) {
-      failV1('state_mismatch', 'State is not open for supervisor start.');
+      fail('state_mismatch', 'State is not open for supervisor start.');
     }
-    const startedAt = timestampV1(input.now());
-    const event: StateRuntimeEventV1 = Object.freeze({
+    const startedAt = timestamp(input.now());
+    const event: StateRuntimeEvent = Object.freeze({
       type: 'capability.sandbox_execution_supervisor_started',
       invocationId: openAcknowledgement.attempt.invocationId,
       attempt: openAcknowledgement.attempt.attempt,
@@ -366,9 +363,9 @@ function createHostPersistenceV1(
       processStartIdentity,
       startedAt,
     });
-    await persistStateEventsV1(input, [event], 'supervisor start');
-    const after = currentInvocationV1(input, openAcknowledgement, 'supervisor start');
-    assertSupervisorStartedStateV1(after, event);
+    await persistStateEvents(input, [event], 'supervisor start');
+    const after = currentInvocation(input, openAcknowledgement, 'supervisor start');
+    assertSupervisorStartedState(after, event);
     const acknowledgement = Object.freeze({
       acknowledged: true,
       stage: 'execution_supervisor_started',
@@ -392,34 +389,34 @@ function createHostPersistenceV1(
     preparationReady: readyAck,
     prepared: candidate,
   }: {
-    readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgementV1>;
-    readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgementV1> | null;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
-  }): Promise<Readonly<SandboxDisposalIntentAcknowledgementV1>> => {
+    readonly preparationIntent: Readonly<SandboxPreparationIntentAcknowledgement>;
+    readonly preparationReady: Readonly<SandboxPreparationReadyAcknowledgement> | null;
+    readonly prepared: Readonly<PreparedSandboxExecution> | null;
+  }): Promise<Readonly<SandboxDisposalIntentAcknowledgement>> => {
     if (!preparationIntent || intentAck !== preparationIntent) {
-      failV1('acknowledgement_mismatch', 'Disposal did not receive the exact intent ack.');
+      fail('acknowledgement_mismatch', 'Disposal did not receive the exact intent ack.');
     }
-    if (disposalIntent) failV1('invalid_stage', 'Disposal intent already exists.');
-    const before = currentInvocationV1(input, openAcknowledgement, 'disposal intent');
+    if (disposalIntent) fail('invalid_stage', 'Disposal intent already exists.');
+    const before = currentInvocation(input, openAcknowledgement, 'disposal intent');
     if (candidate === null) {
       if (readyAck !== null || preparationReady || before.sandboxPreparationReady) {
-        failV1('invalid_stage', 'A ready preparation requires exact-plan disposal.');
+        fail('invalid_stage', 'A ready preparation requires exact-plan disposal.');
       }
       const stateIntent = before.sandboxPreparationIntent;
       if (!stateIntent || stateIntent.intentDigest !== intentAck.intentDigest) {
-        failV1('state_mismatch', 'State preparation intent is not current.');
+        fail('state_mismatch', 'State preparation intent is not current.');
       }
       if (before.sandboxPreparationAbandonment) {
-        failV1('state_mismatch', 'State already contains a preparation abandonment record.');
+        fail('state_mismatch', 'State already contains a preparation abandonment record.');
       }
-      const lifecycleIntentDigest = sandboxAbandonmentLifecycleIntentDigestV1({
+      const lifecycleIntentDigest = sandboxAbandonmentLifecycleIntentDigest({
         invocationId: openAcknowledgement.attempt.invocationId,
         attempt: openAcknowledgement.attempt.attempt,
         intentDigest: intentAck.intentDigest,
         preparationDigest: stateIntent.preparationDigest,
       });
-      const startedAt = timestampV1(input.now());
-      const event: StateRuntimeEventV1 = Object.freeze({
+      const startedAt = timestamp(input.now());
+      const event: StateRuntimeEvent = Object.freeze({
         type: 'capability.sandbox_preparation_abandonment_started',
         invocationId: openAcknowledgement.attempt.invocationId,
         attempt: openAcknowledgement.attempt.attempt,
@@ -427,13 +424,13 @@ function createHostPersistenceV1(
         lifecycleIntentDigest,
         startedAt,
       });
-      await persistStateEventsV1(input, [event], 'preparation abandonment');
-      const after = currentInvocationV1(input, openAcknowledgement, 'preparation abandonment');
+      await persistStateEvents(input, [event], 'preparation abandonment');
+      const after = currentInvocation(input, openAcknowledgement, 'preparation abandonment');
       if (
         after.sandboxPreparationAbandonment?.status !== 'pending' ||
         after.sandboxPreparationAbandonment.lifecycleIntentDigest !== lifecycleIntentDigest
       ) {
-        failV1('state_mismatch', 'State did not reflect preparation abandonment.');
+        fail('state_mismatch', 'State did not reflect preparation abandonment.');
       }
       const acknowledgement = Object.freeze({
         acknowledged: true,
@@ -454,28 +451,28 @@ function createHostPersistenceV1(
       return acknowledgement;
     }
     if (!readyAck || !preparationReady || readyAck !== preparationReady) {
-      failV1('acknowledgement_mismatch', 'Disposal ready acknowledgement is not exact.');
+      fail('acknowledgement_mismatch', 'Disposal ready acknowledgement is not exact.');
     }
-    assertPreparedSandboxMatchesV1(
+    assertPreparedSandboxMatches(
       candidate,
-      requiredPreparedSandboxV1(preparedSandbox),
+      requiredPreparedSandbox(preparedSandbox),
       openAcknowledgement,
     );
     if (before.sandboxPreparationReady?.readyDigest !== readyAck.readyDigest) {
-      failV1('state_mismatch', 'State preparation ready is not current.');
+      fail('state_mismatch', 'State preparation ready is not current.');
     }
     if (before.sandboxDisposal) {
-      failV1('state_mismatch', 'State already contains a sandbox disposal record.');
+      fail('state_mismatch', 'State already contains a sandbox disposal record.');
     }
-    const lifecycleIntentDigest = sandboxDisposalLifecycleIntentDigestV1({
+    const lifecycleIntentDigest = sandboxDisposalLifecycleIntentDigest({
       invocationId: openAcknowledgement.attempt.invocationId,
       attempt: openAcknowledgement.attempt.attempt,
       readyDigest: readyAck.readyDigest,
-      planDigest: sandboxPreparedPlanDigestV1(candidate),
-      cleanupDigest: digestCapabilityValueV1(candidate.cleanup),
+      planDigest: sandboxPreparedPlanDigest(candidate),
+      cleanupDigest: digestCapabilityValue(candidate.cleanup),
     });
-    const startedAt = timestampV1(input.now());
-    const event: StateRuntimeEventV1 = Object.freeze({
+    const startedAt = timestamp(input.now());
+    const event: StateRuntimeEvent = Object.freeze({
       type: 'capability.sandbox_disposal_started',
       invocationId: openAcknowledgement.attempt.invocationId,
       attempt: openAcknowledgement.attempt.attempt,
@@ -483,13 +480,13 @@ function createHostPersistenceV1(
       lifecycleIntentDigest,
       startedAt,
     });
-    await persistStateEventsV1(input, [event], 'disposal intent');
-    const after = currentInvocationV1(input, openAcknowledgement, 'disposal intent');
+    await persistStateEvents(input, [event], 'disposal intent');
+    const after = currentInvocation(input, openAcknowledgement, 'disposal intent');
     if (
       after.sandboxDisposal?.status !== 'pending' ||
       after.sandboxDisposal.lifecycleIntentDigest !== lifecycleIntentDigest
     ) {
-      failV1('state_mismatch', 'State did not reflect disposal intent.');
+      fail('state_mismatch', 'State did not reflect disposal intent.');
     }
     const acknowledgement = Object.freeze({
       acknowledged: true,
@@ -515,27 +512,27 @@ function createHostPersistenceV1(
     prepared: candidate,
     disposed,
   }: {
-    readonly disposalIntent: Readonly<SandboxDisposalIntentAcknowledgementV1>;
-    readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
+    readonly disposalIntent: Readonly<SandboxDisposalIntentAcknowledgement>;
+    readonly prepared: Readonly<PreparedSandboxExecution> | null;
     readonly disposed: boolean;
-  }): Promise<Readonly<SandboxDisposalReceiptAcknowledgementV1>> => {
+  }): Promise<Readonly<SandboxDisposalReceiptAcknowledgement>> => {
     if (!disposalIntent || intentAck !== disposalIntent) {
-      failV1('acknowledgement_mismatch', 'Disposal receipt did not receive the exact intent ack.');
+      fail('acknowledgement_mismatch', 'Disposal receipt did not receive the exact intent ack.');
     }
     const binding = stageBindings.get(intentAck);
     if (binding?.stage !== 'disposal_intent') {
-      failV1('acknowledgement_mismatch', 'Disposal intent is not owned by this composition.');
+      fail('acknowledgement_mismatch', 'Disposal intent is not owned by this composition.');
     }
     if ((candidate === null) !== (intentAck.purpose === 'reconcile_preparation_intent')) {
-      failV1('invalid_stage', 'Disposal receipt purpose does not match its prepared plan.');
+      fail('invalid_stage', 'Disposal receipt purpose does not match its prepared plan.');
     }
     if (candidate !== null)
-      assertPreparedSandboxMatchesV1(
+      assertPreparedSandboxMatches(
         candidate,
-        requiredPreparedSandboxV1(preparedSandbox),
+        requiredPreparedSandbox(preparedSandbox),
         openAcknowledgement,
       );
-    const before = currentInvocationV1(input, openAcknowledgement, 'disposal receipt');
+    const before = currentInvocation(input, openAcknowledgement, 'disposal receipt');
     const stateDisposal =
       intentAck.purpose === 'dispose'
         ? before.sandboxDisposal
@@ -544,10 +541,10 @@ function createHostPersistenceV1(
       stateDisposal?.status !== 'pending' ||
       stateDisposal.lifecycleIntentDigest !== intentAck.lifecycleIntentDigest
     ) {
-      failV1('state_mismatch', 'State disposal intent is not pending.');
+      fail('state_mismatch', 'State disposal intent is not pending.');
     }
-    const disposedAt = timestampV1(input.now());
-    const event: StateRuntimeEventV1 =
+    const disposedAt = timestamp(input.now());
+    const event: StateRuntimeEvent =
       intentAck.purpose === 'dispose'
         ? Object.freeze({
             type: 'capability.sandbox_disposal_completed',
@@ -569,8 +566,8 @@ function createHostPersistenceV1(
             disposed,
             disposedAt,
           });
-    await persistStateEventsV1(input, [event], 'disposal receipt');
-    const after = currentInvocationV1(input, openAcknowledgement, 'disposal receipt');
+    await persistStateEvents(input, [event], 'disposal receipt');
+    const after = currentInvocation(input, openAcknowledgement, 'disposal receipt');
     const afterState =
       intentAck.purpose === 'dispose' ? after.sandboxDisposal : after.sandboxPreparationAbandonment;
     if (
@@ -578,7 +575,7 @@ function createHostPersistenceV1(
       afterState.status !== (disposed ? 'completed' : 'pending') ||
       afterState.attempts !== intentAck.cleanupAttempt
     ) {
-      failV1('state_mismatch', 'State did not reflect disposal receipt.');
+      fail('state_mismatch', 'State did not reflect disposal receipt.');
     }
     const acknowledgement = Object.freeze({
       acknowledged: true,
@@ -608,22 +605,22 @@ function createHostPersistenceV1(
   });
 }
 
-function createEvidencePortV1(
-  input: Readonly<CreateAppToolPipelineSandboxLifecycleInputV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
-  openAcknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+function createEvidencePort(
+  input: Readonly<CreateAppToolPipelineSandboxLifecycleInput>,
+  prepared: Readonly<PreparedToolInvocation>,
+  openAcknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
   stageBindings: WeakMap<object, StageBinding>,
 ) {
   return Object.freeze({
     verify(
-      evidence: RuntimeHostSandboxLifecycleEvidenceV1,
-    ): RuntimeHostSandboxLifecycleEvidenceVerificationResultV1 {
+      evidence: RuntimeHostSandboxLifecycleEvidence,
+    ): RuntimeHostSandboxLifecycleEvidenceVerificationResult {
       try {
         const binding = stageBindings.get(evidence.acknowledgement);
         if (!binding || binding.stage !== evidence.stage)
           return { valid: false, code: 'identity_mismatch' as const };
-        assertOpenAcknowledgementV1(prepared, openAcknowledgement);
-        assertCurrentInvocationIdentityV1(input, openAcknowledgement, 'evidence');
+        assertOpenAcknowledgement(prepared, openAcknowledgement);
+        assertCurrentInvocationIdentity(input, openAcknowledgement, 'evidence');
         switch (evidence.stage) {
           case 'preparation_intent':
             if (
@@ -631,8 +628,8 @@ function createEvidencePortV1(
               binding.acknowledgement !== evidence.acknowledgement
             )
               return { valid: false, code: 'identity_mismatch' as const };
-            assertPreparationIntentStateV1(
-              currentInvocationV1(input, openAcknowledgement, evidence.stage),
+            assertPreparationIntentState(
+              currentInvocation(input, openAcknowledgement, evidence.stage),
               {
                 attempt: openAcknowledgement.attempt.attempt,
                 toolCallId: evidence.preparation.toolCallId,
@@ -641,13 +638,13 @@ function createEvidencePortV1(
                 canonicalWorkspace: evidence.preparation.canonicalWorkspace,
                 effectiveEffectsDigest: evidence.preparation.effectiveEffectsDigest,
                 admissionDigest: evidence.preparation.admissionDigest,
-                preparationDigest: sandboxPreparationDigestV1(evidence.preparation),
+                preparationDigest: sandboxPreparationDigest(evidence.preparation),
                 commandDigest: evidence.preparation.commandDigest,
                 executionBoundaryDigest: evidence.preparation.executionBoundaryDigest,
                 resourceSemantics: 'allocating',
               },
               evidence.acknowledgement.intentDigest,
-              currentInvocationV1(input, openAcknowledgement, evidence.stage)
+              currentInvocation(input, openAcknowledgement, evidence.stage)
                 .sandboxPreparationIntent!.recordedAt,
             );
             return { valid: true as const };
@@ -658,26 +655,26 @@ function createEvidencePortV1(
               binding.acknowledgement !== evidence.acknowledgement
             )
               return { valid: false, code: 'identity_mismatch' as const };
-            assertPreparationReadyStateV1(
-              currentInvocationV1(input, openAcknowledgement, evidence.stage),
+            assertPreparationReadyState(
+              currentInvocation(input, openAcknowledgement, evidence.stage),
               {
                 attempt: openAcknowledgement.attempt.attempt,
                 intentDigest: evidence.preparationIntent.intentDigest,
                 preparationDigest: evidence.prepared.preparationDigest,
                 commandDigest: evidence.prepared.commandDigest,
-                planDigest: sandboxPreparedPlanDigestV1(evidence.prepared),
+                planDigest: sandboxPreparedPlanDigest(evidence.prepared),
                 backend: evidence.prepared.backend,
-                backendCapabilitiesDigest: digestCapabilityValueV1(
+                backendCapabilitiesDigest: digestCapabilityValue(
                   evidence.prepared.backendCapabilities,
                 ),
                 enforcement: evidence.prepared.enforcement,
                 resourceSemantics: evidence.prepared.resourceSemantics,
-                cleanupDigest: digestCapabilityValueV1(evidence.prepared.cleanup),
+                cleanupDigest: digestCapabilityValue(evidence.prepared.cleanup),
                 preparationArtifact: evidence.acknowledgement.preparationArtifact,
               },
               evidence.acknowledgement.readyDigest,
-              currentInvocationV1(input, openAcknowledgement, evidence.stage)
-                .sandboxPreparationReady!.readyAt,
+              currentInvocation(input, openAcknowledgement, evidence.stage).sandboxPreparationReady!
+                .readyAt,
             );
             return { valid: true as const };
           case 'execution_dispatch_intent':
@@ -687,14 +684,14 @@ function createEvidencePortV1(
               binding.acknowledgement !== evidence.acknowledgement
             )
               return { valid: false, code: 'identity_mismatch' as const };
-            assertDispatchIntentStateV1(
-              currentInvocationV1(input, openAcknowledgement, evidence.stage),
+            assertDispatchIntentState(
+              currentInvocation(input, openAcknowledgement, evidence.stage),
               {
                 dispatchId: evidence.acknowledgement.dispatchId,
                 supervisorNonce: evidence.acknowledgement.supervisorNonce,
                 dispatchIntentDigest: evidence.acknowledgement.dispatchIntentDigest,
                 readyDigest: evidence.preparationReady.readyDigest,
-                planDigest: sandboxPreparedPlanDigestV1(evidence.prepared),
+                planDigest: sandboxPreparedPlanDigest(evidence.prepared),
                 attempt: openAcknowledgement.attempt.attempt,
               },
             );
@@ -706,8 +703,8 @@ function createEvidencePortV1(
               binding.acknowledgement !== evidence.acknowledgement
             )
               return { valid: false, code: 'identity_mismatch' as const };
-            assertSupervisorStartedStateV1(
-              currentInvocationV1(input, openAcknowledgement, evidence.stage),
+            assertSupervisorStartedState(
+              currentInvocation(input, openAcknowledgement, evidence.stage),
               {
                 dispatchId: evidence.acknowledgement.dispatchId,
                 dispatchIntentDigest: evidence.acknowledgement.dispatchIntentDigest,
@@ -726,7 +723,7 @@ function createEvidencePortV1(
               binding.acknowledgement !== evidence.acknowledgement
             )
               return { valid: false, code: 'identity_mismatch' as const };
-            assertDisposalIntentStateV1(input, openAcknowledgement, evidence.acknowledgement);
+            assertDisposalIntentState(input, openAcknowledgement, evidence.acknowledgement);
             return { valid: true as const };
           case 'disposal_receipt':
             if (
@@ -735,7 +732,7 @@ function createEvidencePortV1(
               binding.acknowledgement !== evidence.acknowledgement
             )
               return { valid: false, code: 'identity_mismatch' as const };
-            assertDisposalReceiptStateV1(input, openAcknowledgement, evidence);
+            assertDisposalReceiptState(input, openAcknowledgement, evidence);
             return { valid: true as const };
         }
       } catch {
@@ -745,38 +742,35 @@ function createEvidencePortV1(
   });
 }
 
-function createExactArtifactPortV1(
-  store: Pick<SandboxPreparationArtifactStoreV1, 'write' | 'read'>,
-  prepared: Readonly<PreparedToolInvocationV1>,
-): SandboxPreparationArtifactPortV1 {
+function createExactArtifactPort(
+  store: Pick<SandboxPreparationArtifactStore, 'write' | 'read'>,
+  prepared: Readonly<PreparedToolInvocation>,
+): SandboxPreparationArtifactPort {
   const exactByArtifact = new Map<
     string,
     {
-      readonly reference: ReturnType<SandboxPreparationArtifactPortV1['write']>;
-      readonly prepared: Readonly<PreparedSandboxExecutionV1>;
+      readonly reference: ReturnType<SandboxPreparationArtifactPort['write']>;
+      readonly prepared: Readonly<PreparedSandboxExecution>;
     }
   >();
   return Object.freeze({
-    write(candidate: Readonly<PreparedSandboxExecutionV1>) {
-      assertPreparedToolPacketV1(candidate, prepared);
+    write(candidate: Readonly<PreparedSandboxExecution>) {
+      assertPreparedToolPacket(candidate, prepared);
       const rawReference = store.write(candidate);
       const reference = Object.freeze({ ...rawReference });
       if (!Object.isFrozen(reference)) {
-        failV1(
-          'artifact_identity_mismatch',
-          'Sandbox preparation Artifact reference is not frozen.',
-        );
+        fail('artifact_identity_mismatch', 'Sandbox preparation Artifact reference is not frozen.');
       }
       const roundTrip = store.read(reference);
-      assertArtifactRoundTripV1(roundTrip, candidate);
+      assertArtifactRoundTrip(roundTrip, candidate);
       const existing = exactByArtifact.get(reference.artifactId);
       if (existing && (existing.prepared !== candidate || existing.reference !== reference)) {
-        failV1('artifact_identity_mismatch', 'Sandbox preparation Artifact identity was reused.');
+        fail('artifact_identity_mismatch', 'Sandbox preparation Artifact identity was reused.');
       }
       exactByArtifact.set(reference.artifactId, { reference, prepared: candidate });
       return reference;
     },
-    read(reference: Readonly<ReturnType<SandboxPreparationArtifactPortV1['write']>>) {
+    read(reference: Readonly<ReturnType<SandboxPreparationArtifactPort['write']>>) {
       const existing = exactByArtifact.get(reference.artifactId);
       if (
         !existing ||
@@ -784,35 +778,30 @@ function createExactArtifactPortV1(
         existing.reference.integrityIdentifier !== reference.integrityIdentifier ||
         existing.reference.byteLength !== reference.byteLength
       ) {
-        failV1('artifact_identity_mismatch', 'Sandbox preparation Artifact reference is unknown.');
+        fail('artifact_identity_mismatch', 'Sandbox preparation Artifact reference is unknown.');
       }
       const roundTrip = store.read(reference);
-      assertArtifactRoundTripV1(roundTrip, existing.prepared);
+      assertArtifactRoundTrip(roundTrip, existing.prepared);
       return existing.prepared;
     },
   });
 }
 
-function assertArtifactRoundTripV1(
-  roundTrip: Readonly<PreparedSandboxExecutionV1>,
-  expected: Readonly<PreparedSandboxExecutionV1>,
+function assertArtifactRoundTrip(
+  roundTrip: Readonly<PreparedSandboxExecution>,
+  expected: Readonly<PreparedSandboxExecution>,
 ): void {
   if (
-    sandboxPreparedPlanDigestV1(roundTrip) !== sandboxPreparedPlanDigestV1(expected) ||
+    sandboxPreparedPlanDigest(roundTrip) !== sandboxPreparedPlanDigest(expected) ||
     roundTrip.invocationId !== expected.invocationId ||
     roundTrip.attempt !== expected.attempt ||
     roundTrip.planId !== expected.planId
   ) {
-    failV1(
-      'artifact_identity_mismatch',
-      'Sandbox preparation Artifact round-trip changed the plan.',
-    );
+    fail('artifact_identity_mismatch', 'Sandbox preparation Artifact round-trip changed the plan.');
   }
 }
 
-function assertCompositionInputV1(
-  input: Readonly<CreateAppToolPipelineSandboxLifecycleInputV1>,
-): void {
+function assertCompositionInput(input: Readonly<CreateAppToolPipelineSandboxLifecycleInput>): void {
   if (
     !input ||
     typeof input !== 'object' ||
@@ -825,28 +814,28 @@ function assertCompositionInputV1(
     typeof input.artifacts.write !== 'function' ||
     typeof input.artifacts.read !== 'function'
   ) {
-    failV1('invalid_composition', 'App sandbox lifecycle composition inputs are invalid.');
+    fail('invalid_composition', 'App sandbox lifecycle composition inputs are invalid.');
   }
 }
 
-function assertOpenAcknowledgementV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1> | null | undefined,
-): asserts acknowledgement is Readonly<ToolPipelineAttemptAcknowledgementV1> {
+function assertOpenAcknowledgement(
+  prepared: Readonly<PreparedToolInvocation>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement> | null | undefined,
+): asserts acknowledgement is Readonly<ToolPipelineAttemptAcknowledgement> {
   if (
     !acknowledgement ||
     !Object.isFrozen(acknowledgement) ||
     !Object.isFrozen(acknowledgement.attempt) ||
     acknowledgement.acknowledged !== true ||
-    !samePreparedAttemptIdentityV1(prepared, acknowledgement)
+    !samePreparedAttemptIdentity(prepared, acknowledgement)
   ) {
-    failV1('attempt_not_acknowledged', 'The exact prepared attempt is not openly acknowledged.');
+    fail('attempt_not_acknowledged', 'The exact prepared attempt is not openly acknowledged.');
   }
 }
 
-function samePreparedAttemptIdentityV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+function samePreparedAttemptIdentity(
+  prepared: Readonly<PreparedToolInvocation>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
 ): boolean {
   const identity = prepared.identity;
   const attempt = acknowledgement.attempt;
@@ -904,10 +893,10 @@ function samePreparedAttemptIdentityV1(
   );
 }
 
-function assertPreparationMatchesPreparedV1(
-  preparation: Readonly<SandboxPreparationV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+function assertPreparationMatchesPrepared(
+  preparation: Readonly<SandboxPreparation>,
+  prepared: Readonly<PreparedToolInvocation>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
 ): void {
   if (
     preparation.invocationId !== prepared.identity.invocationId ||
@@ -918,17 +907,14 @@ function assertPreparationMatchesPreparedV1(
     preparation.effectiveEffectsDigest !== prepared.identity.effectiveEffectsDigest ||
     preparation.admissionDigest !== prepared.identity.admissionDigest
   ) {
-    failV1(
-      'prepared_identity_mismatch',
-      'Sandbox preparation does not match the prepared attempt.',
-    );
+    fail('prepared_identity_mismatch', 'Sandbox preparation does not match the prepared attempt.');
   }
 }
 
-function assertPreparedSandboxMatchesV1(
-  candidate: Readonly<PreparedSandboxExecutionV1>,
-  prepared: Readonly<PreparedSandboxExecutionV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+function assertPreparedSandboxMatches(
+  candidate: Readonly<PreparedSandboxExecution>,
+  prepared: Readonly<PreparedSandboxExecution>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
 ): void {
   if (
     candidate !== prepared ||
@@ -940,16 +926,16 @@ function assertPreparedSandboxMatchesV1(
     candidate.effectiveEffectsDigest !== acknowledgement.attempt.effectiveEffectsDigest ||
     candidate.admissionDigest !== acknowledgement.attempt.admissionDigest
   ) {
-    failV1(
+    fail(
       'prepared_identity_mismatch',
       'Prepared sandbox execution is not the exact acknowledged plan.',
     );
   }
 }
 
-function assertPreparedSandboxAttemptMatchesV1(
-  candidate: Readonly<PreparedSandboxExecutionV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+function assertPreparedSandboxAttemptMatches(
+  candidate: Readonly<PreparedSandboxExecution>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
 ): void {
   if (
     candidate.invocationId !== acknowledgement.attempt.invocationId ||
@@ -960,49 +946,46 @@ function assertPreparedSandboxAttemptMatchesV1(
     candidate.effectiveEffectsDigest !== acknowledgement.attempt.effectiveEffectsDigest ||
     candidate.admissionDigest !== acknowledgement.attempt.admissionDigest
   ) {
-    failV1(
+    fail(
       'prepared_identity_mismatch',
       'Prepared sandbox execution does not match the open attempt.',
     );
   }
 }
 
-function requiredPreparedSandboxV1(
-  prepared: Readonly<PreparedSandboxExecutionV1> | undefined,
-): Readonly<PreparedSandboxExecutionV1> {
-  if (!prepared) failV1('invalid_stage', 'Prepared sandbox execution is not acknowledged yet.');
+function requiredPreparedSandbox(
+  prepared: Readonly<PreparedSandboxExecution> | undefined,
+): Readonly<PreparedSandboxExecution> {
+  if (!prepared) fail('invalid_stage', 'Prepared sandbox execution is not acknowledged yet.');
   return prepared;
 }
 
-function assertPreparedToolPacketV1(
-  candidate: Readonly<PreparedSandboxExecutionV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
+function assertPreparedToolPacket(
+  candidate: Readonly<PreparedSandboxExecution>,
+  prepared: Readonly<PreparedToolInvocation>,
 ): void {
   if (
     candidate.invocationId !== prepared.identity.invocationId ||
-    candidate.attempt !== parseAttemptV1(prepared.identity.attemptId)
+    candidate.attempt !== parseAttempt(prepared.identity.attemptId)
   ) {
-    failV1(
-      'prepared_identity_mismatch',
-      'Prepared sandbox Artifact belongs to another Tool packet.',
-    );
+    fail('prepared_identity_mismatch', 'Prepared sandbox Artifact belongs to another Tool packet.');
   }
 }
 
-function parseAttemptV1(attemptId: string): number {
+function parseAttempt(attemptId: string): number {
   const match = /:attempt:(\d+)$/u.exec(attemptId);
-  if (!match) failV1('prepared_identity_mismatch', 'Prepared attempt id is invalid.');
+  if (!match) fail('prepared_identity_mismatch', 'Prepared attempt id is invalid.');
   return Number(match[1]);
 }
 
-function currentInvocationV1(
-  input: Readonly<AppToolPipelineSandboxLifecyclePersistenceV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+function currentInvocation(
+  input: Readonly<AppToolPipelineSandboxLifecyclePersistence>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
   stage: string,
 ): InvocationState {
   const invocation =
     input.getState().capabilities.invocations[acknowledgement.attempt.invocationId];
-  if (!invocation) failV1('attempt_not_acknowledged', `State has no open attempt for ${stage}.`);
+  if (!invocation) fail('attempt_not_acknowledged', `State has no open attempt for ${stage}.`);
   if (
     invocation.status !== 'running' ||
     invocation.toolCallId !== acknowledgement.attempt.toolCallId ||
@@ -1014,22 +997,22 @@ function currentInvocationV1(
     invocation.effectiveEffectsDigest !== acknowledgement.attempt.effectiveEffectsDigest ||
     invocation.attemptsStarted !== acknowledgement.attempt.attempt
   ) {
-    failV1('attempt_not_acknowledged', `State open attempt identity is invalid for ${stage}.`);
+    fail('attempt_not_acknowledged', `State open attempt identity is invalid for ${stage}.`);
   }
   return invocation;
 }
 
-function assertCurrentInvocationIdentityV1(
-  input: Readonly<AppToolPipelineSandboxLifecyclePersistenceV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+function assertCurrentInvocationIdentity(
+  input: Readonly<AppToolPipelineSandboxLifecyclePersistence>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
   stage: string,
 ): void {
-  currentInvocationV1(input, acknowledgement, stage);
+  currentInvocation(input, acknowledgement, stage);
 }
 
-async function persistStateEventsV1(
-  input: Readonly<AppToolPipelineSandboxLifecyclePersistenceV1>,
-  events: StateRuntimeEventV1[],
+async function persistStateEvents(
+  input: Readonly<AppToolPipelineSandboxLifecyclePersistence>,
+  events: StateRuntimeEvent[],
   stage: string,
 ): Promise<void> {
   const before = input.getState().revision;
@@ -1037,18 +1020,18 @@ async function persistStateEventsV1(
   try {
     accepted = await input.persistEvents(events);
   } catch (error) {
-    failV1(
+    fail(
       'persistence_failed',
       `${stage} persistence failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (accepted !== true) failV1('persistence_failed', `${stage} persistence was not accepted.`);
+  if (accepted !== true) fail('persistence_failed', `${stage} persistence was not accepted.`);
   if (input.getState().revision < before + events.length) {
-    failV1('state_mismatch', `${stage} persistence did not advance State.`);
+    fail('state_mismatch', `${stage} persistence did not advance State.`);
   }
 }
 
-function assertPreparationIntentStateV1(
+function assertPreparationIntentState(
   invocation: InvocationState,
   body: Readonly<Record<string, unknown>>,
   intentDigest: string,
@@ -1071,11 +1054,11 @@ function assertPreparationIntentStateV1(
     state.intentDigest !== intentDigest ||
     state.recordedAt !== recordedAt
   ) {
-    failV1('state_mismatch', 'State sandbox preparation intent does not match the event.');
+    fail('state_mismatch', 'State sandbox preparation intent does not match the event.');
   }
 }
 
-function assertPreparationReadyStateV1(
+function assertPreparationReadyState(
   invocation: InvocationState,
   body: Readonly<Record<string, unknown>>,
   readyDigest: string,
@@ -1099,11 +1082,11 @@ function assertPreparationReadyStateV1(
     state.readyDigest !== readyDigest ||
     state.readyAt !== readyAt
   ) {
-    failV1('state_mismatch', 'State sandbox preparation ready does not match the event.');
+    fail('state_mismatch', 'State sandbox preparation ready does not match the event.');
   }
 }
 
-function assertDispatchIntentStateV1(
+function assertDispatchIntentState(
   invocation: InvocationState,
   event: {
     readonly attempt: number;
@@ -1124,11 +1107,11 @@ function assertDispatchIntentStateV1(
     state.supervisorNonce !== event.supervisorNonce ||
     state.dispatchIntentDigest !== event.dispatchIntentDigest
   ) {
-    failV1('state_mismatch', 'State sandbox dispatch intent does not match the event.');
+    fail('state_mismatch', 'State sandbox dispatch intent does not match the event.');
   }
 }
 
-function assertSupervisorStartedStateV1(
+function assertSupervisorStartedState(
   invocation: InvocationState,
   event: {
     readonly attempt: number;
@@ -1149,16 +1132,16 @@ function assertSupervisorStartedStateV1(
     state.processGroupId !== event.processGroupId ||
     state.processStartIdentity !== event.processStartIdentity
   ) {
-    failV1('state_mismatch', 'State supervisor start does not match the event.');
+    fail('state_mismatch', 'State supervisor start does not match the event.');
   }
 }
 
-function assertDisposalIntentStateV1(
-  input: Readonly<AppToolPipelineSandboxLifecyclePersistenceV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
-  intent: Readonly<SandboxDisposalIntentAcknowledgementV1>,
+function assertDisposalIntentState(
+  input: Readonly<AppToolPipelineSandboxLifecyclePersistence>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
+  intent: Readonly<SandboxDisposalIntentAcknowledgement>,
 ): void {
-  const invocation = currentInvocationV1(input, acknowledgement, 'disposal evidence');
+  const invocation = currentInvocation(input, acknowledgement, 'disposal evidence');
   const state =
     intent.purpose === 'dispose'
       ? invocation.sandboxDisposal
@@ -1168,16 +1151,16 @@ function assertDisposalIntentStateV1(
     state.lifecycleIntentDigest !== intent.lifecycleIntentDigest ||
     state.attempts + 1 !== intent.cleanupAttempt
   ) {
-    failV1('state_mismatch', 'State disposal intent does not match the acknowledgement.');
+    fail('state_mismatch', 'State disposal intent does not match the acknowledgement.');
   }
 }
 
-function assertDisposalReceiptStateV1(
-  input: Readonly<AppToolPipelineSandboxLifecyclePersistenceV1>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
-  evidence: Extract<RuntimeHostSandboxLifecycleEvidenceV1, { readonly stage: 'disposal_receipt' }>,
+function assertDisposalReceiptState(
+  input: Readonly<AppToolPipelineSandboxLifecyclePersistence>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
+  evidence: Extract<RuntimeHostSandboxLifecycleEvidence, { readonly stage: 'disposal_receipt' }>,
 ): void {
-  const invocation = currentInvocationV1(input, acknowledgement, 'disposal receipt evidence');
+  const invocation = currentInvocation(input, acknowledgement, 'disposal receipt evidence');
   const state =
     evidence.acknowledgement.purpose === 'dispose'
       ? invocation.sandboxDisposal
@@ -1188,25 +1171,25 @@ function assertDisposalReceiptStateV1(
     state.lifecycleIntentDigest !== evidence.disposalIntent.lifecycleIntentDigest ||
     state.attempts !== evidence.acknowledgement.cleanupAttempt
   ) {
-    failV1('state_mismatch', 'State disposal receipt does not match the acknowledgement.');
+    fail('state_mismatch', 'State disposal receipt does not match the acknowledgement.');
   }
 }
 
-function timestampV1(value: string): string {
+function timestamp(value: string): string {
   if (
     typeof value !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value) ||
     !Number.isFinite(Date.parse(value))
   ) {
-    failV1('invalid_composition', 'State sandbox lifecycle timestamp is invalid.');
+    fail('invalid_composition', 'State sandbox lifecycle timestamp is invalid.');
   }
   return value;
 }
 
-function nonEmptyV1(value: string): boolean {
+function nonEmpty(value: string): boolean {
   return typeof value === 'string' && value.length > 0 && !value.includes('\0');
 }
 
-function failV1(code: AppToolPipelineSandboxLifecycleErrorCodeV1, message: string): never {
-  throw new AppToolPipelineSandboxLifecycleErrorV1(code, message);
+function fail(code: AppToolPipelineSandboxLifecycleErrorCode, message: string): never {
+  throw new AppToolPipelineSandboxLifecycleError(code, message);
 }

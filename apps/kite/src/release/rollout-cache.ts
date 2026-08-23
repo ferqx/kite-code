@@ -23,7 +23,7 @@ const commitSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const canonicalBase64Schema = z.string().min(1).refine(isCanonicalBase64);
 const canonicalTimestampSchema = z.string().refine(isCanonicalTimestamp);
 
-export const rolloutArtifactIdentityV1Schema = z
+export const rolloutArtifactIdentitySchema = z
   .object({
     canonicalRepository: z.literal('ferqx/kite-code'),
     repositoryId: z.literal('R_kgDOSKbi8g'),
@@ -33,13 +33,13 @@ export const rolloutArtifactIdentityV1Schema = z
   })
   .strict();
 
-export type RolloutArtifactIdentityV1 = z.infer<typeof rolloutArtifactIdentityV1Schema>;
+export type RolloutArtifactIdentity = z.infer<typeof rolloutArtifactIdentitySchema>;
 
-export const rolloutCacheRecordV1Schema = z
+export const rolloutCacheRecordSchema = z
   .object({
     version: z.literal(1),
     kind: z.literal('signed-rollout-cache-v1'),
-    artifactIdentity: rolloutArtifactIdentityV1Schema,
+    artifactIdentity: rolloutArtifactIdentitySchema,
     sequence: z.number().int().positive().safe(),
     expiresAt: canonicalTimestampSchema,
     manifestBase64: canonicalBase64Schema,
@@ -49,7 +49,7 @@ export const rolloutCacheRecordV1Schema = z
   })
   .strict();
 
-export type RolloutCacheRecordV1 = z.infer<typeof rolloutCacheRecordV1Schema>;
+export type RolloutCacheRecord = z.infer<typeof rolloutCacheRecordSchema>;
 
 export class RolloutCacheError extends Error {
   readonly code: 'cache_invalid' | 'cache_identity_mismatch' | 'cache_io';
@@ -61,14 +61,14 @@ export class RolloutCacheError extends Error {
   }
 }
 
-export function createRolloutCacheRecordV1(input: {
-  artifactIdentity: RolloutArtifactIdentityV1;
+export function createRolloutCacheRecord(input: {
+  artifactIdentity: RolloutArtifactIdentity;
   sequence: number;
   expiresAt: string;
   manifestBytes: Uint8Array;
   signatureBytes: Uint8Array;
-}): RolloutCacheRecordV1 {
-  return rolloutCacheRecordV1Schema.parse({
+}): RolloutCacheRecord {
+  return rolloutCacheRecordSchema.parse({
     version: 1,
     kind: 'signed-rollout-cache-v1',
     artifactIdentity: input.artifactIdentity,
@@ -81,15 +81,15 @@ export function createRolloutCacheRecordV1(input: {
   });
 }
 
-export function decodeIdentityBoundRolloutCacheV1(input: {
+export function decodeIdentityBoundRolloutCache(input: {
   record: unknown;
-  expectedIdentity: RolloutArtifactIdentityV1;
+  expectedIdentity: RolloutArtifactIdentity;
 }): {
-  record: RolloutCacheRecordV1;
+  record: RolloutCacheRecord;
   manifestBytes: Uint8Array;
   signatureBytes: Uint8Array;
 } {
-  const parsed = rolloutCacheRecordV1Schema.safeParse(input.record);
+  const parsed = rolloutCacheRecordSchema.safeParse(input.record);
   if (!parsed.success) throw new RolloutCacheError('cache_invalid');
   if (!sameArtifactIdentity(parsed.data.artifactIdentity, input.expectedIdentity)) {
     throw new RolloutCacheError('cache_identity_mismatch');
@@ -101,7 +101,7 @@ export function decodeIdentityBoundRolloutCacheV1(input: {
   };
 }
 
-export function loadRolloutCacheFileV1(path: string): RolloutCacheRecordV1 | undefined {
+export function loadRolloutCacheFile(path: string): RolloutCacheRecord | undefined {
   const absolute = resolve(path);
   if (!existsSync(absolute)) return undefined;
   let descriptor: number | undefined;
@@ -109,7 +109,7 @@ export function loadRolloutCacheFileV1(path: string): RolloutCacheRecordV1 | und
     descriptor = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
     const stats = fstatSync(descriptor);
     if (!stats.isFile() || stats.size > 512 * 1024) throw new RolloutCacheError('cache_invalid');
-    return rolloutCacheRecordV1Schema.parse(parseCanonicalJson(readFileSync(descriptor)));
+    return rolloutCacheRecordSchema.parse(parseCanonicalJson(readFileSync(descriptor)));
   } catch (error) {
     if (error instanceof RolloutCacheError) throw error;
     throw new RolloutCacheError('cache_io');
@@ -118,8 +118,8 @@ export function loadRolloutCacheFileV1(path: string): RolloutCacheRecordV1 | und
   }
 }
 
-export function writeRolloutCacheFileV1(path: string, record: RolloutCacheRecordV1): void {
-  const parsed = rolloutCacheRecordV1Schema.parse(record);
+export function writeRolloutCacheFile(path: string, record: RolloutCacheRecord): void {
+  const parsed = rolloutCacheRecordSchema.parse(record);
   const encoded = canonicalJsonBytes(parsed);
   const absolute = resolve(path);
   const parent = dirname(absolute);
@@ -130,7 +130,7 @@ export function writeRolloutCacheFileV1(path: string, record: RolloutCacheRecord
   if (existsSync(target)) {
     const existing = lstatSync(target);
     if (!existing.isFile() || existing.isSymbolicLink()) throw new RolloutCacheError('cache_io');
-    const current = loadRolloutCacheFileV1(target);
+    const current = loadRolloutCacheFile(target);
     if (!current || !sameArtifactIdentity(current.artifactIdentity, parsed.artifactIdentity)) {
       throw new RolloutCacheError('cache_identity_mismatch');
     }
@@ -164,8 +164,8 @@ export function writeRolloutCacheFileV1(path: string, record: RolloutCacheRecord
 }
 
 function sameArtifactIdentity(
-  left: RolloutArtifactIdentityV1,
-  right: RolloutArtifactIdentityV1,
+  left: RolloutArtifactIdentity,
+  right: RolloutArtifactIdentity,
 ): boolean {
   return (
     left.canonicalRepository === right.canonicalRepository &&

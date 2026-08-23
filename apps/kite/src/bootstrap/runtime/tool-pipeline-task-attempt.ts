@@ -1,62 +1,60 @@
 import {
-  type BuiltinOperationExecutionValueV1,
-  createBuiltinPreparedTaskDispatchAdapterV1,
+  type BuiltinOperationExecutionValue,
+  createBuiltinPreparedTaskDispatchAdapter,
 } from '@kite/builtin-runtime';
 import type {
-  RuntimeHostCommittedToolInvocationAuthorityV1,
-  RuntimeHostStateToolGovernanceAuthorizationInputV1,
-  RuntimeHostSuspendedToolInvocationAuthorityV1,
+  RuntimeHostCommittedToolInvocationAuthority,
+  RuntimeHostStateToolGovernanceAuthorizationInput,
+  RuntimeHostSuspendedToolInvocationAuthority,
 } from '@kite/runtime-host';
 import type {
-  CapabilityExecutionPortV1,
-  CapabilityToolTerminalResultV1,
-  ClassifiedInvocationV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolCallSnapshotV1,
-  ToolPipelineDispatchOutcomeV1,
-  ToolPipelineResolutionContextV1,
-  ToolPipelineStageFailureV1,
-  ToolPipelineTaskSubagentSuspensionV1,
+  CapabilityExecutionPort,
+  CapabilityToolTerminalResult,
+  ClassifiedInvocation,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolCallSnapshot,
+  ToolPipelineDispatchOutcome,
+  ToolPipelineResolutionContext,
+  ToolPipelineStageFailure,
+  ToolPipelineTaskSubagentSuspension,
 } from '@kite/runtime-spi';
 import {
-  type CreateAppBuiltinPreparedDispatchPortInputV1,
-  createAppBuiltinPreparedTaskDispatchPortV1,
+  type CreateAppBuiltinPreparedDispatchPortInput,
+  createAppBuiltinPreparedTaskDispatchPort,
 } from './builtin-prepared-dispatch-port';
-import type { AppToolPipelineAttemptCompositionV1 } from './tool-pipeline-attempt-composition';
-import type { AppToolPipelineTurnCompositionV1 } from './tool-pipeline-composition';
-import type { AppToolPipelineAttemptScopeV1 } from './tool-pipeline-ordinary-attempt';
+import type { AppToolPipelineAttemptComposition } from './tool-pipeline-attempt-composition';
+import type { AppToolPipelineTurnComposition } from './tool-pipeline-composition';
+import type { AppToolPipelineAttemptScope } from './tool-pipeline-ordinary-attempt';
 import {
-  APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
-  createAppPreparedToolInvocationV1,
+  APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
+  createAppPreparedToolInvocation,
 } from './tool-pipeline-prepared';
-import type { AppStateToolPipelinePersistenceV1 } from './tool-pipeline-state-persistence';
+import type { AppStateToolPipelinePersistence } from './tool-pipeline-state-persistence';
 
-export const APP_TASK_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1 =
+export const APP_TASK_TOOL_PIPELINE_ATTEMPT_SCHEMA_ =
   'kite.app.task-tool-pipeline-attempt.v1' as const;
 
-type GovernanceInputWithoutClassifiedV1 = Omit<
-  RuntimeHostStateToolGovernanceAuthorizationInputV1,
+type GovernanceInputWithoutClassified = Omit<
+  RuntimeHostStateToolGovernanceAuthorizationInput,
   'classified'
 >;
-type GovernanceAdmissionV1 = Parameters<
-  AppToolPipelineTurnCompositionV1['governance']['project']
->[1];
+type GovernanceAdmission = Parameters<AppToolPipelineTurnComposition['governance']['project']>[1];
 
-export interface AppTaskToolPipelineAttemptInputV1 {
-  readonly turn: Readonly<AppToolPipelineTurnCompositionV1>;
+export interface AppTaskToolPipelineAttemptInput {
+  readonly turn: Readonly<AppToolPipelineTurnComposition>;
   /** Must be the private `task` snapshot produced by the App child route. */
-  readonly snapshot: Readonly<ToolCallSnapshotV1>;
-  readonly resolution: Readonly<ToolPipelineResolutionContextV1>;
-  readonly governance: Readonly<GovernanceInputWithoutClassifiedV1>;
-  readonly admission: Readonly<GovernanceAdmissionV1>;
+  readonly snapshot: Readonly<ToolCallSnapshot>;
+  readonly resolution: Readonly<ToolPipelineResolutionContext>;
+  readonly governance: Readonly<GovernanceInputWithoutClassified>;
+  readonly admission: Readonly<GovernanceAdmission>;
   readonly threadId: string;
   readonly attempt: number;
   readonly taskId: string | null;
   readonly planId: string | null;
   readonly planStepId: string | null;
-  readonly capabilityRequestFacts: RuntimeJsonValueV1 | null;
-  readonly capabilityExecution: CapabilityExecutionPortV1;
+  readonly capabilityRequestFacts: RuntimeJsonValue | null;
+  readonly capabilityExecution: CapabilityExecutionPort;
   readonly signal: AbortSignal;
   readonly workspace: string;
   readonly phase: 'planning' | 'building';
@@ -64,8 +62,8 @@ export interface AppTaskToolPipelineAttemptInputV1 {
   /** The only child-runtime semantic callback for this prepared Task. */
   readonly executeTask: (input: {
     readonly executionMode: 'start' | 'resume';
-    readonly prepared: Readonly<PreparedToolInvocationV1>;
-    readonly arguments: Readonly<RuntimeJsonValueV1>;
+    readonly prepared: Readonly<PreparedToolInvocation>;
+    readonly arguments: Readonly<RuntimeJsonValue>;
     readonly signal: AbortSignal;
   }) => Promise<Readonly<Record<string, unknown>>>;
   /**
@@ -74,16 +72,16 @@ export interface AppTaskToolPipelineAttemptInputV1 {
    */
   readonly projectSuspension: (input: {
     readonly executionMode: 'start' | 'resume';
-    readonly prepared: Readonly<PreparedToolInvocationV1>;
-    readonly terminal: Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>>;
-  }) => Readonly<ToolPipelineTaskSubagentSuspensionV1> | null;
+    readonly prepared: Readonly<PreparedToolInvocation>;
+    readonly terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>;
+  }) => Readonly<ToolPipelineTaskSubagentSuspension> | null;
 }
 
-export type AppTaskToolPipelineAttemptResultV1 =
+export type AppTaskToolPipelineAttemptResult =
   | {
       readonly kind: 'stage_failure';
       readonly failure: Readonly<
-        ToolPipelineStageFailureV1<'resolve' | 'validate' | 'classify', string>
+        ToolPipelineStageFailure<'resolve' | 'validate' | 'classify', string>
       >;
     }
   | {
@@ -93,17 +91,17 @@ export type AppTaskToolPipelineAttemptResultV1 =
     }
   | {
       readonly kind: 'governance_terminal';
-      readonly classified: Readonly<ClassifiedInvocationV1>;
+      readonly classified: Readonly<ClassifiedInvocation>;
       readonly facts: Readonly<
         Extract<
-          ReturnType<AppToolPipelineTurnCompositionV1['governance']['project']>,
+          ReturnType<AppToolPipelineTurnComposition['governance']['project']>,
           { readonly ok: true }
         >['value']
       >;
       readonly decision: Readonly<
         Exclude<
           Extract<
-            ReturnType<AppToolPipelineTurnCompositionV1['governance']['decide']>,
+            ReturnType<AppToolPipelineTurnComposition['governance']['decide']>,
             { readonly ok: true }
           >['value'],
           { readonly kind: 'allow' }
@@ -112,24 +110,24 @@ export type AppTaskToolPipelineAttemptResultV1 =
     }
   | {
       readonly kind: 'committed';
-      readonly classified: Readonly<ClassifiedInvocationV1>;
+      readonly classified: Readonly<ClassifiedInvocation>;
       readonly committed: Readonly<
-        RuntimeHostCommittedToolInvocationAuthorityV1<BuiltinOperationExecutionValueV1>
+        RuntimeHostCommittedToolInvocationAuthority<BuiltinOperationExecutionValue>
       >;
     }
   | {
       readonly kind: 'suspended';
-      readonly classified: Readonly<ClassifiedInvocationV1>;
+      readonly classified: Readonly<ClassifiedInvocation>;
       readonly suspended: Readonly<
-        RuntimeHostSuspendedToolInvocationAuthorityV1<BuiltinOperationExecutionValueV1>
+        RuntimeHostSuspendedToolInvocationAuthority<BuiltinOperationExecutionValue>
       >;
     };
 
-export interface AppTaskToolPipelineAttemptRuntimeV1 {
-  readonly schema: typeof APP_TASK_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1;
+export interface AppTaskToolPipelineAttemptRuntime {
+  readonly schema: typeof APP_TASK_TOOL_PIPELINE_ATTEMPT_SCHEMA_;
   readonly execute: (
-    input: Readonly<AppTaskToolPipelineAttemptInputV1>,
-  ) => Promise<Readonly<AppTaskToolPipelineAttemptResultV1>>;
+    input: Readonly<AppTaskToolPipelineAttemptInput>,
+  ) => Promise<Readonly<AppTaskToolPipelineAttemptResult>>;
 }
 
 /**
@@ -137,35 +135,35 @@ export interface AppTaskToolPipelineAttemptRuntimeV1 {
  * scope is required deliberately: production cannot accidentally create a
  * second Host coordinator or router for the Task route.
  */
-export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
-  readonly persistence: AppStateToolPipelinePersistenceV1;
-  readonly scope: Readonly<AppToolPipelineAttemptScopeV1>;
-}): AppTaskToolPipelineAttemptRuntimeV1 {
+export function createAppTaskToolPipelineAttemptRuntime(input: {
+  readonly persistence: AppStateToolPipelinePersistence;
+  readonly scope: Readonly<AppToolPipelineAttemptScope>;
+}): AppTaskToolPipelineAttemptRuntime {
   const scope = input.scope;
   if (scope.persistence !== input.persistence) {
     throw new Error('App Task Tool Pipeline attempt scope persistence is not exact.');
   }
-  const attempts: AppToolPipelineAttemptCompositionV1<
-    RuntimeJsonValueV1,
-    RuntimeJsonValueV1,
-    BuiltinOperationExecutionValueV1
+  const attempts: AppToolPipelineAttemptComposition<
+    RuntimeJsonValue,
+    RuntimeJsonValue,
+    BuiltinOperationExecutionValue
   > = scope.attempts;
 
   const execute = async (
-    attemptInput: Readonly<AppTaskToolPipelineAttemptInputV1>,
-  ): Promise<Readonly<AppTaskToolPipelineAttemptResultV1>> => {
+    attemptInput: Readonly<AppTaskToolPipelineAttemptInput>,
+  ): Promise<Readonly<AppTaskToolPipelineAttemptResult>> => {
     if (attemptInput.workspace.length === 0 || !attemptInput.projectSuspension) {
-      return stageFailureV1('resolve', 'task_composition_invalid', attemptInput.snapshot);
+      return stageFailure('resolve', 'task_composition_invalid', attemptInput.snapshot);
     }
-    if (!isPrivateTaskSnapshotV1(attemptInput.snapshot)) {
-      return stageFailureV1('resolve', 'task_runtime_private_required', attemptInput.snapshot);
+    if (!isPrivateTaskSnapshot(attemptInput.snapshot)) {
+      return stageFailure('resolve', 'task_runtime_private_required', attemptInput.snapshot);
     }
     if (
       attemptInput.resolution.builtinProjectionRevision !== attemptInput.turn.projection.revision ||
       attemptInput.resolution.dynamicCatalogRevision !== null ||
       attemptInput.governance.threadId !== attemptInput.threadId
     ) {
-      return stageFailureV1('resolve', 'resolution_context_invalid', attemptInput.snapshot);
+      return stageFailure('resolve', 'resolution_context_invalid', attemptInput.snapshot);
     }
     const resolved = attemptInput.turn.callbacks.resolve(
       attemptInput.snapshot,
@@ -180,7 +178,7 @@ export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
       target.executionMechanism !== 'subagent' ||
       resolved.value.call.argumentOrigin !== 'runtime_private'
     ) {
-      return stageFailureV1('resolve', 'task_identity_mismatch', attemptInput.snapshot);
+      return stageFailure('resolve', 'task_identity_mismatch', attemptInput.snapshot);
     }
 
     const validated = attemptInput.turn.callbacks.validate(resolved.value);
@@ -230,7 +228,7 @@ export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
         decision: decision.value,
       });
     }
-    if (!isPreparedGrantUsedV1(decision.value.grantUsed)) {
+    if (!isPreparedGrantUsed(decision.value.grantUsed)) {
       return Object.freeze({
         kind: 'governance_failure',
         code: 'unsupported_grant',
@@ -239,7 +237,7 @@ export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
     }
 
     const request = Object.freeze({
-      schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
+      schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
       authorizationKind: decision.value.authorizationKind,
       grantUsed: decision.value.grantUsed,
       policyEffects: Object.freeze({ ...(classifiedValue.policyCompilation.effects ?? {}) }),
@@ -251,7 +249,7 @@ export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
       planStepId: attemptInput.planStepId,
       capabilityRequestFacts: attemptInput.capabilityRequestFacts,
     });
-    const built = createAppPreparedToolInvocationV1({
+    const built = createAppPreparedToolInvocation({
       classified: classifiedValue,
       governance: facts.value,
       decision: decision.value,
@@ -282,7 +280,7 @@ export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
         return result;
       },
     });
-    const portInput: CreateAppBuiltinPreparedDispatchPortInputV1 = {
+    const portInput: CreateAppBuiltinPreparedDispatchPortInput = {
       projection: attemptInput.turn.projection,
       capabilityExecution: attemptInput.capabilityExecution,
       signal: attemptInput.signal,
@@ -298,8 +296,8 @@ export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
         return Object.freeze({ subagent: taskMechanism });
       },
     };
-    const port = createAppBuiltinPreparedTaskDispatchPortV1(portInput);
-    const dispatch = createBuiltinPreparedTaskDispatchAdapterV1({
+    const port = createAppBuiltinPreparedTaskDispatchPort(portInput);
+    const dispatch = createBuiltinPreparedTaskDispatchAdapter({
       projection: attemptInput.turn.projection,
       verifyPreparedIdentity: attemptInput.turn.callbacks.verifyPreparedIdentity,
       port,
@@ -307,11 +305,11 @@ export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
     const outcomeDispatch = Object.freeze({
       verifyPreparedIdentity: dispatch.verifyPreparedIdentity,
       dispatch: async (
-        candidate: Readonly<PreparedToolInvocationV1>,
-      ): Promise<Readonly<ToolPipelineDispatchOutcomeV1<BuiltinOperationExecutionValueV1>>> => {
+        candidate: Readonly<PreparedToolInvocation>,
+      ): Promise<Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>>> => {
         const terminal = await dispatch.dispatch(candidate);
-        if (hasTaskBlockedMarkerV1(terminal)) {
-          if (!isBlockedTaskTerminalV1(terminal)) {
+        if (hasTaskBlockedMarker(terminal)) {
+          if (!isBlockedTaskTerminal(terminal)) {
             throw new Error('Task blocked result is not an exact Builtin suspension envelope.');
           }
           const suspension = attemptInput.projectSuspension({
@@ -351,30 +349,30 @@ export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
     return Object.freeze({ kind: 'committed', classified: classifiedValue, committed: outcome });
   };
 
-  return Object.freeze({ schema: APP_TASK_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1, execute });
+  return Object.freeze({ schema: APP_TASK_TOOL_PIPELINE_ATTEMPT_SCHEMA_, execute });
 }
 
-function isPrivateTaskSnapshotV1(snapshot: Readonly<ToolCallSnapshotV1>): boolean {
+function isPrivateTaskSnapshot(snapshot: Readonly<ToolCallSnapshot>): boolean {
   if (
     snapshot.name !== 'task' ||
     snapshot.argumentOrigin !== 'runtime_private' ||
     snapshot.capabilityId !== null ||
     snapshot.capabilityRevision !== null ||
     snapshot.bindingId !== null ||
-    !isRecordV1(snapshot.rawArguments) ||
+    !isRecord(snapshot.rawArguments) ||
     !Object.hasOwn(snapshot.rawArguments, 'taskArtifact')
   ) {
     return false;
   }
   const artifact = snapshot.rawArguments.taskArtifact;
-  return isRecordV1(artifact);
+  return isRecord(artifact);
 }
 
-function isBlockedTaskTerminalV1(
-  terminal: Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>>,
+function isBlockedTaskTerminal(
+  terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>,
 ): terminal is Readonly<
-  CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1> & {
-    readonly structuredContent: BuiltinOperationExecutionValueV1;
+  CapabilityToolTerminalResult<BuiltinOperationExecutionValue> & {
+    readonly structuredContent: BuiltinOperationExecutionValue;
   }
 > {
   const value = terminal.structuredContent;
@@ -384,30 +382,30 @@ function isBlockedTaskTerminalV1(
     terminal.failure.retryable !== false ||
     !value ||
     value.ok !== false ||
-    !isRecordV1(value.subagentResult) ||
+    !isRecord(value.subagentResult) ||
     value.subagentResult.blocked === undefined
   ) {
     return false;
   }
-  return isRecordV1(value.subagentResult.blocked);
+  return isRecord(value.subagentResult.blocked);
 }
 
-function hasTaskBlockedMarkerV1(
-  terminal: Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>>,
+function hasTaskBlockedMarker(
+  terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>,
 ): boolean {
   const value = terminal.structuredContent;
   return (
     terminal.status === 'error' &&
     terminal.failure?.code === 'rejected' &&
     terminal.failure.retryable === false &&
-    isRecordV1(value) &&
+    isRecord(value) &&
     value.ok === false &&
-    isRecordV1(value.subagentResult) &&
+    isRecord(value.subagentResult) &&
     Object.hasOwn(value.subagentResult, 'blocked')
   );
 }
 
-function isRecordV1(value: unknown): value is Readonly<Record<string, unknown>> {
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -416,7 +414,7 @@ function isRecordV1(value: unknown): value is Readonly<Record<string, unknown>> 
   );
 }
 
-function isPreparedGrantUsedV1(
+function isPreparedGrantUsed(
   value: string,
 ): value is 'none' | 'approve_once' | 'same_command' | 'full_access' {
   return (
@@ -427,11 +425,11 @@ function isPreparedGrantUsedV1(
   );
 }
 
-function stageFailureV1(
+function stageFailure(
   stage: 'resolve' | 'validate' | 'classify',
   code: string,
-  snapshot: Readonly<ToolCallSnapshotV1>,
-): Readonly<AppTaskToolPipelineAttemptResultV1> {
+  snapshot: Readonly<ToolCallSnapshot>,
+): Readonly<AppTaskToolPipelineAttemptResult> {
   return Object.freeze({
     kind: 'stage_failure',
     failure: Object.freeze({

@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { createRuntimeHost } from '@kite/runtime-host';
 import {
-  type ContextCompilerPortV1,
-  type ContextFragmentCandidateV1,
-  type ContextSourceRequestV1,
-  defineRuntimeModuleV1,
-  type RuntimeModuleV1,
+  type ContextCompilerPort,
+  type ContextFragmentCandidate,
+  type ContextSourceRequest,
+  defineRuntimeModule,
+  type RuntimeModule,
 } from '@kite/runtime-spi';
 import { TestExecutionBridge, testRuntimeModules, testStorage } from './helpers';
 
 function contextModule(
-  collect: (request: ContextSourceRequestV1) => readonly ContextFragmentCandidateV1[],
-): RuntimeModuleV1 {
-  return defineRuntimeModuleV1({
+  collect: (request: ContextSourceRequest) => readonly ContextFragmentCandidate[],
+): RuntimeModule {
+  return defineRuntimeModule({
     moduleId: 'context-module',
     providerId: 'context-provider',
     revision: '1',
@@ -32,7 +32,7 @@ describe('runtime Host Context compilation mechanism', () => {
     let collections = 0;
     let compilations = 0;
     let externalCalls = 0;
-    const compiler: ContextCompilerPortV1 = {
+    const compiler: ContextCompilerPort = {
       compilerId: 'builtin-test-compiler',
       revision: '1',
       compile: async (request) => {
@@ -98,7 +98,7 @@ describe('runtime Host Context compilation mechanism', () => {
 
   test('fails closed before or after the compiler when boundaries are invalid', async () => {
     let compilations = 0;
-    const compiler: ContextCompilerPortV1 = {
+    const compiler: ContextCompilerPort = {
       compilerId: 'invalid-test-compiler',
       revision: '1',
       compile: async () => {

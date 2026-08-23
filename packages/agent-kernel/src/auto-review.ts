@@ -10,79 +10,79 @@ import type { AgentAutoReviewState } from './state';
  * gateway, or persistence authority here.
  */
 
-export type AutoReviewGrantV1 = 'approve_once' | 'same_command' | 'full_access';
-export type AutoReviewFailureTypeV1 = 'technical' | 'invalid_response';
+export type AutoReviewGrant = 'approve_once' | 'same_command' | 'full_access';
+export type AutoReviewFailureType = 'technical' | 'invalid_response';
 
-export interface AutoReviewFactsV1 {
+export interface AutoReviewFacts {
   readonly reviewId: string;
   readonly toolCallId: string;
   readonly ok: boolean;
   readonly approved: boolean;
-  readonly grant?: AutoReviewGrantV1;
+  readonly grant?: AutoReviewGrant;
   readonly reason?: string;
-  readonly failureType?: AutoReviewFailureTypeV1;
+  readonly failureType?: AutoReviewFailureType;
 }
 
-export interface AutoReviewAcceptedDecisionV1 {
+export interface AutoReviewAcceptedDecision {
   readonly kind: 'accepted_approval';
   readonly reviewId: string;
   readonly toolCallId: string;
-  readonly grant: Exclude<AutoReviewGrantV1, 'full_access'>;
+  readonly grant: Exclude<AutoReviewGrant, 'full_access'>;
   readonly reason?: string;
 }
 
-export interface AutoReviewUserApprovalDecisionV1 {
+export interface AutoReviewUserApprovalDecision {
   readonly kind: 'request_user_approval';
   readonly reviewId?: string;
   readonly toolCallId?: string;
   readonly reason: string;
-  readonly failureType?: AutoReviewFailureTypeV1;
+  readonly failureType?: AutoReviewFailureType;
 }
 
-export type AutoReviewDecisionV1 = AutoReviewAcceptedDecisionV1 | AutoReviewUserApprovalDecisionV1;
+export type AutoReviewDecision = AutoReviewAcceptedDecision | AutoReviewUserApprovalDecision;
 
-export interface CircuitBreakerConfigV1 {
+export interface CircuitBreakerConfig {
   readonly maxRejections: number;
   readonly windowMs: number;
   readonly maxTotalBlocks: number;
 }
 
-export const DEFAULT_CIRCUIT_BREAKER_CONFIG_V1: CircuitBreakerConfigV1 = Object.freeze({
+export const DEFAULT_CIRCUIT_BREAKER_CONFIG_: CircuitBreakerConfig = Object.freeze({
   maxRejections: 3,
   windowMs: 30_000,
   maxTotalBlocks: 20,
 });
 
-export const DEFAULT_AUTO_REVIEW_STATE_V1: AgentAutoReviewState = {
+export const DEFAULT_AUTO_REVIEW_STATE_: AgentAutoReviewState = {
   pendingWarnings: {},
   consecutiveRejects: 0,
   rejectionHistory: [],
   circuitBreakerTripped: false,
 };
 
-export interface AutoReviewRejectionEntryV1 {
+export interface AutoReviewRejectionEntry {
   readonly timestamp: number;
   readonly toolName: string;
   readonly reason: string;
 }
 
-export interface CircuitBreakerResultV1 {
+export interface CircuitBreakerResult {
   readonly tripped: boolean;
   readonly reason?: string;
   readonly newConsecutiveRejects: number;
-  readonly newRejectionHistory: readonly AutoReviewRejectionEntryV1[];
+  readonly newRejectionHistory: readonly AutoReviewRejectionEntry[];
   readonly newStatus: Readonly<{ status: 'closed' | 'open' }>;
 }
 
 /** Pure State 25 auto-review breaker decision over Host-supplied time facts. */
-export function evaluateAutoReviewCircuitBreakerV1(
+export function evaluateAutoReviewCircuitBreaker(
   consecutiveRejects: number,
-  rejectionHistory: readonly AutoReviewRejectionEntryV1[],
-  config: CircuitBreakerConfigV1,
+  rejectionHistory: readonly AutoReviewRejectionEntry[],
+  config: CircuitBreakerConfig,
   isRejection: boolean,
-  rejectionEntry?: AutoReviewRejectionEntryV1,
+  rejectionEntry?: AutoReviewRejectionEntry,
   observedAt = rejectionEntry?.timestamp ?? 0,
-): CircuitBreakerResultV1 {
+): CircuitBreakerResult {
   const windowStart = observedAt - config.windowMs;
   if (!isRejection) {
     return {
@@ -154,7 +154,7 @@ function exactKeys(
   );
 }
 
-function validFacts(value: unknown): value is AutoReviewFactsV1 {
+function validFacts(value: unknown): value is AutoReviewFacts {
   if (
     !plainRecord(value) ||
     !exactKeys(
@@ -188,8 +188,8 @@ function safeIdentity(value: unknown): string | undefined {
 function requestUserApproval(
   input: { readonly reviewId?: unknown; readonly toolCallId?: unknown } | undefined,
   reason: string,
-  failureType?: AutoReviewFailureTypeV1,
-): AutoReviewUserApprovalDecisionV1 {
+  failureType?: AutoReviewFailureType,
+): AutoReviewUserApprovalDecision {
   const reviewId = safeIdentity(input?.reviewId);
   const toolCallId = safeIdentity(input?.toolCallId);
   return Object.freeze({
@@ -206,7 +206,7 @@ function requestUserApproval(
  * Unknown fields, accessors, custom prototypes, non-canonical identities, and
  * unsupported grants fail closed.
  */
-export function isValidAutoReviewFactsV1(value: unknown): value is AutoReviewFactsV1 {
+export function isValidAutoReviewFacts(value: unknown): value is AutoReviewFacts {
   return validFacts(value);
 }
 
@@ -217,7 +217,7 @@ export function isValidAutoReviewFactsV1(value: unknown): value is AutoReviewFac
  * `approve_once` or `same_command` are all required for automatic acceptance.
  * Every other result, including `full_access`, is a user-approval request.
  */
-export function decideAutoReviewV1(value: unknown): AutoReviewDecisionV1 {
+export function decideAutoReview(value: unknown): AutoReviewDecision {
   if (!validFacts(value)) {
     return requestUserApproval(
       plainRecord(value) ? value : undefined,

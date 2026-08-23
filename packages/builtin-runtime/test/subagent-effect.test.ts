@@ -1,25 +1,25 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1,
-  BuiltinModelEffectCoordinatorV1,
-  type BuiltinModelOperationAttemptV1,
-  type BuiltinModelOperationExecutionPortV1,
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
+  BuiltinModelEffectCoordinator,
+  type BuiltinModelOperationAttempt,
+  type BuiltinModelOperationExecutionPort,
   createChatModel,
   humanMessage,
-  type ModelArtifactWriterV1,
-  ModelInvocationGatewayV1,
-  type ModelInvocationPersistenceV1,
-  type ModelInvocationStateViewV1,
-  type ModelResponseSourceV1,
-  type ModelRuntimeConfigV1,
+  type ModelArtifactWriter,
+  ModelInvocationGateway,
+  type ModelInvocationPersistence,
+  type ModelInvocationStateView,
+  type ModelResponseSource,
+  type ModelRuntimeConfig,
 } from '@kite/builtin-runtime/model';
 import {
-  MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
-  type ModelAttemptOutcomeV1,
-  type PrivateArtifactRefV1,
+  MODEL_ATTEMPT_OUTCOME_SCHEMA_,
+  type ModelAttemptOutcome,
+  type PrivateArtifactRef,
 } from '@kite/runtime-spi';
 
-const CONFIG: ModelRuntimeConfigV1 = Object.freeze({
+const CONFIG: ModelRuntimeConfig = Object.freeze({
   apiKey: 'subagent-effect-fixture-key',
   baseURL: 'https://subagent-effect-fixture.invalid/v1',
   modelName: 'subagent-effect-fixture',
@@ -30,9 +30,9 @@ const CONFIG: ModelRuntimeConfigV1 = Object.freeze({
 
 const MODEL = createChatModel(CONFIG);
 
-function successfulOutcome(): ModelAttemptOutcomeV1 {
+function successfulOutcome(): ModelAttemptOutcome {
   return {
-    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
     kind: 'success',
     response: {
       message: {
@@ -49,7 +49,7 @@ function successfulOutcome(): ModelAttemptOutcomeV1 {
 
 function artifactRef<K extends 'model_surface' | 'model_response'>(
   kind: K,
-): PrivateArtifactRefV1 & { kind: K } {
+): PrivateArtifactRef & { kind: K } {
   return {
     artifactId: `subagent-${kind}`,
     kind,
@@ -58,8 +58,8 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
   };
 }
 
-function persistence(options: { rejectCompletion?: boolean } = {}): ModelInvocationPersistenceV1 {
-  const state: ModelInvocationStateViewV1 = Object.freeze({
+function persistence(options: { rejectCompletion?: boolean } = {}): ModelInvocationPersistence {
+  const state: ModelInvocationStateView = Object.freeze({
     revision: 12,
     session: { threadId: 'subagent-thread', projectId: 'project_subagent_test' },
     turn: { turnId: 'subagent-turn' },
@@ -81,26 +81,26 @@ function createFixture(options: { operationMismatch?: boolean; rejectCompletion?
   let invocationOrdinal = 0;
   let observedOperationId: string | undefined;
   let observedModel: unknown;
-  const source: ModelResponseSourceV1 = Object.freeze({
-    attempt: async (input: Parameters<ModelResponseSourceV1['attempt']>[0]) => {
+  const source: ModelResponseSource = Object.freeze({
+    attempt: async (input: Parameters<ModelResponseSource['attempt']>[0]) => {
       sourceCalls += 1;
       observedModel = input.model;
       return successfulOutcome();
     },
   });
-  const operationExecution: BuiltinModelOperationExecutionPortV1 = Object.freeze({
-    execute: async (attempt: BuiltinModelOperationAttemptV1) => {
+  const operationExecution: BuiltinModelOperationExecutionPort = Object.freeze({
+    execute: async (attempt: BuiltinModelOperationAttempt) => {
       operationCalls += 1;
       observedOperationId = attempt.operationId;
       if (options.operationMismatch) throw new Error('subagent operation identity mismatch');
       return attempt.attempt();
     },
   });
-  const artifacts: ModelArtifactWriterV1 = {
+  const artifacts: ModelArtifactWriter = {
     writeSurface: () => artifactRef('model_surface'),
     writeResponse: () => artifactRef('model_response'),
   };
-  const gateway = new ModelInvocationGatewayV1({
+  const gateway = new ModelInvocationGateway({
     artifacts,
     source,
     operationExecution,
@@ -153,9 +153,9 @@ function baseInput(fixture: ReturnType<typeof createFixture>) {
 describe('Builtin subagent model effect', () => {
   test('uses the coordinator Gateway and model:subagent operation exactly once', async () => {
     const fixture = createFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
-    const result = await coordinator.executeSubagentModelStepV1(baseInput(fixture));
+    const result = await coordinator.executeSubagentModelStep(baseInput(fixture));
 
     expect(result).toMatchObject({
       invocationId: 'subagent-invocation-1',
@@ -170,16 +170,16 @@ describe('Builtin subagent model effect', () => {
     expect(fixture.counts()).toMatchObject({
       operationCalls: 1,
       sourceCalls: 1,
-      observedOperationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1.subagent,
+      observedOperationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_.subagent,
     });
   });
 
   test('fails closed with missing persistence before operation/source dispatch', async () => {
     const fixture = createFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     await expect(
-      coordinator.executeSubagentModelStepV1({
+      coordinator.executeSubagentModelStep({
         ...baseInput(fixture),
         persistence: undefined,
       }),
@@ -189,10 +189,10 @@ describe('Builtin subagent model effect', () => {
 
   test('fails closed on Provider denial before operation/source dispatch', async () => {
     const fixture = createFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     await expect(
-      coordinator.executeSubagentModelStepV1({
+      coordinator.executeSubagentModelStep({
         ...baseInput(fixture),
         providerDataAdmission: () => ({
           admitted: false,
@@ -206,9 +206,9 @@ describe('Builtin subagent model effect', () => {
 
   test('fails closed on operation identity mismatch before source dispatch', async () => {
     const fixture = createFixture({ operationMismatch: true });
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
-    await expect(coordinator.executeSubagentModelStepV1(baseInput(fixture))).rejects.toThrow(
+    await expect(coordinator.executeSubagentModelStep(baseInput(fixture))).rejects.toThrow(
       'operation identity mismatch',
     );
     expect(fixture.counts()).toMatchObject({ operationCalls: 1, sourceCalls: 0 });
@@ -216,11 +216,11 @@ describe('Builtin subagent model effect', () => {
 
   test('does not expose a normalized response when completion commit fails', async () => {
     const fixture = createFixture({ rejectCompletion: true });
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
     let result: unknown;
 
     await expect(
-      coordinator.executeSubagentModelStepV1(baseInput(fixture)).then((value) => {
+      coordinator.executeSubagentModelStep(baseInput(fixture)).then((value) => {
         result = value;
         return value;
       }),

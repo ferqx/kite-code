@@ -5,48 +5,48 @@ import type {
   ToolApprovalPayload,
 } from '@kite/runtime-contract';
 import type {
-  CapabilityApprovalV1,
-  CapabilityAvailabilityContextV1,
-  CapabilityBindingV1,
-  CapabilityDescriptorV1,
-  CapabilityEffectClassV1,
-  CapabilityEffectsV1,
-  CapabilityExecutionMechanismV1,
-  CapabilityExecutionTraitsV1,
-  CapabilityInternalDescriptorV1,
-  CapabilityPolicyCompilationV1,
-  CapabilityRiskClassV1,
-  CapabilityToolKindV1,
-  RuntimeJsonValueV1,
+  CapabilityApproval,
+  CapabilityAvailabilityContext,
+  CapabilityBinding,
+  CapabilityDescriptor,
+  CapabilityEffectClass,
+  CapabilityEffects,
+  CapabilityExecutionMechanism,
+  CapabilityExecutionTraits,
+  CapabilityInternalDescriptor,
+  CapabilityPolicyCompilation,
+  CapabilityRiskClass,
+  CapabilityToolKind,
+  RuntimeJsonValue,
 } from './contracts';
-import type { PrivateSuspendedSubagentRecordV1 } from './subagent';
+import type { PrivateSuspendedSubagentRecord } from './subagent';
 
 /** Stable stage envelope shared by the pure pipeline contract. */
-export const TOOL_PIPELINE_STAGE_SCHEMA_V1 = 'kite.tool-pipeline-stage.v1' as const;
+export const TOOL_PIPELINE_STAGE_SCHEMA_ = 'kite.tool-pipeline-stage.v1' as const;
 
-export type ToolPipelineStageV1 = 'snapshot' | 'resolve' | 'validate' | 'classify' | 'recorded';
+export type ToolPipelineStage = 'snapshot' | 'resolve' | 'validate' | 'classify' | 'recorded';
 
 /** Pipeline arguments are the same canonical, provider-neutral JSON values as SPI. */
-export type CanonicalToolArgumentValueV1 = RuntimeJsonValueV1;
+export type CanonicalToolArgumentValue = RuntimeJsonValue;
 
 /** Dynamic descriptors and bindings retain their runtime-contract shape. */
-export type ToolPipelineCapabilityDescriptorV1 =
-  | Readonly<CapabilityDescriptorV1>
-  | Readonly<CapabilityInternalDescriptorV1>
+export type ToolPipelineCapabilityDescriptor =
+  | Readonly<CapabilityDescriptor>
+  | Readonly<CapabilityInternalDescriptor>
   | Readonly<RuntimeCapabilityDescriptor>;
 
-export type ToolPipelineCapabilityBindingV1 =
-  | Readonly<CapabilityBindingV1>
+export type ToolPipelineCapabilityBinding =
+  | Readonly<CapabilityBinding>
   | Readonly<RuntimeCapabilityBinding>;
 
-export type ToolPipelineCapabilityDisclosureV1 =
-  | Readonly<import('./contracts').CapabilityDisclosureV1>
+export type ToolPipelineCapabilityDisclosure =
+  | Readonly<import('./contracts').CapabilityDisclosure>
   | Readonly<RuntimeCapabilityDisclosure>;
 
-export type ToolExecutionFamilyV1 = 'builtin' | 'mcp' | 'skill' | 'subagent';
+export type ToolExecutionFamily = 'builtin' | 'mcp' | 'skill' | 'subagent';
 
 /** Explicit provenance prevents private Runtime DTOs from being inferred from fields alone. */
-export type ToolArgumentOriginV1 = 'model_public' | 'runtime_private';
+export type ToolArgumentOrigin = 'model_public' | 'runtime_private';
 
 /**
  * Operation identity after the owning resolver has proven it is not the
@@ -54,13 +54,13 @@ export type ToolArgumentOriginV1 = 'model_public' | 'runtime_private';
  * being assigned to the non-dynamic target branch without a runtime helper or
  * a second authority in SPI.
  */
-declare const nonDynamicOperationIdBrandV1: unique symbol;
-export type NonDynamicOperationIdV1 = string & {
-  readonly [nonDynamicOperationIdBrandV1]: 'validated_non_dynamic_operation';
+declare const nonDynamicOperationIdBrand: unique symbol;
+export type NonDynamicOperationId = string & {
+  readonly [nonDynamicOperationIdBrand]: 'validated_non_dynamic_operation';
 };
 
 /** Model visibility is deliberately a discriminated identity, not a name convention. */
-export type ToolPipelineVisibilityIdentityV1 =
+export type ToolPipelineVisibilityIdentity =
   | {
       readonly visibility: 'model';
       readonly modelVisible: true;
@@ -73,15 +73,15 @@ export type ToolPipelineVisibilityIdentityV1 =
     };
 
 /** A dynamic MCP subject name is never the internal wrapper operation name. */
-export type DynamicMcpExposedToolNameV1 = `mcp__${string}`;
+export type DynamicMcpExposedToolName = `mcp__${string}`;
 
 /** The real MCP subject carried alongside the internal runtime wrapper. */
-export interface DynamicMcpSubjectIdentityV1 {
+export interface DynamicMcpSubjectIdentity {
   readonly capabilityId: string;
   readonly capabilityRevision: string;
   readonly descriptorRevision: string;
   readonly providerId: string;
-  readonly exposedToolName: DynamicMcpExposedToolNameV1;
+  readonly exposedToolName: DynamicMcpExposedToolName;
   readonly dynamicCatalogRevision: string;
   readonly bindingId: string | null;
 }
@@ -90,7 +90,7 @@ export interface DynamicMcpSubjectIdentityV1 {
  * The private runtime operation used to reach an MCP subject.  This carrier is
  * identity data only; it contains no registry, callback, or executor object.
  */
-export interface DynamicMcpRuntimeWrapperIdentityV1 {
+export interface DynamicMcpRuntimeWrapperIdentity {
   readonly operationId: 'mcp:dynamic_tool';
   readonly capabilityId: 'mcp:dynamic_tool';
   readonly providerId: string;
@@ -101,18 +101,18 @@ export interface DynamicMcpRuntimeWrapperIdentityV1 {
 }
 
 /** The two catalog identities are intentionally independent fields. */
-export interface ToolPipelineCatalogRevisionsV1 {
+export interface ToolPipelineCatalogRevisions {
   readonly builtinProjectionRevision: string | null;
   readonly dynamicCatalogRevision: string | null;
 }
 
-export interface ToolCallSnapshotV1 {
-  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+export interface ToolCallSnapshot {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_;
   readonly stage: 'snapshot';
   readonly toolCallId: string;
   readonly name: string;
-  readonly rawArguments: CanonicalToolArgumentValueV1;
-  readonly argumentOrigin: ToolArgumentOriginV1;
+  readonly rawArguments: CanonicalToolArgumentValue;
+  readonly argumentOrigin: ToolArgumentOrigin;
   readonly createdAtTurnId: string;
   readonly modelMessageId: string;
   readonly bindingId: string | null;
@@ -125,30 +125,30 @@ export interface ToolCallSnapshotV1 {
  * handle, authorization state, and policy implementation are intentionally
  * absent; only their immutable identities may cross this boundary.
  */
-export interface ToolPipelineResolutionContextV1 extends ToolPipelineCatalogRevisionsV1 {
+export interface ToolPipelineResolutionContext extends ToolPipelineCatalogRevisions {
   readonly currentTurnId: string;
-  readonly availabilityContext: Readonly<CapabilityAvailabilityContextV1>;
-  readonly bindings: readonly ToolPipelineCapabilityBindingV1[];
-  readonly descriptors: readonly ToolPipelineCapabilityDescriptorV1[];
-  readonly disclosures?: readonly ToolPipelineCapabilityDisclosureV1[];
+  readonly availabilityContext: Readonly<CapabilityAvailabilityContext>;
+  readonly bindings: readonly ToolPipelineCapabilityBinding[];
+  readonly descriptors: readonly ToolPipelineCapabilityDescriptor[];
+  readonly disclosures?: readonly ToolPipelineCapabilityDisclosure[];
 }
 
 /**
  * For a dynamic MCP target these top-level descriptor fields identify the
  * real MCP subject. The internal Builtin wrapper has its own exact carrier.
  */
-type ResolvedToolTargetCommonV1 = {
+type ResolvedToolTargetCommon = {
   readonly capabilityId: string;
   readonly capabilityRevision: string;
   readonly descriptorRevision: string;
   readonly providerId: string;
   readonly executorRevision: string | null;
-  readonly toolKind: CapabilityToolKindV1 | 'internal_runtime';
-  readonly binding: ToolPipelineCapabilityBindingV1 | null;
-  readonly descriptor: ToolPipelineCapabilityDescriptorV1;
+  readonly toolKind: CapabilityToolKind | 'internal_runtime';
+  readonly binding: ToolPipelineCapabilityBinding | null;
+  readonly descriptor: ToolPipelineCapabilityDescriptor;
 };
 
-export type DynamicMcpToolTargetV1 = ResolvedToolTargetCommonV1 & {
+export type DynamicMcpToolTarget = ResolvedToolTargetCommon & {
   readonly executionFamily: 'mcp';
   readonly executionMechanism: 'mcp';
   readonly operationId: 'mcp:dynamic_tool';
@@ -156,45 +156,43 @@ export type DynamicMcpToolTargetV1 = ResolvedToolTargetCommonV1 & {
   readonly modelVisible: false;
   readonly exposedToolName: null;
   readonly isDynamicMcp: true;
-  readonly toolKind: CapabilityToolKindV1;
+  readonly toolKind: CapabilityToolKind;
   readonly executorRevision: null;
   readonly builtinProjectionRevision: null;
   readonly dynamicCatalogRevision: string;
-  readonly subject: Readonly<DynamicMcpSubjectIdentityV1>;
-  readonly runtimeWrapper: Readonly<DynamicMcpRuntimeWrapperIdentityV1>;
+  readonly subject: Readonly<DynamicMcpSubjectIdentity>;
+  readonly runtimeWrapper: Readonly<DynamicMcpRuntimeWrapperIdentity>;
 };
 
-export type NonDynamicToolTargetV1 = ResolvedToolTargetCommonV1 & {
+export type NonDynamicToolTarget = ResolvedToolTargetCommon & {
   readonly executionFamily: 'builtin' | 'skill' | 'subagent';
-  readonly executionMechanism: CapabilityExecutionMechanismV1;
-  readonly operationId: NonDynamicOperationIdV1;
+  readonly executionMechanism: CapabilityExecutionMechanism;
+  readonly operationId: NonDynamicOperationId;
   readonly visibility: 'model';
   readonly modelVisible: true;
   readonly exposedToolName: string;
   readonly isDynamicMcp: false;
-  readonly toolKind: CapabilityToolKindV1;
+  readonly toolKind: CapabilityToolKind;
   readonly builtinProjectionRevision: string;
   readonly dynamicCatalogRevision: string | null;
 };
 
-export type ResolvedToolTargetV1 = DynamicMcpToolTargetV1 | NonDynamicToolTargetV1;
+export type ResolvedToolTarget = DynamicMcpToolTarget | NonDynamicToolTarget;
 
-export interface ResolvedInvocationV1 {
-  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+export interface ResolvedInvocation {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_;
   readonly stage: 'resolved';
-  readonly call: Readonly<ToolCallSnapshotV1>;
-  readonly target: Readonly<ResolvedToolTargetV1>;
-  readonly availabilityContext: Readonly<CapabilityAvailabilityContextV1>;
+  readonly call: Readonly<ToolCallSnapshot>;
+  readonly target: Readonly<ResolvedToolTarget>;
+  readonly availabilityContext: Readonly<CapabilityAvailabilityContext>;
   readonly builtinProjectionRevision: string | null;
   readonly dynamicCatalogRevision: string | null;
-  readonly disclosedCapabilities: readonly ToolPipelineCapabilityDescriptorV1[];
-  readonly disclosures: readonly ToolPipelineCapabilityDisclosureV1[];
+  readonly disclosedCapabilities: readonly ToolPipelineCapabilityDescriptor[];
+  readonly disclosures: readonly ToolPipelineCapabilityDisclosure[];
 }
 
-export interface ValidatedToolRequestV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> {
-  readonly source: ToolExecutionFamilyV1;
+export interface ValidatedToolRequest<TArguments extends RuntimeJsonValue = RuntimeJsonValue> {
+  readonly source: ToolExecutionFamily;
   readonly operationId: string;
   readonly name: string;
   readonly arguments: TArguments;
@@ -203,40 +201,40 @@ export interface ValidatedToolRequestV1<
   readonly approvalSummary: string;
 }
 
-export interface ValidatedNestedCapabilityV1 {
-  readonly descriptor: ToolPipelineCapabilityDescriptorV1;
-  readonly disclosure: ToolPipelineCapabilityDisclosureV1;
+export interface ValidatedNestedCapability {
+  readonly descriptor: ToolPipelineCapabilityDescriptor;
+  readonly disclosure: ToolPipelineCapabilityDisclosure;
 }
 
-export interface ValidatedInvocationV1<TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1> {
-  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+export interface ValidatedInvocation<TArguments extends RuntimeJsonValue = RuntimeJsonValue> {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_;
   readonly stage: 'validated';
-  readonly resolved: Readonly<ResolvedInvocationV1>;
-  readonly request: Readonly<ValidatedToolRequestV1<TArguments>>;
-  readonly nestedCapability: Readonly<ValidatedNestedCapabilityV1> | null;
+  readonly resolved: Readonly<ResolvedInvocation>;
+  readonly request: Readonly<ValidatedToolRequest<TArguments>>;
+  readonly nestedCapability: Readonly<ValidatedNestedCapability> | null;
   /** Domain-specific additions stay JSON data instead of importing a domain owner. */
-  readonly domainData?: RuntimeJsonValueV1;
+  readonly domainData?: RuntimeJsonValue;
 }
 
-export type ToolPipelineRiskClassV1 = CapabilityRiskClassV1;
+export type ToolPipelineRiskClass = CapabilityRiskClass;
 
-export type ToolPipelineIntentRequirementV1 = 'required_before_dispatch' | 'not_applicable';
+export type ToolPipelineIntentRequirement = 'required_before_dispatch' | 'not_applicable';
 
-export type ToolPipelineReceiptRequirementV1 =
+export type ToolPipelineReceiptRequirement =
   | 'observation_receipt'
   | 'effect_receipt'
   | 'control_receipt'
   | 'not_applicable';
 
-export type ToolPipelineRetryEligibilityV1 =
+export type ToolPipelineRetryEligibility =
   | 'none'
   | 'safe_read_candidate'
   | 'idempotency_key_candidate';
 
-export interface ToolInvocationRequirementsV1 {
-  readonly intent: ToolPipelineIntentRequirementV1;
-  readonly receipt: ToolPipelineReceiptRequirementV1;
-  readonly retry: ToolPipelineRetryEligibilityV1;
+export interface ToolInvocationRequirements {
+  readonly intent: ToolPipelineIntentRequirement;
+  readonly receipt: ToolPipelineReceiptRequirement;
+  readonly retry: ToolPipelineRetryEligibility;
   readonly idempotencyKeyArgument: string | null;
   readonly verification: 'after_committed_receipt' | 'not_required_by_classification';
 }
@@ -247,20 +245,20 @@ export interface ToolInvocationRequirementsV1 {
  * cannot silently create a second policy schema while mapping facts into the
  * pure Kernel governance DTO.
  */
-export type ToolPipelineGovernancePolicyProjectionV1 = Readonly<CapabilityPolicyCompilationV1>;
+export type ToolPipelineGovernancePolicyProjection = Readonly<CapabilityPolicyCompilation>;
 
 /**
  * Neutral invocation facts consumed by the State 25 governance bridge.  The
  * fields mirror the Kernel's identity facts without importing that package;
  * the two catalog revisions remain independent throughout the projection.
  */
-type ToolPipelineGovernanceInvocationProjectionCommonV1 = {
+type ToolPipelineGovernanceInvocationProjectionCommon = {
   readonly turnId: string;
   readonly modelMessageId: string;
   readonly toolCallId: string;
-  readonly argumentOrigin: ToolArgumentOriginV1;
-  readonly executionFamily: ToolExecutionFamilyV1;
-  readonly executionMechanism: CapabilityExecutionMechanismV1;
+  readonly argumentOrigin: ToolArgumentOrigin;
+  readonly executionFamily: ToolExecutionFamily;
+  readonly executionMechanism: CapabilityExecutionMechanism;
   /** Model-facing name; dynamic MCP uses its real subject name here. */
   readonly exposedToolName: string;
   /** Dynamic MCP keeps the real subject capability while operation is its wrapper. */
@@ -282,11 +280,11 @@ type ToolPipelineGovernanceInvocationProjectionCommonV1 = {
 };
 
 /** Ordinary Builtin/Skill/Subagent invocation facts. */
-export type ToolPipelineGovernanceOrdinaryInvocationProjectionV1 =
-  ToolPipelineGovernanceInvocationProjectionCommonV1 & {
+export type ToolPipelineGovernanceOrdinaryInvocationProjection =
+  ToolPipelineGovernanceInvocationProjectionCommon & {
     readonly isDynamicMcp: false;
     readonly executionFamily: 'builtin' | 'skill' | 'subagent';
-    readonly operationId: NonDynamicOperationIdV1;
+    readonly operationId: NonDynamicOperationId;
     readonly visibility: 'model';
     readonly modelVisible: true;
     readonly builtinProjectionRevision: string;
@@ -295,68 +293,68 @@ export type ToolPipelineGovernanceOrdinaryInvocationProjectionV1 =
   };
 
 /** Dynamic MCP governance facts preserve subject and wrapper identity separately. */
-export type ToolPipelineGovernanceDynamicInvocationProjectionV1 =
-  ToolPipelineGovernanceInvocationProjectionCommonV1 & {
+export type ToolPipelineGovernanceDynamicInvocationProjection =
+  ToolPipelineGovernanceInvocationProjectionCommon & {
     readonly isDynamicMcp: true;
     readonly executionFamily: 'mcp';
     readonly executionMechanism: 'mcp';
     readonly operationId: 'mcp:dynamic_tool';
     readonly visibility: 'internal';
     readonly modelVisible: false;
-    readonly exposedToolName: DynamicMcpExposedToolNameV1;
+    readonly exposedToolName: DynamicMcpExposedToolName;
     readonly capabilityId: string;
     readonly executorRevision: null;
     readonly builtinProjectionRevision: null;
     readonly dynamicCatalogRevision: string;
-    readonly subject: Readonly<DynamicMcpSubjectIdentityV1>;
-    readonly runtimeWrapper: Readonly<DynamicMcpRuntimeWrapperIdentityV1>;
+    readonly subject: Readonly<DynamicMcpSubjectIdentity>;
+    readonly runtimeWrapper: Readonly<DynamicMcpRuntimeWrapperIdentity>;
   };
 
 /** Discriminated invocation projection accepted by the governance bridge. */
-export type ToolPipelineGovernanceInvocationProjectionV1 =
-  | ToolPipelineGovernanceOrdinaryInvocationProjectionV1
-  | ToolPipelineGovernanceDynamicInvocationProjectionV1;
+export type ToolPipelineGovernanceInvocationProjection =
+  | ToolPipelineGovernanceOrdinaryInvocationProjection
+  | ToolPipelineGovernanceDynamicInvocationProjection;
 
-export interface ToolPipelineGovernanceDynamicMcpProjectionV1 {
+export interface ToolPipelineGovernanceDynamicMcpProjection {
   readonly isDynamicMcp: true;
   /** The real provider capability governed by the Kernel. */
-  readonly subject: Readonly<DynamicMcpSubjectIdentityV1>;
+  readonly subject: Readonly<DynamicMcpSubjectIdentity>;
   /** The private Builtin operation used to execute that subject. */
-  readonly runtimeWrapper: Readonly<DynamicMcpRuntimeWrapperIdentityV1>;
-  readonly minimumApproval: CapabilityApprovalV1;
+  readonly runtimeWrapper: Readonly<DynamicMcpRuntimeWrapperIdentity>;
+  readonly minimumApproval: CapabilityApproval;
   readonly readOnly: boolean;
 }
 
 /** Short neutral name for callers that do not need the full prefix. */
-export type DynamicMcpProjectionV1 = ToolPipelineGovernanceDynamicMcpProjectionV1;
+export type DynamicMcpProjection = ToolPipelineGovernanceDynamicMcpProjection;
 
 /** Nested Skill facts may only accompany the activate_skill operation. */
-export interface ToolPipelineGovernanceNestedSkillProjectionV1 {
+export interface ToolPipelineGovernanceNestedSkillProjection {
   readonly operationId: 'builtin:activate_skill';
   readonly capabilityId: string;
   readonly capabilityRevision: string;
   readonly nestedCatalogRevision: string;
-  readonly decision: CapabilityPolicyCompilationV1['decision'];
-  readonly minimumApproval: CapabilityApprovalV1;
+  readonly decision: CapabilityPolicyCompilation['decision'];
+  readonly minimumApproval: CapabilityApproval;
 }
 
-export type NestedSkillProjectionV1 = ToolPipelineGovernanceNestedSkillProjectionV1;
+export type NestedSkillProjection = ToolPipelineGovernanceNestedSkillProjection;
 
 /**
  * Complete neutral governance projection.  `policy` is the same typed
- * Builtin compilation carried by ClassifiedInvocationV1; it is not a second
+ * Builtin compilation carried by ClassifiedInvocation; it is not a second
  * policy result or an authorization decision.
  */
-export interface ToolPipelineGovernanceProjectionV1 {
-  readonly invocation: Readonly<ToolPipelineGovernanceInvocationProjectionV1>;
-  readonly policy: Readonly<ToolPipelineGovernancePolicyProjectionV1>;
-  readonly effectiveEffects: Readonly<CapabilityEffectsV1>;
+export interface ToolPipelineGovernanceProjection {
+  readonly invocation: Readonly<ToolPipelineGovernanceInvocationProjection>;
+  readonly policy: Readonly<ToolPipelineGovernancePolicyProjection>;
+  readonly effectiveEffects: Readonly<CapabilityEffects>;
   readonly effectiveEffectsDigest: string;
-  readonly dynamicMcp: Readonly<ToolPipelineGovernanceDynamicMcpProjectionV1> | null;
-  readonly nestedSkill: Readonly<ToolPipelineGovernanceNestedSkillProjectionV1> | null;
+  readonly dynamicMcp: Readonly<ToolPipelineGovernanceDynamicMcpProjection> | null;
+  readonly nestedSkill: Readonly<ToolPipelineGovernanceNestedSkillProjection> | null;
 }
 
-export type ToolPipelineClassifiedIdentityVerificationResultV1 =
+export type ToolPipelineClassifiedIdentityVerificationResult =
   | { readonly valid: true }
   | {
       readonly valid: false;
@@ -373,42 +371,40 @@ export type ToolPipelineClassifiedIdentityVerificationResultV1 =
     };
 
 /** SPI declaration only; Host/Builtin supplies the identity verifier. */
-export type ToolPipelineClassifiedIdentityVerifierV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export type ToolPipelineClassifiedIdentityVerifier<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 > = (
-  classified: Readonly<ClassifiedInvocationV1<TArguments>>,
-) => boolean | ToolPipelineClassifiedIdentityVerificationResultV1;
+  classified: Readonly<ClassifiedInvocation<TArguments>>,
+) => boolean | ToolPipelineClassifiedIdentityVerificationResult;
 
 /** Explicit governance-prefixed aliases for composition seams. */
-export type ToolPipelineGovernanceIdentityVerificationResultV1 =
-  ToolPipelineClassifiedIdentityVerificationResultV1;
-export type ToolPipelineGovernanceIdentityVerifierV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = ToolPipelineClassifiedIdentityVerifierV1<TArguments>;
+export type ToolPipelineGovernanceIdentityVerificationResult =
+  ToolPipelineClassifiedIdentityVerificationResult;
+export type ToolPipelineGovernanceIdentityVerifier<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+> = ToolPipelineClassifiedIdentityVerifier<TArguments>;
 
-export interface ClassifiedInvocationV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> {
-  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+export interface ClassifiedInvocation<TArguments extends RuntimeJsonValue = RuntimeJsonValue> {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_;
   readonly stage: 'classified';
-  readonly validated: Readonly<ValidatedInvocationV1<TArguments>>;
-  readonly descriptor: Readonly<ToolPipelineCapabilityDescriptorV1>;
-  readonly policyCompilation: ToolPipelineGovernancePolicyProjectionV1;
+  readonly validated: Readonly<ValidatedInvocation<TArguments>>;
+  readonly descriptor: Readonly<ToolPipelineCapabilityDescriptor>;
+  readonly policyCompilation: ToolPipelineGovernancePolicyProjection;
   /** Single neutral projection consumed by the Kernel governance bridge. */
-  readonly governance: Readonly<ToolPipelineGovernanceProjectionV1>;
-  readonly effectClass: CapabilityEffectClassV1;
-  readonly effectiveEffects: Readonly<CapabilityEffectsV1>;
+  readonly governance: Readonly<ToolPipelineGovernanceProjection>;
+  readonly effectClass: CapabilityEffectClass;
+  readonly effectiveEffects: Readonly<CapabilityEffects>;
   readonly effectiveEffectsDigest: string;
-  readonly risk: ToolPipelineRiskClassV1;
+  readonly risk: ToolPipelineRiskClass;
   readonly sideEffect: boolean;
-  readonly minimumApproval: CapabilityApprovalV1;
-  readonly executionTraits: Readonly<CapabilityExecutionTraitsV1> | null;
-  readonly requirements: Readonly<ToolInvocationRequirementsV1>;
+  readonly minimumApproval: CapabilityApproval;
+  readonly executionTraits: Readonly<CapabilityExecutionTraits> | null;
+  readonly requirements: Readonly<ToolInvocationRequirements>;
 }
 
-export type ToolPipelineSnapshotFailureCodeV1 = 'invalid_identity' | 'arguments_not_canonical_json';
+export type ToolPipelineSnapshotFailureCode = 'invalid_identity' | 'arguments_not_canonical_json';
 
-export type ToolPipelineResolveFailureCodeV1 =
+export type ToolPipelineResolveFailureCode =
   | 'invalid_stage_input'
   | 'resolution_context_invalid'
   | 'call_turn_mismatch'
@@ -424,7 +420,7 @@ export type ToolPipelineResolveFailureCodeV1 =
   | 'descriptor_kind_mismatch'
   | 'descriptor_unavailable';
 
-export type ToolPipelineValidateFailureCodeV1 =
+export type ToolPipelineValidateFailureCode =
   | 'invalid_stage_input'
   | 'stage_identity_drift'
   | 'invalid_arguments'
@@ -436,18 +432,18 @@ export type ToolPipelineValidateFailureCodeV1 =
   | 'disclosure_missing'
   | 'disclosure_stale';
 
-export type ToolPipelineClassifyFailureCodeV1 =
+export type ToolPipelineClassifyFailureCode =
   | 'invalid_stage_input'
   | 'stage_identity_drift'
   | 'classification_unavailable';
 
-export type ToolPipelineRecordFailureCodeV1 =
+export type ToolPipelineRecordFailureCode =
   | 'invalid_stage_input'
   | 'identity_mismatch'
   | 'duplicate_attempt'
   | 'persistence_unavailable';
 
-export type ToolPipelineDispatchFailureCodeV1 =
+export type ToolPipelineDispatchFailureCode =
   | 'invalid_prepared_input'
   | 'identity_mismatch'
   | 'dispatch_unavailable'
@@ -455,10 +451,7 @@ export type ToolPipelineDispatchFailureCodeV1 =
   | 'acknowledgement_failed'
   | 'unknown_outcome';
 
-export interface ToolPipelineStageFailureV1<
-  Stage extends ToolPipelineStageV1,
-  Code extends string,
-> {
+export interface ToolPipelineStageFailure<Stage extends ToolPipelineStage, Code extends string> {
   readonly stage: Stage;
   readonly code: Code;
   readonly toolCallId: string | null;
@@ -467,40 +460,40 @@ export interface ToolPipelineStageFailureV1<
   readonly diagnostic?: string;
 }
 
-export type ToolPipelineStageResultV1<Value, Failure> =
+export type ToolPipelineStageResult<Value, Failure> =
   | { readonly ok: true; readonly value: Readonly<Value> }
   | { readonly ok: false; readonly failure: Readonly<Failure> };
 
-export type ToolCallSnapshotResultV1 = ToolPipelineStageResultV1<
-  ToolCallSnapshotV1,
-  ToolPipelineStageFailureV1<'snapshot', ToolPipelineSnapshotFailureCodeV1>
+export type ToolCallSnapshotResult = ToolPipelineStageResult<
+  ToolCallSnapshot,
+  ToolPipelineStageFailure<'snapshot', ToolPipelineSnapshotFailureCode>
 >;
 
-export type ToolResolutionResultV1 = ToolPipelineStageResultV1<
-  ResolvedInvocationV1,
-  ToolPipelineStageFailureV1<'resolve', ToolPipelineResolveFailureCodeV1>
+export type ToolResolutionResult = ToolPipelineStageResult<
+  ResolvedInvocation,
+  ToolPipelineStageFailure<'resolve', ToolPipelineResolveFailureCode>
 >;
 
-export type ToolValidationResultV1<TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1> =
-  ToolPipelineStageResultV1<
-    ValidatedInvocationV1<TArguments>,
-    ToolPipelineStageFailureV1<'validate', ToolPipelineValidateFailureCodeV1>
+export type ToolValidationResult<TArguments extends RuntimeJsonValue = RuntimeJsonValue> =
+  ToolPipelineStageResult<
+    ValidatedInvocation<TArguments>,
+    ToolPipelineStageFailure<'validate', ToolPipelineValidateFailureCode>
   >;
 
-export type ToolClassificationResultV1<TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1> =
-  ToolPipelineStageResultV1<
-    ClassifiedInvocationV1<TArguments>,
-    ToolPipelineStageFailureV1<'classify', ToolPipelineClassifyFailureCodeV1>
+export type ToolClassificationResult<TArguments extends RuntimeJsonValue = RuntimeJsonValue> =
+  ToolPipelineStageResult<
+    ClassifiedInvocation<TArguments>,
+    ToolPipelineStageFailure<'classify', ToolPipelineClassifyFailureCode>
   >;
 
-export interface ToolRecordedAttemptIdentityV1 {
+export interface ToolRecordedAttemptIdentity {
   readonly invocationId: string;
   readonly attemptId: string;
   readonly attempt: number;
   readonly toolCallId: string;
   readonly turnId: string;
   readonly modelMessageId: string;
-  readonly argumentOrigin: ToolArgumentOriginV1;
+  readonly argumentOrigin: ToolArgumentOrigin;
   readonly providerId: string;
   readonly operationId: string;
   readonly capabilityId: string;
@@ -526,14 +519,14 @@ export interface ToolRecordedAttemptIdentityV1 {
   readonly startedAt: string;
 }
 
-export interface RecordedInvocationV1 {
-  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+export interface RecordedInvocation {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_;
   readonly stage: 'recorded';
-  readonly identity: Readonly<ToolRecordedAttemptIdentityV1>;
+  readonly identity: Readonly<ToolRecordedAttemptIdentity>;
 }
 
 /** Neutral terminal failure; provider and domain details remain bounded JSON. */
-export interface CapabilityToolTerminalFailureV1 {
+export interface CapabilityToolTerminalFailure {
   readonly code: string;
   readonly message: string;
   readonly retryable: boolean;
@@ -542,10 +535,10 @@ export interface CapabilityToolTerminalFailureV1 {
   readonly terminatesTurn: boolean;
   readonly journal: boolean;
   readonly parseFailureCode?: string;
-  readonly details?: RuntimeJsonValueV1;
+  readonly details?: RuntimeJsonValue;
 }
 
-export type CapabilityToolTerminalStatusV1 =
+export type CapabilityToolTerminalStatus =
   | 'success'
   | 'partial'
   | 'error'
@@ -553,14 +546,12 @@ export type CapabilityToolTerminalStatusV1 =
   | 'unknown';
 
 /** Neutral terminal result; callers may carry a JSON-safe typed projection. */
-export interface CapabilityToolTerminalResultV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> {
-  readonly status: CapabilityToolTerminalStatusV1;
-  readonly content: readonly RuntimeJsonValueV1[];
+export interface CapabilityToolTerminalResult<TValue extends RuntimeJsonValue = RuntimeJsonValue> {
+  readonly status: CapabilityToolTerminalStatus;
+  readonly content: readonly RuntimeJsonValue[];
   readonly structuredContent?: TValue;
-  readonly failure?: Readonly<CapabilityToolTerminalFailureV1>;
-  readonly providerMeta?: RuntimeJsonValueV1;
+  readonly failure?: Readonly<CapabilityToolTerminalFailure>;
+  readonly providerMeta?: RuntimeJsonValue;
 }
 
 /**
@@ -570,29 +561,29 @@ export interface CapabilityToolTerminalResultV1<
  * fixed here so a caller cannot smuggle a Store, State, or callback handle
  * across this boundary.
  */
-export interface ToolPipelinePlanReviewRequestedEventV1 {
+export interface ToolPipelinePlanReviewRequestedEvent {
   readonly type: 'plan.review_requested';
   readonly interactionId: string;
   readonly toolCallId: string;
   readonly taskId: string;
-  readonly plan: RuntimeJsonValueV1;
+  readonly plan: RuntimeJsonValue;
   readonly planSummary: string;
   readonly planId: string;
   readonly version: number;
   readonly structuralDigest: string;
-  readonly artifact: RuntimeJsonValueV1;
+  readonly artifact: RuntimeJsonValue;
 }
 
 /** The original plan-review suspension remains a closed, exact event branch. */
-export interface ToolPipelinePlanReviewSuspensionV1 {
-  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+export interface ToolPipelinePlanReviewSuspension {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_;
   readonly kind: 'plan_review';
   readonly toolCallId: string;
-  readonly event: Readonly<ToolPipelinePlanReviewRequestedEventV1>;
+  readonly event: Readonly<ToolPipelinePlanReviewRequestedEvent>;
 }
 
 /** Low-information identity for the child tool that blocked a Skill fork. */
-export interface ToolPipelineSkillForkBlockedToolIdentityV1 {
+export interface ToolPipelineSkillForkBlockedToolIdentity {
   readonly toolCallId: string;
   readonly runtimeToolCallId: string | null;
   readonly toolName: string;
@@ -601,14 +592,14 @@ export interface ToolPipelineSkillForkBlockedToolIdentityV1 {
 }
 
 /** Parent identity is repeated explicitly so Host can bind the suspension to its acknowledgement. */
-export interface ToolPipelineSkillForkParentIdentityV1<TToolCallId extends string = string> {
+export interface ToolPipelineSkillForkParentIdentity<TToolCallId extends string = string> {
   readonly toolCallId: TToolCallId;
   readonly invocationId: string;
   readonly attemptId: string;
   readonly attempt: number;
 }
 
-export interface ToolPipelineSkillForkActivationIdentityV1 {
+export interface ToolPipelineSkillForkActivationIdentity {
   readonly activationId: string;
   readonly skillId: string;
   readonly skillRevision: string;
@@ -617,9 +608,7 @@ export interface ToolPipelineSkillForkActivationIdentityV1 {
 }
 
 /** State's exact approval.requested payload; its approval hash binds the blocked child tool. */
-export interface ToolPipelineSkillForkApprovalRequestedEventV1<
-  TToolCallId extends string = string,
-> {
+export interface ToolPipelineSkillForkApprovalRequestedEvent<TToolCallId extends string = string> {
   readonly type: 'approval.requested';
   readonly interactionId: string;
   readonly toolCallId: TToolCallId;
@@ -628,7 +617,7 @@ export interface ToolPipelineSkillForkApprovalRequestedEventV1<
 }
 
 /** State's exact auto_review.requested payload; no reviewer or model handle crosses SPI. */
-export interface ToolPipelineSkillForkAutoReviewRequestedEventV1<
+export interface ToolPipelineSkillForkAutoReviewRequestedEvent<
   TToolCallId extends string = string,
 > {
   readonly type: 'auto_review.requested';
@@ -641,9 +630,9 @@ export interface ToolPipelineSkillForkAutoReviewRequestedEventV1<
   readonly createdAt?: string;
 }
 
-export type ToolPipelineSkillForkSuspensionEventV1<TToolCallId extends string = string> =
-  | Readonly<ToolPipelineSkillForkApprovalRequestedEventV1<TToolCallId>>
-  | Readonly<ToolPipelineSkillForkAutoReviewRequestedEventV1<TToolCallId>>;
+export type ToolPipelineSkillForkSuspensionEvent<TToolCallId extends string = string> =
+  | Readonly<ToolPipelineSkillForkApprovalRequestedEvent<TToolCallId>>
+  | Readonly<ToolPipelineSkillForkAutoReviewRequestedEvent<TToolCallId>>;
 
 /**
  * Skill-fork suspension is an identity/artifact hand-off only.  The shared SPI
@@ -651,20 +640,20 @@ export type ToolPipelineSkillForkSuspensionEventV1<TToolCallId extends string = 
  * bytes, Store/State objects, callbacks, registries, and model loops are not
  * representable here.
  */
-export interface ToolPipelineSkillForkSuspensionV1<TToolCallId extends string = string> {
-  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+export interface ToolPipelineSkillForkSuspension<TToolCallId extends string = string> {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_;
   readonly kind: 'skill_fork';
   readonly operationId: 'builtin:activate_skill';
   readonly toolCallId: TToolCallId;
-  readonly parent: Readonly<ToolPipelineSkillForkParentIdentityV1<TToolCallId>>;
-  readonly activation: Readonly<ToolPipelineSkillForkActivationIdentityV1>;
-  readonly subagent: Readonly<PrivateSuspendedSubagentRecordV1>;
-  readonly blockedTool: Readonly<ToolPipelineSkillForkBlockedToolIdentityV1>;
-  readonly event: Readonly<ToolPipelineSkillForkSuspensionEventV1<TToolCallId>>;
+  readonly parent: Readonly<ToolPipelineSkillForkParentIdentity<TToolCallId>>;
+  readonly activation: Readonly<ToolPipelineSkillForkActivationIdentity>;
+  readonly subagent: Readonly<PrivateSuspendedSubagentRecord>;
+  readonly blockedTool: Readonly<ToolPipelineSkillForkBlockedToolIdentity>;
+  readonly event: Readonly<ToolPipelineSkillForkSuspensionEvent<TToolCallId>>;
 }
 
 /** Low-information identity for the child tool that blocked a task subagent. */
-export interface ToolPipelineTaskSubagentBlockedToolIdentityV1 {
+export interface ToolPipelineTaskSubagentBlockedToolIdentity {
   readonly toolCallId: string;
   readonly runtimeToolCallId: string | null;
   readonly toolName: string;
@@ -673,7 +662,7 @@ export interface ToolPipelineTaskSubagentBlockedToolIdentityV1 {
 }
 
 /** Parent identity is mandatory for both task start and task resume. */
-export interface ToolPipelineTaskSubagentParentIdentityV1<TToolCallId extends string = string> {
+export interface ToolPipelineTaskSubagentParentIdentity<TToolCallId extends string = string> {
   readonly toolCallId: TToolCallId;
   readonly invocationId: string;
   readonly attemptId: string;
@@ -681,7 +670,7 @@ export interface ToolPipelineTaskSubagentParentIdentityV1<TToolCallId extends st
 }
 
 /** State's approval payload for a blocked task child; no live owner crosses SPI. */
-export interface ToolPipelineTaskSubagentApprovalRequestedEventV1<
+export interface ToolPipelineTaskSubagentApprovalRequestedEvent<
   TToolCallId extends string = string,
 > {
   readonly type: 'approval.requested';
@@ -692,7 +681,7 @@ export interface ToolPipelineTaskSubagentApprovalRequestedEventV1<
 }
 
 /** State's auto-review request for a blocked task child; the reviewer remains outside SPI. */
-export interface ToolPipelineTaskSubagentAutoReviewRequestedEventV1<
+export interface ToolPipelineTaskSubagentAutoReviewRequestedEvent<
   TToolCallId extends string = string,
 > {
   readonly type: 'auto_review.requested';
@@ -705,9 +694,9 @@ export interface ToolPipelineTaskSubagentAutoReviewRequestedEventV1<
   readonly createdAt?: string;
 }
 
-export type ToolPipelineTaskSubagentSuspensionEventV1<TToolCallId extends string = string> =
-  | Readonly<ToolPipelineTaskSubagentApprovalRequestedEventV1<TToolCallId>>
-  | Readonly<ToolPipelineTaskSubagentAutoReviewRequestedEventV1<TToolCallId>>;
+export type ToolPipelineTaskSubagentSuspensionEvent<TToolCallId extends string = string> =
+  | Readonly<ToolPipelineTaskSubagentApprovalRequestedEvent<TToolCallId>>
+  | Readonly<ToolPipelineTaskSubagentAutoReviewRequestedEvent<TToolCallId>>;
 
 /**
  * Task start/resume is a distinct suspension branch from Skill fork.  It
@@ -715,23 +704,23 @@ export type ToolPipelineTaskSubagentSuspensionEventV1<TToolCallId extends string
  * and the State interaction event; task runtime, continuation bytes,
  * reviewer, Store, and callbacks are deliberately not representable here.
  */
-export interface ToolPipelineTaskSubagentSuspensionV1<TToolCallId extends string = string> {
-  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+export interface ToolPipelineTaskSubagentSuspension<TToolCallId extends string = string> {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_;
   readonly kind: 'task_subagent';
   readonly operationId: 'builtin:task';
   readonly executionMode: 'start' | 'resume';
   readonly toolCallId: TToolCallId;
-  readonly parent: Readonly<ToolPipelineTaskSubagentParentIdentityV1<TToolCallId>>;
-  readonly subagent: Readonly<PrivateSuspendedSubagentRecordV1>;
-  readonly blockedTool: Readonly<ToolPipelineTaskSubagentBlockedToolIdentityV1>;
-  readonly event: Readonly<ToolPipelineTaskSubagentSuspensionEventV1<TToolCallId>>;
+  readonly parent: Readonly<ToolPipelineTaskSubagentParentIdentity<TToolCallId>>;
+  readonly subagent: Readonly<PrivateSuspendedSubagentRecord>;
+  readonly blockedTool: Readonly<ToolPipelineTaskSubagentBlockedToolIdentity>;
+  readonly event: Readonly<ToolPipelineTaskSubagentSuspensionEvent<TToolCallId>>;
 }
 
 /** Closed suspension union. New interaction kinds require an explicit SPI branch. */
-export type ToolPipelineSuspensionV1 =
-  | ToolPipelinePlanReviewSuspensionV1
-  | ToolPipelineSkillForkSuspensionV1
-  | ToolPipelineTaskSubagentSuspensionV1;
+export type ToolPipelineSuspension =
+  | ToolPipelinePlanReviewSuspension
+  | ToolPipelineSkillForkSuspension
+  | ToolPipelineTaskSubagentSuspension;
 
 /**
  * Successful execution evidence retained while the Tool call remains
@@ -739,13 +728,13 @@ export type ToolPipelineSuspensionV1 =
  * write the same private Capability Artifact and result/evidence digests as a
  * terminal receipt without manufacturing a second domain result.
  */
-export interface ToolPipelineSuspendedExecutionResultV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface ToolPipelineSuspendedExecutionResult<
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
   readonly status: 'success';
-  readonly content: readonly RuntimeJsonValueV1[];
+  readonly content: readonly RuntimeJsonValue[];
   readonly structuredContent: TValue;
-  readonly providerMeta?: RuntimeJsonValueV1;
+  readonly providerMeta?: RuntimeJsonValue;
 }
 
 /**
@@ -753,33 +742,31 @@ export interface ToolPipelineSuspendedExecutionResultV1<
  * unknown effect.  It may cross the neutral seam only as an explicit branch;
  * the persistence/Kernel owner must durably authorize the next attempt.
  */
-export interface ToolPipelineRetryableDispatchV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> {
+export interface ToolPipelineRetryableDispatch<TValue extends RuntimeJsonValue = RuntimeJsonValue> {
   readonly kind: 'retryable';
   readonly replaySafety: 'safe_read';
-  readonly result: Readonly<CapabilityToolTerminalResultV1<TValue>>;
+  readonly result: Readonly<CapabilityToolTerminalResult<TValue>>;
 }
 
 /** A dispatch can commit, suspend, or request one durably governed safe-read retry. */
-export type ToolPipelineDispatchOutcomeV1<TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1> =
+export type ToolPipelineDispatchOutcome<TValue extends RuntimeJsonValue = RuntimeJsonValue> =
   | {
       readonly kind: 'committed';
-      readonly terminal: Readonly<CapabilityToolTerminalResultV1<TValue>>;
+      readonly terminal: Readonly<CapabilityToolTerminalResult<TValue>>;
     }
   | {
       readonly kind: 'suspended';
-      readonly suspension: Readonly<ToolPipelineSuspensionV1>;
+      readonly suspension: Readonly<ToolPipelineSuspension>;
       /** Result evidence is persisted, but must not create a Capability or Tool terminal. */
-      readonly result: Readonly<ToolPipelineSuspendedExecutionResultV1<TValue>>;
+      readonly result: Readonly<ToolPipelineSuspendedExecutionResult<TValue>>;
     }
-  | ToolPipelineRetryableDispatchV1<TValue>;
+  | ToolPipelineRetryableDispatch<TValue>;
 
 /**
  * These common capability/provider/parser fields identify the invoked
  * subject. Dynamic MCP's executable wrapper is always carried separately.
  */
-type PreparedToolInvocationIdentityCommonV1 = {
+type PreparedToolInvocationIdentityCommon = {
   readonly invocationId: string;
   readonly attemptId: string;
   readonly toolCallId: string;
@@ -804,7 +791,7 @@ type PreparedToolInvocationIdentityCommonV1 = {
   readonly bindingId: string | null;
 };
 
-export type DynamicMcpPreparedToolInvocationIdentityV1 = PreparedToolInvocationIdentityCommonV1 & {
+export type DynamicMcpPreparedToolInvocationIdentity = PreparedToolInvocationIdentityCommon & {
   readonly argumentOrigin: 'model_public';
   readonly executionFamily: 'mcp';
   readonly executionMechanism: 'mcp';
@@ -817,16 +804,16 @@ export type DynamicMcpPreparedToolInvocationIdentityV1 = PreparedToolInvocationI
   readonly builtinProjectionRevision: null;
   readonly dynamicCatalogRevision: string;
   /** The real model-facing MCP subject, separate from the internal wrapper. */
-  readonly subject: Readonly<DynamicMcpSubjectIdentityV1>;
+  readonly subject: Readonly<DynamicMcpSubjectIdentity>;
   /** The exact private operation identity used to invoke the subject. */
-  readonly runtimeWrapper: Readonly<DynamicMcpRuntimeWrapperIdentityV1>;
+  readonly runtimeWrapper: Readonly<DynamicMcpRuntimeWrapperIdentity>;
 };
 
-export type NonDynamicPreparedToolInvocationIdentityV1 = PreparedToolInvocationIdentityCommonV1 & {
-  readonly argumentOrigin: ToolArgumentOriginV1;
+export type NonDynamicPreparedToolInvocationIdentity = PreparedToolInvocationIdentityCommon & {
+  readonly argumentOrigin: ToolArgumentOrigin;
   readonly executionFamily: 'builtin' | 'skill' | 'subagent';
-  readonly executionMechanism: CapabilityExecutionMechanismV1;
-  readonly operationId: NonDynamicOperationIdV1;
+  readonly executionMechanism: CapabilityExecutionMechanism;
+  readonly operationId: NonDynamicOperationId;
   readonly visibility: 'model';
   readonly modelVisible: true;
   readonly exposedToolName: string;
@@ -838,36 +825,36 @@ export type NonDynamicPreparedToolInvocationIdentityV1 = PreparedToolInvocationI
   readonly nestedCapabilityId: string | null;
   readonly nestedCapabilityRevision: string | null;
   readonly nestedCatalogRevision: string | null;
-  readonly toolKind: CapabilityToolKindV1;
+  readonly toolKind: CapabilityToolKind;
 };
 
-export type PreparedToolInvocationIdentityV1 =
-  | DynamicMcpPreparedToolInvocationIdentityV1
-  | NonDynamicPreparedToolInvocationIdentityV1;
+export type PreparedToolInvocationIdentity =
+  | DynamicMcpPreparedToolInvocationIdentity
+  | NonDynamicPreparedToolInvocationIdentity;
 
 /** The Host may freeze this transport input; it contains no policy implementation. */
-export interface PreparedToolInvocationInputV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface PreparedToolInvocationInput<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
   readonly invocationId: string;
   readonly attemptId: string;
   readonly toolCallId: string;
   readonly arguments: TArguments;
   readonly request?: TRequest;
-  readonly binding: ToolPipelineCapabilityBindingV1 | null;
-  readonly facts?: RuntimeJsonValueV1;
+  readonly binding: ToolPipelineCapabilityBinding | null;
+  readonly facts?: RuntimeJsonValue;
 }
 
-export interface PreparedToolInvocationV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface PreparedToolInvocation<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly identity: Readonly<PreparedToolInvocationIdentityV1>;
-  readonly input: Readonly<PreparedToolInvocationInputV1<TArguments, TRequest>>;
+  readonly identity: Readonly<PreparedToolInvocationIdentity>;
+  readonly input: Readonly<PreparedToolInvocationInput<TArguments, TRequest>>;
 }
 
-export type ToolPipelinePreparedIdentityVerificationResultV1 =
+export type ToolPipelinePreparedIdentityVerificationResult =
   | { readonly valid: true }
   | {
       readonly valid: false;
@@ -884,49 +871,43 @@ export type ToolPipelinePreparedIdentityVerificationResultV1 =
     };
 
 /** Builtin supplies this synchronous identity check; Host supplies no identity interpretation. */
-export type ToolPipelinePreparedIdentityVerifierV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export type ToolPipelinePreparedIdentityVerifier<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 > = (
-  prepared: Readonly<PreparedToolInvocationV1<TArguments>>,
-) => boolean | ToolPipelinePreparedIdentityVerificationResultV1;
+  prepared: Readonly<PreparedToolInvocation<TArguments>>,
+) => boolean | ToolPipelinePreparedIdentityVerificationResult;
 
-export interface ToolPipelineReceiptCommitV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> {
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-  readonly result: Readonly<CapabilityToolTerminalResultV1<TValue>>;
+export interface ToolPipelineReceiptCommit<TValue extends RuntimeJsonValue = RuntimeJsonValue> {
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+  readonly result: Readonly<CapabilityToolTerminalResult<TValue>>;
 }
 
 /** The durable hand-off for a non-terminal dispatch outcome. */
-export interface ToolPipelineSuspensionCommitV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> {
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-  readonly suspension: Readonly<ToolPipelineSuspensionV1>;
-  readonly result: Readonly<ToolPipelineSuspendedExecutionResultV1<TValue>>;
+export interface ToolPipelineSuspensionCommit<TValue extends RuntimeJsonValue = RuntimeJsonValue> {
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+  readonly suspension: Readonly<ToolPipelineSuspension>;
+  readonly result: Readonly<ToolPipelineSuspendedExecutionResult<TValue>>;
 }
 
 /** Host/App persistence may implement this callback without exposing Store authority. */
-export type ToolPipelineSuspensionCommitCallbackV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = (input: Readonly<ToolPipelineSuspensionCommitV1<TValue>>) => Promise<void>;
+export type ToolPipelineSuspensionCommitCallback<
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
+> = (input: Readonly<ToolPipelineSuspensionCommit<TValue>>) => Promise<void>;
 
 /** Durable hand-off for a confirmed non-terminal safe-read failure. */
-export interface ToolPipelineRetryableCommitV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> {
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
+export interface ToolPipelineRetryableCommit<TValue extends RuntimeJsonValue = RuntimeJsonValue> {
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
   readonly replaySafety: 'safe_read';
-  readonly result: Readonly<CapabilityToolTerminalResultV1<TValue>>;
+  readonly result: Readonly<CapabilityToolTerminalResult<TValue>>;
 }
 
 /** The only durable attempt identity accepted after persistence. */
-export interface ToolPipelineAttemptAcknowledgementV1 {
+export interface ToolPipelineAttemptAcknowledgement {
   readonly acknowledged: true;
-  readonly attempt: Readonly<ToolRecordedAttemptIdentityV1>;
+  readonly attempt: Readonly<ToolRecordedAttemptIdentity>;
 }
 
-export type ToolPipelineUnknownOutcomeCodeV1 =
+export type ToolPipelineUnknownOutcomeCode =
   | 'dispatch_failed'
   | 'dispatch_timed_out'
   | 'dispatch_result_invalid'
@@ -935,30 +916,30 @@ export type ToolPipelineUnknownOutcomeCodeV1 =
   | 'suspension_commit_failed';
 
 /** Post-ack uncertainty is an explicit persistence obligation. */
-export interface ToolPipelineUnknownOutcomeV1 {
-  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-  readonly code: ToolPipelineUnknownOutcomeCodeV1;
+export interface ToolPipelineUnknownOutcome {
+  readonly acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+  readonly code: ToolPipelineUnknownOutcomeCode;
 }
 
 /** Persistence is an injected callback surface, not a Store or event owner. */
-export interface ToolPipelinePersistenceV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface ToolPipelinePersistence<
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
 > {
   /** The persistence owner derives the durable attempt identity from prepared facts. */
   readonly recordAttempt: (
-    input: Readonly<PreparedToolInvocationV1<TArguments, TRequest>>,
-  ) => Promise<Readonly<ToolPipelineAttemptAcknowledgementV1>>;
+    input: Readonly<PreparedToolInvocation<TArguments, TRequest>>,
+  ) => Promise<Readonly<ToolPipelineAttemptAcknowledgement>>;
   /** A post-ack dispatch uncertainty cannot be silently dropped. */
-  readonly recordUnknown: (input: Readonly<ToolPipelineUnknownOutcomeV1>) => Promise<void>;
+  readonly recordUnknown: (input: Readonly<ToolPipelineUnknownOutcome>) => Promise<void>;
   /** A terminal result must be committed through the same acknowledged identity. */
-  readonly commitTerminal: (input: Readonly<ToolPipelineReceiptCommitV1<TValue>>) => Promise<void>;
+  readonly commitTerminal: (input: Readonly<ToolPipelineReceiptCommit<TValue>>) => Promise<void>;
   /** A suspended result must preserve the same acknowledgement without terminalizing it. */
-  readonly commitSuspension: ToolPipelineSuspensionCommitCallbackV1<TValue>;
+  readonly commitSuspension: ToolPipelineSuspensionCommitCallback<TValue>;
   /** Optional until a caller admits the explicit retryable dispatch branch. */
   readonly commitRetryable?: (
-    input: Readonly<ToolPipelineRetryableCommitV1<TValue>>,
+    input: Readonly<ToolPipelineRetryableCommit<TValue>>,
   ) => Promise<void>;
 }
 
@@ -967,26 +948,26 @@ export interface ToolPipelinePersistenceV1<
  * to SPI. The complete prepared packet is supplied so its Host owner can
  * validate identity before invoking this callback; SPI performs no validation.
  */
-export interface ToolPipelineDispatchV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface ToolPipelineDispatch<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1<TArguments>;
+  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier<TArguments>;
   readonly dispatch: (
-    input: Readonly<PreparedToolInvocationV1<TArguments>>,
-  ) => Promise<Readonly<CapabilityToolTerminalResultV1<TValue>>>;
+    input: Readonly<PreparedToolInvocation<TArguments>>,
+  ) => Promise<Readonly<CapabilityToolTerminalResult<TValue>>>;
 }
 
 /**
  * Host-facing dispatch shape. App may project an exact Builtin terminal into
  * the one closed suspended outcome before the Host commits either branch.
  */
-export interface ToolPipelineOutcomeDispatchV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface ToolPipelineOutcomeDispatch<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1<TArguments>;
+  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier<TArguments>;
   readonly dispatch: (
-    input: Readonly<PreparedToolInvocationV1<TArguments>>,
-  ) => Promise<Readonly<ToolPipelineDispatchOutcomeV1<TValue>>>;
+    input: Readonly<PreparedToolInvocation<TArguments>>,
+  ) => Promise<Readonly<ToolPipelineDispatchOutcome<TValue>>>;
 }

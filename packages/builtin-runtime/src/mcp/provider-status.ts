@@ -1,19 +1,19 @@
 import type { McpInventoryNextAction } from './inventory';
 import type { McpProviderDirectoryStatus } from './runtime-provider';
 
-export function isMcpProviderCallableV1(status: McpProviderDirectoryStatus): boolean {
+export function isMcpProviderCallable(status: McpProviderDirectoryStatus): boolean {
   return status === 'ready' || status === 'degraded';
 }
 
-export function isMcpProviderUnavailableV1(status: McpProviderDirectoryStatus): boolean {
-  return !isMcpProviderCallableV1(status);
+export function isMcpProviderUnavailable(status: McpProviderDirectoryStatus): boolean {
+  return !isMcpProviderCallable(status);
 }
 
-export function isMcpProviderHealthyV1(status: McpProviderDirectoryStatus): boolean {
+export function isMcpProviderHealthy(status: McpProviderDirectoryStatus): boolean {
   return status === 'ready';
 }
 
-export function mcpProviderSearchNextActionV1(status: McpProviderDirectoryStatus): string {
+export function mcpProviderSearchNextAction(status: McpProviderDirectoryStatus): string {
   switch (status) {
     case 'pending_approval':
       return 'Complete the MCP project approval prompt.';
@@ -35,7 +35,7 @@ export function mcpProviderSearchNextActionV1(status: McpProviderDirectoryStatus
   }
 }
 
-export function mcpProviderInventoryNextActionV1(
+export function mcpProviderInventoryNextAction(
   status: McpProviderDirectoryStatus,
 ): McpInventoryNextAction | undefined {
   switch (status) {

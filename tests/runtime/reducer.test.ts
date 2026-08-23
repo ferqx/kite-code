@@ -10,12 +10,12 @@ import type {
 } from '@kite/runtime-contract';
 import type { RuntimeState } from '@kite/runtime-host';
 import {
-  createRuntimeHostStateInitialStateV1,
+  createRuntimeHostStateInitialState,
   getActivePlanning,
-  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   setActivePlanning,
 } from '@kite/runtime-host';
-import type { DurableSuspendedSubagentV1 } from '@kite/runtime-spi';
+import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDocument, currentPlanDraftedEvent } from '../helpers/current-plan';
@@ -40,7 +40,7 @@ function planning(state: RuntimeState): PlanningTestView {
 function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
   return reduceCanonicalRuntimeState(
     state,
-    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+    normalizeCurrentToolOutcomeEvent(event, state, '2026-08-11T00:00:00.000Z'),
   );
 }
 
@@ -59,7 +59,7 @@ function makePlan(name: string = 'Test Plan', steps: string[] = ['step 1', 'step
 }
 
 function makeInitialState(overrides?: Partial<RuntimeState>): RuntimeState {
-  const base = createRuntimeHostStateInitialStateV1({
+  const base = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread-1',
     userId: 'user-1',
@@ -84,8 +84,8 @@ function makeActivePlanState(
 }
 
 function makeSuspendedSubagentSnapshot(
-  overrides?: Partial<DurableSuspendedSubagentV1>,
-): DurableSuspendedSubagentV1 {
+  overrides?: Partial<DurableSuspendedSubagent>,
+): DurableSuspendedSubagent {
   return {
     storage: 'private_artifact_v1',
     subagentId: 'subagent-1',
@@ -728,7 +728,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     };
     state.tools.active = [...state.tools.active, 'task'];
 
-    const normalized = normalizeCurrentToolOutcomeEventV1(
+    const normalized = normalizeCurrentToolOutcomeEvent(
       {
         type: 'tool.failed',
         toolCallId: 'task',
@@ -740,7 +740,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
 
     expect(normalized).toMatchObject({
       type: 'tool.failed',
-      outcomeV1: {
+      outcome: {
         dispatchState: 'started',
         externalEffects: 'unknown',
         replaySafety: 'none',

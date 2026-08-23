@@ -1,8 +1,8 @@
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { isToolOutcomeV1 } from '@kite/agent-kernel';
+import { isToolOutcome } from '@kite/agent-kernel';
 import {
-  createRuntimeHostStateInitialStateV1,
-  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostStateInitialState,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
 } from '@kite/runtime-host';
 
 const TEST_OCCURRED_AT = '2026-08-15T00:00:00.000Z';
@@ -12,9 +12,9 @@ const TEST_OCCURRED_AT = '2026-08-15T00:00:00.000Z';
  * Production events receive the same canonical outcome before persistence.
  */
 export function currentRuntimeEvent(event: RuntimeEvent): RuntimeEvent {
-  if ('outcomeV1' in event && isToolOutcomeV1(event.outcomeV1)) return event;
+  if ('outcome' in event && isToolOutcome(event.outcome)) return event;
 
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'current-event-test',
     userId: 'test-user',
@@ -49,7 +49,7 @@ export function currentRuntimeEvent(event: RuntimeEvent): RuntimeEvent {
     }
   }
 
-  return normalizeCurrentToolOutcomeEventV1(event, state, TEST_OCCURRED_AT);
+  return normalizeCurrentToolOutcomeEvent(event, state, TEST_OCCURRED_AT);
 }
 
 export function currentRuntimeEvents(events: RuntimeEvent[]): RuntimeEvent[] {

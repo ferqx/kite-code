@@ -1,5 +1,5 @@
 import type { KernelEvent } from '../../events';
-import type { AgentReducerFactsV1 } from '../../reducer';
+import type { AgentReducerFacts } from '../../reducer';
 import {
   asJsonObject,
   eventRecord,
@@ -9,7 +9,7 @@ import {
   stringField,
 } from '../../reducer-utils';
 import type { AgentState } from '../../state';
-import { verificationSchemaAdmissionDigestV1 } from '../../verification-schema-facts';
+import { verificationSchemaAdmissionDigest } from '../../verification-schema-facts';
 
 const EPOCH_CREATED_AT = '1970-01-01T00:00:00.000Z';
 
@@ -63,7 +63,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
  * payloads fail with the same deterministic TypeError as the Runtime owner.
  */
 function schemaAdmissionDiagnostic(
-  facts: AgentReducerFactsV1,
+  facts: AgentReducerFacts,
   checkIndex: number,
   schema: unknown,
   target: 'schema' | 'outputSchema',
@@ -78,17 +78,14 @@ function schemaAdmissionDiagnostic(
   ) {
     return `Host admission fact is missing for VerificationSpec ${target}.`;
   }
-  if (admission[digestKey] !== verificationSchemaAdmissionDigestV1(schema)) {
+  if (admission[digestKey] !== verificationSchemaAdmissionDigest(schema)) {
     return `Host admission fact identity mismatches VerificationSpec ${target}.`;
   }
   const diagnostic = admission[diagnosticKey];
   return typeof diagnostic === 'string' ? diagnostic : null;
 }
 
-function validateVerificationSpec(
-  specValue: unknown,
-  facts: AgentReducerFactsV1,
-): readonly string[] {
+function validateVerificationSpec(specValue: unknown, facts: AgentReducerFacts): readonly string[] {
   const spec = specValue as Readonly<Record<string, unknown>>;
   const diagnostics: string[] = [];
   if (spec.schemaVersion !== 1) diagnostics.push('Unsupported VerificationSpec schema version.');
@@ -166,7 +163,7 @@ function validateVerificationSpec(
 export function reduceVerificationState(
   state: AgentState,
   event: KernelEvent,
-  facts: AgentReducerFactsV1 = {},
+  facts: AgentReducerFacts = {},
 ): AgentState {
   switch (event.type) {
     case 'verification.requested':

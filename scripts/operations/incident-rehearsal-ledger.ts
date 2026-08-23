@@ -1,15 +1,15 @@
 import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from '../release/canonical-json';
-import { releaseArtifactIdentityV1Schema } from '../release/evidence-schema';
-import { INCIDENT_REHEARSAL_SCENARIOS_V1 } from './rehearsal-evidence';
+import { releaseArtifactIdentitySchema } from '../release/evidence-schema';
+import { INCIDENT_REHEARSAL_SCENARIOS_ } from './rehearsal-evidence';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const timestampSchema = z.iso.datetime({ offset: true });
 const identitySchema = z.string().trim().min(1).max(256);
 
-export const incidentRehearsalSourceV1Schema = z
+export const incidentRehearsalSourceSchema = z
   .object({
-    schema: z.literal('IncidentRehearsalSourceV1'),
+    schema: z.literal('IncidentRehearsalSource'),
     repository: z.literal('ferqx/kite-code'),
     repositoryId: z.literal('R_kgDOSKbi8g'),
     headSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -39,11 +39,11 @@ export const incidentRehearsalSourceV1Schema = z
     }
   });
 
-const receiptMaterialV1Schema = z
+const receiptMaterialSchema = z
   .object({
-    schema: z.literal('IncidentRehearsalReceiptV1'),
+    schema: z.literal('IncidentRehearsalReceipt'),
     sequence: z.number().int().positive(),
-    scenario: z.enum(INCIDENT_REHEARSAL_SCENARIOS_V1),
+    scenario: z.enum(INCIDENT_REHEARSAL_SCENARIOS_),
     sourceDigest: digestSchema,
     artifactIdentityDigest: digestSchema,
     routeDigest: digestSchema,
@@ -58,22 +58,20 @@ const receiptMaterialV1Schema = z
   })
   .strict();
 
-export const incidentRehearsalReceiptV1Schema = receiptMaterialV1Schema.extend({
+export const incidentRehearsalReceiptSchema = receiptMaterialSchema.extend({
   receiptDigest: digestSchema,
 });
-export type IncidentRehearsalReceiptV1 = z.infer<typeof incidentRehearsalReceiptV1Schema>;
+export type IncidentRehearsalReceipt = z.infer<typeof incidentRehearsalReceiptSchema>;
 
-export const incidentRehearsalEvidenceV1Schema = z
+export const incidentRehearsalEvidenceSchema = z
   .object({
-    schema: z.literal('IncidentRehearsalEvidenceV1'),
+    schema: z.literal('IncidentRehearsalEvidence'),
     executionClass: z.enum(['contract_conformance', 'production_rehearsal']),
-    source: incidentRehearsalSourceV1Schema,
-    artifactIdentity: releaseArtifactIdentityV1Schema,
+    source: incidentRehearsalSourceSchema,
+    artifactIdentity: releaseArtifactIdentitySchema,
     routeDigest: digestSchema,
     cohortDigest: digestSchema,
-    receipts: z
-      .array(incidentRehearsalReceiptV1Schema)
-      .length(INCIDENT_REHEARSAL_SCENARIOS_V1.length),
+    receipts: z.array(incidentRehearsalReceiptSchema).length(INCIDENT_REHEARSAL_SCENARIOS_.length),
     ledgerDigest: digestSchema,
     bundleDigest: digestSchema,
     authentication: z.discriminatedUnion('kind', [
@@ -99,9 +97,9 @@ export const incidentRehearsalEvidenceV1Schema = z
   })
   .strict();
 
-export type IncidentRehearsalEvidenceV1 = z.infer<typeof incidentRehearsalEvidenceV1Schema>;
+export type IncidentRehearsalEvidence = z.infer<typeof incidentRehearsalEvidenceSchema>;
 
-export interface IncidentRehearsalAuthorityV1 {
+export interface IncidentRehearsalAuthority {
   authorityIdentity: string;
   verifierIdentity: string;
   subjectDigest: `sha256:${string}`;
@@ -110,14 +108,14 @@ export interface IncidentRehearsalAuthorityV1 {
   verifiedAt: string;
 }
 
-export const PRODUCTION_INCIDENT_REHEARSAL_AUTHORITIES_V1: readonly IncidentRehearsalAuthorityV1[] =
+export const PRODUCTION_INCIDENT_REHEARSAL_AUTHORITIES_: readonly IncidentRehearsalAuthority[] =
   Object.freeze([]);
 
-export function buildIncidentRehearsalReceiptV1(
-  rawMaterial: z.infer<typeof receiptMaterialV1Schema>,
-): IncidentRehearsalReceiptV1 {
-  const material = receiptMaterialV1Schema.parse(rawMaterial);
-  return incidentRehearsalReceiptV1Schema.parse({
+export function buildIncidentRehearsalReceipt(
+  rawMaterial: z.infer<typeof receiptMaterialSchema>,
+): IncidentRehearsalReceipt {
+  const material = receiptMaterialSchema.parse(rawMaterial);
+  return incidentRehearsalReceiptSchema.parse({
     ...material,
     receiptDigest: sha256DomainSeparated(
       'kite.operations.incident-rehearsal-receipt.v1',
@@ -126,8 +124,8 @@ export function buildIncidentRehearsalReceiptV1(
   });
 }
 
-export function computeIncidentRehearsalLedgerDigestV1(
-  receipts: readonly IncidentRehearsalReceiptV1[],
+export function computeIncidentRehearsalLedgerDigest(
+  receipts: readonly IncidentRehearsalReceipt[],
 ): `sha256:${string}` {
   return sha256DomainSeparated(
     'kite.operations.incident-rehearsal-ledger.v1',
@@ -135,8 +133,8 @@ export function computeIncidentRehearsalLedgerDigestV1(
   );
 }
 
-export function computeIncidentRehearsalBundleDigestV1(
-  material: Omit<IncidentRehearsalEvidenceV1, 'bundleDigest' | 'authentication'>,
+export function computeIncidentRehearsalBundleDigest(
+  material: Omit<IncidentRehearsalEvidence, 'bundleDigest' | 'authentication'>,
 ): `sha256:${string}` {
   return sha256DomainSeparated(
     'kite.operations.incident-rehearsal-evidence.v1',
@@ -144,14 +142,14 @@ export function computeIncidentRehearsalBundleDigestV1(
   );
 }
 
-export function verifyIncidentRehearsalEvidenceV1(input: {
+export function verifyIncidentRehearsalEvidence(input: {
   evidence: unknown;
-  expectedSource: z.infer<typeof incidentRehearsalSourceV1Schema>;
-  expectedArtifactIdentity: z.infer<typeof releaseArtifactIdentityV1Schema>;
+  expectedSource: z.infer<typeof incidentRehearsalSourceSchema>;
+  expectedArtifactIdentity: z.infer<typeof releaseArtifactIdentitySchema>;
   expectedRouteDigest: `sha256:${string}`;
   expectedCohortDigest: `sha256:${string}`;
 }): Readonly<{
-  schema: 'IncidentRehearsalEvidenceVerificationV1';
+  schema: 'IncidentRehearsalEvidenceVerification';
   status: 'passed' | 'blocked' | 'failed';
   evidenceEligible: boolean;
   verifiedScenarioCount: 8;
@@ -159,7 +157,7 @@ export function verifyIncidentRehearsalEvidenceV1(input: {
   bundleDigest: `sha256:${string}`;
   reasonCodes: string[];
 }> {
-  const evidence = incidentRehearsalEvidenceV1Schema.parse(input.evidence);
+  const evidence = incidentRehearsalEvidenceSchema.parse(input.evidence);
   if (canonicalJson(evidence.source) !== canonicalJson(input.expectedSource)) {
     throw new Error('Incident rehearsal source identity mismatch.');
   }
@@ -185,7 +183,7 @@ export function verifyIncidentRehearsalEvidenceV1(input: {
   for (const [index, receipt] of evidence.receipts.entries()) {
     if (
       receipt.sequence !== index + 1 ||
-      receipt.scenario !== INCIDENT_REHEARSAL_SCENARIOS_V1[index] ||
+      receipt.scenario !== INCIDENT_REHEARSAL_SCENARIOS_[index] ||
       receipt.previousReceiptDigest !== previous
     ) {
       throw new Error('Incident rehearsal receipt order or chain is invalid.');
@@ -217,12 +215,12 @@ export function verifyIncidentRehearsalEvidenceV1(input: {
     }
     previous = receiptDigest;
   }
-  if (evidence.ledgerDigest !== computeIncidentRehearsalLedgerDigestV1(evidence.receipts)) {
+  if (evidence.ledgerDigest !== computeIncidentRehearsalLedgerDigest(evidence.receipts)) {
     throw new Error('Incident rehearsal ledger digest mismatch.');
   }
   const { bundleDigest, authentication, ...material } = evidence;
   if (
-    bundleDigest !== computeIncidentRehearsalBundleDigestV1(material) ||
+    bundleDigest !== computeIncidentRehearsalBundleDigest(material) ||
     authentication.subjectDigest !== bundleDigest
   ) {
     throw new Error('Incident rehearsal bundle or authentication subject mismatch.');
@@ -232,7 +230,7 @@ export function verifyIncidentRehearsalEvidenceV1(input: {
   }
   const authenticated =
     authentication.kind === 'github_oidc_sigstore_v1' &&
-    PRODUCTION_INCIDENT_REHEARSAL_AUTHORITIES_V1.some(
+    PRODUCTION_INCIDENT_REHEARSAL_AUTHORITIES_.some(
       (authority) =>
         authority.authorityIdentity === authentication.authorityIdentity &&
         authority.verifierIdentity === authentication.verifierIdentity &&
@@ -247,7 +245,7 @@ export function verifyIncidentRehearsalEvidenceV1(input: {
   );
   const status = failed ? 'failed' : reasons.size === 0 ? 'passed' : 'blocked';
   return Object.freeze({
-    schema: 'IncidentRehearsalEvidenceVerificationV1' as const,
+    schema: 'IncidentRehearsalEvidenceVerification' as const,
     status,
     evidenceEligible: status === 'passed',
     verifiedScenarioCount: 8 as const,

@@ -3,35 +3,35 @@ import { mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  EMBEDDED_RELEASE_PROFILES_V1,
-  parseReleaseProfileV1,
+  EMBEDDED_RELEASE_PROFILES_,
+  parseReleaseProfile,
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
-  type ReleaseProfileV1,
+  type ReleaseProfile,
 } from '#app/config';
 import {
-  decodeIdentityBoundRolloutCacheV1,
-  loadRolloutCacheFileV1,
-  type RolloutArtifactIdentityV1,
+  decodeIdentityBoundRolloutCache,
+  loadRolloutCacheFile,
+  type RolloutArtifactIdentity,
   RolloutCacheError,
-  writeRolloutCacheFileV1,
+  writeRolloutCacheFile,
 } from '../../apps/kite/src/release/rollout-cache';
 import {
   DisableOnlyRolloutError,
-  encodeSyntheticRolloutSignatureV1,
+  encodeSyntheticRolloutSignature,
   ROLLOUT_MANIFEST_ENABLED_BY_DEFAULT,
-  resolveDisableOnlyRolloutV1,
-  verifyDisableOnlyRolloutManifestV1,
+  resolveDisableOnlyRollout,
+  verifyDisableOnlyRolloutManifest,
 } from '../../apps/kite/src/release/rollout-manifest-loader';
 import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
-import { signSyntheticRolloutManifestV1 } from '../../scripts/release/sign-rollout-manifest';
+import { signSyntheticRolloutManifest } from '../../scripts/release/sign-rollout-manifest';
 
 const roots: string[] = [];
 const NOW = new Date('2026-08-02T12:00:00.000Z');
 const A = `sha256:${'a'.repeat(64)}` as const;
 const B = `sha256:${'b'.repeat(64)}` as const;
 
-const ARTIFACT_IDENTITY: RolloutArtifactIdentityV1 = {
+const ARTIFACT_IDENTITY: RolloutArtifactIdentity = {
   canonicalRepository: 'ferqx/kite-code',
   repositoryId: 'R_kgDOSKbi8g',
   commit: '1'.repeat(40),
@@ -47,7 +47,7 @@ describe('disable-only signed rollout', () => {
   test('defaults off and does not parse or apply remote bytes', () => {
     expect(ROLLOUT_MANIFEST_ENABLED_BY_DEFAULT).toBe(false);
     const embedded = broadProfile();
-    const result = resolveDisableOnlyRolloutV1({
+    const result = resolveDisableOnlyRollout({
       mandatoryAdmin: false,
       embeddedProfile: embedded,
       embeddedCohortPercent: 50,
@@ -66,7 +66,7 @@ describe('disable-only signed rollout', () => {
       cohortPercent: 50,
     });
     expect(
-      resolveDisableOnlyRolloutV1({
+      resolveDisableOnlyRollout({
         mandatoryAdmin: true,
         embeddedProfile: embedded,
         embeddedCohortPercent: 50,
@@ -79,7 +79,7 @@ describe('disable-only signed rollout', () => {
   test('applies only capability disable, rollout/cohort reduction and allowlist intersection', () => {
     const embedded = broadProfile();
     const signed = fixture({ sequence: 1 });
-    const result = resolveDisableOnlyRolloutV1({
+    const result = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: false,
       embeddedProfile: embedded,
@@ -128,7 +128,7 @@ describe('disable-only signed rollout', () => {
     >;
     manifest.credential = 'injected';
     expect(() =>
-      verifyDisableOnlyRolloutManifestV1({
+      verifyDisableOnlyRolloutManifest({
         ...verificationInput(embedded),
         manifestBytes: canonicalJsonBytes(manifest),
         signatureBytes: signed.signatureBytes,
@@ -140,7 +140,7 @@ describe('disable-only signed rollout', () => {
     };
     tamperedManifest.restrictions.cohortPercent = 0;
     expect(() =>
-      verifyDisableOnlyRolloutManifestV1({
+      verifyDisableOnlyRolloutManifest({
         ...verificationInput(embedded),
         manifestBytes: canonicalJsonBytes(tamperedManifest),
         signatureBytes: signed.signatureBytes,
@@ -149,19 +149,19 @@ describe('disable-only signed rollout', () => {
 
     const signature = { ...signed.signature, signatureBase64: Buffer.alloc(64).toString('base64') };
     expect(() =>
-      verifyDisableOnlyRolloutManifestV1({
+      verifyDisableOnlyRolloutManifest({
         ...verificationInput(embedded),
         manifestBytes: signed.manifestBytes,
-        signatureBytes: encodeSyntheticRolloutSignatureV1(signature),
+        signatureBytes: encodeSyntheticRolloutSignature(signature),
       }),
     ).toThrow(new DisableOnlyRolloutError('signature_invalid'));
 
     const wrongKey = { ...signed.signature, keyId: 'kite-rollout-fixture-2026-b' };
     expect(() =>
-      verifyDisableOnlyRolloutManifestV1({
+      verifyDisableOnlyRolloutManifest({
         ...verificationInput(embedded),
         manifestBytes: signed.manifestBytes,
-        signatureBytes: encodeSyntheticRolloutSignatureV1(wrongKey),
+        signatureBytes: encodeSyntheticRolloutSignature(wrongKey),
       }),
     ).toThrow(new DisableOnlyRolloutError('signature_invalid'));
   });
@@ -186,7 +186,7 @@ describe('disable-only signed rollout', () => {
 
     for (const keyId of ['kite-rollout-fixture-2026-a', 'kite-rollout-fixture-2026-b'] as const) {
       expect(
-        verifyDisableOnlyRolloutManifestV1({
+        verifyDisableOnlyRolloutManifest({
           ...verificationInput(embedded),
           ...fixture({ keyId }),
         }).manifest.keyId,
@@ -196,7 +196,7 @@ describe('disable-only signed rollout', () => {
 
   test('rejects replay/downgrade and uses the newer valid identity-bound cache', () => {
     const embedded = broadProfile();
-    const newer = resolveDisableOnlyRolloutV1({
+    const newer = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: false,
       embeddedProfile: embedded,
@@ -207,7 +207,7 @@ describe('disable-only signed rollout', () => {
     });
     if (newer.status !== 'applied') throw new Error('expected newer rollout application');
 
-    const replay = resolveDisableOnlyRolloutV1({
+    const replay = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: false,
       embeddedProfile: embedded,
@@ -223,7 +223,7 @@ describe('disable-only signed rollout', () => {
     expect(replay.sequence).toBe(2);
     expect(replay.cohortPercent).toBe(10);
 
-    const expiredHighWater = resolveDisableOnlyRolloutV1({
+    const expiredHighWater = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: true,
       embeddedProfile: embedded,
@@ -245,7 +245,7 @@ describe('disable-only signed rollout', () => {
 
   test('uses embedded ceiling for optional outage and denies mandatory admin without valid cache', () => {
     const embedded = broadProfile();
-    const optional = resolveDisableOnlyRolloutV1({
+    const optional = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: false,
       embeddedProfile: embedded,
@@ -256,7 +256,7 @@ describe('disable-only signed rollout', () => {
     });
     expect(optional.status).toBe('embedded_ceiling');
 
-    const mandatory = resolveDisableOnlyRolloutV1({
+    const mandatory = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: true,
       embeddedProfile: embedded,
@@ -274,7 +274,7 @@ describe('disable-only signed rollout', () => {
 
   test('rejects cache identity drift and expired or tampered cached signatures', () => {
     const embedded = broadProfile();
-    const applied = resolveDisableOnlyRolloutV1({
+    const applied = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: false,
       embeddedProfile: embedded,
@@ -286,7 +286,7 @@ describe('disable-only signed rollout', () => {
     if (applied.status !== 'applied') throw new Error('expected rollout application');
 
     expect(() =>
-      decodeIdentityBoundRolloutCacheV1({
+      decodeIdentityBoundRolloutCache({
         record: applied.cacheRecord,
         expectedIdentity: { ...ARTIFACT_IDENTITY, payloadSha256: B },
       }),
@@ -297,7 +297,7 @@ describe('disable-only signed rollout', () => {
       signatureBase64: Buffer.from('tampered').toString('base64'),
     };
     expect(
-      resolveDisableOnlyRolloutV1({
+      resolveDisableOnlyRollout({
         enabled: true,
         mandatoryAdmin: true,
         embeddedProfile: embedded,
@@ -310,7 +310,7 @@ describe('disable-only signed rollout', () => {
     ).toBe('denied');
 
     expect(
-      resolveDisableOnlyRolloutV1({
+      resolveDisableOnlyRollout({
         enabled: true,
         mandatoryAdmin: true,
         embeddedProfile: embedded,
@@ -325,7 +325,7 @@ describe('disable-only signed rollout', () => {
 
   test('persists canonical owner-only cache and refuses symlink targets', () => {
     const embedded = broadProfile();
-    const applied = resolveDisableOnlyRolloutV1({
+    const applied = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: false,
       embeddedProfile: embedded,
@@ -338,14 +338,14 @@ describe('disable-only signed rollout', () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-rollout-cache-'));
     roots.push(root);
     const cachePath = join(root, 'cache', 'rollout.json');
-    writeRolloutCacheFileV1(cachePath, applied.cacheRecord);
-    expect(loadRolloutCacheFileV1(cachePath)).toEqual(applied.cacheRecord);
+    writeRolloutCacheFile(cachePath, applied.cacheRecord);
+    expect(loadRolloutCacheFile(cachePath)).toEqual(applied.cacheRecord);
     if (process.platform !== 'win32') {
       expect(statSync(cachePath).mode & 0o777).toBe(0o600);
     }
-    writeRolloutCacheFileV1(cachePath, applied.cacheRecord);
+    writeRolloutCacheFile(cachePath, applied.cacheRecord);
 
-    const newer = resolveDisableOnlyRolloutV1({
+    const newer = resolveDisableOnlyRollout({
       enabled: true,
       mandatoryAdmin: false,
       embeddedProfile: embedded,
@@ -355,24 +355,24 @@ describe('disable-only signed rollout', () => {
       remote: { status: 'available', ...fixture({ sequence: 2 }) },
     });
     if (newer.status !== 'applied') throw new Error('expected newer rollout application');
-    writeRolloutCacheFileV1(cachePath, newer.cacheRecord);
-    expect(() => writeRolloutCacheFileV1(cachePath, applied.cacheRecord)).toThrow(
+    writeRolloutCacheFile(cachePath, newer.cacheRecord);
+    expect(() => writeRolloutCacheFile(cachePath, applied.cacheRecord)).toThrow(
       new RolloutCacheError('cache_invalid'),
     );
 
     if (process.platform !== 'win32') {
       const symlinkPath = join(root, 'rollout-link.json');
       symlinkSync(cachePath, symlinkPath);
-      expect(() => writeRolloutCacheFileV1(symlinkPath, applied.cacheRecord)).toThrow(
+      expect(() => writeRolloutCacheFile(symlinkPath, applied.cacheRecord)).toThrow(
         new RolloutCacheError('cache_io'),
       );
-      expect(() => loadRolloutCacheFileV1(symlinkPath)).toThrow(new RolloutCacheError('cache_io'));
+      expect(() => loadRolloutCacheFile(symlinkPath)).toThrow(new RolloutCacheError('cache_io'));
     }
   });
 });
 
-function broadProfile(): ReleaseProfileV1 {
-  const profile = structuredClone(EMBEDDED_RELEASE_PROFILES_V1['limited-production']);
+function broadProfile(): ReleaseProfile {
+  const profile = structuredClone(EMBEDDED_RELEASE_PROFILES_['limited-production']);
   profile.capabilities = Object.fromEntries(
     RELEASE_CAPABILITIES.map((capability) => [
       capability,
@@ -383,7 +383,7 @@ function broadProfile(): ReleaseProfileV1 {
   profile.safety.networkAllowlist = ['api.example.test', 'mcp.example.test'];
   profile.safety.mcpProviderAllowlist = ['mcp-a', 'mcp-b'];
   profile.data.providerRouteAllowlist = ['route-a', 'route-b'];
-  return parseReleaseProfileV1(profile);
+  return parseReleaseProfile(profile);
 }
 
 function fixture(
@@ -397,7 +397,7 @@ function fixture(
     networkAllowlist?: string[];
   } = {},
 ) {
-  return signSyntheticRolloutManifestV1({
+  return signSyntheticRolloutManifest({
     version: 1,
     kind: 'disable-only-rollout-manifest-v1',
     artifactIdentity: ARTIFACT_IDENTITY,
@@ -419,7 +419,7 @@ function fixture(
   });
 }
 
-function verificationInput(embeddedProfile: ReleaseProfileV1) {
+function verificationInput(embeddedProfile: ReleaseProfile) {
   return {
     expectedIdentity: ARTIFACT_IDENTITY,
     embeddedProfile,
@@ -430,11 +430,11 @@ function verificationInput(embeddedProfile: ReleaseProfileV1) {
 
 function expectVerifyFailure(
   signed: ReturnType<typeof fixture>,
-  embedded: ReleaseProfileV1,
+  embedded: ReleaseProfile,
   code: DisableOnlyRolloutError['code'],
 ): void {
   expect(() =>
-    verifyDisableOnlyRolloutManifestV1({
+    verifyDisableOnlyRolloutManifest({
       ...verificationInput(embedded),
       manifestBytes: signed.manifestBytes,
       signatureBytes: signed.signatureBytes,

@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  type KernelDoomLoopTrackerEntryV1,
-  kernelCheckDoomLoopFingerprintV1,
-  kernelToolDoomLoopFingerprintV1,
-  kernelUpdateDoomLoopTrackerV1,
+  type KernelDoomLoopTrackerEntry,
+  kernelCheckDoomLoopFingerprint,
+  kernelToolDoomLoopFingerprint,
+  kernelUpdateDoomLoopTracker,
 } from '@kite/agent-kernel';
 import type { PendingToolRequest } from '@kite/builtin-runtime';
 
-type DoomLoopTrackerEntry = KernelDoomLoopTrackerEntryV1;
+type DoomLoopTrackerEntry = KernelDoomLoopTrackerEntry;
 
-const buildToolFingerprint = kernelToolDoomLoopFingerprintV1;
+const buildToolFingerprint = kernelToolDoomLoopFingerprint;
 
 function checkDoomLoop(
   tracker: Readonly<Record<string, DoomLoopTrackerEntry>>,
@@ -18,9 +18,9 @@ function checkDoomLoop(
   windowMs: number,
   now = Date.now(),
 ) {
-  return kernelCheckDoomLoopFingerprintV1(
+  return kernelCheckDoomLoopFingerprint(
     tracker,
-    kernelToolDoomLoopFingerprintV1(request),
+    kernelToolDoomLoopFingerprint(request),
     threshold,
     windowMs,
     now,
@@ -32,7 +32,7 @@ function updateDoomLoopTracker(
   fingerprint: string,
   now = Date.now(),
 ) {
-  return kernelUpdateDoomLoopTrackerV1(tracker, fingerprint, now);
+  return kernelUpdateDoomLoopTracker(tracker, fingerprint, now);
 }
 
 function makeRequest(name: string, args: Record<string, unknown>): PendingToolRequest {

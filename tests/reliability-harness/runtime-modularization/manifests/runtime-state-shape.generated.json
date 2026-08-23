@@ -5,19 +5,19 @@
   "sources": [
     {
       "path": "packages/agent-kernel/src/normalization.ts",
-      "sha256": "sha256:70e4dfe9a26c26c892b184e33bd200f7cf9d9e78c902b2de10a9d6c0bc0d26bb"
+      "sha256": "sha256:91dbdba70ab0e83e673e2ef545bc8015a2e6fbee693e2213f851fe1343f03861"
     },
     {
       "path": "packages/agent-kernel/src/recovery.ts",
-      "sha256": "sha256:4e1b833dee2e3c6141abeb57ee895065bbc7e068639c22f1e7727f013faf177e"
+      "sha256": "sha256:20c50b543c05934ca89e06d3860dc080a4cd53ed19bd72d31220996aa21c65da"
     },
     {
       "path": "packages/agent-kernel/src/state.ts",
-      "sha256": "sha256:26e1c67988665880773f5e84296753245eb2c06c3ed856ea8a761a6db49e885a"
+      "sha256": "sha256:005f88e96f0b506c9b27c28920aa8a9087b49ec0401ae5b4488c3364248dedd1"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:bb09efe9fdec25b4dfc49012ac43aa6b5e40a1756150354f969a043270ebe959"
+      "sha256": "sha256:344bb993aca5941cf3109d0f4ca8e38f9f4b3ba3742726599e7943da5a9174cd"
     }
   ],
   "facts": {
@@ -149,7 +149,7 @@
       {
         "name": "toolRecovery",
         "optional": false,
-        "type": "ToolRecoveryJournalV1"
+        "type": "ToolRecoveryJournal"
       },
       {
         "name": "tools",
@@ -180,7 +180,7 @@
     "reachableDeclarationCount": 120,
     "reachableDeclarations": [
       {
-        "id": "packages/agent-kernel/src/normalization.ts#ToolDispatchStateV1",
+        "id": "packages/agent-kernel/src/normalization.ts#ToolDispatchState",
         "path": "packages/agent-kernel/src/normalization.ts",
         "kind": "TypeAliasDeclaration",
         "fields": [],
@@ -189,10 +189,10 @@
           "\"started\"",
           "\"unknown\""
         ],
-        "declarationDigest": "sha256:f3ef5c9c1b8324535e55d114eb7ad22ea4e4de74d5b3bb50894d03866440f90f"
+        "declarationDigest": "sha256:07ad30be65d4fb06d0ac772271085267682571e1e61cf4e9b7dd57ca6ac2ed7c"
       },
       {
-        "id": "packages/agent-kernel/src/normalization.ts#ToolExternalEffectsV1",
+        "id": "packages/agent-kernel/src/normalization.ts#ToolExternalEffects",
         "path": "packages/agent-kernel/src/normalization.ts",
         "kind": "TypeAliasDeclaration",
         "fields": [],
@@ -201,10 +201,74 @@
           "\"none\"",
           "\"unknown\""
         ],
-        "declarationDigest": "sha256:a526508611edc41f31b017aca72f35368b2e676097f3d6c9f431fe2f6055469f"
+        "declarationDigest": "sha256:94f0776dd5ebed890ba1e3199955ff9795cb06772b5c9cea0c8f6ea9adf5c5c8"
       },
       {
-        "id": "packages/agent-kernel/src/normalization.ts#ToolOutcomeStatusV1",
+        "id": "packages/agent-kernel/src/normalization.ts#ToolOutcome",
+        "path": "packages/agent-kernel/src/normalization.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "diagnosticCodes",
+            "optional": true,
+            "type": "readonly (\"classifier_missing\" | \"classifier_threw\" | \"classifier_conflict\" | \"classifier_invalid\")[] | undefined"
+          },
+          {
+            "name": "dispatchState",
+            "optional": false,
+            "type": "ToolDispatchState"
+          },
+          {
+            "name": "externalEffects",
+            "optional": false,
+            "type": "ToolExternalEffects"
+          },
+          {
+            "name": "failure",
+            "optional": true,
+            "type": "{ kind: FailureKind; detailCode: ToolOutcomeDetailCode; } | undefined"
+          },
+          {
+            "name": "lineage",
+            "optional": true,
+            "type": "{ failureInstanceId?: string; recoveryOf?: string; } | undefined"
+          },
+          {
+            "name": "recovery",
+            "optional": false,
+            "type": "ToolRecovery"
+          },
+          {
+            "name": "replaySafety",
+            "optional": true,
+            "type": "ToolReplaySafety | undefined"
+          },
+          {
+            "name": "schemaVersion",
+            "optional": false,
+            "type": "1"
+          },
+          {
+            "name": "status",
+            "optional": false,
+            "type": "ToolOutcomeStatus"
+          },
+          {
+            "name": "timing",
+            "optional": false,
+            "type": "ToolOutcomeTiming"
+          },
+          {
+            "name": "unknownFields",
+            "optional": true,
+            "type": "UnknownToolFieldsObservation | undefined"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:2bc1778d6f9cfcf08ed89fcf35d2bfa87d58c0f4f4cfe415fec9878bb9fad59b"
+      },
+      {
+        "id": "packages/agent-kernel/src/normalization.ts#ToolOutcomeStatus",
         "path": "packages/agent-kernel/src/normalization.ts",
         "kind": "TypeAliasDeclaration",
         "fields": [],
@@ -217,10 +281,10 @@
           "\"timed_out\"",
           "\"unknown\""
         ],
-        "declarationDigest": "sha256:c18233fc2bacfc67547ae20049c5c44f1e5d3e5cf8452a29654f9fc10118a848"
+        "declarationDigest": "sha256:5e81fce333d568f2c3f870a67522adb74159f034b22b4e00339635d6dacd2100"
       },
       {
-        "id": "packages/agent-kernel/src/normalization.ts#ToolOutcomeTimingV1",
+        "id": "packages/agent-kernel/src/normalization.ts#ToolOutcomeTiming",
         "path": "packages/agent-kernel/src/normalization.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
@@ -251,88 +315,10 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:c9983d1f6ee10492c2bda1df1cbf15b667bda5ebc98829d7f8e9e821bcb0863e"
+        "declarationDigest": "sha256:fe3b76a79d46c3199832b045fb0950e09b9de7ac6e7c6ea72f9576527fc3867b"
       },
       {
-        "id": "packages/agent-kernel/src/normalization.ts#ToolOutcomeV1",
-        "path": "packages/agent-kernel/src/normalization.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "diagnosticCodes",
-            "optional": true,
-            "type": "readonly (\"classifier_missing\" | \"classifier_threw\" | \"classifier_conflict\" | \"classifier_invalid\")[] | undefined"
-          },
-          {
-            "name": "dispatchState",
-            "optional": false,
-            "type": "ToolDispatchStateV1"
-          },
-          {
-            "name": "externalEffects",
-            "optional": false,
-            "type": "ToolExternalEffectsV1"
-          },
-          {
-            "name": "failure",
-            "optional": true,
-            "type": "{ kind: FailureKindV1; detailCode: ToolOutcomeDetailCodeV1; } | undefined"
-          },
-          {
-            "name": "lineage",
-            "optional": true,
-            "type": "{ failureInstanceId?: string; recoveryOf?: string; } | undefined"
-          },
-          {
-            "name": "recovery",
-            "optional": false,
-            "type": "ToolRecoveryV1"
-          },
-          {
-            "name": "replaySafety",
-            "optional": true,
-            "type": "ToolReplaySafetyV1 | undefined"
-          },
-          {
-            "name": "schemaVersion",
-            "optional": false,
-            "type": "1"
-          },
-          {
-            "name": "status",
-            "optional": false,
-            "type": "ToolOutcomeStatusV1"
-          },
-          {
-            "name": "timing",
-            "optional": false,
-            "type": "ToolOutcomeTimingV1"
-          },
-          {
-            "name": "unknownFields",
-            "optional": true,
-            "type": "UnknownToolFieldsObservationV1 | undefined"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:f90a80307b9f3e3bd6b15728549abe10b9093c2b3d2cf8ac6ec47ad40a9a324d"
-      },
-      {
-        "id": "packages/agent-kernel/src/normalization.ts#ToolRecoveryDispositionV1",
-        "path": "packages/agent-kernel/src/normalization.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"alternative\"",
-          "\"correct_args\"",
-          "\"never\"",
-          "\"retry_once\"",
-          "\"user_action\""
-        ],
-        "declarationDigest": "sha256:b7ec847946fb03e97fbff35793146b279de3f0765c2066138464e9b8d62c792c"
-      },
-      {
-        "id": "packages/agent-kernel/src/normalization.ts#ToolRecoveryV1",
+        "id": "packages/agent-kernel/src/normalization.ts#ToolRecovery",
         "path": "packages/agent-kernel/src/normalization.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
@@ -344,7 +330,7 @@
           {
             "name": "disposition",
             "optional": false,
-            "type": "ToolRecoveryDispositionV1"
+            "type": "ToolRecoveryDisposition"
           },
           {
             "name": "maximumAdditionalCalls",
@@ -368,10 +354,24 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:1cacc381669d7e80746dccdd468438d22111c7938f350ea8a1338c6387ba25a0"
+        "declarationDigest": "sha256:a0bfaa2c65c007c95085cc9eea3cc2a562ba9ff6f1f89966a3a4ee3129e03e37"
       },
       {
-        "id": "packages/agent-kernel/src/normalization.ts#UnknownToolFieldsObservationV1",
+        "id": "packages/agent-kernel/src/normalization.ts#ToolRecoveryDisposition",
+        "path": "packages/agent-kernel/src/normalization.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"alternative\"",
+          "\"correct_args\"",
+          "\"never\"",
+          "\"retry_once\"",
+          "\"user_action\""
+        ],
+        "declarationDigest": "sha256:b30ff2743f9081765db74e1783a7dbffe017a34f58ac405543b57368a1e2a8be"
+      },
+      {
+        "id": "packages/agent-kernel/src/normalization.ts#UnknownToolFieldsObservation",
         "path": "packages/agent-kernel/src/normalization.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
@@ -397,10 +397,10 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:07aac172454bb764aaf7b4452eab6f81c1b9ca8a9281dd733f0f7d73a72e78b1"
+        "declarationDigest": "sha256:d447df8334509a474b400ec0020b443af4b4861a29889624cf5c8c9272c58ff2"
       },
       {
-        "id": "packages/agent-kernel/src/recovery.ts#ToolRecoveryFailureV1",
+        "id": "packages/agent-kernel/src/recovery.ts#ToolRecoveryFailure",
         "path": "packages/agent-kernel/src/recovery.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
@@ -447,7 +447,7 @@
           {
             "name": "outcome",
             "optional": false,
-            "type": "ToolOutcomeV1"
+            "type": "ToolOutcome"
           },
           {
             "name": "progressRevision",
@@ -486,17 +486,17 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:6979d568ec09bded68013826268ee53200878bc8fde94af551b20bc4c407dcc2"
+        "declarationDigest": "sha256:fdadd122132932efca81314eff52dc83c714319d74a27ea788bc2b23e68172f9"
       },
       {
-        "id": "packages/agent-kernel/src/recovery.ts#ToolRecoveryJournalV1",
+        "id": "packages/agent-kernel/src/recovery.ts#ToolRecoveryJournal",
         "path": "packages/agent-kernel/src/recovery.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
           {
             "name": "failures",
             "optional": false,
-            "type": "Readonly<Record<string, ToolRecoveryFailureV1>>"
+            "type": "Readonly<Record<string, ToolRecoveryFailure>>"
           },
           {
             "name": "identityKey",
@@ -525,7 +525,7 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:a1db379f6ab63842e9bcd504ff2860a28cdf671797de6ab17394f1d0e6efb064"
+        "declarationDigest": "sha256:fc1c52b7f3faee9e2d6549e339559caa6ee1c33473888104f361cd2a40da1a2f"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentAuthorizationState",
@@ -2203,7 +2203,7 @@
           {
             "name": "budget",
             "optional": false,
-            "type": "ResourceBudgetV1"
+            "type": "ResourceBudget"
           },
           {
             "name": "deadlineAt",
@@ -2218,12 +2218,12 @@
           {
             "name": "reconciledUsage",
             "optional": false,
-            "type": "ResourceUsageV1"
+            "type": "ResourceUsage"
           },
           {
             "name": "reservations",
             "optional": false,
-            "type": "Readonly<Record<string, ResourceReservationV1>>"
+            "type": "Readonly<Record<string, ResourceReservation>>"
           },
           {
             "name": "runId",
@@ -2243,11 +2243,11 @@
           {
             "name": "waiters",
             "optional": false,
-            "type": "Readonly<Record<string, ResourceWaiterV1>>"
+            "type": "Readonly<Record<string, ResourceWaiter>>"
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:2b77fbcf994042f2fab1814d3c7db1943a1621699cdcf3341d1144c7b949078f"
+        "declarationDigest": "sha256:82192ffd92bf81ffceb6eeab30e625a023942fc97a2dcf960eb5d9a950609429"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentResourceBudgetState",
@@ -2944,7 +2944,7 @@
           {
             "name": "toolRecovery",
             "optional": false,
-            "type": "ToolRecoveryJournalV1"
+            "type": "ToolRecoveryJournal"
           },
           {
             "name": "tools",
@@ -3459,9 +3459,9 @@
             "type": "number | undefined"
           },
           {
-            "name": "outcomeV1",
+            "name": "outcome",
             "optional": true,
-            "type": "ToolOutcomeV1 | undefined"
+            "type": "ToolOutcome | undefined"
           },
           {
             "name": "queuedAt",
@@ -3520,7 +3520,7 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:04d70c86fe2637d6d686a097dbdf1b478c661325a770a6c3efa631e3a3ae8c12"
+        "declarationDigest": "sha256:c4a73d47f6b801a6367b8f171abeafba3057b437192d680f915b8956648ed096"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentToolGrant",
@@ -4611,7 +4611,7 @@
         "declarationDigest": "sha256:31fbe1a111f5b71b0a5120efead5d42c5262127b8c58ab1a62086d5e742cf9a4"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#PlanCompletionEvidenceV1",
+        "id": "packages/agent-kernel/src/state.ts#PlanCompletionEvidence",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
@@ -4642,7 +4642,7 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:d6c221b28b739ae714de21e9b801edb5a1b3a8fe542638b90d6133ba1ffdefeb"
+        "declarationDigest": "sha256:c4ec692312448c43c4d5d5fd6de5d4e2a06493d5757fa66ee44ae650a6997f3d"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#PlanDocument",
@@ -4662,7 +4662,7 @@
           {
             "name": "completionEvidence",
             "optional": false,
-            "type": "PlanCompletionEvidenceV1"
+            "type": "PlanCompletionEvidence"
           },
           {
             "name": "createdAtTurnId",
@@ -4716,7 +4716,7 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:f79a3e19d5a01f3d3b6d6d3f9ec869362a83c51230976ea272926c8246046999"
+        "declarationDigest": "sha256:8a0001d6bc365498208a890635a3fd3207f8dc8b6ffc1e19d998a258e1b27e3b"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#PlanningState",
@@ -4778,7 +4778,7 @@
         "declarationDigest": "sha256:089273a67f2f87209d50f0b0eb2c08a01c281a3014523ab42492e0d9fbb335a8"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#ResourceBudgetV1",
+        "id": "packages/agent-kernel/src/state.ts#ResourceBudget",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
@@ -4849,36 +4849,22 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:25ae0b5e1b1c0a90efea6cdb77dbc8d1485d7f6fc6a35aee008d4b6c9b287e1b"
+        "declarationDigest": "sha256:61f71c77e3ce86f1db59f4b714777d4c012f48d57597dedd4956064883525387"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#ResourceReservationState",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"dispatch_started\"",
-          "\"reconciled\"",
-          "\"released\"",
-          "\"reserved\"",
-          "\"unknown\""
-        ],
-        "declarationDigest": "sha256:7ae71d0665568ab93a9bef541c1b3e31a1102ffb84d32477835357273af75af5"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ResourceReservationV1",
+        "id": "packages/agent-kernel/src/state.ts#ResourceReservation",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
           {
             "name": "actual",
             "optional": true,
-            "type": "ResourceUsageV1 | undefined"
+            "type": "ResourceUsage | undefined"
           },
           {
             "name": "executableUpperBound",
             "optional": false,
-            "type": "ResourceUsageV1"
+            "type": "ResourceUsage"
           },
           {
             "name": "invocationId",
@@ -4917,10 +4903,24 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:aff69b8576f277c3a71ea97d43b26904dd8aae2f1b399addbf199d2ebd77a415"
+        "declarationDigest": "sha256:cbcd723a047289503eb30450a856f4288d86b153d86b82c29548eb7897171184"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#ResourceUsageV1",
+        "id": "packages/agent-kernel/src/state.ts#ResourceReservationState",
+        "path": "packages/agent-kernel/src/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"dispatch_started\"",
+          "\"reconciled\"",
+          "\"released\"",
+          "\"reserved\"",
+          "\"unknown\""
+        ],
+        "declarationDigest": "sha256:7ae71d0665568ab93a9bef541c1b3e31a1102ffb84d32477835357273af75af5"
+      },
+      {
+        "id": "packages/agent-kernel/src/state.ts#ResourceUsage",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
@@ -4946,10 +4946,10 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:3468466e290c3caacde607f83f74616f4801fa1bc035134afcbf43c8cac11504"
+        "declarationDigest": "sha256:7e77a863c6f0bf72ef15eefc3e225d32c766b3b3af027782af5a794736a3ab1e"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#ResourceWaiterV1",
+        "id": "packages/agent-kernel/src/state.ts#ResourceWaiter",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
         "fields": [
@@ -4995,9 +4995,9 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:ddd7eb44bcf33fad500084bcfbcc45e8e3de93577ac694cdbc8c54e67ff7b4fe"
+        "declarationDigest": "sha256:db3054b158c82acdd865b899a305b6f2796eb0cbee426f72639b1ef778dbd1ae"
       }
     ]
   },
-  "digest": "sha256:6a1a0f183610315391544bc254b81f510d4825021ca3485978016068d13030ac"
+  "digest": "sha256:e9a2b25bf814e8114a6da40ba99ec1031b0a876d8c8fb7d042f6a29c08698e08"
 }

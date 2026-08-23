@@ -1,7 +1,7 @@
-import type { VerificationCheck, VerificationSpecV1 } from '@kite/runtime-spi';
-import { compileCapabilitySchemaV1, digestCapabilityValueV1 } from '../skills/capability-domain';
+import type { VerificationCheck, VerificationSpec } from '@kite/runtime-spi';
+import { compileCapabilitySchema, digestCapabilityValue } from '../skills/capability-domain';
 
-const VERIFICATION_CHECK_TYPES_V1 = new Set<VerificationCheck['type']>([
+const VERIFICATION_CHECK_TYPES_ = new Set<VerificationCheck['type']>([
   'file_assertion',
   'command',
   'schema',
@@ -10,7 +10,7 @@ const VERIFICATION_CHECK_TYPES_V1 = new Set<VerificationCheck['type']>([
   'reviewer',
 ]);
 
-export function validateBuiltinVerificationSpecV1(spec: VerificationSpecV1): string[] {
+export function validateBuiltinVerificationSpec(spec: VerificationSpec): string[] {
   const diagnostics: string[] = [];
   if (spec.schemaVersion !== 1) diagnostics.push('Unsupported VerificationSpec schema version.');
   if (!spec.verificationId) diagnostics.push('verificationId is required.');
@@ -26,7 +26,7 @@ export function validateBuiltinVerificationSpecV1(spec: VerificationSpecV1): str
     if (ids.has(check.checkId))
       diagnostics.push(`Duplicate verification check '${check.checkId}'.`);
     ids.add(check.checkId);
-    if (!VERIFICATION_CHECK_TYPES_V1.has(check.type)) {
+    if (!VERIFICATION_CHECK_TYPES_.has(check.type)) {
       diagnostics.push(`Unsupported check type '${check.type}'.`);
     }
     if (reviewerSeen && check.type !== 'reviewer') {
@@ -43,7 +43,7 @@ export function validateBuiltinVerificationSpecV1(spec: VerificationSpecV1): str
       diagnostics.push(`${check.checkId}: command is required.`);
     }
     if (check.type === 'schema') {
-      const compiled = compileCapabilitySchemaV1(check.schema);
+      const compiled = compileCapabilitySchema(check.schema);
       if (!compiled.ok) diagnostics.push(`${check.checkId}: ${compiled.diagnostic}`);
     }
     if (check.type === 'mcp_read_after_write') {
@@ -51,7 +51,7 @@ export function validateBuiltinVerificationSpecV1(spec: VerificationSpecV1): str
         diagnostics.push(`${check.checkId}: invocation and capability identity are required.`);
       }
       if (check.outputSchema) {
-        const compiled = compileCapabilitySchemaV1(check.outputSchema);
+        const compiled = compileCapabilitySchema(check.outputSchema);
         if (!compiled.ok) diagnostics.push(`${check.checkId}: ${compiled.diagnostic}`);
       }
     }
@@ -65,25 +65,25 @@ export function validateBuiltinVerificationSpecV1(spec: VerificationSpecV1): str
   return diagnostics;
 }
 
-export interface BuiltinCapabilityVerificationRequestV1 {
+export interface BuiltinCapabilityVerificationRequest {
   readonly type: 'verification.requested';
   readonly verificationId: string;
   readonly taskId?: string;
   readonly mode: 'best_effort' | 'required';
-  readonly spec: VerificationSpecV1;
+  readonly spec: VerificationSpec;
   readonly requestedAt: string;
 }
 
 /** Build concrete verification semantics from a Kernel-selected requirement. */
-export function createBuiltinCapabilityVerificationRequestV1(input: {
+export function createBuiltinCapabilityVerificationRequest(input: {
   readonly invocationId: string;
   readonly capabilityId: string;
   readonly mode: 'best_effort' | 'required';
   readonly taskId?: string;
   readonly externalReferences?: readonly string[];
   readonly requestedAt: string;
-}): BuiltinCapabilityVerificationRequestV1 {
-  const verificationId = digestCapabilityValueV1({
+}): BuiltinCapabilityVerificationRequest {
+  const verificationId = digestCapabilityValue({
     type: 'capability-verification',
     invocationId: input.invocationId,
   });

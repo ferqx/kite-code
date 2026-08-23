@@ -18,38 +18,38 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type {
-  FilesystemCommitGrantV1,
-  FilesystemObserveGrantV1,
-  FilesystemPrepareGrantV1,
-  WorkspaceFilesystemCommittedMutationV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemObserveObservationV1,
-  WorkspaceFilesystemPathScopeV1,
-  WorkspaceFilesystemPreimageObservationV1,
-  WorkspaceFilesystemPreparedMutationV1,
-  WorkspaceFilesystemProtectedBoundaryV1,
-  WorkspaceFilesystemProviderFailureCodeV1,
-  WorkspaceFilesystemProviderResultV1,
-  WorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemStatIdentityV1,
-  WorkspaceFilesystemTargetIdentityV1,
+  FilesystemCommitGrant,
+  FilesystemObserveGrant,
+  FilesystemPrepareGrant,
+  WorkspaceFilesystemCommittedMutation,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemObserveObservation,
+  WorkspaceFilesystemPathScope,
+  WorkspaceFilesystemPreimageObservation,
+  WorkspaceFilesystemPreparedMutation,
+  WorkspaceFilesystemProtectedBoundary,
+  WorkspaceFilesystemProvider,
+  WorkspaceFilesystemProviderFailureCode,
+  WorkspaceFilesystemProviderResult,
+  WorkspaceFilesystemStatIdentity,
+  WorkspaceFilesystemTargetIdentity,
 } from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1 } from '@kite/runtime-spi';
+import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
 import {
-  assertDescriptorRelativeMutationSupportedV1,
-  atomicReplaceInLockedWindowsDirectoryV1,
-  closeOpenedDirectoryChainV1,
-  openExclusiveFileAtV1,
-  openOrCreateDirectoryChainAtV1,
-  renameAtV1,
-  unlinkAtV1,
+  assertDescriptorRelativeMutationSupported,
+  atomicReplaceInLockedWindowsDirectory,
+  closeOpenedDirectoryChain,
+  openExclusiveFileAt,
+  openOrCreateDirectoryChainAt,
+  renameAt,
+  unlinkAt,
 } from './descriptor-relative';
 import {
-  WorkspaceFilesystemGrantErrorV1,
-  type WorkspaceFilesystemGrantVerifierV1,
-  workspaceFilesystemStringDigestV1,
-  workspaceFilesystemTargetEvidenceV1,
-  workspaceFilesystemTargetIdentityDigestV1,
+  WorkspaceFilesystemGrantError,
+  type WorkspaceFilesystemGrantVerifier,
+  workspaceFilesystemStringDigest,
+  workspaceFilesystemTargetEvidence,
+  workspaceFilesystemTargetIdentityDigest,
 } from './grant-authority';
 
 const DEFAULT_MAX_OBSERVATION_BYTES = 8 * 1024 * 1024;
@@ -64,20 +64,20 @@ function msys2ToWindowsPath(filePath: string): string {
   return `${match[1]!.toUpperCase()}:\\${match[2]!.replaceAll('/', '\\')}`;
 }
 
-export interface LocalWorkspaceFilesystemProviderOptionsV1 {
+export interface LocalWorkspaceFilesystemProviderOptions {
   readonly maximumObservationBytes?: number;
   readonly maximumSearchMatches?: number;
 }
 
 /** The sole Node-fs owner for governed workspace capability execution. */
-export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemProviderV1 {
-  readonly #verifier: WorkspaceFilesystemGrantVerifierV1;
+export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProvider {
+  readonly #verifier: WorkspaceFilesystemGrantVerifier;
   readonly #maximumObservationBytes: number;
   readonly #maximumSearchMatches: number;
 
   constructor(
-    verifier: WorkspaceFilesystemGrantVerifierV1,
-    options: LocalWorkspaceFilesystemProviderOptionsV1 = {},
+    verifier: WorkspaceFilesystemGrantVerifier,
+    options: LocalWorkspaceFilesystemProviderOptions = {},
   ) {
     this.#verifier = verifier;
     this.#maximumObservationBytes = positiveInteger(
@@ -91,9 +91,9 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
   }
 
   async observe(input: {
-    readonly grant: FilesystemObserveGrantV1;
+    readonly grant: FilesystemObserveGrant;
     readonly signal?: AbortSignal;
-  }): Promise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemObserveObservationV1>> {
+  }): Promise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemObserveObservation>> {
     try {
       throwIfAborted(input.signal);
       // Integrity, purpose, operation, identity and expiry are checked before the first fs call.
@@ -139,9 +139,9 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
   }
 
   async prepareMutation(input: {
-    readonly grant: FilesystemPrepareGrantV1;
+    readonly grant: FilesystemPrepareGrant;
     readonly signal?: AbortSignal;
-  }): Promise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemPreparedMutationV1>> {
+  }): Promise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemPreparedMutation>> {
     try {
       throwIfAborted(input.signal);
       const grant = this.#verifier.verifyPrepare(input.grant);
@@ -157,14 +157,14 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
         grant.protectedBoundary,
       );
       const preimage = this.#preimage(target);
-      const targetIdentityDigest = workspaceFilesystemTargetIdentityDigestV1(target);
+      const targetIdentityDigest = workspaceFilesystemTargetIdentityDigest(target);
       return success(
         deepFreeze({
           kind: 'prepared_mutation',
           operationKind: grant.operation.kind,
           operationDigest: grant.operationDigest,
           target,
-          targetEvidence: workspaceFilesystemTargetEvidenceV1(target),
+          targetEvidence: workspaceFilesystemTargetEvidence(target),
           targetIdentityDigest,
           preimage,
         }),
@@ -175,9 +175,9 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
   }
 
   async commitMutation(input: {
-    readonly grant: FilesystemCommitGrantV1;
+    readonly grant: FilesystemCommitGrant;
     readonly signal?: AbortSignal;
-  }): Promise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemCommittedMutationV1>> {
+  }): Promise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemCommittedMutation>> {
     let commitCompleted = false;
     try {
       throwIfAborted(input.signal);
@@ -222,14 +222,14 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
         grant.operation.pathScope,
         grant.protectedBoundary,
       );
-      const afterContentDigest = workspaceFilesystemStringDigestV1(normalizeEol(mutation.content));
+      const afterContentDigest = workspaceFilesystemStringDigest(normalizeEol(mutation.content));
       return success(
         deepFreeze({
           kind: 'committed_mutation',
           operationKind: grant.operation.kind,
           operationDigest: grant.operationDigest,
           target: committedTarget,
-          targetEvidence: workspaceFilesystemTargetEvidenceV1(committedTarget),
+          targetEvidence: workspaceFilesystemTargetEvidence(committedTarget),
           beforeContentDigest: preimage.contentDigest,
           afterContentDigest,
           changed: preimage.content !== mutation.content,
@@ -250,10 +250,10 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
   }
 
   #readFile(
-    target: WorkspaceFilesystemTargetIdentityV1,
+    target: WorkspaceFilesystemTargetIdentity,
     offset?: number,
     limit?: number,
-  ): WorkspaceFilesystemObserveObservationV1 {
+  ): WorkspaceFilesystemObserveObservation {
     assertRegularFile(target);
     const decoded = this.#readText(target.canonicalPath, target.canonicalPath, target.followed);
     const lines = sourceLines(decoded);
@@ -270,10 +270,10 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
     return deepFreeze({
       kind: 'read_file',
       target,
-      targetEvidence: workspaceFilesystemTargetEvidenceV1(target),
+      targetEvidence: workspaceFilesystemTargetEvidence(target),
       content,
       rawContent: decoded,
-      contentDigest: workspaceFilesystemStringDigestV1(decoded),
+      contentDigest: workspaceFilesystemStringDigest(decoded),
       totalLines: lines.length,
       fromLine,
       toLine,
@@ -282,11 +282,11 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
 
   async #searchFiles(
     workspace: string,
-    target: WorkspaceFilesystemTargetIdentityV1,
+    target: WorkspaceFilesystemTargetIdentity,
     pattern: string,
-    boundary: WorkspaceFilesystemProtectedBoundaryV1,
+    boundary: WorkspaceFilesystemProtectedBoundary,
     signal?: AbortSignal,
-  ): Promise<WorkspaceFilesystemObserveObservationV1> {
+  ): Promise<WorkspaceFilesystemObserveObservation> {
     const files = await this.#walk(workspace, target, boundary, signal);
     const matches = files
       .map((file) => toPosix(relative(workspace, file)))
@@ -299,20 +299,20 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
     return deepFreeze({
       kind: 'search_files',
       target,
-      targetEvidence: workspaceFilesystemTargetEvidenceV1(target),
+      targetEvidence: workspaceFilesystemTargetEvidence(target),
       matches,
-      contentDigest: workspaceFilesystemStringDigestV1(matches.join('\n')),
+      contentDigest: workspaceFilesystemStringDigest(matches.join('\n')),
     });
   }
 
   async #searchContent(
     workspace: string,
-    target: WorkspaceFilesystemTargetIdentityV1,
+    target: WorkspaceFilesystemTargetIdentity,
     pattern: string,
     glob: string | undefined,
-    boundary: WorkspaceFilesystemProtectedBoundaryV1,
+    boundary: WorkspaceFilesystemProtectedBoundary,
     signal?: AbortSignal,
-  ): Promise<WorkspaceFilesystemObserveObservationV1> {
+  ): Promise<WorkspaceFilesystemObserveObservation> {
     let regex: RegExp;
     try {
       regex = new RegExp(pattern);
@@ -354,16 +354,16 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
     return deepFreeze({
       kind: 'search_content',
       target,
-      targetEvidence: workspaceFilesystemTargetEvidenceV1(target),
+      targetEvidence: workspaceFilesystemTargetEvidence(target),
       matches,
-      contentDigest: workspaceFilesystemStringDigestV1(JSON.stringify(matches)),
+      contentDigest: workspaceFilesystemStringDigest(JSON.stringify(matches)),
     });
   }
 
   async #walk(
     workspace: string,
-    target: WorkspaceFilesystemTargetIdentityV1,
-    boundary: WorkspaceFilesystemProtectedBoundaryV1,
+    target: WorkspaceFilesystemTargetIdentity,
+    boundary: WorkspaceFilesystemProtectedBoundary,
     signal?: AbortSignal,
   ): Promise<string[]> {
     if (!target.exists) throw providerError('not_found', 'Filesystem search target was not found.');
@@ -423,7 +423,7 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
     return output;
   }
 
-  #preimage(target: WorkspaceFilesystemTargetIdentityV1): WorkspaceFilesystemPreimageObservationV1 {
+  #preimage(target: WorkspaceFilesystemTargetIdentity): WorkspaceFilesystemPreimageObservation {
     if (!target.exists) {
       return deepFreeze({ existed: false, content: null, contentDigest: null, byteLength: 0 });
     }
@@ -435,7 +435,7 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
     return deepFreeze({
       existed: true,
       content,
-      contentDigest: workspaceFilesystemStringDigestV1(content),
+      contentDigest: workspaceFilesystemStringDigest(content),
       byteLength: Buffer.byteLength(content),
     });
   }
@@ -443,7 +443,7 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
   #readText(
     path: string,
     admittedRoot: string,
-    expectedIdentity?: WorkspaceFilesystemStatIdentityV1 | null,
+    expectedIdentity?: WorkspaceFilesystemStatIdentity | null,
   ): string {
     let descriptor: number | undefined;
     try {
@@ -479,10 +479,10 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
   }
 
   #assertPreparedIdentity(
-    grant: Readonly<FilesystemCommitGrantV1>,
-    current: WorkspaceFilesystemTargetIdentityV1,
+    grant: Readonly<FilesystemCommitGrant>,
+    current: WorkspaceFilesystemTargetIdentity,
   ): void {
-    const digest = workspaceFilesystemTargetIdentityDigestV1(current);
+    const digest = workspaceFilesystemTargetIdentityDigest(current);
     if (
       digest !== grant.preparedTargetIdentityDigest ||
       current.lexicalPath !== grant.preparedTargetIdentity.lexicalPath ||
@@ -506,8 +506,8 @@ interface MutationContent {
 }
 
 function buildMutation(
-  operation: WorkspaceFilesystemMutationOperationV1,
-  preimage: WorkspaceFilesystemPreimageObservationV1,
+  operation: WorkspaceFilesystemMutationOperation,
+  preimage: WorkspaceFilesystemPreimageObservation,
 ): MutationContent {
   if (operation.kind === 'write_file') return { content: operation.content };
   if (!preimage.existed || preimage.content === null) {
@@ -546,8 +546,8 @@ function buildMutation(
 
 function searchTargetMayBeObserved(
   workspace: string,
-  target: WorkspaceFilesystemTargetIdentityV1,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  target: WorkspaceFilesystemTargetIdentity,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): boolean {
   const lexicalRelative = toPosix(relative(workspace, target.resolvedPath));
   const canonicalRelative = toPosix(relative(workspace, target.canonicalPath));
@@ -564,8 +564,8 @@ function searchTargetMayBeObserved(
 
 function protectedTargetMayBeAccessed(
   workspace: string,
-  target: WorkspaceFilesystemTargetIdentityV1,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  target: WorkspaceFilesystemTargetIdentity,
+  boundary: WorkspaceFilesystemProtectedBoundary,
   allowTraversalAncestor: boolean,
 ): boolean {
   if (normalizePathCase(boundary.canonicalWorkspace) !== normalizePathCase(workspace)) return false;
@@ -594,7 +594,7 @@ function searchPathExcluded(
   workspace: string,
   path: string,
   relativePath: string,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): boolean {
   if (normalizePathCase(boundary.canonicalWorkspace) !== normalizePathCase(workspace)) return true;
   const relativeIdentity = relativePath.toLowerCase();
@@ -616,7 +616,7 @@ function searchPathExcluded(
 function searchDirectoryMayBeTraversed(
   workspace: string,
   directory: string,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): boolean {
   const relativePath = toPosix(relative(workspace, directory));
   if (searchPathExcluded(workspace, directory, relativePath, boundary)) return false;
@@ -632,7 +632,7 @@ function searchFileMayBeObserved(
   workspace: string,
   file: string,
   relativePath: string,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): boolean {
   if (searchPathExcluded(workspace, file, relativePath, boundary)) return false;
   if (boundary.allowedCanonicalPaths.length === 0) return true;
@@ -662,7 +662,7 @@ function verifiedWorkspace(expected: string): string {
 function captureTargetIdentity(
   workspace: string,
   lexicalPath: string,
-): WorkspaceFilesystemTargetIdentityV1 {
+): WorkspaceFilesystemTargetIdentity {
   const normalized = msys2ToWindowsPath(lexicalPath).replace(/[\\/]+/g, sep);
   if (!normalized) {
     throw providerError('path_invalid', 'Filesystem target path is invalid.');
@@ -695,8 +695,8 @@ function captureTargetIdentity(
   const suffix = relative(nearest, resolvedPath);
   const canonicalPath = normalizePathCase(resolve(canonicalNearest, suffix));
   const exists = existsNoFollow(resolvedPath);
-  let noFollow: WorkspaceFilesystemStatIdentityV1 | null = null;
-  let followed: WorkspaceFilesystemStatIdentityV1 | null = null;
+  let noFollow: WorkspaceFilesystemStatIdentity | null = null;
+  let followed: WorkspaceFilesystemStatIdentity | null = null;
   if (exists) {
     try {
       noFollow = statIdentity(lstatSync(resolvedPath));
@@ -706,7 +706,7 @@ function captureTargetIdentity(
     }
   }
   return deepFreeze({
-    schema: WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1,
+    schema: WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_,
     lexicalPath,
     resolvedPath: normalizePathCase(resolvedPath),
     canonicalPath: exists ? normalizePathCase(realpathSync(resolvedPath)) : canonicalPath,
@@ -721,9 +721,9 @@ function captureTargetIdentity(
 function captureAdmittedMutationTargetIdentity(
   workspace: string,
   lexicalPath: string,
-  scope: WorkspaceFilesystemPathScopeV1,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
-): WorkspaceFilesystemTargetIdentityV1 {
+  scope: WorkspaceFilesystemPathScope,
+  boundary: WorkspaceFilesystemProtectedBoundary,
+): WorkspaceFilesystemTargetIdentity {
   const target = captureTargetIdentity(workspace, lexicalPath);
   admitMutationTarget(workspace, target, scope, boundary);
   return target;
@@ -731,9 +731,9 @@ function captureAdmittedMutationTargetIdentity(
 
 function admitTarget(
   workspace: string,
-  target: WorkspaceFilesystemTargetIdentityV1,
-  scope: WorkspaceFilesystemPathScopeV1,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  target: WorkspaceFilesystemTargetIdentity,
+  scope: WorkspaceFilesystemPathScope,
+  boundary: WorkspaceFilesystemProtectedBoundary,
   allowTraversalAncestor = false,
 ): void {
   if (scope === 'workspace_only' && !inside(workspace, target.canonicalPath)) {
@@ -749,9 +749,9 @@ function admitTarget(
 
 function admitMutationTarget(
   workspace: string,
-  target: WorkspaceFilesystemTargetIdentityV1,
-  scope: WorkspaceFilesystemPathScopeV1,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  target: WorkspaceFilesystemTargetIdentity,
+  scope: WorkspaceFilesystemPathScope,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): void {
   admitTarget(workspace, target, scope, boundary);
   if (target.exists && target.followed?.type !== 'file') {
@@ -762,7 +762,7 @@ function admitMutationTarget(
   }
 }
 
-function assertRegularFile(target: WorkspaceFilesystemTargetIdentityV1): void {
+function assertRegularFile(target: WorkspaceFilesystemTargetIdentity): void {
   if (!target.exists) throw providerError('not_found', 'Filesystem target was not found.');
   if (target.followed?.type !== 'file') {
     throw providerError('not_a_file', 'Filesystem target is not a regular file.');
@@ -773,9 +773,9 @@ function atomicWrite(
   workspace: string,
   target: string,
   content: string,
-  identity: WorkspaceFilesystemTargetIdentityV1,
-  scope: WorkspaceFilesystemPathScopeV1,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  identity: WorkspaceFilesystemTargetIdentity,
+  scope: WorkspaceFilesystemPathScope,
+  boundary: WorkspaceFilesystemProtectedBoundary,
   signal?: AbortSignal,
 ): void {
   // The support check precedes every directory, temporary-file or target write.
@@ -791,7 +791,7 @@ function atomicWrite(
     relativeDirectory === '' ? [] : relativeDirectory.split(sep).filter(Boolean);
   const temporaryName = `.${targetName}.kite-${randomUUID()}.tmp`;
   if (process.platform === 'win32') {
-    atomicReplaceInLockedWindowsDirectoryV1({
+    atomicReplaceInLockedWindowsDirectory({
       ancestorDirectory: identity.nearestExistingCanonicalPath,
       directorySegments,
       targetName,
@@ -805,10 +805,10 @@ function atomicWrite(
     });
     return;
   }
-  assertDescriptorRelativeMutationSupportedV1();
+  assertDescriptorRelativeMutationSupported();
   let descriptor: number | undefined;
   let ancestorDescriptor: number | undefined;
-  let directoryChain: ReturnType<typeof openOrCreateDirectoryChainAtV1> | undefined;
+  let directoryChain: ReturnType<typeof openOrCreateDirectoryChainAt> | undefined;
   let published = false;
   try {
     ancestorDescriptor = openSync(
@@ -823,7 +823,7 @@ function atomicWrite(
     ) {
       throw providerError('stale_preimage', 'Prepared filesystem ancestor changed before commit.');
     }
-    directoryChain = openOrCreateDirectoryChainAtV1(ancestorDescriptor, directorySegments);
+    directoryChain = openOrCreateDirectoryChainAt(ancestorDescriptor, directorySegments);
     const parentDescriptor = directoryChain.descriptor;
     const pinnedParent = stableMutationDirectory(targetDirectory, identity);
     if (!sameDirectoryObjectIdentity(pinnedParent, statIdentity(fstatSync(parentDescriptor)))) {
@@ -831,7 +831,7 @@ function atomicWrite(
     }
     const finalMode =
       identity.noFollow?.mode === undefined ? 0o644 : identity.noFollow.mode & 0o777;
-    descriptor = openExclusiveFileAtV1(parentDescriptor, temporaryName, finalMode);
+    descriptor = openExclusiveFileAt(parentDescriptor, temporaryName, finalMode);
     // Normalize the final mode before content is written so ambient umask and
     // platform create-mode details cannot alter the Provider contract.
     fchmodSync(descriptor, finalMode);
@@ -857,7 +857,7 @@ function atomicWrite(
       throw providerError('stale_preimage', 'Filesystem mutation parent changed before publish.');
     }
     runBeforeDescriptorRelativePublishTestHook();
-    renameAtV1(parentDescriptor, temporaryName, targetName);
+    renameAt(parentDescriptor, temporaryName, targetName);
     published = true;
   } catch (error) {
     if (descriptor !== undefined) {
@@ -868,12 +868,12 @@ function atomicWrite(
       }
     }
     if (directoryChain !== undefined) {
-      unlinkAtV1(directoryChain.descriptor, temporaryName);
+      unlinkAt(directoryChain.descriptor, temporaryName);
     }
     throw error;
   } finally {
     if (directoryChain !== undefined) {
-      closeOpenedDirectoryChainV1(directoryChain.openedDirectories, !published);
+      closeOpenedDirectoryChain(directoryChain.openedDirectories, !published);
     }
     if (ancestorDescriptor !== undefined) {
       try {
@@ -905,8 +905,8 @@ function runBeforeDescriptorRelativePublishTestHook(): void {
 
 function stableMutationDirectory(
   directory: string,
-  prepared: WorkspaceFilesystemTargetIdentityV1,
-): WorkspaceFilesystemStatIdentityV1 {
+  prepared: WorkspaceFilesystemTargetIdentity,
+): WorkspaceFilesystemStatIdentity {
   let noFollow: Stats;
   let canonical: string;
   try {
@@ -931,9 +931,9 @@ function stableMutationDirectory(
 
 function assertMutationPathStable(
   workspace: string,
-  prepared: WorkspaceFilesystemTargetIdentityV1,
-  scope: WorkspaceFilesystemPathScopeV1,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  prepared: WorkspaceFilesystemTargetIdentity,
+  scope: WorkspaceFilesystemPathScope,
+  boundary: WorkspaceFilesystemProtectedBoundary,
   allowCreatedParents: boolean,
 ): void {
   const current = captureAdmittedMutationTargetIdentity(
@@ -954,8 +954,8 @@ function assertMutationPathStable(
   }
   if (!allowCreatedParents) {
     if (
-      workspaceFilesystemTargetIdentityDigestV1(current) !==
-      workspaceFilesystemTargetIdentityDigestV1(prepared)
+      workspaceFilesystemTargetIdentityDigest(current) !==
+      workspaceFilesystemTargetIdentityDigest(prepared)
     ) {
       throw providerError(
         'stale_preimage',
@@ -965,7 +965,7 @@ function assertMutationPathStable(
     return;
   }
   const preparedAncestor = prepared.nearestExistingCanonicalPath;
-  let ancestorIdentity: WorkspaceFilesystemStatIdentityV1;
+  let ancestorIdentity: WorkspaceFilesystemStatIdentity;
   try {
     ancestorIdentity = statIdentity(lstatSync(preparedAncestor));
   } catch {
@@ -995,7 +995,7 @@ function assertNoFollowDirectoryChain(ancestor: string, directory: string): void
   }
 }
 
-function statIdentity(stat: Stats): WorkspaceFilesystemStatIdentityV1 {
+function statIdentity(stat: Stats): WorkspaceFilesystemStatIdentity {
   return deepFreeze({
     device: String(stat.dev),
     inode: String(stat.ino),
@@ -1015,7 +1015,7 @@ function statIdentity(stat: Stats): WorkspaceFilesystemStatIdentityV1 {
 function stableDirectoryIdentity(
   directory: string,
   admittedRoot: string,
-): WorkspaceFilesystemStatIdentityV1 {
+): WorkspaceFilesystemStatIdentity {
   const noFollow = lstatSync(directory);
   if (!noFollow.isDirectory() || noFollow.isSymbolicLink()) {
     throw providerError('path_invalid', 'Filesystem search directory is not a stable directory.');
@@ -1046,8 +1046,8 @@ function stableRegularFilePath(path: string, admittedRoot: string): boolean {
 }
 
 function sameStatIdentity(
-  left: WorkspaceFilesystemStatIdentityV1,
-  right: WorkspaceFilesystemStatIdentityV1,
+  left: WorkspaceFilesystemStatIdentity,
+  right: WorkspaceFilesystemStatIdentity,
 ): boolean {
   return (
     left.device === right.device &&
@@ -1060,8 +1060,8 @@ function sameStatIdentity(
 }
 
 function sameDirectoryObjectIdentity(
-  left: WorkspaceFilesystemStatIdentityV1,
-  right: WorkspaceFilesystemStatIdentityV1,
+  left: WorkspaceFilesystemStatIdentity,
+  right: WorkspaceFilesystemStatIdentity,
 ): boolean {
   return (
     left.type === 'directory' &&
@@ -1123,7 +1123,7 @@ interface IgnoreRule {
 function ancestorIgnoreRules(
   workspace: string,
   searchRoot: string,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): IgnoreRule[] {
   if (!inside(workspace, searchRoot)) return [];
   const relativeRoot = toPosix(relative(workspace, searchRoot));
@@ -1147,7 +1147,7 @@ function appendAdmittedIgnoreRules(
   workspace: string,
   directory: string,
   base: string,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): void {
   const ignorePath = join(directory, '.gitignore');
   const relativePath = toPosix(relative(workspace, ignorePath));
@@ -1163,10 +1163,10 @@ function loadIgnoreRules(
   workspace: string,
   directory: string,
   base: string,
-  boundary: WorkspaceFilesystemProtectedBoundaryV1,
+  boundary: WorkspaceFilesystemProtectedBoundary,
 ): IgnoreRule[] {
   const ignorePath = join(directory, '.gitignore');
-  let lexicalIdentity: WorkspaceFilesystemStatIdentityV1;
+  let lexicalIdentity: WorkspaceFilesystemStatIdentity;
   try {
     const lexical = lstatSync(ignorePath);
     if (!lexical.isFile() || lexical.isSymbolicLink()) {
@@ -1429,11 +1429,11 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 interface ProviderError extends Error {
-  readonly providerCode: WorkspaceFilesystemProviderFailureCodeV1;
+  readonly providerCode: WorkspaceFilesystemProviderFailureCode;
 }
 
 function providerError(
-  code: WorkspaceFilesystemProviderFailureCodeV1,
+  code: WorkspaceFilesystemProviderFailureCode,
   message: string,
 ): ProviderError {
   const error = new Error(message) as ProviderError;
@@ -1443,7 +1443,7 @@ function providerError(
 
 function isProviderError(
   error: unknown,
-  code?: WorkspaceFilesystemProviderFailureCodeV1,
+  code?: WorkspaceFilesystemProviderFailureCode,
 ): error is ProviderError {
   return (
     error instanceof Error &&
@@ -1452,10 +1452,8 @@ function isProviderError(
   );
 }
 
-function failureFrom<Observation>(
-  error: unknown,
-): WorkspaceFilesystemProviderResultV1<Observation> {
-  if (error instanceof WorkspaceFilesystemGrantErrorV1) {
+function failureFrom<Observation>(error: unknown): WorkspaceFilesystemProviderResult<Observation> {
+  if (error instanceof WorkspaceFilesystemGrantError) {
     return deepFreeze({ ok: false, failure: { code: error.code, message: error.message } });
   }
   if (isProviderError(error)) {
@@ -1472,7 +1470,7 @@ function failureFrom<Observation>(
 
 function success<Observation>(
   observation: Observation,
-): WorkspaceFilesystemProviderResultV1<Observation> {
+): WorkspaceFilesystemProviderResult<Observation> {
   return deepFreeze({ ok: true, observation });
 }
 

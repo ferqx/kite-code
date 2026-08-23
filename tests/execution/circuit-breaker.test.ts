@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  DEFAULT_CIRCUIT_BREAKER_CONFIG_V1 as DEFAULT_CIRCUIT_BREAKER_CONFIG,
-  evaluateAutoReviewCircuitBreakerV1 as evaluateCircuitBreaker,
-  type AutoReviewRejectionEntryV1 as RejectionEntry,
+  DEFAULT_CIRCUIT_BREAKER_CONFIG_ as DEFAULT_CIRCUIT_BREAKER_CONFIG,
+  evaluateAutoReviewCircuitBreaker as evaluateCircuitBreaker,
+  type AutoReviewRejectionEntry as RejectionEntry,
 } from '@kite/agent-kernel';
 
 const cfg = DEFAULT_CIRCUIT_BREAKER_CONFIG;

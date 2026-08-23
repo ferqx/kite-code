@@ -1,36 +1,36 @@
 /** Protocol-first contract for the governed sandbox preparation seam (ADR-0111). */
 
 import type {
-  SandboxExecutionBackendV1 as RuntimeContractSandboxExecutionBackendV1,
-  SandboxPreparationArtifactRefV1 as RuntimeContractSandboxPreparationArtifactRefV1,
-  SandboxPreparationResourceSemanticsV1 as RuntimeContractSandboxPreparationResourceSemanticsV1,
+  SandboxExecutionBackend as RuntimeContractSandboxExecutionBackend,
+  SandboxPreparationArtifactRef as RuntimeContractSandboxPreparationArtifactRef,
+  SandboxPreparationResourceSemantics as RuntimeContractSandboxPreparationResourceSemantics,
 } from '@kite/runtime-contract';
 
-export const SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1 = 'kite.sandbox-execution-provider.v1' as const;
+export const SANDBOX_EXECUTION_PROVIDER_SCHEMA_ = 'kite.sandbox-execution-provider.v1' as const;
 
 /** SPI-facing alias for the neutral Runtime Contract backend fact. */
-export type SandboxExecutionBackendV1 = RuntimeContractSandboxExecutionBackendV1;
+export type SandboxExecutionBackend = RuntimeContractSandboxExecutionBackend;
 
-export type SandboxBoundaryEnforcementV1 = 'enforced' | 'unsupported';
+export type SandboxBoundaryEnforcement = 'enforced' | 'unsupported';
 
 /** Provider-returned, release-comparable backend evidence. */
-export interface ExecutionBackendCapabilitiesV1 {
-  readonly backend: SandboxExecutionBackendV1;
+export interface ExecutionBackendCapabilities {
+  readonly backend: SandboxExecutionBackend;
   readonly filesystem: Readonly<
-    Record<'read_only' | 'workspace_write' | 'full_access', SandboxBoundaryEnforcementV1>
+    Record<'read_only' | 'workspace_write' | 'full_access', SandboxBoundaryEnforcement>
   >;
-  readonly network: Readonly<Record<'off' | 'allowlist', SandboxBoundaryEnforcementV1>>;
-  readonly syscallFilter: SandboxBoundaryEnforcementV1;
-  readonly processTreeLimit: SandboxBoundaryEnforcementV1;
-  readonly childProcessInheritance: SandboxBoundaryEnforcementV1;
-  readonly verifiedInProcessReadOnly: SandboxBoundaryEnforcementV1;
+  readonly network: Readonly<Record<'off' | 'allowlist', SandboxBoundaryEnforcement>>;
+  readonly syscallFilter: SandboxBoundaryEnforcement;
+  readonly processTreeLimit: SandboxBoundaryEnforcement;
+  readonly childProcessInheritance: SandboxBoundaryEnforcement;
+  readonly verifiedInProcessReadOnly: SandboxBoundaryEnforcement;
 }
 
 /** SPI-facing alias for the neutral Runtime Contract resource fact. */
-export type SandboxPreparationResourceSemanticsV1 =
-  RuntimeContractSandboxPreparationResourceSemanticsV1;
+export type SandboxPreparationResourceSemantics =
+  RuntimeContractSandboxPreparationResourceSemantics;
 
-export interface SandboxResourceLimitsV1 {
+export interface SandboxResourceLimits {
   readonly cpuTime: number;
   readonly virtualMemory: number;
   readonly fileSize: number;
@@ -40,8 +40,8 @@ export interface SandboxResourceLimitsV1 {
 }
 
 /** Frozen facts selected by Policy/approval before the Provider is entered. */
-export interface SandboxPreparationV1 {
-  readonly schema: typeof SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1;
+export interface SandboxPreparation {
+  readonly schema: typeof SANDBOX_EXECUTION_PROVIDER_SCHEMA_;
   readonly toolCallId: string;
   readonly capabilityId: string;
   readonly capabilityRevision: string;
@@ -57,13 +57,13 @@ export interface SandboxPreparationV1 {
   readonly filesystemMode: 'workspace_only' | 'allow_all';
   readonly networkMode: 'disabled' | 'allow_all';
   readonly executionTrust: 'policy_proven_read_only' | null;
-  readonly resourceLimits: SandboxResourceLimitsV1;
+  readonly resourceLimits: SandboxResourceLimits;
   readonly timeoutMs: number;
   readonly cancellationCorrelation: string;
 }
 
 /** Exact command authority; descriptions or shell strings cannot replace this identity. */
-export interface ApprovedShellCommandV1 {
+export interface ApprovedShellCommand {
   readonly schema: 'kite.approved-shell-command.v1';
   readonly invocationId: string;
   readonly attempt: number;
@@ -75,13 +75,13 @@ export interface ApprovedShellCommandV1 {
   readonly seal: string;
 }
 
-export interface SandboxPreparationGrantV1 {
-  readonly schema: typeof SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1;
+export interface SandboxPreparationGrant {
+  readonly schema: typeof SANDBOX_EXECUTION_PROVIDER_SCHEMA_;
   readonly purpose: 'prepare';
-  readonly preparation: SandboxPreparationV1;
-  readonly approvedCommand: ApprovedShellCommandV1;
+  readonly preparation: SandboxPreparation;
+  readonly approvedCommand: ApprovedShellCommand;
   readonly preparationDigest: string;
-  readonly resourceSemantics: SandboxPreparationResourceSemanticsV1;
+  readonly resourceSemantics: SandboxPreparationResourceSemantics;
   /** Required only for allocating preparation and issued after durable intent ack. */
   readonly preparationIntentDigest: string | null;
   readonly issuedAtMs: number;
@@ -89,8 +89,8 @@ export interface SandboxPreparationGrantV1 {
   readonly seal: string;
 }
 
-export interface SandboxCleanupGrantV1 {
-  readonly schema: typeof SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1;
+export interface SandboxCleanupGrant {
+  readonly schema: typeof SANDBOX_EXECUTION_PROVIDER_SCHEMA_;
   readonly purpose: 'dispose' | 'reconcile' | 'reconcile_preparation_intent';
   readonly toolCallId: string;
   readonly capabilityId: string;
@@ -113,17 +113,17 @@ export interface SandboxCleanupGrantV1 {
 }
 
 /** SPI-facing alias for the neutral Runtime Contract artifact identity. */
-export type SandboxPreparationArtifactRefV1 = RuntimeContractSandboxPreparationArtifactRefV1;
+export type SandboxPreparationArtifactRef = RuntimeContractSandboxPreparationArtifactRef;
 
-export interface SandboxCleanupHandleV1 {
+export interface SandboxCleanupHandle {
   readonly kind: 'none' | 'runtime_directory' | 'windows_restricted_token';
   readonly resourceId: string;
   readonly recoveryPayload: Readonly<Record<string, string | number | boolean | null>>;
 }
 
 /** Data-first plan. It deliberately has no execute/spawn method. */
-export interface PreparedSandboxExecutionV1 {
-  readonly schema: typeof SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1;
+export interface PreparedSandboxExecution {
+  readonly schema: typeof SANDBOX_EXECUTION_PROVIDER_SCHEMA_;
   readonly kind: 'prepared_sandbox_execution';
   readonly planId: string;
   readonly toolCallId: string;
@@ -142,12 +142,12 @@ export interface PreparedSandboxExecutionV1 {
   readonly env: Readonly<Record<string, string>> | null;
   readonly stdin: string | null;
   readonly transport: 'stdio' | 'windows_restricted_token_v1';
-  readonly backend: SandboxExecutionBackendV1;
-  readonly backendCapabilities: ExecutionBackendCapabilitiesV1;
+  readonly backend: SandboxExecutionBackend;
+  readonly backendCapabilities: ExecutionBackendCapabilities;
   readonly enforcement: 'full' | 'partial';
-  readonly resourceSemantics: SandboxPreparationResourceSemanticsV1;
+  readonly resourceSemantics: SandboxPreparationResourceSemantics;
   readonly expiresAtMs: number;
-  readonly cleanup: SandboxCleanupHandleV1;
+  readonly cleanup: SandboxCleanupHandle;
 }
 
 /**
@@ -155,7 +155,7 @@ export interface PreparedSandboxExecutionV1 {
  * authenticity; the SPI only carries the exact preparation objects and typed
  * acknowledgements between those owners.
  */
-export type SandboxPreparationLifecycleStageV1 =
+export type SandboxPreparationLifecycleStage =
   | 'preparation_intent'
   | 'preparation_ready'
   | 'execution_dispatch_intent'
@@ -163,20 +163,20 @@ export type SandboxPreparationLifecycleStageV1 =
   | 'disposal_intent'
   | 'disposal_receipt';
 
-export interface SandboxPreparationIntentAcknowledgementV1 {
+export interface SandboxPreparationIntentAcknowledgement {
   readonly acknowledged: true;
   readonly stage: 'preparation_intent';
   readonly intentDigest: string;
 }
 
-export interface SandboxPreparationReadyAcknowledgementV1 {
+export interface SandboxPreparationReadyAcknowledgement {
   readonly acknowledged: true;
   readonly stage: 'preparation_ready';
   readonly readyDigest: string;
-  readonly preparationArtifact: Readonly<SandboxPreparationArtifactRefV1>;
+  readonly preparationArtifact: Readonly<SandboxPreparationArtifactRef>;
 }
 
-export interface SandboxExecutionDispatchIntentAcknowledgementV1 {
+export interface SandboxExecutionDispatchIntentAcknowledgement {
   readonly acknowledged: true;
   readonly stage: 'execution_dispatch_intent';
   readonly dispatchId: string;
@@ -184,7 +184,7 @@ export interface SandboxExecutionDispatchIntentAcknowledgementV1 {
   readonly dispatchIntentDigest: string;
 }
 
-export interface SandboxExecutionSupervisorStartedAcknowledgementV1 {
+export interface SandboxExecutionSupervisorStartedAcknowledgement {
   readonly acknowledged: true;
   readonly stage: 'execution_supervisor_started';
   readonly dispatchId: string;
@@ -194,20 +194,20 @@ export interface SandboxExecutionSupervisorStartedAcknowledgementV1 {
   readonly processStartIdentity: string;
 }
 
-export type SandboxDisposalPurposeV1 = 'dispose' | 'reconcile_preparation_intent';
+export type SandboxDisposalPurpose = 'dispose' | 'reconcile_preparation_intent';
 
-export interface SandboxDisposalIntentAcknowledgementV1 {
+export interface SandboxDisposalIntentAcknowledgement {
   readonly acknowledged: true;
   readonly stage: 'disposal_intent';
-  readonly purpose: SandboxDisposalPurposeV1;
+  readonly purpose: SandboxDisposalPurpose;
   readonly lifecycleIntentDigest: string;
   readonly cleanupAttempt: number;
 }
 
-export interface SandboxDisposalReceiptAcknowledgementV1 {
+export interface SandboxDisposalReceiptAcknowledgement {
   readonly acknowledged: true;
   readonly stage: 'disposal_receipt';
-  readonly purpose: SandboxDisposalPurposeV1;
+  readonly purpose: SandboxDisposalPurpose;
   readonly lifecycleIntentDigest: string;
   readonly cleanupAttempt: number;
   readonly disposed: boolean;
@@ -218,22 +218,22 @@ export interface SandboxDisposalReceiptAcknowledgementV1 {
  * Rejection or unavailable persistence rejects the Promise; a bare boolean is
  * deliberately not an acknowledgement.
  */
-export interface SandboxPreparationLifecycleV1 {
+export interface SandboxPreparationLifecycle {
   recordPreparationIntent(
-    preparation: Readonly<SandboxPreparationV1>,
-  ): Promise<Readonly<SandboxPreparationIntentAcknowledgementV1>>;
+    preparation: Readonly<SandboxPreparation>,
+  ): Promise<Readonly<SandboxPreparationIntentAcknowledgement>>;
   recordPreparationReady(
-    prepared: Readonly<PreparedSandboxExecutionV1>,
-  ): Promise<Readonly<SandboxPreparationReadyAcknowledgementV1>>;
+    prepared: Readonly<PreparedSandboxExecution>,
+  ): Promise<Readonly<SandboxPreparationReadyAcknowledgement>>;
   recordExecutionDispatchIntent(
-    prepared: Readonly<PreparedSandboxExecutionV1>,
+    prepared: Readonly<PreparedSandboxExecution>,
     input: {
       readonly dispatchId: string;
       readonly supervisorNonce: string;
     },
-  ): Promise<Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>>;
+  ): Promise<Readonly<SandboxExecutionDispatchIntentAcknowledgement>>;
   recordExecutionSupervisorStarted(
-    prepared: Readonly<PreparedSandboxExecutionV1>,
+    prepared: Readonly<PreparedSandboxExecution>,
     input: {
       readonly dispatchId: string;
       readonly dispatchIntentDigest: string;
@@ -241,36 +241,36 @@ export interface SandboxPreparationLifecycleV1 {
       readonly processGroupId: number;
       readonly processStartIdentity: string;
     },
-  ): Promise<Readonly<SandboxExecutionSupervisorStartedAcknowledgementV1>>;
+  ): Promise<Readonly<SandboxExecutionSupervisorStartedAcknowledgement>>;
   recordDisposalIntent(
-    prepared: Readonly<PreparedSandboxExecutionV1> | null,
-  ): Promise<Readonly<SandboxDisposalIntentAcknowledgementV1>>;
+    prepared: Readonly<PreparedSandboxExecution> | null,
+  ): Promise<Readonly<SandboxDisposalIntentAcknowledgement>>;
   recordDisposalReceipt(input: {
-    readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
-    readonly purpose: SandboxDisposalPurposeV1;
+    readonly prepared: Readonly<PreparedSandboxExecution> | null;
+    readonly purpose: SandboxDisposalPurpose;
     readonly lifecycleIntentDigest: string;
     readonly cleanupAttempt: number;
     readonly disposed: boolean;
-  }): Promise<Readonly<SandboxDisposalReceiptAcknowledgementV1>>;
+  }): Promise<Readonly<SandboxDisposalReceiptAcknowledgement>>;
 }
 
 /**
  * Neutral artifact transport for the exact prepared plan. It does not expose
  * a Store, event, codec, or integrity implementation.
  */
-export interface SandboxPreparationArtifactPortV1 {
-  write(prepared: Readonly<PreparedSandboxExecutionV1>): Readonly<SandboxPreparationArtifactRefV1>;
-  read(reference: Readonly<SandboxPreparationArtifactRefV1>): Readonly<PreparedSandboxExecutionV1>;
+export interface SandboxPreparationArtifactPort {
+  write(prepared: Readonly<PreparedSandboxExecution>): Readonly<SandboxPreparationArtifactRef>;
+  read(reference: Readonly<SandboxPreparationArtifactRef>): Readonly<PreparedSandboxExecution>;
 }
 
-export interface SandboxPreparedProcessCleanupV1 {
+export interface SandboxPreparedProcessCleanup {
   readonly confirmedExited: boolean;
   readonly gracefulRequested: boolean;
   readonly forced: boolean;
   readonly unconfirmedDescendantCount: number;
 }
 
-export type SandboxPreparedProcessFailureCodeV1 =
+export type SandboxPreparedProcessFailureCode =
   | 'invalid_prepared_execution'
   | 'dispatch_not_acknowledged'
   | 'supervisor_start_not_acknowledged'
@@ -278,84 +278,84 @@ export type SandboxPreparedProcessFailureCodeV1 =
   | 'transport_failed'
   | 'process_failed';
 
-export interface SandboxPreparedProcessFailureV1 {
-  readonly code: SandboxPreparedProcessFailureCodeV1;
+export interface SandboxPreparedProcessFailure {
+  readonly code: SandboxPreparedProcessFailureCode;
   readonly message: string;
 }
 
-export type SandboxPreparedProcessUnknownCodeV1 =
+export type SandboxPreparedProcessUnknownCode =
   | 'post_go_terminal_unknown'
   | 'post_go_transport_lost'
   | 'post_go_cleanup_unknown';
 
-export interface SandboxPreparedProcessUnknownV1 {
-  readonly code: SandboxPreparedProcessUnknownCodeV1;
+export interface SandboxPreparedProcessUnknown {
+  readonly code: SandboxPreparedProcessUnknownCode;
   readonly message: string;
 }
 
-export interface SandboxPreparedProcessCompletedResultV1 {
+export interface SandboxPreparedProcessCompletedResult {
   readonly kind: 'completed';
   readonly executionPhase: 'go_started';
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
-  readonly processCleanup: Readonly<SandboxPreparedProcessCleanupV1>;
+  readonly processCleanup: Readonly<SandboxPreparedProcessCleanup>;
 }
 
-export interface SandboxPreparedProcessTerminatedResultV1 {
+export interface SandboxPreparedProcessTerminatedResult {
   readonly kind: 'terminated';
   readonly executionPhase: 'go_started';
   readonly terminationReason: 'timed_out' | 'cancelled';
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
-  readonly processCleanup: Readonly<SandboxPreparedProcessCleanupV1>;
+  readonly processCleanup: Readonly<SandboxPreparedProcessCleanup>;
 }
 
-export interface SandboxPreparedProcessFailedResultV1 {
+export interface SandboxPreparedProcessFailedResult {
   readonly kind: 'failed';
   readonly executionPhase: 'not_started' | 'supervisor_started_before_go';
   readonly exitCode: number | null;
   readonly stdout: string;
   readonly stderr: string;
-  readonly failure: Readonly<SandboxPreparedProcessFailureV1>;
-  readonly processCleanup: Readonly<SandboxPreparedProcessCleanupV1>;
+  readonly failure: Readonly<SandboxPreparedProcessFailure>;
+  readonly processCleanup: Readonly<SandboxPreparedProcessCleanup>;
 }
 
 /** A post-GO unknown is terminally distinct and is never retry-safe. */
-export interface SandboxPreparedProcessUnknownResultV1 {
+export interface SandboxPreparedProcessUnknownResult {
   readonly kind: 'unknown';
   readonly executionPhase: 'unknown_after_go';
   readonly exitCode: null;
   readonly stdout: string;
   readonly stderr: string;
-  readonly unknown: Readonly<SandboxPreparedProcessUnknownV1>;
+  readonly unknown: Readonly<SandboxPreparedProcessUnknown>;
   readonly retryable: false;
-  readonly processCleanup: Readonly<SandboxPreparedProcessCleanupV1>;
+  readonly processCleanup: Readonly<SandboxPreparedProcessCleanup>;
 }
 
 /** JSON-safe process terminal facts returned across the neutral Host seam. */
-export type SandboxPreparedProcessExecutionResultV1 =
-  | SandboxPreparedProcessCompletedResultV1
-  | SandboxPreparedProcessTerminatedResultV1
-  | SandboxPreparedProcessFailedResultV1
-  | SandboxPreparedProcessUnknownResultV1;
+export type SandboxPreparedProcessExecutionResult =
+  | SandboxPreparedProcessCompletedResult
+  | SandboxPreparedProcessTerminatedResult
+  | SandboxPreparedProcessFailedResult
+  | SandboxPreparedProcessUnknownResult;
 
-export interface SandboxPreparedProcessExecutionPortV1 {
+export interface SandboxPreparedProcessExecutionPort {
   execute(input: {
     /** Exact prepared object already acknowledged by the lifecycle owner. */
-    readonly prepared: Readonly<PreparedSandboxExecutionV1>;
-    readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgementV1>;
-    readonly lifecycle: SandboxPreparationLifecycleV1;
+    readonly prepared: Readonly<PreparedSandboxExecution>;
+    readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgement>;
+    readonly lifecycle: SandboxPreparationLifecycle;
     readonly timeoutMs: number;
     readonly signal?: AbortSignal;
     readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
     /** Caller-owned ephemeral facts; never part of the prepared artifact. */
     readonly ephemeralEnvironment?: Readonly<Record<string, string>>;
-  }): Promise<Readonly<SandboxPreparedProcessExecutionResultV1>>;
+  }): Promise<Readonly<SandboxPreparedProcessExecutionResult>>;
 }
 
-export type SandboxExecutionProviderFailureCodeV1 =
+export type SandboxExecutionProviderFailureCode =
   | 'invalid_grant'
   | 'expired_grant'
   | 'cancelled'
@@ -367,35 +367,35 @@ export type SandboxExecutionProviderFailureCodeV1 =
   | 'fake_denied'
   | 'fake_crashed';
 
-export interface SandboxExecutionProviderFailureV1 {
-  readonly code: SandboxExecutionProviderFailureCodeV1;
+export interface SandboxExecutionProviderFailure {
+  readonly code: SandboxExecutionProviderFailureCode;
   readonly message: string;
 }
 
-export type SandboxExecutionProviderResultV1<Observation> =
+export type SandboxExecutionProviderResult<Observation> =
   | { readonly ok: true; readonly observation: Observation }
-  | { readonly ok: false; readonly failure: SandboxExecutionProviderFailureV1 };
+  | { readonly ok: false; readonly failure: SandboxExecutionProviderFailure };
 
-export interface SandboxExecutionProviderV1 {
-  readonly resourceSemantics: SandboxPreparationResourceSemanticsV1;
+export interface SandboxExecutionProvider {
+  readonly resourceSemantics: SandboxPreparationResourceSemantics;
   prepare(input: {
-    readonly grant: SandboxPreparationGrantV1;
+    readonly grant: SandboxPreparationGrant;
     readonly signal?: AbortSignal;
-  }): Promise<SandboxExecutionProviderResultV1<PreparedSandboxExecutionV1>>;
+  }): Promise<SandboxExecutionProviderResult<PreparedSandboxExecution>>;
   dispose(input: {
-    readonly grant: SandboxCleanupGrantV1;
-    readonly prepared: PreparedSandboxExecutionV1;
+    readonly grant: SandboxCleanupGrant;
+    readonly prepared: PreparedSandboxExecution;
     readonly signal?: AbortSignal;
-  }): Promise<SandboxExecutionProviderResultV1<{ readonly disposed: true }>>;
+  }): Promise<SandboxExecutionProviderResult<{ readonly disposed: true }>>;
   /** Crash recovery consumes only durable artifact data, never a lost in-memory handle. */
   reconcile(input: {
-    readonly grant: SandboxCleanupGrantV1;
-    readonly prepared: PreparedSandboxExecutionV1;
+    readonly grant: SandboxCleanupGrant;
+    readonly prepared: PreparedSandboxExecution;
     readonly signal?: AbortSignal;
-  }): Promise<SandboxExecutionProviderResultV1<{ readonly disposed: true }>>;
+  }): Promise<SandboxExecutionProviderResult<{ readonly disposed: true }>>;
   /** Reclaims a deterministic allocation when the host crashed before ready publication. */
   reconcilePreparationIntent(input: {
-    readonly grant: SandboxCleanupGrantV1;
+    readonly grant: SandboxCleanupGrant;
     readonly signal?: AbortSignal;
-  }): Promise<SandboxExecutionProviderResultV1<{ readonly disposed: true }>>;
+  }): Promise<SandboxExecutionProviderResult<{ readonly disposed: true }>>;
 }

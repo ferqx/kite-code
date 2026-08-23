@@ -1,9 +1,9 @@
 import { join } from 'node:path';
-import { userKiteCodeDirV1 } from '../model/artifact-paths';
+import { userKiteCodeDir } from '../model/artifact-paths';
 
 /** Installation-private root for immutable user-level Plan Artifacts. */
 export function planArtifactRoot(): string {
-  return join(userKiteCodeDirV1(), 'plans');
+  return join(userKiteCodeDir(), 'plans');
 }
 
 /**

@@ -2,7 +2,7 @@ import { dlopen, type Pointer, ptr } from 'bun:ffi';
 import { closeSync, constants } from 'node:fs';
 import { join } from 'node:path';
 
-interface UnixDescriptorFilesystemApiV1 {
+interface UnixDescriptorFilesystemApi {
   openat(directoryDescriptor: number, name: Pointer, flags: number, mode: number): number;
   mkdirat(directoryDescriptor: number, name: Pointer, mode: number): number;
   unlinkat(directoryDescriptor: number, name: Pointer, flags: number): number;
@@ -14,25 +14,25 @@ interface UnixDescriptorFilesystemApiV1 {
   ): number;
 }
 
-interface OpenedDirectoryV1 {
+interface OpenedDirectory {
   readonly descriptor: number;
   readonly parentDescriptor: number;
   readonly name: string;
   readonly created: boolean;
 }
 
-export interface DescriptorRelativeDirectoryChainV1 {
+export interface DescriptorRelativeDirectoryChain {
   readonly descriptor: number;
-  readonly openedDirectories: readonly OpenedDirectoryV1[];
+  readonly openedDirectories: readonly OpenedDirectory[];
 }
 
 let unixLibrary:
   | {
-      readonly symbols: UnixDescriptorFilesystemApiV1;
+      readonly symbols: UnixDescriptorFilesystemApi;
     }
   | undefined;
 
-interface WindowsFilesystemApiV1 {
+interface WindowsFilesystemApi {
   CreateFileW(
     path: Pointer,
     desiredAccess: number,
@@ -58,7 +58,7 @@ interface WindowsFilesystemApiV1 {
   GetLastError(): number;
 }
 
-let windowsLibrary: WindowsFilesystemApiV1 | undefined;
+let windowsLibrary: WindowsFilesystemApi | undefined;
 
 const WINDOWS_GENERIC_READ = 0x8000_0000;
 const WINDOWS_GENERIC_WRITE = 0x4000_0000;
@@ -81,7 +81,7 @@ const WINDOWS_MOVEFILE_WRITE_THROUGH = 0x8;
  * FILE_SHARE_DELETE, so it cannot be renamed or removed while a unique
  * temporary sibling is written and atomically replaced.
  */
-export function atomicReplaceInLockedWindowsDirectoryV1(input: {
+export function atomicReplaceInLockedWindowsDirectory(input: {
   readonly ancestorDirectory: string;
   readonly directorySegments: readonly string[];
   readonly targetName: string;
@@ -96,7 +96,7 @@ export function atomicReplaceInLockedWindowsDirectoryV1(input: {
   assertBasename(input.temporaryName);
   for (const segment of input.directorySegments) assertBasename(segment);
 
-  const api = windowsFilesystemApiV1();
+  const api = windowsFilesystemApi();
   const directories: Array<number | bigint> = [];
   let directoryPath = input.ancestorDirectory;
   let temporaryPath = '';
@@ -140,17 +140,17 @@ export function atomicReplaceInLockedWindowsDirectoryV1(input: {
  * Fail before mutation I/O when this process has no descriptor-relative
  * filesystem backend. Path-based publication is intentionally not a fallback.
  */
-export function assertDescriptorRelativeMutationSupportedV1(): void {
-  unixDescriptorFilesystemApiV1();
+export function assertDescriptorRelativeMutationSupported(): void {
+  unixDescriptorFilesystemApi();
 }
 
 /** Open or create a no-follow directory chain below an already pinned ancestor. */
-export function openOrCreateDirectoryChainAtV1(
+export function openOrCreateDirectoryChainAt(
   ancestorDescriptor: number,
   segments: readonly string[],
-): DescriptorRelativeDirectoryChainV1 {
-  const api = unixDescriptorFilesystemApiV1();
-  const openedDirectories: OpenedDirectoryV1[] = [];
+): DescriptorRelativeDirectoryChain {
+  const api = unixDescriptorFilesystemApi();
+  const openedDirectories: OpenedDirectory[] = [];
   let descriptor = ancestorDescriptor;
   try {
     for (const segment of segments) {
@@ -179,19 +179,19 @@ export function openOrCreateDirectoryChainAtV1(
     }
     return { descriptor, openedDirectories };
   } catch (error) {
-    closeOpenedDirectoryChainV1(openedDirectories, true);
+    closeOpenedDirectoryChain(openedDirectories, true);
     throw error;
   }
 }
 
 /** Create one private regular file without re-resolving the pinned parent path. */
-export function openExclusiveFileAtV1(
+export function openExclusiveFileAt(
   directoryDescriptor: number,
   name: string,
   mode: number,
 ): number {
   assertBasename(name);
-  const descriptor = unixDescriptorFilesystemApiV1().openat(
+  const descriptor = unixDescriptorFilesystemApi().openat(
     directoryDescriptor,
     namePointer(name),
     constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
@@ -204,7 +204,7 @@ export function openExclusiveFileAtV1(
 }
 
 /** Atomically replace a sibling entry using the pinned parent on both sides. */
-export function renameAtV1(
+export function renameAt(
   directoryDescriptor: number,
   sourceName: string,
   targetName: string,
@@ -212,7 +212,7 @@ export function renameAtV1(
   assertBasename(sourceName);
   assertBasename(targetName);
   if (
-    unixDescriptorFilesystemApiV1().renameat(
+    unixDescriptorFilesystemApi().renameat(
       directoryDescriptor,
       namePointer(sourceName),
       directoryDescriptor,
@@ -224,20 +224,20 @@ export function renameAtV1(
 }
 
 /** Best-effort cleanup constrained to a pinned directory descriptor. */
-export function unlinkAtV1(directoryDescriptor: number, name: string): void {
+export function unlinkAt(directoryDescriptor: number, name: string): void {
   assertBasename(name);
-  unixDescriptorFilesystemApiV1().unlinkat(directoryDescriptor, namePointer(name), 0);
+  unixDescriptorFilesystemApi().unlinkat(directoryDescriptor, namePointer(name), 0);
 }
 
 /**
  * Close child descriptors in reverse order and optionally remove only the
  * directories this invocation created, using their still-pinned parents.
  */
-export function closeOpenedDirectoryChainV1(
-  openedDirectories: readonly OpenedDirectoryV1[],
+export function closeOpenedDirectoryChain(
+  openedDirectories: readonly OpenedDirectory[],
   removeCreated: boolean,
 ): void {
-  const api = unixDescriptorFilesystemApiV1();
+  const api = unixDescriptorFilesystemApi();
   for (let index = openedDirectories.length - 1; index >= 0; index--) {
     const opened = openedDirectories[index]!;
     try {
@@ -252,7 +252,7 @@ export function closeOpenedDirectoryChainV1(
 }
 
 function openDirectoryAt(
-  api: UnixDescriptorFilesystemApiV1,
+  api: UnixDescriptorFilesystemApi,
   directoryDescriptor: number,
   name: string,
 ): number {
@@ -282,7 +282,7 @@ function assertBasename(name: string): void {
 }
 
 function openOrCreateLockedWindowsDirectory(
-  api: WindowsFilesystemApiV1,
+  api: WindowsFilesystemApi,
   path: string,
 ): number | bigint {
   try {
@@ -295,7 +295,7 @@ function openOrCreateLockedWindowsDirectory(
   }
 }
 
-function openLockedWindowsDirectory(api: WindowsFilesystemApiV1, path: string): number | bigint {
+function openLockedWindowsDirectory(api: WindowsFilesystemApi, path: string): number | bigint {
   const handle = api.CreateFileW(
     widePointer(path),
     WINDOWS_GENERIC_READ,
@@ -328,7 +328,7 @@ function openLockedWindowsDirectory(api: WindowsFilesystemApiV1, path: string): 
   }
 }
 
-function createWindowsTemporaryFile(api: WindowsFilesystemApiV1, path: string): number | bigint {
+function createWindowsTemporaryFile(api: WindowsFilesystemApi, path: string): number | bigint {
   const handle = api.CreateFileW(
     widePointer(path),
     WINDOWS_GENERIC_WRITE,
@@ -345,7 +345,7 @@ function createWindowsTemporaryFile(api: WindowsFilesystemApiV1, path: string): 
 }
 
 function writeWindowsFile(
-  api: WindowsFilesystemApiV1,
+  api: WindowsFilesystemApi,
   handle: number | bigint,
   content: string,
 ): void {
@@ -373,17 +373,17 @@ function invalidWindowsHandle(handle: number | bigint): boolean {
   return handle === 0 || handle === -1 || handle === BigInt('18446744073709551615');
 }
 
-function closeWindowsHandle(api: WindowsFilesystemApiV1, handle: number | bigint): void {
+function closeWindowsHandle(api: WindowsFilesystemApi, handle: number | bigint): void {
   if (!invalidWindowsHandle(handle)) api.CloseHandle(handle);
 }
 
-function windowsFilesystemError(api: WindowsFilesystemApiV1, action: string): Error {
+function windowsFilesystemError(api: WindowsFilesystemApi, action: string): Error {
   return new Error(
     `Windows locked-directory publication could not ${action} (error ${api.GetLastError()}).`,
   );
 }
 
-function windowsFilesystemApiV1(): WindowsFilesystemApiV1 {
+function windowsFilesystemApi(): WindowsFilesystemApi {
   if (windowsLibrary) return windowsLibrary;
   windowsLibrary = dlopen('kernel32.dll', {
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
@@ -399,7 +399,7 @@ function windowsFilesystemApiV1(): WindowsFilesystemApiV1 {
   return windowsLibrary;
 }
 
-function unixDescriptorFilesystemApiV1(): UnixDescriptorFilesystemApiV1 {
+function unixDescriptorFilesystemApi(): UnixDescriptorFilesystemApi {
   if (process.platform === 'win32') {
     throw new Error('Descriptor-relative Workspace mutation is unavailable on Windows.');
   }

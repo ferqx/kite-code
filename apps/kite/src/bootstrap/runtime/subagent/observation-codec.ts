@@ -1,15 +1,15 @@
 import { createHash } from 'node:crypto';
-import { runtimeHostStateNormalizeToolRecoveryJournalV1 } from '@kite/runtime-host';
+import { runtimeHostStateNormalizeToolRecoveryJournal } from '@kite/runtime-host';
 import type {
-  SubagentHandleV1,
-  SubagentObservationV1,
+  SubagentHandle,
+  SubagentObservation,
   SuspendedSubagentSnapshot,
 } from '@kite/runtime-spi';
-import { SUBAGENT_PROVIDER_SCHEMA_V1 } from '@kite/runtime-spi';
+import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
 import { deserializeSubagentContinuation } from './continuation-codec';
 import type { SubAgentResult } from './types';
 
-const RESOURCE_ADMISSION_FAILURE_REASONS_V1 = new Set([
+const RESOURCE_ADMISSION_FAILURE_REASONS_ = new Set([
   'budget_unconfigured',
   'persistence_unavailable',
   'budget_exhausted',
@@ -19,9 +19,9 @@ const RESOURCE_ADMISSION_FAILURE_REASONS_V1 = new Set([
 ]);
 
 /** Parent-only decoder for the bounded Provider observation envelope. */
-export function subagentResultFromObservationV1(
-  observation: Readonly<SubagentObservationV1>,
-  expectedHandle: Readonly<SubagentHandleV1>,
+export function subagentResultFromObservation(
+  observation: Readonly<SubagentObservation>,
+  expectedHandle: Readonly<SubagentHandle>,
   expectedRecoveryIdentityKey: string,
 ): SubAgentResult {
   const payload = observation.privatePayload as Record<string, unknown>;
@@ -51,7 +51,7 @@ export function subagentResultFromObservationV1(
     'toolRecovery',
   ].sort();
   if (
-    observation.schema !== SUBAGENT_PROVIDER_SCHEMA_V1 ||
+    observation.schema !== SUBAGENT_PROVIDER_SCHEMA_ ||
     observation.handleId !== expectedHandle.handleId ||
     observation.childInvocationId !== expectedHandle.childInvocationId ||
     JSON.stringify(Object.keys(observation).sort()) !== JSON.stringify(envelopeKeys) ||
@@ -79,7 +79,7 @@ export function subagentResultFromObservationV1(
             'parentToolCallId',
             'reason',
           ]) &&
-        RESOURCE_ADMISSION_FAILURE_REASONS_V1.has(
+        RESOURCE_ADMISSION_FAILURE_REASONS_.has(
           payload.resourceAdmissionFailure.reason as string,
         ) &&
         typeof payload.resourceAdmissionFailure.message === 'string' &&
@@ -151,7 +151,7 @@ export function subagentResultFromObservationV1(
     exhaustedFingerprints: payload.exhaustedFingerprints as NonNullable<
       SubAgentResult['exhaustedFingerprints']
     >,
-    toolRecovery: runtimeHostStateNormalizeToolRecoveryJournalV1(
+    toolRecovery: runtimeHostStateNormalizeToolRecoveryJournal(
       payload.toolRecovery,
       expectedRecoveryIdentityKey,
     ),

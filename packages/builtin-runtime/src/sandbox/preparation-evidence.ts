@@ -1,42 +1,42 @@
 import type {
-  SandboxPreparationIntentRecordV1,
-  SandboxPreparationReadyRecordV1,
+  SandboxPreparationIntentRecord,
+  SandboxPreparationReadyRecord,
 } from '@kite/runtime-contract';
-import { digestCapabilityValueV1 } from '../skills/capability-domain';
+import { digestCapabilityValue } from '../skills/capability-domain';
 
-export function sandboxPreparationIntentDigestV1(
-  input: Omit<SandboxPreparationIntentRecordV1, 'intentDigest' | 'recordedAt'>,
+export function sandboxPreparationIntentDigest(
+  input: Omit<SandboxPreparationIntentRecord, 'intentDigest' | 'recordedAt'>,
 ): string {
-  return digestCapabilityValueV1(input);
+  return digestCapabilityValue(input);
 }
 
-export function sandboxPreparationReadyDigestV1(
-  input: Omit<SandboxPreparationReadyRecordV1, 'readyDigest' | 'readyAt'>,
+export function sandboxPreparationReadyDigest(
+  input: Omit<SandboxPreparationReadyRecord, 'readyDigest' | 'readyAt'>,
 ): string {
-  return digestCapabilityValueV1(input);
+  return digestCapabilityValue(input);
 }
 
-export function sandboxDisposalLifecycleIntentDigestV1(input: {
+export function sandboxDisposalLifecycleIntentDigest(input: {
   readonly invocationId: string;
   readonly attempt: number;
   readonly readyDigest: string;
   readonly planDigest: string;
   readonly cleanupDigest: string;
 }): string {
-  return digestCapabilityValueV1({ kind: 'sandbox_disposal_lifecycle_intent_v1', ...input });
+  return digestCapabilityValue({ kind: 'sandbox_disposal_lifecycle_intent_v1', ...input });
 }
 
-export function sandboxAbandonmentLifecycleIntentDigestV1(input: {
+export function sandboxAbandonmentLifecycleIntentDigest(input: {
   readonly invocationId: string;
   readonly attempt: number;
   readonly intentDigest: string;
   readonly preparationDigest: string;
 }): string {
-  return digestCapabilityValueV1({ kind: 'sandbox_abandonment_lifecycle_intent_v1', ...input });
+  return digestCapabilityValue({ kind: 'sandbox_abandonment_lifecycle_intent_v1', ...input });
 }
 
-export function validateSandboxPreparationIntentRecordV1(
-  value: SandboxPreparationIntentRecordV1,
+export function validateSandboxPreparationIntentRecord(
+  value: SandboxPreparationIntentRecord,
 ): void {
   if (
     !Number.isSafeInteger(value.attempt) ||
@@ -52,7 +52,7 @@ export function validateSandboxPreparationIntentRecordV1(
     !value.executionBoundaryDigest ||
     value.resourceSemantics !== 'allocating' ||
     value.intentDigest !==
-      sandboxPreparationIntentDigestV1({
+      sandboxPreparationIntentDigest({
         attempt: value.attempt,
         toolCallId: value.toolCallId,
         capabilityId: value.capabilityId,
@@ -71,9 +71,7 @@ export function validateSandboxPreparationIntentRecordV1(
   }
 }
 
-export function validateSandboxPreparationReadyRecordV1(
-  value: SandboxPreparationReadyRecordV1,
-): void {
+export function validateSandboxPreparationReadyRecord(value: SandboxPreparationReadyRecord): void {
   const artifact = value?.preparationArtifact;
   if (
     !Number.isSafeInteger(value.attempt) ||
@@ -96,7 +94,7 @@ export function validateSandboxPreparationReadyRecordV1(
     !Number.isSafeInteger(artifact.byteLength) ||
     artifact.byteLength < 1 ||
     value.readyDigest !==
-      sandboxPreparationReadyDigestV1({
+      sandboxPreparationReadyDigest({
         attempt: value.attempt,
         intentDigest: value.intentDigest,
         preparationDigest: value.preparationDigest,

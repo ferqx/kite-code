@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { ResolvedMcpToolPolicy } from './tool-policy';
 
-interface McpWriteFeatureFlagsV1 {
-  mcpExecutionRecordV1: boolean;
-  mcpProviderActionV1: boolean;
-  verificationV1: boolean;
+interface McpWriteFeatureFlags {
+  mcpExecutionRecord: boolean;
+  mcpProviderAction: boolean;
+  verification: boolean;
 }
 
-export interface McpWriteRouteContractV1 {
+export interface McpWriteRouteContract {
   routeId: string;
   operatorIdentity: string;
   serverIdentity: string;
@@ -26,7 +26,7 @@ export interface McpWriteRouteContractV1 {
   evidenceExpiresAt: string;
 }
 
-export interface McpWriteInvocationFactsV1 {
+export interface McpWriteInvocationFacts {
   providerIdentity: string;
   serverIdentity: string;
   endpointRevision: string;
@@ -38,7 +38,7 @@ export interface McpWriteInvocationFactsV1 {
   networkBoundaryQualified: boolean;
 }
 
-export interface McpWriteIntentV1 {
+export interface McpWriteIntent {
   invocationId: string;
   routeDigest: string;
   argumentsDigest: string;
@@ -46,7 +46,7 @@ export interface McpWriteIntentV1 {
   persistedBeforeDispatch: boolean;
 }
 
-export interface McpWriteReceiptV1 {
+export interface McpWriteReceipt {
   invocationId: string;
   status: 'succeeded' | 'failed' | 'unknown';
   providerReceiptDigest?: string;
@@ -54,18 +54,18 @@ export interface McpWriteReceiptV1 {
   compensation: 'not_required' | 'succeeded' | 'failed' | 'not_observed';
 }
 
-export type McpWriteAdmissionDecisionV1 = Readonly<{
+export type McpWriteAdmissionDecision = Readonly<{
   status: 'admitted' | 'blocked';
   reasonCodes: string[];
 }>;
 
-export interface McpWriteRouteRegistryV1 {
+export interface McpWriteRouteRegistry {
   version: 1;
   registryId: string;
-  routes: McpWriteRouteContractV1[];
+  routes: McpWriteRouteContract[];
 }
 
-export interface McpWriteDispatchRequestV1 {
+export interface McpWriteDispatchRequest {
   capabilityId: string;
   capabilityRevision: string;
   providerIdentity: string;
@@ -83,7 +83,7 @@ export interface McpWriteDispatchRequestV1 {
   argumentsDigest: string;
 }
 
-export type McpWriteDispatchAdmissionV1 =
+export type McpWriteDispatchAdmission =
   | Readonly<{ admitted: false; reasonCode: string }>
   | Readonly<{
       admitted: true;
@@ -92,39 +92,37 @@ export type McpWriteDispatchAdmissionV1 =
       intentDigest: string;
     }>;
 
-export interface McpWriteDispatchGuardV1 {
-  beforeDispatch(
-    request: Readonly<McpWriteDispatchRequestV1>,
-  ): Promise<McpWriteDispatchAdmissionV1>;
+export interface McpWriteDispatchGuard {
+  beforeDispatch(request: Readonly<McpWriteDispatchRequest>): Promise<McpWriteDispatchAdmission>;
   recordOutcome(input: {
-    admission: Extract<McpWriteDispatchAdmissionV1, { admitted: true }>;
+    admission: Extract<McpWriteDispatchAdmission, { admitted: true }>;
     outcome: 'succeeded' | 'unknown';
     providerReceiptDigest: string | null;
   }): Promise<void>;
 }
 
-export class McpWriteGovernanceErrorV1 extends Error {
+export class McpWriteGovernanceError extends Error {
   readonly reasonCode: string;
 
   constructor(reasonCode: string) {
     super(`MCP write governance denied dispatch: ${reasonCode}.`);
-    this.name = 'McpWriteGovernanceErrorV1';
+    this.name = 'McpWriteGovernanceError';
     this.reasonCode = reasonCode;
   }
 }
 
-const REQUIRED_FLAGS = ['mcpExecutionRecordV1', 'mcpProviderActionV1', 'verificationV1'] as const;
+const REQUIRED_FLAGS = ['mcpExecutionRecord', 'mcpProviderAction', 'verification'] as const;
 
-export function contractDigestV1(value: unknown): string {
+export function contractDigest(value: unknown): string {
   return createHash('sha256').update(canonical(value)).digest('hex');
 }
 
-export function routeContractDigestV1(route: McpWriteRouteContractV1): string {
-  validateMcpWriteRouteContractV1(route);
-  return contractDigestV1(route);
+export function routeContractDigest(route: McpWriteRouteContract): string {
+  validateMcpWriteRouteContract(route);
+  return contractDigest(route);
 }
 
-export function parseMcpWriteRouteRegistryV1(value: unknown): McpWriteRouteRegistryV1 {
+export function parseMcpWriteRouteRegistry(value: unknown): McpWriteRouteRegistry {
   if (!isRecord(value) || !hasExactKeys(value, ['registryId', 'routes', 'version'])) {
     throw new Error('MCP write route registry has missing or unknown fields.');
   }
@@ -136,25 +134,25 @@ export function parseMcpWriteRouteRegistryV1(value: unknown): McpWriteRouteRegis
   ) {
     throw new Error('MCP write route registry identity is invalid.');
   }
-  const routes = value.routes as McpWriteRouteContractV1[];
+  const routes = value.routes as McpWriteRouteContract[];
   const routeIds = new Set<string>();
   for (const route of routes) {
-    if (!isRecord(route) || !hasExactKeys(route, MCP_WRITE_ROUTE_KEYS_V1)) {
+    if (!isRecord(route) || !hasExactKeys(route, MCP_WRITE_ROUTE_KEYS_)) {
       throw new Error('MCP write route has missing or unknown fields.');
     }
-    validateMcpWriteRouteContractV1(route);
+    validateMcpWriteRouteContract(route);
     if (routeIds.has(route.routeId)) throw new Error('MCP write route IDs must be unique.');
     routeIds.add(route.routeId);
   }
   return structuredClone({ version: 1, registryId: value.registryId, routes });
 }
 
-export function evaluateMcpWriteAdmissionV1(input: {
-  flags: Pick<McpWriteFeatureFlagsV1, (typeof REQUIRED_FLAGS)[number]>;
-  route?: McpWriteRouteContractV1;
-  invocation: McpWriteInvocationFactsV1;
+export function evaluateMcpWriteAdmission(input: {
+  flags: Pick<McpWriteFeatureFlags, (typeof REQUIRED_FLAGS)[number]>;
+  route?: McpWriteRouteContract;
+  invocation: McpWriteInvocationFacts;
   now: Date;
-}): McpWriteAdmissionDecisionV1 {
+}): McpWriteAdmissionDecision {
   const reasons = new Set<string>();
   for (const flag of REQUIRED_FLAGS) if (!input.flags[flag]) reasons.add(`flag_off:${flag}`);
   const route = input.route;
@@ -162,7 +160,7 @@ export function evaluateMcpWriteAdmissionV1(input: {
   if (!input.invocation.bindingCurrent) reasons.add('binding_stale');
   if (!input.invocation.networkBoundaryQualified) reasons.add('network_boundary_unqualified');
   if (route) {
-    validateMcpWriteRouteContractV1(route);
+    validateMcpWriteRouteContract(route);
     const identities = [
       ['provider_identity', input.invocation.providerIdentity, route.operatorIdentity],
       ['server_identity', input.invocation.serverIdentity, route.serverIdentity],
@@ -192,9 +190,9 @@ export function evaluateMcpWriteAdmissionV1(input: {
   });
 }
 
-export function classifyMcpWriteRecoveryV1(input: {
-  intent?: McpWriteIntentV1;
-  receipt?: McpWriteReceiptV1;
+export function classifyMcpWriteRecovery(input: {
+  intent?: McpWriteIntent;
+  receipt?: McpWriteReceipt;
   retryPolicy: ResolvedMcpToolPolicy['retry'];
   idempotencyKeyArgument?: string;
   providerActionRecovered: boolean;
@@ -250,8 +248,8 @@ export function classifyMcpWriteRecoveryV1(input: {
   });
 }
 
-export function qualifyMcpWriteRouteV1(input: {
-  route?: McpWriteRouteContractV1;
+export function qualifyMcpWriteRoute(input: {
+  route?: McpWriteRouteContract;
   observedRouteDigest?: string;
   formalTaskEvidence: 'passed' | 'failed' | 'not_observed';
   duplicateSideEffects: number;
@@ -273,8 +271,8 @@ export function qualifyMcpWriteRouteV1(input: {
     reasons.add('hard_safety_violation');
   }
   if (input.route) {
-    validateMcpWriteRouteContractV1(input.route);
-    if (input.observedRouteDigest !== routeContractDigestV1(input.route)) {
+    validateMcpWriteRouteContract(input.route);
+    if (input.observedRouteDigest !== routeContractDigest(input.route)) {
       reasons.add('route_identity_drift');
     }
     if (input.now >= new Date(input.route.evidenceExpiresAt)) reasons.add('route_evidence_stale');
@@ -285,8 +283,8 @@ export function qualifyMcpWriteRouteV1(input: {
   });
 }
 
-export function validateMcpWriteRouteContractV1(route: McpWriteRouteContractV1): void {
-  for (const field of MCP_WRITE_ROUTE_STRING_KEYS_V1) {
+export function validateMcpWriteRouteContract(route: McpWriteRouteContract): void {
+  for (const field of MCP_WRITE_ROUTE_STRING_KEYS_) {
     const value = route[field];
     if (typeof value !== 'string' || value.trim().length === 0) {
       throw new Error(`MCP write route ${field} must not be empty.`);
@@ -339,7 +337,7 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-const MCP_WRITE_ROUTE_KEYS_V1 = [
+const MCP_WRITE_ROUTE_KEYS_ = [
   'effects',
   'endpointRevision',
   'evidenceExpiresAt',
@@ -358,7 +356,7 @@ const MCP_WRITE_ROUTE_KEYS_V1 = [
   'toolRevision',
 ] as const;
 
-const MCP_WRITE_ROUTE_STRING_KEYS_V1 = [
+const MCP_WRITE_ROUTE_STRING_KEYS_ = [
   'endpointRevision',
   'evidenceExpiresAt',
   'evidenceObservedAt',

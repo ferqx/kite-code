@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
+  createBuiltinToolCatalogProjection,
 } from '@kite/builtin-runtime';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
-import { createAppToolPipelineCompositionV1 } from '#app/bootstrap/runtime/tool-pipeline-composition';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+import { createAppToolPipelineComposition } from '#app/bootstrap/runtime/tool-pipeline-composition';
 
 function createComposition() {
-  const snapshot = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules()).snapshot();
-  return createAppToolPipelineCompositionV1(createBuiltinToolCatalogProjectionV1(snapshot));
+  const snapshot = createRuntimeModuleRegistry(createBuiltinRuntimeModules()).snapshot();
+  return createAppToolPipelineComposition(createBuiltinToolCatalogProjection(snapshot));
 }
 
-describe('RMV1-16 App Tool Pipeline composition', () => {
+describe('RM-16 App Tool Pipeline composition', () => {
   test('derives each turn bundle from one frozen base projection', () => {
     const composition = createComposition();
     const first = composition.forTurn({ workspace: '/workspace/a', threadId: 'thread-a' });

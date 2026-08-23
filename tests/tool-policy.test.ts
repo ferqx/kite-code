@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { createToolApprovalBindingDigestV1 } from '@kite/agent-kernel';
+import { createToolApprovalBindingDigest } from '@kite/agent-kernel';
 import type { PendingToolRequest } from '@kite/builtin-runtime';
 import {
-  type BuiltinModelToolCatalogEntryV1,
-  type BuiltinToolCapabilityProjectionV1,
-  compileBuiltinDynamicMcpPolicyV1,
+  type BuiltinModelToolCatalogEntry,
+  type BuiltinToolCapabilityProjection,
+  compileBuiltinDynamicMcpPolicy,
 } from '@kite/builtin-runtime';
-import type { CapabilityPolicyCompilationV1, RuntimeJsonValueV1 } from '@kite/runtime-spi';
+import type { CapabilityPolicyCompilation, RuntimeJsonValue } from '@kite/runtime-spi';
 import {
   applyApprovalGrant,
   buildToolApproval,
@@ -16,7 +16,7 @@ import {
   replaceApprovalCommand,
   validateApprovalHash,
 } from '#app/bootstrap/runtime/tool-policy';
-import { testBuiltinToolCatalogV1 } from './helpers/runtime-model';
+import { testBuiltinToolCatalog } from './helpers/runtime-model';
 
 type EvaluateToolApprovalParams = {
   readonly toolName: string;
@@ -34,11 +34,11 @@ type EvaluateToolApprovalParams = {
     };
     readonly minimumApproval: 'none' | 'auto_review' | 'user';
   };
-  readonly capability?: BuiltinToolCapabilityProjectionV1;
+  readonly capability?: BuiltinToolCapabilityProjection;
 };
 
 type TestApprovalDecision = Pick<
-  CapabilityPolicyCompilationV1,
+  CapabilityPolicyCompilation,
   | 'decision'
   | 'allowed'
   | 'requiresApproval'
@@ -52,17 +52,17 @@ type TestApprovalDecision = Pick<
   readonly grantUsed: 'none' | 'same_command' | 'full_access';
 };
 
-function policyCompilationFor(params: EvaluateToolApprovalParams): CapabilityPolicyCompilationV1 {
-  const entry = testBuiltinToolCatalogV1().entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+function policyCompilationFor(params: EvaluateToolApprovalParams): CapabilityPolicyCompilation {
+  const entry = testBuiltinToolCatalog().entries.find(
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.name === params.toolName,
   );
   if (entry) {
-    return entry.compilePolicy(params.toolArgs as RuntimeJsonValueV1, {
+    return entry.compilePolicy(params.toolArgs as RuntimeJsonValue, {
       workspace: params.workspace ?? '',
       threadId: params.threadId,
       phase: params.phase,
-      promptContractV2: true,
+      promptContract: true,
     });
   }
   const effects = params.mcpPolicy?.effects ?? {
@@ -70,7 +70,7 @@ function policyCompilationFor(params: EvaluateToolApprovalParams): CapabilityPol
     network: 'write' as const,
     externalState: 'write' as const,
   };
-  return compileBuiltinDynamicMcpPolicyV1({
+  return compileBuiltinDynamicMcpPolicy({
     operationId: 'mcp:dynamic_tool',
     capabilityRevision: 'test-mcp-capability-v1',
     parserRevision: 'test-mcp-parser-v1',
@@ -127,7 +127,7 @@ const shellExecuteRequest: PendingToolRequest = {
   protectedCommand: 'bun test',
 };
 
-const presentationApprovalBindingDigest = createToolApprovalBindingDigestV1(
+const presentationApprovalBindingDigest = createToolApprovalBindingDigest(
   {
     workspace: '/tmp/project',
     threadId: 'thread-a',

@@ -1,9 +1,9 @@
 import { runTui } from '@kite/kite/tui';
-import type { AppShellExecutorV1 } from '@/app/sandbox/composition';
+import type { AppShellExecutor } from '@/app/sandbox/composition';
 import {
-  APP_PREPARED_SHELL_EXECUTION_V1,
-  type AppPreparedShellExecutionPortV1,
-  projectAppHostShellResultV1,
+  APP_PREPARED_SHELL_EXECUTION_,
+  type AppPreparedShellExecutionPort,
+  projectAppHostShellResult,
 } from '@/app/sandbox/prepared-tool-pipeline';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -55,15 +55,15 @@ const shellExecutor = (async (input) => {
     stdout: '',
     stderr: `Unexpected shell invocation ${invocation}`,
   };
-}) as AppShellExecutorV1;
+}) as AppShellExecutor;
 
-Object.defineProperty(shellExecutor, APP_PREPARED_SHELL_EXECUTION_V1, {
+Object.defineProperty(shellExecutor, APP_PREPARED_SHELL_EXECUTION_, {
   configurable: false,
   enumerable: false,
   writable: false,
   value: Object.freeze({
-    execute: async (input: Parameters<AppPreparedShellExecutionPortV1['execute']>[0]) =>
-      projectAppHostShellResultV1(
+    execute: async (input: Parameters<AppPreparedShellExecutionPort['execute']>[0]) =>
+      projectAppHostShellResult(
         await shellExecutor({
           workspace: input.workspace,
           command: input.command,

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  canonicalizeCapabilityArgumentsV1,
-  compileCapabilitySchemaV1,
-  validateCapabilityArgumentsV1,
+  canonicalizeCapabilityArguments,
+  compileCapabilitySchema,
+  validateCapabilityArguments,
 } from '@kite/builtin-runtime';
 
 function nestedObjectSchema(depth: number): Record<string, unknown> {
@@ -14,7 +14,7 @@ function nestedObjectSchema(depth: number): Record<string, unknown> {
 }
 
 function compileOutcome(
-  compile: typeof compileCapabilitySchemaV1,
+  compile: typeof compileCapabilitySchema,
   schema: unknown,
 ): { ok: true } | { ok: false; diagnostic: string } {
   const result = compile(schema);
@@ -94,11 +94,11 @@ describe('Builtin capability schema authority cutover', () => {
 
   test('keeps the accepted compiler diagnostics stable on the cutover corpus', () => {
     for (const [schema, expected] of corpus) {
-      expect(compileOutcome(compileCapabilitySchemaV1, schema)).toEqual(expected);
+      expect(compileOutcome(compileCapabilitySchema, schema)).toEqual(expected);
     }
     const valid = corpus[0][0];
-    expect(validateCapabilityArgumentsV1(valid, { name: 'kite' })).toBeNull();
-    expect(validateCapabilityArgumentsV1(valid, {})).toContain('Arguments do not match');
+    expect(validateCapabilityArguments(valid, { name: 'kite' })).toBeNull();
+    expect(validateCapabilityArguments(valid, {})).toContain('Arguments do not match');
   });
 
   test('matches canonical defaults, cloning, and stable repeated failure diagnostics', () => {
@@ -108,15 +108,15 @@ describe('Builtin capability schema authority cutover', () => {
       additionalProperties: false,
     };
     const args = {};
-    expect(canonicalizeCapabilityArgumentsV1(schema, args)).toEqual({
+    expect(canonicalizeCapabilityArguments(schema, args)).toEqual({
       ok: true,
       args: { limit: 10 },
     });
     expect(args).toEqual({});
 
     const unsupported = { type: 'object', unknownKeyword: true };
-    const first = compileOutcome(compileCapabilitySchemaV1, unsupported);
-    const second = compileOutcome(compileCapabilitySchemaV1, unsupported);
+    const first = compileOutcome(compileCapabilitySchema, unsupported);
+    const second = compileOutcome(compileCapabilitySchema, unsupported);
     expect(first).toEqual(second);
   });
 
@@ -124,14 +124,14 @@ describe('Builtin capability schema authority cutover', () => {
     const utf8AtOrBelowLimit = utf8DescriptionSchema(256 * 1024, 0);
     const utf8OverLimit = utf8DescriptionSchema(256 * 1024, 1);
     expect(Buffer.byteLength(JSON.stringify(utf8AtOrBelowLimit), 'utf8')).toBe(256 * 1024);
-    expect(compileOutcome(compileCapabilitySchemaV1, utf8AtOrBelowLimit)).toEqual({ ok: true });
-    expect(compileOutcome(compileCapabilitySchemaV1, utf8OverLimit)).toEqual({
+    expect(compileOutcome(compileCapabilitySchema, utf8AtOrBelowLimit)).toEqual({ ok: true });
+    expect(compileOutcome(compileCapabilitySchema, utf8OverLimit)).toEqual({
       ok: false,
       diagnostic: 'MCP inputSchema exceeds the 256 KiB serialized size limit.',
     });
 
-    expect(compileOutcome(compileCapabilitySchemaV1, objectNodeSchema(4096))).toEqual({ ok: true });
-    expect(compileOutcome(compileCapabilitySchemaV1, objectNodeSchema(4097))).toEqual({
+    expect(compileOutcome(compileCapabilitySchema, objectNodeSchema(4096))).toEqual({ ok: true });
+    expect(compileOutcome(compileCapabilitySchema, objectNodeSchema(4097))).toEqual({
       ok: false,
       diagnostic: 'MCP inputSchema has 4097 object nodes, exceeding the limit of 4096.',
     });
@@ -163,7 +163,7 @@ describe('Builtin capability schema authority cutover', () => {
       minProperties: 1,
       maxProperties: 5,
     };
-    expect(compileOutcome(compileCapabilitySchemaV1, draft07)).toEqual({ ok: true });
+    expect(compileOutcome(compileCapabilitySchema, draft07)).toEqual({ ok: true });
 
     const negatives: readonly [unknown, string][] = [
       [[], 'MCP tool inputSchema must be a JSON object.'],
@@ -192,7 +192,7 @@ describe('Builtin capability schema authority cutover', () => {
       ],
     ];
     for (const [schema, diagnostic] of negatives) {
-      expect(compileOutcome(compileCapabilitySchemaV1, schema)).toEqual({ ok: false, diagnostic });
+      expect(compileOutcome(compileCapabilitySchema, schema)).toEqual({ ok: false, diagnostic });
     }
   });
 
@@ -203,12 +203,12 @@ describe('Builtin capability schema authority cutover', () => {
       properties: { left: shared, right: shared },
       required: ['left', 'right'],
     };
-    expect(compileOutcome(compileCapabilitySchemaV1, sharedSchema)).toEqual({ ok: true });
+    expect(compileOutcome(compileCapabilitySchema, sharedSchema)).toEqual({ ok: true });
 
     const cyclic: Record<string, unknown> = { type: 'object' };
     cyclic.self = cyclic;
-    const first = compileOutcome(compileCapabilitySchemaV1, cyclic);
-    const second = compileOutcome(compileCapabilitySchemaV1, cyclic);
+    const first = compileOutcome(compileCapabilitySchema, cyclic);
+    const second = compileOutcome(compileCapabilitySchema, cyclic);
     const expected = {
       ok: false as const,
       diagnostic: 'Unsupported MCP inputSchema: schema must be JSON-serializable.',

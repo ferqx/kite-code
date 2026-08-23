@@ -1,7 +1,7 @@
 import type {
-  GitProcessAdapterV1,
-  GitProcessRequestV1,
-  GitProcessResultV1,
+  GitProcessAdapter,
+  GitProcessRequest,
+  GitProcessResult,
 } from '@kite/builtin-runtime/git';
 
 async function consume(
@@ -64,11 +64,11 @@ async function confirmUnixProcessGroupExited(pid: number, timeoutMs = 1_000): Pr
 }
 
 /** App-owned process adapter. Core owns argv/env/schema and never imports this implementation. */
-export function createAppGitProcessAdapterV1(
+export function createAppGitProcessAdapter(
   input: { spawn?: typeof Bun.spawn } = {},
-): GitProcessAdapterV1 {
+): GitProcessAdapter {
   return {
-    async run(request: GitProcessRequestV1): Promise<GitProcessResultV1> {
+    async run(request: GitProcessRequest): Promise<GitProcessResult> {
       if (request.signal?.aborted) {
         return {
           exitCode: 130,

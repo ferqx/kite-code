@@ -1,5 +1,5 @@
 # Runtime Contract
 
-Private, in-process client boundary for Kite Runtime. RMV1-02 exposes only a
-versioned boundary descriptor; production commands, queries, and subscriptions
-remain owned by the legacy runtime until their scheduled cutover.
+Private, in-process client boundary for Kite Runtime. It exposes neutral
+commands, queries, subscriptions, and presentation facts without importing App,
+TUI, storage, provider, or concrete execution types.

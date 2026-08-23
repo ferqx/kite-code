@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { OBSERVABILITY_METRIC_DRAFT_SCHEMA_V1 } from '@kite/runtime-contract';
+import { OBSERVABILITY_METRIC_DRAFT_SCHEMA_ } from '@kite/runtime-contract';
 import {
-  createBuiltinObservabilityProjectorV1,
-  LowCardinalityAliasMapperV1,
+  createBuiltinObservabilityProjector,
+  LowCardinalityAliasMapper,
 } from '../src/observability';
 
 const NOW = '2026-08-21T00:00:00.000Z';
 
 describe('Builtin observability projector', () => {
   test('maps Kernel facts to Host-valid metric drafts without event authority', () => {
-    const projector = createBuiltinObservabilityProjectorV1({
+    const projector = createBuiltinObservabilityProjector({
       modelVisibleCapabilityAliases: ['shell_execute'],
     });
     const drafts = projector.mapRuntimeFact({
@@ -22,13 +22,13 @@ describe('Builtin observability projector', () => {
 
     expect(drafts).toEqual([
       {
-        schema: OBSERVABILITY_METRIC_DRAFT_SCHEMA_V1,
+        schema: OBSERVABILITY_METRIC_DRAFT_SCHEMA_,
         name: 'tool_total',
         observedAt: NOW,
         attributes: { outcome: 'timed_out', capability: 'shell_execute' },
       },
       {
-        schema: OBSERVABILITY_METRIC_DRAFT_SCHEMA_V1,
+        schema: OBSERVABILITY_METRIC_DRAFT_SCHEMA_,
         name: 'tool_duration_ms',
         value: 25,
         observedAt: NOW,
@@ -41,12 +41,12 @@ describe('Builtin observability projector', () => {
   });
 
   test('maps typed model, resource, release, task, failure and receipt facts', () => {
-    const projector = createBuiltinObservabilityProjectorV1({ releaseRouteAliases: ['route-a'] });
+    const projector = createBuiltinObservabilityProjector({ releaseRouteAliases: ['route-a'] });
     expect(
       projector.mapModelObservation({ observedAt: NOW, routeAlias: 'route-a', outcome: 'success' }),
     ).toEqual([
       {
-        schema: OBSERVABILITY_METRIC_DRAFT_SCHEMA_V1,
+        schema: OBSERVABILITY_METRIC_DRAFT_SCHEMA_,
         name: 'model_request_total',
         observedAt: NOW,
         attributes: { outcome: 'success', route: 'route-a' },
@@ -83,10 +83,10 @@ describe('Builtin observability projector', () => {
   });
 
   test('keeps arbitrary aliases bounded and rejects unsafe controlled aliases', () => {
-    const aliases = new LowCardinalityAliasMapperV1(['route-a', 'route-b'], 1);
+    const aliases = new LowCardinalityAliasMapper(['route-a', 'route-b'], 1);
     expect(aliases.map('route-a')).toBe('route-a');
     expect(aliases.map('route-b')).toBe('other');
     expect(aliases.map('/private/path')).toBe('custom/unknown');
-    expect(() => new LowCardinalityAliasMapperV1(['/private/path'], 1)).toThrow();
+    expect(() => new LowCardinalityAliasMapper(['/private/path'], 1)).toThrow();
   });
 });

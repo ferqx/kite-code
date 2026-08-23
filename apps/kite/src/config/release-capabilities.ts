@@ -90,8 +90,8 @@ export function parseCapabilityReleaseState(value: unknown): CapabilityReleaseSt
   return capabilityReleaseStateSchema.parse(value);
 }
 
-export const CAPABILITY_PROFILE_VERSION_V1 = 1 as const;
-export const CAPABILITY_PROFILE_GATES_V1 = Object.freeze(['G3', 'G4', 'G5'] as const);
+export const CAPABILITY_PROFILE_VERSION_ = 1 as const;
+export const CAPABILITY_PROFILE_GATES_ = Object.freeze(['G3', 'G4', 'G5'] as const);
 
 const capabilityProfileIdentitySchema = z
   .string()
@@ -102,7 +102,7 @@ const capabilityProfileSortedIdentityListSchema = z
   .array(capabilityProfileIdentitySchema)
   .max(64)
   .superRefine((values, context) => {
-    const normalized = [...new Set(values)].sort(compareCapabilityIdentityV1);
+    const normalized = [...new Set(values)].sort(compareCapabilityIdentity);
     if (
       normalized.length !== values.length ||
       normalized.some((value, index) => value !== values[index])
@@ -114,7 +114,7 @@ const capabilityProfileSortedIdentityListSchema = z
     }
   });
 
-const capabilityProfileDependencyV1Schema = z
+const capabilityProfileDependencySchema = z
   .object({
     dependencyId: capabilityProfileIdentitySchema,
     expectedRevision: capabilityProfileIdentitySchema,
@@ -125,23 +125,23 @@ const capabilityProfileDependencyV1Schema = z
  * Capability-specific release ceiling. This is a contract, not evidence that
  * the capability has passed an internal, canary, beta, or stable Gate.
  */
-export const capabilityProfileV1Schema = z
+export const capabilityProfileSchema = z
   .object({
-    schemaVersion: z.literal(CAPABILITY_PROFILE_VERSION_V1),
+    schemaVersion: z.literal(CAPABILITY_PROFILE_VERSION_),
     profileId: capabilityProfileIdentitySchema,
     capability: releaseCapabilitySchema,
     requiredFeatureFlags: capabilityProfileSortedIdentityListSchema.min(1),
     state: capabilityReleaseStateSchema,
-    dependencies: z.array(capabilityProfileDependencyV1Schema).max(32),
+    dependencies: z.array(capabilityProfileDependencySchema).max(32),
     routeAllowlist: capabilityProfileSortedIdentityListSchema,
     platformAllowlist: capabilityProfileSortedIdentityListSchema,
     evidence: z
       .object({
         freshnessSeconds: z.number().finite().int().nonnegative(),
         requiredGates: z.tuple([
-          z.literal(CAPABILITY_PROFILE_GATES_V1[0]),
-          z.literal(CAPABILITY_PROFILE_GATES_V1[1]),
-          z.literal(CAPABILITY_PROFILE_GATES_V1[2]),
+          z.literal(CAPABILITY_PROFILE_GATES_[0]),
+          z.literal(CAPABILITY_PROFILE_GATES_[1]),
+          z.literal(CAPABILITY_PROFILE_GATES_[2]),
         ]),
       })
       .strict(),
@@ -157,7 +157,7 @@ export const capabilityProfileV1Schema = z
   .strict()
   .superRefine((profile, context) => {
     const dependencyIds = profile.dependencies.map(({ dependencyId }) => dependencyId);
-    const sorted = [...new Set(dependencyIds)].sort(compareCapabilityIdentityV1);
+    const sorted = [...new Set(dependencyIds)].sort(compareCapabilityIdentity);
     if (
       sorted.length !== dependencyIds.length ||
       sorted.some((dependencyId, index) => dependencyId !== dependencyIds[index])
@@ -202,14 +202,14 @@ export const capabilityProfileV1Schema = z
     }
   });
 
-export type CapabilityProfileV1 = z.infer<typeof capabilityProfileV1Schema>;
+export type CapabilityProfile = z.infer<typeof capabilityProfileSchema>;
 
-export interface CapabilityProfileDependencyStateV1 {
+export interface CapabilityProfileDependencyState {
   status: 'ready' | 'blocked';
   revision: string;
 }
 
-export type CapabilityProfileAdmissionReasonV1 =
+export type CapabilityProfileAdmissionReason =
   | 'dependency_blocked'
   | 'dependency_revision_mismatch'
   | 'dependency_unknown'
@@ -227,40 +227,40 @@ export type CapabilityProfileAdmissionReasonV1 =
   | 'route_not_admitted'
   | 'route_unknown';
 
-export interface CapabilityProfileAdmissionDecisionV1 {
+export interface CapabilityProfileAdmissionDecision {
   admitted: boolean;
   capability: ReleaseCapability;
   maturity: CapabilityMaturity;
   rollout: RolloutStage;
-  reasons: readonly CapabilityProfileAdmissionReasonV1[];
+  reasons: readonly CapabilityProfileAdmissionReason[];
   unknownDependencies: readonly string[];
 }
 
-export function parseCapabilityProfileV1(value: unknown): CapabilityProfileV1 {
-  return capabilityProfileV1Schema.parse(value);
+export function parseCapabilityProfile(value: unknown): CapabilityProfile {
+  return capabilityProfileSchema.parse(value);
 }
 
 /**
  * Admission is a pure intersection with the already admitted embedded
  * ceiling. Missing dependency, platform, or route facts never become grants.
  */
-export function evaluateCapabilityProfileAdmissionV1(input: {
-  profile: CapabilityProfileV1;
+export function evaluateCapabilityProfileAdmission(input: {
+  profile: CapabilityProfile;
   embeddedCeiling: CapabilityReleaseState;
   features: Readonly<Partial<Record<FeatureFlagName, boolean>>>;
-  dependencies: Readonly<Record<string, CapabilityProfileDependencyStateV1 | undefined>>;
+  dependencies: Readonly<Record<string, CapabilityProfileDependencyState | undefined>>;
   evidence?: {
     ageSeconds: number;
     gates: Readonly<
-      Record<(typeof CAPABILITY_PROFILE_GATES_V1)[number], 'passed' | 'failed' | 'not_observed'>
+      Record<(typeof CAPABILITY_PROFILE_GATES_)[number], 'passed' | 'failed' | 'not_observed'>
     >;
   };
   platform?: string;
   route?: string;
-}): CapabilityProfileAdmissionDecisionV1 {
-  const profile = parseCapabilityProfileV1(input.profile);
+}): CapabilityProfileAdmissionDecision {
+  const profile = parseCapabilityProfile(input.profile);
   const ceiling = parseCapabilityReleaseState(input.embeddedCeiling);
-  const reasons = new Set<CapabilityProfileAdmissionReasonV1>();
+  const reasons = new Set<CapabilityProfileAdmissionReason>();
   const unknownDependencies: string[] = [];
 
   for (const featureFlag of profile.requiredFeatureFlags as FeatureFlagName[]) {
@@ -316,17 +316,17 @@ export function evaluateCapabilityProfileAdmissionV1(input: {
     else if (!profile.routeAllowlist.includes(input.route)) reasons.add('route_not_admitted');
   }
 
-  const normalizedReasons = [...reasons].sort(compareCapabilityIdentityV1);
+  const normalizedReasons = [...reasons].sort(compareCapabilityIdentity);
   return Object.freeze({
     admitted: normalizedReasons.length === 0,
     capability: profile.capability,
     maturity: profile.state.maturity,
     rollout: profile.state.maxRollout,
     reasons: Object.freeze(normalizedReasons),
-    unknownDependencies: Object.freeze(unknownDependencies.sort(compareCapabilityIdentityV1)),
+    unknownDependencies: Object.freeze(unknownDependencies.sort(compareCapabilityIdentity)),
   });
 }
 
-function compareCapabilityIdentityV1(left: string, right: string): number {
+function compareCapabilityIdentity(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }

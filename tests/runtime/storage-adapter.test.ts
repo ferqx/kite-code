@@ -10,28 +10,26 @@ import {
   type RuntimeEvent,
   reduceAgentState,
 } from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBindingV1 } from '@kite/runtime-host';
-import type { RuntimeSnapshotCodecV1 } from '@kite/runtime-host/storage';
+import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
+import type { RuntimeSnapshotCodec } from '@kite/runtime-host/storage';
 import {
-  createState25CodecForTestV1,
-  createState25Store4StorageForTestV1,
+  createStateStorageForTest,
+  withTestStateProjectIdentity,
 } from '../../scripts/support/runtime-storage';
 
-const state = createRuntimeHostStateStorageBindingV1();
-const codec = createState25CodecForTestV1(
-  state.codec as RuntimeSnapshotCodecV1<RuntimeEvent, AgentState>,
-);
+const state = createRuntimeHostStateStorageBinding();
+const codec = state.codec as RuntimeSnapshotCodec<RuntimeEvent, AgentState>;
 
 function createAdapter(databasePath: string, sessionId: string) {
-  return createState25Store4StorageForTestV1<RuntimeEvent, AgentState>({
+  return createStateStorageForTest<RuntimeEvent, AgentState>({
     databasePath,
     codec,
     sessionId,
   });
 }
 
-describe('SQLite Store 4 RuntimeStorage adapter', () => {
-  test('strictly reopens an existing Store 4 session without schema or marker drift', () => {
+describe('SQLite RuntimeStorage adapter', () => {
+  test('strictly reopens an existing current session without schema or marker drift', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-rmv1-v4-adapter-'));
     const databasePath = join(root, 'runtime.db');
     const sessionId = 'state-session';
@@ -51,10 +49,10 @@ describe('SQLite Store 4 RuntimeStorage adapter', () => {
           createdAt: '2026-08-20T00:00:00.000Z',
         }),
       );
-      const nextState: AgentState = {
+      const nextState = withTestStateProjectIdentity<AgentState>({
         ...reduceAgentState(initial, event),
         revision: 1,
-      };
+      });
       assertAgentStateInvariants(initial);
       assertAgentStateInvariants(nextState);
 
@@ -69,9 +67,9 @@ describe('SQLite Store 4 RuntimeStorage adapter', () => {
 
       const adapter = createAdapter(databasePath, sessionId);
       expect(adapter.adapterId).toBe('sqlite');
-      expect(adapter.stateSchemaVersion).toBe(25);
-      expect(adapter.storeSchemaVersion).toBe(4);
-      expect(adapter.compatibilityEpoch).toBe('kite-runtime-2026-08-18');
+      expect(adapter.stateSchemaVersion).toBe(26);
+      expect(adapter.storeSchemaVersion).toBe(5);
+      expect(adapter.formatEpoch).toBe('kite-runtime-modularization-v1-2026-08-19');
       expect(adapter.sessions.loadEventsStrict(sessionId)).toHaveLength(1);
       expect(adapter.sessions.loadSnapshot<AgentState>(sessionId)?.revision).toBe(1);
       adapter.close();
@@ -88,8 +86,8 @@ describe('SQLite Store 4 RuntimeStorage adapter', () => {
         );
         expect(markers).toEqual(
           new Map([
-            ['format_version', '4'],
-            ['runtime_format_epoch', 'kite-runtime-2026-08-18'],
+            ['format_version', '5'],
+            ['runtime_format_epoch', 'kite-runtime-modularization-v1-2026-08-19'],
           ]),
         );
         expect(
@@ -105,7 +103,7 @@ describe('SQLite Store 4 RuntimeStorage adapter', () => {
               "select count(*) as count from sqlite_master where type = 'index' and sql is not null",
             )
             .get()?.count,
-        ).toBe(3);
+        ).toBe(2);
       } finally {
         database.close();
       }

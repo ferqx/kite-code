@@ -1,22 +1,22 @@
 import type {
-  SubagentHandleArtifactRefV1 as RuntimeContractSubagentHandleArtifactRefV1,
-  SubagentTaskArtifactV1 as RuntimeContractSubagentTaskArtifactV1,
+  SubagentHandleArtifactRef as RuntimeContractSubagentHandleArtifactRef,
+  SubagentTaskArtifact as RuntimeContractSubagentTaskArtifact,
 } from '@kite/runtime-contract';
 import type { JsonObject } from './subagent';
 
 /** JSON-safe authority context values crossing the private Subagent SPI. */
-export type SubagentAgentPhaseV1 = 'planning' | 'building';
-export type SubagentInteractionModeV1 = 'accept_edits' | 'auto' | 'full';
-export type SubagentRoleV1 = 'explore' | 'plan' | 'code' | 'review';
-export type SubagentWorkspaceAccessV1 = 'write';
+export type SubagentAgentPhase = 'planning' | 'building';
+export type SubagentInteractionMode = 'accept_edits' | 'auto' | 'full';
+export type SubagentRole = 'explore' | 'plan' | 'code' | 'review';
+export type SubagentWorkspaceAccess = 'write';
 
 /** Protocol-first contract for the governed child lifecycle seam (ADR-0111). */
-export const SUBAGENT_PROVIDER_SCHEMA_V1 = 'kite.subagent-provider.v1' as const;
+export const SUBAGENT_PROVIDER_SCHEMA_ = 'kite.subagent-provider.v1' as const;
 
 /** SPI-facing alias for the neutral Runtime Contract task artifact identity. */
-export type SubagentTaskArtifactV1 = RuntimeContractSubagentTaskArtifactV1;
+export type SubagentTaskArtifact = RuntimeContractSubagentTaskArtifact;
 
-export interface SubagentTaskRequestArtifactV1 {
+export interface SubagentTaskRequestArtifact {
   readonly artifactId: string;
   readonly kind: 'subagent_task_request';
   readonly integrityIdentifier: string;
@@ -24,38 +24,38 @@ export interface SubagentTaskRequestArtifactV1 {
 }
 
 /** SPI-facing alias for the neutral Runtime Contract handle artifact identity. */
-export type SubagentHandleArtifactRefV1 = RuntimeContractSubagentHandleArtifactRefV1;
+export type SubagentHandleArtifactRef = RuntimeContractSubagentHandleArtifactRef;
 
-export interface SubagentCapabilityCeilingV1 {
+export interface SubagentCapabilityCeiling {
   readonly allowedTools: readonly string[];
   readonly bindingIds: readonly string[];
   readonly bindingRevision: string;
   readonly ceilingDigest: string;
 }
 
-export interface SubagentAuthorizationContextV1 {
+export interface SubagentAuthorizationContext {
   readonly authorizationDigest: string;
-  readonly interactionMode: SubagentInteractionModeV1;
-  readonly phase: SubagentAgentPhaseV1;
-  readonly workspaceAccess: SubagentWorkspaceAccessV1;
+  readonly interactionMode: SubagentInteractionMode;
+  readonly phase: SubagentAgentPhase;
+  readonly workspaceAccess: SubagentWorkspaceAccess;
 }
 
-export interface SubagentExecutionBoundaryV1 {
+export interface SubagentExecutionBoundary {
   readonly canonicalWorkspace: string;
   readonly executionBoundaryDigest: string;
 }
 
-export interface SubagentResourceContextV1 {
+export interface SubagentResourceContext {
   readonly parentReservationId: string | null;
   readonly budgetDigest: string;
 }
 
-export interface SubagentModelContextV1 {
+export interface SubagentModelContext {
   readonly parentModelInvocationId: string;
   readonly parentToolCallId: string;
 }
 
-export interface SubagentGrantBindingV1 {
+export interface SubagentGrantBinding {
   readonly parentInvocationId: string;
   readonly parentToolCallId: string;
   readonly parentAttempt: number;
@@ -63,30 +63,30 @@ export interface SubagentGrantBindingV1 {
   readonly admissionDigest: string;
   readonly effectiveEffectsDigest: string;
   readonly childInvocationId: string;
-  readonly role: SubagentRoleV1;
-  readonly taskArtifact: SubagentTaskArtifactV1;
+  readonly role: SubagentRole;
+  readonly taskArtifact: SubagentTaskArtifact;
   readonly taskDigest: string;
-  readonly capabilityCeiling: SubagentCapabilityCeilingV1;
-  readonly authorization: SubagentAuthorizationContextV1;
-  readonly executionBoundary: SubagentExecutionBoundaryV1;
-  readonly resource: SubagentResourceContextV1;
+  readonly capabilityCeiling: SubagentCapabilityCeiling;
+  readonly authorization: SubagentAuthorizationContext;
+  readonly executionBoundary: SubagentExecutionBoundary;
+  readonly resource: SubagentResourceContext;
   readonly cancellationCorrelation: string;
-  readonly model: SubagentModelContextV1;
+  readonly model: SubagentModelContext;
 }
 
-interface SubagentGrantBaseV1 extends SubagentGrantBindingV1 {
-  readonly schema: typeof SUBAGENT_PROVIDER_SCHEMA_V1;
+interface SubagentGrantBase extends SubagentGrantBinding {
+  readonly schema: typeof SUBAGENT_PROVIDER_SCHEMA_;
   readonly grantId: string;
   readonly issuedAtMs: number;
   readonly expiresAtMs: number;
   readonly seal: string;
 }
 
-export interface SubagentDelegationGrantV1 extends SubagentGrantBaseV1 {
+export interface SubagentDelegationGrant extends SubagentGrantBase {
   readonly purpose: 'start';
 }
 
-export interface SubagentResumeGrantV1 extends SubagentGrantBaseV1 {
+export interface SubagentResumeGrant extends SubagentGrantBase {
   readonly purpose: 'resume';
   readonly continuationId: string;
   readonly continuationDigest: string;
@@ -95,8 +95,8 @@ export interface SubagentResumeGrantV1 extends SubagentGrantBaseV1 {
   readonly resumeAttempt: number;
 }
 
-export interface SubagentHandleV1 {
-  readonly schema: typeof SUBAGENT_PROVIDER_SCHEMA_V1;
+export interface SubagentHandle {
+  readonly schema: typeof SUBAGENT_PROVIDER_SCHEMA_;
   readonly handleId: string;
   readonly grantId: string;
   readonly purpose: 'start' | 'resume';
@@ -104,8 +104,8 @@ export interface SubagentHandleV1 {
   readonly parentInvocationId: string;
   readonly parentToolCallId: string;
   readonly parentAttempt: number;
-  readonly role: SubagentRoleV1;
-  readonly taskArtifact: SubagentTaskArtifactV1;
+  readonly role: SubagentRole;
+  readonly taskArtifact: SubagentTaskArtifact;
   readonly taskDigest: string;
   readonly continuationId: string | null;
   readonly continuationDigest: string | null;
@@ -120,8 +120,8 @@ export interface SubagentHandleV1 {
   readonly integrityIdentifier: string;
 }
 
-export interface SubagentObservationV1 {
-  readonly schema: typeof SUBAGENT_PROVIDER_SCHEMA_V1;
+export interface SubagentObservation {
+  readonly schema: typeof SUBAGENT_PROVIDER_SCHEMA_;
   readonly handleId: string;
   readonly childInvocationId: string;
   readonly status: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
@@ -133,7 +133,7 @@ export interface SubagentObservationV1 {
   readonly privatePayload: JsonObject;
 }
 
-export type SubagentProviderFailureCodeV1 =
+export type SubagentProviderFailureCode =
   | 'invalid_grant'
   | 'expired_grant'
   | 'consumed_grant'
@@ -145,39 +145,39 @@ export type SubagentProviderFailureCodeV1 =
   | 'fake_crashed'
   | 'recovery_required';
 
-export interface SubagentProviderFailureV1 {
-  readonly code: SubagentProviderFailureCodeV1;
+export interface SubagentProviderFailure {
+  readonly code: SubagentProviderFailureCode;
   readonly message: string;
 }
 
-export type SubagentProviderResultV1<T> =
+export type SubagentProviderResult<T> =
   | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly failure: SubagentProviderFailureV1 };
+  | { readonly ok: false; readonly failure: SubagentProviderFailure };
 
-export interface SubagentProviderV1 {
+export interface SubagentProvider {
   start(input: {
-    readonly grant: SubagentDelegationGrantV1;
+    readonly grant: SubagentDelegationGrant;
     readonly signal?: AbortSignal;
-  }): Promise<SubagentProviderResultV1<SubagentHandleV1>>;
+  }): Promise<SubagentProviderResult<SubagentHandle>>;
   resume(input: {
-    readonly grant: SubagentResumeGrantV1;
+    readonly grant: SubagentResumeGrant;
     readonly signal?: AbortSignal;
-  }): Promise<SubagentProviderResultV1<SubagentHandleV1>>;
+  }): Promise<SubagentProviderResult<SubagentHandle>>;
   /** Consume a durably acknowledged prepared handle and only then enter the Driver. */
   activate(input: {
-    readonly handle: SubagentHandleV1;
+    readonly handle: SubagentHandle;
     readonly signal?: AbortSignal;
-  }): Promise<SubagentProviderResultV1<{ readonly activated: true }>>;
+  }): Promise<SubagentProviderResult<{ readonly activated: true }>>;
   observe(input: {
-    readonly handle: SubagentHandleV1;
+    readonly handle: SubagentHandle;
     readonly signal?: AbortSignal;
-  }): Promise<SubagentProviderResultV1<SubagentObservationV1>>;
+  }): Promise<SubagentProviderResult<SubagentObservation>>;
   cancel(input: {
-    readonly handle: SubagentHandleV1;
+    readonly handle: SubagentHandle;
     readonly reason: string;
-  }): Promise<SubagentProviderResultV1<{ readonly cancelled: true }>>;
-  reconcile(input: { readonly handle: SubagentHandleV1 }): Promise<
-    SubagentProviderResultV1<{
+  }): Promise<SubagentProviderResult<{ readonly cancelled: true }>>;
+  reconcile(input: { readonly handle: SubagentHandle }): Promise<
+    SubagentProviderResult<{
       readonly status: 'running' | 'stopped';
       readonly cleanupConfirmed: boolean;
     }>

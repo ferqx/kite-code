@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import type { BuiltinModelToolCatalogEntryV1 } from '@kite/builtin-runtime';
+import type { BuiltinModelToolCatalogEntry } from '@kite/builtin-runtime';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  formatBuiltinToolParseErrorV1,
-  formatBuiltinToolSchemaHintV1,
+  createBuiltinToolCatalogProjection,
+  formatBuiltinToolParseError,
+  formatBuiltinToolSchemaHint,
 } from '@kite/builtin-runtime';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 
-function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const projection = createBuiltinToolCatalogProjectionV1(registry, {
+function modelEntry(name: string): BuiltinModelToolCatalogEntry {
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const projection = createBuiltinToolCatalogProjection(registry, {
     turnContext: {
       toolSearchEnabled: true,
       hasTaskAdapter: true,
@@ -18,11 +18,11 @@ function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
       brokeredGitFeatureRevision: 'brokered-git-r1',
       activeSkillFrameIds: ['skill-frame'],
       availableSkillIds: ['skill'],
-      featureFlags: { brokeredGitV1: true, skillWorkflowV1: true, skillActivationV2: true },
+      featureFlags: { brokeredGit: true, skillWorkflow: true, skillActivation: true },
     },
   });
   const entry = projection.entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.name === name,
   );
   if (!entry) throw new Error(`Builtin model catalog entry is missing: ${name}`);
@@ -31,16 +31,16 @@ function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
 
 describe('Builtin catalog schema-hint formatter', () => {
   test('uses the immutable catalog schema and Builtin contract for hints', () => {
-    expect(formatBuiltinToolSchemaHintV1(modelEntry('ask_user'))).toContain('questions');
-    expect(formatBuiltinToolSchemaHintV1(modelEntry('ask_user'))).toContain('recommended');
-    expect(formatBuiltinToolSchemaHintV1(modelEntry('update_plan'))).toContain('plan_id');
-    expect(formatBuiltinToolSchemaHintV1(modelEntry('update_plan'))).toContain('complete_plan');
-    expect(formatBuiltinToolSchemaHintV1(modelEntry('shell_execute'))).toContain('timeout_ms');
-    expect(formatBuiltinToolSchemaHintV1(modelEntry('shell_execute'))).not.toContain('exitCode');
+    expect(formatBuiltinToolSchemaHint(modelEntry('ask_user'))).toContain('questions');
+    expect(formatBuiltinToolSchemaHint(modelEntry('ask_user'))).toContain('recommended');
+    expect(formatBuiltinToolSchemaHint(modelEntry('update_plan'))).toContain('plan_id');
+    expect(formatBuiltinToolSchemaHint(modelEntry('update_plan'))).toContain('complete_plan');
+    expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).toContain('timeout_ms');
+    expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).not.toContain('exitCode');
   });
 
   test('formats Builtin, dynamic MCP, and unknown diagnostics without a second schema owner', () => {
-    const builtin = formatBuiltinToolParseErrorV1({
+    const builtin = formatBuiltinToolParseError({
       toolName: 'ask_user',
       rawArgs: '{question: 123 invalid}',
       parseError: "Expected property name or '}' at line 1",
@@ -49,7 +49,7 @@ describe('Builtin catalog schema-hint formatter', () => {
     expect(builtin).toContain('ask_user');
     expect(builtin).toContain('questions');
 
-    const mcp = formatBuiltinToolParseErrorV1({
+    const mcp = formatBuiltinToolParseError({
       toolName: 'mcp__server__tool',
       rawArgs: '{}',
       parseError: 'invalid arguments',
@@ -57,7 +57,7 @@ describe('Builtin catalog schema-hint formatter', () => {
     expect(mcp).toContain('MCP tool');
     expect(mcp).toContain('JSON schema');
 
-    const unknown = formatBuiltinToolParseErrorV1({
+    const unknown = formatBuiltinToolParseError({
       toolName: 'nonexistent_tool',
       rawArgs: 'bad args',
       parseError: 'parse error',
@@ -67,7 +67,7 @@ describe('Builtin catalog schema-hint formatter', () => {
   });
 
   test('bounds raw provider arguments in the generic formatter', () => {
-    const result = formatBuiltinToolParseErrorV1({
+    const result = formatBuiltinToolParseError({
       toolName: 'shell_execute',
       rawArgs: 'x'.repeat(2000),
       parseError: 'parse error',

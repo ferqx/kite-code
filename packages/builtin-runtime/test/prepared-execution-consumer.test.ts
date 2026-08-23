@@ -3,20 +3,20 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
-  PreparedSandboxExecutionV1,
-  SandboxExecutionProviderV1,
-  SandboxPreparationLifecycleV1,
-  SandboxPreparationV1,
-  SandboxPreparedProcessExecutionPortV1,
-  SandboxPreparedProcessExecutionResultV1,
+  PreparedSandboxExecution,
+  SandboxExecutionProvider,
+  SandboxPreparation,
+  SandboxPreparationLifecycle,
+  SandboxPreparedProcessExecutionPort,
+  SandboxPreparedProcessExecutionResult,
 } from '@kite/runtime-spi';
 import {
-  createBuiltinPreparedShellExecutionConsumerV1,
-  createBuiltinSandboxPreparationV1,
-  SandboxExecutionGrantAuthorityV1,
-  sandboxBackendCapabilitiesV1,
-  sandboxPreparationDigestV1,
-  sandboxPreparationIntentDigestV1,
+  createBuiltinPreparedShellExecutionConsumer,
+  createBuiltinSandboxPreparation,
+  SandboxExecutionGrantAuthority,
+  sandboxBackendCapabilities,
+  sandboxPreparationDigest,
+  sandboxPreparationIntentDigest,
 } from '../src/sandbox';
 
 const backend = 'bubblewrap' as const;
@@ -34,7 +34,7 @@ function makeHarness(
     readonly intentAcknowledged?: boolean;
     readonly readyAcknowledged?: boolean;
     readonly dispatchAcknowledged?: boolean;
-    readonly processResult?: Readonly<SandboxPreparedProcessExecutionResultV1>;
+    readonly processResult?: Readonly<SandboxPreparedProcessExecutionResult>;
     readonly processThrows?: boolean;
     readonly disposalReceiptAcknowledged?: boolean;
     readonly tamperPreparationDigest?: boolean;
@@ -50,8 +50,8 @@ function makeHarness(
   let providerDisposeCalls = 0;
   let providerReconcileCalls = 0;
   let processCalls = 0;
-  let preparation: Readonly<SandboxPreparationV1> | undefined;
-  let prepared: Readonly<PreparedSandboxExecutionV1> | undefined;
+  let preparation: Readonly<SandboxPreparation> | undefined;
+  let prepared: Readonly<PreparedSandboxExecution> | undefined;
   let dispatch:
     | {
         readonly dispatchId: string;
@@ -64,7 +64,7 @@ function makeHarness(
         readonly purpose: 'dispose' | 'reconcile_preparation_intent';
         readonly lifecycleIntentDigest: string;
         readonly cleanupAttempt: number;
-        readonly prepared: Readonly<PreparedSandboxExecutionV1> | null;
+        readonly prepared: Readonly<PreparedSandboxExecution> | null;
       }
     | undefined;
 
@@ -78,7 +78,7 @@ function makeHarness(
     admissionDigest: 'admission-1',
     cancellationCorrelation: 'cancel-1',
   });
-  const preparationDraft = createBuiltinSandboxPreparationV1({
+  const preparationDraft = createBuiltinSandboxPreparation({
     identity,
     canonicalWorkspace: workspace,
     workspace,
@@ -88,7 +88,7 @@ function makeHarness(
     timeoutMs: 5_000,
   });
   preparation = preparationDraft.preparation;
-  const intentDigest = sandboxPreparationIntentDigestV1({
+  const intentDigest = sandboxPreparationIntentDigest({
     attempt: preparation.attempt,
     toolCallId: preparation.toolCallId,
     capabilityId: preparation.capabilityId,
@@ -96,12 +96,12 @@ function makeHarness(
     canonicalWorkspace: preparation.canonicalWorkspace,
     effectiveEffectsDigest: preparation.effectiveEffectsDigest,
     admissionDigest: preparation.admissionDigest,
-    preparationDigest: sandboxPreparationDigestV1(preparation),
+    preparationDigest: sandboxPreparationDigest(preparation),
     commandDigest: options.tamperCommandDigest ? 'tampered-command' : preparation.commandDigest,
     executionBoundaryDigest: preparation.executionBoundaryDigest,
     resourceSemantics: 'allocating',
   });
-  const plan: PreparedSandboxExecutionV1 = {
+  const plan: PreparedSandboxExecution = {
     schema: 'kite.sandbox-execution-provider.v1',
     kind: 'prepared_sandbox_execution',
     planId: 'plan-1',
@@ -115,7 +115,7 @@ function makeHarness(
     admissionDigest: preparation.admissionDigest,
     preparationDigest: options.tamperPreparationDigest
       ? 'tampered-preparation'
-      : sandboxPreparationDigestV1(preparation),
+      : sandboxPreparationDigest(preparation),
     commandDigest: preparation.commandDigest,
     approvedArgv: preparation.argv,
     argv: preparation.argv,
@@ -124,7 +124,7 @@ function makeHarness(
     stdin: null,
     transport: 'stdio',
     backend: options.tamperBackend ? 'seatbelt' : backend,
-    backendCapabilities: sandboxBackendCapabilitiesV1(backend),
+    backendCapabilities: sandboxBackendCapabilities(backend),
     enforcement: 'full',
     resourceSemantics: 'allocating',
     expiresAtMs: options.expired ? Date.now() - 1 : Date.now() + 60_000,
@@ -132,7 +132,7 @@ function makeHarness(
   };
   prepared = options.mutablePrepared ? plan : freeze(plan);
 
-  const lifecycle: SandboxPreparationLifecycleV1 = {
+  const lifecycle: SandboxPreparationLifecycle = {
     async recordPreparationIntent(candidate) {
       events.push('intent');
       if (!options.intentAcknowledged) throw new Error('intent denied');
@@ -212,7 +212,7 @@ function makeHarness(
     },
   };
 
-  const grants = new SandboxExecutionGrantAuthorityV1();
+  const grants = new SandboxExecutionGrantAuthority();
   const processResult =
     options.processResult ??
     freeze({
@@ -227,8 +227,8 @@ function makeHarness(
         forced: false,
         unconfirmedDescendantCount: 0,
       },
-    } satisfies SandboxPreparedProcessExecutionResultV1);
-  const preparedProcess: SandboxPreparedProcessExecutionPortV1 = {
+    } satisfies SandboxPreparedProcessExecutionResult);
+  const preparedProcess: SandboxPreparedProcessExecutionPort = {
     async execute(input) {
       events.push('process');
       processCalls += 1;
@@ -245,7 +245,7 @@ function makeHarness(
       return processResult;
     },
   };
-  const provider: SandboxExecutionProviderV1 = {
+  const provider: SandboxExecutionProvider = {
     resourceSemantics: 'allocating',
     async prepare() {
       providerPrepareCalls += 1;
@@ -266,7 +266,7 @@ function makeHarness(
       return { ok: true, observation: { disposed: true } };
     },
   };
-  const consumer = createBuiltinPreparedShellExecutionConsumerV1({
+  const consumer = createBuiltinPreparedShellExecutionConsumer({
     provider,
     backend,
     grants,
@@ -461,7 +461,7 @@ describe('Builtin prepared shell execution consumer candidate', () => {
         forced: false,
         unconfirmedDescendantCount: 1,
       },
-    } satisfies SandboxPreparedProcessExecutionResultV1);
+    } satisfies SandboxPreparedProcessExecutionResult);
     const harness = makeHarness({
       intentAcknowledged: true,
       readyAcknowledged: true,

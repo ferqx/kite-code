@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from '../src/control-frame';
+import { createRuntimeControlFrame, verifyRuntimeControlFrame } from '../src/control-frame';
 
 describe('process control frame boundary', () => {
   test('binds peer, invocation, exact shape, and monotonic sequence', () => {
-    const frame = createRuntimeControlFrameV1({
+    const frame = createRuntimeControlFrame({
       schema: 'kite.runtime-control-frame.v1',
       domain: 'sandbox-posix-v1',
       peerId: 'child:1',
@@ -12,7 +12,7 @@ describe('process control frame boundary', () => {
       payload: { status: 'attempted' },
     });
     expect(
-      verifyRuntimeControlFrameV1({
+      verifyRuntimeControlFrame({
         frame,
         expectedDomain: 'sandbox-posix-v1',
         expectedPeerId: 'child:1',
@@ -20,7 +20,7 @@ describe('process control frame boundary', () => {
       }),
     ).toEqual({ status: 'attempted' });
     expect(() =>
-      verifyRuntimeControlFrameV1({
+      verifyRuntimeControlFrame({
         frame,
         expectedDomain: 'sandbox-posix-v1',
         expectedPeerId: 'child:1',
@@ -29,7 +29,7 @@ describe('process control frame boundary', () => {
       }),
     ).toThrow('replay');
     expect(() =>
-      verifyRuntimeControlFrameV1({
+      verifyRuntimeControlFrame({
         frame: { ...frame, extra: true } as typeof frame,
         expectedDomain: 'sandbox-posix-v1',
         expectedPeerId: 'child:1',

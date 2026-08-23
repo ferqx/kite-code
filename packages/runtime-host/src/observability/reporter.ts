@@ -1,20 +1,20 @@
 import {
-  createMetricSampleV1,
-  METRIC_DEFINITIONS_V1,
-  type MetricControlledAliasRegistryV1,
-  type MetricNameV1,
-  type MetricPriorityV1,
-  type MetricSampleV1,
-  metricPriorityV1,
-  parseMetricSampleV1,
+  createMetricSample,
+  METRIC_DEFINITIONS_,
+  type MetricControlledAliasRegistry,
+  type MetricName,
+  type MetricPriority,
+  type MetricSample,
+  metricPriority,
+  parseMetricSample,
 } from './metrics';
 
-export interface MetricExporterV1 {
-  export(samples: readonly MetricSampleV1[]): Promise<void>;
+export interface MetricExporter {
+  export(samples: readonly MetricSample[]): Promise<void>;
   shutdown?(): Promise<void>;
 }
 
-export interface MetricReporterStatusV1 {
+export interface MetricReporterStatus {
   enabled: boolean;
   queued: number;
   capacity: number;
@@ -23,24 +23,24 @@ export interface MetricReporterStatusV1 {
   diskSpool: false;
 }
 
-export interface MetricReporterV1 {
-  report(sample: MetricSampleV1): void;
-  reportMany(samples: readonly MetricSampleV1[]): void;
+export interface MetricReporter {
+  report(sample: MetricSample): void;
+  reportMany(samples: readonly MetricSample[]): void;
   withdrawConsent(): void;
   flush(timeoutMs: number): Promise<void>;
   shutdown(timeoutMs: number): Promise<void>;
-  status(): MetricReporterStatusV1;
+  status(): MetricReporterStatus;
 }
 
-const PRIORITY_RANK: Readonly<Record<MetricPriorityV1, number>> = Object.freeze({
+const PRIORITY_RANK: Readonly<Record<MetricPriority, number>> = Object.freeze({
   low: 0,
   normal: 1,
   critical: 2,
 });
 
-export class BoundedMetricQueueV1 {
+export class BoundedMetricQueue {
   readonly #capacity: number;
-  readonly #samples: MetricSampleV1[] = [];
+  readonly #samples: MetricSample[] = [];
   #dropped = 0;
 
   constructor(capacity: number) {
@@ -62,16 +62,16 @@ export class BoundedMetricQueueV1 {
     return this.#dropped;
   }
 
-  enqueue(sample: MetricSampleV1): void {
+  enqueue(sample: MetricSample): void {
     if (this.#samples.length < this.#capacity) {
       this.#samples.push(sample);
       return;
     }
-    const incomingRank = PRIORITY_RANK[metricPriorityV1(sample)];
+    const incomingRank = PRIORITY_RANK[metricPriority(sample)];
     let oldestLowestIndex = 0;
-    let lowestRank = PRIORITY_RANK[metricPriorityV1(this.#samples[0]!)];
+    let lowestRank = PRIORITY_RANK[metricPriority(this.#samples[0]!)];
     for (let index = 1; index < this.#samples.length; index += 1) {
-      const rank = PRIORITY_RANK[metricPriorityV1(this.#samples[index]!)];
+      const rank = PRIORITY_RANK[metricPriority(this.#samples[index]!)];
       if (rank < lowestRank) {
         lowestRank = rank;
         oldestLowestIndex = index;
@@ -84,11 +84,11 @@ export class BoundedMetricQueueV1 {
     this.#dropped += 1;
   }
 
-  snapshot(): readonly MetricSampleV1[] {
+  snapshot(): readonly MetricSample[] {
     return Object.freeze([...this.#samples]);
   }
 
-  drain(): readonly MetricSampleV1[] {
+  drain(): readonly MetricSample[] {
     return Object.freeze(this.#samples.splice(0));
   }
 
@@ -103,13 +103,13 @@ export class BoundedMetricQueueV1 {
   }
 }
 
-export class NoopMetricReporterV1 implements MetricReporterV1 {
-  report(_sample: MetricSampleV1): void {}
-  reportMany(_samples: readonly MetricSampleV1[]): void {}
+export class NoopMetricReporter implements MetricReporter {
+  report(_sample: MetricSample): void {}
+  reportMany(_samples: readonly MetricSample[]): void {}
   withdrawConsent(): void {}
   async flush(_timeoutMs: number): Promise<void> {}
   async shutdown(_timeoutMs: number): Promise<void> {}
-  status(): MetricReporterStatusV1 {
+  status(): MetricReporterStatus {
     return {
       enabled: false,
       queued: 0,
@@ -121,24 +121,24 @@ export class NoopMetricReporterV1 implements MetricReporterV1 {
   }
 }
 
-export class BufferedMetricReporterV1 implements MetricReporterV1 {
-  readonly #queue: BoundedMetricQueueV1;
-  readonly #exporter: MetricExporterV1;
-  readonly #allowedMetricNames?: ReadonlySet<MetricNameV1>;
-  readonly #controlledAliases: MetricControlledAliasRegistryV1;
-  readonly #seriesByMetric = new Map<MetricNameV1, Set<string>>();
+export class BufferedMetricReporter implements MetricReporter {
+  readonly #queue: BoundedMetricQueue;
+  readonly #exporter: MetricExporter;
+  readonly #allowedMetricNames?: ReadonlySet<MetricName>;
+  readonly #controlledAliases: MetricControlledAliasRegistry;
+  readonly #seriesByMetric = new Map<MetricName, Set<string>>();
   #enabled: boolean;
   #exporterFailures = 0;
 
   constructor(input: {
     enabled: boolean;
     capacity: number;
-    exporter: MetricExporterV1;
-    allowedMetricNames?: ReadonlySet<MetricNameV1>;
-    controlledAliases?: MetricControlledAliasRegistryV1;
+    exporter: MetricExporter;
+    allowedMetricNames?: ReadonlySet<MetricName>;
+    controlledAliases?: MetricControlledAliasRegistry;
   }) {
     this.#enabled = input.enabled;
-    this.#queue = new BoundedMetricQueueV1(input.capacity);
+    this.#queue = new BoundedMetricQueue(input.capacity);
     this.#exporter = input.exporter;
     this.#allowedMetricNames = input.allowedMetricNames;
     this.#controlledAliases = Object.freeze({
@@ -147,10 +147,10 @@ export class BufferedMetricReporterV1 implements MetricReporterV1 {
     });
   }
 
-  report(sample: MetricSampleV1): void {
+  report(sample: MetricSample): void {
     if (!this.#enabled) return;
     try {
-      const rebuilt = parseMetricSampleV1(sample, this.#controlledAliases);
+      const rebuilt = parseMetricSample(sample, this.#controlledAliases);
       if (this.#allowedMetricNames && !this.#allowedMetricNames.has(rebuilt.name)) {
         this.#queue.recordDropped(1);
         return;
@@ -161,7 +161,7 @@ export class BufferedMetricReporterV1 implements MetricReporterV1 {
       const series = this.#seriesByMetric.get(rebuilt.name) ?? new Set<string>();
       if (
         !series.has(seriesKey) &&
-        series.size >= METRIC_DEFINITIONS_V1[rebuilt.name].cardinalityLimit
+        series.size >= METRIC_DEFINITIONS_[rebuilt.name].cardinalityLimit
       ) {
         this.#queue.recordDropped(1);
         return;
@@ -174,7 +174,7 @@ export class BufferedMetricReporterV1 implements MetricReporterV1 {
     }
   }
 
-  reportMany(samples: readonly MetricSampleV1[]): void {
+  reportMany(samples: readonly MetricSample[]): void {
     for (const sample of samples) this.report(sample);
   }
 
@@ -209,7 +209,7 @@ export class BufferedMetricReporterV1 implements MetricReporterV1 {
     }
   }
 
-  status(): MetricReporterStatusV1 {
+  status(): MetricReporterStatus {
     return {
       enabled: this.#enabled,
       queued: this.#queue.size,
@@ -220,11 +220,11 @@ export class BufferedMetricReporterV1 implements MetricReporterV1 {
     };
   }
 
-  localDropMetric(observedAt: string): MetricSampleV1 | undefined {
+  localDropMetric(observedAt: string): MetricSample | undefined {
     const dropped = this.#queue.dropped;
     return dropped === 0
       ? undefined
-      : createMetricSampleV1({
+      : createMetricSample({
           name: 'telemetry_dropped_total',
           value: dropped,
           observedAt,

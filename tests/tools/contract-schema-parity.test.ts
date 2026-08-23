@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { createBuiltinRuntimeModules, RMV1_12_CAPABILITY_REVISIONS_V1 } from '#builtin-runtime';
-import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
+import { createBuiltinRuntimeModules, GIT_CAPABILITY_REVISIONS_ } from '#builtin-runtime';
+import { createRuntimeModuleRegistry } from '#runtime-spi';
 
-describe('RMV1-12 Builtin Runtime input boundary', () => {
+describe('RM-12 Builtin Runtime input boundary', () => {
   test('rejects forged input before invoking a filesystem or Git mechanism', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     let mechanismCalls = 0;
     const context = {
       grant: {
         grantId: 'grant',
         capabilityId: 'builtin:read_file',
-        capabilityRevision: RMV1_12_CAPABILITY_REVISIONS_V1['builtin:read_file'],
+        capabilityRevision: GIT_CAPABILITY_REVISIONS_['builtin:read_file'],
         authority: {},
       },
       requestDigest: 'request-digest',
@@ -38,13 +38,13 @@ describe('RMV1-12 Builtin Runtime input boundary', () => {
     };
     const readExecutor = registry.executor('builtin:read_file');
     const gitExecutor = registry.executor('builtin:git_inspect');
-    if (!readExecutor || !gitExecutor) throw new Error('RMV1-12 executors are missing');
+    if (!readExecutor || !gitExecutor) throw new Error('RM-12 executors are missing');
 
     const invalidRead = await readExecutor.execute(
       {
         invocationId: 'invocation',
         capabilityId: 'builtin:read_file',
-        capabilityRevision: RMV1_12_CAPABILITY_REVISIONS_V1['builtin:read_file'],
+        capabilityRevision: GIT_CAPABILITY_REVISIONS_['builtin:read_file'],
         input: { path: 42 },
       },
       context,
@@ -53,7 +53,7 @@ describe('RMV1-12 Builtin Runtime input boundary', () => {
       {
         invocationId: 'invocation',
         capabilityId: 'builtin:git_inspect',
-        capabilityRevision: RMV1_12_CAPABILITY_REVISIONS_V1['builtin:git_inspect'],
+        capabilityRevision: GIT_CAPABILITY_REVISIONS_['builtin:git_inspect'],
         input: { operation: 'diff', paths: ['safe.ts', 42] },
       },
       {
@@ -61,7 +61,7 @@ describe('RMV1-12 Builtin Runtime input boundary', () => {
         grant: {
           ...context.grant,
           capabilityId: 'builtin:git_inspect',
-          capabilityRevision: RMV1_12_CAPABILITY_REVISIONS_V1['builtin:git_inspect'],
+          capabilityRevision: GIT_CAPABILITY_REVISIONS_['builtin:git_inspect'],
         },
       },
     );

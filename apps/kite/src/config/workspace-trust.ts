@@ -82,7 +82,7 @@ export interface WorkspaceTrustRecord {
   source: WorkspaceTrustSource;
 }
 
-interface WorkspaceTrustFileV1 {
+interface WorkspaceTrustFile {
   version: 1;
   records: Record<string, WorkspaceTrustRecord>;
 }
@@ -154,7 +154,7 @@ export function readWorkspaceTrustStore(path = workspaceTrustPath()): WorkspaceT
   return { status: 'ready', records: records as Record<string, WorkspaceTrustRecord> };
 }
 
-function writeStore(path: string, file: WorkspaceTrustFileV1): void {
+function writeStore(path: string, file: WorkspaceTrustFile): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let fd: number | undefined;

@@ -1,6 +1,6 @@
 import type { KernelEvent } from '../../events';
-import { advanceToolRecoveryResponseV1 } from '../../recovery';
-import type { AgentReducerFactsV1 } from '../../reducer';
+import { advanceToolRecoveryResponse } from '../../recovery';
+import type { AgentReducerFacts } from '../../reducer';
 import {
   booleanField,
   eventRecord,
@@ -385,7 +385,7 @@ function modelLimits(value: unknown): AgentModelLimitsState | undefined {
 export function reduceContextState(
   state: AgentState,
   event: KernelEvent,
-  facts: AgentReducerFactsV1 = {},
+  facts: AgentReducerFacts = {},
 ): AgentState {
   const payload = eventRecord(event);
   switch (event.type) {
@@ -662,7 +662,7 @@ export function reduceContextState(
       ) {
         return state;
       }
-      const toolRecovery = advanceToolRecoveryResponseV1(state.toolRecovery, {
+      const toolRecovery = advanceToolRecoveryResponse(state.toolRecovery, {
         taskId: state.activeTaskId,
         turnId: state.turn.turnId,
         modelMessageId: messageId,

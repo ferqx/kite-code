@@ -8,14 +8,14 @@ import {
   sha256DomainSeparated,
 } from '../release/canonical-json';
 import {
-  type ObservabilityBaselineExpectationV1,
-  observabilityBaselineExpectationV1Schema,
-  verifyObservabilityBaselineLedgerV1,
+  type ObservabilityBaselineExpectation,
+  observabilityBaselineExpectationSchema,
+  verifyObservabilityBaselineLedger,
 } from './observability-baseline-ledger';
 import {
-  type ObservabilityBaselineReportV1,
-  observabilityBaselineReportV1Schema,
-  produceObservabilityBaselineReportV1,
+  type ObservabilityBaselineReport,
+  observabilityBaselineReportSchema,
+  produceObservabilityBaselineReport,
 } from './produce-observability-baseline';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -23,7 +23,7 @@ const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 // Production baseline authority is source-owned and intentionally absent. It
 // cannot be supplied by a CLI argument or report field. A future non-empty
 // revision requires a governed source change plus release-policy review.
-const TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_V1: readonly Readonly<{
+const TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_: readonly Readonly<{
   producerIdentity: string;
   workflowPath: string;
   oidcIssuer: 'https://token.actions.githubusercontent.com';
@@ -35,9 +35,9 @@ const TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_V1: readonly Readonly<{
   reportDigest: `sha256:${string}`;
 }>[] = Object.freeze([]);
 
-export const observabilityBaselineVerificationV1Schema = z
+export const observabilityBaselineVerificationSchema = z
   .object({
-    schema: z.literal('ObservabilityBaselineVerificationV1'),
+    schema: z.literal('ObservabilityBaselineVerification'),
     status: z.enum(['passed', 'blocked']),
     evidenceEligible: z.boolean(),
     sourceIdentityVerified: z.literal(true),
@@ -53,21 +53,21 @@ export const observabilityBaselineVerificationV1Schema = z
   })
   .strict();
 
-export type ObservabilityBaselineVerificationV1 = z.infer<
-  typeof observabilityBaselineVerificationV1Schema
+export type ObservabilityBaselineVerification = z.infer<
+  typeof observabilityBaselineVerificationSchema
 >;
 
-export function verifyObservabilityBaselineReportV1(input: {
+export function verifyObservabilityBaselineReport(input: {
   ledger: unknown;
   report: unknown;
   expected: unknown;
-}): ObservabilityBaselineVerificationV1 {
-  const ledger = verifyObservabilityBaselineLedgerV1(input.ledger);
-  const report = observabilityBaselineReportV1Schema.parse(input.report);
-  const expected = observabilityBaselineExpectationV1Schema.parse(input.expected);
+}): ObservabilityBaselineVerification {
+  const ledger = verifyObservabilityBaselineLedger(input.ledger);
+  const report = observabilityBaselineReportSchema.parse(input.report);
+  const expected = observabilityBaselineExpectationSchema.parse(input.expected);
   assertExpectedIdentity(ledger, expected);
 
-  const rebuiltReport = produceObservabilityBaselineReportV1(ledger);
+  const rebuiltReport = produceObservabilityBaselineReport(ledger);
   if (canonicalJson(report) !== canonicalJson(rebuiltReport)) {
     throw new Error(
       'Observability baseline report does not rebuild exactly from retained metadata.',
@@ -79,7 +79,7 @@ export function verifyObservabilityBaselineReportV1(input: {
     'kite.operations.observability-baseline-source-identity.v1',
     canonicalJson(expected.source),
   );
-  const authority = TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_V1.find(
+  const authority = TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_.find(
     (candidate) =>
       candidate.producerIdentity === expected.source.producerIdentity &&
       candidate.workflowPath === expected.source.workflowPath &&
@@ -97,7 +97,7 @@ export function verifyObservabilityBaselineReportV1(input: {
       reason !== 'production_attestation_verifier_unconfigured',
   );
   if (!authority) {
-    if (TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_V1.length === 0) {
+    if (TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_.length === 0) {
       reasonCodes.push('source_owned_baseline_authority_unconfigured');
       reasonCodes.push('production_attestation_verifier_unconfigured');
     } else {
@@ -112,15 +112,15 @@ export function verifyObservabilityBaselineReportV1(input: {
   );
   const trustRegistryDigest = sha256DomainSeparated(
     'kite.operations.observability-baseline-trust-registry.v1',
-    canonicalJson(TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_V1),
+    canonicalJson(TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_),
   );
   const withoutDigest = {
-    schema: 'ObservabilityBaselineVerificationV1' as const,
+    schema: 'ObservabilityBaselineVerification' as const,
     status: evidenceEligible ? ('passed' as const) : ('blocked' as const),
     evidenceEligible,
     sourceIdentityVerified: true as const,
     retainedRebuildVerified: true as const,
-    sourceAuthorityConfigured: TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_V1.length > 0,
+    sourceAuthorityConfigured: TRUSTED_OBSERVABILITY_BASELINE_PRODUCERS_.length > 0,
     expectedIdentityDigest,
     retainedLedgerDigest: ledger.ledgerDigest,
     rebuildDigest: report.rebuild.rebuildDigest,
@@ -128,7 +128,7 @@ export function verifyObservabilityBaselineReportV1(input: {
     trustRegistryDigest,
     reasonCodes: [...new Set(reasonCodes)].sort(),
   };
-  return observabilityBaselineVerificationV1Schema.parse({
+  return observabilityBaselineVerificationSchema.parse({
     ...withoutDigest,
     verificationDigest: sha256DomainSeparated(
       'kite.operations.observability-baseline-verification.v1',
@@ -138,8 +138,8 @@ export function verifyObservabilityBaselineReportV1(input: {
 }
 
 function assertExpectedIdentity(
-  ledger: ReturnType<typeof verifyObservabilityBaselineLedgerV1>,
-  expected: ObservabilityBaselineExpectationV1,
+  ledger: ReturnType<typeof verifyObservabilityBaselineLedger>,
+  expected: ObservabilityBaselineExpectation,
 ): void {
   for (const field of [
     'canonicalRepository',
@@ -201,7 +201,7 @@ function assertExpectedIdentity(
   }
 }
 
-function verifyReportDigest(report: ObservabilityBaselineReportV1): void {
+function verifyReportDigest(report: ObservabilityBaselineReport): void {
   const { reportDigest, ...material } = report;
   const expectedDigest = sha256DomainSeparated(
     'kite.operations.observability-baseline-report.v1',
@@ -233,7 +233,7 @@ if (import.meta.main) {
   const ledger = parseCanonicalJson(readFileSync(resolve(required(args, 'ledger'))));
   const report = parseCanonicalJson(readFileSync(resolve(required(args, 'report'))));
   const expected = parseCanonicalJson(readFileSync(resolve(required(args, 'expected'))));
-  const verification = verifyObservabilityBaselineReportV1({ ledger, report, expected });
+  const verification = verifyObservabilityBaselineReport({ ledger, report, expected });
   writeFileSync(resolve(required(args, 'output')), canonicalJsonBytes(verification));
   process.stdout.write(`${JSON.stringify(verification)}\n`);
 }

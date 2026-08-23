@@ -3,15 +3,15 @@ import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import { createWebMechanismPort } from '#app/bootstrap/runtime/tool-provider-services';
 import {
-  BuiltinMechanismAuthorityErrorV1,
-  type BuiltinOperationExecutionValueV1,
-  createCapabilityBindingV1,
-  DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1,
-  mergeBuiltinMechanismBundleV1,
-  projectBuiltinExecutionReceiptTerminalResultV1,
-  RMV1_11_CAPABILITY_REVISIONS_V1,
+  BuiltinMechanismAuthorityError,
+  type BuiltinOperationExecutionValue,
+  createCapabilityBinding,
+  DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_,
+  MODEL_CAPABILITY_REVISIONS_,
+  mergeBuiltinMechanismBundle,
+  projectBuiltinExecutionReceiptTerminalResult,
 } from '#builtin-runtime';
-import { testRuntimeCapabilityExecutionPortV1 } from './helpers/runtime-model';
+import { testRuntimeCapabilityExecutionPort } from './helpers/runtime-model';
 
 function provider(
   callCapability: McpRuntimeProvider['callCapability'],
@@ -44,11 +44,11 @@ function provider(
 function runtimeCapability(manager: McpRuntimeProvider, signal: AbortSignal) {
   const capabilityId = 'mcp:docs/search_docs';
   const capabilityRevision = 'revision';
-  const binding = createCapabilityBindingV1({
+  const binding = createCapabilityBinding({
     capabilityId: 'mcp:dynamic_tool',
-    capabilityRevision: RMV1_11_CAPABILITY_REVISIONS_V1['mcp:dynamic_tool'],
+    capabilityRevision: MODEL_CAPABILITY_REVISIONS_['mcp:dynamic_tool'],
     exposedToolName: 'mcp:dynamic_tool',
-    inputSchema: DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1,
+    inputSchema: DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_,
     turnId: 'turn-test',
   });
   const requestInput = {
@@ -72,7 +72,7 @@ function runtimeCapability(manager: McpRuntimeProvider, signal: AbortSignal) {
     invokeRuntimeCapability: (runtimeInput?: {
       readonly executionMechanisms?: Readonly<Record<string, unknown>>;
     }) =>
-      testRuntimeCapabilityExecutionPortV1().invoke({
+      testRuntimeCapabilityExecutionPort().invoke({
         binding,
         request: {
           invocationId: 'invocation-test',
@@ -103,15 +103,15 @@ function runtimeCapability(manager: McpRuntimeProvider, signal: AbortSignal) {
 
 async function invokeCapability(capability: ReturnType<typeof runtimeCapability>) {
   try {
-    const prepared = mergeBuiltinMechanismBundleV1({
+    const prepared = mergeBuiltinMechanismBundle({
       executionMechanism: 'mcp',
       prepared: capability.runtimeCapability.executionMechanisms,
     });
     const receipt = await capability.invokeRuntimeCapability({
       executionMechanisms: prepared,
     });
-    const terminal = projectBuiltinExecutionReceiptTerminalResultV1(receipt);
-    const value = terminal.structuredContent as BuiltinOperationExecutionValueV1 | undefined;
+    const terminal = projectBuiltinExecutionReceiptTerminalResult(receipt);
+    const value = terminal.structuredContent as BuiltinOperationExecutionValue | undefined;
     const capabilityResult =
       value?.capabilityResult &&
       typeof value.capabilityResult === 'object' &&
@@ -200,21 +200,21 @@ describe('MCP tool runner', () => {
     expect(providerCalls).toBe(0);
 
     const frozenMcp = capability.runtimeCapability.executionMechanisms.mcp;
-    const merged = mergeBuiltinMechanismBundleV1({
+    const merged = mergeBuiltinMechanismBundle({
       executionMechanism: 'mcp',
       prepared: Object.freeze({ mcp: frozenMcp }),
     });
     expect(Object.isFrozen(merged)).toBe(true);
     expect(merged.mcp).toBe(frozenMcp);
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'mcp',
         prepared: Object.freeze({ mcp: frozenMcp }),
         runner: Object.freeze({ mcp: frozenMcp }),
       }),
-    ).toThrow(BuiltinMechanismAuthorityErrorV1);
+    ).toThrow(BuiltinMechanismAuthorityError);
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'mcp',
         prepared: Object.freeze({
           mcp: frozenMcp,
@@ -223,7 +223,7 @@ describe('MCP tool runner', () => {
       }),
     ).toThrow("requires only 'mcp'");
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'mcp',
         prepared: { mcp: frozenMcp },
       }),
@@ -235,7 +235,7 @@ describe('MCP tool runner', () => {
       enumerable: true,
     });
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'mcp',
         prepared: Object.freeze(symbolKeyed),
       }),
@@ -247,7 +247,7 @@ describe('MCP tool runner', () => {
       enumerable: false,
     });
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'mcp',
         prepared: Object.freeze(nonEnumerable),
       }),
@@ -263,7 +263,7 @@ describe('MCP tool runner', () => {
       },
     });
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'web',
         prepared: Object.freeze({ web: unavailable }),
       }),

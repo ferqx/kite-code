@@ -1,50 +1,50 @@
 import { describe, expect, test } from 'bun:test';
 import type {
-  BuiltinOperationExecutionValueV1,
-  BuiltinPreparedToolDispatchInputV1,
+  BuiltinOperationExecutionValue,
+  BuiltinPreparedToolDispatchInput,
 } from '@kite/builtin-runtime';
 import {
-  BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1,
-  BuiltinPreparedToolDispatchErrorV1,
-  createBuiltinPreparedTaskDispatchAdapterV1,
-  createBuiltinPreparedToolDispatchAdapterV1,
+  BUILTIN_PREPARED_CALL_FACTS_SCHEMA_,
+  BuiltinPreparedToolDispatchError,
+  createBuiltinPreparedTaskDispatchAdapter,
+  createBuiltinPreparedToolDispatchAdapter,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  digestCapabilityBindingValueV1,
-  projectBuiltinDynamicMcpExecutionReceiptTerminalResultV1,
-  projectBuiltinExecutionReceiptTerminalResultV1,
-  projectBuiltinOperationTerminalResultV1,
+  createBuiltinToolCatalogProjection,
+  digestCapabilityBindingValue,
+  projectBuiltinDynamicMcpExecutionReceiptTerminalResult,
+  projectBuiltinExecutionReceiptTerminalResult,
+  projectBuiltinOperationTerminalResult,
 } from '@kite/builtin-runtime';
 import type {
-  CapabilityTurnContextV1,
-  DynamicMcpPreparedToolInvocationIdentityV1,
-  ExecutionReceiptV1,
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelinePreparedIdentityVerifierV1,
+  CapabilityTurnContext,
+  DynamicMcpPreparedToolInvocationIdentity,
+  ExecutionReceipt,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelinePreparedIdentityVerifier,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 
-const turnContext: CapabilityTurnContextV1 = Object.freeze({
+const turnContext: CapabilityTurnContext = Object.freeze({
   hasTaskAdapter: true,
   hasGitBroker: true,
   brokeredGitFeatureRevision: 'brokered-git-r1',
   toolSearchEnabled: true,
-  promptContractV2: true,
+  promptContract: true,
   activeSkillFrameIds: ['frame-1'],
   availableSkillIds: ['skill-1'],
   featureFlags: {
-    brokeredGitV1: true,
-    skillWorkflowV1: true,
-    skillActivationV2: true,
+    brokeredGit: true,
+    skillWorkflow: true,
+    skillActivation: true,
   },
 });
 
 function projection() {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  return createBuiltinToolCatalogProjectionV1(registry, { turnContext });
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  return createBuiltinToolCatalogProjection(registry, { turnContext });
 }
 
 function freezeDeep<T>(value: T, seen = new WeakSet<object>()): T {
@@ -62,8 +62,8 @@ function operationValue(
   ok: boolean,
   stdout = ok ? 'done' : '',
   stderr = ok ? '' : 'operation failed',
-  terminationReason?: BuiltinOperationExecutionValueV1['terminationReason'],
-): BuiltinOperationExecutionValueV1 {
+  terminationReason?: BuiltinOperationExecutionValue['terminationReason'],
+): BuiltinOperationExecutionValue {
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok,
@@ -71,14 +71,14 @@ function operationValue(
     stderr,
     resultMeta: Object.freeze({}),
     ...(terminationReason ? { terminationReason } : {}),
-  }) as BuiltinOperationExecutionValueV1;
+  }) as BuiltinOperationExecutionValue;
 }
 
 function executionReceipt(
-  preparedInput: Readonly<PreparedToolInvocationV1>,
-  value: BuiltinOperationExecutionValueV1 | undefined,
-  overrides: Partial<ExecutionReceiptV1<BuiltinOperationExecutionValueV1>> = {},
-): ExecutionReceiptV1<BuiltinOperationExecutionValueV1> {
+  preparedInput: Readonly<PreparedToolInvocation>,
+  value: BuiltinOperationExecutionValue | undefined,
+  overrides: Partial<ExecutionReceipt<BuiltinOperationExecutionValue>> = {},
+): ExecutionReceipt<BuiltinOperationExecutionValue> {
   const identity = preparedInput.identity;
   return {
     invocationId: identity.invocationId,
@@ -96,7 +96,7 @@ function executionReceipt(
 
 function identityForEntry(
   entry: ReturnType<typeof projection>['entries'][number],
-): NonDynamicPreparedToolInvocationIdentityV1 {
+): NonDynamicPreparedToolInvocationIdentity {
   if (entry.visibility !== 'model' || !entry.name) {
     throw new Error(`Expected model entry: ${entry.operationId}`);
   }
@@ -111,7 +111,7 @@ function identityForEntry(
     modelMessageId: 'message-1',
     argumentOrigin: 'model_public',
     providerId: entry.providerId,
-    operationId: entry.operationId as NonDynamicOperationIdV1,
+    operationId: entry.operationId as NonDynamicOperationId,
     executionFamily: entry.executionMechanism === 'subagent' ? 'subagent' : 'builtin',
     executionMechanism: entry.executionMechanism,
     capabilityId: entry.capabilityId,
@@ -144,15 +144,15 @@ function identityForEntry(
 function prepared(
   projectionValue: ReturnType<typeof projection>,
   operationId: string,
-  overrides: Partial<NonDynamicPreparedToolInvocationIdentityV1> = {},
-): Readonly<PreparedToolInvocationV1> {
+  overrides: Partial<NonDynamicPreparedToolInvocationIdentity> = {},
+): Readonly<PreparedToolInvocation> {
   const entry = projectionValue.entries.find((candidate) => candidate.operationId === operationId);
   if (!entry) throw new Error(`Missing test entry: ${operationId}`);
   const identity = {
     ...identityForEntry(entry),
     builtinProjectionRevision: projectionValue.revision,
     ...overrides,
-  } satisfies NonDynamicPreparedToolInvocationIdentityV1;
+  } satisfies NonDynamicPreparedToolInvocationIdentity;
   return freezeDeep({
     identity,
     input: {
@@ -165,8 +165,8 @@ function prepared(
   });
 }
 
-function dynamicPrepared(): Readonly<PreparedToolInvocationV1> {
-  const identity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+function dynamicPrepared(): Readonly<PreparedToolInvocation> {
+  const identity: DynamicMcpPreparedToolInvocationIdentity = {
     invocationId: 'invocation-1',
     attemptId: 'attempt-1',
     toolCallId: 'call-1',
@@ -229,12 +229,12 @@ function dynamicPrepared(): Readonly<PreparedToolInvocationV1> {
 }
 
 function adapterFixture(
-  preparedInput: Readonly<PreparedToolInvocationV1>,
-  verify: ToolPipelinePreparedIdentityVerifierV1 = () => ({ valid: true }),
+  preparedInput: Readonly<PreparedToolInvocation>,
+  verify: ToolPipelinePreparedIdentityVerifier = () => ({ valid: true }),
 ) {
   let dispatchCalls = 0;
-  let received: Readonly<BuiltinPreparedToolDispatchInputV1> | undefined;
-  const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+  let received: Readonly<BuiltinPreparedToolDispatchInput> | undefined;
+  const adapter = createBuiltinPreparedToolDispatchAdapter({
     projection: projection(),
     verifyPreparedIdentity: verify,
     port: {
@@ -260,7 +260,7 @@ function adapterFixture(
 
 function privateTaskPrepared(
   projectionValue: ReturnType<typeof projection>,
-  overrides: Partial<NonDynamicPreparedToolInvocationIdentityV1> = {},
+  overrides: Partial<NonDynamicPreparedToolInvocationIdentity> = {},
   argumentsValue: Record<string, unknown> = {
     subagent_type: 'explore',
     taskArtifact: {
@@ -270,7 +270,7 @@ function privateTaskPrepared(
       byteLength: 32,
     },
   },
-): Readonly<PreparedToolInvocationV1> {
+): Readonly<PreparedToolInvocation> {
   const entry = projectionValue.entries.find(
     (candidate) => candidate.visibility === 'model' && candidate.operationId === 'builtin:task',
   );
@@ -279,24 +279,24 @@ function privateTaskPrepared(
   const classification = entry.classifyEffects(canonical);
   const schemaDigest = entry.parser.schemaDigest ?? entry.inputSchemaDigest;
   if (!schemaDigest) throw new Error('Missing task runtime schema digest.');
-  const canonicalRecord = canonical as Readonly<Record<string, RuntimeJsonValueV1>>;
+  const canonicalRecord = canonical as Readonly<Record<string, RuntimeJsonValue>>;
   if (typeof canonicalRecord.subagent_type !== 'string') {
     throw new Error('Missing task subagent role.');
   }
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     ...identityForEntry(entry),
     argumentOrigin: 'runtime_private',
     executionFamily: 'subagent',
     executionMechanism: 'subagent',
     parserRevision: entry.parser.parserRevision,
-    argumentsDigest: digestCapabilityBindingValueV1(canonical),
+    argumentsDigest: digestCapabilityBindingValue(canonical),
     schemaDigest,
-    effectiveEffectsDigest: digestCapabilityBindingValueV1(classification.effectiveEffects),
+    effectiveEffectsDigest: digestCapabilityBindingValue(classification.effectiveEffects),
     builtinProjectionRevision: projectionValue.revision,
     ...overrides,
   };
   const facts = {
-    schema: BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1,
+    schema: BUILTIN_PREPARED_CALL_FACTS_SCHEMA_,
     toolCallId: identity.toolCallId,
     callCreatedAtTurnId: identity.turnId,
     modelMessageId: identity.modelMessageId,
@@ -359,7 +359,7 @@ describe('Builtin prepared dispatch adapter', () => {
     const mutable = {
       ...input,
       input: { ...input.input, arguments: { path: 'tampered' } },
-    } as Readonly<PreparedToolInvocationV1>;
+    } as Readonly<PreparedToolInvocation>;
     await expect(fixture.adapter.dispatch(mutable)).rejects.toMatchObject({
       code: 'invalid_prepared_input',
     });
@@ -374,7 +374,7 @@ describe('Builtin prepared dispatch adapter', () => {
   test('rejects dynamic MCP, ask_user, and subagent boundaries without fallback', async () => {
     const catalog = projection();
     let dispatchCalls = 0;
-    const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+    const adapter = createBuiltinPreparedToolDispatchAdapter({
       projection: catalog,
       verifyPreparedIdentity: () => true,
       port: {
@@ -404,10 +404,10 @@ describe('Builtin prepared dispatch adapter', () => {
   test('task adapter preserves the exact verifier reference and dispatches one private task', async () => {
     const catalog = projection();
     const input = privateTaskPrepared(catalog);
-    const verify: ToolPipelinePreparedIdentityVerifierV1 = () => ({ valid: true });
+    const verify: ToolPipelinePreparedIdentityVerifier = () => ({ valid: true });
     let dispatchCalls = 0;
-    let received: Readonly<BuiltinPreparedToolDispatchInputV1> | undefined;
-    const adapter = createBuiltinPreparedTaskDispatchAdapterV1({
+    let received: Readonly<BuiltinPreparedToolDispatchInput> | undefined;
+    const adapter = createBuiltinPreparedTaskDispatchAdapter({
       projection: catalog,
       verifyPreparedIdentity: verify,
       port: {
@@ -417,7 +417,7 @@ describe('Builtin prepared dispatch adapter', () => {
           const blockedValue = Object.freeze({
             ...(operationValue(true, 'child blocked') as unknown as Record<string, unknown>),
             subagentResult: Object.freeze({ kind: 'blocked', continuationDigest: 'digest-1' }),
-          }) as unknown as BuiltinOperationExecutionValueV1;
+          }) as unknown as BuiltinOperationExecutionValue;
           return executionReceipt(value.prepared, blockedValue);
         },
       },
@@ -441,7 +441,7 @@ describe('Builtin prepared dispatch adapter', () => {
   test('task adapter rejects public/parser/schema/effects/identity drift before the port', async () => {
     const catalog = projection();
     let dispatchCalls = 0;
-    const adapter = createBuiltinPreparedTaskDispatchAdapterV1({
+    const adapter = createBuiltinPreparedTaskDispatchAdapter({
       projection: catalog,
       verifyPreparedIdentity: () => ({ valid: true }),
       port: {
@@ -468,11 +468,11 @@ describe('Builtin prepared dispatch adapter', () => {
         ...validPrivateInput.input,
         arguments: { subagent_type: 'explore' },
       },
-    }) as Readonly<PreparedToolInvocationV1>;
+    }) as Readonly<PreparedToolInvocation>;
     const inputIdentityDrift = freezeDeep({
       ...validPrivateInput,
       input: { ...validPrivateInput.input, attemptId: 'forged-attempt' },
-    }) as Readonly<PreparedToolInvocationV1>;
+    }) as Readonly<PreparedToolInvocation>;
     const driftCases = [
       publicInput,
       missingArtifact,
@@ -496,13 +496,13 @@ describe('Builtin prepared dispatch adapter', () => {
 
   test('task adapter rejects unavailable task projection and receipt identity drift', async () => {
     const unavailableTurnContext = Object.freeze({ ...turnContext, hasTaskAdapter: false });
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-    const unavailable = createBuiltinToolCatalogProjectionV1(registry, {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const unavailable = createBuiltinToolCatalogProjection(registry, {
       turnContext: unavailableTurnContext,
     });
     const unavailableInput = privateTaskPrepared(unavailable);
     let unavailableCalls = 0;
-    const unavailableAdapter = createBuiltinPreparedTaskDispatchAdapterV1({
+    const unavailableAdapter = createBuiltinPreparedTaskDispatchAdapter({
       projection: unavailable,
       verifyPreparedIdentity: () => true,
       port: {
@@ -520,7 +520,7 @@ describe('Builtin prepared dispatch adapter', () => {
     const catalog = projection();
     const input = privateTaskPrepared(catalog);
     let receiptCalls = 0;
-    const receiptAdapter = createBuiltinPreparedTaskDispatchAdapterV1({
+    const receiptAdapter = createBuiltinPreparedTaskDispatchAdapter({
       projection: catalog,
       verifyPreparedIdentity: () => true,
       port: {
@@ -542,7 +542,7 @@ describe('Builtin prepared dispatch adapter', () => {
     const catalog = projection();
     const input = privateTaskPrepared(catalog);
     let ordinaryCalls = 0;
-    const ordinary = createBuiltinPreparedToolDispatchAdapterV1({
+    const ordinary = createBuiltinPreparedToolDispatchAdapter({
       projection: catalog,
       verifyPreparedIdentity: () => true,
       port: {
@@ -562,8 +562,8 @@ describe('Builtin prepared dispatch adapter', () => {
     ).text();
     expect(source).not.toContain('@kite/runtime-host');
     expect(source).not.toContain('@kite/agent-kernel');
-    expect(source).not.toContain('createRuntimeModuleRegistryV1');
-    expect(source).not.toContain('createBuiltinToolCatalogProjectionV1(');
+    expect(source).not.toContain('createRuntimeModuleRegistry');
+    expect(source).not.toContain('createBuiltinToolCatalogProjection(');
     expect(source).not.toContain('catch-old');
   });
 
@@ -575,14 +575,14 @@ describe('Builtin prepared dispatch adapter', () => {
   });
 
   test('projects existing Builtin operation success and failure facts into neutral terminal results', () => {
-    const success = projectBuiltinOperationTerminalResultV1(operationValue(true, 'output'));
+    const success = projectBuiltinOperationTerminalResult(operationValue(true, 'output'));
     expect(success).toMatchObject({
       status: 'success',
       content: [{ type: 'text', text: 'output' }],
       structuredContent: { schema: 'kite.builtin-operation-result.v1', ok: true },
     });
 
-    const failure = projectBuiltinOperationTerminalResultV1(operationValue(false, '', 'denied'));
+    const failure = projectBuiltinOperationTerminalResult(operationValue(false, '', 'denied'));
     expect(failure).toMatchObject({
       status: 'error',
       failure: { code: 'builtin_operation_failed', message: 'denied', retryable: false },
@@ -603,7 +603,7 @@ describe('Builtin prepared dispatch adapter', () => {
       expect(entry?.kind).toBe(expectedKind);
       const input = prepared(catalog, operationId);
       let dispatchCalls = 0;
-      const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+      const adapter = createBuiltinPreparedToolDispatchAdapter({
         projection: catalog,
         verifyPreparedIdentity: () => true,
         port: {
@@ -629,7 +629,7 @@ describe('Builtin prepared dispatch adapter', () => {
     // The exported projector has no projection-entry kind and therefore keeps
     // its standalone compatibility behavior.
     expect(
-      projectBuiltinOperationTerminalResultV1(operationValue(false, '', 'bounded domain denial')),
+      projectBuiltinOperationTerminalResult(operationValue(false, '', 'bounded domain denial')),
     ).toMatchObject({
       failure: { code: 'builtin_operation_failed' },
     });
@@ -639,7 +639,7 @@ describe('Builtin prepared dispatch adapter', () => {
     const catalog = projection();
     const input = prepared(catalog, 'builtin:tool_search');
     let dispatchCalls = 0;
-    const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+    const adapter = createBuiltinPreparedToolDispatchAdapter({
       projection: catalog,
       verifyPreparedIdentity: () => true,
       port: {
@@ -661,7 +661,7 @@ describe('Builtin prepared dispatch adapter', () => {
 
     for (const receiptStatus of ['failed', 'unknown'] as const) {
       let providerCalls = 0;
-      const providerAdapter = createBuiltinPreparedToolDispatchAdapterV1({
+      const providerAdapter = createBuiltinPreparedToolDispatchAdapter({
         projection: catalog,
         verifyPreparedIdentity: () => true,
         port: {
@@ -700,12 +700,12 @@ describe('Builtin prepared dispatch adapter', () => {
       capabilityResult: Object.freeze({ capability: 'read_file', result: 'ok' }),
       subagentResult: Object.freeze({ childStatus: 'completed' }),
       filesystemObservation: Object.freeze({ path: 'README.md', changed: false }),
-      classifierAdviceV1: Object.freeze({ risk: 'read' }),
+      classifierAdvice: Object.freeze({ risk: 'read' }),
       terminationReason: 'sandbox_denied' as const,
       path: 'README.md',
       totalLines: 4,
-    }) as BuiltinOperationExecutionValueV1;
-    const success = projectBuiltinOperationTerminalResultV1(successValue);
+    }) as BuiltinOperationExecutionValue;
+    const success = projectBuiltinOperationTerminalResult(successValue);
     expect(success.structuredContent).toEqual(successValue);
 
     const failureValue = Object.freeze({
@@ -720,12 +720,12 @@ describe('Builtin prepared dispatch adapter', () => {
       capabilityResult: Object.freeze({ capability: 'read_file', result: 'denied' }),
       subagentResult: Object.freeze({ childStatus: 'failed' }),
       filesystemObservation: Object.freeze({ path: 'README.md', changed: false }),
-      classifierAdviceV1: Object.freeze({ risk: 'unknown' }),
+      classifierAdvice: Object.freeze({ risk: 'unknown' }),
       terminationReason: 'cancelled' as const,
       path: 'README.md',
       totalLines: 4,
-    }) as BuiltinOperationExecutionValueV1;
-    const failure = projectBuiltinOperationTerminalResultV1(failureValue);
+    }) as BuiltinOperationExecutionValue;
+    const failure = projectBuiltinOperationTerminalResult(failureValue);
     expect(failure.structuredContent).toEqual(failureValue);
     expect(failure.failure?.details).toEqual(failureValue);
   });
@@ -741,7 +741,7 @@ describe('Builtin prepared dispatch adapter', () => {
     for (const [receiptStatus, terminalStatus] of statuses) {
       const catalog = projection();
       const input = prepared(catalog, 'builtin:shell_execute');
-      const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+      const adapter = createBuiltinPreparedToolDispatchAdapter({
         projection: catalog,
         verifyPreparedIdentity: () => true,
         port: {
@@ -783,8 +783,8 @@ describe('Builtin prepared dispatch adapter', () => {
       { attemptId: 'forged-attempt' },
       { providerId: 'forged-provider' },
       { executorRevision: 'forged-executor' },
-    ] satisfies readonly Partial<ExecutionReceiptV1<BuiltinOperationExecutionValueV1>>[]) {
-      const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+    ] satisfies readonly Partial<ExecutionReceipt<BuiltinOperationExecutionValue>>[]) {
+      const adapter = createBuiltinPreparedToolDispatchAdapter({
         projection: catalog,
         verifyPreparedIdentity: () => true,
         port: {
@@ -806,7 +806,7 @@ describe('Builtin prepared dispatch adapter', () => {
         retryable: true,
       },
     });
-    const result = projectBuiltinExecutionReceiptTerminalResultV1(receipt);
+    const result = projectBuiltinExecutionReceiptTerminalResult(receipt);
     expect(result).toMatchObject({
       status: 'error',
       failure: {
@@ -822,7 +822,7 @@ describe('Builtin prepared dispatch adapter', () => {
   test('projects confirmed MCP read provider failures into a canonical Builtin value', async () => {
     const catalog = projection();
     const input = prepared(catalog, 'builtin:read_mcp_resource');
-    const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+    const adapter = createBuiltinPreparedToolDispatchAdapter({
       projection: catalog,
       verifyPreparedIdentity: () => true,
       port: {
@@ -884,7 +884,7 @@ describe('Builtin prepared dispatch adapter', () => {
           builtinProjectionRevision: catalog.revision,
         },
       },
-    }) as Readonly<PreparedToolInvocationV1>;
+    }) as Readonly<PreparedToolInvocation>;
     const receipt = executionReceipt(input, undefined, {
       providerId: entry.providerId,
       executorRevision: entry.executorRevision,
@@ -896,11 +896,7 @@ describe('Builtin prepared dispatch adapter', () => {
       },
     });
 
-    const terminal = projectBuiltinDynamicMcpExecutionReceiptTerminalResultV1(
-      receipt,
-      entry,
-      input,
-    );
+    const terminal = projectBuiltinDynamicMcpExecutionReceiptTerminalResult(receipt, entry, input);
     expect(terminal).toMatchObject({
       status: 'error',
       structuredContent: {
@@ -920,14 +916,14 @@ describe('Builtin prepared dispatch adapter', () => {
     });
     expect(Object.isFrozen(terminal.structuredContent)).toBe(true);
     expect(() =>
-      projectBuiltinDynamicMcpExecutionReceiptTerminalResultV1(
+      projectBuiltinDynamicMcpExecutionReceiptTerminalResult(
         receipt,
         entry,
         structuredClone(input),
       ),
-    ).toThrow(BuiltinPreparedToolDispatchErrorV1);
+    ).toThrow(BuiltinPreparedToolDispatchError);
     expect(() =>
-      projectBuiltinDynamicMcpExecutionReceiptTerminalResultV1(
+      projectBuiltinDynamicMcpExecutionReceiptTerminalResult(
         receipt,
         entry,
         freezeDeep({
@@ -939,9 +935,9 @@ describe('Builtin prepared dispatch adapter', () => {
               executorRevision: 'forged-executor',
             },
           },
-        }) as Readonly<PreparedToolInvocationV1>,
+        }) as Readonly<PreparedToolInvocation>,
       ),
-    ).toThrow(BuiltinPreparedToolDispatchErrorV1);
+    ).toThrow(BuiltinPreparedToolDispatchError);
   });
 
   test('accepts JSON-safe shared values but rejects an actual cycle', () => {
@@ -956,8 +952,8 @@ describe('Builtin prepared dispatch adapter', () => {
         { type: 'plan.progress_updated', plan: shared },
         { type: 'plan.completed', plan: shared },
       ],
-    } as unknown as BuiltinOperationExecutionValueV1;
-    const result = projectBuiltinExecutionReceiptTerminalResultV1(
+    } as unknown as BuiltinOperationExecutionValue;
+    const result = projectBuiltinExecutionReceiptTerminalResult(
       executionReceipt(prepared(projection(), 'builtin:read_file'), value),
     );
     expect(result.status).toBe('success');
@@ -971,9 +967,9 @@ describe('Builtin prepared dispatch adapter', () => {
       stdout: 'done',
       stderr: '',
       resultMeta: cyclic,
-    } as unknown as BuiltinOperationExecutionValueV1;
+    } as unknown as BuiltinOperationExecutionValue;
     expect(() =>
-      projectBuiltinExecutionReceiptTerminalResultV1(
+      projectBuiltinExecutionReceiptTerminalResult(
         executionReceipt(prepared(projection(), 'builtin:read_file'), cyclicValue),
       ),
     ).toThrow();
@@ -985,8 +981,8 @@ describe('Builtin prepared dispatch adapter', () => {
     ).text();
     expect(source).not.toContain('@kite/runtime-host');
     expect(source).not.toContain('@kite/agent-kernel');
-    expect(source).not.toContain('createRuntimeModuleRegistryV1');
-    expect(source).not.toContain('CapabilityExecutionPortV1');
+    expect(source).not.toContain('createRuntimeModuleRegistry');
+    expect(source).not.toContain('CapabilityExecutionPort');
     expect(source).not.toContain('catch-old');
   });
 });

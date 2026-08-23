@@ -1,14 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { buildCgroupPidsInvocationV1, type CgroupPidsRunnerV1 } from './cgroup-pids-contract';
+import { buildCgroupPidsInvocation, type CgroupPidsRunner } from './cgroup-pids-contract';
 
-export { buildCgroupPidsInvocationV1, type CgroupPidsRunnerV1 };
+export { buildCgroupPidsInvocation, type CgroupPidsRunner };
 
 /**
  * Discovery deliberately returns unavailable until Runtime can acknowledge
  * the exact scope/cgroup identity before GO and persist an empty receipt.
  * Binary/controller presence alone must never allocate or advertise a scope.
  */
-export function findUsableCgroupPidsRunnerV1(): CgroupPidsRunnerV1 | null {
+export function findUsableCgroupPidsRunner(): CgroupPidsRunner | null {
   if (process.platform !== 'linux') return null;
   const controllersPath = '/sys/fs/cgroup/cgroup.controllers';
   if (!existsSync(controllersPath)) return null;

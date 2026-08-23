@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  BuiltinMechanismAuthorityErrorV1,
-  mergeBuiltinMechanismBundleV1,
-} from '@kite/builtin-runtime';
+import { BuiltinMechanismAuthorityError, mergeBuiltinMechanismBundle } from '@kite/builtin-runtime';
 
 describe('Builtin mechanism authority', () => {
   test('accepts one exact frozen mechanism and freezes the merged bundle', () => {
@@ -10,7 +7,7 @@ describe('Builtin mechanism authority', () => {
       allowExternalPaths: false,
       dispatch: async () => Object.freeze({ ok: true }),
     });
-    const merged = mergeBuiltinMechanismBundleV1({
+    const merged = mergeBuiltinMechanismBundle({
       executionMechanism: 'filesystem',
       prepared: Object.freeze({ filesystem }),
     });
@@ -25,26 +22,26 @@ describe('Builtin mechanism authority', () => {
     });
 
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'mcp',
         prepared: Object.freeze({ mcp }),
         runner: Object.freeze({ mcp }),
       }),
-    ).toThrow(BuiltinMechanismAuthorityErrorV1);
+    ).toThrow(BuiltinMechanismAuthorityError);
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'filesystem',
         prepared: Object.freeze({ mcp }),
       }),
-    ).toThrow(BuiltinMechanismAuthorityErrorV1);
+    ).toThrow(BuiltinMechanismAuthorityError);
   });
 
   test('rejects mutable maps before any mechanism can be selected', () => {
     expect(() =>
-      mergeBuiltinMechanismBundleV1({
+      mergeBuiltinMechanismBundle({
         executionMechanism: 'mcp',
         prepared: { mcp: Object.freeze({ runtime: Object.freeze({}) }) },
       }),
-    ).toThrow(BuiltinMechanismAuthorityErrorV1);
+    ).toThrow(BuiltinMechanismAuthorityError);
   });
 });

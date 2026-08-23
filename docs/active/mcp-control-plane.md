@@ -7,7 +7,7 @@
 
 ## 权威与依赖
 
-`McpSupervisor` 是 MCP 连接 control plane 的唯一 App 入口。RMV1-11 后 Manager/Supervisor、SDK client、认证、
+`McpSupervisor` 是 MCP 连接 control plane 的唯一 App 入口。RM-11 后 Manager/Supervisor、SDK client、认证、
 credential、transport 与目录投影实现由 `@kite/builtin-runtime/mcp` 物理拥有；App composition
 只注入 `McpConfigRepository` 与通用 network boundary fetch。它立即发布 configured、disabled、pending、rejected、
 invalid 和 shadowed 条目，再通过内部唯一的 `McpConnectionManager`/SDK client 路径连接可连接 Server。单个 Server
@@ -66,6 +66,6 @@ TUI controller 暴露受约束的 retry、add、set_enabled、remove、decide、
 
 HTTP 401 产生的 `login_required` 从 Detail 进入 authenticate route；只有选择 Open browser 才创建 loopback callback 和打开浏览器，authorizing 时 Esc/Cancel 取消 flow。stored token resume 不打开浏览器。完成 code exchange 后 Manager 通过新连接重新 discovery，旧 binding 与旧 Tool Call 不更新或重放。完整认证规则见 [`mcp-authentication.md`](mcp-authentication.md)。
 
-Runtime 已在默认关闭的 `mcpProviderActionV1` 后提供持久 Provider Action lifecycle。它只向 App shell 请求固定 `login`、`approve` 或 `retry`，不获得配置 mutation API。TUI 使用既有 foreground/background interrupt routing 收集显式决定，再由 `TuiMcpController` 调用相同 control-plane command；完成后返回新的 directory revision，Runtime 以新 turn 重新进入模型边界。CLI 没有该 App controller 时安全 defer。Provider Action 与 `/mcp` Overlay 是两个入口，但共享 controller 与 Runtime facts。
+Runtime 已在默认关闭的 `mcpProviderAction` 后提供持久 Provider Action lifecycle。它只向 App shell 请求固定 `login`、`approve` 或 `retry`，不获得配置 mutation API。TUI 使用既有 foreground/background interrupt routing 收集显式决定，再由 `TuiMcpController` 调用相同 control-plane command；完成后返回新的 directory revision，Runtime 以新 turn 重新进入模型边界。CLI 没有该 App controller 时安全 defer。Provider Action 与 `/mcp` Overlay 是两个入口，但共享 controller 与 Runtime facts。
 
 同一 flag 还在新 Agent run 的首次模型调用前检查 effective required Provider。`ready`/`degraded` 直接准入，其他状态进入 Runtime gate；TUI interrupt 提供 Retry、Session Waive 或 Cancel Run。Waive 只写 Runtime session 事实，不修改 control snapshot 或 capability 可见性。

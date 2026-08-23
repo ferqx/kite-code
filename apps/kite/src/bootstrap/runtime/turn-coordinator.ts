@@ -9,65 +9,62 @@ import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { ContextCompactionProgressPhase } from '@kite/builtin-runtime/model';
 import {
   createLocalCompactionDebugReporter,
-  createModelSecretDetectorV1,
-  ModelAttemptFailureErrorV1,
+  createModelSecretDetector,
+  ModelAttemptFailureError,
   type SupportedChatModel,
 } from '@kite/builtin-runtime/model';
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { AuthorizationMode, InteractionMode } from '@kite/runtime-contract';
 import {
-  type StateAuthorizationSourceV1 as AuthorizationSource,
-  runtimeHostStateActivePlanningV1 as getActivePlanning,
-  runtimeHostStateActiveTaskV1 as getActiveTask,
-  runtimeHostStateInteractionBelongsToCurrentWorkV1 as interactionBelongsToCurrentWork,
-  LIMITED_RESOURCE_BUDGET_V1,
-  type StateRuntimeEffectExecutorV1,
+  type StateAuthorizationSource as AuthorizationSource,
+  runtimeHostStateActivePlanning as getActivePlanning,
+  runtimeHostStateActiveTask as getActiveTask,
+  runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
+  LIMITED_RESOURCE_BUDGET_,
+  type StateRuntimeEffectExecutor,
 } from '@kite/runtime-host';
 import {
-  prepareRuntimeEffectForBudgetV1,
+  prepareRuntimeEffectForBudget,
   type RuntimeExecutorDependencies,
 } from '#app/bootstrap/runtime/runtime-effect-dependencies';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
 import {
-  createApprovedProviderDataAdmissionV1,
+  createApprovedProviderDataAdmission,
   ProviderDataAdmissionError,
 } from '#app/config/provider-data-admission';
-import type {
-  SessionLoggingMode,
-  SessionLoggingPolicyV1,
-} from '#app/config/session-logging-policy';
-import { resolveSessionLoggingPolicyV1 } from '#app/config/session-logging-policy';
+import type { SessionLoggingMode, SessionLoggingPolicy } from '#app/config/session-logging-policy';
+import { resolveSessionLoggingPolicy } from '#app/config/session-logging-policy';
 import {
-  hasPendingSandboxPreparationRecoveryV1,
-  SANDBOX_PREPARATION_RECOVERY_V1,
-  type SandboxPreparationRecoveryConsumerV1,
+  hasPendingSandboxPreparationRecovery,
+  SANDBOX_PREPARATION_RECOVERY_,
+  type SandboxPreparationRecoveryConsumer,
 } from '#app/sandbox/runtime-execution';
-import { SessionLogCollector, type SessionLoggingContentInspectorV1 } from '#app/session-logger';
-import type { CapabilityExecutionPortV1 } from '#runtime-spi';
-import { resolveFailureModeV1 } from './failure-mode-conformance';
+import { SessionLogCollector, type SessionLoggingContentInspector } from '#app/session-logger';
+import type { CapabilityExecutionPort } from '#runtime-spi';
+import { resolveFailureMode } from './failure-mode-conformance';
 import { recordRuntimeFailure } from './failures';
-import { projectRuntimeSchedulerFactsV1 } from './scheduler-facts';
+import { projectRuntimeSchedulerFacts } from './scheduler-facts';
 import { eventsForRunCancellation, eventsForSupersededTurnRecovery } from './state-actions';
 import {
   type RuntimeActionProvider,
-  type RuntimeStateSessionPortV1,
-  runStateRuntimeLoopV1,
+  type RuntimeStateSessionPort,
+  runStateRuntimeLoop,
 } from './state-runner';
 import type {
   RuntimeEffect,
   RuntimeEvent,
   RuntimeState,
-  StateSessionStorageV1,
+  StateSessionStorage,
 } from './state-runtime';
-import { hasPendingSubagentProviderRecoveryV1 } from './subagent-provider-recovery';
-import { failedTerminalOutcomeV1 } from './terminal-outcome';
-import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
+import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
+import { failedTerminalOutcome } from './terminal-outcome';
+import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 
-function exhaustedModelFailureModeV1(
+function exhaustedModelFailureMode(
   error: unknown,
 ): 'model_timeout' | 'model_rate_limit' | 'model_server_error' | undefined {
-  if (!(error instanceof ModelAttemptFailureErrorV1)) return undefined;
+  if (!(error instanceof ModelAttemptFailureError)) return undefined;
   if (error.outcome.kind !== 'retryable_failure') return undefined;
   switch (error.outcome.classification) {
     case 'attempt_timeout':
@@ -118,7 +115,7 @@ export function requiredProviderAdmissionEvents(
 }
 
 /** Inputs for the graph-free runtime entry point. */
-export interface RuntimeTurnInputV1 {
+export interface RuntimeTurnInput {
   task: string;
   /** User-authored goal before App/project context is appended to `task`. */
   userGoal?: string;
@@ -131,12 +128,12 @@ export interface RuntimeTurnInputV1 {
   /** App-selected concrete Model binding; Core never constructs a Provider model. */
   model: SupportedChatModel;
   /** Immutable App policy input; tests must inject an explicit fixture authority. */
-  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGate;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   /** Runtime Host registry port; required by capability-backed production tools. */
-  capabilityExecution?: CapabilityExecutionPortV1;
+  capabilityExecution?: CapabilityExecutionPort;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */
@@ -144,25 +141,25 @@ export interface RuntimeTurnInputV1 {
   /** App-selected Model/Artifact/Subagent mechanisms; Core never constructs a concrete owner. */
   modelInvocationRuntime: {
     /** App projection of the Host's one frozen Builtin capability snapshot. */
-    builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1;
+    builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
     /** App-owned pipeline composition derived from that exact projection. */
-    toolPipelineComposition?: AppToolPipelineCompositionV1;
+    toolPipelineComposition?: AppToolPipelineComposition;
     /** App-owned single Plan Artifact store; absent only for unavailable composition. */
     planArtifacts?: import('@kite/builtin-runtime/planning').PlanArtifactStore;
-    gateway?: import('@kite/builtin-runtime/model').ModelInvocationGatewayV1;
-    modelEffects?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinatorV1;
-    evidence?: import('@kite/builtin-runtime/model').ModelArtifactEvidenceAvailabilityV1;
-    capabilityArtifacts?: import('@kite/builtin-runtime').CapabilityArtifactAccessV1;
-    workspaceFilesystem?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntimeV1;
-    sandboxPreparationArtifacts?: import('@kite/builtin-runtime/sandbox').SandboxPreparationArtifactStoreV1;
-    subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactoryV1;
+    gateway?: import('@kite/builtin-runtime/model').ModelInvocationGateway;
+    modelEffects?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
+    evidence?: import('@kite/builtin-runtime/model').ModelArtifactEvidenceAvailability;
+    capabilityArtifacts?: import('@kite/builtin-runtime').CapabilityArtifactAccess;
+    workspaceFilesystem?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
+    sandboxPreparationArtifacts?: import('@kite/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
+    subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactory;
     reconcilePendingSubagents?: (
       persistence: Parameters<
-        typeof import('./subagent-provider-recovery').reconcilePendingSubagentProvidersAfterCrashV1
+        typeof import('./subagent-provider-recovery').reconcilePendingSubagentProvidersAfterCrash
       >[0]['persistence'],
     ) => Promise<boolean>;
-    subagentContinuationArtifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccessV1;
-    subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccessV1;
+    subagentContinuationArtifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccess;
+    subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccess;
   };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
@@ -175,19 +172,19 @@ export interface RuntimeTurnInputV1 {
   /** Host-owned controller callback; production execution always supplies it. */
   abortExecution?: (reason: string) => void;
   /** Exact State 25 session owned by the App/Host session coordinator. */
-  runtimeSession: RuntimeStateSessionPortV1 & {
-    readonly runtimeStore: StateSessionStorageV1;
+  runtimeSession: RuntimeStateSessionPort & {
+    readonly runtimeStore: StateSessionStorage;
     processEvents(events: RuntimeEvent[]): void;
   };
   /** Exact effect port owned by the App/Host session coordinator. */
   createRuntimeEffectPort: (
     dependencies: RuntimeExecutorDependencies,
-  ) => StateRuntimeEffectExecutorV1<RuntimeState, RuntimeEvent, RuntimeEffect>;
+  ) => StateRuntimeEffectExecutor<RuntimeState, RuntimeEvent, RuntimeEffect>;
   frontend?: string;
   /** App-resolved artifact/user/project policy. App composition roots should always inject it. */
-  sessionLoggingPolicy?: SessionLoggingPolicyV1;
+  sessionLoggingPolicy?: SessionLoggingPolicy;
   /** Trusted detector required before content-mode text can be persisted. */
-  sessionLoggingContentInspector?: SessionLoggingContentInspectorV1;
+  sessionLoggingContentInspector?: SessionLoggingContentInspector;
   onSessionLoggingStatus?: (status: { mode: SessionLoggingMode }) => void;
   onSessionLoggingDiagnostic?: (message: string) => void;
   /** Runtime coordinator registration for this turn's single cancellation transaction. */
@@ -196,8 +193,8 @@ export interface RuntimeTurnInputV1 {
 }
 
 /** Execute one turn against the caller-owned State 25 session and effect port. */
-export async function* executeRuntimeTurnV1(
-  input: RuntimeTurnInputV1,
+export async function* executeRuntimeTurn(
+  input: RuntimeTurnInput,
   provider: RuntimeActionProvider,
 ): AsyncGenerator<RuntimeEvent> {
   const model = input.model;
@@ -210,13 +207,13 @@ export async function* executeRuntimeTurnV1(
   const sessionLoggingPolicy =
     input.sessionLoggingPolicy ??
     input.config.sessionLoggingPolicy ??
-    resolveSessionLoggingPolicyV1({
-      enabled: getFeatureFlags(input.config).sessionLoggingPolicyV1,
+    resolveSessionLoggingPolicy({
+      enabled: getFeatureFlags(input.config).sessionLoggingPolicy,
     });
   input.onSessionLoggingStatus?.({ mode: sessionLoggingPolicy.mode });
   const sessionLoggingContentInspector =
     input.sessionLoggingContentInspector ??
-    createModelSecretDetectorV1({
+    createModelSecretDetector({
       knownSecrets: [input.config.apiKey],
     });
   const collector = new SessionLogCollector(
@@ -251,7 +248,7 @@ export async function* executeRuntimeTurnV1(
   };
   const providerDataAdmission =
     input.providerDataAdmission ??
-    createApprovedProviderDataAdmissionV1(input.config, new Date(), sessionLoggingContentInspector);
+    createApprovedProviderDataAdmission(input.config, new Date(), sessionLoggingContentInspector);
   const cancelRun = (
     reason = 'Cancelled by user.',
     cause: 'user' | 'error' = 'user',
@@ -281,7 +278,7 @@ export async function* executeRuntimeTurnV1(
   if (input.signal?.aborted) forwardExternalAbort();
   else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
   const scheduleRunDeadline = (deadlineAt: string) => {
-    if (!getFeatureFlags(input.config).boundedCancellationV1 || runDeadlineTimer) return;
+    if (!getFeatureFlags(input.config).boundedCancellation || runDeadlineTimer) return;
     const remainingMs = Math.max(0, Date.parse(deadlineAt) - Date.now());
     runDeadlineTimer = setTimeout(() => {
       if (runCancelled || kernel.getState().turn.status !== 'active') return;
@@ -309,7 +306,7 @@ export async function* executeRuntimeTurnV1(
       turnId: kernel.getState().turn.turnId,
       userVisible: true,
     });
-    const conformance = resolveFailureModeV1(
+    const conformance = resolveFailureMode(
       cancellationIncomplete ? 'cancel_timeout' : 'budget_exhausted',
       {
         knownExternalEffects: cancellationIncomplete || unknownReservation ? 'unknown' : 'known',
@@ -326,7 +323,7 @@ export async function* executeRuntimeTurnV1(
   };
   input.registerRunCancellation?.((reason) => cancelRun(reason));
   try {
-    if (hasPendingSubagentProviderRecoveryV1(kernel.getState())) {
+    if (hasPendingSubagentProviderRecovery(kernel.getState())) {
       const reconcilePendingSubagents =
         'reconcilePendingSubagents' in modelInvocationRuntime
           ? modelInvocationRuntime.reconcilePendingSubagents
@@ -363,14 +360,14 @@ export async function* executeRuntimeTurnV1(
         return;
       }
     }
-    if (hasPendingSandboxPreparationRecoveryV1(kernel.getState())) {
+    if (hasPendingSandboxPreparationRecovery(kernel.getState())) {
       const artifacts =
         'sandboxPreparationArtifacts' in modelInvocationRuntime
           ? modelInvocationRuntime.sandboxPreparationArtifacts
           : undefined;
       const recovery = (
-        input.shellExecutor as ShellExecutor & Partial<SandboxPreparationRecoveryConsumerV1>
-      )?.[SANDBOX_PREPARATION_RECOVERY_V1];
+        input.shellExecutor as ShellExecutor & Partial<SandboxPreparationRecoveryConsumer>
+      )?.[SANDBOX_PREPARATION_RECOVERY_];
       const recoveryEvents: RuntimeEvent[] = [];
       const recovered =
         artifacts && recovery
@@ -424,13 +421,13 @@ export async function* executeRuntimeTurnV1(
       collector.recordRuntime(event);
       yield event;
     }
-    if (getFeatureFlags(input.config).resourceBudgetV1) {
+    if (getFeatureFlags(input.config).resourceBudget) {
       if (kernel.getState().resourceBudget.status !== 'unconfigured') {
         if (kernel.getState().resourceBudget.status !== 'active') {
           const failure = recordRuntimeFailure({
             kind: 'mandatory_policy_unavailable',
             message:
-              'ResourceBudgetV1 cannot start from a legacy snapshot; start a new production run.',
+              'ResourceBudget cannot start from a legacy snapshot; start a new production run.',
             phase: 'building',
             turnId: kernel.getState().turn.turnId,
             userVisible: true,
@@ -441,7 +438,7 @@ export async function* executeRuntimeTurnV1(
             recoverable: false,
             failure: failure.failure,
             turnId: failure.turnId,
-            outcome: failedTerminalOutcomeV1(failure.failure, {
+            outcome: failedTerminalOutcome(failure.failure, {
               knownExternalEffects: 'none',
             }),
           };
@@ -457,9 +454,9 @@ export async function* executeRuntimeTurnV1(
           runId: randomUUID(),
           startedAt: startedAt.toISOString(),
           deadlineAt: new Date(
-            startedAt.getTime() + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs,
+            startedAt.getTime() + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs,
           ).toISOString(),
-          budget: LIMITED_RESOURCE_BUDGET_V1,
+          budget: LIMITED_RESOURCE_BUDGET_,
         };
         kernel.processEvent(event);
         collector.recordRuntime(event);
@@ -592,7 +589,7 @@ export async function* executeRuntimeTurnV1(
     const admissionEvents = requiredProviderAdmissionEvents(
       kernel.getState(),
       input.mcpManager,
-      getFeatureFlags(input.config).mcpProviderActionV1,
+      getFeatureFlags(input.config).mcpProviderAction,
     );
     for (const event of admissionEvents) {
       kernel.processEvent(event);
@@ -655,14 +652,14 @@ export async function* executeRuntimeTurnV1(
           : undefined,
     };
     const executor = input.createRuntimeEffectPort(executorDependencies);
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       executor,
       provider,
       10_000,
       (effect, state) =>
-        getFeatureFlags(input.config).resourceBudgetV1
-          ? prepareRuntimeEffectForBudgetV1(effect, state, {
+        getFeatureFlags(input.config).resourceBudget
+          ? prepareRuntimeEffectForBudget(effect, state, {
               config: input.config,
               model,
               shellExecutor: input.shellExecutor,
@@ -678,7 +675,7 @@ export async function* executeRuntimeTurnV1(
             })
           : effect,
       executionSignal,
-      (state) => projectRuntimeSchedulerFactsV1(state, modelInvocationRuntime.builtinToolCatalog),
+      (state) => projectRuntimeSchedulerFacts(state, modelInvocationRuntime.builtinToolCatalog),
     )) {
       collector.recordRuntime(event);
       let abortReasonAfterProjection: string | undefined;
@@ -756,9 +753,9 @@ export async function* executeRuntimeTurnV1(
             )
           ? 'unknown'
           : 'known';
-    const modelFailureMode = exhaustedModelFailureModeV1(error);
+    const modelFailureMode = exhaustedModelFailureMode(error);
     const modelFailureResolution = modelFailureMode
-      ? resolveFailureModeV1(modelFailureMode, {
+      ? resolveFailureMode(modelFailureMode, {
           remainingModelRetryAttempts: 0,
           knownExternalEffects,
         })
@@ -785,7 +782,7 @@ export async function* executeRuntimeTurnV1(
       turnId: failure.turnId,
       outcome:
         modelFailureResolution?.terminalOutcome ??
-        failedTerminalOutcomeV1(failure.failure, { knownExternalEffects }),
+        failedTerminalOutcome(failure.failure, { knownExternalEffects }),
     };
     kernel.processEvent(errorEvent);
     collector.recordRuntime(errorEvent);

@@ -1,4 +1,4 @@
-import type { McpStdioProcessHandleV1, McpStdioProcessPortV1 } from '@kite/runtime-spi';
+import type { McpStdioProcessHandle, McpStdioProcessPort } from '@kite/runtime-spi';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   type JSONRPCMessage,
@@ -6,14 +6,14 @@ import {
   type MessageExtraInfo,
 } from '@modelcontextprotocol/sdk/types.js';
 
-const MCP_STDIO_MAX_LINE_BYTES_V1 = 1024 * 1024;
+const MCP_STDIO_MAX_LINE_BYTES_ = 1024 * 1024;
 
 /**
  * SDK-compatible MCP Transport backed by the Host-authenticated process port.
  * The SDK remains responsible only for JSON-RPC semantics; no process spawn,
  * ambient environment inheritance, or authority verification lives here.
  */
-export function createMcpStdioTransportV1(
+export function createMcpStdioTransport(
   input: Readonly<{
     command: string;
     args?: readonly string[];
@@ -21,16 +21,16 @@ export function createMcpStdioTransportV1(
     env?: Readonly<Record<string, string>>;
     signal?: AbortSignal;
   }>,
-  port: McpStdioProcessPortV1,
+  port: McpStdioProcessPort,
 ): Transport {
   if (input.command.length === 0 || input.cwd.length === 0) {
     throw new Error('MCP stdio process command and cwd are required.');
   }
-  const transport = new HostMcpStdioTransportV1(input, port);
+  const transport = new HostMcpStdioTransport(input, port);
   return transport;
 }
 
-class HostMcpStdioTransportV1 implements Transport {
+class HostMcpStdioTransport implements Transport {
   onclose?: () => void;
   onerror?: (error: Error) => void;
   onmessage?: <T extends JSONRPCMessage>(message: T, extra?: MessageExtraInfo) => void;
@@ -42,8 +42,8 @@ class HostMcpStdioTransportV1 implements Transport {
     env?: Readonly<Record<string, string>>;
     signal?: AbortSignal;
   }>;
-  readonly #port: McpStdioProcessPortV1;
-  #handle: McpStdioProcessHandleV1 | undefined;
+  readonly #port: McpStdioProcessPort;
+  #handle: McpStdioProcessHandle | undefined;
   #reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   #readLoop: Promise<void> | undefined;
   #stderrLoop: Promise<void> | undefined;
@@ -60,7 +60,7 @@ class HostMcpStdioTransportV1 implements Transport {
       env?: Readonly<Record<string, string>>;
       signal?: AbortSignal;
     }>,
-    port: McpStdioProcessPortV1,
+    port: McpStdioProcessPort,
   ) {
     this.#input = input;
     this.#port = port;
@@ -91,7 +91,7 @@ class HostMcpStdioTransportV1 implements Transport {
       throw new Error('MCP JSON-RPC message is not a bounded single line.');
     }
     const bytes = new TextEncoder().encode(`${json}\n`);
-    if (bytes.byteLength > MCP_STDIO_MAX_LINE_BYTES_V1 + 1) {
+    if (bytes.byteLength > MCP_STDIO_MAX_LINE_BYTES_ + 1) {
       throw new Error('MCP JSON-RPC message exceeds the bounded line limit.');
     }
     const write = this.#writeChain.then(() => handle.write(bytes));
@@ -138,11 +138,11 @@ class HostMcpStdioTransportV1 implements Transport {
         const { done, value } = await reader.read();
         if (done) break;
         if (!(value instanceof Uint8Array)) throw new Error('MCP stdio output bytes are invalid.');
-        buffer = appendBufferV1(buffer, value);
+        buffer = appendBuffer(buffer, value);
         while (true) {
           const newline = buffer.indexOf(0x0a);
           if (newline < 0) break;
-          if (newline === 0 || newline > MCP_STDIO_MAX_LINE_BYTES_V1) {
+          if (newline === 0 || newline > MCP_STDIO_MAX_LINE_BYTES_) {
             throw new Error('MCP stdio output line is empty or oversized.');
           }
           const lineBytes = buffer.slice(0, newline);
@@ -194,11 +194,11 @@ class HostMcpStdioTransportV1 implements Transport {
   }
 }
 
-function appendBufferV1(
+function appendBuffer(
   buffer: Uint8Array<ArrayBufferLike>,
   chunk: Uint8Array,
 ): Uint8Array<ArrayBufferLike> {
-  if (buffer.byteLength + chunk.byteLength > MCP_STDIO_MAX_LINE_BYTES_V1 + 1) {
+  if (buffer.byteLength + chunk.byteLength > MCP_STDIO_MAX_LINE_BYTES_ + 1) {
     throw new Error('MCP stdio output exceeds the bounded line limit.');
   }
   const result = new Uint8Array(

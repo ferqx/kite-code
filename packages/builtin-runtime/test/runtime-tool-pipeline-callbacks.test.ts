@@ -1,25 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import type {
-  CapabilityToolKindV1,
-  ClassifiedInvocationV1,
-  DynamicMcpPreparedToolInvocationIdentityV1,
-  DynamicMcpToolTargetV1,
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  ResolvedInvocationV1,
-  ToolCallSnapshotV1,
-  ToolPipelineResolutionContextV1,
-  ValidatedInvocationV1,
+  CapabilityToolKind,
+  ClassifiedInvocation,
+  DynamicMcpPreparedToolInvocationIdentity,
+  DynamicMcpToolTarget,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  ResolvedInvocation,
+  ToolCallSnapshot,
+  ToolPipelineResolutionContext,
+  ValidatedInvocation,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
-import {
-  createCapabilityBindingV1,
-  digestCapabilityBindingValueV1,
-} from '../src/capability-binding';
-import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjectionV1 } from '../src/index';
-import { createBuiltinRuntimeToolPipelineCallbacksV1 } from '../src/runtime-tool-pipeline-callbacks';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+import { createCapabilityBinding, digestCapabilityBindingValue } from '../src/capability-binding';
+import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '../src/index';
+import { createBuiltinRuntimeToolPipelineCallbacks } from '../src/runtime-tool-pipeline-callbacks';
 
 const STAGE_SCHEMA = 'kite.tool-pipeline-stage.v1' as const;
 const ORDINARY_TURN_ID = 'turn-bundle-ordinary';
@@ -28,18 +25,18 @@ const DYNAMIC_TOOL_NAME = 'mcp__fixture__search' as const;
 const DYNAMIC_CATALOG_REVISION = 'd'.repeat(64);
 
 function projectionFixture() {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  return createBuiltinToolCatalogProjectionV1(registry.snapshot(), {
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  return createBuiltinToolCatalogProjection(registry.snapshot(), {
     turnContext: { workspace: '/workspace', phase: 'building' },
   });
 }
 
 function ordinaryFixture(
   projection = projectionFixture(),
-  callbacksOverride?: ReturnType<typeof createBuiltinRuntimeToolPipelineCallbacksV1>,
+  callbacksOverride?: ReturnType<typeof createBuiltinRuntimeToolPipelineCallbacks>,
 ) {
-  const callbacks = callbacksOverride ?? createBuiltinRuntimeToolPipelineCallbacksV1(projection);
-  const context: ToolPipelineResolutionContextV1 = {
+  const callbacks = callbacksOverride ?? createBuiltinRuntimeToolPipelineCallbacks(projection);
+  const context: ToolPipelineResolutionContext = {
     currentTurnId: ORDINARY_TURN_ID,
     availabilityContext: { workspace: '/workspace', phase: 'building' },
     bindings: [],
@@ -48,7 +45,7 @@ function ordinaryFixture(
     builtinProjectionRevision: projection.revision,
     dynamicCatalogRevision: DYNAMIC_CATALOG_REVISION,
   };
-  const call: ToolCallSnapshotV1 = {
+  const call: ToolCallSnapshot = {
     schema: STAGE_SCHEMA,
     stage: 'snapshot',
     toolCallId: 'ordinary-call',
@@ -85,23 +82,23 @@ function dynamicDescriptor(): CapabilityDescriptor {
     availability: 'available',
     diagnostics: [],
   };
-  return { ...base, revision: digestCapabilityBindingValueV1(base) };
+  return { ...base, revision: digestCapabilityBindingValue(base) };
 }
 
 function dynamicFixture(
   projection = projectionFixture(),
-  callbacksOverride?: ReturnType<typeof createBuiltinRuntimeToolPipelineCallbacksV1>,
+  callbacksOverride?: ReturnType<typeof createBuiltinRuntimeToolPipelineCallbacks>,
 ) {
   const subject = dynamicDescriptor();
   if (!subject.inputSchema) throw new Error('dynamic subject schema missing');
-  const binding = createCapabilityBindingV1({
+  const binding = createCapabilityBinding({
     capabilityId: subject.capabilityId,
     capabilityRevision: subject.revision,
     exposedToolName: DYNAMIC_TOOL_NAME,
     inputSchema: subject.inputSchema,
     turnId: DYNAMIC_TURN_ID,
   });
-  const context: ToolPipelineResolutionContextV1 = {
+  const context: ToolPipelineResolutionContext = {
     currentTurnId: DYNAMIC_TURN_ID,
     availabilityContext: { workspace: '/workspace', phase: 'building' },
     bindings: [binding],
@@ -110,8 +107,8 @@ function dynamicFixture(
     builtinProjectionRevision: projection.revision,
     dynamicCatalogRevision: DYNAMIC_CATALOG_REVISION,
   };
-  const callbacks = callbacksOverride ?? createBuiltinRuntimeToolPipelineCallbacksV1(projection);
-  const call: ToolCallSnapshotV1 = {
+  const callbacks = callbacksOverride ?? createBuiltinRuntimeToolPipelineCallbacks(projection);
+  const call: ToolCallSnapshot = {
     schema: STAGE_SCHEMA,
     stage: 'snapshot',
     toolCallId: 'dynamic-call',
@@ -128,10 +125,10 @@ function dynamicFixture(
 }
 
 function prepareOrdinary(value: ReturnType<typeof ordinaryFixture>): {
-  readonly prepared: PreparedToolInvocationV1;
-  readonly resolved: Readonly<ResolvedInvocationV1>;
-  readonly validated: Readonly<ValidatedInvocationV1>;
-  readonly classified: Readonly<ClassifiedInvocationV1>;
+  readonly prepared: PreparedToolInvocation;
+  readonly resolved: Readonly<ResolvedInvocation>;
+  readonly validated: Readonly<ValidatedInvocation>;
+  readonly classified: Readonly<ClassifiedInvocation>;
 } {
   const resolved = value.callbacks.resolve(value.call, value.context);
   expect(resolved.ok).toBe(true);
@@ -146,7 +143,7 @@ function prepareOrdinary(value: ReturnType<typeof ordinaryFixture>): {
     (candidate) => candidate.visibility === 'model' && candidate.name === 'read_file',
   );
   if (entry?.visibility !== 'model') throw new Error('ordinary entry missing');
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     invocationId: 'ordinary-invocation',
     attemptId: 'ordinary-attempt',
     toolCallId: value.call.toolCallId,
@@ -154,7 +151,7 @@ function prepareOrdinary(value: ReturnType<typeof ordinaryFixture>): {
     modelMessageId: value.call.modelMessageId,
     argumentOrigin: value.call.argumentOrigin,
     providerId: entry.providerId,
-    operationId: entry.operationId as NonDynamicOperationIdV1,
+    operationId: entry.operationId as NonDynamicOperationId,
     executionFamily: 'builtin',
     executionMechanism: entry.executionMechanism,
     capabilityId: entry.capabilityId,
@@ -180,9 +177,9 @@ function prepareOrdinary(value: ReturnType<typeof ordinaryFixture>): {
     nestedCapabilityRevision: null,
     nestedCatalogRevision: null,
     isDynamicMcp: false,
-    toolKind: entry.kind as CapabilityToolKindV1,
+    toolKind: entry.kind as CapabilityToolKind,
   };
-  const prepared: PreparedToolInvocationV1 = {
+  const prepared: PreparedToolInvocation = {
     identity,
     input: {
       invocationId: identity.invocationId,
@@ -202,10 +199,10 @@ function prepareOrdinary(value: ReturnType<typeof ordinaryFixture>): {
 }
 
 function prepareDynamic(value: ReturnType<typeof dynamicFixture>): {
-  readonly prepared: PreparedToolInvocationV1;
-  readonly resolved: Readonly<ResolvedInvocationV1>;
-  readonly validated: Readonly<ValidatedInvocationV1>;
-  readonly classified: Readonly<ClassifiedInvocationV1>;
+  readonly prepared: PreparedToolInvocation;
+  readonly resolved: Readonly<ResolvedInvocation>;
+  readonly validated: Readonly<ValidatedInvocation>;
+  readonly classified: Readonly<ClassifiedInvocation>;
 } {
   const resolved = value.callbacks.resolve(value.call, value.context);
   expect(resolved.ok).toBe(true);
@@ -216,9 +213,9 @@ function prepareDynamic(value: ReturnType<typeof dynamicFixture>): {
   const classified = value.callbacks.classify(validated.value);
   expect(classified.ok).toBe(true);
   if (!classified.ok) throw new Error(classified.failure.code);
-  const target = resolved.value.target as DynamicMcpToolTargetV1;
+  const target = resolved.value.target as DynamicMcpToolTarget;
   if (!target.isDynamicMcp) throw new Error('dynamic target missing');
-  const identity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+  const identity: DynamicMcpPreparedToolInvocationIdentity = {
     invocationId: 'dynamic-invocation',
     attemptId: 'dynamic-attempt',
     toolCallId: value.call.toolCallId,
@@ -252,7 +249,7 @@ function prepareDynamic(value: ReturnType<typeof dynamicFixture>): {
     subject: target.subject,
     runtimeWrapper: target.runtimeWrapper,
   };
-  const prepared: PreparedToolInvocationV1 = {
+  const prepared: PreparedToolInvocation = {
     identity,
     input: {
       invocationId: identity.invocationId,
@@ -273,7 +270,7 @@ function prepareDynamic(value: ReturnType<typeof dynamicFixture>): {
 
 function validVerification(
   result: ReturnType<
-    ReturnType<typeof createBuiltinRuntimeToolPipelineCallbacksV1>['verifyPreparedIdentity']
+    ReturnType<typeof createBuiltinRuntimeToolPipelineCallbacks>['verifyPreparedIdentity']
   >,
 ): boolean {
   return typeof result === 'boolean' ? result : result.valid;
@@ -282,7 +279,7 @@ function validVerification(
 describe('Builtin unified Tool Pipeline callbacks', () => {
   test('routes ordinary and dynamic operations through one frozen projection', () => {
     const projection = projectionFixture();
-    const callbacks = createBuiltinRuntimeToolPipelineCallbacksV1(projection);
+    const callbacks = createBuiltinRuntimeToolPipelineCallbacks(projection);
     const ordinary = prepareOrdinary(ordinaryFixture(projection, callbacks));
     const dynamic = prepareDynamic(dynamicFixture(projection, callbacks));
 
@@ -330,7 +327,7 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
 
   test('rejects every partial binding identity before either owner is called', () => {
     const value = ordinaryFixture();
-    const partials: readonly Partial<ToolCallSnapshotV1>[] = [
+    const partials: readonly Partial<ToolCallSnapshot>[] = [
       { bindingId: 'binding-only' },
       { capabilityId: 'capability-only' },
       { capabilityRevision: 'revision-only' },
@@ -353,7 +350,7 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
 
   test('routes validation and classification strictly by target discriminant', () => {
     const projection = projectionFixture();
-    const callbacks = createBuiltinRuntimeToolPipelineCallbacksV1(projection);
+    const callbacks = createBuiltinRuntimeToolPipelineCallbacks(projection);
     const ordinaryValue = ordinaryFixture(projection, callbacks);
     const ordinary = prepareOrdinary(ordinaryValue);
     const dynamicValue = dynamicFixture(projection, callbacks);
@@ -367,38 +364,38 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
     const ordinaryAsDynamic = {
       ...ordinary.resolved,
       target: { ...ordinary.resolved.target, isDynamicMcp: true },
-    } as unknown as ResolvedInvocationV1;
+    } as unknown as ResolvedInvocation;
     expect(callbacks.validate(ordinaryAsDynamic)).toMatchObject({ ok: false });
 
     const dynamicAsOrdinary = {
       ...dynamic.resolved,
       target: { ...dynamic.resolved.target, isDynamicMcp: false },
-    } as unknown as ResolvedInvocationV1;
+    } as unknown as ResolvedInvocation;
     expect(callbacks.validate(dynamicAsOrdinary)).toMatchObject({ ok: false });
 
     const ordinaryValidatedAsDynamic = {
       ...ordinary.validated,
       resolved: ordinaryAsDynamic,
-    } as unknown as ValidatedInvocationV1;
+    } as unknown as ValidatedInvocation;
     expect(callbacks.classify(ordinaryValidatedAsDynamic)).toMatchObject({ ok: false });
 
     const dynamicValidatedAsOrdinary = {
       ...dynamic.validated,
       resolved: dynamicAsOrdinary,
-    } as unknown as ValidatedInvocationV1;
+    } as unknown as ValidatedInvocation;
     expect(callbacks.classify(dynamicValidatedAsOrdinary)).toMatchObject({ ok: false });
   });
 
   test('routes prepared identity verification by identity discriminant and fails cross-branch drift', () => {
     const projection = projectionFixture();
-    const callbacks = createBuiltinRuntimeToolPipelineCallbacksV1(projection);
+    const callbacks = createBuiltinRuntimeToolPipelineCallbacks(projection);
     const ordinary = prepareOrdinary(ordinaryFixture(projection, callbacks));
     const dynamic = prepareDynamic(dynamicFixture(projection, callbacks));
 
     const ordinaryAsDynamic = {
       ...ordinary.prepared,
       identity: { ...ordinary.prepared.identity, isDynamicMcp: true },
-    } as unknown as PreparedToolInvocationV1;
+    } as unknown as PreparedToolInvocation;
     expect(validVerification(callbacks.verifyPreparedIdentity(ordinaryAsDynamic))).toBe(false);
 
     const dynamicAsOrdinary = {
@@ -410,19 +407,19 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
         modelVisible: true,
         exposedToolName: DYNAMIC_TOOL_NAME,
       },
-    } as unknown as PreparedToolInvocationV1;
+    } as unknown as PreparedToolInvocation;
     expect(validVerification(callbacks.verifyPreparedIdentity(dynamicAsOrdinary))).toBe(false);
 
     const malformed = {
       ...ordinary.prepared,
       identity: { ...ordinary.prepared.identity, isDynamicMcp: 'false' },
-    } as unknown as PreparedToolInvocationV1;
+    } as unknown as PreparedToolInvocation;
     expect(callbacks.verifyPreparedIdentity(malformed)).toEqual({
       valid: false,
       code: 'identity_mismatch',
     });
 
-    const foreign = createBuiltinRuntimeToolPipelineCallbacksV1(projection);
+    const foreign = createBuiltinRuntimeToolPipelineCallbacks(projection);
     expect(foreign.verifyClassifiedIdentity(ordinary.classified)).toMatchObject({
       valid: false,
       code: 'governance_missing',
@@ -445,7 +442,7 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
           modelMessageId: 'forged-message',
         },
       },
-    } as unknown as ClassifiedInvocationV1;
+    } as unknown as ClassifiedInvocation;
     expect(callbacks.verifyClassifiedIdentity(tamperedGovernance)).toMatchObject({
       valid: false,
       code: 'governance_missing',
@@ -494,7 +491,7 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
     expect(source).not.toContain('#agent-kernel');
     expect(source).not.toContain('#app/');
     expect(source).not.toContain('src/core/');
-    expect(source).not.toContain('createRuntimeModuleRegistryV1');
+    expect(source).not.toContain('createRuntimeModuleRegistry');
     expect(source).not.toContain('.snapshot(');
     expect(source).not.toContain('try {');
     expect(source).not.toContain('catch');

@@ -1,57 +1,57 @@
 import { createHash } from 'node:crypto';
 import {
-  assertRestoredCapabilityArtifactEvidenceV1,
-  type BuiltinToolCatalogProjectionV1,
+  assertRestoredCapabilityArtifactEvidence,
+  type BuiltinToolCatalogProjection,
 } from '@kite/builtin-runtime';
 import {
-  type ModelArtifactEvidenceAvailabilityV1,
-  verifyCompletedModelInvocationEvidenceV1,
-  verifyPendingModelInvocationEvidenceV1,
+  type ModelArtifactEvidenceAvailability,
+  verifyCompletedModelInvocationEvidence,
+  verifyPendingModelInvocationEvidence,
 } from '@kite/builtin-runtime/model';
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import {
-  assertRuntimeAuthorizationElevationV1,
-  createRuntimeHostStateSessionV1,
-  projectRuntimeHostStateRestartRecoveryEventsV1,
+  assertRuntimeAuthorizationElevation,
+  createRuntimeHostStateSession,
+  projectRuntimeHostStateRestartRecoveryEvents,
   type RuntimeHostExecutionServices,
-  restoreRuntimeHostStateSessionV1,
-  runtimeHostStateRestartRecoveryCapabilityInvocationIdsV1,
-  type StateRuntimeSessionEffectLeaseV1,
-  type StateRuntimeSessionV1,
+  restoreRuntimeHostStateSession,
+  runtimeHostStateRestartRecoveryCapabilityInvocationIds,
+  type StateRuntimeSession,
+  type StateRuntimeSessionEffectLease,
 } from '@kite/runtime-host';
-import type { CapabilityExecutionPortV1, CapabilityRegistrySnapshotV1 } from '@kite/runtime-spi';
+import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite/runtime-spi';
 import type {
-  InstalledKiteRuntimeCompositionFactoryV1,
-  InstalledKiteRuntimeCompositionV1,
+  InstalledKiteRuntimeComposition,
+  InstalledKiteRuntimeCompositionFactory,
 } from '../model-runtime-composition';
-import { createAppRuntimeEffectExecutorV1 } from './runtime-effect-coordinator';
+import { createAppRuntimeEffectExecutor } from './runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from './runtime-effect-dependencies';
 import {
   eventsForRuntimeAction,
   type RuntimeActionResult,
   type RuntimeUserAction,
 } from './state-actions';
-import type { RuntimeActionProvider, RuntimeStateSessionPortV1 } from './state-runner';
+import type { RuntimeActionProvider, RuntimeStateSessionPort } from './state-runner';
 import type {
   RuntimeEffectExecutor,
   RuntimeEffectLeaseExpectation,
   RuntimeEvent,
   RuntimeState,
-  StateSessionStorageV1,
+  StateSessionStorage,
 } from './state-runtime';
-import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
-import { executeRuntimeTurnV1, type RuntimeTurnInputV1 } from './turn-coordinator';
-import { projectVerificationSchemaAdmissionsV1 } from './verification-schema-admission';
+import type { AppToolPipelineComposition } from './tool-pipeline-composition';
+import { executeRuntimeTurn, type RuntimeTurnInput } from './turn-coordinator';
+import { projectVerificationSchemaAdmissions } from './verification-schema-admission';
 
 /** App-private transition control used by the State 25 coordinator. */
-export interface AuthorizedExecutionControlV1 {
+export interface AuthorizedExecutionControl {
   getState: () => Readonly<RuntimeState>;
   processEvent: (event: RuntimeEvent) => void;
   processEventBatch: (events: RuntimeEvent[]) => RuntimeEvent[];
   cancelRun: (reason?: string) => RuntimeEvent[];
 }
 
-export interface RuntimeSessionCoordinatorIdentityV1 {
+export interface RuntimeSessionCoordinatorIdentity {
   readonly sessionId: string;
   readonly userId: string;
   readonly workspace: string;
@@ -60,19 +60,19 @@ export interface RuntimeSessionCoordinatorIdentityV1 {
   readonly interactionMode: RuntimeState['mode'];
   readonly recoveryIdentityKey: string;
   readonly sandboxAvailable?: boolean;
-  readonly modelArtifactEvidence?: ModelArtifactEvidenceAvailabilityV1;
-  readonly capabilityArtifactEvidence?: import('@kite/builtin-runtime').CapabilityArtifactReaderV1;
+  readonly modelArtifactEvidence?: ModelArtifactEvidenceAvailability;
+  readonly capabilityArtifactEvidence?: import('@kite/builtin-runtime').CapabilityArtifactReader;
 }
 
-export interface RuntimeSessionCoordinatorV1 {
+export interface RuntimeSessionCoordinator {
   readonly sessionId: string;
-  readonly control: AuthorizedExecutionControlV1;
-  readonly session: StateRuntimeSessionV1;
+  readonly control: AuthorizedExecutionControl;
+  readonly session: StateRuntimeSession;
   readonly recoveryChanged: boolean;
   readonly lifecycle: 'idle' | 'running' | 'compacting' | 'closing' | 'closed';
 
   getState(): Readonly<RuntimeState>;
-  getStateSessionStorage(): StateSessionStorageV1;
+  getStateSessionStorage(): StateSessionStorage;
   isTurnActive(): boolean;
   beginTurn(): void;
   endTurn(): void;
@@ -84,7 +84,7 @@ export interface RuntimeSessionCoordinatorV1 {
   setActiveCancelRun(cancelRun: (reason?: string) => RuntimeEvent[]): void;
   clearActiveCancelRun(): void;
   executeTurn(
-    input: Omit<RuntimeTurnInputV1, 'runtimeSession' | 'createRuntimeEffectPort'>,
+    input: Omit<RuntimeTurnInput, 'runtimeSession' | 'createRuntimeEffectPort'>,
     provider: RuntimeActionProvider,
   ): AsyncGenerator<RuntimeEvent>;
   createRuntimeEffectPort(dependencies: RuntimeExecutorDependencies): RuntimeEffectExecutor;
@@ -96,39 +96,39 @@ export interface RuntimeSessionCoordinatorV1 {
   close(): Promise<void>;
 }
 
-export interface RuntimeSessionCoordinatorAccessV1 {
-  ensure(input: RuntimeSessionCoordinatorIdentityV1): RuntimeSessionCoordinatorV1;
-  get(sessionId: string): RuntimeSessionCoordinatorV1 | undefined;
+export interface RuntimeSessionCoordinatorAccess {
+  ensure(input: RuntimeSessionCoordinatorIdentity): RuntimeSessionCoordinator;
+  get(sessionId: string): RuntimeSessionCoordinator | undefined;
   release(sessionId: string): Promise<void>;
   close(): Promise<void>;
 }
 
-export interface RuntimeSessionCoordinatorBindingV1 {
+export interface RuntimeSessionCoordinatorBinding {
   bind(input: {
     readonly services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-    readonly capabilities: CapabilityExecutionPortV1;
-    readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
-    readonly builtinToolCatalog: BuiltinToolCatalogProjectionV1;
-    readonly toolPipelineComposition?: AppToolPipelineCompositionV1;
-    readonly modelRuntimeFactory: InstalledKiteRuntimeCompositionFactoryV1;
-    readonly store: StateSessionStorageV1;
+    readonly capabilities: CapabilityExecutionPort;
+    readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+    readonly builtinToolCatalog: BuiltinToolCatalogProjection;
+    readonly toolPipelineComposition?: AppToolPipelineComposition;
+    readonly modelRuntimeFactory: InstalledKiteRuntimeCompositionFactory;
+    readonly store: StateSessionStorage;
   }): void;
-  access(): RuntimeSessionCoordinatorAccessV1;
+  access(): RuntimeSessionCoordinatorAccess;
 }
 
-class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
+class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   readonly sessionId: string;
-  readonly session: StateRuntimeSessionV1;
-  readonly control: AuthorizedExecutionControlV1;
+  readonly session: StateRuntimeSession;
+  readonly control: AuthorizedExecutionControl;
   readonly recoveryChanged: boolean;
-  #lifecycle: RuntimeSessionCoordinatorV1['lifecycle'] = 'idle';
+  #lifecycle: RuntimeSessionCoordinator['lifecycle'] = 'idle';
   #activeOperation: 'turn' | 'compacting' | null = null;
   #activeCancelRun: (reason?: string) => RuntimeEvent[] = () => [];
   #operationCompletion: Promise<void> = Promise.resolve();
   #resolveOperationCompletion: (() => void) | null = null;
   #closePromise: Promise<void> | null = null;
   #closed = false;
-  readonly #store: StateSessionStorageV1;
+  readonly #store: StateSessionStorage;
   readonly #workspace: string;
   readonly #projectId: string;
   readonly #canonicalWorkspaceDigest: `sha256:${string}`;
@@ -136,31 +136,31 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
   readonly #recoveryIdentityKey: string;
   #sandboxAvailable: boolean | undefined;
   #interactionMode: RuntimeState['mode'];
-  readonly #modelArtifactEvidence: ModelArtifactEvidenceAvailabilityV1 | undefined;
+  readonly #modelArtifactEvidence: ModelArtifactEvidenceAvailability | undefined;
   readonly #capabilityArtifactEvidence:
-    | import('@kite/builtin-runtime').CapabilityArtifactReaderV1
+    | import('@kite/builtin-runtime').CapabilityArtifactReader
     | undefined;
   readonly #services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-  readonly #capabilities: CapabilityExecutionPortV1;
-  readonly #capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
-  readonly #builtinToolCatalog: BuiltinToolCatalogProjectionV1;
-  readonly #toolPipelineComposition: AppToolPipelineCompositionV1 | undefined;
-  readonly #modelRuntime: InstalledKiteRuntimeCompositionV1;
-  readonly #runtimePort: RuntimeStateSessionPortV1 & {
-    readonly runtimeStore: StateSessionStorageV1;
+  readonly #capabilities: CapabilityExecutionPort;
+  readonly #capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+  readonly #builtinToolCatalog: BuiltinToolCatalogProjection;
+  readonly #toolPipelineComposition: AppToolPipelineComposition | undefined;
+  readonly #modelRuntime: InstalledKiteRuntimeComposition;
+  readonly #runtimePort: RuntimeStateSessionPort & {
+    readonly runtimeStore: StateSessionStorage;
     processEvents(events: RuntimeEvent[]): void;
   };
 
   constructor(
-    identity: RuntimeSessionCoordinatorIdentityV1,
+    identity: RuntimeSessionCoordinatorIdentity,
     input: {
       readonly services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-      readonly capabilities: CapabilityExecutionPortV1;
-      readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
-      readonly builtinToolCatalog: BuiltinToolCatalogProjectionV1;
-      readonly toolPipelineComposition?: AppToolPipelineCompositionV1;
-      readonly modelRuntime: InstalledKiteRuntimeCompositionV1;
-      readonly store: StateSessionStorageV1;
+      readonly capabilities: CapabilityExecutionPort;
+      readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+      readonly builtinToolCatalog: BuiltinToolCatalogProjection;
+      readonly toolPipelineComposition?: AppToolPipelineComposition;
+      readonly modelRuntime: InstalledKiteRuntimeComposition;
+      readonly store: StateSessionStorage;
     },
   ) {
     this.sessionId = identity.sessionId;
@@ -188,7 +188,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     this.#toolPipelineComposition = input.toolPipelineComposition;
     this.#modelRuntime = input.modelRuntime;
     this.#store = input.store;
-    const restored = restoreRuntimeHostStateSessionV1({
+    const restored = restoreRuntimeHostStateSession({
       sessions: input.services.sessions,
       sessionId: identity.sessionId,
       userId: identity.userId,
@@ -201,16 +201,16 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
       phase: 'building',
       validateRestoredState: identity.capabilityArtifactEvidence
         ? (state) =>
-            assertRestoredCapabilityArtifactEvidenceV1(state, identity.capabilityArtifactEvidence!)
+            assertRestoredCapabilityArtifactEvidence(state, identity.capabilityArtifactEvidence!)
         : undefined,
     });
-    this.session = createRuntimeHostStateSessionV1({
+    this.session = createRuntimeHostStateSession({
       state: restored.state,
       services: input.services,
       clock: () => new Date().toISOString(),
       id: () => crypto.randomUUID(),
       sandboxAvailable: () => this.#sandboxAvailable === true,
-      verificationSchemaAdmissions: (event) => projectVerificationSchemaAdmissionsV1(event),
+      verificationSchemaAdmissions: (event) => projectVerificationSchemaAdmissions(event),
       eventBatchAdmissionValidator: (events) => {
         for (const event of events) {
           if (event.type !== 'interaction_mode.changed') continue;
@@ -218,7 +218,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
             throw new Error('interaction_mode.changed requires a valid changedAt timestamp.');
           }
           if (event.mode === 'full') {
-            assertRuntimeAuthorizationElevationV1({
+            assertRuntimeAuthorizationElevation({
               mode: 'full_access',
               source: event.source,
               sandboxAvailable: this.#sandboxAvailable === true,
@@ -239,9 +239,9 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     this.#runtimePort = this.#createRuntimePort();
     const recoveryEvents =
       restored.state.recoveryState.kind === 'normal'
-        ? projectRuntimeHostStateRestartRecoveryEventsV1(restored.state, {
+        ? projectRuntimeHostStateRestartRecoveryEvents(restored.state, {
             capabilityFinishedAtByInvocationId: Object.fromEntries(
-              runtimeHostStateRestartRecoveryCapabilityInvocationIdsV1(restored.state).map(
+              runtimeHostStateRestartRecoveryCapabilityInvocationIds(restored.state).map(
                 (invocationId) => [invocationId, new Date().toISOString()],
               ),
             ),
@@ -253,10 +253,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
                 )
                 .map((invocation) => [
                   invocation.invocationId,
-                  verifyPendingModelInvocationEvidenceV1(
-                    invocation,
-                    identity.modelArtifactEvidence,
-                  ),
+                  verifyPendingModelInvocationEvidence(invocation, identity.modelArtifactEvidence),
                 ]),
             ),
             completedModelEvidenceFailures: Object.fromEntries(
@@ -264,7 +261,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
                 .filter((invocation) => invocation.status === 'completed')
                 .map((invocation) => [
                   invocation.invocationId,
-                  verifyCompletedModelInvocationEvidenceV1(
+                  verifyCompletedModelInvocationEvidence(
                     invocation,
                     identity.modelArtifactEvidence,
                   ),
@@ -297,7 +294,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     });
   }
 
-  get lifecycle(): RuntimeSessionCoordinatorV1['lifecycle'] {
+  get lifecycle(): RuntimeSessionCoordinator['lifecycle'] {
     return this.#lifecycle;
   }
 
@@ -306,7 +303,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     return this.session.getState();
   }
 
-  getStateSessionStorage(): StateSessionStorageV1 {
+  getStateSessionStorage(): StateSessionStorage {
     this.#assertOpen();
     return this.#store;
   }
@@ -355,7 +352,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
   }
 
   async *executeTurn(
-    input: Omit<RuntimeTurnInputV1, 'runtimeSession' | 'createRuntimeEffectPort'>,
+    input: Omit<RuntimeTurnInput, 'runtimeSession' | 'createRuntimeEffectPort'>,
     provider: RuntimeActionProvider,
   ): AsyncGenerator<RuntimeEvent> {
     this.#assertOpen();
@@ -368,7 +365,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     }
     this.beginTurn();
     try {
-      yield* executeRuntimeTurnV1(
+      yield* executeRuntimeTurn(
         {
           ...input,
           runtimeSession: this.#runtimePort,
@@ -429,7 +426,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     ) {
       throw new Error('Runtime Model composition identity mismatch.');
     }
-    return createAppRuntimeEffectExecutorV1(dependencies);
+    return createAppRuntimeEffectExecutor(dependencies);
   }
 
   async executePendingCompaction(input: {
@@ -440,7 +437,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     this.#beginOperation('compacting');
     this.#lifecycle = 'compacting';
     let runnerId: string | null = null;
-    let effectLease: StateRuntimeSessionEffectLeaseV1 | null = null;
+    let effectLease: StateRuntimeSessionEffectLease | null = null;
     try {
       runnerId = this.session.acquireRunner();
       if (!runnerId) {
@@ -555,7 +552,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     }
   }
 
-  assertIdentity(identity: RuntimeSessionCoordinatorIdentityV1): void {
+  assertIdentity(identity: RuntimeSessionCoordinatorIdentity): void {
     if (
       canonicalPathForComparison(identity.workspace) !== this.#workspace ||
       identity.sessionId !== this.sessionId ||
@@ -572,8 +569,8 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     }
   }
 
-  #createRuntimePort(): RuntimeStateSessionPortV1 & {
-    readonly runtimeStore: StateSessionStorageV1;
+  #createRuntimePort(): RuntimeStateSessionPort & {
+    readonly runtimeStore: StateSessionStorage;
     processEvents(events: RuntimeEvent[]): void;
   } {
     const applyAction = (
@@ -603,8 +600,8 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
       });
       return { status: 'applied', events: [...applied] };
     };
-    const port: RuntimeStateSessionPortV1 & {
-      readonly runtimeStore: StateSessionStorageV1;
+    const port: RuntimeStateSessionPort & {
+      readonly runtimeStore: StateSessionStorage;
       processEvents(events: RuntimeEvent[]): void;
     } = {
       runtimeStore: this.#store,
@@ -617,7 +614,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
       getLastAppliedEvents: () => this.session.getLastAppliedEvents(),
       selectPendingEffects: (
         state?: Readonly<RuntimeState>,
-        facts?: Parameters<StateRuntimeSessionV1['selectPendingEffects']>[1],
+        facts?: Parameters<StateRuntimeSession['selectPendingEffects']>[1],
       ) => this.session.selectPendingEffects(state, facts),
       acquireRunner: () => this.session.acquireRunner(),
       releaseRunner: (runnerId: string) => this.session.releaseRunner(runnerId),
@@ -658,25 +655,25 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
   }
 }
 
-class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAccessV1 {
-  readonly #coordinators = new Map<string, RuntimeSessionCoordinator>();
+class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAccess {
+  readonly #coordinators = new Map<string, RuntimeSessionCoordinatorImpl>();
   readonly #services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-  readonly #store: StateSessionStorageV1;
-  readonly #modelRuntimeFactory: InstalledKiteRuntimeCompositionFactoryV1;
-  readonly #capabilities: CapabilityExecutionPortV1;
-  readonly #snapshot: CapabilityRegistrySnapshotV1;
-  readonly #builtinToolCatalog: BuiltinToolCatalogProjectionV1;
-  readonly #toolPipelineComposition: AppToolPipelineCompositionV1 | undefined;
+  readonly #store: StateSessionStorage;
+  readonly #modelRuntimeFactory: InstalledKiteRuntimeCompositionFactory;
+  readonly #capabilities: CapabilityExecutionPort;
+  readonly #snapshot: CapabilityRegistrySnapshot;
+  readonly #builtinToolCatalog: BuiltinToolCatalogProjection;
+  readonly #toolPipelineComposition: AppToolPipelineComposition | undefined;
   #closed = false;
 
   constructor(input: {
     readonly services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-    readonly store: StateSessionStorageV1;
-    readonly capabilities: CapabilityExecutionPortV1;
-    readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
-    readonly builtinToolCatalog: BuiltinToolCatalogProjectionV1;
-    readonly toolPipelineComposition?: AppToolPipelineCompositionV1;
-    readonly modelRuntimeFactory: InstalledKiteRuntimeCompositionFactoryV1;
+    readonly store: StateSessionStorage;
+    readonly capabilities: CapabilityExecutionPort;
+    readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+    readonly builtinToolCatalog: BuiltinToolCatalogProjection;
+    readonly toolPipelineComposition?: AppToolPipelineComposition;
+    readonly modelRuntimeFactory: InstalledKiteRuntimeCompositionFactory;
   }) {
     if (
       !Object.isFrozen(input.capabilityRegistrySnapshot) ||
@@ -716,7 +713,7 @@ class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAcce
     this.#modelRuntimeFactory = input.modelRuntimeFactory;
   }
 
-  ensure(identity: RuntimeSessionCoordinatorIdentityV1): RuntimeSessionCoordinatorV1 {
+  ensure(identity: RuntimeSessionCoordinatorIdentity): RuntimeSessionCoordinator {
     if (this.#closed) throw new Error('Runtime coordinator registry is closed.');
     const existing = this.#coordinators.get(identity.sessionId);
     if (existing) {
@@ -731,7 +728,7 @@ class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAcce
     ) {
       throw new Error('Runtime Model composition is incomplete.');
     }
-    const coordinator = new RuntimeSessionCoordinator(identity, {
+    const coordinator = new RuntimeSessionCoordinatorImpl(identity, {
       services: this.#services,
       capabilities: this.#capabilities,
       capabilityRegistrySnapshot: this.#snapshot,
@@ -744,7 +741,7 @@ class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAcce
     return coordinator;
   }
 
-  get(sessionId: string): RuntimeSessionCoordinatorV1 | undefined {
+  get(sessionId: string): RuntimeSessionCoordinator | undefined {
     return this.#coordinators.get(sessionId);
   }
 
@@ -766,8 +763,8 @@ class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAcce
   }
 }
 
-export function createRuntimeSessionCoordinatorBindingV1(): RuntimeSessionCoordinatorBindingV1 {
-  let access: RuntimeSessionCoordinatorAccessV1 | undefined;
+export function createRuntimeSessionCoordinatorBinding(): RuntimeSessionCoordinatorBinding {
+  let access: RuntimeSessionCoordinatorAccess | undefined;
   let bound = false;
   return {
     bind(input) {

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { decideCompletionV1 } from '../src/completion';
+import { decideUnplannedCompletion } from '../src/completion';
 import { reduceAuthorizationState } from '../src/core/authorization/reducer';
 import { reduceCompletionState } from '../src/core/completion/reducer';
 import { reduceLifecycleState } from '../src/core/lifecycle/reducer';
 import type { KernelEvent } from '../src/events';
 import { sha256Hex } from '../src/hash';
-import { createToolRecoveryJournalV1, recordRecoveryFailureV1 } from '../src/recovery';
+import { createToolRecoveryJournal, recordRecoveryFailure } from '../src/recovery';
 import { reduceAgentState } from '../src/reducer';
 import { type AgentState, createInitialAgentState } from '../src/state';
 
@@ -322,7 +322,7 @@ describe('State core reducers', () => {
     } as KernelEvent);
     expect(unknownCancelled).toBe(state);
 
-    const journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(RECOVERY_KEY), {
+    const journal = recordRecoveryFailure(createToolRecoveryJournal(RECOVERY_KEY), {
       toolCallId: 'call-1',
       toolName: 'shell_execute',
       invocationFingerprint: 'fingerprint',
@@ -561,7 +561,7 @@ describe('State core reducers', () => {
       } as KernelEvent),
     ).toBe(state);
 
-    const decision = decideCompletionV1(
+    const decision = decideUnplannedCompletion(
       reduceLifecycleState(state, {
         type: 'planning.entered',
         taskId: 'task-1',

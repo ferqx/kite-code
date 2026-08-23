@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { validateCapabilityArgumentsV1 as validateCapabilityArguments } from './capability-domain';
+import { validateCapabilityArguments } from './capability-domain';
 import { findSkillCatalogEntry, type SkillCatalogSnapshot } from './catalog';
 import type {
-  SkillFeatureFlagsV1 as FeatureFlags,
-  SkillRuntimeEventV1 as RuntimeEvent,
-  SkillRuntimeStateViewV1 as RuntimeState,
-  SkillActivationV1 as SkillActivation,
+  SkillFeatureFlags as FeatureFlags,
+  SkillRuntimeEvent as RuntimeEvent,
+  SkillRuntimeStateView as RuntimeState,
+  SkillActivation,
 } from './runtime-domain';
 
 export interface SkillActivationRequest {
@@ -33,7 +33,7 @@ export function evaluateSkillActivation(input: {
   flags: FeatureFlags;
   now?: Date;
 }): SkillActivationEvaluation {
-  if (!input.flags.skillWorkflowV1 || !input.flags.skillActivationV2) {
+  if (!input.flags.skillWorkflow || !input.flags.skillActivation) {
     return { ok: false, reason: 'Skill Workflow activation is disabled by feature flag.' };
   }
   const taskId = input.state.activeTaskId;

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BuiltinModelOperationExecutionPortV1 } from '@kite/builtin-runtime/model';
-import { createInstalledKiteRuntimeCompositionFactoryV1 } from '#app/bootstrap/model-runtime-composition';
+import type { BuiltinModelOperationExecutionPort } from '@kite/builtin-runtime/model';
+import { createInstalledKiteRuntimeCompositionFactory } from '#app/bootstrap/model-runtime-composition';
 
 const previousKiteCodeHome = process.env.KITE_CODE_HOME;
 const temporaryRoots: string[] = [];
@@ -30,12 +30,12 @@ describe('Kite installed Model Runtime composition identity', () => {
     mkdirSync(workspace);
     mkdirSync(otherWorkspace);
 
-    const operationExecution: BuiltinModelOperationExecutionPortV1 = Object.freeze({
+    const operationExecution: BuiltinModelOperationExecutionPort = Object.freeze({
       execute: async () => {
         throw new Error('composition identity test must not dispatch a Model operation');
       },
     });
-    const factory = createInstalledKiteRuntimeCompositionFactoryV1(operationExecution);
+    const factory = createInstalledKiteRuntimeCompositionFactory(operationExecution);
     const first = factory(workspace);
     const second = factory(workspace);
 

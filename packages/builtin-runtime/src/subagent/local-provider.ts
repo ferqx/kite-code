@@ -2,47 +2,47 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type {
   JsonObject,
-  SubagentDelegationGrantV1,
-  SubagentHandleV1,
-  SubagentObservationV1,
-  SubagentProviderResultV1,
-  SubagentProviderV1,
-  SubagentResumeGrantV1,
-  SubagentTaskArtifactV1,
+  SubagentDelegationGrant,
+  SubagentHandle,
+  SubagentObservation,
+  SubagentProvider,
+  SubagentProviderResult,
+  SubagentResumeGrant,
+  SubagentTaskArtifact,
 } from '@kite/runtime-spi';
-import { SUBAGENT_PROVIDER_SCHEMA_V1 } from '@kite/runtime-spi';
-import { SubagentGrantErrorV1, type SubagentGrantVerifierV1 } from './grant-authority';
+import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+import { SubagentGrantError, type SubagentGrantVerifier } from './grant-authority';
 
 const DEFAULT_TOMBSTONE_TTL_MS = 5 * 60_000;
 const MAX_PROVIDER_TOMBSTONES_TOTAL = 1_024;
 
-export interface LocalSubagentLifecycleDriverV1 {
+export interface LocalSubagentLifecycleDriver {
   start(
-    grant: Readonly<SubagentDelegationGrantV1>,
+    grant: Readonly<SubagentDelegationGrant>,
     task: string,
     signal: AbortSignal,
-  ): Promise<LocalSubagentDriverResultV1>;
+  ): Promise<LocalSubagentDriverResult>;
   resume(
-    grant: Readonly<SubagentResumeGrantV1>,
+    grant: Readonly<SubagentResumeGrant>,
     task: string,
     signal: AbortSignal,
-  ): Promise<LocalSubagentDriverResultV1>;
+  ): Promise<LocalSubagentDriverResult>;
   /** Drops an exact pre-activation registration without executing child I/O. */
-  abandon(grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>): boolean;
+  abandon(grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>): boolean;
 }
 
-export interface LocalSubagentDriverResultV1 {
+export interface LocalSubagentDriverResult {
   readonly childInvocationId: string;
-  readonly status: SubagentObservationV1['status'];
+  readonly status: SubagentObservation['status'];
   readonly summary: string;
   readonly toolCallCount: number;
   readonly durationMs: number;
   readonly privatePayload: JsonObject;
 }
 
-export interface BuiltinSubagentTaskArtifactAccessV1 {
+export interface BuiltinSubagentTaskArtifactAccess {
   read(
-    ref: SubagentTaskArtifactV1,
+    ref: SubagentTaskArtifact,
     expected: Readonly<{
       parentInvocationId: string;
       parentAttempt: number;
@@ -54,23 +54,23 @@ export interface BuiltinSubagentTaskArtifactAccessV1 {
 }
 
 interface RunningChild {
-  readonly handle: SubagentHandleV1;
+  readonly handle: SubagentHandle;
   readonly controller: AbortController;
-  readonly grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>;
+  readonly grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>;
   readonly task: string;
   readonly purpose: 'start' | 'resume';
-  completion?: Promise<LocalSubagentDriverResultV1>;
+  completion?: Promise<LocalSubagentDriverResult>;
   observed: boolean;
 }
 
 /** Sole production Provider. It owns lifecycle/cancel/observation transport only. */
-export class LocalSubagentProviderV1 implements SubagentProviderV1 {
+export class LocalSubagentProvider implements SubagentProvider {
   readonly #runs = new Map<string, RunningChild>();
-  readonly #verifier: SubagentGrantVerifierV1;
-  readonly #driver: LocalSubagentLifecycleDriverV1;
+  readonly #verifier: SubagentGrantVerifier;
+  readonly #driver: LocalSubagentLifecycleDriver;
   readonly #idSource: () => string;
   readonly #cleanupGraceMs: number;
-  readonly #taskArtifacts: BuiltinSubagentTaskArtifactAccessV1;
+  readonly #taskArtifacts: BuiltinSubagentTaskArtifactAccess;
   readonly #providerInstanceId: string;
   readonly #ownerProcessStartIdentity: string;
   /**
@@ -87,9 +87,9 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
   readonly #maxProviderTombstones: number;
 
   constructor(
-    verifier: SubagentGrantVerifierV1,
-    driver: LocalSubagentLifecycleDriverV1,
-    taskArtifacts: BuiltinSubagentTaskArtifactAccessV1,
+    verifier: SubagentGrantVerifier,
+    driver: LocalSubagentLifecycleDriver,
+    taskArtifacts: BuiltinSubagentTaskArtifactAccess,
     idSource: () => string = randomUUID,
     cleanupGraceMs = 3_000,
     options: {
@@ -128,15 +128,15 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     this.#cleanupGraceMs = cleanupGraceMs;
   }
 
-  async start(input: { grant: SubagentDelegationGrantV1; signal?: AbortSignal }) {
+  async start(input: { grant: SubagentDelegationGrant; signal?: AbortSignal }) {
     return this.#launch(input.grant, input.signal, 'start');
   }
 
-  async resume(input: { grant: SubagentResumeGrantV1; signal?: AbortSignal }) {
+  async resume(input: { grant: SubagentResumeGrant; signal?: AbortSignal }) {
     return this.#launch(input.grant, input.signal, 'resume');
   }
 
-  async observe(input: { handle: SubagentHandleV1; signal?: AbortSignal }) {
+  async observe(input: { handle: SubagentHandle; signal?: AbortSignal }) {
     this.#pruneTombstones();
     const running = this.#runs.get(input.handle.handleId);
     if (!running?.completion || !sameHandle(running.handle, input.handle) || running.observed) {
@@ -157,7 +157,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
       this.#rememberTombstone(this.#stopped, input.handle.handleId);
       return { ok: true, value: observation } as const;
     } catch (error) {
-      if (error instanceof DriverCleanupPendingErrorV1) {
+      if (error instanceof DriverCleanupPendingError) {
         // The single absolute cleanup grace is exhausted. Forget the in-memory
         // transport handle and force parent reconciliation; never open a
         // second grace window or retain an unobservable active handle.
@@ -167,7 +167,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
       }
       this.#runs.delete(input.handle.handleId);
       this.#rememberTombstone(this.#stopped, input.handle.handleId);
-      if (error instanceof ObservationTooLargeErrorV1) {
+      if (error instanceof ObservationTooLargeError) {
         return failure('observation_too_large', error.message);
       }
       return failure(
@@ -183,7 +183,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     }
   }
 
-  async activate(input: { handle: SubagentHandleV1; signal?: AbortSignal }) {
+  async activate(input: { handle: SubagentHandle; signal?: AbortSignal }) {
     this.#pruneTombstones();
     const running = this.#runs.get(input.handle.handleId);
     if (!running || running.completion || !sameHandle(running.handle, input.handle)) {
@@ -200,12 +200,12 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     running.completion = (
       running.purpose === 'start'
         ? this.#driver.start(
-            running.grant as SubagentDelegationGrantV1,
+            running.grant as SubagentDelegationGrant,
             running.task,
             running.controller.signal,
           )
         : this.#driver.resume(
-            running.grant as SubagentResumeGrantV1,
+            running.grant as SubagentResumeGrant,
             running.task,
             running.controller.signal,
           )
@@ -213,7 +213,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     return { ok: true as const, value: { activated: true as const } };
   }
 
-  async cancel(input: { handle: SubagentHandleV1; reason: string }) {
+  async cancel(input: { handle: SubagentHandle; reason: string }) {
     this.#pruneTombstones();
     const running = this.#runs.get(input.handle.handleId);
     if (!running || !sameHandle(running.handle, input.handle)) {
@@ -229,9 +229,9 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     return { ok: true, value: { cancelled: true as const } } as const;
   }
 
-  async reconcile(input: { handle: SubagentHandleV1 }) {
+  async reconcile(input: { handle: SubagentHandle }) {
     this.#pruneTombstones();
-    let verified: Readonly<SubagentHandleV1>;
+    let verified: Readonly<SubagentHandle>;
     try {
       verified = this.#verifier.verifyHandle(input.handle);
     } catch {
@@ -296,16 +296,16 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
   }
 
   async #launch(
-    grant: SubagentDelegationGrantV1 | SubagentResumeGrantV1,
+    grant: SubagentDelegationGrant | SubagentResumeGrant,
     signal: AbortSignal | undefined,
     purpose: 'start' | 'resume',
-  ): Promise<SubagentProviderResultV1<SubagentHandleV1>> {
+  ): Promise<SubagentProviderResult<SubagentHandle>> {
     try {
       this.#pruneTombstones();
       const verified =
         purpose === 'start'
-          ? this.#verifier.verifyAndConsumeStart(grant as SubagentDelegationGrantV1)
-          : this.#verifier.verifyAndConsumeResume(grant as SubagentResumeGrantV1);
+          ? this.#verifier.verifyAndConsumeStart(grant as SubagentDelegationGrant)
+          : this.#verifier.verifyAndConsumeResume(grant as SubagentResumeGrant);
       if (signal?.aborted) {
         this.#driver.abandon(verified);
         return failure('cancelled', 'Subagent lifecycle was cancelled.');
@@ -335,7 +335,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
       return { ok: true, value: handle };
     } catch (error) {
       this.#driver.abandon(grant);
-      if (error instanceof SubagentGrantErrorV1) return failure(error.code, error.message);
+      if (error instanceof SubagentGrantError) return failure(error.code, error.message);
       return failure('invalid_grant', 'Subagent grant verification failed.');
     }
   }
@@ -390,16 +390,16 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
   }
 }
 
-function sameHandle(left: SubagentHandleV1, right: SubagentHandleV1): boolean {
-  return canonicalSubagentJsonV1(left) === canonicalSubagentJsonV1(right);
+function sameHandle(left: SubagentHandle, right: SubagentHandle): boolean {
+  return canonicalSubagentJson(left) === canonicalSubagentJson(right);
 }
 
-function canonicalSubagentJsonV1(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalSubagentJsonV1).join(',')}]`;
+function canonicalSubagentJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalSubagentJson).join(',')}]`;
   if (value && typeof value === 'object') {
     return `{${Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalSubagentJsonV1(item)}`)
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalSubagentJson(item)}`)
       .join(',')}}`;
   }
   return JSON.stringify(value);
@@ -465,14 +465,14 @@ function failure(
 }
 
 function typedFailure(
-  code: import('@kite/runtime-spi').SubagentProviderFailureCodeV1,
+  code: import('@kite/runtime-spi').SubagentProviderFailureCode,
   message: string,
 ) {
   return { ok: false, failure: { code, message } } as const;
 }
 
-class DriverCleanupPendingErrorV1 extends Error {}
-class ObservationTooLargeErrorV1 extends Error {}
+class DriverCleanupPendingError extends Error {}
+class ObservationTooLargeError extends Error {}
 
 async function boundedCompletion<T>(
   promise: Promise<T>,
@@ -492,7 +492,7 @@ async function boundedCompletion<T>(
 function cleanupRace<T>(promise: Promise<T>, cleanupGraceMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
-      () => reject(new DriverCleanupPendingErrorV1('Child cancellation cleanup is incomplete.')),
+      () => reject(new DriverCleanupPendingError('Child cancellation cleanup is incomplete.')),
       cleanupGraceMs,
     );
     timer.unref?.();
@@ -510,9 +510,9 @@ function cleanupRace<T>(promise: Promise<T>, cleanupGraceMs: number): Promise<T>
 }
 
 function boundedObservation(
-  handle: SubagentHandleV1,
-  result: LocalSubagentDriverResultV1,
-): Readonly<SubagentObservationV1> {
+  handle: SubagentHandle,
+  result: LocalSubagentDriverResult,
+): Readonly<SubagentObservation> {
   if (
     result.childInvocationId !== handle.childInvocationId ||
     !['completed', 'failed', 'cancelled', 'exhausted', 'blocked'].includes(result.status) ||
@@ -532,12 +532,12 @@ function boundedObservation(
     throw new Error('Child Runtime driver returned a non-JSON private payload.');
   }
   if (Buffer.byteLength(payload) > 4 * 1024 * 1024) {
-    throw new ObservationTooLargeErrorV1(
+    throw new ObservationTooLargeError(
       'Child Runtime driver observation exceeds the transport bound.',
     );
   }
   const body = {
-    schema: SUBAGENT_PROVIDER_SCHEMA_V1,
+    schema: SUBAGENT_PROVIDER_SCHEMA_,
     handleId: handle.handleId,
     childInvocationId: handle.childInvocationId,
     status: result.status,

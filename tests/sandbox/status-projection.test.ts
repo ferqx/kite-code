@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  EXECUTION_STATUS_CAPABILITIES_V1,
-  type ExecutionStatusProjectionInputV1,
-  formatExecutionStatusV1,
-  formatUnadmittedExecutionStatusV1,
-  projectExecutionStatusV1,
-  tryProjectAdmittedExecutionStatusV1,
+  EXECUTION_STATUS_CAPABILITIES_,
+  type ExecutionStatusProjectionInput,
+  formatExecutionStatus,
+  formatUnadmittedExecutionStatus,
+  projectExecutionStatus,
+  tryProjectAdmittedExecutionStatus,
 } from '../../apps/kite/src/release/execution-status';
 
 function input(
-  overrides: Partial<ExecutionStatusProjectionInputV1> = {},
-): ExecutionStatusProjectionInputV1 {
+  overrides: Partial<ExecutionStatusProjectionInput> = {},
+): ExecutionStatusProjectionInput {
   return {
     sandboxBackend: 'seatbelt',
     sandboxAvailable: true,
@@ -42,7 +42,7 @@ function input(
 
 describe('execution status projection', () => {
   test('projects the actual enforcement and controller state in a stable order', () => {
-    const status = projectExecutionStatusV1(input());
+    const status = projectExecutionStatus(input());
 
     expect(status).toEqual({
       version: 1,
@@ -86,14 +86,14 @@ describe('execution status projection', () => {
       ],
     });
     expect(status.capabilities.map(({ capability }) => capability)).toEqual([
-      ...EXECUTION_STATUS_CAPABILITIES_V1,
+      ...EXECUTION_STATUS_CAPABILITIES_,
     ]);
     expect(JSON.stringify(status)).not.toContain('api.example.com');
     expect(JSON.stringify(status)).not.toContain('objects.example.com');
   });
 
   test('shows read-only fallback and typed reasons without exposing the security profile', () => {
-    const status = projectExecutionStatusV1(
+    const status = projectExecutionStatus(
       input({
         sandboxBackend: 'none',
         sandboxAvailable: false,
@@ -161,7 +161,7 @@ describe('execution status projection', () => {
   });
 
   test('keeps disabled annotations off enabled capabilities and reports fail-closed fallback', () => {
-    const status = projectExecutionStatusV1(
+    const status = projectExecutionStatus(
       input({
         sandboxBackend: 'none',
         sandboxAvailable: false,
@@ -210,13 +210,13 @@ describe('execution status projection', () => {
       },
       productionExecution: { qualificationId: 'qualification-v1' },
     };
-    const status = tryProjectAdmittedExecutionStatusV1({
+    const status = tryProjectAdmittedExecutionStatus({
       config,
       sandboxRuntime: { backend: 'seatbelt', available: true },
     });
 
     expect(status).not.toBeNull();
-    const text = formatExecutionStatusV1(status!);
+    const text = formatExecutionStatus(status!);
     expect(text).toContain('Execution boundary: admitted');
     expect(text).toContain('Network: mode=allowlist allowlisted_host_count=2');
     expect(text).toContain('localStdioMcp: disabled (feature_disabled)');
@@ -236,12 +236,12 @@ describe('execution status projection', () => {
       sandbox: { enabled: false },
     };
     expect(
-      tryProjectAdmittedExecutionStatusV1({
+      tryProjectAdmittedExecutionStatus({
         config,
         sandboxRuntime: { backend: 'none', available: false },
       }),
     ).toBeNull();
-    expect(formatUnadmittedExecutionStatusV1({ backend: 'none', available: false })).toContain(
+    expect(formatUnadmittedExecutionStatus({ backend: 'none', available: false })).toContain(
       'Execution boundary: not admitted',
     );
   });

@@ -1,19 +1,19 @@
 import type { VerificationReviewerInput, VerificationReviewerResult } from '@kite/runtime-spi';
-import type { ModelRuntimeConfigV1 } from './config';
+import type { ModelRuntimeConfig } from './config';
 import { createChatModel, type SupportedChatModel } from './factory';
 import {
-  computeModelInvocationPrivateDigestV1,
-  type ModelInvocationGatewayV1,
-  type ModelInvocationPersistenceV1,
-  type ModelInvocationStateViewV1,
-  normalizedModelResponseToAIMessageV1,
+  computeModelInvocationPrivateDigest,
+  type ModelInvocationGateway,
+  type ModelInvocationPersistence,
+  type ModelInvocationStateView,
+  normalizedModelResponseToAIMessage,
 } from './invocation-gateway';
 import { type BaseMessage, humanMessage, systemMessage } from './messages';
 import {
   ProviderDataAdmissionError,
-  type ProviderDataAdmissionGateV1,
+  type ProviderDataAdmissionGate,
 } from './provider-data-admission';
-import { compileModelSurfaceV1 } from './surface-compiler';
+import { compileModelSurface } from './surface-compiler';
 
 export type ShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
 
@@ -35,15 +35,15 @@ export interface ToolApprovalPayload {
   reason: string;
 }
 
-export interface PendingToolRequestViewV1 {
+export interface PendingToolRequestView {
   id?: string;
   name: string;
   args: unknown;
 }
 
-type ReviewGatewayV1 = Pick<ModelInvocationGatewayV1, 'invoke'>;
+type ReviewGateway = Pick<ModelInvocationGateway, 'invoke'>;
 
-interface ReviewStateViewV1 extends ModelInvocationStateViewV1 {
+interface ReviewStateView extends ModelInvocationStateView {
   readonly context: { readonly activeCheckpoint?: { readonly sourceDigest: string } };
 }
 
@@ -72,7 +72,7 @@ export interface ReviewContext {
   doomLoopInfo?: { fingerprint: string; count: number };
 }
 
-export function resolveAutoReviewConfig(config: ModelRuntimeConfigV1): ModelRuntimeConfigV1 {
+export function resolveAutoReviewConfig(config: ModelRuntimeConfig): ModelRuntimeConfig {
   const review = config.autoReview;
   return {
     ...config,
@@ -81,20 +81,20 @@ export function resolveAutoReviewConfig(config: ModelRuntimeConfigV1): ModelRunt
   };
 }
 
-export function createAutoReviewModel(config: ModelRuntimeConfigV1): SupportedChatModel {
+export function createAutoReviewModel(config: ModelRuntimeConfig): SupportedChatModel {
   return createChatModel(resolveAutoReviewConfig(config));
 }
 
 export async function reviewToolApproval(input: {
-  config?: ModelRuntimeConfigV1;
+  config?: ModelRuntimeConfig;
   model?: SupportedChatModel;
-  gateway?: ReviewGatewayV1;
-  persistence?: ModelInvocationPersistenceV1<ReviewStateViewV1>;
+  gateway?: ReviewGateway;
+  persistence?: ModelInvocationPersistence<ReviewStateView>;
   payload: ToolApprovalPayload;
-  request: PendingToolRequestViewV1;
+  request: PendingToolRequestView;
   context?: ReviewContext;
   timeoutMs?: number;
-  providerDataAdmission: ProviderDataAdmissionGateV1;
+  providerDataAdmission: ProviderDataAdmissionGate;
   parentReservationId?: string;
   parentInvocationId?: string;
 }): Promise<AutoReviewResult> {
@@ -111,7 +111,7 @@ export async function reviewToolApproval(input: {
     if (!input.config || !input.model || !input.gateway || !input.persistence) {
       throw new Error('ModelInvocationGateway execution context is unavailable.');
     }
-    const compiled = compileModelSurfaceV1({
+    const compiled = compileModelSurface({
       purpose: 'auto_review',
       config: input.config,
       model: input.model,
@@ -130,11 +130,11 @@ export async function reviewToolApproval(input: {
         parentToolCallId: input.request.id,
         contextCheckpointId: state.context.activeCheckpoint?.sourceDigest ?? null,
         promptContractVersion: 'auto-review-v1',
-        projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+        projectionEnvironmentDigest: computeModelInvocationPrivateDigest(
           'kite.model-projection-environment.v1',
           { reviewContext: input.context ?? null },
         ),
-        capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+        capabilityBindingDigest: computeModelInvocationPrivateDigest(
           'kite.model-capability-bindings.v1',
           [],
         ),
@@ -145,7 +145,7 @@ export async function reviewToolApproval(input: {
       signal: controller.signal,
     });
     modelInvocationId = pending.invocationId;
-    const result = normalizedModelResponseToAIMessageV1(await pending.commit());
+    const result = normalizedModelResponseToAIMessage(await pending.commit());
     const reviewResult = parseAutoReviewSuggestion(
       modelResponseText(result.content),
       input.payload.grantOptions,
@@ -185,13 +185,13 @@ export async function reviewToolApproval(input: {
 
 /** Review post-execution evidence in an isolated prompt with no main-model conclusion. */
 export async function reviewVerificationEvidence(input: {
-  config?: ModelRuntimeConfigV1;
+  config?: ModelRuntimeConfig;
   model?: SupportedChatModel;
-  gateway?: ReviewGatewayV1;
-  persistence?: ModelInvocationPersistenceV1<ReviewStateViewV1>;
+  gateway?: ReviewGateway;
+  persistence?: ModelInvocationPersistence<ReviewStateView>;
   evidence: VerificationReviewerInput;
   timeoutMs?: number;
-  providerDataAdmission: ProviderDataAdmissionGateV1;
+  providerDataAdmission: ProviderDataAdmissionGate;
   parentReservationId?: string;
 }): Promise<VerificationReviewerResult> {
   const controller = new AbortController();
@@ -215,7 +215,7 @@ export async function reviewVerificationEvidence(input: {
       ),
       humanMessage(JSON.stringify(input.evidence)),
     ];
-    const compiled = compileModelSurfaceV1({
+    const compiled = compileModelSurface({
       purpose: 'verification_review',
       config: input.config,
       model: input.model,
@@ -232,11 +232,11 @@ export async function reviewVerificationEvidence(input: {
       provenance: {
         contextCheckpointId: state.context.activeCheckpoint?.sourceDigest ?? null,
         promptContractVersion: 'verification-review-v1',
-        projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+        projectionEnvironmentDigest: computeModelInvocationPrivateDigest(
           'kite.model-projection-environment.v1',
           { verificationEvidence: input.evidence },
         ),
-        capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+        capabilityBindingDigest: computeModelInvocationPrivateDigest(
           'kite.model-capability-bindings.v1',
           [],
         ),
@@ -247,7 +247,7 @@ export async function reviewVerificationEvidence(input: {
       signal: controller.signal,
     });
     modelInvocationId = pending.invocationId;
-    const result = normalizedModelResponseToAIMessageV1(await pending.commit());
+    const result = normalizedModelResponseToAIMessage(await pending.commit());
     const parsed = JSON.parse(modelResponseText(result.content)) as Record<string, unknown>;
     if (
       !['passed', 'failed', 'inconclusive'].includes(String(parsed.outcome)) ||
@@ -340,7 +340,7 @@ const REVIEWER_SYSTEM_PROMPT = [
 
 function buildReviewPrompt(
   payload: ToolApprovalPayload,
-  request: PendingToolRequestViewV1,
+  request: PendingToolRequestView,
   context?: ReviewContext,
 ): BaseMessage[] {
   const reviewData: Record<string, unknown> = {

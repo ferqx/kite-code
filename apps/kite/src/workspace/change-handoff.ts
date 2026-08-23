@@ -1,12 +1,12 @@
-import type { WorktreeControllerV1, WriterWorkspaceLeaseV1 } from './worktree-controller';
-import { WorktreeControllerErrorV1 } from './worktree-controller';
+import type { WorktreeController, WriterWorkspaceLease } from './worktree-controller';
+import { WorktreeControllerError } from './worktree-controller';
 
-export interface ChangedFileV1 {
+export interface ChangedFile {
   readonly path: string;
   readonly tracked: boolean;
 }
 
-export interface ChangeHandoffV1 {
+export interface ChangeHandoff {
   readonly version: 1;
   readonly worktreeIdentity: string;
   readonly baselineCommit: string;
@@ -17,7 +17,7 @@ export interface ChangeHandoffV1 {
   readonly writerIdentity: string;
   readonly createdAt: string;
   readonly status: string;
-  readonly changedFiles: readonly ChangedFileV1[];
+  readonly changedFiles: readonly ChangedFile[];
   readonly diff: string;
   readonly hasUncommittedChanges: boolean;
 }
@@ -31,14 +31,14 @@ function nulSeparated(value: string): string[] {
  * Produce a read-only review handoff from an identity-validated worktree. Git
  * hooks, external diff drivers, pushes and merges are never invoked here.
  */
-export function createChangeHandoffV1(input: {
-  controller: WorktreeControllerV1;
-  lease: WriterWorkspaceLeaseV1;
-}): ChangeHandoffV1 {
+export function createChangeHandoff(input: {
+  controller: WorktreeController;
+  lease: WriterWorkspaceLease;
+}): ChangeHandoff {
   const evidence = input.controller.collectHandoffEvidence(input.lease);
   const conflicts = nulSeparated(evidence.conflicts);
   if (conflicts.length > 0) {
-    throw new WorktreeControllerErrorV1(
+    throw new WorktreeControllerError(
       'worktree_conflict',
       'Cannot produce a review handoff with unresolved conflicts.',
     );

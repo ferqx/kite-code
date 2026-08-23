@@ -1,20 +1,20 @@
 import type { ToolSet } from 'ai';
-import type { ModelRuntimeConfigV1 } from '../model/config';
+import type { ModelRuntimeConfig } from '../model/config';
 import { estimateContextTokens } from '../model/context-budget';
 import { serializeToolDescriptors } from '../model/context-projection';
-import type { BuiltinModelEffectCoordinatorV1 } from '../model/effect-coordinator';
+import type { BuiltinModelEffectCoordinator } from '../model/effect-coordinator';
 import type { SupportedChatModel } from '../model/factory';
 import type {
-  BuiltinModelEventV1,
-  ModelInvocationPersistenceV1,
-  ModelInvocationStateViewV1,
+  BuiltinModelEvent,
+  ModelInvocationPersistence,
+  ModelInvocationStateView,
 } from '../model/invocation-gateway';
 import type { AIMessage, BaseMessage, ToolCall, ToolMessage } from '../model/messages';
 import { isSystemMessage } from '../model/messages';
-import type { ProviderDataAdmissionGateV1 } from '../model/provider-data-admission';
+import type { ProviderDataAdmissionGate } from '../model/provider-data-admission';
 import type {
-  BuiltinSubagentModelStepProvenanceV1,
-  BuiltinSubagentModelStepResultV1,
+  BuiltinSubagentModelStepProvenance,
+  BuiltinSubagentModelStepResult,
 } from '../model/subagent-effect';
 
 /**
@@ -23,32 +23,32 @@ import type {
  * transport port.  Production supplies the App-created coordinator; tests
  * may provide a deterministic implementation of this same method.
  */
-export type BuiltinSubagentModelLoopCoordinatorV1 = Pick<
-  BuiltinModelEffectCoordinatorV1,
-  'executeSubagentModelStepV1'
+export type BuiltinSubagentModelLoopCoordinator = Pick<
+  BuiltinModelEffectCoordinator,
+  'executeSubagentModelStep'
 >;
 
-export interface BuiltinSubagentModelLoopProvenanceContextV1 {
+export interface BuiltinSubagentModelLoopProvenanceContext {
   readonly modelInvocationOrdinal: number;
   readonly transcript: readonly BaseMessage[];
 }
 
-export type BuiltinSubagentModelLoopProvenanceFactoryV1 = (
-  input: BuiltinSubagentModelLoopProvenanceContextV1,
-) => BuiltinSubagentModelStepProvenanceV1 | Promise<BuiltinSubagentModelStepProvenanceV1>;
+export type BuiltinSubagentModelLoopProvenanceFactory = (
+  input: BuiltinSubagentModelLoopProvenanceContext,
+) => BuiltinSubagentModelStepProvenance | Promise<BuiltinSubagentModelStepProvenance>;
 
-export interface BuiltinSubagentModelLoopResourceContextV1 {
+export interface BuiltinSubagentModelLoopResourceContext {
   /** Parent-owned reservation consumed by each child model step. */
   readonly parentReservationId?: string;
   /** Resolve the current output ceiling after this round's input estimate. */
   readonly maxOutputTokens?: (
-    input: BuiltinSubagentModelLoopProvenanceContextV1 & {
+    input: BuiltinSubagentModelLoopProvenanceContext & {
       readonly estimatedInputTokens: number;
     },
   ) => number | undefined | Promise<number | undefined>;
 }
 
-export interface BuiltinSubagentModelLoopConsumerInputV1 {
+export interface BuiltinSubagentModelLoopConsumerInput {
   /** Deep-frozen snapshot; neither the array nor any nested message is mutable. */
   readonly transcript: readonly BaseMessage[];
   /** The last message in `transcript`, also deeply frozen. */
@@ -56,7 +56,7 @@ export interface BuiltinSubagentModelLoopConsumerInputV1 {
   readonly invocationId: string;
   readonly modelInvocationOrdinal: number;
   /** Committed cache facts for this exact model step. */
-  readonly cacheMetrics: BuiltinSubagentModelStepResultV1['cacheMetrics'];
+  readonly cacheMetrics: BuiltinSubagentModelStepResult['cacheMetrics'];
   /**
    * Append only the ToolMessages admitted for this response.  The engine
    * clones and freezes every accepted message before the next model step.
@@ -64,61 +64,61 @@ export interface BuiltinSubagentModelLoopConsumerInputV1 {
   readonly append: (messages: readonly ToolMessage[]) => void;
 }
 
-export type BuiltinSubagentModelLoopConsumerDecisionV1<TTerminal> =
+export type BuiltinSubagentModelLoopConsumerDecision<TTerminal> =
   | Readonly<{ kind: 'continue' }>
   | Readonly<{ kind: 'terminal'; value: TTerminal }>;
 
-export interface BuiltinSubagentModelLoopConsumerPortV1<TTerminal> {
+export interface BuiltinSubagentModelLoopConsumerPort<TTerminal> {
   consume(
-    input: BuiltinSubagentModelLoopConsumerInputV1,
+    input: BuiltinSubagentModelLoopConsumerInput,
   ):
-    | BuiltinSubagentModelLoopConsumerDecisionV1<TTerminal>
-    | Promise<BuiltinSubagentModelLoopConsumerDecisionV1<TTerminal>>;
+    | BuiltinSubagentModelLoopConsumerDecision<TTerminal>
+    | Promise<BuiltinSubagentModelLoopConsumerDecision<TTerminal>>;
 }
 
-export interface BuiltinSubagentModelLoopInputV1<
-  State extends ModelInvocationStateViewV1 = ModelInvocationStateViewV1,
-  Event extends BuiltinModelEventV1 = BuiltinModelEventV1,
+export interface BuiltinSubagentModelLoopInput<
+  State extends ModelInvocationStateView = ModelInvocationStateView,
+  Event extends BuiltinModelEvent = BuiltinModelEvent,
   TTerminal = never,
 > {
-  readonly coordinator: BuiltinSubagentModelLoopCoordinatorV1;
+  readonly coordinator: BuiltinSubagentModelLoopCoordinator;
   readonly initialMessages: readonly BaseMessage[];
   /** Last completed ordinal. The first model step is this value plus one. */
   readonly startModelInvocationOrdinal: number;
   readonly model: SupportedChatModel;
-  readonly config: ModelRuntimeConfigV1;
+  readonly config: ModelRuntimeConfig;
   readonly tools: ToolSet;
-  readonly persistence?: ModelInvocationPersistenceV1<State, Event>;
+  readonly persistence?: ModelInvocationPersistence<State, Event>;
   readonly provenance:
-    | BuiltinSubagentModelStepProvenanceV1
-    | BuiltinSubagentModelLoopProvenanceFactoryV1;
-  readonly resource?: BuiltinSubagentModelLoopResourceContextV1;
-  readonly providerDataAdmission: ProviderDataAdmissionGateV1;
-  readonly consumer?: BuiltinSubagentModelLoopConsumerPortV1<TTerminal>;
+    | BuiltinSubagentModelStepProvenance
+    | BuiltinSubagentModelLoopProvenanceFactory;
+  readonly resource?: BuiltinSubagentModelLoopResourceContext;
+  readonly providerDataAdmission: ProviderDataAdmissionGate;
+  readonly consumer?: BuiltinSubagentModelLoopConsumerPort<TTerminal>;
   readonly signal?: AbortSignal;
 }
 
-export interface BuiltinSubagentModelLoopCompletedV1 {
+export interface BuiltinSubagentModelLoopCompleted {
   readonly kind: 'completed';
   readonly invocationId: string;
   readonly message: Readonly<AIMessage>;
   readonly summary: string;
-  readonly cacheMetrics: BuiltinSubagentModelStepResultV1['cacheMetrics'];
+  readonly cacheMetrics: BuiltinSubagentModelStepResult['cacheMetrics'];
   readonly modelInvocationOrdinal: number;
   /** Deep-frozen transcript through the terminal assistant response. */
   readonly messages: readonly BaseMessage[];
 }
 
-export type BuiltinSubagentModelLoopResultV1<TTerminal> =
-  | BuiltinSubagentModelLoopCompletedV1
+export type BuiltinSubagentModelLoopResult<TTerminal> =
+  | BuiltinSubagentModelLoopCompleted
   | Readonly<{ kind: 'terminal'; value: TTerminal }>;
 
-export class BuiltinSubagentModelLoopErrorV1 extends Error {
+export class BuiltinSubagentModelLoopError extends Error {
   readonly code: 'aborted' | 'invalid_input' | 'consumer_protocol';
 
-  constructor(code: BuiltinSubagentModelLoopErrorV1['code'], message: string) {
+  constructor(code: BuiltinSubagentModelLoopError['code'], message: string) {
     super(message);
-    this.name = 'BuiltinSubagentModelLoopErrorV1';
+    this.name = 'BuiltinSubagentModelLoopError';
     this.code = code;
   }
 }
@@ -128,59 +128,59 @@ export class BuiltinSubagentModelLoopErrorV1 extends Error {
  * single-use: each call to `run()` consumes the supplied transcript and
  * performs one live child journey through the injected coordinator.
  */
-export function createBuiltinSubagentModelLoopEngineV1<
-  State extends ModelInvocationStateViewV1 = ModelInvocationStateViewV1,
-  Event extends BuiltinModelEventV1 = BuiltinModelEventV1,
+export function createBuiltinSubagentModelLoopEngine<
+  State extends ModelInvocationStateView = ModelInvocationStateView,
+  Event extends BuiltinModelEvent = BuiltinModelEvent,
   TTerminal = never,
 >(
-  input: BuiltinSubagentModelLoopInputV1<State, Event, TTerminal>,
+  input: BuiltinSubagentModelLoopInput<State, Event, TTerminal>,
 ): {
-  run(): Promise<BuiltinSubagentModelLoopResultV1<TTerminal>>;
+  run(): Promise<BuiltinSubagentModelLoopResult<TTerminal>>;
 } {
-  validateLoopInputV1(input);
+  validateLoopInput(input);
   let used = false;
 
   return Object.freeze({
-    run: async (): Promise<BuiltinSubagentModelLoopResultV1<TTerminal>> => {
+    run: async (): Promise<BuiltinSubagentModelLoopResult<TTerminal>> => {
       if (used) {
-        throw new BuiltinSubagentModelLoopErrorV1(
+        throw new BuiltinSubagentModelLoopError(
           'invalid_input',
           'Builtin subagent model loop engine is single-use.',
         );
       }
       used = true;
-      return runLoopV1(input);
+      return runLoop(input);
     },
   });
 }
 
-async function runLoopV1<
-  State extends ModelInvocationStateViewV1,
-  Event extends BuiltinModelEventV1,
+async function runLoop<
+  State extends ModelInvocationStateView,
+  Event extends BuiltinModelEvent,
   TTerminal,
 >(
-  input: BuiltinSubagentModelLoopInputV1<State, Event, TTerminal>,
-): Promise<BuiltinSubagentModelLoopResultV1<TTerminal>> {
-  const messages = input.initialMessages.map(cloneAndFreezeMessageV1);
+  input: BuiltinSubagentModelLoopInput<State, Event, TTerminal>,
+): Promise<BuiltinSubagentModelLoopResult<TTerminal>> {
+  const messages = input.initialMessages.map(cloneAndFreezeMessage);
   let modelInvocationOrdinal = input.startModelInvocationOrdinal;
 
   while (true) {
-    throwIfAbortedV1(input.signal);
-    const transcript = freezeTranscriptV1(messages);
-    const estimatedInputTokens = estimatedInputTokensV1(transcript, input.tools);
+    throwIfAborted(input.signal);
+    const transcript = freezeTranscript(messages);
+    const estimatedInputTokens = estimateInputTokens(transcript, input.tools);
     const nextOrdinal = modelInvocationOrdinal + 1;
-    const provenance = await resolveProvenanceV1(input.provenance, {
+    const provenance = await resolveProvenance(input.provenance, {
       modelInvocationOrdinal: nextOrdinal,
       transcript,
     });
-    const maxOutputTokens = await resolveMaxOutputTokensV1(input.resource, {
+    const maxOutputTokens = await resolveMaxOutputTokens(input.resource, {
       modelInvocationOrdinal: nextOrdinal,
       transcript,
       estimatedInputTokens,
     });
-    throwIfAbortedV1(input.signal);
+    throwIfAborted(input.signal);
 
-    const modelStep = await input.coordinator.executeSubagentModelStepV1({
+    const modelStep = await input.coordinator.executeSubagentModelStep({
       config: input.config,
       model: input.model,
       tools: input.tools,
@@ -198,9 +198,9 @@ async function runLoopV1<
 
     // A response may have been produced and committed before cancellation was
     // observed. Never pass that response to a consumer in the cancelled path.
-    throwIfAbortedV1(input.signal);
+    throwIfAborted(input.signal);
     modelInvocationOrdinal = nextOrdinal;
-    const response = cloneAndFreezeMessageV1(modelStep.message);
+    const response = cloneAndFreezeMessage(modelStep.message);
     messages.push(response);
 
     if (!response.tool_calls || response.tool_calls.length === 0) {
@@ -208,15 +208,15 @@ async function runLoopV1<
         kind: 'completed',
         invocationId: modelStep.invocationId,
         message: response,
-        summary: extractTextV1(response.content),
+        summary: extractText(response.content),
         cacheMetrics: modelStep.cacheMetrics,
         modelInvocationOrdinal,
-        messages: freezeTranscriptV1(messages),
+        messages: freezeTranscript(messages),
       });
     }
 
     if (!input.consumer) {
-      throw new BuiltinSubagentModelLoopErrorV1(
+      throw new BuiltinSubagentModelLoopError(
         'consumer_protocol',
         'Builtin subagent model loop requires a consumer for tool calls.',
       );
@@ -227,13 +227,13 @@ async function runLoopV1<
     let appendOpen = true;
     const append = (toolMessages: readonly ToolMessage[]): void => {
       if (!appendOpen || input.signal?.aborted) {
-        throw new BuiltinSubagentModelLoopErrorV1(
+        throw new BuiltinSubagentModelLoopError(
           'consumer_protocol',
           'Subagent tool transcript append is no longer available.',
         );
       }
       if (!Array.isArray(toolMessages)) {
-        throw new BuiltinSubagentModelLoopErrorV1(
+        throw new BuiltinSubagentModelLoopError(
           'consumer_protocol',
           'Subagent consumer append requires ToolMessage values.',
         );
@@ -244,41 +244,41 @@ async function runLoopV1<
           .filter((id): id is string => typeof id === 'string' && id.length > 0),
       );
       const clones = toolMessages.map((toolMessage) => {
-        if (!isToolMessageValueV1(toolMessage)) {
-          throw new BuiltinSubagentModelLoopErrorV1(
+        if (!isToolMessageValue(toolMessage)) {
+          throw new BuiltinSubagentModelLoopError(
             'consumer_protocol',
             'Subagent consumer append accepts only ToolMessage values.',
           );
         }
         if (!toolMessage.tool_call_id) {
-          throw new BuiltinSubagentModelLoopErrorV1(
+          throw new BuiltinSubagentModelLoopError(
             'consumer_protocol',
             'Subagent ToolMessage requires a tool_call_id.',
           );
         }
         if (expectedIds.size > 0 && !expectedIds.has(toolMessage.tool_call_id)) {
-          throw new BuiltinSubagentModelLoopErrorV1(
+          throw new BuiltinSubagentModelLoopError(
             'consumer_protocol',
             'Subagent ToolMessage does not match the current model tool call.',
           );
         }
         if (appendedToolCallIds.has(toolMessage.tool_call_id)) {
-          throw new BuiltinSubagentModelLoopErrorV1(
+          throw new BuiltinSubagentModelLoopError(
             'consumer_protocol',
             'Subagent ToolMessage duplicates the current model tool call.',
           );
         }
         appendedToolCallIds.add(toolMessage.tool_call_id);
-        return cloneAndFreezeMessageV1(toolMessage);
+        return cloneAndFreezeMessage(toolMessage);
       });
       messages.push(...clones);
     };
 
-    let decision: BuiltinSubagentModelLoopConsumerDecisionV1<TTerminal>;
+    let decision: BuiltinSubagentModelLoopConsumerDecision<TTerminal>;
     try {
-      decision = await awaitWithAbortV1(
+      decision = await awaitWithAbort(
         input.consumer.consume({
-          transcript: freezeTranscriptV1(messages),
+          transcript: freezeTranscript(messages),
           response,
           invocationId: modelStep.invocationId,
           modelInvocationOrdinal,
@@ -290,47 +290,46 @@ async function runLoopV1<
     } finally {
       appendOpen = false;
     }
-    throwIfAbortedV1(input.signal);
+    throwIfAborted(input.signal);
 
     if (!decision || (decision.kind !== 'continue' && decision.kind !== 'terminal')) {
-      throw new BuiltinSubagentModelLoopErrorV1(
+      throw new BuiltinSubagentModelLoopError(
         'consumer_protocol',
         'Subagent consumer returned an invalid decision.',
       );
     }
-    if (decision.kind === 'terminal')
-      return decision as BuiltinSubagentModelLoopResultV1<TTerminal>;
+    if (decision.kind === 'terminal') return decision as BuiltinSubagentModelLoopResult<TTerminal>;
 
-    assertToolTranscriptCompleteV1(responseToolCalls, appendedToolCallIds);
+    assertToolTranscriptComplete(responseToolCalls, appendedToolCallIds);
   }
 }
 
-function validateLoopInputV1<
-  State extends ModelInvocationStateViewV1,
-  Event extends BuiltinModelEventV1,
+function validateLoopInput<
+  State extends ModelInvocationStateView,
+  Event extends BuiltinModelEvent,
   TTerminal,
->(input: BuiltinSubagentModelLoopInputV1<State, Event, TTerminal>): void {
+>(input: BuiltinSubagentModelLoopInput<State, Event, TTerminal>): void {
   if (!input || typeof input !== 'object') {
-    throw new BuiltinSubagentModelLoopErrorV1('invalid_input', 'Subagent loop input is invalid.');
+    throw new BuiltinSubagentModelLoopError('invalid_input', 'Subagent loop input is invalid.');
   }
   if (
     !Number.isSafeInteger(input.startModelInvocationOrdinal) ||
     input.startModelInvocationOrdinal < 0
   ) {
-    throw new BuiltinSubagentModelLoopErrorV1(
+    throw new BuiltinSubagentModelLoopError(
       'invalid_input',
       'Subagent model invocation ordinal is invalid.',
     );
   }
   if (!Array.isArray(input.initialMessages)) {
-    throw new BuiltinSubagentModelLoopErrorV1(
+    throw new BuiltinSubagentModelLoopError(
       'invalid_input',
       'Subagent initial messages are invalid.',
     );
   }
 }
 
-function estimatedInputTokensV1(messages: readonly BaseMessage[], tools: ToolSet): number {
+function estimateInputTokens(messages: readonly BaseMessage[], tools: ToolSet): number {
   return estimateContextTokens({
     systemMessages: messages.filter(isSystemMessage),
     transcriptMessages: messages.filter((message) => !isSystemMessage(message)),
@@ -339,13 +338,13 @@ function estimatedInputTokensV1(messages: readonly BaseMessage[], tools: ToolSet
   }).totalInputTokens;
 }
 
-async function resolveProvenanceV1(
-  provenance: BuiltinSubagentModelStepProvenanceV1 | BuiltinSubagentModelLoopProvenanceFactoryV1,
-  context: BuiltinSubagentModelLoopProvenanceContextV1,
-): Promise<BuiltinSubagentModelStepProvenanceV1> {
+async function resolveProvenance(
+  provenance: BuiltinSubagentModelStepProvenance | BuiltinSubagentModelLoopProvenanceFactory,
+  context: BuiltinSubagentModelLoopProvenanceContext,
+): Promise<BuiltinSubagentModelStepProvenance> {
   const resolved = typeof provenance === 'function' ? await provenance(context) : provenance;
   if (!resolved || typeof resolved !== 'object') {
-    throw new BuiltinSubagentModelLoopErrorV1(
+    throw new BuiltinSubagentModelLoopError(
       'invalid_input',
       'Subagent model provenance is unavailable.',
     );
@@ -353,15 +352,15 @@ async function resolveProvenanceV1(
   return resolved;
 }
 
-async function resolveMaxOutputTokensV1(
-  resource: BuiltinSubagentModelLoopResourceContextV1 | undefined,
-  context: BuiltinSubagentModelLoopProvenanceContextV1 & {
+async function resolveMaxOutputTokens(
+  resource: BuiltinSubagentModelLoopResourceContext | undefined,
+  context: BuiltinSubagentModelLoopProvenanceContext & {
     readonly estimatedInputTokens: number;
   },
 ): Promise<number | undefined> {
   const value = resource?.maxOutputTokens ? await resource.maxOutputTokens(context) : undefined;
   if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
-    throw new BuiltinSubagentModelLoopErrorV1(
+    throw new BuiltinSubagentModelLoopError(
       'invalid_input',
       'Subagent maxOutputTokens resource ceiling is invalid.',
     );
@@ -369,7 +368,7 @@ async function resolveMaxOutputTokensV1(
   return value;
 }
 
-function assertToolTranscriptCompleteV1(
+function assertToolTranscriptComplete(
   toolCalls: readonly ToolCall[],
   appendedToolCallIds: ReadonlySet<string>,
 ): void {
@@ -380,14 +379,14 @@ function assertToolTranscriptCompleteV1(
     expectedIds.length !== toolCalls.length ||
     expectedIds.some((id) => !appendedToolCallIds.has(id))
   ) {
-    throw new BuiltinSubagentModelLoopErrorV1(
+    throw new BuiltinSubagentModelLoopError(
       'consumer_protocol',
       'Subagent consumer must append one ToolMessage for every model tool call before continuing.',
     );
   }
 }
 
-function isToolMessageValueV1(value: unknown): value is ToolMessage {
+function isToolMessageValue(value: unknown): value is ToolMessage {
   return (
     !!value &&
     typeof value === 'object' &&
@@ -396,9 +395,9 @@ function isToolMessageValueV1(value: unknown): value is ToolMessage {
   );
 }
 
-function cloneAndFreezeMessageV1<T extends BaseMessage>(message: T): Readonly<T> {
+function cloneAndFreezeMessage<T extends BaseMessage>(message: T): Readonly<T> {
   if (!message || typeof message !== 'object' || typeof message.type !== 'string') {
-    throw new BuiltinSubagentModelLoopErrorV1(
+    throw new BuiltinSubagentModelLoopError(
       'invalid_input',
       'Subagent transcript contains an invalid message.',
     );
@@ -407,29 +406,29 @@ function cloneAndFreezeMessageV1<T extends BaseMessage>(message: T): Readonly<T>
   try {
     clone = structuredClone(message);
   } catch {
-    throw new BuiltinSubagentModelLoopErrorV1(
+    throw new BuiltinSubagentModelLoopError(
       'invalid_input',
       'Subagent transcript message is not cloneable.',
     );
   }
-  return deepFreezeV1(clone);
+  return deepFreeze(clone);
 }
 
-function freezeTranscriptV1(messages: readonly BaseMessage[]): readonly BaseMessage[] {
+function freezeTranscript(messages: readonly BaseMessage[]): readonly BaseMessage[] {
   return Object.freeze([...messages]);
 }
 
-function deepFreezeV1<T>(value: T, seen = new WeakSet<object>()): T {
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   if (!value || typeof value !== 'object') return value;
   if (seen.has(value as object)) return value;
   seen.add(value as object);
   for (const child of Object.values(value as Record<string, unknown>)) {
-    deepFreezeV1(child, seen);
+    deepFreeze(child, seen);
   }
   return Object.freeze(value);
 }
 
-function extractTextV1(content: unknown): string {
+function extractText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content
@@ -441,17 +440,17 @@ function extractTextV1(content: unknown): string {
     .join('');
 }
 
-function throwIfAbortedV1(signal: AbortSignal | undefined): void {
+function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
-    throw new BuiltinSubagentModelLoopErrorV1('aborted', 'Subagent model loop was aborted.');
+    throw new BuiltinSubagentModelLoopError('aborted', 'Subagent model loop was aborted.');
   }
 }
 
-async function awaitWithAbortV1<T>(
+async function awaitWithAbort<T>(
   value: T | Promise<T>,
   signal: AbortSignal | undefined,
 ): Promise<T> {
-  throwIfAbortedV1(signal);
+  throwIfAborted(signal);
   if (!signal) return value;
   return new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -460,7 +459,7 @@ async function awaitWithAbortV1<T>(
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new BuiltinSubagentModelLoopErrorV1('aborted', 'Subagent model loop was aborted.'));
+      reject(new BuiltinSubagentModelLoopError('aborted', 'Subagent model loop was aborted.'));
     };
     signal.addEventListener('abort', onAbort, { once: true });
     Promise.resolve(value).then(

@@ -16,63 +16,24 @@ export interface ToolContractSection {
   recovery: string;
 }
 
-/** Compatibility input accepted for non-production/sample registries only. */
-export interface LegacyToolContractSection {
-  whenToUse: string;
-  commonMistakes: string;
-  outputFormat: string;
-  failureHandling: string;
-}
-
 export interface ToolContract {
   name: string;
   description: string;
-  sections: ToolContractSource;
+  sections: ToolContractSection;
 }
 
-export type ToolContractSource = ToolContractSection | LegacyToolContractSection;
-export type ToolDescriptionVersion = 'legacy' | 'v2';
+export type ToolDescriptionStyle = 'standard' | 'catalog';
 
-export function isStructuredToolContract(
-  sections: ToolContractSource,
-): sections is ToolContractSection {
-  return 'summary' in sections;
-}
-
-function conciseSentence(value: string, maximum = 260): string {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  const first = normalized.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? normalized;
-  return Array.from(first).slice(0, maximum).join('');
-}
-
-/** Legacy normalization remains only for external/sample specs; builtins never use it. */
-export function normalizeToolContract(sections: ToolContractSource): ToolContractSection {
-  if (isStructuredToolContract(sections)) return sections;
-  const output = sections.outputFormat.trim();
-  const format = /^(?:JSON|Returns JSON|Structured JSON)/i.test(output) ? 'json' : 'text';
-  return {
-    summary: conciseSentence(sections.whenToUse),
-    useWhen: conciseSentence(sections.whenToUse, 360),
-    returns: { format, description: output.replace(/^JSON:\s*/i, '') },
-    constraints: conciseSentence(sections.commonMistakes),
-    recovery: conciseSentence(sections.failureHandling),
-  };
+export function toolContractSection(sections: ToolContractSection): ToolContractSection {
+  return sections;
 }
 
 export function buildDescription(
-  sections: ToolContractSource,
-  version: ToolDescriptionVersion = 'legacy',
+  sections: ToolContractSection,
+  style: ToolDescriptionStyle = 'standard',
 ): string {
-  if (version === 'legacy' && !isStructuredToolContract(sections)) {
-    return [
-      sections.whenToUse,
-      `\nCommon mistakes: ${sections.commonMistakes}`,
-      `\nOutput: ${sections.outputFormat}`,
-      `\nFailure: ${sections.failureHandling}`,
-    ].join('');
-  }
-  const contract = normalizeToolContract(sections);
-  if (version === 'v2') {
+  const contract = toolContractSection(sections);
+  if (style === 'catalog') {
     return [
       contract.summary,
       contract.useWhen !== contract.summary ? `Use when: ${contract.useWhen}` : '',
@@ -440,39 +401,39 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   },
 };
 
-function compatibilityContract(name: KnownToolName): ToolContract {
+function currentToolContract(name: KnownToolName): ToolContract {
   const sections = BUILTIN_TOOL_CONTRACTS[name];
-  return { name, sections, description: buildDescription(sections, 'legacy') };
+  return { name, sections, description: buildDescription(sections) };
 }
 
-export const READ_FILE_CONTRACT = compatibilityContract('read_file');
-export const READ_PLAN_CONTRACT = compatibilityContract('read_plan');
-export const EDIT_FILE_CONTRACT = compatibilityContract('edit_file');
-export const WRITE_FILE_CONTRACT = compatibilityContract('write_file');
-export const SHELL_EXECUTE_CONTRACT = compatibilityContract('shell_execute');
-export const GIT_INSPECT_CONTRACT = compatibilityContract('git_inspect');
-export const SEARCH_CONTENT_CONTRACT = compatibilityContract('search_content');
-export const SEARCH_FILES_CONTRACT = compatibilityContract('search_files');
-export const TOOL_SEARCH_CONTRACT = compatibilityContract('tool_search');
-export const LIST_MCP_RESOURCES_CONTRACT = compatibilityContract('list_mcp_resources');
-export const LIST_MCP_TOOLS_CONTRACT = compatibilityContract('list_mcp_tools');
-export const READ_MCP_RESOURCE_CONTRACT = compatibilityContract('read_mcp_resource');
-export const WRITE_PLAN_CONTRACT = compatibilityContract('write_plan');
-export const UPDATE_PLAN_CONTRACT = compatibilityContract('update_plan');
-export const ASK_USER_CONTRACT = compatibilityContract('ask_user');
-export const TASK_CONTRACT = compatibilityContract('task');
-export const WEB_FETCH_CONTRACT = compatibilityContract('web_fetch');
+export const READ_FILE_CONTRACT = currentToolContract('read_file');
+export const READ_PLAN_CONTRACT = currentToolContract('read_plan');
+export const EDIT_FILE_CONTRACT = currentToolContract('edit_file');
+export const WRITE_FILE_CONTRACT = currentToolContract('write_file');
+export const SHELL_EXECUTE_CONTRACT = currentToolContract('shell_execute');
+export const GIT_INSPECT_CONTRACT = currentToolContract('git_inspect');
+export const SEARCH_CONTENT_CONTRACT = currentToolContract('search_content');
+export const SEARCH_FILES_CONTRACT = currentToolContract('search_files');
+export const TOOL_SEARCH_CONTRACT = currentToolContract('tool_search');
+export const LIST_MCP_RESOURCES_CONTRACT = currentToolContract('list_mcp_resources');
+export const LIST_MCP_TOOLS_CONTRACT = currentToolContract('list_mcp_tools');
+export const READ_MCP_RESOURCE_CONTRACT = currentToolContract('read_mcp_resource');
+export const WRITE_PLAN_CONTRACT = currentToolContract('write_plan');
+export const UPDATE_PLAN_CONTRACT = currentToolContract('update_plan');
+export const ASK_USER_CONTRACT = currentToolContract('ask_user');
+export const TASK_CONTRACT = currentToolContract('task');
+export const WEB_FETCH_CONTRACT = currentToolContract('web_fetch');
 
-/** Compatibility view; production consumers read ToolSpec.contract from the Registry. */
+/** Current contract registry view. */
 export const TOOL_CONTRACTS: ReadonlyMap<string, ToolContract> = new Map(
-  KNOWN_TOOL_NAMES.map((name) => [name, compatibilityContract(name)]),
+  KNOWN_TOOL_NAMES.map((name) => [name, currentToolContract(name)]),
 );
 
 export function getToolContract(toolName: string): ToolContract | undefined {
   return TOOL_CONTRACTS.get(toolName);
 }
 
-export function builtinToolDescriptionV1(toolName: string): string {
+export function builtinToolDescription(toolName: string): string {
   const contract = TOOL_CONTRACTS.get(toolName);
   if (!contract) throw new Error(`Builtin tool contract is missing: ${toolName}`);
   return contract.description;

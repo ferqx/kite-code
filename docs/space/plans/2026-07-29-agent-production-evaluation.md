@@ -5,7 +5,7 @@
 终态范围（ADR-0069）：2B.1–2B.6、2B.8–2B.10 以小规模本地 case、核心 adversarial、安全/正确性
 case 与 DeepSeek/千问各一次低成本真实 smoke 记为 `completed`；2B.7 的 external participant/human
 cohort 要求记为 `superseded`。不要求重复 8/20 次或 production evaluator authority。当前状态见
-`release/oss-first-release/task-status-v2.json`。
+`release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：

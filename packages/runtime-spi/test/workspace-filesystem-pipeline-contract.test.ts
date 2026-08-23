@@ -1,43 +1,43 @@
 import { describe, expect, test } from 'bun:test';
 import type {
   CapabilityArtifactRef,
-  FilesystemPreimageArtifactRefV1,
-  WorkspaceFilesystemIntentRecordV1,
-  WorkspaceFilesystemMutationReadyRecordV1,
-  WorkspaceFilesystemObservationRecordV1,
+  FilesystemPreimageArtifactRef,
+  WorkspaceFilesystemIntentRecord,
+  WorkspaceFilesystemMutationReadyRecord,
+  WorkspaceFilesystemObservationRecord,
 } from '@kite/runtime-contract';
-import type { RuntimeJsonValueV1 } from '../src/contracts';
+import type { RuntimeJsonValue } from '../src/contracts';
 import type {
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolRecordedAttemptIdentityV1,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  ToolPipelineAttemptAcknowledgement,
+  ToolRecordedAttemptIdentity,
 } from '../src/tool-pipeline';
 import {
-  WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
-  type WorkspaceFilesystemDurableEvidencePortV1,
-  type WorkspaceFilesystemEditObservationPortV1,
-  type WorkspaceFilesystemEditObservationQueryResultV1,
-  type WorkspaceFilesystemEditObservationQueryV1,
-  type WorkspaceFilesystemIntentDraftV1,
-  type WorkspaceFilesystemMutationDurableEvidencePortV1,
-  type WorkspaceFilesystemMutationIntentDraftV1,
-  type WorkspaceFilesystemMutationPipelineOperationV1,
-  type WorkspaceFilesystemMutationReadyDraftV1,
-  type WorkspaceFilesystemPersistedIntentV1,
-  type WorkspaceFilesystemPersistedMutationIntentV1,
-  type WorkspaceFilesystemPersistedMutationReadyV1,
-  type WorkspaceFilesystemPreparedMutationEvidenceV1,
-  type WorkspaceFilesystemReadOperationIdV1,
-  type WorkspaceFilesystemReadOperationV1,
+  WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
+  type WorkspaceFilesystemDurableEvidencePort,
+  type WorkspaceFilesystemEditObservationPort,
+  type WorkspaceFilesystemEditObservationQuery,
+  type WorkspaceFilesystemEditObservationQueryResult,
+  type WorkspaceFilesystemIntentDraft,
+  type WorkspaceFilesystemMutationDurableEvidencePort,
+  type WorkspaceFilesystemMutationIntentDraft,
+  type WorkspaceFilesystemMutationPipelineOperation,
+  type WorkspaceFilesystemMutationReadyDraft,
+  type WorkspaceFilesystemPersistedIntent,
+  type WorkspaceFilesystemPersistedMutationIntent,
+  type WorkspaceFilesystemPersistedMutationReady,
+  type WorkspaceFilesystemPreparedMutationEvidence,
+  type WorkspaceFilesystemReadOperation,
+  type WorkspaceFilesystemReadOperationId,
 } from '../src/workspace-filesystem-pipeline';
 
 const digest = (prefix: string): string => `${prefix}${'0'.repeat(64 - prefix.length)}`;
 
 function operation(
-  operationId: WorkspaceFilesystemReadOperationIdV1,
-): WorkspaceFilesystemReadOperationV1 {
+  operationId: WorkspaceFilesystemReadOperationId,
+): WorkspaceFilesystemReadOperation {
   if (operationId === 'builtin:read_file') {
     return {
       kind: 'read_file',
@@ -60,14 +60,14 @@ function operation(
     operationId,
     path: 'src',
     pathScope: 'workspace_only',
-    pattern: 'RuntimeJsonValueV1',
+    pattern: 'RuntimeJsonValue',
     glob: '*.ts',
   };
 }
 
 function preparedIdentity(
-  operationId: WorkspaceFilesystemReadOperationIdV1,
-): NonDynamicPreparedToolInvocationIdentityV1 {
+  operationId: WorkspaceFilesystemReadOperationId,
+): NonDynamicPreparedToolInvocationIdentity {
   return {
     invocationId: 'invocation-1',
     attemptId: 'invocation-1:attempt:1',
@@ -92,7 +92,7 @@ function preparedIdentity(
     argumentOrigin: 'model_public',
     executionFamily: 'builtin',
     executionMechanism: 'filesystem',
-    operationId: operationId as NonDynamicOperationIdV1,
+    operationId: operationId as NonDynamicOperationId,
     visibility: 'model',
     modelVisible: true,
     exposedToolName: operationId.slice('builtin:'.length),
@@ -106,7 +106,7 @@ function preparedIdentity(
   };
 }
 
-function prepared(operationId: WorkspaceFilesystemReadOperationIdV1): PreparedToolInvocationV1 {
+function prepared(operationId: WorkspaceFilesystemReadOperationId): PreparedToolInvocation {
   const selected = operation(operationId);
   return {
     identity: preparedIdentity(operationId),
@@ -121,8 +121,8 @@ function prepared(operationId: WorkspaceFilesystemReadOperationIdV1): PreparedTo
 }
 
 function acknowledgement(
-  operationId: WorkspaceFilesystemReadOperationIdV1,
-): ToolPipelineAttemptAcknowledgementV1 {
+  operationId: WorkspaceFilesystemReadOperationId,
+): ToolPipelineAttemptAcknowledgement {
   const identity = preparedIdentity(operationId);
   return {
     acknowledged: true,
@@ -157,7 +157,7 @@ function acknowledgement(
       idempotencyKey: null,
       recordedAt: '2026-08-22T00:00:00.000Z',
       startedAt: '2026-08-22T00:00:00.000Z',
-    } satisfies ToolRecordedAttemptIdentityV1,
+    } satisfies ToolRecordedAttemptIdentity,
   };
 }
 
@@ -180,10 +180,10 @@ function intentRecord() {
 }
 
 function persistedIntent(
-  operationId: WorkspaceFilesystemReadOperationIdV1,
-): WorkspaceFilesystemPersistedIntentV1 {
+  operationId: WorkspaceFilesystemReadOperationId,
+): WorkspaceFilesystemPersistedIntent {
   return {
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     status: 'durably_persisted',
     prepared: prepared(operationId),
     acknowledgement: acknowledgement(operationId),
@@ -197,7 +197,7 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
     const read = operation('builtin:read_file');
     expect(read.path).toBe('./src/../src/index.ts');
 
-    const invalidOperation: WorkspaceFilesystemReadOperationV1 = {
+    const invalidOperation: WorkspaceFilesystemReadOperation = {
       // @ts-expect-error mutations cannot enter the read-only evidence seam.
       kind: 'write_file',
       // @ts-expect-error mutation operation ids are excluded.
@@ -211,8 +211,8 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
 
   test('does not let Builtin supply its own attempt acknowledgement', async () => {
     const exactPrepared = prepared('builtin:read_file');
-    const draft: WorkspaceFilesystemIntentDraftV1 = {
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+    const draft: WorkspaceFilesystemIntentDraft = {
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       prepared: exactPrepared,
       operation: operation('builtin:read_file'),
       record: intentRecord(),
@@ -220,10 +220,10 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
     expect(draft).not.toHaveProperty('acknowledgement');
 
     const issued = new WeakSet<object>();
-    const port: WorkspaceFilesystemDurableEvidencePortV1 = {
+    const port: WorkspaceFilesystemDurableEvidencePort = {
       persistIntent: async (candidate) => {
         const persisted = {
-          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
           status: 'durably_persisted' as const,
           prepared: candidate.prepared,
           acknowledgement: acknowledgement('builtin:read_file'),
@@ -249,7 +249,7 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
   test('rejects a structurally identical persisted-intent clone', () => {
     const authentic = persistedIntent('builtin:read_file');
     const issued = new WeakSet<object>([authentic]);
-    const verify: WorkspaceFilesystemDurableEvidencePortV1['verifyPersistedIntent'] = (value) =>
+    const verify: WorkspaceFilesystemDurableEvidencePort['verifyPersistedIntent'] = (value) =>
       issued.has(value) ? { valid: true } : { valid: false, code: 'intent_not_issued' };
     const clone = structuredClone(authentic);
     expect(clone).toEqual(authentic);
@@ -259,9 +259,9 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
 
   test('requires persistence uncertainty to throw before any Provider call', async () => {
     let providerCalls = 0;
-    const run = async (port: WorkspaceFilesystemDurableEvidencePortV1): Promise<void> => {
+    const run = async (port: WorkspaceFilesystemDurableEvidencePort): Promise<void> => {
       const persisted = await port.persistIntent({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         prepared: prepared('builtin:read_file'),
         operation: operation('builtin:read_file'),
         record: intentRecord(),
@@ -269,7 +269,7 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
       if (!port.verifyPersistedIntent(persisted).valid) throw new Error('invalid intent');
       providerCalls += 1;
     };
-    const failingPort: WorkspaceFilesystemDurableEvidencePortV1 = {
+    const failingPort: WorkspaceFilesystemDurableEvidencePort = {
       persistIntent: async () => {
         throw new Error('State intent acknowledgement is uncertain');
       },
@@ -294,7 +294,7 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
 
 function mutationOperation(
   operationId: 'builtin:write_file' | 'builtin:edit_file',
-): WorkspaceFilesystemMutationPipelineOperationV1 {
+): WorkspaceFilesystemMutationPipelineOperation {
   if (operationId === 'builtin:write_file') {
     return {
       kind: 'write_file',
@@ -317,14 +317,14 @@ function mutationOperation(
 
 function mutationPrepared(
   operationId: 'builtin:write_file' | 'builtin:edit_file',
-): PreparedToolInvocationV1 {
+): PreparedToolInvocation {
   const base = preparedIdentity('builtin:read_file');
   const argumentsDigest = digest(operationId === 'builtin:write_file' ? 'w' : 'd');
   return {
     identity: {
       ...base,
       capabilityId: operationId,
-      operationId: operationId as NonDynamicOperationIdV1,
+      operationId: operationId as NonDynamicOperationId,
       exposedToolName: operationId.slice('builtin:'.length),
       argumentsDigest,
     },
@@ -348,7 +348,7 @@ function mutationPrepared(
 
 function mutationAcknowledgement(
   operationId: 'builtin:write_file' | 'builtin:edit_file',
-): ToolPipelineAttemptAcknowledgementV1 {
+): ToolPipelineAttemptAcknowledgement {
   const base = acknowledgement('builtin:read_file');
   return {
     acknowledged: true,
@@ -364,7 +364,7 @@ function mutationAcknowledgement(
 
 function mutationIntentRecord(
   operationId: 'builtin:write_file' | 'builtin:edit_file',
-): WorkspaceFilesystemIntentRecordV1 {
+): WorkspaceFilesystemIntentRecord {
   return {
     ...intentRecord(),
     operationDigest: `sha256:${operationId === 'builtin:write_file' ? '7' : '8'}${'0'.repeat(63)}`,
@@ -373,10 +373,10 @@ function mutationIntentRecord(
 
 function preparedEvidence(
   operationId: 'builtin:write_file' | 'builtin:edit_file',
-): WorkspaceFilesystemPreparedMutationEvidenceV1 {
+): WorkspaceFilesystemPreparedMutationEvidence {
   const preimageExisted = operationId === 'builtin:edit_file';
   return {
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     operationKind: operationId.slice('builtin:'.length) as 'write_file' | 'edit_file',
     operationDigest: mutationIntentRecord(operationId).operationDigest,
     lexicalTargetDigest: `sha256:${'3'.repeat(64)}`,
@@ -388,7 +388,7 @@ function preparedEvidence(
   };
 }
 
-function artifactRef(): FilesystemPreimageArtifactRefV1 {
+function artifactRef(): FilesystemPreimageArtifactRef {
   return {
     artifactId: 'artifact-1',
     kind: 'filesystem_preimage',
@@ -399,8 +399,8 @@ function artifactRef(): FilesystemPreimageArtifactRefV1 {
 
 function mutationReadyRecord(
   operationId: 'builtin:write_file' | 'builtin:edit_file',
-  artifact: FilesystemPreimageArtifactRefV1,
-): WorkspaceFilesystemMutationReadyRecordV1 {
+  artifact: FilesystemPreimageArtifactRef,
+): WorkspaceFilesystemMutationReadyRecord {
   const prepared = preparedEvidence(operationId);
   return {
     attempt: 1,
@@ -416,9 +416,9 @@ function mutationReadyRecord(
 
 function persistedMutationIntent(
   operationId: 'builtin:write_file' | 'builtin:edit_file',
-): WorkspaceFilesystemPersistedMutationIntentV1 {
+): WorkspaceFilesystemPersistedMutationIntent {
   return {
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     status: 'durably_persisted',
     prepared: mutationPrepared(operationId),
     acknowledgement: mutationAcknowledgement(operationId),
@@ -427,15 +427,15 @@ function persistedMutationIntent(
   };
 }
 
-function editObservationQuery(): WorkspaceFilesystemEditObservationQueryV1 {
+function editObservationQuery(): WorkspaceFilesystemEditObservationQuery {
   return {
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     actorIdentityDigest: `sha256:${'c'.repeat(64)}`,
     lexicalTargetDigest: `sha256:${'3'.repeat(64)}`,
   };
 }
 
-function readObservation(): WorkspaceFilesystemObservationRecordV1 {
+function readObservation(): WorkspaceFilesystemObservationRecord {
   return {
     actorIdentityDigest: editObservationQuery().actorIdentityDigest,
     lexicalTargetDigest: editObservationQuery().lexicalTargetDigest,
@@ -447,35 +447,35 @@ function readObservation(): WorkspaceFilesystemObservationRecordV1 {
 
 describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
   test('keeps write/edit closed and does not widen the read operation union', () => {
-    const write: WorkspaceFilesystemMutationPipelineOperationV1 =
+    const write: WorkspaceFilesystemMutationPipelineOperation =
       mutationOperation('builtin:write_file');
-    const edit: WorkspaceFilesystemMutationPipelineOperationV1 =
+    const edit: WorkspaceFilesystemMutationPipelineOperation =
       mutationOperation('builtin:edit_file');
     expect(write.operationId).toBe('builtin:write_file');
     expect(edit.operationId).toBe('builtin:edit_file');
     // @ts-expect-error write is intentionally excluded from the read evidence port.
-    const readOnly: WorkspaceFilesystemReadOperationV1 = write;
+    const readOnly: WorkspaceFilesystemReadOperation = write;
     void readOnly;
   });
 
   test('requires the exact prepared attempt acknowledgement for mutation intent', async () => {
-    const candidate: WorkspaceFilesystemMutationIntentDraftV1 = {
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+    const candidate: WorkspaceFilesystemMutationIntentDraft = {
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       prepared: mutationPrepared('builtin:write_file'),
       operation: mutationOperation('builtin:write_file'),
       record: mutationIntentRecord('builtin:write_file'),
     };
     expect(candidate).not.toHaveProperty('acknowledgement');
     const issued = new WeakSet<object>();
-    const port: WorkspaceFilesystemMutationDurableEvidencePortV1 = {
+    const port: WorkspaceFilesystemMutationDurableEvidencePort = {
       persistIntent: async <
-        TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-        TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+        TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+        TRequest extends RuntimeJsonValue = RuntimeJsonValue,
       >(
-        draft: Readonly<WorkspaceFilesystemMutationIntentDraftV1<TArguments, TRequest>>,
-      ): Promise<Readonly<WorkspaceFilesystemPersistedMutationIntentV1<TArguments, TRequest>>> => {
-        const persisted: WorkspaceFilesystemPersistedMutationIntentV1<TArguments, TRequest> = {
-          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        draft: Readonly<WorkspaceFilesystemMutationIntentDraft<TArguments, TRequest>>,
+      ): Promise<Readonly<WorkspaceFilesystemPersistedMutationIntent<TArguments, TRequest>>> => {
+        const persisted: WorkspaceFilesystemPersistedMutationIntent<TArguments, TRequest> = {
+          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
           status: 'durably_persisted' as const,
           prepared: draft.prepared,
           acknowledgement: mutationAcknowledgement('builtin:write_file'),
@@ -507,14 +507,14 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
     const prepared = preparedEvidence('builtin:edit_file');
     const record = mutationReadyRecord('builtin:edit_file', artifact);
     const issued = new WeakSet<object>();
-    const readyPort: WorkspaceFilesystemMutationDurableEvidencePortV1 = {
+    const readyPort: WorkspaceFilesystemMutationDurableEvidencePort = {
       persistIntent: async <
-        TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-        TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+        TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+        TRequest extends RuntimeJsonValue = RuntimeJsonValue,
       >(
-        draft: Readonly<WorkspaceFilesystemMutationIntentDraftV1<TArguments, TRequest>>,
-      ): Promise<Readonly<WorkspaceFilesystemPersistedMutationIntentV1<TArguments, TRequest>>> => ({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        draft: Readonly<WorkspaceFilesystemMutationIntentDraft<TArguments, TRequest>>,
+      ): Promise<Readonly<WorkspaceFilesystemPersistedMutationIntent<TArguments, TRequest>>> => ({
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         status: 'durably_persisted',
         prepared: draft.prepared,
         acknowledgement: intent.acknowledgement,
@@ -524,12 +524,12 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
       verifyPersistedIntent: () => ({ valid: true }),
       persistMutationReady: async (draft) => {
         const persisted = {
-          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
           status: 'durably_persisted' as const,
           intent: draft.intent,
           preimageArtifact: draft.preimageArtifact,
           record: draft.record,
-        } satisfies WorkspaceFilesystemPersistedMutationReadyV1;
+        } satisfies WorkspaceFilesystemPersistedMutationReady;
         issued.add(persisted);
         expect(draft.preparedEvidence).toBe(prepared);
         return persisted;
@@ -537,8 +537,8 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
       verifyPersistedMutationReady: (value) =>
         issued.has(value) ? { valid: true } : { valid: false, code: 'ready_not_issued' },
     };
-    const draft: WorkspaceFilesystemMutationReadyDraftV1 = {
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+    const draft: WorkspaceFilesystemMutationReadyDraft = {
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       intent,
       preparedEvidence: prepared,
       preimageArtifact: artifact,
@@ -560,7 +560,7 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
   test('edit query returns only the latest authentic record or read_required', async () => {
     const query = editObservationQuery();
     const issued = new WeakSet<object>();
-    const found: WorkspaceFilesystemEditObservationQueryResultV1 = {
+    const found: WorkspaceFilesystemEditObservationQueryResult = {
       status: 'found',
       query,
       invocationId: 'read-invocation-1',
@@ -577,7 +577,7 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
       observation: readObservation(),
     };
     // @ts-expect-error authentic found results must carry the runtime-contract Capability Artifact ref.
-    const foundWithoutArtifact: WorkspaceFilesystemEditObservationQueryResultV1 = {
+    const foundWithoutArtifact: WorkspaceFilesystemEditObservationQueryResult = {
       status: 'found',
       query,
       invocationId: 'read-invocation-1',
@@ -589,7 +589,7 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
     };
     void foundWithoutArtifact;
     issued.add(found);
-    const port: WorkspaceFilesystemEditObservationPortV1 = {
+    const port: WorkspaceFilesystemEditObservationPort = {
       findLatestAuthenticRead: async () => found,
       verifyLatestAuthenticRead: (value) =>
         issued.has(value) ? { valid: true } : { valid: false, code: 'query_result_not_issued' },
@@ -601,13 +601,13 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
       valid: false,
       code: 'query_result_not_issued',
     });
-    const missing: WorkspaceFilesystemEditObservationQueryResultV1 = {
+    const missing: WorkspaceFilesystemEditObservationQueryResult = {
       status: 'missing',
       code: 'read_required',
       query,
     };
     expect(missing.code).toBe('read_required');
-    const appClassifiedStale: WorkspaceFilesystemEditObservationQueryResultV1 = {
+    const appClassifiedStale: WorkspaceFilesystemEditObservationQueryResult = {
       // @ts-expect-error App only returns latest authentic read or read_required; Builtin owns stale classification.
       status: 'stale',
       // @ts-expect-error Stale classification is not an App query result.
@@ -628,7 +628,7 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
     expect(source).not.toMatch(/from\s+['"]node:/u);
     expect(source).not.toMatch(/from\s+['"]@kite\/(?!runtime-contract)/u);
     expect(source).not.toMatch(
-      /\b(?:RuntimeHost|RuntimeStore|BuiltinRuntime|AgentState|WorkspaceFilesystemPreparedMutationV1|PreimageArtifactPortV1)\b/u,
+      /\b(?:RuntimeHost|RuntimeStore|BuiltinRuntime|AgentState|WorkspaceFilesystemPreparedMutation|PreimageArtifactPort)\b/u,
     );
     expect(JSON.parse(JSON.stringify(persistedMutationIntent('builtin:write_file')))).toEqual(
       persistedMutationIntent('builtin:write_file'),

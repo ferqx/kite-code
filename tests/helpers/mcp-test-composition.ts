@@ -7,7 +7,7 @@ import type { McpConfigCatalog, McpConfigCommand, McpConfigRepository } from '#a
  * same through a deterministic repository seam rather than relying on a
  * supervisor fallback or a filesystem-global configuration loader.
  */
-export function createInMemoryMcpConfigRepositoryV1(
+export function createInMemoryMcpConfigRepository(
   source: McpConfigCatalog | ((workspace: string) => McpConfigCatalog),
 ): McpConfigRepository {
   let current: McpConfigCatalog | undefined;

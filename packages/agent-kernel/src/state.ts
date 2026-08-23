@@ -7,7 +7,7 @@
  * runtime-spi types.
  */
 
-import type { ToolRecoveryJournalV1 } from './recovery';
+import type { ToolRecoveryJournal } from './recovery';
 
 export type AuthorizationMode = 'default' | 'full_access';
 export type InteractionMode = 'accept_edits' | 'auto' | 'full';
@@ -32,7 +32,7 @@ export interface PlanStep {
   readonly status: PlanStatus;
   readonly note?: string;
 }
-export interface PlanCompletionEvidenceV1 {
+export interface PlanCompletionEvidence {
   readonly schemaVersion: 1;
   readonly verification: readonly {
     readonly verificationId: string;
@@ -117,7 +117,7 @@ export interface PlanDocument {
   readonly updatedAtTurnId: string;
   readonly supersedesPlanVersion?: number;
   readonly replanReason?: string;
-  readonly completionEvidence: PlanCompletionEvidenceV1;
+  readonly completionEvidence: PlanCompletionEvidence;
   readonly artifact?: PlanArtifactRef;
 }
 export type PlanningState =
@@ -159,7 +159,7 @@ export type PlanningState =
       readonly cancelledAtTurnId: string;
     };
 
-/** The only State format emitted by the RAV1 production runtime. */
+/** The only State format emitted by the RA production runtime. */
 export const RUNTIME_STATE_SCHEMA_VERSION = 26 as const;
 export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-modularization-v1-2026-08-19' as const;
 export const APPLIED_EVENT_ID_TAIL_LIMIT = 4096 as const;
@@ -216,7 +216,7 @@ export interface AgentSessionState {
   readonly threadId: string;
   readonly userId: string;
   readonly workspace: string;
-  /** RAV1 project binding for State sessions. */
+  /** RA project binding for State sessions. */
   readonly projectId?: string;
   readonly canonicalWorkspaceDigest?: string;
 }
@@ -264,7 +264,7 @@ export interface AgentTranscriptState {
   readonly final?: string;
 }
 
-export interface ResourceBudgetV1 {
+export interface ResourceBudget {
   readonly version: 1;
   readonly maxRunDurationMs: number;
   readonly maxTurns: number;
@@ -280,7 +280,7 @@ export interface ResourceBudgetV1 {
   readonly maxArtifactBytes: number;
 }
 
-export interface ResourceUsageV1 {
+export interface ResourceUsage {
   readonly counters: {
     readonly turns: number;
     readonly modelRequests: number;
@@ -306,7 +306,7 @@ export type ResourceReservationState =
   | 'reconciled'
   | 'released'
   | 'unknown';
-export interface ResourceReservationV1 {
+export interface ResourceReservation {
   readonly version: 1;
   readonly reservationId: string;
   readonly runId: string;
@@ -321,11 +321,11 @@ export interface ResourceReservationV1 {
     | 'verification'
     | 'compaction'
     | 'artifact';
-  readonly executableUpperBound: ResourceUsageV1;
-  readonly actual?: ResourceUsageV1;
+  readonly executableUpperBound: ResourceUsage;
+  readonly actual?: ResourceUsage;
   readonly state: ResourceReservationState;
 }
-export interface ResourceWaiterV1 {
+export interface ResourceWaiter {
   readonly version: 1;
   readonly runId: string;
   readonly invocationId: string;
@@ -1109,7 +1109,7 @@ export interface AgentToolCallState {
   readonly result?: AgentToolResultState;
   readonly error?: string;
   readonly failure?: AgentFailureState;
-  readonly outcomeV1?: import('./recovery').ToolOutcomeV1;
+  readonly outcome?: import('./recovery').ToolOutcome;
   readonly bindingId?: string;
   readonly capabilityId?: string;
   readonly capabilityRevision?: string;
@@ -1333,10 +1333,10 @@ export interface AgentResourceBudgetActiveState {
   readonly runId: string;
   readonly startedAt: string;
   readonly deadlineAt: string;
-  readonly budget: ResourceBudgetV1;
-  readonly reconciledUsage: ResourceUsageV1;
-  readonly reservations: Readonly<Record<string, ResourceReservationV1>>;
-  readonly waiters: Readonly<Record<string, ResourceWaiterV1>>;
+  readonly budget: ResourceBudget;
+  readonly reconciledUsage: ResourceUsage;
+  readonly reservations: Readonly<Record<string, ResourceReservation>>;
+  readonly waiters: Readonly<Record<string, ResourceWaiter>>;
   readonly nextWaiterSequence: number;
 }
 
@@ -1352,7 +1352,7 @@ export interface AgentToolRecoveryQualityGuard {
   readonly turnId?: string;
 }
 
-export type AgentToolRecoveryState = ToolRecoveryJournalV1;
+export type AgentToolRecoveryState = ToolRecoveryJournal;
 
 export interface AgentAutoReviewRejectionEntry {
   readonly timestamp: number;
@@ -1383,7 +1383,7 @@ export type AgentRecoveryState =
 
 /**
  * The complete serialized State 25 record.  No State 26 identity or Store 5
- * fields are present here; those are deliberately reserved for RAV1.
+ * fields are present here; those are deliberately reserved for RA.
  */
 export interface AgentState {
   readonly activeTaskId: string | null;

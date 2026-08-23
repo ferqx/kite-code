@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { METRIC_DEFINITIONS_V1 } from '@kite/runtime-host';
+import { METRIC_DEFINITIONS_ } from '@kite/runtime-host';
 import { parseDocument } from 'yaml';
 
 describe('production dashboard and SLO contract', () => {
@@ -33,7 +33,7 @@ describe('production dashboard and SLO contract', () => {
     expect(dashboard.panels.every((panel) => panel.metrics.length > 0)).toBe(true);
     for (const panel of dashboard.panels) {
       for (const metric of panel.metrics) {
-        expect(METRIC_DEFINITIONS_V1).toHaveProperty(metric);
+        expect(METRIC_DEFINITIONS_).toHaveProperty(metric);
       }
     }
   });

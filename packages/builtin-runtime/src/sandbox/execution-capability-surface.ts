@@ -1,29 +1,26 @@
-import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@kite/runtime-spi';
-import { isDescriptorAdmittedByInProcessReadOnlyCatalogV1 } from './in-process-read-only';
-import type { ExecutionCapabilitySurfaceV1 } from './types';
+import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite/runtime-spi';
+import { isDescriptorAdmittedByInProcessReadOnlyCatalog } from './in-process-read-only';
+import type { ExecutionCapabilitySurface } from './types';
 
 const DENIED_EFFECT_LEVELS = new Set(['write', 'destructive', 'unknown']);
 
-interface EffectProfileV1 {
+interface EffectProfile {
   readonly filesystem: string;
   readonly network: string;
   readonly externalState: string;
 }
 
-export interface SandboxCapabilityDescriptorV1 {
+export interface SandboxCapabilityDescriptor {
   readonly kind: string;
   readonly capabilityId: string;
   readonly revision: string;
   readonly provider: { readonly type: string };
   readonly availability: string;
-  readonly declaredEffects: EffectProfileV1;
-  readonly effectiveEffects: EffectProfileV1;
+  readonly declaredEffects: EffectProfile;
+  readonly effectiveEffects: EffectProfile;
 }
 
-function profileFitsSurface(
-  profile: EffectProfileV1,
-  surface: ExecutionCapabilitySurfaceV1,
-): boolean {
+function profileFitsSurface(profile: EffectProfile, surface: ExecutionCapabilitySurface): boolean {
   if (!surface.write) {
     if (DENIED_EFFECT_LEVELS.has(profile.filesystem)) return false;
     if (DENIED_EFFECT_LEVELS.has(profile.externalState)) return false;
@@ -42,9 +39,9 @@ function profileFitsSurface(
  * restrictions. Every other capability must fit both declared and effective
  * effects independently of whether process execution remains available.
  */
-export function isDescriptorAdmittedByExecutionCapabilitySurfaceV1(input: {
-  surface: ExecutionCapabilitySurfaceV1;
-  descriptor: SandboxCapabilityDescriptorV1;
+export function isDescriptorAdmittedByExecutionCapabilitySurface(input: {
+  surface: ExecutionCapabilitySurface;
+  descriptor: SandboxCapabilityDescriptor;
 }): boolean {
   const { surface, descriptor } = input;
 
@@ -53,14 +50,14 @@ export function isDescriptorAdmittedByExecutionCapabilitySurfaceV1(input: {
   // native metadata denial all name the same feature revision.
   if (descriptor.kind === 'builtin_tool' && descriptor.capabilityId === 'builtin:git_inspect') {
     return (
-      surface.gitInspect && surface.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1
+      surface.gitInspect && surface.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_
     );
   }
 
   if (!surface.process && !surface.write) {
     return Boolean(
       surface.inProcessReadOnlyTools &&
-        isDescriptorAdmittedByInProcessReadOnlyCatalogV1({
+        isDescriptorAdmittedByInProcessReadOnlyCatalog({
           catalog: surface.inProcessReadOnlyTools,
           descriptor,
         }),

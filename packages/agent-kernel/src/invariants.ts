@@ -1,5 +1,5 @@
 import { sha256Hex } from './hash';
-import { isToolOutcomeV1 } from './normalization';
+import { isToolOutcome } from './normalization';
 import {
   type AgentState,
   APPLIED_EVENT_ID_TAIL_LIMIT,
@@ -79,7 +79,7 @@ function exactShape(value: UnknownRecord | undefined, keys: readonly string[]): 
 }
 
 function assertToolOutcome(value: unknown, label: string): void {
-  assert(isToolOutcomeV1(value), `${label} has an invalid canonical ToolOutcome.`);
+  assert(isToolOutcome(value), `${label} has an invalid canonical ToolOutcome.`);
 }
 
 function assertResourceBudget(state: AgentState): void {
@@ -506,7 +506,7 @@ function validPrivateArtifact(value: unknown, kind: string): boolean {
   );
 }
 
-export function isValidFilesystemIntentV1(value: unknown): boolean {
+export function isValidFilesystemIntent(value: unknown): boolean {
   const intent = record(value);
   if (
     !intent ||
@@ -545,7 +545,7 @@ export function isValidFilesystemIntentV1(value: unknown): boolean {
   return intent.intentDigest === `sha256:${digestValue(unsigned)}`;
 }
 
-export function isValidFilesystemReadyV1(value: unknown): boolean {
+export function isValidFilesystemReady(value: unknown): boolean {
   const ready = record(value);
   if (
     !ready ||
@@ -577,7 +577,7 @@ export function isValidFilesystemReadyV1(value: unknown): boolean {
   return ready.readyDigest === `sha256:${digestValue(unsigned)}`;
 }
 
-export function isValidFilesystemObservationV1(value: unknown): boolean {
+export function isValidFilesystemObservation(value: unknown): boolean {
   const observation = record(value);
   return (
     !!observation &&
@@ -596,7 +596,7 @@ export function isValidFilesystemObservationV1(value: unknown): boolean {
   );
 }
 
-export function isValidSandboxIntentV1(value: unknown): boolean {
+export function isValidSandboxIntent(value: unknown): boolean {
   const intent = record(value);
   if (
     !intent ||
@@ -638,7 +638,7 @@ export function isValidSandboxIntentV1(value: unknown): boolean {
   return intent.intentDigest === digestValue(unsigned);
 }
 
-export function isValidSandboxReadyV1(value: unknown): boolean {
+export function isValidSandboxReady(value: unknown): boolean {
   const ready = record(value);
   if (
     !ready ||
@@ -876,7 +876,7 @@ function assertCapabilityInvocations(state: AgentState): void {
     const filesystemReady = recordValue(invocation, 'filesystemMutationReady');
     if (filesystemIntent) {
       assert(
-        isValidFilesystemIntentV1(filesystemIntent) &&
+        isValidFilesystemIntent(filesystemIntent) &&
           status !== 'recorded' &&
           numberValue(filesystemIntent, 'attempt') === numberValue(invocation, 'attemptsStarted') &&
           stringValue(filesystemIntent, 'capabilityRevision') ===
@@ -892,7 +892,7 @@ function assertCapabilityInvocations(state: AgentState): void {
     }
     if (filesystemReady) {
       assert(
-        isValidFilesystemReadyV1(filesystemReady) &&
+        isValidFilesystemReady(filesystemReady) &&
           filesystemIntent != null &&
           status !== 'recorded' &&
           numberValue(filesystemReady, 'attempt') === numberValue(filesystemIntent, 'attempt') &&
@@ -904,7 +904,7 @@ function assertCapabilityInvocations(state: AgentState): void {
     const filesystemObservation = recordValue(invocation, 'filesystemObservation');
     if (filesystemObservation) {
       assert(
-        isValidFilesystemObservationV1(filesystemObservation) &&
+        isValidFilesystemObservation(filesystemObservation) &&
           status === 'succeeded' &&
           recordValue(invocation, 'artifact') != null &&
           filesystemIntent != null,
@@ -959,7 +959,7 @@ function assertCapabilityInvocations(state: AgentState): void {
     const sandboxReady = recordValue(invocation, 'sandboxPreparationReady');
     if (sandboxIntent)
       assert(
-        isValidSandboxIntentV1(sandboxIntent) &&
+        isValidSandboxIntent(sandboxIntent) &&
           status !== 'recorded' &&
           numberValue(sandboxIntent, 'attempt') === numberValue(invocation, 'attemptsStarted') &&
           stringValue(sandboxIntent, 'toolCallId') === stringValue(invocation, 'toolCallId') &&
@@ -974,7 +974,7 @@ function assertCapabilityInvocations(state: AgentState): void {
       );
     if (sandboxReady)
       assert(
-        isValidSandboxReadyV1(sandboxReady) &&
+        isValidSandboxReady(sandboxReady) &&
           status !== 'recorded' &&
           sandboxIntent != null &&
           numberValue(sandboxReady, 'attempt') === numberValue(sandboxIntent, 'attempt') &&
@@ -1587,7 +1587,7 @@ export function assertAgentStateInvariants(state: AgentState): void {
   }
   for (const call of Object.values(state.tools.calls)) {
     assert(call.toolCallId.length > 0 && call.name.length > 0, 'tool call identity is invalid.');
-    if (call.outcomeV1 !== undefined) assertToolOutcome(call.outcomeV1, `tool ${call.toolCallId}`);
+    if (call.outcome !== undefined) assertToolOutcome(call.outcome, `tool ${call.toolCallId}`);
     if (call.recoveryOf)
       assert(
         state.toolRecovery.failures[call.recoveryOf] != null ||

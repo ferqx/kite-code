@@ -9,12 +9,12 @@ import {
 } from '../trusted-readonly-environment';
 import type { FilesystemScope, ShellFilesystemMode, ShellNetworkMode } from '../types';
 import {
-  resolveWindowsSandboxRunnerV1,
+  resolveWindowsSandboxRunner,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
-  type WindowsSandboxRunnerV1,
+  type WindowsSandboxRunner,
 } from '../windows-runner';
 
-export interface SandboxShellPreparationInputV1 {
+export interface SandboxShellPreparationInput {
   readonly workspace: string;
   readonly command: string;
   readonly timeoutMs?: number;
@@ -27,9 +27,9 @@ export interface SandboxShellPreparationInputV1 {
 const DEFAULT_SHELL_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_WINDOWS_RESTRICTED_TOKEN_MAX_PROCESSES = 31;
 
-export interface RestrictedTokenInvocationRequestV1 {
+export interface RestrictedTokenInvocationRequest {
   version: typeof WINDOWS_SANDBOX_PROTOCOL_VERSION;
-  directWorkspace: WindowsRestrictedTokenDirectWorkspaceV1;
+  directWorkspace: WindowsRestrictedTokenDirectWorkspace;
   invocationName: string;
   commandLine: string;
   cwd: string;
@@ -46,20 +46,20 @@ export interface RestrictedTokenInvocationRequestV1 {
   networkMode: 'off' | 'allow_all';
 }
 
-export interface WindowsRestrictedTokenPreparedTransportV1 {
-  readonly runner: WindowsSandboxRunnerV1;
-  readonly request: RestrictedTokenInvocationRequestV1;
+export interface WindowsRestrictedTokenPreparedTransport {
+  readonly runner: WindowsSandboxRunner;
+  readonly request: RestrictedTokenInvocationRequest;
   readonly workspaceRoot: string;
   readonly runtimeRoot: string;
 }
 
-export interface WindowsRestrictedTokenDirectWorkspaceV1 {
+export interface WindowsRestrictedTokenDirectWorkspace {
   runtimeCapabilitySid: string;
   approvedFilesystemGuardSid?: string;
   ephemeralWorkspaceCapabilitySid?: string;
 }
 
-export interface WindowsRestrictedTokenExecutorOptionsV1 {
+export interface WindowsRestrictedTokenExecutorOptions {
   enabled: boolean;
   workspace: string;
   filesystemScope?: Exclude<FilesystemScope, 'full_access'>;
@@ -68,14 +68,14 @@ export interface WindowsRestrictedTokenExecutorOptionsV1 {
   startupProbe?: boolean;
 }
 
-export type WindowsRestrictedTokenPreparationResultV1 =
-  | { readonly ok: true; readonly prepared: WindowsRestrictedTokenPreparedTransportV1 }
+export type WindowsRestrictedTokenPreparationResult =
+  | { readonly ok: true; readonly prepared: WindowsRestrictedTokenPreparedTransport }
   | { readonly ok: false; readonly error: string };
 
 /** Strict data-only codec used by Runtime consumption and crash recovery. */
-export function decodeWindowsRestrictedTokenPreparedTransportV1(
+export function decodeWindowsRestrictedTokenPreparedTransport(
   serialized: string,
-): Readonly<WindowsRestrictedTokenPreparedTransportV1> {
+): Readonly<WindowsRestrictedTokenPreparedTransport> {
   const parsed: unknown = JSON.parse(serialized);
   if (
     !recordWithKeys(parsed, ['runner', 'request', 'workspaceRoot', 'runtimeRoot']) ||
@@ -155,15 +155,15 @@ export function decodeWindowsRestrictedTokenPreparedTransportV1(
   ) {
     throw new Error('Windows restricted-token prepared transport identity mismatch.');
   }
-  return deepFreeze(parsed as unknown as WindowsRestrictedTokenPreparedTransportV1);
+  return deepFreeze(parsed as unknown as WindowsRestrictedTokenPreparedTransport);
 }
 
-export function prepareWindowsRestrictedTokenTransportV1(
-  options: WindowsRestrictedTokenExecutorOptionsV1,
-  input: SandboxShellPreparationInputV1,
+export function prepareWindowsRestrictedTokenTransport(
+  options: WindowsRestrictedTokenExecutorOptions,
+  input: SandboxShellPreparationInput,
   allocatedRuntimeRoot: string,
-  resolvedRunner: WindowsSandboxRunnerV1 | null = resolveWindowsSandboxRunnerV1(),
-): WindowsRestrictedTokenPreparationResultV1 {
+  resolvedRunner: WindowsSandboxRunner | null = resolveWindowsSandboxRunner(),
+): WindowsRestrictedTokenPreparationResult {
   if (!resolvedRunner) {
     return { ok: false, error: 'windows_restricted_token_runner_unavailable' };
   }
@@ -186,25 +186,25 @@ export function prepareWindowsRestrictedTokenTransportV1(
     };
   }
   try {
-    const filesystemScope = resolveWindowsRestrictedTokenFilesystemScopeV1({
+    const filesystemScope = resolveWindowsRestrictedTokenFilesystemScope({
       configuredFilesystemScope: options.filesystemScope,
       invocationFilesystemMode: input.filesystemMode,
     });
-    const networkMode = resolveWindowsRestrictedTokenNetworkModeV1({
+    const networkMode = resolveWindowsRestrictedTokenNetworkMode({
       configuredNetworkMode: options.network?.mode,
       invocationNetworkMode: input.networkMode,
     });
-    const networkScopeError = windowsApprovedNetworkScopeErrorV1({ networkMode, filesystemScope });
+    const networkScopeError = windowsApprovedNetworkScopeError({ networkMode, filesystemScope });
     if (networkScopeError) return { ok: false, error: networkScopeError };
-    const directWorkspace = createWindowsRestrictedTokenDirectWorkspaceV1({
+    const directWorkspace = createWindowsRestrictedTokenDirectWorkspace({
       startupProbe: options.startupProbe === true && filesystemScope === 'workspace_write',
       approvedFilesystem: filesystemScope === 'full_access',
     });
-    const request: RestrictedTokenInvocationRequestV1 = {
+    const request: RestrictedTokenInvocationRequest = {
       version: WINDOWS_SANDBOX_PROTOCOL_VERSION,
       directWorkspace,
       invocationName: createWindowsRestrictedTokenInvocationName(),
-      commandLine: wrapWindowsRestrictedTokenCommandV1(input.command),
+      commandLine: wrapWindowsRestrictedTokenCommand(input.command),
       cwd: workspaceRoot,
       env: buildEnvironment(
         runtimeRoot,
@@ -240,7 +240,7 @@ export function prepareWindowsRestrictedTokenTransportV1(
   }
 }
 
-export function createWindowsRestrictedTokenCapabilitySidV1(
+export function createWindowsRestrictedTokenCapabilitySid(
   random: () => string = randomUUID,
 ): string {
   const hex = random().replaceAll('-', '');
@@ -258,13 +258,13 @@ export function createWindowsRestrictedTokenCapabilitySidV1(
   return `S-1-5-21-${parts.join('-')}`;
 }
 
-export function createWindowsRestrictedTokenDirectWorkspaceV1(input: {
+export function createWindowsRestrictedTokenDirectWorkspace(input: {
   startupProbe: boolean;
   approvedFilesystem?: boolean;
   createCapabilitySid?: () => string;
-}): WindowsRestrictedTokenDirectWorkspaceV1 {
+}): WindowsRestrictedTokenDirectWorkspace {
   const createCapabilitySid =
-    input.createCapabilitySid ?? createWindowsRestrictedTokenCapabilitySidV1;
+    input.createCapabilitySid ?? createWindowsRestrictedTokenCapabilitySid;
   const runtimeCapabilitySid = createCapabilitySid();
   if (input.approvedFilesystem) {
     return { runtimeCapabilitySid, approvedFilesystemGuardSid: createCapabilitySid() };
@@ -278,7 +278,7 @@ export function createWindowsRestrictedTokenInvocationName(): string {
   return `kitecode.${randomUUID().replaceAll('-', '')}`;
 }
 
-export function restrictedTokenNetworkUnsupportedReasonV1(input: {
+export function restrictedTokenNetworkUnsupportedReason(input: {
   hasNetworkBroker: boolean;
 }): string | null {
   return input.hasNetworkBroker
@@ -286,7 +286,7 @@ export function restrictedTokenNetworkUnsupportedReasonV1(input: {
     : null;
 }
 
-export function resolveWindowsRestrictedTokenNetworkModeV1(input: {
+export function resolveWindowsRestrictedTokenNetworkMode(input: {
   configuredNetworkMode?: ShellNetworkMode;
   invocationNetworkMode?: ShellNetworkMode;
 }): 'off' | 'allow_all' {
@@ -295,7 +295,7 @@ export function resolveWindowsRestrictedTokenNetworkModeV1(input: {
     : 'off';
 }
 
-export function resolveWindowsRestrictedTokenFilesystemScopeV1(input: {
+export function resolveWindowsRestrictedTokenFilesystemScope(input: {
   configuredFilesystemScope?: 'read_only' | 'workspace_write';
   invocationFilesystemMode?: ShellFilesystemMode;
 }): 'read_only' | 'workspace_write' | 'full_access' {
@@ -308,7 +308,7 @@ export function resolveWindowsRestrictedTokenFilesystemScopeV1(input: {
  * filesystem ceiling. Keep narrower filesystem grants fail-closed instead of
  * treating a network approval as ambient current-user file authority.
  */
-export function windowsApprovedNetworkScopeErrorV1(input: {
+export function windowsApprovedNetworkScopeError(input: {
   networkMode: 'off' | 'allow_all';
   filesystemScope: 'read_only' | 'workspace_write' | 'full_access';
 }): string | null {
@@ -327,7 +327,7 @@ const PACKAGE_MANAGER_PRELUDE = [
   'corepack() { cmd.exe /d /c corepack.cmd "$@"; }',
 ].join('; ');
 
-export function wrapWindowsRestrictedTokenCommandV1(command: string): string {
+export function wrapWindowsRestrictedTokenCommand(command: string): string {
   return `${PACKAGE_MANAGER_PRELUDE};\n${normalizeMsys2DrivePathsInShellCommand(command)}`;
 }
 
@@ -365,7 +365,7 @@ export const WINDOWS_RESTRICTED_TOKEN_ENV_ALLOWLIST = [
 
 function buildEnvironment(
   runtimeRoot: string,
-  runner: WindowsSandboxRunnerV1,
+  runner: WindowsSandboxRunner,
   workspaceRoot: string,
   policyProvenReadOnly: boolean,
 ): Record<string, string> {
@@ -383,7 +383,7 @@ function buildEnvironment(
     win32.join(runtimeRoot, 'kite-coreutils'),
     runner.shellRuntimePath,
   ];
-  const bun = resolveBunExecutableForWindowsRestrictedTokenV1();
+  const bun = resolveBunExecutableForWindowsRestrictedToken();
   if (
     bun &&
     (!policyProvenReadOnly ||
@@ -455,7 +455,7 @@ export function buildWindowsRestrictedTokenEnvForTest(
 }
 
 /** Resolve an independently canonical Bun executable for the direct PATH entry. */
-export function resolveBunExecutableForWindowsRestrictedTokenV1(
+export function resolveBunExecutableForWindowsRestrictedToken(
   input: {
     which?: () => string | null;
     execPath?: string | null;
@@ -494,7 +494,7 @@ function recordWithKeys(value: unknown, keys: readonly string[]): value is Recor
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-function validDirectWorkspace(value: unknown): value is WindowsRestrictedTokenDirectWorkspaceV1 {
+function validDirectWorkspace(value: unknown): value is WindowsRestrictedTokenDirectWorkspace {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const keys = Object.keys(value);
   if (

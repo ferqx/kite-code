@@ -1,16 +1,16 @@
 import { basename } from 'node:path';
 import {
-  createRuntimeHostMcpStdioProcessPortV1,
-  isMcpStdioWrapperInvocationV1,
-  MCP_STDIO_WRAPPER_ENTRYPOINT_V1,
-  runMcpStdioChildRuntimeV1,
+  createRuntimeHostMcpStdioProcessPort,
+  isMcpStdioWrapperInvocation,
+  MCP_STDIO_WRAPPER_ENTRYPOINT_,
+  runMcpStdioChildRuntime,
 } from '@kite/runtime-host';
 
 /** App composition of the one Host-owned authenticated MCP stdio process mechanism. */
-export function createInstalledMcpStdioProcessPortV1() {
+export function createInstalledMcpStdioProcessPort() {
   const executable = basename(process.execPath).toLowerCase();
   const runningUnderBun = executable === 'bun' || executable === 'bun.exe';
-  return createRuntimeHostMcpStdioProcessPortV1({
+  return createRuntimeHostMcpStdioProcessPort({
     // Source runs use Host's checked TypeScript entrypoint. A standalone Kite
     // executable routes the internal flag before normal CLI/TUI bootstrap.
     ...(runningUnderBun ? {} : { wrapperPath: null }),
@@ -18,8 +18,8 @@ export function createInstalledMcpStdioProcessPortV1() {
 }
 
 /** Return true only for the private standalone child entrypoint. */
-export function runKiteInternalMcpStdioChildV1(): boolean {
-  if (!isMcpStdioWrapperInvocationV1(process.argv)) return false;
-  runMcpStdioChildRuntimeV1([MCP_STDIO_WRAPPER_ENTRYPOINT_V1]);
+export function runKiteInternalMcpStdioChild(): boolean {
+  if (!isMcpStdioWrapperInvocation(process.argv)) return false;
+  runMcpStdioChildRuntime([MCP_STDIO_WRAPPER_ENTRYPOINT_]);
   return true;
 }

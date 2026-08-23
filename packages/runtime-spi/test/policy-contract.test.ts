@@ -1,21 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
-  type CapabilityDefinitionV1,
-  type CapabilityPolicyCompilationV1,
-  type CapabilityPolicyContextV1,
-  createRuntimeModuleRegistryV1,
-  defineRuntimeModuleV1,
-  type RuntimeJsonValueV1,
+  CAPABILITY_POLICY_COMPILATION_SCHEMA_,
+  type CapabilityDefinition,
+  type CapabilityPolicyCompilation,
+  type CapabilityPolicyContext,
+  createRuntimeModuleRegistry,
+  defineRuntimeModule,
+  type RuntimeJsonValue,
 } from '@kite/runtime-spi';
 
-const context: CapabilityPolicyContextV1 = Object.freeze({
+const context: CapabilityPolicyContext = Object.freeze({
   workspace: '/tmp/workspace',
   phase: 'building',
 });
 
-const compilation: CapabilityPolicyCompilationV1 = Object.freeze({
-  schema: CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
+const compilation: CapabilityPolicyCompilation = Object.freeze({
+  schema: CAPABILITY_POLICY_COMPILATION_SCHEMA_,
   operationId: 'builtin:test',
   capabilityRevision: 'revision-1',
   parserRevision: 'parser-1',
@@ -44,19 +44,19 @@ const compilation: CapabilityPolicyCompilationV1 = Object.freeze({
 
 describe('runtime SPI policy compiler contract', () => {
   test('keeps policy facts JSON-safe and binds them to one operation identity', () => {
-    const definition: CapabilityDefinitionV1 = Object.freeze({
+    const definition: CapabilityDefinition = Object.freeze({
       capabilityId: 'builtin:test',
       revision: 'revision-1',
       providerId: 'provider-a',
       title: 'Test capability',
-      policyCompiler: (input: RuntimeJsonValueV1, receivedContext: CapabilityPolicyContextV1) => {
+      policyCompiler: (input: RuntimeJsonValue, receivedContext: CapabilityPolicyContext) => {
         expect(input).toEqual({ value: 'test' });
         expect(receivedContext).toEqual(context);
         return compilation;
       },
     });
-    const registry = createRuntimeModuleRegistryV1([
-      defineRuntimeModuleV1({
+    const registry = createRuntimeModuleRegistry([
+      defineRuntimeModule({
         moduleId: 'module-policy',
         providerId: 'provider-a',
         revision: '1',
@@ -73,8 +73,8 @@ describe('runtime SPI policy compiler contract', () => {
 
   test('rejects a non-callable policy compiler at the SPI boundary', () => {
     expect(() =>
-      createRuntimeModuleRegistryV1([
-        defineRuntimeModuleV1({
+      createRuntimeModuleRegistry([
+        defineRuntimeModule({
           moduleId: 'module-invalid-policy',
           providerId: 'provider-a',
           revision: '1',

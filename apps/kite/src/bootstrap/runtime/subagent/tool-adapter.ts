@@ -1,50 +1,50 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import type {
-  BuiltinModelToolCatalogEntryV1,
-  BuiltinModelToolSetV1,
-  BuiltinToolCatalogProjectionV1,
+  BuiltinModelToolCatalogEntry,
+  BuiltinModelToolSet,
+  BuiltinToolCatalogProjection,
 } from '@kite/builtin-runtime';
 import {
-  canonicalizeCapabilityArgumentsV1,
-  createBuiltinCapabilityTurnContextV1,
-  createBuiltinSubagentModelContextV1,
-  createBuiltinSubagentModelLoopEngineV1,
-  createBuiltinSubagentToolSurfaceV1,
-  digestCapabilityValueV1,
+  canonicalizeCapabilityArguments,
+  createBuiltinCapabilityTurnContext,
+  createBuiltinSubagentModelContext,
+  createBuiltinSubagentModelLoopEngine,
+  createBuiltinSubagentToolSurface,
+  digestCapabilityValue,
   getRoleConfig,
-  rejectShellOutsideSubAgentRoleCeilingV1,
-  toolExecutionModelContentV1,
+  rejectShellOutsideSubAgentRoleCeiling,
+  toolExecutionModelContent,
   toolRequestFromCall,
-  validateCapabilityArgumentsV1,
+  validateCapabilityArguments,
 } from '@kite/builtin-runtime';
 import type { BaseMessage } from '@kite/builtin-runtime/model';
 import { countTokens, toolMessage } from '@kite/builtin-runtime/model';
 import { msys2ToWindowsPath } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeState } from '@kite/runtime-host';
 import {
-  runtimeHostStateAdmitRecoveryAttemptV1 as admitRecoveryAttemptV1,
-  runtimeHostStateAdvanceToolRecoveryResponseV1 as advanceToolRecoveryResponseV1,
-  bestEffortRegularFileSizeV1,
-  runtimeHostStateClassifyFailureV1 as classifyFailure,
-  runtimeHostStateClassifyToolOutcomeV1 as classifyToolOutcomeV1,
-  committedResourceUsageV1,
-  runtimeHostStateCreateToolRecoveryJournalV1 as createToolRecoveryJournalV1,
+  runtimeHostStateAdmitRecoveryAttempt as admitRecoveryAttempt,
+  runtimeHostStateAdvanceToolRecoveryResponse as advanceToolRecoveryResponse,
+  bestEffortRegularFileSize,
+  runtimeHostStateClassifyFailure as classifyFailure,
+  runtimeHostStateClassifyToolOutcome as classifyToolOutcome,
+  committedResourceUsage,
+  runtimeHostStateCreateToolRecoveryJournal as createToolRecoveryJournal,
   DescendantResourceAdmissionError,
-  runtimeHostStateFailureKindForToolParseFailureV1 as failureKindForToolParseFailure,
-  type StateRuntimeEventV1 as RuntimeEvent,
-  runtimeHostStateRecordRecoveryFailureV1 as recordRecoveryFailureV1,
-  runtimeHostStateRecordRecoveryInvocationV1 as recordRecoveryInvocationV1,
-  runtimeHostStateRecordToolOwnedProgressV1 as recordToolOwnedProgressV1,
-  type StateToolOutcomeV1 as ToolOutcomeV1,
-  runtimeHostStateToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostStateFailureKindForToolParseFailure as failureKindForToolParseFailure,
+  type StateRuntimeEvent as RuntimeEvent,
+  runtimeHostStateRecordRecoveryFailure as recordRecoveryFailure,
+  runtimeHostStateRecordRecoveryInvocation as recordRecoveryInvocation,
+  runtimeHostStateRecordToolOwnedProgress as recordToolOwnedProgress,
+  type StateToolOutcome as ToolOutcome,
+  runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
 } from '@kite/runtime-host';
 import type { PersistedExecutionJournalEntry } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import {
-  denyMissingProviderDataAdmissionV1,
+  denyMissingProviderDataAdmission,
   ProviderDataAdmissionError,
 } from '#app/config/provider-data-admission';
-import type { AppApprovalBindingV1 } from '../approval-binding';
+import type { AppApprovalBinding } from '../approval-binding';
 import type { ToolExecutionResult } from '../tool-result';
 import type {
   SubAgentContinuation,
@@ -57,14 +57,14 @@ import type {
 /** State 25 adapter around the Builtin-owned child model loop. */
 export type { SubAgentRunnerInput } from './types';
 
-function requireBuiltinToolCatalogV1(input: SubAgentRunnerInput): BuiltinToolCatalogProjectionV1 {
+function requireBuiltinToolCatalog(input: SubAgentRunnerInput): BuiltinToolCatalogProjection {
   if (!input.builtinToolCatalog) {
     throw new Error('Sub-agent Builtin tool catalog projection is unavailable.');
   }
   return input.builtinToolCatalog;
 }
 
-function createSubagentToolTurnContextV1(input: {
+function createSubagentToolTurnContext(input: {
   workspace: string;
   config: SubAgentRunnerInput['config'];
   gitBroker?: SubAgentRunnerInput['gitBroker'];
@@ -79,7 +79,7 @@ function createSubagentToolTurnContextV1(input: {
   taskId?: string;
 }) {
   const featureFlags = getFeatureFlags(input.config);
-  const context = createBuiltinCapabilityTurnContextV1({
+  const context = createBuiltinCapabilityTurnContext({
     workspace: input.workspace,
     threadId: input.threadId,
     turnId: input.turnId,
@@ -100,12 +100,12 @@ function createSubagentToolTurnContextV1(input: {
   });
 }
 
-function isBuiltinShellEntryV1(entry: BuiltinModelToolCatalogEntryV1 | undefined): boolean {
+function isBuiltinShellEntry(entry: BuiltinModelToolCatalogEntry | undefined): boolean {
   return entry?.executionMechanism === 'shell';
 }
 
-function isBuiltinFilesystemMutationEntryV1(
-  entry: BuiltinModelToolCatalogEntryV1 | undefined,
+function isBuiltinFilesystemMutationEntry(
+  entry: BuiltinModelToolCatalogEntry | undefined,
 ): boolean {
   return (
     entry?.executionMechanism === 'filesystem' &&
@@ -113,7 +113,7 @@ function isBuiltinFilesystemMutationEntryV1(
   );
 }
 
-function isReadOnlyCapabilityV1(entry: BuiltinModelToolCatalogEntryV1 | undefined): boolean {
+function isReadOnlyCapability(entry: BuiltinModelToolCatalogEntry | undefined): boolean {
   if (entry?.effects.externalState !== 'none') return false;
   if (entry.executionMechanism === 'filesystem') {
     return entry.effects.filesystem === 'read';
@@ -133,7 +133,7 @@ function nextSubAgentId(): string {
 }
 
 function normalizeSubAgentToolArgs(
-  entry: BuiltinModelToolCatalogEntryV1 | undefined,
+  entry: BuiltinModelToolCatalogEntry | undefined,
   args: Record<string, unknown>,
   workspace: string,
 ): Record<string, unknown> {
@@ -181,11 +181,11 @@ function mcpBindingError(input: {
     descriptor.kind !== 'mcp_tool' ||
     descriptor.availability !== 'available' ||
     !descriptor.inputSchema ||
-    binding.schemaDigest !== digestCapabilityValueV1(descriptor.inputSchema)
+    binding.schemaDigest !== digestCapabilityValue(descriptor.inputSchema)
   ) {
     return 'MCP capability is unavailable for execution.';
   }
-  return validateCapabilityArgumentsV1(descriptor.inputSchema, input.args);
+  return validateCapabilityArguments(descriptor.inputSchema, input.args);
 }
 
 function approvalRequiredBlock(
@@ -194,7 +194,7 @@ function approvalRequiredBlock(
     status?: string;
     stderr?: string;
     approvalRoute?: 'user' | 'auto_review';
-    approvalBinding?: AppApprovalBindingV1;
+    approvalBinding?: AppApprovalBinding;
   },
   toolCallId: string,
   toolName: string,
@@ -255,12 +255,12 @@ function admittedSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | u
   const budget = input.modelInvocationPersistence?.getState().resourceBudget;
   if (budget?.status !== 'active') return configured;
   const remaining =
-    budget.budget.maxRunOutputTokens - committedResourceUsageV1(budget).counters.outputTokens;
+    budget.budget.maxRunOutputTokens - committedResourceUsage(budget).counters.outputTokens;
   if (remaining <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
   return Math.min(configured ?? remaining, remaining);
 }
 
-function structuredSubagentFailureReasonV1(result: ToolExecutionResult): string {
+function structuredSubagentFailureReason(result: ToolExecutionResult): string {
   if (result.terminationReason === 'timed_out') return 'timed_out';
   if (result.terminationReason === 'cancelled') return 'cancelled_by_user';
   if (result.terminationReason === 'sandbox_denied') return 'sandbox_denied';
@@ -268,17 +268,17 @@ function structuredSubagentFailureReasonV1(result: ToolExecutionResult): string 
   return 'tool_reported_failure';
 }
 
-export async function executeSubagentStartWithCoreToolAdapterV1(
+export async function executeSubagentStartWithCoreToolAdapter(
   input: SubAgentRunnerInput,
 ): Promise<SubAgentResult> {
   const id = input.childInvocationId ?? nextSubAgentId();
   const role = normalizeRoleConfig(input.role);
-  const modelContext = createBuiltinSubagentModelContextV1({
+  const modelContext = createBuiltinSubagentModelContext({
     workspace: input.workspace,
     task: input.task,
     role: role.role,
     systemPrompt: role.systemPrompt,
-    promptContractV2: getFeatureFlags(input.config).promptContractV2,
+    promptContract: getFeatureFlags(input.config).promptContract,
     ...(input.projectInstructions ? { projectInstructions: input.projectInstructions } : {}),
     ...(input.skills ? { skills: input.skills } : {}),
   });
@@ -292,7 +292,7 @@ export async function executeSubagentStartWithCoreToolAdapterV1(
     type: 'start',
     data: { id, role: normalizedInput.role.role, task: 'Private delegated task' },
   });
-  return executeCoreSubagentToolAdapterV1(normalizedInput, {
+  return executeCoreSubagentToolAdapter(normalizedInput, {
     id,
     messages: [...modelContext.messages],
     toolCallCount: 0,
@@ -300,11 +300,11 @@ export async function executeSubagentStartWithCoreToolAdapterV1(
     steps: [],
     executionJournal: [],
     exhaustedFingerprints: {},
-    toolRecovery: createToolRecoveryJournalV1(normalizedInput.recoveryIdentityKey),
+    toolRecovery: createToolRecoveryJournal(normalizedInput.recoveryIdentityKey),
   });
 }
 
-export async function executeSubagentResumeWithCoreToolAdapterV1(
+export async function executeSubagentResumeWithCoreToolAdapter(
   input: SubAgentRunnerInput,
   continuation: SubAgentContinuation,
   toolResult: {
@@ -319,7 +319,7 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
     role: normalizeRoleConfig(input.role),
     projectInstructions: continuation.projectInstructions ?? input.projectInstructions,
   };
-  const toolOutput = toolExecutionModelContentV1(toolResult.result);
+  const toolOutput = toolExecutionModelContent(toolResult.result);
   const actualOk = toolResult.result.ok !== false;
   normalizedInput.eventSink({
     type: 'tool_result',
@@ -334,7 +334,7 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
         : {}),
       toolTokenCount: countTokens(toolOutput),
       ...(toolResult.result.ok === false
-        ? { failureReason: structuredSubagentFailureReasonV1(toolResult.result) }
+        ? { failureReason: structuredSubagentFailureReason(toolResult.result) }
         : {}),
     },
   });
@@ -359,9 +359,9 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
     (entry) => entry.binding.exposedToolName === toolResult.toolName,
   );
   const resumeDynamicIdentity = resumeBinding
-    ? canonicalizeCapabilityArgumentsV1(resumeBinding.descriptor.inputSchema, resumeArgs)
+    ? canonicalizeCapabilityArguments(resumeBinding.descriptor.inputSchema, resumeArgs)
     : undefined;
-  const resumeAvailability = createSubagentToolTurnContextV1({
+  const resumeAvailability = createSubagentToolTurnContext({
     workspace: input.workspace,
     gitBroker: input.gitBroker,
     config: input.config,
@@ -370,9 +370,9 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
     eventSink: input.eventSink,
     taskId: continuation.id,
   });
-  const resumeProjection = requireBuiltinToolCatalogV1(input).forTurn(resumeAvailability);
+  const resumeProjection = requireBuiltinToolCatalog(input).forTurn(resumeAvailability);
   const resumeBuiltinEntry = resumeProjection.entries.find(
-    (entry): entry is BuiltinModelToolCatalogEntryV1 =>
+    (entry): entry is BuiltinModelToolCatalogEntry =>
       entry.visibility === 'model' && entry.name === toolResult.toolName,
   );
   const resumePreflight = toolRequestFromCall(
@@ -380,7 +380,7 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
     resumeAvailability,
     resumeProjection,
   );
-  const resumeFingerprint = toolInvocationFingerprintV1({
+  const resumeFingerprint = toolInvocationFingerprint({
     toolName: toolResult.toolName,
     identityRevision:
       resumeBinding?.binding.capabilityRevision ??
@@ -406,13 +406,13 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
   });
   const resumeRejected = !actualOk && toolResult.result.status === 'rejected';
   const resumePolicyDenied =
-    resumeRejected && toolResult.result.classifierAdviceV1?.detailCode === 'policy_denied';
+    resumeRejected && toolResult.result.classifierAdvice?.detailCode === 'policy_denied';
   const resumeOutcome = actualOk
-    ? classifyToolOutcomeV1({
+    ? classifyToolOutcome({
         status: 'success',
         authority: { dispatchState: 'started', externalEffects: 'known' },
       })
-    : classifyToolOutcomeV1({
+    : classifyToolOutcome({
         status: resumeRejected ? 'rejected' : 'failed',
         failure: classifyFailure(
           resumePolicyDenied
@@ -431,15 +431,15 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
               ? { approvalDenied: true }
               : {}),
         },
-        toolAdvice: toolResult.result.classifierAdviceV1,
+        toolAdvice: toolResult.result.classifierAdvice,
         classifierDiagnostic: toolResult.result.classifierDiagnostic,
       });
   const resumedRecovery = actualOk
-    ? recordToolOwnedProgressV1(priorRecovery, {
+    ? recordToolOwnedProgress(priorRecovery, {
         kind: 'receipt',
         referenceId: toolResult.toolCallId,
       })
-    : recordRecoveryFailureV1(priorRecovery, {
+    : recordRecoveryFailure(priorRecovery, {
         toolCallId: toolResult.toolCallId,
         toolName: toolResult.toolName,
         invocationFingerprint: resumeFingerprint,
@@ -448,7 +448,7 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
         taskId: continuation.id,
         turnId: continuation.id,
       });
-  return executeCoreSubagentToolAdapterV1(normalizedInput, {
+  return executeCoreSubagentToolAdapter(normalizedInput, {
     id: continuation.id,
     messages: [
       ...continuation.messages,
@@ -468,7 +468,7 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
   });
 }
 
-async function executeCoreSubagentToolAdapterV1(
+async function executeCoreSubagentToolAdapter(
   input: SubAgentRunnerInput,
   state: {
     id: string;
@@ -479,7 +479,7 @@ async function executeCoreSubagentToolAdapterV1(
     // Phase 5: journal tracking for subagent tool executions
     executionJournal: PersistedExecutionJournalEntry[];
     exhaustedFingerprints: Record<string, true>;
-    toolRecovery: import('@kite/runtime-host').StateToolRecoveryJournalV1;
+    toolRecovery: import('@kite/runtime-host').StateToolRecoveryJournal;
   },
 ): Promise<SubAgentResult> {
   const id = state.id;
@@ -515,7 +515,7 @@ async function executeCoreSubagentToolAdapterV1(
   }
   const combinedSignal = combinedController.signal;
 
-  const availabilityContext = createSubagentToolTurnContextV1({
+  const availabilityContext = createSubagentToolTurnContext({
     workspace: input.workspace,
     gitBroker: input.gitBroker,
     config: input.config,
@@ -528,8 +528,8 @@ async function executeCoreSubagentToolAdapterV1(
   const builtinTurnContext = availabilityContext;
   const depth = input.depth ?? 0;
   const maxDepth = input.maxDepth ?? 0;
-  const subagentToolSurface = createBuiltinSubagentToolSurfaceV1({
-    catalog: requireBuiltinToolCatalogV1(input),
+  const subagentToolSurface = createBuiltinSubagentToolSurface({
+    catalog: requireBuiltinToolCatalog(input),
     turnContext: builtinTurnContext,
     ...(input.config.executionCapabilitySurface
       ? { executionCapabilitySurface: input.config.executionCapabilitySurface }
@@ -539,8 +539,8 @@ async function executeCoreSubagentToolAdapterV1(
     ...(input.mcpBindings ? { dynamicMcpBindings: input.mcpBindings } : {}),
   });
   const builtinProjection = subagentToolSurface.projection;
-  const tools: BuiltinModelToolSetV1 = subagentToolSurface.tools;
-  const builtinEntriesByName = new Map<string, BuiltinModelToolCatalogEntryV1>(
+  const tools: BuiltinModelToolSet = subagentToolSurface.tools;
+  const builtinEntriesByName = new Map<string, BuiltinModelToolCatalogEntry>(
     subagentToolSurface.builtinEntries.map((entry) => [entry.name, entry]),
   );
   const mcpBindings = new Map(
@@ -552,7 +552,7 @@ async function executeCoreSubagentToolAdapterV1(
     if (!input.modelEffectCoordinator || !input.modelInvocationPersistence) {
       throw new Error('ModelInvocationGateway execution context is unavailable.');
     }
-    const modelLoop = createBuiltinSubagentModelLoopEngineV1<
+    const modelLoop = createBuiltinSubagentModelLoopEngine<
       RuntimeState,
       RuntimeEvent,
       SubAgentResult
@@ -570,7 +570,7 @@ async function executeCoreSubagentToolAdapterV1(
         contextCheckpointId:
           input.modelInvocationPersistence.getState().context.activeCheckpoint?.sourceDigest ??
           null,
-        promptContractVersion: getFeatureFlags(input.config).promptContractV2
+        promptContractVersion: getFeatureFlags(input.config).promptContract
           ? 'prompt-contract-v2'
           : 'legacy',
         projectionEnvironment: {
@@ -585,7 +585,7 @@ async function executeCoreSubagentToolAdapterV1(
         parentReservationId: input.modelInvocationParentReservationId,
         maxOutputTokens: () => admittedSubagentMaxOutputTokens(input),
       },
-      providerDataAdmission: input.providerDataAdmission ?? denyMissingProviderDataAdmissionV1,
+      providerDataAdmission: input.providerDataAdmission ?? denyMissingProviderDataAdmission,
       signal: combinedSignal,
       consumer: {
         consume: async ({
@@ -629,7 +629,7 @@ async function executeCoreSubagentToolAdapterV1(
           if (!responseToolCalls || responseToolCalls.length === 0) {
             throw new Error('Builtin subagent model loop invoked its tool consumer without calls.');
           }
-          toolRecovery = advanceToolRecoveryResponseV1(toolRecovery, {
+          toolRecovery = advanceToolRecoveryResponse(toolRecovery, {
             taskId: recoveryScopeId,
             turnId: recoveryScopeId,
             modelMessageId: responseMessageId,
@@ -668,14 +668,14 @@ async function executeCoreSubagentToolAdapterV1(
                 status: 'error' as const,
                 ok: false,
               });
-              const fingerprint = toolInvocationFingerprintV1({
+              const fingerprint = toolInvocationFingerprint({
                 toolName: tc.name,
                 parseCode: 'tool_unavailable',
                 pathCategory: 'unknown',
                 unparsedArgs: tc.args,
               });
               const modelMessageId = responseMessageId;
-              const admission = admitRecoveryAttemptV1(toolRecovery, {
+              const admission = admitRecoveryAttempt(toolRecovery, {
                 toolCallId: tc.id ?? `subagent-unavailable-${toolCallCount}`,
                 toolName: tc.name,
                 invocationFingerprint: fingerprint,
@@ -685,13 +685,13 @@ async function executeCoreSubagentToolAdapterV1(
                 turnId: recoveryScopeId,
               });
               if (admission.admitted && admission.recoveryOf) {
-                toolRecovery = recordRecoveryInvocationV1(toolRecovery, {
+                toolRecovery = recordRecoveryInvocation(toolRecovery, {
                   toolCallId: tc.id ?? `subagent-unavailable-${toolCallCount}`,
                   recoveryOf: admission.recoveryOf,
                   mode: 'model_correction',
                 });
               }
-              const outcome = classifyToolOutcomeV1({
+              const outcome = classifyToolOutcome({
                 status: admission.admitted ? 'failed' : 'exhausted',
                 failure: classifyFailure('tool_not_found', 'Subagent tool is unavailable.'),
                 authority: {
@@ -719,7 +719,7 @@ async function executeCoreSubagentToolAdapterV1(
                 taskId: recoveryScopeId,
                 turnId: recoveryScopeId,
               };
-              toolRecovery = recordRecoveryFailureV1(toolRecovery, unavailableFailure);
+              toolRecovery = recordRecoveryFailure(toolRecovery, unavailableFailure);
               continue;
             }
 
@@ -755,9 +755,9 @@ async function executeCoreSubagentToolAdapterV1(
               if (bindingError) {
                 const bindingEntry = mcpBindings.get(tc.name);
                 const canonicalArgs = bindingEntry
-                  ? canonicalizeCapabilityArgumentsV1(bindingEntry.descriptor.inputSchema, toolArgs)
+                  ? canonicalizeCapabilityArguments(bindingEntry.descriptor.inputSchema, toolArgs)
                   : undefined;
-                const invocationFingerprint = toolInvocationFingerprintV1({
+                const invocationFingerprint = toolInvocationFingerprint({
                   toolName: tc.name,
                   identityRevision: bindingEntry?.binding.capabilityRevision ?? 'unknown',
                   ...(canonicalArgs?.ok
@@ -771,7 +771,7 @@ async function executeCoreSubagentToolAdapterV1(
                       }),
                 });
                 const toolCallId = tc.id ?? `subagent-mcp-binding-${toolCallCount}`;
-                const admission = admitRecoveryAttemptV1(toolRecovery, {
+                const admission = admitRecoveryAttempt(toolRecovery, {
                   toolCallId,
                   toolName: tc.name,
                   invocationFingerprint,
@@ -781,13 +781,13 @@ async function executeCoreSubagentToolAdapterV1(
                   turnId: recoveryScopeId,
                 });
                 if (admission.admitted && admission.recoveryOf) {
-                  toolRecovery = recordRecoveryInvocationV1(toolRecovery, {
+                  toolRecovery = recordRecoveryInvocation(toolRecovery, {
                     toolCallId,
                     recoveryOf: admission.recoveryOf,
                     mode: 'model_correction',
                   });
                 }
-                const outcome = classifyToolOutcomeV1({
+                const outcome = classifyToolOutcome({
                   status: admission.admitted ? 'failed' : 'exhausted',
                   failure: classifyFailure(
                     admission.admitted ? 'tool_invalid_args' : 'loop_exhausted',
@@ -820,7 +820,7 @@ async function executeCoreSubagentToolAdapterV1(
                   taskId: recoveryScopeId,
                   turnId: recoveryScopeId,
                 };
-                toolRecovery = recordRecoveryFailureV1(toolRecovery, bindingFailure);
+                toolRecovery = recordRecoveryFailure(toolRecovery, bindingFailure);
                 const blockedOutput = JSON.stringify({ ok: false, error: bindingError });
                 appendToolMessage(
                   toolMessage({
@@ -860,10 +860,10 @@ async function executeCoreSubagentToolAdapterV1(
             );
             const boundIdentity = mcpBindings.get(tc.name);
             const dynamicIdentity = boundIdentity
-              ? canonicalizeCapabilityArgumentsV1(boundIdentity.descriptor.inputSchema, toolArgs)
+              ? canonicalizeCapabilityArguments(boundIdentity.descriptor.inputSchema, toolArgs)
               : undefined;
             const builtinIdentityEntry = builtinEntriesByName.get(tc.name);
-            const invocationFingerprint = toolInvocationFingerprintV1({
+            const invocationFingerprint = toolInvocationFingerprint({
               toolName: tc.name,
               identityRevision:
                 boundIdentity?.binding.capabilityRevision ??
@@ -888,7 +888,7 @@ async function executeCoreSubagentToolAdapterV1(
                     }),
             });
             const modelMessageId = responseMessageId;
-            const recoveryAdmission = admitRecoveryAttemptV1(toolRecovery, {
+            const recoveryAdmission = admitRecoveryAttempt(toolRecovery, {
               toolCallId: tc.id ?? `subagent-${toolCallCount}`,
               toolName: tc.name,
               invocationFingerprint,
@@ -899,7 +899,7 @@ async function executeCoreSubagentToolAdapterV1(
             });
             const recoveryOf = recoveryAdmission.recoveryOf;
             if (!recoveryAdmission.admitted) {
-              const exhaustedOutcome = classifyToolOutcomeV1({
+              const exhaustedOutcome = classifyToolOutcome({
                 status: 'exhausted',
                 failure: classifyFailure(
                   'loop_exhausted',
@@ -913,7 +913,7 @@ async function executeCoreSubagentToolAdapterV1(
                   detailCode: recoveryAdmission.detailCode,
                 },
               });
-              toolRecovery = recordRecoveryFailureV1(toolRecovery, {
+              toolRecovery = recordRecoveryFailure(toolRecovery, {
                 toolCallId: tc.id ?? `subagent-${toolCallCount}`,
                 toolName: tc.name,
                 invocationFingerprint,
@@ -957,7 +957,7 @@ async function executeCoreSubagentToolAdapterV1(
               continue;
             }
             if (recoveryOf) {
-              toolRecovery = recordRecoveryInvocationV1(toolRecovery, {
+              toolRecovery = recordRecoveryInvocation(toolRecovery, {
                 toolCallId: tc.id ?? `subagent-${toolCallCount}`,
                 recoveryOf,
                 mode: 'model_correction',
@@ -969,7 +969,7 @@ async function executeCoreSubagentToolAdapterV1(
             let ok = true;
             let totalLines: number | undefined;
             let executionResult: ToolExecutionResult | undefined;
-            let failureOutcome: ToolOutcomeV1 | undefined;
+            let failureOutcome: ToolOutcome | undefined;
             let roleCeilingDenied = false;
             try {
               const parsed = parsedPreflight;
@@ -979,8 +979,8 @@ async function executeCoreSubagentToolAdapterV1(
                 );
               }
               const pendingRequest = parsed.request;
-              const roleDenial = isBuiltinShellEntryV1(builtinEntry)
-                ? rejectShellOutsideSubAgentRoleCeilingV1(
+              const roleDenial = isBuiltinShellEntry(builtinEntry)
+                ? rejectShellOutsideSubAgentRoleCeiling(
                     input.role,
                     String((pendingRequest.args as { readonly command?: unknown }).command ?? ''),
                   )
@@ -1005,7 +1005,7 @@ async function executeCoreSubagentToolAdapterV1(
                                 return input.descendantResourceAdmission!.reserveTool({
                                   invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}:attempt:${childToolAdmissionAttempt}`,
                                   toolKind: tc.name,
-                                  shell: isBuiltinShellEntryV1(builtinEntry),
+                                  shell: isBuiltinShellEntry(builtinEntry),
                                   signal: combinedSignal,
                                 });
                               },
@@ -1035,9 +1035,9 @@ async function executeCoreSubagentToolAdapterV1(
                                   await input.descendantResourceAdmission!.reconcileTool({
                                     reservationId,
                                     artifactBytes:
-                                      isBuiltinFilesystemMutationEntryV1(builtinEntry) &&
+                                      isBuiltinFilesystemMutationEntry(builtinEntry) &&
                                       attemptResult?.path
-                                        ? bestEffortRegularFileSizeV1(attemptResult.path)
+                                        ? bestEffortRegularFileSize(attemptResult.path)
                                         : 0,
                                   });
                                 } catch (settlementError) {
@@ -1182,7 +1182,7 @@ async function executeCoreSubagentToolAdapterV1(
                   },
                 };
               }
-              toolOutput = toolExecutionModelContentV1(result);
+              toolOutput = toolExecutionModelContent(result);
               ok = result.ok !== false;
               if ('totalLines' in result && typeof result.totalLines === 'number') {
                 totalLines = result.totalLines;
@@ -1198,7 +1198,7 @@ async function executeCoreSubagentToolAdapterV1(
 
             // Parent and child use the same typed, metadata-only recovery journal.
             if (ok) {
-              toolRecovery = recordToolOwnedProgressV1(toolRecovery, {
+              toolRecovery = recordToolOwnedProgress(toolRecovery, {
                 kind: 'receipt',
                 referenceId: tc.id ?? `subagent-${toolCallCount}`,
                 ...(recoveryOf ? { resolvesFailureIds: [recoveryOf] } : {}),
@@ -1208,8 +1208,8 @@ async function executeCoreSubagentToolAdapterV1(
               const parseFailureCode = !parsedPreflight?.ok
                 ? (parsedPreflight?.request.parseFailureCode ?? 'invalid_arguments')
                 : undefined;
-              const readOnly = isReadOnlyCapabilityV1(builtinEntry);
-              failureOutcome = classifyToolOutcomeV1({
+              const readOnly = isReadOnlyCapability(builtinEntry);
+              failureOutcome = classifyToolOutcome({
                 status: roleCeilingDenied ? 'rejected' : 'failed',
                 failure: classifyFailure(
                   parseFailureCode
@@ -1231,10 +1231,10 @@ async function executeCoreSubagentToolAdapterV1(
                   ...(roleCeilingDenied ? { policyDenied: true } : {}),
                 },
                 ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
-                toolAdvice: executionResult?.classifierAdviceV1,
+                toolAdvice: executionResult?.classifierAdvice,
                 classifierDiagnostic: executionResult?.classifierDiagnostic,
               });
-              toolRecovery = recordRecoveryFailureV1(toolRecovery, {
+              toolRecovery = recordRecoveryFailure(toolRecovery, {
                 toolCallId: tc.id ?? `subagent-${toolCallCount}`,
                 toolName: tc.name,
                 invocationFingerprint,

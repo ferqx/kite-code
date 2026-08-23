@@ -1,48 +1,45 @@
-import {
-  createModelSecretDetectorV1,
-  type ModelSecretInspectionV1,
-} from '@kite/builtin-runtime/model';
-import type { ModelProviderDispatchPurposeV1 } from '@kite/runtime-spi';
+import { createModelSecretDetector, type ModelSecretInspection } from '@kite/builtin-runtime/model';
+import type { ModelProviderDispatchPurpose } from '@kite/runtime-spi';
 import type { AgentConfig } from './index';
 
-export type ProviderPayloadKindV1 = 'user_prompt' | 'file_snippet' | 'tool_result' | 'summary';
-export type ProviderDispatchPurposeV1 = ModelProviderDispatchPurposeV1;
+export type ProviderPayloadKind = 'user_prompt' | 'file_snippet' | 'tool_result' | 'summary';
+export type ProviderDispatchPurpose = ModelProviderDispatchPurpose;
 
-export interface WorkspaceDataLabelV1 {
+export interface WorkspaceDataLabel {
   classification: 'public' | 'internal' | 'confidential' | 'secret';
   source: 'artifact' | 'admin' | 'project_raise_only' | 'runtime_secret_detector';
   provenance: 'user_prompt' | 'workspace_file' | 'tool_result' | 'generated_summary';
   canonicalPathDigest?: string;
 }
 
-export interface ProviderPayloadPartV1 {
-  kind: ProviderPayloadKindV1;
+export interface ProviderPayloadPart {
+  kind: ProviderPayloadKind;
   text: string;
-  label: WorkspaceDataLabelV1;
+  label: WorkspaceDataLabel;
 }
 
-export type ProviderDataAdmissionReasonV1 =
+export type ProviderDataAdmissionReason =
   | 'admitted'
   | 'mandatory_policy_unavailable'
   | 'provider_content_inspection_unknown'
   | 'provider_secret_denied';
 
-export interface ProviderDataAdmissionDecisionV1 {
+export interface ProviderDataAdmissionDecision {
   admitted: boolean;
-  reason: ProviderDataAdmissionReasonV1;
+  reason: ProviderDataAdmissionReason;
   routeAlias: string;
   admissionRevision?: string;
 }
 
-export type SessionLoggingContentInspectorV1 = (input: {
+export type SessionLoggingContentInspector = (input: {
   text: string;
   provenance: 'user_message' | 'model_visible_answer';
-}) => ModelSecretInspectionV1;
+}) => ModelSecretInspection;
 
-export type ProviderDataAdmissionGateV1 = (
-  payload: ProviderPayloadPartV1[],
-  purpose?: ProviderDispatchPurposeV1,
-) => ProviderDataAdmissionDecisionV1;
+export type ProviderDataAdmissionGate = (
+  payload: ProviderPayloadPart[],
+  purpose?: ProviderDispatchPurpose,
+) => ProviderDataAdmissionDecision;
 
 const SECRET_PATTERNS = [
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
@@ -52,7 +49,7 @@ const SECRET_PATTERNS = [
 const PROTECTED_PATH_PATTERN =
   /(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|\.ssh|\.aws|\.kube|credentials?|secrets?)(?:$|[/\\])/i;
 
-function hasSecretMarker(part: ProviderPayloadPartV1): boolean {
+function hasSecretMarker(part: ProviderPayloadPart): boolean {
   return (
     part.label.classification === 'secret' ||
     part.label.source === 'runtime_secret_detector' ||
@@ -66,7 +63,7 @@ function routeAlias(config: AgentConfig): string {
 }
 
 /** Fail closed only when the production composition omitted this required boundary. */
-export const denyMissingProviderDataAdmissionV1: ProviderDataAdmissionGateV1 = () => ({
+export const denyMissingProviderDataAdmission: ProviderDataAdmissionGate = () => ({
   admitted: false,
   reason: 'mandatory_policy_unavailable',
   routeAlias: 'unresolved',
@@ -76,20 +73,20 @@ export const denyMissingProviderDataAdmissionV1: ProviderDataAdmissionGateV1 = (
  * Admit the provider selected by the user's resolved configuration while
  * keeping raw credential material and obvious local secrets out of payloads.
  */
-export function createApprovedProviderDataAdmissionV1(
+export function createApprovedProviderDataAdmission(
   config: AgentConfig,
   _loadedAt = new Date(),
-  contentInspector: SessionLoggingContentInspectorV1 = createModelSecretDetectorV1({
+  contentInspector: SessionLoggingContentInspector = createModelSecretDetector({
     knownSecrets: [config.apiKey],
   }),
-): ProviderDataAdmissionGateV1 {
+): ProviderDataAdmissionGate {
   const alias = routeAlias(config);
   return (payload) => {
     if (payload.some(hasSecretMarker)) {
       return { admitted: false, reason: 'provider_secret_denied', routeAlias: alias };
     }
     for (const part of payload) {
-      let verdict: ModelSecretInspectionV1['verdict'] = 'unknown';
+      let verdict: ModelSecretInspection['verdict'] = 'unknown';
       try {
         verdict = contentInspector({
           text: part.text,
@@ -119,5 +116,5 @@ export function createApprovedProviderDataAdmissionV1(
 
 export {
   ProviderDataAdmissionError,
-  providerPayloadFromModelPromptV1,
+  providerPayloadFromModelPrompt,
 } from '@kite/builtin-runtime/model';

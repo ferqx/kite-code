@@ -1,17 +1,19 @@
 import { sha256Hex } from './hash';
-import { hasActiveUnresolvedToolFailuresV1, isToolRecoveryQualityBlockedV1 } from './recovery';
+import { hasActiveUnresolvedToolFailures, isToolRecoveryQualityBlocked } from './recovery';
 import type {
   AgentState,
   AgentToolCallState,
-  PlanCompletionEvidenceV1,
+  PlanCompletionEvidence,
   PlanDocument,
   PlanningState,
   PlanStep,
 } from './state';
 
-export const COMPLETION_GUARD_V1 = 'completion_guard_v1' as const;
-export const COMPLETION_GUARD_V2 = 'completion_guard_v2' as const;
-export type CompletionGuardVersion = typeof COMPLETION_GUARD_V1 | typeof COMPLETION_GUARD_V2;
+export const COMPLETION_GUARD_UNPLANNED_VERSION = 'completion_guard_v1' as const;
+export const COMPLETION_GUARD_PLANNED_VERSION = 'completion_guard_v2' as const;
+export type CompletionGuardVersion =
+  | typeof COMPLETION_GUARD_UNPLANNED_VERSION
+  | typeof COMPLETION_GUARD_PLANNED_VERSION;
 
 export const COMPLETION_BLOCKER_CODES = [
   'interaction_pending',
@@ -51,22 +53,24 @@ export type CompletionNextAction =
   | 'resolve_plan_evidence'
   | 'start_new_task';
 
-export interface PlanIdentityV1 {
+export interface PlanIdentity {
   readonly planId: string;
   readonly version: number;
   readonly structuralDigest: string;
 }
 
-export interface CompletionGuardAcceptedV1 {
+export interface UnplannedCompletionGuardAccepted {
   readonly status: 'accepted';
-  readonly version: typeof COMPLETION_GUARD_V1;
+  readonly version: typeof COMPLETION_GUARD_UNPLANNED_VERSION;
 }
-export interface CompletionGuardAcceptedV2 {
+export interface PlannedCompletionGuardAccepted {
   readonly status: 'accepted';
-  readonly version: typeof COMPLETION_GUARD_V2;
-  readonly planIdentity: PlanIdentityV1;
+  readonly version: typeof COMPLETION_GUARD_PLANNED_VERSION;
+  readonly planIdentity: PlanIdentity;
 }
-export type CompletionGuardAccepted = CompletionGuardAcceptedV1 | CompletionGuardAcceptedV2;
+export type CompletionGuardAccepted =
+  | UnplannedCompletionGuardAccepted
+  | PlannedCompletionGuardAccepted;
 
 interface CompletionGuardBlockedBase {
   readonly status: 'blocked';
@@ -76,17 +80,23 @@ interface CompletionGuardBlockedBase {
   readonly correctionAttempt: number;
   readonly canCorrect: boolean;
 }
-export interface CompletionGuardBlockedV1 extends CompletionGuardBlockedBase {
-  readonly version: typeof COMPLETION_GUARD_V1;
+export interface UnplannedCompletionGuardBlocked extends CompletionGuardBlockedBase {
+  readonly version: typeof COMPLETION_GUARD_UNPLANNED_VERSION;
 }
-export interface CompletionGuardBlockedV2 extends CompletionGuardBlockedBase {
-  readonly version: typeof COMPLETION_GUARD_V2;
-  readonly planIdentity: PlanIdentityV1;
+export interface PlannedCompletionGuardBlocked extends CompletionGuardBlockedBase {
+  readonly version: typeof COMPLETION_GUARD_PLANNED_VERSION;
+  readonly planIdentity: PlanIdentity;
 }
-export type CompletionGuardBlocked = CompletionGuardBlockedV1 | CompletionGuardBlockedV2;
+export type CompletionGuardBlocked =
+  | UnplannedCompletionGuardBlocked
+  | PlannedCompletionGuardBlocked;
 export type CompletionGuardDecision = CompletionGuardAccepted | CompletionGuardBlocked;
-export type CompletionGuardDecisionV1 = CompletionGuardAcceptedV1 | CompletionGuardBlockedV1;
-export type CompletionGuardDecisionV2 = CompletionGuardAcceptedV2 | CompletionGuardBlockedV2;
+export type UnplannedCompletionGuardDecision =
+  | UnplannedCompletionGuardAccepted
+  | UnplannedCompletionGuardBlocked;
+export type PlannedCompletionGuardDecision =
+  | PlannedCompletionGuardAccepted
+  | PlannedCompletionGuardBlocked;
 
 const NON_TERMINAL_TOOL_STATUSES = new Set<AgentToolCallState['status']>([
   'queued',
@@ -138,7 +148,7 @@ function planStructuralDigest(
   );
 }
 
-function isPlanStepV2(value: unknown): value is PlanStep {
+function isPlanStep(value: unknown): value is PlanStep {
   if (!isRecord(value)) return false;
   const keys = Object.hasOwn(value, 'note')
     ? ['id', 'title', 'status', 'note']
@@ -160,7 +170,7 @@ function isPlanStepV2(value: unknown): value is PlanStep {
   );
 }
 
-function isPlanCompletionEvidenceV1(value: unknown): value is PlanCompletionEvidenceV1 {
+function isPlanCompletionEvidence(value: unknown): value is PlanCompletionEvidence {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['schemaVersion', 'verification', 'execution', 'skipped', 'unresolved']) ||
@@ -209,7 +219,7 @@ function isPlanCompletionEvidenceV1(value: unknown): value is PlanCompletionEvid
   );
 }
 
-function isPlanArtifactRefV2(value: unknown, plan: PlanDocument): boolean {
+function isPlanArtifactRef(value: unknown, plan: PlanDocument): boolean {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -242,7 +252,7 @@ function isPlanArtifactRefV2(value: unknown, plan: PlanDocument): boolean {
   );
 }
 
-function isPlanDocumentV2(value: unknown): value is PlanDocument {
+function isPlanDocument(value: unknown): value is PlanDocument {
   if (!isRecord(value)) return false;
   if (
     !hasOnlyKeys(value, [
@@ -277,7 +287,7 @@ function isPlanDocumentV2(value: unknown): value is PlanDocument {
     !Array.isArray(value.steps) ||
     value.steps.length < 1 ||
     value.steps.length > 12 ||
-    !value.steps.every(isPlanStepV2) ||
+    !value.steps.every(isPlanStep) ||
     new Set(value.steps.map((step) => (step as PlanStep).id)).size !== value.steps.length ||
     typeof value.structuralDigest !== 'string' ||
     !SHA256_DIGEST.test(value.structuralDigest) ||
@@ -285,7 +295,7 @@ function isPlanDocumentV2(value: unknown): value is PlanDocument {
     value.createdAtTurnId.length < 1 ||
     typeof value.updatedAtTurnId !== 'string' ||
     value.updatedAtTurnId.length < 1 ||
-    !isPlanCompletionEvidenceV1(value.completionEvidence) ||
+    !isPlanCompletionEvidence(value.completionEvidence) ||
     (value.supersedesPlanVersion !== undefined &&
       (!Number.isInteger(value.supersedesPlanVersion) ||
         (value.supersedesPlanVersion as number) < 1)) ||
@@ -297,7 +307,7 @@ function isPlanDocumentV2(value: unknown): value is PlanDocument {
   const plan = value as unknown as PlanDocument;
   return (
     planStructuralDigest(plan) === plan.structuralDigest &&
-    (value.artifact === undefined || isPlanArtifactRefV2(value.artifact, plan))
+    (value.artifact === undefined || isPlanArtifactRef(value.artifact, plan))
   );
 }
 
@@ -341,7 +351,7 @@ function activeSkillFramesForCurrentWork(state: AgentState): boolean {
   );
 }
 
-function samePlanIdentity(left: PlanIdentityV1 | undefined, right: PlanIdentityV1): boolean {
+function samePlanIdentity(left: PlanIdentity | undefined, right: PlanIdentity): boolean {
   return (
     left?.planId === right.planId &&
     left.version === right.version &&
@@ -349,26 +359,26 @@ function samePlanIdentity(left: PlanIdentityV1 | undefined, right: PlanIdentityV
   );
 }
 
-function correctionAttemptV1(state: AgentState): number {
-  return state.completionGuard.guardVersion === COMPLETION_GUARD_V2
+function unplannedCorrectionAttempt(state: AgentState): number {
+  return state.completionGuard.guardVersion === COMPLETION_GUARD_PLANNED_VERSION
     ? 1
     : state.completionGuard.correctionAttempts + 1;
 }
 
-function correctionAttemptV2(state: AgentState, planIdentity: PlanIdentityV1): number {
-  return state.completionGuard.guardVersion === COMPLETION_GUARD_V2 &&
+function plannedCorrectionAttempt(state: AgentState, planIdentity: PlanIdentity): number {
+  return state.completionGuard.guardVersion === COMPLETION_GUARD_PLANNED_VERSION &&
     samePlanIdentity(state.completionGuard.planIdentity, planIdentity)
     ? state.completionGuard.correctionAttempts + 1
     : 1;
 }
 
-function blockedV1(
+function blockedUnplannedCompletion(
   state: AgentState,
   planning: PlanningState['kind'],
   code: CompletionBlockerCode,
   nextAction: CompletionNextAction,
-): CompletionGuardBlockedV1 {
-  const correctionAttempt = correctionAttemptV1(state);
+): UnplannedCompletionGuardBlocked {
+  const correctionAttempt = unplannedCorrectionAttempt(state);
   const current = activePlanning(state);
   const reviewedDraftCanPause =
     code === 'plan_draft_pending' &&
@@ -376,7 +386,7 @@ function blockedV1(
     current.revisionFeedback != null;
   return {
     status: 'blocked',
-    version: COMPLETION_GUARD_V1,
+    version: COMPLETION_GUARD_UNPLANNED_VERSION,
     code,
     nextAction,
     planning,
@@ -385,14 +395,14 @@ function blockedV1(
   };
 }
 
-function blockedV2(
+function blockedPlannedCompletion(
   state: AgentState,
   planning: PlanningState['kind'],
-  planIdentity: PlanIdentityV1,
+  planIdentity: PlanIdentity,
   code: CompletionBlockerCode,
   nextAction: CompletionNextAction,
-): CompletionGuardBlockedV2 {
-  const correctionAttempt = correctionAttemptV2(state, planIdentity);
+): PlannedCompletionGuardBlocked {
+  const correctionAttempt = plannedCorrectionAttempt(state, planIdentity);
   const current = activePlanning(state);
   const reviewedDraftCanPause =
     code === 'plan_draft_pending' &&
@@ -400,7 +410,7 @@ function blockedV2(
     current.revisionFeedback != null;
   return {
     status: 'blocked',
-    version: COMPLETION_GUARD_V2,
+    version: COMPLETION_GUARD_PLANNED_VERSION,
     code,
     nextAction,
     planning,
@@ -410,49 +420,69 @@ function blockedV2(
   };
 }
 
-function commonBlocker(state: AgentState): CompletionGuardBlockedV1 | undefined {
+function commonBlocker(state: AgentState): UnplannedCompletionGuardBlocked | undefined {
   const planning = activePlanning(state).kind;
   if (state.interactions.kind !== 'idle')
-    return blockedV1(state, planning, 'interaction_pending', 'wait_for_interaction');
+    return blockedUnplannedCompletion(
+      state,
+      planning,
+      'interaction_pending',
+      'wait_for_interaction',
+    );
   if (hasCurrentNonTerminalTool(state))
-    return blockedV1(state, planning, 'tool_pending', 'wait_for_tool');
+    return blockedUnplannedCompletion(state, planning, 'tool_pending', 'wait_for_tool');
   if (hasCurrentSuspendedSubagent(state))
-    return blockedV1(state, planning, 'subagent_suspended', 'wait_for_subagent');
+    return blockedUnplannedCompletion(state, planning, 'subagent_suspended', 'wait_for_subagent');
   if (
     Object.values(state.capabilities.invocations).some(
       (invocation) => invocation.status === 'unknown',
     )
   )
-    return blockedV1(state, planning, 'unknown_external_invocation', 'reconcile_invocation');
+    return blockedUnplannedCompletion(
+      state,
+      planning,
+      'unknown_external_invocation',
+      'reconcile_invocation',
+    );
   if (activeSkillFramesForCurrentWork(state))
-    return blockedV1(state, planning, 'skill_active', 'complete_skill');
+    return blockedUnplannedCompletion(state, planning, 'skill_active', 'complete_skill');
   return undefined;
 }
 
-export function decideCompletionV1(state: AgentState): CompletionGuardDecisionV1 {
+export function decideUnplannedCompletion(state: AgentState): UnplannedCompletionGuardDecision {
   const planning = activePlanning(state);
   const common = commonBlocker(state);
   if (common) return common;
   switch (planning.kind) {
     case 'building_without_plan':
     case 'completed':
-      return { status: 'accepted', version: COMPLETION_GUARD_V1 };
+      return { status: 'accepted', version: COMPLETION_GUARD_UNPLANNED_VERSION };
     case 'planning_empty':
-      return blockedV1(state, planning.kind, 'planning_empty', 'save_plan');
+      return blockedUnplannedCompletion(state, planning.kind, 'planning_empty', 'save_plan');
     case 'planning_draft':
     case 'replanning_draft':
-      return blockedV1(state, planning.kind, 'plan_draft_pending', 'submit_plan');
+      return blockedUnplannedCompletion(state, planning.kind, 'plan_draft_pending', 'submit_plan');
     case 'awaiting_review':
-      return blockedV1(state, planning.kind, 'plan_review_pending', 'wait_for_review');
+      return blockedUnplannedCompletion(
+        state,
+        planning.kind,
+        'plan_review_pending',
+        'wait_for_review',
+      );
     case 'executing':
-      return blockedV1(state, planning.kind, 'plan_execution_incomplete', 'complete_plan');
+      return blockedUnplannedCompletion(
+        state,
+        planning.kind,
+        'plan_execution_incomplete',
+        'complete_plan',
+      );
     case 'cancelled':
-      return blockedV1(state, planning.kind, 'plan_cancelled', 'start_new_task');
+      return blockedUnplannedCompletion(state, planning.kind, 'plan_cancelled', 'start_new_task');
   }
 }
 
 function isResolvedRecoveryFailure(state: AgentState, call: AgentToolCallState): boolean {
-  const failureInstanceId = call.outcomeV1?.lineage?.failureInstanceId;
+  const failureInstanceId = call.outcome?.lineage?.failureInstanceId;
   return (
     failureInstanceId != null &&
     state.toolRecovery.failures[failureInstanceId]?.status === 'recovered'
@@ -481,11 +511,11 @@ function relevantPendingCalls(state: AgentState): AgentToolCallState[] {
   );
 }
 
-export function projectPlanCompletionEvidenceV1(
+export function projectPlanCompletionEvidence(
   state: AgentState,
   steps: readonly PlanStep[],
   skippedReasonCodes: Readonly<Record<string, string>> = {},
-): PlanCompletionEvidenceV1 {
+): PlanCompletionEvidence {
   const planning = activePlanning(state);
   const previous = planning.kind === 'executing' ? planning.document.completionEvidence : undefined;
   const priorSkipped = new Map(
@@ -508,7 +538,7 @@ export function projectPlanCompletionEvidenceV1(
     .sort((left, right) => left.toolCallId.localeCompare(right.toolCallId));
   const unresolved = Object.values(state.tools.calls)
     .filter((call) => belongsToActiveTask(state, call))
-    .reduce<Array<PlanCompletionEvidenceV1['unresolved'][number]>>((entries, call) => {
+    .reduce<Array<PlanCompletionEvidence['unresolved'][number]>>((entries, call) => {
       if (call.status === 'awaiting_approval')
         entries.push({ kind: 'approval', referenceId: call.toolCallId });
       if (
@@ -541,7 +571,7 @@ export type PlanCompletionBlocker =
 
 export function planCompletionBlocker(
   state: AgentState,
-  evidence: PlanCompletionEvidenceV1,
+  evidence: PlanCompletionEvidence,
 ): PlanCompletionBlocker | null {
   if (state.interactions.kind !== 'idle' || relevantPendingCalls(state).length > 0)
     return 'plan_unresolved_blocker';
@@ -576,19 +606,19 @@ export function planCompletionBlocker(
 export function planCompletionEvidenceMatchesRuntime(
   state: AgentState,
   steps: readonly PlanStep[],
-  evidence: PlanCompletionEvidenceV1,
+  evidence: PlanCompletionEvidence,
 ): boolean {
-  if (!isPlanCompletionEvidenceV1(evidence)) return false;
+  if (!isPlanCompletionEvidence(evidence)) return false;
   const reasonCodes = Object.fromEntries(
     evidence.skipped.map((entry) => [entry.stepId, entry.reasonCode]),
   );
   return (
-    JSON.stringify(projectPlanCompletionEvidenceV1(state, steps, reasonCodes)) ===
+    JSON.stringify(projectPlanCompletionEvidence(state, steps, reasonCodes)) ===
     JSON.stringify(evidence)
   );
 }
 
-export function emptyPlanCompletionEvidenceV1(): PlanCompletionEvidenceV1 {
+export function emptyPlanCompletionEvidence(): PlanCompletionEvidence {
   return {
     schemaVersion: 1,
     verification: [],
@@ -598,10 +628,10 @@ export function emptyPlanCompletionEvidenceV1(): PlanCompletionEvidenceV1 {
   };
 }
 
-function v2EvidenceBlocker(
+function plannedEvidenceBlocker(
   state: AgentState,
   document: PlanDocument,
-): Pick<CompletionGuardBlockedV2, 'code' | 'nextAction'> | null {
+): Pick<PlannedCompletionGuardBlocked, 'code' | 'nextAction'> | null {
   const evidence = document.completionEvidence;
   if (
     Object.values(state.verification.records).some((record) => {
@@ -630,7 +660,7 @@ function v2EvidenceBlocker(
 }
 
 /** Monotonic V2 completion decision for a canonical PlanDocument V2 lifecycle. */
-export function decideCompletionV2(state: AgentState): CompletionGuardDecisionV2 {
+export function decidePlannedCompletion(state: AgentState): PlannedCompletionGuardDecision {
   const planning = activePlanning(state);
   if (!('document' in planning) || planning.document == null)
     throw new Error('CompletionGuard V2 requires a PlanDocument V2.');
@@ -641,7 +671,7 @@ export function decideCompletionV2(state: AgentState): CompletionGuardDecisionV2
     structuralDigest: document.structuralDigest,
   };
   const block = (code: CompletionBlockerCode, nextAction: CompletionNextAction) =>
-    blockedV2(state, planning.kind, planIdentity, code, nextAction);
+    blockedPlannedCompletion(state, planning.kind, planIdentity, code, nextAction);
 
   if (state.interactions.kind !== 'idle')
     return block('interaction_pending', 'wait_for_interaction');
@@ -655,18 +685,17 @@ export function decideCompletionV2(state: AgentState): CompletionGuardDecisionV2
     return block('unknown_external_invocation', 'reconcile_invocation');
   if (activeSkillFramesForCurrentWork(state)) return block('skill_active', 'complete_skill');
   if (
-    isToolRecoveryQualityBlockedV1(state.toolRecovery, {
+    isToolRecoveryQualityBlocked(state.toolRecovery, {
       taskId: state.activeTaskId,
       turnId: state.turn.turnId,
     }) ||
-    hasActiveUnresolvedToolFailuresV1(state.toolRecovery, {
+    hasActiveUnresolvedToolFailures(state.toolRecovery, {
       taskId: state.activeTaskId,
       turnId: state.turn.turnId,
     })
   )
     return block('plan_evidence_unresolved', 'resolve_plan_evidence');
-  if (!isPlanDocumentV2(document))
-    return block('plan_evidence_unresolved', 'resolve_plan_evidence');
+  if (!isPlanDocument(document)) return block('plan_evidence_unresolved', 'resolve_plan_evidence');
 
   switch (planning.kind) {
     case 'planning_draft':
@@ -677,16 +706,16 @@ export function decideCompletionV2(state: AgentState): CompletionGuardDecisionV2
     case 'executing': {
       if (document.steps.some((step) => step.status === 'pending' || step.status === 'in_progress'))
         return block('plan_execution_incomplete', 'complete_plan');
-      const evidenceBlocker = v2EvidenceBlocker(state, document);
+      const evidenceBlocker = plannedEvidenceBlocker(state, document);
       return evidenceBlocker
         ? block(evidenceBlocker.code, evidenceBlocker.nextAction)
         : block('plan_execution_incomplete', 'complete_plan');
     }
     case 'completed': {
-      const evidenceBlocker = v2EvidenceBlocker(state, document);
+      const evidenceBlocker = plannedEvidenceBlocker(state, document);
       return evidenceBlocker
         ? block(evidenceBlocker.code, evidenceBlocker.nextAction)
-        : { status: 'accepted', version: COMPLETION_GUARD_V2, planIdentity };
+        : { status: 'accepted', version: COMPLETION_GUARD_PLANNED_VERSION, planIdentity };
     }
     case 'cancelled':
       return block('plan_cancelled', 'start_new_task');
@@ -697,6 +726,6 @@ export function decideCompletionV2(state: AgentState): CompletionGuardDecisionV2
 export function decideCompletion(state: AgentState): CompletionGuardDecision {
   const planning = activePlanning(state);
   return 'document' in planning && planning.document != null
-    ? decideCompletionV2(state)
-    : decideCompletionV1(state);
+    ? decidePlannedCompletion(state)
+    : decideUnplannedCompletion(state);
 }

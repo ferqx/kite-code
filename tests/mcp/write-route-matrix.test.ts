@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolveMcpToolPolicy } from '@kite/builtin-runtime/mcp';
 import {
-  type McpWriteRouteContractV1,
-  parseMcpWriteRouteRegistryV1,
-  qualifyMcpWriteRouteV1,
-  routeContractDigestV1,
+  type McpWriteRouteContract,
+  parseMcpWriteRouteRegistry,
+  qualifyMcpWriteRoute,
+  routeContractDigest,
 } from './write-contract-fixtures';
 
-function route(): McpWriteRouteContractV1 {
+function route(): McpWriteRouteContract {
   const policy = resolveMcpToolPolicy(
     {
       type: 'http',
@@ -46,8 +46,8 @@ function route(): McpWriteRouteContractV1 {
 
 describe('MCP write production route matrix contract', () => {
   test('loads the source-owned registry as an explicit empty support set', () => {
-    const registry = parseMcpWriteRouteRegistryV1(
-      JSON.parse(readFileSync('release/mcp-write-routes-v1.json', 'utf8')),
+    const registry = parseMcpWriteRouteRegistry(
+      JSON.parse(readFileSync('release/mcp-write-routes.json', 'utf8')),
     );
     expect(registry).toEqual({
       version: 1,
@@ -58,7 +58,7 @@ describe('MCP write production route matrix contract', () => {
 
   test('the repository-local matrix is empty and formal evidence is not observed', () => {
     expect(
-      qualifyMcpWriteRouteV1({
+      qualifyMcpWriteRoute({
         formalTaskEvidence: 'not_observed',
         duplicateSideEffects: 0,
         unauthorizedSideEffects: 0,
@@ -73,11 +73,11 @@ describe('MCP write production route matrix contract', () => {
 
   test('route, schema, tool or policy drift revokes qualification', () => {
     const contract = route();
-    const observed = routeContractDigestV1(contract);
+    const observed = routeContractDigest(contract);
     const drifted = { ...contract, toolRevision: 'tool-v2' };
-    expect(routeContractDigestV1(drifted)).not.toBe(observed);
+    expect(routeContractDigest(drifted)).not.toBe(observed);
     expect(
-      qualifyMcpWriteRouteV1({
+      qualifyMcpWriteRoute({
         route: drifted,
         observedRouteDigest: observed,
         formalTaskEvidence: 'passed',
@@ -91,9 +91,9 @@ describe('MCP write production route matrix contract', () => {
 
   test('duplicate, unauthorized or data-boundary effects force the route off', () => {
     const contract = route();
-    const decision = qualifyMcpWriteRouteV1({
+    const decision = qualifyMcpWriteRoute({
       route: contract,
-      observedRouteDigest: routeContractDigestV1(contract),
+      observedRouteDigest: routeContractDigest(contract),
       formalTaskEvidence: 'passed',
       duplicateSideEffects: 1,
       unauthorizedSideEffects: 0,
@@ -106,7 +106,7 @@ describe('MCP write production route matrix contract', () => {
   test('rejects malformed nested effects and retry/reconciliation enums at runtime', () => {
     const contract = route();
     expect(() =>
-      parseMcpWriteRouteRegistryV1({
+      parseMcpWriteRouteRegistry({
         version: 1,
         registryId: 'invalid-effects',
         routes: [
@@ -118,14 +118,14 @@ describe('MCP write production route matrix contract', () => {
       }),
     ).toThrow('exact EffectProfile');
     expect(() =>
-      parseMcpWriteRouteRegistryV1({
+      parseMcpWriteRouteRegistry({
         version: 1,
         registryId: 'invalid-idempotency',
         routes: [{ ...contract, idempotency: 'blind-retry' }],
       }),
     ).toThrow('idempotency policy');
     expect(() =>
-      parseMcpWriteRouteRegistryV1({
+      parseMcpWriteRouteRegistry({
         version: 1,
         registryId: 'invalid-reconciliation',
         routes: [{ ...contract, reconciliation: 'unsupported' }],

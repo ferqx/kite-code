@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  decideReadPlanCommandV1,
-  decideUpdatePlanCommandV1,
-  decideWritePlanCommandV1,
-  type PlanCommandStateFactsV1,
-  planCommandPhaseV1,
+  decideReadPlanCommand,
+  decideUpdatePlanCommand,
+  decideWritePlanCommand,
+  type PlanCommandStateFacts,
+  planCommandPhase,
 } from '../src/plan-command';
 import type { PlanDocument, PlanningState } from '../src/state';
 
@@ -37,12 +37,12 @@ function document(overrides: Partial<PlanDocument> = {}): PlanDocument {
 
 function facts(
   planning: PlanningState,
-  overrides: Partial<PlanCommandStateFactsV1> = {},
-): PlanCommandStateFactsV1 {
+  overrides: Partial<PlanCommandStateFacts> = {},
+): PlanCommandStateFacts {
   return {
     taskId: 'task-1',
     planning,
-    phase: planCommandPhaseV1(planning),
+    phase: planCommandPhase(planning),
     sideEffectsStarted: false,
     ...overrides,
   };
@@ -59,14 +59,14 @@ describe('Kernel plan-command admission', () => {
   test('read admits the active identity and rejects digest drift before artifact access', () => {
     const planning: PlanningState = { kind: 'planning_draft', document: document() };
     expect(
-      decideReadPlanCommandV1(facts(planning), {
+      decideReadPlanCommand(facts(planning), {
         plan_id: 'plan-1',
         version: 1,
         structural_digest: digest,
       }),
     ).toEqual({ accepted: true, mode: 'read_artifact', code: 'admitted' });
     expect(
-      decideReadPlanCommandV1(facts(planning), {
+      decideReadPlanCommand(facts(planning), {
         plan_id: 'plan-1',
         version: 1,
         structural_digest: 'b'.repeat(64),
@@ -79,24 +79,26 @@ describe('Kernel plan-command admission', () => {
   });
 
   test('write covers auto-enter, initial save, submit, replan, and identity/side-effect gates', () => {
-    expect(
-      decideWritePlanCommandV1(facts({ kind: 'building_without_plan' }), saveDocument),
-    ).toEqual({ accepted: true, mode: 'auto_enter', code: 'admitted' });
+    expect(decideWritePlanCommand(facts({ kind: 'building_without_plan' }), saveDocument)).toEqual({
+      accepted: true,
+      mode: 'auto_enter',
+      code: 'admitted',
+    });
 
     const draft = document();
-    expect(decideWritePlanCommandV1(facts({ kind: 'planning_empty' }), saveDocument)).toEqual({
+    expect(decideWritePlanCommand(facts({ kind: 'planning_empty' }), saveDocument)).toEqual({
       accepted: true,
       mode: 'draft_save',
       code: 'admitted',
     });
     expect(
-      decideWritePlanCommandV1(facts({ kind: 'planning_draft', document: draft }), {
+      decideWritePlanCommand(facts({ kind: 'planning_draft', document: draft }), {
         ...saveDocument,
         title: 'Updated runtime plan',
       }),
     ).toMatchObject({ accepted: false, code: 'plan_identity_required' });
     expect(
-      decideWritePlanCommandV1(facts({ kind: 'planning_draft', document: draft }), {
+      decideWritePlanCommand(facts({ kind: 'planning_draft', document: draft }), {
         ...saveDocument,
         plan_id: 'plan-1',
         version: 1,
@@ -104,7 +106,7 @@ describe('Kernel plan-command admission', () => {
       }),
     ).toMatchObject({ accepted: false, code: 'plan_identity_mismatch' });
     expect(
-      decideWritePlanCommandV1(facts({ kind: 'planning_draft', document: draft }), {
+      decideWritePlanCommand(facts({ kind: 'planning_draft', document: draft }), {
         action: 'submit',
         plan_id: 'plan-1',
         version: 1,
@@ -112,7 +114,7 @@ describe('Kernel plan-command admission', () => {
       }),
     ).toEqual({ accepted: true, mode: 'submit_existing', code: 'admitted' });
     expect(
-      decideWritePlanCommandV1(
+      decideWritePlanCommand(
         facts({ kind: 'planning_empty' }, { sideEffectsStarted: true }),
         saveDocument,
       ),
@@ -125,7 +127,7 @@ describe('Kernel plan-command admission', () => {
       approvedAtTurnId: 'turn-2',
     };
     expect(
-      decideWritePlanCommandV1(facts(executing), {
+      decideWritePlanCommand(facts(executing), {
         ...saveDocument,
         plan_id: 'plan-1',
         version: 1,
@@ -140,7 +142,7 @@ describe('Kernel plan-command admission', () => {
       replanReason: 'retry',
     };
     expect(
-      decideWritePlanCommandV1(facts(replan), {
+      decideWritePlanCommand(facts(replan), {
         action: 'submit',
         plan_id: 'plan-1',
         version: 2,
@@ -163,22 +165,22 @@ describe('Kernel plan-command admission', () => {
     };
     const identity = { plan_id: 'plan-1', version: 1, structural_digest: digest };
     expect(
-      decideUpdatePlanCommandV1(facts(executing), {
+      decideUpdatePlanCommand(facts(executing), {
         ...identity,
         updates: [{ step_id: 'implement', status: 'completed' }],
       }),
     ).toMatchObject({ accepted: true, mode: 'progress_update', code: 'admitted' });
     expect(
-      decideUpdatePlanCommandV1(facts({ kind: 'planning_empty' }), { ...identity, updates: [] }),
+      decideUpdatePlanCommand(facts({ kind: 'planning_empty' }), { ...identity, updates: [] }),
     ).toMatchObject({ accepted: false, code: 'update_plan_phase' });
     expect(
-      decideUpdatePlanCommandV1(facts(executing), {
+      decideUpdatePlanCommand(facts(executing), {
         plan_id: 'plan-1',
         updates: [],
       }),
     ).toMatchObject({ accepted: false, code: 'plan_identity_required' });
     expect(
-      decideUpdatePlanCommandV1(facts(executing), {
+      decideUpdatePlanCommand(facts(executing), {
         ...identity,
         updates: [
           { step_id: 'implement', status: 'completed' },
@@ -187,26 +189,26 @@ describe('Kernel plan-command admission', () => {
       }),
     ).toMatchObject({ accepted: false, code: 'plan_duplicate_step_update' });
     expect(
-      decideUpdatePlanCommandV1(facts(executing), {
+      decideUpdatePlanCommand(facts(executing), {
         ...identity,
         updates: [{ step_id: 'missing', status: 'completed' }],
       }),
     ).toMatchObject({ accepted: false, code: 'plan_unknown_step' });
     expect(
-      decideUpdatePlanCommandV1(facts(executing), {
+      decideUpdatePlanCommand(facts(executing), {
         ...identity,
         updates: [{ step_id: 'inspect', status: 'pending' }],
       }),
     ).toMatchObject({ accepted: false, code: 'plan_terminal_step_rollback' });
     expect(
-      decideUpdatePlanCommandV1(facts(executing), {
+      decideUpdatePlanCommand(facts(executing), {
         ...identity,
         updates: [],
         complete_plan: true,
       }),
     ).toMatchObject({ accepted: false, code: 'plan_pending_steps' });
     expect(
-      decideUpdatePlanCommandV1(
+      decideUpdatePlanCommand(
         facts({
           kind: 'executing',
           document: document({

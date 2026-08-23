@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeCheckpointEntryV1 as RuntimeSnapshotEntry } from '@kite/runtime-host/storage';
+import type { RuntimeCheckpointEntry as RuntimeSnapshotEntry } from '@kite/runtime-host/storage';
 import { render } from 'ink-testing-library';
 import type { MutableRefObject } from 'react';
 import type { FileRestorePreview } from '../apps/kite/src/bootstrap/runtime/file-checkpoints';

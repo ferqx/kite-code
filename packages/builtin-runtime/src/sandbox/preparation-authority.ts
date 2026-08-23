@@ -1,12 +1,12 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { SandboxPreparationV1 } from '@kite/runtime-spi';
+import type { SandboxPreparation } from '@kite/runtime-spi';
 import { checkDangerousPaths } from './dangerous-paths';
-import { sandboxCommandDigestV1 } from './execution/grant-authority';
-import type { SandboxInvocationIdentityV1, ShellInput } from './shell-contract';
+import { sandboxCommandDigest } from './execution/grant-authority';
+import type { SandboxInvocationIdentity, ShellInput } from './shell-contract';
 import {
-  buildHostShellInvocationsV1,
-  buildPolicyProvenReadOnlyHostShellInvocationsV1,
+  buildHostShellInvocations,
+  buildPolicyProvenReadOnlyHostShellInvocations,
   resolveShellTimeoutMs,
 } from './shell-executor';
 import { POLICY_PROVEN_READ_ONLY_EXECUTION } from './trusted-readonly-environment';
@@ -17,24 +17,24 @@ import {
   type ShellNetworkMode,
 } from './types';
 
-export type BuiltinSandboxPreparationErrorCodeV1 =
+export type BuiltinSandboxPreparationErrorCode =
   | 'workspace_unavailable'
   | 'workspace_mismatch'
   | 'protected_path'
   | 'shell_unavailable';
 
-export class BuiltinSandboxPreparationErrorV1 extends Error {
-  readonly code: BuiltinSandboxPreparationErrorCodeV1;
+export class BuiltinSandboxPreparationError extends Error {
+  readonly code: BuiltinSandboxPreparationErrorCode;
 
-  constructor(code: BuiltinSandboxPreparationErrorCodeV1, message: string) {
+  constructor(code: BuiltinSandboxPreparationErrorCode, message: string) {
     super(message);
-    this.name = 'BuiltinSandboxPreparationErrorV1';
+    this.name = 'BuiltinSandboxPreparationError';
     this.code = code;
   }
 }
 
-export interface BuiltinSandboxPreparationInputV1 {
-  readonly identity: SandboxInvocationIdentityV1;
+export interface BuiltinSandboxPreparationInput {
+  readonly identity: SandboxInvocationIdentity;
   readonly canonicalWorkspace: string;
   readonly workspace: string;
   readonly command: string;
@@ -48,9 +48,9 @@ export interface BuiltinSandboxPreparationInputV1 {
   readonly timeoutMs?: number;
 }
 
-export interface BuiltinSandboxPreparationResultV1 {
+export interface BuiltinSandboxPreparationResult {
   readonly canonicalWorkspace: string;
-  readonly preparation: SandboxPreparationV1;
+  readonly preparation: SandboxPreparation;
 }
 
 /**
@@ -58,22 +58,22 @@ export interface BuiltinSandboxPreparationResultV1 {
  * lifecycle acknowledgement, provider allocation, persistence, or process
  * execution; those remain injected seams owned by Runtime/App composition.
  */
-export function createBuiltinSandboxPreparationV1(
-  input: BuiltinSandboxPreparationInputV1,
-): BuiltinSandboxPreparationResultV1 {
+export function createBuiltinSandboxPreparation(
+  input: BuiltinSandboxPreparationInput,
+): BuiltinSandboxPreparationResult {
   let canonicalWorkspace: string;
   let invocationWorkspace: string;
   try {
     canonicalWorkspace = realpathSync.native(resolve(input.canonicalWorkspace));
     invocationWorkspace = realpathSync.native(resolve(input.workspace));
   } catch (error) {
-    throw new BuiltinSandboxPreparationErrorV1(
+    throw new BuiltinSandboxPreparationError(
       'workspace_unavailable',
       error instanceof Error ? error.message : String(error),
     );
   }
   if (canonicalWorkspace !== invocationWorkspace) {
-    throw new BuiltinSandboxPreparationErrorV1(
+    throw new BuiltinSandboxPreparationError(
       'workspace_mismatch',
       'Sandbox invocation Workspace mismatch.',
     );
@@ -81,7 +81,7 @@ export function createBuiltinSandboxPreparationV1(
 
   const deniedPath = checkDangerousPaths(input.command);
   if (deniedPath) {
-    throw new BuiltinSandboxPreparationErrorV1(
+    throw new BuiltinSandboxPreparationError(
       'protected_path',
       `Rejected: command references protected path '${deniedPath}'`,
     );
@@ -89,11 +89,11 @@ export function createBuiltinSandboxPreparationV1(
 
   const candidates =
     input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION
-      ? buildPolicyProvenReadOnlyHostShellInvocationsV1(input.command, input.workspace)
-      : buildHostShellInvocationsV1(input.command);
+      ? buildPolicyProvenReadOnlyHostShellInvocations(input.command, input.workspace)
+      : buildHostShellInvocations(input.command);
   const argv = candidates[0]?.argv;
   if (!argv) {
-    throw new BuiltinSandboxPreparationErrorV1(
+    throw new BuiltinSandboxPreparationError(
       'shell_unavailable',
       'No trusted shell interpreter is available.',
     );
@@ -111,7 +111,7 @@ export function createBuiltinSandboxPreparationV1(
     admissionDigest: input.identity.admissionDigest,
     canonicalWorkspace,
     argv: Object.freeze([...argv]),
-    commandDigest: sandboxCommandDigestV1(argv),
+    commandDigest: sandboxCommandDigest(argv),
     executionBoundaryDigest: input.executionBoundaryDigest,
     protectedPathRevision: input.protectedPathRevision,
     filesystemMode: input.filesystemMode ?? 'workspace_only',

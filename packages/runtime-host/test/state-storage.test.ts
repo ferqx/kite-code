@@ -5,7 +5,7 @@ import {
   encodeCurrentAgentStateJson,
   type RuntimeEvent,
 } from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBindingV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
 
 const RECOVERY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
@@ -21,7 +21,7 @@ function state(): AgentState {
 
 describe('Runtime Host State storage binding', () => {
   test('owns exact event/state bytes and the session summary projection', () => {
-    const binding = createRuntimeHostStateStorageBindingV1();
+    const binding = createRuntimeHostStateStorageBinding();
     const event: RuntimeEvent = {
       type: 'user.message_appended',
       messageId: 'message-1',
@@ -45,7 +45,7 @@ describe('Runtime Host State storage binding', () => {
   });
 
   test('fails closed on snapshot identity and preserves fork/request semantics', () => {
-    const binding = createRuntimeHostStateStorageBindingV1();
+    const binding = createRuntimeHostStateStorageBinding();
     const currentState = state();
     const valid = {
       state: currentState,

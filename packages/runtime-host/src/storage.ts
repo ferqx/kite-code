@@ -6,15 +6,15 @@
  * and RuntimeEvent types at the App composition root.
  */
 
-export interface RuntimeStorageBoundaryV1 {
+export interface RuntimeStorageBoundary {
   readonly adapterId: string;
   readonly stateSchemaVersion: number;
   readonly storeSchemaVersion: number;
-  readonly compatibilityEpoch: string;
+  readonly formatEpoch: string;
 }
 
 /** Opaque event/state codec consumed by storage adapters and owned by Host. */
-export interface RuntimeSnapshotCodecV1<Event = unknown, State = unknown> {
+export interface RuntimeSnapshotCodec<Event = unknown, State = unknown> {
   encodeEvent(event: Event): string;
   decodeEvent(json: string): Event;
   encodeState(state: State): string;
@@ -47,26 +47,26 @@ export interface RuntimeSnapshotCodecV1<Event = unknown, State = unknown> {
   isCurrentPendingInteractionRequest?(state: State, event: Event): boolean;
 }
 
-export interface RuntimeEventMetadataV1 {
+export interface RuntimeEventMetadata {
   readonly eventId: string;
   readonly revision: number;
   readonly causationId?: string;
   readonly occurredAt?: string;
 }
 
-export interface RuntimeSnapshotMetadataV1 {
+export interface RuntimeSnapshotMetadata {
   readonly eventPosition: number;
   readonly stateRevision: number;
   readonly stateChecksum: string;
   readonly schemaVersion: number;
 }
 
-export interface RuntimeRestoreBoundaryV1 {
-  readonly snapshot: RuntimeSnapshotMetadataV1 | null;
+export interface RuntimeRestoreBoundary {
+  readonly snapshot: RuntimeSnapshotMetadata | null;
   readonly lastEventPosition: number;
 }
 
-export interface StoredRuntimeEventV1<Event> {
+export interface StoredRuntimeEvent<Event> {
   readonly id: number;
   readonly thread_id: string;
   readonly event: Event;
@@ -77,19 +77,19 @@ export interface StoredRuntimeEventV1<Event> {
   readonly occurred_at?: string;
 }
 
-export interface RuntimeSessionInfoV1 {
+export interface RuntimeSessionInfo {
   readonly threadId: string;
   readonly name: string;
   readonly updatedAt: number;
   readonly needsSmartName: boolean;
 }
 
-export interface RuntimeSessionModelRouteV1 {
+export interface RuntimeSessionModelRoute {
   readonly provider: string;
   readonly name: string;
 }
 
-export interface RuntimeCheckpointEntryV1 {
+export interface RuntimeCheckpointEntry {
   readonly snapshotId: string;
   readonly eventPosition: number;
   readonly createdAt: number;
@@ -98,7 +98,7 @@ export interface RuntimeCheckpointEntryV1 {
   readonly affectedFileCount?: number;
 }
 
-export interface RuntimeFileRestoreMaterialV1 {
+export interface RuntimeFileRestoreMaterial {
   readonly path: string;
   readonly content: string | null;
   readonly existed: boolean;
@@ -107,7 +107,7 @@ export interface RuntimeFileRestoreMaterialV1 {
 }
 
 /** Host storage mechanism port used by concrete Workspace mutation executors. */
-export type RuntimeHostFilePreimageRecorderV1 = ((
+export type RuntimeHostFilePreimageRecorder = ((
   path: string,
   content: string | null,
   existed: boolean,
@@ -120,34 +120,34 @@ export interface SessionStore<Event = unknown, State = unknown> {
   appendEvents(
     sessionId: string,
     events: readonly Event[],
-    metadata?: readonly RuntimeEventMetadataV1[],
+    metadata?: readonly RuntimeEventMetadata[],
   ): void;
-  loadEventsStrict(sessionId: string, since?: number): StoredRuntimeEventV1<Event>[];
+  loadEventsStrict(sessionId: string, since?: number): StoredRuntimeEvent<Event>[];
   saveSnapshot(sessionId: string, state: State): void;
   loadSnapshot<T = State>(sessionId: string): T | null;
   loadSnapshotRecord<T = State>(
     sessionId: string,
-  ): { state: T; metadata: RuntimeSnapshotMetadataV1 } | null;
+  ): { state: T; metadata: RuntimeSnapshotMetadata } | null;
   getLastEventPosition(sessionId: string): number;
-  listSessions(query?: string, limit?: number): RuntimeSessionInfoV1[];
+  listSessions(query?: string, limit?: number): RuntimeSessionInfo[];
   setSessionName(sessionId: string, name: string): void;
-  getSessionModelRoute(sessionId: string): RuntimeSessionModelRouteV1 | null;
-  setSessionModelRoute(sessionId: string, route: RuntimeSessionModelRouteV1): void;
+  getSessionModelRoute(sessionId: string): RuntimeSessionModelRoute | null;
+  setSessionModelRoute(sessionId: string, route: RuntimeSessionModelRoute): void;
   deleteSession(sessionId: string): void;
 }
 
-export interface RuntimeTransactionInputV1<Event = unknown, State = unknown> {
+export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly sessionId: string;
   readonly events: readonly Event[];
   readonly snapshot: State;
-  readonly metadata?: readonly RuntimeEventMetadataV1[];
-  readonly snapshotMetadata?: RuntimeSnapshotMetadataV1;
-  readonly expectedRestoreBoundary?: RuntimeRestoreBoundaryV1;
-  readonly requiredEffectLease?: RuntimeEffectLeaseExpectationV1;
+  readonly metadata?: readonly RuntimeEventMetadata[];
+  readonly snapshotMetadata?: RuntimeSnapshotMetadata;
+  readonly expectedRestoreBoundary?: RuntimeRestoreBoundary;
+  readonly requiredEffectLease?: RuntimeEffectLeaseExpectation;
 }
 
 /** Store 4 lease predicate checked atomically with the guarded commit. */
-export interface RuntimeEffectLeaseExpectationV1 {
+export interface RuntimeEffectLeaseExpectation {
   readonly effectId: string;
   readonly ownerId: string;
   readonly observedAtMs: number;
@@ -159,10 +159,10 @@ export interface RuntimeEffectLeaseExpectationV1 {
  * future Host from dispatching an effect through an unacknowledged path.
  */
 export interface RuntimeTransactionPort<Event = unknown, State = unknown> {
-  commitDecision(input: RuntimeTransactionInputV1<Event, State>): void;
-  commitAttemptStart(input: RuntimeTransactionInputV1<Event, State>): void;
-  commitReceiptEvidence(input: RuntimeTransactionInputV1<Event, State>): void;
-  commitTerminalRecovery(input: RuntimeTransactionInputV1<Event, State>): void;
+  commitDecision(input: RuntimeTransactionInput<Event, State>): void;
+  commitAttemptStart(input: RuntimeTransactionInput<Event, State>): void;
+  commitReceiptEvidence(input: RuntimeTransactionInput<Event, State>): void;
+  commitTerminalRecovery(input: RuntimeTransactionInput<Event, State>): void;
 }
 
 export interface EffectLeasePort {
@@ -193,7 +193,7 @@ export interface SessionMetadataPort<Value extends object> {
  * use the same Store connection as the RuntimeStorage owner; it must not open
  * a second database or derive an identity from a session identifier.
  */
-export interface RuntimeRecoveryIdentityPortV1 {
+export interface RuntimeRecoveryIdentityPort {
   read(sessionId: string): string | null;
   getOrCreate(sessionId: string, allocate: () => string): string;
   remove(sessionId: string): void;
@@ -202,8 +202,8 @@ export interface RuntimeRecoveryIdentityPortV1 {
 export interface CheckpointPort<State = unknown> {
   saveNamedSnapshot(sessionId: string, name: string, state: State, eventPosition?: number): void;
   loadNamedSnapshot<T = State>(sessionId: string, name: string): T | null;
-  listNamedSnapshots(sessionId: string): RuntimeCheckpointEntryV1[];
-  getNamedSnapshotEntry(sessionId: string, snapshotId: string): RuntimeCheckpointEntryV1 | null;
+  listNamedSnapshots(sessionId: string): RuntimeCheckpointEntry[];
+  getNamedSnapshotEntry(sessionId: string, snapshotId: string): RuntimeCheckpointEntry | null;
   restoreNamedSnapshot(sessionId: string, snapshotId: string): boolean;
   forkSession(
     sourceSessionId: string,
@@ -228,11 +228,11 @@ export interface CheckpointPort<State = unknown> {
     contentHash: string | null,
     existed: boolean,
   ): void;
-  fileRestorePlan(sessionId: string, eventPosition: number): RuntimeFileRestoreMaterialV1[];
+  fileRestorePlan(sessionId: string, eventPosition: number): RuntimeFileRestoreMaterial[];
 }
 
 /** A strong, typed namespace remains responsible for validating its own refs. */
-export interface ArtifactNamespacePortV1<Access extends object = object> {
+export interface ArtifactNamespacePort<Access extends object = object> {
   readonly namespace: string;
   readonly access: Access;
 }
@@ -247,13 +247,13 @@ export interface ArtifactPort {
   listNamespaces(): readonly string[];
 }
 
-export interface RuntimeStorage<Event = unknown, State = unknown> extends RuntimeStorageBoundaryV1 {
+export interface RuntimeStorage<Event = unknown, State = unknown> extends RuntimeStorageBoundary {
   readonly sessions: SessionStore<Event, State>;
   readonly transactions: RuntimeTransactionPort<Event, State>;
   readonly effects: EffectLeasePort;
   readonly checkpoints: CheckpointPort<State>;
   readonly artifacts: ArtifactPort;
-  readonly recoveryIdentities: RuntimeRecoveryIdentityPortV1;
+  readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
   close(): void;
 }
 
@@ -264,7 +264,7 @@ export interface RuntimeStorage<Event = unknown, State = unknown> extends Runtim
  * This is a type-only bridge: the SQLite adapter remains the sole concrete
  * storage owner and exposes the nested RuntimeStorage contract.
  */
-export interface RuntimeSessionStoragePortV1<Event = unknown, State = unknown>
+export interface RuntimeSessionStoragePort<Event = unknown, State = unknown>
   extends SessionStore<Event, State>,
     EffectLeasePort,
     CheckpointPort<State> {
@@ -272,16 +272,16 @@ export interface RuntimeSessionStoragePortV1<Event = unknown, State = unknown>
     sessionId: string,
     events: readonly Event[],
     nextState: State,
-    metadata?: readonly RuntimeEventMetadataV1[],
-    snapshotMetadata?: RuntimeSnapshotMetadataV1,
-    expectedRestoreBoundary?: RuntimeRestoreBoundaryV1,
-    requiredEffectLease?: RuntimeEffectLeaseExpectationV1,
+    metadata?: readonly RuntimeEventMetadata[],
+    snapshotMetadata?: RuntimeSnapshotMetadata,
+    expectedRestoreBoundary?: RuntimeRestoreBoundary,
+    requiredEffectLease?: RuntimeEffectLeaseExpectation,
   ): void;
   close(): void;
 }
 
-export function createArtifactPortV1(
-  namespaces: readonly ArtifactNamespacePortV1[] = [],
+export function createArtifactPort(
+  namespaces: readonly ArtifactNamespacePort[] = [],
 ): ArtifactPort {
   const entries = new Map<string, object>();
   for (const entry of namespaces) {

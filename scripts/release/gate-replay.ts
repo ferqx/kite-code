@@ -1,9 +1,9 @@
 import { canonicalJson, sha256DomainSeparated } from './canonical-json';
-import type { ReleaseArtifactIdentityV1 } from './evidence-schema';
-import { evaluateReleaseGateV1, type ReleaseGateDecisionV1 } from './gate-evaluator';
+import type { ReleaseArtifactIdentity } from './evidence-schema';
+import { evaluateReleaseGate, type ReleaseGateDecision } from './gate-evaluator';
 
-export interface ReleaseGateReplayRecordV1 {
-  schema: 'ReleaseGateReplayRecordV1';
+export interface ReleaseGateReplayRecord {
+  schema: 'ReleaseGateReplayRecord';
   status: 'replay_verified';
   candidateEligible: boolean;
   firstDecisionDigest: string;
@@ -12,15 +12,15 @@ export interface ReleaseGateReplayRecordV1 {
 }
 
 /** Replays a Gate from retained inputs and requires byte-equivalent output. */
-export function replayReleaseGateV1(input: {
+export function replayReleaseGate(input: {
   policy: unknown;
   evidence: unknown;
-  artifactIdentity: ReleaseArtifactIdentityV1;
+  artifactIdentity: ReleaseArtifactIdentity;
   evaluatedAt: string;
   retainedDecision?: unknown;
-}): { decision: ReleaseGateDecisionV1; replay: ReleaseGateReplayRecordV1 } {
+}): { decision: ReleaseGateDecision; replay: ReleaseGateReplayRecord } {
   const evaluation = () =>
-    evaluateReleaseGateV1({
+    evaluateReleaseGate({
       policy: input.policy,
       evidence: input.evidence,
       artifactIdentity: input.artifactIdentity,
@@ -44,7 +44,7 @@ export function replayReleaseGateV1(input: {
   return {
     decision: first,
     replay: {
-      schema: 'ReleaseGateReplayRecordV1',
+      schema: 'ReleaseGateReplayRecord',
       status: 'replay_verified',
       candidateEligible: first.overall === 'approved_candidate',
       firstDecisionDigest: first.decisionDigest,

@@ -2,15 +2,15 @@ import type {
   CompletionBlockerCode,
   CompletionGuardVersion,
   CompletionNextAction,
-  PlanIdentityV1,
+  PlanIdentity,
 } from './completion';
 import type {
-  ClassifiedFailureV1,
-  ToolOutcomeClassifierAdviceV1,
-  ToolOutcomeV1,
-  UnknownToolFieldsObservationV1,
+  ClassifiedFailure,
+  ToolOutcome,
+  ToolOutcomeClassifierAdvice,
+  UnknownToolFieldsObservation,
 } from './normalization';
-import type { ToolRecoveryAttemptModeV1, ToolRecoveryJournalV1 } from './recovery';
+import type { ToolRecoveryAttemptMode, ToolRecoveryJournal } from './recovery';
 import type {
   AgentPlan as StateAgentPlan,
   AgentCapabilityArtifactRef as StateCapabilityArtifactRef,
@@ -22,12 +22,12 @@ import type {
   AgentLoadedCapabilityState as StateLoadedCapability,
   AgentNetworkDecisionReceipt as StateNetworkDecisionReceipt,
   PlanArtifactRef as StatePlanArtifactRef,
-  PlanCompletionEvidenceV1 as StatePlanCompletionEvidence,
+  PlanCompletionEvidence as StatePlanCompletionEvidence,
   PlanningState as StatePlanningState,
-  ResourceBudgetV1 as StateResourceBudget,
-  ResourceReservationV1 as StateResourceReservation,
-  ResourceUsageV1 as StateResourceUsage,
-  ResourceWaiterV1 as StateResourceWaiter,
+  ResourceBudget as StateResourceBudget,
+  ResourceReservation as StateResourceReservation,
+  ResourceUsage as StateResourceUsage,
+  ResourceWaiter as StateResourceWaiter,
   AgentRunTerminalOutcome as StateRunTerminalOutcome,
   AgentSandboxPreparationArtifactRef as StateSandboxPreparationArtifactRef,
   AgentSkillActivationState as StateSkillActivation,
@@ -450,7 +450,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'tool.progress': ['toolCallId', 'chunk', 'stream'],
   'tool.queued': ['toolCallId', 'name', 'args'],
   'tool.rejected': ['toolCallId', 'reason'],
-  'tool.retry_recorded': ['toolCallId', 'failure', 'outcomeV1', 'recoveryOf', 'retryAttempt'],
+  'tool.retry_recorded': ['toolCallId', 'failure', 'outcome', 'recoveryOf', 'retryAttempt'],
   'tool.started': ['toolCallId'],
   'turn.aborted': ['turnId', 'reason'],
   'turn.completed': ['turnId'],
@@ -486,7 +486,7 @@ export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 135 as const;
  * persisted snapshot reducer. Every other discriminant has a state-changing
  * case in one of the fixed domain reducers.
  */
-export const STATE26_DIAGNOSTIC_EVENT_TYPES = [
+export const STATE_DIAGNOSTIC_EVENT_TYPES = [
   'approval.command_replaced',
   'model.cache_metrics',
   'model.context_metrics',
@@ -511,8 +511,8 @@ export const STATE26_DIAGNOSTIC_EVENT_TYPES = [
   'user.command_invoked',
 ] as const satisfies readonly RuntimeEventType[];
 
-/** Seven current discriminants absent from the legacy reducer switch. */
-export const STATE26_LEGACY_DEFAULT_EVENT_TYPES = [
+/** Current discriminants intentionally handled by the reducer default branch. */
+export const STATE_DEFAULT_EVENT_TYPES = [
   'runtime.cancellation_diagnostic',
   'subagent.cache_metrics',
   'subagent.completed',
@@ -556,9 +556,6 @@ type CapabilityDisclosure = Mutable<StateCapabilityDisclosure>;
 type LoadedCapability = Mutable<StateLoadedCapability>;
 type SkillActivation = StateSkillActivation;
 type ToolResultMeta = StateToolResultMeta;
-type ToolOutcome = ToolOutcomeV1;
-type ToolOutcomeClassifierAdvice = ToolOutcomeClassifierAdviceV1;
-type UnknownToolFieldsObservation = Mutable<UnknownToolFieldsObservationV1>;
 type ResourceBudget = Mutable<StateResourceBudget>;
 type ResourceUsage = Mutable<StateResourceUsage>;
 type ResourceReservation = Mutable<StateResourceReservation>;
@@ -571,8 +568,6 @@ type EffectProfile = {
   network: CapabilityEffectLevel;
   externalState: CapabilityEffectLevel;
 };
-
-type ClassifiedFailure = ClassifiedFailureV1;
 
 type RunTerminalOutcome = StateRunTerminalOutcome;
 
@@ -625,7 +620,7 @@ type McpProviderDiagnosticCode =
   | 'config_invalid'
   | 'unknown';
 type McpProviderRecoveryAction = 'login' | 'approve' | 'retry';
-type ModelCapabilitySource = 'explicit_config' | 'adapter_runtime' | 'compatibility_config';
+type ModelCapabilitySource = 'explicit_config' | 'adapter_runtime';
 type ContextPressure = 'unknown' | 'normal' | 'warning' | 'compact_due' | 'hard_limit';
 type ProviderDataAdmissionReason =
   | 'admitted'
@@ -750,7 +745,7 @@ type PrivateSuspendedSubagent = {
   };
 };
 
-type RunPlanIdentity = Mutable<PlanIdentityV1>;
+type RunPlanIdentity = Mutable<PlanIdentity>;
 type WorkspaceFilesystemObservationRecord = {
   actorIdentityDigest: string;
   lexicalTargetDigest: string;
@@ -1217,7 +1212,7 @@ type StateEventMap = ResourceBudgetEventMap & {
     capabilityRevision?: string;
     invocationFingerprint?: string;
     recoveryOf?: string;
-    recoveryMode?: ToolRecoveryAttemptModeV1;
+    recoveryMode?: ToolRecoveryAttemptMode;
     unknownFields?: UnknownToolFieldsObservation;
     createdAt?: string;
   };
@@ -1252,15 +1247,15 @@ type StateEventMap = ResourceBudgetEventMap & {
       terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
       resultMeta?: ToolResultMeta;
     };
-    outcomeV1?: ToolOutcome;
-    classifierAdviceV1?: ToolOutcomeClassifierAdvice;
+    outcome?: ToolOutcome;
+    classifierAdvice?: ToolOutcomeClassifierAdvice;
     classifierDiagnostic?: 'classifier_threw';
   };
   'tool.failed': {
     type: 'tool.failed';
     toolCallId: string;
     createdAt?: string;
-    outcomeV1?: ToolOutcome;
+    outcome?: ToolOutcome;
     failure: ClassifiedFailure;
   };
   'tool.rejected': {
@@ -1269,20 +1264,20 @@ type StateEventMap = ResourceBudgetEventMap & {
     reason: string;
     failure?: ClassifiedFailure;
     createdAt?: string;
-    outcomeV1?: ToolOutcome;
+    outcome?: ToolOutcome;
   };
   'tool.cancelled': {
     type: 'tool.cancelled';
     toolCallId: string;
     reason: string;
     createdAt?: string;
-    outcomeV1?: ToolOutcome;
+    outcome?: ToolOutcome;
   };
   'tool.retry_recorded': {
     type: 'tool.retry_recorded';
     toolCallId: string;
     failure: ClassifiedFailure;
-    outcomeV1: ToolOutcome;
+    outcome: ToolOutcome;
     recoveryOf: string;
     retryAttempt: 1;
   };
@@ -1380,7 +1375,7 @@ type StateEventMap = ResourceBudgetEventMap & {
     reason: string;
     failure?: ClassifiedFailure;
     createdAt?: string;
-    outcomeV1?: ToolOutcome;
+    outcome?: ToolOutcome;
   };
   'provider.action_required': {
     type: 'provider.action_required';
@@ -1500,7 +1495,7 @@ type StateEventMap = ResourceBudgetEventMap & {
           reviewerModelName: string;
           durationMs: number;
         };
-    outcomeV1?: ToolOutcome;
+    outcome?: ToolOutcome;
     createdAt?: string;
   };
   'turn.started': { type: 'turn.started'; turnId: string };
@@ -1776,7 +1771,7 @@ type StateEventMap = ResourceBudgetEventMap & {
   'subagent.recovery_journal_merged': {
     type: 'subagent.recovery_journal_merged';
     toolCallId: string;
-    journal: ToolRecoveryJournalV1;
+    journal: ToolRecoveryJournal;
   };
 };
 

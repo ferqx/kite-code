@@ -1,18 +1,18 @@
 import {
-  createRuntimeHostToolPipelineAttemptCoordinatorV1,
-  type RuntimeHostCommittedToolInvocationAuthorityV1,
-  type RuntimeHostPreparedToolInvocationAuthorityV1,
-  type RuntimeHostRetryableToolInvocationAuthorityV1,
-  type RuntimeHostSuspendedToolInvocationAuthorityV1,
-  type RuntimeHostToolPipelineAttemptCoordinatorV1,
+  createRuntimeHostToolPipelineAttemptCoordinator,
+  type RuntimeHostCommittedToolInvocationAuthority,
+  type RuntimeHostPreparedToolInvocationAuthority,
+  type RuntimeHostRetryableToolInvocationAuthority,
+  type RuntimeHostSuspendedToolInvocationAuthority,
+  type RuntimeHostToolPipelineAttemptCoordinator,
 } from '@kite/runtime-host';
 import type {
-  CapabilityToolTerminalResultV1,
-  PreparedToolInvocationIdentityV1,
-  PreparedToolInvocationInputV1,
-  RuntimeJsonValueV1,
-  ToolPipelineOutcomeDispatchV1,
-  ToolPipelinePersistenceV1,
+  CapabilityToolTerminalResult,
+  PreparedToolInvocationIdentity,
+  PreparedToolInvocationInput,
+  RuntimeJsonValue,
+  ToolPipelineOutcomeDispatch,
+  ToolPipelinePersistence,
 } from '@kite/runtime-spi';
 
 /**
@@ -20,58 +20,58 @@ import type {
  * callbacks.  This seam owns no registry, snapshot, execution port, Store,
  * schema, effect, or policy implementation.
  */
-export const APP_TOOL_PIPELINE_ATTEMPT_COMPOSITION_SCHEMA_V1 =
+export const APP_TOOL_PIPELINE_ATTEMPT_COMPOSITION_SCHEMA_ =
   'kite.app.tool-pipeline-attempt-composition.v1' as const;
 
-export interface AppToolPipelineAttemptCompositionOptionsV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface AppToolPipelineAttemptCompositionOptions<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
   /** App/Host persistence callbacks; this factory does not create a Store. */
-  readonly persistence: ToolPipelinePersistenceV1<TValue>;
+  readonly persistence: ToolPipelinePersistence<TValue>;
   /**
    * One exact Builtin verifier/dispatch bundle. The Host must receive both
    * methods from the same adapter so validation and dispatch cannot name
    * different projection authorities.
    */
-  readonly dispatch: ToolPipelineOutcomeDispatchV1<TArguments, TValue>;
+  readonly dispatch: ToolPipelineOutcomeDispatch<TArguments, TValue>;
 }
 
-export interface AppToolPipelineAttemptCompositionV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface AppToolPipelineAttemptComposition<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly schema: typeof APP_TOOL_PIPELINE_ATTEMPT_COMPOSITION_SCHEMA_V1;
+  readonly schema: typeof APP_TOOL_PIPELINE_ATTEMPT_COMPOSITION_SCHEMA_;
   /** The one Host coordinator composed for this App boundary. */
-  readonly coordinator: RuntimeHostToolPipelineAttemptCoordinatorV1<TArguments, TRequest, TValue>;
-  readonly prepare: RuntimeHostToolPipelineAttemptCoordinatorV1<
+  readonly coordinator: RuntimeHostToolPipelineAttemptCoordinator<TArguments, TRequest, TValue>;
+  readonly prepare: RuntimeHostToolPipelineAttemptCoordinator<
     TArguments,
     TRequest,
     TValue
   >['prepare'];
-  readonly execute: RuntimeHostToolPipelineAttemptCoordinatorV1<
+  readonly execute: RuntimeHostToolPipelineAttemptCoordinator<
     TArguments,
     TRequest,
     TValue
   >['execute'];
-  readonly assertCommitted: RuntimeHostToolPipelineAttemptCoordinatorV1<
+  readonly assertCommitted: RuntimeHostToolPipelineAttemptCoordinator<
     TArguments,
     TRequest,
     TValue
   >['assertCommitted'];
-  readonly assertSuspended: RuntimeHostToolPipelineAttemptCoordinatorV1<
+  readonly assertSuspended: RuntimeHostToolPipelineAttemptCoordinator<
     TArguments,
     TRequest,
     TValue
   >['assertSuspended'];
-  readonly assertRetryable: RuntimeHostToolPipelineAttemptCoordinatorV1<
+  readonly assertRetryable: RuntimeHostToolPipelineAttemptCoordinator<
     TArguments,
     TRequest,
     TValue
   >['assertRetryable'];
   /** The exact verifier reference supplied by Builtin, retained for wiring. */
-  readonly verifyPreparedIdentity: ToolPipelineOutcomeDispatchV1<
+  readonly verifyPreparedIdentity: ToolPipelineOutcomeDispatch<
     TArguments,
     TValue
   >['verifyPreparedIdentity'];
@@ -85,13 +85,13 @@ export interface AppToolPipelineAttemptCompositionV1<
  * dispatch and persistence callbacks remain the injected owners of execution
  * and durable receipts.
  */
-export function createAppToolPipelineAttemptCompositionV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export function createAppToolPipelineAttemptComposition<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 >(
-  options: AppToolPipelineAttemptCompositionOptionsV1<TArguments, TValue>,
-): AppToolPipelineAttemptCompositionV1<TArguments, TRequest, TValue> {
+  options: AppToolPipelineAttemptCompositionOptions<TArguments, TValue>,
+): AppToolPipelineAttemptComposition<TArguments, TRequest, TValue> {
   if (
     !options ||
     typeof options !== 'object' ||
@@ -108,19 +108,17 @@ export function createAppToolPipelineAttemptCompositionV1<
   }
 
   const verifyPreparedIdentity = options.dispatch.verifyPreparedIdentity;
-  const coordinator = createRuntimeHostToolPipelineAttemptCoordinatorV1<
-    TArguments,
-    TRequest,
-    TValue
-  >({
-    persistence: options.persistence,
-    // Keep this exact bundle: Host must not reconstruct or reinterpret
-    // Builtin identity, and no second verifier may appear at this seam.
-    dispatch: options.dispatch,
-  });
+  const coordinator = createRuntimeHostToolPipelineAttemptCoordinator<TArguments, TRequest, TValue>(
+    {
+      persistence: options.persistence,
+      // Keep this exact bundle: Host must not reconstruct or reinterpret
+      // Builtin identity, and no second verifier may appear at this seam.
+      dispatch: options.dispatch,
+    },
+  );
 
   return Object.freeze({
-    schema: APP_TOOL_PIPELINE_ATTEMPT_COMPOSITION_SCHEMA_V1,
+    schema: APP_TOOL_PIPELINE_ATTEMPT_COMPOSITION_SCHEMA_,
     coordinator,
     prepare: coordinator.prepare,
     execute: coordinator.execute,
@@ -131,34 +129,31 @@ export function createAppToolPipelineAttemptCompositionV1<
   });
 }
 
-export type AppToolPipelinePreparedAuthorityV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = RuntimeHostPreparedToolInvocationAuthorityV1<TArguments, TRequest>;
+export type AppToolPipelinePreparedAuthority<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
+> = RuntimeHostPreparedToolInvocationAuthority<TArguments, TRequest>;
 
-export type AppToolPipelineCommittedAuthorityV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = RuntimeHostCommittedToolInvocationAuthorityV1<TValue>;
+export type AppToolPipelineCommittedAuthority<TValue extends RuntimeJsonValue = RuntimeJsonValue> =
+  RuntimeHostCommittedToolInvocationAuthority<TValue>;
 
-export type AppToolPipelineSuspendedAuthorityV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = RuntimeHostSuspendedToolInvocationAuthorityV1<TValue>;
+export type AppToolPipelineSuspendedAuthority<TValue extends RuntimeJsonValue = RuntimeJsonValue> =
+  RuntimeHostSuspendedToolInvocationAuthority<TValue>;
 
-export type AppToolPipelineRetryableAuthorityV1<
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = RuntimeHostRetryableToolInvocationAuthorityV1<TValue>;
+export type AppToolPipelineRetryableAuthority<TValue extends RuntimeJsonValue = RuntimeJsonValue> =
+  RuntimeHostRetryableToolInvocationAuthority<TValue>;
 
-export type AppToolPipelineAttemptInputV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = Readonly<PreparedToolInvocationInputV1<TArguments, TRequest>>;
+export type AppToolPipelineAttemptInput<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TRequest extends RuntimeJsonValue = RuntimeJsonValue,
+> = Readonly<PreparedToolInvocationInput<TArguments, TRequest>>;
 
-export type AppToolPipelineAttemptIdentityV1 = Readonly<PreparedToolInvocationIdentityV1>;
+export type AppToolPipelineAttemptIdentity = Readonly<PreparedToolInvocationIdentity>;
 
-export type AppToolPipelineAttemptResultV1<TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1> =
-  Readonly<CapabilityToolTerminalResultV1<TValue>>;
+export type AppToolPipelineAttemptResult<TValue extends RuntimeJsonValue = RuntimeJsonValue> =
+  Readonly<CapabilityToolTerminalResult<TValue>>;
 
-export type AppToolPipelineAttemptDispatchV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-> = ToolPipelineOutcomeDispatchV1<TArguments, TValue>['dispatch'];
+export type AppToolPipelineAttemptDispatch<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
+> = ToolPipelineOutcomeDispatch<TArguments, TValue>['dispatch'];

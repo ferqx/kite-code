@@ -1,16 +1,16 @@
 import type { KernelEvent } from './events';
 import {
-  type ClassifiedFailureV1,
-  classifyRuntimeFailureV1,
+  type ClassifiedFailure,
+  classifyRuntimeFailure,
   normalizeTerminalAgentEvent,
-  terminalReasonForRuntimeFailureV1,
+  terminalReasonForRuntimeFailure,
 } from './normalization';
 import type { AgentRunTerminalOutcome, AgentTerminalReasonCode } from './state';
 
-export type RuntimeTerminalStatusV1 = AgentRunTerminalOutcome['status'];
-export type RunTerminalOutcomeV1 = AgentRunTerminalOutcome;
+export type RuntimeTerminalStatus = AgentRunTerminalOutcome['status'];
+export type RunTerminalOutcome = AgentRunTerminalOutcome;
 
-export function completedTerminalOutcomeV1(): RunTerminalOutcomeV1 {
+export function completedTerminalOutcome(): RunTerminalOutcome {
   return {
     version: 1,
     status: 'completed',
@@ -22,16 +22,16 @@ export function completedTerminalOutcomeV1(): RunTerminalOutcomeV1 {
   };
 }
 
-export function failedTerminalOutcomeV1(
-  failure: ClassifiedFailureV1,
+export function failedTerminalOutcome(
+  failure: ClassifiedFailure,
   input: {
-    knownExternalEffects?: RunTerminalOutcomeV1['knownExternalEffects'];
+    knownExternalEffects?: RunTerminalOutcome['knownExternalEffects'];
     pendingVerification?: boolean;
     reasonCode?: AgentTerminalReasonCode;
   } = {},
-): RunTerminalOutcomeV1 {
-  const reasonCode = input.reasonCode ?? terminalReasonForRuntimeFailureV1(failure.kind);
-  const status: RuntimeTerminalStatusV1 =
+): RunTerminalOutcome {
+  const reasonCode = input.reasonCode ?? terminalReasonForRuntimeFailure(failure.kind);
+  const status: RuntimeTerminalStatus =
     reasonCode === 'budget_exhausted' || reasonCode === 'process_limit_exceeded'
       ? 'budget_exhausted'
       : reasonCode === 'resource_saturated' ||
@@ -62,16 +62,16 @@ export function failedTerminalOutcomeV1(
   };
 }
 
-export function normalizeTerminalRuntimeEventV1(event: KernelEvent): KernelEvent {
+export function normalizeTerminalRuntimeEvent(event: KernelEvent): KernelEvent {
   if (event.type === 'run.completed' && !event.outcome) {
-    return { ...event, outcome: completedTerminalOutcomeV1() };
+    return { ...event, outcome: completedTerminalOutcome() };
   }
   if (event.type === 'run.error' && !event.outcome) {
-    const failure = event.failure ?? classifyRuntimeFailureV1('unknown', event.message);
+    const failure = event.failure ?? classifyRuntimeFailure('unknown', event.message);
     return {
       ...event,
       failure,
-      outcome: failedTerminalOutcomeV1(failure, {
+      outcome: failedTerminalOutcome(failure, {
         knownExternalEffects: failure.kind === 'unknown' ? 'unknown' : 'known',
       }),
     };

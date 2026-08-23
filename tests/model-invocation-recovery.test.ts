@@ -3,17 +3,17 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  compileModelSurfaceV1,
-  createLiveModelResponseSourceV1,
+  compileModelSurface,
+  createLiveModelResponseSource,
   humanMessage,
-  ModelArtifactStoreV1,
-  ModelInvocationGatewayV1,
+  ModelArtifactStore,
+  ModelInvocationGateway,
   PrivateArtifactStorageError,
 } from '@kite/builtin-runtime/model';
 import type { AgentConfig } from '#app/config';
-import { restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1 } from '../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../scripts/support/runtime-storage';
-import { testBuiltinModelOperationExecutionPortV1 } from './helpers/model-invocation';
+import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../scripts/support/runtime-storage';
+import { testBuiltinModelOperationExecutionPort } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
 const CONFIG: AgentConfig = {
@@ -40,11 +40,11 @@ function createFixture(threadId: string) {
     projectId: `project_${threadId}`,
     canonicalWorkspaceDigest: `sha256:${createHash('sha256').update(workspace).digest('hex')}`,
   } as const;
-  const artifacts = new ModelArtifactStoreV1({
+  const artifacts = new ModelArtifactStore({
     root: join(directory, 'model-artifacts'),
   });
   const model = createMockModel([]);
-  const compiled = compileModelSurfaceV1({
+  const compiled = compileModelSurface({
     purpose: 'primary_agent',
     config: CONFIG,
     model,
@@ -52,19 +52,19 @@ function createFixture(threadId: string) {
     tools: {},
     transport: 'generate',
   });
-  const gateway = new ModelInvocationGatewayV1({
+  const gateway = new ModelInvocationGateway({
     artifacts,
-    source: createLiveModelResponseSourceV1(async () => RESPONSE),
-    operationExecution: testBuiltinModelOperationExecutionPortV1(),
+    source: createLiveModelResponseSource(async () => RESPONSE),
+    operationExecution: testBuiltinModelOperationExecutionPort(),
     sleep: async () => {},
   });
-  const kernel = restoreStateKernelCoordinatorV1({
+  const kernel = restoreStateKernelCoordinator({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'test',
     workspace,
     ...projectIdentity,
-    store: openStateStoreForTestV1(storePath),
+    store: openStateStoreForTest(storePath),
   });
   return {
     directory,
@@ -129,13 +129,13 @@ describe('model invocation evidence recovery', () => {
       ).toBe(true);
       fixture.kernel.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-source',
         userId: 'test',
         workspace: fixture.workspace,
         ...fixture.projectIdentity,
-        store: openStateStoreForTestV1(fixture.storePath),
+        store: openStateStoreForTest(fixture.storePath),
         modelArtifactEvidence: { status: 'available', reader: fixture.artifacts },
       });
       expect(restored.getState().transcript.final).toBe('restored');
@@ -147,13 +147,13 @@ describe('model invocation evidence recovery', () => {
       ).toBeUndefined();
       restored.close();
 
-      const fork = restoreStateKernelCoordinatorV1({
+      const fork = restoreStateKernelCoordinator({
         recoveryIdentityKey: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
         threadId: 'model-evidence-fork',
         userId: 'test',
         workspace: fixture.workspace,
         ...fixture.projectIdentity,
-        store: openStateStoreForTestV1(fixture.storePath),
+        store: openStateStoreForTest(fixture.storePath),
         modelArtifactEvidence: { status: 'available', reader: fixture.artifacts },
       });
       expect(fork.getState().transcript.final).toBe('restored');
@@ -189,13 +189,13 @@ describe('model invocation evidence recovery', () => {
       const missing = () => {
         throw new PrivateArtifactStorageError('artifact_missing', 'fixture artifact missing');
       };
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-missing',
         userId: 'test',
         workspace: fixture.workspace,
         ...fixture.projectIdentity,
-        store: openStateStoreForTestV1(fixture.storePath),
+        store: openStateStoreForTest(fixture.storePath),
         modelArtifactEvidence: {
           status: 'available',
           reader: { readSurface: missing, readResponse: missing },
@@ -239,13 +239,13 @@ describe('model invocation evidence recovery', () => {
       );
       preparedFixture.kernel.close();
 
-      const preparedRestore = restoreStateKernelCoordinatorV1({
+      const preparedRestore = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-prepared',
         userId: 'test',
         workspace: preparedFixture.workspace,
         ...preparedFixture.projectIdentity,
-        store: openStateStoreForTestV1(preparedFixture.storePath),
+        store: openStateStoreForTest(preparedFixture.storePath),
         modelArtifactEvidence: { status: 'available', reader: preparedFixture.artifacts },
       });
       expect(preparedRestore.getState().modelInvocations[preparedId]).toMatchObject({
@@ -268,13 +268,13 @@ describe('model invocation evidence recovery', () => {
       );
       dispatchedFixture.kernel.close();
 
-      const dispatchedRestore = restoreStateKernelCoordinatorV1({
+      const dispatchedRestore = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-dispatched',
         userId: 'test',
         workspace: dispatchedFixture.workspace,
         ...dispatchedFixture.projectIdentity,
-        store: openStateStoreForTestV1(dispatchedFixture.storePath),
+        store: openStateStoreForTest(dispatchedFixture.storePath),
         modelArtifactEvidence: { status: 'available', reader: dispatchedFixture.artifacts },
       });
       expect(dispatchedRestore.getState().modelInvocations[invocationId]).toMatchObject({

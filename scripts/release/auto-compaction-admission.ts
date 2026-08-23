@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from './canonical-json';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
-const AUTO_COMPACTION_DEPENDENCIES_V1 = [
+const AUTO_COMPACTION_DEPENDENCIES_ = [
   'manual_stable',
   'internal_auto_fresh',
   'limited_approved',
@@ -13,10 +13,10 @@ const AUTO_COMPACTION_DEPENDENCIES_V1 = [
   'consent_provider_policy',
   'incident_rehearsal',
 ] as const;
-type AutoCompactionDependencyV1 = (typeof AUTO_COMPACTION_DEPENDENCIES_V1)[number];
+type AutoCompactionDependency = (typeof AUTO_COMPACTION_DEPENDENCIES_)[number];
 
-interface TrustedAutoCompactionVerifierV1 {
-  dependency: AutoCompactionDependencyV1;
+interface TrustedAutoCompactionVerifier {
+  dependency: AutoCompactionDependency;
   verifierIdentity: string;
   decisionDigest: `sha256:${string}`;
   artifactDigest: `sha256:${string}`;
@@ -26,10 +26,11 @@ interface TrustedAutoCompactionVerifierV1 {
   verifiedAt: string;
 }
 
-const TRUSTED_AUTO_COMPACTION_VERIFIERS_V1: readonly TrustedAutoCompactionVerifierV1[] =
-  Object.freeze([]);
+const TRUSTED_AUTO_COMPACTION_VERIFIERS_: readonly TrustedAutoCompactionVerifier[] = Object.freeze(
+  [],
+);
 
-interface TrustedAutoCompactionSafetyObservationV1 {
+interface TrustedAutoCompactionSafetyObservation {
   artifactDigest: `sha256:${string}`;
   profileDigest: `sha256:${string}`;
   routeDigest: `sha256:${string}`;
@@ -39,12 +40,12 @@ interface TrustedAutoCompactionSafetyObservationV1 {
   ledgerDigest: `sha256:${string}`;
 }
 
-const TRUSTED_AUTO_COMPACTION_SAFETY_OBSERVATIONS_V1: readonly TrustedAutoCompactionSafetyObservationV1[] =
+const TRUSTED_AUTO_COMPACTION_SAFETY_OBSERVATIONS_: readonly TrustedAutoCompactionSafetyObservation[] =
   Object.freeze([]);
 
-export const autoCompactionAdmissionInputV1Schema = z
+export const autoCompactionAdmissionInputSchema = z
   .object({
-    schema: z.literal('AutoCompactionAdmissionInputV1'),
+    schema: z.literal('AutoCompactionAdmissionInput'),
     artifactDigest: digestSchema,
     profileDigest: digestSchema,
     routeDigest: digestSchema,
@@ -52,8 +53,8 @@ export const autoCompactionAdmissionInputV1Schema = z
     dependencies: z.array(
       z
         .object({
-          schema: z.literal('AutoCompactionDependencyDecisionV1'),
-          dependency: z.enum(AUTO_COMPACTION_DEPENDENCIES_V1),
+          schema: z.literal('AutoCompactionDependencyDecision'),
+          dependency: z.enum(AUTO_COMPACTION_DEPENDENCIES_),
           status: z.literal('passed'),
           artifactDigest: digestSchema,
           profileDigest: digestSchema,
@@ -75,8 +76,8 @@ export const autoCompactionAdmissionInputV1Schema = z
   })
   .strict();
 
-export interface AutoCompactionAdmissionDecisionV1 {
-  schema: 'AutoCompactionAdmissionDecisionV1';
+export interface AutoCompactionAdmissionDecision {
+  schema: 'AutoCompactionAdmissionDecision';
   status: 'passed' | 'blocked';
   liveAdmissionEligible: boolean;
   summaryDispatches: 0;
@@ -97,15 +98,15 @@ export interface AutoCompactionAdmissionDecisionV1 {
 }
 
 /** Admission-only Gate: it never invokes a model and never writes a checkpoint. */
-export function evaluateAutoCompactionAdmissionV1(
+export function evaluateAutoCompactionAdmission(
   rawInput: unknown,
-): AutoCompactionAdmissionDecisionV1 {
-  const input = autoCompactionAdmissionInputV1Schema.parse(rawInput);
+): AutoCompactionAdmissionDecision {
+  const input = autoCompactionAdmissionInputSchema.parse(rawInput);
   const reasons: string[] = [];
-  if (TRUSTED_AUTO_COMPACTION_VERIFIERS_V1.length === 0) {
+  if (TRUSTED_AUTO_COMPACTION_VERIFIERS_.length === 0) {
     reasons.push('authenticated_auto_compaction_verifier_not_configured');
   }
-  const trustedSafetyObservation = TRUSTED_AUTO_COMPACTION_SAFETY_OBSERVATIONS_V1.some(
+  const trustedSafetyObservation = TRUSTED_AUTO_COMPACTION_SAFETY_OBSERVATIONS_.some(
     (trusted) =>
       trusted.artifactDigest === input.artifactDigest &&
       trusted.profileDigest === input.profileDigest &&
@@ -125,8 +126,8 @@ export function evaluateAutoCompactionAdmissionV1(
     }
     decisions.set(dependency.dependency, dependency);
     if (
-      TRUSTED_AUTO_COMPACTION_VERIFIERS_V1.length > 0 &&
-      !TRUSTED_AUTO_COMPACTION_VERIFIERS_V1.some(
+      TRUSTED_AUTO_COMPACTION_VERIFIERS_.length > 0 &&
+      !TRUSTED_AUTO_COMPACTION_VERIFIERS_.some(
         (trusted) =>
           trusted.dependency === dependency.dependency &&
           trusted.verifierIdentity === dependency.verifierIdentity &&
@@ -149,7 +150,7 @@ export function evaluateAutoCompactionAdmissionV1(
       reasons.push(`dependency_identity_mismatch:${dependency.dependency}`);
     }
   }
-  const missingReason: Record<(typeof AUTO_COMPACTION_DEPENDENCIES_V1)[number], string> = {
+  const missingReason: Record<(typeof AUTO_COMPACTION_DEPENDENCIES_)[number], string> = {
     manual_stable: 'ms_manual_stable_missing',
     internal_auto_fresh: 'ms_internal_auto_fresh_missing',
     limited_approved: 'ms_limited_approved_missing',
@@ -160,16 +161,16 @@ export function evaluateAutoCompactionAdmissionV1(
     consent_provider_policy: 'consent_or_provider_policy_invalid',
     incident_rehearsal: 'incident_rehearsal_missing',
   };
-  for (const dependency of AUTO_COMPACTION_DEPENDENCIES_V1) {
+  for (const dependency of AUTO_COMPACTION_DEPENDENCIES_) {
     if (!decisions.has(dependency)) reasons.push(missingReason[dependency]);
   }
   if (input.safetyObservation.g0Count !== 0) reasons.push('g0_observed');
   if (input.safetyObservation.g1Count !== 0) reasons.push('g1_observed');
   reasons.sort();
-  const status: AutoCompactionAdmissionDecisionV1['status'] =
+  const status: AutoCompactionAdmissionDecision['status'] =
     reasons.length === 0 ? 'passed' : 'blocked';
-  const withoutDigest: Omit<AutoCompactionAdmissionDecisionV1, 'decisionDigest'> = {
-    schema: 'AutoCompactionAdmissionDecisionV1',
+  const withoutDigest: Omit<AutoCompactionAdmissionDecision, 'decisionDigest'> = {
+    schema: 'AutoCompactionAdmissionDecision',
     status,
     liveAdmissionEligible: status === 'passed',
     summaryDispatches: 0,

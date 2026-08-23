@@ -1,36 +1,36 @@
 import type {
-  CompiledContextV1,
-  ContextCompilerPortV1,
-  ContextFragmentCandidateV1,
-  ContextSourceRequestV1,
-  ContextSourceV1,
-  RuntimeJsonValueV1,
-  RuntimeModuleRegistryWriterV1,
+  CompiledContext,
+  ContextCompilerPort,
+  ContextFragmentCandidate,
+  ContextSource,
+  ContextSourceRequest,
+  RuntimeJsonValue,
+  RuntimeModuleRegistryWriter,
 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
-import { RMV1_11_PROVIDER_ID_V1 } from './model-operations';
+import { digestCapabilityBindingValue } from './capability-binding';
+import { MODEL_PROVIDER_ID_ } from './model-operations';
 
-export const BUILTIN_CONTEXT_SOURCE_IDS_V1 = Object.freeze([
+export const BUILTIN_CONTEXT_SOURCE_IDS_ = Object.freeze([
   'builtin:project-instructions-context',
   'builtin:skill-context',
   'builtin:mcp-observation-context',
 ] as const);
 
-export const BUILTIN_CONTEXT_COMPILER_ID_V1 = 'kite-builtin-context-compiler' as const;
-export const BUILTIN_CONTEXT_COMPILER_REVISION_V1 = digestCapabilityBindingValueV1({
+export const BUILTIN_CONTEXT_COMPILER_ID_ = 'kite-builtin-context-compiler' as const;
+export const BUILTIN_CONTEXT_COMPILER_REVISION_ = digestCapabilityBindingValue({
   schema: 'kite.builtin-context-compiler.v1',
   selection: 'always-then-selected-in-source-order',
   onDemand: 'excluded',
 });
 
-type BuiltinContextSourceDefinitionV1 = Readonly<{
-  sourceId: (typeof BUILTIN_CONTEXT_SOURCE_IDS_V1)[number];
+type BuiltinContextSourceDefinition = Readonly<{
+  sourceId: (typeof BUILTIN_CONTEXT_SOURCE_IDS_)[number];
   factKey: string;
   kind: 'project_instruction' | 'skill_instruction' | 'external_content';
   authority: 'project' | 'user' | 'external';
 }>;
 
-const SOURCE_DEFINITIONS_V1: readonly BuiltinContextSourceDefinitionV1[] = Object.freeze([
+const SOURCE_DEFINITIONS_: readonly BuiltinContextSourceDefinition[] = Object.freeze([
   Object.freeze({
     sourceId: 'builtin:project-instructions-context',
     factKey: 'projectInstructionFragments',
@@ -51,19 +51,19 @@ const SOURCE_DEFINITIONS_V1: readonly BuiltinContextSourceDefinitionV1[] = Objec
   }),
 ]);
 
-export function registerBuiltinContextSourcesV1(registry: RuntimeModuleRegistryWriterV1): void {
-  for (const definition of SOURCE_DEFINITIONS_V1) {
-    registry.registerContextSource(createBuiltinContextSourceV1(definition));
+export function registerBuiltinContextSources(registry: RuntimeModuleRegistryWriter): void {
+  for (const definition of SOURCE_DEFINITIONS_) {
+    registry.registerContextSource(createBuiltinContextSource(definition));
   }
 }
 
-export function createBuiltinContextCompilerPortV1(): ContextCompilerPortV1 {
+export function createBuiltinContextCompilerPort(): ContextCompilerPort {
   return Object.freeze({
-    compilerId: BUILTIN_CONTEXT_COMPILER_ID_V1,
-    revision: BUILTIN_CONTEXT_COMPILER_REVISION_V1,
+    compilerId: BUILTIN_CONTEXT_COMPILER_ID_,
+    revision: BUILTIN_CONTEXT_COMPILER_REVISION_,
     async compile(
-      request: Parameters<ContextCompilerPortV1['compile']>[0],
-    ): Promise<CompiledContextV1> {
+      request: Parameters<ContextCompilerPort['compile']>[0],
+    ): Promise<CompiledContext> {
       if (!Number.isSafeInteger(request.tokenBudget) || request.tokenBudget <= 0) {
         throw new Error('Builtin Context Compiler requires a positive integer token budget.');
       }
@@ -72,7 +72,7 @@ export function createBuiltinContextCompilerPortV1(): ContextCompilerPortV1 {
         ...request.candidates.filter((candidate) => candidate.disclosure === 'always'),
         ...request.candidates.filter((candidate) => candidate.disclosure === 'selected'),
       ];
-      const selected: ContextFragmentCandidateV1[] = [];
+      const selected: ContextFragmentCandidate[] = [];
       let used = 0;
       for (const candidate of ordered) {
         if (seen.has(candidate.fragmentId)) {
@@ -114,24 +114,22 @@ export function createBuiltinContextCompilerPortV1(): ContextCompilerPortV1 {
   });
 }
 
-function createBuiltinContextSourceV1(
-  definition: BuiltinContextSourceDefinitionV1,
-): ContextSourceV1 {
+function createBuiltinContextSource(definition: BuiltinContextSourceDefinition): ContextSource {
   return Object.freeze({
     sourceId: definition.sourceId,
-    revision: digestCapabilityBindingValueV1({
+    revision: digestCapabilityBindingValue({
       schema: 'kite.builtin-context-source.v1',
       ...definition,
     }),
-    providerId: RMV1_11_PROVIDER_ID_V1,
-    collect: (request: ContextSourceRequestV1) => collectCommittedFragmentsV1(request, definition),
+    providerId: MODEL_PROVIDER_ID_,
+    collect: (request: ContextSourceRequest) => collectCommittedFragments(request, definition),
   });
 }
 
-function collectCommittedFragmentsV1(
-  request: ContextSourceRequestV1,
-  definition: BuiltinContextSourceDefinitionV1,
-): readonly ContextFragmentCandidateV1[] {
+function collectCommittedFragments(
+  request: ContextSourceRequest,
+  definition: BuiltinContextSourceDefinition,
+): readonly ContextFragmentCandidate[] {
   const value = request.committedFacts[definition.factKey];
   if (!request.projectId.startsWith('project_')) {
     throw new Error('Builtin Context source requires a Host-issued Project identity.');
@@ -160,7 +158,7 @@ function collectCommittedFragmentsV1(
         fragmentId,
         kind: definition.kind,
         authority: definition.authority,
-        content: record.content as RuntimeJsonValueV1,
+        content: record.content as RuntimeJsonValue,
         tokenEstimate: tokenEstimate as number,
         disclosure,
       });
@@ -168,10 +166,8 @@ function collectCommittedFragmentsV1(
   );
 }
 
-function asRecord(
-  value: RuntimeJsonValueV1,
-): Readonly<Record<string, RuntimeJsonValueV1>> | undefined {
+function asRecord(value: RuntimeJsonValue): Readonly<Record<string, RuntimeJsonValue>> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Readonly<Record<string, RuntimeJsonValueV1>>)
+    ? (value as Readonly<Record<string, RuntimeJsonValue>>)
     : undefined;
 }

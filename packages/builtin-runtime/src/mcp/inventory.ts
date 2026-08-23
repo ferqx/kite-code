@@ -4,7 +4,7 @@ import type { CapabilitySnapshot } from './capability-domain';
 import { safeCapabilityMetadata } from './capability-domain';
 import type { McpConfigSourceKind } from './config-domain';
 import type { McpDiagnosticCode } from './diagnostics';
-import { isMcpProviderCallableV1, mcpProviderInventoryNextActionV1 } from './provider-status';
+import { isMcpProviderCallable, mcpProviderInventoryNextAction } from './provider-status';
 import type { McpProviderDirectorySnapshot, McpProviderDirectoryStatus } from './runtime-provider';
 
 export type McpInventoryNextAction =
@@ -169,7 +169,7 @@ export function buildMcpInventory(input: {
       source: entry.source,
       available_tool_count: toolCount,
       last_known_tool_count: entry.lastKnownCapabilityNames.length,
-      next_action: mcpProviderInventoryNextActionV1(entry.status),
+      next_action: mcpProviderInventoryNextAction(entry.status),
       ...(entry.diagnosticCode ? { diagnostic_code: entry.diagnosticCode } : {}),
     });
   }
@@ -227,7 +227,7 @@ export function buildMcpInventory(input: {
       })
     : undefined;
 
-  const callable = providerList.filter((p) => isMcpProviderCallableV1(p.status));
+  const callable = providerList.filter((p) => isMcpProviderCallable(p.status));
 
   // Global counts (unfiltered) so the model never misinterprets a filtered
   // result as the entire system state.
@@ -237,7 +237,7 @@ export function buildMcpInventory(input: {
   ]).size;
   // Global callable: directory entries + defensive backfill (always 'ready')
   const globalCallableProviderIds = new Set(
-    providers.entries.filter((e) => isMcpProviderCallableV1(e.status)).map((e) => e.providerId),
+    providers.entries.filter((e) => isMcpProviderCallable(e.status)).map((e) => e.providerId),
   );
   for (const capId of capabilityProviderIds) {
     if (!providerSet.has(capId)) {

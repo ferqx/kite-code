@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createBuiltinCredentialBrokerV1,
+  createBuiltinCredentialBroker,
   type McpCredentialKey,
   MemoryMcpCredentialStore,
 } from '@kite/builtin-runtime/mcp';
@@ -21,7 +21,7 @@ describe('Builtin credential broker', () => {
       secret: 'broker-secret',
       updatedAt: '2026-08-22T00:00:00.000Z',
     });
-    const broker = createBuiltinCredentialBrokerV1({ store });
+    const broker = createBuiltinCredentialBroker({ store });
     const handle = await broker.issueForKey(KEY, { purpose: 'mcp.transport' });
 
     expect(JSON.stringify(handle)).not.toContain('broker-secret');
@@ -45,7 +45,7 @@ describe('Builtin credential broker', () => {
       updatedAt: '2026-08-22T00:00:00.000Z',
     });
     let now = Date.parse('2026-08-22T00:00:00.000Z');
-    const broker = createBuiltinCredentialBrokerV1({ store, now: () => now });
+    const broker = createBuiltinCredentialBroker({ store, now: () => now });
     const handle = await broker.issueForKey(KEY, {
       purpose: 'mcp.transport',
       expiresAt: new Date(now + 30_000).toISOString(),

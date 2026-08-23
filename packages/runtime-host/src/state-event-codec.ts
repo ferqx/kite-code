@@ -8,14 +8,14 @@ import { assertCurrentRuntimeEvent, type RuntimeEvent } from '@kite/agent-kernel
  * persisted event. This wrapper preserves the package direction while using
  * the one State codec authority.
  */
-export function runtimeHostStateAssertCurrentRuntimeEventV1(
+export function runtimeHostStateAssertCurrentRuntimeEvent(
   value: unknown,
 ): asserts value is RuntimeEvent {
   assertCurrentRuntimeEvent(value);
 }
 
 /** Admit an untyped JSON value without intersecting its transport type with the event union. */
-export function runtimeHostStateAdmitCurrentRuntimeEventV1(value: unknown): RuntimeEvent {
+export function runtimeHostStateAdmitCurrentRuntimeEvent(value: unknown): RuntimeEvent {
   assertCurrentRuntimeEvent(value);
   return value;
 }

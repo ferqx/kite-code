@@ -1,6 +1,6 @@
 import type { Pointer } from 'bun:ffi';
 import { dlopen } from 'bun:ffi';
-import { spawnRuntimeHostProcessV1 } from './process-spawn';
+import { spawnRuntimeHostProcess } from './process-spawn';
 
 type KillableProcess = Pick<Bun.Subprocess, 'kill' | 'pid'>;
 
@@ -462,7 +462,7 @@ async function terminateWindowsProcessTree(pid: number): Promise<boolean> {
   if (await terminateWindowsProcessTreeNative(pid)) return true;
   const systemRoot = process.env.SystemRoot || 'C:\\Windows';
   try {
-    const killer = spawnRuntimeHostProcessV1(
+    const killer = spawnRuntimeHostProcess(
       [`${systemRoot}\\System32\\taskkill.exe`, '/pid', String(pid), '/t', '/f'],
       {
         stdin: 'ignore',

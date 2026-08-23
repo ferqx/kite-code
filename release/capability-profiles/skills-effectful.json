@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
-  "profileId": "manual-compaction-v1",
-  "capability": "manual_compaction",
-  "requiredFeatureFlags": ["contextCompactionManualV1", "contextCompactionV2"],
+  "profileId": "skills-effectful",
+  "capability": "skills_effectful",
+  "requiredFeatureFlags": ["skillActivation", "skillWorkflow"],
   "state": {
     "maturity": "under_development",
     "maxRollout": "off"
   },
   "dependencies": [
     {
-      "dependencyId": "compaction.route-qualification",
-      "expectedRevision": "v1"
+      "dependencyId": "capability.skills-readonly",
+      "expectedRevision": "stable-v1"
     },
     {
-      "dependencyId": "runtime.context-compaction",
-      "expectedRevision": "v2"
+      "dependencyId": "capability.verification",
+      "expectedRevision": "stable-v1"
     }
   ],
   "routeAllowlist": [],

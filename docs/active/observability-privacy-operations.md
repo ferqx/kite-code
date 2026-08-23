@@ -14,7 +14,7 @@ Production Model Artifact 或任何未来实验输入，也不能把 Runtime res
 
 ## 数据与启用边界
 
-`observabilityMetricsV1=false`，普通 CLI/TUI 入口没有 artifact telemetry authority 或默认网络 transport。
+`observabilityMetrics=false`，普通 CLI/TUI 入口没有 artifact telemetry authority 或默认网络 transport。
 project 配置只能关闭观测能力，不能开启远程发送、提供 endpoint secret 或扩大 release ceiling。仓库中
 保留的 exporter/composition contract 在缺少 release authority 或 transport 时固定注入 no-op reporter；
 它们只证明不可达路径 fail closed，不构成受支持的远程 telemetry 产品面。
@@ -26,7 +26,7 @@ metric、日志、报告或 artifact。未知 route/capability 只能折叠为�
 运行时权限切换的 `interaction_mode.changed` 是 Runtime Store 审计事实，不产生 observability metric 或
 属性；其 user source 与时间戳不得通过观测通道外发。
 `completion.blocked` 同样只保留为 Runtime Store 的 completion lifecycle 审计事实；Kernel 的
-`projectRuntimeEventToObservabilityFactV1` 不得为它创建 fact，Builtin projector 也不得为它创建 metric 或属性。事件只包含固定低基数的 blocker code、next action、计划阶段与 correction attempt，
+`projectRuntimeEventToObservabilityFact` 不得为它创建 fact，Builtin projector 也不得为它创建 metric 或属性。事件只包含固定低基数的 blocker code、next action、计划阶段与 correction attempt，
 不得包含 prompt、模型或工具正文、路径、命令、自由错误或身份信息。
 Model Gateway 的 `model.invocation_prepared/attempt_started/completed/interrupted/evidence_unavailable` 也只
 属于 Runtime Store evidence；Kernel fact projector 为它们生成零 fact。invocation id、Surface/Response
@@ -44,14 +44,14 @@ Builtin projector 的 allowlist，不能从 private invocation event 补充高�
 ## Owner 与注入链
 
 Runtime Event 到 secret-free observation fact 只有一个 owner：`@kite/agent-kernel` 的纯函数
-`projectRuntimeEventToObservabilityFactV1`。它只读取闭集事件字段，优先使用 envelope `occurredAt`，无 envelope
+`projectRuntimeEventToObservabilityFact`。它只读取闭集事件字段，优先使用 envelope `occurredAt`，无 envelope
 时使用调用方明确提供的 fallback 时间戳；不复制 State、Store、receipt identity、正文或自由错误。
-`@kite/builtin-runtime` 的 `createBuiltinObservabilityProjectorV1` 只消费 typed fact、model、receipt、resource、release
+`@kite/builtin-runtime` 的 `createBuiltinObservabilityProjector` 只消费 typed fact、model、receipt、resource、release
 与 task-stage DTO，并生成 metric draft；它不导入 Runtime Event 或 Host schema。Metric name、字段与数值约束仍只有
-`@kite/runtime-host` 的现有 metric schema 在 `createMetricSampleV1` 边界校验。
+`@kite/runtime-host` 的现有 metric schema 在 `createMetricSample` 边界校验。
 `apps/kite` 的 Runtime bridge 只负责把 Builtin draft 交给 Host reporter，并吞掉 projector、schema 或 reporter 异常，不能改变
 Runtime outcome。旧 `src/core/observability/runtime-fact.ts` 兼容 seam 已删除；App `RuntimeSessionCoordinator` 与 CLI
-只经 `@kite/runtime-host` 的窄 `projectRuntimeObservabilityFactV1` port 调用同一 Kernel projector。禁止恢复
+只经 `@kite/runtime-host` 的窄 `projectRuntimeObservabilityFact` port 调用同一 Kernel projector。禁止恢复
 旧 mapper/shim 或在 Contract、Builtin、App 复制 Event→fact 语义。
 
 Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低优先级样本并只记录本地 drop 计数。

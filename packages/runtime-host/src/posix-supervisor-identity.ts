@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 
-export interface PosixSupervisorIdentityV1 {
+export interface PosixSupervisorIdentity {
   readonly version: 1;
   readonly dispatchId: string;
   readonly supervisorNonce: string;
@@ -24,13 +24,13 @@ export interface PosixSupervisorIdentityV1 {
   readonly processStartIdentity: string;
 }
 
-export function posixSupervisorIdentityPathV1(runtimePath: string, dispatchId: string): string {
+export function posixSupervisorIdentityPath(runtimePath: string, dispatchId: string): string {
   assertDispatchId(dispatchId);
   return join(runtimePath, `.supervisor-${dispatchId}.json`);
 }
 
 /** Comparable across processes; Darwin deliberately never uses the local timeOrigin fallback. */
-export function readComparablePosixProcessStartIdentityV1(pid: number): string | undefined {
+export function readComparablePosixProcessStartIdentity(pid: number): string | undefined {
   if (!Number.isSafeInteger(pid) || pid < 1) return undefined;
   if (process.platform === 'linux') {
     try {
@@ -85,10 +85,7 @@ export function readComparablePosixProcessStartIdentityV1(pid: number): string |
   return undefined;
 }
 
-export function posixProcessIdentityBindsGroupV1(
-  identity: string,
-  processGroupId: number,
-): boolean {
+export function posixProcessIdentityBindsGroup(identity: string, processGroupId: number): boolean {
   if (identity.startsWith('linux:')) {
     const parts = identity.split(':');
     return parts.length === 5 && parts[3] === String(processGroupId);
@@ -129,9 +126,9 @@ function darwinProcessApi(): DarwinProcessApi {
   return cachedDarwinProcessApi;
 }
 
-export function writePosixSupervisorIdentityV1(
+export function writePosixSupervisorIdentity(
   path: string,
-  identity: PosixSupervisorIdentityV1,
+  identity: PosixSupervisorIdentity,
 ): void {
   validate(identity);
   const fd = openSync(
@@ -159,7 +156,7 @@ export function writePosixSupervisorIdentityV1(
   }
 }
 
-export function readPosixSupervisorIdentityV1(path: string): PosixSupervisorIdentityV1 | undefined {
+export function readPosixSupervisorIdentity(path: string): PosixSupervisorIdentity | undefined {
   try {
     const metadata = lstatSync(path);
     if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1) return undefined;
@@ -172,13 +169,13 @@ export function readPosixSupervisorIdentityV1(path: string): PosixSupervisorIden
       return undefined;
     }
     validate(value);
-    return Object.freeze(value as unknown as PosixSupervisorIdentityV1);
+    return Object.freeze(value as unknown as PosixSupervisorIdentity);
   } catch {
     return undefined;
   }
 }
 
-function validate(value: Record<string, unknown> | PosixSupervisorIdentityV1): void {
+function validate(value: Record<string, unknown> | PosixSupervisorIdentity): void {
   if (
     value.version !== 1 ||
     typeof value.dispatchId !== 'string' ||
@@ -191,7 +188,7 @@ function validate(value: Record<string, unknown> | PosixSupervisorIdentityV1): v
   ) {
     throw new Error('POSIX supervisor identity is malformed.');
   }
-  if (!posixProcessIdentityBindsGroupV1(value.processStartIdentity, Number(value.processGroupId))) {
+  if (!posixProcessIdentityBindsGroup(value.processStartIdentity, Number(value.processGroupId))) {
     throw new Error('POSIX supervisor identity does not bind its process group.');
   }
   assertDispatchId(value.dispatchId);

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sqliteRuntimeStorePathForV2 } from '@kite/runtime-storage-sqlite';
+import { sqliteRuntimeStorePath } from '@kite/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
@@ -20,7 +20,7 @@ describe('TUI PTY System — Keyless Runtime Cutover', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
     const runtimeRoot = join(workspace.home, '.kite-code');
-    writeFileSync(join(runtimeRoot, 'project-identities-v1.json'), '{"legacy":true}\n');
+    writeFileSync(join(runtimeRoot, 'project-identities.json'), '{"legacy":true}\n');
     writeFileSync(join(runtimeRoot, 'checkpoints.runtime-v5.db'), 'legacy-header-shim');
     server.setResponses([]);
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -40,10 +40,10 @@ describe('TUI PTY System — Keyless Runtime Cutover', () => {
     expect(existsSync(join(installationRoot, 'project-identities-state-store-v2.json'))).toBe(
       false,
     );
-    expect(
-      existsSync(sqliteRuntimeStorePathForV2(join(installationRoot, 'checkpoints.sqlite'))),
-    ).toBe(true);
-    expect(readFileSync(join(installationRoot, 'project-identities-v1.json'), 'utf8')).toBe(
+    expect(existsSync(sqliteRuntimeStorePath(join(installationRoot, 'checkpoints.sqlite')))).toBe(
+      true,
+    );
+    expect(readFileSync(join(installationRoot, 'project-identities.json'), 'utf8')).toBe(
       '{"legacy":true}\n',
     );
     expect(readFileSync(join(installationRoot, 'checkpoints.runtime-v5.db'), 'utf8')).toBe(

@@ -1,16 +1,15 @@
 import {
-  type CgroupPidsScopeIdentityV1,
-  isCgroupPidsExecutablePathV1,
-  isCgroupPidsPathV1,
-  isCgroupPidsUnitNameV1,
+  type CgroupPidsScopeIdentity,
+  isCgroupPidsExecutablePath,
+  isCgroupPidsPath,
+  isCgroupPidsUnitName,
 } from '../cgroup-pids-contract';
 
-export const LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_V1 =
-  'kite.linux-cgroup-scope-candidate.v1' as const;
+export const LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_ = 'kite.linux-cgroup-scope-candidate.v1' as const;
 
 /** Candidate-only identity facts; still require native readback before production use. */
-export interface LinuxCgroupScopeCandidateV1 {
-  readonly schema: typeof LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_V1;
+export interface LinuxCgroupScopeCandidate {
+  readonly schema: typeof LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_;
   readonly unitName: string;
   readonly runnerExecutable: string;
   readonly systemctlExecutable: string;
@@ -22,10 +21,10 @@ export interface LinuxCgroupScopeCandidateV1 {
  * dispatch capability. The current Runtime lifecycle deliberately never
  * consumes this result before a future durable scope-ack field exists.
  */
-export function parseLinuxCgroupScopeIdentityV1(input: {
+export function parseLinuxCgroupScopeIdentity(input: {
   readonly argv: readonly string[];
   readonly candidate: unknown;
-}): { readonly scope?: CgroupPidsScopeIdentityV1; readonly invalid: boolean } {
+}): { readonly scope?: CgroupPidsScopeIdentity; readonly invalid: boolean } {
   if (!isRecord(input.candidate)) return { invalid: true };
   const keys = Object.keys(input.candidate).sort();
   if (
@@ -35,18 +34,18 @@ export function parseLinuxCgroupScopeIdentityV1(input: {
     keys[2] !== 'schema' ||
     keys[3] !== 'systemctlExecutable' ||
     keys[4] !== 'unitName' ||
-    input.candidate.schema !== LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_V1
+    input.candidate.schema !== LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_
   ) {
     return { invalid: true };
   }
   const { unitName, runnerExecutable, systemctlExecutable, cgroupPath } = input.candidate;
   if (
-    !isCgroupPidsUnitNameV1(unitName) ||
-    !isCgroupPidsExecutablePathV1(runnerExecutable) ||
-    !isCgroupPidsExecutablePathV1(systemctlExecutable) ||
-    !isCgroupPidsPathV1(cgroupPath, unitName) ||
+    !isCgroupPidsUnitName(unitName) ||
+    !isCgroupPidsExecutablePath(runnerExecutable) ||
+    !isCgroupPidsExecutablePath(systemctlExecutable) ||
+    !isCgroupPidsPath(cgroupPath, unitName) ||
     input.argv[0] !== runnerExecutable ||
-    cgroupPidsUnitFromArgvV1(input.argv) !== unitName
+    cgroupPidsUnitFromArgv(input.argv) !== unitName
   ) {
     return { invalid: true };
   }
@@ -57,10 +56,10 @@ export function parseLinuxCgroupScopeIdentityV1(input: {
 }
 
 /** Extract the Runtime-owned unit from a sealed argv; arbitrary unit names are rejected. */
-export function cgroupPidsUnitFromArgvV1(argv: readonly string[]): string | undefined {
+export function cgroupPidsUnitFromArgv(argv: readonly string[]): string | undefined {
   if (
     argv.length < 12 ||
-    !isCgroupPidsExecutablePathV1(argv[0]) ||
+    !isCgroupPidsExecutablePath(argv[0]) ||
     argv[1] !== '--user' ||
     argv[2] !== '--scope' ||
     argv[3] !== '--quiet' ||
@@ -83,7 +82,7 @@ export function cgroupPidsUnitFromArgvV1(argv: readonly string[]): string | unde
     !/^[1-9][0-9]*$/.test(maxTasks) ||
     !Number.isSafeInteger(Number(maxTasks)) ||
     !argv[9]?.startsWith('--unit=') ||
-    !isCgroupPidsUnitNameV1(unitName)
+    !isCgroupPidsUnitName(unitName)
   ) {
     return undefined;
   }
@@ -91,14 +90,14 @@ export function cgroupPidsUnitFromArgvV1(argv: readonly string[]): string | unde
 }
 
 /** Pure argv contract for a future consumer-owned exact-unit kill-all. */
-export function buildCgroupPidsKillInvocationV1(input: {
-  readonly scope: Readonly<CgroupPidsScopeIdentityV1>;
+export function buildCgroupPidsKillInvocation(input: {
+  readonly scope: Readonly<CgroupPidsScopeIdentity>;
 }): string[] {
   if (
-    !isCgroupPidsUnitNameV1(input.scope.unitName) ||
-    !isCgroupPidsExecutablePathV1(input.scope.runnerExecutable) ||
-    !isCgroupPidsExecutablePathV1(input.scope.systemctlExecutable) ||
-    !isCgroupPidsPathV1(input.scope.cgroupPath, input.scope.unitName)
+    !isCgroupPidsUnitName(input.scope.unitName) ||
+    !isCgroupPidsExecutablePath(input.scope.runnerExecutable) ||
+    !isCgroupPidsExecutablePath(input.scope.systemctlExecutable) ||
+    !isCgroupPidsPath(input.scope.cgroupPath, input.scope.unitName)
   ) {
     throw new Error('cgroup pids cleanup authority is invalid.');
   }
@@ -115,7 +114,7 @@ export function buildCgroupPidsKillInvocationV1(input: {
 }
 
 /** Parse a cgroup-v2 events file; missing/invalid evidence stays unsupported. */
-export function parseCgroupPidsPopulatedV1(contents: string): boolean | undefined {
+export function parseCgroupPidsPopulated(contents: string): boolean | undefined {
   if (contents === '') return undefined;
   const normalized = contents.endsWith('\n') ? contents.slice(0, -1) : contents;
   const lines = normalized.split('\n');
@@ -128,13 +127,13 @@ export function parseCgroupPidsPopulatedV1(contents: string): boolean | undefine
 }
 
 /** Parse cgroup.procs as an exact empty/non-empty fact. */
-export function parseCgroupPidsEmptyV1(contents: string): boolean | undefined {
+export function parseCgroupPidsEmpty(contents: string): boolean | undefined {
   if (contents === '') return true;
   if (!/^[1-9][0-9]*(?:\n[1-9][0-9]*)*\n?$/.test(contents)) return undefined;
   return false;
 }
 
-export { isCgroupPidsPathV1, isCgroupPidsUnitNameV1 };
+export { isCgroupPidsPath, isCgroupPidsUnitName };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

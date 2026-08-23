@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { projectRuntimeSchedulerFactsV1 } from '#app/bootstrap/runtime/scheduler-facts';
-import { runStateRuntimeLoopV1 } from '#app/bootstrap/runtime/state-runner';
-import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
-import { testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
+import { projectRuntimeSchedulerFacts } from '#app/bootstrap/runtime/scheduler-facts';
+import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { testBuiltinToolCatalog } from '../helpers/runtime-model';
 
-function canonicalShellInvocationFactsV1(command: string) {
-  const entry = testBuiltinToolCatalogV1().entries.find(
+function canonicalShellInvocationFacts(command: string) {
+  const entry = testBuiltinToolCatalog().entries.find(
     (candidate) => candidate.visibility === 'model' && candidate.name === 'shell_execute',
   );
   if (!entry) throw new Error('Builtin shell catalog entry is unavailable.');
@@ -25,7 +25,7 @@ function canonicalShellInvocationFactsV1(command: string) {
 
 describe('concurrent shell bounded cancellation', () => {
   test('records cancel_incomplete without reviving a cancelled shell or dispatching successors', async () => {
-    const initial = createRuntimeHostStateInitialStateV1({
+    const initial = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'cancel-incomplete-shell',
       userId: 'u',
@@ -39,7 +39,7 @@ describe('concurrent shell bounded cancellation', () => {
       args: { command: 'long-running' },
       status: 'approved',
       approvalGrant: 'approve_once',
-      ...canonicalShellInvocationFactsV1('long-running'),
+      ...canonicalShellInvocationFacts('long-running'),
       createdAtTurnId: initial.turn.turnId,
     };
     initial.tools.calls['shell-2'] = {
@@ -49,12 +49,12 @@ describe('concurrent shell bounded cancellation', () => {
       name: 'shell_execute',
       args: { command: 'needs-approval' },
       status: 'queued',
-      ...canonicalShellInvocationFactsV1('needs-approval'),
+      ...canonicalShellInvocationFacts('needs-approval'),
       createdAtTurnId: initial.turn.turnId,
     };
     initial.tools.queue = [...initial.tools.queue, 'shell-1', 'shell-2'];
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: initial,
       interactionMode: 'accept_edits',
     });
@@ -62,7 +62,7 @@ describe('concurrent shell bounded cancellation', () => {
     let modelCalls = 0;
     const events: RuntimeEvent[] = [];
 
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async (effect, state, emit) => {
         if (effect.type === 'call_model') {
@@ -133,7 +133,7 @@ describe('concurrent shell bounded cancellation', () => {
       10_000,
       undefined,
       controller.signal,
-      (state) => projectRuntimeSchedulerFactsV1(state, testBuiltinToolCatalogV1()),
+      (state) => projectRuntimeSchedulerFacts(state, testBuiltinToolCatalog()),
     )) {
       events.push(event);
       if (event.type === 'approval.rejected') controller.abort();
@@ -164,7 +164,7 @@ describe('concurrent shell bounded cancellation', () => {
   });
 
   test('drains background cleanup when deadline aborts a pending approval interaction', async () => {
-    const initial = createRuntimeHostStateInitialStateV1({
+    const initial = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'deadline-pending-approval',
       userId: 'u',
@@ -178,7 +178,7 @@ describe('concurrent shell bounded cancellation', () => {
       args: { command: 'long-running' },
       status: 'approved',
       approvalGrant: 'approve_once',
-      ...canonicalShellInvocationFactsV1('long-running'),
+      ...canonicalShellInvocationFacts('long-running'),
       createdAtTurnId: initial.turn.turnId,
     };
     initial.tools.calls['shell-2'] = {
@@ -188,12 +188,12 @@ describe('concurrent shell bounded cancellation', () => {
       name: 'shell_execute',
       args: { command: 'needs-approval' },
       status: 'queued',
-      ...canonicalShellInvocationFactsV1('needs-approval'),
+      ...canonicalShellInvocationFacts('needs-approval'),
       createdAtTurnId: initial.turn.turnId,
     };
     initial.tools.queue = [...initial.tools.queue, 'shell-1', 'shell-2'];
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: initial,
       interactionMode: 'accept_edits',
     });
@@ -202,7 +202,7 @@ describe('concurrent shell bounded cancellation', () => {
     let cleanupFinished = false;
     const events: RuntimeEvent[] = [];
 
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async (effect, state, emit) => {
         if (effect.type !== 'run_tools') return [];
@@ -271,7 +271,7 @@ describe('concurrent shell bounded cancellation', () => {
       10_000,
       undefined,
       controller.signal,
-      (state) => projectRuntimeSchedulerFactsV1(state, testBuiltinToolCatalogV1()),
+      (state) => projectRuntimeSchedulerFacts(state, testBuiltinToolCatalog()),
     )) {
       events.push(event);
     }

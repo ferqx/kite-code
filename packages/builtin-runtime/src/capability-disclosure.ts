@@ -4,27 +4,27 @@ import type {
   CapabilitySearchProviderDiagnostic,
   CapabilitySnapshot,
 } from '@kite/runtime-contract';
-import type { RuntimeJsonValueV1 } from '@kite/runtime-spi';
+import type { RuntimeJsonValue } from '@kite/runtime-spi';
 import { safeCapabilityMetadata } from './mcp/capability-domain';
 import type { McpDiagnosticCode } from './mcp/diagnostics';
-import { isMcpProviderUnavailableV1, mcpProviderSearchNextActionV1 } from './mcp/provider-status';
+import { isMcpProviderUnavailable, mcpProviderSearchNextAction } from './mcp/provider-status';
 import type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
 } from './mcp/runtime-provider';
-import { createCapabilitySnapshotV1, digestCapabilityValueV1 } from './skills/capability-domain';
+import { createCapabilitySnapshot, digestCapabilityValue } from './skills/capability-domain';
 
-export type CapabilityDisclosureModeV1 = 'all' | 'search' | 'fail_closed';
+export type CapabilityDisclosureMode = 'all' | 'search' | 'fail_closed';
 
-export interface CapabilityDisclosureDecisionV1 {
-  readonly mode: CapabilityDisclosureModeV1;
-  readonly skillMode?: CapabilityDisclosureModeV1;
+export interface CapabilityDisclosureDecision {
+  readonly mode: CapabilityDisclosureMode;
+  readonly skillMode?: CapabilityDisclosureMode;
   readonly estimatedTokens: number;
   readonly budgetTokens: number;
   readonly reason: string;
 }
 
-export interface SearchableCapabilityDescriptorV1 {
+export interface SearchableCapabilityDescriptor {
   readonly capabilityId: string;
   readonly revision: string;
   readonly kind: 'mcp_tool' | 'skill';
@@ -34,16 +34,16 @@ export interface SearchableCapabilityDescriptorV1 {
   readonly providerId: string;
 }
 
-export interface SearchableProviderEntryV1 {
+export interface SearchableProviderEntry {
   readonly providerId: string;
   readonly status: McpProviderDirectoryEntry['status'];
   readonly lastKnownCapabilityNames: readonly string[];
   readonly diagnosticCode?: McpDiagnosticCode;
 }
 
-export type BuiltinCapabilitySearchCandidateV1 = RuntimeJsonValueV1 &
+export type BuiltinCapabilitySearchCandidate = RuntimeJsonValue &
   Readonly<CapabilitySearchCandidate>;
-export type BuiltinCapabilitySearchProviderDiagnosticV1 = RuntimeJsonValueV1 &
+export type BuiltinCapabilitySearchProviderDiagnostic = RuntimeJsonValue &
   Readonly<CapabilitySearchProviderDiagnostic>;
 
 const SEARCHABLE_KINDS = new Set<CapabilityDescriptor['kind']>(['mcp_tool', 'skill']);
@@ -56,17 +56,17 @@ const MODEL_HIDDEN_SCHEMA_ANNOTATIONS = new Set([
 ]);
 const MAX_DIRECT_BIND_TOOL_COUNT = 20;
 
-export function modelVisibleCapabilitySchemaV1(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(modelVisibleCapabilitySchemaV1);
+export function modelVisibleCapabilitySchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(modelVisibleCapabilitySchema);
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
       .filter(([key]) => !MODEL_HIDDEN_SCHEMA_ANNOTATIONS.has(key))
-      .map(([key, item]) => [key, modelVisibleCapabilitySchemaV1(item)]),
+      .map(([key, item]) => [key, modelVisibleCapabilitySchema(item)]),
   );
 }
 
-export function searchableCapabilitySnapshotV1(input: {
+export function searchableCapabilitySnapshot(input: {
   readonly mcp?: CapabilitySnapshot;
   readonly skills?: CapabilitySnapshot;
 }): CapabilitySnapshot {
@@ -79,10 +79,10 @@ export function searchableCapabilitySnapshotV1(input: {
       (descriptor, index, all) =>
         all.findIndex((candidate) => candidate.capabilityId === descriptor.capabilityId) === index,
     );
-  return createCapabilitySnapshotV1(descriptors);
+  return createCapabilitySnapshot(descriptors);
 }
 
-export function estimateCapabilityCatalogTokensV1(
+export function estimateCapabilityCatalogTokens(
   descriptors: readonly CapabilityDescriptor[],
 ): number {
   const characters = descriptors.reduce(
@@ -99,17 +99,17 @@ export function estimateCapabilityCatalogTokensV1(
   return Math.ceil(characters / 4);
 }
 
-export function chooseCapabilityDisclosureV1(input: {
+export function chooseCapabilityDisclosure(input: {
   readonly featureEnabled: boolean;
   readonly providerSupportsToolCalls: boolean;
   readonly descriptors: readonly CapabilityDescriptor[];
   readonly contextWindowTokens?: number;
   readonly budgetTokens?: number;
-}): CapabilityDisclosureDecisionV1 {
+}): CapabilityDisclosureDecision {
   const mcpDescriptors = input.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool');
   const skillDescriptors = input.descriptors.filter((descriptor) => descriptor.kind === 'skill');
-  const estimatedMcpTokens = estimateCapabilityCatalogTokensV1(mcpDescriptors);
-  const estimatedSkillTokens = estimateCapabilityCatalogTokensV1(skillDescriptors);
+  const estimatedMcpTokens = estimateCapabilityCatalogTokens(mcpDescriptors);
+  const estimatedSkillTokens = estimateCapabilityCatalogTokens(skillDescriptors);
   const estimatedTokens = estimatedMcpTokens + estimatedSkillTokens;
   const budgetTokens =
     input.budgetTokens ??
@@ -166,12 +166,12 @@ export function chooseCapabilityDisclosureV1(input: {
   };
 }
 
-export function searchCapabilitySnapshotV1(input: {
+export function searchCapabilitySnapshot(input: {
   readonly snapshot: CapabilitySnapshot;
   readonly query: string;
   readonly limit?: number;
-}): readonly BuiltinCapabilitySearchCandidateV1[] {
-  return projectCapabilitySearchCandidatesV1({
+}): readonly BuiltinCapabilitySearchCandidate[] {
+  return projectCapabilitySearchCandidates({
     catalogRevision: input.snapshot.revision,
     descriptors: input.snapshot.descriptors
       .filter(
@@ -193,12 +193,12 @@ export function searchCapabilitySnapshotV1(input: {
   });
 }
 
-export function projectCapabilitySearchCandidatesV1(input: {
+export function projectCapabilitySearchCandidates(input: {
   readonly catalogRevision: string;
-  readonly descriptors: readonly SearchableCapabilityDescriptorV1[];
+  readonly descriptors: readonly SearchableCapabilityDescriptor[];
   readonly query: string;
   readonly limit?: number;
-}): readonly BuiltinCapabilitySearchCandidateV1[] {
+}): readonly BuiltinCapabilitySearchCandidate[] {
   const query = input.query.trim().slice(0, 512);
   const queryTerms = terms(query);
   const phrase = query.toLocaleLowerCase();
@@ -231,7 +231,7 @@ export function projectCapabilitySearchCandidatesV1(input: {
       .slice(0, limit)
       .map(({ descriptor }) =>
         Object.freeze({
-          candidateRef: digestCapabilityValueV1({
+          candidateRef: digestCapabilityValue({
             catalogRevision: input.catalogRevision,
             capabilityId: descriptor.capabilityId,
             revision: descriptor.revision,
@@ -247,23 +247,23 @@ export function projectCapabilitySearchCandidatesV1(input: {
   );
 }
 
-export function searchUnavailableProvidersV1(input: {
+export function searchUnavailableProviders(input: {
   readonly directory?: McpProviderDirectorySnapshot;
   readonly query: string;
   readonly limit?: number;
-}): readonly BuiltinCapabilitySearchProviderDiagnosticV1[] {
-  return projectUnavailableProviderSearchV1({
+}): readonly BuiltinCapabilitySearchProviderDiagnostic[] {
+  return projectUnavailableProviderSearch({
     entries: input.directory?.entries ?? [],
     query: input.query,
     limit: input.limit,
   });
 }
 
-export function projectUnavailableProviderSearchV1(input: {
-  readonly entries: readonly SearchableProviderEntryV1[];
+export function projectUnavailableProviderSearch(input: {
+  readonly entries: readonly SearchableProviderEntry[];
   readonly query: string;
   readonly limit?: number;
-}): readonly BuiltinCapabilitySearchProviderDiagnosticV1[] {
+}): readonly BuiltinCapabilitySearchProviderDiagnostic[] {
   const query = input.query.trim().slice(0, 512);
   const queryTerms = terms(query);
   const phrase = query.toLocaleLowerCase();
@@ -273,9 +273,9 @@ export function projectUnavailableProviderSearchV1(input: {
       .filter(
         (
           entry,
-        ): entry is SearchableProviderEntryV1 & {
+        ): entry is SearchableProviderEntry & {
           readonly status: Exclude<McpProviderDirectoryEntry['status'], 'ready'>;
-        } => isMcpProviderUnavailableV1(entry.status),
+        } => isMcpProviderUnavailable(entry.status),
       )
       .map((entry) => {
         const searchable = [entry.providerId, ...entry.lastKnownCapabilityNames]
@@ -298,7 +298,7 @@ export function projectUnavailableProviderSearchV1(input: {
         Object.freeze({
           providerId: safeCapabilityMetadata(entry.providerId),
           status: entry.status,
-          nextAction: mcpProviderSearchNextActionV1(entry.status),
+          nextAction: mcpProviderSearchNextAction(entry.status),
           ...(entry.diagnosticCode ? { diagnosticCode: entry.diagnosticCode } : {}),
         }),
       ),

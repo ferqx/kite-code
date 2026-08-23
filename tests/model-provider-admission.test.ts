@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentConfig } from '#app/config';
-import { createApprovedProviderDataAdmissionV1 } from '#app/config';
-import { denyMissingProviderDataAdmissionV1 } from '#app/config/provider-data-admission';
+import { createApprovedProviderDataAdmission } from '#app/config';
+import { denyMissingProviderDataAdmission } from '#app/config/provider-data-admission';
 
 const config: AgentConfig = {
   apiKey: 'configured-provider-secret',
@@ -30,7 +30,7 @@ const providerPrompt = (
 describe('model Provider data admission', () => {
   test('admits the provider selected by resolved user configuration', () => {
     expect(
-      createApprovedProviderDataAdmissionV1(config)(providerPrompt('hello'), 'primary_model'),
+      createApprovedProviderDataAdmission(config)(providerPrompt('hello'), 'primary_model'),
     ).toEqual({
       admitted: true,
       reason: 'admitted',
@@ -40,7 +40,7 @@ describe('model Provider data admission', () => {
   });
 
   test('blocks explicit and detected credentials', () => {
-    const admit = createApprovedProviderDataAdmissionV1(config);
+    const admit = createApprovedProviderDataAdmission(config);
     expect(admit(providerPrompt('hello', 'secret'))).toMatchObject({
       admitted: false,
       reason: 'provider_secret_denied',
@@ -52,7 +52,7 @@ describe('model Provider data admission', () => {
   });
 
   test('fails closed when production composition omits the admission boundary', () => {
-    expect(denyMissingProviderDataAdmissionV1([])).toEqual({
+    expect(denyMissingProviderDataAdmission([])).toEqual({
       admitted: false,
       reason: 'mandatory_policy_unavailable',
       routeAlias: 'unresolved',

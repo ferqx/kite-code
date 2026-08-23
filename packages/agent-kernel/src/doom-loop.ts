@@ -1,16 +1,16 @@
 import { sha256Hex } from './hash';
 
-export interface KernelDoomLoopRequestV1 {
+export interface KernelDoomLoopRequest {
   readonly name: string;
   readonly args: unknown;
 }
 
-export interface KernelDoomLoopTrackerEntryV1 {
+export interface KernelDoomLoopTrackerEntry {
   readonly count: number;
   readonly lastSeenAt: number;
 }
 
-export interface KernelDoomLoopCheckV1 {
+export interface KernelDoomLoopCheck {
   readonly blocked: boolean;
   readonly reason?: string;
   readonly fingerprint: string;
@@ -30,7 +30,7 @@ function stableStringify(value: unknown): string {
 }
 
 /** Deterministically bind the State 25 repeat policy to the governed execution target. */
-export function kernelToolDoomLoopFingerprintV1(request: KernelDoomLoopRequestV1): string {
+export function kernelToolDoomLoopFingerprint(request: KernelDoomLoopRequest): string {
   const record =
     request.args !== null && typeof request.args === 'object' && !Array.isArray(request.args)
       ? (request.args as Record<string, unknown>)
@@ -45,13 +45,13 @@ export function kernelToolDoomLoopFingerprintV1(request: KernelDoomLoopRequestV1
 }
 
 /** Evaluate a private fingerprint against immutable State 25 facts. */
-export function kernelCheckDoomLoopFingerprintV1(
-  tracker: Readonly<Record<string, KernelDoomLoopTrackerEntryV1>>,
+export function kernelCheckDoomLoopFingerprint(
+  tracker: Readonly<Record<string, KernelDoomLoopTrackerEntry>>,
   fingerprint: string,
   threshold: number,
   windowMs: number,
   observedAt: number,
-): KernelDoomLoopCheckV1 {
+): KernelDoomLoopCheck {
   const entry = tracker[fingerprint];
   const elapsed = entry ? observedAt - entry.lastSeenAt : undefined;
   if (entry && elapsed !== undefined && elapsed >= 0 && elapsed <= windowMs) {
@@ -68,12 +68,12 @@ export function kernelCheckDoomLoopFingerprintV1(
 }
 
 /** Pure State 25 tracker transition. Time is always supplied as an explicit fact. */
-export function kernelUpdateDoomLoopTrackerV1(
-  tracker: Readonly<Record<string, KernelDoomLoopTrackerEntryV1>>,
+export function kernelUpdateDoomLoopTracker(
+  tracker: Readonly<Record<string, KernelDoomLoopTrackerEntry>>,
   fingerprint: string,
   observedAt: number,
   windowMs = 60_000,
-): Readonly<Record<string, KernelDoomLoopTrackerEntryV1>> {
+): Readonly<Record<string, KernelDoomLoopTrackerEntry>> {
   const next = { ...tracker };
   for (const [key, entry] of Object.entries(next)) {
     if (observedAt - entry.lastSeenAt > 120_000) delete next[key];

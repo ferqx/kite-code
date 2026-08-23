@@ -17,7 +17,7 @@ import {
   type SecureSessionStorageOptions,
 } from '@kite/builtin-runtime/model';
 import { sessionLogRoot } from '#app/config/paths';
-import type { SessionLoggingPolicyV1 } from '#app/config/session-logging-policy';
+import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
 import {
   type ActiveSessionLeaseOptions,
   inspectSessionLogLease,
@@ -70,7 +70,7 @@ interface ScanBudget {
 }
 
 export function runSessionLogMaintenance(
-  policy: SessionLoggingPolicyV1,
+  policy: SessionLoggingPolicy,
   options: SessionLogMaintenanceOptions = {},
 ): SessionLogMaintenanceReport {
   const root = options.root ?? sessionLogRoot();
@@ -94,7 +94,6 @@ export function runSessionLogMaintenance(
     capacitySatisfied: true,
   };
   ensureRoot(root, options);
-  migrateLegacyQuarantine(root, options, report);
   const candidates: SessionCandidate[] = [];
   let activeReservationBytes = 0;
   const scanBudget: ScanBudget = { deadlineAt, maxEntries, report };
@@ -410,22 +409,6 @@ function ensureQuarantine(root: string, options: SecureSessionStorageOptions): s
   if (!existsSync(quarantine)) mkdirSync(quarantine, { mode: 0o700 });
   ensureSecureSessionLogDirectory(quarantine, options);
   return quarantine;
-}
-
-function migrateLegacyQuarantine(
-  root: string,
-  options: SecureSessionStorageOptions,
-  report: SessionLogMaintenanceReport,
-): void {
-  const legacy = join(root, '_quarantine');
-  if (!existsSync(legacy)) return;
-  try {
-    ensureSecureSessionLogDirectory(legacy, options);
-    renameSync(legacy, join(ensureQuarantine(root, options), `legacy-${randomUUID()}`));
-    report.quarantinedSessions++;
-  } catch {
-    report.capacitySatisfied = false;
-  }
 }
 
 function quarantineRootEntry(

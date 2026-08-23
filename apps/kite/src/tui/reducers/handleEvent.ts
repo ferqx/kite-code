@@ -3,10 +3,10 @@
 import { contextCompactionTerminalNotice } from '@kite/builtin-runtime/model';
 import type * as Protocol from '@kite/runtime-contract';
 import {
-  canonicalToolOutcomeV1,
-  projectTerminalOutcomeV1,
-  toolOutcomeProtocolStatusV1,
-  toolOutcomeSucceededV1,
+  canonicalToolOutcome,
+  projectTerminalOutcome,
+  toolOutcomeProtocolStatus,
+  toolOutcomeSucceeded,
 } from '#app/runtime-projection';
 import {
   formatToolResultForDisplay,
@@ -2593,11 +2593,11 @@ export function handleRuntimeEventAction(
       };
     }
     case 'run.completed':
-      if (event.outcome && !projectTerminalOutcomeV1(event.outcome).complete) {
+      if (event.outcome && !projectTerminalOutcome(event.outcome).complete) {
         return handleEventAction(state, {
           type: 'error',
           data: {
-            message: projectTerminalOutcomeV1(event.outcome).label,
+            message: projectTerminalOutcome(event.outcome).label,
             recoverable: event.outcome.safeRetry,
           },
         });
@@ -2785,7 +2785,7 @@ export function handleRuntimeEventAction(
         type: 'error',
         data: {
           message: event.outcome
-            ? `${projectTerminalOutcomeV1(event.outcome).label}: ${event.message}`
+            ? `${projectTerminalOutcome(event.outcome).label}: ${event.message}`
             : event.message,
           recoverable: event.outcome?.safeRetry ?? event.recoverable,
         },
@@ -2825,21 +2825,21 @@ export function handleRuntimeEventAction(
       });
     case 'tool.finished': {
       const materialized = materializePendingTool(state, event.toolCallId, 'running', true);
-      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const outcome = canonicalToolOutcome(event);
       return clearTerminalToolApproval(
         handleEventAction(materialized, {
           type: 'tool_done',
           data: {
             call_id: event.toolCallId,
             name: event.name,
-            ok: toolOutcomeSucceededV1(outcomeV1),
+            ok: toolOutcomeSucceeded(outcome),
             summary: formatToolResultForDisplay(
               event.name,
               event.result.stdout,
               event.result.stderr,
             ),
             exitCode: event.result.exitCode,
-            status: toolOutcomeProtocolStatusV1(outcomeV1),
+            status: toolOutcomeProtocolStatus(outcome),
             userInput: event.result.userInput,
           },
         }),
@@ -2847,7 +2847,7 @@ export function handleRuntimeEventAction(
       );
     }
     case 'tool.failed': {
-      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const outcome = canonicalToolOutcome(event);
       const pendingName =
         state.pendingToolCalls[event.toolCallId]?.name ??
         visibleToolName(state, event.toolCallId) ??
@@ -2861,14 +2861,14 @@ export function handleRuntimeEventAction(
             name: pendingName,
             ok: false,
             summary: event.failure.message,
-            status: toolOutcomeProtocolStatusV1(outcomeV1),
+            status: toolOutcomeProtocolStatus(outcome),
           },
         }),
         event.toolCallId,
       );
     }
     case 'tool.rejected': {
-      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const outcome = canonicalToolOutcome(event);
       if (event.failure?.kind === 'phase_deferred') {
         return withoutPendingTool(state, event.toolCallId);
       }
@@ -2895,14 +2895,14 @@ export function handleRuntimeEventAction(
             name: pendingName,
             ok: false,
             summary: event.reason,
-            status: toolOutcomeProtocolStatusV1(outcomeV1),
+            status: toolOutcomeProtocolStatus(outcome),
           },
         }),
         event.toolCallId,
       );
     }
     case 'tool.cancelled': {
-      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const outcome = canonicalToolOutcome(event);
       const wasPending = state.pendingToolCalls[event.toolCallId] != null;
       const visibleCard = findBlock(
         state,
@@ -2927,7 +2927,7 @@ export function handleRuntimeEventAction(
       const materialized = wasPending
         ? materializePendingTool(state, event.toolCallId, 'queued', true)
         : state;
-      const projectedStatus = toolOutcomeProtocolStatusV1(outcomeV1);
+      const projectedStatus = toolOutcomeProtocolStatus(outcome);
       if (projectedStatus !== 'cancelled') {
         return clearTerminalToolApproval(
           handleEventAction(materialized, {
@@ -2935,7 +2935,7 @@ export function handleRuntimeEventAction(
             data: {
               call_id: event.toolCallId,
               name,
-              ok: toolOutcomeSucceededV1(outcomeV1),
+              ok: toolOutcomeSucceeded(outcome),
               summary: event.reason,
               status: projectedStatus,
             },
@@ -2962,7 +2962,7 @@ export function handleRuntimeEventAction(
       // is followed by approval.requested and must not be rendered as a deny.
       if (event.result.approved) return projectSubagentResuming(state, event.toolCallId);
       if (!event.result.ok || event.result.escalatedToUser) return state;
-      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const outcome = canonicalToolOutcome(event);
       const rejectionReason = event.result.reason ?? '自动审查拒绝执行';
       const terminalized = projectSubagentTerminal(
         state,
@@ -2982,7 +2982,7 @@ export function handleRuntimeEventAction(
           name,
           ok: false,
           summary: rejectionReason,
-          status: toolOutcomeProtocolStatusV1(outcomeV1),
+          status: toolOutcomeProtocolStatus(outcome),
         },
       });
     }
@@ -3160,7 +3160,7 @@ export function handleRuntimeEventAction(
         : withoutInterrupt;
     }
     case 'approval.rejected': {
-      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const outcome = canonicalToolOutcome(event);
       if (
         state.interrupt?.kind !== 'approval' ||
         state.interrupt.interactionId !== event.interactionId ||
@@ -3191,7 +3191,7 @@ export function handleRuntimeEventAction(
             name: visibleName,
             ok: false,
             summary: event.reason,
-            status: toolOutcomeProtocolStatusV1(outcomeV1),
+            status: toolOutcomeProtocolStatus(outcome),
           },
         });
       }

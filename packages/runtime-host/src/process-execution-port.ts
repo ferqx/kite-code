@@ -1,33 +1,33 @@
-import { readRuntimeHostProcessOutputV1 } from './process-output';
-import { spawnRuntimeHostProcessV1 } from './process-spawn';
+import { readRuntimeHostProcessOutput } from './process-output';
+import { spawnRuntimeHostProcess } from './process-spawn';
 import { guardProcessTree, processTreeSpawnOptions } from './process-tree';
 
-export interface RuntimeHostProcessTerminationV1 {
+export interface RuntimeHostProcessTermination {
   readonly confirmedExited: boolean;
   readonly gracefulRequested: boolean;
   readonly forced: boolean;
   readonly unconfirmedProcessCount: number;
 }
 
-export interface RuntimeHostProcessTreeV1 {
-  terminate(): Promise<RuntimeHostProcessTerminationV1>;
+export interface RuntimeHostProcessTree {
+  terminate(): Promise<RuntimeHostProcessTermination>;
   dispose(): void;
 }
 
-export interface RuntimeHostProcessHandleV1 {
+export interface RuntimeHostProcessHandle {
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   readonly exited: Promise<number>;
-  readonly processTree: RuntimeHostProcessTreeV1;
+  readonly processTree: RuntimeHostProcessTree;
 }
 
 /** Generic process mechanism for a domain package to compose. */
-export interface RuntimeHostProcessExecutionPortV1 {
+export interface RuntimeHostProcessExecutionPort {
   spawn(input: {
     readonly argv: readonly string[];
     readonly cwd: string;
     readonly env?: Readonly<Record<string, string>>;
-  }): RuntimeHostProcessHandleV1;
+  }): RuntimeHostProcessHandle;
   readOutput(
     stream: ReadableStream<Uint8Array>,
     onLine?: (line: string) => void,
@@ -39,10 +39,10 @@ export interface RuntimeHostProcessExecutionPortV1 {
  * Compose generic spawn, bounded output, and process-tree cleanup. This port
  * has no Shell/command/policy knowledge; Builtin supplies those semantics.
  */
-export function createRuntimeHostProcessExecutionPortV1(): RuntimeHostProcessExecutionPortV1 {
+export function createRuntimeHostProcessExecutionPort(): RuntimeHostProcessExecutionPort {
   return {
     spawn(input) {
-      const process = spawnRuntimeHostProcessV1([...input.argv], {
+      const process = spawnRuntimeHostProcess([...input.argv], {
         cwd: input.cwd,
         stdout: 'pipe',
         stderr: 'pipe',
@@ -70,6 +70,6 @@ export function createRuntimeHostProcessExecutionPortV1(): RuntimeHostProcessExe
         },
       };
     },
-    readOutput: readRuntimeHostProcessOutputV1,
+    readOutput: readRuntimeHostProcessOutput,
   };
 }

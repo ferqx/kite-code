@@ -13,21 +13,21 @@ import {
   digestProjectionEnvironment,
 } from './context-projection';
 import { ProviderDataAdmissionError } from './provider-data-admission';
-import type { BuiltinContextCheckpointViewV1, BuiltinRuntimeStateViewV1 } from './runtime-view';
+import type { BuiltinContextCheckpointView, BuiltinRuntimeStateView } from './runtime-view';
 
-export type BuiltinContextCompactorV1 = (input: {
-  state: Readonly<BuiltinRuntimeStateViewV1>;
-  pending: Readonly<NonNullable<BuiltinRuntimeStateViewV1['context']['pendingCompaction']>>;
+export type BuiltinContextCompactor = (input: {
+  state: Readonly<BuiltinRuntimeStateView>;
+  pending: Readonly<NonNullable<BuiltinRuntimeStateView['context']['pendingCompaction']>>;
   sourceRevision: number;
   projectionEnvironment?: ContextProjectionEnvironment;
-}) => Promise<BuiltinContextCheckpointViewV1>;
+}) => Promise<BuiltinContextCheckpointView>;
 
-export type BuiltinContextCompactionTerminalV1 =
+export type BuiltinContextCompactionTerminal =
   | {
       readonly type: 'context.compaction_completed';
       readonly compactionId: string;
       readonly sourceRevision: number;
-      readonly checkpoint: BuiltinContextCheckpointViewV1;
+      readonly checkpoint: BuiltinContextCheckpointView;
       readonly durationMs: number;
     }
   | {
@@ -42,14 +42,14 @@ export type BuiltinContextCompactionTerminalV1 =
     };
 
 function failure(input: {
-  pending: Readonly<NonNullable<BuiltinRuntimeStateViewV1['context']['pendingCompaction']>>;
+  pending: Readonly<NonNullable<BuiltinRuntimeStateView['context']['pendingCompaction']>>;
   sourceRevision: number;
   errorKind: ContextCompactionErrorKind;
   message: string;
   retryable: boolean;
   reporter?: CompactionReporter;
   durationMs: number;
-}): BuiltinContextCompactionTerminalV1 {
+}): BuiltinContextCompactionTerminal {
   input.reporter?.recordFailed({
     compactionId: input.pending.compactionId,
     reason: input.pending.reason,
@@ -69,16 +69,16 @@ function failure(input: {
 }
 
 /** Execute the Builtin context compaction effect without Runtime authority. */
-export async function executeBuiltinContextCompactionV1(input: {
-  state: Readonly<BuiltinRuntimeStateViewV1>;
+export async function executeBuiltinContextCompaction(input: {
+  state: Readonly<BuiltinRuntimeStateView>;
   compactionId: string;
-  compact?: BuiltinContextCompactorV1;
+  compact?: BuiltinContextCompactor;
   projectionEnvironment?: ContextProjectionEnvironment;
   resolveProjectionEnvironment?: () => ContextProjectionEnvironment | undefined;
   onProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   reporter?: CompactionReporter;
   now?: () => number;
-}): Promise<ReadonlyArray<BuiltinContextCompactionTerminalV1>> {
+}): Promise<ReadonlyArray<BuiltinContextCompactionTerminal>> {
   const now = input.now ?? Date.now;
   const startedAt = now();
   const elapsed = () => Math.max(0, now() - startedAt);

@@ -1,3 +1,3 @@
-import { runMcpStdioWrapperFixtureV1 } from './mcp-stdio-wrapper-fixture';
+import { runMcpStdioWrapperFixture } from './mcp-stdio-wrapper-fixture';
 
-await runMcpStdioWrapperFixtureV1('unknown');
+await runMcpStdioWrapperFixture('unknown');

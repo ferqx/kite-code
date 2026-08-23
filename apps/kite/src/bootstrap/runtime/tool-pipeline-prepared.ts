@@ -1,32 +1,32 @@
-import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime';
 import type {
-  RuntimeHostStateToolGovernanceDecisionV1,
-  RuntimeHostStateToolGovernanceFactsV1,
+  RuntimeHostStateToolGovernanceDecision,
+  RuntimeHostStateToolGovernanceFacts,
 } from '@kite/runtime-host';
-import { runtimeHostStateCreateApprovalBindingDigestV1 } from '@kite/runtime-host';
+import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host';
 import type {
-  CapabilityEffectsV1,
-  CapabilityPolicyEffectsV1,
-  ClassifiedInvocationV1,
-  DynamicMcpPreparedToolInvocationIdentityV1,
-  DynamicMcpToolTargetV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  NonDynamicToolTargetV1,
-  PreparedToolInvocationIdentityV1,
-  PreparedToolInvocationInputV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineCapabilityBindingV1,
-  ToolPipelineGovernanceInvocationProjectionV1,
-  ToolPipelineReceiptRequirementV1,
-  ToolPipelineRetryEligibilityV1,
+  CapabilityEffects,
+  CapabilityPolicyEffects,
+  ClassifiedInvocation,
+  DynamicMcpPreparedToolInvocationIdentity,
+  DynamicMcpToolTarget,
+  NonDynamicPreparedToolInvocationIdentity,
+  NonDynamicToolTarget,
+  PreparedToolInvocation,
+  PreparedToolInvocationIdentity,
+  PreparedToolInvocationInput,
+  RuntimeJsonValue,
+  ToolPipelineCapabilityBinding,
+  ToolPipelineGovernanceInvocationProjection,
+  ToolPipelineReceiptRequirement,
+  ToolPipelineRetryEligibility,
 } from '@kite/runtime-spi';
 
-export const APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1 =
+export const APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_ =
   'kite.tool-pipeline-prepared-request.v1' as const;
 
-export type AppToolPipelinePreparedAuthorizationKindV1 = 'policy_allow' | 'approved_call';
-export type AppToolPipelinePreparedGrantUsedV1 =
+export type AppToolPipelinePreparedAuthorizationKind = 'policy_allow' | 'approved_call';
+export type AppToolPipelinePreparedGrantUsed =
   | 'none'
   | 'approve_once'
   | 'same_command'
@@ -38,38 +38,38 @@ export type AppToolPipelinePreparedGrantUsedV1 =
  * receipt/retry requirements are copied from the already-classified Builtin
  * projection and never inferred here.
  */
-export interface AppToolPipelinePreparedRequestV1 {
-  readonly schema: typeof APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1;
+export interface AppToolPipelinePreparedRequest {
+  readonly schema: typeof APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_;
   /** Exact authorization kind returned by the Kernel allow decision. */
-  readonly authorizationKind: AppToolPipelinePreparedAuthorizationKindV1;
+  readonly authorizationKind: AppToolPipelinePreparedAuthorizationKind;
   /** The narrowed State 25 grant carried by the Kernel allow decision. */
-  readonly grantUsed: AppToolPipelinePreparedGrantUsedV1;
+  readonly grantUsed: AppToolPipelinePreparedGrantUsed;
   /** Builtin policy effects; `{}` is required when the compilation omits effects. */
-  readonly policyEffects: Readonly<CapabilityPolicyEffectsV1>;
-  readonly effectiveEffects: Readonly<CapabilityEffectsV1>;
-  readonly receiptRequirement: ToolPipelineReceiptRequirementV1;
-  readonly retryEligibility: ToolPipelineRetryEligibilityV1;
+  readonly policyEffects: Readonly<CapabilityPolicyEffects>;
+  readonly effectiveEffects: Readonly<CapabilityEffects>;
+  readonly receiptRequirement: ToolPipelineReceiptRequirement;
+  readonly retryEligibility: ToolPipelineRetryEligibility;
   readonly taskId: string | null;
   readonly planId: string | null;
   readonly planStepId: string | null;
-  readonly capabilityRequestFacts: RuntimeJsonValueV1 | null;
+  readonly capabilityRequestFacts: RuntimeJsonValue | null;
 }
 
-export type AppToolPipelineGovernanceFactsV1 = RuntimeHostStateToolGovernanceFactsV1;
-export type AppToolPipelineGovernanceDecisionV1 = RuntimeHostStateToolGovernanceDecisionV1;
+export type AppToolPipelineGovernanceFacts = RuntimeHostStateToolGovernanceFacts;
+export type AppToolPipelineGovernanceDecision = RuntimeHostStateToolGovernanceDecision;
 
-type AppPreparedToolInvocationInputV1<TArguments extends RuntimeJsonValueV1> = Omit<
-  PreparedToolInvocationInputV1<TArguments, RuntimeJsonValueV1>,
+type AppPreparedToolInvocationInput<TArguments extends RuntimeJsonValue> = Omit<
+  PreparedToolInvocationInput<TArguments, RuntimeJsonValue>,
   'request'
 > & {
-  readonly request: Readonly<AppToolPipelinePreparedRequestV1>;
+  readonly request: Readonly<AppToolPipelinePreparedRequest>;
 };
 
-export type AppPreparedToolInvocationPacketV1<TArguments extends RuntimeJsonValueV1> = Omit<
-  PreparedToolInvocationV1<TArguments, RuntimeJsonValueV1>,
+export type AppPreparedToolInvocationPacket<TArguments extends RuntimeJsonValue> = Omit<
+  PreparedToolInvocation<TArguments, RuntimeJsonValue>,
   'input'
 > & {
-  readonly input: Readonly<AppPreparedToolInvocationInputV1<TArguments>>;
+  readonly input: Readonly<AppPreparedToolInvocationInput<TArguments>>;
 };
 
 /**
@@ -78,31 +78,31 @@ export type AppPreparedToolInvocationPacketV1<TArguments extends RuntimeJsonValu
  * executor; it only binds already-authentic facts into the neutral Host
  * prepared-invocation packet.
  */
-export interface AppPreparedToolInvocationBuilderInputV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface AppPreparedToolInvocationBuilderInput<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly classified: Readonly<ClassifiedInvocationV1<TArguments>>;
-  readonly governance: Readonly<AppToolPipelineGovernanceFactsV1>;
-  readonly decision: Readonly<AppToolPipelineGovernanceDecisionV1>;
+  readonly classified: Readonly<ClassifiedInvocation<TArguments>>;
+  readonly governance: Readonly<AppToolPipelineGovernanceFacts>;
+  readonly decision: Readonly<AppToolPipelineGovernanceDecision>;
   readonly threadId: string;
   readonly attempt: number;
   /** Canonical arguments after any caller-owned, explicit preparation. */
   readonly preparedArguments: TArguments;
   /** Exact canonical request DTO; this builder does not invent one. */
-  readonly request: Readonly<AppToolPipelinePreparedRequestV1>;
+  readonly request: Readonly<AppToolPipelinePreparedRequest>;
   /** The exact target binding, or null for an unbound ordinary Builtin. */
-  readonly binding: ToolPipelineCapabilityBindingV1 | null;
+  readonly binding: ToolPipelineCapabilityBinding | null;
 }
 
 /**
  * Attempt metadata remains alongside the prepared packet until the injected
  * persistence owner records it.  The packet itself is assignable to the SPI
- * PreparedToolInvocationV1 type.
+ * PreparedToolInvocation type.
  */
-export interface AppPreparedToolInvocationBuildV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface AppPreparedToolInvocationBuild<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly prepared: Readonly<AppPreparedToolInvocationPacketV1<TArguments>>;
+  readonly prepared: Readonly<AppPreparedToolInvocationPacket<TArguments>>;
   readonly attempt: number;
 }
 
@@ -111,12 +111,12 @@ export interface AppPreparedToolInvocationBuildV1<
  * SPI prepared invocation.  All identity fields are copied from the existing
  * Builtin/SPI projection; no App policy or execution authority is introduced.
  */
-export function createAppPreparedToolInvocationV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export function createAppPreparedToolInvocation<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 >(
-  input: Readonly<AppPreparedToolInvocationBuilderInputV1<TArguments>>,
-): Readonly<AppPreparedToolInvocationBuildV1<TArguments>> {
-  assertBuilderEnvelopeV1(input);
+  input: Readonly<AppPreparedToolInvocationBuilderInput<TArguments>>,
+): Readonly<AppPreparedToolInvocationBuild<TArguments>> {
+  assertBuilderEnvelope(input);
 
   const classified = input.classified;
   const validated = classified.validated;
@@ -124,27 +124,27 @@ export function createAppPreparedToolInvocationV1<
   const target = resolved.target;
   const governance = input.governance;
   const classifiedGovernance = classified.governance;
-  const decision = allowDecisionV1(input.decision);
+  const decision = allowDecision(input.decision);
   const domainData = validated.domainData;
-  if (domainData === undefined) failV1('Prepared builder requires classified domain facts.');
+  if (domainData === undefined) fail('Prepared builder requires classified domain facts.');
 
-  assertClassifiedAndGovernanceMatchV1(input, classifiedGovernance);
-  assertDecisionAndAdmissionMatchV1(input);
-  assertApprovedCallFactsV1(input);
-  assertPreparedArgumentsV1(validated.request.arguments, input.preparedArguments, classified);
-  assertBindingMatchesTargetV1(input.binding, target.binding);
+  assertClassifiedAndGovernanceMatch(input, classifiedGovernance);
+  assertDecisionAndAdmissionMatch(input);
+  assertApprovedCallFacts(input);
+  assertPreparedArguments(validated.request.arguments, input.preparedArguments, classified);
+  assertBindingMatchesTarget(input.binding, target.binding);
 
-  const policyDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+  const policyDigest = runtimeHostStateCreateApprovalBindingDigest(
     governance.invocation,
     governance.policy,
   );
-  const authorizationDigest = digestCapabilityValueV1({
+  const authorizationDigest = digestCapabilityValue({
     policyDigest,
     authorizationKind: decision.authorizationKind,
     grantUsed: decision.grantUsed,
     authorizationMode: governance.context.authorizationMode,
   });
-  const admissionDigest = digestCapabilityValueV1({
+  const admissionDigest = digestCapabilityValue({
     authorizationDigest,
     reservationIds: governance.admission.reservationIds,
     freshness: governance.admission.freshness,
@@ -153,7 +153,7 @@ export function createAppPreparedToolInvocationV1<
   const originalArgumentsDigest = validated.request.argumentsDigest;
   const subjectCapabilityId = target.capabilityId;
   const subjectCapabilityRevision = target.capabilityRevision;
-  const invocationId = digestCapabilityValueV1({
+  const invocationId = digestCapabilityValue({
     schema: 'kite.tool-invocation-identity.v1',
     threadId: input.threadId,
     toolCallId: resolved.call.toolCallId,
@@ -166,13 +166,13 @@ export function createAppPreparedToolInvocationV1<
   const attemptId = `${invocationId}:attempt:${input.attempt}`;
 
   const idempotencyKeyArgument = classified.requirements.idempotencyKeyArgument;
-  const idempotencyKey = idempotencyKeyFromPreparedArgumentsV1(
+  const idempotencyKey = idempotencyKeyFromPreparedArguments(
     input.preparedArguments,
     idempotencyKeyArgument,
     target.isDynamicMcp,
   );
-  const preparedArgumentsDigest = digestCapabilityValueV1(input.preparedArguments);
-  const identity = createPreparedIdentityV1(
+  const preparedArgumentsDigest = digestCapabilityValue(input.preparedArguments);
+  const identity = createPreparedIdentity(
     target,
     classifiedGovernance.invocation,
     resolved.call.argumentOrigin,
@@ -191,56 +191,56 @@ export function createAppPreparedToolInvocationV1<
     admissionDigest,
   );
 
-  const preparedInput: AppPreparedToolInvocationInputV1<TArguments> = {
+  const preparedInput: AppPreparedToolInvocationInput<TArguments> = {
     invocationId,
     attemptId,
     toolCallId: resolved.call.toolCallId,
-    arguments: cloneAndDeepFreezeJsonV1(input.preparedArguments),
-    request: cloneAndDeepFreezePreparedRequestV1(input.request),
-    binding: cloneAndDeepFreezeBindingV1(input.binding),
-    facts: cloneAndDeepFreezeJsonV1(domainData),
+    arguments: cloneAndDeepFreezeJson(input.preparedArguments),
+    request: cloneAndDeepFreezePreparedRequest(input.request),
+    binding: cloneAndDeepFreezeBinding(input.binding),
+    facts: cloneAndDeepFreezeJson(domainData),
   };
-  const prepared = deepFreezeV1({
+  const prepared = deepFreeze({
     identity,
     input: preparedInput,
   });
-  return deepFreezeV1({
+  return deepFreeze({
     prepared,
     attempt: input.attempt,
   });
 }
 
-function assertBuilderEnvelopeV1<TArguments extends RuntimeJsonValueV1>(
-  input: Readonly<AppPreparedToolInvocationBuilderInputV1<TArguments>>,
+function assertBuilderEnvelope<TArguments extends RuntimeJsonValue>(
+  input: Readonly<AppPreparedToolInvocationBuilderInput<TArguments>>,
 ): void {
-  if (!input || typeof input !== 'object') failV1('Prepared builder input is unavailable.');
+  if (!input || typeof input !== 'object') fail('Prepared builder input is unavailable.');
   if (input.classified?.stage !== 'classified') {
-    failV1('Prepared builder requires a classified invocation.');
+    fail('Prepared builder requires a classified invocation.');
   }
   if (input.governance?.schema !== 'kite.tool-governance-facts.v1') {
-    failV1('Prepared builder requires State 25 governance facts.');
+    fail('Prepared builder requires State 25 governance facts.');
   }
   if (input.decision.kind !== 'allow') {
-    failV1('Prepared builder requires a Kernel allow decision.');
+    fail('Prepared builder requires a Kernel allow decision.');
   }
-  if (!nonEmptyStringV1(input.threadId)) failV1('Prepared builder thread identity is invalid.');
+  if (!nonEmptyString(input.threadId)) fail('Prepared builder thread identity is invalid.');
   if (!Number.isSafeInteger(input.attempt) || input.attempt < 1) {
-    failV1('Prepared builder attempt is invalid.');
+    fail('Prepared builder attempt is invalid.');
   }
-  assertRuntimeJsonV1(input.preparedArguments, 'prepared arguments');
-  if (input.request === undefined) failV1('Prepared builder requires request facts.');
-  assertRuntimeJsonV1(input.request, 'prepared request');
-  assertPreparedRequestV1(input.request, input.classified, input.decision);
-  if (input.binding !== null) assertBindingV1(input.binding);
+  assertRuntimeJson(input.preparedArguments, 'prepared arguments');
+  if (input.request === undefined) fail('Prepared builder requires request facts.');
+  assertRuntimeJson(input.request, 'prepared request');
+  assertPreparedRequest(input.request, input.classified, input.decision);
+  if (input.binding !== null) assertBinding(input.binding);
   if (input.classified.validated.domainData === undefined) {
-    failV1('Prepared builder requires classified domain facts.');
+    fail('Prepared builder requires classified domain facts.');
   }
-  assertRuntimeJsonV1(input.classified.validated.domainData, 'classified domain facts');
+  assertRuntimeJson(input.classified.validated.domainData, 'classified domain facts');
 }
 
-function assertClassifiedAndGovernanceMatchV1<TArguments extends RuntimeJsonValueV1>(
-  input: Readonly<AppPreparedToolInvocationBuilderInputV1<TArguments>>,
-  classifiedGovernance: Readonly<ClassifiedInvocationV1<TArguments>['governance']>,
+function assertClassifiedAndGovernanceMatch<TArguments extends RuntimeJsonValue>(
+  input: Readonly<AppPreparedToolInvocationBuilderInput<TArguments>>,
+  classifiedGovernance: Readonly<ClassifiedInvocation<TArguments>['governance']>,
 ): void {
   const classified = input.classified;
   const validated = classified.validated;
@@ -252,21 +252,21 @@ function assertClassifiedAndGovernanceMatchV1<TArguments extends RuntimeJsonValu
 
   if (
     classified.policyCompilation !== classifiedGovernance.policy &&
-    digestCapabilityValueV1(classified.policyCompilation) !==
-      digestCapabilityValueV1(classifiedGovernance.policy)
+    digestCapabilityValue(classified.policyCompilation) !==
+      digestCapabilityValue(classifiedGovernance.policy)
   ) {
-    failV1('Prepared builder policy projection is inconsistent.');
+    fail('Prepared builder policy projection is inconsistent.');
   }
   if (
     classifiedGovernance.effectiveEffects !== classified.effectiveEffects ||
     classifiedGovernance.effectiveEffectsDigest !== classified.effectiveEffectsDigest ||
-    digestCapabilityValueV1(classifiedGovernance.effectiveEffects) !==
+    digestCapabilityValue(classifiedGovernance.effectiveEffects) !==
       classified.effectiveEffectsDigest
   ) {
-    failV1('Prepared builder effects projection is inconsistent.');
+    fail('Prepared builder effects projection is inconsistent.');
   }
-  if (validated.request.argumentsDigest !== digestCapabilityValueV1(validated.request.arguments)) {
-    failV1('Prepared builder validated argument digest is inconsistent.');
+  if (validated.request.argumentsDigest !== digestCapabilityValue(validated.request.arguments)) {
+    fail('Prepared builder validated argument digest is inconsistent.');
   }
   if (
     facts.invocation.threadId !== input.threadId ||
@@ -290,7 +290,7 @@ function assertClassifiedAndGovernanceMatchV1<TArguments extends RuntimeJsonValu
     factInvocation.dynamicCatalogRevision !== target.dynamicCatalogRevision ||
     factInvocation.exposedToolName !== projection.exposedToolName
   ) {
-    failV1('Prepared builder governance invocation does not match classified facts.');
+    fail('Prepared builder governance invocation does not match classified facts.');
   }
   if (
     projection.argumentOrigin !== resolved.call.argumentOrigin ||
@@ -298,39 +298,34 @@ function assertClassifiedAndGovernanceMatchV1<TArguments extends RuntimeJsonValu
     projection.executionMechanism !== target.executionMechanism ||
     projection.providerId !== target.providerId
   ) {
-    failV1('Prepared builder classified invocation projection is stale.');
+    fail('Prepared builder classified invocation projection is stale.');
   }
   if (facts.policy.operationId !== classified.policyCompilation.operationId) {
-    failV1('Prepared builder governance policy does not match classified facts.');
+    fail('Prepared builder governance policy does not match classified facts.');
   }
   if (
-    !policyFactsMatchV1(
-      facts.policy,
-      classifiedGovernance.policy,
-      classified.effectiveEffectsDigest,
-    )
+    !policyFactsMatch(facts.policy, classifiedGovernance.policy, classified.effectiveEffectsDigest)
   ) {
-    failV1('Prepared builder State 25 policy facts are stale.');
+    fail('Prepared builder State 25 policy facts are stale.');
   }
   if (
-    facts.context.executionMechanism !==
-    executionMechanismForGovernanceV1(target.executionMechanism)
+    facts.context.executionMechanism !== executionMechanismForGovernance(target.executionMechanism)
   ) {
-    failV1('Prepared builder governance mechanism is stale.');
+    fail('Prepared builder governance mechanism is stale.');
   }
   if (target.isDynamicMcp) {
-    assertDynamicProjectionMatchV1(target, projection, classifiedGovernance.dynamicMcp, facts);
+    assertDynamicProjectionMatch(target, projection, classifiedGovernance.dynamicMcp, facts);
   } else {
-    assertOrdinaryProjectionMatchV1(target, projection, facts);
+    assertOrdinaryProjectionMatch(target, projection, facts);
   }
 }
 
-function assertPreparedRequestV1<TArguments extends RuntimeJsonValueV1>(
-  request: Readonly<AppToolPipelinePreparedRequestV1>,
-  classified: Readonly<ClassifiedInvocationV1<TArguments>>,
-  decision: Readonly<AppToolPipelineGovernanceDecisionV1>,
+function assertPreparedRequest<TArguments extends RuntimeJsonValue>(
+  request: Readonly<AppToolPipelinePreparedRequest>,
+  classified: Readonly<ClassifiedInvocation<TArguments>>,
+  decision: Readonly<AppToolPipelineGovernanceDecision>,
 ): void {
-  if (decision.kind !== 'allow') failV1('Prepared request requires a Kernel allow decision.');
+  if (decision.kind !== 'allow') fail('Prepared request requires a Kernel allow decision.');
   const expectedKeys = new Set([
     'schema',
     'authorizationKind',
@@ -348,51 +343,50 @@ function assertPreparedRequestV1<TArguments extends RuntimeJsonValueV1>(
     Reflect.ownKeys(request).some((key) => typeof key !== 'string' || !expectedKeys.has(key)) ||
     expectedKeys.size !== Reflect.ownKeys(request).length
   ) {
-    failV1('Prepared request contains unexpected or missing fields.');
+    fail('Prepared request contains unexpected or missing fields.');
   }
   if (
-    request.schema !== APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1 ||
-    digestCapabilityValueV1(request.effectiveEffects) !==
-      digestCapabilityValueV1(classified.effectiveEffects) ||
+    request.schema !== APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_ ||
+    digestCapabilityValue(request.effectiveEffects) !==
+      digestCapabilityValue(classified.effectiveEffects) ||
     request.receiptRequirement !== classified.requirements.receipt ||
     request.retryEligibility !== classified.requirements.retry
   ) {
-    failV1('Prepared request facts do not match classified facts.');
+    fail('Prepared request facts do not match classified facts.');
   }
   if (
-    !isPreparedAuthorizationKindV1(decision.authorizationKind) ||
+    !isPreparedAuthorizationKind(decision.authorizationKind) ||
     request.authorizationKind !== decision.authorizationKind ||
-    !isPreparedGrantUsedV1(decision.grantUsed) ||
+    !isPreparedGrantUsed(decision.grantUsed) ||
     request.grantUsed !== decision.grantUsed
   ) {
-    failV1('Prepared request authorization facts do not match the Kernel allow decision.');
+    fail('Prepared request authorization facts do not match the Kernel allow decision.');
   }
-  assertPolicyEffectsV1(request.policyEffects, 'prepared policy effects');
+  assertPolicyEffects(request.policyEffects, 'prepared policy effects');
   const expectedPolicyEffects = classified.policyCompilation.effects ?? {};
-  assertPolicyEffectsV1(expectedPolicyEffects, 'classified policy effects');
+  assertPolicyEffects(expectedPolicyEffects, 'classified policy effects');
   if (
-    digestCapabilityValueV1(request.policyEffects) !==
-    digestCapabilityValueV1(expectedPolicyEffects)
+    digestCapabilityValue(request.policyEffects) !== digestCapabilityValue(expectedPolicyEffects)
   ) {
-    failV1('Prepared request policy effects do not match classified policy facts.');
+    fail('Prepared request policy effects do not match classified policy facts.');
   }
   for (const value of [request.taskId, request.planId, request.planStepId]) {
-    if (value !== null && !nonEmptyStringV1(value)) {
-      failV1('Prepared request identifier is invalid.');
+    if (value !== null && !nonEmptyString(value)) {
+      fail('Prepared request identifier is invalid.');
     }
   }
   if (request.capabilityRequestFacts !== null) {
-    assertRuntimeJsonV1(request.capabilityRequestFacts, 'prepared capability request facts');
+    assertRuntimeJson(request.capabilityRequestFacts, 'prepared capability request facts');
   }
 }
 
-function isPreparedAuthorizationKindV1(
+function isPreparedAuthorizationKind(
   value: unknown,
-): value is AppToolPipelinePreparedAuthorizationKindV1 {
+): value is AppToolPipelinePreparedAuthorizationKind {
   return value === 'policy_allow' || value === 'approved_call';
 }
 
-function isPreparedGrantUsedV1(value: unknown): value is AppToolPipelinePreparedGrantUsedV1 {
+function isPreparedGrantUsed(value: unknown): value is AppToolPipelinePreparedGrantUsed {
   return (
     value === 'none' ||
     value === 'approve_once' ||
@@ -401,26 +395,26 @@ function isPreparedGrantUsedV1(value: unknown): value is AppToolPipelinePrepared
   );
 }
 
-function assertPolicyEffectsV1(
+function assertPolicyEffects(
   value: unknown,
   label: string,
-): asserts value is Readonly<CapabilityPolicyEffectsV1> {
-  assertRuntimeJsonV1(value, label);
-  if (!isJsonRecordV1(value)) failV1(`${label} must be a JSON object.`);
+): asserts value is Readonly<CapabilityPolicyEffects> {
+  assertRuntimeJson(value, label);
+  if (!isJsonRecord(value)) fail(`${label} must be a JSON object.`);
   const allowedKeys = new Set(['network', 'externalRead', 'externalWrite', 'uncertainEffects']);
   for (const [key, item] of Object.entries(value)) {
-    if (!allowedKeys.has(key) || item !== true) failV1(`${label} is invalid.`);
+    if (!allowedKeys.has(key) || item !== true) fail(`${label} is invalid.`);
   }
 }
 
-function policyFactsMatchV1(
-  facts: Readonly<AppToolPipelineGovernanceFactsV1['policy']>,
-  policy: Readonly<ClassifiedInvocationV1['policyCompilation']>,
+function policyFactsMatch(
+  facts: Readonly<AppToolPipelineGovernanceFacts['policy']>,
+  policy: Readonly<ClassifiedInvocation['policyCompilation']>,
   effectiveEffectsDigest: string,
 ): boolean {
   return (
-    digestCapabilityValueV1(facts) ===
-    digestCapabilityValueV1({
+    digestCapabilityValue(facts) ===
+    digestCapabilityValue({
       operationId: policy.operationId,
       capabilityRevision: policy.capabilityRevision,
       parserRevision: policy.parserRevision,
@@ -442,11 +436,11 @@ function policyFactsMatchV1(
   );
 }
 
-function assertDynamicProjectionMatchV1(
-  target: Readonly<DynamicMcpToolTargetV1>,
-  projection: Readonly<ToolPipelineGovernanceInvocationProjectionV1>,
-  classifiedDynamicMcp: Readonly<ClassifiedInvocationV1['governance']['dynamicMcp']>,
-  facts: Readonly<AppToolPipelineGovernanceFactsV1>,
+function assertDynamicProjectionMatch(
+  target: Readonly<DynamicMcpToolTarget>,
+  projection: Readonly<ToolPipelineGovernanceInvocationProjection>,
+  classifiedDynamicMcp: Readonly<ClassifiedInvocation['governance']['dynamicMcp']>,
+  facts: Readonly<AppToolPipelineGovernanceFacts>,
 ): void {
   if (
     !projection.isDynamicMcp ||
@@ -459,25 +453,25 @@ function assertDynamicProjectionMatchV1(
     projection.exposedToolName !== target.subject.exposedToolName ||
     projection.builtinProjectionRevision !== null ||
     projection.dynamicCatalogRevision !== target.dynamicCatalogRevision ||
-    digestCapabilityValueV1(projection.subject) !== digestCapabilityValueV1(target.subject) ||
-    digestCapabilityValueV1(projection.runtimeWrapper) !==
-      digestCapabilityValueV1(target.runtimeWrapper) ||
+    digestCapabilityValue(projection.subject) !== digestCapabilityValue(target.subject) ||
+    digestCapabilityValue(projection.runtimeWrapper) !==
+      digestCapabilityValue(target.runtimeWrapper) ||
     !facts.dynamicMcp ||
     !classifiedDynamicMcp ||
-    digestCapabilityValueV1(facts.dynamicMcp) !==
-      digestCapabilityValueV1({
+    digestCapabilityValue(facts.dynamicMcp) !==
+      digestCapabilityValue({
         minimumApproval: classifiedDynamicMcp.minimumApproval,
         readOnly: classifiedDynamicMcp.readOnly,
       })
   ) {
-    failV1('Prepared builder dynamic MCP identity is inconsistent.');
+    fail('Prepared builder dynamic MCP identity is inconsistent.');
   }
 }
 
-function assertOrdinaryProjectionMatchV1(
-  target: Readonly<NonDynamicToolTargetV1>,
-  projection: Readonly<ToolPipelineGovernanceInvocationProjectionV1>,
-  facts: Readonly<AppToolPipelineGovernanceFactsV1>,
+function assertOrdinaryProjectionMatch(
+  target: Readonly<NonDynamicToolTarget>,
+  projection: Readonly<ToolPipelineGovernanceInvocationProjection>,
+  facts: Readonly<AppToolPipelineGovernanceFacts>,
 ): void {
   if (
     projection.isDynamicMcp ||
@@ -490,27 +484,27 @@ function assertOrdinaryProjectionMatchV1(
     projection.dynamicCatalogRevision !== target.dynamicCatalogRevision ||
     facts.dynamicMcp !== undefined
   ) {
-    failV1('Prepared builder ordinary identity is inconsistent.');
+    fail('Prepared builder ordinary identity is inconsistent.');
   }
 }
 
-function assertDecisionAndAdmissionMatchV1<TArguments extends RuntimeJsonValueV1>(
-  input: Readonly<AppPreparedToolInvocationBuilderInputV1<TArguments>>,
+function assertDecisionAndAdmissionMatch<TArguments extends RuntimeJsonValue>(
+  input: Readonly<AppPreparedToolInvocationBuilderInput<TArguments>>,
 ): void {
   const decision = input.decision;
   const facts = input.governance;
   if (decision.kind !== 'allow' || facts.policy.allowed !== true) {
-    failV1('Prepared builder admission is not allowed.');
+    fail('Prepared builder admission is not allowed.');
   }
   if (facts.admission.freshness !== 'current') {
-    failV1('Prepared builder admission is stale.');
+    fail('Prepared builder admission is stale.');
   }
   if (
-    digestCapabilityValueV1(decision.reservationIds) !==
-      digestCapabilityValueV1(facts.admission.reservationIds) ||
+    digestCapabilityValue(decision.reservationIds) !==
+      digestCapabilityValue(facts.admission.reservationIds) ||
     decision.reservationIds.some((value) => typeof value !== 'string')
   ) {
-    failV1('Prepared builder reservation identity is inconsistent.');
+    fail('Prepared builder reservation identity is inconsistent.');
   }
 }
 
@@ -520,12 +514,12 @@ function assertDecisionAndAdmissionMatchV1<TArguments extends RuntimeJsonValueV1
  * `approve_once` is a transient per-call grant: it must never be accepted
  * from a policy-allow decision, an unapproved envelope, or a copied digest.
  */
-function assertApprovedCallFactsV1<TArguments extends RuntimeJsonValueV1>(
-  input: Readonly<AppPreparedToolInvocationBuilderInputV1<TArguments>>,
+function assertApprovedCallFacts<TArguments extends RuntimeJsonValue>(
+  input: Readonly<AppPreparedToolInvocationBuilderInput<TArguments>>,
 ): void {
   const decision = input.decision;
   const approval = input.governance.approval;
-  if (decision.kind !== 'allow') failV1('Prepared builder requires a Kernel allow decision.');
+  if (decision.kind !== 'allow') fail('Prepared builder requires a Kernel allow decision.');
 
   if (approval.status === 'queued') {
     if (
@@ -533,7 +527,7 @@ function assertApprovedCallFactsV1<TArguments extends RuntimeJsonValueV1>(
       approval.approvedToolCallId !== null ||
       approval.approvalBindingDigest !== null
     ) {
-      failV1('Prepared builder queued approval facts are malformed.');
+      fail('Prepared builder queued approval facts are malformed.');
     }
   } else if (
     approval.status !== 'approved' ||
@@ -541,21 +535,21 @@ function assertApprovedCallFactsV1<TArguments extends RuntimeJsonValueV1>(
     approval.approvedToolCallId === null ||
     approval.approvalBindingDigest === null
   ) {
-    failV1('Prepared builder approval facts are malformed.');
+    fail('Prepared builder approval facts are malformed.');
   }
 
   if (decision.authorizationKind === 'policy_allow') {
     if (decision.grantUsed !== 'none' || approval.status !== 'queued') {
-      failV1('Policy-allow decisions cannot carry an approval grant.');
+      fail('Policy-allow decisions cannot carry an approval grant.');
     }
     return;
   }
 
   if (decision.authorizationKind !== 'approved_call') {
-    failV1('Prepared builder authorization kind is unknown.');
+    fail('Prepared builder authorization kind is unknown.');
   }
   if (decision.grantUsed === 'none') {
-    failV1('Prepared builder approved-call facts are not bound to the Kernel decision.');
+    fail('Prepared builder approved-call facts are not bound to the Kernel decision.');
   }
   const exactApproval =
     approval.status === 'approved' &&
@@ -563,24 +557,24 @@ function assertApprovedCallFactsV1<TArguments extends RuntimeJsonValueV1>(
     approval.approvedToolCallId === input.governance.invocation.toolCallId &&
     approval.approvalBindingDigest !== null &&
     approval.approvalBindingDigest ===
-      runtimeHostStateCreateApprovalBindingDigestV1(
+      runtimeHostStateCreateApprovalBindingDigest(
         input.governance.invocation,
         input.governance.policy,
       );
   if (exactApproval) return;
   if (approval.status !== 'queued') {
-    failV1('Prepared builder approved-call facts are not bound to the Kernel decision.');
+    fail('Prepared builder approved-call facts are not bound to the Kernel decision.');
   }
-  if (decision.grantUsed === 'same_command' && sameCommandGrantMatchesV1(input.governance)) {
+  if (decision.grantUsed === 'same_command' && sameCommandGrantMatches(input.governance)) {
     return;
   }
-  if (decision.grantUsed === 'full_access' && fullAccessBypassMatchesV1(input.governance)) {
+  if (decision.grantUsed === 'full_access' && fullAccessBypassMatches(input.governance)) {
     return;
   }
-  failV1('Prepared builder approved-call facts are not bound to the Kernel decision.');
+  fail('Prepared builder approved-call facts are not bound to the Kernel decision.');
 }
 
-function sameCommandGrantMatchesV1(facts: Readonly<AppToolPipelineGovernanceFactsV1>): boolean {
+function sameCommandGrantMatches(facts: Readonly<AppToolPipelineGovernanceFacts>): boolean {
   const grant = facts.sameCommandGrant;
   const invocation = facts.invocation;
   const observedAt = facts.context.observedAt;
@@ -597,7 +591,7 @@ function sameCommandGrantMatchesV1(facts: Readonly<AppToolPipelineGovernanceFact
   );
 }
 
-function fullAccessBypassMatchesV1(facts: Readonly<AppToolPipelineGovernanceFactsV1>): boolean {
+function fullAccessBypassMatches(facts: Readonly<AppToolPipelineGovernanceFacts>): boolean {
   const nested = facts.nestedSkill;
   const dynamic = facts.dynamicMcp;
   const forceManual =
@@ -618,63 +612,63 @@ function fullAccessBypassMatchesV1(facts: Readonly<AppToolPipelineGovernanceFact
   );
 }
 
-function allowDecisionV1(
-  decision: Readonly<AppToolPipelineGovernanceDecisionV1>,
-): Extract<AppToolPipelineGovernanceDecisionV1, { readonly kind: 'allow' }> {
-  if (decision.kind !== 'allow') failV1('Prepared builder requires a Kernel allow decision.');
+function allowDecision(
+  decision: Readonly<AppToolPipelineGovernanceDecision>,
+): Extract<AppToolPipelineGovernanceDecision, { readonly kind: 'allow' }> {
+  if (decision.kind !== 'allow') fail('Prepared builder requires a Kernel allow decision.');
   return decision;
 }
 
-function assertPreparedArgumentsV1<TArguments extends RuntimeJsonValueV1>(
+function assertPreparedArguments<TArguments extends RuntimeJsonValue>(
   validatedArguments: TArguments,
   preparedArguments: TArguments,
-  classified: Readonly<ClassifiedInvocationV1<TArguments>>,
+  classified: Readonly<ClassifiedInvocation<TArguments>>,
 ): void {
   const key = classified.requirements.idempotencyKeyArgument;
-  if (key !== null && !nonEmptyStringV1(key)) {
-    failV1('Prepared builder idempotency argument is invalid.');
+  if (key !== null && !nonEmptyString(key)) {
+    fail('Prepared builder idempotency argument is invalid.');
   }
-  const validatedDigest = digestCapabilityValueV1(validatedArguments);
-  const preparedDigest = digestCapabilityValueV1(preparedArguments);
+  const validatedDigest = digestCapabilityValue(validatedArguments);
+  const preparedDigest = digestCapabilityValue(preparedArguments);
   if (validatedDigest === preparedDigest) return;
-  if (key === null) failV1('Prepared arguments differ from validated arguments.');
-  if (!isJsonRecordV1(validatedArguments) || !isJsonRecordV1(preparedArguments)) {
-    failV1('Prepared idempotency arguments must be JSON objects.');
+  if (key === null) fail('Prepared arguments differ from validated arguments.');
+  if (!isJsonRecord(validatedArguments) || !isJsonRecord(preparedArguments)) {
+    fail('Prepared idempotency arguments must be JSON objects.');
   }
   const preparedKey = preparedArguments[key];
   if (typeof preparedKey !== 'string') {
-    failV1('Prepared idempotency argument must be a string.');
+    fail('Prepared idempotency argument must be a string.');
   }
   const validatedKey = validatedArguments[key];
   if (validatedKey !== undefined && validatedKey !== preparedKey) {
-    failV1('Prepared idempotency argument does not match validated facts.');
+    fail('Prepared idempotency argument does not match validated facts.');
   }
-  const validatedRest = withoutKeyV1(validatedArguments, key);
-  const preparedRest = withoutKeyV1(preparedArguments, key);
-  if (digestCapabilityValueV1(validatedRest) !== digestCapabilityValueV1(preparedRest)) {
-    failV1('Prepared arguments changed outside the idempotency field.');
+  const validatedRest = withoutKey(validatedArguments, key);
+  const preparedRest = withoutKey(preparedArguments, key);
+  if (digestCapabilityValue(validatedRest) !== digestCapabilityValue(preparedRest)) {
+    fail('Prepared arguments changed outside the idempotency field.');
   }
 }
 
-function idempotencyKeyFromPreparedArgumentsV1(
-  preparedArguments: RuntimeJsonValueV1,
+function idempotencyKeyFromPreparedArguments(
+  preparedArguments: RuntimeJsonValue,
   key: string | null,
   allowMissing: boolean,
 ): string | null {
   if (key === null) return null;
-  if (!isJsonRecordV1(preparedArguments)) {
-    failV1('Prepared idempotency argument must be a string.');
+  if (!isJsonRecord(preparedArguments)) {
+    fail('Prepared idempotency argument must be a string.');
   }
   if (preparedArguments[key] === undefined && allowMissing) return null;
   if (typeof preparedArguments[key] !== 'string') {
-    failV1('Prepared idempotency argument must be a string.');
+    fail('Prepared idempotency argument must be a string.');
   }
   return preparedArguments[key] as string;
 }
 
-function createPreparedIdentityV1(
-  target: Readonly<DynamicMcpToolTargetV1 | NonDynamicToolTargetV1>,
-  projection: Readonly<ToolPipelineGovernanceInvocationProjectionV1>,
+function createPreparedIdentity(
+  target: Readonly<DynamicMcpToolTarget | NonDynamicToolTarget>,
+  projection: Readonly<ToolPipelineGovernanceInvocationProjection>,
   argumentOrigin: 'model_public' | 'runtime_private',
   toolCallId: string,
   turnId: string,
@@ -689,7 +683,7 @@ function createPreparedIdentityV1(
   policyDigest: string,
   authorizationDigest: string,
   admissionDigest: string,
-): Readonly<PreparedToolInvocationIdentityV1> {
+): Readonly<PreparedToolInvocationIdentity> {
   const common = {
     invocationId,
     attemptId,
@@ -713,7 +707,7 @@ function createPreparedIdentityV1(
     bindingId: target.binding?.bindingId ?? null,
   } as const;
   if (target.isDynamicMcp) {
-    const identity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+    const identity: DynamicMcpPreparedToolInvocationIdentity = {
       ...common,
       argumentOrigin: 'model_public',
       executionFamily: 'mcp',
@@ -726,16 +720,16 @@ function createPreparedIdentityV1(
       executorRevision: null,
       builtinProjectionRevision: null,
       dynamicCatalogRevision: target.dynamicCatalogRevision,
-      subject: cloneAndDeepFreezeJsonV1(
+      subject: cloneAndDeepFreezeJson(
         target.subject,
-      ) as DynamicMcpPreparedToolInvocationIdentityV1['subject'],
-      runtimeWrapper: cloneAndDeepFreezeJsonV1(
+      ) as DynamicMcpPreparedToolInvocationIdentity['subject'],
+      runtimeWrapper: cloneAndDeepFreezeJson(
         target.runtimeWrapper,
-      ) as DynamicMcpPreparedToolInvocationIdentityV1['runtimeWrapper'],
+      ) as DynamicMcpPreparedToolInvocationIdentity['runtimeWrapper'],
     };
-    return deepFreezeV1(identity);
+    return deepFreeze(identity);
   }
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     ...common,
     argumentOrigin,
     executionFamily: target.executionFamily,
@@ -752,60 +746,60 @@ function createPreparedIdentityV1(
     nestedCatalogRevision: projection.nestedCatalogRevision,
     toolKind: target.toolKind,
   };
-  return deepFreezeV1(identity);
+  return deepFreeze(identity);
 }
 
-function assertBindingMatchesTargetV1(
-  supplied: ToolPipelineCapabilityBindingV1 | null,
-  target: ToolPipelineCapabilityBindingV1 | null,
+function assertBindingMatchesTarget(
+  supplied: ToolPipelineCapabilityBinding | null,
+  target: ToolPipelineCapabilityBinding | null,
 ): void {
   if (supplied === null || target === null) {
-    if (supplied !== target) failV1('Prepared binding does not match target identity.');
+    if (supplied !== target) fail('Prepared binding does not match target identity.');
     return;
   }
-  assertBindingV1(supplied);
-  assertBindingV1(target);
-  if (digestCapabilityValueV1(supplied) !== digestCapabilityValueV1(target)) {
-    failV1('Prepared binding does not match target identity.');
+  assertBinding(supplied);
+  assertBinding(target);
+  if (digestCapabilityValue(supplied) !== digestCapabilityValue(target)) {
+    fail('Prepared binding does not match target identity.');
   }
 }
 
-function assertBindingV1(value: ToolPipelineCapabilityBindingV1): void {
+function assertBinding(value: ToolPipelineCapabilityBinding): void {
   if (
     !value ||
     typeof value !== 'object' ||
-    !nonEmptyStringV1(value.bindingId) ||
-    !nonEmptyStringV1(value.capabilityId) ||
-    !nonEmptyStringV1(value.capabilityRevision) ||
-    !nonEmptyStringV1(value.exposedToolName) ||
-    !nonEmptyStringV1(value.schemaDigest) ||
-    !nonEmptyStringV1(value.issuedForTurnId)
+    !nonEmptyString(value.bindingId) ||
+    !nonEmptyString(value.capabilityId) ||
+    !nonEmptyString(value.capabilityRevision) ||
+    !nonEmptyString(value.exposedToolName) ||
+    !nonEmptyString(value.schemaDigest) ||
+    !nonEmptyString(value.issuedForTurnId)
   ) {
-    failV1('Prepared binding is invalid.');
+    fail('Prepared binding is invalid.');
   }
 }
 
-function assertRuntimeJsonV1(value: unknown, label: string): asserts value is RuntimeJsonValueV1 {
+function assertRuntimeJson(value: unknown, label: string): asserts value is RuntimeJsonValue {
   const seen = new WeakSet<object>();
   const visit = (candidate: unknown): void => {
     if (candidate === null || typeof candidate === 'string' || typeof candidate === 'boolean')
       return;
     if (typeof candidate === 'number') {
-      if (!Number.isFinite(candidate)) failV1(`${label} is not canonical JSON.`);
+      if (!Number.isFinite(candidate)) fail(`${label} is not canonical JSON.`);
       return;
     }
-    if (typeof candidate !== 'object') failV1(`${label} is not canonical JSON.`);
-    if (seen.has(candidate)) failV1(`${label} is not canonical JSON.`);
+    if (typeof candidate !== 'object') fail(`${label} is not canonical JSON.`);
+    if (seen.has(candidate)) fail(`${label} is not canonical JSON.`);
     seen.add(candidate);
     if (Array.isArray(candidate)) {
       for (const item of candidate) visit(item);
     } else {
       const prototype = Object.getPrototypeOf(candidate);
       if (prototype !== Object.prototype && prototype !== null) {
-        failV1(`${label} is not canonical JSON.`);
+        fail(`${label} is not canonical JSON.`);
       }
       for (const [key, item] of Object.entries(candidate)) {
-        if (typeof key !== 'string') failV1(`${label} is not canonical JSON.`);
+        if (typeof key !== 'string') fail(`${label} is not canonical JSON.`);
         visit(item);
       }
     }
@@ -814,9 +808,9 @@ function assertRuntimeJsonV1(value: unknown, label: string): asserts value is Ru
   visit(value);
 }
 
-function isJsonRecordV1(
-  value: RuntimeJsonValueV1,
-): value is { readonly [key: string]: RuntimeJsonValueV1 } {
+function isJsonRecord(
+  value: RuntimeJsonValue,
+): value is { readonly [key: string]: RuntimeJsonValue } {
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -825,31 +819,31 @@ function isJsonRecordV1(
   );
 }
 
-function withoutKeyV1(
-  value: { readonly [key: string]: RuntimeJsonValueV1 },
+function withoutKey(
+  value: { readonly [key: string]: RuntimeJsonValue },
   key: string,
-): Record<string, RuntimeJsonValueV1> {
-  const result: Record<string, RuntimeJsonValueV1> = {};
+): Record<string, RuntimeJsonValue> {
+  const result: Record<string, RuntimeJsonValue> = {};
   for (const [candidate, item] of Object.entries(value)) {
     if (candidate !== key) result[candidate] = item;
   }
   return result;
 }
 
-function cloneAndDeepFreezeJsonV1<T extends RuntimeJsonValueV1>(value: T): T {
-  const clone = cloneJsonV1(value);
-  return deepFreezeV1(clone) as T;
+function cloneAndDeepFreezeJson<T extends RuntimeJsonValue>(value: T): T {
+  const clone = cloneJson(value);
+  return deepFreeze(clone) as T;
 }
 
-function cloneAndDeepFreezePreparedRequestV1(
-  request: Readonly<AppToolPipelinePreparedRequestV1>,
-): Readonly<AppToolPipelinePreparedRequestV1> {
-  const clone: AppToolPipelinePreparedRequestV1 = {
+function cloneAndDeepFreezePreparedRequest(
+  request: Readonly<AppToolPipelinePreparedRequest>,
+): Readonly<AppToolPipelinePreparedRequest> {
+  const clone: AppToolPipelinePreparedRequest = {
     schema: request.schema,
     authorizationKind: request.authorizationKind,
     grantUsed: request.grantUsed,
-    policyEffects: cloneAndDeepFreezePolicyEffectsV1(request.policyEffects),
-    effectiveEffects: cloneAndDeepFreezeCapabilityEffectsV1(request.effectiveEffects),
+    policyEffects: cloneAndDeepFreezePolicyEffects(request.policyEffects),
+    effectiveEffects: cloneAndDeepFreezeCapabilityEffects(request.effectiveEffects),
     receiptRequirement: request.receiptRequirement,
     retryEligibility: request.retryEligibility,
     taskId: request.taskId,
@@ -858,66 +852,66 @@ function cloneAndDeepFreezePreparedRequestV1(
     capabilityRequestFacts:
       request.capabilityRequestFacts === null
         ? null
-        : cloneAndDeepFreezeJsonV1(request.capabilityRequestFacts),
+        : cloneAndDeepFreezeJson(request.capabilityRequestFacts),
   };
-  return deepFreezeV1(clone);
+  return deepFreeze(clone);
 }
 
-function cloneAndDeepFreezePolicyEffectsV1(
-  value: Readonly<CapabilityPolicyEffectsV1>,
-): Readonly<CapabilityPolicyEffectsV1> {
-  const clone: CapabilityPolicyEffectsV1 = {
+function cloneAndDeepFreezePolicyEffects(
+  value: Readonly<CapabilityPolicyEffects>,
+): Readonly<CapabilityPolicyEffects> {
+  const clone: CapabilityPolicyEffects = {
     ...(value.network === true ? { network: true } : {}),
     ...(value.externalRead === true ? { externalRead: true } : {}),
     ...(value.externalWrite === true ? { externalWrite: true } : {}),
     ...(value.uncertainEffects === true ? { uncertainEffects: true } : {}),
   };
-  return deepFreezeV1(clone);
+  return deepFreeze(clone);
 }
 
-function cloneAndDeepFreezeCapabilityEffectsV1(
-  value: Readonly<CapabilityEffectsV1>,
-): Readonly<CapabilityEffectsV1> {
-  return deepFreezeV1({
+function cloneAndDeepFreezeCapabilityEffects(
+  value: Readonly<CapabilityEffects>,
+): Readonly<CapabilityEffects> {
+  return deepFreeze({
     filesystem: value.filesystem,
     network: value.network,
     externalState: value.externalState,
   });
 }
 
-function cloneJsonV1(value: RuntimeJsonValueV1): RuntimeJsonValueV1 {
+function cloneJson(value: RuntimeJsonValue): RuntimeJsonValue {
   if (value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map((item) => cloneJsonV1(item));
-  const result: Record<string, RuntimeJsonValueV1> = {};
-  for (const [key, item] of Object.entries(value)) result[key] = cloneJsonV1(item);
+  if (Array.isArray(value)) return value.map((item) => cloneJson(item));
+  const result: Record<string, RuntimeJsonValue> = {};
+  for (const [key, item] of Object.entries(value)) result[key] = cloneJson(item);
   return result;
 }
 
-function cloneAndDeepFreezeBindingV1(
-  value: ToolPipelineCapabilityBindingV1 | null,
-): ToolPipelineCapabilityBindingV1 | null {
+function cloneAndDeepFreezeBinding(
+  value: ToolPipelineCapabilityBinding | null,
+): ToolPipelineCapabilityBinding | null {
   if (value === null) return null;
-  return cloneAndDeepFreezeJsonV1(
-    value as unknown as RuntimeJsonValueV1,
-  ) as unknown as ToolPipelineCapabilityBindingV1;
+  return cloneAndDeepFreezeJson(
+    value as unknown as RuntimeJsonValue,
+  ) as unknown as ToolPipelineCapabilityBinding;
 }
 
-function deepFreezeV1<T>(value: T): T {
+function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
-  for (const child of Object.values(value as Record<string, unknown>)) deepFreezeV1(child);
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
   return Object.freeze(value);
 }
 
-function executionMechanismForGovernanceV1(mechanism: string): 'user_input' | 'shell' | 'other' {
+function executionMechanismForGovernance(mechanism: string): 'user_input' | 'shell' | 'other' {
   if (mechanism === 'user_input') return 'user_input';
   if (mechanism === 'shell') return 'shell';
   return 'other';
 }
 
-function nonEmptyStringV1(value: unknown): value is string {
+function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-function failV1(message: string): never {
+function fail(message: string): never {
   throw new Error(message);
 }

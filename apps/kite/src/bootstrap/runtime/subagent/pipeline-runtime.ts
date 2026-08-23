@@ -1,22 +1,22 @@
 import type {
-  BuiltinChildRuntimeDriverV1,
-  GovernedSubagentCompositionV1 as BuiltinGovernedSubagentCompositionV1,
-  SubagentLifecycleArtifactAccessV1,
-  SubagentTaskArtifactAccessV1,
+  BuiltinChildRuntimeDriver,
+  GovernedSubagentComposition as BuiltinGovernedSubagentComposition,
+  SubagentLifecycleArtifactAccess,
+  SubagentTaskArtifactAccess,
 } from '@kite/builtin-runtime';
 import {
-  executePipelineIssuedSubagentResumeV1,
-  executePipelineIssuedSubagentStartV1,
-  type SubagentInvocationRuntimeV1,
+  executePipelineIssuedSubagentResume,
+  executePipelineIssuedSubagentStart,
+  type SubagentInvocationRuntime,
 } from './task-tool';
 
 /** App factory consumed only after Host has acknowledged the outer attempt. */
-export type AppSubagentRuntimeFactoryV1 = () => SubagentInvocationRuntimeV1;
+export type AppSubagentRuntimeFactory = () => SubagentInvocationRuntime;
 
-type GovernedSubagentCompositionV1 = BuiltinGovernedSubagentCompositionV1<
-  SubagentLifecycleArtifactAccessV1,
-  BuiltinChildRuntimeDriverV1,
-  SubagentTaskArtifactAccessV1
+type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<
+  SubagentLifecycleArtifactAccess,
+  BuiltinChildRuntimeDriver,
+  SubagentTaskArtifactAccess
 >;
 
 /**
@@ -24,13 +24,13 @@ type GovernedSubagentCompositionV1 = BuiltinGovernedSubagentCompositionV1<
  * child lifecycle semantics; this adapter only binds the installed App
  * composition to the State 25 task-tool transport.
  */
-export function createPipelineSubagentRuntimeV1(
-  compositionFactory: () => GovernedSubagentCompositionV1,
-): SubagentInvocationRuntimeV1 {
-  const runtime: SubagentInvocationRuntimeV1 = {
-    start: (deps, args) => executePipelineIssuedSubagentStartV1(compositionFactory(), deps, args),
+export function createPipelineSubagentRuntime(
+  compositionFactory: () => GovernedSubagentComposition,
+): SubagentInvocationRuntime {
+  const runtime: SubagentInvocationRuntime = {
+    start: (deps, args) => executePipelineIssuedSubagentStart(compositionFactory(), deps, args),
     resume: (deps, continuation, toolResult) =>
-      executePipelineIssuedSubagentResumeV1(compositionFactory(), deps, continuation, toolResult),
+      executePipelineIssuedSubagentResume(compositionFactory(), deps, continuation, toolResult),
   };
   return Object.freeze(runtime);
 }

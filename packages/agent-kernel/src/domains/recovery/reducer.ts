@@ -1,13 +1,13 @@
 import type { KernelEvent } from '../../events';
-import { isToolOutcomeV1 } from '../../normalization';
+import { isToolOutcome } from '../../normalization';
 import {
-  mergeToolRecoveryJournalsV1,
-  recordRecoveryFailureV1,
-  recordRecoveryInvocationV1,
-  recordToolOwnedProgressV1,
-  type ToolOutcomeV1,
-  type ToolRecoveryJournalV1,
-  toolInvocationFingerprintV1,
+  mergeToolRecoveryJournals,
+  recordRecoveryFailure,
+  recordRecoveryInvocation,
+  recordToolOwnedProgress,
+  type ToolOutcome,
+  type ToolRecoveryJournal,
+  toolInvocationFingerprint,
 } from '../../recovery';
 import {
   asJsonObject,
@@ -20,7 +20,7 @@ import type { AgentState, AgentTranscriptMessage } from '../../state';
 
 const EPOCH_CREATED_AT = '1970-01-01T00:00:00.000Z';
 
-function recoveryProjection(outcome: ToolOutcomeV1) {
+function recoveryProjection(outcome: ToolOutcome) {
   const recovery = outcome.recovery;
   const modelFixable =
     recovery.requiresNewModelResponse &&
@@ -48,7 +48,7 @@ function appendSupplementalToolTranscript(
   state: AgentState,
   call: AgentState['tools']['calls'][string],
   event: KernelEvent,
-  outcome: ToolOutcomeV1,
+  outcome: ToolOutcome,
 ): AgentState['transcript'] {
   if (
     state.transcript.messages.some(
@@ -170,9 +170,9 @@ export function reduceRecoveryState(state: AgentState, event: KernelEvent): Agen
         Array.isArray(journal)
       )
         return state;
-      const merged = mergeToolRecoveryJournalsV1(
+      const merged = mergeToolRecoveryJournals(
         state.toolRecovery,
-        journal as ToolRecoveryJournalV1,
+        journal as ToolRecoveryJournal,
         state.toolRecovery.identityKey,
         {
           taskId: call.taskId ?? state.activeTaskId ?? undefined,
@@ -224,24 +224,24 @@ export function reduceRecoveryState(state: AgentState, event: KernelEvent): Agen
   ) {
     return state;
   }
-  const outcomeValue = payload.outcomeV1;
-  if (!isToolOutcomeV1(outcomeValue)) return state;
-  const outcome = outcomeValue as ToolOutcomeV1;
+  const outcomeValue = payload.outcome;
+  if (!isToolOutcome(outcomeValue)) return state;
+  const outcome = outcomeValue as ToolOutcome;
   const invocationFingerprint =
     call.invocationFingerprint ??
-    toolInvocationFingerprintV1({
+    toolInvocationFingerprint({
       toolName: call.name,
       parsedArgs: call.args,
     });
-  let journal = state.toolRecovery as unknown as ToolRecoveryJournalV1;
+  let journal = state.toolRecovery as unknown as ToolRecoveryJournal;
   if (event.type === 'tool.finished' && outcome.status === 'success') {
-    journal = recordToolOwnedProgressV1(journal, {
+    journal = recordToolOwnedProgress(journal, {
       kind: 'receipt',
       referenceId: toolCallId,
       ...(call.recoveryOf ? { resolvesFailureIds: [call.recoveryOf] } : {}),
     });
   } else {
-    journal = recordRecoveryFailureV1(journal, {
+    journal = recordRecoveryFailure(journal, {
       toolCallId,
       toolName: call.name,
       invocationFingerprint,
@@ -253,7 +253,7 @@ export function reduceRecoveryState(state: AgentState, event: KernelEvent): Agen
     if (event.type === 'tool.retry_recorded') {
       const recoveryOf = nonEmptyStringField(payload, 'recoveryOf');
       if (!recoveryOf) return state;
-      journal = recordRecoveryInvocationV1(journal, {
+      journal = recordRecoveryInvocation(journal, {
         toolCallId,
         recoveryOf,
         mode: 'automatic_retry',

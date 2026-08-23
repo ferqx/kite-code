@@ -53,8 +53,8 @@ Header 使用 Ink `Static` 写入 scrollback，但模型或推理强度切换后
 
 若错误发生在 React error boundary，退出提示不得统一猜测为 Model Provider 配置问题，只显示 Enter/Esc
 退出，不建议运行 `kite-code setup`。Runtime/Artifact 不创建 installation key，因此不存在 key-loss startup
-screen。旧 `project-identities-v1.json` 与 `.runtime-v5.db` header shim 不属于当前 target evidence；PTY
-回归必须证明旧字节保持不变、canonical Workspace identity 与 `.runtime-state26-store5.db` 正常初始化。
+screen。旧 `project-identities.json` 与 `.runtime-state-store.db` header shim 不属于当前 target evidence；PTY
+回归必须证明旧字节保持不变、canonical Workspace identity 与 `.runtime-state-store.db` 正常初始化。
 
 ## 边界
 

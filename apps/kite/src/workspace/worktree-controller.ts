@@ -29,7 +29,7 @@ const MAX_BASELINE_TOTAL_BYTES = 128 * 1024 * 1024;
 const MAX_BASELINE_FILE_COUNT = 10_000;
 const MAX_REPOSITORY_CONTROL_BYTES = 1024 * 1024;
 
-export type WriterExecutionModeV1 =
+export type WriterExecutionMode =
   | 'foreground_tui'
   | 'foreground_headless_cli'
   | 'background'
@@ -38,7 +38,7 @@ export type WriterExecutionModeV1 =
   | 'concurrent'
   | 'delegated';
 
-export type WriterWorkspaceAdmissionV1 =
+export type WriterWorkspaceAdmission =
   | { allowed: true; workspace: 'shared_read_only' | 'shared_foreground_writer' | 'worktree' }
   | {
       allowed: false;
@@ -46,9 +46,9 @@ export type WriterWorkspaceAdmissionV1 =
       reason: 'foreground_headless_write_excluded' | 'worktree_controller_disabled';
     };
 
-export interface ResolveWriterWorkspaceAdmissionV1Input {
+export interface ResolveWriterWorkspaceAdmissionInput {
   featureEnabled: boolean;
-  mode: WriterExecutionModeV1;
+  mode: WriterExecutionMode;
   access: 'read_only' | 'write';
   currentCheckoutSelected?: boolean;
 }
@@ -58,9 +58,9 @@ export interface ResolveWriterWorkspaceAdmissionV1Input {
  * of Runtime types: Core receives a canonical workspace plus an opaque binding,
  * never Git credentials or controller authority.
  */
-export function resolveWriterWorkspaceAdmissionV1(
-  input: ResolveWriterWorkspaceAdmissionV1Input,
-): WriterWorkspaceAdmissionV1 {
+export function resolveWriterWorkspaceAdmission(
+  input: ResolveWriterWorkspaceAdmissionInput,
+): WriterWorkspaceAdmission {
   if (input.access === 'read_only') {
     return { allowed: true, workspace: 'shared_read_only' };
   }
@@ -76,7 +76,7 @@ export function resolveWriterWorkspaceAdmissionV1(
   return { allowed: true, workspace: 'worktree' };
 }
 
-export type WorktreeControllerFailureCodeV1 =
+export type WorktreeControllerFailureCode =
   | 'invalid_input'
   | 'invalid_repository'
   | 'invalid_baseline'
@@ -91,32 +91,32 @@ export type WorktreeControllerFailureCodeV1 =
   | 'worktree_conflict'
   | 'worktree_dirty';
 
-export class WorktreeControllerErrorV1 extends Error {
-  readonly code: WorktreeControllerFailureCodeV1;
+export class WorktreeControllerError extends Error {
+  readonly code: WorktreeControllerFailureCode;
 
-  constructor(code: WorktreeControllerFailureCodeV1, message: string, options?: ErrorOptions) {
+  constructor(code: WorktreeControllerFailureCode, message: string, options?: ErrorOptions) {
     super(message, options);
-    this.name = 'WorktreeControllerErrorV1';
+    this.name = 'WorktreeControllerError';
     this.code = code;
   }
 }
 
-export interface WorktreeRuntimeBindingV1 {
+export interface WorktreeRuntimeBinding {
   readonly version: 1;
   readonly kind: 'controller_worktree';
   readonly worktreeIdentity: string;
 }
 
-export interface WriterWorkspaceLeaseV1 {
+export interface WriterWorkspaceLease {
   readonly version: 1;
   readonly worktreeIdentity: string;
   readonly workspaceRoot: string;
   /** App-private ownership epoch. Never include this in the Runtime binding. */
   readonly ownershipNonce: string;
-  readonly runtimeBinding: WorktreeRuntimeBindingV1;
+  readonly runtimeBinding: WorktreeRuntimeBinding;
 }
 
-export interface AcquireWriterWorkspaceV1Input {
+export interface AcquireWriterWorkspaceInput {
   baselineRepoRoot: string;
   baselineCommit: string;
   taskIdentity: string;
@@ -124,7 +124,7 @@ export interface AcquireWriterWorkspaceV1Input {
   writerIdentity: string;
 }
 
-export interface WorktreeControllerV1Options {
+export interface WorktreeControllerOptions {
   stateRoot: string;
   gitBinary?: string;
   now?: () => Date;
@@ -137,7 +137,7 @@ interface GitResult {
   readonly stderr: string;
 }
 
-interface RepositoryIdentityV1 {
+interface RepositoryIdentity {
   readonly repoRoot: string;
   readonly commonGitDirectory: string;
   readonly commonGitDirectoryDevice: number;
@@ -167,9 +167,9 @@ const recordSchema = z
   })
   .strict();
 
-type WorktreeRecordV1 = z.infer<typeof recordSchema>;
+type WorktreeRecord = z.infer<typeof recordSchema>;
 
-export interface OwnedWorktreeSnapshotV1 {
+export interface OwnedWorktreeSnapshot {
   readonly worktreeIdentity: string;
   readonly workspaceRoot: string;
   readonly repoRoot: string;
@@ -181,7 +181,7 @@ export interface OwnedWorktreeSnapshotV1 {
   readonly createdAt: string;
 }
 
-export interface WorktreeHandoffEvidenceV1 extends OwnedWorktreeSnapshotV1 {
+export interface WorktreeHandoffEvidence extends OwnedWorktreeSnapshot {
   readonly conflicts: string;
   readonly status: string;
   readonly uncommitted: string;
@@ -199,7 +199,7 @@ function collectUntrackedReview(root: string, nulPaths: string): string {
   for (const path of paths.sort()) {
     const absolute = resolve(root, path);
     if (!isInside(root, absolute) || relative(root, absolute).split(sep).join('/') !== path) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Untracked review path escaped or changed identity.',
       );
@@ -213,14 +213,14 @@ function collectUntrackedReview(root: string, nulPaths: string): string {
       ownerMismatch ||
       before.size > MAX_UNTRACKED_REVIEW_FILE_BYTES
     ) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Untracked review accepts only bounded, owned regular files.',
       );
     }
     total += before.size;
     if (total > MAX_UNTRACKED_REVIEW_TOTAL_BYTES) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Untracked review content exceeds the bounded handoff limit.',
       );
@@ -238,7 +238,7 @@ function collectUntrackedReview(root: string, nulPaths: string): string {
         opened.ino !== before.ino ||
         opened.size !== before.size
       ) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'identity_mismatch',
           'Untracked review file changed during secure open.',
         );
@@ -252,13 +252,13 @@ function collectUntrackedReview(root: string, nulPaths: string): string {
         after.mtimeMs !== opened.mtimeMs ||
         content.byteLength !== opened.size
       ) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'identity_mismatch',
           'Untracked review file changed while being read.',
         );
       }
       records.push(
-        `KITE_UNTRACKED_FILE_V1 ${JSON.stringify({
+        `KITE_UNTRACKED_FILE_ ${JSON.stringify({
           path,
           size: content.byteLength,
           sha256: `sha256:${createHash('sha256').update(content).digest('hex')}`,
@@ -280,7 +280,7 @@ function isInside(parent: string, candidate: string): boolean {
 
 function validateIdentity(name: string, value: string): void {
   if (!IDENTITY_PATTERN.test(value)) {
-    throw new WorktreeControllerErrorV1(
+    throw new WorktreeControllerError(
       'invalid_input',
       `${name} must contain only 1-64 safe identity characters.`,
     );
@@ -314,7 +314,7 @@ function branchName(input: {
 function opaqueIdentity(value: string): string {
   const normalized = value.replaceAll('-', '').toLowerCase();
   if (!/^[0-9a-f]{32}$/.test(normalized)) {
-    throw new WorktreeControllerErrorV1('invalid_input', 'Generated worktree identity is invalid.');
+    throw new WorktreeControllerError('invalid_input', 'Generated worktree identity is invalid.');
   }
   return `wt_${normalized}`;
 }
@@ -354,11 +354,11 @@ function readPrivateFile(path: string): string {
   return readFileSync(path, 'utf8');
 }
 
-function readStrictRecord(path: string): WorktreeRecordV1 {
+function readStrictRecord(path: string): WorktreeRecord {
   try {
     return recordSchema.parse(JSON.parse(readPrivateFile(path)));
   } catch (error) {
-    throw new WorktreeControllerErrorV1(
+    throw new WorktreeControllerError(
       'record_unavailable',
       'Writer worktree ownership record is missing or invalid.',
       { cause: error },
@@ -392,7 +392,7 @@ function replacePrivateRecord(path: string, value: unknown): void {
   }
 }
 
-export class WorktreeControllerV1 {
+export class WorktreeController {
   private readonly stateRoot: string;
   private readonly recordsRoot: string;
   private readonly locksRoot: string;
@@ -402,7 +402,7 @@ export class WorktreeControllerV1 {
   private readonly now: () => Date;
   private readonly randomIdentity: () => string;
 
-  constructor(options: WorktreeControllerV1Options) {
+  constructor(options: WorktreeControllerOptions) {
     this.gitBinary = options.gitBinary ?? 'git';
     this.now = options.now ?? (() => new Date());
     this.randomIdentity = options.randomIdentity ?? randomUUID;
@@ -427,7 +427,7 @@ export class WorktreeControllerV1 {
       this.worktreesRoot = this.createPrivateChild('worktrees');
       this.hooksRoot = this.createPrivateChild('disabled-hooks');
     } catch (error) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'state_root_unsafe',
         'Worktree controller state root is unavailable or unsafe.',
         { cause: error },
@@ -435,12 +435,12 @@ export class WorktreeControllerV1 {
     }
   }
 
-  acquire(input: AcquireWriterWorkspaceV1Input): WriterWorkspaceLeaseV1 {
+  acquire(input: AcquireWriterWorkspaceInput): WriterWorkspaceLease {
     validateIdentity('taskIdentity', input.taskIdentity);
     validateIdentity('runIdentity', input.runIdentity);
     validateIdentity('writerIdentity', input.writerIdentity);
     if (!COMMIT_PATTERN.test(input.baselineCommit)) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'invalid_baseline',
         'baselineCommit must be a full lowercase commit identity.',
       );
@@ -451,7 +451,7 @@ export class WorktreeControllerV1 {
       isInside(repository.repoRoot, this.stateRoot) ||
       isInside(this.stateRoot, repository.repoRoot)
     ) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'state_root_unsafe',
         'Controller state and worktrees must be outside the baseline repository.',
       );
@@ -466,7 +466,7 @@ export class WorktreeControllerV1 {
       `${input.baselineCommit}^{commit}`,
     ]).stdout.trim();
     if (resolvedCommit !== input.baselineCommit) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'invalid_baseline',
         'baselineCommit does not resolve to the requested immutable commit.',
       );
@@ -475,7 +475,7 @@ export class WorktreeControllerV1 {
       this.git(repository.repoRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
         .stdout.length > 0
     ) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'baseline_dirty',
         'Baseline checkout is dirty; isolated writer creation is blocked.',
       );
@@ -483,7 +483,7 @@ export class WorktreeControllerV1 {
 
     const createdAt = this.now();
     if (!Number.isFinite(createdAt.getTime())) {
-      throw new WorktreeControllerErrorV1('invalid_input', 'Controller clock is invalid.');
+      throw new WorktreeControllerError('invalid_input', 'Controller clock is invalid.');
     }
     const leaseKey = writerLeaseKey(input);
     const worktreeIdentity = opaqueIdentity(this.randomIdentity());
@@ -491,7 +491,7 @@ export class WorktreeControllerV1 {
     try {
       writeNewPrivateFile(lockPath, { version: 1, leaseKey, worktreeIdentity });
     } catch (error) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'writer_lease_conflict',
         'A writer workspace lease already exists for this task/run/writer identity.',
         { cause: error },
@@ -501,7 +501,7 @@ export class WorktreeControllerV1 {
     const targetBranch = branchName(input);
     const targetRoot = resolve(this.worktreesRoot, worktreeIdentity);
     const recordPath = this.recordPath(worktreeIdentity);
-    const record: WorktreeRecordV1 = {
+    const record: WorktreeRecord = {
       version: 1,
       state: 'provisioning',
       worktreeIdentity,
@@ -525,13 +525,13 @@ export class WorktreeControllerV1 {
         [0, 1],
       );
       if (branchProbe.status === 0) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'branch_collision',
           `Controller branch already exists: ${targetBranch}`,
         );
       }
       if (existsSync(targetRoot)) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'identity_mismatch',
           'Generated worktree path already exists.',
         );
@@ -556,8 +556,8 @@ export class WorktreeControllerV1 {
       // Keep the ownership record and lease lock. A partial Git operation or
       // disk failure must remain blocked for operator diagnosis, never become
       // active, fall back to the shared checkout, or trigger broad deletion.
-      if (error instanceof WorktreeControllerErrorV1) throw error;
-      throw new WorktreeControllerErrorV1(
+      if (error instanceof WorktreeControllerError) throw error;
+      throw new WorktreeControllerError(
         'git_failure',
         'Failed to provision an isolated writer worktree.',
         { cause: error },
@@ -565,12 +565,12 @@ export class WorktreeControllerV1 {
     }
   }
 
-  recover(worktreeIdentity: string): WriterWorkspaceLeaseV1 {
+  recover(worktreeIdentity: string): WriterWorkspaceLease {
     return this.withOperationLock(worktreeIdentity, () => {
       const record = this.readRecord(worktreeIdentity);
       this.assertLeaseLock(record);
       if (record.state !== 'active') {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'record_unavailable',
           'Provisioning worktree cannot be recovered automatically; discard and recreate it explicitly.',
         );
@@ -583,7 +583,7 @@ export class WorktreeControllerV1 {
       try {
         replacePrivateRecord(this.recordPath(worktreeIdentity), recoveredRecord);
       } catch (error) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'record_unavailable',
           'Cannot persist the recovered writer ownership epoch.',
           { cause: error },
@@ -593,7 +593,7 @@ export class WorktreeControllerV1 {
     });
   }
 
-  inspect(lease: WriterWorkspaceLeaseV1): OwnedWorktreeSnapshotV1 {
+  inspect(lease: WriterWorkspaceLease): OwnedWorktreeSnapshot {
     const record = this.readRecord(lease.worktreeIdentity);
     if (
       lease.version !== 1 ||
@@ -603,7 +603,7 @@ export class WorktreeControllerV1 {
       lease.runtimeBinding.kind !== 'controller_worktree' ||
       lease.runtimeBinding.worktreeIdentity !== record.worktreeIdentity
     ) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Writer workspace lease does not match its ownership record.',
       );
@@ -623,7 +623,7 @@ export class WorktreeControllerV1 {
     };
   }
 
-  cleanup(lease: WriterWorkspaceLeaseV1): void {
+  cleanup(lease: WriterWorkspaceLease): void {
     this.withOperationLock(lease.worktreeIdentity, () => {
       const snapshot = this.inspect(lease);
       const conflicts = this.git(snapshot.workspaceRoot, [
@@ -634,7 +634,7 @@ export class WorktreeControllerV1 {
         '--',
       ]).stdout;
       if (conflicts.length > 0) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'worktree_conflict',
           'Writer worktree contains unresolved conflicts and was retained.',
         );
@@ -646,7 +646,7 @@ export class WorktreeControllerV1 {
         '--untracked-files=all',
       ]).stdout;
       if (status.length > 0) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'worktree_dirty',
           'Writer worktree contains uncommitted changes and was retained.',
         );
@@ -656,7 +656,7 @@ export class WorktreeControllerV1 {
       this.git(snapshot.repoRoot, ['worktree', 'remove', '--', snapshot.workspaceRoot]);
       const record = this.readRecord(snapshot.worktreeIdentity);
       if (record.ownershipNonce !== lease.ownershipNonce) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'identity_mismatch',
           'Writer ownership epoch changed during cleanup.',
         );
@@ -667,13 +667,13 @@ export class WorktreeControllerV1 {
     });
   }
 
-  collectHandoffEvidence(lease: WriterWorkspaceLeaseV1): WorktreeHandoffEvidenceV1 {
+  collectHandoffEvidence(lease: WriterWorkspaceLease): WorktreeHandoffEvidence {
     return this.withOperationLock(lease.worktreeIdentity, () =>
       this.collectHandoffEvidenceLocked(lease),
     );
   }
 
-  private collectHandoffEvidenceLocked(lease: WriterWorkspaceLeaseV1): WorktreeHandoffEvidenceV1 {
+  private collectHandoffEvidenceLocked(lease: WriterWorkspaceLease): WorktreeHandoffEvidence {
     const snapshot = this.inspect(lease);
     const conflicts = this.git(snapshot.workspaceRoot, [
       'diff',
@@ -769,7 +769,7 @@ export class WorktreeControllerV1 {
       untrackedReview !== finalUntrackedReview ||
       diff !== finalDiff
     ) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Writer worktree changed while collecting handoff evidence.',
       );
@@ -789,7 +789,7 @@ export class WorktreeControllerV1 {
 
   private withOperationLock<T>(worktreeIdentity: string, operation: () => T): T {
     if (!OPAQUE_IDENTITY_PATTERN.test(worktreeIdentity)) {
-      throw new WorktreeControllerErrorV1('invalid_input', 'Invalid opaque worktree identity.');
+      throw new WorktreeControllerError('invalid_input', 'Invalid opaque worktree identity.');
     }
     const operationPath = resolve(this.locksRoot, `${worktreeIdentity}.operation`);
     try {
@@ -799,7 +799,7 @@ export class WorktreeControllerV1 {
         nonce: randomUUID(),
       });
     } catch (error) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'operation_in_progress',
         'Another controller operation is active or requires manual recovery.',
         { cause: error },
@@ -830,13 +830,13 @@ export class WorktreeControllerV1 {
     return path;
   }
 
-  private resolveRepository(requestedRoot: string): RepositoryIdentityV1 {
+  private resolveRepository(requestedRoot: string): RepositoryIdentity {
     let canonicalRequested: string;
     try {
       canonicalRequested = realpathSync.native(resolve(requestedRoot));
       if (!statSync(canonicalRequested).isDirectory()) throw new Error('not a directory');
     } catch (error) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'invalid_repository',
         'Baseline repository root is unavailable.',
         { cause: error },
@@ -849,7 +849,7 @@ export class WorktreeControllerV1 {
         resolve(this.git(canonicalRequested, ['rev-parse', '--show-toplevel']).stdout.trim()),
       );
       if (topLevel !== canonicalRequested) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_repository',
           'baselineRepoRoot must resolve to the canonical repository root.',
         );
@@ -865,8 +865,8 @@ export class WorktreeControllerV1 {
         commonGitDirectoryInode: commonStat.ino,
       };
     } catch (error) {
-      if (error instanceof WorktreeControllerErrorV1) throw error;
-      throw new WorktreeControllerErrorV1(
+      if (error instanceof WorktreeControllerError) throw error;
+      throw new WorktreeControllerError(
         'invalid_repository',
         'Cannot establish the canonical Git repository identity.',
         { cause: error },
@@ -874,7 +874,7 @@ export class WorktreeControllerV1 {
     }
   }
 
-  private assertRecordBinding(record: WorktreeRecordV1): void {
+  private assertRecordBinding(record: WorktreeRecord): void {
     const repository = this.resolveRepository(record.repoRoot);
     if (
       repository.commonGitDirectory !== record.commonGitDirectory ||
@@ -882,7 +882,7 @@ export class WorktreeControllerV1 {
       repository.commonGitDirectoryInode !== record.commonGitDirectoryInode ||
       resolve(this.worktreesRoot, record.worktreeIdentity) !== record.worktreeRoot
     ) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Repository or controller worktree identity changed.',
       );
@@ -891,7 +891,7 @@ export class WorktreeControllerV1 {
     try {
       worktreeRoot = realpathSync.native(record.worktreeRoot);
     } catch (error) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Controller-owned worktree is missing.',
         { cause: error },
@@ -918,14 +918,14 @@ export class WorktreeControllerV1 {
       observedCommon !== record.commonGitDirectory ||
       observedBranch !== record.branchName
     ) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Worktree repository or branch identity changed.',
       );
     }
   }
 
-  private assertLeaseLock(record: WorktreeRecordV1): void {
+  private assertLeaseLock(record: WorktreeRecord): void {
     try {
       const lock = JSON.parse(readPrivateFile(this.lockPath(record.writerLeaseKey))) as {
         version?: unknown;
@@ -940,7 +940,7 @@ export class WorktreeControllerV1 {
         throw new Error('lease lock identity mismatch');
       }
     } catch (error) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Writer lease lock is missing or does not match the worktree record.',
         { cause: error },
@@ -948,14 +948,14 @@ export class WorktreeControllerV1 {
     }
   }
 
-  private readRecord(worktreeIdentity: string): WorktreeRecordV1 {
+  private readRecord(worktreeIdentity: string): WorktreeRecord {
     if (!OPAQUE_IDENTITY_PATTERN.test(worktreeIdentity)) {
-      throw new WorktreeControllerErrorV1('invalid_input', 'Invalid opaque worktree identity.');
+      throw new WorktreeControllerError('invalid_input', 'Invalid opaque worktree identity.');
     }
     return readStrictRecord(this.recordPath(worktreeIdentity));
   }
 
-  private leaseFromRecord(record: WorktreeRecordV1): WriterWorkspaceLeaseV1 {
+  private leaseFromRecord(record: WorktreeRecord): WriterWorkspaceLease {
     return Object.freeze({
       version: 1 as const,
       worktreeIdentity: record.worktreeIdentity,
@@ -973,23 +973,20 @@ export class WorktreeControllerV1 {
     return resolve(this.recordsRoot, `${identity}.json`);
   }
 
-  private assertBaselineHasNoExternalFilters(
-    repository: RepositoryIdentityV1,
-    commit: string,
-  ): void {
+  private assertBaselineHasNoExternalFilters(repository: RepositoryIdentity, commit: string): void {
     // Replacement refs are disabled in every subprocess too, but reject their
     // repository-local presence so an immutable baseline never has two
     // competing interpretations at the controller boundary.
     const replacementRefsPath = resolve(repository.commonGitDirectory, 'refs', 'replace');
     if (existsSync(replacementRefsPath)) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'invalid_baseline',
         'Repository replacement refs are present; immutable baseline admission is blocked.',
       );
     }
     const graftsPath = resolve(repository.commonGitDirectory, 'info', 'grafts');
     if (existsSync(graftsPath)) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'invalid_baseline',
         'Repository legacy grafts are present; immutable baseline admission is blocked.',
       );
@@ -1002,7 +999,7 @@ export class WorktreeControllerV1 {
         'Repository packed refs are unsafe.',
       );
       if (/^[0-9a-f]{40} refs\/replace\//mu.test(packedRefs)) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Repository packed replacement refs are present; immutable baseline admission is blocked.',
         );
@@ -1022,7 +1019,7 @@ export class WorktreeControllerV1 {
     for (const path of paths) {
       const contents = this.git(repository.repoRoot, ['show', `${commit}:${path}`]).stdout;
       if (this.attributesDeclareFilter(contents)) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Baseline declares a Git content filter and cannot be materialized safely.',
         );
@@ -1037,7 +1034,7 @@ export class WorktreeControllerV1 {
         'Repository Git config is unsafe.',
       );
       if (/^\s*\[(?:filter\b|include\b|includeif\b)/imu.test(config)) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Repository Git config declares a filter or include and cannot be materialized safely.',
         );
@@ -1052,7 +1049,7 @@ export class WorktreeControllerV1 {
         'Repository info attributes are unsafe.',
       );
       if (this.attributesDeclareFilter(attributes)) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Repository info attributes declare a Git content filter.',
         );
@@ -1081,7 +1078,7 @@ export class WorktreeControllerV1 {
         listing.subarray(0, Math.max(0, listing.length - 1)),
       );
     } catch (error) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'invalid_baseline',
         'Baseline contains a non-UTF-8 path that cannot be materialized safely.',
         { cause: error },
@@ -1091,7 +1088,7 @@ export class WorktreeControllerV1 {
       if (rawEntry === '') continue;
       const match = /^(100644|100755) blob ([a-f0-9]{40})\t(.+)$/u.exec(rawEntry);
       if (!match) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Baseline contains a non-regular or unsupported Git tree entry.',
         );
@@ -1099,7 +1096,7 @@ export class WorktreeControllerV1 {
       const [, mode, objectId, path] = match;
       fileCount += 1;
       if (fileCount > MAX_BASELINE_FILE_COUNT) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Baseline contains too many files for bounded materialization.',
         );
@@ -1109,21 +1106,21 @@ export class WorktreeControllerV1 {
         !isInside(worktreeRoot, absolute) ||
         relative(worktreeRoot, absolute).split(sep).join('/') !== path
       ) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Baseline tree path escaped the controller worktree.',
         );
       }
       const content = this.gitBytes(worktreeRoot, ['cat-file', 'blob', objectId!]);
       if (content.byteLength > MAX_BASELINE_FILE_BYTES) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Baseline file exceeds the bounded materialization limit.',
         );
       }
       total += content.byteLength;
       if (total > MAX_BASELINE_TOTAL_BYTES) {
-        throw new WorktreeControllerErrorV1(
+        throw new WorktreeControllerError(
           'invalid_baseline',
           'Baseline exceeds the bounded materialization limit.',
         );
@@ -1153,7 +1150,7 @@ export class WorktreeControllerV1 {
   private readRepositoryControlFile(root: string, path: string, message: string): string {
     const absolute = resolve(path);
     if (!isInside(root, absolute)) {
-      throw new WorktreeControllerErrorV1('identity_mismatch', message);
+      throw new WorktreeControllerError('identity_mismatch', message);
     }
     const before = lstatSync(absolute);
     const ownerMismatch = process.platform !== 'win32' && before.uid !== process.getuid?.();
@@ -1164,7 +1161,7 @@ export class WorktreeControllerV1 {
       ownerMismatch ||
       before.size > MAX_REPOSITORY_CONTROL_BYTES
     ) {
-      throw new WorktreeControllerErrorV1('identity_mismatch', message);
+      throw new WorktreeControllerError('identity_mismatch', message);
     }
     let fd: number | undefined;
     try {
@@ -1179,7 +1176,7 @@ export class WorktreeControllerV1 {
         opened.ino !== before.ino ||
         opened.size !== before.size
       ) {
-        throw new WorktreeControllerErrorV1('identity_mismatch', message);
+        throw new WorktreeControllerError('identity_mismatch', message);
       }
       const contents = readFileSync(fd, 'utf8');
       const after = fstatSync(fd);
@@ -1190,7 +1187,7 @@ export class WorktreeControllerV1 {
         opened.mtimeMs !== after.mtimeMs ||
         Buffer.byteLength(contents, 'utf8') !== opened.size
       ) {
-        throw new WorktreeControllerErrorV1('identity_mismatch', message);
+        throw new WorktreeControllerError('identity_mismatch', message);
       }
       return contents;
     } finally {
@@ -1207,14 +1204,14 @@ export class WorktreeControllerV1 {
     const ownerMismatch = process.platform !== 'win32' && before.uid !== process.getuid?.();
     const permissionsUnsafe = process.platform !== 'win32' && (before.mode & 0o077) !== 0;
     if (!before.isFile() || before.isSymbolicLink() || ownerMismatch || permissionsUnsafe) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Controller identity file was replaced.',
       );
     }
     const after = lstatSync(path);
     if (before.dev !== after.dev || before.ino !== after.ino) {
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'identity_mismatch',
         'Controller identity file changed during cleanup.',
       );
@@ -1253,11 +1250,9 @@ export class WorktreeControllerV1 {
       const diagnostic = (result.stderr || result.error?.message || 'unknown Git failure')
         .trim()
         .slice(0, 1_000);
-      throw new WorktreeControllerErrorV1(
-        'git_failure',
-        `Git command failed closed: ${diagnostic}`,
-        { cause: result.error },
-      );
+      throw new WorktreeControllerError('git_failure', `Git command failed closed: ${diagnostic}`, {
+        cause: result.error,
+      });
     }
     return { status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
   }
@@ -1292,7 +1287,7 @@ export class WorktreeControllerV1 {
       const stderr = Buffer.isBuffer(result.stderr)
         ? result.stderr.toString('utf8')
         : String(result.stderr ?? result.error?.message ?? 'unknown Git failure');
-      throw new WorktreeControllerErrorV1(
+      throw new WorktreeControllerError(
         'git_failure',
         `Git command failed closed: ${stderr.trim().slice(0, 1_000)}`,
         { cause: result.error },

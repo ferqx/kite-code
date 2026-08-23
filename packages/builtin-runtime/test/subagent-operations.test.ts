@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { projectSubagentResultV1 } from '../src/subagent-operations';
+import { projectSubagentResult } from '../src/subagent-operations';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 
@@ -100,10 +100,10 @@ function project(
   input: Record<string, unknown> = { subagent_type: 'explore' },
   phase: 'planning' | 'building' = 'building',
 ) {
-  return projectSubagentResultV1({ input, result, phase });
+  return projectSubagentResult({ input, result, phase });
 }
 
-describe('RMV1-14 Builtin subagent result projection', () => {
+describe('RM-14 Builtin subagent result projection', () => {
   test('retains the explicit normal terminal allowlist as exact RuntimeJson', () => {
     const projected = project(completedResult());
     expect(projected).toMatchObject({

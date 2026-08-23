@@ -1,4 +1,4 @@
-import type { SubagentRoleV1 } from './subagent-provider';
+import type { SubagentRole } from './subagent-provider';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -70,7 +70,7 @@ export interface PersistedExecutionJournalEntry {
 
 export interface SuspendedSubagentSnapshot {
   subagentId: string;
-  role: SubagentRoleV1;
+  role: SubagentRole;
   task: string;
   messages: PersistedSubagentMessage[];
   toolCallCount: number;
@@ -98,7 +98,7 @@ export interface SuspendedSubagentSnapshot {
 }
 
 /** Path-free content-addressed reference to a private immutable continuation payload. */
-export interface SubagentContinuationArtifactRefV1 {
+export interface SubagentContinuationArtifactRef {
   artifactId: string;
   kind: 'subagent_continuation';
   integrityIdentifier: string;
@@ -106,13 +106,13 @@ export interface SubagentContinuationArtifactRefV1 {
 }
 
 /** Low-information durable projection used by all new suspension writes. */
-export interface PrivateSuspendedSubagentRecordV1 {
+export interface PrivateSuspendedSubagentRecord {
   storage: 'private_artifact_v1';
   subagentId: string;
-  role: SubagentRoleV1;
+  role: SubagentRole;
   continuationId: string;
   modelInvocationOrdinal: number;
-  continuationArtifact: SubagentContinuationArtifactRefV1;
+  continuationArtifact: SubagentContinuationArtifactRef;
   parentInvocationId: string;
   parentAttempt: number;
   blockedTool: {
@@ -124,4 +124,4 @@ export interface PrivateSuspendedSubagentRecordV1 {
 }
 
 /** The production cutover epoch persists only low-information private references. */
-export type DurableSuspendedSubagentV1 = PrivateSuspendedSubagentRecordV1;
+export type DurableSuspendedSubagent = PrivateSuspendedSubagentRecord;

@@ -1,24 +1,24 @@
 import type {
-  BuiltinPlanningExecutionMechanismV1,
+  BuiltinPlanningExecutionMechanism,
   SkillCatalogSnapshot,
 } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type {
-  NetworkBoundaryPolicyV1,
-  NetworkDecisionRecorderV1,
-  ProtectedPathEvaluatorV1,
+  NetworkBoundaryPolicy,
+  NetworkDecisionRecorder,
+  ProtectedPathEvaluator,
   ShellExecutor,
   ShellFilesystemMode,
   ShellNetworkMode,
 } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeState } from '@kite/runtime-host';
-import type { CapabilityAvailabilityContextV1, CapabilityKindV1 } from '@kite/runtime-spi';
+import type { CapabilityAvailabilityContext, CapabilityKind } from '@kite/runtime-spi';
 import type { FeatureFlags } from '#app/config/features';
 import type { SubAgentResult } from './subagent/types';
 
-export interface ToolAvailabilityContext extends CapabilityAvailabilityContextV1 {}
+export interface ToolAvailabilityContext extends CapabilityAvailabilityContext {}
 
-export type ToolKind = Exclude<CapabilityKindV1, 'internal_runtime'>;
+export type ToolKind = Exclude<CapabilityKind, 'internal_runtime'>;
 
 /** App composition DTO; it carries no schema, effects, availability, or executor authority. */
 export interface ToolExecutionContext extends ToolAvailabilityContext {
@@ -27,8 +27,8 @@ export interface ToolExecutionContext extends ToolAvailabilityContext {
   shellExecutor?: ShellExecutor;
   shellNetworkMode?: ShellNetworkMode;
   shellFilesystemMode?: ShellFilesystemMode;
-  networkBoundaryPolicy?: NetworkBoundaryPolicyV1;
-  recordNetworkDecision?: NetworkDecisionRecorderV1;
+  networkBoundaryPolicy?: NetworkBoundaryPolicy;
+  recordNetworkDecision?: NetworkDecisionRecorder;
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   mcpManager?: McpRuntimeProvider;
   runTask?: (input: {
@@ -48,8 +48,8 @@ export interface ToolExecutionContext extends ToolAvailabilityContext {
       outputSchema: Record<string, unknown>;
     }) => Promise<SubAgentResult | null>;
   };
-  planRuntime?: BuiltinPlanningExecutionMechanismV1;
-  workspaceFilesystem?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemInvocationDispatcherV1;
+  planRuntime?: BuiltinPlanningExecutionMechanism;
+  workspaceFilesystem?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemInvocationDispatcher;
   allowExternalPaths?: boolean;
   writeTarget?: {
     path: string;
@@ -59,6 +59,6 @@ export interface ToolExecutionContext extends ToolAvailabilityContext {
   };
   invocationInput?: unknown;
   beforeExecute?: () => void | Promise<void>;
-  protectedPathEvaluator?: ProtectedPathEvaluatorV1;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  protectedPathEvaluator?: ProtectedPathEvaluator;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
 }

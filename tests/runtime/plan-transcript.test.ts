@@ -11,9 +11,9 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createRuntimeHostStateInitialStateV1,
+  createRuntimeHostStateInitialState,
   getActivePlanning,
-  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
 } from '@kite/runtime-host';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent, emptyCurrentPlanEvidence } from '../helpers/current-plan';
@@ -32,7 +32,7 @@ function draftEvent(plan: AgentPlan, toolCallId: string, planId: string) {
 }
 
 function currentPlanningState() {
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 't1',
     userId: 'u1',
@@ -103,7 +103,7 @@ describe('transcript integrity', () => {
       (current, event) =>
         reduceRuntimeState(
           current,
-          normalizeCurrentToolOutcomeEventV1(event, current, '2026-08-11T00:00:00.000Z'),
+          normalizeCurrentToolOutcomeEvent(event, current, '2026-08-11T00:00:00.000Z'),
         ),
       state,
     );

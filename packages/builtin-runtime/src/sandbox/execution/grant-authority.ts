@@ -1,15 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
-  ApprovedShellCommandV1,
-  PreparedSandboxExecutionV1,
-  SandboxCleanupGrantV1,
-  SandboxPreparationGrantV1,
-  SandboxPreparationResourceSemanticsV1,
-  SandboxPreparationV1,
+  ApprovedShellCommand,
+  PreparedSandboxExecution,
+  SandboxCleanupGrant,
+  SandboxPreparation,
+  SandboxPreparationGrant,
+  SandboxPreparationResourceSemantics,
 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from '../../capability-binding';
+import { digestCapabilityBindingValue } from '../../capability-binding';
 
-export interface SandboxPreparationIntentRecordV1 {
+export interface SandboxPreparationIntentRecord {
   readonly attempt: number;
   readonly toolCallId: string;
   readonly capabilityId: string;
@@ -25,30 +25,30 @@ export interface SandboxPreparationIntentRecordV1 {
   readonly recordedAt: string;
 }
 
-function sandboxPreparationIntentDigestV1(
-  input: Omit<SandboxPreparationIntentRecordV1, 'intentDigest' | 'recordedAt'>,
+function sandboxPreparationIntentDigest(
+  input: Omit<SandboxPreparationIntentRecord, 'intentDigest' | 'recordedAt'>,
 ): string {
-  return digestCapabilityBindingValueV1(input);
+  return digestCapabilityBindingValue(input);
 }
 
 const GRANT_DOMAIN = 'kite.sandbox-preparation-grant.v1\0';
 const COMMAND_DOMAIN = 'kite.approved-shell-command.v1\0';
 const DEFAULT_TTL_MS = 60_000;
 
-export class SandboxExecutionGrantErrorV1 extends Error {
+export class SandboxExecutionGrantError extends Error {
   readonly code = 'invalid_grant';
   constructor(message: string) {
     super(message);
-    this.name = 'SandboxExecutionGrantErrorV1';
+    this.name = 'SandboxExecutionGrantError';
   }
 }
 
-export interface SandboxExecutionGrantVerifierV1 {
-  verify(grant: SandboxPreparationGrantV1): Readonly<SandboxPreparationGrantV1>;
-  verifyCleanup(grant: SandboxCleanupGrantV1): Readonly<SandboxCleanupGrantV1>;
+export interface SandboxExecutionGrantVerifier {
+  verify(grant: SandboxPreparationGrant): Readonly<SandboxPreparationGrant>;
+  verifyCleanup(grant: SandboxCleanupGrant): Readonly<SandboxCleanupGrant>;
 }
 
-export class SandboxExecutionGrantAuthorityV1 {
+export class SandboxExecutionGrantAuthority {
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #consumedGrantSeals = new Set<string>();
@@ -59,13 +59,13 @@ export class SandboxExecutionGrantAuthorityV1 {
   }
 
   issue(input: {
-    preparation: SandboxPreparationV1;
-    resourceSemantics: SandboxPreparationResourceSemanticsV1;
+    preparation: SandboxPreparation;
+    resourceSemantics: SandboxPreparationResourceSemantics;
     preparationIntentDigest?: string;
-  }): Readonly<SandboxPreparationGrantV1> {
+  }): Readonly<SandboxPreparationGrant> {
     const preparation = validatePreparation(input.preparation);
     if (input.resourceSemantics === 'allocating' && !input.preparationIntentDigest) {
-      throw new SandboxExecutionGrantErrorV1(
+      throw new SandboxExecutionGrantError(
         'Allocating sandbox preparation requires a durable intent acknowledgement.',
       );
     }
@@ -73,12 +73,12 @@ export class SandboxExecutionGrantAuthorityV1 {
       input.resourceSemantics === 'allocating' &&
       input.preparationIntentDigest !== allocatingIntentDigest(preparation)
     ) {
-      throw new SandboxExecutionGrantErrorV1(
+      throw new SandboxExecutionGrantError(
         'Allocating sandbox preparation intent does not match the approved preparation.',
       );
     }
     if (input.resourceSemantics === 'pure' && input.preparationIntentDigest) {
-      throw new SandboxExecutionGrantErrorV1(
+      throw new SandboxExecutionGrantError(
         'Pure sandbox preparation cannot claim an allocating intent.',
       );
     }
@@ -97,13 +97,13 @@ export class SandboxExecutionGrantAuthorityV1 {
     const approvedCommand = freeze({
       ...commandBase,
       seal: sign(COMMAND_DOMAIN, commandBase),
-    }) satisfies Readonly<ApprovedShellCommandV1>;
+    }) satisfies Readonly<ApprovedShellCommand>;
     const base = {
       schema: 'kite.sandbox-execution-provider.v1' as const,
       purpose: 'prepare' as const,
       preparation,
       approvedCommand,
-      preparationDigest: sandboxPreparationDigestV1(preparation),
+      preparationDigest: sandboxPreparationDigest(preparation),
       resourceSemantics: input.resourceSemantics,
       preparationIntentDigest: input.preparationIntentDigest ?? null,
       issuedAtMs,
@@ -112,14 +112,14 @@ export class SandboxExecutionGrantAuthorityV1 {
     return freeze({ ...base, seal: sign(GRANT_DOMAIN, base) });
   }
 
-  verifier(): SandboxExecutionGrantVerifierV1 {
+  verifier(): SandboxExecutionGrantVerifier {
     return Object.freeze({
-      verify: (grant: SandboxPreparationGrantV1) => this.verify(grant),
-      verifyCleanup: (grant: SandboxCleanupGrantV1) => this.verifyCleanup(grant),
+      verify: (grant: SandboxPreparationGrant) => this.verify(grant),
+      verifyCleanup: (grant: SandboxCleanupGrant) => this.verifyCleanup(grant),
     });
   }
 
-  verify(grant: SandboxPreparationGrantV1): Readonly<SandboxPreparationGrantV1> {
+  verify(grant: SandboxPreparationGrant): Readonly<SandboxPreparationGrant> {
     const copy = structuredClone(grant);
     if (
       !hasExactKeys(copy as unknown as Record<string, unknown>, [
@@ -159,7 +159,7 @@ export class SandboxExecutionGrantAuthorityV1 {
     if (
       copy.schema !== 'kite.sandbox-execution-provider.v1' ||
       copy.purpose !== 'prepare' ||
-      copy.preparationDigest !== sandboxPreparationDigestV1(preparation) ||
+      copy.preparationDigest !== sandboxPreparationDigest(preparation) ||
       copy.approvedCommand.invocationId !== preparation.invocationId ||
       copy.approvedCommand.attempt !== preparation.attempt ||
       copy.approvedCommand.commandDigest !== preparation.commandDigest ||
@@ -187,14 +187,14 @@ export class SandboxExecutionGrantAuthorityV1 {
   }
 
   issueCleanup(input: {
-    purpose: SandboxCleanupGrantV1['purpose'];
-    prepared?: Readonly<PreparedSandboxExecutionV1>;
-    intent?: Readonly<SandboxPreparationIntentRecordV1>;
+    purpose: SandboxCleanupGrant['purpose'];
+    prepared?: Readonly<PreparedSandboxExecution>;
+    intent?: Readonly<SandboxPreparationIntentRecord>;
     invocationId?: string;
     lifecycleIntentDigest: string;
     cleanupAttempt: number;
     cleanupConfirmed: boolean;
-  }): Readonly<SandboxCleanupGrantV1> {
+  }): Readonly<SandboxCleanupGrant> {
     const source = input.prepared ?? input.intent;
     if (!source || !input.lifecycleIntentDigest) {
       invalid('Sandbox cleanup grant requires durable lifecycle identity.');
@@ -218,8 +218,8 @@ export class SandboxExecutionGrantAuthorityV1 {
       effectiveEffectsDigest: source.effectiveEffectsDigest,
       admissionDigest: source.admissionDigest,
       preparationDigest: source.preparationDigest,
-      preparedPlanDigest: input.prepared ? sandboxPreparedPlanDigestV1(input.prepared) : null,
-      cleanupDigest: input.prepared ? sandboxCleanupDigestV1(input.prepared.cleanup) : null,
+      preparedPlanDigest: input.prepared ? sandboxPreparedPlanDigest(input.prepared) : null,
+      cleanupDigest: input.prepared ? sandboxCleanupDigest(input.prepared.cleanup) : null,
       lifecycleIntentDigest: input.lifecycleIntentDigest,
       cleanupGrantId: randomUUID(),
       cleanupAttempt: input.cleanupAttempt,
@@ -230,7 +230,7 @@ export class SandboxExecutionGrantAuthorityV1 {
     return freeze({ ...base, seal: sign(GRANT_DOMAIN, base) });
   }
 
-  verifyCleanup(grant: SandboxCleanupGrantV1): Readonly<SandboxCleanupGrantV1> {
+  verifyCleanup(grant: SandboxCleanupGrant): Readonly<SandboxCleanupGrant> {
     const copy = structuredClone(grant);
     if (
       !hasExactKeys(copy as unknown as Record<string, unknown>, [
@@ -293,20 +293,18 @@ export class SandboxExecutionGrantAuthorityV1 {
   }
 }
 
-export function sandboxPreparedPlanDigestV1(
-  prepared: Readonly<PreparedSandboxExecutionV1>,
-): string {
+export function sandboxPreparedPlanDigest(prepared: Readonly<PreparedSandboxExecution>): string {
   return digest(prepared);
 }
 
-export function sandboxCleanupDigestV1(
-  cleanup: Readonly<PreparedSandboxExecutionV1['cleanup']>,
+export function sandboxCleanupDigest(
+  cleanup: Readonly<PreparedSandboxExecution['cleanup']>,
 ): string {
   return digest(cleanup);
 }
 
-function allocatingIntentDigest(preparation: Readonly<SandboxPreparationV1>): string {
-  return sandboxPreparationIntentDigestV1({
+function allocatingIntentDigest(preparation: Readonly<SandboxPreparation>): string {
+  return sandboxPreparationIntentDigest({
     attempt: preparation.attempt,
     toolCallId: preparation.toolCallId,
     capabilityId: preparation.capabilityId,
@@ -314,25 +312,25 @@ function allocatingIntentDigest(preparation: Readonly<SandboxPreparationV1>): st
     canonicalWorkspace: preparation.canonicalWorkspace,
     effectiveEffectsDigest: preparation.effectiveEffectsDigest,
     admissionDigest: preparation.admissionDigest,
-    preparationDigest: sandboxPreparationDigestV1(preparation as SandboxPreparationV1),
+    preparationDigest: sandboxPreparationDigest(preparation as SandboxPreparation),
     commandDigest: preparation.commandDigest,
     executionBoundaryDigest: preparation.executionBoundaryDigest,
     resourceSemantics: 'allocating',
   });
 }
 
-export function sandboxCommandDigestV1(argv: readonly string[]): string {
+export function sandboxCommandDigest(argv: readonly string[]): string {
   if (!Array.isArray(argv) || argv.length < 1 || argv.some((part) => typeof part !== 'string')) {
     throw new Error('Sandbox command argv is invalid.');
   }
   return digest({ argv: [...argv] });
 }
 
-export function sandboxPreparationDigestV1(preparation: SandboxPreparationV1): string {
+export function sandboxPreparationDigest(preparation: SandboxPreparation): string {
   return digest(preparation);
 }
 
-function validatePreparation(value: SandboxPreparationV1): Readonly<SandboxPreparationV1> {
+function validatePreparation(value: SandboxPreparation): Readonly<SandboxPreparation> {
   const copy = structuredClone(value);
   if (
     !hasExactKeys(copy as unknown as Record<string, unknown>, [
@@ -380,7 +378,7 @@ function validatePreparation(value: SandboxPreparationV1): Readonly<SandboxPrepa
     !Number.isSafeInteger(copy.timeoutMs) ||
     copy.timeoutMs < 1 ||
     !validResourceLimits(copy.resourceLimits) ||
-    copy.commandDigest !== sandboxCommandDigestV1(copy.argv) ||
+    copy.commandDigest !== sandboxCommandDigest(copy.argv) ||
     !copy.executionBoundaryDigest ||
     !copy.protectedPathRevision ||
     !copy.cancellationCorrelation
@@ -390,7 +388,7 @@ function validatePreparation(value: SandboxPreparationV1): Readonly<SandboxPrepa
   return freeze(copy);
 }
 
-function validResourceLimits(value: SandboxPreparationV1['resourceLimits']): boolean {
+function validResourceLimits(value: SandboxPreparation['resourceLimits']): boolean {
   return (
     [
       value.cpuTime,
@@ -440,7 +438,7 @@ function safeEqual(left: unknown, right: string): boolean {
 }
 
 function invalid(message: string): never {
-  throw new SandboxExecutionGrantErrorV1(message);
+  throw new SandboxExecutionGrantError(message);
 }
 
 function freeze<T>(value: T): Readonly<T> {

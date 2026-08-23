@@ -21,53 +21,53 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { canonicalModelJsonV1 } from '@kite/builtin-runtime/model';
+import { canonicalModelJson } from '@kite/builtin-runtime/model';
 import {
-  cleanupPosixSandboxRuntimeRootsNoSpawnV1,
-  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
-  createPosixSandboxRuntimeRootsForPreparationV1,
-  createSandboxRuntimeDirForPreparationV1,
-  createWindowsSandboxRuntimeDirForPreparationV1,
-  LocalSandboxExecutionProviderV1,
-  removeDirectoryTreeAtV1,
-  SandboxPreparationArtifactErrorV1,
-  SandboxPreparationArtifactStoreV1,
-  sandboxPreparationIntentDigestV1,
-  sandboxRuntimeDirForPreparationV1,
-  sandboxRuntimeRootsForPreparationV1,
+  cleanupPosixSandboxRuntimeRootsNoSpawn,
+  cleanupWindowsSandboxRuntimeDirNoSpawn,
+  createPosixSandboxRuntimeRootsForPreparation,
+  createSandboxRuntimeDirForPreparation,
+  createWindowsSandboxRuntimeDirForPreparation,
+  LocalSandboxExecutionProvider,
+  removeDirectoryTreeAt,
+  SandboxPreparationArtifactError,
+  SandboxPreparationArtifactStore,
+  sandboxPreparationIntentDigest,
+  sandboxRuntimeDirForPreparation,
+  sandboxRuntimeRootsForPreparation,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import type {
-  NonDynamicOperationIdV1,
-  PreparedSandboxExecutionV1,
-  PreparedToolInvocationV1,
-  SandboxPreparationLifecycleV1,
-  SandboxPreparationV1,
-  ToolPipelineAttemptAcknowledgementV1,
+  NonDynamicOperationId,
+  PreparedSandboxExecution,
+  PreparedToolInvocation,
+  SandboxPreparation,
+  SandboxPreparationLifecycle,
+  ToolPipelineAttemptAcknowledgement,
 } from '@kite/runtime-spi';
-import { createAppToolPipelineSandboxLifecycleV1 } from '#app/bootstrap/runtime/tool-pipeline-sandbox-lifecycle';
+import { createAppToolPipelineSandboxLifecycle } from '#app/bootstrap/runtime/tool-pipeline-sandbox-lifecycle';
 import {
-  reconcilePendingSandboxPreparationsAfterCrashV1,
-  reconcileSandboxPreparationAfterCrashV1,
-  SandboxExecutionGrantAuthorityV1,
-  sandboxCommandDigestV1,
-  sandboxPreparationDigestV1,
+  reconcilePendingSandboxPreparationsAfterCrash,
+  reconcileSandboxPreparationAfterCrash,
+  SandboxExecutionGrantAuthority,
+  sandboxCommandDigest,
+  sandboxPreparationDigest,
 } from '#app/sandbox/runtime-execution';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { ScriptableFakeSandboxExecutionProviderV1 } from '../helpers/sandbox-execution-provider';
+import { ScriptableFakeSandboxExecutionProvider } from '../helpers/sandbox-execution-provider';
 import {
-  createBuiltinSandboxExecutionConsumerForTestV1,
-  createCompletedPreparedProcessPortForTestV1,
+  createBuiltinSandboxExecutionConsumerForTest,
+  createCompletedPreparedProcessPortForTest,
 } from '../helpers/sandbox-executor';
 
 function createTestRuntimeDir(workspace: string, label: string): string {
   const preparationDigest = `sandbox-provider-test:${label}:${randomUUID()}`;
   return process.platform === 'win32'
-    ? createWindowsSandboxRuntimeDirForPreparationV1(workspace, preparationDigest)
-    : createSandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+    ? createWindowsSandboxRuntimeDirForPreparation(workspace, preparationDigest)
+    : createSandboxRuntimeDirForPreparation(workspace, preparationDigest);
 }
 
-describe('SandboxExecutionProviderV1', () => {
+describe('SandboxExecutionProvider', () => {
   test.skipIf(process.platform === 'win32')(
     'confirms an allocating intent made no POSIX runtime when its private base is absent',
     () => {
@@ -76,9 +76,9 @@ describe('SandboxExecutionProviderV1', () => {
       const previousTmpdir = process.env.TMPDIR;
       try {
         process.env.TMPDIR = isolatedTemp;
-        const roots = sandboxRuntimeRootsForPreparationV1(workspace, 'sha256:absent-runtime');
+        const roots = sandboxRuntimeRootsForPreparation(workspace, 'sha256:absent-runtime');
         expect(existsSync(join(isolatedTemp, 'openpx-sandbox-runtime'))).toBe(false);
-        expect(cleanupPosixSandboxRuntimeRootsNoSpawnV1(roots)).toBe(true);
+        expect(cleanupPosixSandboxRuntimeRootsNoSpawn(roots)).toBe(true);
       } finally {
         if (previousTmpdir === undefined) delete process.env.TMPDIR;
         else process.env.TMPDIR = previousTmpdir;
@@ -94,14 +94,14 @@ describe('SandboxExecutionProviderV1', () => {
     const previousTmpdir = process.env.TMPDIR;
     try {
       process.env.TMPDIR = isolatedTemp;
-      const runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
+      const runtimeRoot = createWindowsSandboxRuntimeDirForPreparation(
         workspace,
         'sha256:already-removed',
       );
 
-      expect(cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)).toBe(true);
+      expect(cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeRoot)).toBe(true);
       expect(existsSync(join(isolatedTemp, 'openpx-sandbox-runtime'))).toBe(false);
-      expect(cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)).toBe(true);
+      expect(cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeRoot)).toBe(true);
     } finally {
       if (previousTmpdir === undefined) delete process.env.TMPDIR;
       else process.env.TMPDIR = previousTmpdir;
@@ -113,13 +113,13 @@ describe('SandboxExecutionProviderV1', () => {
   test('allocating prepare is zero-call without durable intent lifecycle', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         resourceSemantics: 'allocating',
         prepare: () => ({ ok: false, failure: { code: 'fake_denied', message: 'deny' } }),
       });
-      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -149,7 +149,7 @@ describe('SandboxExecutionProviderV1', () => {
   });
 
   test('allocating grant cannot be issued without acknowledged intent', () => {
-    const authority = new SandboxExecutionGrantAuthorityV1();
+    const authority = new SandboxExecutionGrantAuthority();
     const preparation = samplePreparation(process.cwd());
     expect(() => authority.issue({ preparation, resourceSemantics: 'allocating' })).toThrow(
       'durable intent acknowledgement',
@@ -161,8 +161,8 @@ describe('SandboxExecutionProviderV1', () => {
     try {
       for (const failure of ['resolver', 'semantics', 'grant'] as const) {
         const sequence: string[] = [];
-        const grants = new SandboxExecutionGrantAuthorityV1();
-        const provider = new ScriptableFakeSandboxExecutionProviderV1({
+        const grants = new SandboxExecutionGrantAuthority();
+        const provider = new ScriptableFakeSandboxExecutionProvider({
           verifier: grants.verifier(),
           resourceSemantics: failure === 'semantics' ? 'pure' : 'allocating',
           prepare: () => {
@@ -177,9 +177,9 @@ describe('SandboxExecutionProviderV1', () => {
           });
         }
         let receipt:
-          | { prepared: Readonly<PreparedSandboxExecutionV1> | null; disposed: boolean }
+          | { prepared: Readonly<PreparedSandboxExecution> | null; disposed: boolean }
           | undefined;
-        const result = await createBuiltinSandboxExecutionConsumerForTestV1({
+        const result = await createBuiltinSandboxExecutionConsumerForTest({
           resolveProviderAfterIntent: () => {
             sequence.push('resolve');
             if (failure === 'resolver') throw new Error('probe failed');
@@ -239,14 +239,14 @@ describe('SandboxExecutionProviderV1', () => {
       }
 
       let probes = 0;
-      const deniedBeforeAck = await createBuiltinSandboxExecutionConsumerForTestV1({
+      const deniedBeforeAck = await createBuiltinSandboxExecutionConsumerForTest({
         resolveProviderAfterIntent: () => {
           probes += 1;
           throw new Error('probe must not run');
         },
         resourceSemantics: 'allocating',
         backend: 'seatbelt',
-        grants: new SandboxExecutionGrantAuthorityV1(),
+        grants: new SandboxExecutionGrantAuthority(),
         canonicalWorkspace: workspace,
         executionBoundaryDigest: 'boundary',
         protectedPathRevision: 'protected',
@@ -287,18 +287,18 @@ describe('SandboxExecutionProviderV1', () => {
     let runtimeRoot = '';
     let expectedRuntimeRoot = '';
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
+      const grants = new SandboxExecutionGrantAuthority();
       let reconciled = false;
-      const provider = new ScriptableFakeSandboxExecutionProviderV1({
+      const provider = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         resourceSemantics: 'allocating',
         prepare: (grant) => {
-          runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
+          runtimeRoot = createWindowsSandboxRuntimeDirForPreparation(
             workspace,
             grant.preparationDigest,
           );
           expectedRuntimeRoot = realpathSync.native(
-            sandboxRuntimeDirForPreparationV1(workspace, grant.preparationDigest),
+            sandboxRuntimeDirForPreparation(workspace, grant.preparationDigest),
           );
           return {
             ok: false,
@@ -316,7 +316,7 @@ describe('SandboxExecutionProviderV1', () => {
           return { ok: true, observation: { disposed: true } };
         },
       });
-      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
         provider,
         resourceSemantics: 'allocating',
         backend: 'windows_restricted_token',
@@ -379,13 +379,13 @@ describe('SandboxExecutionProviderV1', () => {
     mkdirSync(workspace);
     try {
       const storeRoot = join(root, 'sandbox-preparations');
-      const store = new SandboxPreparationArtifactStoreV1({
+      const store = new SandboxPreparationArtifactStore({
         root: storeRoot,
       });
       const preparation = samplePreparation(workspace);
       const prepared = plan(
         preparation,
-        sandboxPreparationDigestV1(preparation),
+        sandboxPreparationDigest(preparation),
         workspace,
         'artifact-plan',
       );
@@ -397,13 +397,13 @@ describe('SandboxExecutionProviderV1', () => {
             recoveryPayload: { unexpected: 'authority drift' },
           },
         }),
-      ).toThrow(SandboxPreparationArtifactErrorV1);
+      ).toThrow(SandboxPreparationArtifactError);
 
       const ref = store.write(prepared);
       const sibling = join(root, 'sibling');
       mkdirSync(sibling);
       const siblingPayload = Buffer.from(
-        canonicalModelJsonV1({
+        canonicalModelJson({
           artifactFormatVersion: 1,
           prepared: { ...prepared, cwd: sibling },
         }),
@@ -417,7 +417,7 @@ describe('SandboxExecutionProviderV1', () => {
       const siblingTarget = join(storeRoot, 'plans', `${siblingRef.artifactId}.json`);
       writeFileSync(siblingTarget, siblingPayload);
       if (process.platform !== 'win32') chmodSync(siblingTarget, 0o600);
-      expect(() => store.read(siblingRef)).toThrow(SandboxPreparationArtifactErrorV1);
+      expect(() => store.read(siblingRef)).toThrow(SandboxPreparationArtifactError);
 
       const target = join(storeRoot, 'plans', `${ref.artifactId}.json`);
       writeFileSync(target, '{"artifactFormatVersion":1,"prepared":{"extra":true}}', 'utf8');
@@ -426,8 +426,8 @@ describe('SandboxExecutionProviderV1', () => {
         store.read(ref);
         throw new Error('expected typed Artifact corruption');
       } catch (error) {
-        expect(error).toBeInstanceOf(SandboxPreparationArtifactErrorV1);
-        if (!(error instanceof SandboxPreparationArtifactErrorV1)) throw error;
+        expect(error).toBeInstanceOf(SandboxPreparationArtifactError);
+        if (!(error instanceof SandboxPreparationArtifactError)) throw error;
         expect(error.code).toBe('artifact_corrupt');
       }
     } finally {
@@ -440,14 +440,14 @@ describe('SandboxExecutionProviderV1', () => {
     async () => {
       const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
       try {
-        const grants = new SandboxExecutionGrantAuthorityV1();
+        const grants = new SandboxExecutionGrantAuthority();
         const runtimeDirectory = createTestRuntimeDir(workspace, 'shared-plan');
         const controlRoot = join(runtimeDirectory, 'control');
         const dataRoot = join(runtimeDirectory, 'data');
         mkdirSync(controlRoot);
         mkdirSync(dataRoot);
-        let sharedPlan: PreparedSandboxExecutionV1 | undefined;
-        const fake = new ScriptableFakeSandboxExecutionProviderV1({
+        let sharedPlan: PreparedSandboxExecution | undefined;
+        const fake = new ScriptableFakeSandboxExecutionProvider({
           verifier: grants.verifier(),
           resourceSemantics: 'allocating',
           prepare: (grant) => {
@@ -486,10 +486,10 @@ describe('SandboxExecutionProviderV1', () => {
           executionBoundaryDigest: 'boundary',
           protectedPathRevision: 'protected',
         } as const;
-        const consumer = createBuiltinSandboxExecutionConsumerForTestV1(consumerOptions);
+        const consumer = createBuiltinSandboxExecutionConsumerForTest(consumerOptions);
         let consumed = false;
-        const lifecycle: SandboxPreparationLifecycleV1 = {
-          async recordPreparationIntent(preparation: SandboxPreparationV1) {
+        const lifecycle: SandboxPreparationLifecycle = {
+          async recordPreparationIntent(preparation: SandboxPreparation) {
             return preparationIntentAcknowledgement(preparation);
           },
           async recordPreparationReady() {
@@ -535,7 +535,7 @@ describe('SandboxExecutionProviderV1', () => {
           sandboxPreparationLifecycle: lifecycle,
         } as const;
         expect((await consumer(input)).stdout).toBe('one');
-        const second = await createBuiltinSandboxExecutionConsumerForTestV1(consumerOptions)(input);
+        const second = await createBuiltinSandboxExecutionConsumerForTest(consumerOptions)(input);
         expect(second.terminationReason).toBe('sandbox_denied');
         expect(second.stderr).toContain('dispatch intent acknowledgement failed');
         expect(fake.calls()).toEqual({ prepare: 2, dispose: 2, reconcile: 0 });
@@ -548,8 +548,8 @@ describe('SandboxExecutionProviderV1', () => {
   test('prepared plan cannot replace the approved argv before spawn', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         prepare: (grant) => {
           const prepared = plan(
@@ -560,7 +560,7 @@ describe('SandboxExecutionProviderV1', () => {
           );
           return {
             ok: true,
-            observation: deepFreezeSandboxFixtureV1({
+            observation: deepFreezeSandboxFixture({
               ...prepared,
               approvedArgv: ['/bin/sh', '-c', 'printf changed'],
               argv: ['/bin/sh', '-c', 'touch must-not-exist'],
@@ -568,7 +568,7 @@ describe('SandboxExecutionProviderV1', () => {
           };
         },
       });
-      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -607,13 +607,13 @@ describe('SandboxExecutionProviderV1', () => {
     mkdirSync(sibling);
     try {
       const marker = join(workspace, 'must-not-spawn');
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         resourceSemantics: 'allocating',
         prepare: (grant) => ({
           ok: true,
-          observation: deepFreezeSandboxFixtureV1({
+          observation: deepFreezeSandboxFixture({
             ...plan(
               grant.preparation,
               grant.preparationDigest,
@@ -628,7 +628,7 @@ describe('SandboxExecutionProviderV1', () => {
       });
       let readyCalls = 0;
       let abandonmentReceipt = false;
-      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -683,8 +683,8 @@ describe('SandboxExecutionProviderV1', () => {
   test('sealed backend evidence mismatch is denied before dispatch', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         prepare: (grant) => {
           const prepared = plan(
@@ -695,7 +695,7 @@ describe('SandboxExecutionProviderV1', () => {
           );
           return {
             ok: true,
-            observation: deepFreezeSandboxFixtureV1({
+            observation: deepFreezeSandboxFixture({
               ...prepared,
               backendCapabilities: {
                 ...prepared.backendCapabilities,
@@ -705,7 +705,7 @@ describe('SandboxExecutionProviderV1', () => {
           };
         },
       });
-      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -728,8 +728,8 @@ describe('SandboxExecutionProviderV1', () => {
   test('ready acknowledgement failure disposes and spawns zero processes', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         resourceSemantics: 'allocating',
         prepare: (grant) => ({
@@ -743,7 +743,7 @@ describe('SandboxExecutionProviderV1', () => {
           ),
         }),
       });
-      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -804,8 +804,8 @@ describe('SandboxExecutionProviderV1', () => {
   test('disposal intent failure calls no Provider cleanup and fails closed', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         resourceSemantics: 'allocating',
         prepare: (grant) => ({
@@ -819,9 +819,9 @@ describe('SandboxExecutionProviderV1', () => {
           ),
         }),
       });
-      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
-        preparedProcess: createCompletedPreparedProcessPortForTestV1(),
+        preparedProcess: createCompletedPreparedProcessPortForTest(),
         backend: 'seatbelt',
         grants,
         canonicalWorkspace: workspace,
@@ -873,8 +873,8 @@ describe('SandboxExecutionProviderV1', () => {
   test('disposal receipt acknowledgement failure cannot report command success', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         resourceSemantics: 'allocating',
         prepare: (grant) => {
@@ -885,13 +885,13 @@ describe('SandboxExecutionProviderV1', () => {
             'receipt-ack',
             'allocating',
           );
-          const runtimeRoots = sandboxRuntimeRootsForPreparationV1(
+          const runtimeRoots = sandboxRuntimeRootsForPreparation(
             workspace,
             grant.preparationDigest,
           );
           return {
             ok: true,
-            observation: deepFreezeSandboxFixtureV1({
+            observation: deepFreezeSandboxFixture({
               ...prepared,
               cleanup: {
                 kind: 'runtime_directory',
@@ -905,10 +905,10 @@ describe('SandboxExecutionProviderV1', () => {
           };
         },
       });
-      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         resourceSemantics: 'allocating',
-        preparedProcess: createCompletedPreparedProcessPortForTestV1(),
+        preparedProcess: createCompletedPreparedProcessPortForTest(),
         backend: 'seatbelt',
         grants,
         canonicalWorkspace: workspace,
@@ -958,11 +958,11 @@ describe('SandboxExecutionProviderV1', () => {
     'Local POSIX disposal retains a runtime until process cleanup is confirmed',
     async () => {
       const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
-      const grants = new SandboxExecutionGrantAuthorityV1();
+      const grants = new SandboxExecutionGrantAuthority();
       const preparation = samplePreparation(workspace);
-      const runtimeRoots = createPosixSandboxRuntimeRootsForPreparationV1(
+      const runtimeRoots = createPosixSandboxRuntimeRootsForPreparation(
         workspace,
-        sandboxPreparationDigestV1(preparation),
+        sandboxPreparationDigest(preparation),
       );
       const externalSentinel = join(workspace, 'external-sentinel');
       if (process.platform !== 'win32') {
@@ -971,14 +971,14 @@ describe('SandboxExecutionProviderV1', () => {
         symlinkSync(externalSentinel, join(runtimeRoots.dataRoot, 'external-link'));
       }
       try {
-        const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
+        const provider = new LocalSandboxExecutionProvider(grants.verifier(), {
           backend: 'seatbelt',
           canonicalWorkspace: workspace,
         });
-        const prepared: PreparedSandboxExecutionV1 = {
+        const prepared: PreparedSandboxExecution = {
           ...plan(
             preparation,
-            sandboxPreparationDigestV1(preparation),
+            sandboxPreparationDigest(preparation),
             workspace,
             'retained-runtime',
             'allocating',
@@ -1042,9 +1042,9 @@ describe('SandboxExecutionProviderV1', () => {
       mkdirSync(workspace);
       symlinkSync(workspace, alias, 'dir');
       try {
-        const grants = new SandboxExecutionGrantAuthorityV1();
+        const grants = new SandboxExecutionGrantAuthority();
         const preparation = samplePreparation(workspace);
-        const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
+        const provider = new LocalSandboxExecutionProvider(grants.verifier(), {
           backend: 'seatbelt',
           canonicalWorkspace: alias,
         });
@@ -1093,7 +1093,7 @@ describe('SandboxExecutionProviderV1', () => {
         writeFileSync(hardlinkTarget, 'must-survive');
         linkSync(hardlinkTarget, hardlink);
 
-        expect(removeDirectoryTreeAtV1(parentFd, 'hardlink-tree')).toBe(false);
+        expect(removeDirectoryTreeAt(parentFd, 'hardlink-tree')).toBe(false);
         expect(existsSync(hardlink)).toBe(true);
         expect(lstatSync(hardlink).nlink).toBe(2);
         expect(existsSync(hardlinkTarget)).toBe(true);
@@ -1109,7 +1109,7 @@ describe('SandboxExecutionProviderV1', () => {
         ).toBe(0);
         expect(lstatSync(fifo).isFIFO()).toBe(true);
 
-        expect(removeDirectoryTreeAtV1(parentFd, 'special-tree')).toBe(false);
+        expect(removeDirectoryTreeAt(parentFd, 'special-tree')).toBe(false);
         expect(existsSync(fifo)).toBe(true);
         expect(lstatSync(fifo).isFIFO()).toBe(true);
 
@@ -1127,7 +1127,7 @@ describe('SandboxExecutionProviderV1', () => {
         const replacementSentinel = join(replacementTree, 'must-survive.txt');
         writeFileSync(replacementSentinel, 'replacement-parent');
 
-        expect(removeDirectoryTreeAtV1(parentFd, 'pinned-tree')).toBe(true);
+        expect(removeDirectoryTreeAt(parentFd, 'pinned-tree')).toBe(true);
         expect(existsSync(join(displacedRoot, 'pinned-tree'))).toBe(false);
         expect(existsSync(replacementSentinel)).toBe(true);
       } finally {
@@ -1141,9 +1141,9 @@ describe('SandboxExecutionProviderV1', () => {
   test('Fake cleanup failure stays failed and records no successful disposal receipt', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
+      const grants = new SandboxExecutionGrantAuthority();
       let disposedReceipt: boolean | undefined;
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         resourceSemantics: 'allocating',
         prepare: (grant) => {
@@ -1154,13 +1154,13 @@ describe('SandboxExecutionProviderV1', () => {
             'fake-leak-plan',
             'allocating',
           );
-          const runtimeRoots = sandboxRuntimeRootsForPreparationV1(
+          const runtimeRoots = sandboxRuntimeRootsForPreparation(
             workspace,
             grant.preparationDigest,
           );
           return {
             ok: true,
-            observation: deepFreezeSandboxFixtureV1({
+            observation: deepFreezeSandboxFixture({
               ...prepared,
               cleanup: {
                 kind: 'runtime_directory',
@@ -1178,10 +1178,10 @@ describe('SandboxExecutionProviderV1', () => {
           failure: { code: 'dispose_failed', message: 'Fake cleanup remains unknown.' },
         }),
       });
-      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         resourceSemantics: 'allocating',
-        preparedProcess: createCompletedPreparedProcessPortForTestV1(),
+        preparedProcess: createCompletedPreparedProcessPortForTest(),
         backend: 'seatbelt',
         grants,
         canonicalWorkspace: workspace,
@@ -1236,7 +1236,7 @@ describe('SandboxExecutionProviderV1', () => {
       const workspace = join(root, 'workspace');
       mkdirSync(workspace);
       try {
-        let state = createRuntimeHostStateInitialStateV1({
+        let state = createRuntimeHostStateInitialState({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: 'thread',
           userId: 'user',
@@ -1274,7 +1274,7 @@ describe('SandboxExecutionProviderV1', () => {
           },
         };
         const preparation = samplePreparation(workspace);
-        const preparationDigest = sandboxPreparationDigestV1(preparation);
+        const preparationDigest = sandboxPreparationDigest(preparation);
         apply({
           type: 'capability.sandbox_preparation_intent_recorded',
           invocationId: 'invocation',
@@ -1292,21 +1292,21 @@ describe('SandboxExecutionProviderV1', () => {
           intentDigest: intentDigest(preparation),
           recordedAt: new Date().toISOString(),
         });
-        const runtimeDirectory = createSandboxRuntimeDirForPreparationV1(
+        const runtimeDirectory = createSandboxRuntimeDirForPreparation(
           workspace,
           preparationDigest,
         );
-        const grants = new SandboxExecutionGrantAuthorityV1();
-        const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
+        const grants = new SandboxExecutionGrantAuthority();
+        const provider = new LocalSandboxExecutionProvider(grants.verifier(), {
           backend: 'seatbelt',
           canonicalWorkspace: workspace,
         });
-        const artifacts = new SandboxPreparationArtifactStoreV1({
+        const artifacts = new SandboxPreparationArtifactStore({
           root: join(root, 'sandbox-preparations'),
         });
 
         expect(
-          await reconcilePendingSandboxPreparationsAfterCrashV1({
+          await reconcilePendingSandboxPreparationsAfterCrash({
             provider,
             grants,
             artifacts,
@@ -1326,15 +1326,15 @@ describe('SandboxExecutionProviderV1', () => {
   test('fake denial does not fall back to a Local or host command', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         prepare: () => ({
           ok: false,
           failure: { code: 'fake_denied', message: 'Scriptable Fake denied prepare.' },
         }),
       });
-      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -1368,14 +1368,14 @@ describe('SandboxExecutionProviderV1', () => {
   test('fake crash evidence remains denied with zero Local fallback', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const grants = new SandboxExecutionGrantAuthority();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         prepare: () => {
           throw new Error('Fake lost its preparation handle.');
         },
       });
-      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -1402,7 +1402,7 @@ describe('SandboxExecutionProviderV1', () => {
     mkdirSync(workspace);
     await Bun.write(join(workspace, '.keep'), '');
     try {
-      let state = createRuntimeHostStateInitialStateV1({
+      let state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'thread',
         userId: 'user',
@@ -1443,12 +1443,12 @@ describe('SandboxExecutionProviderV1', () => {
           return true;
         },
       };
-      const artifacts = new SandboxPreparationArtifactStoreV1({
+      const artifacts = new SandboxPreparationArtifactStore({
         root: join(root, 'sandbox-preparations'),
       });
-      const preparedTool = sandboxPreparedToolPacketV1();
-      const acknowledgement = sandboxAttemptAcknowledgementV1(preparedTool);
-      const lifecycle = createAppToolPipelineSandboxLifecycleV1({
+      const preparedTool = sandboxPreparedToolPacket();
+      const acknowledgement = sandboxAttemptAcknowledgement(preparedTool);
+      const lifecycle = createAppToolPipelineSandboxLifecycle({
         prepared: preparedTool,
         resolveOpenAcknowledgement: (candidate) =>
           candidate === preparedTool ? acknowledgement : null,
@@ -1457,16 +1457,16 @@ describe('SandboxExecutionProviderV1', () => {
         now: () => new Date().toISOString(),
         artifacts,
       });
-      const preparation = deepFreezeSandboxFixtureV1(samplePreparation(workspace));
+      const preparation = deepFreezeSandboxFixture(samplePreparation(workspace));
       const intent = await lifecycle.recordPreparationIntent(preparation);
       const fixedNow = Date.now();
-      const grants = new SandboxExecutionGrantAuthorityV1({ now: () => fixedNow });
+      const grants = new SandboxExecutionGrantAuthority({ now: () => fixedNow });
       const grant = grants.issue({
         preparation,
         resourceSemantics: 'allocating',
         preparationIntentDigest: intent.intentDigest,
       });
-      const prepared = deepFreezeSandboxFixtureV1(
+      const prepared = deepFreezeSandboxFixture(
         plan(preparation, grant.preparationDigest, workspace, 'crashed-plan', 'allocating'),
       );
       expect(await lifecycle.recordPreparationReady(prepared)).toMatchObject({
@@ -1474,7 +1474,7 @@ describe('SandboxExecutionProviderV1', () => {
         stage: 'preparation_ready',
       });
 
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
+      const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         resourceSemantics: 'allocating',
         prepare: () => ({ ok: true, observation: prepared }),
@@ -1484,7 +1484,7 @@ describe('SandboxExecutionProviderV1', () => {
         },
       });
       expect(
-        await reconcileSandboxPreparationAfterCrashV1({
+        await reconcileSandboxPreparationAfterCrash({
           invocationId: 'invocation',
           provider: fake,
           grants,
@@ -1497,7 +1497,7 @@ describe('SandboxExecutionProviderV1', () => {
         attempts: 1,
       });
       expect(
-        await reconcileSandboxPreparationAfterCrashV1({
+        await reconcileSandboxPreparationAfterCrash({
           invocationId: 'invocation',
           provider: fake,
           grants,
@@ -1517,7 +1517,7 @@ describe('SandboxExecutionProviderV1', () => {
     async () => {
       const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-cgroup-negative-'));
       try {
-        const grants = new SandboxExecutionGrantAuthorityV1();
+        const grants = new SandboxExecutionGrantAuthority();
         const preparation = {
           ...samplePreparation(workspace),
           resourceLimits: {
@@ -1530,7 +1530,7 @@ describe('SandboxExecutionProviderV1', () => {
           resourceSemantics: 'allocating',
           preparationIntentDigest: intentDigest(preparation),
         });
-        const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
+        const provider = new LocalSandboxExecutionProvider(grants.verifier(), {
           backend: 'bubblewrap',
           canonicalWorkspace: workspace,
           bubblewrapPath: '/usr/bin/bwrap',
@@ -1552,7 +1552,7 @@ describe('SandboxExecutionProviderV1', () => {
   );
 });
 
-function sandboxPreparedToolPacketV1(): Readonly<PreparedToolInvocationV1> {
+function sandboxPreparedToolPacket(): Readonly<PreparedToolInvocation> {
   const identity = {
     invocationId: 'invocation',
     attemptId: 'invocation:attempt:1',
@@ -1561,7 +1561,7 @@ function sandboxPreparedToolPacketV1(): Readonly<PreparedToolInvocationV1> {
     modelMessageId: 'message-sandbox-recovery',
     argumentOrigin: 'model_public' as const,
     providerId: 'builtin-provider',
-    operationId: 'builtin:shell_execute' as NonDynamicOperationIdV1,
+    operationId: 'builtin:shell_execute' as NonDynamicOperationId,
     executionFamily: 'builtin' as const,
     executionMechanism: 'shell' as const,
     capabilityId: 'builtin:shell_execute',
@@ -1589,7 +1589,7 @@ function sandboxPreparedToolPacketV1(): Readonly<PreparedToolInvocationV1> {
     isDynamicMcp: false as const,
     toolKind: 'computer' as const,
   };
-  return deepFreezeSandboxFixtureV1({
+  return deepFreezeSandboxFixture({
     identity,
     input: {
       invocationId: identity.invocationId,
@@ -1616,13 +1616,13 @@ function sandboxPreparedToolPacketV1(): Readonly<PreparedToolInvocationV1> {
       binding: null,
       facts: {},
     },
-  }) as Readonly<PreparedToolInvocationV1>;
+  }) as Readonly<PreparedToolInvocation>;
 }
 
-function sandboxAttemptAcknowledgementV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<ToolPipelineAttemptAcknowledgementV1> {
-  return deepFreezeSandboxFixtureV1({
+function sandboxAttemptAcknowledgement(
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<ToolPipelineAttemptAcknowledgement> {
+  return deepFreezeSandboxFixture({
     acknowledged: true as const,
     attempt: {
       ...prepared.identity,
@@ -1638,17 +1638,17 @@ function sandboxAttemptAcknowledgementV1(
   });
 }
 
-function deepFreezeSandboxFixtureV1<T>(value: T): Readonly<T> {
+function deepFreezeSandboxFixture<T>(value: T): Readonly<T> {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     Object.freeze(value);
     for (const nested of Object.values(value as Record<string, unknown>)) {
-      deepFreezeSandboxFixtureV1(nested);
+      deepFreezeSandboxFixture(nested);
     }
   }
   return value;
 }
 
-function samplePreparation(workspace: string): SandboxPreparationV1 {
+function samplePreparation(workspace: string): SandboxPreparation {
   const argv = ['/bin/sh', '-c', 'printf test'];
   const canonicalWorkspace = realpathSync.native(workspace);
   return {
@@ -1662,7 +1662,7 @@ function samplePreparation(workspace: string): SandboxPreparationV1 {
     admissionDigest: 'admission',
     canonicalWorkspace,
     argv,
-    commandDigest: sandboxCommandDigestV1(argv),
+    commandDigest: sandboxCommandDigest(argv),
     executionBoundaryDigest: 'boundary',
     protectedPathRevision: 'protected',
     filesystemMode: 'workspace_only',
@@ -1694,8 +1694,8 @@ function invocationIdentity() {
   } as const;
 }
 
-function intentDigest(preparation: SandboxPreparationV1): string {
-  return sandboxPreparationIntentDigestV1({
+function intentDigest(preparation: SandboxPreparation): string {
+  return sandboxPreparationIntentDigest({
     attempt: preparation.attempt,
     toolCallId: preparation.toolCallId,
     capabilityId: preparation.capabilityId,
@@ -1703,14 +1703,14 @@ function intentDigest(preparation: SandboxPreparationV1): string {
     canonicalWorkspace: preparation.canonicalWorkspace,
     effectiveEffectsDigest: preparation.effectiveEffectsDigest,
     admissionDigest: preparation.admissionDigest,
-    preparationDigest: sandboxPreparationDigestV1(preparation),
+    preparationDigest: sandboxPreparationDigest(preparation),
     commandDigest: preparation.commandDigest,
     executionBoundaryDigest: preparation.executionBoundaryDigest,
     resourceSemantics: 'allocating',
   });
 }
 
-function preparationIntentAcknowledgement(preparation: SandboxPreparationV1) {
+function preparationIntentAcknowledgement(preparation: SandboxPreparation) {
   return Object.freeze({
     acknowledged: true as const,
     stage: 'preparation_intent' as const,
@@ -1718,7 +1718,7 @@ function preparationIntentAcknowledgement(preparation: SandboxPreparationV1) {
   });
 }
 
-function preparationReadyAcknowledgement(prepared?: Readonly<PreparedSandboxExecutionV1>) {
+function preparationReadyAcknowledgement(prepared?: Readonly<PreparedSandboxExecution>) {
   const preparedPlanDigest = prepared?.planId ?? 'test-prepared';
   return Object.freeze({
     acknowledged: true as const,
@@ -1781,12 +1781,12 @@ function disposalReceiptAcknowledgement(input: {
 }
 
 function plan(
-  preparation: SandboxPreparationV1,
+  preparation: SandboxPreparation,
   preparationDigest: string,
   workspace: string,
   planId: string,
   resourceSemantics: 'pure' | 'allocating' = 'pure',
-): PreparedSandboxExecutionV1 {
+): PreparedSandboxExecution {
   return {
     schema: 'kite.sandbox-execution-provider.v1',
     kind: 'prepared_sandbox_execution',

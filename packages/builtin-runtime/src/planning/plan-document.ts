@@ -1,5 +1,5 @@
 import type { AgentPlan, PlanArtifactRef, PlanDocument, PlanStep } from '@kite/runtime-contract';
-import { isPlanCompletionEvidenceV1 } from './plan-evidence';
+import { isPlanCompletionEvidence } from './plan-evidence';
 import { computePlanStructuralDigest } from './plan-hashes';
 
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
@@ -19,7 +19,7 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
 }
 
 /** Strict JSON transport shape checked before reducer mapping or normalization. */
-export function isAgentPlanTransportV2(value: unknown): value is AgentPlan {
+export function isAgentPlanTransport(value: unknown): value is AgentPlan {
   if (!isRecord(value) || !hasExactKeys(value, ['name', 'description', 'status', 'steps'])) {
     return false;
   }
@@ -53,12 +53,12 @@ export function isAgentPlanTransportV2(value: unknown): value is AgentPlan {
 }
 
 /** Exact public transport match used when replaying an idempotent immutable V2 draft. */
-export function agentPlanTransportMatchesDocumentV2(
+export function agentPlanTransportMatchesDocument(
   value: unknown,
   document: PlanDocument,
 ): value is AgentPlan {
   if (
-    !isAgentPlanTransportV2(value) ||
+    !isAgentPlanTransport(value) ||
     value.name !== document.title ||
     value.description !== document.bodyMarkdown ||
     value.status !== 'pending' ||
@@ -96,7 +96,7 @@ export function isPlanStepMetadata(value: unknown): value is PlanStep {
   );
 }
 
-export function isPlanStepV2(value: unknown): value is PlanStep {
+export function isPlanStep(value: unknown): value is PlanStep {
   return (
     isPlanStepMetadata(value) &&
     SAFE_STEP_ID.test(value.id) &&
@@ -108,11 +108,11 @@ export function isPlanStepV2(value: unknown): value is PlanStep {
 }
 
 /** Validate a full V2 progress/completion transport before reducer mapping. */
-export function planStepsFromAgentPlanUpdateV2(
+export function planStepsFromAgentPlanUpdate(
   value: unknown,
   document: PlanDocument,
 ): PlanStep[] | null {
-  if (!isAgentPlanTransportV2(value) || value.name !== document.title) return null;
+  if (!isAgentPlanTransport(value) || value.name !== document.title) return null;
   if (value.description !== document.bodyMarkdown || value.steps.length !== document.steps.length) {
     return null;
   }
@@ -128,7 +128,7 @@ export function planStepsFromAgentPlanUpdateV2(
     const existing = document.steps[index];
     if (
       !existing ||
-      !isPlanStepV2(step) ||
+      !isPlanStep(step) ||
       step.id !== existing.id ||
       step.title !== existing.title
     ) {
@@ -139,7 +139,7 @@ export function planStepsFromAgentPlanUpdateV2(
   return new Set(steps.map((step) => step.id)).size === steps.length ? steps : null;
 }
 
-function isPlanArtifactRefV2(value: unknown, plan: PlanDocument): value is PlanArtifactRef {
+function isPlanArtifactRef(value: unknown, plan: PlanDocument): value is PlanArtifactRef {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -178,7 +178,7 @@ function isPlanArtifactRefV2(value: unknown, plan: PlanDocument): value is PlanA
  * Persistence, the facade, and reducer replay all use this one definition so
  * malformed event content cannot be normalized into a valid document.
  */
-export function isPlanDocumentV2(value: unknown): value is PlanDocument & {
+export function isPlanDocument(value: unknown): value is PlanDocument & {
   planSchemaVersion: 2;
 } {
   if (!isRecord(value)) return false;
@@ -219,7 +219,7 @@ export function isPlanDocumentV2(value: unknown): value is PlanDocument & {
     !Array.isArray(value.steps) ||
     value.steps.length < 1 ||
     value.steps.length > 12 ||
-    !value.steps.every(isPlanStepV2) ||
+    !value.steps.every(isPlanStep) ||
     new Set(value.steps.map((step) => step.id)).size !== value.steps.length ||
     typeof value.structuralDigest !== 'string' ||
     !SHA256_DIGEST.test(value.structuralDigest) ||
@@ -227,7 +227,7 @@ export function isPlanDocumentV2(value: unknown): value is PlanDocument & {
     value.createdAtTurnId.length < 1 ||
     typeof value.updatedAtTurnId !== 'string' ||
     value.updatedAtTurnId.length < 1 ||
-    !isPlanCompletionEvidenceV1(value.completionEvidence) ||
+    !isPlanCompletionEvidence(value.completionEvidence) ||
     !hasValidPlanRevisionMetadata(value)
   ) {
     return false;
@@ -235,7 +235,7 @@ export function isPlanDocumentV2(value: unknown): value is PlanDocument & {
   const plan = value as unknown as PlanDocument;
   return (
     computePlanStructuralDigest(plan) === plan.structuralDigest &&
-    (value.artifact === undefined || isPlanArtifactRefV2(value.artifact, plan))
+    (value.artifact === undefined || isPlanArtifactRef(value.artifact, plan))
   );
 }
 

@@ -1,9 +1,9 @@
 export const OBSERVABILITY_METRICS_VERSION = 1 as const;
-export const MAX_METRIC_SAMPLE_BYTES_V1 = 1_024 as const;
+export const MAX_METRIC_SAMPLE_BYTES_ = 1_024 as const;
 
-export type MetricKindV1 = 'counter' | 'gauge' | 'histogram';
-export type MetricPriorityV1 = 'low' | 'normal' | 'critical';
-export type MetricPrivacyV1 = 'non_content_low_cardinality';
+export type MetricKind = 'counter' | 'gauge' | 'histogram';
+export type MetricPriority = 'low' | 'normal' | 'critical';
+export type MetricPrivacy = 'non_content_low_cardinality';
 
 export const METRIC_ATTRIBUTE_KEYS = [
   'outcome',
@@ -17,108 +17,107 @@ export const METRIC_ATTRIBUTE_KEYS = [
   'status',
   'stage',
 ] as const;
-export type MetricAttributeKeyV1 = (typeof METRIC_ATTRIBUTE_KEYS)[number];
-export type MetricAttributesV1 = Readonly<Partial<Record<MetricAttributeKeyV1, string>>>;
-export type MetricDynamicAliasKeyV1 = 'route' | 'capability';
-export type MetricControlledAliasRegistryV1 = Readonly<
-  Partial<Record<MetricDynamicAliasKeyV1, ReadonlySet<string>>>
+export type MetricAttributeKey = (typeof METRIC_ATTRIBUTE_KEYS)[number];
+export type MetricAttributes = Readonly<Partial<Record<MetricAttributeKey, string>>>;
+export type MetricDynamicAliasKey = 'route' | 'capability';
+export type MetricControlledAliasRegistry = Readonly<
+  Partial<Record<MetricDynamicAliasKey, ReadonlySet<string>>>
 >;
 
-const CONTROLLED_ALIAS_PATTERN_V1 = /^[a-z0-9][a-z0-9._:-]{0,47}$/;
-const FIXED_DYNAMIC_ALIASES_V1 = new Set(['custom/unknown', 'other']);
+const CONTROLLED_ALIAS_PATTERN_ = /^[a-z0-9][a-z0-9._:-]{0,47}$/;
+const FIXED_DYNAMIC_ALIASES_ = new Set(['custom/unknown', 'other']);
 
-const FINITE_ATTRIBUTE_VALUES: Readonly<
-  Partial<Record<MetricAttributeKeyV1, ReadonlySet<string>>>
-> = Object.freeze({
-  outcome: new Set([
-    'completed',
-    'cancelled',
-    'failed',
-    'success',
-    'retry',
-    'timeout',
-    'terminated',
-    'active',
-    'unknown',
-    'started',
-    'closed',
-    'invalidated',
-    'drafted',
-    'rejected',
-    'passed',
-    'inconclusive',
-    'waived',
-    'reset',
-    'cleared',
-    'admitted',
-    'blocked',
-    'rolled_back',
-    'timed_out',
-    'not_dispatched',
-    'aborted',
-    'budget_exhausted',
-    'exhausted',
-    'resource_saturated',
-  ]),
-  reason: new Set([
-    'completed',
-    'model',
-    'policy',
-    'tool',
-    'provider',
-    'sandbox',
-    'runtime',
-    'budget',
-    'resource',
-    'compaction',
-    'verification',
-    'cancellation',
-    'late_or_stale_action',
-    'queue_full',
-    'exporter_failure',
-    'unknown',
-  ]),
-  resource: new Set([
-    'tool',
-    'shell_invocation',
-    'shell_descendant',
-    'input',
-    'output',
-    'run_duration',
-    'turn',
-    'model_request',
-    'token',
-    'artifact',
-    'unknown',
-  ]),
-  profile: new Set(['internal', 'limited', 'canary', 'ga']),
-  cohort: new Set(['internal', 'limited', 'canary', 'general', 'unknown']),
-  source: new Set(['runtime', 'session_logger', 'checkpoint', 'hard_block']),
-  status: new Set(['ready', 'blocked', 'active', 'unknown']),
-  stage: new Set(['checks', 'human_accepted', 'integrated', 'reverted']),
-});
+const FINITE_ATTRIBUTE_VALUES: Readonly<Partial<Record<MetricAttributeKey, ReadonlySet<string>>>> =
+  Object.freeze({
+    outcome: new Set([
+      'completed',
+      'cancelled',
+      'failed',
+      'success',
+      'retry',
+      'timeout',
+      'terminated',
+      'active',
+      'unknown',
+      'started',
+      'closed',
+      'invalidated',
+      'drafted',
+      'rejected',
+      'passed',
+      'inconclusive',
+      'waived',
+      'reset',
+      'cleared',
+      'admitted',
+      'blocked',
+      'rolled_back',
+      'timed_out',
+      'not_dispatched',
+      'aborted',
+      'budget_exhausted',
+      'exhausted',
+      'resource_saturated',
+    ]),
+    reason: new Set([
+      'completed',
+      'model',
+      'policy',
+      'tool',
+      'provider',
+      'sandbox',
+      'runtime',
+      'budget',
+      'resource',
+      'compaction',
+      'verification',
+      'cancellation',
+      'late_or_stale_action',
+      'queue_full',
+      'exporter_failure',
+      'unknown',
+    ]),
+    resource: new Set([
+      'tool',
+      'shell_invocation',
+      'shell_descendant',
+      'input',
+      'output',
+      'run_duration',
+      'turn',
+      'model_request',
+      'token',
+      'artifact',
+      'unknown',
+    ]),
+    profile: new Set(['internal', 'limited', 'canary', 'ga']),
+    cohort: new Set(['internal', 'limited', 'canary', 'general', 'unknown']),
+    source: new Set(['runtime', 'session_logger', 'checkpoint', 'hard_block']),
+    status: new Set(['ready', 'blocked', 'active', 'unknown']),
+    stage: new Set(['checks', 'human_accepted', 'integrated', 'reverted']),
+  });
 
-export interface MetricDefinitionV1 {
+export interface MetricDefinition {
   version: 1;
   name: string;
-  kind: MetricKindV1;
-  allowedAttributes: readonly MetricAttributeKeyV1[];
+  kind: MetricKind;
+  allowedAttributes: readonly MetricAttributeKey[];
   cardinalityLimit: number;
   producer: string;
   consumers: readonly string[];
-  privacy: MetricPrivacyV1;
-  priority: MetricPriorityV1;
+  privacy: MetricPrivacy;
+  priority: MetricPriority;
 }
 
 function metric(
   name: string,
-  kind: MetricKindV1,
-  allowedAttributes: readonly MetricAttributeKeyV1[],
+  kind: MetricKind,
+  allowedAttributes: readonly MetricAttributeKey[],
   cardinalityLimit: number,
   producer: string,
   consumers: readonly string[],
-  priority: MetricPriorityV1 = 'normal',
-): MetricDefinitionV1 {
+  priority: MetricPriority = 'normal',
+): MetricDefinition {
   return Object.freeze({
     version: OBSERVABILITY_METRICS_VERSION,
     name,
@@ -132,7 +131,7 @@ function metric(
   });
 }
 
-export const METRIC_DEFINITIONS_V1 = Object.freeze({
+export const METRIC_DEFINITIONS_ = Object.freeze({
   run_total: metric('run_total', 'counter', ['outcome', 'reason'], 64, 'Runtime terminal', ['SLO']),
   run_duration_ms: metric('run_duration_ms', 'histogram', ['outcome'], 8, 'Runtime terminal', [
     'SLO',
@@ -271,7 +270,7 @@ export const METRIC_DEFINITIONS_V1 = Object.freeze({
     'gauge',
     ['resource'],
     12,
-    'ResourceBudgetV1',
+    'ResourceBudget',
     ['SLO'],
   ),
   resource_reserved_invocations: metric(
@@ -279,7 +278,7 @@ export const METRIC_DEFINITIONS_V1 = Object.freeze({
     'gauge',
     ['resource'],
     12,
-    'ResourceBudgetV1',
+    'ResourceBudget',
     ['SLO'],
   ),
   process_tree_high_water: metric('process_tree_high_water', 'gauge', [], 1, 'sandbox metadata', [
@@ -308,7 +307,7 @@ export const METRIC_DEFINITIONS_V1 = Object.freeze({
     'histogram',
     ['resource', 'outcome'],
     24,
-    'ResourceBudgetV1',
+    'ResourceBudget',
     ['SLO'],
   ),
   concurrency_saturation_total: metric(
@@ -316,7 +315,7 @@ export const METRIC_DEFINITIONS_V1 = Object.freeze({
     'counter',
     ['resource'],
     12,
-    'ResourceBudgetV1',
+    'ResourceBudget',
     ['SLO', 'alert'],
   ),
   approval_sibling_total: metric(
@@ -332,7 +331,7 @@ export const METRIC_DEFINITIONS_V1 = Object.freeze({
     'counter',
     ['resource'],
     12,
-    'ResourceBudgetV1',
+    'ResourceBudget',
     ['SLO', 'alert'],
     'critical',
   ),
@@ -379,18 +378,18 @@ export const METRIC_DEFINITIONS_V1 = Object.freeze({
   ),
 });
 
-export type MetricNameV1 = keyof typeof METRIC_DEFINITIONS_V1;
+export type MetricName = keyof typeof METRIC_DEFINITIONS_;
 
-export interface MetricSampleV1 {
+export interface MetricSample {
   version: 1;
-  name: MetricNameV1;
-  kind: MetricKindV1;
+  name: MetricName;
+  kind: MetricKind;
   value: number;
   observedAt: string;
-  attributes: MetricAttributesV1;
+  attributes: MetricAttributes;
 }
 
-const METRIC_SAMPLE_KEYS_V1 = [
+const METRIC_SAMPLE_KEYS_ = [
   'attributes',
   'kind',
   'name',
@@ -404,22 +403,22 @@ const METRIC_SAMPLE_KEYS_V1 = [
  * not a privacy boundary, so unknown fields and caller-supplied kind/version
  * values must be rejected before anything reaches an exporter.
  */
-export function parseMetricSampleV1(
+export function parseMetricSample(
   value: unknown,
-  controlledAliases: MetricControlledAliasRegistryV1 = {},
-): MetricSampleV1 {
+  controlledAliases: MetricControlledAliasRegistry = {},
+): MetricSample {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Metric sample must be an object.');
   }
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record).sort();
   if (
-    keys.length !== METRIC_SAMPLE_KEYS_V1.length ||
-    keys.some((key, index) => key !== METRIC_SAMPLE_KEYS_V1[index])
+    keys.length !== METRIC_SAMPLE_KEYS_.length ||
+    keys.some((key, index) => key !== METRIC_SAMPLE_KEYS_[index])
   ) {
     throw new Error('Metric sample has missing or unknown fields.');
   }
-  if (typeof record.name !== 'string' || !Object.hasOwn(METRIC_DEFINITIONS_V1, record.name)) {
+  if (typeof record.name !== 'string' || !Object.hasOwn(METRIC_DEFINITIONS_, record.name)) {
     throw new Error('Metric sample name is not allowlisted.');
   }
   if (
@@ -433,12 +432,12 @@ export function parseMetricSampleV1(
     Object.entries(record.attributes).map(([key, entry]) => {
       if (key !== 'route' && key !== 'capability') return [key, entry];
       if (typeof entry !== 'string') return [key, entry];
-      if (FIXED_DYNAMIC_ALIASES_V1.has(entry)) return [key, entry];
+      if (FIXED_DYNAMIC_ALIASES_.has(entry)) return [key, entry];
       return [key, controlledAliases[key]?.has(entry) ? entry : 'custom/unknown'];
     }),
-  ) as MetricAttributesV1;
-  const rebuilt = createMetricSampleV1({
-    name: record.name as MetricNameV1,
+  ) as MetricAttributes;
+  const rebuilt = createMetricSample({
+    name: record.name as MetricName,
     value: record.value as number,
     observedAt: record.observedAt as string,
     attributes: normalizedAttributes,
@@ -449,13 +448,13 @@ export function parseMetricSampleV1(
   return rebuilt;
 }
 
-export function createMetricSampleV1(input: {
-  name: MetricNameV1;
+export function createMetricSample(input: {
+  name: MetricName;
   value?: number;
   observedAt: string;
-  attributes?: MetricAttributesV1;
-}): MetricSampleV1 {
-  const definition = METRIC_DEFINITIONS_V1[input.name];
+  attributes?: MetricAttributes;
+}): MetricSample {
+  const definition = METRIC_DEFINITIONS_[input.name];
   const value = input.value ?? 1;
   if (!Number.isFinite(value) || value < 0)
     throw new Error('Metric value must be finite and non-negative.');
@@ -469,15 +468,15 @@ export function createMetricSampleV1(input: {
   const allowed = new Set(definition.allowedAttributes);
   for (const [key, entry] of Object.entries(attributes)) {
     if (
-      !METRIC_ATTRIBUTE_KEYS.includes(key as MetricAttributeKeyV1) ||
-      !allowed.has(key as MetricAttributeKeyV1)
+      !METRIC_ATTRIBUTE_KEYS.includes(key as MetricAttributeKey) ||
+      !allowed.has(key as MetricAttributeKey)
     ) {
       throw new Error(`Metric ${input.name} does not allow attribute ${key}.`);
     }
     if (typeof entry !== 'string' || entry.length === 0 || entry.length > 64) {
       throw new Error(`Metric ${input.name} attribute ${key} is invalid.`);
     }
-    const finiteValues = FINITE_ATTRIBUTE_VALUES[key as MetricAttributeKeyV1];
+    const finiteValues = FINITE_ATTRIBUTE_VALUES[key as MetricAttributeKey];
     if (finiteValues && !finiteValues.has(entry)) {
       throw new Error(`Metric ${input.name} attribute ${key} has an unknown enum value.`);
     }
@@ -485,7 +484,7 @@ export function createMetricSampleV1(input: {
       (key === 'route' || key === 'capability') &&
       entry !== 'custom/unknown' &&
       entry !== 'other' &&
-      !CONTROLLED_ALIAS_PATTERN_V1.test(entry)
+      !CONTROLLED_ALIAS_PATTERN_.test(entry)
     ) {
       throw new Error(`Metric ${input.name} attribute ${key} is not a controlled alias.`);
     }
@@ -500,6 +499,6 @@ export function createMetricSampleV1(input: {
   });
 }
 
-export function metricPriorityV1(sample: MetricSampleV1): MetricPriorityV1 {
-  return METRIC_DEFINITIONS_V1[sample.name].priority;
+export function metricPriority(sample: MetricSample): MetricPriority {
+  return METRIC_DEFINITIONS_[sample.name].priority;
 }

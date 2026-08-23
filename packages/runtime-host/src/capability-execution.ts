@@ -1,13 +1,13 @@
 import {
-  arbitrateCapabilityV1,
-  type CapabilityExecutionInvocationV1,
-  type CapabilityExecutionPortV1,
-  type CapabilityRegistrySnapshotV1,
-  type ExecutionReceiptV1,
-  type RuntimeModuleRegistryV1,
+  arbitrateCapability,
+  type CapabilityExecutionInvocation,
+  type CapabilityExecutionPort,
+  type CapabilityRegistrySnapshot,
+  type ExecutionReceipt,
+  type RuntimeModuleRegistry,
 } from '@kite/runtime-spi';
 
-export type RuntimeHostCapabilityExecutionFailureCodeV1 =
+export type RuntimeHostCapabilityExecutionFailureCode =
   | 'binding_invalid'
   | 'capability_missing'
   | 'capability_revision_mismatch'
@@ -22,17 +22,17 @@ export type RuntimeHostCapabilityExecutionFailureCodeV1 =
   | 'executor_failed'
   | 'receipt_identity_mismatch';
 
-export class RuntimeHostCapabilityExecutionErrorV1 extends Error {
-  readonly code: RuntimeHostCapabilityExecutionFailureCodeV1;
+export class RuntimeHostCapabilityExecutionError extends Error {
+  readonly code: RuntimeHostCapabilityExecutionFailureCode;
   readonly causeValue: unknown | undefined;
 
   constructor(
-    code: RuntimeHostCapabilityExecutionFailureCodeV1,
+    code: RuntimeHostCapabilityExecutionFailureCode,
     message: string,
     causeValue?: unknown,
   ) {
     super(message);
-    this.name = 'RuntimeHostCapabilityExecutionErrorV1';
+    this.name = 'RuntimeHostCapabilityExecutionError';
     this.code = code;
     this.causeValue = causeValue;
   }
@@ -43,10 +43,10 @@ export class RuntimeHostCapabilityExecutionErrorV1 extends Error {
  * in-process claim per invocation/attempt. It never interprets provider facts
  * or grants additional authority.
  */
-export function createRuntimeHostCapabilityExecutionPortV1(
-  registry: RuntimeModuleRegistryV1,
-): CapabilityExecutionPortV1 {
-  return createRuntimeHostCapabilityExecutionPortFromSnapshotV1(registry.snapshot());
+export function createRuntimeHostCapabilityExecutionPort(
+  registry: RuntimeModuleRegistry,
+): CapabilityExecutionPort {
+  return createRuntimeHostCapabilityExecutionPortFromSnapshot(registry.snapshot());
 }
 
 /**
@@ -55,15 +55,15 @@ export function createRuntimeHostCapabilityExecutionPortV1(
  * compatibility factory prevents the Host from making a second snapshot for
  * its production execution port.
  */
-export function createRuntimeHostCapabilityExecutionPortFromSnapshotV1(
-  snapshot: Readonly<CapabilityRegistrySnapshotV1>,
-): CapabilityExecutionPortV1 {
+export function createRuntimeHostCapabilityExecutionPortFromSnapshot(
+  snapshot: Readonly<CapabilityRegistrySnapshot>,
+): CapabilityExecutionPort {
   const claimedAttempts = new Set<string>();
   return Object.freeze({
-    async invoke(invocation: CapabilityExecutionInvocationV1): Promise<ExecutionReceiptV1> {
-      const resolved = arbitrateCapabilityV1(snapshot, invocation.binding);
+    async invoke(invocation: CapabilityExecutionInvocation): Promise<ExecutionReceipt> {
+      const resolved = arbitrateCapability(snapshot, invocation.binding);
       if (resolved.status === 'failed') {
-        throw new RuntimeHostCapabilityExecutionErrorV1(
+        throw new RuntimeHostCapabilityExecutionError(
           resolved.code,
           `Runtime capability arbitration failed: ${resolved.code}.`,
         );
@@ -73,7 +73,7 @@ export function createRuntimeHostCapabilityExecutionPortFromSnapshotV1(
         invocation.request.capabilityId !== definition.capabilityId ||
         invocation.request.capabilityRevision !== definition.revision
       ) {
-        throw new RuntimeHostCapabilityExecutionErrorV1(
+        throw new RuntimeHostCapabilityExecutionError(
           'request_identity_mismatch',
           'Runtime capability request identity does not match the exact binding.',
         );
@@ -82,27 +82,27 @@ export function createRuntimeHostCapabilityExecutionPortFromSnapshotV1(
         invocation.grant.capabilityId !== definition.capabilityId ||
         invocation.grant.capabilityRevision !== definition.revision
       ) {
-        throw new RuntimeHostCapabilityExecutionErrorV1(
+        throw new RuntimeHostCapabilityExecutionError(
           'grant_identity_mismatch',
           'Runtime capability grant identity does not match the exact binding.',
         );
       }
       if (invocation.attempt.invocationId !== invocation.request.invocationId) {
-        throw new RuntimeHostCapabilityExecutionErrorV1(
+        throw new RuntimeHostCapabilityExecutionError(
           'attempt_identity_mismatch',
           'Runtime capability attempt does not belong to the invocation request.',
         );
       }
       const claimKey = `${invocation.attempt.invocationId}\0${invocation.attempt.attemptId}`;
       if (claimedAttempts.has(claimKey)) {
-        throw new RuntimeHostCapabilityExecutionErrorV1(
+        throw new RuntimeHostCapabilityExecutionError(
           'attempt_already_claimed',
           'Runtime capability attempt has already been claimed.',
         );
       }
       claimedAttempts.add(claimKey);
 
-      let receipt: ExecutionReceiptV1;
+      let receipt: ExecutionReceipt;
       try {
         receipt = await executor.execute(invocation.request, {
           grant: invocation.grant,
@@ -112,7 +112,7 @@ export function createRuntimeHostCapabilityExecutionPortFromSnapshotV1(
           attempt: invocation.attempt,
         });
       } catch (error) {
-        throw new RuntimeHostCapabilityExecutionErrorV1(
+        throw new RuntimeHostCapabilityExecutionError(
           'executor_failed',
           error instanceof Error ? error.message : 'Runtime capability executor failed.',
           error,
@@ -125,7 +125,7 @@ export function createRuntimeHostCapabilityExecutionPortFromSnapshotV1(
         receipt.executorRevision !== executor.executorRevision ||
         receipt.requestDigest !== invocation.requestDigest
       ) {
-        throw new RuntimeHostCapabilityExecutionErrorV1(
+        throw new RuntimeHostCapabilityExecutionError(
           'receipt_identity_mismatch',
           'Runtime capability receipt identity does not match the claimed attempt.',
         );

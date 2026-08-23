@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { assertAgentStateInvariants } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function queuedEvent(index: number): RuntimeEvent {
@@ -15,7 +15,7 @@ function queuedEvent(index: number): RuntimeEvent {
 
 describe('Runtime long-replay qualification lifecycle', () => {
   test('replays a long deterministic event stream without violating invariants', () => {
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'stress',
       userId: 'u',

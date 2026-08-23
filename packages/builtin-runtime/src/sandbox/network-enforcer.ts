@@ -4,7 +4,7 @@ import { request as requestHttp } from 'node:http';
 import { request as requestHttps } from 'node:https';
 import { isIP } from 'node:net';
 import { Readable } from 'node:stream';
-import { canonicalNetworkHostname, type NetworkBoundaryPolicyV1 } from './network-policy';
+import { canonicalNetworkHostname, type NetworkBoundaryPolicy } from './network-policy';
 
 export type NetworkBoundaryFailureCode =
   | 'network_off'
@@ -31,12 +31,12 @@ export class NetworkBoundaryError extends Error {
   }
 }
 
-export interface NetworkResolvedAddressV1 {
+export interface NetworkResolvedAddress {
   address: string;
   family: 4 | 6;
 }
 
-export interface NetworkAdmissionReceiptV1 {
+export interface NetworkAdmissionReceipt {
   version: 1;
   outcome: 'allowed';
   toolCallId: string;
@@ -52,7 +52,7 @@ export interface NetworkAdmissionReceiptV1 {
   receiptDigest: string;
 }
 
-export interface NetworkDenialReceiptV1 {
+export interface NetworkDenialReceipt {
   version: 1;
   outcome: 'denied';
   toolCallId: string;
@@ -66,34 +66,32 @@ export interface NetworkDenialReceiptV1 {
   receiptDigest: string;
 }
 
-export type NetworkDecisionReceiptV1 = NetworkAdmissionReceiptV1 | NetworkDenialReceiptV1;
-export type NetworkDecisionRecorderV1 = (
-  decision: NetworkDecisionReceiptV1,
-) => void | Promise<void>;
+export type NetworkDecisionReceipt = NetworkAdmissionReceipt | NetworkDenialReceipt;
+export type NetworkDecisionRecorder = (decision: NetworkDecisionReceipt) => void | Promise<void>;
 
-export type NetworkResolverV1 = (hostname: string) => Promise<readonly NetworkResolvedAddressV1[]>;
+export type NetworkResolver = (hostname: string) => Promise<readonly NetworkResolvedAddress[]>;
 
-export interface NetworkBoundaryEnforcerV1 {
-  readonly policy: NetworkBoundaryPolicyV1;
+export interface NetworkBoundaryEnforcer {
+  readonly policy: NetworkBoundaryPolicy;
   admit(input: {
     url: string | URL;
     toolCallId: string;
     invocationId: string;
     hop: number;
     expectedEndpointRevision?: string;
-  }): Promise<NetworkAdmissionReceiptV1>;
+  }): Promise<NetworkAdmissionReceipt>;
 }
 
-export function createNetworkBoundaryEnforcerV1(
-  policy: NetworkBoundaryPolicyV1,
-  resolver: NetworkResolverV1 = resolveNetworkAddresses,
-  recordDecision?: NetworkDecisionRecorderV1,
-): NetworkBoundaryEnforcerV1 {
+export function createNetworkBoundaryEnforcer(
+  policy: NetworkBoundaryPolicy,
+  resolver: NetworkResolver = resolveNetworkAddresses,
+  recordDecision?: NetworkDecisionRecorder,
+): NetworkBoundaryEnforcer {
   const allowedHosts = new Set(policy.allowedHosts.map(canonicalNetworkHostname));
   return {
     policy,
     async admit(input) {
-      let admission: NetworkAdmissionReceiptV1;
+      let admission: NetworkAdmissionReceipt;
       try {
         admission = await admitNetworkEndpoint(policy, allowedHosts, resolver, input);
       } catch (error) {
@@ -131,9 +129,9 @@ export function createNetworkBoundaryEnforcerV1(
 }
 
 async function admitNetworkEndpoint(
-  policy: NetworkBoundaryPolicyV1,
+  policy: NetworkBoundaryPolicy,
   allowedHosts: ReadonlySet<string>,
-  resolver: NetworkResolverV1,
+  resolver: NetworkResolver,
   input: {
     url: string | URL;
     toolCallId: string;
@@ -141,7 +139,7 @@ async function admitNetworkEndpoint(
     hop: number;
     expectedEndpointRevision?: string;
   },
-): Promise<NetworkAdmissionReceiptV1> {
+): Promise<NetworkAdmissionReceipt> {
   if (policy.mode === 'off') {
     throw new NetworkBoundaryError('network_off', 'Network access is disabled by policy.');
   }
@@ -173,7 +171,7 @@ async function admitNetworkEndpoint(
     );
   }
 
-  let resolved: readonly NetworkResolvedAddressV1[];
+  let resolved: readonly NetworkResolvedAddress[];
   try {
     resolved = await resolver(host);
   } catch (error) {
@@ -240,7 +238,7 @@ function isBracketedIpLiteral(host: string): boolean {
 }
 
 function denialReceipt(
-  policy: NetworkBoundaryPolicyV1,
+  policy: NetworkBoundaryPolicy,
   input: {
     url: string | URL;
     toolCallId: string;
@@ -249,7 +247,7 @@ function denialReceipt(
     expectedEndpointRevision?: string;
   },
   failureCode: NetworkBoundaryFailureCode,
-): NetworkDenialReceiptV1 {
+): NetworkDenialReceipt {
   const target = safeNetworkAuthority(input.url);
   const receipt = {
     version: 1 as const,
@@ -280,24 +278,24 @@ function safeNetworkAuthority(input: string | URL): { origin: string; host: stri
   }
 }
 
-export interface NetworkBoundaryFetchOptionsV1 {
-  resolver?: NetworkResolverV1;
-  onAdmission?: (receipt: NetworkAdmissionReceiptV1) => void;
-  recordDecision?: NetworkDecisionRecorderV1;
+export interface NetworkBoundaryFetchOptions {
+  resolver?: NetworkResolver;
+  onAdmission?: (receipt: NetworkAdmissionReceipt) => void;
+  recordDecision?: NetworkDecisionRecorder;
   toolCallId?: string;
   expectedEndpointRevision?: string;
   invocationIdFactory?: () => string;
-  request?: PinnedNetworkRequestV1;
+  request?: PinnedNetworkRequest;
   maxRedirects?: number;
 }
 
-export type PinnedNetworkRequestV1 = (input: {
+export type PinnedNetworkRequest = (input: {
   url: URL;
   method: string;
   headers: Headers;
   body?: Uint8Array;
   signal?: AbortSignal;
-  admission: NetworkAdmissionReceiptV1;
+  admission: NetworkAdmissionReceipt;
 }) => Promise<Response>;
 
 /**
@@ -305,15 +303,11 @@ export type PinnedNetworkRequestV1 = (input: {
  * socket lookup to the admitted address. It never trusts proxy environment
  * variables and never lets the transport perform an unchecked redirect.
  */
-export function createNetworkBoundaryFetchV1(
-  policy: NetworkBoundaryPolicyV1,
-  options: NetworkBoundaryFetchOptionsV1 = {},
+export function createNetworkBoundaryFetch(
+  policy: NetworkBoundaryPolicy,
+  options: NetworkBoundaryFetchOptions = {},
 ): typeof fetch {
-  const enforcer = createNetworkBoundaryEnforcerV1(
-    policy,
-    options.resolver,
-    options.recordDecision,
-  );
+  const enforcer = createNetworkBoundaryEnforcer(policy, options.resolver, options.recordDecision);
   const request = options.request ?? requestPinnedNetworkEndpoint;
   const maxRedirects = normalizeMaxRedirects(options.maxRedirects);
   return (async (input: string | URL | Request, init?: RequestInit) => {
@@ -368,7 +362,7 @@ export function createNetworkBoundaryFetchV1(
 
 async function resolveNetworkAddresses(
   hostname: string,
-): Promise<readonly NetworkResolvedAddressV1[]> {
+): Promise<readonly NetworkResolvedAddress[]> {
   try {
     const addresses = await dns.lookup(hostname, { all: true, verbatim: true });
     return addresses.flatMap((entry) =>
@@ -402,9 +396,9 @@ function parseNetworkUrl(input: string | URL): URL {
 }
 
 function normalizeResolvedAddresses(
-  addresses: readonly NetworkResolvedAddressV1[],
-): NetworkResolvedAddressV1[] {
-  const unique = new Map<string, NetworkResolvedAddressV1>();
+  addresses: readonly NetworkResolvedAddress[],
+): NetworkResolvedAddress[] {
+  const unique = new Map<string, NetworkResolvedAddress>();
   for (const entry of addresses) {
     const family = isIP(entry.address);
     if (family !== 4 && family !== 6) continue;
@@ -584,7 +578,7 @@ function authoritativeRequestHeaders(headers: Headers, url: URL): Headers {
 }
 
 async function requestPinnedNetworkEndpoint(
-  input: Parameters<PinnedNetworkRequestV1>[0],
+  input: Parameters<PinnedNetworkRequest>[0],
 ): Promise<Response> {
   if (input.signal?.aborted) throw abortError(input.signal.reason);
   const request = input.url.protocol === 'https:' ? requestHttps : requestHttp;

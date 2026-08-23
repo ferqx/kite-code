@@ -1,57 +1,57 @@
 import type {
-  CapabilityExecutorV1,
-  ExecutionReceiptV1,
-  RuntimeJsonValueV1,
-  RuntimeModuleV1,
+  CapabilityExecutor,
+  ExecutionReceipt,
+  RuntimeJsonValue,
+  RuntimeModule,
 } from '@kite/runtime-spi';
-import { defineRuntimeModuleV1 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
+import { defineRuntimeModule } from '@kite/runtime-spi';
+import { digestCapabilityBindingValue } from './capability-binding';
 import type {
-  BuiltinCapabilitySearchCandidateV1,
-  BuiltinCapabilitySearchProviderDiagnosticV1,
+  BuiltinCapabilitySearchCandidate,
+  BuiltinCapabilitySearchProviderDiagnostic,
 } from './capability-disclosure';
 import {
-  projectCapabilitySearchCandidatesV1,
-  projectUnavailableProviderSearchV1,
+  projectCapabilitySearchCandidates,
+  projectUnavailableProviderSearch,
 } from './capability-disclosure';
 import {
-  defineBuiltinCapabilityContractV1,
-  parserForBuiltinOperationV1,
-  staticEffectsClassifierV1,
-  toolSearchAvailabilityV1,
+  defineBuiltinCapabilityContract,
+  parserForBuiltinOperation,
+  staticEffectsClassifier,
+  toolSearchAvailability,
 } from './catalog-contract';
 import type { McpDiagnosticCode } from './mcp/diagnostics';
-import { isMcpProviderUnavailableV1 } from './mcp/provider-status';
-import { createBuiltinPolicyCompilerV1, readOnlyBuiltinPolicyRuleV1 } from './policy-compiler';
-import { builtinToolDescriptionV1 } from './tool-contracts';
-import { BUILTIN_JSON_SCHEMAS_V1 } from './tool-schemas';
+import { isMcpProviderUnavailable } from './mcp/provider-status';
+import { createBuiltinPolicyCompiler, readOnlyBuiltinPolicyRule } from './policy-compiler';
+import { builtinToolDescription } from './tool-contracts';
+import { BUILTIN_JSON_SCHEMAS_ } from './tool-schemas';
 
-export const TOOL_SEARCH_CAPABILITY_ID_V1 = 'builtin:tool_search' as const;
-export const TOOL_SEARCH_PROVIDER_ID_V1 = 'kite-code' as const;
+export const TOOL_SEARCH_CAPABILITY_ID_ = 'builtin:tool_search' as const;
+export const TOOL_SEARCH_PROVIDER_ID_ = 'kite-code' as const;
 
-export const TOOL_SEARCH_INPUT_SCHEMA_V1 = BUILTIN_JSON_SCHEMAS_V1['builtin:tool_search'];
+export const TOOL_SEARCH_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:tool_search'];
 
-const TOOL_SEARCH_EFFECTS_V1 = Object.freeze({
+const TOOL_SEARCH_EFFECTS_ = Object.freeze({
   filesystem: 'none',
   network: 'read',
   externalState: 'none',
 });
 
-export const TOOL_SEARCH_CAPABILITY_REVISION_V1 = digestCapabilityBindingValueV1({
+export const TOOL_SEARCH_CAPABILITY_REVISION_ = digestCapabilityBindingValue({
   schema: 'kite.builtin-tool-search-capability.v1',
-  inputSchema: TOOL_SEARCH_INPUT_SCHEMA_V1,
-  providerId: TOOL_SEARCH_PROVIDER_ID_V1,
-  effects: TOOL_SEARCH_EFFECTS_V1,
+  inputSchema: TOOL_SEARCH_INPUT_SCHEMA_,
+  providerId: TOOL_SEARCH_PROVIDER_ID_,
+  effects: TOOL_SEARCH_EFFECTS_,
 });
 
-export const TOOL_SEARCH_EXECUTOR_REVISION_V1 = digestCapabilityBindingValueV1({
+export const TOOL_SEARCH_EXECUTOR_REVISION_ = digestCapabilityBindingValue({
   schema: 'kite.builtin-tool-search-executor.v1',
-  capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
+  capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_,
 });
 
-type SearchableKindV1 = 'mcp_tool' | 'skill';
-type ProviderTypeV1 = 'builtin' | 'mcp' | 'skill' | 'subagent';
-type ProviderStatusV1 =
+type SearchableKind = 'mcp_tool' | 'skill';
+type ProviderType = 'builtin' | 'mcp' | 'skill' | 'subagent';
+type ProviderStatus =
   | 'pending_approval'
   | 'rejected'
   | 'disabled'
@@ -62,50 +62,50 @@ type ProviderStatusV1 =
   | 'failed'
   | 'quarantined';
 
-export interface ToolSearchDescriptorInputV1 {
+export interface ToolSearchDescriptorInput {
   readonly capabilityId: string;
   readonly revision: string;
   readonly kind: string;
   readonly displayName: string;
   readonly description: string;
   readonly modelDescription?: string;
-  readonly provider: Readonly<{ type: ProviderTypeV1; id: string }>;
+  readonly provider: Readonly<{ type: ProviderType; id: string }>;
   readonly availability: string;
 }
 
-export interface ToolSearchProviderEntryInputV1 {
+export interface ToolSearchProviderEntryInput {
   readonly providerId: string;
-  readonly status: ProviderStatusV1;
+  readonly status: ProviderStatus;
   readonly lastKnownCapabilityNames: readonly string[];
   readonly diagnosticCode?: McpDiagnosticCode;
 }
 
-type FrozenSearchDescriptorV1 = Readonly<{
+type FrozenSearchDescriptor = Readonly<{
   capabilityId: string;
   revision: string;
-  kind: SearchableKindV1;
+  kind: SearchableKind;
   displayName: string;
   description: string;
-  providerType: ProviderTypeV1;
+  providerType: ProviderType;
   providerId: string;
 }>;
 
-type FrozenProviderEntryV1 = Readonly<{
+type FrozenProviderEntry = Readonly<{
   providerId: string;
-  status: ProviderStatusV1;
+  status: ProviderStatus;
   lastKnownCapabilityNames: readonly string[];
   diagnosticCode?: McpDiagnosticCode;
 }>;
 
-export type ToolSearchProviderFactsV1 = RuntimeJsonValueV1 &
+export type ToolSearchProviderFacts = RuntimeJsonValue &
   Readonly<{
     schema: 'kite.builtin-tool-search-facts.v1';
     threadId: string;
     turnId: string;
     toolCallId: string;
     catalogRevision: string;
-    descriptors: readonly FrozenSearchDescriptorV1[];
-    providers: readonly FrozenProviderEntryV1[];
+    descriptors: readonly FrozenSearchDescriptor[];
+    providers: readonly FrozenProviderEntry[];
     catalogSummary: Readonly<{
       availableMcpToolCount: number;
       availableSkillCount: number;
@@ -115,38 +115,38 @@ export type ToolSearchProviderFactsV1 = RuntimeJsonValueV1 &
     }>;
   }>;
 
-export type ToolSearchCandidateV1 = BuiltinCapabilitySearchCandidateV1;
-export type ToolSearchProviderDiagnosticV1 = BuiltinCapabilitySearchProviderDiagnosticV1;
+export type ToolSearchCandidate = BuiltinCapabilitySearchCandidate;
+export type ToolSearchProviderDiagnostic = BuiltinCapabilitySearchProviderDiagnostic;
 
-export type ToolSearchResultV1 = RuntimeJsonValueV1 &
+export type ToolSearchResult = RuntimeJsonValue &
   Readonly<{
     searchId: string;
     query: string;
     catalogRevision: string;
     requestedAtTurnId: string;
-    candidates: readonly ToolSearchCandidateV1[];
-    providers?: readonly ToolSearchProviderDiagnosticV1[];
+    candidates: readonly ToolSearchCandidate[];
+    providers?: readonly ToolSearchProviderDiagnostic[];
   }>;
 
-export type ToolSearchExecutionValueV1 = RuntimeJsonValueV1 &
+export type ToolSearchExecutionValue = RuntimeJsonValue &
   Readonly<{
     schema: 'kite.builtin-tool-search-result.v1';
     stdout: string;
-    searchResult?: ToolSearchResultV1;
+    searchResult?: ToolSearchResult;
   }>;
 
-export function createToolSearchProviderFactsV1(input: {
+export function createToolSearchProviderFacts(input: {
   readonly threadId: string;
   readonly turnId: string;
   readonly toolCallId: string;
-  readonly mcpDescriptors?: readonly ToolSearchDescriptorInputV1[];
-  readonly skillDescriptors?: readonly ToolSearchDescriptorInputV1[];
-  readonly providerEntries?: readonly ToolSearchProviderEntryInputV1[];
-}): ToolSearchProviderFactsV1 {
+  readonly mcpDescriptors?: readonly ToolSearchDescriptorInput[];
+  readonly skillDescriptors?: readonly ToolSearchDescriptorInput[];
+  readonly providerEntries?: readonly ToolSearchProviderEntryInput[];
+}): ToolSearchProviderFacts {
   const allDescriptors = [...(input.mcpDescriptors ?? []), ...(input.skillDescriptors ?? [])];
   const searchable = allDescriptors
     .filter(
-      (descriptor): descriptor is ToolSearchDescriptorInputV1 & { kind: SearchableKindV1 } =>
+      (descriptor): descriptor is ToolSearchDescriptorInput & { kind: SearchableKind } =>
         (descriptor.kind === 'mcp_tool' || descriptor.kind === 'skill') &&
         descriptor.availability === 'available',
     )
@@ -174,7 +174,7 @@ export function createToolSearchProviderFactsV1(input: {
       ...(entry.diagnosticCode ? { diagnosticCode: entry.diagnosticCode } : {}),
     }),
   );
-  const catalogRevision = digestCapabilityBindingValueV1(
+  const catalogRevision = digestCapabilityBindingValue(
     searchable.map((descriptor) => ({
       capabilityId: descriptor.capabilityId,
       revision: descriptor.revision,
@@ -196,64 +196,63 @@ export function createToolSearchProviderFactsV1(input: {
         (descriptor) => descriptor.kind === 'skill' && descriptor.availability === 'available',
       ).length,
       configuredProviderCount: providers.length,
-      unavailableProviderCount: providers.filter((entry) =>
-        isMcpProviderUnavailableV1(entry.status),
-      ).length,
+      unavailableProviderCount: providers.filter((entry) => isMcpProviderUnavailable(entry.status))
+        .length,
       nonHealthyProviderCount: providers.filter((entry) => entry.status !== 'ready').length,
     }),
-  }) as ToolSearchProviderFactsV1;
+  }) as ToolSearchProviderFacts;
 }
 
-export function createToolSearchRuntimeModuleV1(): RuntimeModuleV1 {
-  const executor: CapabilityExecutorV1 = Object.freeze({
-    providerId: TOOL_SEARCH_PROVIDER_ID_V1,
-    capabilityId: TOOL_SEARCH_CAPABILITY_ID_V1,
-    capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
-    executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_V1,
-    execute: executeToolSearchV1,
+export function createToolSearchRuntimeModule(): RuntimeModule {
+  const executor: CapabilityExecutor = Object.freeze({
+    providerId: TOOL_SEARCH_PROVIDER_ID_,
+    capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
+    capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_,
+    executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_,
+    execute: executeToolSearch,
   });
-  return defineRuntimeModuleV1({
+  return defineRuntimeModule({
     moduleId: 'kite-builtin-runtime',
-    providerId: TOOL_SEARCH_PROVIDER_ID_V1,
+    providerId: TOOL_SEARCH_PROVIDER_ID_,
     revision: 'rmv1-10',
-    operationIds: [TOOL_SEARCH_CAPABILITY_ID_V1],
+    operationIds: [TOOL_SEARCH_CAPABILITY_ID_],
     register: (registry) => {
       registry.registerCapability(
-        defineBuiltinCapabilityContractV1(
+        defineBuiltinCapabilityContract(
           {
-            capabilityId: TOOL_SEARCH_CAPABILITY_ID_V1,
-            revision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
-            providerId: TOOL_SEARCH_PROVIDER_ID_V1,
+            capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
+            revision: TOOL_SEARCH_CAPABILITY_REVISION_,
+            providerId: TOOL_SEARCH_PROVIDER_ID_,
             title: 'Tool search catalog observation',
             executionMechanism: 'catalog',
             toolName: 'tool_search',
-            description: builtinToolDescriptionV1('tool_search'),
+            description: builtinToolDescription('tool_search'),
             visibility: 'model',
-            effects: TOOL_SEARCH_EFFECTS_V1,
-            inputSchema: TOOL_SEARCH_INPUT_SCHEMA_V1,
-            inputSchemaDigest: digestCapabilityBindingValueV1(TOOL_SEARCH_INPUT_SCHEMA_V1),
+            effects: TOOL_SEARCH_EFFECTS_,
+            inputSchema: TOOL_SEARCH_INPUT_SCHEMA_,
+            inputSchemaDigest: digestCapabilityBindingValue(TOOL_SEARCH_INPUT_SCHEMA_),
           },
           {
-            parser: parserForBuiltinOperationV1(
-              TOOL_SEARCH_CAPABILITY_ID_V1,
-              TOOL_SEARCH_CAPABILITY_REVISION_V1,
+            parser: parserForBuiltinOperation(
+              TOOL_SEARCH_CAPABILITY_ID_,
+              TOOL_SEARCH_CAPABILITY_REVISION_,
             ),
             kind: 'coordination',
             minimumApproval: 'none',
-            availability: toolSearchAvailabilityV1,
-            effectsClassifier: staticEffectsClassifierV1(
+            availability: toolSearchAvailability,
+            effectsClassifier: staticEffectsClassifier(
               'read_only',
               false,
               'Searches governed capability metadata without issuing a binding.',
-              TOOL_SEARCH_EFFECTS_V1,
+              TOOL_SEARCH_EFFECTS_,
             ),
-            policyCompiler: createBuiltinPolicyCompilerV1({
-              operationId: TOOL_SEARCH_CAPABILITY_ID_V1,
-              capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
-              parserRevision: TOOL_SEARCH_CAPABILITY_REVISION_V1,
-              declaredEffects: TOOL_SEARCH_EFFECTS_V1,
+            policyCompiler: createBuiltinPolicyCompiler({
+              operationId: TOOL_SEARCH_CAPABILITY_ID_,
+              capabilityRevision: TOOL_SEARCH_CAPABILITY_REVISION_,
+              parserRevision: TOOL_SEARCH_CAPABILITY_REVISION_,
+              declaredEffects: TOOL_SEARCH_EFFECTS_,
               minimumApproval: 'none',
-              rule: readOnlyBuiltinPolicyRuleV1,
+              rule: readOnlyBuiltinPolicyRule,
             }),
           },
         ),
@@ -263,9 +262,9 @@ export function createToolSearchRuntimeModuleV1(): RuntimeModuleV1 {
   });
 }
 
-export function isToolSearchExecutionValueV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is ToolSearchExecutionValueV1 {
+export function isToolSearchExecutionValue(
+  value: RuntimeJsonValue | undefined,
+): value is ToolSearchExecutionValue {
   const record = asRecord(value);
   return Boolean(
     record &&
@@ -274,12 +273,12 @@ export function isToolSearchExecutionValueV1(
   );
 }
 
-async function executeToolSearchV1(
-  request: Parameters<CapabilityExecutorV1['execute']>[0],
-  context: Parameters<CapabilityExecutorV1['execute']>[1],
-): Promise<ExecutionReceiptV1> {
+async function executeToolSearch(
+  request: Parameters<CapabilityExecutor['execute']>[0],
+  context: Parameters<CapabilityExecutor['execute']>[1],
+): Promise<ExecutionReceipt> {
   const input = asRecord(request.input);
-  const facts = readToolSearchFactsV1(request.facts);
+  const facts = readToolSearchFacts(request.facts);
   if (!input || typeof input.query !== 'string' || !facts) {
     return failedReceipt(request.invocationId, context, 'tool_search_invalid_input');
   }
@@ -299,8 +298,8 @@ async function executeToolSearchV1(
     return Object.freeze({
       invocationId: request.invocationId,
       attemptId: context.attempt.attemptId,
-      providerId: TOOL_SEARCH_PROVIDER_ID_V1,
-      executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_V1,
+      providerId: TOOL_SEARCH_PROVIDER_ID_,
+      executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_,
       requestDigest: context.requestDigest,
       status: 'cancelled',
       dispatchCertainty: 'none',
@@ -315,18 +314,18 @@ async function executeToolSearchV1(
     });
   }
 
-  const candidates = projectCapabilitySearchCandidatesV1({
+  const candidates = projectCapabilitySearchCandidates({
     catalogRevision: facts.catalogRevision,
     descriptors: facts.descriptors,
     query,
     limit: limitValue as number | undefined,
   });
-  const providers = projectUnavailableProviderSearchV1({
+  const providers = projectUnavailableProviderSearch({
     entries: facts.providers,
     query,
     limit: limitValue as number | undefined,
   });
-  const searchId = digestCapabilityBindingValueV1({
+  const searchId = digestCapabilityBindingValue({
     threadId: facts.threadId,
     turnId: facts.turnId,
     toolCallId: facts.toolCallId,
@@ -340,7 +339,7 @@ async function executeToolSearchV1(
     requestedAtTurnId: facts.turnId,
     candidates,
     ...(providers.length > 0 ? { providers } : {}),
-  }) as ToolSearchResultV1;
+  }) as ToolSearchResult;
   const showSummary = candidates.length === 0;
   const catalogMessage =
     providers.length > 0
@@ -394,14 +393,14 @@ async function executeToolSearchV1(
 
 function succeededReceipt(
   invocationId: string,
-  context: Parameters<CapabilityExecutorV1['execute']>[1],
-  value: ToolSearchExecutionValueV1,
-): ExecutionReceiptV1 {
+  context: Parameters<CapabilityExecutor['execute']>[1],
+  value: ToolSearchExecutionValue,
+): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: TOOL_SEARCH_PROVIDER_ID_V1,
-    executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_V1,
+    providerId: TOOL_SEARCH_PROVIDER_ID_,
+    executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_,
     requestDigest: context.requestDigest,
     status: 'succeeded',
     dispatchCertainty: 'attempted',
@@ -412,14 +411,14 @@ function succeededReceipt(
 
 function failedReceipt(
   invocationId: string,
-  context: Parameters<CapabilityExecutorV1['execute']>[1],
+  context: Parameters<CapabilityExecutor['execute']>[1],
   code: string,
-): ExecutionReceiptV1 {
+): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
-    providerId: TOOL_SEARCH_PROVIDER_ID_V1,
-    executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_V1,
+    providerId: TOOL_SEARCH_PROVIDER_ID_,
+    executorRevision: TOOL_SEARCH_EXECUTOR_REVISION_,
     requestDigest: context.requestDigest,
     status: 'failed',
     dispatchCertainty: 'none',
@@ -432,7 +431,7 @@ function failedReceipt(
   });
 }
 
-function inventoryRedirect(query: string): RuntimeJsonValueV1 | null {
+function inventoryRedirect(query: string): RuntimeJsonValue | null {
   const normalized = query.trim().slice(0, 512).toLocaleLowerCase();
   const containsMcp = /mcp/i.test(normalized);
   const chineseInventory =
@@ -463,7 +462,7 @@ function inventoryRedirect(query: string): RuntimeJsonValueV1 | null {
   return chineseInventory ? inventoryRedirectValue() : null;
 }
 
-function inventoryRedirectValue(): RuntimeJsonValueV1 {
+function inventoryRedirectValue(): RuntimeJsonValue {
   return Object.freeze({
     ok: false,
     code: 'inventory_query',
@@ -481,18 +480,16 @@ function terms(value: string): string[] {
 }
 
 function asRecord(
-  value: RuntimeJsonValueV1 | undefined,
-): Readonly<Record<string, RuntimeJsonValueV1>> | null {
-  return value && typeof value === 'object' && !isRuntimeJsonArrayV1(value) ? value : null;
+  value: RuntimeJsonValue | undefined,
+): Readonly<Record<string, RuntimeJsonValue>> | null {
+  return value && typeof value === 'object' && !isRuntimeJsonArray(value) ? value : null;
 }
 
-function isRuntimeJsonArrayV1(value: RuntimeJsonValueV1): value is readonly RuntimeJsonValueV1[] {
+function isRuntimeJsonArray(value: RuntimeJsonValue): value is readonly RuntimeJsonValue[] {
   return Array.isArray(value);
 }
 
-function readToolSearchFactsV1(
-  value: RuntimeJsonValueV1 | undefined,
-): ToolSearchProviderFactsV1 | null {
+function readToolSearchFacts(value: RuntimeJsonValue | undefined): ToolSearchProviderFacts | null {
   const record = asRecord(value);
   if (
     record?.schema !== 'kite.builtin-tool-search-facts.v1' ||
@@ -508,5 +505,5 @@ function readToolSearchFactsV1(
   ) {
     return null;
   }
-  return value as ToolSearchProviderFactsV1;
+  return value as ToolSearchProviderFacts;
 }

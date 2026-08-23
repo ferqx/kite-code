@@ -4,8 +4,8 @@ import { findBashBinary, findSystemBash } from './shell-bash-path';
 import type {
   ShellExecutor,
   ShellInput,
-  ShellProcessPortV1,
-  ShellProcessTerminationV1,
+  ShellProcessPort,
+  ShellProcessTermination,
   ShellResult,
 } from './shell-contract';
 import {
@@ -14,9 +14,9 @@ import {
   POLICY_PROVEN_READ_ONLY_EXECUTION,
 } from './trusted-readonly-environment';
 
-type BuiltinShellProcessHandleV1 = ReturnType<ShellProcessPortV1['spawn']>;
-type BuiltinShellProcessTerminationV1 = Awaited<
-  ReturnType<BuiltinShellProcessHandleV1['processTree']['terminate']>
+type BuiltinShellProcessHandle = ReturnType<ShellProcessPort['spawn']>;
+type BuiltinShellProcessTermination = Awaited<
+  ReturnType<BuiltinShellProcessHandle['processTree']['terminate']>
 >;
 
 /** Default hard limit for shell commands when the caller omits timeout_ms. */
@@ -29,14 +29,14 @@ export function resolveShellTimeoutMs(timeoutMs?: number): number {
     : DEFAULT_SHELL_TIMEOUT_MS;
 }
 
-export type HostShellKindV1 = 'bash' | 'cmd' | 'powershell' | 'posix';
+export type HostShellKind = 'bash' | 'cmd' | 'powershell' | 'posix';
 
-export interface HostShellInvocationV1 {
-  kind: HostShellKindV1;
+export interface HostShellInvocation {
+  kind: HostShellKind;
   argv: string[];
 }
 
-export interface HostShellResolutionDepsV1 {
+export interface HostShellResolutionDeps {
   platform: NodeJS.Platform;
   systemRoot: string;
   configuredShell?: string;
@@ -50,10 +50,10 @@ export interface HostShellResolutionDepsV1 {
  * a Workspace-controlled path. Windows keeps fixed or independently located
  * hosts, while POSIX uses the platform /bin/sh directly.
  */
-export function buildPolicyProvenReadOnlyHostShellInvocationsV1(
+export function buildPolicyProvenReadOnlyHostShellInvocations(
   command: string,
   workspace: string,
-  deps: Pick<HostShellResolutionDepsV1, 'platform' | 'systemRoot'> & {
+  deps: Pick<HostShellResolutionDeps, 'platform' | 'systemRoot'> & {
     systemBash?: string | null;
     vendoredBash?: string | null;
     canonicalPathOutsideWorkspace?: (path: string) => boolean;
@@ -63,7 +63,7 @@ export function buildPolicyProvenReadOnlyHostShellInvocationsV1(
     systemBash: process.platform === 'win32' ? findSystemBash() : null,
     vendoredBash: process.platform === 'win32' ? findBashBinary() : null,
   },
-): HostShellInvocationV1[] {
+): HostShellInvocation[] {
   if (deps.platform !== 'win32') {
     return [{ kind: 'posix', argv: ['/bin/sh', '-c', command] }];
   }
@@ -71,7 +71,7 @@ export function buildPolicyProvenReadOnlyHostShellInvocationsV1(
   const outsideWorkspace =
     deps.canonicalPathOutsideWorkspace ??
     ((path: string) => isCanonicalPathOutsideWorkspace(workspace, path));
-  const candidates: HostShellInvocationV1[] = [];
+  const candidates: HostShellInvocation[] = [];
   const seen = new Set<string>();
   for (const bash of [deps.systemBash, deps.vendoredBash]) {
     if (!bash || !outsideWorkspace(bash)) continue;
@@ -106,9 +106,9 @@ export function buildPolicyProvenReadOnlyHostShellInvocationsV1(
  * candidate is attempted only when the previous interpreter could not start;
  * a user command that starts and exits non-zero is never replayed.
  */
-export function buildHostShellInvocationsV1(
+export function buildHostShellInvocations(
   command: string,
-  deps: HostShellResolutionDepsV1 = {
+  deps: HostShellResolutionDeps = {
     platform: process.platform,
     systemRoot: process.env.SystemRoot || 'C:\\Windows',
     configuredShell: process.env.SHELL,
@@ -116,10 +116,10 @@ export function buildHostShellInvocationsV1(
     vendoredBash: process.platform === 'win32' ? findBashBinary() : null,
     which: (name) => Bun.which(name),
   },
-): HostShellInvocationV1[] {
-  const candidates: HostShellInvocationV1[] = [];
+): HostShellInvocation[] {
+  const candidates: HostShellInvocation[] = [];
   const seen = new Set<string>();
-  const add = (kind: HostShellKindV1, argv: string[]) => {
+  const add = (kind: HostShellKind, argv: string[]) => {
     const executable = argv[0];
     if (!executable) return;
     const key = deps.platform === 'win32' ? executable.toLowerCase() : executable;
@@ -194,14 +194,14 @@ export function assertInsideWorkspace(workspace: string, targetPath: string): st
  * port. This keeps invocation, timeout, trusted-read-only environment, and
  * result semantics in Builtin while Host owns spawn/output/tree mechanics.
  */
-export function createBuiltinShellExecutorV1(port: ShellProcessPortV1): ShellExecutor {
+export function createBuiltinShellExecutor(port: ShellProcessPort): ShellExecutor {
   return async function executeBuiltinShell(input: ShellInput): Promise<ShellResult> {
     const timeoutMs = resolveShellTimeoutMs(input.timeoutMs);
     let timedOut = false;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let termination: Promise<BuiltinShellProcessTerminationV1> | undefined;
-    let terminationResult: BuiltinShellProcessTerminationV1 | undefined;
+    let termination: Promise<BuiltinShellProcessTermination> | undefined;
+    let terminationResult: BuiltinShellProcessTermination | undefined;
     const outputStop = new AbortController();
     const terminate = (reason: 'timeout' | 'cancelled') => {
       if (timedOut || cancelled) return;
@@ -214,14 +214,14 @@ export function createBuiltinShellExecutorV1(port: ShellProcessPortV1): ShellExe
       if (timeoutId) clearTimeout(timeoutId);
       terminate('cancelled');
     };
-    let processTree: ReturnType<ShellProcessPortV1['spawn']> | undefined;
+    let processTree: ReturnType<ShellProcessPort['spawn']> | undefined;
     try {
-      let proc: ReturnType<ShellProcessPortV1['spawn']> | undefined;
+      let proc: ReturnType<ShellProcessPort['spawn']> | undefined;
       let lastSpawnError: unknown;
       const policyProvenReadOnly = input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION;
       const candidates = policyProvenReadOnly
-        ? buildPolicyProvenReadOnlyHostShellInvocationsV1(input.command, input.workspace)
-        : buildHostShellInvocationsV1(input.command);
+        ? buildPolicyProvenReadOnlyHostShellInvocations(input.command, input.workspace)
+        : buildHostShellInvocations(input.command);
       const trustedEnv = policyProvenReadOnly
         ? buildPolicyProvenReadOnlyEnv(input.workspace)
         : undefined;
@@ -341,7 +341,7 @@ function appendTerminalMessage(stderr: string, message: string): string {
 }
 
 function processCleanupResult(
-  result: ShellProcessTerminationV1,
+  result: ShellProcessTermination,
 ): NonNullable<ShellResult['processCleanup']> {
   return {
     confirmedExited: result.confirmedExited,

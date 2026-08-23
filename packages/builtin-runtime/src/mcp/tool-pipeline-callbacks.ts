@@ -1,56 +1,56 @@
 import type { CapabilityDescriptor as RuntimeCapabilityDescriptor } from '@kite/runtime-contract';
 import type {
-  CapabilityApprovalV1,
-  CapabilityBindingV1,
-  CapabilityEffectsV1,
-  CapabilityPolicyCompilationV1,
-  ClassifiedInvocationV1,
-  DynamicMcpPreparedToolInvocationIdentityV1,
-  DynamicMcpRuntimeWrapperIdentityV1,
-  DynamicMcpSubjectIdentityV1,
-  DynamicMcpToolTargetV1,
-  PreparedToolInvocationV1,
-  ResolvedInvocationV1,
-  RuntimeJsonValueV1,
-  ToolArgumentOriginV1,
-  ToolCallSnapshotV1,
-  ToolClassificationResultV1,
-  ToolPipelineCapabilityBindingV1,
-  ToolPipelineCapabilityDescriptorV1,
-  ToolPipelineClassifiedIdentityVerificationResultV1,
-  ToolPipelineClassifiedIdentityVerifierV1,
-  ToolPipelineGovernanceProjectionV1,
-  ToolPipelinePreparedIdentityVerificationResultV1,
-  ToolPipelinePreparedIdentityVerifierV1,
-  ToolPipelineResolutionContextV1,
-  ToolPipelineResolveFailureCodeV1,
-  ToolPipelineValidateFailureCodeV1,
-  ToolResolutionResultV1,
-  ToolValidationResultV1,
-  ValidatedInvocationV1,
+  CapabilityApproval,
+  CapabilityBinding,
+  CapabilityEffects,
+  CapabilityPolicyCompilation,
+  ClassifiedInvocation,
+  DynamicMcpPreparedToolInvocationIdentity,
+  DynamicMcpRuntimeWrapperIdentity,
+  DynamicMcpSubjectIdentity,
+  DynamicMcpToolTarget,
+  PreparedToolInvocation,
+  ResolvedInvocation,
+  RuntimeJsonValue,
+  ToolArgumentOrigin,
+  ToolCallSnapshot,
+  ToolClassificationResult,
+  ToolPipelineCapabilityBinding,
+  ToolPipelineCapabilityDescriptor,
+  ToolPipelineClassifiedIdentityVerificationResult,
+  ToolPipelineClassifiedIdentityVerifier,
+  ToolPipelineGovernanceProjection,
+  ToolPipelinePreparedIdentityVerificationResult,
+  ToolPipelinePreparedIdentityVerifier,
+  ToolPipelineResolutionContext,
+  ToolPipelineResolveFailureCode,
+  ToolPipelineValidateFailureCode,
+  ToolResolutionResult,
+  ToolValidationResult,
+  ValidatedInvocation,
 } from '@kite/runtime-spi';
 import {
-  CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
-  TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  CAPABILITY_POLICY_COMPILATION_SCHEMA_,
+  TOOL_PIPELINE_STAGE_SCHEMA_,
 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from '../capability-binding';
+import { digestCapabilityBindingValue } from '../capability-binding';
 import {
-  BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
-  compileBuiltinDynamicMcpPolicyV1,
+  BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
+  compileBuiltinDynamicMcpPolicy,
 } from '../policy-compiler';
 import type {
-  BuiltinInternalOperationCatalogEntryV1,
-  BuiltinToolCatalogProjectionV1,
+  BuiltinInternalOperationCatalogEntry,
+  BuiltinToolCatalogProjection,
 } from '../tool-catalog';
-import { canonicalizeCapabilityArguments as canonicalizeCapabilityArgumentsV1 } from './capability-domain';
+import { canonicalizeCapabilityArguments } from './capability-domain';
 
 /** Stable JSON facts carried from MCP resolution to Host prepared identity. */
-export const BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1 =
+export const BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_ =
   'kite.builtin-runtime.dynamic-mcp-subject-facts.v1' as const;
-const SHA256_HEX_V1 = /^[0-9a-f]{64}$/u;
+const SHA256_HEX_ = /^[0-9a-f]{64}$/u;
 
-export interface BuiltinDynamicMcpSubjectFactsV1 {
-  readonly schema: typeof BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1;
+export interface BuiltinDynamicMcpSubjectFacts {
+  readonly schema: typeof BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_;
   readonly capabilityId: string;
   readonly capabilityRevision: string;
   readonly descriptorRevision: string;
@@ -61,36 +61,36 @@ export interface BuiltinDynamicMcpSubjectFactsV1 {
   readonly exposedToolName: `mcp__${string}`;
   readonly availability: 'available';
   readonly schemaDigest: string;
-  readonly effectiveEffects: CapabilityEffectsV1;
+  readonly effectiveEffects: CapabilityEffects;
   readonly effectiveEffectsDigest: string;
-  readonly minimumApproval: CapabilityApprovalV1;
+  readonly minimumApproval: CapabilityApproval;
   readonly dynamicCatalogRevision: string;
   readonly bindingId: string;
   readonly issuedForTurnId: string;
   readonly callCreatedAtTurnId: string;
   readonly modelMessageId: string;
-  readonly argumentOrigin: Extract<ToolArgumentOriginV1, 'model_public'>;
+  readonly argumentOrigin: Extract<ToolArgumentOrigin, 'model_public'>;
   readonly descriptor: Readonly<RuntimeCapabilityDescriptor>;
 }
 
-export interface BuiltinDynamicMcpSubjectFactsIdentityV1 {
+export interface BuiltinDynamicMcpSubjectFactsIdentity {
   readonly dynamicCatalogRevision: string;
   readonly bindingId: string;
   readonly issuedForTurnId: string;
   readonly callCreatedAtTurnId: string;
   readonly modelMessageId: string;
-  readonly argumentOrigin: Extract<ToolArgumentOriginV1, 'model_public'>;
+  readonly argumentOrigin: Extract<ToolArgumentOrigin, 'model_public'>;
 }
 
-export interface BuiltinDynamicMcpToolPipelineCallbacksV1 {
+export interface BuiltinDynamicMcpToolPipelineCallbacks {
   readonly resolve: (
-    call: Readonly<ToolCallSnapshotV1>,
-    context: Readonly<ToolPipelineResolutionContextV1>,
-  ) => ToolResolutionResultV1;
-  readonly validate: (resolved: Readonly<ResolvedInvocationV1>) => ToolValidationResultV1;
-  readonly classify: (validated: Readonly<ValidatedInvocationV1>) => ToolClassificationResultV1;
-  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1;
-  readonly verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifierV1;
+    call: Readonly<ToolCallSnapshot>,
+    context: Readonly<ToolPipelineResolutionContext>,
+  ) => ToolResolutionResult;
+  readonly validate: (resolved: Readonly<ResolvedInvocation>) => ToolValidationResult;
+  readonly classify: (validated: Readonly<ValidatedInvocation>) => ToolClassificationResult;
+  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier;
+  readonly verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifier;
 }
 
 /**
@@ -98,49 +98,44 @@ export interface BuiltinDynamicMcpToolPipelineCallbacksV1 {
  * frozen Builtin projection. The callback owns no MCP runtime, registry,
  * executor, Store, Host, Kernel, or App object.
  */
-export function createBuiltinDynamicMcpToolPipelineCallbacksV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-): BuiltinDynamicMcpToolPipelineCallbacksV1 {
-  const wrapper = captureDynamicMcpWrapperV1(projection);
-  const classifiedAuthenticityV1 = new WeakSet<object>();
+export function createBuiltinDynamicMcpToolPipelineCallbacks(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+): BuiltinDynamicMcpToolPipelineCallbacks {
+  const wrapper = captureDynamicMcpWrapper(projection);
+  const classifiedAuthenticity = new WeakSet<object>();
 
-  const callbacks: BuiltinDynamicMcpToolPipelineCallbacksV1 = {
-    resolve: (call, context) => resolveDynamicMcpV1(projection, wrapper, call, context),
-    validate: (resolved) => validateDynamicMcpV1(projection, wrapper, resolved),
+  const callbacks: BuiltinDynamicMcpToolPipelineCallbacks = {
+    resolve: (call, context) => resolveDynamicMcp(projection, wrapper, call, context),
+    validate: (resolved) => validateDynamicMcp(projection, wrapper, resolved),
     classify: (validated) =>
-      classifyDynamicMcpV1(projection, wrapper, classifiedAuthenticityV1, validated),
+      classifyDynamicMcp(projection, wrapper, classifiedAuthenticity, validated),
     verifyPreparedIdentity: (prepared) =>
-      verifyPreparedDynamicMcpIdentityV1(projection, wrapper, prepared),
+      verifyPreparedDynamicMcpIdentity(projection, wrapper, prepared),
     verifyClassifiedIdentity: (classified) =>
-      verifyClassifiedDynamicMcpIdentityV1(
-        projection,
-        wrapper,
-        classifiedAuthenticityV1,
-        classified,
-      ),
+      verifyClassifiedDynamicMcpIdentity(projection, wrapper, classifiedAuthenticity, classified),
   };
   return Object.freeze(callbacks);
 }
 
-function captureDynamicMcpWrapperV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-): BuiltinInternalOperationCatalogEntryV1 {
-  assertFrozenProjectionV1(projection);
+function captureDynamicMcpWrapper(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+): BuiltinInternalOperationCatalogEntry {
+  assertFrozenProjection(projection);
   const matches = projection.entries.filter(
-    (entry): entry is BuiltinInternalOperationCatalogEntryV1 =>
-      entry.visibility === 'internal' && entry.operationId === BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+    (entry): entry is BuiltinInternalOperationCatalogEntry =>
+      entry.visibility === 'internal' && entry.operationId === BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
   );
   if (matches.length !== 1) {
     throw new Error('Builtin dynamic MCP callback requires one internal wrapper operation.');
   }
   const wrapper = matches[0]!;
   if (
-    wrapper.capabilityId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 ||
+    wrapper.capabilityId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_ ||
     wrapper.executionMechanism !== 'mcp' ||
     wrapper.kind !== 'internal_runtime' ||
     wrapper.executorRevision.length === 0 ||
     !wrapper.inputSchema ||
-    !isJsonRecordV1(wrapper.inputSchema) ||
+    !isJsonRecord(wrapper.inputSchema) ||
     wrapper.providerId.length === 0 ||
     wrapper.revision.length === 0 ||
     wrapper.descriptor.kind !== 'internal_runtime' ||
@@ -149,7 +144,7 @@ function captureDynamicMcpWrapperV1(
   ) {
     throw new Error('Builtin dynamic MCP wrapper identity is invalid.');
   }
-  const wrapperSchemaDigest = digestCapabilityBindingValueV1(wrapper.inputSchema);
+  const wrapperSchemaDigest = digestCapabilityBindingValue(wrapper.inputSchema);
   if (wrapper.inputSchemaDigest && wrapper.inputSchemaDigest !== wrapperSchemaDigest) {
     throw new Error('Builtin dynamic MCP wrapper schema identity is invalid.');
   }
@@ -162,85 +157,85 @@ function captureDynamicMcpWrapperV1(
   return wrapper;
 }
 
-function resolveDynamicMcpV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  wrapper: BuiltinInternalOperationCatalogEntryV1,
-  call: Readonly<ToolCallSnapshotV1>,
-  context: Readonly<ToolPipelineResolutionContextV1>,
-): ToolResolutionResultV1 {
-  if (call.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 || call.stage !== 'snapshot') {
-    return resolveFailureV1('invalid_stage_input', null, null);
+function resolveDynamicMcp(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  wrapper: BuiltinInternalOperationCatalogEntry,
+  call: Readonly<ToolCallSnapshot>,
+  context: Readonly<ToolPipelineResolutionContext>,
+): ToolResolutionResult {
+  if (call.schema !== TOOL_PIPELINE_STAGE_SCHEMA_ || call.stage !== 'snapshot') {
+    return resolveFailure('invalid_stage_input', null, null);
   }
-  if (!validDynamicResolutionContextV1(projection, context)) {
-    return resolveFailureV1('resolution_context_invalid', call.toolCallId, call.name);
+  if (!validDynamicResolutionContext(projection, context)) {
+    return resolveFailure('resolution_context_invalid', call.toolCallId, call.name);
   }
   const dynamicCatalogRevision = context.dynamicCatalogRevision;
   if (typeof dynamicCatalogRevision !== 'string') {
-    return resolveFailureV1('resolution_context_invalid', call.toolCallId, call.name);
+    return resolveFailure('resolution_context_invalid', call.toolCallId, call.name);
   }
   if (call.createdAtTurnId !== context.currentTurnId) {
-    return resolveFailureV1('call_turn_mismatch', call.toolCallId, call.name);
+    return resolveFailure('call_turn_mismatch', call.toolCallId, call.name);
   }
   if (call.argumentOrigin !== 'model_public') {
-    return resolveFailureV1('unknown_tool', call.toolCallId, call.name);
+    return resolveFailure('unknown_tool', call.toolCallId, call.name);
   }
   if (!call.name.startsWith('mcp__') || call.name.length <= 'mcp__'.length) {
-    return resolveFailureV1('unknown_tool', call.toolCallId, call.name);
+    return resolveFailure('unknown_tool', call.toolCallId, call.name);
   }
   if (!call.bindingId || !call.capabilityId || !call.capabilityRevision) {
-    return resolveFailureV1('binding_missing', call.toolCallId, call.name);
+    return resolveFailure('binding_missing', call.toolCallId, call.name);
   }
 
-  const binding = uniqueMatchV1(
+  const binding = uniqueMatch(
     context.bindings,
     (candidate) => candidate.bindingId === call.bindingId,
   );
   if (binding === 'duplicate') {
-    return resolveFailureV1('resolution_context_invalid', call.toolCallId, call.name);
+    return resolveFailure('resolution_context_invalid', call.toolCallId, call.name);
   }
-  if (!binding) return resolveFailureV1('binding_missing', call.toolCallId, call.name);
+  if (!binding) return resolveFailure('binding_missing', call.toolCallId, call.name);
   if (
     binding.bindingId !== call.bindingId ||
     binding.capabilityId !== call.capabilityId ||
     binding.capabilityRevision !== call.capabilityRevision
   ) {
-    return resolveFailureV1('binding_identity_mismatch', call.toolCallId, call.name);
+    return resolveFailure('binding_identity_mismatch', call.toolCallId, call.name);
   }
   if (binding.issuedForTurnId !== call.createdAtTurnId) {
-    return resolveFailureV1('binding_turn_mismatch', call.toolCallId, call.name);
+    return resolveFailure('binding_turn_mismatch', call.toolCallId, call.name);
   }
   if (binding.exposedToolName !== call.name || !binding.exposedToolName.startsWith('mcp__')) {
-    return resolveFailureV1('binding_name_mismatch', call.toolCallId, call.name);
+    return resolveFailure('binding_name_mismatch', call.toolCallId, call.name);
   }
-  if (!validBindingIdV1(binding)) {
-    return resolveFailureV1('binding_identity_mismatch', call.toolCallId, call.name);
+  if (!validBindingId(binding)) {
+    return resolveFailure('binding_identity_mismatch', call.toolCallId, call.name);
   }
 
-  const descriptor = uniqueMatchV1(
+  const descriptor = uniqueMatch(
     context.descriptors,
     (candidate) => candidate.capabilityId === binding.capabilityId,
   );
   if (descriptor === 'duplicate') {
-    return resolveFailureV1('resolution_context_invalid', call.toolCallId, call.name);
+    return resolveFailure('resolution_context_invalid', call.toolCallId, call.name);
   }
-  if (!descriptor) return resolveFailureV1('descriptor_missing', call.toolCallId, call.name);
+  if (!descriptor) return resolveFailure('descriptor_missing', call.toolCallId, call.name);
   if (descriptor.revision !== binding.capabilityRevision) {
-    return resolveFailureV1('descriptor_revision_mismatch', call.toolCallId, call.name);
+    return resolveFailure('descriptor_revision_mismatch', call.toolCallId, call.name);
   }
-  if (!isDynamicMcpSubjectDescriptorV1(descriptor)) {
-    return resolveFailureV1('descriptor_kind_mismatch', call.toolCallId, call.name);
+  if (!isDynamicMcpSubjectDescriptor(descriptor)) {
+    return resolveFailure('descriptor_kind_mismatch', call.toolCallId, call.name);
   }
   if (descriptor.availability !== 'available') {
-    return resolveFailureV1('descriptor_unavailable', call.toolCallId, call.name);
+    return resolveFailure('descriptor_unavailable', call.toolCallId, call.name);
   }
-  if (!descriptor.inputSchema || !isJsonRecordV1(descriptor.inputSchema)) {
-    return resolveFailureV1('descriptor_revision_mismatch', call.toolCallId, call.name);
+  if (!descriptor.inputSchema || !isJsonRecord(descriptor.inputSchema)) {
+    return resolveFailure('descriptor_revision_mismatch', call.toolCallId, call.name);
   }
-  if (digestCapabilityBindingValueV1(descriptor.inputSchema) !== binding.schemaDigest) {
-    return resolveFailureV1('binding_identity_mismatch', call.toolCallId, call.name);
+  if (digestCapabilityBindingValue(descriptor.inputSchema) !== binding.schemaDigest) {
+    return resolveFailure('binding_identity_mismatch', call.toolCallId, call.name);
   }
 
-  const subject = freezeDynamicSubjectV1({
+  const subject = freezeDynamicSubject({
     capabilityId: descriptor.capabilityId,
     capabilityRevision: descriptor.revision,
     descriptorRevision: descriptor.revision,
@@ -249,11 +244,11 @@ function resolveDynamicMcpV1(
     dynamicCatalogRevision,
     bindingId: binding.bindingId,
   });
-  const runtimeWrapper = freezeRuntimeWrapperV1(projection, wrapper);
-  const target: Readonly<DynamicMcpToolTargetV1> = Object.freeze({
+  const runtimeWrapper = freezeRuntimeWrapper(projection, wrapper);
+  const target: Readonly<DynamicMcpToolTarget> = Object.freeze({
     executionFamily: 'mcp' as const,
     executionMechanism: 'mcp' as const,
-    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
     visibility: 'internal' as const,
     modelVisible: false as const,
     exposedToolName: null,
@@ -264,88 +259,84 @@ function resolveDynamicMcpV1(
     descriptorRevision: descriptor.revision,
     providerId: descriptor.provider.id,
     executorRevision: null,
-    binding: freezeBindingV1(binding),
-    descriptor: freezeRuntimeDescriptorV1(descriptor),
+    binding: freezeBinding(binding),
+    descriptor: freezeRuntimeDescriptor(descriptor),
     builtinProjectionRevision: null,
     dynamicCatalogRevision,
     subject,
     runtimeWrapper,
   });
-  return successV1({
-    schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  return success({
+    schema: TOOL_PIPELINE_STAGE_SCHEMA_,
     stage: 'resolved' as const,
-    call: freezeToolCallV1(call),
+    call: freezeToolCall(call),
     target,
-    availabilityContext: freezeAvailabilityContextV1(context.availabilityContext),
+    availabilityContext: freezeAvailabilityContext(context.availabilityContext),
     builtinProjectionRevision: projection.revision,
     dynamicCatalogRevision,
-    disclosedCapabilities: freezeJsonArrayV1(context.descriptors),
-    disclosures: freezeJsonArrayV1(context.disclosures ?? []),
+    disclosedCapabilities: freezeJsonArray(context.descriptors),
+    disclosures: freezeJsonArray(context.disclosures ?? []),
   });
 }
 
-function validateDynamicMcpV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  wrapper: BuiltinInternalOperationCatalogEntryV1,
-  resolved: Readonly<ResolvedInvocationV1>,
-): ToolValidationResultV1 {
-  const target = resolved?.target as Readonly<DynamicMcpToolTargetV1>;
+function validateDynamicMcp(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  wrapper: BuiltinInternalOperationCatalogEntry,
+  resolved: Readonly<ResolvedInvocation>,
+): ToolValidationResult {
+  const target = resolved?.target as Readonly<DynamicMcpToolTarget>;
   if (
     !resolved ||
-    resolved.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 ||
+    resolved.schema !== TOOL_PIPELINE_STAGE_SCHEMA_ ||
     resolved.stage !== 'resolved'
   ) {
-    return validationFailureV1('invalid_stage_input', null, null);
+    return validationFailure('invalid_stage_input', null, null);
   }
-  if (!validResolvedDynamicMcpV1(projection, wrapper, resolved)) {
-    return validationFailureV1(
-      'stage_identity_drift',
-      resolved.call.toolCallId,
-      resolved.call.name,
-    );
+  if (!validResolvedDynamicMcp(projection, wrapper, resolved)) {
+    return validationFailure('stage_identity_drift', resolved.call.toolCallId, resolved.call.name);
   }
   const binding = target.binding;
   const descriptor = target.descriptor as unknown as RuntimeCapabilityDescriptor;
-  if (!binding || !descriptor.inputSchema || !isJsonRecordV1(descriptor.inputSchema)) {
-    return validationFailureV1('schema_missing', resolved.call.toolCallId, resolved.call.name);
+  if (!binding || !descriptor.inputSchema || !isJsonRecord(descriptor.inputSchema)) {
+    return validationFailure('schema_missing', resolved.call.toolCallId, resolved.call.name);
   }
-  const schemaDigest = digestCapabilityBindingValueV1(descriptor.inputSchema);
+  const schemaDigest = digestCapabilityBindingValue(descriptor.inputSchema);
   if (binding.schemaDigest !== schemaDigest) {
-    return validationFailureV1(
+    return validationFailure(
       'schema_digest_mismatch',
       resolved.call.toolCallId,
       resolved.call.name,
     );
   }
-  const canonical = canonicalizeCapabilityArgumentsV1(
+  const canonical = canonicalizeCapabilityArguments(
     descriptor.inputSchema,
     resolved.call.rawArguments,
   );
   if (!canonical.ok) {
-    return validationFailureV1(
+    return validationFailure(
       'invalid_arguments',
       resolved.call.toolCallId,
       resolved.call.name,
-      boundedDiagnosticV1(canonical.diagnostic),
+      boundedDiagnostic(canonical.diagnostic),
     );
   }
-  const canonicalValue = canonical.args as unknown as RuntimeJsonValueV1;
-  if (!isJsonValueV1(canonicalValue)) {
-    return validationFailureV1(
+  const canonicalValue = canonical.args as unknown as RuntimeJsonValue;
+  if (!isJsonValue(canonicalValue)) {
+    return validationFailure(
       'arguments_not_canonical_json',
       resolved.call.toolCallId,
       resolved.call.name,
     );
   }
-  const argumentsValue = freezeJsonV1(canonicalValue);
-  if (!isJsonRecordV1(argumentsValue)) {
-    return validationFailureV1(
+  const argumentsValue = freezeJson(canonicalValue);
+  if (!isJsonRecord(argumentsValue)) {
+    return validationFailure(
       'arguments_not_canonical_json',
       resolved.call.toolCallId,
       resolved.call.name,
     );
   }
-  const subjectFacts = createBuiltinDynamicMcpSubjectFactsV1(
+  const subjectFacts = createBuiltinDynamicMcpSubjectFacts(
     descriptor as unknown as RuntimeCapabilityDescriptor,
     resolved.call.name as `mcp__${string}`,
     {
@@ -359,88 +350,88 @@ function validateDynamicMcpV1(
   );
   const request = Object.freeze({
     source: 'mcp' as const,
-    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
     name: resolved.call.name,
     arguments: argumentsValue,
-    argumentsDigest: digestCapabilityBindingValueV1(argumentsValue),
+    argumentsDigest: digestCapabilityBindingValue(argumentsValue),
     schemaDigest,
-    approvalSummary: boundedDiagnosticV1(resolved.call.name),
+    approvalSummary: boundedDiagnostic(resolved.call.name),
   });
-  return successV1({
-    schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  return success({
+    schema: TOOL_PIPELINE_STAGE_SCHEMA_,
     stage: 'validated' as const,
     resolved,
     request,
     nestedCapability: null,
-    domainData: subjectFacts as unknown as RuntimeJsonValueV1,
+    domainData: subjectFacts as unknown as RuntimeJsonValue,
   });
 }
 
-function classifyDynamicMcpV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  wrapper: BuiltinInternalOperationCatalogEntryV1,
-  classifiedAuthenticityV1: WeakSet<object>,
-  validated: Readonly<ValidatedInvocationV1>,
-): ToolClassificationResultV1 {
+function classifyDynamicMcp(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  wrapper: BuiltinInternalOperationCatalogEntry,
+  classifiedAuthenticity: WeakSet<object>,
+  validated: Readonly<ValidatedInvocation>,
+): ToolClassificationResult {
   if (
     !validated ||
-    validated.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 ||
+    validated.schema !== TOOL_PIPELINE_STAGE_SCHEMA_ ||
     validated.stage !== 'validated'
   ) {
-    return classifyFailureV1('invalid_stage_input', null, null);
+    return classifyFailure('invalid_stage_input', null, null);
   }
   const resolved = validated.resolved;
-  const target = resolved.target as Readonly<DynamicMcpToolTargetV1>;
+  const target = resolved.target as Readonly<DynamicMcpToolTarget>;
   if (
-    !validResolvedDynamicMcpV1(projection, wrapper, resolved) ||
+    !validResolvedDynamicMcp(projection, wrapper, resolved) ||
     validated.request.source !== 'mcp' ||
-    validated.request.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 ||
+    validated.request.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_ ||
     validated.request.name !== target.subject.exposedToolName ||
-    validated.request.schemaDigest !== digestCapabilityBindingValueV1(target.descriptor.inputSchema)
+    validated.request.schemaDigest !== digestCapabilityBindingValue(target.descriptor.inputSchema)
   ) {
-    return classifyFailureV1(
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const argumentsDigest = digestCapabilityBindingValueV1(validated.request.arguments);
+  const argumentsDigest = digestCapabilityBindingValue(validated.request.arguments);
   if (validated.request.argumentsDigest !== argumentsDigest) {
-    return classifyFailureV1(
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
   const descriptor = target.descriptor as unknown as RuntimeCapabilityDescriptor;
-  if (!descriptor.inputSchema || !isJsonRecordV1(descriptor.inputSchema)) {
-    return classifyFailureV1(
+  if (!descriptor.inputSchema || !isJsonRecord(descriptor.inputSchema)) {
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const recanonical = canonicalizeCapabilityArgumentsV1(
+  const recanonical = canonicalizeCapabilityArguments(
     descriptor.inputSchema,
     validated.request.arguments,
   );
   if (
     !recanonical.ok ||
-    !isJsonValueV1(recanonical.args) ||
-    !isJsonRecordV1(recanonical.args) ||
-    digestCapabilityBindingValueV1(recanonical.args) !== argumentsDigest
+    !isJsonValue(recanonical.args) ||
+    !isJsonRecord(recanonical.args) ||
+    digestCapabilityBindingValue(recanonical.args) !== argumentsDigest
   ) {
-    return classifyFailureV1(
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const effects = freezeEffectsV1(descriptor.effectiveEffects);
-  let policyCompilation: CapabilityPolicyCompilationV1;
+  const effects = freezeEffects(descriptor.effectiveEffects);
+  let policyCompilation: CapabilityPolicyCompilation;
   try {
-    policyCompilation = compileBuiltinDynamicMcpPolicyV1({
-      operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+    policyCompilation = compileBuiltinDynamicMcpPolicy({
+      operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
       capabilityRevision: descriptor.revision,
       parserRevision: validated.request.schemaDigest,
       exposedToolName: target.subject.exposedToolName,
@@ -450,33 +441,33 @@ function classifyDynamicMcpV1(
       workspace: resolved.availabilityContext.workspace,
     });
   } catch {
-    return classifyFailureV1(
+    return classifyFailure(
       'classification_unavailable',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const effectsDigest = digestCapabilityBindingValueV1(effects);
+  const effectsDigest = digestCapabilityBindingValue(effects);
   if (
-    policyCompilation.schema !== CAPABILITY_POLICY_COMPILATION_SCHEMA_V1 ||
-    policyCompilation.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 ||
+    policyCompilation.schema !== CAPABILITY_POLICY_COMPILATION_SCHEMA_ ||
+    policyCompilation.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_ ||
     policyCompilation.capabilityRevision !== descriptor.revision ||
     policyCompilation.parserRevision !== validated.request.schemaDigest ||
     policyCompilation.minimumApproval !== descriptor.policy.minimumApproval ||
-    digestCapabilityBindingValueV1(policyCompilation.effectiveEffects) !== effectsDigest
+    digestCapabilityBindingValue(policyCompilation.effectiveEffects) !== effectsDigest
   ) {
-    return classifyFailureV1(
+    return classifyFailure(
       'classification_unavailable',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const capability = capabilityFromEffectsV1(effects);
-  const sideEffect = capability.sideEffect || hasMutationOrUnknownEffectV1(effects);
-  const effectiveRisk = riskForDynamicEffectsV1(capability.effectClass, effects);
-  const requirements = invocationRequirementsV1(descriptor, sideEffect, effects);
-  const frozenPolicyCompilation = freezePolicyCompilationV1(policyCompilation);
-  const governance = createDynamicGovernanceProjectionV1(
+  const capability = capabilityFromEffects(effects);
+  const sideEffect = capability.sideEffect || hasMutationOrUnknownEffect(effects);
+  const effectiveRisk = riskForDynamicEffects(capability.effectClass, effects);
+  const requirements = invocationRequirements(descriptor, sideEffect, effects);
+  const frozenPolicyCompilation = freezePolicyCompilation(policyCompilation);
+  const governance = createDynamicGovernanceProjection(
     projection,
     wrapper,
     resolved,
@@ -486,14 +477,14 @@ function classifyDynamicMcpV1(
     effectsDigest,
   );
   if (!governance) {
-    return classifyFailureV1(
+    return classifyFailure(
       'classification_unavailable',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const classified: ClassifiedInvocationV1 = {
-    schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  const classified: ClassifiedInvocation = {
+    schema: TOOL_PIPELINE_STAGE_SCHEMA_,
     stage: 'classified' as const,
     validated,
     descriptor,
@@ -508,21 +499,21 @@ function classifyDynamicMcpV1(
     executionTraits: null,
     requirements,
   };
-  classifiedAuthenticityV1.add(classified);
-  return successV1(classified);
+  classifiedAuthenticity.add(classified);
+  return success(classified);
 }
 
-function createDynamicGovernanceProjectionV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  wrapper: BuiltinInternalOperationCatalogEntryV1,
-  resolved: Readonly<ResolvedInvocationV1>,
-  validated: Readonly<ValidatedInvocationV1>,
-  policyCompilation: Readonly<CapabilityPolicyCompilationV1>,
-  effectiveEffects: Readonly<CapabilityEffectsV1>,
+function createDynamicGovernanceProjection(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  wrapper: BuiltinInternalOperationCatalogEntry,
+  resolved: Readonly<ResolvedInvocation>,
+  validated: Readonly<ValidatedInvocation>,
+  policyCompilation: Readonly<CapabilityPolicyCompilation>,
+  effectiveEffects: Readonly<CapabilityEffects>,
   effectiveEffectsDigest: string,
-): Readonly<ToolPipelineGovernanceProjectionV1> | null {
-  if (!validResolvedDynamicMcpV1(projection, wrapper, resolved)) return null;
-  const target = resolved.target as Readonly<DynamicMcpToolTargetV1>;
+): Readonly<ToolPipelineGovernanceProjection> | null {
+  if (!validResolvedDynamicMcp(projection, wrapper, resolved)) return null;
+  const target = resolved.target as Readonly<DynamicMcpToolTarget>;
   const descriptor = target.descriptor as Readonly<RuntimeCapabilityDescriptor>;
   const subject = target.subject;
   const runtimeWrapper = target.runtimeWrapper;
@@ -562,7 +553,7 @@ function createDynamicGovernanceProjectionV1(
     subject,
     runtimeWrapper,
     minimumApproval: descriptor.policy.minimumApproval,
-    readOnly: readOnlyPolicyV1(policyCompilation),
+    readOnly: readOnlyPolicy(policyCompilation),
   });
   return Object.freeze({
     invocation,
@@ -574,28 +565,28 @@ function createDynamicGovernanceProjectionV1(
   });
 }
 
-function readOnlyPolicyV1(policy: Readonly<CapabilityPolicyCompilationV1>): boolean {
+function readOnlyPolicy(policy: Readonly<CapabilityPolicyCompilation>): boolean {
   return policy.decision === 'allow' && policy.risk === 'read';
 }
 
-function verifyClassifiedDynamicMcpIdentityV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  wrapper: BuiltinInternalOperationCatalogEntryV1,
-  classifiedAuthenticityV1: WeakSet<object>,
-  classified: Readonly<ClassifiedInvocationV1>,
-): ToolPipelineClassifiedIdentityVerificationResultV1 {
+function verifyClassifiedDynamicMcpIdentity(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  wrapper: BuiltinInternalOperationCatalogEntry,
+  classifiedAuthenticity: WeakSet<object>,
+  classified: Readonly<ClassifiedInvocation>,
+): ToolPipelineClassifiedIdentityVerificationResult {
   if (
     !classified ||
     typeof classified !== 'object' ||
-    !classifiedAuthenticityV1.has(classified as object)
+    !classifiedAuthenticity.has(classified as object)
   ) {
-    return invalidClassifiedIdentityV1('governance_missing');
+    return invalidClassifiedIdentity('governance_missing');
   }
   const governance = classified.governance;
   const validated = classified.validated;
   const resolved = validated?.resolved;
   if (
-    classified.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 ||
+    classified.schema !== TOOL_PIPELINE_STAGE_SCHEMA_ ||
     classified.stage !== 'classified' ||
     !governance ||
     !validated ||
@@ -604,12 +595,12 @@ function verifyClassifiedDynamicMcpIdentityV1(
     governance.invocation.isDynamicMcp !== true ||
     !governance.dynamicMcp
   ) {
-    return invalidClassifiedIdentityV1('invocation_mismatch');
+    return invalidClassifiedIdentity('invocation_mismatch');
   }
-  if (!validResolvedDynamicMcpV1(projection, wrapper, resolved)) {
-    return invalidClassifiedIdentityV1('invocation_mismatch');
+  if (!validResolvedDynamicMcp(projection, wrapper, resolved)) {
+    return invalidClassifiedIdentity('invocation_mismatch');
   }
-  const target = resolved.target as Readonly<DynamicMcpToolTargetV1>;
+  const target = resolved.target as Readonly<DynamicMcpToolTarget>;
   const descriptor = target.descriptor as Readonly<RuntimeCapabilityDescriptor>;
   const subject = target.subject;
   const invocation = governance.invocation;
@@ -643,47 +634,47 @@ function verifyClassifiedDynamicMcpIdentityV1(
     invocation.subject !== subject ||
     invocation.runtimeWrapper !== target.runtimeWrapper
   ) {
-    return invalidClassifiedIdentityV1('invocation_mismatch');
+    return invalidClassifiedIdentity('invocation_mismatch');
   }
   if (
     governance.policy !== classified.policyCompilation ||
     governance.effectiveEffects !== classified.effectiveEffects ||
     governance.effectiveEffectsDigest !== classified.effectiveEffectsDigest
   ) {
-    return invalidClassifiedIdentityV1('effects_mismatch');
+    return invalidClassifiedIdentity('effects_mismatch');
   }
   if (
     governance.nestedSkill !== null ||
     governance.dynamicMcp.subject !== subject ||
     governance.dynamicMcp.runtimeWrapper !== target.runtimeWrapper ||
     governance.dynamicMcp.minimumApproval !== descriptor.policy.minimumApproval ||
-    governance.dynamicMcp.readOnly !== readOnlyPolicyV1(classified.policyCompilation) ||
+    governance.dynamicMcp.readOnly !== readOnlyPolicy(classified.policyCompilation) ||
     !Object.isFrozen(governance) ||
     !Object.isFrozen(governance.invocation) ||
     !Object.isFrozen(governance.dynamicMcp) ||
     !Object.isFrozen(governance.effectiveEffects) ||
     !Object.isFrozen(governance.policy)
   ) {
-    return invalidClassifiedIdentityV1('dynamic_subject_mismatch');
+    return invalidClassifiedIdentity('dynamic_subject_mismatch');
   }
   return Object.freeze({ valid: true });
 }
 
-function verifyPreparedDynamicMcpIdentityV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  wrapper: BuiltinInternalOperationCatalogEntryV1,
-  prepared: Readonly<PreparedToolInvocationV1>,
-): ToolPipelinePreparedIdentityVerificationResultV1 {
+function verifyPreparedDynamicMcpIdentity(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  wrapper: BuiltinInternalOperationCatalogEntry,
+  prepared: Readonly<PreparedToolInvocation>,
+): ToolPipelinePreparedIdentityVerificationResult {
   const identity = prepared?.identity;
   const input = prepared?.input;
   if (!identity || !input || typeof identity !== 'object' || typeof input !== 'object') {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
-  if (!isDynamicIdentityShapeV1(identity)) return invalidIdentityV1('visibility_mismatch');
+  if (!isDynamicIdentityShape(identity)) return invalidIdentity('visibility_mismatch');
   const runtimeWrapper = identity.runtimeWrapper;
-  const expectedWrapper = freezeRuntimeWrapperV1(projection, wrapper);
-  if (!sameDynamicWrapperV1(runtimeWrapper, expectedWrapper)) {
-    return invalidIdentityV1('runtime_wrapper_mismatch');
+  const expectedWrapper = freezeRuntimeWrapper(projection, wrapper);
+  if (!sameDynamicWrapper(runtimeWrapper, expectedWrapper)) {
+    return invalidIdentity('runtime_wrapper_mismatch');
   }
   const subject = identity.subject;
   if (
@@ -694,54 +685,51 @@ function verifyPreparedDynamicMcpIdentityV1(
     subject.dynamicCatalogRevision !== identity.dynamicCatalogRevision ||
     subject.bindingId !== identity.bindingId
   ) {
-    return invalidIdentityV1('subject_mismatch');
+    return invalidIdentity('subject_mismatch');
   }
   if (
     identity.builtinProjectionRevision !== null ||
-    !SHA256_HEX_V1.test(identity.dynamicCatalogRevision)
+    !SHA256_HEX_.test(identity.dynamicCatalogRevision)
   ) {
-    return invalidIdentityV1('revision_mismatch');
+    return invalidIdentity('revision_mismatch');
   }
   if (
     input.invocationId !== identity.invocationId ||
     input.attemptId !== identity.attemptId ||
     input.toolCallId !== identity.toolCallId
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
-  if (!input.binding || !bindingMatchesDynamicSubjectV1(input.binding, identity)) {
-    return invalidIdentityV1('binding_mismatch');
+  if (!input.binding || !bindingMatchesDynamicSubject(input.binding, identity)) {
+    return invalidIdentity('binding_mismatch');
   }
-  const facts = parseDynamicMcpSubjectFactsV1(input.facts);
-  if (!facts || !factsMatchIdentityV1(facts, identity, input.binding)) {
-    return invalidIdentityV1('subject_mismatch');
+  const facts = parseDynamicMcpSubjectFacts(input.facts);
+  if (!facts || !factsMatchIdentity(facts, identity, input.binding)) {
+    return invalidIdentity('subject_mismatch');
   }
-  const canonical = canonicalizeCapabilityArgumentsV1(
-    facts.descriptor.inputSchema,
-    input.arguments,
-  );
-  if (!canonical.ok || !isJsonValueV1(canonical.args) || !isJsonRecordV1(canonical.args)) {
-    return invalidIdentityV1('schema_mismatch');
+  const canonical = canonicalizeCapabilityArguments(facts.descriptor.inputSchema, input.arguments);
+  if (!canonical.ok || !isJsonValue(canonical.args) || !isJsonRecord(canonical.args)) {
+    return invalidIdentity('schema_mismatch');
   }
-  const argumentsDigest = digestCapabilityBindingValueV1(canonical.args);
+  const argumentsDigest = digestCapabilityBindingValue(canonical.args);
   if (identity.argumentsDigest !== argumentsDigest) {
-    return invalidIdentityV1('arguments_mismatch');
+    return invalidIdentity('arguments_mismatch');
   }
   if (
     identity.schemaDigest !== facts.schemaDigest ||
     identity.effectiveEffectsDigest !== facts.effectiveEffectsDigest ||
     identity.parserRevision !== facts.schemaDigest ||
     identity.executorRevision !== null ||
-    identity.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1
+    identity.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   if (
     identity.turnId !== facts.callCreatedAtTurnId ||
     identity.turnId !== input.binding.issuedForTurnId ||
     identity.modelMessageId !== facts.modelMessageId
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   const idempotencyArgument = facts.descriptor.execution?.idempotencyKeyArgument ?? null;
   const idempotencyKey =
@@ -752,17 +740,17 @@ function verifyPreparedDynamicMcpIdentityV1(
     identity.idempotencyKeyArgument !== idempotencyArgument ||
     identity.idempotencyKey !== idempotencyKey
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   return Object.freeze({ valid: true });
 }
 
 /** Create the exact JSON facts expected in PreparedToolInvocation.input.facts. */
-export function createBuiltinDynamicMcpSubjectFactsV1(
+export function createBuiltinDynamicMcpSubjectFacts(
   descriptor: Readonly<RuntimeCapabilityDescriptor>,
   exposedToolName: `mcp__${string}`,
-  identity: Readonly<BuiltinDynamicMcpSubjectFactsIdentityV1>,
-): BuiltinDynamicMcpSubjectFactsV1 {
+  identity: Readonly<BuiltinDynamicMcpSubjectFactsIdentity>,
+): BuiltinDynamicMcpSubjectFacts {
   if (
     !identity.dynamicCatalogRevision ||
     !identity.bindingId ||
@@ -774,21 +762,21 @@ export function createBuiltinDynamicMcpSubjectFactsV1(
   ) {
     throw new Error('Dynamic MCP subject fact identity is invalid.');
   }
-  if (!isDynamicMcpSubjectDescriptorV1(descriptor) || descriptor.availability !== 'available') {
+  if (!isDynamicMcpSubjectDescriptor(descriptor) || descriptor.availability !== 'available') {
     throw new Error('Dynamic MCP subject descriptor is invalid.');
   }
-  if (!descriptor.inputSchema || !isJsonRecordV1(descriptor.inputSchema)) {
+  if (!descriptor.inputSchema || !isJsonRecord(descriptor.inputSchema)) {
     throw new Error('Dynamic MCP subject descriptor has no JSON input schema.');
   }
-  const frozenDescriptor = freezeRuntimeDescriptorV1(descriptor);
-  const effects = freezeEffectsV1(descriptor.effectiveEffects);
-  const schemaDigest = digestCapabilityBindingValueV1(descriptor.inputSchema);
+  const frozenDescriptor = freezeRuntimeDescriptor(descriptor);
+  const effects = freezeEffects(descriptor.effectiveEffects);
+  const schemaDigest = digestCapabilityBindingValue(descriptor.inputSchema);
   return Object.freeze({
-    schema: BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1,
+    schema: BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_,
     capabilityId: descriptor.capabilityId,
     capabilityRevision: descriptor.revision,
     descriptorRevision: descriptor.revision,
-    descriptorDigest: digestCapabilityBindingValueV1(frozenDescriptor),
+    descriptorDigest: digestCapabilityBindingValue(frozenDescriptor),
     providerId: descriptor.provider.id,
     providerType: 'mcp' as const,
     kind: 'mcp_tool' as const,
@@ -796,7 +784,7 @@ export function createBuiltinDynamicMcpSubjectFactsV1(
     availability: 'available' as const,
     schemaDigest,
     effectiveEffects: effects,
-    effectiveEffectsDigest: digestCapabilityBindingValueV1(effects),
+    effectiveEffectsDigest: digestCapabilityBindingValue(effects),
     minimumApproval: descriptor.policy.minimumApproval,
     dynamicCatalogRevision: identity.dynamicCatalogRevision,
     bindingId: identity.bindingId,
@@ -808,10 +796,10 @@ export function createBuiltinDynamicMcpSubjectFactsV1(
   });
 }
 
-function validResolvedDynamicMcpV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  wrapper: BuiltinInternalOperationCatalogEntryV1,
-  resolved: Readonly<ResolvedInvocationV1>,
+function validResolvedDynamicMcp(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  wrapper: BuiltinInternalOperationCatalogEntry,
+  resolved: Readonly<ResolvedInvocation>,
 ): boolean {
   if (
     !resolved ||
@@ -837,7 +825,7 @@ function validResolvedDynamicMcpV1(
     target.isDynamicMcp !== true ||
     target.executionFamily !== 'mcp' ||
     target.executionMechanism !== 'mcp' ||
-    target.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 ||
+    target.operationId !== BUILTIN_DYNAMIC_MCP_OPERATION_ID_ ||
     target.visibility !== 'internal' ||
     target.modelVisible !== false ||
     target.exposedToolName !== null ||
@@ -848,10 +836,10 @@ function validResolvedDynamicMcpV1(
   ) {
     return false;
   }
-  const dynamicTarget = target as Readonly<DynamicMcpToolTargetV1>;
+  const dynamicTarget = target as Readonly<DynamicMcpToolTarget>;
   if (
-    !isDynamicSubjectShapeV1(dynamicTarget.subject) ||
-    !isDynamicWrapperShapeV1(dynamicTarget.runtimeWrapper)
+    !isDynamicSubjectShape(dynamicTarget.subject) ||
+    !isDynamicWrapperShape(dynamicTarget.runtimeWrapper)
   ) {
     return false;
   }
@@ -859,17 +847,17 @@ function validResolvedDynamicMcpV1(
   const binding = dynamicTarget.binding;
   if (
     !binding ||
-    !isDynamicMcpSubjectDescriptorV1(descriptor) ||
+    !isDynamicMcpSubjectDescriptor(descriptor) ||
     descriptor.availability !== 'available' ||
     !descriptor.inputSchema ||
-    !isJsonRecordV1(descriptor.inputSchema) ||
-    !validBindingIdV1(binding) ||
-    digestCapabilityBindingValueV1(descriptor.inputSchema) !== binding.schemaDigest
+    !isJsonRecord(descriptor.inputSchema) ||
+    !validBindingId(binding) ||
+    digestCapabilityBindingValue(descriptor.inputSchema) !== binding.schemaDigest
   ) {
     return false;
   }
-  const expectedWrapper = freezeRuntimeWrapperV1(projection, wrapper);
-  if (!sameDynamicWrapperV1(dynamicTarget.runtimeWrapper, expectedWrapper)) return false;
+  const expectedWrapper = freezeRuntimeWrapper(projection, wrapper);
+  if (!sameDynamicWrapper(dynamicTarget.runtimeWrapper, expectedWrapper)) return false;
   const subject = dynamicTarget.subject;
   return (
     subject.capabilityId === dynamicTarget.capabilityId &&
@@ -894,32 +882,32 @@ function validResolvedDynamicMcpV1(
   );
 }
 
-function isDynamicIdentityShapeV1(
-  identity: Readonly<PreparedToolInvocationV1['identity']>,
-): identity is Readonly<DynamicMcpPreparedToolInvocationIdentityV1> {
+function isDynamicIdentityShape(
+  identity: Readonly<PreparedToolInvocation['identity']>,
+): identity is Readonly<DynamicMcpPreparedToolInvocationIdentity> {
   return (
     identity.isDynamicMcp === true &&
     identity.executionFamily === 'mcp' &&
     identity.executionMechanism === 'mcp' &&
-    identity.operationId === BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 &&
+    identity.operationId === BUILTIN_DYNAMIC_MCP_OPERATION_ID_ &&
     identity.visibility === 'internal' &&
     identity.modelVisible === false &&
     identity.exposedToolName === null &&
     identity.executorRevision === null &&
     identity.builtinProjectionRevision === null &&
     typeof identity.dynamicCatalogRevision === 'string' &&
-    SHA256_HEX_V1.test(identity.dynamicCatalogRevision) &&
+    SHA256_HEX_.test(identity.dynamicCatalogRevision) &&
     typeof identity.turnId === 'string' &&
     identity.turnId.length > 0 &&
     typeof identity.modelMessageId === 'string' &&
     identity.modelMessageId.length > 0 &&
     identity.argumentOrigin === 'model_public' &&
-    isDynamicSubjectShapeV1(identity.subject) &&
-    isDynamicWrapperShapeV1(identity.runtimeWrapper)
+    isDynamicSubjectShape(identity.subject) &&
+    isDynamicWrapperShape(identity.runtimeWrapper)
   );
 }
 
-function isDynamicSubjectShapeV1(value: unknown): value is Readonly<DynamicMcpSubjectIdentityV1> {
+function isDynamicSubjectShape(value: unknown): value is Readonly<DynamicMcpSubjectIdentity> {
   if (!value || typeof value !== 'object') return false;
   const subject = value as Record<string, unknown>;
   return (
@@ -934,20 +922,20 @@ function isDynamicSubjectShapeV1(value: unknown): value is Readonly<DynamicMcpSu
     typeof subject.exposedToolName === 'string' &&
     subject.exposedToolName.startsWith('mcp__') &&
     typeof subject.dynamicCatalogRevision === 'string' &&
-    SHA256_HEX_V1.test(subject.dynamicCatalogRevision) &&
+    SHA256_HEX_.test(subject.dynamicCatalogRevision) &&
     typeof subject.bindingId === 'string' &&
     subject.bindingId.length > 0
   );
 }
 
-function isDynamicWrapperShapeV1(
+function isDynamicWrapperShape(
   value: unknown,
-): value is Readonly<DynamicMcpRuntimeWrapperIdentityV1> {
+): value is Readonly<DynamicMcpRuntimeWrapperIdentity> {
   if (!value || typeof value !== 'object') return false;
   const wrapper = value as Record<string, unknown>;
   return (
-    wrapper.operationId === BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 &&
-    wrapper.capabilityId === BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1 &&
+    wrapper.operationId === BUILTIN_DYNAMIC_MCP_OPERATION_ID_ &&
+    wrapper.capabilityId === BUILTIN_DYNAMIC_MCP_OPERATION_ID_ &&
     typeof wrapper.providerId === 'string' &&
     wrapper.providerId.length > 0 &&
     typeof wrapper.capabilityRevision === 'string' &&
@@ -961,9 +949,9 @@ function isDynamicWrapperShapeV1(
   );
 }
 
-function sameDynamicWrapperV1(
-  actual: Readonly<DynamicMcpRuntimeWrapperIdentityV1>,
-  expected: Readonly<DynamicMcpRuntimeWrapperIdentityV1>,
+function sameDynamicWrapper(
+  actual: Readonly<DynamicMcpRuntimeWrapperIdentity>,
+  expected: Readonly<DynamicMcpRuntimeWrapperIdentity>,
 ): boolean {
   return (
     actual.operationId === expected.operationId &&
@@ -976,9 +964,9 @@ function sameDynamicWrapperV1(
   );
 }
 
-function bindingMatchesDynamicSubjectV1(
-  binding: Readonly<CapabilityBindingV1 | import('@kite/runtime-contract').CapabilityBinding>,
-  identity: Readonly<DynamicMcpPreparedToolInvocationIdentityV1>,
+function bindingMatchesDynamicSubject(
+  binding: Readonly<CapabilityBinding | import('@kite/runtime-contract').CapabilityBinding>,
+  identity: Readonly<DynamicMcpPreparedToolInvocationIdentity>,
 ): boolean {
   return (
     binding.bindingId === identity.bindingId &&
@@ -986,29 +974,29 @@ function bindingMatchesDynamicSubjectV1(
     binding.capabilityRevision === identity.subject.capabilityRevision &&
     binding.exposedToolName === identity.subject.exposedToolName &&
     binding.schemaDigest === identity.schemaDigest &&
-    validBindingIdV1(binding)
+    validBindingId(binding)
   );
 }
 
-function factsMatchIdentityV1(
-  facts: BuiltinDynamicMcpSubjectFactsV1,
-  identity: Readonly<DynamicMcpPreparedToolInvocationIdentityV1>,
-  binding: Readonly<CapabilityBindingV1 | import('@kite/runtime-contract').CapabilityBinding>,
+function factsMatchIdentity(
+  facts: BuiltinDynamicMcpSubjectFacts,
+  identity: Readonly<DynamicMcpPreparedToolInvocationIdentity>,
+  binding: Readonly<CapabilityBinding | import('@kite/runtime-contract').CapabilityBinding>,
 ): boolean {
   const descriptor = facts.descriptor;
-  const effectsDigest = digestCapabilityBindingValueV1(descriptor.effectiveEffects);
+  const effectsDigest = digestCapabilityBindingValue(descriptor.effectiveEffects);
   if (
-    !isDynamicMcpSubjectDescriptorV1(descriptor) ||
+    !isDynamicMcpSubjectDescriptor(descriptor) ||
     descriptor.availability !== 'available' ||
     !descriptor.inputSchema ||
-    !isJsonRecordV1(descriptor.inputSchema) ||
+    !isJsonRecord(descriptor.inputSchema) ||
     descriptor.kind !== facts.kind ||
     descriptor.provider.type !== facts.providerType ||
     descriptor.provider.id !== facts.providerId ||
     descriptor.policy.minimumApproval !== facts.minimumApproval ||
     effectsDigest !== facts.effectiveEffectsDigest ||
-    digestCapabilityBindingValueV1(facts.effectiveEffects) !== facts.effectiveEffectsDigest ||
-    facts.schemaDigest !== digestCapabilityBindingValueV1(descriptor.inputSchema) ||
+    digestCapabilityBindingValue(facts.effectiveEffects) !== facts.effectiveEffectsDigest ||
+    facts.schemaDigest !== digestCapabilityBindingValue(descriptor.inputSchema) ||
     facts.bindingId !== identity.bindingId ||
     facts.dynamicCatalogRevision !== identity.dynamicCatalogRevision ||
     facts.issuedForTurnId !== binding.issuedForTurnId ||
@@ -1031,16 +1019,16 @@ function factsMatchIdentityV1(
     descriptor.revision === identity.descriptorRevision &&
     descriptor.capabilityId === identity.capabilityId &&
     descriptor.provider.id === identity.providerId &&
-    digestCapabilityBindingValueV1(descriptor) === facts.descriptorDigest &&
-    descriptorRevisionIsValidV1(descriptor) &&
+    digestCapabilityBindingValue(descriptor) === facts.descriptorDigest &&
+    descriptorRevisionIsValid(descriptor) &&
     facts.bindingId === binding.bindingId &&
     facts.exposedToolName === binding.exposedToolName
   );
 }
 
-function parseDynamicMcpSubjectFactsV1(
-  value: RuntimeJsonValueV1 | undefined,
-): BuiltinDynamicMcpSubjectFactsV1 | null {
+function parseDynamicMcpSubjectFacts(
+  value: RuntimeJsonValue | undefined,
+): BuiltinDynamicMcpSubjectFacts | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const factKeys = new Set([
@@ -1069,7 +1057,7 @@ function parseDynamicMcpSubjectFactsV1(
   if (Object.keys(record).some((key) => !factKeys.has(key))) return null;
   const descriptor = record.descriptor;
   if (
-    record.schema !== BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1 ||
+    record.schema !== BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_ ||
     typeof record.capabilityId !== 'string' ||
     typeof record.capabilityRevision !== 'string' ||
     typeof record.descriptorRevision !== 'string' ||
@@ -1081,11 +1069,11 @@ function parseDynamicMcpSubjectFactsV1(
     !record.exposedToolName.startsWith('mcp__') ||
     record.availability !== 'available' ||
     typeof record.schemaDigest !== 'string' ||
-    !isJsonRecordUnknownV1(record.effectiveEffects) ||
+    !isJsonRecordUnknown(record.effectiveEffects) ||
     typeof record.effectiveEffectsDigest !== 'string' ||
-    !isApprovalV1(record.minimumApproval) ||
+    !isApproval(record.minimumApproval) ||
     typeof record.dynamicCatalogRevision !== 'string' ||
-    !SHA256_HEX_V1.test(record.dynamicCatalogRevision) ||
+    !SHA256_HEX_.test(record.dynamicCatalogRevision) ||
     typeof record.bindingId !== 'string' ||
     record.bindingId.length === 0 ||
     typeof record.issuedForTurnId !== 'string' ||
@@ -1095,19 +1083,19 @@ function parseDynamicMcpSubjectFactsV1(
     typeof record.modelMessageId !== 'string' ||
     record.modelMessageId.length === 0 ||
     record.argumentOrigin !== 'model_public' ||
-    !isJsonRecordUnknownV1(descriptor)
+    !isJsonRecordUnknown(descriptor)
   ) {
     return null;
   }
   if (
-    !isEffectLevelV1(record.effectiveEffects.filesystem) ||
-    !isEffectLevelV1(record.effectiveEffects.network) ||
-    !isEffectLevelV1(record.effectiveEffects.externalState)
+    !isEffectLevel(record.effectiveEffects.filesystem) ||
+    !isEffectLevel(record.effectiveEffects.network) ||
+    !isEffectLevel(record.effectiveEffects.externalState)
   ) {
     return null;
   }
   const candidate = {
-    schema: BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1,
+    schema: BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_,
     capabilityId: record.capabilityId,
     capabilityRevision: record.capabilityRevision,
     descriptorRevision: record.descriptorRevision,
@@ -1132,12 +1120,12 @@ function parseDynamicMcpSubjectFactsV1(
     modelMessageId: record.modelMessageId,
     argumentOrigin: 'model_public' as const,
     descriptor: descriptor as unknown as RuntimeCapabilityDescriptor,
-  } satisfies BuiltinDynamicMcpSubjectFactsV1;
+  } satisfies BuiltinDynamicMcpSubjectFacts;
   return candidate;
 }
 
-function isDynamicMcpSubjectDescriptorV1(
-  descriptor: Readonly<ToolPipelineCapabilityDescriptorV1>,
+function isDynamicMcpSubjectDescriptor(
+  descriptor: Readonly<ToolPipelineCapabilityDescriptor>,
 ): descriptor is Readonly<RuntimeCapabilityDescriptor> {
   if (!descriptor || typeof descriptor !== 'object') return false;
   const candidate = descriptor as Readonly<RuntimeCapabilityDescriptor>;
@@ -1150,24 +1138,24 @@ function isDynamicMcpSubjectDescriptorV1(
     candidate.capabilityId.length > 0 &&
     typeof candidate.revision === 'string' &&
     candidate.revision.length > 0 &&
-    isJsonValueV1(candidate) &&
-    descriptorRevisionIsValidV1(candidate) &&
-    (candidate.inputSchema === undefined || isJsonRecordV1(candidate.inputSchema))
+    isJsonValue(candidate) &&
+    descriptorRevisionIsValid(candidate) &&
+    (candidate.inputSchema === undefined || isJsonRecord(candidate.inputSchema))
   );
 }
 
-function descriptorRevisionIsValidV1(descriptor: Readonly<RuntimeCapabilityDescriptor>): boolean {
+function descriptorRevisionIsValid(descriptor: Readonly<RuntimeCapabilityDescriptor>): boolean {
   const { revision: _revision, ...withoutRevision } = descriptor;
-  return digestCapabilityBindingValueV1(withoutRevision) === descriptor.revision;
+  return digestCapabilityBindingValue(withoutRevision) === descriptor.revision;
 }
 
-function validBindingIdV1(
-  binding: Readonly<CapabilityBindingV1 | import('@kite/runtime-contract').CapabilityBinding>,
+function validBindingId(
+  binding: Readonly<CapabilityBinding | import('@kite/runtime-contract').CapabilityBinding>,
 ): boolean {
   return (
     typeof binding.bindingId === 'string' &&
     binding.bindingId ===
-      digestCapabilityBindingValueV1({
+      digestCapabilityBindingValue({
         capabilityId: binding.capabilityId,
         revision: binding.capabilityRevision,
         exposedToolName: binding.exposedToolName,
@@ -1177,9 +1165,9 @@ function validBindingIdV1(
   );
 }
 
-function validDynamicResolutionContextV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  context: Readonly<ToolPipelineResolutionContextV1>,
+function validDynamicResolutionContext(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  context: Readonly<ToolPipelineResolutionContext>,
 ): boolean {
   if (
     !context ||
@@ -1187,7 +1175,7 @@ function validDynamicResolutionContextV1(
     context.currentTurnId.length === 0 ||
     context.builtinProjectionRevision !== projection.revision ||
     typeof context.dynamicCatalogRevision !== 'string' ||
-    !SHA256_HEX_V1.test(context.dynamicCatalogRevision) ||
+    !SHA256_HEX_.test(context.dynamicCatalogRevision) ||
     !context.availabilityContext ||
     typeof context.availabilityContext.workspace !== 'string' ||
     !Array.isArray(context.bindings) ||
@@ -1197,60 +1185,60 @@ function validDynamicResolutionContextV1(
     return false;
   }
   return (
-    !hasDuplicateKeyV1(context.bindings, (item) => item.bindingId) &&
-    !hasDuplicateKeyV1(context.bindings, (item) => item.exposedToolName) &&
-    !hasDuplicateKeyV1(context.descriptors, (item) => item.capabilityId)
+    !hasDuplicateKey(context.bindings, (item) => item.bindingId) &&
+    !hasDuplicateKey(context.bindings, (item) => item.exposedToolName) &&
+    !hasDuplicateKey(context.descriptors, (item) => item.capabilityId)
   );
 }
 
-function freezeRuntimeWrapperV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  wrapper: BuiltinInternalOperationCatalogEntryV1,
-): Readonly<DynamicMcpRuntimeWrapperIdentityV1> {
+function freezeRuntimeWrapper(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  wrapper: BuiltinInternalOperationCatalogEntry,
+): Readonly<DynamicMcpRuntimeWrapperIdentity> {
   return Object.freeze({
-    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
-    capabilityId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
+    capabilityId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
     providerId: wrapper.providerId,
     capabilityRevision: wrapper.revision,
     executorRevision: wrapper.executorRevision,
-    schemaDigest: digestCapabilityBindingValueV1(wrapper.inputSchema ?? {}),
+    schemaDigest: digestCapabilityBindingValue(wrapper.inputSchema ?? {}),
     builtinProjectionRevision: projection.revision,
   });
 }
 
-function freezeDynamicSubjectV1(
-  value: DynamicMcpSubjectIdentityV1,
-): Readonly<DynamicMcpSubjectIdentityV1> {
+function freezeDynamicSubject(
+  value: DynamicMcpSubjectIdentity,
+): Readonly<DynamicMcpSubjectIdentity> {
   return Object.freeze({ ...value });
 }
 
-function freezeRuntimeDescriptorV1(
+function freezeRuntimeDescriptor(
   descriptor: Readonly<RuntimeCapabilityDescriptor>,
 ): Readonly<RuntimeCapabilityDescriptor> {
-  return freezeJsonV1(
-    descriptor as unknown as RuntimeJsonValueV1,
+  return freezeJson(
+    descriptor as unknown as RuntimeJsonValue,
   ) as unknown as RuntimeCapabilityDescriptor;
 }
 
-function freezeBindingV1(
-  binding: Readonly<ToolPipelineCapabilityBindingV1>,
-): Readonly<ToolPipelineCapabilityBindingV1> {
-  return freezeJsonV1(binding as unknown as RuntimeJsonValueV1) as ToolPipelineCapabilityBindingV1;
+function freezeBinding(
+  binding: Readonly<ToolPipelineCapabilityBinding>,
+): Readonly<ToolPipelineCapabilityBinding> {
+  return freezeJson(binding as unknown as RuntimeJsonValue) as ToolPipelineCapabilityBinding;
 }
 
-function freezeToolCallV1(call: Readonly<ToolCallSnapshotV1>): Readonly<ToolCallSnapshotV1> {
-  return freezeJsonV1(call as unknown as RuntimeJsonValueV1) as unknown as ToolCallSnapshotV1;
+function freezeToolCall(call: Readonly<ToolCallSnapshot>): Readonly<ToolCallSnapshot> {
+  return freezeJson(call as unknown as RuntimeJsonValue) as unknown as ToolCallSnapshot;
 }
 
-function freezeAvailabilityContextV1(
-  context: Readonly<import('@kite/runtime-spi').CapabilityAvailabilityContextV1>,
-): Readonly<import('@kite/runtime-spi').CapabilityAvailabilityContextV1> {
-  return freezeJsonV1(
-    context as unknown as RuntimeJsonValueV1,
-  ) as unknown as import('@kite/runtime-spi').CapabilityAvailabilityContextV1;
+function freezeAvailabilityContext(
+  context: Readonly<import('@kite/runtime-spi').CapabilityAvailabilityContext>,
+): Readonly<import('@kite/runtime-spi').CapabilityAvailabilityContext> {
+  return freezeJson(
+    context as unknown as RuntimeJsonValue,
+  ) as unknown as import('@kite/runtime-spi').CapabilityAvailabilityContext;
 }
 
-function freezeEffectsV1(value: CapabilityEffectsV1): Readonly<CapabilityEffectsV1> {
+function freezeEffects(value: CapabilityEffects): Readonly<CapabilityEffects> {
   return Object.freeze({
     filesystem: value.filesystem,
     network: value.network,
@@ -1258,52 +1246,52 @@ function freezeEffectsV1(value: CapabilityEffectsV1): Readonly<CapabilityEffects
   });
 }
 
-function freezePolicyCompilationV1(
-  value: CapabilityPolicyCompilationV1,
-): Readonly<CapabilityPolicyCompilationV1> {
+function freezePolicyCompilation(
+  value: CapabilityPolicyCompilation,
+): Readonly<CapabilityPolicyCompilation> {
   return Object.freeze({
     ...value,
     ...(value.effects ? { effects: Object.freeze({ ...value.effects }) } : {}),
-    effectiveEffects: freezeEffectsV1(value.effectiveEffects),
+    effectiveEffects: freezeEffects(value.effectiveEffects),
     expectedEffects: Object.freeze([...value.expectedEffects]),
   });
 }
 
-function freezeJsonArrayV1<T>(value: readonly T[]): readonly T[] {
+function freezeJsonArray<T>(value: readonly T[]): readonly T[] {
   return Object.freeze(
-    value.map((item) => freezeJsonV1(item as unknown as RuntimeJsonValueV1)),
+    value.map((item) => freezeJson(item as unknown as RuntimeJsonValue)),
   ) as readonly T[];
 }
 
-function freezeJsonV1(value: RuntimeJsonValueV1): RuntimeJsonValueV1 {
-  if (Array.isArray(value)) return Object.freeze(value.map((item) => freezeJsonV1(item)));
+function freezeJson(value: RuntimeJsonValue): RuntimeJsonValue {
+  if (Array.isArray(value)) return Object.freeze(value.map((item) => freezeJson(item)));
   if (value && typeof value === 'object') {
     return Object.freeze(
-      Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeJsonV1(item)])),
-    ) as RuntimeJsonValueV1;
+      Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeJson(item)])),
+    ) as RuntimeJsonValue;
   }
   return value;
 }
 
-function isJsonRecordV1(value: unknown): value is Readonly<Record<string, RuntimeJsonValueV1>> {
+function isJsonRecord(value: unknown): value is Readonly<Record<string, RuntimeJsonValue>> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function isJsonValueV1(value: unknown): value is RuntimeJsonValueV1 {
+function isJsonValue(value: unknown): value is RuntimeJsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every((item) => isJsonValueV1(item));
+  if (Array.isArray(value)) return value.every((item) => isJsonValue(item));
   if (value && typeof value === 'object') {
-    return Object.values(value).every((item) => isJsonValueV1(item));
+    return Object.values(value).every((item) => isJsonValue(item));
   }
   return false;
 }
 
-function isJsonRecordUnknownV1(value: unknown): value is Record<string, unknown> {
+function isJsonRecordUnknown(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function isEffectLevelV1(value: unknown): value is CapabilityEffectsV1[keyof CapabilityEffectsV1] {
+function isEffectLevel(value: unknown): value is CapabilityEffects[keyof CapabilityEffects] {
   return (
     value === 'none' ||
     value === 'read' ||
@@ -1313,11 +1301,11 @@ function isEffectLevelV1(value: unknown): value is CapabilityEffectsV1[keyof Cap
   );
 }
 
-function isApprovalV1(value: unknown): value is CapabilityApprovalV1 {
+function isApproval(value: unknown): value is CapabilityApproval {
   return value === 'none' || value === 'auto_review' || value === 'user';
 }
 
-function uniqueMatchV1<T>(
+function uniqueMatch<T>(
   items: readonly T[],
   predicate: (item: T) => boolean,
 ): T | 'duplicate' | null {
@@ -1326,7 +1314,7 @@ function uniqueMatchV1<T>(
   return matches[0] ?? null;
 }
 
-function hasDuplicateKeyV1<T, K>(items: readonly T[], keyOf: (item: T) => K): boolean {
+function hasDuplicateKey<T, K>(items: readonly T[], keyOf: (item: T) => K): boolean {
   const keys = new Set<K>();
   for (const item of items) {
     const key = keyOf(item);
@@ -1336,7 +1324,7 @@ function hasDuplicateKeyV1<T, K>(items: readonly T[], keyOf: (item: T) => K): bo
   return false;
 }
 
-function capabilityFromEffectsV1(effects: CapabilityEffectsV1) {
+function capabilityFromEffects(effects: CapabilityEffects) {
   const levels = [effects.filesystem, effects.network, effects.externalState];
   if (levels.every((level) => level === 'none' || level === 'read')) {
     return {
@@ -1352,10 +1340,10 @@ function capabilityFromEffectsV1(effects: CapabilityEffectsV1) {
   };
 }
 
-function riskForDynamicEffectsV1(
-  effectClass: ReturnType<typeof capabilityFromEffectsV1>['effectClass'],
-  effects: CapabilityEffectsV1,
-): ClassifiedInvocationV1['risk'] {
+function riskForDynamicEffects(
+  effectClass: ReturnType<typeof capabilityFromEffects>['effectClass'],
+  effects: CapabilityEffects,
+): ClassifiedInvocation['risk'] {
   if (Object.values(effects).some((effect) => effect === 'destructive')) return 'destructive';
   if (effects.filesystem === 'write') return 'workspace_write';
   if (effects.network === 'read' || effects.network === 'write') return 'network';
@@ -1365,13 +1353,13 @@ function riskForDynamicEffectsV1(
   return 'execute';
 }
 
-function invocationRequirementsV1(
+function invocationRequirements(
   descriptor: Readonly<RuntimeCapabilityDescriptor>,
   sideEffect: boolean,
-  effects: CapabilityEffectsV1,
+  effects: CapabilityEffects,
 ) {
   const receipt =
-    sideEffect || hasMutationOrUnknownEffectV1(effects)
+    sideEffect || hasMutationOrUnknownEffect(effects)
       ? ('effect_receipt' as const)
       : ('observation_receipt' as const);
   const retry =
@@ -1392,18 +1380,18 @@ function invocationRequirementsV1(
   });
 }
 
-function hasMutationOrUnknownEffectV1(effects: CapabilityEffectsV1): boolean {
+function hasMutationOrUnknownEffect(effects: CapabilityEffects): boolean {
   return Object.values(effects).some(
     (effect) => effect === 'write' || effect === 'destructive' || effect === 'unknown',
   );
 }
 
-function resolveFailureV1(
-  code: ToolPipelineResolveFailureCodeV1,
+function resolveFailure(
+  code: ToolPipelineResolveFailureCode,
   toolCallId: string | null,
   toolName: string | null,
   diagnostic?: string,
-): ToolResolutionResultV1 {
+): ToolResolutionResult {
   return Object.freeze({
     ok: false,
     failure: Object.freeze({
@@ -1411,17 +1399,17 @@ function resolveFailureV1(
       code,
       toolCallId,
       toolName,
-      ...(diagnostic ? { diagnostic: boundedDiagnosticV1(diagnostic) } : {}),
+      ...(diagnostic ? { diagnostic: boundedDiagnostic(diagnostic) } : {}),
     }),
   });
 }
 
-function validationFailureV1(
-  code: ToolPipelineValidateFailureCodeV1,
+function validationFailure(
+  code: ToolPipelineValidateFailureCode,
   toolCallId: string | null,
   toolName: string | null,
   diagnostic?: string,
-): ToolValidationResultV1 {
+): ToolValidationResult {
   return Object.freeze({
     ok: false,
     failure: Object.freeze({
@@ -1429,27 +1417,27 @@ function validationFailureV1(
       code,
       toolCallId,
       toolName,
-      ...(diagnostic ? { diagnostic: boundedDiagnosticV1(diagnostic) } : {}),
+      ...(diagnostic ? { diagnostic: boundedDiagnostic(diagnostic) } : {}),
     }),
   });
 }
 
-function classifyFailureV1(
+function classifyFailure(
   code: 'invalid_stage_input' | 'stage_identity_drift' | 'classification_unavailable',
   toolCallId: string | null,
   toolName: string | null,
-): ToolClassificationResultV1 {
+): ToolClassificationResult {
   return Object.freeze({
     ok: false,
     failure: Object.freeze({ stage: 'classify' as const, code, toolCallId, toolName }),
   });
 }
 
-function successV1<T>(value: T): { readonly ok: true; readonly value: Readonly<T> } {
+function success<T>(value: T): { readonly ok: true; readonly value: Readonly<T> } {
   return Object.freeze({ ok: true as const, value: Object.freeze(value) });
 }
 
-function invalidIdentityV1(
+function invalidIdentity(
   code:
     | 'identity_mismatch'
     | 'revision_mismatch'
@@ -1459,24 +1447,24 @@ function invalidIdentityV1(
     | 'runtime_wrapper_mismatch'
     | 'arguments_mismatch'
     | 'binding_mismatch',
-): ToolPipelinePreparedIdentityVerificationResultV1 {
+): ToolPipelinePreparedIdentityVerificationResult {
   return Object.freeze({ valid: false as const, code });
 }
 
-function invalidClassifiedIdentityV1(
+function invalidClassifiedIdentity(
   code: Extract<
-    ToolPipelineClassifiedIdentityVerificationResultV1,
+    ToolPipelineClassifiedIdentityVerificationResult,
     { readonly valid: false }
   >['code'],
-): ToolPipelineClassifiedIdentityVerificationResultV1 {
+): ToolPipelineClassifiedIdentityVerificationResult {
   return Object.freeze({ valid: false as const, code });
 }
 
-function boundedDiagnosticV1(value: string): string {
+function boundedDiagnostic(value: string): string {
   return Array.from(value).slice(0, 160).join('');
 }
 
-function assertFrozenProjectionV1(projection: Readonly<BuiltinToolCatalogProjectionV1>): void {
+function assertFrozenProjection(projection: Readonly<BuiltinToolCatalogProjection>): void {
   if (
     !projection ||
     typeof projection !== 'object' ||

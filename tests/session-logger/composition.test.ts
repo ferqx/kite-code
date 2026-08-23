@@ -2,23 +2,23 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { aiMessage, createModelSecretDetectorV1 } from '@kite/builtin-runtime/model';
+import { aiMessage, createModelSecretDetector } from '@kite/builtin-runtime/model';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   type AgentConfig,
   loadAgentConfig,
-  resolveSessionLoggingPolicyV1,
-  type SessionLoggingPolicyV1,
+  resolveSessionLoggingPolicy,
+  type SessionLoggingPolicy,
 } from '#app/config';
 import { sessionLogDir } from '#app/config/paths';
 import { SessionLogCollector } from '#app/session-logger';
 import { buildRunAgentParams } from '../../apps/kite/src/bootstrap/runtime/runtime-agent-input';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { CURRENT_TEST_PLAN_REVIEW_FACTS } from '../helpers/current-plan';
-import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
+import { runTestRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
-const CONTENT_ARTIFACT_POLICY: SessionLoggingPolicyV1 = {
+const CONTENT_ARTIFACT_POLICY: SessionLoggingPolicy = {
   version: 1,
   mode: 'content',
   retentionDays: 7,
@@ -42,14 +42,14 @@ function ollamaConfig(extra = ''): string {
         "models": [{ "name": "fixture", "default": true }]
       }
     },
-    "features": { "sessionLoggingPolicyV1": true }
+    "features": { "sessionLoggingPolicy": true }
     ${extra}
   }`;
 }
 
 describe('session logger composition', () => {
   test('passes the complete resolved retention and capacity policy into the writer', async () => {
-    let receivedPolicy: SessionLoggingPolicyV1 | undefined;
+    let receivedPolicy: SessionLoggingPolicy | undefined;
     const collector = new SessionLogCollector(
       'policy-forwarding',
       '/workspace',
@@ -69,23 +69,23 @@ describe('session logger composition', () => {
   });
 
   test('requires both artifact permission and explicit user opt-in for content mode', () => {
-    expect(resolveSessionLoggingPolicyV1({ enabled: false }).mode).toBe('off');
-    expect(resolveSessionLoggingPolicyV1({ enabled: true }).mode).toBe('metadata');
+    expect(resolveSessionLoggingPolicy({ enabled: false }).mode).toBe('off');
+    expect(resolveSessionLoggingPolicy({ enabled: true }).mode).toBe('metadata');
     expect(
-      resolveSessionLoggingPolicyV1({
+      resolveSessionLoggingPolicy({
         enabled: true,
         artifactPolicy: CONTENT_ARTIFACT_POLICY,
       }).mode,
     ).toBe('metadata');
     expect(
-      resolveSessionLoggingPolicyV1({
+      resolveSessionLoggingPolicy({
         enabled: true,
         artifactPolicy: CONTENT_ARTIFACT_POLICY,
         user: { mode: 'content' },
       }).mode,
     ).toBe('content');
     expect(() =>
-      resolveSessionLoggingPolicyV1({
+      resolveSessionLoggingPolicy({
         enabled: true,
         artifactPolicy: CONTENT_ARTIFACT_POLICY,
         user: { mode: 'content' },
@@ -502,13 +502,13 @@ describe('session logger composition', () => {
     process.env.KITE_CODE_HOME = root;
     try {
       const events: RuntimeEvent[] = [];
-      for await (const event of runTestRuntimeAgentV1(
+      for await (const event of runTestRuntimeAgent(
         {
           task: 'CLEAR_USER_MESSAGE_MARKER',
           userId: 'u',
           threadId: 'content-runtime',
           workspace: root,
-          openStateSessionStorage: () => openStateStoreForTestV1(join(root, 'runtime.db')),
+          openStateSessionStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
           config: {
             apiKey: secret,
             baseURL: 'https://example.invalid',
@@ -544,7 +544,7 @@ describe('session logger composition', () => {
   });
 
   test('runtime secret detector returns unknown for text beyond its inspection bound', () => {
-    const inspector = createModelSecretDetectorV1({
+    const inspector = createModelSecretDetector({
       knownSecrets: [],
       environment: {},
       maxInspectionChars: 4,
@@ -562,13 +562,13 @@ describe('session logger composition', () => {
     const diagnostics: string[] = [];
     const events: RuntimeEvent[] = [];
     try {
-      for await (const event of runTestRuntimeAgentV1(
+      for await (const event of runTestRuntimeAgent(
         {
           task: 'Complete despite logging failure.',
           userId: 'u',
           threadId: 'logging-failure',
           workspace: root,
-          openStateSessionStorage: () => openStateStoreForTestV1(join(root, 'runtime.db')),
+          openStateSessionStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
           config: {
             apiKey: 'unused',
             baseURL: 'https://example.invalid',

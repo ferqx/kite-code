@@ -1,6 +1,6 @@
 import { findSafeCompactionBoundary } from './compaction';
 import type { ContextPreflight } from './context-budget';
-import type { BuiltinRuntimeStateViewV1 } from './runtime-view';
+import type { BuiltinRuntimeStateView } from './runtime-view';
 
 export type AutomaticCompactionDecision =
   | { action: 'invoke' }
@@ -21,7 +21,7 @@ export const THRASH_CONFIG = {
 } as const;
 
 export function decideAutomaticContextCompaction(input: {
-  state: Readonly<BuiltinRuntimeStateViewV1>;
+  state: Readonly<BuiltinRuntimeStateView>;
   preflight: ContextPreflight;
   mode: ContextCompactionAutoMode;
   triggerRatio?: number;
@@ -118,12 +118,12 @@ export interface ThrashUpdateInput {
  * Returns the new guard state (caller should persist via reducer).
  */
 export function updateAutoCompactionGuard(
-  guard: BuiltinRuntimeStateViewV1['context']['autoGuard'],
+  guard: BuiltinRuntimeStateView['context']['autoGuard'],
   event:
     | { kind: 'completed'; turnIndex: number; reductionRatio: number; tokensAfter: number }
     | { kind: 'low_gain' }
     | { kind: 'manual_reset' },
-): BuiltinRuntimeStateViewV1['context']['autoGuard'] {
+): BuiltinRuntimeStateView['context']['autoGuard'] {
   if (event.kind === 'manual_reset') {
     return {
       recentAutomaticCompactions: [],

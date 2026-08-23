@@ -1,15 +1,15 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { evaluateSkillActivation } from './activation';
-import { validateCapabilityArgumentsV1 as validateCapabilityArguments } from './capability-domain';
+import { validateCapabilityArguments } from './capability-domain';
 import type { SkillCatalogEntry, SkillCatalogSnapshot } from './catalog';
 import type {
-  SkillFeatureFlagsV1 as FeatureFlags,
-  SkillRuntimeEventV1 as RuntimeEvent,
-  SkillRuntimeStateViewV1 as RuntimeState,
-  SkillForkResultV1 as SubAgentResult,
+  SkillFeatureFlags as FeatureFlags,
+  SkillRuntimeEvent as RuntimeEvent,
+  SkillRuntimeStateView as RuntimeState,
+  SkillForkResult as SubAgentResult,
 } from './runtime-domain';
-import { verificationRequestForSkillV1 as verificationRequestForSkill } from './runtime-domain';
+import { verificationRequestForSkill } from './runtime-domain';
 
 export interface SkillLifecycleContext {
   state: RuntimeState;

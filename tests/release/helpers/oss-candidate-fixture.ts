@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  ossCandidateManifestV1Schema,
+  ossCandidateManifestSchema,
   writeOssCandidateArchive,
 } from '../../../scripts/release/oss-candidate';
 
@@ -24,8 +24,8 @@ export async function createOssCandidateFixture(
     ['docs/KNOWN_LIMITATIONS.md', bytes('# Limitations\n')],
     ['docs/RELEASE_NOTES.md', bytes('# Notes\n')],
   ]);
-  const manifest = ossCandidateManifestV1Schema.parse({
-    schema: 'KiteCodeOssCandidateManifestV1',
+  const manifest = ossCandidateManifestSchema.parse({
+    schema: 'KiteCodeOssCandidateManifest',
     version: 1,
     productVersion: version,
     commitSha: 'a'.repeat(40),

@@ -9,11 +9,11 @@ import type {
   McpRuntimeProvider,
 } from '@kite/builtin-runtime/mcp';
 import type { CapabilitySnapshot } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
-import { createPreparedAppShellExecutorV1 } from '#app/sandbox/composition';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createPreparedAppShellExecutor } from '#app/sandbox/composition';
 import {
-  executeTestRuntimeToolsV1,
-  testRuntimeCapabilityExecutionPortV1,
+  executeTestRuntimeTools,
+  testRuntimeCapabilityExecutionPort,
 } from '../helpers/runtime-model';
 
 const temporaryRoots: string[] = [];
@@ -61,7 +61,7 @@ function inventoryProvider(calls: { capability: number; provider: number; resour
 }
 
 function stateFor(name: 'list_mcp_tools' | 'list_mcp_resources') {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: `production-cutover-${name}`,
     userId: 'user',
@@ -156,7 +156,7 @@ function activeSkillFixture(name: 'read_skill_reference' | 'complete_skill') {
       },
     ],
   };
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: `production-cutover-${name}`,
     userId: 'user',
@@ -195,7 +195,7 @@ function activeSkillFixture(name: 'read_skill_reference' | 'complete_skill') {
 }
 
 function webFetchState(workspace: string) {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'production-cutover-web-fetch',
     userId: 'user',
@@ -216,7 +216,7 @@ function webFetchState(workspace: string) {
 }
 
 function askUserState() {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'production-cutover-ask-user',
     userId: 'user',
@@ -246,7 +246,7 @@ function askUserState() {
 }
 
 function shellState(workspace: string) {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'production-cutover-shell',
     userId: 'user',
@@ -266,9 +266,9 @@ function shellState(workspace: string) {
   return state;
 }
 
-describe('RMV1-16 production Tool Pipeline cutover', () => {
+describe('RM-16 production Tool Pipeline cutover', () => {
   test('routes ask_user only through Kernel governance and emits no capability attempt', async () => {
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state: askUserState(),
       toolCallIds: ['call'],
     });
@@ -294,7 +294,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
 
   test('routes MCP inventory through the effect-scoped Host/Builtin attempt exactly once', async () => {
     const calls = { capability: 0, provider: 0, resource: 0 };
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state: stateFor('list_mcp_tools'),
       toolCallIds: ['call'],
       mcpManager: inventoryProvider(calls),
@@ -321,7 +321,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
   test('routes write_file through one acknowledged mutation intent, ready, Provider, and terminal', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-tool-pipeline-write-'));
     temporaryRoots.push(workspace);
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'production-cutover-write-file',
       userId: 'user',
@@ -338,10 +338,10 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue = [...state.tools.queue, 'call'];
-    const host = testRuntimeCapabilityExecutionPortV1();
+    const host = testRuntimeCapabilityExecutionPort();
     let hostInvokes = 0;
 
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['call'],
       capabilityExecution: Object.freeze({
@@ -375,7 +375,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-tool-pipeline-shell-'));
     temporaryRoots.push(workspace);
     let processCalls = 0;
-    const shellExecutor = createPreparedAppShellExecutorV1({
+    const shellExecutor = createPreparedAppShellExecutor({
       workspace,
       sandboxEnabled: false,
       resolveBackend: () => 'none',
@@ -393,9 +393,9 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
         };
       },
     });
-    const host = testRuntimeCapabilityExecutionPortV1();
+    const host = testRuntimeCapabilityExecutionPort();
     let hostInvokes = 0;
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state: shellState(workspace),
       toolCallIds: ['call'],
       sandboxAvailable: true,
@@ -423,7 +423,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
 
   test('routes resource inventory through the same port and fails before acknowledgement without it', async () => {
     const calls = { capability: 0, provider: 0, resource: 0 };
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state: stateFor('list_mcp_resources'),
       toolCallIds: ['call'],
       mcpManager: inventoryProvider(calls),
@@ -435,7 +435,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
     });
     expect(calls.resource).toBe(1);
 
-    const unavailable = await executeTestRuntimeToolsV1({
+    const unavailable = await executeTestRuntimeTools({
       state: stateFor('list_mcp_tools'),
       toolCallIds: ['call'],
     });
@@ -452,7 +452,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
 
   test('routes active Skill reference and completion through one Host/Builtin attempt each', async () => {
     const reference = activeSkillFixture('read_skill_reference');
-    const referenceEvents = await executeTestRuntimeToolsV1({
+    const referenceEvents = await executeTestRuntimeTools({
       state: reference.state,
       toolCallIds: ['call'],
       skillCatalog: reference.catalog,
@@ -474,7 +474,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
     });
 
     const completion = activeSkillFixture('complete_skill');
-    const completionEvents = await executeTestRuntimeToolsV1({
+    const completionEvents = await executeTestRuntimeTools({
       state: completion.state,
       toolCallIds: ['call'],
       skillCatalog: completion.catalog,
@@ -495,7 +495,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
   test('rejects Skill lifecycle calls without an active frame before Host acknowledgement', async () => {
     const fixture = activeSkillFixture('read_skill_reference');
     fixture.state.skills.frames = {};
-    const events = await executeTestRuntimeToolsV1({
+    const events = await executeTestRuntimeTools({
       state: fixture.state,
       toolCallIds: ['call'],
       skillCatalog: fixture.catalog,
@@ -520,7 +520,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
       providerName: 'test',
       providerType: 'openai-compatible' as const,
       sandbox: { enabled: false },
-      features: { networkBoundaryV1: false },
+      features: { networkBoundary: false },
       executionBoundary: {
         filesystemScope: 'read_only' as const,
         workspaceRoot: workspace,
@@ -533,7 +533,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
         sandboxUnavailable: 'verified_in_process_read_only' as const,
       },
     };
-    const requested = await executeTestRuntimeToolsV1({
+    const requested = await executeTestRuntimeTools({
       state,
       toolCallIds: ['call'],
       taskConfig,
@@ -550,7 +550,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
     state.tools.calls.call!.approvalGrant = 'approve_once';
     state.tools.calls.call!.approvalHash = approval.approval.approvalHash;
     const decisions: unknown[] = [];
-    const executed = await executeTestRuntimeToolsV1({
+    const executed = await executeTestRuntimeTools({
       state,
       toolCallIds: ['call'],
       taskConfig,

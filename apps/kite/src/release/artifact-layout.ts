@@ -52,7 +52,7 @@ const SYNTHETIC_SIGNATURE_KEYS = [
   'version',
 ] as const;
 
-export interface ReleaseManifestV1 {
+export interface ReleaseManifest {
   version: 1;
   productVersion: string;
   commitSha: string;
@@ -78,7 +78,7 @@ export interface ReleaseManifestV1 {
  * A deliberately non-distributable signature fixture. The filename reserves
  * the detached bundle slot, but this object is not a Sigstore production bundle.
  */
-export interface SyntheticSignatureBundleV1 {
+export interface SyntheticSignatureBundle {
   version: 1;
   kind: typeof SYNTHETIC_SIGNATURE_KIND;
   signedObject: 'canonical-release-manifest-v1';
@@ -125,12 +125,12 @@ export function releaseArtifactLayout(directory: string): ReleaseArtifactLayout 
   };
 }
 
-export function encodeReleaseManifest(manifest: ReleaseManifestV1): Uint8Array {
+export function encodeReleaseManifest(manifest: ReleaseManifest): Uint8Array {
   validateReleaseManifest(manifest);
   return canonicalJsonBytes(manifest);
 }
 
-export function decodeReleaseManifest(input: string | Uint8Array): ReleaseManifestV1 {
+export function decodeReleaseManifest(input: string | Uint8Array): ReleaseManifest {
   let value: unknown;
   try {
     value = parseCanonicalJson(input);
@@ -141,12 +141,12 @@ export function decodeReleaseManifest(input: string | Uint8Array): ReleaseManife
   return value;
 }
 
-export function encodeSyntheticSignature(bundle: SyntheticSignatureBundleV1): Uint8Array {
+export function encodeSyntheticSignature(bundle: SyntheticSignatureBundle): Uint8Array {
   validateSyntheticSignatureBundle(bundle);
   return canonicalJsonBytes(bundle);
 }
 
-export function decodeSyntheticSignature(input: string | Uint8Array): SyntheticSignatureBundleV1 {
+export function decodeSyntheticSignature(input: string | Uint8Array): SyntheticSignatureBundle {
   let value: unknown;
   try {
     value = parseCanonicalJson(input);
@@ -157,18 +157,18 @@ export function decodeSyntheticSignature(input: string | Uint8Array): SyntheticS
   return value;
 }
 
-export function validateReleaseManifest(value: unknown): asserts value is ReleaseManifestV1 {
-  const manifest = expectExactObject(value, RELEASE_MANIFEST_KEYS, 'ReleaseManifestV1');
-  if (manifest.version !== 1) schemaError('ReleaseManifestV1.version must equal 1.');
+export function validateReleaseManifest(value: unknown): asserts value is ReleaseManifest {
+  const manifest = expectExactObject(value, RELEASE_MANIFEST_KEYS, 'ReleaseManifest');
+  if (manifest.version !== 1) schemaError('ReleaseManifest.version must equal 1.');
   expectNonEmptyString(manifest.productVersion, 'productVersion');
   if (typeof manifest.commitSha !== 'string' || !/^[0-9a-f]{40}$/.test(manifest.commitSha)) {
-    schemaError('ReleaseManifestV1.commitSha must be a lowercase 40-character Git SHA.');
+    schemaError('ReleaseManifest.commitSha must be a lowercase 40-character Git SHA.');
   }
   if (
     typeof manifest.buildTimestamp !== 'string' ||
     !isCanonicalTimestamp(manifest.buildTimestamp)
   ) {
-    schemaError('ReleaseManifestV1.buildTimestamp must be a canonical UTC ISO timestamp.');
+    schemaError('ReleaseManifest.buildTimestamp must be a canonical UTC ISO timestamp.');
   }
   expectNonEmptyString(manifest.bunVersion, 'bunVersion');
   for (const field of [
@@ -191,7 +191,7 @@ export function validateReleaseManifest(value: unknown): asserts value is Releas
     !Number.isSafeInteger(manifest.runtimeSchemaVersion) ||
     manifest.runtimeSchemaVersion < 1
   ) {
-    schemaError('ReleaseManifestV1.runtimeSchemaVersion must be a positive safe integer.');
+    schemaError('ReleaseManifest.runtimeSchemaVersion must be a positive safe integer.');
   }
   expectSortedUniqueStrings(manifest.supportedPlatforms, 'supportedPlatforms');
   expectSortedUniqueStrings(manifest.supportedProviderTypes, 'supportedProviderTypes');
@@ -199,8 +199,8 @@ export function validateReleaseManifest(value: unknown): asserts value is Releas
 
 export function validateSyntheticSignatureBundle(
   value: unknown,
-): asserts value is SyntheticSignatureBundleV1 {
-  const bundle = expectExactObject(value, SYNTHETIC_SIGNATURE_KEYS, 'SyntheticSignatureBundleV1');
+): asserts value is SyntheticSignatureBundle {
+  const bundle = expectExactObject(value, SYNTHETIC_SIGNATURE_KEYS, 'SyntheticSignatureBundle');
   if (bundle.version !== 1) schemaError('Synthetic signature version must equal 1.');
   if (bundle.kind !== SYNTHETIC_SIGNATURE_KIND) {
     schemaError('Only the non-distributable synthetic signature fixture is accepted.');
@@ -253,7 +253,7 @@ function expectExactObject<const Keys extends readonly string[]>(
 
 function expectNonEmptyString(value: unknown, field: string): asserts value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 256) {
-    schemaError(`ReleaseManifestV1.${field} must be a non-empty bounded string.`);
+    schemaError(`ReleaseManifest.${field} must be a non-empty bounded string.`);
   }
 }
 
@@ -265,11 +265,11 @@ function expectSha256(value: unknown, field: string): asserts value is `sha256:$
 
 function expectSortedUniqueStrings(value: unknown, field: string): asserts value is string[] {
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string' || !entry)) {
-    schemaError(`ReleaseManifestV1.${field} must be an array of non-empty strings.`);
+    schemaError(`ReleaseManifest.${field} must be an array of non-empty strings.`);
   }
   const sorted = [...value].sort(compareStrings);
   if (value.some((entry, index) => entry !== sorted[index] || entry === value[index - 1])) {
-    schemaError(`ReleaseManifestV1.${field} must be sorted and unique.`);
+    schemaError(`ReleaseManifest.${field} must be sorted and unique.`);
   }
 }
 

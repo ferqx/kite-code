@@ -1,4 +1,4 @@
-import type { AuthorizationSourceV1 } from '@kite/agent-kernel';
+import type { AuthorizationSource } from '@kite/agent-kernel';
 import {
   type AgentState,
   type AgentTaskState,
@@ -12,7 +12,7 @@ import {
   type PlanningState,
   type WorkspaceAccess,
 } from '@kite/agent-kernel';
-import { createLiveRuntimeIdSourceV1, type RuntimeIdSourceV1 } from './runtime-id-source';
+import { createLiveRuntimeIdSource, type RuntimeIdSource } from './runtime-id-source';
 
 /**
  * Mutable construction view for State 25 fixtures and compatibility adapters.
@@ -32,7 +32,7 @@ export type ToolCallRecord = MutableState<AgentToolCallState>;
 export type ToolCallStatus = AgentToolCallState['status'];
 export type ToolResultMeta = AgentToolResultMeta;
 
-export interface RuntimeHostStateInitialStateInputV1 {
+export interface RuntimeHostStateInitialStateInput {
   readonly threadId: string;
   readonly userId: string;
   readonly workspace: string;
@@ -41,11 +41,11 @@ export interface RuntimeHostStateInitialStateInputV1 {
   readonly recoveryIdentityKey: string;
   readonly interactionMode?: InteractionMode;
   readonly authorizationMode?: 'default' | 'full_access';
-  readonly authorizationSource?: AuthorizationSourceV1;
+  readonly authorizationSource?: AuthorizationSource;
   readonly workspaceAccess?: WorkspaceAccess;
   readonly phase?: 'planning' | 'building';
   /** Test callers may inject the same deterministic Host source. */
-  readonly runtimeIdSource?: RuntimeIdSourceV1;
+  readonly runtimeIdSource?: RuntimeIdSource;
 }
 
 /**
@@ -54,10 +54,10 @@ export interface RuntimeHostStateInitialStateInputV1 {
  * Agent Kernel receives only Host-supplied identity/time facts. This preserves
  * the former test input shape without reintroducing a second State owner.
  */
-export function createRuntimeHostStateInitialStateV1(
-  input: RuntimeHostStateInitialStateInputV1,
+export function createRuntimeHostStateInitialState(
+  input: RuntimeHostStateInitialStateInput,
 ): RuntimeState {
-  const source = input.runtimeIdSource ?? createLiveRuntimeIdSourceV1();
+  const source = input.runtimeIdSource ?? createLiveRuntimeIdSource();
   const authorizationMode = input.authorizationMode ?? 'default';
   const base = {
     threadId: input.threadId,

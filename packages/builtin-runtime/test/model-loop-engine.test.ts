@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  type BuiltinSubagentModelLoopCoordinatorV1,
-  createBuiltinSubagentModelLoopEngineV1,
+  type BuiltinSubagentModelLoopCoordinator,
+  createBuiltinSubagentModelLoopEngine,
 } from '@kite/builtin-runtime';
 import type { AIMessage, BaseMessage, ToolMessage } from '@kite/builtin-runtime/model';
 import {
   aiMessage,
-  type BuiltinModelEventV1,
-  type BuiltinSubagentModelStepInputV1,
-  type BuiltinSubagentModelStepResultV1,
+  type BuiltinModelEvent,
+  type BuiltinSubagentModelStepInput,
+  type BuiltinSubagentModelStepResult,
   createChatModel,
   humanMessage,
-  type ModelInvocationStateViewV1,
-  type ModelRuntimeConfigV1,
+  type ModelInvocationStateView,
+  type ModelRuntimeConfig,
   toolMessage,
 } from '@kite/builtin-runtime/model';
 import type { ToolSet } from 'ai';
 
-const CONFIG: ModelRuntimeConfigV1 = Object.freeze({
+const CONFIG: ModelRuntimeConfig = Object.freeze({
   apiKey: 'model-loop-engine-test-key',
   baseURL: 'https://model-loop-engine.invalid/v1',
   modelName: 'model-loop-engine-test',
@@ -56,7 +56,7 @@ const PERSISTENCE = {
 };
 
 function coordinatorFor(responses: readonly AIMessage[]): {
-  coordinator: BuiltinSubagentModelLoopCoordinatorV1;
+  coordinator: BuiltinSubagentModelLoopCoordinator;
   calls: Array<{
     readonly messages: readonly BaseMessage[];
     readonly estimatedInputTokens: number;
@@ -69,13 +69,13 @@ function coordinatorFor(responses: readonly AIMessage[]): {
     readonly estimatedInputTokens: number;
     readonly maxOutputTokens?: number;
   }> = [];
-  const coordinator: BuiltinSubagentModelLoopCoordinatorV1 = {
-    executeSubagentModelStepV1: async <
-      State extends ModelInvocationStateViewV1,
-      Event extends BuiltinModelEventV1,
+  const coordinator: BuiltinSubagentModelLoopCoordinator = {
+    executeSubagentModelStep: async <
+      State extends ModelInvocationStateView,
+      Event extends BuiltinModelEvent,
     >(
-      input: BuiltinSubagentModelStepInputV1<State, Event>,
-    ): Promise<BuiltinSubagentModelStepResultV1> => {
+      input: BuiltinSubagentModelStepInput<State, Event>,
+    ): Promise<BuiltinSubagentModelStepResult> => {
       const response = responses[responseIndex];
       if (!response) throw new Error('model-loop test ran past its response fixture.');
       responseIndex += 1;
@@ -95,8 +95,8 @@ function coordinatorFor(responses: readonly AIMessage[]): {
 }
 
 function inputFor(
-  coordinator: BuiltinSubagentModelLoopCoordinatorV1,
-  overrides: Partial<Parameters<typeof createBuiltinSubagentModelLoopEngineV1>[0]> = {},
+  coordinator: BuiltinSubagentModelLoopCoordinator,
+  overrides: Partial<Parameters<typeof createBuiltinSubagentModelLoopEngine>[0]> = {},
 ) {
   return {
     coordinator,
@@ -126,7 +126,7 @@ describe('Builtin subagent model loop engine', () => {
     const second = aiMessage({ content: 'bounded child complete' });
     const fixture = coordinatorFor([first, second]);
     const provenanceOrdinals: number[] = [];
-    const engine = createBuiltinSubagentModelLoopEngineV1(
+    const engine = createBuiltinSubagentModelLoopEngine(
       inputFor(fixture.coordinator, {
         startModelInvocationOrdinal: 7,
         provenance: ({ modelInvocationOrdinal }) => {
@@ -179,9 +179,7 @@ describe('Builtin subagent model loop engine', () => {
   test('returns terminal text and frozen transcript when the model has no tool calls', async () => {
     const response = aiMessage({ content: [{ type: 'text', text: 'terminal text' }] });
     const fixture = coordinatorFor([response]);
-    const result = await createBuiltinSubagentModelLoopEngineV1(
-      inputFor(fixture.coordinator),
-    ).run();
+    const result = await createBuiltinSubagentModelLoopEngine(inputFor(fixture.coordinator)).run();
 
     expect(result).toMatchObject({
       kind: 'completed',
@@ -206,7 +204,7 @@ describe('Builtin subagent model loop engine', () => {
       release = resolve;
     });
     let consumerCalls = 0;
-    const run = createBuiltinSubagentModelLoopEngineV1(
+    const run = createBuiltinSubagentModelLoopEngine(
       inputFor(fixture.coordinator, {
         consumer: {
           consume: async ({ append, response }) => {
@@ -236,7 +234,7 @@ describe('Builtin subagent model loop engine', () => {
     const controller = new AbortController();
     controller.abort();
     await expect(
-      createBuiltinSubagentModelLoopEngineV1(
+      createBuiltinSubagentModelLoopEngine(
         inputFor(fixture.coordinator, { signal: controller.signal }),
       ).run(),
     ).rejects.toMatchObject({ code: 'aborted' });
@@ -252,7 +250,7 @@ describe('Builtin subagent model loop engine', () => {
       kind: 'terminal' as const,
       value: Object.freeze({ status: 'suspended', reason: 'approval' }),
     });
-    const result = await createBuiltinSubagentModelLoopEngineV1(
+    const result = await createBuiltinSubagentModelLoopEngine(
       inputFor(fixture.coordinator, {
         consumer: {
           consume: () => terminal,
@@ -272,7 +270,7 @@ describe('Builtin subagent model loop engine', () => {
     const fixture = coordinatorFor([first, second]);
     let appendRejected = false;
     const sourceTool = toolMessage({ content: 'source', tool_call_id: 'call-guard' });
-    const result = await createBuiltinSubagentModelLoopEngineV1(
+    const result = await createBuiltinSubagentModelLoopEngine(
       inputFor(fixture.coordinator, {
         consumer: {
           consume: ({ transcript, append }) => {

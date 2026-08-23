@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
-import { type SandboxBackend, sandboxSupportsFullModeV1 } from '#app/sandbox/types';
+import { type SandboxBackend, sandboxSupportsFullMode } from '#app/sandbox/types';
 import { useI18n } from '#app/tui/i18n';
 import { useTheme } from '#app/tui/theme';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
@@ -40,7 +40,7 @@ export default function PermissionSelector({
       description: translate('permission.fullDescription'),
     },
   ];
-  const fullAvailable = sandboxSupportsFullModeV1(sandboxBackend);
+  const fullAvailable = sandboxSupportsFullMode(sandboxBackend);
   const [selected, setSelected] = useState(() =>
     Math.max(
       0,

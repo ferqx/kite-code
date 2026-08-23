@@ -1,29 +1,29 @@
-export const RUNTIME_CONTRACT_SCHEMA_V1 = 'kite.runtime-contract.v1' as const;
-export const RUNTIME_COMMAND_SCHEMA_V1 = 'kite.runtime-command.v1' as const;
-export const RUNTIME_QUERY_SCHEMA_V1 = 'kite.runtime-query.v1' as const;
-export const RUNTIME_NOTIFICATION_SCHEMA_V1 = 'kite.runtime-notification.v1' as const;
-export const RUNTIME_PROJECTION_SCHEMA_V1 = 'kite.runtime-projection.v1' as const;
+export const RUNTIME_CONTRACT_SCHEMA_ = 'kite.runtime-contract.v1' as const;
+export const RUNTIME_COMMAND_SCHEMA_ = 'kite.runtime-command.v1' as const;
+export const RUNTIME_QUERY_SCHEMA_ = 'kite.runtime-query.v1' as const;
+export const RUNTIME_NOTIFICATION_SCHEMA_ = 'kite.runtime-notification.v1' as const;
+export const RUNTIME_PROJECTION_SCHEMA_ = 'kite.runtime-projection.v1' as const;
 
 export * from './capabilities';
 export * from './observability';
 export * from './presentation';
 
-export interface RuntimeContractBoundaryV1 {
+export interface RuntimeContractBoundary {
   readonly audience: 'kite-app';
   readonly transport: 'in-process';
   readonly revision: 'rmv1-03';
-  readonly schema: typeof RUNTIME_CONTRACT_SCHEMA_V1;
+  readonly schema: typeof RUNTIME_CONTRACT_SCHEMA_;
 }
 
-export const RUNTIME_CONTRACT_BOUNDARY_V1: RuntimeContractBoundaryV1 = Object.freeze({
+export const RUNTIME_CONTRACT_BOUNDARY_: RuntimeContractBoundary = Object.freeze({
   audience: 'kite-app',
   transport: 'in-process',
   revision: 'rmv1-03',
-  schema: RUNTIME_CONTRACT_SCHEMA_V1,
+  schema: RUNTIME_CONTRACT_SCHEMA_,
 });
 
 export interface RuntimeCommandBase {
-  readonly schema: typeof RUNTIME_COMMAND_SCHEMA_V1;
+  readonly schema: typeof RUNTIME_COMMAND_SCHEMA_;
   readonly commandId: string;
 }
 
@@ -193,7 +193,7 @@ export interface RuntimeWorkProjection {
 }
 
 export interface RuntimeSessionProjection {
-  readonly schema: typeof RUNTIME_PROJECTION_SCHEMA_V1;
+  readonly schema: typeof RUNTIME_PROJECTION_SCHEMA_;
   readonly sessionId: string;
   readonly revision: number;
   readonly displayName?: string;
@@ -220,24 +220,24 @@ export interface RuntimeContextProjection {
 }
 
 export type RuntimeQuery =
-  | { readonly schema: typeof RUNTIME_QUERY_SCHEMA_V1; readonly type: 'list_sessions' }
+  | { readonly schema: typeof RUNTIME_QUERY_SCHEMA_; readonly type: 'list_sessions' }
   | {
-      readonly schema: typeof RUNTIME_QUERY_SCHEMA_V1;
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
       readonly type: 'get_session_projection';
       readonly sessionId: string;
     }
   | {
-      readonly schema: typeof RUNTIME_QUERY_SCHEMA_V1;
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
       readonly type: 'get_context_status';
       readonly sessionId: string;
     }
   | {
-      readonly schema: typeof RUNTIME_QUERY_SCHEMA_V1;
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
       readonly type: 'list_checkpoints';
       readonly sessionId: string;
     }
   | {
-      readonly schema: typeof RUNTIME_QUERY_SCHEMA_V1;
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
       readonly type: 'get_rewind_preview';
       readonly sessionId: string;
       readonly checkpointId: string;
@@ -263,13 +263,13 @@ export type RuntimeQueryResult =
 export interface RuntimeProjectionDelta {
   readonly kind: 'snapshot' | 'session' | 'work' | 'turn' | 'interaction' | 'evidence';
   readonly session: RuntimeSessionProjection;
-  /** App-safe legacy presentation payload retained only during RMV1 migration. */
+  /** App-safe legacy presentation payload retained only during RM migration. */
   readonly presentation?: ClientPresentationEvent;
 }
 
 /**
  * A presentation-only compatibility payload. It carries no state/store/provider
- * authority. RMV1-16 removes it when the remaining App presentation handlers
+ * authority. RM-16 removes it when the remaining App presentation handlers
  * have migrated to typed Runtime projections.
  */
 export type ClientPresentationEvent = Readonly<{ type: string } & Record<string, unknown>>;
@@ -288,14 +288,14 @@ export type RuntimeStreamPayload =
 
 export type RuntimeNotification =
   | {
-      readonly schema: typeof RUNTIME_NOTIFICATION_SCHEMA_V1;
+      readonly schema: typeof RUNTIME_NOTIFICATION_SCHEMA_;
       readonly durability: 'durable';
       readonly sessionId: string;
       readonly revision: number;
       readonly projection: RuntimeProjectionDelta;
     }
   | {
-      readonly schema: typeof RUNTIME_NOTIFICATION_SCHEMA_V1;
+      readonly schema: typeof RUNTIME_NOTIFICATION_SCHEMA_;
       readonly durability: 'ephemeral';
       readonly sessionId: string;
       readonly workId: string;
@@ -338,7 +338,7 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   const candidate = value as Partial<RuntimeCommand>;
   if (
     !(
-      candidate.schema === RUNTIME_COMMAND_SCHEMA_V1 &&
+      candidate.schema === RUNTIME_COMMAND_SCHEMA_ &&
       typeof candidate.commandId === 'string' &&
       candidate.commandId.length > 0 &&
       typeof candidate.type === 'string' &&

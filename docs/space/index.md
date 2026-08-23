@@ -44,6 +44,7 @@
 | `../active/tui-localization.md` | active | TUI 中英文文案、用户级 `language` 偏好、地区解析、Static 重建与展示层边界 | 修改 TUI 本地化、`/language`、自有交互文案、语言切换或启动前 locale 读取时。 |
 | `../active/tui-e2e-testing-limits.md` | active | PTY 能力、平台差异与测试分层边界 | 编写 TUI E2E、处理 PTY flaky 或选择测试层次时。 |
 | `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
+| `../active/pre-release-architecture.md` | active | 未发布阶段的无版本命名 clean cutover、唯一 composition root、兼容路径零保留与静态门禁 | 修改生产标识符、包导出、兼容路径、模块边界或发布前架构门禁时必读。 |
 | `../active/plan-mode-implementation.md` | active | Plan Artifact、planning/building、plan_review 与恢复 | 修改 Plan 生命周期、工具、策略或 TUI 审核交互时。 |
 | `../active/plan-artifact-lifecycle.md` | active | Plan Artifact 持久化、提交校验、审核交互与 Runtime 恢复边界 | 修改 `write_plan`、Plan review、Task 生命周期、Runtime Context、TUI/CLI 审核展示或会话恢复时必读。 |
 | `../active/completion-guard.md` | active | CompletionGuard V1、完成前的可审计 blocker 与一次纠正语义 | 修改 Runtime 完成语义、Scheduler、Runner、Plan/Skill 生命周期或相关测试时必读。 |

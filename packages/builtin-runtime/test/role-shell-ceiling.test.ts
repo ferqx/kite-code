@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   getRoleConfig,
-  rejectShellOutsideSubAgentRoleCeilingV1,
-  resolveSubAgentShellExecutorV1,
+  rejectShellOutsideSubAgentRoleCeiling,
+  resolveSubAgentShellExecutor,
 } from '../src/index';
 import type { ShellInput, ShellResult } from '../src/sandbox';
 
@@ -22,10 +22,7 @@ function successfulResult(input: ShellInput): ShellResult {
 
 describe('Builtin subagent shell role ceiling', () => {
   test('returns the stable rejection envelope without invoking a shell', () => {
-    const result = rejectShellOutsideSubAgentRoleCeilingV1(
-      getRoleConfig('explore'),
-      'rm output.txt',
-    );
+    const result = rejectShellOutsideSubAgentRoleCeiling(getRoleConfig('explore'), 'rm output.txt');
 
     expect(result).toEqual({
       ok: false,
@@ -35,7 +32,7 @@ describe('Builtin subagent shell role ceiling', () => {
       stderr:
         'Command rejected: "rm output.txt" is not a read-only command. This sub-agent has read-only access only.',
       status: 'rejected',
-      classifierAdviceV1: {
+      classifierAdvice: {
         detailCode: 'policy_denied',
         disposition: 'never',
         maximumAdditionalCalls: 0,
@@ -46,14 +43,12 @@ describe('Builtin subagent shell role ceiling', () => {
   });
 
   test('allows a proven read-only command for restricted roles', () => {
-    expect(
-      rejectShellOutsideSubAgentRoleCeilingV1(getRoleConfig('explore'), 'pwd'),
-    ).toBeUndefined();
+    expect(rejectShellOutsideSubAgentRoleCeiling(getRoleConfig('explore'), 'pwd')).toBeUndefined();
   });
 
   test('fails closed before the supplied executor for a restricted role', async () => {
     let calls = 0;
-    const executor = resolveSubAgentShellExecutorV1(getRoleConfig('explore'), async (input) => {
+    const executor = resolveSubAgentShellExecutor(getRoleConfig('explore'), async (input) => {
       calls += 1;
       return successfulResult(input);
     });
@@ -69,7 +64,7 @@ describe('Builtin subagent shell role ceiling', () => {
 
   test('does not add a ceiling to the unrestricted code role', async () => {
     let calls = 0;
-    const executor = resolveSubAgentShellExecutorV1(getRoleConfig('code'), async (input) => {
+    const executor = resolveSubAgentShellExecutor(getRoleConfig('code'), async (input) => {
       calls += 1;
       return successfulResult(input);
     });

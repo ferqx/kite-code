@@ -7,15 +7,15 @@ import {
   parseCanonicalJson,
   sha256DomainSeparated,
 } from '../release/canonical-json';
-import { releaseArtifactIdentityV1Schema } from '../release/evidence-schema';
+import { releaseArtifactIdentitySchema } from '../release/evidence-schema';
 import {
-  OBSERVABILITY_BASELINE_METRICS_V1,
-  observabilityBaselineG0V1Schema,
-  observabilityBaselineGithubSourceV1Schema,
-  observabilityBaselinePolicyIdentityV1Schema,
-  observabilityBaselineRouteIdentityV1Schema,
-  rebuildObservabilityBaselineV1,
-  verifyObservabilityBaselineLedgerV1,
+  OBSERVABILITY_BASELINE_METRICS_,
+  observabilityBaselineG0Schema,
+  observabilityBaselineGithubSourceSchema,
+  observabilityBaselinePolicyIdentitySchema,
+  observabilityBaselineRouteIdentitySchema,
+  rebuildObservabilityBaseline,
+  verifyObservabilityBaselineLedger,
 } from './observability-baseline-ledger';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -28,40 +28,40 @@ const rateSchema = z
   .strict();
 const metricsSchema = z
   .object(
-    Object.fromEntries(OBSERVABILITY_BASELINE_METRICS_V1.map((metric) => [metric, rateSchema])) as {
-      [Key in (typeof OBSERVABILITY_BASELINE_METRICS_V1)[number]]: typeof rateSchema;
+    Object.fromEntries(OBSERVABILITY_BASELINE_METRICS_.map((metric) => [metric, rateSchema])) as {
+      [Key in (typeof OBSERVABILITY_BASELINE_METRICS_)[number]]: typeof rateSchema;
     },
   )
   .strict();
 const rebuildSchema = z
   .object({
-    schema: z.literal('ObservabilityBaselineRebuildV1'),
+    schema: z.literal('ObservabilityBaselineRebuild'),
     startedAt: z.iso.datetime({ offset: true }),
     endedAt: z.iso.datetime({ offset: true }),
     durationSeconds: z.number().int().nonnegative(),
     sampleCount: z.number().int().nonnegative(),
     noData: z.boolean(),
     droppedSampleCount: z.literal(0),
-    unknownMetrics: z.array(z.enum(OBSERVABILITY_BASELINE_METRICS_V1)),
+    unknownMetrics: z.array(z.enum(OBSERVABILITY_BASELINE_METRICS_)),
     metrics: metricsSchema,
-    g0: observabilityBaselineG0V1Schema,
+    g0: observabilityBaselineG0Schema,
     g1Failures: z.number().int().nonnegative(),
     ledgerDigest: digestSchema,
     rebuildDigest: digestSchema,
   })
   .strict();
 
-export const observabilityBaselineReportV1Schema = z
+export const observabilityBaselineReportSchema = z
   .object({
-    schema: z.literal('ObservabilityBaselineReportV1'),
+    schema: z.literal('ObservabilityBaselineReport'),
     status: z.literal('blocked'),
     baselineState: z.enum(['unknown', 'observed_unqualified']),
     evidenceEligible: z.literal(false),
     sourceAuthority: z.literal('unconfigured'),
-    artifactIdentity: releaseArtifactIdentityV1Schema,
-    routeIdentity: observabilityBaselineRouteIdentityV1Schema,
-    policyIdentity: observabilityBaselinePolicyIdentityV1Schema,
-    source: observabilityBaselineGithubSourceV1Schema,
+    artifactIdentity: releaseArtifactIdentitySchema,
+    routeIdentity: observabilityBaselineRouteIdentitySchema,
+    policyIdentity: observabilityBaselinePolicyIdentitySchema,
+    source: observabilityBaselineGithubSourceSchema,
     retainedLedgerDigest: digestSchema,
     rebuild: rebuildSchema,
     reasonCodes: z.array(z.string().min(1)),
@@ -69,18 +69,18 @@ export const observabilityBaselineReportV1Schema = z
   })
   .strict();
 
-export type ObservabilityBaselineReportV1 = z.infer<typeof observabilityBaselineReportV1Schema>;
+export type ObservabilityBaselineReport = z.infer<typeof observabilityBaselineReportSchema>;
 
 /**
  * Rebuilds a production-shaped report from retained metadata only. The local
  * producer deliberately has no authority input and can therefore never mint a
  * production-eligible baseline.
  */
-export function produceObservabilityBaselineReportV1(
+export function produceObservabilityBaselineReport(
   rawLedger: unknown,
-): ObservabilityBaselineReportV1 {
-  const ledger = verifyObservabilityBaselineLedgerV1(rawLedger);
-  const rebuild = rebuildObservabilityBaselineV1(ledger);
+): ObservabilityBaselineReport {
+  const ledger = verifyObservabilityBaselineLedger(rawLedger);
+  const rebuild = rebuildObservabilityBaseline(ledger);
   const reasons = new Set<string>([
     'source_owned_baseline_authority_unconfigured',
     'production_attestation_verifier_unconfigured',
@@ -97,7 +97,7 @@ export function produceObservabilityBaselineReportV1(
   if (rebuild.g1Failures !== 0) reasons.add('g1_observed');
 
   const withoutDigest = {
-    schema: 'ObservabilityBaselineReportV1' as const,
+    schema: 'ObservabilityBaselineReport' as const,
     status: 'blocked' as const,
     baselineState:
       rebuild.noData || rebuild.unknownMetrics.length > 0
@@ -113,7 +113,7 @@ export function produceObservabilityBaselineReportV1(
     rebuild,
     reasonCodes: [...reasons].sort(compareCodeUnits),
   };
-  return observabilityBaselineReportV1Schema.parse({
+  return observabilityBaselineReportSchema.parse({
     ...withoutDigest,
     reportDigest: sha256DomainSeparated(
       'kite.operations.observability-baseline-report.v1',
@@ -145,7 +145,7 @@ function required(args: Map<string, string>, name: string): string {
 if (import.meta.main) {
   const args = readArgs(process.argv.slice(2));
   const ledger = parseCanonicalJson(readFileSync(resolve(required(args, 'ledger'))));
-  const report = produceObservabilityBaselineReportV1(ledger);
+  const report = produceObservabilityBaselineReport(ledger);
   writeFileSync(resolve(required(args, 'output')), canonicalJsonBytes(report));
   process.stdout.write(`${JSON.stringify(report)}\n`);
 }

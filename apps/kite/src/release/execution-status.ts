@@ -1,13 +1,13 @@
 import type {
-  ExecutionBoundaryAdmissionReasonV1,
-  ExecutionBoundaryV1,
-  ExecutionCapabilitySurfaceV1,
+  ExecutionBoundary,
+  ExecutionBoundaryAdmissionReason,
+  ExecutionCapabilitySurface,
   SandboxBackend,
   SandboxRuntime,
 } from '@kite/builtin-runtime/sandbox';
 import type { AgentConfig } from '#app/config';
 
-export const EXECUTION_STATUS_CAPABILITIES_V1 = [
+export const EXECUTION_STATUS_CAPABILITIES_ = [
   'network',
   'process',
   'write',
@@ -18,11 +18,11 @@ export const EXECUTION_STATUS_CAPABILITIES_V1 = [
   'gitInspect',
 ] as const;
 
-export type ExecutionStatusCapabilityV1 = (typeof EXECUTION_STATUS_CAPABILITIES_V1)[number];
-export type ExecutionWorktreeModeV1 = 'current_checkout' | 'controller_worktree';
+export type ExecutionStatusCapability = (typeof EXECUTION_STATUS_CAPABILITIES_)[number];
+export type ExecutionWorktreeMode = 'current_checkout' | 'controller_worktree';
 
-export type ExecutionStatusDisabledReasonV1 =
-  | Exclude<ExecutionBoundaryAdmissionReasonV1, 'admitted' | 'verified_in_process_read_only'>
+export type ExecutionStatusDisabledReason =
+  | Exclude<ExecutionBoundaryAdmissionReason, 'admitted' | 'verified_in_process_read_only'>
   | 'capability_not_admitted'
   | 'controller_ownership_unverified'
   | 'controller_worktree_disabled'
@@ -31,8 +31,8 @@ export type ExecutionStatusDisabledReasonV1 =
   | 'sandbox_unavailable'
   | 'sandbox_verified_read_only_fallback';
 
-type ExecutionBoundaryStatusSourceV1 = Pick<
-  ExecutionBoundaryV1,
+type ExecutionBoundaryStatusSource = Pick<
+  ExecutionBoundary,
   | 'filesystemScope'
   | 'networkMode'
   | 'networkAllowlist'
@@ -40,29 +40,26 @@ type ExecutionBoundaryStatusSourceV1 = Pick<
   | 'sandboxUnavailable'
 >;
 
-type ExecutionCapabilityStatusSourceV1 = Pick<
-  ExecutionCapabilitySurfaceV1,
-  ExecutionStatusCapabilityV1
->;
+type ExecutionCapabilityStatusSource = Pick<ExecutionCapabilitySurface, ExecutionStatusCapability>;
 
-export interface ExecutionStatusProjectionInputV1 {
+export interface ExecutionStatusProjectionInput {
   /** Runtime-selected backend, not the release-profile request. */
   sandboxBackend: SandboxBackend;
   sandboxAvailable: boolean;
-  boundary: ExecutionBoundaryStatusSourceV1;
-  capabilitySurface: ExecutionCapabilityStatusSourceV1;
-  worktreeMode: ExecutionWorktreeModeV1;
+  boundary: ExecutionBoundaryStatusSource;
+  capabilitySurface: ExecutionCapabilityStatusSource;
+  worktreeMode: ExecutionWorktreeMode;
   controllerOwned: boolean;
   capabilityDisabledReasons?: Readonly<
-    Partial<Record<ExecutionStatusCapabilityV1, readonly ExecutionStatusDisabledReasonV1[]>>
+    Partial<Record<ExecutionStatusCapability, readonly ExecutionStatusDisabledReason[]>>
   >;
-  worktreeDisabledReasons?: readonly ExecutionStatusDisabledReasonV1[];
+  worktreeDisabledReasons?: readonly ExecutionStatusDisabledReason[];
 }
 
-export interface ExecutionStatusCapabilityProjectionV1 {
-  capability: ExecutionStatusCapabilityV1;
+export interface ExecutionStatusCapabilityProjection {
+  capability: ExecutionStatusCapability;
   enabled: boolean;
-  disabledReasons: readonly ExecutionStatusDisabledReasonV1[];
+  disabledReasons: readonly ExecutionStatusDisabledReason[];
 }
 
 /**
@@ -70,59 +67,59 @@ export interface ExecutionStatusCapabilityProjectionV1 {
  * allowlisted hosts, process limits, qualification proof, and capability
  * catalog details, so it is not a second release profile or model surface.
  */
-export interface ExecutionStatusProjectionV1 {
+export interface ExecutionStatusProjection {
   version: 1;
   sandbox: {
     backend: SandboxBackend;
     available: boolean;
-    unavailablePolicy: ExecutionBoundaryV1['sandboxUnavailable'];
+    unavailablePolicy: ExecutionBoundary['sandboxUnavailable'];
     fallbackActive: boolean;
   };
-  filesystemScope: ExecutionBoundaryV1['filesystemScope'];
+  filesystemScope: ExecutionBoundary['filesystemScope'];
   network: {
-    mode: ExecutionBoundaryV1['networkMode'];
+    mode: ExecutionBoundary['networkMode'];
     allowlistedHostCount: number;
   };
   protectedPaths: {
-    policy: ExecutionBoundaryV1['protectedPathPolicy'];
+    policy: ExecutionBoundary['protectedPathPolicy'];
   };
   controllerWorktree: {
-    mode: ExecutionWorktreeModeV1;
+    mode: ExecutionWorktreeMode;
     controllerOwned: boolean;
     active: boolean;
-    disabledReasons: readonly ExecutionStatusDisabledReasonV1[];
+    disabledReasons: readonly ExecutionStatusDisabledReason[];
   };
-  capabilities: readonly ExecutionStatusCapabilityProjectionV1[];
+  capabilities: readonly ExecutionStatusCapabilityProjection[];
 }
 
-type AdmittedExecutionConfigV1 = AgentConfig & {
-  executionBoundary: ExecutionBoundaryV1;
-  executionCapabilitySurface: ExecutionCapabilitySurfaceV1;
+type AdmittedExecutionConfig = AgentConfig & {
+  executionBoundary: ExecutionBoundary;
+  executionCapabilitySurface: ExecutionCapabilitySurface;
   productionExecution: { qualificationId: string };
 };
 
-export interface ExecutionStatusWorktreeInputV1 {
-  mode: ExecutionWorktreeModeV1;
+export interface ExecutionStatusWorktreeInput {
+  mode: ExecutionWorktreeMode;
   controllerOwned: boolean;
-  disabledReasons?: readonly ExecutionStatusDisabledReasonV1[];
+  disabledReasons?: readonly ExecutionStatusDisabledReason[];
 }
 
 /**
  * Presentation-only adapter for a config that has already crossed the Core
  * production admission gate. This function does not grant capabilities.
  */
-export function tryProjectAdmittedExecutionStatusV1(input: {
+export function tryProjectAdmittedExecutionStatus(input: {
   config: AgentConfig;
   sandboxRuntime: Pick<SandboxRuntime, 'backend' | 'available'>;
-  worktree?: ExecutionStatusWorktreeInputV1;
-}): ExecutionStatusProjectionV1 | null {
-  if (!isAdmittedExecutionConfigV1(input.config)) return null;
+  worktree?: ExecutionStatusWorktreeInput;
+}): ExecutionStatusProjection | null {
+  if (!isAdmittedExecutionConfig(input.config)) return null;
   const worktree = input.worktree ?? {
     mode: 'current_checkout' as const,
     controllerOwned: false,
     disabledReasons: ['controller_worktree_disabled'] as const,
   };
-  return projectExecutionStatusV1({
+  return projectExecutionStatus({
     sandboxBackend: input.sandboxRuntime.backend,
     sandboxAvailable: input.sandboxRuntime.available,
     boundary: input.config.executionBoundary,
@@ -136,7 +133,7 @@ export function tryProjectAdmittedExecutionStatusV1(input: {
   });
 }
 
-export function formatExecutionStatusV1(status: ExecutionStatusProjectionV1): string {
+export function formatExecutionStatus(status: ExecutionStatusProjection): string {
   const capabilities = status.capabilities
     .map(({ capability, enabled, disabledReasons }) =>
       enabled
@@ -158,7 +155,7 @@ export function formatExecutionStatusV1(status: ExecutionStatusProjectionV1): st
   ].join('\n');
 }
 
-export function formatUnadmittedExecutionStatusV1(
+export function formatUnadmittedExecutionStatus(
   sandboxRuntime: Pick<SandboxRuntime, 'backend' | 'available'>,
 ): string {
   return [
@@ -168,9 +165,9 @@ export function formatUnadmittedExecutionStatusV1(
   ].join('\n');
 }
 
-export function projectExecutionStatusV1(
-  input: ExecutionStatusProjectionInputV1,
-): ExecutionStatusProjectionV1 {
+export function projectExecutionStatus(
+  input: ExecutionStatusProjectionInput,
+): ExecutionStatusProjection {
   const fallbackActive =
     !input.sandboxAvailable &&
     input.boundary.sandboxUnavailable === 'verified_in_process_read_only';
@@ -207,7 +204,7 @@ export function projectExecutionStatusV1(
               : 'controller_worktree_disabled',
           ]),
     },
-    capabilities: EXECUTION_STATUS_CAPABILITIES_V1.map((capability) => {
+    capabilities: EXECUTION_STATUS_CAPABILITIES_.map((capability) => {
       const enabled = input.capabilitySurface[capability];
       const disabledReasons = [
         ...defaultCapabilityDisabledReasons(input, capability, fallbackActive),
@@ -224,11 +221,11 @@ export function projectExecutionStatusV1(
 }
 
 function defaultCapabilityDisabledReasons(
-  input: ExecutionStatusProjectionInputV1,
-  capability: ExecutionStatusCapabilityV1,
+  input: ExecutionStatusProjectionInput,
+  capability: ExecutionStatusCapability,
   fallbackActive: boolean,
-): ExecutionStatusDisabledReasonV1[] {
-  const reasons: ExecutionStatusDisabledReasonV1[] = [];
+): ExecutionStatusDisabledReason[] {
+  const reasons: ExecutionStatusDisabledReason[] = [];
   if (!input.sandboxAvailable) {
     reasons.push(fallbackActive ? 'sandbox_verified_read_only_fallback' : 'sandbox_unavailable');
   }
@@ -245,8 +242,8 @@ function defaultCapabilityDisabledReasons(
 }
 
 function normalizeReasons(
-  reasons: readonly ExecutionStatusDisabledReasonV1[],
-): ExecutionStatusDisabledReasonV1[] {
+  reasons: readonly ExecutionStatusDisabledReason[],
+): ExecutionStatusDisabledReason[] {
   return [...new Set(reasons)].sort(compareCodeUnits);
 }
 
@@ -254,7 +251,7 @@ function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function isAdmittedExecutionConfigV1(config: AgentConfig): config is AdmittedExecutionConfigV1 {
+function isAdmittedExecutionConfig(config: AgentConfig): config is AdmittedExecutionConfig {
   const productionExecution = (config as AgentConfig & { productionExecution?: unknown })
     .productionExecution;
   return (

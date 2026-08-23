@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { CredentialHandleV1 } from '@kite/runtime-spi';
+import type { CredentialHandle } from '@kite/runtime-spi';
 import type {
   OAuthClientProvider,
   OAuthDiscoveryState,
@@ -9,20 +9,20 @@ import type {
   OAuthClientMetadata,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
-import type { BuiltinCredentialBrokerV1 } from './credential-broker';
+import type { BuiltinCredentialBroker } from './credential-broker';
 import type { McpCredentialKey, McpOAuthCredentialMaterial } from './credential-store';
 
 export interface KiteMcpOAuthProviderOptions {
   /** Shared Builtin credential authority used by production composition. */
-  credentialBroker: BuiltinCredentialBrokerV1;
+  credentialBroker: BuiltinCredentialBroker;
   credentialKey: McpCredentialKey;
   /** Opaque handle issued by the shared Builtin broker. */
-  credentialHandle?: CredentialHandleV1;
+  credentialHandle?: CredentialHandle;
   redirectUrl: URL;
   scopes?: readonly string[];
   clientId?: string;
   clientSecretKey?: McpCredentialKey;
-  clientSecretHandle?: CredentialHandleV1;
+  clientSecretHandle?: CredentialHandle;
   onAuthorization?: (authorizationUrl: URL) => void | Promise<void>;
   state?: string;
 }
@@ -31,12 +31,12 @@ export interface KiteMcpOAuthProviderOptions {
 export class KiteMcpOAuthProvider implements OAuthClientProvider {
   readonly redirectUrl: URL;
   readonly clientMetadata: OAuthClientMetadata;
-  private readonly credentialBroker: BuiltinCredentialBrokerV1;
+  private readonly credentialBroker: BuiltinCredentialBroker;
   private readonly credentialKey: McpCredentialKey;
-  private readonly credentialHandle: CredentialHandleV1 | undefined;
+  private readonly credentialHandle: CredentialHandle | undefined;
   private readonly configuredClientId: string | undefined;
   private readonly clientSecretKey: McpCredentialKey | undefined;
-  private readonly clientSecretHandle: CredentialHandleV1 | undefined;
+  private readonly clientSecretHandle: CredentialHandle | undefined;
   private readonly onAuthorization: ((authorizationUrl: URL) => void | Promise<void>) | undefined;
   private readonly flowState: string;
   private authorizationUrl: URL | undefined;
@@ -216,7 +216,7 @@ export class KiteMcpOAuthProvider implements OAuthClientProvider {
   }
 
   private withMaterial<T>(
-    handle: CredentialHandleV1 | undefined,
+    handle: CredentialHandle | undefined,
     key: McpCredentialKey,
     purpose: string,
     operation: (material: import('./credential-store').McpCredentialMaterial) => Promise<T> | T,

@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createMcpTransportAdmissionReceiptV1,
-  createMcpTransportBoundaryIdentityV1,
+  createMcpTransportAdmissionReceipt,
+  createMcpTransportBoundaryIdentity,
   McpConnectionManager,
-  type McpTransportAdmissionRequestV1,
+  type McpTransportAdmissionRequest,
 } from '@kite/builtin-runtime/mcp';
-import type { ExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
-import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
+import type { ExecutionBoundary } from '@kite/builtin-runtime/sandbox';
+import { networkBoundaryPolicyFromExecutionBoundary } from '@kite/builtin-runtime/sandbox';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 describe('MCP transport boundary concurrency', () => {
   test('does not reuse one sibling admission for another concurrent invocation', async () => {
     const workspace = process.cwd();
-    const executionBoundary: ExecutionBoundaryV1 = {
+    const executionBoundary: ExecutionBoundary = {
       filesystemScope: 'workspace_write',
       workspaceRoot: workspace,
       networkMode: 'allowlist',
@@ -23,8 +23,8 @@ describe('MCP transport boundary concurrency', () => {
       sandboxRequired: true,
       sandboxUnavailable: 'fail',
     };
-    const networkPolicy = networkBoundaryPolicyFromExecutionBoundaryV1(executionBoundary, true);
-    const identity = createMcpTransportBoundaryIdentityV1({
+    const networkPolicy = networkBoundaryPolicyFromExecutionBoundary(executionBoundary, true);
+    const identity = createMcpTransportBoundaryIdentity({
       workspaceRoot: workspace,
       executionBoundary,
       executionSurface: {
@@ -43,7 +43,7 @@ describe('MCP transport boundary concurrency', () => {
       profileIdentity: 'profile-concurrent',
       networkPolicyRevision: networkPolicy.revision,
     });
-    const admitted: McpTransportAdmissionRequestV1[] = [];
+    const admitted: McpTransportAdmissionRequest[] = [];
     const dispatched: string[] = [];
     let releaseStaleAdmission = () => {};
     let observeStaleAdmission = () => {};
@@ -89,7 +89,7 @@ describe('MCP transport boundary concurrency', () => {
             observeStaleAdmission();
             await staleAdmissionGate;
           }
-          const receipt = createMcpTransportAdmissionReceiptV1(request);
+          const receipt = createMcpTransportAdmissionReceipt(request);
           return request.invocationId === 'b'
             ? { ...receipt, toolCallId: 'sibling-a-cached' }
             : receipt;

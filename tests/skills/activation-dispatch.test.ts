@@ -1,37 +1,37 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  type BuiltinOperationExecutionValueV1,
+  type BuiltinOperationExecutionValue,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  createCapabilitySnapshotV1,
-  descriptorRevisionV1,
+  createBuiltinToolCatalogProjection,
+  createCapabilitySnapshot,
+  descriptorRevision,
   type SkillCatalogSnapshot,
   type SkillWorkflowContract,
 } from '@kite/builtin-runtime';
 import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
 import {
-  createRuntimeHostCapabilityExecutionPortV1,
-  createRuntimeHostToolCallSnapshotV1,
-  runtimeHostStateCreateApprovalBindingDigestV1,
+  createRuntimeHostCapabilityExecutionPort,
+  createRuntimeHostToolCallSnapshot,
+  runtimeHostStateCreateApprovalBindingDigest,
 } from '@kite/runtime-host';
 import type {
-  CapabilityExecutionInvocationV1,
-  CapabilityExecutionPortV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelinePersistenceV1,
-  ToolPipelineReceiptCommitV1,
-  ToolPipelineSuspensionCommitV1,
-  WorkspaceFilesystemEditObservationQueryV1,
+  CapabilityExecutionInvocation,
+  CapabilityExecutionPort,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelinePersistence,
+  ToolPipelineReceiptCommit,
+  ToolPipelineSuspensionCommit,
+  WorkspaceFilesystemEditObservationQuery,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
-import { createAppToolPipelineCompositionV1 } from '#app/bootstrap/runtime/tool-pipeline-composition';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+import { createAppToolPipelineComposition } from '#app/bootstrap/runtime/tool-pipeline-composition';
 import {
-  createAppOrdinaryToolPipelineAttemptRuntimeV1,
-  createAppToolPipelineAttemptScopeV1,
+  createAppOrdinaryToolPipelineAttemptRuntime,
+  createAppToolPipelineAttemptScope,
 } from '#app/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import type { AppStateToolPipelinePersistenceV1 } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
+import type { AppStateToolPipelinePersistence } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
 import { getFeatureFlags } from '#app/config/features';
 
 const TOOL_CALL_ID = 'call-activate-skill';
@@ -71,7 +71,7 @@ function skillDescriptor(
     availability: 'available',
     diagnostics: [],
   };
-  return { ...withoutRevision, revision: descriptorRevisionV1(withoutRevision) };
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
 }
 
 function skillContract(
@@ -120,7 +120,7 @@ function skillCatalog(
     { descriptor, contextMode },
     { descriptor: otherDescriptor, contextMode: otherMode },
   ];
-  const capabilities = createCapabilitySnapshotV1(entries.map((entry) => entry.descriptor));
+  const capabilities = createCapabilitySnapshot(entries.map((entry) => entry.descriptor));
   return deepFreeze({
     revision: 'skill-catalog',
     capabilities,
@@ -140,8 +140,8 @@ function skillCatalog(
 }
 
 function acknowledgement(
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<ToolPipelineAttemptAcknowledgementV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<ToolPipelineAttemptAcknowledgement> {
   const identity = prepared.identity;
   return Object.freeze({
     acknowledged: true,
@@ -190,8 +190,8 @@ function persistence(
   },
   options: { readonly rejectAttempt?: boolean; readonly events?: string[] } = {},
 ) {
-  const pipeline: ToolPipelinePersistenceV1<BuiltinOperationExecutionValueV1> = Object.freeze({
-    recordAttempt: async (prepared: Readonly<PreparedToolInvocationV1>) => {
+  const pipeline: ToolPipelinePersistence<BuiltinOperationExecutionValue> = Object.freeze({
+    recordAttempt: async (prepared: Readonly<PreparedToolInvocation>) => {
       calls.record += 1;
       options.events?.push('ack');
       if (options.rejectAttempt) throw new Error('acknowledgement unavailable');
@@ -200,11 +200,11 @@ function persistence(
     recordUnknown: async () => {
       calls.unknown += 1;
     },
-    commitTerminal: async (_commit: Readonly<ToolPipelineReceiptCommitV1>) => {
+    commitTerminal: async (_commit: Readonly<ToolPipelineReceiptCommit>) => {
       calls.commit += 1;
       options.events?.push('commit');
     },
-    commitSuspension: async (_commit: Readonly<ToolPipelineSuspensionCommitV1>) => {
+    commitSuspension: async (_commit: Readonly<ToolPipelineSuspensionCommit>) => {
       calls.suspend += 1;
     },
   });
@@ -233,12 +233,12 @@ function persistence(
         Object.freeze({ valid: false as const, code: 'ready_not_issued' as const }),
     }),
     workspaceFilesystemEditObservation: Object.freeze({
-      findLatestAuthenticRead: async (query: Readonly<WorkspaceFilesystemEditObservationQueryV1>) =>
+      findLatestAuthenticRead: async (query: Readonly<WorkspaceFilesystemEditObservationQuery>) =>
         Object.freeze({ status: 'missing' as const, code: 'read_required' as const, query }),
       verifyLatestAuthenticRead: () =>
         Object.freeze({ valid: false as const, code: 'query_result_not_issued' as const }),
     }),
-  }) as AppStateToolPipelinePersistenceV1;
+  }) as AppStateToolPipelinePersistence;
 }
 
 function skillMechanism(catalog: SkillCatalogSnapshot, runFork: () => void) {
@@ -252,7 +252,7 @@ function skillMechanism(catalog: SkillCatalogSnapshot, runFork: () => void) {
         frames: Object.freeze({}),
       }),
     }),
-    flags: Object.freeze({ skillActivationV2: true, skillWorkflowV1: true }),
+    flags: Object.freeze({ skillActivation: true, skillWorkflow: true }),
     verificationEnabled: false,
     runFork: async () => {
       runFork();
@@ -278,11 +278,11 @@ function fixture(
     issuedForTurnId: TURN_ID,
   };
   const featureFlags = getFeatureFlags({
-    features: { skillWorkflowV1: true, skillActivationV2: true },
+    features: { skillWorkflow: true, skillActivation: true },
   });
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const baseProjection = createBuiltinToolCatalogProjectionV1(registry.snapshot());
-  const composition = createAppToolPipelineCompositionV1(baseProjection);
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const baseProjection = createBuiltinToolCatalogProjection(registry.snapshot());
+  const composition = createAppToolPipelineComposition(baseProjection);
   const turn = composition.forTurn({
     workspace: '/workspace',
     phase: 'building',
@@ -294,20 +294,20 @@ function fixture(
   const calls = { record: 0, host: 0, commit: 0, suspend: 0, unknown: 0 };
   const events: string[] = [];
   const appPersistence = persistence(calls, { ...options, events });
-  const scope = createAppToolPipelineAttemptScopeV1({ persistence: appPersistence });
-  const runtime = createAppOrdinaryToolPipelineAttemptRuntimeV1({
+  const scope = createAppToolPipelineAttemptScope({ persistence: appPersistence });
+  const runtime = createAppOrdinaryToolPipelineAttemptRuntime({
     persistence: appPersistence,
     scope,
   });
-  const host = createRuntimeHostCapabilityExecutionPortV1(registry);
-  const capabilityExecution: CapabilityExecutionPortV1 = Object.freeze({
-    invoke: (input: CapabilityExecutionInvocationV1) => {
+  const host = createRuntimeHostCapabilityExecutionPort(registry);
+  const capabilityExecution: CapabilityExecutionPort = Object.freeze({
+    invoke: (input: CapabilityExecutionInvocation) => {
       calls.host += 1;
       events.push('host');
       return host.invoke(input);
     },
   });
-  const snapshot = createRuntimeHostToolCallSnapshotV1({
+  const snapshot = createRuntimeHostToolCallSnapshot({
     toolCallId: TOOL_CALL_ID,
     name: 'activate_skill',
     rawArguments: { skill_id: descriptor.capabilityId, input: {} },
@@ -374,7 +374,7 @@ function fixture(
     }),
   );
   if (!projected.ok) throw new Error(projected.failure.code);
-  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
+  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigest(
     projected.value.invocation,
     projected.value.policy,
   );
@@ -428,7 +428,7 @@ function executeInput(
     taskId: null,
     planId: null,
     planStepId: null,
-    capabilityRequestFacts: null as RuntimeJsonValueV1 | null,
+    capabilityRequestFacts: null as RuntimeJsonValue | null,
     capabilityExecution: value.capabilityExecution,
     signal: new AbortController().signal,
     mechanismResources: Object.freeze({ workspace: '/workspace', ...mechanisms }),

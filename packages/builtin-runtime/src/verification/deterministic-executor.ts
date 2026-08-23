@@ -2,18 +2,18 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type {
-  VerificationCapabilityResultV1,
+  VerificationCapabilityResult,
   VerificationCheck,
   VerificationCheckResult,
-  VerificationExecutionReceiptV1,
+  VerificationExecutionReceipt,
   VerificationOutcome,
   VerificationReviewerInput,
   VerificationReviewerResult,
 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from '../capability-binding';
-import { validateCapabilityArgumentsV1 } from '../skills/capability-domain';
+import { digestCapabilityBindingValue } from '../capability-binding';
+import { validateCapabilityArguments } from '../skills/capability-domain';
 
-export interface BuiltinVerificationReceiptViewV1 extends VerificationExecutionReceiptV1 {
+export interface BuiltinVerificationReceiptView extends VerificationExecutionReceipt {
   readonly resultDigest?: string;
   readonly evidenceDigest?: string;
   readonly artifact?: unknown;
@@ -21,13 +21,13 @@ export interface BuiltinVerificationReceiptViewV1 extends VerificationExecutionR
   readonly externalReferences?: readonly string[];
 }
 
-export interface BuiltinVerificationStateViewV1 {
+export interface BuiltinVerificationStateView {
   readonly workspace: string;
-  readonly receipts: Readonly<Record<string, BuiltinVerificationReceiptViewV1>>;
+  readonly receipts: Readonly<Record<string, BuiltinVerificationReceiptView>>;
   readonly skillOutputs: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 }
 
-export interface BuiltinVerificationShellPortV1 {
+export interface BuiltinVerificationShellPort {
   execute(input: {
     readonly workspace: string;
     readonly command: string;
@@ -36,7 +36,7 @@ export interface BuiltinVerificationShellPortV1 {
   }): Promise<Readonly<{ exitCode: number; stdout: string; stderr: string }>>;
 }
 
-export interface BuiltinVerificationMcpPortV1 {
+export interface BuiltinVerificationMcpPort {
   findCapability(capabilityId: string):
     | Readonly<{
         revision: string;
@@ -55,12 +55,10 @@ export interface BuiltinVerificationMcpPortV1 {
   }): Promise<unknown>;
 }
 
-export interface BuiltinDeterministicVerificationDependenciesV1 {
-  readonly shell?: BuiltinVerificationShellPortV1;
-  readonly mcp?: BuiltinVerificationMcpPortV1;
-  readonly readArtifact?: (
-    receipt: BuiltinVerificationReceiptViewV1,
-  ) => VerificationCapabilityResultV1;
+export interface BuiltinDeterministicVerificationDependencies {
+  readonly shell?: BuiltinVerificationShellPort;
+  readonly mcp?: BuiltinVerificationMcpPort;
+  readonly readArtifact?: (receipt: BuiltinVerificationReceiptView) => VerificationCapabilityResult;
   readonly reviewer?: (input: VerificationReviewerInput) => Promise<VerificationReviewerResult>;
   /** Host-classified dispatch failures that must not be reduced to an inconclusive check. */
   readonly isFatalError?: (error: unknown) => boolean;
@@ -68,22 +66,22 @@ export interface BuiltinDeterministicVerificationDependenciesV1 {
   readonly now?: () => Date;
 }
 
-export class BuiltinVerificationDispatchErrorV1 extends Error {
+export class BuiltinVerificationDispatchError extends Error {
   readonly causeValue: unknown;
   readonly externalEffectsMayHaveOccurred: boolean;
 
   constructor(causeValue: unknown, externalEffectsMayHaveOccurred: boolean) {
     super(causeValue instanceof Error ? causeValue.message : String(causeValue));
-    this.name = 'BuiltinVerificationDispatchErrorV1';
+    this.name = 'BuiltinVerificationDispatchError';
     this.causeValue = causeValue;
     this.externalEffectsMayHaveOccurred = externalEffectsMayHaveOccurred;
   }
 }
 
-export async function executeDeterministicVerificationChecksV1(input: {
+export async function executeDeterministicVerificationChecks(input: {
   readonly checks: readonly VerificationCheck[];
-  readonly state: BuiltinVerificationStateViewV1;
-  readonly dependencies?: BuiltinDeterministicVerificationDependenciesV1;
+  readonly state: BuiltinVerificationStateView;
+  readonly dependencies?: BuiltinDeterministicVerificationDependencies;
 }): Promise<
   Readonly<{ results: readonly VerificationCheckResult[]; outcome: VerificationOutcome }>
 > {
@@ -92,18 +90,18 @@ export async function executeDeterministicVerificationChecksV1(input: {
   let externalEffectsMayHaveOccurred = false;
   try {
     for (const check of input.checks) {
-      results.push(await executeCheckV1(check, input.state, dependencies));
-      externalEffectsMayHaveOccurred ||= checkMayDispatchExternalEffectV1(check, dependencies);
+      results.push(await executeCheck(check, input.state, dependencies));
+      externalEffectsMayHaveOccurred ||= checkMayDispatchExternalEffect(check, dependencies);
     }
   } catch (error) {
-    throw new BuiltinVerificationDispatchErrorV1(error, externalEffectsMayHaveOccurred);
+    throw new BuiltinVerificationDispatchError(error, externalEffectsMayHaveOccurred);
   }
-  return Object.freeze({ results: Object.freeze(results), outcome: aggregateOutcomeV1(results) });
+  return Object.freeze({ results: Object.freeze(results), outcome: aggregateOutcome(results) });
 }
 
-function checkMayDispatchExternalEffectV1(
+function checkMayDispatchExternalEffect(
   check: VerificationCheck,
-  dependencies: BuiltinDeterministicVerificationDependenciesV1,
+  dependencies: BuiltinDeterministicVerificationDependencies,
 ): boolean {
   return (
     (check.type === 'command' && Boolean(dependencies.shell)) ||
@@ -112,15 +110,15 @@ function checkMayDispatchExternalEffectV1(
   );
 }
 
-async function executeCheckV1(
+async function executeCheck(
   check: VerificationCheck,
-  state: BuiltinVerificationStateViewV1,
-  dependencies: BuiltinDeterministicVerificationDependenciesV1,
+  state: BuiltinVerificationStateView,
+  dependencies: BuiltinDeterministicVerificationDependencies,
 ): Promise<VerificationCheckResult> {
   const now = dependencies.now ?? (() => new Date());
   const startedAt = now().toISOString();
   try {
-    const observation = await observeCheckV1(check, state, dependencies);
+    const observation = await observeCheck(check, state, dependencies);
     return {
       checkId: check.checkId,
       ...('modelInvocationId' in observation && typeof observation.modelInvocationId === 'string'
@@ -128,7 +126,7 @@ async function executeCheckV1(
         : {}),
       outcome: observation.outcome,
       summary: observation.summary.slice(0, 2_000),
-      evidenceDigest: digestCapabilityBindingValueV1(observation.evidence),
+      evidenceDigest: digestCapabilityBindingValue(observation.evidence),
       startedAt,
       finishedAt: now().toISOString(),
     };
@@ -144,10 +142,10 @@ async function executeCheckV1(
   }
 }
 
-async function observeCheckV1(
+async function observeCheck(
   check: VerificationCheck,
-  state: BuiltinVerificationStateViewV1,
-  dependencies: BuiltinDeterministicVerificationDependenciesV1,
+  state: BuiltinVerificationStateView,
+  dependencies: BuiltinDeterministicVerificationDependencies,
 ): Promise<{
   outcome: VerificationOutcome;
   summary: string;
@@ -155,7 +153,7 @@ async function observeCheckV1(
   modelInvocationId?: string;
 }> {
   if (check.type === 'file_assertion') {
-    const path = insideWorkspaceV1(state.workspace, check.path);
+    const path = insideWorkspace(state.workspace, check.path);
     const exists = existsSync(path);
     if (check.assertion === 'exists') {
       return {
@@ -192,7 +190,7 @@ async function observeCheckV1(
         evidence: null,
       };
     }
-    const workspace = check.cwd ? insideWorkspaceV1(state.workspace, check.cwd) : state.workspace;
+    const workspace = check.cwd ? insideWorkspace(state.workspace, check.cwd) : state.workspace;
     const result = await dependencies.shell.execute({
       workspace,
       command: check.command,
@@ -210,11 +208,11 @@ async function observeCheckV1(
     };
   }
   if (check.type === 'schema') {
-    const value = resolveSchemaSubjectV1(check.subject, state, dependencies);
+    const value = resolveSchemaSubject(check.subject, state, dependencies);
     if (value === undefined) {
       return { outcome: 'inconclusive', summary: 'Schema subject is unavailable.', evidence: null };
     }
-    const error = validateSchemaV1(check.schema, value);
+    const error = validateSchema(check.schema, value);
     return {
       outcome: error ? 'failed' : 'passed',
       summary: error ?? 'Value matches the required schema.',
@@ -242,7 +240,7 @@ async function observeCheckV1(
         evidence: descriptor,
       };
     }
-    if (requiresVerificationV1(descriptor.effectiveEffects)) {
+    if (requiresVerification(descriptor.effectiveEffects)) {
       return {
         outcome: 'inconclusive',
         summary: 'Read-after-write verification requires a read-only capability.',
@@ -262,7 +260,7 @@ async function observeCheckV1(
       arguments: check.arguments,
     });
     const value = asRecord(result)?.structuredContent ?? result;
-    const schemaError = check.outputSchema ? validateSchemaV1(check.outputSchema, value) : null;
+    const schemaError = check.outputSchema ? validateSchema(check.outputSchema, value) : null;
     return {
       outcome: schemaError ? 'failed' : 'passed',
       summary: schemaError ?? 'Read-after-write completed against the bound capability revision.',
@@ -291,7 +289,7 @@ async function observeCheckV1(
       evidence: null,
     };
   }
-  const resolved = reviewerInputV1(check, state, dependencies);
+  const resolved = reviewerInput(check, state, dependencies);
   if (!resolved.ok) {
     return { outcome: 'inconclusive', summary: resolved.summary, evidence: null };
   }
@@ -299,10 +297,10 @@ async function observeCheckV1(
   return { ...result, evidence: resolved.input };
 }
 
-function resolveSchemaSubjectV1(
+function resolveSchemaSubject(
   subject: Extract<VerificationCheck, { type: 'schema' }>['subject'],
-  state: BuiltinVerificationStateViewV1,
-  dependencies: BuiltinDeterministicVerificationDependenciesV1,
+  state: BuiltinVerificationStateView,
+  dependencies: BuiltinDeterministicVerificationDependencies,
 ): unknown {
   if (subject.kind === 'literal') return subject.value;
   if (subject.kind === 'skill_output') return state.skillOutputs[subject.activationId];
@@ -315,15 +313,15 @@ function resolveSchemaSubjectV1(
   }
 }
 
-function reviewerInputV1(
+function reviewerInput(
   check: Extract<VerificationCheck, { type: 'reviewer' }>,
-  state: BuiltinVerificationStateViewV1,
-  dependencies: BuiltinDeterministicVerificationDependenciesV1,
+  state: BuiltinVerificationStateView,
+  dependencies: BuiltinDeterministicVerificationDependencies,
 ): { ok: true; input: VerificationReviewerInput } | { ok: false; summary: string } {
   const invocationIds = check.invocationIds ?? [];
   const receipts = invocationIds
     .map((id) => state.receipts[id])
-    .filter((receipt): receipt is BuiltinVerificationReceiptViewV1 => Boolean(receipt));
+    .filter((receipt): receipt is BuiltinVerificationReceiptView => Boolean(receipt));
   if (receipts.length !== invocationIds.length) {
     return { ok: false, summary: 'A referenced capability receipt is unavailable.' };
   }
@@ -362,7 +360,7 @@ function reviewerInputV1(
   };
 }
 
-function insideWorkspaceV1(workspace: string, candidate: string): string {
+function insideWorkspace(workspace: string, candidate: string): string {
   const root = resolve(workspace);
   const target = resolve(root, candidate.replace(/[\\/]+/g, '/'));
   const pathFromRoot = relative(root, target);
@@ -375,11 +373,11 @@ function insideWorkspaceV1(workspace: string, candidate: string): string {
   return target;
 }
 
-function validateSchemaV1(schema: Record<string, unknown>, value: unknown): string | null {
-  return validateCapabilityArgumentsV1(schema, value as Record<string, unknown>);
+function validateSchema(schema: Record<string, unknown>, value: unknown): string | null {
+  return validateCapabilityArguments(schema, value as Record<string, unknown>);
 }
 
-function requiresVerificationV1(effects: {
+function requiresVerification(effects: {
   readonly filesystem: string;
   readonly network: string;
   readonly externalState: string;
@@ -389,7 +387,7 @@ function requiresVerificationV1(effects: {
   );
 }
 
-function aggregateOutcomeV1(results: readonly VerificationCheckResult[]): VerificationOutcome {
+function aggregateOutcome(results: readonly VerificationCheckResult[]): VerificationOutcome {
   if (results.some((result) => result.outcome === 'failed')) return 'failed';
   if (results.some((result) => result.outcome === 'inconclusive')) return 'inconclusive';
   return 'passed';

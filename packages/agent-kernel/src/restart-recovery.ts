@@ -1,20 +1,20 @@
 import type { KernelEvent } from './events';
 import type { AgentState } from './state';
 
-export type StateModelEvidenceFailureV1 = 'artifact_missing' | 'artifact_corrupt';
+export type StateModelEvidenceFailure = 'artifact_missing' | 'artifact_corrupt';
 
-export interface StateRestartRecoveryFactsV1 {
+export interface StateRestartRecoveryFacts {
   readonly capabilityFinishedAtByInvocationId: Readonly<Record<string, string | undefined>>;
   readonly pendingModelEvidenceFailures: Readonly<
-    Record<string, StateModelEvidenceFailureV1 | undefined>
+    Record<string, StateModelEvidenceFailure | undefined>
   >;
   readonly completedModelEvidenceFailures: Readonly<
-    Record<string, StateModelEvidenceFailureV1 | undefined>
+    Record<string, StateModelEvidenceFailure | undefined>
   >;
 }
 
 /** Exact capability intents which restart recovery must terminalize as unknown. */
-export function stateRestartRecoveryCapabilityInvocationIdsV1(
+export function stateRestartRecoveryCapabilityInvocationIds(
   state: Readonly<AgentState>,
 ): readonly string[] {
   return Object.values(state.capabilities.invocations)
@@ -43,12 +43,12 @@ export function stateRestartRecoveryCapabilityInvocationIdsV1(
  * Project the current State restart policy from canonical Host/Builtin
  * evidence facts. This function performs no I/O and owns no artifact reader.
  */
-export function projectStateRestartRecoveryEventsV1(
+export function projectStateRestartRecoveryEvents(
   state: Readonly<AgentState>,
-  facts: StateRestartRecoveryFactsV1,
+  facts: StateRestartRecoveryFacts,
 ): readonly KernelEvent[] {
   const events: KernelEvent[] = [];
-  const capabilityRecoveryIds = new Set(stateRestartRecoveryCapabilityInvocationIdsV1(state));
+  const capabilityRecoveryIds = new Set(stateRestartRecoveryCapabilityInvocationIds(state));
   for (const invocation of Object.values(state.capabilities.invocations)) {
     if (!capabilityRecoveryIds.has(invocation.invocationId)) continue;
     const finishedAt = facts.capabilityFinishedAtByInvocationId[invocation.invocationId];

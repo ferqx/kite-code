@@ -1,7 +1,7 @@
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics, type PromptCacheMetrics } from './cache-metrics';
 import type { CompactionReporter } from './compaction-metrics';
-import type { ModelRuntimeConfigV1 } from './config';
+import type { ModelRuntimeConfig } from './config';
 import { preflightModelContext } from './context-budget';
 import { decideAutomaticContextCompaction } from './context-compaction-decision';
 import { resolveContextCompactionRollout } from './context-compaction-rollout';
@@ -12,22 +12,22 @@ import {
 } from './context-projection';
 import type { SupportedChatModel } from './factory';
 import {
-  type BuiltinModelEventV1,
-  computeModelInvocationPrivateDigestV1,
-  type ModelCompletionFinalizationV1,
-  type ModelInvocationGatewayV1,
-  type ModelInvocationPersistenceV1,
-  type ModelInvocationStateViewV1,
-  normalizedModelResponseToAIMessageV1,
+  type BuiltinModelEvent,
+  computeModelInvocationPrivateDigest,
+  type ModelCompletionFinalization,
+  type ModelInvocationGateway,
+  type ModelInvocationPersistence,
+  type ModelInvocationStateView,
+  normalizedModelResponseToAIMessage,
 } from './invocation-gateway';
 import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
-import type { ProviderDataAdmissionGateV1 } from './provider-data-admission';
-import type { BuiltinRuntimeStateViewV1 } from './runtime-view';
-import { compileModelSurfaceV1 } from './surface-compiler';
+import type { ProviderDataAdmissionGate } from './provider-data-admission';
+import type { BuiltinRuntimeStateView } from './runtime-view';
+import { compileModelSurface } from './surface-compiler';
 
-export type BuiltinPrimaryModelStateV1 = BuiltinRuntimeStateViewV1 & ModelInvocationStateViewV1;
+export type BuiltinPrimaryModelState = BuiltinRuntimeStateView & ModelInvocationStateView;
 
-export interface BuiltinPrimaryModelContextMetricsV1 {
+export interface BuiltinPrimaryModelContextMetrics {
   readonly type: 'model.context_metrics';
   readonly modelName: string;
   readonly contextWindowTokens?: number;
@@ -50,23 +50,23 @@ export interface BuiltinPrimaryModelContextMetricsV1 {
   };
 }
 
-export interface BuiltinPrimaryContextCompactionRequestedV1 {
+export interface BuiltinPrimaryContextCompactionRequested {
   readonly type: 'context.compaction_requested';
   readonly compactionId: string;
   readonly reason: 'auto';
   readonly requestedAtRevision: number;
   readonly requestedAtTurnId: string;
   readonly force: false;
-  readonly estimate: BuiltinPrimaryModelContextMetricsV1['estimate'];
+  readonly estimate: BuiltinPrimaryModelContextMetrics['estimate'];
 }
 
-export interface BuiltinPrimaryToolCallV1 {
+export interface BuiltinPrimaryToolCall {
   readonly id: string;
   readonly name: string;
   readonly args: Readonly<Record<string, unknown>>;
 }
 
-export interface BuiltinPrimaryInvalidToolCallV1 {
+export interface BuiltinPrimaryInvalidToolCall {
   readonly id: string;
   readonly name: string;
   /** Private, in-memory parse fact. A State adapter must never persist this raw value. */
@@ -74,12 +74,12 @@ export interface BuiltinPrimaryInvalidToolCallV1 {
 }
 
 /** Provider-neutral facts passed to the synchronous State 25 translation adapter. */
-export interface BuiltinPrimaryModelCompletionV1 {
+export interface BuiltinPrimaryModelCompletion {
   readonly invocationId: string;
   readonly messageId: string;
   readonly durationMs: number;
-  readonly toolCalls: readonly BuiltinPrimaryToolCallV1[];
-  readonly invalidToolCalls: readonly BuiltinPrimaryInvalidToolCallV1[];
+  readonly toolCalls: readonly BuiltinPrimaryToolCall[];
+  readonly invalidToolCalls: readonly BuiltinPrimaryInvalidToolCall[];
   readonly text?: string;
   readonly reasoningText?: string;
   readonly inputTokens?: number;
@@ -87,50 +87,50 @@ export interface BuiltinPrimaryModelCompletionV1 {
   readonly cacheMetrics?: Readonly<PromptCacheMetrics>;
 }
 
-export type BuiltinPrimaryModelEffectResultV1<Value> =
+export type BuiltinPrimaryModelEffectResult<Value> =
   | {
       readonly kind: 'automatic_compaction';
-      readonly contextMetrics: BuiltinPrimaryModelContextMetricsV1;
-      readonly terminal: BuiltinPrimaryContextCompactionRequestedV1;
+      readonly contextMetrics: BuiltinPrimaryModelContextMetrics;
+      readonly terminal: BuiltinPrimaryContextCompactionRequested;
     }
   | {
       readonly kind: 'completed';
       readonly value: Value;
     };
 
-export interface BuiltinPrimaryAutoCompactionFactsV1 {
+export interface BuiltinPrimaryAutoCompactionFacts {
   readonly masterEnabled: boolean;
   /** Deterministic test seam; production lets Builtin allocate the request identity. */
   readonly compactionId?: string;
 }
 
-export interface BuiltinPrimaryModelResourceAdmissionV1 {
+export interface BuiltinPrimaryModelResourceAdmission {
   readonly inputTokens: number;
   readonly maxOutputTokens: number;
 }
 
-export interface BuiltinPrimaryCapabilityBindingFactsV1 {
+export interface BuiltinPrimaryCapabilityBindingFacts {
   /** Dynamic MCP + Skill catalog revision only; never the Builtin operation catalog revision. */
   readonly catalogRevision: string;
   readonly bindings: readonly unknown[];
   readonly disclosures: readonly unknown[];
 }
 
-export interface BuiltinPrimaryModelEffectInputV1<
-  State extends BuiltinPrimaryModelStateV1,
-  Event extends BuiltinModelEventV1,
+export interface BuiltinPrimaryModelEffectInput<
+  State extends BuiltinPrimaryModelState,
+  Event extends BuiltinModelEvent,
   Value,
 > {
   readonly state: Readonly<State>;
-  readonly config: ModelRuntimeConfigV1;
+  readonly config: ModelRuntimeConfig;
   readonly model: SupportedChatModel;
   readonly tools: ToolSet;
   readonly projectionEnvironment: ContextProjectionEnvironment;
-  readonly capabilityBindingFacts: BuiltinPrimaryCapabilityBindingFactsV1;
-  readonly autoCompaction: BuiltinPrimaryAutoCompactionFactsV1;
-  readonly resourceAdmission?: BuiltinPrimaryModelResourceAdmissionV1;
-  readonly persistence?: ModelInvocationPersistenceV1<State, Event>;
-  readonly providerDataAdmission: ProviderDataAdmissionGateV1;
+  readonly capabilityBindingFacts: BuiltinPrimaryCapabilityBindingFacts;
+  readonly autoCompaction: BuiltinPrimaryAutoCompactionFacts;
+  readonly resourceAdmission?: BuiltinPrimaryModelResourceAdmission;
+  readonly persistence?: ModelInvocationPersistence<State, Event>;
+  readonly providerDataAdmission: ProviderDataAdmissionGate;
   readonly compactionReporter?: CompactionReporter;
   readonly signal?: AbortSignal;
   readonly emitEphemeral?: (event: Event) => void;
@@ -140,9 +140,9 @@ export interface BuiltinPrimaryModelEffectInputV1<
    * batch committed atomically with model.invocation_completed.
    */
   readonly finalize: (
-    completion: Readonly<BuiltinPrimaryModelCompletionV1>,
-    contextMetrics: BuiltinPrimaryModelContextMetricsV1,
-  ) => ModelCompletionFinalizationV1<Value, Event>;
+    completion: Readonly<BuiltinPrimaryModelCompletion>,
+    contextMetrics: BuiltinPrimaryModelContextMetrics,
+  ) => ModelCompletionFinalization<Value, Event>;
   readonly now?: () => number;
   /** Deterministic test seam for Provider calls without an id. */
   readonly nextToolCallId?: () => string;
@@ -154,10 +154,10 @@ function positiveConfigNumber(value: unknown): number | undefined {
     : undefined;
 }
 
-function contextMetricsV1(
+function contextMetrics(
   modelCapabilities: ReturnType<typeof resolveModelCapabilities>,
   preflight: ReturnType<typeof preflightModelContext>,
-): BuiltinPrimaryModelContextMetricsV1 {
+): BuiltinPrimaryModelContextMetrics {
   return Object.freeze({
     type: 'model.context_metrics',
     modelName: modelCapabilities.modelName,
@@ -198,7 +198,7 @@ function extractText(content: unknown): string | undefined {
   return text || undefined;
 }
 
-function extractReasoningText(message: ReturnType<typeof normalizedModelResponseToAIMessageV1>) {
+function extractReasoningText(message: ReturnType<typeof normalizedModelResponseToAIMessage>) {
   const reasoning =
     typeof message.additional_kwargs?.reasoning_content === 'string'
       ? message.additional_kwargs.reasoning_content
@@ -206,14 +206,14 @@ function extractReasoningText(message: ReturnType<typeof normalizedModelResponse
   return reasoning && reasoning.length > 0 ? reasoning : undefined;
 }
 
-export async function executeBuiltinPrimaryModelEffectV1<
-  State extends BuiltinPrimaryModelStateV1,
-  Event extends BuiltinModelEventV1,
+export async function executeBuiltinPrimaryModelEffect<
+  State extends BuiltinPrimaryModelState,
+  Event extends BuiltinModelEvent,
   Value,
 >(
-  gateway: ModelInvocationGatewayV1,
-  input: BuiltinPrimaryModelEffectInputV1<State, Event, Value>,
-): Promise<BuiltinPrimaryModelEffectResultV1<Value>> {
+  gateway: ModelInvocationGateway,
+  input: BuiltinPrimaryModelEffectInput<State, Event, Value>,
+): Promise<BuiltinPrimaryModelEffectResult<Value>> {
   const projectionEnvironment = input.projectionEnvironment;
   const projection = buildContextProjection({
     role: 'agent',
@@ -241,7 +241,7 @@ export async function executeBuiltinPrimaryModelEffectV1<
     hardRatio: input.config.compaction?.hardRatio,
     warningRatio: input.config.compaction?.warningRatio,
   });
-  const contextMetrics = contextMetricsV1(modelCapabilities, preflight);
+  const metrics = contextMetrics(modelCapabilities, preflight);
   input.compactionReporter?.recordContextFollowUp?.(
     input.state.turn.turnIndex,
     preflight.estimate.totalInputTokens,
@@ -271,11 +271,11 @@ export async function executeBuiltinPrimaryModelEffectV1<
       requestedAtRevision: input.state.revision,
       requestedAtTurnId: input.state.turn.turnId,
       force: false as const,
-      estimate: contextMetrics.estimate,
+      estimate: metrics.estimate,
     });
     return Object.freeze({
       kind: 'automatic_compaction',
-      contextMetrics,
+      contextMetrics: metrics,
       terminal,
     });
   }
@@ -292,7 +292,7 @@ export async function executeBuiltinPrimaryModelEffectV1<
   }
   const now = input.now ?? Date.now;
   const startedAtMs = now();
-  const compiled = compileModelSurfaceV1({
+  const compiled = compileModelSurface({
     purpose: 'primary_agent',
     config: input.config,
     model: input.model,
@@ -312,11 +312,11 @@ export async function executeBuiltinPrimaryModelEffectV1<
     provenance: {
       contextCheckpointId: input.state.context.activeCheckpoint?.sourceDigest ?? null,
       promptContractVersion: projectionEnvironment.promptContractVersion ?? 'legacy',
-      projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+      projectionEnvironmentDigest: computeModelInvocationPrivateDigest(
         'kite.model-projection-environment.v1',
         digestProjectionEnvironment(projectionEnvironment),
       ),
-      capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+      capabilityBindingDigest: computeModelInvocationPrivateDigest(
         'kite.model-capability-bindings.v1',
         input.capabilityBindingFacts,
       ),
@@ -327,7 +327,7 @@ export async function executeBuiltinPrimaryModelEffectV1<
     emitEphemeral: input.emitEphemeral,
   });
   const value = await pending.commitWith((normalized) => {
-    const response = normalizedModelResponseToAIMessageV1(normalized);
+    const response = normalizedModelResponseToAIMessage(normalized);
     const nextToolCallId = input.nextToolCallId ?? (() => crypto.randomUUID());
     const toolCalls = Object.freeze(
       (response.tool_calls ?? []).map((call) =>
@@ -386,7 +386,7 @@ export async function executeBuiltinPrimaryModelEffectV1<
         : {}),
       ...(cacheMetrics ? { cacheMetrics: Object.freeze({ ...cacheMetrics }) } : {}),
     });
-    return input.finalize(completion, contextMetrics);
+    return input.finalize(completion, metrics);
   });
   return Object.freeze({ kind: 'completed', value });
 }

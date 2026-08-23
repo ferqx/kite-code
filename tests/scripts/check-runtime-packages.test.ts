@@ -279,8 +279,8 @@ describe('runtime workspace package gate', () => {
   test.each([
     ["import { createRuntimeHost } from '@kite/runtime-host';", 'createRuntimeHost'],
     [
-      "import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';",
-      'createRuntimeModuleRegistryV1',
+      "import { createRuntimeModuleRegistry } from '@kite/runtime-spi';",
+      'createRuntimeModuleRegistry',
     ],
     [
       "import { createBuiltinRuntimeModules } from '@kite/builtin-runtime';",

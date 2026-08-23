@@ -1,7 +1,7 @@
 import { authorizeEffect } from '@kite/agent-kernel';
 import {
   assertRuntimeCommand,
-  RUNTIME_QUERY_SCHEMA_V1,
+  RUNTIME_QUERY_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
   type RuntimeCommandReceipt,
@@ -11,19 +11,19 @@ import {
   type RuntimeSubscription,
 } from '@kite/runtime-contract';
 import type {
-  CapabilityDefinitionV1,
-  CapabilityRegistrySnapshotV1,
-  ContextCompilerPortV1,
-  RuntimeModuleRegistryV1,
+  CapabilityDefinition,
+  CapabilityRegistrySnapshot,
+  ContextCompilerPort,
+  RuntimeModuleRegistry,
 } from '@kite/runtime-spi';
-import { createRuntimeHostCapabilityExecutionPortFromSnapshotV1 } from './capability-execution';
+import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from './capability-execution';
 import {
-  createRuntimeHostContextCompilationPortFromSnapshotV1,
-  type RuntimeHostContextCompilationPortV1,
+  createRuntimeHostContextCompilationPortFromSnapshot,
+  type RuntimeHostContextCompilationPort,
 } from './context-compilation';
 import { EffectSupervisor } from './effect-supervisor';
 import {
-  RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+  RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionAdapterContext,
   type RuntimeHostExecutionBridge,
   type RuntimeHostPreparedExecution,
@@ -38,7 +38,7 @@ import type { RuntimeStorage } from './storage';
  * Narrow command/query/lifecycle authority exposed to App clients.
  * Storage, registry snapshots, and composition mechanisms remain bootstrap-only.
  */
-export interface RuntimeHostCoordinatorPortV1 extends RuntimeAccess, AsyncDisposable {
+export interface RuntimeHostCoordinatorPort extends RuntimeAccess, AsyncDisposable {
   cancelSession(sessionId: string, reason?: string): Promise<void>;
   cancelAllSessions(reason?: string): Promise<void>;
   waitForSessionIdle(sessionId: string): Promise<void>;
@@ -47,15 +47,14 @@ export interface RuntimeHostCoordinatorPortV1 extends RuntimeAccess, AsyncDispos
 }
 
 /** Bootstrap-only concrete Host composition surface. */
-export interface RuntimeHost<Event = unknown, State = unknown>
-  extends RuntimeHostCoordinatorPortV1 {
+export interface RuntimeHost<Event = unknown, State = unknown> extends RuntimeHostCoordinatorPort {
   readonly storage: RuntimeStorage<Event, State>;
   readonly contractRevision: 'rmv1-03';
   readonly deterministicKernel: true;
   readonly moduleIds: readonly string[];
   /** The single frozen registry view shared with Host capability execution. */
-  readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
-  readonly contextCompilation: RuntimeHostContextCompilationPortV1;
+  readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+  readonly contextCompilation: RuntimeHostContextCompilationPort;
   start(): Promise<void>;
 }
 
@@ -66,10 +65,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   readonly contractRevision = 'rmv1-03' as const;
   readonly deterministicKernel = true as const;
   readonly moduleIds: readonly string[];
-  readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
-  readonly contextCompilation: RuntimeHostContextCompilationPortV1;
+  readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+  readonly contextCompilation: RuntimeHostContextCompilationPort;
   readonly #bridge: RuntimeHostExecutionBridge;
-  readonly #moduleRegistry: RuntimeModuleRegistryV1;
+  readonly #moduleRegistry: RuntimeModuleRegistry;
   readonly #registry = new SessionRegistry();
   readonly #notifications = new NotificationProjector(this.#registry);
   readonly #lifecycle = new SessionLifecycleSupervisor();
@@ -85,17 +84,17 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   constructor(input: {
     readonly storage: RuntimeStorage<Event, State>;
-    readonly moduleRegistry: RuntimeModuleRegistryV1;
-    readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
-    readonly contextCompiler?: ContextCompilerPortV1;
+    readonly moduleRegistry: RuntimeModuleRegistry;
+    readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+    readonly contextCompiler?: ContextCompilerPort;
   }) {
     this.storage = input.storage;
     this.#moduleRegistry = input.moduleRegistry;
     this.moduleIds = input.moduleRegistry.moduleIds;
-    assertRuntimeHostRegistrySnapshotV1(input.moduleRegistry, input.capabilityRegistrySnapshot);
+    assertRuntimeHostRegistrySnapshot(input.moduleRegistry, input.capabilityRegistrySnapshot);
     this.capabilityRegistrySnapshot = input.capabilityRegistrySnapshot;
     this.contextCompilation = input.contextCompiler
-      ? createRuntimeHostContextCompilationPortFromSnapshotV1(
+      ? createRuntimeHostContextCompilationPortFromSnapshot(
           input.moduleRegistry,
           input.contextCompiler,
           this.capabilityRegistrySnapshot,
@@ -106,13 +105,13 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     const services = new EffectSupervisor(input.storage, Date.now, (sessionId) => {
       this.#lifecycle.abort(sessionId, 'Runtime effect lease was lost.');
     }).services;
-    const capabilities = createRuntimeHostCapabilityExecutionPortFromSnapshotV1(
+    const capabilities = createRuntimeHostCapabilityExecutionPortFromSnapshot(
       this.capabilityRegistrySnapshot,
     );
     const adapter = input.moduleRegistry.requireExecutionAdapter<
       RuntimeHostExecutionAdapterContext<Event, State>,
       RuntimeHostExecutionBridge
-    >(RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1);
+    >(RUNTIME_HOST_EXECUTION_ADAPTER_ID_);
     this.#bridge = adapter.create(
       Object.freeze({
         services,
@@ -371,7 +370,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   async #hydrateSessions(): Promise<void> {
     const result = await this.#bridge.query({
-      schema: RUNTIME_QUERY_SCHEMA_V1,
+      schema: RUNTIME_QUERY_SCHEMA_,
       type: 'list_sessions',
     });
     if (result.status !== 'ok') return;
@@ -419,7 +418,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   async #loadProjection(sessionId: string): Promise<RuntimeSessionProjection | undefined> {
     const result = await this.#bridge.query({
-      schema: RUNTIME_QUERY_SCHEMA_V1,
+      schema: RUNTIME_QUERY_SCHEMA_,
       type: 'get_session_projection',
       sessionId,
     });
@@ -489,9 +488,9 @@ function createSingleUsePreparedDispatch(
   };
 }
 
-function assertRuntimeHostRegistrySnapshotV1(
-  registry: RuntimeModuleRegistryV1,
-  snapshot: CapabilityRegistrySnapshotV1,
+function assertRuntimeHostRegistrySnapshot(
+  registry: RuntimeModuleRegistry,
+  snapshot: CapabilityRegistrySnapshot,
 ): void {
   if (
     !snapshot ||
@@ -559,7 +558,7 @@ function assertRuntimeHostRegistrySnapshotV1(
         'Runtime Host capability registry snapshot does not match its executor registry.',
       );
     }
-    if (executor && !isExecutorBoundToDefinitionV1(entry.definition, executor)) {
+    if (executor && !isExecutorBoundToDefinition(entry.definition, executor)) {
       throw new Error(
         'Runtime Host capability registry snapshot contains an invalid executor binding.',
       );
@@ -591,8 +590,8 @@ function assertRuntimeHostRegistrySnapshotV1(
   }
 }
 
-function isExecutorBoundToDefinitionV1(
-  definition: CapabilityDefinitionV1,
+function isExecutorBoundToDefinition(
+  definition: CapabilityDefinition,
   executor: Readonly<{
     readonly providerId: string;
     readonly capabilityId: string;

@@ -1,5 +1,5 @@
 /** Provider-neutral capability result admitted to deterministic verification. */
-export interface VerificationCapabilityResultV1 {
+export interface VerificationCapabilityResult {
   status: 'success' | 'partial' | 'error' | 'cancelled' | 'unknown';
   content: Array<Record<string, unknown>>;
   structuredContent?: unknown;
@@ -17,7 +17,7 @@ export interface VerificationCapabilityResultV1 {
 }
 
 /** Minimal immutable receipt projection consumed by an independent reviewer. */
-export interface VerificationExecutionReceiptV1 {
+export interface VerificationExecutionReceipt {
   invocationId: string;
   toolCallId: string;
   capabilityId: string;
@@ -79,7 +79,7 @@ export type VerificationCheck =
       instructions: string;
     });
 
-export interface VerificationSpecV1 {
+export interface VerificationSpec {
   schemaVersion: 1;
   verificationId: string;
   taskId?: string;
@@ -107,8 +107,8 @@ export interface VerificationCheckResult {
 /** The reviewer receives source receipts and immutable artifact payloads, never a main-model verdict. */
 export interface VerificationReviewerInput {
   instructions: string;
-  receipts: VerificationExecutionReceiptV1[];
-  artifacts: Array<{ invocationId: string; result: VerificationCapabilityResultV1 }>;
+  receipts: VerificationExecutionReceipt[];
+  artifacts: Array<{ invocationId: string; result: VerificationCapabilityResult }>;
   skillOutputs: Array<{ activationId: string; output: Record<string, unknown> }>;
 }
 

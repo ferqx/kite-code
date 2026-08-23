@@ -1,18 +1,18 @@
-import type { MetricExporterV1 } from '@kite/runtime-host';
+import type { MetricExporter } from '@kite/runtime-host';
 import {
-  admitProductionDistributionTargetIdentityV1,
-  parseReleaseProfileV1,
+  admitProductionDistributionTargetIdentity,
+  parseReleaseProfile,
 } from '#app/config/release-profile';
-import type { ReleaseCompositionV1 } from '#app/release/composition-root';
-import { composeObservabilityV1 } from './composition';
+import type { ReleaseComposition } from '#app/release/composition-root';
+import { composeObservability } from './composition';
 import {
-  type AdminObservabilityPolicyV1,
-  type ProjectTelemetryConfigV1,
-  resolveTelemetryConsentV1,
-  type UserTelemetryConfigV1,
+  type AdminObservabilityPolicy,
+  type ProjectTelemetryConfig,
+  resolveTelemetryConsent,
+  type UserTelemetryConfig,
 } from './consent';
 
-export type ExternalCanaryTelemetryBlockReasonV1 =
+export type ExternalCanaryTelemetryBlockReason =
   | 'artifact_authority_missing'
   | 'artifact_authority_invalid'
   | 'release_channel_not_canary'
@@ -20,28 +20,28 @@ export type ExternalCanaryTelemetryBlockReasonV1 =
   | 'telemetry_disabled'
   | 'mandatory_audit_unavailable'
   | 'exporter_missing'
-  | ReturnType<typeof resolveTelemetryConsentV1>['reason'];
+  | ReturnType<typeof resolveTelemetryConsent>['reason'];
 
 /**
  * External canary cohort composition fixes the release channel to `canary` so
  * callers cannot accidentally reuse ordinary limited consent without the
  * separate canary opt-in.
  */
-export function composeExternalCanaryObservabilityV1(input: {
-  releaseComposition?: ReleaseCompositionV1;
-  user?: UserTelemetryConfigV1;
-  project?: ProjectTelemetryConfigV1;
-  admin?: AdminObservabilityPolicyV1;
-  exporter?: MetricExporterV1;
+export function composeExternalCanaryObservability(input: {
+  releaseComposition?: ReleaseComposition;
+  user?: UserTelemetryConfig;
+  project?: ProjectTelemetryConfig;
+  admin?: AdminObservabilityPolicy;
+  exporter?: MetricExporter;
   queueCapacity?: number;
 }) {
   const release = input.releaseComposition;
   const suppliedProductionRelease = release?.active === true && release.production === true;
-  let productionRelease: { profile: ReturnType<typeof parseReleaseProfileV1> } | undefined;
+  let productionRelease: { profile: ReturnType<typeof parseReleaseProfile> } | undefined;
   if (suppliedProductionRelease) {
     try {
-      const profile = parseReleaseProfileV1(release.profile);
-      admitProductionDistributionTargetIdentityV1({
+      const profile = parseReleaseProfile(release.profile);
+      admitProductionDistributionTargetIdentity({
         profile,
         production: true,
         distributionTargetIdentity: release.distributionTargetIdentity,
@@ -61,13 +61,13 @@ export function composeExternalCanaryObservabilityV1(input: {
     canaryCapability !== undefined &&
     canaryRelease.profile.capabilities[canaryCapability].maxRollout === 'canary';
   const telemetryAllowed = canaryRelease?.profile.telemetry.allowed === true;
-  const consent = resolveTelemetryConsentV1({
+  const consent = resolveTelemetryConsent({
     releaseChannel: 'canary',
     user: input.user,
     project: input.project,
     admin: input.admin,
   });
-  const composition = composeObservabilityV1({
+  const composition = composeObservability({
     artifactTelemetryAllowed: telemetryAllowed,
     featureEnabled: capabilityEnabled,
     consent,
@@ -76,7 +76,7 @@ export function composeExternalCanaryObservabilityV1(input: {
     releaseRouteAliases: new Set(canaryRelease?.profile.data.providerRouteAllowlist ?? []),
     modelVisibleCapabilityAliases: new Set(canaryCapability ? [canaryCapability] : []),
   });
-  const blockReason: ExternalCanaryTelemetryBlockReasonV1 | undefined = !artifactAuthorityPresent
+  const blockReason: ExternalCanaryTelemetryBlockReason | undefined = !artifactAuthorityPresent
     ? suppliedProductionRelease
       ? 'artifact_authority_invalid'
       : 'artifact_authority_missing'

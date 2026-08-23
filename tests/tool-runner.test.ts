@@ -7,21 +7,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import {
-  MAX_MODEL_READ_FILE_CHARS_V1,
+  MAX_MODEL_READ_FILE_CHARS_,
   type PendingToolRequest,
   toolRequestFromCall,
 } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { RuntimeHostToolExecutionResultV1 } from '@kite/runtime-host';
-import type { RuntimeHostFilePreimageRecorderV1 as FilePreimageRecorder } from '@kite/runtime-host/storage';
+import type { RuntimeHostToolExecutionResult } from '@kite/runtime-host';
+import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite/runtime-host/storage';
 import type { AgentConfig } from '#app/config';
-import type { RuntimeJsonValueV1 } from '#runtime-spi';
+import type { RuntimeJsonValue } from '#runtime-spi';
 import {
-  executeTestRuntimeToolV1,
-  testBuiltinToolCatalogV1,
-  testCapabilityArtifactWriterV1,
-  testSubagentTaskRequestsV1,
-  testWorkspaceFilesystemRuntimeV1,
+  executeTestRuntimeTool,
+  testBuiltinToolCatalog,
+  testCapabilityArtifactWriter,
+  testSubagentTaskRequests,
+  testWorkspaceFilesystemRuntime,
 } from './helpers/runtime-model';
 import { DEFAULT_SHELL_TIMEOUT_MS } from './helpers/shell-executor';
 
@@ -30,10 +30,8 @@ import { DEFAULT_SHELL_TIMEOUT_MS } from './helpers/shell-executor';
 type GovernedToolInvocationInput = {
   readonly workspace: string;
   readonly request: PendingToolRequest;
-  readonly builtinToolCatalog?: ReturnType<typeof testBuiltinToolCatalogV1>;
-  readonly shellExecutor?: Parameters<
-    typeof executeTestRuntimeToolV1
-  >[0]['execution'] extends infer T
+  readonly builtinToolCatalog?: ReturnType<typeof testBuiltinToolCatalog>;
+  readonly shellExecutor?: Parameters<typeof executeTestRuntimeTool>[0]['execution'] extends infer T
     ? T extends { shellExecutor?: infer E }
       ? E
       : never
@@ -53,37 +51,37 @@ type GovernedToolInvocationInput = {
   readonly threadId?: string;
   readonly readStateActorId?: string;
   readonly capabilityExecution?: NonNullable<
-    Parameters<typeof executeTestRuntimeToolV1>[0]['execution']
+    Parameters<typeof executeTestRuntimeTool>[0]['execution']
   >['capabilityExecution'];
   readonly capabilityIdOverride?: string;
-  readonly subagentTaskRequests?: ReturnType<typeof testSubagentTaskRequestsV1>;
+  readonly subagentTaskRequests?: ReturnType<typeof testSubagentTaskRequests>;
   readonly mcpPolicy?: unknown;
 };
 
 const retainedFilesystemStates = new Map<
   string,
-  Parameters<typeof executeTestRuntimeToolV1>[0]['state']
+  Parameters<typeof executeTestRuntimeTool>[0]['state']
 >();
 const retainedFilesystemRuntimes = new Map<
   string,
-  ReturnType<typeof testWorkspaceFilesystemRuntimeV1>
+  ReturnType<typeof testWorkspaceFilesystemRuntime>
 >();
 const retainedCapabilityArtifacts = new Map<
   string,
-  ReturnType<typeof testCapabilityArtifactWriterV1>
+  ReturnType<typeof testCapabilityArtifactWriter>
 >();
 
 function testBuiltinCatalogForWorkspace(workspace: string) {
-  return testBuiltinToolCatalogV1().forTurn({
+  return testBuiltinToolCatalog().forTurn({
     workspace,
     hasTaskAdapter: true,
     hasGitBroker: true,
     toolSearchEnabled: true,
     brokeredGitFeatureRevision: 'brokered-git-r1',
     featureFlags: {
-      brokeredGitV1: true,
-      skillWorkflowV1: true,
-      skillActivationV2: true,
+      brokeredGit: true,
+      skillWorkflow: true,
+      skillActivation: true,
     },
     activeSkillFrameIds: ['test-skill'],
     availableSkillIds: ['test-skill'],
@@ -92,7 +90,7 @@ function testBuiltinCatalogForWorkspace(workspace: string) {
 
 async function invokeGovernedTool(
   input: GovernedToolInvocationInput,
-): Promise<RuntimeHostToolExecutionResultV1> {
+): Promise<RuntimeHostToolExecutionResult> {
   const execution = {
     ...(input.shellExecutor ? { shellExecutor: input.shellExecutor } : {}),
     ...(input.mcpManager ? { mcpManager: input.mcpManager } : {}),
@@ -121,7 +119,7 @@ async function invokeGovernedTool(
   const filesystemArtifacts = retainState
     ? (retainedCapabilityArtifacts.get(input.workspace) ??
       (() => {
-        const artifacts = testCapabilityArtifactWriterV1();
+        const artifacts = testCapabilityArtifactWriter();
         retainedCapabilityArtifacts.set(input.workspace, artifacts);
         return artifacts;
       })())
@@ -129,7 +127,7 @@ async function invokeGovernedTool(
   const filesystemRuntime = retainState
     ? (retainedFilesystemRuntimes.get(input.workspace) ??
       (() => {
-        const runtime = testWorkspaceFilesystemRuntimeV1(input.workspace, filesystemArtifacts);
+        const runtime = testWorkspaceFilesystemRuntime(input.workspace, filesystemArtifacts);
         retainedFilesystemRuntimes.set(input.workspace, runtime);
         return runtime;
       })())
@@ -140,15 +138,15 @@ async function invokeGovernedTool(
   }
   const run = (
     extra: {
-      readonly state?: Parameters<typeof executeTestRuntimeToolV1>[0]['state'];
+      readonly state?: Parameters<typeof executeTestRuntimeTool>[0]['state'];
       readonly status?: 'queued' | 'approved';
-      readonly callOverrides?: Parameters<typeof executeTestRuntimeToolV1>[0]['callOverrides'];
+      readonly callOverrides?: Parameters<typeof executeTestRuntimeTool>[0]['callOverrides'];
     } = {},
   ) =>
-    executeTestRuntimeToolV1({
+    executeTestRuntimeTool({
       workspace: input.workspace,
       toolName: input.request.name,
-      args: input.request.args as RuntimeJsonValueV1,
+      args: input.request.args as RuntimeJsonValue,
       ...(input.request.id ? { toolCallId: input.request.id } : {}),
       ...(input.builtinToolCatalog
         ? { execution: { ...execution, builtinToolCatalog: input.builtinToolCatalog } }
@@ -188,7 +186,7 @@ async function invokeGovernedTool(
     return {
       ...terminal.result,
       command: input.request.protectedCommand,
-    } satisfies RuntimeHostToolExecutionResultV1;
+    } satisfies RuntimeHostToolExecutionResult;
   }
   const failureMessage =
     terminal?.type === 'tool.rejected'
@@ -207,7 +205,7 @@ async function invokeGovernedTool(
     ...(runtime.events.some((event) => event.type === 'approval.requested')
       ? { approvalRoute: 'user' as const }
       : {}),
-  } satisfies RuntimeHostToolExecutionResultV1;
+  } satisfies RuntimeHostToolExecutionResult;
 }
 
 describe('Builtin Harness catalog identity', () => {
@@ -313,7 +311,7 @@ function makeHydratedTaskInvocation(input: {
   role: 'explore' | 'plan' | 'code' | 'review';
   task: string;
 }) {
-  const taskRequests = testSubagentTaskRequestsV1();
+  const taskRequests = testSubagentTaskRequests();
   const requestArtifact = taskRequests.write({
     parentModelInvocationId: `test-parent-model:${input.id}`,
     parentToolCallId: input.id,
@@ -819,7 +817,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
         interactionMode: 'accept_edits',
         approvedGrant: 'approve_once',
         taskConfig: {
-          features: { networkBoundaryV1: true },
+          features: { networkBoundary: true },
           executionBoundary: {
             filesystemScope: 'workspace_write',
             workspaceRoot: workspace,
@@ -1287,7 +1285,7 @@ describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
 
     const read = await runFileTool('read_file', { path: 'large.ts', limit: 2_501 });
     expect(read.ok).toBe(true);
-    expect(read.stdout.length).toBeLessThanOrEqual(MAX_MODEL_READ_FILE_CHARS_V1);
+    expect(read.stdout.length).toBeLessThanOrEqual(MAX_MODEL_READ_FILE_CHARS_);
     expect(read.stdout).toContain('continue with offset=');
     expect(read.resultMeta).toMatchObject({
       path: 'large.ts',

@@ -1,26 +1,26 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1,
-  BuiltinModelEffectCoordinatorV1,
-  type BuiltinModelOperationAttemptV1,
-  type BuiltinModelOperationExecutionPortV1,
-  type BuiltinPrimaryModelCompletionV1,
-  type BuiltinPrimaryModelContextMetricsV1,
-  type BuiltinPrimaryModelStateV1,
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
+  BuiltinModelEffectCoordinator,
+  type BuiltinModelOperationAttempt,
+  type BuiltinModelOperationExecutionPort,
+  type BuiltinPrimaryModelCompletion,
+  type BuiltinPrimaryModelContextMetrics,
+  type BuiltinPrimaryModelState,
   createChatModel,
-  type ModelArtifactWriterV1,
-  ModelInvocationGatewayV1,
-  type ModelInvocationPersistenceV1,
-  type ModelResponseSourceV1,
-  type ModelRuntimeConfigV1,
+  type ModelArtifactWriter,
+  ModelInvocationGateway,
+  type ModelInvocationPersistence,
+  type ModelResponseSource,
+  type ModelRuntimeConfig,
 } from '@kite/builtin-runtime/model';
 import {
-  MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
-  type ModelAttemptOutcomeV1,
-  type PrivateArtifactRefV1,
+  MODEL_ATTEMPT_OUTCOME_SCHEMA_,
+  type ModelAttemptOutcome,
+  type PrivateArtifactRef,
 } from '@kite/runtime-spi';
 
-const CONFIG: ModelRuntimeConfigV1 = Object.freeze({
+const CONFIG: ModelRuntimeConfig = Object.freeze({
   apiKey: 'primary-effect-fixture-key',
   baseURL: 'https://primary-effect-fixture.invalid/v1',
   modelName: 'primary-effect-fixture',
@@ -31,9 +31,9 @@ const CONFIG: ModelRuntimeConfigV1 = Object.freeze({
 
 const MODEL = createChatModel(CONFIG);
 
-function successfulOutcome(): ModelAttemptOutcomeV1 {
+function successfulOutcome(): ModelAttemptOutcome {
   return {
-    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
     kind: 'success',
     response: {
       message: {
@@ -50,7 +50,7 @@ function successfulOutcome(): ModelAttemptOutcomeV1 {
 
 function artifactRef<K extends 'model_surface' | 'model_response'>(
   kind: K,
-): PrivateArtifactRefV1 & { kind: K } {
+): PrivateArtifactRef & { kind: K } {
   return {
     artifactId: `primary-${kind}`,
     kind,
@@ -59,7 +59,7 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
   };
 }
 
-function stateWithHistory(turns = 3): BuiltinPrimaryModelStateV1 {
+function stateWithHistory(turns = 3): BuiltinPrimaryModelState {
   return {
     activeTaskId: null,
     tasks: {},
@@ -105,8 +105,8 @@ function projectionEnvironment() {
 }
 
 function persistence(
-  state: BuiltinPrimaryModelStateV1,
-): ModelInvocationPersistenceV1<BuiltinPrimaryModelStateV1> {
+  state: BuiltinPrimaryModelState,
+): ModelInvocationPersistence<BuiltinPrimaryModelState> {
   return {
     getState: () => state,
     persistEvents: async () => true,
@@ -118,26 +118,26 @@ function createGatewayFixture() {
   let sourceCalls = 0;
   let invocationOrdinal = 0;
   let purpose: string | undefined;
-  const source: ModelResponseSourceV1 = Object.freeze({
+  const source: ModelResponseSource = Object.freeze({
     attempt: async () => {
       sourceCalls += 1;
       return successfulOutcome();
     },
   });
-  const operationExecution: BuiltinModelOperationExecutionPortV1 = Object.freeze({
-    execute: async (attempt: BuiltinModelOperationAttemptV1) => {
+  const operationExecution: BuiltinModelOperationExecutionPort = Object.freeze({
+    execute: async (attempt: BuiltinModelOperationAttempt) => {
       operationCalls += 1;
       purpose = attempt.purpose;
-      expect(attempt.operationId).toBe(BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1.primary_agent);
+      expect(attempt.operationId).toBe(BUILTIN_MODEL_OPERATION_BY_PURPOSE_.primary_agent);
       expect(attempt.purpose).toBe('primary_agent');
       return attempt.attempt();
     },
   });
-  const artifacts: ModelArtifactWriterV1 = {
+  const artifacts: ModelArtifactWriter = {
     writeSurface: () => artifactRef('model_surface'),
     writeResponse: () => artifactRef('model_response'),
   };
-  const gateway = new ModelInvocationGatewayV1({
+  const gateway = new ModelInvocationGateway({
     artifacts,
     source,
     operationExecution,
@@ -175,8 +175,8 @@ function baseInput(state = stateWithHistory()) {
     autoCompaction: { masterEnabled: false },
     now: () => 10_000,
     finalize: (
-      completion: BuiltinPrimaryModelCompletionV1,
-      contextMetrics: BuiltinPrimaryModelContextMetricsV1,
+      completion: BuiltinPrimaryModelCompletion,
+      contextMetrics: BuiltinPrimaryModelContextMetrics,
     ) => ({
       events: [],
       value: { completion, contextMetrics },
@@ -187,8 +187,8 @@ function baseInput(state = stateWithHistory()) {
 describe('Builtin primary Model effect execution', () => {
   test('returns automatic compaction before Gateway, operation, or source dispatch', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
-    const result = await coordinator.executePrimaryModelEffectV1({
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
+    const result = await coordinator.executePrimaryModelEffect({
       ...baseInput(),
       config: {
         ...CONFIG,
@@ -221,10 +221,10 @@ describe('Builtin primary Model effect execution', () => {
 
   test('rejects a resource estimate mismatch before any external dispatch', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     await expect(
-      coordinator.executePrimaryModelEffectV1({
+      coordinator.executePrimaryModelEffect({
         ...baseInput(),
         resourceAdmission: { inputTokens: 1, maxOutputTokens: 20 },
         persistence: persistence(stateWithHistory()),
@@ -235,10 +235,10 @@ describe('Builtin primary Model effect execution', () => {
 
   test('rejects missing persistence only on the dispatching path', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     await expect(
-      coordinator.executePrimaryModelEffectV1({
+      coordinator.executePrimaryModelEffect({
         ...baseInput(),
         persistence: undefined,
       }),
@@ -248,10 +248,10 @@ describe('Builtin primary Model effect execution', () => {
 
   test('passes provider denial to the Gateway before operation/source dispatch', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
 
     await expect(
-      coordinator.executePrimaryModelEffectV1({
+      coordinator.executePrimaryModelEffect({
         ...baseInput(),
         providerDataAdmission: () => ({
           admitted: false,
@@ -266,13 +266,13 @@ describe('Builtin primary Model effect execution', () => {
 
   test('uses the coordinator Gateway once for primary_agent and preserves stable metrics', async () => {
     const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinatorV1(fixture.gateway);
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
     const input = {
       ...baseInput(),
       persistence: persistence(stateWithHistory()),
     };
-    const first = await coordinator.executePrimaryModelEffectV1(input);
-    const second = await coordinator.executePrimaryModelEffectV1(input);
+    const first = await coordinator.executePrimaryModelEffect(input);
+    const second = await coordinator.executePrimaryModelEffect(input);
 
     expect(first.kind).toBe('completed');
     expect(second.kind).toBe('completed');

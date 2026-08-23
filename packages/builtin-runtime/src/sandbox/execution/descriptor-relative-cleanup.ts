@@ -4,7 +4,7 @@ import { closeSync, constants, fchmodSync, fstatSync, fsyncSync } from 'node:fs'
 const AT_REMOVEDIR = process.platform === 'darwin' ? 0x80 : 0x200;
 const AT_SYMLINK_NOFOLLOW = process.platform === 'darwin' ? 0x20 : 0x100;
 
-interface NativeDirectoryApiV1 {
+interface NativeDirectoryApi {
   openat(dirfd: number, name: Pointer, flags: number, mode: number): number;
   unlinkat(dirfd: number, name: Pointer, flags: number): number;
   fchmodat(dirfd: number, name: Pointer, mode: number, flags: number): number;
@@ -19,14 +19,14 @@ interface NativeDirectoryApiV1 {
  * resolved from the process root; symlinks and special files are unlinked at
  * their pinned parent and are never traversed.
  */
-export function removeDirectoryTreeAtV1(parentFd: number, name: string): boolean {
+export function removeDirectoryTreeAt(parentFd: number, name: string): boolean {
   if (!validName(name)) return false;
   const api = nativeApi();
   const names = listDirectoryNames(parentFd);
   if (!names?.includes(name)) return names !== null;
   // Restore hostile modes descriptor-relatively without following symlinks.
   api.fchmodat(parentFd, namePointer(name), 0o700, AT_SYMLINK_NOFOLLOW);
-  const rootFd = openDirectoryAt(api, parentFd, name);
+  const rootFd = openPinnedDirectoryAt(api, parentFd, name);
   if (rootFd < 0) return false;
   try {
     if (!removeDirectoryContents(api, rootFd)) return false;
@@ -36,25 +36,25 @@ export function removeDirectoryTreeAtV1(parentFd: number, name: string): boolean
   return api.unlinkat(parentFd, namePointer(name), AT_REMOVEDIR) === 0;
 }
 
-export function openDirectoryAtV1(parentFd: number, name: string): number {
+export function openDirectoryAt(parentFd: number, name: string): number {
   if (!validName(name)) return -1;
-  return openDirectoryAt(nativeApi(), parentFd, name);
+  return openPinnedDirectoryAt(nativeApi(), parentFd, name);
 }
 
-export function directoryNamesAtV1(fd: number): readonly string[] | null {
+export function directoryNamesAt(fd: number): readonly string[] | null {
   return listDirectoryNames(fd);
 }
 
-export function removeEmptyDirectoryAtV1(parentFd: number, name: string): boolean {
+export function removeEmptyDirectoryAt(parentFd: number, name: string): boolean {
   return validName(name) && nativeApi().unlinkat(parentFd, namePointer(name), AT_REMOVEDIR) === 0;
 }
 
-function removeDirectoryContents(api: NativeDirectoryApiV1, directoryFd: number): boolean {
+function removeDirectoryContents(api: NativeDirectoryApi, directoryFd: number): boolean {
   const names = listDirectoryNames(directoryFd);
   if (!names) return false;
   for (const name of names) {
     api.fchmodat(directoryFd, namePointer(name), 0o700, AT_SYMLINK_NOFOLLOW);
-    const childDirectory = openDirectoryAt(api, directoryFd, name);
+    const childDirectory = openPinnedDirectoryAt(api, directoryFd, name);
     if (childDirectory >= 0) {
       try {
         if (!removeDirectoryContents(api, childDirectory)) return false;
@@ -128,7 +128,7 @@ function listDirectoryNames(fd: number): string[] | null {
   }
 }
 
-function openDirectoryAt(api: NativeDirectoryApiV1, parentFd: number, name: string): number {
+function openPinnedDirectoryAt(api: NativeDirectoryApi, parentFd: number, name: string): number {
   const fd = api.openat(
     parentFd,
     namePointer(name),
@@ -163,9 +163,9 @@ function namePointer(name: string): Pointer {
   return ptr(Buffer.from(`${name}\0`));
 }
 
-let loaded: { symbols: NativeDirectoryApiV1 } | undefined;
+let loaded: { symbols: NativeDirectoryApi } | undefined;
 
-function nativeApi(): NativeDirectoryApiV1 {
+function nativeApi(): NativeDirectoryApi {
   if (process.platform === 'win32') throw new Error('Descriptor-relative cleanup is unavailable.');
   if (loaded) return loaded.symbols;
   const symbols = {
@@ -185,13 +185,13 @@ function nativeApi(): NativeDirectoryApiV1 {
       symbols: {
         ...native.symbols,
         openat: native.symbols.__openat,
-      } as unknown as NativeDirectoryApiV1,
+      } as unknown as NativeDirectoryApi,
     };
   } else {
     loaded = dlopen('libc.so.6', {
       openat: { args: ['i32', 'ptr', 'i32', 'u32'], returns: 'i32' },
       ...symbols,
-    }) as unknown as { symbols: NativeDirectoryApiV1 };
+    }) as unknown as { symbols: NativeDirectoryApi };
   }
   return loaded.symbols;
 }

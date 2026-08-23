@@ -3,61 +3,61 @@
  * overrides cannot silently introduce a typo or an undocumented switch.
  */
 export interface FeatureFlags {
-  planLifecycleV2: boolean;
-  interactionControllerV2: boolean;
-  autoReviewV2: boolean;
+  planLifecycle: boolean;
+  interactionController: boolean;
+  autoReview: boolean;
   nativeLoopEngine: boolean;
   loopMode: boolean;
-  capabilityCatalogV1: boolean;
-  mcpRuntimeBindingV1: boolean;
-  mcpExecutionRecordV1: boolean;
-  mcpProviderActionV1: boolean;
-  skillActivationV2: boolean;
-  skillWorkflowV1: boolean;
-  verificationV1: boolean;
-  toolSearchV1: boolean;
-  contextCompactionV2: boolean;
-  contextCompactionAutoV1: boolean;
-  contextCompactionManualV1: boolean;
-  sessionLoggingPolicyV1: boolean;
-  resourceBudgetV1: boolean;
-  terminalOutcomeV1: boolean;
-  boundedCancellationV1: boolean;
-  executionBoundaryV1: boolean;
-  networkBoundaryV1: boolean;
-  releaseProfileV1: boolean;
-  observabilityMetricsV1: boolean;
-  brokeredGitV1: boolean;
-  promptContractV2: boolean;
+  capabilityCatalog: boolean;
+  mcpRuntimeBinding: boolean;
+  mcpExecutionRecord: boolean;
+  mcpProviderAction: boolean;
+  skillActivation: boolean;
+  skillWorkflow: boolean;
+  verification: boolean;
+  toolSearch: boolean;
+  contextCompaction: boolean;
+  contextCompactionAuto: boolean;
+  contextCompactionManual: boolean;
+  sessionLoggingPolicy: boolean;
+  resourceBudget: boolean;
+  terminalOutcome: boolean;
+  boundedCancellation: boolean;
+  executionBoundary: boolean;
+  networkBoundary: boolean;
+  releaseProfile: boolean;
+  observabilityMetrics: boolean;
+  brokeredGit: boolean;
+  promptContract: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
-  planLifecycleV2: true,
-  interactionControllerV2: true,
-  autoReviewV2: false,
+  planLifecycle: true,
+  interactionController: true,
+  autoReview: false,
   nativeLoopEngine: false,
   loopMode: false,
-  capabilityCatalogV1: true,
-  mcpRuntimeBindingV1: true,
-  mcpExecutionRecordV1: false,
-  mcpProviderActionV1: false,
-  skillActivationV2: false,
-  skillWorkflowV1: false,
-  verificationV1: false,
-  toolSearchV1: true,
-  contextCompactionV2: true,
-  contextCompactionAutoV1: false,
-  contextCompactionManualV1: true,
-  sessionLoggingPolicyV1: true,
-  resourceBudgetV1: false,
-  terminalOutcomeV1: false,
-  boundedCancellationV1: false,
-  executionBoundaryV1: false,
-  networkBoundaryV1: false,
-  releaseProfileV1: false,
-  observabilityMetricsV1: false,
-  brokeredGitV1: false,
-  promptContractV2: true,
+  capabilityCatalog: true,
+  mcpRuntimeBinding: true,
+  mcpExecutionRecord: false,
+  mcpProviderAction: false,
+  skillActivation: false,
+  skillWorkflow: false,
+  verification: false,
+  toolSearch: true,
+  contextCompaction: true,
+  contextCompactionAuto: false,
+  contextCompactionManual: true,
+  sessionLoggingPolicy: true,
+  resourceBudget: false,
+  terminalOutcome: false,
+  boundedCancellation: false,
+  executionBoundary: false,
+  networkBoundary: false,
+  releaseProfile: false,
+  observabilityMetrics: false,
+  brokeredGit: false,
+  promptContract: true,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

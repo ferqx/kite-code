@@ -1,12 +1,12 @@
 /** App-local projection of the selected concrete sandbox backend. */
-export type AppSandboxBackendV1 = 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
+export type AppSandboxBackend = 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
 
-export type SandboxBackend = AppSandboxBackendV1;
+export type SandboxBackend = AppSandboxBackend;
 
-export function appSandboxSupportsFullModeV1(backend: AppSandboxBackendV1): boolean {
+export function appSandboxSupportsFullMode(backend: AppSandboxBackend): boolean {
   return (
     backend === 'seatbelt' || backend === 'bubblewrap' || backend === 'windows_restricted_token'
   );
 }
 
-export const sandboxSupportsFullModeV1 = appSandboxSupportsFullModeV1;
+export const sandboxSupportsFullMode = appSandboxSupportsFullMode;

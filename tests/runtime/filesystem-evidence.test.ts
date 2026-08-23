@@ -5,29 +5,29 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { assertAgentStateInvariants, assertCurrentRuntimeEvent } from '@kite/agent-kernel';
 import {
-  capabilityResultDigestV1,
-  capabilityResultEvidenceDigestV1,
-  digestCapabilityValueV1,
+  capabilityResultDigest,
+  capabilityResultEvidenceDigest,
+  digestCapabilityValue,
 } from '@kite/builtin-runtime';
 import {
-  workspaceFilesystemIntentDigestV1,
-  workspaceFilesystemMutationReadyDigestV1,
+  workspaceFilesystemIntentDigest,
+  workspaceFilesystemMutationReadyDigest,
 } from '@kite/builtin-runtime/filesystem';
 import type {
-  WorkspaceFilesystemIntentRecordV1,
-  WorkspaceFilesystemMutationReadyRecordV1,
+  WorkspaceFilesystemIntentRecord,
+  WorkspaceFilesystemMutationReadyRecord,
 } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { restoreStateStateFromStoreV1 as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { restoreStateStateFromStore as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 
 const BARE_A = 'a'.repeat(64);
 const BARE_B = 'b'.repeat(64);
 const SHA_A = `sha256:${BARE_A}`;
 const SHA_B = `sha256:${BARE_B}`;
 const AT = '2026-08-17T00:00:00.000Z';
-const WRITE_EFFECTS_DIGEST = digestCapabilityValueV1({
+const WRITE_EFFECTS_DIGEST = digestCapabilityValue({
   filesystem: 'write',
   network: 'none',
   externalState: 'none',
@@ -110,8 +110,8 @@ describe('Runtime filesystem evidence', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-filesystem-evidence-'));
     const databasePath = join(root, 'runtime.db');
     try {
-      const store = openStateStoreForTestV1(databasePath);
-      const snapshot = createRuntimeHostStateInitialStateV1({
+      const store = openStateStoreForTest(databasePath);
+      const snapshot = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'filesystem-restore-tamper',
         userId: 'test',
@@ -136,14 +136,14 @@ describe('Runtime filesystem evidence', () => {
       );
       database.close();
 
-      expect(() => openStateStoreForTestV1(databasePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTest(databasePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
   test('marks restored filesystem observation evidence with the wrong Artifact owner as corrupted', () => {
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const observation = {
       actorIdentityDigest: BARE_A,
       lexicalTargetDigest: SHA_A,
@@ -171,8 +171,8 @@ describe('Runtime filesystem evidence', () => {
     state = reduceRuntimeState(state, {
       type: 'capability.execution_succeeded',
       invocationId: 'invocation-1',
-      resultDigest: capabilityResultDigestV1(result),
-      evidenceDigest: capabilityResultEvidenceDigestV1(result),
+      resultDigest: capabilityResultDigest(result),
+      evidenceDigest: capabilityResultEvidenceDigest(result),
       finishedAt: AT,
       artifact: {
         artifactId: `pa_${BARE_A}`,
@@ -310,7 +310,7 @@ describe('Runtime filesystem evidence', () => {
 });
 
 function runningFilesystemInvocation() {
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'filesystem-evidence',
     userId: 'test',
@@ -338,7 +338,7 @@ function runningFilesystemInvocation() {
   });
 }
 
-function intentRecord(): WorkspaceFilesystemIntentRecordV1 {
+function intentRecord(): WorkspaceFilesystemIntentRecord {
   const unsigned = {
     attempt: 1,
     capabilityRevision: BARE_A,
@@ -353,12 +353,12 @@ function intentRecord(): WorkspaceFilesystemIntentRecordV1 {
     effectiveEffectsDigest: WRITE_EFFECTS_DIGEST,
     recordedAt: AT,
   };
-  return { ...unsigned, intentDigest: workspaceFilesystemIntentDigestV1(unsigned) };
+  return { ...unsigned, intentDigest: workspaceFilesystemIntentDigest(unsigned) };
 }
 
 function readyRecord(
-  intent: WorkspaceFilesystemIntentRecordV1,
-): WorkspaceFilesystemMutationReadyRecordV1 {
+  intent: WorkspaceFilesystemIntentRecord,
+): WorkspaceFilesystemMutationReadyRecord {
   const unsigned = {
     attempt: intent.attempt,
     intentDigest: intent.intentDigest,
@@ -373,5 +373,5 @@ function readyRecord(
     },
     readyAt: AT,
   };
-  return { ...unsigned, readyDigest: workspaceFilesystemMutationReadyDigestV1(unsigned) };
+  return { ...unsigned, readyDigest: workspaceFilesystemMutationReadyDigest(unsigned) };
 }

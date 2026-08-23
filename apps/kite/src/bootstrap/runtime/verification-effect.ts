@@ -1,15 +1,12 @@
-import {
-  type CapabilityArtifactReaderV1,
-  readBoundCapabilityArtifactV1,
-} from '@kite/builtin-runtime';
+import { type CapabilityArtifactReader, readBoundCapabilityArtifact } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import { assertInsideWorkspace, type ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { VerificationReviewerInput, VerificationReviewerResult } from '@kite/runtime-spi';
 import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import {
-  BuiltinVerificationDispatchErrorV1,
-  type BuiltinVerificationReceiptViewV1,
-  executeDeterministicVerificationChecksV1,
+  BuiltinVerificationDispatchError,
+  type BuiltinVerificationReceiptView,
+  executeDeterministicVerificationChecks,
 } from '#builtin-runtime';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
 
@@ -20,7 +17,7 @@ export type VerificationReviewer = (
 export interface VerificationExecutorDependencies {
   shellExecutor?: ShellExecutor;
   mcpManager?: McpRuntimeProvider;
-  artifactStore?: CapabilityArtifactReaderV1;
+  artifactStore?: CapabilityArtifactReader;
   reviewer?: VerificationReviewer;
   signal?: AbortSignal;
 }
@@ -103,12 +100,12 @@ export async function executeVerificationEffect(
     },
   ];
   try {
-    const execution = await executeDeterministicVerificationChecksV1({
+    const execution = await executeDeterministicVerificationChecks({
       checks: record.spec.checks,
       state: {
         workspace: state.session.workspace,
         receipts: state.capabilities.invocations,
-        skillOutputs: collectSkillOutputsV1(state),
+        skillOutputs: collectSkillOutputs(state),
       },
       dependencies: {
         ...(dependencies.shellExecutor
@@ -134,12 +131,12 @@ export async function executeVerificationEffect(
         ...(dependencies.mcpManager ? { mcp: dependencies.mcpManager } : {}),
         ...(dependencies.artifactStore
           ? {
-              readArtifact: (receipt: BuiltinVerificationReceiptViewV1) => {
+              readArtifact: (receipt: BuiltinVerificationReceiptView) => {
                 const source = state.capabilities.invocations[receipt.invocationId];
                 if (!source?.artifact || !source.resultDigest || !source.evidenceDigest) {
                   throw new Error('A bound capability Artifact is unavailable.');
                 }
-                return readBoundCapabilityArtifactV1(dependencies.artifactStore!, source.artifact, {
+                return readBoundCapabilityArtifact(dependencies.artifactStore!, source.artifact, {
                   invocationId: source.invocationId,
                   resultDigest: source.resultDigest,
                   evidenceDigest: source.evidenceDigest,
@@ -170,7 +167,7 @@ export async function executeVerificationEffect(
     });
     return events;
   } catch (error) {
-    if (!(error instanceof BuiltinVerificationDispatchErrorV1)) throw error;
+    if (!(error instanceof BuiltinVerificationDispatchError)) throw error;
     const cause = error.causeValue;
     if (cause instanceof ProviderDataAdmissionError && error.externalEffectsMayHaveOccurred) {
       throw new ProviderDataAdmissionError(cause.decision, { knownExternalEffects: 'unknown' });
@@ -179,7 +176,7 @@ export async function executeVerificationEffect(
   }
 }
 
-function collectSkillOutputsV1(
+function collectSkillOutputs(
   state: Readonly<RuntimeState>,
 ): Readonly<Record<string, Readonly<Record<string, unknown>>>> {
   const outputs: Record<string, Readonly<Record<string, unknown>>> = {};

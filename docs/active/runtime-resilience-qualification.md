@@ -36,7 +36,7 @@ Subagent continuation 或 Runtime interaction 的 suspension 保持可恢复，�
 unknown reconciliation 与 restart 后零重复 dispatch。
 
 PS-01 已让 Subagent 内部 filesystem tool 由 parent Runtime 建立 namespaced queue，并递归执行同一完整
-Tool Pipeline；PS-03 又把 child lifecycle/observation 接到唯一 `SubagentProviderV1`/Local composition。启动顺序
+Tool Pipeline；PS-03 又把 child lifecycle/observation 接到唯一 `SubagentProvider`/Local composition。启动顺序
 固定为外层 attempt exact ack → private dispatch intent → Provider prepare（零 Driver/Gateway/tool I/O）→ private
 sealed handle publish → low-information handle-ready ack → activate。Provider denial 在 intent 后以显式 undispatched
 cleanup intent/receipt 闭合；ready ack 前失败不得 activate。ready/activate 后 crash、stale、oversize、Artifact fault
@@ -116,11 +116,11 @@ snapshot 仍有 preparation/ready/disposal/abandonment cleanup authority 时必�
 window、same-era PID identity forgery、Artifact corruption、cleanup unknown、Fake deny/no-fallback 与 source/named
 fork negatives；这些定向测试不替代本文件的完整 fault/soak qualification。
 
-seed 只决定每轮 case 的旋转顺序；不能减少固定 case 集，也不得传入 Bun test 改写 test scheduler。每个 probe 只允许一次 runner invocation；测试型 probe 由 coordinator 把各功能文件放入隔离 child 且各运行一次，避免共享 Yoga/全局 fixture。Qualification 只对 manifest 中每个 case 明确选定的真实代表 lifecycle 文件保留 1 次 warm-up 和 8 次 measured rerun；dedicated long-replay 还先执行 2 次不进入报告的 allocator/JIT prewarm，其他 lifecycle 不增加该步骤。不能重放整个大型功能 suite 后把 Bun test runner 自身保留的断言/fixture 内存归因于产品泄漏。测试 helper 在每个测试边界必须清除它自己创建的临时根；依赖进程退出或整个重复文件结束的清理不构成 lifecycle cleanup。long-runtime 当前以 deterministic state replay 和测试专用 `runTestRuntimeAgentV1` 对 production `executeRuntimeTurnV1` 的真实 budget workload 为资源 lifecycle；该 helper 只组合 State26/Store5 test port，不是 production fallback；其他 case 分别选择 cancel/recovery、deadline、MCP supervisor、SIGKILL/SQLite fault lifecycle。超时后必须终止整个子进程树。Unix probe 使用独立 process group；fault-soak 内的 TUI per-file 与 lifecycle child 必须继承该 group，不能再创建 `ps` 缺失时无法发现的 nested detached group。runner 同时以 parent/PGID 双重采样 owned PID；每条 telemetry 还必须匹配 attempt nonce、PID、OS process-start identity、lifecycle ID 和 group nonce。报告必须精确收到 manifest 声明的全部 qualification lifecycle group；短命 child 即使错过 50 ms 采样，也只能凭有效 nonce 绑定补入 owned PID 集，任一声明组缺失、重复或未绑定均使 qualification `inconclusive`；同一 probe 中仅运行一次的功能文件 telemetry 不进入 qualification series。正常退出后发现的后代同样先记录为 orphan；runner 必须重新读取并匹配 OS process-start identity 后才可将 PID 计为 orphan 或强制清理，数值 PID 已被复用时不得触碰新进程，身份无法确认则 inspection unsupported。`ps`/`git worktree` 因平台缺失或权限策略无法启动、抛错或非零退出时必须转为 inspection unsupported，使 qualification 结构化 `inconclusive`，不能在报告前崩溃。stdout/stderr 在进程退出后最多等待 2 秒 EOF，持有继承 pipe 的漏杀后代不能让 runner 永久挂起。外层 probe 超时时对已经采样的 PID 先绑定 process-start identity，kill 前再次核验；可发现的 nested detached group 先按 PPID/PGID 快照并由深到浅终止，最后终止 coordinator group，不能先杀 coordinator 导致后代 reparent 后失去 ownership。runner 为每个 attempt 分配独立临时目录，并把普通临时残留记录为 `residualPaths`；`orphanWorktrees` 只来自 probe 前后 `git worktree list --porcelain` 的 registry 差集。任一残留、orphan worktree 或 orphan PID 都是 hard failure。
+seed 只决定每轮 case 的旋转顺序；不能减少固定 case 集，也不得传入 Bun test 改写 test scheduler。每个 probe 只允许一次 runner invocation；测试型 probe 由 coordinator 把各功能文件放入隔离 child 且各运行一次，避免共享 Yoga/全局 fixture。Qualification 只对 manifest 中每个 case 明确选定的真实代表 lifecycle 文件保留 1 次 warm-up 和 8 次 measured rerun；dedicated long-replay 还先执行 2 次不进入报告的 allocator/JIT prewarm，其他 lifecycle 不增加该步骤。不能重放整个大型功能 suite 后把 Bun test runner 自身保留的断言/fixture 内存归因于产品泄漏。测试 helper 在每个测试边界必须清除它自己创建的临时根；依赖进程退出或整个重复文件结束的清理不构成 lifecycle cleanup。long-runtime 当前以 deterministic state replay 和测试专用 `runTestRuntimeAgent` 对 production `executeRuntimeTurn` 的真实 budget workload 为资源 lifecycle；该 helper 只组合 Runtime State/SQLite Store test port，不是 production fallback；其他 case 分别选择 cancel/recovery、deadline、MCP supervisor、SIGKILL/SQLite fault lifecycle。超时后必须终止整个子进程树。Unix probe 使用独立 process group；fault-soak 内的 TUI per-file 与 lifecycle child 必须继承该 group，不能再创建 `ps` 缺失时无法发现的 nested detached group。runner 同时以 parent/PGID 双重采样 owned PID；每条 telemetry 还必须匹配 attempt nonce、PID、OS process-start identity、lifecycle ID 和 group nonce。报告必须精确收到 manifest 声明的全部 qualification lifecycle group；短命 child 即使错过 50 ms 采样，也只能凭有效 nonce 绑定补入 owned PID 集，任一声明组缺失、重复或未绑定均使 qualification `inconclusive`；同一 probe 中仅运行一次的功能文件 telemetry 不进入 qualification series。正常退出后发现的后代同样先记录为 orphan；runner 必须重新读取并匹配 OS process-start identity 后才可将 PID 计为 orphan 或强制清理，数值 PID 已被复用时不得触碰新进程，身份无法确认则 inspection unsupported。`ps`/`git worktree` 因平台缺失或权限策略无法启动、抛错或非零退出时必须转为 inspection unsupported，使 qualification 结构化 `inconclusive`，不能在报告前崩溃。stdout/stderr 在进程退出后最多等待 2 秒 EOF，持有继承 pipe 的漏杀后代不能让 runner 永久挂起。外层 probe 超时时对已经采样的 PID 先绑定 process-start identity，kill 前再次核验；可发现的 nested detached group 先按 PPID/PGID 快照并由深到浅终止，最后终止 coordinator group，不能先杀 coordinator 导致后代 reparent 后失去 ownership。runner 为每个 attempt 分配独立临时目录，并把普通临时残留记录为 `residualPaths`；`orphanWorktrees` 只来自 probe 前后 `git worktree list --porcelain` 的 registry 差集。任一残留、orphan worktree 或 orphan PID 都是 hard failure。
 
 ## 报告与资源判定
 
-报告 schema 当前为 v2，并包含 runner revision、seed、profile、平台/Bun 版本、逐 attempt 的状态/清理/resource series、每个 case 的 p50/p95/p99、状态不变量、资源摘要和 SHA-256 canonical digest。CI 报告可记录 `source.kind=local`；qualification 只有在 `source.kind=github_actions` 且 repository、40 位 head SHA、完整 ref、workflow 文件名、GitHub `workflow_ref`/`workflow_sha`、run ID 和正整数 run attempt 全部存在时才可能为 `passed`，缺失时必须为 `inconclusive`。这些字段和 retained attempt evidence 都进入 canonical digest，不能靠 artifact 页面上的旁证补写。digest 是完整性字段，不是单独的真实性证明；真实性根是成功的 GitHub Actions run、由可信 GitHub context 提供的 expected identity 以及被审查 head。`runnerBudgetUsage` 只表示外层 probe invocation 与 wall-clock 上限；`runtimeBudgetUsage` 仅来自 long-runtime case 中 `runTestRuntimeAgentV1 → executeRuntimeTurnV1` workload 的 actual reconciled/committed `ResourceBudgetV1` ledger receipt，reducer-only 合成状态不得作为该证据，二者也不得混写。Qualification 的每个 long-runtime attempt 必须保留 9 条 receipt provenance；每条 receipt 还必须与同一条 process resource lifecycle 在 case、iteration、lifecycle、PID、sequence、attempt nonce、OS process-start identity 和 group nonce 上完全匹配，错轮或未绑定的 receipt 一律使该证据 unsupported。
+报告 schema 当前为 v2，并包含 runner revision、seed、profile、平台/Bun 版本、逐 attempt 的状态/清理/resource series、每个 case 的 p50/p95/p99、状态不变量、资源摘要和 SHA-256 canonical digest。CI 报告可记录 `source.kind=local`；qualification 只有在 `source.kind=github_actions` 且 repository、40 位 head SHA、完整 ref、workflow 文件名、GitHub `workflow_ref`/`workflow_sha`、run ID 和正整数 run attempt 全部存在时才可能为 `passed`，缺失时必须为 `inconclusive`。这些字段和 retained attempt evidence 都进入 canonical digest，不能靠 artifact 页面上的旁证补写。digest 是完整性字段，不是单独的真实性证明；真实性根是成功的 GitHub Actions run、由可信 GitHub context 提供的 expected identity 以及被审查 head。`runnerBudgetUsage` 只表示外层 probe invocation 与 wall-clock 上限；`runtimeBudgetUsage` 仅来自 long-runtime case 中 `runTestRuntimeAgent → executeRuntimeTurn` workload 的 actual reconciled/committed `ResourceBudget` ledger receipt，reducer-only 合成状态不得作为该证据，二者也不得混写。Qualification 的每个 long-runtime attempt 必须保留 9 条 receipt provenance；每条 receipt 还必须与同一条 process resource lifecycle 在 case、iteration、lifecycle、PID、sequence、attempt nonce、OS process-start identity 和 group nonce 上完全匹配，错轮或未绑定的 receipt 一律使该证据 unsupported。
 
 正式 workflow 在上传前运行 `scripts/runtime/verify-fault-soak-qualification.ts`。verifier 以 workflow 的可信 GitHub context 重新匹配 source identity、重算 report digest，再从 retained attempts 重新构建 case/aggregate 摘要；它要求 Linux x64/Bun 1.3.14、固定 7 case、每 case 8/8 通过、合计 56/56 probe、精确 wall time、完整 terminal/state assertion、零 orphan/residual、long-runtime 每项资源 128 个 measured 样本、其他 case 每项 64 个样本、全部资源不超阈值，以及 long-runtime 分 8 个 attempt 的 72 条带 provenance Runtime ledger receipt。runner 或 verifier 任一失败都使 workflow 失败；artifact 即使被保留也只是诊断材料，不能登记为通过证据。
 
@@ -162,33 +162,33 @@ Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/recon
 transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
 reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
 重发。当前定向 recovery journey 覆盖这些边界；response source/catalog 继续使用 ack-before-lookup、
-strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；当前使用 schema v26、Store5 与 epoch `kite-runtime-modularization-v1-2026-08-19`。
+strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；当前使用 schema v26、SQLite Store 与 epoch `kite-runtime-modularization-v1-2026-08-19`。
 
-RMV1-04 production Store 由 App 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
-旧 Store4 production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning State26 type view。CLI、TUI、Kernel 与
+RM-04 production Store 由 App 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
+旧 SQLite Store production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning Runtime State type view。CLI、TUI、Kernel 与
 App adapter 不得直接创建 SQLite 连接。adapter 的四类 transaction method 都映射到一次既有
-Store5 event+snapshot+provenance 原子提交，没有 retry/fallback/双写。每个底层连接在设置 journal mode 或执行 schema
+SQLite Store event+snapshot+provenance 原子提交，没有 retry/fallback/双写。每个底层连接在设置 journal mode 或执行 schema
 写入前先安装 5000 ms `busy_timeout`，因此 journal/schema/事件写竞争都受同一有界等待约束。SQLite writer
 lock 释放后只允许一次成功提交；不能因为重试重复事件。
 
-RMV1-05 的 deterministic Host contract 额外验证 same-session FIFO、cross-session concurrency、bridge 前
+RM-05 的 deterministic Host contract 额外验证 same-session FIFO、cross-session concurrency、bridge 前
 revision conflict、Host 生命周期内 scoped idempotency、committed Query、history-gap snapshot、stale
 ephemeral drop、slow subscriber 断开，以及 subscriber close 不取消 Runtime work。TUI PTY 继续验证真实
 production bootstrap；不兼容 Store 必须在历史会话加载边界 fail closed，而不能让 Host 组合阶段阻止 TUI
 挂载。
 
-RMV1-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
+RM-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
 acknowledgement、effect lease claim/renew/release 与 restart recovery 切到 Host。Host contract 和 Runtime fault
 suite 证明 attempt ack 失败为零 dispatch、stale/renew-lost lease 不能 dispatch/commit、lease loss 中止 lifecycle、
 cancel 在 signal 前提交、successor 等待 cleanup、dispose 等待 drain，以及 recovery 在首次 execution 前恰好一次且
-失败关闭。`bun run test:runtime:soak` 仍只是 7-case CI profile smoke；它可以形成 RMV1-06 stage evidence，但不能
+失败关闭。`bun run test:runtime:soak` 仍只是 7-case CI profile smoke；它可以形成 RM-06 stage evidence，但不能
 升级为正式 release qualification。当前单-Store lease 没有被解释为 cross-Host Project fence。
 
-当前链路将 State26 input 经纯 `@kite/agent-kernel` transition 后再由 Store5 原子提交；进程内 State 只在
+当前链路将 Runtime State input 经纯 `@kite/agent-kernel` transition 后再由 SQLite Store 原子提交；进程内 State 只在
 commit 成功后推进。Required Kernel/reducer 与 scheduling/completion suite 证明 snapshot/terminal/revision 行为
 等价。Host applied receipt 后的
 `AuthorizedEffect` 精确绑定 execution identity，App adapter 只允许单次消费和 exact match；mismatch、重复消费
-或未 applied receipt 均不得 dispatch。crash/restore/fork 全部复用同一 Store5 authority transaction；正式
+或未 applied receipt 均不得 dispatch。crash/restore/fork 全部复用同一 SQLite Store authority transaction；正式
 fault/soak qualification 仍由独立 workflow 绑定最终 SHA。
 
 `RuntimeStoreOptions.faultInjectionMaxPageCount` 仅供测试把连接限制到确定性 page ceiling，从而触发 `SQLITE_FULL`。生产组合根不得设置它。失败写入必须完整回滚，重开后事件集合、Runtime state 和恢复状态仍满足不变量。
@@ -202,5 +202,5 @@ CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若
 到期，这是另一条合法的 fail-closed 路径，不能用来否定取消传播，也不能与 in-flight 断言混为一谈。
 验证“原子完成后慢 consumer 不得反向 abort”的 fixture 同样先保留该调度余量，再让 consumer 明确
 跨过 deadline；不得使用会在 hosted runner 负载下先于 `run.completed` 到期的亚秒窗口制造竞态。
-RAV1-06 target State26/Store5 is the production path for new sessions；qualification separately proves old Store4 remains untouched and old sessions fail closed rather than being migrated or used as fallback. Target commits reject explicit legacy snapshot metadata instead of normalizing it；corrupt Event/Snapshot、writer mismatch、fork/rollback/delete inconsistency 与 multi-session corruption 都必须在 dispatch 前 fail closed。内部 Runtime/Artifact key、authority ledger 与 key-loss Gate 已删除。
+RA-06 target Runtime State/SQLite Store is the production path for new sessions；qualification separately proves old SQLite Store remains untouched and old sessions fail closed rather than being migrated or used as fallback. Target commits reject explicit legacy snapshot metadata instead of normalizing it；corrupt Event/Snapshot、writer mismatch、fork/rollback/delete inconsistency 与 multi-session corruption 都必须在 dispatch 前 fail closed。内部 Runtime/Artifact key、authority ledger 与 key-loss Gate 已删除。
 > 路径同步：runtime resilience 验证引用当前无版本命名的 state/store 实现路径；格式版本仍由 metadata 校验。

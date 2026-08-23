@@ -1,34 +1,34 @@
 import type {
-  BuiltinPlanActionResultV1,
-  BuiltinPlanningExecutionMechanismV1,
-  BuiltinReadPlanInputV1,
-  BuiltinRuntimeEventValueV1,
-  BuiltinUpdatePlanInputV1,
-  BuiltinWritePlanInputV1,
+  BuiltinPlanActionResult,
+  BuiltinPlanningExecutionMechanism,
+  BuiltinReadPlanInput,
+  BuiltinRuntimeEventValue,
+  BuiltinUpdatePlanInput,
+  BuiltinWritePlanInput,
 } from '@kite/builtin-runtime';
 import {
-  createBuiltinPlanDocumentV2V1,
-  isBuiltinSavedReplanRevisionV1,
+  createBuiltinPlanDocument,
+  isBuiltinSavedReplanRevision,
   PlanArtifactError,
   type PlanArtifactStore,
-  projectBuiltinPublicPlanV2V1,
+  projectBuiltinPublicPlan,
 } from '@kite/builtin-runtime/planning';
 import type { PlanArtifactRef } from '@kite/runtime-contract';
 import {
   acceptRuntimeAction,
-  createRuntimeHostInteractionIdV1 as genInteractionId,
+  createRuntimeHostInteractionId as genInteractionId,
   getActivePlanning,
   getActiveTask,
   type RuntimeActionEmission,
-  type StateRuntimeEventV1 as RuntimeEvent,
+  type StateRuntimeEvent as RuntimeEvent,
   type RuntimeState,
   rejectRuntimeAction,
-  runtimeHostStateDecideReadPlanCommandV1,
-  runtimeHostStateDecideUpdatePlanCommandV1,
-  runtimeHostStateDecideWritePlanCommandV1,
-  runtimeHostStatePlanCommandFactsV1,
-  runtimeHostStatePlanCompletionBlockerV1,
-  runtimeHostStateProjectPlanCompletionEvidenceV1,
+  runtimeHostStateDecideReadPlanCommand,
+  runtimeHostStateDecideUpdatePlanCommand,
+  runtimeHostStateDecideWritePlanCommand,
+  runtimeHostStatePlanCommandFacts,
+  runtimeHostStatePlanCompletionBlocker,
+  runtimeHostStateProjectPlanCompletionEvidence,
 } from '@kite/runtime-host';
 
 export interface PlanRuntimeContext {
@@ -45,20 +45,17 @@ export interface PlanRuntimeContext {
  * document/artifact semantics, and Host action/event transport. The Core
  * pipeline receives only this already-composed Builtin mechanism.
  */
-export function createPlanRuntimeV1(
-  context: PlanRuntimeContext,
-): BuiltinPlanningExecutionMechanismV1 {
+export function createPlanRuntime(context: PlanRuntimeContext): BuiltinPlanningExecutionMechanism {
   return Object.freeze({
-    read: async (input: BuiltinReadPlanInputV1) =>
-      planActionResultV1(readPlanAction(context, input)),
-    update: async (toolCallId: string, input: BuiltinUpdatePlanInputV1) =>
-      planActionResultV1(updatePlanAction(context, toolCallId, input)),
-    write: async (toolCallId: string, input: BuiltinWritePlanInputV1) =>
-      planActionResultV1(writePlanAction(context, toolCallId, input)),
+    read: async (input: BuiltinReadPlanInput) => planActionResult(readPlanAction(context, input)),
+    update: async (toolCallId: string, input: BuiltinUpdatePlanInput) =>
+      planActionResult(updatePlanAction(context, toolCallId, input)),
+    write: async (toolCallId: string, input: BuiltinWritePlanInput) =>
+      planActionResult(writePlanAction(context, toolCallId, input)),
   });
 }
 
-function planActionResultV1(action: RuntimeActionEmission): BuiltinPlanActionResultV1 {
+function planActionResult(action: RuntimeActionEmission): BuiltinPlanActionResult {
   return {
     ok: action.ok,
     stdout: action.stdout,
@@ -66,7 +63,7 @@ function planActionResultV1(action: RuntimeActionEmission): BuiltinPlanActionRes
     ...(action.runtimeEvents === undefined
       ? {}
       : {
-          runtimeEvents: action.runtimeEvents as unknown as readonly BuiltinRuntimeEventValueV1[],
+          runtimeEvents: action.runtimeEvents as unknown as readonly BuiltinRuntimeEventValue[],
         }),
   };
 }
@@ -142,8 +139,8 @@ export function readPlanAction(
 ): RuntimeActionEmission {
   const planning = getActivePlanning(context.state);
   const task = getActiveTask(context.state);
-  const decision = runtimeHostStateDecideReadPlanCommandV1(
-    runtimeHostStatePlanCommandFactsV1(context.state),
+  const decision = runtimeHostStateDecideReadPlanCommand(
+    runtimeHostStatePlanCommandFacts(context.state),
     command,
   );
   if (!decision.accepted) return rejectRuntimeAction(decision.diagnostic);
@@ -200,8 +197,8 @@ export function writePlanAction(
   const state = context.state;
   const planning = getActivePlanning(state);
   const task = getActiveTask(state);
-  const decision = runtimeHostStateDecideWritePlanCommandV1(
-    runtimeHostStatePlanCommandFactsV1(state),
+  const decision = runtimeHostStateDecideWritePlanCommand(
+    runtimeHostStatePlanCommandFacts(state),
     command,
   );
   if (!decision.accepted) return rejectRuntimeAction(decision.diagnostic);
@@ -213,7 +210,7 @@ export function writePlanAction(
     command.steps !== undefined;
   const replanningDocumentIsSavedCanonicalRevision =
     planning.kind === 'replanning_draft' &&
-    isBuiltinSavedReplanRevisionV1(planning.document, {
+    isBuiltinSavedReplanRevision(planning.document, {
       supersedesPlanVersion: planning.supersedesPlanVersion,
       replanReason: planning.replanReason,
     });
@@ -271,7 +268,7 @@ export function writePlanAction(
         interactionId: genInteractionId(),
         toolCallId,
         taskId,
-        plan: projectBuiltinPublicPlanV2V1(document),
+        plan: projectBuiltinPublicPlan(document),
         planSummary: `${document.title}\n\n${document.steps.map((step, index) => `${index + 1}. ${step.title}`).join('\n')}`,
         planId: document.planId,
         version: document.version,
@@ -316,7 +313,7 @@ export function writePlanAction(
           : {};
   const currentRevisionIsSavedCanonicalDraft =
     planning.kind === 'planning_draft' || replanningDocumentIsSavedCanonicalRevision;
-  const candidate = createBuiltinPlanDocumentV2V1({
+  const candidate = createBuiltinPlanDocument({
     taskId,
     turnId: state.turn.turnId,
     title: command.title!,
@@ -352,7 +349,7 @@ export function writePlanAction(
     planId: document.planId,
     version: document.version,
     planSchemaVersion: 2,
-    plan: projectBuiltinPublicPlanV2V1(document),
+    plan: projectBuiltinPublicPlan(document),
     structuralHash: document.structuralDigest,
     taskId,
     artifact,
@@ -393,24 +390,24 @@ export function updatePlanAction(
 ): RuntimeActionEmission {
   const planning = getActivePlanning(context.state);
   const task = getActiveTask(context.state);
-  const facts = runtimeHostStatePlanCommandFactsV1(context.state);
-  const admission = runtimeHostStateDecideUpdatePlanCommandV1(facts, command);
+  const facts = runtimeHostStatePlanCommandFacts(context.state);
+  const admission = runtimeHostStateDecideUpdatePlanCommand(facts, command);
   if (!admission.accepted) return rejectRuntimeAction(admission.diagnostic);
   const skippedReasonCodes = Object.fromEntries(
     command.updates.flatMap((update) =>
       update.reason_code === undefined ? [] : [[update.step_id, update.reason_code]],
     ),
   );
-  const evidence = runtimeHostStateProjectPlanCompletionEvidenceV1(
+  const evidence = runtimeHostStateProjectPlanCompletionEvidence(
     context.state,
     admission.nextSteps,
     skippedReasonCodes,
   );
-  const decision = runtimeHostStateDecideUpdatePlanCommandV1(
+  const decision = runtimeHostStateDecideUpdatePlanCommand(
     {
       ...facts,
       completionBlocker: command.complete_plan
-        ? runtimeHostStatePlanCompletionBlockerV1(context.state, evidence)
+        ? runtimeHostStatePlanCompletionBlocker(context.state, evidence)
         : null,
     },
     command,

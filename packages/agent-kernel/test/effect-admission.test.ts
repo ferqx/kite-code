@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type AgentState,
-  assertCapabilityToolTerminalBatchV1,
-  attachSuspendedCapabilityTerminalsV1,
+  assertCapabilityToolTerminalBatch,
+  attachSuspendedCapabilityTerminals,
   createInitialAgentState,
-  hasLateTerminalEventForCancelledToolV1,
-  isConcurrentShellEffectBatchCurrentV1,
-  isConcurrentShellEffectEventCurrentV1,
+  hasLateTerminalEventForCancelledTool,
+  isConcurrentShellEffectBatchCurrent,
+  isConcurrentShellEffectEventCurrent,
   type KernelEvent,
-  suspendedCapabilityTerminalRequirementsV1,
+  suspendedCapabilityTerminalRequirements,
 } from '../src';
 
 const RECOVERY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -87,46 +87,46 @@ describe('State effect admission policy', () => {
       toolCallId: 'shell',
       reason: 'user cancellation',
     };
-    expect(suspendedCapabilityTerminalRequirementsV1(state, [cancelled])).toEqual([
+    expect(suspendedCapabilityTerminalRequirements(state, [cancelled])).toEqual([
       { invocationId: 'invocation', toolCallId: 'shell' },
     ]);
-    const batch = attachSuspendedCapabilityTerminalsV1(state, [cancelled], {
+    const batch = attachSuspendedCapabilityTerminals(state, [cancelled], {
       invocation: '2026-08-20T00:00:02.000Z',
     });
     expect(batch.map((event) => event.type)).toEqual([
       'capability.execution_unknown',
       'tool.cancelled',
     ]);
-    expect(() => assertCapabilityToolTerminalBatchV1(state, lease, batch)).not.toThrow();
-    expect(() => assertCapabilityToolTerminalBatchV1(state, lease, [batch[0]!])).toThrow(
+    expect(() => assertCapabilityToolTerminalBatch(state, lease, batch)).not.toThrow();
+    expect(() => assertCapabilityToolTerminalBatch(state, lease, [batch[0]!])).toThrow(
       /atomic batch/u,
     );
   });
 
   test('rejects late cancelled results and admits only exact live Shell identities', () => {
     expect(
-      hasLateTerminalEventForCancelledToolV1(runningShellState('cancelled'), lease, [finished]),
+      hasLateTerminalEventForCancelledTool(runningShellState('cancelled'), lease, [finished]),
     ).toBe(true);
     const state = runningShellState();
-    expect(isConcurrentShellEffectEventCurrentV1(state, lease, finished)).toBe(true);
+    expect(isConcurrentShellEffectEventCurrent(state, lease, finished)).toBe(true);
     expect(
-      isConcurrentShellEffectEventCurrentV1(
+      isConcurrentShellEffectEventCurrent(
         state,
         { ...lease, effect: { type: 'run_tools', toolCallIds: ['other'] } },
         finished,
       ),
     ).toBe(false);
     expect(
-      isConcurrentShellEffectBatchCurrentV1(
+      isConcurrentShellEffectBatchCurrent(
         state,
         lease,
         [finished],
         () => '2026-08-20T00:00:02.000Z',
       ),
     ).toBe(true);
-    expect(
-      isConcurrentShellEffectBatchCurrentV1(state, lease, [finished], () => 'not-a-time'),
-    ).toBe(false);
+    expect(isConcurrentShellEffectBatchCurrent(state, lease, [finished], () => 'not-a-time')).toBe(
+      false,
+    );
   });
 
   test('admits verification only in the atomic batch that commits its source receipt', () => {
@@ -152,7 +152,7 @@ describe('State effect admission policy', () => {
       },
       requestedAt: '2026-08-20T00:00:02.000Z',
     };
-    expect(() => assertCapabilityToolTerminalBatchV1(state, lease, [verification])).toThrow(
+    expect(() => assertCapabilityToolTerminalBatch(state, lease, [verification])).toThrow(
       'uncommitted capability receipt',
     );
 
@@ -170,7 +170,7 @@ describe('State effect admission policy', () => {
       },
     };
     expect(() =>
-      assertCapabilityToolTerminalBatchV1(state, lease, [receipt, finished, verification]),
+      assertCapabilityToolTerminalBatch(state, lease, [receipt, finished, verification]),
     ).not.toThrow();
   });
 });

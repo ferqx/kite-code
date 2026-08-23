@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from '../release/canonical-json';
-import { releaseArtifactIdentityV1Schema } from '../release/evidence-schema';
-import { limitedSloGithubSourceV1Schema } from './limited-slo-ledger';
+import { releaseArtifactIdentitySchema } from '../release/evidence-schema';
+import { limitedSloGithubSourceSchema } from './limited-slo-ledger';
 import {
-  type LimitedSloQualificationExpectationV1,
-  type LimitedSloQualificationVerificationV1,
-  verifyLimitedSloQualificationV1,
+  type LimitedSloQualificationExpectation,
+  type LimitedSloQualificationVerification,
+  verifyLimitedSloQualification,
 } from './verify-limited-slo-qualification';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -31,9 +31,9 @@ const thresholdsSchema = z
   })
   .strict();
 
-export const approvedLimitedSloPolicyV1Schema = z
+export const approvedLimitedSloPolicySchema = z
   .object({
-    schema: z.literal('AgentProductionSloV1'),
+    schema: z.literal('AgentProductionSlo'),
     policyId: z.string().min(1),
     status: z.literal('approved'),
     approvalMilestone: z.literal('MS:LIM-APPROVED'),
@@ -61,13 +61,13 @@ export const approvedLimitedSloPolicyV1Schema = z
   })
   .strict();
 
-export const limitedCohortObservationV1Schema = z
+export const limitedCohortObservationSchema = z
   .object({
-    schema: z.literal('LimitedCohortObservationV1'),
-    artifactIdentity: releaseArtifactIdentityV1Schema,
+    schema: z.literal('LimitedCohortObservation'),
+    artifactIdentity: releaseArtifactIdentitySchema,
     routeDigest: digestSchema,
     cohortDigest: digestSchema,
-    source: limitedSloGithubSourceV1Schema
+    source: limitedSloGithubSourceSchema
       .extend({
         reportDigest: digestSchema,
         verifierDigest: digestSchema,
@@ -88,11 +88,11 @@ export const limitedCohortObservationV1Schema = z
   })
   .strict();
 
-export type ApprovedLimitedSloPolicyV1 = z.infer<typeof approvedLimitedSloPolicyV1Schema>;
-export type LimitedCohortObservationV1 = z.infer<typeof limitedCohortObservationV1Schema>;
+export type ApprovedLimitedSloPolicy = z.infer<typeof approvedLimitedSloPolicySchema>;
+export type LimitedCohortObservation = z.infer<typeof limitedCohortObservationSchema>;
 
-export interface LimitedSloGateRecordV1 {
-  schema: 'LimitedSloGateRecordV1';
+export interface LimitedSloGateRecord {
+  schema: 'LimitedSloGateRecord';
   gate: 'limited_slo';
   status: 'passed' | 'blocked';
   milestone: 'MS:LIMITED-SLO' | null;
@@ -118,20 +118,20 @@ export interface LimitedSloGateRecordV1 {
  * Qualifies a supplied real observation. This function never collects data and
  * never upgrades an unapproved/null baseline: absent policy facts remain blocked.
  */
-export function qualifyLimitedSloV1(input: {
+export function qualifyLimitedSlo(input: {
   policy: unknown;
   observation: unknown;
   retainedLedger?: unknown;
-  expectedSource?: LimitedSloQualificationExpectationV1;
-}): LimitedSloGateRecordV1 {
-  const observation = limitedCohortObservationV1Schema.parse(input.observation);
-  const policyResult = approvedLimitedSloPolicyV1Schema.safeParse(input.policy);
+  expectedSource?: LimitedSloQualificationExpectation;
+}): LimitedSloGateRecord {
+  const observation = limitedCohortObservationSchema.parse(input.observation);
+  const policyResult = approvedLimitedSloPolicySchema.safeParse(input.policy);
   const reasons = new Set<string>();
-  let verification: LimitedSloQualificationVerificationV1 | null = null;
+  let verification: LimitedSloQualificationVerification | null = null;
   if (input.retainedLedger === undefined) reasons.add('retained_sample_ledger_missing');
   if (input.expectedSource === undefined) reasons.add('trusted_source_expectation_missing');
   if (input.retainedLedger !== undefined && input.expectedSource !== undefined) {
-    verification = verifyLimitedSloQualificationV1({
+    verification = verifyLimitedSloQualification({
       ledger: input.retainedLedger,
       expected: input.expectedSource,
     });
@@ -279,8 +279,8 @@ export function qualifyLimitedSloV1(input: {
     }),
   );
   const evidenceEligible = verification?.productionEvidenceEligible === true && reasons.size === 0;
-  const withoutDigest: Omit<LimitedSloGateRecordV1, 'recordDigest'> = {
-    schema: 'LimitedSloGateRecordV1' as const,
+  const withoutDigest: Omit<LimitedSloGateRecord, 'recordDigest'> = {
+    schema: 'LimitedSloGateRecord' as const,
     gate: 'limited_slo' as const,
     status: evidenceEligible ? 'passed' : 'blocked',
     milestone: evidenceEligible ? 'MS:LIMITED-SLO' : null,

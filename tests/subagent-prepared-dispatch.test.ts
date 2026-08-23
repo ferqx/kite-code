@@ -1,49 +1,47 @@
 import { describe, expect, test } from 'bun:test';
-import type { BuiltinOperationExecutionValueV1 } from '@kite/builtin-runtime';
+import type { BuiltinOperationExecutionValue } from '@kite/builtin-runtime';
 import {
-  BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1,
-  createBuiltinPreparedTaskDispatchAdapterV1,
+  BUILTIN_PREPARED_CALL_FACTS_SCHEMA_,
+  createBuiltinPreparedTaskDispatchAdapter,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  digestCapabilityBindingValueV1,
+  createBuiltinToolCatalogProjection,
+  digestCapabilityBindingValue,
 } from '@kite/builtin-runtime';
 import type {
-  ExecutionReceiptV1,
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineOutcomeDispatchV1,
-  ToolPipelinePersistenceV1,
+  ExecutionReceipt,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineOutcomeDispatch,
+  ToolPipelinePersistence,
 } from '@kite/runtime-spi';
-import { createAppToolPipelineAttemptCompositionV1 } from '#app/bootstrap/runtime/tool-pipeline-attempt-composition';
-import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
+import { createAppToolPipelineAttemptComposition } from '#app/bootstrap/runtime/tool-pipeline-attempt-composition';
+import { createRuntimeModuleRegistry } from '#runtime-spi';
 
 const TURN_ID = 'turn-subagent-prepared-dispatch';
 const THREAD_ID = 'thread-subagent-prepared-dispatch';
 const WORKSPACE = '/workspace';
-const REGISTRY = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-const PROJECTION = createBuiltinToolCatalogProjectionV1(REGISTRY.snapshot()).forTurn({
+const REGISTRY = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+const PROJECTION = createBuiltinToolCatalogProjection(REGISTRY.snapshot()).forTurn({
   workspace: WORKSPACE,
   threadId: THREAD_ID,
   turnId: TURN_ID,
   phase: 'building',
   hasTaskAdapter: true,
 });
-type ProjectionEntryV1 = (typeof PROJECTION.entries)[number];
-type TaskCatalogEntryV1 = Omit<
-  Extract<ProjectionEntryV1, { visibility: 'model' }>,
+type ProjectionEntry = (typeof PROJECTION.entries)[number];
+type TaskCatalogEntry = Omit<
+  Extract<ProjectionEntry, { visibility: 'model' }>,
   'name' | 'inputSchemaDigest' | 'kind'
 > & {
   readonly name: string;
   readonly inputSchemaDigest: string;
-  readonly kind: Exclude<ProjectionEntryV1['kind'], 'internal_runtime'>;
+  readonly kind: Exclude<ProjectionEntry['kind'], 'internal_runtime'>;
 };
 
-function assertTaskEntryV1(
-  entry: ProjectionEntryV1 | undefined,
-): asserts entry is TaskCatalogEntryV1 {
+function assertTaskEntry(entry: ProjectionEntry | undefined): asserts entry is TaskCatalogEntry {
   if (
     entry?.visibility !== 'model' ||
     entry.operationId !== 'builtin:task' ||
@@ -57,8 +55,8 @@ function assertTaskEntryV1(
 const taskEntryCandidate = PROJECTION.entries.find(
   (entry) => entry.visibility === 'model' && entry.operationId === 'builtin:task',
 );
-assertTaskEntryV1(taskEntryCandidate);
-const TASK_ENTRY: TaskCatalogEntryV1 = taskEntryCandidate;
+assertTaskEntry(taskEntryCandidate);
+const TASK_ENTRY: TaskCatalogEntry = taskEntryCandidate;
 
 const TASK_ARGUMENTS = Object.freeze({
   subagent_type: 'code' as const,
@@ -81,7 +79,7 @@ function freezeDeep<T>(value: T, seen = new WeakSet<object>()): T {
   return Object.freeze(value);
 }
 
-function operationValue(): BuiltinOperationExecutionValueV1 {
+function operationValue(): BuiltinOperationExecutionValue {
   return freezeDeep({
     schema: 'kite.builtin-operation-result.v1' as const,
     ok: true,
@@ -92,19 +90,19 @@ function operationValue(): BuiltinOperationExecutionValueV1 {
 }
 
 function preparedTask(
-  overrides: Partial<NonDynamicPreparedToolInvocationIdentityV1> = {},
-  argumentsValue: RuntimeJsonValueV1 = TASK_ARGUMENTS,
-): Readonly<PreparedToolInvocationV1> {
+  overrides: Partial<NonDynamicPreparedToolInvocationIdentity> = {},
+  argumentsValue: RuntimeJsonValue = TASK_ARGUMENTS,
+): Readonly<PreparedToolInvocation> {
   const canonical = TASK_ENTRY.parser.canonicalize(argumentsValue);
   if (typeof canonical !== 'object' || canonical === null || Array.isArray(canonical)) {
     throw new Error('Task parser did not produce an object.');
   }
-  const canonicalRecord = canonical as Readonly<Record<string, RuntimeJsonValueV1>>;
+  const canonicalRecord = canonical as Readonly<Record<string, RuntimeJsonValue>>;
   const role = canonicalRecord.subagent_type;
   if (typeof role !== 'string') throw new Error('Task parser did not produce a role.');
   const classification = TASK_ENTRY.classifyEffects(canonical);
   const schemaDigest = TASK_ENTRY.parser.schemaDigest ?? TASK_ENTRY.inputSchemaDigest;
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     invocationId: 'invocation-task-1',
     attemptId: 'invocation-task-1:attempt:1',
     toolCallId: 'task-call',
@@ -112,7 +110,7 @@ function preparedTask(
     modelMessageId: 'model-message',
     argumentOrigin: 'runtime_private',
     providerId: TASK_ENTRY.providerId,
-    operationId: TASK_ENTRY.operationId as NonDynamicOperationIdV1,
+    operationId: TASK_ENTRY.operationId as NonDynamicOperationId,
     executionFamily: 'subagent',
     executionMechanism: 'subagent',
     capabilityId: TASK_ENTRY.capabilityId,
@@ -120,9 +118,9 @@ function preparedTask(
     descriptorRevision: TASK_ENTRY.descriptor.revision,
     parserRevision: TASK_ENTRY.parser.parserRevision,
     executorRevision: TASK_ENTRY.executorRevision,
-    argumentsDigest: digestCapabilityBindingValueV1(canonical),
+    argumentsDigest: digestCapabilityBindingValue(canonical),
     schemaDigest,
-    effectiveEffectsDigest: digestCapabilityBindingValueV1(classification.effectiveEffects),
+    effectiveEffectsDigest: digestCapabilityBindingValue(classification.effectiveEffects),
     policyDigest: 'policy-task-1',
     authorizationDigest: 'authorization-task-1',
     admissionDigest: 'admission-task-1',
@@ -142,7 +140,7 @@ function preparedTask(
     ...overrides,
   };
   const facts = {
-    schema: BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1,
+    schema: BUILTIN_PREPARED_CALL_FACTS_SCHEMA_,
     toolCallId: identity.toolCallId,
     callCreatedAtTurnId: identity.turnId,
     modelMessageId: identity.modelMessageId,
@@ -188,9 +186,9 @@ function preparedTask(
 }
 
 function preparedWithFacts(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  facts: RuntimeJsonValueV1,
-): Readonly<PreparedToolInvocationV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+  facts: RuntimeJsonValue,
+): Readonly<PreparedToolInvocation> {
   return freezeDeep({
     ...prepared,
     input: {
@@ -201,15 +199,15 @@ function preparedWithFacts(
 }
 
 function executionReceipt(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  value: BuiltinOperationExecutionValueV1,
-): ExecutionReceiptV1<RuntimeJsonValueV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+  value: BuiltinOperationExecutionValue,
+): ExecutionReceipt<RuntimeJsonValue> {
   return {
     invocationId: prepared.identity.invocationId,
     attemptId: prepared.identity.attemptId,
     providerId: TASK_ENTRY.providerId,
     executorRevision: TASK_ENTRY.executorRevision,
-    requestDigest: digestCapabilityBindingValueV1(prepared.input.arguments),
+    requestDigest: digestCapabilityBindingValue(prepared.input.arguments),
     status: 'succeeded',
     dispatchCertainty: 'attempted',
     cleanupCertainty: 'not_required',
@@ -218,8 +216,8 @@ function executionReceipt(
 }
 
 function acknowledgement(
-  prepared: Readonly<PreparedToolInvocationV1>,
-): ToolPipelineAttemptAcknowledgementV1 {
+  prepared: Readonly<PreparedToolInvocation>,
+): ToolPipelineAttemptAcknowledgement {
   const identity = prepared.identity;
   return {
     acknowledged: true,
@@ -260,16 +258,16 @@ function acknowledgement(
 
 function fixture(
   options: {
-    readonly prepared?: Readonly<PreparedToolInvocationV1>;
-    readonly verify?: (prepared: Readonly<PreparedToolInvocationV1>) => boolean;
+    readonly prepared?: Readonly<PreparedToolInvocation>;
+    readonly verify?: (prepared: Readonly<PreparedToolInvocation>) => boolean;
     readonly persist?: boolean;
-    readonly hostStatus?: ExecutionReceiptV1['status'];
+    readonly hostStatus?: ExecutionReceipt['status'];
   } = {},
 ) {
   const prepared = options.prepared ?? preparedTask();
   let suppliedPortCalls = 0;
   let childCalls = 0;
-  const adapter = createBuiltinPreparedTaskDispatchAdapterV1({
+  const adapter = createBuiltinPreparedTaskDispatchAdapter({
     projection: PROJECTION,
     verifyPreparedIdentity: options.verify ?? (() => true),
     port: {
@@ -286,7 +284,7 @@ function fixture(
   let dispatchCalls = 0;
   let commitCalls = 0;
   let unknownCalls = 0;
-  const persistence: ToolPipelinePersistenceV1 = {
+  const persistence: ToolPipelinePersistence = {
     recordAttempt: async (candidate) => {
       events.push('record');
       recordCalls += 1;
@@ -311,7 +309,7 @@ function fixture(
       throw new Error('Task fixture does not suspend.');
     },
   };
-  const dispatch: ToolPipelineOutcomeDispatchV1 = {
+  const dispatch: ToolPipelineOutcomeDispatch = {
     verifyPreparedIdentity: adapter.verifyPreparedIdentity,
     dispatch: async (candidate) => {
       dispatchCalls += 1;
@@ -319,7 +317,7 @@ function fixture(
       return { kind: 'committed', terminal };
     },
   };
-  const composition = createAppToolPipelineAttemptCompositionV1({ persistence, dispatch });
+  const composition = createAppToolPipelineAttemptComposition({ persistence, dispatch });
   const authority = composition.prepare(prepared.identity, prepared.input);
   return {
     adapter,
@@ -410,7 +408,7 @@ describe('prepared Builtin Task dispatch', () => {
         ...value.authority.input,
         arguments: { ...TASK_ARGUMENTS, tampered: true },
       },
-    } as Readonly<PreparedToolInvocationV1>;
+    } as Readonly<PreparedToolInvocation>;
     await expect(value.adapter.dispatch(mutable)).rejects.toBeTruthy();
     expect(value.counters.host).toBe(0);
     expect(value.counters.child).toBe(0);

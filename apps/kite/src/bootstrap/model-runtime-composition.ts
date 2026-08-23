@@ -1,63 +1,63 @@
 import {
-  BuiltinChildRuntimeDriverV1,
+  BuiltinChildRuntimeDriver,
   CapabilityArtifactStore,
-  createGovernedLocalSubagentCompositionV1,
-  type GovernedSubagentCompositionV1,
+  createGovernedLocalSubagentComposition,
+  type GovernedSubagentComposition,
 } from '@kite/builtin-runtime';
 import {
-  type BuiltinWorkspaceFilesystemRuntimeV1,
-  FilesystemPreimageArtifactStoreV1,
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
+  type BuiltinWorkspaceFilesystemRuntime,
+  FilesystemPreimageArtifactStore,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
 } from '@kite/builtin-runtime/filesystem';
 import {
-  BuiltinModelEffectCoordinatorV1,
-  type BuiltinModelOperationExecutionPortV1,
-  createLiveModelResponseSourceV1,
-  type ModelArtifactEvidenceAvailabilityV1,
-  ModelArtifactStoreV1,
-  ModelInvocationGatewayV1,
+  BuiltinModelEffectCoordinator,
+  type BuiltinModelOperationExecutionPort,
+  createLiveModelResponseSource,
+  type ModelArtifactEvidenceAvailability,
+  ModelArtifactStore,
+  ModelInvocationGateway,
 } from '@kite/builtin-runtime/model';
 import { PlanArtifactStore } from '@kite/builtin-runtime/planning';
 import {
   canonicalPathForComparison,
-  SandboxPreparationArtifactStoreV1,
+  SandboxPreparationArtifactStore,
 } from '@kite/builtin-runtime/sandbox';
-import { planModelInvocationResourceV1 } from '@kite/runtime-host';
+import { planModelInvocationResource } from '@kite/runtime-host';
 import { userKiteCodeDir } from '#app/config/paths';
 import {
-  type SubagentContinuationArtifactAccessV1,
-  SubagentContinuationArtifactStoreV1,
-  type SubagentLifecycleArtifactAccessV1,
-  SubagentLifecycleArtifactStoreV1,
-  type SubagentTaskArtifactAccessV1,
-  SubagentTaskArtifactStoreV1,
-  type SubagentTaskRequestArtifactAccessV1,
-  SubagentTaskRequestArtifactStoreV1,
+  type SubagentContinuationArtifactAccess,
+  SubagentContinuationArtifactStore,
+  type SubagentLifecycleArtifactAccess,
+  SubagentLifecycleArtifactStore,
+  type SubagentTaskArtifactAccess,
+  SubagentTaskArtifactStore,
+  type SubagentTaskRequestArtifactAccess,
+  SubagentTaskRequestArtifactStore,
 } from '#builtin-runtime';
 import type { RuntimeState } from './runtime/state-runtime';
 import {
-  type AppSubagentRuntimeFactoryV1,
-  createPipelineSubagentRuntimeV1,
+  type AppSubagentRuntimeFactory,
+  createPipelineSubagentRuntime,
 } from './runtime/subagent/pipeline-runtime';
-import { reconcilePendingSubagentProvidersAfterCrashV1 } from './runtime/subagent-provider-recovery';
+import { reconcilePendingSubagentProvidersAfterCrash } from './runtime/subagent-provider-recovery';
 
-type InstalledSubagentCompositionV1 = GovernedSubagentCompositionV1<
-  SubagentLifecycleArtifactAccessV1,
-  BuiltinChildRuntimeDriverV1,
-  SubagentTaskArtifactAccessV1
+type InstalledSubagentComposition = GovernedSubagentComposition<
+  SubagentLifecycleArtifactAccess,
+  BuiltinChildRuntimeDriver,
+  SubagentTaskArtifactAccess
 >;
 
-const installedSubagentCompositions = new Map<string, InstalledSubagentCompositionV1>();
+const installedSubagentCompositions = new Map<string, InstalledSubagentComposition>();
 
-function installedSubagentCompositionV1() {
+function installedSubagentComposition() {
   const installation = userKiteCodeDir();
   const existing = installedSubagentCompositions.get(installation);
   if (existing) return existing;
-  const taskArtifacts = new SubagentTaskArtifactStoreV1();
-  const lifecycleArtifacts = new SubagentLifecycleArtifactStoreV1();
-  const composition = createGovernedLocalSubagentCompositionV1({
-    driver: new BuiltinChildRuntimeDriverV1(),
+  const taskArtifacts = new SubagentTaskArtifactStore();
+  const lifecycleArtifacts = new SubagentLifecycleArtifactStore();
+  const composition = createGovernedLocalSubagentComposition({
+    driver: new BuiltinChildRuntimeDriver(),
     taskArtifacts,
     lifecycleArtifacts,
   });
@@ -65,81 +65,81 @@ function installedSubagentCompositionV1() {
   return composition;
 }
 
-export type InstalledKiteRuntimeCompositionV1 = {
+export type InstalledKiteRuntimeComposition = {
   status: 'available';
-  artifacts: ModelArtifactStoreV1;
+  artifacts: ModelArtifactStore;
   /** The one App-owned immutable Plan Artifact writer for this runtime. */
   planArtifacts: PlanArtifactStore;
   capabilityArtifacts: CapabilityArtifactStore;
-  evidence: ModelArtifactEvidenceAvailabilityV1;
-  gateway: ModelInvocationGatewayV1;
-  modelEffects: BuiltinModelEffectCoordinatorV1;
-  workspaceFilesystem?: BuiltinWorkspaceFilesystemRuntimeV1;
-  sandboxPreparationArtifacts: SandboxPreparationArtifactStoreV1;
-  subagentRuntimeFactory: AppSubagentRuntimeFactoryV1;
+  evidence: ModelArtifactEvidenceAvailability;
+  gateway: ModelInvocationGateway;
+  modelEffects: BuiltinModelEffectCoordinator;
+  workspaceFilesystem?: BuiltinWorkspaceFilesystemRuntime;
+  sandboxPreparationArtifacts: SandboxPreparationArtifactStore;
+  subagentRuntimeFactory: AppSubagentRuntimeFactory;
   reconcilePendingSubagents: (
-    persistence: Parameters<typeof reconcilePendingSubagentProvidersAfterCrashV1>[0]['persistence'],
+    persistence: Parameters<typeof reconcilePendingSubagentProvidersAfterCrash>[0]['persistence'],
   ) => Promise<boolean>;
-  subagentContinuationArtifacts: SubagentContinuationArtifactAccessV1;
-  subagentTaskRequests: SubagentTaskRequestArtifactAccessV1;
+  subagentContinuationArtifacts: SubagentContinuationArtifactAccess;
+  subagentTaskRequests: SubagentTaskRequestArtifactAccess;
 };
 
-export type InstalledKiteRuntimeCompositionFactoryV1 = (
+export type InstalledKiteRuntimeCompositionFactory = (
   workspace: string,
-) => InstalledKiteRuntimeCompositionV1;
+) => InstalledKiteRuntimeComposition;
 
 /** Reuse one composition per canonical Workspace without a process-global fence. */
-export function createInstalledKiteRuntimeCompositionFactoryV1(
-  operationExecution: BuiltinModelOperationExecutionPortV1,
-): InstalledKiteRuntimeCompositionFactoryV1 {
-  const installed = new Map<string, InstalledKiteRuntimeCompositionV1>();
+export function createInstalledKiteRuntimeCompositionFactory(
+  operationExecution: BuiltinModelOperationExecutionPort,
+): InstalledKiteRuntimeCompositionFactory {
+  const installed = new Map<string, InstalledKiteRuntimeComposition>();
   return (workspace) => {
     const canonicalWorkspace = canonicalPathForComparison(workspace);
     const existing = installed.get(canonicalWorkspace);
     if (existing) return existing;
-    const created = resolveInstalledKiteRuntimeCompositionV1(workspace, operationExecution);
+    const created = resolveInstalledKiteRuntimeComposition(workspace, operationExecution);
     installed.set(canonicalWorkspace, created);
     return created;
   };
 }
 
 /** App-owned composition for installation-private Model evidence and runtime mechanisms. */
-export function resolveInstalledKiteRuntimeCompositionV1(
+export function resolveInstalledKiteRuntimeComposition(
   workspace?: string,
-  operationExecution?: BuiltinModelOperationExecutionPortV1,
-): InstalledKiteRuntimeCompositionV1 {
+  operationExecution?: BuiltinModelOperationExecutionPort,
+): InstalledKiteRuntimeComposition {
   if (!operationExecution) {
     throw new Error('Builtin Model operation execution port is unavailable.');
   }
-  const artifacts = new ModelArtifactStoreV1({});
+  const artifacts = new ModelArtifactStore({});
   const planArtifacts = new PlanArtifactStore();
   const capabilityArtifacts = new CapabilityArtifactStore();
-  const sandboxPreparationArtifacts = new SandboxPreparationArtifactStoreV1({});
-  const subagentComposition = installedSubagentCompositionV1();
-  const subagentContinuationStore = new SubagentContinuationArtifactStoreV1();
-  const subagentTaskRequestStore = new SubagentTaskRequestArtifactStoreV1();
-  const subagentContinuationArtifacts: SubagentContinuationArtifactAccessV1 = Object.freeze({
-    write: (input: Parameters<SubagentContinuationArtifactAccessV1['write']>[0]) =>
+  const sandboxPreparationArtifacts = new SandboxPreparationArtifactStore({});
+  const subagentComposition = installedSubagentComposition();
+  const subagentContinuationStore = new SubagentContinuationArtifactStore();
+  const subagentTaskRequestStore = new SubagentTaskRequestArtifactStore();
+  const subagentContinuationArtifacts: SubagentContinuationArtifactAccess = Object.freeze({
+    write: (input: Parameters<SubagentContinuationArtifactAccess['write']>[0]) =>
       subagentContinuationStore.write(input),
     read: (
-      ref: Parameters<SubagentContinuationArtifactAccessV1['read']>[0],
-      expected: Parameters<SubagentContinuationArtifactAccessV1['read']>[1],
+      ref: Parameters<SubagentContinuationArtifactAccess['read']>[0],
+      expected: Parameters<SubagentContinuationArtifactAccess['read']>[1],
     ) => subagentContinuationStore.read(ref, expected),
   });
-  const subagentTaskRequests: SubagentTaskRequestArtifactAccessV1 = Object.freeze({
-    write: (input: Parameters<SubagentTaskRequestArtifactAccessV1['write']>[0]) =>
+  const subagentTaskRequests: SubagentTaskRequestArtifactAccess = Object.freeze({
+    write: (input: Parameters<SubagentTaskRequestArtifactAccess['write']>[0]) =>
       subagentTaskRequestStore.write(input),
     read: (
-      ref: Parameters<SubagentTaskRequestArtifactAccessV1['read']>[0],
-      expected: Parameters<SubagentTaskRequestArtifactAccessV1['read']>[1],
+      ref: Parameters<SubagentTaskRequestArtifactAccess['read']>[0],
+      expected: Parameters<SubagentTaskRequestArtifactAccess['read']>[1],
     ) => subagentTaskRequestStore.read(ref, expected),
   });
-  const filesystemGrants = workspace ? new WorkspaceFilesystemGrantAuthorityV1() : undefined;
-  const gateway = new ModelInvocationGatewayV1({
+  const filesystemGrants = workspace ? new WorkspaceFilesystemGrantAuthority() : undefined;
+  const gateway = new ModelInvocationGateway({
     artifacts,
-    source: createLiveModelResponseSourceV1(),
+    source: createLiveModelResponseSource(),
     operationExecution,
-    planResource: (state, request) => planModelInvocationResourceV1(state as RuntimeState, request),
+    planResource: (state, request) => planModelInvocationResource(state as RuntimeState, request),
   });
   return {
     status: 'available',
@@ -147,9 +147,9 @@ export function resolveInstalledKiteRuntimeCompositionV1(
     planArtifacts,
     capabilityArtifacts,
     sandboxPreparationArtifacts,
-    subagentRuntimeFactory: () => createPipelineSubagentRuntimeV1(() => subagentComposition),
+    subagentRuntimeFactory: () => createPipelineSubagentRuntime(() => subagentComposition),
     reconcilePendingSubagents: (persistence) =>
-      reconcilePendingSubagentProvidersAfterCrashV1({
+      reconcilePendingSubagentProvidersAfterCrash({
         composition: subagentComposition,
         persistence,
       }),
@@ -157,14 +157,14 @@ export function resolveInstalledKiteRuntimeCompositionV1(
     subagentTaskRequests,
     evidence: { status: 'available', reader: artifacts },
     gateway,
-    modelEffects: new BuiltinModelEffectCoordinatorV1(gateway),
+    modelEffects: new BuiltinModelEffectCoordinator(gateway),
     ...(workspace && filesystemGrants
       ? {
           workspaceFilesystem: {
             canonicalWorkspace: canonicalPathForComparison(workspace),
             grants: filesystemGrants,
-            provider: new LocalWorkspaceFilesystemProviderV1(filesystemGrants.verifier()),
-            preimageArtifacts: new FilesystemPreimageArtifactStoreV1(),
+            provider: new LocalWorkspaceFilesystemProvider(filesystemGrants.verifier()),
+            preimageArtifacts: new FilesystemPreimageArtifactStore(),
             capabilityArtifacts,
           },
         }

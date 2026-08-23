@@ -50,7 +50,7 @@ jobs:
         name: Verify Windows runner manifest pin
         run: |
           bun run scripts/release/windows-runner-evidence.ts
-          git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json
+          git diff --exit-code -- release/platform-capabilities/windows-runner.json
       - name: Release contract tests
         run: >-
           bun test

@@ -1,6 +1,6 @@
 import type { KernelEvent } from '../../events';
 import { sha256Hex } from '../../hash';
-import { closeToolRecoveryScopeV1, recordToolOwnedProgressV1 } from '../../recovery';
+import { closeToolRecoveryScope, recordToolOwnedProgress } from '../../recovery';
 import {
   eventRecord,
   nonEmptyStringField,
@@ -14,7 +14,7 @@ import type {
   AgentState,
   AgentTaskState,
   PlanArtifactRef,
-  PlanCompletionEvidenceV1,
+  PlanCompletionEvidence,
   PlanDocument,
   PlanStep,
 } from '../../state';
@@ -48,7 +48,7 @@ function planStatus(value: unknown): PlanStep['status'] | undefined {
     : undefined;
 }
 
-function isPlanStepV2(value: unknown): value is PlanStep {
+function isPlanStep(value: unknown): value is PlanStep {
   if (!isRecord(value)) return false;
   const keys = Object.hasOwn(value, 'note')
     ? ['id', 'title', 'status', 'note']
@@ -67,7 +67,7 @@ function isPlanStepV2(value: unknown): value is PlanStep {
   );
 }
 
-function isAgentPlanTransportV2(value: unknown): value is AgentPlan {
+function isAgentPlanTransport(value: unknown): value is AgentPlan {
   if (!isRecord(value) || !hasExactKeys(value, ['name', 'description', 'status', 'steps'])) {
     return false;
   }
@@ -88,11 +88,11 @@ function isAgentPlanTransportV2(value: unknown): value is AgentPlan {
   );
 }
 
-function emptyPlanCompletionEvidence(): PlanCompletionEvidenceV1 {
+function emptyPlanCompletionEvidence(): PlanCompletionEvidence {
   return { schemaVersion: 1, verification: [], execution: [], skipped: [], unresolved: [] };
 }
 
-function isPlanCompletionEvidence(value: unknown): value is PlanCompletionEvidenceV1 {
+function isPlanCompletionEvidence(value: unknown): value is PlanCompletionEvidence {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ['schemaVersion', 'verification', 'execution', 'skipped', 'unresolved']) ||
@@ -153,7 +153,7 @@ function computePlanStructuralDigest(
   );
 }
 
-function isPlanArtifactRefV2(value: unknown, plan: PlanDocument): value is PlanArtifactRef {
+function isPlanArtifactRef(value: unknown, plan: PlanDocument): value is PlanArtifactRef {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -186,7 +186,7 @@ function isPlanArtifactRefV2(value: unknown, plan: PlanDocument): value is PlanA
   );
 }
 
-function isPlanDocumentV2(value: unknown): value is PlanDocument {
+function isPlanDocument(value: unknown): value is PlanDocument {
   if (!isRecord(value)) return false;
   if (
     !hasOnlyKeys(value, [
@@ -221,7 +221,7 @@ function isPlanDocumentV2(value: unknown): value is PlanDocument {
     !Array.isArray(value.steps) ||
     value.steps.length < 1 ||
     value.steps.length > 12 ||
-    !value.steps.every(isPlanStepV2) ||
+    !value.steps.every(isPlanStep) ||
     new Set(value.steps.map((step) => (step as PlanStep).id)).size !== value.steps.length ||
     typeof value.structuralDigest !== 'string' ||
     !SHA256_DIGEST.test(value.structuralDigest) ||
@@ -240,13 +240,13 @@ function isPlanDocumentV2(value: unknown): value is PlanDocument {
   const plan = value as unknown as PlanDocument;
   return (
     computePlanStructuralDigest(plan) === plan.structuralDigest &&
-    (value.artifact === undefined || isPlanArtifactRefV2(value.artifact, plan))
+    (value.artifact === undefined || isPlanArtifactRef(value.artifact, plan))
   );
 }
 
 function agentPlanTransportMatchesDocument(value: unknown, document: PlanDocument): boolean {
   if (
-    !isAgentPlanTransportV2(value) ||
+    !isAgentPlanTransport(value) ||
     value.name !== document.title ||
     value.description !== document.bodyMarkdown ||
     value.status !== 'pending' ||
@@ -270,7 +270,7 @@ function planStepsFromAgentPlanUpdate(
   value: unknown,
   document: PlanDocument,
 ): PlanStep[] | undefined {
-  if (!isAgentPlanTransportV2(value) || value.name !== document.title) return undefined;
+  if (!isAgentPlanTransport(value) || value.name !== document.title) return undefined;
   if (value.description !== document.bodyMarkdown || value.steps.length !== document.steps.length)
     return undefined;
   const steps: PlanStep[] = [];
@@ -283,12 +283,7 @@ function planStepsFromAgentPlanUpdate(
       ...(candidate.note === undefined ? {} : { note: candidate.note }),
     };
     const existing = document.steps[index];
-    if (
-      !existing ||
-      !isPlanStepV2(step) ||
-      step.id !== existing.id ||
-      step.title !== existing.title
-    )
+    if (!existing || !isPlanStep(step) || step.id !== existing.id || step.title !== existing.title)
       return undefined;
     steps.push(step);
   }
@@ -357,7 +352,7 @@ function planDocumentFromTransport(
   const taskId = nonEmptyStringField(payload, 'taskId');
   const artifact = recordField(payload, 'artifact') as PlanArtifactRef | undefined;
   if (!planId || version === undefined || !structuralDigest || !taskId) return undefined;
-  if (!isAgentPlanTransportV2(plan)) return undefined;
+  if (!isAgentPlanTransport(plan)) return undefined;
   const steps: PlanStep[] = plan.steps.map((step) => ({
     id: typeof step.id === 'string' ? step.id : '',
     title: step.step,
@@ -379,7 +374,7 @@ function planDocumentFromTransport(
     ...(supersedesPlanVersion === undefined ? {} : { supersedesPlanVersion }),
     ...(replanReason === undefined ? {} : { replanReason }),
   };
-  return isPlanDocumentV2(document) ? document : undefined;
+  return isPlanDocument(document) ? document : undefined;
 }
 
 function activeRecoveryFailureIds(state: AgentState, includeExhausted = false): string[] {
@@ -432,7 +427,7 @@ function belongsToActiveTask(state: AgentState, taskId: string | undefined): boo
 }
 
 function isResolvedRecoveryFailure(state: AgentState, call: AgentState['tools']['calls'][string]) {
-  const failureId = call.outcomeV1?.lineage?.failureInstanceId;
+  const failureId = call.outcome?.lineage?.failureInstanceId;
   return failureId !== undefined && state.toolRecovery.failures[failureId]?.status === 'recovered';
 }
 
@@ -440,7 +435,7 @@ function projectPlanCompletionEvidence(
   state: AgentState,
   steps: readonly PlanStep[],
   skippedReasonCodes: Readonly<Record<string, string>> = {},
-): PlanCompletionEvidenceV1 {
+): PlanCompletionEvidence {
   const task = activeTask(state);
   const previous =
     task?.planning.kind === 'executing' ? task.planning.document.completionEvidence : undefined;
@@ -470,7 +465,7 @@ function projectPlanCompletionEvidence(
     .sort((left, right) => left.toolCallId.localeCompare(right.toolCallId));
   const unresolved = Object.values(state.tools.calls)
     .filter((call) => belongsToActiveTask(state, call.taskId))
-    .reduce<Array<PlanCompletionEvidenceV1['unresolved'][number]>>((entries, call) => {
+    .reduce<Array<PlanCompletionEvidence['unresolved'][number]>>((entries, call) => {
       if (call.status === 'awaiting_approval') {
         entries.push({ kind: 'approval', referenceId: call.toolCallId });
       }
@@ -496,10 +491,7 @@ function projectPlanCompletionEvidence(
   return { schemaVersion: 1, verification, execution, skipped, unresolved };
 }
 
-function planCompletionBlocker(
-  state: AgentState,
-  evidence: PlanCompletionEvidenceV1,
-): string | null {
+function planCompletionBlocker(state: AgentState, evidence: PlanCompletionEvidence): string | null {
   if (
     state.interactions.kind !== 'idle' ||
     Object.values(state.tools.calls).some(
@@ -550,7 +542,7 @@ function planCompletionEvidenceMatchesRuntime(
   state: AgentState,
   steps: readonly PlanStep[],
   evidence: unknown,
-): evidence is PlanCompletionEvidenceV1 {
+): evidence is PlanCompletionEvidence {
   if (!isPlanCompletionEvidence(evidence)) return false;
   const reasonCodes = Object.fromEntries(
     evidence.skipped.map((entry) => [entry.stepId, entry.reasonCode]),
@@ -600,7 +592,7 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
       };
       return {
         ...state,
-        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+        toolRecovery: closeToolRecoveryScope(state.toolRecovery, {
           kind: 'task',
           taskId,
         }),
@@ -620,7 +612,7 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
       };
       return {
         ...state,
-        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+        toolRecovery: closeToolRecoveryScope(state.toolRecovery, {
           kind: 'task',
           taskId,
         }),
@@ -631,16 +623,18 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
     case 'turn.started': {
       const turnId = nonEmptyStringField(payload, 'turnId');
       if (!turnId) return state;
-      const preserveV2Correction =
+      const preservePlannedCorrection =
         state.completionGuard.guardVersion === 'completion_guard_v2' &&
         samePlanIdentity(state.completionGuard.planIdentity, planningIdentity(state));
       return {
         ...state,
-        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+        toolRecovery: closeToolRecoveryScope(state.toolRecovery, {
           kind: 'turn',
           turnId: state.turn.turnId,
         }),
-        completionGuard: preserveV2Correction ? state.completionGuard : { correctionAttempts: 0 },
+        completionGuard: preservePlannedCorrection
+          ? state.completionGuard
+          : { correctionAttempts: 0 },
         terminalOutcome: undefined,
         turn: { turnId, turnIndex: state.turn.turnIndex + 1, status: 'active' },
       };
@@ -680,7 +674,7 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
       const toolCallId = nonEmptyStringField(payload, 'toolCallId');
       if (
         !document ||
-        !isPlanDocumentV2(document) ||
+        !isPlanDocument(document) ||
         !planId ||
         version === undefined ||
         !structuralDigest ||
@@ -857,7 +851,7 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
         ? next
         : {
             ...next,
-            toolRecovery: recordToolOwnedProgressV1(state.toolRecovery, {
+            toolRecovery: recordToolOwnedProgress(state.toolRecovery, {
               kind: 'replanned',
               referenceId: `${planning.document.planId}:${planning.document.version + 1}`,
               resolvesFailureIds,
@@ -894,7 +888,7 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
         structuralHash === draftDocument.structuralDigest;
       if (reusesCanonicalDocument) {
         if (
-          !isPlanDocumentV2(draftDocument) ||
+          !isPlanDocument(draftDocument) ||
           !agentPlanTransportMatchesDocument(plan, draftDocument) ||
           !samePlanArtifactRef(artifact, draftDocument.artifact) ||
           supersedesPlanVersion !== draftDocument.supersedesPlanVersion ||
@@ -937,7 +931,7 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
         effectiveSupersedesPlanVersion,
         effectiveReplanReason,
       );
-      if (!document || !isPlanArtifactRefV2(artifact, document)) return state;
+      if (!document || !isPlanArtifactRef(artifact, document)) return state;
       const nextPlanning =
         planning.kind === 'replanning_draft'
           ? {
@@ -974,9 +968,9 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
         ...executing.document,
         steps: updatedSteps,
         updatedAtTurnId: state.turn.turnId,
-        completionEvidence: payload.completionEvidence as PlanCompletionEvidenceV1,
+        completionEvidence: payload.completionEvidence as PlanCompletionEvidence,
       };
-      if (!isPlanDocumentV2(updatedDocument)) return state;
+      if (!isPlanDocument(updatedDocument)) return state;
       const updated = updateTasks(state, taskId, (current) =>
         current && current.planning.kind === 'executing'
           ? { ...current, planning: { ...current.planning, document: updatedDocument } }
@@ -993,7 +987,7 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
         ? updated
         : {
             ...updated,
-            toolRecovery: recordToolOwnedProgressV1(state.toolRecovery, {
+            toolRecovery: recordToolOwnedProgress(state.toolRecovery, {
               kind: 'skipped',
               referenceId: nonEmptyStringField(payload, 'toolCallId') ?? '',
               resolvesFailureIds,
@@ -1028,16 +1022,15 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
         updatedSteps.some((step) => step.status === 'pending' || step.status === 'in_progress') ||
         updatedSteps.every((step) => step.status === 'skipped') ||
         !planCompletionEvidenceMatchesRuntime(state, updatedSteps, payload.completionEvidence) ||
-        planCompletionBlocker(state, payload.completionEvidence as PlanCompletionEvidenceV1) !==
-          null
+        planCompletionBlocker(state, payload.completionEvidence as PlanCompletionEvidence) !== null
       )
         return state;
       const completedDocument: PlanDocument = {
         ...executing.document,
         steps: updatedSteps,
-        completionEvidence: payload.completionEvidence as PlanCompletionEvidenceV1,
+        completionEvidence: payload.completionEvidence as PlanCompletionEvidence,
       };
-      if (!isPlanDocumentV2(completedDocument)) return state;
+      if (!isPlanDocument(completedDocument)) return state;
       return updateTasks(state, taskId, (current) =>
         current && current.planning.kind === 'executing'
           ? {

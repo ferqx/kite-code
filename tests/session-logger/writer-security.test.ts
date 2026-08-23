@@ -17,11 +17,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite/builtin-runtime/model';
 import { sessionLogDir, sessionLogFrontendDir, sessionLogRoot } from '#app/config/paths';
-import type { SessionLoggingPolicyV1 } from '#app/config/session-logging-policy';
+import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
 import { SessionLogCollector } from '#app/session-logger/collector';
 import { SessionLogWriter } from '#app/session-logger/writer';
 
-const POLICY: SessionLoggingPolicyV1 = {
+const POLICY: SessionLoggingPolicy = {
   version: 1,
   mode: 'metadata',
   retentionDays: 7,

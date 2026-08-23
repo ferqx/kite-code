@@ -1,16 +1,16 @@
 import {
-  MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
-  type ModelAttemptOutcomeV1,
-  type ModelSurfaceV1,
+  MODEL_ATTEMPT_OUTCOME_SCHEMA_,
+  type ModelAttemptOutcome,
+  type ModelSurface,
 } from '@kite/runtime-spi';
 import { isTransientModelConnectionError } from './deepseek';
 import type { SupportedChatModel } from './factory';
-import { invokeModelTransportSingleAttemptV1, type ModelTransportResponseV1 } from './transport';
+import { invokeModelTransportSingleAttempt, type ModelTransportResponse } from './transport';
 
-export type SingleAttemptTransportV1 = typeof invokeModelTransportSingleAttemptV1;
+export type SingleAttemptTransport = typeof invokeModelTransportSingleAttempt;
 
-export interface ModelResponseSourceAttemptInputV1 {
-  surface: ModelSurfaceV1;
+export interface ModelResponseSourceAttemptInput {
+  surface: ModelSurface;
   attemptOrdinal: number;
   model: SupportedChatModel;
   signal?: AbortSignal;
@@ -21,31 +21,31 @@ export interface ModelResponseSourceAttemptInputV1 {
 }
 
 /** Exactly one outcome. Retry, backoff and the next attempt ack remain Gateway-owned. */
-export interface ModelResponseSourceV1 {
-  attempt(input: ModelResponseSourceAttemptInputV1): Promise<ModelAttemptOutcomeV1>;
+export interface ModelResponseSource {
+  attempt(input: ModelResponseSourceAttemptInput): Promise<ModelAttemptOutcome>;
   /** Live-only diagnostic cause; never persisted or copied into Runtime events. */
-  failureError?(outcome: Exclude<ModelAttemptOutcomeV1, { kind: 'success' }>): Error | undefined;
+  failureError?(outcome: Exclude<ModelAttemptOutcome, { kind: 'success' }>): Error | undefined;
 }
 
-export class ModelAttemptFailureErrorV1 extends Error {
-  readonly outcome: Exclude<ModelAttemptOutcomeV1, { kind: 'success' }>;
+export class ModelAttemptFailureError extends Error {
+  readonly outcome: Exclude<ModelAttemptOutcome, { kind: 'success' }>;
 
-  constructor(outcome: Exclude<ModelAttemptOutcomeV1, { kind: 'success' }>, cause?: Error) {
+  constructor(outcome: Exclude<ModelAttemptOutcome, { kind: 'success' }>, cause?: Error) {
     super(
       `MODEL_ATTEMPT_${outcome.kind.toUpperCase()}:${outcome.classification}`,
       cause ? { cause } : undefined,
     );
-    this.name = 'ModelAttemptFailureErrorV1';
+    this.name = 'ModelAttemptFailureError';
     this.outcome = outcome;
   }
 }
 
-export function createLiveModelResponseSourceV1(
-  transport: SingleAttemptTransportV1 = invokeModelTransportSingleAttemptV1,
-): ModelResponseSourceV1 {
+export function createLiveModelResponseSource(
+  transport: SingleAttemptTransport = invokeModelTransportSingleAttempt,
+): ModelResponseSource {
   const failureCauses = new WeakMap<object, Error>();
   return Object.freeze({
-    attempt: async (input: ModelResponseSourceAttemptInputV1) => {
+    attempt: async (input: ModelResponseSourceAttemptInput) => {
       try {
         const response = await transport({
           model: input.model,
@@ -63,14 +63,14 @@ export function createLiveModelResponseSourceV1(
         return outcome;
       }
     },
-    failureError: (outcome: Exclude<ModelAttemptOutcomeV1, { kind: 'success' }>) =>
+    failureError: (outcome: Exclude<ModelAttemptOutcome, { kind: 'success' }>) =>
       failureCauses.get(outcome),
   });
 }
 
-function outcomeSuccess(response: ModelTransportResponseV1): ModelAttemptOutcomeV1 {
+function outcomeSuccess(response: ModelTransportResponse): ModelAttemptOutcome {
   return deepFreeze({
-    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
     kind: 'success',
     response,
     nativeReplayState: null,
@@ -80,7 +80,7 @@ function outcomeSuccess(response: ModelTransportResponseV1): ModelAttemptOutcome
 function outcomeFromTransportFailure(
   error: unknown,
   signal: AbortSignal | undefined,
-): ModelAttemptOutcomeV1 {
+): ModelAttemptOutcome {
   const status = providerStatusCode(error);
   const timedOut = Boolean(
     signal?.aborted &&
@@ -92,7 +92,7 @@ function outcomeFromTransportFailure(
   }
   if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
     return deepFreeze({
-      schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+      schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
       kind: 'aborted',
       classification: signal?.aborted ? 'cancelled' : 'transport_aborted',
     });
@@ -113,12 +113,12 @@ function outcomeFromTransportFailure(
 }
 
 function outcomeRetryable(
-  classification: Extract<ModelAttemptOutcomeV1, { kind: 'retryable_failure' }>['classification'],
+  classification: Extract<ModelAttemptOutcome, { kind: 'retryable_failure' }>['classification'],
   providerStatusCode: number | null,
   timedOut: boolean,
-): ModelAttemptOutcomeV1 {
+): ModelAttemptOutcome {
   return deepFreeze({
-    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
     kind: 'retryable_failure',
     classification,
     retryObservation: { providerStatusCode, timedOut },
@@ -126,11 +126,11 @@ function outcomeRetryable(
 }
 
 function outcomeFatal(
-  classification: Extract<ModelAttemptOutcomeV1, { kind: 'fatal_failure' }>['classification'],
+  classification: Extract<ModelAttemptOutcome, { kind: 'fatal_failure' }>['classification'],
   providerStatusCode: number | null,
-): ModelAttemptOutcomeV1 {
+): ModelAttemptOutcome {
   return deepFreeze({
-    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+    schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
     kind: 'fatal_failure',
     classification,
     providerStatusCode,

@@ -1,77 +1,77 @@
 import type {
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelinePreparedIdentityVerifierV1,
-  WorkspaceFilesystemEditObservationPortV1,
-  WorkspaceFilesystemEditObservationQueryResultV1,
-  WorkspaceFilesystemIntentRecordV1,
-  WorkspaceFilesystemMutationDurableEvidencePortV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemMutationPipelineOperationV1,
-  WorkspaceFilesystemMutationReadyRecordV1,
-  WorkspaceFilesystemOperationV1,
-  WorkspaceFilesystemPersistedMutationIntentV1,
-  WorkspaceFilesystemPersistedMutationReadyV1,
-  WorkspaceFilesystemPreparedMutationEvidenceV1,
-  WorkspaceFilesystemPreparedMutationV1,
-  WorkspaceFilesystemProtectedBoundaryV1,
-  WorkspaceFilesystemProviderFailureV1,
-  WorkspaceFilesystemProviderV1,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelinePreparedIdentityVerifier,
+  WorkspaceFilesystemEditObservationPort,
+  WorkspaceFilesystemEditObservationQueryResult,
+  WorkspaceFilesystemIntentRecord,
+  WorkspaceFilesystemMutationDurableEvidencePort,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemMutationPipelineOperation,
+  WorkspaceFilesystemMutationReadyRecord,
+  WorkspaceFilesystemOperation,
+  WorkspaceFilesystemPersistedMutationIntent,
+  WorkspaceFilesystemPersistedMutationReady,
+  WorkspaceFilesystemPreparedMutation,
+  WorkspaceFilesystemPreparedMutationEvidence,
+  WorkspaceFilesystemProtectedBoundary,
+  WorkspaceFilesystemProvider,
+  WorkspaceFilesystemProviderFailure,
 } from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 } from '@kite/runtime-spi';
-import { readBoundCapabilityArtifactV1 } from '../capability-artifacts';
-import { digestCapabilityBindingValueV1 } from '../capability-binding';
-import type { ProtectedPathEvaluatorV1 } from '../sandbox/protected-path';
+import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite/runtime-spi';
+import { readBoundCapabilityArtifact } from '../capability-artifacts';
+import { digestCapabilityBindingValue } from '../capability-binding';
+import type { ProtectedPathEvaluator } from '../sandbox/protected-path';
 import {
-  validateWorkspaceFilesystemIntentRecordV1,
-  validateWorkspaceFilesystemMutationReadyRecordV1,
-  workspaceFilesystemIntentDigestV1,
-  workspaceFilesystemMutationReadyDigestV1,
+  validateWorkspaceFilesystemIntentRecord,
+  validateWorkspaceFilesystemMutationReadyRecord,
+  workspaceFilesystemIntentDigest,
+  workspaceFilesystemMutationReadyDigest,
 } from './evidence';
 import {
-  validateWorkspaceFilesystemOperationV1,
-  workspaceFilesystemOperationDigestV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
-  workspaceFilesystemStringDigestV1,
-  workspaceFilesystemTargetEvidenceV1,
+  validateWorkspaceFilesystemOperation,
+  workspaceFilesystemOperationDigest,
+  workspaceFilesystemProtectedBoundaryDigest,
+  workspaceFilesystemStringDigest,
+  workspaceFilesystemTargetEvidence,
 } from './grant-authority';
-import { issueBuiltinWorkspaceFilesystemMutationObservationV1 } from './observation-authority';
+import { issueBuiltinWorkspaceFilesystemMutationObservation } from './observation-authority';
 import type {
-  BuiltinWorkspaceFilesystemInvocationDispatcherV1,
-  BuiltinWorkspaceFilesystemPipelineResultV1,
-  BuiltinWorkspaceFilesystemRuntimeV1,
+  BuiltinWorkspaceFilesystemInvocationDispatcher,
+  BuiltinWorkspaceFilesystemPipelineResult,
+  BuiltinWorkspaceFilesystemRuntime,
 } from './runtime-composition';
 
-const DEFAULT_GRANT_TTL_MS_V1 = 30_000;
-const WRITE_EFFECTS_DIGEST_V1 = digestCapabilityBindingValueV1({
+const DEFAULT_GRANT_TTL_MS_ = 30_000;
+const WRITE_EFFECTS_DIGEST_ = digestCapabilityBindingValue({
   filesystem: 'write',
   network: 'none',
   externalState: 'none',
 });
 
-export interface CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1 {
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
+export interface CreateBuiltinWorkspaceFilesystemMutationDispatcherInput {
+  readonly prepared: Readonly<PreparedToolInvocation>;
   /** Exact verifier from the same frozen Builtin callback bundle. */
-  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1;
-  readonly runtime: Readonly<BuiltinWorkspaceFilesystemRuntimeV1>;
-  readonly durableEvidence: WorkspaceFilesystemMutationDurableEvidencePortV1;
+  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier;
+  readonly runtime: Readonly<BuiltinWorkspaceFilesystemRuntime>;
+  readonly durableEvidence: WorkspaceFilesystemMutationDurableEvidencePort;
   /** App queries only same-actor, same-lexical latest read evidence. */
-  readonly editObservation: WorkspaceFilesystemEditObservationPortV1;
-  readonly protectedPathEvaluator: ProtectedPathEvaluatorV1;
+  readonly editObservation: WorkspaceFilesystemEditObservationPort;
+  readonly protectedPathEvaluator: ProtectedPathEvaluator;
   readonly protectedPathRevision: string;
   readonly actorIdentity: Readonly<{ readonly threadId: string; readonly actorId: string }>;
   /** App-owned legacy rewind projection; never authorizes prepare, ready, or commit. */
-  readonly checkpointProjection?: Readonly<BuiltinWorkspaceFilesystemCheckpointProjectionV1>;
+  readonly checkpointProjection?: Readonly<BuiltinWorkspaceFilesystemCheckpointProjection>;
   readonly signal?: AbortSignal;
   readonly now?: () => Date;
 }
 
-export interface BuiltinWorkspaceFilesystemCheckpointProjectionV1 {
+export interface BuiltinWorkspaceFilesystemCheckpointProjection {
   readonly recordPreimage: (path: string, content: string | null, existed: boolean) => void;
   readonly recordPostimage?: (path: string, content: string | null, existed: boolean) => void;
 }
 
-export type BuiltinWorkspaceFilesystemMutationDispatchErrorCodeV1 =
+export type BuiltinWorkspaceFilesystemMutationDispatchErrorCode =
   | 'invalid_composition'
   | 'prepared_identity_invalid'
   | 'unsupported_operation'
@@ -83,24 +83,24 @@ export type BuiltinWorkspaceFilesystemMutationDispatchErrorCodeV1 =
   | 'ready_verification_failed'
   | 'edit_observation_failed';
 
-export class BuiltinWorkspaceFilesystemMutationDispatchErrorV1 extends Error {
-  readonly code: BuiltinWorkspaceFilesystemMutationDispatchErrorCodeV1;
+export class BuiltinWorkspaceFilesystemMutationDispatchError extends Error {
+  readonly code: BuiltinWorkspaceFilesystemMutationDispatchErrorCode;
 
-  constructor(code: BuiltinWorkspaceFilesystemMutationDispatchErrorCodeV1) {
+  constructor(code: BuiltinWorkspaceFilesystemMutationDispatchErrorCode) {
     super(`Builtin Workspace filesystem mutation dispatcher rejected '${code}'.`);
-    this.name = 'BuiltinWorkspaceFilesystemMutationDispatchErrorV1';
+    this.name = 'BuiltinWorkspaceFilesystemMutationDispatchError';
     this.code = code;
   }
 }
 
 /** A Provider commit crossed its atomic boundary but did not return certainty. */
-export class BuiltinWorkspaceFilesystemMutationCommitUnknownErrorV1 extends Error {
+export class BuiltinWorkspaceFilesystemMutationCommitUnknownError extends Error {
   readonly code = 'commit_unknown' as const;
   readonly causeValue: unknown;
 
   constructor(causeValue: unknown) {
     super('Builtin Workspace filesystem Provider did not return commit certainty.');
-    this.name = 'BuiltinWorkspaceFilesystemMutationCommitUnknownErrorV1';
+    this.name = 'BuiltinWorkspaceFilesystemMutationCommitUnknownError';
     this.causeValue = causeValue;
   }
 }
@@ -110,51 +110,51 @@ export class BuiltinWorkspaceFilesystemMutationCommitUnknownErrorV1 extends Erro
  * injected neutral ports; the full Provider prepared mutation never crosses
  * either port.
  */
-export function createBuiltinWorkspaceFilesystemMutationDispatcherV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
-): BuiltinWorkspaceFilesystemInvocationDispatcherV1 {
-  assertCompositionV1(input);
+export function createBuiltinWorkspaceFilesystemMutationDispatcher(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
+): BuiltinWorkspaceFilesystemInvocationDispatcher {
+  assertComposition(input);
   return Object.freeze({
-    dispatch: (operation: WorkspaceFilesystemOperationV1) => dispatchMutationV1(input, operation),
+    dispatch: (operation: WorkspaceFilesystemOperation) => dispatchMutation(input, operation),
   });
 }
 
-async function dispatchMutationV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
-  operation: WorkspaceFilesystemOperationV1,
-): Promise<BuiltinWorkspaceFilesystemPipelineResultV1> {
-  assertPreparedIdentityV1(input.prepared, input.verifyPreparedIdentity);
-  const validated = mutationOperationForPreparedV1(
+async function dispatchMutation(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
+  operation: WorkspaceFilesystemOperation,
+): Promise<BuiltinWorkspaceFilesystemPipelineResult> {
+  assertPreparedIdentity(input.prepared, input.verifyPreparedIdentity);
+  const validated = mutationOperationForPrepared(
     input.prepared,
     operation,
     input.protectedPathEvaluator,
   );
-  const protectedBoundary = protectedBoundaryV1(input);
-  const intent = intentRecordV1(input, validated, protectedBoundary);
-  const evidenceOperation = evidenceOperationV1(input.prepared, validated);
-  const draft = deepFreezeV1({
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+  const boundary = protectedBoundary(input);
+  const intent = intentRecord(input, validated, boundary);
+  const pipelineOperation = evidenceOperation(input.prepared, validated);
+  const draft = deepFreeze({
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     prepared: input.prepared,
-    operation: evidenceOperation,
+    operation: pipelineOperation,
     record: intent,
   });
 
-  let persisted: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>;
+  let persisted: Readonly<WorkspaceFilesystemPersistedMutationIntent>;
   try {
     persisted = await input.durableEvidence.persistIntent(draft);
   } catch {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('intent_persistence_failed');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('intent_persistence_failed');
   }
-  if (!persistedIntentValidV1(input, persisted, evidenceOperation, intent)) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('intent_verification_failed');
+  if (!persistedIntentValid(input, persisted, pipelineOperation, intent)) {
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('intent_verification_failed');
   }
 
-  const binding = grantBindingV1(input, persisted, protectedBoundary);
+  const binding = grantBinding(input, persisted, boundary);
   const prepareGrant = input.runtime.grants.issuePrepareGrant({
     binding,
     operation: validated,
-    protectedBoundary,
-    ttlMs: input.runtime.grantTtlMs ?? DEFAULT_GRANT_TTL_MS_V1,
+    protectedBoundary: boundary,
+    ttlMs: input.runtime.grantTtlMs ?? DEFAULT_GRANT_TTL_MS_,
   });
   const preparedResult = await input.runtime.provider.prepareMutation({
     grant: prepareGrant,
@@ -162,19 +162,17 @@ async function dispatchMutationV1(
   });
   if (!preparedResult.ok) return Object.freeze({ ok: false, failure: preparedResult.failure });
   const preparedMutation = preparedResult.observation;
-  assertPreparedMutationV1(preparedMutation, validated);
-  const preparedEvidence = preparedMutationEvidenceV1(preparedMutation);
+  assertPreparedMutation(preparedMutation, validated);
+  const preparedEvidence = preparedMutationEvidence(preparedMutation);
 
   if (validated.kind === 'edit_file') {
-    const priorFailure = await verifyPriorReadV1(input, validated, preparedEvidence);
+    const priorFailure = await verifyPriorRead(input, validated, preparedEvidence);
     if (priorFailure) return Object.freeze({ ok: false, failure: priorFailure });
   }
 
-  let preimageArtifact: ReturnType<
-    BuiltinWorkspaceFilesystemRuntimeV1['preimageArtifacts']['write']
-  >;
+  let preimageArtifact: ReturnType<BuiltinWorkspaceFilesystemRuntime['preimageArtifacts']['write']>;
   try {
-    preimageArtifact = deepFreezeV1(
+    preimageArtifact = deepFreeze(
       input.runtime.preimageArtifacts.write({
         invocationId: input.prepared.identity.invocationId,
         operationDigest: preparedMutation.operationDigest,
@@ -183,7 +181,7 @@ async function dispatchMutationV1(
       }),
     );
   } catch {
-    return failureV1('operation_failed', 'Filesystem preimage Artifact could not be persisted.');
+    return failure('operation_failed', 'Filesystem preimage Artifact could not be persisted.');
   }
   try {
     input.checkpointProjection?.recordPreimage(
@@ -195,14 +193,14 @@ async function dispatchMutationV1(
     // Compatibility projection only; immutable Artifact + ready remain authoritative.
   }
 
-  const ready = readyRecordV1(
+  const ready = readyRecord(
     persisted.record,
     preparedMutation,
     preimageArtifact,
     input.now?.() ?? new Date(),
   );
-  const readyDraft = deepFreezeV1({
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+  const readyDraft = deepFreeze({
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     intent: persisted,
     preparedEvidence,
     // The Builtin validator canonicalizes the Artifact reference while
@@ -212,35 +210,35 @@ async function dispatchMutationV1(
     preimageArtifact: ready.preimageArtifact,
     record: ready,
   });
-  let persistedReady: Readonly<WorkspaceFilesystemPersistedMutationReadyV1>;
+  let persistedReady: Readonly<WorkspaceFilesystemPersistedMutationReady>;
   try {
     persistedReady = await input.durableEvidence.persistMutationReady(readyDraft);
   } catch {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('ready_persistence_failed');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('ready_persistence_failed');
   }
-  if (!persistedReadyValidV1(input, persistedReady, persisted, ready.preimageArtifact, ready)) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('ready_verification_failed');
+  if (!persistedReadyValid(input, persistedReady, persisted, ready.preimageArtifact, ready)) {
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('ready_verification_failed');
   }
 
   const readyAuthorization = input.runtime.grants.acknowledgeMutationReady({
     binding,
     operation: validated,
-    protectedBoundary,
+    protectedBoundary: boundary,
     prepared: preparedMutation,
     ready,
   });
   const commitGrant = input.runtime.grants.issueCommitGrant({
     authorization: readyAuthorization,
-    ttlMs: input.runtime.grantTtlMs ?? DEFAULT_GRANT_TTL_MS_V1,
+    ttlMs: input.runtime.grantTtlMs ?? DEFAULT_GRANT_TTL_MS_,
   });
-  let committedResult: Awaited<ReturnType<WorkspaceFilesystemProviderV1['commitMutation']>>;
+  let committedResult: Awaited<ReturnType<WorkspaceFilesystemProvider['commitMutation']>>;
   try {
     committedResult = await input.runtime.provider.commitMutation({
       grant: commitGrant,
       signal: input.signal,
     });
   } catch (error) {
-    throw new BuiltinWorkspaceFilesystemMutationCommitUnknownErrorV1(error);
+    throw new BuiltinWorkspaceFilesystemMutationCommitUnknownError(error);
   }
   if (!committedResult.ok) return Object.freeze({ ok: false, failure: committedResult.failure });
 
@@ -251,14 +249,14 @@ async function dispatchMutationV1(
     // Compatibility projection only; Provider evidence remains authoritative.
   }
   const filesystemObservation = Object.freeze({
-    actorIdentityDigest: actorIdentityDigestV1(input),
+    actorIdentityDigest: actorIdentityDigest(input),
     lexicalTargetDigest: committed.targetEvidence.lexicalTargetDigest,
     canonicalTargetDigest: committed.targetEvidence.canonicalTargetDigest,
     targetIdentityDigest: committed.targetEvidence.targetIdentityDigest,
     contentDigest: committed.afterContentDigest,
   });
   try {
-    issueBuiltinWorkspaceFilesystemMutationObservationV1({
+    issueBuiltinWorkspaceFilesystemMutationObservation({
       prepared: input.prepared,
       persisted,
       mutationReady: ready,
@@ -266,7 +264,7 @@ async function dispatchMutationV1(
       observation: filesystemObservation,
     });
   } catch (error) {
-    throw new BuiltinWorkspaceFilesystemMutationCommitUnknownErrorV1(error);
+    throw new BuiltinWorkspaceFilesystemMutationCommitUnknownError(error);
   }
   return Object.freeze({
     ok: true,
@@ -276,8 +274,8 @@ async function dispatchMutationV1(
   });
 }
 
-function assertCompositionV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
+function assertComposition(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
 ): void {
   if (
     !input ||
@@ -296,18 +294,18 @@ function assertCompositionV1(
     typeof input.runtime?.preimageArtifacts?.write !== 'function' ||
     typeof input.protectedPathEvaluator?.evaluate !== 'function' ||
     typeof input.protectedPathEvaluator?.projectFilesystemBoundary !== 'function' ||
-    !nonEmptyV1(input.protectedPathRevision) ||
-    !nonEmptyV1(input.actorIdentity?.threadId) ||
-    !nonEmptyV1(input.actorIdentity?.actorId) ||
-    !sameWorkspaceV1(input.runtime.canonicalWorkspace, input.protectedPathEvaluator.workspaceRoot)
+    !nonEmpty(input.protectedPathRevision) ||
+    !nonEmpty(input.actorIdentity?.threadId) ||
+    !nonEmpty(input.actorIdentity?.actorId) ||
+    !sameWorkspace(input.runtime.canonicalWorkspace, input.protectedPathEvaluator.workspaceRoot)
   ) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('invalid_composition');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('invalid_composition');
   }
 }
 
-function assertPreparedIdentityV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  verifier: ToolPipelinePreparedIdentityVerifierV1,
+function assertPreparedIdentity(
+  prepared: Readonly<PreparedToolInvocation>,
+  verifier: ToolPipelinePreparedIdentityVerifier,
 ): void {
   let valid = false;
   try {
@@ -326,40 +324,40 @@ function assertPreparedIdentityV1(
     !identity.modelVisible ||
     identity.dynamicCatalogRevision !== null ||
     identity.admissionDigest === null ||
-    identity.effectiveEffectsDigest !== WRITE_EFFECTS_DIGEST_V1 ||
+    identity.effectiveEffectsDigest !== WRITE_EFFECTS_DIGEST_ ||
     (identity.operationId !== 'builtin:write_file' && identity.operationId !== 'builtin:edit_file')
   ) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('prepared_identity_invalid');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('prepared_identity_invalid');
   }
 }
 
-function mutationOperationForPreparedV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  operation: Readonly<WorkspaceFilesystemOperationV1>,
-  evaluator: ProtectedPathEvaluatorV1,
-): Readonly<WorkspaceFilesystemMutationOperationV1> {
-  if (!isMutationOperationV1(operation)) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('unsupported_operation');
+function mutationOperationForPrepared(
+  prepared: Readonly<PreparedToolInvocation>,
+  operation: Readonly<WorkspaceFilesystemOperation>,
+  evaluator: ProtectedPathEvaluator,
+): Readonly<WorkspaceFilesystemMutationOperation> {
+  if (!isMutationOperation(operation)) {
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('unsupported_operation');
   }
-  let validated: Readonly<WorkspaceFilesystemOperationV1>;
+  let validated: Readonly<WorkspaceFilesystemOperation>;
   try {
-    validated = validateWorkspaceFilesystemOperationV1(operation, 'mutation');
+    validated = validateWorkspaceFilesystemOperation(operation, 'mutation');
   } catch {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('operation_identity_mismatch');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('operation_identity_mismatch');
   }
-  if (!isMutationOperationV1(validated)) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('unsupported_operation');
+  if (!isMutationOperation(validated)) {
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('unsupported_operation');
   }
   const identity = prepared.identity;
   if (
     identity.operationId !== `builtin:${validated.kind}` ||
-    !argumentsMatchOperationV1(jsonRecordV1(prepared.input.arguments), validated)
+    !argumentsMatchOperation(jsonRecord(prepared.input.arguments), validated)
   ) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('operation_identity_mismatch');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('operation_identity_mismatch');
   }
   const decision = evaluator.evaluate({ path: validated.path, operation: 'write' });
   if (decision.outcome === 'deny') {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('protected_boundary_invalid');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('protected_boundary_invalid');
   }
   if (decision.relativePath === null) {
     if (
@@ -367,69 +365,69 @@ function mutationOperationForPreparedV1(
       identity.authorizationDigest === null ||
       identity.admissionDigest === null
     ) {
-      throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('protected_boundary_invalid');
+      throw new BuiltinWorkspaceFilesystemMutationDispatchError('protected_boundary_invalid');
     }
   } else if (validated.pathScope !== 'workspace_only') {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('protected_boundary_invalid');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('protected_boundary_invalid');
   }
   return validated;
 }
 
-function protectedBoundaryV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
-): Readonly<WorkspaceFilesystemProtectedBoundaryV1> {
+function protectedBoundary(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
+): Readonly<WorkspaceFilesystemProtectedBoundary> {
   try {
     const projection = input.protectedPathEvaluator.projectFilesystemBoundary();
     if (
-      !sameWorkspaceV1(projection.canonicalWorkspace, input.runtime.canonicalWorkspace) ||
-      !sameWorkspaceV1(input.protectedPathEvaluator.workspaceRoot, input.runtime.canonicalWorkspace)
+      !sameWorkspace(projection.canonicalWorkspace, input.runtime.canonicalWorkspace) ||
+      !sameWorkspace(input.protectedPathEvaluator.workspaceRoot, input.runtime.canonicalWorkspace)
     ) {
       throw new Error('workspace mismatch');
     }
-    const unsigned = deepFreezeV1({
+    const unsigned = deepFreeze({
       schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
       ...structuredClone(projection),
     });
-    return deepFreezeV1({
+    return deepFreeze({
       ...unsigned,
-      boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsigned),
+      boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsigned),
     });
   } catch {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('protected_boundary_invalid');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('protected_boundary_invalid');
   }
 }
 
-function intentRecordV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
-  operation: Readonly<WorkspaceFilesystemMutationOperationV1>,
-  boundary: Readonly<WorkspaceFilesystemProtectedBoundaryV1>,
-): Readonly<WorkspaceFilesystemIntentRecordV1> {
+function intentRecord(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
+  operation: Readonly<WorkspaceFilesystemMutationOperation>,
+  boundary: Readonly<WorkspaceFilesystemProtectedBoundary>,
+): Readonly<WorkspaceFilesystemIntentRecord> {
   const identity = input.prepared.identity;
-  const recordedAt = timestampV1(input.now?.() ?? new Date());
+  const recordedAt = timestamp(input.now?.() ?? new Date());
   const unsigned = {
-    attempt: attemptV1(identity.invocationId, identity.attemptId),
+    attempt: attempt(identity.invocationId, identity.attemptId),
     capabilityRevision: identity.capabilityRevision,
     argumentsDigest: identity.argumentsDigest,
-    admissionDigest: requiredV1(identity.admissionDigest),
-    operationDigest: workspaceFilesystemOperationDigestV1(operation),
+    admissionDigest: required(identity.admissionDigest),
+    operationDigest: workspaceFilesystemOperationDigest(operation),
     searchBoundaryDigest: boundary.boundaryDigest,
-    lexicalTargetDigest: workspaceFilesystemStringDigestV1(operation.path),
-    canonicalWorkspaceDigest: workspaceFilesystemStringDigestV1(boundary.canonicalWorkspace),
+    lexicalTargetDigest: workspaceFilesystemStringDigest(operation.path),
+    canonicalWorkspaceDigest: workspaceFilesystemStringDigest(boundary.canonicalWorkspace),
     protectedPathRevision: input.protectedPathRevision,
-    approvalSummaryDigest: workspaceFilesystemStringDigestV1(approvalSummaryV1(input.prepared)),
+    approvalSummaryDigest: workspaceFilesystemStringDigest(approvalSummary(input.prepared)),
     effectiveEffectsDigest: identity.effectiveEffectsDigest,
     recordedAt,
-  } satisfies Omit<WorkspaceFilesystemIntentRecordV1, 'intentDigest'>;
-  return validateWorkspaceFilesystemIntentRecordV1({
+  } satisfies Omit<WorkspaceFilesystemIntentRecord, 'intentDigest'>;
+  return validateWorkspaceFilesystemIntentRecord({
     ...unsigned,
-    intentDigest: workspaceFilesystemIntentDigestV1(unsigned),
+    intentDigest: workspaceFilesystemIntentDigest(unsigned),
   });
 }
 
-function evidenceOperationV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  operation: Readonly<WorkspaceFilesystemMutationOperationV1>,
-): Readonly<WorkspaceFilesystemMutationPipelineOperationV1> {
+function evidenceOperation(
+  prepared: Readonly<PreparedToolInvocation>,
+  operation: Readonly<WorkspaceFilesystemMutationOperation>,
+): Readonly<WorkspaceFilesystemMutationPipelineOperation> {
   const operationId = prepared.identity.operationId;
   if (operationId === 'builtin:write_file' && operation.kind === 'write_file') {
     return Object.freeze({ ...operation, operationId: 'builtin:write_file' as const });
@@ -437,13 +435,13 @@ function evidenceOperationV1(
   if (operationId === 'builtin:edit_file' && operation.kind === 'edit_file') {
     return Object.freeze({ ...operation, operationId: 'builtin:edit_file' as const });
   }
-  throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('operation_identity_mismatch');
+  throw new BuiltinWorkspaceFilesystemMutationDispatchError('operation_identity_mismatch');
 }
 
-function grantBindingV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
-  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>,
-  boundary: Readonly<WorkspaceFilesystemProtectedBoundaryV1>,
+function grantBinding(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
+  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntent>,
+  boundary: Readonly<WorkspaceFilesystemProtectedBoundary>,
 ) {
   return Object.freeze({
     threadId: input.actorIdentity.threadId,
@@ -457,11 +455,11 @@ function grantBindingV1(
     effectDigest: persisted.acknowledgement.attempt.effectiveEffectsDigest,
     canonicalWorkspace: boundary.canonicalWorkspace,
     protectedPathRevision: input.protectedPathRevision,
-    approvalSummary: approvalSummaryV1(input.prepared),
+    approvalSummary: approvalSummary(input.prepared),
   });
 }
 
-function preparedMutationEvidenceV1(
+function preparedMutationEvidence(
   prepared: Readonly<{
     operationKind: 'write_file' | 'edit_file';
     operationDigest: string;
@@ -477,9 +475,9 @@ function preparedMutationEvidenceV1(
       byteLength: number;
     }>;
   }>,
-): Readonly<WorkspaceFilesystemPreparedMutationEvidenceV1> {
-  return deepFreezeV1({
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+): Readonly<WorkspaceFilesystemPreparedMutationEvidence> {
+  return deepFreeze({
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     operationKind: prepared.operationKind,
     operationDigest: prepared.operationDigest,
     lexicalTargetDigest: prepared.targetEvidence.lexicalTargetDigest,
@@ -491,15 +489,15 @@ function preparedMutationEvidenceV1(
   });
 }
 
-function assertPreparedMutationV1(
-  prepared: Readonly<WorkspaceFilesystemPreparedMutationV1>,
-  operation: Readonly<WorkspaceFilesystemMutationOperationV1>,
+function assertPreparedMutation(
+  prepared: Readonly<WorkspaceFilesystemPreparedMutation>,
+  operation: Readonly<WorkspaceFilesystemMutationOperation>,
 ): void {
-  const expectedEvidence = workspaceFilesystemTargetEvidenceV1(prepared.target);
+  const expectedEvidence = workspaceFilesystemTargetEvidence(prepared.target);
   if (
     prepared.kind !== 'prepared_mutation' ||
     prepared.operationKind !== operation.kind ||
-    prepared.operationDigest !== workspaceFilesystemOperationDigestV1(operation) ||
+    prepared.operationDigest !== workspaceFilesystemOperationDigest(operation) ||
     prepared.target.lexicalPath !== operation.path ||
     prepared.targetIdentityDigest !== expectedEvidence.targetIdentityDigest ||
     prepared.targetEvidence.lexicalTargetDigest !== expectedEvidence.lexicalTargetDigest ||
@@ -509,32 +507,32 @@ function assertPreparedMutationV1(
     (prepared.preimage.existed &&
       (prepared.preimage.content === null ||
         prepared.preimage.contentDigest !==
-          workspaceFilesystemStringDigestV1(prepared.preimage.content) ||
+          workspaceFilesystemStringDigest(prepared.preimage.content) ||
         prepared.preimage.byteLength !== Buffer.byteLength(prepared.preimage.content))) ||
     (!prepared.preimage.existed &&
       (prepared.preimage.content !== null ||
         prepared.preimage.contentDigest !== null ||
         prepared.preimage.byteLength !== 0))
   ) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('operation_identity_mismatch');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('operation_identity_mismatch');
   }
 }
 
-async function verifyPriorReadV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
-  operation: Readonly<Extract<WorkspaceFilesystemMutationOperationV1, { kind: 'edit_file' }>>,
-  prepared: Readonly<WorkspaceFilesystemPreparedMutationEvidenceV1>,
-): Promise<Readonly<WorkspaceFilesystemProviderFailureV1> | null> {
-  const query = deepFreezeV1({
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
-    actorIdentityDigest: actorIdentityDigestV1(input),
+async function verifyPriorRead(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
+  operation: Readonly<Extract<WorkspaceFilesystemMutationOperation, { kind: 'edit_file' }>>,
+  prepared: Readonly<WorkspaceFilesystemPreparedMutationEvidence>,
+): Promise<Readonly<WorkspaceFilesystemProviderFailure> | null> {
+  const query = deepFreeze({
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
+    actorIdentityDigest: actorIdentityDigest(input),
     lexicalTargetDigest: prepared.lexicalTargetDigest,
   });
-  let result: Readonly<WorkspaceFilesystemEditObservationQueryResultV1>;
+  let result: Readonly<WorkspaceFilesystemEditObservationQueryResult>;
   try {
     result = await input.editObservation.findLatestAuthenticRead(query);
   } catch {
-    return failureValueV1('operation_failed', 'Latest read evidence is unavailable.');
+    return failureValue('operation_failed', 'Latest read evidence is unavailable.');
   }
   let valid = false;
   try {
@@ -543,19 +541,19 @@ async function verifyPriorReadV1(
     valid = false;
   }
   if (!valid || result.query !== query) {
-    return failureValueV1('operation_failed', 'Latest read evidence authority rejected the query.');
+    return failureValue('operation_failed', 'Latest read evidence authority rejected the query.');
   }
   if (result.status === 'missing') {
-    return failureValueV1(
+    return failureValue(
       'read_required',
       `File must be read before edit_file can commit: ${operation.path}.`,
     );
   }
   if (!input.runtime.capabilityArtifacts) {
-    return failureValueV1('read_required', 'Committed read Artifact evidence is unavailable.');
+    return failureValue('read_required', 'Committed read Artifact evidence is unavailable.');
   }
   try {
-    const artifactResult = readBoundCapabilityArtifactV1(
+    const artifactResult = readBoundCapabilityArtifact(
       input.runtime.capabilityArtifacts,
       result.artifact,
       {
@@ -567,29 +565,26 @@ async function verifyPriorReadV1(
     );
     if (
       artifactResult.status !== 'success' ||
-      !isRecordV1(artifactResult.structuredContent) ||
+      !isRecord(artifactResult.structuredContent) ||
       artifactResult.structuredContent.path !== operation.path
     ) {
-      return failureValueV1('read_required', 'Committed read Artifact is not a successful read.');
+      return failureValue('read_required', 'Committed read Artifact is not a successful read.');
     }
   } catch {
-    return failureValueV1('read_required', 'Committed read Artifact evidence is invalid.');
+    return failureValue('read_required', 'Committed read Artifact evidence is invalid.');
   }
   if (
     result.observation.actorIdentityDigest !== query.actorIdentityDigest ||
     result.observation.lexicalTargetDigest !== query.lexicalTargetDigest
   ) {
-    return failureValueV1(
-      'operation_failed',
-      'Committed read actor or lexical identity mismatched.',
-    );
+    return failureValue('operation_failed', 'Committed read actor or lexical identity mismatched.');
   }
   if (
     result.observation.canonicalTargetDigest !== prepared.canonicalTargetDigest ||
     result.observation.targetIdentityDigest !== prepared.targetIdentityDigest ||
     result.observation.contentDigest !== prepared.preimageDigest
   ) {
-    return failureValueV1(
+    return failureValue(
       'stale_read',
       `File has changed since the latest committed read: ${operation.path}.`,
     );
@@ -597,18 +592,18 @@ async function verifyPriorReadV1(
   return null;
 }
 
-function readyRecordV1(
-  intent: Readonly<WorkspaceFilesystemIntentRecordV1>,
+function readyRecord(
+  intent: Readonly<WorkspaceFilesystemIntentRecord>,
   prepared: Readonly<{
     operationDigest: string;
     targetIdentityDigest: string;
     preimage: Readonly<{ contentDigest: string | null }>;
   }>,
   preimageArtifact: Readonly<
-    ReturnType<BuiltinWorkspaceFilesystemRuntimeV1['preimageArtifacts']['write']>
+    ReturnType<BuiltinWorkspaceFilesystemRuntime['preimageArtifacts']['write']>
   >,
   now: Date,
-): Readonly<WorkspaceFilesystemMutationReadyRecordV1> {
+): Readonly<WorkspaceFilesystemMutationReadyRecord> {
   const unsigned = {
     attempt: intent.attempt,
     intentDigest: intent.intentDigest,
@@ -616,35 +611,34 @@ function readyRecordV1(
     targetIdentityDigest: prepared.targetIdentityDigest,
     preimageDigest: prepared.preimage.contentDigest,
     preimageArtifact,
-    readyAt: timestampV1(now),
-  } satisfies Omit<WorkspaceFilesystemMutationReadyRecordV1, 'readyDigest'>;
-  return deepFreezeV1(
-    validateWorkspaceFilesystemMutationReadyRecordV1({
+    readyAt: timestamp(now),
+  } satisfies Omit<WorkspaceFilesystemMutationReadyRecord, 'readyDigest'>;
+  return deepFreeze(
+    validateWorkspaceFilesystemMutationReadyRecord({
       ...unsigned,
-      readyDigest: workspaceFilesystemMutationReadyDigestV1(unsigned),
+      readyDigest: workspaceFilesystemMutationReadyDigest(unsigned),
     }),
   );
 }
 
-function persistedIntentValidV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
-  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>,
-  operation: Readonly<WorkspaceFilesystemMutationPipelineOperationV1>,
-  record: Readonly<WorkspaceFilesystemIntentRecordV1>,
+function persistedIntentValid(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
+  persisted: Readonly<WorkspaceFilesystemPersistedMutationIntent>,
+  operation: Readonly<WorkspaceFilesystemMutationPipelineOperation>,
+  record: Readonly<WorkspaceFilesystemIntentRecord>,
 ): boolean {
   try {
     if (!input.durableEvidence.verifyPersistedIntent(persisted).valid) return false;
     const acknowledged = persisted.acknowledgement.attempt;
     const identity = input.prepared.identity;
     return (
-      persisted.schema === WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 &&
+      persisted.schema === WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ &&
       persisted.status === 'durably_persisted' &&
       persisted.prepared === input.prepared &&
       persisted.operation === operation &&
       persisted.record === record &&
-      workspaceFilesystemOperationDigestV1(providerOperationV1(operation)) ===
-        record.operationDigest &&
-      workspaceFilesystemStringDigestV1(operation.path) === record.lexicalTargetDigest &&
+      workspaceFilesystemOperationDigest(providerOperation(operation)) === record.operationDigest &&
+      workspaceFilesystemStringDigest(operation.path) === record.lexicalTargetDigest &&
       acknowledged.invocationId === identity.invocationId &&
       acknowledged.attemptId === identity.attemptId &&
       acknowledged.attempt === record.attempt &&
@@ -672,17 +666,17 @@ function persistedIntentValidV1(
   }
 }
 
-function persistedReadyValidV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
-  persisted: Readonly<WorkspaceFilesystemPersistedMutationReadyV1>,
-  intent: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>,
-  artifact: Readonly<ReturnType<BuiltinWorkspaceFilesystemRuntimeV1['preimageArtifacts']['write']>>,
-  record: Readonly<WorkspaceFilesystemMutationReadyRecordV1>,
+function persistedReadyValid(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
+  persisted: Readonly<WorkspaceFilesystemPersistedMutationReady>,
+  intent: Readonly<WorkspaceFilesystemPersistedMutationIntent>,
+  artifact: Readonly<ReturnType<BuiltinWorkspaceFilesystemRuntime['preimageArtifacts']['write']>>,
+  record: Readonly<WorkspaceFilesystemMutationReadyRecord>,
 ): boolean {
   try {
     return (
       input.durableEvidence.verifyPersistedMutationReady(persisted).valid &&
-      persisted.schema === WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 &&
+      persisted.schema === WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ &&
       persisted.status === 'durably_persisted' &&
       persisted.intent === intent &&
       persisted.preimageArtifact === artifact &&
@@ -693,16 +687,16 @@ function persistedReadyValidV1(
   }
 }
 
-function providerOperationV1(
-  operation: Readonly<WorkspaceFilesystemMutationPipelineOperationV1>,
-): Readonly<WorkspaceFilesystemMutationOperationV1> {
+function providerOperation(
+  operation: Readonly<WorkspaceFilesystemMutationPipelineOperation>,
+): Readonly<WorkspaceFilesystemMutationOperation> {
   const { operationId: _operationId, ...providerOperation } = operation;
   return providerOperation;
 }
 
-function argumentsMatchOperationV1(
-  args: Readonly<Record<string, RuntimeJsonValueV1>>,
-  operation: Readonly<WorkspaceFilesystemMutationOperationV1>,
+function argumentsMatchOperation(
+  args: Readonly<Record<string, RuntimeJsonValue>>,
+  operation: Readonly<WorkspaceFilesystemMutationOperation>,
 ): boolean {
   if (operation.kind === 'write_file') {
     return operation.path === args.path && operation.content === args.content;
@@ -715,59 +709,59 @@ function argumentsMatchOperationV1(
   );
 }
 
-function approvalSummaryV1(prepared: Readonly<PreparedToolInvocationV1>): string {
-  const facts = jsonRecordV1(prepared.input.facts);
+function approvalSummary(prepared: Readonly<PreparedToolInvocation>): string {
+  const facts = jsonRecord(prepared.input.facts);
   const summary = facts.approvalSummary;
   if (typeof summary !== 'string' || summary.length > 1024) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('prepared_identity_invalid');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('prepared_identity_invalid');
   }
   return summary;
 }
 
-function actorIdentityDigestV1(
-  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1>,
+function actorIdentityDigest(
+  input: Readonly<CreateBuiltinWorkspaceFilesystemMutationDispatcherInput>,
 ): string {
-  return digestCapabilityBindingValueV1({
+  return digestCapabilityBindingValue({
     schema: 'kite.workspace-filesystem-actor.v1',
     threadId: input.actorIdentity.threadId,
     actorIdentity: input.actorIdentity.actorId,
   });
 }
 
-function failureV1(
-  code: WorkspaceFilesystemProviderFailureV1['code'],
+function failure(
+  code: WorkspaceFilesystemProviderFailure['code'],
   message: string,
-): BuiltinWorkspaceFilesystemPipelineResultV1 {
-  return Object.freeze({ ok: false, failure: failureValueV1(code, message) });
+): BuiltinWorkspaceFilesystemPipelineResult {
+  return Object.freeze({ ok: false, failure: failureValue(code, message) });
 }
 
-function failureValueV1(
-  code: WorkspaceFilesystemProviderFailureV1['code'],
+function failureValue(
+  code: WorkspaceFilesystemProviderFailure['code'],
   message: string,
-): Readonly<WorkspaceFilesystemProviderFailureV1> {
+): Readonly<WorkspaceFilesystemProviderFailure> {
   return Object.freeze({ code, message });
 }
 
-function attemptV1(invocationId: string, attemptId: string): number {
+function attempt(invocationId: string, attemptId: string): number {
   const prefix = `${invocationId}:attempt:`;
   const suffix = attemptId.startsWith(prefix) ? attemptId.slice(prefix.length) : '';
   const attempt = Number(suffix);
   if (!/^[1-9]\d*$/u.test(suffix) || !Number.isSafeInteger(attempt)) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('prepared_identity_invalid');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('prepared_identity_invalid');
   }
   return attempt;
 }
 
-function timestampV1(value: Date): string {
+function timestamp(value: Date): string {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('invalid_composition');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('invalid_composition');
   }
   return value.toISOString();
 }
 
-function jsonRecordV1(
-  value: RuntimeJsonValueV1 | undefined,
-): Readonly<Record<string, RuntimeJsonValueV1>> {
+function jsonRecord(
+  value: RuntimeJsonValue | undefined,
+): Readonly<Record<string, RuntimeJsonValue>> {
   if (
     value === undefined ||
     value === null ||
@@ -775,12 +769,12 @@ function jsonRecordV1(
     Array.isArray(value) ||
     Object.getPrototypeOf(value) !== Object.prototype
   ) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('prepared_identity_invalid');
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('prepared_identity_invalid');
   }
-  return value as Readonly<Record<string, RuntimeJsonValueV1>>;
+  return value as Readonly<Record<string, RuntimeJsonValue>>;
 }
 
-function isRecordV1(value: unknown): value is Readonly<Record<string, RuntimeJsonValueV1>> {
+function isRecord(value: unknown): value is Readonly<Record<string, RuntimeJsonValue>> {
   return (
     value !== null &&
     typeof value === 'object' &&
@@ -789,31 +783,31 @@ function isRecordV1(value: unknown): value is Readonly<Record<string, RuntimeJso
   );
 }
 
-function isMutationOperationV1(
-  operation: Readonly<WorkspaceFilesystemOperationV1>,
-): operation is Readonly<WorkspaceFilesystemMutationOperationV1> {
+function isMutationOperation(
+  operation: Readonly<WorkspaceFilesystemOperation>,
+): operation is Readonly<WorkspaceFilesystemMutationOperation> {
   return operation.kind === 'write_file' || operation.kind === 'edit_file';
 }
 
-function sameWorkspaceV1(left: string, right: string): boolean {
+function sameWorkspace(left: string, right: string): boolean {
   return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
-function requiredV1(value: string | null): string {
-  if (!nonEmptyV1(value)) {
-    throw new BuiltinWorkspaceFilesystemMutationDispatchErrorV1('prepared_identity_invalid');
+function required(value: string | null): string {
+  if (!nonEmpty(value)) {
+    throw new BuiltinWorkspaceFilesystemMutationDispatchError('prepared_identity_invalid');
   }
   return value;
 }
 
-function nonEmptyV1(value: unknown): value is string {
+function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && !value.includes('\0');
 }
 
-function deepFreezeV1<Value>(value: Value): Readonly<Value> {
+function deepFreeze<Value>(value: Value): Readonly<Value> {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     Object.freeze(value);
-    for (const nested of Object.values(value as Record<string, unknown>)) deepFreezeV1(nested);
+    for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
   }
   return value;
 }

@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { realpathSync } from 'node:fs';
 import {
-  BuiltinSandboxPreparationErrorV1,
-  createBuiltinSandboxPreparationV1,
-  SandboxExecutionGrantAuthorityV1,
-  type SandboxInvocationIdentityV1,
+  BuiltinSandboxPreparationError,
+  createBuiltinSandboxPreparation,
+  SandboxExecutionGrantAuthority,
+  type SandboxInvocationIdentity,
 } from '@kite/builtin-runtime/sandbox';
-import type { SandboxExecutionProviderV1 } from '@kite/runtime-spi';
-import { createBuiltinSandboxExecutionConsumerForTestV1 } from '../helpers/sandbox-executor';
+import type { SandboxExecutionProvider } from '@kite/runtime-spi';
+import { createBuiltinSandboxExecutionConsumerForTest } from '../helpers/sandbox-executor';
 
 const workspace = realpathSync.native(process.cwd());
-const identity: SandboxInvocationIdentityV1 = {
+const identity: SandboxInvocationIdentity = {
   toolCallId: 'tool-preparation-authority',
   capabilityId: 'builtin:shell_execute',
   capabilityRevision: 'shell-revision-v1',
@@ -38,7 +38,7 @@ function preparationInput(command: string, inputWorkspace = workspace) {
   };
 }
 
-function pureProvider(capture: (preparation: unknown) => void): SandboxExecutionProviderV1 {
+function pureProvider(capture: (preparation: unknown) => void): SandboxExecutionProvider {
   return {
     resourceSemantics: 'pure',
     async prepare({ grant }) {
@@ -63,15 +63,15 @@ function pureProvider(capture: (preparation: unknown) => void): SandboxExecution
 describe('Builtin sandbox preparation authority', () => {
   test('matches the Core consumer grant preparation corpus', async () => {
     const input = preparationInput('printf preparation-authority');
-    const direct = createBuiltinSandboxPreparationV1(input);
+    const direct = createBuiltinSandboxPreparation(input);
     let observed: unknown;
-    const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
+    const consumer = createBuiltinSandboxExecutionConsumerForTest({
       provider: pureProvider((preparation) => {
         observed = preparation;
       }),
       resourceSemantics: 'pure',
       backend: 'bubblewrap',
-      grants: new SandboxExecutionGrantAuthorityV1(),
+      grants: new SandboxExecutionGrantAuthority(),
       canonicalWorkspace: workspace,
       executionBoundaryDigest: input.executionBoundaryDigest,
       protectedPathRevision: input.protectedPathRevision,
@@ -96,10 +96,10 @@ describe('Builtin sandbox preparation authority', () => {
 
   test('rejects protected paths before any lifecycle or provider seam', () => {
     expect(() =>
-      createBuiltinSandboxPreparationV1(preparationInput('printf x > ~/.ssh/authorized_keys')),
-    ).toThrow(BuiltinSandboxPreparationErrorV1);
+      createBuiltinSandboxPreparation(preparationInput('printf x > ~/.ssh/authorized_keys')),
+    ).toThrow(BuiltinSandboxPreparationError);
     try {
-      createBuiltinSandboxPreparationV1(preparationInput('cat ~/.ssh/authorized_keys'));
+      createBuiltinSandboxPreparation(preparationInput('cat ~/.ssh/authorized_keys'));
     } catch (error) {
       expect(error).toMatchObject({
         code: 'protected_path',
@@ -110,12 +110,12 @@ describe('Builtin sandbox preparation authority', () => {
 
   test('rejects a Workspace identity mismatch before producing preparation facts', () => {
     expect(() =>
-      createBuiltinSandboxPreparationV1(preparationInput('printf x', `${workspace}/..`)),
+      createBuiltinSandboxPreparation(preparationInput('printf x', `${workspace}/..`)),
     ).toThrow('Sandbox invocation Workspace mismatch.');
   });
 
   test('projects policy-proven read-only and fail-closed defaults as frozen facts', () => {
-    const prepared = createBuiltinSandboxPreparationV1({
+    const prepared = createBuiltinSandboxPreparation({
       ...preparationInput('ls'),
       executionTrust: 'policy_proven_read_only',
       filesystemMode: undefined,

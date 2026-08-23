@@ -7,10 +7,10 @@ import {
   persistSessionName,
   searchSessions,
 } from './session-persistence';
-import type { StateSessionStorageV1 } from './state-runtime';
+import type { StateSessionStorage } from './state-runtime';
 
 export interface SessionPersistenceServiceDependencies {
-  readonly openStateSessionStorage: (threadId?: string) => StateSessionStorageV1;
+  readonly openStateSessionStorage: (threadId?: string) => StateSessionStorage;
   readonly resolveRecoveryIdentity: (threadId: string) => string;
   readonly allocateRecoveryIdentity: () => string;
 }
@@ -109,11 +109,7 @@ export class SessionPersistenceService {
     }
   }
 
-  private hasCheckpoint(
-    store: StateSessionStorageV1,
-    threadId: string,
-    snapshotId: string,
-  ): boolean {
+  private hasCheckpoint(store: StateSessionStorage, threadId: string, snapshotId: string): boolean {
     if (!store.getNamedSnapshotEntry(threadId, snapshotId)) return false;
     const snapshot = store.loadNamedSnapshot(threadId, snapshotId);
     return typeof snapshot === 'object' && snapshot !== null && !Array.isArray(snapshot);

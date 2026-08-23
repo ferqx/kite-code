@@ -1,16 +1,16 @@
 import {
   type AgentConfig,
-  admitEmbeddedReleaseProfileV1,
-  admitProductionDistributionTargetIdentityV1,
-  composeReleaseProfileV1,
-  type EmbeddedReleaseProfileIdV1,
-  type ProductionDistributionTargetIdentityV1,
-  type ReleaseProfileRestrictionLayerV1,
-  type ReleaseProfileV1,
+  admitEmbeddedReleaseProfile,
+  admitProductionDistributionTargetIdentity,
+  composeReleaseProfile,
+  type EmbeddedReleaseProfileId,
+  type ProductionDistributionTargetIdentity,
+  type ReleaseProfile,
+  type ReleaseProfileRestrictionLayer,
 } from '#app/config';
 import { getFeatureFlags } from '#app/config/features';
 
-export type ReleaseCompositionInactiveReasonV1 =
+export type ReleaseCompositionInactiveReason =
   | 'artifact_disabled'
   | 'rollout_disabled'
   | 'distribution_target_capabilities_not_off'
@@ -19,39 +19,39 @@ export type ReleaseCompositionInactiveReasonV1 =
   | 'production_internal_profile'
   | 'production_artifact_authority_unconfigured';
 
-export type ReleaseCompositionV1 =
+export type ReleaseComposition =
   | {
       version: 1;
       active: false;
       production: boolean;
-      reason: ReleaseCompositionInactiveReasonV1;
+      reason: ReleaseCompositionInactiveReason;
     }
   | {
       version: 1;
       active: true;
       production: false;
-      profile: ReleaseProfileV1;
+      profile: ReleaseProfile;
     }
   | {
       version: 1;
       active: true;
       production: true;
-      distributionTargetIdentity: ProductionDistributionTargetIdentityV1;
-      profile: ReleaseProfileV1;
+      distributionTargetIdentity: ProductionDistributionTargetIdentity;
+      profile: ReleaseProfile;
     };
 
-export interface ReleaseControlledAgentConfigV1 extends AgentConfig {
+export interface ReleaseControlledAgentConfig extends AgentConfig {
   readonly releaseControl:
     | {
         readonly version: 1;
         readonly production: false;
-        readonly effectiveProfile: ReleaseProfileV1;
+        readonly effectiveProfile: ReleaseProfile;
       }
     | {
         readonly version: 1;
         readonly production: true;
-        readonly distributionTargetIdentity: ProductionDistributionTargetIdentityV1;
-        readonly effectiveProfile: ReleaseProfileV1;
+        readonly distributionTargetIdentity: ProductionDistributionTargetIdentity;
+        readonly effectiveProfile: ReleaseProfile;
       };
 }
 
@@ -59,18 +59,18 @@ export interface ReleaseControlledAgentConfigV1 extends AgentConfig {
  * App-owned release composition gate. Artifact authority is independent from
  * project/user config; ordinary config and CLI layers can only tighten it.
  */
-export function resolveReleaseCompositionV1(input: {
+export function resolveReleaseComposition(input: {
   config: AgentConfig;
   artifactReleaseProfileV1Enabled: boolean;
-  profileId: EmbeddedReleaseProfileIdV1;
+  profileId: EmbeddedReleaseProfileId;
   production: boolean;
   distributionTargetIdentity?: string;
-  restrictionLayers?: readonly ReleaseProfileRestrictionLayerV1[];
-}): ReleaseCompositionV1 {
+  restrictionLayers?: readonly ReleaseProfileRestrictionLayer[];
+}): ReleaseComposition {
   if (!input.artifactReleaseProfileV1Enabled) {
     return { version: 1, active: false, production: input.production, reason: 'artifact_disabled' };
   }
-  if (!getFeatureFlags(input.config).releaseProfileV1) {
+  if (!getFeatureFlags(input.config).releaseProfile) {
     return { version: 1, active: false, production: input.production, reason: 'rollout_disabled' };
   }
   if (input.production) {
@@ -81,12 +81,12 @@ export function resolveReleaseCompositionV1(input: {
       reason: 'production_artifact_authority_unconfigured',
     };
   }
-  const embedded = admitEmbeddedReleaseProfileV1({
+  const embedded = admitEmbeddedReleaseProfile({
     profileId: input.profileId,
     releaseProfileV1Enabled: true,
     production: false,
   });
-  const profile = composeReleaseProfileV1({
+  const profile = composeReleaseProfile({
     embedded,
     layers: input.restrictionLayers,
   });
@@ -94,10 +94,10 @@ export function resolveReleaseCompositionV1(input: {
 }
 
 /** Only an active composition can create the config passed to Runtime/providers. */
-export function createReleaseControlledAgentConfigV1(input: {
+export function createReleaseControlledAgentConfig(input: {
   config: AgentConfig;
-  composition: ReleaseCompositionV1;
-}): ReleaseControlledAgentConfigV1 {
+  composition: ReleaseComposition;
+}): ReleaseControlledAgentConfig {
   if (!input.composition.active) {
     throw new Error(`Release-controlled Runtime creation denied: ${input.composition.reason}.`);
   }
@@ -106,7 +106,7 @@ export function createReleaseControlledAgentConfigV1(input: {
       'Release-controlled Runtime creation denied: production_artifact_authority_unconfigured.',
     );
   }
-  admitProductionDistributionTargetIdentityV1({
+  admitProductionDistributionTargetIdentity({
     profile: input.composition.profile,
     production: false,
   });

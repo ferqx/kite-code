@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
 
-export const RELEASE_EVIDENCE_SCHEMA = 'ReleaseEvidenceV1' as const;
+export const RELEASE_EVIDENCE_SCHEMA = 'ReleaseEvidence' as const;
 
 export const RELEASE_GATES = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5'] as const;
-export type ReleaseGateV1 = (typeof RELEASE_GATES)[number];
+export type ReleaseGate = (typeof RELEASE_GATES)[number];
 
 export const RELEASE_EVIDENCE_KINDS = [
   'clean_install',
@@ -29,14 +29,14 @@ export const RELEASE_EVIDENCE_KINDS = [
   'canary_slo',
   'maintainer_security_review',
 ] as const;
-export type ReleaseEvidenceKindV1 = (typeof RELEASE_EVIDENCE_KINDS)[number];
+export type ReleaseEvidenceKind = (typeof RELEASE_EVIDENCE_KINDS)[number];
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const commitSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const isoTimestampSchema = z.iso.datetime({ offset: true });
 const nonEmptySchema = z.string().trim().min(1);
 
-export const releaseArtifactIdentityV1Schema = z
+export const releaseArtifactIdentitySchema = z
   .object({
     canonicalRepository: nonEmptySchema,
     repositoryId: nonEmptySchema,
@@ -49,7 +49,7 @@ export const releaseArtifactIdentityV1Schema = z
   })
   .strict();
 
-const maintainerReviewScopeV1Schema = z.tuple([
+const maintainerReviewScopeSchema = z.tuple([
   z.literal('architecture'),
   z.literal('security_boundaries'),
   z.literal('artifact_identity'),
@@ -57,7 +57,7 @@ const maintainerReviewScopeV1Schema = z.tuple([
   z.literal('adversarial_bypass'),
 ]);
 
-const maintainerReviewExecutionV1Schema = z
+const maintainerReviewExecutionSchema = z
   .object({
     canonicalRepository: nonEmptySchema,
     repositoryId: nonEmptySchema,
@@ -72,22 +72,22 @@ const maintainerReviewExecutionV1Schema = z
   })
   .strict();
 
-const maintainerSecurityReviewMaterialV1Schema = z
+const maintainerSecurityReviewMaterialSchema = z
   .object({
-    schema: z.literal('MaintainerSecurityReviewRecordV1'),
+    schema: z.literal('MaintainerSecurityReviewRecord'),
     reviewMode: z.literal('single_maintainer'),
     reviewerIdentity: nonEmptySchema,
     reviewedAt: isoTimestampSchema,
     outcome: z.enum(['passed', 'failed']),
-    candidate: releaseArtifactIdentityV1Schema,
-    execution: maintainerReviewExecutionV1Schema,
+    candidate: releaseArtifactIdentitySchema,
+    execution: maintainerReviewExecutionSchema,
     ref: nonEmptySchema,
     trustedVerifierCommit: commitSchema,
     routeIdentity: nonEmptySchema,
     platformIdentity: nonEmptySchema,
     rollbackReportDigest: digestSchema,
     compatibilityReportDigest: digestSchema,
-    scope: maintainerReviewScopeV1Schema,
+    scope: maintainerReviewScopeSchema,
     unresolvedP0: z.literal(0),
     unresolvedP1: z.literal(0),
     p2Dispositions: z
@@ -117,12 +117,12 @@ const maintainerSecurityReviewMaterialV1Schema = z
     }
   });
 
-export const maintainerSecurityReviewRecordV1Schema = maintainerSecurityReviewMaterialV1Schema
+export const maintainerSecurityReviewRecordSchema = maintainerSecurityReviewMaterialSchema
   .extend({ recordDigest: digestSchema })
   .strict()
   .superRefine((value, context) => {
     const { recordDigest, ...material } = value;
-    const expected = computeMaintainerSecurityReviewDigestV1(material);
+    const expected = computeMaintainerSecurityReviewDigest(material);
     if (recordDigest !== expected) {
       context.addIssue({
         code: 'custom',
@@ -132,38 +132,36 @@ export const maintainerSecurityReviewRecordV1Schema = maintainerSecurityReviewMa
     }
   });
 
-export type MaintainerSecurityReviewRecordV1 = z.infer<
-  typeof maintainerSecurityReviewRecordV1Schema
->;
-export type MaintainerSecurityReviewMaterialV1 = z.infer<
-  typeof maintainerSecurityReviewMaterialV1Schema
+export type MaintainerSecurityReviewRecord = z.infer<typeof maintainerSecurityReviewRecordSchema>;
+export type MaintainerSecurityReviewMaterial = z.infer<
+  typeof maintainerSecurityReviewMaterialSchema
 >;
 
-export function computeMaintainerSecurityReviewDigestV1(
-  material: MaintainerSecurityReviewMaterialV1,
+export function computeMaintainerSecurityReviewDigest(
+  material: MaintainerSecurityReviewMaterial,
 ): `sha256:${string}` {
   return sha256DomainSeparated(
     'maintainer-security-review-record-v1',
-    canonicalJsonBytes(maintainerSecurityReviewMaterialV1Schema.parse(material)),
+    canonicalJsonBytes(maintainerSecurityReviewMaterialSchema.parse(material)),
   );
 }
 
-export function buildMaintainerSecurityReviewRecordV1(
-  material: MaintainerSecurityReviewMaterialV1,
-): MaintainerSecurityReviewRecordV1 {
-  return maintainerSecurityReviewRecordV1Schema.parse({
+export function buildMaintainerSecurityReviewRecord(
+  material: MaintainerSecurityReviewMaterial,
+): MaintainerSecurityReviewRecord {
+  return maintainerSecurityReviewRecordSchema.parse({
     ...material,
-    recordDigest: computeMaintainerSecurityReviewDigestV1(material),
+    recordDigest: computeMaintainerSecurityReviewDigest(material),
   });
 }
 
-const productionReleaseReplayEvidenceMaterialV1Schema = z
+const productionReleaseReplayEvidenceMaterialSchema = z
   .object({
-    schema: z.literal('ProductionReleaseReplayEvidenceRecordV1'),
+    schema: z.literal('ProductionReleaseReplayEvidenceRecord'),
     kind: z.enum(['schema_rollback', 'ga_compatibility']),
     productionEvidence: z.literal(true),
     status: z.literal('passed'),
-    candidate: releaseArtifactIdentityV1Schema,
+    candidate: releaseArtifactIdentitySchema,
     completedAt: isoTimestampSchema,
     trustedVerifierCommit: commitSchema,
     reportDigest: digestSchema,
@@ -171,13 +169,13 @@ const productionReleaseReplayEvidenceMaterialV1Schema = z
   })
   .strict();
 
-export const productionReleaseReplayEvidenceRecordV1Schema =
-  productionReleaseReplayEvidenceMaterialV1Schema
+export const productionReleaseReplayEvidenceRecordSchema =
+  productionReleaseReplayEvidenceMaterialSchema
     .extend({ recordDigest: digestSchema })
     .strict()
     .superRefine((value, context) => {
       const { recordDigest, ...material } = value;
-      const expected = computeProductionReleaseReplayEvidenceDigestV1(material);
+      const expected = computeProductionReleaseReplayEvidenceDigest(material);
       if (recordDigest !== expected) {
         context.addIssue({
           code: 'custom',
@@ -187,32 +185,32 @@ export const productionReleaseReplayEvidenceRecordV1Schema =
       }
     });
 
-export type ProductionReleaseReplayEvidenceRecordV1 = z.infer<
-  typeof productionReleaseReplayEvidenceRecordV1Schema
+export type ProductionReleaseReplayEvidenceRecord = z.infer<
+  typeof productionReleaseReplayEvidenceRecordSchema
 >;
-export type ProductionReleaseReplayEvidenceMaterialV1 = z.infer<
-  typeof productionReleaseReplayEvidenceMaterialV1Schema
+export type ProductionReleaseReplayEvidenceMaterial = z.infer<
+  typeof productionReleaseReplayEvidenceMaterialSchema
 >;
 
-export function computeProductionReleaseReplayEvidenceDigestV1(
-  material: ProductionReleaseReplayEvidenceMaterialV1,
+export function computeProductionReleaseReplayEvidenceDigest(
+  material: ProductionReleaseReplayEvidenceMaterial,
 ): `sha256:${string}` {
   return sha256DomainSeparated(
     'production-release-replay-evidence-record-v1',
-    canonicalJsonBytes(productionReleaseReplayEvidenceMaterialV1Schema.parse(material)),
+    canonicalJsonBytes(productionReleaseReplayEvidenceMaterialSchema.parse(material)),
   );
 }
 
-export function buildProductionReleaseReplayEvidenceRecordV1(
-  material: ProductionReleaseReplayEvidenceMaterialV1,
-): ProductionReleaseReplayEvidenceRecordV1 {
-  return productionReleaseReplayEvidenceRecordV1Schema.parse({
+export function buildProductionReleaseReplayEvidenceRecord(
+  material: ProductionReleaseReplayEvidenceMaterial,
+): ProductionReleaseReplayEvidenceRecord {
+  return productionReleaseReplayEvidenceRecordSchema.parse({
     ...material,
-    recordDigest: computeProductionReleaseReplayEvidenceDigestV1(material),
+    recordDigest: computeProductionReleaseReplayEvidenceDigest(material),
   });
 }
 
-const githubExecutionIdentityV1Schema = z
+const githubExecutionIdentitySchema = z
   .object({
     source: z.literal('github_actions'),
     canonicalRepository: nonEmptySchema,
@@ -231,7 +229,7 @@ const githubExecutionIdentityV1Schema = z
   })
   .strict();
 
-const localSyntheticExecutionIdentityV1Schema = z
+const localSyntheticExecutionIdentitySchema = z
   .object({
     source: z.literal('local_synthetic'),
     fixtureId: nonEmptySchema,
@@ -242,7 +240,7 @@ const localSyntheticExecutionIdentityV1Schema = z
   })
   .strict();
 
-const externalExecutionIdentityV1Schema = z
+const externalExecutionIdentitySchema = z
   .object({
     source: z.literal('external'),
     reviewerIdentity: nonEmptySchema,
@@ -253,7 +251,7 @@ const externalExecutionIdentityV1Schema = z
   })
   .strict();
 
-const githubMaintainerReviewExecutionIdentityV1Schema = z
+const githubMaintainerReviewExecutionIdentitySchema = z
   .object({
     source: z.literal('github_maintainer_review'),
     canonicalRepository: nonEmptySchema,
@@ -274,22 +272,22 @@ const githubMaintainerReviewExecutionIdentityV1Schema = z
   })
   .strict();
 
-export const releaseEvidenceExecutionIdentityV1Schema = z.discriminatedUnion('source', [
-  githubExecutionIdentityV1Schema,
-  localSyntheticExecutionIdentityV1Schema,
-  externalExecutionIdentityV1Schema,
-  githubMaintainerReviewExecutionIdentityV1Schema,
+export const releaseEvidenceExecutionIdentitySchema = z.discriminatedUnion('source', [
+  githubExecutionIdentitySchema,
+  localSyntheticExecutionIdentitySchema,
+  externalExecutionIdentitySchema,
+  githubMaintainerReviewExecutionIdentitySchema,
 ]);
 
-export const releaseEvidenceResultV1Schema = z
+export const releaseEvidenceResultSchema = z
   .object({
     evidenceId: nonEmptySchema,
     kind: z.enum(RELEASE_EVIDENCE_KINDS),
     gate: z.enum(RELEASE_GATES),
     capability: nonEmptySchema.optional(),
     status: z.enum(['passed', 'failed', 'blocked', 'not_run']),
-    artifactIdentity: releaseArtifactIdentityV1Schema,
-    executionIdentity: releaseEvidenceExecutionIdentityV1Schema,
+    artifactIdentity: releaseArtifactIdentitySchema,
+    executionIdentity: releaseEvidenceExecutionIdentitySchema,
     routeIdentity: nonEmptySchema.optional(),
     platformIdentity: nonEmptySchema.optional(),
     suiteIdentity: nonEmptySchema,
@@ -301,7 +299,7 @@ export const releaseEvidenceResultV1Schema = z
       .strict(),
     expiresAt: isoTimestampSchema.optional(),
     summary: nonEmptySchema.max(512),
-    maintainerReview: maintainerSecurityReviewRecordV1Schema.optional(),
+    maintainerReview: maintainerSecurityReviewRecordSchema.optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -394,7 +392,7 @@ export const releaseEvidenceResultV1Schema = z
     }
   });
 
-export const releaseEvidenceRiskV1Schema = z
+export const releaseEvidenceRiskSchema = z
   .object({
     riskId: nonEmptySchema,
     severity: z.enum(['P0', 'P1', 'P2']),
@@ -404,7 +402,7 @@ export const releaseEvidenceRiskV1Schema = z
   })
   .strict();
 
-export const releaseEvidenceExceptionV1Schema = z
+export const releaseEvidenceExceptionSchema = z
   .object({
     exceptionId: nonEmptySchema,
     evidenceId: nonEmptySchema,
@@ -418,17 +416,17 @@ export const releaseEvidenceExceptionV1Schema = z
   })
   .strict();
 
-export const releaseEvidenceV1Schema = z
+export const releaseEvidenceSchema = z
   .object({
     schema: z.literal(RELEASE_EVIDENCE_SCHEMA),
     evidenceBundleId: nonEmptySchema,
     generatedAt: isoTimestampSchema,
-    artifactIdentity: releaseArtifactIdentityV1Schema,
+    artifactIdentity: releaseArtifactIdentitySchema,
     nonDistributable: z.boolean(),
     syntheticTrustRoot: z.boolean(),
-    results: z.array(releaseEvidenceResultV1Schema),
-    risks: z.array(releaseEvidenceRiskV1Schema),
-    exceptions: z.array(releaseEvidenceExceptionV1Schema),
+    results: z.array(releaseEvidenceResultSchema),
+    risks: z.array(releaseEvidenceRiskSchema),
+    exceptions: z.array(releaseEvidenceExceptionSchema),
     bundleDigest: digestSchema,
   })
   .strict()
@@ -490,22 +488,22 @@ export const releaseEvidenceV1Schema = z
     }
   });
 
-export type ReleaseArtifactIdentityV1 = z.infer<typeof releaseArtifactIdentityV1Schema>;
-export type ReleaseEvidenceExecutionIdentityV1 = z.infer<
-  typeof releaseEvidenceExecutionIdentityV1Schema
+export type ReleaseArtifactIdentity = z.infer<typeof releaseArtifactIdentitySchema>;
+export type ReleaseEvidenceExecutionIdentity = z.infer<
+  typeof releaseEvidenceExecutionIdentitySchema
 >;
-export type ReleaseEvidenceResultV1 = z.infer<typeof releaseEvidenceResultV1Schema>;
-export type ReleaseEvidenceRiskV1 = z.infer<typeof releaseEvidenceRiskV1Schema>;
-export type ReleaseEvidenceExceptionV1 = z.infer<typeof releaseEvidenceExceptionV1Schema>;
-export type ReleaseEvidenceV1 = z.infer<typeof releaseEvidenceV1Schema>;
+export type ReleaseEvidenceResult = z.infer<typeof releaseEvidenceResultSchema>;
+export type ReleaseEvidenceRisk = z.infer<typeof releaseEvidenceRiskSchema>;
+export type ReleaseEvidenceException = z.infer<typeof releaseEvidenceExceptionSchema>;
+export type ReleaseEvidence = z.infer<typeof releaseEvidenceSchema>;
 
-export function parseReleaseEvidenceV1(value: unknown): ReleaseEvidenceV1 {
-  return releaseEvidenceV1Schema.parse(value);
+export function parseReleaseEvidence(value: unknown): ReleaseEvidence {
+  return releaseEvidenceSchema.parse(value);
 }
 
 function sameArtifactIdentity(
-  left: ReleaseArtifactIdentityV1,
-  right: ReleaseArtifactIdentityV1,
+  left: ReleaseArtifactIdentity,
+  right: ReleaseArtifactIdentity,
 ): boolean {
   return (
     left.canonicalRepository === right.canonicalRepository &&

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { EffectSupervisor } from '../src/effect-supervisor';
-import type { RuntimeStorage, RuntimeTransactionInputV1 } from '../src/storage';
+import type { RuntimeStorage, RuntimeTransactionInput } from '../src/storage';
 
 describe('Host EffectSupervisor', () => {
   test('exposes the exact storage-owned recovery identity port without a second owner', () => {
@@ -105,7 +105,7 @@ describe('Host EffectSupervisor', () => {
   });
 });
 
-function transactionInput(): RuntimeTransactionInputV1 {
+function transactionInput(): RuntimeTransactionInput {
   return { sessionId: 'session-1', events: [], snapshot: {} };
 }
 
@@ -114,7 +114,7 @@ function storageFixture(calls: string[], lease: { renew?: () => boolean } = {}):
     adapterId: 'test',
     stateSchemaVersion: 25,
     storeSchemaVersion: 4,
-    compatibilityEpoch: 'kite-runtime-2026-08-18',
+    formatEpoch: 'kite-runtime-2026-08-18',
     sessions: {} as RuntimeStorage['sessions'],
     checkpoints: {} as RuntimeStorage['checkpoints'],
     artifacts: {} as RuntimeStorage['artifacts'],

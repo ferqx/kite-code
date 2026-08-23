@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import {
-  type RuntimeStateSessionPortV1,
-  runStateRuntimeLoopV1,
+  type RuntimeStateSessionPort,
+  runStateRuntimeLoop,
 } from '#app/bootstrap/runtime/state-runner';
 import type { RuntimeEvent, RuntimeState } from '#app/bootstrap/runtime/state-runtime';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 
 function initialState(): RuntimeState {
-  return createRuntimeHostStateInitialStateV1({
+  return createRuntimeHostStateInitialState({
     recoveryIdentityKey: RECOVERY_KEY,
     threadId: 'state-runner-ack-test',
     userId: 'user-1',
@@ -29,7 +29,7 @@ describe('State runner effect acknowledgements', () => {
       turnId: state.turn.turnId,
       effect: { type: 'call_model' as const },
     };
-    const kernel: RuntimeStateSessionPortV1 = {
+    const kernel: RuntimeStateSessionPort = {
       getState: () => state,
       processEvent: () => ({ status: 'applied', eventId: 'unused' }),
       processEventBatch: () => [],
@@ -56,7 +56,7 @@ describe('State runner effect acknowledgements', () => {
     };
 
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async (_effect, _state, _emit, context) => {
         expect(context?.persistAttemptStartEvents).toBeFunction();
@@ -94,7 +94,7 @@ describe('State runner effect acknowledgements', () => {
       turnId: state.turn.turnId,
       effect: { type: 'call_model' as const },
     };
-    const kernel: RuntimeStateSessionPortV1 = {
+    const kernel: RuntimeStateSessionPort = {
       getState: () => state,
       processEvent: () => ({ status: 'applied', eventId: 'unused' }),
       processEventBatch: () => [],
@@ -122,7 +122,7 @@ describe('State runner effect acknowledgements', () => {
 
     const accepted: boolean[] = [];
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async (_effect, _state, _emit, context) => {
         accepted.push(

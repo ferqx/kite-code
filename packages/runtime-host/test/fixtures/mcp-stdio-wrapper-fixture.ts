@@ -1,13 +1,13 @@
-import { canonicalControlFrameJsonV1, RUNTIME_CONTROL_FRAME_SCHEMA_V1 } from '@kite/runtime-spi';
-import { createRuntimeControlFrameV1 } from '../../src/control-frame';
+import { canonicalControlFrameJson, RUNTIME_CONTROL_FRAME_SCHEMA_ } from '@kite/runtime-spi';
+import { createRuntimeControlFrame } from '../../src/control-frame';
 import {
-  MCP_STDIO_CONTROL_DOMAIN_V1,
-  MCP_STDIO_MAX_LINE_BYTES_V1,
-  MCP_STDIO_WRAPPER_PEER_ID_V1,
-  parseMcpStdioJsonLineV1,
+  MCP_STDIO_CONTROL_DOMAIN_,
+  MCP_STDIO_MAX_LINE_BYTES_,
+  MCP_STDIO_WRAPPER_PEER_ID_,
+  parseMcpStdioJsonLine,
 } from '../../src/mcp-stdio-process';
 
-export type McpStdioWrapperFixtureModeV1 =
+export type McpStdioWrapperFixtureMode =
   | 'wrong-peer'
   | 'replay'
   | 'unknown'
@@ -15,23 +15,21 @@ export type McpStdioWrapperFixtureModeV1 =
   | 'oversize'
   | 'pre-ready';
 
-export async function runMcpStdioWrapperFixtureV1(
-  mode: McpStdioWrapperFixtureModeV1,
-): Promise<void> {
-  const invocationId = await readGoV1();
+export async function runMcpStdioWrapperFixture(mode: McpStdioWrapperFixtureMode): Promise<void> {
+  const invocationId = await readGo();
   if (mode === 'truncated') {
     process.stdout.write('{"schema":"kite.runtime-control-frame.v1"');
-    closeFixtureInputV1();
+    closeFixtureInput();
     return;
   }
   if (mode === 'oversize') {
-    process.stdout.write(`${'x'.repeat(MCP_STDIO_MAX_LINE_BYTES_V1 + 2)}\n`);
-    closeFixtureInputV1();
+    process.stdout.write(`${'x'.repeat(MCP_STDIO_MAX_LINE_BYTES_ + 2)}\n`);
+    closeFixtureInput();
     return;
   }
   if (mode === 'pre-ready') {
     process.stdout.write('{"jsonrpc":"2.0","id":1,"result":{}}\n');
-    closeFixtureInputV1();
+    closeFixtureInput();
     return;
   }
   const payload: Record<string, unknown> = {
@@ -42,27 +40,27 @@ export async function runMcpStdioWrapperFixtureV1(
     processStartIdentity: 'fixture-start',
     ...(mode === 'unknown' ? { unexpected: true } : {}),
   };
-  const frame = createRuntimeControlFrameV1({
-    schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-    domain: MCP_STDIO_CONTROL_DOMAIN_V1,
-    peerId: mode === 'wrong-peer' ? 'evil-peer' : MCP_STDIO_WRAPPER_PEER_ID_V1,
+  const frame = createRuntimeControlFrame({
+    schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
+    domain: MCP_STDIO_CONTROL_DOMAIN_,
+    peerId: mode === 'wrong-peer' ? 'evil-peer' : MCP_STDIO_WRAPPER_PEER_ID_,
     invocationId,
     sequence: 0,
     payload,
   });
-  const encoded = `${canonicalControlFrameJsonV1(frame)}\n`;
+  const encoded = `${canonicalControlFrameJson(frame)}\n`;
   process.stdout.write(encoded);
   if (mode === 'replay') process.stdout.write(encoded);
-  closeFixtureInputV1();
+  closeFixtureInput();
 }
 
-function closeFixtureInputV1(): void {
+function closeFixtureInput(): void {
   try {
     process.stdin.destroy();
   } catch {}
 }
 
-async function readGoV1(): Promise<string> {
+async function readGo(): Promise<string> {
   let buffer = Buffer.alloc(0);
   return new Promise((resolve, reject) => {
     const onData = (chunk: Uint8Array) => {
@@ -70,7 +68,7 @@ async function readGoV1(): Promise<string> {
       const newline = buffer.indexOf(0x0a);
       if (newline < 0) return;
       try {
-        const go = parseMcpStdioJsonLineV1(buffer.subarray(0, newline));
+        const go = parseMcpStdioJsonLine(buffer.subarray(0, newline));
         const invocationId = (go as Record<string, unknown>).invocationId;
         if (typeof invocationId !== 'string') throw new Error('fixture invocation unavailable');
         process.stdin.off('data', onData);

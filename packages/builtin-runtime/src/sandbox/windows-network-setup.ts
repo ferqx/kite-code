@@ -1,16 +1,16 @@
-import { resolveWindowsSandboxRunnerV1 } from './windows-runner';
+import { resolveWindowsSandboxRunner } from './windows-runner';
 
-export type WindowsManagedNetworkSetupStateV1 = 'unsupported' | 'runner_unavailable' | 'ready';
+export type WindowsManagedNetworkSetupState = 'unsupported' | 'runner_unavailable' | 'ready';
 
-export interface WindowsManagedNetworkSetupStatusV1 {
+export interface WindowsManagedNetworkSetupStatus {
   version: 1;
-  state: WindowsManagedNetworkSetupStateV1;
+  state: WindowsManagedNetworkSetupState;
   reason: string;
 }
 
-export interface WindowsManagedNetworkSetupDependenciesV1 {
+export interface WindowsManagedNetworkSetupDependencies {
   platform?: NodeJS.Platform;
-  resolveRunner?: typeof resolveWindowsSandboxRunnerV1;
+  resolveRunner?: typeof resolveWindowsSandboxRunner;
 }
 
 /**
@@ -19,13 +19,13 @@ export interface WindowsManagedNetworkSetupDependenciesV1 {
  * script. No local account, credential store, UAC setup, or persistent state
  * is involved.
  */
-export async function resolveWindowsManagedNetworkSetupStatusV1(
-  dependencies: WindowsManagedNetworkSetupDependenciesV1 = {},
-): Promise<WindowsManagedNetworkSetupStatusV1> {
+export async function resolveWindowsManagedNetworkSetupStatus(
+  dependencies: WindowsManagedNetworkSetupDependencies = {},
+): Promise<WindowsManagedNetworkSetupStatus> {
   if ((dependencies.platform ?? process.platform) !== 'win32') {
     return { version: 1, state: 'unsupported', reason: 'windows_only' };
   }
-  const runner = (dependencies.resolveRunner ?? resolveWindowsSandboxRunnerV1)();
+  const runner = (dependencies.resolveRunner ?? resolveWindowsSandboxRunner)();
   if (!runner) {
     return {
       version: 1,
@@ -37,10 +37,10 @@ export async function resolveWindowsManagedNetworkSetupStatusV1(
 }
 
 /** Legacy CLI compatibility: there is no Windows network identity to install. */
-export async function setupWindowsManagedNetworkV1(
-  dependencies: WindowsManagedNetworkSetupDependenciesV1 = {},
-): Promise<WindowsManagedNetworkSetupStatusV1> {
-  const status = await resolveWindowsManagedNetworkSetupStatusV1(dependencies);
+export async function setupWindowsManagedNetwork(
+  dependencies: WindowsManagedNetworkSetupDependencies = {},
+): Promise<WindowsManagedNetworkSetupStatus> {
+  const status = await resolveWindowsManagedNetworkSetupStatus(dependencies);
   if (status.state === 'unsupported') {
     throw new Error('Windows sandbox setup is only available on Windows.');
   }

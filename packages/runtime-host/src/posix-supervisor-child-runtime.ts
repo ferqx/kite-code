@@ -1,20 +1,20 @@
 import { connect } from 'node:net';
-import type { RuntimeControlFrameV1 } from '@kite/runtime-spi';
-import { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from './control-frame';
+import type { RuntimeControlFrame } from '@kite/runtime-spi';
+import { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-frame';
 import {
-  readComparablePosixProcessStartIdentityV1,
-  writePosixSupervisorIdentityV1,
+  readComparablePosixProcessStartIdentity,
+  writePosixSupervisorIdentity,
 } from './posix-supervisor-identity';
-import { verifyInheritedPosixSupervisorLockV1 } from './posix-supervisor-lock';
-import { spawnRuntimeHostProcessV1 } from './process-spawn';
+import { verifyInheritedPosixSupervisorLock } from './posix-supervisor-lock';
+import { spawnRuntimeHostProcess } from './process-spawn';
 
-const POSIX_CONTROL_FRAME_DOMAIN_V1 = 'sandbox-posix-v1';
-const POSIX_HOST_PEER_ID_V1 = 'runtime-host';
-const POSIX_CHILD_PEER_ID_V1 = 'posix-supervisor-child';
-const RUNTIME_CONTROL_FRAME_SCHEMA_V1 = 'kite.runtime-control-frame.v1' as const;
+const POSIX_CONTROL_FRAME_DOMAIN_ = 'sandbox-posix-v1';
+const POSIX_HOST_PEER_ID_ = 'runtime-host';
+const POSIX_CHILD_PEER_ID_ = 'posix-supervisor-child';
+const RUNTIME_CONTROL_FRAME_SCHEMA_ = 'kite.runtime-control-frame.v1' as const;
 
 /** Internal Runtime mode embedded in release executables; never accepts an unvalidated command directly. */
-export function runPosixSupervisorChildV1(args: readonly string[]): void {
+export function runPosixSupervisorChild(args: readonly string[]): void {
   const [
     socketPath = '',
     identityPath = '',
@@ -38,7 +38,7 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
     process.exit(125);
   }
   if (
-    !verifyInheritedPosixSupervisorLockV1(3, controlRoot, {
+    !verifyInheritedPosixSupervisorLock(3, controlRoot, {
       version: 1,
       dispatchId,
       supervisorNonce,
@@ -47,9 +47,9 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
   ) {
     process.exit(125);
   }
-  const processStartIdentity = readComparablePosixProcessStartIdentityV1(process.pid);
+  const processStartIdentity = readComparablePosixProcessStartIdentity(process.pid);
   if (!processStartIdentity) process.exit(125);
-  writePosixSupervisorIdentityV1(identityPath, {
+  writePosixSupervisorIdentity(identityPath, {
     version: 1,
     dispatchId,
     supervisorNonce,
@@ -68,10 +68,10 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
   socket.on('connect', () => {
     socket.write(
       `${JSON.stringify(
-        createRuntimeControlFrameV1({
-          schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-          domain: POSIX_CONTROL_FRAME_DOMAIN_V1,
-          peerId: POSIX_CHILD_PEER_ID_V1,
+        createRuntimeControlFrame({
+          schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
+          domain: POSIX_CONTROL_FRAME_DOMAIN_,
+          peerId: POSIX_CHILD_PEER_ID_,
           invocationId: dispatchId,
           sequence: childSequence++,
           payload: {
@@ -113,10 +113,10 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
     }
     let payload: Record<string, unknown>;
     try {
-      payload = verifyRuntimeControlFrameV1<Record<string, unknown>>({
-        frame: frame as unknown as RuntimeControlFrameV1<Record<string, unknown>>,
-        expectedDomain: POSIX_CONTROL_FRAME_DOMAIN_V1,
-        expectedPeerId: POSIX_HOST_PEER_ID_V1,
+      payload = verifyRuntimeControlFrame<Record<string, unknown>>({
+        frame: frame as unknown as RuntimeControlFrame<Record<string, unknown>>,
+        expectedDomain: POSIX_CONTROL_FRAME_DOMAIN_,
+        expectedPeerId: POSIX_HOST_PEER_ID_,
         expectedInvocationId: dispatchId,
         lastSequence: lastHostSequence,
       });
@@ -152,7 +152,7 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
     }
     commandStarted = true;
     try {
-      const proc = spawnRuntimeHostProcessV1(payload.argv as string[], {
+      const proc = spawnRuntimeHostProcess(payload.argv as string[], {
         cwd: payload.cwd as string,
         stdin: payload.stdin === null ? 'inherit' : 'pipe',
         stdout: 'inherit',
@@ -167,10 +167,10 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
       terminalFrameSent = true;
       socket.write(
         `${JSON.stringify(
-          createRuntimeControlFrameV1({
-            schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-            domain: POSIX_CONTROL_FRAME_DOMAIN_V1,
-            peerId: POSIX_CHILD_PEER_ID_V1,
+          createRuntimeControlFrame({
+            schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
+            domain: POSIX_CONTROL_FRAME_DOMAIN_,
+            peerId: POSIX_CHILD_PEER_ID_,
             invocationId: dispatchId,
             sequence: childSequence++,
             payload: { type: 'exit', dispatchId, supervisorNonce, dispatchIntentDigest, exitCode },
@@ -181,10 +181,10 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
       terminalFrameSent = true;
       socket.write(
         `${JSON.stringify(
-          createRuntimeControlFrameV1({
-            schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
-            domain: POSIX_CONTROL_FRAME_DOMAIN_V1,
-            peerId: POSIX_CHILD_PEER_ID_V1,
+          createRuntimeControlFrame({
+            schema: RUNTIME_CONTROL_FRAME_SCHEMA_,
+            domain: POSIX_CONTROL_FRAME_DOMAIN_,
+            peerId: POSIX_CHILD_PEER_ID_,
             invocationId: dispatchId,
             sequence: childSequence++,
             payload: {

@@ -1,50 +1,47 @@
 import type {
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineDispatchOutcomeV1,
-  ToolPipelineOutcomeDispatchV1,
-  ToolPipelinePreparedIdentityVerificationResultV1,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineDispatchOutcome,
+  ToolPipelineOutcomeDispatch,
+  ToolPipelinePreparedIdentityVerificationResult,
 } from '@kite/runtime-spi';
 
-export const APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_V1 =
+export const APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_ =
   'kite.app.tool-pipeline-attempt-router.v1' as const;
 
-export type AppToolPipelineAttemptRouterFailureCodeV1 =
+export type AppToolPipelineAttemptRouterFailureCode =
   | 'invalid_binding'
   | 'duplicate_binding'
   | 'unbound_prepared'
   | 'unverified_dispatch'
   | 'duplicate_dispatch';
 
-export class AppToolPipelineAttemptRouterErrorV1 extends Error {
-  readonly code: AppToolPipelineAttemptRouterFailureCodeV1;
+export class AppToolPipelineAttemptRouterError extends Error {
+  readonly code: AppToolPipelineAttemptRouterFailureCode;
 
-  constructor(code: AppToolPipelineAttemptRouterFailureCodeV1) {
+  constructor(code: AppToolPipelineAttemptRouterFailureCode) {
     super(`App Tool Pipeline attempt router failed closed: ${code}.`);
-    this.name = 'AppToolPipelineAttemptRouterErrorV1';
+    this.name = 'AppToolPipelineAttemptRouterError';
     this.code = code;
   }
 }
 
-export interface AppToolPipelineAttemptRouterV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+export interface AppToolPipelineAttemptRouter<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
 > {
-  readonly schema: typeof APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_V1;
+  readonly schema: typeof APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_;
   /** The one callback bundle supplied to the effect-scoped Host coordinator. */
-  readonly dispatch: ToolPipelineOutcomeDispatchV1<TArguments, TValue>;
+  readonly dispatch: ToolPipelineOutcomeDispatch<TArguments, TValue>;
   /** Bind one Host-issued prepared authority to its exact turn-local Builtin callback bundle. */
   readonly bind: (
-    prepared: Readonly<PreparedToolInvocationV1<TArguments>>,
-    dispatch: ToolPipelineOutcomeDispatchV1<TArguments, TValue>,
+    prepared: Readonly<PreparedToolInvocation<TArguments>>,
+    dispatch: ToolPipelineOutcomeDispatch<TArguments, TValue>,
   ) => void;
 }
 
-interface BoundDispatchV1<
-  TArguments extends RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1,
-> {
-  readonly dispatch: ToolPipelineOutcomeDispatchV1<TArguments, TValue>;
+interface BoundDispatch<TArguments extends RuntimeJsonValue, TValue extends RuntimeJsonValue> {
+  readonly dispatch: ToolPipelineOutcomeDispatch<TArguments, TValue>;
   verified: boolean;
   dispatched: boolean;
 }
@@ -58,15 +55,15 @@ interface BoundDispatchV1<
  * composition. The binding is single-use and is consumed before the first
  * dispatch await, so no thrown callback can activate a fallback.
  */
-export function createAppToolPipelineAttemptRouterV1<
-  TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-  TValue extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
->(): AppToolPipelineAttemptRouterV1<TArguments, TValue> {
-  const bindings = new WeakMap<object, BoundDispatchV1<TArguments, TValue>>();
+export function createAppToolPipelineAttemptRouter<
+  TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+  TValue extends RuntimeJsonValue = RuntimeJsonValue,
+>(): AppToolPipelineAttemptRouter<TArguments, TValue> {
+  const bindings = new WeakMap<object, BoundDispatch<TArguments, TValue>>();
 
   const bind = (
-    prepared: Readonly<PreparedToolInvocationV1<TArguments>>,
-    dispatch: ToolPipelineOutcomeDispatchV1<TArguments, TValue>,
+    prepared: Readonly<PreparedToolInvocation<TArguments>>,
+    dispatch: ToolPipelineOutcomeDispatch<TArguments, TValue>,
   ): void => {
     if (
       !prepared ||
@@ -78,19 +75,19 @@ export function createAppToolPipelineAttemptRouterV1<
       typeof dispatch.verifyPreparedIdentity !== 'function' ||
       typeof dispatch.dispatch !== 'function'
     ) {
-      throw new AppToolPipelineAttemptRouterErrorV1('invalid_binding');
+      throw new AppToolPipelineAttemptRouterError('invalid_binding');
     }
     if (bindings.has(prepared)) {
-      throw new AppToolPipelineAttemptRouterErrorV1('duplicate_binding');
+      throw new AppToolPipelineAttemptRouterError('duplicate_binding');
     }
     bindings.set(prepared, { dispatch, verified: false, dispatched: false });
   };
 
   const verifyPreparedIdentity = (
-    prepared: Readonly<PreparedToolInvocationV1<TArguments>>,
-  ): boolean | ToolPipelinePreparedIdentityVerificationResultV1 => {
+    prepared: Readonly<PreparedToolInvocation<TArguments>>,
+  ): boolean | ToolPipelinePreparedIdentityVerificationResult => {
     const bound = bindings.get(prepared);
-    if (!bound || bound.dispatched) return invalidIdentityV1();
+    if (!bound || bound.dispatched) return invalidIdentity();
     const verification = bound.dispatch.verifyPreparedIdentity(prepared);
     if (verification === true || (verification !== false && verification.valid === true)) {
       bound.verified = true;
@@ -99,27 +96,27 @@ export function createAppToolPipelineAttemptRouterV1<
   };
 
   const dispatchPrepared = async (
-    prepared: Readonly<PreparedToolInvocationV1<TArguments>>,
-  ): Promise<Readonly<ToolPipelineDispatchOutcomeV1<TValue>>> => {
+    prepared: Readonly<PreparedToolInvocation<TArguments>>,
+  ): Promise<Readonly<ToolPipelineDispatchOutcome<TValue>>> => {
     const bound = bindings.get(prepared);
-    if (!bound) throw new AppToolPipelineAttemptRouterErrorV1('unbound_prepared');
+    if (!bound) throw new AppToolPipelineAttemptRouterError('unbound_prepared');
     if (!bound.verified) {
-      throw new AppToolPipelineAttemptRouterErrorV1('unverified_dispatch');
+      throw new AppToolPipelineAttemptRouterError('unverified_dispatch');
     }
     if (bound.dispatched) {
-      throw new AppToolPipelineAttemptRouterErrorV1('duplicate_dispatch');
+      throw new AppToolPipelineAttemptRouterError('duplicate_dispatch');
     }
     bound.dispatched = true;
     return bound.dispatch.dispatch(prepared);
   };
 
   return Object.freeze({
-    schema: APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_V1,
+    schema: APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_,
     dispatch: Object.freeze({ verifyPreparedIdentity, dispatch: dispatchPrepared }),
     bind,
   });
 }
 
-function invalidIdentityV1(): ToolPipelinePreparedIdentityVerificationResultV1 {
+function invalidIdentity(): ToolPipelinePreparedIdentityVerificationResult {
   return Object.freeze({ valid: false, code: 'identity_mismatch' });
 }

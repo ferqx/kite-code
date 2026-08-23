@@ -1,11 +1,11 @@
 import type { KernelEvent } from '../../events';
 import { sha256Hex } from '../../hash';
-import { isToolOutcomeV1 } from '../../normalization';
+import { isToolOutcome } from '../../normalization';
 import {
-  admitRecoveryAttemptV1,
-  recordRecoveryInvocationV1,
-  type ToolOutcomeV1,
-  toolInvocationFingerprintV1,
+  admitRecoveryAttempt,
+  recordRecoveryInvocation,
+  type ToolOutcome,
+  toolInvocationFingerprint,
 } from '../../recovery';
 import {
   asJsonObject,
@@ -261,7 +261,7 @@ function clearSuspendedSubagent(state: AgentState, toolCallId: string, isTaskCal
   return remaining;
 }
 
-function recoveryProjection(outcome: ToolOutcomeV1) {
+function recoveryProjection(outcome: ToolOutcome) {
   const recovery = outcome.recovery;
   const modelFixable =
     recovery.requiresNewModelResponse &&
@@ -287,7 +287,7 @@ function recoveryProjection(outcome: ToolOutcomeV1) {
 
 function terminalStatus(
   event: KernelEvent,
-  outcome: ToolOutcomeV1 | undefined,
+  outcome: ToolOutcome | undefined,
 ): AgentToolCallState['status'] | undefined {
   if (event.type === 'tool.finished' && outcome) {
     if (outcome.status === 'exhausted') return 'exhausted';
@@ -306,16 +306,16 @@ function terminalStatus(
   }
 }
 
-function canonicalOutcome(payload: Readonly<Record<string, unknown>>): ToolOutcomeV1 | undefined {
-  const outcome = payload.outcomeV1;
-  return isToolOutcomeV1(outcome) ? (outcome as ToolOutcomeV1) : undefined;
+function canonicalOutcome(payload: Readonly<Record<string, unknown>>): ToolOutcome | undefined {
+  const outcome = payload.outcome;
+  return isToolOutcome(outcome) ? (outcome as ToolOutcome) : undefined;
 }
 
 function terminalTranscript(
   state: AgentState,
   event: KernelEvent,
   call: AgentToolCallState,
-  outcome: ToolOutcomeV1 | undefined,
+  outcome: ToolOutcome | undefined,
 ): AgentTranscriptMessage {
   const payload = eventRecord(event);
   if (event.type === 'tool.finished') {
@@ -409,7 +409,7 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
       const args = asJsonValue(payload.args);
       const invocationFingerprint =
         stringField(payload, 'invocationFingerprint') ??
-        toolInvocationFingerprintV1({
+        toolInvocationFingerprint({
           toolName: name,
           parsedArgs: args,
         });
@@ -417,7 +417,7 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
         stringField(payload, 'recoveryMode') === 'automatic_retry'
           ? ('automatic_retry' as const)
           : ('model_correction' as const);
-      const admission = admitRecoveryAttemptV1(state.toolRecovery, {
+      const admission = admitRecoveryAttempt(state.toolRecovery, {
         toolCallId,
         toolName: name,
         invocationFingerprint,
@@ -463,7 +463,7 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
       };
       const toolRecovery =
         admission.admitted && admission.recoveryOf
-          ? recordRecoveryInvocationV1(state.toolRecovery, {
+          ? recordRecoveryInvocation(state.toolRecovery, {
               toolCallId,
               recoveryOf: admission.recoveryOf,
               mode: recoveryMode,
@@ -536,7 +536,7 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
                   : {}),
                 resultMeta: resultMeta(current, resultPayload, resultContent),
               }),
-              ...(outcome ? { outcomeV1: outcome } : {}),
+              ...(outcome ? { outcome: outcome } : {}),
             }
           : {
               ...current,
@@ -550,7 +550,7 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
                   }
                 : {}),
               ...(event.type !== 'tool.cancelled' && failure ? { failure } : {}),
-              ...(outcome ? { outcomeV1: outcome } : {}),
+              ...(outcome ? { outcome: outcome } : {}),
             };
       const clearsMatchingApproval =
         event.type === 'tool.finished' &&

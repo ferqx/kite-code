@@ -1,10 +1,10 @@
 import type {
-  GitShellDenyEvidenceV1,
-  ExecutionBackendCapabilitiesV1 as SpiExecutionBackendCapabilitiesV1,
+  GitShellDenyEvidence,
+  ExecutionBackendCapabilities as SpiExecutionBackendCapabilities,
 } from '@kite/runtime-spi';
 import type { SandboxBackend } from './platform';
 
-export type ExecutionBackendCapabilitiesV1 = SpiExecutionBackendCapabilitiesV1;
+export type ExecutionBackendCapabilities = SpiExecutionBackendCapabilities;
 
 /** Legacy per-shell network switch used by the current development executor. */
 export type ShellNetworkMode = 'disabled' | 'allow_all';
@@ -25,7 +25,7 @@ export type SandboxUnavailablePolicy = 'fail' | 'verified_in_process_read_only';
  * Release-pinned execution boundary. User/project/CLI configuration may only
  * consume a resolved boundary; it cannot manufacture or widen one.
  */
-export interface ExecutionBoundaryV1 {
+export interface ExecutionBoundary {
   filesystemScope: FilesystemScope;
   /** Canonical realpath shared with Workspace Trust identity. */
   workspaceRoot: string;
@@ -41,17 +41,17 @@ export interface ExecutionBoundaryV1 {
   sandboxUnavailable: SandboxUnavailablePolicy;
 }
 
-export type BoundaryEnforcementV1 = 'enforced' | 'unsupported';
+export type BoundaryEnforcement = 'enforced' | 'unsupported';
 
 /**
  * Concrete backend strength. This intentionally cannot be reduced to a
  * sandboxAvailable boolean: every production-relevant dimension is explicit.
  */
-export type ProductionPlatformQualificationV1 = 'supported' | 'read_only_only' | 'excluded';
+export type ProductionPlatformQualification = 'supported' | 'read_only_only' | 'excluded';
 
-export type ProductionExecutionEntrypointV1 = 'tui' | 'foreground_cli';
+export type ProductionExecutionEntrypoint = 'tui' | 'foreground_cli';
 
-export interface InProcessReadOnlyToolContractV1 {
+export interface InProcessReadOnlyToolContract {
   toolId: string;
   descriptorRevision: string;
   filesystem: 'workspace_read';
@@ -61,19 +61,19 @@ export interface InProcessReadOnlyToolContractV1 {
   externalPath: false;
 }
 
-export interface InProcessReadOnlyToolCatalogV1 {
+export interface InProcessReadOnlyToolCatalog {
   version: 1;
   revision: string;
   digest: string;
-  tools: readonly InProcessReadOnlyToolContractV1[];
+  tools: readonly InProcessReadOnlyToolContract[];
 }
 
 /** Release-gate output pinned to native evidence and one exact environment. */
-export interface ProductionExecutionQualificationV1 {
+export interface ProductionExecutionQualification {
   version: 1;
   qualificationId: string;
   decisionId: 'D-04';
-  outcome: Exclude<ProductionPlatformQualificationV1, 'excluded'>;
+  outcome: Exclude<ProductionPlatformQualification, 'excluded'>;
   platform: 'darwin' | 'linux' | 'win32';
   osRelease: string;
   osVersion: string;
@@ -81,10 +81,10 @@ export interface ProductionExecutionQualificationV1 {
   bunVersion: string;
   backend: SandboxBackend;
   selectedNetworkMode: ExecutionNetworkMode;
-  entrypoints: readonly ProductionExecutionEntrypointV1[];
+  entrypoints: readonly ProductionExecutionEntrypoint[];
   evidenceDigest: string;
   evidenceCommit: string;
-  backendCapabilities: ExecutionBackendCapabilitiesV1;
+  backendCapabilities: ExecutionBackendCapabilities;
   /** Exact process-backed capabilities admitted by this native evidence. */
   processCapabilitySurface: {
     shell: boolean;
@@ -92,15 +92,15 @@ export interface ProductionExecutionQualificationV1 {
     localStdioMcp: boolean;
     /** Optional brokered-Git qualification; absence means both Git axes are excluded. */
     brokeredGit?: {
-      featureRevision: typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_V1;
+      featureRevision: typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
       inspect: boolean;
-      shellDenyEvidence: GitShellDenyEvidenceV1;
+      shellDenyEvidence: GitShellDenyEvidence;
     };
   };
-  inProcessReadOnlyTools: InProcessReadOnlyToolCatalogV1;
+  inProcessReadOnlyTools: InProcessReadOnlyToolCatalog;
 }
 
-export interface ProductionExecutionQualificationRegistryV1 {
+export interface ProductionExecutionQualificationRegistry {
   version: 1;
   decisionId: 'D-04';
   revision: string;
@@ -108,12 +108,12 @@ export interface ProductionExecutionQualificationRegistryV1 {
   selectedNetworkMode: ExecutionNetworkMode;
   evidenceCommit: string;
   digest: string;
-  qualifications: readonly ProductionExecutionQualificationV1[];
+  qualifications: readonly ProductionExecutionQualification[];
 }
 
-export interface ExecutionCapabilitySurfaceV1 {
+export interface ExecutionCapabilitySurface {
   /** Full catalog identity/effect contract; tool IDs alone are not sufficient evidence. */
-  inProcessReadOnlyTools: InProcessReadOnlyToolCatalogV1 | null;
+  inProcessReadOnlyTools: InProcessReadOnlyToolCatalog | null;
   network: boolean;
   process: boolean;
   write: boolean;
@@ -125,11 +125,11 @@ export interface ExecutionCapabilitySurfaceV1 {
   gitInspect: boolean;
   /** Disclosure, dispatch and native shell metadata deny must match this exact revision. */
   brokeredGitFeatureRevision:
-    | typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_V1
+    | typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_
     | null;
 }
 
-export type ExecutionBoundaryAdmissionReasonV1 =
+export type ExecutionBoundaryAdmissionReason =
   | 'admitted'
   | 'verified_in_process_read_only'
   | 'feature_disabled'
@@ -151,19 +151,19 @@ export type ExecutionBoundaryAdmissionReasonV1 =
   | 'backend_child_inheritance_unsupported'
   | 'read_only_fallback_unverified';
 
-export interface ExecutionBoundaryAdmissionV1 {
+export interface ExecutionBoundaryAdmission {
   allowed: boolean;
   admissionKind: 'denied' | 'technical_evaluation' | 'release_approved';
-  reason: ExecutionBoundaryAdmissionReasonV1;
-  boundary?: ExecutionBoundaryV1;
+  reason: ExecutionBoundaryAdmissionReason;
+  boundary?: ExecutionBoundary;
   workspaceKey?: string;
-  surface: ExecutionCapabilitySurfaceV1;
+  surface: ExecutionCapabilitySurface;
   qualificationProof?: {
     registryRevision: string;
     registryDigest: string;
     qualificationId: string;
     evidenceDigest: string;
-    brokeredGitShellDenyEvidence?: GitShellDenyEvidenceV1;
+    brokeredGitShellDenyEvidence?: GitShellDenyEvidence;
   };
 }
 

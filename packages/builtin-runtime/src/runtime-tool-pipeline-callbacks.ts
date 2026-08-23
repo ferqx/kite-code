@@ -1,23 +1,23 @@
 import type {
-  ClassifiedInvocationV1,
-  PreparedToolInvocationV1,
-  ResolvedInvocationV1,
-  ToolCallSnapshotV1,
-  ToolClassificationResultV1,
-  ToolPipelineClassifiedIdentityVerificationResultV1,
-  ToolPipelineResolutionContextV1,
-  ToolResolutionResultV1,
-  ToolValidationResultV1,
-  ValidatedInvocationV1,
+  ClassifiedInvocation,
+  PreparedToolInvocation,
+  ResolvedInvocation,
+  ToolCallSnapshot,
+  ToolClassificationResult,
+  ToolPipelineClassifiedIdentityVerificationResult,
+  ToolPipelineResolutionContext,
+  ToolResolutionResult,
+  ToolValidationResult,
+  ValidatedInvocation,
 } from '@kite/runtime-spi';
 import {
-  type BuiltinDynamicMcpToolPipelineCallbacksV1,
-  createBuiltinDynamicMcpToolPipelineCallbacksV1,
+  type BuiltinDynamicMcpToolPipelineCallbacks,
+  createBuiltinDynamicMcpToolPipelineCallbacks,
 } from './mcp/tool-pipeline-callbacks';
-import type { BuiltinToolCatalogProjectionV1 } from './tool-catalog';
+import type { BuiltinToolCatalogProjection } from './tool-catalog';
 import {
-  type BuiltinToolPipelineCallbacksV1,
-  createBuiltinToolPipelineCallbacksV1,
+  type BuiltinToolPipelineCallbacks,
+  createBuiltinToolPipelineCallbacks,
 } from './tool-pipeline-callbacks';
 
 /**
@@ -27,9 +27,9 @@ import {
  * separate owners.  This bundle is only a discriminated router over those
  * owners; it creates no registry, snapshot, port, parser, or fallback path.
  */
-export type BuiltinRuntimeToolPipelineCallbacksV1 = BuiltinToolPipelineCallbacksV1;
+export type BuiltinRuntimeToolPipelineCallbacks = BuiltinToolPipelineCallbacks;
 
-type PipelineBranchV1 = 'ordinary' | 'dynamic' | 'invalid';
+type PipelineBranch = 'ordinary' | 'dynamic' | 'invalid';
 
 /**
  * Compose ordinary and dynamic callbacks from the exact same frozen
@@ -37,48 +37,48 @@ type PipelineBranchV1 = 'ordinary' | 'dynamic' | 'invalid';
  * binding identity for resolve, target identity for validate/classify, and
  * prepared identity for verification.
  */
-export function createBuiltinRuntimeToolPipelineCallbacksV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-): BuiltinRuntimeToolPipelineCallbacksV1 {
-  const ordinary: BuiltinToolPipelineCallbacksV1 = createBuiltinToolPipelineCallbacksV1(projection);
-  const dynamic: BuiltinDynamicMcpToolPipelineCallbacksV1 =
-    createBuiltinDynamicMcpToolPipelineCallbacksV1(projection);
+export function createBuiltinRuntimeToolPipelineCallbacks(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+): BuiltinRuntimeToolPipelineCallbacks {
+  const ordinary: BuiltinToolPipelineCallbacks = createBuiltinToolPipelineCallbacks(projection);
+  const dynamic: BuiltinDynamicMcpToolPipelineCallbacks =
+    createBuiltinDynamicMcpToolPipelineCallbacks(projection);
 
   const resolve = (
-    call: Readonly<ToolCallSnapshotV1>,
-    context: Readonly<ToolPipelineResolutionContextV1>,
-  ): ToolResolutionResultV1 => {
-    const branch = resolveBranchV1(call);
+    call: Readonly<ToolCallSnapshot>,
+    context: Readonly<ToolPipelineResolutionContext>,
+  ): ToolResolutionResult => {
+    const branch = resolveBranch(call);
     if (branch === 'ordinary') return ordinary.resolve(call, context);
     if (branch === 'dynamic') return dynamic.resolve(call, context);
-    return resolveRoutingFailureV1(call);
+    return resolveRoutingFailure(call);
   };
 
-  const validate = (resolved: Readonly<ResolvedInvocationV1>): ToolValidationResultV1 => {
-    const branch = targetBranchV1(resolved?.target);
+  const validate = (resolved: Readonly<ResolvedInvocation>): ToolValidationResult => {
+    const branch = targetBranch(resolved?.target);
     if (branch === 'ordinary') return ordinary.validate(resolved);
     if (branch === 'dynamic') return dynamic.validate(resolved);
-    return validationRoutingFailureV1(resolved);
+    return validationRoutingFailure(resolved);
   };
 
-  const classify = (validated: Readonly<ValidatedInvocationV1>): ToolClassificationResultV1 => {
-    const branch = targetBranchV1(validated?.resolved?.target);
+  const classify = (validated: Readonly<ValidatedInvocation>): ToolClassificationResult => {
+    const branch = targetBranch(validated?.resolved?.target);
     if (branch === 'ordinary') return ordinary.classify(validated);
     if (branch === 'dynamic') return dynamic.classify(validated);
-    return classificationRoutingFailureV1(validated);
+    return classificationRoutingFailure(validated);
   };
 
-  const verifyPreparedIdentity = (prepared: Readonly<PreparedToolInvocationV1>) => {
-    const branch = preparedIdentityBranchV1(prepared);
+  const verifyPreparedIdentity = (prepared: Readonly<PreparedToolInvocation>) => {
+    const branch = preparedIdentityBranch(prepared);
     if (branch === 'ordinary') return ordinary.verifyPreparedIdentity(prepared);
     if (branch === 'dynamic') return dynamic.verifyPreparedIdentity(prepared);
     return Object.freeze({ valid: false, code: 'identity_mismatch' as const });
   };
 
   const verifyClassifiedIdentity = (
-    classified: Readonly<ClassifiedInvocationV1>,
-  ): ToolPipelineClassifiedIdentityVerificationResultV1 | boolean => {
-    const branch = classifiedIdentityBranchV1(classified);
+    classified: Readonly<ClassifiedInvocation>,
+  ): ToolPipelineClassifiedIdentityVerificationResult | boolean => {
+    const branch = classifiedIdentityBranch(classified);
     if (branch === 'ordinary') return ordinary.verifyClassifiedIdentity(classified);
     if (branch === 'dynamic') return dynamic.verifyClassifiedIdentity(classified);
     return Object.freeze({ valid: false, code: 'governance_missing' as const });
@@ -93,7 +93,7 @@ export function createBuiltinRuntimeToolPipelineCallbacksV1(
   });
 }
 
-function resolveBranchV1(call: Readonly<ToolCallSnapshotV1> | null | undefined): PipelineBranchV1 {
+function resolveBranch(call: Readonly<ToolCallSnapshot> | null | undefined): PipelineBranch {
   if (!call || typeof call !== 'object') return 'invalid';
   const bindingIdentity = [call.bindingId, call.capabilityId, call.capabilityRevision] as const;
   if (bindingIdentity.every((value) => value === null)) return 'ordinary';
@@ -101,7 +101,7 @@ function resolveBranchV1(call: Readonly<ToolCallSnapshotV1> | null | undefined):
   return 'invalid';
 }
 
-function targetBranchV1(target: unknown): PipelineBranchV1 {
+function targetBranch(target: unknown): PipelineBranch {
   if (!target || typeof target !== 'object') return 'invalid';
   const discriminant = (target as { readonly isDynamicMcp?: unknown }).isDynamicMcp;
   if (discriminant === false) return 'ordinary';
@@ -109,9 +109,9 @@ function targetBranchV1(target: unknown): PipelineBranchV1 {
   return 'invalid';
 }
 
-function preparedIdentityBranchV1(
-  prepared: Readonly<PreparedToolInvocationV1> | null | undefined,
-): PipelineBranchV1 {
+function preparedIdentityBranch(
+  prepared: Readonly<PreparedToolInvocation> | null | undefined,
+): PipelineBranch {
   if (!prepared || typeof prepared !== 'object' || !prepared.identity) return 'invalid';
   const discriminant = (prepared.identity as { readonly isDynamicMcp?: unknown }).isDynamicMcp;
   if (discriminant === false) return 'ordinary';
@@ -119,9 +119,9 @@ function preparedIdentityBranchV1(
   return 'invalid';
 }
 
-function classifiedIdentityBranchV1(
-  classified: Readonly<ClassifiedInvocationV1> | null | undefined,
-): PipelineBranchV1 {
+function classifiedIdentityBranch(
+  classified: Readonly<ClassifiedInvocation> | null | undefined,
+): PipelineBranch {
   if (!classified || typeof classified !== 'object' || !classified.governance) return 'invalid';
   const discriminant = classified.governance.invocation?.isDynamicMcp;
   if (discriminant === false) return 'ordinary';
@@ -129,9 +129,9 @@ function classifiedIdentityBranchV1(
   return 'invalid';
 }
 
-function resolveRoutingFailureV1(
-  call: Readonly<ToolCallSnapshotV1> | null | undefined,
-): ToolResolutionResultV1 {
+function resolveRoutingFailure(
+  call: Readonly<ToolCallSnapshot> | null | undefined,
+): ToolResolutionResult {
   return Object.freeze({
     ok: false as const,
     failure: Object.freeze({
@@ -143,9 +143,9 @@ function resolveRoutingFailureV1(
   });
 }
 
-function validationRoutingFailureV1(
-  resolved: Readonly<ResolvedInvocationV1> | null | undefined,
-): ToolValidationResultV1 {
+function validationRoutingFailure(
+  resolved: Readonly<ResolvedInvocation> | null | undefined,
+): ToolValidationResult {
   return Object.freeze({
     ok: false as const,
     failure: Object.freeze({
@@ -157,9 +157,9 @@ function validationRoutingFailureV1(
   });
 }
 
-function classificationRoutingFailureV1(
-  validated: Readonly<ValidatedInvocationV1> | null | undefined,
-): ToolClassificationResultV1 {
+function classificationRoutingFailure(
+  validated: Readonly<ValidatedInvocation> | null | undefined,
+): ToolClassificationResult {
   return Object.freeze({
     ok: false as const,
     failure: Object.freeze({

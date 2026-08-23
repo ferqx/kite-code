@@ -1,37 +1,37 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createRuntimeHostToolPipelineAttemptCoordinatorV1,
-  type RuntimeHostToolInvocationOutcomeAuthorityV1,
-  RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
-  type RuntimeHostToolPipelineAttemptCoordinatorV1,
+  createRuntimeHostToolPipelineAttemptCoordinator,
+  type RuntimeHostToolInvocationOutcomeAuthority,
+  type RuntimeHostToolPipelineAttemptCoordinator,
+  RuntimeHostToolPipelineAttemptCoordinatorError,
 } from '@kite/runtime-host';
 import type {
-  CapabilityToolTerminalResultV1,
-  NonDynamicOperationIdV1,
-  PreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineDispatchOutcomeV1,
-  ToolPipelineDispatchV1,
-  ToolPipelineOutcomeDispatchV1,
-  ToolPipelinePersistenceV1,
-  ToolPipelineRetryableCommitV1,
-  ToolPipelineSkillForkSuspensionV1,
-  ToolPipelineSuspendedExecutionResultV1,
-  ToolPipelineSuspensionV1,
-  ToolPipelineTaskSubagentSuspensionV1,
+  CapabilityToolTerminalResult,
+  NonDynamicOperationId,
+  PreparedToolInvocation,
+  PreparedToolInvocationIdentity,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineDispatch,
+  ToolPipelineDispatchOutcome,
+  ToolPipelineOutcomeDispatch,
+  ToolPipelinePersistence,
+  ToolPipelineRetryableCommit,
+  ToolPipelineSkillForkSuspension,
+  ToolPipelineSuspendedExecutionResult,
+  ToolPipelineSuspension,
+  ToolPipelineTaskSubagentSuspension,
 } from '@kite/runtime-spi';
 
-const operationId = 'builtin:fixture' as NonDynamicOperationIdV1;
+const operationId = 'builtin:fixture' as NonDynamicOperationId;
 
-function isRuntimeJsonObjectV1(
-  value: RuntimeJsonValueV1,
-): value is Readonly<Record<string, RuntimeJsonValueV1>> {
+function isRuntimeJsonObject(
+  value: RuntimeJsonValue,
+): value is Readonly<Record<string, RuntimeJsonValue>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function identity(): PreparedToolInvocationIdentityV1 {
+function identity(): PreparedToolInvocationIdentity {
   return {
     invocationId: 'invocation-1',
     attemptId: 'attempt-1',
@@ -70,21 +70,21 @@ function identity(): PreparedToolInvocationIdentityV1 {
   };
 }
 
-function skillIdentity(): PreparedToolInvocationIdentityV1 {
+function skillIdentity(): PreparedToolInvocationIdentity {
   return {
     ...identity(),
-    operationId: 'builtin:activate_skill' as NonDynamicOperationIdV1,
-  } as PreparedToolInvocationIdentityV1;
+    operationId: 'builtin:activate_skill' as NonDynamicOperationId,
+  } as PreparedToolInvocationIdentity;
 }
 
-function taskIdentity(): PreparedToolInvocationIdentityV1 {
+function taskIdentity(): PreparedToolInvocationIdentity {
   return {
     ...identity(),
-    operationId: 'builtin:task' as NonDynamicOperationIdV1,
-  } as PreparedToolInvocationIdentityV1;
+    operationId: 'builtin:task' as NonDynamicOperationId,
+  } as PreparedToolInvocationIdentity;
 }
 
-function dynamicIdentity(): PreparedToolInvocationIdentityV1 {
+function dynamicIdentity(): PreparedToolInvocationIdentity {
   return {
     invocationId: 'invocation-1',
     attemptId: 'attempt-1',
@@ -138,12 +138,12 @@ function dynamicIdentity(): PreparedToolInvocationIdentityV1 {
 }
 
 function result(
-  overrides: Partial<CapabilityToolTerminalResultV1> = {},
-): CapabilityToolTerminalResultV1 {
+  overrides: Partial<CapabilityToolTerminalResult> = {},
+): CapabilityToolTerminalResult {
   return { status: 'success', content: [{ ok: true }], ...overrides };
 }
 
-function planReviewSuspension(toolCallId = 'call-1'): ToolPipelineSuspensionV1 {
+function planReviewSuspension(toolCallId = 'call-1'): ToolPipelineSuspension {
   return {
     schema: 'kite.tool-pipeline-stage.v1',
     kind: 'plan_review',
@@ -163,7 +163,7 @@ function planReviewSuspension(toolCallId = 'call-1'): ToolPipelineSuspensionV1 {
   };
 }
 
-function suspendedResult(): ToolPipelineSuspendedExecutionResultV1 {
+function suspendedResult(): ToolPipelineSuspendedExecutionResult {
   return {
     status: 'success',
     content: [{ type: 'text', text: 'plan review requested' }],
@@ -173,7 +173,7 @@ function suspendedResult(): ToolPipelineSuspendedExecutionResultV1 {
 
 function suspendedOutcome(
   toolCallId = 'call-1',
-): Extract<ToolPipelineDispatchOutcomeV1, { readonly kind: 'suspended' }> {
+): Extract<ToolPipelineDispatchOutcome, { readonly kind: 'suspended' }> {
   return {
     kind: 'suspended',
     suspension: planReviewSuspension(toolCallId),
@@ -183,7 +183,7 @@ function suspendedOutcome(
 
 function skillForkSuspension(
   eventKind: 'approval' | 'auto_review' = 'approval',
-): ToolPipelineSkillForkSuspensionV1 {
+): ToolPipelineSkillForkSuspension {
   const approval = {
     scope: 'once',
     callId: 'child-call-1',
@@ -268,12 +268,12 @@ function skillForkSuspension(
       commandDigest: 'command-digest-1',
     },
     event,
-  } as ToolPipelineSkillForkSuspensionV1;
+  } as ToolPipelineSkillForkSuspension;
 }
 
 function skillForkOutcome(
-  suspension: ToolPipelineSkillForkSuspensionV1 = skillForkSuspension(),
-): Extract<ToolPipelineDispatchOutcomeV1, { readonly kind: 'suspended' }> {
+  suspension: ToolPipelineSkillForkSuspension = skillForkSuspension(),
+): Extract<ToolPipelineDispatchOutcome, { readonly kind: 'suspended' }> {
   return {
     kind: 'suspended',
     suspension,
@@ -284,7 +284,7 @@ function skillForkOutcome(
 function taskSubagentSuspension(
   executionMode: 'start' | 'resume' = 'start',
   eventKind: 'approval' | 'auto_review' = 'approval',
-): ToolPipelineTaskSubagentSuspensionV1 {
+): ToolPipelineTaskSubagentSuspension {
   const approval = {
     scope: 'once',
     callId: 'runtime-task-child-call-1',
@@ -363,12 +363,12 @@ function taskSubagentSuspension(
       commandDigest: null,
     },
     event,
-  } as ToolPipelineTaskSubagentSuspensionV1;
+  } as ToolPipelineTaskSubagentSuspension;
 }
 
 function taskSubagentOutcome(
-  suspension: ToolPipelineTaskSubagentSuspensionV1 = taskSubagentSuspension(),
-): Extract<ToolPipelineDispatchOutcomeV1, { readonly kind: 'suspended' }> {
+  suspension: ToolPipelineTaskSubagentSuspension = taskSubagentSuspension(),
+): Extract<ToolPipelineDispatchOutcome, { readonly kind: 'suspended' }> {
   return {
     kind: 'suspended',
     suspension,
@@ -377,8 +377,8 @@ function taskSubagentOutcome(
 }
 
 function retryableOutcome(
-  overrides: Partial<CapabilityToolTerminalResultV1> = {},
-): Extract<ToolPipelineDispatchOutcomeV1, { readonly kind: 'retryable' }> {
+  overrides: Partial<CapabilityToolTerminalResult> = {},
+): Extract<ToolPipelineDispatchOutcome, { readonly kind: 'retryable' }> {
   return {
     kind: 'retryable',
     replaySafety: 'safe_read',
@@ -400,9 +400,9 @@ function retryableOutcome(
 }
 
 function acknowledgement(
-  prepared: Readonly<PreparedToolInvocationV1>,
+  prepared: Readonly<PreparedToolInvocation>,
   overrides: Record<string, unknown> = {},
-): ToolPipelineAttemptAcknowledgementV1 {
+): ToolPipelineAttemptAcknowledgement {
   const identity = prepared.identity;
   return {
     acknowledged: true,
@@ -452,8 +452,8 @@ function acknowledgement(
 
 function fixture(
   options: {
-    readonly identity?: PreparedToolInvocationIdentityV1;
-    readonly arguments?: RuntimeJsonValueV1;
+    readonly identity?: PreparedToolInvocationIdentity;
+    readonly arguments?: RuntimeJsonValue;
     readonly binding?: Readonly<{
       bindingId: string;
       capabilityId: string;
@@ -462,15 +462,15 @@ function fixture(
       schemaDigest: string;
       issuedForTurnId: string;
     }>;
-    readonly verify?: ToolPipelineDispatchV1['verifyPreparedIdentity'];
+    readonly verify?: ToolPipelineDispatch['verifyPreparedIdentity'];
     readonly recordAttempt?: (
-      input: Readonly<PreparedToolInvocationV1>,
+      input: Readonly<PreparedToolInvocation>,
     ) => Promise<unknown> | unknown;
     readonly recordUnknown?: (input: unknown) => Promise<void> | void;
     readonly commitTerminal?: (input: unknown) => Promise<void> | void;
     readonly commitSuspension?: (input: unknown) => Promise<void> | void;
     readonly commitRetryable?: (input: unknown) => Promise<void> | void;
-    readonly dispatch?: (input: Readonly<PreparedToolInvocationV1>) => Promise<unknown> | unknown;
+    readonly dispatch?: (input: Readonly<PreparedToolInvocation>) => Promise<unknown> | unknown;
   } = {},
 ) {
   let persistenceCalls = 0;
@@ -480,7 +480,7 @@ function fixture(
   let suspensionCommitCalls = 0;
   let retryableCommitCalls = 0;
   const unknownInputs: unknown[] = [];
-  const recordedInputs: Readonly<PreparedToolInvocationV1>[] = [];
+  const recordedInputs: Readonly<PreparedToolInvocation>[] = [];
   const suspensionInputs: unknown[] = [];
   const retryableInputs: unknown[] = [];
   const selectedIdentity = options.identity ?? identity();
@@ -513,12 +513,12 @@ function fixture(
           }),
   } as const;
 
-  const persistence: ToolPipelinePersistenceV1 = {
+  const persistence: ToolPipelinePersistence = {
     recordAttempt: async (received) => {
       persistenceCalls += 1;
       recordedInputs.push(received);
       if (options.recordAttempt) {
-        return (await options.recordAttempt(received)) as ToolPipelineAttemptAcknowledgementV1;
+        return (await options.recordAttempt(received)) as ToolPipelineAttemptAcknowledgement;
       }
       return acknowledgement(received);
     },
@@ -538,7 +538,7 @@ function fixture(
     },
     ...(options.commitRetryable
       ? {
-          commitRetryable: async (input: Readonly<ToolPipelineRetryableCommitV1>) => {
+          commitRetryable: async (input: Readonly<ToolPipelineRetryableCommit>) => {
             retryableCommitCalls += 1;
             retryableInputs.push(input);
             await options.commitRetryable?.(input);
@@ -546,7 +546,7 @@ function fixture(
         }
       : {}),
   };
-  const dispatch: ToolPipelineOutcomeDispatchV1 = {
+  const dispatch: ToolPipelineOutcomeDispatch = {
     verifyPreparedIdentity: options.verify ?? (() => true),
     dispatch: async (prepared) => {
       dispatchCalls += 1;
@@ -559,15 +559,15 @@ function fixture(
           dispatched.kind === 'suspended' ||
           dispatched.kind === 'retryable')
       ) {
-        return dispatched as ToolPipelineDispatchOutcomeV1;
+        return dispatched as ToolPipelineDispatchOutcome;
       }
       return {
         kind: 'committed',
-        terminal: (dispatched ?? result()) as CapabilityToolTerminalResultV1,
+        terminal: (dispatched ?? result()) as CapabilityToolTerminalResult,
       };
     },
   };
-  const coordinator = createRuntimeHostToolPipelineAttemptCoordinatorV1({
+  const coordinator = createRuntimeHostToolPipelineAttemptCoordinator({
     persistence,
     dispatch,
   });
@@ -607,7 +607,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
     expect(Object.isFrozen(harness.prepared.identity)).toBe(true);
     expect(Object.isFrozen(harness.prepared.input)).toBe(true);
     const argumentsValue = harness.prepared.input.arguments;
-    if (!isRuntimeJsonObjectV1(argumentsValue)) {
+    if (!isRuntimeJsonObject(argumentsValue)) {
       throw new Error('fixture arguments unexpectedly non-object');
     }
     expect(Object.isFrozen(argumentsValue)).toBe(true);
@@ -663,7 +663,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
       const error = await harness.coordinator
         .execute(harness.prepared)
         .catch((caught: unknown) => caught);
-      expect(error).toBeInstanceOf(RuntimeHostToolPipelineAttemptCoordinatorErrorV1);
+      expect(error).toBeInstanceOf(RuntimeHostToolPipelineAttemptCoordinatorError);
       expect((error as Error).message).not.toContain('secret');
       expect(harness.persistenceCalls).toBe(0);
       expect(harness.dispatchCalls).toBe(0);
@@ -682,9 +682,9 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
     expect(harness.recordedInputs[0]).toBe(harness.prepared);
 
     const suspendedHarness = fixture({ dispatch: async () => suspendedOutcome() });
-    const suspendedCoordinator: RuntimeHostToolPipelineAttemptCoordinatorV1 =
+    const suspendedCoordinator: RuntimeHostToolPipelineAttemptCoordinator =
       suspendedHarness.coordinator;
-    const suspended: Readonly<RuntimeHostToolInvocationOutcomeAuthorityV1> =
+    const suspended: Readonly<RuntimeHostToolInvocationOutcomeAuthority> =
       await suspendedCoordinator.execute(suspendedHarness.prepared);
     suspendedCoordinator.assertSuspended(suspended);
     if (suspended.kind !== 'suspended')
@@ -819,7 +819,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
 
     for (const forged of [structuredClone(retryable), { ...retryable }]) {
       expect(() => harness.coordinator.assertRetryable(forged)).toThrow(
-        RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+        RuntimeHostToolPipelineAttemptCoordinatorError,
       );
     }
     const other = fixture({
@@ -827,7 +827,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
       commitRetryable: async () => {},
     });
     expect(() => other.coordinator.assertRetryable(retryable)).toThrow(
-      RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+      RuntimeHostToolPipelineAttemptCoordinatorError,
     );
   });
 
@@ -861,7 +861,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
 
       for (const forged of [structuredClone(suspended), { ...suspended }]) {
         expect(() => harness.coordinator.assertSuspended(forged)).toThrow(
-          RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+          RuntimeHostToolPipelineAttemptCoordinatorError,
         );
       }
     }
@@ -926,7 +926,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
     for (const suspension of malformed) {
       const harness = fixture({
         identity: skillIdentity(),
-        dispatch: async () => skillForkOutcome(suspension as ToolPipelineSkillForkSuspensionV1),
+        dispatch: async () => skillForkOutcome(suspension as ToolPipelineSkillForkSuspension),
       });
       await expect(harness.coordinator.execute(harness.prepared)).rejects.toMatchObject({
         code: 'unknown_outcome',
@@ -987,7 +987,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
 
         for (const forged of [structuredClone(suspended), { ...suspended }]) {
           expect(() => harness.coordinator.assertSuspended(forged)).toThrow(
-            RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+            RuntimeHostToolPipelineAttemptCoordinatorError,
           );
         }
       }
@@ -1085,8 +1085,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
     for (const suspension of malformed) {
       const harness = fixture({
         identity: taskIdentity(),
-        dispatch: async () =>
-          taskSubagentOutcome(suspension as ToolPipelineTaskSubagentSuspensionV1),
+        dispatch: async () => taskSubagentOutcome(suspension as ToolPipelineTaskSubagentSuspension),
       });
       await expect(harness.coordinator.execute(harness.prepared)).rejects.toMatchObject({
         code: 'unknown_outcome',
@@ -1125,32 +1124,32 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
 
     for (const forged of [structuredClone(committed), { ...committed }]) {
       expect(() => harness.coordinator.assertCommitted(forged)).toThrow(
-        RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+        RuntimeHostToolPipelineAttemptCoordinatorError,
       );
     }
     const other = fixture();
     expect(() => other.coordinator.assertCommitted(committed)).toThrow(
-      RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+      RuntimeHostToolPipelineAttemptCoordinatorError,
     );
 
     const suspendedHarness = fixture({ dispatch: async () => suspendedOutcome() });
-    const suspendedCoordinator: RuntimeHostToolPipelineAttemptCoordinatorV1 =
+    const suspendedCoordinator: RuntimeHostToolPipelineAttemptCoordinator =
       suspendedHarness.coordinator;
-    const suspended: Readonly<RuntimeHostToolInvocationOutcomeAuthorityV1> =
+    const suspended: Readonly<RuntimeHostToolInvocationOutcomeAuthority> =
       await suspendedCoordinator.execute(suspendedHarness.prepared);
     suspendedCoordinator.assertSuspended(suspended);
     if (suspended.kind !== 'suspended')
       throw new Error('fixture suspension unexpectedly committed');
     for (const forged of [structuredClone(suspended), { ...suspended }]) {
       expect(() => suspendedHarness.coordinator.assertSuspended(forged)).toThrow(
-        RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+        RuntimeHostToolPipelineAttemptCoordinatorError,
       );
     }
     expect(() => suspendedHarness.coordinator.assertCommitted(suspended)).toThrow(
-      RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+      RuntimeHostToolPipelineAttemptCoordinatorError,
     );
     expect(() => other.coordinator.assertSuspended(suspended)).toThrow(
-      RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+      RuntimeHostToolPipelineAttemptCoordinatorError,
     );
   });
 
@@ -1195,13 +1194,13 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
   });
 
   test('rejects empty and oversized identity fields before persistence or dispatch', async () => {
-    const invalidIdentities: readonly PreparedToolInvocationIdentityV1[] = [
+    const invalidIdentities: readonly PreparedToolInvocationIdentity[] = [
       { ...identity(), providerId: '' },
       { ...identity(), invocationId: 'x'.repeat(257) },
       { ...identity(), argumentsDigest: '' },
       { ...identity(), turnId: '' },
       { ...identity(), modelMessageId: 'm'.repeat(257) },
-      { ...identity(), argumentOrigin: 'forged' } as unknown as PreparedToolInvocationIdentityV1,
+      { ...identity(), argumentOrigin: 'forged' } as unknown as PreparedToolInvocationIdentity,
     ];
     for (const invalidIdentity of invalidIdentities) {
       const harness = fixture({ identity: invalidIdentity });
@@ -1243,7 +1242,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
       },
     });
     expect(() => fixture({ arguments: accessor })).toThrow(
-      RuntimeHostToolPipelineAttemptCoordinatorErrorV1,
+      RuntimeHostToolPipelineAttemptCoordinatorError,
     );
     expect(accessorCalls).toBe(0);
   });
@@ -1299,7 +1298,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
   });
 
   test('rejects false, thrown, malformed, and identity-drifted acknowledgements before dispatch', async () => {
-    const cases: readonly ((input: Readonly<PreparedToolInvocationV1>) => unknown)[] = [
+    const cases: readonly ((input: Readonly<PreparedToolInvocation>) => unknown)[] = [
       () => false,
       () => {
         throw new Error('private persistence diagnostic');
@@ -1316,8 +1315,8 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
       const error = await harness.coordinator
         .execute(harness.prepared)
         .catch((caught: unknown) => caught);
-      expect(error).toBeInstanceOf(RuntimeHostToolPipelineAttemptCoordinatorErrorV1);
-      expect((error as RuntimeHostToolPipelineAttemptCoordinatorErrorV1).code).toMatch(
+      expect(error).toBeInstanceOf(RuntimeHostToolPipelineAttemptCoordinatorError);
+      expect((error as RuntimeHostToolPipelineAttemptCoordinatorError).code).toMatch(
         /persistence_unavailable|acknowledgement_failed/,
       );
       expect(harness.persistenceCalls).toBe(1);
@@ -1403,8 +1402,8 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
       const error = await harness.coordinator
         .execute(harness.prepared)
         .catch((caught: unknown) => caught);
-      expect(error).toBeInstanceOf(RuntimeHostToolPipelineAttemptCoordinatorErrorV1);
-      expect((error as RuntimeHostToolPipelineAttemptCoordinatorErrorV1).code).toBe(
+      expect(error).toBeInstanceOf(RuntimeHostToolPipelineAttemptCoordinatorError);
+      expect((error as RuntimeHostToolPipelineAttemptCoordinatorError).code).toBe(
         'unknown_persistence_failed',
       );
       expect(harness.persistenceCalls).toBe(1);
@@ -1507,10 +1506,8 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
     const error = await harness.coordinator
       .execute(harness.prepared)
       .catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(RuntimeHostToolPipelineAttemptCoordinatorErrorV1);
-    expect((error as RuntimeHostToolPipelineAttemptCoordinatorErrorV1).code).toBe(
-      'unknown_outcome',
-    );
+    expect(error).toBeInstanceOf(RuntimeHostToolPipelineAttemptCoordinatorError);
+    expect((error as RuntimeHostToolPipelineAttemptCoordinatorError).code).toBe('unknown_outcome');
     expect(harness.persistenceCalls).toBe(1);
     expect(harness.dispatchCalls).toBe(1);
     expect(harness.commitCalls).toBe(1);

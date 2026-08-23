@@ -1,7 +1,7 @@
-import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
+import type { CapabilityTurnContext } from '@kite/runtime-spi';
 import type { SkillCatalogSnapshot } from './skills/catalog';
 
-export interface BuiltinCapabilityTurnContextInputV1 {
+export interface BuiltinCapabilityTurnContextInput {
   readonly workspace: string;
   readonly threadId?: string;
   readonly turnId?: string;
@@ -9,9 +9,9 @@ export interface BuiltinCapabilityTurnContextInputV1 {
   readonly activeTaskId?: string;
   readonly modelMessageId?: string;
   readonly toolCallId?: string;
-  readonly phase?: CapabilityTurnContextV1['phase'];
-  readonly workspaceTrust?: CapabilityTurnContextV1['workspaceTrust'];
-  readonly featureFlags?: CapabilityTurnContextV1['featureFlags'];
+  readonly phase?: CapabilityTurnContext['phase'];
+  readonly workspaceTrust?: CapabilityTurnContext['workspaceTrust'];
+  readonly featureFlags?: CapabilityTurnContext['featureFlags'];
   readonly brokeredGitFeatureRevision?: string | null;
   readonly hasTaskAdapter?: boolean;
   readonly hasGitBroker?: boolean;
@@ -22,14 +22,14 @@ export interface BuiltinCapabilityTurnContextInputV1 {
   readonly availableSkillIds?: readonly string[];
 }
 
-export type BuiltinCapabilityTurnContextV1 = CapabilityTurnContextV1 & {
+export type BuiltinCapabilityTurnContext = CapabilityTurnContext & {
   readonly workspace: string;
 };
 
 /** Build the immutable facts consumed by one frozen Builtin registry turn projection. */
-export function createBuiltinCapabilityTurnContextV1(
-  input: BuiltinCapabilityTurnContextInputV1,
-): BuiltinCapabilityTurnContextV1 {
+export function createBuiltinCapabilityTurnContext(
+  input: BuiltinCapabilityTurnContextInput,
+): BuiltinCapabilityTurnContext {
   const featureFlags = input.featureFlags ? Object.freeze({ ...input.featureFlags }) : undefined;
   return Object.freeze({
     workspace: input.workspace,
@@ -40,7 +40,7 @@ export function createBuiltinCapabilityTurnContextV1(
     ...(input.modelMessageId ? { modelMessageId: input.modelMessageId } : {}),
     ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
     ...(input.phase ? { phase: input.phase } : {}),
-    promptContractV2: input.featureFlags?.promptContractV2 === true,
+    promptContract: input.featureFlags?.promptContract === true,
     brokeredGitFeatureRevision: input.brokeredGitFeatureRevision ?? null,
     hasTaskAdapter: input.hasTaskAdapter === true,
     hasGitBroker: input.hasGitBroker === true,

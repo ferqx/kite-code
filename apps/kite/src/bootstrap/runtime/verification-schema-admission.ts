@@ -1,7 +1,7 @@
-import { compileCapabilitySchemaV1 } from '@kite/builtin-runtime';
+import { compileCapabilitySchema } from '@kite/builtin-runtime';
 import {
-  type RuntimeHostStateVerificationSchemaAdmissionsV1,
-  runtimeHostStateVerificationSchemaAdmissionDigestV1,
+  type RuntimeHostStateVerificationSchemaAdmissions,
+  runtimeHostStateVerificationSchemaAdmissionDigest,
 } from '@kite/runtime-host';
 import type { RuntimeEvent } from './state-runtime';
 
@@ -10,25 +10,25 @@ import type { RuntimeEvent } from './state-runtime';
  * Builtin remains the only schema compiler; Kernel receives only canonical,
  * digest-bound facts and never imports execution/schema implementation.
  */
-export function projectVerificationSchemaAdmissionsV1(
+export function projectVerificationSchemaAdmissions(
   event: RuntimeEvent,
-): RuntimeHostStateVerificationSchemaAdmissionsV1 {
+): RuntimeHostStateVerificationSchemaAdmissions {
   if (event.type !== 'verification.requested') return undefined;
   let hasSchema = false;
   const admissions = event.spec.checks.map((check) => {
     if (check.type === 'schema') {
       hasSchema = true;
-      const compiled = compileCapabilitySchemaV1(check.schema);
+      const compiled = compileCapabilitySchema(check.schema);
       return {
-        schemaDigest: runtimeHostStateVerificationSchemaAdmissionDigestV1(check.schema),
+        schemaDigest: runtimeHostStateVerificationSchemaAdmissionDigest(check.schema),
         schemaDiagnostic: compiled.ok ? null : compiled.diagnostic,
       };
     }
     if (check.type === 'mcp_read_after_write' && check.outputSchema) {
       hasSchema = true;
-      const compiled = compileCapabilitySchemaV1(check.outputSchema);
+      const compiled = compileCapabilitySchema(check.outputSchema);
       return {
-        outputSchemaDigest: runtimeHostStateVerificationSchemaAdmissionDigestV1(check.outputSchema),
+        outputSchemaDigest: runtimeHostStateVerificationSchemaAdmissionDigest(check.outputSchema),
         outputSchemaDiagnostic: compiled.ok ? null : compiled.diagnostic,
       };
     }

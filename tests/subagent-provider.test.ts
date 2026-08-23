@@ -1,41 +1,41 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { createToolRecoveryJournalV1 } from '@kite/agent-kernel';
+import { createToolRecoveryJournal } from '@kite/agent-kernel';
 import {
-  BuiltinChildRuntimeDriverV1,
-  digestCapabilityValueV1,
-  type LocalSubagentLifecycleDriverV1,
-  LocalSubagentProviderV1,
-  SubagentGrantAuthorityV1,
+  BuiltinChildRuntimeDriver,
+  digestCapabilityValue,
+  type LocalSubagentLifecycleDriver,
+  LocalSubagentProvider,
+  SubagentGrantAuthority,
 } from '@kite/builtin-runtime';
-import { aiMessage, BuiltinModelEffectCoordinatorV1 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { aiMessage, BuiltinModelEffectCoordinator } from '@kite/builtin-runtime/model';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import type {
-  SubagentDelegationGrantV1,
-  SubagentHandleV1,
-  SubagentProviderV1,
-  SubagentResumeGrantV1,
+  SubagentDelegationGrant,
+  SubagentHandle,
+  SubagentProvider,
+  SubagentResumeGrant,
 } from '@kite/runtime-spi';
-import { SUBAGENT_PROVIDER_SCHEMA_V1 } from '@kite/runtime-spi';
-import { subagentResultFromObservationV1 } from '#app/bootstrap/runtime/subagent/observation-codec';
-import { SubagentProviderRecoveryRequiredErrorV1 } from '#app/bootstrap/runtime/subagent/task-tool';
+import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+import { subagentResultFromObservation } from '#app/bootstrap/runtime/subagent/observation-codec';
+import { SubagentProviderRecoveryRequiredError } from '#app/bootstrap/runtime/subagent/task-tool';
 import type { AgentConfig } from '#app/config/index';
-import type { SubagentLifecycleArtifactAccessV1 } from '#builtin-runtime';
-import { type SubagentTaskArtifactAccessV1, subagentTaskDigestV1 } from '#builtin-runtime';
+import type { SubagentLifecycleArtifactAccess } from '#builtin-runtime';
+import { type SubagentTaskArtifactAccess, subagentTaskDigest } from '#builtin-runtime';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { createPipelineSubagentRuntimeV1 } from '../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
-import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
+import { createPipelineSubagentRuntime } from '../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
+import { createTestModelInvocationHarness } from './helpers/model-invocation';
 import {
-  executeTestRuntimeToolsV1,
-  testBuiltinToolCatalogV1,
-  testRuntimeCapabilityExecutionPortV1,
-  testSubagentTaskRequestsV1,
+  executeTestRuntimeTools,
+  testBuiltinToolCatalog,
+  testRuntimeCapabilityExecutionPort,
+  testSubagentTaskRequests,
 } from './helpers/runtime-model';
 import { createMockModel } from './mock-model';
 
 const TEST_TASK = 'task';
 const TEST_RECOVERY_IDENTITY_KEY = '1'.repeat(64);
-const TEST_TASK_DIGEST = subagentTaskDigestV1(TEST_TASK);
+const TEST_TASK_DIGEST = subagentTaskDigest(TEST_TASK);
 const TEST_AGENT_CONFIG: AgentConfig = {
   apiKey: 'unused',
   baseURL: 'https://example.invalid',
@@ -51,10 +51,10 @@ const TEST_TASK_REF = Object.freeze({
   byteLength: 256,
 });
 let testStoredTask = TEST_TASK;
-const TEST_TASK_ARTIFACTS: SubagentTaskArtifactAccessV1 = {
+const TEST_TASK_ARTIFACTS: SubagentTaskArtifactAccess = {
   write: ({ task }) => {
     testStoredTask = task;
-    return { ref: TEST_TASK_REF, taskDigest: subagentTaskDigestV1(task) };
+    return { ref: TEST_TASK_REF, taskDigest: subagentTaskDigest(task) };
   },
   read: (_ref, expected) => ({
     artifactFormatVersion: 1,
@@ -65,7 +65,7 @@ const TEST_TASK_ARTIFACTS: SubagentTaskArtifactAccessV1 = {
       childInvocationId: expected.childInvocationId,
     },
     task: testStoredTask,
-    taskDigest: subagentTaskDigestV1(testStoredTask),
+    taskDigest: subagentTaskDigest(testStoredTask),
     taskByteLength: Buffer.byteLength(testStoredTask),
   }),
 };
@@ -75,8 +75,8 @@ const TEST_HANDLE_REF = Object.freeze({
   integrityIdentifier: `sha256:${'4'.repeat(64)}`,
   byteLength: 512,
 });
-let testStoredHandle: SubagentHandleV1 | undefined;
-const TEST_LIFECYCLE_ARTIFACTS: SubagentLifecycleArtifactAccessV1 = {
+let testStoredHandle: SubagentHandle | undefined;
+const TEST_LIFECYCLE_ARTIFACTS: SubagentLifecycleArtifactAccess = {
   write: (value) => {
     testStoredHandle = value;
     return TEST_HANDLE_REF;
@@ -92,7 +92,7 @@ function lifecyclePersistence(
   attempt = 1,
   reject?: (events: import('@kite/agent-kernel').RuntimeEvent[]) => boolean,
 ) {
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `lifecycle-${invocationId}`,
     userId: 'test',
@@ -102,11 +102,11 @@ function lifecyclePersistence(
     invocationId,
     toolCallId: 'parent-tool',
     capabilityId: 'builtin:task',
-    capabilityRevision: digestCapabilityValueV1({ value: 'capability' }),
-    argumentsDigest: digestCapabilityValueV1({ value: 'arguments' }),
-    authorizationDigest: digestCapabilityValueV1({ value: 'authorization' }),
-    admissionDigest: digestCapabilityValueV1({ value: 'admission' }),
-    effectiveEffectsDigest: digestCapabilityValueV1({ value: 'effects' }),
+    capabilityRevision: digestCapabilityValue({ value: 'capability' }),
+    argumentsDigest: digestCapabilityValue({ value: 'arguments' }),
+    authorizationDigest: digestCapabilityValue({ value: 'authorization' }),
+    admissionDigest: digestCapabilityValue({ value: 'admission' }),
+    effectiveEffectsDigest: digestCapabilityValue({ value: 'effects' }),
     status: 'running',
     recordedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
@@ -122,9 +122,9 @@ function lifecyclePersistence(
   };
 }
 
-function taskProviderJourneyV1(input: { invocationId: string; task?: string }) {
+function taskProviderJourney(input: { invocationId: string; task?: string }) {
   const task = input.task ?? 'Inspect the acknowledged Provider route.';
-  const taskRequests = testSubagentTaskRequestsV1();
+  const taskRequests = testSubagentTaskRequests();
   const parentModelInvocationId = `provider-parent-model:${input.invocationId}`;
   const taskArtifact = taskRequests.write({
     parentModelInvocationId,
@@ -132,7 +132,7 @@ function taskProviderJourneyV1(input: { invocationId: string; task?: string }) {
     role: 'review',
     task,
   });
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: TEST_RECOVERY_IDENTITY_KEY,
     threadId: `provider-task-${input.invocationId}`,
     userId: 'test',
@@ -161,7 +161,7 @@ function taskProviderJourneyV1(input: { invocationId: string; task?: string }) {
 }
 
 function binding() {
-  const hash = (name: string) => digestCapabilityValueV1({ name });
+  const hash = (name: string) => digestCapabilityValue({ name });
   return {
     parentInvocationId: 'parent-invocation',
     parentToolCallId: 'parent-tool',
@@ -209,10 +209,10 @@ function driverResult(childInvocationId = 'child-1') {
   };
 }
 
-describe('SubagentProviderV1 grant and Local Provider', () => {
+describe('SubagentProvider grant and Local Provider', () => {
   test('seals every current interaction mode and rejects the removed legacy identity', () => {
     for (const interactionMode of ['accept_edits', 'auto', 'full'] as const) {
-      const authority = new SubagentGrantAuthorityV1({
+      const authority = new SubagentGrantAuthority({
         idSource: () => `grant-${interactionMode}`,
       });
       expect(
@@ -223,7 +223,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
       ).toBe(interactionMode);
     }
     expect(() =>
-      new SubagentGrantAuthorityV1().issueStart({
+      new SubagentGrantAuthority().issueStart({
         ...binding(),
         authorization: {
           ...binding().authorization,
@@ -235,9 +235,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
 
   test('rejects cross-child and digest-mutated observation envelopes', () => {
     const expected = handle({
-      ...new SubagentGrantAuthorityV1({ idSource: () => 'observation-grant' }).issueStart(
-        binding(),
-      ),
+      ...new SubagentGrantAuthority({ idSource: () => 'observation-grant' }).issueStart(binding()),
     });
     const privatePayload = JSON.parse(
       JSON.stringify({
@@ -251,12 +249,12 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
         steps: [],
         executionJournal: [],
         exhaustedFingerprints: {},
-        toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+        toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
         blocked: null,
       }),
     ) as import('@kite/runtime-spi').JsonObject;
     const body = {
-      schema: SUBAGENT_PROVIDER_SCHEMA_V1,
+      schema: SUBAGENT_PROVIDER_SCHEMA_,
       handleId: 'other-handle',
       childInvocationId: expected.childInvocationId,
       status: 'completed' as const,
@@ -270,7 +268,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
       observationDigest: `sha256:${createHash('sha256').update(JSON.stringify(body)).digest('hex')}`,
     };
     expect(() =>
-      subagentResultFromObservationV1(observation, expected, TEST_RECOVERY_IDENTITY_KEY),
+      subagentResultFromObservation(observation, expected, TEST_RECOVERY_IDENTITY_KEY),
     ).toThrow('malformed or inconsistent');
     const crossChildBody = {
       ...body,
@@ -278,7 +276,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
       childInvocationId: 'other-child',
     };
     expect(() =>
-      subagentResultFromObservationV1(
+      subagentResultFromObservation(
         {
           ...crossChildBody,
           observationDigest: `sha256:${createHash('sha256')
@@ -290,7 +288,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
       ),
     ).toThrow('malformed or inconsistent');
     expect(() =>
-      subagentResultFromObservationV1(
+      subagentResultFromObservation(
         { ...observation, handleId: expected.handleId },
         expected,
         TEST_RECOVERY_IDENTITY_KEY,
@@ -312,7 +310,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
         },
       };
       expect(() =>
-        subagentResultFromObservationV1(
+        subagentResultFromObservation(
           {
             ...resourceBody,
             observationDigest: `sha256:${createHash('sha256')
@@ -332,17 +330,17 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
 
   test('binds, expires, and consumes an exact start grant once', async () => {
     let now = 10;
-    const authority = new SubagentGrantAuthorityV1({
+    const authority = new SubagentGrantAuthority({
       now: () => now,
       ttlMs: 20,
       idSource: () => 'grant-1',
     });
-    const driver: LocalSubagentLifecycleDriverV1 = {
+    const driver: LocalSubagentLifecycleDriver = {
       abandon: () => true,
       start: async (grant) => driverResult(grant.childInvocationId),
       resume: async (grant) => driverResult(grant.childInvocationId),
     };
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       driver,
       TEST_TASK_ARTIFACTS,
@@ -364,14 +362,14 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
       failure: { code: 'consumed_grant' },
     });
 
-    const expiring = new SubagentGrantAuthorityV1({
+    const expiring = new SubagentGrantAuthority({
       now: () => now,
       ttlMs: 5,
       idSource: () => 'grant-expired',
     });
     const expiredGrant = expiring.issueStart(binding());
     now = 16;
-    const expiredProvider = new LocalSubagentProviderV1(
+    const expiredProvider = new LocalSubagentProvider(
       expiring.verifier(),
       driver,
       TEST_TASK_ARTIFACTS,
@@ -385,7 +383,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
   test('bounds consumed-grant tombstones without replaying a still-valid grant', () => {
     let now = 0;
     let ordinal = 0;
-    const authority = new SubagentGrantAuthorityV1({
+    const authority = new SubagentGrantAuthority({
       now: () => now,
       ttlMs: 10,
       maxConsumedGrantTombstones: 2,
@@ -412,7 +410,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
 
   test('uses a non-decreasing grant clock so rollback cannot revive an expired grant', () => {
     let now = 0;
-    const authority = new SubagentGrantAuthorityV1({
+    const authority = new SubagentGrantAuthority({
       now: () => now,
       ttlMs: 10,
       idSource: () => 'grant-clock-rollback',
@@ -431,18 +429,18 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
 
   test('discards only exact pre-activation start and resume Driver registrations', () => {
     let ordinal = 0;
-    const authority = new SubagentGrantAuthorityV1({ idSource: () => `discard-${++ordinal}` });
+    const authority = new SubagentGrantAuthority({ idSource: () => `discard-${++ordinal}` });
     const startGrant = authority.issueStart(binding());
     const resumeGrant = authority.issueResume({
       ...binding(),
       childInvocationId: 'child-resume-discard',
       continuationId: 'continuation-discard',
-      continuationDigest: digestCapabilityValueV1({ value: 'continuation-discard' }),
+      continuationDigest: digestCapabilityValue({ value: 'continuation-discard' }),
       blockedToolCallId: 'blocked-model-discard',
       blockedRuntimeToolCallId: 'blocked-runtime-discard',
       resumeAttempt: 2,
     });
-    const registration = (grant: SubagentDelegationGrantV1 | SubagentResumeGrantV1) => ({
+    const registration = (grant: SubagentDelegationGrant | SubagentResumeGrant) => ({
       childInvocationId: grant.childInvocationId,
       parentInvocationId: grant.parentInvocationId,
       parentToolCallId: grant.parentToolCallId,
@@ -451,24 +449,24 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
         return driverResult(consumedGrant.childInvocationId);
       },
     });
-    const driver = new BuiltinChildRuntimeDriverV1();
+    const driver = new BuiltinChildRuntimeDriver();
     driver.registerStart(startGrant.grantId, registration(startGrant));
     driver.registerResume(resumeGrant.grantId, registration(resumeGrant));
-    expect(driver.pendingRegistrationCountV1()).toBe(2);
+    expect(driver.pendingRegistrationCount()).toBe(2);
     expect(driver.abandon({ ...startGrant, childInvocationId: 'wrong-child' })).toBe(false);
-    expect(driver.pendingRegistrationCountV1()).toBe(2);
+    expect(driver.pendingRegistrationCount()).toBe(2);
     expect(driver.abandon(startGrant)).toBe(true);
     expect(driver.abandon(resumeGrant)).toBe(true);
-    expect(driver.pendingRegistrationCountV1()).toBe(0);
+    expect(driver.pendingRegistrationCount()).toBe(0);
 
     let now = 0;
-    const bounded = new BuiltinChildRuntimeDriverV1({ now: () => now, maxPendingRegistrations: 1 });
+    const bounded = new BuiltinChildRuntimeDriver({ now: () => now, maxPendingRegistrations: 1 });
     bounded.registerStart('expired-registration', {
       ...registration(startGrant),
       expiresAtMs: 1,
     });
     now = 1;
-    expect(bounded.pendingRegistrationCountV1()).toBe(0);
+    expect(bounded.pendingRegistrationCount()).toBe(0);
     bounded.registerStart('live-registration', {
       ...registration(startGrant),
       expiresAtMs: 10,
@@ -481,7 +479,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     ).toThrow('capacity is exhausted');
 
     for (const expiresAtMs of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1, 5 * 60_000 + 1]) {
-      const strict = new BuiltinChildRuntimeDriverV1({ now: () => 0 });
+      const strict = new BuiltinChildRuntimeDriver({ now: () => 0 });
       expect(() =>
         strict.registerStart(`invalid-expiry-${String(expiresAtMs)}`, {
           ...registration(startGrant),
@@ -489,7 +487,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
         }),
       ).toThrow('expiry is invalid');
     }
-    const overflow = new BuiltinChildRuntimeDriverV1({
+    const overflow = new BuiltinChildRuntimeDriver({
       now: () => Number.MAX_SAFE_INTEGER - 1,
     });
     expect(() =>
@@ -500,13 +498,13 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
   });
 
   test('rejects a tampered grant and stale or identity-mutated handles', async () => {
-    const authority = new SubagentGrantAuthorityV1({ idSource: () => 'grant-2' });
-    const driver: LocalSubagentLifecycleDriverV1 = {
+    const authority = new SubagentGrantAuthority({ idSource: () => 'grant-2' });
+    const driver: LocalSubagentLifecycleDriver = {
       abandon: () => true,
       start: async (grant) => driverResult(grant.childInvocationId),
       resume: async (grant) => driverResult(grant.childInvocationId),
     };
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       driver,
       TEST_TASK_ARTIFACTS,
@@ -515,7 +513,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     const grant = authority.issueStart(binding());
     expect(
       await provider.start({
-        grant: { ...grant, parentAttempt: 2 } as SubagentDelegationGrantV1,
+        grant: { ...grant, parentAttempt: 2 } as SubagentDelegationGrant,
       }),
     ).toMatchObject({ ok: false, failure: { code: 'invalid_grant' } });
     const valid = authority.issueStart({ ...binding(), childInvocationId: 'child-2' });
@@ -524,7 +522,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     if (!started.ok) return;
     expect(
       await provider.observe({
-        handle: { ...started.value, role: 'code' } as SubagentHandleV1,
+        handle: { ...started.value, role: 'code' } as SubagentHandle,
       }),
     ).toMatchObject({ ok: false, failure: { code: 'stale_handle' } });
     expect(await provider.activate({ handle: started.value })).toMatchObject({ ok: true });
@@ -536,8 +534,8 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
   });
 
   test('maps driver crash and oversized observations to typed transport failures', async () => {
-    const crashAuthority = new SubagentGrantAuthorityV1({ idSource: () => 'grant-crash' });
-    const crashProvider = new LocalSubagentProviderV1(
+    const crashAuthority = new SubagentGrantAuthority({ idSource: () => 'grant-crash' });
+    const crashProvider = new LocalSubagentProvider(
       crashAuthority.verifier(),
       {
         abandon: () => true,
@@ -563,8 +561,8 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
       });
     }
 
-    const largeAuthority = new SubagentGrantAuthorityV1({ idSource: () => 'grant-large' });
-    const largeProvider = new LocalSubagentProviderV1(
+    const largeAuthority = new SubagentGrantAuthority({ idSource: () => 'grant-large' });
+    const largeProvider = new LocalSubagentProvider(
       largeAuthority.verifier(),
       {
         abandon: () => true,
@@ -592,10 +590,10 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
 
   test('consumes an exact resume grant and confirms abort-aware cancellation cleanup', async () => {
     let grantOrdinal = 0;
-    const authority = new SubagentGrantAuthorityV1({
+    const authority = new SubagentGrantAuthority({
       idSource: () => `grant-resume-${++grantOrdinal}`,
     });
-    const driver: LocalSubagentLifecycleDriverV1 = {
+    const driver: LocalSubagentLifecycleDriver = {
       abandon: () => true,
       start: async (grant, _task, signal) =>
         new Promise((resolve) => {
@@ -611,7 +609,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
         }),
       resume: async (grant) => driverResult(grant.childInvocationId),
     };
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       driver,
       TEST_TASK_ARTIFACTS,
@@ -620,7 +618,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     const resumeGrant = authority.issueResume({
       ...binding(),
       continuationId: 'continuation-exact',
-      continuationDigest: digestCapabilityValueV1({ value: 'continuation' }),
+      continuationDigest: digestCapabilityValue({ value: 'continuation' }),
       blockedToolCallId: 'blocked-model-tool',
       blockedRuntimeToolCallId: 'blocked-runtime-tool',
       resumeAttempt: 2,
@@ -657,9 +655,9 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
   });
 
   test('uses one bounded cleanup grace and forgets a non-cooperative driver handle', async () => {
-    const authority = new SubagentGrantAuthorityV1({ idSource: () => 'grant-leak' });
+    const authority = new SubagentGrantAuthority({ idSource: () => 'grant-leak' });
     const never = new Promise<ReturnType<typeof driverResult>>(() => {});
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       {
         abandon: () => true,
@@ -701,12 +699,12 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     let now = 100;
     let grantOrdinal = 0;
     let handleOrdinal = 0;
-    const authority = new SubagentGrantAuthorityV1({
+    const authority = new SubagentGrantAuthority({
       now: () => now,
       idSource: () => `grant-unconfirmed-clock-${++grantOrdinal}`,
     });
     const never = new Promise<ReturnType<typeof driverResult>>(() => {});
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       {
         abandon: () => true,
@@ -749,8 +747,8 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
   });
 
   test('rejects non-finite or unsafe Provider and Driver clocks', () => {
-    const authority = new SubagentGrantAuthorityV1();
-    const driver: LocalSubagentLifecycleDriverV1 = {
+    const authority = new SubagentGrantAuthority();
+    const driver: LocalSubagentLifecycleDriver = {
       abandon: () => true,
       start: async (grant) => driverResult(grant.childInvocationId),
       resume: async (grant) => driverResult(grant.childInvocationId),
@@ -758,7 +756,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     for (const clock of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1]) {
       expect(
         () =>
-          new LocalSubagentProviderV1(
+          new LocalSubagentProvider(
             authority.verifier(),
             driver,
             TEST_TASK_ARTIFACTS,
@@ -767,12 +765,10 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
             { now: () => clock },
           ),
       ).toThrow('clock is invalid');
-      expect(() => new BuiltinChildRuntimeDriverV1({ now: () => clock })).toThrow(
-        'clock is invalid',
-      );
+      expect(() => new BuiltinChildRuntimeDriver({ now: () => clock })).toThrow('clock is invalid');
     }
 
-    const overflowAuthority = new SubagentGrantAuthorityV1({
+    const overflowAuthority = new SubagentGrantAuthority({
       now: () => Number.MAX_SAFE_INTEGER,
     });
     expect(() => overflowAuthority.issueStart(binding())).toThrow('expiry is invalid');
@@ -782,11 +778,11 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     let now = 100;
     let grantOrdinal = 0;
     let handleOrdinal = 0;
-    const authority = new SubagentGrantAuthorityV1({
+    const authority = new SubagentGrantAuthority({
       now: () => now,
       idSource: () => `grant-bounded-provider-${++grantOrdinal}`,
     });
-    const provider = new LocalSubagentProviderV1(
+    const provider = new LocalSubagentProvider(
       authority.verifier(),
       {
         abandon: () => true,
@@ -829,17 +825,17 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
   });
 });
 
-class FakeProviderV1 implements SubagentProviderV1 {
+class FakeProvider implements SubagentProvider {
   starts = 0;
   observes = 0;
   cancels = 0;
-  lastGrant?: SubagentDelegationGrantV1;
-  lastResumeGrant?: SubagentResumeGrantV1;
+  lastGrant?: SubagentDelegationGrant;
+  lastResumeGrant?: SubagentResumeGrant;
   readonly mode: 'deny' | 'crash' | 'stale' | 'recovery';
   constructor(mode: 'deny' | 'crash' | 'stale' | 'recovery') {
     this.mode = mode;
   }
-  async start(input: { grant: SubagentDelegationGrantV1 }) {
+  async start(input: { grant: SubagentDelegationGrant }) {
     this.starts += 1;
     this.lastGrant = input.grant;
     if (this.mode === 'deny') {
@@ -847,7 +843,7 @@ class FakeProviderV1 implements SubagentProviderV1 {
     }
     return { ok: true, value: handle(input.grant) } as const;
   }
-  async resume(input: { grant: SubagentResumeGrantV1 }) {
+  async resume(input: { grant: SubagentResumeGrant }) {
     this.lastResumeGrant = input.grant;
     return { ok: true, value: handle(input.grant) } as const;
   }
@@ -876,15 +872,15 @@ class FakeProviderV1 implements SubagentProviderV1 {
   }
 }
 
-async function executeAppTaskWithFakeProviderV1(input: {
+async function executeAppTaskWithFakeProvider(input: {
   mode: 'deny' | 'crash' | 'stale' | 'recovery';
   persistRuntimeEvents?: (events: import('@kite/agent-kernel').RuntimeEvent[]) => Promise<boolean>;
 }) {
-  const journey = taskProviderJourneyV1({ invocationId: `app-task-${input.mode}` });
-  const fake = new FakeProviderV1(input.mode);
-  const driver = new BuiltinChildRuntimeDriverV1();
+  const journey = taskProviderJourney({ invocationId: `app-task-${input.mode}` });
+  const fake = new FakeProvider(input.mode);
+  const driver = new BuiltinChildRuntimeDriver();
   let runtimeFactoryCalls = 0;
-  const events = await executeTestRuntimeToolsV1({
+  const events = await executeTestRuntimeTools({
     state: journey.state,
     toolCallIds: ['pipeline-task'],
     taskConfig: TEST_AGENT_CONFIG,
@@ -892,11 +888,11 @@ async function executeAppTaskWithFakeProviderV1(input: {
     subagentTaskRequests: journey.taskRequests,
     persistRuntimeEvents: input.persistRuntimeEvents ?? journey.persistRuntimeEvents,
     getRuntimeState: journey.getRuntimeState,
-    capabilityExecution: testRuntimeCapabilityExecutionPortV1(),
+    capabilityExecution: testRuntimeCapabilityExecutionPort(),
     subagentRuntimeFactory: () => {
       runtimeFactoryCalls += 1;
-      return createPipelineSubagentRuntimeV1(() => ({
-        grants: new SubagentGrantAuthorityV1({ idSource: () => `app-task-${input.mode}` }),
+      return createPipelineSubagentRuntime(() => ({
+        grants: new SubagentGrantAuthority({ idSource: () => `app-task-${input.mode}` }),
         driver,
         provider: fake,
         taskArtifacts: TEST_TASK_ARTIFACTS,
@@ -907,9 +903,9 @@ async function executeAppTaskWithFakeProviderV1(input: {
   return { events, fake, driver, runtimeFactoryCalls, journey };
 }
 
-function handle(grant: SubagentDelegationGrantV1 | SubagentResumeGrantV1): SubagentHandleV1 {
+function handle(grant: SubagentDelegationGrant | SubagentResumeGrant): SubagentHandle {
   return {
-    schema: SUBAGENT_PROVIDER_SCHEMA_V1,
+    schema: SUBAGENT_PROVIDER_SCHEMA_,
     handleId: `handle-${grant.grantId}`,
     grantId: grant.grantId,
     purpose: grant.purpose,
@@ -940,16 +936,16 @@ describe('Pipeline-owned Fake Provider negatives', () => {
       'capability.subagent_handle_recorded',
     ] as const) {
       const invocationId = `registration-${rejectedType}`;
-      const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
-      const grants = new SubagentGrantAuthorityV1({ idSource: () => `grant-${rejectedType}` });
-      const driver = new BuiltinChildRuntimeDriverV1();
-      const provider = new LocalSubagentProviderV1(
+      const harness = createTestModelInvocationHarness({ workspace: process.cwd() });
+      const grants = new SubagentGrantAuthority({ idSource: () => `grant-${rejectedType}` });
+      const driver = new BuiltinChildRuntimeDriver();
+      const provider = new LocalSubagentProvider(
         grants.verifier(),
         driver,
         TEST_TASK_ARTIFACTS,
         () => `handle-${rejectedType}`,
       );
-      const runtime = createPipelineSubagentRuntimeV1(() => ({
+      const runtime = createPipelineSubagentRuntime(() => ({
         grants,
         driver,
         provider,
@@ -959,7 +955,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
       await expect(
         runtime.start(
           {
-            builtinToolCatalog: testBuiltinToolCatalogV1(),
+            builtinToolCatalog: testBuiltinToolCatalog(),
             config: {
               apiKey: 'unused',
               baseURL: 'https://example.invalid',
@@ -973,7 +969,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
             recoveryIdentityKey: '5'.repeat(64),
             model: createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]),
             eventSink: () => {},
-            modelEffectCoordinator: new BuiltinModelEffectCoordinatorV1(harness.gateway),
+            modelEffectCoordinator: new BuiltinModelEffectCoordinator(harness.gateway),
             modelInvocationPersistence: harness.persistence,
             subagentLifecyclePersistence: lifecyclePersistence(invocationId, 1, (events) =>
               events.some((event) => event.type === rejectedType),
@@ -983,36 +979,36 @@ describe('Pipeline-owned Fake Provider negatives', () => {
             subagentInvocationIdentity: {
               invocationId,
               attempt: 1,
-              capabilityRevision: digestCapabilityValueV1({ value: 'capability' }),
-              authorizationDigest: digestCapabilityValueV1({ value: 'authorization' }),
-              admissionDigest: digestCapabilityValueV1({ value: 'admission' }),
-              effectiveEffectsDigest: digestCapabilityValueV1({ value: 'effects' }),
+              capabilityRevision: digestCapabilityValue({ value: 'capability' }),
+              authorizationDigest: digestCapabilityValue({ value: 'authorization' }),
+              admissionDigest: digestCapabilityValue({ value: 'admission' }),
+              effectiveEffectsDigest: digestCapabilityValue({ value: 'effects' }),
             },
             subagentRuntime: runtime,
           },
           { subagent_type: 'review', task: `inspect ${rejectedType}` },
         ),
-      ).rejects.toBeInstanceOf(SubagentProviderRecoveryRequiredErrorV1);
-      expect(driver.pendingRegistrationCountV1()).toBe(0);
+      ).rejects.toBeInstanceOf(SubagentProviderRecoveryRequiredError);
+      expect(driver.pendingRegistrationCount()).toBe(0);
       expect(harness.events.filter((event) => event.type.startsWith('model.'))).toHaveLength(0);
     }
   });
 
   test('injects Fake Providers only after a real admitted Task attempt is acknowledged', async () => {
-    const noAck = await executeAppTaskWithFakeProviderV1({
+    const noAck = await executeAppTaskWithFakeProvider({
       mode: 'deny',
       persistRuntimeEvents: async () => false,
     });
     expect(noAck.runtimeFactoryCalls).toBe(0);
     expect(noAck.fake.starts).toBe(0);
-    expect(noAck.driver.pendingRegistrationCountV1()).toBe(0);
+    expect(noAck.driver.pendingRegistrationCount()).toBe(0);
     expect(noAck.events).toContainEqual(expect.objectContaining({ type: 'tool.failed' }));
 
     for (const mode of ['deny', 'crash', 'stale', 'recovery'] as const) {
-      const result = await executeAppTaskWithFakeProviderV1({ mode });
+      const result = await executeAppTaskWithFakeProvider({ mode });
       expect(result.runtimeFactoryCalls).toBe(1);
       expect(result.fake.starts).toBe(1);
-      expect(result.driver.pendingRegistrationCountV1()).toBe(0);
+      expect(result.driver.pendingRegistrationCount()).toBe(0);
       expect(result.events.some((event) => event.type === 'model.requested')).toBe(false);
       expect(result.events).toContainEqual(
         expect.objectContaining({ type: 'tool.failed', toolCallId: 'pipeline-task' }),
@@ -1022,18 +1018,18 @@ describe('Pipeline-owned Fake Provider negatives', () => {
 
   for (const mode of ['deny', 'crash', 'stale', 'recovery'] as const) {
     test(`${mode} never falls back to Local Provider or the legacy runner`, async () => {
-      const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
-      const fake = new FakeProviderV1(mode);
-      const runtime = createPipelineSubagentRuntimeV1(() => ({
-        grants: new SubagentGrantAuthorityV1({ idSource: () => `grant-${mode}` }),
-        driver: new BuiltinChildRuntimeDriverV1(),
+      const harness = createTestModelInvocationHarness({ workspace: process.cwd() });
+      const fake = new FakeProvider(mode);
+      const runtime = createPipelineSubagentRuntime(() => ({
+        grants: new SubagentGrantAuthority({ idSource: () => `grant-${mode}` }),
+        driver: new BuiltinChildRuntimeDriver(),
         provider: fake,
         taskArtifacts: TEST_TASK_ARTIFACTS,
         lifecycleArtifacts: TEST_LIFECYCLE_ARTIFACTS,
       }));
       const result = runtime.start(
         {
-          builtinToolCatalog: testBuiltinToolCatalogV1(),
+          builtinToolCatalog: testBuiltinToolCatalog(),
           config: {
             apiKey: 'unused',
             baseURL: 'https://example.invalid',
@@ -1047,7 +1043,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
           recoveryIdentityKey: '5'.repeat(64),
           model: createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]),
           eventSink: () => {},
-          modelEffectCoordinator: new BuiltinModelEffectCoordinatorV1(harness.gateway),
+          modelEffectCoordinator: new BuiltinModelEffectCoordinator(harness.gateway),
           modelInvocationPersistence: harness.persistence,
           subagentLifecyclePersistence: lifecyclePersistence('parent-invocation'),
           modelInvocationParentId: 'parent-model',
@@ -1055,10 +1051,10 @@ describe('Pipeline-owned Fake Provider negatives', () => {
           subagentInvocationIdentity: {
             invocationId: 'parent-invocation',
             attempt: 1,
-            capabilityRevision: digestCapabilityValueV1({ value: 'capability' }),
-            authorizationDigest: digestCapabilityValueV1({ value: 'authorization' }),
-            admissionDigest: digestCapabilityValueV1({ value: 'admission' }),
-            effectiveEffectsDigest: digestCapabilityValueV1({ value: 'effects' }),
+            capabilityRevision: digestCapabilityValue({ value: 'capability' }),
+            authorizationDigest: digestCapabilityValue({ value: 'authorization' }),
+            admissionDigest: digestCapabilityValue({ value: 'admission' }),
+            effectiveEffectsDigest: digestCapabilityValue({ value: 'effects' }),
           },
           subagentRuntime: runtime,
         },
@@ -1067,7 +1063,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
       if (mode === 'deny') {
         expect(await result).toMatchObject({ ok: false, summary: 'denied' });
       } else {
-        await expect(result).rejects.toBeInstanceOf(SubagentProviderRecoveryRequiredErrorV1);
+        await expect(result).rejects.toBeInstanceOf(SubagentProviderRecoveryRequiredError);
       }
       expect(fake.starts).toBe(1);
       expect(fake.lastGrant).toMatchObject({

@@ -3,7 +3,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
-import type { McpStdioProcessPortV1 } from '@kite/runtime-spi';
+import type { McpStdioProcessPort } from '@kite/runtime-spi';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -15,10 +15,10 @@ import {
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
-  inspectMcpArgumentsV1,
-  type McpCapabilityRouteV1,
-  mcpArgumentDigestV1,
-  snapshotMcpArgumentsV1,
+  inspectMcpArguments,
+  type McpCapabilityRoute,
+  mcpArgumentDigest,
+  snapshotMcpArguments,
 } from './argument-inspection';
 import {
   type CapabilityDescriptor,
@@ -30,16 +30,16 @@ import {
   UNKNOWN_EXTERNAL_EFFECTS,
   validateCapabilityArguments,
 } from './capability-domain';
-import type { BuiltinCredentialBrokerV1 } from './credential-broker';
+import type { BuiltinCredentialBroker } from './credential-broker';
 import { diagnoseMcpError } from './diagnostics';
 import {
-  canonicalWorkspaceKeyV1,
-  type NetworkBoundaryFetchFactoryV1,
-  type NetworkBoundaryPolicyV1,
-  type NetworkDecisionRecorderV1,
-  type NetworkResolverV1,
-  type PinnedNetworkRequestV1,
-  type ProtectedPathEvaluatorV1,
+  canonicalWorkspaceKey,
+  type NetworkBoundaryFetchFactory,
+  type NetworkBoundaryPolicy,
+  type NetworkDecisionRecorder,
+  type NetworkResolver,
+  type PinnedNetworkRequest,
+  type ProtectedPathEvaluator,
 } from './mechanism-ports';
 import {
   capabilityChangedProviderError,
@@ -52,23 +52,23 @@ import type {
   McpProviderDirectorySnapshot,
   McpResourceDirectorySnapshot,
 } from './runtime-provider';
-import { inspectRuntimeSecretV1 } from './secret-inspector';
-import { createMcpStdioTransportV1 } from './stdio-transport';
+import { inspectRuntimeSecret } from './secret-inspector';
+import { createMcpStdioTransport } from './stdio-transport';
 import { isMcpToolEnabled, resolveMcpToolPolicy } from './tool-policy';
 import {
-  assertMcpTransportAdmissionReceiptV1,
-  canonicalMcpHttpEndpointIdentityV1,
-  type McpTransportAdmissionReceiptV1,
-  type McpTransportBoundaryControllerV1,
-  McpTransportBoundaryErrorV1,
-  type McpTransportInvocationBindingV1,
-  type McpTransportOperationV1,
+  assertMcpTransportAdmissionReceipt,
+  canonicalMcpHttpEndpointIdentity,
+  type McpTransportAdmissionReceipt,
+  type McpTransportBoundaryController,
+  McpTransportBoundaryError,
+  type McpTransportInvocationBinding,
+  type McpTransportOperation,
 } from './transport-boundary';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
 import {
-  type McpWriteDispatchAdmissionV1,
-  type McpWriteDispatchGuardV1,
-  McpWriteGovernanceErrorV1,
+  type McpWriteDispatchAdmission,
+  type McpWriteDispatchGuard,
+  McpWriteGovernanceError,
 } from './write-governance';
 
 const MCP_STARTUP_TIMEOUT = 5000;
@@ -86,7 +86,7 @@ function isPathLikeExecutable(command: string | undefined): command is string {
   );
 }
 
-function pathLikeMcpArgumentV1(argument: string): string | undefined {
+function pathLikeMcpArgument(argument: string): string | undefined {
   const candidate =
     argument.startsWith('-') && argument.includes('=')
       ? argument.slice(argument.indexOf('=') + 1)
@@ -123,25 +123,25 @@ export interface McpConnectionManagerOptions {
     authProvider?: OAuthClientProvider,
   ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
   /** Shared Builtin credential authority. Production composition always supplies this. */
-  credentialBroker?: BuiltinCredentialBrokerV1;
+  credentialBroker?: BuiltinCredentialBroker;
   /** Shared release boundary for local stdio process working directories. */
-  protectedPathEvaluator?: ProtectedPathEvaluatorV1;
+  protectedPathEvaluator?: ProtectedPathEvaluator;
   /** Sealed execution profiles require a per-operation transport admission controller. */
   transportBoundaryRequired?: boolean;
-  transportBoundary?: McpTransportBoundaryControllerV1;
+  transportBoundary?: McpTransportBoundaryController;
   /** Release-derived policy used by the built-in pinned HTTP transport. */
-  transportNetworkPolicy?: NetworkBoundaryPolicyV1;
-  transportNetworkResolver?: NetworkResolverV1;
-  transportRecordNetworkDecision?: NetworkDecisionRecorderV1;
+  transportNetworkPolicy?: NetworkBoundaryPolicy;
+  transportNetworkResolver?: NetworkResolver;
+  transportRecordNetworkDecision?: NetworkDecisionRecorder;
   /** Test-only pinned request adapter; production omits it for the native implementation. */
-  transportPinnedRequest?: PinnedNetworkRequestV1;
+  transportPinnedRequest?: PinnedNetworkRequest;
   /** App-composed generic network mechanism; Builtin owns MCP transport semantics. */
-  createNetworkBoundaryFetch?: NetworkBoundaryFetchFactoryV1;
+  createNetworkBoundaryFetch?: NetworkBoundaryFetchFactory;
   /** Required production Host process port; absent means local stdio fail-closed. */
-  stdioProcessPort?: McpStdioProcessPortV1;
+  stdioProcessPort?: McpStdioProcessPort;
   /** Release profiles can require a durable production write admission guard. */
   mcpWriteGovernanceRequired?: boolean;
-  mcpWriteDispatchGuard?: McpWriteDispatchGuardV1;
+  mcpWriteDispatchGuard?: McpWriteDispatchGuard;
 }
 
 /**
@@ -153,19 +153,19 @@ export class McpConnectionManager {
     config: McpServerConfig,
     authProvider?: OAuthClientProvider,
   ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
-  private readonly protectedPathEvaluator: ProtectedPathEvaluatorV1 | undefined;
+  private readonly protectedPathEvaluator: ProtectedPathEvaluator | undefined;
   private readonly transportBoundaryRequired: boolean;
-  private readonly transportBoundary: McpTransportBoundaryControllerV1 | undefined;
-  private readonly credentialBroker: BuiltinCredentialBrokerV1 | undefined;
-  private readonly transportNetworkPolicy: NetworkBoundaryPolicyV1 | undefined;
-  private readonly transportNetworkResolver: NetworkResolverV1 | undefined;
-  private readonly transportRecordNetworkDecision: NetworkDecisionRecorderV1 | undefined;
-  private readonly transportPinnedRequest: PinnedNetworkRequestV1 | undefined;
-  private readonly createNetworkBoundaryFetch: NetworkBoundaryFetchFactoryV1 | undefined;
-  private readonly stdioProcessPort: McpStdioProcessPortV1 | undefined;
+  private readonly transportBoundary: McpTransportBoundaryController | undefined;
+  private readonly credentialBroker: BuiltinCredentialBroker | undefined;
+  private readonly transportNetworkPolicy: NetworkBoundaryPolicy | undefined;
+  private readonly transportNetworkResolver: NetworkResolver | undefined;
+  private readonly transportRecordNetworkDecision: NetworkDecisionRecorder | undefined;
+  private readonly transportPinnedRequest: PinnedNetworkRequest | undefined;
+  private readonly createNetworkBoundaryFetch: NetworkBoundaryFetchFactory | undefined;
+  private readonly stdioProcessPort: McpStdioProcessPort | undefined;
   private readonly mcpWriteGovernanceRequired: boolean;
-  private readonly mcpWriteDispatchGuard: McpWriteDispatchGuardV1 | undefined;
-  private readonly transportHttpContext = new AsyncLocalStorage<McpTransportAdmissionReceiptV1>();
+  private readonly mcpWriteDispatchGuard: McpWriteDispatchGuard | undefined;
+  private readonly transportHttpContext = new AsyncLocalStorage<McpTransportAdmissionReceipt>();
   private servers = new Map<string, McpServerState>();
   private promptRegistry = new Map<string, PromptEntry>();
   private snapshot: CapabilitySnapshot = createSnapshot([]);
@@ -212,9 +212,9 @@ export class McpConnectionManager {
     // reason to crash the TUI control plane before it can display config and
     // diagnostics. `admitTransport` still rejects every connect/read/call.
     if (!this.transportBoundary) return;
-    const expected = canonicalWorkspaceKeyV1(workspace);
+    const expected = canonicalWorkspaceKey(workspace);
     if (this.transportBoundary.identity.workspaceKey !== expected) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'workspace_mismatch',
         'MCP transport boundary does not match the canonical Workspace.',
       );
@@ -257,7 +257,7 @@ export class McpConnectionManager {
             name,
           ),
       ) ||
-      inspectRuntimeSecretV1({
+      inspectRuntimeSecret({
         text: JSON.stringify(configuredMaterial),
         maxInspectionChars: 256 * 1024,
       }) !== 'clear'
@@ -282,7 +282,7 @@ export class McpConnectionManager {
     this.publish();
 
     let transport: Parameters<Client['connect']>[0];
-    let connectAdmission: McpTransportAdmissionReceiptV1 | undefined;
+    let connectAdmission: McpTransportAdmissionReceipt | undefined;
     try {
       let transportConfig = config;
       if (config.type === 'stdio' && !this.protectedPathEvaluator) {
@@ -327,7 +327,7 @@ export class McpConnectionManager {
         }
         if (this.stdioProcessPort && config.args) {
           for (const argument of config.args) {
-            const candidate = pathLikeMcpArgumentV1(argument);
+            const candidate = pathLikeMcpArgument(argument);
             if (!candidate) continue;
             const argumentDecision = protectedPathEvaluator.evaluate({
               path: resolve(cwdDecision.canonicalPath, candidate),
@@ -626,7 +626,7 @@ export class McpConnectionManager {
       this.oauthTransports.get(name)?.transport !== session.transport ||
       this.servers.get(name) !== state
     ) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'boundary_identity_mismatch',
         'OAuth transport changed during boundary admission.',
       );
@@ -721,7 +721,7 @@ export class McpConnectionManager {
     return this.snapshot.descriptors.find((descriptor) => descriptor.capabilityId === capabilityId);
   }
 
-  getCapabilityRoute(capabilityId: string): McpCapabilityRouteV1 | undefined {
+  getCapabilityRoute(capabilityId: string): McpCapabilityRoute | undefined {
     const descriptor = this.findCapability(capabilityId);
     if (descriptor?.kind !== 'mcp_tool') return undefined;
     const server = descriptor.provider.id;
@@ -755,7 +755,7 @@ export class McpConnectionManager {
       throw providerErrorFromDiagnostic(server, undefined);
     }
     const route = this.getCapabilityRoute(invocation.capabilityId);
-    const argumentSnapshot = snapshotMcpArgumentsV1(invocation.arguments);
+    const argumentSnapshot = snapshotMcpArguments(invocation.arguments);
     const args = argumentSnapshot.ok ? argumentSnapshot.arguments : Object.freeze({});
     if (argumentSnapshot.ok) {
       const argumentError = validateCapabilityArguments(descriptor.inputSchema, args);
@@ -769,7 +769,7 @@ export class McpConnectionManager {
       }
     }
     if (route?.transport === 'http' && Object.keys(args).length > 0) {
-      const inspection = argumentSnapshot.ok ? inspectMcpArgumentsV1(args) : 'unknown';
+      const inspection = argumentSnapshot.ok ? inspectMcpArguments(args) : 'unknown';
       if (inspection !== 'clear') {
         throw new McpProviderError({
           providerId: descriptor.provider.id,
@@ -849,10 +849,10 @@ export class McpConnectionManager {
     descriptor: CapabilityDescriptor;
     toolName: string;
     args: Readonly<Record<string, unknown>>;
-    route: McpCapabilityRouteV1 | undefined;
-    transportAdmission: McpTransportAdmissionReceiptV1 | undefined;
+    route: McpCapabilityRoute | undefined;
+    transportAdmission: McpTransportAdmissionReceipt | undefined;
     governance: McpCapabilityInvocation['writeGovernance'];
-  }): Promise<Extract<McpWriteDispatchAdmissionV1, { admitted: true }> | null> {
+  }): Promise<Extract<McpWriteDispatchAdmission, { admitted: true }> | null> {
     const { descriptor } = input;
     const writeClass = ['write', 'destructive', 'unknown'].includes(
       descriptor.effectiveEffects.externalState,
@@ -861,14 +861,14 @@ export class McpConnectionManager {
     const guard = this.mcpWriteDispatchGuard;
     if (!guard) {
       if (this.mcpWriteGovernanceRequired) {
-        throw new McpWriteGovernanceErrorV1('production_write_guard_unconfigured');
+        throw new McpWriteGovernanceError('production_write_guard_unconfigured');
       }
       return null;
     }
     if (!input.governance || !input.route) {
-      throw new McpWriteGovernanceErrorV1('write_governance_facts_missing');
+      throw new McpWriteGovernanceError('write_governance_facts_missing');
     }
-    let admission: McpWriteDispatchAdmissionV1;
+    let admission: McpWriteDispatchAdmission;
     try {
       admission = await guard.beforeDispatch({
         capabilityId: descriptor.capabilityId,
@@ -891,17 +891,17 @@ export class McpConnectionManager {
           : {}),
         userApprovalReceiptDigest: input.governance.userApprovalReceiptDigest,
         transportAdmissionReceiptDigest: input.transportAdmission?.receiptDigest ?? null,
-        argumentsDigest: mcpArgumentDigestV1(input.args),
+        argumentsDigest: mcpArgumentDigest(input.args),
       });
     } catch {
-      throw new McpWriteGovernanceErrorV1('write_admission_persistence_failed');
+      throw new McpWriteGovernanceError('write_admission_persistence_failed');
     }
-    if (!admission.admitted) throw new McpWriteGovernanceErrorV1(admission.reasonCode);
+    if (!admission.admitted) throw new McpWriteGovernanceError(admission.reasonCode);
     return admission;
   }
 
   private async recordMcpWriteOutcome(
-    admission: Extract<McpWriteDispatchAdmissionV1, { admitted: true }>,
+    admission: Extract<McpWriteDispatchAdmission, { admitted: true }>,
     outcome: 'succeeded' | 'unknown',
     providerReceiptDigest: string | null,
   ): Promise<void> {
@@ -912,7 +912,7 @@ export class McpConnectionManager {
         providerReceiptDigest,
       });
     } catch {
-      throw new McpWriteGovernanceErrorV1('write_receipt_persistence_failed');
+      throw new McpWriteGovernanceError('write_receipt_persistence_failed');
     }
   }
 
@@ -968,7 +968,7 @@ export class McpConnectionManager {
     serverName: string,
     uri: string,
     signal?: AbortSignal,
-    transportBoundary?: McpTransportInvocationBindingV1,
+    transportBoundary?: McpTransportInvocationBinding,
   ): Promise<string> {
     if (!serverName || !uri) {
       throw new Error('server and uri are required');
@@ -1057,7 +1057,7 @@ export class McpConnectionManager {
       !this.transportNetworkPolicy ||
       !this.transportRecordNetworkDecision
     ) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'boundary_unavailable',
         'The pinned MCP HTTP transport boundary is unavailable.',
       );
@@ -1067,7 +1067,7 @@ export class McpConnectionManager {
       this.transportNetworkPolicy.revision !==
         this.transportBoundary?.identity.networkPolicyRevision
     ) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'boundary_identity_mismatch',
         'The MCP HTTP network policy does not match the admitted execution boundary.',
       );
@@ -1077,14 +1077,14 @@ export class McpConnectionManager {
     const boundaryFetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const receipt = this.transportHttpContext.getStore();
       if (!receipt) {
-        throw new McpTransportBoundaryErrorV1(
+        throw new McpTransportBoundaryError(
           'invocation_identity_missing',
           'An MCP HTTP request escaped its admitted invocation context.',
         );
       }
       const createBoundaryFetch = this.createNetworkBoundaryFetch;
       if (!createBoundaryFetch) {
-        throw new McpTransportBoundaryErrorV1(
+        throw new McpTransportBoundaryError(
           'boundary_unavailable',
           'The generic network boundary mechanism is unavailable.',
         );
@@ -1109,13 +1109,13 @@ export class McpConnectionManager {
   private async admitTransport(
     serverIdentity: string,
     config: McpServerConfig,
-    operation: McpTransportOperationV1,
-    binding: McpTransportInvocationBindingV1 | undefined,
-  ): Promise<McpTransportAdmissionReceiptV1 | undefined> {
+    operation: McpTransportOperation,
+    binding: McpTransportInvocationBinding | undefined,
+  ): Promise<McpTransportAdmissionReceipt | undefined> {
     if (!this.transportBoundaryRequired && !this.transportBoundary) return undefined;
     const boundary = this.transportBoundary;
     if (!boundary) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'boundary_unavailable',
         'MCP transport admission controller is unavailable.',
       );
@@ -1124,7 +1124,7 @@ export class McpConnectionManager {
       (config.type === 'stdio' && !boundary.identity.localStdioMcp) ||
       (config.type === 'http' && !boundary.identity.remoteHttpMcp)
     ) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'transport_denied',
         config.type === 'stdio'
           ? 'Local stdio MCP is denied by the execution surface.'
@@ -1132,32 +1132,32 @@ export class McpConnectionManager {
       );
     }
     if (!binding) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'invocation_identity_missing',
         'MCP transport invocation identity is missing.',
       );
     }
     const endpointRevision = transportEndpointRevision(serverIdentity, config);
-    const endpointIdentity = canonicalMcpHttpEndpointIdentityV1(config);
+    const endpointIdentity = canonicalMcpHttpEndpointIdentity(config);
     if (
       !binding.boundaryIdentityDigest.trim() ||
       !binding.invocationId.trim() ||
       !binding.toolCallId.trim() ||
       !binding.endpointRevision.trim()
     ) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'invocation_identity_missing',
         'MCP transport invocation identity is incomplete.',
       );
     }
     if (binding.boundaryIdentityDigest !== boundary.identity.identityDigest) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'boundary_identity_mismatch',
         'MCP transport invocation belongs to a different execution boundary.',
       );
     }
     if (binding.endpointRevision !== endpointRevision) {
-      throw new McpTransportBoundaryErrorV1(
+      throw new McpTransportBoundaryError(
         'endpoint_revision_mismatch',
         'MCP transport endpoint revision changed before dispatch.',
       );
@@ -1168,7 +1168,7 @@ export class McpConnectionManager {
         active?.identityDigest !== boundary.identity.identityDigest ||
         active.endpointRevision !== endpointRevision
       ) {
-        throw new McpTransportBoundaryErrorV1(
+        throw new McpTransportBoundaryError(
           'boundary_identity_mismatch',
           'The active MCP transport was not created for this execution boundary.',
         );
@@ -1188,15 +1188,15 @@ export class McpConnectionManager {
       ...binding,
     });
     const receipt = await boundary.admit(request);
-    assertMcpTransportAdmissionReceiptV1(request, receipt);
+    assertMcpTransportAdmissionReceipt(request, receipt);
     return receipt;
   }
 
   private async admitInternalTransport(
     serverIdentity: string,
     config: McpServerConfig,
-    operation: Exclude<McpTransportOperationV1, 'connect' | 'tool_call' | 'resource_read'>,
-  ): Promise<McpTransportAdmissionReceiptV1 | undefined> {
+    operation: Exclude<McpTransportOperation, 'connect' | 'tool_call' | 'resource_read'>,
+  ): Promise<McpTransportAdmissionReceipt | undefined> {
     if (!this.transportBoundaryRequired && !this.transportBoundary) return undefined;
     const invocationId = randomUUID();
     return this.admitTransport(serverIdentity, config, operation, {
@@ -1208,7 +1208,7 @@ export class McpConnectionManager {
   }
 
   private async withTransportReceipt<T>(
-    receipt: McpTransportAdmissionReceiptV1 | undefined,
+    receipt: McpTransportAdmissionReceipt | undefined,
     operation: () => Promise<T>,
   ): Promise<T> {
     return receipt ? this.transportHttpContext.run(receipt, operation) : operation();
@@ -1458,9 +1458,9 @@ function safeProviderMetadata(value: string, maximum = 96): string {
 async function createTransport(
   config: McpServerConfig,
   authProvider: OAuthClientProvider | undefined,
-  credentialBroker: BuiltinCredentialBrokerV1 | undefined,
+  credentialBroker: BuiltinCredentialBroker | undefined,
   boundaryFetch?: typeof fetch,
-  stdioProcessPort?: McpStdioProcessPortV1,
+  stdioProcessPort?: McpStdioProcessPort,
 ) {
   if (config.type === 'http') {
     const url = new URL(config.url ?? 'http://localhost');
@@ -1480,7 +1480,7 @@ async function createTransport(
   if (!stdioProcessPort) {
     throw new Error('MCP stdio process port is unavailable; local stdio is fail-closed.');
   }
-  return createMcpStdioTransportV1(
+  return createMcpStdioTransport(
     {
       command: config.command ?? '',
       args: config.args ?? [],
@@ -1493,7 +1493,7 @@ async function createTransport(
 
 async function resolveHttpHeaders(
   config: McpServerConfig,
-  credentialBroker: BuiltinCredentialBrokerV1 | undefined,
+  credentialBroker: BuiltinCredentialBroker | undefined,
 ): Promise<Record<string, string> | undefined> {
   const headers = { ...config.headers };
   const auth = config.auth;

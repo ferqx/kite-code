@@ -1,4 +1,4 @@
-export interface ClientTerminalOutcomeV1 {
+export interface ClientTerminalOutcome {
   readonly status:
     | 'completed'
     | 'aborted'
@@ -11,17 +11,17 @@ export interface ClientTerminalOutcomeV1 {
   readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
 }
 
-export interface ClientTerminalOutcomePresentationV1 {
+export interface ClientTerminalOutcomePresentation {
   readonly label: string;
   readonly severity: 'success' | 'warning' | 'error';
   readonly complete: boolean;
   readonly safeRetry: boolean;
-  readonly recoveryEntry: ClientTerminalOutcomeV1['recoveryEntry'];
+  readonly recoveryEntry: ClientTerminalOutcome['recoveryEntry'];
 }
 
-export function projectTerminalOutcomeV1(
-  outcome: ClientTerminalOutcomeV1,
-): ClientTerminalOutcomePresentationV1 {
+export function projectTerminalOutcome(
+  outcome: ClientTerminalOutcome,
+): ClientTerminalOutcomePresentation {
   if (outcome.status === 'completed') {
     return {
       label: 'Completed',
@@ -40,7 +40,7 @@ export function projectTerminalOutcomeV1(
   };
 }
 
-export interface ClientToolOutcomeV1 {
+export interface ClientToolOutcome {
   readonly status:
     | 'success'
     | 'failed'
@@ -51,12 +51,12 @@ export interface ClientToolOutcomeV1 {
     | 'unknown';
 }
 
-export function toolOutcomeSucceededV1(outcome: ClientToolOutcomeV1): boolean {
+export function toolOutcomeSucceeded(outcome: ClientToolOutcome): boolean {
   return outcome.status === 'success';
 }
 
-export function toolOutcomeProtocolStatusV1(
-  outcome: ClientToolOutcomeV1,
+export function toolOutcomeProtocolStatus(
+  outcome: ClientToolOutcome,
 ): 'success' | 'error' | 'cancelled' | 'timeout' | 'exhausted' {
   switch (outcome.status) {
     case 'success':
@@ -72,12 +72,12 @@ export function toolOutcomeProtocolStatusV1(
   }
 }
 
-export function canonicalToolOutcomeV1(event: {
+export function canonicalToolOutcome(event: {
   readonly type: string;
-  readonly outcomeV1?: ClientToolOutcomeV1;
-}): ClientToolOutcomeV1 {
-  if (!event.outcomeV1) {
-    throw new Error(`${event.type} requires a canonical ToolOutcomeV1.`);
+  readonly outcome?: ClientToolOutcome;
+}): ClientToolOutcome {
+  if (!event.outcome) {
+    throw new Error(`${event.type} requires a canonical ToolOutcome.`);
   }
-  return event.outcomeV1;
+  return event.outcome;
 }

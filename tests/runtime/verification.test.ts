@@ -3,15 +3,15 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { resolveKernelVerificationModeV1 as resolveVerificationMode } from '@kite/agent-kernel';
+import { resolveKernelVerificationMode as resolveVerificationMode } from '@kite/agent-kernel';
 import {
-  capabilityResultDigestV1,
-  capabilityResultEvidenceDigestV1,
-  verificationRequestForSkillV1 as verificationRequestForSkill,
+  capabilityResultDigest,
+  capabilityResultEvidenceDigest,
+  verificationRequestForSkill,
 } from '@kite/builtin-runtime';
 import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
-import type { VerificationSpecV1 } from '@kite/runtime-spi';
+import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import type { VerificationSpec } from '@kite/runtime-spi';
 import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeVerificationEffect } from '../../apps/kite/src/bootstrap/runtime/verification-effect';
@@ -27,7 +27,7 @@ function activeState(): RuntimeState {
   const workspace = join(tmpdir(), `kite-verification-${crypto.randomUUID()}`);
   mkdirSync(workspace, { recursive: true });
   roots.push(workspace);
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread',
     userId: 'user',
@@ -47,7 +47,7 @@ function activeState(): RuntimeState {
   return state;
 }
 
-function spec(checks: VerificationSpecV1['checks'], maxAttempts = 1): VerificationSpecV1 {
+function spec(checks: VerificationSpec['checks'], maxAttempts = 1): VerificationSpec {
   return {
     schemaVersion: 1,
     verificationId: 'verification-1',
@@ -60,7 +60,7 @@ function spec(checks: VerificationSpecV1['checks'], maxAttempts = 1): Verificati
 
 function request(
   mode: 'not_required' | 'best_effort' | 'required',
-  value: VerificationSpecV1,
+  value: VerificationSpec,
 ): RuntimeEvent {
   return {
     type: 'verification.requested',
@@ -321,8 +321,8 @@ describe('VerificationSpec execution and recovery', () => {
       effectiveEffectsDigest: 'effects',
       status: 'succeeded',
       recordedAt: '2026-07-15T00:00:00.000Z',
-      resultDigest: capabilityResultDigestV1(artifactResult),
-      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      resultDigest: capabilityResultDigest(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigest(artifactResult),
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
@@ -402,8 +402,8 @@ describe('VerificationSpec execution and recovery', () => {
       effectiveEffectsDigest: 'effects',
       status: 'succeeded',
       recordedAt: '2026-07-15T00:00:00.000Z',
-      resultDigest: capabilityResultDigestV1(artifactResult),
-      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      resultDigest: capabilityResultDigest(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigest(artifactResult),
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
@@ -463,8 +463,8 @@ describe('VerificationSpec execution and recovery', () => {
       effectiveEffectsDigest: 'effects',
       status: 'succeeded',
       recordedAt: '2026-07-15T00:00:00.000Z',
-      resultDigest: capabilityResultDigestV1(artifactResult),
-      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      resultDigest: capabilityResultDigest(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigest(artifactResult),
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',

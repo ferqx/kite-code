@@ -6,16 +6,16 @@ import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 import {
   canonicalExistingPath,
   canonicalPathForComparison,
-  createProtectedPathEvaluatorV1,
+  createProtectedPathEvaluator,
   generateSandboxProfile,
-  PROTECTED_WORKSPACE_DIRECTORIES_V1,
-  PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
-  PROTECTED_WORKSPACE_FILES_V1,
+  PROTECTED_WORKSPACE_DIRECTORIES_,
+  PROTECTED_WORKSPACE_FILE_PREFIXES_,
+  PROTECTED_WORKSPACE_FILES_,
 } from '@kite/builtin-runtime/sandbox';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { AgentConfig } from '#app/config';
-import type { RuntimeJsonValueV1 } from '#runtime-spi';
-import { executeTestRuntimeToolV1 } from '../helpers/runtime-model';
+import type { RuntimeJsonValue } from '#runtime-spi';
+import { executeTestRuntimeTool } from '../helpers/runtime-model';
 
 const roots: string[] = [];
 
@@ -55,8 +55,8 @@ function productionBoundaryConfig(workspace: string): AgentConfig {
 
 function parsedBuiltinRequest(
   workspace: string,
-  name: Parameters<typeof executeTestRuntimeToolV1>[0]['toolName'],
-  args: Readonly<Record<string, RuntimeJsonValueV1>>,
+  name: Parameters<typeof executeTestRuntimeTool>[0]['toolName'],
+  args: Readonly<Record<string, RuntimeJsonValue>>,
 ) {
   return { workspace, name, args };
 }
@@ -65,7 +65,7 @@ describe('protected-path policy V1', () => {
   test('returns canonical path and preserves read/write operation semantics', () => {
     const workspace = temporaryDirectory('openpx-protected-operation-');
     mkdirSync(join(workspace, 'src'));
-    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+    const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
 
     const read = evaluator.evaluate({ path: 'src/file.ts', operation: 'read' });
     const write = evaluator.evaluate({ path: 'src/file.ts', operation: 'write' });
@@ -83,7 +83,7 @@ describe('protected-path policy V1', () => {
   test('allows all file reads and trusted-workspace writes while retaining execute protection', () => {
     const workspace = temporaryDirectory('openpx-protected-rules-');
     const outside = temporaryDirectory('openpx-protected-outside-');
-    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+    const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
 
     for (const path of [
       '.git/config',
@@ -124,7 +124,7 @@ describe('protected-path policy V1', () => {
     const host = temporaryDirectory('openpx-managed-host-');
     const workspace = join(host, '.codex', 'worktrees', 'fixture', 'project');
     mkdirSync(workspace, { recursive: true });
-    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+    const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
 
     for (const path of [
       'package.json',
@@ -141,7 +141,7 @@ describe('protected-path policy V1', () => {
 
   test('matches protected execute identities conservatively across ASCII case aliases', () => {
     const workspace = temporaryDirectory('openpx-protected-case-alias-');
-    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+    const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
 
     for (const path of [
       '.GIT/config',
@@ -164,7 +164,7 @@ describe('protected-path policy V1', () => {
       join(workspace, 'escape'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+    const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
 
     const decision = evaluator.evaluate({ path: 'escape/new.txt', operation: 'write' });
     expect(decision).toMatchObject({ outcome: 'prompt', reason: 'outside_workspace' });
@@ -184,7 +184,7 @@ describe('protected-path policy V1', () => {
     if (process.platform !== 'win32') {
       symlinkSync('public.txt', join(workspace, '.env'));
     }
-    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+    const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
 
     expect(evaluator.evaluate({ path: '.git/config', operation: 'read' })).toMatchObject({
       outcome: 'allow',
@@ -210,7 +210,7 @@ describe('protected-path policy V1', () => {
   test('evaluates deny roots before a tighter allowlist', () => {
     const workspace = temporaryDirectory('openpx-protected-deny-wins-');
     mkdirSync(join(workspace, '.git'));
-    const evaluator = createProtectedPathEvaluatorV1({
+    const evaluator = createProtectedPathEvaluator({
       workspaceRoot: workspace,
       mode: 'deny',
       allowedPaths: ['.git'],
@@ -226,12 +226,12 @@ describe('protected-path policy V1', () => {
   test('unions additional deny roots and keeps prompt as a non-allow outcome', () => {
     const workspace = temporaryDirectory('openpx-protected-union-');
     mkdirSync(join(workspace, 'private'));
-    const deny = createProtectedPathEvaluatorV1({
+    const deny = createProtectedPathEvaluator({
       workspaceRoot: workspace,
       mode: 'deny',
       additionalDeniedPaths: ['private'],
     });
-    const prompt = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'prompt' });
+    const prompt = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'prompt' });
 
     expect(deny.evaluate({ path: 'private/data.txt', operation: 'execute' }).reason).toBe(
       'additional_deny',
@@ -251,9 +251,9 @@ describe('protected-path policy V1', () => {
     const canonicalWorkspace = canonicalExistingPath(workspace);
 
     for (const path of [
-      ...PROTECTED_WORKSPACE_DIRECTORIES_V1,
-      ...PROTECTED_WORKSPACE_FILES_V1,
-      ...PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
+      ...PROTECTED_WORKSPACE_DIRECTORIES_,
+      ...PROTECTED_WORKSPACE_FILES_,
+      ...PROTECTED_WORKSPACE_FILE_PREFIXES_,
     ]) {
       const seatbeltPath = resolve(canonicalWorkspace, path)
         .replaceAll('\\', '\\\\')
@@ -281,7 +281,7 @@ describe('path-policy Registry and Harness integration', () => {
       pattern: 'needle',
       path: '.git',
     });
-    const result = await executeTestRuntimeToolV1({
+    const result = await executeTestRuntimeTool({
       workspace: request.workspace,
       toolName: request.name,
       args: request.args,
@@ -307,7 +307,7 @@ describe('path-policy Registry and Harness integration', () => {
       path: '.env',
       content: 'changed',
     });
-    const result = await executeTestRuntimeToolV1({
+    const result = await executeTestRuntimeTool({
       workspace: request.workspace,
       toolName: request.name,
       args: request.args,
@@ -345,7 +345,7 @@ describe('path-policy Registry and Harness integration', () => {
       path: target,
       content: 'changed',
     });
-    const result = await executeTestRuntimeToolV1({
+    const result = await executeTestRuntimeTool({
       workspace: request.workspace,
       toolName: request.name,
       args: request.args,
@@ -369,7 +369,7 @@ describe('path-policy Registry and Harness integration', () => {
       pattern: 'needle',
       path: '.',
     });
-    const result = await executeTestRuntimeToolV1({
+    const result = await executeTestRuntimeTool({
       workspace: request.workspace,
       toolName: request.name,
       args: request.args,
@@ -393,7 +393,7 @@ describe('path-policy Registry and Harness integration', () => {
   test('local stdio MCP rejects a protected cwd before transport creation', async () => {
     const workspace = temporaryDirectory('openpx-protected-mcp-');
     mkdirSync(join(workspace, '.kite-code'));
-    const protectedPathEvaluator = createProtectedPathEvaluatorV1({
+    const protectedPathEvaluator = createProtectedPathEvaluator({
       workspaceRoot: workspace,
       mode: 'deny',
     });
@@ -442,7 +442,7 @@ describe('path-policy Registry and Harness integration', () => {
 
   test('local stdio MCP passes the canonical admitted cwd to its transport factory', async () => {
     const workspace = temporaryDirectory('openpx-protected-mcp-canonical-');
-    const protectedPathEvaluator = createProtectedPathEvaluatorV1({
+    const protectedPathEvaluator = createProtectedPathEvaluator({
       workspaceRoot: workspace,
       mode: 'deny',
     });

@@ -9,7 +9,7 @@ export const REAL_RELEASE_PROVENANCE_VERIFICATION_ENABLED = false as const;
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const commitSchema = z.string().regex(/^[a-f0-9]{40}$/);
 
-export const releaseProvenanceClaimsV1Schema = z
+export const releaseProvenanceClaimsSchema = z
   .object({
     version: z.literal(1),
     source: z.literal('github_actions_oidc'),
@@ -51,7 +51,7 @@ export const releaseProvenanceClaimsV1Schema = z
     }
   });
 
-export type ReleaseProvenanceClaimsV1 = z.infer<typeof releaseProvenanceClaimsV1Schema>;
+export type ReleaseProvenanceClaims = z.infer<typeof releaseProvenanceClaimsSchema>;
 
 export class ReleaseProvenanceIdentityError extends Error {
   readonly code: 'claims_invalid' | 'identity_mismatch';
@@ -63,7 +63,7 @@ export class ReleaseProvenanceIdentityError extends Error {
   }
 }
 
-export interface BlockedReleaseProvenanceEvaluationV1 {
+export interface BlockedReleaseProvenanceEvaluation {
   status: 'blocked';
   reason:
     | 'repository_private'
@@ -79,7 +79,7 @@ export interface BlockedReleaseProvenanceEvaluationV1 {
  * Validate the complete pinned identity projection. This is not a substitute
  * for cryptographic Sigstore/GitHub attestation verification, which is disabled.
  */
-export function evaluateReleaseProvenanceIdentityV1(input: {
+export function evaluateReleaseProvenanceIdentity(input: {
   claims: unknown;
   expected: {
     commit: string;
@@ -89,8 +89,8 @@ export function evaluateReleaseProvenanceIdentityV1(input: {
     canonicalManifestDigest: string;
     sbomSha256: string;
   };
-}): BlockedReleaseProvenanceEvaluationV1 {
-  const parsed = releaseProvenanceClaimsV1Schema.safeParse(input.claims);
+}): BlockedReleaseProvenanceEvaluation {
+  const parsed = releaseProvenanceClaimsSchema.safeParse(input.claims);
   if (!parsed.success) throw new ReleaseProvenanceIdentityError('claims_invalid');
   const claims = parsed.data;
   const expected = input.expected;
@@ -116,7 +116,7 @@ export function evaluateReleaseProvenanceIdentityV1(input: {
 }
 
 function blocked(
-  reason: BlockedReleaseProvenanceEvaluationV1['reason'],
-): BlockedReleaseProvenanceEvaluationV1 {
+  reason: BlockedReleaseProvenanceEvaluation['reason'],
+): BlockedReleaseProvenanceEvaluation {
   return { status: 'blocked', reason, productionAccepted: false, identityContractMatched: true };
 }

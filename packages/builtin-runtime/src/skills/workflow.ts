@@ -3,15 +3,15 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node
 import { join, relative, resolve, sep } from 'node:path';
 import { parseDocument } from 'yaml';
 import type {
-  CapabilityApprovalV1 as CapabilityApproval,
-  CapabilityDescriptorV1 as CapabilityDescriptor,
-  EffectProfileV1 as EffectProfile,
-  JsonSchemaV1 as JsonSchema,
+  CapabilityApproval,
+  CapabilityDescriptor,
+  EffectProfile,
+  JsonSchema,
 } from './capability-domain';
 import {
-  compileCapabilitySchemaV1 as compileCapabilitySchema,
-  descriptorRevisionV1 as descriptorRevision,
-  digestCapabilityValueV1 as digestCapability,
+  compileCapabilitySchema,
+  descriptorRevision,
+  digestCapabilityValue as digestCapability,
 } from './capability-domain';
 
 export const SKILL_WORKFLOW_SCHEMA_VERSION = 1;

@@ -1,22 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import type { BuiltinWorkspaceFilesystemInvocationDispatcherV1 } from '@kite/builtin-runtime/filesystem';
+import type { BuiltinWorkspaceFilesystemInvocationDispatcher } from '@kite/builtin-runtime/filesystem';
 import {
-  AppBuiltinMechanismResolverErrorV1,
-  type AppBuiltinPreassembledMechanismResolverInputV1,
-  type AppBuiltinShellExecutorInputV1,
-  createAppBuiltinMechanismResolverV1,
+  AppBuiltinMechanismResolverError,
+  type AppBuiltinPreassembledMechanismResolverInput,
+  type AppBuiltinShellExecutorInput,
+  createAppBuiltinMechanismResolver,
 } from '#app/bootstrap/runtime/builtin-mechanism-resolver';
-import type { BuiltinShellExecutionResultV1 } from '#builtin-runtime';
+import type { BuiltinShellExecutionResult } from '#builtin-runtime';
 import type {
-  CapabilityPolicyEffectsV1,
-  GitInspectRequestV1,
-  RuntimeJsonValueV1,
-  WorkspaceFilesystemOperationV1,
+  CapabilityPolicyEffects,
+  GitInspectRequest,
+  RuntimeJsonValue,
+  WorkspaceFilesystemOperation,
 } from '#runtime-spi';
 
 const WORKSPACE = '/tmp/kite-mechanism-resolver';
 
-function frozenJson<T extends RuntimeJsonValueV1>(value: T): T {
+function frozenJson<T extends RuntimeJsonValue>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value)) frozenJson(child);
     Object.freeze(value);
@@ -25,8 +25,8 @@ function frozenJson<T extends RuntimeJsonValueV1>(value: T): T {
 }
 
 function baseInput(
-  overrides: Partial<AppBuiltinPreassembledMechanismResolverInputV1> = {},
-): AppBuiltinPreassembledMechanismResolverInputV1 {
+  overrides: Partial<AppBuiltinPreassembledMechanismResolverInput> = {},
+): AppBuiltinPreassembledMechanismResolverInput {
   return {
     executionMechanism: 'catalog',
     workspace: WORKSPACE,
@@ -44,7 +44,7 @@ function mechanism<T extends Record<string, unknown>>(
   return Object.freeze(record);
 }
 
-function shellResult(): BuiltinShellExecutionResultV1 {
+function shellResult(): BuiltinShellExecutionResult {
   return {
     ok: true,
     command: 'fixture',
@@ -57,28 +57,28 @@ function shellResult(): BuiltinShellExecutionResultV1 {
 
 describe('App Builtin mechanism resolver', () => {
   test('returns one frozen empty catalog map and rejects dedicated seams', () => {
-    const resolve = createAppBuiltinMechanismResolverV1();
+    const resolve = createAppBuiltinMechanismResolver();
     const catalog = resolve(baseInput());
     expect(catalog).toEqual({});
     expect(Object.isFrozen(catalog)).toBe(true);
 
     for (const executionMechanism of ['subagent', 'user_input', 'model', 'verification'] as const) {
       expect(() => resolve(baseInput({ executionMechanism }))).toThrow(
-        AppBuiltinMechanismResolverErrorV1,
+        AppBuiltinMechanismResolverError,
       );
     }
   });
 
   test('preserves raw filesystem paths and keeps external read/write grant boundaries', async () => {
-    const calls: WorkspaceFilesystemOperationV1[] = [];
-    const filesystemRuntime: BuiltinWorkspaceFilesystemInvocationDispatcherV1 = Object.freeze({
-      dispatch: async (operation: WorkspaceFilesystemOperationV1) => {
+    const calls: WorkspaceFilesystemOperation[] = [];
+    const filesystemRuntime: BuiltinWorkspaceFilesystemInvocationDispatcher = Object.freeze({
+      dispatch: async (operation: WorkspaceFilesystemOperation) => {
         calls.push(operation);
         return { ok: true } as never;
       },
     });
-    const resolve = createAppBuiltinMechanismResolverV1();
-    const readPolicy: CapabilityPolicyEffectsV1 = Object.freeze({ externalRead: true });
+    const resolve = createAppBuiltinMechanismResolver();
+    const readPolicy: CapabilityPolicyEffects = Object.freeze({ externalRead: true });
     const readMap = resolve(
       baseInput({
         executionMechanism: 'filesystem',
@@ -89,7 +89,7 @@ describe('App Builtin mechanism resolver', () => {
     );
     const readMechanism = readMap.filesystem as {
       readonly allowExternalPaths: boolean;
-      readonly dispatch: (operation: WorkspaceFilesystemOperationV1) => Promise<unknown>;
+      readonly dispatch: (operation: WorkspaceFilesystemOperation) => Promise<unknown>;
     };
     expect(readMechanism.allowExternalPaths).toBe(true);
     await readMechanism.dispatch({
@@ -101,7 +101,7 @@ describe('App Builtin mechanism resolver', () => {
     expect(calls[0]?.pathScope).toBe('external_read');
 
     calls.length = 0;
-    const writePolicy: CapabilityPolicyEffectsV1 = Object.freeze({ externalWrite: true });
+    const writePolicy: CapabilityPolicyEffects = Object.freeze({ externalWrite: true });
     const noGrantMap = resolve(
       baseInput({
         executionMechanism: 'filesystem',
@@ -113,7 +113,7 @@ describe('App Builtin mechanism resolver', () => {
     );
     const noGrantMechanism = noGrantMap.filesystem as {
       readonly allowExternalPaths: boolean;
-      readonly dispatch: (operation: WorkspaceFilesystemOperationV1) => Promise<unknown>;
+      readonly dispatch: (operation: WorkspaceFilesystemOperation) => Promise<unknown>;
     };
     expect(noGrantMechanism.allowExternalPaths).toBe(false);
     await noGrantMechanism.dispatch({
@@ -136,7 +136,7 @@ describe('App Builtin mechanism resolver', () => {
     );
     const grantedMechanism = grantedMap.filesystem as {
       readonly allowExternalPaths: boolean;
-      readonly dispatch: (operation: WorkspaceFilesystemOperationV1) => Promise<unknown>;
+      readonly dispatch: (operation: WorkspaceFilesystemOperation) => Promise<unknown>;
     };
     expect(grantedMechanism.allowExternalPaths).toBe(true);
     await grantedMechanism.dispatch({
@@ -152,25 +152,25 @@ describe('App Builtin mechanism resolver', () => {
     const controller = new AbortController();
     let inspectedSignal: AbortSignal | undefined;
     const gitBroker = Object.freeze({
-      inspect: async (_request: GitInspectRequestV1, signal?: AbortSignal) => {
+      inspect: async (_request: GitInspectRequest, signal?: AbortSignal) => {
         inspectedSignal = signal;
         return { ok: true, output: 'status' };
       },
     });
-    const resolve = createAppBuiltinMechanismResolverV1();
+    const resolve = createAppBuiltinMechanismResolver();
     const gitMap = resolve(
       baseInput({ executionMechanism: 'git', signal: controller.signal, gitBroker }),
     );
     const git = gitMap.git as {
-      readonly inspect: (request: GitInspectRequestV1, signal?: AbortSignal) => Promise<unknown>;
+      readonly inspect: (request: GitInspectRequest, signal?: AbortSignal) => Promise<unknown>;
     };
     await git.inspect({ operation: 'status' });
     expect(inspectedSignal).toBe(controller.signal);
 
     const progress: unknown[] = [];
-    const shellInputs: AppBuiltinShellExecutorInputV1[] = [];
+    const shellInputs: AppBuiltinShellExecutorInput[] = [];
     const shellExecutor = Object.freeze({
-      execute: async (input: Readonly<AppBuiltinShellExecutorInputV1>) => {
+      execute: async (input: Readonly<AppBuiltinShellExecutorInput>) => {
         shellInputs.push(input);
         return shellResult();
       },
@@ -233,7 +233,7 @@ describe('App Builtin mechanism resolver', () => {
     });
     await expect(
       Promise.resolve().then(() => shell.execute({ command: 'different', timeoutMs: 100 })),
-    ).rejects.toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).rejects.toThrow(AppBuiltinMechanismResolverError);
 
     const aborted = new AbortController();
     aborted.abort();
@@ -249,19 +249,19 @@ describe('App Builtin mechanism resolver', () => {
     const abortedShell = abortedMap.shell as typeof shell;
     await expect(
       Promise.resolve().then(() => abortedShell.execute({ command: 'pwd', timeoutMs: 100 })),
-    ).rejects.toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).rejects.toThrow(AppBuiltinMechanismResolverError);
     expect(shellInputs).toHaveLength(callsBeforeAbort);
   });
 
   test('treats approve_once as a bound one-call grant without widening policy effects', async () => {
-    const filesystemCalls: WorkspaceFilesystemOperationV1[] = [];
-    const filesystemRuntime: BuiltinWorkspaceFilesystemInvocationDispatcherV1 = Object.freeze({
-      dispatch: async (operation: WorkspaceFilesystemOperationV1) => {
+    const filesystemCalls: WorkspaceFilesystemOperation[] = [];
+    const filesystemRuntime: BuiltinWorkspaceFilesystemInvocationDispatcher = Object.freeze({
+      dispatch: async (operation: WorkspaceFilesystemOperation) => {
         filesystemCalls.push(operation);
         return { ok: true } as never;
       },
     });
-    const filesystem = createAppBuiltinMechanismResolverV1()(
+    const filesystem = createAppBuiltinMechanismResolver()(
       baseInput({
         executionMechanism: 'filesystem',
         canonicalArguments: frozenJson({ path: '../outside.txt', content: 'x' }),
@@ -273,7 +273,7 @@ describe('App Builtin mechanism resolver', () => {
     );
     const filesystemMechanism = filesystem.filesystem as {
       readonly allowExternalPaths: boolean;
-      readonly dispatch: (operation: WorkspaceFilesystemOperationV1) => Promise<unknown>;
+      readonly dispatch: (operation: WorkspaceFilesystemOperation) => Promise<unknown>;
     };
     expect(filesystemMechanism.allowExternalPaths).toBe(true);
     await filesystemMechanism.dispatch({
@@ -284,7 +284,7 @@ describe('App Builtin mechanism resolver', () => {
     });
     expect(filesystemCalls[0]?.pathScope).toBe('approved_external');
 
-    const filesystemWithoutPolicy = createAppBuiltinMechanismResolverV1()(
+    const filesystemWithoutPolicy = createAppBuiltinMechanismResolver()(
       baseInput({
         executionMechanism: 'filesystem',
         canonicalArguments: frozenJson({ path: '../outside.txt', content: 'x' }),
@@ -304,14 +304,14 @@ describe('App Builtin mechanism resolver', () => {
     });
     expect(filesystemCalls[1]?.pathScope).toBe('workspace_only');
 
-    const shellInputs: AppBuiltinShellExecutorInputV1[] = [];
+    const shellInputs: AppBuiltinShellExecutorInput[] = [];
     const shellExecutor = Object.freeze({
-      execute: async (input: Readonly<AppBuiltinShellExecutorInputV1>) => {
+      execute: async (input: Readonly<AppBuiltinShellExecutorInput>) => {
         shellInputs.push(input);
         return shellResult();
       },
     });
-    const resolve = createAppBuiltinMechanismResolverV1();
+    const resolve = createAppBuiltinMechanismResolver();
 
     const approved = resolve(
       baseInput({
@@ -355,7 +355,7 @@ describe('App Builtin mechanism resolver', () => {
       policyEffects: Object.freeze({ network: true }),
       shellExecutor,
     });
-    expect(() => resolve(policyAllow)).toThrow(AppBuiltinMechanismResolverErrorV1);
+    expect(() => resolve(policyAllow)).toThrow(AppBuiltinMechanismResolverError);
     expect(() =>
       resolve(
         baseInput({
@@ -366,7 +366,7 @@ describe('App Builtin mechanism resolver', () => {
           shellExecutor,
         }),
       ),
-    ).toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).toThrow(AppBuiltinMechanismResolverError);
     expect(() =>
       resolve(
         baseInput({
@@ -377,11 +377,11 @@ describe('App Builtin mechanism resolver', () => {
           shellExecutor,
         }),
       ),
-    ).toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).toThrow(AppBuiltinMechanismResolverError);
   });
 
   test('passes only one exact frozen preassembled wrapper for web, MCP, Skill, or planning', () => {
-    const resolve = createAppBuiltinMechanismResolverV1();
+    const resolve = createAppBuiltinMechanismResolver();
     const web = mechanism({ fetch: async () => ({ ok: true }) });
     const runtime = mechanism({
       getCapabilitySnapshot: () => ({}),
@@ -419,15 +419,15 @@ describe('App Builtin mechanism resolver', () => {
   });
 
   test('fails closed for missing, wrong-key, duplicate, mutable, and malformed mechanisms', () => {
-    const resolve = createAppBuiltinMechanismResolverV1();
-    const filesystemRuntime: BuiltinWorkspaceFilesystemInvocationDispatcherV1 = Object.freeze({
+    const resolve = createAppBuiltinMechanismResolver();
+    const filesystemRuntime: BuiltinWorkspaceFilesystemInvocationDispatcher = Object.freeze({
       dispatch: async () => ({ ok: true }) as never,
     });
     expect(() =>
       resolve(baseInput({ executionMechanism: 'filesystem', filesystemRuntime })),
     ).not.toThrow();
     expect(() => resolve(baseInput({ executionMechanism: 'git' }))).toThrow(
-      AppBuiltinMechanismResolverErrorV1,
+      AppBuiltinMechanismResolverError,
     );
     expect(() =>
       resolve(
@@ -436,7 +436,7 @@ describe('App Builtin mechanism resolver', () => {
           preassembledMechanism: Object.freeze({ wrong: Object.freeze({}) }),
         }),
       ),
-    ).toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).toThrow(AppBuiltinMechanismResolverError);
     expect(() =>
       resolve(
         baseInput({
@@ -447,7 +447,7 @@ describe('App Builtin mechanism resolver', () => {
           }),
         }),
       ),
-    ).toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).toThrow(AppBuiltinMechanismResolverError);
     expect(() =>
       resolve(
         baseInput({
@@ -455,7 +455,7 @@ describe('App Builtin mechanism resolver', () => {
           preassembledMechanism: { web: Object.freeze({ fetch: () => ({}) }) },
         }),
       ),
-    ).toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).toThrow(AppBuiltinMechanismResolverError);
     expect(() =>
       resolve(
         baseInput({
@@ -464,7 +464,7 @@ describe('App Builtin mechanism resolver', () => {
           shellExecutor: Object.freeze({ execute: async () => shellResult() }),
         }),
       ),
-    ).toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).toThrow(AppBuiltinMechanismResolverError);
     expect(() =>
       resolve(
         baseInput({
@@ -474,6 +474,6 @@ describe('App Builtin mechanism resolver', () => {
           policyEffects: { externalRead: true },
         }),
       ),
-    ).toThrow(AppBuiltinMechanismResolverErrorV1);
+    ).toThrow(AppBuiltinMechanismResolverError);
   });
 });

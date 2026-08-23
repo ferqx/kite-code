@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import { createCapabilityBindingV1 } from '@kite/builtin-runtime';
+import { createCapabilityBinding } from '@kite/builtin-runtime';
 import {
   isMcpToolEnabled,
   McpConnectionManager,
@@ -157,7 +157,7 @@ describe('MCP Tool visibility and policy', () => {
     });
     const beforeSnapshot = manager.getCapabilitySnapshot();
     const before = manager.findCapability('mcp:fixture/read')!;
-    const binding = createCapabilityBindingV1({
+    const binding = createCapabilityBinding({
       capabilityId: before.capabilityId,
       capabilityRevision: before.revision,
       exposedToolName: 'mcp__fixture__read',

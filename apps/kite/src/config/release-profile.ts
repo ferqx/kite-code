@@ -10,15 +10,15 @@ import {
 
 export const RELEASE_PROFILE_VERSION = 1 as const;
 
-export const PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1 = [
+export const PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_ = [
   'macos-15-arm64',
   'ubuntu-24.04-x64',
   'windows-2025-x64',
 ] as const;
-export type ProductionDistributionTargetIdentityV1 =
-  (typeof PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1)[number];
-export type ProductionDistributionTargetV1 = Readonly<{
-  identity: ProductionDistributionTargetIdentityV1;
+export type ProductionDistributionTargetIdentity =
+  (typeof PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_)[number];
+export type ProductionDistributionTarget = Readonly<{
+  identity: ProductionDistributionTargetIdentity;
   platform: 'macos' | 'linux' | 'windows';
   arch: 'arm64' | 'x64';
   nativeRunner: 'macos-15' | 'ubuntu-24.04' | 'windows-2025';
@@ -28,8 +28,8 @@ export type ProductionDistributionTargetV1 = Readonly<{
  * Release-owned, closed distribution target registry. Membership admits only
  * a TUI/CLI artifact identity; it does not admit any effectful capability.
  */
-export const PRODUCTION_DISTRIBUTION_TARGETS_V1: Readonly<
-  Record<ProductionDistributionTargetIdentityV1, ProductionDistributionTargetV1>
+export const PRODUCTION_DISTRIBUTION_TARGETS_: Readonly<
+  Record<ProductionDistributionTargetIdentity, ProductionDistributionTarget>
 > = Object.freeze({
   'macos-15-arm64': Object.freeze({
     identity: 'macos-15-arm64',
@@ -52,19 +52,19 @@ export const PRODUCTION_DISTRIBUTION_TARGETS_V1: Readonly<
 });
 
 /** D-04 effectful execution support remains independently empty. */
-export const SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1: readonly string[] = Object.freeze([]);
+export const SUPPORTED_PRODUCTION_EXECUTION_TARGETS_: readonly string[] = Object.freeze([]);
 
-export function parseProductionDistributionTargetIdentityV1(
+export function parseProductionDistributionTargetIdentity(
   value: unknown,
-): ProductionDistributionTargetIdentityV1 {
+): ProductionDistributionTargetIdentity {
   const identity = typeof value === 'string' ? value.trim() : '';
   if (!identity) {
     throw new ProductionReleaseProfileAdmissionError('distribution_target_identity_missing');
   }
-  if (!Object.hasOwn(PRODUCTION_DISTRIBUTION_TARGETS_V1, identity)) {
+  if (!Object.hasOwn(PRODUCTION_DISTRIBUTION_TARGETS_, identity)) {
     throw new ProductionReleaseProfileAdmissionError('distribution_target_identity_unsupported');
   }
-  return identity as ProductionDistributionTargetIdentityV1;
+  return identity as ProductionDistributionTargetIdentity;
 }
 
 const finiteNonNegativeIntegerSchema = z.number().finite().int().nonnegative();
@@ -77,7 +77,7 @@ const capabilityShape = Object.fromEntries(
 
 export const releaseCapabilityStatesSchema = z.object(capabilityShape).strict();
 
-const releaseSafetyV1Schema = z
+const releaseSafetySchema = z
   .object({
     requireWorkspaceTrust: z.literal(true),
     requireSandbox: z.boolean(),
@@ -98,7 +98,7 @@ const releaseSafetyV1Schema = z
   })
   .strict();
 
-const releaseDataV1Schema = z
+const releaseDataSchema = z
   .object({
     providerRouteAllowlist: z.array(identitySchema),
     providerRouteDenylist: z.array(identitySchema),
@@ -107,14 +107,14 @@ const releaseDataV1Schema = z
   })
   .strict();
 
-export const releaseProfileV1Schema = z
+export const releaseProfileSchema = z
   .object({
     version: z.literal(RELEASE_PROFILE_VERSION),
     profileId: identitySchema,
     channel: z.enum(['internal', 'limited', 'canary', 'ga']),
     capabilities: releaseCapabilityStatesSchema,
     canaryCapability: z.enum(RELEASE_CAPABILITIES).optional(),
-    safety: releaseSafetyV1Schema,
+    safety: releaseSafetySchema,
     resources: z
       .object({
         maxRunDurationMs: finiteNonNegativeIntegerSchema,
@@ -132,7 +132,7 @@ export const releaseProfileV1Schema = z
         maxArtifactBytes: finiteNonNegativeIntegerSchema,
       })
       .strict(),
-    data: releaseDataV1Schema,
+    data: releaseDataSchema,
     logging: z
       .object({
         defaultMode: z.enum(['off', 'metadata']),
@@ -224,12 +224,12 @@ export const releaseProfileV1Schema = z
     data: normalizeDataSets(profile.data),
   }));
 
-export type ReleaseProfileV1 = z.infer<typeof releaseProfileV1Schema>;
-export type ReleaseChannelV1 = ReleaseProfileV1['channel'];
-export type ReleaseProfileApprovalRequirementV1 = CapabilityApproval;
-export type ReleaseProfileVerificationRequirementV1 = VerificationMode;
+export type ReleaseProfile = z.infer<typeof releaseProfileSchema>;
+export type ReleaseChannel = ReleaseProfile['channel'];
+export type ReleaseProfileApprovalRequirement = CapabilityApproval;
+export type ReleaseProfileVerificationRequirement = VerificationMode;
 
-export type EmbeddedReleaseProfileIdV1 =
+export type EmbeddedReleaseProfileId =
   | 'internal-dogfood'
   | 'limited-production'
   | 'capability-canary'
@@ -263,7 +263,7 @@ function normalizeSet(values: readonly string[]): string[] {
   return [...new Set(values)].sort();
 }
 
-function normalizeSafetySets(safety: z.input<typeof releaseSafetyV1Schema>) {
+function normalizeSafetySets(safety: z.input<typeof releaseSafetySchema>) {
   const networkDenylist = normalizeSet(safety.networkDenylist);
   const mcpProviderDenylist = normalizeSet(safety.mcpProviderDenylist);
   const deniedNetworkHosts = new Set(networkDenylist);
@@ -287,7 +287,7 @@ function normalizeSafetySets(safety: z.input<typeof releaseSafetyV1Schema>) {
   };
 }
 
-function normalizeDataSets(data: z.input<typeof releaseDataV1Schema>) {
+function normalizeDataSets(data: z.input<typeof releaseDataSchema>) {
   const providerRouteDenylist = normalizeSet(data.providerRouteDenylist);
   const deniedRoutes = new Set(providerRouteDenylist);
   return {
@@ -317,11 +317,11 @@ function allCapabilitiesOff(): Record<ReleaseCapability, CapabilityReleaseState>
 }
 
 function failClosedEmbeddedProfile(
-  profileId: EmbeddedReleaseProfileIdV1,
-  channel: ReleaseChannelV1,
+  profileId: EmbeddedReleaseProfileId,
+  channel: ReleaseChannel,
   canaryCapability?: ReleaseCapability,
-): ReleaseProfileV1 {
-  return parseReleaseProfileV1({
+): ReleaseProfile {
+  return parseReleaseProfile({
     version: 1,
     profileId,
     channel,
@@ -382,8 +382,8 @@ function failClosedEmbeddedProfile(
  * Static, non-distributable ceilings. D-04 keeps every capability and budget
  * closed; these values are schema fixtures until an ADR admits a real target.
  */
-export const EMBEDDED_RELEASE_PROFILES_V1: Readonly<
-  Record<EmbeddedReleaseProfileIdV1, ReleaseProfileV1>
+export const EMBEDDED_RELEASE_PROFILES_: Readonly<
+  Record<EmbeddedReleaseProfileId, ReleaseProfile>
 > = deepFreeze({
   'internal-dogfood': failClosedEmbeddedProfile('internal-dogfood', 'internal'),
   'limited-production': failClosedEmbeddedProfile('limited-production', 'limited'),
@@ -395,8 +395,8 @@ export const EMBEDDED_RELEASE_PROFILES_V1: Readonly<
   'general-availability': failClosedEmbeddedProfile('general-availability', 'ga'),
 });
 
-export function parseReleaseProfileV1(value: unknown): ReleaseProfileV1 {
-  return releaseProfileV1Schema.parse(value);
+export function parseReleaseProfile(value: unknown): ReleaseProfile {
+  return releaseProfileSchema.parse(value);
 }
 
 /**
@@ -404,26 +404,26 @@ export function parseReleaseProfileV1(value: unknown): ReleaseProfileV1 {
  * The controlled-config boundary calls this again so an in-memory forged
  * composition cannot bypass the release profile admission decision.
  */
-export function admitProductionDistributionTargetIdentityV1(input: {
-  profile: ReleaseProfileV1;
+export function admitProductionDistributionTargetIdentity(input: {
+  profile: ReleaseProfile;
   production: true;
   distributionTargetIdentity?: string;
-}): ProductionDistributionTargetIdentityV1;
-export function admitProductionDistributionTargetIdentityV1(input: {
-  profile: ReleaseProfileV1;
+}): ProductionDistributionTargetIdentity;
+export function admitProductionDistributionTargetIdentity(input: {
+  profile: ReleaseProfile;
   production: false;
   distributionTargetIdentity?: string;
 }): undefined;
-export function admitProductionDistributionTargetIdentityV1(input: {
-  profile: ReleaseProfileV1;
+export function admitProductionDistributionTargetIdentity(input: {
+  profile: ReleaseProfile;
   production: boolean;
   distributionTargetIdentity?: string;
-}): ProductionDistributionTargetIdentityV1 | undefined;
-export function admitProductionDistributionTargetIdentityV1(input: {
-  profile: ReleaseProfileV1;
+}): ProductionDistributionTargetIdentity | undefined;
+export function admitProductionDistributionTargetIdentity(input: {
+  profile: ReleaseProfile;
   production: boolean;
   distributionTargetIdentity?: string;
-}): ProductionDistributionTargetIdentityV1 | undefined {
+}): ProductionDistributionTargetIdentity | undefined {
   if (!input.production) return undefined;
   if (input.profile.channel === 'internal') {
     throw new ProductionReleaseProfileAdmissionError('production_internal_profile');
@@ -431,25 +431,25 @@ export function admitProductionDistributionTargetIdentityV1(input: {
   if (Object.values(input.profile.capabilities).some((state) => state.maxRollout !== 'off')) {
     throw new ProductionReleaseProfileAdmissionError('distribution_target_capabilities_not_off');
   }
-  return parseProductionDistributionTargetIdentityV1(input.distributionTargetIdentity);
+  return parseProductionDistributionTargetIdentity(input.distributionTargetIdentity);
 }
 
 /** Admission must run before any production Runtime/provider/transport exists. */
-export function admitEmbeddedReleaseProfileV1(input: {
-  profileId: EmbeddedReleaseProfileIdV1;
+export function admitEmbeddedReleaseProfile(input: {
+  profileId: EmbeddedReleaseProfileId;
   releaseProfileV1Enabled: boolean;
   production?: boolean;
   distributionTargetIdentity?: string;
-}): ReleaseProfileV1 {
+}): ReleaseProfile {
   if (!input.releaseProfileV1Enabled) {
     throw new ProductionReleaseProfileAdmissionError('feature_disabled');
   }
-  const profile = EMBEDDED_RELEASE_PROFILES_V1[input.profileId];
+  const profile = EMBEDDED_RELEASE_PROFILES_[input.profileId];
   if (!profile) throw new ProductionReleaseProfileAdmissionError('profile_not_embedded');
-  admitProductionDistributionTargetIdentityV1({
+  admitProductionDistributionTargetIdentity({
     profile,
     production: input.production ?? false,
     distributionTargetIdentity: input.distributionTargetIdentity,
   });
-  return parseReleaseProfileV1(profile);
+  return parseReleaseProfile(profile);
 }

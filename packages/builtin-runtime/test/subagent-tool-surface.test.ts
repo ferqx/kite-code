@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinSubagentToolSurfaceV1,
-  createBuiltinToolCatalogProjectionV1,
-  createCapabilityBindingV1,
+  createBuiltinSubagentToolSurface,
+  createBuiltinToolCatalogProjection,
+  createCapabilityBinding,
 } from '@kite/builtin-runtime';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 
 function catalog() {
-  return createBuiltinToolCatalogProjectionV1(
-    createRuntimeModuleRegistryV1(createBuiltinRuntimeModules()).snapshot(),
+  return createBuiltinToolCatalogProjection(
+    createRuntimeModuleRegistry(createBuiltinRuntimeModules()).snapshot(),
   );
 }
 
@@ -38,7 +38,7 @@ const MCP_DESCRIPTOR: CapabilityDescriptor = Object.freeze({
 
 describe('Builtin subagent tool surface', () => {
   test('filters interrupt/nested Task and keeps dynamic MCP outside the catalog revision', () => {
-    const binding = createCapabilityBindingV1({
+    const binding = createCapabilityBinding({
       capabilityId: MCP_DESCRIPTOR.capabilityId,
       capabilityRevision: MCP_DESCRIPTOR.revision,
       exposedToolName: 'mcp__test__read',
@@ -46,9 +46,9 @@ describe('Builtin subagent tool surface', () => {
       turnId: 'turn-1',
     });
     const baseCatalog = catalog();
-    const surface = createBuiltinSubagentToolSurfaceV1({
+    const surface = createBuiltinSubagentToolSurface({
       catalog: baseCatalog,
-      turnContext: Object.freeze({ workspace: '/workspace', promptContractV2: true }),
+      turnContext: Object.freeze({ workspace: '/workspace', promptContract: true }),
       allowedTools: new Set(['read_file', 'search_files', 'task']),
       canSpawnSubagents: false,
       dynamicMcpBindings: [{ binding, descriptor: MCP_DESCRIPTOR }],
@@ -69,7 +69,7 @@ describe('Builtin subagent tool surface', () => {
   });
 
   test('fails closed by omission for stale schema identity or a non-MCP exposed name', () => {
-    const binding = createCapabilityBindingV1({
+    const binding = createCapabilityBinding({
       capabilityId: MCP_DESCRIPTOR.capabilityId,
       capabilityRevision: MCP_DESCRIPTOR.revision,
       exposedToolName: 'mcp__test__read',
@@ -78,7 +78,7 @@ describe('Builtin subagent tool surface', () => {
     });
     const staleBinding = Object.freeze({ ...binding, schemaDigest: 'stale-schema' });
     const disguisedBinding = Object.freeze({ ...binding, exposedToolName: 'ask_user' });
-    const surface = createBuiltinSubagentToolSurfaceV1({
+    const surface = createBuiltinSubagentToolSurface({
       catalog: catalog(),
       turnContext: Object.freeze({ workspace: '/workspace' }),
       allowedTools: new Set(),

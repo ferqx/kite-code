@@ -1,10 +1,10 @@
 import {
-  type BuiltinShellExecutionResultV1,
-  classifyBuiltinShellIntentV1,
+  type BuiltinShellExecutionResult,
+  classifyBuiltinShellIntent,
 } from '@kite/builtin-runtime';
 import type {
-  BuiltinPreparedShellExecutionInputV1,
-  BuiltinPreparedShellExecutionResultV1,
+  BuiltinPreparedShellExecutionInput,
+  BuiltinPreparedShellExecutionResult,
   ShellExecutor,
   ShellResult,
 } from '@kite/builtin-runtime/sandbox';
@@ -14,38 +14,38 @@ import type {
  * startup. It is composition metadata only; it is never persisted or exposed
  * through the Runtime SPI registry.
  */
-export const APP_PREPARED_SHELL_EXECUTION_V1 = Symbol.for('kite.app.prepared-shell-execution.v1');
+export const APP_PREPARED_SHELL_EXECUTION_ = Symbol.for('kite.app.prepared-shell-execution.v1');
 
-export interface AppPreparedShellExecutionPortV1 {
+export interface AppPreparedShellExecutionPort {
   readonly execute: (
-    input: Readonly<BuiltinPreparedShellExecutionInputV1>,
-  ) => Promise<Readonly<BuiltinShellExecutionResultV1>>;
+    input: Readonly<BuiltinPreparedShellExecutionInput>,
+  ) => Promise<Readonly<BuiltinShellExecutionResult>>;
 }
 
-export type AppPreparedShellExecutionCarrierV1 = ShellExecutor & {
-  readonly [APP_PREPARED_SHELL_EXECUTION_V1]: AppPreparedShellExecutionPortV1;
+export type AppPreparedShellExecutionCarrier = ShellExecutor & {
+  readonly [APP_PREPARED_SHELL_EXECUTION_]: AppPreparedShellExecutionPort;
 };
 
-export function appPreparedShellExecutionPortV1(
+export function appPreparedShellExecutionPort(
   executor: ShellExecutor | undefined,
-): AppPreparedShellExecutionPortV1 | undefined {
+): AppPreparedShellExecutionPort | undefined {
   if (!executor) return undefined;
-  const candidate = (executor as Partial<AppPreparedShellExecutionCarrierV1>)[
-    APP_PREPARED_SHELL_EXECUTION_V1
+  const candidate = (executor as Partial<AppPreparedShellExecutionCarrier>)[
+    APP_PREPARED_SHELL_EXECUTION_
   ];
   return candidate && typeof candidate.execute === 'function' ? candidate : undefined;
 }
 
-export function projectBuiltinPreparedShellResultV1(
-  result: Readonly<BuiltinPreparedShellExecutionResultV1>,
-): Readonly<BuiltinShellExecutionResultV1> {
+export function projectBuiltinPreparedShellResult(
+  result: Readonly<BuiltinPreparedShellExecutionResult>,
+): Readonly<BuiltinShellExecutionResult> {
   return Object.freeze({
     ok: result.ok,
     command: result.command,
     exitCode: result.exitCode,
     stdout: result.stdout,
     stderr: result.stderr,
-    intent: classifyBuiltinShellIntentV1(result.command),
+    intent: classifyBuiltinShellIntent(result.command),
     ...(result.terminationReason ? { terminationReason: result.terminationReason } : {}),
     ...(result.terminationReason === 'timed_out' ? { timedOut: true } : {}),
     ...(result.terminationReason === 'cancelled' ? { aborted: true } : {}),
@@ -57,9 +57,9 @@ export function projectBuiltinPreparedShellResultV1(
   });
 }
 
-export function projectAppHostShellResultV1(
+export function projectAppHostShellResult(
   result: Readonly<ShellResult>,
-): Readonly<BuiltinShellExecutionResultV1> {
+): Readonly<BuiltinShellExecutionResult> {
   const executionPhase =
     result.sandboxFailure?.stage === 'pre_dispatch'
       ? ('not_started' as const)
@@ -72,7 +72,7 @@ export function projectAppHostShellResultV1(
     exitCode: result.exitCode,
     stdout: result.stdout,
     stderr: result.stderr,
-    intent: classifyBuiltinShellIntentV1(result.command),
+    intent: classifyBuiltinShellIntent(result.command),
     ...(result.terminationReason ? { terminationReason: result.terminationReason } : {}),
     ...(result.terminationReason === 'timed_out' ? { timedOut: true } : {}),
     ...(result.terminationReason === 'cancelled' ? { aborted: true } : {}),

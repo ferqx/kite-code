@@ -15,11 +15,11 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
 
 ## Model Surface V1 与唯一 Gateway
 
-RMV1-15 后，`packages/runtime-spi/src/model-surface.ts` 与
+RM-15 后，`packages/runtime-spi/src/model-surface.ts` 与
 `packages/builtin-runtime/src/model/surface-canonicalizer.ts` 封闭定义五类 invocation purpose 及其 Provider
 dispatch purpose 映射、
-provider-neutral message/tool/route、`ModelSurfaceV1`、`ModelInvocationEnvelopeV1`、
-`ModelResponseRecordV1` 和 opaque `PrivateArtifactRefV1`。现有 `ProviderDispatchPurposeV1` 只复用该
+provider-neutral message/tool/route、`ModelSurface`、`ModelInvocationEnvelope`、
+`ModelResponseRecord` 和 opaque `PrivateArtifactRef`。现有 `ProviderDispatchPurpose` 只复用该
 Protocol union，避免两份 purpose 列表漂移；这不改变 admission 决策。
 
 Model Surface canonicalizer 使用独立 private domain 的严格 canonical JSON：object key 顺序不影响
@@ -28,38 +28,38 @@ object、closure、未知 message part、未知 contract 字段、stale nested d
 provider options 都 fail closed。Surface route 只允许 provider/model/adapter 的无秘密 identity 与 digest，
 不接受 API key、authorization header、credential、base URL 或原始 endpoint。
 
-共享 `PrivateImmutableArtifactStorageV1` 与 schema-aware `ModelArtifactStoreV1` 保存 Model Surface、
+共享 `PrivateImmutableArtifactStorage` 与 schema-aware `ModelArtifactStore` 保存 Model Surface、
 response 与大尺寸 Provider options。它们使用独立分区、path-free content ref、owner-only/no-follow
 单链接文件、file/directory fsync 与 atomic publish；corruption、未知 GC entry 和不完整的全
 session/fork reachability 都 fail closed。Artifact 正文不进入 Runtime Event、Session Logger 或 telemetry。
 `CapabilityArtifactStore` 复用同一无密钥内容寻址原语，但继续保持独立
 `capability-artifacts/results` namespace、schema、ref 与访问边界；Capability receipt 不能写入或读取 Model 分区。
 
-RMV1-16 的源码 caller/owner closure 已切到唯一 App/Host/Builtin seam。五个 `model:*` operation 由 Builtin registry 唯一
-注册；每个 App/Host lifetime 只创建一个 `BuiltinModelOperationExecutionPortV1`、一个 Gateway 与一个
-`BuiltinModelEffectCoordinatorV1`，均绑定同一 frozen snapshot。App `RuntimeSessionCoordinator`、
-`runtime-effect-coordinator.ts`、`runtime-tool-effect.ts` 与 `turn-coordinator.ts` 是唯一 State26 orchestration seam；
+RM-16 的源码 caller/owner closure 已切到唯一 App/Host/Builtin seam。五个 `model:*` operation 由 Builtin registry 唯一
+注册；每个 App/Host lifetime 只创建一个 `BuiltinModelOperationExecutionPort`、一个 Gateway 与一个
+`BuiltinModelEffectCoordinator`，均绑定同一 frozen snapshot。App `RuntimeSessionCoordinator`、
+`runtime-effect-coordinator.ts`、`runtime-tool-effect.ts` 与 `turn-coordinator.ts` 是唯一 Runtime State orchestration seam；
 Host `tool-pipeline-coordinator.ts` 只负责 generic prepared/ack/receipt/lifecycle mechanism，Kernel 只负责纯 decision/reducer。
 Primary、compaction、auto-review、verification-review 与 subagent step 均通过同一 Gateway；Context/Prompt projection、
 preflight、Surface、Provider admission、response normalization、cache/usage/tool-call facts 与 completion commit 由
 Builtin/App seam 拥有。`packages/builtin-runtime/src/subagent/` 拥有 child Model loop、角色 prompt、Workspace/CWD、
 Builtin catalog 与 dynamic MCP overlay；App subagent adapter 只注入 callback。旧 Core/legacy production paths、第二
-coordinator、direct model caller 与 fallback 均不存在。RMV1-16 最终 manifest/docs/journey/fault/soak Gate 已全部通过。
+coordinator、direct model caller 与 fallback 均不存在。RM-16 最终 manifest/docs/journey/fault/soak Gate 已全部通过。
 
 MS-03/MS-04 已作为同一个模型迁移 series 接线。`buildContextProjection()` 仍是 primary 最终消息事实源；
-每类调用都先由 `compileModelSurfaceV1()` 生成并冻结唯一 Surface，再交给
-`ModelInvocationGatewayV1`。Gateway 是唯一拥有 live response attempt/retry orchestration、
+每类调用都先由 `compileModelSurface()` 生成并冻结唯一 Surface，再交给
+`ModelInvocationGateway`。Gateway 是唯一拥有 live response attempt/retry orchestration、
 admission、Model Artifact protocol 与 response completion handle 的生产入口；旧 `invokeBoundModel()`
-及旧 low-level invoke authority 已删除。production composition 只显式构造 live `ModelResponseSourceV1`；
+及旧 low-level invoke authority 已删除。production composition 只显式构造 live `ModelResponseSource`；
 live Source 是唯一可导入 single-attempt transport 的模块，Gateway 直接导入 transport 也由静态边界拒绝。
 primary agent、context compaction、auto review、verification review 和 subagent step 五个 purpose 均通过该 Gateway。
 
 2026-08-22 的直接裁决已删除本版 evaluation 与其 ModelReplay catalog、record/replay response source、
 suite actor/context 和 CI 入口；生产与测试源码不存在第二种 response source、外部 replay catalog 或
-live fallback。产品态 State26 Session restore/Event replay 不属于该 evaluation，继续严格保留。
-`ModelAdapterReplayOwnerV1`、`route.replayOwner` 与 `nativeReplayState` 是 Store5 Model Artifact 的既有
+live fallback。产品态 Runtime State Session restore/Event replay 不属于该 evaluation，继续严格保留。
+`ModelAdapterReplayOwner`、`route.replayOwner` 与 `nativeReplayState` 是 SQLite Store Model Artifact 的既有
 序列化兼容字段，仅描述 Provider adapter 对其原生响应状态的 ownership；它们不构成 evaluator、catalog、
-cassette 或自动重放 authority，并在 RMV1 中不得重命名或改变形状。后续评测必须另立计划和全新边界。
+cassette 或自动重放 authority，并在 RM 中不得重命名或改变形状。后续评测必须另立计划和全新边界。
 
 Gateway、live response source、single-attempt transport、Surface compiler、message conversion、prompt assets、
 Context compiler/selection、token/cache accounting、compaction 与 reviewer 的物理实现都位于
@@ -67,7 +67,7 @@ Context compiler/selection、token/cache accounting、compaction 与 reviewer �
 `kite-builtin-runtime-rmv1-15` 唯一注册五类 Model operation，Legacy operation 列表为空。App composition root 显式
 装配 Artifact mechanism 与 live Source，再把 composition port 注入 RuntimeSessionCoordinator；App 不创建
 第二 Gateway/Source，也没有 try-new-catch-old 或 live fallback。Model Surface contract 与 concrete implementation
-只位于 `packages/runtime-spi/model` 与 `packages/builtin-runtime/model`，State26 typing 由 Kernel/Host seam 提供。
+只位于 `packages/runtime-spi/model` 与 `packages/builtin-runtime/model`，Runtime State typing 由 Kernel/Host seam 提供。
 
 Subagent start/resume 的每个 child model attempt 继续只经同一 coordinator 与 Gateway；Provider 与 Driver 不能取得 transport
 或 Model Surface authority。actor identity 由 parent invocation/tool/attempt/role 等不含 task 正文的稳定事实派生；
@@ -143,7 +143,7 @@ Artifact receipt；恢复路径不自动重放，也没有 live fallback。
   派生会话时恢复各自 route。新会话使用最近一次全局选择，已有会话之间不得互相覆盖模型配置。
 
 Provider 真实网络访问不属于默认确定性测试。运行时只能通过唯一
-`ModelInvocationGatewayV1`、configured-provider admission 和一次性 transport attempt 进入 Provider；
+`ModelInvocationGateway`、configured-provider admission 和一次性 transport attempt 进入 Provider；
 缺少 composition、resolved route、credential 或 transport 时必须在网络调用前 fail closed。
 
 Gateway 的 admission 不是 release-pinned provider allowlist。它接受用户最终 resolved configuration，

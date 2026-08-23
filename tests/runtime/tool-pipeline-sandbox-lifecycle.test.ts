@@ -2,33 +2,33 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime';
 import {
-  SandboxPreparationArtifactStoreV1,
-  sandboxPreparationDigestV1,
+  SandboxPreparationArtifactStore,
+  sandboxPreparationDigest,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  createDeterministicRuntimeIdSourceV1,
-  createRuntimeHostSandboxPreparedProcessExecutionPortV1,
-  createRuntimeHostStateInitialStateV1,
-  createRuntimeHostStateSessionV1,
+  createDeterministicRuntimeIdSource,
+  createRuntimeHostSandboxPreparedProcessExecutionPort,
+  createRuntimeHostStateInitialState,
+  createRuntimeHostStateSession,
   type RuntimeHostExecutionServices,
-  type StateRuntimeSessionInputV1,
-  type StateRuntimeStateV1,
+  type StateRuntimeSessionInput,
+  type StateRuntimeState,
 } from '@kite/runtime-host';
 import type {
-  ExecutionBackendCapabilitiesV1,
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedSandboxExecutionV1,
-  PreparedToolInvocationV1,
-  SandboxExecutionDispatchIntentAcknowledgementV1,
-  SandboxPreparationV1,
-  ToolPipelineAttemptAcknowledgementV1,
+  ExecutionBackendCapabilities,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedSandboxExecution,
+  PreparedToolInvocation,
+  SandboxExecutionDispatchIntentAcknowledgement,
+  SandboxPreparation,
+  ToolPipelineAttemptAcknowledgement,
 } from '@kite/runtime-spi';
 import {
-  AppToolPipelineSandboxLifecycleErrorV1,
-  createAppToolPipelineSandboxLifecycleV1,
+  AppToolPipelineSandboxLifecycleError,
+  createAppToolPipelineSandboxLifecycle,
 } from '#app/bootstrap/runtime/tool-pipeline-sandbox-lifecycle';
 
 const NOW = '2026-08-22T00:00:00.000Z';
@@ -38,9 +38,9 @@ const EFFECTS = Object.freeze({
   network: 'none' as const,
   externalState: 'none' as const,
 });
-const EFFECTS_DIGEST = digestCapabilityValueV1(EFFECTS);
+const EFFECTS_DIGEST = digestCapabilityValue(EFFECTS);
 
-const backendCapabilities: ExecutionBackendCapabilitiesV1 = deepFreeze({
+const backendCapabilities: ExecutionBackendCapabilities = deepFreeze({
   backend: 'bubblewrap',
   filesystem: {
     read_only: 'enforced',
@@ -54,10 +54,10 @@ const backendCapabilities: ExecutionBackendCapabilitiesV1 = deepFreeze({
   verifiedInProcessReadOnly: 'enforced',
 });
 
-function preparedTool(): Readonly<PreparedToolInvocationV1> & {
-  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentityV1>;
+function preparedTool(): Readonly<PreparedToolInvocation> & {
+  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentity>;
 } {
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     invocationId: 'invocation-sandbox-lifecycle',
     attemptId: 'invocation-sandbox-lifecycle:attempt:1',
     toolCallId: 'tool-call-sandbox-lifecycle',
@@ -65,7 +65,7 @@ function preparedTool(): Readonly<PreparedToolInvocationV1> & {
     modelMessageId: 'message-sandbox-lifecycle',
     argumentOrigin: 'model_public',
     providerId: 'builtin-provider',
-    operationId: 'builtin:shell_execute' as NonDynamicOperationIdV1,
+    operationId: 'builtin:shell_execute' as NonDynamicOperationId,
     executionFamily: 'builtin',
     executionMechanism: 'shell',
     capabilityId: 'builtin:shell_execute',
@@ -73,7 +73,7 @@ function preparedTool(): Readonly<PreparedToolInvocationV1> & {
     descriptorRevision: 'shell-descriptor-v1',
     parserRevision: 'shell-parser-v1',
     executorRevision: 'shell-executor-v1',
-    argumentsDigest: digestCapabilityValueV1({ command: 'printf hello' }),
+    argumentsDigest: digestCapabilityValue({ command: 'printf hello' }),
     schemaDigest: 'shell-schema-v1',
     effectiveEffectsDigest: EFFECTS_DIGEST,
     policyDigest: 'shell-policy-v1',
@@ -120,8 +120,8 @@ function preparedTool(): Readonly<PreparedToolInvocationV1> & {
 }
 
 function openAcknowledgement(
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<ToolPipelineAttemptAcknowledgementV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<ToolPipelineAttemptAcknowledgement> {
   const identity = prepared.identity;
   return deepFreeze({
     acknowledged: true,
@@ -139,7 +139,7 @@ function openAcknowledgement(
   });
 }
 
-function preparation(prepared: Readonly<PreparedToolInvocationV1>): Readonly<SandboxPreparationV1> {
+function preparation(prepared: Readonly<PreparedToolInvocation>): Readonly<SandboxPreparation> {
   return deepFreeze({
     schema: 'kite.sandbox-execution-provider.v1',
     toolCallId: prepared.identity.toolCallId,
@@ -171,9 +171,9 @@ function preparation(prepared: Readonly<PreparedToolInvocationV1>): Readonly<San
 }
 
 function preparedSandbox(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  source: Readonly<SandboxPreparationV1>,
-): Readonly<PreparedSandboxExecutionV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+  source: Readonly<SandboxPreparation>,
+): Readonly<PreparedSandboxExecution> {
   return deepFreeze({
     schema: 'kite.sandbox-execution-provider.v1',
     kind: 'prepared_sandbox_execution',
@@ -186,7 +186,7 @@ function preparedSandbox(
     canonicalWorkspace: WORKSPACE,
     effectiveEffectsDigest: prepared.identity.effectiveEffectsDigest,
     admissionDigest: prepared.identity.admissionDigest!,
-    preparationDigest: sandboxPreparationDigestV1(source),
+    preparationDigest: sandboxPreparationDigest(source),
     commandDigest: source.commandDigest,
     approvedArgv: source.argv,
     argv: source.argv,
@@ -203,20 +203,20 @@ function preparedSandbox(
   });
 }
 
-function initialState(): StateRuntimeStateV1 {
-  return createRuntimeHostStateInitialStateV1({
+function initialState(): StateRuntimeState {
+  return createRuntimeHostStateInitialState({
     recoveryIdentityKey: 'a'.repeat(64),
     threadId: 'sandbox-lifecycle-test',
     userId: 'user-sandbox-lifecycle',
     workspace: WORKSPACE,
-    runtimeIdSource: createDeterministicRuntimeIdSourceV1({
+    runtimeIdSource: createDeterministicRuntimeIdSource({
       seed: 'sandbox-lifecycle',
       epochMs: Date.parse(NOW),
     }),
   });
 }
 
-function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeStateV1> {
+function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeState> {
   return {
     sessions: {
       appendEvents: () => undefined,
@@ -263,13 +263,13 @@ function createHarness(options: { readonly persist?: 'false' | 'throw' | 'stale'
   const ack = openAcknowledgement(prepared);
   const source = preparation(prepared);
   const plan = preparedSandbox(prepared, source);
-  const session = createRuntimeHostStateSessionV1({
+  const session = createRuntimeHostStateSession({
     state: initialState(),
     services: services(),
     clock: () => NOW,
     id: (kind) => `${kind}-sandbox-lifecycle`,
     sandboxAvailable: true,
-  } satisfies StateRuntimeSessionInputV1);
+  } satisfies StateRuntimeSessionInput);
   session.processEvent({
     type: 'tool.queued',
     toolCallId: prepared.identity.toolCallId,
@@ -303,13 +303,13 @@ function createHarness(options: { readonly persist?: 'false' | 'throw' | 'stale'
     attempt: ack.attempt.attempt,
   };
   expect(session.applyEffectEvents(lease, [recorded, started], 'attempt_start')).toBe(true);
-  const store = new SandboxPreparationArtifactStoreV1({
+  const store = new SandboxPreparationArtifactStore({
     root: join(
       mkdtempSync(join('/tmp', 'kite-sandbox-lifecycle-artifacts-')),
       'sandbox-preparations',
     ),
   });
-  const lifecycle = createAppToolPipelineSandboxLifecycleV1({
+  const lifecycle = createAppToolPipelineSandboxLifecycle({
     prepared,
     resolveOpenAcknowledgement: (candidate) => {
       expect(candidate).toBe(prepared);
@@ -369,25 +369,25 @@ describe('App State sandbox lifecycle composition', () => {
     const prepared = preparedTool();
     const source = preparation(prepared);
     expect(() =>
-      createAppToolPipelineSandboxLifecycleV1({
+      createAppToolPipelineSandboxLifecycle({
         prepared,
         resolveOpenAcknowledgement: () => null,
         getState: () => initialState(),
         persistEvents: async () => true,
         now: () => NOW,
-        artifacts: new SandboxPreparationArtifactStoreV1({
+        artifacts: new SandboxPreparationArtifactStore({
           root: join(
             mkdtempSync(join('/tmp', 'kite-sandbox-lifecycle-no-ack-')),
             'sandbox-preparations',
           ),
         }),
       }),
-    ).toThrow(AppToolPipelineSandboxLifecycleErrorV1);
+    ).toThrow(AppToolPipelineSandboxLifecycleError);
     void source;
 
     const harness = createHarness();
     let providerCalls = 0;
-    const port = createRuntimeHostSandboxPreparedProcessExecutionPortV1({
+    const port = createRuntimeHostSandboxPreparedProcessExecutionPort({
       supervisor: {
         execute: async () => {
           providerCalls++;
@@ -403,7 +403,7 @@ describe('App State sandbox lifecycle composition', () => {
         dispatchId: 'unacknowledged',
         supervisorNonce: 'unacknowledged',
         dispatchIntentDigest: 'unacknowledged',
-      } satisfies SandboxExecutionDispatchIntentAcknowledgementV1),
+      } satisfies SandboxExecutionDispatchIntentAcknowledgement),
       lifecycle: harness.lifecycle,
       timeoutMs: 1_000,
     });
@@ -434,7 +434,7 @@ describe('App State sandbox lifecycle composition', () => {
     });
     const clonedDispatch = deepFreeze(structuredClone(dispatch));
     let supervisorCalls = 0;
-    const clonedDispatchResult = await createRuntimeHostSandboxPreparedProcessExecutionPortV1({
+    const clonedDispatchResult = await createRuntimeHostSandboxPreparedProcessExecutionPort({
       supervisor: {
         execute: async () => {
           supervisorCalls += 1;
@@ -491,7 +491,7 @@ describe('App State sandbox lifecycle composition', () => {
         }),
       read: () => deepFreeze({ ...harness.plan, planId: 'corrupt-plan' }),
     };
-    const corrupt = createAppToolPipelineSandboxLifecycleV1({
+    const corrupt = createAppToolPipelineSandboxLifecycle({
       prepared: corruptHarness.prepared,
       resolveOpenAcknowledgement: () => corruptHarness.ack,
       getState: () => corruptHarness.session.getState(),

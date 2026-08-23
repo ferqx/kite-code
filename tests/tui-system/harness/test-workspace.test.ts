@@ -3,9 +3,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  createSqliteRuntimeStorageV5,
-  SQLITE_RUNTIME_FORMAT_EPOCH_V2,
-  sqliteRuntimeStorePathForV2,
+  createSqliteRuntimeStorage,
+  SQLITE_RUNTIME_FORMAT_EPOCH,
+  sqliteRuntimeStorePath,
 } from '@kite/runtime-storage-sqlite';
 import {
   createTestWorkspace,
@@ -32,7 +32,7 @@ function writeStoreObserverFixture(
       canonicalWorkspaceDigest: string;
     };
   };
-  const storage = createSqliteRuntimeStorageV5<Record<string, unknown>, State>({
+  const storage = createSqliteRuntimeStorage<Record<string, unknown>, State>({
     databasePath,
     codec: {
       encodeEvent: JSON.stringify,
@@ -56,7 +56,7 @@ function writeStoreObserverFixture(
     events,
     snapshot: {
       schemaVersion: 26,
-      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH_V2,
+      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
       revision: events.length,
       session: {
         threadId: sessionId,
@@ -98,7 +98,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database path is a directory', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteRuntimeStorePathForV2(
+    const runtimePath = sqliteRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     mkdirSync(runtimePath);
@@ -110,7 +110,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('treats an existing database without Runtime schema as not ready', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteRuntimeStorePathForV2(
+    const runtimePath = sqliteRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     new Database(runtimePath).close();
@@ -127,7 +127,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database is corrupt', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteRuntimeStorePathForV2(
+    const runtimePath = sqliteRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     writeFileSync(runtimePath, 'not a sqlite database');
@@ -139,7 +139,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('reads exact persistence evidence without competing with the child writer', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteRuntimeStorePathForV2(
+    const runtimePath = sqliteRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     const store = writeStoreObserverFixture(
@@ -229,7 +229,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('matches RuntimeStore name fallback when the first user message is empty', () => {
     workspace = createTestWorkspace();
-    const runtimePath = sqliteRuntimeStorePathForV2(
+    const runtimePath = sqliteRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     const store = writeStoreObserverFixture(runtimePath, 'thread-empty', [

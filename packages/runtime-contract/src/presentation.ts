@@ -50,7 +50,7 @@ export interface PlanStep {
 }
 
 /** Metadata-only Runtime evidence attached to a V2 PlanDocument. */
-export interface PlanCompletionEvidenceV1 {
+export interface PlanCompletionEvidence {
   schemaVersion: 1;
   verification: readonly { verificationId: string; outcome: 'passed' | 'waived' }[];
   execution: readonly { toolCallId: string; outcome: 'succeeded' }[];
@@ -90,7 +90,7 @@ export interface PlanDocument {
   /** Why the structural replan was requested. */
   replanReason?: string;
   /** Runtime-derived references only; never accepts model-authored execution content. */
-  completionEvidence: PlanCompletionEvidenceV1;
+  completionEvidence: PlanCompletionEvidence;
   /** Durable user-level Markdown Artifact for this version. */
   artifact?: PlanArtifactRef;
 }

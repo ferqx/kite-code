@@ -3,23 +3,23 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
-  ExecutionBoundaryV1,
-  ExecutionCapabilitySurfaceV1,
+  ExecutionBoundary,
+  ExecutionCapabilitySurface,
   ShellExecutor,
   ShellInput,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  composeAppSandboxExecutorV1,
-  createPreparedAppShellExecutorV1,
+  composeAppSandboxExecutor,
+  createPreparedAppShellExecutor,
   SANDBOX_PREPARATION_ABORTED_REASON,
 } from '@/app/sandbox/composition';
 import {
-  APP_PREPARED_SHELL_EXECUTION_V1,
-  appPreparedShellExecutionPortV1,
+  APP_PREPARED_SHELL_EXECUTION_,
+  appPreparedShellExecutionPort,
 } from '@/app/sandbox/prepared-tool-pipeline';
-import { withAcknowledgedSandboxLifecycleForTestV1 } from '../helpers/sandbox-executor';
+import { withAcknowledgedSandboxLifecycleForTest } from '../helpers/sandbox-executor';
 
-const shellSurface: ExecutionCapabilitySurfaceV1 = {
+const shellSurface: ExecutionCapabilitySurface = {
   inProcessReadOnlyTools: null,
   network: false,
   process: true,
@@ -32,7 +32,7 @@ const shellSurface: ExecutionCapabilitySurfaceV1 = {
   brokeredGitFeatureRevision: null,
 };
 
-function boundary(workspace: string, networkMode: 'off' | 'allowlist'): ExecutionBoundaryV1 {
+function boundary(workspace: string, networkMode: 'off' | 'allowlist'): ExecutionBoundary {
   return {
     filesystemScope: 'workspace_write',
     workspaceRoot: workspace,
@@ -117,7 +117,7 @@ describe('App sandbox composition', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
       const marker = join(workspace, 'development-override');
-      const executor = composeAppSandboxExecutorV1({
+      const executor = composeAppSandboxExecutor({
         entrypoint: 'foreground_cli',
         workspace,
         config: { sandbox: { enabled: true } },
@@ -138,7 +138,7 @@ describe('App sandbox composition', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
       const marker = join(workspace, 'acknowledged-host-fallback');
-      const executor = composeAppSandboxExecutorV1({
+      const executor = composeAppSandboxExecutor({
         entrypoint: 'foreground_cli',
         workspace,
         config: { sandbox: { enabled: true } },
@@ -165,7 +165,7 @@ describe('App sandbox composition', () => {
 
   test('exposes one prepared Shell port for the preselected host execution owner', async () => {
     const calls: string[] = [];
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: '/workspace',
       sandboxEnabled: false,
       resolveBackend: () => 'none',
@@ -177,7 +177,7 @@ describe('App sandbox composition', () => {
         return { ok: true, command: input.command, exitCode: 0, stdout: 'ok', stderr: '' };
       },
     });
-    const port = appPreparedShellExecutionPortV1(executor);
+    const port = appPreparedShellExecutionPort(executor);
     if (!port) throw new Error('prepared Shell port is unavailable');
     const result = await port.execute({
       identity: {
@@ -209,7 +209,7 @@ describe('App sandbox composition', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
       const marker = join(workspace, 'must-not-exist');
-      const executor = composeAppSandboxExecutorV1({
+      const executor = composeAppSandboxExecutor({
         entrypoint: 'tui',
         workspace,
         config: {
@@ -233,7 +233,7 @@ describe('App sandbox composition', () => {
   test('fails closed when the sealed surface does not admit Shell', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
-      const executor = composeAppSandboxExecutorV1({
+      const executor = composeAppSandboxExecutor({
         entrypoint: 'foreground_cli',
         workspace,
         config: {
@@ -253,7 +253,7 @@ describe('App sandbox composition', () => {
   test('sealed composition fails closed when the sandbox is explicitly unavailable', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
-      const executor = composeAppSandboxExecutorV1({
+      const executor = composeAppSandboxExecutor({
         entrypoint: 'foreground_cli',
         workspace,
         config: {
@@ -274,7 +274,7 @@ describe('App sandbox composition', () => {
   test('TUI selects host availability but still requires an acknowledged Runtime invocation', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
-      const executor = composeAppSandboxExecutorV1({
+      const executor = composeAppSandboxExecutor({
         entrypoint: 'tui',
         workspace,
         config: { sandbox: { enabled: true } },
@@ -295,7 +295,7 @@ describe('App sandbox composition', () => {
       releaseYield = resolvePromise;
     });
     let backendResolutions = 0;
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: '/workspace',
       sandboxEnabled: true,
       yieldBeforeResolve: () => yieldGate,
@@ -320,7 +320,7 @@ describe('App sandbox composition', () => {
   });
 
   test('preserves the Windows runner availability reason while failing closed', async () => {
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: 'C:/workspace',
       sandboxEnabled: true,
       yieldBeforeResolve: async () => {},
@@ -349,7 +349,7 @@ describe('App sandbox composition', () => {
     const constructedWorkspaces: string[] = [];
     const calls: Array<{ boundWorkspace: string; inputWorkspace: string; command: string }> = [];
     try {
-      const executor = createPreparedAppShellExecutorV1({
+      const executor = createPreparedAppShellExecutor({
         workspace,
         sandboxEnabled: true,
         yieldBeforeResolve: async () => {},
@@ -385,7 +385,7 @@ describe('App sandbox composition', () => {
 
   test('caches pure backend selection without running a preflight command', async () => {
     const nativeCommands: string[] = [];
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: 'C:/workspace',
       sandboxEnabled: true,
       resolveBackend: () => 'windows_restricted_token',
@@ -412,7 +412,7 @@ describe('App sandbox composition', () => {
 
   test('never replays a user command in the host after sandbox preflight succeeds', async () => {
     const nativeCommands: string[] = [];
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: '/workspace',
       sandboxEnabled: true,
       resolveBackend: () => 'bubblewrap',
@@ -437,7 +437,7 @@ describe('App sandbox composition', () => {
   test('does not change an approved native environment after pre-dispatch unavailability', async () => {
     const nativeCommands: string[] = [];
     const hostCommands: string[] = [];
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: '/workspace',
       sandboxEnabled: true,
       resolveBackend: () => 'seatbelt',
@@ -489,7 +489,7 @@ describe('App sandbox composition', () => {
       stdout: '',
       stderr: 'Prepared port must be used.',
     });
-    Object.defineProperty(nativeExecutor, APP_PREPARED_SHELL_EXECUTION_V1, {
+    Object.defineProperty(nativeExecutor, APP_PREPARED_SHELL_EXECUTION_, {
       value: Object.freeze({
         execute: async (input: { readonly command: string }) => {
           nativeCommands.push(input.command);
@@ -510,7 +510,7 @@ describe('App sandbox composition', () => {
         },
       }),
     });
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: '/workspace',
       sandboxEnabled: true,
       resolveBackend: () => 'seatbelt',
@@ -520,7 +520,7 @@ describe('App sandbox composition', () => {
         return { ok: true, command: input.command, exitCode: 0, stdout: 'host result', stderr: '' };
       },
     });
-    const port = appPreparedShellExecutionPortV1(executor);
+    const port = appPreparedShellExecutionPort(executor);
     if (!port) throw new Error('prepared Shell port is unavailable');
 
     const result = await port.execute({
@@ -555,13 +555,13 @@ describe('App sandbox composition', () => {
     async () => {
       const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-seatbelt-fallback-'));
       try {
-        const appExecutor = composeAppSandboxExecutorV1({
+        const appExecutor = composeAppSandboxExecutor({
           entrypoint: 'foreground_cli',
           workspace,
           config: { sandbox: { enabled: true } },
         });
         const decision = await appExecutor.prepare();
-        const executor = withAcknowledgedSandboxLifecycleForTestV1(appExecutor);
+        const executor = withAcknowledgedSandboxLifecycleForTest(appExecutor);
         const result = await executor({ workspace, command: 'printf seatbelt-host-fallback' });
 
         expect(decision).toMatchObject({ mode: 'sandbox', backend: 'seatbelt' });
@@ -579,7 +579,7 @@ describe('App sandbox composition', () => {
 
   test('never falls back when pre-dispatch cleanup is unconfirmed', async () => {
     const hostCommands: string[] = [];
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: '/workspace',
       sandboxEnabled: true,
       resolveBackend: () => 'seatbelt',
@@ -610,7 +610,7 @@ describe('App sandbox composition', () => {
 
   test('aborting an in-flight preparation rejects it and the next prepare retries fresh', async () => {
     let resolveMode: 'hang-until-abort' | 'fast-success' = 'hang-until-abort';
-    const executor = createPreparedAppShellExecutorV1({
+    const executor = createPreparedAppShellExecutor({
       workspace: '/workspace',
       sandboxEnabled: true,
       resolveBackend: async (): Promise<'bubblewrap'> => {

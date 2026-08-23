@@ -1,87 +1,87 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { BuiltinWorkspaceFilesystemTerminalVerifierV1 } from '@kite/builtin-runtime';
-import { digestCapabilityValueV1, isBuiltinOperationExecutionValueV1 } from '@kite/builtin-runtime';
+import type { BuiltinWorkspaceFilesystemTerminalVerifier } from '@kite/builtin-runtime';
+import { digestCapabilityValue, isBuiltinOperationExecutionValue } from '@kite/builtin-runtime';
 import {
-  workspaceFilesystemIntentDigestV1,
-  workspaceFilesystemMutationReadyDigestV1,
-  workspaceFilesystemOperationDigestV1,
-  workspaceFilesystemStringDigestV1,
+  workspaceFilesystemIntentDigest,
+  workspaceFilesystemMutationReadyDigest,
+  workspaceFilesystemOperationDigest,
+  workspaceFilesystemStringDigest,
 } from '@kite/builtin-runtime/filesystem';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import {
-  createDeterministicRuntimeIdSourceV1,
-  createRuntimeHostStateInitialStateV1,
-  createRuntimeHostStateSessionV1,
-  createRuntimeHostToolPipelineAttemptCoordinatorV1,
+  createDeterministicRuntimeIdSource,
+  createRuntimeHostStateInitialState,
+  createRuntimeHostStateSession,
+  createRuntimeHostToolPipelineAttemptCoordinator,
   type RuntimeHostExecutionServices,
-  type StateRuntimeSessionInputV1,
-  type StateRuntimeStateV1,
+  type StateRuntimeSessionInput,
+  type StateRuntimeState,
 } from '@kite/runtime-host';
 import type {
-  CapabilityToolTerminalResultV1,
-  DynamicMcpPreparedToolInvocationIdentityV1,
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  PrivateSuspendedSubagentRecordV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineSuspendedExecutionResultV1,
-  ToolPipelineTaskSubagentSuspensionV1,
+  CapabilityToolTerminalResult,
+  DynamicMcpPreparedToolInvocationIdentity,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  PrivateSuspendedSubagentRecord,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineSuspendedExecutionResult,
+  ToolPipelineTaskSubagentSuspension,
 } from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 } from '@kite/runtime-spi';
+import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite/runtime-spi';
 import {
-  createAppStateToolPipelinePersistenceV1,
-  type StateBuiltinOperationStructuredContentV1,
+  createAppStateToolPipelinePersistence,
+  type StateBuiltinOperationStructuredContent,
 } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
 
 const NOW = '2026-08-22T00:00:00.000Z';
 const NEXT = '2026-08-22T00:00:01.000Z';
 const RECOVERY_KEY = 'a'.repeat(64);
-const OPERATION_ID = 'builtin:read_file' as NonDynamicOperationIdV1;
+const OPERATION_ID = 'builtin:read_file' as NonDynamicOperationId;
 const EFFECTS = Object.freeze({
   filesystem: 'read' as const,
   network: 'none' as const,
   externalState: 'none' as const,
 });
-const EFFECTS_DIGEST = digestCapabilityValueV1(EFFECTS);
+const EFFECTS_DIGEST = digestCapabilityValue(EFFECTS);
 const TASK_EFFECTS = Object.freeze({
   filesystem: 'unknown' as const,
   network: 'unknown' as const,
   externalState: 'none' as const,
 });
-const TASK_EFFECTS_DIGEST = digestCapabilityValueV1(TASK_EFFECTS);
+const TASK_EFFECTS_DIGEST = digestCapabilityValue(TASK_EFFECTS);
 const TASK_BLOCKED_ARGUMENTS = Object.freeze({ path: 'README.md' });
 const TASK_BLOCKED_COMMAND = 'write child file';
-const TASK_BLOCKED_ARGUMENTS_DIGEST = digestCapabilityValueV1(TASK_BLOCKED_ARGUMENTS);
-const TASK_BLOCKED_COMMAND_DIGEST = digestCapabilityValueV1(TASK_BLOCKED_COMMAND);
+const TASK_BLOCKED_ARGUMENTS_DIGEST = digestCapabilityValue(TASK_BLOCKED_ARGUMENTS);
+const TASK_BLOCKED_COMMAND_DIGEST = digestCapabilityValue(TASK_BLOCKED_COMMAND);
 const AUTHENTIC_FILESYSTEM_OBSERVATION = Object.freeze({
   actorIdentityDigest: 'a'.repeat(64),
-  lexicalTargetDigest: workspaceFilesystemStringDigestV1('README.md'),
+  lexicalTargetDigest: workspaceFilesystemStringDigest('README.md'),
   canonicalTargetDigest: `sha256:${'c'.repeat(64)}`,
   targetIdentityDigest: `sha256:${'d'.repeat(64)}`,
   contentDigest: `sha256:${'e'.repeat(64)}`,
 });
-const REJECT_FILESYSTEM_TERMINAL: BuiltinWorkspaceFilesystemTerminalVerifierV1 = () => ({
+const REJECT_FILESYSTEM_TERMINAL: BuiltinWorkspaceFilesystemTerminalVerifier = () => ({
   valid: false,
   code: 'terminal_not_issued',
 });
 
-function initialState(): StateRuntimeStateV1 {
-  return createRuntimeHostStateInitialStateV1({
+function initialState(): StateRuntimeState {
+  return createRuntimeHostStateInitialState({
     recoveryIdentityKey: RECOVERY_KEY,
     threadId: 'state-persistence-test',
     userId: 'user-1',
     workspace: '/workspace',
-    runtimeIdSource: createDeterministicRuntimeIdSourceV1({
+    runtimeIdSource: createDeterministicRuntimeIdSource({
       seed: 'state-persistence',
       epochMs: Date.parse(NOW),
     }),
   });
 }
 
-function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeStateV1> {
+function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeState> {
   return {
     sessions: {
       appendEvents: () => undefined,
@@ -124,21 +124,21 @@ function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeStat
 }
 
 function createSession(state = initialState()) {
-  return createRuntimeHostStateSessionV1({
+  return createRuntimeHostStateSession({
     state,
     services: services(),
     clock: () => NOW,
     id: (kind) => `${kind}-1`,
     sandboxAvailable: true,
-  } satisfies StateRuntimeSessionInputV1);
+  } satisfies StateRuntimeSessionInput);
 }
 
-function prepared(attempt = 1): Readonly<PreparedToolInvocationV1> & {
-  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentityV1>;
+function prepared(attempt = 1): Readonly<PreparedToolInvocation> & {
+  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentity>;
 } {
   const argumentsValue = { path: 'README.md' } as const;
-  const argumentsDigest = digestCapabilityValueV1(argumentsValue);
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+  const argumentsDigest = digestCapabilityValue(argumentsValue);
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     invocationId: 'invocation-1',
     attemptId: `invocation-1:attempt:${attempt}`,
     toolCallId: 'call-1',
@@ -150,7 +150,7 @@ function prepared(attempt = 1): Readonly<PreparedToolInvocationV1> & {
     executionFamily: 'builtin',
     executionMechanism: 'filesystem',
     capabilityId: OPERATION_ID,
-    capabilityRevision: digestCapabilityValueV1({ capability: 'read_file', revision: 1 }),
+    capabilityRevision: digestCapabilityValue({ capability: 'read_file', revision: 1 }),
     descriptorRevision: 'descriptor-1',
     parserRevision: 'parser-1',
     executorRevision: 'executor-1',
@@ -159,7 +159,7 @@ function prepared(attempt = 1): Readonly<PreparedToolInvocationV1> & {
     effectiveEffectsDigest: EFFECTS_DIGEST,
     policyDigest: 'policy-1',
     authorizationDigest: 'authorization-1',
-    admissionDigest: digestCapabilityValueV1({ admission: 'policy_allow', revision: 1 }),
+    admissionDigest: digestCapabilityValue({ admission: 'policy_allow', revision: 1 }),
     idempotencyKeyArgument: null,
     idempotencyKey: null,
     bindingId: null,
@@ -203,8 +203,8 @@ function prepared(attempt = 1): Readonly<PreparedToolInvocationV1> & {
 function taskPrepared(
   attempt = 1,
   argumentOrigin: 'model_public' | 'runtime_private' = 'runtime_private',
-): Readonly<PreparedToolInvocationV1> & {
-  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentityV1>;
+): Readonly<PreparedToolInvocation> & {
+  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentity>;
 } {
   const base = prepared(attempt);
   const baseRequest = base.input.request;
@@ -224,12 +224,12 @@ function taskPrepared(
           },
         }),
   });
-  const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+  const identity: NonDynamicPreparedToolInvocationIdentity = {
     ...base.identity,
     argumentOrigin,
     invocationId: 'invocation-task-1',
     attemptId: `invocation-task-1:attempt:${attempt}`,
-    operationId: 'builtin:task' as NonDynamicOperationIdV1,
+    operationId: 'builtin:task' as NonDynamicOperationId,
     executionFamily: 'subagent',
     executionMechanism: 'subagent',
     capabilityId: 'builtin:task',
@@ -237,7 +237,7 @@ function taskPrepared(
     descriptorRevision: 'task-descriptor-1',
     parserRevision: 'task-parser-1',
     executorRevision: 'task-executor-1',
-    argumentsDigest: digestCapabilityValueV1(argumentsValue),
+    argumentsDigest: digestCapabilityValue(argumentsValue),
     effectiveEffectsDigest: TASK_EFFECTS_DIGEST,
     exposedToolName: 'task',
     toolKind: 'coordination',
@@ -276,7 +276,7 @@ function readOperation() {
   });
 }
 
-function readIntentRecord(acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>) {
+function readIntentRecord(acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>) {
   const operation = readOperation();
   const { operationId: _operationId, ...providerOperation } = operation;
   const unsigned = Object.freeze({
@@ -284,24 +284,24 @@ function readIntentRecord(acknowledgement: Readonly<ToolPipelineAttemptAcknowled
     capabilityRevision: acknowledgement.attempt.capabilityRevision,
     argumentsDigest: acknowledgement.attempt.argumentsDigest,
     admissionDigest: acknowledgement.attempt.admissionDigest!,
-    operationDigest: workspaceFilesystemOperationDigestV1(providerOperation),
-    searchBoundaryDigest: workspaceFilesystemStringDigestV1('protected-boundary-1'),
-    lexicalTargetDigest: workspaceFilesystemStringDigestV1(operation.path),
-    canonicalWorkspaceDigest: workspaceFilesystemStringDigestV1('/workspace'),
+    operationDigest: workspaceFilesystemOperationDigest(providerOperation),
+    searchBoundaryDigest: workspaceFilesystemStringDigest('protected-boundary-1'),
+    lexicalTargetDigest: workspaceFilesystemStringDigest(operation.path),
+    canonicalWorkspaceDigest: workspaceFilesystemStringDigest('/workspace'),
     protectedPathRevision: 'protected-path-revision-1',
-    approvalSummaryDigest: workspaceFilesystemStringDigestV1('read_file README.md'),
+    approvalSummaryDigest: workspaceFilesystemStringDigest('read_file README.md'),
     effectiveEffectsDigest: acknowledgement.attempt.effectiveEffectsDigest,
     recordedAt: NEXT,
   });
   return Object.freeze({
     ...unsigned,
-    intentDigest: workspaceFilesystemIntentDigestV1(unsigned),
+    intentDigest: workspaceFilesystemIntentDigest(unsigned),
   });
 }
 
-function dynamicPrepared(): Readonly<PreparedToolInvocationV1> {
+function dynamicPrepared(): Readonly<PreparedToolInvocation> {
   const base = prepared(1);
-  const identity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+  const identity: DynamicMcpPreparedToolInvocationIdentity = {
     ...base.identity,
     capabilityId: 'mcp:server:fixture',
     capabilityRevision: 'subject-capability-1',
@@ -340,14 +340,14 @@ function dynamicPrepared(): Readonly<PreparedToolInvocationV1> {
   return Object.freeze({ ...base, identity: Object.freeze(identity) });
 }
 
-function dynamicRetryPrepared(attempt = 1): Readonly<PreparedToolInvocationV1> {
+function dynamicRetryPrepared(attempt = 1): Readonly<PreparedToolInvocation> {
   const base = prepared(attempt);
   const baseRequest = base.input.request;
   if (!baseRequest || typeof baseRequest !== 'object' || Array.isArray(baseRequest)) {
     throw new Error('invalid prepared request fixture');
   }
   const bindingId = 'dynamic-binding-1';
-  const identity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+  const identity: DynamicMcpPreparedToolInvocationIdentity = {
     ...base.identity,
     bindingId,
     providerId: 'mcp-provider',
@@ -405,8 +405,8 @@ function dynamicRetryPrepared(attempt = 1): Readonly<PreparedToolInvocationV1> {
   });
 }
 
-function retryableProviderFailureResult(): CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1> {
-  const retryableValue: RuntimeJsonValueV1 = {
+function retryableProviderFailureResult(): CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent> {
+  const retryableValue: RuntimeJsonValue = {
     schema: 'kite.builtin-operation-result.v1',
     ok: false,
     stdout: '',
@@ -415,7 +415,7 @@ function retryableProviderFailureResult(): CapabilityToolTerminalResultV1<StateB
       providerFailure: { code: 'provider_unavailable', retryable: true },
     },
   };
-  if (!isBuiltinOperationExecutionValueV1(retryableValue)) {
+  if (!isBuiltinOperationExecutionValue(retryableValue)) {
     throw new Error('invalid retryable provider failure fixture');
   }
   return Object.freeze({
@@ -435,9 +435,9 @@ function retryableProviderFailureResult(): CapabilityToolTerminalResultV1<StateB
 }
 
 function structuredContent(
-  overrides: Readonly<Record<string, RuntimeJsonValueV1>> = {},
-): StateBuiltinOperationStructuredContentV1 {
-  const value: RuntimeJsonValueV1 = {
+  overrides: Readonly<Record<string, RuntimeJsonValue>> = {},
+): StateBuiltinOperationStructuredContent {
+  const value: RuntimeJsonValue = {
     schema: 'kite.builtin-operation-result.v1',
     ok: true,
     stdout: 'read ok',
@@ -447,13 +447,13 @@ function structuredContent(
     totalLines: 1,
     ...overrides,
   };
-  if (!isBuiltinOperationExecutionValueV1(value)) throw new Error('invalid test result fixture');
+  if (!isBuiltinOperationExecutionValue(value)) throw new Error('invalid test result fixture');
   return value;
 }
 
 function structuredContentWithObservation(
-  overrides: Readonly<Record<string, RuntimeJsonValueV1>> = {},
-): StateBuiltinOperationStructuredContentV1 {
+  overrides: Readonly<Record<string, RuntimeJsonValue>> = {},
+): StateBuiltinOperationStructuredContent {
   return structuredContent({
     filesystemObservation: AUTHENTIC_FILESYSTEM_OBSERVATION,
     ...overrides,
@@ -461,15 +461,15 @@ function structuredContentWithObservation(
 }
 
 function structuredContentWithoutObservation(
-  overrides: Readonly<Record<string, RuntimeJsonValueV1>> = {},
-): StateBuiltinOperationStructuredContentV1 {
+  overrides: Readonly<Record<string, RuntimeJsonValue>> = {},
+): StateBuiltinOperationStructuredContent {
   const { filesystemObservation: _filesystemObservation, ...withoutObservation } = overrides;
   return structuredContent({ ...withoutObservation, ok: overrides.ok ?? true });
 }
 
 function result(
-  overrides: Partial<CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>> = {},
-): CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1> {
+  overrides: Partial<CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>> = {},
+): CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent> {
   const status = overrides.status ?? 'success';
   return {
     status,
@@ -483,7 +483,7 @@ function result(
 function taskSuspension(
   executionMode: 'start' | 'resume' = 'start',
   eventKind: 'approval' | 'auto_review' = 'approval',
-): ToolPipelineTaskSubagentSuspensionV1 {
+): ToolPipelineTaskSubagentSuspension {
   const approval = {
     scope: 'once' as const,
     callId: 'runtime-task-child-call-1',
@@ -519,7 +519,7 @@ function taskSuspension(
           createdAt: NEXT,
         };
   const continuationId = `continuation-${'1'.repeat(64)}`;
-  const subagent: PrivateSuspendedSubagentRecordV1 = {
+  const subagent: PrivateSuspendedSubagentRecord = {
     storage: 'private_artifact_v1',
     subagentId: 'task-subagent-1',
     role: 'code',
@@ -569,9 +569,9 @@ function taskSuspension(
 }
 
 function taskSuspendedResult(
-  suspension: Readonly<ToolPipelineTaskSubagentSuspensionV1>,
-  options: Readonly<{ readonly toolRecovery?: RuntimeJsonValueV1 }> = {},
-): ToolPipelineSuspendedExecutionResultV1<StateBuiltinOperationStructuredContentV1> {
+  suspension: Readonly<ToolPipelineTaskSubagentSuspension>,
+  options: Readonly<{ readonly toolRecovery?: RuntimeJsonValue }> = {},
+): ToolPipelineSuspendedExecutionResult<StateBuiltinOperationStructuredContent> {
   const continuation = {
     id: suspension.subagent.subagentId,
     role: suspension.subagent.role,
@@ -615,13 +615,13 @@ function taskSuspendedResult(
 }
 
 function tamperedTaskSuspendedResult(
-  suspension: Readonly<ToolPipelineTaskSubagentSuspensionV1>,
-  blockedPatch: Readonly<Record<string, RuntimeJsonValueV1>>,
-): ToolPipelineSuspendedExecutionResultV1<StateBuiltinOperationStructuredContentV1> {
+  suspension: Readonly<ToolPipelineTaskSubagentSuspension>,
+  blockedPatch: Readonly<Record<string, RuntimeJsonValue>>,
+): ToolPipelineSuspendedExecutionResult<StateBuiltinOperationStructuredContent> {
   const result = taskSuspendedResult(suspension);
   const structuredContent = structuredClone(
     result.structuredContent,
-  ) as StateBuiltinOperationStructuredContentV1;
+  ) as StateBuiltinOperationStructuredContent;
   const subagentResult = structuredContent.subagentResult;
   if (
     subagentResult === undefined ||
@@ -631,7 +631,7 @@ function tamperedTaskSuspendedResult(
   ) {
     throw new Error('invalid task result fixture');
   }
-  const subagentRecord = subagentResult as Readonly<Record<string, RuntimeJsonValueV1>>;
+  const subagentRecord = subagentResult as Readonly<Record<string, RuntimeJsonValue>>;
   const blocked = subagentRecord.blocked;
   if (
     blocked === undefined ||
@@ -641,9 +641,9 @@ function tamperedTaskSuspendedResult(
   ) {
     throw new Error('invalid blocked task result fixture');
   }
-  const blockedRecord = blocked as Readonly<Record<string, RuntimeJsonValueV1>>;
+  const blockedRecord = blocked as Readonly<Record<string, RuntimeJsonValue>>;
   const structuredRecord = structuredContent as unknown as Readonly<
-    Record<string, RuntimeJsonValueV1>
+    Record<string, RuntimeJsonValue>
   >;
   const nextStructuredContent = {
     ...structuredRecord,
@@ -654,15 +654,15 @@ function tamperedTaskSuspendedResult(
   };
   return {
     ...result,
-    structuredContent: nextStructuredContent as unknown as StateBuiltinOperationStructuredContentV1,
+    structuredContent: nextStructuredContent as unknown as StateBuiltinOperationStructuredContent,
   };
 }
 
 function taskCompletedResult(
   attempt: number,
-  toolRecovery?: RuntimeJsonValueV1,
-  runtimeEvents: readonly RuntimeJsonValueV1[] = [],
-): CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1> {
+  toolRecovery?: RuntimeJsonValue,
+  runtimeEvents: readonly RuntimeJsonValue[] = [],
+): CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent> {
   return {
     status: 'success',
     content: [{ type: 'text', text: 'task complete' }],
@@ -686,7 +686,7 @@ function taskResourceAdmissionFailureResult(
     readonly parentInvocationId: string;
     readonly parentToolCallId: string;
   }>,
-): CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1> {
+): CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent> {
   return {
     status: 'error',
     content: [{ type: 'text', text: 'child resource admission failed' }],
@@ -724,9 +724,9 @@ function taskResourceAdmissionFailureResult(
 }
 
 function writePlanPrepared(
-  args: Readonly<Record<string, RuntimeJsonValueV1>>,
-): Readonly<PreparedToolInvocationV1> & {
-  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentityV1>;
+  args: Readonly<Record<string, RuntimeJsonValue>>,
+): Readonly<PreparedToolInvocation> & {
+  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentity>;
 } {
   const base = prepared(1);
   const baseRequest = base.input.request;
@@ -740,15 +740,15 @@ function writePlanPrepared(
   });
   const identity = Object.freeze({
     ...base.identity,
-    operationId: 'builtin:write_plan' as NonDynamicOperationIdV1,
+    operationId: 'builtin:write_plan' as NonDynamicOperationId,
     executionMechanism: 'planning' as const,
     capabilityId: 'builtin:write_plan',
     capabilityRevision: 'write-plan-capability-1',
     descriptorRevision: 'write-plan-descriptor-1',
     parserRevision: 'write-plan-parser-1',
     executorRevision: 'write-plan-executor-1',
-    argumentsDigest: digestCapabilityValueV1(args),
-    effectiveEffectsDigest: digestCapabilityValueV1(effects),
+    argumentsDigest: digestCapabilityValue(args),
+    effectiveEffectsDigest: digestCapabilityValue(effects),
     exposedToolName: 'write_plan',
   });
   return Object.freeze({
@@ -764,17 +764,17 @@ function writePlanPrepared(
   });
 }
 
-function searchPrepared(): Readonly<PreparedToolInvocationV1> & {
-  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentityV1>;
+function searchPrepared(): Readonly<PreparedToolInvocation> & {
+  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentity>;
 } {
   const base = prepared(1);
   const argumentsValue = { path: 'src', pattern: '*.ts' } as const;
   const identity = Object.freeze({
     ...base.identity,
-    operationId: 'builtin:search_files' as NonDynamicOperationIdV1,
+    operationId: 'builtin:search_files' as NonDynamicOperationId,
     capabilityId: 'builtin:search_files',
     exposedToolName: 'search_files',
-    argumentsDigest: digestCapabilityValueV1(argumentsValue),
+    argumentsDigest: digestCapabilityValue(argumentsValue),
   });
   return Object.freeze({
     ...base,
@@ -788,8 +788,8 @@ function searchPrepared(): Readonly<PreparedToolInvocationV1> & {
 
 function mutationPrepared(
   kind: 'write_file' | 'edit_file' = 'write_file',
-): Readonly<PreparedToolInvocationV1> & {
-  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentityV1>;
+): Readonly<PreparedToolInvocation> & {
+  readonly identity: Readonly<NonDynamicPreparedToolInvocationIdentity>;
 } {
   const base = prepared(1);
   const baseRequest = base.input.request;
@@ -810,17 +810,17 @@ function mutationPrepared(
     network: 'none' as const,
     externalState: 'none' as const,
   });
-  const operationId = `builtin:${kind}` as NonDynamicOperationIdV1;
+  const operationId = `builtin:${kind}` as NonDynamicOperationId;
   const identity = Object.freeze({
     ...base.identity,
     operationId,
     capabilityId: operationId,
-    capabilityRevision: digestCapabilityValueV1({ capability: kind, revision: 1 }),
+    capabilityRevision: digestCapabilityValue({ capability: kind, revision: 1 }),
     descriptorRevision: `${kind}-descriptor-1`,
     parserRevision: `${kind}-parser-1`,
     executorRevision: `${kind}-executor-1`,
-    argumentsDigest: digestCapabilityValueV1(argumentsValue),
-    effectiveEffectsDigest: digestCapabilityValueV1(effects),
+    argumentsDigest: digestCapabilityValue(argumentsValue),
+    effectiveEffectsDigest: digestCapabilityValue(effects),
     exposedToolName: kind,
   });
   return Object.freeze({
@@ -859,7 +859,7 @@ function mutationOperation(kind: 'write_file' | 'edit_file' = 'write_file') {
 }
 
 function mutationIntentRecord(
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
   kind: 'write_file' | 'edit_file' = 'write_file',
 ) {
   const operation = mutationOperation(kind);
@@ -869,18 +869,18 @@ function mutationIntentRecord(
     capabilityRevision: acknowledgement.attempt.capabilityRevision,
     argumentsDigest: acknowledgement.attempt.argumentsDigest,
     admissionDigest: acknowledgement.attempt.admissionDigest!,
-    operationDigest: workspaceFilesystemOperationDigestV1(providerOperation),
-    searchBoundaryDigest: workspaceFilesystemStringDigestV1('protected-boundary-1'),
-    lexicalTargetDigest: workspaceFilesystemStringDigestV1(operation.path),
-    canonicalWorkspaceDigest: workspaceFilesystemStringDigestV1('/workspace'),
+    operationDigest: workspaceFilesystemOperationDigest(providerOperation),
+    searchBoundaryDigest: workspaceFilesystemStringDigest('protected-boundary-1'),
+    lexicalTargetDigest: workspaceFilesystemStringDigest(operation.path),
+    canonicalWorkspaceDigest: workspaceFilesystemStringDigest('/workspace'),
     protectedPathRevision: 'protected-path-revision-1',
-    approvalSummaryDigest: workspaceFilesystemStringDigestV1(`${kind} README.md`),
+    approvalSummaryDigest: workspaceFilesystemStringDigest(`${kind} README.md`),
     effectiveEffectsDigest: acknowledgement.attempt.effectiveEffectsDigest,
     recordedAt: NEXT,
   });
   return Object.freeze({
     ...unsigned,
-    intentDigest: workspaceFilesystemIntentDigestV1(unsigned),
+    intentDigest: workspaceFilesystemIntentDigest(unsigned),
   });
 }
 
@@ -896,7 +896,7 @@ function mutationPreparedEvidence(
   kind: 'write_file' | 'edit_file' = 'write_file',
 ) {
   return Object.freeze({
-    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+    schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
     operationKind: kind,
     operationDigest,
     lexicalTargetDigest: AUTHENTIC_FILESYSTEM_OBSERVATION.lexicalTargetDigest,
@@ -923,15 +923,15 @@ function mutationReadyRecord(
   });
   return Object.freeze({
     ...unsigned,
-    readyDigest: workspaceFilesystemMutationReadyDigestV1(unsigned),
+    readyDigest: workspaceFilesystemMutationReadyDigest(unsigned),
   });
 }
 
 function persistenceHarness(
   options: {
-    readonly state?: StateRuntimeStateV1;
+    readonly state?: StateRuntimeState;
     readonly toolName?: string;
-    readonly toolArgs?: Record<string, RuntimeJsonValueV1>;
+    readonly toolArgs?: Record<string, RuntimeJsonValue>;
     readonly artifactWrite?: (
       invocationId: string,
       value: unknown,
@@ -945,7 +945,7 @@ function persistenceHarness(
     readonly receiptThrow?: boolean;
     readonly receiptFalseAt?: number;
     readonly receiptThrowAt?: number;
-    readonly terminalVerifier?: BuiltinWorkspaceFilesystemTerminalVerifierV1;
+    readonly terminalVerifier?: BuiltinWorkspaceFilesystemTerminalVerifier;
     readonly withoutTerminalVerifier?: boolean;
     readonly providerActionEnabled?: boolean;
   } = {},
@@ -969,7 +969,7 @@ function persistenceHarness(
     recoveryEvents: [] as RuntimeEvent[][],
   };
   const issuedAcknowledgements = new WeakSet<object>();
-  const terminalVerifier: BuiltinWorkspaceFilesystemTerminalVerifierV1 =
+  const terminalVerifier: BuiltinWorkspaceFilesystemTerminalVerifier =
     options.terminalVerifier ??
     ((commit) => {
       calls.verifier += 1;
@@ -987,7 +987,7 @@ function persistenceHarness(
       return { valid: true, observation: AUTHENTIC_FILESYSTEM_OBSERVATION };
     });
   let lease = session.beginEffect({ type: 'run_tools', toolCallIds: ['call-1'] });
-  const rawPersistence = createAppStateToolPipelinePersistenceV1({
+  const rawPersistence = createAppStateToolPipelinePersistence({
     getState: () => session.getState(),
     persistAttemptStartEvents: async (events) => {
       calls.attempt += 1;
@@ -1045,7 +1045,7 @@ function persistenceHarness(
   });
   const persistence = Object.freeze({
     ...rawPersistence,
-    recordAttempt: async (candidate: Readonly<PreparedToolInvocationV1>) => {
+    recordAttempt: async (candidate: Readonly<PreparedToolInvocation>) => {
       const acknowledgement = await rawPersistence.recordAttempt(candidate);
       issuedAcknowledgements.add(acknowledgement);
       return acknowledgement;
@@ -1083,7 +1083,7 @@ function taskPersistenceHarness(options: Parameters<typeof persistenceHarness>[0
   });
 }
 
-async function prepareMutationAttemptV1(
+async function prepareMutationAttempt(
   harness: ReturnType<typeof persistenceHarness>,
   kind: 'write_file' | 'edit_file' = 'write_file',
 ) {
@@ -1093,7 +1093,7 @@ async function prepareMutationAttemptV1(
   const record = mutationIntentRecord(acknowledgement, kind);
   const intent = await harness.persistence.workspaceFilesystemMutationEvidence.persistIntent(
     Object.freeze({
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       prepared: candidate,
       operation,
       record,
@@ -1102,7 +1102,7 @@ async function prepareMutationAttemptV1(
   const evidence = mutationPreparedEvidence(record.operationDigest, kind);
   const ready = await harness.persistence.workspaceFilesystemMutationEvidence.persistMutationReady(
     Object.freeze({
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       intent,
       preparedEvidence: evidence,
       preimageArtifact: PREIMAGE_ARTIFACT,
@@ -1129,22 +1129,22 @@ describe('App State Tool Pipeline persistence', () => {
       capabilityRevision: acknowledgement.attempt.capabilityRevision,
       argumentsDigest: acknowledgement.attempt.argumentsDigest,
       admissionDigest: acknowledgement.attempt.admissionDigest!,
-      operationDigest: workspaceFilesystemOperationDigestV1(providerOperation),
-      searchBoundaryDigest: workspaceFilesystemStringDigestV1('protected-boundary-1'),
-      lexicalTargetDigest: workspaceFilesystemStringDigestV1(operation.path),
-      canonicalWorkspaceDigest: workspaceFilesystemStringDigestV1('/workspace'),
+      operationDigest: workspaceFilesystemOperationDigest(providerOperation),
+      searchBoundaryDigest: workspaceFilesystemStringDigest('protected-boundary-1'),
+      lexicalTargetDigest: workspaceFilesystemStringDigest(operation.path),
+      canonicalWorkspaceDigest: workspaceFilesystemStringDigest('/workspace'),
       protectedPathRevision: 'protected-path-revision-1',
-      approvalSummaryDigest: workspaceFilesystemStringDigestV1('read_file README.md'),
+      approvalSummaryDigest: workspaceFilesystemStringDigest('read_file README.md'),
       effectiveEffectsDigest: acknowledgement.attempt.effectiveEffectsDigest,
       recordedAt: NEXT,
     });
     const record = Object.freeze({
       ...unsigned,
-      intentDigest: workspaceFilesystemIntentDigestV1(unsigned),
+      intentDigest: workspaceFilesystemIntentDigest(unsigned),
     });
     const persisted = await harness.persistence.workspaceFilesystemEvidence.persistIntent(
       Object.freeze({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         prepared: candidate,
         operation,
         record,
@@ -1192,23 +1192,23 @@ describe('App State Tool Pipeline persistence', () => {
       capabilityRevision: acknowledgement.attempt.capabilityRevision,
       argumentsDigest: acknowledgement.attempt.argumentsDigest,
       admissionDigest: acknowledgement.attempt.admissionDigest!,
-      operationDigest: workspaceFilesystemOperationDigestV1(providerOperation),
-      searchBoundaryDigest: workspaceFilesystemStringDigestV1('protected-boundary-1'),
-      lexicalTargetDigest: workspaceFilesystemStringDigestV1(operation.path),
-      canonicalWorkspaceDigest: workspaceFilesystemStringDigestV1('/workspace'),
+      operationDigest: workspaceFilesystemOperationDigest(providerOperation),
+      searchBoundaryDigest: workspaceFilesystemStringDigest('protected-boundary-1'),
+      lexicalTargetDigest: workspaceFilesystemStringDigest(operation.path),
+      canonicalWorkspaceDigest: workspaceFilesystemStringDigest('/workspace'),
       protectedPathRevision: 'protected-path-revision-1',
-      approvalSummaryDigest: workspaceFilesystemStringDigestV1('read_file README.md'),
+      approvalSummaryDigest: workspaceFilesystemStringDigest('read_file README.md'),
       effectiveEffectsDigest: acknowledgement.attempt.effectiveEffectsDigest,
       recordedAt: NEXT,
     });
     await expect(
       harness.persistence.workspaceFilesystemEvidence.persistIntent({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         prepared: candidate,
         operation,
         record: Object.freeze({
           ...unsigned,
-          intentDigest: workspaceFilesystemIntentDigestV1(unsigned),
+          intentDigest: workspaceFilesystemIntentDigest(unsigned),
         }),
       }),
     ).rejects.toMatchObject({ code: 'filesystem_intent_commit_failed' });
@@ -1223,7 +1223,7 @@ describe('App State Tool Pipeline persistence', () => {
     const record = mutationIntentRecord(acknowledgement);
     const intent = await harness.persistence.workspaceFilesystemMutationEvidence.persistIntent(
       Object.freeze({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         prepared: candidate,
         operation,
         record,
@@ -1234,7 +1234,7 @@ describe('App State Tool Pipeline persistence', () => {
     const ready =
       await harness.persistence.workspaceFilesystemMutationEvidence.persistMutationReady(
         Object.freeze({
-          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
           intent,
           preparedEvidence: evidence,
           preimageArtifact: PREIMAGE_ARTIFACT,
@@ -1276,7 +1276,7 @@ describe('App State Tool Pipeline persistence', () => {
     const record = mutationIntentRecord(acknowledgement);
     const intent = await cloned.persistence.workspaceFilesystemMutationEvidence.persistIntent(
       Object.freeze({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         prepared: candidate,
         operation,
         record,
@@ -1287,7 +1287,7 @@ describe('App State Tool Pipeline persistence', () => {
     await expect(
       cloned.persistence.workspaceFilesystemMutationEvidence.persistMutationReady(
         Object.freeze({
-          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
           intent: structuredClone(intent),
           preparedEvidence: evidence,
           preimageArtifact: PREIMAGE_ARTIFACT,
@@ -1309,7 +1309,7 @@ describe('App State Tool Pipeline persistence', () => {
       const persistedIntent =
         await harness.persistence.workspaceFilesystemMutationEvidence.persistIntent(
           Object.freeze({
-            schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+            schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
             prepared: preparedMutation,
             operation: mutation,
             record: intentRecord,
@@ -1319,7 +1319,7 @@ describe('App State Tool Pipeline persistence', () => {
       await expect(
         harness.persistence.workspaceFilesystemMutationEvidence.persistMutationReady(
           Object.freeze({
-            schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+            schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
             intent: persistedIntent,
             preparedEvidence,
             preimageArtifact: PREIMAGE_ARTIFACT,
@@ -1340,7 +1340,7 @@ describe('App State Tool Pipeline persistence', () => {
     const candidate = prepared(1);
     const acknowledgement = await harness.persistence.recordAttempt(candidate);
     await harness.persistence.workspaceFilesystemEvidence.persistIntent({
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       prepared: candidate,
       operation: readOperation(),
       record: readIntentRecord(acknowledgement),
@@ -1350,7 +1350,7 @@ describe('App State Tool Pipeline persistence', () => {
       result: result({ structuredContent: structuredContentWithObservation() }),
     });
     const query = Object.freeze({
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       actorIdentityDigest: AUTHENTIC_FILESYSTEM_OBSERVATION.actorIdentityDigest,
       lexicalTargetDigest: AUTHENTIC_FILESYSTEM_OBSERVATION.lexicalTargetDigest,
     });
@@ -1393,7 +1393,7 @@ describe('App State Tool Pipeline persistence', () => {
     const record = mutationIntentRecord(acknowledgement);
     const intent = await harness.persistence.workspaceFilesystemMutationEvidence.persistIntent(
       Object.freeze({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         prepared: candidate,
         operation,
         record,
@@ -1402,7 +1402,7 @@ describe('App State Tool Pipeline persistence', () => {
     const evidence = mutationPreparedEvidence(record.operationDigest);
     await harness.persistence.workspaceFilesystemMutationEvidence.persistMutationReady(
       Object.freeze({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         intent,
         preparedEvidence: evidence,
         preimageArtifact: PREIMAGE_ARTIFACT,
@@ -1439,7 +1439,7 @@ describe('App State Tool Pipeline persistence', () => {
 
   test('rejects missing, forged, or path-mismatched mutation terminals before Artifact write', async () => {
     const missing = persistenceHarness({ toolName: 'write_file' });
-    const missingAttempt = await prepareMutationAttemptV1(missing);
+    const missingAttempt = await prepareMutationAttempt(missing);
     await expect(
       missing.persistence.commitTerminal({
         acknowledgement: missingAttempt.acknowledgement,
@@ -1456,7 +1456,7 @@ describe('App State Tool Pipeline persistence', () => {
         observation: structuredClone(AUTHENTIC_FILESYSTEM_OBSERVATION),
       }),
     });
-    const forgedAttempt = await prepareMutationAttemptV1(forged);
+    const forgedAttempt = await prepareMutationAttempt(forged);
     await expect(
       forged.persistence.commitTerminal({
         acknowledgement: forgedAttempt.acknowledgement,
@@ -1467,7 +1467,7 @@ describe('App State Tool Pipeline persistence', () => {
     expect(forged.calls.receipt).toBe(2);
 
     const wrongPath = persistenceHarness({ toolName: 'write_file' });
-    const wrongPathAttempt = await prepareMutationAttemptV1(wrongPath);
+    const wrongPathAttempt = await prepareMutationAttempt(wrongPath);
     await expect(
       wrongPath.persistence.commitTerminal({
         acknowledgement: wrongPathAttempt.acknowledgement,
@@ -1487,7 +1487,7 @@ describe('App State Tool Pipeline persistence', () => {
     const operation = readOperation();
     const record = readIntentRecord(acknowledgement);
     await harness.persistence.workspaceFilesystemEvidence.persistIntent({
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       prepared: candidate,
       operation,
       record,
@@ -1535,7 +1535,7 @@ describe('App State Tool Pipeline persistence', () => {
       attemptsStarted: 1,
     });
     await harness.persistence.workspaceFilesystemEvidence.persistIntent({
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       prepared: candidate,
       operation: readOperation(),
       record: readIntentRecord(first),
@@ -1546,7 +1546,7 @@ describe('App State Tool Pipeline persistence', () => {
       result: result({
         structuredContent: structuredContentWithObservation({
           runtimeEvents: [{ type: 'model.text_delta', text: 'runtime fact' }],
-          classifierAdviceV1: {
+          classifierAdvice: {
             detailCode: 'read_complete',
             disposition: 'never',
             safeAutomaticRetry: false,
@@ -1567,7 +1567,7 @@ describe('App State Tool Pipeline persistence', () => {
         totalLines: 1,
         resultMeta: { command: 'read_file', path: 'README.md' },
       },
-      classifierAdviceV1: { detailCode: 'read_complete', disposition: 'never' },
+      classifierAdvice: { detailCode: 'read_complete', disposition: 'never' },
     });
     expect(harness.session.getState().capabilities.invocations['invocation-1']).toMatchObject({
       status: 'succeeded',
@@ -1667,7 +1667,7 @@ describe('App State Tool Pipeline persistence', () => {
     });
     const lease = session.beginEffect({ type: 'run_tools', toolCallIds: ['call-1', 'call-2'] });
     const receiptEvents: RuntimeEvent[][] = [];
-    const persistence = createAppStateToolPipelinePersistenceV1({
+    const persistence = createAppStateToolPipelinePersistence({
       getState: () => session.getState(),
       persistAttemptStartEvents: async (events) =>
         session.applyEffectEvents(lease, events, 'attempt_start'),
@@ -1845,7 +1845,7 @@ describe('App State Tool Pipeline persistence', () => {
       acknowledgement,
       suspension,
       result: taskSuspendedResult(suspension, {
-        toolRecovery: childRecoveryJournal as unknown as RuntimeJsonValueV1,
+        toolRecovery: childRecoveryJournal as unknown as RuntimeJsonValue,
       }),
     });
 
@@ -1869,7 +1869,7 @@ describe('App State Tool Pipeline persistence', () => {
     const childRecoveryJournal = harness.session.getState().toolRecovery;
     await harness.persistence.commitTerminal({
       acknowledgement,
-      result: taskCompletedResult(1, childRecoveryJournal as unknown as RuntimeJsonValueV1),
+      result: taskCompletedResult(1, childRecoveryJournal as unknown as RuntimeJsonValue),
     });
 
     expect(harness.calls.receiptEvents[0]?.map((event) => event.type)).toEqual([
@@ -1920,7 +1920,7 @@ describe('App State Tool Pipeline persistence', () => {
           {
             type: 'subagent.recovery_journal_merged',
             toolCallId: 'call-1',
-            journal: topLevelJournal as unknown as RuntimeJsonValueV1,
+            journal: topLevelJournal as unknown as RuntimeJsonValue,
           },
         ]),
       }),
@@ -1937,7 +1937,7 @@ describe('App State Tool Pipeline persistence', () => {
         result: taskCompletedResult(1, {
           ...nestedJournal,
           identityKey: 'f'.repeat(64),
-        } as unknown as RuntimeJsonValueV1),
+        } as unknown as RuntimeJsonValue),
       }),
     ).rejects.toMatchObject({ code: 'invalid_terminal_result' });
     expect(nestedTampered.calls.writes).toBe(0);
@@ -2077,7 +2077,7 @@ describe('App State Tool Pipeline persistence', () => {
       ...missingArtifactPrepared,
       identity: Object.freeze({
         ...missingArtifactPrepared.identity,
-        argumentsDigest: digestCapabilityValueV1(missingArtifactArguments),
+        argumentsDigest: digestCapabilityValue(missingArtifactArguments),
       }),
       input: Object.freeze({
         ...missingArtifactPrepared.input,
@@ -2181,7 +2181,7 @@ describe('App State Tool Pipeline persistence', () => {
           toolRecovery: {
             ...harness.session.getState().toolRecovery,
             identityKey: 'f'.repeat(64),
-          } as unknown as RuntimeJsonValueV1,
+          } as unknown as RuntimeJsonValue,
         }),
       },
     ] as const;
@@ -2190,7 +2190,7 @@ describe('App State Tool Pipeline persistence', () => {
       await expect(
         harness.persistence.commitSuspension({
           acknowledgement,
-          suspension: candidate.suspension as ToolPipelineTaskSubagentSuspensionV1,
+          suspension: candidate.suspension as ToolPipelineTaskSubagentSuspension,
           result: candidate.result,
         }),
       ).rejects.toMatchObject({ code: 'invalid_suspension_result' });
@@ -2262,7 +2262,7 @@ describe('App State Tool Pipeline persistence', () => {
           stdout: '',
           stderr: 'timed out',
           terminationReason: 'timed_out',
-          classifierAdviceV1: { detailCode: 'timeout', disposition: 'never' },
+          classifierAdvice: { detailCode: 'timeout', disposition: 'never' },
         }),
       },
     });
@@ -2301,7 +2301,7 @@ describe('App State Tool Pipeline persistence', () => {
           stdout: '',
           stderr: 'git inspection failed',
           resultMeta: { command: 'git_inspect', exitCode: 1 },
-          classifierAdviceV1: { detailCode: 'git_failed', disposition: 'never' },
+          classifierAdvice: { detailCode: 'git_failed', disposition: 'never' },
         }),
       },
     });
@@ -2324,7 +2324,7 @@ describe('App State Tool Pipeline persistence', () => {
           rawResultDigest: expect.any(String),
         },
       },
-      classifierAdviceV1: { detailCode: 'git_failed', disposition: 'never' },
+      classifierAdvice: { detailCode: 'git_failed', disposition: 'never' },
     });
   });
 
@@ -2443,10 +2443,10 @@ describe('App State Tool Pipeline persistence', () => {
       receiptResult: false,
     });
     const candidate = dynamicRetryPrepared(1);
-    const coordinator = createRuntimeHostToolPipelineAttemptCoordinatorV1<
-      RuntimeJsonValueV1,
-      RuntimeJsonValueV1,
-      StateBuiltinOperationStructuredContentV1
+    const coordinator = createRuntimeHostToolPipelineAttemptCoordinator<
+      RuntimeJsonValue,
+      RuntimeJsonValue,
+      StateBuiltinOperationStructuredContent
     >({
       persistence: harness.persistence,
       dispatch: {
@@ -2500,10 +2500,10 @@ describe('App State Tool Pipeline persistence', () => {
       },
     });
     const candidate = prepared(1);
-    const coordinator = createRuntimeHostToolPipelineAttemptCoordinatorV1<
-      RuntimeJsonValueV1,
-      RuntimeJsonValueV1,
-      StateBuiltinOperationStructuredContentV1
+    const coordinator = createRuntimeHostToolPipelineAttemptCoordinator<
+      RuntimeJsonValue,
+      RuntimeJsonValue,
+      StateBuiltinOperationStructuredContent
     >({
       persistence: harness.persistence,
       dispatch: {
@@ -2638,7 +2638,7 @@ describe('App State Tool Pipeline persistence', () => {
         ...askUser,
         identity: {
           ...askUser.identity,
-          operationId: 'builtin:ask_user' as NonDynamicOperationIdV1,
+          operationId: 'builtin:ask_user' as NonDynamicOperationId,
           executionMechanism: 'user_input',
           exposedToolName: 'ask_user',
         },

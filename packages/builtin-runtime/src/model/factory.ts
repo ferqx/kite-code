@@ -3,7 +3,7 @@
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { type LanguageModel, wrapLanguageModel } from 'ai';
-import type { ModelRuntimeConfigV1 } from './config';
+import type { ModelRuntimeConfig } from './config';
 import { createDeepSeekMiddleware } from './deepseek';
 import type { ModelCapabilityMetadata } from './model-capabilities';
 
@@ -37,7 +37,7 @@ export interface ChatModelFactoryOptions {
 
 /** 根据配置创建 AI SDK 聊天模型 / Create an AI SDK chat model from config */
 export function createChatModel(
-  config: ModelRuntimeConfigV1,
+  config: ModelRuntimeConfig,
   options: ChatModelFactoryOptions = {},
 ): SupportedChatModel {
   const provider = createOpenAICompatible({

@@ -3,49 +3,49 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  type BuiltinOperationExecutionValueV1,
+  type BuiltinOperationExecutionValue,
   CapabilityArtifactStore,
-  type CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1,
-  capabilityResultDigestV1,
-  capabilityResultEvidenceDigestV1,
-  createBuiltinPreparedToolDispatchAdapterV1,
+  type CreateBuiltinWorkspaceFilesystemMutationDispatcherInput,
+  capabilityResultDigest,
+  capabilityResultEvidenceDigest,
+  createBuiltinPreparedToolDispatchAdapter,
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  createBuiltinToolPipelineCallbacksV1,
-  digestCapabilityBindingValueV1,
+  createBuiltinToolCatalogProjection,
+  createBuiltinToolPipelineCallbacks,
+  digestCapabilityBindingValue,
 } from '@kite/builtin-runtime';
 import {
-  BuiltinWorkspaceFilesystemMutationCommitUnknownErrorV1,
-  type BuiltinWorkspaceFilesystemRuntimeV1,
-  createBuiltinWorkspaceFilesystemMutationDispatcherV1,
-  FilesystemPreimageArtifactStoreV1,
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
+  BuiltinWorkspaceFilesystemMutationCommitUnknownError,
+  type BuiltinWorkspaceFilesystemRuntime,
+  createBuiltinWorkspaceFilesystemMutationDispatcher,
+  FilesystemPreimageArtifactStore,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
 } from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import type {
   CapabilityArtifactRef,
   CapabilityResult,
-  WorkspaceFilesystemObservationRecordV1,
+  WorkspaceFilesystemObservationRecord,
 } from '@kite/runtime-contract';
 import type {
-  CapabilityToolKindV1,
-  ExecutionReceiptV1,
-  NonDynamicOperationIdV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineResolutionContextV1,
-  WorkspaceFilesystemEditObservationPortV1,
-  WorkspaceFilesystemEditObservationQueryResultV1,
-  WorkspaceFilesystemMutationDurableEvidencePortV1,
-  WorkspaceFilesystemMutationIntentDraftV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemPersistedMutationIntentV1,
-  WorkspaceFilesystemPersistedMutationReadyV1,
-  WorkspaceFilesystemProviderV1,
+  CapabilityToolKind,
+  ExecutionReceipt,
+  NonDynamicOperationId,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineResolutionContext,
+  WorkspaceFilesystemEditObservationPort,
+  WorkspaceFilesystemEditObservationQueryResult,
+  WorkspaceFilesystemMutationDurableEvidencePort,
+  WorkspaceFilesystemMutationIntentDraft,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemPersistedMutationIntent,
+  WorkspaceFilesystemPersistedMutationReady,
+  WorkspaceFilesystemProvider,
 } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 
 const FIXED_NOW = new Date('2026-08-22T00:00:00.000Z');
 
@@ -75,12 +75,12 @@ function mutationPreparedFixture(name: MutationName, workspace: string) {
     name === 'write_file'
       ? { path: './notes.txt', content: 'after\n' }
       : { path: './notes.txt', old_string: 'before', new_string: 'after', replace_all: false };
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const projection = createBuiltinToolCatalogProjectionV1(registry.snapshot(), {
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const projection = createBuiltinToolCatalogProjection(registry.snapshot(), {
     turnContext: { workspace },
   });
-  const callbacks = createBuiltinToolPipelineCallbacksV1(projection);
-  const context: ToolPipelineResolutionContextV1 = {
+  const callbacks = createBuiltinToolPipelineCallbacks(projection);
+  const context: ToolPipelineResolutionContext = {
     currentTurnId: 'turn-mutation',
     availabilityContext: { workspace },
     bindings: [],
@@ -95,7 +95,7 @@ function mutationPreparedFixture(name: MutationName, workspace: string) {
       stage: 'snapshot',
       toolCallId: `call-${name}`,
       name,
-      rawArguments: args as unknown as RuntimeJsonValueV1,
+      rawArguments: args as unknown as RuntimeJsonValue,
       argumentOrigin: 'model_public',
       createdAtTurnId: 'turn-mutation',
       modelMessageId: 'message-mutation',
@@ -123,7 +123,7 @@ function mutationPreparedFixture(name: MutationName, workspace: string) {
     modelMessageId: resolved.value.call.modelMessageId,
     argumentOrigin: resolved.value.call.argumentOrigin,
     providerId: entry.providerId,
-    operationId: entry.operationId as NonDynamicOperationIdV1,
+    operationId: entry.operationId as NonDynamicOperationId,
     executionFamily: 'builtin' as const,
     executionMechanism: entry.executionMechanism,
     capabilityId: entry.capabilityId,
@@ -134,9 +134,9 @@ function mutationPreparedFixture(name: MutationName, workspace: string) {
     argumentsDigest: validated.value.request.argumentsDigest,
     schemaDigest: validated.value.request.schemaDigest,
     effectiveEffectsDigest: classified.value.effectiveEffectsDigest,
-    policyDigest: digestCapabilityBindingValueV1({ name, kind: 'policy' }),
-    authorizationDigest: digestCapabilityBindingValueV1({ name, kind: 'authorization' }),
-    admissionDigest: digestCapabilityBindingValueV1({ name, kind: 'admission' }),
+    policyDigest: digestCapabilityBindingValue({ name, kind: 'policy' }),
+    authorizationDigest: digestCapabilityBindingValue({ name, kind: 'authorization' }),
+    admissionDigest: digestCapabilityBindingValue({ name, kind: 'admission' }),
     idempotencyKeyArgument: null,
     idempotencyKey: null,
     bindingId: null,
@@ -149,7 +149,7 @@ function mutationPreparedFixture(name: MutationName, workspace: string) {
     nestedCapabilityRevision: null,
     nestedCatalogRevision: null,
     isDynamicMcp: false as const,
-    toolKind: entry.kind as CapabilityToolKindV1,
+    toolKind: entry.kind as CapabilityToolKind,
   };
   const prepared = freezeDeep({
     identity,
@@ -161,14 +161,14 @@ function mutationPreparedFixture(name: MutationName, workspace: string) {
       facts: validated.value.domainData,
       binding: null,
     },
-  }) satisfies Readonly<PreparedToolInvocationV1>;
+  }) satisfies Readonly<PreparedToolInvocation>;
   expect(callbacks.verifyPreparedIdentity(prepared)).toEqual({ valid: true });
   return { workspace, projection, callbacks, prepared, operation: args };
 }
 
 function acknowledgement(
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<ToolPipelineAttemptAcknowledgementV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<ToolPipelineAttemptAcknowledgement> {
   const identity = prepared.identity;
   return freezeDeep({
     acknowledged: true as const,
@@ -207,7 +207,7 @@ function acknowledgement(
   });
 }
 
-function mutationOperation(name: MutationName): WorkspaceFilesystemMutationOperationV1 {
+function mutationOperation(name: MutationName): WorkspaceFilesystemMutationOperation {
   return name === 'write_file'
     ? {
         kind: 'write_file',
@@ -226,18 +226,18 @@ function mutationOperation(name: MutationName): WorkspaceFilesystemMutationOpera
 }
 
 function mutationDurable(
-  prepared: Readonly<PreparedToolInvocationV1>,
+  prepared: Readonly<PreparedToolInvocation>,
   mode: DurableMode,
-): WorkspaceFilesystemMutationDurableEvidencePortV1 & {
+): WorkspaceFilesystemMutationDurableEvidencePort & {
   readonly intentCalls: number;
   readonly readyCalls: number;
-  readonly lastIntent?: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>;
-  readonly lastReady?: Readonly<WorkspaceFilesystemPersistedMutationReadyV1>;
+  readonly lastIntent?: Readonly<WorkspaceFilesystemPersistedMutationIntent>;
+  readonly lastReady?: Readonly<WorkspaceFilesystemPersistedMutationReady>;
 } {
   let intentCalls = 0;
   let readyCalls = 0;
-  let lastIntent: Readonly<WorkspaceFilesystemPersistedMutationIntentV1> | undefined;
-  let lastReady: Readonly<WorkspaceFilesystemPersistedMutationReadyV1> | undefined;
+  let lastIntent: Readonly<WorkspaceFilesystemPersistedMutationIntent> | undefined;
+  let lastReady: Readonly<WorkspaceFilesystemPersistedMutationReady> | undefined;
   const issuedIntents = new WeakSet<object>();
   const issuedReady = new WeakSet<object>();
   return {
@@ -254,11 +254,11 @@ function mutationDurable(
       return lastReady;
     },
     persistIntent: async <
-      TArguments extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
-      TRequest extends RuntimeJsonValueV1 = RuntimeJsonValueV1,
+      TArguments extends RuntimeJsonValue = RuntimeJsonValue,
+      TRequest extends RuntimeJsonValue = RuntimeJsonValue,
     >(
-      draft: Readonly<WorkspaceFilesystemMutationIntentDraftV1<TArguments, TRequest>>,
-    ): Promise<Readonly<WorkspaceFilesystemPersistedMutationIntentV1<TArguments, TRequest>>> => {
+      draft: Readonly<WorkspaceFilesystemMutationIntentDraft<TArguments, TRequest>>,
+    ): Promise<Readonly<WorkspaceFilesystemPersistedMutationIntent<TArguments, TRequest>>> => {
       intentCalls += 1;
       if (mode === 'intent_throw') throw new Error('intent uncertainty');
       const operation =
@@ -314,24 +314,24 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-builtin-mutation-'));
   if (name === 'edit_file') writeFileSync(join(workspace, 'notes.txt'), 'before\n');
   const prepared = mutationPreparedFixture(name, workspace);
-  const grants = new WorkspaceFilesystemGrantAuthorityV1({
+  const grants = new WorkspaceFilesystemGrantAuthority({
     now: () => FIXED_NOW.getTime(),
     idSource: (() => {
       let id = 0;
       return () => `mutation-grant-${++id}`;
     })(),
   });
-  const local = new LocalWorkspaceFilesystemProviderV1(grants.verifier());
+  const local = new LocalWorkspaceFilesystemProvider(grants.verifier());
   const artifactWorkspace = mkdtempSync(join(tmpdir(), 'kite-builtin-artifacts-'));
   const preimageRoot = join(artifactWorkspace, 'filesystem-preimages');
   const capabilityRoot = join(artifactWorkspace, 'capability-artifacts');
-  const preimageStore = new FilesystemPreimageArtifactStoreV1({
+  const preimageStore = new FilesystemPreimageArtifactStore({
     root: preimageRoot,
   });
   const capabilityStore = new CapabilityArtifactStore({
     root: capabilityRoot,
   });
-  const protectedPathEvaluator = createProtectedPathEvaluatorV1({
+  const protectedPathEvaluator = createProtectedPathEvaluator({
     workspaceRoot: workspace,
     mode: 'deny',
   });
@@ -341,13 +341,13 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
   let postimageProjectionCalls = 0;
   let priorObservation:
     | {
-        readonly observation: Readonly<WorkspaceFilesystemObservationRecordV1>;
+        readonly observation: Readonly<WorkspaceFilesystemObservationRecord>;
         readonly artifact: Readonly<CapabilityArtifactRef>;
         readonly resultDigest: string;
         readonly evidenceDigest: string;
       }
     | undefined;
-  const provider: WorkspaceFilesystemProviderV1 = {
+  const provider: WorkspaceFilesystemProvider = {
     observe: (input) => local.observe(input),
     prepareMutation: async (input) => {
       prepareCalls += 1;
@@ -359,7 +359,7 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
             ? `sha256:${'f'.repeat(64)}`
             : (result.observation.preimage.contentDigest ?? `sha256:${'e'.repeat(64)}`);
         const observation = freezeDeep({
-          actorIdentityDigest: actorDigestV1(),
+          actorIdentityDigest: actorDigest(),
           lexicalTargetDigest: evidence.lexicalTargetDigest,
           canonicalTargetDigest: evidence.canonicalTargetDigest,
           targetIdentityDigest: evidence.targetIdentityDigest,
@@ -377,8 +377,8 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
         priorObservation = {
           observation,
           artifact,
-          resultDigest: capabilityResultDigestV1(capabilityResult),
-          evidenceDigest: capabilityResultEvidenceDigestV1(capabilityResult),
+          resultDigest: capabilityResultDigest(capabilityResult),
+          evidenceDigest: capabilityResultEvidenceDigest(capabilityResult),
         };
       }
       return result;
@@ -389,7 +389,7 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
       return local.commitMutation(input);
     },
   };
-  const runtime: BuiltinWorkspaceFilesystemRuntimeV1 = {
+  const runtime: BuiltinWorkspaceFilesystemRuntime = {
     canonicalWorkspace: protectedPathEvaluator.workspaceRoot,
     provider,
     grants,
@@ -403,12 +403,12 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
     capabilityArtifacts: capabilityStore,
   };
   const durable = mutationDurable(prepared.prepared, options.durableMode ?? 'valid');
-  const editObservation: WorkspaceFilesystemEditObservationPortV1 = {
+  const editObservation: WorkspaceFilesystemEditObservationPort = {
     findLatestAuthenticRead: async (query) => {
       if (options.editMode === 'missing' || !priorObservation) {
         return { status: 'missing', code: 'read_required', query };
       }
-      const result: WorkspaceFilesystemEditObservationQueryResultV1 = {
+      const result: WorkspaceFilesystemEditObservationQueryResult = {
         status: 'found',
         query,
         invocationId: 'prior-read-invocation',
@@ -429,7 +429,7 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
         ? { valid: false, code: 'query_result_not_issued' }
         : { valid: true },
   };
-  const input: CreateBuiltinWorkspaceFilesystemMutationDispatcherInputV1 = {
+  const input: CreateBuiltinWorkspaceFilesystemMutationDispatcherInput = {
     prepared: prepared.prepared,
     verifyPreparedIdentity: prepared.callbacks.verifyPreparedIdentity,
     runtime,
@@ -450,8 +450,8 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
     },
     now: () => new Date(FIXED_NOW),
   };
-  function actorDigestV1(): string {
-    return digestCapabilityBindingValueV1({
+  function actorDigest(): string {
+    return digestCapabilityBindingValue({
       schema: 'kite.workspace-filesystem-actor.v1',
       threadId: 'thread-mutation',
       actorIdentity: 'actor-mutation',
@@ -480,9 +480,9 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
 }
 
 function executionReceipt(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  value: BuiltinOperationExecutionValueV1,
-): ExecutionReceiptV1<BuiltinOperationExecutionValueV1> {
+  prepared: Readonly<PreparedToolInvocation>,
+  value: BuiltinOperationExecutionValue,
+): ExecutionReceipt<BuiltinOperationExecutionValue> {
   return {
     invocationId: prepared.identity.invocationId,
     attemptId: prepared.identity.attemptId,
@@ -499,7 +499,7 @@ function executionReceipt(
 async function terminalFor(
   fixtureValue: ReturnType<typeof fixture>,
   result: Awaited<
-    ReturnType<ReturnType<typeof createBuiltinWorkspaceFilesystemMutationDispatcherV1>['dispatch']>
+    ReturnType<ReturnType<typeof createBuiltinWorkspaceFilesystemMutationDispatcher>['dispatch']>
   >,
 ) {
   if (!result.ok || !result.filesystemObservation) throw new Error('mutation observation missing');
@@ -511,8 +511,8 @@ async function terminalFor(
     resultMeta: {},
     filesystemObservation: result.filesystemObservation,
     path: './notes.txt',
-  }) as unknown as BuiltinOperationExecutionValueV1;
-  const adapter = createBuiltinPreparedToolDispatchAdapterV1({
+  }) as unknown as BuiltinOperationExecutionValue;
+  const adapter = createBuiltinPreparedToolDispatchAdapter({
     projection: fixtureValue.projection,
     verifyPreparedIdentity: fixtureValue.callbacks.verifyPreparedIdentity,
     port: { dispatch: async () => executionReceipt(fixtureValue.prepared, value) },
@@ -523,7 +523,7 @@ async function terminalFor(
 describe('Builtin Workspace filesystem mutation dispatcher', () => {
   test('write_file performs prepare/ready/commit exactly once without a prior read', async () => {
     const value = fixture('write_file');
-    const result = await createBuiltinWorkspaceFilesystemMutationDispatcherV1(value.input).dispatch(
+    const result = await createBuiltinWorkspaceFilesystemMutationDispatcher(value.input).dispatch(
       value.operation,
     );
     expect(result.ok).toBe(true);
@@ -541,7 +541,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
 
   test('legacy checkpoint projection remains best-effort and never authorizes mutation', async () => {
     const value = fixture('write_file', { checkpointThrow: true });
-    const result = await createBuiltinWorkspaceFilesystemMutationDispatcherV1(value.input).dispatch(
+    const result = await createBuiltinWorkspaceFilesystemMutationDispatcher(value.input).dispatch(
       value.operation,
     );
     expect(result.ok).toBe(true);
@@ -552,7 +552,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
 
   test('edit_file accepts only an authentic same-actor read Artifact and detects stale content', async () => {
     const valid = fixture('edit_file', { editMode: 'valid' });
-    const result = await createBuiltinWorkspaceFilesystemMutationDispatcherV1(valid.input).dispatch(
+    const result = await createBuiltinWorkspaceFilesystemMutationDispatcher(valid.input).dispatch(
       valid.operation,
     );
     expect(result.ok).toBe(true);
@@ -561,7 +561,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
     expect(valid.readContent()).toBe('after\n');
 
     const stale = fixture('edit_file', { editMode: 'stale' });
-    const staleResult = await createBuiltinWorkspaceFilesystemMutationDispatcherV1(
+    const staleResult = await createBuiltinWorkspaceFilesystemMutationDispatcher(
       stale.input,
     ).dispatch(stale.operation);
     expect(staleResult).toMatchObject({ ok: false, failure: { code: 'stale_read' } });
@@ -572,9 +572,9 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
   test('missing or forged read evidence fails closed before commit', async () => {
     for (const editMode of ['missing', 'artifact_invalid', 'clone'] as const) {
       const value = fixture('edit_file', { editMode });
-      const result = await createBuiltinWorkspaceFilesystemMutationDispatcherV1(
-        value.input,
-      ).dispatch(value.operation);
+      const result = await createBuiltinWorkspaceFilesystemMutationDispatcher(value.input).dispatch(
+        value.operation,
+      );
       expect(result).toMatchObject({ ok: false });
       expect(value.prepareCalls).toBe(1);
       expect(value.commitCalls).toBe(0);
@@ -584,7 +584,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
   test('intent and ready uncertainty never reaches Provider commit', async () => {
     const intentFailure = fixture('write_file', { durableMode: 'intent_throw' });
     await expect(
-      createBuiltinWorkspaceFilesystemMutationDispatcherV1(intentFailure.input).dispatch(
+      createBuiltinWorkspaceFilesystemMutationDispatcher(intentFailure.input).dispatch(
         intentFailure.operation,
       ),
     ).rejects.toMatchObject({ code: 'intent_persistence_failed' });
@@ -598,7 +598,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
       'ready_clone',
     ] as const) {
       const value = fixture('write_file', { durableMode });
-      const result = createBuiltinWorkspaceFilesystemMutationDispatcherV1(value.input).dispatch(
+      const result = createBuiltinWorkspaceFilesystemMutationDispatcher(value.input).dispatch(
         value.operation,
       );
       if (durableMode === 'intent_invalid' || durableMode === 'intent_clone') {
@@ -619,7 +619,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
 
   test('preimage Artifact failure blocks ready and commit; Provider commit throw is typed unknown', async () => {
     const artifactFailure = fixture('write_file', { preimageFailure: true });
-    const result = await createBuiltinWorkspaceFilesystemMutationDispatcherV1(
+    const result = await createBuiltinWorkspaceFilesystemMutationDispatcher(
       artifactFailure.input,
     ).dispatch(artifactFailure.operation);
     expect(result).toMatchObject({ ok: false, failure: { code: 'operation_failed' } });
@@ -629,10 +629,8 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
 
     const unknown = fixture('write_file', { commitThrow: true });
     await expect(
-      createBuiltinWorkspaceFilesystemMutationDispatcherV1(unknown.input).dispatch(
-        unknown.operation,
-      ),
-    ).rejects.toBeInstanceOf(BuiltinWorkspaceFilesystemMutationCommitUnknownErrorV1);
+      createBuiltinWorkspaceFilesystemMutationDispatcher(unknown.input).dispatch(unknown.operation),
+    ).rejects.toBeInstanceOf(BuiltinWorkspaceFilesystemMutationCommitUnknownError);
     expect(unknown.commitCalls).toBe(1);
     expect(unknown.preimageProjectionCalls).toBe(1);
     expect(unknown.postimageProjectionCalls).toBe(0);
@@ -640,7 +638,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
 
   test('successful mutation observation binds the exact cloned terminal and rejects forged/failed terminals', async () => {
     const value = fixture('write_file');
-    const dispatcher = createBuiltinWorkspaceFilesystemMutationDispatcherV1(value.input);
+    const dispatcher = createBuiltinWorkspaceFilesystemMutationDispatcher(value.input);
     const result = await dispatcher.dispatch(value.operation);
     const terminal = await terminalFor(value, result);
     expect(terminal).toMatchObject({
@@ -659,8 +657,8 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
       resultMeta: {},
       filesystemObservation: structuredClone(result.filesystemObservation),
       path: './notes.txt',
-    }) as unknown as BuiltinOperationExecutionValueV1;
-    const forgedAdapter = createBuiltinPreparedToolDispatchAdapterV1({
+    }) as unknown as BuiltinOperationExecutionValue;
+    const forgedAdapter = createBuiltinPreparedToolDispatchAdapter({
       projection: value.projection,
       verifyPreparedIdentity: value.callbacks.verifyPreparedIdentity,
       port: { dispatch: async () => executionReceipt(value.prepared, forgedValue) },
@@ -677,8 +675,8 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
       resultMeta: {},
       filesystemObservation: forgedValue.filesystemObservation,
       path: './notes.txt',
-    }) as unknown as BuiltinOperationExecutionValueV1;
-    const failedAdapter = createBuiltinPreparedToolDispatchAdapterV1({
+    }) as unknown as BuiltinOperationExecutionValue;
+    const failedAdapter = createBuiltinPreparedToolDispatchAdapter({
       projection: value.projection,
       verifyPreparedIdentity: value.callbacks.verifyPreparedIdentity,
       port: { dispatch: async () => executionReceipt(value.prepared, failedValue) },
@@ -693,7 +691,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
       new URL('../src/filesystem/mutation-dispatcher.ts', import.meta.url),
     ).text();
     expect(source).not.toMatch(/@kite\/(?:runtime-host|agent-kernel)|#app|@\/core/u);
-    expect(source).not.toContain('createRuntimeModuleRegistryV1');
+    expect(source).not.toContain('createRuntimeModuleRegistry');
     expect(source).not.toContain('RuntimeStore');
     expect(source).not.toContain('catchOld');
   });

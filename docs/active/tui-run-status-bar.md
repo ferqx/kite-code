@@ -113,7 +113,7 @@ Working 阶段的 StatusBar 文字与 spinner 固定使用当前主题的 `prima
 
 ## Context Footer 与终态提示
 
-当前 Runtime state 的终态通过共享 `projectTerminalOutcomeV1` 投影。TUI 只在
+当前 Runtime state 的终态通过共享 `projectTerminalOutcome` 投影。TUI 只在
 `outcome.status=completed` 时进入完成展示；`unknown`、`blocked`、`budget_exhausted` 和
 `resource_saturated` 保持错误/警告终态，并使用结构化 `safeRetry`，不得从本地化 message
 反推。没有 outcome 的历史事件继续按原 `recoverable` 字段回放。Headless CLI 对带 outcome 的

@@ -27,28 +27,28 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
+  workspaceFilesystemProtectedBoundaryDigest,
 } from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import type {
-  WorkspaceFilesystemObserveOperationV1,
-  WorkspaceReadFileOperationV1,
-  WorkspaceSearchContentOperationV1,
-  WorkspaceSearchFilesOperationV1,
+  WorkspaceFilesystemObserveOperation,
+  WorkspaceReadFileOperation,
+  WorkspaceSearchContentOperation,
+  WorkspaceSearchFilesOperation,
 } from '@kite/runtime-spi';
 
 const DIR_COUNT = 25;
 const FILES_PER_DIR = 24;
 type LocalSearchOperation =
-  | Omit<WorkspaceReadFileOperationV1, 'pathScope'>
-  | Omit<WorkspaceSearchFilesOperationV1, 'pathScope'>
-  | Omit<WorkspaceSearchContentOperationV1, 'pathScope'>;
+  | Omit<WorkspaceReadFileOperation, 'pathScope'>
+  | Omit<WorkspaceSearchFilesOperation, 'pathScope'>
+  | Omit<WorkspaceSearchContentOperation, 'pathScope'>;
 
 function localSearch(workspace: string) {
-  const authority = new WorkspaceFilesystemGrantAuthorityV1();
-  const projection = createProtectedPathEvaluatorV1({
+  const authority = new WorkspaceFilesystemGrantAuthority();
+  const projection = createProtectedPathEvaluator({
     workspaceRoot: workspace,
     mode: 'deny',
   }).projectFilesystemBoundary();
@@ -58,7 +58,7 @@ function localSearch(workspace: string) {
   };
   const protectedBoundary = {
     ...unsignedBoundary,
-    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsignedBoundary),
   };
   const binding = {
     threadId: 'search-nonblocking-thread',
@@ -74,7 +74,7 @@ function localSearch(workspace: string) {
     protectedPathRevision: 'search-nonblocking-protected-path',
     approvalSummary: 'search nonblocking fixture',
   };
-  const provider = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+  const provider = new LocalWorkspaceFilesystemProvider(authority.verifier());
   return (operation: LocalSearchOperation) =>
     provider.observe({
       grant: authority.issueObserveGrant({
@@ -82,7 +82,7 @@ function localSearch(workspace: string) {
         operation: {
           ...operation,
           pathScope: 'workspace_only',
-        } as WorkspaceFilesystemObserveOperationV1,
+        } as WorkspaceFilesystemObserveOperation,
         protectedBoundary,
         ttlMs: 30_000,
       }),

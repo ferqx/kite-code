@@ -8,7 +8,7 @@ const SECRET_SHAPE_PATTERNS = [
   /(?:^|[/\\])(?:\.env(?:\.[^/\\]+)?|\.ssh|\.aws|\.kube|credentials?|secrets?)(?:$|[/\\])/i,
 ] as const;
 
-export function inspectRuntimeSecretV1(input: {
+export function inspectRuntimeSecret(input: {
   text: string;
   knownSecrets?: Iterable<string | undefined>;
   maxInspectionChars: number;

@@ -1,44 +1,44 @@
 import { describe, expect, test } from 'bun:test';
 import type { ToolApprovalPayload } from '@kite/runtime-contract';
 import {
-  type CapabilityToolTerminalResultV1,
-  type DynamicMcpPreparedToolInvocationIdentityV1,
-  type DynamicMcpToolTargetV1,
-  type NonDynamicOperationIdV1,
-  type NonDynamicPreparedToolInvocationIdentityV1,
-  type PreparedToolInvocationIdentityV1,
-  type PrivateSuspendedSubagentRecordV1,
-  type ResolvedToolTargetV1,
-  type RuntimeJsonValueV1,
-  TOOL_PIPELINE_STAGE_SCHEMA_V1,
-  type ToolPipelineAttemptAcknowledgementV1,
-  type ToolPipelineDispatchOutcomeV1,
-  type ToolPipelineDispatchV1,
-  type ToolPipelineGovernanceDynamicMcpProjectionV1,
-  type ToolPipelineGovernanceInvocationProjectionV1,
-  type ToolPipelineGovernanceNestedSkillProjectionV1,
-  type ToolPipelineGovernanceOrdinaryInvocationProjectionV1,
-  type ToolPipelineGovernancePolicyProjectionV1,
-  type ToolPipelineGovernanceProjectionV1,
-  type ToolPipelineOutcomeDispatchV1,
-  type ToolPipelinePersistenceV1,
-  type ToolPipelinePlanReviewRequestedEventV1,
-  type ToolPipelineResolutionContextV1,
-  type ToolPipelineSkillForkApprovalRequestedEventV1,
-  type ToolPipelineSkillForkAutoReviewRequestedEventV1,
-  type ToolPipelineSkillForkSuspensionEventV1,
-  type ToolPipelineSkillForkSuspensionV1,
-  type ToolPipelineSuspensionCommitCallbackV1,
-  type ToolPipelineSuspensionCommitV1,
-  type ToolPipelineSuspensionV1,
-  type ToolPipelineTaskSubagentApprovalRequestedEventV1,
-  type ToolPipelineTaskSubagentAutoReviewRequestedEventV1,
-  type ToolPipelineTaskSubagentSuspensionEventV1,
-  type ToolPipelineTaskSubagentSuspensionV1,
-  type ToolRecordedAttemptIdentityV1,
+  type CapabilityToolTerminalResult,
+  type DynamicMcpPreparedToolInvocationIdentity,
+  type DynamicMcpToolTarget,
+  type NonDynamicOperationId,
+  type NonDynamicPreparedToolInvocationIdentity,
+  type PreparedToolInvocationIdentity,
+  type PrivateSuspendedSubagentRecord,
+  type ResolvedToolTarget,
+  type RuntimeJsonValue,
+  TOOL_PIPELINE_STAGE_SCHEMA_,
+  type ToolPipelineAttemptAcknowledgement,
+  type ToolPipelineDispatch,
+  type ToolPipelineDispatchOutcome,
+  type ToolPipelineGovernanceDynamicMcpProjection,
+  type ToolPipelineGovernanceInvocationProjection,
+  type ToolPipelineGovernanceNestedSkillProjection,
+  type ToolPipelineGovernanceOrdinaryInvocationProjection,
+  type ToolPipelineGovernancePolicyProjection,
+  type ToolPipelineGovernanceProjection,
+  type ToolPipelineOutcomeDispatch,
+  type ToolPipelinePersistence,
+  type ToolPipelinePlanReviewRequestedEvent,
+  type ToolPipelineResolutionContext,
+  type ToolPipelineSkillForkApprovalRequestedEvent,
+  type ToolPipelineSkillForkAutoReviewRequestedEvent,
+  type ToolPipelineSkillForkSuspension,
+  type ToolPipelineSkillForkSuspensionEvent,
+  type ToolPipelineSuspension,
+  type ToolPipelineSuspensionCommit,
+  type ToolPipelineSuspensionCommitCallback,
+  type ToolPipelineTaskSubagentApprovalRequestedEvent,
+  type ToolPipelineTaskSubagentAutoReviewRequestedEvent,
+  type ToolPipelineTaskSubagentSuspension,
+  type ToolPipelineTaskSubagentSuspensionEvent,
+  type ToolRecordedAttemptIdentity,
 } from '@kite/runtime-spi';
 
-function dynamicResolvedTarget(): DynamicMcpToolTargetV1 {
+function dynamicResolvedTarget(): DynamicMcpToolTarget {
   return {
     executionFamily: 'mcp',
     executionMechanism: 'mcp',
@@ -99,9 +99,9 @@ function dynamicResolvedTarget(): DynamicMcpToolTargetV1 {
 
 describe('runtime SPI tool pipeline contract', () => {
   test('keeps the exact stage schema and separate catalog identities', () => {
-    expect(TOOL_PIPELINE_STAGE_SCHEMA_V1).toBe('kite.tool-pipeline-stage.v1');
+    expect(TOOL_PIPELINE_STAGE_SCHEMA_).toBe('kite.tool-pipeline-stage.v1');
 
-    const context: ToolPipelineResolutionContextV1 = {
+    const context: ToolPipelineResolutionContext = {
       currentTurnId: 'turn-1',
       availabilityContext: { workspace: '/tmp/workspace' },
       bindings: [],
@@ -117,7 +117,7 @@ describe('runtime SPI tool pipeline contract', () => {
   test('projects Kernel governance facts with disjoint dynamic, builtin, and nested identities', () => {
     const builtinRevision = 'b'.repeat(64);
     const dynamicRevision = 'd'.repeat(64);
-    const policy: ToolPipelineGovernancePolicyProjectionV1 = {
+    const policy: ToolPipelineGovernancePolicyProjection = {
       schema: 'kite.capability-policy-compilation.v1',
       operationId: 'builtin:read_file',
       capabilityRevision: builtinRevision,
@@ -135,7 +135,7 @@ describe('runtime SPI tool pipeline contract', () => {
       sameCommandMayBypassApproval: false,
       requiresSandbox: true,
     };
-    const ordinary: ToolPipelineGovernanceOrdinaryInvocationProjectionV1 = {
+    const ordinary: ToolPipelineGovernanceOrdinaryInvocationProjection = {
       turnId: 'turn-1',
       modelMessageId: 'message-1',
       toolCallId: 'call-1',
@@ -143,7 +143,7 @@ describe('runtime SPI tool pipeline contract', () => {
       executionFamily: 'builtin',
       executionMechanism: 'filesystem',
       exposedToolName: 'read_file',
-      operationId: 'builtin:read_file' as NonDynamicOperationIdV1,
+      operationId: 'builtin:read_file' as NonDynamicOperationId,
       capabilityId: 'builtin:read_file',
       providerId: 'builtin-runtime',
       capabilityRevision: builtinRevision,
@@ -164,7 +164,7 @@ describe('runtime SPI tool pipeline contract', () => {
       visibility: 'model',
       modelVisible: true,
     };
-    const dynamic: ToolPipelineGovernanceInvocationProjectionV1 = {
+    const dynamic: ToolPipelineGovernanceInvocationProjection = {
       ...ordinary,
       executionFamily: 'mcp',
       executionMechanism: 'mcp',
@@ -199,14 +199,14 @@ describe('runtime SPI tool pipeline contract', () => {
         builtinProjectionRevision: builtinRevision,
       },
     };
-    const dynamicProjection: ToolPipelineGovernanceDynamicMcpProjectionV1 = {
+    const dynamicProjection: ToolPipelineGovernanceDynamicMcpProjection = {
       isDynamicMcp: true,
       subject: dynamic.subject,
       runtimeWrapper: dynamic.runtimeWrapper,
       minimumApproval: 'none',
       readOnly: true,
     };
-    const nested: ToolPipelineGovernanceNestedSkillProjectionV1 = {
+    const nested: ToolPipelineGovernanceNestedSkillProjection = {
       operationId: 'builtin:activate_skill',
       capabilityId: 'skill:workflow',
       capabilityRevision: 'k'.repeat(64),
@@ -214,7 +214,7 @@ describe('runtime SPI tool pipeline contract', () => {
       decision: 'ask',
       minimumApproval: 'user',
     };
-    const projection: ToolPipelineGovernanceProjectionV1 = {
+    const projection: ToolPipelineGovernanceProjection = {
       invocation: ordinary,
       policy,
       effectiveEffects: policy.effectiveEffects,
@@ -237,14 +237,14 @@ describe('runtime SPI tool pipeline contract', () => {
     expect(dynamicProjection.subject).toBe(dynamic.subject);
 
     // Dynamic MCP cannot be assigned to the ordinary governance branch.
-    // @ts-expect-error the dynamic wrapper is not a NonDynamicOperationIdV1.
-    const invalidOrdinary: ToolPipelineGovernanceOrdinaryInvocationProjectionV1 = dynamic;
+    // @ts-expect-error the dynamic wrapper is not a NonDynamicOperationId.
+    const invalidOrdinary: ToolPipelineGovernanceOrdinaryInvocationProjection = dynamic;
     void invalidOrdinary;
   });
 
   test('expresses internal dynamic MCP identity as non-model-visible', () => {
     const dynamicTarget = dynamicResolvedTarget();
-    const target: ResolvedToolTargetV1 = dynamicTarget;
+    const target: ResolvedToolTarget = dynamicTarget;
     expect(target.operationId).toBe('mcp:dynamic_tool');
     expect(target.modelVisible).toBe(false);
     expect(target.exposedToolName).toBeNull();
@@ -259,7 +259,7 @@ describe('runtime SPI tool pipeline contract', () => {
     expect(target.runtimeWrapper.builtinProjectionRevision).toBe('builtin-projection-1');
 
     // @ts-expect-error dynamic MCP must remain internal and non-model-visible.
-    const invalidVisibility: ResolvedToolTargetV1 = {
+    const invalidVisibility: ResolvedToolTarget = {
       ...target,
       visibility: 'model',
       modelVisible: true,
@@ -267,7 +267,7 @@ describe('runtime SPI tool pipeline contract', () => {
     };
     void invalidVisibility;
     // @ts-expect-error the dynamic wrapper cannot use the non-dynamic branch.
-    const invalidOperation: ResolvedToolTargetV1 = {
+    const invalidOperation: ResolvedToolTarget = {
       ...target,
       operationId: 'mcp:dynamic_tool',
       isDynamicMcp: false,
@@ -280,7 +280,7 @@ describe('runtime SPI tool pipeline contract', () => {
         // @ts-expect-error the wrapper cannot impersonate the real MCP subject.
         capabilityId: dynamicTarget.subject.capabilityId,
       },
-    } satisfies DynamicMcpToolTargetV1;
+    } satisfies DynamicMcpToolTarget;
     void invalidWrapperCapability;
     const invalidWrapperProjection = {
       ...dynamicTarget,
@@ -289,12 +289,12 @@ describe('runtime SPI tool pipeline contract', () => {
         // @ts-expect-error the frozen Builtin wrapper always carries its projection revision.
         builtinProjectionRevision: null,
       },
-    } satisfies DynamicMcpToolTargetV1;
+    } satisfies DynamicMcpToolTarget;
     void invalidWrapperProjection;
   });
 
   test('keeps terminal result JSON-safe and cloneable', () => {
-    const result: CapabilityToolTerminalResultV1 = {
+    const result: CapabilityToolTerminalResult = {
       status: 'error',
       content: [{ type: 'text', text: 'denied' }],
       providerMeta: { provider: 'mcp', retryAfterMs: 1000 },
@@ -327,14 +327,14 @@ describe('runtime SPI tool pipeline contract', () => {
       version: 2,
       structuralDigest: 'plan-digest-1',
       artifact: { kind: 'plan', ref: 'artifact-1' },
-    } satisfies ToolPipelinePlanReviewRequestedEventV1;
-    const suspension: ToolPipelineSuspensionV1 = {
-      schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+    } satisfies ToolPipelinePlanReviewRequestedEvent;
+    const suspension: ToolPipelineSuspension = {
+      schema: TOOL_PIPELINE_STAGE_SCHEMA_,
       kind: 'plan_review',
       toolCallId: event.toolCallId,
       event,
     };
-    const committed: ToolPipelineDispatchOutcomeV1 = {
+    const committed: ToolPipelineDispatchOutcome = {
       kind: 'committed',
       terminal: { status: 'success', content: [] },
     };
@@ -350,18 +350,18 @@ describe('runtime SPI tool pipeline contract', () => {
           runtimeEvents: [event],
         },
       },
-    } satisfies ToolPipelineDispatchOutcomeV1;
-    const acknowledgement: ToolPipelineAttemptAcknowledgementV1 = {
+    } satisfies ToolPipelineDispatchOutcome;
+    const acknowledgement: ToolPipelineAttemptAcknowledgement = {
       acknowledged: true,
-      attempt: {} as ToolRecordedAttemptIdentityV1,
+      attempt: {} as ToolRecordedAttemptIdentity,
     };
-    const commit: ToolPipelineSuspensionCommitV1 = {
+    const commit: ToolPipelineSuspensionCommit = {
       acknowledgement,
       suspension,
       result: suspended.result,
     };
-    const received: { current: ToolPipelineSuspensionCommitV1 | null } = { current: null };
-    const commitSuspension: ToolPipelineSuspensionCommitCallbackV1 = async (input) => {
+    const received: { current: ToolPipelineSuspensionCommit | null } = { current: null };
+    const commitSuspension: ToolPipelineSuspensionCommitCallback = async (input) => {
       received.current = input;
     };
     await commitSuspension(commit);
@@ -397,23 +397,23 @@ describe('runtime SPI tool pipeline contract', () => {
 
     // A terminal result is not a suspension payload.
     // @ts-expect-error capability terminal results cannot be assigned as suspension.
-    const terminalAsSuspension: ToolPipelineSuspensionV1 = committed.terminal;
+    const terminalAsSuspension: ToolPipelineSuspension = committed.terminal;
     void terminalAsSuspension;
-    const approvalSuspension: ToolPipelineSuspensionV1 = {
-      schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+    const approvalSuspension: ToolPipelineSuspension = {
+      schema: TOOL_PIPELINE_STAGE_SCHEMA_,
       // @ts-expect-error approval is not an admitted suspension kind.
       kind: 'approval',
       toolCallId: 'call-approval-1',
       event,
     };
     void approvalSuspension;
-    const userInputSuspension: ToolPipelineSuspensionV1 = {
+    const userInputSuspension: ToolPipelineSuspension = {
       ...suspension,
       // @ts-expect-error user-input events cannot enter the plan-review suspension.
       event: { ...event, type: 'user_input.answered' },
     };
     void userInputSuspension;
-    const cancelledSuspension: ToolPipelineDispatchOutcomeV1 = {
+    const cancelledSuspension: ToolPipelineDispatchOutcome = {
       kind: 'suspended',
       suspension: {
         ...suspension,
@@ -424,7 +424,7 @@ describe('runtime SPI tool pipeline contract', () => {
     };
     void cancelledSuspension;
 
-    const failedSuspension: ToolPipelineDispatchOutcomeV1 = {
+    const failedSuspension: ToolPipelineDispatchOutcome = {
       kind: 'suspended',
       suspension,
       result: {
@@ -438,7 +438,7 @@ describe('runtime SPI tool pipeline contract', () => {
   });
 
   test('closes Skill fork suspension to artifact and exact approval/auto-review facts', async () => {
-    const subagent: PrivateSuspendedSubagentRecordV1 = {
+    const subagent: PrivateSuspendedSubagentRecord = {
       storage: 'private_artifact_v1',
       subagentId: 'child-subagent-1',
       role: 'code',
@@ -474,14 +474,14 @@ describe('runtime SPI tool pipeline contract', () => {
       grantOptions: ['approve_once'],
       recommendedGrant: 'approve_once',
     };
-    const approvalEvent: ToolPipelineSkillForkApprovalRequestedEventV1<'skill-call-1'> = {
+    const approvalEvent: ToolPipelineSkillForkApprovalRequestedEvent<'skill-call-1'> = {
       type: 'approval.requested',
       interactionId: 'interaction-skill-1',
       toolCallId: 'skill-call-1',
       approval,
       createdAt: '2026-08-22T00:00:00.000Z',
     };
-    const autoReviewEvent: ToolPipelineSkillForkAutoReviewRequestedEventV1<'skill-call-1'> = {
+    const autoReviewEvent: ToolPipelineSkillForkAutoReviewRequestedEvent<'skill-call-1'> = {
       type: 'auto_review.requested',
       reviewId: 'review-skill-1',
       toolCallId: 'skill-call-1',
@@ -491,8 +491,8 @@ describe('runtime SPI tool pipeline contract', () => {
       requestFingerprint: 'request-fingerprint-1',
       createdAt: '2026-08-22T00:00:00.000Z',
     };
-    const suspension: ToolPipelineSkillForkSuspensionV1<'skill-call-1'> = {
-      schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+    const suspension: ToolPipelineSkillForkSuspension<'skill-call-1'> = {
+      schema: TOOL_PIPELINE_STAGE_SCHEMA_,
       kind: 'skill_fork',
       operationId: 'builtin:activate_skill',
       toolCallId: 'skill-call-1',
@@ -528,21 +528,21 @@ describe('runtime SPI tool pipeline contract', () => {
         structuredContent: {
           schema: 'kite.builtin-operation-result.v1',
           ok: true,
-          runtimeEvents: [approvalEvent as unknown as RuntimeJsonValueV1],
+          runtimeEvents: [approvalEvent as unknown as RuntimeJsonValue],
         },
       },
-    } satisfies ToolPipelineDispatchOutcomeV1;
-    const acknowledgement: ToolPipelineAttemptAcknowledgementV1 = {
+    } satisfies ToolPipelineDispatchOutcome;
+    const acknowledgement: ToolPipelineAttemptAcknowledgement = {
       acknowledged: true,
-      attempt: {} as ToolRecordedAttemptIdentityV1,
+      attempt: {} as ToolRecordedAttemptIdentity,
     };
-    const commit: ToolPipelineSuspensionCommitV1 = {
+    const commit: ToolPipelineSuspensionCommit = {
       acknowledgement,
       suspension,
       result: suspended.result,
     };
-    const received: { current: ToolPipelineSuspensionCommitV1 | null } = { current: null };
-    const commitSuspension: ToolPipelineSuspensionCommitCallbackV1 = async (input) => {
+    const received: { current: ToolPipelineSuspensionCommit | null } = { current: null };
+    const commitSuspension: ToolPipelineSuspensionCommitCallback = async (input) => {
       received.current = input;
     };
     await commitSuspension(commit);
@@ -609,25 +609,25 @@ describe('runtime SPI tool pipeline contract', () => {
     expect(structuredClone(suspended)).toEqual(suspended);
     expect(received.current).toBe(commit);
 
-    const wrongParentEvent: ToolPipelineSkillForkApprovalRequestedEventV1<'skill-call-1'> = {
+    const wrongParentEvent: ToolPipelineSkillForkApprovalRequestedEvent<'skill-call-1'> = {
       ...approvalEvent,
       // @ts-expect-error the event parent identity is branded by the suspension toolCallId.
       toolCallId: 'different-parent',
     };
     void wrongParentEvent;
-    const missingApproval: ToolPipelineSkillForkApprovalRequestedEventV1<'skill-call-1'> = {
+    const missingApproval: ToolPipelineSkillForkApprovalRequestedEvent<'skill-call-1'> = {
       ...approvalEvent,
       // @ts-expect-error State approval.requested always carries its approval payload.
       approval: undefined,
     };
     void missingApproval;
-    const malformedApprovalEvent: ToolPipelineSkillForkApprovalRequestedEventV1<'skill-call-1'> = {
+    const malformedApprovalEvent: ToolPipelineSkillForkApprovalRequestedEvent<'skill-call-1'> = {
       ...approvalEvent,
       // @ts-expect-error non-State blockedToolCallId must not replace approval.approvalHash.
       blockedToolCallId: 'child-call-1',
     };
     void malformedApprovalEvent;
-    const missingAutoReviewApproval: ToolPipelineSkillForkSuspensionEventV1<'skill-call-1'> = {
+    const missingAutoReviewApproval: ToolPipelineSkillForkSuspensionEvent<'skill-call-1'> = {
       type: 'auto_review.requested',
       reviewId: 'review-skill-2',
       toolCallId: 'skill-call-1',
@@ -637,24 +637,24 @@ describe('runtime SPI tool pipeline contract', () => {
       approval: undefined,
     };
     void missingAutoReviewApproval;
-    const wrongOperation: ToolPipelineSkillForkSuspensionV1<'skill-call-1'> = {
+    const wrongOperation: ToolPipelineSkillForkSuspension<'skill-call-1'> = {
       ...suspension,
       // @ts-expect-error Skill suspension cannot impersonate plan or another operation.
       operationId: 'builtin:write_plan',
     };
     void wrongOperation;
-    const planAsSkill: ToolPipelineSkillForkSuspensionEventV1<'skill-call-1'> = {
+    const planAsSkill: ToolPipelineSkillForkSuspensionEvent<'skill-call-1'> = {
       // @ts-expect-error plan review is a separate closed suspension branch.
       type: 'plan.review_requested',
     };
     void planAsSkill;
-    const missingArtifact: PrivateSuspendedSubagentRecordV1 = {
+    const missingArtifact: PrivateSuspendedSubagentRecord = {
       ...subagent,
       // @ts-expect-error a skill suspension must retain an opaque continuation artifact reference.
       continuationArtifact: undefined,
     };
     void missingArtifact;
-    const liveArtifactHandle: PrivateSuspendedSubagentRecordV1 = {
+    const liveArtifactHandle: PrivateSuspendedSubagentRecord = {
       ...subagent,
       continuationArtifact: {
         ...subagent.continuationArtifact,
@@ -663,7 +663,7 @@ describe('runtime SPI tool pipeline contract', () => {
       },
     };
     void liveArtifactHandle;
-    const liveContinuation: ToolPipelineSkillForkSuspensionV1<'skill-call-1'> = {
+    const liveContinuation: ToolPipelineSkillForkSuspension<'skill-call-1'> = {
       ...suspension,
       // @ts-expect-error continuation bytes/content are not part of the neutral suspension.
       continuation: {},
@@ -672,7 +672,7 @@ describe('runtime SPI tool pipeline contract', () => {
   });
 
   test('keeps task subagent suspension distinct from Skill fork', () => {
-    const subagent: PrivateSuspendedSubagentRecordV1 = {
+    const subagent: PrivateSuspendedSubagentRecord = {
       storage: 'private_artifact_v1',
       subagentId: 'task-child-1',
       role: 'code',
@@ -708,14 +708,14 @@ describe('runtime SPI tool pipeline contract', () => {
       grantOptions: ['approve_once'],
       recommendedGrant: 'approve_once',
     };
-    const approvalEvent: ToolPipelineTaskSubagentApprovalRequestedEventV1<'task-call-1'> = {
+    const approvalEvent: ToolPipelineTaskSubagentApprovalRequestedEvent<'task-call-1'> = {
       type: 'approval.requested',
       interactionId: 'interaction-task-1',
       toolCallId: 'task-call-1',
       approval,
       createdAt: '2026-08-22T00:00:00.000Z',
     };
-    const autoReviewEvent: ToolPipelineTaskSubagentAutoReviewRequestedEventV1<'task-call-1'> = {
+    const autoReviewEvent: ToolPipelineTaskSubagentAutoReviewRequestedEvent<'task-call-1'> = {
       type: 'auto_review.requested',
       reviewId: 'review-task-1',
       toolCallId: 'task-call-1',
@@ -725,8 +725,8 @@ describe('runtime SPI tool pipeline contract', () => {
       requestFingerprint: 'task-request-fingerprint-1',
       createdAt: '2026-08-22T00:00:00.000Z',
     };
-    const suspension: ToolPipelineTaskSubagentSuspensionV1<'task-call-1'> = {
-      schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+    const suspension: ToolPipelineTaskSubagentSuspension<'task-call-1'> = {
+      schema: TOOL_PIPELINE_STAGE_SCHEMA_,
       kind: 'task_subagent',
       operationId: 'builtin:task',
       executionMode: 'resume',
@@ -756,11 +756,11 @@ describe('runtime SPI tool pipeline contract', () => {
         structuredContent: {
           schema: 'kite.builtin-operation-result.v1',
           ok: true,
-          runtimeEvents: [autoReviewEvent as unknown as RuntimeJsonValueV1],
+          runtimeEvents: [autoReviewEvent as unknown as RuntimeJsonValue],
         },
       },
-    } satisfies ToolPipelineDispatchOutcomeV1;
-    const union: ToolPipelineSuspensionV1 = suspension;
+    } satisfies ToolPipelineDispatchOutcome;
+    const union: ToolPipelineSuspension = suspension;
 
     expect(union.kind).toBe('task_subagent');
     expect(suspension.operationId).toBe('builtin:task');
@@ -792,41 +792,41 @@ describe('runtime SPI tool pipeline contract', () => {
     expect(Object.keys(suspension.subagent)).not.toContain('registry');
     expect(structuredClone(suspended)).toEqual(suspended);
 
-    const approvalSuspension: ToolPipelineTaskSubagentSuspensionEventV1<'task-call-1'> =
+    const approvalSuspension: ToolPipelineTaskSubagentSuspensionEvent<'task-call-1'> =
       approvalEvent;
     expect(approvalSuspension.type).toBe('approval.requested');
 
-    const wrongTaskKind: ToolPipelineTaskSubagentSuspensionV1<'task-call-1'> = {
+    const wrongTaskKind: ToolPipelineTaskSubagentSuspension<'task-call-1'> = {
       ...suspension,
       // @ts-expect-error task suspension cannot impersonate the Skill fork branch.
       kind: 'skill_fork',
     };
     void wrongTaskKind;
-    const wrongTaskOperation: ToolPipelineTaskSubagentSuspensionV1<'task-call-1'> = {
+    const wrongTaskOperation: ToolPipelineTaskSubagentSuspension<'task-call-1'> = {
       ...suspension,
       // @ts-expect-error task suspension is fixed to builtin:task.
       operationId: 'builtin:activate_skill',
     };
     void wrongTaskOperation;
-    const wrongExecutionMode: ToolPipelineTaskSubagentSuspensionV1<'task-call-1'> = {
+    const wrongExecutionMode: ToolPipelineTaskSubagentSuspension<'task-call-1'> = {
       ...suspension,
       // @ts-expect-error task execution mode is the closed start/resume set.
       executionMode: 'restart',
     };
     void wrongExecutionMode;
-    const missingParent: ToolPipelineTaskSubagentSuspensionV1<'task-call-1'> = {
+    const missingParent: ToolPipelineTaskSubagentSuspension<'task-call-1'> = {
       ...suspension,
       // @ts-expect-error parent identity is required for every task suspension.
       parent: undefined,
     };
     void missingParent;
-    const missingPrivateRecord: ToolPipelineTaskSubagentSuspensionV1<'task-call-1'> = {
+    const missingPrivateRecord: ToolPipelineTaskSubagentSuspension<'task-call-1'> = {
       ...suspension,
       // @ts-expect-error private suspended record is required for task resume.
       subagent: undefined,
     };
     void missingPrivateRecord;
-    const missingBlockedParentIdentity: ToolPipelineTaskSubagentSuspensionV1<'task-call-1'> = {
+    const missingBlockedParentIdentity: ToolPipelineTaskSubagentSuspension<'task-call-1'> = {
       ...suspension,
       parent: {
         ...suspension.parent,
@@ -835,14 +835,14 @@ describe('runtime SPI tool pipeline contract', () => {
       },
     };
     void missingBlockedParentIdentity;
-    const skillAsTask: ToolPipelineSkillForkSuspensionV1<'skill-call-1'> = {
-      ...({} as ToolPipelineSkillForkSuspensionV1<'skill-call-1'>),
+    const skillAsTask: ToolPipelineSkillForkSuspension<'skill-call-1'> = {
+      ...({} as ToolPipelineSkillForkSuspension<'skill-call-1'>),
       // @ts-expect-error Skill fork cannot use the task suspension kind.
       kind: 'task_subagent',
     };
     void skillAsTask;
-    const taskAsSkillOperation: ToolPipelineSkillForkSuspensionV1<'skill-call-1'> = {
-      ...({} as ToolPipelineSkillForkSuspensionV1<'skill-call-1'>),
+    const taskAsSkillOperation: ToolPipelineSkillForkSuspension<'skill-call-1'> = {
+      ...({} as ToolPipelineSkillForkSuspension<'skill-call-1'>),
       // @ts-expect-error Skill fork operation remains builtin:activate_skill.
       operationId: 'builtin:task',
     };
@@ -850,7 +850,7 @@ describe('runtime SPI tool pipeline contract', () => {
   });
 
   test('keeps prepared identity/input and callback ports neutral', async () => {
-    const identity: NonDynamicPreparedToolInvocationIdentityV1 = {
+    const identity: NonDynamicPreparedToolInvocationIdentity = {
       invocationId: 'invocation-1',
       attemptId: 'attempt-1',
       toolCallId: 'call-1',
@@ -858,7 +858,7 @@ describe('runtime SPI tool pipeline contract', () => {
       modelMessageId: 'message-1',
       argumentOrigin: 'model_public',
       providerId: 'builtin-provider',
-      operationId: 'builtin:read_file' as NonDynamicOperationIdV1,
+      operationId: 'builtin:read_file' as NonDynamicOperationId,
       executionFamily: 'builtin',
       capabilityId: 'builtin:read_file',
       capabilityRevision: 'capability-1',
@@ -887,7 +887,7 @@ describe('runtime SPI tool pipeline contract', () => {
       toolKind: 'computer',
     };
     // @ts-expect-error prepared identity cannot mark the dynamic wrapper as non-dynamic.
-    const invalidPreparedIdentity: PreparedToolInvocationIdentityV1 = {
+    const invalidPreparedIdentity: PreparedToolInvocationIdentity = {
       ...identity,
       operationId: 'mcp:dynamic_tool',
       isDynamicMcp: false,
@@ -895,12 +895,12 @@ describe('runtime SPI tool pipeline contract', () => {
     void invalidPreparedIdentity;
     // `mcp` is a legal mechanism for a model-visible Builtin operation; the
     // ordinary branch is separated by visibility and operation identity.
-    const builtinMcpIdentity: NonDynamicPreparedToolInvocationIdentityV1 = {
+    const builtinMcpIdentity: NonDynamicPreparedToolInvocationIdentity = {
       ...identity,
       executionMechanism: 'mcp',
     };
     expect(builtinMcpIdentity.executionMechanism).toBe('mcp');
-    const invalidInternalIdentity: NonDynamicPreparedToolInvocationIdentityV1 = {
+    const invalidInternalIdentity: NonDynamicPreparedToolInvocationIdentity = {
       ...identity,
       // @ts-expect-error an internal/non-model identity cannot enter the ordinary branch.
       visibility: 'internal',
@@ -910,12 +910,12 @@ describe('runtime SPI tool pipeline contract', () => {
       exposedToolName: null,
     };
     void invalidInternalIdentity;
-    const runtimePrivateIdentity: NonDynamicPreparedToolInvocationIdentityV1 = {
+    const runtimePrivateIdentity: NonDynamicPreparedToolInvocationIdentity = {
       ...identity,
       argumentOrigin: 'runtime_private',
     };
     expect(runtimePrivateIdentity.argumentOrigin).toBe('runtime_private');
-    const attempt: ToolRecordedAttemptIdentityV1 = {
+    const attempt: ToolRecordedAttemptIdentity = {
       invocationId: 'invocation-1',
       attemptId: 'attempt-1',
       attempt: 1,
@@ -957,12 +957,12 @@ describe('runtime SPI tool pipeline contract', () => {
         binding: null,
       },
     } as const;
-    const acknowledgement: ToolPipelineAttemptAcknowledgementV1 = {
+    const acknowledgement: ToolPipelineAttemptAcknowledgement = {
       acknowledged: true,
       attempt,
     };
     const unknownCodes: string[] = [];
-    const persistence: ToolPipelinePersistenceV1 = {
+    const persistence: ToolPipelinePersistence = {
       recordAttempt: async (received) => {
         expect(received).toBe(prepared);
         return acknowledgement;
@@ -985,7 +985,7 @@ describe('runtime SPI tool pipeline contract', () => {
       },
       commitSuspension: async () => {},
     };
-    const dispatch: ToolPipelineDispatchV1 = {
+    const dispatch: ToolPipelineDispatch = {
       verifyPreparedIdentity: (prepared) => {
         expect(prepared.identity).toBe(identity);
         return true;
@@ -995,7 +995,7 @@ describe('runtime SPI tool pipeline contract', () => {
         return { status: 'success', content: [] };
       },
     };
-    const outcomeDispatch: ToolPipelineOutcomeDispatchV1 = {
+    const outcomeDispatch: ToolPipelineOutcomeDispatch = {
       verifyPreparedIdentity: dispatch.verifyPreparedIdentity,
       dispatch: async (input) => ({
         kind: 'committed',
@@ -1051,7 +1051,7 @@ describe('runtime SPI tool pipeline contract', () => {
   });
 
   test('keeps the MCP subject and internal wrapper identities disjoint', () => {
-    const dynamicIdentity: DynamicMcpPreparedToolInvocationIdentityV1 = {
+    const dynamicIdentity: DynamicMcpPreparedToolInvocationIdentity = {
       invocationId: 'invocation-mcp-1',
       attemptId: 'attempt-mcp-1',
       toolCallId: 'call-mcp-1',
@@ -1118,10 +1118,10 @@ describe('runtime SPI tool pipeline contract', () => {
       ...dynamicIdentity,
       // @ts-expect-error dynamic MCP can only originate from a model-visible call.
       argumentOrigin: 'runtime_private',
-    } satisfies DynamicMcpPreparedToolInvocationIdentityV1;
+    } satisfies DynamicMcpPreparedToolInvocationIdentity;
     void invalidDynamicOrigin;
 
-    const dynamicAttempt: ToolRecordedAttemptIdentityV1 = {
+    const dynamicAttempt: ToolRecordedAttemptIdentity = {
       invocationId: dynamicIdentity.invocationId,
       attemptId: dynamicIdentity.attemptId,
       attempt: 1,
@@ -1171,7 +1171,7 @@ describe('runtime SPI tool pipeline contract', () => {
         // @ts-expect-error the wrapper operation is an exact internal literal.
         operationId: 'mcp__server__tool',
       },
-    } satisfies DynamicMcpPreparedToolInvocationIdentityV1;
+    } satisfies DynamicMcpPreparedToolInvocationIdentity;
     void mixedWrapper;
     const mixedSubject = {
       ...dynamicIdentity,
@@ -1180,17 +1180,17 @@ describe('runtime SPI tool pipeline contract', () => {
         // @ts-expect-error the subject must carry a model-facing mcp__ name, not the wrapper literal.
         exposedToolName: 'mcp:dynamic_tool',
       },
-    } satisfies DynamicMcpPreparedToolInvocationIdentityV1;
+    } satisfies DynamicMcpPreparedToolInvocationIdentity;
     void mixedSubject;
   });
 
   test('requires authoritative acknowledgement, unknown, and terminal ports', () => {
-    const acknowledgement: ToolPipelineAttemptAcknowledgementV1 = {
+    const acknowledgement: ToolPipelineAttemptAcknowledgement = {
       acknowledged: true,
-      attempt: {} as ToolRecordedAttemptIdentityV1,
+      attempt: {} as ToolRecordedAttemptIdentity,
     };
     // @ts-expect-error persistence cannot omit the required post-ack ports.
-    const incompletePersistence: ToolPipelinePersistenceV1 = {
+    const incompletePersistence: ToolPipelinePersistence = {
       recordAttempt: async () => acknowledgement,
     };
     void incompletePersistence;

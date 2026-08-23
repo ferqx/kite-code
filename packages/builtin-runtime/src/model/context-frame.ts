@@ -4,7 +4,7 @@
 // LangChain BaseMessage[] is only produced at the final serialization step.
 
 import type { BaseMessage } from './messages';
-import type { BuiltinToolEffectClassV1 } from './runtime-view';
+import type { BuiltinToolEffectClass } from './runtime-view';
 
 // ── Tool result metadata ──
 
@@ -34,7 +34,7 @@ export interface FrameToolResult {
   content: string;
   ok: boolean;
   args?: unknown;
-  effectClass?: BuiltinToolEffectClassV1;
+  effectClass?: BuiltinToolEffectClass;
   resultMeta?: FrameToolResultMeta;
 }
 

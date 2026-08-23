@@ -1,11 +1,11 @@
 import {
-  COMPLETION_GUARD_V1,
-  COMPLETION_GUARD_V2,
+  COMPLETION_GUARD_PLANNED_VERSION,
+  COMPLETION_GUARD_UNPLANNED_VERSION,
   type CompletionGuardBlocked,
   type CompletionGuardDecision,
-  decideCompletionV1,
-  decideCompletionV2,
-  type PlanIdentityV1,
+  decidePlannedCompletion,
+  decideUnplannedCompletion,
+  type PlanIdentity,
 } from '../../completion';
 import type { KernelEvent } from '../../events';
 import {
@@ -76,7 +76,7 @@ function recoveryEntry(value: unknown): value is AgentRunTerminalOutcome['recove
   );
 }
 
-function samePlanIdentity(left: PlanIdentityV1 | undefined, right: PlanIdentityV1): boolean {
+function samePlanIdentity(left: PlanIdentity | undefined, right: PlanIdentity): boolean {
   return (
     left?.planId === right.planId &&
     left.version === right.version &&
@@ -84,7 +84,7 @@ function samePlanIdentity(left: PlanIdentityV1 | undefined, right: PlanIdentityV
   );
 }
 
-function planIdentity(value: unknown): PlanIdentityV1 | undefined {
+function planIdentity(value: unknown): PlanIdentity | undefined {
   const candidate = recordField({ value }, 'value');
   const planId = nonEmptyStringField(candidate ?? {}, 'planId');
   const version = candidate?.version;
@@ -105,10 +105,10 @@ function completionDecisionForVersion(
   state: AgentState,
   version: string,
 ): CompletionGuardDecision | undefined {
-  if (version === COMPLETION_GUARD_V1) return decideCompletionV1(state);
-  if (version === COMPLETION_GUARD_V2) {
+  if (version === COMPLETION_GUARD_UNPLANNED_VERSION) return decideUnplannedCompletion(state);
+  if (version === COMPLETION_GUARD_PLANNED_VERSION) {
     try {
-      return decideCompletionV2(state);
+      return decidePlannedCompletion(state);
     } catch {
       return undefined;
     }
@@ -128,7 +128,7 @@ function blockedEventMatchesDecision(
     payload.correctionAttempt !== decision.correctionAttempt
   )
     return false;
-  return decision.version === COMPLETION_GUARD_V1
+  return decision.version === COMPLETION_GUARD_UNPLANNED_VERSION
     ? true
     : samePlanIdentity(planIdentity(payload.planIdentity), decision.planIdentity);
 }
@@ -195,12 +195,13 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
       if (!turnId || turnId !== state.turn.turnId) return state;
       const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
       if (!activeTask) return state;
-      const version = stringField(payload, 'completionGuardVersion') ?? COMPLETION_GUARD_V1;
-      if (hasPlanDocument(state) && version !== COMPLETION_GUARD_V2) return state;
+      const version =
+        stringField(payload, 'completionGuardVersion') ?? COMPLETION_GUARD_UNPLANNED_VERSION;
+      if (hasPlanDocument(state) && version !== COMPLETION_GUARD_PLANNED_VERSION) return state;
       const decision = completionDecisionForVersion(state, version);
       if (decision?.status !== 'accepted') return state;
       if (
-        decision.version === COMPLETION_GUARD_V2 &&
+        decision.version === COMPLETION_GUARD_PLANNED_VERSION &&
         !samePlanIdentity(planIdentity(payload.planIdentity), decision.planIdentity)
       )
         return state;
@@ -231,7 +232,7 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
       const turnId = nonEmptyStringField(payload, 'turnId');
       const version = stringField(payload, 'guardVersion');
       if (!turnId || turnId !== state.turn.turnId || !version) return state;
-      if (hasPlanDocument(state) && version !== COMPLETION_GUARD_V2) return state;
+      if (hasPlanDocument(state) && version !== COMPLETION_GUARD_PLANNED_VERSION) return state;
       const decision = completionDecisionForVersion(state, version);
       if (decision?.status !== 'blocked') return state;
       if (!blockedEventMatchesDecision(payload, decision)) return state;
@@ -241,7 +242,7 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
         completionGuard: asJsonObject({
           correctionAttempts: blocked.correctionAttempt,
           guardVersion: blocked.version,
-          ...(blocked.version === COMPLETION_GUARD_V2
+          ...(blocked.version === COMPLETION_GUARD_PLANNED_VERSION
             ? { planIdentity: blocked.planIdentity }
             : {}),
         }),

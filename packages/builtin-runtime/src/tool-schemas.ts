@@ -1,6 +1,6 @@
-import type { RuntimeJsonValueV1 } from '@kite/runtime-spi';
+import type { RuntimeJsonValue } from '@kite/runtime-spi';
 import { z } from 'zod';
-import { isGitRevisionV1 } from './git/broker';
+import { isGitRevision } from './git/broker';
 
 /**
  * Builtin-owned input schemas. Operation registrations and the model ToolSet
@@ -15,7 +15,7 @@ const outputBound = z.number().int().min(1).max(262_144).optional();
 const recordBound = z.number().int().min(1).max(200).optional();
 const paths = z.array(boundedPath).min(1).max(128);
 
-export const BUILTIN_READ_FILE_SCHEMA_V1 = z.object({
+export const BUILTIN_READ_FILE_SCHEMA_ = z.object({
   path: z.string().describe('Workspace-relative, absolute, or home-relative (~) path to the file'),
   offset: z
     .number()
@@ -31,7 +31,7 @@ export const BUILTIN_READ_FILE_SCHEMA_V1 = z.object({
     .describe('Maximum number of lines to read (default 2000)'),
 });
 
-export const BUILTIN_SEARCH_CONTENT_SCHEMA_V1 = z.object({
+export const BUILTIN_SEARCH_CONTENT_SCHEMA_ = z.object({
   pattern: z.string().describe('Regex pattern to search for (e.g. "function\\s+\\w+")'),
   path: z
     .string()
@@ -42,7 +42,7 @@ export const BUILTIN_SEARCH_CONTENT_SCHEMA_V1 = z.object({
   glob: z.string().optional().describe('File glob filter (e.g. "*.ts", "*.{ts,tsx}")'),
 });
 
-export const BUILTIN_SEARCH_FILES_SCHEMA_V1 = z.object({
+export const BUILTIN_SEARCH_FILES_SCHEMA_ = z.object({
   pattern: z.string().describe('File name pattern (e.g. "*.test.ts", "config.*")'),
   path: z
     .string()
@@ -52,14 +52,14 @@ export const BUILTIN_SEARCH_FILES_SCHEMA_V1 = z.object({
     ),
 });
 
-export const BUILTIN_WRITE_FILE_SCHEMA_V1 = z.object({
+export const BUILTIN_WRITE_FILE_SCHEMA_ = z.object({
   path: z
     .string()
     .describe('Workspace-relative path, or an approved absolute/home-relative external path'),
   content: z.string().describe('Complete file content to write'),
 });
 
-export const BUILTIN_EDIT_FILE_SCHEMA_V1 = z.object({
+export const BUILTIN_EDIT_FILE_SCHEMA_ = z.object({
   path: z
     .string()
     .describe(
@@ -77,7 +77,7 @@ export const BUILTIN_EDIT_FILE_SCHEMA_V1 = z.object({
     .describe('Replace all occurrences (default: false, fails if multiple matches found)'),
 });
 
-export const BUILTIN_GIT_INSPECT_SCHEMA_V1 = z.discriminatedUnion('operation', [
+export const BUILTIN_GIT_INSPECT_SCHEMA_ = z.discriminatedUnion('operation', [
   z
     .object({
       operation: z.literal('status'),
@@ -99,7 +99,7 @@ export const BUILTIN_GIT_INSPECT_SCHEMA_V1 = z.discriminatedUnion('operation', [
     .object({
       operation: z.literal('log'),
       paths,
-      revision: z.string().min(1).max(128).refine(isGitRevisionV1).optional(),
+      revision: z.string().min(1).max(128).refine(isGitRevision).optional(),
       max_records: recordBound,
       max_output_bytes: outputBound,
       timeout_ms: timeout,
@@ -115,7 +115,7 @@ export const BUILTIN_GIT_INSPECT_SCHEMA_V1 = z.discriminatedUnion('operation', [
     .strict(),
 ]);
 
-export const BUILTIN_WEB_FETCH_SCHEMA_V1 = z.object({
+export const BUILTIN_WEB_FETCH_SCHEMA_ = z.object({
   url: z.string().min(1).max(8192).describe('Public http/https URL to fetch (max 8192 chars)'),
   max_chars: z
     .number()
@@ -135,37 +135,37 @@ export const BUILTIN_WEB_FETCH_SCHEMA_V1 = z.object({
     ),
 });
 
-export const BUILTIN_LIST_MCP_RESOURCES_SCHEMA_V1 = z.object({
+export const BUILTIN_LIST_MCP_RESOURCES_SCHEMA_ = z.object({
   server: z.string().min(1).optional().describe('Optional exact MCP server name'),
 });
 
-export const BUILTIN_LIST_MCP_TOOLS_SCHEMA_V1 = z.object({
+export const BUILTIN_LIST_MCP_TOOLS_SCHEMA_ = z.object({
   provider: z.string().trim().min(1).max(128).optional(),
   limit: z.number().int().min(1).max(100).optional(),
   cursor: z.string().max(2048).optional(),
 });
 
-export const BUILTIN_READ_MCP_RESOURCE_SCHEMA_V1 = z.object({
+export const BUILTIN_READ_MCP_RESOURCE_SCHEMA_ = z.object({
   server: z.string().describe('MCP server name'),
   uri: z.string().describe('Resource URI to read (e.g. file:///docs/api.md)'),
 });
 
-export const BUILTIN_ACTIVATE_SKILL_SCHEMA_V1 = z.object({
+export const BUILTIN_ACTIVATE_SKILL_SCHEMA_ = z.object({
   skill_id: z.string().min(1),
   input: z.record(z.string(), z.unknown()),
 });
 
-export const BUILTIN_READ_SKILL_REFERENCE_SCHEMA_V1 = z.object({
+export const BUILTIN_READ_SKILL_REFERENCE_SCHEMA_ = z.object({
   activation_id: z.string().min(1),
   path: z.string().min(1),
 });
 
-export const BUILTIN_COMPLETE_SKILL_SCHEMA_V1 = z.object({
+export const BUILTIN_COMPLETE_SKILL_SCHEMA_ = z.object({
   activation_id: z.string().min(1),
   output: z.record(z.string(), z.unknown()),
 });
 
-export const BUILTIN_DYNAMIC_MCP_SCHEMA_V1 = z
+export const BUILTIN_DYNAMIC_MCP_SCHEMA_ = z
   .object({
     capability_id: z.string().min(1),
     capability_revision: z.string().min(1),
@@ -173,17 +173,17 @@ export const BUILTIN_DYNAMIC_MCP_SCHEMA_V1 = z
   })
   .strict();
 
-const optionSchemaV1 = z
+const optionSchema = z
   .object({
     label: z.string().trim().min(1),
     description: z.string().trim().min(1),
     recommended: z.boolean(),
   })
   .strict();
-const questionSchemaV1 = z
+const questionSchema = z
   .object({
     question: z.string().trim().min(1),
-    options: z.array(optionSchemaV1).min(2).max(3),
+    options: z.array(optionSchema).min(2).max(3),
   })
   .strict()
   .superRefine((value, context) => {
@@ -196,11 +196,11 @@ const questionSchemaV1 = z
     }
   });
 
-export const BUILTIN_ASK_USER_SCHEMA_V1 = z
-  .object({ questions: z.array(questionSchemaV1).min(1).max(3) })
+export const BUILTIN_ASK_USER_SCHEMA_ = z
+  .object({ questions: z.array(questionSchema).min(1).max(3) })
   .strict();
 
-export const BUILTIN_READ_PLAN_SCHEMA_V1 = z
+export const BUILTIN_READ_PLAN_SCHEMA_ = z
   .object({
     plan_id: z.string().min(1),
     version: z.number().int().positive().optional(),
@@ -208,7 +208,7 @@ export const BUILTIN_READ_PLAN_SCHEMA_V1 = z
   })
   .strict();
 
-const planStepSchemaV1 = z
+const planStepSchema = z
   .object({
     id: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
     title: z
@@ -220,7 +220,7 @@ const planStepSchemaV1 = z
   })
   .strict();
 
-const writePlanDocumentFieldsV1 = {
+const writePlanDocumentFields = {
   title: z
     .string()
     .trim()
@@ -229,7 +229,7 @@ const writePlanDocumentFieldsV1 = {
     .regex(/^[^\r\n]+$/),
   body_markdown: z.string().trim().min(20).max(30_000),
   steps: z
-    .array(planStepSchemaV1)
+    .array(planStepSchema)
     .min(1)
     .max(12)
     .superRefine((steps, context) => {
@@ -247,11 +247,11 @@ const writePlanDocumentFieldsV1 = {
     }),
 };
 
-export const BUILTIN_WRITE_PLAN_SCHEMA_V1 = z
+export const BUILTIN_WRITE_PLAN_SCHEMA_ = z
   .object({
-    title: writePlanDocumentFieldsV1.title.optional(),
-    body_markdown: writePlanDocumentFieldsV1.body_markdown.optional(),
-    steps: writePlanDocumentFieldsV1.steps.optional(),
+    title: writePlanDocumentFields.title.optional(),
+    body_markdown: writePlanDocumentFields.body_markdown.optional(),
+    steps: writePlanDocumentFields.steps.optional(),
     plan_id: z.string().trim().min(1).optional(),
     version: z.number().int().positive().optional(),
     structural_digest: z.string().trim().min(1).optional(),
@@ -284,7 +284,7 @@ export const BUILTIN_WRITE_PLAN_SCHEMA_V1 = z
     }
   });
 
-export const BUILTIN_UPDATE_PLAN_SCHEMA_V1 = z
+export const BUILTIN_UPDATE_PLAN_SCHEMA_ = z
   .object({
     plan_id: z.string().min(1).describe('Plan ID from the approved plan'),
     version: z.number().int().positive().describe('Version from the approved plan').optional(),
@@ -334,7 +334,7 @@ export const BUILTIN_UPDATE_PLAN_SCHEMA_V1 = z
   })
   .strict();
 
-export const BUILTIN_TASK_PUBLIC_SCHEMA_V1 = z
+export const BUILTIN_TASK_PUBLIC_SCHEMA_ = z
   .object({
     subagent_type: z
       .enum(['explore', 'plan', 'code', 'review'])
@@ -350,7 +350,7 @@ export const BUILTIN_TASK_PUBLIC_SCHEMA_V1 = z
   })
   .strict();
 
-export const BUILTIN_TASK_PRIVATE_SCHEMA_V1 = z
+export const BUILTIN_TASK_PRIVATE_SCHEMA_ = z
   .object({
     subagent_type: z.enum(['explore', 'plan', 'code', 'review']),
     taskArtifact: z
@@ -364,20 +364,12 @@ export const BUILTIN_TASK_PRIVATE_SCHEMA_V1 = z
   })
   .strict();
 
-export const BUILTIN_TASK_RUNTIME_SCHEMA_V1 = z.union([
-  BUILTIN_TASK_PUBLIC_SCHEMA_V1,
-  BUILTIN_TASK_PRIVATE_SCHEMA_V1,
+export const BUILTIN_TASK_RUNTIME_SCHEMA_ = z.union([
+  BUILTIN_TASK_PUBLIC_SCHEMA_,
+  BUILTIN_TASK_PRIVATE_SCHEMA_,
 ]);
 
-export const BUILTIN_TASK_LEGACY_PLANNING_SCHEMA_V1 = BUILTIN_TASK_PUBLIC_SCHEMA_V1.extend({
-  subagent_type: z
-    .enum(['explore', 'plan'])
-    .describe(
-      'Read-only role: explore for evidence gathering or plan for architecture and design planning',
-    ),
-});
-
-export const BUILTIN_SHELL_EXECUTE_SCHEMA_V1 = z.object({
+export const BUILTIN_SHELL_EXECUTE_SCHEMA_ = z.object({
   command: z.string().describe('Shell command to execute in the workspace'),
   description: z
     .string()
@@ -393,75 +385,75 @@ export const BUILTIN_SHELL_EXECUTE_SCHEMA_V1 = z.object({
     ),
 });
 
-export const BUILTIN_TOOL_SEARCH_SCHEMA_V1 = z.object({
+export const BUILTIN_TOOL_SEARCH_SCHEMA_ = z.object({
   query: z.string().trim().min(2).max(512).describe('Capability intent to search for'),
   limit: z.number().int().min(1).max(12).optional().describe('Maximum candidates'),
 });
 
-const internalSchemaV1 = z.object({}).passthrough();
+const internalSchema = z.object({}).passthrough();
 
-export const BUILTIN_ZOD_SCHEMAS_V1 = Object.freeze({
-  'builtin:read_file': BUILTIN_READ_FILE_SCHEMA_V1,
-  'builtin:search_content': BUILTIN_SEARCH_CONTENT_SCHEMA_V1,
-  'builtin:search_files': BUILTIN_SEARCH_FILES_SCHEMA_V1,
-  'builtin:write_file': BUILTIN_WRITE_FILE_SCHEMA_V1,
-  'builtin:edit_file': BUILTIN_EDIT_FILE_SCHEMA_V1,
-  'builtin:git_inspect': BUILTIN_GIT_INSPECT_SCHEMA_V1,
-  'builtin:web_fetch': BUILTIN_WEB_FETCH_SCHEMA_V1,
-  'builtin:list_mcp_resources': BUILTIN_LIST_MCP_RESOURCES_SCHEMA_V1,
-  'builtin:list_mcp_tools': BUILTIN_LIST_MCP_TOOLS_SCHEMA_V1,
-  'builtin:read_mcp_resource': BUILTIN_READ_MCP_RESOURCE_SCHEMA_V1,
-  'builtin:read_skill_reference': BUILTIN_READ_SKILL_REFERENCE_SCHEMA_V1,
-  'builtin:complete_skill': BUILTIN_COMPLETE_SKILL_SCHEMA_V1,
-  'builtin:activate_skill': BUILTIN_ACTIVATE_SKILL_SCHEMA_V1,
-  'mcp:dynamic_tool': BUILTIN_DYNAMIC_MCP_SCHEMA_V1,
-  'builtin:ask_user': BUILTIN_ASK_USER_SCHEMA_V1,
-  'builtin:read_plan': BUILTIN_READ_PLAN_SCHEMA_V1,
-  'builtin:update_plan': BUILTIN_UPDATE_PLAN_SCHEMA_V1,
-  'builtin:write_plan': BUILTIN_WRITE_PLAN_SCHEMA_V1,
-  'builtin:task': BUILTIN_TASK_RUNTIME_SCHEMA_V1,
-  'builtin:shell_execute': BUILTIN_SHELL_EXECUTE_SCHEMA_V1,
-  'builtin:tool_search': BUILTIN_TOOL_SEARCH_SCHEMA_V1,
-  'subagent:start': internalSchemaV1,
-  'subagent:resume': internalSchemaV1,
-  'verification:deterministic': internalSchemaV1,
-  'model:primary': internalSchemaV1,
-  'model:compaction': internalSchemaV1,
-  'model:auto_review': internalSchemaV1,
-  'model:verification_review': internalSchemaV1,
-  'model:subagent': internalSchemaV1,
+export const BUILTIN_ZOD_SCHEMAS_ = Object.freeze({
+  'builtin:read_file': BUILTIN_READ_FILE_SCHEMA_,
+  'builtin:search_content': BUILTIN_SEARCH_CONTENT_SCHEMA_,
+  'builtin:search_files': BUILTIN_SEARCH_FILES_SCHEMA_,
+  'builtin:write_file': BUILTIN_WRITE_FILE_SCHEMA_,
+  'builtin:edit_file': BUILTIN_EDIT_FILE_SCHEMA_,
+  'builtin:git_inspect': BUILTIN_GIT_INSPECT_SCHEMA_,
+  'builtin:web_fetch': BUILTIN_WEB_FETCH_SCHEMA_,
+  'builtin:list_mcp_resources': BUILTIN_LIST_MCP_RESOURCES_SCHEMA_,
+  'builtin:list_mcp_tools': BUILTIN_LIST_MCP_TOOLS_SCHEMA_,
+  'builtin:read_mcp_resource': BUILTIN_READ_MCP_RESOURCE_SCHEMA_,
+  'builtin:read_skill_reference': BUILTIN_READ_SKILL_REFERENCE_SCHEMA_,
+  'builtin:complete_skill': BUILTIN_COMPLETE_SKILL_SCHEMA_,
+  'builtin:activate_skill': BUILTIN_ACTIVATE_SKILL_SCHEMA_,
+  'mcp:dynamic_tool': BUILTIN_DYNAMIC_MCP_SCHEMA_,
+  'builtin:ask_user': BUILTIN_ASK_USER_SCHEMA_,
+  'builtin:read_plan': BUILTIN_READ_PLAN_SCHEMA_,
+  'builtin:update_plan': BUILTIN_UPDATE_PLAN_SCHEMA_,
+  'builtin:write_plan': BUILTIN_WRITE_PLAN_SCHEMA_,
+  'builtin:task': BUILTIN_TASK_RUNTIME_SCHEMA_,
+  'builtin:shell_execute': BUILTIN_SHELL_EXECUTE_SCHEMA_,
+  'builtin:tool_search': BUILTIN_TOOL_SEARCH_SCHEMA_,
+  'subagent:start': internalSchema,
+  'subagent:resume': internalSchema,
+  'verification:deterministic': internalSchema,
+  'model:primary': internalSchema,
+  'model:compaction': internalSchema,
+  'model:auto_review': internalSchema,
+  'model:verification_review': internalSchema,
+  'model:subagent': internalSchema,
 } as const);
 
-export type BuiltinOperationIdV1 = keyof typeof BUILTIN_ZOD_SCHEMAS_V1;
+export type BuiltinOperationId = keyof typeof BUILTIN_ZOD_SCHEMAS_;
 
-export interface BuiltinJsonSchemaOptionsV1 {
-  /** Project Zod's empty passthrough object to the existing RMV1 JSON shape. */
+export interface BuiltinJsonSchemaOptions {
+  /** Project Zod's empty passthrough object to the existing RM JSON shape. */
   readonly passthroughObject?: boolean;
 }
 
 /** The only JSON-schema projection used by Builtin registrations and ToolSet. */
-export function builtinJsonSchemaV1(
+export function builtinJsonSchema(
   schema: z.ZodType,
-  options: BuiltinJsonSchemaOptionsV1 = {},
-): Readonly<Record<string, RuntimeJsonValueV1>> {
+  options: BuiltinJsonSchemaOptions = {},
+): Readonly<Record<string, RuntimeJsonValue>> {
   const raw = z.toJSONSchema(schema) as unknown;
-  const projected = options.passthroughObject ? normalizePassthroughSchemaV1(raw) : raw;
-  return freezeRuntimeJsonRecordV1(projected);
+  const projected = options.passthroughObject ? normalizePassthroughSchema(raw) : raw;
+  return freezeRuntimeJsonRecord(projected);
 }
 
-export const BUILTIN_JSON_SCHEMAS_V1 = Object.freeze(
+export const BUILTIN_JSON_SCHEMAS_ = Object.freeze(
   Object.fromEntries(
-    Object.entries(BUILTIN_ZOD_SCHEMAS_V1).map(([operationId, schema]) => [
+    Object.entries(BUILTIN_ZOD_SCHEMAS_).map(([operationId, schema]) => [
       operationId,
-      builtinJsonSchemaV1(schema, {
+      builtinJsonSchema(schema, {
         passthroughObject: operationId === 'mcp:dynamic_tool' || operationId.startsWith('model:'),
       }),
     ]),
   ),
-) as Readonly<Record<BuiltinOperationIdV1, Readonly<Record<string, RuntimeJsonValueV1>>>>;
+) as Readonly<Record<BuiltinOperationId, Readonly<Record<string, RuntimeJsonValue>>>>;
 
-function normalizePassthroughSchemaV1(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(normalizePassthroughSchemaV1);
+function normalizePassthroughSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizePassthroughSchema);
   if (!value || typeof value !== 'object') return value;
   const record = value as Record<string, unknown>;
   const normalized = Object.fromEntries(
@@ -473,7 +465,7 @@ function normalizePassthroughSchemaV1(value: unknown): unknown {
       !Array.isArray(item) &&
       Object.keys(item).length === 0
         ? true
-        : normalizePassthroughSchemaV1(item),
+        : normalizePassthroughSchema(item),
     ]),
   );
   if (
@@ -488,21 +480,21 @@ function normalizePassthroughSchemaV1(value: unknown): unknown {
   return normalized;
 }
 
-function freezeRuntimeJsonRecordV1(value: unknown): Readonly<Record<string, RuntimeJsonValueV1>> {
+function freezeRuntimeJsonRecord(value: unknown): Readonly<Record<string, RuntimeJsonValue>> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Builtin JSON schema projection must be an object');
   }
   return Object.freeze(
     Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, freezeRuntimeJsonValueV1(item)]),
+      Object.entries(value).map(([key, item]) => [key, freezeRuntimeJsonValue(item)]),
     ),
   );
 }
 
-function freezeRuntimeJsonValueV1(value: unknown): RuntimeJsonValueV1 {
+function freezeRuntimeJsonValue(value: unknown): RuntimeJsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (Array.isArray(value)) return Object.freeze(value.map(freezeRuntimeJsonValueV1));
-  if (value && typeof value === 'object') return freezeRuntimeJsonRecordV1(value);
+  if (Array.isArray(value)) return Object.freeze(value.map(freezeRuntimeJsonValue));
+  if (value && typeof value === 'object') return freezeRuntimeJsonRecord(value);
   throw new Error('Builtin JSON schema contains a non-JSON value');
 }

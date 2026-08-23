@@ -352,7 +352,7 @@ function validateRootPackageEntry(
     true,
   );
   const expected = new Map([
-    ['createKiteRuntimeBoundaryV1', './bootstrap'],
+    ['createKiteRuntimeBoundary', './bootstrap'],
     ['runCli', './cli/executable'],
     ['runTui', './tui/executable'],
   ]);
@@ -386,7 +386,7 @@ function validateRootPackageEntry(
     addViolation(
       violations,
       'APP_PUBLIC_ENTRY_INVALID',
-      'App public entry may only export createKiteRuntimeBoundaryV1, runCli, and runTui from their exact App modules',
+      'App public entry may only export createKiteRuntimeBoundary, runCli, and runTui from their exact App modules',
       'apps/kite/src/index.ts',
     );
   }
@@ -989,7 +989,7 @@ function validateRmv103ClientBoundary(
       addViolation(
         violations,
         'LEGACY_APP_SOURCE_PRESENT',
-        `RMV1-03 source must be absent: ${legacySource}`,
+        `RM-03 source must be absent: ${legacySource}`,
         legacySource,
       );
     }
@@ -1003,7 +1003,7 @@ function validateRmv103ClientBoundary(
     addViolation(
       violations,
       'RUNTIME_EXECUTION_MODULE_MISSING',
-      'RMV1-16 requires the unique App Runtime execution module',
+      'RM-16 requires the unique App Runtime execution module',
       'apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
     );
   }
@@ -1017,7 +1017,7 @@ function validateRmv103ClientBoundary(
         addViolation(
           violations,
           'RMV1_FORMAT_AUTHORITY_LEAK',
-          `RMV1 Contract may not introduce ${forbidden}`,
+          `RM Contract may not introduce ${forbidden}`,
           'packages/runtime-contract/src/index.ts',
         );
       }
@@ -1154,11 +1154,11 @@ function validateCompositionRoot(
       );
     }
   }
-  if (!readFileSync(join(root, expectedRoot), 'utf8').includes('createKiteRuntimeBoundaryV1')) {
+  if (!readFileSync(join(root, expectedRoot), 'utf8').includes('createKiteRuntimeBoundary')) {
     addViolation(
       violations,
       'COMPOSITION_ROOT_EXPORT_MISSING',
-      'bootstrap must export createKiteRuntimeBoundaryV1',
+      'bootstrap must export createKiteRuntimeBoundary',
       expectedRoot,
     );
   }
@@ -1180,14 +1180,14 @@ function compositionAuthorityBinding(edge: ImportEdge): string | undefined {
   const exact: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
     '@kite/runtime-host': new Set([
       'createRuntimeHost',
-      'createRuntimeHostBoundaryV1',
-      'createRuntimeHostStateStorageBindingV1',
+      'createRuntimeHostBoundary',
+      'createRuntimeHostStateStorageBinding',
     ]),
-    '@kite/runtime-spi': new Set(['createRuntimeModuleRegistryV1', 'defineRuntimeModuleV1']),
+    '@kite/runtime-spi': new Set(['createRuntimeModuleRegistry', 'defineRuntimeModule']),
     '@kite/builtin-runtime': new Set([
-      'createBuiltinContextCompilerPortV1',
+      'createBuiltinContextCompilerPort',
       'createBuiltinRuntimeModules',
-      'createBuiltinToolCatalogProjectionV1',
+      'createBuiltinToolCatalogProjection',
     ]),
   });
   const forbidden = exact[packageName];

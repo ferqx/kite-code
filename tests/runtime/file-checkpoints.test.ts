@@ -5,26 +5,26 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { workspaceFilesystemContentHashV1 as fileContentHash } from '@kite/builtin-runtime/filesystem';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { workspaceFilesystemContentHash as fileContentHash } from '@kite/builtin-runtime/filesystem';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import {
   createFilePreimageRecorder,
   previewFilesToCheckpoint,
   restoreFilesToCheckpoint,
 } from '../../apps/kite/src/bootstrap/runtime/file-checkpoints';
-import type { StateSessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import type { StateSessionStorage } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 
 let root: string;
 let workspace: string;
-let store: StateSessionStorageV1;
+let store: StateSessionStorage;
 let revisions: Map<string, number>;
 
 beforeEach(() => {
   root = mkdtempSync(join(process.cwd(), '.file-checkpoints-'));
   workspace = join(root, 'workspace');
   mkdirSync(workspace, { recursive: true });
-  store = openStateStoreForTestV1(join(root, 'checkpoints.runtime.db'));
+  store = openStateStoreForTest(join(root, 'checkpoints.runtime.db'));
   revisions = new Map();
 });
 
@@ -44,9 +44,9 @@ function appendEvent(threadId: string, toolCallId: string): void {
   );
 }
 
-function snapshotFor(threadId: string): ReturnType<typeof createRuntimeHostStateInitialStateV1> {
+function snapshotFor(threadId: string): ReturnType<typeof createRuntimeHostStateInitialState> {
   return {
-    ...createRuntimeHostStateInitialStateV1({
+    ...createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
@@ -221,7 +221,7 @@ describe('createFilePreimageRecorder', () => {
       recordFilePreimage: () => {
         throw new Error('boom');
       },
-    } as unknown as StateSessionStorageV1;
+    } as unknown as StateSessionStorage;
     const recorder = createFilePreimageRecorder(throwing, 'th');
     expect(recorder).toBeDefined();
     expect(() => recorder?.('a.md', 'x', true)).not.toThrow();

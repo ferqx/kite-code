@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  BuiltinShellExecutionUnknownErrorV1,
+  BuiltinShellExecutionUnknownError,
   createBuiltinRuntimeModules,
-  RMV1_13_CAPABILITY_REVISION_V1,
-  RMV1_13_EXECUTOR_REVISION_V1,
+  PLANNING_CAPABILITY_REVISION_,
+  PLANNING_EXECUTOR_REVISION_,
 } from '@kite/builtin-runtime';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 
 function request() {
   return {
     invocationId: 'shell-invocation-1',
     capabilityId: 'builtin:shell_execute',
-    capabilityRevision: RMV1_13_CAPABILITY_REVISION_V1,
+    capabilityRevision: PLANNING_CAPABILITY_REVISION_,
     input: { command: 'printf ok' },
   } as const;
 }
@@ -21,7 +21,7 @@ function context(execute: () => Promise<Record<string, unknown>>) {
     grant: {
       grantId: 'grant-1',
       capabilityId: 'builtin:shell_execute',
-      capabilityRevision: RMV1_13_CAPABILITY_REVISION_V1,
+      capabilityRevision: PLANNING_CAPABILITY_REVISION_,
       authority: {},
     },
     requestDigest: 'request-digest-1',
@@ -37,7 +37,7 @@ function context(execute: () => Promise<Record<string, unknown>>) {
 
 describe('Builtin Shell operation terminal certainty', () => {
   test('throws the package marker for post-GO unknown instead of emitting a normal failure', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const executor = registry.executor('builtin:shell_execute');
     if (!executor) throw new Error('Shell executor is unavailable.');
 
@@ -60,11 +60,11 @@ describe('Builtin Shell operation terminal certainty', () => {
           },
         })),
       ),
-    ).rejects.toBeInstanceOf(BuiltinShellExecutionUnknownErrorV1);
+    ).rejects.toBeInstanceOf(BuiltinShellExecutionUnknownError);
   });
 
   test('preserves confirmed cleanup and pre-dispatch sandbox evidence in the result', async () => {
-    const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const executor = registry.executor('builtin:shell_execute');
     if (!executor) throw new Error('Shell executor is unavailable.');
     const receipt = await executor.execute(
@@ -94,7 +94,7 @@ describe('Builtin Shell operation terminal certainty', () => {
 
     expect(receipt).toMatchObject({
       status: 'succeeded',
-      executorRevision: RMV1_13_EXECUTOR_REVISION_V1,
+      executorRevision: PLANNING_EXECUTOR_REVISION_,
       value: {
         ok: false,
         resultMeta: {

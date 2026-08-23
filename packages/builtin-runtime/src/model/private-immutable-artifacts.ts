@@ -28,7 +28,7 @@ const DEFAULT_SCAN_ENTRY_LIMIT = 10_000;
 const ARTIFACT_ID_DOMAIN = 'kite.private-immutable-artifact.id.v1\0';
 const ARTIFACT_INTEGRITY_DOMAIN = 'kite.private-immutable-artifact.integrity.v1\0';
 
-export type PrivateArtifactStorageErrorCodeV1 =
+export type PrivateArtifactStorageErrorCode =
   | 'invalid_reference'
   | 'artifact_missing'
   | 'artifact_corrupt'
@@ -39,56 +39,56 @@ export type PrivateArtifactStorageErrorCodeV1 =
   | 'publish_failed';
 
 export class PrivateArtifactStorageError extends Error {
-  public readonly code: PrivateArtifactStorageErrorCodeV1;
+  public readonly code: PrivateArtifactStorageErrorCode;
 
-  constructor(code: PrivateArtifactStorageErrorCodeV1, message: string) {
+  constructor(code: PrivateArtifactStorageErrorCode, message: string) {
     super(message);
     this.name = 'PrivateArtifactStorageError';
     this.code = code;
   }
 }
 
-export interface PrivateImmutableArtifactRefV1<Kind extends string = string> {
+export interface PrivateImmutableArtifactRef<Kind extends string = string> {
   artifactId: string;
   kind: Kind;
   integrityIdentifier: string;
   byteLength: number;
 }
 
-export interface PrivateArtifactPartitionV1<Kind extends string> {
+export interface PrivateArtifactPartition<Kind extends string> {
   kind: Kind;
   directory: string;
   extension: `.${string}`;
 }
 
-export type PrivateArtifactWriteFaultPointV1 =
+export type PrivateArtifactWriteFaultPoint =
   | 'after_temporary_file_fsync'
   | 'after_atomic_publish_before_directory_fsync';
 
-export interface PrivateImmutableArtifactStorageOptionsV1<Kind extends string> {
+export interface PrivateImmutableArtifactStorageOptions<Kind extends string> {
   root: string;
   namespace: string;
-  partitions: readonly PrivateArtifactPartitionV1<Kind>[];
+  partitions: readonly PrivateArtifactPartition<Kind>[];
   maxArtifactBytes: number;
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
-  faultInjector?: (point: PrivateArtifactWriteFaultPointV1) => void;
+  faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
 }
 
-export interface PrivateArtifactReachabilitySnapshotV1<Kind extends string> {
+export interface PrivateArtifactReachabilitySnapshot<Kind extends string> {
   /** Must cover every retained session and fork before any deletion is allowed. */
   complete: boolean;
-  reachable: readonly PrivateImmutableArtifactRefV1<Kind>[];
+  reachable: readonly PrivateImmutableArtifactRef<Kind>[];
 }
 
-export interface PrivateArtifactGarbageCollectionOptionsV1<Kind extends string> {
-  reachability: PrivateArtifactReachabilitySnapshotV1<Kind>;
+export interface PrivateArtifactGarbageCollectionOptions<Kind extends string> {
+  reachability: PrivateArtifactReachabilitySnapshot<Kind>;
   minimumRetentionMs: number;
   nowMs?: number;
   maxEntries?: number;
 }
 
-export interface PrivateArtifactGarbageCollectionResultV1 {
+export interface PrivateArtifactGarbageCollectionResult {
   scannedEntries: number;
   retainedArtifacts: number;
   deletedArtifacts: number;
@@ -106,7 +106,7 @@ interface DirectoryBinding extends FileIdentity {
 }
 
 interface BoundPartition<Kind extends string> {
-  descriptor: PrivateArtifactPartitionV1<Kind>;
+  descriptor: PrivateArtifactPartition<Kind>;
   directories: readonly DirectoryBinding[];
   directory: DirectoryBinding;
 }
@@ -120,7 +120,7 @@ interface ScannedFile {
   mtimeMs: number;
 }
 
-function storageError(code: PrivateArtifactStorageErrorCodeV1, message: string): never {
+function storageError(code: PrivateArtifactStorageErrorCode, message: string): never {
   throw new PrivateArtifactStorageError(code, message);
 }
 
@@ -147,16 +147,16 @@ function safeEqual(left: string, right: string): boolean {
  * The content-addressed identifier and digest detect corruption and mixups.
  * No installation secret is required to create or recover local artifacts.
  */
-export class PrivateImmutableArtifactStorageV1<Kind extends string> {
+export class PrivateImmutableArtifactStorage<Kind extends string> {
   private readonly root: string;
   private readonly namespace: string;
   private readonly maxArtifactBytes: number;
   private readonly platform: NodeJS.Platform;
   private readonly secureWindowsPath: (path: string) => void;
-  private readonly faultInjector?: (point: PrivateArtifactWriteFaultPointV1) => void;
-  private readonly partitions: ReadonlyMap<Kind, PrivateArtifactPartitionV1<Kind>>;
+  private readonly faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
+  private readonly partitions: ReadonlyMap<Kind, PrivateArtifactPartition<Kind>>;
 
-  constructor(options: PrivateImmutableArtifactStorageOptionsV1<Kind>) {
+  constructor(options: PrivateImmutableArtifactStorageOptions<Kind>) {
     if (!SAFE_STORAGE_SEGMENT.test(options.namespace)) {
       storageError('storage_boundary_violation', 'Private Artifact namespace is invalid.');
     }
@@ -168,7 +168,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
     if (root === resolve(dirname(root)) || basename(root) !== options.namespace) {
       storageError('storage_boundary_violation', 'Private Artifact root is too broad.');
     }
-    const partitions = new Map<Kind, PrivateArtifactPartitionV1<Kind>>();
+    const partitions = new Map<Kind, PrivateArtifactPartition<Kind>>();
     const directories = new Set<string>();
     for (const descriptor of options.partitions) {
       if (
@@ -199,7 +199,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
   write<SpecificKind extends Kind>(
     kind: SpecificKind,
     payload: Uint8Array,
-  ): PrivateImmutableArtifactRefV1<SpecificKind> {
+  ): PrivateImmutableArtifactRef<SpecificKind> {
     const bytes = Buffer.from(payload);
     const ref = this.deriveReference(kind, bytes);
     const partition = this.bindPartition(kind, true);
@@ -271,7 +271,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
     return storageError('publish_failed', 'Private Artifact write did not complete.');
   }
 
-  read(ref: PrivateImmutableArtifactRefV1<Kind>): Uint8Array {
+  read(ref: PrivateImmutableArtifactRef<Kind>): Uint8Array {
     this.assertReference(ref);
     const partition = this.bindPartition(ref.kind, false);
     const target = this.artifactPath(partition, ref.artifactId);
@@ -293,8 +293,8 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
   }
 
   collectGarbage(
-    options: PrivateArtifactGarbageCollectionOptionsV1<Kind>,
-  ): PrivateArtifactGarbageCollectionResultV1 {
+    options: PrivateArtifactGarbageCollectionOptions<Kind>,
+  ): PrivateArtifactGarbageCollectionResult {
     if (!options.reachability.complete) {
       storageError(
         'reachability_incomplete',
@@ -416,7 +416,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
   private deriveReference<SpecificKind extends Kind>(
     kind: SpecificKind,
     bytes: Buffer,
-  ): PrivateImmutableArtifactRefV1<SpecificKind> {
+  ): PrivateImmutableArtifactRef<SpecificKind> {
     this.partition(kind);
     if (bytes.byteLength > this.maxArtifactBytes) {
       storageError('artifact_too_large', 'Private Artifact exceeds its byte limit.');
@@ -438,7 +438,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
     return { artifactId, kind, integrityIdentifier, byteLength: bytes.byteLength };
   }
 
-  private assertReference(ref: PrivateImmutableArtifactRefV1<Kind>): void {
+  private assertReference(ref: PrivateImmutableArtifactRef<Kind>): void {
     const reference = ref as unknown;
     if (!reference || typeof reference !== 'object' || Array.isArray(reference)) {
       storageError('invalid_reference', 'Private Artifact reference is invalid.');
@@ -469,7 +469,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
     this.partition(ref.kind);
   }
 
-  private partition(kind: Kind): PrivateArtifactPartitionV1<Kind> {
+  private partition(kind: Kind): PrivateArtifactPartition<Kind> {
     const partition = this.partitions.get(kind);
     if (!partition) storageError('invalid_reference', 'Private Artifact kind is invalid.');
     return partition;
@@ -487,7 +487,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
   }
 
   private tryReadExisting(
-    ref: PrivateImmutableArtifactRefV1<Kind>,
+    ref: PrivateImmutableArtifactRef<Kind>,
     target: string,
     partition: BoundPartition<Kind>,
   ): boolean {
@@ -512,7 +512,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
   }
 
   private waitForConcurrentPublisher(
-    ref: PrivateImmutableArtifactRefV1<Kind>,
+    ref: PrivateImmutableArtifactRef<Kind>,
     target: string,
     partition: BoundPartition<Kind>,
   ): boolean {
@@ -774,7 +774,7 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
     }
   }
 
-  private partitionExists(descriptor: PrivateArtifactPartitionV1<Kind>): boolean {
+  private partitionExists(descriptor: PrivateArtifactPartition<Kind>): boolean {
     const path = join(this.root, descriptor.directory);
     try {
       const stats = lstatSync(path);

@@ -5,21 +5,21 @@ import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
 import { aiMessage } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostStateInitialStateV1,
-  createZeroResourceUsageV1,
-  LIMITED_RESOURCE_BUDGET_V1,
+  createRuntimeHostStateInitialState,
+  createZeroResourceUsage,
+  LIMITED_RESOURCE_BUDGET_,
   type RuntimeState,
 } from '@kite/runtime-host';
 import { resolveContextProjectionEnvironment } from '#app/bootstrap/runtime/model-effect';
-import type { AuthorizedExecutionControlV1 } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
+import type { AuthorizedExecutionControl } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import { eventsForRunCancellation } from '#app/bootstrap/runtime/state-actions';
-import { runStateRuntimeLoopV1 } from '#app/bootstrap/runtime/state-runner';
+import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
 import {
-  StateHostSessionHarnessV1 as AgentKernel,
-  restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1,
+  StateHostSessionHarness as AgentKernel,
+  restoreStateHostSessionHarness as restoreStateKernelCoordinator,
 } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
-import { runTestRuntimeAgentV1, testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgent, testBuiltinToolCatalog } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 describe('bounded Runtime cancellation', () => {
@@ -54,13 +54,13 @@ describe('bounded Runtime cancellation', () => {
       try {
         const run = (async () => {
           const events: RuntimeEvent[] = [];
-          for await (const event of runTestRuntimeAgentV1(
+          for await (const event of runTestRuntimeAgent(
             {
               task: 'wait for external cancellation',
               threadId,
               userId: 'test',
               workspace,
-              openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+              openStateSessionStorage: () => openStateStoreForTest(storePath),
               model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
               config,
               signal: controller.signal,
@@ -83,7 +83,7 @@ describe('bounded Runtime cancellation', () => {
             reason: 'Cancelled by integration test.',
           }),
         );
-        const store = openStateStoreForTestV1(storePath);
+        const store = openStateStoreForTest(storePath);
         expect(store.loadSnapshot<RuntimeState>(threadId)?.turn).toMatchObject({
           status: 'aborted',
           abortReason: 'Cancelled by integration test.',
@@ -101,7 +101,7 @@ describe('bounded Runtime cancellation', () => {
     const storePath = join(workspace, 'runtime.db');
     const threadId = 'cancel-successor';
     const kernelControl: {
-      current: AuthorizedExecutionControlV1 | null;
+      current: AuthorizedExecutionControl | null;
     } = {
       current: null,
     };
@@ -132,13 +132,13 @@ describe('bounded Runtime cancellation', () => {
     try {
       const firstPromise = (async () => {
         const events: RuntimeEvent[] = [];
-        for await (const event of runTestRuntimeAgentV1(
+        for await (const event of runTestRuntimeAgent(
           {
             task: '测试 shell 取消',
             threadId,
             userId: 'test',
             workspace,
-            openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+            openStateSessionStorage: () => openStateStoreForTest(storePath),
             model: model as unknown as SupportedChatModel,
             config,
             sandboxBackend: 'seatbelt',
@@ -185,18 +185,18 @@ describe('bounded Runtime cancellation', () => {
       kernelControl.current.cancelRun('cancelled by test');
       const firstEvents = await firstPromise;
       expect(firstEvents.map((event) => event.type)).toContain('tool.started');
-      const cancelledStore = openStateStoreForTestV1(storePath);
+      const cancelledStore = openStateStoreForTest(storePath);
       expect(cancelledStore.loadSnapshot<RuntimeState>(threadId)?.turn.status).toBe('aborted');
       cancelledStore.close();
 
       const secondEvents: RuntimeEvent[] = [];
-      for await (const event of runTestRuntimeAgentV1(
+      for await (const event of runTestRuntimeAgent(
         {
           task: '继续测试',
           threadId,
           userId: 'test',
           workspace,
-          openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+          openStateSessionStorage: () => openStateStoreForTest(storePath),
           model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
           config,
         },
@@ -232,12 +232,12 @@ describe('bounded Runtime cancellation', () => {
     };
 
     try {
-      const stale = restoreStateKernelCoordinatorV1({
+      const stale = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'test',
         workspace,
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
         interactionMode: 'accept_edits',
       });
       stale.processEventBatch([
@@ -270,13 +270,13 @@ describe('bounded Runtime cancellation', () => {
 
       const model = createMockModel([{ message: aiMessage({ content: '新消息已正常完成。' }) }]);
       const events: RuntimeEvent[] = [];
-      for await (const event of runTestRuntimeAgentV1(
+      for await (const event of runTestRuntimeAgent(
         {
           task: '继续发送消息',
           threadId,
           userId: 'test',
           workspace,
-          openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+          openStateSessionStorage: () => openStateStoreForTest(storePath),
           model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
           config,
         },
@@ -296,12 +296,12 @@ describe('bounded Runtime cancellation', () => {
       expect(events.some((event) => event.type === 'completion.blocked')).toBe(false);
       expect(events.at(-1)?.type).toBe('turn.completed');
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'test',
         workspace,
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
         interactionMode: 'accept_edits',
       });
       expect(restored.getState().tools.calls['task-orphan']?.status).toBe('cancelled');
@@ -316,7 +316,7 @@ describe('bounded Runtime cancellation', () => {
     const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-cross-task-successor-'));
     const storePath = join(workspace, 'runtime.db');
     const threadId = 'cross-task-successor';
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
@@ -413,7 +413,7 @@ describe('bounded Runtime cancellation', () => {
       recoveryEntry: 'reconcile',
       pendingVerification: false,
     };
-    const store = openStateStoreForTestV1(storePath);
+    const store = openStateStoreForTest(storePath);
     store.saveSnapshot(threadId, state);
     store.close();
     const model = createMockModel([{ message: aiMessage({ content: 'successor completed' }) }]);
@@ -428,13 +428,13 @@ describe('bounded Runtime cancellation', () => {
 
     try {
       const events: RuntimeEvent[] = [];
-      for await (const event of runTestRuntimeAgentV1(
+      for await (const event of runTestRuntimeAgent(
         {
           task: 'successor message',
           threadId,
           userId: 'test',
           workspace,
-          openStateSessionStorage: () => openStateStoreForTestV1(storePath),
+          openStateSessionStorage: () => openStateStoreForTest(storePath),
           model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
           config,
         },
@@ -449,12 +449,12 @@ describe('bounded Runtime cancellation', () => {
       expect(events.some((event) => event.type === 'completion.blocked')).toBe(false);
       expect(events.filter((event) => event.type === 'run.error')).toEqual([]);
       expect(events.at(-1)?.type).toBe('turn.completed');
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'test',
         workspace,
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState()).toMatchObject({
         interactions: { kind: 'idle' },
@@ -467,7 +467,7 @@ describe('bounded Runtime cancellation', () => {
     }
   });
   test('withholds writer, shell, and child capabilities until bounded cancellation is enabled', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'bounded-capabilities',
       userId: 'u',
@@ -482,13 +482,13 @@ describe('bounded Runtime cancellation', () => {
         providerName: 'fixture',
         providerType: 'openai-compatible',
         features: {
-          resourceBudgetV1: true,
-          boundedCancellationV1: false,
+          resourceBudget: true,
+          boundedCancellation: false,
         },
         sandbox: { enabled: false },
       },
       model: createMockModel([]),
-      builtinToolCatalog: testBuiltinToolCatalogV1(),
+      builtinToolCatalog: testBuiltinToolCatalog(),
     });
     const disclosed = environment.serializedTools.map((tool) => tool.name);
 
@@ -499,14 +499,14 @@ describe('bounded Runtime cancellation', () => {
   });
 
   test('persists a structured unknown terminal when recovery is blocked', async () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'blocked-recovery',
       userId: 'u',
       workspace: '/',
     });
     state.recoveryState = { kind: 'incompatible', schemaVersion: 999, formatEpoch: null };
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: state,
@@ -514,7 +514,7 @@ describe('bounded Runtime cancellation', () => {
     });
     const events = [];
 
-    for await (const event of runStateRuntimeLoopV1(kernel, async () => [], {
+    for await (const event of runStateRuntimeLoop(kernel, async () => [], {
       requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
     })) {
       events.push(event);
@@ -542,7 +542,7 @@ describe('bounded Runtime cancellation', () => {
 
   test('interrupts a concurrency wait and cannot dispatch a new tool afterward', async () => {
     const now = Date.now();
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'cancel-waiter',
       userId: 'u',
@@ -558,7 +558,7 @@ describe('bounded Runtime cancellation', () => {
     };
     state.tools.queue = [...state.tools.queue, 'queued-tool'];
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -567,9 +567,9 @@ describe('bounded Runtime cancellation', () => {
       runId: 'run-1',
       startedAt: new Date(now).toISOString(),
       deadlineAt: new Date(now + 30_000).toISOString(),
-      budget: { ...LIMITED_RESOURCE_BUDGET_V1, maxConcurrentToolInvocations: 1 },
+      budget: { ...LIMITED_RESOURCE_BUDGET_, maxConcurrentToolInvocations: 1 },
     });
-    const upper = createZeroResourceUsageV1('versioned_upper_bound', 'test-v1');
+    const upper = createZeroResourceUsage('versioned_upper_bound', 'test-v1');
     upper.counters.toolInvocations = 1;
     upper.gauges.activeToolInvocations = 1;
     kernel.processEvent({
@@ -592,7 +592,7 @@ describe('bounded Runtime cancellation', () => {
     const controller = new AbortController();
     let executorCalls = 0;
     const emitted: string[] = [];
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async () => {
         executorCalls += 1;
@@ -627,14 +627,14 @@ describe('bounded Runtime cancellation', () => {
   });
 
   test('bounds cleanup when an in-flight executor ignores AbortSignal', async () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'non-cooperative-cancel',
       userId: 'u',
       workspace: '/',
     });
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -643,7 +643,7 @@ describe('bounded Runtime cancellation', () => {
     const startedAt = Date.now();
     setTimeout(() => controller.abort('Cancellation requested.'), 10);
 
-    for await (const _event of runStateRuntimeLoopV1(
+    for await (const _event of runStateRuntimeLoop(
       kernel,
       async () => {
         executorCalls += 1;
@@ -667,12 +667,12 @@ describe('bounded Runtime cancellation', () => {
     const storePath = join(directory, 'runtime.db');
     const threadId = 'cancel-restart';
     try {
-      const kernel = restoreStateKernelCoordinatorV1({
+      const kernel = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'u',
         workspace: directory,
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       const now = Date.now();
       kernel.processEvent({
@@ -680,9 +680,9 @@ describe('bounded Runtime cancellation', () => {
         runId: 'run-restart',
         startedAt: new Date(now).toISOString(),
         deadlineAt: new Date(now + 30_000).toISOString(),
-        budget: LIMITED_RESOURCE_BUDGET_V1,
+        budget: LIMITED_RESOURCE_BUDGET_,
       });
-      const upper = createZeroResourceUsageV1('versioned_upper_bound', 'restart-test-v1');
+      const upper = createZeroResourceUsage('versioned_upper_bound', 'restart-test-v1');
       upper.counters.toolInvocations = 1;
       upper.gauges.activeToolInvocations = 1;
       kernel.processEvent({
@@ -749,12 +749,12 @@ describe('bounded Runtime cancellation', () => {
       });
       kernel.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'u',
         workspace: directory,
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState()).toMatchObject({
         turn: { status: 'aborted' },

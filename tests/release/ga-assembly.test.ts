@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
-  computeGaMaintainerReviewDecisionDigestV1,
-  evaluateGaAssemblyV1,
-  GA_ASSEMBLY_DEPENDENCIES_V1,
+  computeGaMaintainerReviewDecisionDigest,
+  evaluateGaAssembly,
+  GA_ASSEMBLY_DEPENDENCIES_,
 } from '../../scripts/release/assemble-ga';
-import { verifyGaCompatibilityFixtureV1 } from '../../scripts/release/ga-compatibility';
-import { validateGaSelectionV1 } from '../../scripts/release/ga-selection';
-import { verifyReleaseSchemaRollbackFixtureV1 } from '../../scripts/release/schema-rollback';
+import { verifyGaCompatibilityFixture } from '../../scripts/release/ga-compatibility';
+import { validateGaSelection } from '../../scripts/release/ga-selection';
+import { verifyReleaseSchemaRollbackFixture } from '../../scripts/release/schema-rollback';
 
 const digest = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`;
 const candidate = {
@@ -52,7 +52,7 @@ const selection = {
   ],
   approvedBy: ['github:release-owner'],
 } as const;
-const selectionDigest = validateGaSelectionV1(selection, [stableDecision]).selectionDigest;
+const selectionDigest = validateGaSelection(selection, [stableDecision]).selectionDigest;
 const facts = [
   {
     kind: 'verification',
@@ -63,8 +63,8 @@ const facts = [
     replayed: false,
   },
 ] as const;
-const rollbackReport = verifyReleaseSchemaRollbackFixtureV1({
-  schema: 'ReleaseSchemaRollbackFixtureV1',
+const rollbackReport = verifyReleaseSchemaRollbackFixture({
+  schema: 'ReleaseSchemaRollbackFixture',
   fixtureClass: 'synthetic_contract_only',
   sourceSchemaVersion: 21,
   candidateSchemaVersion: 22,
@@ -84,8 +84,8 @@ const compatibilityFacts = [
     kind: 'verification',
   },
 ] as const;
-const compatibilityReport = verifyGaCompatibilityFixtureV1({
-  schema: 'GACompatibilityFixtureV1',
+const compatibilityReport = verifyGaCompatibilityFixture({
+  schema: 'GACompatibilityFixture',
   fixtureClass: 'synthetic_contract_only',
   fromArtifactDigest: digest('7'),
   gaArtifactDigest: candidate.artifactDigest,
@@ -100,8 +100,8 @@ const compatibilityReport = verifyGaCompatibilityFixtureV1({
   newAdmissionsForDisabledCapabilities: 0,
 });
 
-const dependencies = GA_ASSEMBLY_DEPENDENCIES_V1.map((dependency, index) => ({
-  schema: 'GAAssemblyDependencyDecisionV1' as const,
+const dependencies = GA_ASSEMBLY_DEPENDENCIES_.map((dependency, index) => ({
+  schema: 'GAAssemblyDependencyDecision' as const,
   dependency,
   status: 'passed' as const,
   ...candidate,
@@ -111,7 +111,7 @@ const dependencies = GA_ASSEMBLY_DEPENDENCIES_V1.map((dependency, index) => ({
   decisionDigest: digest(String.fromCharCode(97 + index)),
 }));
 const rollbackReplay = {
-  schema: 'GAAssemblyRollbackReplayV1' as const,
+  schema: 'GAAssemblyRollbackReplay' as const,
   candidate,
   selectionDigest,
   verifierIdentity: 'fixture:rollback-verifier',
@@ -120,7 +120,7 @@ const rollbackReplay = {
   report: rollbackReport,
 };
 const compatibilityReplay = {
-  schema: 'GAAssemblyCompatibilityReplayV1' as const,
+  schema: 'GAAssemblyCompatibilityReplay' as const,
   candidate,
   selectionDigest,
   verifierIdentity: 'fixture:compatibility-verifier',
@@ -129,7 +129,7 @@ const compatibilityReplay = {
   report: compatibilityReport,
 };
 const maintainerReviewMaterial = {
-  schema: 'GAAssemblyMaintainerReviewV1' as const,
+  schema: 'GAAssemblyMaintainerReview' as const,
   status: 'passed' as const,
   reviewMode: 'single_maintainer' as const,
   candidate,
@@ -152,10 +152,10 @@ const maintainerReviewMaterial = {
 };
 const maintainerReview = {
   ...maintainerReviewMaterial,
-  decisionDigest: computeGaMaintainerReviewDecisionDigestV1(maintainerReviewMaterial),
+  decisionDigest: computeGaMaintainerReviewDecisionDigest(maintainerReviewMaterial),
 };
 const input = {
-  schema: 'GAAssemblyInputV1' as const,
+  schema: 'GAAssemblyInput' as const,
   assemblyId: 'ga-assembly-001',
   assembledAt: '2026-08-03T02:00:00.000Z',
   candidate,
@@ -169,7 +169,7 @@ const input = {
 
 describe('GA pure assembly and replay contract', () => {
   test('binds the complete local contract but remains non-distributable without authority', () => {
-    expect(evaluateGaAssemblyV1(input)).toMatchObject({
+    expect(evaluateGaAssembly(input)).toMatchObject({
       status: 'blocked',
       gaEligible: false,
       distributable: false,
@@ -191,7 +191,7 @@ describe('GA pure assembly and replay contract', () => {
   });
 
   test('keeps missing dependencies, review, and replay evidence explicitly blocked', () => {
-    const result = evaluateGaAssemblyV1({
+    const result = evaluateGaAssembly({
       ...input,
       dependencies: [],
       maintainerReview: null,
@@ -221,7 +221,7 @@ describe('GA pure assembly and replay contract', () => {
       rollbackReportDigest: digest('9'),
       compatibilityReportDigest: digest('9'),
     };
-    const result = evaluateGaAssemblyV1({
+    const result = evaluateGaAssembly({
       ...input,
       dependencies: dependencies.map((entry) =>
         entry.dependency === 'route_decision'
@@ -240,7 +240,7 @@ describe('GA pure assembly and replay contract', () => {
       },
       maintainerReview: {
         ...splicedReviewMaterial,
-        decisionDigest: computeGaMaintainerReviewDecisionDigestV1(splicedReviewMaterial),
+        decisionDigest: computeGaMaintainerReviewDecisionDigest(splicedReviewMaterial),
       },
     });
     expect(result.reasonCodes).toEqual(
@@ -261,13 +261,13 @@ describe('GA pure assembly and replay contract', () => {
 
   test('rejects duplicate decisions, hidden fields, and unvalidated stable selection', () => {
     expect(() =>
-      evaluateGaAssemblyV1({
+      evaluateGaAssembly({
         ...input,
         dependencies: [dependencies[0], dependencies[0]],
       }),
     ).toThrow('duplicated');
-    expect(() => evaluateGaAssemblyV1({ ...input, hiddenPublish: true })).toThrow();
-    expect(() => evaluateGaAssemblyV1({ ...input, stableCapabilityDecisions: [] })).toThrow(
+    expect(() => evaluateGaAssembly({ ...input, hiddenPublish: true })).toThrow();
+    expect(() => evaluateGaAssembly({ ...input, stableCapabilityDecisions: [] })).toThrow(
       'fresh stable decision',
     );
   });

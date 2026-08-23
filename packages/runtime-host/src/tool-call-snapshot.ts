@@ -1,12 +1,12 @@
 import {
-  type RuntimeJsonValueV1,
-  TOOL_PIPELINE_STAGE_SCHEMA_V1,
-  type ToolArgumentOriginV1,
-  type ToolCallSnapshotResultV1,
+  type RuntimeJsonValue,
+  TOOL_PIPELINE_STAGE_SCHEMA_,
+  type ToolArgumentOrigin,
+  type ToolCallSnapshotResult,
 } from '@kite/runtime-spi';
 
-const MAX_IDENTITY_LENGTH_V1 = 256;
-const SNAPSHOT_KEYS_V1 = Object.freeze([
+const MAX_IDENTITY_LENGTH_ = 256;
+const SNAPSHOT_KEYS_ = Object.freeze([
   'toolCallId',
   'name',
   'rawArguments',
@@ -18,11 +18,11 @@ const SNAPSHOT_KEYS_V1 = Object.freeze([
   'capabilityRevision',
 ] as const);
 
-export interface RuntimeHostToolCallSnapshotInputV1 {
+export interface RuntimeHostToolCallSnapshotInput {
   readonly toolCallId: string;
   readonly name: string;
   readonly rawArguments: unknown;
-  readonly argumentOrigin: ToolArgumentOriginV1;
+  readonly argumentOrigin: ToolArgumentOrigin;
   readonly createdAtTurnId: string;
   readonly modelMessageId: string;
   readonly bindingId: string | null;
@@ -37,17 +37,17 @@ export interface RuntimeHostToolCallSnapshotInputV1 {
  * does not parse a capability schema, classify effects, resolve a binding, or
  * select an executor.
  */
-export function createRuntimeHostToolCallSnapshotV1(
-  input: Readonly<RuntimeHostToolCallSnapshotInputV1>,
-): ToolCallSnapshotResultV1 {
+export function createRuntimeHostToolCallSnapshot(
+  input: Readonly<RuntimeHostToolCallSnapshotInput>,
+): ToolCallSnapshotResult {
   try {
-    if (!validSnapshotInputShapeV1(input)) {
-      return snapshotFailureV1(input, 'invalid_identity');
+    if (!validSnapshotInputShape(input)) {
+      return snapshotFailure(input, 'invalid_identity');
     }
 
-    const rawArguments = cloneCanonicalJsonV1(input.rawArguments);
+    const rawArguments = cloneCanonicalJson(input.rawArguments);
     const snapshot = Object.freeze({
-      schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+      schema: TOOL_PIPELINE_STAGE_SCHEMA_,
       stage: 'snapshot' as const,
       toolCallId: input.toolCallId,
       name: input.name,
@@ -61,30 +61,30 @@ export function createRuntimeHostToolCallSnapshotV1(
     });
     return Object.freeze({ ok: true as const, value: snapshot });
   } catch {
-    return snapshotFailureV1(input, 'arguments_not_canonical_json');
+    return snapshotFailure(input, 'arguments_not_canonical_json');
   }
 }
 
-function validSnapshotInputShapeV1(input: unknown): input is RuntimeHostToolCallSnapshotInputV1 {
-  if (!plainRecordV1(input) || !exactKeysV1(input, SNAPSHOT_KEYS_V1)) return false;
+function validSnapshotInputShape(input: unknown): input is RuntimeHostToolCallSnapshotInput {
+  if (!plainRecord(input) || !exactKeys(input, SNAPSHOT_KEYS_)) return false;
   return (
-    boundedIdentityV1(input.toolCallId) &&
-    boundedIdentityV1(input.name) &&
+    boundedIdentity(input.toolCallId) &&
+    boundedIdentity(input.name) &&
     (input.argumentOrigin === 'model_public' || input.argumentOrigin === 'runtime_private') &&
-    boundedIdentityV1(input.createdAtTurnId) &&
-    boundedIdentityV1(input.modelMessageId) &&
-    nullableIdentityV1(input.bindingId) &&
-    nullableIdentityV1(input.capabilityId) &&
-    nullableIdentityV1(input.capabilityRevision)
+    boundedIdentity(input.createdAtTurnId) &&
+    boundedIdentity(input.modelMessageId) &&
+    nullableIdentity(input.bindingId) &&
+    nullableIdentity(input.capabilityId) &&
+    nullableIdentity(input.capabilityRevision)
   );
 }
 
-function snapshotFailureV1(
+function snapshotFailure(
   input: unknown,
   code: 'invalid_identity' | 'arguments_not_canonical_json',
-): ToolCallSnapshotResultV1 {
-  const toolCallId = safeBoundedIdentityV1(readDataPropertyV1(input, 'toolCallId'));
-  const toolName = safeBoundedIdentityV1(readDataPropertyV1(input, 'name'));
+): ToolCallSnapshotResult {
+  const toolCallId = safeBoundedIdentity(readDataProperty(input, 'toolCallId'));
+  const toolName = safeBoundedIdentity(readDataProperty(input, 'name'));
   return Object.freeze({
     ok: false as const,
     failure: Object.freeze({
@@ -100,7 +100,7 @@ function snapshotFailureV1(
   });
 }
 
-function plainRecordV1(value: unknown): value is Record<string, unknown> {
+function plainRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   try {
     const prototype = Object.getPrototypeOf(value);
@@ -115,7 +115,7 @@ function plainRecordV1(value: unknown): value is Record<string, unknown> {
   }
 }
 
-function exactKeysV1(value: Record<string, unknown>, keys: readonly string[]): boolean {
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const expected = new Set(keys);
   return (
     Reflect.ownKeys(value).every((key) => typeof key === 'string' && expected.has(key)) &&
@@ -123,7 +123,7 @@ function exactKeysV1(value: Record<string, unknown>, keys: readonly string[]): b
   );
 }
 
-function readDataPropertyV1(value: unknown, key: string): unknown {
+function readDataProperty(value: unknown, key: string): unknown {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function'))
     return undefined;
   try {
@@ -134,27 +134,27 @@ function readDataPropertyV1(value: unknown, key: string): unknown {
   }
 }
 
-function boundedIdentityV1(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= MAX_IDENTITY_LENGTH_V1;
+function boundedIdentity(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= MAX_IDENTITY_LENGTH_;
 }
 
-function safeBoundedIdentityV1(value: unknown): string | null {
-  return boundedIdentityV1(value) ? value : null;
+function safeBoundedIdentity(value: unknown): string | null {
+  return boundedIdentity(value) ? value : null;
 }
 
-function nullableIdentityV1(value: unknown): value is string | null {
-  return value === null || boundedIdentityV1(value);
+function nullableIdentity(value: unknown): value is string | null {
+  return value === null || boundedIdentity(value);
 }
 
-function cloneCanonicalJsonV1(value: unknown): RuntimeJsonValueV1 {
-  return cloneCanonicalJsonValueV1(value, new WeakSet<object>(), new WeakMap<object, object>());
+function cloneCanonicalJson(value: unknown): RuntimeJsonValue {
+  return cloneCanonicalJsonValue(value, new WeakSet<object>(), new WeakMap<object, object>());
 }
 
-function cloneCanonicalJsonValueV1(
+function cloneCanonicalJsonValue(
   value: unknown,
   active: WeakSet<object>,
   clones: WeakMap<object, object>,
-): RuntimeJsonValueV1 {
+): RuntimeJsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new TypeError('non-finite JSON number');
@@ -163,7 +163,7 @@ function cloneCanonicalJsonValueV1(
   if (typeof value !== 'object') throw new TypeError('unsupported JSON value');
   if (active.has(value)) throw new TypeError('cyclic JSON value');
   const existing = clones.get(value);
-  if (existing !== undefined) return existing as RuntimeJsonValueV1;
+  if (existing !== undefined) return existing as RuntimeJsonValue;
 
   let prototype: object | null;
   try {
@@ -188,7 +188,7 @@ function cloneCanonicalJsonValueV1(
       const length = lengthDescriptor.value;
       const keys = Reflect.ownKeys(value);
       if (keys.length !== length + 1) throw new TypeError('sparse or extended array');
-      const clone: RuntimeJsonValueV1[] = new Array(length);
+      const clone: RuntimeJsonValue[] = new Array(length);
       clones.set(value, clone);
       for (let index = 0; index < length; index += 1) {
         const key = String(index);
@@ -201,7 +201,7 @@ function cloneCanonicalJsonValueV1(
         ) {
           throw new TypeError('invalid array property');
         }
-        clone[index] = cloneCanonicalJsonValueV1(descriptor.value, active, clones);
+        clone[index] = cloneCanonicalJsonValue(descriptor.value, active, clones);
       }
       for (const key of keys) {
         if (
@@ -217,7 +217,7 @@ function cloneCanonicalJsonValueV1(
     if (prototype !== Object.prototype && prototype !== null) {
       throw new TypeError('invalid object prototype');
     }
-    const clone = Object.create(prototype) as Record<string, RuntimeJsonValueV1>;
+    const clone = Object.create(prototype) as Record<string, RuntimeJsonValue>;
     clones.set(value, clone);
     for (const key of Reflect.ownKeys(value)) {
       if (typeof key !== 'string') throw new TypeError('symbol JSON property');
@@ -228,11 +228,11 @@ function cloneCanonicalJsonValueV1(
       Object.defineProperty(clone, key, {
         configurable: true,
         enumerable: true,
-        value: cloneCanonicalJsonValueV1(descriptor.value, active, clones),
+        value: cloneCanonicalJsonValue(descriptor.value, active, clones),
         writable: true,
       });
     }
-    return Object.freeze(clone) as RuntimeJsonValueV1;
+    return Object.freeze(clone) as RuntimeJsonValue;
   } finally {
     active.delete(value);
   }

@@ -1,7 +1,7 @@
 import { sha256Hex } from './hash';
 import { MAX_PARALLEL_READ_TOOLS, MAX_PARALLEL_SUBAGENTS } from './scheduler';
 
-export interface RuntimeSchedulingPolicyV1 {
+export interface RuntimeSchedulingPolicy {
   version: 1;
   parallelRead: {
     concurrencyGroup: 'parallel-read';
@@ -28,7 +28,7 @@ export interface RuntimeSchedulingPolicyV1 {
   lateEventPolicy: 'diagnostic_or_reconciliation_only';
 }
 
-export function createRuntimeSchedulingPolicyV1(): RuntimeSchedulingPolicyV1 {
+export function createRuntimeSchedulingPolicy(): RuntimeSchedulingPolicy {
   return Object.freeze({
     version: 1 as const,
     parallelRead: Object.freeze({
@@ -57,8 +57,8 @@ export function createRuntimeSchedulingPolicyV1(): RuntimeSchedulingPolicyV1 {
   });
 }
 
-export function computeRuntimeSchedulingPolicyDigestV1(
-  policy = createRuntimeSchedulingPolicyV1(),
+export function computeRuntimeSchedulingPolicyDigest(
+  policy = createRuntimeSchedulingPolicy(),
 ): string {
   return `sha256:${sha256Hex(`kite.runtime-scheduling-policy.v1\0${JSON.stringify(policy)}`)}`;
 }

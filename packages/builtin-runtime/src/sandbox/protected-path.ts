@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { WorkspaceFilesystemProtectedBoundaryV1 } from '@kite/runtime-spi';
+import type { WorkspaceFilesystemProtectedBoundary } from '@kite/runtime-spi';
 import {
   canonicalPathForComparison,
   isPathInsideWorkspace,
@@ -8,14 +8,14 @@ import {
 } from './path-utils';
 import type { ProtectedPathPolicy } from './types';
 
-export type ProtectedPathOperationV1 = 'read' | 'write' | 'execute';
+export type ProtectedPathOperation = 'read' | 'write' | 'execute';
 
-export interface ProtectedPathAccessV1 {
+export interface ProtectedPathAccess {
   path: string;
-  operation: ProtectedPathOperationV1;
+  operation: ProtectedPathOperation;
 }
 
-export type ProtectedPathDecisionReasonV1 =
+export type ProtectedPathDecisionReason =
   | 'allowed_workspace_path'
   | 'allowed_read_path'
   | 'outside_workspace'
@@ -25,28 +25,28 @@ export type ProtectedPathDecisionReasonV1 =
   | 'outside_allowlist'
   | 'invalid_path';
 
-export interface ProtectedPathDecisionV1 extends ProtectedPathAccessV1 {
+export interface ProtectedPathDecision extends ProtectedPathAccess {
   lexicalPath: string | null;
   lexicalRelativePath: string | null;
   canonicalPath: string | null;
   relativePath: string | null;
   outcome: 'allow' | 'deny' | 'prompt';
-  reason: ProtectedPathDecisionReasonV1;
+  reason: ProtectedPathDecisionReason;
   matchedRule?: string;
 }
 
-export interface ProtectedPathEvaluatorV1 {
+export interface ProtectedPathEvaluator {
   readonly version: 1;
   readonly workspaceRoot: string;
   readonly mode: ProtectedPathPolicy;
-  evaluate(access: ProtectedPathAccessV1): ProtectedPathDecisionV1;
+  evaluate(access: ProtectedPathAccess): ProtectedPathDecision;
   /** Complete JSON-safe policy projection; Provider never receives this evaluator. */
   projectFilesystemBoundary(): Readonly<
-    Omit<WorkspaceFilesystemProtectedBoundaryV1, 'schema' | 'boundaryDigest'>
+    Omit<WorkspaceFilesystemProtectedBoundary, 'schema' | 'boundaryDigest'>
   >;
 }
 
-export interface CreateProtectedPathEvaluatorV1Input {
+export interface CreateProtectedPathEvaluatorInput {
   workspaceRoot: string;
   mode: ProtectedPathPolicy;
   /** Additional deny roots are unioned with the built-in protected set. */
@@ -56,7 +56,7 @@ export interface CreateProtectedPathEvaluatorV1Input {
 }
 
 /** Root-relative directories denied to executable/process surfaces. */
-export const PROTECTED_WORKSPACE_DIRECTORIES_V1 = Object.freeze([
+export const PROTECTED_WORKSPACE_DIRECTORIES_ = Object.freeze([
   '.git',
   '.ssh',
   '.aws',
@@ -83,7 +83,7 @@ export const PROTECTED_WORKSPACE_DIRECTORIES_V1 = Object.freeze([
 ] as const);
 
 /** Root-relative files denied to executable/process surfaces. */
-export const PROTECTED_WORKSPACE_FILES_V1 = Object.freeze([
+export const PROTECTED_WORKSPACE_FILES_ = Object.freeze([
   '.bashrc',
   '.bash_profile',
   '.bash_logout',
@@ -109,7 +109,7 @@ export const PROTECTED_WORKSPACE_FILES_V1 = Object.freeze([
 ] as const);
 
 /** Root-relative filename prefixes denied to executable/process surfaces. */
-export const PROTECTED_WORKSPACE_FILE_PREFIXES_V1 = Object.freeze(['.env.'] as const);
+export const PROTECTED_WORKSPACE_FILE_PREFIXES_ = Object.freeze(['.env.'] as const);
 
 function pathFromWorkspace(workspaceRoot: string, candidate: string): string {
   if (candidate.includes('\0')) throw new Error('Path contains a NUL byte.');
@@ -160,9 +160,9 @@ function denyOutcome(mode: ProtectedPathPolicy): 'deny' | 'prompt' {
  * remain pending until the Tool Pipeline supplies an exact approval grant.
  * Execute/process surfaces retain the protected identity rules below.
  */
-export function createProtectedPathEvaluatorV1(
-  input: CreateProtectedPathEvaluatorV1Input,
-): ProtectedPathEvaluatorV1 {
+export function createProtectedPathEvaluator(
+  input: CreateProtectedPathEvaluatorInput,
+): ProtectedPathEvaluator {
   const lexicalWorkspaceRoot = resolve(input.workspaceRoot);
   const workspaceRoot = canonicalPathForComparison(input.workspaceRoot);
   const additionalDeniedPaths = (input.additionalDeniedPaths ?? []).map((path) =>
@@ -187,7 +187,7 @@ export function createProtectedPathEvaluatorV1(
         allowedCanonicalPaths: [],
       });
     },
-    evaluate(access: ProtectedPathAccessV1): ProtectedPathDecisionV1 {
+    evaluate(access: ProtectedPathAccess): ProtectedPathDecision {
       let lexicalPath: string;
       let canonicalPath: string;
       try {
@@ -224,7 +224,7 @@ export function createProtectedPathEvaluatorV1(
         return { ...base, outcome: denyOutcome(input.mode), reason: 'outside_workspace' };
       }
 
-      const protectedDirectory = PROTECTED_WORKSPACE_DIRECTORIES_V1.find(
+      const protectedDirectory = PROTECTED_WORKSPACE_DIRECTORIES_.find(
         (rule) =>
           isSameOrDescendant(relativePath, rule) ||
           (lexicalRelativePath !== null && isSameOrDescendant(lexicalRelativePath, rule)),
@@ -238,7 +238,7 @@ export function createProtectedPathEvaluatorV1(
         };
       }
 
-      const protectedFile = PROTECTED_WORKSPACE_FILES_V1.find(
+      const protectedFile = PROTECTED_WORKSPACE_FILES_.find(
         (rule) =>
           isSameProtectedIdentity(relativePath, rule) ||
           isSameProtectedIdentity(lexicalRelativePath, rule),
@@ -252,7 +252,7 @@ export function createProtectedPathEvaluatorV1(
         };
       }
 
-      const protectedFilePrefix = PROTECTED_WORKSPACE_FILE_PREFIXES_V1.find(
+      const protectedFilePrefix = PROTECTED_WORKSPACE_FILE_PREFIXES_.find(
         (rule) =>
           startsWithProtectedIdentity(relativePath, rule) ||
           startsWithProtectedIdentity(lexicalRelativePath, rule),

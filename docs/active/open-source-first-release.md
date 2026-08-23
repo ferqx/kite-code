@@ -6,7 +6,7 @@
 
 验证：`bun test tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
 
-相关：ADR-0068、ADR-0069、ADR-0093、`release/oss-first-release/task-status-v2.json`、`.github/workflows/release-candidate.yml`。
+相关：ADR-0068、ADR-0069、ADR-0093、`release/oss-first-release/task-status.json`、`.github/workflows/release-candidate.yml`。
 
 首发 Gate、候选构建命令和限制以本文件及 `release/oss-first-release/` 为权威，不要求在面向使用者的
 `README.md` 中重复维护。
@@ -73,6 +73,6 @@ Release/Security 人员或 production evaluator authority。旧 fail-closed cont
 
 ## 状态权威
 
-`release/oss-first-release/task-status-v2.json` 精确覆盖原 108 个 Task。当前终态为 83 `completed`、
+`release/oss-first-release/task-status.json` 精确覆盖原 108 个 Task。当前终态为 83 `completed`、
 25 `superseded`、0 optional；不存在 pending、in-progress 或发布后路线图 Task。各旧 Phase 计划保留
 Task 说明和历史证据，但其 execution binding 与 milestone 不再决定发布状态。

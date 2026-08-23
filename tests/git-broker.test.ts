@@ -4,16 +4,16 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  createGitBrokerV1,
-  type GitProcessAdapterV1,
-  type GitProcessRequestV1,
-  qualifyBrokeredGitNativeDenyV1,
+  createGitBroker,
+  type GitProcessAdapter,
+  type GitProcessRequest,
+  qualifyBrokeredGitNativeDeny,
 } from '@kite/builtin-runtime/git';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
-import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@kite/runtime-spi';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config/index';
-import { composeAppGitBrokerV1 } from '@/app/git/composition';
-import { createAppGitProcessAdapterV1 } from '@/app/git/process-adapter';
+import { composeAppGitBroker } from '@/app/git/composition';
+import { createAppGitProcessAdapter } from '@/app/git/process-adapter';
 
 function fixture(): string {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-git-broker-'));
@@ -31,7 +31,7 @@ function platform(): 'darwin' | 'linux' | 'win32' {
 
 function qualifiedEvidence() {
   return {
-    featureRevision: BROKERED_GIT_FEATURE_REVISION_V1,
+    featureRevision: BROKERED_GIT_FEATURE_REVISION_,
     platform: platform(),
     backend:
       platform() === 'darwin'
@@ -49,7 +49,7 @@ function qualifiedEvidence() {
 }
 
 function protectedEvaluator(workspace: string) {
-  return createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+  return createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
 }
 
 function git(workspace: string, ...args: string[]): string {
@@ -94,15 +94,15 @@ describe('ACORE-GIT hardened broker', () => {
       skillChild: false,
       localStdioMcp: false,
       gitInspect: true,
-      brokeredGitFeatureRevision: BROKERED_GIT_FEATURE_REVISION_V1,
+      brokeredGitFeatureRevision: BROKERED_GIT_FEATURE_REVISION_,
     } as const;
     try {
       expect(
-        composeAppGitBrokerV1({
+        composeAppGitBroker({
           workspace,
           executable: process.execPath,
           config: {
-            features: { brokeredGitV1: false },
+            features: { brokeredGit: false },
             executionCapabilitySurface: surface,
             executionBoundary: { workspaceRoot: workspace, protectedPathPolicy: 'deny' },
           } as AgentConfig,
@@ -110,17 +110,17 @@ describe('ACORE-GIT hardened broker', () => {
         }),
       ).toBeUndefined();
       expect(
-        composeAppGitBrokerV1({
+        composeAppGitBroker({
           workspace,
           executable: process.execPath,
           config: {
-            features: { brokeredGitV1: true },
+            features: { brokeredGit: true },
             executionCapabilitySurface: surface,
             executionBoundary: { workspaceRoot: workspace, protectedPathPolicy: 'deny' },
           } as AgentConfig,
           shellDenyEvidence: qualifiedEvidence(),
         })?.featureRevision,
-      ).toBe(BROKERED_GIT_FEATURE_REVISION_V1);
+      ).toBe(BROKERED_GIT_FEATURE_REVISION_);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -132,7 +132,7 @@ describe('ACORE-GIT hardened broker', () => {
       ['win32', 'windows_restricted_token'],
     ] as const) {
       expect(
-        qualifyBrokeredGitNativeDenyV1({
+        qualifyBrokeredGitNativeDeny({
           ...qualifiedEvidence(),
           platform: platformName,
           backend,
@@ -140,7 +140,7 @@ describe('ACORE-GIT hardened broker', () => {
         }),
       ).toEqual({ outcome: 'excluded', reason: 'metadata_read_deny_unproven' });
       expect(
-        qualifyBrokeredGitNativeDenyV1({
+        qualifyBrokeredGitNativeDeny({
           ...qualifiedEvidence(),
           platform: platformName,
           backend,
@@ -151,15 +151,15 @@ describe('ACORE-GIT hardened broker', () => {
   });
   test('runs a fixed bounded inspect argv under a clean environment and emits bound receipt', async () => {
     const workspace = fixture();
-    const requests: GitProcessRequestV1[] = [];
-    const adapter: GitProcessAdapterV1 = {
+    const requests: GitProcessRequest[] = [];
+    const adapter: GitProcessAdapter = {
       run: async (request) => {
         requests.push(request);
         return { exitCode: 0, stdout: ' M safe.txt\n', stderr: '' };
       },
     };
     try {
-      const result = await createGitBrokerV1({
+      const result = await createGitBroker({
         workspace,
         executable: process.execPath,
         processAdapter: adapter,
@@ -187,7 +187,7 @@ describe('ACORE-GIT hardened broker', () => {
       });
       expect(requests[0]?.env).not.toHaveProperty('PATH');
       expect(result.receipt).toMatchObject({
-        featureRevision: BROKERED_GIT_FEATURE_REVISION_V1,
+        featureRevision: BROKERED_GIT_FEATURE_REVISION_,
         operation: 'status',
         effect: 'git_inspect',
         exitCode: 0,
@@ -203,14 +203,14 @@ describe('ACORE-GIT hardened broker', () => {
   test('hostile config, attributes, protected paths and missing native deny fail before process dispatch', async () => {
     const workspace = fixture();
     let calls = 0;
-    const adapter: GitProcessAdapterV1 = {
+    const adapter: GitProcessAdapter = {
       run: async () => {
         calls++;
         return { exitCode: 0, stdout: '', stderr: '' };
       },
     };
     try {
-      const noEvidence = createGitBrokerV1({
+      const noEvidence = createGitBroker({
         workspace,
         executable: process.execPath,
         processAdapter: adapter,
@@ -219,7 +219,7 @@ describe('ACORE-GIT hardened broker', () => {
       expect(
         (await noEvidence.inspect({ operation: 'status', paths: ['safe.txt'] })).failureCode,
       ).toBe('sandbox_capability_missing');
-      const broker = createGitBrokerV1({
+      const broker = createGitBroker({
         workspace,
         executable: process.execPath,
         processAdapter: adapter,
@@ -252,14 +252,14 @@ describe('ACORE-GIT hardened broker', () => {
     const workspace = realRepository();
     writeFileSync(join(workspace, '.env'), 'changed-protected\n');
     const marker = join(workspace, 'adapter-called');
-    const adapter: GitProcessAdapterV1 = {
+    const adapter: GitProcessAdapter = {
       run: async () => {
         writeFileSync(marker, 'called');
         return { exitCode: 0, stdout: '', stderr: '' };
       },
     };
     try {
-      const broker = createGitBrokerV1({
+      const broker = createGitBroker({
         workspace,
         executable: '/usr/bin/git',
         processAdapter: adapter,
@@ -285,14 +285,14 @@ describe('ACORE-GIT hardened broker', () => {
     writeFileSync(join(workspace, '.git'), `gitdir: ${join(privateRepo, '.git')}\n`);
     writeFileSync(join(workspace, 'safe.txt'), 'safe\n');
     let calls = 0;
-    const adapter: GitProcessAdapterV1 = {
+    const adapter: GitProcessAdapter = {
       run: async () => {
         calls += 1;
         return { exitCode: 0, stdout: 'must-not-read', stderr: '' };
       },
     };
     try {
-      const result = await createGitBrokerV1({
+      const result = await createGitBroker({
         workspace,
         executable: '/usr/bin/git',
         processAdapter: adapter,
@@ -306,7 +306,7 @@ describe('ACORE-GIT hardened broker', () => {
       rmSync(join(workspace, '.git'));
       mkdirSync(join(workspace, '.git'), { recursive: true });
       symlinkSync(join(privateRepo, '.git', 'config'), join(workspace, '.git', 'config'));
-      const symlinked = await createGitBrokerV1({
+      const symlinked = await createGitBroker({
         workspace,
         executable: '/usr/bin/git',
         processAdapter: adapter,
@@ -327,11 +327,11 @@ describe('ACORE-GIT hardened broker', () => {
     rmSync(linked, { recursive: true, force: true });
     try {
       git(primary, 'worktree', 'add', '--quiet', '-b', 'linked-test', linked);
-      const broker = createGitBrokerV1({
+      const broker = createGitBroker({
         workspace: linked,
         authorizedRepositoryRoot: primary,
         executable: '/usr/bin/git',
-        processAdapter: createAppGitProcessAdapterV1(),
+        processAdapter: createAppGitProcessAdapter(),
         protectedPathEvaluator: protectedEvaluator(linked),
         shellDenyEvidence: qualifiedEvidence(),
       });
@@ -355,10 +355,10 @@ describe('ACORE-GIT hardened broker', () => {
       rmSync(join(workspace, 'file-000.txt'));
       execFileSync('/bin/mv', ['file-001.txt', 'renamed-001.txt'], { cwd: workspace });
       git(workspace, 'branch', 'bounded-branch');
-      const broker = createGitBrokerV1({
+      const broker = createGitBroker({
         workspace,
         executable: '/usr/bin/git',
-        processAdapter: createAppGitProcessAdapterV1(),
+        processAdapter: createAppGitProcessAdapter(),
         protectedPathEvaluator: protectedEvaluator(workspace),
         shellDenyEvidence: qualifiedEvidence(),
       });
@@ -378,10 +378,10 @@ describe('ACORE-GIT hardened broker', () => {
     const workspace = realRepository();
     try {
       writeFileSync(join(workspace, 'file-000.txt'), 'v2\n');
-      const broker = createGitBrokerV1({
+      const broker = createGitBroker({
         workspace,
         executable: '/usr/bin/git',
-        processAdapter: createAppGitProcessAdapterV1(),
+        processAdapter: createAppGitProcessAdapter(),
         protectedPathEvaluator: protectedEvaluator(workspace),
         shellDenyEvidence: qualifiedEvidence(),
       });
@@ -392,7 +392,7 @@ describe('ACORE-GIT hardened broker', () => {
         /[a-f0-9]{40}/,
       );
 
-      const unicodeBroker = createGitBrokerV1({
+      const unicodeBroker = createGitBroker({
         workspace,
         executable: '/usr/bin/git',
         processAdapter: { run: async () => ({ exitCode: 0, stdout: '🙂'.repeat(40), stderr: '' }) },
@@ -414,7 +414,7 @@ describe('ACORE-GIT hardened broker', () => {
   test('adapter exceptions are stable and never expose private diagnostic bodies', async () => {
     const workspace = realRepository();
     try {
-      const result = await createGitBrokerV1({
+      const result = await createGitBroker({
         workspace,
         executable: process.execPath,
         processAdapter: {
@@ -438,7 +438,7 @@ describe('ACORE-GIT hardened broker', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-git-adapter-cancel-'));
     const marker = join(workspace, 'late-marker');
     try {
-      const result = await createAppGitProcessAdapterV1().run({
+      const result = await createAppGitProcessAdapter().run({
         executable: '/bin/sh',
         args: ['-c', `(sleep 0.15; printf late > "${marker}") & wait`],
         cwd: workspace,
@@ -464,7 +464,7 @@ describe('ACORE-GIT hardened broker', () => {
         '[core]\n\trepositoryformatversion = 0\n\texcludesFile = /tmp/private-ignore\n',
       );
       let calls = 0;
-      const hostile = createGitBrokerV1({
+      const hostile = createGitBroker({
         workspace,
         executable: '/usr/bin/git',
         processAdapter: {
@@ -488,10 +488,10 @@ describe('ACORE-GIT hardened broker', () => {
       git(workspace, 'mv', '--', '.env', 'safe-renamed.txt');
       git(workspace, 'commit', '--quiet', '-m', 'rename protected');
       writeFileSync(join(workspace, 'safe-renamed.txt'), 'changed public-looking content\n');
-      const broker = createGitBrokerV1({
+      const broker = createGitBroker({
         workspace,
         executable: '/usr/bin/git',
-        processAdapter: createAppGitProcessAdapterV1(),
+        processAdapter: createAppGitProcessAdapter(),
         protectedPathEvaluator: protectedEvaluator(workspace),
         shellDenyEvidence: qualifiedEvidence(),
       });
@@ -508,7 +508,7 @@ describe('ACORE-GIT hardened broker', () => {
     const workspace = realRepository();
     try {
       let calls = 0;
-      const broker = createGitBrokerV1({
+      const broker = createGitBroker({
         workspace,
         executable: '/usr/bin/git',
         processAdapter: {
@@ -528,7 +528,7 @@ describe('ACORE-GIT hardened broker', () => {
       expect(calls).toBe(0);
 
       let spawns = 0;
-      const appPreAborted = await createAppGitProcessAdapterV1({
+      const appPreAborted = await createAppGitProcessAdapter({
         spawn: (() => {
           spawns += 1;
           throw new Error('spawn must not run');
@@ -546,7 +546,7 @@ describe('ACORE-GIT hardened broker', () => {
       expect(appPreAborted).toMatchObject({ cancelled: true, cleanupConfirmed: true });
       expect(spawns).toBe(0);
 
-      const bounded = await createAppGitProcessAdapterV1().run({
+      const bounded = await createAppGitProcessAdapter().run({
         executable: '/bin/sh',
         args: ['-c', "printf '\\342\\202\\254%.0s' $(seq 1 200)"],
         cwd: workspace,
@@ -585,7 +585,7 @@ describe('ACORE-GIT hardened broker', () => {
         if (target.endsWith('/replace')) mkdirSync(external);
         else writeFileSync(external, target.includes('packed-refs') ? '' : '');
         symlinkSync(external, targetPath, target.endsWith('/replace') ? 'dir' : 'file');
-        const broker = createGitBrokerV1({
+        const broker = createGitBroker({
           workspace,
           executable: '/usr/bin/git',
           processAdapter: {
@@ -616,7 +616,7 @@ describe('ACORE-GIT hardened broker', () => {
         join(workspace, '.git', 'packed-refs'),
         `${'a'.repeat(40)} refs/replace/${'b'.repeat(40)}\n`,
       );
-      const broker = createGitBrokerV1({
+      const broker = createGitBroker({
         workspace,
         executable: '/usr/bin/git',
         processAdapter: {

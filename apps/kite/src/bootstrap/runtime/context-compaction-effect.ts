@@ -1,10 +1,10 @@
 import type {
-  BuiltinContextCompactorV1,
+  BuiltinContextCompactor,
   CompactionReporter,
   ContextCompactionProgressPhase,
   ContextProjectionEnvironment,
 } from '@kite/builtin-runtime/model';
-import { executeBuiltinContextCompactionV1 } from '@kite/builtin-runtime/model';
+import { executeBuiltinContextCompaction } from '@kite/builtin-runtime/model';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 type PendingContextCompaction = NonNullable<RuntimeState['context']['pendingCompaction']>;
@@ -32,7 +32,7 @@ export async function executeContextCompaction(input: {
   reporter?: CompactionReporter;
 }): Promise<RuntimeEvent[]> {
   const stateCompactor = input.compact;
-  const compact: BuiltinContextCompactorV1 | undefined = stateCompactor
+  const compact: BuiltinContextCompactor | undefined = stateCompactor
     ? ({ pending, sourceRevision, projectionEnvironment }) =>
         stateCompactor({
           state: input.state,
@@ -41,7 +41,7 @@ export async function executeContextCompaction(input: {
           projectionEnvironment,
         })
     : undefined;
-  const terminals = await executeBuiltinContextCompactionV1({
+  const terminals = await executeBuiltinContextCompaction({
     state: input.state,
     compactionId: input.compactionId,
     compact,

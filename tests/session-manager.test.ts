@@ -6,59 +6,57 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { aiMessage } from '@kite/builtin-runtime/model';
 import {
-  type BuiltinPreparedShellExecutionInputV1,
-  SandboxPreparationArtifactStoreV1,
+  type BuiltinPreparedShellExecutionInput,
+  SandboxPreparationArtifactStore,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  createRuntimeHostStateInitialStateV1,
+  createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
 } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import type {
-  RuntimeSessionCoordinatorAccessV1,
-  RuntimeSessionCoordinatorV1,
+  RuntimeSessionCoordinator,
+  RuntimeSessionCoordinatorAccess,
 } from '../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
+import { loadSession } from '../apps/kite/src/bootstrap/runtime/session-persistence';
 import {
   isSilentCancellationMismatch,
   type SessionDeps,
   SessionManager,
   SessionRuntime,
-} from '../apps/kite/src/bootstrap/runtime/SessionManager';
-import { loadSession } from '../apps/kite/src/bootstrap/runtime/session-persistence';
+} from '../apps/kite/src/runtime/session';
 import type {
-  AppShellExecutorV1,
-  AppShellRuntimeDecisionV1,
+  AppShellExecutor,
+  AppShellRuntimeDecision,
 } from '../apps/kite/src/sandbox/composition';
 import {
-  APP_PREPARED_SHELL_EXECUTION_V1,
-  projectAppHostShellResultV1,
+  APP_PREPARED_SHELL_EXECUTION_,
+  projectAppHostShellResult,
 } from '../apps/kite/src/sandbox/prepared-tool-pipeline';
 import {
   admitInteractionModeTarget,
   fullModeUnavailableReason,
   resolveInteractionModeTarget,
-  sandboxSupportsFullModeV1,
+  sandboxSupportsFullMode,
 } from '../apps/kite/src/tui/interaction-mode';
 import { type TuiAction, TuiUserInputProvider } from '../apps/kite/src/tui/provider';
 import type { Action } from '../apps/kite/src/tui/reducers/actions';
 import type { StatusState } from '../apps/kite/src/tui/types';
-import { createSqliteSessionTokenStatsV1 } from '../packages/runtime-storage-sqlite/src';
-import { restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1 } from '../scripts/support/runtime-host-state';
 import {
-  assertState25Store4CanOpenForTestV1,
-  openStateStoreForTestV1,
-  state25Store4PathForTestV1,
-  stateStorePathForTestV1,
-} from '../scripts/support/runtime-storage';
+  assertSqliteRuntimeStorageCanOpen,
+  createSqliteSessionTokenStats,
+} from '../packages/runtime-storage-sqlite/src';
+import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../scripts/support/runtime-host-state';
+import { openStateStoreForTest, stateStorePathForTest } from '../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from './helpers/current-plan';
 import {
-  runTestRuntimeAgentV1,
-  testBuiltinToolCatalogV1,
-  testModelInvocationRuntimeV1,
-  testProviderDataAdmissionV1,
-  testRuntimeCapabilityExecutionPortV1,
+  runTestRuntimeAgent,
+  testBuiltinToolCatalog,
+  testModelInvocationRuntime,
+  testProviderDataAdmission,
+  testRuntimeCapabilityExecutionPort,
 } from './helpers/runtime-model';
 import { createMockModel } from './mock-model';
 import { createMockModelServer } from './tui-system/harness/fixtures';
@@ -103,8 +101,8 @@ function makeDeps(checkpointPath = ':memory:'): SessionDeps {
     providerName: 'deepseek',
     providerType: 'openai-compatible',
     features: {
-      resourceBudgetV1: true,
-      boundedCancellationV1: true,
+      resourceBudget: true,
+      boundedCancellation: true,
     },
     sandbox: { enabled: true },
   };
@@ -118,7 +116,7 @@ function makeDeps(checkpointPath = ':memory:'): SessionDeps {
     const existing = recoveryIdentities.get(threadId);
     if (existing) return existing;
     if (checkpointPath !== ':memory:') {
-      const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
+      const store = openStateStoreForTest(stateStorePathForTest(checkpointPath));
       try {
         const snapshot = store.loadSnapshot<RuntimeState>(threadId);
         const snapshotIdentity = snapshot?.toolRecovery?.identityKey;
@@ -141,17 +139,17 @@ function makeDeps(checkpointPath = ':memory:'): SessionDeps {
     skillOptions: null,
     mcpManager: null,
     checkpointPath,
-    openStateSessionStorage: () => openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
+    openStateSessionStorage: () => openStateStoreForTest(stateStorePathForTest(checkpointPath)),
     resolveRecoveryIdentity,
     allocateRecoveryIdentity,
-    builtinToolCatalog: testBuiltinToolCatalogV1(),
-    capabilityExecution: testRuntimeCapabilityExecutionPortV1(),
-    tokenStatsStorage: createSqliteSessionTokenStatsV1({
-      databasePath: state25Store4PathForTestV1(checkpointPath),
+    builtinToolCatalog: testBuiltinToolCatalog(),
+    capabilityExecution: testRuntimeCapabilityExecutionPort(),
+    tokenStatsStorage: createSqliteSessionTokenStats({
+      databasePath: stateStorePathForTest(checkpointPath),
       journalMode: 'delete',
-      assertCanOpen: assertState25Store4CanOpenForTestV1,
+      assertCanOpen: assertSqliteRuntimeStorageCanOpen,
     }),
-    modelInvocationRuntimeFactory: testModelInvocationRuntimeV1,
+    modelInvocationRuntimeFactory: testModelInvocationRuntime,
   };
 }
 
@@ -166,7 +164,7 @@ function makeRuntime(threadId = 't1', workspace = '/tmp/ws') {
 function installTestOnlyRuntimeTurnAdapter(
   deps: SessionDeps,
   threadId: string,
-): RuntimeSessionCoordinatorAccessV1 {
+): RuntimeSessionCoordinatorAccess {
   const unavailableState = (): never => {
     throw new Error('test-only State control is unavailable while no turn is active');
   };
@@ -178,7 +176,7 @@ function installTestOnlyRuntimeTurnAdapter(
       processEventBatch: unavailableState,
       cancelRun: () => [],
     },
-    session: {} as RuntimeSessionCoordinatorV1['session'],
+    session: {} as RuntimeSessionCoordinator['session'],
     recoveryChanged: false,
     lifecycle: 'idle' as const,
     getState: unavailableState,
@@ -192,11 +190,11 @@ function installTestOnlyRuntimeTurnAdapter(
     setActiveCancelRun: () => undefined,
     clearActiveCancelRun: () => undefined,
     executeTurn: (input, provider) =>
-      runTestRuntimeAgentV1(
+      runTestRuntimeAgent(
         {
           ...input,
           openStateSessionStorage: deps.openStateSessionStorage,
-          providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmissionV1,
+          providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmission,
         },
         provider,
       ),
@@ -204,7 +202,7 @@ function installTestOnlyRuntimeTurnAdapter(
     executePendingCompaction: unavailableState,
     waitForIdle: async () => undefined,
     close: async () => undefined,
-  } satisfies RuntimeSessionCoordinatorV1;
+  } satisfies RuntimeSessionCoordinator;
   return {
     ensure: () => coordinator,
     get: (sessionId) => (sessionId === threadId ? coordinator : undefined),
@@ -214,14 +212,14 @@ function installTestOnlyRuntimeTurnAdapter(
 }
 
 function createDeferredShellExecutor() {
-  let resolvePreparation!: (decision: AppShellRuntimeDecisionV1) => void;
-  const preparation = new Promise<AppShellRuntimeDecisionV1>((resolve) => {
+  let resolvePreparation!: (decision: AppShellRuntimeDecision) => void;
+  const preparation = new Promise<AppShellRuntimeDecision>((resolve) => {
     resolvePreparation = resolve;
   });
   let prepareCalls = 0;
   let executionCalls = 0;
 
-  const executor = (async (input: Parameters<AppShellExecutorV1>[0]) => {
+  const executor = (async (input: Parameters<AppShellExecutor>[0]) => {
     executionCalls += 1;
     return {
       ok: false,
@@ -230,7 +228,7 @@ function createDeferredShellExecutor() {
       stdout: '',
       stderr: 'unexpected shell execution',
     };
-  }) as AppShellExecutorV1;
+  }) as AppShellExecutor;
   executor.prepare = () => {
     prepareCalls += 1;
     return preparation;
@@ -272,7 +270,7 @@ describe('fullModeUnavailableReason', () => {
   });
 
   test('allows development Full mode with the direct Windows restricted-token backend', () => {
-    expect(sandboxSupportsFullModeV1('windows_restricted_token')).toBe(true);
+    expect(sandboxSupportsFullMode('windows_restricted_token')).toBe(true);
     expect(fullModeUnavailableReason('full', 'windows_restricted_token')).toBeNull();
   });
 
@@ -323,9 +321,9 @@ describe('SessionManager', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-resolved-approval-'));
     const checkpointPath = join(root, 'checkpoints.sqlite');
     const threadId = 'resolved-approval';
-    const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
+    const store = openStateStoreForTest(stateStorePathForTest(checkpointPath));
     try {
-      let state = createRuntimeHostStateInitialStateV1({
+      let state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
@@ -387,7 +385,7 @@ describe('SessionManager', () => {
 
     try {
       const restored = await loadSession(
-        () => openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
+        () => openStateStoreForTest(stateStorePathForTest(checkpointPath)),
         threadId,
         '0'.repeat(64),
       );
@@ -446,12 +444,12 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -498,12 +496,12 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -537,7 +535,7 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
@@ -552,12 +550,12 @@ describe('SessionManager', () => {
     const deps = makeDeps();
     deps.config = {
       ...deps.config,
-      features: { ...deps.config.features, contextCompactionManualV1: true },
+      features: { ...deps.config.features, contextCompactionManual: true },
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
 
-    const result = await mgr.executeHostCompactionV1(threadId);
+    const result = await mgr.executeHostCompaction(threadId);
 
     expect(result).toEqual({
       events: [],
@@ -577,12 +575,12 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
@@ -607,7 +605,7 @@ describe('SessionManager', () => {
           toolCalls: [],
         },
       ];
-      const store = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
+      const store = openStateStoreForTest(stateStorePathForTest(deps.checkpointPath));
       try {
         store.saveSnapshot(threadId, state);
       } finally {
@@ -629,7 +627,7 @@ describe('SessionManager', () => {
     const deps = makeDeps(join(root, 'checkpoints.sqlite'));
     deps.config = {
       ...deps.config,
-      features: { ...deps.config.features, contextCompactionManualV1: true },
+      features: { ...deps.config.features, contextCompactionManual: true },
     };
     const cachedModelRuntime = deps.modelInvocationRuntimeFactory('/tmp/ws');
     deps.modelInvocationRuntimeFactory = () => cachedModelRuntime;
@@ -641,7 +639,7 @@ describe('SessionManager', () => {
     };
     const retainedStore = deps.openStateSessionStorage('retained-manager-test');
     const threadId = 'retained-manager-test';
-    const runtimeState = createRuntimeHostStateInitialStateV1({
+    const runtimeState = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui-user',
@@ -704,7 +702,7 @@ describe('SessionManager', () => {
     const runtimeCoordinator = {
       sessionId: threadId,
       control,
-      session: {} as RuntimeSessionCoordinatorV1['session'],
+      session: {} as RuntimeSessionCoordinator['session'],
       recoveryChanged: false,
       lifecycle: 'idle' as const,
       getState: () => state,
@@ -759,7 +757,7 @@ describe('SessionManager', () => {
       },
       waitForIdle: async () => undefined,
       close: async () => undefined,
-    } satisfies Partial<RuntimeSessionCoordinatorV1> as RuntimeSessionCoordinatorV1;
+    } satisfies Partial<RuntimeSessionCoordinator> as RuntimeSessionCoordinator;
     deps.runtimeSessionCoordinator = {
       ensure: () => {
         ensureCalls += 1;
@@ -776,13 +774,13 @@ describe('SessionManager', () => {
       openStoreCalls = 0;
       expect(mgr.recoverRuntimeState(threadId)).toBe(false);
       expect(ensureCalls).toBe(2);
-      const first = await mgr.executeHostCompactionV1(threadId);
+      const first = await mgr.executeHostCompaction(threadId);
       expect(
         first.events.filter((event) => event.type === 'context.compaction_completed'),
       ).toHaveLength(1);
       expect(executeCalls).toBe(1);
       expect(openStoreCalls).toBe(0);
-      const second = await mgr.executeHostCompactionV1(threadId);
+      const second = await mgr.executeHostCompaction(threadId);
       expect(executeCalls).toBe(1);
       expect(
         second.events.filter((event) => event.type === 'context.compaction_completed'),
@@ -803,7 +801,7 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
@@ -830,18 +828,18 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
 
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const kernel = restoreStateKernelCoordinatorV1({
+      const kernel = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
         workspace: '/tmp/ws',
-        store: openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
+        store: openStateStoreForTest(stateStorePathForTest(checkpointPath)),
         interactionMode: 'accept_edits',
         phase: 'building',
       });
@@ -873,10 +871,10 @@ describe('SessionManager', () => {
       expect(result.failureCode).toBe('runtime_control_unavailable');
       expect(result.isError).toBe(true);
 
-      const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
+      const store = openStateStoreForTest(stateStorePathForTest(checkpointPath));
       try {
         const state =
-          store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(threadId);
+          store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>(threadId);
         expect(state?.context.pendingCompaction?.compactionId).toBe('stuck-manual-request');
       } finally {
         store.close();
@@ -895,12 +893,12 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    let state = createRuntimeHostStateInitialStateV1({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -986,12 +984,12 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -1051,12 +1049,12 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -1122,7 +1120,7 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
     };
 
     try {
@@ -1130,14 +1128,14 @@ describe('SessionManager', () => {
       const threadId = mgr.createSession('/tmp/ws');
       await mgr.handleContextCompaction(threadId, 'focus on auth changes');
 
-      const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
+      const store = openStateStoreForTest(stateStorePathForTest(checkpointPath));
       try {
         const events = store.loadEventsStrict(threadId).map((entry) => entry.event);
         expect(events).not.toContainEqual(
           expect.objectContaining({ type: 'user.command_invoked' }),
         );
         const state =
-          store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(threadId);
+          store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>(threadId);
         expect(state).toBeNull();
       } finally {
         store.close();
@@ -1156,13 +1154,13 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
       compaction: {},
     };
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -1222,13 +1220,13 @@ describe('SessionManager', () => {
       providerName: 'mock',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
       compaction: { maxSummaryTokens: 200, maxNarrativeTokens: 200 },
     };
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
@@ -1242,7 +1240,7 @@ describe('SessionManager', () => {
         createdAt: `2026-08-08T00:0${index}:00.000Z`,
         content: `Historical goal ${index}: ${'important context '.repeat(1_000)}`,
       }));
-      const store = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
+      const store = openStateStoreForTest(stateStorePathForTest(deps.checkpointPath));
       try {
         store.saveSnapshot(threadId, state);
       } finally {
@@ -1255,10 +1253,10 @@ describe('SessionManager', () => {
       expect(result.events).toEqual([]);
       expect(result.failureCode).toBe('runtime_control_unavailable');
       expect(result.isError).toBe(true);
-      const restored = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
+      const restored = openStateStoreForTest(stateStorePathForTest(deps.checkpointPath));
       try {
         expect(
-          restored.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(threadId)
+          restored.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>(threadId)
             ?.context.activeCheckpoint,
         ).toBeUndefined();
       } finally {
@@ -1281,14 +1279,14 @@ describe('SessionManager', () => {
       providerName: 'unapproved-provider',
       providerType: 'openai-compatible',
       sandbox: { enabled: true },
-      features: { contextCompactionManualV1: true },
+      features: { contextCompactionManual: true },
       compaction: { maxSummaryTokens: 200, maxNarrativeTokens: 200 },
     };
 
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
@@ -1302,7 +1300,7 @@ describe('SessionManager', () => {
         createdAt: `2026-08-08T00:0${index}:00.000Z`,
         content: `Historical goal ${index}: ${'important context '.repeat(1_000)}`,
       }));
-      const store = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
+      const store = openStateStoreForTest(stateStorePathForTest(deps.checkpointPath));
       try {
         store.saveSnapshot(threadId, state);
       } finally {
@@ -1315,10 +1313,10 @@ describe('SessionManager', () => {
       expect(result.events).toEqual([]);
       expect(result.failureCode).toBe('runtime_control_unavailable');
       expect(result.isError).toBe(true);
-      const restored = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
+      const restored = openStateStoreForTest(stateStorePathForTest(deps.checkpointPath));
       try {
         expect(
-          restored.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(threadId)
+          restored.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>(threadId)
             ?.context.pendingCompaction,
         ).toBeUndefined();
       } finally {
@@ -1385,16 +1383,16 @@ describe('SessionManager', () => {
     const checkpointPath = join(root, 'checkpoints.sqlite');
     const deps = makeDeps(checkpointPath);
     const mgr = new SessionManager(deps);
-    let kernel: ReturnType<typeof restoreStateKernelCoordinatorV1> | undefined;
+    let kernel: ReturnType<typeof restoreStateKernelCoordinator> | undefined;
     try {
       const threadId = mgr.createSession('/tmp/ws');
       const runtime = mgr.getRuntime(threadId)!;
-      kernel = restoreStateKernelCoordinatorV1({
+      kernel = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
         workspace: '/tmp/ws',
-        store: openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
+        store: openStateStoreForTest(stateStorePathForTest(checkpointPath)),
         phase: 'building',
       });
       runtime.authorizedExecutionControl = {
@@ -1514,12 +1512,12 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(makeDeps(checkpointPath));
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const kernel = restoreStateKernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
       workspace: '/tmp/ws',
-      store: openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
+      store: openStateStoreForTest(stateStorePathForTest(checkpointPath)),
       phase: 'building',
     });
     try {
@@ -1738,10 +1736,10 @@ describe('SessionManager', () => {
     expect(mgr.getSnapshot()).toEqual([]);
   });
 
-  test('getSnapshot does not initialize token stats in an incompatible StateSessionStorageV1', () => {
+  test('getSnapshot does not initialize token stats in an incompatible StateSessionStorage', () => {
     const dir = mkdtempSync(join(process.cwd(), '.kite-stats-incompatible-'));
     const checkpointPath = join(dir, 'checkpoints.sqlite');
-    const storePath = stateStorePathForTestV1(checkpointPath);
+    const storePath = stateStorePathForTest(checkpointPath);
     try {
       const legacy = new Database(storePath);
       legacy.run(
@@ -1771,16 +1769,16 @@ describe('SessionManager', () => {
   test('loadSession rejects a retired event before TUI replay', async () => {
     const dir = mkdtempSync(join(process.cwd(), '.kite-session-retired-tail-'));
     const checkpointPath = join(dir, 'checkpoints.sqlite');
-    const storePath = stateStorePathForTestV1(checkpointPath);
+    const storePath = stateStorePathForTest(checkpointPath);
     const threadId = 'retired-session-tail';
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'u',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
       const database = new Database(storePath);
@@ -1800,7 +1798,7 @@ describe('SessionManager', () => {
 
       await expect(
         loadSession(
-          () => openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
+          () => openStateStoreForTest(stateStorePathForTest(checkpointPath)),
           threadId,
           '0'.repeat(64),
         ),
@@ -1935,7 +1933,7 @@ describe('SessionManager', () => {
     expect(snap.status.cacheHitTokens).toBe(100);
   });
 
-  test('shares one journal mode between the long-lived stats connection and StateSessionStorageV1', () => {
+  test('shares one journal mode between the long-lived stats connection and StateSessionStorage', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-session-journal-'));
     const checkpointPath = join(root, 'checkpoints.sqlite');
     const mgr = new SessionManager(makeDeps(checkpointPath));
@@ -1946,7 +1944,7 @@ describe('SessionManager', () => {
         true,
       );
 
-      const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
+      const store = openStateStoreForTest(stateStorePathForTest(checkpointPath));
       store.appendEvents('dual-connection', []);
       store.close();
     } finally {
@@ -2071,12 +2069,12 @@ describe('SessionRuntime', () => {
 
   test('persists an interaction-mode change to a live Kernel control', () => {
     const rt = makeRuntime();
-    const kernel = restoreStateKernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: rt.threadId,
       userId: 'tui',
       workspace: rt.workspace,
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       sandboxAvailable: true,
     });
     try {
@@ -2142,12 +2140,12 @@ describe('SessionRuntime', () => {
 
   test('rejects a live Full mode change without a Full-qualified sandbox', () => {
     const rt = makeRuntime();
-    const kernel = restoreStateKernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: rt.threadId,
       userId: 'tui',
       workspace: rt.workspace,
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       sandboxAvailable: false,
     });
     try {
@@ -2249,7 +2247,7 @@ describe('SessionRuntime', () => {
     'request_plan_review',
   ] as const)('binds a raw UI cancel to the active %s interaction id', async (effectType) => {
     const rt = makeRuntime();
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2312,7 +2310,7 @@ describe('SessionRuntime', () => {
 
   test('maps the verification decision prompt to an explicit user waiver', async () => {
     const rt = makeRuntime();
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2366,7 +2364,7 @@ describe('SessionRuntime', () => {
         providerStatus: 'ready',
       }),
     };
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2404,7 +2402,7 @@ describe('SessionRuntime', () => {
         };
       },
     };
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2512,17 +2510,17 @@ describe('SessionRuntime', () => {
 
   test('abort during sandbox preparation cancels the executor preflight', async () => {
     let rejectPreparation!: (error: Error) => void;
-    const preparation = new Promise<AppShellRuntimeDecisionV1>((_resolve, reject) => {
+    const preparation = new Promise<AppShellRuntimeDecision>((_resolve, reject) => {
       rejectPreparation = reject;
     });
     let abortPreparationCalls = 0;
-    const executor = (async (input: Parameters<AppShellExecutorV1>[0]) => ({
+    const executor = (async (input: Parameters<AppShellExecutor>[0]) => ({
       ok: false,
       command: input.command,
       exitCode: -1,
       stdout: '',
       stderr: 'unexpected shell execution',
-    })) as AppShellExecutorV1;
+    })) as AppShellExecutor;
     executor.prepare = () => preparation;
     executor.abortPreparation = () => {
       abortPreparationCalls += 1;
@@ -2568,7 +2566,7 @@ describe('SessionRuntime', () => {
   test('abort persists and projects cancellation facts before signalling the controller', () => {
     const rt = makeRuntime();
     const ac = new AbortController();
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: rt.threadId,
       userId: 'tui',
@@ -2666,7 +2664,7 @@ describe('SessionRuntime', () => {
     const shellStarted = new Promise<void>((resolve) => {
       reportShellStarted = resolve;
     });
-    const shellExecutor = (async (input: Parameters<AppShellExecutorV1>[0]) => {
+    const shellExecutor = (async (input: Parameters<AppShellExecutor>[0]) => {
       reportShellStarted();
       await new Promise<void>((resolve) => {
         const finish = () => resolve();
@@ -2680,14 +2678,14 @@ describe('SessionRuntime', () => {
         stdout: '',
         stderr: 'cancelled',
       };
-    }) as AppShellExecutorV1;
-    Object.defineProperty(shellExecutor, APP_PREPARED_SHELL_EXECUTION_V1, {
+    }) as AppShellExecutor;
+    Object.defineProperty(shellExecutor, APP_PREPARED_SHELL_EXECUTION_, {
       configurable: false,
       enumerable: false,
       writable: false,
       value: Object.freeze({
-        execute: async (input: BuiltinPreparedShellExecutionInputV1) =>
-          projectAppHostShellResultV1(
+        execute: async (input: BuiltinPreparedShellExecutionInput) =>
+          projectAppHostShellResult(
             await shellExecutor({
               workspace: input.workspace,
               command: input.command,
@@ -2720,8 +2718,8 @@ describe('SessionRuntime', () => {
       provider: new TuiUserInputProvider(),
       shellExecutor,
       modelInvocationRuntimeFactory: (runtimeWorkspace) => ({
-        ...testModelInvocationRuntimeV1(runtimeWorkspace),
-        sandboxPreparationArtifacts: new SandboxPreparationArtifactStoreV1({
+        ...testModelInvocationRuntime(runtimeWorkspace),
+        sandboxPreparationArtifacts: new SandboxPreparationArtifactStore({
           root: join(runtimeWorkspace, '.kite-test', 'sandbox-preparations'),
         }),
       }),

@@ -1,52 +1,49 @@
 import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
-import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
+import type { CapabilityTurnContext } from '@kite/runtime-spi';
 import { dynamicTool, jsonSchema, type ToolSet } from 'ai';
-import { digestCapabilityBindingValueV1 } from '../capability-binding';
-import type { ExecutionCapabilitySurfaceV1 } from '../sandbox';
-import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '../sandbox';
-import type {
-  BuiltinModelToolCatalogEntryV1,
-  BuiltinToolCatalogProjectionV1,
-} from '../tool-catalog';
+import { digestCapabilityBindingValue } from '../capability-binding';
+import type { ExecutionCapabilitySurface } from '../sandbox';
+import { isDescriptorAdmittedByExecutionCapabilitySurface } from '../sandbox';
+import type { BuiltinModelToolCatalogEntry, BuiltinToolCatalogProjection } from '../tool-catalog';
 
-export interface BuiltinSubagentDynamicMcpBindingV1 {
+export interface BuiltinSubagentDynamicMcpBinding {
   readonly binding: CapabilityBinding;
   readonly descriptor: CapabilityDescriptor;
 }
 
-export interface BuiltinSubagentToolSurfaceInputV1 {
-  readonly catalog: BuiltinToolCatalogProjectionV1;
-  readonly turnContext: CapabilityTurnContextV1;
-  readonly executionCapabilitySurface?: ExecutionCapabilitySurfaceV1;
+export interface BuiltinSubagentToolSurfaceInput {
+  readonly catalog: BuiltinToolCatalogProjection;
+  readonly turnContext: CapabilityTurnContext;
+  readonly executionCapabilitySurface?: ExecutionCapabilitySurface;
   readonly allowedTools?: ReadonlySet<string>;
   readonly canSpawnSubagents: boolean;
-  readonly dynamicMcpBindings?: readonly BuiltinSubagentDynamicMcpBindingV1[];
+  readonly dynamicMcpBindings?: readonly BuiltinSubagentDynamicMcpBinding[];
 }
 
-export interface BuiltinSubagentToolSurfaceV1 {
+export interface BuiltinSubagentToolSurface {
   /** Turn projection derived from the App-owned frozen registry snapshot. */
-  readonly projection: BuiltinToolCatalogProjectionV1;
+  readonly projection: BuiltinToolCatalogProjection;
   /** Schema-only Builtin surface plus the independent dynamic MCP overlay. */
   readonly tools: ToolSet;
-  readonly builtinEntries: readonly BuiltinModelToolCatalogEntryV1[];
+  readonly builtinEntries: readonly BuiltinModelToolCatalogEntry[];
 }
 
-export interface BuiltinModelToolSurfaceFromProjectionInputV1 {
-  readonly projection: BuiltinToolCatalogProjectionV1;
-  readonly turnContext: CapabilityTurnContextV1;
-  readonly executionCapabilitySurface?: ExecutionCapabilitySurfaceV1;
+export interface BuiltinModelToolSurfaceFromProjectionInput {
+  readonly projection: BuiltinToolCatalogProjection;
+  readonly turnContext: CapabilityTurnContext;
+  readonly executionCapabilitySurface?: ExecutionCapabilitySurface;
   readonly allowedTools?: ReadonlySet<string>;
   readonly canSpawnSubagents?: boolean;
   readonly exposeInterrupts?: boolean;
-  readonly dynamicMcpBindings?: readonly BuiltinSubagentDynamicMcpBindingV1[];
+  readonly dynamicMcpBindings?: readonly BuiltinSubagentDynamicMcpBinding[];
 }
 
 /** Compose one schema-only model surface from an already frozen turn projection. */
-export function createBuiltinModelToolSurfaceFromProjectionV1(
-  input: BuiltinModelToolSurfaceFromProjectionInputV1,
-): BuiltinSubagentToolSurfaceV1 {
+export function createBuiltinModelToolSurfaceFromProjection(
+  input: BuiltinModelToolSurfaceFromProjectionInput,
+): BuiltinSubagentToolSurface {
   const builtinEntries = input.projection.entries.filter(
-    (entry): entry is BuiltinModelToolCatalogEntryV1 =>
+    (entry): entry is BuiltinModelToolCatalogEntry =>
       entry.visibility === 'model' &&
       entry.availability === 'available' &&
       (input.exposeInterrupts !== false ||
@@ -54,7 +51,7 @@ export function createBuiltinModelToolSurfaceFromProjectionV1(
       (input.canSpawnSubagents !== false || entry.executionMechanism !== 'subagent') &&
       (!input.allowedTools || input.allowedTools.has(entry.name)) &&
       (!input.executionCapabilitySurface ||
-        isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
+        isDescriptorAdmittedByExecutionCapabilitySurface({
           surface: input.executionCapabilitySurface,
           descriptor: entry.descriptor,
         })),
@@ -72,9 +69,9 @@ export function createBuiltinModelToolSurfaceFromProjectionV1(
       !descriptor.inputSchema ||
       binding.capabilityId !== descriptor.capabilityId ||
       binding.capabilityRevision !== descriptor.revision ||
-      binding.schemaDigest !== digestCapabilityBindingValueV1(descriptor.inputSchema) ||
+      binding.schemaDigest !== digestCapabilityBindingValue(descriptor.inputSchema) ||
       (input.executionCapabilitySurface &&
-        !isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
+        !isDescriptorAdmittedByExecutionCapabilitySurface({
           surface: input.executionCapabilitySurface,
           descriptor,
         }))
@@ -82,11 +79,11 @@ export function createBuiltinModelToolSurfaceFromProjectionV1(
       continue;
     }
     dynamicMcpTools[binding.exposedToolName] = dynamicTool({
-      description: input.turnContext.promptContractV2
+      description: input.turnContext.promptContract
         ? (descriptor.modelDescription ?? `MCP capability ${descriptor.displayName}.`)
         : 'Runtime-bound MCP capability. The Runtime validates its current revision, arguments, policy, approval, execution receipt, and verification before use.',
       inputSchema: jsonSchema(
-        modelVisibleDynamicMcpSchemaV1(descriptor.inputSchema) as Parameters<typeof jsonSchema>[0],
+        modelVisibleDynamicMcpSchema(descriptor.inputSchema) as Parameters<typeof jsonSchema>[0],
       ),
     });
   }
@@ -101,11 +98,11 @@ export function createBuiltinModelToolSurfaceFromProjectionV1(
  * Project the child model surface from one Builtin snapshot. Dynamic MCP stays
  * an independent overlay and never changes the Builtin catalog revision.
  */
-export function createBuiltinSubagentToolSurfaceV1(
-  input: BuiltinSubagentToolSurfaceInputV1,
-): BuiltinSubagentToolSurfaceV1 {
+export function createBuiltinSubagentToolSurface(
+  input: BuiltinSubagentToolSurfaceInput,
+): BuiltinSubagentToolSurface {
   const projection = input.catalog.forTurn(input.turnContext);
-  return createBuiltinModelToolSurfaceFromProjectionV1({
+  return createBuiltinModelToolSurfaceFromProjection({
     projection,
     turnContext: input.turnContext,
     executionCapabilitySurface: input.executionCapabilitySurface,
@@ -116,7 +113,7 @@ export function createBuiltinSubagentToolSurfaceV1(
   });
 }
 
-const MODEL_HIDDEN_SCHEMA_ANNOTATIONS_V1 = new Set([
+const MODEL_HIDDEN_SCHEMA_ANNOTATIONS_ = new Set([
   'description',
   'title',
   '$comment',
@@ -125,12 +122,12 @@ const MODEL_HIDDEN_SCHEMA_ANNOTATIONS_V1 = new Set([
 ]);
 
 /** Remove untrusted MCP prose without changing the admitted schema structure. */
-function modelVisibleDynamicMcpSchemaV1(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(modelVisibleDynamicMcpSchemaV1);
+function modelVisibleDynamicMcpSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(modelVisibleDynamicMcpSchema);
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => !MODEL_HIDDEN_SCHEMA_ANNOTATIONS_V1.has(key))
-      .map(([key, item]) => [key, modelVisibleDynamicMcpSchemaV1(item)]),
+      .filter(([key]) => !MODEL_HIDDEN_SCHEMA_ANNOTATIONS_.has(key))
+      .map(([key, item]) => [key, modelVisibleDynamicMcpSchema(item)]),
   );
 }

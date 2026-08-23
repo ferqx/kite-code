@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { failClosedBuiltinToolCapabilityV1 as failClosedToolCapabilityV1 } from '@kite/builtin-runtime';
-import { testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
+import { failClosedBuiltinToolCapability as failClosedToolCapability } from '@kite/builtin-runtime';
+import { testBuiltinToolCatalog } from '../helpers/runtime-model';
 
 function entry(name: string) {
-  const found = testBuiltinToolCatalogV1().entries.find((candidate) => candidate.name === name);
+  const found = testBuiltinToolCatalog().entries.find((candidate) => candidate.name === name);
   if (!found) throw new Error(`Missing Builtin catalog entry for ${name}.`);
   return found;
 }
@@ -49,7 +49,7 @@ describe('Builtin-owned tool capability classification', () => {
   });
 
   test('missing captured effects remain generic and fail closed', () => {
-    expect(failClosedToolCapabilityV1('unknown_tool')).toEqual({
+    expect(failClosedToolCapability('unknown_tool')).toEqual({
       effectClass: 'unknown',
       sideEffect: true,
       classificationReason: 'No captured capability classification exists for unknown_tool.',

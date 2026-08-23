@@ -90,7 +90,7 @@
       "schemaVersion": 1,
       "inputIdentity": "kite.default-configuration.v1",
       "canonicalInput": {
-        "features": { "productionRelease": false, "networkBoundaryV1": false },
+        "features": { "productionRelease": false, "networkBoundary": false },
         "budgets": { "maxTurns": 30, "maxToolInvocations": 250 },
         "permissions": { "filesystem": "workspace", "network": "off" },
         "config": { "approvalMode": "default" }

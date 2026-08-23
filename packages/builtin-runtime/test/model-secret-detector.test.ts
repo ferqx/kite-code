@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { createModelSecretDetectorV1 } from '../src/model';
+import { createModelSecretDetector } from '../src/model';
 
-const inspect = createModelSecretDetectorV1({
+const inspect = createModelSecretDetector({
   knownSecrets: ['KNOWN_SECRET_MARKER'],
   environment: {
     ORDINARY_SETTING: 'not-secret-by-name',
@@ -9,7 +9,7 @@ const inspect = createModelSecretDetectorV1({
   },
 });
 
-describe('createModelSecretDetectorV1 legacy differential corpus', () => {
+describe('createModelSecretDetector legacy differential corpus', () => {
   test.each([
     ['ordinary content', 'clear'],
     ['contains KNOWN_SECRET_MARKER', 'secret'],
@@ -31,7 +31,7 @@ describe('createModelSecretDetectorV1 legacy differential corpus', () => {
     expect(inspect({ text: 'not-secret-by-name', provenance: 'user_message' }).verdict).toBe(
       'clear',
     );
-    const bounded = createModelSecretDetectorV1({ environment: {}, maxInspectionChars: 4 });
+    const bounded = createModelSecretDetector({ environment: {}, maxInspectionChars: 4 });
     expect(bounded({ text: '1234', provenance: 'user_message' }).verdict).toBe('clear');
     expect(bounded({ text: '12345', provenance: 'user_message' })).toEqual({
       schemaVersion: 1,

@@ -2,95 +2,95 @@ import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import {
   type AgentState,
-  admitRecoveryAttemptV1 as admitPackageRecoveryAttemptV1,
-  admitRecoveryAttemptV1 as admitRootRecoveryAttemptV1,
-  advanceToolRecoveryResponseV1 as advancePackageToolRecoveryResponseV1,
-  advanceToolRecoveryResponseV1 as advanceRootToolRecoveryResponseV1,
+  admitRecoveryAttempt as admitPackageRecoveryAttempt,
+  admitRecoveryAttempt as admitRootRecoveryAttempt,
+  advanceToolRecoveryResponse as advancePackageToolRecoveryResponse,
+  advanceToolRecoveryResponse as advanceRootToolRecoveryResponse,
   assertCurrentRuntimeEvent as assertPackageEvent,
   assertCurrentRuntimeEvent as assertRootEvent,
   CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS,
   CURRENT_RUNTIME_EVENT_TYPE_COUNT,
-  classifyToolOutcomeV1 as classifyPackageToolOutcomeV1,
-  classifyToolOutcomeV1 as classifyRootToolOutcomeV1,
-  closeToolRecoveryScopeV1 as closePackageToolRecoveryScopeV1,
-  closeToolRecoveryScopeV1 as closeRootToolRecoveryScopeV1,
+  classifyToolOutcome as classifyPackageToolOutcome,
+  classifyToolOutcome as classifyRootToolOutcome,
+  closeToolRecoveryScope as closePackageToolRecoveryScope,
+  closeToolRecoveryScope as closeRootToolRecoveryScope,
   createInitialAgentState,
-  createToolRecoveryJournalV1 as createPackageToolRecoveryJournalV1,
-  createToolRecoveryJournalV1 as createRootToolRecoveryJournalV1,
-  decideCompletionV1,
-  decideCompletionV2,
+  createToolRecoveryJournal as createPackageToolRecoveryJournal,
+  createToolRecoveryJournal as createRootToolRecoveryJournal,
   decideCompletion as decidePackageCompletion,
   decideNextEffect as decidePackageEffect,
+  decidePlannedCompletion,
+  decideUnplannedCompletion,
   decodeCurrentRuntimeEventJson as decodePackageEvent,
   decodeCurrentRuntimeEventJson as decodeRootEvent,
   encodeCurrentAgentStateJson,
   encodeCurrentRuntimeEventJson as encodePackageEvent,
-  hasActiveUnresolvedToolFailuresV1 as hasActivePackageUnresolvedToolFailuresV1,
-  hasActiveUnresolvedToolFailuresV1 as hasActiveRootUnresolvedToolFailuresV1,
-  hasUnresolvedToolFailuresV1 as hasPackageUnresolvedToolFailuresV1,
-  hasUnresolvedToolFailuresV1 as hasRootUnresolvedToolFailuresV1,
-  isToolOutcomeV1 as isPackageToolOutcomeV1,
-  isToolOutcomeV1 as isRootToolOutcomeV1,
-  isToolRecoveryJournalInvalidV1,
-  isToolRecoveryResolutionV1,
-  isValidSchedulerFactsV1,
+  hasActiveUnresolvedToolFailures as hasActivePackageUnresolvedToolFailures,
+  hasActiveUnresolvedToolFailures as hasActiveRootUnresolvedToolFailures,
+  hasUnresolvedToolFailures as hasPackageUnresolvedToolFailures,
+  hasUnresolvedToolFailures as hasRootUnresolvedToolFailures,
+  isToolOutcome as isPackageToolOutcome,
+  isToolOutcome as isRootToolOutcome,
+  isToolRecoveryJournalInvalid,
+  isToolRecoveryResolution,
+  isValidSchedulerFacts,
   type KernelEvent,
-  mergeToolRecoveryJournalsV1 as mergePackageToolRecoveryJournalsV1,
-  mergeToolRecoveryJournalsV1 as mergeRootToolRecoveryJournalsV1,
+  mergeToolRecoveryJournals as mergePackageToolRecoveryJournals,
+  mergeToolRecoveryJournals as mergeRootToolRecoveryJournals,
   normalizeAgentEvent,
   normalizeAgentToolOutcomeEvent,
-  normalizeToolRecoveryJournalV1 as normalizePackageToolRecoveryJournalV1,
-  normalizeToolRecoveryJournalV1 as normalizeRootToolRecoveryJournalV1,
-  type ToolRecoveryJournalV1 as PackageToolRecoveryJournalV1,
-  toolFailureInstanceIdV1 as packageToolFailureInstanceIdV1,
-  toolInvocationFingerprintV1 as packageToolInvocationFingerprintV1,
-  toolOutcomeMetricStatusV1 as packageToolOutcomeMetricStatusV1,
-  toolOutcomeProtocolStatusV1 as packageToolOutcomeProtocolStatusV1,
-  toolOutcomeSucceededV1 as packageToolOutcomeSucceededV1,
-  trustedToolTimingV1 as packageTrustedToolTimingV1,
-  type ToolOutcomeV1 as RootToolOutcomeV1,
-  type ToolRecoveryJournalV1 as RootToolRecoveryJournalV1,
+  normalizeToolRecoveryJournal as normalizePackageToolRecoveryJournal,
+  normalizeToolRecoveryJournal as normalizeRootToolRecoveryJournal,
+  type ToolRecoveryJournal as PackageToolRecoveryJournal,
+  toolFailureInstanceId as packageToolFailureInstanceId,
+  toolInvocationFingerprint as packageToolInvocationFingerprint,
+  toolOutcomeMetricStatus as packageToolOutcomeMetricStatus,
+  toolOutcomeProtocolStatus as packageToolOutcomeProtocolStatus,
+  toolOutcomeSucceeded as packageToolOutcomeSucceeded,
+  trustedToolTiming as packageTrustedToolTiming,
+  type ToolOutcome as RootToolOutcome,
+  type ToolRecoveryJournal as RootToolRecoveryJournal,
   type RuntimeEventType,
-  recordRecoveryFailureV1 as recordPackageRecoveryFailureV1,
-  recordRecoveryInvocationV1 as recordPackageRecoveryInvocationV1,
-  recordToolOwnedProgressV1 as recordPackageToolOwnedProgressV1,
-  recordRecoveryFailureV1 as recordRootRecoveryFailureV1,
-  recordRecoveryInvocationV1 as recordRootRecoveryInvocationV1,
-  recordToolOwnedProgressV1 as recordRootToolOwnedProgressV1,
+  recordRecoveryFailure as recordPackageRecoveryFailure,
+  recordRecoveryInvocation as recordPackageRecoveryInvocation,
+  recordToolOwnedProgress as recordPackageToolOwnedProgress,
+  recordRecoveryFailure as recordRootRecoveryFailure,
+  recordRecoveryInvocation as recordRootRecoveryInvocation,
+  recordToolOwnedProgress as recordRootToolOwnedProgress,
   reduceAgentState,
-  toolFailureInstanceIdV1 as rootToolFailureInstanceIdV1,
-  toolInvocationFingerprintV1 as rootToolInvocationFingerprintV1,
-  toolOutcomeMetricStatusV1 as rootToolOutcomeMetricStatusV1,
-  toolOutcomeProtocolStatusV1 as rootToolOutcomeProtocolStatusV1,
-  toolOutcomeSucceededV1 as rootToolOutcomeSucceededV1,
-  trustedToolTimingV1 as rootTrustedToolTimingV1,
-  type SchedulerFactsV1,
-  STATE26_DIAGNOSTIC_EVENT_TYPES,
-  STATE26_EVENT_REDUCER_COVERAGE,
-  STATE26_LEGACY_DEFAULT_EVENT_TYPES,
-  verificationSchemaAdmissionDigestV1,
+  toolFailureInstanceId as rootToolFailureInstanceId,
+  toolInvocationFingerprint as rootToolInvocationFingerprint,
+  toolOutcomeMetricStatus as rootToolOutcomeMetricStatus,
+  toolOutcomeProtocolStatus as rootToolOutcomeProtocolStatus,
+  toolOutcomeSucceeded as rootToolOutcomeSucceeded,
+  trustedToolTiming as rootTrustedToolTiming,
+  type SchedulerFacts,
+  STATE_DEFAULT_EVENT_TYPES,
+  STATE_DIAGNOSTIC_EVENT_TYPES,
+  STATE_EVENT_REDUCER_COVERAGE,
+  verificationSchemaAdmissionDigest,
 } from '@kite/agent-kernel';
-import { compileCapabilitySchemaV1 } from '@kite/builtin-runtime';
+import { compileCapabilitySchema } from '@kite/builtin-runtime';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type { PlanDocument } from '@kite/runtime-contract';
 import {
-  createDeterministicRuntimeIdSourceV1,
-  createRuntimeHostStateInitialStateV1,
-  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createDeterministicRuntimeIdSource,
+  createRuntimeHostStateInitialState,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
 } from '@kite/runtime-host';
 import type { VerificationCheck } from '@kite/runtime-spi';
-import { SQLITE_RUNTIME_STORE5_SCHEMA_VERSION } from '@kite/runtime-storage-sqlite';
+import { SQLITE_RUNTIME_STORE_SCHEMA_VERSION } from '@kite/runtime-storage-sqlite';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { normalizeTerminalRuntimeEventV1 } from '#app/bootstrap/runtime/terminal-outcome';
+import { normalizeTerminalRuntimeEvent } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const OCCURRED_AT = '2026-08-20T00:00:00.000Z';
 
-const STATE26_EPOCH = 'kite-runtime-modularization-v1-2026-08-19';
+const STATE_EPOCH = 'kite-runtime-modularization-v1-2026-08-19';
 
 const FAILURE_KINDS = [
   'model_invalid_tool_args',
@@ -370,7 +370,7 @@ function fixtureValue(field: string): unknown {
   if (
     field === 'failure' ||
     field === 'result' ||
-    field === 'outcomeV1' ||
+    field === 'outcome' ||
     field === 'approval' ||
     field === 'grant' ||
     field === 'plan' ||
@@ -414,13 +414,13 @@ function materializeEvent(type: RuntimeEventType): Record<string, unknown> {
 }
 
 function rootState(): RuntimeState {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'session-1',
     userId: 'user-1',
     workspace: '/workspace',
     interactionMode: 'accept_edits',
-    runtimeIdSource: createDeterministicRuntimeIdSourceV1({
+    runtimeIdSource: createDeterministicRuntimeIdSource({
       seed: 'parity',
       epochMs: Date.parse(OCCURRED_AT),
     }),
@@ -585,16 +585,14 @@ function toolFailureEvent(kind: string): Record<string, unknown> {
 
 function canonicalOutcomeValue(value: unknown): unknown {
   if (!isRecord(value)) return value;
-  return value.outcomeV1;
+  return value.outcome;
 }
 
 function rootToolOutcome(kind: string): Probe<unknown> {
   return probe(() => {
     const event = toolFailureEvent(kind);
     assertRootEvent(event);
-    return canonicalOutcomeValue(
-      normalizeCurrentToolOutcomeEventV1(event, rootState(), OCCURRED_AT),
-    );
+    return canonicalOutcomeValue(normalizeCurrentToolOutcomeEvent(event, rootState(), OCCURRED_AT));
   });
 }
 
@@ -738,8 +736,8 @@ function reduceDifferentialSequence(
     const rootResult = probe(() =>
       reduceRuntimeState(
         root,
-        normalizeCurrentToolOutcomeEventV1(
-          normalizeTerminalRuntimeEventV1(event as never),
+        normalizeCurrentToolOutcomeEvent(
+          normalizeTerminalRuntimeEvent(event as never),
           root,
           occurredAt,
         ),
@@ -1126,7 +1124,7 @@ function lifecycleAndAuthorizationSequence(): readonly DifferentialEvent[] {
       toolCallId: 'shell-rejected',
       reason: 'fixture approval rejection',
       createdAt: '2026-08-20T00:00:01.500Z',
-      outcomeV1: DIFFERENTIAL_APPROVAL_REJECTED_OUTCOME,
+      outcome: DIFFERENTIAL_APPROVAL_REJECTED_OUTCOME,
     },
     {
       type: 'tool.queued',
@@ -1188,7 +1186,7 @@ function lifecycleAndAuthorizationSequence(): readonly DifferentialEvent[] {
         durationMs: 75,
       },
       createdAt: '2026-08-20T00:00:03.000Z',
-      outcomeV1: DIFFERENTIAL_AUTO_REVIEW_REJECTED_OUTCOME,
+      outcome: DIFFERENTIAL_AUTO_REVIEW_REJECTED_OUTCOME,
     },
     { type: 'turn.started', turnId: 'parity-turn-0002' },
     { type: 'task.completed', taskId: 'task-parity', turnId: 'parity-turn-0002' },
@@ -1546,14 +1544,14 @@ function capabilitySequence(): readonly DifferentialEvent[] {
   ];
 }
 
-type RecoveryFailureInput = Parameters<typeof recordRootRecoveryFailureV1>[1];
-type RecoveryAdmissionInput = Parameters<typeof admitRootRecoveryAttemptV1>[1];
-type RecoveryInvocationInput = Parameters<typeof recordRootRecoveryInvocationV1>[1];
-type RecoveryProgressInput = Parameters<typeof recordRootToolOwnedProgressV1>[1];
-type RecoveryCloseInput = Parameters<typeof closeRootToolRecoveryScopeV1>[1];
-type RecoveryMergeScope = Parameters<typeof mergeRootToolRecoveryJournalsV1>[3];
-type RecoveryFingerprintInput = Parameters<typeof rootToolInvocationFingerprintV1>[0];
-type RecoveryAdvanceInput = Parameters<typeof advanceRootToolRecoveryResponseV1>[1];
+type RecoveryFailureInput = Parameters<typeof recordRootRecoveryFailure>[1];
+type RecoveryAdmissionInput = Parameters<typeof admitRootRecoveryAttempt>[1];
+type RecoveryInvocationInput = Parameters<typeof recordRootRecoveryInvocation>[1];
+type RecoveryProgressInput = Parameters<typeof recordRootToolOwnedProgress>[1];
+type RecoveryCloseInput = Parameters<typeof closeRootToolRecoveryScope>[1];
+type RecoveryMergeScope = Parameters<typeof mergeRootToolRecoveryJournals>[3];
+type RecoveryFingerprintInput = Parameters<typeof rootToolInvocationFingerprint>[0];
+type RecoveryAdvanceInput = Parameters<typeof advanceRootToolRecoveryResponse>[1];
 
 type RecoveryJournalApi<Journal> = {
   readonly create: (identityKey: string) => Journal;
@@ -1599,7 +1597,7 @@ function runRecoveryJournalCorpus<Journal>(
     modelMessageId: 'recovery-model-1',
     taskId: 'recovery-task-1',
     turnId: 'recovery-turn-1',
-    outcome: JOURNAL_FAILURE_OUTCOME as RootToolOutcomeV1,
+    outcome: JOURNAL_FAILURE_OUTCOME as RootToolOutcome,
   });
   journals.push(first);
   const firstId = api.order(first)[0]!;
@@ -1646,7 +1644,7 @@ function runRecoveryJournalCorpus<Journal>(
     outcome: {
       ...JOURNAL_FAILURE_OUTCOME,
       lineage: { recoveryOf: firstId },
-    } as RootToolOutcomeV1,
+    } as RootToolOutcome,
   });
   journals.push(second);
   const secondId = api.order(second).find((id) => id !== firstId)!;
@@ -1676,7 +1674,7 @@ function runRecoveryJournalCorpus<Journal>(
     modelMessageId: 'recovery-child-model-1',
     taskId: 'recovery-child-task',
     turnId: 'recovery-child-turn',
-    outcome: JOURNAL_REJECTED_OUTCOME as RootToolOutcomeV1,
+    outcome: JOURNAL_REJECTED_OUTCOME as RootToolOutcome,
   });
   const merged = api.merge(closed, child, {
     taskId: 'recovery-task-1',
@@ -1696,53 +1694,53 @@ function runRecoveryJournalCorpus<Journal>(
   };
 }
 
-const ROOT_RECOVERY_JOURNAL_API: RecoveryJournalApi<RootToolRecoveryJournalV1> = {
-  create: (identityKey) => createRootToolRecoveryJournalV1(identityKey),
-  fingerprint: (input) => rootToolInvocationFingerprintV1(input),
-  recordFailure: (journal, input) => recordRootRecoveryFailureV1(journal, input),
-  advance: (journal, input) => advanceRootToolRecoveryResponseV1(journal, input),
-  admit: (journal, input) => admitRootRecoveryAttemptV1(journal, input),
-  recordInvocation: (journal, input) => recordRootRecoveryInvocationV1(journal, input),
-  recordProgress: (journal, input) => recordRootToolOwnedProgressV1(journal, input),
-  close: (journal, input) => closeRootToolRecoveryScopeV1(journal, input),
+const ROOT_RECOVERY_JOURNAL_API: RecoveryJournalApi<RootToolRecoveryJournal> = {
+  create: (identityKey) => createRootToolRecoveryJournal(identityKey),
+  fingerprint: (input) => rootToolInvocationFingerprint(input),
+  recordFailure: (journal, input) => recordRootRecoveryFailure(journal, input),
+  advance: (journal, input) => advanceRootToolRecoveryResponse(journal, input),
+  admit: (journal, input) => admitRootRecoveryAttempt(journal, input),
+  recordInvocation: (journal, input) => recordRootRecoveryInvocation(journal, input),
+  recordProgress: (journal, input) => recordRootToolOwnedProgress(journal, input),
+  close: (journal, input) => closeRootToolRecoveryScope(journal, input),
   merge: (parent, child, scope) =>
-    mergeRootToolRecoveryJournalsV1(parent, child, IDENTITY_KEY, scope),
-  normalize: (journal) => normalizeRootToolRecoveryJournalV1(journal, IDENTITY_KEY),
+    mergeRootToolRecoveryJournals(parent, child, IDENTITY_KEY, scope),
+  normalize: (journal) => normalizeRootToolRecoveryJournal(journal, IDENTITY_KEY),
   order: (journal) => journal.order,
-  hasUnresolved: (journal) => hasRootUnresolvedToolFailuresV1(journal),
-  hasActive: (journal, scope) => hasActiveRootUnresolvedToolFailuresV1(journal, scope),
+  hasUnresolved: (journal) => hasRootUnresolvedToolFailures(journal),
+  hasActive: (journal, scope) => hasActiveRootUnresolvedToolFailures(journal, scope),
 };
 
-const PACKAGE_RECOVERY_JOURNAL_API: RecoveryJournalApi<PackageToolRecoveryJournalV1> = {
-  create: (identityKey) => createPackageToolRecoveryJournalV1(identityKey),
-  fingerprint: (input) => packageToolInvocationFingerprintV1(input),
-  recordFailure: (journal, input) => recordPackageRecoveryFailureV1(journal, input),
-  advance: (journal, input) => advancePackageToolRecoveryResponseV1(journal, input),
-  admit: (journal, input) => admitPackageRecoveryAttemptV1(journal, input),
-  recordInvocation: (journal, input) => recordPackageRecoveryInvocationV1(journal, input),
-  recordProgress: (journal, input) => recordPackageToolOwnedProgressV1(journal, input),
-  close: (journal, input) => closePackageToolRecoveryScopeV1(journal, input),
+const PACKAGE_RECOVERY_JOURNAL_API: RecoveryJournalApi<PackageToolRecoveryJournal> = {
+  create: (identityKey) => createPackageToolRecoveryJournal(identityKey),
+  fingerprint: (input) => packageToolInvocationFingerprint(input),
+  recordFailure: (journal, input) => recordPackageRecoveryFailure(journal, input),
+  advance: (journal, input) => advancePackageToolRecoveryResponse(journal, input),
+  admit: (journal, input) => admitPackageRecoveryAttempt(journal, input),
+  recordInvocation: (journal, input) => recordPackageRecoveryInvocation(journal, input),
+  recordProgress: (journal, input) => recordPackageToolOwnedProgress(journal, input),
+  close: (journal, input) => closePackageToolRecoveryScope(journal, input),
   merge: (parent, child, scope) =>
-    mergePackageToolRecoveryJournalsV1(parent, child, IDENTITY_KEY, scope),
-  normalize: (journal) => normalizePackageToolRecoveryJournalV1(journal, IDENTITY_KEY),
+    mergePackageToolRecoveryJournals(parent, child, IDENTITY_KEY, scope),
+  normalize: (journal) => normalizePackageToolRecoveryJournal(journal, IDENTITY_KEY),
   order: (journal) => journal.order,
-  hasUnresolved: (journal) => hasPackageUnresolvedToolFailuresV1(journal),
-  hasActive: (journal, scope) => hasActivePackageUnresolvedToolFailuresV1(journal, scope),
+  hasUnresolved: (journal) => hasPackageUnresolvedToolFailures(journal),
+  hasActive: (journal, scope) => hasActivePackageUnresolvedToolFailures(journal, scope),
 };
 
-describe('RMV1 State package parity harness', () => {
+describe('RM State package parity harness', () => {
   test('keeps the exact initial State snapshot bytes', () => {
     expect(stateBytes(rootState())).toBe(textBytes(encodeCurrentAgentStateJson(packageState())));
   });
 
-  test('pins the recovery corpus to State, Store4, and the RMV1 epoch', () => {
+  test('pins the recovery corpus to State, Store4, and the RM epoch', () => {
     const root = rootState();
     const packageStateValue = packageState();
-    expect(SQLITE_RUNTIME_STORE5_SCHEMA_VERSION).toBe(5);
+    expect(SQLITE_RUNTIME_STORE_SCHEMA_VERSION).toBe(5);
     expect(root.schemaVersion).toBe(26);
     expect(packageStateValue.schemaVersion).toBe(26);
-    expect(root.formatEpoch).toBe(STATE26_EPOCH);
-    expect(packageStateValue.formatEpoch).toBe(STATE26_EPOCH);
+    expect(root.formatEpoch).toBe(STATE_EPOCH);
+    expect(packageStateValue.formatEpoch).toBe(STATE_EPOCH);
     expect('projectIdentity' in root).toBe(false);
     expect('projectIdentity' in packageStateValue).toBe(false);
   });
@@ -1774,24 +1772,22 @@ describe('RMV1 State package parity harness', () => {
         identityRevision: 'dynamic-revision-v1',
       },
     ];
-    const rootFingerprints = fingerprintInputs.map((input) =>
-      rootToolInvocationFingerprintV1(input),
-    );
+    const rootFingerprints = fingerprintInputs.map((input) => rootToolInvocationFingerprint(input));
     const packageFingerprints = fingerprintInputs.map((input) =>
-      packageToolInvocationFingerprintV1(input),
+      packageToolInvocationFingerprint(input),
     );
     expect(packageFingerprints).toEqual(rootFingerprints);
 
     const failureIdOutcomes = [JOURNAL_FAILURE_OUTCOME, JOURNAL_REJECTED_OUTCOME] as const;
     const rootFailureIds = failureIdOutcomes.map((outcome, index) =>
-      rootToolFailureInstanceIdV1({
+      rootToolFailureInstanceId({
         toolCallId: `failure-id-call-${index + 1}`,
         invocationFingerprint: rootFingerprints[index]!,
-        outcome: outcome as RootToolOutcomeV1,
+        outcome: outcome as RootToolOutcome,
       }),
     );
     const packageFailureIds = failureIdOutcomes.map((outcome, index) =>
-      packageToolFailureInstanceIdV1({
+      packageToolFailureInstanceId({
         toolCallId: `failure-id-call-${index + 1}`,
         invocationFingerprint: packageFingerprints[index]!,
         outcome,
@@ -1809,15 +1805,15 @@ describe('RMV1 State package parity harness', () => {
   });
 
   test('records fail-closed identity and non-JSON boundaries without a Core fallback', () => {
-    const invalidCreate = probe(() => createPackageToolRecoveryJournalV1('not-a-host-key'));
+    const invalidCreate = probe(() => createPackageToolRecoveryJournal('not-a-host-key'));
     expect(invalidCreate.ok).toBe(false);
     expect(invalidCreate.ok ? '' : invalidCreate.error).toContain('canonical host-supplied key');
 
-    const rootInvalidCreate = probe(() => createRootToolRecoveryJournalV1('not-a-host-key'));
+    const rootInvalidCreate = probe(() => createRootToolRecoveryJournal('not-a-host-key'));
     expect(rootInvalidCreate.ok).toBe(false);
 
     const invalidNormalize = probe(() =>
-      normalizePackageToolRecoveryJournalV1(null, undefined as unknown as string),
+      normalizePackageToolRecoveryJournal(null, undefined as unknown as string),
     );
     expect(invalidNormalize.ok).toBe(false);
     expect(invalidNormalize.ok ? '' : invalidNormalize.error).toContain(
@@ -1825,28 +1821,28 @@ describe('RMV1 State package parity harness', () => {
     );
 
     const rootInvalidNormalize = probe(() =>
-      normalizeRootToolRecoveryJournalV1(null, undefined as unknown as string),
+      normalizeRootToolRecoveryJournal(null, undefined as unknown as string),
     );
     expect(rootInvalidNormalize.ok).toBe(false);
 
     const forged = {
-      ...createPackageToolRecoveryJournalV1(IDENTITY_KEY),
+      ...createPackageToolRecoveryJournal(IDENTITY_KEY),
       identityKey: 'f'.repeat(64),
     };
-    const packageForged = normalizePackageToolRecoveryJournalV1(forged, IDENTITY_KEY);
-    expect(isToolRecoveryJournalInvalidV1(packageForged)).toBe(true);
+    const packageForged = normalizePackageToolRecoveryJournal(forged, IDENTITY_KEY);
+    expect(isToolRecoveryJournalInvalid(packageForged)).toBe(true);
     expect(packageForged.identityKey).toBe(IDENTITY_KEY);
-    expect(isToolRecoveryResolutionV1('user_action')).toBe(true);
-    expect(isToolRecoveryResolutionV1('provider')).toBe(false);
+    expect(isToolRecoveryResolution('user_action')).toBe(true);
+    expect(isToolRecoveryResolution('provider')).toBe(false);
 
     const nonJsonInput = {
       toolName: 'read_file',
       parsedArgs: undefined,
     } satisfies RecoveryFingerprintInput;
-    const packageNonJson = probe(() => packageToolInvocationFingerprintV1(nonJsonInput));
+    const packageNonJson = probe(() => packageToolInvocationFingerprint(nonJsonInput));
     expect(packageNonJson.ok).toBe(false);
     expect(packageNonJson.ok ? '' : packageNonJson.error).toContain('not JSON serializable');
-    const rootNonJson = probe(() => rootToolInvocationFingerprintV1(nonJsonInput));
+    const rootNonJson = probe(() => rootToolInvocationFingerprint(nonJsonInput));
     expect(rootNonJson.ok).toBe(false);
     expect(rootNonJson.ok ? '' : rootNonJson.error).toContain('not JSON serializable');
   });
@@ -1911,9 +1907,9 @@ describe('RMV1 State package parity harness', () => {
   });
 
   test('compares all 128 non-legacy-default reducer cases by state bytes or throw', () => {
-    const eventTypes = Object.values(STATE26_EVENT_REDUCER_COVERAGE)
+    const eventTypes = Object.values(STATE_EVENT_REDUCER_COVERAGE)
       .flat()
-      .filter((type) => !new Set<string>(STATE26_LEGACY_DEFAULT_EVENT_TYPES).has(type));
+      .filter((type) => !new Set<string>(STATE_DEFAULT_EVENT_TYPES).has(type));
     expect(eventTypes).toHaveLength(128);
 
     const mismatches: Array<Record<string, unknown>> = [];
@@ -1935,11 +1931,11 @@ describe('RMV1 State package parity harness', () => {
   });
 
   test('compares the seven diagnostic/no-op discriminants independently', () => {
-    expect(STATE26_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
-    expect(STATE26_LEGACY_DEFAULT_EVENT_TYPES).toHaveLength(7);
+    expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
+    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(7);
 
     const mismatches: Array<Record<string, unknown>> = [];
-    for (const type of STATE26_LEGACY_DEFAULT_EVENT_TYPES) {
+    for (const type of STATE_DEFAULT_EVENT_TYPES) {
       const root = rootReducer(type);
       const packageResult = packageReducer(type);
       if (root.ok !== packageResult.ok) {
@@ -1974,12 +1970,12 @@ describe('RMV1 State package parity harness', () => {
   });
 
   test('keeps Core outcome APIs as direct package identity and preserves typed classifier facts', () => {
-    expect(classifyRootToolOutcomeV1).toBe(classifyPackageToolOutcomeV1);
-    expect(isRootToolOutcomeV1).toBe(isPackageToolOutcomeV1);
-    expect(rootTrustedToolTimingV1).toBe(packageTrustedToolTimingV1);
-    expect(rootToolOutcomeSucceededV1).toBe(packageToolOutcomeSucceededV1);
-    expect(rootToolOutcomeProtocolStatusV1).toBe(packageToolOutcomeProtocolStatusV1);
-    expect(rootToolOutcomeMetricStatusV1).toBe(packageToolOutcomeMetricStatusV1);
+    expect(classifyRootToolOutcome).toBe(classifyPackageToolOutcome);
+    expect(isRootToolOutcome).toBe(isPackageToolOutcome);
+    expect(rootTrustedToolTiming).toBe(packageTrustedToolTiming);
+    expect(rootToolOutcomeSucceeded).toBe(packageToolOutcomeSucceeded);
+    expect(rootToolOutcomeProtocolStatus).toBe(packageToolOutcomeProtocolStatus);
+    expect(rootToolOutcomeMetricStatus).toBe(packageToolOutcomeMetricStatus);
 
     const authority = {
       dispatchState: 'started' as const,
@@ -2053,17 +2049,17 @@ describe('RMV1 State package parity harness', () => {
           schemaRevision: 'rmv1-s6-outcome-v1',
         },
       };
-      const root = classifyRootToolOutcomeV1(input);
-      const packageOutcome = classifyPackageToolOutcomeV1(input);
+      const root = classifyRootToolOutcome(input);
+      const packageOutcome = classifyPackageToolOutcome(input);
       expect(root).toEqual(packageOutcome);
-      expect(isRootToolOutcomeV1(root)).toBe(true);
-      expect(isPackageToolOutcomeV1(packageOutcome)).toBe(true);
-      expect(rootToolOutcomeSucceededV1(root)).toBe(packageToolOutcomeSucceededV1(packageOutcome));
-      expect(rootToolOutcomeProtocolStatusV1(root)).toBe(
-        packageToolOutcomeProtocolStatusV1(packageOutcome),
+      expect(isRootToolOutcome(root)).toBe(true);
+      expect(isPackageToolOutcome(packageOutcome)).toBe(true);
+      expect(rootToolOutcomeSucceeded(root)).toBe(packageToolOutcomeSucceeded(packageOutcome));
+      expect(rootToolOutcomeProtocolStatus(root)).toBe(
+        packageToolOutcomeProtocolStatus(packageOutcome),
       );
-      expect(rootToolOutcomeMetricStatusV1(root)).toBe(
-        packageToolOutcomeMetricStatusV1(packageOutcome),
+      expect(rootToolOutcomeMetricStatus(root)).toBe(
+        packageToolOutcomeMetricStatus(packageOutcome),
       );
     }
 
@@ -2087,11 +2083,11 @@ describe('RMV1 State package parity harness', () => {
     }));
     expect(failureCorpus).toHaveLength(44);
     for (const input of failureCorpus) {
-      const root = classifyRootToolOutcomeV1(input);
-      const packageOutcome = classifyPackageToolOutcomeV1(input);
+      const root = classifyRootToolOutcome(input);
+      const packageOutcome = classifyPackageToolOutcome(input);
       expect(root).toEqual(packageOutcome);
-      expect(isRootToolOutcomeV1(root)).toBe(true);
-      expect(isPackageToolOutcomeV1(packageOutcome)).toBe(true);
+      expect(isRootToolOutcome(root)).toBe(true);
+      expect(isPackageToolOutcome(packageOutcome)).toBe(true);
     }
 
     const baseInput = {
@@ -2107,7 +2103,7 @@ describe('RMV1 State package parity harness', () => {
       },
       authority,
     };
-    const builtinObservation = classifyRootToolOutcomeV1({
+    const builtinObservation = classifyRootToolOutcome({
       ...baseInput,
       unknownFields: {
         hasUnknown: true,
@@ -2116,7 +2112,7 @@ describe('RMV1 State package parity harness', () => {
         schemaRevision: 'rmv1-s6-outcome-v1',
       },
     });
-    const mcpObservation = classifyRootToolOutcomeV1({
+    const mcpObservation = classifyRootToolOutcome({
       ...baseInput,
       unknownFields: {
         hasUnknown: true,
@@ -2143,9 +2139,9 @@ describe('RMV1 State package parity harness', () => {
   });
 
   test('rejects malformed scheduler facts before selecting an executable effect', () => {
-    const malformedFacts: SchedulerFactsV1 = { traits: {}, approval: {} };
+    const malformedFacts: SchedulerFacts = { traits: {}, approval: {} };
     Object.defineProperty(malformedFacts, 'traits', { configurable: true, value: null });
-    expect(isValidSchedulerFactsV1(malformedFacts)).toBe(false);
+    expect(isValidSchedulerFacts(malformedFacts)).toBe(false);
 
     const packageDecision = probe(() => decidePackageEffect(packageState(), malformedFacts));
     expect(packageDecision).toEqual({
@@ -2162,17 +2158,17 @@ describe('RMV1 State package parity harness', () => {
     const v1 = [
       {
         name: 'idle',
-        root: decideCompletionV1(rootState()),
+        root: decideUnplannedCompletion(rootState()),
         package: decidePackageCompletion(packageState()),
       },
       {
         name: 'queued-tool',
-        root: decideCompletionV1(rootQueuedState()),
+        root: decideUnplannedCompletion(rootQueuedState()),
         package: decidePackageCompletion(packageQueuedState()),
       },
     ];
     const v2 = {
-      root: probe(() => decideCompletionV2(rootCompletedPlanState())),
+      root: probe(() => decidePlannedCompletion(rootCompletedPlanState())),
       package: probe(() => decidePackageCompletion(packageCompletedPlanState())),
     };
     const mismatches: Array<unknown> = v1.filter(
@@ -2332,16 +2328,16 @@ describe('RMV1 State package parity harness', () => {
       } as RuntimeEvent;
       const verificationSchemaAdmissions = checks.map((check) => {
         if (check.type === 'schema') {
-          const compiled = compileCapabilitySchemaV1(check.schema);
+          const compiled = compileCapabilitySchema(check.schema);
           return {
-            schemaDigest: verificationSchemaAdmissionDigestV1(check.schema),
+            schemaDigest: verificationSchemaAdmissionDigest(check.schema),
             schemaDiagnostic: compiled.ok ? null : compiled.diagnostic,
           };
         }
         if (check.type === 'mcp_read_after_write' && check.outputSchema) {
-          const compiled = compileCapabilitySchemaV1(check.outputSchema);
+          const compiled = compileCapabilitySchema(check.outputSchema);
           return {
-            outputSchemaDigest: verificationSchemaAdmissionDigestV1(check.outputSchema),
+            outputSchemaDigest: verificationSchemaAdmissionDigest(check.outputSchema),
             outputSchemaDiagnostic: compiled.ok ? null : compiled.diagnostic,
           };
         }
@@ -2350,12 +2346,12 @@ describe('RMV1 State package parity harness', () => {
       const expected = reduceAgentState(initial as AgentState, event as KernelEvent, {
         verificationSchemaAdmissions,
       }).verification;
-      const store = openStateStoreForTestV1(':memory:');
+      const store = openStateStoreForTest(':memory:');
       const kernel = new AgentKernel({
         store,
         initialState: initial,
         interactionMode: 'accept_edits',
-        runtimeIdSource: createDeterministicRuntimeIdSourceV1({
+        runtimeIdSource: createDeterministicRuntimeIdSource({
           seed: `schema-${candidate.name}`,
           epochMs: Date.parse(OCCURRED_AT),
         }),

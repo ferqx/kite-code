@@ -14,10 +14,10 @@ import {
   type RuntimeEvent,
   rebindForkAgentState,
 } from '@kite/agent-kernel';
-import type { RuntimeSnapshotCodecV1 } from './storage';
+import type { RuntimeSnapshotCodec } from './storage';
 
-export interface RuntimeHostStateStorageBindingV1 {
-  readonly codec: RuntimeSnapshotCodecV1<RuntimeEvent, AgentState>;
+export interface RuntimeHostStateStorageBinding {
+  readonly codec: RuntimeSnapshotCodec<RuntimeEvent, AgentState>;
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -34,7 +34,7 @@ function requireState(value: unknown): AgentState {
   return value;
 }
 
-function createStateCodec(): RuntimeSnapshotCodecV1<RuntimeEvent, AgentState> {
+function createStateCodec(): RuntimeSnapshotCodec<RuntimeEvent, AgentState> {
   return Object.freeze({
     encodeEvent(event: RuntimeEvent): string {
       assertCurrentRuntimeEvent(event);
@@ -119,7 +119,7 @@ function createStateCodec(): RuntimeSnapshotCodecV1<RuntimeEvent, AgentState> {
 }
 
 /** Bind the current State Kernel format to the generic Host storage port once. */
-export function createRuntimeHostStateStorageBindingV1(): RuntimeHostStateStorageBindingV1 {
+export function createRuntimeHostStateStorageBinding(): RuntimeHostStateStorageBinding {
   return Object.freeze({
     codec: createStateCodec(),
   });

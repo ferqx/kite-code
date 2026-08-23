@@ -1,49 +1,46 @@
 import type {
-  CapabilityAvailabilityContextV1,
-  CapabilityBindingV1,
-  CapabilityEffectsV1,
-  CapabilityExecutionTraitsV1,
-  CapabilityParseIssueV1,
-  CapabilityParserV1,
-  CapabilityPolicyCompilationV1,
-  CapabilityToolKindV1,
-  ClassifiedInvocationV1,
-  NonDynamicOperationIdV1,
-  NonDynamicToolTargetV1,
-  PreparedToolInvocationV1,
-  ResolvedInvocationV1,
-  RuntimeJsonValueV1,
-  ToolArgumentOriginV1,
-  ToolCallSnapshotV1,
-  ToolClassificationResultV1,
-  ToolExecutionFamilyV1,
-  ToolPipelineCapabilityDescriptorV1,
-  ToolPipelineClassifiedIdentityVerificationResultV1,
-  ToolPipelineClassifiedIdentityVerifierV1,
-  ToolPipelineClassifyFailureCodeV1,
-  ToolPipelineGovernanceProjectionV1,
-  ToolPipelinePreparedIdentityVerificationResultV1,
-  ToolPipelinePreparedIdentityVerifierV1,
-  ToolPipelineResolutionContextV1,
-  ToolPipelineResolveFailureCodeV1,
-  ToolPipelineValidateFailureCodeV1,
-  ToolResolutionResultV1,
-  ToolValidationResultV1,
-  ValidatedInvocationV1,
+  CapabilityAvailabilityContext,
+  CapabilityBinding,
+  CapabilityEffects,
+  CapabilityExecutionTraits,
+  CapabilityParseIssue,
+  CapabilityParser,
+  CapabilityPolicyCompilation,
+  CapabilityToolKind,
+  ClassifiedInvocation,
+  NonDynamicOperationId,
+  NonDynamicToolTarget,
+  PreparedToolInvocation,
+  ResolvedInvocation,
+  RuntimeJsonValue,
+  ToolArgumentOrigin,
+  ToolCallSnapshot,
+  ToolClassificationResult,
+  ToolExecutionFamily,
+  ToolPipelineCapabilityDescriptor,
+  ToolPipelineClassifiedIdentityVerificationResult,
+  ToolPipelineClassifiedIdentityVerifier,
+  ToolPipelineClassifyFailureCode,
+  ToolPipelineGovernanceProjection,
+  ToolPipelinePreparedIdentityVerificationResult,
+  ToolPipelinePreparedIdentityVerifier,
+  ToolPipelineResolutionContext,
+  ToolPipelineResolveFailureCode,
+  ToolPipelineValidateFailureCode,
+  ToolResolutionResult,
+  ToolValidationResult,
+  ValidatedInvocation,
 } from '@kite/runtime-spi';
 import {
-  CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
-  TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  CAPABILITY_POLICY_COMPILATION_SCHEMA_,
+  TOOL_PIPELINE_STAGE_SCHEMA_,
 } from '@kite/runtime-spi';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
-import type {
-  BuiltinModelToolCatalogEntryV1,
-  BuiltinToolCatalogProjectionV1,
-} from './tool-catalog';
+import { digestCapabilityBindingValue } from './capability-binding';
+import type { BuiltinModelToolCatalogEntry, BuiltinToolCatalogProjection } from './tool-catalog';
 
-export const BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1 =
+export const BUILTIN_PREPARED_CALL_FACTS_SCHEMA_ =
   'kite.builtin-runtime.non-dynamic-prepared-call-facts.v1' as const;
-const SHA256_HEX_V1 = /^[0-9a-f]{64}$/u;
+const SHA256_HEX_ = /^[0-9a-f]{64}$/u;
 
 /**
  * Package-only callbacks for the model-visible Builtin part of Tool Pipeline.
@@ -51,15 +48,15 @@ const SHA256_HEX_V1 = /^[0-9a-f]{64}$/u;
  * This surface owns neither dispatch nor Kernel governance.  It only projects
  * the exact immutable Builtin catalog facts into the neutral SPI DTOs.
  */
-export interface BuiltinToolPipelineCallbacksV1 {
+export interface BuiltinToolPipelineCallbacks {
   readonly resolve: (
-    call: Readonly<ToolCallSnapshotV1>,
-    context: Readonly<ToolPipelineResolutionContextV1>,
-  ) => ToolResolutionResultV1;
-  readonly validate: (resolved: Readonly<ResolvedInvocationV1>) => ToolValidationResultV1;
-  readonly classify: (validated: Readonly<ValidatedInvocationV1>) => ToolClassificationResultV1;
-  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1;
-  readonly verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifierV1;
+    call: Readonly<ToolCallSnapshot>,
+    context: Readonly<ToolPipelineResolutionContext>,
+  ) => ToolResolutionResult;
+  readonly validate: (resolved: Readonly<ResolvedInvocation>) => ToolValidationResult;
+  readonly classify: (validated: Readonly<ValidatedInvocation>) => ToolClassificationResult;
+  readonly verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier;
+  readonly verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifier;
 }
 
 /**
@@ -67,28 +64,28 @@ export interface BuiltinToolPipelineCallbacksV1 {
  * projection.  No registry, snapshot, executor, fallback parser, or second
  * schema/effects authority is created here.
  */
-export function createBuiltinToolPipelineCallbacksV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-): BuiltinToolPipelineCallbacksV1 {
-  assertFrozenProjectionV1(projection);
-  const classifiedAuthenticityV1 = new WeakSet<object>();
+export function createBuiltinToolPipelineCallbacks(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+): BuiltinToolPipelineCallbacks {
+  assertFrozenProjection(projection);
+  const classifiedAuthenticity = new WeakSet<object>();
 
   const resolve = (
-    call: Readonly<ToolCallSnapshotV1>,
-    context: Readonly<ToolPipelineResolutionContextV1>,
-  ): ToolResolutionResultV1 => resolveBuiltinV1(projection, call, context);
+    call: Readonly<ToolCallSnapshot>,
+    context: Readonly<ToolPipelineResolutionContext>,
+  ): ToolResolutionResult => resolveBuiltin(projection, call, context);
 
-  const validate = (resolved: Readonly<ResolvedInvocationV1>): ToolValidationResultV1 =>
-    validateBuiltinV1(projection, resolved);
+  const validate = (resolved: Readonly<ResolvedInvocation>): ToolValidationResult =>
+    validateBuiltin(projection, resolved);
 
-  const classify = (validated: Readonly<ValidatedInvocationV1>): ToolClassificationResultV1 =>
-    classifyBuiltinV1(projection, classifiedAuthenticityV1, validated);
+  const classify = (validated: Readonly<ValidatedInvocation>): ToolClassificationResult =>
+    classifyBuiltin(projection, classifiedAuthenticity, validated);
 
-  const verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifierV1 = (prepared) =>
-    verifyPreparedBuiltinIdentityV1(projection, prepared);
+  const verifyPreparedIdentity: ToolPipelinePreparedIdentityVerifier = (prepared) =>
+    verifyPreparedBuiltinIdentity(projection, prepared);
 
-  const verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifierV1 = (classified) =>
-    verifyClassifiedBuiltinIdentityV1(projection, classifiedAuthenticityV1, classified);
+  const verifyClassifiedIdentity: ToolPipelineClassifiedIdentityVerifier = (classified) =>
+    verifyClassifiedBuiltinIdentity(projection, classifiedAuthenticity, classified);
 
   return Object.freeze({
     resolve,
@@ -99,41 +96,41 @@ export function createBuiltinToolPipelineCallbacksV1(
   });
 }
 
-function resolveBuiltinV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  call: Readonly<ToolCallSnapshotV1>,
-  context: Readonly<ToolPipelineResolutionContextV1>,
-): ToolResolutionResultV1 {
-  if (call.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 || call.stage !== 'snapshot') {
-    return resolveFailureV1('invalid_stage_input', null, null);
+function resolveBuiltin(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  call: Readonly<ToolCallSnapshot>,
+  context: Readonly<ToolPipelineResolutionContext>,
+): ToolResolutionResult {
+  if (call.schema !== TOOL_PIPELINE_STAGE_SCHEMA_ || call.stage !== 'snapshot') {
+    return resolveFailure('invalid_stage_input', null, null);
   }
-  if (!validResolutionContextV1(context, projection)) {
-    return resolveFailureV1('resolution_context_invalid', call.toolCallId, call.name);
+  if (!validResolutionContext(context, projection)) {
+    return resolveFailure('resolution_context_invalid', call.toolCallId, call.name);
   }
   if (call.createdAtTurnId !== context.currentTurnId) {
-    return resolveFailureV1('call_turn_mismatch', call.toolCallId, call.name);
+    return resolveFailure('call_turn_mismatch', call.toolCallId, call.name);
   }
   if (call.bindingId !== null || call.capabilityId !== null || call.capabilityRevision !== null) {
-    return resolveFailureV1('unexpected_binding', call.toolCallId, call.name);
+    return resolveFailure('unexpected_binding', call.toolCallId, call.name);
   }
 
-  const entry = modelEntryByNameV1(projection, call.name);
-  if (!entry) return resolveFailureV1('unknown_tool', call.toolCallId, call.name);
+  const entry = modelEntryByName(projection, call.name);
+  if (!entry) return resolveFailure('unknown_tool', call.toolCallId, call.name);
   // `toolSet` intentionally contains only available model entries.  A
   // degraded/hidden entry therefore remains unavailable to the model surface.
   if (entry.availability !== 'available' || !Object.hasOwn(projection.toolSet, entry.name)) {
-    return resolveFailureV1('tool_unavailable', call.toolCallId, call.name);
+    return resolveFailure('tool_unavailable', call.toolCallId, call.name);
   }
   if (entry.kind === 'internal_runtime') {
-    return resolveFailureV1('unknown_tool', call.toolCallId, call.name);
+    return resolveFailure('unknown_tool', call.toolCallId, call.name);
   }
   if (entry.operationId === 'mcp:dynamic_tool') {
-    return resolveFailureV1('unknown_tool', call.toolCallId, call.name);
+    return resolveFailure('unknown_tool', call.toolCallId, call.name);
   }
 
-  const operationId = entry.operationId as NonDynamicOperationIdV1;
-  const executionFamily = executionFamilyForBuiltinV1(entry.executionMechanism);
-  const target: NonDynamicToolTargetV1 = Object.freeze({
+  const operationId = entry.operationId as NonDynamicOperationId;
+  const executionFamily = executionFamilyForBuiltin(entry.executionMechanism);
+  const target: NonDynamicToolTarget = Object.freeze({
     executionFamily,
     executionMechanism: entry.executionMechanism,
     operationId,
@@ -142,7 +139,7 @@ function resolveBuiltinV1(
     descriptorRevision: entry.descriptor.revision,
     providerId: entry.providerId,
     executorRevision: entry.executorRevision,
-    toolKind: entry.kind as CapabilityToolKindV1,
+    toolKind: entry.kind as CapabilityToolKind,
     visibility: 'model' as const,
     modelVisible: true as const,
     exposedToolName: entry.name,
@@ -155,25 +152,25 @@ function resolveBuiltinV1(
     descriptor: entry.descriptor,
   });
 
-  return successV1({
-    schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  return success({
+    schema: TOOL_PIPELINE_STAGE_SCHEMA_,
     stage: 'resolved',
     call,
     target,
-    availabilityContext: freezeAvailabilityContextV1(context.availabilityContext),
+    availabilityContext: freezeAvailabilityContext(context.availabilityContext),
     builtinProjectionRevision: projection.revision,
     dynamicCatalogRevision: context.dynamicCatalogRevision,
-    disclosedCapabilities: freezeJsonArrayV1(context.descriptors),
-    disclosures: freezeJsonArrayV1(context.disclosures ?? []),
+    disclosedCapabilities: freezeJsonArray(context.descriptors),
+    disclosures: freezeJsonArray(context.disclosures ?? []),
   });
 }
 
-function validateBuiltinV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  resolved: Readonly<ResolvedInvocationV1>,
-): ToolValidationResultV1 {
-  if (resolved.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 || resolved.stage !== 'resolved') {
-    return validationFailureV1('invalid_stage_input', null, null);
+function validateBuiltin(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  resolved: Readonly<ResolvedInvocation>,
+): ToolValidationResult {
+  if (resolved.schema !== TOOL_PIPELINE_STAGE_SCHEMA_ || resolved.stage !== 'resolved') {
+    return validationFailure('invalid_stage_input', null, null);
   }
   const target = resolved.target;
   if (
@@ -184,35 +181,23 @@ function validateBuiltinV1(
     target.exposedToolName === null ||
     target.binding !== null
   ) {
-    return validationFailureV1(
-      'stage_identity_drift',
-      resolved.call.toolCallId,
-      resolved.call.name,
-    );
+    return validationFailure('stage_identity_drift', resolved.call.toolCallId, resolved.call.name);
   }
   if (resolved.builtinProjectionRevision !== projection.revision) {
-    return validationFailureV1(
-      'stage_identity_drift',
-      resolved.call.toolCallId,
-      resolved.call.name,
-    );
+    return validationFailure('stage_identity_drift', resolved.call.toolCallId, resolved.call.name);
   }
-  const entry = exactEntryForResolvedV1(projection, resolved);
+  const entry = exactEntryForResolved(projection, resolved);
   if (entry?.availability !== 'available') {
-    return validationFailureV1(
-      'stage_identity_drift',
-      resolved.call.toolCallId,
-      resolved.call.name,
-    );
+    return validationFailure('stage_identity_drift', resolved.call.toolCallId, resolved.call.name);
   }
 
-  const argumentAuthority = argumentAuthorityForEntryV1(
+  const argumentAuthority = argumentAuthorityForEntry(
     entry,
     resolved.call.argumentOrigin,
     resolved.call.rawArguments,
   );
   if (argumentAuthority === null) {
-    return validationFailureV1(
+    return validationFailure(
       'invalid_arguments',
       resolved.call.toolCallId,
       resolved.call.name,
@@ -220,9 +205,9 @@ function validateBuiltinV1(
     );
   }
   const privateTaskProjection = argumentAuthority === 'runtime_private';
-  const parserAuthority = parserAuthorityForEntryV1(entry, privateTaskProjection);
-  let observed: ReturnType<CapabilityParserV1['observeUnknownFields']>;
-  let parsed: ReturnType<CapabilityParserV1['parse']>;
+  const parserAuthority = parserAuthorityForEntry(entry, privateTaskProjection);
+  let observed: ReturnType<CapabilityParser['observeUnknownFields']>;
+  let parsed: ReturnType<CapabilityParser['parse']>;
   try {
     // Both calls deliberately use the selected parser authority from this
     // exact entry. Unknown fields are observed for bounded diagnostics; their
@@ -230,7 +215,7 @@ function validateBuiltinV1(
     observed = parserAuthority.observeUnknownFields(resolved.call.rawArguments);
     parsed = parserAuthority.parse(resolved.call.rawArguments);
   } catch {
-    return validationFailureV1(
+    return validationFailure(
       'invalid_arguments',
       resolved.call.toolCallId,
       resolved.call.name,
@@ -239,27 +224,27 @@ function validateBuiltinV1(
   }
   void observed;
   if (!parsed.success) {
-    return validationFailureV1(
+    return validationFailure(
       'invalid_arguments',
       resolved.call.toolCallId,
       resolved.call.name,
-      boundedParseDiagnosticV1(parsed.issues[0]),
+      boundedParseDiagnostic(parsed.issues[0]),
     );
   }
 
-  let canonical: RuntimeJsonValueV1;
+  let canonical: RuntimeJsonValue;
   try {
-    canonical = freezeJsonV1(parserAuthority.canonicalize(parsed.data));
+    canonical = freezeJson(parserAuthority.canonicalize(parsed.data));
   } catch {
-    return validationFailureV1(
+    return validationFailure(
       'invalid_arguments',
       resolved.call.toolCallId,
       resolved.call.name,
       'Builtin arguments failed canonicalization.',
     );
   }
-  if (!isJsonRecordV1(canonical)) {
-    return validationFailureV1(
+  if (!isJsonRecord(canonical)) {
+    return validationFailure(
       'arguments_not_canonical_json',
       resolved.call.toolCallId,
       resolved.call.name,
@@ -268,29 +253,29 @@ function validateBuiltinV1(
 
   const schemaDigest = parserAuthority.schemaDigest;
   if (!schemaDigest) {
-    return validationFailureV1('schema_missing', resolved.call.toolCallId, resolved.call.name);
+    return validationFailure('schema_missing', resolved.call.toolCallId, resolved.call.name);
   }
-  const approvalSummary = boundedSummaryV1(entry.projectApprovalSummary(canonical));
+  const approvalSummary = boundedSummary(entry.projectApprovalSummary(canonical));
   const request = Object.freeze({
     source: 'builtin' as const,
     operationId: target.operationId,
     name: entry.name,
     arguments: canonical,
-    argumentsDigest: digestCapabilityBindingValueV1(canonical),
+    argumentsDigest: digestCapabilityBindingValue(canonical),
     schemaDigest,
     approvalSummary,
   });
-  const subagentRole = subagentRoleV1(target.executionMechanism, canonical);
-  const nested = validateNestedCapabilityV1(entry, resolved, canonical);
+  const subagentRole = resolveSubagentRole(target.executionMechanism, canonical);
+  const nested = validateNestedCapability(entry, resolved, canonical);
   if (!nested.ok) return nested;
-  return successV1({
-    schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  return success({
+    schema: TOOL_PIPELINE_STAGE_SCHEMA_,
     stage: 'validated',
     resolved,
     request,
     nestedCapability: nested.value,
-    domainData: freezeJsonV1({
-      schema: BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1,
+    domainData: freezeJson({
+      schema: BUILTIN_PREPARED_CALL_FACTS_SCHEMA_,
       toolCallId: resolved.call.toolCallId,
       callCreatedAtTurnId: resolved.call.createdAtTurnId,
       modelMessageId: resolved.call.modelMessageId,
@@ -302,7 +287,7 @@ function validateBuiltinV1(
       nestedCapabilityId: nested.value?.descriptor.capabilityId ?? null,
       nestedCapabilityRevision: nested.value?.descriptor.revision ?? null,
       nestedSkill: nested.value
-        ? nestedSkillFactsV1(
+        ? nestedSkillFacts(
             resolved,
             nested.value.descriptor,
             nested.value.disclosure,
@@ -313,13 +298,13 @@ function validateBuiltinV1(
   });
 }
 
-function classifyBuiltinV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  classifiedAuthenticityV1: WeakSet<object>,
-  validated: Readonly<ValidatedInvocationV1>,
-): ToolClassificationResultV1 {
-  if (validated.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 || validated.stage !== 'validated') {
-    return classifyFailureV1('invalid_stage_input', null, null);
+function classifyBuiltin(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  classifiedAuthenticity: WeakSet<object>,
+  validated: Readonly<ValidatedInvocation>,
+): ToolClassificationResult {
+  if (validated.schema !== TOOL_PIPELINE_STAGE_SCHEMA_ || validated.stage !== 'validated') {
+    return classifyFailure('invalid_stage_input', null, null);
   }
   const resolved = validated.resolved;
   const target = resolved.target;
@@ -332,43 +317,42 @@ function classifyBuiltinV1(
     target.binding !== null ||
     resolved.builtinProjectionRevision !== projection.revision
   ) {
-    return classifyFailureV1(
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const entry = exactEntryForResolvedV1(projection, resolved);
+  const entry = exactEntryForResolved(projection, resolved);
   if (entry === undefined) {
-    return classifyFailureV1(
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const argumentAuthority = argumentAuthorityForEntryV1(
+  const argumentAuthority = argumentAuthorityForEntry(
     entry,
     resolved.call.argumentOrigin,
     validated.request.arguments,
   );
   if (argumentAuthority === null) {
-    return classifyFailureV1(
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
   const privateTaskProjection = argumentAuthority === 'runtime_private';
-  const parserAuthority = parserAuthorityForEntryV1(entry, privateTaskProjection);
+  const parserAuthority = parserAuthorityForEntry(entry, privateTaskProjection);
   if (
     entry.availability !== 'available' ||
     validated.request.name !== entry.name ||
     validated.request.operationId !== target.operationId ||
     validated.request.schemaDigest !== parserAuthority.schemaDigest ||
-    validated.request.argumentsDigest !==
-      digestCapabilityBindingValueV1(validated.request.arguments)
+    validated.request.argumentsDigest !== digestCapabilityBindingValue(validated.request.arguments)
   ) {
-    return classifyFailureV1(
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
@@ -376,9 +360,9 @@ function classifyBuiltinV1(
   }
 
   const canonical = validated.request.arguments;
-  let classification: ReturnType<BuiltinModelToolCatalogEntryV1['classifyEffects']>;
-  let policyCompilation: CapabilityPolicyCompilationV1;
-  let executionTraits: CapabilityExecutionTraitsV1;
+  let classification: ReturnType<BuiltinModelToolCatalogEntry['classifyEffects']>;
+  let policyCompilation: CapabilityPolicyCompilation;
+  let executionTraits: CapabilityExecutionTraits;
   try {
     // These entry methods close over the exact turn context that produced the
     // frozen projection. Transported resolution facts must never re-select a
@@ -387,7 +371,7 @@ function classifyBuiltinV1(
     policyCompilation = entry.compilePolicy(canonical);
     executionTraits = entry.projectExecutionTraits(canonical);
   } catch {
-    return classifyFailureV1(
+    return classifyFailure(
       'classification_unavailable',
       resolved.call.toolCallId,
       validated.request.name,
@@ -395,8 +379,8 @@ function classifyBuiltinV1(
   }
 
   const nested = validated.nestedCapability;
-  if (nested && !validNestedCapabilityV1(entry, resolved, nested)) {
-    return classifyFailureV1(
+  if (nested && !validNestedCapability(entry, resolved, nested)) {
+    return classifyFailure(
       'stage_identity_drift',
       resolved.call.toolCallId,
       validated.request.name,
@@ -404,43 +388,43 @@ function classifyBuiltinV1(
   }
   const governingDescriptor = nested?.descriptor ?? entry.descriptor;
   const capability = nested
-    ? capabilityFromEffectsV1(governingDescriptor.effectiveEffects)
+    ? capabilityFromEffects(governingDescriptor.effectiveEffects)
     : {
         effectClass: classification.effectClass,
         sideEffect: classification.sideEffect,
         classificationReason: classification.classificationReason,
       };
-  const effectiveEffects = freezeEffectsV1(
+  const effectiveEffects = freezeEffects(
     nested ? governingDescriptor.effectiveEffects : classification.effectiveEffects,
   );
-  const effectiveEffectsDigest = digestCapabilityBindingValueV1(effectiveEffects);
+  const effectiveEffectsDigest = digestCapabilityBindingValue(effectiveEffects);
   const schemaDigest = parserAuthority.schemaDigest;
   if (
     !schemaDigest ||
-    policyCompilation.schema !== CAPABILITY_POLICY_COMPILATION_SCHEMA_V1 ||
+    policyCompilation.schema !== CAPABILITY_POLICY_COMPILATION_SCHEMA_ ||
     policyCompilation.operationId !== target.operationId ||
     policyCompilation.capabilityRevision !== target.capabilityRevision ||
     policyCompilation.parserRevision !== entry.parser.parserRevision ||
     policyCompilation.minimumApproval !== entry.minimumApproval ||
     (!nested &&
-      digestCapabilityBindingValueV1(policyCompilation.effectiveEffects) !== effectiveEffectsDigest)
+      digestCapabilityBindingValue(policyCompilation.effectiveEffects) !== effectiveEffectsDigest)
   ) {
-    return classifyFailureV1(
+    return classifyFailure(
       'classification_unavailable',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
 
-  const sideEffect = capability.sideEffect || hasMutationOrUnknownEffectV1(effectiveEffects);
-  const requirements = invocationRequirementsV1(
+  const sideEffect = capability.sideEffect || hasMutationOrUnknownEffect(effectiveEffects);
+  const requirements = invocationRequirements(
     target.toolKind,
     capability,
     effectiveEffects,
     governingDescriptor,
   );
-  const frozenPolicyCompilation = freezePolicyCompilationV1(policyCompilation);
-  const governance = createBuiltinGovernanceProjectionV1(
+  const frozenPolicyCompilation = freezePolicyCompilation(policyCompilation);
+  const governance = createBuiltinGovernanceProjection(
     projection,
     entry,
     resolved,
@@ -452,14 +436,14 @@ function classifyBuiltinV1(
     nested,
   );
   if (!governance) {
-    return classifyFailureV1(
+    return classifyFailure(
       'classification_unavailable',
       resolved.call.toolCallId,
       validated.request.name,
     );
   }
-  const classified: ClassifiedInvocationV1 = {
-    schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  const classified: ClassifiedInvocation = {
+    schema: TOOL_PIPELINE_STAGE_SCHEMA_,
     stage: 'classified',
     validated,
     descriptor: governingDescriptor,
@@ -468,27 +452,27 @@ function classifyBuiltinV1(
     effectClass: capability.effectClass,
     effectiveEffects,
     effectiveEffectsDigest,
-    risk: nested ? riskForEffectsV1(capability.effectClass, effectiveEffects) : classification.risk,
+    risk: nested ? riskForEffects(capability.effectClass, effectiveEffects) : classification.risk,
     sideEffect,
     minimumApproval: governingDescriptor.policy.minimumApproval,
-    executionTraits: nested ? null : freezeExecutionTraitsV1(executionTraits),
+    executionTraits: nested ? null : freezeExecutionTraits(executionTraits),
     requirements,
   };
-  classifiedAuthenticityV1.add(classified);
-  return successV1(classified);
+  classifiedAuthenticity.add(classified);
+  return success(classified);
 }
 
-function createBuiltinGovernanceProjectionV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  entry: BuiltinModelToolCatalogEntryV1,
-  resolved: Readonly<ResolvedInvocationV1>,
-  validated: Readonly<ValidatedInvocationV1>,
-  parserAuthority: BuiltinParserAuthorityV1,
-  policyCompilation: Readonly<CapabilityPolicyCompilationV1>,
-  effectiveEffects: Readonly<CapabilityEffectsV1>,
+function createBuiltinGovernanceProjection(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  entry: BuiltinModelToolCatalogEntry,
+  resolved: Readonly<ResolvedInvocation>,
+  validated: Readonly<ValidatedInvocation>,
+  parserAuthority: BuiltinParserAuthority,
+  policyCompilation: Readonly<CapabilityPolicyCompilation>,
+  effectiveEffects: Readonly<CapabilityEffects>,
   effectiveEffectsDigest: string,
-  nested: Readonly<ValidatedInvocationV1['nestedCapability']>,
-): Readonly<ToolPipelineGovernanceProjectionV1> | null {
+  nested: Readonly<ValidatedInvocation['nestedCapability']>,
+): Readonly<ToolPipelineGovernanceProjection> | null {
   const target = resolved.target;
   if (
     target.isDynamicMcp ||
@@ -528,10 +512,7 @@ function createBuiltinGovernanceProjectionV1(
     nestedCapabilityId: nested?.descriptor.capabilityId ?? null,
     nestedCapabilityRevision: nested?.descriptor.revision ?? null,
     nestedCatalogRevision,
-    commandDigest: commandDigestForBuiltinV1(
-      target.executionMechanism,
-      validated.request.arguments,
-    ),
+    commandDigest: commandDigestForBuiltin(target.executionMechanism, validated.request.arguments),
     isDynamicMcp: false as const,
     visibility: 'model' as const,
     modelVisible: true as const,
@@ -544,7 +525,7 @@ function createBuiltinGovernanceProjectionV1(
         capabilityId: nested.descriptor.capabilityId,
         capabilityRevision: nested.descriptor.revision,
         nestedCatalogRevision: nestedCatalogRevision as string,
-        decision: nestedSkillDecisionV1(nested.descriptor),
+        decision: nestedSkillDecision(nested.descriptor),
         minimumApproval: nested.descriptor.policy.minimumApproval,
       })
     : null;
@@ -558,42 +539,42 @@ function createBuiltinGovernanceProjectionV1(
   });
 }
 
-function commandDigestForBuiltinV1(
-  mechanism: BuiltinModelToolCatalogEntryV1['executionMechanism'],
-  argumentsValue: RuntimeJsonValueV1,
+function commandDigestForBuiltin(
+  mechanism: BuiltinModelToolCatalogEntry['executionMechanism'],
+  argumentsValue: RuntimeJsonValue,
 ): string | null {
-  if (mechanism !== 'shell' || !isJsonRecordV1(argumentsValue)) return null;
+  if (mechanism !== 'shell' || !isJsonRecord(argumentsValue)) return null;
   const command = argumentsValue.command;
   if (typeof command !== 'string') return null;
   const canonicalCommand = command.trim();
-  return canonicalCommand.length > 0 ? digestCapabilityBindingValueV1(canonicalCommand) : null;
+  return canonicalCommand.length > 0 ? digestCapabilityBindingValue(canonicalCommand) : null;
 }
 
-function nestedSkillDecisionV1(
-  descriptor: ToolPipelineCapabilityDescriptorV1,
-): CapabilityPolicyCompilationV1['decision'] {
+function nestedSkillDecision(
+  descriptor: ToolPipelineCapabilityDescriptor,
+): CapabilityPolicyCompilation['decision'] {
   if (descriptor.policy.minimumApproval === 'none') return 'allow';
   return descriptor.availability === 'available' ? 'ask' : 'deny';
 }
 
-function verifyClassifiedBuiltinIdentityV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  classifiedAuthenticityV1: WeakSet<object>,
-  classified: Readonly<ClassifiedInvocationV1>,
-): ToolPipelineClassifiedIdentityVerificationResultV1 {
+function verifyClassifiedBuiltinIdentity(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  classifiedAuthenticity: WeakSet<object>,
+  classified: Readonly<ClassifiedInvocation>,
+): ToolPipelineClassifiedIdentityVerificationResult {
   if (
     !classified ||
     typeof classified !== 'object' ||
-    !classifiedAuthenticityV1.has(classified as object)
+    !classifiedAuthenticity.has(classified as object)
   ) {
-    return invalidClassifiedIdentityV1('governance_missing');
+    return invalidClassifiedIdentity('governance_missing');
   }
   const governance = classified.governance;
   const validated = classified.validated;
   const resolved = validated?.resolved;
   const target = resolved?.target;
   if (
-    classified.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 ||
+    classified.schema !== TOOL_PIPELINE_STAGE_SCHEMA_ ||
     classified.stage !== 'classified' ||
     !governance ||
     !validated ||
@@ -602,21 +583,21 @@ function verifyClassifiedBuiltinIdentityV1(
     target.isDynamicMcp ||
     governance.invocation.isDynamicMcp !== false
   ) {
-    return invalidClassifiedIdentityV1('invocation_mismatch');
+    return invalidClassifiedIdentity('invocation_mismatch');
   }
-  const entry = exactEntryForResolvedV1(projection, resolved);
-  if (entry === undefined) return invalidClassifiedIdentityV1('invocation_mismatch');
-  const argumentAuthority = argumentAuthorityForEntryV1(
+  const entry = exactEntryForResolved(projection, resolved);
+  if (entry === undefined) return invalidClassifiedIdentity('invocation_mismatch');
+  const argumentAuthority = argumentAuthorityForEntry(
     entry,
     resolved.call.argumentOrigin,
     validated.request.arguments,
   );
-  if (argumentAuthority === null) return invalidClassifiedIdentityV1('invocation_mismatch');
-  const parserAuthority = parserAuthorityForEntryV1(entry, argumentAuthority === 'runtime_private');
+  if (argumentAuthority === null) return invalidClassifiedIdentity('invocation_mismatch');
+  const parserAuthority = parserAuthorityForEntry(entry, argumentAuthority === 'runtime_private');
   const invocation = governance.invocation;
   const nested = validated.nestedCapability;
   const expectedNestedCatalogRevision = nested ? resolved.dynamicCatalogRevision : null;
-  const expectedCommandDigest = commandDigestForBuiltinV1(
+  const expectedCommandDigest = commandDigestForBuiltin(
     target.executionMechanism,
     validated.request.arguments,
   );
@@ -648,7 +629,7 @@ function verifyClassifiedBuiltinIdentityV1(
     invocation.builtinProjectionRevision !== projection.revision ||
     invocation.dynamicCatalogRevision !== null
   ) {
-    return invalidClassifiedIdentityV1('invocation_mismatch');
+    return invalidClassifiedIdentity('invocation_mismatch');
   }
   if (
     governance.policy !== classified.policyCompilation ||
@@ -656,7 +637,7 @@ function verifyClassifiedBuiltinIdentityV1(
     governance.effectiveEffectsDigest !== classified.effectiveEffectsDigest ||
     governance.dynamicMcp !== null
   ) {
-    return invalidClassifiedIdentityV1('effects_mismatch');
+    return invalidClassifiedIdentity('effects_mismatch');
   }
   if (nested) {
     if (
@@ -666,13 +647,13 @@ function verifyClassifiedBuiltinIdentityV1(
       governance.nestedSkill.capabilityId !== nested.descriptor.capabilityId ||
       governance.nestedSkill.capabilityRevision !== nested.descriptor.revision ||
       governance.nestedSkill.nestedCatalogRevision !== resolved.dynamicCatalogRevision ||
-      governance.nestedSkill.decision !== nestedSkillDecisionV1(nested.descriptor) ||
+      governance.nestedSkill.decision !== nestedSkillDecision(nested.descriptor) ||
       governance.nestedSkill.minimumApproval !== nested.descriptor.policy.minimumApproval
     ) {
-      return invalidClassifiedIdentityV1('nested_skill_mismatch');
+      return invalidClassifiedIdentity('nested_skill_mismatch');
     }
   } else if (governance.nestedSkill !== null) {
-    return invalidClassifiedIdentityV1('nested_skill_mismatch');
+    return invalidClassifiedIdentity('nested_skill_mismatch');
   }
   if (
     !Object.isFrozen(governance) ||
@@ -681,22 +662,22 @@ function verifyClassifiedBuiltinIdentityV1(
     !Object.isFrozen(governance.policy) ||
     (governance.nestedSkill !== null && !Object.isFrozen(governance.nestedSkill))
   ) {
-    return invalidClassifiedIdentityV1('governance_missing');
+    return invalidClassifiedIdentity('governance_missing');
   }
   return Object.freeze({ valid: true });
 }
 
-function verifyPreparedBuiltinIdentityV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  prepared: Readonly<PreparedToolInvocationV1>,
-): ToolPipelinePreparedIdentityVerificationResultV1 {
+function verifyPreparedBuiltinIdentity(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  prepared: Readonly<PreparedToolInvocation>,
+): ToolPipelinePreparedIdentityVerificationResult {
   // This is identity-only. Authorization, admission, and Kernel governance
   // remain owned by the separate Kernel governance seam; no policy decision
   // or executor/dispatch callback is reachable from this verifier.
   const identity = prepared?.identity;
   const input = prepared?.input;
   if (!identity || !input || typeof identity !== 'object' || typeof input !== 'object') {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   if (
     identity.isDynamicMcp === true ||
@@ -704,7 +685,7 @@ function verifyPreparedBuiltinIdentityV1(
     identity.operationId === 'mcp:dynamic_tool' ||
     identity.builtinProjectionRevision === null
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   if (
     identity.isDynamicMcp !== false ||
@@ -713,36 +694,36 @@ function verifyPreparedBuiltinIdentityV1(
     typeof identity.exposedToolName !== 'string' ||
     identity.exposedToolName.length === 0
   ) {
-    return invalidIdentityV1('visibility_mismatch');
+    return invalidIdentity('visibility_mismatch');
   }
   if (identity.builtinProjectionRevision !== projection.revision) {
-    return invalidIdentityV1('revision_mismatch');
+    return invalidIdentity('revision_mismatch');
   }
   if (identity.dynamicCatalogRevision !== null) {
-    return invalidIdentityV1('revision_mismatch');
+    return invalidIdentity('revision_mismatch');
   }
 
-  const entry = modelEntryByNameV1(projection, identity.exposedToolName);
+  const entry = modelEntryByName(projection, identity.exposedToolName);
   if (entry?.availability !== 'available') {
-    return invalidIdentityV1('revision_mismatch');
+    return invalidIdentity('revision_mismatch');
   }
   if (entry.kind === 'interrupt' || entry.executionMechanism === 'user_input') {
-    return invalidIdentityV1('visibility_mismatch');
+    return invalidIdentity('visibility_mismatch');
   }
-  const argumentAuthority = argumentAuthorityForEntryV1(
+  const argumentAuthority = argumentAuthorityForEntry(
     entry,
     identity.argumentOrigin,
     input.arguments,
   );
-  if (argumentAuthority === null) return invalidIdentityV1('identity_mismatch');
+  if (argumentAuthority === null) return invalidIdentity('identity_mismatch');
   const privateTaskProjection = argumentAuthority === 'runtime_private';
-  const parserAuthority = parserAuthorityForEntryV1(entry, privateTaskProjection);
+  const parserAuthority = parserAuthorityForEntry(entry, privateTaskProjection);
   const schemaDigest = parserAuthority.schemaDigest;
-  if (!schemaDigest) return invalidIdentityV1('schema_mismatch');
+  if (!schemaDigest) return invalidIdentity('schema_mismatch');
   if (
     entry.operationId === 'mcp:dynamic_tool' ||
     identity.operationId !== entry.operationId ||
-    identity.executionFamily !== executionFamilyForBuiltinV1(entry.executionMechanism) ||
+    identity.executionFamily !== executionFamilyForBuiltin(entry.executionMechanism) ||
     identity.toolKind !== entry.kind ||
     identity.capabilityId !== entry.capabilityId ||
     identity.capabilityRevision !== entry.revision ||
@@ -754,22 +735,21 @@ function verifyPreparedBuiltinIdentityV1(
     identity.executionMechanism !== entry.executionMechanism ||
     identity.exposedToolName !== entry.name
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   if (
     input.invocationId !== identity.invocationId ||
     input.attemptId !== identity.attemptId ||
     input.toolCallId !== identity.toolCallId
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   const outerFacts =
-    isJsonRecordOptionalV1(input.facts) &&
-    input.facts.schema === BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1
+    isJsonRecordOptional(input.facts) && input.facts.schema === BUILTIN_PREPARED_CALL_FACTS_SCHEMA_
       ? input.facts
       : undefined;
-  if (!outerFacts) return invalidIdentityV1('identity_mismatch');
-  const callFacts = preparedCallFactsV1(outerFacts);
+  if (!outerFacts) return invalidIdentity('identity_mismatch');
+  const callFacts = preparedCallFacts(outerFacts);
   if (
     !callFacts ||
     callFacts.toolCallId !== identity.toolCallId ||
@@ -779,74 +759,74 @@ function verifyPreparedBuiltinIdentityV1(
     callFacts.argumentOrigin !== argumentAuthority ||
     callFacts.dynamicCatalogRevision !== null
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
-  if (!bindingMatchesEntryV1(input.binding, identity.bindingId, entry, schemaDigest)) {
-    return invalidIdentityV1('identity_mismatch');
+  if (!bindingMatchesEntry(input.binding, identity.bindingId, entry, schemaDigest)) {
+    return invalidIdentity('identity_mismatch');
   }
 
-  let canonical: RuntimeJsonValueV1;
-  let classification: ReturnType<BuiltinModelToolCatalogEntryV1['classifyEffects']>;
-  let parsed: ReturnType<CapabilityParserV1['parse']>;
-  if (factsProvideParserContextV1(outerFacts)) {
-    return invalidIdentityV1('identity_mismatch');
+  let canonical: RuntimeJsonValue;
+  let classification: ReturnType<BuiltinModelToolCatalogEntry['classifyEffects']>;
+  let parsed: ReturnType<CapabilityParser['parse']>;
+  if (factsProvideParserContext(outerFacts)) {
+    return invalidIdentity('identity_mismatch');
   }
   try {
     parserAuthority.observeUnknownFields(input.arguments);
     parsed = parserAuthority.parse(input.arguments);
-    if (!parsed.success) return invalidIdentityV1('schema_mismatch');
-    canonical = freezeJsonV1(parserAuthority.canonicalize(parsed.data));
-    if (!isJsonRecordV1(canonical)) return invalidIdentityV1('schema_mismatch');
+    if (!parsed.success) return invalidIdentity('schema_mismatch');
+    canonical = freezeJson(parserAuthority.canonicalize(parsed.data));
+    if (!isJsonRecord(canonical)) return invalidIdentity('schema_mismatch');
     classification = entry.classifyEffects(canonical);
   } catch {
-    return invalidIdentityV1('schema_mismatch');
+    return invalidIdentity('schema_mismatch');
   }
-  if (identity.argumentsDigest !== digestCapabilityBindingValueV1(canonical)) {
-    return invalidIdentityV1('identity_mismatch');
+  if (identity.argumentsDigest !== digestCapabilityBindingValue(canonical)) {
+    return invalidIdentity('identity_mismatch');
   }
   let approvalSummary: string;
   try {
-    approvalSummary = boundedSummaryV1(entry.projectApprovalSummary(canonical));
+    approvalSummary = boundedSummary(entry.projectApprovalSummary(canonical));
   } catch {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   if (callFacts.approvalSummary !== approvalSummary) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   if (entry.operationId === 'builtin:activate_skill') {
-    let nestedFacts: PreparedNestedSkillFactsV1 | null;
+    let nestedFacts: PreparedNestedSkillFacts | null;
     try {
-      nestedFacts = preparedNestedSkillFactsV1(outerFacts.nestedSkill);
-      if (!nestedFacts || !preparedNestedSkillFactsMatchV1(nestedFacts, canonical, identity)) {
-        return invalidIdentityV1('identity_mismatch');
+      nestedFacts = preparedNestedSkillFacts(outerFacts.nestedSkill);
+      if (!nestedFacts || !preparedNestedSkillFactsMatch(nestedFacts, canonical, identity)) {
+        return invalidIdentity('identity_mismatch');
       }
     } catch {
-      return invalidIdentityV1('identity_mismatch');
+      return invalidIdentity('identity_mismatch');
     }
   } else if (
     identity.nestedCapabilityId !== null ||
     identity.nestedCapabilityRevision !== null ||
     identity.nestedCatalogRevision !== null ||
     identity.effectiveEffectsDigest !==
-      digestCapabilityBindingValueV1(classification.effectiveEffects)
+      digestCapabilityBindingValue(classification.effectiveEffects)
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
 
   const configuredIdempotencyArgument = entry.execution?.idempotencyKeyArgument ?? null;
   const expectedIdempotencyKey = configuredIdempotencyArgument
-    ? idempotencyKeyFromArgumentsV1(canonical, configuredIdempotencyArgument)
+    ? idempotencyKeyFromArguments(canonical, configuredIdempotencyArgument)
     : null;
   if (
     identity.idempotencyKeyArgument !== configuredIdempotencyArgument ||
     identity.idempotencyKey !== expectedIdempotencyKey
   ) {
-    return invalidIdentityV1('identity_mismatch');
+    return invalidIdentity('identity_mismatch');
   }
   return Object.freeze({ valid: true });
 }
 
-function assertFrozenProjectionV1(projection: Readonly<BuiltinToolCatalogProjectionV1>): void {
+function assertFrozenProjection(projection: Readonly<BuiltinToolCatalogProjection>): void {
   if (
     !projection ||
     typeof projection !== 'object' ||
@@ -879,17 +859,16 @@ function assertFrozenProjectionV1(projection: Readonly<BuiltinToolCatalogProject
   }
 }
 
-function validResolutionContextV1(
-  context: Readonly<ToolPipelineResolutionContextV1>,
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
+function validResolutionContext(
+  context: Readonly<ToolPipelineResolutionContext>,
+  projection: Readonly<BuiltinToolCatalogProjection>,
 ): boolean {
   return (
     Boolean(context) &&
     typeof context.currentTurnId === 'string' &&
     context.currentTurnId.length > 0 &&
     context.builtinProjectionRevision === projection.revision &&
-    (context.dynamicCatalogRevision === null ||
-      SHA256_HEX_V1.test(context.dynamicCatalogRevision)) &&
+    (context.dynamicCatalogRevision === null || SHA256_HEX_.test(context.dynamicCatalogRevision)) &&
     Boolean(context.availabilityContext) &&
     typeof context.availabilityContext.workspace === 'string' &&
     Array.isArray(context.bindings) &&
@@ -898,23 +877,23 @@ function validResolutionContextV1(
   );
 }
 
-function modelEntryByNameV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
+function modelEntryByName(
+  projection: Readonly<BuiltinToolCatalogProjection>,
   name: string,
-): BuiltinModelToolCatalogEntryV1 | undefined {
+): BuiltinModelToolCatalogEntry | undefined {
   const entry = projection.entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.name === name,
   );
   return entry;
 }
 
-function exactEntryForResolvedV1(
-  projection: Readonly<BuiltinToolCatalogProjectionV1>,
-  resolved: Readonly<ResolvedInvocationV1>,
-): BuiltinModelToolCatalogEntryV1 | undefined {
+function exactEntryForResolved(
+  projection: Readonly<BuiltinToolCatalogProjection>,
+  resolved: Readonly<ResolvedInvocation>,
+): BuiltinModelToolCatalogEntry | undefined {
   const target = resolved.target;
-  const entry = modelEntryByNameV1(projection, target.exposedToolName ?? resolved.call.name);
+  const entry = modelEntryByName(projection, target.exposedToolName ?? resolved.call.name);
   if (
     !entry ||
     entry.name !== resolved.call.name ||
@@ -924,7 +903,7 @@ function exactEntryForResolvedV1(
     entry.providerId !== target.providerId ||
     entry.executorRevision !== target.executorRevision ||
     entry.executionMechanism !== target.executionMechanism ||
-    target.executionFamily !== executionFamilyForBuiltinV1(entry.executionMechanism) ||
+    target.executionFamily !== executionFamilyForBuiltin(entry.executionMechanism) ||
     target.isDynamicMcp !== false ||
     target.dynamicCatalogRevision !== null ||
     entry.descriptor.revision !== target.descriptorRevision ||
@@ -935,17 +914,17 @@ function exactEntryForResolvedV1(
   return entry;
 }
 
-function executionFamilyForBuiltinV1(
-  mechanism: BuiltinModelToolCatalogEntryV1['executionMechanism'],
-): Exclude<ToolExecutionFamilyV1, 'mcp'> {
+function executionFamilyForBuiltin(
+  mechanism: BuiltinModelToolCatalogEntry['executionMechanism'],
+): Exclude<ToolExecutionFamily, 'mcp'> {
   if (mechanism === 'subagent') return 'subagent';
   if (mechanism === 'skill') return 'skill';
   return 'builtin';
 }
 
-function subagentRoleV1(
-  mechanism: BuiltinModelToolCatalogEntryV1['executionMechanism'],
-  argumentsValue: Readonly<Record<string, RuntimeJsonValueV1>>,
+function resolveSubagentRole(
+  mechanism: BuiltinModelToolCatalogEntry['executionMechanism'],
+  argumentsValue: Readonly<Record<string, RuntimeJsonValue>>,
 ): 'explore' | 'plan' | 'code' | 'review' | null {
   if (mechanism !== 'subagent') return null;
   const role = argumentsValue.subagent_type;
@@ -954,12 +933,12 @@ function subagentRoleV1(
     : null;
 }
 
-function validateNestedCapabilityV1(
-  entry: BuiltinModelToolCatalogEntryV1,
-  resolved: Readonly<ResolvedInvocationV1>,
-  argumentsValue: Readonly<Record<string, RuntimeJsonValueV1>>,
+function validateNestedCapability(
+  entry: BuiltinModelToolCatalogEntry,
+  resolved: Readonly<ResolvedInvocation>,
+  argumentsValue: Readonly<Record<string, RuntimeJsonValue>>,
 ):
-  | { readonly ok: true; readonly value: Readonly<ValidatedInvocationV1['nestedCapability']> }
+  | { readonly ok: true; readonly value: Readonly<ValidatedInvocation['nestedCapability']> }
   | {
       readonly ok: false;
       readonly failure: Readonly<{
@@ -978,40 +957,40 @@ function validateNestedCapabilityV1(
   }
   const skillId = argumentsValue.skill_id;
   if (typeof skillId !== 'string' || skillId.length === 0) {
-    return nestedValidationFailureV1('nested_capability_invalid', resolved);
+    return nestedValidationFailure('nested_capability_invalid', resolved);
   }
   const descriptors = resolved.disclosedCapabilities.filter(
     (candidate) => candidate.capabilityId === skillId,
   );
   if (descriptors.length === 0) {
-    return nestedValidationFailureV1('nested_capability_missing', resolved);
+    return nestedValidationFailure('nested_capability_missing', resolved);
   }
   if (descriptors.length !== 1) {
-    return nestedValidationFailureV1('nested_capability_invalid', resolved);
+    return nestedValidationFailure('nested_capability_invalid', resolved);
   }
   const descriptor = descriptors[0]!;
   if (
     descriptor.kind !== 'skill' ||
     descriptor.availability !== 'available' ||
-    !descriptorRevisionMatchesV1(descriptor)
+    !descriptorRevisionMatches(descriptor)
   ) {
-    return nestedValidationFailureV1('nested_capability_invalid', resolved);
+    return nestedValidationFailure('nested_capability_invalid', resolved);
   }
   const disclosures = resolved.disclosures.filter(
     (candidate) => candidate.capabilityId === skillId,
   );
   if (disclosures.length === 0) {
-    return nestedValidationFailureV1('disclosure_missing', resolved);
+    return nestedValidationFailure('disclosure_missing', resolved);
   }
   if (disclosures.length !== 1) {
-    return nestedValidationFailureV1('nested_capability_invalid', resolved);
+    return nestedValidationFailure('nested_capability_invalid', resolved);
   }
   const disclosure = disclosures[0]!;
   if (
     disclosure.issuedForTurnId !== resolved.call.createdAtTurnId ||
     disclosure.capabilityRevision !== descriptor.revision
   ) {
-    return nestedValidationFailureV1('disclosure_stale', resolved);
+    return nestedValidationFailure('disclosure_stale', resolved);
   }
   return {
     ok: true,
@@ -1019,16 +998,16 @@ function validateNestedCapabilityV1(
   };
 }
 
-function validNestedCapabilityV1(
-  entry: BuiltinModelToolCatalogEntryV1,
-  resolved: Readonly<ResolvedInvocationV1>,
-  nested: NonNullable<ValidatedInvocationV1['nestedCapability']>,
+function validNestedCapability(
+  entry: BuiltinModelToolCatalogEntry,
+  resolved: Readonly<ResolvedInvocation>,
+  nested: NonNullable<ValidatedInvocation['nestedCapability']>,
 ): boolean {
   if (entry.operationId !== 'builtin:activate_skill') return false;
   if (
     nested.descriptor.kind !== 'skill' ||
     nested.descriptor.availability !== 'available' ||
-    !descriptorRevisionMatchesV1(nested.descriptor)
+    !descriptorRevisionMatches(nested.descriptor)
   ) {
     return false;
   }
@@ -1041,13 +1020,13 @@ function validNestedCapabilityV1(
   );
 }
 
-function nestedValidationFailureV1(
+function nestedValidationFailure(
   code:
     | 'nested_capability_missing'
     | 'nested_capability_invalid'
     | 'disclosure_missing'
     | 'disclosure_stale',
-  resolved: Readonly<ResolvedInvocationV1>,
+  resolved: Readonly<ResolvedInvocation>,
 ) {
   return {
     ok: false as const,
@@ -1060,15 +1039,15 @@ function nestedValidationFailureV1(
   };
 }
 
-function descriptorRevisionMatchesV1(descriptor: ToolPipelineCapabilityDescriptorV1): boolean {
+function descriptorRevisionMatches(descriptor: ToolPipelineCapabilityDescriptor): boolean {
   if (!descriptor || typeof descriptor !== 'object' || typeof descriptor.revision !== 'string') {
     return false;
   }
   const { revision, ...withoutRevision } = descriptor as Record<string, unknown>;
-  return digestCapabilityBindingValueV1(withoutRevision) === revision;
+  return digestCapabilityBindingValue(withoutRevision) === revision;
 }
 
-function capabilityFromEffectsV1(effects: CapabilityEffectsV1) {
+function capabilityFromEffects(effects: CapabilityEffects) {
   const levels = [effects.filesystem, effects.network, effects.externalState];
   if (levels.every((level) => level === 'none' || level === 'read')) {
     return {
@@ -1084,10 +1063,10 @@ function capabilityFromEffectsV1(effects: CapabilityEffectsV1) {
   };
 }
 
-function riskForEffectsV1(
+function riskForEffects(
   effectClass: 'read_only' | 'plan_only' | 'workspace_write' | 'external_side_effect' | 'unknown',
-  effects: CapabilityEffectsV1,
-): ClassifiedInvocationV1['risk'] {
+  effects: CapabilityEffects,
+): ClassifiedInvocation['risk'] {
   if (Object.values(effects).some((effect) => effect === 'destructive')) return 'destructive';
   if (effects.filesystem === 'write') return 'workspace_write';
   if (effects.network === 'read' || effects.network === 'write') return 'network';
@@ -1100,27 +1079,27 @@ function riskForEffectsV1(
   return 'unknown';
 }
 
-interface BuiltinParserAuthorityV1 {
-  readonly parser: CapabilityParserV1;
+interface BuiltinParserAuthority {
+  readonly parser: CapabilityParser;
   readonly schemaDigest: string | null;
-  readonly parse: (value: unknown) => ReturnType<CapabilityParserV1['parse']>;
-  readonly canonicalize: (value: unknown) => RuntimeJsonValueV1;
+  readonly parse: (value: unknown) => ReturnType<CapabilityParser['parse']>;
+  readonly canonicalize: (value: unknown) => RuntimeJsonValue;
   readonly observeUnknownFields: (
     value: unknown,
-  ) => ReturnType<CapabilityParserV1['observeUnknownFields']>;
+  ) => ReturnType<CapabilityParser['observeUnknownFields']>;
 }
 
-function argumentAuthorityForEntryV1(
-  entry: BuiltinModelToolCatalogEntryV1,
-  argumentOrigin: ToolArgumentOriginV1,
+function argumentAuthorityForEntry(
+  entry: BuiltinModelToolCatalogEntry,
+  argumentOrigin: ToolArgumentOrigin,
   value: unknown,
-): ToolArgumentOriginV1 | null {
+): ToolArgumentOrigin | null {
   if (argumentOrigin === 'model_public') return 'model_public';
   if (
     argumentOrigin !== 'runtime_private' ||
     entry.operationId !== 'builtin:task' ||
     entry.executionMechanism !== 'subagent' ||
-    !isRecordUnknownV1(value) ||
+    !isRecordUnknown(value) ||
     !('taskArtifact' in value)
   ) {
     return null;
@@ -1131,10 +1110,10 @@ function argumentAuthorityForEntryV1(
 }
 
 /** Select exactly the parser/schema pair that owns the model or private input. */
-function parserAuthorityForEntryV1(
-  entry: BuiltinModelToolCatalogEntryV1,
+function parserAuthorityForEntry(
+  entry: BuiltinModelToolCatalogEntry,
   privateTaskProjection: boolean,
-): BuiltinParserAuthorityV1 {
+): BuiltinParserAuthority {
   const parser = privateTaskProjection ? entry.parser : (entry.modelParser ?? entry.parser);
   const schema = privateTaskProjection
     ? (entry.inputSchema ?? entry.descriptor.inputSchema)
@@ -1150,21 +1129,21 @@ function parserAuthorityForEntryV1(
     // The projected schema is the model ToolSet schema. A contextual model
     // parser may retain a stable parserRevision while its selected schema
     // digest changes with the frozen turn projection.
-    schemaDigest: schema ? digestCapabilityBindingValueV1(schema) : (parser.schemaDigest ?? null),
+    schemaDigest: schema ? digestCapabilityBindingValue(schema) : (parser.schemaDigest ?? null),
     parse,
     canonicalize,
     observeUnknownFields,
   });
 }
 
-function nestedSkillFactsV1(
-  resolved: Readonly<ResolvedInvocationV1>,
-  descriptor: ToolPipelineCapabilityDescriptorV1,
-  disclosure: import('@kite/runtime-spi').ToolPipelineCapabilityDisclosureV1,
+function nestedSkillFacts(
+  resolved: Readonly<ResolvedInvocation>,
+  descriptor: ToolPipelineCapabilityDescriptor,
+  disclosure: import('@kite/runtime-spi').ToolPipelineCapabilityDisclosure,
   approvalSummary: string,
-): RuntimeJsonValueV1 {
-  const effectiveEffects = freezeEffectsV1(descriptor.effectiveEffects);
-  return freezeJsonV1({
+): RuntimeJsonValue {
+  const effectiveEffects = freezeEffects(descriptor.effectiveEffects);
+  return freezeJson({
     schema: 'kite.builtin-tool-pipeline-nested-skill-facts.v1',
     toolCallId: resolved.call.toolCallId,
     callCreatedAtTurnId: resolved.call.createdAtTurnId,
@@ -1175,60 +1154,60 @@ function nestedSkillFactsV1(
     nestedCatalogRevision: resolved.dynamicCatalogRevision,
     skillId: descriptor.capabilityId,
     descriptorRevision: descriptor.revision,
-    descriptor: descriptor as unknown as RuntimeJsonValueV1,
-    disclosure: disclosure as unknown as RuntimeJsonValueV1,
+    descriptor: descriptor as unknown as RuntimeJsonValue,
+    disclosure: disclosure as unknown as RuntimeJsonValue,
     effectiveEffects,
-    effectiveEffectsDigest: digestCapabilityBindingValueV1(effectiveEffects),
+    effectiveEffectsDigest: digestCapabilityBindingValue(effectiveEffects),
     minimumApproval: descriptor.policy.minimumApproval,
   });
 }
 
-interface PreparedNestedSkillFactsV1 {
-  readonly descriptor: ToolPipelineCapabilityDescriptorV1;
-  readonly disclosure: import('@kite/runtime-spi').ToolPipelineCapabilityDisclosureV1;
-  readonly effectiveEffects: CapabilityEffectsV1;
+interface PreparedNestedSkillFacts {
+  readonly descriptor: ToolPipelineCapabilityDescriptor;
+  readonly disclosure: import('@kite/runtime-spi').ToolPipelineCapabilityDisclosure;
+  readonly effectiveEffects: CapabilityEffects;
   readonly effectiveEffectsDigest: string;
   readonly minimumApproval: 'none' | 'auto_review' | 'user';
   readonly toolCallId: string;
   readonly callCreatedAtTurnId: string;
   readonly modelMessageId: string;
-  readonly argumentOrigin: ToolArgumentOriginV1;
+  readonly argumentOrigin: ToolArgumentOrigin;
   readonly dynamicCatalogRevision: null;
   readonly approvalSummary: string;
   readonly nestedCatalogRevision: string;
 }
 
-function preparedNestedSkillFactsV1(
-  value: RuntimeJsonValueV1 | undefined,
-): PreparedNestedSkillFactsV1 | null {
-  if (!isJsonRecordOptionalV1(value)) return null;
+function preparedNestedSkillFacts(
+  value: RuntimeJsonValue | undefined,
+): PreparedNestedSkillFacts | null {
+  if (!isJsonRecordOptional(value)) return null;
   if (value.schema !== 'kite.builtin-tool-pipeline-nested-skill-facts.v1') return null;
   const descriptor = value.descriptor;
   const disclosure = value.disclosure;
   const effects = value.effectiveEffects;
-  if (!isJsonRecordOptionalV1(descriptor) || !isJsonRecordOptionalV1(disclosure)) return null;
-  if (!isJsonRecordOptionalV1(effects)) return null;
+  if (!isJsonRecordOptional(descriptor) || !isJsonRecordOptional(disclosure)) return null;
+  if (!isJsonRecordOptional(effects)) return null;
   if (
     typeof value.toolCallId !== 'string' ||
     typeof value.callCreatedAtTurnId !== 'string' ||
     typeof value.modelMessageId !== 'string' ||
     (value.argumentOrigin !== 'model_public' && value.argumentOrigin !== 'runtime_private') ||
     value.dynamicCatalogRevision !== null ||
-    !isBoundedSummaryV1(value.approvalSummary) ||
+    !isBoundedSummary(value.approvalSummary) ||
     typeof value.nestedCatalogRevision !== 'string' ||
-    !SHA256_HEX_V1.test(value.nestedCatalogRevision) ||
+    !SHA256_HEX_.test(value.nestedCatalogRevision) ||
     typeof value.effectiveEffectsDigest !== 'string' ||
-    !isApprovalV1(value.minimumApproval) ||
-    !isEffectLevelV1(effects.filesystem) ||
-    !isEffectLevelV1(effects.network) ||
-    !isEffectLevelV1(effects.externalState)
+    !isApproval(value.minimumApproval) ||
+    !isEffectLevel(effects.filesystem) ||
+    !isEffectLevel(effects.network) ||
+    !isEffectLevel(effects.externalState)
   ) {
     return null;
   }
   return {
-    descriptor: descriptor as unknown as ToolPipelineCapabilityDescriptorV1,
+    descriptor: descriptor as unknown as ToolPipelineCapabilityDescriptor,
     disclosure:
-      disclosure as unknown as import('@kite/runtime-spi').ToolPipelineCapabilityDisclosureV1,
+      disclosure as unknown as import('@kite/runtime-spi').ToolPipelineCapabilityDisclosure,
     effectiveEffects: {
       filesystem: effects.filesystem,
       network: effects.network,
@@ -1246,10 +1225,10 @@ function preparedNestedSkillFactsV1(
   };
 }
 
-function preparedNestedSkillFactsMatchV1(
-  facts: PreparedNestedSkillFactsV1,
-  argumentsValue: Readonly<Record<string, RuntimeJsonValueV1>>,
-  identity: Readonly<PreparedToolInvocationV1['identity']>,
+function preparedNestedSkillFactsMatch(
+  facts: PreparedNestedSkillFacts,
+  argumentsValue: Readonly<Record<string, RuntimeJsonValue>>,
+  identity: Readonly<PreparedToolInvocation['identity']>,
 ): boolean {
   const skillId = argumentsValue.skill_id;
   const descriptor = facts.descriptor;
@@ -1259,7 +1238,7 @@ function preparedNestedSkillFactsMatchV1(
     descriptor.kind !== 'skill' ||
     descriptor.availability !== 'available' ||
     descriptor.capabilityId !== skillId ||
-    !descriptorRevisionMatchesV1(descriptor) ||
+    !descriptorRevisionMatches(descriptor) ||
     disclosure.capabilityId !== descriptor.capabilityId ||
     disclosure.capabilityRevision !== descriptor.revision ||
     disclosure.issuedForTurnId !== facts.callCreatedAtTurnId ||
@@ -1272,8 +1251,8 @@ function preparedNestedSkillFactsMatchV1(
     identity.nestedCapabilityRevision !== descriptor.revision ||
     identity.nestedCatalogRevision !== facts.nestedCatalogRevision ||
     descriptor.policy.minimumApproval !== facts.minimumApproval ||
-    digestCapabilityBindingValueV1(facts.effectiveEffects) !== facts.effectiveEffectsDigest ||
-    digestCapabilityBindingValueV1(descriptor.effectiveEffects) !== facts.effectiveEffectsDigest ||
+    digestCapabilityBindingValue(facts.effectiveEffects) !== facts.effectiveEffectsDigest ||
+    digestCapabilityBindingValue(descriptor.effectiveEffects) !== facts.effectiveEffectsDigest ||
     identity.effectiveEffectsDigest !== facts.effectiveEffectsDigest
   ) {
     return false;
@@ -1281,10 +1260,10 @@ function preparedNestedSkillFactsMatchV1(
   return true;
 }
 
-function bindingMatchesEntryV1(
-  binding: CapabilityBindingV1 | null,
+function bindingMatchesEntry(
+  binding: CapabilityBinding | null,
   bindingId: string | null,
-  entry: BuiltinModelToolCatalogEntryV1,
+  entry: BuiltinModelToolCatalogEntry,
   schemaDigest: string,
 ): boolean {
   if (bindingId === null) return binding === null;
@@ -1299,7 +1278,7 @@ function bindingMatchesEntryV1(
   }
   return (
     binding.bindingId ===
-    digestCapabilityBindingValueV1({
+    digestCapabilityBindingValue({
       capabilityId: binding.capabilityId,
       revision: binding.capabilityRevision,
       exposedToolName: binding.exposedToolName,
@@ -1309,19 +1288,19 @@ function bindingMatchesEntryV1(
   );
 }
 
-function invocationRequirementsV1(
-  toolKind: ClassifiedInvocationV1['validated']['resolved']['target']['toolKind'],
+function invocationRequirements(
+  toolKind: ClassifiedInvocation['validated']['resolved']['target']['toolKind'],
   classification: Pick<
-    ReturnType<BuiltinModelToolCatalogEntryV1['classifyEffects']>,
+    ReturnType<BuiltinModelToolCatalogEntry['classifyEffects']>,
     'effectClass' | 'sideEffect'
   >,
-  effects: CapabilityEffectsV1,
-  descriptor: ToolPipelineCapabilityDescriptorV1,
+  effects: CapabilityEffects,
+  descriptor: ToolPipelineCapabilityDescriptor,
 ) {
   const receipt =
     toolKind === 'runtime_action'
       ? ('control_receipt' as const)
-      : classification.sideEffect || hasMutationOrUnknownEffectV1(effects)
+      : classification.sideEffect || hasMutationOrUnknownEffect(effects)
         ? ('effect_receipt' as const)
         : ('observation_receipt' as const);
   const retry =
@@ -1342,33 +1321,33 @@ function invocationRequirementsV1(
   });
 }
 
-function hasMutationOrUnknownEffectV1(effects: CapabilityEffectsV1): boolean {
+function hasMutationOrUnknownEffect(effects: CapabilityEffects): boolean {
   return Object.values(effects).some(
     (effect) => effect === 'write' || effect === 'destructive' || effect === 'unknown',
   );
 }
 
-function idempotencyKeyFromArgumentsV1(
-  argumentsValue: Readonly<Record<string, RuntimeJsonValueV1>>,
+function idempotencyKeyFromArguments(
+  argumentsValue: Readonly<Record<string, RuntimeJsonValue>>,
   field: string,
 ): string | null {
   const value = argumentsValue[field];
   return typeof value === 'string' ? value : null;
 }
 
-function freezePolicyCompilationV1(
-  value: CapabilityPolicyCompilationV1,
-): Readonly<CapabilityPolicyCompilationV1> {
+function freezePolicyCompilation(
+  value: CapabilityPolicyCompilation,
+): Readonly<CapabilityPolicyCompilation> {
   return Object.freeze({
     ...value,
     ...(value.effects ? { effects: Object.freeze({ ...value.effects }) } : {}),
     ...(value.recovery ? { recovery: Object.freeze({ ...value.recovery }) } : {}),
-    effectiveEffects: freezeEffectsV1(value.effectiveEffects),
+    effectiveEffects: freezeEffects(value.effectiveEffects),
     expectedEffects: Object.freeze([...value.expectedEffects]),
   });
 }
 
-function freezeEffectsV1(value: CapabilityEffectsV1): Readonly<CapabilityEffectsV1> {
+function freezeEffects(value: CapabilityEffects): Readonly<CapabilityEffects> {
   return Object.freeze({
     filesystem: value.filesystem,
     network: value.network,
@@ -1376,9 +1355,9 @@ function freezeEffectsV1(value: CapabilityEffectsV1): Readonly<CapabilityEffects
   });
 }
 
-function freezeExecutionTraitsV1(
-  value: CapabilityExecutionTraitsV1,
-): Readonly<CapabilityExecutionTraitsV1> {
+function freezeExecutionTraits(
+  value: CapabilityExecutionTraits,
+): Readonly<CapabilityExecutionTraits> {
   return Object.freeze({
     ...value,
     resourceScopes: Object.freeze(value.resourceScopes.map((scope) => Object.freeze({ ...scope }))),
@@ -1386,9 +1365,9 @@ function freezeExecutionTraitsV1(
   });
 }
 
-function freezeAvailabilityContextV1(
-  value: Readonly<CapabilityAvailabilityContextV1>,
-): Readonly<CapabilityAvailabilityContextV1> {
+function freezeAvailabilityContext(
+  value: Readonly<CapabilityAvailabilityContext>,
+): Readonly<CapabilityAvailabilityContext> {
   return Object.freeze({
     ...value,
     ...(value.featureFlags ? { featureFlags: Object.freeze({ ...value.featureFlags }) } : {}),
@@ -1401,50 +1380,50 @@ function freezeAvailabilityContextV1(
   });
 }
 
-function freezeJsonArrayV1<T>(value: readonly T[]): readonly T[] {
+function freezeJsonArray<T>(value: readonly T[]): readonly T[] {
   return Object.freeze(
-    value.map((item) => freezeJsonV1(item as unknown as RuntimeJsonValueV1)),
+    value.map((item) => freezeJson(item as unknown as RuntimeJsonValue)),
   ) as readonly T[];
 }
 
-function freezeJsonV1(value: RuntimeJsonValueV1): RuntimeJsonValueV1 {
-  if (Array.isArray(value)) return Object.freeze(value.map((item) => freezeJsonV1(item)));
+function freezeJson(value: RuntimeJsonValue): RuntimeJsonValue {
+  if (Array.isArray(value)) return Object.freeze(value.map((item) => freezeJson(item)));
   if (value && typeof value === 'object') {
     return Object.freeze(
-      Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeJsonV1(item)])),
-    ) as RuntimeJsonValueV1;
+      Object.fromEntries(Object.entries(value).map(([key, item]) => [key, freezeJson(item)])),
+    ) as RuntimeJsonValue;
   }
   return value;
 }
 
-function isJsonRecordV1(
-  value: RuntimeJsonValueV1,
-): value is Readonly<Record<string, RuntimeJsonValueV1>> {
+function isJsonRecord(
+  value: RuntimeJsonValue,
+): value is Readonly<Record<string, RuntimeJsonValue>> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function isJsonRecordOptionalV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is Readonly<Record<string, RuntimeJsonValueV1>> {
-  return value !== undefined && isJsonRecordV1(value);
+function isJsonRecordOptional(
+  value: RuntimeJsonValue | undefined,
+): value is Readonly<Record<string, RuntimeJsonValue>> {
+  return value !== undefined && isJsonRecord(value);
 }
 
-function factsProvideParserContextV1(facts: RuntimeJsonValueV1 | undefined): boolean {
-  return isJsonRecordOptionalV1(facts) && Object.hasOwn(facts, 'parserContext');
+function factsProvideParserContext(facts: RuntimeJsonValue | undefined): boolean {
+  return isJsonRecordOptional(facts) && Object.hasOwn(facts, 'parserContext');
 }
 
-interface PreparedCallFactsV1 {
+interface PreparedCallFacts {
   readonly toolCallId: string;
   readonly callCreatedAtTurnId: string;
   readonly modelMessageId: string;
-  readonly argumentOrigin: ToolArgumentOriginV1;
+  readonly argumentOrigin: ToolArgumentOrigin;
   readonly dynamicCatalogRevision: string | null;
   readonly approvalSummary: string;
 }
 
-function preparedCallFactsV1(facts: RuntimeJsonValueV1 | undefined): PreparedCallFactsV1 | null {
-  if (!isJsonRecordOptionalV1(facts)) return null;
-  if (facts.schema !== BUILTIN_PREPARED_CALL_FACTS_SCHEMA_V1) {
+function preparedCallFacts(facts: RuntimeJsonValue | undefined): PreparedCallFacts | null {
+  if (!isJsonRecordOptional(facts)) return null;
+  if (facts.schema !== BUILTIN_PREPARED_CALL_FACTS_SCHEMA_) {
     return null;
   }
   if (
@@ -1455,10 +1434,10 @@ function preparedCallFactsV1(facts: RuntimeJsonValueV1 | undefined): PreparedCal
     typeof facts.modelMessageId !== 'string' ||
     facts.modelMessageId.length === 0 ||
     (facts.argumentOrigin !== 'model_public' && facts.argumentOrigin !== 'runtime_private') ||
-    !isBoundedSummaryV1(facts.approvalSummary) ||
+    !isBoundedSummary(facts.approvalSummary) ||
     (facts.dynamicCatalogRevision !== null &&
       (typeof facts.dynamicCatalogRevision !== 'string' ||
-        !SHA256_HEX_V1.test(facts.dynamicCatalogRevision)))
+        !SHA256_HEX_.test(facts.dynamicCatalogRevision)))
   ) {
     return null;
   }
@@ -1472,14 +1451,12 @@ function preparedCallFactsV1(facts: RuntimeJsonValueV1 | undefined): PreparedCal
   });
 }
 
-function isApprovalV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is 'none' | 'auto_review' | 'user' {
+function isApproval(value: RuntimeJsonValue | undefined): value is 'none' | 'auto_review' | 'user' {
   return value === 'none' || value === 'auto_review' || value === 'user';
 }
 
-function isEffectLevelV1(
-  value: RuntimeJsonValueV1 | undefined,
+function isEffectLevel(
+  value: RuntimeJsonValue | undefined,
 ): value is 'none' | 'read' | 'write' | 'destructive' | 'unknown' {
   return (
     value === 'none' ||
@@ -1490,11 +1467,11 @@ function isEffectLevelV1(
   );
 }
 
-function isRecordUnknownV1(value: unknown): value is Readonly<Record<string, unknown>> {
+function isRecordUnknown(value: unknown): value is Readonly<Record<string, unknown>> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function boundedParseDiagnosticV1(issue: CapabilityParseIssueV1 | undefined): string {
+function boundedParseDiagnostic(issue: CapabilityParseIssue | undefined): string {
   if (!issue) return 'Builtin arguments failed parser validation.';
   const path = issue.path
     .filter((part) => typeof part === 'string' || typeof part === 'number')
@@ -1504,39 +1481,39 @@ function boundedParseDiagnosticV1(issue: CapabilityParseIssueV1 | undefined): st
   return `${path ? `${path}: ` : ''}${code || 'invalid_arguments'}`.slice(0, 256);
 }
 
-function boundedSummaryV1(value: string): string {
+function boundedSummary(value: string): string {
   return typeof value === 'string' ? value.slice(0, 1024) : 'Builtin tool invocation.';
 }
 
-function isBoundedSummaryV1(value: RuntimeJsonValueV1 | undefined): value is string {
+function isBoundedSummary(value: RuntimeJsonValue | undefined): value is string {
   return typeof value === 'string' && value.length <= 1024;
 }
 
-function invalidIdentityV1(
+function invalidIdentity(
   code: 'identity_mismatch' | 'revision_mismatch' | 'schema_mismatch' | 'visibility_mismatch',
-): ToolPipelinePreparedIdentityVerificationResultV1 {
+): ToolPipelinePreparedIdentityVerificationResult {
   return Object.freeze({ valid: false, code });
 }
 
-function invalidClassifiedIdentityV1(
+function invalidClassifiedIdentity(
   code: Extract<
-    ToolPipelineClassifiedIdentityVerificationResultV1,
+    ToolPipelineClassifiedIdentityVerificationResult,
     { readonly valid: false }
   >['code'],
-): ToolPipelineClassifiedIdentityVerificationResultV1 {
+): ToolPipelineClassifiedIdentityVerificationResult {
   return Object.freeze({ valid: false, code });
 }
 
-function successV1<T>(value: T): { readonly ok: true; readonly value: Readonly<T> } {
+function success<T>(value: T): { readonly ok: true; readonly value: Readonly<T> } {
   return Object.freeze({ ok: true as const, value: Object.freeze(value) });
 }
 
-function resolveFailureV1(
-  code: ToolPipelineResolveFailureCodeV1,
+function resolveFailure(
+  code: ToolPipelineResolveFailureCode,
   toolCallId: string | null,
   toolName: string | null,
   diagnostic?: string,
-): ToolResolutionResultV1 {
+): ToolResolutionResult {
   return Object.freeze({
     ok: false as const,
     failure: Object.freeze({
@@ -1549,12 +1526,12 @@ function resolveFailureV1(
   });
 }
 
-function validationFailureV1(
-  code: ToolPipelineValidateFailureCodeV1,
+function validationFailure(
+  code: ToolPipelineValidateFailureCode,
   toolCallId: string | null,
   toolName: string | null,
   diagnostic?: string,
-): ToolValidationResultV1 {
+): ToolValidationResult {
   return Object.freeze({
     ok: false as const,
     failure: Object.freeze({
@@ -1567,11 +1544,11 @@ function validationFailureV1(
   });
 }
 
-function classifyFailureV1(
-  code: ToolPipelineClassifyFailureCodeV1,
+function classifyFailure(
+  code: ToolPipelineClassifyFailureCode,
   toolCallId: string | null,
   toolName: string | null,
-): ToolClassificationResultV1 {
+): ToolClassificationResult {
   return Object.freeze({
     ok: false as const,
     failure: Object.freeze({ stage: 'classify' as const, code, toolCallId, toolName }),

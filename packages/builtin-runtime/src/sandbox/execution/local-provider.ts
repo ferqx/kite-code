@@ -2,31 +2,31 @@ import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  BROKERED_GIT_FEATURE_REVISION_V1,
-  type PreparedSandboxExecutionV1,
-  type SandboxCleanupGrantV1,
-  type SandboxExecutionBackendV1,
-  type SandboxExecutionProviderFailureCodeV1,
-  type SandboxExecutionProviderResultV1,
-  type SandboxExecutionProviderV1,
-  type SandboxPreparationGrantV1,
-  type SandboxPreparationV1,
+  BROKERED_GIT_FEATURE_REVISION_,
+  type PreparedSandboxExecution,
+  type SandboxCleanupGrant,
+  type SandboxExecutionBackend,
+  type SandboxExecutionProvider,
+  type SandboxExecutionProviderFailureCode,
+  type SandboxExecutionProviderResult,
+  type SandboxPreparation,
+  type SandboxPreparationGrant,
 } from '@kite/runtime-spi';
 import { generateBwrapArgs } from '../bwrap';
-import type { CgroupPidsRunnerV1 } from '../cgroup-pids-contract';
+import type { CgroupPidsRunner } from '../cgroup-pids-contract';
 import { discoverRuntimeReadOnlyRoots, generateSandboxProfile } from '../profile';
 import { findApplySeccomp, resolveSeccompPath } from '../seccomp';
 import type { ResourceLimits } from '../types';
-import { sandboxBackendCapabilitiesV1 } from './backend-capabilities';
-import type { SandboxExecutionGrantVerifierV1 } from './grant-authority';
-import { sandboxCleanupDigestV1, sandboxPreparedPlanDigestV1 } from './grant-authority';
+import { sandboxBackendCapabilities } from './backend-capabilities';
+import type { SandboxExecutionGrantVerifier } from './grant-authority';
+import { sandboxCleanupDigest, sandboxPreparedPlanDigest } from './grant-authority';
 import {
-  cleanupPosixSandboxRuntimeRootsNoSpawnV1,
-  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
-  createPosixSandboxRuntimeRootsForPreparationV1,
-  createWindowsSandboxRuntimeDirForPreparationV1,
-  sandboxRuntimeDirForPreparationV1,
-  sandboxRuntimeRootsForPreparationV1,
+  cleanupPosixSandboxRuntimeRootsNoSpawn,
+  cleanupWindowsSandboxRuntimeDirNoSpawn,
+  createPosixSandboxRuntimeRootsForPreparation,
+  createWindowsSandboxRuntimeDirForPreparation,
+  sandboxRuntimeDirForPreparation,
+  sandboxRuntimeRootsForPreparation,
 } from './local-runtime-filesystem';
 import {
   buildEnvExportSnippet,
@@ -34,28 +34,28 @@ import {
   buildHardenedEnv,
   buildUlimitPreamble,
 } from './local-shell-preparation';
-import { prepareWindowsRestrictedTokenTransportV1 } from './windows-preparation';
+import { prepareWindowsRestrictedTokenTransport } from './windows-preparation';
 
-export interface LocalSandboxExecutionProviderOptionsV1 {
-  readonly backend: Exclude<SandboxExecutionBackendV1, 'none'>;
+export interface LocalSandboxExecutionProviderOptions {
+  readonly backend: Exclude<SandboxExecutionBackend, 'none'>;
   readonly canonicalWorkspace: string;
   readonly filesystemScope?: 'read_only' | 'workspace_write';
   readonly runtimeReadOnlyRoots?: readonly string[];
-  readonly brokeredGitFeatureRevision?: typeof BROKERED_GIT_FEATURE_REVISION_V1;
+  readonly brokeredGitFeatureRevision?: typeof BROKERED_GIT_FEATURE_REVISION_;
   readonly startupProbe?: boolean;
   readonly bubblewrapPath?: string;
-  readonly cgroupPidsRunner?: CgroupPidsRunnerV1;
+  readonly cgroupPidsRunner?: CgroupPidsRunner;
 }
 
 /** Local confinement preparation. This module never imports or calls Bun.spawn. */
-export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProviderV1 {
+export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
   readonly resourceSemantics = 'allocating' as const;
-  readonly #verifier: SandboxExecutionGrantVerifierV1;
-  readonly #options: LocalSandboxExecutionProviderOptionsV1;
+  readonly #verifier: SandboxExecutionGrantVerifier;
+  readonly #options: LocalSandboxExecutionProviderOptions;
 
   constructor(
-    verifier: SandboxExecutionGrantVerifierV1,
-    options: LocalSandboxExecutionProviderOptionsV1,
+    verifier: SandboxExecutionGrantVerifier,
+    options: LocalSandboxExecutionProviderOptions,
   ) {
     this.#verifier = verifier;
     this.#options = Object.freeze({
@@ -65,11 +65,11 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
   }
 
   async prepare(input: {
-    readonly grant: SandboxPreparationGrantV1;
+    readonly grant: SandboxPreparationGrant;
     readonly signal?: AbortSignal;
-  }): Promise<SandboxExecutionProviderResultV1<PreparedSandboxExecutionV1>> {
+  }): Promise<SandboxExecutionProviderResult<PreparedSandboxExecution>> {
     if (input.signal?.aborted) return failure('cancelled', 'Sandbox preparation was cancelled.');
-    let grant: Readonly<SandboxPreparationGrantV1>;
+    let grant: Readonly<SandboxPreparationGrant>;
     try {
       grant = this.#verifier.verify(input.grant);
     } catch (error) {
@@ -102,14 +102,14 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
     if (this.#options.backend === 'windows_restricted_token') {
       return this.#prepareWindows(grant, canonicalWorkspace);
     }
-    let runtimeRoots: ReturnType<typeof sandboxRuntimeRootsForPreparationV1> | undefined;
+    let runtimeRoots: ReturnType<typeof sandboxRuntimeRootsForPreparation> | undefined;
     try {
-      runtimeRoots = createPosixSandboxRuntimeRootsForPreparationV1(
+      runtimeRoots = createPosixSandboxRuntimeRootsForPreparation(
         canonicalWorkspace,
         grant.preparationDigest,
       );
       if (input.signal?.aborted) {
-        const cleaned = cleanupPosixSandboxRuntimeRootsNoSpawnV1(runtimeRoots);
+        const cleaned = cleanupPosixSandboxRuntimeRootsNoSpawn(runtimeRoots);
         return cleaned
           ? failure('cancelled', 'Sandbox preparation was cancelled.')
           : failure('dispose_failed', 'Cancelled sandbox preparation could not be disposed.');
@@ -117,7 +117,7 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
       const plan = this.#preparePosix(grant, canonicalWorkspace, runtimeRoots);
       return { ok: true, observation: deepFreeze(plan) };
     } catch (error) {
-      if (runtimeRoots && !cleanupPosixSandboxRuntimeRootsNoSpawnV1(runtimeRoots)) {
+      if (runtimeRoots && !cleanupPosixSandboxRuntimeRootsNoSpawn(runtimeRoots)) {
         return failure(
           'dispose_failed',
           `Sandbox preparation failed and its runtime could not be disposed: ${message(error)}`,
@@ -128,26 +128,26 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
   }
 
   async dispose(input: {
-    readonly grant: SandboxCleanupGrantV1;
-    readonly prepared: PreparedSandboxExecutionV1;
+    readonly grant: SandboxCleanupGrant;
+    readonly prepared: PreparedSandboxExecution;
     readonly signal?: AbortSignal;
-  }): Promise<SandboxExecutionProviderResultV1<{ readonly disposed: true }>> {
+  }): Promise<SandboxExecutionProviderResult<{ readonly disposed: true }>> {
     return this.#dispose(input.grant, input.prepared, 'dispose');
   }
 
   async reconcile(input: {
-    readonly grant: SandboxCleanupGrantV1;
-    readonly prepared: PreparedSandboxExecutionV1;
+    readonly grant: SandboxCleanupGrant;
+    readonly prepared: PreparedSandboxExecution;
     readonly signal?: AbortSignal;
-  }): Promise<SandboxExecutionProviderResultV1<{ readonly disposed: true }>> {
+  }): Promise<SandboxExecutionProviderResult<{ readonly disposed: true }>> {
     return this.#dispose(input.grant, input.prepared, 'reconcile');
   }
 
   async reconcilePreparationIntent(input: {
-    readonly grant: SandboxCleanupGrantV1;
+    readonly grant: SandboxCleanupGrant;
     readonly signal?: AbortSignal;
-  }): Promise<SandboxExecutionProviderResultV1<{ readonly disposed: true }>> {
-    let grant: Readonly<SandboxCleanupGrantV1>;
+  }): Promise<SandboxExecutionProviderResult<{ readonly disposed: true }>> {
+    let grant: Readonly<SandboxCleanupGrant>;
     try {
       grant = this.#verifier.verifyCleanup(input.grant);
     } catch (error) {
@@ -161,11 +161,11 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
       return failure('dispose_failed', 'Sandbox preparation intent cleanup identity is invalid.');
     }
     if (this.#options.backend === 'windows_restricted_token') {
-      const runtimeRoot = sandboxRuntimeDirForPreparationV1(
+      const runtimeRoot = sandboxRuntimeDirForPreparation(
         this.#options.canonicalWorkspace,
         grant.preparationDigest,
       );
-      return cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)
+      return cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeRoot)
         ? { ok: true, observation: Object.freeze({ disposed: true as const }) }
         : failure(
             'dispose_failed',
@@ -173,11 +173,11 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
           );
     }
     try {
-      const roots = sandboxRuntimeRootsForPreparationV1(
+      const roots = sandboxRuntimeRootsForPreparation(
         this.#options.canonicalWorkspace,
         grant.preparationDigest,
       );
-      return cleanupPosixSandboxRuntimeRootsNoSpawnV1(roots)
+      return cleanupPosixSandboxRuntimeRootsNoSpawn(roots)
         ? { ok: true, observation: Object.freeze({ disposed: true as const }) }
         : failure('dispose_failed', 'Sandbox preparation intent cleanup could not be confirmed.');
     } catch (error) {
@@ -186,11 +186,11 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
   }
 
   async #dispose(
-    cleanupGrant: SandboxCleanupGrantV1,
-    prepared: PreparedSandboxExecutionV1,
+    cleanupGrant: SandboxCleanupGrant,
+    prepared: PreparedSandboxExecution,
     purpose: 'dispose' | 'reconcile',
-  ): Promise<SandboxExecutionProviderResultV1<{ readonly disposed: true }>> {
-    let grant: Readonly<SandboxCleanupGrantV1>;
+  ): Promise<SandboxExecutionProviderResult<{ readonly disposed: true }>> {
+    let grant: Readonly<SandboxCleanupGrant>;
     try {
       grant = this.#verifier.verifyCleanup(cleanupGrant);
     } catch (error) {
@@ -198,8 +198,8 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
     }
     if (
       grant.purpose !== purpose ||
-      grant.preparedPlanDigest !== sandboxPreparedPlanDigestV1(prepared) ||
-      grant.cleanupDigest !== sandboxCleanupDigestV1(prepared.cleanup) ||
+      grant.preparedPlanDigest !== sandboxPreparedPlanDigest(prepared) ||
+      grant.cleanupDigest !== sandboxCleanupDigest(prepared.cleanup) ||
       grant.toolCallId !== prepared.toolCallId ||
       grant.capabilityId !== prepared.capabilityId ||
       grant.capabilityRevision !== prepared.capabilityRevision ||
@@ -226,7 +226,7 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
       if (typeof path !== 'string') {
         return failure('dispose_failed', 'Windows sandbox cleanup handle is incomplete.');
       }
-      return cleanupWindowsSandboxRuntimeDirNoSpawnV1(path)
+      return cleanupWindowsSandboxRuntimeDirNoSpawn(path)
         ? { ok: true, observation: Object.freeze({ disposed: true as const }) }
         : failure('dispose_failed', 'Windows sandbox runtime cleanup could not be confirmed.');
     }
@@ -234,7 +234,7 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
       prepared.cleanup.kind === 'runtime_directory' &&
       typeof prepared.cleanup.recoveryPayload.controlRoot === 'string' &&
       typeof prepared.cleanup.recoveryPayload.dataRoot === 'string' &&
-      cleanupPosixSandboxRuntimeRootsNoSpawnV1({
+      cleanupPosixSandboxRuntimeRootsNoSpawn({
         controlRoot: prepared.cleanup.recoveryPayload.controlRoot,
         dataRoot: prepared.cleanup.recoveryPayload.dataRoot,
       });
@@ -245,10 +245,10 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
   }
 
   #preparePosix(
-    grant: Readonly<SandboxPreparationGrantV1>,
+    grant: Readonly<SandboxPreparationGrant>,
     workspace: string,
-    runtimeRoots: Readonly<ReturnType<typeof sandboxRuntimeRootsForPreparationV1>>,
-  ): PreparedSandboxExecutionV1 {
+    runtimeRoots: Readonly<ReturnType<typeof sandboxRuntimeRootsForPreparation>>,
+  ): PreparedSandboxExecution {
     const preparation = grant.preparation;
     const command = commandFromArgv(preparation.argv);
     const policyProvenReadOnly = preparation.executionTrust === 'policy_proven_read_only';
@@ -273,7 +273,7 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
         sandboxRuntimeDir: runtimeRoots.dataRoot,
         runtimeReadOnlyRoots: this.#options.runtimeReadOnlyRoots ?? discoverRuntimeReadOnlyRoots(),
         gitAccess:
-          this.#options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1
+          this.#options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_
             ? 'deny'
             : 'allow',
       });
@@ -290,7 +290,7 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
             ? 'full_access'
             : (this.#options.filesystemScope ?? 'workspace_write'),
         gitMetadataDeny:
-          this.#options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1,
+          this.#options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_,
       });
       const inner = seccomp
         ? [seccomp, shell, '-c', wrappedCommand]
@@ -306,7 +306,7 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
         argv = sandboxArgv;
       }
     }
-    const capabilities = sandboxBackendCapabilitiesV1(this.#options.backend);
+    const capabilities = sandboxBackendCapabilities(this.#options.backend);
     return {
       schema: 'kite.sandbox-execution-provider.v1',
       kind: 'prepared_sandbox_execution',
@@ -346,17 +346,17 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
   }
 
   #prepareWindows(
-    grant: Readonly<SandboxPreparationGrantV1>,
+    grant: Readonly<SandboxPreparationGrant>,
     workspace: string,
-  ): SandboxExecutionProviderResultV1<PreparedSandboxExecutionV1> {
+  ): SandboxExecutionProviderResult<PreparedSandboxExecution> {
     const preparation = grant.preparation;
     let runtimeRoot: string | undefined;
     try {
-      runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
+      runtimeRoot = createWindowsSandboxRuntimeDirForPreparation(
         workspace,
         grant.preparationDigest,
       );
-      const prepared = prepareWindowsRestrictedTokenTransportV1(
+      const prepared = prepareWindowsRestrictedTokenTransport(
         {
           enabled: true,
           workspace,
@@ -376,11 +376,11 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
         runtimeRoot,
       );
       if (!prepared.ok) {
-        cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot);
+        cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeRoot);
         return failure('backend_unavailable', prepared.error);
       }
       const transport = prepared.prepared;
-      const capabilities = sandboxBackendCapabilitiesV1(this.#options.backend);
+      const capabilities = sandboxBackendCapabilities(this.#options.backend);
       const serialized = JSON.stringify(transport);
       return {
         ok: true,
@@ -420,7 +420,7 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
         }),
       };
     } catch (error) {
-      if (runtimeRoot) cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot);
+      if (runtimeRoot) cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeRoot);
       return failure('preparation_failed', message(error));
     }
   }
@@ -437,7 +437,7 @@ function commandFromArgv(argv: readonly string[]): string {
   return argv.at(-1)!;
 }
 
-function resourceLimits(input: SandboxPreparationV1['resourceLimits']): Partial<ResourceLimits> {
+function resourceLimits(input: SandboxPreparation['resourceLimits']): Partial<ResourceLimits> {
   return {
     cpuTime: input.cpuTime,
     virtualMemory: input.virtualMemory,
@@ -448,9 +448,9 @@ function resourceLimits(input: SandboxPreparationV1['resourceLimits']): Partial<
 }
 
 function failure(
-  code: SandboxExecutionProviderFailureCodeV1,
+  code: SandboxExecutionProviderFailureCode,
   text: string,
-): SandboxExecutionProviderResultV1<never> {
+): SandboxExecutionProviderResult<never> {
   return { ok: false, failure: Object.freeze({ code, message: text }) };
 }
 

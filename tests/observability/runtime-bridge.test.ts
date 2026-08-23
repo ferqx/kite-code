@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { projectRuntimeEventToObservabilityFactV1 } from '@kite/agent-kernel';
-import { createBuiltinObservabilityProjectorV1 } from '@kite/builtin-runtime';
-import { BufferedMetricReporterV1 } from '@kite/runtime-host';
-import { RuntimeMetricBridgeV1 } from '../../apps/kite/src/observability/runtime-bridge';
+import { projectRuntimeEventToObservabilityFact } from '@kite/agent-kernel';
+import { createBuiltinObservabilityProjector } from '@kite/builtin-runtime';
+import { BufferedMetricReporter } from '@kite/runtime-host';
+import { RuntimeMetricBridge } from '../../apps/kite/src/observability/runtime-bridge';
 
 describe('Runtime metric bridge', () => {
   test('maps the public Runtime stream into the shared bounded reporter', async () => {
     const exported: string[] = [];
-    const reporter = new BufferedMetricReporterV1({
+    const reporter = new BufferedMetricReporter({
       enabled: true,
       capacity: 8,
       exporter: {
@@ -16,15 +16,15 @@ describe('Runtime metric bridge', () => {
         },
       },
     });
-    const bridge = new RuntimeMetricBridgeV1({
-      projector: createBuiltinObservabilityProjectorV1(),
+    const bridge = new RuntimeMetricBridge({
+      projector: createBuiltinObservabilityProjector(),
       reporter,
     });
-    const turnFact = projectRuntimeEventToObservabilityFactV1(
+    const turnFact = projectRuntimeEventToObservabilityFact(
       { type: 'turn.completed', turnId: 'turn-1' },
       '2026-08-03T00:00:00.000Z',
     );
-    const retryFact = projectRuntimeEventToObservabilityFactV1(
+    const retryFact = projectRuntimeEventToObservabilityFact(
       {
         eventId: 'event-1',
         threadId: 'thread-1',
@@ -43,8 +43,8 @@ describe('Runtime metric bridge', () => {
   });
 
   test('never lets projector or reporter failures change Runtime flow', () => {
-    const bridge = new RuntimeMetricBridgeV1({
-      projector: createBuiltinObservabilityProjectorV1(),
+    const bridge = new RuntimeMetricBridge({
+      projector: createBuiltinObservabilityProjector(),
       reporter: {
         report: () => {
           throw new Error('exporter detail');
@@ -65,7 +65,7 @@ describe('Runtime metric bridge', () => {
         }),
       },
     });
-    const turnFact = projectRuntimeEventToObservabilityFactV1(
+    const turnFact = projectRuntimeEventToObservabilityFact(
       { type: 'turn.completed', turnId: 'turn-1' },
       '2026-08-03T00:00:00.000Z',
     );

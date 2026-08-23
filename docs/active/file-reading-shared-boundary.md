@@ -12,11 +12,11 @@
 在 Windows/Linux/macOS 三平台下，读取、编辑准备与提交使用同一 Local Provider 解码和目标身份，且任何
 Workspace filesystem I/O 都不能绕过 Tool Pipeline 的 durable intent 与 purpose-bound grant。
 
-## 当前生产权威（PS-01 + RMV1-12）
+## 当前生产权威（PS-01 + RM-12）
 
-生产文件能力的唯一 contract seam 是 `@kite/runtime-spi` 的 `WorkspaceFilesystemProviderV1`，其三个 purpose
+生产文件能力的唯一 contract seam 是 `@kite/runtime-spi` 的 `WorkspaceFilesystemProvider`，其三个 purpose
 隔离入口为 `observe`、`prepareMutation` 与 `commitMutation`。`@kite/builtin-runtime/filesystem` 的
-`LocalWorkspaceFilesystemProviderV1`、grant/evidence、diff 与 descriptor-relative internal helper 是唯一可以为
+`LocalWorkspaceFilesystemProvider`、grant/evidence、diff 与 descriptor-relative internal helper 是唯一可以为
 受治理文件工具导入 host filesystem/native API 的生产 backend。五个 Builtin catalog filesystem entry 只保留 schema、Policy、approval、protected-path 与 ExecutionTraits，不再含
 `execute/projectResult`。`kite-builtin-runtime-rmv1-12` 是 `read_file/search_content/search_files/write_file/edit_file`
 及 typed `git_inspect` 的唯一 Runtime executor owner；Runner/Controller 只在 durable acknowledgement 后把当前
@@ -93,7 +93,7 @@ Workspace: /d/work/my-project
   防止 shell 输出中残留的 MSYS2 路径被模型学习。
 ```
 
-### 单一边界 `LocalWorkspaceFilesystemProviderV1`
+### 单一边界 `LocalWorkspaceFilesystemProvider`
 
 读取、search content、mutation preimage 与 commit stale 检查共享 Local Provider 的 decode/identity 规则；
 禁止 production 调用方自行导入旧 `readTextContent` 或 filesystem adapter。

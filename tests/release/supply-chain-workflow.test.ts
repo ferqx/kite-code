@@ -72,7 +72,7 @@ describe('ordinary open-source release candidate workflow', () => {
       'rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal',
       'bun run scripts/release/build-windows-runner.ts',
       'bun run scripts/release/windows-runner-evidence.ts',
-      'git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json',
+      'git diff --exit-code -- release/platform-capabilities/windows-runner.json',
       'bun run release:build',
     ];
     let previousIndex = -1;
@@ -83,7 +83,7 @@ describe('ordinary open-source release candidate workflow', () => {
     }
 
     for (const asset of [
-      'release/platform-capabilities/windows-runner-v1.json',
+      'release/platform-capabilities/windows-runner.json',
       'native/windows-sandbox-runner/target/release/kite-windows-runner.exe',
       'vendor/isksh/isksh.exe',
       'vendor/isksh/coreutils.exe',

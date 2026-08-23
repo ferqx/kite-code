@@ -1,20 +1,20 @@
 /** Layered identities are deterministic bindings, not separate authority objects. */
-export interface ProjectIdentityV1 {
+export interface ProjectIdentity {
   readonly projectId: `project_${string}`;
   readonly revision: number;
   readonly workspaceDigest: `sha256:${string}`;
 }
-export interface SessionCompositionIdentityV1 {
+export interface SessionCompositionIdentity {
   readonly formatEpoch: string;
   readonly stateSchema: 25 | 26;
   readonly storeSchema: 4 | 5;
   readonly kernelRevision: string;
   readonly policyRevision: string;
-  readonly project: ProjectIdentityV1;
+  readonly project: ProjectIdentity;
   readonly capabilityCatalogRevision: string;
 }
 
-export interface ExecutionEnvironmentIdentityBindingV1 {
+export interface ExecutionEnvironmentIdentityBinding {
   readonly platformQualification: string;
   readonly sandbox: string;
   readonly networkPolicy: string;
@@ -22,7 +22,7 @@ export interface ExecutionEnvironmentIdentityBindingV1 {
   readonly canonicalWorkspaceDigest: `sha256:${string}`;
 }
 
-export interface ProviderBindingIdentityV1 {
+export interface ProviderBindingIdentity {
   readonly provider: string;
   readonly executor: string;
   readonly capabilityRevision: string;
@@ -31,7 +31,7 @@ export interface ProviderBindingIdentityV1 {
   readonly transportBoundary: string;
 }
 
-export interface CredentialGrantIdentityV1 {
+export interface CredentialGrantIdentity {
   readonly projectId: `project_${string}`;
   readonly provider: string;
   readonly serverOrProfile: string;
@@ -41,7 +41,7 @@ export interface CredentialGrantIdentityV1 {
   readonly credentialHandleId: string;
 }
 
-export interface ArtifactNamespaceIdentityV1 {
+export interface ArtifactNamespaceIdentity {
   readonly namespace: string;
   readonly schema: string;
   readonly ownerProjectId: `project_${string}`;

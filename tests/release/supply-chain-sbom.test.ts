@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseCanonicalJson } from '../../scripts/release/canonical-json';
 import {
-  encodeSyntheticCycloneDxSbomV1,
-  generateSyntheticCycloneDxSbomV1,
+  encodeSyntheticCycloneDxSbom,
+  generateSyntheticCycloneDxSbom,
 } from '../../scripts/release/generate-sbom';
 
 describe('synthetic CycloneDX SBOM', () => {
@@ -13,9 +13,9 @@ describe('synthetic CycloneDX SBOM', () => {
       packageJsonBytes: readFileSync(resolve('package.json')),
       bunLockBytes: readFileSync(resolve('bun.lock')),
     };
-    const first = generateSyntheticCycloneDxSbomV1(input);
-    const second = generateSyntheticCycloneDxSbomV1(input);
-    expect(encodeSyntheticCycloneDxSbomV1(first)).toEqual(encodeSyntheticCycloneDxSbomV1(second));
+    const first = generateSyntheticCycloneDxSbom(input);
+    const second = generateSyntheticCycloneDxSbom(input);
+    expect(encodeSyntheticCycloneDxSbom(first)).toEqual(encodeSyntheticCycloneDxSbom(second));
     expect(first.bomFormat).toBe('CycloneDX');
     expect(first.specVersion).toBe('1.6');
     expect(first.components.length).toBeGreaterThan(100);
@@ -38,7 +38,7 @@ describe('synthetic CycloneDX SBOM', () => {
         ),
       ),
     ).toBe(true);
-    expect(parseCanonicalJson(encodeSyntheticCycloneDxSbomV1(first))).toEqual(first);
+    expect(parseCanonicalJson(encodeSyntheticCycloneDxSbom(first))).toEqual(first);
   });
 
   test('generates canonical scoped purls and converts canonical sha512 integrity to hex', () => {
@@ -59,7 +59,7 @@ describe('synthetic CycloneDX SBOM', () => {
         ],
       },
     };
-    const sbom = generateSyntheticCycloneDxSbomV1({
+    const sbom = generateSyntheticCycloneDxSbom({
       packageJsonBytes: new TextEncoder().encode('{"name":"fixture","version":"1.0.0"}'),
       bunLockBytes: new TextEncoder().encode(JSON.stringify(lock)),
     });
@@ -85,10 +85,10 @@ describe('synthetic CycloneDX SBOM', () => {
         JSON.stringify({ workspaces: { '': {} }, packages: { invalid: entry } }),
       );
     expect(() =>
-      generateSyntheticCycloneDxSbomV1({ packageJsonBytes, bunLockBytes: makeLock(['invalid']) }),
+      generateSyntheticCycloneDxSbom({ packageJsonBytes, bunLockBytes: makeLock(['invalid']) }),
     ).toThrow('invalid resolution');
     expect(() =>
-      generateSyntheticCycloneDxSbomV1({
+      generateSyntheticCycloneDxSbom({
         packageJsonBytes,
         bunLockBytes: makeLock(['pkg@1.0.0', 'url', {}, 'sha1-invalid']),
       }),

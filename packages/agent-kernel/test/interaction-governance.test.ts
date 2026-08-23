@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   type AgentState,
   createInitialAgentState,
-  decidePlanReviewSiblingCancellationsV1,
+  decidePlanReviewSiblingCancellations,
 } from '../src';
 
 describe('State interaction governance', () => {
@@ -68,12 +68,12 @@ describe('State interaction governance', () => {
       },
     } satisfies AgentState;
 
-    expect(decidePlanReviewSiblingCancellationsV1(state, 'opening')).toEqual([
+    expect(decidePlanReviewSiblingCancellations(state, 'opening')).toEqual([
       {
         toolCallId: 'later',
         reason: 'Cancelled because an earlier tool call opened an interaction.',
       },
     ]);
-    expect(decidePlanReviewSiblingCancellationsV1(state, 'missing')).toEqual([]);
+    expect(decidePlanReviewSiblingCancellations(state, 'missing')).toEqual([]);
   });
 });

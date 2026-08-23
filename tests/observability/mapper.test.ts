@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { projectRuntimeEventToObservabilityFactV1 } from '@kite/agent-kernel';
+import { projectRuntimeEventToObservabilityFact } from '@kite/agent-kernel';
 import {
-  createBuiltinObservabilityProjectorV1,
-  LowCardinalityAliasMapperV1,
+  createBuiltinObservabilityProjector,
+  LowCardinalityAliasMapper,
 } from '@kite/builtin-runtime';
 import type { ClassifiedFailure } from '#app/bootstrap/runtime/failures';
 
@@ -17,15 +17,15 @@ const MARKERS = [
 function runtimeSamples(
   input: unknown,
   observedAt: string,
-  projector = createBuiltinObservabilityProjectorV1(),
+  projector = createBuiltinObservabilityProjector(),
 ) {
-  const fact = projectRuntimeEventToObservabilityFactV1(input, observedAt);
+  const fact = projectRuntimeEventToObservabilityFact(input, observedAt);
   return fact ? projector.mapRuntimeFact(fact) : [];
 }
 
 describe('Builtin observability allowlist projector', () => {
   test('emits no prompt, path, command, source, or free error marker', () => {
-    const projector = createBuiltinObservabilityProjectorV1({
+    const projector = createBuiltinObservabilityProjector({
       releaseRouteAliases: ['approved-route'],
       modelVisibleCapabilityAliases: ['read_file'],
     });
@@ -78,7 +78,7 @@ describe('Builtin observability allowlist projector', () => {
   });
 
   test('retains only controlled aliases and folds cardinality overflow', () => {
-    const aliases = new LowCardinalityAliasMapperV1(['route-a', 'route-b', 'route-c'], 2);
+    const aliases = new LowCardinalityAliasMapper(['route-a', 'route-b', 'route-c'], 2);
     expect(aliases.map('route-a')).toBe('route-a');
     expect(aliases.map('route-b')).toBe('route-b');
     expect(aliases.map('route-a')).toBe('route-a');
@@ -89,7 +89,7 @@ describe('Builtin observability allowlist projector', () => {
   });
 
   test('derives terminal tool metrics from the canonical outcome instead of legacy fields', () => {
-    const projector = createBuiltinObservabilityProjectorV1({
+    const projector = createBuiltinObservabilityProjector({
       modelVisibleCapabilityAliases: ['shell_execute'],
     });
     const samples = runtimeSamples(
@@ -98,7 +98,7 @@ describe('Builtin observability allowlist projector', () => {
         toolCallId: 'private-call',
         name: 'shell_execute',
         result: { ok: false, command: 'private', exitCode: 124, stdout: '', stderr: 'private' },
-        outcomeV1: {
+        outcome: {
           schemaVersion: 1,
           status: 'timed_out',
           failure: { kind: 'tool_timeout', detailCode: 'timed_out' },
@@ -133,7 +133,7 @@ describe('Builtin observability allowlist projector', () => {
   });
 
   test('emits exactly one canonical tool metric pair for approval and auto-review rejection', () => {
-    const projector = createBuiltinObservabilityProjectorV1();
+    const projector = createBuiltinObservabilityProjector();
     const rejectionOutcome = {
       schemaVersion: 1 as const,
       status: 'rejected' as const,
@@ -155,7 +155,7 @@ describe('Builtin observability allowlist projector', () => {
         interactionId: 'private-approval',
         toolCallId: 'private-tool',
         reason: 'private',
-        outcomeV1: rejectionOutcome,
+        outcome: rejectionOutcome,
       },
       NOW,
       projector,
@@ -166,7 +166,7 @@ describe('Builtin observability allowlist projector', () => {
         reviewId: 'private-review',
         toolCallId: 'private-tool',
         result: { ok: true, approved: false, reviewerModelName: 'private', durationMs: 17 },
-        outcomeV1: {
+        outcome: {
           ...rejectionOutcome,
           failure: {
             kind: 'auto_review_rejected' as const,
@@ -185,7 +185,7 @@ describe('Builtin observability allowlist projector', () => {
   });
 
   test('maps Runtime, resource, failure, model, and receipt metadata without identities', () => {
-    const projector = createBuiltinObservabilityProjectorV1({
+    const projector = createBuiltinObservabilityProjector({
       releaseRouteAliases: ['route-a'],
       modelVisibleCapabilityAliases: ['mcp:docs'],
     });

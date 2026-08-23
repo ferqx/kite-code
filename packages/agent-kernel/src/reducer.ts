@@ -18,24 +18,24 @@ import {
   normalizeAgentToolOutcomeEvent,
   normalizeTerminalAgentEvent,
 } from './normalization';
-import type { SchedulerFactsV1 } from './scheduler';
+import type { SchedulerFacts } from './scheduler';
 import { selectPendingEffects as selectScheduledEffects } from './scheduler';
 import type { AgentState } from './state';
-import type { VerificationSchemaAdmissionFactV1 } from './verification-schema-facts';
+import type { VerificationSchemaAdmissionFact } from './verification-schema-facts';
 
 export type PendingEffect = RuntimeEffect;
 
 /** Transient, Host-projected facts consumed during one fixed reducer pass. */
-export interface AgentReducerFactsV1 {
+export interface AgentReducerFacts {
   readonly allocatedTaskId?: string;
   /** Index-aligned with VerificationSpec.checks; never persisted in State. */
-  readonly verificationSchemaAdmissions?: readonly (VerificationSchemaAdmissionFactV1 | null)[];
+  readonly verificationSchemaAdmissions?: readonly (VerificationSchemaAdmissionFact | null)[];
 }
 
 type AgentStateReducer = (
   state: AgentState,
   event: KernelEvent,
-  facts?: AgentReducerFactsV1,
+  facts?: AgentReducerFacts,
 ) => AgentState;
 
 /**
@@ -114,7 +114,7 @@ export function digestAgentEvent(event: KernelEvent): string {
 export function reduceAgentState(
   state: AgentState,
   event: KernelEvent,
-  facts: AgentReducerFactsV1 = {},
+  facts: AgentReducerFacts = {},
 ): AgentState {
   assertCurrentRuntimeEvent(event);
   const normalized = normalizeTerminalAgentEvent(event);
@@ -127,7 +127,7 @@ export function reduceAgentState(
 /** Select effects from State 25 queue order, without inspecting tool names. */
 export function selectPendingEffects(
   state: Readonly<AgentState>,
-  facts?: SchedulerFactsV1,
+  facts?: SchedulerFacts,
 ): readonly PendingEffect[] {
   return selectScheduledEffects(state as AgentState, facts);
 }

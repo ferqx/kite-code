@@ -1,16 +1,16 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type {
-  FilesystemPreimageArtifactRefV1,
-  WorkspaceFilesystemPreimageObservationV1,
+  FilesystemPreimageArtifactRef,
+  WorkspaceFilesystemPreimageObservation,
 } from '@kite/runtime-spi';
 import {
-  canonicalModelJsonV1,
+  canonicalModelJson,
   PrivateArtifactStorageError,
-  type PrivateArtifactWriteFaultPointV1,
-  PrivateImmutableArtifactStorageV1,
+  type PrivateArtifactWriteFaultPoint,
+  PrivateImmutableArtifactStorage,
 } from '../model';
-import { userKiteCodeDirV1 } from '../model/artifact-paths';
+import { userKiteCodeDir } from '../model/artifact-paths';
 
 const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const SAFE_INVOCATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -19,7 +19,7 @@ const PARTITIONS = Object.freeze([
   { kind: 'filesystem_preimage', directory: 'preimages', extension: '.json' },
 ] as const);
 
-export type FilesystemPreimageArtifactErrorCodeV1 =
+export type FilesystemPreimageArtifactErrorCode =
   | 'invalid_preimage'
   | 'artifact_missing'
   | 'artifact_corrupt'
@@ -27,52 +27,52 @@ export type FilesystemPreimageArtifactErrorCodeV1 =
   | 'storage_boundary_violation'
   | 'publish_failed';
 
-export class FilesystemPreimageArtifactErrorV1 extends Error {
-  readonly code: FilesystemPreimageArtifactErrorCodeV1;
+export class FilesystemPreimageArtifactError extends Error {
+  readonly code: FilesystemPreimageArtifactErrorCode;
 
-  constructor(code: FilesystemPreimageArtifactErrorCodeV1, message: string) {
+  constructor(code: FilesystemPreimageArtifactErrorCode, message: string) {
     super(message);
-    this.name = 'FilesystemPreimageArtifactErrorV1';
+    this.name = 'FilesystemPreimageArtifactError';
     this.code = code;
   }
 }
 
 /** Installation-private root for filesystem mutation preimage evidence. */
-export function filesystemPreimageArtifactRootV1(): string {
-  return join(userKiteCodeDirV1(), 'filesystem-preimages');
+export function filesystemPreimageArtifactRoot(): string {
+  return join(userKiteCodeDir(), 'filesystem-preimages');
 }
 
-export interface FilesystemPreimageArtifactPayloadV1 {
+export interface FilesystemPreimageArtifactPayload {
   readonly artifactFormatVersion: 1;
   readonly invocationId: string;
   readonly operationDigest: string;
   readonly targetIdentityDigest: string;
-  readonly preimage: WorkspaceFilesystemPreimageObservationV1;
+  readonly preimage: WorkspaceFilesystemPreimageObservation;
 }
 
-export interface FilesystemPreimageArtifactWriterV1 {
+export interface FilesystemPreimageArtifactWriter {
   write(input: {
     readonly invocationId: string;
     readonly operationDigest: string;
     readonly targetIdentityDigest: string;
-    readonly preimage: WorkspaceFilesystemPreimageObservationV1;
-  }): FilesystemPreimageArtifactRefV1;
+    readonly preimage: WorkspaceFilesystemPreimageObservation;
+  }): FilesystemPreimageArtifactRef;
 }
 
-export interface FilesystemPreimageArtifactStoreOptionsV1 {
+export interface FilesystemPreimageArtifactStoreOptions {
   readonly root?: string;
   readonly maxArtifactBytes?: number;
   readonly platform?: NodeJS.Platform;
   readonly secureWindowsPath?: (path: string) => void;
-  readonly faultInjector?: (point: PrivateArtifactWriteFaultPointV1) => void;
+  readonly faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
 }
 
 /** Private immutable evidence required before a filesystem commit grant exists. */
-export class FilesystemPreimageArtifactStoreV1 implements FilesystemPreimageArtifactWriterV1 {
-  readonly #options: FilesystemPreimageArtifactStoreOptionsV1;
-  #storage: PrivateImmutableArtifactStorageV1<'filesystem_preimage'> | undefined;
+export class FilesystemPreimageArtifactStore implements FilesystemPreimageArtifactWriter {
+  readonly #options: FilesystemPreimageArtifactStoreOptions;
+  #storage: PrivateImmutableArtifactStorage<'filesystem_preimage'> | undefined;
 
-  constructor(options: FilesystemPreimageArtifactStoreOptionsV1 = {}) {
+  constructor(options: FilesystemPreimageArtifactStoreOptions = {}) {
     this.#options = Object.freeze({ ...options });
   }
 
@@ -80,42 +80,42 @@ export class FilesystemPreimageArtifactStoreV1 implements FilesystemPreimageArti
     readonly invocationId: string;
     readonly operationDigest: string;
     readonly targetIdentityDigest: string;
-    readonly preimage: WorkspaceFilesystemPreimageObservationV1;
-  }): FilesystemPreimageArtifactRefV1 {
+    readonly preimage: WorkspaceFilesystemPreimageObservation;
+  }): FilesystemPreimageArtifactRef {
     const payload = validatedPayload({ artifactFormatVersion: 1, ...input });
     try {
       return this.#resolveStorage().write(
         'filesystem_preimage',
-        Buffer.from(canonicalModelJsonV1(payload), 'utf8'),
+        Buffer.from(canonicalModelJson(payload), 'utf8'),
       );
     } catch (error) {
       throw mapStorageError(error);
     }
   }
 
-  read(ref: FilesystemPreimageArtifactRefV1): FilesystemPreimageArtifactPayloadV1 {
+  read(ref: FilesystemPreimageArtifactRef): FilesystemPreimageArtifactPayload {
     try {
       const bytes = this.#resolveStorage().read(ref);
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       const parsed: unknown = JSON.parse(text);
-      if (!isPlainObject(parsed) || canonicalModelJsonV1(parsed) !== text) {
-        throw new FilesystemPreimageArtifactErrorV1(
+      if (!isPlainObject(parsed) || canonicalModelJson(parsed) !== text) {
+        throw new FilesystemPreimageArtifactError(
           'artifact_corrupt',
           'Filesystem preimage Artifact is not canonical JSON.',
         );
       }
       return validatedPayload(parsed);
     } catch (error) {
-      if (error instanceof FilesystemPreimageArtifactErrorV1) throw error;
+      if (error instanceof FilesystemPreimageArtifactError) throw error;
       throw mapStorageError(error);
     }
   }
 
-  #resolveStorage(): PrivateImmutableArtifactStorageV1<'filesystem_preimage'> {
+  #resolveStorage(): PrivateImmutableArtifactStorage<'filesystem_preimage'> {
     if (this.#storage) return this.#storage;
     try {
-      this.#storage = new PrivateImmutableArtifactStorageV1({
-        root: this.#options.root ?? filesystemPreimageArtifactRootV1(),
+      this.#storage = new PrivateImmutableArtifactStorage({
+        root: this.#options.root ?? filesystemPreimageArtifactRoot(),
         namespace: 'filesystem-preimages',
         partitions: PARTITIONS,
         maxArtifactBytes: this.#options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,
@@ -132,7 +132,7 @@ export class FilesystemPreimageArtifactStoreV1 implements FilesystemPreimageArti
   }
 }
 
-function validatedPayload(input: unknown): FilesystemPreimageArtifactPayloadV1 {
+function validatedPayload(input: unknown): FilesystemPreimageArtifactPayload {
   if (!isPlainObject(input)) invalid();
   const source = input as Record<string, unknown>;
   const keys = Object.keys(source).sort();
@@ -169,7 +169,7 @@ function validatedPayload(input: unknown): FilesystemPreimageArtifactPayloadV1 {
   });
 }
 
-function validatePreimage(value: unknown): WorkspaceFilesystemPreimageObservationV1 {
+function validatePreimage(value: unknown): WorkspaceFilesystemPreimageObservation {
   if (!isPlainObject(value)) invalid();
   const keys = Object.keys(value).sort();
   const expected = ['byteLength', 'content', 'contentDigest', 'existed'];
@@ -206,16 +206,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function invalid(): never {
-  throw new FilesystemPreimageArtifactErrorV1(
+  throw new FilesystemPreimageArtifactError(
     'invalid_preimage',
     'Filesystem preimage Artifact payload is invalid.',
   );
 }
 
-function mapStorageError(error: unknown): FilesystemPreimageArtifactErrorV1 {
-  if (error instanceof FilesystemPreimageArtifactErrorV1) return error;
+function mapStorageError(error: unknown): FilesystemPreimageArtifactError {
+  if (error instanceof FilesystemPreimageArtifactError) return error;
   if (error instanceof PrivateArtifactStorageError) {
-    const code: FilesystemPreimageArtifactErrorCodeV1 =
+    const code: FilesystemPreimageArtifactErrorCode =
       error.code === 'artifact_missing'
         ? 'artifact_missing'
         : error.code === 'artifact_corrupt' || error.code === 'invalid_reference'
@@ -225,9 +225,9 @@ function mapStorageError(error: unknown): FilesystemPreimageArtifactErrorV1 {
             : error.code === 'publish_failed'
               ? 'publish_failed'
               : 'storage_boundary_violation';
-    return new FilesystemPreimageArtifactErrorV1(code, error.message);
+    return new FilesystemPreimageArtifactError(code, error.message);
   }
-  return new FilesystemPreimageArtifactErrorV1(
+  return new FilesystemPreimageArtifactError(
     'storage_boundary_violation',
     'Filesystem preimage Artifact storage is unavailable.',
   );

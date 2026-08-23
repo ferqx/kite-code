@@ -2,19 +2,19 @@ import { Database } from 'bun:sqlite';
 import { existsSync, lstatSync } from 'node:fs';
 import type { SessionMetadataPort } from '@kite/runtime-host/storage';
 
-export interface SessionTokenStatsV1 {
+export interface SessionTokenStats {
   readonly cacheHitTokens: number;
   readonly cacheMissTokens: number;
   readonly totalTokens: number;
 }
 
-export interface SqliteSessionMetadataInputV1 {
+export interface SqliteSessionMetadataInput {
   readonly databasePath: string;
   readonly journalMode: 'wal' | 'delete';
   readonly assertCanOpen: (databasePath: string) => void;
 }
 
-interface SessionTokenStatsRowV1 {
+interface SessionTokenStatsRow {
   thread_id: string;
   cache_hit_tokens: number;
   cache_miss_tokens: number;
@@ -22,7 +22,7 @@ interface SessionTokenStatsRowV1 {
 }
 
 /** Fail-closed preflight for the App-only metadata database. */
-export function assertSqliteSessionMetadataCanOpenV1(databasePath: string): void {
+export function assertSqliteSessionMetadataCanOpen(databasePath: string): void {
   if (databasePath === ':memory:' || !existsSync(databasePath)) return;
   if (lstatSync(databasePath).isSymbolicLink()) {
     throw new Error('Session metadata database must not be a symlink.');
@@ -66,9 +66,9 @@ export function assertSqliteSessionMetadataCanOpenV1(databasePath: string): void
  * `session_stats` table and long-lived connection behavior without exposing a
  * raw SQLite handle to TUI, CLI, Kernel, or Host.
  */
-export function createSqliteSessionTokenStatsV1(
-  input: SqliteSessionMetadataInputV1,
-): SessionMetadataPort<SessionTokenStatsV1> {
+export function createSqliteSessionTokenStats(
+  input: SqliteSessionMetadataInput,
+): SessionMetadataPort<SessionTokenStats> {
   let database: Database | null = null;
 
   const resolveDatabase = (): Database => {
@@ -101,9 +101,9 @@ export function createSqliteSessionTokenStatsV1(
         [sessionId, value.cacheHitTokens, value.cacheMissTokens, value.totalTokens],
       );
     },
-    loadAll(): readonly { sessionId: string; value: SessionTokenStatsV1 }[] {
+    loadAll(): readonly { sessionId: string; value: SessionTokenStats }[] {
       return resolveDatabase()
-        .query<SessionTokenStatsRowV1, []>(
+        .query<SessionTokenStatsRow, []>(
           `select thread_id, cache_hit_tokens, cache_miss_tokens, total_tokens from session_stats`,
         )
         .all()

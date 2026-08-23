@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from '../release/canonical-json';
-import { releaseArtifactIdentityV1Schema } from '../release/evidence-schema';
+import { releaseArtifactIdentitySchema } from '../release/evidence-schema';
 import {
-  type LimitedSloRebuildV1,
-  limitedSloGithubSourceV1Schema,
-  rebuildLimitedSloObservationV1,
-  verifyLimitedSloSampleLedgerV1,
+  type LimitedSloRebuild,
+  limitedSloGithubSourceSchema,
+  rebuildLimitedSloObservation,
+  verifyLimitedSloSampleLedger,
 } from './limited-slo-ledger';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -13,7 +13,7 @@ const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 // No production observation producer or attestation verifier has been approved.
 // This registry is deliberately not injectable by a caller: a future non-empty
 // revision requires governed source code and release-policy changes.
-interface TrustedLimitedSloProducerV1 {
+interface TrustedLimitedSloProducer {
   producerId: string;
   repositoryId: string;
   workflowPath: string;
@@ -26,27 +26,27 @@ interface TrustedLimitedSloProducerV1 {
   reportDigest: `sha256:${string}`;
 }
 
-const TRUSTED_LIMITED_SLO_PRODUCERS_V1: readonly TrustedLimitedSloProducerV1[] = Object.freeze([]);
+const TRUSTED_LIMITED_SLO_PRODUCERS_: readonly TrustedLimitedSloProducer[] = Object.freeze([]);
 
-export const limitedSloQualificationExpectationV1Schema = z
+export const limitedSloQualificationExpectationSchema = z
   .object({
     policyDigest: digestSchema,
     limitedApprovalDecisionDigest: digestSchema,
-    artifactIdentity: releaseArtifactIdentityV1Schema,
+    artifactIdentity: releaseArtifactIdentitySchema,
     routeDigest: digestSchema,
     cohortDigest: digestSchema,
-    source: limitedSloGithubSourceV1Schema,
+    source: limitedSloGithubSourceSchema,
     reportDigest: digestSchema,
     verifierDigest: digestSchema,
   })
   .strict();
 
-export type LimitedSloQualificationExpectationV1 = z.infer<
-  typeof limitedSloQualificationExpectationV1Schema
+export type LimitedSloQualificationExpectation = z.infer<
+  typeof limitedSloQualificationExpectationSchema
 >;
 
-export interface LimitedSloQualificationVerificationV1 {
-  schema: 'LimitedSloQualificationVerificationV1';
+export interface LimitedSloQualificationVerification {
+  schema: 'LimitedSloQualificationVerification';
   status: 'passed' | 'blocked';
   productionEvidenceEligible: boolean;
   trustRegistryConfigured: boolean;
@@ -55,7 +55,7 @@ export interface LimitedSloQualificationVerificationV1 {
   expectationDigest: `sha256:${string}`;
   trustRegistryDigest: `sha256:${string}`;
   reasonCodes: string[];
-  rebuild: LimitedSloRebuildV1;
+  rebuild: LimitedSloRebuild;
   verificationDigest: `sha256:${string}`;
 }
 
@@ -64,19 +64,19 @@ export interface LimitedSloQualificationVerificationV1 {
  * identity. It cannot authenticate production observations until a governed
  * producer/attestation trust root is registered in this module.
  */
-export function verifyLimitedSloQualificationV1(input: {
+export function verifyLimitedSloQualification(input: {
   ledger: unknown;
   expected: unknown;
-}): LimitedSloQualificationVerificationV1 {
-  const ledger = verifyLimitedSloSampleLedgerV1(input.ledger);
-  const expected = limitedSloQualificationExpectationV1Schema.parse(input.expected);
-  const rebuild = rebuildLimitedSloObservationV1(ledger);
+}): LimitedSloQualificationVerification {
+  const ledger = verifyLimitedSloSampleLedger(input.ledger);
+  const expected = limitedSloQualificationExpectationSchema.parse(input.expected);
+  const rebuild = rebuildLimitedSloObservation(ledger);
   const reasons = new Set<string>();
   const sourceIdentityDigest = sha256DomainSeparated(
     'kite.operations.limited-slo-source-identity.v1',
     canonicalJson(expected.source),
   );
-  const trustedProducer = TRUSTED_LIMITED_SLO_PRODUCERS_V1.find(
+  const trustedProducer = TRUSTED_LIMITED_SLO_PRODUCERS_.find(
     (producer) =>
       producer.repositoryId === expected.source.repositoryId &&
       producer.workflowPath === expected.source.workflowPath &&
@@ -154,11 +154,11 @@ export function verifyLimitedSloQualificationV1(input: {
   );
   const trustRegistryDigest = sha256DomainSeparated(
     'kite.operations.limited-slo-trust-registry.v1',
-    canonicalJson(TRUSTED_LIMITED_SLO_PRODUCERS_V1),
+    canonicalJson(TRUSTED_LIMITED_SLO_PRODUCERS_),
   );
   const productionEvidenceEligible = reasons.size === 0 && trustedProducer !== undefined;
   const withoutDigest = {
-    schema: 'LimitedSloQualificationVerificationV1' as const,
+    schema: 'LimitedSloQualificationVerification' as const,
     status: productionEvidenceEligible ? ('passed' as const) : ('blocked' as const),
     productionEvidenceEligible,
     trustRegistryConfigured: trustedProducer !== undefined,

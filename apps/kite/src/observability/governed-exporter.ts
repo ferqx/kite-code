@@ -1,7 +1,7 @@
-import type { MetricExporterV1, MetricSampleV1 } from '@kite/runtime-host';
+import type { MetricExporter, MetricSample } from '@kite/runtime-host';
 import { canonicalJsonBytes, sha256DomainSeparated } from '../release/canonical-json';
 
-export interface GovernedMetricTransportV1 {
+export interface GovernedMetricTransport {
   send(input: {
     endpointAlias: string;
     contentType: 'application/vnd.kite.metrics.v1+json';
@@ -10,12 +10,12 @@ export interface GovernedMetricTransportV1 {
   shutdown?(): Promise<void>;
 }
 
-export interface GovernedMetricExportEnvelopeV1 {
-  schema: 'GovernedMetricExportEnvelopeV1';
+export interface GovernedMetricExportEnvelope {
+  schema: 'GovernedMetricExportEnvelope';
   endpointAlias: string;
   sequence: number;
   sampleCount: number;
-  samples: readonly MetricSampleV1[];
+  samples: readonly MetricSample[];
   payloadDigest: `sha256:${string}`;
 }
 
@@ -25,9 +25,9 @@ const ENDPOINT_ALIAS_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,95}$/;
  * Concrete metadata-only exporter. Network execution remains delegated to the
  * governed transport so this class cannot bypass the Runtime network boundary.
  */
-export class GovernedMetricExporterV1 implements MetricExporterV1 {
+export class GovernedMetricExporter implements MetricExporter {
   readonly #endpointAlias: string;
-  readonly #transport: GovernedMetricTransportV1;
+  readonly #transport: GovernedMetricTransport;
   readonly #maximumBatchSamples: number;
   readonly #maximumPayloadBytes: number;
   #sequence = 0;
@@ -36,7 +36,7 @@ export class GovernedMetricExporterV1 implements MetricExporterV1 {
   constructor(input: {
     endpointAlias: string;
     approvedEndpointAliases: ReadonlySet<string>;
-    transport: GovernedMetricTransportV1;
+    transport: GovernedMetricTransport;
     maximumBatchSamples?: number;
     maximumPayloadBytes?: number;
   }) {
@@ -55,7 +55,7 @@ export class GovernedMetricExporterV1 implements MetricExporterV1 {
     );
   }
 
-  async export(samples: readonly MetricSampleV1[]): Promise<void> {
+  async export(samples: readonly MetricSample[]): Promise<void> {
     if (this.#shutdown) throw new Error('Metric exporter is shut down.');
     if (samples.length === 0) return;
     if (samples.length > this.#maximumBatchSamples) {
@@ -63,13 +63,13 @@ export class GovernedMetricExporterV1 implements MetricExporterV1 {
     }
     this.#sequence += 1;
     const material = {
-      schema: 'GovernedMetricExportEnvelopeV1' as const,
+      schema: 'GovernedMetricExportEnvelope' as const,
       endpointAlias: this.#endpointAlias,
       sequence: this.#sequence,
       sampleCount: samples.length,
       samples: Object.freeze(structuredClone(samples)),
     };
-    const envelope: GovernedMetricExportEnvelopeV1 = {
+    const envelope: GovernedMetricExportEnvelope = {
       ...material,
       payloadDigest: sha256DomainSeparated(
         'kite.observability.metric-export-envelope.v1',

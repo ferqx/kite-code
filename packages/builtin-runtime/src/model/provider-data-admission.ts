@@ -1,9 +1,9 @@
-import type { ModelProviderDispatchPurposeV1 } from '@kite/runtime-spi';
+import type { ModelProviderDispatchPurpose } from '@kite/runtime-spi';
 
-export type ProviderPayloadKindV1 = 'user_prompt' | 'file_snippet' | 'tool_result' | 'summary';
+export type ProviderPayloadKind = 'user_prompt' | 'file_snippet' | 'tool_result' | 'summary';
 
-export interface ProviderPayloadPartV1 {
-  kind: ProviderPayloadKindV1;
+export interface ProviderPayloadPart {
+  kind: ProviderPayloadKind;
   text: string;
   label: {
     classification: 'public' | 'internal' | 'confidential' | 'secret';
@@ -13,23 +13,23 @@ export interface ProviderPayloadPartV1 {
   };
 }
 
-export type ProviderDataAdmissionReasonV1 =
+export type ProviderDataAdmissionReason =
   | 'admitted'
   | 'mandatory_policy_unavailable'
   | 'provider_content_inspection_unknown'
   | 'provider_secret_denied';
 
-export interface ProviderDataAdmissionDecisionV1 {
+export interface ProviderDataAdmissionDecision {
   admitted: boolean;
-  reason: ProviderDataAdmissionReasonV1;
+  reason: ProviderDataAdmissionReason;
   routeAlias: string;
   admissionRevision?: string;
 }
 
-export type ProviderDataAdmissionGateV1 = (
-  payload: ProviderPayloadPartV1[],
-  purpose?: ModelProviderDispatchPurposeV1,
-) => ProviderDataAdmissionDecisionV1;
+export type ProviderDataAdmissionGate = (
+  payload: ProviderPayloadPart[],
+  purpose?: ModelProviderDispatchPurpose,
+) => ProviderDataAdmissionDecision;
 
 function promptPartText(part: unknown): string {
   if (typeof part === 'string') return part;
@@ -41,9 +41,7 @@ function promptPartText(part: unknown): string {
 }
 
 /** Build provenance-bearing admission parts without mutating the provider prompt. */
-export function providerPayloadFromModelPromptV1(
-  prompt: readonly unknown[],
-): ProviderPayloadPartV1[] {
+export function providerPayloadFromModelPrompt(prompt: readonly unknown[]): ProviderPayloadPart[] {
   return prompt.flatMap((value) => {
     const message =
       value && typeof value === 'object' ? (value as Record<string, unknown>) : { content: value };
@@ -83,11 +81,11 @@ export function providerPayloadFromModelPromptV1(
 }
 
 export class ProviderDataAdmissionError extends Error {
-  readonly decision: ProviderDataAdmissionDecisionV1;
+  readonly decision: ProviderDataAdmissionDecision;
   readonly knownExternalEffects: 'none' | 'unknown';
 
   constructor(
-    decision: ProviderDataAdmissionDecisionV1,
+    decision: ProviderDataAdmissionDecision,
     options: { knownExternalEffects?: 'none' | 'unknown' } = {},
   ) {
     super(`Provider data admission denied: ${decision.reason}.`);

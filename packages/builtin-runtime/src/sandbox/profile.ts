@@ -1,10 +1,10 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, parse, resolve } from 'node:path';
-import { resolveFixedDangerousPathIdentitiesV1 } from './dangerous-paths';
+import { resolveFixedDangerousPathIdentities } from './dangerous-paths';
 import {
-  PROTECTED_WORKSPACE_DIRECTORIES_V1,
-  PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
-  PROTECTED_WORKSPACE_FILES_V1,
+  PROTECTED_WORKSPACE_DIRECTORIES_,
+  PROTECTED_WORKSPACE_FILE_PREFIXES_,
+  PROTECTED_WORKSPACE_FILES_,
 } from './protected-path';
 import type { FilesystemScope } from './types';
 
@@ -309,18 +309,18 @@ function protectedPathPolicy(workspaceRoot: string, gitAccess: SandboxGitAccess)
   // tool-policy evaluator and `checkDangerousPaths()` respectively.
   const protectedDirectories =
     gitAccess === 'allow'
-      ? PROTECTED_WORKSPACE_DIRECTORIES_V1.filter((name) => name !== '.git')
-      : PROTECTED_WORKSPACE_DIRECTORIES_V1;
+      ? PROTECTED_WORKSPACE_DIRECTORIES_.filter((name) => name !== '.git')
+      : PROTECTED_WORKSPACE_DIRECTORIES_;
   const directoryFilters = protectedDirectories.map((path) =>
     subpathFilter(resolve(workspaceRoot, path)),
   );
-  const fileFilters = PROTECTED_WORKSPACE_FILES_V1.map((path) =>
+  const fileFilters = PROTECTED_WORKSPACE_FILES_.map((path) =>
     literalFilter(resolve(workspaceRoot, path)),
   );
-  const filePrefixFilters = PROTECTED_WORKSPACE_FILE_PREFIXES_V1.map((path) =>
+  const filePrefixFilters = PROTECTED_WORKSPACE_FILE_PREFIXES_.map((path) =>
     regexFilterForLiteralPrefix(resolve(workspaceRoot, path)),
   );
-  const fixedExternalIdentities = resolveFixedDangerousPathIdentitiesV1({
+  const fixedExternalIdentities = resolveFixedDangerousPathIdentities({
     workspace: workspaceRoot,
   }).filter((identity) => {
     const path = resolve(identity.path);
@@ -345,10 +345,10 @@ function protectedPathPolicy(workspaceRoot: string, gitAccess: SandboxGitAccess)
     ...protectedDirectories.map((path) =>
       regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), '(/.*)?'),
     ),
-    ...PROTECTED_WORKSPACE_FILES_V1.map((path) =>
+    ...PROTECTED_WORKSPACE_FILES_.map((path) =>
       regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), ''),
     ),
-    ...PROTECTED_WORKSPACE_FILE_PREFIXES_V1.map((path) =>
+    ...PROTECTED_WORKSPACE_FILE_PREFIXES_.map((path) =>
       regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), '.*'),
     ),
     ...fixedExternalIdentities

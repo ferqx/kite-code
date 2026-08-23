@@ -3,36 +3,36 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
-  workspaceFilesystemMutationReadyDigestV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
+  workspaceFilesystemMutationReadyDigest,
+  workspaceFilesystemProtectedBoundaryDigest,
 } from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import type {
-  WorkspaceFilesystemCommittedMutationV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemObserveObservationV1,
-  WorkspaceFilesystemObserveOperationV1,
-  WorkspaceFilesystemPreparedMutationV1,
-  WorkspaceFilesystemProviderResultV1,
+  WorkspaceFilesystemCommittedMutation,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemObserveObservation,
+  WorkspaceFilesystemObserveOperation,
+  WorkspaceFilesystemPreparedMutation,
+  WorkspaceFilesystemProviderResult,
 } from '@kite/runtime-spi';
 
 function builtinFilesystemFixture(workspace: string) {
-  const authority = new WorkspaceFilesystemGrantAuthorityV1({
+  const authority = new WorkspaceFilesystemGrantAuthority({
     idSource: (() => {
       let id = 0;
       return () => `boundary-grant-${++id}`;
     })(),
   });
-  const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+  const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
   const unsignedBoundary = {
     schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
     ...structuredClone(evaluator.projectFilesystemBoundary()),
   };
   const protectedBoundary = {
     ...unsignedBoundary,
-    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsignedBoundary),
   };
   const binding = {
     threadId: 'boundary-test-thread',
@@ -48,11 +48,11 @@ function builtinFilesystemFixture(workspace: string) {
     protectedPathRevision: 'boundary-test-protected-path',
     approvalSummary: 'boundary test fixture',
   };
-  const provider = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+  const provider = new LocalWorkspaceFilesystemProvider(authority.verifier());
 
   async function observe(
-    operation: WorkspaceFilesystemObserveOperationV1,
-  ): Promise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemObserveObservationV1>> {
+    operation: WorkspaceFilesystemObserveOperation,
+  ): Promise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemObserveObservation>> {
     return provider.observe({
       grant: authority.issueObserveGrant({
         binding,
@@ -64,8 +64,8 @@ function builtinFilesystemFixture(workspace: string) {
   }
 
   async function mutate(
-    operation: WorkspaceFilesystemMutationOperationV1,
-  ): Promise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemCommittedMutationV1>> {
+    operation: WorkspaceFilesystemMutationOperation,
+  ): Promise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemCommittedMutation>> {
     const prepared = await provider.prepareMutation({
       grant: authority.issuePrepareGrant({
         binding,
@@ -75,7 +75,7 @@ function builtinFilesystemFixture(workspace: string) {
       }),
     });
     if (!prepared.ok) return prepared;
-    const preparedMutation: WorkspaceFilesystemPreparedMutationV1 = prepared.observation;
+    const preparedMutation: WorkspaceFilesystemPreparedMutation = prepared.observation;
     const preimageArtifact = {
       artifactId: `pa_${'0'.repeat(64)}`,
       kind: 'filesystem_preimage' as const,
@@ -93,7 +93,7 @@ function builtinFilesystemFixture(workspace: string) {
     };
     const ready = {
       ...readyWithoutDigest,
-      readyDigest: workspaceFilesystemMutationReadyDigestV1(readyWithoutDigest),
+      readyDigest: workspaceFilesystemMutationReadyDigest(readyWithoutDigest),
     };
     const authorization = authority.acknowledgeMutationReady({
       binding,

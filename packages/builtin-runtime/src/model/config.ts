@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 
-export type ModelProviderTypeV1 = 'deepseek' | 'openai' | 'openai-compatible' | 'ollama';
+export type ModelProviderType = 'deepseek' | 'openai' | 'openai-compatible' | 'ollama';
 
 /** Structural projection of AgentConfig consumed only by Builtin model semantics. */
-export interface ModelRuntimeConfigV1 {
+export interface ModelRuntimeConfig {
   readonly apiKey: string;
   readonly baseURL: string;
   readonly modelName: string;
   readonly providerName: string;
-  readonly providerType: ModelProviderTypeV1;
+  readonly providerType: ModelProviderType;
   readonly reasoningEffort?: string | null;
   readonly reasoning?: boolean;
   readonly reasoningExplicitlyDisabled?: boolean;
@@ -51,7 +51,7 @@ export interface ModelRuntimeConfigV1 {
   }>;
 }
 
-interface ProviderRouteIdentityV1 {
+interface ProviderRouteIdentity {
   readonly providerType: string;
   readonly operatorId: string;
   readonly endpointOrigin: string;
@@ -60,10 +60,10 @@ interface ProviderRouteIdentityV1 {
   readonly region: string;
 }
 
-export function providerRouteIdentityFromModelConfigV1(
-  config: ModelRuntimeConfigV1,
-): ProviderRouteIdentityV1 {
-  if (isApprovedDeepSeekV4FlashRoute(config)) {
+export function providerRouteIdentityFromModelConfig(
+  config: ModelRuntimeConfig,
+): ProviderRouteIdentity {
+  if (isApprovedDeepSeekFlashRoute(config)) {
     return {
       providerType: 'deepseek',
       operatorId: 'hangzhou-deepseek-ai',
@@ -84,15 +84,15 @@ export function providerRouteIdentityFromModelConfigV1(
   };
 }
 
-export function computeProviderEndpointIdentityDigestV1(value: ProviderRouteIdentityV1): string {
-  const canonical = canonicalJson(normalizeProviderRouteIdentityV1(value));
+export function computeProviderEndpointIdentityDigest(value: ProviderRouteIdentity): string {
+  const canonical = canonicalJson(normalizeProviderRouteIdentity(value));
   return `sha256:${createHash('sha256')
     .update('kite.provider-route-identity.v1\0')
     .update(canonical)
     .digest('hex')}`;
 }
 
-function isApprovedDeepSeekV4FlashRoute(config: ModelRuntimeConfigV1): boolean {
+function isApprovedDeepSeekFlashRoute(config: ModelRuntimeConfig): boolean {
   if (config.providerType !== 'deepseek' || config.modelName !== 'deepseek-v4-flash') return false;
   try {
     const endpoint = new URL(config.baseURL);
@@ -111,7 +111,7 @@ function isApprovedDeepSeekV4FlashRoute(config: ModelRuntimeConfigV1): boolean {
   }
 }
 
-function normalizeProviderRouteIdentityV1(value: ProviderRouteIdentityV1): ProviderRouteIdentityV1 {
+function normalizeProviderRouteIdentity(value: ProviderRouteIdentity): ProviderRouteIdentity {
   const endpoint = new URL(value.endpointOrigin);
   if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
     throw new Error('endpointOrigin must not include credentials, query parameters, or fragments.');

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createInitialAgentState, projectStateRestartRecoveryEventsV1 } from '@kite/agent-kernel';
+import { createInitialAgentState, projectStateRestartRecoveryEvents } from '@kite/agent-kernel';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 
@@ -13,7 +13,7 @@ describe('State restart recovery projection', () => {
       recoveryIdentityKey: RECOVERY_KEY,
     });
     expect(
-      projectStateRestartRecoveryEventsV1(state, {
+      projectStateRestartRecoveryEvents(state, {
         capabilityFinishedAtByInvocationId: {},
         pendingModelEvidenceFailures: {},
         completedModelEvidenceFailures: {},
@@ -30,7 +30,7 @@ describe('State restart recovery projection', () => {
       recoveryIdentityKey: RECOVERY_KEY,
     });
     expect(
-      projectStateRestartRecoveryEventsV1(state, {
+      projectStateRestartRecoveryEvents(state, {
         capabilityFinishedAtByInvocationId: {},
         pendingModelEvidenceFailures: {},
         completedModelEvidenceFailures: {},

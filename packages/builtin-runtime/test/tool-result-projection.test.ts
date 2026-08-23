@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
-  projectBuiltinToolResultDigestsV1,
-  toolExecutionModelContentV1,
+  projectBuiltinToolResultDigests,
+  toolExecutionModelContent,
 } from '../src/tool-result-projection';
 
 describe('Builtin tool result projection', () => {
@@ -15,8 +15,8 @@ describe('Builtin tool result projection', () => {
       status: 'success' as const,
     };
 
-    expect(projectBuiltinToolResultDigestsV1(input)).toEqual({
-      contentDigest: createHash('sha256').update(toolExecutionModelContentV1(input)).digest('hex'),
+    expect(projectBuiltinToolResultDigests(input)).toEqual({
+      contentDigest: createHash('sha256').update(toolExecutionModelContent(input)).digest('hex'),
       rawResultDigest: createHash('sha256')
         .update(
           JSON.stringify({
@@ -28,7 +28,7 @@ describe('Builtin tool result projection', () => {
         )
         .digest('hex'),
       modelContentDigest: createHash('sha256')
-        .update(toolExecutionModelContentV1(input))
+        .update(toolExecutionModelContent(input))
         .digest('hex'),
       digestScope: 'raw',
     });
@@ -36,7 +36,7 @@ describe('Builtin tool result projection', () => {
 
   test('preserves a supplied raw digest while marking truncated output projected', () => {
     expect(
-      projectBuiltinToolResultDigestsV1({
+      projectBuiltinToolResultDigests({
         ok: false,
         stdout: '',
         stderr: 'projected failure',
@@ -54,7 +54,7 @@ describe('Builtin tool result projection', () => {
   });
 
   test('does not invent a raw digest for truncated output', () => {
-    const projection = projectBuiltinToolResultDigestsV1({
+    const projection = projectBuiltinToolResultDigests({
       ok: true,
       stdout: 'partial',
       stderr: '',

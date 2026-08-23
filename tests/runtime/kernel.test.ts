@@ -4,69 +4,66 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createToolRecoveryJournalV1 } from '@kite/agent-kernel';
-import { createCapabilityBindingV1, descriptorRevisionV1 } from '@kite/builtin-runtime';
+import { createToolRecoveryJournal } from '@kite/agent-kernel';
+import { createCapabilityBinding, descriptorRevision } from '@kite/builtin-runtime';
 import { McpConnectionManager, McpProviderError } from '@kite/builtin-runtime/mcp';
 import { buildContextProjection } from '@kite/builtin-runtime/model';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type {
-  BuiltinPreparedShellExecutionInputV1,
+  BuiltinPreparedShellExecutionInput,
   ShellExecutor,
 } from '@kite/builtin-runtime/sandbox';
-import { SandboxPreparationArtifactStoreV1 } from '@kite/builtin-runtime/sandbox';
+import { SandboxPreparationArtifactStore } from '@kite/builtin-runtime/sandbox';
 import {
-  createDeterministicRuntimeIdSourceV1,
-  createRuntimeHostStateInitialStateV1 as createRuntimeHostStateInitialStateRawV1,
+  createDeterministicRuntimeIdSource,
+  createRuntimeHostStateInitialState as createRuntimeHostStateInitialStateRaw,
   getActivePlanning,
-  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
 } from '@kite/runtime-host';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { projectRuntimeSchedulerFactsV1 } from '#app/bootstrap/runtime/scheduler-facts';
+import { projectRuntimeSchedulerFacts } from '#app/bootstrap/runtime/scheduler-facts';
 import { eventsForRunCancellation } from '#app/bootstrap/runtime/state-actions';
-import { runStateRuntimeLoopV1 } from '#app/bootstrap/runtime/state-runner';
-import { normalizeTerminalRuntimeEventV1 } from '#app/bootstrap/runtime/terminal-outcome';
+import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
+import { normalizeTerminalRuntimeEvent } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import type { StateSessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
+import type { StateSessionStorage } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
 import {
-  APP_PREPARED_SHELL_EXECUTION_V1,
-  projectAppHostShellResultV1,
+  APP_PREPARED_SHELL_EXECUTION_,
+  projectAppHostShellResult,
 } from '../../apps/kite/src/sandbox/prepared-tool-pipeline';
 import {
-  StateHostSessionHarnessV1 as AgentKernel,
-  restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorRawV1,
+  StateHostSessionHarness as AgentKernel,
+  restoreStateHostSessionHarness as restoreStateKernelCoordinatorRaw,
 } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
-import {
-  createTestRuntimeEffectExecutorV1,
-  testBuiltinToolCatalogV1,
-} from '../helpers/runtime-model';
+import { createTestRuntimeEffectExecutor, testBuiltinToolCatalog } from '../helpers/runtime-model';
 
-function createRuntimeHostStateInitialStateV1(
-  input: Parameters<typeof createRuntimeHostStateInitialStateRawV1>[0],
+function createRuntimeHostStateInitialState(
+  input: Parameters<typeof createRuntimeHostStateInitialStateRaw>[0],
 ) {
-  return createRuntimeHostStateInitialStateRawV1({
+  return createRuntimeHostStateInitialStateRaw({
     projectId: 'project_kernel_test',
     canonicalWorkspaceDigest: `sha256:${'9'.repeat(64)}`,
     ...input,
   });
 }
 
-function restoreStateKernelCoordinatorV1(
-  input: Parameters<typeof restoreStateKernelCoordinatorRawV1>[0],
+function restoreStateKernelCoordinator(
+  input: Parameters<typeof restoreStateKernelCoordinatorRaw>[0],
 ) {
-  return restoreStateKernelCoordinatorRawV1({
+  return restoreStateKernelCoordinatorRaw({
     projectId: 'project_kernel_test',
     canonicalWorkspaceDigest: `sha256:${'9'.repeat(64)}`,
     ...input,
   });
 }
 
-function insertRawStateEventV1(input: {
+function insertRawStateEvent(input: {
   storePath: string;
   threadId: string;
   eventId: string;
@@ -94,8 +91,8 @@ function insertRawStateEventV1(input: {
   }
 }
 
-function openPreflightedStore(storePath: string, threadId: string): StateSessionStorageV1 {
-  return openStateStoreForTestV1(storePath, { sessionId: threadId });
+function openPreflightedStore(storePath: string, threadId: string): StateSessionStorage {
+  return openStateStoreForTest(storePath, { sessionId: threadId });
 }
 
 function mutateStoredStateForKernelFixture(
@@ -130,8 +127,8 @@ function mutateStoredStateForKernelFixture(
  * fixture reads the already-corrupted bytes after the one Store 4 adapter is
  * closed for mutation, then overlays only Core's test compatibility read.
  */
-function canonicalShellInvocationFactsV1(command: string) {
-  const entry = testBuiltinToolCatalogV1().entries.find(
+function canonicalShellInvocationFacts(command: string) {
+  const entry = testBuiltinToolCatalog().entries.find(
     (candidate) => candidate.visibility === 'model' && candidate.name === 'shell_execute',
   );
   if (!entry) throw new Error('Builtin shell catalog entry is unavailable.');
@@ -145,22 +142,22 @@ function canonicalShellInvocationFactsV1(command: string) {
   };
 }
 
-function testSandboxPreparationArtifactsV1(label: string) {
-  return new SandboxPreparationArtifactStoreV1({
+function testSandboxPreparationArtifacts(label: string) {
+  return new SandboxPreparationArtifactStore({
     root: join(mkdtempSync(join('/tmp', `kite-kernel-${label}-`)), 'sandbox-preparations'),
   });
 }
 
-function preparedShellExecutorV1(executor: ShellExecutor): ShellExecutor {
+function preparedShellExecutor(executor: ShellExecutor): ShellExecutor {
   const wrapped = ((input) => executor(input)) as ShellExecutor &
-    Partial<Record<typeof APP_PREPARED_SHELL_EXECUTION_V1, unknown>>;
-  Object.defineProperty(wrapped, APP_PREPARED_SHELL_EXECUTION_V1, {
+    Partial<Record<typeof APP_PREPARED_SHELL_EXECUTION_, unknown>>;
+  Object.defineProperty(wrapped, APP_PREPARED_SHELL_EXECUTION_, {
     configurable: false,
     enumerable: false,
     writable: false,
     value: Object.freeze({
-      execute: async (input: BuiltinPreparedShellExecutionInputV1) =>
-        projectAppHostShellResultV1(
+      execute: async (input: BuiltinPreparedShellExecutionInput) =>
+        projectAppHostShellResult(
           await executor({
             workspace: input.workspace,
             command: input.command,
@@ -178,7 +175,7 @@ function preparedShellExecutorV1(executor: ShellExecutor): ShellExecutor {
   return Object.freeze(wrapped);
 }
 
-function reduceKernelTestEventsV1(
+function reduceKernelTestEvents(
   state: RuntimeState,
   events: readonly RuntimeEvent[],
 ): RuntimeState {
@@ -187,8 +184,8 @@ function reduceKernelTestEventsV1(
   for (const event of events) {
     next = reduceRuntimeState(
       next,
-      normalizeCurrentToolOutcomeEventV1(
-        normalizeTerminalRuntimeEventV1(event),
+      normalizeCurrentToolOutcomeEvent(
+        normalizeTerminalRuntimeEvent(event),
         next,
         new Date().toISOString(),
       ),
@@ -201,8 +198,8 @@ function reduceKernelTestEventsV1(
 
 describe('AgentKernel durability', () => {
   test('fails closed when a restored State recovery identity disagrees with Host storage', () => {
-    const store = openStateStoreForTestV1(':memory:');
-    const state = createRuntimeHostStateInitialStateV1({
+    const store = openStateStoreForTest(':memory:');
+    const state = createRuntimeHostStateInitialState({
       threadId: 'recovery-identity-mismatch',
       userId: 'user',
       workspace: '/workspace',
@@ -210,7 +207,7 @@ describe('AgentKernel durability', () => {
     });
     store.saveSnapshot(state.session.threadId, state);
 
-    const restored = restoreStateKernelCoordinatorV1({
+    const restored = restoreStateKernelCoordinator({
       threadId: state.session.threadId,
       userId: 'user',
       workspace: '/workspace',
@@ -231,13 +228,13 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'pre-cutover-v24';
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
 
@@ -250,7 +247,7 @@ describe('AgentKernel durability', () => {
       const digest = () => createHash('sha256').update(readFileSync(storePath)).digest('hex');
       const before = digest();
       expect(() =>
-        restoreStateKernelCoordinatorV1({
+        restoreStateKernelCoordinator({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'user',
@@ -272,13 +269,13 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = `format-${formatEpoch ?? 'missing'}`;
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
 
@@ -295,7 +292,7 @@ describe('AgentKernel durability', () => {
       const digest = () => createHash('sha256').update(readFileSync(storePath)).digest('hex');
       const before = digest();
       expect(() =>
-        restoreStateKernelCoordinatorV1({
+        restoreStateKernelCoordinator({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'user',
@@ -314,17 +311,17 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'retired-tail';
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
 
-      insertRawStateEventV1({
+      insertRawStateEvent({
         storePath,
         threadId,
         eventId: 'retired-event',
@@ -332,7 +329,7 @@ describe('AgentKernel durability', () => {
         occurredAt: '2026-08-15T00:00:00.000Z',
       });
 
-      expect(() => openStateStoreForTestV1(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -343,17 +340,17 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'malformed-current-tail';
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
 
-      insertRawStateEventV1({
+      insertRawStateEvent({
         storePath,
         threadId,
         eventId: 'malformed-event',
@@ -361,7 +358,7 @@ describe('AgentKernel durability', () => {
         occurredAt: '2026-08-15T00:00:00.000Z',
       });
 
-      expect(() => openStateStoreForTestV1(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -372,13 +369,13 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'task-identity-tail';
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.appendEvents(
         threadId,
@@ -399,12 +396,12 @@ describe('AgentKernel durability', () => {
       );
       store.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState().recoveryState).toMatchObject({
         kind: 'corrupted',
@@ -422,20 +419,20 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'v23-missing-recovery';
     try {
-      const current = createRuntimeHostStateInitialStateV1({
+      const current = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, current);
       store.close();
       mutateStoredStateForKernelFixture(storePath, threadId, (state) => {
         Reflect.deleteProperty(state, 'toolRecovery');
       });
 
-      expect(() => openStateStoreForTestV1(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -446,20 +443,20 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'v25-missing-model-evidence';
     try {
-      const current = createRuntimeHostStateInitialStateV1({
+      const current = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, current);
       store.close();
       mutateStoredStateForKernelFixture(storePath, threadId, (state) => {
         Reflect.deleteProperty(state, 'modelInvocations');
       });
 
-      expect(() => openStateStoreForTestV1(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -504,18 +501,18 @@ describe('AgentKernel durability', () => {
       const storePath = join(dir, 'runtime.db');
       const threadId = `v25-missing-${label.replaceAll(' ', '-').toLowerCase()}`;
       try {
-        const current = createRuntimeHostStateInitialStateV1({
+        const current = createRuntimeHostStateInitialState({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'user',
           workspace: '/workspace',
         });
-        const store = openStateStoreForTestV1(storePath);
+        const store = openStateStoreForTest(storePath);
         store.saveSnapshot(threadId, current);
         store.close();
         mutateStoredStateForKernelFixture(storePath, threadId, mutate);
 
-        expect(() => openStateStoreForTestV1(storePath)).toThrow('Runtime format is incompatible');
+        expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -527,13 +524,13 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'current-child-missing-recovery';
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
       mutateStoredStateForKernelFixture(storePath, threadId, (storedState) => {
@@ -553,7 +550,7 @@ describe('AgentKernel durability', () => {
         } as unknown as (typeof storedState.suspendedSubagents)[string];
       });
 
-      expect(() => openStateStoreForTestV1(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -564,7 +561,7 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'child-merge-restart';
     try {
-      const initial = createRuntimeHostStateInitialStateV1({
+      const initial = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
@@ -579,7 +576,7 @@ describe('AgentKernel durability', () => {
         createdAtTurnId: initial.turn.turnId,
       };
       const parentIdentity = initial.toolRecovery.identityKey;
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       const kernel = new AgentKernel({
         store,
         initialState: initial,
@@ -588,16 +585,16 @@ describe('AgentKernel durability', () => {
       kernel.processEvent({
         type: 'subagent.recovery_journal_merged',
         toolCallId: 'task-1',
-        journal: createToolRecoveryJournalV1(parentIdentity),
+        journal: createToolRecoveryJournal(parentIdentity),
       });
       kernel.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState().toolRecovery.identityKey).toBe(parentIdentity);
       expect(restored.getState().toolRecovery.qualityGuard).toEqual({
@@ -615,7 +612,7 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'compaction-crash-matrix';
     try {
-      const base = createRuntimeHostStateInitialStateV1({
+      const base = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
@@ -667,7 +664,7 @@ describe('AgentKernel durability', () => {
         sourceRevision: 1,
         checkpoint,
       };
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(threadId, base);
       store.appendEvents(
         threadId,
@@ -676,30 +673,30 @@ describe('AgentKernel durability', () => {
       );
       store.close();
 
-      const afterRequest = restoreStateKernelCoordinatorV1({
+      const afterRequest = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(afterRequest.getState().context.pendingCompaction?.compactionId).toBe('compact-crash');
       expect(afterRequest.getState().transcript.messages).toEqual(base.transcript.messages);
       afterRequest.close();
 
-      const tailStore = openStateStoreForTestV1(storePath);
+      const tailStore = openStateStoreForTest(storePath);
       tailStore.appendEvents(
         threadId,
         [completed],
         [{ eventId: 'completed-1', revision: 2, occurredAt: '2026-07-22T00:00:02.000Z' }],
       );
       tailStore.close();
-      const afterCompletedTail = restoreStateKernelCoordinatorV1({
+      const afterCompletedTail = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(afterCompletedTail.getState().context.pendingCompaction).toBeUndefined();
       expect(afterCompletedTail.getState().context.activeCheckpoint).toEqual(checkpoint);
@@ -707,12 +704,12 @@ describe('AgentKernel durability', () => {
       afterCompletedTail.runtimeStore.saveSnapshot(threadId, afterCompletedTail.getState());
       afterCompletedTail.close();
 
-      const afterCompletedSnapshot = restoreStateKernelCoordinatorV1({
+      const afterCompletedSnapshot = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(afterCompletedSnapshot.getState().context.activeCheckpoint).toEqual(checkpoint);
       expect(afterCompletedSnapshot.getState().context.history).toHaveLength(1);
@@ -743,7 +740,7 @@ describe('AgentKernel durability', () => {
     const dir = mkdtempSync(join(process.cwd(), '.kite-runtime-loaded-capability-restart-'));
     const storePath = join(dir, 'runtime.db');
     try {
-      const state = createRuntimeHostStateInitialStateV1({
+      const state = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'loaded-capability-restart',
         userId: 'user',
@@ -754,7 +751,7 @@ describe('AgentKernel durability', () => {
         capabilityRevision: 'revision-1',
         firstLoadedAtTurnId: state.turn.turnId,
       };
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       const kernel = new AgentKernel({
         store,
         initialState: state,
@@ -788,12 +785,12 @@ describe('AgentKernel durability', () => {
       });
       kernel.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: state.session.threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState().capabilities.loadedCapabilities).toEqual({
         [loaded.capabilityId]: loaded,
@@ -809,10 +806,10 @@ describe('AgentKernel durability', () => {
   });
 
   test('persists a snapshot with each processed event', () => {
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: createRuntimeHostStateInitialStateV1({
+      initialState: createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'kernel-durability',
         userId: 'user',
@@ -829,7 +826,7 @@ describe('AgentKernel durability', () => {
     });
 
     const snapshot =
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>(
         'kernel-durability',
       );
     expect(snapshot?.tools.queue).toEqual(['call-1']);
@@ -840,12 +837,12 @@ describe('AgentKernel durability', () => {
     const dir = mkdtempSync(join(process.cwd(), '.kite-runtime-invocation-'));
     const storePath = join(dir, 'runtime.db');
     try {
-      const first = restoreStateKernelCoordinatorV1({
+      const first = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'invocation-recovery',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       first.processEvent({
         type: 'capability.invocation_recorded',
@@ -861,12 +858,12 @@ describe('AgentKernel durability', () => {
       });
       first.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'invocation-recovery',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState().capabilities.invocations['invocation-1']).toMatchObject({
         status: 'unknown',
@@ -886,12 +883,12 @@ describe('AgentKernel durability', () => {
     const invocationId = 'subagent-blocked-invocation';
     const intent = `sha256:${'1'.repeat(64)}`;
     try {
-      const first = restoreStateKernelCoordinatorV1({
+      const first = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       first.processEvents([
         {
@@ -982,12 +979,12 @@ describe('AgentKernel durability', () => {
       });
       first.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState().capabilities.invocations[invocationId]).toMatchObject({
         status: 'unknown',
@@ -1004,12 +1001,12 @@ describe('AgentKernel durability', () => {
     const dir = mkdtempSync(join(process.cwd(), '.kite-runtime-reconcile-'));
     const storePath = join(dir, 'runtime.db');
     try {
-      const first = restoreStateKernelCoordinatorV1({
+      const first = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'reconcile-recovery',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       first.processEvent({
         type: 'capability.invocation_recorded',
@@ -1025,12 +1022,12 @@ describe('AgentKernel durability', () => {
       });
       first.close();
 
-      const recovered = restoreStateKernelCoordinatorV1({
+      const recovered = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'reconcile-recovery',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       const action = recovered.applyAction({
         type: 'reconcile_invocation',
@@ -1040,12 +1037,12 @@ describe('AgentKernel durability', () => {
       expect(action.status).toBe('applied');
       recovered.close();
 
-      const restored = restoreStateKernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'reconcile-recovery',
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(restored.getState().capabilities.invocations['invocation-reconcile']).toMatchObject({
         status: 'succeeded',
@@ -1062,18 +1059,18 @@ describe('AgentKernel durability', () => {
     const storePath = join(dir, 'runtime.db');
     const threadId = 'task-identity-reopen';
     try {
-      const idSource = createDeterministicRuntimeIdSourceV1({
+      const idSource = createDeterministicRuntimeIdSource({
         seed: 'identity',
         epochMs: Date.parse('2026-08-20T00:00:00.000Z'),
       });
-      const initial = createRuntimeHostStateInitialStateV1({
+      const initial = createRuntimeHostStateInitialState({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
         runtimeIdSource: idSource,
       });
-      const store = openStateStoreForTestV1(storePath);
+      const store = openStateStoreForTest(storePath);
       const kernel = new AgentKernel({
         store,
         initialState: initial,
@@ -1094,12 +1091,12 @@ describe('AgentKernel durability', () => {
       expect(Object.hasOwn(persistedEvent ?? {}, 'taskId')).toBe(false);
       kernel.close();
 
-      const reopened = restoreStateKernelCoordinatorV1({
+      const reopened = restoreStateKernelCoordinator({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openStateStoreForTestV1(storePath),
+        store: openStateStoreForTest(storePath),
       });
       expect(reopened.getState().activeTaskId).toBe('identity-task-0001');
       expect(Object.keys(reopened.getState().tasks)).toEqual(['identity-task-0001']);
@@ -1111,8 +1108,8 @@ describe('AgentKernel durability', () => {
 });
 
 test('Kernel replay cannot complete a V2 plan while an external read awaits approval', () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'kernel-plan-approval-block',
     userId: 'u',
@@ -1193,11 +1190,11 @@ test('Kernel replay cannot complete a V2 plan while an external read awaits appr
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 resumes a matching input action and persists its facts', async () => {
-  const store = openStateStoreForTestV1(':memory:');
+test('runStateRuntimeLoop resumes a matching input action and persists its facts', async () => {
+  const store = openStateStoreForTest(':memory:');
   const kernel = new AgentKernel({
     store,
-    initialState: createRuntimeHostStateInitialStateV1({
+    initialState: createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'loop',
       userId: 'u',
@@ -1215,7 +1212,7 @@ test('runStateRuntimeLoopV1 resumes a matching input action and persists its fac
     },
   ]);
   const events = [] as string[];
-  for await (const event of runStateRuntimeLoopV1(kernel, async () => [], {
+  for await (const event of runStateRuntimeLoop(kernel, async () => [], {
     requestAction: async () => ({ type: 'input', interactionId: 'input-1', text: 'answer' }),
   }))
     events.push(event.type);
@@ -1224,9 +1221,9 @@ test('runStateRuntimeLoopV1 resumes a matching input action and persists its fac
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 completes provider recovery on a fresh turn without replaying the tool', async () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+test('runStateRuntimeLoop completes provider recovery on a fresh turn without replaying the tool', async () => {
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'provider-recovery-loop',
     userId: 'u',
@@ -1268,7 +1265,7 @@ test('runStateRuntimeLoopV1 completes provider recovery on a fresh turn without 
   ]);
 
   const events: RuntimeEvent[] = [];
-  for await (const event of runStateRuntimeLoopV1(kernel, async () => [], {
+  for await (const event of runStateRuntimeLoop(kernel, async () => [], {
     requestAction: async () => ({
       type: 'provider_action_result',
       interactionId: 'provider-action',
@@ -1297,15 +1294,15 @@ test.each([
   ['awaiting_tool_approval', 'generic'],
   ['awaiting_review', 'generic'],
   ['awaiting_review', 'structured'],
-] as const)('runStateRuntimeLoopV1 consumes %s cancellation via %s action without throwing', async (interactionKind, actionKind) => {
-  const store = openStateStoreForTestV1(':memory:');
+] as const)('runStateRuntimeLoop consumes %s cancellation via %s action without throwing', async (interactionKind, actionKind) => {
+  const store = openStateStoreForTest(':memory:');
   const toolCallId =
     interactionKind === 'awaiting_user_input'
       ? 'ask-1'
       : interactionKind === 'awaiting_tool_approval'
         ? 'approval-1'
         : 'plan-1';
-  const initial = createRuntimeHostStateInitialStateV1({
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `cancel-${interactionKind}`,
     userId: 'u',
@@ -1403,7 +1400,7 @@ test.each([
   const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
   const events: string[] = [];
   const executedEffects: string[] = [];
-  for await (const event of runStateRuntimeLoopV1(
+  for await (const event of runStateRuntimeLoop(
     kernel,
     async (effect) => {
       executedEffects.push(effect.type);
@@ -1440,9 +1437,9 @@ test.each([
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 closes a suspended subagent when its approval is cancelled', async () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+test('runStateRuntimeLoop closes a suspended subagent when its approval is cancelled', async () => {
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'cancel-subagent-approval',
     userId: 'u',
@@ -1499,7 +1496,7 @@ test('runStateRuntimeLoopV1 closes a suspended subagent when its approval is can
 
   const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
   const events: string[] = [];
-  for await (const event of runStateRuntimeLoopV1(kernel, async () => [], {
+  for await (const event of runStateRuntimeLoop(kernel, async () => [], {
     requestAction: async () => ({ type: 'cancel', interactionId: 'approval-1' }),
   })) {
     events.push(event.type);
@@ -1512,11 +1509,11 @@ test('runStateRuntimeLoopV1 closes a suspended subagent when its approval is can
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 persists and yields a durable terminal output event', async () => {
-  const store = openStateStoreForTestV1(':memory:');
+test('runStateRuntimeLoop persists and yields a durable terminal output event', async () => {
+  const store = openStateStoreForTest(':memory:');
   const kernel = new AgentKernel({
     store,
-    initialState: createRuntimeHostStateInitialStateV1({
+    initialState: createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'final',
       userId: 'u',
@@ -1525,7 +1522,7 @@ test('runStateRuntimeLoopV1 persists and yields a durable terminal output event'
     interactionMode: 'accept_edits',
   });
   const events = [] as string[];
-  for await (const event of runStateRuntimeLoopV1(
+  for await (const event of runStateRuntimeLoop(
     kernel,
     async () => [
       {
@@ -1553,11 +1550,11 @@ test('runStateRuntimeLoopV1 persists and yields a durable terminal output event'
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 applies streamed tool events before the effect completes', async () => {
-  const store = openStateStoreForTestV1(':memory:');
+test('runStateRuntimeLoop applies streamed tool events before the effect completes', async () => {
+  const store = openStateStoreForTest(':memory:');
   const kernel = new AgentKernel({
     store,
-    initialState: createRuntimeHostStateInitialStateV1({
+    initialState: createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'streamed-tool',
       userId: 'u',
@@ -1573,7 +1570,7 @@ test('runStateRuntimeLoopV1 applies streamed tool events before the effect compl
   });
 
   const events: RuntimeEvent[] = [];
-  for await (const event of runStateRuntimeLoopV1(
+  for await (const event of runStateRuntimeLoop(
     kernel,
     async (effect, _state, emit) => {
       if (effect.type !== 'run_tools') return [];
@@ -1637,10 +1634,10 @@ test('runStateRuntimeLoopV1 applies streamed tool events before the effect compl
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 rejects persistEvent when durable persistence throws instead of hanging', async () => {
-  const durableStore = openStateStoreForTestV1(':memory:');
+test('runStateRuntimeLoop rejects persistEvent when durable persistence throws instead of hanging', async () => {
+  const durableStore = openStateStoreForTest(':memory:');
   const persistenceError = new Error('fixture persistence failure');
-  const store: StateSessionStorageV1 = {
+  const store: StateSessionStorage = {
     ...durableStore,
     appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata) {
       if (events.some((event) => event.type === 'network.admission_decided')) {
@@ -1649,7 +1646,7 @@ test('runStateRuntimeLoopV1 rejects persistEvent when durable persistence throws
       durableStore.appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata);
     },
   };
-  const initialState = createRuntimeHostStateInitialStateV1({
+  const initialState = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'streamed-persistence-rejection',
     userId: 'u',
@@ -1678,7 +1675,7 @@ test('runStateRuntimeLoopV1 rejects persistEvent when durable persistence throws
     receiptDigest: `sha256:${'1'.repeat(64)}`,
   };
   let persistenceRejected = false;
-  const stream = runStateRuntimeLoopV1(
+  const stream = runStateRuntimeLoop(
     kernel,
     async (effect, _state, _emit, context) => {
       if (effect.type !== 'run_tools') return [];
@@ -1717,9 +1714,9 @@ test('runStateRuntimeLoopV1 rejects persistEvent when durable persistence throws
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 starts each approved shell while later sibling approval is pending', async () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+test('runStateRuntimeLoop starts each approved shell while later sibling approval is pending', async () => {
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'incremental-shell-approval',
     userId: 'u',
@@ -1735,7 +1732,7 @@ test('runStateRuntimeLoopV1 starts each approved shell while later sibling appro
       name: 'shell_execute',
       args: { command },
       status: 'queued',
-      ...canonicalShellInvocationFactsV1(command),
+      ...canonicalShellInvocationFacts(command),
       createdAtTurnId: initial.turn.turnId,
     };
   }
@@ -1753,7 +1750,7 @@ test('runStateRuntimeLoopV1 starts each approved shell while later sibling appro
   const approvalOrder: string[] = [];
   const events: RuntimeEvent[] = [];
   const run = (async () => {
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async (effect, state, emit) => {
         if (effect.type === 'call_model') {
@@ -1822,7 +1819,7 @@ test('runStateRuntimeLoopV1 starts each approved shell while later sibling appro
       10_000,
       undefined,
       undefined,
-      (state) => projectRuntimeSchedulerFactsV1(state, testBuiltinToolCatalogV1()),
+      (state) => projectRuntimeSchedulerFacts(state, testBuiltinToolCatalog()),
     )) {
       events.push(event);
     }
@@ -1845,8 +1842,8 @@ test('runStateRuntimeLoopV1 starts each approved shell while later sibling appro
 });
 
 test('cancelling a later shell approval aborts the turn and cancels a running sibling', async () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'cancel-incremental-shell-approval',
     userId: 'u',
@@ -1862,7 +1859,7 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
       name: 'shell_execute',
       args: { command },
       status: 'queued',
-      ...canonicalShellInvocationFactsV1(command),
+      ...canonicalShellInvocationFacts(command),
       createdAtTurnId: initial.turn.turnId,
     };
   }
@@ -1879,7 +1876,7 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
   let modelCalls = 0;
   const events: RuntimeEvent[] = [];
 
-  for await (const event of runStateRuntimeLoopV1(
+  for await (const event of runStateRuntimeLoop(
     kernel,
     async (effect, state, emit) => {
       if (effect.type === 'call_model') {
@@ -1953,7 +1950,7 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
     10_000,
     undefined,
     undefined,
-    (state) => projectRuntimeSchedulerFactsV1(state, testBuiltinToolCatalogV1()),
+    (state) => projectRuntimeSchedulerFacts(state, testBuiltinToolCatalog()),
   )) {
     events.push(event);
   }
@@ -1972,8 +1969,8 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
 });
 
 test('a cancelled concurrent shell rejects its late terminal event', () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'cancel-concurrent-shell',
     userId: 'u',
@@ -2019,8 +2016,8 @@ test('a cancelled concurrent shell rejects its late terminal event', () => {
 });
 
 test('a stale concurrent shell lease accepts one ordered started-to-finished result batch', () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'concurrent-shell-result-batch',
     userId: 'u',
@@ -2066,8 +2063,8 @@ test('a stale concurrent shell lease accepts one ordered started-to-finished res
 });
 
 test('a stale concurrent shell lease forwards ephemeral progress without advancing revision', () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'concurrent-shell-progress',
     userId: 'u',
@@ -2123,7 +2120,7 @@ test('a stale concurrent shell lease forwards ephemeral progress without advanci
 });
 
 test('production executor overlaps tools from a scheduler read batch', async () => {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'parallel-read-executor',
     userId: 'u',
@@ -2155,7 +2152,7 @@ test('production executor overlaps tools from a scheduler read batch', async () 
     reportBothStarted = resolve;
   });
   const entered: string[] = [];
-  const executor = createTestRuntimeEffectExecutorV1({
+  const executor = createTestRuntimeEffectExecutor({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -2166,8 +2163,8 @@ test('production executor overlaps tools from a scheduler read batch', async () 
     },
     model: {} as never,
     sandboxBackend: 'seatbelt',
-    sandboxPreparationArtifacts: testSandboxPreparationArtifactsV1('parallel-read'),
-    shellExecutor: preparedShellExecutorV1(async ({ command }) => {
+    sandboxPreparationArtifacts: testSandboxPreparationArtifacts('parallel-read'),
+    shellExecutor: preparedShellExecutor(async ({ command }) => {
       entered.push(command);
       if (entered.length === 2) reportBothStarted();
       await released;
@@ -2187,22 +2184,22 @@ test('production executor overlaps tools from a scheduler read batch', async () 
       getState: () => runtimeState,
       persistEvent: async (event) => {
         persistedEvents.push(event);
-        runtimeState = reduceKernelTestEventsV1(runtimeState, [event]);
+        runtimeState = reduceKernelTestEvents(runtimeState, [event]);
         return true;
       },
       persistEvents: async (events) => {
         persistedEvents.push(...events);
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
       persistAttemptStartEvents: async (events) => {
         persistedEvents.push(...events);
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
       persistTerminalRecoveryEvents: async (events) => {
         persistedEvents.push(...events);
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
     },
@@ -2224,7 +2221,7 @@ test('production executor overlaps tools from a scheduler read batch', async () 
 });
 
 test('production executor all-settled waits for a sibling when another adapter throws', async () => {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'all-settled-production-executor',
     userId: 'u',
@@ -2248,7 +2245,7 @@ test('production executor all-settled waits for a sibling when another adapter t
   }
   let slowFinished = false;
   const persistedEvents: RuntimeEvent[] = [];
-  const executor = createTestRuntimeEffectExecutorV1({
+  const executor = createTestRuntimeEffectExecutor({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -2259,8 +2256,8 @@ test('production executor all-settled waits for a sibling when another adapter t
     },
     model: {} as never,
     sandboxBackend: 'seatbelt',
-    sandboxPreparationArtifacts: testSandboxPreparationArtifactsV1('all-settled'),
-    shellExecutor: preparedShellExecutorV1(async ({ command }) => {
+    sandboxPreparationArtifacts: testSandboxPreparationArtifacts('all-settled'),
+    shellExecutor: preparedShellExecutor(async ({ command }) => {
       if (command === 'pwd') throw new Error('private adapter failure');
       await Bun.sleep(20);
       slowFinished = true;
@@ -2277,22 +2274,22 @@ test('production executor all-settled waits for a sibling when another adapter t
       getState: () => runtimeState,
       persistEvent: async (event) => {
         persistedEvents.push(event);
-        runtimeState = reduceKernelTestEventsV1(runtimeState, [event]);
+        runtimeState = reduceKernelTestEvents(runtimeState, [event]);
         return true;
       },
       persistEvents: async (events) => {
         persistedEvents.push(...events);
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
       persistAttemptStartEvents: async (events) => {
         persistedEvents.push(...events);
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
       persistTerminalRecoveryEvents: async (events) => {
         persistedEvents.push(...events);
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
     },
@@ -2306,7 +2303,7 @@ test('production executor all-settled waits for a sibling when another adapter t
 });
 
 test('production executor commits provider recovery after the originating tool failure', async () => {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'provider-action-order',
     userId: 'u',
@@ -2335,9 +2332,9 @@ test('production executor commits provider recovery after the originating tool f
   };
   const descriptor = {
     ...descriptorWithoutRevision,
-    revision: descriptorRevisionV1(descriptorWithoutRevision),
+    revision: descriptorRevision(descriptorWithoutRevision),
   };
-  const binding = createCapabilityBindingV1({
+  const binding = createCapabilityBinding({
     capabilityId: descriptor.capabilityId,
     capabilityRevision: descriptor.revision,
     exposedToolName: 'mcp__github__publish',
@@ -2385,7 +2382,7 @@ test('production executor commits provider recovery after the originating tool f
       retryable: false,
     });
   };
-  const executor = createTestRuntimeEffectExecutorV1({
+  const executor = createTestRuntimeEffectExecutor({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -2394,9 +2391,9 @@ test('production executor commits provider recovery after the originating tool f
       modelName: 'test',
       sandbox: { enabled: false },
       features: {
-        capabilityCatalogV1: true,
-        mcpRuntimeBindingV1: true,
-        mcpProviderActionV1: true,
+        capabilityCatalog: true,
+        mcpRuntimeBinding: true,
+        mcpProviderAction: true,
       },
     },
     model: {} as never,
@@ -2413,19 +2410,19 @@ test('production executor commits provider recovery after the originating tool f
       reservationIds: [],
       getState: () => runtimeState,
       persistEvent: async (event) => {
-        runtimeState = reduceKernelTestEventsV1(runtimeState, [event]);
+        runtimeState = reduceKernelTestEvents(runtimeState, [event]);
         return true;
       },
       persistEvents: async (events) => {
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
       persistAttemptStartEvents: async (events) => {
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
       persistTerminalRecoveryEvents: async (events) => {
-        runtimeState = reduceKernelTestEventsV1(runtimeState, events);
+        runtimeState = reduceKernelTestEvents(runtimeState, events);
         return true;
       },
     },
@@ -2440,8 +2437,8 @@ test('production executor commits provider recovery after the originating tool f
 });
 
 test('batch run completion persists a named rewind recovery point', () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initialState = createRuntimeHostStateInitialStateV1({
+  const store = openStateStoreForTest(':memory:');
+  const initialState = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'batch-completion-rewind',
     userId: 'u',
@@ -2474,11 +2471,11 @@ test('batch run completion persists a named rewind recovery point', () => {
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 yields model deltas without persisting or reducing them', async () => {
-  const store = openStateStoreForTestV1(':memory:');
+test('runStateRuntimeLoop yields model deltas without persisting or reducing them', async () => {
+  const store = openStateStoreForTest(':memory:');
   const kernel = new AgentKernel({
     store,
-    initialState: createRuntimeHostStateInitialStateV1({
+    initialState: createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'ephemeral-model-deltas',
       userId: 'u',
@@ -2489,7 +2486,7 @@ test('runStateRuntimeLoopV1 yields model deltas without persisting or reducing t
   const revisionBeforeDelta = kernel.getState().revision;
   const events: RuntimeEvent[] = [];
 
-  for await (const event of runStateRuntimeLoopV1(
+  for await (const event of runStateRuntimeLoop(
     kernel,
     async (effect, _state, emit) => {
       if (effect.type !== 'call_model') return [];
@@ -2518,11 +2515,11 @@ test('runStateRuntimeLoopV1 yields model deltas without persisting or reducing t
   kernel.close();
 });
 
-test('runStateRuntimeLoopV1 drops ephemeral model deltas from a stale effect lease', async () => {
-  const store = openStateStoreForTestV1(':memory:');
+test('runStateRuntimeLoop drops ephemeral model deltas from a stale effect lease', async () => {
+  const store = openStateStoreForTest(':memory:');
   const kernel = new AgentKernel({
     store,
-    initialState: createRuntimeHostStateInitialStateV1({
+    initialState: createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'stale-ephemeral-model-delta',
       userId: 'u',
@@ -2533,7 +2530,7 @@ test('runStateRuntimeLoopV1 drops ephemeral model deltas from a stale effect lea
   const events: RuntimeEvent[] = [];
   let calls = 0;
 
-  for await (const event of runStateRuntimeLoopV1(
+  for await (const event of runStateRuntimeLoop(
     kernel,
     async (effect, _state, emit) => {
       if (effect.type !== 'call_model') return [];
@@ -2563,8 +2560,8 @@ test('runStateRuntimeLoopV1 drops ephemeral model deltas from a stale effect lea
 });
 
 test('run cancellation atomically settles running and queued tools while keeping the task resumable', () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'cancel-run',
     userId: 'u',
@@ -2642,8 +2639,8 @@ test('run cancellation atomically settles running and queued tools while keeping
 });
 
 test('Kernel atomically terminalizes a suspended Tool with its prepared capability receipt', () => {
-  const store = openStateStoreForTestV1(':memory:');
-  const initial = createRuntimeHostStateInitialStateV1({
+  const store = openStateStoreForTest(':memory:');
+  const initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'suspended-capability-receipt',
     userId: 'u',

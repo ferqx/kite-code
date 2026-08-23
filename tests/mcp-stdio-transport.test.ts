@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import { createMcpStdioTransportV1, McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostMcpStdioProcessPortV1 } from '@kite/runtime-host';
+import { createMcpStdioTransport, McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import { createRuntimeHostMcpStdioProcessPort } from '@kite/runtime-host';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 const workspace = process.cwd();
@@ -16,13 +16,13 @@ const protectedPathEvaluator = {
 };
 
 function createPort() {
-  return createRuntimeHostMcpStdioProcessPortV1();
+  return createRuntimeHostMcpStdioProcessPort();
 }
 
 describe('Builtin MCP Host stdio transport', () => {
   test('keeps SDK JSON-RPC semantics on the Host-validated process port', async () => {
     const client = new Client({ name: 'builtin-mcp-test', version: '1' }, { capabilities: {} });
-    const transport = createMcpStdioTransportV1(
+    const transport = createMcpStdioTransport(
       {
         command: process.execPath,
         args: [fixture],

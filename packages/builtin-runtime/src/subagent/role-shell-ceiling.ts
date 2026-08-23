@@ -1,7 +1,7 @@
-import { isReadOnlyShellCommandV1 } from '../catalog-contract';
+import { isReadOnlyShellCommand } from '../catalog-contract';
 import type { ShellExecutor, ShellInput, ShellResult } from '../sandbox/shell-contract';
-import { subagentRoleAllowsShellCommandV1 } from './role-ceiling';
-import type { BuiltinSubagentRoleConfigV1 } from './roles';
+import { subagentRoleAllowsShellCommand } from './role-ceiling';
+import type { BuiltinSubagentRoleConfig } from './roles';
 
 /**
  * The stable, pre-dispatch refusal envelope for a read-only subagent role.
@@ -10,9 +10,9 @@ import type { BuiltinSubagentRoleConfigV1 } from './roles';
  * ToolExecutionResult. Core may enrich the result at its adapter seam, but
  * the policy decision and refusal text are owned by Builtin Runtime.
  */
-export interface BuiltinSubagentShellRejectionV1 extends ShellResult {
+export interface BuiltinSubagentShellRejection extends ShellResult {
   readonly status: 'rejected';
-  readonly classifierAdviceV1: {
+  readonly classifierAdvice: {
     readonly detailCode: 'policy_denied';
     readonly disposition: 'never';
     readonly maximumAdditionalCalls: 0;
@@ -21,8 +21,8 @@ export interface BuiltinSubagentShellRejectionV1 extends ShellResult {
   };
 }
 
-function readOnlyShellRejectionV1(command: string): BuiltinSubagentShellRejectionV1 | undefined {
-  if (isReadOnlyShellCommandV1(command)) return undefined;
+function readOnlyShellRejection(command: string): BuiltinSubagentShellRejection | undefined {
+  if (isReadOnlyShellCommand(command)) return undefined;
   return {
     ok: false,
     command,
@@ -30,7 +30,7 @@ function readOnlyShellRejectionV1(command: string): BuiltinSubagentShellRejectio
     stdout: '',
     stderr: `Command rejected: "${command}" is not a read-only command. This sub-agent has read-only access only.`,
     status: 'rejected',
-    classifierAdviceV1: {
+    classifierAdvice: {
       detailCode: 'policy_denied',
       disposition: 'never',
       maximumAdditionalCalls: 0,
@@ -41,24 +41,24 @@ function readOnlyShellRejectionV1(command: string): BuiltinSubagentShellRejectio
 }
 
 /** Apply the Builtin role shell ceiling before a child tool can reach a port. */
-export function rejectShellOutsideSubAgentRoleCeilingV1(
-  role: Pick<BuiltinSubagentRoleConfigV1, 'allowedTools'>,
+export function rejectShellOutsideSubAgentRoleCeiling(
+  role: Pick<BuiltinSubagentRoleConfig, 'allowedTools'>,
   command: string,
-): BuiltinSubagentShellRejectionV1 | undefined {
-  return subagentRoleAllowsShellCommandV1({
+): BuiltinSubagentShellRejection | undefined {
+  return subagentRoleAllowsShellCommand({
     role,
-    commandIsReadOnly: isReadOnlyShellCommandV1(command),
+    commandIsReadOnly: isReadOnlyShellCommand(command),
   })
     ? undefined
-    : readOnlyShellRejectionV1(command);
+    : readOnlyShellRejection(command);
 }
 
 /** Bind the role ceiling to an injected Shell executor without a fallback owner. */
-export function resolveSubAgentShellExecutorV1(
-  role: Pick<BuiltinSubagentRoleConfigV1, 'allowedTools'>,
+export function resolveSubAgentShellExecutor(
+  role: Pick<BuiltinSubagentRoleConfig, 'allowedTools'>,
   shellExecutor?: ShellExecutor,
 ): ShellExecutor | undefined {
   if (!role.allowedTools || !shellExecutor) return shellExecutor;
   return async (shellInput: ShellInput) =>
-    readOnlyShellRejectionV1(shellInput.command) ?? shellExecutor(shellInput);
+    readOnlyShellRejection(shellInput.command) ?? shellExecutor(shellInput);
 }

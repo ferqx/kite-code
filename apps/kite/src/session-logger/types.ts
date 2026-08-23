@@ -5,13 +5,13 @@
 // 不依赖 @opentelemetry/api，但格式兼容 OTLP JSON 序列化。
 
 import type {
-  StateFailureKindV1 as FailureKindV1,
-  StateToolDispatchStateV1 as ToolDispatchStateV1,
-  StateToolExternalEffectsV1 as ToolExternalEffectsV1,
-  StateToolOutcomeDetailCodeV1 as ToolOutcomeDetailCodeV1,
-  StateToolOutcomeStatusV1 as ToolOutcomeStatusV1,
-  StateToolRecoveryDispositionV1 as ToolRecoveryDispositionV1,
-  StateUnknownToolFieldsObservationV1 as UnknownToolFieldsObservationV1,
+  StateFailureKind as FailureKind,
+  StateToolDispatchState as ToolDispatchState,
+  StateToolExternalEffects as ToolExternalEffects,
+  StateToolOutcomeDetailCode as ToolOutcomeDetailCode,
+  StateToolOutcomeStatus as ToolOutcomeStatus,
+  StateToolRecoveryDisposition as ToolRecoveryDisposition,
+  StateUnknownToolFieldsObservation as UnknownToolFieldsObservation,
 } from '@kite/runtime-host';
 
 // ── OTel 兼容的 Trace 记录 ──
@@ -54,19 +54,19 @@ export interface TraceEvent {
  * Producers construct this object from structured Runtime fields only; a full
  * RuntimeEvent is never serialized into this shape.
  */
-export interface MetadataEventRecordV1 {
+export interface MetadataEventRecord {
   schemaVersion: 1;
   eventType: string;
   timestamp: string;
   status: 'ok' | 'error' | 'cancelled' | 'blocked' | 'unknown';
-  metadata: MetadataFieldsV1;
+  metadata: MetadataFields;
 }
 
-export interface MetadataFieldsV1 {
+export interface MetadataFields {
   durationMs?: number;
   toolKind?: string;
   capabilityKind?: string;
-  failureKind?: FailureKindV1;
+  failureKind?: FailureKind;
   inputTokens?: number;
   outputTokens?: number;
   cacheHitTokens?: number;
@@ -82,31 +82,31 @@ export interface MetadataFieldsV1 {
   compactionFailureKind?: string;
   providerAdmissionRevision?: string;
   releaseVersion?: string;
-  releaseProfile?: ReleaseProfileMetadataV1;
+  releaseProfile?: ReleaseProfileMetadata;
   releaseCohort?: string;
-  toolOutcomeStatus?: ToolOutcomeStatusV1;
-  toolOutcomeDetailCode?: ToolOutcomeDetailCodeV1;
-  toolDispatchState?: ToolDispatchStateV1;
-  toolExternalEffects?: ToolExternalEffectsV1;
-  toolRecoveryDisposition?: ToolRecoveryDispositionV1;
+  toolOutcomeStatus?: ToolOutcomeStatus;
+  toolOutcomeDetailCode?: ToolOutcomeDetailCode;
+  toolDispatchState?: ToolDispatchState;
+  toolExternalEffects?: ToolExternalEffects;
+  toolRecoveryDisposition?: ToolRecoveryDisposition;
   toolQueueMs?: number;
   toolExecutionMs?: number;
   toolApprovalWaitMs?: number;
   toolTotalActiveMs?: number;
   unknownFieldObserved?: boolean;
   unknownFieldCount?: number;
-  unknownFieldToolClass?: UnknownToolFieldsObservationV1['toolClass'];
+  unknownFieldToolClass?: UnknownToolFieldsObservation['toolClass'];
 }
 
-export type ReleaseProfileMetadataV1 = 'limited' | 'internal' | 'canary' | 'ga';
+export type ReleaseProfileMetadata = 'limited' | 'internal' | 'canary' | 'ga';
 
-export interface SessionMetadataContextV1 {
+export interface SessionMetadataContext {
   releaseVersion?: string;
-  releaseProfile?: ReleaseProfileMetadataV1;
+  releaseProfile?: ReleaseProfileMetadata;
   releaseCohort?: string;
 }
 
-export type SessionLoggingDiagnosticV1 =
+export type SessionLoggingDiagnostic =
   | {
       code: 'writer_unavailable';
       message: 'Session logging is unavailable; the Agent will continue without a logging fallback.';
@@ -120,16 +120,16 @@ export type SessionLoggingDiagnosticV1 =
       message: 'The session log reached its configured size limit; further records were disabled.';
     };
 
-export type SessionLoggingContentProvenanceV1 = 'user_message' | 'model_visible_answer';
+export type SessionLoggingContentProvenance = 'user_message' | 'model_visible_answer';
 
 /** Trusted, structured result from the Runtime secret detector. */
-export interface SessionLoggingContentInspectionV1 {
+export interface SessionLoggingContentInspection {
   schemaVersion: 1;
   detector: 'runtime_secret_detector';
   verdict: 'clear' | 'secret' | 'unknown';
 }
 
-export type SessionLoggingContentInspectorV1 = (input: {
+export type SessionLoggingContentInspector = (input: {
   text: string;
-  provenance: SessionLoggingContentProvenanceV1;
-}) => SessionLoggingContentInspectionV1;
+  provenance: SessionLoggingContentProvenance;
+}) => SessionLoggingContentInspection;

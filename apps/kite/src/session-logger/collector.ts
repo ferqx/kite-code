@@ -18,16 +18,16 @@
 // 子 Agent 事件通过 subagentEventSink → emitAndRecord() 写入，
 // parentSpanId 使用当前活跃的 node span，归入主日志文件（子 agent 不创建独立日志）。
 
-import type { StateRuntimeEventV1 as RuntimeEvent } from '@kite/runtime-host';
-import type { SessionLoggingPolicyV1 } from '#app/config/session-logging-policy';
+import type { StateRuntimeEvent as RuntimeEvent } from '@kite/runtime-host';
+import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
 import { genSpanId, genTraceId } from './ids';
-import { mapRuntimeMetadataV1, mapSessionBoundaryMetadataV1 } from './metadata-mapper';
+import { mapRuntimeMetadata, mapSessionBoundaryMetadata } from './metadata-mapper';
 import { recordContentRuntimeEvent } from './recorder';
 import type {
-  SessionLoggingContentInspectorV1,
-  SessionLoggingContentProvenanceV1,
-  SessionLoggingDiagnosticV1,
-  SessionMetadataContextV1,
+  SessionLoggingContentInspector,
+  SessionLoggingContentProvenance,
+  SessionLoggingDiagnostic,
+  SessionMetadataContext,
   TraceRecord,
 } from './types';
 import { SessionLogWriter } from './writer';
@@ -39,16 +39,16 @@ interface SessionLogWriterLike {
 
 export interface SessionLogCollectorOptions {
   mode?: 'off' | 'metadata' | 'content';
-  policy?: SessionLoggingPolicyV1;
-  metadataContext?: SessionMetadataContextV1;
-  contentInspector?: SessionLoggingContentInspectorV1;
-  onDiagnostic?: (diagnostic: SessionLoggingDiagnosticV1) => void;
+  policy?: SessionLoggingPolicy;
+  metadataContext?: SessionMetadataContext;
+  contentInspector?: SessionLoggingContentInspector;
+  onDiagnostic?: (diagnostic: SessionLoggingDiagnostic) => void;
   writerFactory?: (
     frontend: string,
     threadId: string,
     basename: string,
-    onDiagnostic: (diagnostic: SessionLoggingDiagnosticV1) => void,
-    policy?: SessionLoggingPolicyV1,
+    onDiagnostic: (diagnostic: SessionLoggingDiagnostic) => void,
+    policy?: SessionLoggingPolicy,
   ) => SessionLogWriterLike;
 }
 
@@ -56,13 +56,13 @@ export class SessionLogCollector {
   private _writer: SessionLogWriterLike | null = null;
   private _finalizationWriter: SessionLogWriterLike | null = null;
   private _mode: 'off' | 'metadata' | 'content';
-  private _metadataContext: SessionMetadataContextV1;
+  private _metadataContext: SessionMetadataContext;
   private _traceId: string;
   /** 当前 turn span ID，nextTurn() 时刷新 */
   private _currentTurnSpanId = '';
-  private readonly _reportedDiagnostics = new Set<SessionLoggingDiagnosticV1['code']>();
-  private readonly _contentInspector?: SessionLoggingContentInspectorV1;
-  private readonly _onDiagnostic?: (diagnostic: SessionLoggingDiagnosticV1) => void;
+  private readonly _reportedDiagnostics = new Set<SessionLoggingDiagnostic['code']>();
+  private readonly _contentInspector?: SessionLoggingContentInspector;
+  private readonly _onDiagnostic?: (diagnostic: SessionLoggingDiagnostic) => void;
 
   constructor(
     threadId: string,
@@ -108,7 +108,7 @@ export class SessionLogCollector {
       }
     }
     if (this._mode === 'metadata') {
-      this._write(mapSessionBoundaryMetadataV1('session.start', 'ok', this._metadataContext));
+      this._write(mapSessionBoundaryMetadata('session.start', 'ok', this._metadataContext));
       return;
     }
     if (this._mode === 'off') return;
@@ -135,7 +135,7 @@ export class SessionLogCollector {
     if (this._mode === 'off') return;
     if (this._mode === 'metadata') {
       try {
-        this._write(mapRuntimeMetadataV1(event));
+        this._write(mapRuntimeMetadata(event));
       } catch {
         this._tripLogging();
       }
@@ -173,7 +173,7 @@ export class SessionLogCollector {
     }
     if (this._mode === 'metadata') {
       this._write(
-        mapSessionBoundaryMetadataV1(
+        mapSessionBoundaryMetadata(
           'session.end',
           status === 'completed' ? 'ok' : status === 'aborted' ? 'cancelled' : 'error',
           this._metadataContext,
@@ -224,7 +224,7 @@ export class SessionLogCollector {
     }
   }
 
-  private _tripLogging(diagnostic?: SessionLoggingDiagnosticV1): void {
+  private _tripLogging(diagnostic?: SessionLoggingDiagnostic): void {
     this._mode = 'off';
     this._writer = null;
     this._currentTurnSpanId = '';
@@ -237,7 +237,7 @@ export class SessionLogCollector {
     );
   }
 
-  private _contentAllowed(text: string, provenance: SessionLoggingContentProvenanceV1): boolean {
+  private _contentAllowed(text: string, provenance: SessionLoggingContentProvenance): boolean {
     if (!this._contentInspector) return false;
     try {
       const inspection = this._contentInspector({ text, provenance });
@@ -252,7 +252,7 @@ export class SessionLogCollector {
     }
   }
 
-  private _reportDiagnostic(diagnostic: SessionLoggingDiagnosticV1): void {
+  private _reportDiagnostic(diagnostic: SessionLoggingDiagnostic): void {
     if (this._reportedDiagnostics.has(diagnostic.code)) return;
     this._reportedDiagnostics.add(diagnostic.code);
     try {

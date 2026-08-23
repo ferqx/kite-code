@@ -2,21 +2,21 @@ import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
   type SkillCatalogSnapshot,
-  verifyBuiltinWorkspaceFilesystemTerminalV1,
+  verifyBuiltinWorkspaceFilesystemTerminal,
 } from '@kite/builtin-runtime';
-import { sandboxSupportsFullModeV1 } from '@kite/builtin-runtime/sandbox';
+import { sandboxSupportsFullMode } from '@kite/builtin-runtime/sandbox';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import {
-  createDescendantResourceAdmissionV1,
-  createRuntimeHostInteractionIdV1,
+  createDescendantResourceAdmission,
+  createRuntimeHostInteractionId,
   DescendantResourceAdmissionError,
 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
-import { isBuiltinSubagentTaskToolNameV1 } from '#builtin-runtime';
+import { isBuiltinSubagentTaskToolName } from '#builtin-runtime';
 import { classifyFailure } from './failures';
 import { createFilePreimageRecorder } from './file-checkpoints';
-import { ProviderReadinessCoordinatorV1 } from './provider-readiness';
-import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
+import { ProviderReadinessCoordinator } from './provider-readiness';
+import { resourceAdmissionTerminalEvents } from './resource-admission-terminal';
 import type { RuntimeExecutorDependencies } from './runtime-effect-dependencies';
 import type {
   RuntimeEffect,
@@ -25,24 +25,24 @@ import type {
   RuntimeState,
 } from './state-runtime';
 import {
-  executeAppRuntimeToolsV1,
+  executeAppRuntimeTools,
   serializeConcurrentSubagentApprovalEvents,
 } from './tool-controller-adapter';
 import {
-  createAppOrdinaryToolPipelineAttemptRuntimeV1,
-  createAppToolPipelineAttemptScopeV1,
+  createAppOrdinaryToolPipelineAttemptRuntime,
+  createAppToolPipelineAttemptScope,
 } from './tool-pipeline-ordinary-attempt';
-import { createAppStateToolPipelinePersistenceV1 } from './tool-pipeline-state-persistence';
-import { createAppTaskToolPipelineAttemptRuntimeV1 } from './tool-pipeline-task-attempt';
+import { createAppStateToolPipelinePersistence } from './tool-pipeline-state-persistence';
+import { createAppTaskToolPipelineAttemptRuntime } from './tool-pipeline-task-attempt';
 
-function requireBuiltinToolCatalogV1(dependencies: RuntimeExecutorDependencies) {
+function requireBuiltinToolCatalog(dependencies: RuntimeExecutorDependencies) {
   if (!dependencies.builtinToolCatalog) {
     throw new Error('Runtime Builtin tool catalog projection is unavailable.');
   }
   return dependencies.builtinToolCatalog;
 }
 
-function requireModelEffectCoordinatorV1(dependencies: RuntimeExecutorDependencies) {
+function requireModelEffectCoordinator(dependencies: RuntimeExecutorDependencies) {
   if (!dependencies.modelEffectCoordinator) {
     throw new Error('Builtin Model effect coordinator is unavailable.');
   }
@@ -50,7 +50,7 @@ function requireModelEffectCoordinatorV1(dependencies: RuntimeExecutorDependenci
 }
 
 /** Validate the exact App composition before the adapter receives a tool call. */
-function resolveToolPipelineAdapterCompositionV1(
+function resolveToolPipelineAdapterComposition(
   dependencies: RuntimeExecutorDependencies,
 ): NonNullable<RuntimeExecutorDependencies['toolPipelineComposition']> {
   const composition = dependencies.toolPipelineComposition;
@@ -67,8 +67,8 @@ function currentSkillCatalog(
   dependencies: RuntimeExecutorDependencies,
 ): SkillCatalogSnapshot | undefined {
   return dependencies.skillOptions &&
-    getFeatureFlags(dependencies.config).skillWorkflowV1 &&
-    getFeatureFlags(dependencies.config).skillActivationV2
+    getFeatureFlags(dependencies.config).skillWorkflow &&
+    getFeatureFlags(dependencies.config).skillActivation
     ? refreshSkillCatalog(dependencies.skillOptions, {
         resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
       })
@@ -76,7 +76,7 @@ function currentSkillCatalog(
 }
 
 /** App-owned State projection for the one run_tools effect. */
-export async function executeAppRuntimeToolsEffectV1(
+export async function executeAppRuntimeToolsEffect(
   effect: Extract<RuntimeEffect, { type: 'run_tools' }>,
   state: Readonly<RuntimeState>,
   dependencies: RuntimeExecutorDependencies,
@@ -84,7 +84,7 @@ export async function executeAppRuntimeToolsEffectV1(
   executionContext: Parameters<RuntimeEffectExecutor>[3],
   subagentEventSink: SubAgentEventSink,
 ): Promise<RuntimeEvent[]> {
-  const providerReadinessCoordinator = new ProviderReadinessCoordinatorV1(dependencies.mcpManager);
+  const providerReadinessCoordinator = new ProviderReadinessCoordinator(dependencies.mcpManager);
   const persistAttemptStartEvents = executionContext?.persistAttemptStartEvents;
   const persistTerminalRecoveryEvents = executionContext?.persistTerminalRecoveryEvents;
   const stateToolPipelinePersistence =
@@ -92,34 +92,34 @@ export async function executeAppRuntimeToolsEffectV1(
     persistAttemptStartEvents &&
     persistTerminalRecoveryEvents &&
     dependencies.capabilityArtifactStore
-      ? createAppStateToolPipelinePersistenceV1({
+      ? createAppStateToolPipelinePersistence({
           getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
           persistAttemptStartEvents: (events) => persistAttemptStartEvents(events),
           persistTerminalRecoveryEvents: (events) => persistTerminalRecoveryEvents(events),
           persistReceiptEvents: (events) => executionContext.persistEvents(events),
           now: dependencies.now ?? (() => new Date().toISOString()),
           capabilityArtifactWriter: dependencies.capabilityArtifactStore,
-          verifyBuiltinWorkspaceFilesystemTerminal: verifyBuiltinWorkspaceFilesystemTerminalV1,
+          verifyBuiltinWorkspaceFilesystemTerminal: verifyBuiltinWorkspaceFilesystemTerminal,
           providerAction: Object.freeze({
-            enabled: getFeatureFlags(dependencies.config).mcpProviderActionV1,
-            createInteractionId: createRuntimeHostInteractionIdV1,
+            enabled: getFeatureFlags(dependencies.config).mcpProviderAction,
+            createInteractionId: createRuntimeHostInteractionId,
           }),
-          verificationEnabled: getFeatureFlags(dependencies.config).verificationV1 === true,
+          verificationEnabled: getFeatureFlags(dependencies.config).verification === true,
         })
       : undefined;
   const toolPipelineAttemptScope = stateToolPipelinePersistence
-    ? createAppToolPipelineAttemptScopeV1({ persistence: stateToolPipelinePersistence })
+    ? createAppToolPipelineAttemptScope({ persistence: stateToolPipelinePersistence })
     : undefined;
   const ordinaryToolPipelineAttemptRuntime =
     stateToolPipelinePersistence && toolPipelineAttemptScope
-      ? createAppOrdinaryToolPipelineAttemptRuntimeV1({
+      ? createAppOrdinaryToolPipelineAttemptRuntime({
           persistence: stateToolPipelinePersistence,
           scope: toolPipelineAttemptScope,
         })
       : undefined;
   const taskToolPipelineAttemptRuntime =
     stateToolPipelinePersistence && toolPipelineAttemptScope
-      ? createAppTaskToolPipelineAttemptRuntimeV1({
+      ? createAppTaskToolPipelineAttemptRuntime({
           persistence: stateToolPipelinePersistence,
           scope: toolPipelineAttemptScope,
         })
@@ -128,12 +128,12 @@ export async function executeAppRuntimeToolsEffectV1(
     const parallelSubagentBatch =
       effect.toolCallIds.length > 1 &&
       effect.toolCallIds.every((toolCallId) =>
-        isBuiltinSubagentTaskToolNameV1(state.tools.calls[toolCallId]?.name),
+        isBuiltinSubagentTaskToolName(state.tools.calls[toolCallId]?.name),
       );
     const execute = async (toolCallIds: string[], subagentConcurrencyGroupId?: string) => {
       const taskCallId =
         toolCallIds.length === 1 &&
-        isBuiltinSubagentTaskToolNameV1(state.tools.calls[toolCallIds[0]!]?.name)
+        isBuiltinSubagentTaskToolName(state.tools.calls[toolCallIds[0]!]?.name)
           ? toolCallIds[0]
           : undefined;
       const parentReservationId = taskCallId
@@ -150,7 +150,7 @@ export async function executeAppRuntimeToolsEffectV1(
         : undefined;
       const descendantResourceAdmission =
         parentReservationId && executionContext
-          ? createDescendantResourceAdmissionV1({
+          ? createDescendantResourceAdmission({
               state: state as RuntimeState,
               parentReservationId,
               getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
@@ -191,15 +191,15 @@ export async function executeAppRuntimeToolsEffectV1(
         }
       };
       try {
-        const toolPipelineComposition = resolveToolPipelineAdapterCompositionV1(dependencies);
-        const returnedEvents = await executeAppRuntimeToolsV1({
+        const toolPipelineComposition = resolveToolPipelineAdapterComposition(dependencies);
+        const returnedEvents = await executeAppRuntimeTools({
           state,
           toolCallIds,
           shellExecutor: dependencies.shellExecutor,
           gitBroker: dependencies.gitBroker,
           mcpManager: dependencies.mcpManager,
           capabilityExecution: dependencies.capabilityExecution,
-          builtinToolCatalog: requireBuiltinToolCatalogV1(dependencies),
+          builtinToolCatalog: requireBuiltinToolCatalog(dependencies),
           toolPipelineComposition,
           ordinaryToolPipelineAttemptRuntime,
           taskToolPipelineAttemptRuntime,
@@ -213,13 +213,13 @@ export async function executeAppRuntimeToolsEffectV1(
           taskModel: dependencies.model,
           providerDataAdmission: dependencies.providerDataAdmission,
           descendantResourceAdmission,
-          modelEffectCoordinator: requireModelEffectCoordinatorV1(dependencies),
+          modelEffectCoordinator: requireModelEffectCoordinator(dependencies),
           capabilityArtifactStore: dependencies.capabilityArtifactStore,
           workspaceFilesystemRuntime: dependencies.workspaceFilesystemRuntime,
           sandboxPreparationArtifacts: dependencies.sandboxPreparationArtifacts,
           sandboxAvailable:
             dependencies.sandboxBackend !== 'unknown' &&
-            sandboxSupportsFullModeV1(dependencies.sandboxBackend ?? 'none'),
+            sandboxSupportsFullMode(dependencies.sandboxBackend ?? 'none'),
           authorizationObservedAt: Date.now(),
           subagentRuntimeFactory: dependencies.subagentRuntimeFactory,
           subagentContinuationArtifacts: dependencies.subagentContinuationArtifacts,
@@ -245,7 +245,7 @@ export async function executeAppRuntimeToolsEffectV1(
           ...(executionContext
             ? {
                 recordNetworkDecision: async (
-                  decision: import('@kite/builtin-runtime/sandbox').NetworkDecisionReceiptV1,
+                  decision: import('@kite/builtin-runtime/sandbox').NetworkDecisionReceipt,
                 ) => {
                   const applied = await executionContext.persistEvent({
                     type: 'network.admission_decided',
@@ -263,10 +263,7 @@ export async function executeAppRuntimeToolsEffectV1(
       } catch (error) {
         if (!(error instanceof DescendantResourceAdmissionError)) throw error;
         const currentState = (executionContext?.getState?.() as RuntimeState | undefined) ?? state;
-        return [
-          ...terminalEvents,
-          ...resourceAdmissionTerminalEventsV1(currentState, error.reason),
-        ];
+        return [...terminalEvents, ...resourceAdmissionTerminalEvents(currentState, error.reason)];
       }
       return terminalEvents;
     };
@@ -290,7 +287,7 @@ export async function executeAppRuntimeToolsEffectV1(
       const currentState = (executionContext?.getState?.() as RuntimeState | undefined) ?? state;
       if (batch.reason instanceof DescendantResourceAdmissionError) {
         terminalEventBatches.push(
-          resourceAdmissionTerminalEventsV1(currentState, batch.reason.reason),
+          resourceAdmissionTerminalEvents(currentState, batch.reason.reason),
         );
       } else {
         terminalEventBatches.push([
@@ -315,7 +312,7 @@ export async function executeAppRuntimeToolsEffectV1(
   } catch (error) {
     if (error instanceof DescendantResourceAdmissionError) {
       const currentState = (executionContext?.getState?.() as RuntimeState | undefined) ?? state;
-      return resourceAdmissionTerminalEventsV1(currentState, error.reason);
+      return resourceAdmissionTerminalEvents(currentState, error.reason);
     }
     const mcpCalls = effect.toolCallIds.flatMap((toolCallId) => {
       const call = state.tools.calls[toolCallId];

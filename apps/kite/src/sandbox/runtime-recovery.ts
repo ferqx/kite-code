@@ -1,34 +1,34 @@
-import { digestCapabilityBindingValueV1 } from '@kite/builtin-runtime/capability';
-import type { SandboxPreparationArtifactStoreV1 } from '@kite/builtin-runtime/sandbox';
+import { digestCapabilityBindingValue } from '@kite/builtin-runtime/capability';
+import type { SandboxPreparationArtifactStore } from '@kite/builtin-runtime/sandbox';
 import {
-  cleanupPosixSandboxRuntimeRootsNoSpawnV1,
-  decodeWindowsRestrictedTokenPreparedTransportV1,
-  type SandboxExecutionGrantAuthorityV1,
-  sandboxAbandonmentLifecycleIntentDigestV1,
-  sandboxDisposalLifecycleIntentDigestV1,
-  sandboxPreparedPlanDigestV1,
-  sandboxRuntimeRootsForPreparationV1,
+  cleanupPosixSandboxRuntimeRootsNoSpawn,
+  decodeWindowsRestrictedTokenPreparedTransport,
+  type SandboxExecutionGrantAuthority,
+  sandboxAbandonmentLifecycleIntentDigest,
+  sandboxDisposalLifecycleIntentDigest,
+  sandboxPreparedPlanDigest,
+  sandboxRuntimeRootsForPreparation,
 } from '@kite/builtin-runtime/sandbox';
-import { reconcilePosixSupervisorV1 } from '@kite/runtime-host';
-import type { SandboxExecutionProviderV1 } from '@kite/runtime-spi';
+import { reconcilePosixSupervisor } from '@kite/runtime-host';
+import type { SandboxExecutionProvider } from '@kite/runtime-spi';
 import type { RuntimeEvent, RuntimeState } from '../bootstrap/runtime/state-runtime';
-import { reconcileWindowsRestrictedTokenPreparedV1 } from './windows-restricted-token-runtime';
+import { reconcileWindowsRestrictedTokenPrepared } from './windows-restricted-token-runtime';
 
-export interface SandboxPreparationRecoveryPersistenceV1 {
+export interface SandboxPreparationRecoveryPersistence {
   getState(): Readonly<RuntimeState>;
   persistEvents(events: RuntimeEvent[]): Promise<boolean>;
 }
 
-export const SANDBOX_PREPARATION_RECOVERY_V1 = Symbol.for('kite.sandbox-preparation-recovery.v1');
+export const SANDBOX_PREPARATION_RECOVERY_ = Symbol.for('kite.sandbox-preparation-recovery.v1');
 
-export interface SandboxPreparationRecoveryConsumerV1 {
-  [SANDBOX_PREPARATION_RECOVERY_V1](input: {
-    readonly artifacts: SandboxPreparationArtifactStoreV1;
-    readonly persistence: SandboxPreparationRecoveryPersistenceV1;
+export interface SandboxPreparationRecoveryConsumer {
+  [SANDBOX_PREPARATION_RECOVERY_](input: {
+    readonly artifacts: SandboxPreparationArtifactStore;
+    readonly persistence: SandboxPreparationRecoveryPersistence;
   }): Promise<boolean>;
 }
 
-export function hasPendingSandboxPreparationRecoveryV1(state: Readonly<RuntimeState>): boolean {
+export function hasPendingSandboxPreparationRecovery(state: Readonly<RuntimeState>): boolean {
   return Object.values(state.capabilities.invocations).some((invocation) => {
     if (invocation.sandboxPreparationReady) {
       return invocation.sandboxDisposal?.status !== 'completed';
@@ -40,11 +40,11 @@ export function hasPendingSandboxPreparationRecoveryV1(state: Readonly<RuntimeSt
   });
 }
 
-export async function reconcilePendingSandboxPreparationsAfterCrashV1(input: {
-  readonly provider: SandboxExecutionProviderV1;
-  readonly grants: SandboxExecutionGrantAuthorityV1;
-  readonly artifacts: SandboxPreparationArtifactStoreV1;
-  readonly persistence: SandboxPreparationRecoveryPersistenceV1;
+export async function reconcilePendingSandboxPreparationsAfterCrash(input: {
+  readonly provider: SandboxExecutionProvider;
+  readonly grants: SandboxExecutionGrantAuthority;
+  readonly artifacts: SandboxPreparationArtifactStore;
+  readonly persistence: SandboxPreparationRecoveryPersistence;
 }): Promise<boolean> {
   for (const invocation of Object.values(input.persistence.getState().capabilities.invocations)) {
     if (
@@ -53,7 +53,7 @@ export async function reconcilePendingSandboxPreparationsAfterCrashV1(input: {
       invocation.sandboxPreparationAbandonment?.status !== 'completed'
     ) {
       if (
-        !(await reconcileAbandonedSandboxPreparationIntentV1({
+        !(await reconcileAbandonedSandboxPreparationIntent({
           invocationId: invocation.invocationId,
           provider: input.provider,
           grants: input.grants,
@@ -68,7 +68,7 @@ export async function reconcilePendingSandboxPreparationsAfterCrashV1(input: {
       continue;
     }
     if (
-      !(await reconcileSandboxPreparationAfterCrashV1({
+      !(await reconcileSandboxPreparationAfterCrash({
         invocationId: invocation.invocationId,
         provider: input.provider,
         grants: input.grants,
@@ -83,18 +83,18 @@ export async function reconcilePendingSandboxPreparationsAfterCrashV1(input: {
 }
 
 /** Reclaim an allocation whose host died after intent acknowledgement but before ready evidence. */
-async function reconcileAbandonedSandboxPreparationIntentV1(input: {
+async function reconcileAbandonedSandboxPreparationIntent(input: {
   readonly invocationId: string;
-  readonly provider: SandboxExecutionProviderV1;
-  readonly grants: SandboxExecutionGrantAuthorityV1;
-  readonly persistence: SandboxPreparationRecoveryPersistenceV1;
+  readonly provider: SandboxExecutionProvider;
+  readonly grants: SandboxExecutionGrantAuthority;
+  readonly persistence: SandboxPreparationRecoveryPersistence;
   readonly now?: () => Date;
 }): Promise<boolean> {
   let invocation = input.persistence.getState().capabilities.invocations[input.invocationId];
   const intent = invocation?.sandboxPreparationIntent;
   if (!invocation || !intent || invocation.sandboxPreparationReady) return false;
   if (invocation.sandboxPreparationAbandonment?.status === 'completed') return true;
-  const lifecycleIntentDigest = sandboxAbandonmentLifecycleIntentDigestV1({
+  const lifecycleIntentDigest = sandboxAbandonmentLifecycleIntentDigest({
     invocationId: invocation.invocationId,
     attempt: intent.attempt,
     intentDigest: intent.intentDigest,
@@ -125,8 +125,8 @@ async function reconcileAbandonedSandboxPreparationIntentV1(input: {
   const runtimeCleanupConfirmed =
     process.platform === 'win32'
       ? false
-      : cleanupPosixSandboxRuntimeRootsNoSpawnV1(
-          sandboxRuntimeRootsForPreparationV1(intent.canonicalWorkspace, intent.preparationDigest),
+      : cleanupPosixSandboxRuntimeRootsNoSpawn(
+          sandboxRuntimeRootsForPreparation(intent.canonicalWorkspace, intent.preparationDigest),
         );
   const disposed = await Promise.resolve()
     .then(() =>
@@ -163,19 +163,19 @@ async function reconcileAbandonedSandboxPreparationIntentV1(input: {
 }
 
 /** Reconcile one allocating preparation after restore using durable plan evidence only. */
-export async function reconcileSandboxPreparationAfterCrashV1(input: {
+export async function reconcileSandboxPreparationAfterCrash(input: {
   readonly invocationId: string;
-  readonly provider: SandboxExecutionProviderV1;
-  readonly grants: SandboxExecutionGrantAuthorityV1;
-  readonly artifacts: SandboxPreparationArtifactStoreV1;
-  readonly persistence: SandboxPreparationRecoveryPersistenceV1;
+  readonly provider: SandboxExecutionProvider;
+  readonly grants: SandboxExecutionGrantAuthority;
+  readonly artifacts: SandboxPreparationArtifactStore;
+  readonly persistence: SandboxPreparationRecoveryPersistence;
   readonly now?: () => Date;
 }): Promise<boolean> {
   const invocation = input.persistence.getState().capabilities.invocations[input.invocationId];
   const ready = invocation?.sandboxPreparationReady;
   if (!invocation || !ready) return false;
   if (invocation.sandboxDisposal?.status === 'completed') return true;
-  let prepared: Readonly<import('@kite/runtime-spi').PreparedSandboxExecutionV1>;
+  let prepared: Readonly<import('@kite/runtime-spi').PreparedSandboxExecution>;
   try {
     prepared = input.artifacts.read(ready.preparationArtifact);
   } catch {
@@ -196,16 +196,16 @@ export async function reconcileSandboxPreparationAfterCrashV1(input: {
     prepared.preparationDigest !== ready.preparationDigest ||
     prepared.commandDigest !== ready.commandDigest ||
     prepared.backend !== ready.backend ||
-    digestCapabilityBindingValueV1(prepared.backendCapabilities) !==
+    digestCapabilityBindingValue(prepared.backendCapabilities) !==
       ready.backendCapabilitiesDigest ||
     prepared.enforcement !== ready.enforcement ||
     prepared.resourceSemantics !== ready.resourceSemantics ||
-    digestCapabilityBindingValueV1(prepared.cleanup) !== ready.cleanupDigest ||
-    sandboxPreparedPlanDigestV1(prepared) !== ready.planDigest
+    digestCapabilityBindingValue(prepared.cleanup) !== ready.cleanupDigest ||
+    sandboxPreparedPlanDigest(prepared) !== ready.planDigest
   ) {
     return false;
   }
-  const lifecycleIntentDigest = sandboxDisposalLifecycleIntentDigestV1({
+  const lifecycleIntentDigest = sandboxDisposalLifecycleIntentDigest({
     invocationId: invocation.invocationId,
     attempt: ready.attempt,
     readyDigest: ready.readyDigest,
@@ -242,8 +242,8 @@ export async function reconcileSandboxPreparationAfterCrashV1(input: {
     const serialized = prepared.cleanup.recoveryPayload.transport;
     if (typeof serialized !== 'string') return false;
     try {
-      cleanupConfirmed = await reconcileWindowsRestrictedTokenPreparedV1(
-        decodeWindowsRestrictedTokenPreparedTransportV1(serialized),
+      cleanupConfirmed = await reconcileWindowsRestrictedTokenPrepared(
+        decodeWindowsRestrictedTokenPreparedTransport(serialized),
         {
           supervisorNonce: invocation.sandboxExecutionDispatch?.supervisorNonce ?? '',
         },
@@ -255,7 +255,7 @@ export async function reconcileSandboxPreparationAfterCrashV1(input: {
     const runtimePath = prepared.cleanup.recoveryPayload.controlRoot;
     if (invocation.sandboxExecutionDispatch) {
       if (typeof runtimePath !== 'string') return false;
-      cleanupConfirmed = await reconcilePosixSupervisorV1({
+      cleanupConfirmed = await reconcilePosixSupervisor({
         runtimePath,
         dispatch: invocation.sandboxExecutionDispatch,
         // Darwin's Seatbelt candidate has no qualified kernel/launchd or
@@ -276,7 +276,7 @@ export async function reconcileSandboxPreparationAfterCrashV1(input: {
       cleanupConfirmed =
         typeof controlRoot === 'string' &&
         typeof dataRoot === 'string' &&
-        cleanupPosixSandboxRuntimeRootsNoSpawnV1({ controlRoot, dataRoot });
+        cleanupPosixSandboxRuntimeRootsNoSpawn({ controlRoot, dataRoot });
     } else if (
       prepared.cleanup.kind !== 'none' &&
       prepared.cleanup.kind !== 'windows_restricted_token'

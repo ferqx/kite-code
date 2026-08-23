@@ -1,19 +1,19 @@
 import type { ShellInput, ShellResult } from '@kite/builtin-runtime/sandbox';
 import {
   appendTimeoutMessage,
-  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
-  type RestrictedTokenInvocationRequestV1,
-  resolveWindowsSandboxRunnerV1,
+  cleanupWindowsSandboxRuntimeDirNoSpawn,
+  type RestrictedTokenInvocationRequest,
+  resolveWindowsSandboxRunner,
   timeoutMessage,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
-  type WindowsRestrictedTokenPreparedTransportV1,
-  type WindowsSandboxRunnerV1,
+  type WindowsRestrictedTokenPreparedTransport,
+  type WindowsSandboxRunner,
 } from '@kite/builtin-runtime/sandbox';
 import {
   BoundedOutputBuffer,
   BoundedProgressLineBuffer,
-  readRuntimeHostProcessOutputV1 as readWithProgress,
-  spawnRuntimeHostProcessV1,
+  readRuntimeHostProcessOutput as readWithProgress,
+  spawnRuntimeHostProcess,
 } from '@kite/runtime-host';
 
 /**
@@ -38,16 +38,16 @@ interface ExecutionReceipt {
   error: string | null;
 }
 
-const WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_V1 = 'host';
-const WINDOWS_SANDBOX_AUTHORITY_RUNNER_PEER_ID_V1 = 'runner';
+const WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_ = 'host';
+const WINDOWS_SANDBOX_AUTHORITY_RUNNER_PEER_ID_ = 'runner';
 /** Monotonic control state for one directly spawned native runner. */
-export interface WindowsSandboxControlSessionV1 {
+export interface WindowsSandboxControlSession {
   readonly invocationId: string;
   hostSequence: number;
   runnerSequence: number;
 }
 
-type ControlFrameTypeV1 =
+type ControlFrameType =
   | 'request'
   | 'ready'
   | 'go'
@@ -57,8 +57,8 @@ type ControlFrameTypeV1 =
   | 'stderr'
   | 'exit';
 
-interface RuntimeControlFrameV1 {
-  type: ControlFrameTypeV1;
+interface RuntimeControlFrame {
+  type: ControlFrameType;
   version: typeof WINDOWS_SANDBOX_PROTOCOL_VERSION;
   invocationId: string;
   peerId: 'host' | 'runner';
@@ -66,12 +66,12 @@ interface RuntimeControlFrameV1 {
   payloadBase64: string;
 }
 
-export function createWindowsSandboxControlSessionV1(
+export function createWindowsSandboxControlSession(
   input: Readonly<{
     invocationId: string;
     supervisorNonce: string;
   }>,
-): WindowsSandboxControlSessionV1 {
+): WindowsSandboxControlSession {
   if (!/^kitecode\.[a-z0-9]{32}$/u.test(input.invocationId)) {
     throw new Error('Windows sandbox control invocation identity is invalid.');
   }
@@ -85,7 +85,7 @@ export function createWindowsSandboxControlSessionV1(
   };
 }
 
-export interface WindowsRestrictedTokenPreparedExecutionHooksV1 {
+export interface WindowsRestrictedTokenPreparedExecutionHooks {
   /** Runs after the inert runner starts and before its first user-command frame. */
   readonly acknowledgeSupervisorStarted: (input: {
     readonly supervisorPid: number;
@@ -96,21 +96,21 @@ export interface WindowsRestrictedTokenPreparedExecutionHooksV1 {
   readonly onGoStarted: () => void;
 }
 
-export interface WindowsSandboxControlInputV1 {
+export interface WindowsSandboxControlInput {
   readonly supervisorNonce: string;
 }
 
 /** Runtime consumer adapter for the framed native runner. */
-export async function executeWindowsRestrictedTokenPreparedV1(
+export async function executeWindowsRestrictedTokenPrepared(
   input: ShellInput,
-  prepared: WindowsRestrictedTokenPreparedTransportV1,
-  hooks: Readonly<WindowsRestrictedTokenPreparedExecutionHooksV1>,
-  controlInput: WindowsSandboxControlInputV1,
+  prepared: WindowsRestrictedTokenPreparedTransport,
+  hooks: Readonly<WindowsRestrictedTokenPreparedExecutionHooks>,
+  controlInput: WindowsSandboxControlInput,
 ): Promise<ShellResult> {
   const { runner, request, workspaceRoot, runtimeRoot } = prepared;
-  let control: WindowsSandboxControlSessionV1;
+  let control: WindowsSandboxControlSession;
   try {
-    control = createWindowsSandboxControlSessionV1({
+    control = createWindowsSandboxControlSession({
       ...controlInput,
       invocationId: request.invocationName,
     });
@@ -123,14 +123,14 @@ export async function executeWindowsRestrictedTokenPreparedV1(
 
   let proc: ReturnType<typeof Bun.spawn>;
   try {
-    proc = spawnRuntimeHostProcessV1([runner.path], {
+    proc = spawnRuntimeHostProcess([runner.path], {
       cwd: workspaceRoot,
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
     });
   } catch (error) {
-    const runtimeCleaned = cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot);
+    const runtimeCleaned = cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeRoot);
     const message = `Sandbox runner launch failed: ${
       error instanceof Error ? error.message : String(error)
     }`;
@@ -162,7 +162,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
   try {
     if (!proc.stdin) throw new Error('runner stdin unavailable');
     const processStartIdentity = `windows-restricted-token:${proc.pid}:${request.invocationName}`;
-    const requestFrame = encodeRuntimeControlFrameV1('request', request, control, 'host');
+    const requestFrame = encodeRuntimeControlFrame('request', request, control, 'host');
     try {
       writeRunnerInput(proc.stdin, requestFrame);
     } finally {
@@ -193,7 +193,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
       WINDOWS_RESTRICTED_TOKEN_CONTROL_PLANE_GRACE_MS,
     );
     if (first.done) throw new Error('Windows sandbox runner exited before validated ready.');
-    const ready = decodeWindowsSandboxRunnerFrameV1(first.value, request.invocationName, control);
+    const ready = decodeWindowsSandboxRunnerFrame(first.value, request.invocationName, control);
     if (ready.type !== 'ready') {
       throw new Error('Windows sandbox runner did not validate readiness before GO.');
     }
@@ -206,7 +206,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
     ) {
       throw new Error('Windows restricted-token supervisor start acknowledgement failed.');
     }
-    const goFrame = encodeRuntimeControlFrameV1(
+    const goFrame = encodeRuntimeControlFrame(
       'go',
       { invocationName: request.invocationName, supervisorAcknowledged: true },
       control,
@@ -225,7 +225,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
           const next = await frames.next();
           if (next.done) break;
           const payload = next.value;
-          const frame = decodeWindowsSandboxRunnerFrameV1(payload, request.invocationName, control);
+          const frame = decodeWindowsSandboxRunnerFrame(payload, request.invocationName, control);
           if (frame.type === 'stdout') {
             onOutputFrame(
               input,
@@ -436,7 +436,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
     // helper can revoke the invocation ACL after the runner exits, but it
     // must not race a surviving child by deleting its runtime directory.
     if (outcome && receiptCleanupConfirmed) {
-      if (!cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)) {
+      if (!cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeRoot)) {
         outcome.ok = false;
         outcome.exitCode = -1;
         outcome.stderr = appendTerminalMessage(outcome.stderr, 'Sandbox runtime cleanup failed.');
@@ -481,16 +481,16 @@ async function waitForRunnerExit(
   }
 }
 async function recoverRestrictedTokenAcl(
-  runner: WindowsSandboxRunnerV1,
-  request: RestrictedTokenInvocationRequestV1,
+  runner: WindowsSandboxRunner,
+  request: RestrictedTokenInvocationRequest,
   cwd: string,
-  controlInput: WindowsSandboxControlInputV1,
+  controlInput: WindowsSandboxControlInput,
 ): Promise<boolean> {
   let cleanup: ReturnType<typeof Bun.spawn> | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let control: WindowsSandboxControlSessionV1;
+  let control: WindowsSandboxControlSession;
   try {
-    control = createWindowsSandboxControlSessionV1({
+    control = createWindowsSandboxControlSession({
       ...controlInput,
       invocationId: request.invocationName,
     });
@@ -498,14 +498,14 @@ async function recoverRestrictedTokenAcl(
     return false;
   }
   try {
-    cleanup = spawnRuntimeHostProcessV1([runner.path, '--cleanup'], {
+    cleanup = spawnRuntimeHostProcess([runner.path, '--cleanup'], {
       cwd,
       stdin: 'pipe',
       stdout: 'ignore',
       stderr: 'ignore',
     });
     if (!cleanup.stdin) return false;
-    const requestFrame = encodeRuntimeControlFrameV1('request', request, control, 'host');
+    const requestFrame = encodeRuntimeControlFrame('request', request, control, 'host');
     try {
       writeRunnerInput(cleanup.stdin, requestFrame);
     } finally {
@@ -537,11 +537,11 @@ async function recoverRestrictedTokenAcl(
 }
 
 /** Runtime crash-recovery consumer; the Provider itself never launches cleanup processes. */
-export async function reconcileWindowsRestrictedTokenPreparedV1(
-  prepared: WindowsRestrictedTokenPreparedTransportV1,
-  controlInput: WindowsSandboxControlInputV1,
+export async function reconcileWindowsRestrictedTokenPrepared(
+  prepared: WindowsRestrictedTokenPreparedTransport,
+  controlInput: WindowsSandboxControlInput,
 ): Promise<boolean> {
-  const current = resolveWindowsSandboxRunnerV1();
+  const current = resolveWindowsSandboxRunner();
   if (
     !current ||
     current.path !== prepared.runner.path ||
@@ -597,12 +597,12 @@ function flushOutputFrames(
 
 async function sendCancelFrame(
   proc: { stdin?: unknown } | undefined,
-  control: WindowsSandboxControlSessionV1,
+  control: WindowsSandboxControlSession,
 ): Promise<void> {
   const stdin = proc?.stdin;
   if (stdin && typeof stdin === 'object' && 'write' in stdin) {
     try {
-      const frame = encodeRuntimeControlFrameV1('cancel', {}, control, 'host');
+      const frame = encodeRuntimeControlFrame('cancel', {}, control, 'host');
       try {
         writeRunnerInput(stdin, frame);
       } finally {
@@ -641,7 +641,7 @@ function closeRunnerInput(stdin: unknown): void {
 }
 
 function encodeFrame(value: unknown): Uint8Array {
-  const serialized = canonicalControlFrameJsonV1(value);
+  const serialized = canonicalControlFrameJson(value);
   const payload = new TextEncoder().encode(serialized);
   const frame = Buffer.alloc(4 + payload.length);
   frame.writeUInt32LE(payload.length, 0);
@@ -649,23 +649,23 @@ function encodeFrame(value: unknown): Uint8Array {
   return frame;
 }
 
-export function encodeWindowsSandboxRuntimeControlFrameV1(
-  type: ControlFrameTypeV1,
+export function encodeWindowsSandboxRuntimeControlFrame(
+  type: ControlFrameType,
   payload: unknown,
-  control: WindowsSandboxControlSessionV1,
+  control: WindowsSandboxControlSession,
   peerId: 'host' | 'runner' = 'host',
 ): Uint8Array {
-  return encodeRuntimeControlFrameV1(type, payload, control, peerId);
+  return encodeRuntimeControlFrame(type, payload, control, peerId);
 }
 
-function encodeRuntimeControlFrameV1(
-  type: ControlFrameTypeV1,
+function encodeRuntimeControlFrame(
+  type: ControlFrameType,
   payload: unknown,
-  control: WindowsSandboxControlSessionV1,
+  control: WindowsSandboxControlSession,
   peerId: 'host' | 'runner',
 ): Uint8Array {
   const sequence =
-    peerId === WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_V1
+    peerId === WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_
       ? control.hostSequence++
       : control.runnerSequence++;
   const unsigned = {
@@ -674,31 +674,31 @@ function encodeRuntimeControlFrameV1(
     invocationId: control.invocationId,
     peerId,
     sequence,
-    payloadBase64: Buffer.from(canonicalControlFrameJsonV1(payload), 'utf8').toString('base64'),
-  } satisfies RuntimeControlFrameV1;
+    payloadBase64: Buffer.from(canonicalControlFrameJson(payload), 'utf8').toString('base64'),
+  } satisfies RuntimeControlFrame;
   return encodeFrame(unsigned);
 }
 
-function canonicalControlFrameJsonV1(value: unknown): string {
+function canonicalControlFrameJson(value: unknown): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') {
     const encoded = JSON.stringify(value);
     if (encoded === undefined) throw new Error('Authority JSON value is not serializable.');
     return encoded;
   }
   if (typeof value === 'string') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalControlFrameJsonV1).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map(canonicalControlFrameJson).join(',')}]`;
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
-      compareAuthorityUtf8V1(left, right),
+      compareAuthorityUtf8(left, right),
     );
     return `{${entries
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalControlFrameJsonV1(child)}`)
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalControlFrameJson(child)}`)
       .join(',')}}`;
   }
   throw new Error('Authority JSON value is not serializable.');
 }
 
-function compareAuthorityUtf8V1(left: string, right: string): number {
+function compareAuthorityUtf8(left: string, right: string): number {
   const leftBytes = new TextEncoder().encode(left);
   const rightBytes = new TextEncoder().encode(right);
   const length = Math.min(leftBytes.length, rightBytes.length);
@@ -760,34 +760,34 @@ async function nextRunnerFrameWithTimeout(
   }
 }
 
-export type WindowsSandboxRunnerFrameV1 =
+export type WindowsSandboxRunnerFrame =
   | { type: 'ready'; invocationName: string; runtimeValidated: true }
   | { type: 'log'; level: string; message: string }
   | { type: 'stdout'; data: string }
   | { type: 'stderr'; data: string }
   | { type: 'exit'; receipt: ExecutionReceipt };
 
-export function decodeWindowsSandboxRunnerFrameV1(
+export function decodeWindowsSandboxRunnerFrame(
   payload: Uint8Array,
   expectedInvocationName: string,
-  control?: WindowsSandboxControlSessionV1,
-): WindowsSandboxRunnerFrameV1 {
+  control?: WindowsSandboxControlSession,
+): WindowsSandboxRunnerFrame {
   try {
     if (!control) throw new Error('runner frame control is required');
     const raw = new TextDecoder('utf-8', { fatal: true }).decode(payload);
     const value: unknown = JSON.parse(raw);
-    if (canonicalControlFrameJsonV1(value) !== raw) throw new Error('non-canonical frame');
-    if (!isRuntimeControlFrameV1(value)) throw new Error('malformed frame');
+    if (canonicalControlFrameJson(value) !== raw) throw new Error('non-canonical frame');
+    if (!isRuntimeControlFrame(value)) throw new Error('malformed frame');
     if (
       value.version !== WINDOWS_SANDBOX_PROTOCOL_VERSION ||
-      value.peerId !== WINDOWS_SANDBOX_AUTHORITY_RUNNER_PEER_ID_V1 ||
+      value.peerId !== WINDOWS_SANDBOX_AUTHORITY_RUNNER_PEER_ID_ ||
       value.invocationId !== expectedInvocationName ||
       value.invocationId !== control.invocationId ||
       value.sequence !== control.runnerSequence
     ) {
       throw new Error('malformed frame');
     }
-    const decodedPayload = decodeAuthorityPayloadV1(value.payloadBase64);
+    const decodedPayload = decodeAuthorityPayload(value.payloadBase64);
     control.runnerSequence += 1;
     if (
       value.type === 'ready' &&
@@ -829,7 +829,7 @@ export function decodeWindowsSandboxRunnerFrameV1(
   }
 }
 
-function isRuntimeControlFrameV1(value: unknown): value is RuntimeControlFrameV1 {
+function isRuntimeControlFrame(value: unknown): value is RuntimeControlFrame {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -847,8 +847,8 @@ function isRuntimeControlFrameV1(value: unknown): value is RuntimeControlFrameV1
       value.type === 'stdout' ||
       value.type === 'stderr' ||
       value.type === 'exit') &&
-    (value.peerId === WINDOWS_SANDBOX_AUTHORITY_RUNNER_PEER_ID_V1 ||
-      value.peerId === WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_V1) &&
+    (value.peerId === WINDOWS_SANDBOX_AUTHORITY_RUNNER_PEER_ID_ ||
+      value.peerId === WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_) &&
     value.version === WINDOWS_SANDBOX_PROTOCOL_VERSION &&
     typeof value.invocationId === 'string' &&
     nonNegativeSafeInteger(value.sequence) &&
@@ -856,13 +856,13 @@ function isRuntimeControlFrameV1(value: unknown): value is RuntimeControlFrameV1
   );
 }
 
-function decodeAuthorityPayloadV1(payloadBase64: string): unknown {
+function decodeAuthorityPayload(payloadBase64: string): unknown {
   if (!validBase64(payloadBase64)) throw new Error('malformed payload');
   const raw = new TextDecoder('utf-8', { fatal: true }).decode(
     Buffer.from(payloadBase64, 'base64'),
   );
   const parsed = JSON.parse(raw) as unknown;
-  if (canonicalControlFrameJsonV1(parsed) !== raw) throw new Error('non-canonical payload');
+  if (canonicalControlFrameJson(parsed) !== raw) throw new Error('non-canonical payload');
   return parsed;
 }
 

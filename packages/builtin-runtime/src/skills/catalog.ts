@@ -1,17 +1,14 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type {
-  CapabilityDescriptorV1 as CapabilityDescriptor,
-  CapabilitySnapshotV1 as CapabilitySnapshot,
-} from './capability-domain';
+import type { CapabilityDescriptor, CapabilitySnapshot } from './capability-domain';
 import {
-  createCapabilitySnapshotV1 as createSnapshot,
-  descriptorRevisionV1 as descriptorRevision,
+  createCapabilitySnapshot as createSnapshot,
+  descriptorRevision,
 } from './capability-domain';
 import type { SkillManifest, SkillScanOptions } from './types';
 import { type CompiledSkillWorkflow, compileSkillWorkflow } from './workflow';
 
-export interface SkillMcpCapabilityResolverPortV1 {
+export interface SkillMcpCapabilityResolverPort {
   findCapability(capabilityId: string): CapabilityDescriptor | undefined;
 }
 
@@ -59,7 +56,7 @@ const KNOWN_BUILTINS = new Set([
 
 /** Resolve Skill dependencies against the current Runtime capability boundary. */
 export function createSkillCapabilityResolver(
-  mcpProvider?: SkillMcpCapabilityResolverPortV1,
+  mcpProvider?: SkillMcpCapabilityResolverPort,
 ): (capabilityId: string) => CapabilityDescriptor | undefined {
   return (capabilityId) => {
     if (capabilityId.startsWith('mcp:')) return mcpProvider?.findCapability(capabilityId);

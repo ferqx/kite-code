@@ -1,26 +1,26 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  RUNTIME_COMMAND_SCHEMA_V1,
-  RUNTIME_QUERY_SCHEMA_V1,
+  RUNTIME_COMMAND_SCHEMA_,
+  RUNTIME_QUERY_SCHEMA_,
   type RuntimeCommand,
 } from '@kite/runtime-contract';
 import {
-  assertRuntimeAuthorizationElevationV1,
+  assertRuntimeAuthorizationElevation,
   createRuntimeHost,
-  createRuntimeHostBoundaryV1,
-  createRuntimeHostFromRegistryV1,
-  projectRuntimeObservabilityFactV1,
-  RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+  createRuntimeHostBoundary,
+  createRuntimeHostFromRegistry,
+  projectRuntimeObservabilityFact,
+  RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionAdapterContext,
   runtimeCommandFromKernelInput,
   translateRuntimeCommandToKernelInput,
 } from '@kite/runtime-host';
-import { createArtifactPortV1, type RuntimeStorageBoundaryV1 } from '@kite/runtime-host/storage';
-import type { CapabilityExecutionInvocationV1, CapabilityExecutionPortV1 } from '@kite/runtime-spi';
+import { createArtifactPort, type RuntimeStorageBoundary } from '@kite/runtime-host/storage';
+import type { CapabilityExecutionInvocation, CapabilityExecutionPort } from '@kite/runtime-spi';
 import {
-  createRuntimeModuleRegistryV1,
-  defineRuntimeModuleV1,
-  type RuntimeModuleRegistryV1,
+  createRuntimeModuleRegistry,
+  defineRuntimeModule,
+  type RuntimeModuleRegistry,
 } from '@kite/runtime-spi';
 import { runtimeCommandOwner } from '../src/command-router';
 import {
@@ -31,19 +31,19 @@ import {
   testStorage,
 } from './helpers';
 
-const module = defineRuntimeModuleV1({ moduleId: 'test-module', revision: '1' });
+const module = defineRuntimeModule({ moduleId: 'test-module', revision: '1' });
 
 describe('runtime host package boundary', () => {
   test('exposes narrow Kernel policy and observability ports without App authority', () => {
     expect(() =>
-      assertRuntimeAuthorizationElevationV1({
+      assertRuntimeAuthorizationElevation({
         mode: 'full_access',
         source: 'config',
         sandboxAvailable: false,
       }),
     ).toThrow('full_access requires an available workspace sandbox.');
     expect(
-      projectRuntimeObservabilityFactV1(
+      projectRuntimeObservabilityFact(
         { type: 'turn.completed', turnId: 'turn-1' },
         '2026-08-21T00:00:00.000Z',
       ),
@@ -55,13 +55,13 @@ describe('runtime host package boundary', () => {
   });
 
   test('composes contract, kernel, SPI, and storage boundary facts', () => {
-    const storage: RuntimeStorageBoundaryV1 = {
+    const storage: RuntimeStorageBoundary = {
       adapterId: 'test',
       stateSchemaVersion: 25,
       storeSchemaVersion: 4,
-      compatibilityEpoch: 'kite-runtime-2026-08-18',
+      formatEpoch: 'kite-runtime-2026-08-18',
     };
-    expect(createRuntimeHostBoundaryV1({ storage, modules: [module] })).toEqual({
+    expect(createRuntimeHostBoundary({ storage, modules: [module] })).toEqual({
       contractRevision: 'rmv1-03',
       deterministicKernel: true,
       storage,
@@ -84,7 +84,7 @@ describe('runtime host package boundary', () => {
     await host[Symbol.asyncDispose]();
     expect(closes).toBe(1);
     await expect(
-      host.query({ schema: RUNTIME_QUERY_SCHEMA_V1, type: 'list_sessions' }),
+      host.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' }),
     ).rejects.toThrow('disposed');
   });
 
@@ -93,7 +93,7 @@ describe('runtime host package boundary', () => {
     let snapshotCalls = 0;
     const bridge = new TestExecutionBridge();
     const modules = [
-      defineRuntimeModuleV1({
+      defineRuntimeModule({
         moduleId: 'prebuilt-module',
         revision: '1',
         register: (registry) => {
@@ -113,7 +113,7 @@ describe('runtime host package boundary', () => {
             ],
           });
           registry.registerExecutionAdapter({
-            adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+            adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
             revision: '1',
             create: (context: RuntimeHostExecutionAdapterContext) => {
               adapterSnapshot = context.capabilityRegistrySnapshot;
@@ -123,7 +123,7 @@ describe('runtime host package boundary', () => {
         },
       }),
     ];
-    const registry = createRuntimeModuleRegistryV1(modules);
+    const registry = createRuntimeModuleRegistry(modules);
     const snapshot = registry.snapshot();
     const prebuiltRegistry = new Proxy(registry, {
       get(target, property, _receiver) {
@@ -136,8 +136,8 @@ describe('runtime host package boundary', () => {
         const value = Reflect.get(target, property, target);
         return typeof value === 'function' ? value.bind(target) : value;
       },
-    }) as RuntimeModuleRegistryV1;
-    const host = createRuntimeHostFromRegistryV1({
+    }) as RuntimeModuleRegistry;
+    const host = createRuntimeHostFromRegistry({
       storage: testStorage(),
       moduleRegistry: prebuiltRegistry,
       capabilityRegistrySnapshot: snapshot,
@@ -165,21 +165,21 @@ describe('runtime host package boundary', () => {
 
   test('rejects a mismatched registry and snapshot before Host composition', () => {
     const createModule = (moduleId: string) =>
-      defineRuntimeModuleV1({
+      defineRuntimeModule({
         moduleId,
         revision: '1',
         register: (registry) => {
           registry.registerExecutionAdapter({
-            adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+            adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
             revision: '1',
             create: () => new TestExecutionBridge(),
           });
         },
       });
-    const first = createRuntimeModuleRegistryV1([createModule('first-module')]);
-    const second = createRuntimeModuleRegistryV1([createModule('second-module')]);
+    const first = createRuntimeModuleRegistry([createModule('first-module')]);
+    const second = createRuntimeModuleRegistry([createModule('second-module')]);
     expect(() =>
-      createRuntimeHostFromRegistryV1({
+      createRuntimeHostFromRegistry({
         storage: testStorage(),
         moduleRegistry: first,
         capabilityRegistrySnapshot: second.snapshot(),
@@ -192,7 +192,7 @@ describe('runtime host package boundary', () => {
   test('rejects mutable nested snapshot entries before adapter or capability port creation', () => {
     let adapterCreateCalls = 0;
     let capabilityPortCalls = 0;
-    const module = defineRuntimeModuleV1({
+    const module = defineRuntimeModule({
       moduleId: 'nested-freeze-module',
       providerId: 'nested-freeze-provider',
       revision: '1',
@@ -229,7 +229,7 @@ describe('runtime host package boundary', () => {
           },
         });
         registry.registerExecutionAdapter({
-          adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+          adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
           revision: '1',
           create: () => {
             adapterCreateCalls += 1;
@@ -238,7 +238,7 @@ describe('runtime host package boundary', () => {
         });
       },
     });
-    const registry = createRuntimeModuleRegistryV1([module]);
+    const registry = createRuntimeModuleRegistry([module]);
     const snapshot = registry.snapshot();
     const entry = snapshot.capabilities[0];
     if (!entry) throw new Error('nested freeze fixture capability was not registered');
@@ -249,7 +249,7 @@ describe('runtime host package boundary', () => {
     });
 
     expect(() =>
-      createRuntimeHostFromRegistryV1({
+      createRuntimeHostFromRegistry({
         storage: testStorage(),
         moduleRegistry: registry,
         capabilityRegistrySnapshot: forgedSnapshot,
@@ -261,7 +261,7 @@ describe('runtime host package boundary', () => {
   });
 
   test('rejects mixed module and prebuilt composition inputs', () => {
-    const registry = createRuntimeModuleRegistryV1(
+    const registry = createRuntimeModuleRegistry(
       testRuntimeModules(() => new TestExecutionBridge()),
     );
     expect(() =>
@@ -277,12 +277,12 @@ describe('runtime host package boundary', () => {
 
   test('exposes the frozen registry snapshot used by execution and seals registration before start', async () => {
     let executorCalls = 0;
-    let capabilityPort: CapabilityExecutionPortV1 | undefined;
+    let capabilityPort: CapabilityExecutionPort | undefined;
     let adapterSnapshot:
       | RuntimeHostExecutionAdapterContext['capabilityRegistrySnapshot']
       | undefined;
     let registerAfterSeal: (() => void) | undefined;
-    const capabilityModule = defineRuntimeModuleV1({
+    const capabilityModule = defineRuntimeModule({
       moduleId: 'capability-module',
       providerId: 'capability-provider',
       revision: '1',
@@ -326,7 +326,7 @@ describe('runtime host package boundary', () => {
           },
         });
         registry.registerExecutionAdapter({
-          adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+          adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
           revision: '1',
           create: (context: RuntimeHostExecutionAdapterContext) => {
             capabilityPort = context.capabilities;
@@ -361,7 +361,7 @@ describe('runtime host package boundary', () => {
     expect(snapshot.capabilities[0]?.executor?.executorRevision).toBe('executor-1');
 
     await host.start();
-    const invocation: CapabilityExecutionInvocationV1 = {
+    const invocation: CapabilityExecutionInvocation = {
       binding: {
         bindingId: 'binding-1',
         capabilityId: 'builtin:fixture',
@@ -556,7 +556,7 @@ describe('runtime host command and projection authority', () => {
     });
     expect(
       await host.command({
-        schema: RUNTIME_COMMAND_SCHEMA_V1,
+        schema: RUNTIME_COMMAND_SCHEMA_,
         commandId: 'fork-1',
         type: 'fork_session',
         sourceSessionId: 'session-1',
@@ -638,7 +638,7 @@ describe('runtime host command and projection authority', () => {
     await until(() => bridge.calls.length === 1);
     expect(
       await host.query({
-        schema: RUNTIME_QUERY_SCHEMA_V1,
+        schema: RUNTIME_QUERY_SCHEMA_,
         type: 'get_session_projection',
         sessionId: 'session-1',
       }),
@@ -647,7 +647,7 @@ describe('runtime host command and projection authority', () => {
     await pending;
     expect(
       await host.query({
-        schema: RUNTIME_QUERY_SCHEMA_V1,
+        schema: RUNTIME_QUERY_SCHEMA_,
         type: 'get_session_projection',
         sessionId: 'session-1',
       }),
@@ -731,7 +731,7 @@ describe('runtime host command and projection authority', () => {
     await host.command(startCommand('turn-1', 'session-1', 0));
     await until(() => order.includes('provider-started'));
     await host.command({
-      schema: RUNTIME_COMMAND_SCHEMA_V1,
+      schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'cancel-1',
       type: 'cancel_turn',
       sessionId: 'session-1',
@@ -1002,7 +1002,7 @@ describe('runtime host command and projection authority', () => {
     await host.command(startCommand('turn-1', 'session-1', 0));
     await until(() => order.includes('predecessor-started'));
     await host.command({
-      schema: RUNTIME_COMMAND_SCHEMA_V1,
+      schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'cancel-1',
       type: 'cancel_turn',
       sessionId: 'session-1',
@@ -1071,7 +1071,7 @@ describe('runtime host command and projection authority', () => {
     await host.command(startCommand('turn-1', 'session-1', 0));
     await until(() => host.isSessionOperationActive('session-1'));
     await host.command({
-      schema: RUNTIME_COMMAND_SCHEMA_V1,
+      schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: 'cancel-1',
       type: 'cancel_turn',
       sessionId: 'session-1',
@@ -1137,7 +1137,7 @@ describe('runtime host command and projection authority', () => {
     const secondDispose = host[Symbol.asyncDispose]();
     expect(secondDispose).toBe(firstDispose);
     await expect(
-      host.query({ schema: RUNTIME_QUERY_SCHEMA_V1, type: 'list_sessions' }),
+      host.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' }),
     ).rejects.toThrow('disposed');
     await until(() => order.includes('host-signal'));
     expect(order).toEqual(['provider-started', 'cancellation-persisted', 'host-signal']);
@@ -1202,7 +1202,7 @@ describe('runtime host storage ports', () => {
   test('keeps typed artifact namespaces exact and rejects cross-namespace lookup', () => {
     const capability = { read: () => 'capability' };
     const model = { read: () => 'model' };
-    const artifacts = createArtifactPortV1([
+    const artifacts = createArtifactPort([
       { namespace: 'capability-result', access: capability },
       { namespace: 'model-surface', access: model },
     ]);
@@ -1210,7 +1210,7 @@ describe('runtime host storage ports', () => {
     expect(artifacts.getNamespace<typeof capability>('capability-result')).toBe(capability);
     expect(artifacts.getNamespace('subagent-continuation')).toBeNull();
     expect(() =>
-      createArtifactPortV1([
+      createArtifactPort([
         { namespace: 'same', access: capability },
         { namespace: 'same', access: model },
       ]),
@@ -1224,7 +1224,7 @@ function startCommand(
   expectedRevision: number,
 ): Extract<RuntimeCommand, { type: 'start_turn' }> {
   return {
-    schema: RUNTIME_COMMAND_SCHEMA_V1,
+    schema: RUNTIME_COMMAND_SCHEMA_,
     commandId,
     type: 'start_turn',
     sessionId,

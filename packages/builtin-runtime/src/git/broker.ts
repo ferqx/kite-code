@@ -2,21 +2,21 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type {
-  GitBrokerFailureCodeV1,
-  GitBrokerResultV1,
-  GitCapabilityEvidenceV1,
-  GitInspectRequestV1,
-  GitInvocationReceiptV1,
-  GitShellDenyEvidenceV1,
+  GitBrokerFailureCode,
+  GitBrokerResult,
+  GitCapabilityEvidence,
+  GitInspectRequest,
+  GitInvocationReceipt,
+  GitShellDenyEvidence,
 } from '@kite/runtime-spi';
 import {
-  BROKERED_GIT_FEATURE_REVISION_V1,
-  GIT_BROKER_REVISION_V1,
-  GIT_OPERATION_SCHEMA_REVISION_V1,
+  BROKERED_GIT_FEATURE_REVISION_,
+  GIT_BROKER_REVISION_,
+  GIT_OPERATION_SCHEMA_REVISION_,
 } from '@kite/runtime-spi';
-import { qualifyBrokeredGitNativeDenyV1 } from './qualification';
+import { qualifyBrokeredGitNativeDeny } from './qualification';
 
-export interface BuiltinProtectedPathEvaluatorV1 {
+export interface BuiltinProtectedPathEvaluator {
   evaluate(access: Readonly<{ path: string; operation: 'read' | 'write' | 'execute' }>): Readonly<{
     outcome: 'allow' | 'deny' | 'prompt';
   }>;
@@ -42,7 +42,7 @@ const PROTECTED_SEGMENTS = new Set([
   '.git-credentials',
 ]);
 
-export interface GitProcessRequestV1 {
+export interface GitProcessRequest {
   executable: string;
   args: readonly string[];
   cwd: string;
@@ -54,7 +54,7 @@ export interface GitProcessRequestV1 {
   signal?: AbortSignal;
 }
 
-export interface GitProcessResultV1 {
+export interface GitProcessResult {
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -65,17 +65,17 @@ export interface GitProcessResultV1 {
 }
 
 /** Canonical revision grammar shared by Provider schema, Registry and broker. */
-export function isGitRevisionV1(value: string): boolean {
+export function isGitRevision(value: string): boolean {
   return REVISION_PATTERN.test(value);
 }
 
-export interface GitProcessAdapterV1 {
-  run(request: GitProcessRequestV1): Promise<GitProcessResultV1>;
+export interface GitProcessAdapter {
+  run(request: GitProcessRequest): Promise<GitProcessResult>;
 }
 
-export interface GitBrokerV1 {
-  readonly featureRevision: typeof BROKERED_GIT_FEATURE_REVISION_V1;
-  inspect(request: GitInspectRequestV1, signal?: AbortSignal): Promise<GitBrokerResultV1>;
+export interface GitBroker {
+  readonly featureRevision: typeof BROKERED_GIT_FEATURE_REVISION_;
+  inspect(request: GitInspectRequest, signal?: AbortSignal): Promise<GitBrokerResult>;
 }
 
 interface RepositoryBinding {
@@ -88,14 +88,14 @@ interface RepositoryBinding {
 }
 
 function failure(
-  failureCode: GitBrokerFailureCodeV1,
+  failureCode: GitBrokerFailureCode,
   output: string,
-  nextCapability?: GitBrokerResultV1['nextCapability'],
-): GitBrokerResultV1 {
+  nextCapability?: GitBrokerResult['nextCapability'],
+): GitBrokerResult {
   return { ok: false, output, failureCode, ...(nextCapability ? { nextCapability } : {}) };
 }
 
-function preflightFailureCode(message: string): GitBrokerFailureCodeV1 {
+function preflightFailureCode(message: string): GitBrokerFailureCode {
   if (message.startsWith('binary_')) return 'binary_untrusted';
   if (
     message.startsWith('hostile_') ||
@@ -152,7 +152,7 @@ function isLiteralGitPath(path: string): boolean {
 function validatePaths(
   workspace: string,
   paths: readonly string[],
-  evaluator: BuiltinProtectedPathEvaluatorV1,
+  evaluator: BuiltinProtectedPathEvaluator,
 ): string[] {
   if (paths.length < 1 || paths.length > MAX_PATHS) throw new Error('path_count');
   const normalized = paths.map((path) => {
@@ -183,7 +183,7 @@ function validatePaths(
 
 function enumerateSafeWorkspacePaths(
   workspace: string,
-  evaluator: BuiltinProtectedPathEvaluatorV1,
+  evaluator: BuiltinProtectedPathEvaluator,
   maximum = MAX_STATUS_PATHS,
 ): string[] {
   const result: string[] = [];
@@ -556,7 +556,7 @@ function fixedRepositoryArgs(binding: RepositoryBinding, args: readonly string[]
 
 async function assertDiffHistoryIsSafe(
   binding: RepositoryBinding,
-  adapter: GitProcessAdapterV1,
+  adapter: GitProcessAdapter,
   paths: readonly string[],
   timeoutMs: number,
   signal?: AbortSignal,
@@ -612,17 +612,17 @@ async function assertDiffHistoryIsSafe(
   }
 }
 
-export function createGitBrokerV1(input: {
+export function createGitBroker(input: {
   workspace: string;
   /** Root that owns the primary repository metadata; defaults to workspace. */
   authorizedRepositoryRoot?: string;
   executable: string;
-  processAdapter: GitProcessAdapterV1;
-  protectedPathEvaluator: BuiltinProtectedPathEvaluatorV1;
-  featureRevision?: typeof BROKERED_GIT_FEATURE_REVISION_V1;
-  shellDenyEvidence?: GitShellDenyEvidenceV1;
-}): GitBrokerV1 {
-  const featureRevision = input.featureRevision ?? BROKERED_GIT_FEATURE_REVISION_V1;
+  processAdapter: GitProcessAdapter;
+  protectedPathEvaluator: BuiltinProtectedPathEvaluator;
+  featureRevision?: typeof BROKERED_GIT_FEATURE_REVISION_;
+  shellDenyEvidence?: GitShellDenyEvidence;
+}): GitBroker {
+  const featureRevision = input.featureRevision ?? BROKERED_GIT_FEATURE_REVISION_;
   const authorizedRepositoryRoot = input.authorizedRepositoryRoot ?? input.workspace;
 
   const denyEvidenceIdentity = (): string | undefined => {
@@ -634,18 +634,18 @@ export function createGitBrokerV1(input: {
     ) {
       return undefined;
     }
-    if (qualifyBrokeredGitNativeDenyV1(evidence).outcome !== 'qualified') return undefined;
+    if (qualifyBrokeredGitNativeDeny(evidence).outcome !== 'qualified') return undefined;
     return digest('kite.git.native-deny.v1', JSON.stringify(evidence));
   };
 
   const invoke = async (request: {
-    operation: GitInvocationReceiptV1['operation'];
+    operation: GitInvocationReceipt['operation'];
     args: readonly string[];
     maxOutputBytes?: number;
     timeoutMs?: number;
     signal?: AbortSignal;
     maxRecords?: number;
-  }): Promise<GitBrokerResultV1> => {
+  }): Promise<GitBrokerResult> => {
     if (request.signal?.aborted) {
       return failure('cancelled', 'Git broker invocation cancelled before dispatch.');
     }
@@ -689,7 +689,7 @@ export function createGitBrokerV1(input: {
       DEFAULT_OUTPUT_BYTES,
       MAX_OUTPUT_BYTES,
     );
-    let processResult: GitProcessResultV1;
+    let processResult: GitProcessResult;
     try {
       processResult = await input.processAdapter.run({
         executable: before.executable,
@@ -722,15 +722,15 @@ export function createGitBrokerV1(input: {
     ) {
       return failure('receipt_invalid', 'Git broker identity changed during invocation.');
     }
-    const evidence: GitCapabilityEvidenceV1 = {
+    const evidence: GitCapabilityEvidence = {
       featureRevision,
-      brokerRevision: GIT_BROKER_REVISION_V1,
-      operationSchemaRevision: GIT_OPERATION_SCHEMA_REVISION_V1,
+      brokerRevision: GIT_BROKER_REVISION_,
+      operationSchemaRevision: GIT_OPERATION_SCHEMA_REVISION_,
       repositoryBinding: before.repositoryBinding,
       executableIdentity: before.executableIdentity,
       nativeDenyEvidenceIdentity,
     };
-    const receipt: GitInvocationReceiptV1 = {
+    const receipt: GitInvocationReceipt = {
       ...evidence,
       invocationId: randomUUID(),
       operation: request.operation,
@@ -818,7 +818,7 @@ export function createGitBrokerV1(input: {
         boundedInteger(request.timeoutMs, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
         if (request.operation !== 'branch_list' && paths.length === 0)
           throw new Error('paths_required');
-        if (request.revision && !isGitRevisionV1(request.revision)) throw new Error('revision');
+        if (request.revision && !isGitRevision(request.revision)) throw new Error('revision');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'invalid request';
         return failure(

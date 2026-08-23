@@ -1,27 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 import type {
-  CapabilityToolTerminalResultV1,
-  DynamicMcpPreparedToolInvocationIdentityV1,
-  NonDynamicOperationIdV1,
-  NonDynamicPreparedToolInvocationIdentityV1,
-  PreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelineOutcomeDispatchV1,
-  ToolPipelinePersistenceV1,
-  ToolPipelinePreparedIdentityVerifierV1,
+  CapabilityToolTerminalResult,
+  DynamicMcpPreparedToolInvocationIdentity,
+  NonDynamicOperationId,
+  NonDynamicPreparedToolInvocationIdentity,
+  PreparedToolInvocation,
+  PreparedToolInvocationIdentity,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelineOutcomeDispatch,
+  ToolPipelinePersistence,
+  ToolPipelinePreparedIdentityVerifier,
 } from '@kite/runtime-spi';
 import {
-  type AppToolPipelineAttemptCompositionV1,
-  createAppToolPipelineAttemptCompositionV1,
+  type AppToolPipelineAttemptComposition,
+  createAppToolPipelineAttemptComposition,
 } from '#app/bootstrap/runtime/tool-pipeline-attempt-composition';
 
-type PreparedV1 = Readonly<PreparedToolInvocationV1>;
-type VerifierV1 = ToolPipelinePreparedIdentityVerifierV1;
+type Prepared = Readonly<PreparedToolInvocation>;
+type Verifier = ToolPipelinePreparedIdentityVerifier;
 
-const ordinaryOperationId = 'builtin:fixture' as NonDynamicOperationIdV1;
+const ordinaryOperationId = 'builtin:fixture' as NonDynamicOperationId;
 
-function ordinaryIdentity(): NonDynamicPreparedToolInvocationIdentityV1 {
+function ordinaryIdentity(): NonDynamicPreparedToolInvocationIdentity {
   return {
     invocationId: 'invocation-1',
     attemptId: 'attempt-1',
@@ -60,7 +60,7 @@ function ordinaryIdentity(): NonDynamicPreparedToolInvocationIdentityV1 {
   };
 }
 
-function dynamicIdentity(): DynamicMcpPreparedToolInvocationIdentityV1 {
+function dynamicIdentity(): DynamicMcpPreparedToolInvocationIdentity {
   return {
     invocationId: 'invocation-1',
     attemptId: 'attempt-1',
@@ -113,7 +113,7 @@ function dynamicIdentity(): DynamicMcpPreparedToolInvocationIdentityV1 {
   };
 }
 
-function bindingFor(identity: Readonly<PreparedToolInvocationIdentityV1>): {
+function bindingFor(identity: Readonly<PreparedToolInvocationIdentity>): {
   readonly bindingId: string;
   readonly capabilityId: string;
   readonly capabilityRevision: string;
@@ -140,7 +140,7 @@ function bindingFor(identity: Readonly<PreparedToolInvocationIdentityV1>): {
       };
 }
 
-function acknowledgement(prepared: PreparedV1): ToolPipelineAttemptAcknowledgementV1 {
+function acknowledgement(prepared: Prepared): ToolPipelineAttemptAcknowledgement {
   const identity = prepared.identity;
   return {
     acknowledged: true,
@@ -187,7 +187,7 @@ function acknowledgement(prepared: PreparedV1): ToolPipelineAttemptAcknowledgeme
   };
 }
 
-function terminalResult(): CapabilityToolTerminalResultV1 {
+function terminalResult(): CapabilityToolTerminalResult {
   return {
     status: 'success',
     content: [{ ok: true }],
@@ -197,16 +197,16 @@ function terminalResult(): CapabilityToolTerminalResultV1 {
 
 function fixture(
   options: {
-    readonly identity?: PreparedToolInvocationIdentityV1;
-    readonly verify?: VerifierV1;
+    readonly identity?: PreparedToolInvocationIdentity;
+    readonly verify?: Verifier;
     readonly recordAttempt?: (
-      input: PreparedV1,
-    ) => Promise<ToolPipelineAttemptAcknowledgementV1> | ToolPipelineAttemptAcknowledgementV1;
+      input: Prepared,
+    ) => Promise<ToolPipelineAttemptAcknowledgement> | ToolPipelineAttemptAcknowledgement;
     readonly recordUnknown?: (input: unknown) => Promise<void> | void;
     readonly commitTerminal?: (input: unknown) => Promise<void> | void;
     readonly dispatch?: (
-      input: PreparedV1,
-    ) => Promise<CapabilityToolTerminalResultV1> | CapabilityToolTerminalResultV1;
+      input: Prepared,
+    ) => Promise<CapabilityToolTerminalResult> | CapabilityToolTerminalResult;
   } = {},
 ) {
   const selectedIdentity = options.identity ?? ordinaryIdentity();
@@ -217,7 +217,7 @@ function fixture(
   let commitCalls = 0;
   const unknownInputs: unknown[] = [];
   const verifier = options.verify ?? (() => true);
-  const persistence: ToolPipelinePersistenceV1 = {
+  const persistence: ToolPipelinePersistence = {
     recordAttempt: async (prepared) => {
       events.push('record');
       persistenceCalls += 1;
@@ -238,7 +238,7 @@ function fixture(
       throw new Error('fixture does not suspend');
     },
   };
-  const dispatch: ToolPipelineOutcomeDispatchV1 = {
+  const dispatch: ToolPipelineOutcomeDispatch = {
     verifyPreparedIdentity: verifier,
     dispatch: async (prepared) => {
       events.push('dispatch');
@@ -249,7 +249,7 @@ function fixture(
       };
     },
   };
-  const composition = createAppToolPipelineAttemptCompositionV1({
+  const composition = createAppToolPipelineAttemptComposition({
     persistence,
     dispatch,
   });
@@ -283,10 +283,10 @@ function fixture(
   };
 }
 
-describe('RMV1-16 App Tool Pipeline attempt composition', () => {
+describe('RM-16 App Tool Pipeline attempt composition', () => {
   test('passes the exact Builtin verifier and preserves ack-before-dispatch', async () => {
     let verifierCalls = 0;
-    const exactVerifier: VerifierV1 = () => {
+    const exactVerifier: Verifier = () => {
       verifierCalls += 1;
       return true;
     };
@@ -300,7 +300,7 @@ describe('RMV1-16 App Tool Pipeline attempt composition', () => {
     expect(harness.dispatchCalls).toBe(1);
     expect(harness.commitCalls).toBe(1);
     expect(harness.events).toEqual(['record', 'dispatch', 'commit']);
-    const composition: AppToolPipelineAttemptCompositionV1 = harness.composition;
+    const composition: AppToolPipelineAttemptComposition = harness.composition;
     composition.assertCommitted(committed);
   });
 
@@ -317,7 +317,7 @@ describe('RMV1-16 App Tool Pipeline attempt composition', () => {
   test('fails closed before dispatch when acknowledgement is invalid', async () => {
     const harness = fixture({
       recordAttempt: () =>
-        ({ acknowledged: true, attempt: {} }) as unknown as ToolPipelineAttemptAcknowledgementV1,
+        ({ acknowledged: true, attempt: {} }) as unknown as ToolPipelineAttemptAcknowledgement,
     });
 
     await expect(harness.composition.execute(harness.prepared)).rejects.toMatchObject({
@@ -361,7 +361,7 @@ describe('RMV1-16 App Tool Pipeline attempt composition', () => {
   });
 
   test('retains dynamic MCP subject and private wrapper identity as one prepared packet', async () => {
-    let verifiedIdentity: PreparedToolInvocationIdentityV1 | undefined;
+    let verifiedIdentity: PreparedToolInvocationIdentity | undefined;
     const harness = fixture({
       identity: dynamicIdentity(),
       verify: (prepared) => {

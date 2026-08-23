@@ -6,19 +6,16 @@ import {
   type ContextProjectionEnvironment,
   expectedCompactionSourceDigest,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import {
   type ContextCompactor,
   executeContextCompaction,
 } from '#app/bootstrap/runtime/context-compaction-effect';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
-import {
-  createTestRuntimeEffectExecutorV1,
-  testBuiltinToolCatalogV1,
-} from '../helpers/runtime-model';
+import { createTestRuntimeEffectExecutor, testBuiltinToolCatalog } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const estimate: ContextTokenEstimate = {
@@ -32,7 +29,7 @@ const estimate: ContextTokenEstimate = {
 };
 
 function requested(reason: 'manual' | 'auto' = 'manual') {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'e2e',
     userId: 'u',
@@ -175,7 +172,7 @@ describe('narrative compaction e2e', () => {
   test('revision-stale results are rejected by the Kernel lease', () => {
     const state = requested();
     const kernel = new AgentKernel({
-      store: openStateStoreForTestV1(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -187,7 +184,7 @@ describe('narrative compaction e2e', () => {
 
   test('Runtime effect lease suppresses a duplicate compaction dispatch', async () => {
     const state = requested();
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -224,11 +221,11 @@ describe('narrative compaction e2e', () => {
       },
       model: createMockModel([]),
       runtimeStore: store,
-      builtinToolCatalog: testBuiltinToolCatalogV1(),
+      builtinToolCatalog: testBuiltinToolCatalog(),
       testContextCompactor: contextCompactor,
     };
-    const firstExecutor = createTestRuntimeEffectExecutorV1(dependencies);
-    const secondExecutor = createTestRuntimeEffectExecutorV1(dependencies);
+    const firstExecutor = createTestRuntimeEffectExecutor(dependencies);
+    const secondExecutor = createTestRuntimeEffectExecutor(dependencies);
 
     try {
       const first = firstExecutor({ type: 'compact_context', compactionId: 'compact-1' }, state);
@@ -258,10 +255,10 @@ describe('narrative compaction e2e', () => {
 
   test('a lost Runtime effect lease prevents compaction Provider dispatch', async () => {
     const state = requested();
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     let compactorCalls = 0;
     store.renewEffectLease = () => false;
-    const executor = createTestRuntimeEffectExecutorV1({
+    const executor = createTestRuntimeEffectExecutor({
       config: {
         providerName: 'test',
         providerType: 'openai-compatible' as const,
@@ -272,7 +269,7 @@ describe('narrative compaction e2e', () => {
       },
       model: createMockModel([]),
       runtimeStore: store,
-      builtinToolCatalog: testBuiltinToolCatalogV1(),
+      builtinToolCatalog: testBuiltinToolCatalog(),
       testContextCompactor: async ({ sourceRevision, pending, projectionEnvironment }) => {
         compactorCalls += 1;
         return checkpointFor(

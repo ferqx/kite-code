@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { verifyGaCompatibilityFixtureV1 } from '../../scripts/release/ga-compatibility';
+import { verifyGaCompatibilityFixture } from '../../scripts/release/ga-compatibility';
 
 const digest = `sha256:${'c'.repeat(64)}` as const;
 const facts = [
@@ -29,7 +29,7 @@ const facts = [
   },
 ] as const;
 const fixture = {
-  schema: 'GACompatibilityFixtureV1',
+  schema: 'GACompatibilityFixture',
   fixtureClass: 'synthetic_contract_only',
   fromArtifactDigest: digest,
   gaArtifactDigest: digest,
@@ -46,7 +46,7 @@ const fixture = {
 
 describe('GA upgrade/downgrade compatibility contract', () => {
   test('preserves durable facts and never treats synthetic replay as production evidence', () => {
-    expect(verifyGaCompatibilityFixtureV1(fixture)).toMatchObject({
+    expect(verifyGaCompatibilityFixture(fixture)).toMatchObject({
       status: 'contract_replay_passed',
       fixtureClass: 'synthetic_contract_only',
       productionEvidence: false,
@@ -58,13 +58,13 @@ describe('GA upgrade/downgrade compatibility contract', () => {
 
   test('rejects deleted required Verification and replayed unknown external effects', () => {
     expect(() =>
-      verifyGaCompatibilityFixtureV1({
+      verifyGaCompatibilityFixture({
         ...fixture,
         afterRollbackFacts: facts.filter((fact) => fact.kind !== 'verification'),
       }),
     ).toThrow('deleted');
     expect(() =>
-      verifyGaCompatibilityFixtureV1({
+      verifyGaCompatibilityFixture({
         ...fixture,
         afterUpgradeFacts: facts.map((fact) =>
           fact.factId === 'unknown-write' ? { ...fact, replayed: true } : fact,
@@ -74,9 +74,9 @@ describe('GA upgrade/downgrade compatibility contract', () => {
   });
 
   test('rejects schema downgrade drift and hidden fields', () => {
-    expect(() => verifyGaCompatibilityFixtureV1({ ...fixture, rollbackRuntimeSchema: 20 })).toThrow(
+    expect(() => verifyGaCompatibilityFixture({ ...fixture, rollbackRuntimeSchema: 20 })).toThrow(
       'exact source Runtime schema',
     );
-    expect(() => verifyGaCompatibilityFixtureV1({ ...fixture, hiddenMigration: true })).toThrow();
+    expect(() => verifyGaCompatibilityFixture({ ...fixture, hiddenMigration: true })).toThrow();
   });
 });

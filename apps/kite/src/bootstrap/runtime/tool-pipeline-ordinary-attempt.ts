@@ -1,61 +1,61 @@
 import {
-  type BuiltinOperationExecutionValueV1,
-  type BuiltinShellExecutionResultV1,
-  createBuiltinPreparedToolDispatchAdapterV1,
+  type BuiltinOperationExecutionValue,
+  type BuiltinShellExecutionResult,
+  createBuiltinPreparedToolDispatchAdapter,
 } from '@kite/builtin-runtime';
 import {
-  type BuiltinWorkspaceFilesystemActorIdentityV1,
-  type BuiltinWorkspaceFilesystemCheckpointProjectionV1,
-  type BuiltinWorkspaceFilesystemRuntimeV1,
-  createBuiltinWorkspaceFilesystemMutationDispatcherV1,
-  createBuiltinWorkspaceFilesystemReadDispatcherV1,
+  type BuiltinWorkspaceFilesystemActorIdentity,
+  type BuiltinWorkspaceFilesystemCheckpointProjection,
+  type BuiltinWorkspaceFilesystemRuntime,
+  createBuiltinWorkspaceFilesystemMutationDispatcher,
+  createBuiltinWorkspaceFilesystemReadDispatcher,
 } from '@kite/builtin-runtime/filesystem';
 import type {
-  ProtectedPathEvaluatorV1,
-  SandboxPreparationArtifactStoreV1,
+  ProtectedPathEvaluator,
+  SandboxPreparationArtifactStore,
 } from '@kite/builtin-runtime/sandbox';
 import type {
-  RuntimeHostCommittedToolInvocationAuthorityV1,
-  RuntimeHostRetryableToolInvocationAuthorityV1,
-  RuntimeHostStateToolGovernanceAuthorizationInputV1,
-  RuntimeHostSuspendedToolInvocationAuthorityV1,
+  RuntimeHostCommittedToolInvocationAuthority,
+  RuntimeHostRetryableToolInvocationAuthority,
+  RuntimeHostStateToolGovernanceAuthorizationInput,
+  RuntimeHostSuspendedToolInvocationAuthority,
 } from '@kite/runtime-host';
 import type {
-  CapabilityExecutionPortV1,
-  CapabilityToolTerminalResultV1,
-  ClassifiedInvocationV1,
-  PreparedToolInvocationV1,
-  RuntimeJsonValueV1,
-  ToolCallSnapshotV1,
-  ToolPipelineDispatchOutcomeV1,
-  ToolPipelinePlanReviewRequestedEventV1,
-  ToolPipelineResolutionContextV1,
-  ToolPipelineStageFailureV1,
+  CapabilityExecutionPort,
+  CapabilityToolTerminalResult,
+  ClassifiedInvocation,
+  PreparedToolInvocation,
+  RuntimeJsonValue,
+  ToolCallSnapshot,
+  ToolPipelineDispatchOutcome,
+  ToolPipelinePlanReviewRequestedEvent,
+  ToolPipelineResolutionContext,
+  ToolPipelineStageFailure,
 } from '@kite/runtime-spi';
-import { TOOL_PIPELINE_STAGE_SCHEMA_V1 } from '@kite/runtime-spi';
-import type { AppPreparedShellExecutionPortV1 } from '../../sandbox/prepared-tool-pipeline';
+import { TOOL_PIPELINE_STAGE_SCHEMA_ } from '@kite/runtime-spi';
+import type { AppPreparedShellExecutionPort } from '../../sandbox/prepared-tool-pipeline';
 import {
-  type AppBuiltinPreassembledMechanismResolverInputV1,
-  createAppBuiltinMechanismResolverV1,
+  type AppBuiltinPreassembledMechanismResolverInput,
+  createAppBuiltinMechanismResolver,
 } from './builtin-mechanism-resolver';
 import {
-  createAppBuiltinPreparedDispatchPortV1,
-  createAppDynamicMcpPreparedDispatchAdapterV1,
+  createAppBuiltinPreparedDispatchPort,
+  createAppDynamicMcpPreparedDispatchAdapter,
 } from './builtin-prepared-dispatch-port';
 import {
-  type AppToolPipelineAttemptCompositionV1,
-  createAppToolPipelineAttemptCompositionV1,
+  type AppToolPipelineAttemptComposition,
+  createAppToolPipelineAttemptComposition,
 } from './tool-pipeline-attempt-composition';
-import type { AppToolPipelineAttemptRouterV1 } from './tool-pipeline-attempt-router';
-import { createAppToolPipelineAttemptRouterV1 } from './tool-pipeline-attempt-router';
-import type { AppToolPipelineTurnCompositionV1 } from './tool-pipeline-composition';
+import type { AppToolPipelineAttemptRouter } from './tool-pipeline-attempt-router';
+import { createAppToolPipelineAttemptRouter } from './tool-pipeline-attempt-router';
+import type { AppToolPipelineTurnComposition } from './tool-pipeline-composition';
 import {
-  APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
-  createAppPreparedToolInvocationV1,
+  APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
+  createAppPreparedToolInvocation,
 } from './tool-pipeline-prepared';
-import type { AppStateToolPipelinePersistenceV1 } from './tool-pipeline-state-persistence';
+import type { AppStateToolPipelinePersistence } from './tool-pipeline-state-persistence';
 
-export const APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1 =
+export const APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_ =
   'kite.app.ordinary-tool-pipeline-attempt.v1' as const;
 
 /**
@@ -63,7 +63,7 @@ export const APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1 =
  * mechanism/evidence owner to be complete; it is routing state, never a
  * schema, parser, effects, or availability authority.
  */
-export const APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_V1 = Object.freeze([
+export const APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_ = Object.freeze([
   'builtin:git_inspect',
   'builtin:read_file',
   'builtin:search_files',
@@ -85,18 +85,16 @@ export const APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_V1 = Object.freeze([
   'builtin:activate_skill',
 ] as const);
 
-type AppOrdinaryToolPipelineOperationIdV1 =
-  (typeof APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_V1)[number];
+type AppOrdinaryToolPipelineOperationId =
+  (typeof APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_)[number];
 
-type GovernanceInputWithoutClassifiedV1 = Omit<
-  RuntimeHostStateToolGovernanceAuthorizationInputV1,
+type GovernanceInputWithoutClassified = Omit<
+  RuntimeHostStateToolGovernanceAuthorizationInput,
   'classified'
 >;
-type GovernanceAdmissionV1 = Parameters<
-  AppToolPipelineTurnCompositionV1['governance']['project']
->[1];
-type MechanismResourcesV1 = Omit<
-  AppBuiltinPreassembledMechanismResolverInputV1,
+type GovernanceAdmission = Parameters<AppToolPipelineTurnComposition['governance']['project']>[1];
+type MechanismResources = Omit<
+  AppBuiltinPreassembledMechanismResolverInput,
   | 'executionMechanism'
   | 'canonicalArguments'
   | 'grantUsed'
@@ -106,46 +104,46 @@ type MechanismResourcesV1 = Omit<
   | 'filesystemRuntime'
 >;
 
-export interface AppOrdinaryWorkspaceFilesystemCompositionV1 {
-  readonly runtime: Readonly<BuiltinWorkspaceFilesystemRuntimeV1>;
-  readonly protectedPathEvaluator: ProtectedPathEvaluatorV1;
+export interface AppOrdinaryWorkspaceFilesystemComposition {
+  readonly runtime: Readonly<BuiltinWorkspaceFilesystemRuntime>;
+  readonly protectedPathEvaluator: ProtectedPathEvaluator;
   readonly protectedPathRevision: string;
-  readonly actorIdentity: Readonly<BuiltinWorkspaceFilesystemActorIdentityV1>;
-  readonly checkpointProjection?: Readonly<BuiltinWorkspaceFilesystemCheckpointProjectionV1>;
+  readonly actorIdentity: Readonly<BuiltinWorkspaceFilesystemActorIdentity>;
+  readonly checkpointProjection?: Readonly<BuiltinWorkspaceFilesystemCheckpointProjection>;
   readonly now?: () => Date;
 }
 
-export interface AppOrdinaryShellCompositionV1 {
-  readonly execution: Readonly<AppPreparedShellExecutionPortV1>;
-  readonly artifacts: SandboxPreparationArtifactStoreV1;
+export interface AppOrdinaryShellComposition {
+  readonly execution: Readonly<AppPreparedShellExecutionPort>;
+  readonly artifacts: SandboxPreparationArtifactStore;
 }
 
-export interface AppOrdinaryToolPipelineAttemptLifecycleV1 {
+export interface AppOrdinaryToolPipelineAttemptLifecycle {
   /** Called only after Kernel authorization allows the operation and before admission. */
   readonly prepareAdmission?: (
-    classified: Readonly<ClassifiedInvocationV1>,
-  ) => Promise<Readonly<GovernanceAdmissionV1>>;
+    classified: Readonly<ClassifiedInvocation>,
+  ) => Promise<Readonly<GovernanceAdmission>>;
   /** Runs inside Host dispatch, therefore strictly after the durable attempt acknowledgement. */
   readonly beforeDispatch?: (attempt: number) => Promise<void>;
   /** Runs after Host has durably acknowledged the attempt and before Builtin dispatch. */
   readonly afterAcknowledgement?: (input: {
     readonly attempt: number;
-    readonly prepared: Readonly<PreparedToolInvocationV1>;
+    readonly prepared: Readonly<PreparedToolInvocation>;
   }) => Promise<void>;
   /** Settles one acknowledged dispatch exactly once; errors remain post-ack unknown. */
   readonly afterDispatch?: (input: {
     readonly attempt: number;
-    readonly result?: Readonly<BuiltinOperationExecutionValueV1>;
+    readonly result?: Readonly<BuiltinOperationExecutionValue>;
     readonly error?: unknown;
   }) => Promise<void>;
 }
 
-export interface AppOrdinaryToolPipelineAttemptInputV1 {
-  readonly turn: Readonly<AppToolPipelineTurnCompositionV1>;
-  readonly snapshot: Readonly<ToolCallSnapshotV1>;
-  readonly resolution: Readonly<ToolPipelineResolutionContextV1>;
-  readonly governance: Readonly<GovernanceInputWithoutClassifiedV1>;
-  readonly admission: Readonly<GovernanceAdmissionV1>;
+export interface AppOrdinaryToolPipelineAttemptInput {
+  readonly turn: Readonly<AppToolPipelineTurnComposition>;
+  readonly snapshot: Readonly<ToolCallSnapshot>;
+  readonly resolution: Readonly<ToolPipelineResolutionContext>;
+  readonly governance: Readonly<GovernanceInputWithoutClassified>;
+  readonly admission: Readonly<GovernanceAdmission>;
   readonly threadId: string;
   readonly attempt: number;
   /** Allows at most one new attempt after State durably admits safe-read evidence. */
@@ -153,33 +151,33 @@ export interface AppOrdinaryToolPipelineAttemptInputV1 {
   readonly taskId: string | null;
   readonly planId: string | null;
   readonly planStepId: string | null;
-  readonly capabilityRequestFacts: RuntimeJsonValueV1 | null;
-  readonly capabilityExecution: CapabilityExecutionPortV1;
+  readonly capabilityRequestFacts: RuntimeJsonValue | null;
+  readonly capabilityExecution: CapabilityExecutionPort;
   readonly signal: AbortSignal;
-  readonly mechanismResources: Readonly<MechanismResourcesV1>;
+  readonly mechanismResources: Readonly<MechanismResources>;
   /**
    * Dynamic MCP preflight hook. It runs after Kernel admission but before the
    * Host attempt acknowledgement, so readiness/egress facts cannot be
    * discovered after an external attempt has already been claimed.
    */
   readonly prepareMechanism?: (input: {
-    readonly classified: Readonly<ClassifiedInvocationV1>;
-    readonly canonicalArguments: RuntimeJsonValueV1;
-  }) => Promise<Readonly<MechanismResourcesV1>>;
+    readonly classified: Readonly<ClassifiedInvocation>;
+    readonly canonicalArguments: RuntimeJsonValue;
+  }) => Promise<Readonly<MechanismResources>>;
   /** App facts used to compose the Builtin read-only filesystem owner after Host preparation. */
-  readonly workspaceFilesystem?: Readonly<AppOrdinaryWorkspaceFilesystemCompositionV1>;
+  readonly workspaceFilesystem?: Readonly<AppOrdinaryWorkspaceFilesystemComposition>;
   /** App-selected Shell Provider/process composition; it owns no Tool policy facts. */
-  readonly shell?: Readonly<AppOrdinaryShellCompositionV1>;
+  readonly shell?: Readonly<AppOrdinaryShellComposition>;
   /** Optional child-attempt lifecycle; it never parses or authorizes tool semantics. */
-  readonly lifecycle?: Readonly<AppOrdinaryToolPipelineAttemptLifecycleV1>;
+  readonly lifecycle?: Readonly<AppOrdinaryToolPipelineAttemptLifecycle>;
 }
 
-type StageFailureV1 = ToolPipelineStageFailureV1<'resolve' | 'validate' | 'classify', string>;
+type StageFailure = ToolPipelineStageFailure<'resolve' | 'validate' | 'classify', string>;
 
-export type AppOrdinaryToolPipelineAttemptResultV1 =
+export type AppOrdinaryToolPipelineAttemptResult =
   | {
       readonly kind: 'stage_failure';
-      readonly failure: Readonly<StageFailureV1>;
+      readonly failure: Readonly<StageFailure>;
     }
   | {
       readonly kind: 'governance_failure';
@@ -188,17 +186,17 @@ export type AppOrdinaryToolPipelineAttemptResultV1 =
     }
   | {
       readonly kind: 'governance_terminal';
-      readonly classified: Readonly<ClassifiedInvocationV1>;
+      readonly classified: Readonly<ClassifiedInvocation>;
       readonly facts: Readonly<
         Extract<
-          ReturnType<AppToolPipelineTurnCompositionV1['governance']['project']>,
+          ReturnType<AppToolPipelineTurnComposition['governance']['project']>,
           { readonly ok: true }
         >['value']
       >;
       readonly decision: Readonly<
         Exclude<
           Extract<
-            ReturnType<AppToolPipelineTurnCompositionV1['governance']['decide']>,
+            ReturnType<AppToolPipelineTurnComposition['governance']['decide']>,
             { readonly ok: true }
           >['value'],
           { readonly kind: 'allow' }
@@ -207,31 +205,31 @@ export type AppOrdinaryToolPipelineAttemptResultV1 =
     }
   | {
       readonly kind: 'committed';
-      readonly classified: Readonly<ClassifiedInvocationV1>;
+      readonly classified: Readonly<ClassifiedInvocation>;
       readonly committed: Readonly<
-        RuntimeHostCommittedToolInvocationAuthorityV1<BuiltinOperationExecutionValueV1>
+        RuntimeHostCommittedToolInvocationAuthority<BuiltinOperationExecutionValue>
       >;
     }
   | {
       readonly kind: 'suspended';
-      readonly classified: Readonly<ClassifiedInvocationV1>;
+      readonly classified: Readonly<ClassifiedInvocation>;
       readonly suspended: Readonly<
-        RuntimeHostSuspendedToolInvocationAuthorityV1<BuiltinOperationExecutionValueV1>
+        RuntimeHostSuspendedToolInvocationAuthority<BuiltinOperationExecutionValue>
       >;
     }
   | {
       readonly kind: 'retryable';
-      readonly classified: Readonly<ClassifiedInvocationV1>;
+      readonly classified: Readonly<ClassifiedInvocation>;
       readonly retryable: Readonly<
-        RuntimeHostRetryableToolInvocationAuthorityV1<BuiltinOperationExecutionValueV1>
+        RuntimeHostRetryableToolInvocationAuthority<BuiltinOperationExecutionValue>
       >;
     };
 
-export interface AppOrdinaryToolPipelineAttemptRuntimeV1 {
-  readonly schema: typeof APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1;
+export interface AppOrdinaryToolPipelineAttemptRuntime {
+  readonly schema: typeof APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_;
   readonly execute: (
-    input: Readonly<AppOrdinaryToolPipelineAttemptInputV1>,
-  ) => Promise<Readonly<AppOrdinaryToolPipelineAttemptResultV1>>;
+    input: Readonly<AppOrdinaryToolPipelineAttemptInput>,
+  ) => Promise<Readonly<AppOrdinaryToolPipelineAttemptResult>>;
 }
 
 /**
@@ -242,31 +240,28 @@ export interface AppOrdinaryToolPipelineAttemptRuntimeV1 {
  * scope explicit lets the composition root hand one object to ordinary and
  * task runtimes without allowing either route to create a second coordinator.
  */
-export interface AppToolPipelineAttemptScopeV1 {
-  readonly persistence: AppStateToolPipelinePersistenceV1;
-  readonly router: AppToolPipelineAttemptRouterV1<
-    RuntimeJsonValueV1,
-    BuiltinOperationExecutionValueV1
-  >;
-  readonly attempts: AppToolPipelineAttemptCompositionV1<
-    RuntimeJsonValueV1,
-    RuntimeJsonValueV1,
-    BuiltinOperationExecutionValueV1
+export interface AppToolPipelineAttemptScope {
+  readonly persistence: AppStateToolPipelinePersistence;
+  readonly router: AppToolPipelineAttemptRouter<RuntimeJsonValue, BuiltinOperationExecutionValue>;
+  readonly attempts: AppToolPipelineAttemptComposition<
+    RuntimeJsonValue,
+    RuntimeJsonValue,
+    BuiltinOperationExecutionValue
   >;
 }
 
-export function createAppToolPipelineAttemptScopeV1(input: {
-  readonly persistence: AppStateToolPipelinePersistenceV1;
-}): AppToolPipelineAttemptScopeV1 {
-  const router = createAppToolPipelineAttemptRouterV1<
-    RuntimeJsonValueV1,
-    BuiltinOperationExecutionValueV1
+export function createAppToolPipelineAttemptScope(input: {
+  readonly persistence: AppStateToolPipelinePersistence;
+}): AppToolPipelineAttemptScope {
+  const router = createAppToolPipelineAttemptRouter<
+    RuntimeJsonValue,
+    BuiltinOperationExecutionValue
   >();
-  const attempts: AppToolPipelineAttemptCompositionV1<
-    RuntimeJsonValueV1,
-    RuntimeJsonValueV1,
-    BuiltinOperationExecutionValueV1
-  > = createAppToolPipelineAttemptCompositionV1({
+  const attempts: AppToolPipelineAttemptComposition<
+    RuntimeJsonValue,
+    RuntimeJsonValue,
+    BuiltinOperationExecutionValue
+  > = createAppToolPipelineAttemptComposition({
     persistence: input.persistence,
     dispatch: router.dispatch,
   });
@@ -277,42 +272,42 @@ export function createAppToolPipelineAttemptScopeV1(input: {
  * Create one ordinary attempt runtime for one run_tools effect. The router and
  * Host coordinator are intentionally shared by every call in that effect.
  */
-export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
-  readonly persistence: AppStateToolPipelinePersistenceV1;
+export function createAppOrdinaryToolPipelineAttemptRuntime(input: {
+  readonly persistence: AppStateToolPipelinePersistence;
   /** Optional shared effect scope; task and ordinary routes must share it. */
-  readonly scope?: Readonly<AppToolPipelineAttemptScopeV1>;
-}): AppOrdinaryToolPipelineAttemptRuntimeV1 {
-  const scope = input.scope ?? createAppToolPipelineAttemptScopeV1(input);
+  readonly scope?: Readonly<AppToolPipelineAttemptScope>;
+}): AppOrdinaryToolPipelineAttemptRuntime {
+  const scope = input.scope ?? createAppToolPipelineAttemptScope(input);
   if (scope.persistence !== input.persistence) {
     throw new Error('App Tool Pipeline attempt scope persistence is not exact.');
   }
   const router = scope.router;
-  const attempts: AppToolPipelineAttemptCompositionV1<
-    RuntimeJsonValueV1,
-    RuntimeJsonValueV1,
-    BuiltinOperationExecutionValueV1
+  const attempts: AppToolPipelineAttemptComposition<
+    RuntimeJsonValue,
+    RuntimeJsonValue,
+    BuiltinOperationExecutionValue
   > = scope.attempts;
-  const resolveMechanism = createAppBuiltinMechanismResolverV1();
+  const resolveMechanism = createAppBuiltinMechanismResolver();
 
   const execute = async (
-    attemptInput: Readonly<AppOrdinaryToolPipelineAttemptInputV1>,
-  ): Promise<Readonly<AppOrdinaryToolPipelineAttemptResultV1>> => {
+    attemptInput: Readonly<AppOrdinaryToolPipelineAttemptInput>,
+  ): Promise<Readonly<AppOrdinaryToolPipelineAttemptResult>> => {
     const turn = attemptInput.turn;
     if (
       attemptInput.resolution.builtinProjectionRevision !== turn.projection.revision ||
       attemptInput.governance.threadId !== attemptInput.threadId
     ) {
-      return stageFailureV1('resolve', 'resolution_context_invalid', attemptInput.snapshot);
+      return stageFailure('resolve', 'resolution_context_invalid', attemptInput.snapshot);
     }
 
     const resolved = turn.callbacks.resolve(attemptInput.snapshot, attemptInput.resolution);
     if (!resolved.ok) return Object.freeze({ kind: 'stage_failure', failure: resolved.failure });
     const target = resolved.value.target;
     if (
-      (!target.isDynamicMcp && !isAppOrdinaryToolPipelineOperationIdV1(target.operationId)) ||
+      (!target.isDynamicMcp && !isAppOrdinaryToolPipelineOperationId(target.operationId)) ||
       target.executionMechanism === 'subagent'
     ) {
-      return stageFailureV1('resolve', 'unsupported_operation', attemptInput.snapshot);
+      return stageFailure('resolve', 'unsupported_operation', attemptInput.snapshot);
     }
 
     const validated = turn.callbacks.validate(resolved.value);
@@ -371,7 +366,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
     }
     const allowDecision = decision.value;
     const grantUsed = allowDecision.grantUsed;
-    if (!isPreparedGrantUsedV1(grantUsed)) {
+    if (!isPreparedGrantUsed(grantUsed)) {
       return Object.freeze({
         kind: 'governance_failure',
         code: 'unsupported_grant',
@@ -380,7 +375,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
     }
 
     const request = Object.freeze({
-      schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
+      schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
       authorizationKind: allowDecision.authorizationKind,
       grantUsed,
       policyEffects: Object.freeze({ ...(classifiedValue.policyCompilation.effects ?? {}) }),
@@ -392,7 +387,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
       planStepId: attemptInput.planStepId,
       capabilityRequestFacts: attemptInput.capabilityRequestFacts,
     });
-    const built = createAppPreparedToolInvocationV1({
+    const built = createAppPreparedToolInvocation({
       classified: classifiedValue,
       governance: facts.value,
       decision: allowDecision,
@@ -414,7 +409,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
     try {
       const filesystemRuntime =
         target.executionMechanism === 'filesystem'
-          ? createFilesystemDispatcherV1({
+          ? createFilesystemDispatcher({
               composition: attemptInput.workspaceFilesystem,
               persistence: input.persistence,
               prepared,
@@ -425,7 +420,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
           : undefined;
       const shellExecutor =
         target.executionMechanism === 'shell'
-          ? createShellExecutorV1({
+          ? createShellExecutor({
               composition: attemptInput.shell,
               persistence: input.persistence,
               prepared,
@@ -452,7 +447,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
         diagnostic: 'The admitted Builtin execution mechanism is unavailable.',
       });
     }
-    const port = createAppBuiltinPreparedDispatchPortV1({
+    const port = createAppBuiltinPreparedDispatchPort({
       projection: turn.projection,
       capabilityExecution: attemptInput.capabilityExecution,
       signal: attemptInput.signal,
@@ -467,7 +462,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
       },
     });
     const dispatch = target.isDynamicMcp
-      ? createAppDynamicMcpPreparedDispatchAdapterV1({
+      ? createAppDynamicMcpPreparedDispatchAdapter({
           projection: turn.projection,
           capabilityExecution: attemptInput.capabilityExecution,
           resolveMechanisms: (mechanismInput) => {
@@ -482,7 +477,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
           signal: attemptInput.signal,
           verifyPreparedIdentity: turn.callbacks.verifyPreparedIdentity,
         })
-      : createBuiltinPreparedToolDispatchAdapterV1({
+      : createBuiltinPreparedToolDispatchAdapter({
           projection: turn.projection,
           verifyPreparedIdentity: turn.callbacks.verifyPreparedIdentity,
           port,
@@ -493,13 +488,13 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
         verifyPreparedIdentity: dispatch.verifyPreparedIdentity,
         dispatch: async (value: Parameters<typeof dispatch.dispatch>[0]) => {
           const attempt = attemptInput.attempt;
-          let terminal: Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>>;
-          let projected: Readonly<ToolPipelineDispatchOutcomeV1<BuiltinOperationExecutionValueV1>>;
+          let terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>;
+          let projected: Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>>;
           try {
             await attemptInput.lifecycle?.beforeDispatch?.(attempt);
             await attemptInput.lifecycle?.afterAcknowledgement?.({ attempt, prepared });
             terminal = await dispatch.dispatch(value);
-            projected = projectBuiltinToolDispatchOutcomeV1({
+            projected = projectBuiltinToolDispatchOutcome({
               operationId: target.operationId,
               retryEligibility: request.retryEligibility,
               allowSafeReadRetry: attemptInput.allowSafeReadRetry === true,
@@ -535,15 +530,15 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
   };
 
   return Object.freeze({
-    schema: APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1,
+    schema: APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_,
     execute,
   });
 }
 
-function createShellExecutorV1(input: {
-  readonly composition: Readonly<AppOrdinaryShellCompositionV1> | undefined;
-  readonly persistence: AppStateToolPipelinePersistenceV1;
-  readonly prepared: Readonly<PreparedToolInvocationV1>;
+function createShellExecutor(input: {
+  readonly composition: Readonly<AppOrdinaryShellComposition> | undefined;
+  readonly persistence: AppStateToolPipelinePersistence;
+  readonly prepared: Readonly<PreparedToolInvocation>;
   readonly operationId: string;
   readonly attempt: number;
   readonly signal: AbortSignal;
@@ -573,7 +568,7 @@ function createShellExecutorV1(input: {
         readonly filesystemAccess: 'workspace_only' | 'external_read' | 'approved_external';
         readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
       }>,
-    ): Promise<Readonly<BuiltinShellExecutionResultV1>> => {
+    ): Promise<Readonly<BuiltinShellExecutionResult>> => {
       if (
         shellInput.signal !== input.signal ||
         shellInput.command !==
@@ -611,14 +606,14 @@ function createShellExecutorV1(input: {
   });
 }
 
-function createFilesystemDispatcherV1(input: {
-  readonly composition: Readonly<AppOrdinaryWorkspaceFilesystemCompositionV1> | undefined;
-  readonly persistence: AppStateToolPipelinePersistenceV1;
+function createFilesystemDispatcher(input: {
+  readonly composition: Readonly<AppOrdinaryWorkspaceFilesystemComposition> | undefined;
+  readonly persistence: AppStateToolPipelinePersistence;
   readonly prepared: Parameters<
-    typeof createBuiltinWorkspaceFilesystemReadDispatcherV1
+    typeof createBuiltinWorkspaceFilesystemReadDispatcher
   >[0]['prepared'];
   readonly verifyPreparedIdentity: Parameters<
-    typeof createBuiltinWorkspaceFilesystemReadDispatcherV1
+    typeof createBuiltinWorkspaceFilesystemReadDispatcher
   >[0]['verifyPreparedIdentity'];
   readonly operationId: string;
   readonly signal: AbortSignal;
@@ -626,7 +621,7 @@ function createFilesystemDispatcherV1(input: {
   const composition = input.composition;
   if (!composition) throw new Error('Workspace filesystem composition is unavailable.');
   if (input.operationId === 'builtin:write_file' || input.operationId === 'builtin:edit_file') {
-    return createBuiltinWorkspaceFilesystemMutationDispatcherV1({
+    return createBuiltinWorkspaceFilesystemMutationDispatcher({
       prepared: input.prepared,
       verifyPreparedIdentity: input.verifyPreparedIdentity,
       runtime: composition.runtime,
@@ -642,7 +637,7 @@ function createFilesystemDispatcherV1(input: {
       ...(composition.now ? { now: composition.now } : {}),
     });
   }
-  return createBuiltinWorkspaceFilesystemReadDispatcherV1({
+  return createBuiltinWorkspaceFilesystemReadDispatcher({
     prepared: input.prepared,
     verifyPreparedIdentity: input.verifyPreparedIdentity,
     runtime: composition.runtime,
@@ -655,12 +650,12 @@ function createFilesystemDispatcherV1(input: {
   });
 }
 
-function projectBuiltinToolDispatchOutcomeV1(input: {
+function projectBuiltinToolDispatchOutcome(input: {
   readonly operationId: string;
   readonly retryEligibility: string;
   readonly allowSafeReadRetry: boolean;
-  readonly terminal: Readonly<CapabilityToolTerminalResultV1<BuiltinOperationExecutionValueV1>>;
-}): Readonly<ToolPipelineDispatchOutcomeV1<BuiltinOperationExecutionValueV1>> {
+  readonly terminal: Readonly<CapabilityToolTerminalResult<BuiltinOperationExecutionValue>>;
+}): Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>> {
   const { operationId, terminal } = input;
   if (
     operationId === 'mcp:dynamic_tool' &&
@@ -698,10 +693,10 @@ function projectBuiltinToolDispatchOutcomeV1(input: {
   return Object.freeze({
     kind: 'suspended' as const,
     suspension: Object.freeze({
-      schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+      schema: TOOL_PIPELINE_STAGE_SCHEMA_,
       kind: 'plan_review' as const,
       toolCallId: event.toolCallId as string,
-      event: event as Readonly<ToolPipelinePlanReviewRequestedEventV1>,
+      event: event as Readonly<ToolPipelinePlanReviewRequestedEvent>,
     }),
     result: Object.freeze({
       status: 'success' as const,
@@ -709,16 +704,16 @@ function projectBuiltinToolDispatchOutcomeV1(input: {
       structuredContent: value,
       ...(terminal.providerMeta === undefined ? {} : { providerMeta: terminal.providerMeta }),
     }),
-  }) satisfies Readonly<ToolPipelineDispatchOutcomeV1<BuiltinOperationExecutionValueV1>>;
+  }) satisfies Readonly<ToolPipelineDispatchOutcome<BuiltinOperationExecutionValue>>;
 }
 
-export function isAppOrdinaryToolPipelineOperationIdV1(
+export function isAppOrdinaryToolPipelineOperationId(
   value: string,
-): value is AppOrdinaryToolPipelineOperationIdV1 {
-  return APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_V1.some((operationId) => operationId === value);
+): value is AppOrdinaryToolPipelineOperationId {
+  return APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_.some((operationId) => operationId === value);
 }
 
-function isPreparedGrantUsedV1(
+function isPreparedGrantUsed(
   value: string,
 ): value is 'none' | 'approve_once' | 'same_command' | 'full_access' {
   return (
@@ -729,11 +724,11 @@ function isPreparedGrantUsedV1(
   );
 }
 
-function stageFailureV1(
-  stage: StageFailureV1['stage'],
+function stageFailure(
+  stage: StageFailure['stage'],
   code: string,
-  snapshot: Readonly<ToolCallSnapshotV1>,
-): Readonly<AppOrdinaryToolPipelineAttemptResultV1> {
+  snapshot: Readonly<ToolCallSnapshot>,
+): Readonly<AppOrdinaryToolPipelineAttemptResult> {
   return Object.freeze({
     kind: 'stage_failure',
     failure: Object.freeze({

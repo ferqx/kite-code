@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  createRuntimeHostStateInitialStateV1,
-  LIMITED_RESOURCE_BUDGET_V1,
-} from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState, LIMITED_RESOURCE_BUDGET_ } from '@kite/runtime-host';
 import {
   eventsForRunCancellation,
   eventsForRuntimeAction,
@@ -11,7 +8,7 @@ import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 describe('runtime user actions', () => {
   test('waives a required provider with a redacted session-scoped fact', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider',
       userId: 'u',
@@ -45,7 +42,7 @@ describe('runtime user actions', () => {
   });
 
   test('records required-provider retry outcome without inventing capability visibility', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider',
       userId: 'u',
@@ -80,7 +77,7 @@ describe('runtime user actions', () => {
   });
 
   test('completes provider recovery by clearing the interaction and starting a new turn', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider',
       userId: 'u',
@@ -124,7 +121,7 @@ describe('runtime user actions', () => {
   });
 
   test('maps provider recovery cancellation to a durable defer without starting a turn', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider',
       userId: 'u',
@@ -154,7 +151,7 @@ describe('runtime user actions', () => {
   });
 
   test('ignores an action whose interaction id does not match', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -172,7 +169,7 @@ describe('runtime user actions', () => {
   });
 
   test('turns matching input into answer and tool completion facts', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -194,7 +191,7 @@ describe('runtime user actions', () => {
   });
 
   test('preserves five-question input answers as structured tool completion data', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -245,7 +242,7 @@ describe('runtime user actions', () => {
   });
 
   test('cancels a matching user-input interaction into a tool completion', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -290,7 +287,7 @@ describe('runtime user actions', () => {
   });
 
   test('cancelling auto_review durably cancels the tool without escalating to approval', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -316,7 +313,7 @@ describe('runtime user actions', () => {
   });
 
   test('a process-level user cancellation records auto_review as user_cancelled', () => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -350,7 +347,7 @@ describe('runtime user actions', () => {
     'cancel',
     'reject',
   ] as const)('%s on a matching tool approval rejects the target and aborts the whole turn', (actionType) => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -440,7 +437,7 @@ describe('runtime user actions', () => {
     'awaiting_tool_approval',
     'awaiting_review',
   ] as const)('ignores a stale generic cancel for %s', (kind) => {
-    const state = createRuntimeHostStateInitialStateV1({
+    const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -490,7 +487,7 @@ describe('runtime user actions', () => {
 });
 
 test('full access approval is rejected when no sandbox is available', () => {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'auth',
     userId: 'u',
@@ -531,7 +528,7 @@ test('full access approval is rejected when no sandbox is available', () => {
 });
 
 test('bounded cancellation removes every durable waiter before aborting the turn', () => {
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'wait-cancel',
     userId: 'u',
@@ -542,7 +539,7 @@ test('bounded cancellation removes every durable waiter before aborting the turn
     runId: 'run-1',
     startedAt: '2026-07-30T00:00:00Z',
     deadlineAt: '2026-07-30T00:30:00Z',
-    budget: LIMITED_RESOURCE_BUDGET_V1,
+    budget: LIMITED_RESOURCE_BUDGET_,
   });
   state = reduceRuntimeState(state, {
     type: 'resource_budget.waiter_enqueued',
@@ -572,7 +569,7 @@ test('bounded cancellation removes every durable waiter before aborting the turn
 });
 
 test('approval ignores grants that were not offered by the pending interaction', () => {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'auth',
     userId: 'u',

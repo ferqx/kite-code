@@ -5,7 +5,7 @@ import {
   releaseCapabilitySchema,
   rolloutStageSchema,
 } from './release-capabilities';
-import { parseReleaseProfileV1, type ReleaseProfileV1 } from './release-profile';
+import { parseReleaseProfile, type ReleaseProfile } from './release-profile';
 
 const restrictionCapabilitySchema = z
   .object({
@@ -50,7 +50,7 @@ const resourceRestrictionSchema = z
   })
   .strict();
 
-export const releaseProfileRestrictionV1Schema = z
+export const releaseProfileRestrictionSchema = z
   .object({
     capabilities: capabilityRestrictionsSchema.optional(),
     safety: z
@@ -105,27 +105,25 @@ export const releaseProfileRestrictionV1Schema = z
   })
   .strict();
 
-export const releaseProfileRestrictionLayerV1Schema = z
+export const releaseProfileRestrictionLayerSchema = z
   .object({
     source: z.enum(['rollout', 'admin', 'user', 'project', 'cli']),
-    restrictions: releaseProfileRestrictionV1Schema,
+    restrictions: releaseProfileRestrictionSchema,
   })
   .strict();
 
-export type ReleaseProfileRestrictionV1 = z.infer<typeof releaseProfileRestrictionV1Schema>;
-export type ReleaseProfileRestrictionLayerV1 = z.infer<
-  typeof releaseProfileRestrictionLayerV1Schema
->;
-export type ReleaseProfileRestrictionSourceV1 = ReleaseProfileRestrictionLayerV1['source'];
+export type ReleaseProfileRestriction = z.infer<typeof releaseProfileRestrictionSchema>;
+export type ReleaseProfileRestrictionLayer = z.infer<typeof releaseProfileRestrictionLayerSchema>;
+export type ReleaseProfileRestrictionSource = ReleaseProfileRestrictionLayer['source'];
 
 export class ReleaseProfileEscalationError extends Error {
-  readonly source: ReleaseProfileRestrictionSourceV1;
+  readonly source: ReleaseProfileRestrictionSource;
   readonly path: string;
   readonly requested: unknown;
   readonly ceiling: unknown;
 
   constructor(
-    source: ReleaseProfileRestrictionSourceV1,
+    source: ReleaseProfileRestrictionSource,
     path: string,
     requested: unknown,
     ceiling: unknown,
@@ -167,7 +165,7 @@ const APPROVAL_RANK = { none: 0, auto_review: 1, user: 2 } as const;
 const VERIFICATION_RANK = { not_required: 0, best_effort: 1, required: 2 } as const;
 
 function escalation(
-  layer: ReleaseProfileRestrictionLayerV1,
+  layer: ReleaseProfileRestrictionLayer,
   path: string,
   requested: unknown,
   ceiling: unknown,
@@ -185,7 +183,7 @@ function intersect(left: readonly string[], right: readonly string[]): string[] 
 }
 
 function ensureSubset(
-  layer: ReleaseProfileRestrictionLayerV1,
+  layer: ReleaseProfileRestrictionLayer,
   path: string,
   requested: readonly string[],
   ceiling: readonly string[],
@@ -197,7 +195,7 @@ function ensureSubset(
 }
 
 function tightenRanked<T extends string>(input: {
-  layer: ReleaseProfileRestrictionLayerV1;
+  layer: ReleaseProfileRestrictionLayer;
   path: string;
   requested: T | undefined;
   ceiling: T;
@@ -212,7 +210,7 @@ function tightenRanked<T extends string>(input: {
 }
 
 function tightenRequirement<T extends string>(input: {
-  layer: ReleaseProfileRestrictionLayerV1;
+  layer: ReleaseProfileRestrictionLayer;
   path: string;
   requested: T | undefined;
   ceiling: T;
@@ -227,7 +225,7 @@ function tightenRequirement<T extends string>(input: {
 }
 
 function requireOnlyTighterBoolean(input: {
-  layer: ReleaseProfileRestrictionLayerV1;
+  layer: ReleaseProfileRestrictionLayer;
   path: string;
   requested: boolean | undefined;
   ceiling: boolean;
@@ -243,7 +241,7 @@ function requireOnlyTighterBoolean(input: {
   return input.trueIsStricter ? input.current || input.requested : input.current && input.requested;
 }
 
-function cloneProfile(profile: ReleaseProfileV1): ReleaseProfileV1 {
+function cloneProfile(profile: ReleaseProfile): ReleaseProfile {
   return structuredClone(profile);
 }
 
@@ -252,15 +250,15 @@ function cloneProfile(profile: ReleaseProfileV1): ReleaseProfileV1 {
  * parsed strictly before evaluation, and widening attempts are rejected rather
  * than silently clamped. Call this before creating Runtime/MCP/Skill providers.
  */
-export function composeReleaseProfileV1(input: {
+export function composeReleaseProfile(input: {
   embedded: unknown;
   layers?: readonly unknown[];
-}): ReleaseProfileV1 {
-  const ceiling = parseReleaseProfileV1(input.embedded);
+}): ReleaseProfile {
+  const ceiling = parseReleaseProfile(input.embedded);
   const effective = cloneProfile(ceiling);
 
   for (const rawLayer of input.layers ?? []) {
-    const layer = releaseProfileRestrictionLayerV1Schema.parse(rawLayer);
+    const layer = releaseProfileRestrictionLayerSchema.parse(rawLayer);
     const restriction = layer.restrictions;
 
     for (const capability of RELEASE_CAPABILITIES) {
@@ -490,5 +488,5 @@ export function composeReleaseProfileV1(input: {
     }
   }
 
-  return parseReleaseProfileV1(effective);
+  return parseReleaseProfile(effective);
 }

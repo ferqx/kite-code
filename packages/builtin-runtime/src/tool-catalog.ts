@@ -1,50 +1,50 @@
 import type { CapabilityDescriptor as RuntimeCapabilityDescriptor } from '@kite/runtime-contract';
 import type {
-  CapabilityApprovalV1,
-  CapabilityAvailabilityDecisionV1,
-  CapabilityDescriptorV1,
-  CapabilityEffectsClassifierV1,
-  CapabilityEffectsV1,
-  CapabilityExecutionInvocationV1,
-  CapabilityExecutionMechanismV1,
-  CapabilityExecutionPolicyV1,
-  CapabilityExecutionPortV1,
-  CapabilityExecutionTraitsDeclarationV1,
-  CapabilityExecutionTraitsProjectorV1,
-  CapabilityExecutionTraitsV1,
-  CapabilityInternalDescriptorV1,
-  CapabilityKindV1,
-  CapabilityParseResultV1,
-  CapabilityParserV1,
-  CapabilityPolicyCompilationV1,
-  CapabilityPolicyContextV1,
-  CapabilityRegistrySnapshotV1,
-  CapabilityTurnContextV1,
-  CapabilityUnknownFieldObservationV1,
-  ExecutionReceiptV1,
-  RuntimeJsonValueV1,
-  RuntimeModuleRegistryV1,
+  CapabilityApproval,
+  CapabilityAvailabilityDecision,
+  CapabilityDescriptor,
+  CapabilityEffects,
+  CapabilityEffectsClassifier,
+  CapabilityExecutionInvocation,
+  CapabilityExecutionMechanism,
+  CapabilityExecutionPolicy,
+  CapabilityExecutionPort,
+  CapabilityExecutionTraits,
+  CapabilityExecutionTraitsDeclaration,
+  CapabilityExecutionTraitsProjector,
+  CapabilityInternalDescriptor,
+  CapabilityKind,
+  CapabilityParseResult,
+  CapabilityParser,
+  CapabilityPolicyCompilation,
+  CapabilityPolicyContext,
+  CapabilityRegistrySnapshot,
+  CapabilityTurnContext,
+  CapabilityUnknownFieldObservation,
+  ExecutionReceipt,
+  RuntimeJsonValue,
+  RuntimeModuleRegistry,
 } from '@kite/runtime-spi';
 import {
-  CAPABILITY_EXECUTION_MECHANISMS_V1,
-  capabilityBindingIdentityFailureV1,
+  CAPABILITY_EXECUTION_MECHANISMS_,
+  capabilityBindingIdentityFailure,
 } from '@kite/runtime-spi';
 import { dynamicTool, jsonSchema, type ToolSet } from 'ai';
-import { digestCapabilityBindingValueV1 } from './capability-binding';
-import { projectBuiltinExecutionTraitsV1 } from './catalog-contract';
+import { digestCapabilityBindingValue } from './capability-binding';
+import { projectBuiltinExecutionTraits } from './catalog-contract';
 
 /** Opaque model tool surface owned and constructed by Builtin Runtime. */
-export type BuiltinModelToolSetV1 = ToolSet;
+export type BuiltinModelToolSet = ToolSet;
 
 /** Availability is a projection fact, not an execution fallback. */
-export type BuiltinToolAvailabilityV1 =
+export type BuiltinToolAvailability =
   | 'available'
   | 'degraded'
   | 'unavailable'
   | 'quarantined'
   | 'hidden';
 
-export interface BuiltinUnknownToolFieldsProjectionV1 {
+export interface BuiltinUnknownToolFieldsProjection {
   readonly hasUnknown: boolean;
   readonly count: number;
   readonly toolClass:
@@ -56,23 +56,21 @@ export interface BuiltinUnknownToolFieldsProjectionV1 {
   readonly schemaRevision: string;
 }
 
-export type BuiltinToolEffectClassV1 =
+export type BuiltinToolEffectClass =
   | 'read_only'
   | 'plan_only'
   | 'workspace_write'
   | 'external_side_effect'
   | 'unknown';
 
-export interface BuiltinToolCapabilityProjectionV1 {
-  readonly effectClass: BuiltinToolEffectClassV1;
+export interface BuiltinToolCapabilityProjection {
+  readonly effectClass: BuiltinToolEffectClass;
   readonly sideEffect: boolean;
   readonly classificationReason: string;
 }
 
 /** Missing captured effects are conservatively unsafe and never name-classified. */
-export function failClosedBuiltinToolCapabilityV1(
-  toolName: string,
-): BuiltinToolCapabilityProjectionV1 {
+export function failClosedBuiltinToolCapability(toolName: string): BuiltinToolCapabilityProjection {
   return Object.freeze({
     effectClass: 'unknown',
     sideEffect: true,
@@ -84,11 +82,11 @@ export function failClosedBuiltinToolCapabilityV1(
  * Project parser-owned unknown-field facts into the bounded State shape.
  * Field names and values never cross this concrete Builtin semantic boundary.
  */
-export function projectBuiltinUnknownToolFieldsObservationV1(input: {
+export function projectBuiltinUnknownToolFieldsObservation(input: {
   readonly toolName: string;
   readonly unknownFieldCount: number;
   readonly schemaRevision: string;
-}): BuiltinUnknownToolFieldsProjectionV1 {
+}): BuiltinUnknownToolFieldsProjection {
   const toolClass = input.toolName.startsWith('mcp__')
     ? 'mcp_tool'
     : /^(read|search|list)_/u.test(input.toolName)
@@ -111,54 +109,54 @@ export function projectBuiltinUnknownToolFieldsObservationV1(input: {
   });
 }
 
-interface BuiltinToolCatalogEntryCommonV1 {
+interface BuiltinToolCatalogEntryCommon {
   /** Stable operation identity owned by the registered Builtin module. */
   readonly operationId: string;
   readonly capabilityId: string;
   readonly providerId: string;
   readonly revision: string;
   readonly executorRevision: string;
-  readonly kind: CapabilityKindV1;
-  readonly executionMechanism: CapabilityExecutionMechanismV1;
+  readonly kind: CapabilityKind;
+  readonly executionMechanism: CapabilityExecutionMechanism;
   readonly description: string;
   readonly modelDescription: string;
-  readonly inputSchema?: Readonly<Record<string, RuntimeJsonValueV1>>;
-  readonly modelInputSchema?: Readonly<Record<string, RuntimeJsonValueV1>>;
+  readonly inputSchema?: Readonly<Record<string, RuntimeJsonValue>>;
+  readonly modelInputSchema?: Readonly<Record<string, RuntimeJsonValue>>;
   readonly inputSchemaDigest?: string;
-  readonly effects: CapabilityEffectsV1;
-  readonly availability: BuiltinToolAvailabilityV1;
+  readonly effects: CapabilityEffects;
+  readonly availability: BuiltinToolAvailability;
   readonly availabilityReason?: string;
   readonly availabilityDiagnostics: readonly string[];
-  readonly minimumApproval: CapabilityApprovalV1;
+  readonly minimumApproval: CapabilityApproval;
   readonly workspaceTrustRequired: boolean;
-  readonly execution?: CapabilityExecutionPolicyV1;
-  readonly executionTraitsDeclaration?: CapabilityExecutionTraitsDeclarationV1;
-  readonly executionTraitsProjector?: CapabilityExecutionTraitsProjectorV1;
-  readonly parser: CapabilityParserV1;
-  readonly modelParser?: CapabilityParserV1;
-  readonly effectsClassifier?: CapabilityEffectsClassifierV1;
-  projectApprovalSummary(input: RuntimeJsonValueV1, context?: CapabilityTurnContextV1): string;
-  parse(input: unknown, context?: CapabilityTurnContextV1): CapabilityParseResultV1;
-  parseModelInput(input: unknown, context?: CapabilityTurnContextV1): CapabilityParseResultV1;
-  canonicalize(input: unknown, context?: CapabilityTurnContextV1): RuntimeJsonValueV1;
+  readonly execution?: CapabilityExecutionPolicy;
+  readonly executionTraitsDeclaration?: CapabilityExecutionTraitsDeclaration;
+  readonly executionTraitsProjector?: CapabilityExecutionTraitsProjector;
+  readonly parser: CapabilityParser;
+  readonly modelParser?: CapabilityParser;
+  readonly effectsClassifier?: CapabilityEffectsClassifier;
+  projectApprovalSummary(input: RuntimeJsonValue, context?: CapabilityTurnContext): string;
+  parse(input: unknown, context?: CapabilityTurnContext): CapabilityParseResult;
+  parseModelInput(input: unknown, context?: CapabilityTurnContext): CapabilityParseResult;
+  canonicalize(input: unknown, context?: CapabilityTurnContext): RuntimeJsonValue;
   observeUnknownFields(
     input: unknown,
-    context?: CapabilityTurnContextV1,
-  ): CapabilityUnknownFieldObservationV1;
+    context?: CapabilityTurnContext,
+  ): CapabilityUnknownFieldObservation;
   classifyEffects(
-    input: RuntimeJsonValueV1,
-    context?: CapabilityTurnContextV1,
-  ): ReturnType<CapabilityEffectsClassifierV1>;
+    input: RuntimeJsonValue,
+    context?: CapabilityTurnContext,
+  ): ReturnType<CapabilityEffectsClassifier>;
   projectExecutionTraits(
-    input: RuntimeJsonValueV1,
-    context?: CapabilityTurnContextV1,
-  ): CapabilityExecutionTraitsV1;
+    input: RuntimeJsonValue,
+    context?: CapabilityTurnContext,
+  ): CapabilityExecutionTraits;
 }
 
-export interface BuiltinModelToolCatalogEntryV1 extends BuiltinToolCatalogEntryCommonV1 {
+export interface BuiltinModelToolCatalogEntry extends BuiltinToolCatalogEntryCommon {
   readonly visibility: 'model';
   readonly name: string;
-  readonly descriptor: CapabilityDescriptorV1;
+  readonly descriptor: CapabilityDescriptor;
   /** Runtime-contract descriptor projected from the same frozen SPI descriptor. */
   readonly runtimeDescriptor: RuntimeCapabilityDescriptor;
   /**
@@ -166,44 +164,44 @@ export interface BuiltinModelToolCatalogEntryV1 extends BuiltinToolCatalogEntryC
    * parser. Authorization mode and grant matching are intentionally absent.
    */
   readonly compilePolicy: (
-    input: RuntimeJsonValueV1,
-    context?: CapabilityPolicyContextV1,
-  ) => CapabilityPolicyCompilationV1;
+    input: RuntimeJsonValue,
+    context?: CapabilityPolicyContext,
+  ) => CapabilityPolicyCompilation;
 }
 
-export interface BuiltinInternalOperationCatalogEntryV1 extends BuiltinToolCatalogEntryCommonV1 {
+export interface BuiltinInternalOperationCatalogEntry extends BuiltinToolCatalogEntryCommon {
   readonly visibility: 'internal';
   readonly name?: never;
-  readonly descriptor: CapabilityInternalDescriptorV1;
+  readonly descriptor: CapabilityInternalDescriptor;
 }
 
-export type BuiltinToolCatalogEntryV1 =
-  | BuiltinModelToolCatalogEntryV1
-  | BuiltinInternalOperationCatalogEntryV1;
+export type BuiltinToolCatalogEntry =
+  | BuiltinModelToolCatalogEntry
+  | BuiltinInternalOperationCatalogEntry;
 
-export interface BuiltinToolCatalogProjectionV1 {
+export interface BuiltinToolCatalogProjection {
   /** Stable revision composed only from the frozen registered definitions. */
   readonly revision: string;
   /** Includes model-visible and internal operations for parity/audit. */
-  readonly entries: readonly BuiltinToolCatalogEntryV1[];
+  readonly entries: readonly BuiltinToolCatalogEntry[];
   /** Model-facing ToolSet; entries without model visibility are never exposed. */
   readonly toolSet: ToolSet;
   /** Re-projects one immutable snapshot for a new turn context. */
-  forTurn(context: CapabilityTurnContextV1): BuiltinToolCatalogProjectionV1;
+  forTurn(context: CapabilityTurnContext): BuiltinToolCatalogProjection;
   /**
    * Dispatches one exact operation through the Host-selected execution port.
    * The projection never selects a second handler or calls an executor itself.
    */
   dispatch(
     operationId: string,
-    port: CapabilityExecutionPortV1,
-    invocation: CapabilityExecutionInvocationV1,
-  ): Promise<ExecutionReceiptV1>;
+    port: CapabilityExecutionPort,
+    invocation: CapabilityExecutionInvocation,
+  ): Promise<ExecutionReceipt>;
 }
 
-export interface CreateBuiltinToolCatalogProjectionOptionsV1 {
+export interface CreateBuiltinToolCatalogProjectionOptions {
   /** One immutable turn context consumed by all definition availability gates. */
-  readonly turnContext?: CapabilityTurnContextV1;
+  readonly turnContext?: CapabilityTurnContext;
 }
 
 /**
@@ -212,14 +210,14 @@ export interface CreateBuiltinToolCatalogProjectionOptionsV1 {
  * from registered definitions; no Core registry or hand-written schema table
  * participates in this projection.
  */
-export function createBuiltinToolCatalogProjectionV1(
-  registryOrSnapshot: RuntimeModuleRegistryV1 | CapabilityRegistrySnapshotV1,
-  options: CreateBuiltinToolCatalogProjectionOptionsV1 = {},
-): BuiltinToolCatalogProjectionV1 {
+export function createBuiltinToolCatalogProjection(
+  registryOrSnapshot: RuntimeModuleRegistry | CapabilityRegistrySnapshot,
+  options: CreateBuiltinToolCatalogProjectionOptions = {},
+): BuiltinToolCatalogProjection {
   const snapshot =
     'snapshot' in registryOrSnapshot ? registryOrSnapshot.snapshot() : registryOrSnapshot;
-  assertFrozenBuiltinRegistrySnapshotV1(snapshot);
-  const turnContext = options.turnContext ?? EMPTY_TURN_CONTEXT_V1;
+  assertFrozenBuiltinRegistrySnapshot(snapshot);
+  const turnContext = options.turnContext ?? EMPTY_TURN_CONTEXT_;
   const entries = snapshot.capabilities
     .map(({ definition, executor }) => {
       if (!executor) {
@@ -245,10 +243,10 @@ export function createBuiltinToolCatalogProjectionV1(
         providerId: definition.providerId,
         revision: definition.revision,
       });
-      const availabilityDecision: CapabilityAvailabilityDecisionV1 = definition.availability?.(
+      const availabilityDecision: CapabilityAvailabilityDecision = definition.availability?.(
         turnContext,
       ) ?? { status: 'available' };
-      const availability = normalizeBuiltinAvailabilityV1(availabilityDecision);
+      const availability = normalizeBuiltinAvailability(availabilityDecision);
       if (visibility === 'model' && (!definition.toolName || !definition.inputSchema)) {
         throw new Error(
           `Model-visible Builtin capability is missing tool name or input schema: ${definition.capabilityId}`,
@@ -273,8 +271,8 @@ export function createBuiltinToolCatalogProjectionV1(
       if (!parser) {
         throw new Error(`Builtin capability is missing its parser: ${definition.capabilityId}`);
       }
-      const executionMechanism = requireBuiltinExecutionMechanismV1(definition);
-      const descriptor = definition.descriptor ?? createFallbackDescriptorV1(definition);
+      const executionMechanism = requireBuiltinExecutionMechanism(definition);
+      const descriptor = definition.descriptor ?? createFallbackDescriptor(definition);
       if (descriptor.executionMechanism !== executionMechanism) {
         throw new Error(
           `Builtin capability descriptor mechanism mismatch: ${definition.capabilityId}`,
@@ -284,7 +282,7 @@ export function createBuiltinToolCatalogProjectionV1(
         ? definition.modelInputSchemaForContext(turnContext)
         : definition.modelInputSchema;
       const frozenModelInputSchema = modelInputSchema
-        ? freezeRuntimeJsonRecordV1(modelInputSchema)
+        ? freezeRuntimeJsonRecord(modelInputSchema)
         : undefined;
       const commonEntry = Object.freeze({
         ...base,
@@ -316,48 +314,42 @@ export function createBuiltinToolCatalogProjectionV1(
         ...(definition.effectsClassifier
           ? { effectsClassifier: definition.effectsClassifier }
           : {}),
-        projectApprovalSummary(
-          input: RuntimeJsonValueV1,
-          context?: CapabilityTurnContextV1,
-        ): string {
+        projectApprovalSummary(input: RuntimeJsonValue, context?: CapabilityTurnContext): string {
           return (
             definition.approvalSummary?.(input, context ?? turnContext) ??
             definition.toolName ??
             definition.capabilityId
           );
         },
-        parse(input: unknown, context?: CapabilityTurnContextV1): CapabilityParseResultV1 {
+        parse(input: unknown, context?: CapabilityTurnContext): CapabilityParseResult {
           return parser.parse(input, context ?? turnContext);
         },
-        parseModelInput(
-          input: unknown,
-          context?: CapabilityTurnContextV1,
-        ): CapabilityParseResultV1 {
+        parseModelInput(input: unknown, context?: CapabilityTurnContext): CapabilityParseResult {
           return (definition.modelParser ?? parser).parse(input, context ?? turnContext);
         },
-        canonicalize(input: unknown, context?: CapabilityTurnContextV1): RuntimeJsonValueV1 {
+        canonicalize(input: unknown, context?: CapabilityTurnContext): RuntimeJsonValue {
           return parser.canonicalize(input, context ?? turnContext);
         },
         observeUnknownFields(
           input: unknown,
-          context?: CapabilityTurnContextV1,
-        ): CapabilityUnknownFieldObservationV1 {
+          context?: CapabilityTurnContext,
+        ): CapabilityUnknownFieldObservation {
           return parser.observeUnknownFields(input, context ?? turnContext);
         },
-        classifyEffects(input: RuntimeJsonValueV1, context?: CapabilityTurnContextV1) {
+        classifyEffects(input: RuntimeJsonValue, context?: CapabilityTurnContext) {
           return (
             definition.effectsClassifier?.(input, context ?? turnContext) ??
-            defaultEffectsClassificationV1(definition.effects)
+            defaultEffectsClassification(definition.effects)
           );
         },
-        projectExecutionTraits(input: RuntimeJsonValueV1, context?: CapabilityTurnContextV1) {
+        projectExecutionTraits(input: RuntimeJsonValue, context?: CapabilityTurnContext) {
           const effectiveContext = context ?? turnContext;
           const invocationEffects =
             definition.effectsClassifier?.(input, effectiveContext) ??
-            defaultEffectsClassificationV1(definition.effects);
+            defaultEffectsClassification(definition.effects);
           return (
             definition.executionTraitsProjector?.(input, effectiveContext, invocationEffects) ??
-            projectBuiltinExecutionTraitsV1(
+            projectBuiltinExecutionTraits(
               definition.executionTraitsDeclaration,
               input,
               effectiveContext,
@@ -374,22 +366,22 @@ export function createBuiltinToolCatalogProjectionV1(
           );
         }
         const compilePolicy = (
-          input: RuntimeJsonValueV1,
-          context?: CapabilityPolicyContextV1,
-        ): CapabilityPolicyCompilationV1 => {
-          const policyContext = normalizeBuiltinPolicyContextV1(context ?? turnContext);
+          input: RuntimeJsonValue,
+          context?: CapabilityPolicyContext,
+        ): CapabilityPolicyCompilation => {
+          const policyContext = normalizeBuiltinPolicyContext(context ?? turnContext);
           const canonicalInput = parser.canonicalize(input, policyContext);
           const compiled = definition.policyCompiler!(canonicalInput, policyContext);
-          return validateBuiltinPolicyCompilationV1(compiled, definition, parser, policyContext);
+          return validateBuiltinPolicyCompilation(compiled, definition, parser, policyContext);
         };
         return Object.freeze({
           ...commonEntry,
           visibility: 'model' as const,
           name: definition.toolName,
           descriptor,
-          runtimeDescriptor: createRuntimeContractDescriptorV1(descriptor),
+          runtimeDescriptor: createRuntimeContractDescriptor(descriptor),
           compilePolicy,
-        }) satisfies BuiltinModelToolCatalogEntryV1;
+        }) satisfies BuiltinModelToolCatalogEntry;
       }
 
       if (descriptor.kind !== 'internal_runtime') {
@@ -401,7 +393,7 @@ export function createBuiltinToolCatalogProjectionV1(
         ...commonEntry,
         visibility: 'internal' as const,
         descriptor,
-      }) satisfies BuiltinInternalOperationCatalogEntryV1;
+      }) satisfies BuiltinInternalOperationCatalogEntry;
     })
     .sort((left, right) => left.operationId.localeCompare(right.operationId));
 
@@ -414,8 +406,8 @@ export function createBuiltinToolCatalogProjectionV1(
     names.add(entry.name);
   }
 
-  const toolSet = createBuiltinModelToolSetV1(frozenEntries, turnContext);
-  const revision = digestCatalogRevisionV1(snapshot, frozenEntries);
+  const toolSet = createBuiltinModelToolSet(frozenEntries, turnContext);
+  const revision = digestCatalogRevision(snapshot, frozenEntries);
   const entryByOperationId = new Map(frozenEntries.map((entry) => [entry.operationId, entry]));
   const definitionByOperationId = new Map(
     snapshot.capabilities.map(({ definition }) => [definition.capabilityId, definition]),
@@ -425,20 +417,20 @@ export function createBuiltinToolCatalogProjectionV1(
     revision,
     entries: frozenEntries,
     toolSet,
-    forTurn(context: CapabilityTurnContextV1): BuiltinToolCatalogProjectionV1 {
-      return createBuiltinToolCatalogProjectionV1(snapshot, { turnContext: context });
+    forTurn(context: CapabilityTurnContext): BuiltinToolCatalogProjection {
+      return createBuiltinToolCatalogProjection(snapshot, { turnContext: context });
     },
     async dispatch(
       operationId: string,
-      port: CapabilityExecutionPortV1,
-      invocation: CapabilityExecutionInvocationV1,
-    ): Promise<ExecutionReceiptV1> {
+      port: CapabilityExecutionPort,
+      invocation: CapabilityExecutionInvocation,
+    ): Promise<ExecutionReceipt> {
       const entry = entryByOperationId.get(operationId);
       if (!entry) throw new Error(`Unknown Builtin capability operation: ${operationId}`);
       const definition = definitionByOperationId.get(operationId);
       if (!definition) throw new Error(`Builtin capability definition is missing: ${operationId}`);
-      const bindingFailure = capabilityBindingIdentityFailureV1(definition, invocation.binding);
-      const expectedBindingId = digestCapabilityBindingValueV1({
+      const bindingFailure = capabilityBindingIdentityFailure(definition, invocation.binding);
+      const expectedBindingId = digestCapabilityBindingValue({
         capabilityId: invocation.binding.capabilityId,
         revision: invocation.binding.capabilityRevision,
         exposedToolName: invocation.binding.exposedToolName,
@@ -480,16 +472,16 @@ export function createBuiltinToolCatalogProjectionV1(
 }
 
 /** Build a schema-only AI SDK ToolSet from the immutable catalog projection. */
-export function createBuiltinModelToolSetV1(
-  entries: readonly BuiltinToolCatalogEntryV1[],
-  context?: CapabilityTurnContextV1,
+export function createBuiltinModelToolSet(
+  entries: readonly BuiltinToolCatalogEntry[],
+  context?: CapabilityTurnContext,
 ): ToolSet {
   const tools: Record<string, unknown> = {};
   for (const entry of entries) {
     if (entry.visibility !== 'model' || entry.availability !== 'available') continue;
     if (!entry.name || !(entry.modelInputSchema ?? entry.inputSchema)) continue;
     tools[entry.name] = dynamicTool({
-      description: context?.promptContractV2 ? entry.modelDescription : entry.description,
+      description: context?.promptContract ? entry.modelDescription : entry.description,
       inputSchema: jsonSchema(
         (entry.modelInputSchema ?? entry.inputSchema) as Parameters<typeof jsonSchema>[0],
       ),
@@ -498,11 +490,9 @@ export function createBuiltinModelToolSetV1(
   return Object.freeze(tools) as ToolSet;
 }
 
-const EMPTY_TURN_CONTEXT_V1: CapabilityTurnContextV1 = Object.freeze({});
+const EMPTY_TURN_CONTEXT_: CapabilityTurnContext = Object.freeze({});
 
-function normalizeBuiltinPolicyContextV1(
-  context: CapabilityTurnContextV1,
-): CapabilityPolicyContextV1 {
+function normalizeBuiltinPolicyContext(context: CapabilityTurnContext): CapabilityPolicyContext {
   return Object.freeze({
     ...context,
     workspace: context.workspace ?? '',
@@ -510,12 +500,12 @@ function normalizeBuiltinPolicyContextV1(
   });
 }
 
-function validateBuiltinPolicyCompilationV1(
-  compiled: CapabilityPolicyCompilationV1,
-  definition: CapabilityRegistrySnapshotV1['capabilities'][number]['definition'],
-  parser: CapabilityParserV1,
-  _context: CapabilityPolicyContextV1,
-): CapabilityPolicyCompilationV1 {
+function validateBuiltinPolicyCompilation(
+  compiled: CapabilityPolicyCompilation,
+  definition: CapabilityRegistrySnapshot['capabilities'][number]['definition'],
+  parser: CapabilityParser,
+  _context: CapabilityPolicyContext,
+): CapabilityPolicyCompilation {
   if (!compiled || typeof compiled !== 'object') {
     throw new Error(`Builtin policy compiler returned no compilation: ${definition.capabilityId}`);
   }
@@ -584,12 +574,12 @@ function validateBuiltinPolicyCompilationV1(
   ) {
     throw new Error(`Builtin policy compilation facts are invalid: ${definition.capabilityId}`);
   }
-  return freezeBuiltinPolicyCompilationV1(compiled);
+  return freezeBuiltinPolicyCompilation(compiled);
 }
 
-function freezeBuiltinPolicyCompilationV1(
-  compiled: CapabilityPolicyCompilationV1,
-): CapabilityPolicyCompilationV1 {
+function freezeBuiltinPolicyCompilation(
+  compiled: CapabilityPolicyCompilation,
+): CapabilityPolicyCompilation {
   return Object.freeze({
     ...compiled,
     ...(compiled.effects ? { effects: Object.freeze({ ...compiled.effects }) } : {}),
@@ -599,7 +589,7 @@ function freezeBuiltinPolicyCompilationV1(
   });
 }
 
-function assertFrozenBuiltinRegistrySnapshotV1(snapshot: CapabilityRegistrySnapshotV1): void {
+function assertFrozenBuiltinRegistrySnapshot(snapshot: CapabilityRegistrySnapshot): void {
   if (
     !Object.isFrozen(snapshot) ||
     !Object.isFrozen(snapshot.modules) ||
@@ -646,18 +636,18 @@ function assertFrozenBuiltinRegistrySnapshotV1(snapshot: CapabilityRegistrySnaps
   }
 }
 
-function normalizeBuiltinAvailabilityV1(
-  decision: CapabilityAvailabilityDecisionV1,
-): Readonly<{ status: BuiltinToolAvailabilityV1; reason?: string }> {
+function normalizeBuiltinAvailability(
+  decision: CapabilityAvailabilityDecision,
+): Readonly<{ status: BuiltinToolAvailability; reason?: string }> {
   return Object.freeze({
     status: decision.status,
     ...(decision.reason ? { reason: decision.reason } : {}),
   });
 }
 
-function createFallbackDescriptorV1(
-  definition: CapabilityRegistrySnapshotV1['capabilities'][number]['definition'],
-): CapabilityDescriptorV1 | CapabilityInternalDescriptorV1 {
+function createFallbackDescriptor(
+  definition: CapabilityRegistrySnapshot['capabilities'][number]['definition'],
+): CapabilityDescriptor | CapabilityInternalDescriptor {
   const effects = definition.effects ?? {
     filesystem: 'unknown' as const,
     network: 'unknown' as const,
@@ -667,7 +657,7 @@ function createFallbackDescriptorV1(
     capabilityId: definition.capabilityId,
     revision: definition.revision,
     kind: 'builtin_tool',
-    executionMechanism: requireBuiltinExecutionMechanismV1(definition),
+    executionMechanism: requireBuiltinExecutionMechanism(definition),
     displayName: definition.toolName ?? definition.capabilityId,
     description: definition.description ?? definition.title,
     modelDescription: definition.modelDescription ?? definition.description ?? definition.title,
@@ -693,11 +683,11 @@ function createFallbackDescriptorV1(
   });
 }
 
-function requireBuiltinExecutionMechanismV1(
-  definition: CapabilityRegistrySnapshotV1['capabilities'][number]['definition'],
-): CapabilityExecutionMechanismV1 {
+function requireBuiltinExecutionMechanism(
+  definition: CapabilityRegistrySnapshot['capabilities'][number]['definition'],
+): CapabilityExecutionMechanism {
   const mechanism = definition.executionMechanism;
-  if (mechanism === undefined || !CAPABILITY_EXECUTION_MECHANISMS_V1.includes(mechanism)) {
+  if (mechanism === undefined || !CAPABILITY_EXECUTION_MECHANISMS_.includes(mechanism)) {
     throw new Error(
       `Builtin capability execution mechanism is invalid: ${definition.capabilityId}`,
     );
@@ -711,8 +701,8 @@ function requireBuiltinExecutionMechanismV1(
  * optional SPI policy fact remains available on `entry.descriptor` while the
  * contract projection carries every field in its declared type.
  */
-function createRuntimeContractDescriptorV1(
-  descriptor: CapabilityDescriptorV1,
+function createRuntimeContractDescriptor(
+  descriptor: CapabilityDescriptor,
 ): RuntimeCapabilityDescriptor {
   if (descriptor.kind !== 'builtin_tool') {
     throw new Error(`Model Builtin descriptor must be builtin_tool: ${descriptor.capabilityId}`);
@@ -744,9 +734,9 @@ function createRuntimeContractDescriptorV1(
   });
 }
 
-function defaultEffectsClassificationV1(
-  effects: CapabilityEffectsV1 | undefined,
-): ReturnType<CapabilityEffectsClassifierV1> {
+function defaultEffectsClassification(
+  effects: CapabilityEffects | undefined,
+): ReturnType<CapabilityEffectsClassifier> {
   const effectiveEffects =
     effects ??
     ({
@@ -763,11 +753,11 @@ function defaultEffectsClassificationV1(
   });
 }
 
-function digestCatalogRevisionV1(
-  snapshot: CapabilityRegistrySnapshotV1,
-  entries: readonly BuiltinToolCatalogEntryV1[],
+function digestCatalogRevision(
+  snapshot: CapabilityRegistrySnapshot,
+  entries: readonly BuiltinToolCatalogEntry[],
 ): string {
-  return digestCapabilityBindingValueV1({
+  return digestCapabilityBindingValue({
     schema: 'kite.builtin-tool-catalog-projection.v1',
     modules: snapshot.modules,
     capabilities: entries.map((entry) => ({
@@ -790,20 +780,20 @@ function digestCatalogRevisionV1(
   });
 }
 
-function freezeRuntimeJsonRecordV1(
-  value: Readonly<Record<string, RuntimeJsonValueV1>>,
-): Readonly<Record<string, RuntimeJsonValueV1>> {
+function freezeRuntimeJsonRecord(
+  value: Readonly<Record<string, RuntimeJsonValue>>,
+): Readonly<Record<string, RuntimeJsonValue>> {
   return Object.freeze(
     Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, freezeRuntimeJsonValueV1(item)]),
+      Object.entries(value).map(([key, item]) => [key, freezeRuntimeJsonValue(item)]),
     ),
   );
 }
 
-function freezeRuntimeJsonValueV1(value: RuntimeJsonValueV1): RuntimeJsonValueV1 {
-  if (Array.isArray(value)) return Object.freeze(value.map(freezeRuntimeJsonValueV1));
+function freezeRuntimeJsonValue(value: RuntimeJsonValue): RuntimeJsonValue {
+  if (Array.isArray(value)) return Object.freeze(value.map(freezeRuntimeJsonValue));
   if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return freezeRuntimeJsonRecordV1(value as Readonly<Record<string, RuntimeJsonValueV1>>);
+    return freezeRuntimeJsonRecord(value as Readonly<Record<string, RuntimeJsonValue>>);
   }
   return value;
 }

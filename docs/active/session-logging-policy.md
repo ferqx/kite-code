@@ -2,7 +2,7 @@
 
 状态：active
 
-读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicyV1` 时。
+读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicy` 时。
 
 验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
@@ -16,23 +16,23 @@ production Artifact。
 
 ## 模式与组合
 
-RMV1-04 将 TUI 的累计 token stats SQLite 访问移入 `@kite/runtime-storage-sqlite` 的显式
+RM-04 将 TUI 的累计 token stats SQLite 访问移入 `@kite/runtime-storage-sqlite` 的显式
 `SessionMetadataPort`；SessionManager 只接收注入的 `save/loadAll/close` port，不再持有 raw SQLite handle。
 token stats 仍是 App session metadata，不是 Session Logger、Runtime State/Event 或 remote telemetry，既有
 `session_stats` 布局、journal 策略和隐私边界均未改变。
 
-RMV1-05 的 Host mailbox 与 notification projector 不属于 Session Logger，也不新增日志序列化器。它们只处理
+RM-05 的 Host mailbox 与 notification projector 不属于 Session Logger，也不新增日志序列化器。它们只处理
 Client-safe command/receipt/projection/stream DTO；Runtime 执行仍按既有 resolved logging policy 写入唯一
 collector，Host 不复制正文、reasoning、Tool 参数、credential 或 Artifact 内容。
 
-RMV1-06 的 Host lifecycle、effect supervisor 与 restart recovery 也不成为第二个 Session Logger owner。Host
-只管理 execution signal、Store5 acknowledgement/lease 与 Client-safe notification；唯一 App execution
+RM-06 的 Host lifecycle、effect supervisor 与 restart recovery 也不成为第二个 Session Logger owner。Host
+只管理 execution signal、SQLite Store acknowledgement/lease 与 Client-safe notification；唯一 App execution
 bridge 继续把既有 Runtime events 写入原 collector。取消、续租失败和 recovery 不得把正文、reasoning、Tool
 参数、credential 或 Artifact 内容复制到 Host receipt/notification。
 
 `SessionLogCollector` 只接受 `off | metadata | content` 三种已解析模式。App 配置加载边界先
 合并 artifact policy、用户配置和项目配置，再把 resolved policy 注入 Runtime；Runtime 不从
-展示层配置重新推导 mode。`sessionLoggingPolicyV1` 默认开启，artifact policy 未放宽时为
+展示层配置重新推导 mode。`sessionLoggingPolicy` 默认开启，artifact policy 未放宽时为
 `metadata`；用户显式设置为 `false` 时强制为 `off`。
 
 `off` 不创建 writer、目录或正文缓存，也不能回退到旧 content serializer。`content` 必须同时
@@ -48,7 +48,7 @@ Metadata 记录由 `metadata-mapper.ts` 直接从结构化 RuntimeEvent 构造�
 
 - event type、status、duration；
 - 低基数 tool/capability kind 与 `FailureKind`；
-- `ToolOutcomeV1` 的固定 status/detail、dispatch/effect certainty、recovery disposition 与
+- `ToolOutcome` 的固定 status/detail、dispatch/effect certainty、recovery disposition 与
   Runtime-boundary queue/execution/approval/total timing，以及 unknown-field 的 has/count/tool class；
 - token、cache、retry 计数；
 - approval/verification 类型与结果；
@@ -64,7 +64,7 @@ revision、未知字段名/值和 classifier/provider 正文永不进入 Session
 人工审批后继续累计真实 approval wait，而不是
 UI wall clock；成功 terminal 同样保留 approval wait 与 `totalActiveMs`。reducer、模型恢复 guidance、
 Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影。持久
-event 必须通过当前 epoch 的 strict payload decoder 与 Store5 checksum/metadata 校验；未知、退役或身份不完整
+event 必须通过当前 epoch 的 strict payload decoder 与 SQLite Store checksum/metadata 校验；未知、退役或身份不完整
 的事件直接把恢复标记为 corrupted，不进入 reducer、TUI replay 或 logger。在线路径不存在
 旧 decoder，也不能用旧字段覆盖 canonical outcome；TUI 不得把所有 approval/auto-review/cancel
 terminal 硬编码为 `cancelled`。
@@ -99,7 +99,7 @@ message。preimage Artifact 正文永久禁止进入 logger 和 remote observabi
 既有低基数 capability status/outcome allowlist 记录。新增 filesystem receipt 字段默认不记录。
 
 Runtime 的 deadline、budget admission 等 `run.error` producer 可以携带结构化
-`RunTerminalOutcomeV1` 供 Runtime Store、恢复与前端投影使用；session metadata mapper 仍只记录
+`RunTerminalOutcome` 供 Runtime Store、恢复与前端投影使用；session metadata mapper 仍只记录
 allowlist 中的稳定 `FailureKind`，不得把 terminal outcome 对象或用户可见错误文案整体序列化到
 session log。
 
@@ -132,7 +132,7 @@ collector 在 content 路径先按 event type allowlist 拒绝事件，再调用
 或 thread 标识，content 模式不生成 `summary.json` 或独立 error log。正文进入 mapper 前还必须
 取得可信 runtime secret detector 的结构化 `clear` 结论；detector 缺失、返回 unknown/secret
 或抛错时拒绝该正文。Regex 脱敏只能作为 clear 结论后的纵深防御，不能作为允许落盘的依据。
-唯一 detector owner 是 `@kite/builtin-runtime/model` 的 `createModelSecretDetectorV1`。CLI/TUI
+唯一 detector owner 是 `@kite/builtin-runtime/model` 的 `createModelSecretDetector`。CLI/TUI
 composition 与 App run composition 都使用它，以当前 Runtime 持有的 API key 与 credential 类环境
 变量建立 exact-match secret 集合，并叠加保守 secret shape/protected-path 检测；不存在第二 detector
 别名、实现或 fallback。这样既确保披露为 content 时 clear 正文实际可写，也确保命中 secret 的整条

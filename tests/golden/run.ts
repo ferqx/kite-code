@@ -1,10 +1,10 @@
 import { deepStrictEqual, ok } from 'node:assert';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
 import type { RuntimeUserAction } from '#app/bootstrap/runtime/state-actions';
-import { runStateRuntimeLoopV1 } from '#app/bootstrap/runtime/state-runner';
-import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 
 export interface GoldenFixture {
   name: string;
@@ -38,13 +38,13 @@ function getByPath(value: unknown, path: string): unknown {
  * their output stable and their failures useful as kernel regressions.
  */
 export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeState> {
-  const base = createRuntimeHostStateInitialStateV1({
+  const base = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `golden-${fixture.name}`,
     userId: 'golden-user',
     workspace: '/tmp/golden',
   });
-  const store = openStateStoreForTestV1(':memory:');
+  const store = openStateStoreForTest(':memory:');
   const kernel = new AgentKernel({
     store,
     initialState: { ...base, ...fixture.initialState },
@@ -57,7 +57,7 @@ export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeStat
   const actions = [...(fixture.userActions ?? [])];
   const observedEffects: string[] = [];
   try {
-    for await (const event of runStateRuntimeLoopV1(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async (effect) => {
         observedEffects.push(effect.type);

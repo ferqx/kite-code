@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { assertAuthorizationElevation } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
 import { applyApprovalGrant } from '#app/bootstrap/runtime/tool-policy';
 
 test('authorization elevation requires a sandbox', () => {
@@ -29,7 +29,7 @@ test('automated paths cannot elevate to full access', () => {
 });
 
 test('records explicit test provenance for injected authorization', () => {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'test-thread',
     userId: 'u',

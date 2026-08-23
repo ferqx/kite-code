@@ -44,7 +44,7 @@ checkout/Cargo cache 路径并清除 PE 时间戳；
 重新生成 manifest 后必须以 `git diff --exit-code` 证明提交的 runner pin 与构建产物一致。
 
 相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089、ADR-0097、ADR-0110，
-`release/platform-capabilities/windows-runner-v1.json`。
+`release/platform-capabilities/windows-runner.json`。
 
 ## 当前 backend 选择
 
@@ -63,7 +63,7 @@ AppContainer backend、`KITE_WINDOWS_APPCONTAINER_EXPERIMENTAL` 选择逻辑、p
 staging、repository copy、预算 Worker 和 reconciliation 已由 ADR-0088 删除。设置旧环境变量不会改变
 backend。该移除不降低 production 能力，因为实验路径从未取得 production qualification。
 
-RMV1-13 的物理所有权不改变 protocol V6 或当前 fallback：runner manifest、transport preparation、
+RM-13 的物理所有权不改变 protocol V6 或当前 fallback：runner manifest、transport preparation、
 protected-path/network/resource 语义位于 `packages/builtin-runtime/src/sandbox/`，通用异步进程创建、POSIX
 supervisor、output drain 与 process-tree cleanup 位于 `packages/runtime-host/src/`，唯一 App composition 位于
 `apps/kite/src/sandbox/`。已删除的 `src/core/sandbox/**` 和 protocol/Core 旧路径不得恢复为兼容导出或
@@ -126,7 +126,7 @@ ACL lease（否则会在不增加约束的情况下逐次改写用户 profile DA
 删除的 backend mode、AppContainer identity 与 staging 字段；任何 V1-V5 runner 都在 user script 前
 fail closed。
 
-`windows-runner-v1.json` 的 V1 仍表示 manifest schema/file naming，不是 invocation protocol。
+`windows-runner.json` 的 V1 仍表示 manifest schema/file naming，不是 invocation protocol。
 新 runner pin 必须固定 protocol V6、runner 0.8.3+、binary digest、Windows baseline 与 vendored runtime
 digest。当前仓库 pin 已由 canonical Windows build 提升为 0.8.3/V6，并固定该构建生成的 binary
 digest `sha256:41f773bfa4f378b726316234041c94bcf48f6a2c472bc08e803e4bf8ea9fe85d`；后续任何 native

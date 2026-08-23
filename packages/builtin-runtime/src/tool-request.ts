@@ -1,21 +1,18 @@
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import type {
-  CapabilityExecutionMechanismV1,
-  CapabilityTurnContextV1,
-  ValidatedInvocationV1 as RuntimeValidatedInvocationV1,
+  CapabilityExecutionMechanism,
+  CapabilityTurnContext,
+  ValidatedInvocation as RuntimeValidatedInvocation,
 } from '@kite/runtime-spi';
-import type {
-  BuiltinModelToolCatalogEntryV1,
-  BuiltinToolCatalogProjectionV1,
-} from './tool-catalog';
+import type { BuiltinModelToolCatalogEntry, BuiltinToolCatalogProjection } from './tool-catalog';
 import type { KnownToolName } from './tool-contracts';
 
-export type BuiltinToolAvailabilityContextV1 = CapabilityTurnContextV1 & {
+export type BuiltinToolAvailabilityContext = CapabilityTurnContext & {
   readonly workspace: string;
   readonly interactionMode?: import('@kite/runtime-contract').InteractionMode;
 };
 
-export interface BuiltinValidatedInvocationProjectionV1 {
+export interface BuiltinValidatedInvocationProjection {
   readonly resolved: Readonly<{
     readonly call: Readonly<{ readonly toolCallId: string }>;
     readonly target: Readonly<{
@@ -23,9 +20,9 @@ export interface BuiltinValidatedInvocationProjectionV1 {
       readonly capabilityRevision: string;
       readonly executorRevision: string | null;
       readonly descriptor: Readonly<CapabilityDescriptor>;
-      readonly executionMechanism: CapabilityExecutionMechanismV1;
+      readonly executionMechanism: CapabilityExecutionMechanism;
     }>;
-    /** RMV1 neutral SPI name. */
+    /** RM neutral SPI name. */
     readonly builtinProjectionRevision?: string | null;
     /** Temporary Core dispatch-shape name; removed with the Core Pipeline. */
     readonly builtinCatalogRevision?: string;
@@ -39,7 +36,7 @@ export interface BuiltinValidatedInvocationProjectionV1 {
   }>;
 }
 
-interface PendingBuiltinToolRequestBaseV1 {
+interface PendingBuiltinToolRequestBase {
   readonly source: 'builtin';
   readonly id?: string;
   readonly reason: string;
@@ -51,19 +48,19 @@ interface PendingBuiltinToolRequestBaseV1 {
   readonly executorRevision?: string;
   readonly schemaDigest?: string;
   readonly catalogRevision?: string;
-  readonly executionMechanism?: CapabilityExecutionMechanismV1;
+  readonly executionMechanism?: CapabilityExecutionMechanism;
 }
 
 // Names are defined by the Builtin Runtime package. Harness does not keep a
 // second model-surface name authority here.
-type BuiltinModelToolNameV1 = KnownToolName;
+type BuiltinModelToolName = KnownToolName;
 
-type PendingShellRequestV1 = PendingBuiltinToolRequestBaseV1 & {
+type PendingShellRequest = PendingBuiltinToolRequestBase & {
   readonly name: 'shell_execute';
   readonly args: { command: string; description?: string; timeout_ms?: number };
 };
 
-type PendingTaskRequestV1 = PendingBuiltinToolRequestBaseV1 & {
+type PendingTaskRequest = PendingBuiltinToolRequestBase & {
   readonly name: 'task';
   readonly args:
     | {
@@ -72,25 +69,25 @@ type PendingTaskRequestV1 = PendingBuiltinToolRequestBaseV1 & {
       }
     | {
         subagent_type: 'explore' | 'plan' | 'code' | 'review';
-        taskArtifact: import('@kite/runtime-spi').SubagentTaskRequestArtifactV1;
+        taskArtifact: import('@kite/runtime-spi').SubagentTaskRequestArtifact;
       };
 };
 
-type PendingEditRequestV1 = PendingBuiltinToolRequestBaseV1 & {
+type PendingEditRequest = PendingBuiltinToolRequestBase & {
   readonly name: 'edit_file';
   readonly args: Record<string, unknown> & { path: string; old_string: string };
 };
 
-type PendingOtherBuiltinRequestV1 = PendingBuiltinToolRequestBaseV1 & {
-  readonly name: Exclude<BuiltinModelToolNameV1, 'edit_file' | 'shell_execute' | 'task'>;
+type PendingOtherBuiltinRequest = PendingBuiltinToolRequestBase & {
+  readonly name: Exclude<BuiltinModelToolName, 'edit_file' | 'shell_execute' | 'task'>;
   readonly args: Record<string, unknown>;
 };
 
 export type PendingBuiltinToolRequest =
-  | PendingShellRequestV1
-  | PendingTaskRequestV1
-  | PendingEditRequestV1
-  | PendingOtherBuiltinRequestV1;
+  | PendingShellRequest
+  | PendingTaskRequest
+  | PendingEditRequest
+  | PendingOtherBuiltinRequest;
 
 /** 解析/校验失败的工具调用 — 不进入 PendingToolRequest 联合，非合法请求。 */
 export interface InvalidToolRequest {
@@ -101,10 +98,10 @@ export interface InvalidToolRequest {
   parseError: string;
   /** Structured failure code from the Builtin catalog parser; distinguishes
    *  unavailable vs. invalid-arguments at the request-adapter layer. */
-  parseFailureCode?: ToolRequestParseFailureCodeV1;
+  parseFailureCode?: ToolRequestParseFailureCode;
 }
 
-export type ToolRequestParseFailureCodeV1 =
+export type ToolRequestParseFailureCode =
   | 'invalid_json'
   | 'unknown_tool'
   | 'tool_unavailable'
@@ -138,11 +135,9 @@ export type ToolRequestParseResult =
  * Adapt one Builtin-owned or dynamic-MCP validated Pipeline request into the
  * legacy harness DTO. No schema lookup or argument re-parse is permitted here.
  */
-export function pendingToolRequestFromValidatedInvocationV1(
-  validated:
-    | Readonly<BuiltinValidatedInvocationProjectionV1>
-    | Readonly<RuntimeValidatedInvocationV1>,
-  builtinToolCatalog: BuiltinToolCatalogProjectionV1,
+export function pendingToolRequestFromValidatedInvocation(
+  validated: Readonly<BuiltinValidatedInvocationProjection> | Readonly<RuntimeValidatedInvocation>,
+  builtinToolCatalog: BuiltinToolCatalogProjection,
 ): PendingToolRequest {
   const request = validated.request;
   if (
@@ -176,7 +171,7 @@ export function pendingToolRequestFromValidatedInvocationV1(
       ? validated.resolved.builtinCatalogRevision
       : undefined);
   const entry = builtinToolCatalog.entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.operationId === target.operationId,
   );
   if (
@@ -212,10 +207,10 @@ export function pendingToolRequestFromValidatedInvocationV1(
 /** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
 export function toolRequestFromCall(
   call: { id?: string; name: string; args: unknown },
-  availabilityContext: string | BuiltinToolAvailabilityContextV1,
-  builtinToolCatalog?: BuiltinToolCatalogProjectionV1,
+  availabilityContext: string | BuiltinToolAvailabilityContext,
+  builtinToolCatalog?: BuiltinToolCatalogProjection,
 ): ToolRequestParseResult | null {
-  const context: BuiltinToolAvailabilityContextV1 =
+  const context: BuiltinToolAvailabilityContext =
     typeof availabilityContext === 'string'
       ? { workspace: availabilityContext }
       : availabilityContext;
@@ -289,7 +284,7 @@ export function toolRequestFromCall(
     };
   }
 
-  const entry = builtinModelEntryByNameV1(builtinToolCatalog, call.name);
+  const entry = builtinModelEntryByName(builtinToolCatalog, call.name);
   if (!entry) {
     return {
       ok: false,
@@ -324,7 +319,7 @@ export function toolRequestFromCall(
     typeof call.args === 'object' &&
     !Array.isArray(call.args) &&
     'taskArtifact' in call.args;
-  const turnContext = toCapabilityTurnContextV1(context);
+  const turnContext = toCapabilityTurnContext(context);
   const parsed = isPrivateTaskProjection
     ? entry.parse(call.args, turnContext)
     : entry.parseModelInput(call.args, turnContext);
@@ -369,19 +364,17 @@ export function toolRequestFromCall(
   };
 }
 
-function builtinModelEntryByNameV1(
-  catalog: BuiltinToolCatalogProjectionV1,
+function builtinModelEntryByName(
+  catalog: BuiltinToolCatalogProjection,
   name: string,
-): BuiltinModelToolCatalogEntryV1 | undefined {
+): BuiltinModelToolCatalogEntry | undefined {
   return catalog.entries.find(
-    (entry): entry is BuiltinModelToolCatalogEntryV1 =>
+    (entry): entry is BuiltinModelToolCatalogEntry =>
       entry.visibility === 'model' && entry.name === name,
   );
 }
 
-function toCapabilityTurnContextV1(
-  context: BuiltinToolAvailabilityContextV1,
-): CapabilityTurnContextV1 {
+function toCapabilityTurnContext(context: BuiltinToolAvailabilityContext): CapabilityTurnContext {
   return {
     workspace: context.workspace,
     ...(context.threadId !== undefined ? { threadId: context.threadId } : {}),

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  evaluateReleaseProvenanceIdentityV1,
+  evaluateReleaseProvenanceIdentity,
   PINNED_RELEASE_REPOSITORY,
   PINNED_RELEASE_REPOSITORY_ID,
   PINNED_RELEASE_WORKFLOW_PATH,
@@ -53,7 +53,7 @@ const expected = {
 describe('release provenance identity contract', () => {
   test('pins repository, workflow, ref, run, attempt and every subject but stays blocked', () => {
     expect(REAL_RELEASE_PROVENANCE_VERIFICATION_ENABLED).toBe(false);
-    expect(evaluateReleaseProvenanceIdentityV1({ claims: claims(), expected })).toEqual({
+    expect(evaluateReleaseProvenanceIdentity({ claims: claims(), expected })).toEqual({
       status: 'blocked',
       reason: 'non_distributable_input',
       productionAccepted: false,
@@ -68,25 +68,25 @@ describe('release provenance identity contract', () => {
       nativePlatformSignatureVerified: true,
     };
     expect(
-      evaluateReleaseProvenanceIdentityV1({ claims: privateLookingProduction, expected }).reason,
+      evaluateReleaseProvenanceIdentity({ claims: privateLookingProduction, expected }).reason,
     ).toBe('repository_private');
   });
 
   test('rejects pinned identity and artifact subject mismatches', () => {
     expect(() =>
-      evaluateReleaseProvenanceIdentityV1({
+      evaluateReleaseProvenanceIdentity({
         claims: { ...claims(), repositoryId: 'R_wrong' },
         expected,
       }),
     ).toThrow(new ReleaseProvenanceIdentityError('claims_invalid'));
     expect(() =>
-      evaluateReleaseProvenanceIdentityV1({
+      evaluateReleaseProvenanceIdentity({
         claims: claims(),
         expected: { ...expected, artifactDigest: B },
       }),
     ).toThrow(new ReleaseProvenanceIdentityError('identity_mismatch'));
     expect(() =>
-      evaluateReleaseProvenanceIdentityV1({
+      evaluateReleaseProvenanceIdentity({
         claims: { ...claims(), runAttempt: 0 },
         expected,
       }),
@@ -95,13 +95,13 @@ describe('release provenance identity contract', () => {
 
   test('rejects branches, unpinned workflow refs and unknown claims', () => {
     expect(() =>
-      evaluateReleaseProvenanceIdentityV1({
+      evaluateReleaseProvenanceIdentity({
         claims: { ...claims(), ref: 'refs/heads/main' },
         expected,
       }),
     ).toThrow(new ReleaseProvenanceIdentityError('claims_invalid'));
     expect(() =>
-      evaluateReleaseProvenanceIdentityV1({
+      evaluateReleaseProvenanceIdentity({
         claims: {
           ...claims(),
           workflowRef: `${PINNED_RELEASE_REPOSITORY}/${PINNED_RELEASE_WORKFLOW_PATH}@refs/heads/main`,
@@ -110,7 +110,7 @@ describe('release provenance identity contract', () => {
       }),
     ).toThrow(new ReleaseProvenanceIdentityError('claims_invalid'));
     expect(() =>
-      evaluateReleaseProvenanceIdentityV1({
+      evaluateReleaseProvenanceIdentity({
         claims: { ...claims(), syntheticApproval: true },
         expected,
       }),

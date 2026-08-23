@@ -1,88 +1,79 @@
 import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime';
 import {
-  type BuiltinChildRuntimeDriverV1,
-  type BuiltinChildRuntimeResumeRegistrationV1,
-  type BuiltinChildRuntimeStartRegistrationV1,
-  type GovernedSubagentCompositionV1 as BuiltinGovernedSubagentCompositionV1,
+  type BuiltinChildRuntimeDriver,
+  type BuiltinChildRuntimeResumeRegistration,
+  type BuiltinChildRuntimeStartRegistration,
+  type GovernedSubagentComposition as BuiltinGovernedSubagentComposition,
   DEFAULT_SUBAGENT_TIMEOUT_MS,
-  digestCapabilityValueV1,
+  digestCapabilityValue,
   getRoleConfig,
-  type LocalSubagentDriverResultV1,
-  subagentDispatchIntentDigestV1,
-  subagentTaskDigestV1,
+  type LocalSubagentDriverResult,
+  subagentDispatchIntentDigest,
+  subagentTaskDigest,
 } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import {
-  runtimeHostStateCreateToolRecoveryJournalV1 as createToolRecoveryJournalV1,
+  runtimeHostStateCreateToolRecoveryJournal as createToolRecoveryJournal,
+  type DescendantResourceAdmission,
   DescendantResourceAdmissionError,
-  type DescendantResourceAdmissionV1,
 } from '@kite/runtime-host';
 import type {
-  SubagentDelegationGrantV1,
-  SubagentHandleV1,
-  SubagentResumeGrantV1,
+  SubagentDelegationGrant,
+  SubagentHandle,
+  SubagentResumeGrant,
 } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config/index';
-import { computeExecutionBoundaryDigestV1 } from '#app/config/index';
-import type {
-  SubagentLifecycleArtifactAccessV1,
-  SubagentTaskArtifactAccessV1,
-} from '#builtin-runtime';
+import { computeExecutionBoundaryDigest } from '#app/config/index';
+import type { SubagentLifecycleArtifactAccess, SubagentTaskArtifactAccess } from '#builtin-runtime';
 import type { ToolExecutionResult } from '../tool-result';
+import { serializeSubagentContinuation, subagentContinuationCursorId } from './continuation-codec';
+import { subagentResultFromObservation } from './observation-codec';
 import {
-  serializeSubagentContinuation,
-  subagentContinuationCursorIdV1,
-} from './continuation-codec';
-import { subagentResultFromObservationV1 } from './observation-codec';
-import {
-  executeSubagentResumeWithCoreToolAdapterV1,
-  executeSubagentStartWithCoreToolAdapterV1,
+  executeSubagentResumeWithCoreToolAdapter,
+  executeSubagentStartWithCoreToolAdapter,
 } from './tool-adapter';
 import type { SubAgentEventSink, SubAgentResult, SubAgentRunnerInput } from './types';
 
-type GovernedSubagentCompositionV1 = BuiltinGovernedSubagentCompositionV1<
-  SubagentLifecycleArtifactAccessV1,
-  BuiltinChildRuntimeDriverV1,
-  SubagentTaskArtifactAccessV1
+type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<
+  SubagentLifecycleArtifactAccess,
+  BuiltinChildRuntimeDriver,
+  SubagentTaskArtifactAccess
 >;
 
-interface CoreSubagentResumeToolResultV1 {
+interface CoreSubagentResumeToolResult {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly result: ToolExecutionResult;
 }
 
 /** Core State registration adapter over the Builtin lifecycle Driver. */
-function createCoreSubagentStartRegistrationV1(input: {
+function createCoreSubagentStartRegistration(input: {
   readonly input: SubAgentRunnerInput;
   readonly expiresAtMs?: number;
-}): BuiltinChildRuntimeStartRegistrationV1 {
+}): BuiltinChildRuntimeStartRegistration {
   return {
-    ...registrationIdentityV1(input.input),
+    ...registrationIdentity(input.input),
     ...(input.expiresAtMs === undefined ? {} : { expiresAtMs: input.expiresAtMs }),
     run: async (grant, task, signal) => {
       const exact = exactInput(input.input, task, grant, signal);
-      const result = await governedRun(
-        () => executeSubagentStartWithCoreToolAdapterV1(exact),
-        exact,
-      );
-      return toLocalSubagentDriverResultV1(grant.childInvocationId, result);
+      const result = await governedRun(() => executeSubagentStartWithCoreToolAdapter(exact), exact);
+      return toLocalSubagentDriverResult(grant.childInvocationId, result);
     },
   };
 }
 
 /** Core State resume adapter over the Builtin lifecycle Driver. */
-function createCoreSubagentResumeRegistrationV1(input: {
+function createCoreSubagentResumeRegistration(input: {
   readonly input: SubAgentRunnerInput;
   readonly continuation: import('./types').RestoredSubAgentContinuation;
-  readonly toolResult: CoreSubagentResumeToolResultV1;
+  readonly toolResult: CoreSubagentResumeToolResult;
   readonly expiresAtMs?: number;
-}): BuiltinChildRuntimeResumeRegistrationV1 {
+}): BuiltinChildRuntimeResumeRegistration {
   return {
-    ...registrationIdentityV1(input.input),
+    ...registrationIdentity(input.input),
     ...(input.expiresAtMs === undefined ? {} : { expiresAtMs: input.expiresAtMs }),
     run: async (grant, task, signal) => {
       const snapshot = serializeSubagentContinuation(
@@ -90,9 +81,9 @@ function createCoreSubagentResumeRegistrationV1(input: {
         input.continuation.blockedTool,
       );
       if (
-        grant.continuationId !== subagentContinuationCursorIdV1(snapshot) ||
+        grant.continuationId !== subagentContinuationCursorId(snapshot) ||
         grant.continuationDigest !==
-          digestCapabilityValueV1({ schema: 'kite.subagent-continuation.v1', snapshot }) ||
+          digestCapabilityValue({ schema: 'kite.subagent-continuation.v1', snapshot }) ||
         grant.blockedToolCallId !== input.continuation.blockedTool.toolCallId ||
         grant.blockedRuntimeToolCallId !== input.continuation.blockedTool.runtimeToolCallId ||
         grant.blockedToolCallId !== input.toolResult.toolCallId ||
@@ -102,21 +93,20 @@ function createCoreSubagentResumeRegistrationV1(input: {
       }
       const exact = exactInput(input.input, task, grant, signal);
       const result = await governedRun(
-        () =>
-          executeSubagentResumeWithCoreToolAdapterV1(exact, input.continuation, input.toolResult),
+        () => executeSubagentResumeWithCoreToolAdapter(exact, input.continuation, input.toolResult),
         exact,
       );
-      return toLocalSubagentDriverResultV1(grant.childInvocationId, result);
+      return toLocalSubagentDriverResult(grant.childInvocationId, result);
     },
   };
 }
 
 export interface TaskToolDeps {
-  builtinToolCatalog?: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1;
+  builtinToolCatalog?: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
   config: AgentConfig;
   workspace: string;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -125,7 +115,7 @@ export interface TaskToolDeps {
     binding: import('@kite/runtime-contract').CapabilityBinding;
     descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
   }>;
-  authorization?: import('@kite/runtime-host').StateAuthorizationStateV1;
+  authorization?: import('@kite/runtime-host').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   /** Current parent Runtime interaction mode, inherited by the child execution. */
@@ -137,31 +127,31 @@ export interface TaskToolDeps {
   eventSink: SubAgentEventSink;
   signal?: AbortSignal;
   model?: SupportedChatModel;
-  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGateV1;
-  descendantResourceAdmission?: DescendantResourceAdmissionV1;
-  modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinatorV1;
-  modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistenceV1<
+  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGate;
+  descendantResourceAdmission?: DescendantResourceAdmission;
+  modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
+  modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
     import('@kite/runtime-host').RuntimeState,
-    import('@kite/runtime-host').StateRuntimeEventV1
+    import('@kite/runtime-host').StateRuntimeEvent
   >;
   /** Outer Runtime lifecycle facts; distinct from ModelInvocationGateway persistence. */
   subagentLifecyclePersistence?: {
     getState(): Readonly<import('@kite/runtime-host').RuntimeState>;
-    persistEvents(events: import('@kite/runtime-host').StateRuntimeEventV1[]): Promise<boolean>;
+    persistEvents(events: import('@kite/runtime-host').StateRuntimeEvent[]): Promise<boolean>;
   };
   modelInvocationParentId?: string;
   modelInvocationParentToolCallId?: string;
   modelInvocationParentReservationId?: string;
-  subagentInvocationIdentity?: SubagentInvocationIdentityV1;
+  subagentInvocationIdentity?: SubagentInvocationIdentity;
   /** Pipeline-issued lifecycle runtime. Task adapters cannot compose or select Providers. */
-  subagentRuntime?: SubagentInvocationRuntimeV1;
-  toolDispatcher?: import('./types').SubAgentToolDispatcherV1;
+  subagentRuntime?: SubagentInvocationRuntime;
+  toolDispatcher?: import('./types').SubAgentToolDispatcher;
   maxDepth?: number;
   /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0042 §4）。 */
-  recordFilePreimage?: import('@kite/runtime-host/storage').RuntimeHostFilePreimageRecorderV1;
+  recordFilePreimage?: import('@kite/runtime-host/storage').RuntimeHostFilePreimageRecorder;
 }
 
-export interface SubagentInvocationIdentityV1 {
+export interface SubagentInvocationIdentity {
   invocationId: string;
   attempt: number;
   capabilityRevision: string;
@@ -170,7 +160,7 @@ export interface SubagentInvocationIdentityV1 {
   effectiveEffectsDigest: string;
 }
 
-export interface SubagentInvocationRuntimeV1 {
+export interface SubagentInvocationRuntime {
   start(
     deps: TaskToolDeps,
     args: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
@@ -186,11 +176,11 @@ export interface SubagentInvocationRuntimeV1 {
   ): Promise<SubAgentResult>;
 }
 
-export class SubagentProviderRecoveryRequiredErrorV1 extends Error {
+export class SubagentProviderRecoveryRequiredError extends Error {
   readonly code = 'subagent_provider_recovery_required';
   constructor(message: string) {
     super(message);
-    this.name = 'SubagentProviderRecoveryRequiredErrorV1';
+    this.name = 'SubagentProviderRecoveryRequiredError';
   }
 }
 
@@ -205,8 +195,8 @@ export async function runTaskSubAgent(
 }
 
 /** Pipeline-owned implementation; production imports are statically restricted to composition. */
-export async function executePipelineIssuedSubagentStartV1(
-  composition: GovernedSubagentCompositionV1,
+export async function executePipelineIssuedSubagentStart(
+  composition: GovernedSubagentComposition,
   deps: TaskToolDeps,
   args: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
 ): Promise<SubAgentResult> {
@@ -253,8 +243,8 @@ export async function executePipelineIssuedSubagentStartV1(
   });
   const taskDigest = publishedTask.taskDigest;
   const boundaryDigest = deps.config.executionBoundary
-    ? computeExecutionBoundaryDigestV1(deps.config.executionBoundary)
-    : `sha256:${digestCapabilityValueV1({ schema: 'kite.execution-boundary.unconfigured.v1' })}`;
+    ? computeExecutionBoundaryDigest(deps.config.executionBoundary)
+    : `sha256:${digestCapabilityValue({ schema: 'kite.execution-boundary.unconfigured.v1' })}`;
   const grant = authority.issueStart({
     parentInvocationId: deps.subagentInvocationIdentity.invocationId,
     parentToolCallId: deps.modelInvocationParentToolCallId,
@@ -269,11 +259,11 @@ export async function executePipelineIssuedSubagentStartV1(
     capabilityCeiling: {
       allowedTools,
       bindingIds,
-      bindingRevision: digestCapabilityValueV1({
+      bindingRevision: digestCapabilityValue({
         schema: 'kite.subagent-binding-revision.v1',
         bindings: (deps.mcpBindings ?? []).map(({ binding }) => binding),
       }),
-      ceilingDigest: digestCapabilityValueV1({
+      ceilingDigest: digestCapabilityValue({
         schema: 'kite.subagent-capability-ceiling.v1',
         allowedTools,
         bindingIds,
@@ -292,7 +282,7 @@ export async function executePipelineIssuedSubagentStartV1(
     },
     resource: {
       parentReservationId: deps.modelInvocationParentReservationId ?? null,
-      budgetDigest: digestCapabilityValueV1({
+      budgetDigest: digestCapabilityValue({
         schema: 'kite.subagent-resource-budget.v1',
         budget: stableBudgetCeiling(deps.modelInvocationPersistence.getState().resourceBudget),
       }),
@@ -305,7 +295,7 @@ export async function executePipelineIssuedSubagentStartV1(
   });
   driver.registerStart(
     grant.grantId,
-    createCoreSubagentStartRegistrationV1({
+    createCoreSubagentStartRegistration({
       input: {
         config: deps.config,
         builtinToolCatalog: deps.builtinToolCatalog,
@@ -354,27 +344,27 @@ export async function executePipelineIssuedSubagentStartV1(
     }),
   );
   let registrationOwned = true;
-  let preparedHandle: SubagentHandleV1 | undefined;
+  let preparedHandle: SubagentHandle | undefined;
   try {
     let dispatchIntentDigest: string;
     try {
-      dispatchIntentDigest = await recordSubagentDispatchIntentV1(deps, grant);
+      dispatchIntentDigest = await recordSubagentDispatchIntent(deps, grant);
     } catch (error) {
       driver.abandon(grant);
       throw error;
     }
     const started = await provider.start({ grant, signal: deps.signal });
     if (!started.ok) {
-      if (await finalizeUndispatchedSubagentIntentV1(deps, grant, dispatchIntentDigest)) {
+      if (await finalizeUndispatchedSubagentIntent(deps, grant, dispatchIntentDigest)) {
         return failed(started.failure.message);
       }
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent preparation failed without durable undispatched cleanup.',
       );
     }
     preparedHandle = started.value;
     if (
-      !(await recordSubagentHandleReadyV1(
+      !(await recordSubagentHandleReady(
         composition,
         deps,
         grant,
@@ -383,13 +373,13 @@ export async function executePipelineIssuedSubagentStartV1(
       ))
     ) {
       await provider.cancel({ handle: started.value, reason: 'handle_ready_ack_failed' });
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent handle-ready acknowledgement failed before Driver dispatch.',
       );
     }
     const activated = await provider.activate({ handle: started.value, signal: deps.signal });
     if (!activated.ok) {
-      const cleanupConfirmed = await finalizeSubagentCleanupV1(
+      const cleanupConfirmed = await finalizeSubagentCleanup(
         composition,
         deps,
         grant,
@@ -397,7 +387,7 @@ export async function executePipelineIssuedSubagentStartV1(
         dispatchIntentDigest,
       );
       if (cleanupConfirmed) return failed(activated.failure.message);
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent activation failed without confirmed cleanup.',
       );
     }
@@ -405,7 +395,7 @@ export async function executePipelineIssuedSubagentStartV1(
     registrationOwned = false;
     const observed = await provider.observe({ handle: started.value, signal: deps.signal });
     if (!observed.ok) {
-      const cleanupConfirmed = await finalizeSubagentCleanupV1(
+      const cleanupConfirmed = await finalizeSubagentCleanup(
         composition,
         deps,
         grant,
@@ -417,19 +407,19 @@ export async function executePipelineIssuedSubagentStartV1(
       }
       if (observed.failure.code === 'cancelled' && cleanupConfirmed)
         return failed(observed.failure.message);
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         `${observed.failure.code}: Subagent Provider outcome requires reconciliation.`,
       );
     }
     if (
-      !(await recordSubagentObservationV1(deps, grant, dispatchIntentDigest, observed.value.status))
+      !(await recordSubagentObservation(deps, grant, dispatchIntentDigest, observed.value.status))
     ) {
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent observation acknowledgement failed after Driver dispatch.',
       );
     }
     if (
-      !(await finalizeSubagentCleanupV1(
+      !(await finalizeSubagentCleanup(
         composition,
         deps,
         grant,
@@ -437,11 +427,11 @@ export async function executePipelineIssuedSubagentStartV1(
         dispatchIntentDigest,
       ))
     ) {
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent cleanup acknowledgement requires reconciliation.',
       );
     }
-    return subagentResultFromObservationV1(observed.value, started.value, deps.recoveryIdentityKey);
+    return subagentResultFromObservation(observed.value, started.value, deps.recoveryIdentityKey);
   } finally {
     if (registrationOwned) {
       driver.abandon(grant);
@@ -455,7 +445,7 @@ export async function executePipelineIssuedSubagentStartV1(
   }
 }
 
-export async function resumeTaskSubAgentV1(
+export async function resumeTaskSubAgent(
   deps: TaskToolDeps,
   continuation: import('./types').RestoredSubAgentContinuation,
   toolResult: {
@@ -471,8 +461,8 @@ export async function resumeTaskSubAgentV1(
 }
 
 /** Pipeline-owned implementation; production imports are statically restricted to composition. */
-export async function executePipelineIssuedSubagentResumeV1(
-  composition: GovernedSubagentCompositionV1,
+export async function executePipelineIssuedSubagentResume(
+  composition: GovernedSubagentComposition,
   deps: TaskToolDeps,
   continuation: import('./types').RestoredSubAgentContinuation,
   toolResult: {
@@ -506,7 +496,7 @@ export async function executePipelineIssuedSubagentResumeV1(
   });
   const taskDigest = publishedTask.taskDigest;
   const snapshot = serializeSubagentContinuation(continuation, continuation.blockedTool);
-  const continuationId = subagentContinuationCursorIdV1(snapshot);
+  const continuationId = subagentContinuationCursorId(snapshot);
   const binding = {
     parentInvocationId: deps.subagentInvocationIdentity.invocationId,
     parentToolCallId: deps.modelInvocationParentToolCallId,
@@ -521,11 +511,11 @@ export async function executePipelineIssuedSubagentResumeV1(
     capabilityCeiling: {
       allowedTools,
       bindingIds,
-      bindingRevision: digestCapabilityValueV1({
+      bindingRevision: digestCapabilityValue({
         schema: 'kite.subagent-binding-revision.v1',
         bindings: (deps.mcpBindings ?? []).map(({ binding }) => binding),
       }),
-      ceilingDigest: digestCapabilityValueV1({
+      ceilingDigest: digestCapabilityValue({
         schema: 'kite.subagent-capability-ceiling.v1',
         allowedTools,
         bindingIds,
@@ -541,12 +531,12 @@ export async function executePipelineIssuedSubagentResumeV1(
     executionBoundary: {
       canonicalWorkspace: canonicalPathForComparison(deps.workspace),
       executionBoundaryDigest: deps.config.executionBoundary
-        ? computeExecutionBoundaryDigestV1(deps.config.executionBoundary)
-        : `sha256:${digestCapabilityValueV1({ schema: 'kite.execution-boundary.unconfigured.v1' })}`,
+        ? computeExecutionBoundaryDigest(deps.config.executionBoundary)
+        : `sha256:${digestCapabilityValue({ schema: 'kite.execution-boundary.unconfigured.v1' })}`,
     },
     resource: {
       parentReservationId: deps.modelInvocationParentReservationId ?? null,
-      budgetDigest: digestCapabilityValueV1({
+      budgetDigest: digestCapabilityValue({
         schema: 'kite.subagent-resource-budget.v1',
         budget: stableBudgetCeiling(deps.modelInvocationPersistence.getState().resourceBudget),
       }),
@@ -560,7 +550,7 @@ export async function executePipelineIssuedSubagentResumeV1(
   const grant = authority.issueResume({
     ...binding,
     continuationId,
-    continuationDigest: digestCapabilityValueV1({
+    continuationDigest: digestCapabilityValue({
       schema: 'kite.subagent-continuation.v1',
       snapshot,
     }),
@@ -570,7 +560,7 @@ export async function executePipelineIssuedSubagentResumeV1(
   });
   driver.registerResume(
     grant.grantId,
-    createCoreSubagentResumeRegistrationV1({
+    createCoreSubagentResumeRegistration({
       input: {
         config: deps.config,
         builtinToolCatalog: deps.builtinToolCatalog,
@@ -621,27 +611,27 @@ export async function executePipelineIssuedSubagentResumeV1(
     }),
   );
   let registrationOwned = true;
-  let preparedHandle: SubagentHandleV1 | undefined;
+  let preparedHandle: SubagentHandle | undefined;
   try {
     let dispatchIntentDigest: string;
     try {
-      dispatchIntentDigest = await recordSubagentDispatchIntentV1(deps, grant);
+      dispatchIntentDigest = await recordSubagentDispatchIntent(deps, grant);
     } catch (error) {
       driver.abandon(grant);
       throw error;
     }
     const resumed = await provider.resume({ grant, signal: deps.signal });
     if (!resumed.ok) {
-      if (await finalizeUndispatchedSubagentIntentV1(deps, grant, dispatchIntentDigest)) {
+      if (await finalizeUndispatchedSubagentIntent(deps, grant, dispatchIntentDigest)) {
         return failed(resumed.failure.message);
       }
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent resume preparation failed without durable undispatched cleanup.',
       );
     }
     preparedHandle = resumed.value;
     if (
-      !(await recordSubagentHandleReadyV1(
+      !(await recordSubagentHandleReady(
         composition,
         deps,
         grant,
@@ -650,13 +640,13 @@ export async function executePipelineIssuedSubagentResumeV1(
       ))
     ) {
       await provider.cancel({ handle: resumed.value, reason: 'handle_ready_ack_failed' });
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent resume handle-ready acknowledgement failed before Driver dispatch.',
       );
     }
     const activated = await provider.activate({ handle: resumed.value, signal: deps.signal });
     if (!activated.ok) {
-      const cleanupConfirmed = await finalizeSubagentCleanupV1(
+      const cleanupConfirmed = await finalizeSubagentCleanup(
         composition,
         deps,
         grant,
@@ -664,7 +654,7 @@ export async function executePipelineIssuedSubagentResumeV1(
         dispatchIntentDigest,
       );
       if (cleanupConfirmed) return failed(activated.failure.message);
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent resume activation failed without confirmed cleanup.',
       );
     }
@@ -672,7 +662,7 @@ export async function executePipelineIssuedSubagentResumeV1(
     registrationOwned = false;
     const observed = await provider.observe({ handle: resumed.value, signal: deps.signal });
     if (!observed.ok) {
-      const cleanupConfirmed = await finalizeSubagentCleanupV1(
+      const cleanupConfirmed = await finalizeSubagentCleanup(
         composition,
         deps,
         grant,
@@ -684,19 +674,19 @@ export async function executePipelineIssuedSubagentResumeV1(
       }
       if (observed.failure.code === 'cancelled' && cleanupConfirmed)
         return failed(observed.failure.message);
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         `${observed.failure.code}: Subagent Provider outcome requires reconciliation.`,
       );
     }
     if (
-      !(await recordSubagentObservationV1(deps, grant, dispatchIntentDigest, observed.value.status))
+      !(await recordSubagentObservation(deps, grant, dispatchIntentDigest, observed.value.status))
     ) {
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent resume observation acknowledgement failed after Driver dispatch.',
       );
     }
     if (
-      !(await finalizeSubagentCleanupV1(
+      !(await finalizeSubagentCleanup(
         composition,
         deps,
         grant,
@@ -704,11 +694,11 @@ export async function executePipelineIssuedSubagentResumeV1(
         dispatchIntentDigest,
       ))
     ) {
-      throw new SubagentProviderRecoveryRequiredErrorV1(
+      throw new SubagentProviderRecoveryRequiredError(
         'Subagent resume cleanup acknowledgement requires reconciliation.',
       );
     }
-    return subagentResultFromObservationV1(observed.value, resumed.value, deps.recoveryIdentityKey);
+    return subagentResultFromObservation(observed.value, resumed.value, deps.recoveryIdentityKey);
   } finally {
     if (registrationOwned) {
       driver.abandon(grant);
@@ -748,19 +738,19 @@ function stableBudgetCeiling(
     : (state ?? null);
 }
 
-async function recordSubagentDispatchIntentV1(
+async function recordSubagentDispatchIntent(
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrantV1
-    | import('@kite/runtime-spi').SubagentResumeGrantV1
+    | import('@kite/runtime-spi').SubagentDelegationGrant
+    | import('@kite/runtime-spi').SubagentResumeGrant
   >,
 ): Promise<string> {
   if (!deps.subagentLifecyclePersistence) {
-    throw new SubagentProviderRecoveryRequiredErrorV1(
+    throw new SubagentProviderRecoveryRequiredError(
       'Subagent lifecycle persistence is unavailable.',
     );
   }
-  const dispatchIntentDigest = subagentDispatchIntentDigestV1(grant);
+  const dispatchIntentDigest = subagentDispatchIntentDigest(grant);
   const recordedAt = new Date().toISOString();
   const ok = await deps.subagentLifecyclePersistence.persistEvents([
     {
@@ -782,25 +772,25 @@ async function recordSubagentDispatchIntentV1(
     fact?.dispatchIntentDigest !== dispatchIntentDigest ||
     fact.status !== 'intent_recorded'
   ) {
-    throw new SubagentProviderRecoveryRequiredErrorV1(
+    throw new SubagentProviderRecoveryRequiredError(
       'Subagent dispatch intent acknowledgement failed before Provider preparation.',
     );
   }
   return dispatchIntentDigest;
 }
 
-async function recordSubagentHandleReadyV1(
-  composition: GovernedSubagentCompositionV1,
+async function recordSubagentHandleReady(
+  composition: GovernedSubagentComposition,
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrantV1
-    | import('@kite/runtime-spi').SubagentResumeGrantV1
+    | import('@kite/runtime-spi').SubagentDelegationGrant
+    | import('@kite/runtime-spi').SubagentResumeGrant
   >,
-  handle: import('@kite/runtime-spi').SubagentHandleV1,
+  handle: import('@kite/runtime-spi').SubagentHandle,
   dispatchIntentDigest: string,
 ): Promise<boolean> {
   if (!deps.subagentLifecyclePersistence) return false;
-  let handleArtifact: import('@kite/runtime-spi').SubagentHandleArtifactRefV1;
+  let handleArtifact: import('@kite/runtime-spi').SubagentHandleArtifactRef;
   try {
     handleArtifact = composition.lifecycleArtifacts.write(handle, composition.grants.verifier());
   } catch {
@@ -829,14 +819,14 @@ async function recordSubagentHandleReadyV1(
   );
 }
 
-async function recordSubagentObservationV1(
+async function recordSubagentObservation(
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrantV1
-    | import('@kite/runtime-spi').SubagentResumeGrantV1
+    | import('@kite/runtime-spi').SubagentDelegationGrant
+    | import('@kite/runtime-spi').SubagentResumeGrant
   >,
   dispatchIntentDigest: string,
-  status: import('@kite/runtime-spi').SubagentObservationV1['status'],
+  status: import('@kite/runtime-spi').SubagentObservation['status'],
 ): Promise<boolean> {
   if (!deps.modelInvocationPersistence) return false;
   if (!deps.subagentLifecyclePersistence) return false;
@@ -862,11 +852,11 @@ async function recordSubagentObservationV1(
   );
 }
 
-async function finalizeUndispatchedSubagentIntentV1(
+async function finalizeUndispatchedSubagentIntent(
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrantV1
-    | import('@kite/runtime-spi').SubagentResumeGrantV1
+    | import('@kite/runtime-spi').SubagentDelegationGrant
+    | import('@kite/runtime-spi').SubagentResumeGrant
   >,
   dispatchIntentDigest: string,
 ): Promise<boolean> {
@@ -935,14 +925,14 @@ async function finalizeUndispatchedSubagentIntentV1(
   );
 }
 
-async function finalizeSubagentCleanupV1(
-  composition: GovernedSubagentCompositionV1,
+async function finalizeSubagentCleanup(
+  composition: GovernedSubagentComposition,
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrantV1
-    | import('@kite/runtime-spi').SubagentResumeGrantV1
+    | import('@kite/runtime-spi').SubagentDelegationGrant
+    | import('@kite/runtime-spi').SubagentResumeGrant
   >,
-  handle: import('@kite/runtime-spi').SubagentHandleV1,
+  handle: import('@kite/runtime-spi').SubagentHandle,
   dispatchIntentDigest: string,
 ): Promise<boolean> {
   if (!deps.modelInvocationPersistence) return false;
@@ -1003,7 +993,7 @@ async function finalizeSubagentCleanupV1(
   );
 }
 
-function registrationIdentityV1(input: SubAgentRunnerInput): Readonly<{
+function registrationIdentity(input: SubAgentRunnerInput): Readonly<{
   childInvocationId: string;
   parentInvocationId: string;
   parentToolCallId: string;
@@ -1020,7 +1010,7 @@ function registrationIdentityV1(input: SubAgentRunnerInput): Readonly<{
 function exactInput(
   input: SubAgentRunnerInput,
   task: string,
-  grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>,
+  grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>,
   signal: AbortSignal,
 ): SubAgentRunnerInput {
   if (
@@ -1035,21 +1025,21 @@ function exactInput(
   }
   const allowedTools = [...(input.role.allowedTools ?? [])].sort();
   const bindingIds = (input.mcpBindings ?? []).map(({ binding }) => binding.bindingId).sort();
-  const taskDigest = subagentTaskDigestV1(input.task);
+  const taskDigest = subagentTaskDigest(input.task);
   const boundaryDigest = input.config.executionBoundary
-    ? computeExecutionBoundaryDigestV1(input.config.executionBoundary)
-    : `sha256:${digestCapabilityValueV1({ schema: 'kite.execution-boundary.unconfigured.v1' })}`;
-  const expectedBudgetDigest = digestCapabilityValueV1({
+    ? computeExecutionBoundaryDigest(input.config.executionBoundary)
+    : `sha256:${digestCapabilityValue({ schema: 'kite.execution-boundary.unconfigured.v1' })}`;
+  const expectedBudgetDigest = digestCapabilityValue({
     schema: 'kite.subagent-resource-budget.v1',
     budget: input.modelInvocationPersistence
       ? stableBudgetCeiling(input.modelInvocationPersistence.getState().resourceBudget)
       : null,
   });
-  const expectedBindingRevision = digestCapabilityValueV1({
+  const expectedBindingRevision = digestCapabilityValue({
     schema: 'kite.subagent-binding-revision.v1',
     bindings: (input.mcpBindings ?? []).map(({ binding }) => binding),
   });
-  const expectedCeilingDigest = digestCapabilityValueV1({
+  const expectedCeilingDigest = digestCapabilityValue({
     schema: 'kite.subagent-capability-ceiling.v1',
     allowedTools,
     bindingIds,
@@ -1089,10 +1079,10 @@ function exactInput(
   };
 }
 
-function toLocalSubagentDriverResultV1(
+function toLocalSubagentDriverResult(
   childInvocationId: string,
   result: SubAgentResult,
-): LocalSubagentDriverResultV1 {
+): LocalSubagentDriverResult {
   return {
     childInvocationId,
     status: result.blocked
@@ -1161,7 +1151,7 @@ async function governedRun(
       steps: [],
       executionJournal: [],
       exhaustedFingerprints: {},
-      toolRecovery: createToolRecoveryJournalV1(input.recoveryIdentityKey),
+      toolRecovery: createToolRecoveryJournal(input.recoveryIdentityKey),
       resourceAdmissionFailure: {
         reason: error.reason,
         message: error.message,

@@ -5,41 +5,41 @@
  * handlers, credentials, endpoints, Runtime state objects, and UI projections.
  */
 
-export type CanonicalJsonScalarV1 = null | boolean | number | string;
-export type CanonicalJsonValueV1 =
-  | CanonicalJsonScalarV1
-  | readonly CanonicalJsonValueV1[]
-  | CanonicalJsonObjectV1;
-export interface CanonicalJsonObjectV1 {
-  readonly [key: string]: CanonicalJsonValueV1;
+export type CanonicalJsonScalar = null | boolean | number | string;
+export type CanonicalJsonValue =
+  | CanonicalJsonScalar
+  | readonly CanonicalJsonValue[]
+  | CanonicalJsonObject;
+export interface CanonicalJsonObject {
+  readonly [key: string]: CanonicalJsonValue;
 }
 
-export type Sha256DigestV1 = `sha256:${string}`;
+export type Sha256Digest = `sha256:${string}`;
 
-export const MODEL_SURFACE_SCHEMA_V1 = Object.freeze({
+export const MODEL_SURFACE_SCHEMA_ = Object.freeze({
   name: 'kite.model-surface',
   canonicalizerVersion: 'kite.model-surface.canonical-json.v1',
   surfaceFormatVersion: 1,
 } as const);
 
-export const MODEL_INVOCATION_ENVELOPE_SCHEMA_V1 = Object.freeze({
+export const MODEL_INVOCATION_ENVELOPE_SCHEMA_ = Object.freeze({
   name: 'kite.model-invocation-envelope',
   version: 1,
 } as const);
 
-export const MODEL_RESPONSE_RECORD_SCHEMA_V1 = Object.freeze({
+export const MODEL_RESPONSE_RECORD_SCHEMA_ = Object.freeze({
   name: 'kite.model-response-record',
   canonicalizerVersion: 'kite.model-surface.canonical-json.v1',
   version: 1,
 } as const);
 
-export const MODEL_ATTEMPT_OUTCOME_SCHEMA_V1 = Object.freeze({
+export const MODEL_ATTEMPT_OUTCOME_SCHEMA_ = Object.freeze({
   name: 'kite.model-attempt-outcome',
   canonicalizerVersion: 'kite.model-surface.canonical-json.v1',
   version: 1,
 } as const);
 
-export const MODEL_INVOCATION_PURPOSES_V1 = Object.freeze([
+export const MODEL_INVOCATION_PURPOSES_ = Object.freeze([
   'primary_agent',
   'context_compaction',
   'auto_review',
@@ -47,9 +47,9 @@ export const MODEL_INVOCATION_PURPOSES_V1 = Object.freeze([
   'subagent',
 ] as const);
 
-export type ModelInvocationPurposeV1 = (typeof MODEL_INVOCATION_PURPOSES_V1)[number];
+export type ModelInvocationPurpose = (typeof MODEL_INVOCATION_PURPOSES_)[number];
 
-export type ModelProviderDispatchPurposeV1 =
+export type ModelProviderDispatchPurpose =
   | 'primary_model'
   | 'compaction'
   | 'auto_review'
@@ -57,50 +57,50 @@ export type ModelProviderDispatchPurposeV1 =
   | 'subagent';
 
 /** Closed mapping shared by Surface compilation and Provider data admission. */
-export const MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1 = Object.freeze({
+export const MODEL_PURPOSE_TO_PROVIDER_DISPATCH_ = Object.freeze({
   primary_agent: 'primary_model',
   context_compaction: 'compaction',
   auto_review: 'auto_review',
   verification_review: 'verification_review',
   subagent: 'subagent',
-} as const satisfies Readonly<Record<ModelInvocationPurposeV1, ModelProviderDispatchPurposeV1>>);
+} as const satisfies Readonly<Record<ModelInvocationPurpose, ModelProviderDispatchPurpose>>);
 
-export interface ModelAdapterReplayOwnerV1 {
+export interface ModelAdapterReplayOwner {
   /** Stable adapter family, never a credential or endpoint. */
   adapterKind: string;
   adapterProtocolVersion: string;
   /** Secret-free fingerprint for exact adapter-instance replay ownership. */
-  ownerFingerprint: Sha256DigestV1;
+  ownerFingerprint: Sha256Digest;
 }
 
-export interface ModelRouteIdentityV1 {
+export interface ModelRouteIdentity {
   /** Provider family only; API keys, headers and endpoints are forbidden. */
   providerKind: string;
   modelName: string;
   adapterProtocolVersion: string;
   /** Secret-free identity derived at the governed config boundary. */
-  routeFingerprint: Sha256DigestV1;
-  replayOwner: ModelAdapterReplayOwnerV1;
+  routeFingerprint: Sha256Digest;
+  replayOwner: ModelAdapterReplayOwner;
 }
 
-export interface CanonicalModelTextPartV1 {
+export interface CanonicalModelTextPart {
   type: 'text';
   text: string;
 }
 
-export interface CanonicalModelReasoningPartV1 {
+export interface CanonicalModelReasoningPart {
   type: 'reasoning';
   text: string;
 }
 
-export interface CanonicalModelToolCallPartV1 {
+export interface CanonicalModelToolCallPart {
   type: 'tool_call';
   toolCallId: string;
   toolName: string;
-  input: CanonicalJsonValueV1;
+  input: CanonicalJsonValue;
 }
 
-export interface CanonicalModelToolResultPartV1 {
+export interface CanonicalModelToolResultPart {
   type: 'tool_result';
   toolCallId: string;
   toolName: string;
@@ -110,88 +110,85 @@ export interface CanonicalModelToolResultPartV1 {
   };
 }
 
-export type CanonicalModelMessageV1 =
+export type CanonicalModelMessage =
   | {
       role: 'user';
-      content: readonly CanonicalModelTextPartV1[];
+      content: readonly CanonicalModelTextPart[];
     }
   | {
       role: 'assistant';
       content: readonly (
-        | CanonicalModelTextPartV1
-        | CanonicalModelReasoningPartV1
-        | CanonicalModelToolCallPartV1
+        | CanonicalModelTextPart
+        | CanonicalModelReasoningPart
+        | CanonicalModelToolCallPart
       )[];
     }
   | {
       role: 'tool';
-      content: readonly CanonicalModelToolResultPartV1[];
+      content: readonly CanonicalModelToolResultPart[];
     };
 
-export interface CanonicalToolDeclarationV1 {
+export interface CanonicalToolDeclaration {
   name: string;
   description: string | null;
   /** Exact provider-facing JSON Schema; executable handlers are never stored. */
-  inputSchema: CanonicalJsonObjectV1;
+  inputSchema: CanonicalJsonObject;
 }
 
-export type ModelCapabilitySourceV1 =
-  | 'explicit_config'
-  | 'adapter_runtime'
-  | 'compatibility_config';
+export type ModelCapabilitySource = 'explicit_config' | 'adapter_runtime';
 
 /** Canonical value of the already-resolved model capabilities. */
-export interface ResolvedModelCapabilitiesValueV1 {
+export interface ResolvedModelCapabilitiesValue {
   providerName: string;
   modelName: string;
   contextWindowTokens: number | null;
-  contextWindowSource: ModelCapabilitySourceV1 | null;
+  contextWindowSource: ModelCapabilitySource | null;
   maxOutputTokens: number | null;
-  maxOutputTokensSource: ModelCapabilitySourceV1 | null;
+  maxOutputTokensSource: ModelCapabilitySource | null;
   tokenizerFamily: string | null;
-  tokenizerSource: ModelCapabilitySourceV1 | null;
+  tokenizerSource: ModelCapabilitySource | null;
   supportsUsageMetadata: boolean | null;
-  supportsUsageMetadataSource: ModelCapabilitySourceV1 | null;
+  supportsUsageMetadataSource: ModelCapabilitySource | null;
   supportsPromptCache: boolean | null;
-  supportsPromptCacheSource: ModelCapabilitySourceV1 | null;
+  supportsPromptCacheSource: ModelCapabilitySource | null;
   supportsToolCalls: boolean | null;
-  supportsToolCallsSource: ModelCapabilitySourceV1 | null;
+  supportsToolCallsSource: ModelCapabilitySource | null;
   streaming: boolean;
-  streamingSource: ModelCapabilitySourceV1 | null;
+  streamingSource: ModelCapabilitySource | null;
 }
 
-export interface ResolvedModelCapabilitiesEvidenceV1 {
-  value: ResolvedModelCapabilitiesValueV1;
-  digest: Sha256DigestV1;
+export interface ResolvedModelCapabilitiesEvidence {
+  value: ResolvedModelCapabilitiesValue;
+  digest: Sha256Digest;
 }
 
-export type PrivateArtifactKindV1 = 'model_surface' | 'model_response' | 'provider_options';
+export type PrivateArtifactKind = 'model_surface' | 'model_response' | 'provider_options';
 
 /** Opaque external reference. It never exposes a content digest or relative path. */
-export interface PrivateArtifactRefV1 {
+export interface PrivateArtifactRef {
   artifactId: string;
-  kind: PrivateArtifactKindV1;
+  kind: PrivateArtifactKind;
   integrityIdentifier: string;
   byteLength: number;
 }
 
-export type CanonicalProviderOptionsV1 =
+export type CanonicalProviderOptions =
   | {
       kind: 'inline';
-      value: CanonicalJsonObjectV1;
-      digest: Sha256DigestV1;
+      value: CanonicalJsonObject;
+      digest: Sha256Digest;
     }
   | {
       kind: 'artifact';
-      artifact: PrivateArtifactRefV1 & { kind: 'provider_options' };
-      contentDigest: Sha256DigestV1;
+      artifact: PrivateArtifactRef & { kind: 'provider_options' };
+      contentDigest: Sha256Digest;
     };
 
-export interface ModelSemanticRequestV1 {
+export interface ModelSemanticRequest {
   /** System messages merged exactly as they will be sent to the transport. */
   system: string;
-  messages: readonly CanonicalModelMessageV1[];
-  tools: readonly CanonicalToolDeclarationV1[];
+  messages: readonly CanonicalModelMessage[];
+  tools: readonly CanonicalToolDeclaration[];
   temperature: number;
   maxOutputTokens: number | null;
   stopPolicy: {
@@ -202,28 +199,28 @@ export interface ModelSemanticRequestV1 {
   sdkRetry: {
     maxRetries: 0;
   };
-  resolvedCapabilities: ResolvedModelCapabilitiesEvidenceV1;
-  providerOptions: CanonicalProviderOptionsV1;
+  resolvedCapabilities: ResolvedModelCapabilitiesEvidence;
+  providerOptions: CanonicalProviderOptions;
 }
 
 /** Complete provider-neutral request semantics, frozen before admission. */
-export interface ModelSurfaceV1 {
-  schema: typeof MODEL_SURFACE_SCHEMA_V1;
-  purpose: ModelInvocationPurposeV1;
-  route: ModelRouteIdentityV1;
-  request: ModelSemanticRequestV1;
+export interface ModelSurface {
+  schema: typeof MODEL_SURFACE_SCHEMA_;
+  purpose: ModelInvocationPurpose;
+  route: ModelRouteIdentity;
+  request: ModelSemanticRequest;
 }
 
-export interface ModelInvocationEnvelopeV1 {
-  schema: typeof MODEL_INVOCATION_ENVELOPE_SCHEMA_V1;
+export interface ModelInvocationEnvelope {
+  schema: typeof MODEL_INVOCATION_ENVELOPE_SCHEMA_;
   surface: {
-    artifact: PrivateArtifactRefV1 & { kind: 'model_surface' };
+    artifact: PrivateArtifactRef & { kind: 'model_surface' };
     surfaceIntegrityIdentifier: string;
   };
   admission: {
     providerAdmissionRevision: string | null;
-    routeIdentityDigest: Sha256DigestV1;
-    payloadClassificationDigest: Sha256DigestV1;
+    routeIdentityDigest: Sha256Digest;
+    payloadClassificationDigest: Sha256Digest;
     admitted: boolean;
   };
   provenance: {
@@ -235,8 +232,8 @@ export interface ModelInvocationEnvelopeV1 {
     stateRevision: number;
     contextCheckpointId: string | null;
     promptContractVersion: string;
-    projectionEnvironmentDigest: Sha256DigestV1;
-    capabilityBindingDigest: Sha256DigestV1;
+    projectionEnvironmentDigest: Sha256Digest;
+    capabilityBindingDigest: Sha256Digest;
   };
   resource: {
     budget:
@@ -257,7 +254,7 @@ export interface ModelInvocationEnvelopeV1 {
   };
 }
 
-export type ModelFinishReasonV1 =
+export type ModelFinishReason =
   | 'stop'
   | 'length'
   | 'content_filter'
@@ -266,14 +263,14 @@ export type ModelFinishReasonV1 =
   | 'other'
   | 'unknown';
 
-export interface ModelResponseRecordV1 {
-  schema: typeof MODEL_RESPONSE_RECORD_SCHEMA_V1;
+export interface ModelResponseRecord {
+  schema: typeof MODEL_RESPONSE_RECORD_SCHEMA_;
   invocationId: string;
   surfaceIntegrityIdentifier: string;
-  route: ModelRouteIdentityV1;
+  route: ModelRouteIdentity;
   response: {
-    message: Extract<CanonicalModelMessageV1, { role: 'assistant' }>;
-    finishReason: ModelFinishReasonV1;
+    message: Extract<CanonicalModelMessage, { role: 'assistant' }>;
+    finishReason: ModelFinishReason;
     usage: {
       inputTokens: number | null;
       outputTokens: number | null;
@@ -281,51 +278,51 @@ export interface ModelResponseRecordV1 {
       cacheReadTokens: number | null;
     };
     /** Private, JSON-safe metadata required for exact response reconstruction. */
-    providerMetadata: CanonicalJsonObjectV1;
+    providerMetadata: CanonicalJsonObject;
   };
   nativeReplayState: null | {
-    owner: ModelAdapterReplayOwnerV1;
-    value: CanonicalJsonValueV1;
+    owner: ModelAdapterReplayOwner;
+    value: CanonicalJsonValue;
   };
 }
 
-export type ModelAttemptRetryableFailureClassificationV1 =
+export type ModelAttemptRetryableFailureClassification =
   | 'attempt_timeout'
   | 'connection_failure'
   | 'provider_rate_limited'
   | 'provider_unavailable';
 
-export type ModelAttemptFatalFailureClassificationV1 = 'provider_rejected' | 'provider_failure';
+export type ModelAttemptFatalFailureClassification = 'provider_rejected' | 'provider_failure';
 
-export type ModelAttemptAbortedClassificationV1 = 'cancelled' | 'transport_aborted';
+export type ModelAttemptAbortedClassification = 'cancelled' | 'transport_aborted';
 
-export interface ModelAttemptRetryObservationV1 {
+export interface ModelAttemptRetryObservation {
   providerStatusCode: number | null;
   timedOut: boolean;
 }
 
 /** Stable, JSON-safe outcome for exactly one already-occurring Provider attempt. */
-export type ModelAttemptOutcomeV1 =
+export type ModelAttemptOutcome =
   | {
-      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_V1;
+      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_;
       kind: 'success';
-      response: ModelResponseRecordV1['response'];
-      nativeReplayState: ModelResponseRecordV1['nativeReplayState'];
+      response: ModelResponseRecord['response'];
+      nativeReplayState: ModelResponseRecord['nativeReplayState'];
     }
   | {
-      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_V1;
+      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_;
       kind: 'retryable_failure';
-      classification: ModelAttemptRetryableFailureClassificationV1;
-      retryObservation: ModelAttemptRetryObservationV1;
+      classification: ModelAttemptRetryableFailureClassification;
+      retryObservation: ModelAttemptRetryObservation;
     }
   | {
-      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_V1;
+      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_;
       kind: 'fatal_failure';
-      classification: ModelAttemptFatalFailureClassificationV1;
+      classification: ModelAttemptFatalFailureClassification;
       providerStatusCode: number | null;
     }
   | {
-      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_V1;
+      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_;
       kind: 'aborted';
-      classification: ModelAttemptAbortedClassificationV1;
+      classification: ModelAttemptAbortedClassification;
     };

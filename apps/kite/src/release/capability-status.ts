@@ -1,7 +1,7 @@
 import type { EffectProfile, PlanningState } from '@kite/runtime-contract';
 import type {
-  CapabilityProfileAdmissionDecisionV1,
-  CapabilityProfileV1,
+  CapabilityProfile,
+  CapabilityProfileAdmissionDecision,
 } from '#app/config/release-capabilities';
 
 export type VerificationStatus =
@@ -16,7 +16,7 @@ export type VerificationStatus =
   | 'compensated'
   | 'budget_exhausted';
 
-export interface CapabilityStatusRuntimeProjectionV1 {
+export interface CapabilityStatusRuntimeProjection {
   readonly terminalOutcome?: {
     readonly status: 'completed' | string;
     readonly safeRetry: boolean;
@@ -43,14 +43,14 @@ export interface CapabilityStatusRuntimeProjectionV1 {
   };
 }
 
-export type CapabilityExecutionBoundaryV1 = 'local' | 'mixed' | 'remote' | 'unknown';
+export type CapabilityExecutionBoundary = 'local' | 'mixed' | 'remote' | 'unknown';
 
-export interface CompletionSemanticsProjectionV1 {
+export interface CompletionSemanticsProjection {
   agentFinal: 'absent' | 'present';
   runtimeTerminal:
     | 'not_ended'
-    | NonNullable<CapabilityStatusRuntimeProjectionV1['terminalOutcome']>['status'];
-  planLifecycle: ReturnType<typeof projectPlanLifecycleV1>;
+    | NonNullable<CapabilityStatusRuntimeProjection['terminalOutcome']>['status'];
+  planLifecycle: ReturnType<typeof projectPlanLifecycle>;
   checks: {
     declared: number;
     executed: number;
@@ -72,15 +72,15 @@ export interface CompletionSemanticsProjectionV1 {
     | 'runtime_completed_verification_waived';
 }
 
-export interface CapabilityStatusProjectionV1 {
+export interface CapabilityStatusProjection {
   version: 1;
-  capability: CapabilityProfileV1['capability'];
+  capability: CapabilityProfile['capability'];
   profileId: string;
-  maturity: CapabilityProfileV1['state']['maturity'];
-  rollout: CapabilityProfileV1['state']['maxRollout'];
+  maturity: CapabilityProfile['state']['maturity'];
+  rollout: CapabilityProfile['state']['maxRollout'];
   admission: 'admitted' | 'blocked';
   disabledReasons: readonly string[];
-  executionBoundary: CapabilityExecutionBoundaryV1;
+  executionBoundary: CapabilityExecutionBoundary;
   expectedSideEffects: EffectProfile;
   recovery: {
     disableNewAdmission: true;
@@ -91,17 +91,17 @@ export interface CapabilityStatusProjectionV1 {
     entry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
   };
   experimentalExit: 'disable_new_admission_and_set_cohort_zero';
-  completion: CompletionSemanticsProjectionV1;
+  completion: CompletionSemanticsProjection;
 }
 
 /**
  * Projects durable Runtime facts without turning a final answer, ended turn,
  * completed Plan, or executed check into a Verification pass.
  */
-export function projectCompletionSemanticsV1(input: {
-  state: Readonly<CapabilityStatusRuntimeProjectionV1>;
+export function projectCompletionSemantics(input: {
+  state: Readonly<CapabilityStatusRuntimeProjection>;
   verificationFeatureEnabled: boolean;
-}): CompletionSemanticsProjectionV1 {
+}): CompletionSemanticsProjection {
   const records = Object.values(input.state.verification.records).sort((left, right) =>
     left.verificationId < right.verificationId
       ? -1
@@ -111,15 +111,13 @@ export function projectCompletionSemanticsV1(input: {
   );
   const required = records.filter((record) => record.mode === 'required');
   const results = records.flatMap((record) => Object.values(record.checkResults));
-  const requiredStatus = aggregateRequiredVerificationStatusV1(
-    required.map(({ status }) => status),
-  );
+  const requiredStatus = aggregateRequiredVerificationStatus(required.map(({ status }) => status));
   const runtimeCompleted = input.state.terminalOutcome?.status === 'completed';
 
   return Object.freeze({
     agentFinal: input.state.transcript.final === undefined ? 'absent' : 'present',
     runtimeTerminal: input.state.terminalOutcome?.status ?? 'not_ended',
-    planLifecycle: projectPlanLifecycleV1(input.state),
+    planLifecycle: projectPlanLifecycle(input.state),
     checks: Object.freeze({
       declared: records.reduce((total, record) => total + record.spec.checks.length, 0),
       executed: results.length,
@@ -133,19 +131,19 @@ export function projectCompletionSemanticsV1(input: {
       requiredFactsRetained: required.length > 0,
       status: requiredStatus,
     }),
-    assessment: completionAssessmentV1(runtimeCompleted, requiredStatus),
+    assessment: completionAssessment(runtimeCompleted, requiredStatus),
   });
 }
 
 /** Presentation-only projection. It cannot enable a capability. */
-export function projectCapabilityStatusV1(input: {
-  profile: CapabilityProfileV1;
-  admission: CapabilityProfileAdmissionDecisionV1;
-  executionBoundary: CapabilityExecutionBoundaryV1;
+export function projectCapabilityStatus(input: {
+  profile: CapabilityProfile;
+  admission: CapabilityProfileAdmissionDecision;
+  executionBoundary: CapabilityExecutionBoundary;
   expectedSideEffects: EffectProfile;
-  state: Readonly<CapabilityStatusRuntimeProjectionV1>;
+  state: Readonly<CapabilityStatusRuntimeProjection>;
   verificationFeatureEnabled: boolean;
-}): CapabilityStatusProjectionV1 {
+}): CapabilityStatusProjection {
   const outcome = input.state.terminalOutcome;
   return Object.freeze({
     version: 1,
@@ -163,14 +161,14 @@ export function projectCapabilityStatusV1(input: {
       entry: outcome?.recoveryEntry ?? 'none',
     }),
     experimentalExit: 'disable_new_admission_and_set_cohort_zero',
-    completion: projectCompletionSemanticsV1({
+    completion: projectCompletionSemantics({
       state: input.state,
       verificationFeatureEnabled: input.verificationFeatureEnabled,
     }),
   });
 }
 
-export function formatCapabilityStatusV1(status: CapabilityStatusProjectionV1): string {
+export function formatCapabilityStatus(status: CapabilityStatusProjection): string {
   const completion = status.completion;
   return [
     `Capability: ${status.capability}`,
@@ -192,7 +190,7 @@ export function formatCapabilityStatusV1(status: CapabilityStatusProjectionV1): 
   ].join('\n');
 }
 
-function aggregateRequiredVerificationStatusV1(
+function aggregateRequiredVerificationStatus(
   statuses: readonly VerificationStatus[],
 ): 'not_required' | VerificationStatus {
   if (statuses.length === 0) return 'not_required';
@@ -213,10 +211,10 @@ function aggregateRequiredVerificationStatusV1(
   return priority.find((status) => statuses.includes(status)) ?? 'inconclusive';
 }
 
-function completionAssessmentV1(
+function completionAssessment(
   runtimeCompleted: boolean,
   verificationStatus: 'not_required' | VerificationStatus,
-): CompletionSemanticsProjectionV1['assessment'] {
+): CompletionSemanticsProjection['assessment'] {
   if (!runtimeCompleted) return 'runtime_not_completed';
   if (verificationStatus === 'not_required') return 'runtime_completed_verification_not_required';
   if (verificationStatus === 'passed') return 'runtime_completed_verification_passed';
@@ -224,8 +222,8 @@ function completionAssessmentV1(
   return 'runtime_completed_verification_pending';
 }
 
-function projectPlanLifecycleV1(
-  state: Readonly<CapabilityStatusRuntimeProjectionV1>,
+function projectPlanLifecycle(
+  state: Readonly<CapabilityStatusRuntimeProjection>,
 ):
   | 'not_present'
   | 'building_without_plan'

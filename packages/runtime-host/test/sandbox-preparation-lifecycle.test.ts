@@ -2,25 +2,25 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
-  ExecutionBackendCapabilitiesV1,
-  PreparedSandboxExecutionV1,
-  SandboxExecutionDispatchIntentAcknowledgementV1,
-  SandboxPreparationArtifactPortV1,
-  SandboxPreparationArtifactRefV1,
-  SandboxPreparationV1,
+  ExecutionBackendCapabilities,
+  PreparedSandboxExecution,
+  SandboxExecutionDispatchIntentAcknowledgement,
+  SandboxPreparation,
+  SandboxPreparationArtifactPort,
+  SandboxPreparationArtifactRef,
 } from '@kite/runtime-spi';
-import { SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1 } from '@kite/runtime-spi';
-import type { RuntimeHostPreparedProcessInputV1 } from '../src/posix-supervisor';
+import { SANDBOX_EXECUTION_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+import type { RuntimeHostPreparedProcessInput } from '../src/posix-supervisor';
 import {
-  createRuntimeHostSandboxPreparationLifecycleV1,
-  createRuntimeHostSandboxPreparedProcessExecutionPortV1,
-  RuntimeHostSandboxLifecycleErrorV1,
-  type RuntimeHostSandboxLifecycleEvidencePortV1,
-  type RuntimeHostSandboxLifecyclePersistenceV1,
-  type RuntimeHostSandboxSupervisorPortV1,
+  createRuntimeHostSandboxPreparationLifecycle,
+  createRuntimeHostSandboxPreparedProcessExecutionPort,
+  RuntimeHostSandboxLifecycleError,
+  type RuntimeHostSandboxLifecycleEvidencePort,
+  type RuntimeHostSandboxLifecyclePersistence,
+  type RuntimeHostSandboxSupervisorPort,
 } from '../src/sandbox-preparation-lifecycle';
 
-const backendCapabilities: ExecutionBackendCapabilitiesV1 = deepFreeze({
+const backendCapabilities: ExecutionBackendCapabilities = deepFreeze({
   backend: 'bubblewrap',
   filesystem: {
     read_only: 'enforced',
@@ -34,8 +34,8 @@ const backendCapabilities: ExecutionBackendCapabilitiesV1 = deepFreeze({
   verifiedInProcessReadOnly: 'enforced',
 });
 
-const preparation: Readonly<SandboxPreparationV1> = deepFreeze({
-  schema: SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1,
+const preparation: Readonly<SandboxPreparation> = deepFreeze({
+  schema: SANDBOX_EXECUTION_PROVIDER_SCHEMA_,
   toolCallId: 'tool-call-1',
   capabilityId: 'builtin:shell_execute',
   capabilityRevision: 'shell-v1',
@@ -63,8 +63,8 @@ const preparation: Readonly<SandboxPreparationV1> = deepFreeze({
   cancellationCorrelation: 'cancel-1',
 });
 
-const prepared: Readonly<PreparedSandboxExecutionV1> = deepFreeze({
-  schema: SANDBOX_EXECUTION_PROVIDER_SCHEMA_V1,
+const prepared: Readonly<PreparedSandboxExecution> = deepFreeze({
+  schema: SANDBOX_EXECUTION_PROVIDER_SCHEMA_,
   kind: 'prepared_sandbox_execution',
   planId: 'plan-1',
   toolCallId: preparation.toolCallId,
@@ -91,7 +91,7 @@ const prepared: Readonly<PreparedSandboxExecutionV1> = deepFreeze({
   cleanup: { kind: 'none', resourceId: 'none', recoveryPayload: {} },
 });
 
-const artifactRef: Readonly<SandboxPreparationArtifactRefV1> = Object.freeze({
+const artifactRef: Readonly<SandboxPreparationArtifactRef> = Object.freeze({
   artifactId: 'artifact-1',
   kind: 'sandbox_preparation',
   integrityIdentifier: 'artifact-integrity-1',
@@ -107,7 +107,7 @@ function createLifecycleHarness(
   } = {},
 ) {
   const order: string[] = [];
-  const artifacts: SandboxPreparationArtifactPortV1 = {
+  const artifacts: SandboxPreparationArtifactPort = {
     write(candidate) {
       order.push('artifact:write');
       expect(candidate).toBe(prepared);
@@ -119,7 +119,7 @@ function createLifecycleHarness(
       return prepared;
     },
   };
-  const persistence: RuntimeHostSandboxLifecyclePersistenceV1 = {
+  const persistence: RuntimeHostSandboxLifecyclePersistence = {
     async persistPreparationIntent() {
       order.push('persist:preparation_intent');
       return Object.freeze({
@@ -182,7 +182,7 @@ function createLifecycleHarness(
       });
     },
   };
-  const evidence: RuntimeHostSandboxLifecycleEvidencePortV1 = {
+  const evidence: RuntimeHostSandboxLifecycleEvidencePort = {
     verify(candidate) {
       order.push(`verify:${candidate.stage}`);
       return candidate.stage === options.rejectEvidenceStage
@@ -191,7 +191,7 @@ function createLifecycleHarness(
     },
   };
   return {
-    lifecycle: createRuntimeHostSandboxPreparationLifecycleV1({
+    lifecycle: createRuntimeHostSandboxPreparationLifecycle({
       persistence,
       evidence,
       artifacts,
@@ -209,10 +209,10 @@ async function acknowledgeReady(harness: LifecycleHarness) {
   });
 }
 
-function successfulSupervisor(onExecute?: (input: RuntimeHostPreparedProcessInputV1) => void) {
+function successfulSupervisor(onExecute?: (input: RuntimeHostPreparedProcessInput) => void) {
   let calls = 0;
   let goCalls = 0;
-  const supervisor: RuntimeHostSandboxSupervisorPortV1 = {
+  const supervisor: RuntimeHostSandboxSupervisorPort = {
     async execute(input) {
       calls += 1;
       onExecute?.(input);
@@ -298,7 +298,7 @@ describe('Runtime Host sandbox lifecycle', () => {
   test('fails closed on out-of-order, cloned, and unreflected evidence', async () => {
     const harness = createLifecycleHarness();
     await expect(harness.lifecycle.recordPreparationReady(prepared)).rejects.toBeInstanceOf(
-      RuntimeHostSandboxLifecycleErrorV1,
+      RuntimeHostSandboxLifecycleError,
     );
     await harness.lifecycle.recordPreparationIntent(preparation);
     await harness.lifecycle.recordPreparationReady(prepared);
@@ -327,7 +327,7 @@ describe('Runtime Host sandbox lifecycle', () => {
     const harness = createLifecycleHarness();
     const dispatch = await acknowledgeReady(harness);
     const fake = successfulSupervisor();
-    const port = createRuntimeHostSandboxPreparedProcessExecutionPortV1({
+    const port = createRuntimeHostSandboxPreparedProcessExecutionPort({
       supervisor: fake.supervisor,
     });
 
@@ -357,10 +357,10 @@ describe('Runtime Host sandbox lifecycle', () => {
     const harness = createLifecycleHarness();
     const dispatch = await acknowledgeReady(harness);
     const fake = successfulSupervisor();
-    const port = createRuntimeHostSandboxPreparedProcessExecutionPortV1({
+    const port = createRuntimeHostSandboxPreparedProcessExecutionPort({
       supervisor: fake.supervisor,
     });
-    const clonedDispatch: SandboxExecutionDispatchIntentAcknowledgementV1 = Object.freeze({
+    const clonedDispatch: SandboxExecutionDispatchIntentAcknowledgement = Object.freeze({
       ...dispatch,
     });
     const result = await port.execute({
@@ -382,7 +382,7 @@ describe('Runtime Host sandbox lifecycle', () => {
     const harness = createLifecycleHarness({ failSupervisorPersistence: true });
     const dispatch = await acknowledgeReady(harness);
     const fake = successfulSupervisor();
-    const port = createRuntimeHostSandboxPreparedProcessExecutionPortV1({
+    const port = createRuntimeHostSandboxPreparedProcessExecutionPort({
       supervisor: fake.supervisor,
     });
     const result = await port.execute({
@@ -404,7 +404,7 @@ describe('Runtime Host sandbox lifecycle', () => {
     const cases = [
       {
         code: 'post_go_terminal_unknown',
-        execute: async (input: RuntimeHostPreparedProcessInputV1) => {
+        execute: async (input: RuntimeHostPreparedProcessInput) => {
           await recordSupervisorStarted(input);
           input.onGoStarted?.();
           return {
@@ -420,7 +420,7 @@ describe('Runtime Host sandbox lifecycle', () => {
       },
       {
         code: 'post_go_transport_lost',
-        execute: async (input: RuntimeHostPreparedProcessInputV1) => {
+        execute: async (input: RuntimeHostPreparedProcessInput) => {
           await recordSupervisorStarted(input);
           input.onGoStarted?.();
           throw new Error('transport lost');
@@ -428,7 +428,7 @@ describe('Runtime Host sandbox lifecycle', () => {
       },
       {
         code: 'post_go_cleanup_unknown',
-        execute: async (input: RuntimeHostPreparedProcessInputV1) => {
+        execute: async (input: RuntimeHostPreparedProcessInput) => {
           await recordSupervisorStarted(input);
           input.onGoStarted?.();
           return {
@@ -452,7 +452,7 @@ describe('Runtime Host sandbox lifecycle', () => {
     for (const candidate of cases) {
       const harness = createLifecycleHarness();
       const dispatch = await acknowledgeReady(harness);
-      const port = createRuntimeHostSandboxPreparedProcessExecutionPortV1({
+      const port = createRuntimeHostSandboxPreparedProcessExecutionPort({
         supervisor: { execute: candidate.execute },
       });
       const result = await port.execute({
@@ -473,7 +473,7 @@ describe('Runtime Host sandbox lifecycle', () => {
   test('projects abort terminal and exact cleanup without changing its certainty', async () => {
     const harness = createLifecycleHarness();
     const dispatch = await acknowledgeReady(harness);
-    const port = createRuntimeHostSandboxPreparedProcessExecutionPortV1({
+    const port = createRuntimeHostSandboxPreparedProcessExecutionPort({
       supervisor: {
         async execute(input) {
           await recordSupervisorStarted(input);
@@ -531,7 +531,7 @@ describe('Runtime Host sandbox lifecycle', () => {
   });
 });
 
-async function recordSupervisorStarted(input: RuntimeHostPreparedProcessInputV1): Promise<void> {
+async function recordSupervisorStarted(input: RuntimeHostPreparedProcessInput): Promise<void> {
   const accepted = await input.lifecycle.recordExecutionSupervisorStarted(input.prepared, {
     dispatchId: input.dispatchId,
     dispatchIntentDigest: input.dispatchIntentDigest,

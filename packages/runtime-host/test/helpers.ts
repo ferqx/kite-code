@@ -1,5 +1,5 @@
 import {
-  RUNTIME_PROJECTION_SCHEMA_V1,
+  RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeCommand,
   type RuntimeCommandReceipt,
   type RuntimeNotification,
@@ -8,7 +8,7 @@ import {
   type RuntimeSessionProjection,
 } from '@kite/runtime-contract';
 import {
-  RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+  RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionBridge,
   type RuntimeHostExecutionServices,
   type RuntimeHostKernelInput,
@@ -16,11 +16,11 @@ import {
   runtimeCommandFromKernelInput,
 } from '@kite/runtime-host';
 import type { RuntimeStorage } from '@kite/runtime-host/storage';
-import { defineRuntimeModuleV1, type RuntimeModuleV1 } from '@kite/runtime-spi';
+import { defineRuntimeModule, type RuntimeModule } from '@kite/runtime-spi';
 
 export function projection(sessionId: string, revision: number): RuntimeSessionProjection {
   return {
-    schema: RUNTIME_PROJECTION_SCHEMA_V1,
+    schema: RUNTIME_PROJECTION_SCHEMA_,
     sessionId,
     revision,
     workspace: `/workspace/${sessionId}`,
@@ -103,7 +103,7 @@ export function testStorage(onClose: () => void = () => undefined): RuntimeStora
     adapterId: 'test',
     stateSchemaVersion: 25,
     storeSchemaVersion: 4,
-    compatibilityEpoch: 'kite-runtime-2026-08-18',
+    formatEpoch: 'kite-runtime-2026-08-18',
     close: onClose,
   } as unknown as RuntimeStorage;
 }
@@ -114,14 +114,14 @@ export function testRuntimeModules(
     readonly start?: () => Promise<void>;
     readonly dispose?: () => Promise<void>;
   } = {},
-): readonly RuntimeModuleV1[] {
+): readonly RuntimeModule[] {
   return [
-    defineRuntimeModuleV1({
+    defineRuntimeModule({
       moduleId: 'test-module',
       revision: '1',
       register: (registry) => {
         registry.registerExecutionAdapter({
-          adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
+          adapterId: RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
           revision: '1',
           create: ({ services }: { readonly services: RuntimeHostExecutionServices }) =>
             createBridge(services),

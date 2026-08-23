@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1 } from '#app/config/release-profile';
+import { SUPPORTED_PRODUCTION_EXECUTION_TARGETS_ } from '#app/config/release-profile';
 import { verifyBootstrapArtifact } from './bootstrap-verifier';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
 
@@ -15,7 +15,7 @@ const ADVERSARIAL_CASES = [
   ['worktree_collision_ownership_and_cleanup', 'tests/workspace/worktree-controller.test.ts'],
 ] as const;
 
-interface SupportMatrixV1 {
+interface SupportMatrix {
   version: 1;
   decisionId: 'D-04';
   status: 'accepted_empty_support_set';
@@ -28,8 +28,8 @@ interface SupportMatrixV1 {
   }>;
 }
 
-export interface ExecutionBoundarySmokeReportV1 {
-  schema: 'ExecutionBoundaryArtifactSmokeV1';
+export interface ExecutionBoundarySmokeReport {
+  schema: 'ExecutionBoundaryArtifactSmoke';
   artifactClass: 'synthetic_non_production';
   status: 'passed_negative_conformance';
   productionSupported: false;
@@ -54,13 +54,13 @@ export interface ExecutionBoundarySmokeReportV1 {
   reportDigest: string;
 }
 
-export function runExecutionBoundaryArtifactSmokeV1(input: {
+export function runExecutionBoundaryArtifactSmoke(input: {
   artifactDirectory: string;
   supportMatrix: unknown;
   repositoryRoot?: string;
-}): ExecutionBoundarySmokeReportV1 {
+}): ExecutionBoundarySmokeReport {
   const matrix = parseSupportMatrix(input.supportMatrix);
-  if (SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1.length !== 0) {
+  if (SUPPORTED_PRODUCTION_EXECUTION_TARGETS_.length !== 0) {
     throw new Error('Core D-04 execution registry diverges from the accepted empty support set.');
   }
   const root = resolve(input.repositoryRoot ?? '.');
@@ -72,7 +72,7 @@ export function runExecutionBoundaryArtifactSmokeV1(input: {
   });
   const artifact = verifyBootstrapArtifact(input.artifactDirectory);
   const material = {
-    schema: 'ExecutionBoundaryArtifactSmokeV1' as const,
+    schema: 'ExecutionBoundaryArtifactSmoke' as const,
     artifactClass: 'synthetic_non_production' as const,
     status: 'passed_negative_conformance' as const,
     productionSupported: false as const,
@@ -100,9 +100,9 @@ export function runExecutionBoundaryArtifactSmokeV1(input: {
   };
 }
 
-export function verifyExecutionBoundarySmokeReportV1(
-  value: ExecutionBoundarySmokeReportV1,
-): ExecutionBoundarySmokeReportV1 {
+export function verifyExecutionBoundarySmokeReport(
+  value: ExecutionBoundarySmokeReport,
+): ExecutionBoundarySmokeReport {
   const { reportDigest, ...material } = value;
   const expected = sha256DomainSeparated(
     'execution-boundary-artifact-smoke-v1',
@@ -121,11 +121,11 @@ export function verifyExecutionBoundarySmokeReportV1(
   return value;
 }
 
-function parseSupportMatrix(value: unknown): SupportMatrixV1 {
+function parseSupportMatrix(value: unknown): SupportMatrix {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('D-04 support matrix must be an object.');
   }
-  const matrix = value as Partial<SupportMatrixV1>;
+  const matrix = value as Partial<SupportMatrix>;
   if (
     matrix.version !== 1 ||
     matrix.decisionId !== 'D-04' ||
@@ -149,16 +149,16 @@ function parseSupportMatrix(value: unknown): SupportMatrixV1 {
       throw new Error('Every D-04 target must have an explicit excluded outcome and reason.');
     }
   }
-  return matrix as SupportMatrixV1;
+  return matrix as SupportMatrix;
 }
 
 if (import.meta.main) {
   const artifactDirectory = resolve(process.argv[2] ?? 'dist/release-synthetic');
   const outputPath = resolve(process.argv[3] ?? 'dist/execution-boundary-smoke.json');
   const supportMatrix = JSON.parse(
-    readFileSync(resolve('release/platform-capabilities/support-matrix-v1.json'), 'utf8'),
+    readFileSync(resolve('release/platform-capabilities/support-matrix.json'), 'utf8'),
   ) as unknown;
-  const report = runExecutionBoundaryArtifactSmokeV1({ artifactDirectory, supportMatrix });
+  const report = runExecutionBoundaryArtifactSmoke({ artifactDirectory, supportMatrix });
   writeFileSync(outputPath, canonicalJsonBytes(report), { mode: 0o600 });
   process.stdout.write(
     `${JSON.stringify(

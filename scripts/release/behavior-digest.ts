@@ -47,30 +47,30 @@ export type CanonicalBehaviorValue =
   | { readonly [key: string]: CanonicalBehaviorValue };
 export type CanonicalBehaviorObject = Readonly<Record<string, CanonicalBehaviorValue>>;
 
-export interface BehaviorComponentInputV1 {
+export interface BehaviorComponentInput {
   schemaVersion: 1;
   inputIdentity: string;
   /** The generated or domain-parser-approved snapshot, never a source directory identity. */
   canonicalInput: CanonicalBehaviorObject;
 }
 
-export interface BehaviorDigestInputV1 {
+export interface BehaviorDigestInput {
   version: 1;
   inputClass: BehaviorDigestInputClass;
-  components: Readonly<Record<BehaviorComponentName, BehaviorComponentInputV1>>;
+  components: Readonly<Record<BehaviorComponentName, BehaviorComponentInput>>;
 }
 
-export interface BehaviorComponentDigestV1 {
+export interface BehaviorComponentDigest {
   schemaVersion: 1;
   inputIdentity: string;
   digest: BehaviorSha256Digest;
 }
 
-export interface BehaviorDigestV1 {
+export interface BehaviorDigest {
   version: 1;
   canonicalizer: typeof BEHAVIOR_DIGEST_CANONICALIZER;
   inputClass: BehaviorDigestInputClass;
-  items: Readonly<Record<BehaviorComponentName, BehaviorComponentDigestV1>>;
+  items: Readonly<Record<BehaviorComponentName, BehaviorComponentDigest>>;
   aggregateDigest: BehaviorSha256Digest;
 }
 
@@ -131,10 +131,7 @@ function parseInputClass(value: unknown): BehaviorDigestInputClass {
   return value;
 }
 
-function parseComponentInput(
-  name: BehaviorComponentName,
-  value: unknown,
-): BehaviorComponentInputV1 {
+function parseComponentInput(name: BehaviorComponentName, value: unknown): BehaviorComponentInput {
   if (!isRecord(value)) throw new Error(`Behavior component ${name} must be an object.`);
   assertExactKeys(value, ['schemaVersion', 'inputIdentity', 'canonicalInput'], name);
   if (value.schemaVersion !== 1) {
@@ -164,18 +161,18 @@ function parseComponentInput(
   });
 }
 
-export function parseBehaviorDigestInputV1(value: unknown): BehaviorDigestInputV1 {
-  if (!isRecord(value)) throw new Error('BehaviorDigestInputV1 must be an object.');
-  assertExactKeys(value, ['version', 'inputClass', 'components'], 'BehaviorDigestInputV1');
+export function parseBehaviorDigestInput(value: unknown): BehaviorDigestInput {
+  if (!isRecord(value)) throw new Error('BehaviorDigestInput must be an object.');
+  assertExactKeys(value, ['version', 'inputClass', 'components'], 'BehaviorDigestInput');
   if (value.version !== BEHAVIOR_DIGEST_SCHEMA_VERSION) {
     throw new Error(`Unknown behavior digest input version: ${String(value.version)}.`);
   }
   if (!isRecord(value.components)) {
-    throw new Error('BehaviorDigestInputV1.components must be an object.');
+    throw new Error('BehaviorDigestInput.components must be an object.');
   }
-  assertExactKeys(value.components, BEHAVIOR_COMPONENT_NAMES, 'BehaviorDigestInputV1.components');
+  assertExactKeys(value.components, BEHAVIOR_COMPONENT_NAMES, 'BehaviorDigestInput.components');
 
-  const components = {} as Record<BehaviorComponentName, BehaviorComponentInputV1>;
+  const components = {} as Record<BehaviorComponentName, BehaviorComponentInput>;
   for (const name of BEHAVIOR_COMPONENT_NAMES) {
     components[name] = parseComponentInput(name, value.components[name]);
   }
@@ -186,9 +183,9 @@ export function parseBehaviorDigestInputV1(value: unknown): BehaviorDigestInputV
   });
 }
 
-export function generateBehaviorDigestV1(value: unknown): BehaviorDigestV1 {
-  const input = parseBehaviorDigestInputV1(value);
-  const items = {} as Record<BehaviorComponentName, BehaviorComponentDigestV1>;
+export function generateBehaviorDigest(value: unknown): BehaviorDigest {
+  const input = parseBehaviorDigestInput(value);
+  const items = {} as Record<BehaviorComponentName, BehaviorComponentDigest>;
 
   for (const name of BEHAVIOR_COMPONENT_NAMES) {
     const component = input.components[name];
@@ -225,7 +222,7 @@ export function generateBehaviorDigestV1(value: unknown): BehaviorDigestV1 {
 function parseComponentDigest(
   name: BehaviorComponentName,
   value: unknown,
-): BehaviorComponentDigestV1 {
+): BehaviorComponentDigest {
   if (!isRecord(value)) throw new Error(`Behavior digest item ${name} must be an object.`);
   assertExactKeys(value, ['schemaVersion', 'inputIdentity', 'digest'], `items.${name}`);
   if (value.schemaVersion !== 1)
@@ -244,12 +241,12 @@ function parseComponentDigest(
   });
 }
 
-export function parseBehaviorDigestV1(value: unknown): BehaviorDigestV1 {
-  if (!isRecord(value)) throw new Error('BehaviorDigestV1 must be an object.');
+export function parseBehaviorDigest(value: unknown): BehaviorDigest {
+  if (!isRecord(value)) throw new Error('BehaviorDigest must be an object.');
   assertExactKeys(
     value,
     ['version', 'canonicalizer', 'inputClass', 'items', 'aggregateDigest'],
-    'BehaviorDigestV1',
+    'BehaviorDigest',
   );
   if (value.version !== BEHAVIOR_DIGEST_SCHEMA_VERSION) {
     throw new Error(`Unknown behavior digest version: ${String(value.version)}.`);
@@ -257,14 +254,14 @@ export function parseBehaviorDigestV1(value: unknown): BehaviorDigestV1 {
   if (value.canonicalizer !== BEHAVIOR_DIGEST_CANONICALIZER) {
     throw new Error(`Unknown behavior digest canonicalizer: ${String(value.canonicalizer)}.`);
   }
-  if (!isRecord(value.items)) throw new Error('BehaviorDigestV1.items must be an object.');
-  assertExactKeys(value.items, BEHAVIOR_COMPONENT_NAMES, 'BehaviorDigestV1.items');
-  const items = {} as Record<BehaviorComponentName, BehaviorComponentDigestV1>;
+  if (!isRecord(value.items)) throw new Error('BehaviorDigest.items must be an object.');
+  assertExactKeys(value.items, BEHAVIOR_COMPONENT_NAMES, 'BehaviorDigest.items');
+  const items = {} as Record<BehaviorComponentName, BehaviorComponentDigest>;
   for (const name of BEHAVIOR_COMPONENT_NAMES) {
     items[name] = parseComponentDigest(name, value.items[name]);
   }
   if (typeof value.aggregateDigest !== 'string' || !SHA256_PATTERN.test(value.aggregateDigest)) {
-    throw new Error('BehaviorDigestV1.aggregateDigest is invalid.');
+    throw new Error('BehaviorDigest.aggregateDigest is invalid.');
   }
   const inputClass = parseInputClass(value.inputClass);
   const expectedAggregateDigest = sha256DomainSeparated(
@@ -277,7 +274,7 @@ export function parseBehaviorDigestV1(value: unknown): BehaviorDigestV1 {
     }),
   );
   if (value.aggregateDigest !== expectedAggregateDigest) {
-    throw new Error('BehaviorDigestV1 aggregate digest does not match its canonical items.');
+    throw new Error('BehaviorDigest aggregate digest does not match its canonical items.');
   }
   return Object.freeze({
     version: BEHAVIOR_DIGEST_SCHEMA_VERSION,
@@ -289,9 +286,9 @@ export function parseBehaviorDigestV1(value: unknown): BehaviorDigestV1 {
 }
 
 /** Rebuild every item and the aggregate; stale or spliced output fails closed. */
-export function verifyBehaviorDigestV1(input: unknown, candidate: unknown): BehaviorDigestV1 {
-  const parsed = parseBehaviorDigestV1(candidate);
-  const rebuilt = generateBehaviorDigestV1(input);
+export function verifyBehaviorDigest(input: unknown, candidate: unknown): BehaviorDigest {
+  const parsed = parseBehaviorDigest(candidate);
+  const rebuilt = generateBehaviorDigest(input);
   if (canonicalJson(parsed) !== canonicalJson(rebuilt)) {
     throw new Error('Behavior digest does not match the resolved canonical inputs.');
   }

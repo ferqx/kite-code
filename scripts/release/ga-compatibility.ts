@@ -20,9 +20,9 @@ const durableFactSchema = z
   })
   .strict();
 
-export const gaCompatibilityFixtureV1Schema = z
+export const gaCompatibilityFixtureSchema = z
   .object({
-    schema: z.literal('GACompatibilityFixtureV1'),
+    schema: z.literal('GACompatibilityFixture'),
     fixtureClass: z.literal('synthetic_contract_only'),
     fromArtifactDigest: digestSchema,
     gaArtifactDigest: digestSchema,
@@ -38,8 +38,8 @@ export const gaCompatibilityFixtureV1Schema = z
   })
   .strict();
 
-export interface GACompatibilityReportV1 {
-  schema: 'GACompatibilityReportV1';
+export interface GACompatibilityReport {
+  schema: 'GACompatibilityReport';
   fixtureClass: 'synthetic_contract_only';
   status: 'contract_replay_passed';
   productionEvidence: false;
@@ -49,8 +49,8 @@ export interface GACompatibilityReportV1 {
   reportDigest: `sha256:${string}`;
 }
 
-export function verifyGaCompatibilityFixtureV1(rawFixture: unknown): GACompatibilityReportV1 {
-  const fixture = gaCompatibilityFixtureV1Schema.parse(rawFixture);
+export function verifyGaCompatibilityFixture(rawFixture: unknown): GACompatibilityReport {
+  const fixture = gaCompatibilityFixtureSchema.parse(rawFixture);
   if (fixture.gaRuntimeSchema < fixture.fromRuntimeSchema) {
     throw new Error('GA upgrade fixture moves the Runtime schema backwards.');
   }
@@ -81,8 +81,8 @@ export function verifyGaCompatibilityFixtureV1(rawFixture: unknown): GACompatibi
       }
     }
   }
-  const withoutDigest: Omit<GACompatibilityReportV1, 'reportDigest'> = {
-    schema: 'GACompatibilityReportV1',
+  const withoutDigest: Omit<GACompatibilityReport, 'reportDigest'> = {
+    schema: 'GACompatibilityReport',
     fixtureClass: 'synthetic_contract_only',
     status: 'contract_replay_passed',
     productionEvidence: false,

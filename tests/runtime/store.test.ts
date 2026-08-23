@@ -1,5 +1,5 @@
-// ── StateSessionStorageV1 持久化测试 / StateSessionStorageV1 persistence tests ──
-// 验证 State/Store4 adapter 的事件日志与快照的完整持久化链路
+// ── StateSessionStorage 持久化测试 / StateSessionStorage persistence tests ──
+// 验证 current State/Store adapter 的事件日志与快照的完整持久化链路
 
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -7,15 +7,15 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { sandboxPreparationIntentDigestV1 } from '@kite/builtin-runtime/sandbox';
+import { sandboxPreparationIntentDigest } from '@kite/builtin-runtime/sandbox';
 import type {
   AgentPlan,
   ShellApprovalGrant,
   ToolApprovalPayload,
   UserInputPayload,
 } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
-import type { RuntimeSessionStoragePortV1 } from '@kite/runtime-host/storage';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import type { RuntimeSessionStoragePort } from '@kite/runtime-host/storage';
 import {
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeRevisionConflictError,
@@ -23,8 +23,9 @@ import {
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
-  openState25Store4ForTestV1,
-  state25Store4PathForTestV1,
+  openStateStoreForTest,
+  type StateStoreTestOptions,
+  stateStorePathForTest,
 } from '../../scripts/support/runtime-storage';
 import {
   CURRENT_TEST_PLAN_IDENTITY,
@@ -33,7 +34,14 @@ import {
 
 const TEST_FORK_RECOVERY_IDENTITY = 'f'.repeat(64);
 const TEST_FORK_RECOVERY_IDENTITY_2 = 'e'.repeat(64);
-type StateSessionStorageV1 = RuntimeSessionStoragePortV1<RuntimeEvent, unknown>;
+type StateSessionStorage = RuntimeSessionStoragePort<RuntimeEvent, unknown>;
+
+function openStore(databasePath: string, input: StateStoreTestOptions = {}): StateSessionStorage {
+  return openStateStoreForTest(databasePath, {
+    ...input,
+    bootstrapMissingSessions: true,
+  });
+}
 
 // ── helpers ──
 
@@ -64,7 +72,7 @@ function currentSnapshot(
   threadId: string,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const base = createRuntimeHostStateInitialStateV1({
+  const base = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'store-test-user',
@@ -78,7 +86,7 @@ function currentSnapshot(
 }
 
 function pendingSandboxSnapshot(threadId: string): {
-  state: ReturnType<typeof createRuntimeHostStateInitialStateV1>;
+  state: ReturnType<typeof createRuntimeHostStateInitialState>;
   events: RuntimeEvent[];
 } {
   const recordedAt = new Date().toISOString();
@@ -121,11 +129,11 @@ function pendingSandboxSnapshot(threadId: string): {
       type: 'capability.sandbox_preparation_intent_recorded',
       invocationId: 'sandbox-invocation',
       ...intentBody,
-      intentDigest: sandboxPreparationIntentDigestV1(intentBody),
+      intentDigest: sandboxPreparationIntentDigest(intentBody),
       recordedAt,
     },
   ];
-  let state = createRuntimeHostStateInitialStateV1({
+  let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'store-test-user',
@@ -136,7 +144,7 @@ function pendingSandboxSnapshot(threadId: string): {
 }
 
 function pendingSubagentSnapshot(threadId: string) {
-  const state = createRuntimeHostStateInitialStateV1({
+  const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'store-test-user',
@@ -196,7 +204,7 @@ function tableExists(dbPath: string, table: string): boolean {
 
 // ── 测试套件 / Test suites ──
 
-describe('openState25Store4ForTestV1', () => {
+describe('openStore', () => {
   let tmpDir: string;
   let dbPath: string;
 
@@ -211,22 +219,22 @@ describe('openState25Store4ForTestV1', () => {
 
   // 验证创建实例后自动创建所需的表 / Verify required tables are created on instantiation
   test('creates runtime_events and runtime_snapshots tables on init', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.close();
 
     expect(tableExists(dbPath, 'runtime_events')).toBe(true);
     expect(tableExists(dbPath, 'runtime_snapshots')).toBe(true);
   });
 
-  // 验证事件表创建了 thread_id 索引 / Verify index on runtime_events(thread_id) is created
-  test('creates index on runtime_events(thread_id)', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+  // 验证事件表创建了 session_id 索引 / Verify index on runtime_events(session_id) is created
+  test('creates index on runtime_events(session_id)', () => {
+    const store = openStore(dbPath);
     store.close();
 
     const db = new Database(dbPath);
     const row = db
       .query<{ name: string }, []>(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_runtime_events_thread'",
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='runtime_events_session_sequence'",
       )
       .get();
     db.close();
@@ -235,7 +243,7 @@ describe('openState25Store4ForTestV1', () => {
 
   // 验证仅内存模式也能正常工作 / Verify in-memory mode works correctly
   test('works with :memory: database', () => {
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openStore(':memory:');
     const event = makeEvent({
       type: 'tool.queued',
       toolCallId: 'mem-1',
@@ -250,7 +258,7 @@ describe('openState25Store4ForTestV1', () => {
   });
 
   test('persists a provider:model route for each session', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.setSessionModelRoute('thread-model', {
       provider: 'ollama',
       name: 'qwen2.5-coder:7b',
@@ -265,7 +273,7 @@ describe('openState25Store4ForTestV1', () => {
   });
 
   test('supports DELETE journal mode for immediate portable close and reopen', () => {
-    const store = openState25Store4ForTestV1(dbPath, {
+    const store = openStore(dbPath, {
       options: { journalMode: 'delete' },
     });
     store.close();
@@ -277,7 +285,7 @@ describe('openState25Store4ForTestV1', () => {
   });
 
   test('selects a platform-safe default journal mode', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.close();
 
     const reopened = new Database(dbPath);
@@ -286,7 +294,7 @@ describe('openState25Store4ForTestV1', () => {
     expect(mode?.journal_mode).toBe(process.platform === 'win32' ? 'delete' : 'wal');
   });
 
-  test('rejects an unmarked StateSessionStorageV1 without moving or rewriting it', () => {
+  test('rejects an unmarked StateSessionStorage without moving or rewriting it', () => {
     const db = new Database(dbPath);
     db.run(
       'CREATE TABLE runtime_events (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL, created_at INTEGER)',
@@ -296,12 +304,12 @@ describe('openState25Store4ForTestV1', () => {
     );
     db.close();
 
-    expect(() => openState25Store4ForTestV1(dbPath)).toThrow('Runtime format is incompatible');
+    expect(() => openStore(dbPath)).toThrow('Runtime format is incompatible');
     expect(existsSync(dbPath)).toBe(true);
     expect(existsSync(`${dbPath}.legacy`)).toBe(false);
   });
 
-  test('rejects an unmarked StateSessionStorageV1 whose schema exists only in WAL without rewriting it', () => {
+  test('rejects an unmarked StateSessionStorage whose schema exists only in WAL without rewriting it', () => {
     const legacy = new Database(dbPath);
     legacy.run('PRAGMA journal_mode = WAL');
     legacy.run('PRAGMA wal_autocheckpoint = 0');
@@ -315,7 +323,7 @@ describe('openState25Store4ForTestV1', () => {
     const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
     const before = new Map(paths.map((path) => [path, digest(path)]));
 
-    expect(() => openState25Store4ForTestV1(dbPath)).toThrow('Runtime format is incompatible');
+    expect(() => openStore(dbPath)).toThrow('Runtime format is incompatible');
     expect(new Map(paths.map((path) => [path, digest(path)]))).toEqual(before);
     expect(
       legacy
@@ -328,25 +336,25 @@ describe('openState25Store4ForTestV1', () => {
   });
 });
 
-describe('state25Store4PathForTestV1', () => {
+describe('stateStorePathForTest', () => {
   test('preserves :memory: instead of creating a sidecar filename', () => {
-    expect(state25Store4PathForTestV1(':memory:')).toBe(':memory:');
+    expect(stateStorePathForTest(':memory:')).toBe(':memory:');
   });
 
   test('derives a sidecar database path for persistent checkpoints', () => {
-    expect(state25Store4PathForTestV1('/tmp/checkpoints.sqlite')).toBe(
-      '/tmp/checkpoints.runtime.db',
+    expect(stateStorePathForTest('/tmp/checkpoints.sqlite')).toBe(
+      '/tmp/checkpoints.runtime-state-store.db',
     );
   });
 });
 
 describe('appendEvents + loadEventsStrict round-trip', () => {
-  let store: StateSessionStorageV1;
+  let store: StateSessionStorage;
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    store = openStore(join(tmpDir, 'runtime.db'));
   });
 
   afterEach(() => {
@@ -471,12 +479,12 @@ describe('appendEvents + loadEventsStrict round-trip', () => {
 });
 
 describe('loadEventsStrict with since parameter', () => {
-  let store: StateSessionStorageV1;
+  let store: StateSessionStorage;
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    store = openStore(join(tmpDir, 'runtime.db'));
   });
 
   afterEach(() => {
@@ -524,12 +532,12 @@ describe('loadEventsStrict with since parameter', () => {
 });
 
 describe('saveSnapshot + loadSnapshot round-trip', () => {
-  let store: StateSessionStorageV1;
+  let store: StateSessionStorage;
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    store = openStore(join(tmpDir, 'runtime.db'));
   });
 
   afterEach(() => {
@@ -612,12 +620,12 @@ describe('saveSnapshot + loadSnapshot round-trip', () => {
 });
 
 describe('loadSnapshot returns null when no snapshot', () => {
-  let store: StateSessionStorageV1;
+  let store: StateSessionStorage;
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    store = openStore(join(tmpDir, 'runtime.db'));
   });
 
   afterEach(() => {
@@ -631,11 +639,11 @@ describe('loadSnapshot returns null when no snapshot', () => {
     expect(result).toBeNull();
   });
 
-  // 验证事件数据存在但无对应快照时也返回 null / Verify events do not affect snapshot query
-  test('returns null for thread that has events but no snapshot', () => {
+  test('requires a State identity snapshot before accepting session events', () => {
     store.appendEvents('thread-no-snap', [makeEvent({ toolCallId: 'evt' })]);
-    const result = store.loadSnapshot('thread-no-snap');
-    expect(result).toBeNull();
+    const result =
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>('thread-no-snap');
+    expect(result?.session.threadId).toBe('thread-no-snap');
   });
 });
 
@@ -649,7 +657,7 @@ describe('close()', () => {
   // 验证 close 后追加事件不会抛出异常 / Verify appendEvents is silent after close
   test('appendEvents is silent after close', () => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    const store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    const store = openStore(join(tmpDir, 'runtime.db'));
 
     // 先写入一些事件以确认正常写入 / Write some events first to confirm normal operation
     store.appendEvents('thread-f', [makeEvent({ toolCallId: 'before-close' })]);
@@ -666,7 +674,7 @@ describe('close()', () => {
   // 验证 close 后加载事件返回空数组 / Verify loadEventsStrict returns empty after close
   test('loadEventsStrict returns empty array after close', () => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    const store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    const store = openStore(join(tmpDir, 'runtime.db'));
     store.appendEvents('thread-g', [makeEvent({ toolCallId: 'pre-close' })]);
 
     store.close();
@@ -678,7 +686,7 @@ describe('close()', () => {
   // 验证 close 后保存快照不抛异常 / Verify saveSnapshot is silent after close
   test('saveSnapshot is silent after close', () => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    const store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    const store = openStore(join(tmpDir, 'runtime.db'));
 
     store.close();
 
@@ -690,7 +698,7 @@ describe('close()', () => {
   // 验证 close 后加载快照返回 null / Verify loadSnapshot returns null after close
   test('loadSnapshot returns null after close', () => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    const store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    const store = openStore(join(tmpDir, 'runtime.db'));
     store.saveSnapshot('thread-i', currentSnapshot('thread-i', { alive: true }));
 
     store.close();
@@ -702,19 +710,19 @@ describe('close()', () => {
   // 验证 double close 安全：不抛异常 / Verify double close is safe (idempotent)
   test('double close does not throw', () => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    const store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    const store = openStore(join(tmpDir, 'runtime.db'));
     store.close();
     expect(() => store.close()).not.toThrow();
   });
 });
 
 describe('edge cases', () => {
-  let store: StateSessionStorageV1;
+  let store: StateSessionStorage;
   let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(process.cwd(), 'kite-code-runtime-store-'));
-    store = openState25Store4ForTestV1(join(tmpDir, 'runtime.db'));
+    store = openStore(join(tmpDir, 'runtime.db'));
   });
 
   afterEach(() => {
@@ -852,14 +860,14 @@ describe('persistence across close/reopen', () => {
 
   // 验证事件在 close 后重新打开仍然存在 / Verify events survive close+reopen
   test('events survive close and reopen', () => {
-    const s1 = openState25Store4ForTestV1(dbPath);
+    const s1 = openStore(dbPath);
     s1.appendEvents('thread-p', [
       makeEvent({ toolCallId: 'evt-1' }),
       makeEvent({ toolCallId: 'evt-2' }),
     ]);
     s1.close();
 
-    const s2 = openState25Store4ForTestV1(dbPath);
+    const s2 = openStore(dbPath);
     const loaded = s2.loadEventsStrict('thread-p');
     expect(loaded.length).toBe(2);
     expect((loaded[0]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
@@ -873,11 +881,11 @@ describe('persistence across close/reopen', () => {
 
   // 验证快照在 close 后重新打开仍然存在 / Verify snapshots survive close+reopen
   test('snapshots survive close and reopen', () => {
-    const s1 = openState25Store4ForTestV1(dbPath);
+    const s1 = openStore(dbPath);
     s1.saveSnapshot('thread-q', currentSnapshot('thread-q', { field: 'persisted', count: 99 }));
     s1.close();
 
-    const s2 = openState25Store4ForTestV1(dbPath);
+    const s2 = openStore(dbPath);
     const snap = s2.loadSnapshot<{ field: string; count: number }>('thread-q');
     expect(snap).not.toBeNull();
     expect(snap!.field).toBe('persisted');
@@ -887,12 +895,12 @@ describe('persistence across close/reopen', () => {
 
   // 验证自增 ID 跨会话递增 / Verify auto-increment IDs continue across sessions
   test('event IDs continue incrementing across sessions', () => {
-    const s1 = openState25Store4ForTestV1(dbPath);
+    const s1 = openStore(dbPath);
     s1.appendEvents('thread-r', [makeEvent({ toolCallId: 'batch1' })]);
     const ids1 = s1.loadEventsStrict('thread-r').map((e) => e.id);
     s1.close();
 
-    const s2 = openState25Store4ForTestV1(dbPath);
+    const s2 = openStore(dbPath);
     s2.appendEvents('thread-r', [makeEvent({ toolCallId: 'batch2' })]);
     const all = s2.loadEventsStrict('thread-r');
     s2.close();
@@ -921,7 +929,7 @@ describe('persistence edge cases', () => {
 
   // 验证快照在 close/reopen 周期后仍然存在 / Verify snapshot survives close/reopen cycle
   test('snapshot survives close and reopen cycle', () => {
-    const s1 = openState25Store4ForTestV1(dbPath);
+    const s1 = openStore(dbPath);
     s1.saveSnapshot(
       'thread-snap-cycle',
       currentSnapshot('thread-snap-cycle', {
@@ -933,7 +941,7 @@ describe('persistence edge cases', () => {
     s1.close();
 
     // Reopen
-    const s2 = openState25Store4ForTestV1(dbPath);
+    const s2 = openStore(dbPath);
     const loaded = s2.loadSnapshot<{
       phase: string;
       counter: number;
@@ -949,7 +957,7 @@ describe('persistence edge cases', () => {
 
   // 验证不同线程的事件和快照完全隔离 / Verify events and snapshots are fully isolated across threads
   test('thread isolation for both events and snapshots', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('thread-iso-a', [makeEvent({ toolCallId: 'a1' })]);
     store.appendEvents('thread-iso-b', [makeEvent({ toolCallId: 'b1' })]);
     store.saveSnapshot('thread-iso-a', currentSnapshot('thread-iso-a', { version: 1 }));
@@ -970,7 +978,7 @@ describe('persistence edge cases', () => {
 
   // 验证大批量事件写入和读取 / Verify large batch of events round-trips correctly
   test('round-trips a large batch of events (120 events)', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const events: RuntimeEvent[] = [];
     for (let i = 0; i < 120; i++) {
       events.push(makeEvent({ type: 'tool.started', toolCallId: `call-${i}` }));
@@ -990,7 +998,7 @@ describe('persistence edge cases', () => {
 
   // 验证特殊字符和 Unicode 在事件 payload 中正确保存 / Verify special chars and Unicode survive round-trip
   test('round-trips events with special characters and Unicode', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const event: RuntimeEvent = {
       type: 'tool.finished',
       toolCallId: 'call-special',
@@ -1016,7 +1024,7 @@ describe('persistence edge cases', () => {
 
   // 验证复杂嵌套快照对象正确保存 / Verify complex nested snapshots round-trip
   test('round-trips complex nested snapshot state', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const complexState = {
       tools: {
         calls: {
@@ -1067,7 +1075,7 @@ describe('persistence edge cases', () => {
 
   // 验证不存在线程的快照返回 null / Verify non-existent thread snapshot returns null
   test('loadSnapshot returns null for completely new thread', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const result = store.loadSnapshot('completely-new-thread');
     expect(result).toBeNull();
     store.close();
@@ -1075,7 +1083,7 @@ describe('persistence edge cases', () => {
 
   // 验证自增 ID 在空批次后仍能继续 / Verify auto-increment continues after empty batch
   test('auto-increment IDs continue after empty batch append', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('thread-seq', [makeEvent({ toolCallId: 'first' })]);
     const idsAfterFirst = store.loadEventsStrict('thread-seq').map((e) => e.id);
 
@@ -1092,7 +1100,7 @@ describe('persistence edge cases', () => {
 
   // 验证多线程并发快照覆盖不互相干扰 / Verify snapshot upsert across threads is isolated
   test('snapshot upsert across threads does not interfere', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.saveSnapshot('t1', currentSnapshot('t1', { version: 1, data: 'first' }));
     store.saveSnapshot('t2', currentSnapshot('t2', { version: 100, data: 'second' }));
     store.saveSnapshot('t1', currentSnapshot('t1', { version: 2, data: 'first-updated' }));
@@ -1106,7 +1114,7 @@ describe('persistence edge cases', () => {
   });
 
   test('named snapshots retain a recovery point and its event position', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('rewindable', [makeEvent({ toolCallId: 'before-rewind' })]);
     const position = store.getLastEventPosition('rewindable');
     store.saveNamedSnapshot(
@@ -1125,7 +1133,7 @@ describe('persistence edge cases', () => {
   });
 
   test('restoreNamedSnapshot truncates later events and restores the saved state', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('rewind', [makeEvent({ toolCallId: 'before' })]);
     store.saveNamedSnapshot('rewind', 'safe', currentSnapshot('rewind', { testVersion: 1 }));
     store.appendEvents('rewind', [makeEvent({ toolCallId: 'after' })]);
@@ -1137,7 +1145,7 @@ describe('persistence edge cases', () => {
   });
 
   test('restoreNamedSnapshot validates thread ownership before truncating events', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('rewind-owner', [makeEvent({ toolCallId: 'before' })]);
     store.saveNamedSnapshot(
       'rewind-owner',
@@ -1148,12 +1156,15 @@ describe('persistence edge cases', () => {
 
     expect(store.restoreNamedSnapshot('rewind-owner', 'cross-thread')).toBe(false);
     expect(store.loadEventsStrict('rewind-owner')).toHaveLength(2);
-    expect(store.loadSnapshot('rewind-owner')).toBeNull();
+    expect(
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>('rewind-owner')
+        ?.session.threadId,
+    ).toBe('rewind-owner');
     store.close();
   });
 
   test('named restore and fork reject a pre-cutover epoch before mutating source or target', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('old-epoch-source', [makeEvent({ toolCallId: 'source-before' })]);
     expect(() =>
       store.saveNamedSnapshot(
@@ -1177,12 +1188,15 @@ describe('persistence edge cases', () => {
       'tool.started',
     ]);
     expect(store.loadEventsStrict('existing-target')).toHaveLength(1);
-    expect(store.loadSnapshot('existing-target')).toBeNull();
+    expect(
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>('existing-target')
+        ?.session.threadId,
+    ).toBe('existing-target');
     store.close();
   });
 
   test('restoreNamedSnapshot removes recovery points beyond the restored position', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('rewind-prune', [makeEvent({ toolCallId: 'first' })]);
     store.saveNamedSnapshot(
       'rewind-prune',
@@ -1204,7 +1218,7 @@ describe('persistence edge cases', () => {
   });
 
   test('lists the next user message and recorded file impact for rewind previews', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('rewind-preview', [
       {
         type: 'user.message_appended',
@@ -1241,7 +1255,7 @@ describe('persistence edge cases', () => {
   });
 
   test('forkSession rebinds the persisted state to the target thread', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('source', [makeEvent({ toolCallId: 'source-call' })]);
     store.setSessionModelRoute('source', {
       provider: 'opencode_go',
@@ -1300,7 +1314,7 @@ describe('persistence edge cases', () => {
   });
 
   test('forkCurrentSession omits only its active pending interaction request', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const approval = { toolName: 'shell_execute' } as unknown as ToolApprovalPayload;
     store.appendEvents('source', [
       { type: 'tool.queued', toolCallId: 'shell-1', name: 'shell_execute', args: {} },
@@ -1313,7 +1327,7 @@ describe('persistence edge cases', () => {
     ]);
     const sourceState = currentSnapshot('source', {
       session: { threadId: 'source' },
-    }) as unknown as ReturnType<typeof createRuntimeHostStateInitialStateV1>;
+    }) as unknown as ReturnType<typeof createRuntimeHostStateInitialState>;
     sourceState.tools.calls['shell-1'] = {
       toolCallId: 'shell-1',
       modelMessageId: 'model-1',
@@ -1351,7 +1365,7 @@ describe('persistence edge cases', () => {
   });
 
   test('forks cannot copy or race source-owned pending sandbox cleanup authority', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const pending = pendingSandboxSnapshot('sandbox-source');
     store.appendEvents('sandbox-source', pending.events);
     store.saveSnapshot('sandbox-source', pending.state);
@@ -1366,14 +1380,14 @@ describe('persistence edge cases', () => {
     expect(store.loadSnapshot('current-fork')).toBeNull();
     expect(store.loadSnapshot('named-fork')).toBeNull();
     expect(
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>('sandbox-source')
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>('sandbox-source')
         ?.capabilities.invocations['sandbox-invocation']?.sandboxPreparationIntent,
     ).toBeDefined();
     store.close();
   });
 
   test('forks reject pending Subagent Provider authority before creating the target', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const pending = pendingSubagentSnapshot('subagent-source');
     store.saveSnapshot('subagent-source', pending);
     store.saveNamedSnapshot('subagent-source', 'pending-subagent', pending);
@@ -1396,7 +1410,7 @@ describe('persistence edge cases', () => {
     expect(store.loadSnapshot('current-subagent-fork')).toBeNull();
     expect(store.loadSnapshot('named-subagent-fork')).toBeNull();
     expect(
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>('subagent-source')
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>('subagent-source')
         ?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle?.status,
     ).toBe('handle_recorded');
 
@@ -1431,19 +1445,19 @@ describe('persistence edge cases', () => {
     ).toBe(true);
     for (const target of ['terminal-current-fork', 'terminal-named-fork']) {
       expect(
-        store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(target)
+        store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>(target)
           ?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle,
       ).toBeUndefined();
     }
     expect(
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>('subagent-source')
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialState>>('subagent-source')
         ?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle?.status,
     ).toBe('cleanup_completed');
     store.close();
   });
 
   test('forkSession preserves event timestamps and envelope metadata', () => {
-    let store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents(
       'metadata-source',
       [makeEvent({ toolCallId: 'metadata-call' })],
@@ -1464,15 +1478,6 @@ describe('persistence edge cases', () => {
         revision: 7,
       }),
     );
-    store.close();
-
-    const database = new Database(dbPath);
-    database
-      .query('UPDATE runtime_events SET created_at = ? WHERE thread_id = ?')
-      .run(1_700_000_123, 'metadata-source');
-    database.close();
-
-    store = openState25Store4ForTestV1(dbPath);
     expect(
       store.forkSession('metadata-source', 'safe', 'metadata-fork', TEST_FORK_RECOVERY_IDENTITY),
     ).toBe(true);
@@ -1484,8 +1489,8 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
-  test('forkSession fails closed before mutating the target when source events are corrupt', () => {
-    let store = openState25Store4ForTestV1(dbPath);
+  test('reopen rejects corrupt source events without mutating the database', () => {
+    const store = openStore(dbPath);
     store.appendEvents('corrupt-source', [makeEvent({ toolCallId: 'corrupt-call' })]);
     store.saveNamedSnapshot('corrupt-source', 'safe', currentSnapshot('corrupt-source'));
     store.appendEvents('existing-target', [makeEvent({ toolCallId: 'keep-call' })]);
@@ -1498,26 +1503,17 @@ describe('persistence edge cases', () => {
 
     const database = new Database(dbPath);
     database
-      .query('UPDATE runtime_events SET event_json = ? WHERE thread_id = ?')
+      .query('UPDATE runtime_events SET event_json = ? WHERE session_id = ?')
       .run('{broken-json', 'corrupt-source');
     database.close();
 
-    store = openState25Store4ForTestV1(dbPath);
-    expect(
-      store.forkSession('corrupt-source', 'safe', 'existing-target', TEST_FORK_RECOVERY_IDENTITY),
-    ).toBe(false);
-    expect(store.loadEventsStrict('existing-target')).toHaveLength(1);
-    expect(
-      store.loadNamedSnapshot<{ session: { threadId: string }; marker: string }>(
-        'existing-target',
-        'keep',
-      ),
-    ).toEqual(expect.objectContaining({ marker: 'keep' }));
-    store.close();
+    const before = createHash('sha256').update(readFileSync(dbPath)).digest('hex');
+    expect(() => openStore(dbPath)).toThrow('Runtime format is incompatible');
+    expect(createHash('sha256').update(readFileSync(dbPath)).digest('hex')).toBe(before);
   });
 
   test('forkSession rejects a parseable but structurally invalid selected snapshot', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('invalid-state-source', [makeEvent({ toolCallId: 'source-call' })]);
     expect(() =>
       store.saveNamedSnapshot('invalid-state-source', 'invalid', 'not-a-runtime-state'),
@@ -1537,7 +1533,7 @@ describe('persistence edge cases', () => {
   });
 
   test('forkSession preserves earlier recovery points with remapped event positions', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('rewind-source', [
       {
         type: 'user.message_appended',
@@ -1625,7 +1621,7 @@ describe('persistence edge cases', () => {
   // ── ADR-0042 §4：文件原像 / file pre-images ──
 
   test('recordFilePreimage keeps the earliest pre-image per path within a checkpoint window', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('preimg', [makeEvent({ toolCallId: 'turn-1' })]);
     store.saveNamedSnapshot('preimg', 'turn-1', currentSnapshot('preimg', { version: 1 }));
 
@@ -1675,7 +1671,7 @@ describe('persistence edge cases', () => {
   });
 
   test('fileRestorePlan reports created files for deletion and ignores pre-checkpoint captures', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('preimg-plan', [makeEvent({ toolCallId: 'a' })]);
     store.recordFilePreimage('preimg-plan', 'ancient.md', 'before checkpoint', true);
     store.saveNamedSnapshot('preimg-plan', 'cp', currentSnapshot('preimg-plan', { version: 1 }));
@@ -1708,7 +1704,7 @@ describe('persistence edge cases', () => {
   });
 
   test('restoreNamedSnapshot truncates pre-images beyond the restored position', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('preimg-trunc', [makeEvent({ toolCallId: 'a' })]);
     store.saveNamedSnapshot(
       'preimg-trunc',
@@ -1725,7 +1721,7 @@ describe('persistence edge cases', () => {
   });
 
   test('deleteSession cascades file pre-images', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('preimg-gone', [makeEvent({ toolCallId: 'a' })]);
     store.saveNamedSnapshot('preimg-gone', 'cp', currentSnapshot('preimg-gone', { version: 1 }));
     store.recordFilePreimage('preimg-gone', 'notes.md', 'x', true);
@@ -1735,7 +1731,7 @@ describe('persistence edge cases', () => {
   });
 
   test('forkSession copies pre-images up to the fork point only', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('preimg-fork', [makeEvent({ toolCallId: 'a' })]);
     store.recordFilePreimage('preimg-fork', 'notes.md', 'turn-1 pre-image', true);
     store.saveNamedSnapshot('preimg-fork', 'cp', currentSnapshot('preimg-fork'));
@@ -1756,7 +1752,7 @@ describe('persistence edge cases', () => {
   });
 
   test('getNamedSnapshotEntry resolves position and timestamp, null when absent', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     store.appendEvents('preimg-entry', [makeEvent({ toolCallId: 'a' })]);
     store.saveNamedSnapshot('preimg-entry', 'cp', currentSnapshot('preimg-entry', { version: 1 }));
     const entry = store.getNamedSnapshotEntry('preimg-entry', 'cp');
@@ -1766,9 +1762,9 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
-  test('effect leases are exclusive across StateSessionStorageV1 connections and recover after release', () => {
-    const first = openState25Store4ForTestV1(dbPath);
-    const second = openState25Store4ForTestV1(dbPath);
+  test('effect leases are exclusive across StateSessionStorage connections and recover after release', () => {
+    const first = openStore(dbPath);
+    const second = openStore(dbPath);
     expect(
       first.tryAcquireEffectLease('lease-thread', 'compact-1', 'owner-a', Date.now() + 60_000),
     ).toBe(true);
@@ -1784,7 +1780,7 @@ describe('persistence edge cases', () => {
   });
 
   test('rejects renewal and atomic commits after an effect lease expires', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const now = Date.now();
     expect(store.tryAcquireEffectLease('lease-fence', 'compact-1', 'owner-a', now + 60_000)).toBe(
       true,
@@ -1802,7 +1798,7 @@ describe('persistence edge cases', () => {
     const database = new Database(dbPath);
     database
       .query(
-        'UPDATE runtime_effect_leases SET expires_at_ms = ? WHERE thread_id = ? AND effect_id = ?',
+        'UPDATE runtime_effect_leases SET expires_at_ms = ? WHERE session_id = ? AND effect_id = ?',
       )
       .run(now - 1, 'lease-fence', 'compact-1');
     database.close();
@@ -1828,7 +1824,7 @@ describe('persistence edge cases', () => {
   });
 
   test('atomically rejects a guarded commit from a non-owner', () => {
-    const store = openState25Store4ForTestV1(dbPath);
+    const store = openStore(dbPath);
     const now = Date.now();
     expect(store.tryAcquireEffectLease('lease-owner', 'compact-1', 'owner-a', now + 60_000)).toBe(
       true,
@@ -1849,8 +1845,8 @@ describe('persistence edge cases', () => {
   });
 
   test('rejects stale snapshot writers and late writes after deletion', () => {
-    const first = openState25Store4ForTestV1(dbPath);
-    const second = openState25Store4ForTestV1(dbPath);
+    const first = openStore(dbPath);
+    const second = openStore(dbPath);
     first.saveSnapshot('cas-thread', currentSnapshot('cas-thread', { revision: 0 }));
     first.appendEventsAndSnapshot(
       'cas-thread',

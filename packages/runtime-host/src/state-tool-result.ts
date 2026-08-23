@@ -3,12 +3,12 @@ import type {
   CapabilityResult,
   ShellGrantUsed,
   WorkspaceAccess,
-  WorkspaceFilesystemObservationRecordV1,
+  WorkspaceFilesystemObservationRecord,
 } from '@kite/runtime-contract';
-import type { SandboxExecutionProviderFailureCodeV1 } from '@kite/runtime-spi';
+import type { SandboxExecutionProviderFailureCode } from '@kite/runtime-spi';
 
 /** Generic shell-shaped result carried across Host/App execution seams. */
-export interface RuntimeHostShellResultV1 {
+export interface RuntimeHostShellResult {
   ok: boolean;
   command: string;
   exitCode: number;
@@ -16,7 +16,7 @@ export interface RuntimeHostShellResultV1 {
   stderr: string;
   terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
   sandboxFailure?: {
-    code: SandboxExecutionProviderFailureCodeV1;
+    code: SandboxExecutionProviderFailureCode;
     stage: 'pre_dispatch' | 'post_dispatch';
     cleanupConfirmed: boolean;
   };
@@ -29,7 +29,7 @@ export interface RuntimeHostShellResultV1 {
 }
 
 /** Structured failure guidance shared by Host/App execution adapters. */
-export interface RuntimeHostToolFailureV1 {
+export interface RuntimeHostToolFailure {
   message: 'Tool execution failed.';
   tool: string;
   reason: string;
@@ -40,18 +40,18 @@ export interface RuntimeHostToolFailureV1 {
  * Generic structural terminal result.  The Host owns only this transport
  * shape; the optional subagent payload remains an opaque caller type.
  */
-export type RuntimeHostToolExecutionResultV1<
+export type RuntimeHostToolExecutionResult<
   TSubagentResult = unknown,
   TIntent = unknown,
-> = RuntimeHostShellResultV1 & {
+> = RuntimeHostShellResult & {
   runtimeEvents?: RuntimeEvent[];
-  classifierAdviceV1?: import('@kite/agent-kernel').ToolOutcomeClassifierAdviceV1;
+  classifierAdvice?: import('@kite/agent-kernel').ToolOutcomeClassifierAdvice;
   classifierDiagnostic?: 'classifier_threw';
   resultMeta?: AgentToolResultMeta;
   status?: 'success' | 'error' | 'rejected' | 'exhausted';
   approvalRoute?: 'user' | 'auto_review';
   tool?: string;
-  failure?: RuntimeHostToolFailureV1;
+  failure?: RuntimeHostToolFailure;
   path?: string;
   action?: {
     intent?: TIntent;
@@ -62,10 +62,10 @@ export type RuntimeHostToolExecutionResultV1<
   totalLines?: number;
   subagentResult?: TSubagentResult;
   capabilityResult?: CapabilityResult;
-  filesystemObservation?: WorkspaceFilesystemObservationRecordV1;
+  filesystemObservation?: WorkspaceFilesystemObservationRecord;
 };
 
-export interface RuntimeHostToolExecutionSideEffectsV1 {
+export interface RuntimeHostToolExecutionSideEffects {
   plan?: AgentPlan;
   workspaceAccess?: WorkspaceAccess;
   authorization?: import('@kite/agent-kernel').AgentAuthorizationState;

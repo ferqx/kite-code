@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import type { BuiltinModelToolCatalogEntryV1 } from '@kite/builtin-runtime';
+import type { BuiltinModelToolCatalogEntry } from '@kite/builtin-runtime';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjectionV1,
-  formatBuiltinToolParseErrorV1,
-  formatBuiltinToolSchemaHintV1,
+  createBuiltinToolCatalogProjection,
+  formatBuiltinToolParseError,
+  formatBuiltinToolSchemaHint,
 } from '@kite/builtin-runtime';
-import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 
-function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
-  const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
-  const projection = createBuiltinToolCatalogProjectionV1(registry, {
+function modelEntry(name: string): BuiltinModelToolCatalogEntry {
+  const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+  const projection = createBuiltinToolCatalogProjection(registry, {
     turnContext: {
       toolSearchEnabled: true,
       hasTaskAdapter: true,
@@ -18,11 +18,11 @@ function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
       brokeredGitFeatureRevision: 'brokered-git-r1',
       activeSkillFrameIds: ['skill-frame'],
       availableSkillIds: ['skill'],
-      featureFlags: { brokeredGitV1: true, skillWorkflowV1: true, skillActivationV2: true },
+      featureFlags: { brokeredGit: true, skillWorkflow: true, skillActivation: true },
     },
   });
   const entry = projection.entries.find(
-    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
       candidate.visibility === 'model' && candidate.name === name,
   );
   if (!entry) throw new Error(`Builtin model catalog entry is missing: ${name}`);
@@ -31,28 +31,28 @@ function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
 
 describe('Builtin catalog schema hint', () => {
   test('returns ask_user schema', () => {
-    const hint = formatBuiltinToolSchemaHintV1(modelEntry('ask_user'));
+    const hint = formatBuiltinToolSchemaHint(modelEntry('ask_user'));
     expect(hint).toContain('question');
     expect(hint).toContain('options');
     expect(hint).toContain('recommended');
   });
 
   test('returns update_plan schema', () => {
-    const hint = formatBuiltinToolSchemaHintV1(modelEntry('update_plan'));
+    const hint = formatBuiltinToolSchemaHint(modelEntry('update_plan'));
     expect(hint).toContain('plan_id');
     expect(hint).toContain('updates');
     expect(hint).toContain('complete_plan');
   });
 
   test('returns shell_execute schema', () => {
-    const hint = formatBuiltinToolSchemaHintV1(modelEntry('shell_execute'));
+    const hint = formatBuiltinToolSchemaHint(modelEntry('shell_execute'));
     expect(hint).toContain('command');
     expect(hint).toContain('timeout_ms');
     expect(hint).not.toContain('exitCode');
   });
 
   test('returns MCP tool hint', () => {
-    const hint = formatBuiltinToolParseErrorV1({
+    const hint = formatBuiltinToolParseError({
       toolName: 'mcp__server__tool',
       rawArgs: '{}',
       parseError: 'invalid arguments',
@@ -62,7 +62,7 @@ describe('Builtin catalog schema hint', () => {
   });
 
   test('returns fallback for unknown tool', () => {
-    const hint = formatBuiltinToolParseErrorV1({
+    const hint = formatBuiltinToolParseError({
       toolName: 'nonexistent_tool',
       rawArgs: '{}',
       parseError: 'invalid arguments',
@@ -74,7 +74,7 @@ describe('Builtin catalog schema hint', () => {
 
 describe('Builtin catalog parse error formatter', () => {
   test('includes tool name, raw args, parse error, and schema hint', () => {
-    const result = formatBuiltinToolParseErrorV1({
+    const result = formatBuiltinToolParseError({
       toolName: 'ask_user',
       rawArgs: '{question: 123 invalid}',
       parseError: "Expected property name or '}' at line 1",
@@ -89,7 +89,7 @@ describe('Builtin catalog parse error formatter', () => {
 
   test('truncates long raw args', () => {
     const longArgs = 'x'.repeat(2000);
-    const result = formatBuiltinToolParseErrorV1({
+    const result = formatBuiltinToolParseError({
       toolName: 'shell_execute',
       rawArgs: longArgs,
       parseError: 'parse error',
@@ -100,7 +100,7 @@ describe('Builtin catalog parse error formatter', () => {
   });
 
   test('formats error for unknown tool', () => {
-    const result = formatBuiltinToolParseErrorV1({
+    const result = formatBuiltinToolParseError({
       toolName: 'unknown',
       rawArgs: 'bad args',
       parseError: 'parse error',

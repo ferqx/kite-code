@@ -2,11 +2,11 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type {
-  CapabilityEffectsV1,
-  CapabilityExecutionMechanismV1,
-  RuntimeJsonValueV1,
+  CapabilityEffects,
+  CapabilityExecutionMechanism,
+  RuntimeJsonValue,
 } from '@kite/runtime-spi';
-import type { BuiltinRuntimeStateViewV1 } from './runtime-view';
+import type { BuiltinRuntimeStateView } from './runtime-view';
 import { countTokens } from './token-counter';
 
 const MAX_FILE_BYTES = 16 * 1024;
@@ -32,12 +32,12 @@ export interface ProjectInstructionSnapshot {
   warnings: readonly string[];
 }
 
-export interface ProjectInstructionGuardTargetV1 {
+export interface ProjectInstructionGuardTarget {
   readonly targetPath: string;
   readonly reason: 'filesystem_write' | 'shell' | 'code_subagent';
 }
 
-export type ProjectInstructionSnapshotGuardResultV1 =
+export type ProjectInstructionSnapshotGuardResult =
   | { readonly status: 'accepted' }
   | {
       readonly status: 'changed';
@@ -50,18 +50,18 @@ export type ProjectInstructionSnapshotGuardResultV1 =
  * Project the guarded instruction scope from the frozen catalog facts and
  * canonical parser output. No operation-name schema/effect table lives here.
  */
-export function projectProjectInstructionGuardTargetV1(input: {
-  readonly executionMechanism: CapabilityExecutionMechanismV1;
-  readonly declaredFilesystemEffect: CapabilityEffectsV1['filesystem'];
-  readonly effectiveFilesystemEffect: CapabilityEffectsV1['filesystem'];
-  readonly canonicalArguments: Readonly<Record<string, RuntimeJsonValueV1>>;
-}): Readonly<ProjectInstructionGuardTargetV1> | null {
+export function projectProjectInstructionGuardTarget(input: {
+  readonly executionMechanism: CapabilityExecutionMechanism;
+  readonly declaredFilesystemEffect: CapabilityEffects['filesystem'];
+  readonly effectiveFilesystemEffect: CapabilityEffects['filesystem'];
+  readonly canonicalArguments: Readonly<Record<string, RuntimeJsonValue>>;
+}): Readonly<ProjectInstructionGuardTarget> | null {
   if (
     input.executionMechanism === 'filesystem' &&
     (input.declaredFilesystemEffect === 'write' || input.effectiveFilesystemEffect === 'write')
   ) {
     return Object.freeze({
-      targetPath: nonEmptyPathV1(input.canonicalArguments.path) ?? '.',
+      targetPath: nonEmptyPath(input.canonicalArguments.path) ?? '.',
       reason: 'filesystem_write' as const,
     });
   }
@@ -77,12 +77,12 @@ export function projectProjectInstructionGuardTargetV1(input: {
   return null;
 }
 
-/** RMV1-equivalent ContextSource guard over one explicit model-visible snapshot. */
-export function checkProjectInstructionSnapshotFreshnessV1(input: {
+/** RM-equivalent ContextSource guard over one explicit model-visible snapshot. */
+export function checkProjectInstructionSnapshotFreshness(input: {
   readonly workspace: string;
   readonly visibleSnapshot: Readonly<ProjectInstructionSnapshot>;
-  readonly target: Readonly<ProjectInstructionGuardTargetV1>;
-}): Readonly<ProjectInstructionSnapshotGuardResultV1> {
+  readonly target: Readonly<ProjectInstructionGuardTarget>;
+}): Readonly<ProjectInstructionSnapshotGuardResult> {
   const current = resolveProjectInstructionSnapshot({
     workspace: input.workspace,
     targetPaths: [input.target.targetPath],
@@ -102,7 +102,7 @@ export function checkProjectInstructionSnapshotFreshnessV1(input: {
   });
 }
 
-function nonEmptyPathV1(value: RuntimeJsonValueV1 | undefined): string | null {
+function nonEmptyPath(value: RuntimeJsonValue | undefined): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
@@ -116,7 +116,7 @@ function inside(root: string, candidate: string): boolean {
 }
 
 function targetPaths(
-  state: Readonly<BuiltinRuntimeStateViewV1> | undefined,
+  state: Readonly<BuiltinRuntimeStateView> | undefined,
   excludeModelMessageId?: string,
 ): string[] {
   if (!state) return [];
@@ -180,7 +180,7 @@ function scopeDirectories(workspaceRoot: string, targets: readonly string[]): st
 
 export function resolveProjectInstructionSnapshot(input: {
   workspace: string;
-  state?: Readonly<BuiltinRuntimeStateViewV1>;
+  state?: Readonly<BuiltinRuntimeStateView>;
   targetPaths?: readonly string[];
   excludeModelMessageId?: string;
 }): ProjectInstructionSnapshot {

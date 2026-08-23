@@ -1,47 +1,47 @@
 import {
   type AgentState,
-  activeSkillFramesForCurrentWorkV1,
+  activeSkillFramesForCurrentWork,
   decideCompletion,
   getActivePlanning,
   getActiveTask,
   getEffectiveInteractionMode,
-  interactionBelongsToCurrentWorkV1,
-  interactionToolCallV1,
-  toolCallBelongsToCurrentWorkV1,
+  interactionBelongsToCurrentWork,
+  interactionToolCall,
+  toolCallBelongsToCurrentWork,
 } from '@kite/agent-kernel';
 
-export const runtimeHostStateDecideCompletionV1 = decideCompletion;
+export const runtimeHostStateDecideCompletion = decideCompletion;
 
 /** Host-facing read-only selectors over the exact State Kernel shape. */
-export function runtimeHostStateActiveTaskV1(state: Readonly<AgentState>) {
+export function runtimeHostStateActiveTask(state: Readonly<AgentState>) {
   return getActiveTask(state);
 }
 
-export function runtimeHostStateActivePlanningV1(state: Readonly<AgentState>) {
+export function runtimeHostStateActivePlanning(state: Readonly<AgentState>) {
   return getActivePlanning(state);
 }
 
-export function runtimeHostStateEffectiveInteractionModeV1(state: Readonly<AgentState>) {
+export function runtimeHostStateEffectiveInteractionMode(state: Readonly<AgentState>) {
   return getEffectiveInteractionMode(state);
 }
 
-export function runtimeHostStateInteractionBelongsToCurrentWorkV1(
+export function runtimeHostStateInteractionBelongsToCurrentWork(
   state: Readonly<AgentState>,
 ): boolean {
-  return interactionBelongsToCurrentWorkV1(state);
+  return interactionBelongsToCurrentWork(state);
 }
 
-export function runtimeHostStateActiveSkillFramesV1(state: Readonly<AgentState>) {
-  return activeSkillFramesForCurrentWorkV1(state);
+export function runtimeHostStateActiveSkillFrames(state: Readonly<AgentState>) {
+  return activeSkillFramesForCurrentWork(state);
 }
 
-export function runtimeHostStateInteractionToolCallV1(state: Readonly<AgentState>) {
-  return interactionToolCallV1(state);
+export function runtimeHostStateInteractionToolCall(state: Readonly<AgentState>) {
+  return interactionToolCall(state);
 }
 
-export function runtimeHostStateToolCallBelongsToCurrentWorkV1(
+export function runtimeHostStateToolCallBelongsToCurrentWork(
   state: Readonly<AgentState>,
-  call: Parameters<typeof toolCallBelongsToCurrentWorkV1>[1],
+  call: Parameters<typeof toolCallBelongsToCurrentWork>[1],
 ): boolean {
-  return toolCallBelongsToCurrentWorkV1(state, call);
+  return toolCallBelongsToCurrentWork(state, call);
 }

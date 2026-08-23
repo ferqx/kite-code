@@ -10,11 +10,11 @@ import {
   RUNTIME_STATE_SCHEMA_VERSION,
   reduce,
 } from '@kite/agent-kernel';
-import type { RuntimeRestoreBoundaryV1, SessionStore, StoredRuntimeEventV1 } from './storage';
+import type { RuntimeRestoreBoundary, SessionStore, StoredRuntimeEvent } from './storage';
 
-export type StateRuntimeRestoreSourceV1 = 'fresh' | 'restored' | 'incompatible' | 'corrupted';
+export type StateRuntimeRestoreSource = 'fresh' | 'restored' | 'incompatible' | 'corrupted';
 
-interface StateRuntimeRestoreInputBaseV1 {
+interface StateRuntimeRestoreInputBase {
   readonly sessions: SessionStore<KernelEvent, AgentState>;
   readonly sessionId: string;
   readonly userId: string;
@@ -34,25 +34,25 @@ interface StateRuntimeRestoreInputBaseV1 {
   readonly validateRestoredState?: (state: Readonly<AgentState>) => void;
 }
 
-export type StateRuntimeRestoreInputV1 =
-  | (StateRuntimeRestoreInputBaseV1 & {
+export type StateRuntimeRestoreInput =
+  | (StateRuntimeRestoreInputBase & {
       readonly authorizationMode?: 'default';
       readonly authorizationSource?: CreateAgentStateInput['authorizationSource'];
       readonly modeGrantedAt?: never;
     })
-  | (StateRuntimeRestoreInputBaseV1 & {
+  | (StateRuntimeRestoreInputBase & {
       readonly authorizationMode: 'full_access';
       readonly authorizationSource: NonNullable<CreateAgentStateInput['authorizationSource']>;
       readonly modeGrantedAt: string;
     });
 
-export interface StateRuntimeRestoreResultV1 {
+export interface StateRuntimeRestoreResult {
   readonly state: AgentState;
-  readonly restoreBoundary: RuntimeRestoreBoundaryV1;
-  readonly source: StateRuntimeRestoreSourceV1;
+  readonly restoreBoundary: RuntimeRestoreBoundary;
+  readonly source: StateRuntimeRestoreSource;
 }
 
-function incompatibleState(freshState: AgentState, snapshot: unknown): AgentState {
+function formatMismatchState(freshState: AgentState, snapshot: unknown): AgentState {
   const candidate = snapshot as {
     readonly schemaVersion?: unknown;
     readonly formatEpoch?: unknown;
@@ -76,7 +76,7 @@ function corruptedState(freshState: AgentState, reason: string): AgentState {
 
 function replayCurrentStateTail(
   state: AgentState,
-  tail: readonly StoredRuntimeEventV1<KernelEvent>[],
+  tail: readonly StoredRuntimeEvent<KernelEvent>[],
   sessionId: string,
 ): AgentState {
   let current = state;
@@ -111,7 +111,7 @@ function replayCurrentStateTail(
   return current;
 }
 
-function freshState(input: StateRuntimeRestoreInputV1): AgentState {
+function freshState(input: StateRuntimeRestoreInput): AgentState {
   const common = {
     threadId: input.sessionId,
     userId: input.userId,
@@ -138,14 +138,14 @@ function freshState(input: StateRuntimeRestoreInputV1): AgentState {
       });
 }
 
-/** Restore only State / Store / the current RAV1 epoch from injected Host services. */
-export function restoreRuntimeHostStateSessionV1(
-  input: StateRuntimeRestoreInputV1,
-): StateRuntimeRestoreResultV1 {
+/** Restore only State / Store / the current RA epoch from injected Host services. */
+export function restoreRuntimeHostStateSession(
+  input: StateRuntimeRestoreInput,
+): StateRuntimeRestoreResult {
   const restoredState = freshState(input);
   const snapshotRecord = input.sessions.loadSnapshotRecord<unknown>(input.sessionId);
   const lastEventPosition = input.sessions.getLastEventPosition(input.sessionId);
-  const restoreBoundary: RuntimeRestoreBoundaryV1 = {
+  const restoreBoundary: RuntimeRestoreBoundary = {
     snapshot: snapshotRecord?.metadata ?? null,
     lastEventPosition,
   };
@@ -174,7 +174,7 @@ export function restoreRuntimeHostStateSessionV1(
     candidate.formatEpoch !== RUNTIME_STATE_FORMAT_EPOCH
   ) {
     return {
-      state: incompatibleState(restoredState, snapshotRecord.state),
+      state: formatMismatchState(restoredState, snapshotRecord.state),
       restoreBoundary,
       source: 'incompatible',
     };

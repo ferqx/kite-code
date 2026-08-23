@@ -1,11 +1,11 @@
 import {
   assertAuthorizationElevation as assertKernelAuthorizationElevation,
-  projectRuntimeEventToObservabilityFactV1 as projectKernelRuntimeObservabilityFactV1,
+  projectRuntimeEventToObservabilityFact as projectKernelRuntimeObservabilityFact,
 } from '@kite/agent-kernel';
-import type { ObservabilityRuntimeFactV1 } from '@kite/runtime-contract';
+import type { ObservabilityRuntimeFact } from '@kite/runtime-contract';
 
 /** Canonical facts supplied by App before it asks Host to admit authorization. */
-export interface RuntimeAuthorizationElevationFactsV1 {
+export interface RuntimeAuthorizationElevationFacts {
   readonly mode: 'default' | 'full_access';
   readonly source?: 'user' | 'config' | 'test' | 'system';
   readonly sandboxAvailable: boolean;
@@ -14,16 +14,16 @@ export interface RuntimeAuthorizationElevationFactsV1 {
 }
 
 /** Host policy port; the deterministic decision remains owned by Agent Kernel. */
-export function assertRuntimeAuthorizationElevationV1(
-  facts: RuntimeAuthorizationElevationFactsV1,
+export function assertRuntimeAuthorizationElevation(
+  facts: RuntimeAuthorizationElevationFacts,
 ): void {
   assertKernelAuthorizationElevation(facts);
 }
 
 /** Host projection port; App never imports Kernel event or policy authority. */
-export function projectRuntimeObservabilityFactV1(
+export function projectRuntimeObservabilityFact(
   event: unknown,
   fallbackObservedAt: string,
-): ObservabilityRuntimeFactV1 | undefined {
-  return projectKernelRuntimeObservabilityFactV1(event, fallbackObservedAt);
+): ObservabilityRuntimeFact | undefined {
+  return projectKernelRuntimeObservabilityFact(event, fallbackObservedAt);
 }

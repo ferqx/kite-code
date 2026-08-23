@@ -1,44 +1,44 @@
 import {
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
-  type ReleaseProfileRestrictionLayerV1,
+  type ReleaseProfileRestrictionLayer,
 } from '#app/config';
 
 const CAPABILITY_SET = new Set<string>(RELEASE_CAPABILITIES);
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
-export type KillSwitchReasonV1 =
+export type KillSwitchReason =
   | 'g0_incident'
   | 'required_ci_failed'
   | 'error_budget_burn'
   | 'provider_outage'
   | 'operator_containment';
 
-export interface CapabilityKillSwitchRequestV1 {
+export interface CapabilityKillSwitchRequest {
   version: 1;
-  reason: KillSwitchReasonV1;
+  reason: KillSwitchReason;
   disableCapabilities: readonly ReleaseCapability[];
   cohortPercent: 0;
   rollbackArtifactDigest?: string;
   preserveMetadataEvidence: true;
 }
 
-export interface CapabilityKillSwitchDecisionV1 {
+export interface CapabilityKillSwitchDecision {
   version: 1;
   admitted: true;
   cohortPercent: 0;
   rollbackArtifactDigest?: string;
   preserveMetadataEvidence: true;
-  restrictionLayer: ReleaseProfileRestrictionLayerV1;
+  restrictionLayer: ReleaseProfileRestrictionLayer;
 }
 
 /**
  * Builds a disable-only release restriction. It cannot enable a capability,
  * increase a cohort, loosen network policy, or authorize a new artifact.
  */
-export function buildCapabilityKillSwitchDecisionV1(
-  input: CapabilityKillSwitchRequestV1,
-): CapabilityKillSwitchDecisionV1 {
+export function buildCapabilityKillSwitchDecision(
+  input: CapabilityKillSwitchRequest,
+): CapabilityKillSwitchDecision {
   if (input.version !== 1 || input.cohortPercent !== 0 || !input.preserveMetadataEvidence) {
     throw new Error('Kill-switch request must be disable-only and preserve metadata evidence.');
   }

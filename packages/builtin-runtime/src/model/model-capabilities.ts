@@ -1,6 +1,6 @@
-import type { ModelRuntimeConfigV1 } from './config';
+import type { ModelRuntimeConfig } from './config';
 
-export type ModelCapabilitySource = 'explicit_config' | 'adapter_runtime' | 'compatibility_config';
+export type ModelCapabilitySource = 'explicit_config' | 'adapter_runtime';
 
 export interface ResolvedModelCapabilities {
   providerName: string;
@@ -50,25 +50,18 @@ function firstDefined<T>(
 
 /** Resolve fields independently; model names never participate in capability resolution. */
 export function resolveModelCapabilities(input: {
-  config: ModelRuntimeConfigV1;
+  config: ModelRuntimeConfig;
   adapter?: ModelCapabilityMetadata;
 }): ResolvedModelCapabilities {
   const explicit = input.config.modelCapabilities ?? {};
   const adapter = input.adapter ?? {};
-  const compatibility = input.config.modelKwargs ?? {};
-
   const contextWindow = firstDefined<number>([
     [positiveNumber(explicit.contextWindowTokens), 'explicit_config'],
     [positiveNumber(adapter.contextWindowTokens), 'adapter_runtime'],
-    [positiveNumber(compatibility.contextWindowTokens), 'compatibility_config'],
   ]);
   const maxOutput = firstDefined<number>([
     [positiveNumber(explicit.maxOutputTokens), 'explicit_config'],
     [positiveNumber(adapter.maxOutputTokens), 'adapter_runtime'],
-    [
-      positiveNumber(compatibility.maxOutputTokens) ?? positiveNumber(compatibility.maxTokens),
-      'compatibility_config',
-    ],
   ]);
   const tokenizer = firstDefined<string>([
     [
@@ -79,29 +72,21 @@ export function resolveModelCapabilities(input: {
       typeof adapter.tokenizerFamily === 'string' ? adapter.tokenizerFamily : undefined,
       'adapter_runtime',
     ],
-    [
-      typeof compatibility.tokenizerFamily === 'string' ? compatibility.tokenizerFamily : undefined,
-      'compatibility_config',
-    ],
   ]);
   const usage = firstDefined<boolean>([
     [booleanValue(explicit.supportsUsageMetadata), 'explicit_config'],
     [booleanValue(adapter.supportsUsageMetadata), 'adapter_runtime'],
-    [booleanValue(compatibility.supportsUsageMetadata), 'compatibility_config'],
   ]);
   const cache = firstDefined<boolean>([
     [booleanValue(explicit.supportsPromptCache), 'explicit_config'],
     [booleanValue(adapter.supportsPromptCache), 'adapter_runtime'],
-    [booleanValue(compatibility.supportsPromptCache), 'compatibility_config'],
   ]);
   const toolCalls = firstDefined<boolean>([
     [booleanValue(adapter.supportsToolCalls), 'adapter_runtime'],
-    [booleanValue(compatibility.supportsToolCalls), 'compatibility_config'],
   ]);
   const streaming = firstDefined<boolean>([
     [booleanValue(explicit.streaming), 'explicit_config'],
     [booleanValue(adapter.streaming), 'adapter_runtime'],
-    [booleanValue(compatibility.streaming), 'compatibility_config'],
   ]);
 
   return {

@@ -1,19 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
 import {
-  type FailureModeContextV1,
-  type FailureModeResolutionV1,
-  RUNTIME_FAILURE_MODES_V1,
-  type RuntimeFailureModeV1,
-  resolveFailureModeV1,
+  type FailureModeContext,
+  type FailureModeResolution,
+  RUNTIME_FAILURE_MODES_,
+  type RuntimeFailureMode,
+  resolveFailureMode,
 } from '#app/bootstrap/runtime/failure-mode-conformance';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { projectTerminalOutcomeV1 } from '#app/bootstrap/runtime/terminal-outcome';
+import { projectTerminalOutcome } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { projectCliRuntimeEventV1 } from '@/app/cli';
+import { projectCliRuntimeEvent } from '@/app/cli';
 import { createInitialState } from '@/app/tui/initialState';
 import { handleRuntimeEventAction } from '@/app/tui/reducers/handleEvent';
-import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 
 const EXPECTED_FAILURE_MODES = [
   'artifact_invalid',
@@ -47,24 +47,24 @@ const EXPECTED_FAILURE_MODES = [
   'optional_telemetry_failure',
   'mandatory_admin_policy_unavailable',
   'optional_rollout_unavailable',
-] as const satisfies readonly RuntimeFailureModeV1[];
+] as const satisfies readonly RuntimeFailureMode[];
 
-type ExpectedResolution = Omit<FailureModeResolutionV1, 'version' | 'mode' | 'reasonCode'>;
+type ExpectedResolution = Omit<FailureModeResolution, 'version' | 'mode' | 'reasonCode'>;
 
 interface FailureFixture {
-  context?: FailureModeContextV1;
+  context?: FailureModeContext;
   expected: ExpectedResolution;
 }
 
 function terminalExpected(input: {
-  reason: NonNullable<FailureModeResolutionV1['terminalReason']>;
-  status?: NonNullable<FailureModeResolutionV1['terminalOutcome']>['status'];
-  durableState?: FailureModeResolutionV1['durableState'];
-  effects?: FailureModeResolutionV1['externalSideEffects'];
+  reason: NonNullable<FailureModeResolution['terminalReason']>;
+  status?: NonNullable<FailureModeResolution['terminalOutcome']>['status'];
+  durableState?: FailureModeResolution['durableState'];
+  effects?: FailureModeResolution['externalSideEffects'];
   safeRetry?: boolean;
-  recoveryEntry?: FailureModeResolutionV1['recoveryEntry'];
+  recoveryEntry?: FailureModeResolution['recoveryEntry'];
   pendingVerification?: boolean;
-  fallback?: FailureModeResolutionV1['fallback'];
+  fallback?: FailureModeResolution['fallback'];
 }): ExpectedResolution {
   const status = input.status ?? 'blocked';
   const effects = input.effects ?? 'none';
@@ -95,11 +95,11 @@ function terminalExpected(input: {
 }
 
 const preDispatchBlocked = (
-  reason: NonNullable<FailureModeResolutionV1['terminalReason']>,
+  reason: NonNullable<FailureModeResolution['terminalReason']>,
 ): ExpectedResolution => terminalExpected({ reason });
 
 const unknownTerminal = (
-  reason: NonNullable<FailureModeResolutionV1['terminalReason']>,
+  reason: NonNullable<FailureModeResolution['terminalReason']>,
   input: Partial<Parameters<typeof terminalExpected>[0]> = {},
 ): ExpectedResolution =>
   terminalExpected({
@@ -278,14 +278,14 @@ const FIXTURES = {
       terminalOutcome: null,
     },
   },
-} as const satisfies Record<RuntimeFailureModeV1, FailureFixture>;
+} as const satisfies Record<RuntimeFailureMode, FailureFixture>;
 
 function expectExactResolution(
-  mode: RuntimeFailureModeV1,
+  mode: RuntimeFailureMode,
   expected: ExpectedResolution,
-  context?: FailureModeContextV1,
+  context?: FailureModeContext,
 ): void {
-  expect(resolveFailureModeV1(mode, context)).toEqual({
+  expect(resolveFailureMode(mode, context)).toEqual({
     version: 1,
     mode,
     reasonCode: mode,
@@ -293,14 +293,14 @@ function expectExactResolution(
   });
 }
 
-function fixtureContext(fixture: FailureFixture): FailureModeContextV1 | undefined {
+function fixtureContext(fixture: FailureFixture): FailureModeContext | undefined {
   return fixture.context;
 }
 
 describe('RFC failure-mode conformance v1', () => {
   test('ratchets the independent canonical list to exactly 31 failure modes', () => {
-    expect(RUNTIME_FAILURE_MODES_V1).toHaveLength(31);
-    expect(RUNTIME_FAILURE_MODES_V1).toEqual(EXPECTED_FAILURE_MODES);
+    expect(RUNTIME_FAILURE_MODES_).toHaveLength(31);
+    expect(RUNTIME_FAILURE_MODES_).toEqual(EXPECTED_FAILURE_MODES);
     expect(Object.keys(FIXTURES)).toEqual([...EXPECTED_FAILURE_MODES]);
   });
 
@@ -312,11 +312,11 @@ describe('RFC failure-mode conformance v1', () => {
   });
 
   test('uses the same terminal outcome through Core persistence, CLI, and TUI projections', () => {
-    const store = openStateStoreForTestV1(':memory:');
+    const store = openStateStoreForTest(':memory:');
     try {
       for (const mode of EXPECTED_FAILURE_MODES) {
         const fixture = FIXTURES[mode];
-        const resolution = resolveFailureModeV1(mode, fixtureContext(fixture));
+        const resolution = resolveFailureMode(mode, fixtureContext(fixture));
         if (!resolution.terminalOutcome) continue;
         const message = `fixture ${mode}`;
         const event = {
@@ -327,7 +327,7 @@ describe('RFC failure-mode conformance v1', () => {
           outcome: resolution.terminalOutcome,
         };
         const coreState = reduceRuntimeState(
-          createRuntimeHostStateInitialStateV1({
+          createRuntimeHostStateInitialState({
             recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
             threadId: mode,
             userId: 'u',
@@ -340,8 +340,8 @@ describe('RFC failure-mode conformance v1', () => {
           resolution.terminalOutcome,
         );
 
-        const presentation = projectTerminalOutcomeV1(resolution.terminalOutcome);
-        expect(projectCliRuntimeEventV1(event)).toMatchObject({
+        const presentation = projectTerminalOutcome(resolution.terminalOutcome);
+        expect(projectCliRuntimeEvent(event)).toMatchObject({
           terminalPresentation: presentation,
         });
 

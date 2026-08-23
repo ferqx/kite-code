@@ -1,25 +1,25 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  type BuiltinContextCompactionTerminalV1,
-  type BuiltinContextCompactorV1,
+  type BuiltinContextCompactionTerminal,
+  type BuiltinContextCompactor,
   buildContextProjection,
   ContextCompactionValidationError,
-  executeBuiltinContextCompactionV1,
+  executeBuiltinContextCompaction,
   expectedCompactionSourceDigest,
   findSafeCompactionBoundary,
   ProviderDataAdmissionError,
 } from '@kite/builtin-runtime/model';
 import type {
-  BuiltinContextCheckpointViewV1,
-  BuiltinRuntimeStateViewV1,
+  BuiltinContextCheckpointView,
+  BuiltinRuntimeStateView,
 } from '../src/model/runtime-view';
 
 function stateWithPending(
   overrides: Partial<{
-    pending: BuiltinRuntimeStateViewV1['context']['pendingCompaction'];
+    pending: BuiltinRuntimeStateView['context']['pendingCompaction'];
     interactions: string;
   }> = {},
-): BuiltinRuntimeStateViewV1 {
+): BuiltinRuntimeStateView {
   return {
     activeTaskId: null,
     tasks: {},
@@ -68,14 +68,14 @@ function stateWithPending(
 }
 
 function validCheckpoint(
-  state: BuiltinRuntimeStateViewV1,
+  state: BuiltinRuntimeStateView,
   summary = 'A compacted narrative.',
-): BuiltinContextCheckpointViewV1 {
+): BuiltinContextCheckpointView {
   const boundary = findSafeCompactionBoundary(state);
   if (!boundary.lastMessageId || !boundary.coveredThroughTurnId) {
     throw new Error('fixture must provide a safe compaction boundary');
   }
-  const candidate: BuiltinContextCheckpointViewV1 = {
+  const candidate: BuiltinContextCheckpointView = {
     compactionId: 'compact-1',
     version: 1,
     sourceRevision: state.revision,
@@ -104,22 +104,22 @@ function fixedNow() {
 }
 
 function terminal(
-  events: ReadonlyArray<BuiltinContextCompactionTerminalV1>,
-): BuiltinContextCompactionTerminalV1 {
+  events: ReadonlyArray<BuiltinContextCompactionTerminal>,
+): BuiltinContextCompactionTerminal {
   const value = events[0];
   if (!value) throw new Error('expected terminal event');
   return value;
 }
 
-describe('executeBuiltinContextCompactionV1', () => {
+describe('executeBuiltinContextCompaction', () => {
   test('emits a JSON-safe completed terminal DTO with deterministic timing', async () => {
     const state = stateWithPending();
     const progress: Array<string | undefined> = [];
     const reports: string[] = [];
     const checkpoint = validCheckpoint(state);
-    const compact: BuiltinContextCompactorV1 = async () => checkpoint;
+    const compact: BuiltinContextCompactor = async () => checkpoint;
 
-    const events = await executeBuiltinContextCompactionV1({
+    const events = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact,
@@ -146,7 +146,7 @@ describe('executeBuiltinContextCompactionV1', () => {
 
   test('classifies missing compactor, provider denial, and validation failures', async () => {
     const state = stateWithPending();
-    const missing = await executeBuiltinContextCompactionV1({
+    const missing = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       now: fixedNow(),
@@ -159,7 +159,7 @@ describe('executeBuiltinContextCompactionV1', () => {
       durationMs: 0,
     });
 
-    const denied = await executeBuiltinContextCompactionV1({
+    const denied = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => {
@@ -177,7 +177,7 @@ describe('executeBuiltinContextCompactionV1', () => {
       retryable: false,
     });
 
-    const validation = await executeBuiltinContextCompactionV1({
+    const validation = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => {
@@ -196,7 +196,7 @@ describe('executeBuiltinContextCompactionV1', () => {
   test('returns no terminal DTO for a stale request and preserves retryability rules', async () => {
     const state = stateWithPending();
     expect(
-      await executeBuiltinContextCompactionV1({
+      await executeBuiltinContextCompaction({
         state,
         compactionId: 'different-compaction',
         compact: async () => validCheckpoint(state),
@@ -210,7 +210,7 @@ describe('executeBuiltinContextCompactionV1', () => {
         reason: 'auto',
       },
     });
-    const lowGain = await executeBuiltinContextCompactionV1({
+    const lowGain = await executeBuiltinContextCompaction({
       state: autoState,
       compactionId: 'compact-1',
       compact: async () => {
@@ -230,7 +230,7 @@ describe('executeBuiltinContextCompactionV1', () => {
     const environment = { serializedTools: [], workflowSkills: [] };
 
     let resolverCalls = 0;
-    const stale = await executeBuiltinContextCompactionV1({
+    const stale = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => valid,
@@ -244,7 +244,7 @@ describe('executeBuiltinContextCompactionV1', () => {
     });
     expect(terminal(stale)).toMatchObject({ errorKind: 'stale_context', retryable: true });
 
-    const identity = await executeBuiltinContextCompactionV1({
+    const identity = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => ({ ...valid, compactionId: 'different' }),
@@ -252,7 +252,7 @@ describe('executeBuiltinContextCompactionV1', () => {
     });
     expect(terminal(identity)).toMatchObject({ errorKind: 'invalid_candidate', retryable: false });
 
-    const boundary = await executeBuiltinContextCompactionV1({
+    const boundary = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => ({ ...valid, coveredThroughMessageId: 'missing-message' }),
@@ -260,7 +260,7 @@ describe('executeBuiltinContextCompactionV1', () => {
     });
     expect(terminal(boundary)).toMatchObject({ errorKind: 'unsafe_boundary', retryable: false });
 
-    const envelope = await executeBuiltinContextCompactionV1({
+    const envelope = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => ({ ...valid, summary: '  unnormalized  ' }),
@@ -268,7 +268,7 @@ describe('executeBuiltinContextCompactionV1', () => {
     });
     expect(terminal(envelope)).toMatchObject({ errorKind: 'invalid_candidate', retryable: false });
 
-    const tokens = await executeBuiltinContextCompactionV1({
+    const tokens = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => ({ ...valid, inputTokensBefore: valid.inputTokensBefore + 1 }),
@@ -276,7 +276,7 @@ describe('executeBuiltinContextCompactionV1', () => {
     });
     expect(terminal(tokens)).toMatchObject({ errorKind: 'invalid_candidate', retryable: false });
 
-    const lowGain = await executeBuiltinContextCompactionV1({
+    const lowGain = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => {
@@ -290,7 +290,7 @@ describe('executeBuiltinContextCompactionV1', () => {
       retryable: false,
     });
 
-    const generic = await executeBuiltinContextCompactionV1({
+    const generic = await executeBuiltinContextCompaction({
       state,
       compactionId: 'compact-1',
       compact: async () => {

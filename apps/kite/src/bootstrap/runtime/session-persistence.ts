@@ -1,12 +1,12 @@
 import type { AgentPlan, PlanArtifactRef, PlanDocument } from '@kite/runtime-contract';
 import {
-  runtimeHostStateActivePlanningV1 as getActivePlanning,
-  restoreRuntimeHostStateSessionV1,
+  runtimeHostStateActivePlanning as getActivePlanning,
+  restoreRuntimeHostStateSession,
 } from '@kite/runtime-host';
-import type { RuntimeSessionInfoV1 as RuntimeSessionInfo } from '@kite/runtime-host/storage';
-import type { RuntimeEvent, RuntimeState, StateSessionStorageV1 } from './state-runtime';
+import type { RuntimeSessionInfo } from '@kite/runtime-host/storage';
+import type { RuntimeEvent, RuntimeState, StateSessionStorage } from './state-runtime';
 
-export type OpenStateSessionStorageV1 = (threadId?: string) => StateSessionStorageV1;
+export type OpenStateSessionStorage = (threadId?: string) => StateSessionStorage;
 
 /** Project the durable PlanDocument into the App-facing review shape. */
 function planDocumentToAgentPlan(doc: PlanDocument): AgentPlan {
@@ -66,7 +66,7 @@ function mapSession(info: RuntimeSessionInfo): SessionInfo {
 }
 
 export async function listSessions(
-  openStateSessionStorage: OpenStateSessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorage,
 ): Promise<SessionInfo[]> {
   const store = openStateSessionStorage();
   try {
@@ -77,7 +77,7 @@ export async function listSessions(
 }
 
 export async function searchSessions(
-  openStateSessionStorage: OpenStateSessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorage,
   query: string,
 ): Promise<SessionInfo[]> {
   const store = openStateSessionStorage();
@@ -89,7 +89,7 @@ export async function searchSessions(
 }
 
 export async function loadSession(
-  openStateSessionStorage: OpenStateSessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorage,
   threadId: string,
   recoveryIdentityKey: string,
 ): Promise<SessionData | null> {
@@ -98,7 +98,7 @@ export async function loadSession(
     const snapshot = store.loadSnapshotRecord<RuntimeState>(threadId);
     const lastEventPosition = store.getLastEventPosition(threadId);
     if (!snapshot && lastEventPosition === 0) return null;
-    const restored = restoreRuntimeHostStateSessionV1({
+    const restored = restoreRuntimeHostStateSession({
       sessions: store,
       sessionId: threadId,
       userId: 'tui',
@@ -152,7 +152,7 @@ export async function loadSession(
 }
 
 export async function persistSessionName(
-  openStateSessionStorage: OpenStateSessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorage,
   threadId: string,
   name: string,
 ): Promise<void> {
@@ -165,7 +165,7 @@ export async function persistSessionName(
 }
 
 export async function deleteSession(
-  openStateSessionStorage: OpenStateSessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorage,
   threadId: string,
 ): Promise<void> {
   const store = openStateSessionStorage(threadId);
@@ -177,7 +177,7 @@ export async function deleteSession(
 }
 
 export async function enrichSessionNames(
-  openStateSessionStorage: OpenStateSessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorage,
   sessions: SessionInfo[],
   resolveRecoveryIdentity: (threadId: string) => string,
   onNamed: (threadId: string, name: string) => void,

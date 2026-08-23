@@ -7,29 +7,29 @@
  * provider-facing vocabulary, while the Runtime Contract must not import the
  * SPI back across the package boundary.
  */
-export type SandboxExecutionBackendV1 =
+export type SandboxExecutionBackend =
   | 'seatbelt'
   | 'bubblewrap'
   | 'windows_restricted_token'
   | 'none';
 
-export type SandboxPreparationResourceSemanticsV1 = 'pure' | 'allocating';
+export type SandboxPreparationResourceSemantics = 'pure' | 'allocating';
 
-export interface SandboxPreparationArtifactRefV1 {
+export interface SandboxPreparationArtifactRef {
   readonly artifactId: string;
   readonly kind: 'sandbox_preparation';
   readonly integrityIdentifier: string;
   readonly byteLength: number;
 }
 
-export interface SubagentTaskArtifactV1 {
+export interface SubagentTaskArtifact {
   readonly artifactId: string;
   readonly kind: 'subagent_task';
   readonly integrityIdentifier: string;
   readonly byteLength: number;
 }
 
-export interface SubagentHandleArtifactRefV1 {
+export interface SubagentHandleArtifactRef {
   readonly artifactId: string;
   readonly kind: 'subagent_handle';
   readonly integrityIdentifier: string;
@@ -203,7 +203,7 @@ export type CapabilityInvocationStatus =
   | 'unknown';
 
 /** Digest-only filesystem observation admitted to Runtime state after terminal receipt commit. */
-export interface WorkspaceFilesystemObservationRecordV1 {
+export interface WorkspaceFilesystemObservationRecord {
   actorIdentityDigest: string;
   lexicalTargetDigest: string;
   canonicalTargetDigest: string;
@@ -212,7 +212,7 @@ export interface WorkspaceFilesystemObservationRecordV1 {
 }
 
 /** Durable ready barrier proving that a private preimage exists before commit. */
-export interface WorkspaceFilesystemIntentRecordV1 {
+export interface WorkspaceFilesystemIntentRecord {
   attempt: number;
   capabilityRevision: string;
   argumentsDigest: string;
@@ -229,7 +229,7 @@ export interface WorkspaceFilesystemIntentRecordV1 {
 }
 
 /** Opaque private Artifact identity persisted before a filesystem mutation is ready. */
-export interface FilesystemPreimageArtifactRefV1 {
+export interface FilesystemPreimageArtifactRef {
   artifactId: string;
   kind: 'filesystem_preimage';
   integrityIdentifier: string;
@@ -237,19 +237,19 @@ export interface FilesystemPreimageArtifactRefV1 {
 }
 
 /** Durable ready barrier proving that a private preimage exists before commit. */
-export interface WorkspaceFilesystemMutationReadyRecordV1 {
+export interface WorkspaceFilesystemMutationReadyRecord {
   attempt: number;
   intentDigest: string;
   operationDigest: string;
   targetIdentityDigest: string;
   preimageDigest: string | null;
-  preimageArtifact: FilesystemPreimageArtifactRefV1;
+  preimageArtifact: FilesystemPreimageArtifactRef;
   readyDigest: string;
   readyAt: string;
 }
 
 /** Durable intent required before an allocating Sandbox Provider prepare call. */
-export interface SandboxPreparationIntentRecordV1 {
+export interface SandboxPreparationIntentRecord {
   attempt: number;
   toolCallId: string;
   capabilityId: string;
@@ -266,24 +266,24 @@ export interface SandboxPreparationIntentRecordV1 {
 }
 
 /** Durable ready barrier binding a private prepared plan before process spawn. */
-export interface SandboxPreparationReadyRecordV1 {
+export interface SandboxPreparationReadyRecord {
   attempt: number;
   intentDigest: string;
   preparationDigest: string;
   commandDigest: string;
   planDigest: string;
-  backend: SandboxExecutionBackendV1;
+  backend: SandboxExecutionBackend;
   backendCapabilitiesDigest: string;
   enforcement: 'full' | 'partial';
-  resourceSemantics: SandboxPreparationResourceSemanticsV1;
+  resourceSemantics: SandboxPreparationResourceSemantics;
   cleanupDigest: string;
-  preparationArtifact: SandboxPreparationArtifactRefV1;
+  preparationArtifact: SandboxPreparationArtifactRef;
   readyDigest: string;
   readyAt: string;
 }
 
 /** Durable single-use consumption barrier written before any Runtime process owner starts. */
-export interface SandboxExecutionDispatchRecordV1 {
+export interface SandboxExecutionDispatchRecord {
   attempt: number;
   readyDigest: string;
   planDigest: string;
@@ -298,7 +298,7 @@ export interface SandboxExecutionDispatchRecordV1 {
   supervisorStartedAt?: string;
 }
 
-export interface SandboxDisposalRecordV1 {
+export interface SandboxDisposalRecord {
   attempt: number;
   readyDigest: string;
   lifecycleIntentDigest: string;
@@ -309,7 +309,7 @@ export interface SandboxDisposalRecordV1 {
   lastFailureAt?: string;
 }
 
-export interface SandboxPreparationAbandonmentRecordV1 {
+export interface SandboxPreparationAbandonmentRecord {
   attempt: number;
   intentDigest: string;
   lifecycleIntentDigest: string;
@@ -321,11 +321,11 @@ export interface SandboxPreparationAbandonmentRecordV1 {
 }
 
 /** Digest-only Runtime projection of one governed Subagent Provider lifecycle. */
-export interface SubagentProviderLifecycleRecordV1 {
+export interface SubagentProviderLifecycleRecord {
   attempt: number;
   purpose: 'start' | 'resume';
   childInvocationId: string;
-  taskArtifact: SubagentTaskArtifactV1;
+  taskArtifact: SubagentTaskArtifact;
   dispatchIntentDigest: string;
   status:
     | 'intent_recorded'
@@ -334,7 +334,7 @@ export interface SubagentProviderLifecycleRecordV1 {
     | 'cleanup_pending'
     | 'cleanup_completed';
   recordedAt: string;
-  handleArtifact?: SubagentHandleArtifactRefV1;
+  handleArtifact?: SubagentHandleArtifactRef;
   handleIntegrityIdentifier?: string;
   handleRecordedAt?: string;
   observationStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
@@ -367,15 +367,15 @@ export interface CapabilityInvocationRecord {
   resultDigest?: string;
   evidenceDigest?: string;
   artifact?: CapabilityArtifactRef;
-  filesystemMutationReady?: WorkspaceFilesystemMutationReadyRecordV1;
-  filesystemIntent?: WorkspaceFilesystemIntentRecordV1;
-  filesystemObservation?: WorkspaceFilesystemObservationRecordV1;
-  sandboxPreparationIntent?: SandboxPreparationIntentRecordV1;
-  sandboxPreparationReady?: SandboxPreparationReadyRecordV1;
-  sandboxExecutionDispatch?: SandboxExecutionDispatchRecordV1;
-  sandboxDisposal?: SandboxDisposalRecordV1;
-  sandboxPreparationAbandonment?: SandboxPreparationAbandonmentRecordV1;
-  subagentProviderLifecycle?: SubagentProviderLifecycleRecordV1;
+  filesystemMutationReady?: WorkspaceFilesystemMutationReadyRecord;
+  filesystemIntent?: WorkspaceFilesystemIntentRecord;
+  filesystemObservation?: WorkspaceFilesystemObservationRecord;
+  sandboxPreparationIntent?: SandboxPreparationIntentRecord;
+  sandboxPreparationReady?: SandboxPreparationReadyRecord;
+  sandboxExecutionDispatch?: SandboxExecutionDispatchRecord;
+  sandboxDisposal?: SandboxDisposalRecord;
+  sandboxPreparationAbandonment?: SandboxPreparationAbandonmentRecord;
+  subagentProviderLifecycle?: SubagentProviderLifecycleRecord;
   receiptRequirement?:
     | 'observation_receipt'
     | 'effect_receipt'
@@ -390,7 +390,7 @@ export interface CapabilityInvocationRecord {
 }
 
 /** Keyed opaque handle emitted by the hardened capability Artifact writer. */
-export interface PrivateCapabilityArtifactRefV1 {
+export interface PrivateCapabilityArtifactRef {
   artifactId: string;
   kind: 'capability_result';
   integrityIdentifier: string;
@@ -398,7 +398,7 @@ export interface PrivateCapabilityArtifactRefV1 {
 }
 
 /** JSON-safe handle to an access-controlled capability result artifact. */
-export type CapabilityArtifactRef = PrivateCapabilityArtifactRefV1;
+export type CapabilityArtifactRef = PrivateCapabilityArtifactRef;
 
 /** Read-only projection of a durable invocation record for receipts and verification. */
 export type ExecutionReceipt = CapabilityInvocationRecord;

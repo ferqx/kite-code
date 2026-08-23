@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createBuiltinCredentialBrokerV1,
+  createBuiltinCredentialBroker,
   KiteMcpOAuthProvider,
   type McpCredentialKey,
   MemoryMcpCredentialStore,
@@ -14,7 +14,7 @@ const KEY: McpCredentialKey = {
   profile: 'oauth',
 };
 
-const broker = (store: MemoryMcpCredentialStore) => createBuiltinCredentialBrokerV1({ store });
+const broker = (store: MemoryMcpCredentialStore) => createBuiltinCredentialBroker({ store });
 
 describe('KiteMcpOAuthProvider', () => {
   test('persists SDK client, token, verifier, and discovery state in one isolated profile', async () => {

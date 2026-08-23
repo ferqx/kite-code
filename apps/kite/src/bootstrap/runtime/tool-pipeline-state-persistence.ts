@@ -1,105 +1,105 @@
 import {
-  type BuiltinOperationExecutionValueV1,
-  type BuiltinWorkspaceFilesystemTerminalVerificationResultV1,
-  type BuiltinWorkspaceFilesystemTerminalVerifierV1,
-  type CapabilityArtifactWriterV1,
-  capabilityResultDigestV1,
-  capabilityResultEvidenceDigestV1,
-  createBuiltinCapabilityVerificationRequestV1,
-  digestCapabilityValueV1,
-  isBuiltinOperationExecutionValueV1,
-  projectBuiltinToolResultDigestsV1,
+  type BuiltinOperationExecutionValue,
+  type BuiltinWorkspaceFilesystemTerminalVerificationResult,
+  type BuiltinWorkspaceFilesystemTerminalVerifier,
+  type CapabilityArtifactWriter,
+  capabilityResultDigest,
+  capabilityResultEvidenceDigest,
+  createBuiltinCapabilityVerificationRequest,
+  digestCapabilityValue,
+  isBuiltinOperationExecutionValue,
+  projectBuiltinToolResultDigests,
 } from '@kite/builtin-runtime';
 import type { CapabilityFailure, CapabilityResult } from '@kite/runtime-contract';
 import {
-  type RuntimeHostToolExecutionResultV1,
-  runtimeHostStateAdmitCurrentRuntimeEventV1,
-  runtimeHostStateAdmitRecoveryAttemptV1,
-  runtimeHostStateClassifyFailureV1,
-  runtimeHostStateClassifyToolOutcomeV1,
-  runtimeHostStateIsFailureKindV1,
-  runtimeHostStateNormalizeToolRecoveryJournalV1,
-  runtimeHostStatePlanReviewSiblingCancellationsV1,
-  runtimeHostStateRecordRecoveryFailureV1,
-  runtimeHostStateToolFailureInstanceIdV1,
-  runtimeHostStateToolInvocationFingerprintV1,
-  runtimeHostStateToolRecoveryJournalInvalidV1,
-  type StateClassifiedFailureV1,
-  type StateRuntimeEventV1,
-  type StateRuntimeStateV1,
+  type RuntimeHostToolExecutionResult,
+  runtimeHostStateAdmitCurrentRuntimeEvent,
+  runtimeHostStateAdmitRecoveryAttempt,
+  runtimeHostStateClassifyFailure,
+  runtimeHostStateClassifyToolOutcome,
+  runtimeHostStateIsFailureKind,
+  runtimeHostStateNormalizeToolRecoveryJournal,
+  runtimeHostStatePlanReviewSiblingCancellations,
+  runtimeHostStateRecordRecoveryFailure,
+  runtimeHostStateToolFailureInstanceId,
+  runtimeHostStateToolInvocationFingerprint,
+  runtimeHostStateToolRecoveryJournalInvalid,
+  type StateClassifiedFailure,
+  type StateRuntimeEvent,
+  type StateRuntimeState,
 } from '@kite/runtime-host';
 import type {
-  CapabilityEffectsV1,
-  CapabilityToolTerminalFailureV1,
-  CapabilityToolTerminalResultV1,
-  PreparedToolInvocationIdentityV1,
-  PreparedToolInvocationV1,
-  PrivateSuspendedSubagentRecordV1,
-  RuntimeJsonValueV1,
-  SandboxPreparationArtifactPortV1,
-  SandboxPreparationLifecycleV1,
-  ToolPipelineAttemptAcknowledgementV1,
-  ToolPipelinePersistenceV1,
-  ToolPipelineReceiptCommitV1,
-  ToolPipelineReceiptRequirementV1,
-  ToolPipelineRetryableCommitV1,
-  ToolPipelineRetryEligibilityV1,
-  ToolPipelineSuspendedExecutionResultV1,
-  ToolPipelineSuspensionCommitV1,
-  ToolPipelineTaskSubagentSuspensionV1,
-  ToolPipelineUnknownOutcomeV1,
-  WorkspaceFilesystemDurableEvidencePortV1,
-  WorkspaceFilesystemEditObservationPortV1,
-  WorkspaceFilesystemEditObservationQueryResultV1,
-  WorkspaceFilesystemEditObservationQueryV1,
-  WorkspaceFilesystemIntentDraftV1,
-  WorkspaceFilesystemMutationDurableEvidencePortV1,
-  WorkspaceFilesystemMutationIntentDraftV1,
-  WorkspaceFilesystemMutationReadyDraftV1,
-  WorkspaceFilesystemPersistedIntentV1,
-  WorkspaceFilesystemPersistedMutationIntentV1,
-  WorkspaceFilesystemPersistedMutationReadyV1,
-  WorkspaceFilesystemPreparedMutationEvidenceV1,
+  CapabilityEffects,
+  CapabilityToolTerminalFailure,
+  CapabilityToolTerminalResult,
+  PreparedToolInvocation,
+  PreparedToolInvocationIdentity,
+  PrivateSuspendedSubagentRecord,
+  RuntimeJsonValue,
+  SandboxPreparationArtifactPort,
+  SandboxPreparationLifecycle,
+  ToolPipelineAttemptAcknowledgement,
+  ToolPipelinePersistence,
+  ToolPipelineReceiptCommit,
+  ToolPipelineReceiptRequirement,
+  ToolPipelineRetryableCommit,
+  ToolPipelineRetryEligibility,
+  ToolPipelineSuspendedExecutionResult,
+  ToolPipelineSuspensionCommit,
+  ToolPipelineTaskSubagentSuspension,
+  ToolPipelineUnknownOutcome,
+  WorkspaceFilesystemDurableEvidencePort,
+  WorkspaceFilesystemEditObservationPort,
+  WorkspaceFilesystemEditObservationQuery,
+  WorkspaceFilesystemEditObservationQueryResult,
+  WorkspaceFilesystemIntentDraft,
+  WorkspaceFilesystemMutationDurableEvidencePort,
+  WorkspaceFilesystemMutationIntentDraft,
+  WorkspaceFilesystemMutationReadyDraft,
+  WorkspaceFilesystemPersistedIntent,
+  WorkspaceFilesystemPersistedMutationIntent,
+  WorkspaceFilesystemPersistedMutationReady,
+  WorkspaceFilesystemPreparedMutationEvidence,
 } from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 } from '@kite/runtime-spi';
-import { resourceAdmissionFailureEventV1 } from './resource-admission-terminal';
-import type { AppToolPipelinePreparedRequestV1 } from './tool-pipeline-prepared';
-import { createAppToolPipelineSandboxLifecycleV1 } from './tool-pipeline-sandbox-lifecycle';
+import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite/runtime-spi';
+import { resourceAdmissionFailureEvent } from './resource-admission-terminal';
+import type { AppToolPipelinePreparedRequest } from './tool-pipeline-prepared';
+import { createAppToolPipelineSandboxLifecycle } from './tool-pipeline-sandbox-lifecycle';
 
-export const APP_STATE26_TOOL_PIPELINE_PERSISTENCE_SCHEMA_V1 =
+export const APP_STATE_TOOL_PIPELINE_PERSISTENCE_SCHEMA_ =
   'kite.app-state-tool-pipeline-persistence.v1' as const;
 
 /** State consumes the Builtin-owned neutral result; App defines no second schema. */
-export type StateBuiltinOperationStructuredContentV1 = BuiltinOperationExecutionValueV1;
-type AuthenticatedFilesystemObservationV1 = Extract<
-  BuiltinWorkspaceFilesystemTerminalVerificationResultV1,
+export type StateBuiltinOperationStructuredContent = BuiltinOperationExecutionValue;
+type AuthenticatedFilesystemObservation = Extract<
+  BuiltinWorkspaceFilesystemTerminalVerificationResult,
   { readonly valid: true }
 >['observation'];
 
-export interface AppStateToolPipelinePersistenceV1
-  extends ToolPipelinePersistenceV1<StateBuiltinOperationStructuredContentV1> {
+export interface AppStateToolPipelinePersistence
+  extends ToolPipelinePersistence<StateBuiltinOperationStructuredContent> {
   /** Same-instance post-ack filesystem evidence; it owns no Provider semantics. */
-  readonly workspaceFilesystemEvidence: WorkspaceFilesystemDurableEvidencePortV1;
+  readonly workspaceFilesystemEvidence: WorkspaceFilesystemDurableEvidencePort;
   /** Same-instance mutation intent/ready evidence; Builtin remains the mutation semantic owner. */
-  readonly workspaceFilesystemMutationEvidence: WorkspaceFilesystemMutationDurableEvidencePortV1;
+  readonly workspaceFilesystemMutationEvidence: WorkspaceFilesystemMutationDurableEvidencePort;
   /** State scan only; Builtin validates the returned Artifact and decides stale_read. */
-  readonly workspaceFilesystemEditObservation: WorkspaceFilesystemEditObservationPortV1;
+  readonly workspaceFilesystemEditObservation: WorkspaceFilesystemEditObservationPort;
   /** Creates the six-stage sandbox lifecycle only after this exact attempt is open. */
   readonly createSandboxLifecycle: (input: {
-    readonly prepared: Readonly<PreparedToolInvocationV1>;
-    readonly artifacts: SandboxPreparationArtifactPortV1;
-  }) => SandboxPreparationLifecycleV1;
+    readonly prepared: Readonly<PreparedToolInvocation>;
+    readonly artifacts: SandboxPreparationArtifactPort;
+  }) => SandboxPreparationLifecycle;
 }
 
-export interface CreateAppStateToolPipelinePersistenceInputV1 {
-  readonly getState: () => Readonly<StateRuntimeStateV1>;
-  readonly persistAttemptStartEvents: (events: StateRuntimeEventV1[]) => Promise<boolean>;
-  readonly persistTerminalRecoveryEvents: (events: StateRuntimeEventV1[]) => Promise<boolean>;
-  readonly persistReceiptEvents: (events: StateRuntimeEventV1[]) => Promise<boolean>;
+export interface CreateAppStateToolPipelinePersistenceInput {
+  readonly getState: () => Readonly<StateRuntimeState>;
+  readonly persistAttemptStartEvents: (events: StateRuntimeEvent[]) => Promise<boolean>;
+  readonly persistTerminalRecoveryEvents: (events: StateRuntimeEvent[]) => Promise<boolean>;
+  readonly persistReceiptEvents: (events: StateRuntimeEvent[]) => Promise<boolean>;
   readonly now: () => string;
-  readonly capabilityArtifactWriter: CapabilityArtifactWriterV1;
+  readonly capabilityArtifactWriter: CapabilityArtifactWriter;
   /** Required before committing any terminal carrying Builtin filesystem evidence. */
-  readonly verifyBuiltinWorkspaceFilesystemTerminal?: BuiltinWorkspaceFilesystemTerminalVerifierV1;
+  readonly verifyBuiltinWorkspaceFilesystemTerminal?: BuiltinWorkspaceFilesystemTerminalVerifier;
   /** App-owned presentation sideband; Builtin remains the provider-failure classifier. */
   readonly providerAction?: Readonly<{
     enabled: boolean;
@@ -109,7 +109,7 @@ export interface CreateAppStateToolPipelinePersistenceInputV1 {
   readonly verificationEnabled?: boolean;
 }
 
-export type AppStateToolPipelinePersistenceErrorCodeV1 =
+export type AppStateToolPipelinePersistenceErrorCode =
   | 'invalid_prepared_request'
   | 'unsupported_operation'
   | 'attempt_identity_mismatch'
@@ -131,90 +131,90 @@ export type AppStateToolPipelinePersistenceErrorCodeV1 =
   | 'retryable_commit_failed'
   | 'suspension_commit_failed';
 
-export class AppStateToolPipelinePersistenceErrorV1 extends Error {
-  readonly code: AppStateToolPipelinePersistenceErrorCodeV1;
+export class AppStateToolPipelinePersistenceError extends Error {
+  readonly code: AppStateToolPipelinePersistenceErrorCode;
 
-  constructor(code: AppStateToolPipelinePersistenceErrorCodeV1, message?: string) {
-    super(message ?? appStateToolPipelinePersistenceMessageV1(code));
-    this.name = 'AppStateToolPipelinePersistenceErrorV1';
+  constructor(code: AppStateToolPipelinePersistenceErrorCode, message?: string) {
+    super(message ?? appStateToolPipelinePersistenceMessage(code));
+    this.name = 'AppStateToolPipelinePersistenceError';
     this.code = code;
   }
 }
 
-export function createAppStateToolPipelinePersistenceV1(
-  input: Readonly<CreateAppStateToolPipelinePersistenceInputV1>,
-): AppStateToolPipelinePersistenceV1 {
-  assertCompositionInputV1(input);
+export function createAppStateToolPipelinePersistence(
+  input: Readonly<CreateAppStateToolPipelinePersistenceInput>,
+): AppStateToolPipelinePersistence {
+  assertCompositionInput(input);
   const issuedAcknowledgements = new WeakSet<object>();
   const acknowledgementsByPrepared = new WeakMap<
     object,
-    Readonly<ToolPipelineAttemptAcknowledgementV1>
+    Readonly<ToolPipelineAttemptAcknowledgement>
   >();
-  const preparedByAcknowledgement = new WeakMap<object, Readonly<PreparedToolInvocationV1>>();
+  const preparedByAcknowledgement = new WeakMap<object, Readonly<PreparedToolInvocation>>();
   const issuedFilesystemIntents = new WeakSet<object>();
   const filesystemIntentBindings = new WeakMap<
     object,
     Readonly<{
-      prepared: Readonly<PreparedToolInvocationV1>;
-      acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-      operation: Readonly<WorkspaceFilesystemPersistedIntentV1['operation']>;
-      record: Readonly<WorkspaceFilesystemPersistedIntentV1['record']>;
+      prepared: Readonly<PreparedToolInvocation>;
+      acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+      operation: Readonly<WorkspaceFilesystemPersistedIntent['operation']>;
+      record: Readonly<WorkspaceFilesystemPersistedIntent['record']>;
     }>
   >();
   const issuedFilesystemMutationIntents = new WeakSet<object>();
   const filesystemMutationIntentBindings = new WeakMap<
     object,
     Readonly<{
-      prepared: Readonly<PreparedToolInvocationV1>;
-      acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>;
-      operation: Readonly<WorkspaceFilesystemPersistedMutationIntentV1['operation']>;
-      record: Readonly<WorkspaceFilesystemPersistedMutationIntentV1['record']>;
+      prepared: Readonly<PreparedToolInvocation>;
+      acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>;
+      operation: Readonly<WorkspaceFilesystemPersistedMutationIntent['operation']>;
+      record: Readonly<WorkspaceFilesystemPersistedMutationIntent['record']>;
     }>
   >();
   const issuedFilesystemMutationReadies = new WeakSet<object>();
   const filesystemMutationReadyBindings = new WeakMap<
     object,
     Readonly<{
-      intent: Readonly<WorkspaceFilesystemPersistedMutationIntentV1>;
-      preparedEvidence: Readonly<WorkspaceFilesystemPreparedMutationEvidenceV1>;
-      preimageArtifact: Readonly<WorkspaceFilesystemPersistedMutationReadyV1['preimageArtifact']>;
-      record: Readonly<WorkspaceFilesystemPersistedMutationReadyV1['record']>;
+      intent: Readonly<WorkspaceFilesystemPersistedMutationIntent>;
+      preparedEvidence: Readonly<WorkspaceFilesystemPreparedMutationEvidence>;
+      preimageArtifact: Readonly<WorkspaceFilesystemPersistedMutationReady['preimageArtifact']>;
+      record: Readonly<WorkspaceFilesystemPersistedMutationReady['record']>;
     }>
   >();
   const issuedFilesystemEditObservations = new WeakSet<object>();
   const filesystemEditObservationBindings = new WeakMap<
     object,
     Readonly<{
-      query: Readonly<WorkspaceFilesystemEditObservationQueryV1>;
-      result: Readonly<WorkspaceFilesystemEditObservationQueryResultV1>;
+      query: Readonly<WorkspaceFilesystemEditObservationQuery>;
+      result: Readonly<WorkspaceFilesystemEditObservationQueryResult>;
     }>
   >();
   const settledAcknowledgements = new WeakSet<object>();
 
   const recordAttempt = async (
-    prepared: Readonly<PreparedToolInvocationV1>,
-  ): Promise<Readonly<ToolPipelineAttemptAcknowledgementV1>> => {
-    const identity = assertSupportedPreparedIdentityV1(prepared);
-    const request = readPreparedRequestV1(prepared);
+    prepared: Readonly<PreparedToolInvocation>,
+  ): Promise<Readonly<ToolPipelineAttemptAcknowledgement>> => {
+    const identity = assertSupportedPreparedIdentity(prepared);
+    const request = readPreparedRequest(prepared);
     const before = input.getState();
     const existing = before.capabilities.invocations[identity.invocationId];
-    assertPreparedStateV1(prepared, identity, request, before, existing);
+    assertPreparedState(prepared, identity, request, before, existing);
 
     const attempt = (existing?.attemptsStarted ?? 0) + 1;
     const expectedAttemptId = `${identity.invocationId}:attempt:${attempt}`;
     if (identity.attemptId !== expectedAttemptId) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'attempt_identity_mismatch',
         'Prepared attemptId does not match the State next attempt suffix.',
       );
     }
 
-    const now = stateTimestampV1(input.now());
+    const now = stateTimestamp(input.now());
     const recordedAt = existing?.recordedAt ?? now;
     const persistedStartedAt = existing?.startedAt ?? now;
     const toolCall = before.tools.calls[identity.toolCallId];
-    const events: StateRuntimeEventV1[] = [];
-    if (!existing) events.push(invocationRecordedEventV1(identity, request, recordedAt));
+    const events: StateRuntimeEvent[] = [];
+    if (!existing) events.push(invocationRecordedEvent(identity, request, recordedAt));
     events.push({
       type: 'capability.execution_started',
       invocationId: identity.invocationId,
@@ -225,9 +225,9 @@ export function createAppStateToolPipelinePersistenceV1(
       events.push({ type: 'tool.started', toolCallId: identity.toolCallId, createdAt: now });
     }
 
-    await persistExactV1(input.persistAttemptStartEvents, events, 'attempt_start');
+    await persistExact(input.persistAttemptStartEvents, events, 'attempt_start');
     const after = input.getState();
-    assertRecordedStateV1(
+    assertRecordedState(
       after,
       before,
       events.length,
@@ -287,23 +287,23 @@ export function createAppStateToolPipelinePersistenceV1(
     return acknowledgement;
   };
 
-  const persistFilesystemIntent: WorkspaceFilesystemDurableEvidencePortV1['persistIntent'] = async (
+  const persistFilesystemIntent: WorkspaceFilesystemDurableEvidencePort['persistIntent'] = async (
     draft,
   ) => {
     const acknowledgement = acknowledgementsByPrepared.get(draft.prepared);
     if (
-      draft.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 ||
+      draft.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ ||
       !acknowledgement ||
       !issuedAcknowledgements.has(acknowledgement) ||
       settledAcknowledgements.has(acknowledgement)
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1('filesystem_intent_invalid');
+      throw new AppStateToolPipelinePersistenceError('filesystem_intent_invalid');
     }
     const identity = acknowledgement.attempt;
-    assertFilesystemIntentDraftV1(draft, identity);
+    assertFilesystemIntentDraft(draft, identity);
     const before = input.getState();
-    assertAcknowledgementStateV1(before, identity);
-    await persistExactV1(
+    assertAcknowledgementState(before, identity);
+    await persistExact(
       input.persistReceiptEvents,
       [
         {
@@ -317,15 +317,15 @@ export function createAppStateToolPipelinePersistenceV1(
     const after = input.getState();
     const invocation = after.capabilities.invocations[identity.invocationId];
     if (
-      !includesAcknowledgedRevisionV1(after, before, 1) ||
+      !includesAcknowledgedRevision(after, before, 1) ||
       invocation?.status !== 'running' ||
       invocation.attemptsStarted !== identity.attempt ||
-      !sameJsonV1(invocation.filesystemIntent, draft.record)
+      !sameJson(invocation.filesystemIntent, draft.record)
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1('filesystem_intent_commit_failed');
+      throw new AppStateToolPipelinePersistenceError('filesystem_intent_commit_failed');
     }
     const persisted = Object.freeze({
-      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+      schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
       status: 'durably_persisted' as const,
       prepared: draft.prepared,
       acknowledgement,
@@ -345,7 +345,7 @@ export function createAppStateToolPipelinePersistenceV1(
     return persisted;
   };
 
-  const verifyPersistedFilesystemIntent: WorkspaceFilesystemDurableEvidencePortV1['verifyPersistedIntent'] =
+  const verifyPersistedFilesystemIntent: WorkspaceFilesystemDurableEvidencePort['verifyPersistedIntent'] =
     (intent) => {
       const binding = filesystemIntentBindings.get(intent);
       if (!issuedFilesystemIntents.has(intent) || !binding) {
@@ -361,15 +361,15 @@ export function createAppStateToolPipelinePersistenceV1(
         return Object.freeze({ valid: false, code: 'operation_identity_mismatch' as const });
       }
       try {
-        assertOpenAcknowledgementV1(
+        assertOpenAcknowledgement(
           issuedAcknowledgements,
           settledAcknowledgements,
           intent.acknowledgement,
         );
         const state = input.getState();
         const attempt = intent.acknowledgement.attempt;
-        const invocation = assertAcknowledgementStateV1(state, attempt);
-        if (!sameJsonV1(invocation.filesystemIntent, intent.record)) {
+        const invocation = assertAcknowledgementState(state, attempt);
+        if (!sameJson(invocation.filesystemIntent, intent.record)) {
           return Object.freeze({ valid: false, code: 'durable_state_mismatch' as const });
         }
       } catch {
@@ -378,22 +378,22 @@ export function createAppStateToolPipelinePersistenceV1(
       return Object.freeze({ valid: true as const });
     };
 
-  const persistFilesystemMutationIntent: WorkspaceFilesystemMutationDurableEvidencePortV1['persistIntent'] =
+  const persistFilesystemMutationIntent: WorkspaceFilesystemMutationDurableEvidencePort['persistIntent'] =
     async (draft) => {
       const acknowledgement = acknowledgementsByPrepared.get(draft.prepared);
       if (
-        draft.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 ||
+        draft.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ ||
         !acknowledgement ||
         !issuedAcknowledgements.has(acknowledgement) ||
         settledAcknowledgements.has(acknowledgement)
       ) {
-        throw new AppStateToolPipelinePersistenceErrorV1('filesystem_intent_invalid');
+        throw new AppStateToolPipelinePersistenceError('filesystem_intent_invalid');
       }
       const identity = acknowledgement.attempt;
-      assertFilesystemMutationIntentDraftV1(draft, identity);
+      assertFilesystemMutationIntentDraft(draft, identity);
       const before = input.getState();
-      assertAcknowledgementStateV1(before, identity);
-      await persistExactV1(
+      assertAcknowledgementState(before, identity);
+      await persistExact(
         input.persistReceiptEvents,
         [
           {
@@ -407,15 +407,15 @@ export function createAppStateToolPipelinePersistenceV1(
       const after = input.getState();
       const invocation = after.capabilities.invocations[identity.invocationId];
       if (
-        !includesAcknowledgedRevisionV1(after, before, 1) ||
+        !includesAcknowledgedRevision(after, before, 1) ||
         invocation?.status !== 'running' ||
         invocation.attemptsStarted !== identity.attempt ||
-        !sameJsonV1(invocation.filesystemIntent, draft.record)
+        !sameJson(invocation.filesystemIntent, draft.record)
       ) {
-        throw new AppStateToolPipelinePersistenceErrorV1('filesystem_intent_commit_failed');
+        throw new AppStateToolPipelinePersistenceError('filesystem_intent_commit_failed');
       }
       const persisted = Object.freeze({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         status: 'durably_persisted' as const,
         prepared: draft.prepared,
         acknowledgement,
@@ -435,7 +435,7 @@ export function createAppStateToolPipelinePersistenceV1(
       return persisted;
     };
 
-  const verifyPersistedFilesystemMutationIntent: WorkspaceFilesystemMutationDurableEvidencePortV1['verifyPersistedIntent'] =
+  const verifyPersistedFilesystemMutationIntent: WorkspaceFilesystemMutationDurableEvidencePort['verifyPersistedIntent'] =
     (intent) => {
       const binding = filesystemMutationIntentBindings.get(intent);
       if (!issuedFilesystemMutationIntents.has(intent) || !binding) {
@@ -451,16 +451,16 @@ export function createAppStateToolPipelinePersistenceV1(
         return Object.freeze({ valid: false, code: 'operation_identity_mismatch' as const });
       }
       try {
-        assertOpenAcknowledgementV1(
+        assertOpenAcknowledgement(
           issuedAcknowledgements,
           settledAcknowledgements,
           intent.acknowledgement,
         );
-        const invocation = assertAcknowledgementStateV1(
+        const invocation = assertAcknowledgementState(
           input.getState(),
           intent.acknowledgement.attempt,
         );
-        if (!sameJsonV1(invocation.filesystemIntent, intent.record)) {
+        if (!sameJson(invocation.filesystemIntent, intent.record)) {
           return Object.freeze({ valid: false, code: 'durable_state_mismatch' as const });
         }
       } catch {
@@ -469,27 +469,27 @@ export function createAppStateToolPipelinePersistenceV1(
       return Object.freeze({ valid: true as const });
     };
 
-  const persistFilesystemMutationReady: WorkspaceFilesystemMutationDurableEvidencePortV1['persistMutationReady'] =
+  const persistFilesystemMutationReady: WorkspaceFilesystemMutationDurableEvidencePort['persistMutationReady'] =
     async (draft) => {
       const intentBinding = filesystemMutationIntentBindings.get(draft.intent);
       if (
-        draft.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 ||
+        draft.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ ||
         !issuedFilesystemMutationIntents.has(draft.intent) ||
         !intentBinding ||
         draft.intent.acknowledgement !== intentBinding.acknowledgement
       ) {
-        throw new AppStateToolPipelinePersistenceErrorV1('filesystem_mutation_ready_invalid');
+        throw new AppStateToolPipelinePersistenceError('filesystem_mutation_ready_invalid');
       }
-      assertOpenAcknowledgementV1(
+      assertOpenAcknowledgement(
         issuedAcknowledgements,
         settledAcknowledgements,
         draft.intent.acknowledgement,
       );
-      assertFilesystemMutationReadyDraftV1(draft);
+      assertFilesystemMutationReadyDraft(draft);
       const identity = draft.intent.acknowledgement.attempt;
       const before = input.getState();
-      assertAcknowledgementStateV1(before, identity);
-      await persistExactV1(
+      assertAcknowledgementState(before, identity);
+      await persistExact(
         input.persistReceiptEvents,
         [
           {
@@ -503,16 +503,16 @@ export function createAppStateToolPipelinePersistenceV1(
       const after = input.getState();
       const invocation = after.capabilities.invocations[identity.invocationId];
       if (
-        !includesAcknowledgedRevisionV1(after, before, 1) ||
+        !includesAcknowledgedRevision(after, before, 1) ||
         invocation?.status !== 'running' ||
         invocation.attemptsStarted !== identity.attempt ||
-        !sameJsonV1(invocation.filesystemIntent, draft.intent.record) ||
-        !sameJsonV1(invocation.filesystemMutationReady, draft.record)
+        !sameJson(invocation.filesystemIntent, draft.intent.record) ||
+        !sameJson(invocation.filesystemMutationReady, draft.record)
       ) {
-        throw new AppStateToolPipelinePersistenceErrorV1('filesystem_mutation_ready_commit_failed');
+        throw new AppStateToolPipelinePersistenceError('filesystem_mutation_ready_commit_failed');
       }
       const persisted = Object.freeze({
-        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
         status: 'durably_persisted' as const,
         intent: draft.intent,
         preimageArtifact: draft.preimageArtifact,
@@ -531,7 +531,7 @@ export function createAppStateToolPipelinePersistenceV1(
       return persisted;
     };
 
-  const verifyPersistedFilesystemMutationReady: WorkspaceFilesystemMutationDurableEvidencePortV1['verifyPersistedMutationReady'] =
+  const verifyPersistedFilesystemMutationReady: WorkspaceFilesystemMutationDurableEvidencePort['verifyPersistedMutationReady'] =
     (ready) => {
       const binding = filesystemMutationReadyBindings.get(ready);
       if (!issuedFilesystemMutationReadies.has(ready) || !binding) {
@@ -550,25 +550,25 @@ export function createAppStateToolPipelinePersistenceV1(
         return Object.freeze({ valid: false, code: 'ready_identity_mismatch' as const });
       }
       try {
-        assertOpenAcknowledgementV1(
+        assertOpenAcknowledgement(
           issuedAcknowledgements,
           settledAcknowledgements,
           ready.intent.acknowledgement,
         );
-        assertFilesystemMutationReadyDraftV1({
-          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1,
+        assertFilesystemMutationReadyDraft({
+          schema: WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_,
           intent: ready.intent,
           preparedEvidence: binding.preparedEvidence,
           preimageArtifact: ready.preimageArtifact,
           record: ready.record,
         });
-        const invocation = assertAcknowledgementStateV1(
+        const invocation = assertAcknowledgementState(
           input.getState(),
           ready.intent.acknowledgement.attempt,
         );
         if (
-          !sameJsonV1(invocation.filesystemIntent, ready.intent.record) ||
-          !sameJsonV1(invocation.filesystemMutationReady, ready.record)
+          !sameJson(invocation.filesystemIntent, ready.intent.record) ||
+          !sameJson(invocation.filesystemMutationReady, ready.record)
         ) {
           return Object.freeze({ valid: false, code: 'durable_state_mismatch' as const });
         }
@@ -578,11 +578,11 @@ export function createAppStateToolPipelinePersistenceV1(
       return Object.freeze({ valid: true as const });
     };
 
-  const findLatestFilesystemEditObservation: WorkspaceFilesystemEditObservationPortV1['findLatestAuthenticRead'] =
+  const findLatestFilesystemEditObservation: WorkspaceFilesystemEditObservationPort['findLatestAuthenticRead'] =
     async (query) => {
-      assertFilesystemEditObservationQueryV1(query);
-      const candidate = latestFilesystemObservationInvocationV1(input.getState(), query);
-      const result: WorkspaceFilesystemEditObservationQueryResultV1 = candidate
+      assertFilesystemEditObservationQuery(query);
+      const candidate = latestFilesystemObservationInvocation(input.getState(), query);
+      const result: WorkspaceFilesystemEditObservationQueryResult = candidate
         ? Object.freeze({
             status: 'found' as const,
             query,
@@ -600,7 +600,7 @@ export function createAppStateToolPipelinePersistenceV1(
       return result;
     };
 
-  const verifyLatestFilesystemEditObservation: WorkspaceFilesystemEditObservationPortV1['verifyLatestAuthenticRead'] =
+  const verifyLatestFilesystemEditObservation: WorkspaceFilesystemEditObservationPort['verifyLatestAuthenticRead'] =
     (result) => {
       const binding = filesystemEditObservationBindings.get(result);
       if (!issuedFilesystemEditObservations.has(result) || !binding || binding.result !== result) {
@@ -610,11 +610,11 @@ export function createAppStateToolPipelinePersistenceV1(
         return Object.freeze({ valid: false, code: 'query_identity_mismatch' as const });
       }
       try {
-        assertFilesystemEditObservationQueryV1(result.query);
+        assertFilesystemEditObservationQuery(result.query);
       } catch {
         return Object.freeze({ valid: false, code: 'query_identity_mismatch' as const });
       }
-      const current = latestFilesystemObservationInvocationV1(input.getState(), result.query);
+      const current = latestFilesystemObservationInvocation(input.getState(), result.query);
       if (result.status === 'missing') {
         return current
           ? Object.freeze({ valid: false, code: 'durable_state_mismatch' as const })
@@ -627,26 +627,26 @@ export function createAppStateToolPipelinePersistenceV1(
         current.capabilityRevision !== result.capabilityRevision ||
         current.resultDigest !== result.resultDigest ||
         current.evidenceDigest !== result.evidenceDigest ||
-        !sameJsonV1(current.artifact, result.artifact) ||
-        !sameJsonV1(current.filesystemObservation, result.observation)
+        !sameJson(current.artifact, result.artifact) ||
+        !sameJson(current.filesystemObservation, result.observation)
       ) {
         return Object.freeze({ valid: false, code: 'durable_state_mismatch' as const });
       }
       return Object.freeze({ valid: true as const });
     };
 
-  const recordUnknown = async (unknown: Readonly<ToolPipelineUnknownOutcomeV1>): Promise<void> => {
-    const identity = assertSupportedAcknowledgementV1(unknown);
-    assertOpenAcknowledgementV1(
+  const recordUnknown = async (unknown: Readonly<ToolPipelineUnknownOutcome>): Promise<void> => {
+    const identity = assertSupportedAcknowledgement(unknown);
+    assertOpenAcknowledgement(
       issuedAcknowledgements,
       settledAcknowledgements,
       unknown.acknowledgement,
     );
     const before = input.getState();
-    const invocation = assertAcknowledgementStateV1(before, identity);
-    const finishedAt = stateTimestampV1(input.now());
-    const reason = boundedUnknownReasonV1(unknown.code);
-    const events: StateRuntimeEventV1[] = [
+    const invocation = assertAcknowledgementState(before, identity);
+    const finishedAt = stateTimestamp(input.now());
+    const reason = boundedUnknownReason(unknown.code);
+    const events: StateRuntimeEvent[] = [
       {
         type: 'capability.execution_unknown',
         invocationId: identity.invocationId,
@@ -656,7 +656,7 @@ export function createAppStateToolPipelinePersistenceV1(
       {
         type: 'tool.failed',
         toolCallId: identity.toolCallId,
-        failure: runtimeHostStateClassifyFailureV1(
+        failure: runtimeHostStateClassifyFailure(
           identity.operationId === 'mcp:dynamic_tool' && unknown.code === 'terminal_commit_failed'
             ? 'persistence_unavailable'
             : 'unknown',
@@ -664,16 +664,16 @@ export function createAppStateToolPipelinePersistenceV1(
         ),
       },
     ];
-    await persistExactV1(input.persistTerminalRecoveryEvents, events, 'terminal_recovery');
+    await persistExact(input.persistTerminalRecoveryEvents, events, 'terminal_recovery');
     const after = input.getState();
     if (
-      !includesAcknowledgedRevisionV1(after, before, events.length) ||
+      !includesAcknowledgedRevision(after, before, events.length) ||
       after.capabilities.invocations[identity.invocationId]?.status !== 'unknown' ||
       after.capabilities.invocations[identity.invocationId]?.finishedAt !== finishedAt ||
       after.tools.calls[identity.toolCallId]?.status !== 'failed' ||
       invocation.status !== 'running'
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'acknowledgement_mismatch',
         'State unknown terminal acknowledgement did not commit the exact invocation.',
       );
@@ -682,19 +682,19 @@ export function createAppStateToolPipelinePersistenceV1(
   };
 
   const commitRetryable = async (
-    commit: Readonly<ToolPipelineRetryableCommitV1<StateBuiltinOperationStructuredContentV1>>,
+    commit: Readonly<ToolPipelineRetryableCommit<StateBuiltinOperationStructuredContent>>,
   ): Promise<void> => {
-    const identity = assertSupportedAcknowledgementV1(commit);
-    assertOpenAcknowledgementV1(
+    const identity = assertSupportedAcknowledgement(commit);
+    assertOpenAcknowledgement(
       issuedAcknowledgements,
       settledAcknowledgements,
       commit.acknowledgement,
     );
     const prepared = preparedByAcknowledgement.get(commit.acknowledgement);
     if (!prepared) {
-      throw new AppStateToolPipelinePersistenceErrorV1('acknowledgement_mismatch');
+      throw new AppStateToolPipelinePersistenceError('acknowledgement_mismatch');
     }
-    const request = readPreparedRequestV1(prepared);
+    const request = readPreparedRequest(prepared);
     const failure = commit.result.failure;
     if (
       identity.operationId !== 'mcp:dynamic_tool' ||
@@ -703,29 +703,29 @@ export function createAppStateToolPipelinePersistenceV1(
       commit.result.status !== 'error' ||
       failure?.code !== 'provider_unavailable' ||
       failure.retryable !== true ||
-      !isExactDynamicMcpRetryableFailureValueV1(commit.result.structuredContent, failure)
+      !isExactDynamicMcpRetryableFailureValue(commit.result.structuredContent, failure)
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'retryable_commit_failed',
         'Only an exact Dynamic MCP safe-read provider failure may authorize another attempt.',
       );
     }
 
     const before = input.getState();
-    assertAcknowledgementStateV1(before, identity);
+    assertAcknowledgementState(before, identity);
     const call = before.tools.calls[identity.toolCallId];
     if (
       call?.status !== 'running' ||
       call.createdAtTurnId !== identity.turnId ||
       call.modelMessageId !== identity.modelMessageId
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1('acknowledgement_mismatch');
+      throw new AppStateToolPipelinePersistenceError('acknowledgement_mismatch');
     }
-    const classifiedFailure = runtimeHostStateClassifyFailureV1(
+    const classifiedFailure = runtimeHostStateClassifyFailure(
       'provider_unavailable',
       failure.message,
     );
-    const outcome = runtimeHostStateClassifyToolOutcomeV1({
+    const outcome = runtimeHostStateClassifyToolOutcome({
       status: 'failed',
       failure: classifiedFailure,
       authority: Object.freeze({
@@ -745,20 +745,20 @@ export function createAppStateToolPipelinePersistenceV1(
       outcome.recovery.maximumAdditionalCalls !== 1 ||
       outcome.recovery.safeAutomaticRetry !== true
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1('retryable_commit_failed');
+      throw new AppStateToolPipelinePersistenceError('retryable_commit_failed');
     }
     const invocationFingerprint =
       call.invocationFingerprint ??
-      runtimeHostStateToolInvocationFingerprintV1({
+      runtimeHostStateToolInvocationFingerprint({
         toolName: call.name,
         parsedArgs: call.args,
       });
-    const recoveryOf = runtimeHostStateToolFailureInstanceIdV1({
+    const recoveryOf = runtimeHostStateToolFailureInstanceId({
       toolCallId: identity.toolCallId,
       invocationFingerprint,
       outcome,
     });
-    const candidateJournal = runtimeHostStateRecordRecoveryFailureV1(before.toolRecovery, {
+    const candidateJournal = runtimeHostStateRecordRecoveryFailure(before.toolRecovery, {
       toolCallId: identity.toolCallId,
       toolName: call.name,
       invocationFingerprint,
@@ -767,7 +767,7 @@ export function createAppStateToolPipelinePersistenceV1(
       ...(call.taskId ? { taskId: call.taskId } : {}),
       turnId: call.createdAtTurnId,
     });
-    const admission = runtimeHostStateAdmitRecoveryAttemptV1(candidateJournal, {
+    const admission = runtimeHostStateAdmitRecoveryAttempt(candidateJournal, {
       toolCallId: identity.toolCallId,
       toolName: call.name,
       invocationFingerprint,
@@ -777,29 +777,29 @@ export function createAppStateToolPipelinePersistenceV1(
       turnId: call.createdAtTurnId,
     });
     if (!admission.admitted || admission.recoveryOf !== recoveryOf) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'retryable_commit_failed',
         'State recovery policy did not admit the exact safe-read retry.',
       );
     }
-    const retryEvent: StateRuntimeEventV1 = {
+    const retryEvent: StateRuntimeEvent = {
       type: 'tool.retry_recorded',
       toolCallId: identity.toolCallId,
       failure: classifiedFailure,
-      outcomeV1: Object.freeze({
+      outcome: Object.freeze({
         ...outcome,
         lineage: Object.freeze({ failureInstanceId: recoveryOf }),
       }),
       recoveryOf,
       retryAttempt: 1,
     };
-    await persistExactV1(input.persistReceiptEvents, [retryEvent], 'retry_evidence');
+    await persistExact(input.persistReceiptEvents, [retryEvent], 'retry_evidence');
     const after = input.getState();
     const invocation = after.capabilities.invocations[identity.invocationId];
     const afterCall = after.tools.calls[identity.toolCallId];
     const failureRecord = after.toolRecovery.failures[recoveryOf];
     if (
-      !includesAcknowledgedRevisionV1(after, before, 1) ||
+      !includesAcknowledgedRevision(after, before, 1) ||
       invocation?.status !== 'running' ||
       invocation.attemptsStarted !== identity.attempt ||
       afterCall?.status !== 'running' ||
@@ -808,7 +808,7 @@ export function createAppStateToolPipelinePersistenceV1(
       failureRecord?.failureInstanceId !== recoveryOf ||
       failureRecord.automaticRetryAttempts !== 1
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'retryable_commit_failed',
         'State did not acknowledge the exact safe-read retry evidence.',
       );
@@ -817,25 +817,23 @@ export function createAppStateToolPipelinePersistenceV1(
   };
 
   const commitTerminal = async (
-    commit: Readonly<ToolPipelineReceiptCommitV1<StateBuiltinOperationStructuredContentV1>>,
+    commit: Readonly<ToolPipelineReceiptCommit<StateBuiltinOperationStructuredContent>>,
   ): Promise<void> => {
-    const identity = assertSupportedAcknowledgementV1(commit);
-    assertOpenAcknowledgementV1(
+    const identity = assertSupportedAcknowledgement(commit);
+    assertOpenAcknowledgement(
       issuedAcknowledgements,
       settledAcknowledgements,
       commit.acknowledgement,
     );
     const before = input.getState();
-    assertAcknowledgementStateV1(before, identity);
-    const { runtimeEvents, value } = readStructuredContentV1(commit.result);
+    assertAcknowledgementState(before, identity);
+    const { runtimeEvents, value } = readStructuredContent(commit.result);
     const taskRecoveryEvent =
       identity.operationId === 'builtin:task'
-        ? taskSubagentRecoveryEventV1(value, before, identity, 'invalid_terminal_result')
+        ? taskSubagentRecoveryEvent(value, before, identity, 'invalid_terminal_result')
         : undefined;
     const topLevelTaskRecoveryEvents = runtimeEvents.filter(
-      (
-        event,
-      ): event is Extract<StateRuntimeEventV1, { type: 'subagent.recovery_journal_merged' }> =>
+      (event): event is Extract<StateRuntimeEvent, { type: 'subagent.recovery_journal_merged' }> =>
         event.type === 'subagent.recovery_journal_merged',
     );
     if (
@@ -845,10 +843,10 @@ export function createAppStateToolPipelinePersistenceV1(
         topLevelTaskRecoveryEvents.some(
           (event) =>
             event.toolCallId !== identity.toolCallId ||
-            (taskRecoveryEvent !== undefined && !sameJsonV1(event, taskRecoveryEvent)),
+            (taskRecoveryEvent !== undefined && !sameJson(event, taskRecoveryEvent)),
         ))
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'invalid_terminal_result',
         'Task recovery evidence must match the exact nested Builtin journal.',
       );
@@ -859,48 +857,48 @@ export function createAppStateToolPipelinePersistenceV1(
       identity.operationId === 'builtin:task'
         ? runtimeEvents.filter((event) => event.type !== 'subagent.recovery_journal_merged')
         : runtimeEvents;
-    const filesystemObservation = verifyTerminalFilesystemObservationV1(
+    const filesystemObservation = verifyTerminalFilesystemObservation(
       input.verifyBuiltinWorkspaceFilesystemTerminal,
       commit,
       value,
       identity,
     );
     if (commit.result.status === 'unknown' || (commit.result.status === 'success') !== value.ok) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'invalid_terminal_result',
         'Unknown or contradictory Builtin terminal results must enter unknown recovery.',
       );
     }
     const prepared = preparedByAcknowledgement.get(commit.acknowledgement);
-    const fileChange = fileChangeEventV1(prepared, commit.result, value, identity);
-    const taskResourceAdmissionFailure = exactTaskResourceAdmissionFailureV1(value, identity);
-    const toolTerminal = toolTerminalEventV1(
+    const fileChange = fileChangeEvent(prepared, commit.result, value, identity);
+    const taskResourceAdmissionFailure = exactTaskResourceAdmissionFailure(value, identity);
+    const toolTerminal = toolTerminalEvent(
       commit.result,
       value,
       identity,
       taskResourceAdmissionFailure
-        ? resourceAdmissionFailureEventV1(taskResourceAdmissionFailure.reason, before).failure
+        ? resourceAdmissionFailureEvent(taskResourceAdmissionFailure.reason, before).failure
         : undefined,
     );
-    const providerAction = providerActionRequiredEventV1(
+    const providerAction = providerActionRequiredEvent(
       input.providerAction,
       prepared,
       commit.result,
       identity,
     );
-    const capabilityResult = capabilityResultFromTerminalV1(commit.result, value);
-    let artifact: ReturnType<CapabilityArtifactWriterV1['write']>;
+    const capabilityResult = capabilityResultFromTerminal(commit.result, value);
+    let artifact: ReturnType<CapabilityArtifactWriter['write']>;
     try {
       artifact = input.capabilityArtifactWriter.write(identity.invocationId, capabilityResult);
     } catch (error) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'artifact_write_failed',
         error instanceof Error ? error.message : 'Capability result artifact write failed.',
       );
     }
 
-    const finishedAt = stateTimestampV1(input.now());
-    const capabilityTerminal = capabilityTerminalEventV1(
+    const finishedAt = stateTimestamp(input.now());
+    const capabilityTerminal = capabilityTerminalEvent(
       commit.result,
       value,
       identity.invocationId,
@@ -909,19 +907,19 @@ export function createAppStateToolPipelinePersistenceV1(
       capabilityResult,
       filesystemObservation,
     );
-    const preparedRequest = prepared ? readPreparedRequestV1(prepared) : undefined;
+    const preparedRequest = prepared ? readPreparedRequest(prepared) : undefined;
     const verificationEvent =
       identity.operationId === 'mcp:dynamic_tool' && input.verificationEnabled !== false
         ? (() => {
             if (!preparedRequest) {
-              throw new AppStateToolPipelinePersistenceErrorV1(
+              throw new AppStateToolPipelinePersistenceError(
                 'acknowledgement_mismatch',
                 'Dynamic MCP verification requires its prepared request facts.',
               );
             }
             return preparedRequest.receiptRequirement !== 'effect_receipt'
               ? undefined
-              : createBuiltinCapabilityVerificationRequestV1({
+              : createBuiltinCapabilityVerificationRequest({
                   invocationId: identity.invocationId,
                   capabilityId: identity.capabilityId,
                   mode: 'required',
@@ -930,7 +928,7 @@ export function createAppStateToolPipelinePersistenceV1(
                 });
           })()
         : undefined;
-    const events: StateRuntimeEventV1[] = [
+    const events: StateRuntimeEvent[] = [
       capabilityTerminal,
       ...taskRecoveryEvents,
       ...persistedRuntimeEvents,
@@ -939,17 +937,17 @@ export function createAppStateToolPipelinePersistenceV1(
       toolTerminal,
       ...(providerAction ? [providerAction] : []),
     ];
-    await persistExactV1(input.persistReceiptEvents, events, 'receipt_evidence');
+    await persistExact(input.persistReceiptEvents, events, 'receipt_evidence');
     const after = input.getState();
-    assertTerminalStateV1(
+    assertTerminalState(
       after,
       before,
       events.length,
       identity,
       commit.result.status,
       artifact,
-      capabilityResultDigestV1(capabilityResult),
-      capabilityResultEvidenceDigestV1(capabilityResult),
+      capabilityResultDigest(capabilityResult),
+      capabilityResultEvidenceDigest(capabilityResult),
       finishedAt,
       filesystemObservation,
     );
@@ -957,18 +955,18 @@ export function createAppStateToolPipelinePersistenceV1(
   };
 
   const commitSuspension = async (
-    commit: Readonly<ToolPipelineSuspensionCommitV1<StateBuiltinOperationStructuredContentV1>>,
+    commit: Readonly<ToolPipelineSuspensionCommit<StateBuiltinOperationStructuredContent>>,
   ): Promise<void> => {
-    const identity = assertSupportedAcknowledgementV1(commit);
-    assertOpenAcknowledgementV1(
+    const identity = assertSupportedAcknowledgement(commit);
+    assertOpenAcknowledgement(
       issuedAcknowledgements,
       settledAcknowledgements,
       commit.acknowledgement,
     );
     const before = input.getState();
-    assertAcknowledgementStateV1(before, identity);
+    assertAcknowledgementState(before, identity);
     if (identity.operationId === 'builtin:task') {
-      await commitTaskSubagentSuspensionV1({
+      await commitTaskSubagentSuspension({
         commit,
         identity,
         before,
@@ -983,9 +981,9 @@ export function createAppStateToolPipelinePersistenceV1(
       identity.toolCallId !== commit.suspension.toolCallId ||
       commit.suspension.kind !== 'plan_review'
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1('invalid_suspension_result');
+      throw new AppStateToolPipelinePersistenceError('invalid_suspension_result');
     }
-    const { runtimeEvents, value } = readStructuredContentV1(commit.result);
+    const { runtimeEvents, value } = readStructuredContent(commit.result);
     if (
       commit.result.status !== 'success' ||
       !value.ok ||
@@ -994,37 +992,37 @@ export function createAppStateToolPipelinePersistenceV1(
       runtimeEvents[0]?.type !== 'plan.review_requested' ||
       JSON.stringify(runtimeEvents[0]) !== JSON.stringify(commit.suspension.event)
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'invalid_suspension_result',
         'Plan review suspension must carry one exact successful Builtin result and review event.',
       );
     }
     const reviewEvent = runtimeEvents[0];
-    const capabilityResult = capabilityResultFromTerminalV1(commit.result, value);
-    let artifact: ReturnType<CapabilityArtifactWriterV1['write']>;
+    const capabilityResult = capabilityResultFromTerminal(commit.result, value);
+    let artifact: ReturnType<CapabilityArtifactWriter['write']>;
     try {
       artifact = input.capabilityArtifactWriter.write(identity.invocationId, capabilityResult);
     } catch (error) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'artifact_write_failed',
         error instanceof Error ? error.message : 'Capability result artifact write failed.',
       );
     }
-    const recordedAt = stateTimestampV1(input.now());
-    const resultDigest = capabilityResultDigestV1(capabilityResult);
-    const evidenceDigest = capabilityResultEvidenceDigestV1(capabilityResult);
-    const siblingCancellationDecisions = runtimeHostStatePlanReviewSiblingCancellationsV1(
+    const recordedAt = stateTimestamp(input.now());
+    const resultDigest = capabilityResultDigest(capabilityResult);
+    const evidenceDigest = capabilityResultEvidenceDigest(capabilityResult);
+    const siblingCancellationDecisions = runtimeHostStatePlanReviewSiblingCancellations(
       before,
       identity.toolCallId,
     );
     const siblingCancellations = siblingCancellationDecisions.map(
-      (decision): StateRuntimeEventV1 => ({
+      (decision): StateRuntimeEvent => ({
         type: 'tool.cancelled',
         toolCallId: decision.toolCallId,
         reason: decision.reason,
       }),
     );
-    const events: StateRuntimeEventV1[] = [
+    const events: StateRuntimeEvent[] = [
       {
         type: 'capability.execution_result_recorded',
         invocationId: identity.invocationId,
@@ -1036,9 +1034,9 @@ export function createAppStateToolPipelinePersistenceV1(
       reviewEvent,
       ...siblingCancellations,
     ];
-    await persistExactV1(input.persistReceiptEvents, events, 'suspension_evidence');
+    await persistExact(input.persistReceiptEvents, events, 'suspension_evidence');
     const after = input.getState();
-    assertSuspendedStateV1(
+    assertSuspendedState(
       after,
       before,
       events.length,
@@ -1075,10 +1073,10 @@ export function createAppStateToolPipelinePersistenceV1(
       prepared,
       artifacts,
     }: {
-      readonly prepared: Readonly<PreparedToolInvocationV1>;
-      readonly artifacts: SandboxPreparationArtifactPortV1;
+      readonly prepared: Readonly<PreparedToolInvocation>;
+      readonly artifacts: SandboxPreparationArtifactPort;
     }) =>
-      createAppToolPipelineSandboxLifecycleV1({
+      createAppToolPipelineSandboxLifecycle({
         prepared,
         artifacts,
         getState: input.getState,
@@ -1097,11 +1095,11 @@ export function createAppStateToolPipelinePersistenceV1(
   });
 }
 
-function isExactDynamicMcpRetryableFailureValueV1(
-  value: StateBuiltinOperationStructuredContentV1 | undefined,
-  failure: Readonly<CapabilityToolTerminalFailureV1>,
+function isExactDynamicMcpRetryableFailureValue(
+  value: StateBuiltinOperationStructuredContent | undefined,
+  failure: Readonly<CapabilityToolTerminalFailure>,
 ): boolean {
-  if (!value || !isJsonRecordV1(value)) return false;
+  if (!value || !isJsonRecord(value)) return false;
   const valueKeys = Object.keys(value).sort();
   if (
     valueKeys.length !== 5 ||
@@ -1110,7 +1108,7 @@ function isExactDynamicMcpRetryableFailureValueV1(
     value.ok !== false ||
     value.stdout !== '' ||
     value.stderr !== failure.message ||
-    !isJsonRecordV1(value.resultMeta)
+    !isJsonRecord(value.resultMeta)
   ) {
     return false;
   }
@@ -1119,21 +1117,19 @@ function isExactDynamicMcpRetryableFailureValueV1(
   return (
     resultMetaKeys.length === 1 &&
     resultMetaKeys[0] === 'providerFailure' &&
-    isJsonRecordV1(providerFailure) &&
+    isJsonRecord(providerFailure) &&
     Object.keys(providerFailure).sort().join(',') === 'code,retryable' &&
     providerFailure.code === failure.code &&
     providerFailure.retryable === true
   );
 }
 
-interface CommitTaskSubagentSuspensionInputV1 {
-  readonly commit: Readonly<
-    ToolPipelineSuspensionCommitV1<StateBuiltinOperationStructuredContentV1>
-  >;
-  readonly identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>;
-  readonly before: Readonly<StateRuntimeStateV1>;
-  readonly prepared: Readonly<PreparedToolInvocationV1> | undefined;
-  readonly input: Readonly<CreateAppStateToolPipelinePersistenceInputV1>;
+interface CommitTaskSubagentSuspensionInput {
+  readonly commit: Readonly<ToolPipelineSuspensionCommit<StateBuiltinOperationStructuredContent>>;
+  readonly identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>;
+  readonly before: Readonly<StateRuntimeState>;
+  readonly prepared: Readonly<PreparedToolInvocation> | undefined;
+  readonly input: Readonly<CreateAppStateToolPipelinePersistenceInput>;
 }
 
 /**
@@ -1142,27 +1138,27 @@ interface CommitTaskSubagentSuspensionInputV1 {
  * projects the already-authenticated Builtin result and suspension facts; it
  * never creates a child runtime, reviewer, continuation, or terminal event.
  */
-async function commitTaskSubagentSuspensionV1(
-  input: CommitTaskSubagentSuspensionInputV1,
+async function commitTaskSubagentSuspension(
+  input: CommitTaskSubagentSuspensionInput,
 ): Promise<void> {
   const suspension = input.commit.suspension;
   if (
-    !isTaskSubagentSuspensionV1(suspension) ||
+    !isTaskSubagentSuspension(suspension) ||
     input.identity.operationId !== 'builtin:task' ||
     input.identity.capabilityId !== 'builtin:task' ||
     input.identity.toolCallId !== suspension.toolCallId
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('invalid_suspension_result');
+    throw new AppStateToolPipelinePersistenceError('invalid_suspension_result');
   }
 
-  const structured = readTaskSuspendedContentV1(input.commit.result);
-  const recoveryEvent = taskSubagentRecoveryEventV1(
+  const structured = readTaskSuspendedContent(input.commit.result);
+  const recoveryEvent = taskSubagentRecoveryEvent(
     structured.value,
     input.before,
     input.identity,
     'invalid_suspension_result',
   );
-  assertTaskSubagentSuspensionFactsV1(
+  assertTaskSubagentSuspensionFacts(
     input.before,
     input.identity,
     input.prepared,
@@ -1172,25 +1168,25 @@ async function commitTaskSubagentSuspensionV1(
     recoveryEvent,
   );
 
-  const capabilityResult = capabilityResultFromTerminalV1(input.commit.result, structured.value);
-  let artifact: ReturnType<CapabilityArtifactWriterV1['write']>;
+  const capabilityResult = capabilityResultFromTerminal(input.commit.result, structured.value);
+  let artifact: ReturnType<CapabilityArtifactWriter['write']>;
   try {
     artifact = input.input.capabilityArtifactWriter.write(
       input.identity.invocationId,
       capabilityResult,
     );
   } catch (error) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'artifact_write_failed',
       error instanceof Error ? error.message : 'Capability result artifact write failed.',
     );
   }
 
-  const recordedAt = stateTimestampV1(input.input.now());
-  const resultDigest = capabilityResultDigestV1(capabilityResult);
-  const evidenceDigest = capabilityResultEvidenceDigestV1(capabilityResult);
+  const recordedAt = stateTimestamp(input.input.now());
+  const resultDigest = capabilityResultDigest(capabilityResult);
+  const evidenceDigest = capabilityResultEvidenceDigest(capabilityResult);
   const recordedEvent: Extract<
-    StateRuntimeEventV1,
+    StateRuntimeEvent,
     { type: 'capability.execution_result_recorded' }
   > = {
     type: 'capability.execution_result_recorded',
@@ -1200,31 +1196,31 @@ async function commitTaskSubagentSuspensionV1(
     recordedAt,
     artifact,
   };
-  const suspendedEvent: Extract<StateRuntimeEventV1, { type: 'subagent.suspended' }> = {
+  const suspendedEvent: Extract<StateRuntimeEvent, { type: 'subagent.suspended' }> = {
     type: 'subagent.suspended',
     toolCallId: suspension.toolCallId,
     snapshot: suspension.subagent as Extract<
-      StateRuntimeEventV1,
+      StateRuntimeEvent,
       { type: 'subagent.suspended' }
     >['snapshot'],
   };
   const embeddedSuspensionEvent = structured.runtimeEvents.find(
-    (event) => event.type === suspension.event.type && sameJsonV1(event, suspension.event),
+    (event) => event.type === suspension.event.type && sameJson(event, suspension.event),
   );
   const interactionDeferred = input.before.interactions.kind !== 'idle';
-  const interactionEvent: StateRuntimeEventV1 = interactionDeferred
+  const interactionEvent: StateRuntimeEvent = interactionDeferred
     ? { type: 'subagent.approval_deferred', toolCallId: suspension.toolCallId }
-    : (embeddedSuspensionEvent ?? (suspension.event as StateRuntimeEventV1));
+    : (embeddedSuspensionEvent ?? (suspension.event as StateRuntimeEvent));
   const recoveryEvents = recoveryEvent ? [recoveryEvent] : [];
-  const events: StateRuntimeEventV1[] = [
+  const events: StateRuntimeEvent[] = [
     recordedEvent,
     ...recoveryEvents,
     suspendedEvent,
     interactionEvent,
   ];
-  await persistExactV1(input.input.persistReceiptEvents, events, 'suspension_evidence');
+  await persistExact(input.input.persistReceiptEvents, events, 'suspension_evidence');
   const after = input.input.getState();
-  assertTaskSubagentSuspendedStateV1(
+  assertTaskSubagentSuspendedState(
     after,
     input.before,
     events.length,
@@ -1237,29 +1233,24 @@ async function commitTaskSubagentSuspensionV1(
   );
 }
 
-function readTaskSuspendedContentV1(
-  result: Readonly<
-    ToolPipelineSuspendedExecutionResultV1<StateBuiltinOperationStructuredContentV1>
-  >,
+function readTaskSuspendedContent(
+  result: Readonly<ToolPipelineSuspendedExecutionResult<StateBuiltinOperationStructuredContent>>,
 ): Readonly<{
-  readonly value: Readonly<StateBuiltinOperationStructuredContentV1>;
-  readonly runtimeEvents: readonly StateRuntimeEventV1[];
+  readonly value: Readonly<StateBuiltinOperationStructuredContent>;
+  readonly runtimeEvents: readonly StateRuntimeEvent[];
 }> {
-  if (
-    result.status !== 'success' ||
-    !isBuiltinOperationExecutionValueV1(result.structuredContent)
-  ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+  if (result.status !== 'success' || !isBuiltinOperationExecutionValue(result.structuredContent)) {
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_suspension_result',
       'Task suspension requires one successful Builtin operation result.',
     );
   }
-  let runtimeEvents: StateRuntimeEventV1[];
+  let runtimeEvents: StateRuntimeEvent[];
   try {
-    runtimeEvents = admitRuntimeEventsV1(result.structuredContent.runtimeEvents);
+    runtimeEvents = admitRuntimeEvents(result.structuredContent.runtimeEvents);
   } catch (error) {
-    if (error instanceof AppStateToolPipelinePersistenceErrorV1) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+    if (error instanceof AppStateToolPipelinePersistenceError) {
+      throw new AppStateToolPipelinePersistenceError(
         'invalid_suspension_result',
         'Task suspension runtime events are not valid State events.',
       );
@@ -1269,15 +1260,15 @@ function readTaskSuspendedContentV1(
   return Object.freeze({ value: result.structuredContent, runtimeEvents });
 }
 
-function assertTaskSubagentSuspensionFactsV1(
-  before: Readonly<StateRuntimeStateV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-  prepared: Readonly<PreparedToolInvocationV1> | undefined,
-  suspension: Readonly<ToolPipelineTaskSubagentSuspensionV1>,
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
-  runtimeEvents: readonly StateRuntimeEventV1[],
+function assertTaskSubagentSuspensionFacts(
+  before: Readonly<StateRuntimeState>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+  prepared: Readonly<PreparedToolInvocation> | undefined,
+  suspension: Readonly<ToolPipelineTaskSubagentSuspension>,
+  value: Readonly<StateBuiltinOperationStructuredContent>,
+  runtimeEvents: readonly StateRuntimeEvent[],
   recoveryEvent:
-    | Extract<StateRuntimeEventV1, { type: 'subagent.recovery_journal_merged' }>
+    | Extract<StateRuntimeEvent, { type: 'subagent.recovery_journal_merged' }>
     | undefined,
 ): void {
   const call = before.tools.calls[identity.toolCallId];
@@ -1291,26 +1282,26 @@ function assertTaskSubagentSuspensionFactsV1(
     suspension.executionMode === 'start'
       ? previousSuspension === undefined
       : previousSuspension !== undefined &&
-        privateSuspendedSubagentParentMatchesV1(previousSuspension, suspension.parent);
+        privateSuspendedSubagentParentMatches(previousSuspension, suspension.parent);
   if (
     !parentMatches ||
     !modeMatches ||
-    !isTaskPreparedInputV1(prepared, identity) ||
+    !isTaskPreparedInput(prepared, identity) ||
     !call ||
     call.name !== 'task' ||
     call.status !== 'running' ||
-    !isExactPrivateSuspendedSubagentRecordV1(suspension.subagent) ||
+    !isExactPrivateSuspendedSubagentRecord(suspension.subagent) ||
     suspension.subagent.parentInvocationId !== suspension.parent.invocationId ||
     suspension.subagent.parentAttempt !== suspension.parent.attempt ||
-    !isExactTaskBlockedToolIdentityV1(suspension.blockedTool) ||
+    !isExactTaskBlockedToolIdentity(suspension.blockedTool) ||
     suspension.subagent.blockedTool.toolCallId !== suspension.blockedTool.toolCallId ||
     (suspension.subagent.blockedTool.runtimeToolCallId ?? null) !==
       suspension.blockedTool.runtimeToolCallId ||
     suspension.subagent.blockedTool.toolName !== suspension.blockedTool.toolName ||
-    !isTaskSuspensionEventV1(suspension.event, suspension) ||
-    !taskSubagentResultMatchesSuspensionV1(value, suspension)
+    !isTaskSuspensionEvent(suspension.event, suspension) ||
+    !taskSubagentResultMatchesSuspension(value, suspension)
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_suspension_result',
       'Task suspension facts do not match the current State parent attempt.',
     );
@@ -1320,61 +1311,61 @@ function assertTaskSubagentSuspensionFactsV1(
     (event) => event.type === 'approval.requested' || event.type === 'auto_review.requested',
   );
   const embeddedEventCount = interactionEvents.filter((event) =>
-    sameJsonV1(event, suspension.event),
+    sameJson(event, suspension.event),
   ).length;
   const embeddedRecoveryEvents = runtimeEvents.filter(
-    (event): event is Extract<StateRuntimeEventV1, { type: 'subagent.recovery_journal_merged' }> =>
+    (event): event is Extract<StateRuntimeEvent, { type: 'subagent.recovery_journal_merged' }> =>
       event.type === 'subagent.recovery_journal_merged',
   );
   if (
-    interactionEvents.some((event) => !sameJsonV1(event, suspension.event)) ||
+    interactionEvents.some((event) => !sameJson(event, suspension.event)) ||
     embeddedEventCount > 1 ||
     embeddedRecoveryEvents.length > 1 ||
     (recoveryEvent === undefined && embeddedRecoveryEvents.length > 0) ||
     (recoveryEvent !== undefined &&
-      embeddedRecoveryEvents.some((event) => !sameJsonV1(event, recoveryEvent))) ||
+      embeddedRecoveryEvents.some((event) => !sameJson(event, recoveryEvent))) ||
     runtimeEvents.some(
       (event) =>
-        event.type !== 'subagent.recovery_journal_merged' && !sameJsonV1(event, suspension.event),
+        event.type !== 'subagent.recovery_journal_merged' && !sameJson(event, suspension.event),
     ) ||
     (interactionEvents.length > 0 && embeddedEventCount !== 1)
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_suspension_result',
       'Task suspension runtime events must contain only the exact Builtin review event.',
     );
   }
 }
 
-function taskSubagentRecoveryEventV1(
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
-  before: Readonly<StateRuntimeStateV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
+function taskSubagentRecoveryEvent(
+  value: Readonly<StateBuiltinOperationStructuredContent>,
+  before: Readonly<StateRuntimeState>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
   failureCode: 'invalid_suspension_result' | 'invalid_terminal_result',
-): Extract<StateRuntimeEventV1, { type: 'subagent.recovery_journal_merged' }> | undefined {
-  if (!isJsonRecordV1(value.subagentResult)) return undefined;
+): Extract<StateRuntimeEvent, { type: 'subagent.recovery_journal_merged' }> | undefined {
+  if (!isJsonRecord(value.subagentResult)) return undefined;
   if (!Object.hasOwn(value.subagentResult, 'toolRecovery')) return undefined;
   const rawJournal = value.subagentResult.toolRecovery;
-  if (!isRuntimeJsonV1(rawJournal)) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+  if (!isRuntimeJson(rawJournal)) {
+    throw new AppStateToolPipelinePersistenceError(
       failureCode,
       'Builtin task recovery journal is not JSON-safe State data.',
     );
   }
-  let normalized: ReturnType<typeof runtimeHostStateNormalizeToolRecoveryJournalV1>;
+  let normalized: ReturnType<typeof runtimeHostStateNormalizeToolRecoveryJournal>;
   try {
-    normalized = runtimeHostStateNormalizeToolRecoveryJournalV1(
+    normalized = runtimeHostStateNormalizeToolRecoveryJournal(
       rawJournal,
       before.toolRecovery.identityKey,
     );
   } catch {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       failureCode,
       'Builtin task recovery journal could not be normalized.',
     );
   }
-  if (runtimeHostStateToolRecoveryJournalInvalidV1(normalized)) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+  if (runtimeHostStateToolRecoveryJournalInvalid(normalized)) {
+    throw new AppStateToolPipelinePersistenceError(
       failureCode,
       'Builtin task recovery journal is invalid for the current State identity.',
     );
@@ -1385,22 +1376,22 @@ function taskSubagentRecoveryEventV1(
     journal: normalized,
   };
   try {
-    const admitted = runtimeHostStateAdmitCurrentRuntimeEventV1(candidate);
+    const admitted = runtimeHostStateAdmitCurrentRuntimeEvent(candidate);
     if (admitted.type !== 'subagent.recovery_journal_merged') {
       throw new Error('wrong State recovery event type');
     }
     return admitted;
   } catch {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       failureCode,
       'Builtin task recovery event failed State admission.',
     );
   }
 }
 
-function isTaskPreparedInputV1(
-  prepared: Readonly<PreparedToolInvocationV1> | undefined,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
+function isTaskPreparedInput(
+  prepared: Readonly<PreparedToolInvocation> | undefined,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
 ): boolean {
   if (
     !prepared ||
@@ -1409,12 +1400,12 @@ function isTaskPreparedInputV1(
     prepared.identity.toolCallId !== identity.toolCallId ||
     prepared.identity.operationId !== 'builtin:task' ||
     prepared.identity.argumentOrigin !== 'runtime_private' ||
-    !isJsonRecordV1(prepared.input.arguments)
+    !isJsonRecord(prepared.input.arguments)
   ) {
     return false;
   }
   const taskArtifact = prepared.input.arguments.taskArtifact;
-  if (!isJsonRecordV1(taskArtifact)) return false;
+  if (!isJsonRecord(taskArtifact)) return false;
   return (
     Object.keys(taskArtifact).sort().join(',') ===
       'artifactId,byteLength,integrityIdentifier,kind' &&
@@ -1429,13 +1420,13 @@ function isTaskPreparedInputV1(
   );
 }
 
-function assertTaskSubagentSuspendedStateV1(
-  after: Readonly<StateRuntimeStateV1>,
-  before: Readonly<StateRuntimeStateV1>,
+function assertTaskSubagentSuspendedState(
+  after: Readonly<StateRuntimeState>,
+  before: Readonly<StateRuntimeState>,
   eventCount: number,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-  suspension: Readonly<ToolPipelineTaskSubagentSuspensionV1>,
-  artifact: ReturnType<CapabilityArtifactWriterV1['write']>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+  suspension: Readonly<ToolPipelineTaskSubagentSuspension>,
+  artifact: ReturnType<CapabilityArtifactWriter['write']>,
   resultDigest: string,
   evidenceDigest: string,
   interactionDeferred: boolean,
@@ -1455,7 +1446,7 @@ function assertTaskSubagentSuspendedStateV1(
           toolCallId: identity.toolCallId,
         };
   if (
-    !includesAcknowledgedRevisionV1(after, before, eventCount) ||
+    !includesAcknowledgedRevision(after, before, eventCount) ||
     !invocation ||
     invocation.status !== 'running' ||
     invocation.toolCallId !== identity.toolCallId ||
@@ -1464,9 +1455,9 @@ function assertTaskSubagentSuspendedStateV1(
     invocation.evidenceDigest !== evidenceDigest ||
     invocation.artifact?.artifactId !== artifact.artifactId ||
     invocation.artifact?.integrityIdentifier !== artifact.integrityIdentifier ||
-    !sameJsonV1(after.suspendedSubagents[identity.toolCallId], suspension.subagent) ||
+    !sameJson(after.suspendedSubagents[identity.toolCallId], suspension.subagent) ||
     (interactionDeferred
-      ? call?.status !== 'queued' || !sameJsonV1(after.interactions, before.interactions)
+      ? call?.status !== 'queued' || !sameJson(after.interactions, before.interactions)
       : (suspension.event.type === 'approval.requested'
           ? call?.status !== 'awaiting_approval'
           : call?.status !== 'awaiting_auto_review') ||
@@ -1474,17 +1465,17 @@ function assertTaskSubagentSuspendedStateV1(
         after.interactions.interactionId !== expectedInteraction.interactionId ||
         after.interactions.toolCallId !== expectedInteraction.toolCallId)
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'acknowledgement_mismatch',
       'State task suspension acknowledgement does not match the committed evidence.',
     );
   }
 }
 
-function isTaskSubagentSuspensionV1(
+function isTaskSubagentSuspension(
   value: Readonly<unknown>,
-): value is Readonly<ToolPipelineTaskSubagentSuspensionV1> {
-  if (!isRuntimeJsonV1(value) || !isJsonRecordV1(value)) return false;
+): value is Readonly<ToolPipelineTaskSubagentSuspension> {
+  if (!isRuntimeJson(value) || !isJsonRecord(value)) return false;
   const keys = Object.keys(value).sort();
   return (
     keys.join(',') ===
@@ -1494,30 +1485,30 @@ function isTaskSubagentSuspensionV1(
     value.operationId === 'builtin:task' &&
     (value.executionMode === 'start' || value.executionMode === 'resume') &&
     typeof value.toolCallId === 'string' &&
-    isJsonRecordV1(value.parent) &&
-    isJsonRecordV1(value.subagent) &&
-    isJsonRecordV1(value.blockedTool) &&
-    isJsonRecordV1(value.event)
+    isJsonRecord(value.parent) &&
+    isJsonRecord(value.subagent) &&
+    isJsonRecord(value.blockedTool) &&
+    isJsonRecord(value.event)
   );
 }
 
-function isExactTaskBlockedToolIdentityV1(value: unknown): boolean {
-  if (!isRuntimeJsonV1(value) || !isJsonRecordV1(value)) return false;
+function isExactTaskBlockedToolIdentity(value: unknown): boolean {
+  if (!isRuntimeJson(value) || !isJsonRecord(value)) return false;
   const keys = Object.keys(value).sort();
   return (
     keys.join(',') === 'argumentsDigest,commandDigest,runtimeToolCallId,toolCallId,toolName' &&
-    nonEmptyStringV1(value.toolCallId) &&
-    (value.runtimeToolCallId === null || nonEmptyStringV1(value.runtimeToolCallId)) &&
-    nonEmptyStringV1(value.toolName) &&
-    nonEmptyStringV1(value.argumentsDigest) &&
-    (value.commandDigest === null || nonEmptyStringV1(value.commandDigest))
+    nonEmptyString(value.toolCallId) &&
+    (value.runtimeToolCallId === null || nonEmptyString(value.runtimeToolCallId)) &&
+    nonEmptyString(value.toolName) &&
+    nonEmptyString(value.argumentsDigest) &&
+    (value.commandDigest === null || nonEmptyString(value.commandDigest))
   );
 }
 
-function isExactPrivateSuspendedSubagentRecordV1(
+function isExactPrivateSuspendedSubagentRecord(
   value: unknown,
-): value is Readonly<PrivateSuspendedSubagentRecordV1> {
-  if (!isRuntimeJsonV1(value) || !isJsonRecordV1(value)) return false;
+): value is Readonly<PrivateSuspendedSubagentRecord> {
+  if (!isRuntimeJson(value) || !isJsonRecord(value)) return false;
   const keys = Object.keys(value).sort();
   const continuationArtifact = value.continuationArtifact;
   const blockedTool = value.blockedTool;
@@ -1525,18 +1516,18 @@ function isExactPrivateSuspendedSubagentRecordV1(
     keys.join(',') !==
       'blockedTool,continuationArtifact,continuationId,modelInvocationOrdinal,parentAttempt,parentInvocationId,role,storage,subagentId' ||
     value.storage !== 'private_artifact_v1' ||
-    !nonEmptyStringV1(value.subagentId) ||
+    !nonEmptyString(value.subagentId) ||
     !['explore', 'plan', 'code', 'review'].includes(String(value.role)) ||
     typeof value.continuationId !== 'string' ||
     !/^continuation-[0-9a-f]{64}$/u.test(value.continuationId) ||
     typeof value.modelInvocationOrdinal !== 'number' ||
     !Number.isSafeInteger(value.modelInvocationOrdinal) ||
     value.modelInvocationOrdinal < 0 ||
-    !nonEmptyStringV1(value.parentInvocationId) ||
+    !nonEmptyString(value.parentInvocationId) ||
     typeof value.parentAttempt !== 'number' ||
     !Number.isSafeInteger(value.parentAttempt) ||
     value.parentAttempt < 1 ||
-    !isJsonRecordV1(continuationArtifact) ||
+    !isJsonRecord(continuationArtifact) ||
     Object.keys(continuationArtifact).sort().join(',') !==
       'artifactId,byteLength,integrityIdentifier,kind' ||
     typeof continuationArtifact.artifactId !== 'string' ||
@@ -1547,7 +1538,7 @@ function isExactPrivateSuspendedSubagentRecordV1(
     typeof continuationArtifact.byteLength !== 'number' ||
     !Number.isSafeInteger(continuationArtifact.byteLength) ||
     continuationArtifact.byteLength < 1 ||
-    !isJsonRecordV1(blockedTool)
+    !isJsonRecord(blockedTool)
   ) {
     return false;
   }
@@ -1562,31 +1553,31 @@ function isExactPrivateSuspendedSubagentRecordV1(
     blockedKeys.join(',') === expectedBlockedKeys.join(',') &&
     (blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' ||
       blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW') &&
-    nonEmptyStringV1(blockedTool.toolCallId) &&
-    nonEmptyStringV1(blockedTool.toolName) &&
-    (blockedTool.runtimeToolCallId === undefined || nonEmptyStringV1(blockedTool.runtimeToolCallId))
+    nonEmptyString(blockedTool.toolCallId) &&
+    nonEmptyString(blockedTool.toolName) &&
+    (blockedTool.runtimeToolCallId === undefined || nonEmptyString(blockedTool.runtimeToolCallId))
   );
 }
 
-function privateSuspendedSubagentParentMatchesV1(
+function privateSuspendedSubagentParentMatches(
   value: unknown,
-  parent: Readonly<ToolPipelineTaskSubagentSuspensionV1['parent']>,
+  parent: Readonly<ToolPipelineTaskSubagentSuspension['parent']>,
 ): boolean {
   return (
-    isExactPrivateSuspendedSubagentRecordV1(value) &&
+    isExactPrivateSuspendedSubagentRecord(value) &&
     value.parentInvocationId === parent.invocationId &&
     value.parentAttempt + 1 === parent.attempt
   );
 }
 
-function isTaskSuspensionEventV1(
+function isTaskSuspensionEvent(
   value: unknown,
-  suspension: Readonly<ToolPipelineTaskSubagentSuspensionV1>,
+  suspension: Readonly<ToolPipelineTaskSubagentSuspension>,
 ): boolean {
-  if (!isRuntimeJsonV1(value) || !isJsonRecordV1(value)) return false;
-  let admitted: StateRuntimeEventV1;
+  if (!isRuntimeJson(value) || !isJsonRecord(value)) return false;
+  let admitted: StateRuntimeEvent;
   try {
-    admitted = runtimeHostStateAdmitCurrentRuntimeEventV1(value);
+    admitted = runtimeHostStateAdmitCurrentRuntimeEvent(value);
   } catch {
     return false;
   }
@@ -1611,31 +1602,31 @@ function isTaskSuspensionEventV1(
   );
 }
 
-function taskSubagentResultMatchesSuspensionV1(
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
-  suspension: Readonly<ToolPipelineTaskSubagentSuspensionV1>,
+function taskSubagentResultMatchesSuspension(
+  value: Readonly<StateBuiltinOperationStructuredContent>,
+  suspension: Readonly<ToolPipelineTaskSubagentSuspension>,
 ): boolean {
-  if (value.ok !== false || !isJsonRecordV1(value.subagentResult)) return false;
+  if (value.ok !== false || !isJsonRecord(value.subagentResult)) return false;
   const subagentResult = value.subagentResult;
   const blocked = subagentResult.blocked;
-  if (!isJsonRecordV1(blocked)) return false;
+  if (!isJsonRecord(blocked)) return false;
   const continuation = blocked.continuation;
-  if (!isJsonRecordV1(continuation)) return false;
+  if (!isJsonRecord(continuation)) return false;
   const blockedArguments = blocked.args;
   const blockedCommand = blocked.command;
   const continuationBlockedTool = continuation.blockedTool;
   if (
-    !isJsonRecordV1(blockedArguments) ||
+    !isJsonRecord(blockedArguments) ||
     typeof blockedCommand !== 'string' ||
-    !isJsonRecordV1(continuationBlockedTool) ||
-    !isJsonRecordV1(continuationBlockedTool.args) ||
+    !isJsonRecord(continuationBlockedTool) ||
+    !isJsonRecord(continuationBlockedTool.args) ||
     typeof continuationBlockedTool.command !== 'string'
   ) {
     return false;
   }
-  const argumentsDigest = digestCapabilityValueV1(blockedArguments);
+  const argumentsDigest = digestCapabilityValue(blockedArguments);
   const commandDigest =
-    blockedCommand.trim().length > 0 ? digestCapabilityValueV1(blockedCommand.trim()) : null;
+    blockedCommand.trim().length > 0 ? digestCapabilityValue(blockedCommand.trim()) : null;
   return (
     blocked.reasonCode === suspension.subagent.blockedTool.reasonCode &&
     blocked.toolCallId === suspension.blockedTool.toolCallId &&
@@ -1650,15 +1641,13 @@ function taskSubagentResultMatchesSuspensionV1(
     continuationBlockedTool.toolCallId === blocked.toolCallId &&
     (continuationBlockedTool.runtimeToolCallId ?? null) === (blocked.runtimeToolCallId ?? null) &&
     continuationBlockedTool.toolName === blocked.toolName &&
-    digestCapabilityValueV1(continuationBlockedTool.args) === argumentsDigest &&
+    digestCapabilityValue(continuationBlockedTool.args) === argumentsDigest &&
     continuationBlockedTool.command === blockedCommand &&
     subagentResult.terminalStatus === 'suspended'
   );
 }
 
-function assertCompositionInputV1(
-  input: Readonly<CreateAppStateToolPipelinePersistenceInputV1>,
-): void {
+function assertCompositionInput(input: Readonly<CreateAppStateToolPipelinePersistenceInput>): void {
   if (
     !input ||
     typeof input.getState !== 'function' ||
@@ -1669,13 +1658,13 @@ function assertCompositionInputV1(
     !input.capabilityArtifactWriter ||
     typeof input.capabilityArtifactWriter.write !== 'function'
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('persistence_unavailable');
+    throw new AppStateToolPipelinePersistenceError('persistence_unavailable');
   }
 }
 
-function assertFilesystemIntentDraftV1(
-  draft: Readonly<WorkspaceFilesystemIntentDraftV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
+function assertFilesystemIntentDraft(
+  draft: Readonly<WorkspaceFilesystemIntentDraft>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
 ): void {
   const prepared = draft.prepared;
   const operation = draft.operation;
@@ -1714,13 +1703,13 @@ function assertFilesystemIntentDraftV1(
     record.approvalSummaryDigest.length === 0 ||
     typeof record.recordedAt !== 'string'
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('filesystem_intent_invalid');
+    throw new AppStateToolPipelinePersistenceError('filesystem_intent_invalid');
   }
 }
 
-function assertFilesystemMutationIntentDraftV1(
-  draft: Readonly<WorkspaceFilesystemMutationIntentDraftV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
+function assertFilesystemMutationIntentDraft(
+  draft: Readonly<WorkspaceFilesystemMutationIntentDraft>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
 ): void {
   const prepared = draft.prepared;
   const operation = draft.operation;
@@ -1729,7 +1718,7 @@ function assertFilesystemMutationIntentDraftV1(
   const argumentsValue = prepared.input.arguments;
   const operationId = String(operation.operationId);
   const expectedKind = operationId === 'builtin:write_file' ? 'write_file' : 'edit_file';
-  const validArguments = isJsonRecordV1(argumentsValue);
+  const validArguments = isJsonRecord(argumentsValue);
   const argumentsMatch =
     validArguments && operation.path === argumentsValue.path
       ? operation.kind === 'write_file'
@@ -1738,7 +1727,7 @@ function assertFilesystemMutationIntentDraftV1(
           operation.newString === argumentsValue.new_string &&
           operation.replaceAll === argumentsValue.replace_all
       : false;
-  const preparedRequest = isPreparedRequestV1(request) ? request : undefined;
+  const preparedRequest = isPreparedRequest(request) ? request : undefined;
   const approvedExternal =
     preparedRequest?.policyEffects.externalWrite === true && preparedRequest.grantUsed !== 'none';
   if (
@@ -1774,12 +1763,12 @@ function assertFilesystemMutationIntentDraftV1(
     record.approvalSummaryDigest.length === 0 ||
     typeof record.recordedAt !== 'string'
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('filesystem_intent_invalid');
+    throw new AppStateToolPipelinePersistenceError('filesystem_intent_invalid');
   }
 }
 
-function assertFilesystemMutationReadyDraftV1(
-  draft: Readonly<WorkspaceFilesystemMutationReadyDraftV1>,
+function assertFilesystemMutationReadyDraft(
+  draft: Readonly<WorkspaceFilesystemMutationReadyDraft>,
 ): void {
   const identity = draft.intent.acknowledgement.attempt;
   const operation = draft.intent.operation;
@@ -1793,7 +1782,7 @@ function assertFilesystemMutationReadyDraftV1(
     !Object.isFrozen(evidence) ||
     !Object.isFrozen(draft.preimageArtifact) ||
     !Object.isFrozen(record) ||
-    evidence.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 ||
+    evidence.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ ||
     evidence.operationKind !== operation.kind ||
     evidence.operationDigest !== draft.intent.record.operationDigest ||
     evidence.lexicalTargetDigest !== draft.intent.record.lexicalTargetDigest ||
@@ -1815,12 +1804,12 @@ function assertFilesystemMutationReadyDraftV1(
     record.readyDigest.length === 0 ||
     typeof record.readyAt !== 'string'
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('filesystem_mutation_ready_invalid');
+    throw new AppStateToolPipelinePersistenceError('filesystem_mutation_ready_invalid');
   }
 }
 
-function assertFilesystemEditObservationQueryV1(
-  query: Readonly<WorkspaceFilesystemEditObservationQueryV1>,
+function assertFilesystemEditObservationQuery(
+  query: Readonly<WorkspaceFilesystemEditObservationQuery>,
 ): void {
   const keys = Object.keys(query).sort();
   const expected = ['actorIdentityDigest', 'lexicalTargetDigest', 'schema'];
@@ -1828,17 +1817,17 @@ function assertFilesystemEditObservationQueryV1(
     !Object.isFrozen(query) ||
     keys.length !== expected.length ||
     keys.some((key, index) => key !== expected[index]) ||
-    query.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 ||
+    query.schema !== WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ ||
     !/^[a-f0-9]{64}$/u.test(query.actorIdentityDigest) ||
     !/^sha256:[a-f0-9]{64}$/u.test(query.lexicalTargetDigest)
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('filesystem_edit_observation_invalid');
+    throw new AppStateToolPipelinePersistenceError('filesystem_edit_observation_invalid');
   }
 }
 
-function assertSupportedPreparedIdentityV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<PreparedToolInvocationIdentityV1> {
+function assertSupportedPreparedIdentity(
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<PreparedToolInvocationIdentity> {
   const identity = prepared.identity;
   if (identity.isDynamicMcp) {
     if (
@@ -1854,7 +1843,7 @@ function assertSupportedPreparedIdentityV1(
       identity.bindingId === null ||
       identity.subject.bindingId !== identity.bindingId
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1('unsupported_operation');
+      throw new AppStateToolPipelinePersistenceError('unsupported_operation');
     }
     return identity;
   }
@@ -1871,20 +1860,20 @@ function assertSupportedPreparedIdentityV1(
         identity.exposedToolName !== 'task' ||
         identity.modelVisible !== true))
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('unsupported_operation');
+    throw new AppStateToolPipelinePersistenceError('unsupported_operation');
   }
   if (identity.builtinProjectionRevision === null || identity.dynamicCatalogRevision !== null) {
-    throw new AppStateToolPipelinePersistenceErrorV1('attempt_identity_mismatch');
+    throw new AppStateToolPipelinePersistenceError('attempt_identity_mismatch');
   }
   return identity;
 }
 
-function readPreparedRequestV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-): Readonly<AppToolPipelinePreparedRequestV1> {
+function readPreparedRequest(
+  prepared: Readonly<PreparedToolInvocation>,
+): Readonly<AppToolPipelinePreparedRequest> {
   const request = prepared.input.request;
-  if (!isPreparedRequestV1(request)) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+  if (!isPreparedRequest(request)) {
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_prepared_request',
       'State persistence requires the typed App prepared request facts.',
     );
@@ -1892,23 +1881,23 @@ function readPreparedRequestV1(
   return request;
 }
 
-function assertPreparedStateV1(
-  prepared: Readonly<PreparedToolInvocationV1>,
-  identity: Readonly<PreparedToolInvocationIdentityV1>,
-  request: Readonly<AppToolPipelinePreparedRequestV1>,
-  state: Readonly<StateRuntimeStateV1>,
-  existing: Readonly<StateRuntimeStateV1['capabilities']['invocations'][string]> | undefined,
+function assertPreparedState(
+  prepared: Readonly<PreparedToolInvocation>,
+  identity: Readonly<PreparedToolInvocationIdentity>,
+  request: Readonly<AppToolPipelinePreparedRequest>,
+  state: Readonly<StateRuntimeState>,
+  existing: Readonly<StateRuntimeState['capabilities']['invocations'][string]> | undefined,
 ): void {
   if (
     prepared.input.invocationId !== identity.invocationId ||
     prepared.input.attemptId !== identity.attemptId ||
     prepared.input.toolCallId !== identity.toolCallId ||
-    digestCapabilityValueV1(prepared.input.arguments) !== identity.argumentsDigest ||
-    digestCapabilityValueV1(request.effectiveEffects) !== identity.effectiveEffectsDigest ||
+    digestCapabilityValue(prepared.input.arguments) !== identity.argumentsDigest ||
+    digestCapabilityValue(request.effectiveEffects) !== identity.effectiveEffectsDigest ||
     identity.authorizationDigest === null ||
     identity.turnId !== state.turn.turnId
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('attempt_identity_mismatch');
+    throw new AppStateToolPipelinePersistenceError('attempt_identity_mismatch');
   }
   const toolCall = state.tools.calls[identity.toolCallId];
   if (
@@ -1919,31 +1908,31 @@ function assertPreparedStateV1(
     toolCall.createdAtTurnId !== identity.turnId ||
     toolCall.modelMessageId !== identity.modelMessageId
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'attempt_identity_mismatch',
       'Prepared identity does not match the active State Tool call.',
     );
   }
   if (existing && existing.toolCallId !== identity.toolCallId) {
-    throw new AppStateToolPipelinePersistenceErrorV1('invocation_collision');
+    throw new AppStateToolPipelinePersistenceError('invocation_collision');
   }
   if (existing && !['recorded', 'running'].includes(existing.status)) {
-    throw new AppStateToolPipelinePersistenceErrorV1('terminal_invocation');
+    throw new AppStateToolPipelinePersistenceError('terminal_invocation');
   }
   if (
     existing?.subagentProviderLifecycle &&
     existing.subagentProviderLifecycle.status !== 'cleanup_completed'
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('subagent_lifecycle_pending');
+    throw new AppStateToolPipelinePersistenceError('subagent_lifecycle_pending');
   }
 }
 
-function invocationRecordedEventV1(
-  identity: Readonly<PreparedToolInvocationIdentityV1>,
-  request: Readonly<AppToolPipelinePreparedRequestV1>,
+function invocationRecordedEvent(
+  identity: Readonly<PreparedToolInvocationIdentity>,
+  request: Readonly<AppToolPipelinePreparedRequest>,
   recordedAt: string,
-): Extract<StateRuntimeEventV1, { type: 'capability.invocation_recorded' }> {
-  const event: Extract<StateRuntimeEventV1, { type: 'capability.invocation_recorded' }> = {
+): Extract<StateRuntimeEvent, { type: 'capability.invocation_recorded' }> {
+  const event: Extract<StateRuntimeEvent, { type: 'capability.invocation_recorded' }> = {
     type: 'capability.invocation_recorded',
     invocationId: identity.invocationId,
     toolCallId: identity.toolCallId,
@@ -1965,19 +1954,19 @@ function invocationRecordedEventV1(
   return event;
 }
 
-function assertRecordedStateV1(
-  after: Readonly<StateRuntimeStateV1>,
-  before: Readonly<StateRuntimeStateV1>,
+function assertRecordedState(
+  after: Readonly<StateRuntimeState>,
+  before: Readonly<StateRuntimeState>,
   eventCount: number,
-  identity: Readonly<PreparedToolInvocationIdentityV1>,
-  request: Readonly<AppToolPipelinePreparedRequestV1>,
+  identity: Readonly<PreparedToolInvocationIdentity>,
+  request: Readonly<AppToolPipelinePreparedRequest>,
   attempt: number,
   recordedAt: string,
   startedAt: string,
 ): void {
   const invocation = after.capabilities.invocations[identity.invocationId];
   if (
-    !includesAcknowledgedRevisionV1(after, before, eventCount) ||
+    !includesAcknowledgedRevision(after, before, eventCount) ||
     invocation?.status !== 'running' ||
     invocation.toolCallId !== identity.toolCallId ||
     invocation.capabilityRevision !== identity.capabilityRevision ||
@@ -1993,44 +1982,44 @@ function assertRecordedStateV1(
     request.retryEligibility !== invocation.retryEligibility ||
     after.tools.calls[identity.toolCallId]?.status !== 'running'
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'acknowledgement_mismatch',
       'State attempt acknowledgement does not match the committed invocation.',
     );
   }
 }
 
-function assertSupportedAcknowledgementV1(
+function assertSupportedAcknowledgement(
   input: Readonly<
-    | ToolPipelineUnknownOutcomeV1
-    | ToolPipelineReceiptCommitV1
-    | ToolPipelineRetryableCommitV1
-    | ToolPipelineSuspensionCommitV1
+    | ToolPipelineUnknownOutcome
+    | ToolPipelineReceiptCommit
+    | ToolPipelineRetryableCommit
+    | ToolPipelineSuspensionCommit
   >,
-): Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']> {
+): Readonly<ToolPipelineAttemptAcknowledgement['attempt']> {
   const acknowledgement = input.acknowledgement;
   const attempt = acknowledgement?.attempt;
   if (
     acknowledgement?.acknowledged !== true ||
     !attempt ||
-    !nonEmptyStringV1(attempt.invocationId) ||
-    !nonEmptyStringV1(attempt.attemptId) ||
+    !nonEmptyString(attempt.invocationId) ||
+    !nonEmptyString(attempt.attemptId) ||
     !Number.isSafeInteger(attempt.attempt) ||
     attempt.attempt < 1 ||
-    !nonEmptyStringV1(attempt.toolCallId) ||
-    !nonEmptyStringV1(attempt.turnId) ||
-    !nonEmptyStringV1(attempt.modelMessageId) ||
-    !nonEmptyStringV1(attempt.providerId) ||
-    !nonEmptyStringV1(attempt.operationId) ||
-    !nonEmptyStringV1(attempt.capabilityId) ||
-    !nonEmptyStringV1(attempt.capabilityRevision) ||
-    !nonEmptyStringV1(attempt.descriptorRevision) ||
-    !nonEmptyStringV1(attempt.argumentsDigest) ||
-    !nonEmptyStringV1(attempt.schemaDigest) ||
-    !nonEmptyStringV1(attempt.effectiveEffectsDigest) ||
+    !nonEmptyString(attempt.toolCallId) ||
+    !nonEmptyString(attempt.turnId) ||
+    !nonEmptyString(attempt.modelMessageId) ||
+    !nonEmptyString(attempt.providerId) ||
+    !nonEmptyString(attempt.operationId) ||
+    !nonEmptyString(attempt.capabilityId) ||
+    !nonEmptyString(attempt.capabilityRevision) ||
+    !nonEmptyString(attempt.descriptorRevision) ||
+    !nonEmptyString(attempt.argumentsDigest) ||
+    !nonEmptyString(attempt.schemaDigest) ||
+    !nonEmptyString(attempt.effectiveEffectsDigest) ||
     (attempt.argumentOrigin !== 'model_public' && attempt.argumentOrigin !== 'runtime_private') ||
     attempt.authorizationDigest === null ||
-    !nonEmptyStringV1(attempt.authorizationDigest) ||
+    !nonEmptyString(attempt.authorizationDigest) ||
     attempt.attemptId !== `${attempt.invocationId}:attempt:${attempt.attempt}` ||
     attempt.operationId === 'builtin:ask_user' ||
     (attempt.operationId === 'mcp:dynamic_tool'
@@ -2050,31 +2039,31 @@ function assertSupportedAcknowledgementV1(
         attempt.runtimeWrapperSchemaDigest !== null ||
         attempt.runtimeWrapperBuiltinProjectionRevision !== null)
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1('acknowledgement_mismatch');
+    throw new AppStateToolPipelinePersistenceError('acknowledgement_mismatch');
   }
   return attempt;
 }
 
-function assertOpenAcknowledgementV1(
+function assertOpenAcknowledgement(
   issuedAcknowledgements: WeakSet<object>,
   settledAcknowledgements: WeakSet<object>,
-  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgementV1>,
+  acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
 ): void {
   if (
     !issuedAcknowledgements.has(acknowledgement) ||
     settledAcknowledgements.has(acknowledgement)
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'acknowledgement_mismatch',
       'State persistence rejected an acknowledgement not issued by this owner.',
     );
   }
 }
 
-function assertAcknowledgementStateV1(
-  state: Readonly<StateRuntimeStateV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-): Readonly<StateRuntimeStateV1['capabilities']['invocations'][string]> {
+function assertAcknowledgementState(
+  state: Readonly<StateRuntimeState>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+): Readonly<StateRuntimeState['capabilities']['invocations'][string]> {
   const invocation = state.capabilities.invocations[identity.invocationId];
   if (
     invocation?.status !== 'running' ||
@@ -2087,7 +2076,7 @@ function assertAcknowledgementStateV1(
     invocation.effectiveEffectsDigest !== identity.effectiveEffectsDigest ||
     invocation.attemptsStarted !== identity.attempt
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'acknowledgement_mismatch',
       'State acknowledgement is not the current running invocation.',
     );
@@ -2095,32 +2084,32 @@ function assertAcknowledgementStateV1(
   return invocation;
 }
 
-function readStructuredContentV1(
+function readStructuredContent(
   result: Readonly<
-    | CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>
-    | ToolPipelineSuspendedExecutionResultV1<StateBuiltinOperationStructuredContentV1>
+    | CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>
+    | ToolPipelineSuspendedExecutionResult<StateBuiltinOperationStructuredContent>
   >,
 ): Readonly<{
-  value: Readonly<StateBuiltinOperationStructuredContentV1>;
-  runtimeEvents: readonly StateRuntimeEventV1[];
+  value: Readonly<StateBuiltinOperationStructuredContent>;
+  runtimeEvents: readonly StateRuntimeEvent[];
 }> {
   const value = result.structuredContent;
-  if (!isBuiltinOperationExecutionValueV1(value)) {
-    throw new AppStateToolPipelinePersistenceErrorV1('invalid_terminal_result');
+  if (!isBuiltinOperationExecutionValue(value)) {
+    throw new AppStateToolPipelinePersistenceError('invalid_terminal_result');
   }
-  return Object.freeze({ value, runtimeEvents: admitRuntimeEventsV1(value.runtimeEvents) });
+  return Object.freeze({ value, runtimeEvents: admitRuntimeEvents(value.runtimeEvents) });
 }
 
-function capabilityResultFromTerminalV1(
+function capabilityResultFromTerminal(
   result: Readonly<
-    | CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>
-    | ToolPipelineSuspendedExecutionResultV1<StateBuiltinOperationStructuredContentV1>
+    | CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>
+    | ToolPipelineSuspendedExecutionResult<StateBuiltinOperationStructuredContent>
   >,
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
+  value: Readonly<StateBuiltinOperationStructuredContent>,
 ): CapabilityResult {
   const content = result.content.map((entry) => {
-    if (!isJsonRecordV1(entry)) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+    if (!isJsonRecord(entry)) {
+      throw new AppStateToolPipelinePersistenceError(
         'invalid_terminal_result',
         'Capability terminal content must contain JSON objects for Artifact storage.',
       );
@@ -2141,8 +2130,8 @@ function capabilityResultFromTerminalV1(
       }
     : undefined;
   const providerMeta = result.providerMeta;
-  if (providerMeta !== undefined && !isJsonRecordV1(providerMeta)) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+  if (providerMeta !== undefined && !isJsonRecord(providerMeta)) {
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'Capability provider metadata must be a JSON object for Artifact storage.',
     );
@@ -2156,12 +2145,12 @@ function capabilityResultFromTerminalV1(
   };
 }
 
-function verifyTerminalFilesystemObservationV1(
-  verifier: BuiltinWorkspaceFilesystemTerminalVerifierV1 | undefined,
-  commit: Readonly<ToolPipelineReceiptCommitV1<StateBuiltinOperationStructuredContentV1>>,
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-): Readonly<AuthenticatedFilesystemObservationV1> | undefined {
+function verifyTerminalFilesystemObservation(
+  verifier: BuiltinWorkspaceFilesystemTerminalVerifier | undefined,
+  commit: Readonly<ToolPipelineReceiptCommit<StateBuiltinOperationStructuredContent>>,
+  value: Readonly<StateBuiltinOperationStructuredContent>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+): Readonly<AuthenticatedFilesystemObservation> | undefined {
   const candidate = value.filesystemObservation;
   const observationOperation =
     identity.operationId === 'builtin:read_file' ||
@@ -2173,23 +2162,23 @@ function verifyTerminalFilesystemObservationV1(
     commit.result.status === 'success' &&
     value.ok
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'A successful filesystem terminal must carry an authentic filesystem observation.',
     );
   }
   if (candidate === undefined) return undefined;
   if (!verifier) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'Filesystem observation requires the injected Builtin terminal verifier.',
     );
   }
-  let verification: ReturnType<BuiltinWorkspaceFilesystemTerminalVerifierV1>;
+  let verification: ReturnType<BuiltinWorkspaceFilesystemTerminalVerifier>;
   try {
     verification = verifier(commit);
   } catch {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'Builtin filesystem terminal verification failed.',
     );
@@ -2199,12 +2188,12 @@ function verifyTerminalFilesystemObservationV1(
     !observationOperation ||
     commit.result.status !== 'success' ||
     !value.ok ||
-    !isExactFilesystemObservationV1(candidate) ||
-    !isExactFilesystemObservationV1(verification.observation) ||
+    !isExactFilesystemObservation(candidate) ||
+    !isExactFilesystemObservation(verification.observation) ||
     verification.observation !== candidate ||
-    !sameJsonV1(verification.observation, candidate)
+    !sameJson(verification.observation, candidate)
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'Builtin filesystem terminal observation authority did not match the exact terminal.',
     );
@@ -2212,7 +2201,7 @@ function verifyTerminalFilesystemObservationV1(
   return verification.observation;
 }
 
-interface LatestFilesystemObservationInvocationV1 {
+interface LatestFilesystemObservationInvocation {
   readonly invocationId: string;
   readonly attemptsStarted: number;
   readonly capabilityRevision: string;
@@ -2220,18 +2209,18 @@ interface LatestFilesystemObservationInvocationV1 {
   readonly resultDigest: string;
   readonly evidenceDigest: string;
   readonly artifact: NonNullable<
-    StateRuntimeStateV1['capabilities']['invocations'][string]['artifact']
+    StateRuntimeState['capabilities']['invocations'][string]['artifact']
   >;
   readonly filesystemObservation: NonNullable<
-    StateRuntimeStateV1['capabilities']['invocations'][string]['filesystemObservation']
+    StateRuntimeState['capabilities']['invocations'][string]['filesystemObservation']
   >;
 }
 
-function latestFilesystemObservationInvocationV1(
-  state: Readonly<StateRuntimeStateV1>,
-  query: Readonly<WorkspaceFilesystemEditObservationQueryV1>,
-): Readonly<LatestFilesystemObservationInvocationV1> | null {
-  let latest: Readonly<LatestFilesystemObservationInvocationV1> | undefined;
+function latestFilesystemObservationInvocation(
+  state: Readonly<StateRuntimeState>,
+  query: Readonly<WorkspaceFilesystemEditObservationQuery>,
+): Readonly<LatestFilesystemObservationInvocation> | null {
+  let latest: Readonly<LatestFilesystemObservationInvocation> | undefined;
   for (const invocation of Object.values(state.capabilities.invocations)) {
     const observation = invocation.filesystemObservation;
     const expectedEffect =
@@ -2247,7 +2236,7 @@ function latestFilesystemObservationInvocationV1(
       invocation.status !== 'succeeded' ||
       expectedEffect === null ||
       invocation.effectiveEffectsDigest !==
-        digestCapabilityValueV1({
+        digestCapabilityValue({
           filesystem: expectedEffect,
           network: 'none',
           externalState: 'none',
@@ -2290,10 +2279,10 @@ function latestFilesystemObservationInvocationV1(
   return latest ?? null;
 }
 
-function isExactFilesystemObservationV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is Readonly<AuthenticatedFilesystemObservationV1> {
-  if (!isJsonRecordV1(value)) return false;
+function isExactFilesystemObservation(
+  value: RuntimeJsonValue | undefined,
+): value is Readonly<AuthenticatedFilesystemObservation> {
+  if (!isJsonRecord(value)) return false;
   const expected = [
     'actorIdentityDigest',
     'canonicalTargetDigest',
@@ -2309,22 +2298,22 @@ function isExactFilesystemObservationV1(
   );
 }
 
-function capabilityTerminalEventV1(
-  result: Readonly<CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>>,
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
+function capabilityTerminalEvent(
+  result: Readonly<CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>>,
+  value: Readonly<StateBuiltinOperationStructuredContent>,
   invocationId: string,
-  artifact: ReturnType<CapabilityArtifactWriterV1['write']>,
+  artifact: ReturnType<CapabilityArtifactWriter['write']>,
   finishedAt: string,
   capabilityResult: CapabilityResult,
-  filesystemObservation?: Readonly<AuthenticatedFilesystemObservationV1>,
+  filesystemObservation?: Readonly<AuthenticatedFilesystemObservation>,
 ): Extract<
-  StateRuntimeEventV1,
+  StateRuntimeEvent,
   { type: 'capability.execution_succeeded' | 'capability.execution_failed' }
 > {
   const base = {
     invocationId,
-    resultDigest: capabilityResultDigestV1(capabilityResult),
-    evidenceDigest: capabilityResultEvidenceDigestV1(capabilityResult),
+    resultDigest: capabilityResultDigest(capabilityResult),
+    evidenceDigest: capabilityResultEvidenceDigest(capabilityResult),
     finishedAt,
     artifact,
     ...(filesystemObservation ? { filesystemObservation } : {}),
@@ -2342,13 +2331,13 @@ function capabilityTerminalEventV1(
   };
 }
 
-function toolTerminalEventV1(
-  result: Readonly<CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>>,
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-  resourceAdmissionFailure?: Readonly<StateClassifiedFailureV1>,
-): StateRuntimeEventV1 {
-  const meta = resultMetaForToolEventV1(value);
+function toolTerminalEvent(
+  result: Readonly<CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>>,
+  value: Readonly<StateBuiltinOperationStructuredContent>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+  resourceAdmissionFailure?: Readonly<StateClassifiedFailure>,
+): StateRuntimeEvent {
+  const meta = resultMetaForToolEvent(value);
   if (resourceAdmissionFailure) {
     return {
       type: 'tool.failed',
@@ -2363,7 +2352,7 @@ function toolTerminalEventV1(
       reason: result.failure?.message ?? (value.stderr || 'Tool execution was cancelled.'),
     };
   }
-  if (result.status !== 'success' && isRejectedResultV1(result)) {
+  if (result.status !== 'success' && isRejectedResult(result)) {
     return {
       type: 'tool.rejected',
       toolCallId: identity.toolCallId,
@@ -2377,7 +2366,7 @@ function toolTerminalEventV1(
     return {
       type: 'tool.failed',
       toolCallId: identity.toolCallId,
-      failure: classifyToolFailureV1(result),
+      failure: classifyToolFailure(result),
     };
   }
   const status =
@@ -2389,7 +2378,7 @@ function toolTerminalEventV1(
   const exitCode = meta.exitCode ?? 0;
   const resultMeta = {
     ...meta,
-    ...projectBuiltinToolResultDigestsV1({
+    ...projectBuiltinToolResultDigests({
       ok: value.ok,
       stdout: value.stdout,
       stderr: value.stderr,
@@ -2420,13 +2409,13 @@ function toolTerminalEventV1(
       resultMeta,
       status,
     },
-    ...(value.classifierAdviceV1
-      ? { classifierAdviceV1: classifierAdviceForToolEventV1(value.classifierAdviceV1) }
+    ...(value.classifierAdvice
+      ? { classifierAdvice: classifierAdviceForToolEvent(value.classifierAdvice) }
       : {}),
   };
 }
 
-const TASK_RESOURCE_ADMISSION_REASONS_V1 = Object.freeze([
+const TASK_RESOURCE_ADMISSION_REASONS_ = Object.freeze([
   'budget_unconfigured',
   'persistence_unavailable',
   'budget_exhausted',
@@ -2435,23 +2424,23 @@ const TASK_RESOURCE_ADMISSION_REASONS_V1 = Object.freeze([
   'shell_concurrency_saturated',
 ] as const);
 
-function exactTaskResourceAdmissionFailureV1(
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
+function exactTaskResourceAdmissionFailure(
+  value: Readonly<StateBuiltinOperationStructuredContent>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
 ):
   | Readonly<{
-      reason: (typeof TASK_RESOURCE_ADMISSION_REASONS_V1)[number];
+      reason: (typeof TASK_RESOURCE_ADMISSION_REASONS_)[number];
       message: string;
     }>
   | undefined {
-  if (identity.operationId !== 'builtin:task' || !isJsonRecordV1(value.subagentResult)) {
+  if (identity.operationId !== 'builtin:task' || !isJsonRecord(value.subagentResult)) {
     return undefined;
   }
   const candidate = value.subagentResult.resourceAdmissionFailure;
   if (candidate === undefined) return undefined;
   if (
     value.ok !== false ||
-    !isJsonRecordV1(candidate) ||
+    !isJsonRecord(candidate) ||
     JSON.stringify(Object.keys(candidate).sort()) !==
       JSON.stringify([
         'childInvocationId',
@@ -2460,8 +2449,8 @@ function exactTaskResourceAdmissionFailureV1(
         'parentToolCallId',
         'reason',
       ]) ||
-    !TASK_RESOURCE_ADMISSION_REASONS_V1.includes(
-      candidate.reason as (typeof TASK_RESOURCE_ADMISSION_REASONS_V1)[number],
+    !TASK_RESOURCE_ADMISSION_REASONS_.includes(
+      candidate.reason as (typeof TASK_RESOURCE_ADMISSION_REASONS_)[number],
     ) ||
     typeof candidate.message !== 'string' ||
     candidate.message.length === 0 ||
@@ -2470,33 +2459,33 @@ function exactTaskResourceAdmissionFailureV1(
     typeof candidate.childInvocationId !== 'string' ||
     candidate.childInvocationId.length === 0
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'Task resource admission failure did not match its exact parent attempt identity.',
     );
   }
   return Object.freeze({
-    reason: candidate.reason as (typeof TASK_RESOURCE_ADMISSION_REASONS_V1)[number],
+    reason: candidate.reason as (typeof TASK_RESOURCE_ADMISSION_REASONS_)[number],
     message: candidate.message,
   });
 }
 
-function fileChangeEventV1(
-  prepared: Readonly<PreparedToolInvocationV1> | undefined,
-  result: Readonly<CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>>,
-  value: Readonly<StateBuiltinOperationStructuredContentV1>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-): Extract<StateRuntimeEventV1, { type: 'tool.file_change' }> | undefined {
+function fileChangeEvent(
+  prepared: Readonly<PreparedToolInvocation> | undefined,
+  result: Readonly<CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>>,
+  value: Readonly<StateBuiltinOperationStructuredContent>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+): Extract<StateRuntimeEvent, { type: 'tool.file_change' }> | undefined {
   const mutationOperation =
     identity.operationId === 'builtin:write_file' || identity.operationId === 'builtin:edit_file';
   if (!mutationOperation || result.status !== 'success' || !value.ok) return undefined;
   const argumentsValue = prepared?.input.arguments;
   const path =
-    isJsonRecordV1(argumentsValue) && typeof argumentsValue.path === 'string'
+    isJsonRecord(argumentsValue) && typeof argumentsValue.path === 'string'
       ? argumentsValue.path
       : undefined;
   if (!prepared || !path || value.path !== path) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'Successful filesystem mutation result did not match its exact prepared lexical path.',
     );
@@ -2511,12 +2500,12 @@ function fileChangeEventV1(
   };
 }
 
-function providerActionRequiredEventV1(
-  composition: CreateAppStateToolPipelinePersistenceInputV1['providerAction'],
-  prepared: Readonly<PreparedToolInvocationV1> | undefined,
-  result: Readonly<CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>>,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-): Extract<StateRuntimeEventV1, { type: 'provider.action_required' }> | undefined {
+function providerActionRequiredEvent(
+  composition: CreateAppStateToolPipelinePersistenceInput['providerAction'],
+  prepared: Readonly<PreparedToolInvocation> | undefined,
+  result: Readonly<CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+): Extract<StateRuntimeEvent, { type: 'provider.action_required' }> | undefined {
   const isDynamicMcp = identity.operationId === 'mcp:dynamic_tool';
   if (
     composition?.enabled !== true ||
@@ -2547,14 +2536,14 @@ function providerActionRequiredEventV1(
       ? argumentsValue.server
       : '';
   if (!providerId || providerId.length > 512 || /\p{Cc}/u.test(providerId)) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'Confirmed MCP provider action is missing its exact prepared provider identity.',
     );
   }
   const interactionId = composition.createInteractionId();
   if (!interactionId || interactionId.length > 512 || /\p{Cc}/u.test(interactionId)) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'invalid_terminal_result',
       'Provider action interaction identity is unavailable.',
     );
@@ -2568,7 +2557,7 @@ function providerActionRequiredEventV1(
   };
 }
 
-function resultMetaForToolEventV1(value: Readonly<StateBuiltinOperationStructuredContentV1>): {
+function resultMetaForToolEvent(value: Readonly<StateBuiltinOperationStructuredContent>): {
   readonly command?: string;
   readonly exitCode?: number;
   readonly path?: string;
@@ -2604,9 +2593,9 @@ function resultMetaForToolEventV1(value: Readonly<StateBuiltinOperationStructure
   };
 }
 
-function classifierAdviceForToolEventV1(
-  value: Readonly<Record<string, RuntimeJsonValueV1>>,
-): NonNullable<RuntimeHostToolExecutionResultV1['classifierAdviceV1']> {
+function classifierAdviceForToolEvent(
+  value: Readonly<Record<string, RuntimeJsonValue>>,
+): NonNullable<RuntimeHostToolExecutionResult['classifierAdvice']> {
   const disposition = value.disposition;
   return {
     ...(typeof value.detailCode === 'string' ? { detailCode: value.detailCode } : {}),
@@ -2633,19 +2622,19 @@ function classifierAdviceForToolEventV1(
   };
 }
 
-function classifyToolFailureV1(
-  result: Readonly<CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>>,
-): StateClassifiedFailureV1 {
+function classifyToolFailure(
+  result: Readonly<CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>>,
+): StateClassifiedFailure {
   const code = result.failure?.code;
-  const kind = code && runtimeHostStateIsFailureKindV1(code) ? code : 'unknown';
-  return runtimeHostStateClassifyFailureV1(
+  const kind = code && runtimeHostStateIsFailureKind(code) ? code : 'unknown';
+  return runtimeHostStateClassifyFailure(
     kind,
     result.failure?.message ?? 'Builtin operation failed.',
   );
 }
 
-function isRejectedResultV1(
-  result: Readonly<CapabilityToolTerminalResultV1<StateBuiltinOperationStructuredContentV1>>,
+function isRejectedResult(
+  result: Readonly<CapabilityToolTerminalResult<StateBuiltinOperationStructuredContent>>,
 ): boolean {
   return (
     result.failure?.code === 'rejected' ||
@@ -2654,22 +2643,22 @@ function isRejectedResultV1(
   );
 }
 
-function assertTerminalStateV1(
-  after: Readonly<StateRuntimeStateV1>,
-  before: Readonly<StateRuntimeStateV1>,
+function assertTerminalState(
+  after: Readonly<StateRuntimeState>,
+  before: Readonly<StateRuntimeState>,
   eventCount: number,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-  status: CapabilityToolTerminalResultV1['status'],
-  artifact: ReturnType<CapabilityArtifactWriterV1['write']>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+  status: CapabilityToolTerminalResult['status'],
+  artifact: ReturnType<CapabilityArtifactWriter['write']>,
   resultDigest: string,
   evidenceDigest: string,
   finishedAt: string,
-  filesystemObservation?: Readonly<AuthenticatedFilesystemObservationV1>,
+  filesystemObservation?: Readonly<AuthenticatedFilesystemObservation>,
 ): void {
   const invocation = after.capabilities.invocations[identity.invocationId];
   const expectedStatus = status === 'success' ? 'succeeded' : 'failed';
   if (
-    !includesAcknowledgedRevisionV1(after, before, eventCount) ||
+    !includesAcknowledgedRevision(after, before, eventCount) ||
     !invocation ||
     invocation.status !== expectedStatus ||
     invocation.toolCallId !== identity.toolCallId ||
@@ -2681,28 +2670,28 @@ function assertTerminalStateV1(
     invocation.finishedAt !== finishedAt ||
     (filesystemObservation === undefined
       ? invocation.filesystemObservation !== undefined
-      : !sameJsonV1(invocation.filesystemObservation, filesystemObservation))
+      : !sameJson(invocation.filesystemObservation, filesystemObservation))
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'acknowledgement_mismatch',
       'State terminal acknowledgement does not match the committed receipt.',
     );
   }
 }
 
-function assertSuspendedStateV1(
-  after: Readonly<StateRuntimeStateV1>,
-  before: Readonly<StateRuntimeStateV1>,
+function assertSuspendedState(
+  after: Readonly<StateRuntimeState>,
+  before: Readonly<StateRuntimeState>,
   eventCount: number,
-  identity: Readonly<ToolPipelineAttemptAcknowledgementV1['attempt']>,
-  artifact: ReturnType<CapabilityArtifactWriterV1['write']>,
+  identity: Readonly<ToolPipelineAttemptAcknowledgement['attempt']>,
+  artifact: ReturnType<CapabilityArtifactWriter['write']>,
   resultDigest: string,
   evidenceDigest: string,
   cancelledToolCallIds: readonly string[],
 ): void {
   const invocation = after.capabilities.invocations[identity.invocationId];
   if (
-    !includesAcknowledgedRevisionV1(after, before, eventCount) ||
+    !includesAcknowledgedRevision(after, before, eventCount) ||
     !invocation ||
     invocation.status !== 'running' ||
     invocation.toolCallId !== identity.toolCallId ||
@@ -2716,7 +2705,7 @@ function assertSuspendedStateV1(
     after.interactions.toolCallId !== identity.toolCallId ||
     cancelledToolCallIds.some((toolCallId) => after.tools.calls[toolCallId]?.status !== 'cancelled')
   ) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       'acknowledgement_mismatch',
       'State suspension acknowledgement does not match the committed review receipt.',
     );
@@ -2729,17 +2718,17 @@ function assertSuspendedStateV1(
  * below prove this batch; the global revision therefore has to include the
  * acknowledged batch, not equal it exclusively.
  */
-function includesAcknowledgedRevisionV1(
-  after: Readonly<StateRuntimeStateV1>,
-  before: Readonly<StateRuntimeStateV1>,
+function includesAcknowledgedRevision(
+  after: Readonly<StateRuntimeState>,
+  before: Readonly<StateRuntimeState>,
   eventCount: number,
 ): boolean {
   return after.revision >= before.revision + eventCount;
 }
 
-async function persistExactV1(
-  persist: (events: StateRuntimeEventV1[]) => Promise<boolean>,
-  events: StateRuntimeEventV1[],
+async function persistExact(
+  persist: (events: StateRuntimeEvent[]) => Promise<boolean>,
+  events: StateRuntimeEvent[],
   acknowledgement:
     | 'attempt_start'
     | 'terminal_recovery'
@@ -2753,7 +2742,7 @@ async function persistExactV1(
   try {
     persisted = await persist(events);
   } catch (error) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       acknowledgement === 'receipt_evidence'
         ? 'terminal_commit_failed'
         : acknowledgement === 'retry_evidence'
@@ -2769,7 +2758,7 @@ async function persistExactV1(
     );
   }
   if (!persisted) {
-    throw new AppStateToolPipelinePersistenceErrorV1(
+    throw new AppStateToolPipelinePersistenceError(
       acknowledgement === 'receipt_evidence'
         ? 'terminal_commit_failed'
         : acknowledgement === 'retry_evidence'
@@ -2785,14 +2774,14 @@ async function persistExactV1(
   }
 }
 
-function stateTimestampV1(value: string): string {
+function stateTimestamp(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value)) {
-    throw new AppStateToolPipelinePersistenceErrorV1('persistence_unavailable');
+    throw new AppStateToolPipelinePersistenceError('persistence_unavailable');
   }
   return value;
 }
 
-function boundedUnknownReasonV1(code: ToolPipelineUnknownOutcomeV1['code']): string {
+function boundedUnknownReason(code: ToolPipelineUnknownOutcome['code']): string {
   const reason = {
     dispatch_failed: 'Tool dispatch failed after the attempt was acknowledged.',
     dispatch_timed_out: 'Tool dispatch timed out after the attempt was acknowledged.',
@@ -2804,8 +2793,8 @@ function boundedUnknownReasonV1(code: ToolPipelineUnknownOutcomeV1['code']): str
   return reason.slice(0, 256);
 }
 
-function appStateToolPipelinePersistenceMessageV1(
-  code: AppStateToolPipelinePersistenceErrorCodeV1,
+function appStateToolPipelinePersistenceMessage(
+  code: AppStateToolPipelinePersistenceErrorCode,
 ): string {
   switch (code) {
     case 'invalid_prepared_request':
@@ -2851,10 +2840,10 @@ function appStateToolPipelinePersistenceMessageV1(
   }
 }
 
-function isPreparedRequestV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is AppToolPipelinePreparedRequestV1 & RuntimeJsonValueV1 {
-  if (!isJsonRecordV1(value)) return false;
+function isPreparedRequest(
+  value: RuntimeJsonValue | undefined,
+): value is AppToolPipelinePreparedRequest & RuntimeJsonValue {
+  if (!isJsonRecord(value)) return false;
   const expectedKeys = [
     'schema',
     'authorizationKind',
@@ -2877,43 +2866,41 @@ function isPreparedRequestV1(
       value.grantUsed === 'approve_once' ||
       value.grantUsed === 'same_command' ||
       value.grantUsed === 'full_access') &&
-    isPolicyEffectsV1(value.policyEffects) &&
-    isCapabilityEffectsV1(value.effectiveEffects) &&
-    isReceiptRequirementV1(value.receiptRequirement) &&
-    isRetryEligibilityV1(value.retryEligibility) &&
-    nullableStringV1(value.taskId) &&
-    nullableStringV1(value.planId) &&
-    nullableStringV1(value.planStepId) &&
-    (value.capabilityRequestFacts === null || isRuntimeJsonV1(value.capabilityRequestFacts))
+    isPolicyEffects(value.policyEffects) &&
+    isCapabilityEffects(value.effectiveEffects) &&
+    isReceiptRequirement(value.receiptRequirement) &&
+    isRetryEligibility(value.retryEligibility) &&
+    nullableString(value.taskId) &&
+    nullableString(value.planId) &&
+    nullableString(value.planStepId) &&
+    (value.capabilityRequestFacts === null || isRuntimeJson(value.capabilityRequestFacts))
   );
 }
 
-function sameJsonV1(left: unknown, right: unknown): boolean {
+function sameJson(left: unknown, right: unknown): boolean {
   try {
-    return digestCapabilityValueV1(left) === digestCapabilityValueV1(right);
+    return digestCapabilityValue(left) === digestCapabilityValue(right);
   } catch {
     return false;
   }
 }
 
-function isPolicyEffectsV1(value: RuntimeJsonValueV1 | undefined): boolean {
-  if (!isJsonRecordV1(value)) return false;
+function isPolicyEffects(value: RuntimeJsonValue | undefined): boolean {
+  if (!isJsonRecord(value)) return false;
   const allowed = new Set(['network', 'externalRead', 'externalWrite', 'uncertainEffects']);
   return Object.entries(value).every(([key, item]) => allowed.has(key) && item === true);
 }
 
-function isCapabilityEffectsV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is CapabilityEffectsV1 & RuntimeJsonValueV1 {
-  if (!isJsonRecordV1(value)) return false;
+function isCapabilityEffects(
+  value: RuntimeJsonValue | undefined,
+): value is CapabilityEffects & RuntimeJsonValue {
+  if (!isJsonRecord(value)) return false;
   return (
-    effectLevelV1(value.filesystem) &&
-    effectLevelV1(value.network) &&
-    effectLevelV1(value.externalState)
+    effectLevel(value.filesystem) && effectLevel(value.network) && effectLevel(value.externalState)
   );
 }
 
-function effectLevelV1(value: RuntimeJsonValueV1 | undefined): boolean {
+function effectLevel(value: RuntimeJsonValue | undefined): boolean {
   return (
     value === 'none' ||
     value === 'read' ||
@@ -2923,9 +2910,9 @@ function effectLevelV1(value: RuntimeJsonValueV1 | undefined): boolean {
   );
 }
 
-function isReceiptRequirementV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is ToolPipelineReceiptRequirementV1 {
+function isReceiptRequirement(
+  value: RuntimeJsonValue | undefined,
+): value is ToolPipelineReceiptRequirement {
   return (
     value === 'observation_receipt' ||
     value === 'effect_receipt' ||
@@ -2934,47 +2921,45 @@ function isReceiptRequirementV1(
   );
 }
 
-function isRetryEligibilityV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is ToolPipelineRetryEligibilityV1 {
+function isRetryEligibility(
+  value: RuntimeJsonValue | undefined,
+): value is ToolPipelineRetryEligibility {
   return (
     value === 'none' || value === 'safe_read_candidate' || value === 'idempotency_key_candidate'
   );
 }
 
-function nullableStringV1(value: RuntimeJsonValueV1 | undefined): value is string | null {
+function nullableString(value: RuntimeJsonValue | undefined): value is string | null {
   return value === null || typeof value === 'string';
 }
 
-function nonEmptyStringV1(value: unknown): value is string {
+function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-function isJsonRecordV1(
-  value: RuntimeJsonValueV1 | undefined,
-): value is { readonly [key: string]: RuntimeJsonValueV1 } {
+function isJsonRecord(
+  value: RuntimeJsonValue | undefined,
+): value is { readonly [key: string]: RuntimeJsonValue } {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isRuntimeJsonV1(value: unknown): value is RuntimeJsonValueV1 {
+function isRuntimeJson(value: unknown): value is RuntimeJsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
   if (typeof value === 'number') return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every((entry) => isRuntimeJsonV1(entry));
+  if (Array.isArray(value)) return value.every((entry) => isRuntimeJson(entry));
   if (typeof value !== 'object') return false;
-  return Object.values(value).every((entry) => isRuntimeJsonV1(entry));
+  return Object.values(value).every((entry) => isRuntimeJson(entry));
 }
 
-function admitRuntimeEventsV1(
-  events: readonly RuntimeJsonValueV1[] | undefined,
-): StateRuntimeEventV1[] {
+function admitRuntimeEvents(events: readonly RuntimeJsonValue[] | undefined): StateRuntimeEvent[] {
   if (events === undefined) return [];
-  const admitted: StateRuntimeEventV1[] = [];
+  const admitted: StateRuntimeEvent[] = [];
   for (const event of events) {
-    let admittedEvent: StateRuntimeEventV1;
+    let admittedEvent: StateRuntimeEvent;
     try {
-      admittedEvent = runtimeHostStateAdmitCurrentRuntimeEventV1(event);
+      admittedEvent = runtimeHostStateAdmitCurrentRuntimeEvent(event);
     } catch {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'invalid_terminal_result',
         'Builtin runtimeEvents must be valid State JSON event objects.',
       );
@@ -2989,7 +2974,7 @@ function admitRuntimeEventsV1(
       admittedEvent.type === 'tool.rejected' ||
       admittedEvent.type === 'tool.file_change'
     ) {
-      throw new AppStateToolPipelinePersistenceErrorV1(
+      throw new AppStateToolPipelinePersistenceError(
         'invalid_terminal_result',
         'Builtin runtimeEvents cannot provide a second capability, Tool terminal, or file-change owner.',
       );
