@@ -1,6 +1,6 @@
 # Kite Runtime Authority & Format V1 实施方案
 
-状态：active
+状态：archived
 
 日期：2026-08-20；2026-08-23 按用户裁决与 ADR-0127 重开收口
 
@@ -14,7 +14,9 @@
 
 当前实施 baseline：`2b4b4e01da0a554a9f6e83ffeba8b7d7953f2c41`
 
-Implementation final SHA：pending
+Implementation final SHA：`938c43b9e6156e89e25f316780b9c713c24b1042`
+
+完成记录：[`2026-08-23-rav1-simplified-runtime-authority-format-closure.md`](../execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md)
 
 目标 Runtime State schema：`26`
 
@@ -56,12 +58,12 @@ Implementation final SHA：pending
 
 | Stage | 状态 | 当前验收 |
 | --- | --- | --- |
-| RAV1-01 simplified identity | implementation complete; Gate pending | CLI/TUI no key/no lock；canonical alias identity；removed caller/static scan |
-| RAV1-02 control boundary | implementation complete; native Gate pending | POSIX/MCP real child；Windows TS；final-SHA Windows Cargo/native E2E required |
-| RAV1-03 Model/MCP/Credential | implementation complete; Gate pending | five-purpose Gateway；HTTP argument inspection；one broker；secret absence |
-| RAV1-04 no speculative fencing | implementation complete; Gate pending | no global lock；SQLite revision/lease concurrency facts；multi-process startup |
-| RAV1-05 State26/Store5 | implementation complete; Gate pending | exact 7/2 DDL；all-session preflight；fork/rewind/delete/reopen；old bytes unchanged |
-| RAV1-06 cutover/qualification | active | full default/TUI/fault/soak/package/docs/manifests；final SHA Platform/OSS/7×8 verifier |
+| RAV1-01 simplified identity | completed | CLI/TUI no key/no lock；canonical alias identity；removed caller/static scan |
+| RAV1-02 control boundary | completed | POSIX/MCP real child；Windows Cargo/native E2E/probe passed |
+| RAV1-03 Model/MCP/Credential | completed | five-purpose Gateway；HTTP argument inspection；one broker；secret absence |
+| RAV1-04 no speculative fencing | completed | no global lock；SQLite revision/lease concurrency facts；multi-process startup |
+| RAV1-05 State26/Store5 | completed | exact 7/2 DDL；all-session preflight；fork/rewind/delete/reopen；old bytes unchanged |
+| RAV1-06 cutover/qualification | completed | full default/TUI/fault/soak/package/docs/manifests；Platform/OSS/7×8 verifier |
 
 ## 5. Stop-and-report Gate
 
@@ -76,10 +78,13 @@ Implementation final SHA：pending
 
 任何失败、skip 覆盖 required native case、未提交改动、远端不同步或旧 SHA evidence 都不能完成本计划。
 
+最终证据见上述完成记录。Implementation SHA 的三套受信 GitHub workflow 已 passed；
+完成记录所在 docs-only final SHA 依同一记录的 external-check 规则复验，不在文件内形成自引用 SHA。
+
 ## 6. Cutover 不变量
 
 - 不保留 try-new-catch-old、异常 fallback、双写、双 handler、第二 registry、隐式 compatibility adapter。
 - 旧 Store4 只允许 test support 显式打开并验证 bytes 不变；production package 只导出 V5。
 - 同进程 typed seam 不增加密码协议；control frame 不声称 cryptographic authenticity。
 - 真正的 API/OAuth credential 只在 Broker 使用点物化，不能因删除内部 key 而退回环境变量或明文配置。
-- 最终文档、completion evidence、push 后工作树与 qualification 必须共同收敛；在此之前保持 `active`。
+- 最终文档、completion evidence、push 后工作树与 qualification 必须共同收敛；本计划的完成记录是唯一归档证据。

@@ -116,6 +116,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md` | completed | 记录 ADR-0127 简化切换、过度设计删除、State26/Store5、用户 model 修复保留、本地 Gate 与 final-SHA GitHub qualification。 |
 | `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | superseded | ADR-0127 已删除该记录中的推测性 key/authority inventory；仅保留历史。 |
 | `execution/completed/2026-08-22-rav1-01-project-layered-identity.md` | superseded | ProjectIdentityStore/ProjectHandle 已删除；当前只有 canonical Workspace identity。 |
 | `execution/completed/2026-08-22-rav1-02-grant-receipt-authenticity.md` | superseded | persisted authority 与 child key/HMAC 已删除；当前使用 strict Store/control frame。 |
