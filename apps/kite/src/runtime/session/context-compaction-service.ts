@@ -123,7 +123,7 @@ export class ContextCompactionService {
 
     // Manual compaction is a Kernel effect, not an App-side recovery helper.
     // An idle SessionRuntime currently has no retained execution control that
-    // can safely own the State 25 transition, lease, and Store 4 commit. Keep
+    // can safely own the State 27 transition, lease, and Store 4 commit. Keep
     // the operation fail-closed until Host/session lifecycle supplies that
     // single coordinator; never open a second Kernel or executor here.
     const control = rt.authorizedExecutionControl;

@@ -540,6 +540,28 @@ function createDynamicGovernanceProjection(
     nestedCapabilityRevision: null,
     nestedCatalogRevision: null,
     commandDigest: null,
+    canonicalCwd: resolved.availabilityContext.workspace,
+    shellOrExecutorIdentity: `${subject.providerId}:${subject.capabilityId}:mcp`,
+    executionEnvironmentDigest: digestCapabilityBindingValue({
+      workspace: resolved.availabilityContext.workspace,
+      workspaceTrust: resolved.availabilityContext.workspaceTrust ?? null,
+      phase: resolved.availabilityContext.phase ?? null,
+      interactionMode: resolved.availabilityContext.interactionMode ?? null,
+      featureFlags: resolved.availabilityContext.featureFlags ?? null,
+    }),
+    effectiveSandboxScopeDigest:
+      policyCompilation.sandboxScope?.digest ??
+      digestCapabilityBindingValue({
+        kind: 'baseline',
+        filesystem:
+          resolved.availabilityContext.phase === 'planning' ? 'read_only' : 'workspace_write',
+        network: 'disabled',
+      }),
+    policyParserExecutorRevision: digestCapabilityBindingValue({
+      parserRevision: policyCompilation.parserRevision,
+      policyParserRevision: policyCompilation.parserRevision,
+      executorRevision: null,
+    }),
     isDynamicMcp: true as const,
     visibility: 'internal' as const,
     modelVisible: false as const,

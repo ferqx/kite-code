@@ -6,7 +6,7 @@ import {
 import type { RuntimeEvent } from './state-runtime';
 
 /**
- * Temporary State 25 Host adapter for VerificationSpec schema admission.
+ * Temporary State 27 Host adapter for VerificationSpec schema admission.
  * Builtin remains the only schema compiler; Kernel receives only canonical,
  * digest-bound facts and never imports execution/schema implementation.
  */

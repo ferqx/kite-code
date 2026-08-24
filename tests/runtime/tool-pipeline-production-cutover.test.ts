@@ -252,7 +252,7 @@ function shellState(workspace: string) {
     userId: 'user',
     workspace,
   });
-  state.authorization.mode = 'full_access';
+  state.mode = 'full';
   state.tools.calls.call = {
     toolCallId: 'call',
     modelMessageId: 'message-1',

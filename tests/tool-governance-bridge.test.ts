@@ -149,12 +149,13 @@ describe('RM-16 Builtin to Host governance bridge', () => {
       host.project(
         Object.freeze({
           classified,
+          sessionId: 'session-governance-integration',
           workspace: '/workspace',
+          canonicalWorkspaceIdentity: '/workspace',
           threadId: 'thread-governance-integration',
           context: Object.freeze({
             phase: 'building' as const,
             interactionMode: 'accept_edits' as const,
-            authorizationMode: 'default' as const,
             sandboxAvailable: true,
             circuitBreakerTripped: false,
             gates: Object.freeze({

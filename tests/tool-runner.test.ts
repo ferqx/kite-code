@@ -38,11 +38,7 @@ type GovernedToolInvocationInput = {
     : never;
   readonly mcpManager?: McpRuntimeProvider;
   readonly interactionMode?: 'auto' | 'accept_edits' | 'full';
-  readonly approvedGrant?: 'approve_once' | 'same_command' | 'full_access' | 'none';
-  readonly authorization?: {
-    readonly mode?: 'default' | 'full_access';
-    readonly commandGrants?: Readonly<Record<string, string>>;
-  };
+  readonly approvedGrant?: 'approve_once' | 'same_command' | 'none';
   readonly workspaceAccess?: 'write';
   readonly phase?: 'planning' | 'building';
   readonly taskConfig?: AgentConfig;
@@ -109,10 +105,6 @@ async function invokeGovernedTool(
     ...(input.phase ? { phase: input.phase } : {}),
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {}),
-    authorizationMode:
-      input.authorization?.mode === 'full_access' || input.interactionMode === 'full'
-        ? ('full_access' as const)
-        : ('default' as const),
   };
   const stateKey = `${input.workspace}:${input.threadId ?? 'default'}`;
   const retainState = ['read_file', 'edit_file', 'write_file'].includes(input.request.name);
@@ -725,7 +717,7 @@ describe('invokeGovernedTool — search_files', () => {
 });
 
 describe('invokeGovernedTool — shell_execute timeout', () => {
-  it('requires accept_edits approval for workspace-local shell commands', async () => {
+  it('runs workspace-local shell commands directly in the baseline sandbox', async () => {
     let capturedNetworkMode: string | undefined;
 
     const result = await invokeGovernedTool({
@@ -745,12 +737,11 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
       },
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.stderr).toContain('current interaction mode must review this exact invocation');
-    expect(capturedNetworkMode).toBeUndefined();
+    expect(result.ok).toBe(true);
+    expect(capturedNetworkMode).toBe('disabled');
   });
 
-  it('requires accept_edits approval for fixed runtime version queries', async () => {
+  it('runs fixed runtime version queries directly in the baseline sandbox', async () => {
     const capturedNetworkModes: string[] = [];
 
     for (const command of ['node --version', 'npm --version', 'bun --version']) {
@@ -770,11 +761,10 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
           return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
         },
       });
-      expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('current interaction mode must review this exact invocation');
+      expect(result.ok).toBe(true);
     }
 
-    expect(capturedNetworkModes).toEqual([]);
+    expect(capturedNetworkModes).toEqual(['disabled', 'disabled', 'disabled']);
   });
 
   it('opens networking only for an approved network shell command', async () => {
@@ -943,7 +933,6 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
         protectedCommand: 'curl https://example.com',
       } as PendingToolRequest,
       interactionMode: 'full',
-      authorization: { mode: 'full_access', commandGrants: {} },
       shellExecutor: async (input) => {
         capturedNetworkMode = input.networkMode;
         return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };

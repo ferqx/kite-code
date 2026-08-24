@@ -17,7 +17,6 @@ export const initialState: TuiState = {
     phase: 'building',
     plan: null,
     pendingPlan: null,
-    authorization: 'default',
     workspaceAccess: 'write',
     cacheHitTokens: 0,
     cacheMissTokens: 0,
@@ -58,6 +57,9 @@ export const initialState: TuiState = {
   currentModelReasoningStreamed: false,
   currentModelReasoningText: undefined,
   interactionMode: 'auto',
+  sessionCommandGrants: new Map(),
+  sessionCommandGrantGeneration: 0,
+  sessionCommandGrantRevision: 0,
   skillManifests: [],
 };
 

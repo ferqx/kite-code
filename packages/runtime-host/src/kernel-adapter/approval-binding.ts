@@ -14,7 +14,7 @@ export interface RuntimeHostStateVerifiedApprovalBindingInput {
   readonly policyFact: Readonly<ToolGovernancePolicyFact>;
 }
 
-/** Sole State 25 verifier for a transported Kernel approval binding. */
+/** Sole State 27 verifier for a transported Kernel approval binding. */
 export function runtimeHostStateVerifyApprovalBindingDigest(input: {
   readonly digest: unknown;
   readonly invocationFact: unknown;

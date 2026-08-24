@@ -1,5 +1,5 @@
 import { InteractionMode } from '@kite/runtime-contract';
-import { type SandboxBackend, sandboxSupportsFullMode } from '#app/sandbox/types';
+import { appSandboxBackendAvailable, type SandboxBackend } from '#app/sandbox/types';
 
 export type TuiInteractionMode =
   | typeof InteractionMode.AcceptEdits
@@ -12,15 +12,13 @@ export interface InteractionModeAdmission {
   reason: string | null;
 }
 
-export { sandboxSupportsFullMode };
+export { appSandboxBackendAvailable };
 
 export function fullModeUnavailableReason(
-  interactionMode: TuiInteractionMode,
-  sandboxBackend: SandboxBackend,
+  _interactionMode: TuiInteractionMode,
+  _sandboxBackend: SandboxBackend,
 ): string | null {
-  if (interactionMode !== InteractionMode.Full) return null;
-  if (sandboxSupportsFullMode(sandboxBackend)) return null;
-  return '非沙箱环境无法开启full';
+  return null;
 }
 
 export function resolveInteractionModeTarget(
@@ -47,8 +45,5 @@ export function admitInteractionModeTarget(
   sandboxBackend: SandboxBackend,
 ): InteractionModeAdmission {
   const reason = fullModeUnavailableReason(target, sandboxBackend);
-  if (reason) {
-    return { allowed: false, mode: InteractionMode.AcceptEdits, reason };
-  }
-  return { allowed: true, mode: target, reason: null };
+  return { allowed: true, mode: target, reason };
 }

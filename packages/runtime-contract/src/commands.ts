@@ -43,7 +43,7 @@ export type RuntimeInteractionResponse =
   | { readonly kind: 'text'; readonly value: string }
   | {
       readonly kind: 'approval';
-      readonly decision: 'approve_once' | 'full_access' | 'reject';
+      readonly decision: 'approve_once' | 'same_command' | 'reject';
     }
   | {
       readonly kind: 'plan_review';

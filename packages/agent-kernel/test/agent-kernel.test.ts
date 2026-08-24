@@ -42,7 +42,7 @@ import {
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const INITIAL_STATE_FIXTURE_JSON =
-  '{"schemaVersion":26,"formatEpoch":"kite-runtime-modularization-v1-2026-08-19","revision":0,"appliedEventIds":[],"recoveryState":{"kind":"normal"},"session":{"threadId":"session-1","userId":"user-1","workspace":"/workspace"},"turn":{"turnId":"turn-1","turnIndex":0,"status":"active"},"transcript":{"messages":[]},"context":{"history":[],"autoGuard":{"recentAutomaticCompactions":[],"consecutiveLowGain":0,"disabledUntilManualAction":false,"recoveryAttempted":false}},"resourceBudget":{"status":"unconfigured","reservations":{}},"modelInvocations":{},"providerReadiness":{},"completionGuard":{"correctionAttempts":0},"activeTaskId":null,"tasks":{},"interactions":{"kind":"idle"},"tools":{"calls":{},"queue":[],"active":[]},"toolRecovery":{"schemaVersion":1,"identityKey":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","failures":{},"order":[],"progressRevision":0,"qualityGuard":{"blocked":false,"observedFailures":0}},"capabilities":{"catalogRevision":"","bindings":{},"disclosures":{},"loadedCapabilities":{},"invocations":{}},"skills":{"catalogRevision":"","frames":{}},"verification":{"records":{}},"providerAdmission":{"pending":[],"waivers":{}},"suspendedSubagents":{},"authorization":{"mode":"default","commandGrants":{}},"mode":"accept_edits","workspaceAccess":"write","autoReview":{"pendingWarnings":{},"consecutiveRejects":0,"rejectionHistory":[],"circuitBreakerTripped":false},"doomLoop":{}}';
+  '{"schemaVersion":27,"formatEpoch":"kite-runtime-saq-v1-2026-08-25","revision":0,"appliedEventIds":[],"recoveryState":{"kind":"normal"},"session":{"threadId":"session-1","userId":"user-1","workspace":"/workspace"},"turn":{"turnId":"turn-1","turnIndex":0,"status":"active"},"transcript":{"messages":[]},"context":{"history":[],"autoGuard":{"recentAutomaticCompactions":[],"consecutiveLowGain":0,"disabledUntilManualAction":false,"recoveryAttempted":false}},"resourceBudget":{"status":"unconfigured","reservations":{}},"modelInvocations":{},"providerReadiness":{},"completionGuard":{"correctionAttempts":0},"activeTaskId":null,"tasks":{},"interactions":{"kind":"idle"},"tools":{"calls":{},"queue":[],"active":[]},"toolRecovery":{"schemaVersion":1,"identityKey":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","failures":{},"order":[],"progressRevision":0,"qualityGuard":{"blocked":false,"observedFailures":0}},"capabilities":{"catalogRevision":"","bindings":{},"disclosures":{},"loadedCapabilities":{},"invocations":{}},"skills":{"catalogRevision":"","frames":{}},"verification":{"records":{}},"providerAdmission":{"pending":[],"waivers":{}},"suspendedSubagents":{},"mode":"accept_edits","interactionModeRevision":0,"workspaceAccess":"write","autoReview":{"pendingWarnings":{},"consecutiveRejects":0,"rejectionHistory":[],"circuitBreakerTripped":false},"doomLoop":{},"pendingApprovals":{},"activeApprovalId":null,"nextQueueSequence":0,"approvalGeneration":0,"sessionCommandGrants":{},"approvalReceipts":{}}';
 
 function stableFixtureJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -277,6 +277,36 @@ function completeEvidenceFixture(
 
 function minimalEvent(type: RuntimeEventType): KernelEvent {
   const valueFor = (field: string): unknown => {
+    if (field === 'grantKey') return 'grant-key-fixture';
+    if (field === 'grant') {
+      if (type === 'approval.granted') return 'approve_once';
+      if (type === 'approval.batch_released') return 'same_command';
+      return 'fixture';
+    }
+    if (field === 'generation' || field === 'sessionRevision') return 1;
+    if (field === 'fullModeBypassEligible' || field === 'fullModePolicyBypassAllowed') {
+      return false;
+    }
+    if (field === 'matches') {
+      return [
+        { interactionId: 'fixture', toolCallId: 'fixture', receiptId: 'fixture', generation: 1 },
+      ];
+    }
+    if (field === 'commandIdentity') {
+      return {
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        workspace: '/workspace',
+        canonicalWorkspaceIdentity: 'workspace-identity',
+        cwd: '/workspace',
+        executor: 'shell',
+        environment: 'environment',
+        scope: 'workspace',
+        effects: 'read',
+        parserRevision: 'parser',
+        commandDigest: 'command',
+      };
+    }
     if (field === 'actor') return 'user';
     if (field === 'reservationId') return 'reservation-fixture';
     if (field === 'invocationId') return 'invocation-fixture';
@@ -817,13 +847,49 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'agent-kernel-current',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(135);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(136);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
     expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(7);
   });
 
   test('validates and decodes every current State event discriminant', () => {
-    const fixtureValue = (field: string): unknown => {
+    const fixtureValue = (field: string, eventType: RuntimeEventType): unknown => {
+      if (field === 'fullModeBypassEligible' || field === 'fullModePolicyBypassAllowed') {
+        return false;
+      }
+      if (field === 'grantKey') return 'grant-key-fixture';
+      if (field === 'grant') {
+        if (eventType === 'approval.granted') return 'approve_once';
+        if (eventType === 'approval.batch_released') return 'same_command';
+        return 'fixture';
+      }
+      if (field === 'receiptId') return 'receipt-fixture';
+      if (field === 'generation' || field === 'sessionRevision') return 1;
+      if (field === 'matches') {
+        return [
+          {
+            interactionId: 'fixture',
+            toolCallId: 'fixture',
+            receiptId: 'receipt-fixture',
+            generation: 1,
+          },
+        ];
+      }
+      if (field === 'commandIdentity') {
+        return {
+          sessionId: 'session-1',
+          threadId: 'thread-1',
+          workspace: '/workspace',
+          canonicalWorkspaceIdentity: 'workspace-identity',
+          cwd: '/workspace',
+          executor: 'shell',
+          environment: 'environment',
+          scope: 'workspace',
+          effects: 'read',
+          parserRevision: 'parser',
+          commandDigest: 'command',
+        };
+      }
       if (
         field.endsWith('Id') ||
         field === 'name' ||
@@ -898,7 +964,9 @@ describe('agent kernel package boundary', () => {
     for (const [type, fields] of Object.entries(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS)) {
       const event = completeEvidenceFixture(type as RuntimeEventType, {
         type,
-        ...Object.fromEntries(fields.map((field) => [field, fixtureValue(field)])),
+        ...Object.fromEntries(
+          fields.map((field) => [field, fixtureValue(field, type as RuntimeEventType)]),
+        ),
       });
       assertCurrentRuntimeEvent(event);
       expect(decodeCurrentRuntimeEventJson(JSON.stringify(event))).toEqual(event);
@@ -954,12 +1022,12 @@ describe('agent kernel package boundary', () => {
     expect(reduceAgentState(state, diagnostic as KernelEvent)).toEqual(state);
   });
 
-  test('classifies all 135 events into one static owner or an explicit diagnostic no-op', () => {
+  test('classifies all 136 events into one static owner or an explicit diagnostic no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(135);
-    expect(new Set(covered).size).toBe(135);
-    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(128);
-    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(135);
+    expect(covered).toHaveLength(136);
+    expect(new Set(covered).size).toBe(136);
+    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(129);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(136);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
@@ -968,7 +1036,7 @@ describe('agent kernel package boundary', () => {
     ).toBe(true);
   });
 
-  test('runs the complete 128-case compatibility switch corpus and proves seven default diagnostics are no-op', () => {
+  test('runs the complete 129-case compatibility switch corpus and proves seven default diagnostics are no-op', () => {
     const diagnosticSet = new Set<string>(STATE_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);
@@ -1185,7 +1253,7 @@ describe('agent kernel package boundary', () => {
     );
   });
 
-  test('decides and reduces a State 25 event without a dynamic domain', () => {
+  test('decides and reduces a State 27 event without a dynamic domain', () => {
     const initial = createInitialAgentState({
       threadId: 'session-1',
       userId: 'user-1',
@@ -1510,15 +1578,21 @@ describe('agent kernel package boundary', () => {
       'verification',
       'providerAdmission',
       'suspendedSubagents',
-      'authorization',
       'mode',
+      'interactionModeRevision',
       'workspaceAccess',
       'autoReview',
       'doomLoop',
+      'pendingApprovals',
+      'activeApprovalId',
+      'nextQueueSequence',
+      'approvalGeneration',
+      'sessionCommandGrants',
+      'approvalReceipts',
     ]);
     expect(state).toEqual({
-      schemaVersion: 26,
-      formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
+      schemaVersion: 27,
+      formatEpoch: 'kite-runtime-saq-v1-2026-08-25',
       revision: 0,
       appliedEventIds: [],
       recoveryState: { kind: 'normal' },
@@ -1561,8 +1635,8 @@ describe('agent kernel package boundary', () => {
       verification: { records: {} },
       providerAdmission: { pending: [], waivers: {} },
       suspendedSubagents: {},
-      authorization: { mode: 'default', commandGrants: {} },
       mode: 'accept_edits',
+      interactionModeRevision: 0,
       workspaceAccess: 'write',
       autoReview: {
         pendingWarnings: {},
@@ -1571,6 +1645,12 @@ describe('agent kernel package boundary', () => {
         circuitBreakerTripped: false,
       },
       doomLoop: {},
+      pendingApprovals: new Map(),
+      activeApprovalId: null,
+      nextQueueSequence: 0,
+      approvalGeneration: 0,
+      sessionCommandGrants: new Map(),
+      approvalReceipts: new Map(),
     });
     const serialized = encodeCurrentAgentStateJson(state);
     expect(serialized).toBe(INITIAL_STATE_FIXTURE_JSON);
@@ -1610,30 +1690,27 @@ describe('agent kernel package boundary', () => {
         }),
       ),
     ).toThrow();
-    expect(serialized).toContain('"formatEpoch":"kite-runtime-modularization-v1-2026-08-19"');
+    expect(serialized).toContain('"formatEpoch":"kite-runtime-saq-v1-2026-08-25"');
   });
 
-  test('requires explicit Host authorization facts for full_access State construction', () => {
-    const base = {
+  test('rejects legacy full_access authorization facts without producing a State event', () => {
+    const state = createInitialAgentState({
       threadId: 'session-1',
       userId: 'user-1',
       workspace: '/workspace',
       turnId: 'turn-1',
       recoveryIdentityKey: IDENTITY_KEY,
-      authorizationMode: 'full_access' as const,
-      authorizationSource: 'user' as const,
-    };
-    expect(() => createInitialAgentState(base as never)).toThrow(/modeGrantedAt/u);
-    const elevated = createInitialAgentState({
-      ...base,
-      modeGrantedAt: '2026-08-20T00:00:00.000Z',
     });
-    expect(elevated.authorization).toEqual({
+    const legacy = {
+      type: 'authorization.changed',
       mode: 'full_access',
       modeSource: 'user',
       modeGrantedAt: '2026-08-20T00:00:00.000Z',
       commandGrants: {},
-    });
+    };
+    expect(() => assertCurrentRuntimeEvent(legacy)).toThrow();
+    expect(() => reduceAgentState(state, legacy as unknown as KernelEvent)).toThrow();
+    expect(encodeCurrentAgentStateJson(state)).toBe(INITIAL_STATE_FIXTURE_JSON);
   });
 
   test('reduces the previously uncovered State domains with their durable facts', () => {
@@ -1915,7 +1992,9 @@ describe('agent kernel package boundary', () => {
     const fork = rebindForkAgentState(state, 'session-2', 'b'.repeat(64));
     expect(fork.session.threadId).toBe('session-2');
     expect(fork.toolRecovery).toEqual(createToolRecoveryJournal('b'.repeat(64)));
-    expect(fork.authorization).toEqual({ mode: 'default', commandGrants: {} });
+    expect(fork.pendingApprovals).toEqual(new Map());
+    expect(fork.sessionCommandGrants).toEqual(new Map());
+    expect(fork.approvalReceipts).toEqual(new Map());
     expect(fork.interactions).toEqual({ kind: 'idle' });
     expect(fork.tools.queue).toEqual([]);
     expect(fork.tools.active).toEqual([]);

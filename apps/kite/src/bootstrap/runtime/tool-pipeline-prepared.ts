@@ -7,6 +7,7 @@ import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host/
 import type {
   CapabilityEffects,
   CapabilityPolicyEffects,
+  CapabilitySandboxScopeFact,
   ClassifiedInvocation,
   DynamicMcpPreparedToolInvocationIdentity,
   DynamicMcpToolTarget,
@@ -26,11 +27,7 @@ export const APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_ =
   'kite.tool-pipeline-prepared-request.v1' as const;
 
 export type AppToolPipelinePreparedAuthorizationKind = 'policy_allow' | 'approved_call';
-export type AppToolPipelinePreparedGrantUsed =
-  | 'none'
-  | 'approve_once'
-  | 'same_command'
-  | 'full_access';
+export type AppToolPipelinePreparedGrantUsed = 'none' | 'approve_once' | 'same_command';
 
 /**
  * The request facts persisted alongside a prepared attempt.  It is a neutral
@@ -42,8 +39,12 @@ export interface AppToolPipelinePreparedRequest {
   readonly schema: typeof APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_;
   /** Exact authorization kind returned by the Kernel allow decision. */
   readonly authorizationKind: AppToolPipelinePreparedAuthorizationKind;
-  /** The narrowed State 25 grant carried by the Kernel allow decision. */
+  /** The narrowed State 27 grant carried by the Kernel allow decision. */
   readonly grantUsed: AppToolPipelinePreparedGrantUsed;
+  /** Live mode that produced the authorization digest; Full is not a grant. */
+  readonly interactionMode: 'auto' | 'accept_edits' | 'full';
+  /** Exact compiler-selected sandbox lane, or null for non-sandbox tools. */
+  readonly sandboxScope: Readonly<CapabilitySandboxScopeFact> | null;
   /** Builtin policy effects; `{}` is required when the compilation omits effects. */
   readonly policyEffects: Readonly<CapabilityPolicyEffects>;
   readonly effectiveEffects: Readonly<CapabilityEffects>;
@@ -107,7 +108,7 @@ export interface AppPreparedToolInvocationBuild<
 }
 
 /**
- * Bind State 25 governance facts and one Kernel allow decision to an immutable
+ * Bind State 27 governance facts and one Kernel allow decision to an immutable
  * SPI prepared invocation.  All identity fields are copied from the existing
  * Builtin/SPI projection; no App policy or execution authority is introduced.
  */
@@ -142,7 +143,8 @@ export function createAppPreparedToolInvocation<
     policyDigest,
     authorizationKind: decision.authorizationKind,
     grantUsed: decision.grantUsed,
-    authorizationMode: governance.context.authorizationMode,
+    interactionMode: governance.context.interactionMode,
+    sandboxScope: classified.policyCompilation.sandboxScope ?? null,
   });
   const admissionDigest = digestCapabilityValue({
     authorizationDigest,
@@ -218,7 +220,7 @@ function assertBuilderEnvelope<TArguments extends RuntimeJsonValue>(
     fail('Prepared builder requires a classified invocation.');
   }
   if (input.governance?.schema !== 'kite.tool-governance-facts.v1') {
-    fail('Prepared builder requires State 25 governance facts.');
+    fail('Prepared builder requires State 27 governance facts.');
   }
   if (input.decision.kind !== 'allow') {
     fail('Prepared builder requires a Kernel allow decision.');
@@ -230,7 +232,12 @@ function assertBuilderEnvelope<TArguments extends RuntimeJsonValue>(
   assertRuntimeJson(input.preparedArguments, 'prepared arguments');
   if (input.request === undefined) fail('Prepared builder requires request facts.');
   assertRuntimeJson(input.request, 'prepared request');
-  assertPreparedRequest(input.request, input.classified, input.decision);
+  assertPreparedRequest(
+    input.request,
+    input.classified,
+    input.decision,
+    input.governance.context.interactionMode,
+  );
   if (input.binding !== null) assertBinding(input.binding);
   if (input.classified.validated.domainData === undefined) {
     fail('Prepared builder requires classified domain facts.');
@@ -306,7 +313,7 @@ function assertClassifiedAndGovernanceMatch<TArguments extends RuntimeJsonValue>
   if (
     !policyFactsMatch(facts.policy, classifiedGovernance.policy, classified.effectiveEffectsDigest)
   ) {
-    fail('Prepared builder State 25 policy facts are stale.');
+    fail('Prepared builder State 27 policy facts are stale.');
   }
   if (
     facts.context.executionMechanism !== executionMechanismForGovernance(target.executionMechanism)
@@ -324,12 +331,15 @@ function assertPreparedRequest<TArguments extends RuntimeJsonValue>(
   request: Readonly<AppToolPipelinePreparedRequest>,
   classified: Readonly<ClassifiedInvocation<TArguments>>,
   decision: Readonly<AppToolPipelineGovernanceDecision>,
+  interactionMode: AppToolPipelinePreparedRequest['interactionMode'],
 ): void {
   if (decision.kind !== 'allow') fail('Prepared request requires a Kernel allow decision.');
   const expectedKeys = new Set([
     'schema',
     'authorizationKind',
     'grantUsed',
+    'interactionMode',
+    'sandboxScope',
     'policyEffects',
     'effectiveEffects',
     'receiptRequirement',
@@ -347,6 +357,9 @@ function assertPreparedRequest<TArguments extends RuntimeJsonValue>(
   }
   if (
     request.schema !== APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_ ||
+    request.interactionMode !== interactionMode ||
+    digestCapabilityValue(request.sandboxScope) !==
+      digestCapabilityValue(classified.policyCompilation.sandboxScope ?? null) ||
     digestCapabilityValue(request.effectiveEffects) !==
       digestCapabilityValue(classified.effectiveEffects) ||
     request.receiptRequirement !== classified.requirements.receipt ||
@@ -387,12 +400,7 @@ function isPreparedAuthorizationKind(
 }
 
 function isPreparedGrantUsed(value: unknown): value is AppToolPipelinePreparedGrantUsed {
-  return (
-    value === 'none' ||
-    value === 'approve_once' ||
-    value === 'same_command' ||
-    value === 'full_access'
-  );
+  return value === 'none' || value === 'approve_once' || value === 'same_command';
 }
 
 function assertPolicyEffects(
@@ -573,9 +581,6 @@ function assertApprovedCallFacts<TArguments extends RuntimeJsonValue>(
   if (decision.grantUsed === 'same_command' && sameCommandGrantMatches(input.governance)) {
     return;
   }
-  if (decision.grantUsed === 'full_access' && fullAccessBypassMatches(input.governance)) {
-    return;
-  }
   fail('Prepared builder approved-call facts are not bound to the Kernel decision.');
 }
 
@@ -589,31 +594,18 @@ function sameCommandGrantMatches(facts: Readonly<AppToolPipelineGovernanceFacts>
     invocation.commandDigest !== null &&
     grant.workspace === invocation.workspace &&
     grant.threadId === invocation.threadId &&
+    grant.canonicalWorkspaceIdentity === invocation.canonicalWorkspaceIdentity &&
+    grant.cwd === invocation.cwd &&
+    grant.executor === invocation.executor &&
+    grant.environmentDigest === invocation.environmentDigest &&
+    grant.scopeDigest === invocation.scopeDigest &&
+    grant.effectsDigest === invocation.effectiveEffectsDigest &&
+    grant.parserRevision === invocation.parserRevision &&
+    grant.executorRevision === invocation.executorRevision &&
     grant.commandDigest === invocation.commandDigest &&
     observedAt !== undefined &&
     observedAt >= grant.grantedAt &&
     (grant.expiresAt === undefined || observedAt < grant.expiresAt)
-  );
-}
-
-function fullAccessBypassMatches(facts: Readonly<AppToolPipelineGovernanceFacts>): boolean {
-  const nested = facts.nestedSkill;
-  const dynamic = facts.dynamicMcp;
-  const forceManual =
-    (facts.invocation.operationId === 'builtin:activate_skill' &&
-      facts.policy.minimumApproval === 'user') ||
-    (facts.invocation.operationId === 'builtin:activate_skill' &&
-      (nested?.decision === 'ask' || nested?.minimumApproval === 'user')) ||
-    dynamic?.minimumApproval === 'user';
-  const forceAutoReview =
-    (facts.invocation.operationId === 'builtin:activate_skill' &&
-      nested?.minimumApproval === 'auto_review') ||
-    dynamic?.minimumApproval === 'auto_review';
-  return (
-    !forceManual &&
-    !forceAutoReview &&
-    facts.context.authorizationMode === 'full_access' &&
-    facts.policy.fullAccessMayBypassApproval
   );
 }
 
@@ -847,6 +839,8 @@ function cloneAndDeepFreezePreparedRequest(
     schema: request.schema,
     authorizationKind: request.authorizationKind,
     grantUsed: request.grantUsed,
+    interactionMode: request.interactionMode,
+    sandboxScope: request.sandboxScope === null ? null : Object.freeze({ ...request.sandboxScope }),
     policyEffects: cloneAndDeepFreezePolicyEffects(request.policyEffects),
     effectiveEffects: cloneAndDeepFreezeCapabilityEffects(request.effectiveEffects),
     receiptRequirement: request.receiptRequirement,

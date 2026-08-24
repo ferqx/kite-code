@@ -58,7 +58,6 @@ describe('buildRuntimeContext', () => {
     const snapshot = buildRuntimeModeSnapshot({
       phase: 'planning',
       interactionMode: 'auto',
-      authorizationMode: 'default',
       sandboxBackend: 'seatbelt',
       planningState: {
         kind: 'planning_draft',
@@ -78,7 +77,6 @@ describe('buildRuntimeContext', () => {
     expect(snapshot).toContain('<runtime-state source="runtime.kernel">');
     expect(snapshot).toContain('phase: planning');
     expect(snapshot).toContain('interaction_mode: auto');
-    expect(snapshot).toContain('authorization_mode: default');
     expect(snapshot).toContain('sandbox_backend: seatbelt');
     expect(snapshot).toContain('plan_id: p1');
     expect(snapshot).toContain('version: 2');

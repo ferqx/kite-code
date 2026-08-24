@@ -1,7 +1,7 @@
 import type { GitBroker } from '@kite/builtin-runtime/git';
 import { createChatModel, createModelSecretDetector } from '@kite/builtin-runtime/model';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import type { AuthorizationMode, InteractionMode, SkillScanOptions } from '@kite/runtime-contract';
+import type { InteractionMode, SkillScanOptions } from '@kite/runtime-contract';
 import {
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
@@ -21,7 +21,7 @@ import {
 } from '@kite/runtime-host/kernel-adapter';
 import type { ProjectIdentity } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
-import { type SandboxBackend, sandboxSupportsFullMode } from '#app/sandbox/types';
+import { appSandboxBackendAvailable, type SandboxBackend } from '#app/sandbox/types';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
 import type {
   RuntimeSessionCoordinator,
@@ -41,8 +41,6 @@ export interface CliRuntimeBridgeInput {
   readonly shellExecutor: ShellExecutor;
   readonly gitBroker?: GitBroker;
   readonly interactionMode: InteractionMode;
-  readonly authorizationMode?: AuthorizationMode;
-  readonly authorizationSource?: 'config';
   readonly sandboxBackend: SandboxBackend;
   readonly skillOptions: SkillScanOptions;
   readonly initialSkillActivations: readonly {
@@ -232,7 +230,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     this.#activePublish = publish;
     const coordinator = this.#ensureCoordinator();
     coordinator.updateInteractionMode(this.#input.interactionMode);
-    coordinator.updateSandboxAvailable(sandboxSupportsFullMode(this.#input.sandboxBackend));
+    coordinator.updateSandboxAvailable(appSandboxBackendAvailable(this.#input.sandboxBackend));
     let status: NonNullable<RuntimeSessionProjection['activeWork']>['status'] = 'completed';
     try {
       const generator = coordinator.executeTurn(
@@ -250,8 +248,6 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           shellExecutor: this.#input.shellExecutor,
           gitBroker: this.#input.gitBroker,
           interactionMode: this.#input.interactionMode,
-          authorizationMode: this.#input.authorizationMode,
-          authorizationSource: this.#input.authorizationSource,
           sandboxBackend: this.#input.sandboxBackend,
           frontend: 'cli',
           signal,
@@ -346,7 +342,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
       canonicalWorkspaceDigest: this.#input.projectIdentity.workspaceDigest,
       interactionMode: this.#input.interactionMode,
       recoveryIdentityKey: this.#resolveRecoveryIdentity(this.#input.sessionId),
-      sandboxAvailable: sandboxSupportsFullMode(this.#input.sandboxBackend),
+      sandboxAvailable: appSandboxBackendAvailable(this.#input.sandboxBackend),
       modelArtifactEvidence: modelRuntime.evidence,
       capabilityArtifactEvidence:
         'capabilityArtifacts' in modelRuntime ? modelRuntime.capabilityArtifacts : undefined,
@@ -472,17 +468,37 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
       }
       if (state.interactions.kind === 'awaiting_tool_approval') {
         const approval = state.interactions.approval;
+        const pending = state.pendingApprovals.get(effect.interactionId);
+        if (!pending || pending.status !== 'awaiting_user') {
+          throw new Error('CLI approval queue identity changed before input dispatch.');
+        }
         console.error(`\n[APPROVAL REQUIRED] ${approval.tool}: ${approval.command}`);
         console.error(`Risk: ${approval.risk} | ${approval.summary}`);
-        console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
+        console.error(
+          'Type y/yes to approve once, s/same to approve matching commands, or n to reject:',
+        );
         const value = (await readStdin()).toLowerCase();
-        if (value === 'f' || value === 'full_access') {
-          return { type: 'approve', interactionId: effect.interactionId, grant: 'full_access' };
+        if (value === 's' || value === 'same' || value === 'same_command') {
+          return {
+            type: 'approve',
+            interactionId: effect.interactionId,
+            generation: pending.generation,
+            grant: 'same_command',
+          };
         }
         if (value === 'y' || value === 'yes') {
-          return { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' };
+          return {
+            type: 'approve',
+            interactionId: effect.interactionId,
+            generation: pending.generation,
+            grant: 'approve_once',
+          };
         }
-        return { type: 'reject', interactionId: effect.interactionId };
+        return {
+          type: 'reject',
+          interactionId: effect.interactionId,
+          generation: pending.generation,
+        };
       }
       if (state.interactions.kind === 'awaiting_review') {
         const plan = state.interactions.plan;

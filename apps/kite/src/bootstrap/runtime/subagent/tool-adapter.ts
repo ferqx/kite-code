@@ -57,7 +57,7 @@ import type {
   SubAgentStepSnapshot,
 } from './types';
 
-/** State 25 adapter around the Builtin-owned child model loop. */
+/** State 27 adapter around the Builtin-owned child model loop. */
 export type { SubAgentRunnerInput } from './types';
 
 function requireBuiltinToolCatalog(input: SubAgentRunnerInput): BuiltinToolCatalogProjection {

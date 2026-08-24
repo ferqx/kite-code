@@ -842,7 +842,7 @@ export async function executeTestRuntimeTools(
 }
 
 /**
- * Test-only entry point for a single real State 25 tool turn.
+ * Test-only entry point for a single real State 27 tool turn.
  *
  * Callers provide the model-facing tool name and JSON arguments, while the
  * App pipeline remains responsible for projection lookup, parsing,
@@ -858,7 +858,7 @@ export interface TestRuntimeToolInvocationInput {
   readonly modelMessageId?: string;
   readonly status?: 'queued' | 'approved';
   readonly state?: RuntimeState | Partial<Omit<RuntimeHostStateInitialStateInput, 'workspace'>>;
-  /** Existing State 25 call facts needed by dynamic MCP/private-task fixtures. */
+  /** Existing State 27 call facts needed by dynamic MCP/private-task fixtures. */
   readonly callOverrides?: Partial<RuntimeState['tools']['calls'][string]>;
   /** App-owned dependencies and ports are forwarded to the one pipeline entry point. */
   readonly execution?: Omit<Parameters<typeof executeTestRuntimeTools>[0], 'state' | 'toolCallIds'>;
@@ -879,9 +879,9 @@ export interface TestRuntimeToolInvocationResult {
 }
 
 /**
- * Construct one pending call in a real State 25 turn and execute it through
+ * Construct one pending call in a real State 27 turn and execute it through
  * the existing App composition.  Persistence and event sinks are wrapped only
- * to expose the resulting State 25 projection to tests; injected callbacks
+ * to expose the resulting State 27 projection to tests; injected callbacks
  * still run first and retain their production behavior.
  */
 export async function executeTestRuntimeTool(
@@ -900,7 +900,7 @@ export async function executeTestRuntimeTool(
         });
   const existingCall = initialState.tools.calls[toolCallId];
   if (existingCall && existingCall.name !== input.toolName) {
-    throw new Error(`State 25 tool call '${toolCallId}' already belongs to another tool.`);
+    throw new Error(`State 27 tool call '${toolCallId}' already belongs to another tool.`);
   }
   const preparedState: RuntimeState = {
     ...initialState,

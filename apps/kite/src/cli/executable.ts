@@ -1,5 +1,5 @@
 import packageJson from '../../package.json' with { type: 'json' };
-import { assertKiteRuntimeAuthorizationElevation, createKiteCliRuntimeAccess } from '../bootstrap';
+import { createKiteCliRuntimeAccess } from '../bootstrap';
 import { runKiteInternalMcpStdioChild } from '../bootstrap/mcp-stdio-composition';
 import { main } from './index';
 
@@ -10,7 +10,6 @@ export async function runCli(): Promise<void> {
   }
   await main({
     createRuntimeAccess: createKiteCliRuntimeAccess,
-    assertAuthorizationElevation: assertKiteRuntimeAuthorizationElevation,
   });
 }
 

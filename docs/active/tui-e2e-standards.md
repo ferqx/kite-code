@@ -6,6 +6,8 @@
 
 验证：`bun run test:tui:harness`、`bun run test:tui:system`、`bun run test:tui:system:core`；取消后 scrollback 单次提示词回归可定向运行 `bun run scripts/run-tui-system-tests.ts interrupt`。
 
+相关：ADR-0137、`docs/active/authorization.md`、`docs/active/cancel-resume-cleanup.md`。
+
 ## 测试边界
 
 PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、App `RuntimeSessionCoordinator`、
@@ -32,9 +34,10 @@ cacheable context、唯一 Runtime block、phase-stable V2 工具声明和 Runti
 链路证据，但仍是本地确定性 Provider，不能表述为真实模型
 A/B、release artifact 或平台资格证据。
 
-权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions` 选择器保留 Full
-能力说明并显示环境警告，默认 metadata session logging 不显示普通 mode 状态；测试同时验证 Full
-不可选择、content logging 披露没有被普通 metadata 路径误触发。
+权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions` 选择器仍保留
+Full 能力说明，Full 由 `interactionMode=full` 表达，不因受限 sandbox backend 不可用而转成旧 grant
+或隐藏；实际受限执行在 backend 不可用时 clean fail closed。默认 metadata session logging 不显示
+普通 mode 状态；测试同时验证 content logging 披露没有被普通 metadata 路径误触发。
 
 MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：列表通过“状态 + 选中行 +
 添加入口”组合确认数据已加载，详情通过操作区确认已经打开；项目审批与 OAuth 恢复分别等待
@@ -254,8 +257,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     marker；关闭 native sandbox 只能得到 `denied`，不得恢复裸 host command。不得让
     `sandbox_apply`/`bwrap` 失败后仍靠模型固定回答通过。
     `sandbox-mode` 中 `/permissions` 无参数场景只证明开发 composition 打开 interaction mode 选择器，
-    选择器中的 Full 不可选场景只证明 sandbox 关闭时 Full 不可选；两者都不是 native sandbox、
-    release admission 或 production platform qualification 证据。
+    选择器中的 Full 可见且独立于 sandbox availability；受限 backend 不可用时只证明 clean fail-closed，
+    两者都不是 native sandbox、release admission 或 production platform qualification 证据。
     同一 scenario 的 `/release` 只证明普通开发入口显示 `artifact_disabled`，不代表 embedded
     profile、Sigstore、artifact attestation、平台制品或任一 production Gate 已通过。
 18. 远程 HTTP MCP Tool 场景必须使用生产 TUI 组合根，验证 exact endpoint/network boundary、共享
@@ -289,18 +292,17 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     fixture 选择的角色一致（例如只读检查使用 `explore`/`review`，实现修改使用 `code`）；项目文档、
     fixture 注释或模型 canned response 不得扩大 phase、authorization、预算或角色能力 ceiling。
     多个独立 Subagent fixture 应验证同一 model response 的 sibling lifecycle 可以交错且各自保持稳定
-    ID；依赖型或写范围重叠的 fixture 仍必须串行。若多个 child 同时暂停，场景必须验证只呈现一个
-    canonical approval，其余 continuation 排队且随后恢复时不重新调用 child model。每个 durable
+    ID；依赖型或写范围重叠的 fixture 仍必须串行。若多个 child 同时暂停，场景必须验证所有请求都
+    保留在 durable approval queue，只有当前可见的 `awaiting_user` entry 拥有 Footer/ApprovalBlock，
+    其余 child 按 route、generation、sequence 排队且随后恢复时不重新调用 child model。每个 durable
     `subagent.suspended` 都必须立即停止对应 TUI block 的 spinner/计时，并通过 Runtime 后续事实区分
     “等待自动审查”“自动审查中”和“等待你的批准”；只有最后一种表示需要用户动作。该投影不得依赖
     child 当前是否拥有唯一 approval interrupt。自动或人工获批后必须先恢复当前 active continuation，
-    deferred sibling 不得插队；用户提交“批准”后，TUI 必须立即按当前 interrupt 的 subagent/parent
-    identity 清除该 block 的等待审批投影并重新进入 running；旧/bridge 事件缺失可匹配 identity 时只可
-    回退到唯一的 `awaiting_user` child，存在多个候选时不得猜测。该投影不等待 continuation 的下一条进度事件；
-    同一审批已获本地确认后，迟到的 duplicate `subagent.suspended`/`subagent.approval_deferred`
-    不得把 block 回退为等待审批；下一条 child progress/result/terminal 会结束该去重窗口。
-    durable `approval.granted` 仍是回放与 Runtime 状态的权威事实。拒绝或取消不得乐观清除 interrupt，
-    必须等待 durable terminal event，避免遗漏当前 turn 的终态投影。
+    sibling 不得插队；Enter 必须提交 exact interactionId/generation，且只能在 canonical release event
+    后投影 `authorized_queued`。Esc 只拒绝当前可见焦点，Ctrl+C 才取消 whole turn；旧/bridge 事件缺失
+    可匹配 identity 时必须 no-op，存在多个候选时不得猜测。迟到的 duplicate suspension/review/release
+    不得把 block 回退为等待审批；下一条 child progress/result/terminal 会结束该去重窗口。拒绝或取消不得
+    乐观清除 interrupt，必须等待 durable terminal event，避免遗漏当前 turn 的终态投影。
     当后续 tool call 必须使用前一 Tool result 中运行时生成的标识时，当前 queue slot 可以使用
     test-only `response(request)` resolver 从已记录的 Mock request 生成该 slot 的 response；resolver
     不能读取 queue cursor、未消费 response、Runtime state 或网络。它仍严格消耗一个 slot，且返回值

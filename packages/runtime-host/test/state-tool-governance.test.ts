@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  type AgentAuthorizationState,
-  applyApprovalGrant,
+  type AgentApprovalCommandIdentity,
+  type AgentSessionCommandGrant,
+  approvalCommandGrantKey,
   createToolApprovalBindingDigest,
   createToolGovernanceCommandDigest,
 } from '@kite/agent-kernel';
@@ -78,6 +79,10 @@ function ordinaryClassified(): ClassifiedInvocation {
     modelVisible: true as const,
     builtinProjectionRevision: E,
     dynamicCatalogRevision: null,
+    canonicalCwd: '/workspace',
+    shellOrExecutorIdentity: 'shell',
+    executionEnvironmentDigest: E,
+    effectiveSandboxScopeDigest: F,
   });
   const governance: ToolPipelineGovernanceProjection = Object.freeze({
     invocation: invocation as ToolPipelineGovernanceProjection['invocation'],
@@ -269,7 +274,6 @@ function context(): RuntimeHostStateToolGovernanceAuthorizationInput['context'] 
   return {
     phase: 'building',
     interactionMode: 'accept_edits',
-    authorizationMode: 'default',
     sandboxAvailable: true,
     circuitBreakerTripped: false,
     gates: {
@@ -282,8 +286,38 @@ function context(): RuntimeHostStateToolGovernanceAuthorizationInput['context'] 
   };
 }
 
-function authorization(): AgentAuthorizationState {
-  return { mode: 'default', commandGrants: {} };
+function commandIdentity(
+  overrides: Partial<AgentApprovalCommandIdentity> = {},
+): AgentApprovalCommandIdentity {
+  return {
+    sessionId: 'session-1',
+    threadId: 'thread-1',
+    workspace: '/workspace',
+    canonicalWorkspaceIdentity: D,
+    cwd: '/workspace',
+    executor: 'shell',
+    environment: E,
+    scope: F,
+    effects: C,
+    parserRevision: B,
+    executorRevision: C,
+    commandDigest: COMMAND_DIGEST,
+    ...overrides,
+  };
+}
+
+function persistedGrant(
+  overrides: Partial<AgentSessionCommandGrant> = {},
+): AgentSessionCommandGrant {
+  const identity = commandIdentity();
+  return {
+    grant: 'same_command',
+    grantKey: approvalCommandGrantKey(identity),
+    ...identity,
+    createdAt: '1970-01-01T00:00:00.100Z',
+    generation: 1,
+    ...overrides,
+  };
 }
 
 function input(
@@ -292,7 +326,9 @@ function input(
 ): RuntimeHostStateToolGovernanceAuthorizationInput {
   return {
     classified,
+    sessionId: 'session-1',
     workspace: '/workspace',
+    canonicalWorkspaceIdentity: D,
     threadId: 'thread-1',
     context: context(),
     approval: {
@@ -358,7 +394,7 @@ describe('Runtime Host State tool governance bridge', () => {
       ok: false,
       failure: {
         code: 'kernel_facts_invalid',
-        diagnostic: 'Projected State 25 governance facts are invalid: context.',
+        diagnostic: 'Projected State 27 governance facts are invalid: context.',
       },
     });
   });
@@ -472,18 +508,10 @@ describe('Runtime Host State tool governance bridge', () => {
   });
 
   test('uses only an exact persisted State same-command grant', () => {
-    const granted = applyApprovalGrant({
-      authorization: authorization(),
-      grant: 'same_command',
-      workspace: '/workspace',
-      threadId: 'thread-1',
-      command: 'echo hello',
-      source: 'user',
-      grantedAt: '1970-01-01T00:00:00.100Z',
-    });
+    const granted = persistedGrant();
     const projected = bridge().project(
       input(ordinaryClassified(), {
-        sameCommandGrant: { authorization: granted, command: '  echo hello  ' },
+        sameCommandGrant: { sessionCommandGrants: new Map([[granted.grantKey, granted]]) },
       }),
       admission(),
     );
@@ -493,13 +521,25 @@ describe('Runtime Host State tool governance bridge', () => {
       workspace: '/workspace',
       threadId: 'thread-1',
       commandDigest: COMMAND_DIGEST,
-      source: 'user',
+      canonicalWorkspaceIdentity: D,
+      cwd: '/workspace',
+      executor: 'shell',
+      environmentDigest: E,
+      scopeDigest: F,
+      effectsDigest: C,
+      parserRevision: B,
+      executorRevision: C,
       grantedAt: 100,
     });
 
+    const mismatchedGrant = persistedGrant({
+      commandDigest: createToolGovernanceCommandDigest('echo other')!,
+    });
     const mismatch = bridge().project(
       input(ordinaryClassified(), {
-        sameCommandGrant: { authorization: granted, command: 'echo other' },
+        sameCommandGrant: {
+          sessionCommandGrants: new Map([[granted.grantKey, mismatchedGrant]]),
+        },
       }),
       admission(),
     );
@@ -508,7 +548,9 @@ describe('Runtime Host State tool governance bridge', () => {
 
     const whitespaceMismatch = bridge().project(
       input(ordinaryClassified(), {
-        sameCommandGrant: { authorization: granted, command: 'echo  hello' },
+        sameCommandGrant: {
+          sessionCommandGrants: new Map([[granted.grantKey, mismatchedGrant]]),
+        },
       }),
       admission(),
     );

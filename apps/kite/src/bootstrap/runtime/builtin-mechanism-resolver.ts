@@ -9,12 +9,13 @@ import {
 import type {
   CapabilityExecutionMechanism,
   CapabilityPolicyEffects,
+  CapabilitySandboxScopeFact,
   GitInspectRequest,
   RuntimeJsonValue,
   WorkspaceFilesystemOperation,
 } from '#runtime-spi';
 
-export type AppBuiltinMechanismGrantUsed = 'none' | 'approve_once' | 'same_command' | 'full_access';
+export type AppBuiltinMechanismGrantUsed = 'none' | 'approve_once' | 'same_command';
 
 export interface AppBuiltinShellExecutorInput {
   readonly workspace: string;
@@ -38,6 +39,8 @@ export interface AppBuiltinPreassembledMechanismResolverInput {
   readonly workspace: string;
   readonly canonicalArguments: Readonly<RuntimeJsonValue>;
   readonly grantUsed: AppBuiltinMechanismGrantUsed;
+  readonly interactionMode: 'auto' | 'accept_edits' | 'full';
+  readonly sandboxScope: Readonly<CapabilitySandboxScopeFact> | null;
   /** Optional for legacy policy-allow calls; mandatory for approve_once. */
   readonly authorizationKind?: 'policy_allow' | 'approved_call';
   readonly policyEffects: Readonly<CapabilityPolicyEffects>;
@@ -115,10 +118,10 @@ function filesystemMechanism(
   if (input.preassembledMechanism !== undefined || !input.filesystemRuntime) {
     fail('mechanism_missing');
   }
+  const expandedAuthority = input.grantUsed !== 'none' || input.interactionMode === 'full';
   const externalReadAllowed =
     input.policyEffects.externalRead === true && input.policyEffects.externalWrite !== true;
-  const externalWriteAllowed =
-    input.policyEffects.externalWrite === true && input.grantUsed !== 'none';
+  const externalWriteAllowed = input.policyEffects.externalWrite === true && expandedAuthority;
   const allowExternalPaths = externalReadAllowed || externalWriteAllowed;
   const mechanism = Object.freeze({
     allowExternalPaths,
@@ -191,20 +194,24 @@ function shellMechanism(
     fail('mechanism_missing');
   }
   const command = recordString(input.canonicalArguments, 'command');
-  const readOnly = isReadOnlyShellCommand(command);
+  const sandboxScope = input.sandboxScope;
+  if (!sandboxScope) fail('invalid_facts');
+  const readOnly = sandboxScope.filesystem === 'read_only' || isReadOnlyShellCommand(command);
   // Authorization and scope remain separate: a durable grant permits the
   // invocation, while compiled effects select the minimum sandbox lane.
-  const networkEffect = Boolean(
-    input.policyEffects.network || input.policyEffects.uncertainEffects,
-  );
-  const networkAccess = networkEffect && input.grantUsed !== 'none' ? 'approved' : 'none';
-  const externalFilesystem = Boolean(
-    input.policyEffects.externalRead ||
-      input.policyEffects.externalWrite ||
-      input.policyEffects.uncertainEffects,
-  );
+  const expandedAuthority = input.grantUsed !== 'none' || input.interactionMode === 'full';
+  const networkAccess =
+    sandboxScope.network === 'allow_all' && expandedAuthority ? 'approved' : 'none';
   const filesystemAccess =
-    externalFilesystem && input.grantUsed !== 'none' ? 'approved_external' : 'workspace_only';
+    sandboxScope.filesystem === 'full_access' && expandedAuthority
+      ? 'approved_external'
+      : 'workspace_only';
+  if (
+    (sandboxScope.network === 'allow_all' || sandboxScope.filesystem === 'full_access') &&
+    !expandedAuthority
+  ) {
+    fail('invalid_facts');
+  }
   const executor = input.shellExecutor;
   const mechanism = Object.freeze({
     execute: (shellInput: Readonly<{ command: string; timeoutMs: number }>) => {
@@ -258,7 +265,9 @@ function assertFacts(input: Readonly<AppBuiltinPreassembledMechanismResolverInpu
     !input.signal ||
     typeof input.signal.aborted !== 'boolean' ||
     typeof input.signal.addEventListener !== 'function' ||
-    !['none', 'approve_once', 'same_command', 'full_access'].includes(input.grantUsed)
+    !['none', 'approve_once', 'same_command'].includes(input.grantUsed) ||
+    !['auto', 'accept_edits', 'full'].includes(input.interactionMode) ||
+    !validSandboxScope(input.sandboxScope)
   ) {
     fail('invalid_facts');
   }
@@ -284,6 +293,20 @@ function assertFacts(input: Readonly<AppBuiltinPreassembledMechanismResolverInpu
       fail('mechanism_wrapper_invalid');
     }
   }
+}
+
+function validSandboxScope(value: unknown): value is Readonly<CapabilitySandboxScopeFact> | null {
+  if (value === null) return true;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const scope = value as Record<string, unknown>;
+  return (
+    Object.keys(scope).length === 4 &&
+    ['baseline', 'expanded', 'unrestricted'].includes(String(scope.kind)) &&
+    ['read_only', 'workspace_write', 'full_access'].includes(String(scope.filesystem)) &&
+    ['disabled', 'allow_all'].includes(String(scope.network)) &&
+    typeof scope.digest === 'string' &&
+    scope.digest.length > 0
+  );
 }
 
 function assertFrozenJson(value: unknown, label: string): asserts value is RuntimeJsonValue {

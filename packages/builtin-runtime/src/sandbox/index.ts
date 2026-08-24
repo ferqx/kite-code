@@ -131,7 +131,7 @@ export {
   findUsableBubblewrap,
   isSandboxAvailable,
   resolveSandboxRuntime,
-  sandboxSupportsFullMode,
+  sandboxBackendAvailable,
   selectSandboxBackend,
   usableBubblewrapPath,
 } from './platform';

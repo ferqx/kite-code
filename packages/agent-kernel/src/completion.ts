@@ -105,6 +105,7 @@ const NON_TERMINAL_TOOL_STATUSES = new Set<AgentToolCallState['status']>([
   'awaiting_approval',
   'awaiting_auto_review',
   'approved',
+  'authorized_queued',
   'running',
 ]);
 const TERMINAL_TOOL_STATUSES = new Set<AgentToolCallState['status']>([
@@ -507,6 +508,7 @@ function relevantPendingCalls(state: AgentState): AgentToolCallState[] {
         'awaiting_review',
         'awaiting_approval',
         'awaiting_auto_review',
+        'authorized_queued',
       ].includes(call.status),
   );
 }

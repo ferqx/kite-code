@@ -270,8 +270,6 @@ describe('network boundary concurrent invocation isolation', () => {
       userId: 'user',
       workspace: process.cwd(),
       interactionMode: 'full',
-      authorizationMode: 'full_access',
-      authorizationSource: 'test',
     });
     const descriptor = {
       capabilityId: 'mcp:docs/search',

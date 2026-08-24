@@ -15,6 +15,18 @@ import type {
 } from '#runtime-spi';
 
 const WORKSPACE = '/tmp/kite-mechanism-resolver';
+const BASELINE_SANDBOX_SCOPE = Object.freeze({
+  kind: 'baseline' as const,
+  filesystem: 'workspace_write' as const,
+  network: 'disabled' as const,
+  digest: 'scope-baseline',
+});
+const FULL_SANDBOX_SCOPE = Object.freeze({
+  kind: 'unrestricted' as const,
+  filesystem: 'full_access' as const,
+  network: 'allow_all' as const,
+  digest: 'scope-full',
+});
 
 function frozenJson<T extends RuntimeJsonValue>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -32,6 +44,8 @@ function baseInput(
     workspace: WORKSPACE,
     canonicalArguments: frozenJson({}),
     grantUsed: 'none',
+    interactionMode: 'accept_edits',
+    sandboxScope: BASELINE_SANDBOX_SCOPE,
     policyEffects: Object.freeze({}),
     signal: new AbortController().signal,
     ...overrides,
@@ -179,7 +193,8 @@ describe('App Builtin mechanism resolver', () => {
       baseInput({
         executionMechanism: 'shell',
         canonicalArguments: frozenJson({ command: 'pwd' }),
-        grantUsed: 'full_access',
+        interactionMode: 'full',
+        sandboxScope: FULL_SANDBOX_SCOPE,
         policyEffects: Object.freeze({ network: true, externalRead: true }),
         signal: controller.signal,
         shellExecutor,
@@ -228,8 +243,8 @@ describe('App Builtin mechanism resolver', () => {
     );
     await (uncertainMap.shell as typeof shell).execute({ command: 'custom-tool', timeoutMs: 100 });
     expect(shellInputs[2]).toMatchObject({
-      networkAccess: 'approved',
-      filesystemAccess: 'approved_external',
+      networkAccess: 'none',
+      filesystemAccess: 'workspace_only',
     });
     await expect(
       Promise.resolve().then(() => shell.execute({ command: 'different', timeoutMs: 100 })),
@@ -279,7 +294,7 @@ describe('App Builtin mechanism resolver', () => {
     await filesystemMechanism.dispatch({
       kind: 'write_file',
       path: '../outside.txt',
-      pathScope: 'workspace_only',
+      pathScope: 'approved_external',
       content: 'x',
     });
     expect(filesystemCalls[0]?.pathScope).toBe('approved_external');
@@ -329,7 +344,7 @@ describe('App Builtin mechanism resolver', () => {
       ) => Promise<unknown>;
     };
     await approvedShell.execute({ command: 'curl https://example.test', timeoutMs: 100 });
-    expect(shellInputs[0]?.networkAccess).toBe('approved');
+    expect(shellInputs[0]?.networkAccess).toBe('none');
     expect(shellInputs[0]?.filesystemAccess).toBe('workspace_only');
 
     const noPolicyEffect = resolve(

@@ -21,9 +21,9 @@ import type {
   RuntimeSnapshotCodec,
 } from '@kite/runtime-host/storage';
 
-export const SQLITE_RUNTIME_STATE_SCHEMA_VERSION = 26;
+export const SQLITE_RUNTIME_STATE_SCHEMA_VERSION = 27;
 export const SQLITE_RUNTIME_STORE_SCHEMA_VERSION = 5;
-export const SQLITE_RUNTIME_FORMAT_EPOCH = 'kite-runtime-modularization-v1-2026-08-19' as const;
+export const SQLITE_RUNTIME_FORMAT_EPOCH = 'kite-runtime-saq-v1-2026-08-25' as const;
 export type SqliteRuntimeJournalMode = 'wal' | 'delete';
 
 /** Platform-safe journal mode for the current Store implementation. */
@@ -407,7 +407,7 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
         )
         .all(sessionId);
       for (const event of events) {
-        if (event.schema_version !== 26) {
+        if (event.schema_version !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION) {
           throw new SqliteRuntimeFormatMismatchError(
             event.schema_version,
             values.get('runtime_format_epoch')!,
@@ -437,7 +437,10 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
           )
           .get(currentSessionId);
         if (!row) {
-          throw new SqliteRuntimeFormatMismatchError(26, values.get('runtime_format_epoch')!);
+          throw new SqliteRuntimeFormatMismatchError(
+            SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+            values.get('runtime_format_epoch')!,
+          );
         }
         if (!row.state_checksum || checksum(row.state_json) !== row.state_checksum) {
           throw new SqliteRuntimeStorageOpenError('Store snapshot checksum is invalid.');
@@ -466,17 +469,17 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
             )
             .get(currentSessionId, row.event_position)?.sequence ?? 0;
         if (
-          row.schema_version !== 26 ||
-          row.format_epoch !== 'kite-runtime-modularization-v1-2026-08-19' ||
-          metadata.schemaVersion !== 26 ||
+          row.schema_version !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
+          row.format_epoch !== SQLITE_RUNTIME_FORMAT_EPOCH ||
+          metadata.schemaVersion !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
           metadata.stateRevision !== row.revision ||
           row.revision !== eventRevision ||
           !identity ||
           !session ||
           session.project_id !== identity.projectId ||
           session.workspace_digest !== identity.canonicalWorkspaceDigest ||
-          session.state_schema !== 26 ||
-          session.format_epoch !== 'kite-runtime-modularization-v1-2026-08-19' ||
+          session.state_schema !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
+          session.format_epoch !== SQLITE_RUNTIME_FORMAT_EPOCH ||
           session.revision !== row.revision
         ) {
           throw new SqliteRuntimeFormatMismatchError(

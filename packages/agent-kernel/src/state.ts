@@ -1,5 +1,5 @@
 /**
- * State 25 persisted shape.
+ * State 27 persisted shape.
  *
  * The Kernel owns the top-level shape and its format identity. Durable State
  * records use local, provider-neutral DTOs; only opaque artifact/provider
@@ -58,13 +58,12 @@ export type {
   AgentVerificationStatus,
 } from './domains/verification/state';
 
-export type AuthorizationMode = 'default' | 'full_access';
 export type InteractionMode = 'accept_edits' | 'auto' | 'full';
 export type WorkspaceAccess = 'write';
 
 /** The only State format emitted by the RA production runtime. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 26 as const;
-export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-modularization-v1-2026-08-19' as const;
+export const RUNTIME_STATE_SCHEMA_VERSION = 27 as const;
+export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-saq-v1-2026-08-25' as const;
 export const APPLIED_EVENT_ID_TAIL_LIMIT = 4096 as const;
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -727,20 +726,93 @@ export interface AgentProviderAdmissionState {
   readonly waivers: Readonly<Record<string, AgentProviderWaiver>>;
 }
 
-export interface AgentAuthorizationState {
-  readonly mode: AuthorizationMode;
-  readonly modeSource?: 'user' | 'config' | 'test' | 'system';
-  readonly modeGrantedAt?: string;
-  readonly commandGrants: Readonly<Record<string, AgentToolGrant>>;
+export type AgentApprovalRoute = 'user' | 'auto';
+export type AgentApprovalStatus =
+  | 'queued_auto'
+  | 'auto_reviewing'
+  | 'authorized_queued'
+  | 'queued_user'
+  | 'awaiting_user'
+  | 'approving'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'rejected'
+  | 'expired';
+
+/** Stable invocation subject used by same_command matching. */
+export interface AgentApprovalCommandIdentity {
+  readonly sessionId: string;
+  readonly threadId: string;
+  readonly workspace: string;
+  readonly canonicalWorkspaceIdentity: string;
+  readonly cwd: string;
+  readonly executor: string;
+  readonly environment: string;
+  readonly scope: string;
+  readonly effects: string;
+  readonly parserRevision: string;
+  readonly executorRevision?: string;
+  readonly commandDigest: string;
 }
 
-export interface AgentToolGrant {
-  readonly workspace: string;
+export interface AgentPendingApproval {
+  readonly interactionId: string;
+  readonly toolCallId: string;
+  readonly parentToolCallId?: string;
+  readonly childSubagentId?: string;
+  readonly runtimeToolCallId?: string;
+  readonly route: AgentApprovalRoute;
+  /** Sealed result of canonical governance re-evaluation under Full mode. */
+  readonly fullModeBypassEligible: boolean;
+  /** Canonical policy/gate result used only when mode later changes to Full. */
+  readonly fullModePolicyBypassAllowed: boolean;
+  readonly bindingDigest: string;
+  readonly approval: AgentToolApprovalPayload;
+  readonly invocation: Readonly<Record<string, unknown>>;
+  readonly commandIdentity?: AgentApprovalCommandIdentity;
+  readonly commandKey?: string;
+  readonly approvalHash?: string;
+  readonly sequence: number;
+  readonly generation: number;
+  readonly createdAt: string;
+  readonly status: AgentApprovalStatus;
+  /** Compatibility projection used by existing subagent queue consumers. */
+  readonly state: AgentApprovalStatus;
+  readonly receiptId?: string;
+  readonly authorizationSource?: 'mode_full' | 'approve_once' | 'same_command';
+  readonly dispatchState?: 'before_dispatch' | 'dispatch_acked' | 'unknown';
+}
+
+export interface AgentSessionCommandGrant {
+  readonly grant: 'same_command';
+  readonly grantKey: string;
+  readonly sessionId: string;
   readonly threadId: string;
-  readonly command: string;
-  readonly source: 'user' | 'config' | 'test' | 'system';
-  readonly grantedAt: string;
+  readonly workspace: string;
+  readonly canonicalWorkspaceIdentity: string;
+  readonly cwd: string;
+  readonly executor: string;
+  readonly environment: string;
+  readonly scope: string;
+  readonly effects: string;
+  readonly parserRevision: string;
+  readonly executorRevision?: string;
+  readonly commandDigest: string;
+  readonly createdAt: string;
+  readonly generation: number;
   readonly expiresAt?: string;
+}
+
+export interface AgentApprovalReceipt {
+  readonly receiptId: string;
+  readonly interactionId: string;
+  readonly toolCallId: string;
+  readonly generation: number;
+  readonly grant: 'approve_once' | 'same_command';
+  readonly status: 'authorized_queued' | 'running' | 'terminal' | 'unknown';
+  readonly dispatchState?: 'before_dispatch' | 'dispatch_acked' | 'unknown';
 }
 
 export interface AgentSuspendedSubagentState {
@@ -809,7 +881,7 @@ export interface AgentToolCallState {
   readonly capabilityRevision?: string;
   readonly unknownFields?: AgentUnknownToolFieldsObservation;
   readonly approvalHash?: string;
-  readonly approvalGrant?: 'approve_once' | 'same_command' | 'full_access';
+  readonly approvalGrant?: 'approve_once' | 'same_command';
   readonly effectClass?:
     | 'read_only'
     | 'plan_only'
@@ -826,6 +898,7 @@ export interface AgentToolCallState {
     | 'awaiting_approval'
     | 'awaiting_auto_review'
     | 'approved'
+    | 'authorized_queued'
     | 'running'
     | 'succeeded'
     | 'failed'
@@ -1076,8 +1149,8 @@ export type AgentRecoveryState =
     };
 
 /**
- * The complete serialized State 25 record.  No State 26 identity or Store 5
- * fields are present here; those are deliberately reserved for RA.
+ * The complete serialized State 27 record. Maps are materialized in memory
+ * and encoded by state-codec as deterministic JSON object entries.
  */
 export interface AgentState {
   readonly activeTaskId: string | null;
@@ -1105,11 +1178,17 @@ export interface AgentState {
   readonly verification: AgentVerificationRuntimeState;
   readonly providerAdmission: AgentProviderAdmissionState;
   readonly suspendedSubagents: Readonly<Record<string, AgentSuspendedSubagentState>>;
-  readonly authorization: AgentAuthorizationState;
   readonly mode: InteractionMode;
+  readonly interactionModeRevision: number;
   readonly workspaceAccess: WorkspaceAccess;
   readonly autoReview: AgentAutoReviewState;
   readonly doomLoop: Readonly<Record<string, AgentDoomLoopRecord>>;
+  readonly pendingApprovals: ReadonlyMap<string, AgentPendingApproval>;
+  readonly activeApprovalId: string | null;
+  readonly nextQueueSequence: number;
+  readonly approvalGeneration: number;
+  readonly sessionCommandGrants: ReadonlyMap<string, AgentSessionCommandGrant>;
+  readonly approvalReceipts: ReadonlyMap<string, AgentApprovalReceipt>;
 }
 
 /** Exact persisted State identity-bearing view used by Store. */
@@ -1180,20 +1259,9 @@ interface CreateAgentStateInputBase {
   readonly phase?: 'planning' | 'building';
   readonly workspaceAccess?: WorkspaceAccess;
 }
-export type CreateAgentStateInput =
-  | (CreateAgentStateInputBase & {
-      readonly authorizationMode?: 'default';
-      readonly authorizationSource?: 'user' | 'config' | 'test' | 'system';
-      readonly modeGrantedAt?: never;
-    })
-  | (CreateAgentStateInputBase & {
-      readonly authorizationMode: 'full_access';
-      readonly authorizationSource: 'user' | 'config' | 'test' | 'system';
-      /** The Host/App materializes this fact without Kernel clock access. */
-      readonly modeGrantedAt: string;
-    });
+export type CreateAgentStateInput = CreateAgentStateInputBase;
 
-/** Construct a deterministic State 26 value without reading clock or random. */
+/** Construct a deterministic State 27 value without reading clock or random. */
 export function createInitialAgentState(input: CreateAgentStateInput): AgentState {
   if (
     input.threadId.length === 0 ||
@@ -1206,16 +1274,6 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
   if (!/^[a-f0-9]{64}$/u.test(input.recoveryIdentityKey)) {
     throw new Error(
       'State tool recovery recoveryIdentityKey must be a 64-character lowercase hex value.',
-    );
-  }
-  if (
-    input.authorizationMode === 'full_access' &&
-    (input.authorizationSource === undefined ||
-      input.modeGrantedAt === undefined ||
-      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(input.modeGrantedAt))
-  ) {
-    throw new Error(
-      'State full_access initialization requires Host authorizationSource and modeGrantedAt facts.',
     );
   }
   return {
@@ -1271,17 +1329,8 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
     verification: { records: {} },
     providerAdmission: { pending: [], waivers: {} },
     suspendedSubagents: {},
-    authorization: {
-      mode: input.authorizationMode ?? 'default',
-      ...(input.authorizationMode === 'full_access'
-        ? {
-            modeSource: input.authorizationSource,
-            modeGrantedAt: input.modeGrantedAt,
-          }
-        : {}),
-      commandGrants: {},
-    },
     mode: input.interactionMode ?? 'accept_edits',
+    interactionModeRevision: 0,
     workspaceAccess: input.workspaceAccess ?? 'write',
     autoReview: {
       pendingWarnings: {},
@@ -1290,5 +1339,11 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
       circuitBreakerTripped: false,
     },
     doomLoop: {},
+    pendingApprovals: new Map(),
+    activeApprovalId: null,
+    nextQueueSequence: 0,
+    approvalGeneration: 0,
+    sessionCommandGrants: new Map(),
+    approvalReceipts: new Map(),
   };
 }

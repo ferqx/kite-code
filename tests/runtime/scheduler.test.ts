@@ -500,7 +500,7 @@ describe('decideNextEffect', () => {
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['tool'] });
   });
 
-  test('batches structured approval-free reads but stops before raw Shell', () => {
+  test('batches structured reads and a read-only baseline Shell command', () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'parallel-reads',
@@ -528,7 +528,7 @@ describe('decideNextEffect', () => {
 
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: ['read-a', 'search'],
+      toolCallIds: ['read-a', 'search', 'status'],
     });
   });
 
@@ -736,8 +736,6 @@ describe('decideNextEffect', () => {
       userId: 'u',
       workspace: '/workspace',
       interactionMode: 'full',
-      authorizationMode: 'full_access',
-      authorizationSource: 'test',
     });
     queueCall(state, 'code-a', {
       name: 'task',
@@ -1035,6 +1033,8 @@ describe('decideNextEffect', () => {
       type: 'auto_review.requested',
       reviewId: 'review-a',
       toolCallId: 'task-a',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       toolName: 'shell_execute',
       reason: 'Review child command.',
       approval: {} as never,
@@ -1057,7 +1057,7 @@ describe('decideNextEffect', () => {
       },
     });
 
-    expect(state.tools.calls['task-a']?.status).toBe('approved');
+    expect(state.tools.calls['task-a']?.status).toBe('authorized_queued');
     expect(state.tools.calls['task-b']?.status).toBe('queued');
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-a'] });
   });
@@ -1155,6 +1155,8 @@ describe('decideNextEffect', () => {
       type: 'approval.requested',
       interactionId: 'approval-a',
       toolCallId: 'task-a',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       approval: {} as never,
     });
     state = reduceRuntimeState(state, {
@@ -1195,6 +1197,8 @@ describe('decideNextEffect', () => {
       interactionId: 'approval-a',
       toolCallId: 'task-a',
       grant: 'approve_once',
+      receiptId: 'receipt-task-a',
+      generation: 0,
     });
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-a'] });
 
@@ -1220,6 +1224,8 @@ describe('decideNextEffect', () => {
       type: 'approval.requested',
       interactionId: 'approval-b',
       toolCallId: 'task-b',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       approval: {} as never,
     });
     expect(decideNextEffect(state)).toEqual({
@@ -1259,6 +1265,8 @@ describe('decideNextEffect', () => {
       type: 'auto_review.requested',
       reviewId: 'review-1',
       toolCallId: 'shell-tool',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       toolName: 'shell_execute',
       reason: 'Needs review',
       approval: approval as never,
@@ -1317,6 +1325,8 @@ describe('decideNextEffect', () => {
       type: 'approval.requested',
       interactionId: 'approval-1',
       toolCallId: 'shell-1',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       approval: approval as never,
     });
     state = reduceRuntimeState(state, {
@@ -1324,6 +1334,8 @@ describe('decideNextEffect', () => {
       interactionId: 'approval-1',
       toolCallId: 'shell-1',
       grant: 'approve_once',
+      receiptId: 'receipt-shell-1',
+      generation: 0,
     });
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
@@ -1338,6 +1350,8 @@ describe('decideNextEffect', () => {
       type: 'approval.requested',
       interactionId: 'approval-2',
       toolCallId: 'shell-2',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       approval: approval as never,
     });
     state = reduceRuntimeState(
@@ -1347,6 +1361,7 @@ describe('decideNextEffect', () => {
           type: 'approval.rejected',
           interactionId: 'approval-2',
           toolCallId: 'shell-2',
+          generation: 0,
           reason: 'Rejected by user.',
         },
         state,
@@ -1362,6 +1377,8 @@ describe('decideNextEffect', () => {
       type: 'approval.requested',
       interactionId: 'approval-3',
       toolCallId: 'shell-3',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       approval: approval as never,
     });
     state = reduceRuntimeState(state, {
@@ -1369,6 +1386,8 @@ describe('decideNextEffect', () => {
       interactionId: 'approval-3',
       toolCallId: 'shell-3',
       grant: 'approve_once',
+      receiptId: 'receipt-shell-3',
+      generation: 0,
     });
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',

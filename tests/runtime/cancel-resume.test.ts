@@ -243,11 +243,16 @@ describe('bounded Runtime cancellation', () => {
             },
           },
           {
-            requestAction: async (effect) => ({
-              type: 'approve',
-              interactionId: effect.interactionId,
-              grant: 'approve_once',
-            }),
+            requestAction: async (effect, state) => {
+              const pending = state.pendingApprovals.get(effect.interactionId);
+              if (!pending) throw new Error('Expected a durable approval queue record.');
+              return {
+                type: 'approve',
+                interactionId: effect.interactionId,
+                generation: pending.generation,
+                grant: 'approve_once',
+              };
+            },
           },
         )) {
           events.push(event);

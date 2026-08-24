@@ -1,17 +1,9 @@
 import type { PendingToolRequest } from '@kite/builtin-runtime';
+import type { ShellApprovalGrant, ToolApprovalPayload } from '@kite/runtime-contract';
 import type {
-  AgentPhase,
-  ShellApprovalGrant,
-  ToolApprovalPayload,
-  WorkspaceAccess,
-} from '@kite/runtime-contract';
-import type { StateAuthorizationSource } from '@kite/runtime-host';
-import {
-  runtimeHostStateApplyApprovalGrant,
-  runtimeHostStateGrantSameCommand,
-  runtimeHostStateNormalizeAuthorization,
-  type StateAuthorizationState,
-  type StateToolGovernancePolicyFact,
+  RuntimeHostStateApprovalCommandIdentity,
+  StateToolGovernanceInvocationFact,
+  StateToolGovernancePolicyFact,
 } from '@kite/runtime-host/kernel-adapter';
 
 /** App-only presentation bridge; authorization identity remains Kernel-owned. */
@@ -29,9 +21,7 @@ export function buildToolApproval(input: {
   };
 }): ToolApprovalPayload {
   const grantOptions: ShellApprovalGrant[] =
-    input.request.name === 'shell_execute'
-      ? ['approve_once', 'same_command', 'full_access']
-      : ['approve_once'];
+    input.request.name === 'shell_execute' ? ['approve_once', 'same_command'] : ['approve_once'];
   return {
     scope: 'once',
     ...(input.request.id ? { callId: input.request.id } : {}),
@@ -68,36 +58,40 @@ export function replaceApprovalCommand(
   return { ...request, args: { ...request.args, command }, protectedCommand: command };
 }
 
-export function applyApprovalGrant(input: {
-  authorization: StateAuthorizationState | null | undefined;
-  grant: ShellApprovalGrant;
-  workspace: string;
-  threadId: string;
-  request: PendingToolRequest;
-  source?: StateAuthorizationSource;
-}): StateAuthorizationState {
-  const authorization = runtimeHostStateNormalizeAuthorization(input.authorization);
-  if (input.grant === 'same_command' && input.request.name === 'shell_execute') {
-    return runtimeHostStateGrantSameCommand({
-      authorization,
-      workspace: input.workspace,
-      threadId: input.threadId,
-      command: input.request.args.command,
-      source: input.source,
-    });
+/** Complete Session-scoped Shell subject carried by the durable queue event. */
+export function commandIdentityForToolApproval(input: {
+  readonly sessionId: string;
+  readonly threadId: string;
+  readonly workspace: string;
+  readonly canonicalWorkspaceIdentity: string;
+  readonly invocation: Readonly<StateToolGovernanceInvocationFact>;
+}): RuntimeHostStateApprovalCommandIdentity | undefined {
+  const invocation = input.invocation;
+  if (
+    !invocation.commandDigest ||
+    !invocation.cwd ||
+    !invocation.executor ||
+    !invocation.environmentDigest ||
+    !invocation.scopeDigest
+  ) {
+    return undefined;
   }
-  if (input.grant === 'full_access') {
-    return runtimeHostStateApplyApprovalGrant({
-      authorization,
-      grant: input.grant,
-      workspace: input.workspace,
-      threadId: input.threadId,
-      command: '',
-      source: input.source ?? 'user',
-      grantedAt: new Date().toISOString(),
-    });
-  }
-  return authorization;
+  return {
+    sessionId: input.sessionId,
+    threadId: input.threadId,
+    workspace: input.workspace,
+    canonicalWorkspaceIdentity: input.canonicalWorkspaceIdentity,
+    cwd: invocation.cwd,
+    executor: invocation.executor,
+    environment: invocation.environmentDigest,
+    scope: invocation.scopeDigest,
+    effects: invocation.effectiveEffectsDigest,
+    parserRevision: invocation.policyParserExecutorRevision ?? invocation.parserRevision,
+    ...(invocation.executorRevision === null
+      ? {}
+      : { executorRevision: invocation.executorRevision }),
+    commandDigest: invocation.commandDigest,
+  };
 }
 
 function approvalCommand(request: PendingToolRequest): string {
@@ -125,8 +119,4 @@ function approvalSummary(
     default:
       return 'Approve a shell command';
   }
-}
-
-export function defaultPhaseForWorkspaceAccess(_workspaceAccess: WorkspaceAccess): AgentPhase {
-  return 'building';
 }

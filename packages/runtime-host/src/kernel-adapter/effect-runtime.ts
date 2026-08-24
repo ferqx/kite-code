@@ -1,7 +1,7 @@
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from '@kite/agent-kernel';
 import type { RuntimeEffectLeaseExpectation } from '../storage';
 
-/** Mutable in-process lease for one State 25 effect attempt. */
+/** Mutable in-process lease for one State 27 effect attempt. */
 export interface StateRuntimeEffectLease {
   readonly effectId: string;
   expectedRevision: number;
@@ -66,7 +66,7 @@ export function isStateRuntimeEffectDeferred<Event>(
   return 'deferred' in result;
 }
 
-/** Host execution port used by the State 25 coordinator. */
+/** Host execution port used by the State 27 coordinator. */
 export type StateRuntimeEffectExecutor<
   State = RuntimeState,
   Event = RuntimeEvent,

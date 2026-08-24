@@ -24,5 +24,4 @@ export interface SessionData {
   readonly modelName: string;
   readonly thinkingLevel: string | null;
   readonly plan: AgentPlan | null;
-  readonly planAuthMode: string | null;
 }

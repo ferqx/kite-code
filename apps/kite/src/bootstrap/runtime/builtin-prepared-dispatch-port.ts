@@ -676,6 +676,8 @@ function grantAuthority(
     admissionDigest: identity.admissionDigest,
     authorizationKind: request.authorizationKind,
     grantUsed: request.grantUsed,
+    interactionMode: request.interactionMode,
+    sandboxScope: request.sandboxScope,
     policyEffects: request.policyEffects,
     effectiveEffects: request.effectiveEffects,
     receiptRequirement: request.receiptRequirement,
@@ -801,6 +803,8 @@ function isRequestEnvelopeShape(value: unknown): value is Readonly<AppToolPipeli
     'schema',
     'authorizationKind',
     'grantUsed',
+    'interactionMode',
+    'sandboxScope',
     'policyEffects',
     'effectiveEffects',
     'receiptRequirement',
@@ -821,8 +825,11 @@ function isRequestEnvelopeShape(value: unknown): value is Readonly<AppToolPipeli
       request.authorizationKind === 'approved_call') &&
     (request.grantUsed === 'none' ||
       request.grantUsed === 'approve_once' ||
-      request.grantUsed === 'same_command' ||
-      request.grantUsed === 'full_access') &&
+      request.grantUsed === 'same_command') &&
+    (request.interactionMode === 'auto' ||
+      request.interactionMode === 'accept_edits' ||
+      request.interactionMode === 'full') &&
+    isSandboxScope(request.sandboxScope) &&
     (request.grantUsed !== 'approve_once' || request.authorizationKind === 'approved_call') &&
     isPolicyEffects(request.policyEffects) &&
     typeof request.receiptRequirement === 'string' &&
@@ -851,6 +858,19 @@ function isPolicyEffects(value: unknown): boolean {
     'sensitiveExternalAccess',
   ]);
   return Object.entries(value).every(([key, item]) => allowed.has(key) && item === true);
+}
+
+function isSandboxScope(value: unknown): boolean {
+  if (value === null) return true;
+  if (!isPlainRecord(value) || Object.keys(value).length !== 4) return false;
+  return (
+    (value.kind === 'baseline' || value.kind === 'expanded' || value.kind === 'unrestricted') &&
+    (value.filesystem === 'read_only' ||
+      value.filesystem === 'workspace_write' ||
+      value.filesystem === 'full_access') &&
+    (value.network === 'disabled' || value.network === 'allow_all') &&
+    isNonEmptyString(value.digest)
+  );
 }
 
 function isCapabilityEffects(value: unknown): boolean {

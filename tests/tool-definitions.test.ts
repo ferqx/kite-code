@@ -649,13 +649,11 @@ describe('code agent tool definitions', () => {
     const planningTools = createAgentTools({
       workspace: '/tmp',
       phase: 'planning',
-      authorization: { mode: 'default', commandGrants: {} },
       workspaceAccess: 'write',
     });
     const buildingTools = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'full_access', commandGrants: {} },
       workspaceAccess: 'write',
     });
 
@@ -738,36 +736,17 @@ describe('code agent tool definitions', () => {
     expect(String(task.description)).toContain('Planning permits only explore/plan');
   });
 
-  test('invalidates tool cache when same-sized command grants change', () => {
-    const grantA = {
-      'grant-a': {
-        workspace: '/tmp',
-        threadId: 'thread-1',
-        command: 'bun test a',
-        source: 'test' as const,
-        grantedAt: '2026-01-01T00:00:00.000Z',
-      },
-    };
-    const grantB = {
-      'grant-b': {
-        workspace: '/tmp',
-        threadId: 'thread-1',
-        command: 'bun test b',
-        source: 'test' as const,
-        grantedAt: '2026-01-01T00:00:00.000Z',
-      },
-    };
-
+  test('invalidates tool cache when the session identity changes', () => {
     const toolsA = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: grantA },
+      threadId: 'thread-1',
       workspaceAccess: 'write',
     });
     const toolsB = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: grantB },
+      threadId: 'thread-2',
       workspaceAccess: 'write',
     });
 
@@ -991,14 +970,12 @@ describe('tool contracts (ACI)', () => {
     const a = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
       workspaceAccess: 'write',
       interactionMode: 'auto',
     });
     const b = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
       workspaceAccess: 'write',
       interactionMode: 'auto',
     });
@@ -1090,56 +1067,43 @@ describe('tool contracts (ACI)', () => {
       workspace: '/tmp',
       phase: 'planning',
       subagentEventSink: () => {},
-      authorization: { mode: 'default', commandGrants: {} },
     });
     const building = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
       subagentEventSink: () => {},
-      authorization: { mode: 'default', commandGrants: {} },
     });
     expect(await declaration(planning)).toEqual(await declaration(building));
   });
 
-  test('different authorization mode produces different cache key (cache miss)', () => {
+  test('different interaction mode produces different cache key (cache miss)', () => {
     clearToolCache();
-    const defaultAuth = createAgentTools({
+    const acceptEdits = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
+      interactionMode: 'accept_edits',
     });
-    const fullAccess = createAgentTools({
+    const full = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'full_access', commandGrants: {} },
+      interactionMode: 'full',
     });
-    expect(defaultAuth).not.toBe(fullAccess);
+    expect(acceptEdits).not.toBe(full);
   });
 
-  test('different commandGrants produces different cache key (cache miss)', () => {
+  test('different thread identity produces different cache key (cache miss)', () => {
     clearToolCache();
-    const noGrants = createAgentTools({
+    const threadA = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
+      threadId: 'thread-a',
     });
-    const withGrants = createAgentTools({
+    const threadB = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: {
-        mode: 'default',
-        commandGrants: {
-          'thread-x::/tmp::bun test': {
-            workspace: '/tmp',
-            threadId: 'thread-x',
-            command: 'bun test',
-            source: 'test' as const,
-            grantedAt: '2026-01-01T00:00:00.000Z',
-          },
-        },
-      },
+      threadId: 'thread-b',
     });
-    expect(noGrants).not.toBe(withGrants);
+    expect(threadA).not.toBe(threadB);
   });
 
   test('different interactionMode produces different cache key (cache miss)', () => {
@@ -1147,13 +1111,11 @@ describe('tool contracts (ACI)', () => {
     const auto = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
       interactionMode: 'auto',
     });
     const ask = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
       interactionMode: 'accept_edits',
     });
     expect(auto).not.toBe(ask);

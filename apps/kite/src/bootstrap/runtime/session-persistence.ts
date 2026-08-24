@@ -42,7 +42,6 @@ export interface SessionData {
   modelName: string;
   thinkingLevel: string | null;
   plan: AgentPlan | null;
-  planAuthMode: string | null;
 }
 
 export function formatLocalDateTime(timestamp: number): string {
@@ -142,7 +141,6 @@ export async function loadSession(
       modelName: modelRoute?.name ?? '',
       thinkingLevel: null,
       plan,
-      planAuthMode: state.authorization.mode,
     };
   } finally {
     store.close();

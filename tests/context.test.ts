@@ -200,7 +200,8 @@ describe('model context protocol', () => {
 
     expect(messages[2]!.type).toBe('human');
     expect(String(messages[2]!.content)).toContain('runtime.kernel');
-    expect(String(messages[2]!.content)).toContain('authorization_mode');
+    expect(String(messages[2]!.content)).toContain('interaction_mode: accept_edits');
+    expect(String(messages[2]!.content)).not.toContain('authorization_mode');
   });
 
   // 验证 plan 尾部 HumanMessage 仍然注入，但不再有 workspaceAccess 提醒 / Verify plan HumanMessage still injected without workspaceAccess reminder

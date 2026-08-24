@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 `apps/kite/src/tui/i18n/`、用户级 `language` 配置、`/language`、会影响启动门禁的 TUI 文案、Static 输出重建或已接入本地化的 TUI 表面时必读。
 验证：`bun run typecheck`、`bun test tests/config.test.ts tests/tui-i18n.test.ts tests/tui-slash-command.test.ts tests/tui-reducer.test.ts tests/run-status.test.ts tests/tui-layout.test.tsx`、`bun run check:docs-impact`、`bun run check:docs`。
-相关：[TUI 中英文国际化实施方案](../space/plans/2026-08-15-tui-i18n-zh-en.md)、[TUI Overlay 设计系统](tui-overlay-design-system.md)、[Workspace 信任门禁](workspace-trust.md)。
+相关：[TUI 中英文国际化实施方案](../space/plans/2026-08-15-tui-i18n-zh-en.md)、[TUI Overlay 设计系统](tui-overlay-design-system.md)、[Workspace 信任门禁](workspace-trust.md)、ADR-0137。
 
 ## 配置与解析
 
@@ -24,3 +24,16 @@
 语言变化是展示 identity 的变化。`useStaticContent` 必须把已解析语言纳入 `presentationKey`，使 Ink 的 `<Static>` 与动态输出按同步输出边界重新构建；不得追加旧语言和新语言两份历史内容。
 
 当前已接入的表面包括 workspace 信任、首次 Provider/API key/配置错误界面、帮助与 slash command 描述、通用偏好选择器、权限/推理深度/主题选择、回退检查点（含确认、文件影响和日期）、会话和模型选择器、审批、问答、计划审核、问答工具卡片的标题/取消状态、运行状态栏和语言选择器。其余 TUI 表面迁移前可以保留既有基准文字，但不得声称已完成全界面覆盖；新增自有文案应优先进入 catalog，并按实施计划补齐双语言测试。
+
+## SAQ-10 审批与模式文案
+
+审批队列的本地化只改变标题、状态和快捷键说明，不改变 canonical event 或 action payload。`queued_user`、
+`awaiting_user`、`approving`、`authorized_queued`、`queued_auto`、`auto_reviewing` 与终态必须有稳定的
+中英文映射；命令、路径、binding digest、generation、receipt 和 parent/child identity 保持原样或按安全
+脱敏规则展示。仅当前可见 focused approval 显示人工 Footer：Enter 提交 exact interactionId/generation，
+Esc 为 focused reject，Ctrl+C 为 whole-turn cancel；后台 Auto 状态不能夺取焦点。
+
+权限选择器中 Full 只表示 `interactionMode=full`，与 Plan lifecycle 和受限 sandbox availability 正交；
+不要翻译或重新引入 `full_access` grant。`/permissions` 的 session grant 清除必须以 canonical
+`session_grants_cleared` 事件投影，session/revision/generation 不匹配时不显示已清除。新增文案须同步英文
+catalog、中文 catalog、TUI reducer/replay fixture，避免 live 与 replay 出现不同焦点或状态。

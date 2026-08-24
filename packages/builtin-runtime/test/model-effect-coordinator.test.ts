@@ -171,7 +171,6 @@ function contextStateWithHistory(
     },
     interactions: { kind: interactionKind },
     tools: { calls: {} },
-    authorization: { mode: 'default' },
     mode: 'accept_edits',
   };
 }
@@ -190,18 +189,18 @@ function pendingCompaction(state: BuiltinRuntimeStateView) {
 describe('BuiltinModelEffectCoordinator', () => {
   test.each([
     [
-      'approve',
-      '{"decision":"approve","grant":"approve_once","reason":"safe"}',
+      'approve_once',
+      '{"decision":"approve_once","reason":"safe"}',
       { ok: true, suggestion: { approved: true, reason: 'safe' } },
     ],
     [
       'reject',
-      '{"decision":"reject","grant":"approve_once","reason":"unsafe"}',
+      '{"decision":"reject","reason":"unsafe"}',
       { ok: true, suggestion: { approved: false, reason: 'unsafe' } },
     ],
     [
       'ask_user',
-      '{"decision":"ask_user","grant":"approve_once","reason":"intent required"}',
+      '{"decision":"ask_user","reason":"intent required"}',
       {
         ok: true,
         suggestion: {
@@ -212,16 +211,9 @@ describe('BuiltinModelEffectCoordinator', () => {
       },
     ],
     [
-      'legacy rejection',
-      '{"approved":false,"grant":"approve_once","reason":"legacy risk"}',
-      {
-        ok: true,
-        suggestion: {
-          approved: false,
-          requiresUserApproval: true,
-          reason: 'legacy risk',
-        },
-      },
+      'same_command auto signature',
+      '{"decision":"approve_once","grant":"same_command","reason":"repeatable"}',
+      { ok: false, failureType: 'invalid_response', reason: 'auto review returned unknown fields' },
     ],
   ] as const)('parses the %s auto-review disposition', async (_label, response, expected) => {
     const fixture = createGatewayFixture({ autoReviewResponse: response });
@@ -247,14 +239,34 @@ describe('BuiltinModelEffectCoordinator', () => {
 
   test.each([
     [
-      'unknown fields',
-      '{"decision":"approve","grant":"approve_once","reason":"safe","extra":true}',
+      'legacy approve decision',
+      '{"decision":"approve"}',
+      'auto review returned an unsupported decision',
+    ],
+    [
+      'full_access decision',
+      '{"decision":"full_access"}',
+      'auto review returned an unsupported decision',
+    ],
+    [
+      'full_access grant field',
+      '{"decision":"approve_once","grant":"full_access"}',
       'auto review returned unknown fields',
     ],
     [
-      'contradictory fields',
-      '{"decision":"reject","approved":true,"grant":"approve_once","reason":"conflict"}',
-      'auto review returned contradictory decision fields',
+      'same_command decision',
+      '{"decision":"same_command"}',
+      'auto review returned an unsupported decision',
+    ],
+    [
+      'unknown fields',
+      '{"decision":"approve_once","reason":"safe","extra":true}',
+      'auto review returned unknown fields',
+    ],
+    [
+      'legacy fields',
+      '{"approved":false,"grant":"approve_once","reason":"legacy risk"}',
+      'auto review returned unknown fields',
     ],
   ] as const)('fails closed for auto-review %s', async (_label, response, reason) => {
     const fixture = createGatewayFixture({ autoReviewResponse: response });

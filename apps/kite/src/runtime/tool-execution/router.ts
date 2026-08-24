@@ -36,6 +36,7 @@ import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateEffectiveInteractionMode as getEffectiveInteractionMode,
   runtimeHostStateToolRecoveryJournalInvalid as isToolRecoveryJournalInvalid,
+  runtimeHostStateCanAuthorizeToolInFullMode,
   runtimeHostStateClassifyToolOutcome,
   runtimeHostStateCreateApprovalBindingDigest,
   runtimeHostStateToolFailureInstanceId as toolFailureInstanceId,
@@ -63,7 +64,10 @@ import {
   isAppOrdinaryToolPipelineOperationId,
 } from '#app/bootstrap/runtime/tool-pipeline-ordinary-attempt';
 import type { AppTaskToolPipelineAttemptRuntime } from '#app/bootstrap/runtime/tool-pipeline-task-attempt';
-import { buildToolApproval } from '#app/bootstrap/runtime/tool-policy';
+import {
+  buildToolApproval,
+  commandIdentityForToolApproval,
+} from '#app/bootstrap/runtime/tool-policy';
 import {
   createSkillMechanismPort,
   createWebMechanismPort,
@@ -95,7 +99,6 @@ import {
   isConcurrentExploreSubagentBatch,
   isCurrentExactChildToolReservation,
   type PrivateSubagentTask,
-  serializeConcurrentSubagentApprovalEvents,
 } from './subagent-executor';
 import {
   providerActionRequiredEvent,
@@ -140,6 +143,21 @@ export async function executeAppRuntimeTools(params: {
   subagentAutoReviewBatch?: boolean;
   /** Child-only live mode specialization; ordinary parent calls never set it. */
   interactionModeOverride?: import('@kite/runtime-contract').InteractionMode;
+  /**
+   * A resumed child may use the exact already-acknowledged parent approval.
+   * This is an in-memory execution hint bound to the parent receipt; it never
+   * emits a synthetic child approval request/grant.
+   */
+  parentApprovalForToolCallId?: Readonly<
+    Record<
+      string,
+      {
+        parentToolCallId: string;
+        grant: 'approve_once' | 'same_command';
+        approvalBindingDigest?: string;
+      }
+    >
+  >;
   planArtifactStore?: PlanArtifactStore;
   capabilityArtifactStore?: CapabilityArtifactWriter;
   workspaceFilesystemRuntime?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
@@ -195,6 +213,10 @@ export async function executeAppRuntimeTools(params: {
     >
   >;
 }): Promise<RuntimeEvent[]> {
+  const isAuthorizedStatus = (status: string | undefined) =>
+    status === 'approved' || status === 'authorized_queued';
+  const isDispatchableStatus = (status: string | undefined) =>
+    status === 'queued' || isAuthorizedStatus(status);
   const approvedParallelShellBatch =
     params.toolCallIds.length > 1 &&
     params.toolCallIds.every((toolCallId) => {
@@ -203,7 +225,11 @@ export async function executeAppRuntimeTools(params: {
         call && params.builtinToolCatalog
           ? modelBuiltinEntry(params.builtinToolCatalog, call.name)
           : undefined;
-      return entry?.executionMechanism === 'shell' && call?.status === 'approved';
+      return (
+        entry?.executionMechanism === 'shell' &&
+        (isAuthorizedStatus(call?.status) ||
+          (params.state.mode === 'full' && call?.status === 'queued'))
+      );
     });
   const parallelSubagentBatch =
     params.toolCallIds.length > 1 &&
@@ -257,23 +283,24 @@ export async function executeAppRuntimeTools(params: {
         }),
       ),
     );
-    const serialized = serializeConcurrentSubagentApprovalEvents(
-      batches.map((batch, index) => {
-        const deferred = deferredInteractions[index]!;
-        if (deferred.length === 0) return batch;
-        return [
-          ...deferred,
-          ...batch.filter(
-            (event) =>
-              event.type !== 'subagent.suspended' &&
-              event.type !== 'approval.requested' &&
-              event.type !== 'auto_review.requested',
-          ),
-        ];
-      }),
-    );
-    if (!params.emitRuntimeEvent) return serialized;
-    for (const event of serialized) params.emitRuntimeEvent(event);
+    const canonicalEvents = batches.flatMap((batch, index) => {
+      const deferred = deferredInteractions[index]!;
+      if (deferred.length === 0) return batch;
+      // Keep every canonical suspension/review event.  The Kernel queue owns
+      // focus and FIFO order; this adapter must not synthesize a deferred
+      // placeholder for a sibling.
+      return [
+        ...deferred,
+        ...batch.filter(
+          (event) =>
+            event.type !== 'subagent.suspended' &&
+            event.type !== 'approval.requested' &&
+            event.type !== 'auto_review.requested',
+        ),
+      ];
+    });
+    if (!params.emitRuntimeEvent) return canonicalEvents;
+    for (const event of canonicalEvents) params.emitRuntimeEvent(event);
     return [];
   }
   const events: RuntimeEvent[] = [];
@@ -292,7 +319,7 @@ export async function executeAppRuntimeTools(params: {
     const reason = 'Runtime tool recovery journal is invalid; tool dispatch is blocked.';
     for (const toolCallId of params.toolCallIds) {
       const call = currentState.tools.calls[toolCallId] ?? params.state.tools.calls[toolCallId];
-      if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+      if (!call || !isDispatchableStatus(call.status)) continue;
       events.push({
         type: 'tool.rejected',
         toolCallId,
@@ -309,7 +336,7 @@ export async function executeAppRuntimeTools(params: {
   };
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
-    if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+    if (!call || !isDispatchableStatus(call.status)) continue;
     let privateSubagentTask: PrivateSubagentTask | undefined;
     if (isBuiltinSubagentTaskToolName(call.name)) {
       const args = call.args;
@@ -510,7 +537,8 @@ export async function executeAppRuntimeTools(params: {
       } catch (error) {
         if (error instanceof DescendantResourceAdmissionError) throw error;
         const after = params.getRuntimeState?.()?.tools.calls[toolCallId];
-        if (after && !['queued', 'approved', 'running'].includes(after.status)) continue;
+        if (after && !['queued', 'approved', 'authorized_queued', 'running'].includes(after.status))
+          continue;
         events.push({
           type: 'tool.failed',
           toolCallId,
@@ -764,6 +792,7 @@ export async function executeAppRuntimeTools(params: {
           | undefined;
         let skillForkRuntimeIssued = false;
         let outcome: Awaited<ReturnType<typeof ordinaryRuntime.execute>>;
+        const parentApproval = params.parentApprovalForToolCallId?.[toolCallId];
         while (true) {
           ordinaryChildReservationId = undefined;
           ordinaryAttemptAcknowledged = false;
@@ -830,21 +859,18 @@ export async function executeAppRuntimeTools(params: {
               disclosures: Object.freeze([...Object.values(liveState.capabilities.disclosures)]),
             }),
             governance: Object.freeze({
+              sessionId: liveState.session.threadId,
               workspace: liveState.session.workspace,
+              canonicalWorkspaceIdentity:
+                liveState.session.canonicalWorkspaceDigest ?? liveState.session.workspace,
               threadId: liveState.session.threadId,
               context: Object.freeze({
                 phase: getAgentPhase(planning),
                 interactionMode:
                   params.interactionModeOverride ?? getEffectiveInteractionMode(liveState),
-                authorizationMode: liveState.authorization.mode,
-                ...(liveState.authorization.modeSource
-                  ? { authorizationSource: liveState.authorization.modeSource }
-                  : {}),
                 sandboxAvailable: params.sandboxAvailable === true,
                 circuitBreakerTripped: liveState.autoReview.circuitBreakerTripped,
                 observedAt: params.authorizationObservedAt ?? 0,
-                autoReview: params.authorizationFromAutoReview === true,
-                loopMode: params.authorizationFromLoopMode === true,
                 gates: Object.freeze({
                   recoveryAdmission:
                     !call.recoveryAdmission || call.recoveryAdmission === 'admitted'
@@ -862,11 +888,26 @@ export async function executeAppRuntimeTools(params: {
                 }),
               }),
               approval: Object.freeze({
-                status: call.status,
-                grant: call.approvalGrant ?? 'none',
-                approvedToolCallId: call.status === 'approved' ? toolCallId : null,
+                status: parentApproval
+                  ? ('approved' as const)
+                  : call.status === 'authorized_queued'
+                    ? ('approved' as const)
+                    : call.status,
+                grant: parentApproval?.grant ?? call.approvalGrant ?? 'none',
+                approvedToolCallId:
+                  parentApproval ||
+                  call.status === 'approved' ||
+                  call.status === 'authorized_queued'
+                    ? toolCallId
+                    : null,
                 approvalBindingDigest:
-                  call.status === 'approved' ? (call.approvalHash ?? null) : null,
+                  parentApproval?.approvalBindingDigest ??
+                  (call.status === 'approved' || call.status === 'authorized_queued'
+                    ? (call.approvalHash ?? null)
+                    : null),
+              }),
+              sameCommandGrant: Object.freeze({
+                sessionCommandGrants: liveState.sessionCommandGrants,
               }),
             }),
             admission: Object.freeze({
@@ -1080,7 +1121,7 @@ export async function executeAppRuntimeTools(params: {
                       ];
                       if (
                         readinessCall?.status === 'queued' ||
-                        readinessCall?.status === 'approved'
+                        isAuthorizedStatus(readinessCall?.status)
                       ) {
                         const persisted = await params.persistRuntimeEvent({
                           type: 'tool.started',
@@ -1336,6 +1377,19 @@ export async function executeAppRuntimeTools(params: {
               invocationFact: outcome.facts.invocation,
               policyFact: outcome.facts.policy,
             });
+            const commandIdentity = commandIdentityForToolApproval({
+              sessionId: liveState.session.threadId,
+              threadId: liveState.session.threadId,
+              workspace: liveState.session.workspace,
+              canonicalWorkspaceIdentity:
+                liveState.session.canonicalWorkspaceDigest ?? liveState.session.workspace,
+              invocation: outcome.facts.invocation,
+            });
+            const fullModePolicyBypassAllowed = runtimeHostStateCanAuthorizeToolInFullMode(
+              outcome.facts,
+            );
+            const fullModeBypassEligible =
+              outcome.facts.context.interactionMode === 'full' && fullModePolicyBypassAllowed;
             if (outcome.decision.kind === 'request_auto_review') {
               events.push({
                 type: 'auto_review.requested',
@@ -1344,6 +1398,9 @@ export async function executeAppRuntimeTools(params: {
                 toolName: request.name,
                 reason: outcome.decision.decision.reason,
                 approval,
+                fullModeBypassEligible,
+                fullModePolicyBypassAllowed,
+                ...(commandIdentity ? { commandIdentity } : {}),
               });
             } else {
               events.push({
@@ -1351,6 +1408,9 @@ export async function executeAppRuntimeTools(params: {
                 interactionId: genInteractionId(),
                 toolCallId,
                 approval,
+                fullModeBypassEligible,
+                fullModePolicyBypassAllowed,
+                ...(commandIdentity ? { commandIdentity } : {}),
               });
             }
             continue;
@@ -1389,7 +1449,8 @@ export async function executeAppRuntimeTools(params: {
         await settleOrdinaryChildBeforeDispatch(error);
         if (error instanceof DescendantResourceAdmissionError) throw error;
         const after = params.getRuntimeState?.().tools.calls[toolCallId];
-        if (after && !['queued', 'approved', 'running'].includes(after.status)) continue;
+        if (after && !['queued', 'approved', 'authorized_queued', 'running'].includes(after.status))
+          continue;
         const failure =
           dynamicMcpCutover && isMcpProviderError(error)
             ? classifyMcpProviderError(error)

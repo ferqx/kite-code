@@ -17,6 +17,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               running: state.running,
               interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
+              pendingApprovals: state.pendingApprovals,
+              activeApprovalId: state.activeApprovalId,
+              sessionCommandGrants: state.sessionCommandGrants,
+              sessionCommandGrantGeneration: state.sessionCommandGrantGeneration,
+              sessionCommandGrantRevision: state.sessionCommandGrantRevision,
               active: false,
             }
           : s,
@@ -52,6 +57,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         status: newStatus,
         turns: [],
         pendingToolCalls: {},
+        pendingApprovals: new Map(),
+        activeApprovalId: null,
+        sessionCommandGrants: new Map(),
+        sessionCommandGrantGeneration: 0,
+        sessionCommandGrantRevision: 0,
       };
       return {
         ...state,
@@ -87,6 +97,9 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         sessionKey: state.sessionKey + 1,
         status: newStatus,
         interactionMode: state.interactionMode,
+        sessionCommandGrants: new Map(),
+        sessionCommandGrantGeneration: 0,
+        sessionCommandGrantRevision: 0,
       };
     }
     case 'LOAD_SESSION_PENDING':
@@ -103,6 +116,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               running: state.running,
               interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
+              pendingApprovals: state.pendingApprovals,
+              activeApprovalId: state.activeApprovalId,
+              sessionCommandGrants: state.sessionCommandGrants,
+              sessionCommandGrantGeneration: state.sessionCommandGrantGeneration,
+              sessionCommandGrantRevision: state.sessionCommandGrantRevision,
               active: false,
             }
           : s,
@@ -134,6 +152,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         nextBlockId: nextId,
         toolStartTimes: undefined,
         pendingToolCalls: action.pendingToolCalls ?? target?.pendingToolCalls ?? {},
+        pendingApprovals: target?.pendingApprovals ?? new Map(),
+        activeApprovalId: target?.activeApprovalId ?? null,
+        sessionCommandGrants: target?.sessionCommandGrants ?? new Map(),
+        sessionCommandGrantGeneration: target?.sessionCommandGrantGeneration ?? 0,
+        sessionCommandGrantRevision: target?.sessionCommandGrantRevision ?? 0,
         interrupt: action.interrupt,
         showHelp: false,
         showSessions: false,
@@ -193,6 +216,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               running: state.running,
               interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
+              pendingApprovals: state.pendingApprovals,
+              activeApprovalId: state.activeApprovalId,
+              sessionCommandGrants: state.sessionCommandGrants,
+              sessionCommandGrantGeneration: state.sessionCommandGrantGeneration,
+              sessionCommandGrantRevision: state.sessionCommandGrantRevision,
               active: false,
             }
           : s.threadId === action.threadId
@@ -212,6 +240,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         interrupt: target?.interrupt ?? null,
         toolStartTimes: undefined,
         pendingToolCalls: target?.pendingToolCalls ?? {},
+        pendingApprovals: target?.pendingApprovals ?? new Map(),
+        activeApprovalId: target?.activeApprovalId ?? null,
+        sessionCommandGrants: target?.sessionCommandGrants ?? new Map(),
+        sessionCommandGrantGeneration: target?.sessionCommandGrantGeneration ?? 0,
+        sessionCommandGrantRevision: target?.sessionCommandGrantRevision ?? 0,
         exited: false,
         running: target?.running ?? false,
         currentRunReasonId: undefined,
@@ -252,6 +285,17 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
             turns: existing.turns,
             status: isActive ? state.status : existing.status,
             pendingToolCalls: isActive ? state.pendingToolCalls : existing.pendingToolCalls,
+            pendingApprovals: isActive ? state.pendingApprovals : existing.pendingApprovals,
+            activeApprovalId: isActive ? state.activeApprovalId : existing.activeApprovalId,
+            sessionCommandGrants: isActive
+              ? state.sessionCommandGrants
+              : existing.sessionCommandGrants,
+            sessionCommandGrantGeneration: isActive
+              ? state.sessionCommandGrantGeneration
+              : existing.sessionCommandGrantGeneration,
+            sessionCommandGrantRevision: isActive
+              ? state.sessionCommandGrantRevision
+              : existing.sessionCommandGrantRevision,
           };
         }
         return incoming;

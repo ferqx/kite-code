@@ -11,7 +11,7 @@ export interface CreateCapabilityBindingInput {
 
 /**
  * The one RM binding constructor. Its canonicalization intentionally
- * preserves the State 25 digest produced by the legacy catalog helper.
+ * preserves the State 27 digest produced by the legacy catalog helper.
  */
 export function createCapabilityBinding(input: CreateCapabilityBindingInput): CapabilityBinding {
   const schemaDigest = digestCapabilityBindingValue(input.inputSchema ?? {});

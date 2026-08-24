@@ -1244,11 +1244,36 @@ function isValidSubagentSuspensionEvent(
     if (
       !hasExactOptionalDataKeys(
         value,
-        ['type', 'interactionId', 'toolCallId', 'approval'],
-        ['createdAt'],
+        [
+          'type',
+          'interactionId',
+          'toolCallId',
+          'approval',
+          'approvalRoute',
+          'fullModeBypassEligible',
+          'fullModePolicyBypassAllowed',
+          'queueGeneration',
+          'queueSequence',
+          'parentToolCallId',
+          'childSubagentId',
+          'bindingDigest',
+        ],
+        ['runtimeToolCallId', 'commandIdentity', 'createdAt'],
       ) ||
       value.toolCallId !== parentToolCallId ||
       !isBoundedIdentityString(value.interactionId) ||
+      value.approvalRoute !== 'user' ||
+      typeof value.fullModeBypassEligible !== 'boolean' ||
+      typeof value.fullModePolicyBypassAllowed !== 'boolean' ||
+      !isNonNegativeSafeInteger(value.queueGeneration) ||
+      !isNonNegativeSafeInteger(value.queueSequence) ||
+      value.parentToolCallId !== parentToolCallId ||
+      !isBoundedIdentityString(value.childSubagentId) ||
+      !isBoundedIdentityString(value.bindingDigest) ||
+      (Object.hasOwn(value, 'runtimeToolCallId') &&
+        !isBoundedIdentityString(value.runtimeToolCallId)) ||
+      (Object.hasOwn(value, 'commandIdentity') &&
+        !isValidApprovalCommandIdentity(value.commandIdentity)) ||
       (Object.hasOwn(value, 'createdAt') && !isBoundedTextString(value.createdAt))
     ) {
       return false;
@@ -1262,14 +1287,41 @@ function isValidSubagentSuspensionEvent(
   if (
     !hasExactOptionalDataKeys(
       value,
-      ['type', 'reviewId', 'toolCallId', 'toolName', 'reason', 'approval'],
-      ['requestFingerprint', 'createdAt'],
+      [
+        'type',
+        'reviewId',
+        'toolCallId',
+        'toolName',
+        'reason',
+        'approval',
+        'approvalRoute',
+        'fullModeBypassEligible',
+        'fullModePolicyBypassAllowed',
+        'queueGeneration',
+        'queueSequence',
+        'parentToolCallId',
+        'childSubagentId',
+        'bindingDigest',
+      ],
+      ['runtimeToolCallId', 'commandIdentity', 'requestFingerprint', 'createdAt'],
     ) ||
     value.toolCallId !== parentToolCallId ||
     !isBoundedIdentityString(value.reviewId) ||
     !isBoundedIdentityString(value.toolName) ||
     value.toolName !== blockedTool.toolName ||
     !isBoundedTextString(value.reason) ||
+    value.approvalRoute !== 'auto' ||
+    typeof value.fullModeBypassEligible !== 'boolean' ||
+    typeof value.fullModePolicyBypassAllowed !== 'boolean' ||
+    !isNonNegativeSafeInteger(value.queueGeneration) ||
+    !isNonNegativeSafeInteger(value.queueSequence) ||
+    value.parentToolCallId !== parentToolCallId ||
+    !isBoundedIdentityString(value.childSubagentId) ||
+    !isBoundedIdentityString(value.bindingDigest) ||
+    (Object.hasOwn(value, 'runtimeToolCallId') &&
+      !isBoundedIdentityString(value.runtimeToolCallId)) ||
+    (Object.hasOwn(value, 'commandIdentity') &&
+      !isValidApprovalCommandIdentity(value.commandIdentity)) ||
     (Object.hasOwn(value, 'requestFingerprint') &&
       !isBoundedIdentityString(value.requestFingerprint)) ||
     (Object.hasOwn(value, 'createdAt') && !isBoundedTextString(value.createdAt))
@@ -1306,7 +1358,19 @@ function isValidSubagentApproval(
         'grantOptions',
         'recommendedGrant',
       ],
-      ['plan', 'subagentId', 'reviewFailure'],
+      [
+        'plan',
+        'subagentId',
+        'reviewFailure',
+        'sandboxScope',
+        'approvalRoute',
+        'queueSequence',
+        'queueGeneration',
+        'matchingPendingCount',
+        'parentToolCallId',
+        'childSubagentId',
+        'bindingDigest',
+      ],
     ) ||
     value.scope !== 'once' ||
     value.callId !== expectedCallId ||
@@ -1329,6 +1393,32 @@ function isValidSubagentApproval(
     return false;
   }
   return true;
+}
+
+function isValidApprovalCommandIdentity(value: unknown): boolean {
+  if (!isRecordObject(value)) return false;
+  const required = [
+    'sessionId',
+    'threadId',
+    'workspace',
+    'canonicalWorkspaceIdentity',
+    'cwd',
+    'executor',
+    'environment',
+    'scope',
+    'effects',
+    'parserRevision',
+    'commandDigest',
+  ];
+  if (
+    !hasExactOptionalDataKeys(value, required, ['executorRevision']) ||
+    !required.every((key) => isBoundedTextString(value[key], 4_096))
+  ) {
+    return false;
+  }
+  return (
+    !Object.hasOwn(value, 'executorRevision') || isBoundedTextString(value.executorRevision, 4_096)
+  );
 }
 
 function hasExactOptionalDataKeys(
@@ -1370,7 +1460,7 @@ function isBoundedStringArray(value: unknown, maxLength: number): value is reado
 }
 
 function isValidGrant(value: unknown): boolean {
-  return value === 'approve_once' || value === 'same_command' || value === 'full_access';
+  return value === 'approve_once' || value === 'same_command';
 }
 
 function isValidApprovalRisk(value: unknown): boolean {

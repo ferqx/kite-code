@@ -48,7 +48,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         model: { default: { provider: 'mock', name: 'mock-model' } },
-        interactionMode: 'auto',
+        // Thought rendering is independent from sandbox qualification. Use the
+        // canonical Full interaction mode so this PTY suite remains portable;
+        // restricted Shell sandbox admission is covered by the platform and
+        // sandbox-mode contract suites.
+        interactionMode: 'full',
         sandbox: { enabled: false },
       },
       files: {
@@ -306,15 +310,6 @@ describe('TUI PTY System — Thought Lifecycle', () => {
                 args: { command: 'grep "name" package.json' },
               },
             ],
-          },
-        },
-        {
-          message: {
-            content: JSON.stringify({
-              decision: 'approve',
-              grant: 'approve_once',
-              reason: 'The fixture command only reads its isolated workspace.',
-            }),
           },
         },
         {

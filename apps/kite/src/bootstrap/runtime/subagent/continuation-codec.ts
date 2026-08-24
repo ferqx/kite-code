@@ -18,6 +18,7 @@ import type {
 import { decodeAppApprovalBinding } from '../approval-binding';
 import type {
   RestoredSubAgentContinuation,
+  SubAgentApprovalFacts,
   SubAgentBlockedTool,
   SubAgentContinuation,
   SubAgentStepSnapshot,
@@ -33,7 +34,7 @@ export function serializeSubagentContinuation(
   if (blockedTool.approvalBinding && !approvalBinding) {
     throw new Error('Subagent continuation approval binding is malformed.');
   }
-  return encodeSubagentContinuationSnapshot({
+  const snapshot = {
     subagentId: continuation.id,
     role: continuation.role.role,
     name: continuation.name ?? 'Delegated task',
@@ -59,6 +60,9 @@ export function serializeSubagentContinuation(
     ),
     ...(continuation.allowedTools ? { allowedTools: [...continuation.allowedTools] } : {}),
     ...(continuation.mcpBindingIds ? { mcpBindingIds: [...continuation.mcpBindingIds] } : {}),
+    ...(continuation.approvalFacts
+      ? { approvalFacts: toJsonObject(continuation.approvalFacts, 'approvalFacts') }
+      : {}),
     blockedTool: {
       reasonCode: blockedTool.reasonCode,
       toolCallId: blockedTool.toolCallId,
@@ -72,7 +76,8 @@ export function serializeSubagentContinuation(
         ? { approvalBinding: toJsonObject(approvalBinding, 'blockedTool.approvalBinding') }
         : {}),
     },
-  });
+  } as unknown as SuspendedSubagentSnapshot;
+  return encodeSubagentContinuationSnapshot(snapshot);
 }
 
 export function deserializeSubagentContinuation(
@@ -85,6 +90,10 @@ export function deserializeSubagentContinuation(
     : undefined;
   if (snapshot.blockedTool.approvalBinding && !approvalBinding) {
     throw new Error('Subagent continuation approval binding is malformed.');
+  }
+  const approvalFacts = decodeApprovalFacts((snapshot as SnapshotWithApprovalFacts).approvalFacts);
+  if ((snapshot as SnapshotWithApprovalFacts).approvalFacts !== undefined && !approvalFacts) {
+    throw new Error('Subagent continuation approval facts are malformed.');
   }
   return {
     id: snapshot.subagentId,
@@ -111,6 +120,7 @@ export function deserializeSubagentContinuation(
     ),
     ...(snapshot.allowedTools ? { allowedTools: [...snapshot.allowedTools] } : {}),
     ...(snapshot.mcpBindingIds ? { mcpBindingIds: [...snapshot.mcpBindingIds] } : {}),
+    ...(approvalFacts ? { approvalFacts } : {}),
     blockedTool: {
       reasonCode: snapshot.blockedTool.reasonCode,
       toolCallId: snapshot.blockedTool.toolCallId,
@@ -126,6 +136,57 @@ export function deserializeSubagentContinuation(
 }
 
 export { subagentContinuationCursorId };
+
+type SnapshotWithApprovalFacts = SuspendedSubagentSnapshot & {
+  readonly approvalFacts?: JsonObject;
+};
+
+function decodeApprovalFacts(value: unknown): SubAgentApprovalFacts | undefined {
+  if (value === undefined) return undefined;
+  if (!isPlainRecord(value)) return undefined;
+  const keys = Object.keys(value).sort();
+  const required = [
+    'bindingDigest',
+    'childToolCallId',
+    'generation',
+    'parentToolCallId',
+    'route',
+    'sequence',
+  ];
+  const optional = ['runtimeToolCallId'];
+  const allowed = [...required, ...optional].sort();
+  if (keys.join(',') !== allowed.join(',') && keys.join(',') !== required.join(',')) {
+    return undefined;
+  }
+  const generation = value.generation;
+  const sequence = value.sequence;
+  if (
+    (value.route !== 'auto_review' && value.route !== 'user') ||
+    typeof value.bindingDigest !== 'string' ||
+    typeof value.parentToolCallId !== 'string' ||
+    typeof value.childToolCallId !== 'string' ||
+    typeof generation !== 'number' ||
+    !Number.isSafeInteger(generation) ||
+    generation < 0 ||
+    typeof sequence !== 'number' ||
+    !Number.isSafeInteger(sequence) ||
+    sequence < 0 ||
+    (value.runtimeToolCallId !== undefined && typeof value.runtimeToolCallId !== 'string')
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    route: value.route,
+    generation,
+    sequence,
+    bindingDigest: value.bindingDigest,
+    parentToolCallId: value.parentToolCallId,
+    childToolCallId: value.childToolCallId,
+    ...(value.runtimeToolCallId === undefined
+      ? {}
+      : { runtimeToolCallId: value.runtimeToolCallId }),
+  });
+}
 
 function serializeMessage(message: BaseMessage): PersistedSubagentMessage {
   const base = {
@@ -346,4 +407,10 @@ function isPlainObject(value: object): value is Record<string, unknown> {
 
 function isJsonObject(value: JsonValue): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }

@@ -105,7 +105,7 @@ async function invokeGovernedTool(input: {
     userId: 'test',
     workspace: input.workspace,
   });
-  state.authorization.mode = 'full_access';
+  state.mode = 'full';
   state.tools.calls['list-tools'] = {
     toolCallId: 'list-tools',
     modelMessageId: 'list-mcp-tools-test-model',

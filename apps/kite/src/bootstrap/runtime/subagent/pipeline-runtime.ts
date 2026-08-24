@@ -22,7 +22,7 @@ type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<
 /**
  * App composition for an acknowledged Subagent attempt. Builtin owns the
  * child lifecycle semantics; this adapter only binds the installed App
- * composition to the State 25 task-tool transport.
+ * composition to the State 27 task-tool transport.
  */
 export function createPipelineSubagentRuntime(
   compositionFactory: () => GovernedSubagentComposition,

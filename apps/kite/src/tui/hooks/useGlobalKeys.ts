@@ -46,8 +46,11 @@ export function useGlobalKeys(
       }
       // Ctrl+C 始终生效
       if (key.ctrl && input === 'c') {
-        if (overlayActiveRef.current) onCancelInterrupt?.();
-        else onAbort?.();
+        // Ctrl+C is the durable whole-turn cancellation primitive, including
+        // while an approval overlay is focused.  It must never be translated
+        // into the overlay's focused-reject action; that would leave queued,
+        // authorized, or running siblings alive.
+        onAbort?.();
         dispatch({ type: 'CTRL_C' });
         if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
         ctrlCTimerRef.current = setTimeout(() => {

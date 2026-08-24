@@ -1457,7 +1457,7 @@ test.each([
 
 test('runStateRuntimeLoop closes a suspended subagent when its approval is cancelled', async () => {
   const store = openStateStoreForTest(':memory:');
-  const initial = createRuntimeHostStateInitialState({
+  let initial = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'cancel-subagent-approval',
     userId: 'u',
@@ -1471,26 +1471,32 @@ test('runStateRuntimeLoop closes a suspended subagent when its approval is cance
     status: 'awaiting_approval',
     createdAtTurnId: initial.turn.turnId,
   };
-  initial.interactions = {
-    kind: 'awaiting_tool_approval',
+  const approval = {
+    scope: 'once' as const,
+    cwd: '/',
+    threadId: initial.session.threadId,
+    tool: 'shell_execute',
+    command: 'pwd',
+    risk: 'execute_code' as const,
+    approvalHash: 'a'.repeat(64),
+    summary: 'Run pwd',
+    reason: 'Nested command needs approval.',
+    expectedEffects: [] as string[],
+    grantOptions: ['approve_once'] as const,
+    recommendedGrant: 'approve_once' as const,
+    subagentId: 'subagent-1',
+  };
+  initial = reduceRuntimeState(initial, {
+    type: 'approval.requested',
     interactionId: 'approval-1',
     toolCallId: 'task-1',
-    approval: {
-      scope: 'once',
-      cwd: '/',
-      threadId: initial.session.threadId,
-      tool: 'shell_execute',
-      command: 'pwd',
-      risk: 'execute_code',
-      approvalHash: 'approval-hash',
-      summary: 'Run pwd',
-      reason: 'Nested command needs approval.',
-      expectedEffects: [],
-      grantOptions: ['approve_once'],
-      recommendedGrant: 'approve_once',
-      subagentId: 'subagent-1',
-    },
-  };
+    fullModeBypassEligible: false,
+    fullModePolicyBypassAllowed: false,
+    approvalRoute: 'user',
+    queueGeneration: 0,
+    queueSequence: 0,
+    approval,
+  });
   initial.suspendedSubagents['task-1'] = {
     storage: 'private_artifact_v1',
     subagentId: 'subagent-1',
@@ -1782,6 +1788,8 @@ test('runStateRuntimeLoop starts each approved shell while later sibling approva
             type: 'approval.requested',
             interactionId: `approval-${toolCallId}`,
             toolCallId,
+            fullModeBypassEligible: false,
+            fullModePolicyBypassAllowed: false,
             approval: {
               scope: 'once',
               cwd: '/',
@@ -1819,7 +1827,7 @@ test('runStateRuntimeLoop starts each approved shell while later sibling approva
         ];
       },
       {
-        requestAction: async (effect) => {
+        requestAction: async (effect, state) => {
           if (effect.type !== 'request_tool_approval') {
             throw new Error(`Unexpected interaction: ${effect.type}`);
           }
@@ -1827,9 +1835,12 @@ test('runStateRuntimeLoop starts each approved shell while later sibling approva
           if (effect.toolCallId === 'shell-2') {
             expect(kernel.getState().tools.calls['shell-1']?.status).toBe('running');
           }
+          const pending = state.pendingApprovals.get(effect.interactionId);
+          if (!pending) throw new Error('Expected a durable approval queue record.');
           return {
             type: 'approve',
             interactionId: effect.interactionId,
+            generation: pending.generation,
             grant: 'approve_once',
           };
         },
@@ -1909,6 +1920,8 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
           type: 'approval.requested',
           interactionId: `approval-${toolCallId}`,
           toolCallId,
+          fullModeBypassEligible: false,
+          fullModePolicyBypassAllowed: false,
           approval: {
             scope: 'once',
             cwd: '/',
@@ -1948,16 +1961,20 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
       }
     },
     {
-      requestAction: async (effect) => {
+      requestAction: async (effect, state) => {
         if (effect.type !== 'request_tool_approval') {
           throw new Error(`Unexpected interaction: ${effect.type}`);
         }
+        const pending = state.pendingApprovals.get(effect.interactionId);
         return effect.toolCallId === 'shell-1'
-          ? {
-              type: 'approve',
-              interactionId: effect.interactionId,
-              grant: 'approve_once',
-            }
+          ? pending
+            ? {
+                type: 'approve',
+                interactionId: effect.interactionId,
+                generation: pending.generation,
+                grant: 'approve_once',
+              }
+            : { type: 'cancel', interactionId: effect.interactionId, reason: 'Missing approval.' }
           : {
               type: 'cancel',
               interactionId: effect.interactionId,
@@ -2144,7 +2161,7 @@ test('production executor overlaps full-authorized shell siblings', async () => 
     userId: 'u',
     workspace: '/workspace',
   });
-  state.authorization.mode = 'full_access';
+  state.mode = 'full';
   for (const [toolCallId, command] of [
     ['read-a', 'pwd'],
     ['read-b', 'ls -la'],
@@ -2246,7 +2263,7 @@ test('production executor all-settled waits for a full-authorized sibling when a
     userId: 'u',
     workspace: '/workspace',
   });
-  state.authorization.mode = 'full_access';
+  state.mode = 'full';
   for (const [toolCallId, command] of [
     ['throwing', 'pwd'],
     ['slow', 'ls'],

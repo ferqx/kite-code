@@ -10,17 +10,12 @@ export const AGENT_KERNEL_BOUNDARY_: AgentKernelBoundary = Object.freeze({
   revision: 'agent-kernel-current',
 });
 
-export type {
-  ApprovalGrant,
-  AuthorizationElevationFacts,
-  AuthorizationSource,
-} from './authorization';
 export {
-  applyApprovalGrant,
-  assertAuthorizationElevation,
-  authorizationCommandGrantKey,
-} from './authorization';
-
+  approvalCommandGrantKey,
+  chooseApprovalFocus,
+  selectPendingApprovals,
+  selectSessionCommandGrants,
+} from './approval-queue';
 export type {
   AutoReviewAcceptedDecision,
   AutoReviewDecision,
@@ -347,7 +342,10 @@ export {
   selectPendingEffects as selectScheduledEffects,
 } from './scheduler';
 export type {
-  AgentAuthorizationState,
+  AgentApprovalCommandIdentity,
+  AgentApprovalReceipt,
+  AgentApprovalRoute,
+  AgentApprovalStatus,
   AgentAutoReviewRejectionEntry,
   AgentAutoReviewState,
   AgentCapabilityArtifactRef,
@@ -371,6 +369,7 @@ export type {
   AgentNetworkAdmissionReceipt,
   AgentNetworkDecisionReceipt,
   AgentNetworkDenialReceipt,
+  AgentPendingApproval,
   AgentPrivateArtifactRef,
   AgentRecoveryState,
   AgentResourceBudgetActiveState,
@@ -383,6 +382,7 @@ export type {
   AgentSandboxPreparationArtifactRef,
   AgentSandboxPreparationIntentState,
   AgentSandboxPreparationReadyState,
+  AgentSessionCommandGrant,
   AgentSessionState,
   AgentSkillRuntimeState,
   AgentState,
@@ -393,7 +393,6 @@ export type {
   AgentTerminalOutcomeState,
   AgentTerminalReasonCode,
   AgentToolCallState,
-  AgentToolGrant,
   AgentToolResultMeta,
   AgentToolResultState,
   AgentToolsState,
@@ -403,7 +402,6 @@ export type {
   AgentTranscriptToolCall,
   AgentTurnState,
   AgentUnknownToolFieldsObservation,
-  AuthorizationMode,
   CreateAgentStateInput,
   InteractionMode,
   JsonObject,
@@ -449,8 +447,6 @@ export type {
   ToolGovernanceAdmissionFacts,
   ToolGovernanceApprovalFact,
   ToolGovernanceAuthorizationDecision,
-  ToolGovernanceAuthorizationMode,
-  ToolGovernanceAuthorizationSource,
   ToolGovernanceContextFacts,
   ToolGovernanceDecision,
   ToolGovernanceDynamicMcpFact,
@@ -474,6 +470,7 @@ export type {
 export {
   admitToolGovernance,
   authorizeToolGovernance,
+  canAuthorizeToolGovernanceInFullMode,
   createToolApprovalBindingDigest,
   createToolGovernanceCommandDigest,
   decideToolGovernance,

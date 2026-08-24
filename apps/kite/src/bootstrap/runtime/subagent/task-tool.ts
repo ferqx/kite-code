@@ -90,7 +90,14 @@ function createCoreSubagentResumeRegistration(input: {
         grant.blockedToolCallId !== input.continuation.blockedTool.toolCallId ||
         grant.blockedRuntimeToolCallId !== input.continuation.blockedTool.runtimeToolCallId ||
         grant.blockedToolCallId !== input.toolResult.toolCallId ||
-        grant.resumeAttempt !== input.input.subagentGrantContext?.attempt
+        grant.resumeAttempt !== input.input.subagentGrantContext?.attempt ||
+        (input.continuation.approvalFacts !== undefined &&
+          (input.continuation.approvalFacts.parentToolCallId !==
+            input.input.modelInvocationParentToolCallId ||
+            input.continuation.approvalFacts.childToolCallId !==
+              input.continuation.blockedTool.toolCallId ||
+            input.continuation.approvalFacts.runtimeToolCallId !==
+              input.continuation.blockedTool.runtimeToolCallId))
       ) {
         throw new Error('Child Runtime resume grant does not match its durable continuation.');
       }
@@ -118,7 +125,6 @@ export interface TaskToolDeps {
     binding: import('@kite/runtime-contract').CapabilityBinding;
     descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
   }>;
-  authorization?: import('@kite/runtime-host/kernel-adapter').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   /** Current parent Runtime interaction mode, inherited by the child execution. */
@@ -311,7 +317,6 @@ export async function executePipelineIssuedSubagentStart(
         skills: deps.skills,
         skillOptions: deps.skillOptions,
         mcpBindings: deps.mcpBindings,
-        authorization: deps.authorization,
         workspaceAccess: deps.workspaceAccess,
         phase: deps.phase,
         interactionMode: deps.interactionMode,
@@ -483,6 +488,14 @@ export async function executePipelineIssuedSubagentResume(
   ) {
     return failed('Governed Subagent resume context is unavailable.');
   }
+  if (
+    continuation.approvalFacts &&
+    (continuation.approvalFacts.parentToolCallId !== deps.modelInvocationParentToolCallId ||
+      continuation.approvalFacts.childToolCallId !== continuation.blockedTool.toolCallId ||
+      continuation.approvalFacts.runtimeToolCallId !== continuation.blockedTool.runtimeToolCallId)
+  ) {
+    return failed('Governed Subagent approval continuation identity is stale.');
+  }
   const { grants: authority, driver, provider } = composition;
   const allowedTools = [...(continuation.role.allowedTools ?? [])].sort();
   const bindingIds = (deps.mcpBindings ?? []).map(({ binding }) => binding.bindingId).sort();
@@ -576,7 +589,6 @@ export async function executePipelineIssuedSubagentResume(
         skills: deps.skills,
         skillOptions: deps.skillOptions,
         mcpBindings: deps.mcpBindings,
-        authorization: deps.authorization,
         workspaceAccess: deps.workspaceAccess,
         phase: deps.phase,
         interactionMode: deps.interactionMode,

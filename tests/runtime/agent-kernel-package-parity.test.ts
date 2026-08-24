@@ -90,7 +90,7 @@ import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const OCCURRED_AT = '2026-08-20T00:00:00.000Z';
 
-const STATE_EPOCH = 'kite-runtime-modularization-v1-2026-08-19';
+const STATE_EPOCH = 'kite-runtime-saq-v1-2026-08-25';
 
 const FAILURE_KINDS = [
   'model_invalid_tool_args',
@@ -394,7 +394,6 @@ function materializeEvent(type: RuntimeEventType): Record<string, unknown> {
   for (const field of CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[type]) {
     value[field] = fixtureValue(field);
   }
-  if (type === 'authorization.changed') value.mode = 'default';
   if (type === 'interaction_mode.changed') {
     value.mode = 'accept_edits';
     value.source = 'user';
@@ -769,7 +768,7 @@ function reduceDifferentialSequence(
 
     root = rootResult.value;
     packageStateValue = packageResult.value;
-    const rootBytes = stateBytes(root);
+    const rootBytes = textBytes(encodeCurrentAgentStateJson(root));
     const packageBytes = textBytes(encodeCurrentAgentStateJson(packageStateValue));
     if (rootBytes !== packageBytes) {
       const firstDifference = firstByteDifference(rootBytes, packageBytes);
@@ -1083,6 +1082,8 @@ function lifecycleAndAuthorizationSequence(): readonly DifferentialEvent[] {
       interactionId: 'approval-1',
       toolCallId: 'shell-approval',
       approval: { kind: 'shell', command: 'echo parity', cwd: '/workspace' },
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       createdAt: OCCURRED_AT,
     },
     {
@@ -1090,6 +1091,8 @@ function lifecycleAndAuthorizationSequence(): readonly DifferentialEvent[] {
       interactionId: 'approval-1',
       toolCallId: 'shell-approval',
       grant: 'approve_once',
+      receiptId: 'receipt-approval-1',
+      generation: 0,
       createdAt: '2026-08-20T00:00:01.000Z',
     },
     {
@@ -1109,6 +1112,8 @@ function lifecycleAndAuthorizationSequence(): readonly DifferentialEvent[] {
       interactionId: 'approval-2',
       toolCallId: 'shell-rejected',
       approval: { kind: 'shell', command: 'echo rejected', cwd: '/workspace' },
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       createdAt: OCCURRED_AT,
     },
     {
@@ -1136,6 +1141,8 @@ function lifecycleAndAuthorizationSequence(): readonly DifferentialEvent[] {
       reviewId: 'review-auto-1',
       toolCallId: 'shell-auto-review',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'Automatic review is required for this command.',
       approval: { kind: 'shell', command: 'echo auto-review', cwd: '/workspace' },
       createdAt: OCCURRED_AT,
@@ -1164,6 +1171,8 @@ function lifecycleAndAuthorizationSequence(): readonly DifferentialEvent[] {
       reviewId: 'review-auto-2',
       toolCallId: 'shell-auto-rejected',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'Automatic review rejects this deterministic fixture.',
       approval: { kind: 'shell', command: 'echo auto-rejected', cwd: '/workspace' },
       createdAt: '2026-08-20T00:00:02.500Z',
@@ -1723,15 +1732,17 @@ const PACKAGE_RECOVERY_JOURNAL_API: RecoveryJournalApi<PackageToolRecoveryJourna
 
 describe('RM State package parity harness', () => {
   test('keeps the exact initial State snapshot bytes', () => {
-    expect(stateBytes(rootState())).toBe(textBytes(encodeCurrentAgentStateJson(packageState())));
+    expect(encodeCurrentAgentStateJson(rootState())).toBe(
+      encodeCurrentAgentStateJson(packageState()),
+    );
   });
 
   test('pins the recovery corpus to State, Store4, and the RM epoch', () => {
     const root = rootState();
     const packageStateValue = packageState();
     expect(SQLITE_RUNTIME_STORE_SCHEMA_VERSION).toBe(5);
-    expect(root.schemaVersion).toBe(26);
-    expect(packageStateValue.schemaVersion).toBe(26);
+    expect(root.schemaVersion).toBe(27);
+    expect(packageStateValue.schemaVersion).toBe(27);
     expect(root.formatEpoch).toBe(STATE_EPOCH);
     expect(packageStateValue.formatEpoch).toBe(STATE_EPOCH);
     expect('projectIdentity' in root).toBe(false);
@@ -1899,11 +1910,11 @@ describe('RM State package parity harness', () => {
     expectNoParityMismatches(mismatches, 'codec parity mismatch');
   });
 
-  test('compares all 128 non-legacy-default reducer cases by state bytes or throw', () => {
+  test('compares all 129 non-legacy-default reducer cases by state bytes or throw', () => {
     const eventTypes = Object.values(STATE_EVENT_REDUCER_COVERAGE)
       .flat()
       .filter((type) => !new Set<string>(STATE_DEFAULT_EVENT_TYPES).has(type));
-    expect(eventTypes).toHaveLength(128);
+    expect(eventTypes).toHaveLength(129);
 
     const mismatches: Array<Record<string, unknown>> = [];
     for (const type of eventTypes) {

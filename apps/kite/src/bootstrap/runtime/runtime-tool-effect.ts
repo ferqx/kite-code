@@ -1,5 +1,5 @@
 import { verifyBuiltinWorkspaceFilesystemTerminal } from '@kite/builtin-runtime';
-import { sandboxSupportsFullMode } from '@kite/builtin-runtime/sandbox';
+import { sandboxBackendAvailable } from '@kite/builtin-runtime/sandbox';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
@@ -14,10 +14,7 @@ import {
 } from '@kite/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import { executeAppRuntimeTools } from '../../runtime/tool-execution/router';
-import {
-  isConcurrentExploreSubagentBatch,
-  serializeConcurrentSubagentApprovalEvents,
-} from '../../runtime/tool-execution/subagent-executor';
+import { isConcurrentExploreSubagentBatch } from '../../runtime/tool-execution/subagent-executor';
 import { createAppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
 import { classifyFailure } from './failures';
 import { createFilePreimageRecorder } from './file-checkpoints';
@@ -74,34 +71,6 @@ function currentSkillCatalog(
         resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
       })
     : undefined;
-}
-
-/**
- * A resumed child that blocks again must yield the one interaction slot to an
- * older queued sibling. Otherwise the same long-running child can repeatedly
- * reclaim approval and starve the original deferred continuation forever.
- */
-export function deferResumedSubagentApprovalBehindQueuedSibling(
-  state: Readonly<RuntimeState>,
-  currentToolCallId: string,
-  event: RuntimeEvent,
-): RuntimeEvent {
-  if (
-    (event.type !== 'approval.requested' && event.type !== 'auto_review.requested') ||
-    event.toolCallId !== currentToolCallId ||
-    state.suspendedSubagents[currentToolCallId] == null
-  ) {
-    return event;
-  }
-  const hasQueuedSuspendedSibling = state.tools.queue.some(
-    (toolCallId) =>
-      toolCallId !== currentToolCallId &&
-      state.suspendedSubagents[toolCallId] != null &&
-      state.tools.calls[toolCallId]?.status === 'queued',
-  );
-  return hasQueuedSuspendedSibling
-    ? { type: 'subagent.approval_deferred', toolCallId: currentToolCallId }
-    : event;
 }
 
 /** App-owned State projection for the one run_tools effect. */
@@ -198,9 +167,10 @@ export async function executeAppRuntimeToolsEffect(
           : undefined;
       const terminalEvents: RuntimeEvent[] = [];
       const emitOrDefer = (rawEvent: RuntimeEvent) => {
-        const event = taskCallId
-          ? deferResumedSubagentApprovalBehindQueuedSibling(state, taskCallId, rawEvent)
-          : rawEvent;
+        // Approval requests are durable queue facts now.  Do not replace a
+        // sibling's canonical request with a local deferred placeholder;
+        // Kernel queue ordering/focus is the sole authority.
+        const event = rawEvent;
         if (
           event.type === 'tool.file_change' ||
           event.type === 'tool.finished' ||
@@ -252,7 +222,7 @@ export async function executeAppRuntimeToolsEffect(
           sandboxPreparationArtifacts: dependencies.sandboxPreparationArtifacts,
           sandboxAvailable:
             dependencies.sandboxBackend !== 'unknown' &&
-            sandboxSupportsFullMode(dependencies.sandboxBackend ?? 'none'),
+            sandboxBackendAvailable(dependencies.sandboxBackend ?? 'none'),
           authorizationObservedAt: Date.now(),
           subagentRuntimeFactory: dependencies.subagentRuntimeFactory,
           subagentContinuationArtifacts: dependencies.subagentContinuationArtifacts,
@@ -340,9 +310,7 @@ export async function executeAppRuntimeToolsEffect(
         ]);
       }
     }
-    return parallelSubagentBatch
-      ? serializeConcurrentSubagentApprovalEvents(terminalEventBatches)
-      : terminalEventBatches.flat();
+    return terminalEventBatches.flat();
   } catch (error) {
     if (error instanceof DescendantResourceAdmissionError) {
       const currentState = (executionContext?.getState?.() as RuntimeState | undefined) ?? state;

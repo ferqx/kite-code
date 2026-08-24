@@ -13,7 +13,7 @@ import type {
   SessionStore,
 } from '@kite/runtime-host/storage';
 
-/** App-private names for the exact RM State 25 Host boundary. */
+/** App-private names for the exact RM State 27 Host boundary. */
 export type RuntimeEffect = StateRuntimeEffect;
 export type RuntimeEvent = StateRuntimeEvent;
 export type RuntimeState = StateRuntimeState;

@@ -13,7 +13,7 @@ import {
 
 type Event = { type: string; content?: string };
 type State = {
-  schemaVersion: 26;
+  schemaVersion: 27;
   formatEpoch: string;
   revision: number;
   session: {
@@ -28,7 +28,7 @@ const codec = {
   decodeEvent: (json: string) => JSON.parse(json) as Event,
   encodeState: JSON.stringify,
   decodeState: <T>(json: string) => JSON.parse(json) as T,
-  snapshotMetadata: (state: State) => ({ stateRevision: state.revision, schemaVersion: 26 }),
+  snapshotMetadata: (state: State) => ({ stateRevision: state.revision, schemaVersion: 27 }),
   sessionIdentity: (state: State) => ({
     projectId: state.session.projectId,
     canonicalWorkspaceDigest: state.session.canonicalWorkspaceDigest,
@@ -42,10 +42,10 @@ const codec = {
   }) => {
     if (
       input.state.session.threadId !== input.sessionId ||
-      input.state.schemaVersion !== 26 ||
+      input.state.schemaVersion !== 27 ||
       input.state.formatEpoch !== SQLITE_RUNTIME_FORMAT_EPOCH ||
       input.stateRevision !== input.state.revision ||
-      input.schemaVersion !== 26 ||
+      input.schemaVersion !== 27 ||
       input.eventRevision !== input.state.revision
     ) {
       throw new Error('invalid current snapshot');
@@ -59,7 +59,7 @@ const codec = {
 
 function state(threadId: string, revision = 1): State {
   return {
-    schemaVersion: 26,
+    schemaVersion: 27,
     formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
     revision,
     session: {
@@ -80,9 +80,9 @@ function temporaryDatabase(): { path: string; cleanup(): void } {
 
 describe('State/Store production format', () => {
   test('publishes the current profile and a separate path', () => {
-    expect(SQLITE_RUNTIME_STATE_SCHEMA_VERSION).toBe(26);
+    expect(SQLITE_RUNTIME_STATE_SCHEMA_VERSION).toBe(27);
     expect(SQLITE_RUNTIME_STORE_SCHEMA_VERSION).toBe(5);
-    expect(SQLITE_RUNTIME_FORMAT_EPOCH).toBe('kite-runtime-modularization-v1-2026-08-19');
+    expect(SQLITE_RUNTIME_FORMAT_EPOCH).toBe('kite-runtime-saq-v1-2026-08-25');
     expect(sqliteRuntimeStorePath('/tmp/checkpoints.sqlite')).toBe(
       '/tmp/checkpoints.runtime-state-store.db',
     );

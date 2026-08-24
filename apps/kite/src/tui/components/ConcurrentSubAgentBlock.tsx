@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
 import { memo, useEffect, useRef, useState } from 'react';
+import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import { formatElapsed } from './render-utils';
@@ -29,6 +30,7 @@ function isActive(block: SubagentBlock): boolean {
 function childStatus(
   block: SubagentBlock,
   now: number,
+  translate: ReturnType<typeof useI18n>['t'],
 ): {
   text: string;
   tone: 'dim' | 'warning' | 'error';
@@ -44,6 +46,9 @@ function childStatus(
     return { text: '人工审批排队中', tone: 'dim' };
   }
   if (approvalState === 'awaiting_user') return { text: '等待你的批准', tone: 'warning' };
+  if (approvalState === 'authorized_queued') {
+    return { text: translate('approval.authorizedQueued'), tone: 'dim' };
+  }
   if (block.status === 'running') {
     const elapsed = block.startedAt == null ? '' : ` (${formatElapsed(now - block.startedAt)})`;
     return { text: `进行中${elapsed}`, tone: 'dim' };
@@ -100,6 +105,7 @@ const ConcurrentSubAgentBlock = memo(function ConcurrentSubAgentBlock({
   allowExpanded = true,
 }: ConcurrentSubAgentBlockProps) {
   const dt = useTheme();
+  const { t: translate } = useI18n();
   const active = blocks.some(isActive);
   const waitingOnly =
     active &&
@@ -193,7 +199,7 @@ const ConcurrentSubAgentBlock = memo(function ConcurrentSubAgentBlock({
             </Box>
           )}
           {visibleChildren.map((block, index) => {
-            const status = childStatus(block, Date.now());
+            const status = childStatus(block, Date.now(), translate);
             const label = roleLabel(block.role);
             const branch = index === 0 ? '└─ ' : '   ';
             const nestedBranch = '   └─ ';

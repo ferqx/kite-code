@@ -237,12 +237,13 @@ function input(
       disclosures: Object.freeze([]),
     }),
     governance: Object.freeze({
+      sessionId: 'thread-1',
       workspace: '/workspace',
       threadId: 'thread-1',
+      canonicalWorkspaceIdentity: 'workspace:/workspace',
       context: Object.freeze({
         phase: 'building' as const,
         interactionMode: 'accept_edits' as const,
-        authorizationMode: 'default' as const,
         sandboxAvailable: true,
         circuitBreakerTripped: false,
         gates: Object.freeze({
@@ -743,6 +744,15 @@ describe('RM-16 App ordinary Tool Pipeline attempt runtime', () => {
             type: 'approval.requested' as const,
             interactionId: 'interaction-1',
             toolCallId: 'call-1',
+            fullModeBypassEligible: false,
+            fullModePolicyBypassAllowed: false,
+            approvalRoute: 'user',
+            queueGeneration: 0,
+            queueSequence: 0,
+            parentToolCallId: 'call-1',
+            childSubagentId: 'subagent-1',
+            runtimeToolCallId: blockedTool.runtimeToolCallId,
+            bindingDigest: 'approval-hash-1',
             approval: Object.freeze({
               scope: 'once' as const,
               callId: blockedTool.runtimeToolCallId,

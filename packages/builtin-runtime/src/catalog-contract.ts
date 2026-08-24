@@ -1343,10 +1343,16 @@ function stripShellQuotes(value: string): string {
 
 export function isNetworkShellCommand(command: string): boolean {
   return (
-    /\b(?:curl|wget|ssh|scp|sftp|rsync|ftp|nc|ncat|telnet)\b/.test(command) ||
-    /\bgit\s+(?:clone|fetch|pull|push|ls-remote)\b/.test(command) ||
-    /\b(?:bun|npm|pnpm|yarn)\s+(?:install|add|remove|update|upgrade)\b/.test(command) ||
-    /\b(?:pip|pip3|cargo|gem|go|brew|apt|apt-get|choco)\s+(?:install|update|upgrade)\b/.test(
+    /(?:^|[;&|]\s*)(?:(?:sudo|runas)\s+)?(?:[^\s;&|]+[/\\])?(?:curl|wget|ssh|scp|sftp|rsync|ftp|nc|ncat|telnet)(?:\.exe)?\b/.test(
+      command,
+    ) ||
+    /(?:^|[;&|]\s*)(?:(?:sudo|runas)\s+)?(?:[^\s;&|]+[/\\])?git(?:\.exe)?\s+(?:clone|fetch|pull|push|ls-remote)\b/.test(
+      command,
+    ) ||
+    /(?:^|[;&|]\s*)(?:(?:sudo|runas)\s+)?(?:[^\s;&|]+[/\\])?(?:bun|npm|pnpm|yarn)(?:\.exe)?\s+(?:install|add|remove|update|upgrade)\b/.test(
+      command,
+    ) ||
+    /(?:^|[;&|]\s*)(?:(?:sudo|runas)\s+)?(?:[^\s;&|]+[/\\])?(?:pip|pip3|cargo|gem|go|brew|apt|apt-get|choco)(?:\.exe)?\s+(?:install|update|upgrade)\b/.test(
       command,
     )
   );

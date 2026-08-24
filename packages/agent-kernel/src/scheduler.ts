@@ -192,10 +192,19 @@ function runnableToolIds(state: AgentState): string[] {
     const call = state.tools.calls[toolCallId];
     return (
       call != null &&
-      (call.status === 'queued' || call.status === 'approved') &&
+      (call.status === 'queued' ||
+        call.status === 'approved' ||
+        call.status === 'authorized_queued') &&
       toolBelongsToCurrentWork(state, call) &&
       parentSchedulerOwnsToolCall(state, call)
     );
+  });
+}
+
+function authorizedQueuedToolIds(state: AgentState): string[] {
+  return runnableToolIds(state).filter((toolCallId) => {
+    const call = state.tools.calls[toolCallId];
+    return call?.status === 'authorized_queued';
   });
 }
 
@@ -243,6 +252,44 @@ function parallelBatch(
       !call ||
       !traits ||
       !approvalFree(call, group, facts) ||
+      !candidates.every((candidate) => executionTraitsMayOverlap(candidate.traits, traits))
+    )
+      break;
+    candidates.push({ effectId: toolCallId, traits });
+  }
+  return selectSchedulableEffectBatch(candidates, ceiling);
+}
+
+/**
+ * Authorized queue entries have crossed the approval barrier. They remain
+ * subject to execution-trait overlap and concurrency ceilings, but must not
+ * be hidden behind a different approval/auto-review presentation focus.
+ */
+function authorizedBatch(
+  state: AgentState,
+  first: string,
+  facts: SchedulerFacts | undefined,
+): readonly string[] {
+  const firstCall = state.tools.calls[first];
+  const firstTraits = firstCall ? schedulerTraits(firstCall, facts) : undefined;
+  if (!firstCall || !firstTraits) return [first];
+  const ceiling =
+    firstTraits.access === 'read' && firstTraits.isolation === 'shared'
+      ? MAX_PARALLEL_READ_TOOLS
+      : 1;
+  if (ceiling === 1) return [first];
+  const candidates: Array<{ effectId: string; traits: ExecutionTraits }> = [
+    { effectId: first, traits: firstTraits },
+  ];
+  for (const toolCallId of authorizedQueuedToolIds(state)) {
+    if (toolCallId === first || candidates.length >= ceiling) continue;
+    const call = state.tools.calls[toolCallId];
+    const traits = call ? schedulerTraits(call, facts) : undefined;
+    if (
+      !call ||
+      !traits ||
+      traits.access !== 'read' ||
+      traits.isolation !== 'shared' ||
       !candidates.every((candidate) => executionTraitsMayOverlap(candidate.traits, traits))
     )
       break;
@@ -310,6 +357,24 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
         failureKind: 'persistence_unavailable',
       };
   }
+  // A different approval/auto-review waiter may retain presentation focus
+  // while an earlier approve_once/same_command invocation is already sealed.
+  // Dispatch sealed work first; ordinary queued work remains behind the
+  // interaction barrier below.
+  if (
+    interactionKind === 'idle' ||
+    interactionKind === 'awaiting_tool_approval' ||
+    interactionKind === 'awaiting_auto_review'
+  ) {
+    const authorized = authorizedQueuedToolIds(state);
+    if (authorized.length > 0) {
+      return {
+        type: 'run_tools',
+        toolCallIds: authorizedBatch(state, authorized[0]!, facts),
+      };
+    }
+  }
+
   switch (interactionKind) {
     case 'awaiting_user_input':
       return {
@@ -404,7 +469,7 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
   const approvedSuspended = state.tools.active.find((toolCallId) => {
     const call = state.tools.calls[toolCallId];
     return (
-      call?.status === 'approved' &&
+      (call?.status === 'approved' || call?.status === 'authorized_queued') &&
       state.suspendedSubagents[toolCallId] != null &&
       toolBelongsToCurrentWork(state, call)
     );

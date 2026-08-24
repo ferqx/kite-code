@@ -18,12 +18,8 @@ export interface ResolveSandboxRuntimeOptions {
   detectBackend?: () => SandboxBackend;
 }
 
-/**
- * Full mode is available whenever the selected development backend owns the
- * command process boundary. Windows remains development-only for release
- * qualification; this product mode must not be read as that separate claim.
- */
-export function sandboxSupportsFullMode(backend: SandboxBackend): boolean {
+/** Whether restricted modes can bind execution to a concrete sandbox backend. */
+export function sandboxBackendAvailable(backend: SandboxBackend): boolean {
   return (
     backend === 'seatbelt' || backend === 'bubblewrap' || backend === 'windows_restricted_token'
   );

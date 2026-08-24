@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AgentState,
-  assertAuthorizationElevation,
   type KernelEvent,
   projectStateRestartRecoveryEvents,
   type RuntimeEffect,
@@ -84,13 +83,6 @@ export class StateHostSessionHarness {
           if (event.type !== 'interaction_mode.changed') continue;
           if (!Number.isFinite(Date.parse(event.changedAt))) {
             throw new Error('interaction_mode.changed requires a valid changedAt timestamp.');
-          }
-          if (event.mode === 'full') {
-            assertAuthorizationElevation({
-              mode: 'full_access',
-              source: event.source,
-              sandboxAvailable: this.#sandboxAvailable,
-            });
           }
         }
         return true;
@@ -306,8 +298,6 @@ export interface RestoreStateHostSessionHarnessInput {
   readonly store: StateStore;
   readonly recoveryIdentityKey: string;
   readonly interactionMode?: AgentState['mode'];
-  readonly authorizationMode?: AgentState['authorization']['mode'];
-  readonly authorizationSource?: NonNullable<AgentState['authorization']['modeSource']>;
   readonly phase?: 'planning' | 'building';
   readonly sandboxAvailable?: boolean;
   readonly modelArtifactEvidence?: ModelArtifactEvidenceAvailability;
@@ -380,19 +370,7 @@ export function restoreStateStateFromStore(input: RestoreStateHostSessionHarness
           assertRestoredCapabilityArtifactEvidence(state, capabilityArtifactEvidence)
       : undefined,
   };
-  const restored =
-    input.authorizationMode === 'full_access'
-      ? restoreRuntimeHostStateSession({
-          ...common,
-          authorizationMode: 'full_access',
-          authorizationSource: input.authorizationSource ?? 'system',
-          modeGrantedAt: new Date(source.now()).toISOString(),
-        })
-      : restoreRuntimeHostStateSession({
-          ...common,
-          authorizationMode: input.authorizationMode,
-          authorizationSource: input.authorizationSource,
-        });
+  const restored = restoreRuntimeHostStateSession(common);
   return { state: restored.state, restoreBoundary: restored.restoreBoundary };
 }
 

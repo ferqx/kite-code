@@ -33,6 +33,12 @@ export interface SubAgentToolDispatcher {
       result?: import('../tool-result').ToolExecutionResult;
       error?: unknown;
     }) => Promise<void>;
+    /** Exact parent approval receipt used for a resumed blocked child. */
+    parentApproval?: {
+      parentToolCallId: string;
+      grant: 'approve_once' | 'same_command';
+      approvalBindingDigest?: string;
+    };
     binding?: import('@kite/runtime-contract').CapabilityBinding;
   }): Promise<{
     runtimeToolCallId: string;
@@ -51,6 +57,24 @@ export interface SubAgentRoleConfig {
   model?: import('@kite/builtin-runtime/model').SupportedChatModel;
   /** 可选超时毫秒（不指定则使用 SubAgentRunnerInput.timeoutMs）/ Optional timeout in milliseconds */
   timeoutMs?: number;
+}
+
+/**
+ * Durable facts for the approval interaction that suspended a child.
+ *
+ * These facts belong to the continuation, rather than to a transient TUI
+ * slot.  A resumed child must replay the original route and identity even if
+ * another sibling has since claimed focus or the live interaction mode has
+ * changed.
+ */
+export interface SubAgentApprovalFacts {
+  readonly route: 'auto_review' | 'user';
+  readonly generation: number;
+  readonly sequence: number;
+  readonly bindingDigest: string;
+  readonly parentToolCallId: string;
+  readonly childToolCallId: string;
+  readonly runtimeToolCallId?: string;
 }
 
 /** 子 agent 运行输入 / Sub-agent runner input */
@@ -74,7 +98,6 @@ export interface SubAgentRunnerInput {
   }>;
   /** Explicit capability-derived tool ceiling for a governed caller. */
   allowedTools?: Set<string>;
-  authorization?: import('@kite/runtime-host/kernel-adapter').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   /** Parent Runtime interaction mode for this invocation. Resume callers pass the current live mode. */
@@ -139,6 +162,8 @@ export interface SubAgentContinuation {
   allowedTools?: string[];
   /** Runtime-issued bindings that authorize the retained dynamic MCP surface. */
   mcpBindingIds?: string[];
+  /** Original approval route and identity retained across restart/resume. */
+  approvalFacts?: SubAgentApprovalFacts;
 }
 
 /** 已暂停子 agent 的待执行工具 / Pending tool preserved with a suspended continuation */

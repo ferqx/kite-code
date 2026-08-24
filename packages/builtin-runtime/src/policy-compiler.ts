@@ -9,13 +9,16 @@ import type {
   CapabilityPolicyRecovery,
   CapabilityPolicyRisk,
   CapabilityRiskClass,
+  CapabilitySandboxScopeFact,
   RuntimeJsonValue,
 } from '@kite/runtime-spi';
+import { digestCapabilityBindingValue } from './capability-binding';
 import {
   isDestructiveShellCommand,
   isNetworkShellCommand,
   isReadOnlyShellCommand,
   isVcsMutationShellCommand,
+  isWriteShellCommand,
   shellEffectsClassifier,
   taskEffectsClassifier,
 } from './catalog-contract';
@@ -39,9 +42,11 @@ export interface BuiltinPolicyRuleResult {
   readonly expectedEffects: readonly string[];
   readonly phaseConstraint?: 'planning';
   readonly effectiveEffects: CapabilityEffects;
+  readonly requiresSandbox?: boolean;
   readonly fullAccessMayBypassApproval: boolean;
   readonly sameCommandMayBypassApproval: boolean;
   readonly recovery?: Readonly<CapabilityPolicyRecovery>;
+  readonly sandboxScope?: Readonly<CapabilitySandboxScopeFact>;
 }
 
 export interface CreateBuiltinPolicyCompilerInput {
@@ -427,54 +432,143 @@ export function shellBuiltinPolicyRule(
   }
 
   const shellEffects = shellEffectiveEffects(command, context.workspace, declaredEffects);
-  if (context.phase === 'planning') {
-    return denyRule({
-      risk: 'unknown',
-      reason:
-        'planning phase allows read-only inspection and plan updates only; rejected shell_execute.',
-      userVisibleSummary:
-        'Plan mode is read-only. This operation did not run and cannot be approved while planning. Use read-only inspection or describe the intended implementation in the plan, then run it after plan approval.',
-      expectedEffects: ['No workspace mutation or code execution will run'],
-      phaseConstraint: 'planning',
-      effectiveEffects: shellEffects.effectiveEffects,
-    });
-  }
-
-  if (sensitiveExternalPath) {
-    return askRule({
-      risk: 'unknown',
-      effects: {
+  const policyEffects = sensitiveExternalPath
+    ? {
         ...shellEffects.policyEffects,
-        sensitiveExternalAccess: true,
+        sensitiveExternalAccess: true as const,
         ...(!shellEffects.policyEffects?.externalRead &&
         !shellEffects.policyEffects?.externalWrite &&
         !shellEffects.policyEffects?.uncertainEffects
           ? { uncertainEffects: true as const }
           : {}),
-      },
+      }
+    : shellEffects.policyEffects;
+  const externalFilesystemExpansion = Boolean(
+    sensitiveExternalPath || policyEffects?.externalRead || policyEffects?.externalWrite,
+  );
+  const planningWorkspaceWriteExpansion =
+    context.phase === 'planning' &&
+    (shellEffects.effectiveEffects.filesystem === 'write' ||
+      shellEffects.effectiveEffects.filesystem === 'destructive');
+  const expandedScope = Boolean(
+    externalFilesystemExpansion || planningWorkspaceWriteExpansion || policyEffects?.network,
+  );
+  const sandboxScope = shellSandboxScope({
+    phase: context.phase,
+    interactionMode: context.interactionMode ?? 'accept_edits',
+    expanded: expandedScope,
+    externalFilesystemExpansion,
+    planningWorkspaceWriteExpansion,
+    effects: policyEffects,
+  });
+  if (sensitiveExternalPath) {
+    return askRule({
+      risk: shellPolicyRisk(command, policyEffects),
+      effects: policyEffects,
       reason: `This shell command accesses the sensitive external path '${sensitiveExternalPath}'.`,
       userVisibleSummary: `Access sensitive external path with Shell: ${sensitiveExternalPath}`,
       expectedEffects: ['Accesses sensitive data or system configuration outside the workspace'],
       effectiveEffects: shellEffects.effectiveEffects,
+      requiresSandbox: context.interactionMode !== 'full',
       fullAccessMayBypassApproval: true,
       sameCommandMayBypassApproval: false,
+      sandboxScope,
     });
   }
 
-  return askRule({
-    risk: 'unknown',
-    effects: shellEffects.policyEffects,
+  if (expandedScope) {
+    return askRule({
+      risk: shellPolicyRisk(command, policyEffects),
+      effects: policyEffects,
+      reason:
+        context.phase === 'planning'
+          ? 'This shell command requires an explicit scope expansion beyond the read-only workspace baseline.'
+          : 'This shell command requires an explicit scope expansion beyond the workspace baseline.',
+      userVisibleSummary: `Review shell scope expansion: ${command}`,
+      expectedEffects: [
+        context.phase === 'planning'
+          ? 'Expands beyond the read-only workspace sandbox baseline'
+          : 'Expands beyond the workspace sandbox baseline',
+      ],
+      effectiveEffects: shellEffects.effectiveEffects,
+      requiresSandbox: context.interactionMode !== 'full',
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: true,
+      sandboxScope,
+    });
+  }
+
+  // The compiler deliberately does not maintain a command-name allowlist. Any
+  // command whose effects are not known to require a scope expansion remains
+  // inside the native workspace baseline. The sandbox, not a lexical allowlist,
+  // constrains unknown commands; this is also why `uncertainEffects` alone is
+  // not an authorization request or an implicit `allow_all` scope.
+  return allowRule({
+    risk: shellPolicyRisk(command, policyEffects),
+    effects: policyEffects,
     reason:
-      'Shell effects are not authorized from a fixed command grammar; the current interaction mode must review this exact invocation.',
-    userVisibleSummary: `Review shell command: ${command}`,
+      context.phase === 'planning'
+        ? 'Shell command is constrained to the read-only workspace sandbox baseline.'
+        : 'Shell command is constrained to the workspace sandbox baseline.',
+    userVisibleSummary:
+      context.phase === 'planning'
+        ? `Run read-only workspace Shell command: ${command}`
+        : `Run workspace Shell command: ${command}`,
     expectedEffects: [
-      'Executes an arbitrary shell command',
-      'May read or modify files, access the network, or change external state',
+      context.phase === 'planning'
+        ? 'Runs inside the read-only workspace sandbox baseline'
+        : 'Runs inside the workspace sandbox baseline',
+      ...(policyEffects?.uncertainEffects
+        ? ['Unknown effects remain constrained by the baseline sandbox']
+        : []),
     ],
     effectiveEffects: shellEffects.effectiveEffects,
-    fullAccessMayBypassApproval: true,
-    sameCommandMayBypassApproval: true,
+    requiresSandbox: context.interactionMode !== 'full',
+    sandboxScope,
   });
+}
+
+function shellSandboxScope(input: {
+  readonly phase: CapabilityPolicyContext['phase'];
+  readonly interactionMode: CapabilityPolicyContext['interactionMode'];
+  readonly expanded: boolean;
+  readonly externalFilesystemExpansion: boolean;
+  readonly planningWorkspaceWriteExpansion: boolean;
+  readonly effects: Readonly<CapabilityPolicyEffects> | undefined;
+}): Readonly<CapabilitySandboxScopeFact> {
+  if (input.interactionMode === 'full') {
+    const kind = 'unrestricted' as const;
+    const filesystem = 'full_access' as const;
+    const network = 'allow_all' as const;
+    const digest = digestCapabilityBindingValue({ kind, filesystem, network });
+    return Object.freeze({ kind, filesystem, network, digest });
+  }
+  // Filesystem and network are independent capability dimensions. A network
+  // expansion must never silently widen filesystem access, and a known
+  // Planning workspace mutation needs only workspace_write rather than host
+  // unrestricted access.
+  const filesystem = input.externalFilesystemExpansion
+    ? 'full_access'
+    : input.planningWorkspaceWriteExpansion || input.phase !== 'planning'
+      ? 'workspace_write'
+      : 'read_only';
+  const network = input.effects?.network ? 'allow_all' : 'disabled';
+  const kind = input.expanded ? 'expanded' : 'baseline';
+  const digest = digestCapabilityBindingValue({ kind, filesystem, network });
+  return Object.freeze({ kind, filesystem, network, digest });
+}
+
+function shellPolicyRisk(
+  command: string,
+  effects: Readonly<CapabilityPolicyEffects> | undefined,
+): CapabilityPolicyRisk {
+  if (effects?.network) return 'network';
+  if (effects?.externalWrite) return 'write_file';
+  if (effects?.externalRead) return 'read';
+  if (isDestructiveShellCommand(command.toLowerCase())) return 'destructive';
+  if (isVcsMutationShellCommand(command.toLowerCase())) return 'vcs_mutation';
+  if (isWriteShellCommand(command.toLowerCase())) return 'write_file';
+  return 'unknown';
 }
 
 export function fileBuiltinPolicyRule(
@@ -634,9 +728,11 @@ function allowRule(input: {
   readonly userVisibleSummary: string;
   readonly expectedEffects: readonly string[];
   readonly effectiveEffects: CapabilityEffects;
+  readonly requiresSandbox?: boolean;
   readonly fullAccessMayBypassApproval?: boolean;
   readonly sameCommandMayBypassApproval?: boolean;
   readonly recovery?: Readonly<CapabilityPolicyRecovery>;
+  readonly sandboxScope?: Readonly<CapabilitySandboxScopeFact>;
 }): BuiltinPolicyRuleResult {
   return {
     decision: 'allow',
@@ -655,10 +751,12 @@ function askRule(input: {
   readonly userVisibleSummary: string;
   readonly expectedEffects: readonly string[];
   readonly effectiveEffects: CapabilityEffects;
+  readonly requiresSandbox?: boolean;
   readonly phaseConstraint?: 'planning';
   readonly fullAccessMayBypassApproval?: boolean;
   readonly sameCommandMayBypassApproval?: boolean;
   readonly recovery?: Readonly<CapabilityPolicyRecovery>;
+  readonly sandboxScope?: Readonly<CapabilitySandboxScopeFact>;
 }): BuiltinPolicyRuleResult {
   return {
     decision: 'ask',
@@ -679,6 +777,7 @@ function denyRule(input: {
   readonly effectiveEffects: CapabilityEffects;
   readonly phaseConstraint?: 'planning';
   readonly recovery?: Readonly<CapabilityPolicyRecovery>;
+  readonly sandboxScope?: Readonly<CapabilitySandboxScopeFact>;
 }): BuiltinPolicyRuleResult {
   return {
     decision: 'deny',
@@ -800,6 +899,9 @@ function shellPolicyEffects(
   const normalized = command.toLowerCase();
   const readOnly = isReadOnlyShellCommand(command);
   if (isNetworkShellCommand(normalized)) effects.network = true;
+  const gitScopeEffects = shellGitScopeEffects(command, workspace);
+  if (gitScopeEffects?.externalRead) effects.externalRead = true;
+  if (gitScopeEffects?.externalWrite) effects.externalWrite = true;
   const writeTargets = readOnly
     ? []
     : isVcsMutationShellCommand(normalized)
@@ -819,6 +921,74 @@ function shellPolicyEffects(
   if (readTargets.some((target) => isExternalPath(target, workspace))) effects.externalRead = true;
   if (Object.keys(effects).length > 0) return Object.freeze(effects);
   return isVcsMutationShellCommand(normalized) ? Object.freeze({}) : undefined;
+}
+
+/**
+ * Bind Git's path-bearing options and well-known path operands to the same
+ * workspace boundary as ordinary Shell filesystem access. Unknown Git syntax
+ * remains sandbox-confined; an explicit external target is never silently
+ * collapsed into the workspace baseline.
+ */
+function shellGitScopeEffects(
+  command: string,
+  workspace: string,
+): Readonly<{ externalRead?: true; externalWrite?: true }> | undefined {
+  const tokens = tokenizeDirectShellCommand(command);
+  if (!tokens) return undefined;
+  const gitIndex = tokens.findIndex((token) => portableExecutableName(token) === 'git');
+  if (gitIndex < 0) return undefined;
+
+  const args = tokens.slice(gitIndex + 1);
+  const pathTargets: string[] = [];
+  let cwd = resolve(workspace);
+  let subcommandIndex = -1;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!;
+    if (argument === '-C' && args[index + 1]) {
+      cwd = resolveGitPath(args[index + 1]!, cwd);
+      pathTargets.push(cwd);
+      index += 1;
+      continue;
+    }
+    const optionPath = gitOptionPath(argument, args[index + 1]);
+    if (optionPath) {
+      pathTargets.push(resolveGitPath(optionPath.value, cwd));
+      if (optionPath.consumesNext) index += 1;
+      continue;
+    }
+    if (!argument.startsWith('-')) {
+      subcommandIndex = index;
+      break;
+    }
+  }
+
+  const subcommand = subcommandIndex >= 0 ? args[subcommandIndex]!.toLowerCase() : '';
+  if (subcommand === 'hash-object') {
+    pathTargets.push(
+      ...args
+        .slice(subcommandIndex + 1)
+        .filter((argument) => !argument.startsWith('-'))
+        .map((argument) => resolveGitPath(argument, cwd)),
+    );
+  } else if (subcommand === 'diff' && args.slice(subcommandIndex + 1).includes('--no-index')) {
+    pathTargets.push(
+      ...args
+        .slice(subcommandIndex + 1)
+        .filter((argument) => !argument.startsWith('-'))
+        .map((argument) => resolveGitPath(argument, cwd)),
+    );
+  }
+
+  const externalTarget = pathTargets.some((target) => !isPathInsideWorkspace(workspace, target));
+  const globalConfigWrite =
+    subcommand === 'config' && args.slice(subcommandIndex + 1).includes('--global');
+  if (!externalTarget && !globalConfigWrite) return undefined;
+  return Object.freeze({
+    ...(externalTarget ? { externalRead: true as const } : {}),
+    ...(globalConfigWrite || (externalTarget && isVcsMutationShellCommand(command.toLowerCase()))
+      ? { externalWrite: true as const }
+      : {}),
+  });
 }
 
 function shellEffectiveEffects(
@@ -1057,11 +1227,13 @@ function isCriticalSystemTarget(value: string): boolean {
 
 function freezeCompilation(value: CapabilityPolicyCompilation): CapabilityPolicyCompilation {
   const effects = value.effects ? Object.freeze({ ...value.effects }) : undefined;
+  const sandboxScope = value.sandboxScope ? Object.freeze({ ...value.sandboxScope }) : undefined;
   const effectiveEffects = Object.freeze({ ...value.effectiveEffects });
   const expectedEffects = Object.freeze([...value.expectedEffects]);
   return Object.freeze({
     ...value,
     ...(effects ? { effects } : {}),
+    ...(sandboxScope ? { sandboxScope } : {}),
     ...(value.recovery ? { recovery: Object.freeze({ ...value.recovery }) } : {}),
     effectiveEffects,
     expectedEffects,

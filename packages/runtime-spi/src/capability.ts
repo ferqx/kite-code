@@ -116,6 +116,8 @@ export interface CapabilityTurnContext {
   readonly modelMessageId?: string;
   readonly toolCallId?: string;
   readonly phase?: 'planning' | 'building';
+  /** Live Session interaction mode; Full is execution authority, never a grant. */
+  readonly interactionMode?: import('@kite/runtime-contract').InteractionMode;
   readonly brokeredGitFeatureRevision?: string | null;
   readonly hasTaskAdapter?: boolean;
   readonly hasGitBroker?: boolean;
@@ -133,7 +135,6 @@ export interface CapabilityTurnContext {
  */
 export interface CapabilityAvailabilityContext extends CapabilityTurnContext {
   readonly workspace: string;
-  readonly interactionMode?: import('@kite/runtime-contract').InteractionMode;
 }
 
 export interface CapabilityAvailabilityDecision {
@@ -170,6 +171,22 @@ export interface CapabilityInvocationEffects {
   readonly risk: CapabilityRiskClass;
   /** Runtime may only tighten these declared facts for one invocation. */
   readonly effectiveEffects: CapabilityEffects;
+}
+
+/**
+ * Sealed filesystem/network lane selected for one capability invocation.
+ * This is descriptive evidence for matching and presentation; it never
+ * grants execution authority on its own.
+ */
+export type CapabilitySandboxFilesystemScope = 'read_only' | 'workspace_write' | 'full_access';
+export type CapabilitySandboxNetworkScope = 'disabled' | 'allow_all';
+export type CapabilitySandboxScopeKind = 'baseline' | 'expanded' | 'unrestricted';
+
+export interface CapabilitySandboxScopeFact {
+  readonly kind: CapabilitySandboxScopeKind;
+  readonly filesystem: CapabilitySandboxFilesystemScope;
+  readonly network: CapabilitySandboxNetworkScope;
+  readonly digest: string;
 }
 
 /**
@@ -241,6 +258,8 @@ export interface CapabilityPolicyCompilation {
   readonly requiresSandbox?: boolean;
   /** Optional neutral recovery guidance owned by the capability policy. */
   readonly recovery?: Readonly<CapabilityPolicyRecovery>;
+  /** Sealed scope evidence for UI projection and Session command matching. */
+  readonly sandboxScope?: Readonly<CapabilitySandboxScopeFact>;
 }
 
 /**

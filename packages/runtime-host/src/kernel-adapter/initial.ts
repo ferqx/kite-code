@@ -1,4 +1,3 @@
-import type { AuthorizationSource } from '@kite/agent-kernel';
 import {
   type AgentState,
   type AgentTaskState,
@@ -9,13 +8,15 @@ import {
   getActiveTask as getKernelActiveTask,
   getEffectiveInteractionMode as getKernelEffectiveInteractionMode,
   type InteractionMode,
+  RUNTIME_STATE_FORMAT_EPOCH as KERNEL_STATE_FORMAT_EPOCH,
+  RUNTIME_STATE_SCHEMA_VERSION as KERNEL_STATE_SCHEMA_VERSION,
   type PlanningState,
   type WorkspaceAccess,
 } from '@kite/agent-kernel';
 import { createLiveRuntimeIdSource, type RuntimeIdSource } from '../runtime-id-source';
 
 /**
- * Mutable construction view for State 25 fixtures and compatibility adapters.
+ * Mutable construction view for State 27 fixtures and compatibility adapters.
  * The persisted schema and all validation remain owned by Agent Kernel.
  */
 type MutableState<T> = T extends (...args: never[]) => unknown
@@ -40,8 +41,6 @@ export interface RuntimeHostStateInitialStateInput {
   readonly canonicalWorkspaceDigest?: string;
   readonly recoveryIdentityKey: string;
   readonly interactionMode?: InteractionMode;
-  readonly authorizationMode?: 'default' | 'full_access';
-  readonly authorizationSource?: AuthorizationSource;
   readonly workspaceAccess?: WorkspaceAccess;
   readonly phase?: 'planning' | 'building';
   /** Test callers may inject the same deterministic Host source. */
@@ -49,7 +48,7 @@ export interface RuntimeHostStateInitialStateInput {
 }
 
 /**
- * Host composition wrapper for the current State 25 constructor.
+ * Host composition wrapper for the current State 27 constructor.
  *
  * Agent Kernel receives only Host-supplied identity/time facts. This preserves
  * the former test input shape without reintroducing a second State owner.
@@ -58,7 +57,6 @@ export function createRuntimeHostStateInitialState(
   input: RuntimeHostStateInitialStateInput,
 ): RuntimeState {
   const source = input.runtimeIdSource ?? createLiveRuntimeIdSource();
-  const authorizationMode = input.authorizationMode ?? 'default';
   const base = {
     threadId: input.threadId,
     userId: input.userId,
@@ -71,22 +69,7 @@ export function createRuntimeHostStateInitialState(
     workspaceAccess: input.workspaceAccess,
     phase: input.phase,
   } as const;
-  const state =
-    authorizationMode === 'full_access'
-      ? createInitialAgentState({
-          ...base,
-          authorizationMode,
-          authorizationSource: input.authorizationSource ?? 'system',
-          modeGrantedAt: new Date(source.now()).toISOString(),
-        })
-      : createInitialAgentState({
-          ...base,
-          authorizationMode: 'default',
-          ...(input.authorizationSource === undefined
-            ? {}
-            : { authorizationSource: input.authorizationSource }),
-        });
-  return state;
+  return createInitialAgentState(base);
 }
 
 export function getActiveTask(state: RuntimeState): TaskState | null {
@@ -114,5 +97,5 @@ export function setActivePlanning(state: RuntimeState, planning: PlanningState):
   };
 }
 
-export const RUNTIME_STATE_SCHEMA_VERSION = 26 as const;
-export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-modularization-v1-2026-08-19' as const;
+export const RUNTIME_STATE_SCHEMA_VERSION = KERNEL_STATE_SCHEMA_VERSION;
+export const RUNTIME_STATE_FORMAT_EPOCH = KERNEL_STATE_FORMAT_EPOCH;

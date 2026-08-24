@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import type { AgentPendingApproval } from '@kite/agent-kernel';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
@@ -57,25 +58,46 @@ function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: strin
       request: { question: 'Continue?', options: [], allow_free_text: true },
     };
   } else if (kind === 'approval') {
+    const approval = {
+      scope: 'once' as const,
+      cwd: '/workspace',
+      threadId: state.session.threadId,
+      tool: 'shell_execute',
+      command: 'pwd',
+      risk: 'execute_code' as const,
+      approvalHash: 'approval-hash',
+      summary: 'Run pwd',
+      reason: 'State-machine test',
+      expectedEffects: [],
+      grantOptions: ['approve_once'] as const,
+      recommendedGrant: 'approve_once' as const,
+    };
     state.interactions = {
       kind: 'awaiting_tool_approval',
       interactionId: 'approval-interaction',
       toolCallId,
-      approval: {
-        scope: 'once',
-        cwd: '/workspace',
-        threadId: state.session.threadId,
-        tool: 'shell_execute',
-        command: 'pwd',
-        risk: 'execute_code',
-        approvalHash: 'approval-hash',
-        summary: 'Run pwd',
-        reason: 'State-machine test',
-        expectedEffects: [],
-        grantOptions: ['approve_once'],
-        recommendedGrant: 'approve_once',
-      },
+      approval,
     };
+    const pending: AgentPendingApproval = {
+      interactionId: 'approval-interaction',
+      toolCallId,
+      route: 'user',
+      bindingDigest: 'approval-hash',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval,
+      invocation: {},
+      sequence: 0,
+      generation: 0,
+      createdAt: '2026-08-25T00:00:00.000Z',
+      status: 'awaiting_user',
+      state: 'awaiting_user',
+    };
+    (state.pendingApprovals as Map<string, AgentPendingApproval>).set(
+      pending.interactionId,
+      pending,
+    );
+    state.activeApprovalId = pending.interactionId;
   } else {
     const document = currentPlanDocument({
       planId: 'plan-state-machine',
@@ -263,14 +285,15 @@ const cases: InteractionCase[] = [
     action: {
       type: 'approve',
       interactionId: 'approval-interaction',
+      generation: 0,
       grant: 'approve_once',
     },
-    expectedToolStatus: 'approved',
+    expectedToolStatus: 'authorized_queued',
   },
   {
     name: 'tool approval rejected',
     initial: () => waitingToolState('approval', 'approval-tool'),
-    action: { type: 'reject', interactionId: 'approval-interaction' },
+    action: { type: 'reject', interactionId: 'approval-interaction', generation: 0 },
     expectedToolStatus: 'rejected',
   },
   {

@@ -158,7 +158,7 @@ describe('builtin runtime package boundary', () => {
     expect(Object.isFrozen(modules)).toBe(true);
   });
 
-  test('creates the exact frozen State 25 turn binding without authorization', () => {
+  test('creates the exact frozen State 27 turn binding without authorization', () => {
     const binding = createCapabilityBinding({
       capabilityId: 'mcp:docs:search',
       capabilityRevision: 'revision-1',

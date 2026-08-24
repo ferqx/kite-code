@@ -15,7 +15,7 @@ describe('Kernel observability fact projection', () => {
     expect(
       OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_.length +
         OBSERVABILITY_IGNORED_RUNTIME_EVENT_TYPES_.length,
-    ).toBe(135);
+    ).toBe(136);
   });
 
   test('uses envelope time and strips event identity and free-form fields', () => {

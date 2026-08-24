@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '#app/tui/provider';
 import { useTheme } from '#app/tui/theme';
 import { useI18n } from '../i18n';
+import type { TuiPendingApproval } from '../types';
 import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
@@ -11,6 +12,7 @@ export interface ApprovalBlockProps {
   approval: ToolApprovalPayload;
   provider: TuiUserInputProvider;
   onResolved: (action: string, grant?: string) => void;
+  queueEntry?: TuiPendingApproval;
 }
 
 interface Option {
@@ -29,7 +31,12 @@ function approvalToolCategory(tool: string, translate: ReturnType<typeof useI18n
   );
 }
 
-export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
+export default function ApprovalBlock({
+  approval,
+  provider,
+  onResolved,
+  queueEntry,
+}: ApprovalBlockProps) {
   const t = useTheme();
   const { t: translate } = useI18n();
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -40,6 +47,15 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     .trim();
   const isCommand = approval.tool === 'shell_execute';
   const toolCategory = approvalToolCategory(approval.tool, translate);
+  const route =
+    queueEntry?.route ??
+    approval.approvalRoute ??
+    (approval.tool === 'shell_execute' ? 'user' : 'user');
+  const generation = queueEntry?.generation ?? approval.queueGeneration;
+  const scope = queueEntry?.actualSandboxScope ?? approval.sandboxScope;
+  const scopeLabel = scope
+    ? [scope.filesystem, scope.network, scope.backend, scope.enforcement].join(' · ')
+    : undefined;
   const visibleOptions: Option[] = [
     { label: translate('approval.once'), action: 'approve', grant: 'approve_once' },
     { label: translate('approval.session'), action: 'approve', grant: 'same_command' },
@@ -64,6 +80,9 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
   }));
 
   function resolve(opt: Option) {
+    // Approval actions are accepted only with the focused durable identity
+    // pair. Legacy/off-screen cards without that pair cannot grant anything.
+    if (!queueEntry?.interactionId || generation == null) return;
     if (opt.action === 'approve') {
       const grant = opt.grant ?? 'approve_once';
       // Queue the local acknowledgement before resolving Runtime's pending
@@ -71,10 +90,19 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       // interrupt before React applies RESOLVE_INTERRUPT, leaving the child
       // card visually suspended until a later progress event arrives.
       onResolved('approve', grant);
-      provider.submitAction({ type: 'approve', grant });
+      provider.submitAction({
+        type: 'approve',
+        grant,
+        interactionId: queueEntry.interactionId,
+        generation,
+      });
     } else {
       onResolved('denied');
-      provider.submitAction({ type: 'reject' });
+      provider.submitAction({
+        type: 'reject',
+        interactionId: queueEntry.interactionId,
+        generation,
+      });
     }
   }
 
@@ -133,6 +161,32 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
         borderColor={t.dim}
       >
         <Text wrap="truncate-end">{approvalLabel}</Text>
+      </Box>
+      <Box marginTop={1} marginLeft={1} flexDirection="column">
+        <Text color={t.dim}>
+          {route === 'auto' ? translate('approval.routeAuto') : translate('approval.routeUser')}
+          {queueEntry
+            ? [
+                translate('approval.queuePosition', { sequence: queueEntry.sequence }),
+                translate('approval.queueGeneration', { generation: queueEntry.generation }),
+              ].join(' · ')
+            : ''}
+        </Text>
+        {queueEntry?.matchCount != null && queueEntry.matchCount > 1 && (
+          <Text color={t.dim}>
+            {queueEntry.grant === 'same_command'
+              ? translate('approval.batchReleased', { count: queueEntry.matchCount })
+              : translate('approval.matchCount', { count: queueEntry.matchCount })}
+          </Text>
+        )}
+        <Text color={t.dim}>
+          {scopeLabel
+            ? translate('approval.scope', { scope: scopeLabel })
+            : translate('approval.scopeUnavailable')}
+        </Text>
+        {queueEntry?.status === 'authorized_queued' && (
+          <Text color={t.success}>{translate('approval.authorizedQueued')}</Text>
+        )}
       </Box>
       {approval.reviewFailure ? (
         <Box marginTop={1} marginLeft={1}>

@@ -328,7 +328,6 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
     buildRuntimeModeSnapshot({
       phase,
       interactionMode,
-      authorizationMode: input.state.authorization?.mode ?? 'default',
       sandboxBackend: input.sandboxBackend ?? 'unknown',
       planningState: planning.kind !== 'planning_empty' ? planning : undefined,
       taskId: activeTask?.taskId,

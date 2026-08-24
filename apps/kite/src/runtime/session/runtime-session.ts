@@ -1,6 +1,6 @@
 import type { BuiltinToolCatalogProjection } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { sandboxSupportsFullMode } from '@kite/builtin-runtime/sandbox';
+import { sandboxBackendAvailable } from '@kite/builtin-runtime/sandbox';
 import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
 import { projectRuntimeObservabilityFact } from '@kite/runtime-host';
 import type {
@@ -22,7 +22,6 @@ import type { AgentConfig } from '#app/config/index';
 import { composeAppGitBroker, resolveAppGitExecutable } from '#app/git/composition';
 import type { RuntimeMetricBridge } from '#app/observability/runtime-bridge';
 import {
-  fullModeUnavailableReason,
   type McpRecoveryController,
   providerActionInput,
   providerAdmissionInput,
@@ -301,7 +300,11 @@ export class SessionRuntime {
   private _proxyProvider: Pick<SessionUserInputProvider, 'requestAction'>;
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
   private _pendingInterrupt: SessionInterruptPayload | null = null;
-  private _pendingResolve: ((action: SessionUserAction) => void) | null = null;
+  private _pendingResolve: {
+    interactionId: string;
+    generation?: number;
+    resolve: (action: SessionUserAction) => void;
+  } | null = null;
   /**
    * A durable interaction can reach the TUI before the runner installs its
    * requestAction waiter (notably while concurrent Subagent siblings drain).
@@ -310,8 +313,11 @@ export class SessionRuntime {
    */
   private _queuedInterruptAction: {
     interactionId: string;
+    generation?: number;
     action: SessionUserAction;
   } | null = null;
+  /** Bounded exact-ID guard for key repeat and late UI submissions. */
+  private readonly _submittedInteractionIds = new Set<string>();
   private _activeDispatch: ((action: SessionPresentationAction) => void) | null = null;
   private _contentLoggingDisclosureShown = false;
   private readonly _observabilityBridge: RuntimeMetricBridge | undefined;
@@ -511,7 +517,7 @@ export class SessionRuntime {
     this._manualCompactionAbortController?.abort('Cancelled by user.');
     // Resolve a suspended interaction before aborting so the generator can
     // leave requestAction and close its StateRuntimeStorage handle.
-    this.resolveInterrupt({ type: 'cancel' as const });
+    this._cancelCurrentInteraction();
     this._preparingShellExecutor?.abortPreparation?.();
     this.abortController?.abort();
     this.abortController = null;
@@ -593,7 +599,7 @@ export class SessionRuntime {
     this._activeExecutionSignal = executionSignal;
     this._activeDispatch = deps.dispatch;
     const forwardHostAbort = () => {
-      this.resolveInterrupt({ type: 'cancel' as const });
+      this._cancelCurrentInteraction();
       this._preparingShellExecutor?.abortPreparation?.();
       this._manualCompactionAbortController?.abort('Cancelled by user.');
       this._foregroundWake?.();
@@ -639,33 +645,6 @@ export class SessionRuntime {
               shellDenyEvidence: deps.config.brokeredGitShellDenyEvidence,
             })
           : undefined;
-      const fullModeReason = fullModeUnavailableReason(this.interactionMode, effectiveBackend);
-      if (fullModeReason) {
-        const runtimeCoordinator = this._runtimeSessionCoordinator?.get(this.threadId);
-        const control = this.authorizedExecutionControl ?? runtimeCoordinator?.control;
-        control?.processEvent({
-          type: 'interaction_mode.changed',
-          mode: 'accept_edits',
-          source: 'user',
-          changedAt: new Date().toISOString(),
-        });
-        this.interactionMode = 'accept_edits';
-        runtimeCoordinator?.updateInteractionMode('accept_edits');
-        deps.dispatch({ type: 'SET_INTERACTION_MODE', mode: 'accept_edits' });
-        deps.dispatch({
-          type: 'RUNTIME_EVENT',
-          event: {
-            type: 'run.error',
-            message: fullModeReason,
-            recoverable: true,
-          },
-        });
-        return;
-      }
-
-      const authMode =
-        this.interactionMode === 'full' ? ('full_access' as const) : ('default' as const);
-
       const runAgentParams = buildRunAgentParams({
         task,
         threadId: this.threadId,
@@ -681,7 +660,6 @@ export class SessionRuntime {
         mcpManager: this.mcpManager,
         shellContext,
         interactionMode: this.interactionMode,
-        authorizationMode: authMode,
         phase: requestedPhase ?? 'building',
         sandboxBackend: effectiveBackend,
         model: deps.model,
@@ -694,7 +672,7 @@ export class SessionRuntime {
       }
       activeRuntimeCoordinator = runtimeCoordinator;
       this.authorizedExecutionControl = runtimeCoordinator.control;
-      runtimeCoordinator.updateSandboxAvailable(sandboxSupportsFullMode(effectiveBackend));
+      runtimeCoordinator.updateSandboxAvailable(sandboxBackendAvailable(effectiveBackend));
       reconcileRuntimeInteractionMode(runtimeCoordinator.control, this.interactionMode);
 
       // 始终使用代理提供器 — 事件路由由 _foreground 控制
@@ -719,8 +697,6 @@ export class SessionRuntime {
         skillOptions: runAgentParams.skillOptions,
         initialSkillActivations: runAgentParams.initialSkillActivations,
         interactionMode: runAgentParams.interactionMode,
-        authorizationMode: runAgentParams.authorizationMode,
-        authorizationSource: runAgentParams.authorizationSource,
         phase: runAgentParams.phase,
         thinkingLevel: runAgentParams.thinkingLevel,
         sandboxBackend: runAgentParams.sandboxBackend,
@@ -927,12 +903,6 @@ export class SessionRuntime {
   ): void {
     const observabilityFact = projectRuntimeObservabilityFact(event, new Date().toISOString());
     if (observabilityFact) this._observabilityBridge?.observeRuntimeFact(observabilityFact);
-    if (event.type === 'plan.approved') {
-      this.interactionMode = event.executionMode;
-      this._runtimeSessionCoordinator
-        ?.get(this.threadId)
-        ?.updateInteractionMode(event.executionMode);
-    }
     if (event.type === 'interaction_mode.changed') {
       this.interactionMode = event.mode;
       this._runtimeSessionCoordinator?.get(this.threadId)?.updateInteractionMode(event.mode);
@@ -1047,6 +1017,7 @@ export class SessionRuntime {
     if (effect.type === 'request_provider_action') {
       const response = await this._proxyProvider.requestAction({
         kind: 'input',
+        interactionId: effect.interactionId,
         question: providerActionInput(effect.providerId, effect.action),
       });
       if (response.type !== 'input' || response.text.toLowerCase().startsWith('later')) {
@@ -1079,6 +1050,7 @@ export class SessionRuntime {
     if (effect.type === 'request_provider_admission') {
       const response = await this._proxyProvider.requestAction({
         kind: 'input',
+        interactionId: effect.interactionId,
         question: providerAdmissionInput(
           effect.providerId,
           effect.providerStatus,
@@ -1150,6 +1122,7 @@ export class SessionRuntime {
       ];
       const action = await this._proxyProvider.requestAction({
         kind: 'input',
+        interactionId: effect.interactionId,
         question: {
           question: `Required verification is ${record.status}. Choose a recovery action.`,
           options,
@@ -1212,15 +1185,33 @@ export class SessionRuntime {
         : null;
     let payload: SessionInterruptPayload;
     if (effect.type === 'request_user_input' && interaction.kind === 'awaiting_user_input') {
-      payload = { kind: 'input', question: interaction.request };
+      payload = {
+        kind: 'input',
+        interactionId: effect.interactionId,
+        question: interaction.request,
+      };
     } else if (
       effect.type === 'request_tool_approval' &&
       interaction.kind === 'awaiting_tool_approval'
     ) {
-      payload = { kind: 'approval', approval: interaction.approval };
+      const pendingApproval = state.pendingApprovals.get(effect.interactionId);
+      if (!pendingApproval || pendingApproval.status !== 'awaiting_user') {
+        return {
+          type: 'cancel',
+          interactionId: effect.interactionId,
+          reason: 'Approval queue identity changed.',
+        };
+      }
+      payload = {
+        kind: 'approval',
+        interactionId: effect.interactionId,
+        generation: pendingApproval.generation,
+        approval: interaction.approval,
+      };
     } else if (effect.type === 'request_plan_review' && interaction.kind === 'awaiting_review') {
       payload = {
         kind: 'plan_review',
+        interactionId: effect.interactionId,
         plan: interaction.plan,
         ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
       };
@@ -1242,19 +1233,18 @@ export class SessionRuntime {
           answers: action.answers,
         };
       case 'approve':
-        return action.grant === 'none'
-          ? {
-              type: 'reject',
-              interactionId: effect.interactionId,
-              reason: 'No approval grant selected.',
-            }
-          : {
-              type: 'approve',
-              interactionId: effect.interactionId,
-              grant: action.grant,
-            };
+        return {
+          type: 'approve',
+          interactionId: effect.interactionId,
+          generation: payload.kind === 'approval' ? payload.generation : -1,
+          grant: action.grant,
+        };
       case 'reject':
-        return { type: 'reject', interactionId: effect.interactionId };
+        return {
+          type: 'reject',
+          interactionId: effect.interactionId,
+          generation: payload.kind === 'approval' ? payload.generation : -1,
+        };
       case 'plan_review_decision':
         return planReviewDecision(action.decision)!;
       case 'cancel':
@@ -1281,7 +1271,7 @@ export class SessionRuntime {
             !payload.question?.context?.startsWith('verification:') &&
             !payload.question?.context?.startsWith('mcp-provider-')
           ) {
-            return { type: 'cancel' as const };
+            return { type: 'cancel' as const, interactionId: payload.interactionId };
           }
           // 后台 tool_approval 中断：标记并等待前台切换
           // Background tool_approval: mark and wait for foreground switch
@@ -1292,19 +1282,33 @@ export class SessionRuntime {
           });
           self.pendingInterrupt = false;
           if (!self._activeExecutionSignal || self._activeExecutionSignal.aborted) {
-            return { type: 'cancel' as const };
+            return { type: 'cancel' as const, interactionId: payload.interactionId };
           }
         }
-        const interactionId = self._currentRuntimeInteractionId();
         const queued = self._queuedInterruptAction;
         if (queued) {
           self._queuedInterruptAction = null;
-          if (queued.interactionId === interactionId) return queued.action;
+          if (
+            queued.interactionId === payload.interactionId &&
+            // Approve/reject are approval-generation scoped.  Cancellation
+            // is deliberately not: Ctrl+C and an early Esc/cancel may arrive
+            // before the waiter attaches, and input/plan interactions do not
+            // carry an approval generation at all.  Requiring
+            // `undefined === payload.generation` here strands an early
+            // cancellation for an approval forever.
+            (queued.action.type === 'cancel' || queued.generation === approvalGeneration(payload))
+          ) {
+            return queued.action;
+          }
         }
         // 使用运行时自身的中断状态，永久等待用户处理
         self._pendingInterrupt = payload;
         return new Promise<SessionUserAction>((resolve) => {
-          self._pendingResolve = resolve;
+          self._pendingResolve = {
+            interactionId: payload.interactionId,
+            ...(payload.kind === 'approval' ? { generation: payload.generation } : {}),
+            resolve,
+          };
         });
       },
 
@@ -1313,7 +1317,7 @@ export class SessionRuntime {
       },
 
       reset(): void {
-        self.resolveInterrupt({ type: 'cancel' as const });
+        self._cancelCurrentInteraction();
       },
 
       getPendingInterrupt(): SessionInterruptPayload | null {
@@ -1321,7 +1325,7 @@ export class SessionRuntime {
       },
 
       teardown(): Promise<void> {
-        self.resolveInterrupt({ type: 'cancel' as const });
+        self._cancelCurrentInteraction();
         return Promise.resolve();
       },
     };
@@ -1330,36 +1334,103 @@ export class SessionRuntime {
 
   /** 解析挂起的中断（由 SessionManager 的中央 bridge 调用）/ Resolve pending interrupt (called by SessionManager's central bridge) */
   resolveInterrupt(action: SessionUserAction): void {
-    if (this._pendingResolve) {
-      const r = this._pendingResolve;
+    const actionKey = sessionActionIdentity(action);
+    const generation = approvalActionGeneration(action);
+    if (this._submittedInteractionIds.has(actionKey)) return;
+    if (
+      this._pendingResolve?.interactionId === action.interactionId &&
+      (action.type === 'cancel' || this._pendingResolve.generation === generation)
+    ) {
+      const pending = this._pendingResolve;
       this._pendingResolve = null;
       this._pendingInterrupt = null;
       this._queuedInterruptAction = null;
-      r(action);
+      this._rememberSubmittedInteraction(actionKey);
+      pending.resolve(action);
       return;
     }
-    const interactionId = this._currentRuntimeInteractionId();
-    if (interactionId && !this._queuedInterruptAction) {
-      this._queuedInterruptAction = { interactionId, action };
+    const interaction = this._currentRuntimeInteractionIdentity();
+    if (
+      interaction?.interactionId === action.interactionId &&
+      (action.type === 'cancel' || interaction.generation === generation) &&
+      !this._queuedInterruptAction
+    ) {
+      this._queuedInterruptAction = {
+        interactionId: action.interactionId,
+        ...(generation === undefined ? {} : { generation }),
+        action,
+      };
     }
   }
 
+  private _cancelCurrentInteraction(): void {
+    const interactionId =
+      this._pendingInterrupt?.interactionId ??
+      this._pendingResolve?.interactionId ??
+      this._currentRuntimeInteractionId();
+    if (interactionId) this.resolveInterrupt({ type: 'cancel', interactionId });
+  }
+
+  private _rememberSubmittedInteraction(actionIdentity: string): void {
+    this._submittedInteractionIds.add(actionIdentity);
+    if (this._submittedInteractionIds.size <= 4096) return;
+    const oldest = this._submittedInteractionIds.values().next().value;
+    if (typeof oldest === 'string') this._submittedInteractionIds.delete(oldest);
+  }
+
   private _currentRuntimeInteractionId(): string | null {
-    let interaction: Readonly<RuntimeState>['interactions'] | undefined;
+    return this._currentRuntimeInteractionIdentity()?.interactionId ?? null;
+  }
+
+  private _currentRuntimeInteractionIdentity(): {
+    interactionId: string;
+    generation?: number;
+  } | null {
+    let state: Readonly<RuntimeState> | undefined;
     try {
-      interaction = this._runtimeSessionCoordinator?.get(this.threadId)?.getState().interactions;
+      state = this._runtimeSessionCoordinator?.get(this.threadId)?.getState();
     } catch {
       // An idle or closing coordinator may intentionally have no readable
       // control plane. There is no durable interaction to bind in that state.
       return null;
     }
-    if (!interaction || interaction.kind === 'idle' || !('interactionId' in interaction)) {
-      return null;
+    const interaction = state?.interactions;
+    if (interaction && interaction.kind !== 'idle' && 'interactionId' in interaction) {
+      const interactionId = interaction.interactionId;
+      if (typeof interactionId === 'string' && interactionId.length > 0) {
+        // The focused interaction wins over an off-screen approval.  This is
+        // important while an input/plan waiter is visible alongside durable
+        // queued approvals: an early cancel must bind to the input/plan id,
+        // not be discarded because the approval carries another generation.
+        const pending = state?.pendingApprovals.get(interactionId);
+        return {
+          interactionId,
+          ...(pending ? { generation: pending.generation } : {}),
+        };
+      }
     }
-    return typeof interaction.interactionId === 'string' && interaction.interactionId.length > 0
-      ? interaction.interactionId
-      : null;
+    const activeApprovalId = state?.activeApprovalId;
+    if (typeof activeApprovalId === 'string' && activeApprovalId.length > 0) {
+      const pending = state?.pendingApprovals.get(activeApprovalId);
+      return {
+        interactionId: activeApprovalId,
+        ...(pending ? { generation: pending.generation } : {}),
+      };
+    }
+    return null;
   }
+}
+
+function approvalGeneration(payload: SessionInterruptPayload): number | undefined {
+  return payload.kind === 'approval' ? payload.generation : undefined;
+}
+
+function approvalActionGeneration(action: SessionUserAction): number | undefined {
+  return action.type === 'approve' || action.type === 'reject' ? action.generation : undefined;
+}
+
+function sessionActionIdentity(action: SessionUserAction): string {
+  return `${action.interactionId}:${approvalActionGeneration(action) ?? 'interaction'}`;
 }
 
 /** 多会话管理器：创建/切换/查快照 */

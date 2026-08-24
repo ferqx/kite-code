@@ -118,7 +118,11 @@ export function createAppStateToolPipelinePersistence(
       startedAt: now,
       attempt,
     });
-    if (toolCall?.status === 'queued' || toolCall?.status === 'approved') {
+    if (
+      toolCall?.status === 'queued' ||
+      toolCall?.status === 'approved' ||
+      toolCall?.status === 'authorized_queued'
+    ) {
       events.push({ type: 'tool.started', toolCallId: identity.toolCallId, createdAt: now });
     }
 
@@ -765,7 +769,7 @@ function assertPreparedState(
   const toolCall = state.tools.calls[identity.toolCallId];
   if (
     !toolCall ||
-    !['queued', 'approved', 'running'].includes(toolCall.status) ||
+    !['queued', 'approved', 'authorized_queued', 'running'].includes(toolCall.status) ||
     toolCall.name !==
       (identity.isDynamicMcp ? identity.subject.exposedToolName : identity.exposedToolName) ||
     toolCall.createdAtTurnId !== identity.turnId ||

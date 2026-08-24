@@ -72,7 +72,7 @@ export interface BuiltinPrimaryInvalidToolCall {
   readonly unparsedArgs: string;
 }
 
-/** Provider-neutral facts passed to the synchronous State 25 translation adapter. */
+/** Provider-neutral facts passed to the synchronous State 27 translation adapter. */
 export interface BuiltinPrimaryModelCompletion {
   readonly invocationId: string;
   readonly messageId: string;

@@ -402,39 +402,48 @@ describe('runtime user actions', () => {
       },
     };
 
-    const events = eventsForRuntimeAction(state, {
-      type: actionType,
-      interactionId: 'approval-1',
-      reason: 'Cancelled with Ctrl+C.',
-    });
+    const events = eventsForRuntimeAction(
+      state,
+      actionType === 'reject'
+        ? {
+            type: 'reject',
+            interactionId: 'approval-1',
+            generation: 0,
+            reason: 'Cancelled with Ctrl+C.',
+          }
+        : { type: 'cancel', interactionId: 'approval-1', reason: 'Cancelled with Ctrl+C.' },
+    );
 
-    expect(events.map((event) => event.type)).toEqual([
-      'approval.rejected',
-      'tool.cancelled',
-      'tool.cancelled',
-      'turn.aborted',
-    ]);
-    expect(events).toEqual([
-      expect.objectContaining({
-        type: 'approval.rejected',
+    if (actionType === 'reject') {
+      expect(events.map((event) => event.type)).toEqual(['approval.rejected']);
+      expect(events[0]).toMatchObject({
         interactionId: 'approval-1',
         toolCallId: 'shell-1',
         reason: 'Cancelled with Ctrl+C.',
-      }),
-      expect.objectContaining({
-        type: 'tool.cancelled',
-        toolCallId: 'shell-running',
-      }),
-      expect.objectContaining({
-        type: 'tool.cancelled',
-        toolCallId: 'read-queued',
-      }),
-      expect.objectContaining({
-        type: 'turn.aborted',
-        cause: 'user',
-        reason: 'Cancelled with Ctrl+C.',
-      }),
-    ]);
+      });
+    } else {
+      expect(events.map((event) => event.type)).toEqual([
+        'approval.rejected',
+        'tool.cancelled',
+        'tool.cancelled',
+        'turn.aborted',
+      ]);
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: 'approval.rejected',
+          interactionId: 'approval-1',
+          toolCallId: 'shell-1',
+          reason: 'Cancelled with Ctrl+C.',
+        }),
+        expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'shell-running' }),
+        expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'read-queued' }),
+        expect.objectContaining({
+          type: 'turn.aborted',
+          cause: 'user',
+          reason: 'Cancelled with Ctrl+C.',
+        }),
+      ]);
+    }
   });
 
   test.each([
@@ -491,45 +500,16 @@ describe('runtime user actions', () => {
   });
 });
 
-test('full access approval is rejected when no sandbox is available', () => {
+test('Full mode is not represented as an approval grant', () => {
   const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'auth',
     userId: 'u',
     workspace: '/',
+    interactionMode: 'full',
   });
-  state.interactions = {
-    kind: 'awaiting_tool_approval',
-    interactionId: 'approval-1',
-    toolCallId: 'tool-1',
-    approval: {
-      scope: 'once',
-      cwd: '/',
-      threadId: 'auth',
-      tool: 'shell_execute',
-      command: 'pwd',
-      risk: 'execute_code',
-      approvalHash: 'hash',
-      summary: 'Run pwd',
-      reason: 'test',
-      expectedEffects: [],
-      grantOptions: ['full_access'],
-      recommendedGrant: 'full_access',
-    },
-  };
-  expect(
-    eventsForRuntimeAction(
-      state,
-      { type: 'approve', interactionId: 'approval-1', grant: 'full_access' },
-      { sandboxAvailable: false },
-    ),
-  ).toEqual([
-    expect.objectContaining({
-      type: 'approval.rejected',
-      toolCallId: 'tool-1',
-      reason: expect.stringContaining('requires'),
-    }),
-  ]);
+  expect(state.mode).toBe('full');
+  expect(state.sessionCommandGrants).toEqual(new Map());
 });
 
 test('bounded cancellation removes every durable waiter before aborting the turn', () => {
@@ -648,7 +628,16 @@ test('process cancellation on one child approval settles deferred siblings witho
     },
   };
 
-  const events = eventsForRunCancellation(state, 'Tool approval cancelled by user.', 'user');
+  const queuedState = reduceRuntimeState(state, {
+    type: 'approval.requested',
+    interactionId: 'approval-a',
+    toolCallId: 'task-a',
+    fullModeBypassEligible: false,
+    fullModePolicyBypassAllowed: false,
+    approval: state.interactions.approval,
+  });
+
+  const events = eventsForRunCancellation(queuedState, 'Tool approval cancelled by user.', 'user');
 
   expect(events).toContainEqual(
     expect.objectContaining({ type: 'approval.rejected', toolCallId: 'task-a' }),
@@ -681,7 +670,7 @@ test('process cancellation on one child approval settles deferred siblings witho
         current,
         normalizeCurrentToolOutcomeEvent(event, current, '2026-08-24T00:00:00.000Z'),
       ),
-    state,
+    queuedState,
   );
   expect(cancelled.tools.calls['task-a']?.status).toBe('rejected');
   expect(cancelled.tools.calls['task-b']?.status).toBe('cancelled');
@@ -724,6 +713,7 @@ test('approval ignores grants that were not offered by the pending interaction',
     eventsForRuntimeAction(state, {
       type: 'approve',
       interactionId: 'approval-1',
+      generation: 0,
       grant: 'same_command',
     }),
   ).toEqual([]);

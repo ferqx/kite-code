@@ -23,8 +23,8 @@ test('RA-05 maps every State field into the exact State target without a product
   } = target.session;
   const state = {
     ...target,
-    schemaVersion: 25,
-    formatEpoch: 'kite-runtime-2026-08-18',
+    schemaVersion: 27,
+    formatEpoch: 'kite-runtime-saq-v1-2026-08-25',
     session: stateSession,
   };
   const mapped = mapHistoricalStateToState({

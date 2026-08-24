@@ -61,7 +61,6 @@ function stateWithPending(
     },
     interactions: { kind: overrides.interactions ?? 'idle' },
     tools: { calls: {} },
-    authorization: { mode: 'default' },
     mode: 'accept_edits',
   };
 }

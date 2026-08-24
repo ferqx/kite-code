@@ -1,6 +1,4 @@
-import { assertRuntimeAuthorizationElevation as assertAuthorizationElevation } from '@kite/runtime-host';
 import {
-  runtimeHostStateApplyApprovalGrant as applyApprovalGrant,
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
   runtimeHostStateInteractionToolCall as interactionToolCall,
@@ -205,6 +203,9 @@ function approvalCancellationEvents(
       type: 'approval.rejected',
       interactionId: interaction.interactionId,
       toolCallId: interaction.toolCallId,
+      generation:
+        state.pendingApprovals.get(interaction.interactionId)?.generation ??
+        state.approvalGeneration,
       reason,
       failure: classifyFailure('approval_rejected', reason),
     },
@@ -221,6 +222,110 @@ function approvalCancellationEvents(
       turnId: state.turn.turnId,
       reason,
       cause: 'user',
+    },
+  ];
+}
+
+function focusedApprovalRejectionEvent(
+  state: Readonly<RuntimeState>,
+  interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_tool_approval' }>,
+  reason: string,
+): RuntimeEvent {
+  return {
+    type: 'approval.rejected',
+    interactionId: interaction.interactionId,
+    toolCallId: interaction.toolCallId,
+    generation:
+      state.pendingApprovals.get(interaction.interactionId)?.generation ?? state.approvalGeneration,
+    reason,
+    failure: classifyFailure('approval_rejected', reason),
+  };
+}
+
+function eventsForPendingApprovalAction(
+  state: Readonly<RuntimeState>,
+  action: Extract<RuntimeUserAction, { type: 'approve' | 'reject' }>,
+): RuntimeEvent[] | null {
+  const pending = state.pendingApprovals.get(action.interactionId);
+  if (!pending) return null;
+  if (
+    state.activeApprovalId !== action.interactionId ||
+    pending.status !== 'awaiting_user' ||
+    pending.generation !== action.generation
+  ) {
+    return [];
+  }
+  if (action.type === 'reject') {
+    const reason = action.reason ?? 'Tool approval rejected by user.';
+    return [
+      {
+        type: 'approval.rejected',
+        interactionId: pending.interactionId,
+        toolCallId: pending.toolCallId,
+        generation: pending.generation,
+        reason,
+        failure: classifyFailure('approval_rejected', reason),
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+  if (action.grant !== 'approve_once' && action.grant !== 'same_command') {
+    return [];
+  }
+  if (!pending.approval.grantOptions.includes(action.grant)) return [];
+  if (action.grant === 'approve_once') {
+    return [
+      {
+        type: 'approval.granted',
+        interactionId: pending.interactionId,
+        toolCallId: pending.toolCallId,
+        grant: 'approve_once',
+        receiptId: crypto.randomUUID(),
+        generation: pending.generation,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+  if (!pending.commandIdentity || !pending.commandKey) return [];
+  const matches = [...state.pendingApprovals.values()]
+    .filter(
+      (candidate) =>
+        candidate.commandKey === pending.commandKey &&
+        candidate.generation === pending.generation &&
+        ['queued_auto', 'auto_reviewing', 'queued_user', 'awaiting_user'].includes(
+          candidate.status,
+        ),
+    )
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((candidate) => ({
+      interactionId: candidate.interactionId,
+      toolCallId: candidate.toolCallId,
+      receiptId: crypto.randomUUID(),
+      generation: candidate.generation,
+      bindingDigest: candidate.bindingDigest,
+    }));
+  if (!matches.some((candidate) => candidate.interactionId === pending.interactionId)) return [];
+  return [
+    {
+      type: 'approval.batch_released',
+      interactionId: pending.interactionId,
+      toolCallId: pending.toolCallId,
+      grant: 'same_command',
+      grantKey: pending.commandKey,
+      sessionRevision: state.revision,
+      generation: pending.generation,
+      commandIdentity: pending.commandIdentity,
+      matches,
+      cancelledReviewIds: [...state.pendingApprovals.values()]
+        .filter(
+          (candidate) =>
+            candidate.commandKey === pending.commandKey &&
+            candidate.generation === pending.generation &&
+            candidate.route === 'auto' &&
+            (candidate.status === 'queued_auto' || candidate.status === 'auto_reviewing'),
+        )
+        .map((candidate) => candidate.interactionId),
+      createdAt: new Date().toISOString(),
     },
   ];
 }
@@ -302,9 +407,10 @@ export type RuntimeUserAction =
   | {
       type: 'approve';
       interactionId: string;
+      generation: number;
       grant: import('@kite/runtime-contract').ShellApprovalGrant;
     }
-  | { type: 'reject'; interactionId: string; reason?: string }
+  | { type: 'reject'; interactionId: string; generation: number; reason?: string }
   // ── Plan Mode v2: unified plan_review_decision ──
   | {
       type: 'plan_review_decision';
@@ -360,7 +466,7 @@ export type RuntimeActionResult =
 export function eventsForRuntimeAction(
   state: RuntimeState,
   action: RuntimeUserAction,
-  options: { sandboxAvailable?: boolean } = {},
+  _options: { sandboxAvailable?: boolean } = {},
 ): RuntimeEvent[] {
   if (action.type === 'reconcile_invocation') {
     const invocation = state.capabilities.invocations[action.invocationId];
@@ -415,6 +521,10 @@ export function eventsForRuntimeAction(
       },
     ];
   }
+  if (action.type === 'approve' || action.type === 'reject') {
+    const pendingEvents = eventsForPendingApprovalAction(state, action);
+    if (pendingEvents !== null) return pendingEvents;
+  }
   const interaction = state.interactions;
   if (interaction.kind === 'idle' || interaction.interactionId !== action.interactionId) return [];
 
@@ -449,62 +559,29 @@ export function eventsForRuntimeAction(
 
   if (interaction.kind === 'awaiting_tool_approval') {
     if (action.type === 'approve') {
+      if (action.grant !== 'approve_once' && action.grant !== 'same_command') return [];
       if (!interaction.approval.grantOptions.includes(action.grant)) return [];
-      if (action.grant === 'full_access') {
-        try {
-          assertAuthorizationElevation({
-            mode: 'full_access',
-            source: 'user',
-            sandboxAvailable: options.sandboxAvailable ?? false,
-          });
-        } catch (error) {
-          return [
-            {
-              type: 'approval.rejected',
-              interactionId: action.interactionId,
-              toolCallId: interaction.toolCallId,
-              reason: error instanceof Error ? error.message : String(error),
-              failure: classifyFailure(
-                'sandbox_error',
-                error instanceof Error ? error.message : String(error),
-              ),
-            },
-          ];
-        }
-      }
-      const nextAuthorization = applyApprovalGrant({
-        authorization: state.authorization,
-        grant: action.grant,
-        source: 'user',
-        workspace: state.session.workspace,
-        threadId: state.session.threadId,
-        command: interaction.approval.command,
-        grantedAt: new Date().toISOString(),
-      });
+      if (action.grant === 'same_command') return [];
       return [
         {
           type: 'approval.granted',
           interactionId: action.interactionId,
           toolCallId: interaction.toolCallId,
-          grant: action.grant,
-        },
-        {
-          type: 'authorization.changed',
-          mode: nextAuthorization.mode,
-          commandGrants: nextAuthorization.commandGrants,
-          modeSource: nextAuthorization.modeSource,
-          modeGrantedAt: nextAuthorization.modeGrantedAt,
+          grant: 'approve_once',
+          receiptId: crypto.randomUUID(),
+          generation: state.approvalGeneration,
         },
       ];
     }
-    if (action.type === 'reject' || action.type === 'cancel') {
+    if (action.type === 'reject') {
+      const reason = action.reason ?? 'Tool approval rejected by user.';
+      return [focusedApprovalRejectionEvent(state, interaction, reason)];
+    }
+    if (action.type === 'cancel') {
       return approvalCancellationEvents(
         state,
         interaction,
-        action.reason ??
-          (action.type === 'reject'
-            ? 'Tool approval rejected by user.'
-            : 'Tool approval cancelled by user.'),
+        action.reason ?? 'Tool approval cancelled by user.',
       );
     }
     return [];

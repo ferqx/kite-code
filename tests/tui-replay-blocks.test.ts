@@ -21,6 +21,10 @@ const approval = {
   grantOptions: ['approve_once'],
   recommendedGrant: 'approve_once',
 } as unknown as ToolApprovalPayload;
+const APPROVAL_EVENT_METADATA = {
+  fullModeBypassEligible: false,
+  fullModePolicyBypassAllowed: false,
+} as const;
 
 function data(
   runtimeEvents: RuntimeEvent[],
@@ -35,7 +39,6 @@ function data(
     modelName: 'test',
     thinkingLevel: null,
     plan: null,
-    planAuthMode: null,
   };
 }
 
@@ -59,6 +62,7 @@ describe('TUI replay interaction recovery', () => {
           },
           {
             type: 'approval.requested',
+            ...APPROVAL_EVENT_METADATA,
             interactionId: 'approval-1',
             toolCallId: 'tool-1',
             approval,
@@ -90,7 +94,13 @@ describe('TUI replay interaction recovery', () => {
           args: { command: 'echo ok' },
         },
         { type: 'tool.started', toolCallId: 'tool-1' },
-        { type: 'approval.requested', interactionId: 'approval-1', toolCallId: 'tool-1', approval },
+        {
+          type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
+          interactionId: 'approval-1',
+          toolCallId: 'tool-1',
+          approval,
+        },
       ]),
     );
 
@@ -125,6 +135,7 @@ describe('TUI replay interaction recovery', () => {
       },
       {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-external-write',
         toolCallId: 'external-write',
         approval,
@@ -266,6 +277,7 @@ describe('TUI replay interaction recovery', () => {
         },
         {
           type: 'auto_review.requested',
+          ...APPROVAL_EVENT_METADATA,
           reviewId: 'review-1',
           toolCallId: 'tool-2',
           toolName: 'shell_execute',
@@ -296,6 +308,7 @@ describe('TUI replay interaction recovery', () => {
         },
         {
           type: 'auto_review.requested',
+          ...APPROVAL_EVENT_METADATA,
           reviewId: 'legacy-review',
           toolCallId: 'tool-legacy-review',
           toolName: 'shell_execute',
@@ -328,6 +341,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'approved-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'approval-granted',
           toolCallId: 'approved-tool',
           approval,
@@ -337,6 +351,8 @@ describe('TUI replay interaction recovery', () => {
           interactionId: 'approval-granted',
           toolCallId: 'approved-tool',
           grant: 'approve_once',
+          receiptId: 'receipt-approved-tool',
+          generation: 0,
         },
       ]),
     );
@@ -345,6 +361,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'rejected-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'approval-rejected',
           toolCallId: 'rejected-tool',
           approval,
@@ -353,6 +370,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'approval.rejected',
           interactionId: 'approval-rejected',
           toolCallId: 'rejected-tool',
+          generation: 0,
           reason: 'Tool approval cancelled by user.',
         },
       ]),
@@ -377,6 +395,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'started-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'approval-started',
           toolCallId: 'started-tool',
           approval,
@@ -402,6 +421,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'started-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'stale-approval',
           toolCallId: 'started-tool',
           approval: { ...approval, callId: 'started-tool' },
@@ -410,6 +430,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'rejected-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'rejected-approval',
           toolCallId: 'rejected-tool',
           approval: { ...approval, callId: 'rejected-tool' },
@@ -418,6 +439,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'approval.rejected',
           interactionId: 'rejected-approval',
           toolCallId: 'rejected-tool',
+          generation: 0,
           reason: 'Tool approval cancelled by user.',
         },
       ]),
@@ -439,6 +461,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'finished-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'stale-completed-approval',
           toolCallId: 'finished-tool',
           approval: { ...approval, callId: 'finished-tool' },
@@ -452,6 +475,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'rejected-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'rejected-approval',
           toolCallId: 'rejected-tool',
           approval: { ...approval, callId: 'rejected-tool' },
@@ -460,6 +484,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'approval.rejected',
           interactionId: 'rejected-approval',
           toolCallId: 'rejected-tool',
+          generation: 0,
           reason: 'Tool approval cancelled by user.',
         },
       ]),

@@ -15,7 +15,7 @@ const DEFAULT_RUNTIME_SCOPE_ = Object.freeze([
 
 /**
  * Project non-persisted scheduler facts from the one frozen Builtin catalog.
- * State 25 remains unchanged; dynamic MCP and malformed calls receive only the
+ * State 27 remains unchanged; dynamic MCP and malformed calls receive only the
  * generic exclusive fallback and never create another per-name traits table.
  */
 export function projectRuntimeSchedulerFacts(

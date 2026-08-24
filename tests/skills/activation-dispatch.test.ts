@@ -338,12 +338,13 @@ function fixture(
     disclosures: Object.freeze([disclosure]),
   });
   const baseGovernance = Object.freeze({
+    sessionId: THREAD_ID,
     workspace: '/workspace',
+    canonicalWorkspaceIdentity: '/workspace',
     threadId: THREAD_ID,
     context: Object.freeze({
       phase: 'building' as const,
       interactionMode: 'accept_edits' as const,
-      authorizationMode: 'default' as const,
       sandboxAvailable: true,
       circuitBreakerTripped: false,
       gates: Object.freeze({

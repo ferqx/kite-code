@@ -8,7 +8,7 @@
 
 App `RuntimeSessionCoordinator`、Kernel Runtime State 与同一 Host SQLite Store adapter 共享唯一 persistence/abort seam；
 Session、effect coordinator 与 turn coordinator 不按路径自行创建第二 Store。取消顺序、cleanup barrier、effect lease、
-unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持；RM-16 final Gate 已完成。
+unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持；SAQ queue/generation/revision 也必须沿同一 boundary。
 
 RM-06 已把 production execution lifecycle 原子切到 Runtime Host。Host 为每个长期 turn/compaction 创建唯一
 root `AbortController`，同一 Session 同时最多一个活动 operation；只有当前 operation 已收到 abort 后才允许保留
@@ -25,14 +25,14 @@ Session lifecycle，拒绝后续 dispatch/commit；dispatch 后没有 receipt �
 收敛。terminal persist 必须携带执行者取得的 caller-bound owner token；Host 不允许旧执行者从相同 effectId 的
 replacement claim 反查并借用新 owner。Host 在 hydrate 后、首次 resume/start/compact 前对每个 Session 恰好运行一次 restart recovery，失败时在
 execution bridge 前 fail closed。当前没有进程级 single-Host global lock；SQLite transaction、revision 与
-effect lease 负责真实 writer fencing。Runtime State、SQLite Store 与 epoch `kite-runtime-modularization-v1-2026-08-19`
-是唯一 production format。
+effect lease 负责真实 writer fencing。Runtime State、SQLite Store 与 State 27/SAQ epoch 是唯一 production format；旧单槽
+approval/旧 Full grant 不进入新 reducer。
 
 ## Runtime 取消语义
 
 取消通过 AbortSignal 传播到模型、工具和 Subagent。用户停止当前轮次时，App shell 必须先通过 live Kernel control plane 原子持久化全部未终结工具的 `tool.cancelled` 与带 `cause=user` 的 `turn.aborted`，再触发 AbortSignal；这样活动 Effect lease 会因 revision 前移而失效，队列、active 列表和 transcript 工具调用/结果对共同收敛，不能留下永久 busy 状态。公共 `RunRuntimeAgentInput.signal` 也属于相同的取消边界：无论调用方是否持有 Kernel control，它一旦 abort 必须先写出同一组 durable cancellation facts，再解除 model、tool 或 interaction 等待；不得让 generator 静默结束而把 active turn 留在 Store。该操作只终止当前 turn，不把活动 task 改为 cancelled，下一条用户消息仍可沿当前任务上下文继续。重复取消不得追加重复 Tool Result。TUI 清理运行中 block 只是上述 Runtime 事实的展示投影，不是 Runtime 取消事实本身。
 
-工具审批中的显式“拒绝”与 Esc/取消使用同一整轮语义。Kernel 必须在一个 action batch 中先为当前审批目标写入带 `approval_rejected` failure 的 `approval.rejected`，再为其余未终结 sibling 写入 `tool.cancelled`；若这些终态覆盖的 Tool 仍有 `recorded/running` 且要求 receipt 的 Capability invocation，必须在同一 batch 中先写入 exact-invocation `capability.reconciliation_resolved(decision=waived)`，最后才能写入 `turn.aborted(cause=user)`。终态 batch 不得留下任何 outlives-terminal-Tool 的 Capability。Runner 随即退出，不再请求后续审批、执行 queued 工具或调用模型。Agent 在观察到该用户审批拒绝时立即 abort 本轮内部执行信号，使已经启动的 Shell、Subagent 或其他可取消执行真正停止；迟到事件由 Effect lease 拒绝。该规则不适用于 `policy_denied`、sandbox 缺失或系统自动审查等非用户拒绝，它们继续按各自失败路径处理。
+工具审批的显式 reject 与 whole-turn cancel 是不同动作。Kernel 对 Approval overlay 的 Esc 只在一个 action batch 中写入 focused `approval.rejected`，校验 interactionId/generation 后推进下一个人工 focus，不取消无关 sibling；Ctrl+C 才写入其余未终结 sibling 的 `tool.cancelled`、必要的 `capability.reconciliation_resolved(decision=waived)` 与 `turn.aborted(cause=user)`。终态 batch 不得留下任何 outlives-terminal-Tool 的 Capability。Runner 在 Ctrl+C 后不再请求后续审批、执行 queued 工具或调用模型；策略拒绝、sandbox 缺失或系统自动审查失败继续按各自 failure path 处理。
 
 方案执行确认（`request_plan_review`）也是执行授权屏障。用户选择取消或按 Esc 时，Kernel 在同一 action batch 中写入 `plan.review_cancelled`，将触发确认的方案工具及其余未终结 sibling 全部写为 `tool.cancelled`，最后写入 `turn.aborted(cause=user)`；方案文档保留为可继续修改的 draft，但当前 turn 立即结束，Runner 不得再次调用模型或进入执行阶段。
 
@@ -108,7 +108,11 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 
 ## Resume 语义
 
-恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。App 读取会话时必须把 rolling snapshot 之后的持久化事件尾部归并后再投影交互；已经出现 `approval.granted` 或 `approval.rejected` 的审批不得从旧快照或事件重放中复活。回放层留下的 `approval.requested` 展示投影也不能单独判定为 pending：若持久化 RuntimeState 已无 interaction（例如后续已有 `tool.started`），不得 fork 一份重复的 recovery 会话。`tool.started` 必须同步清理同一 call 的旧审批投影，否则它会阻塞后续 `approval.requested`，使真实的 `approval.rejected` 工具卡在回放中丢失。Subagent 审批的展示交互以 parent `task` call 为 owner；child Tool Call id 只标识实际待执行工具，不能导致批准或拒绝后的 Footer interrupt 残留。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。
+恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。App 读取会话时必须把 rolling snapshot 之后的持久化事件尾部归并后再投影交互；已经出现 `approval.granted`、`approval.batch_released` 或 `approval.rejected` 的审批不得从旧快照或事件重放中复活。回放层留下的 `approval.requested` 展示投影也不能单独判定为 pending：必须以 State 27 queue record/status/generation 为准；若该 record 已终态（例如后续已有 `tool.started`），不得 fork 一份重复的 recovery 会话。`tool.started` 必须同步清理同一 call 的旧审批投影，否则它会阻塞后续 `approval.requested`，使真实的 `approval.rejected` 工具卡在回放中丢失。Subagent 审批的展示交互以 parent `task` call 为 owner；child Tool Call id 只标识实际待执行工具，不能导致批准或拒绝后的 Footer interrupt 残留。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。
+
+SAQ-10 覆盖该恢复判定：`approval.granted`、`approval.batch_released` 与 `approval.rejected` 都按 generation
+和 queue record 终态去重；不能只看旧的单一 interaction。`approval.requested` 只有在 State 27 record 仍为
+queued/awaiting/approving 时才是 pending，迟到的旧 session/revision 或已 terminal record 必须 no-op。
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
 Runtime recovery journal identity 由 Host 的同一 SQLite Store owner 按 session 恢复并与 Runtime State snapshot
@@ -225,13 +229,14 @@ private suspended ref、Artifact schema/key、approval resume、cancel grace、c
 并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
 可见的 suspended 状态并停止 spinner 与计时；snapshot 的原始 route 将其区分为“自动审查排队中”或
 “人工审批排队中”，取得 interaction 后再显示“自动审查中”或“等待你的批准”，只有最后一种表示用户必须操作。该展示不能依赖 child 是否占有
-唯一的 approval interaction。只有一个审批可以成为 canonical interaction，其余 continuation 通过
-`subagent.approval_deferred` 排队。snapshot 必须保存原始人工或 auto-review 路由，历史 snapshot
-缺失该字段时保守回退人工审批；重新呈现延后审批不 dispatch、不创建资源 reservation，真正批准
-并恢复 child 时才创建新的 parent attempt。`subagent.approval_deferred` 只能表达排队事实，不得覆盖
-snapshot 已给出的 route；任一 child 的 done/error/cancelled 终态都必须清除其 approvalState 与待审批标记，
-不能因为其他 sibling 仍在运行或已经完成而留下幽灵审批。已经获批的 active continuation 必须先于 deferred sibling
-恢复；批准事件立即将 TUI block 切回 running，后续 child step 保持该状态。
+唯一的 approval interaction。每个 child 都保留自己的 canonical Session queue record、route、generation、sequence、
+bindingDigest 与 parent/child/runtime identity；只有当前可见的 `awaiting_user` record 可以成为 focused
+interaction，其余 continuation 继续排队。snapshot 缺少原始 route、generation 或 binding facts 时必须
+保守 fail closed，不能回退为 synthetic request/grant。重新呈现排队审批不 dispatch、不创建资源 reservation，
+真正批准并恢复 child 时才创建新的 parent attempt；`approval.granted`/`approval.batch_released` 的 generation
+确认后，TUI block 才进入 `authorized_queued`。任一 child 的 done/error/cancelled 终态都必须清除其
+approvalState 与待审批标记，不能因为其他 sibling 仍在运行或已经完成而留下幽灵审批。已经获批的 active
+continuation 必须先于 queued sibling 恢复；迟到 event 按 identity/generation no-op。
 
 Resource budget 为每次 continuation/resume 创建新的 parent attempt reservation；每个子模型及
 工具、Shell/MCP 调用再创建链接到 parent 的独立 reservation，artifact bytes 由产出它的调用一并
@@ -252,3 +257,19 @@ Runtime canonical event store 只记录真实用户操作。TUI 从事件日志�
 用户在这种本地恢复投影上首次继续新工作时，TUI 必须 fork 一个清理后的恢复会话：源会话及其 canonical pending 事实保持不变，fork 的 Runtime snapshot 清除待交互状态、活动队列和临时授权，并只从 fork 的回放事件历史中排除造成当前 pending 的那一条请求事件。这样新的 TUI 工作不会重新进入旧 interaction，也不会把本地投影伪装成源会话里的用户拒绝；当前 TUI 继续使用已投影的取消结果。
 
 回放本地取消仅适用于尚未开始执行的交互等待工具。已经产生 `tool.started`、外部副作用、未知 Capability invocation 或未知资源 reservation 的事实必须保留为 `unknown`，进入 reconciliation，禁止自动重试或重复执行。`auto_review` 不属于人工交互：明确通过继续执行，明确拒绝终止工具；技术异常（包括超时、Provider 不可用、网络/格式/Admission 错误）先记录带 `failureType` 的 `auto_review.completed` 失败，再生成新的 `approval.requested`。缺少 `failureType` 的历史 `ok=false` 记录按未完成技术异常保守处理，TUI 只做本地取消投影，既不自动执行也不伪造成明确拒绝。用户显式取消自动审查时，Runtime 将工具持久化为 `tool.cancelled(reason=user_cancelled)`；仅进程在审查完成前退出时才在 TUI 本地投影取消，不自动通过，也不转人工审批。
+
+## SAQ-10 durable queue 叠加规则
+
+本节是 ADR-0137 对本页旧单槽交互描述的定向更新：State 27 的 `pendingApprovals`、`activeApprovalId`、generation、queue
+sequence、Session grants 和独立 receipts 是唯一审批事实；Subagent private deferred slot 不是 authority。只有 active、visible 的
+`queued_user|awaiting_user|approving` record 拥有人工 Footer；`queued_auto|auto_reviewing` 不抢焦点。
+
+Approval overlay 的 Enter 提交 exact `{interactionId,generation,grant}` 且 exactly-once；Esc 是 focused reject，不取消 sibling；
+Ctrl+C 才是 whole-turn cancel。`same_command` 以完整 Session/workspace/cwd/executor/environment/scope/effects/parser-executor
+revision identity 在一个 Store transaction 中登记 grant、匹配等待调用、生成独立 receipts、取消尚未开始的 review 并进入
+`authorized_queued`。late reviewer/input、旧 generation/session revision 和 terminal/cancelled 调用均 no-op/fail closed。
+
+Subagent route 只有同一 model message/turn 的并发 Explore children（且 parent 非 Full）派生 Auto；single Explore、plan/code/review
+继承 parent，Full 不降级。Continuation 必须持久化 route、generation、sequence、bindingDigest、parent/child/runtime identity；
+resume 先恢复 queue/grant/continuation，再恢复 capability attempt，最后允许 owner Tool terminal。reviewer terminal 不能结束
+outer Tool；每个 capability invocation 必须先获得 Result/ack。live/replay/restart 使用相同 generation/session guards。

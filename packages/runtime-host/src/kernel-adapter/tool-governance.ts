@@ -1,9 +1,10 @@
 import {
-  type AgentAuthorizationState,
+  type AgentApprovalCommandIdentity,
+  type AgentSessionCommandGrant,
   admitToolGovernance,
-  authorizationCommandGrantKey,
+  approvalCommandGrantKey,
   authorizeToolGovernance,
-  createToolGovernanceCommandDigest,
+  canAuthorizeToolGovernanceInFullMode,
   TOOL_GOVERNANCE_FACTS_SCHEMA_,
   type ToolGovernanceAdmissionFacts,
   type ToolGovernanceApprovalFact,
@@ -32,9 +33,17 @@ import {
 /** Host-facing aliases keep App composition from depending on Agent Kernel directly. */
 export type RuntimeHostStateToolGovernanceFacts = ToolGovernanceFacts;
 export type RuntimeHostStateToolGovernanceDecision = ToolGovernanceDecision;
+export type RuntimeHostStateApprovalCommandIdentity = AgentApprovalCommandIdentity;
+
+/** Host alias for the Kernel's exact Full-mode re-evaluation. */
+export function runtimeHostStateCanAuthorizeToolInFullMode(
+  facts: Readonly<ToolGovernanceFacts>,
+): boolean {
+  return canAuthorizeToolGovernanceInFullMode(facts);
+}
 
 /**
- * State 25 authorization facts supplied by Host around one Builtin-owned
+ * State 27 authorization facts supplied by Host around one Builtin-owned
  * classification. Workspace and thread identity are deliberately supplied
  * here: Builtin governance must not manufacture Host session identity.
  */
@@ -42,7 +51,9 @@ export interface RuntimeHostStateToolGovernanceAuthorizationInput<
   TArguments extends RuntimeJsonValue = RuntimeJsonValue,
 > {
   readonly classified: Readonly<ClassifiedInvocation<TArguments>>;
+  readonly sessionId: string;
   readonly workspace: string;
+  readonly canonicalWorkspaceIdentity: string;
   readonly threadId: string;
   readonly context: Readonly<
     Omit<ToolGovernanceContextFacts, 'executionMechanism' | 'gates'> & {
@@ -51,7 +62,7 @@ export interface RuntimeHostStateToolGovernanceAuthorizationInput<
   >;
   readonly approval: Readonly<ToolGovernanceApprovalFact>;
   /**
-   * A private State 25 authorization lookup. The command is used only to
+   * A private State 27 authorization lookup. The command is used only to
    * select the exact persisted grant; its digest must already be present in
    * the authentic Builtin governance projection.
    */
@@ -66,8 +77,7 @@ export interface RuntimeHostStateToolGovernanceInput<
 }
 
 export interface RuntimeHostStateSameCommandGrantInput {
-  readonly authorization: Readonly<AgentAuthorizationState>;
-  readonly command: string;
+  readonly sessionCommandGrants: ReadonlyMap<string, Readonly<AgentSessionCommandGrant>>;
 }
 
 const AUTHORIZATION_ADMISSION_: Readonly<ToolGovernanceAdmissionFacts> = Object.freeze({
@@ -118,7 +128,7 @@ export interface RuntimeHostStateToolGovernancePort<
 }
 
 /**
- * Build the only Host-to-Kernel State 25 governance bridge for a classified
+ * Build the only Host-to-Kernel State 27 governance bridge for a classified
  * invocation. The injected verifier is the Builtin/SPI identity authority;
  * no raw arguments, domainData, parser, effects compiler, or executor is
  * consulted here.
@@ -244,12 +254,12 @@ function projectStateFacts<TArguments extends RuntimeJsonValue>(
     if (invalidReason !== undefined) {
       return failure(
         'kernel_facts_invalid',
-        `Projected State 25 governance facts are invalid: ${invalidReason}.`,
+        `Projected State 27 governance facts are invalid: ${invalidReason}.`,
       );
     }
     return success(deepFreeze(facts));
   } catch {
-    return failure('kernel_facts_invalid', 'Projected State 25 governance facts are invalid.');
+    return failure('kernel_facts_invalid', 'Projected State 27 governance facts are invalid.');
   }
 }
 
@@ -379,6 +389,7 @@ function invocationFact(
   return {
     workspace: input.workspace,
     threadId: input.threadId,
+    canonicalWorkspaceIdentity: input.canonicalWorkspaceIdentity,
     turnId: invocation.turnId,
     modelMessageId: invocation.modelMessageId,
     toolCallId: invocation.toolCallId,
@@ -399,6 +410,19 @@ function invocationFact(
     nestedCapabilityRevision: invocation.nestedCapabilityRevision,
     nestedCatalogRevision: invocation.nestedCatalogRevision,
     commandDigest: invocation.commandDigest,
+    ...(invocation.canonicalCwd === undefined ? {} : { cwd: invocation.canonicalCwd }),
+    ...(invocation.shellOrExecutorIdentity === undefined
+      ? {}
+      : { executor: invocation.shellOrExecutorIdentity }),
+    ...(invocation.executionEnvironmentDigest === undefined
+      ? {}
+      : { environmentDigest: invocation.executionEnvironmentDigest }),
+    ...(invocation.effectiveSandboxScopeDigest === undefined
+      ? {}
+      : { scopeDigest: invocation.effectiveSandboxScopeDigest }),
+    ...(invocation.policyParserExecutorRevision === undefined
+      ? {}
+      : { policyParserExecutorRevision: invocation.policyParserExecutorRevision }),
   };
 }
 
@@ -433,7 +457,6 @@ function contextFacts(
   const projected: ToolGovernanceContextFacts = {
     phase: context.phase,
     interactionMode: context.interactionMode,
-    authorizationMode: context.authorizationMode,
     sandboxAvailable: context.sandboxAvailable,
     circuitBreakerTripped: context.circuitBreakerTripped,
     executionMechanism: projectExecutionMechanism(executionMechanism),
@@ -443,11 +466,6 @@ function contextFacts(
       executionBoundary: context.gates.executionBoundary,
       skillCapabilityCeiling: context.gates.skillCapabilityCeiling,
     },
-    ...(context.authorizationSource === undefined
-      ? {}
-      : { authorizationSource: context.authorizationSource }),
-    ...(context.autoReview === undefined ? {} : { autoReview: context.autoReview }),
-    ...(context.loopMode === undefined ? {} : { loopMode: context.loopMode }),
     ...(context.observedAt === undefined ? {} : { observedAt: context.observedAt }),
   };
   return projected;
@@ -511,29 +529,16 @@ function sameCommandGrantFact(
   if (!candidate || !policy.sameCommandMayBypassApproval || !invocation.commandDigest) {
     return undefined;
   }
-  if (typeof candidate.command !== 'string') return undefined;
-  const command = candidate.command.trim();
-  if (!command) return undefined;
-  if (createToolGovernanceCommandDigest(command) !== invocation.commandDigest) {
+  const commandIdentity = approvalCommandIdentity(input, invocation);
+  if (!commandIdentity) {
     return undefined;
   }
-  const authorization = candidate.authorization;
-  const commandGrants = authorization?.commandGrants;
-  if (!commandGrants || typeof commandGrants !== 'object') return undefined;
-  const key = authorizationCommandGrantKey({
-    workspace: input.workspace,
-    threadId: input.threadId,
-    command,
-  });
-  const keyed = commandGrants[key];
-  const matches = Object.values(commandGrants).filter(
-    (grant) =>
-      grant.workspace === input.workspace &&
-      grant.threadId === input.threadId &&
-      grant.command === command,
-  );
-  if (!keyed || matches.length !== 1 || matches[0] !== keyed) return undefined;
-  const grantedAt = Date.parse(keyed.grantedAt);
+  const key = approvalCommandGrantKey(commandIdentity);
+  const keyed = candidate.sessionCommandGrants.get(key);
+  if (!keyed || keyed.grantKey !== key || !sameCommandSubjectMatches(keyed, commandIdentity)) {
+    return undefined;
+  }
+  const grantedAt = Date.parse(keyed.createdAt);
   const expiresAt = keyed.expiresAt === undefined ? undefined : Date.parse(keyed.expiresAt);
   if (
     !Number.isSafeInteger(grantedAt) ||
@@ -545,11 +550,70 @@ function sameCommandGrantFact(
   return {
     workspace: input.workspace,
     threadId: input.threadId,
+    canonicalWorkspaceIdentity: commandIdentity.canonicalWorkspaceIdentity,
+    cwd: commandIdentity.cwd,
+    executor: commandIdentity.executor,
+    environmentDigest: commandIdentity.environment,
+    scopeDigest: commandIdentity.scope,
+    effectsDigest: commandIdentity.effects,
+    parserRevision: commandIdentity.parserRevision,
+    executorRevision: commandIdentity.executorRevision ?? null,
     commandDigest: invocation.commandDigest,
-    source: keyed.source,
     grantedAt,
     ...(expiresAt === undefined ? {} : { expiresAt }),
   };
+}
+
+function approvalCommandIdentity(
+  input: Readonly<RuntimeHostStateToolGovernanceAuthorizationInput>,
+  invocation: Readonly<ToolGovernanceInvocationFact>,
+): AgentApprovalCommandIdentity | undefined {
+  if (
+    !invocation.commandDigest ||
+    !invocation.cwd ||
+    !invocation.executor ||
+    !invocation.environmentDigest ||
+    !invocation.scopeDigest
+  ) {
+    return undefined;
+  }
+  return {
+    sessionId: input.sessionId,
+    threadId: input.threadId,
+    workspace: input.workspace,
+    canonicalWorkspaceIdentity: input.canonicalWorkspaceIdentity,
+    cwd: invocation.cwd,
+    executor: invocation.executor,
+    environment: invocation.environmentDigest,
+    scope: invocation.scopeDigest,
+    effects: invocation.effectiveEffectsDigest,
+    parserRevision: invocation.policyParserExecutorRevision ?? invocation.parserRevision,
+    ...(invocation.executorRevision === null
+      ? {}
+      : { executorRevision: invocation.executorRevision }),
+    commandDigest: invocation.commandDigest,
+  };
+}
+
+function sameCommandSubjectMatches(
+  grant: Readonly<AgentSessionCommandGrant>,
+  subject: Readonly<AgentApprovalCommandIdentity>,
+): boolean {
+  return (
+    grant.grant === 'same_command' &&
+    grant.sessionId === subject.sessionId &&
+    grant.threadId === subject.threadId &&
+    grant.workspace === subject.workspace &&
+    grant.canonicalWorkspaceIdentity === subject.canonicalWorkspaceIdentity &&
+    grant.cwd === subject.cwd &&
+    grant.executor === subject.executor &&
+    grant.environment === subject.environment &&
+    grant.scope === subject.scope &&
+    grant.effects === subject.effects &&
+    grant.parserRevision === subject.parserRevision &&
+    grant.executorRevision === subject.executorRevision &&
+    grant.commandDigest === subject.commandDigest
+  );
 }
 
 function classifiedIdentityAccepted(

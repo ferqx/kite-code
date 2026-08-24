@@ -10,7 +10,6 @@ import {
 } from '@kite/builtin-runtime/model';
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import {
-  assertRuntimeAuthorizationElevation,
   type RuntimeHostExecutionServices,
   restoreRuntimeHostStateSession,
 } from '@kite/runtime-host';
@@ -45,7 +44,7 @@ import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 import { executeRuntimeTurn, type RuntimeTurnInput } from './turn-coordinator';
 import { projectVerificationSchemaAdmissions } from './verification-schema-admission';
 
-/** App-private transition control used by the State 25 coordinator. */
+/** App-private transition control used by the State 27 coordinator. */
 export interface AuthorizedExecutionControl {
   getState: () => Readonly<RuntimeState>;
   processEvent: (event: RuntimeEvent) => void;
@@ -59,11 +58,27 @@ export interface RuntimeSessionCoordinatorIdentity {
   readonly workspace: string;
   readonly projectId: string;
   readonly canonicalWorkspaceDigest: `sha256:${string}`;
+  /** Bootstrap value for a fresh Session. Restored Sessions use durable State. */
   readonly interactionMode: RuntimeState['mode'];
   readonly recoveryIdentityKey: string;
   readonly sandboxAvailable?: boolean;
   readonly modelArtifactEvidence?: ModelArtifactEvidenceAvailability;
   readonly capabilityArtifactEvidence?: import('@kite/builtin-runtime').CapabilityArtifactReader;
+}
+
+export function projectRuntimeSessionLiveMode(
+  state: Pick<RuntimeState, 'mode' | 'interactionModeRevision'>,
+): Readonly<{
+  interactionMode: RuntimeState['mode'];
+  interactionModeRevision: number;
+}> {
+  if (!Number.isSafeInteger(state.interactionModeRevision) || state.interactionModeRevision < 0) {
+    throw new Error('Runtime interaction mode revision is invalid.');
+  }
+  return Object.freeze({
+    interactionMode: state.mode,
+    interactionModeRevision: state.interactionModeRevision,
+  });
 }
 
 export interface RuntimeSessionCoordinator {
@@ -80,6 +95,11 @@ export interface RuntimeSessionCoordinator {
   endTurn(): void;
   /** Explicitly records a durable interaction-mode mutation for identity checks. */
   updateInteractionMode(mode: RuntimeState['mode']): void;
+  /** Live mutable mode is revisioned Session state, not coordinator identity. */
+  getInteractionModeState(): Readonly<{
+    interactionMode: RuntimeState['mode'];
+    interactionModeRevision: number;
+  }>;
   /** Applies the Host-prepared sandbox fact before the next turn. */
   updateSandboxAvailable(available: boolean): void;
   getSandboxAvailable(): boolean | undefined;
@@ -138,6 +158,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   readonly #recoveryIdentityKey: string;
   #sandboxAvailable: boolean | undefined;
   #interactionMode: RuntimeState['mode'];
+  #interactionModeRevision = 0;
   readonly #modelArtifactEvidence: ModelArtifactEvidenceAvailability | undefined;
   readonly #capabilityArtifactEvidence:
     | import('@kite/builtin-runtime').CapabilityArtifactReader
@@ -219,13 +240,6 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
           if (!Number.isFinite(Date.parse(event.changedAt))) {
             throw new Error('interaction_mode.changed requires a valid changedAt timestamp.');
           }
-          if (event.mode === 'full') {
-            assertRuntimeAuthorizationElevation({
-              mode: 'full_access',
-              source: event.source,
-              sandboxAvailable: this.#sandboxAvailable === true,
-            });
-          }
         }
         return true;
       },
@@ -238,6 +252,12 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
         );
       },
     });
+    this.#interactionMode = restored.state.mode;
+    this.#interactionModeRevision =
+      'interactionModeRevision' in restored.state &&
+      Number.isSafeInteger(restored.state.interactionModeRevision)
+        ? Number(restored.state.interactionModeRevision)
+        : 0;
     this.#runtimePort = this.#createRuntimePort();
     const recoveryEvents =
       restored.state.recoveryState.kind === 'normal'
@@ -329,7 +349,23 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
 
   updateInteractionMode(mode: RuntimeState['mode']): void {
     this.#assertOpen();
+    if (this.#interactionMode === mode) return;
     this.#interactionMode = mode;
+    const persistedRevision = this.session.getState().interactionModeRevision;
+    this.#interactionModeRevision = Number.isSafeInteger(persistedRevision)
+      ? persistedRevision
+      : this.#interactionModeRevision + 1;
+  }
+
+  getInteractionModeState(): Readonly<{
+    interactionMode: RuntimeState['mode'];
+    interactionModeRevision: number;
+  }> {
+    this.#assertOpen();
+    return projectRuntimeSessionLiveMode({
+      mode: this.#interactionMode,
+      interactionModeRevision: this.#interactionModeRevision,
+    });
   }
 
   updateSandboxAvailable(available: boolean): void {
@@ -562,7 +598,6 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       identity.projectId !== this.#projectId ||
       identity.canonicalWorkspaceDigest !== this.#canonicalWorkspaceDigest ||
       identity.recoveryIdentityKey !== this.#recoveryIdentityKey ||
-      identity.interactionMode !== this.#interactionMode ||
       identity.sandboxAvailable !== this.#sandboxAvailable ||
       identity.modelArtifactEvidence !== this.#modelArtifactEvidence ||
       identity.capabilityArtifactEvidence !== this.#capabilityArtifactEvidence
@@ -597,9 +632,21 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
           },
         };
       }
-      const applied = this.session.processEventBatch([...events, ...additionalEvents], {
-        source: 'command',
-      });
+      const batchRelease =
+        events.length === 1 &&
+        additionalEvents.length === 0 &&
+        events[0]?.type === 'approval.batch_released'
+          ? events[0]
+          : undefined;
+      let applied: readonly RuntimeEvent[];
+      if (batchRelease) {
+        this.session.commitApprovalBatch(batchRelease, batchRelease.sessionRevision);
+        applied = this.session.getLastAppliedEvents();
+      } else {
+        applied = this.session.processEventBatch([...events, ...additionalEvents], {
+          source: 'command',
+        });
+      }
       return { status: 'applied', events: [...applied] };
     };
     const port: RuntimeStateSessionPort & {

@@ -75,6 +75,13 @@ function requestEnvelope(
     schema: 'kite.tool-pipeline-prepared-request.v1' as const,
     authorizationKind: 'policy_allow' as const,
     grantUsed: 'none' as const,
+    interactionMode: 'accept_edits' as const,
+    sandboxScope: {
+      kind: 'baseline' as const,
+      filesystem: 'workspace_write' as const,
+      network: 'disabled' as const,
+      digest: 'scope-baseline',
+    },
     policyEffects: {},
     effectiveEffects: entry.effects,
     receiptRequirement: 'observation_receipt' as const,

@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
-import type { JsonValue, SuspendedSubagentSnapshot } from '@kite/runtime-spi';
+import type {
+  JsonValue,
+  SubagentApprovalFacts,
+  SuspendedSubagentSnapshot,
+} from '@kite/runtime-spi';
 import { digestCapabilityBindingValue } from '../capability-binding';
+
+const MAX_APPROVAL_FACT_IDENTITY_LENGTH = 256;
+const MAX_APPROVAL_FACT_COUNTER = 0x7fff_ffff;
 
 /** Builtin-owned JSON boundary for durable continuation payloads. */
 export function encodeSubagentContinuationSnapshot(
@@ -39,7 +46,85 @@ function cloneSnapshot(snapshot: SuspendedSubagentSnapshot): SuspendedSubagentSn
   if (!cloned || typeof cloned !== 'object' || Array.isArray(cloned)) {
     throw new Error('Subagent continuation must be a JSON object.');
   }
+  if ('approvalFacts' in cloned) {
+    const approvalFacts = decodeSubagentApprovalFacts(
+      (cloned as Record<string, unknown>).approvalFacts,
+    );
+    if (!approvalFacts) {
+      throw new Error('Subagent continuation approval facts are malformed.');
+    }
+    (cloned as Record<string, unknown>).approvalFacts = approvalFacts;
+  }
   return cloned as unknown as SuspendedSubagentSnapshot;
+}
+
+/**
+ * Decode the optional approval facts at the Builtin-owned JSON boundary.
+ * Unknown keys, unbounded identities, and non-canonical counters fail closed
+ * before an artifact can be published or consumed.
+ */
+function decodeSubagentApprovalFacts(value: unknown): SubagentApprovalFacts | undefined {
+  if (!plainRecord(value)) return undefined;
+  const keys = Object.keys(value).sort();
+  const required = [
+    'bindingDigest',
+    'childToolCallId',
+    'generation',
+    'parentToolCallId',
+    'route',
+    'sequence',
+  ];
+  const optional = ['runtimeToolCallId'];
+  const requiredKeys = required.slice().sort();
+  const optionalKeys = [...required, ...optional].sort();
+  if (keys.join(',') !== requiredKeys.join(',') && keys.join(',') !== optionalKeys.join(',')) {
+    return undefined;
+  }
+  if (
+    (value.route !== 'auto_review' && value.route !== 'user') ||
+    !boundedApprovalIdentity(value.bindingDigest) ||
+    !boundedApprovalIdentity(value.parentToolCallId) ||
+    !boundedApprovalIdentity(value.childToolCallId) ||
+    !boundedApprovalCounter(value.generation) ||
+    !boundedApprovalCounter(value.sequence) ||
+    (value.runtimeToolCallId !== undefined && !boundedApprovalIdentity(value.runtimeToolCallId))
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    route: value.route,
+    generation: value.generation,
+    sequence: value.sequence,
+    bindingDigest: value.bindingDigest,
+    parentToolCallId: value.parentToolCallId,
+    childToolCallId: value.childToolCallId,
+    ...(value.runtimeToolCallId === undefined
+      ? {}
+      : { runtimeToolCallId: value.runtimeToolCallId }),
+  });
+}
+
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function boundedApprovalIdentity(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_APPROVAL_FACT_IDENTITY_LENGTH
+  );
+}
+
+function boundedApprovalCounter(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= MAX_APPROVAL_FACT_COUNTER
+  );
 }
 
 function toJsonValue(value: unknown, path: string, seen = new WeakSet<object>()): JsonValue {

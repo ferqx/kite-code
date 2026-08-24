@@ -3,7 +3,6 @@ import {
   discoverSandboxBackendCandidate,
   resolveSandboxRuntime,
   resolveWindowsManagedNetworkSetupStatus,
-  sandboxSupportsFullMode,
   setupWindowsManagedNetwork,
 } from '@kite/builtin-runtime/sandbox';
 import type { InteractionMode, ShellApprovalGrant } from '@kite/runtime-contract';
@@ -47,8 +46,6 @@ export interface CliRuntimeAccessInput {
   readonly shellExecutor: ReturnType<typeof composeAppSandboxExecutor>;
   readonly gitBroker?: ReturnType<typeof composeAppGitBroker>;
   readonly interactionMode: InteractionMode;
-  readonly authorizationMode?: 'default' | 'full_access';
-  readonly authorizationSource?: 'config';
   readonly sandboxBackend: SandboxBackend;
   readonly skillOptions: ReturnType<typeof skillDirs>;
   readonly initialSkillActivations: readonly {
@@ -65,11 +62,6 @@ export interface CliMainDependencies {
   readonly createRuntimeAccess: (
     input: CliRuntimeAccessInput,
   ) => RuntimeAccess & Partial<AsyncDisposable>;
-  readonly assertAuthorizationElevation: (input: {
-    readonly mode: 'default' | 'full_access';
-    readonly source: 'config';
-    readonly sandboxAvailable: boolean;
-  }) => void;
 }
 
 export interface ParsedArgs {
@@ -79,7 +71,6 @@ export interface ParsedArgs {
   userId: string;
   workspace: string;
   checkpointPath: string;
-  authorizationMode?: 'default' | 'full_access';
   approve: boolean;
   approvalGrant?: ShellApprovalGrant;
   approvalHash?: string;
@@ -229,19 +220,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     shellRuntime.mode === 'sandbox'
       ? { enabled: true, backend: shellRuntime.backend, available: true }
       : { enabled: false, backend: 'none' as const, available: false };
-  const fullModeAvailable = sandboxSupportsFullMode(effectiveSandboxRuntime.backend);
-  if (interactionMode === 'full' && !fullModeAvailable) {
-    throw new Error('非沙箱环境无法开启full');
-  }
-  const authorizationMode =
-    args.authorizationMode ?? (args.approvalGrant === 'full_access' ? 'full_access' : undefined);
-  if (authorizationMode) {
-    dependencies.assertAuthorizationElevation({
-      mode: authorizationMode,
-      source: 'config',
-      sandboxAvailable: fullModeAvailable,
-    });
-  }
   const observability = composeObservability({
     artifactTelemetryAllowed: false,
     featureEnabled: getFeatureFlags(config).observabilityMetrics,
@@ -268,8 +246,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     shellExecutor,
     gitBroker,
     interactionMode,
-    authorizationMode,
-    authorizationSource: authorizationMode === 'full_access' ? 'config' : undefined,
     sandboxBackend: effectiveSandboxRuntime.backend,
     skillOptions,
     initialSkillActivations,
@@ -413,7 +389,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
         ? 'accept_edits'
         : undefined;
   const explicitThread = value('--thread', '');
-  const authorizationMode = parseAuthorizationMode(optionalValue('--authorization-mode') ?? '');
   const answer = optionalValue('--answer');
   const approvalHash = optionalValue('--approval-hash');
   const replacementCommand = optionalValue('--replace-command');
@@ -458,7 +433,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
     userId: value('--user', 'default-user'),
     workspace: resolve(value('--workspace', cwd)),
     checkpointPath: resolve(value('--checkpoints', defaultCheckpointPath())),
-    authorizationMode,
     approve: approvalGrant !== undefined,
     approvalGrant,
     approvalHash,
@@ -479,7 +453,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
-  if (argv.includes('--full-access')) return 'full_access';
   if (argv.includes('--approve-same-command')) return 'same_command';
   if (argv.includes('--approve')) return 'approve_once';
   return undefined;
@@ -513,12 +486,6 @@ function positionalTask(argv: string[]): string {
   return parts.join(' ').trim();
 }
 
-function parseAuthorizationMode(value: string): 'default' | 'full_access' | undefined {
-  if (value === 'full_access' || value === 'full-access') return 'full_access';
-  if (value === 'default') return 'default';
-  return undefined;
-}
-
 function freshThreadId(): string {
   return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -547,12 +514,10 @@ Options:
   --format json          Emit a trace as JSON
   --approve              Approve tool call on resume
   --approve-same-command Approve same future commands
-  --full-access          Start with full authorization (requires sandbox; source=config)
   --trust-workspace      Record trust for --workspace and continue (source=config)
   --approval-hash <hash> Approval hash
   --replace-command <cmd> Replace pending command
   --answer <text>        Answer user input interrupt
-  --authorization-mode <mode>  default or full-access
   --ask                  Ask before every tool (default)
   --auto                 Auto-review tools, ask when uncertain
   --full           Run with full permissions, never ask

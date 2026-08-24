@@ -1,6 +1,6 @@
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
-import { type SandboxBackend, sandboxSupportsFullMode } from '#app/sandbox/types';
+import type { SandboxBackend } from '#app/sandbox/types';
 import { useI18n } from '#app/tui/i18n';
 import { useTheme } from '#app/tui/theme';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
@@ -13,6 +13,8 @@ interface PermissionSelectorProps {
   sandboxBackend: SandboxBackend;
   onSelect: (mode: InteractionMode) => void;
   onClose: () => void;
+  sessionGrantCount?: number;
+  onClearSessionGrants?: () => void;
 }
 
 export default function PermissionSelector({
@@ -20,6 +22,8 @@ export default function PermissionSelector({
   sandboxBackend,
   onSelect,
   onClose,
+  sessionGrantCount = 0,
+  onClearSessionGrants,
 }: PermissionSelectorProps) {
   const t = useTheme();
   const { t: translate } = useI18n();
@@ -40,7 +44,10 @@ export default function PermissionSelector({
       description: translate('permission.fullDescription'),
     },
   ];
-  const fullAvailable = sandboxSupportsFullMode(sandboxBackend);
+  // Full is an interaction mode, not an approval grant. Its availability must
+  // not be inferred from the backend sandbox probe; execution still fails
+  // closed at the Runtime boundary when a backend cannot honor the mode.
+  void sandboxBackend;
   const [selected, setSelected] = useState(() =>
     Math.max(
       0,
@@ -52,24 +59,23 @@ export default function PermissionSelector({
 
   const move = (direction: 1 | -1) => {
     setSelected((current) => {
-      let next = current;
-      do {
-        next = (next + direction + options.length) % options.length;
-      } while (options[next]!.mode === 'full' && !fullAvailable);
-      return next;
+      return (current + direction + options.length) % options.length;
     });
   };
 
-  useInput((_, key) => {
+  useInput((input, key) => {
     if (key.escape) {
       onClose();
+      return;
+    }
+    if ((input === 'c' || input === 'C') && sessionGrantCount > 0) {
+      onClearSessionGrants?.();
       return;
     }
     if (key.upArrow) move(-1);
     if (key.downArrow) move(1);
     if (key.return) {
       const option = options[selectedRef.current]!;
-      if (option.mode === 'full' && !fullAvailable) return;
       onSelect(option.mode);
       onClose();
     }
@@ -88,6 +94,9 @@ export default function PermissionSelector({
           shortcuts={[
             { keys: '↑↓', label: translate('common.navigate') },
             { keys: 'Enter', label: translate('common.select') },
+            ...(sessionGrantCount > 0
+              ? [{ keys: 'C', label: translate('approval.clearSessionGrants') }]
+              : []),
             { keys: 'Esc', label: translate('common.close') },
           ]}
         />
@@ -95,22 +104,22 @@ export default function PermissionSelector({
     >
       <Box flexDirection="column">
         {options.map((option, index) => {
-          const disabled = option.mode === 'full' && !fullAvailable;
           return (
             <Box key={option.mode} flexDirection="column">
               <OverlayListRow
                 selected={selected === index}
                 primary={option.label}
                 secondary={option.description}
-                disabled={disabled}
                 trailing={<OverlayStatusColumn active={option.mode === currentMode} />}
               />
-              {disabled && (
-                <Text color={t.warning}> {translate('permission.fullUnavailable')}</Text>
-              )}
             </Box>
           );
         })}
+      </Box>
+      <Box marginTop={1} paddingLeft={1}>
+        <Text color={t.dim}>
+          {translate('approval.sessionGrants', { count: sessionGrantCount })}
+        </Text>
       </Box>
     </OverlayFrame>
   );

@@ -6,6 +6,8 @@
 
 验证：`bun run test:tui:harness`、`bun run test:tui:system`、`bun test tests/tui-layout.test.tsx tests/tui-reducer.test.ts`。
 
+相关：ADR-0137、`docs/active/tui-e2e-standards.md`、`docs/active/authorization.md`。
+
 ## 当前能力
 
 当前系统测试通过 Bun 启动真实终端子进程，并使用 OpenAI-compatible mock server 控制模型响应。
@@ -13,6 +15,18 @@ Harness 同时保留原始 PTY transcript，并通过 `@xterm/headless` 维护�
 逐 chunk 解析后的有界 screen frame 历史。action delta 只发布已完成 VT 解析的字节范围，PTY
 退出或 cleanup 会等待解析队列并释放 headless terminal。它能够覆盖键盘输入、Ink 渲染、审批、ask-user、计划审核、
 session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming 瞬态和 resize。
+
+### SAQ-10 可观测边界
+
+PTY 只能观察 durable approval queue 的 canonical projection，不能把本地焦点或 UI optimistic ack 当作
+授权事实。测试必须用 exact interactionId/generation 发送 Enter/Esc；Esc 只拒绝 focused approval，
+Ctrl+C 才取消 whole turn，迟到 generation/session event 必须 no-op。多个 pending request 可以并存，但
+只有当前可见 `awaiting_user` entry 拥有 Footer；queued_auto/auto_reviewing 只显示自动状态，不夺取人工焦点。
+
+`interactionMode=full` 是唯一 Full authority，Full 选择与受限 sandbox availability 正交；backend unsupported
+时受限执行 clean fail closed，不恢复旧 grant 或 host fallback。Human/Auto Subagent PTY 还必须观察 parent
+Tool terminal barrier：reviewer/child capability 尚未完成时，外层 Tool 不得提前 terminal，恢复必须沿原
+parent/child identity 与 queue generation 进行。
 
 ## 已知限制
 

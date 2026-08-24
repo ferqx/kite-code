@@ -12,6 +12,8 @@ import {
   isConcurrentShellEffectBatchCurrent,
   type KernelEvent,
   normalizeAgentEvent,
+  RUNTIME_STATE_FORMAT_EPOCH,
+  RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeEffect,
   reduce,
   type SchedulerFacts,
@@ -37,9 +39,9 @@ import type {
 
 /** The one current State / Store format accepted by this Host session. */
 export const STATE_RUNTIME_SESSION_FORMAT_ = Object.freeze({
-  schemaVersion: 26 as const,
+  schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
   storeVersion: 5 as const,
-  epoch: 'kite-runtime-modularization-v1-2026-08-19' as const,
+  epoch: RUNTIME_STATE_FORMAT_EPOCH,
 });
 
 export type StateRuntimeSessionClock = () => string;
@@ -83,7 +85,7 @@ export interface StateRuntimeNamedTurnSnapshotInput {
 
 /**
  * The only Host seam for a concurrent effect that is allowed to survive an
- * unrelated State 25 revision.  The callback owns the domain-specific
+ * unrelated State 27 revision.  The callback owns the domain-specific
  * predicate (for example, a shell sibling predicate); Host never inspects a
  * tool name or a model operation.
  */
@@ -146,6 +148,15 @@ export interface StateRuntimeSession {
     events: readonly KernelEvent[],
     options?: StateRuntimeProcessEventBatchOptions,
   ): readonly KernelEvent[];
+  /**
+   * Commit one same-command release as a single Store transaction. The event
+   * contains the complete snapshot match and per-invocation receipts; callers
+   * may not emulate this by looping approval.granted events.
+   */
+  commitApprovalBatch(
+    event: Extract<KernelEvent, { readonly type: 'approval.batch_released' }>,
+    expectedRevision: number,
+  ): StateRuntimeProcessEventResult;
   getLastAppliedEvents(): readonly KernelEvent[];
   selectPendingEffects(
     state?: Readonly<AgentState>,
@@ -212,7 +223,7 @@ function assertStateRuntimeSessionState(state: AgentState): void {
 }
 
 /**
- * Host-owned State 25 session.  It is deliberately a thin transaction and
+ * Host-owned State 27 session.  It is deliberately a thin transaction and
  * lease boundary around the pure Agent Kernel; it owns no Builtin, Model,
  * Prompt, Tool, or MCP semantics.
  */
@@ -238,7 +249,9 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
   constructor(input: StateRuntimeSessionInput) {
     assertStateRuntimeSessionState(input.state);
     if (input.state.schemaVersion !== STATE_RUNTIME_SESSION_FORMAT_.schemaVersion) {
-      throw new Error('Runtime Host State session requires schema version 25.');
+      throw new Error(
+        `Runtime Host State session requires schema version ${STATE_RUNTIME_SESSION_FORMAT_.schemaVersion}.`,
+      );
     }
     if (input.state.formatEpoch !== STATE_RUNTIME_SESSION_FORMAT_.epoch) {
       throw new Error('Runtime Host State session requires the current compatibility epoch.');
@@ -247,7 +260,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       throw new Error('Runtime Host State session requires a non-empty session identity.');
     }
     if (input.services.sessions === undefined || input.services.transactions === undefined) {
-      throw new Error('Runtime Host State session requires the injected Store 4 services.');
+      throw new Error('Runtime Host State session requires the injected Store services.');
     }
     if (typeof input.clock !== 'function' || typeof input.id !== 'function') {
       throw new Error('Runtime Host State session requires injected clock and id callbacks.');
@@ -380,6 +393,21 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       });
     }
     return this.#lastAppliedEvents;
+  }
+
+  commitApprovalBatch(
+    event: Extract<KernelEvent, { readonly type: 'approval.batch_released' }>,
+    expectedRevision: number,
+  ): StateRuntimeProcessEventResult {
+    if (
+      !Number.isSafeInteger(expectedRevision) ||
+      expectedRevision < 0 ||
+      event.sessionRevision !== expectedRevision ||
+      this.#state.revision !== expectedRevision
+    ) {
+      throw new Error(`Runtime approval batch revision conflict at ${this.#state.revision}.`);
+    }
+    return this.processEvent(event);
   }
 
   getLastAppliedEvents(): readonly KernelEvent[] {

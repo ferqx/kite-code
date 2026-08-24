@@ -14,6 +14,8 @@ export function isPreparedRequest(
     'schema',
     'authorizationKind',
     'grantUsed',
+    'interactionMode',
+    'sandboxScope',
     'policyEffects',
     'effectiveEffects',
     'receiptRequirement',
@@ -30,8 +32,11 @@ export function isPreparedRequest(
     (value.authorizationKind === 'policy_allow' || value.authorizationKind === 'approved_call') &&
     (value.grantUsed === 'none' ||
       value.grantUsed === 'approve_once' ||
-      value.grantUsed === 'same_command' ||
-      value.grantUsed === 'full_access') &&
+      value.grantUsed === 'same_command') &&
+    (value.interactionMode === 'auto' ||
+      value.interactionMode === 'accept_edits' ||
+      value.interactionMode === 'full') &&
+    isSandboxScope(value.sandboxScope) &&
     isPolicyEffects(value.policyEffects) &&
     isCapabilityEffects(value.effectiveEffects) &&
     isReceiptRequirement(value.receiptRequirement) &&
@@ -40,6 +45,20 @@ export function isPreparedRequest(
     nullableString(value.planId) &&
     nullableString(value.planStepId) &&
     (value.capabilityRequestFacts === null || isRuntimeJson(value.capabilityRequestFacts))
+  );
+}
+
+function isSandboxScope(value: RuntimeJsonValue | undefined): boolean {
+  if (value === null) return true;
+  if (!isJsonRecord(value) || Object.keys(value).length !== 4) return false;
+  return (
+    (value.kind === 'baseline' || value.kind === 'expanded' || value.kind === 'unrestricted') &&
+    (value.filesystem === 'read_only' ||
+      value.filesystem === 'workspace_write' ||
+      value.filesystem === 'full_access') &&
+    (value.network === 'disabled' || value.network === 'allow_all') &&
+    typeof value.digest === 'string' &&
+    value.digest.length > 0
   );
 }
 

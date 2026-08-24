@@ -1,7 +1,6 @@
 // ── 基础类型 / Base types ──
 export type WorkspaceAccess = 'write';
 export type AgentPhase = 'planning' | 'building';
-export type AuthorizationMode = 'default' | 'full_access';
 export const InteractionMode = {
   AcceptEdits: 'accept_edits',
   Auto: 'auto',
@@ -9,7 +8,7 @@ export const InteractionMode = {
 } as const;
 export type InteractionMode = (typeof InteractionMode)[keyof typeof InteractionMode];
 
-export type ShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
+export type ShellApprovalGrant = 'approve_once' | 'same_command';
 export type ShellGrantUsed = 'none' | ShellApprovalGrant;
 
 /** 判断是否为全自动放行模式（目前只有 full） */
@@ -289,7 +288,6 @@ export interface StateChangePayload {
   workspaceAccess?: WorkspaceAccess;
   phase?: AgentPhase;
   plan?: AgentPlan | null;
-  authorization?: { mode: AuthorizationMode };
   interactionMode?: InteractionMode;
   modelProvider?: string;
   modelName?: string;
@@ -374,6 +372,20 @@ export interface ToolApprovalPayload {
   summary: string;
   reason: string;
   expectedEffects: readonly string[];
+  /** Actual backend-enforceable expansion shown to the user. */
+  sandboxScope?: {
+    filesystem: 'read_only' | 'workspace_write' | 'full_access';
+    network: 'off' | 'allow_all';
+    backend: 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
+    enforcement: 'enforced' | 'unsupported';
+  };
+  approvalRoute?: 'user' | 'auto';
+  queueSequence?: number;
+  queueGeneration?: number;
+  matchingPendingCount?: number;
+  parentToolCallId?: string;
+  childSubagentId?: string;
+  bindingDigest?: string;
   grantOptions: readonly ShellApprovalGrant[];
   recommendedGrant: ShellApprovalGrant;
   /** update_plan 的方案数据（审批时嵌入） */

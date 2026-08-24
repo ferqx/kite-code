@@ -623,6 +623,23 @@ export function reduceInteractionState(state: AgentState, event: KernelEvent): A
         },
       };
     }
+    case 'turn.aborted': {
+      const turnId = nonEmptyStringField(payload, 'turnId');
+      if (!turnId || turnId !== state.turn.turnId) return state;
+      const pending = arrayField(state.providerAdmission, 'pending') ?? [];
+      if (pending.length === 0) return state;
+      return {
+        ...state,
+        providerAdmission: asJsonObject({
+          ...state.providerAdmission,
+          pending: [],
+        }),
+        interactions:
+          state.interactions.kind === 'awaiting_provider_admission'
+            ? { kind: 'idle' }
+            : state.interactions,
+      };
+    }
     default:
       return state;
   }

@@ -45,7 +45,10 @@ describe('TUI PTY System — cancel shell then render successor', () => {
     workspace = createTestWorkspace({
       configOverrides: {
         language: 'en-US',
-        interactionMode: 'auto',
+        // The fixture disables native sandboxing to exercise a synthetic slow
+        // process-tree cleanup. Full is the only Shell mode admitted without
+        // a restricted sandbox backend.
+        interactionMode: 'full',
         sandbox: { enabled: false },
       },
     });
@@ -65,15 +68,6 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       },
       {
         message: {
-          content: JSON.stringify({
-            decision: 'approve',
-            grant: 'approve_once',
-            reason: 'The fixture command is bounded to its isolated workspace.',
-          }),
-        },
-      },
-      {
-        message: {
           content: 'Starting the successor shell.',
           tool_calls: [
             {
@@ -82,15 +76,6 @@ describe('TUI PTY System — cancel shell then render successor', () => {
               args: { command: 'pwd' },
             },
           ],
-        },
-      },
-      {
-        message: {
-          content: JSON.stringify({
-            decision: 'approve',
-            grant: 'approve_once',
-            reason: 'The successor fixture command is bounded to its isolated workspace.',
-          }),
         },
       },
       {
@@ -156,9 +141,9 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       await waitForText(() => tui.viewport(), 'cancelled', 2_000);
 
       const successorRequestBaseline = server.getRequestCount();
-      // The old run made one primary-model request and one Auto reviewer
-      // request before Shell execution began.
-      expect(successorRequestBaseline).toBe(2);
+      // Workspace-baseline Shell executes directly in Auto. The cancelled run
+      // therefore made exactly one primary-model request and no reviewer call.
+      expect(successorRequestBaseline).toBe(1);
 
       await typeText(tui, 'continue with successor', 0);
       // Record an explicit semantic input lifecycle. The successor is expected

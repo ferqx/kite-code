@@ -6,7 +6,6 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
-import type { StateAuthorizationSource } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config/index';
 import { defaultCheckpointPath } from '#app/config/paths';
 import type { SandboxBackend } from '#app/sandbox/types';
@@ -27,8 +26,6 @@ export interface BuildRunTaskParams {
   mcpManager: McpRuntimeProvider | null;
   shellContext: string;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
-  authorizationMode?: import('@kite/runtime-contract').AuthorizationMode;
-  authorizationSource?: StateAuthorizationSource;
   phase?: 'planning' | 'building';
   sandboxBackend?: SandboxBackend | 'unknown';
   model?: SupportedChatModel;
@@ -65,8 +62,6 @@ export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
     skillOptions: p.skillOptions ?? undefined,
     initialSkillActivations: p.initialSkillActivations,
     interactionMode: p.interactionMode,
-    authorizationMode: p.authorizationMode,
-    authorizationSource: p.authorizationSource,
     phase: p.phase,
     thinkingLevel: p.thinkingLevel,
     sandboxBackend: p.sandboxBackend,

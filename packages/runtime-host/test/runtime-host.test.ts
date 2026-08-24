@@ -5,13 +5,13 @@ import {
   type RuntimeCommand,
 } from '@kite/runtime-contract';
 import {
-  assertRuntimeAuthorizationElevation,
   createRuntimeHost,
   createRuntimeHostBoundary,
   createRuntimeHostFromRegistry,
   projectRuntimeObservabilityFact,
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionAdapterContext,
+  runtimeHostStateAssertCurrentRuntimeEvent,
 } from '@kite/runtime-host';
 import {
   runtimeCommandFromKernelInput,
@@ -38,12 +38,12 @@ const module = defineRuntimeModule({ moduleId: 'test-module', revision: '1' });
 describe('runtime host package boundary', () => {
   test('exposes narrow Kernel policy and observability ports without App authority', () => {
     expect(() =>
-      assertRuntimeAuthorizationElevation({
-        mode: 'full_access',
-        source: 'config',
-        sandboxAvailable: false,
+      runtimeHostStateAssertCurrentRuntimeEvent({
+        type: 'approval.granted',
+        approval: { tool: 'shell_execute', command: 'echo hello' },
+        grant: 'full_access',
       }),
-    ).toThrow('full_access requires an available workspace sandbox.');
+    ).toThrow();
     expect(
       projectRuntimeObservabilityFact(
         { type: 'turn.completed', turnId: 'turn-1' },
@@ -59,9 +59,9 @@ describe('runtime host package boundary', () => {
   test('composes contract, kernel, SPI, and storage boundary facts', () => {
     const storage: RuntimeStorageBoundary = {
       adapterId: 'test',
-      stateSchemaVersion: 25,
+      stateSchemaVersion: 27,
       storeSchemaVersion: 4,
-      formatEpoch: 'kite-runtime-2026-08-18',
+      formatEpoch: 'kite-runtime-saq-v1-2026-08-25',
     };
     expect(createRuntimeHostBoundary({ storage, modules: [module] })).toEqual({
       contractRevision: 'runtime-contract-current',

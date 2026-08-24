@@ -118,7 +118,6 @@ export async function runAppSkillFork(input: {
       skillOptions: params.skillOptions,
       allowedTools: ceiling.allowedTools,
       mcpBindings: ceiling.mcpBindings,
-      authorization: currentState.authorization,
       workspaceAccess: currentState.workspaceAccess,
       phase: getAgentPhase(getActivePlanning(currentState)),
       interactionMode: getEffectiveInteractionMode(currentState),

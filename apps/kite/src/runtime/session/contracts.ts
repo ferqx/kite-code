@@ -5,25 +5,25 @@ import type {
 import type {
   AgentPhase,
   AgentPlan,
-  AuthorizationMode,
   ContextCompactionProgressPhase,
   PlanArtifactRef,
-  ShellGrantUsed,
+  ShellApprovalGrant,
   ToolApprovalPayload,
   UserInputPayload,
   WorkspaceAccess,
 } from '@kite/runtime-contract';
 import { InteractionMode } from '@kite/runtime-contract';
 import type { StateRuntimeEvent } from '@kite/runtime-host';
-import { type SandboxBackend, sandboxSupportsFullMode } from '#app/sandbox/types';
+import type { SandboxBackend } from '#app/sandbox/types';
 
 export type SessionUserAction =
-  | { type: 'approve'; grant: ShellGrantUsed }
-  | { type: 'reject' }
-  | { type: 'input'; text: string; answers?: Record<string, string> }
-  | { type: 'cancel' }
+  | { type: 'approve'; interactionId: string; generation: number; grant: ShellApprovalGrant }
+  | { type: 'reject'; interactionId: string; generation: number }
+  | { type: 'input'; interactionId: string; text: string; answers?: Record<string, string> }
+  | { type: 'cancel'; interactionId: string }
   | {
       type: 'plan_review_decision';
+      interactionId: string;
       decision:
         | { kind: 'approve'; nextMode: 'accept_edits' | 'auto' }
         | { kind: 'revise'; feedback: string }
@@ -31,13 +31,25 @@ export type SessionUserAction =
     };
 
 export type SessionInterruptPayload =
-  | { kind: 'approval'; approval: ToolApprovalPayload }
-  | { kind: 'input'; question: UserInputPayload }
-  | { kind: 'plan_review'; plan: AgentPlan; artifact?: PlanArtifactRef };
+  | {
+      kind: 'approval';
+      interactionId: string;
+      generation: number;
+      approval: ToolApprovalPayload;
+    }
+  | { kind: 'input'; interactionId: string; question: UserInputPayload }
+  | {
+      kind: 'plan_review';
+      interactionId: string;
+      plan: AgentPlan;
+      artifact?: PlanArtifactRef;
+    };
 
 export interface SessionUserInputProvider {
   requestAction(payload: SessionInterruptPayload): Promise<SessionUserAction>;
   submitAction(action: SessionUserAction): void;
+  /** Bridge exact live UI actions when no local requestAction waiter exists. */
+  setActionSink?(sink: ((action: SessionUserAction) => void) | null): void;
   getPendingInterrupt(): SessionInterruptPayload | null;
   teardown(): Promise<void>;
   reset(): void;
@@ -59,7 +71,6 @@ export interface SessionStatusProjection {
   phase: AgentPhase;
   plan: AgentPlan | null;
   pendingPlan: AgentPlan | null;
-  authorization: AuthorizationMode;
   workspaceAccess: WorkspaceAccess;
   cacheHitTokens: number;
   cacheMissTokens: number;
@@ -107,13 +118,10 @@ export type SessionInteractionMode =
   | typeof InteractionMode.Full;
 
 export function fullModeUnavailableReason(
-  interactionMode: SessionInteractionMode,
-  sandboxBackend: SandboxBackend,
+  _interactionMode: SessionInteractionMode,
+  _sandboxBackend: SandboxBackend,
 ): string | null {
-  if (interactionMode !== InteractionMode.Full || sandboxSupportsFullMode(sandboxBackend)) {
-    return null;
-  }
-  return '非沙箱环境无法开启full';
+  return null;
 }
 
 export function resolveInteractionModeTarget(

@@ -1,7 +1,6 @@
 export const STATE_STATE_TOP_LEVEL_FIELDS_ = Object.freeze([
   'activeTaskId',
   'appliedEventIds',
-  'authorization',
   'autoReview',
   'capabilities',
   'completionGuard',
@@ -11,9 +10,16 @@ export const STATE_STATE_TOP_LEVEL_FIELDS_ = Object.freeze([
   'interactions',
   'lastAppliedEventId',
   'mode',
+  'interactionModeRevision',
   'modelInvocations',
   'providerAdmission',
   'providerReadiness',
+  'pendingApprovals',
+  'activeApprovalId',
+  'nextQueueSequence',
+  'approvalGeneration',
+  'sessionCommandGrants',
+  'approvalReceipts',
   'recoveryState',
   'resourceBudget',
   'revision',
@@ -32,8 +38,8 @@ export const STATE_STATE_TOP_LEVEL_FIELDS_ = Object.freeze([
 ] as const);
 
 /**
- * RA-05 conformance mapping only. Production never opens or migrates a
- * Store4 Session; this explicit mapping proves the target field decision.
+ * RA-05 conformance mapping only. Production never opens or migrates an
+ * older Session; this explicit mapping proves the State 27 target fields.
  */
 export function mapHistoricalStateToState(input: {
   readonly state: Readonly<Record<string, unknown>>;
@@ -42,8 +48,8 @@ export function mapHistoricalStateToState(input: {
 }): Readonly<Record<string, unknown>> {
   const allowed = new Set<string>(STATE_STATE_TOP_LEVEL_FIELDS_);
   if (
-    input.state.schemaVersion !== 25 ||
-    input.state.formatEpoch !== 'kite-runtime-2026-08-18' ||
+    input.state.schemaVersion !== 27 ||
+    input.state.formatEpoch !== 'kite-runtime-saq-v1-2026-08-25' ||
     Object.keys(input.state).some((field) => !allowed.has(field)) ||
     !input.projectId.startsWith('project_') ||
     !/^sha256:[a-f0-9]{64}$/u.test(input.canonicalWorkspaceDigest)
@@ -56,8 +62,8 @@ export function mapHistoricalStateToState(input: {
   }
   return Object.freeze({
     ...structuredClone(input.state),
-    schemaVersion: 26,
-    formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
+    schemaVersion: 27,
+    formatEpoch: 'kite-runtime-saq-v1-2026-08-25',
     session: Object.freeze({
       ...(session as Readonly<Record<string, unknown>>),
       projectId: input.projectId,

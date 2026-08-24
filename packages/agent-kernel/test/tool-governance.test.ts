@@ -23,6 +23,11 @@ const F = 'c'.repeat(64);
 const BASE_INVOCATION: ToolGovernanceInvocationFact = {
   workspace: '/workspace',
   threadId: 'thread-1',
+  canonicalWorkspaceIdentity: D,
+  cwd: '/workspace',
+  executor: 'shell',
+  environmentDigest: E,
+  scopeDigest: F,
   turnId: 'turn-1',
   modelMessageId: 'message-1',
   toolCallId: 'call-1',
@@ -71,7 +76,6 @@ const BASE_GATES: ToolGovernanceGateFacts = {
 const BASE_CONTEXT: ToolGovernanceContextFacts = {
   phase: 'building',
   interactionMode: 'accept_edits',
-  authorizationMode: 'default',
   sandboxAvailable: true,
   circuitBreakerTripped: false,
   executionMechanism: 'other',
@@ -128,7 +132,7 @@ function facts(overrides: FactOverrides = {}): ToolGovernanceFacts {
 }
 
 function approvedFacts(
-  grant: 'approve_once' | 'same_command' | 'full_access' = 'approve_once',
+  grant: 'approve_once' | 'same_command' = 'approve_once',
   overrides: FactOverrides = {},
 ): ToolGovernanceFacts {
   const pending = facts(overrides);
@@ -419,7 +423,7 @@ describe('State tool governance authorization facts', () => {
             risk: 'destructive',
             phaseConstraint: 'planning',
           },
-          context: { phase: 'planning', authorizationMode: 'full_access' },
+          context: { phase: 'planning' },
         }),
       ),
     ).toMatchObject({ kind: 'reject', failureKind: 'phase_deferred' });
@@ -432,34 +436,31 @@ describe('State tool governance authorization facts', () => {
             requiresApproval: false,
             risk: 'destructive',
           },
-          context: { authorizationMode: 'full_access' },
+          context: {},
         }),
       ),
     ).toMatchObject({ kind: 'reject', failureKind: 'policy_denied' });
     expect(
       authorizeToolGovernance(
-        shellFacts({ context: { authorizationMode: 'full_access', sandboxAvailable: false } }),
-      ),
-    ).toMatchObject({ code: 'authorization_elevation_denied' });
-    expect(
-      authorizeToolGovernance(
         shellFacts({
-          context: {
-            authorizationMode: 'full_access',
-            authorizationSource: 'system',
-            autoReview: true,
-          },
+          policy: { requiresSandbox: true },
+          context: { sandboxAvailable: false },
         }),
       ),
     ).toMatchObject({ code: 'authorization_elevation_denied' });
     expect(
       authorizeToolGovernance(
         shellFacts({
-          context: {
-            authorizationMode: 'full_access',
-            authorizationSource: 'system',
-            loopMode: true,
-          },
+          policy: { requiresSandbox: true },
+          context: { sandboxAvailable: false },
+        }),
+      ),
+    ).toMatchObject({ code: 'authorization_elevation_denied' });
+    expect(
+      authorizeToolGovernance(
+        shellFacts({
+          policy: { requiresSandbox: true },
+          context: { sandboxAvailable: false },
         }),
       ),
     ).toMatchObject({ code: 'authorization_elevation_denied' });
@@ -476,7 +477,7 @@ describe('State tool governance authorization facts', () => {
             risk: 'read',
             minimumApproval: 'user',
           },
-          context: { authorizationMode: 'default' },
+          context: {},
         }),
       ),
     ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
@@ -491,7 +492,7 @@ describe('State tool governance authorization facts', () => {
             effects: { externalWrite: true },
             fullAccessMayBypassApproval: true,
           },
-          context: { interactionMode: 'accept_edits', authorizationMode: 'default' },
+          context: { interactionMode: 'accept_edits' },
         }),
       ),
     ).toMatchObject({ kind: 'request_approval' });
@@ -507,10 +508,10 @@ describe('State tool governance authorization facts', () => {
             effects: { externalRead: true, sensitiveExternalAccess: true },
             fullAccessMayBypassApproval: true,
           },
-          context: { interactionMode: 'full', authorizationMode: 'full_access' },
+          context: { interactionMode: 'full' },
         }),
       ),
-    ).toEqual({ kind: 'authorized', authorizationKind: 'approved_call', grantUsed: 'full_access' });
+    ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
     expect(
       authorizeToolGovernance(
         shellFacts({
@@ -523,7 +524,7 @@ describe('State tool governance authorization facts', () => {
             effects: { externalRead: true, sensitiveExternalAccess: true },
             fullAccessMayBypassApproval: true,
           },
-          context: { interactionMode: 'auto', authorizationMode: 'default' },
+          context: { interactionMode: 'auto' },
         }),
       ),
     ).toMatchObject({ kind: 'request_auto_review' });
@@ -539,11 +540,7 @@ describe('State tool governance authorization facts', () => {
             effects: { externalRead: true, sensitiveExternalAccess: true },
             fullAccessMayBypassApproval: true,
           },
-          context: {
-            interactionMode: 'auto',
-            authorizationMode: 'default',
-            circuitBreakerTripped: true,
-          },
+          context: { interactionMode: 'auto', circuitBreakerTripped: true },
         }),
       ),
     ).toMatchObject({ kind: 'request_approval' });
@@ -557,7 +554,7 @@ describe('State tool governance authorization facts', () => {
             risk: 'write_file',
             minimumApproval: 'user',
           },
-          context: { interactionMode: 'accept_edits', authorizationMode: 'default' },
+          context: { interactionMode: 'accept_edits' },
         }),
       ),
     ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
@@ -571,10 +568,10 @@ describe('State tool governance authorization facts', () => {
             risk: 'execute_code',
             fullAccessMayBypassApproval: true,
           },
-          context: { authorizationMode: 'full_access' },
+          context: {},
         }),
       ),
-    ).toEqual({ kind: 'authorized', authorizationKind: 'approved_call', grantUsed: 'full_access' });
+    ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
     expect(
       authorizeToolGovernance(
         shellFacts({
@@ -585,7 +582,7 @@ describe('State tool governance authorization facts', () => {
             risk: 'execute_code',
             fullAccessMayBypassApproval: false,
           },
-          context: { authorizationMode: 'full_access' },
+          context: {},
         }),
       ),
     ).toMatchObject({ kind: 'request_approval' });
@@ -598,10 +595,10 @@ describe('State tool governance authorization facts', () => {
             requiresApproval: true,
             risk: 'execute_code',
           },
-          context: { interactionMode: 'full', authorizationMode: 'default' },
+          context: { interactionMode: 'full' },
         }),
       ),
-    ).toMatchObject({ kind: 'request_approval' });
+    ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
   });
 
   test('requires a sandbox whenever the compiled policy requires one', () => {
@@ -627,8 +624,15 @@ describe('State tool governance authorization facts', () => {
     const grant = {
       workspace: '/workspace',
       threadId: 'thread-1',
+      canonicalWorkspaceIdentity: D,
+      cwd: '/workspace',
+      executor: 'shell',
+      environmentDigest: E,
+      scopeDigest: F,
+      effectsDigest: F,
+      parserRevision: D,
+      executorRevision: D,
       commandDigest: D,
-      source: 'user' as const,
       grantedAt: 10,
       expiresAt: 200,
     };
@@ -701,9 +705,9 @@ describe('State tool governance authorization facts', () => {
   });
 
   test('dynamic MCP minimum user remains manual under full_access, while read-only stays fast', () => {
-    expect(
-      authorizeToolGovernance(dynamicMcpFacts({ context: { authorizationMode: 'full_access' } })),
-    ).toMatchObject({ kind: 'request_approval' });
+    expect(authorizeToolGovernance(dynamicMcpFacts({ context: {} }))).toMatchObject({
+      kind: 'request_approval',
+    });
     expect(
       authorizeToolGovernance(
         dynamicMcpFacts({
@@ -727,7 +731,7 @@ describe('State tool governance authorization facts', () => {
             requiresApproval: false,
             fullAccessMayBypassApproval: true,
           },
-          context: { authorizationMode: 'full_access' },
+          context: {},
         }),
       ),
     ).toMatchObject({ kind: 'request_auto_review' });
@@ -762,7 +766,7 @@ describe('State tool governance authorization facts', () => {
             fullAccessMayBypassApproval: true,
           },
           nestedSkill: { decision: 'ask', minimumApproval: 'user' },
-          context: { authorizationMode: 'full_access' },
+          context: {},
         }),
       ),
     ).toMatchObject({ kind: 'request_approval' });

@@ -16,7 +16,7 @@ const SNAPSHOT_METADATA: RuntimeSnapshotMetadata = {
   eventPosition: 0,
   stateRevision: 0,
   stateChecksum: 'checksum',
-  schemaVersion: 26,
+  schemaVersion: 27,
 };
 
 function state(overrides: Partial<AgentState> = {}): AgentState {
@@ -109,8 +109,8 @@ describe('Runtime Host State restore', () => {
   test('creates only the exact fresh State format when storage is empty', () => {
     const result = restore(services());
     expect(result.source).toBe('fresh');
-    expect(result.state.schemaVersion).toBe(26);
-    expect(result.state.formatEpoch).toBe('kite-runtime-modularization-v1-2026-08-19');
+    expect(result.state.schemaVersion).toBe(27);
+    expect(result.state.formatEpoch).toBe('kite-runtime-saq-v1-2026-08-25');
     expect(result.state.turn.turnId).toBe('fresh-turn');
     expect(result.restoreBoundary).toEqual({ snapshot: null, lastEventPosition: 0 });
   });

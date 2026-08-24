@@ -39,7 +39,7 @@ type AgentStateReducer = (
 ) => AgentState;
 
 /**
- * The order is part of the State 25 replay contract.  It is a literal,
+ * The order is part of the State 27 replay contract.  It is a literal,
  * compile-time list: there is no reducer registration, injection, or module
  * discovery API.
  */
@@ -47,7 +47,7 @@ export const FIXED_AGENT_STATE_REDUCERS: readonly AgentStateReducer[] = Object.f
   reduceLifecycleState,
   reduceAuthorizationState,
   // Recovery must observe the pre-transition Tool lifecycle status. This
-  // preserves the State 25 rule that late terminal events are complete no-ops
+  // preserves the State 27 rule that late terminal events are complete no-ops
   // while the Intent reducer remains the sole owner of Tool call projection.
   reduceRecoveryState,
   reduceIntentState,
@@ -103,7 +103,7 @@ export function finalizeAgentEvent<Event extends KernelEvent>(
   return event;
 }
 
-/** State 25 event identity: SHA-256(JSON.stringify(event)) with no canonical rewrite. */
+/** State 27 event identity: SHA-256(JSON.stringify(event)) with no canonical rewrite. */
 export function digestAgentEvent(event: KernelEvent): string {
   const serialized = JSON.stringify(event);
   if (serialized === undefined) throw new Error('Runtime event cannot be serialized.');
@@ -124,7 +124,7 @@ export function reduceAgentState(
   return next;
 }
 
-/** Select effects from State 25 queue order, without inspecting tool names. */
+/** Select effects from State 27 queue order, without inspecting tool names. */
 export function selectPendingEffects(
   state: Readonly<AgentState>,
   facts?: SchedulerFacts,

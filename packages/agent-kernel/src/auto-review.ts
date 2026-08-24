@@ -1,7 +1,7 @@
 import type { AgentAutoReviewState } from './state';
 
 /**
- * State 25 auto-review completion authority.
+ * State 27 auto-review completion authority.
  *
  * Builtin owns reviewer/model semantics and supplies this module only the
  * resulting canonical facts. Kernel owns the deterministic decision about
@@ -10,7 +10,7 @@ import type { AgentAutoReviewState } from './state';
  * gateway, or persistence authority here.
  */
 
-export type AutoReviewGrant = 'approve_once' | 'same_command' | 'full_access';
+export type AutoReviewGrant = 'approve_once';
 export type AutoReviewFailureType = 'technical' | 'invalid_response';
 
 export interface AutoReviewFacts {
@@ -28,7 +28,7 @@ export interface AutoReviewAcceptedDecision {
   readonly kind: 'accepted_approval';
   readonly reviewId: string;
   readonly toolCallId: string;
-  readonly grant: Exclude<AutoReviewGrant, 'full_access'>;
+  readonly grant: AutoReviewGrant;
   readonly reason?: string;
 }
 
@@ -85,7 +85,7 @@ export interface CircuitBreakerResult {
   readonly newStatus: Readonly<{ status: 'closed' | 'open' }>;
 }
 
-/** Pure State 25 auto-review breaker decision over Host-supplied time facts. */
+/** Pure State 27 auto-review breaker decision over Host-supplied time facts. */
 export function evaluateAutoReviewCircuitBreaker(
   consecutiveRejects: number,
   rejectionHistory: readonly AutoReviewRejectionEntry[],
@@ -183,10 +183,7 @@ function validFacts(value: unknown): value is AutoReviewFacts {
     typeof value.approved === 'boolean' &&
     (value.requiresUserApproval === undefined || value.requiresUserApproval === true) &&
     !(value.approved && value.requiresUserApproval === true) &&
-    (value.grant === undefined ||
-      value.grant === 'approve_once' ||
-      value.grant === 'same_command' ||
-      value.grant === 'full_access') &&
+    (value.grant === undefined || value.grant === 'approve_once') &&
     (value.reason === undefined || boundedString(value.reason, MAX_REASON_LENGTH)) &&
     (value.failureType === undefined ||
       value.failureType === 'technical' ||
@@ -226,8 +223,9 @@ export function isValidAutoReviewFacts(value: unknown): value is AutoReviewFacts
 /**
  * Decide one completed auto-review result.
  *
- * `ok === true`, `approved === true`, and an operation-bound grant of
- * `approve_once` or `same_command` are all required for automatic acceptance.
+ * `ok === true`, `approved === true`, and an operation-bound `approve_once`
+ * grant are required for automatic acceptance; same_command is never minted
+ * by an auto reviewer.
  * A canonical reviewer rejection is terminal unless the reviewer explicitly
  * requests user approval. Technical/invalid results and unsupported grants
  * always escalate to the user.
@@ -269,12 +267,10 @@ export function decideAutoReview(value: unknown): AutoReviewDecision {
     });
   }
 
-  if (value.grant !== 'approve_once' && value.grant !== 'same_command') {
+  if (value.grant !== 'approve_once') {
     return requestUserApproval(
       value,
-      value.grant === 'full_access'
-        ? 'Auto-review cannot grant full_access; user approval is required.'
-        : 'Auto-review approval has no supported operation-bound grant.',
+      'Auto-review can only issue approve_once; user approval is required for another grant.',
       'invalid_response',
     );
   }

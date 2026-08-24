@@ -55,17 +55,13 @@ export class SessionManager {
       (threadId) => this.sessionRegistry.runtimes.get(threadId),
     );
     this.tokenStatsService = new TokenStatsService(deps.tokenStatsStorage);
-    // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
-    // on the real provider, route to the active runtime's resolveInterrupt.
-    // This runs once, avoiding the chain-wrapping anti-pattern of per-runtime bridges.
-    if (deps.provider.submitAction) {
-      const origSubmit = deps.provider.submitAction.bind(deps.provider);
-      deps.provider.submitAction = (action: SessionUserAction) => {
-        origSubmit(action);
-        const active = this.sessionRegistry.runtimes.get(this.sessionRegistry.activeId);
-        active?.resolveInterrupt(action);
-      };
-    }
+    // Durable approvals do not occupy the presentation provider's local
+    // requestAction slot. One explicit sink carries exact actions to the
+    // currently active Runtime without wrapping or replacing submitAction.
+    deps.provider.setActionSink?.((action: SessionUserAction) => {
+      const active = this.sessionRegistry.runtimes.get(this.sessionRegistry.activeId);
+      active?.resolveInterrupt(action);
+    });
   }
 
   listRewindCheckpoints(threadId: string) {
@@ -155,6 +151,36 @@ export class SessionManager {
     return this.sessionRegistry.runtimes.get(threadId);
   }
 
+  listSessionCommandGrants(threadId: string) {
+    const coordinator = this.deps.runtimeSessionCoordinator?.get(threadId);
+    if (!coordinator) return [];
+    return [...coordinator.getState().sessionCommandGrants.values()].sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt),
+    );
+  }
+
+  clearSessionCommandGrants(threadId: string): readonly RuntimeEvent[] | null {
+    const coordinator = this.deps.runtimeSessionCoordinator?.get(threadId);
+    if (!coordinator) return null;
+    const state = coordinator.getState();
+    if (state.sessionCommandGrants.size === 0) return [];
+    const event: RuntimeEvent = {
+      type: 'approval.session_grants_cleared',
+      sessionId: state.session.threadId,
+      sessionRevision: state.revision,
+      generation: state.approvalGeneration + 1,
+      clearedAt: new Date().toISOString(),
+    };
+    const applied = coordinator.control.processEventBatch([event]);
+    if (applied.length !== 1 || coordinator.getState().sessionCommandGrants.size !== 0) {
+      return null;
+    }
+    // Return the exact persisted event so the foreground TUI consumes the
+    // same fact that replay will later see; callers must not synthesize a
+    // presentation-only "cleared" action.
+    return applied;
+  }
+
   /** Bridge-only restart reconciliation. Runtime Host decides when it runs. */
   recoverRuntimeState(threadId: string): boolean {
     const runtime = this.sessionRegistry.runtimes.get(threadId);
@@ -166,12 +192,6 @@ export class SessionManager {
     const coordinatorAccess = this.deps.runtimeSessionCoordinator;
     if (!coordinatorAccess) return undefined;
     const existingCoordinator = coordinatorAccess.get(runtime.threadId);
-    // Interaction mode is mutable session state, not an immutable binding
-    // identity. TUI replay and the prompt submission boundary may project the
-    // latest mode onto SessionRuntime before the Host performs its one-time
-    // recovery ensure, so align the retained coordinator before asserting the
-    // rest of the identity.
-    existingCoordinator?.updateInteractionMode(runtime.interactionMode);
     const modelInvocationRuntime = this.deps.modelInvocationRuntimeFactory(runtime.workspace);
     const identity: RuntimeSessionCoordinatorIdentity = {
       sessionId: runtime.threadId,
@@ -189,6 +209,7 @@ export class SessionManager {
           : undefined,
     };
     const coordinator = coordinatorAccess.ensure(identity);
+    runtime.interactionMode = coordinator.getInteractionModeState().interactionMode;
     runtime.authorizedExecutionControl = coordinator.control;
     return coordinator;
   }
@@ -444,7 +465,7 @@ export class SessionManager {
     if (this.sessionRegistry.activeId === threadId) this.sessionRegistry.activeId = '';
   }
 
-  /** Release the State 25 session only after Host lifecycle has drained. */
+  /** Release the State 27 session only after Host lifecycle has drained. */
   async releaseRuntimeSessionCoordinator(threadId: string): Promise<void> {
     await this.deps.runtimeSessionCoordinator?.release(threadId);
   }
@@ -474,6 +495,7 @@ export class SessionManager {
 
   /** 清理资源：刷新所有防抖写入、关闭 DB 连接 / Cleanup: flush all pending debounce writes, close DB */
   dispose(): void {
+    this.deps.provider.setActionSink?.(null);
     // 清除所有防抖定时器并立即写入最新值
     // Clear all debounce timers and write latest values immediately
     this.tokenStatsService.flushAll();

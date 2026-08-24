@@ -28,6 +28,7 @@ import {
   SessionManager,
   SessionRuntime,
 } from '../apps/kite/src/runtime/session';
+import type { SessionUserAction } from '../apps/kite/src/runtime/session/contracts';
 import type {
   AppShellExecutor,
   AppShellRuntimeDecision,
@@ -38,11 +39,11 @@ import {
 } from '../apps/kite/src/sandbox/prepared-tool-pipeline';
 import {
   admitInteractionModeTarget,
+  appSandboxBackendAvailable,
   fullModeUnavailableReason,
   resolveInteractionModeTarget,
-  sandboxSupportsFullMode,
 } from '../apps/kite/src/tui/interaction-mode';
-import { type TuiAction, TuiUserInputProvider } from '../apps/kite/src/tui/provider';
+import { TuiUserInputProvider } from '../apps/kite/src/tui/provider';
 import type { Action } from '../apps/kite/src/tui/reducers/actions';
 import type { StatusState } from '../apps/kite/src/tui/types';
 import {
@@ -64,7 +65,11 @@ import { createMockModelServer } from './tui-system/harness/fixtures';
 // ── Test-only structural access to private members (casts are erased at runtime) ──
 
 type RuntimeWithPendingResolve = {
-  _pendingResolve: ((action: unknown) => void) | null;
+  _pendingResolve: {
+    interactionId: string;
+    generation?: number;
+    resolve: (action: SessionUserAction) => void;
+  } | null;
 };
 type RuntimeWithForegroundWake = { _foregroundWake: () => void };
 type RuntimeWithForeground = { _foreground: boolean };
@@ -194,6 +199,10 @@ function installTestOnlyRuntimeTurnAdapter(
     beginTurn: () => undefined,
     endTurn: () => undefined,
     updateInteractionMode: () => undefined,
+    getInteractionModeState: () => ({
+      interactionMode,
+      interactionModeRevision: 0,
+    }),
     updateSandboxAvailable: () => undefined,
     getSandboxAvailable: () => undefined,
     setActiveCancelRun: () => undefined,
@@ -255,7 +264,6 @@ function makeStatus(overrides: Partial<StatusState> = {}): StatusState {
     phase: 'building',
     plan: null,
     pendingPlan: null,
-    authorization: 'default',
     workspaceAccess: 'write',
     cacheHitTokens: 0,
     cacheMissTokens: 0,
@@ -273,12 +281,12 @@ function makeStatus(overrides: Partial<StatusState> = {}): StatusState {
 // ── SessionManager ──
 
 describe('fullModeUnavailableReason', () => {
-  test('rejects full mode when no sandbox backend is available', () => {
-    expect(fullModeUnavailableReason('full', 'none')).toBe('非沙箱环境无法开启full');
+  test('keeps Full selectable even when no sandbox backend is available', () => {
+    expect(fullModeUnavailableReason('full', 'none')).toBeNull();
   });
 
   test('allows development Full mode with the direct Windows restricted-token backend', () => {
-    expect(sandboxSupportsFullMode('windows_restricted_token')).toBe(true);
+    expect(appSandboxBackendAvailable('windows_restricted_token')).toBe(true);
     expect(fullModeUnavailableReason('full', 'windows_restricted_token')).toBeNull();
   });
 
@@ -300,11 +308,9 @@ describe('interaction mode admission', () => {
     expect(resolveInteractionModeTarget('au')).toBe('auto');
   });
 
-  test('rejects full admission before dispatch when sandbox is unavailable', () => {
+  test('does not downgrade Full admission when sandbox is unavailable', () => {
     const decision = admitInteractionModeTarget('full', 'none');
-    expect(decision.allowed).toBe(false);
-    expect(decision.mode).toBe('accept_edits');
-    expect(decision.reason).toBe('非沙箱环境无法开启full');
+    expect(decision).toEqual({ allowed: true, mode: 'full', reason: null });
   });
 
   test('allows full admission for the direct Windows restricted-token backend', () => {
@@ -324,7 +330,211 @@ describe('interaction mode admission', () => {
   });
 });
 
+describe('durable TUI approval action bridge', () => {
+  test('sends exact approval actions once and emits identity-bound input/plan actions', async () => {
+    const provider = new TuiUserInputProvider();
+    const delivered: SessionUserAction[] = [];
+    provider.setActionSink?.((action) => delivered.push(action));
+    const approval = {
+      scope: 'once' as const,
+      cwd: '/tmp/ws',
+      threadId: 'tui-bridge',
+      tool: 'shell_execute',
+      command: 'printf bridge',
+      risk: 'execute_code' as const,
+      approvalHash: 'bridge-hash',
+      summary: 'Run bridge fixture',
+      reason: 'test',
+      expectedEffects: [],
+      grantOptions: ['approve_once'] as const,
+      recommendedGrant: 'approve_once' as const,
+    };
+    const approvalPromise = provider.requestAction({
+      kind: 'approval',
+      interactionId: 'approval-bridge',
+      generation: 4,
+      approval,
+    });
+
+    provider.submitAction({
+      type: 'approve',
+      interactionId: 'approval-bridge',
+      generation: 3,
+      grant: 'approve_once',
+    });
+    expect(provider.getPendingInterrupt()?.interactionId).toBe('approval-bridge');
+    expect(delivered).toHaveLength(0);
+
+    provider.submitAction({
+      type: 'approve',
+      interactionId: 'approval-bridge',
+      generation: 4,
+      grant: 'approve_once',
+    });
+    provider.submitAction({
+      type: 'approve',
+      interactionId: 'approval-bridge',
+      generation: 4,
+      grant: 'approve_once',
+    });
+    await expect(approvalPromise).resolves.toEqual({
+      type: 'approve',
+      interactionId: 'approval-bridge',
+      generation: 4,
+      grant: 'approve_once',
+    });
+    expect(provider.getPendingInterrupt()).toBeNull();
+    expect(delivered).toEqual([
+      {
+        type: 'approve',
+        interactionId: 'approval-bridge',
+        generation: 4,
+        grant: 'approve_once',
+      },
+    ]);
+
+    const inputPromise = provider.requestAction({
+      kind: 'input',
+      interactionId: 'input-bridge',
+      question: { question: 'Continue?', options: [], allow_free_text: true },
+    });
+    provider.submitAction({ type: 'input', text: 'yes' });
+    await expect(inputPromise).resolves.toEqual({
+      type: 'input',
+      interactionId: 'input-bridge',
+      text: 'yes',
+    });
+
+    const planPromise = provider.requestAction({
+      kind: 'plan_review',
+      interactionId: 'plan-bridge',
+      plan: {
+        name: 'Bridge plan',
+        description: 'test',
+        status: 'pending',
+        steps: [],
+      },
+    });
+    provider.submitAction({
+      type: 'plan_review_decision',
+      decision: { kind: 'cancel', reason: 'test' },
+    });
+    await expect(planPromise).resolves.toEqual({
+      type: 'plan_review_decision',
+      interactionId: 'plan-bridge',
+      decision: { kind: 'cancel', reason: 'test' },
+    });
+    expect(delivered).toHaveLength(3);
+  });
+});
+
 describe('SessionManager', () => {
+  test('clears only the exact Session grants through one replayable event without changing mode', () => {
+    const grant = (threadId: string) => ({
+      grant: 'same_command' as const,
+      grantKey: `grant:${threadId}`,
+      sessionId: threadId,
+      threadId,
+      workspace: `/tmp/${threadId}`,
+      canonicalWorkspaceIdentity: `workspace:${threadId}`,
+      cwd: `/tmp/${threadId}`,
+      executor: 'shell_execute',
+      environment: 'env:test',
+      scope: 'scope:workspace-write',
+      effects: 'effects:filesystem-write',
+      parserRevision: 'parser:v1',
+      commandDigest: `command:${threadId}`,
+      createdAt: '2026-08-25T00:00:00.000Z',
+      generation: 0,
+    });
+    const initialState = (threadId: string, mode: RuntimeState['mode']) => {
+      const state = createRuntimeHostStateInitialState({
+        recoveryIdentityKey: createHash('sha256').update(`clear:${threadId}`).digest('hex'),
+        threadId,
+        userId: 'tui',
+        workspace: `/tmp/${threadId}`,
+        projectId: `project_${threadId}`,
+        canonicalWorkspaceDigest: `sha256:${createHash('sha256').update(threadId).digest('hex')}`,
+      });
+      state.mode = mode;
+      (state.sessionCommandGrants as Map<string, ReturnType<typeof grant>>).set(
+        `grant:${threadId}`,
+        grant(threadId),
+      );
+      return state;
+    };
+    const coordinators = new Map<string, RuntimeSessionCoordinator>();
+    const persisted = new Map<string, RuntimeEvent[]>();
+    const install = (threadId: string, mode: RuntimeState['mode']) => {
+      let state = initialState(threadId, mode);
+      const applied: RuntimeEvent[] = [];
+      const coordinator = {
+        sessionId: threadId,
+        getState: () => state,
+        control: {
+          getState: () => state,
+          processEvent: (event: RuntimeEvent) => {
+            const before = state;
+            state = reduceRuntimeState(state, event);
+            if (state !== before) applied.push(event);
+          },
+          processEventBatch: (events: readonly RuntimeEvent[]) => {
+            const accepted: RuntimeEvent[] = [];
+            for (const event of events) {
+              const before = state;
+              state = reduceRuntimeState(state, event);
+              if (state !== before) {
+                accepted.push(event);
+                applied.push(event);
+              }
+            }
+            return accepted;
+          },
+          cancelRun: () => [],
+        },
+      } as unknown as RuntimeSessionCoordinator;
+      coordinators.set(threadId, coordinator);
+      persisted.set(threadId, applied);
+      return { coordinator, getState: () => state };
+    };
+
+    const sessionA = install('session-a', 'auto');
+    const sessionB = install('session-b', 'full');
+    const deps = makeDeps();
+    deps.runtimeSessionCoordinator = {
+      ensure: () => {
+        throw new Error('unused');
+      },
+      get: (sessionId) => coordinators.get(sessionId),
+      release: async () => undefined,
+      close: async () => undefined,
+    };
+    const manager = new SessionManager(deps);
+
+    expect(manager.listSessionCommandGrants('session-a')).toHaveLength(1);
+    expect(manager.listSessionCommandGrants('session-b')).toHaveLength(1);
+    const cleared = manager.clearSessionCommandGrants('session-a');
+    expect(cleared).toHaveLength(1);
+    expect(cleared?.[0]).toMatchObject({
+      type: 'approval.session_grants_cleared',
+      sessionId: 'session-a',
+      sessionRevision: 0,
+      generation: 1,
+    });
+    expect(manager.listSessionCommandGrants('session-a')).toHaveLength(0);
+    expect(manager.listSessionCommandGrants('session-b')).toHaveLength(1);
+    expect(sessionA.getState().mode).toBe('auto');
+    expect(sessionB.getState().mode).toBe('full');
+
+    let replayed = initialState('session-a', 'auto');
+    for (const event of persisted.get('session-a') ?? []) {
+      replayed = reduceRuntimeState(replayed, event);
+    }
+    expect(replayed.sessionCommandGrants.size).toBe(0);
+    expect(replayed.mode).toBe('auto');
+    expect(replayed.approvalGeneration).toBe(1);
+  });
+
   test('reconciles a mutable TUI interaction mode before Host recovery re-ensures identity', () => {
     const deps = makeDeps();
     deps.config = { ...deps.config, interactionMode: 'accept_edits' };
@@ -353,6 +563,10 @@ describe('SessionManager', () => {
       updateInteractionMode: (mode: SessionRuntime['interactionMode']) => {
         retainedMode = mode;
       },
+      getInteractionModeState: () => ({
+        interactionMode: retainedMode,
+        interactionModeRevision: 0,
+      }),
       updateSandboxAvailable: () => undefined,
       getSandboxAvailable: () => undefined,
       setActiveCancelRun: () => undefined,
@@ -365,9 +579,6 @@ describe('SessionManager', () => {
     } satisfies RuntimeSessionCoordinator;
     deps.runtimeSessionCoordinator = {
       ensure: (identity) => {
-        if (registered && identity.interactionMode !== retainedMode) {
-          throw new Error('Runtime session identity drifted.');
-        }
         registered = true;
         retainedMode = identity.interactionMode;
         return coordinator;
@@ -413,6 +624,8 @@ describe('SessionManager', () => {
         type: 'approval.requested',
         interactionId: 'approval-1',
         toolCallId: 'shell-1',
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
         approval: {
           scope: 'once',
           cwd: '/tmp/ws',
@@ -437,6 +650,8 @@ describe('SessionManager', () => {
             interactionId: 'approval-1',
             toolCallId: 'shell-1',
             grant: 'approve_once',
+            receiptId: 'receipt-approval-1',
+            generation: 0,
           },
         ],
         [
@@ -783,6 +998,10 @@ describe('SessionManager', () => {
       beginTurn: () => undefined,
       endTurn: () => undefined,
       updateInteractionMode: () => undefined,
+      getInteractionModeState: () => ({
+        interactionMode: state.mode,
+        interactionModeRevision: state.interactionModeRevision,
+      }),
       updateSandboxAvailable: () => undefined,
       getSandboxAvailable: () => undefined,
       setActiveCancelRun: () => undefined,
@@ -1426,9 +1645,10 @@ describe('SessionManager', () => {
     const id1 = mgr.createSession('/tmp/ws');
     const rt1 = mgr.getRuntime(id1)!;
     // Set up a pending interrupt on the old session
-    (rt1 as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = (
-      _action: unknown,
-    ) => {};
+    (rt1 as unknown as RuntimeWithPendingResolve)._pendingResolve = {
+      interactionId: 'backgrounded-interaction',
+      resolve: () => {},
+    };
     rt1.pendingInterrupt = true;
 
     // Create new session — should deactivate old one
@@ -1659,9 +1879,10 @@ describe('SessionManager', () => {
     const id2 = mgr.createSession('/tmp/ws');
     const rt1 = mgr.getRuntime(id1)!;
     rt1.pendingInterrupt = true;
-    (rt1 as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = (
-      _action: unknown,
-    ) => {};
+    (rt1 as unknown as RuntimeWithPendingResolve)._pendingResolve = {
+      interactionId: 'switch-interaction',
+      resolve: () => {},
+    };
 
     mgr.switchSession(id1, id2);
 
@@ -2123,7 +2344,7 @@ describe('SessionManager', () => {
 // ── SessionRuntime ──
 
 describe('SessionRuntime', () => {
-  test('mirrors an approved plan execution mode before routing it to the TUI', () => {
+  test('keeps an approved plan lifecycle orthogonal to the live interaction mode', () => {
     const rt = makeRuntime();
 
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
@@ -2136,7 +2357,7 @@ describe('SessionRuntime', () => {
       () => {},
     );
 
-    expect(rt.interactionMode).toBe('auto');
+    expect(rt.interactionMode).toBe('accept_edits');
   });
 
   test('persists an interaction-mode change to a live Kernel control', () => {
@@ -2163,11 +2384,8 @@ describe('SessionRuntime', () => {
 
       expect(rt.interactionMode).toBe('full');
       expect(kernel.getState().mode).toBe('full');
-      expect(kernel.getState().authorization).toMatchObject({
-        mode: 'full_access',
-        modeSource: 'user',
-      });
-      expect(Date.parse(kernel.getState().authorization.modeGrantedAt ?? '')).toBeFinite();
+      expect(kernel.getState()).not.toHaveProperty('authorization');
+      expect(kernel.getState().interactionModeRevision).toBe(1);
     } finally {
       kernel.close();
     }
@@ -2245,7 +2463,7 @@ describe('SessionRuntime', () => {
     expect(mirroredMode).toBe('accept_edits');
   });
 
-  test('rejects a live Full mode change without a Full-qualified sandbox', () => {
+  test('keeps a live Full mode change without a Full-qualified sandbox', () => {
     const rt = makeRuntime();
     const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
@@ -2265,12 +2483,10 @@ describe('SessionRuntime', () => {
         cancelRun: () => [],
       };
 
-      expect(() => rt.setInteractionMode('full')).toThrow(
-        'full_access requires an available workspace sandbox',
-      );
-      expect(rt.interactionMode).toBe('accept_edits');
-      expect(kernel.getState().mode).toBe('accept_edits');
-      expect(kernel.getState().authorization.mode).toBe('default');
+      expect(() => rt.setInteractionMode('full')).not.toThrow();
+      expect(rt.interactionMode).toBe('full');
+      expect(kernel.getState().mode).toBe('full');
+      expect(kernel.getState()).not.toHaveProperty('authorization');
     } finally {
       kernel.close();
     }
@@ -2354,7 +2570,7 @@ describe('SessionRuntime', () => {
     'request_plan_review',
   ] as const)('binds a raw UI cancel to the active %s interaction id', async (effectType) => {
     const rt = makeRuntime();
-    const state = createRuntimeHostStateInitialState({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2403,11 +2619,38 @@ describe('SessionRuntime', () => {
       };
     }
 
+    if (effectType === 'request_tool_approval') {
+      state = reduceRuntimeState(state, {
+        type: 'approval.requested',
+        interactionId,
+        toolCallId,
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
+        approval:
+          state.interactions.kind === 'awaiting_tool_approval'
+            ? state.interactions.approval
+            : {
+                scope: 'once',
+                cwd: '/tmp/ws',
+                threadId: 't1',
+                tool: 'shell_execute',
+                command: 'pwd',
+                risk: 'execute_code',
+                approvalHash: 'hash',
+                summary: 'Run pwd',
+                reason: 'test',
+                expectedEffects: [],
+                grantOptions: ['approve_once'],
+                recommendedGrant: 'approve_once',
+              },
+      });
+    }
+
     const actionPromise = (rt as unknown as RuntimeWithRuntimeAction)._requestRuntimeAction(
       { type: effectType, interactionId, toolCallId },
       state,
     );
-    rt.resolveInterrupt({ type: 'cancel' });
+    rt.resolveInterrupt({ type: 'cancel', interactionId });
 
     await expect(actionPromise).resolves.toEqual({
       type: 'cancel',
@@ -2454,7 +2697,11 @@ describe('SessionRuntime', () => {
       },
       state,
     );
-    rt.resolveInterrupt({ type: 'input', text: 'waive: accepted by user' });
+    rt.resolveInterrupt({
+      type: 'input',
+      interactionId: 'verification',
+      text: 'waive: accepted by user',
+    });
     expect(await actionPromise).toEqual({
       type: 'waive_verification',
       verificationId: 'verification',
@@ -2487,7 +2734,7 @@ describe('SessionRuntime', () => {
       },
       state,
     );
-    rt.resolveInterrupt({ type: 'input', text: 'Run login' });
+    rt.resolveInterrupt({ type: 'input', interactionId: 'provider-action', text: 'Run login' });
     await expect(actionPromise).resolves.toEqual({
       type: 'provider_action_result',
       interactionId: 'provider-action',
@@ -2525,7 +2772,11 @@ describe('SessionRuntime', () => {
       },
       state,
     );
-    rt.resolveInterrupt({ type: 'input', text: 'Session Waive' });
+    rt.resolveInterrupt({
+      type: 'input',
+      interactionId: 'provider-admission',
+      text: 'Session Waive',
+    });
     await expect(actionPromise).resolves.toEqual({
       type: 'provider_admission_decision',
       interactionId: 'provider-admission',
@@ -2651,14 +2902,27 @@ describe('SessionRuntime', () => {
   });
 
   test('abort resolves pending interrupt and signals AbortController', () => {
-    const rt = makeRuntime();
+    const deps = makeDeps();
+    deps.runtimeSessionCoordinator = {
+      get: () => ({
+        getState: () => ({
+          activeApprovalId: 'abort-interaction',
+          pendingApprovals: new Map([['abort-interaction', { generation: 0 }]]),
+        }),
+      }),
+    } as unknown as RuntimeSessionCoordinatorAccess;
+    const rt = new SessionRuntime('abort-interaction', '/tmp/ws', deps);
     const ac = new AbortController();
     rt.agentLoopActive = true;
     rt.abortController = ac;
 
     let resolved = false;
-    (rt as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = () => {
-      resolved = true;
+    (rt as unknown as RuntimeWithPendingResolve)._pendingResolve = {
+      interactionId: 'abort-interaction',
+      generation: 0,
+      resolve: () => {
+        resolved = true;
+      },
     };
 
     rt.abort();
@@ -3098,24 +3362,34 @@ describe('SessionRuntime', () => {
   test('resolveInterrupt resolves the pending promise with action', () => {
     const rt = makeRuntime();
     let resolvedAction: unknown = null;
-    (rt as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = (
-      action: unknown,
-    ) => {
-      resolvedAction = action;
+    (rt as unknown as RuntimeWithPendingResolve)._pendingResolve = {
+      interactionId: 'pending-approval',
+      generation: 0,
+      resolve: (action) => {
+        resolvedAction = action;
+      },
     };
 
-    rt.resolveInterrupt({ type: 'approve' } as unknown as TuiAction);
+    rt.resolveInterrupt({
+      type: 'approve',
+      interactionId: 'pending-approval',
+      generation: 0,
+      grant: 'approve_once',
+    });
 
-    expect(resolvedAction).toEqual({ type: 'approve' });
-    expect(
-      (rt as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve,
-    ).toBeNull();
+    expect(resolvedAction).toEqual({
+      type: 'approve',
+      interactionId: 'pending-approval',
+      generation: 0,
+      grant: 'approve_once',
+    });
+    expect((rt as unknown as RuntimeWithPendingResolve)._pendingResolve).toBeNull();
   });
 
   test('resolveInterrupt is no-op when no pending resolve or durable interaction', () => {
     const rt = makeRuntime();
     // should not throw
-    rt.resolveInterrupt({ type: 'cancel' } as unknown as TuiAction);
+    rt.resolveInterrupt({ type: 'cancel', interactionId: 'no-active-interaction' });
   });
 
   test('queues an early UI decision until the Runtime interaction waiter attaches', async () => {
@@ -3123,6 +3397,8 @@ describe('SessionRuntime', () => {
     deps.runtimeSessionCoordinator = {
       get: () => ({
         getState: () => ({
+          activeApprovalId: 'approval-race-1',
+          pendingApprovals: new Map([['approval-race-1', { generation: 0 }]]),
           interactions: {
             kind: 'awaiting_tool_approval',
             interactionId: 'approval-race-1',
@@ -3133,10 +3409,24 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime('approval-race', '/tmp/ws', deps);
     const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
 
-    rt.resolveInterrupt({ type: 'approve', grant: 'approve_once' });
-
-    await expect(proxy.requestAction({ kind: 'approval', approval: {} })).resolves.toEqual({
+    rt.resolveInterrupt({
       type: 'approve',
+      interactionId: 'approval-race-1',
+      generation: 0,
+      grant: 'approve_once',
+    });
+
+    await expect(
+      proxy.requestAction({
+        kind: 'approval',
+        interactionId: 'approval-race-1',
+        generation: 0,
+        approval: {},
+      }),
+    ).resolves.toEqual({
+      type: 'approve',
+      interactionId: 'approval-race-1',
+      generation: 0,
       grant: 'approve_once',
     });
   });
@@ -3146,6 +3436,8 @@ describe('SessionRuntime', () => {
     deps.runtimeSessionCoordinator = {
       get: () => ({
         getState: () => ({
+          activeApprovalId: 'approval-race-escape',
+          pendingApprovals: new Map([['approval-race-escape', { generation: 0 }]]),
           interactions: {
             kind: 'awaiting_tool_approval',
             interactionId: 'approval-race-escape',
@@ -3156,11 +3448,16 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime('approval-race-escape', '/tmp/ws', deps);
     const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
 
-    rt.resolveInterrupt({ type: 'cancel' });
+    rt.resolveInterrupt({ type: 'cancel', interactionId: 'approval-race-escape' });
 
-    await expect(proxy.requestAction({ kind: 'approval', approval: {} })).resolves.toEqual({
-      type: 'cancel',
-    });
+    await expect(
+      proxy.requestAction({
+        kind: 'approval',
+        interactionId: 'approval-race-escape',
+        generation: 0,
+        approval: {},
+      }),
+    ).resolves.toEqual({ type: 'cancel', interactionId: 'approval-race-escape' });
   });
 
   test('does not carry an early UI decision into a different Runtime interaction', async () => {
@@ -3169,6 +3466,8 @@ describe('SessionRuntime', () => {
     deps.runtimeSessionCoordinator = {
       get: () => ({
         getState: () => ({
+          activeApprovalId: interactionId,
+          pendingApprovals: new Map([[interactionId, { generation: 0 }]]),
           interactions: {
             kind: 'awaiting_tool_approval',
             interactionId,
@@ -3179,13 +3478,28 @@ describe('SessionRuntime', () => {
     const rt = new SessionRuntime('approval-race', '/tmp/ws', deps);
     const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
 
-    rt.resolveInterrupt({ type: 'cancel' });
+    rt.resolveInterrupt({ type: 'cancel', interactionId: 'approval-race-1' });
     interactionId = 'approval-race-2';
-    const waiting = proxy.requestAction({ kind: 'approval', approval: {} });
+    const waiting = proxy.requestAction({
+      kind: 'approval',
+      interactionId: 'approval-race-2',
+      generation: 0,
+      approval: {},
+    });
     await Bun.sleep(0);
-    rt.resolveInterrupt({ type: 'approve', grant: 'approve_once' });
+    rt.resolveInterrupt({
+      type: 'approve',
+      interactionId: 'approval-race-2',
+      generation: 0,
+      grant: 'approve_once',
+    });
 
-    await expect(waiting).resolves.toEqual({ type: 'approve', grant: 'approve_once' });
+    await expect(waiting).resolves.toEqual({
+      type: 'approve',
+      interactionId: 'approval-race-2',
+      generation: 0,
+      grant: 'approve_once',
+    });
   });
 
   // ── _pushToBuffer (via private access) ──
@@ -3598,24 +3912,30 @@ describe('SessionRuntime', () => {
   test('proxy submitAction delegates to resolveInterrupt', () => {
     const rt = makeRuntime();
     let resolved: unknown = null;
-    (rt as unknown as RuntimeWithPendingResolve)._pendingResolve = (action: unknown) => {
-      resolved = action;
+    (rt as unknown as RuntimeWithPendingResolve)._pendingResolve = {
+      interactionId: 'proxy-interaction',
+      resolve: (action) => {
+        resolved = action;
+      },
     };
     const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
 
-    proxy.submitAction({ type: 'cancel' });
-    expect(resolved).toEqual({ type: 'cancel' });
+    proxy.submitAction({ type: 'cancel', interactionId: 'proxy-interaction' });
+    expect(resolved).toEqual({ type: 'cancel', interactionId: 'proxy-interaction' });
   });
 
   test('proxy reset cancels any pending interrupt', () => {
     const rt = makeRuntime();
     let resolved: unknown = null;
-    (rt as unknown as RuntimeWithPendingResolve)._pendingResolve = (action: unknown) => {
-      resolved = action;
+    (rt as unknown as RuntimeWithPendingResolve)._pendingResolve = {
+      interactionId: 'reset-interaction',
+      resolve: (action) => {
+        resolved = action;
+      },
     };
     const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
 
     proxy.reset();
-    expect(resolved).toEqual({ type: 'cancel' });
+    expect(resolved).toEqual({ type: 'cancel', interactionId: 'reset-interaction' });
   });
 });

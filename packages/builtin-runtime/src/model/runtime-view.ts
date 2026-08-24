@@ -2,7 +2,7 @@
  * Structural, read-only view of the Runtime facts consumed by Builtin model semantics.
  *
  * This is deliberately not a persisted state schema and owns no Kernel authority. The
- * Core State 25 object satisfies this view structurally at the Builtin invocation seam.
+ * Core State 27 object satisfies this view structurally at the Builtin invocation seam.
  */
 export type BuiltinToolEffectClass =
   | 'read_only'
@@ -13,7 +13,6 @@ export type BuiltinToolEffectClass =
 
 export type BuiltinAgentPhase = 'planning' | 'building';
 export type BuiltinInteractionMode = 'accept_edits' | 'auto' | 'full';
-export type BuiltinAuthorizationMode = 'default' | 'full_access';
 export type BuiltinSandboxBackend = 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
 
 export interface BuiltinPlanDocumentView {
@@ -164,7 +163,6 @@ export interface BuiltinRuntimeStateView {
       >
     >;
   };
-  readonly authorization?: { readonly mode: BuiltinAuthorizationMode };
   readonly mode: BuiltinInteractionMode;
 }
 

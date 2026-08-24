@@ -8,7 +8,6 @@ import {
 import type { BuiltinModelOperationExecutionPort } from '@kite/builtin-runtime/model';
 import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite/runtime-contract';
 import {
-  assertRuntimeAuthorizationElevation,
   createRuntimeHost,
   createRuntimeHostBoundary,
   createRuntimeHostStateStorageBinding,
@@ -223,15 +222,6 @@ export function createKiteRuntimeBoundary(): RuntimeHostBoundary {
       throw new Error('Kite boundary inspection cannot create a runtime execution adapter');
     }),
   });
-}
-
-/** Bootstrap-owned Host policy binding supplied to Client entrypoints as a narrow callback. */
-export function assertKiteRuntimeAuthorizationElevation(input: {
-  readonly mode: 'default' | 'full_access';
-  readonly source: 'config';
-  readonly sandboxAvailable: boolean;
-}): void {
-  assertRuntimeAuthorizationElevation(input);
 }
 
 export function createKiteCliRuntimeAccess(

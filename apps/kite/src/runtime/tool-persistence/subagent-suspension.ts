@@ -114,10 +114,12 @@ export async function commitTaskSubagentSuspension(
   const embeddedSuspensionEvent = structured.runtimeEvents.find(
     (event) => event.type === suspension.event.type && sameJson(event, suspension.event),
   );
-  const interactionDeferred = input.before.interactions.kind !== 'idle';
-  const interactionEvent: StateRuntimeEvent = interactionDeferred
-    ? { type: 'subagent.approval_deferred', toolCallId: suspension.toolCallId }
-    : (embeddedSuspensionEvent ?? (suspension.event as StateRuntimeEvent));
+  // Every sibling keeps its canonical approval/auto-review request.  The
+  // durable Kernel queue owns focus and ordering; this persistence boundary
+  // must never turn a real request into a local deferred placeholder.
+  const interactionDeferred = false;
+  const interactionEvent: StateRuntimeEvent =
+    embeddedSuspensionEvent ?? (suspension.event as StateRuntimeEvent);
   const recoveryEvents = recoveryEvent ? [recoveryEvent] : [];
   const events: StateRuntimeEvent[] = [
     recordedEvent,
@@ -352,6 +354,21 @@ function assertTaskSubagentSuspendedState(
           interactionId: suspension.event.reviewId,
           toolCallId: identity.toolCallId,
         };
+  const approvalInteractionId =
+    suspension.event.type === 'approval.requested'
+      ? suspension.event.interactionId
+      : suspension.event.reviewId;
+  const approvalState = after as StateRuntimeState & {
+    pendingApprovals?: ReadonlyMap<string, { status?: string; toolCallId?: string }>;
+    approvalQueue?: {
+      pendingApprovals?: Record<string, { status?: string; toolCallId?: string }>;
+    };
+  };
+  const queueRecord =
+    approvalState.pendingApprovals?.get(approvalInteractionId) ??
+    approvalState.approvalQueue?.pendingApprovals?.[approvalInteractionId];
+  const queueAcknowledged =
+    queueRecord !== undefined && queueRecord.toolCallId === identity.toolCallId;
   if (
     !includesAcknowledgedRevision(after, before, eventCount) ||
     !invocation ||
@@ -363,14 +380,16 @@ function assertTaskSubagentSuspendedState(
     invocation.artifact?.artifactId !== artifact.artifactId ||
     invocation.artifact?.integrityIdentifier !== artifact.integrityIdentifier ||
     !sameJson(after.suspendedSubagents[identity.toolCallId], suspension.subagent) ||
-    (interactionDeferred
-      ? call?.status !== 'queued' || !sameJson(after.interactions, before.interactions)
-      : (suspension.event.type === 'approval.requested'
-          ? call?.status !== 'awaiting_approval'
-          : call?.status !== 'awaiting_auto_review') ||
-        after.interactions.kind !== expectedInteraction.kind ||
-        after.interactions.interactionId !== expectedInteraction.interactionId ||
-        after.interactions.toolCallId !== expectedInteraction.toolCallId)
+    (approvalState.pendingApprovals !== undefined || approvalState.approvalQueue !== undefined
+      ? !queueAcknowledged
+      : interactionDeferred
+        ? call?.status !== 'queued' || !sameJson(after.interactions, before.interactions)
+        : (suspension.event.type === 'approval.requested'
+            ? call?.status !== 'awaiting_approval'
+            : call?.status !== 'awaiting_auto_review') ||
+          after.interactions.kind !== expectedInteraction.kind ||
+          after.interactions.interactionId !== expectedInteraction.interactionId ||
+          after.interactions.toolCallId !== expectedInteraction.toolCallId)
   ) {
     throw new AppStateToolPipelinePersistenceError(
       'acknowledgement_mismatch',

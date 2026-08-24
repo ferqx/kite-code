@@ -229,6 +229,7 @@
       "documents": [
         "docs/active/mcp-runtime-governance.md",
         "docs/active/mcp-authentication.md",
+        "docs/active/tool-gated-autonomy.md",
         "docs/book/11-MCP与Skills扩展.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
       ]
@@ -257,6 +258,7 @@
         "docs/active/mcp-project-approval.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/active/mcp-authentication.md",
+        "docs/active/tui-localization.md",
         "docs/book/08-TUI交互全景.md",
         "docs/book/09-CLI模式与配置.md",
         "docs/book/11-MCP与Skills扩展.md",
@@ -1254,12 +1256,15 @@
     {
       "id": "protocol",
       "sources": ["packages/runtime-contract/src/**", "packages/runtime-spi/src/**"],
-      "documents": ["docs/book/03-协议层.md"]
+      "documents": [
+        "docs/active/authorization.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/book/03-协议层.md"
+      ]
     },
     {
       "id": "authorization-elevation-domain",
       "sources": [
-        "packages/agent-kernel/src/authorization.ts",
         "packages/agent-kernel/src/tool-governance.ts",
         "packages/agent-kernel/test/authorization.test.ts",
         "apps/kite/src/cli/index.ts",
@@ -1270,6 +1275,67 @@
         "docs/active/authorization.md",
         "docs/active/layer-boundary-enforcement.md",
         "docs/active/six-concept-runtime-architecture.md"
+      ]
+    },
+    {
+      "id": "shell-sandbox-approval-queue",
+      "sources": [
+        "packages/agent-kernel/src/state.ts",
+        "packages/agent-kernel/src/events.ts",
+        "packages/agent-kernel/src/codec.ts",
+        "packages/agent-kernel/src/core/authorization/**",
+        "packages/agent-kernel/src/scheduler.ts",
+        "packages/agent-kernel/src/completion.ts",
+        "packages/agent-kernel/src/invariants.ts",
+        "packages/agent-kernel/src/tool-governance.ts",
+        "packages/agent-kernel/test/approval-queue.test.ts",
+        "packages/agent-kernel/test/shell-policy-matrix.test.ts",
+        "packages/runtime-host/src/kernel-adapter/**",
+        "packages/runtime-host/src/**",
+        "packages/runtime-host/test/approval-batch-recovery.test.ts",
+        "packages/runtime-storage-sqlite/src/**",
+        "packages/runtime-storage-sqlite/test/approval-queue-recovery.test.ts",
+        "packages/runtime-spi/src/subagent.ts",
+        "packages/runtime-spi/src/subagent-provider.ts",
+        "packages/builtin-runtime/src/subagent/**",
+        "packages/builtin-runtime/src/sandbox/**",
+        "packages/builtin-runtime/test/sandbox-scope-contract.test.ts",
+        "apps/kite/src/runtime/tool-execution/**",
+        "apps/kite/src/runtime/tool-persistence/**",
+        "apps/kite/src/bootstrap/runtime/**",
+        "apps/kite/src/runtime/session/**",
+        "apps/kite/src/config/**",
+        "apps/kite/src/tui/**",
+        "tests/runtime/approval-*.test.ts",
+        "tests/runtime/subagent-approval-queue.test.ts",
+        "tests/runtime/concurrent-shell-cancel.test.ts",
+        "tests/subagent-*.test.ts",
+        "tests/tui-system/scenarios/approval-escape.test.ts",
+        "tests/tui-system/scenarios/subagent-approval.test.ts",
+        "tests/tui-system/scenarios/plan-mode-policy.test.ts",
+        "tests/tui-system/scenarios/sandbox-mode.test.ts"
+      ],
+      "documents": [
+        "docs/active/authorization.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/active/cancel-resume-cleanup.md",
+        "docs/active/plan-mode-implementation.md",
+        "docs/active/plan-state-reminder.md",
+        "docs/active/execution-boundary.md",
+        "docs/active/execution-platform-support.md",
+        "docs/active/shell-platform-compatibility.md",
+        "docs/active/windows-shell-sandbox.md",
+        "docs/active/session-logging-policy.md",
+        "docs/active/tui-e2e-standards.md",
+        "docs/active/tui-e2e-testing-limits.md",
+        "docs/active/tui-localization.md",
+        "docs/active/workspace-trust.md",
+        "docs/active/project-conventions.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/adr/0137-shell-sandbox-durable-approval-queue.md",
+        "docs/space/plans/2026-08-25-shell-sandbox-approval-queue-optimization.md",
+        "docs/space/execution/completed/2026-08-25-shell-sandbox-approval-queue-optimization.md",
+        "docs/space/plans/index.md"
       ]
     }
   ]

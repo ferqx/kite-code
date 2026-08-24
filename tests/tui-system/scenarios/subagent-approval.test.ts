@@ -20,7 +20,7 @@ import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { screenContains, stripAnsi, waitForAnyText, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -140,7 +140,11 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
       // Approve the tool (default "允许一次" at index 0, press Enter)
       tui.write('\r');
 
-      await waitForText(() => tui.viewport(), '进行中', TIMEOUT);
+      // The optimistic `approving` projection may be shorter than one Ink
+      // frame.  Require the first canonical post-grant child state instead:
+      // either the durable authorized queue acknowledgement or its immediate
+      // running successor.
+      await waitForAnyText(() => tui.viewport(), ['已授权 · 等待执行', '执行中'], TIMEOUT);
       const acknowledged = tui.viewport();
       expect(screenContains(acknowledged, '等待你的批准')).toBe(false);
       expect(screenContains(acknowledged, '工具授权')).toBe(false);
@@ -244,8 +248,7 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
             delay: 750,
             message: {
               content: JSON.stringify({
-                approved: true,
-                grant: 'approve_once',
+                decision: 'approve_once',
                 reason: 'The requested fixture write is scoped and reversible.',
                 riskAssessment: 'low',
               }),

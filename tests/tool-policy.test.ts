@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentSessionCommandGrant } from '@kite/agent-kernel';
 import { createToolApprovalBindingDigest } from '@kite/agent-kernel';
 import type { PendingToolRequest } from '@kite/builtin-runtime';
 import {
@@ -6,16 +7,8 @@ import {
   type BuiltinToolCapabilityProjection,
   compileBuiltinDynamicMcpPolicy,
 } from '@kite/builtin-runtime';
-import type { StateAuthorizationSource } from '@kite/runtime-host';
-import {
-  runtimeHostStateDefaultAuthorization as defaultAuthorizationState,
-  runtimeHostStateGrantSameCommand,
-  runtimeHostStateHasSameCommandGrant,
-  type StateAuthorizationState,
-} from '@kite/runtime-host/kernel-adapter';
 import type { CapabilityPolicyCompilation, RuntimeJsonValue } from '@kite/runtime-spi';
 import {
-  applyApprovalGrant,
   buildToolApproval,
   replaceApprovalCommand,
   validateApprovalHash,
@@ -28,8 +21,17 @@ type EvaluateToolApprovalParams = {
   readonly phase: 'planning' | 'building';
   readonly workspace?: string;
   readonly threadId?: string;
-  readonly authorization?: { readonly mode?: 'default' | 'full_access' } | null;
-  readonly override?: { readonly current: 'default' | 'full_access' };
+  readonly interactionMode?: 'auto' | 'accept_edits' | 'full';
+  readonly sessionId?: string;
+  readonly canonicalWorkspaceIdentity?: string;
+  readonly cwd?: string;
+  readonly executor?: string;
+  readonly environment?: string;
+  readonly scope?: string;
+  readonly effectsDigest?: string;
+  readonly parserRevision?: string;
+  readonly executorRevision?: string;
+  readonly sessionCommandGrant?: Readonly<AgentSessionCommandGrant> | null;
   readonly mcpPolicy?: {
     readonly effects: {
       readonly filesystem: 'none' | 'read' | 'write' | 'destructive';
@@ -41,23 +43,42 @@ type EvaluateToolApprovalParams = {
   readonly capability?: BuiltinToolCapabilityProjection;
 };
 
-function grantSameCommand(
-  authorization: StateAuthorizationState | null | undefined,
-  input: {
-    workspace: string;
-    threadId: string;
-    command: string;
-    source?: StateAuthorizationSource;
-  },
-): StateAuthorizationState {
-  return runtimeHostStateGrantSameCommand({ authorization, ...input });
+function commandDigest(command: string): string {
+  return command.trim();
 }
 
-function hasSameCommandGrant(
-  authorization: StateAuthorizationState | null | undefined,
-  input: { workspace: string; threadId: string; command: string },
-): boolean {
-  return runtimeHostStateHasSameCommandGrant({ authorization, ...input });
+function grantSameCommand(input: {
+  workspace: string;
+  threadId: string;
+  command: string;
+  sessionId?: string;
+  canonicalWorkspaceIdentity?: string;
+  cwd?: string;
+  executor?: string;
+  environment?: string;
+  scope?: string;
+  effectsDigest?: string;
+  parserRevision?: string;
+  executorRevision?: string;
+}): AgentSessionCommandGrant {
+  return {
+    grant: 'same_command',
+    grantKey: 'fixture-grant',
+    sessionId: input.sessionId ?? 'session-a',
+    threadId: input.threadId,
+    workspace: input.workspace,
+    canonicalWorkspaceIdentity: input.canonicalWorkspaceIdentity ?? input.workspace,
+    cwd: input.cwd ?? input.workspace,
+    executor: input.executor ?? 'shell',
+    environment: input.environment ?? 'env-v1',
+    scope: input.scope ?? 'workspace_only',
+    effects: input.effectsDigest ?? 'effects-v1',
+    parserRevision: input.parserRevision ?? 'parser-v1',
+    executorRevision: input.executorRevision ?? 'executor-v1',
+    commandDigest: commandDigest(input.command),
+    createdAt: '2026-01-01T00:00:00.000Z',
+    generation: 1,
+  };
 }
 
 type TestApprovalDecision = Pick<
@@ -72,7 +93,7 @@ type TestApprovalDecision = Pick<
   | 'expectedEffects'
   | 'phaseConstraint'
 > & {
-  readonly grantUsed: 'none' | 'same_command' | 'full_access';
+  readonly grantUsed: 'none' | 'same_command';
 };
 
 function policyCompilationFor(params: EvaluateToolApprovalParams): CapabilityPolicyCompilation {
@@ -111,25 +132,37 @@ function evaluateToolApproval(params: EvaluateToolApprovalParams): TestApprovalD
     params.toolName === 'shell_execute' && typeof params.toolArgs.command === 'string'
       ? params.toolArgs.command
       : undefined;
-  const fullAccess =
-    params.authorization?.mode === 'full_access' || params.override?.current === 'full_access';
   const sameCommand =
     command !== undefined &&
     params.workspace !== undefined &&
     params.threadId !== undefined &&
-    hasSameCommandGrant(params.authorization as never, {
-      workspace: params.workspace,
-      threadId: params.threadId,
-      command,
-    });
+    params.sessionCommandGrant !== undefined &&
+    params.sessionCommandGrant !== null &&
+    params.sessionCommandGrant.sessionId === (params.sessionId ?? '') &&
+    params.sessionCommandGrant.threadId === params.threadId &&
+    params.sessionCommandGrant.workspace === params.workspace &&
+    params.sessionCommandGrant.canonicalWorkspaceIdentity ===
+      (params.canonicalWorkspaceIdentity ?? '') &&
+    params.sessionCommandGrant.cwd === (params.cwd ?? '') &&
+    params.sessionCommandGrant.executor === (params.executor ?? '') &&
+    params.sessionCommandGrant.environment === (params.environment ?? '') &&
+    params.sessionCommandGrant.scope === (params.scope ?? '') &&
+    params.sessionCommandGrant.effects === (params.effectsDigest ?? '') &&
+    params.sessionCommandGrant.parserRevision === (params.parserRevision ?? '') &&
+    params.sessionCommandGrant.executorRevision === (params.executorRevision ?? '') &&
+    params.sessionCommandGrant.commandDigest === commandDigest(command);
   if (compilation.allowed && compilation.requiresApproval) {
-    if (fullAccess && compilation.fullAccessMayBypassApproval) grantUsed = 'full_access';
-    else if (sameCommand && compilation.sameCommandMayBypassApproval) grantUsed = 'same_command';
+    if (params.interactionMode === 'full' && compilation.fullAccessMayBypassApproval) {
+      // Full is an interaction mode, never an approval grant.
+      grantUsed = 'none';
+    } else if (sameCommand && compilation.sameCommandMayBypassApproval) grantUsed = 'same_command';
   }
+  const fullModeBypass =
+    params.interactionMode === 'full' && compilation.fullAccessMayBypassApproval;
   return {
     decision: grantUsed === 'none' ? compilation.decision : 'allow',
     allowed: compilation.allowed,
-    requiresApproval: compilation.requiresApproval && grantUsed === 'none',
+    requiresApproval: compilation.requiresApproval && grantUsed === 'none' && !fullModeBypass,
     risk: compilation.risk,
     ...(compilation.effects ? { effects: compilation.effects } : {}),
     reason: compilation.reason,
@@ -148,6 +181,18 @@ const shellExecuteRequest: PendingToolRequest = {
   reason: 'Model requested shell_execute tool call',
   protectedCommand: 'bun test',
 };
+
+const sameCommandIdentity = {
+  sessionId: 'session-a',
+  canonicalWorkspaceIdentity: '/tmp/project',
+  cwd: '/tmp/project',
+  executor: 'shell',
+  environment: 'env-v1',
+  scope: 'workspace_only',
+  effectsDigest: 'effects-v1',
+  parserRevision: 'parser-v1',
+  executorRevision: 'executor-v1',
+} as const;
 
 const presentationApprovalBindingDigest = createToolApprovalBindingDigest(
   {
@@ -237,7 +282,7 @@ describe('tool policy', () => {
     }
   });
 
-  test('routes Shell execution through mode review without local command authorization', () => {
+  test('allows the Building workspace baseline directly without a grant', () => {
     const decision = evaluateToolApproval({
       toolName: shellExecuteRequest.name,
       toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
@@ -245,13 +290,13 @@ describe('tool policy', () => {
     });
 
     expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(true);
+    expect(decision.requiresApproval).toBe(false);
     expect(decision.risk).toBe('unknown');
     expect(decision.userVisibleSummary).toContain('bun test');
-    expect(decision.expectedEffects).toContain('Executes an arbitrary shell command');
+    expect(decision.expectedEffects).toContain('Runs inside the workspace sandbox baseline');
   });
 
-  test('does not grant a Shell approval bypass from a fixed read-only command list', () => {
+  test('keeps baseline shell commands direct without a command allowlist', () => {
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
       toolArgs: { command: 'pwd' },
@@ -259,11 +304,11 @@ describe('tool policy', () => {
     });
 
     expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(true);
+    expect(decision.requiresApproval).toBe(false);
     expect(decision.risk).toBe('unknown');
   });
 
-  test('keeps every Shell command outside the planning execution ceiling', () => {
+  test('allows the Planning workspace read-only baseline directly', () => {
     for (const command of ['ls -la', 'pwd', 'rg TODO src']) {
       const decision = evaluateToolApproval({
         toolName: 'shell_execute',
@@ -272,24 +317,22 @@ describe('tool policy', () => {
         workspace: '/tmp/project',
         threadId: 'thread-a',
       });
-      expect(decision.allowed, command).toBe(false);
+      expect(decision.allowed, command).toBe(true);
       expect(decision.requiresApproval, command).toBe(false);
-      expect(decision.reason, command).toContain('planning phase');
+      expect(decision.risk, command).toBe('unknown');
     }
   });
 
-  // 验证规划阶段拒绝执行类工具，即使工作区访问权限错误地为 write / Planning phase rejects execution tools even if workspace access is write
-  test('rejects shell execution during planning phase', () => {
+  test('keeps Planning baseline shell execution direct', () => {
     const decision = evaluateToolApproval({
       toolName: shellExecuteRequest.name,
       toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
       phase: 'planning',
     });
 
-    expect(decision.allowed).toBe(false);
+    expect(decision.allowed).toBe(true);
     expect(decision.requiresApproval).toBe(false);
     expect(decision.risk).toBe('unknown');
-    expect(decision.reason).toContain('planning phase');
   });
 
   // 验证高危命令默认拒绝，不进入普通审批 / High-risk shell commands are denied instead of routed to normal approval
@@ -305,20 +348,22 @@ describe('tool policy', () => {
     expect(decision.risk).toBe('destructive');
   });
 
-  // 验证 same_command 授权命中后，同一 thread/workspace 的同一命令不再审批 / same_command grants bypass approval for the exact command in the same thread and workspace
+  // same_command is a Session grant over the complete execution identity.
   test('allows same-command shell execution without approval after a command grant', () => {
-    const authorization = grantSameCommand(defaultAuthorizationState(), {
+    const sessionCommandGrant = grantSameCommand({
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      command: 'bun test',
+      command: 'curl https://example.com',
+      ...sameCommandIdentity,
     });
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
-      toolArgs: { command: 'bun test' },
+      toolArgs: { command: 'curl https://example.com' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      ...sameCommandIdentity,
+      sessionCommandGrant,
     });
 
     expect(decision.allowed).toBe(true);
@@ -326,22 +371,23 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('same_command');
   });
 
-  // 验证 same_command 只看 command.trim() / same_command matching uses the exact trimmed command
-  test('same-command grant ignores surrounding command whitespace', () => {
-    const authorization = grantSameCommand(defaultAuthorizationState(), {
+  test('same-command grant canonicalizes command whitespace but preserves other identity fields', () => {
+    const sessionCommandGrant = grantSameCommand({
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      command: 'bun test',
+      command: 'curl https://example.com',
+      ...sameCommandIdentity,
     });
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
       toolArgs: {
-        command: '  bun test  ',
+        command: '  curl https://example.com  ',
       },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      ...sameCommandIdentity,
+      sessionCommandGrant,
     });
 
     expect(decision.allowed).toBe(true);
@@ -349,20 +395,22 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('same_command');
   });
 
-  // 验证不同命令不会命中 same_command 授权 / Different commands do not match a same_command grant
+  // Different commands do not match a same_command grant.
   test('does not apply same-command grant to a different command', () => {
-    const authorization = grantSameCommand(defaultAuthorizationState(), {
+    const sessionCommandGrant = grantSameCommand({
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      command: 'bun test',
+      command: 'curl https://example.com',
+      ...sameCommandIdentity,
     });
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
-      toolArgs: { command: 'bun run typecheck' },
+      toolArgs: { command: 'curl https://other.example.com' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      ...sameCommandIdentity,
+      sessionCommandGrant,
     });
 
     expect(decision.allowed).toBe(true);
@@ -370,16 +418,8 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('none');
   });
 
-  // 验证 full_access 当前 thread 内允许非 destructive 的 shell_execute / full_access allows non-destructive shell commands
-  test('allows shell execution risk classes under full access', () => {
-    const authorization = applyApprovalGrant({
-      authorization: defaultAuthorizationState(),
-      grant: 'full_access',
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-
+  // Full is a mode, not a persisted approval grant.
+  test('allows shell execution risk classes under Full interaction mode without a grant', () => {
     for (const command of ['echo hi > hello.txt', 'git add -A', 'bun test']) {
       const decision = evaluateToolApproval({
         toolName: 'shell_execute',
@@ -387,32 +427,23 @@ describe('tool policy', () => {
         phase: 'building',
         workspace: '/tmp/project',
         threadId: 'thread-a',
-        authorization,
+        interactionMode: 'full',
       });
 
       expect(decision.allowed).toBe(true);
       expect(decision.requiresApproval).toBe(false);
-      expect(decision.grantUsed).toBe('full_access');
+      expect(decision.grantUsed).toBe('none');
     }
   });
 
-  // 验证 destructive 命令在 full_access 下仍然被拒绝 / destructive commands are denied even under full_access
-  test('denies destructive commands even under full access', () => {
-    const authorization = applyApprovalGrant({
-      authorization: defaultAuthorizationState(),
-      grant: 'full_access',
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-
+  test('denies destructive commands even under Full interaction mode', () => {
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
       toolArgs: { command: 'sudo rm -rf /' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      interactionMode: 'full',
     });
 
     expect(decision.allowed).toBe(false);
@@ -420,12 +451,13 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('none');
   });
 
-  // 验证 destructive 命令在 same_command grant 下仍然被拒绝 / destructive commands are denied even with same_command grant
+  // Destructive commands remain hard denied even with a same_command grant.
   test('denies destructive commands even with same_command grant', () => {
-    const authorization = grantSameCommand(defaultAuthorizationState(), {
+    const sessionCommandGrant = grantSameCommand({
       workspace: '/tmp/project',
       threadId: 'thread-a',
       command: 'sudo rm -rf /',
+      ...sameCommandIdentity,
     });
 
     const decision = evaluateToolApproval({
@@ -434,7 +466,8 @@ describe('tool policy', () => {
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      ...sameCommandIdentity,
+      sessionCommandGrant,
     });
 
     expect(decision.allowed).toBe(false);
@@ -442,46 +475,17 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('none');
   });
 
-  // 验证 approve_once 不写入 command grant，same_command 和 full_access 才更新 thread 授权状态 / Grant updates are explicit and thread-scoped
-  test('applies approval grants to thread authorization state', () => {
-    const initial = defaultAuthorizationState();
-    const approveOnce = applyApprovalGrant({
-      authorization: initial,
-      grant: 'approve_once',
+  test('approve_once is per-call and cannot create a Full or Session grant', () => {
+    const decision = evaluateToolApproval({
+      toolName: shellExecuteRequest.name,
+      toolArgs: { command: 'curl https://example.com' },
+      phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      request: shellExecuteRequest,
+      interactionMode: 'accept_edits',
     });
-    const sameCommand = applyApprovalGrant({
-      authorization: initial,
-      grant: 'same_command',
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-    const fullAccess = applyApprovalGrant({
-      authorization: initial,
-      grant: 'full_access',
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-
-    expect(
-      hasSameCommandGrant(approveOnce, {
-        workspace: '/tmp/project',
-        threadId: 'thread-a',
-        command: 'bun test',
-      }),
-    ).toBe(false);
-    expect(
-      hasSameCommandGrant(sameCommand, {
-        workspace: '/tmp/project',
-        threadId: 'thread-a',
-        command: 'bun test',
-      }),
-    ).toBe(true);
-    expect(fullAccess.mode).toBe('full_access');
+    expect(decision.requiresApproval).toBe(true);
+    expect(decision.grantUsed).toBe('none');
   });
 
   // 验证审批 payload 由 runtime 基于工具请求和策略生成 / Approval payload is generated by the runtime from request and policy
@@ -512,7 +516,7 @@ describe('tool policy', () => {
       summary: 'Approve a shell command',
       reason: decision.reason,
       expectedEffects: decision.expectedEffects,
-      grantOptions: ['approve_once', 'same_command', 'full_access'],
+      grantOptions: ['approve_once', 'same_command'],
       recommendedGrant: 'approve_once',
     });
   });

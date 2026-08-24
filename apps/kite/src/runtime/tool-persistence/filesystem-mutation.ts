@@ -502,7 +502,8 @@ function assertFilesystemMutationIntentDraft(
       : false;
   const preparedRequest = isPreparedRequest(request) ? request : undefined;
   const approvedExternal =
-    preparedRequest?.policyEffects.externalWrite === true && preparedRequest.grantUsed !== 'none';
+    preparedRequest?.policyEffects.externalWrite === true &&
+    (preparedRequest.grantUsed !== 'none' || preparedRequest.interactionMode === 'full');
   if (
     !Object.isFrozen(prepared) ||
     prepared.identity.isDynamicMcp ||

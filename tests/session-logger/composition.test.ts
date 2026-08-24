@@ -332,6 +332,7 @@ describe('session logger composition', () => {
         type: 'approval.rejected',
         interactionId: 'approval',
         toolCallId: 'shell',
+        generation: 0,
         reason: forbidden.approvalReason,
       },
       {

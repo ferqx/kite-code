@@ -863,12 +863,11 @@ export async function* runStateRuntimeLoop(
           continue;
         }
         const events = actionResult.events;
-        // Cancelling either execution authorization barrier ends the turn.
-        // Declining ask_user remains a normal tool result, so the model can
-        // continue without the optional answer.
+        // Rejecting one focused tool approval is a terminal result for that
+        // exact invocation only; the durable queue advances to its next
+        // record. Only an explicit whole-turn cancel drains background work.
         const executionAuthorizationCancelled =
-          (effect.type === 'request_tool_approval' &&
-            (action.type === 'reject' || action.type === 'cancel')) ||
+          (effect.type === 'request_tool_approval' && action.type === 'cancel') ||
           (effect.type === 'request_plan_review' &&
             (action.type === 'cancel' ||
               (action.type === 'plan_review_decision' && action.decision.kind === 'cancel')));

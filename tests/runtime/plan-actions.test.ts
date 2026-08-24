@@ -154,9 +154,8 @@ describe('plan_review_decision actions', () => {
     };
 
     const events = eventsForRuntimeAction(state, action);
-    // No authorization.changed event for plan approvals
-    const authEvents = events.filter((e) => e.type === 'authorization.changed');
-    expect(authEvents).toHaveLength(0);
+    // Plan approval changes lifecycle/mode only; it never creates a shell grant.
+    expect(events.some((e) => e.type === 'approval.granted')).toBe(false);
   });
 
   test('revise → plan.revision_requested + tool.finished with feedback', () => {

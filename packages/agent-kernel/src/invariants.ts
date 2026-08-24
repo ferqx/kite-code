@@ -631,7 +631,7 @@ export function isValidSandboxIntent(value: unknown): boolean {
     !validTimestamp(intent.recordedAt)
   )
     return false;
-  // State 25 binds the preparation facts, while the event timestamp remains
+  // State 27 binds the preparation facts, while the event timestamp remains
   // envelope metadata. Keep this byte-for-byte aligned with the existing
   // Runtime contract validator and its persisted Store 4 records.
   const { intentDigest: _intentDigest, recordedAt: _recordedAt, ...unsigned } = intent;
@@ -679,7 +679,7 @@ export function isValidSandboxReady(value: unknown): boolean {
   )
     return false;
   // As with the intent record, readyAt is event metadata rather than part of
-  // the State 25 preparation authority digest.
+  // the State 27 preparation authority digest.
   const { readyDigest: _readyDigest, readyAt: _readyAt, ...unsigned } = ready;
   return ready.readyDigest === digestValue(unsigned);
 }
@@ -1416,8 +1416,119 @@ function assertSuspendedSubagents(state: AgentState): void {
   }
 }
 
+function assertApprovalQueue(state: AgentState): void {
+  assert(state.pendingApprovals instanceof Map, 'pending approval queue must be a Map.');
+  assert(state.sessionCommandGrants instanceof Map, 'session command grants must be a Map.');
+  assert(state.approvalReceipts instanceof Map, 'approval receipts must be a Map.');
+  assert(
+    state.activeApprovalId === null || state.pendingApprovals.has(state.activeApprovalId),
+    'active approval focus must identify a queued approval.',
+  );
+  assert(
+    Number.isSafeInteger(state.nextQueueSequence) && state.nextQueueSequence >= 0,
+    'approval queue sequence is invalid.',
+  );
+  assert(
+    Number.isSafeInteger(state.approvalGeneration) && state.approvalGeneration >= 0,
+    'approval generation is invalid.',
+  );
+  const sequences = new Set<number>();
+  for (const [interactionId, pending] of state.pendingApprovals) {
+    assert(
+      interactionId.length > 0 && pending.interactionId === interactionId,
+      'approval identity is invalid.',
+    );
+    assert(pending.toolCallId.length > 0, 'approval tool identity is required.');
+    assert(pending.route === 'user' || pending.route === 'auto', 'approval route is invalid.');
+    assert(
+      typeof pending.fullModeBypassEligible === 'boolean',
+      'approval Full-mode eligibility is invalid.',
+    );
+    assert(
+      typeof pending.fullModePolicyBypassAllowed === 'boolean',
+      'approval Full-mode policy eligibility is invalid.',
+    );
+    assert(typeof pending.bindingDigest === 'string', 'approval binding digest is invalid.');
+    assert(
+      Number.isSafeInteger(pending.sequence) && pending.sequence >= 0,
+      'approval sequence is invalid.',
+    );
+    assert(!sequences.has(pending.sequence), 'approval queue sequence is duplicated.');
+    sequences.add(pending.sequence);
+    assert(
+      Number.isSafeInteger(pending.generation) && pending.generation >= 0,
+      'approval generation is invalid.',
+    );
+    assert(
+      typeof pending.createdAt === 'string' && pending.createdAt.length > 0,
+      'approval createdAt is invalid.',
+    );
+    assert(pending.status === pending.state, 'approval status/state projection diverged.');
+    assert(
+      [
+        'queued_auto',
+        'auto_reviewing',
+        'authorized_queued',
+        'queued_user',
+        'awaiting_user',
+        'approving',
+        'running',
+        'succeeded',
+        'failed',
+        'cancelled',
+        'rejected',
+        'expired',
+      ].includes(pending.status),
+      'approval status is invalid.',
+    );
+  }
+  for (const [grantKey, grant] of state.sessionCommandGrants) {
+    assert(grantKey.length > 0 && grant.grantKey === grantKey, 'session grant key is invalid.');
+    assert(grant.grant === 'same_command', 'session grant kind is invalid.');
+    assert(
+      [
+        grant.sessionId,
+        grant.threadId,
+        grant.workspace,
+        grant.canonicalWorkspaceIdentity,
+        grant.cwd,
+        grant.executor,
+        grant.environment,
+        grant.scope,
+        grant.effects,
+        grant.parserRevision,
+        grant.commandDigest,
+        grant.createdAt,
+      ].every((value) => typeof value === 'string' && value.length > 0),
+      'session grant subject is incomplete.',
+    );
+  }
+  for (const [receiptId, receipt] of state.approvalReceipts) {
+    assert(
+      receiptId.length > 0 && receipt.receiptId === receiptId,
+      'approval receipt identity is invalid.',
+    );
+    assert(
+      receipt.interactionId.length > 0 && receipt.toolCallId.length > 0,
+      'approval receipt binding is invalid.',
+    );
+    assert(
+      Number.isSafeInteger(receipt.generation) && receipt.generation >= 0,
+      'approval receipt generation is invalid.',
+    );
+    assert(
+      receipt.grant === 'approve_once' || receipt.grant === 'same_command',
+      'approval receipt grant is invalid.',
+    );
+    assert(
+      ['authorized_queued', 'running', 'terminal', 'unknown'].includes(receipt.status),
+      'approval receipt status is invalid.',
+    );
+  }
+}
+
 function isCanonicalValue(value: unknown, ancestors: Set<object>): boolean {
-  // Optional State 25 properties are represented as undefined in memory and
+  // Optional State 27 properties are represented as undefined in memory and
   // omitted by JSON.stringify at the persistence boundary.
   if (value === undefined) return true;
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
@@ -1427,6 +1538,14 @@ function isCanonicalValue(value: unknown, ancestors: Set<object>): boolean {
   ancestors.add(value);
   try {
     if (Array.isArray(value)) return value.every((entry) => isCanonicalValue(entry, ancestors));
+    if (value instanceof Map) {
+      return [...value.entries()].every(
+        ([key, entry]) =>
+          typeof key === 'string' &&
+          isCanonicalValue(key, ancestors) &&
+          isCanonicalValue(entry, ancestors),
+      );
+    }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) return false;
     const descriptors = Object.getOwnPropertyDescriptors(value);
@@ -1466,6 +1585,14 @@ function nonCanonicalPath(
       }
       return undefined;
     }
+    if (value instanceof Map) {
+      for (const [key, entry] of value.entries()) {
+        if (typeof key !== 'string') return `${path}.<key>`;
+        const invalid = nonCanonicalPath(entry, `${path}.${key}`, ancestors);
+        if (invalid) return invalid;
+      }
+      return undefined;
+    }
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) return path;
     for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
@@ -1479,14 +1606,19 @@ function nonCanonicalPath(
   }
 }
 
-/** Validate the complete State 25 snapshot before Host persistence. */
+/** Validate the complete State 27 snapshot before Host persistence. */
 export function assertAgentStateInvariants(state: AgentState): void {
   assert(
     state.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION &&
       state.formatEpoch === RUNTIME_STATE_FORMAT_EPOCH,
-    'runtime state format must match State 25 and the current epoch.',
+    'runtime state format must match State 27 and the current epoch.',
   );
   assert(Number.isSafeInteger(state.revision) && state.revision >= 0, 'revision is invalid.');
+  assert(
+    Number.isSafeInteger(state.interactionModeRevision) && state.interactionModeRevision >= 0,
+    'interaction mode revision is invalid.',
+  );
+  assertApprovalQueue(state);
   assertUnique(state.appliedEventIds, 'applied event ids');
   assert(
     state.appliedEventIds.length <= APPLIED_EVENT_ID_TAIL_LIMIT,

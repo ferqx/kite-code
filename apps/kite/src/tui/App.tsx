@@ -65,6 +65,8 @@ export interface AppProps {
   sandboxBackend?: SandboxBackend;
   onTogglePlanMode?: () => void;
   onInteractionModeChange?: (mode: 'accept_edits' | 'auto' | 'full') => void;
+  sessionGrantCount?: number;
+  onClearSessionGrants?: () => void;
   themePreset?: ThemePreset;
   onThemeSelect?: (preset: ThemePreset) => void;
   languagePreference?: LanguagePreference;
@@ -122,6 +124,8 @@ export default function App({
   sandboxBackend = 'none',
   onTogglePlanMode,
   onInteractionModeChange,
+  sessionGrantCount,
+  onClearSessionGrants,
   themePreset,
   onThemeSelect,
   languagePreference = 'system',
@@ -146,7 +150,21 @@ export default function App({
     state.showSessions ||
     state.showMcp ||
     state.showRewind;
-  const overlayOrInterrupt = modalOverlayActive || !!state.interrupt;
+  const activeApprovalEntry = useMemo(() => {
+    if (state.activeApprovalId == null) return undefined;
+    const pending = state.pendingApprovals?.get(state.activeApprovalId);
+    if (!pending || !['queued_user', 'awaiting_user'].includes(pending.status)) {
+      return undefined;
+    }
+    return pending;
+  }, [state.activeApprovalId, state.pendingApprovals]);
+  // A pending approval may remain durable while an input or plan-review
+  // interaction owns the visible surface. Do not let an off-screen queue
+  // steal Esc/focus from those older interaction semantics.
+  const focusedApprovalEntry =
+    state.interrupt && state.interrupt.kind !== 'approval' ? undefined : activeApprovalEntry;
+  const approvalQueueActive = focusedApprovalEntry?.approval != null;
+  const overlayOrInterrupt = modalOverlayActive || !!state.interrupt || approvalQueueActive;
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
   const layeredOverlayEscRef = useRef(false);
@@ -158,9 +176,27 @@ export default function App({
     layeredOverlayEscRef,
     onTogglePlanMode,
     () => {
-      if (state.interrupt) {
-        provider.submitAction({ type: 'cancel' });
-        if (state.interrupt.kind === 'approval') onAbort?.();
+      const approvalInteractionId = focusedApprovalEntry?.interactionId;
+      if (approvalInteractionId) {
+        const approvalGeneration = focusedApprovalEntry.generation;
+        if (approvalGeneration == null) return;
+        // Escape rejects only the focused approval. The exact interaction id
+        // is carried to both the provider and Runtime; duplicate delivery is
+        // harmless because both layers de-duplicate it.
+        provider.submitAction({
+          type: 'reject',
+          interactionId: approvalInteractionId,
+          generation: approvalGeneration,
+        });
+        dispatch({
+          type: 'RESOLVE_INTERRUPT',
+          resolution: { action: 'reject' },
+        });
+      } else if (state.interrupt) {
+        provider.submitAction({
+          type: 'cancel',
+          interactionId: state.interrupt.interactionId,
+        });
       }
     },
     onAbort,
@@ -267,9 +303,11 @@ export default function App({
     return undefined;
   }, [state.interrupt, state.turns]);
 
-  const awaitingApproval = state.interrupt?.kind === 'approval';
+  const awaitingApproval = state.interrupt?.kind === 'approval' || approvalQueueActive;
   const awaitingInput = state.interrupt?.kind === 'input';
   const activeApproval = useMemo(() => {
+    if (state.interrupt?.kind !== 'approval' && !focusedApprovalEntry) return undefined;
+    if (focusedApprovalEntry?.approval) return focusedApprovalEntry.approval;
     if (state.interrupt?.kind !== 'approval') return undefined;
     if (state.interrupt.approval) return state.interrupt.approval;
     const blockId = state.interrupt.blockId;
@@ -279,7 +317,7 @@ export default function App({
       if (block?.kind === 'approval' && !block.resolved) return block.approval;
     }
     return undefined;
-  }, [state.interrupt, state.turns]);
+  }, [focusedApprovalEntry, state.interrupt, state.turns]);
 
   const resolveApproval = useCallback(
     (action: string, grant?: string) => {
@@ -385,7 +423,7 @@ export default function App({
 
   // Runtime decisions supersede any stale local selector state while the
   // reducer transitions the UI to its single interrupt surface.
-  const overlayActive = modalOverlayActive && !state.interrupt;
+  const overlayActive = modalOverlayActive && !state.interrupt && !approvalQueueActive;
   const showRunStatus = shouldShowRunStatus(state);
   const runStatus = showRunStatus ? deriveRunStatusSnapshot(state) : undefined;
 
@@ -420,10 +458,10 @@ export default function App({
           running={showRunStatus}
           timerKey={state.runCount}
           interactionMode={state.interactionMode}
-          hideGlobalStatus={Boolean(state.interrupt)}
+          hideGlobalStatus={Boolean(state.interrupt) || approvalQueueActive}
         >
           {/* Interaction row: input line or approval/input UI, mutually exclusive */}
-          {!state.interrupt && (
+          {!state.interrupt && !approvalQueueActive && (
             <>
               {state.sessionServiceUnavailable && !state.showSessions && (
                 <Text color={t.warning}>{translate('session.serviceUnavailable')}</Text>
@@ -439,10 +477,12 @@ export default function App({
               approval={activeApproval}
               provider={provider}
               onResolved={resolveApproval}
+              queueEntry={focusedApprovalEntry}
             />
           )}
           {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (
             <InputBlock
+              interactionId={state.interrupt?.interactionId}
               question={interruptBlock.question}
               provider={provider}
               onResolved={resolveInput}
@@ -451,6 +491,7 @@ export default function App({
           )}
           {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
             <PlanReviewBlock
+              interactionId={state.interrupt.interactionId}
               plan={state.interrupt.plan}
               artifact={state.interrupt.artifact}
               provider={provider}
@@ -492,6 +533,8 @@ export default function App({
           sandboxBackend={sandboxBackend}
           onSelect={selectInteractionMode}
           onClose={hidePermissionSelector}
+          sessionGrantCount={state.sessionCommandGrants?.size ?? sessionGrantCount ?? 0}
+          onClearSessionGrants={onClearSessionGrants}
         />
       )}
       {!state.interrupt && state.showEffortSelector && (

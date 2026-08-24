@@ -6,7 +6,7 @@
 
 验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`。
 
-相关：[`layer-boundary-enforcement.md`](layer-boundary-enforcement.md)、[`pre-release-architecture.md`](pre-release-architecture.md)、ADR-0128。
+相关：[`layer-boundary-enforcement.md`](layer-boundary-enforcement.md)、[`pre-release-architecture.md`](pre-release-architecture.md)、ADR-0128、ADR-0137。
 
 ## 总览
 
@@ -119,7 +119,7 @@ Ack、Receipt、terminal、recovery、sandbox cleanup、MCP/Subagent lifecycle �
 
 MCP 默认配置来源只有 project 与 user；explicit 是调用方授权的独立文件。project 必须通过配置摘要审批。没有旧 source、迁移 command 或 ambient-environment auth spelling。Runtime 只获得受限 `McpRuntimeProvider`，不能调用配置 mutation 或 Supervisor control API。
 
-Subagent Provider 使用 private task/handle/continuation Artifact、exact parent attempt、resource admission 与 cleanup receipt。并发 sibling approval 只允许一个占据 interaction slot，其余以 durable deferred fact 保留；恢复不能重启已挂起 child model。已恢复 child 再次阻塞时必须把新 interaction 排在既有 deferred sibling 后面，不能由一个长任务连续抢占并造成审批饥饿。
+Subagent Provider 使用 private task/handle/continuation Artifact、exact parent attempt、resource admission 与 cleanup receipt。并发 sibling approval 共享 State 27 Session durable queue；每个 child 保留 route、generation、sequence 与 binding facts，只有当前可见 `activeApprovalId` 占据人工焦点，其余记录按 FIFO 保留。恢复不能重启已挂起 child model；已恢复 child 再次阻塞时必须按 queue sequence 排在既有请求后面，不能由一个长任务连续抢占并造成审批饥饿。
 
 Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port。Kernel verification state/event map 是唯一 lifecycle authority；App effect 不得自行 waiver、改变 outcome、调用模型复核或制造 evidence。
 

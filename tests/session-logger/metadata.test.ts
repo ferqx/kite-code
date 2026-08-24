@@ -126,6 +126,8 @@ describe('metadata-only session logging', () => {
         type: 'approval.requested',
         interactionId: SECRET,
         toolCallId: SECRET,
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
         approval: {
           scope: 'once',
           cwd: ABSOLUTE_PATH,

@@ -26,6 +26,7 @@ import {
   runtimeHostStateEffectiveInteractionMode as getEffectiveInteractionMode,
   runtimeHostStateToolRecoveryJournalInvalid as isToolRecoveryJournalInvalid,
   runtimeHostStateNormalizeToolRecoveryJournal as normalizeToolRecoveryJournal,
+  runtimeHostStateCanAuthorizeToolInFullMode,
   runtimeHostStateCreateApprovalBindingDigest,
   type StateToolGovernancePolicyFact,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
@@ -46,12 +47,16 @@ import {
 import type { TaskToolDeps } from '#app/bootstrap/runtime/subagent/task-tool';
 import type {
   RestoredSubAgentContinuation,
+  SubAgentApprovalFacts,
   SubAgentResult,
   SubAgentToolDispatcher,
 } from '#app/bootstrap/runtime/subagent/types';
 import type { AppToolPipelineComposition } from '#app/bootstrap/runtime/tool-pipeline-composition';
 import type { AppTaskToolPipelineAttemptRuntime } from '#app/bootstrap/runtime/tool-pipeline-task-attempt';
-import { buildToolApproval } from '#app/bootstrap/runtime/tool-policy';
+import {
+  buildToolApproval,
+  commandIdentityForToolApproval,
+} from '#app/bootstrap/runtime/tool-policy';
 import type { ToolExecutionResult } from '#app/bootstrap/runtime/tool-result';
 import {
   type AppToolTurnContext,
@@ -187,6 +192,8 @@ export function readPrivateSuspendedSubagent(
       'Private Subagent continuation Artifact failed exact readback.',
     );
   }
+  const approvalFacts = (snapshot as unknown as { approvalFacts?: SubAgentApprovalFacts })
+    .approvalFacts;
   if (
     snapshot.subagentId !== suspended.subagentId ||
     snapshot.role !== suspended.role ||
@@ -196,36 +203,20 @@ export function readPrivateSuspendedSubagent(
     snapshot.blockedTool.toolCallId !== suspended.blockedTool.toolCallId ||
     (snapshot.blockedTool.runtimeToolCallId ?? undefined) !==
       suspended.blockedTool.runtimeToolCallId ||
-    snapshot.blockedTool.toolName !== suspended.blockedTool.toolName
+    snapshot.blockedTool.toolName !== suspended.blockedTool.toolName ||
+    (approvalFacts !== undefined &&
+      (approvalFacts.parentToolCallId !== parentToolCallId ||
+        approvalFacts.childToolCallId !== snapshot.blockedTool.toolCallId ||
+        approvalFacts.runtimeToolCallId !== (snapshot.blockedTool.runtimeToolCallId ?? undefined) ||
+        (snapshot.blockedTool.approvalBinding !== undefined &&
+          approvalFacts.bindingDigest !==
+            (snapshot.blockedTool.approvalBinding as { digest?: unknown }).digest)))
   ) {
     throw new SubagentContinuationPersistenceError(
       'Private Subagent continuation Artifact is cross-bound.',
     );
   }
   return snapshot;
-}
-
-/** Preserve every suspended sibling without overwriting the Runtime interaction slot. */
-export function serializeConcurrentSubagentApprovalEvents(
-  batches: RuntimeEvent[][],
-): RuntimeEvent[] {
-  let interactionClaimed = false;
-  return batches.flatMap((batch) => {
-    const request = batch.find(
-      (event) => event.type === 'approval.requested' || event.type === 'auto_review.requested',
-    );
-    if (!request) return batch;
-    if (!interactionClaimed) {
-      interactionClaimed = true;
-      return batch;
-    }
-    return [
-      ...batch.filter(
-        (event) => event.type !== 'approval.requested' && event.type !== 'auto_review.requested',
-      ),
-      { type: 'subagent.approval_deferred', toolCallId: request.toolCallId } as const,
-    ];
-  });
 }
 
 export type PrivateSubagentTask = {
@@ -239,6 +230,18 @@ export type PrivateSubagentTask = {
 };
 
 type AppTaskAttemptInput = Parameters<AppTaskToolPipelineAttemptRuntime['execute']>[0];
+
+type RuntimeToolCall = RuntimeState['tools']['calls'][string];
+
+/**
+ * An approval grant is first durable as `authorized_queued`.  The scheduler
+ * deliberately keeps that state until the owning Task continuation claims the
+ * call; requiring the legacy `approved` spelling here strands a suspended
+ * child after an approval.granted/batch_released replay.
+ */
+function isResumeAuthorizedToolCall(call: RuntimeToolCall | undefined): boolean {
+  return call?.status === 'approved' || call?.status === 'authorized_queued';
+}
 
 export function forkToolCeiling(input: {
   capabilityCeiling: readonly string[];
@@ -546,6 +549,7 @@ export function blockedSubagentReviewEvent(input: {
   availCtx: AppToolTurnContext;
   toolPipelineComposition: AppToolPipelineComposition;
   descriptors?: readonly Readonly<CapabilityDescriptor>[];
+  sandboxAvailable?: boolean;
 }): RuntimeEvent {
   const { blocked, state } = input;
   const exact = exactBlockedSubagentPolicy(input);
@@ -561,11 +565,36 @@ export function blockedSubagentReviewEvent(input: {
     approvalBindingDigest: exact.approvalBindingDigest,
   });
   approval.subagentId = blocked.continuation.id;
-
+  const commandIdentity = commandIdentityForToolApproval({
+    sessionId: state.session.threadId,
+    threadId: state.session.threadId,
+    workspace: state.session.workspace,
+    canonicalWorkspaceIdentity: state.session.canonicalWorkspaceDigest ?? state.session.workspace,
+    invocation: exact.approvalBinding.invocationFact,
+  });
+  const queueFacts = blocked.continuation.approvalFacts;
   const effectiveMode = effectiveSubagentInteractionMode(state, input.parentToolCallId);
+  const queueMetadata = {
+    parentToolCallId: input.parentToolCallId,
+    childSubagentId: blocked.continuation.id,
+    fullModeBypassEligible: effectiveMode === 'full' && exact.fullModePolicyBypassAllowed,
+    fullModePolicyBypassAllowed: exact.fullModePolicyBypassAllowed,
+    ...(blocked.runtimeToolCallId ? { runtimeToolCallId: blocked.runtimeToolCallId } : {}),
+    ...(commandIdentity ? { commandIdentity } : {}),
+    ...(queueFacts
+      ? {
+          queueGeneration: queueFacts.generation,
+          queueSequence: queueFacts.sequence,
+        }
+      : {}),
+  };
+
+  const originalRoute = blocked.continuation.approvalFacts?.route;
   if (
-    exact.route === 'auto_review' ||
+    originalRoute === 'auto_review' ||
+    (originalRoute === undefined && exact.route === 'auto_review') ||
     (blocked.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' &&
+      originalRoute !== 'user' &&
       effectiveMode === 'auto' &&
       !state.autoReview.circuitBreakerTripped)
   ) {
@@ -576,6 +605,7 @@ export function blockedSubagentReviewEvent(input: {
       toolName: blocked.toolName,
       reason: exact.decision.reason,
       approval,
+      ...queueMetadata,
       requestFingerprint: toolInvocationFingerprint({
         toolName: blocked.toolName,
         parsedArgs: blocked.args,
@@ -588,6 +618,8 @@ export function blockedSubagentReviewEvent(input: {
     interactionId: genInteractionId(),
     toolCallId: input.parentToolCallId,
     approval,
+    approvalRoute: 'user',
+    ...queueMetadata,
   };
 }
 
@@ -598,6 +630,7 @@ function exactBlockedSubagentPolicy(input: {
   availCtx: AppToolTurnContext;
   toolPipelineComposition: AppToolPipelineComposition;
   descriptors?: readonly Readonly<CapabilityDescriptor>[];
+  sandboxAvailable?: boolean;
   allowMissingBinding?: boolean;
 }):
   | {
@@ -606,6 +639,7 @@ function exactBlockedSubagentPolicy(input: {
       readonly approvalBindingDigest: string;
       readonly approvalBinding: AppApprovalBinding;
       readonly route: 'user' | 'auto_review';
+      readonly fullModePolicyBypassAllowed: boolean;
     }
   | undefined {
   const { state, blocked } = input;
@@ -637,9 +671,14 @@ function exactBlockedSubagentPolicy(input: {
     approvalBinding?.invocationFact.modelMessageId ??
     call?.modelMessageId ??
     `subagent:${blocked.continuation.id}`;
+  const effectiveMode = effectiveSubagentInteractionMode(state, input.parentToolCallId);
+  const effectiveAvailCtx = Object.freeze({
+    ...input.availCtx,
+    interactionMode: effectiveMode,
+  });
   const turnPipeline = input.toolPipelineComposition.forTurn(
     Object.freeze({
-      ...input.availCtx,
+      ...effectiveAvailCtx,
       turnId: state.turn.turnId,
       modelMessageId,
       toolCallId,
@@ -673,7 +712,7 @@ function exactBlockedSubagentPolicy(input: {
     currentTurnId: state.turn.turnId,
     builtinProjectionRevision: turnPipeline.projection.revision,
     dynamicCatalogRevision,
-    availabilityContext: input.availCtx,
+    availabilityContext: effectiveAvailCtx,
     bindings: Object.values(state.capabilities.bindings),
     descriptors,
     disclosures: Object.values(state.capabilities.disclosures),
@@ -683,24 +722,18 @@ function exactBlockedSubagentPolicy(input: {
   if (!validated.ok) return undefined;
   const classified = turnPipeline.callbacks.classify(validated.value);
   if (!classified.ok) return undefined;
-  const command =
-    blocked.args && typeof blocked.args.command === 'string' ? blocked.args.command : undefined;
   const governanceInput = Object.freeze({
     classified: classified.value,
+    sessionId: state.session.threadId,
     workspace: state.session.workspace,
+    canonicalWorkspaceIdentity: state.session.canonicalWorkspaceDigest ?? state.session.workspace,
     threadId: state.session.threadId,
     context: Object.freeze({
       phase: getAgentPhase(getActivePlanning(state)),
-      interactionMode: effectiveSubagentInteractionMode(state, input.parentToolCallId),
-      authorizationMode: state.authorization.mode,
-      ...(state.authorization.modeSource
-        ? { authorizationSource: state.authorization.modeSource }
-        : {}),
-      sandboxAvailable: false,
+      interactionMode: effectiveMode,
+      sandboxAvailable: input.sandboxAvailable === true,
       circuitBreakerTripped: state.autoReview.circuitBreakerTripped,
       observedAt: 0,
-      autoReview: false,
-      loopMode: false,
       gates: Object.freeze({
         recoveryAdmission: 'admitted' as const,
         boundedCancellation: 'admitted' as const,
@@ -714,9 +747,9 @@ function exactBlockedSubagentPolicy(input: {
       approvedToolCallId: null,
       approvalBindingDigest: null,
     }),
-    ...(command
-      ? { sameCommandGrant: Object.freeze({ authorization: state.authorization, command }) }
-      : {}),
+    sameCommandGrant: Object.freeze({
+      sessionCommandGrants: state.sessionCommandGrants,
+    }),
   });
   const facts = turnPipeline.governance.project(
     governanceInput,
@@ -768,6 +801,7 @@ function exactBlockedSubagentPolicy(input: {
     decision: reviewTerminal?.decision ?? facts.value.policy,
     approvalBindingDigest: derivedApprovalBinding.digest,
     approvalBinding: approvalBinding ?? derivedApprovalBinding,
+    fullModePolicyBypassAllowed: runtimeHostStateCanAuthorizeToolInFullMode(facts.value),
     route: reviewTerminal
       ? reviewTerminal.kind === 'request_auto_review'
         ? 'auto_review'
@@ -865,12 +899,18 @@ export function createAppSharedChildToolDispatcher(input: {
         }
       }
       const existing = beforeQueue.tools.calls[runtimeToolCallId];
+      const parentApproval = childInput.parentApproval;
       let executionState: Readonly<RuntimeState>;
       if (existing) {
         const sameCall =
           existing.name === childInput.request.name &&
           digestCapabilityValue(existing.args) === digestCapabilityValue(childInput.request.args);
-        if (!sameCall || existing.status !== 'approved') {
+        const approvedByParent =
+          parentApproval?.parentToolCallId === parentToolCallId &&
+          (existing.status === 'queued' ||
+            existing.status === 'approved' ||
+            existing.status === ('authorized_queued' as typeof existing.status));
+        if (!sameCall || (existing.status !== 'approved' && !approvedByParent)) {
           return {
             runtimeToolCallId,
             result: failClosed(
@@ -921,6 +961,19 @@ export function createAppSharedChildToolDispatcher(input: {
           parentToolCallId,
           params.subagentAutoReviewBatch === true,
         ),
+        ...(parentApproval
+          ? {
+              parentApprovalForToolCallId: {
+                [runtimeToolCallId]: {
+                  parentToolCallId: parentApproval.parentToolCallId,
+                  grant: parentApproval.grant,
+                  ...(parentApproval.approvalBindingDigest
+                    ? { approvalBindingDigest: parentApproval.approvalBindingDigest }
+                    : {}),
+                },
+              },
+            }
+          : {}),
         signal: childInput.signal,
         emitRuntimeEvent: undefined,
         emitTerminalEventBatch: undefined,
@@ -956,7 +1009,9 @@ export function createAppSharedChildToolDispatcher(input: {
         (event) => event.type === 'approval.requested' || event.type === 'auto_review.requested',
       );
       if (approval) {
-        const approvalBinding = appApprovalBindingForPresentation(approval.approval);
+        const approvalBinding = appApprovalBindingForPresentation(
+          approval.approval as unknown as import('@kite/runtime-contract').ToolApprovalPayload,
+        );
         if (!approvalBinding) {
           return {
             runtimeToolCallId,
@@ -1116,7 +1171,11 @@ async function prepareAppTaskResumeChild(input: {
   }
 
   const call = state.tools.calls[toolCallId];
-  if (call?.status !== 'approved' || !call.approvalGrant) {
+  const parentApprovalGrant =
+    call?.approvalGrant === 'approve_once' || call?.approvalGrant === 'same_command'
+      ? call.approvalGrant
+      : undefined;
+  if (!isResumeAuthorizedToolCall(call) || !parentApprovalGrant) {
     return taskResumeRejectedEvents(
       toolCallId,
       'The approved parent Task call is no longer live before child resume.',
@@ -1159,7 +1218,7 @@ async function prepareAppTaskResumeChild(input: {
   if (
     !runtimeToolCallId ||
     !childCall ||
-    childCall.status !== 'queued' ||
+    (childCall.status !== 'queued' && childCall.status !== 'authorized_queued') ||
     !childCall.modelInvocationId ||
     runtimeToolCallId !== expectedRuntimeToolCallId ||
     childCall.name !== blocked.toolName ||
@@ -1212,8 +1271,9 @@ async function prepareAppTaskResumeChild(input: {
     availCtx: input.availCtx,
     toolPipelineComposition: input.toolPipelineComposition,
     descriptors: approvalDescriptors,
+    sandboxAvailable: params.sandboxAvailable,
   });
-  if (!exactApproval || call.approvalHash !== exactApproval.approvalBindingDigest) {
+  if (!call || !exactApproval || call.approvalHash !== exactApproval.approvalBindingDigest) {
     return taskResumeRejectedEvents(
       toolCallId,
       'Sub-agent child approval binding no longer matches the exact blocked operation.',
@@ -1235,59 +1295,17 @@ async function prepareAppTaskResumeChild(input: {
     if (
       isToolRecoveryJournalInvalid(dispatchState.toolRecovery) ||
       dispatchState.toolRecovery.identityKey !== recovery.identityKey ||
-      dispatchCall?.status !== 'approved'
+      !isResumeAuthorizedToolCall(dispatchCall)
     ) {
       return taskResumeRejectedEvents(
         toolCallId,
         'Sub-agent approval became stale before its blocked child could be dispatched.',
       );
     }
-    const review = blockedSubagentReviewEvent({
-      state: dispatchState,
-      parentToolCallId: toolCallId,
-      blocked: {
-        ...blocked,
-        message: `Sub-agent tool '${blocked.toolName}' requires approval.`,
-        continuation,
-      },
-      availCtx: input.availCtx,
-      toolPipelineComposition: input.toolPipelineComposition,
-      descriptors: approvalDescriptors,
-    });
-    if (review.type !== 'approval.requested' && review.type !== 'auto_review.requested') {
-      return taskResumeRejectedEvents(
-        toolCallId,
-        'Child approval policy did not produce an operation-bound review fact.',
-      );
-    }
     if (!params.persistRuntimeEvents || !params.getRuntimeState) {
       return taskResumeRejectedEvents(
         toolCallId,
         'Child approval persistence is unavailable before resume dispatch.',
-      );
-    }
-    const interactionId = genInteractionId();
-    const approvalAcknowledged = await params.persistRuntimeEvents([
-      {
-        type: 'approval.requested',
-        interactionId,
-        toolCallId: runtimeToolCallId,
-        approval: review.approval,
-      },
-      {
-        type: 'approval.granted',
-        interactionId,
-        toolCallId: runtimeToolCallId,
-        grant: call.approvalGrant,
-      },
-    ]);
-    if (
-      !approvalAcknowledged ||
-      params.getRuntimeState().tools.calls[runtimeToolCallId]?.status !== 'approved'
-    ) {
-      return taskResumeRejectedEvents(
-        toolCallId,
-        'Child operation-bound approval could not be durably acknowledged.',
       );
     }
     let childToolAdmissionAttempt = 0;
@@ -1297,6 +1315,11 @@ async function prepareAppTaskResumeChild(input: {
       modelToolCallId: blocked.toolCallId,
       request: blockedRequest,
       signal: input.signal,
+      parentApproval: {
+        parentToolCallId: toolCallId,
+        grant: parentApprovalGrant,
+        approvalBindingDigest: exactApproval.approvalBindingDigest,
+      },
       ...(params.descendantResourceAdmission
         ? {
             beforeAdmission: async () => {
@@ -1479,9 +1502,9 @@ export async function executeAppTaskToolPipeline(input: {
   );
   let suspended = state.suspendedSubagents[toolCallId];
   const executionMode: 'start' | 'resume' =
-    suspended && call.status === 'approved' ? 'resume' : 'start';
+    suspended && isResumeAuthorizedToolCall(call) ? 'resume' : 'start';
   let resumePreparation: AppTaskResumeChildPreparation | undefined;
-  if (suspended && call.status === 'approved') {
+  if (suspended && isResumeAuthorizedToolCall(call)) {
     let continuation: RestoredSubAgentContinuation;
     try {
       continuation = deserializeSubagentContinuation(
@@ -1534,6 +1557,7 @@ export async function executeAppTaskToolPipeline(input: {
         availCtx: turnContext,
         toolPipelineComposition: params.toolPipelineComposition,
         descriptors,
+        sandboxAvailable: params.sandboxAvailable,
       });
       return [review];
     } catch (error) {
@@ -1554,7 +1578,7 @@ export async function executeAppTaskToolPipeline(input: {
     state = makeState();
     call = state.tools.calls[toolCallId] ?? call;
     suspended = state.suspendedSubagents[toolCallId];
-    if (call.status !== 'approved' || !suspended) {
+    if (!isResumeAuthorizedToolCall(call) || !suspended) {
       return taskResumeRejectedEvents(
         toolCallId,
         'The approved parent Task continuation changed before its live resume attempt.',
@@ -1648,20 +1672,16 @@ export async function executeAppTaskToolPipeline(input: {
       ? resumedParent.parentAttempt + 1
       : (existingInvocation?.attemptsStarted ?? 0) + 1;
   const governance = Object.freeze({
+    sessionId: state.session.threadId,
     workspace: state.session.workspace,
+    canonicalWorkspaceIdentity: state.session.canonicalWorkspaceDigest ?? state.session.workspace,
     threadId: state.session.threadId,
     context: Object.freeze({
       phase: getAgentPhase(planning),
       interactionMode: getEffectiveInteractionMode(state),
-      authorizationMode: state.authorization.mode,
-      ...(state.authorization.modeSource
-        ? { authorizationSource: state.authorization.modeSource }
-        : {}),
       sandboxAvailable: params.sandboxAvailable === true,
       circuitBreakerTripped: state.autoReview.circuitBreakerTripped,
       observedAt: params.authorizationObservedAt ?? 0,
-      autoReview: params.authorizationFromAutoReview === true,
-      loopMode: params.authorizationFromLoopMode === true,
       gates: Object.freeze({
         recoveryAdmission:
           !call.recoveryAdmission || call.recoveryAdmission === 'admitted'
@@ -1681,11 +1701,16 @@ export async function executeAppTaskToolPipeline(input: {
             approvalBindingDigest: null,
           })
         : Object.freeze({
-            status: call.status === 'approved' ? ('approved' as const) : ('queued' as const),
+            status: isResumeAuthorizedToolCall(call) ? ('approved' as const) : ('queued' as const),
             grant: call.approvalGrant ?? 'none',
-            approvedToolCallId: call.status === 'approved' ? toolCallId : null,
-            approvalBindingDigest: call.status === 'approved' ? (call.approvalHash ?? null) : null,
+            approvedToolCallId: isResumeAuthorizedToolCall(call) ? toolCallId : null,
+            approvalBindingDigest: isResumeAuthorizedToolCall(call)
+              ? (call.approvalHash ?? null)
+              : null,
           }),
+    sameCommandGrant: Object.freeze({
+      sessionCommandGrants: state.sessionCommandGrants,
+    }),
   });
   const taskInput = (prepared: Readonly<PreparedToolInvocation>): TaskToolDeps => {
     const identity = prepared.identity;
@@ -1720,7 +1745,6 @@ export async function executeAppTaskToolPipeline(input: {
       skills: params.skillManifests,
       skillOptions: params.skillOptions,
       mcpBindings: [...mcpBindings],
-      authorization: makeState().authorization,
       workspaceAccess: makeState().workspaceAccess,
       phase: getAgentPhase(getActivePlanning(makeState())),
       interactionMode: effectiveSubagentInteractionMode(
@@ -1815,16 +1839,73 @@ export async function executeAppTaskToolPipeline(input: {
       availCtx: turnContext,
       toolPipelineComposition: params.toolPipelineComposition,
       descriptors,
+      sandboxAvailable: params.sandboxAvailable,
     });
     if (review.type !== 'approval.requested' && review.type !== 'auto_review.requested') {
       return null;
     }
+    const presentationBinding = appApprovalBindingForPresentation(
+      review.approval as unknown as import('@kite/runtime-contract').ToolApprovalPayload,
+    );
+    const approvalQueue = live as RuntimeState & {
+      approvalGeneration?: number;
+      nextQueueSequence?: number;
+      approvalQueue?: { generation?: number; nextSequence?: number };
+    };
+    const approvalFacts: SubAgentApprovalFacts = {
+      route: review.type === 'auto_review.requested' ? 'auto_review' : 'user',
+      generation:
+        typeof approvalQueue.approvalGeneration === 'number'
+          ? approvalQueue.approvalGeneration
+          : typeof approvalQueue.approvalQueue?.generation === 'number'
+            ? approvalQueue.approvalQueue.generation
+            : live.revision,
+      sequence:
+        (typeof approvalQueue.nextQueueSequence === 'number'
+          ? approvalQueue.nextQueueSequence
+          : typeof approvalQueue.approvalQueue?.nextSequence === 'number'
+            ? approvalQueue.approvalQueue.nextSequence
+            : live.revision + 1) + (live.tools.calls[toolCallId]?.ordinal ?? 0),
+      bindingDigest: presentationBinding?.digest ?? blockedValue.approvalBinding?.digest ?? '',
+      parentToolCallId: toolCallId,
+      childToolCallId: blockedValue.toolCallId,
+      ...(blockedValue.runtimeToolCallId
+        ? { runtimeToolCallId: blockedValue.runtimeToolCallId }
+        : {}),
+    };
+    // Queue metadata travels with the canonical request.  The reducer can
+    // therefore persist exact route/generation/sequence/binding facts before
+    // any TUI projection or continuation resume occurs.  Keep the metadata on
+    // both the event and its presentation payload: old adapters read the
+    // payload while the durable Kernel queue reads the event envelope.
+    const reviewWithQueueFacts = {
+      ...review,
+      approvalRoute: approvalFacts.route === 'auto_review' ? 'auto' : 'user',
+      queueGeneration: approvalFacts.generation,
+      queueSequence: approvalFacts.sequence,
+      parentToolCallId: approvalFacts.parentToolCallId,
+      childSubagentId: blockedValue.continuation.id,
+      ...(approvalFacts.runtimeToolCallId
+        ? { runtimeToolCallId: approvalFacts.runtimeToolCallId }
+        : {}),
+      bindingDigest: approvalFacts.bindingDigest,
+      approval: {
+        ...review.approval,
+        approvalRoute: approvalFacts.route === 'auto_review' ? 'auto' : 'user',
+        queueGeneration: approvalFacts.generation,
+        queueSequence: approvalFacts.sequence,
+      },
+    } as unknown as RuntimeEvent;
+    const continuation = Object.freeze({
+      ...blockedValue.continuation,
+      approvalFacts,
+    });
     const subagent = privateSuspendedSubagentRecord({
       artifacts: params.subagentContinuationArtifacts,
       parentInvocationId: prepared.identity.invocationId,
       parentAttempt: expectedAttempt,
       parentToolCallId: toolCallId,
-      blocked: blockedValue,
+      blocked: Object.freeze({ ...blockedValue, continuation }),
     });
     const suspension = Object.freeze({
       schema: 'kite.tool-pipeline-stage.v1' as const,
@@ -1849,9 +1930,9 @@ export async function executeAppTaskToolPipeline(input: {
             ? digestCapabilityValue(blockedValue.command.trim())
             : null,
       }),
-      event: review,
+      event: reviewWithQueueFacts,
     });
-    return suspension;
+    return suspension as unknown as Readonly<ToolPipelineTaskSubagentSuspension>;
   };
   const phase = getAgentPhase(planning) === 'planning' ? 'planning' : 'building';
   let result: Awaited<ReturnType<typeof taskRuntime.execute>>;
@@ -1947,6 +2028,17 @@ export async function executeAppTaskToolPipeline(input: {
         invocationFact: result.facts.invocation,
         policyFact: result.facts.policy,
       });
+      const commandIdentity = commandIdentityForToolApproval({
+        sessionId: state.session.threadId,
+        threadId: state.session.threadId,
+        workspace: state.session.workspace,
+        canonicalWorkspaceIdentity:
+          state.session.canonicalWorkspaceDigest ?? state.session.workspace,
+        invocation: result.facts.invocation,
+      });
+      const fullModePolicyBypassAllowed = runtimeHostStateCanAuthorizeToolInFullMode(result.facts);
+      const fullModeBypassEligible =
+        result.facts.context.interactionMode === 'full' && fullModePolicyBypassAllowed;
       return result.decision.kind === 'request_auto_review'
         ? [
             {
@@ -1956,6 +2048,9 @@ export async function executeAppTaskToolPipeline(input: {
               toolName: request.name,
               reason: result.decision.decision.reason,
               approval,
+              fullModeBypassEligible,
+              fullModePolicyBypassAllowed,
+              ...(commandIdentity ? { commandIdentity } : {}),
             },
           ]
         : [
@@ -1964,6 +2059,9 @@ export async function executeAppTaskToolPipeline(input: {
               interactionId: genInteractionId(),
               toolCallId,
               approval,
+              fullModeBypassEligible,
+              fullModePolicyBypassAllowed,
+              ...(commandIdentity ? { commandIdentity } : {}),
             },
           ];
     }

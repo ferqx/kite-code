@@ -9,6 +9,7 @@ import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
 interface PlanReviewBlockProps {
+  interactionId?: string;
   plan: AgentPlan;
   artifact?: PlanArtifactRef;
   provider: TuiUserInputProvider;
@@ -18,6 +19,7 @@ interface PlanReviewBlockProps {
 }
 
 export default function PlanReviewBlock({
+  interactionId,
   plan: _plan,
   provider,
   onResolved,
@@ -60,6 +62,7 @@ export default function PlanReviewBlock({
       case 'approved_auto':
         provider.submitAction({
           type: 'plan_review_decision',
+          interactionId,
           decision: { kind: 'approve', nextMode: 'auto' },
         });
         onResolved('approved_auto');
@@ -67,6 +70,7 @@ export default function PlanReviewBlock({
       case 'approved_accept_edits':
         provider.submitAction({
           type: 'plan_review_decision',
+          interactionId,
           decision: { kind: 'approve', nextMode: 'accept_edits' },
         });
         onResolved('approved_accept_edits');
@@ -74,12 +78,17 @@ export default function PlanReviewBlock({
       case 'supplemented':
         provider.submitAction({
           type: 'plan_review_decision',
+          interactionId,
           decision: { kind: 'revise', feedback: feedback ?? '' },
         });
         onResolved('supplemented', feedback);
         break;
       case 'rejected':
-        provider.submitAction({ type: 'plan_review_decision', decision: { kind: 'cancel' } });
+        provider.submitAction({
+          type: 'plan_review_decision',
+          interactionId,
+          decision: { kind: 'cancel' },
+        });
         onResolved('rejected');
         break;
     }

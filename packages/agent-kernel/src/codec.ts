@@ -53,13 +53,41 @@ function validTimestamp(value: unknown): boolean {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
 }
 
+function validApprovalCommandIdentity(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const required = [
+    'sessionId',
+    'threadId',
+    'workspace',
+    'canonicalWorkspaceIdentity',
+    'cwd',
+    'executor',
+    'environment',
+    'scope',
+    'effects',
+    'parserRevision',
+    'commandDigest',
+  ];
+  const optional = ['executorRevision'];
+  const keys = Object.keys(value);
+  if (
+    !required.every((field) => typeof value[field] === 'string' && value[field].length > 0) ||
+    keys.some((field) => !required.includes(field) && !optional.includes(field))
+  )
+    return false;
+  return (
+    value.executorRevision === undefined ||
+    (typeof value.executorRevision === 'string' && value.executorRevision.length > 0)
+  );
+}
+
 function assertPositiveAttempt(event: Record<string, unknown>): void {
   if (!Number.isSafeInteger(event.attempt) || Number(event.attempt) < 1)
     throw new Error(`Runtime event ${String(event.type)} requires a positive attempt.`);
 }
 
 /**
- * Validate the exact State 25 event discriminant and required-field contract.
+ * Validate the exact State 27 event discriminant and required-field contract.
  * The deeper provider evidence schemas remain private to their Builtin
  * producer; the Kernel applies the same State admission checks as the
  * current root codec and leaves JSON conversion to the JSON codec boundary.
@@ -97,6 +125,110 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
     case 'approval.rejected':
       requireNonEmptyString(value, 'interactionId');
       requireNonEmptyString(value, 'toolCallId');
+      if (value.type === 'approval.granted' && value.grant !== 'approve_once') {
+        throw new Error('approval.granted may only issue approve_once.');
+      }
+      if (
+        !Number.isSafeInteger(value.generation) ||
+        Number(value.generation) < 0 ||
+        (value.type === 'approval.granted' &&
+          (typeof value.receiptId !== 'string' || value.receiptId.length === 0))
+      ) {
+        throw new Error(`${value.type} receipt/generation is invalid.`);
+      }
+      break;
+    case 'approval.batch_released': {
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.cancelledReviewIds === undefined ? [] : ['cancelledReviewIds']),
+      ]);
+      requireNonEmptyString(value, 'interactionId');
+      requireNonEmptyString(value, 'toolCallId');
+      requireNonEmptyString(value, 'grantKey');
+      if (value.grant !== 'same_command')
+        throw new Error('approval.batch_released requires same_command.');
+      if (!validApprovalCommandIdentity(value.commandIdentity))
+        throw new Error('approval.batch_released command identity is invalid.');
+      if (!Number.isSafeInteger(value.sessionRevision) || Number(value.sessionRevision) < 0)
+        throw new Error('approval.batch_released sessionRevision is invalid.');
+      if (!Number.isSafeInteger(value.generation) || Number(value.generation) < 0)
+        throw new Error('approval.batch_released generation is invalid.');
+      if (!Array.isArray(value.matches) || value.matches.length === 0)
+        throw new Error('approval.batch_released matches are required.');
+      const receiptIds = new Set<string>();
+      for (const match of value.matches) {
+        if (
+          !isRecord(match) ||
+          (() => {
+            const expected = new Set([
+              'interactionId',
+              'toolCallId',
+              'receiptId',
+              'generation',
+              ...(match.bindingDigest === undefined ? [] : ['bindingDigest']),
+            ]);
+            const keys = Object.keys(match);
+            return keys.length !== expected.size || keys.some((key) => !expected.has(key));
+          })() ||
+          typeof match.interactionId !== 'string' ||
+          match.interactionId.length === 0 ||
+          typeof match.toolCallId !== 'string' ||
+          match.toolCallId.length === 0 ||
+          typeof match.receiptId !== 'string' ||
+          match.receiptId.length === 0 ||
+          receiptIds.has(match.receiptId) ||
+          !Number.isSafeInteger(match.generation) ||
+          Number(match.generation) < 0 ||
+          (match.bindingDigest !== undefined &&
+            (typeof match.bindingDigest !== 'string' || match.bindingDigest.length === 0))
+        ) {
+          throw new Error('approval.batch_released match is invalid.');
+        }
+        receiptIds.add(match.receiptId);
+      }
+      if (value.cancelledReviewIds !== undefined) {
+        if (
+          !Array.isArray(value.cancelledReviewIds) ||
+          value.cancelledReviewIds.some(
+            (reviewId) => typeof reviewId !== 'string' || reviewId.length === 0,
+          ) ||
+          new Set(value.cancelledReviewIds).size !== value.cancelledReviewIds.length
+        ) {
+          throw new Error('approval.batch_released cancelled review identities are invalid.');
+        }
+      }
+      if (!validTimestamp(value.createdAt))
+        throw new Error('approval.batch_released createdAt is invalid.');
+      break;
+    }
+    case 'approval.requested':
+    case 'auto_review.requested':
+      if (
+        value.commandIdentity !== undefined &&
+        !validApprovalCommandIdentity(value.commandIdentity)
+      )
+        throw new Error(`${value.type} command identity is invalid.`);
+      if (
+        typeof value.fullModeBypassEligible !== 'boolean' ||
+        typeof value.fullModePolicyBypassAllowed !== 'boolean'
+      )
+        throw new Error(`${value.type} Full-mode eligibility is invalid.`);
+      break;
+    case 'approval.session_grants_cleared':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'sessionId');
+      if (!Number.isSafeInteger(value.sessionRevision) || Number(value.sessionRevision) < 0)
+        throw new Error('approval.session_grants_cleared sessionRevision is invalid.');
+      if (!Number.isSafeInteger(value.generation) || Number(value.generation) < 0)
+        throw new Error('approval.session_grants_cleared generation is invalid.');
+      if (!validTimestamp(value.clearedAt))
+        throw new Error('approval.session_grants_cleared clearedAt is invalid.');
+      break;
+    case 'auto_review.completed':
+      if (!isRecord(value.result)) throw new Error('auto_review.completed result is invalid.');
+      if (value.result.escalatedToUser !== undefined && value.result.escalatedToUser !== true) {
+        throw new Error('auto_review.completed escalation disposition is invalid.');
+      }
       break;
     case 'capability.execution_succeeded':
       if (

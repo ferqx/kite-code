@@ -88,6 +88,7 @@ export type {
   PersistedSystemMessage,
   PersistedToolMessage,
   PrivateSuspendedSubagentRecord,
+  SubagentApprovalFacts,
   SubagentContinuationArtifactRef,
   SuspendedSubagentSnapshot,
 } from './subagent';

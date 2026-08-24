@@ -2,7 +2,6 @@ import {
   type AgentState,
   APPLIED_EVENT_ID_TAIL_LIMIT,
   assertAgentStateInvariants,
-  type CreateAgentStateInput,
   createInitialAgentState,
   isCurrentAgentStateSnapshot,
   type KernelEvent,
@@ -34,17 +33,7 @@ interface StateRuntimeRestoreInputBase {
   readonly validateRestoredState?: (state: Readonly<AgentState>) => void;
 }
 
-export type StateRuntimeRestoreInput =
-  | (StateRuntimeRestoreInputBase & {
-      readonly authorizationMode?: 'default';
-      readonly authorizationSource?: CreateAgentStateInput['authorizationSource'];
-      readonly modeGrantedAt?: never;
-    })
-  | (StateRuntimeRestoreInputBase & {
-      readonly authorizationMode: 'full_access';
-      readonly authorizationSource: NonNullable<CreateAgentStateInput['authorizationSource']>;
-      readonly modeGrantedAt: string;
-    });
+export type StateRuntimeRestoreInput = StateRuntimeRestoreInputBase;
 
 export interface StateRuntimeRestoreResult {
   readonly state: AgentState;
@@ -112,7 +101,7 @@ function replayCurrentStateTail(
 }
 
 function freshState(input: StateRuntimeRestoreInput): AgentState {
-  const common = {
+  return createInitialAgentState({
     threadId: input.sessionId,
     userId: input.userId,
     workspace: input.workspace,
@@ -123,19 +112,7 @@ function freshState(input: StateRuntimeRestoreInput): AgentState {
     interactionMode: input.interactionMode,
     phase: input.phase,
     workspaceAccess: input.workspaceAccess,
-  };
-  return input.authorizationMode === 'full_access'
-    ? createInitialAgentState({
-        ...common,
-        authorizationMode: 'full_access',
-        authorizationSource: input.authorizationSource,
-        modeGrantedAt: input.modeGrantedAt,
-      })
-    : createInitialAgentState({
-        ...common,
-        authorizationMode: input.authorizationMode,
-        authorizationSource: input.authorizationSource,
-      });
+  });
 }
 
 /** Restore only State / Store / the current RA epoch from injected Host services. */
@@ -225,26 +202,8 @@ export function restoreRuntimeHostStateSession(
     };
   }
 
-  if (input.interactionMode !== undefined && state.mode !== input.interactionMode) {
-    state = { ...state, mode: input.interactionMode };
-  }
-  if (
-    input.authorizationMode !== undefined &&
-    state.authorization.mode !== input.authorizationMode
-  ) {
-    state = {
-      ...state,
-      authorization:
-        input.authorizationMode === 'full_access'
-          ? {
-              ...state.authorization,
-              mode: 'full_access',
-              modeSource: input.authorizationSource,
-              modeGrantedAt: input.modeGrantedAt,
-            }
-          : { ...state.authorization, mode: 'default' },
-    };
-  }
+  // Restored Sessions keep the last durable interaction_mode.changed fact.
+  // Startup configuration is only a default for a fresh Session.
   assertAgentStateInvariants(state);
   return { state, restoreBoundary, source: 'restored' };
 }

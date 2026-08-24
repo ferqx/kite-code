@@ -62,7 +62,7 @@ export interface AgentUserInputPayload {
   readonly recommended?: string;
   readonly questions?: readonly AgentUserInputQuestion[];
 }
-export type AgentShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
+export type AgentShellApprovalGrant = 'approve_once' | 'same_command';
 export interface AgentToolApprovalPayload {
   readonly scope: 'once';
   readonly callId?: string;

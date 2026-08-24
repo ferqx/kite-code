@@ -52,7 +52,7 @@ describe('Runtime Host State storage binding', () => {
       sessionId: 'session-1',
       eventPosition: 0,
       stateRevision: 0,
-      schemaVersion: 26,
+      schemaVersion: 27,
       eventRevision: 0,
     };
     expect(() => binding.codec.validateSnapshot?.(valid)).not.toThrow();

@@ -10,7 +10,8 @@ import {
 import { type BaseMessage, humanMessage, systemMessage } from './messages';
 import { compileModelSurface } from './surface-compiler';
 
-export type ShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
+/** User-signed approval grants. Full is an interaction mode, never a grant. */
+export type ShellApprovalGrant = 'approve_once' | 'same_command';
 
 export interface ToolApprovalPayload {
   risk:
@@ -45,7 +46,8 @@ interface ReviewStateView extends ModelInvocationStateView {
 export interface AutoReviewSuggestion {
   approved: boolean;
   requiresUserApproval?: true;
-  grant: ShellApprovalGrant;
+  /** Auto review may only produce approve_once; same_command is user-signed. */
+  grant?: 'approve_once';
   reason: string;
   riskAssessment?: 'low' | 'medium' | 'high' | 'critical';
 }
@@ -233,13 +235,15 @@ const REVIEWER_SYSTEM_PROMPT = [
   '',
   'OUTPUT FORMAT: Return ONLY a JSON object:',
   '{',
-  '  "decision": "approve" | "reject" | "ask_user",',
-  '  "grant": "approve_once" | "same_command" | "full_access",',
+  '  "decision": "approve_once" | "reject" | "ask_user",',
   '  "reason": "brief explanation (max 200 chars)",',
   '  "riskAssessment": "low" | "medium" | "high" | "critical"',
   '}',
   '',
-  'Default to "approve_once" unless the action is a repeatable build/test command.',
+  'Use "approve_once" only when this exact invocation is safe to run.',
+  'Use "reject" for a clearly unsafe or unrelated invocation.',
+  'Use "ask_user" when intent or authorization is not established.',
+  'Never emit same_command: only the user may sign a session-scoped grant.',
   'Prefer allowing file cleanup operations (rm, del) on non-critical paths.',
 ].join('\n');
 
@@ -253,8 +257,7 @@ function buildReviewPrompt(
     args: request.args,
     risk: payload.risk,
     expectedEffects: payload.expectedEffects,
-    grantOptions: payload.grantOptions,
-    recommendedGrant: payload.recommendedGrant,
+    autoReviewDecisions: ['approve_once', 'reject', 'ask_user'],
     approvalSummary: payload.summary,
     approvalReason: payload.reason,
   };
@@ -324,7 +327,7 @@ function parseAutoReviewSuggestion(
     };
   }
   const obj = parsed as Record<string, unknown>;
-  const allowedKeys = new Set(['decision', 'approved', 'grant', 'reason', 'riskAssessment']);
+  const allowedKeys = new Set(['decision', 'reason', 'riskAssessment']);
   if (Object.keys(obj).some((key) => !allowedKeys.has(key))) {
     return {
       ok: false,
@@ -332,43 +335,15 @@ function parseAutoReviewSuggestion(
       failureType: 'invalid_response',
     };
   }
-  if (
-    (obj.decision !== undefined &&
-      obj.decision !== 'approve' &&
-      obj.decision !== 'reject' &&
-      obj.decision !== 'ask_user') ||
-    (obj.approved !== undefined && typeof obj.approved !== 'boolean')
-  ) {
+  if (obj.decision !== 'approve_once' && obj.decision !== 'reject' && obj.decision !== 'ask_user') {
     return {
       ok: false,
       reason: 'auto review returned an unsupported decision',
       failureType: 'invalid_response',
     };
   }
-  const decision =
-    obj.decision === 'approve' || obj.decision === 'reject' || obj.decision === 'ask_user'
-      ? obj.decision
-      : typeof obj.approved === 'boolean'
-        ? obj.approved
-          ? 'approve'
-          : 'ask_user'
-        : null;
-  if (decision === null) {
-    return {
-      ok: false,
-      reason: 'auto review returned an unsupported decision',
-      failureType: 'invalid_response',
-    };
-  }
-  if (typeof obj.approved === 'boolean' && obj.approved !== (decision === 'approve')) {
-    return {
-      ok: false,
-      reason: 'auto review returned contradictory decision fields',
-      failureType: 'invalid_response',
-    };
-  }
-  const approved = decision === 'approve';
-  const grant = typeof obj.grant === 'string' ? obj.grant : 'approve_once';
+  const decision = obj.decision;
+  const approved = decision === 'approve_once';
   const reason = typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim() : '';
   if (
     obj.riskAssessment !== undefined &&
@@ -383,10 +358,10 @@ function parseAutoReviewSuggestion(
   }
   const riskAssessment = obj.riskAssessment as AutoReviewSuggestion['riskAssessment'];
 
-  if (!isShellApprovalGrant(grant) || !grantOptions.includes(grant)) {
+  if (approved && !grantOptions.includes('approve_once')) {
     return {
       ok: false,
-      reason: `auto review suggested unsupported grant: ${grant}`,
+      reason: 'auto review suggested unsupported grant: approve_once',
       failureType: 'invalid_response',
     };
   }
@@ -396,11 +371,11 @@ function parseAutoReviewSuggestion(
     suggestion: {
       approved,
       ...(decision === 'ask_user' ? { requiresUserApproval: true as const } : {}),
-      grant,
+      ...(approved ? { grant: 'approve_once' as const } : {}),
       reason:
         reason ||
         (approved
-          ? 'auto review approved'
+          ? 'auto review approved once'
           : decision === 'ask_user'
             ? 'auto review requested user approval'
             : 'auto review rejected'),
@@ -418,8 +393,4 @@ function extractJsonObject(content: string): string | null {
   const last = trimmed.lastIndexOf('}');
   if (first >= 0 && last > first) return trimmed.slice(first, last + 1);
   return null;
-}
-
-function isShellApprovalGrant(value: string): value is ShellApprovalGrant {
-  return value === 'approve_once' || value === 'same_command' || value === 'full_access';
 }

@@ -135,10 +135,19 @@ try {
       },
     },
     {
-      requestAction: async (effect) =>
-        process.env.MCP_E2E_APPROVE_TOOL === '1'
-          ? { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' }
-          : { type: 'cancel', interactionId: effect.interactionId },
+      requestAction: async (effect, state) => {
+        if (process.env.MCP_E2E_APPROVE_TOOL !== '1') {
+          return { type: 'cancel', interactionId: effect.interactionId };
+        }
+        const pending = state.pendingApprovals.get(effect.interactionId);
+        if (!pending) throw new Error('Approval effect has no durable queue record.');
+        return {
+          type: 'approve',
+          interactionId: effect.interactionId,
+          generation: pending.generation,
+          grant: 'approve_once',
+        };
+      },
     },
   )) {
     events.push(event);

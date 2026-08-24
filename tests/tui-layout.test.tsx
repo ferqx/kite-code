@@ -43,6 +43,7 @@ import type {
   FileChangeRecord,
   OutputBlock,
   StatusState,
+  TuiPendingApproval,
   TuiState,
   Turn,
 } from '../apps/kite/src/tui/types';
@@ -64,7 +65,6 @@ function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
     phase: 'building',
     plan: null,
     pendingPlan: null,
-    authorization: 'full_access',
     workspaceAccess: 'write',
     cacheHitTokens: 0,
     cacheMissTokens: 0,
@@ -112,8 +112,28 @@ function fakeApproval(overrides: Partial<ToolApprovalPayload> = {}): ToolApprova
     summary: 'Run unit tests',
     reason: 'Agent wants to verify changes',
     expectedEffects: ['runs jest', 'outputs results'],
-    grantOptions: ['approve_once', 'same_command', 'full_access'],
+    grantOptions: ['approve_once', 'same_command'],
     recommendedGrant: 'approve_once',
+    ...overrides,
+  };
+}
+
+function fakePendingApproval(
+  approvalPayload: ToolApprovalPayload,
+  overrides: Partial<TuiPendingApproval> = {},
+): TuiPendingApproval {
+  const interactionId = overrides.interactionId ?? 'approval-test';
+  const toolCallId = overrides.toolCallId ?? approvalPayload.callId ?? 'tool-test';
+  const generation = overrides.generation ?? approvalPayload.queueGeneration ?? 1;
+  return {
+    interactionId,
+    toolCallId,
+    route: overrides.route ?? approvalPayload.approvalRoute ?? 'user',
+    status: overrides.status ?? 'awaiting_user',
+    sequence: overrides.sequence ?? 0,
+    generation,
+    approval: approvalPayload,
+    approvalHash: approvalPayload.approvalHash,
     ...overrides,
   };
 }
@@ -388,19 +408,19 @@ describe('StatsLine', () => {
   });
 
   test('shows [Auto] for auto mode in the English fallback locale', () => {
-    const status = fakeStatus({ authorization: 'default' });
+    const status = fakeStatus();
     const { lastFrame } = render(<StatsLine status={status} running interactionMode="auto" />);
     expect(lastFrame()).toContain('[Auto]');
   });
 
   test('shows [Full access] for full mode in the English fallback locale', () => {
-    const status = fakeStatus({ authorization: 'full_access' });
+    const status = fakeStatus();
     const { lastFrame } = render(<StatsLine status={status} running interactionMode="full" />);
     expect(lastFrame()).toContain('[Full access]');
   });
 
   test('shows no label for accept_edits mode (default)', () => {
-    const status = fakeStatus({ authorization: 'default' });
+    const status = fakeStatus();
     const { lastFrame } = render(
       <StatsLine status={status} running interactionMode="accept_edits" />,
     );
@@ -1109,6 +1129,45 @@ describe('ApprovalBlock', () => {
     );
   });
 
+  test('renders durable queue identity, route, match count, and actual scope', () => {
+    const approvalPayload = fakeApproval({
+      approvalRoute: 'auto',
+      queueSequence: 7,
+      queueGeneration: 3,
+      matchingPendingCount: 2,
+      sandboxScope: {
+        filesystem: 'workspace_write',
+        network: 'off',
+        backend: 'none',
+        enforcement: 'unsupported',
+      },
+    });
+    const { lastFrame } = render(
+      <ApprovalBlock
+        approval={approvalPayload}
+        provider={fakeProvider()}
+        onResolved={onResolved}
+        queueEntry={fakePendingApproval(approvalPayload, {
+          interactionId: 'approval-queue-7',
+          sequence: 7,
+          generation: 3,
+          route: 'auto',
+          status: 'authorized_queued',
+          matchCount: 2,
+          actualSandboxScope: approvalPayload.sandboxScope,
+        })}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Auto review');
+    expect(frame).toContain('Queue #7');
+    expect(frame).toContain('Generation 3');
+    expect(frame).toContain('2 matching requests');
+    expect(frame).toContain('workspace_write');
+    expect(frame).toContain('unsupported');
+    expect(frame).toContain('Authorized · queued to run');
+  });
+
   test('shows three grant options', () => {
     const approval = fakeApproval();
     const { lastFrame } = render(
@@ -1173,11 +1232,13 @@ describe('ApprovalBlock', () => {
 
   test('recognizes raw terminal arrow sequences when selecting a grant', async () => {
     const resolved: Array<{ action: string; grant?: string }> = [];
+    const approvalPayload = fakeApproval();
     const { stdin } = render(
       <ApprovalBlock
-        approval={fakeApproval()}
+        approval={approvalPayload}
         provider={fakeProvider()}
         onResolved={(action, grant) => resolved.push({ action, grant })}
+        queueEntry={fakePendingApproval(approvalPayload)}
       />,
     );
 
@@ -4755,7 +4816,7 @@ describe('OutputArea', () => {
         id: 1,
         kind: 'approval',
         approval: fakeApproval(),
-        resolved: { action: 'approve', grant: 'full_access' },
+        resolved: { action: 'approve', grant: 'same_command' },
       },
     ];
     const { lastFrame } = render(
@@ -4908,6 +4969,31 @@ describe('App', () => {
     expect(lastFrame()).toContain('Auto');
     expect(lastFrame()).not.toContain('permission-input-marker');
     expect(lastFrame()?.match(/claude-opus/g) ?? []).toHaveLength(1);
+  });
+
+  test('keeps Full orthogonal to sandbox availability and exposes session grants', async () => {
+    let cleared = 0;
+    const view = render(
+      <App
+        state={fakeState({ showPermissionSelector: true })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        sandboxBackend="none"
+        sessionGrantCount={2}
+        onClearSessionGrants={() => {
+          cleared += 1;
+        }}
+      />,
+    );
+    const frame = view.lastFrame() ?? '';
+    expect(frame).toContain('Full');
+    expect(frame).toContain('Session grants: 2');
+    expect(frame).not.toContain('unavailable');
+
+    view.stdin.write('c');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(cleared).toBe(1);
   });
 
   test('refreshes the header and Footer when thinking effort changes', () => {
@@ -5093,15 +5179,23 @@ describe('App', () => {
 
   test('Enter immediately acknowledges an accepted approval in local TUI state', async () => {
     const actions: Action[] = [];
+    const approval = fakeApproval({ subagentId: 'child-local' });
+    const pending = fakePendingApproval(approval, {
+      interactionId: 'approval-child-local',
+      toolCallId: 'parent-task-local',
+      childSubagentId: 'child-local',
+    });
     const view = render(
       <App
         state={fakeState({
           running: true,
+          pendingApprovals: new Map([[pending.interactionId, pending]]),
+          activeApprovalId: pending.interactionId,
           interrupt: {
             kind: 'approval',
-            interactionId: 'approval-child-local',
-            toolCallId: 'parent-task-local',
-            approval: fakeApproval({ subagentId: 'child-local' }),
+            interactionId: pending.interactionId,
+            toolCallId: pending.toolCallId,
+            approval,
           },
         })}
         dispatch={(action) => actions.push(action)}
@@ -5121,6 +5215,12 @@ describe('App', () => {
 
   test('approval Enter cannot also expand the active Subagent card', async () => {
     const actions: Action[] = [];
+    const approval = fakeApproval({ subagentId: 'approval-child-no-key-leak' });
+    const pending = fakePendingApproval(approval, {
+      interactionId: 'approval-no-key-leak',
+      toolCallId: 'parent-task-no-key-leak',
+      childSubagentId: 'approval-child-no-key-leak',
+    });
     const activeChild: Extract<OutputBlock, { kind: 'subagent' }> = {
       id: 1,
       kind: 'subagent',
@@ -5148,11 +5248,13 @@ describe('App', () => {
         state={fakeState({
           running: true,
           turns: [{ blocks: [activeChild] }],
+          pendingApprovals: new Map([[pending.interactionId, pending]]),
+          activeApprovalId: pending.interactionId,
           interrupt: {
             kind: 'approval',
-            interactionId: 'approval-no-key-leak',
+            interactionId: pending.interactionId,
             toolCallId: activeChild.parentToolCallId,
-            approval: fakeApproval({ subagentId: activeChild.subagentId }),
+            approval,
           },
         })}
         dispatch={(action) => actions.push(action)}
@@ -5216,23 +5318,28 @@ describe('App', () => {
     expect(view.lastFrame()).not.toContain('❯ Allow for this session');
   });
 
-  test.each([
-    ['Escape', '\u001b'],
-    ['Ctrl+C', '\u0003'],
-  ])('%s immediately aborts a visible tool approval', async (_name, input) => {
+  test('Escape rejects only the focused approval without aborting the whole run', async () => {
     let aborts = 0;
+    const actions: Action[] = [];
+    const approvalPayload = fakeApproval();
+    const pending = fakePendingApproval(approvalPayload, {
+      interactionId: 'approval-cancel',
+      toolCallId: 'task-cancel',
+    });
     const view = render(
       <App
         state={fakeState({
           running: true,
+          pendingApprovals: new Map([[pending.interactionId, pending]]),
+          activeApprovalId: pending.interactionId,
           interrupt: {
             kind: 'approval',
-            interactionId: 'approval-cancel',
-            toolCallId: 'task-cancel',
-            approval: fakeApproval(),
+            interactionId: pending.interactionId,
+            toolCallId: pending.toolCallId,
+            approval: approvalPayload,
           },
         })}
-        dispatch={noop}
+        dispatch={(action) => actions.push(action)}
         onToggleReason={noop}
         provider={fakeProvider()}
         onAbort={() => {
@@ -5241,10 +5348,44 @@ describe('App', () => {
       />,
     );
 
-    view.stdin.write(input);
-    await new Promise((resolve) => setTimeout(resolve, input === '\u001b' ? 100 : 10));
+    view.stdin.write('\u001b');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(aborts).toBe(0);
+    expect(actions).toContainEqual({
+      type: 'RESOLVE_INTERRUPT',
+      resolution: { action: 'reject' },
+    });
+  });
+
+  test('Ctrl+C aborts the whole turn while an approval is visible', async () => {
+    let aborts = 0;
+    const actions: Action[] = [];
+    const view = render(
+      <App
+        state={fakeState({
+          running: true,
+          interrupt: {
+            kind: 'approval',
+            interactionId: 'approval-ctrl-c',
+            toolCallId: 'task-ctrl-c',
+            approval: fakeApproval(),
+          },
+        })}
+        dispatch={(action) => actions.push(action)}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        onAbort={() => {
+          aborts += 1;
+        }}
+      />,
+    );
+
+    view.stdin.write('\u0003');
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(aborts).toBe(1);
+    expect(actions.some((action) => action.type === 'RESOLVE_INTERRUPT')).toBe(false);
   });
 
   test('Escape cancels ask_user without aborting the whole run', async () => {
@@ -5363,7 +5504,7 @@ describe('App', () => {
               id: 1,
               kind: 'approval',
               approval,
-              resolved: { action: 'approve', grant: 'full_access' },
+              resolved: { action: 'approve', grant: 'same_command' },
             },
           ],
         },

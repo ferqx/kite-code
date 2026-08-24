@@ -497,6 +497,7 @@ function normalizeBuiltinPolicyContext(context: CapabilityTurnContext): Capabili
     ...context,
     workspace: context.workspace ?? '',
     phase: context.phase ?? 'building',
+    interactionMode: context.interactionMode ?? 'accept_edits',
   });
 }
 
@@ -570,7 +571,8 @@ function validateBuiltinPolicyCompilation(
           (typeof compiled.recovery.capabilityIntent !== 'string' ||
             compiled.recovery.capabilityIntent.length === 0)))) ||
     typeof compiled.fullAccessMayBypassApproval !== 'boolean' ||
-    typeof compiled.sameCommandMayBypassApproval !== 'boolean'
+    typeof compiled.sameCommandMayBypassApproval !== 'boolean' ||
+    (compiled.sandboxScope !== undefined && !validSandboxScope(compiled.sandboxScope))
   ) {
     throw new Error(`Builtin policy compilation facts are invalid: ${definition.capabilityId}`);
   }
@@ -583,10 +585,31 @@ function freezeBuiltinPolicyCompilation(
   return Object.freeze({
     ...compiled,
     ...(compiled.effects ? { effects: Object.freeze({ ...compiled.effects }) } : {}),
+    ...(compiled.sandboxScope ? { sandboxScope: Object.freeze({ ...compiled.sandboxScope }) } : {}),
     ...(compiled.recovery ? { recovery: Object.freeze({ ...compiled.recovery }) } : {}),
     effectiveEffects: Object.freeze({ ...compiled.effectiveEffects }),
     expectedEffects: Object.freeze([...compiled.expectedEffects]),
   });
+}
+
+function validSandboxScope(
+  value: NonNullable<CapabilityPolicyCompilation['sandboxScope']>,
+): boolean {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    ['baseline', 'expanded', 'unrestricted'].includes(value.kind) &&
+    ['read_only', 'workspace_write', 'full_access'].includes(value.filesystem) &&
+    ['disabled', 'allow_all'].includes(value.network) &&
+    typeof value.digest === 'string' &&
+    value.digest.length > 0 &&
+    value.digest ===
+      digestCapabilityBindingValue({
+        kind: value.kind,
+        filesystem: value.filesystem,
+        network: value.network,
+      })
+  );
 }
 
 function assertFrozenBuiltinRegistrySnapshot(snapshot: CapabilityRegistrySnapshot): void {

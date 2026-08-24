@@ -6,7 +6,6 @@ import { useTheme } from '#app/tui/theme';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { SLASH_COMMAND_DEFS } from '../hooks/useSlashSuggestions';
 import { useI18n } from '../i18n';
-import { sandboxSupportsFullMode } from '../interaction-mode';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 import { OverlaySection } from './OverlayPrimitives';
 
@@ -25,9 +24,10 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
   const { t: translate } = useI18n();
   const [scrollOffset, setScrollOffset] = useState(0);
   const maxContentHeight = useOverlayHeight(8);
-  const modeHelp = !sandboxSupportsFullMode(sandboxBackend)
-    ? translate('help.permissionsUnsandboxed')
-    : translate('help.permissionsSandboxed');
+  // Full is an interaction mode and is available independently of the
+  // restricted sandbox backend used by Accept/Auto.
+  void sandboxBackend;
+  const modeHelp = translate('help.permissionsSandboxed');
   const commandShortcuts: [string, string][] = SLASH_COMMAND_DEFS.map((command) => [
     `/${command.name}`,
     command.name === 'permissions'

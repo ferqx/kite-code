@@ -2,6 +2,7 @@
 
 import { contextCompactionTerminalNotice } from '@kite/builtin-runtime/model';
 import type * as Protocol from '@kite/runtime-contract';
+import type { ToolApprovalPayload } from '@kite/runtime-contract';
 import {
   canonicalToolOutcome,
   projectTerminalOutcome,
@@ -21,6 +22,8 @@ import type {
   FileChangeRecord,
   InterruptState,
   OutputBlock,
+  TuiApprovalStatus,
+  TuiPendingApproval,
   TuiState,
 } from '../types';
 import { projectToolCancelled, projectUserCancelledTurn } from './cancellation-projection';
@@ -124,6 +127,175 @@ function interactionMatches(
   if (!interrupt) return true;
   if (interrupt.kind !== kind) return false;
   return interrupt.interactionId == null || interrupt.interactionId === interactionId;
+}
+
+const APPROVAL_FOCUS_STATUSES: readonly TuiApprovalStatus[] = ['queued_user', 'awaiting_user'];
+
+function approvalQueue(state: TuiState): Map<string, TuiPendingApproval> {
+  return new Map(state.pendingApprovals ?? []);
+}
+
+function approvalNeedsFocus(status: TuiApprovalStatus): boolean {
+  return APPROVAL_FOCUS_STATUSES.includes(status);
+}
+
+function nextApprovalId(queue: ReadonlyMap<string, TuiPendingApproval>): string | null {
+  let selected: TuiPendingApproval | undefined;
+  for (const pending of queue.values()) {
+    if (!approvalNeedsFocus(pending.status)) continue;
+    if (
+      selected === undefined ||
+      pending.sequence < selected.sequence ||
+      (pending.sequence === selected.sequence &&
+        pending.interactionId.localeCompare(selected.interactionId) < 0)
+    ) {
+      selected = pending;
+    }
+  }
+  return selected?.interactionId ?? null;
+}
+
+function focusedApprovalInterrupt(
+  queue: ReadonlyMap<string, TuiPendingApproval>,
+  activeApprovalId: string | null,
+): InterruptState | null {
+  const pending = activeApprovalId == null ? undefined : queue.get(activeApprovalId);
+  if (!pending?.approval || !approvalNeedsFocus(pending.status)) return null;
+  return {
+    kind: 'approval',
+    interactionId: pending.interactionId,
+    toolCallId: pending.toolCallId,
+    approval: pending.approval,
+  };
+}
+
+function projectApprovalQueue(
+  state: TuiState,
+  queue: ReadonlyMap<string, TuiPendingApproval>,
+  preferredId?: string | null,
+): TuiState {
+  const currentId =
+    preferredId != null &&
+    queue.get(preferredId) &&
+    approvalNeedsFocus(queue.get(preferredId)!.status)
+      ? preferredId
+      : state.activeApprovalId != null &&
+          queue.get(state.activeApprovalId) &&
+          approvalNeedsFocus(queue.get(state.activeApprovalId)!.status)
+        ? state.activeApprovalId
+        : nextApprovalId(queue);
+  const nextInterrupt = focusedApprovalInterrupt(queue, currentId);
+  return {
+    ...state,
+    pendingApprovals: queue,
+    activeApprovalId: currentId,
+    ...(state.interrupt?.kind === 'approval' || state.interrupt == null
+      ? { interrupt: nextInterrupt }
+      : {}),
+  };
+}
+
+function queueSequenceFromEvent(
+  state: TuiState,
+  event: RuntimePresentationEvent,
+  approval: ToolApprovalPayload,
+): number {
+  const candidate = (event as { queueSequence?: unknown }).queueSequence ?? approval.queueSequence;
+  if (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0) {
+    return candidate;
+  }
+  const values = [...(state.pendingApprovals?.values() ?? [])];
+  return values.reduce((max, pending) => Math.max(max, pending.sequence), -1) + 1;
+}
+
+function queueGenerationFromEvent(
+  event: RuntimePresentationEvent,
+  approval: ToolApprovalPayload,
+): number {
+  const candidate =
+    (event as { queueGeneration?: unknown }).queueGeneration ?? approval.queueGeneration;
+  if (typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0) {
+    return candidate;
+  }
+  return 0;
+}
+
+function approvalPayloadForQueue(
+  event: RuntimePresentationEvent,
+  route: 'user' | 'auto',
+  sequence: number,
+  generation: number,
+): ToolApprovalPayload {
+  const raw = event.approval as ToolApprovalPayload;
+  return {
+    ...raw,
+    callId: raw.callId ?? event.toolCallId,
+    approvalRoute: route,
+    queueSequence: sequence,
+    queueGeneration: generation,
+    ...(event.parentToolCallId === undefined ? {} : { parentToolCallId: event.parentToolCallId }),
+    ...(event.childSubagentId === undefined ? {} : { childSubagentId: event.childSubagentId }),
+    ...(event.bindingDigest === undefined ? {} : { bindingDigest: event.bindingDigest }),
+  };
+}
+
+function pendingApprovalFromEvent(
+  state: TuiState,
+  event: RuntimePresentationEvent,
+  route: 'user' | 'auto',
+): TuiPendingApproval {
+  const approval = event.approval as ToolApprovalPayload;
+  const sequence = queueSequenceFromEvent(state, event, approval);
+  const generation = queueGenerationFromEvent(event, approval);
+  const payload = approvalPayloadForQueue(event, route, sequence, generation);
+  const status: TuiApprovalStatus = route === 'auto' ? 'auto_reviewing' : 'awaiting_user';
+  return {
+    interactionId: event.type === 'auto_review.requested' ? event.reviewId : event.interactionId,
+    toolCallId: event.toolCallId,
+    ...(event.parentToolCallId === undefined ? {} : { parentToolCallId: event.parentToolCallId }),
+    ...(event.childSubagentId === undefined ? {} : { childSubagentId: event.childSubagentId }),
+    route,
+    status,
+    sequence,
+    generation,
+    approval: payload,
+    approvalHash: payload.approvalHash,
+    bindingDigest: event.bindingDigest ?? payload.bindingDigest ?? payload.approvalHash,
+    actualSandboxScope: payload.sandboxScope,
+  };
+}
+
+function updateApprovalTerminalState(state: TuiState, event: RuntimePresentationEvent): TuiState {
+  if (
+    event.type !== 'tool.started' &&
+    event.type !== 'tool.finished' &&
+    event.type !== 'tool.failed' &&
+    event.type !== 'tool.rejected' &&
+    event.type !== 'tool.cancelled'
+  ) {
+    return state;
+  }
+  const queue = approvalQueue(state);
+  let changed = false;
+  const status: TuiApprovalStatus =
+    event.type === 'tool.started'
+      ? 'running'
+      : event.type === 'tool.finished'
+        ? 'succeeded'
+        : event.type === 'tool.cancelled'
+          ? 'cancelled'
+          : 'failed';
+  for (const [interactionId, pending] of queue) {
+    if (pending.toolCallId !== event.toolCallId || pending.status === status) continue;
+    queue.set(interactionId, {
+      ...pending,
+      status,
+      result:
+        status === 'succeeded' ? 'succeeded' : status === 'cancelled' ? 'cancelled' : 'failed',
+    });
+    changed = true;
+  }
+  return changed ? projectApprovalQueue(state, queue) : state;
 }
 
 function clearInteractionInterrupt(
@@ -790,12 +962,6 @@ function projectSubagentSuspended(
         ) {
           return block;
         }
-        // The Footer can acknowledge an approval before a duplicate
-        // subagent.approval_deferred/suspended projection reaches Ink. Do not
-        // regress the card to "Awaiting your approval" after the user has
-        // already confirmed it. Child progress/result clears this marker so a
-        // later, genuinely new approval may suspend the same child again.
-        if (block.approvalAcknowledged) return block;
         changed = true;
         const stepIndex = block.steps.length - 1;
         const steps = block.steps.map((step, index) =>
@@ -839,7 +1005,6 @@ function projectSubagentResuming(state: TuiState, parentToolCallId: string): Tui
           approvalState: undefined,
           awaitingApproval: false,
           approvingStepIndex: undefined,
-          approvalAcknowledged: undefined,
           steps: block.steps.map((step) =>
             step.status === 'awaiting_approval' ? { ...step, status: 'pending' as const } : step,
           ),
@@ -882,7 +1047,6 @@ function projectSubagentTerminal(
           approvalState: undefined,
           awaitingApproval: false,
           approvingStepIndex: undefined,
-          approvalAcknowledged: undefined,
           expanded: false,
           steps: block.steps.map((step) =>
             step.status === 'awaiting_approval'
@@ -1642,7 +1806,6 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       let nextInteractionMode = state.interactionMode;
       if (d.phase) next.phase = d.phase;
       if (d.plan !== undefined) next.plan = d.plan;
-      if (d.authorization) next.authorization = d.authorization.mode;
       if (d.interactionMode)
         nextInteractionMode = d.interactionMode as 'accept_edits' | 'auto' | 'full';
       if (d.workspaceAccess) next.workspaceAccess = d.workspaceAccess;
@@ -1954,7 +2117,6 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         awaitingApproval: false, // 新步骤到来时清除等待状态
         approvalState: undefined,
         approvingStepIndex: undefined,
-        approvalAcknowledged: undefined,
       };
       return replaceBlockById(state, matched.id, next);
     }
@@ -2024,7 +2186,6 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         awaitingApproval: false,
         approvalState: undefined,
         approvingStepIndex: undefined,
-        approvalAcknowledged: undefined,
       };
       return replaceBlockById(state, matched.id, next);
     }
@@ -2044,7 +2205,6 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         approvalState: undefined,
         awaitingApproval: false,
         approvingStepIndex: undefined,
-        approvalAcknowledged: undefined,
         expanded: false,
       };
       return replaceBlockById(state, matched.id, next);
@@ -2068,7 +2228,6 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         approvalState: undefined,
         awaitingApproval: false,
         approvingStepIndex: undefined,
-        approvalAcknowledged: undefined,
         expanded: false,
       };
       return replaceBlockById(state, matched.id, next);
@@ -2308,6 +2467,11 @@ export function handleRuntimeEventAction(
   event: RuntimePresentationEvent,
 ): TuiState {
   if (isSubagentInternalToolEvent(event)) return state;
+
+  // Queue terminal transitions are projected before the ordinary tool-card
+  // reducer so late results cannot leave an authorized_queued approval
+  // looking actionable after its execution has already settled.
+  state = updateApprovalTerminalState(state, event);
 
   switch (event.type) {
     case 'subagent.suspended':
@@ -2971,7 +3135,7 @@ export function handleRuntimeEventAction(
         state.pendingToolCalls[event.toolCallId]?.name ?? visibleToolName(state, event.toolCallId);
       if (!name) return withoutPendingTool(state, event.toolCallId);
       // plan.review_requested already rendered the durable draft and marked its
-      // card done. Cancelling execution authorization must not replace that
+      // card done. Cancelling execution must not replace that
       // document with a synthetic Cancelled result.
       if (
         visibleCard?.kind === 'tool_card' &&
@@ -3007,24 +3171,63 @@ export function handleRuntimeEventAction(
         event.toolCallId,
       );
     }
-    case 'auto_review.requested':
+    case 'auto_review.requested': {
+      const queue = approvalQueue(state);
+      const pending = pendingApprovalFromEvent(state, event, 'auto');
+      if (!queue.has(pending.interactionId)) queue.set(pending.interactionId, pending);
+      const projected = projectApprovalQueue(state, queue);
       return event.approval.subagentId
-        ? projectSubagentSuspended(state, {
+        ? projectSubagentSuspended(projected, {
             subagentId: event.approval.subagentId,
             parentToolCallId: event.toolCallId,
             approvalState: 'auto_reviewing',
           })
-        : state;
+        : projected;
+    }
     case 'auto_review.completed': {
       // Auto-review is not a user-facing interaction. Only an explicit
       // automatic rejection becomes a visible tool result; technical failure
       // is followed by approval.requested and must not be rendered as a deny.
-      if (event.result.approved) return projectSubagentResuming(state, event.toolCallId);
-      if (!event.result.ok || event.result.escalatedToUser) return state;
+      const queue = approvalQueue(state);
+      const reviewId = event.reviewId;
+      const pending = queue.get(reviewId);
+      if (event.result.approved) {
+        if (pending) {
+          queue.set(reviewId, {
+            ...pending,
+            status: 'authorized_queued',
+            grant: 'approve_once',
+            result: 'authorized',
+            receiptId: 'auto:' + reviewId + ':' + pending.generation,
+          });
+        }
+        return projectSubagentResuming(projectApprovalQueue(state, queue), event.toolCallId);
+      }
+      if (!event.result.ok) return state;
+      if (event.result.escalatedToUser) {
+        if (pending) {
+          queue.set(reviewId, {
+            ...pending,
+            route: 'user',
+            status: 'awaiting_user',
+            approval: pending.approval
+              ? { ...pending.approval, approvalRoute: 'user' }
+              : pending.approval,
+          });
+        }
+        return projectApprovalQueue(state, queue);
+      }
       const outcome = canonicalToolOutcome(event);
       const rejectionReason = event.result.reason ?? '自动审查拒绝执行';
+      if (pending) {
+        queue.set(reviewId, {
+          ...pending,
+          status: 'rejected',
+          result: 'rejected',
+        });
+      }
       const terminalized = projectSubagentTerminal(
-        state,
+        projectApprovalQueue(state, queue),
         event.toolCallId,
         'error',
         rejectionReason,
@@ -3180,56 +3383,178 @@ export function handleRuntimeEventAction(
     case 'provider.admission_cancelled':
       return clearInteractionInterrupt(state, 'input', event.interactionId);
     case 'approval.requested': {
+      const pending = pendingApprovalFromEvent(state, event, 'user');
+      const queue = approvalQueue(state);
+      if (queue.has(pending.interactionId)) return state;
+      queue.set(pending.interactionId, pending);
+      // Canonical requests are retained even while another request owns the
+      // Footer. Only the durable queue focus decides which one is rendered.
+      const projected = projectApprovalQueue(state, queue);
+      return event.approval.subagentId
+        ? projectSubagentSuspended(projected, {
+            subagentId: event.approval.subagentId,
+            parentToolCallId: event.toolCallId,
+            approvalState: 'awaiting_user',
+          })
+        : projected;
+    }
+    case 'approval.granted': {
+      const queue = approvalQueue(state);
+      const pending = queue.get(event.interactionId);
       if (
-        !interactionMatches(state, 'approval', event.interactionId) ||
-        state.interrupt?.kind === 'approval'
+        pending &&
+        pending.toolCallId === event.toolCallId &&
+        pending.generation === event.generation
+      ) {
+        queue.set(event.interactionId, {
+          ...pending,
+          status: 'authorized_queued',
+          grant: event.grant === 'same_command' ? 'same_command' : 'approve_once',
+          ...(event.receiptId ? { receiptId: event.receiptId } : {}),
+          result: 'authorized',
+        });
+      }
+      const projected = projectApprovalQueue(state, queue);
+      return event.toolCallId ? projectSubagentResuming(projected, event.toolCallId) : projected;
+    }
+    case 'approval.batch_released': {
+      const eventGeneration = Number(event.generation);
+      const eventRevision = Number(event.sessionRevision);
+      const eventSessionId =
+        typeof event.commandIdentity?.sessionId === 'string'
+          ? event.commandIdentity.sessionId
+          : undefined;
+      if (
+        !Number.isSafeInteger(eventGeneration) ||
+        eventGeneration < 0 ||
+        !Number.isSafeInteger(eventRevision) ||
+        eventRevision < 0 ||
+        (state.activeSessionId != null && eventSessionId !== state.activeSessionId) ||
+        eventGeneration < (state.sessionCommandGrantGeneration ?? 0) ||
+        eventRevision < (state.sessionCommandGrantRevision ?? 0)
       ) {
         return state;
       }
-      const next = handleEventAction(state, {
-        type: 'need_approval',
-        data: {
-          ...event.approval,
-          callId: event.approval.callId ?? event.toolCallId,
-        },
-      });
-      return next.interrupt?.kind === 'approval'
-        ? {
-            ...next,
-            interrupt: {
-              ...next.interrupt,
-              interactionId: event.interactionId,
-              toolCallId: event.toolCallId,
-            },
-          }
-        : next;
+      const queue = approvalQueue(state);
+      const matches = Array.isArray(event.matches) ? event.matches : [];
+      for (const match of matches) {
+        if (!match || typeof match !== 'object') continue;
+        const interactionId =
+          typeof match.interactionId === 'string' ? match.interactionId : undefined;
+        if (!interactionId) continue;
+        const pending = queue.get(interactionId);
+        if (
+          !pending ||
+          pending.toolCallId !== match.toolCallId ||
+          pending.generation !== match.generation ||
+          match.generation !== event.generation
+        ) {
+          continue;
+        }
+        queue.set(interactionId, {
+          ...pending,
+          status: 'authorized_queued',
+          grant: 'same_command',
+          matchCount: matches.length,
+          ...(typeof match.receiptId === 'string' ? { receiptId: match.receiptId } : {}),
+          result: 'authorized',
+        });
+      }
+      const cancelledReviewIds = Array.isArray(event.cancelledReviewIds)
+        ? event.cancelledReviewIds.filter((id: unknown): id is string => typeof id === 'string')
+        : [];
+      for (const interactionId of cancelledReviewIds) {
+        const pending = queue.get(interactionId);
+        if (pending) {
+          queue.set(interactionId, {
+            ...pending,
+            status: 'cancelled',
+            grant: undefined,
+            matchCount: matches.length,
+            result: 'cancelled',
+          });
+        }
+      }
+      let next = projectApprovalQueue(state, queue);
+      if (event.grantKey) {
+        const grants = new Map(next.sessionCommandGrants ?? []);
+        grants.set(event.grantKey, {
+          grantKey: event.grantKey,
+          command:
+            typeof event.commandIdentity?.commandDigest === 'string'
+              ? event.commandIdentity.commandDigest
+              : undefined,
+          createdAt: typeof event.createdAt === 'string' ? event.createdAt : undefined,
+          generation: eventGeneration,
+          sessionRevision: eventRevision,
+        });
+        next = {
+          ...next,
+          sessionCommandGrants: grants,
+          sessionCommandGrantGeneration: eventGeneration,
+          sessionCommandGrantRevision: eventRevision,
+        };
+      }
+      return event.toolCallId ? projectSubagentResuming(next, event.toolCallId) : next;
     }
-    case 'approval.granted': {
-      // Live approval is cleared by the local UI action before this durable
-      // event arrives. Replay has no local action, so it must clear the same
-      // Footer interrupt explicitly instead of reviving an approved request.
-      const withoutInterrupt =
-        state.interrupt?.kind === 'approval' &&
-        state.interrupt.interactionId === event.interactionId &&
-        (state.interrupt.toolCallId ?? state.interrupt.approval?.callId) === event.toolCallId
-          ? { ...state, interrupt: null }
-          : state;
-      return event.toolCallId
-        ? projectSubagentResuming(withoutInterrupt, event.toolCallId)
-        : withoutInterrupt;
+    case 'approval.session_grants_cleared': {
+      // Session-scoped grants must never be cleared by a late event from a
+      // different focused session or an older queue generation/revision.
+      if (state.activeSessionId && state.activeSessionId !== event.sessionId) return state;
+      const eventGeneration = Number(event.generation);
+      const eventRevision = Number(event.sessionRevision);
+      if (
+        !Number.isSafeInteger(eventGeneration) ||
+        eventGeneration < 0 ||
+        !Number.isSafeInteger(eventRevision) ||
+        eventRevision < 0 ||
+        eventGeneration <= (state.sessionCommandGrantGeneration ?? 0) ||
+        eventRevision < (state.sessionCommandGrantRevision ?? 0)
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        sessionCommandGrants: new Map(),
+        sessionCommandGrantGeneration: eventGeneration,
+        sessionCommandGrantRevision: eventRevision,
+      };
     }
     case 'approval.rejected': {
       const outcome = canonicalToolOutcome(event);
+      const queue = approvalQueue(state);
+      const interactionId = String(event.interactionId);
+      const pending = queue.get(interactionId);
       if (
-        state.interrupt?.kind !== 'approval' ||
-        state.interrupt.interactionId !== event.interactionId ||
-        (state.interrupt.toolCallId ?? state.interrupt.approval?.callId) !== event.toolCallId
+        pending &&
+        pending.toolCallId === event.toolCallId &&
+        pending.generation === event.generation
       ) {
-        return state;
+        queue.set(interactionId, {
+          interactionId: pending.interactionId,
+          toolCallId: pending.toolCallId,
+          ...(pending.parentToolCallId ? { parentToolCallId: pending.parentToolCallId } : {}),
+          ...(pending.childSubagentId ? { childSubagentId: pending.childSubagentId } : {}),
+          route: pending.route,
+          status: 'rejected',
+          sequence: pending.sequence,
+          generation: pending.generation,
+          ...(pending.approval ? { approval: pending.approval } : {}),
+          ...(pending.approvalHash ? { approvalHash: pending.approvalHash } : {}),
+          ...(pending.bindingDigest ? { bindingDigest: pending.bindingDigest } : {}),
+          ...(pending.grant ? { grant: pending.grant } : {}),
+          ...(pending.receiptId ? { receiptId: pending.receiptId } : {}),
+          ...(pending.matchCount === undefined ? {} : { matchCount: pending.matchCount }),
+          result: 'rejected',
+          ...(pending.actualSandboxScope ? { actualSandboxScope: pending.actualSandboxScope } : {}),
+        });
       }
+      const queuedState = projectApprovalQueue(state, queue);
       const approvalBlock =
-        state.interrupt?.kind === 'approval' && state.interrupt.blockId
-          ? findBlockById(state, state.interrupt.blockId)
+        state.interrupt?.kind === 'approval' &&
+        state.interrupt.interactionId === event.interactionId &&
+        state.interrupt.blockId
+          ? findBlockById(queuedState, state.interrupt.blockId)
           : undefined;
       const activeApproval = approvalBlock?.kind === 'approval' ? approvalBlock : undefined;
       const toolCallId = event.toolCallId;
@@ -3238,8 +3563,8 @@ export function handleRuntimeEventAction(
       // list. Materialize the queued call before closing it so live rendering
       // matches replay and the user can see why the turn stopped.
       const materialized = toolCallId
-        ? materializePendingTool(state, toolCallId, 'queued', true)
-        : state;
+        ? materializePendingTool(queuedState, toolCallId, 'queued', true)
+        : queuedState;
       const visibleName = toolCallId ? visibleToolName(materialized, toolCallId) : undefined;
       let next = toolCallId ? withoutPendingTool(materialized, toolCallId) : materialized;
       if (toolCallId && visibleName) {
@@ -3263,7 +3588,7 @@ export function handleRuntimeEventAction(
       if (toolCallId) {
         next = projectSubagentTerminal(next, toolCallId, 'cancelled', event.reason);
       }
-      return { ...next, interrupt: null };
+      return projectApprovalQueue(next, queue);
     }
     case 'planning.entered':
       return { ...state, status: { ...state.status, phase: 'planning' } };
@@ -3305,7 +3630,6 @@ export function handleRuntimeEventAction(
       return {
         ...state,
         interrupt: null,
-        interactionMode: event.executionMode,
         status: {
           ...state.status,
           phase: 'building',

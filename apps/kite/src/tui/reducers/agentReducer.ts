@@ -1,7 +1,7 @@
 // ── Agent 生命周期（运行/空闲/退出）、中断、授权、Ctrl+C/Esc ──
 
 import { InteractionMode } from '@kite/runtime-contract';
-import type { OutputBlock, TuiState } from '../types';
+import type { OutputBlock, TuiApprovalStatus, TuiPendingApproval, TuiState } from '../types';
 import type { Action } from './actions';
 import { projectUserCancelledTurn } from './cancellation-projection';
 import {
@@ -89,6 +89,58 @@ function cancelAskUserToolCard(s: TuiState, questionBlockId: number): TuiState {
     });
   }
   return next;
+}
+
+function focusableApproval(status: TuiApprovalStatus): boolean {
+  return (
+    status === 'queued_auto' ||
+    status === 'auto_reviewing' ||
+    status === 'queued_user' ||
+    status === 'awaiting_user'
+  );
+}
+
+function advanceApprovalQueue(
+  state: TuiState,
+  interactionId: string | undefined,
+  status: 'approving' | 'rejected',
+  grant?: 'approve_once' | 'same_command',
+): TuiState {
+  if (!state.pendingApprovals || interactionId == null) return state;
+  const queue = new Map(state.pendingApprovals);
+  const pending = queue.get(interactionId);
+  if (!pending) return { ...state, interrupt: null, activeApprovalId: null };
+  queue.set(interactionId, {
+    ...pending,
+    status,
+    ...(grant ? { grant } : {}),
+    ...(status === 'rejected' ? { result: 'rejected' as const } : {}),
+  });
+  let next: TuiPendingApproval | undefined;
+  for (const candidate of queue.values()) {
+    if (!focusableApproval(candidate.status)) continue;
+    if (
+      next === undefined ||
+      candidate.sequence < next.sequence ||
+      (candidate.sequence === next.sequence &&
+        candidate.interactionId.localeCompare(next.interactionId) < 0)
+    ) {
+      next = candidate;
+    }
+  }
+  return {
+    ...state,
+    pendingApprovals: queue,
+    activeApprovalId: next?.interactionId ?? null,
+    interrupt: next?.approval
+      ? {
+          kind: 'approval',
+          interactionId: next.interactionId,
+          toolCallId: next.toolCallId,
+          approval: next.approval,
+        }
+      : null,
+  };
 }
 
 /** Shared helper: cancel a running interrupt during Ctrl+C or Escape */
@@ -209,78 +261,47 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
       const approvalInterrupt = state.interrupt?.kind === 'approval' ? state.interrupt : undefined;
       if (approvalInterrupt || action.approvalTarget) {
+        if (
+          resolution.action === 'reject' ||
+          resolution.action === 'denied' ||
+          resolution.action === 'cancelled'
+        ) {
+          const rejected = advanceApprovalQueue(
+            state,
+            approvalInterrupt?.interactionId,
+            'rejected',
+          );
+          const rejectedBlock =
+            b?.kind === 'approval'
+              ? replaceBlockById(rejected, b.id, {
+                  ...b,
+                  resolved: { action: 'reject' },
+                })
+              : rejected;
+          return {
+            ...rejectedBlock,
+            interrupt: state.pendingApprovals ? rejected.interrupt : null,
+          };
+        }
         // Only an accepted approval is safe to project optimistically. A
         // rejection/cancellation must keep the interrupt identity until the
         // durable approval.rejected event terminalizes the affected turn.
         if (resolution.action !== 'approve' && resolution.action !== 'approved') return state;
-        let withResolved = state;
+        const queueAcknowledgement = advanceApprovalQueue(
+          state,
+          approvalInterrupt?.interactionId,
+          'approving',
+          resolution.grant === 'same_command' ? 'same_command' : 'approve_once',
+        );
+        let withResolved = queueAcknowledgement;
         if (b?.kind === 'approval') {
-          withResolved = replaceBlockById(state, b.id, { ...b, resolved: resolution });
+          withResolved = replaceBlockById(withResolved, b.id, { ...b, resolved: resolution });
         }
-        const approvedSubagentId =
-          action.approvalTarget?.subagentId ?? approvalInterrupt?.approval?.subagentId;
-        const approvedParentToolCallId =
-          action.approvalTarget?.parentToolCallId ?? approvalInterrupt?.toolCallId;
-        const suspendedSubagents = withResolved.turns.flatMap((turn) =>
-          turn.blocks.filter(
-            (block): block is Extract<OutputBlock, { kind: 'subagent' }> =>
-              block.kind === 'subagent' && block.status === 'suspended',
-          ),
-        );
-        const identityTarget =
-          (approvedSubagentId == null
-            ? undefined
-            : suspendedSubagents.find((block) => block.subagentId === approvedSubagentId)) ??
-          (approvedParentToolCallId == null
-            ? undefined
-            : suspendedSubagents.find(
-                (block) => block.parentToolCallId === approvedParentToolCallId,
-              ));
-        // Older/live bridge events do not always preserve the parent task id on
-        // the Footer interaction. Runtime still guarantees one canonical human
-        // approval, so a unique awaiting_user projection is a safe fallback.
-        // Never guess when multiple candidates exist.
-        const awaitingUserTargets = suspendedSubagents.filter(
-          (block) =>
-            block.approvalState === 'awaiting_user' ||
-            (block.approvalState == null && block.awaitingApproval === true),
-        );
-        const approvedTarget =
-          identityTarget ?? (awaitingUserTargets.length === 1 ? awaitingUserTargets[0] : undefined);
-        const now = approvedTarget ? Date.now() : undefined;
-        const updatedTurns = withResolved.turns.map((turn) => {
-          let changed = false;
-          const blocks = turn.blocks.map((block) => {
-            if (
-              block.kind === 'subagent' &&
-              block.status === 'suspended' &&
-              block.subagentId === approvedTarget?.subagentId
-            ) {
-              changed = true;
-              return {
-                ...block,
-                status: 'running' as const,
-                ...(now != null ? { startedAt: now } : {}),
-                approvalState: undefined,
-                awaitingApproval: false,
-                approvingStepIndex: undefined,
-                approvalAcknowledged: true,
-                steps: block.steps.map((step) =>
-                  step.status === 'awaiting_approval'
-                    ? { ...step, status: 'pending' as const }
-                    : step,
-                ),
-              };
-            }
-            return block;
-          });
-          return changed ? { blocks } : turn;
-        });
-        return {
-          ...withResolved,
-          turns: updatedTurns,
-          interrupt: approvalInterrupt ? null : withResolved.interrupt,
-        };
+        // The local key acknowledgement may project only `approving` in the
+        // durable queue. Child running/authorized state is derived exclusively
+        // from approval.granted or approval.batch_released so live and replay
+        // cannot diverge.
+        return withResolved;
       }
       if (b?.kind !== 'question') return state;
 
@@ -374,16 +395,10 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       };
     }
     case 'SWITCH_AUTH': {
-      const newMode =
-        action.mode === 'toggle'
-          ? state.status.authorization === 'full_access'
-            ? 'default'
-            : 'full_access'
-          : action.mode;
-      return {
-        ...state,
-        status: { ...state.status, authorization: newMode as 'default' | 'full_access' },
-      };
+      // Authorization grants are durable Runtime approvals.  The TUI only
+      // owns the orthogonal interaction mode; this legacy action is retained
+      // for slash-command compatibility and must not recreate a grant mode.
+      return state;
     }
     case 'EXPORT_SESSION':
       return state;
@@ -414,22 +429,18 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
               ? InteractionMode.Full
               : InteractionMode.AcceptEdits
           : action.mode;
-      const auth = next === InteractionMode.Full ? 'full_access' : 'default';
       return {
         ...state,
         interactionMode: next,
-        status: { ...state.status, authorization: auth as 'default' | 'full_access' },
       };
     }
     case 'TOGGLE_PLAN_MODE': {
       const nextPhase = state.status.phase === 'planning' ? 'building' : 'planning';
-      const nextAuth = nextPhase === 'planning' ? 'default' : state.status.authorization;
       return {
         ...state,
         status: {
           ...state.status,
           phase: nextPhase,
-          authorization: nextAuth as 'default' | 'full_access',
         },
       };
     }

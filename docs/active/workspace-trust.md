@@ -32,7 +32,9 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 `run` 命令在加载配置与创建 Runtime 之前执行同一 `shouldPromptWorkspaceTrust` 判定：
 
 - 未信任且未显式授权 → 向 stderr 输出错误并以非零码退出，stdout 不产生任何 runtime 事件（stdout 保持 JSONL 事件流语义）。
-- `--trust-workspace` → 调用方显式背书，写入 `source: 'config'` 的信任记录后继续；语义与 `--full-access` 的 `source: 'config'` 授权一致（见 `docs/active/authorization.md`）。记录写入失败时同样报错退出。CI/自动化应使用该旗标或预写信任存储。
+- `--trust-workspace` → 调用方显式背书，写入 `source: 'config'` 的信任记录后继续；该记录只表示 Workspace trust，
+  不授予 Full 或任何 approval grant。历史 `--full-access` flag 仅保留为 ignored/negative compatibility input，
+  不再是当前 CLI authority（见 `docs/active/authorization.md`）。记录写入失败时同样报错退出。CI/自动化应使用该旗标或预写信任存储。
 - `trace`、`help` 命令不执行项目代码，不做门禁。
 
 CLI 组合根产生的 sandbox 诊断也只能写入 stderr；不得混入 stdout 的 JSONL Runtime 事件流，更不得由

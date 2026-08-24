@@ -1,7 +1,7 @@
 import type {
   AgentPhase,
   AgentPlan,
-  AuthorizationMode,
+  InteractionMode,
   SubAgentFailureDiagnostic,
   SubAgentRole,
   ToolApprovalPayload,
@@ -198,16 +198,14 @@ export type OutputBlock =
         | 'queued_auto_review'
         | 'queued_user_approval'
         | 'auto_reviewing'
-        | 'awaiting_user';
+        | 'awaiting_user'
+        | 'authorized_queued';
       /** Parent task tool call that owns the persisted child continuation. */
       parentToolCallId?: string;
       /** 子 agent 正在等待工具审批 / Sub-agent is awaiting tool approval */
       awaitingApproval?: boolean;
       /** 正在等待审批的步骤索引，用于 tool_result 回来后标记 rejected / Step index being approved, used to mark as rejected on tool_result */
       approvingStepIndex?: number;
-      /** Local UI acknowledgement for the current approval. It suppresses a
-       * late duplicate suspension until child progress confirms continuation. */
-      approvalAcknowledged?: boolean;
       /** TUI-only identity for children that started as one concurrent sibling batch. */
       concurrencyGroupId?: string;
     };
@@ -223,6 +221,49 @@ export interface FileChangeRecord {
   linesAdded?: number;
   linesRemoved?: number;
   preview?: string;
+}
+
+export type TuiApprovalStatus =
+  | 'queued_auto'
+  | 'auto_reviewing'
+  | 'queued_user'
+  | 'awaiting_user'
+  | 'approving'
+  | 'authorized_queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'rejected'
+  | 'expired';
+
+/** Presentation projection of the Kernel-owned durable approval queue. */
+export interface TuiPendingApproval {
+  interactionId: string;
+  toolCallId: string;
+  parentToolCallId?: string;
+  childSubagentId?: string;
+  route: 'user' | 'auto';
+  status: TuiApprovalStatus;
+  sequence: number;
+  generation: number;
+  approval?: ToolApprovalPayload;
+  approvalHash?: string;
+  bindingDigest?: string;
+  grant?: 'approve_once' | 'same_command';
+  receiptId?: string;
+  matchCount?: number;
+  result?: 'authorized' | 'rejected' | 'cancelled' | 'succeeded' | 'failed';
+  actualSandboxScope?: ToolApprovalPayload['sandboxScope'];
+}
+
+export interface TuiSessionCommandGrant {
+  grantKey: string;
+  command?: string;
+  createdAt?: string;
+  generation?: number;
+  /** Kernel revision expected immediately before the grant batch commit. */
+  sessionRevision?: number;
 }
 
 export interface TuiState {
@@ -281,6 +322,16 @@ export interface TuiState {
   currentModelReasoningText?: string;
   /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
   interactionMode: 'accept_edits' | 'auto' | 'full';
+  /** Durable Kernel approval queue projection; optional for legacy snapshots. */
+  pendingApprovals?: ReadonlyMap<string, TuiPendingApproval>;
+  /** Focused approval interaction identity restored from the durable queue. */
+  activeApprovalId?: string | null;
+  /** Session-scoped same-command grants shown by /permissions. */
+  sessionCommandGrants?: ReadonlyMap<string, TuiSessionCommandGrant>;
+  /** Latest durable queue generation that changed the Session grant projection. */
+  sessionCommandGrantGeneration?: number;
+  /** Latest pre-commit Kernel revision carried by a Session grant event. */
+  sessionCommandGrantRevision?: number;
   /** Deduplicates durable terminal compaction notices during replay. */
   terminalCompactionNotices?: Record<string, 'completed' | 'failed' | 'cancelled'>;
   /** Ephemeral presentation for the active context compaction. */
@@ -330,7 +381,6 @@ export interface StatusState {
   plan: AgentPlan | null;
   /** 待审批的方案（区别于已审批的 plan）/ Pending plan awaiting review (distinct from approved plan) */
   pendingPlan: AgentPlan | null;
-  authorization: AuthorizationMode;
   workspaceAccess: WorkspaceAccess;
   cacheHitTokens: number;
   cacheMissTokens: number;
@@ -356,10 +406,15 @@ export interface SessionSnapshot {
   /** Full interrupt state for session-switch restoration. Set on switch-away, read on switch-back. */
   interrupt: InterruptState | null;
   plan: import('@kite/runtime-contract').AgentPlan | null;
-  /** Last mode selected for this session, including an approved plan's execution mode. */
-  interactionMode?: TuiState['interactionMode'];
+  /** Last explicit Session interaction mode; Plan execution mode is orthogonal. */
+  interactionMode?: InteractionMode;
   status: StatusState;
   turns: Turn[];
   /** Off-screen queued tool metadata owned by this TUI session projection. */
   pendingToolCalls?: TuiState['pendingToolCalls'];
+  pendingApprovals?: ReadonlyMap<string, TuiPendingApproval>;
+  activeApprovalId?: string | null;
+  sessionCommandGrants?: ReadonlyMap<string, TuiSessionCommandGrant>;
+  sessionCommandGrantGeneration?: number;
+  sessionCommandGrantRevision?: number;
 }

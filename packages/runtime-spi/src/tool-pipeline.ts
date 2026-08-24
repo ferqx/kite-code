@@ -248,7 +248,7 @@ export interface ToolInvocationRequirements {
 export type ToolPipelineGovernancePolicyProjection = Readonly<CapabilityPolicyCompilation>;
 
 /**
- * Neutral invocation facts consumed by the State 25 governance bridge.  The
+ * Neutral invocation facts consumed by the State 27 governance bridge.  The
  * fields mirror the Kernel's identity facts without importing that package;
  * the two catalog revisions remain independent throughout the projection.
  */
@@ -277,6 +277,16 @@ type ToolPipelineGovernanceInvocationProjectionCommon = {
   readonly nestedCapabilityRevision: string | null;
   readonly nestedCatalogRevision: string | null;
   readonly commandDigest: string | null;
+  /** Canonical working directory captured for Session command matching. */
+  readonly canonicalCwd?: string;
+  /** Stable shell/executor identity; never a live handle. */
+  readonly shellOrExecutorIdentity?: string;
+  /** Digest of the execution-environment facts used by the invocation. */
+  readonly executionEnvironmentDigest?: string;
+  /** Digest of the sealed baseline/expanded sandbox scope. */
+  readonly effectiveSandboxScopeDigest?: string;
+  /** Parser + executor policy revision used to compile this invocation. */
+  readonly policyParserExecutorRevision?: string;
 };
 
 /** Ordinary Builtin/Skill/Subagent invocation facts. */
@@ -515,6 +525,11 @@ export interface ToolRecordedAttemptIdentity {
   readonly authorizationDigest: string | null;
   readonly admissionDigest: string | null;
   readonly idempotencyKey: string | null;
+  readonly canonicalCwd?: string;
+  readonly shellOrExecutorIdentity?: string;
+  readonly executionEnvironmentDigest?: string;
+  readonly effectiveSandboxScopeDigest?: string;
+  readonly policyParserExecutorRevision?: string;
   readonly recordedAt: string;
   readonly startedAt: string;
 }
@@ -613,6 +628,16 @@ export interface ToolPipelineSkillForkApprovalRequestedEvent<TToolCallId extends
   readonly interactionId: string;
   readonly toolCallId: TToolCallId;
   readonly approval: Readonly<ToolApprovalPayload>;
+  readonly fullModeBypassEligible: boolean;
+  readonly fullModePolicyBypassAllowed: boolean;
+  readonly approvalRoute: 'user';
+  readonly queueGeneration: number;
+  readonly queueSequence: number;
+  readonly parentToolCallId: string;
+  readonly childSubagentId: string;
+  readonly runtimeToolCallId?: string;
+  readonly bindingDigest: string;
+  readonly commandIdentity?: Readonly<Record<string, RuntimeJsonValue>>;
   readonly createdAt?: string;
 }
 
@@ -626,6 +651,16 @@ export interface ToolPipelineSkillForkAutoReviewRequestedEvent<
   readonly toolName: string;
   readonly reason: string;
   readonly approval: Readonly<ToolApprovalPayload>;
+  readonly fullModeBypassEligible: boolean;
+  readonly fullModePolicyBypassAllowed: boolean;
+  readonly approvalRoute: 'auto';
+  readonly queueGeneration: number;
+  readonly queueSequence: number;
+  readonly parentToolCallId: string;
+  readonly childSubagentId: string;
+  readonly runtimeToolCallId?: string;
+  readonly bindingDigest: string;
+  readonly commandIdentity?: Readonly<Record<string, RuntimeJsonValue>>;
   readonly requestFingerprint?: string;
   readonly createdAt?: string;
 }
@@ -677,6 +712,16 @@ export interface ToolPipelineTaskSubagentApprovalRequestedEvent<
   readonly interactionId: string;
   readonly toolCallId: TToolCallId;
   readonly approval: Readonly<ToolApprovalPayload>;
+  readonly fullModeBypassEligible: boolean;
+  readonly fullModePolicyBypassAllowed: boolean;
+  readonly approvalRoute: 'user';
+  readonly queueGeneration: number;
+  readonly queueSequence: number;
+  readonly parentToolCallId: string;
+  readonly childSubagentId: string;
+  readonly runtimeToolCallId?: string;
+  readonly bindingDigest: string;
+  readonly commandIdentity?: Readonly<Record<string, RuntimeJsonValue>>;
   readonly createdAt?: string;
 }
 
@@ -690,6 +735,16 @@ export interface ToolPipelineTaskSubagentAutoReviewRequestedEvent<
   readonly toolName: string;
   readonly reason: string;
   readonly approval: Readonly<ToolApprovalPayload>;
+  readonly fullModeBypassEligible: boolean;
+  readonly fullModePolicyBypassAllowed: boolean;
+  readonly approvalRoute: 'auto';
+  readonly queueGeneration: number;
+  readonly queueSequence: number;
+  readonly parentToolCallId: string;
+  readonly childSubagentId: string;
+  readonly runtimeToolCallId?: string;
+  readonly bindingDigest: string;
+  readonly commandIdentity?: Readonly<Record<string, RuntimeJsonValue>>;
   readonly requestFingerprint?: string;
   readonly createdAt?: string;
 }
@@ -789,6 +844,12 @@ type PreparedToolInvocationIdentityCommon = {
   readonly idempotencyKeyArgument: string | null;
   readonly idempotencyKey: string | null;
   readonly bindingId: string | null;
+  /** Optional identity facts carried by producers that support Session grants. */
+  readonly canonicalCwd?: string;
+  readonly shellOrExecutorIdentity?: string;
+  readonly executionEnvironmentDigest?: string;
+  readonly effectiveSandboxScopeDigest?: string;
+  readonly policyParserExecutorRevision?: string;
 };
 
 export type DynamicMcpPreparedToolInvocationIdentity = PreparedToolInvocationIdentityCommon & {

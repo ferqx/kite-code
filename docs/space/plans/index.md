@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-23（新增 SQLite 会话日志 Server/Web 实施方案）
+最后更新：2026-08-25（新增 Shell 沙箱边界与并发审批队列优化方案）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-25-shell-sandbox-approval-queue-optimization.md`](2026-08-25-shell-sandbox-approval-queue-optimization.md) | completed（待最终远程门禁确认） | P0 | ADR-0133、ADR-0136、当前 Runtime/Store/Sandbox/TUI | 方案一已实施；ADR-0137 部分 supersede ADR-0136 的 phase 结论，保留无命令白名单与 hard deny；最终 required checks 由完成记录登记 | Sandbox-first phase/mode 矩阵、两类 grant、durable approval queue、same-command 原子批量释放、Plan + Full 正交；[完成记录](../execution/completed/2026-08-25-shell-sandbox-approval-queue-optimization.md) |
 | [`2026-08-23-sqlite-session-log-server-web.md`](2026-08-23-sqlite-session-log-server-web.md) | active | P1 | ADR-0129、当前 State26/Store5 SQLite Runtime | SQLite 是唯一会话日志事实源；明确排除 Session Logger/JSONL | LOGWEB-00～04 已完成；后续为 loopback Server/SSE、Web 时间线与跨平台验证 |
 | [`2026-08-23-pre-release-clean-cutover-module-boundaries.md`](2026-08-23-pre-release-clean-cutover-module-boundaries.md) | archived | P0 | ADR-0128、当前 State26/Store5 Runtime | 落实用户提供的《Kite Code 完整模块化优化方案》 | 无版本命名 clean cutover、零 compatibility production path、领域拆分、根 API 收窄、静态 Gate；[完成记录](../execution/completed/2026-08-23-pre-release-clean-cutover-module-boundaries.md) |
 | [`2026-08-19-kite-runtime-modularization-v1-implementation.md`](2026-08-19-kite-runtime-modularization-v1-implementation.md) | completed | P0 | accepted RFC、ADR-0124/0125、baseline `af5a5123` | 只做物理模块化；Authority/Format范围移入RAV1 | RMV1-01 至 RMV1-16 [全部完成](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)；implementation final SHA `e5a64c21`；State 25、Store 4和原epoch保持不变 |

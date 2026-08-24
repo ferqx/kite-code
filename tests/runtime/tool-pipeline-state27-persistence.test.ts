@@ -188,6 +188,8 @@ function prepared(attempt = 1): Readonly<PreparedToolInvocation> & {
         schema: 'kite.tool-pipeline-prepared-request.v1',
         authorizationKind: 'policy_allow',
         grantUsed: 'none',
+        interactionMode: 'accept_edits',
+        sandboxScope: null,
         policyEffects: {},
         effectiveEffects: EFFECTS,
         receiptRequirement: 'observation_receipt',
@@ -486,6 +488,7 @@ function result(
 function taskSuspension(
   executionMode: 'start' | 'resume' = 'start',
   eventKind: 'approval' | 'auto_review' = 'approval',
+  queueSequence = 0,
 ): ToolPipelineTaskSubagentSuspension {
   const approval = {
     scope: 'once' as const,
@@ -508,6 +511,15 @@ function taskSuspension(
           type: 'approval.requested' as const,
           interactionId: executionMode === 'resume' ? 'interaction-task-2' : 'interaction-task-1',
           toolCallId: 'call-1',
+          fullModeBypassEligible: false,
+          fullModePolicyBypassAllowed: false,
+          approvalRoute: 'user' as const,
+          queueGeneration: 0,
+          queueSequence,
+          parentToolCallId: 'call-1',
+          childSubagentId: 'task-subagent-1',
+          runtimeToolCallId: 'runtime-task-child-call-1',
+          bindingDigest: 'task-approval-binding-1',
           approval,
           createdAt: NEXT,
         }
@@ -516,6 +528,15 @@ function taskSuspension(
           reviewId: executionMode === 'resume' ? 'review-task-2' : 'review-task-1',
           toolCallId: 'call-1',
           toolName: 'write_file',
+          fullModeBypassEligible: false,
+          fullModePolicyBypassAllowed: false,
+          approvalRoute: 'auto' as const,
+          queueGeneration: 0,
+          queueSequence,
+          parentToolCallId: 'call-1',
+          childSubagentId: 'task-subagent-1',
+          runtimeToolCallId: 'runtime-task-child-call-1',
+          bindingDigest: 'task-approval-binding-1',
           reason: 'The task child write requires auto review.',
           approval,
           requestFingerprint: 'task-request-fingerprint-1',
@@ -1795,7 +1816,7 @@ describe('App State Tool Pipeline persistence', () => {
     }
   });
 
-  test('defers a sibling task approval in the same suspension batch when the interaction slot is occupied', async () => {
+  test('keeps a sibling task approval in the durable queue when the focus is occupied', async () => {
     const seeded = createSession();
     seeded.processEvent({
       type: 'tool.queued',
@@ -1809,15 +1830,23 @@ describe('App State Tool Pipeline persistence', () => {
       throw new Error('invalid occupied interaction fixture');
     }
     seeded.processEvent({
-      ...occupiedApproval,
+      type: 'approval.requested',
       interactionId: 'occupied-interaction',
       toolCallId: 'occupied-call',
+      fullModeBypassEligible: occupiedApproval.fullModeBypassEligible,
+      fullModePolicyBypassAllowed: occupiedApproval.fullModePolicyBypassAllowed,
+      approvalRoute: 'user',
+      queueGeneration: occupiedApproval.queueGeneration,
+      queueSequence: occupiedApproval.queueSequence,
+      parentToolCallId: occupiedApproval.parentToolCallId,
+      childSubagentId: occupiedApproval.childSubagentId,
+      runtimeToolCallId: occupiedApproval.runtimeToolCallId,
       approval: { ...occupiedApproval.approval, callId: 'occupied-call', tool: 'shell_execute' },
     });
     const beforeInteraction = seeded.getState().interactions;
     const harness = taskPersistenceHarness({ state: seeded.getState() });
     const acknowledgement = await harness.persistence.recordAttempt(taskPrepared(1));
-    const suspension = taskSuspension('start', 'approval');
+    const suspension = taskSuspension('start', 'approval', 1);
 
     await harness.persistence.commitSuspension({
       acknowledgement,
@@ -1828,15 +1857,19 @@ describe('App State Tool Pipeline persistence', () => {
     expect(harness.calls.receiptEvents[0]?.map((event) => event.type)).toEqual([
       'capability.execution_result_recorded',
       'subagent.suspended',
-      'subagent.approval_deferred',
+      'approval.requested',
     ]);
-    expect(harness.calls.receiptEvents[0]?.[2]).toEqual({
-      type: 'subagent.approval_deferred',
+    expect(harness.calls.receiptEvents[0]?.[2]).toMatchObject({
+      type: 'approval.requested',
+      interactionId: 'interaction-task-1',
       toolCallId: 'call-1',
     });
     expect(harness.session.getState().interactions).toEqual(beforeInteraction);
     expect(harness.session.getState().suspendedSubagents['call-1']).toEqual(suspension.subagent);
-    expect(harness.session.getState().tools.calls['call-1']?.status).toBe('queued');
+    expect(harness.session.getState().pendingApprovals.get('interaction-task-1')?.status).toBe(
+      'awaiting_user',
+    );
+    expect(harness.session.getState().tools.calls['call-1']?.status).toBe('awaiting_approval');
   });
 
   test('projects nested Builtin recovery journal after result recording and before task suspension', async () => {
@@ -1964,6 +1997,8 @@ describe('App State Tool Pipeline persistence', () => {
           interactionId: 'interaction-task-1',
           toolCallId: 'call-1',
           grant: 'approve_once',
+          receiptId: 'receipt-interaction-task-1',
+          generation: 0,
         });
       } else {
         harness.session.processEvent({
@@ -1978,13 +2013,13 @@ describe('App State Tool Pipeline persistence', () => {
           },
         });
       }
-      expect(harness.session.getState().tools.calls['call-1']?.status).toBe('approved');
+      expect(harness.session.getState().tools.calls['call-1']?.status).toBe('authorized_queued');
       harness.replaceLease();
 
       const resumeAcknowledgement = await harness.persistence.recordAttempt(
         taskPrepared(2, 'runtime_private'),
       );
-      const resumeSuspension = taskSuspension('resume', eventKind);
+      const resumeSuspension = taskSuspension('resume', eventKind, 1);
       await harness.persistence.commitSuspension({
         acknowledgement: resumeAcknowledgement,
         suspension: resumeSuspension,
@@ -2026,12 +2061,14 @@ describe('App State Tool Pipeline persistence', () => {
       interactionId: 'interaction-task-1',
       toolCallId: 'call-1',
       grant: 'approve_once',
+      receiptId: 'receipt-interaction-task-1',
+      generation: 0,
     });
     harness.replaceLease();
     const resumeAcknowledgement = await harness.persistence.recordAttempt(
       taskPrepared(2, 'runtime_private'),
     );
-    const validResume = taskSuspension('resume', 'approval');
+    const validResume = taskSuspension('resume', 'approval', 1);
     const malformed = [
       {
         ...validResume,

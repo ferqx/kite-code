@@ -22,15 +22,41 @@ export function decodeCurrentAgentStateJson(serialized: string): AgentState {
   if (!isCurrentAgentStateSnapshot(value)) {
     throw new Error('Runtime snapshot is not State/current-epoch data.');
   }
-  assertAgentStateInvariants(value);
-  return value;
+  const hydrated = hydrateApprovalMaps(value);
+  assertAgentStateInvariants(hydrated);
+  return hydrated;
 }
 
 export function encodeCurrentAgentStateJson(state: AgentState): string {
   assertAgentStateInvariants(state);
-  const encoded = JSON.stringify(state);
+  const encoded = JSON.stringify(encodeApprovalMaps(state));
   if (encoded === undefined) throw new Error('Runtime snapshot could not be encoded.');
   return encoded;
+}
+
+function mapEntries<T>(value: unknown): readonly [string, T][] {
+  if (value instanceof Map) return [...value.entries()] as readonly [string, T][];
+  if (isRecord(value)) return Object.entries(value) as readonly [string, T][];
+  return [];
+}
+
+function encodeApprovalMaps(state: AgentState): Record<string, unknown> {
+  return {
+    ...state,
+    pendingApprovals: Object.fromEntries(state.pendingApprovals.entries()),
+    sessionCommandGrants: Object.fromEntries(state.sessionCommandGrants.entries()),
+    approvalReceipts: Object.fromEntries(state.approvalReceipts.entries()),
+  };
+}
+
+function hydrateApprovalMaps(value: AgentState): AgentState {
+  const source = value as unknown as Record<string, unknown>;
+  return {
+    ...value,
+    pendingApprovals: new Map(mapEntries(source.pendingApprovals)),
+    sessionCommandGrants: new Map(mapEntries(source.sessionCommandGrants)),
+    approvalReceipts: new Map(mapEntries(source.approvalReceipts)),
+  } as AgentState;
 }
 
 function cloneState(state: AgentState): AgentState {
@@ -51,11 +77,6 @@ export function rebindForkAgentState(
   const session = forkState.session as Record<string, unknown>;
   session.threadId = targetThreadId;
 
-  const authorization = forkState.authorization as Record<string, unknown>;
-  authorization.mode = 'default';
-  authorization.commandGrants = {};
-  delete authorization.modeSource;
-  delete authorization.modeGrantedAt;
   if (forkState.mode === 'full') forkState.mode = 'accept_edits';
 
   const capabilities = forkState.capabilities as Record<string, unknown>;
@@ -83,6 +104,13 @@ export function rebindForkAgentState(
     active: [],
   };
   forkState.suspendedSubagents = {};
+  forkState.pendingApprovals = new Map();
+  forkState.activeApprovalId = null;
+  forkState.nextQueueSequence = 0;
+  forkState.approvalGeneration = 0;
+  forkState.sessionCommandGrants = new Map();
+  forkState.approvalReceipts = new Map();
+  forkState.interactionModeRevision = 0;
   forkState.toolRecovery = createToolRecoveryJournal(targetRecoveryIdentityKey);
   const rebound = forkState as unknown as AgentState;
   assertAgentStateInvariants(rebound);

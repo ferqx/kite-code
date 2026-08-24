@@ -15,7 +15,7 @@ tests/execution/sandbox-execution-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、ADR-0097、ADR-0131、
+相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、ADR-0097、ADR-0131、ADR-0137、
 `execution-platform-support.md`。
 
 ## Schema ownership
@@ -95,7 +95,7 @@ digest，使旧 release evidence 失效。
 ## Network projection and durable admission
 
 存在 sealed `ExecutionBoundary` 时，Runner 总是派生不可变 `NetworkBoundaryPolicy`。
-`networkBoundary=false` 只会把 policy 收紧为 `off`，不会回到开发期 `allow_all`。开启后，当前
+`networkBoundary=false` 只会把 policy 收紧为 `off`，不会回到开发期 `networkMode=allow_all`。开启后，当前
 唯一具备透明逐调用执行层的网络工具是进程内 `web_fetch`：每次 robots、正文和 redirect hop
 都重新校验精确 allowlisted DNS host，解析全部实际地址并拒绝 IP literal、loopback、private、
 link-local、metadata 与 reserved range；transport 使用已批准地址的 pinned lookup，且不消费
@@ -135,7 +135,8 @@ invocation 还会用不递归的 `rmdir` 回收空的共享 runtime 容器；并
 安全跳过。并发调用不能共享 invocation 目录，writable temp 也不进入 executable-map
 allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；`read_only` 不允许 Workspace 写入。系统与当前 Bun/Node runtime 依赖只有
 显式只读 root；默认 scope 之外的 Workspace 外 read/write/create/unlink 与指向外部的 symlink 继续拒绝。
-若 Policy 对 exact invocation 批准 `allow_all`，则可访问 Workspace 外敏感 identity，native profile 不再
+若 Policy 对 exact invocation 依据完整 effects/scope facts 密封
+`filesystem=full_access` scope，则可访问 Workspace 外敏感 identity，native profile 不再
 按名称二次拒绝；网络、进程、资源和真实宿主 ACL/TCC 边界保持不变。
 按 ADR-0131/ADR-0135，canonical Workspace 是完整授权身份：Policy、Seatbelt、bubblewrap 与 Windows runner 不得因
 `.git`、Agent/MCP 配置、credential、shell profile、隐藏名称或大小写别名对内部成员追加 deny；
@@ -144,9 +145,10 @@ Shell child 继承同一整 Workspace scope。`checkDangerousPaths()` 接收 can
 不再生成永久 deny；关键 destructive
 command 仍由独立规则硬拒绝。
 Building 阶段内，Policy 对可证明只作用于该 Workspace 的结构化文件 mutation 直接授权；native profile 仍执行
-相同 workspace scope。raw Shell（包括 Git）不从命令 grammar 或 Workspace target 获得授权：Accept Edits 请求
-exact approval，Auto 三态审查，Full 直接授权，并在获批后按 effects 为该 invocation 密封 filesystem scope。
-Planning 拒绝全部 Shell；该规则不改变结构化只读 capability 的 phase 资格。
+相同 workspace scope。raw Shell（包括 Git）在 Workspace baseline 内 direct；已知 external/sensitive scope 才按
+Accept Edits exact approval、Auto 三态审查或 Full direct 路由，并在获批后按 effects 为该 invocation 密封 filesystem scope。
+Planning 非 Full 使用 Workspace read-only baseline direct，已知扩 scope 进入同一 approval route；Planning + Full
+仍直接执行 Full scope 并保持 Plan lifecycle。该规则不改变结构化只读 capability 的 phase 资格，hard deny 仍不可覆盖。
 Seatbelt 的 `#"..."` regex literal 直接消费正则反斜杠；profile generator 必须只转义该 literal
 的引号 delimiter，保留 `\.` 等单反斜杠 regex token，不能复用普通 Seatbelt string literal 的
 反斜杠转义。生成器测试同时要求单反斜杠模式存在、双反斜杠模式不存在。
@@ -326,11 +328,11 @@ receipt 已确认，App availability composition（包括唯一 prepared Shell p
 prepare 返回 unavailable；Windows restricted-token 保留 protocol V6 preparation/runtime codec，但在
 handle-relative/no-follow runtime cleanup 未完成前同样 unavailable。Linux bubblewrap 是唯一继续
 收集 native PID namespace/cgroup/descendant-exit 证据的 candidate，仍未进入 production support set。
-`full_access` 会暴露 host-only control root，因此也 fail closed。
+请求 `filesystemScope=full_access` 会暴露 host-only control root，因此也 fail closed。
 
 用户命令在获准后至多执行一次。native command 可能已经启动、non-zero exit、timeout、cancellation、
 cleanup unknown/failure 或 runner failure 时都不得以非沙箱方式重试。sealed surface 没有 Shell、请求
-`full_access`、network allowlist 无法兑现或独立 Policy 判为高危时，App 保持 `denied`。Host fallback 是
+`filesystemScope=full_access`、network allowlist 无法兑现或独立 Policy 判为高危时，App 保持 `denied`。Host fallback 是
 unisolated availability，不是 native qualification；qualification/probe 不能在后台把已拒绝 executor
 提升为可运行权威。
 

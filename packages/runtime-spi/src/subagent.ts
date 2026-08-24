@@ -57,6 +57,23 @@ export interface PersistedSubagentStep {
   totalLines?: number;
 }
 
+/**
+ * Durable identity facts for the approval interaction that suspended a child.
+ *
+ * These facts are intentionally separate from the transient UI interaction.
+ * A resumed continuation must retain the original route and parent/child
+ * identity even when a sibling has since claimed the live approval surface.
+ */
+export interface SubagentApprovalFacts {
+  readonly route: 'auto_review' | 'user';
+  readonly generation: number;
+  readonly sequence: number;
+  readonly bindingDigest: string;
+  readonly parentToolCallId: string;
+  readonly childToolCallId: string;
+  readonly runtimeToolCallId?: string;
+}
+
 export interface PersistedExecutionJournalEntry {
   toolCallId: string;
   toolName: string;
@@ -87,6 +104,8 @@ export interface SuspendedSubagentSnapshot {
   allowedTools?: string[];
   /** Runtime-issued bindings that authorize the retained dynamic MCP surface. */
   mcpBindingIds?: string[];
+  /** Original approval route and bounded identity retained across suspension/resume. */
+  approvalFacts?: Readonly<SubagentApprovalFacts>;
   blockedTool: {
     reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
     toolCallId: string;

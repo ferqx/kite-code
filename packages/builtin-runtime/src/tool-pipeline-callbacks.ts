@@ -513,6 +513,28 @@ function createBuiltinGovernanceProjection(
     nestedCapabilityRevision: nested?.descriptor.revision ?? null,
     nestedCatalogRevision,
     commandDigest: commandDigestForBuiltin(target.executionMechanism, validated.request.arguments),
+    canonicalCwd: resolved.availabilityContext.workspace,
+    shellOrExecutorIdentity: `${target.providerId}:${target.capabilityId}:${target.executorRevision ?? ''}`,
+    executionEnvironmentDigest: digestCapabilityBindingValue({
+      workspace: resolved.availabilityContext.workspace,
+      workspaceTrust: resolved.availabilityContext.workspaceTrust ?? null,
+      phase: resolved.availabilityContext.phase ?? null,
+      interactionMode: resolved.availabilityContext.interactionMode ?? null,
+      featureFlags: resolved.availabilityContext.featureFlags ?? null,
+    }),
+    effectiveSandboxScopeDigest:
+      policyCompilation.sandboxScope?.digest ??
+      digestCapabilityBindingValue({
+        kind: 'baseline',
+        filesystem:
+          resolved.availabilityContext.phase === 'planning' ? 'read_only' : 'workspace_write',
+        network: 'disabled',
+      }),
+    policyParserExecutorRevision: digestCapabilityBindingValue({
+      parserRevision: parserAuthority.parser.parserRevision,
+      policyParserRevision: policyCompilation.parserRevision,
+      executorRevision: target.executorRevision,
+    }),
     isDynamicMcp: false as const,
     visibility: 'model' as const,
     modelVisible: true as const,
@@ -1341,6 +1363,7 @@ function freezePolicyCompilation(
   return Object.freeze({
     ...value,
     ...(value.effects ? { effects: Object.freeze({ ...value.effects }) } : {}),
+    ...(value.sandboxScope ? { sandboxScope: Object.freeze({ ...value.sandboxScope }) } : {}),
     ...(value.recovery ? { recovery: Object.freeze({ ...value.recovery }) } : {}),
     effectiveEffects: freezeEffects(value.effectiveEffects),
     expectedEffects: Object.freeze([...value.expectedEffects]),

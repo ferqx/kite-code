@@ -1,6 +1,6 @@
 {
-  "name": "approval-full-access",
-  "description": "An approved request persists the authorization transition.",
+  "name": "approval-approve-once",
+  "description": "An approve_once request persists one durable authorized queue record.",
   "initialEvents": [
     {
       "type": "tool.queued",
@@ -16,6 +16,12 @@
           "type": "approval.requested",
           "interactionId": "approval-1",
           "toolCallId": "call-1",
+          "approvalRoute": "user",
+          "fullModeBypassEligible": false,
+          "fullModePolicyBypassAllowed": false,
+          "queueGeneration": 0,
+          "queueSequence": 0,
+          "createdAt": "2026-08-02T00:00:00.000Z",
           "approval": {
             "scope": "once",
             "cwd": "/tmp/golden",
@@ -27,19 +33,18 @@
             "summary": "Run tests",
             "reason": "execution",
             "expectedEffects": [],
-            "grantOptions": ["full_access"],
-            "recommendedGrant": "full_access"
+            "grantOptions": ["approve_once", "same_command"],
+            "recommendedGrant": "approve_once"
           }
         }
       ]
     }
   ],
-  "userActions": [{ "type": "approve", "grant": "full_access" }],
+  "userActions": [{ "type": "approve", "grant": "approve_once" }],
   "expectedEffects": ["run_tools", "request_tool_approval"],
-  "expectedEvents": ["approval.requested", "approval.granted", "authorization.changed"],
+  "expectedEvents": ["approval.requested", "approval.granted"],
   "expectedFinalState": {
     "interactions.kind": "idle",
-    "authorization.mode": "full_access",
-    "tools.calls.call-1.status": "approved"
+    "tools.calls.call-1.status": "authorized_queued"
   }
 }

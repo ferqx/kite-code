@@ -1,5 +1,5 @@
 /**
- * Pure State 25 tool-governance contract.
+ * Pure State 27 tool-governance contract.
  *
  * Host/Builtin supplies bounded, immutable classification facts. Kernel owns
  * authorization, approval identity, mode selection, and admission. This
@@ -7,16 +7,12 @@
  * clock authority.
  */
 
-import { assertAuthorizationElevation } from './authorization';
-
 export const TOOL_GOVERNANCE_FACTS_SCHEMA_ = 'kite.tool-governance-facts.v1' as const;
 
 const MAX_IDENTITY_LENGTH = 256;
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/u;
 
 export type ToolGovernanceInteractionMode = 'auto' | 'accept_edits' | 'full';
-export type ToolGovernanceAuthorizationMode = 'default' | 'full_access';
-export type ToolGovernanceAuthorizationSource = 'user' | 'config' | 'test' | 'system';
 export type ToolGovernancePhase = 'planning' | 'building';
 export type ToolGovernanceApprovalStatus = 'queued' | 'approved';
 export type ToolGovernanceExecutionMechanism = 'user_input' | 'shell' | 'other';
@@ -30,7 +26,7 @@ export type ToolGovernanceRisk =
   | 'vcs_mutation'
   | 'mcp'
   | 'unknown';
-export type ToolGovernanceGrant = 'none' | 'approve_once' | 'same_command' | 'full_access';
+export type ToolGovernanceGrant = 'none' | 'approve_once' | 'same_command';
 export type ToolGovernanceMinimumApproval = 'none' | 'auto_review' | 'user';
 
 export interface ToolGovernanceEffects {
@@ -45,6 +41,7 @@ export interface ToolGovernanceEffects {
 export interface ToolGovernanceInvocationFact {
   readonly workspace: string;
   readonly threadId: string;
+  readonly canonicalWorkspaceIdentity?: string;
   readonly turnId: string;
   readonly modelMessageId: string;
   readonly toolCallId: string;
@@ -65,6 +62,12 @@ export interface ToolGovernanceInvocationFact {
   readonly nestedCapabilityRevision: string | null;
   readonly nestedCatalogRevision: string | null;
   readonly commandDigest: string | null;
+  /** Required for a live same_command match; optional only for legacy facts. */
+  readonly cwd?: string;
+  readonly executor?: string;
+  readonly environmentDigest?: string;
+  readonly scopeDigest?: string;
+  readonly policyParserExecutorRevision?: string;
 }
 
 /** Immutable operation policy facts compiled by Builtin. */
@@ -107,8 +110,15 @@ export interface ToolGovernanceApprovalFact {
 export interface ToolGovernanceSameCommandGrantFact {
   readonly workspace: string;
   readonly threadId: string;
+  readonly canonicalWorkspaceIdentity: string;
+  readonly cwd: string;
+  readonly executor: string;
+  readonly environmentDigest: string;
+  readonly scopeDigest: string;
+  readonly effectsDigest: string;
+  readonly parserRevision: string;
+  readonly executorRevision: string | null;
   readonly commandDigest: string;
-  readonly source: ToolGovernanceAuthorizationSource;
   readonly grantedAt: number;
   readonly expiresAt?: number;
 }
@@ -135,14 +145,10 @@ export interface ToolGovernanceGateFacts {
 export interface ToolGovernanceContextFacts {
   readonly phase: ToolGovernancePhase;
   readonly interactionMode: ToolGovernanceInteractionMode;
-  readonly authorizationMode: ToolGovernanceAuthorizationMode;
   readonly sandboxAvailable: boolean;
   readonly circuitBreakerTripped: boolean;
   readonly executionMechanism: ToolGovernanceExecutionMechanism;
   readonly gates: Readonly<ToolGovernanceGateFacts>;
-  readonly authorizationSource?: ToolGovernanceAuthorizationSource;
-  readonly autoReview?: boolean;
-  readonly loopMode?: boolean;
   /** Supplied observation time used only for same-command expiry checks. */
   readonly observedAt?: number;
 }
@@ -179,7 +185,7 @@ export type ToolGovernanceFactsInvalidReason =
   | 'identity';
 
 /**
- * Canonical digest for the exact State 25 same-command grant subject.
+ * Canonical digest for the exact State 27 same-command grant subject.
  *
  * Builtin owns Shell parsing and supplies the invocation digest. Host uses
  * this pure Kernel helper only to prove that the persisted, trimmed grant
@@ -284,6 +290,28 @@ export function authorizeToolGovernance(value: unknown): ToolGovernanceAuthoriza
   return authorizeValidToolGovernanceFacts(value);
 }
 
+/**
+ * Re-evaluate a sealed governance envelope under Full interaction mode.
+ * Hard denies, stale facts, execution gates, and force-manual/auto policy are
+ * preserved because the canonical authorization decision is run again.
+ */
+export function canAuthorizeToolGovernanceInFullMode(value: unknown): boolean {
+  if (!isValidToolGovernanceFacts(value)) return false;
+  const facts: ToolGovernanceFacts = {
+    ...value,
+    context: {
+      ...value.context,
+      interactionMode: 'full',
+    },
+  };
+  const decision = decideToolGovernance(facts);
+  return (
+    decision.kind === 'allow' &&
+    decision.authorizationKind === 'policy_allow' &&
+    decision.grantUsed === 'none'
+  );
+}
+
 export function admitToolGovernance(
   authorization: ToolGovernanceAuthorizationDecision,
   admission: unknown,
@@ -369,22 +397,6 @@ function authorizeValidToolGovernanceFacts(
     );
   }
 
-  try {
-    assertAuthorizationElevation({
-      mode: context.authorizationMode,
-      source: context.authorizationSource,
-      sandboxAvailable: context.sandboxAvailable,
-      autoReview: context.autoReview,
-      loopMode: context.loopMode,
-    });
-  } catch (error) {
-    return reject(
-      'mandatory_policy_unavailable',
-      error instanceof Error ? error.message : String(error),
-      'authorization_elevation_denied',
-    );
-  }
-
   if (context.executionMechanism === 'user_input') {
     return freezeAuthorizationDecision({ kind: 'request_user_input' });
   }
@@ -429,6 +441,24 @@ function authorizeValidToolGovernanceFacts(
     activationRequiresManual || nestedSkillRequiresManual || dynamicMcpRequiresManual;
   const forceAutoReview = dynamicMcpRequiresAutoReview || nestedSkillRequiresAutoReview;
 
+  // Full interaction mode may bypass an ordinary approval only when the
+  // immutable Builtin policy explicitly grants that authority. Compiler
+  // deny, sandbox/gate checks, exact approval identity, and force-manual /
+  // force-auto-review constraints have all run above; mode alone is never a
+  // substitute for those checks.
+  if (
+    context.interactionMode === 'full' &&
+    policy.fullAccessMayBypassApproval &&
+    !forceManualApproval &&
+    !forceAutoReview
+  ) {
+    return freezeAuthorizationDecision({
+      kind: 'authorized',
+      authorizationKind: 'policy_allow',
+      grantUsed: 'none',
+    });
+  }
+
   if (!forceManualApproval && !forceAutoReview && sameCommandGrantMatches(facts)) {
     return freezeAuthorizationDecision({
       kind: 'authorized',
@@ -437,21 +467,7 @@ function authorizeValidToolGovernanceFacts(
     });
   }
 
-  const fullAccessBypass =
-    !forceManualApproval &&
-    !forceAutoReview &&
-    context.authorizationMode === 'full_access' &&
-    policy.fullAccessMayBypassApproval;
-  if (fullAccessBypass) {
-    return freezeAuthorizationDecision({
-      kind: 'authorized',
-      authorizationKind: 'approved_call',
-      grantUsed: 'full_access',
-    });
-  }
-
   const requiresEffectReview =
-    !fullAccessBypass &&
     context.interactionMode !== 'full' &&
     !facts.dynamicMcp?.readOnly &&
     hasAuthorizationReviewEffect(policy.effects);
@@ -639,6 +655,15 @@ function sameCommandGrantMatches(facts: ToolGovernanceFacts): boolean {
   if (
     grant.workspace !== invocation.workspace ||
     grant.threadId !== invocation.threadId ||
+    grant.canonicalWorkspaceIdentity !== invocation.canonicalWorkspaceIdentity ||
+    grant.cwd !== invocation.cwd ||
+    grant.executor !== invocation.executor ||
+    grant.environmentDigest !== invocation.environmentDigest ||
+    grant.scopeDigest !== invocation.scopeDigest ||
+    grant.effectsDigest !== invocation.effectiveEffectsDigest ||
+    grant.parserRevision !==
+      (invocation.policyParserExecutorRevision ?? invocation.parserRevision) ||
+    grant.executorRevision !== invocation.executorRevision ||
     grant.commandDigest !== invocation.commandDigest
   ) {
     return false;
@@ -749,30 +774,41 @@ function validEffects(value: unknown): value is ToolGovernanceEffects {
 function validInvocation(value: unknown): value is ToolGovernanceInvocationFact {
   if (
     !plainRecord(value) ||
-    !exactKeys(value, [
-      'workspace',
-      'threadId',
-      'turnId',
-      'modelMessageId',
-      'toolCallId',
-      'exposedToolName',
-      'operationId',
-      'capabilityId',
-      'capabilityRevision',
-      'executorRevision',
-      'descriptorRevision',
-      'parserRevision',
-      'schemaDigest',
-      'argumentsDigest',
-      'effectiveEffectsDigest',
-      'bindingId',
-      'builtinCatalogRevision',
-      'dynamicCatalogRevision',
-      'nestedCapabilityId',
-      'nestedCapabilityRevision',
-      'nestedCatalogRevision',
-      'commandDigest',
-    ])
+    !exactKeys(
+      value,
+      [
+        'workspace',
+        'threadId',
+        'turnId',
+        'modelMessageId',
+        'toolCallId',
+        'exposedToolName',
+        'operationId',
+        'capabilityId',
+        'capabilityRevision',
+        'executorRevision',
+        'descriptorRevision',
+        'parserRevision',
+        'schemaDigest',
+        'argumentsDigest',
+        'effectiveEffectsDigest',
+        'bindingId',
+        'builtinCatalogRevision',
+        'dynamicCatalogRevision',
+        'nestedCapabilityId',
+        'nestedCapabilityRevision',
+        'nestedCatalogRevision',
+        'commandDigest',
+      ],
+      [
+        'canonicalWorkspaceIdentity',
+        'cwd',
+        'executor',
+        'environmentDigest',
+        'scopeDigest',
+        'policyParserExecutorRevision',
+      ],
+    )
   ) {
     return false;
   }
@@ -802,7 +838,15 @@ function validInvocation(value: unknown): value is ToolGovernanceInvocationFact 
     (value.nestedCapabilityId === null || boundedIdentity(value.nestedCapabilityId)) &&
     nullableDigest(value.nestedCapabilityRevision) &&
     nullableDigest(value.nestedCatalogRevision) &&
-    nullableDigest(value.commandDigest)
+    nullableDigest(value.commandDigest) &&
+    (value.cwd === undefined || boundedIdentity(value.cwd)) &&
+    (value.canonicalWorkspaceIdentity === undefined ||
+      boundedIdentity(value.canonicalWorkspaceIdentity)) &&
+    (value.executor === undefined || boundedIdentity(value.executor)) &&
+    (value.environmentDigest === undefined || boundedIdentity(value.environmentDigest)) &&
+    (value.scopeDigest === undefined || boundedIdentity(value.scopeDigest)) &&
+    (value.policyParserExecutorRevision === undefined ||
+      digest64(value.policyParserExecutorRevision))
   );
 }
 
@@ -879,7 +923,7 @@ function validApproval(value: unknown): value is ToolGovernanceApprovalFact {
   }
   if (
     !['queued', 'approved'].includes(String(value.status)) ||
-    !['none', 'approve_once', 'same_command', 'full_access'].includes(String(value.grant)) ||
+    !['none', 'approve_once', 'same_command'].includes(String(value.grant)) ||
     !(value.approvedToolCallId === null || boundedIdentity(value.approvedToolCallId)) ||
     !nullableDigest(value.approvalBindingDigest)
   ) {
@@ -904,7 +948,20 @@ function validSameCommandGrant(value: unknown): value is ToolGovernanceSameComma
     !plainRecord(value) ||
     !exactKeys(
       value,
-      ['workspace', 'threadId', 'commandDigest', 'source', 'grantedAt'],
+      [
+        'workspace',
+        'threadId',
+        'canonicalWorkspaceIdentity',
+        'cwd',
+        'executor',
+        'environmentDigest',
+        'scopeDigest',
+        'effectsDigest',
+        'parserRevision',
+        'executorRevision',
+        'commandDigest',
+        'grantedAt',
+      ],
       ['expiresAt'],
     )
   ) {
@@ -913,8 +970,15 @@ function validSameCommandGrant(value: unknown): value is ToolGovernanceSameComma
   return (
     boundedIdentity(value.workspace) &&
     boundedIdentity(value.threadId) &&
+    boundedIdentity(value.canonicalWorkspaceIdentity) &&
+    boundedIdentity(value.cwd) &&
+    boundedIdentity(value.executor) &&
+    boundedIdentity(value.environmentDigest) &&
+    boundedIdentity(value.scopeDigest) &&
+    digest64(value.effectsDigest) &&
+    digest64(value.parserRevision) &&
+    (value.executorRevision === null || digest64(value.executorRevision)) &&
     digest64(value.commandDigest) &&
-    ['user', 'config', 'test', 'system'].includes(String(value.source)) &&
     validTimestamp(value.grantedAt) &&
     (value.expiresAt === undefined ||
       (validTimestamp(value.expiresAt) && value.expiresAt > value.grantedAt))
@@ -960,13 +1024,12 @@ function validContext(value: unknown): value is ToolGovernanceContextFacts {
       [
         'phase',
         'interactionMode',
-        'authorizationMode',
         'sandboxAvailable',
         'circuitBreakerTripped',
         'executionMechanism',
         'gates',
       ],
-      ['authorizationSource', 'autoReview', 'loopMode', 'observedAt'],
+      ['observedAt'],
     )
   ) {
     return false;
@@ -974,15 +1037,10 @@ function validContext(value: unknown): value is ToolGovernanceContextFacts {
   return (
     (value.phase === 'planning' || value.phase === 'building') &&
     ['auto', 'accept_edits', 'full'].includes(String(value.interactionMode)) &&
-    ['default', 'full_access'].includes(String(value.authorizationMode)) &&
     typeof value.sandboxAvailable === 'boolean' &&
     typeof value.circuitBreakerTripped === 'boolean' &&
     ['user_input', 'shell', 'other'].includes(String(value.executionMechanism)) &&
     validGates(value.gates) &&
-    (value.authorizationSource === undefined ||
-      ['user', 'config', 'test', 'system'].includes(String(value.authorizationSource))) &&
-    (value.autoReview === undefined || typeof value.autoReview === 'boolean') &&
-    (value.loopMode === undefined || typeof value.loopMode === 'boolean') &&
     (value.observedAt === undefined || validTimestamp(value.observedAt))
   );
 }

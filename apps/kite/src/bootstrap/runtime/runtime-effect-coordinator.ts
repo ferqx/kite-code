@@ -77,7 +77,7 @@ function currentSkillCatalog(
 }
 
 /**
- * App-owned effect coordinator for the State 25 runtime.
+ * App-owned effect coordinator for the State 27 runtime.
  *
  * The Core executor remains the single owner for every remaining effect. Model,
  * auto-review, verification, and compaction effects are deliberately selected
@@ -292,8 +292,13 @@ async function projectAutoReviewEffect(
   const call = state.tools.calls[effect.toolCallId];
   if (!call || state.interactions.kind !== 'awaiting_auto_review') return [];
 
+  const pending = state.pendingApprovals.get(effect.reviewId);
+  if (!pending || pending.toolCallId !== effect.toolCallId || pending.status !== 'auto_reviewing') {
+    return [];
+  }
+  const pendingGeneration = pending.generation;
   const suspended = state.suspendedSubagents[effect.toolCallId];
-  const subagentId = state.interactions.approval.subagentId;
+  const subagentId = pending.approval.subagentId;
   if (subagentId && (!suspended || suspended.subagentId !== subagentId)) {
     return [
       {
@@ -453,26 +458,27 @@ async function projectAutoReviewEffect(
         : {
             ok: false,
             approved: false,
+            ...(escalated ? { escalatedToUser: true as const } : {}),
             failureType: result.failureType ?? 'technical',
             reason: decision.reason,
             reviewerModelName: reviewerConfig.modelName ?? reviewerConfig.providerName ?? 'unknown',
             durationMs: Date.now() - startTime,
           },
     };
-    if (escalated) {
-      return [
-        completed,
-        {
-          type: 'approval.requested',
-          interactionId: crypto.randomUUID(),
-          toolCallId: effect.toolCallId,
-          approval: {
-            ...state.interactions.approval,
-            reviewFailure: decision.reason,
-          },
-        },
-      ];
+    const currentState = modelInvocationPersistence?.getState() ?? state;
+    const currentPending = currentState.pendingApprovals.get(effect.reviewId);
+    if (
+      !currentPending ||
+      currentPending.toolCallId !== effect.toolCallId ||
+      currentPending.status !== 'auto_reviewing' ||
+      currentPending.generation !== pendingGeneration
+    ) {
+      return [];
     }
+    // The durable queue keeps the same review/interaction identity while an
+    // auto review escalates to the user. The Kernel reducer advances that
+    // record to awaiting_user from this completion fact; emitting a second
+    // approval.requested would duplicate the invocation and lose FIFO identity.
     return [completed];
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -487,6 +493,16 @@ async function projectAutoReviewEffect(
     if (decision.kind !== 'request_user_approval') {
       throw new Error('Kernel accepted a failed auto-review result.');
     }
+    const currentState = modelInvocationPersistence?.getState() ?? state;
+    const currentPending = currentState.pendingApprovals.get(effect.reviewId);
+    if (
+      !currentPending ||
+      currentPending.toolCallId !== effect.toolCallId ||
+      currentPending.status !== 'auto_reviewing' ||
+      currentPending.generation !== pendingGeneration
+    ) {
+      return [];
+    }
     return [
       {
         type: 'auto_review.completed',
@@ -495,19 +511,11 @@ async function projectAutoReviewEffect(
         result: {
           ok: false,
           approved: false,
+          escalatedToUser: true,
           failureType: 'technical',
           reason: decision.reason,
           reviewerModelName: dependencies.config.modelName ?? 'unknown',
           durationMs: Date.now() - startTime,
-        },
-      },
-      {
-        type: 'approval.requested',
-        interactionId: crypto.randomUUID(),
-        toolCallId: effect.toolCallId,
-        approval: {
-          ...state.interactions.approval,
-          reviewFailure: decision.reason,
         },
       },
     ];

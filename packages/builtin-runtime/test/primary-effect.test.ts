@@ -90,7 +90,6 @@ function stateWithHistory(turns = 3): BuiltinPrimaryModelState {
     },
     interactions: { kind: 'idle' },
     tools: { calls: {} },
-    authorization: { mode: 'default' },
     mode: 'accept_edits',
   };
 }

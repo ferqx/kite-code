@@ -15,6 +15,7 @@ import type {
 import type { ToolRecoveryAttemptMode, ToolRecoveryJournal } from './recovery';
 import type {
   AgentPlan as StateAgentPlan,
+  AgentApprovalCommandIdentity as StateApprovalCommandIdentity,
   AgentCapabilityArtifactRef as StateCapabilityArtifactRef,
   AgentCapabilityBindingState as StateCapabilityBinding,
   AgentCapabilityDisclosureState as StateCapabilityDisclosure,
@@ -50,12 +51,37 @@ import type {
  */
 export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'approval.command_replaced': ['interactionId', 'command'],
-  'approval.granted': ['interactionId', 'toolCallId', 'grant'],
-  'approval.rejected': ['interactionId', 'toolCallId', 'reason'],
-  'approval.requested': ['interactionId', 'toolCallId', 'approval'],
-  'authorization.changed': ['mode'],
+  'approval.granted': ['interactionId', 'toolCallId', 'grant', 'receiptId', 'generation'],
+  'approval.batch_released': [
+    'interactionId',
+    'toolCallId',
+    'grant',
+    'grantKey',
+    'sessionRevision',
+    'generation',
+    'commandIdentity',
+    'matches',
+    'createdAt',
+  ],
+  'approval.session_grants_cleared': ['sessionId', 'sessionRevision', 'generation', 'clearedAt'],
+  'approval.rejected': ['interactionId', 'toolCallId', 'generation', 'reason'],
+  'approval.requested': [
+    'interactionId',
+    'toolCallId',
+    'approval',
+    'fullModeBypassEligible',
+    'fullModePolicyBypassAllowed',
+  ],
   'auto_review.completed': ['reviewId', 'toolCallId', 'result'],
-  'auto_review.requested': ['reviewId', 'toolCallId', 'toolName', 'reason', 'approval'],
+  'auto_review.requested': [
+    'reviewId',
+    'toolCallId',
+    'toolName',
+    'reason',
+    'approval',
+    'fullModeBypassEligible',
+    'fullModePolicyBypassAllowed',
+  ],
   'capability.bindings_issued': ['catalogRevision', 'bindings'],
   'capability.execution_failed': ['invocationId', 'error', 'finishedAt'],
   'capability.execution_started': ['invocationId', 'startedAt'],
@@ -479,7 +505,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
 /** The State union has 134 current events plus one read-only compatibility event. */
-export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 135 as const;
+export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 136 as const;
 
 /**
  * State diagnostics/projection notifications intentionally left out of the
@@ -525,7 +551,7 @@ export const STATE_DEFAULT_EVENT_TYPES = [
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State RuntimeEvent discriminant table must contain exactly 135 entries.');
+  throw new Error('State RuntimeEvent discriminant table must contain exactly 136 entries.');
 }
 
 /** Make the package-owned State DTOs structurally match the mutable root
@@ -577,8 +603,6 @@ type ToolEffectClass =
   | 'workspace_write'
   | 'external_side_effect'
   | 'unknown';
-type AuthorizationMode = 'default' | 'full_access';
-type AuthorizationSource = 'user' | 'config' | 'test' | 'system';
 type InteractionMode = 'accept_edits' | 'auto' | 'full';
 type UserInputResult = { answer: string; answers?: Record<string, string> };
 
@@ -1240,19 +1264,57 @@ type StateEventMap = ResourceBudgetEventMap &
       interactionId: string;
       toolCallId: string;
       approval: ToolApprovalPayload;
+      commandIdentity?: StateApprovalCommandIdentity;
+      parentToolCallId?: string;
+      childSubagentId?: string;
+      runtimeToolCallId?: string;
+      approvalRoute?: 'user' | 'auto';
+      fullModeBypassEligible: boolean;
+      fullModePolicyBypassAllowed: boolean;
+      queueGeneration?: number;
+      queueSequence?: number;
       createdAt?: string;
     };
     'approval.granted': {
       type: 'approval.granted';
       interactionId: string;
       toolCallId: string;
-      grant: 'approve_once' | 'same_command' | 'full_access';
+      grant: 'approve_once';
+      receiptId: string;
+      generation: number;
       createdAt?: string;
+    };
+    'approval.batch_released': {
+      type: 'approval.batch_released';
+      interactionId: string;
+      toolCallId: string;
+      grant: 'same_command';
+      grantKey: string;
+      sessionRevision: number;
+      generation: number;
+      commandIdentity: StateApprovalCommandIdentity;
+      matches: readonly {
+        interactionId: string;
+        toolCallId: string;
+        receiptId: string;
+        generation: number;
+        bindingDigest?: string;
+      }[];
+      cancelledReviewIds?: readonly string[];
+      createdAt: string;
+    };
+    'approval.session_grants_cleared': {
+      type: 'approval.session_grants_cleared';
+      sessionId: string;
+      sessionRevision: number;
+      generation: number;
+      clearedAt: string;
     };
     'approval.rejected': {
       type: 'approval.rejected';
       interactionId: string;
       toolCallId: string;
+      generation: number;
       reason: string;
       failure?: ClassifiedFailure;
       createdAt?: string;
@@ -1320,23 +1382,6 @@ type StateEventMap = ResourceBudgetEventMap &
       interactionId: string;
       providerId: string;
     };
-    'authorization.changed': {
-      type: 'authorization.changed';
-      mode: AuthorizationMode;
-      commandGrants?: Record<
-        string,
-        {
-          workspace: string;
-          threadId: string;
-          command: string;
-          source: AuthorizationSource;
-          grantedAt: string;
-          expiresAt?: string;
-        }
-      >;
-      modeSource?: AuthorizationSource;
-      modeGrantedAt?: string;
-    };
     'interaction_mode.changed': {
       type: 'interaction_mode.changed';
       mode: InteractionMode;
@@ -1350,6 +1395,14 @@ type StateEventMap = ResourceBudgetEventMap &
       toolName: string;
       reason: string;
       approval: ToolApprovalPayload;
+      commandIdentity?: StateApprovalCommandIdentity;
+      fullModeBypassEligible: boolean;
+      fullModePolicyBypassAllowed: boolean;
+      parentToolCallId?: string;
+      childSubagentId?: string;
+      runtimeToolCallId?: string;
+      queueGeneration?: number;
+      queueSequence?: number;
       requestFingerprint?: string;
       createdAt?: string;
     };
@@ -1371,6 +1424,7 @@ type StateEventMap = ResourceBudgetEventMap &
         | {
             ok: false;
             approved: false;
+            escalatedToUser?: true;
             failureType: 'technical' | 'invalid_response';
             reason?: string;
             reviewerModelName: string;
@@ -1687,7 +1741,7 @@ export type ContextCompactionResetEvent = StateEventMap['context.compaction_rese
 
 type EventForType<EventType extends RuntimeEventType> = StateEventMap[EventType];
 
-/** The State union has one exact object type for each of its 135 discriminants. */
+/** The State union has one exact object type for each of its 136 discriminants. */
 export type KernelEvent = {
   [EventType in RuntimeEventType]: EventForType<EventType>;
 }[RuntimeEventType];

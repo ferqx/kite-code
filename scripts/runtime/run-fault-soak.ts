@@ -103,6 +103,8 @@ const PROBES: readonly ProbeDefinition[] = [
     terminalEvidence: {
       model_retry_exhausted:
         /\(pass\).*model_rate_limit admits exactly one retry only while the bounded retry budget remains/,
+      deadline_exceeded:
+        /\(pass\).*model_timeout admits exactly one retry only while the bounded retry budget remains/,
     },
     invariantEvidence:
       /\(pass\).*cancellation wins even when the provider ignores its abort signal/,

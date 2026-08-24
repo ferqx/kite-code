@@ -38,7 +38,7 @@ const CONTEXT_HARD_BLOCK_REASONS = new Set<ContextHardBlockReason>([
   'runtime_invariant_violation',
 ]);
 
-/** Reject persisted reason values outside the frozen State 25 schema. */
+/** Reject persisted reason values outside the frozen State 27 schema. */
 export function normalizeContextCompactionReason(value: unknown): ContextCompactionReason | null {
   return value === 'manual' || value === 'auto' ? value : null;
 }
@@ -47,7 +47,7 @@ export function isContextHardBlockReason(value: unknown): value is ContextHardBl
   return CONTEXT_HARD_BLOCK_REASONS.has(value as ContextHardBlockReason);
 }
 
-/** The only Kernel constructor for a durable State 25 context correctness block. */
+/** The only Kernel constructor for a durable State 27 context correctness block. */
 export function createContextCorrectnessBlock(
   failure: ContextCorrectnessFailure,
 ): ContextHardBlock {
@@ -60,7 +60,7 @@ export function createContextCorrectnessBlock(
   return { ...failure, message: failure.message.trim() };
 }
 
-/** Normalize restored development State 25 context facts without changing their schema. */
+/** Normalize restored development State 27 context facts without changing their schema. */
 export function normalizeContextRuntimeState(
   context: ContextRuntimeState | undefined,
 ): ContextRuntimeState {

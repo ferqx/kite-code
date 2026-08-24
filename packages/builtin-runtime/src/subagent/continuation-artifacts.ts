@@ -171,6 +171,7 @@ function hasContinuationSnapshotKeys(value: Record<string, unknown>): boolean {
     'toolRecovery',
   ];
   const optional = [
+    'approvalFacts',
     'allowedTools',
     'executionJournal',
     'exhaustedFingerprints',

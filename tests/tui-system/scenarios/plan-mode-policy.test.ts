@@ -32,9 +32,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace({
-      configOverrides: { sandbox: { enabled: false } },
-    });
+    workspace = createTestWorkspace();
 
     server.setResponses([
       {
@@ -92,27 +90,11 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           content: 'I will validate the plan.',
           tool_calls: [
             {
-              id: 'call_plan_pwd_read',
+              id: 'call_plan_baseline_shell',
               name: 'shell_execute',
               args: {
-                command: 'pwd',
-                description: 'Inspect the current directory',
-              },
-            },
-            {
-              id: 'call_plan_typecheck_deferred',
-              name: 'shell_execute',
-              args: {
-                command: 'bun run typecheck',
-                description: 'Type-check the project',
-              },
-            },
-            {
-              id: 'call_plan_tests_deferred',
-              name: 'shell_execute',
-              args: {
-                command: 'bun test tests/runtime',
-                description: 'Run Runtime tests',
+                command: 'pwd && ls -la',
+                description: 'Inspect the workspace inside the planning baseline',
               },
             },
           ],
@@ -122,21 +104,13 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         expectedRequest: {
           toolResults: [
             {
-              toolCallId: 'call_plan_pwd_read',
-              contentIncludes: ['"deferred":true', '"until_phase":"building"'],
-            },
-            {
-              toolCallId: 'call_plan_typecheck_deferred',
-              contentIncludes: ['"deferred":true', '"until_phase":"building"'],
-            },
-            {
-              toolCallId: 'call_plan_tests_deferred',
-              contentIncludes: ['"deferred":true', '"until_phase":"building"'],
+              toolCallId: 'call_plan_baseline_shell',
+              contentIncludes: [workspace.workspace],
             },
           ],
         },
         message: {
-          content: 'Recorded validation commands for the execution phase.',
+          content: 'Validated commands inside the planning read-only baseline.',
           tool_calls: [
             {
               id: 'call_plan_save_shell',
@@ -145,7 +119,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
                 action: 'save',
                 title: 'Plan-safe shell validation',
                 body_markdown:
-                  'Record deferred planning validation commands without claiming completion.',
+                  'Record commands validated inside the planning read-only sandbox baseline.',
                 steps: [{ id: 'validate-shell', title: 'Validate planning shell policy' }],
               },
             },
@@ -215,7 +189,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   );
 
   step(
-    'non-read planning shell validation is deferred without execution or approval',
+    'planning Shell baseline executes directly without approval or scope expansion',
     async () => {
       const task = 'Plan the runtime validation commands';
       tui.write('\x1b[Z');
@@ -224,7 +198,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       await submitUserMessage(tui, server, task, { timeout: 15000 });
       await waitForText(
         () => tui.viewport(),
-        'Recorded validation commands for the execution phase.',
+        'Validated commands inside the planning read-only baseline.',
         15000,
       );
       await waitForText(() => tui.viewport(), '方案审核', 15_000);
@@ -237,13 +211,11 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
 
       const output = tui.screenFramesSince(conversationFrames).join('\n');
       expect(screenContains(output, 'Deferred until execution')).toBe(false);
-      expect(screenContains(output, 'bun run typecheck')).toBe(false);
-      expect(screenContains(output, 'bun test tests/runtime')).toBe(false);
+      expect(screenContains(output, 'Bash Ran: pwd && ls -la')).toBe(true);
       expect(screenContains(output, 'Rejected shell_execute during planning phase')).toBe(false);
       expect(screenContains(output, "Tool 'shell_execute' is not available in this context")).toBe(
         false,
       );
-      expect(screenContains(output, 'Bash Ran: pwd')).toBe(false);
       expect(screenContains(output, '工具授权')).toBe(false);
     },
     TIMEOUT,

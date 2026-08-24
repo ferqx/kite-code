@@ -8,12 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { sandboxPreparationIntentDigest } from '@kite/builtin-runtime/sandbox';
-import type {
-  AgentPlan,
-  ShellApprovalGrant,
-  ToolApprovalPayload,
-  UserInputPayload,
-} from '@kite/runtime-contract';
+import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@kite/runtime-contract';
 import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   SqliteRuntimeEffectLeaseConflictError,
@@ -801,21 +796,25 @@ describe('edge cases', () => {
         type: 'approval.requested',
         interactionId: 'i3',
         toolCallId: 'c6',
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
         approval: { toolName: 'shell' } as unknown as ToolApprovalPayload,
       },
       {
         type: 'approval.granted',
         interactionId: 'i3',
         toolCallId: 'c6',
-        grant: { mode: 'once' } as unknown as ShellApprovalGrant,
+        grant: 'approve_once',
+        receiptId: 'receipt-i3',
+        generation: 0,
       },
       {
         type: 'approval.rejected',
         interactionId: 'i3',
         toolCallId: 'c1',
+        generation: 0,
         reason: 'unsafe',
       },
-      { type: 'authorization.changed', mode: 'full_access' },
     ];
 
     store.appendEvents('thread-k', events);
@@ -1281,24 +1280,18 @@ describe('persistence edge cases', () => {
     });
     const fork = store.loadSnapshot<{
       session: { threadId: string };
-      authorization: {
-        mode: string;
-        modeSource?: string;
-        modeGrantedAt?: string;
-        commandGrants: Record<string, unknown>;
-      };
       mode: string;
       interactions: unknown;
       tools: unknown;
       capabilities: unknown;
       providerAdmission: unknown;
       suspendedSubagents: unknown;
+      pendingApprovals: ReadonlyMap<string, unknown>;
+      activeApprovalId: string | null;
+      sessionCommandGrants: ReadonlyMap<string, unknown>;
+      approvalReceipts: ReadonlyMap<string, unknown>;
     }>('fork')!;
     expect(fork.session.threadId).toBe('fork');
-    expect(fork.authorization.mode).toBe('default');
-    expect(fork.authorization.commandGrants).toEqual({});
-    expect(fork.authorization.modeSource).toBeUndefined();
-    expect(fork.authorization.modeGrantedAt).toBeUndefined();
     expect(fork.mode).toBe('accept_edits');
     expect(fork.interactions).toEqual({ kind: 'idle' });
     expect(fork.tools).toEqual({
@@ -1311,6 +1304,10 @@ describe('persistence edge cases', () => {
     );
     expect(fork.providerAdmission).toEqual({ pending: [], waivers: {} });
     expect(fork.suspendedSubagents).toEqual({});
+    expect(fork.pendingApprovals.size).toBe(0);
+    expect(fork.activeApprovalId).toBeNull();
+    expect(fork.sessionCommandGrants.size).toBe(0);
+    expect(fork.approvalReceipts.size).toBe(0);
     expect(store.loadEventsStrict('fork')).toHaveLength(1);
     expect(store.listNamedSnapshots('fork')[0]!.eventPosition).toBe(
       store.getLastEventPosition('fork'),
@@ -1327,6 +1324,8 @@ describe('persistence edge cases', () => {
         type: 'approval.requested',
         interactionId: 'approval-1',
         toolCallId: 'shell-1',
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
         approval,
       },
     ]);

@@ -112,7 +112,6 @@ export interface TuiBootstrapProps {
   createSessionManager?: TuiSessionManagerFactory;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   model?: import('@kite/builtin-runtime/model').SupportedChatModel;
-  /** App-owned authorization source; omitted production composition remains fail closed. */
   /** Optional App-owned Shell runtime injection used by composition and system tests. */
   shellExecutor?: AppShellExecutor;
 }
@@ -456,8 +455,8 @@ function TuiApp({
     },
     [sessionManager],
   );
-  // Pending qualification is deliberately projected as unavailable. This keeps
-  // Full disabled without synchronously probing the platform in React render.
+  // The probe describes restricted Accept/Auto execution. Full remains a
+  // separately selected interaction mode even when no sandbox backend exists.
   const [sandboxBackend, setSandboxBackend] = React.useState<SandboxBackend>('none');
   React.useEffect(() => {
     let disposed = false;
@@ -1194,7 +1193,7 @@ function TuiApp({
     prevInterruptRef.current = state.interrupt;
     const clearedByResolution = interruptClearedByResolutionRef.current;
     if (shouldCancelClearedInterrupt(prev, state.interrupt, clearedByResolution)) {
-      provider.submitAction({ type: 'cancel' });
+      provider.submitAction({ type: 'cancel', interactionId: prev!.interactionId });
     }
     if (prev && !state.interrupt) {
       interruptClearedByResolutionRef.current = false;
@@ -1236,9 +1235,9 @@ function TuiApp({
   // race where the next prompt is submitted while the old runtime still looks
   // active, so tryReservePrompt() rejects it as an ordinary concurrent prompt.
   const abortForegroundRun = React.useCallback(() => {
-    if (!stateRef.current.running) return;
-    const interrupt = stateRef.current.interrupt;
-    if (interrupt && interrupt.kind !== 'approval') return;
+    // Ctrl+C is always whole-turn cancellation.  SessionRuntime owns the
+    // durable no-op check when there is no active turn, so an input/plan/tool
+    // overlay must never narrow this into a local interaction cancellation.
     sessionManager.getRuntime(threadIdRef.current)?.abort();
   }, [sessionManager]);
 
@@ -1258,6 +1257,22 @@ function TuiApp({
     },
     [dispatch, sessionManager, translate],
   );
+
+  const clearActiveSessionCommandGrants = React.useCallback(() => {
+    const activeThreadId = threadIdRef.current;
+    const applied = sessionManager.clearSessionCommandGrants(activeThreadId);
+    if (applied === null) {
+      dispatchSessionLoad({
+        type: 'LOCAL_TEXT',
+        text: '  ⎿  Session command grants could not be cleared.',
+        isError: true,
+      });
+      return;
+    }
+    for (const event of applied) {
+      dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+    }
+  }, [dispatchSessionLoad, sessionManager]);
 
   const runTask = React.useCallback(
     async (
@@ -1434,6 +1449,8 @@ function TuiApp({
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
         onInteractionModeChange={syncInteractionMode}
+        sessionGrantCount={sessionManager.listSessionCommandGrants(threadIdRef.current).length}
+        onClearSessionGrants={clearActiveSessionCommandGrants}
         themePreset={themePreset}
         onThemeSelect={applyThemePreset}
         languagePreference={languagePreference}

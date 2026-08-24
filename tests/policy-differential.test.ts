@@ -279,6 +279,12 @@ const EXTRA_VECTORS: readonly DifferentialVector[] = [
     phase: 'planning',
   },
   {
+    label: 'shell planning workspace write',
+    toolName: 'shell_execute',
+    input: { command: 'touch plan-output.txt' },
+    phase: 'planning',
+  },
+  {
     label: 'shell planning read',
     toolName: 'shell_execute',
     input: { command: 'pwd' },
@@ -379,6 +385,9 @@ function expectedAuthorizationEligibility(vector: DifferentialVector): Readonly<
   minimumApproval: CapabilityPolicyCompilation['minimumApproval'];
   fullAccessMayBypassApproval: boolean;
   sameCommandMayBypassApproval: boolean;
+  decision?: CapabilityPolicyCompilation['decision'];
+  requiresApproval?: boolean;
+  requiresSandbox?: boolean;
 }> {
   if (vector.toolName === 'activate_skill' || vector.toolName === 'task') {
     return {
@@ -403,11 +412,30 @@ function expectedAuthorizationEligibility(vector: DifferentialVector): Readonly<
     };
   }
   if (vector.toolName === 'shell_execute') {
-    if (vector.phase === 'planning' || vector.label === 'shell critical-path rm') {
+    if (
+      vector.label === 'shell_execute' ||
+      vector.label === 'shell workspace-root rm' ||
+      vector.label === 'shell local vcs mutation' ||
+      vector.label === 'shell uncertain script' ||
+      vector.label === 'shell planning non-read' ||
+      vector.label === 'shell planning read'
+    ) {
       return {
         minimumApproval: 'user',
         fullAccessMayBypassApproval: false,
         sameCommandMayBypassApproval: false,
+        decision: 'allow',
+        requiresApproval: false,
+        requiresSandbox: true,
+      };
+    }
+    if (vector.label === 'shell critical-path rm') {
+      return {
+        minimumApproval: 'user',
+        fullAccessMayBypassApproval: false,
+        sameCommandMayBypassApproval: false,
+        decision: 'deny',
+        requiresApproval: false,
       };
     }
     const sensitive = vector.label === 'shell protected path';
@@ -415,6 +443,9 @@ function expectedAuthorizationEligibility(vector: DifferentialVector): Readonly<
       minimumApproval: 'user',
       fullAccessMayBypassApproval: true,
       sameCommandMayBypassApproval: !sensitive,
+      decision: 'ask',
+      requiresApproval: true,
+      requiresSandbox: true,
     };
   }
   return {

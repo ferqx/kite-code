@@ -43,8 +43,26 @@ runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，�
 checkout/Cargo cache 路径并清除 PE 时间戳；
 重新生成 manifest 后必须以 `git diff --exit-code` 证明提交的 runner pin 与构建产物一致。
 
-相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089、ADR-0097、ADR-0110、ADR-0131，
+相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089、ADR-0097、ADR-0110、ADR-0131、ADR-0137，
 `release/platform-capabilities/windows-runner.json`。
+
+## SAQ-10 当前 contract
+
+Windows restricted-token 只兑现明确的 sealed scope；UI 展示的 scope、prepared transport 中的
+scope，以及 native runner 的实际 boundary 必须一致。`interactionMode=full` 是 Full 的唯一表达，
+不再存在 `full_access` approval grant 或第二个 authorization mode。`none`/能力不可用时，受限
+执行 clean fail closed，不能退回 host Shell；这不应把 Full 选择器误报为需要一个旧 grant。
+
+SAQ-10 的阶段基线是 Building 的 Workspace 读写 baseline 与 Planning 的 Workspace 只读 baseline。
+已知的 external/sensitive scope 由 Tool Policy 路由到 `approve_once`、`same_command` 或 Auto
+review；同一 invocation 的 sealed scope 仍须在 approval、recovery 与 dispatch 中保持不变。Plan 与
+Full 正交：Planning + Full 可直接执行但仍保留 Plan lifecycle。只有同一轮并发多个 Explore children
+才派生 Auto；单个 Explore 及 plan/code/review children 继承 parent route。
+
+人工队列由 State 27/SAQ epoch 持久化。Enter 提交 exact interactionId/generation，Esc 只拒绝当前
+可见焦点，Ctrl+C 才取消 whole turn；`/permissions` 的 session grants 清除通过 canonical event
+持久化，并在 session/revision/generation 不匹配时 no-op。旧 queue/grant 或旧 epoch 不能在 restore
+后复活。
 
 ## 当前 backend 选择
 
@@ -53,7 +71,7 @@ Windows 只有以下 runtime outcome：
 | outcome | 选择条件 | Workspace 模型 | assurance 与 Full |
 | --- | --- | --- | --- |
 | windows_restricted_token | protocol V6/native runner compatibility path；Builtin Local Provider 在 durable intent 后生成 transport，Runtime lifecycle consumer 经唯一 Host spawn primitive 启动 | canonical 真实 Workspace，不复制 repository | development restricted-token sandbox；开发期 Full 可用，production qualification 不可用 |
-| none / denied | candidate 不可用、sandbox 关闭或语义不受支持 | 不启动用户命令 | 零 host Shell fallback；Full 不可用 |
+| none / denied | candidate 不可用、sandbox 关闭或语义不受支持 | 不启动用户命令 | 零 host Shell fallback；受限 scope clean fail closed，Full 不转成旧 grant |
 
 另有 ADR-0100 定义的逐 invocation approved-filesystem scope：普通 Workspace 外读写或路径范围无法
 证明的命令审批通过后，仍由去权 restricted token 与 Job Object 执行，只使用当前用户普通 ACL，而不使用
@@ -71,7 +89,7 @@ durable lifecycle adapter，也不得重新加入 `Bun.spawn`、第二个 runner
 
 正常本地路径无需 UAC，TUI 不检查联网身份。foreground CLI 保留 `bun run agent sandbox status` 与
 `bun run agent sandbox setup` 作为非提升兼容入口；两者在 pinned runner 可用时均报告
-`current_user_restricted_token`。Runtime 记录该次 Shell 的 `allow_all` 用户授权后，native runner 直接
+`current_user_restricted_token`。Runtime 记录该次 Shell 的 sealed-scope 授权后，native runner 直接
 使用当前登录用户 token 运行该 exact command，不创建、登录或依赖另一 Windows 本地账户。
 
 ## direct Workspace restricted-token backend
@@ -91,15 +109,16 @@ durable lifecycle adapter，也不得重新加入 `Bun.spawn`、第二个 runner
 6. persistent Workspace capability ledger 只持久化根 allow ACE；Workspace member 不再生成或刷新
    名称级 deny。升级时在 Workspace mutex 下只对仍带旧 capability deny ACE 的 snapshot 执行恢复，
    已被宿主替换且不再带该 ACE 的对象不会套用 stale snapshot。
-7. 只有同一次 invocation 同时获批 `allow_all` 与 `full_access` 时，native runner 才使用当前登录用户
+7. 只有同一次 invocation 在 `interactionMode=full` 下获得
+   `filesystem=full_access, network=allow_all` sealed scope 时，native runner 才使用当前登录用户
    token 启动该 exact command，并先把它加入 kill-on-close/active-process-limit Job。它不调用
-   `CreateProcessWithLogonW`，也不创建、登录或轮换 `KiteNet*`/其他本地账户。`allow_all` 配合
+   `CreateProcessWithLogonW`，也不创建、登录或轮换 `KiteNet*`/其他本地账户。`network=allow_all` 配合
    `read_only` 或 `workspace_write` 必须由 TypeScript adapter 与 native runner 在 user script 前以
    `approved_network_requires_full_filesystem_scope` fail closed：不得为了 Schannel 静默放弃受限 token 的
    文件系统边界。
 8. 上述同时获批网络与完整文件系统的 command environment 只保留当前用户 profile 中 Schannel 所需的 `APPDATA`、
    `LOCALAPPDATA`、`USERPROFILE` 等路径，再覆盖受信 runtime allowlist；这使 TLS 使用当前用户的
-   credential store。此 exact `allow_all` invocation 还继承用户已有的标准 proxy variables
+   credential store。此 exact `full_access + allow_all` invocation 还继承用户已有的标准 proxy variables
    （`HTTP[S]_PROXY`、`ALL_PROXY`、`NO_PROXY`；Windows environment 名称不区分大小写），使企业或本地代理可达；network-off、
    policy-proven read-only 与未批准调用不得继承这些变量。proxy 值只由 runner 在实际 spawn 时从当前进程
    读取，不能出现在持久化的 preparation 或 recovery artifact 中。
@@ -118,10 +137,9 @@ digest 不一致使 backend 不可用，不会加载未固定的 host runner。
 
 adapter 与 runner 必须要求 native invocation `protocolVersion=6`。V6 只描述 direct
 `windows_restricted_token` invocation，携带 development network `off | allow_all` 与 filesystem
-`read_only | workspace_write | full_access` authorization projection；`full_access` 只允许来自已批准的单次
-invocation；`allow_all` 也必须同时带有 `full_access`，否则在 user script 前拒绝。未获网络授权的
-`full_access` 要求 `approvedFilesystemGuardSid`，并仍创建去权 restricted token 与 Job Object。已审批
-`allow_all + full_access` 的当前用户 token 不携带 Workspace synthetic SID；Workspace 外固定路径仍由
+`read_only | workspace_write | full_access` sealed-scope projection；`full_access` scope 只能由当前
+interaction/policy facts 产生，不能由一个旧 grant 隐式扩大。没有匹配 scope 时在 user script 前拒绝。
+`full_access + allow_all` 的当前用户 token 不携带 Workspace synthetic SID；Workspace 外固定路径仍由
 approved-filesystem guard 保护。V6 继承 V5
 删除的 backend mode、AppContainer identity 与 staging 字段；任何 V1-V5 runner 都在 user script 前
 fail closed。
@@ -145,7 +163,7 @@ user/group SID 并加入 compatibility SID，同时保留 Logon/World SID。这�
 ACL 身份授予执行权的 system/toolchain binary 仍可运行；按 ADR-0132，Workspace 外固定路径不再对该 SID
 安装 write deny ACE。approved token 与普通 Workspace token 使用同一
 Logon/World/capability default DACL 初始化，确保 shell 创建的 pipe 与 Node/npm 等 descendant process
-object 可由该 token 继续访问。只有已审批 `allow_all + full_access` 的网络调用才改用当前用户 token，
+object 可由该 token 继续访问。只有带 `full_access + allow_all` sealed scope 的网络调用才改用当前用户 token，
 以便 Schannel 读取当前 profile；因此它不保留 restricted-token filesystem ceiling，普通用户 ACL 成为该
 exact 已审批 command 的文件权限边界，也不得安装该 token 无法命中的 temporary guard ACE。任何较小
 filesystem scope 的网络调用均被拒绝，不能把 network approval 变成该 filesystem 扩权。
@@ -165,8 +183,8 @@ Job Object 提供进程树数量和终止边界，不单独作为 filesystem 或
 - `productionSupported=false`，D-04 仍为 excluded。
 
 Tool Policy 保持逐调用授权：可证明本地的 version query 投影为 `off`；网络命令和 uncertain script
-经批准后投影为 `allow_all`；Windows 还必须同时拥有 explicit `full_access`，才使用当前登录用户 token，
-否则在 native runner 前 fail closed。这里的模式是 development authorization，不产生域名 allowlist 或
+经批准后投影为 `allow_all`；Windows 仅在 interaction/policy facts 明确给出对应 filesystem scope 时使用当前
+登录用户 token，否则在 native runner 前 fail closed。这里的模式是 development scope projection，不产生域名 allowlist 或
 production network evidence。
 
 文件系统 effects 独立处理：`externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后与其他平台
@@ -186,7 +204,8 @@ SessionRuntime 被取消时会中止探针，runner 清空 Job 并回收 ephemer
 
 development/production App 在 user script 前确认 runner pin、OS baseline 或 token capability
 等 essential capability unavailable 时，缓存 backend=`none`/mode=`denied`，不使用 host Shell。
-该 denial 不是 sandbox evidence，Full 仍不可用。
+该 denial 只表示受限执行不可用；Full 选择仍由 `interactionMode=full` 表达，实际执行在缺能力时
+按 sealed scope clean fail closed。
 
 一旦 user script 交给 native runner，它至多执行一次。non-zero exit、timeout、cancellation、runner
 error、Job cleanup、ACL lease cleanup 或其他 command-time failure 都作为该 backend 的结果返回，不得
@@ -209,12 +228,12 @@ E2E/probe。
 
 | 条件 | 必须的结果 |
 | --- | --- |
-| user script 前 runner pin/OS/token/cleanup structural capability unavailable | App 缓存 backend none/mode denied，不启动 host command；Full 保持不可用 |
+| user script 前 runner pin/OS/token/cleanup structural capability unavailable | App 缓存 backend none/mode denied，不启动 host command；受限 scope clean fail closed，Full 不转成旧 grant |
 | user script 开始后的 command/timeout/cancel/cleanup failure | selected backend fail closed；不 host replay |
 | legacy protected snapshot migration 或 Workspace ACL/ledger recovery failure | fail closed 并保留 diagnostic |
-| 已审批 `allow_all + full_access` | 当前用户 token 在 Job Object 中运行 exact command；不创建账户、不请求 UAC |
-| 已审批 `allow_all + read_only/workspace_write` | `approved_network_requires_full_filesystem_scope`，不启动 user script，不 host replay |
-| none 请求 Full | disabled/rejected，并显示非沙箱环境无法开启 full |
+| `full_access + allow_all` sealed scope + `interactionMode=full` | 当前用户 token 在 Job Object 中运行 exact command；不创建账户、不请求 UAC |
+| `allow_all + read_only/workspace_write` | `approved_network_requires_full_filesystem_scope`，不启动 user script，不 host replay |
+| none 请求受限 scope | disabled/rejected，并显示当前 backend 不可用；不 host fallback |
 | windows_restricted_token 请求 Full | 允许开发期 Full；不改变 `productionSupported=false` 或 strict production evidence 要求 |
 
 ADR-0120 开始实现 direct Workspace 的临时 AppContainer strict candidate：它不是 Windows 登录账户，
@@ -226,9 +245,9 @@ conformance 全部通过前，它仍不是可选择 backend，也不能用于 pr
 按 ADR-0131，Windows restricted-token 开发 backend 不再尝试证明通用 Shell 对 Workspace `.git`
 metadata 的独立 read/write deny；旧 ACL snapshot 会由 V3 ledger migration 恢复并删除。依赖该 deny 的
 `brokered-git-r1` production qualification 固定 excluded，直到后续 ADR 建立不缩小 Workspace 的新证据模型；
-typed broker schema 与 hostile repository 检查保留。按 ADR-0136，Windows 上的每个 raw Shell（包括 direct
-`git status`、无 patch `git log`、local Git mutation 和普通命令）均按 Full、Auto、Accept Edits 当前模式治理，
-不再由闭集 grammar 或 Workspace target 直接授权。命中 ADR-0134 read-only classifier 的已批准命令仍可使用
-hardened environment，并固定关闭 external config、prompt、pager、optional locks 与 fsmonitor；该分类不跳过
-mode review。raw Git token 不被硬拒绝，typed broker qualification 保持独立且不得由 generic process evidence
-推导。
+typed broker schema 与 hostile repository 检查保留。按 ADR-0137，Windows raw Shell 先按 interactionMode
+与 phase 选择 Workspace baseline：Building 使用 Workspace 读写，Planning 非 Full 使用 Workspace 只读；
+baseline 不再因为命令名进入全量人工审批，已知 external/sensitive scope 才路由到 durable approval/Auto
+review。命中 ADR-0134 read-only classifier 的命令仍可使用 hardened environment，并固定关闭 external
+config、prompt、pager、optional locks 与 fsmonitor；该分类不跳过 mode/policy review。raw Git token 不被
+硬拒绝，typed broker qualification 保持独立且不得由 generic process evidence 推导。

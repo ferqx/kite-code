@@ -367,6 +367,11 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
     const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['task-private-db'],
+      // The privacy fixture needs the child to reach the durable approval
+      // suspension boundary. Restricted Shell admission therefore carries the
+      // same qualified sandbox fact as production; the executor itself never
+      // runs because the external read remains pending approval.
+      sandboxAvailable: true,
       taskConfig: {
         apiKey: 'unused',
         baseURL: 'https://example.invalid',

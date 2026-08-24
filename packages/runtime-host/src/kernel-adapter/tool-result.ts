@@ -58,7 +58,6 @@ export type RuntimeHostToolExecutionResult<
     grantUsed: ShellGrantUsed;
   };
   workspaceAccess?: WorkspaceAccess;
-  authorization?: import('@kite/agent-kernel').AgentAuthorizationState;
   totalLines?: number;
   subagentResult?: TSubagentResult;
   capabilityResult?: CapabilityResult;
@@ -68,6 +67,5 @@ export type RuntimeHostToolExecutionResult<
 export interface RuntimeHostToolExecutionSideEffects {
   plan?: AgentPlan;
   workspaceAccess?: WorkspaceAccess;
-  authorization?: import('@kite/agent-kernel').AgentAuthorizationState;
   pendingSubagentApproval?: unknown;
 }

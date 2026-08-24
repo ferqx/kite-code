@@ -14,8 +14,7 @@ import {
   evaluateSkillActivation,
   refreshSkillCatalog,
 } from '@kite/builtin-runtime/skills';
-import type { AuthorizationMode, InteractionMode } from '@kite/runtime-contract';
-import type { StateAuthorizationSource as AuthorizationSource } from '@kite/runtime-host';
+import type { InteractionMode } from '@kite/runtime-contract';
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
@@ -183,8 +182,6 @@ export interface RuntimeTurnInput {
     subagentTaskRequests?: import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   };
   interactionMode?: InteractionMode;
-  authorizationMode?: AuthorizationMode;
-  authorizationSource?: AuthorizationSource;
   /** 初始执行阶段 / Initial execution phase */
   phase?: 'planning' | 'building';
   thinkingLevel?: string | null;
@@ -192,7 +189,7 @@ export interface RuntimeTurnInput {
   signal?: AbortSignal;
   /** Host-owned controller callback; production execution always supplies it. */
   abortExecution?: (reason: string) => void;
-  /** Exact State 25 session owned by the App/Host session coordinator. */
+  /** Exact State 27 session owned by the App/Host session coordinator. */
   runtimeSession: RuntimeStateSessionPort & {
     readonly runtimeStore: StateRuntimeStorage;
     processEvents(events: RuntimeEvent[]): void;
@@ -213,7 +210,7 @@ export interface RuntimeTurnInput {
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
 }
 
-/** Execute one turn against the caller-owned State 25 session and effect port. */
+/** Execute one turn against the caller-owned State 27 session and effect port. */
 export async function* executeRuntimeTurn(
   input: RuntimeTurnInput,
   provider: RuntimeActionProvider,

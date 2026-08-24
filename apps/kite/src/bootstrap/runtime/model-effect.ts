@@ -253,7 +253,6 @@ export function resolveContextProjectionEnvironment(input: {
     signal: input.signal,
     model: input.model,
     threadId: input.state.session.threadId,
-    authorization: input.state.authorization,
     workspaceAccess: input.state.workspaceAccess,
     phase: getAgentPhase(getActivePlanning(input.state)),
     interactionMode: getEffectiveInteractionMode(input.state),
@@ -326,7 +325,7 @@ function positiveConfigNumber(value: unknown): number | undefined {
 }
 
 /**
- * State 25 adapter for the Builtin-owned primary Model effect. Dynamic MCP/Skill
+ * State 27 adapter for the Builtin-owned primary Model effect. Dynamic MCP/Skill
  * disclosure and RuntimeEvent projection remain explicit compatibility facts;
  * Context, Prompt, Surface, admission, and dispatch are owned by the coordinator.
  */
@@ -517,7 +516,6 @@ export async function projectPrimaryModelEffect(params: {
     signal: params.signal,
     model: params.model,
     threadId: state.session.threadId,
-    authorization: state.authorization,
     workspaceAccess: state.workspaceAccess,
     phase: getAgentPhase(getActivePlanning(state)),
     interactionMode: getEffectiveInteractionMode(state),

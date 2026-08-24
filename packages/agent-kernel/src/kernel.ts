@@ -214,7 +214,7 @@ function validDecisionFacts(facts: DecisionFacts): boolean {
 }
 
 /**
- * Decide a State 25 transition. Domain ownership is compile-time fixed in
+ * Decide a State 27 transition. Domain ownership is compile-time fixed in
  * reduceAgentState; there is intentionally no caller-supplied reducer parameter.
  */
 export function decide<

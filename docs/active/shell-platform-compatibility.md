@@ -28,6 +28,7 @@
 - `project-conventions.md`
 - `file-reading-shared-boundary.md` — MSYS2 路径转换 + readTextContent 边界
 - ADR-0131 — canonical Workspace 不再按隐藏名称二次拒绝
+- ADR-0137 — sandbox-first phase/mode 与 durable approval queue
 
 验证：
 
@@ -36,6 +37,19 @@
 - `bun run typecheck`
 
 ---
+
+## SAQ-10 当前 contract
+
+Planning 非 Full 的 Workspace read-only baseline 与 Building 非 Full 的 Workspace read/write baseline 内 Shell 可直接 dispatch；
+已知扩 filesystem/network/process scope 才按 Accept/Auto 进入 user/reviewer approval queue。Planning/Building Full 由
+`interactionMode=full` 直接表达并保持 Plan lifecycle，不产生 approval grant。命令名、Git subcommand、read-only classifier 和
+hidden basename 都不是 raw Shell 的授权来源；hard deny 仍不可覆盖。
+
+State 27 的 `pendingApprovals`/`activeApprovalId`/generation/sequence/Session grants 是唯一 queue authority。same-command 使用完整
+Session/workspace/cwd/executor/environment/scope/effects/parser-executor revision identity，并以一个 Store transaction 产生独立
+receipts、`authorized_queued` 和 batch event。Approval Enter 是 exact-once，Approval Esc 只 focused reject，Ctrl+C 才 whole-turn
+cancel；late generation/session event no-op。UI scope 必须等于 sealed boundary 与 backend evidence；unsupported 时 clean fail closed，
+不能改用 host replay。
 
 ## 1. Shell 解析与受治理执行
 
@@ -57,7 +71,7 @@ unavailable，或 exact `backend_unavailable + pre_dispatch + cleanupConfirmed` 
 
 ADR-0100 的 approved-filesystem lane 是另一条显式 capability 路径，不是 backend fallback：
 `externalRead`、`externalWrite` 或 `uncertainEffects` 审批通过后，在用户命令启动前把
-`filesystemMode=allow_all` 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
+相应的 sealed filesystem scope 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
 也不得自行切换 host Shell；只有 ADR-0119 的独立 App availability 条件可选择 host。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
 effects；Workspace 外固定高危身份由 Tool Policy 分类为 `sensitiveExternalAccess`，授权后 Seatbelt、bubblewrap 或
 Windows runner 不得安装第二层 protected-path deny。canonical Workspace member 不得因名称被拒绝。按
@@ -156,17 +170,19 @@ Tool Result 的 `command` 继续保存用户/模型提交的原始命令，不�
 `/x/...` 不属于该静态兼容层；调用方应使用字面量 POSIX drive path 或 `X:/...` mixed path。
 
 Shell Tool Policy 与 macOS/Linux 共用逐调用模式治理：精确 `node|npm|pnpm|yarn|bun --version|-v`、明确网络
-命令、`node script.js`、`npm run build` 和未知脚本均先按 Accept Edits、Auto 或 Full 审查；分类出的 network、
-external filesystem 与 uncertain effects 只帮助 reviewer 和 scope projection，不产生免审。批准后仅该 invocation
+命令、`node script.js`、`npm run build` 和未知脚本都按当前 phase/mode facts 处理；baseline 内 direct，扩 scope 才进入
+Accept/Auto/Full route。分类出的 network、external filesystem 与 uncertain effects 只帮助 reviewer 和 scope projection，不产生免审。批准后仅该 invocation
 投影相应 filesystem/network scope。direct profile 接受该开发期授权，但不会
 structural enforce network-off、arbitrary
 descendant allowlist。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
-定义的开发期交互模式，不是 production admission；只有 backend=none 时才显示“非沙箱环境无法开启full”。
+定义的开发期交互模式，不是 production admission；backend unavailable 不会改变 Full interaction mode，但实际执行 boundary
+不可用时必须 fail closed。
 
-当且仅当 invocation 已投影为 `allow_all`，macOS/Linux 本地 backend 都把宿主已有的标准代理变量
+当且仅当 invocation 已投影为 `network=allow_all` sealed scope，macOS/Linux 本地 backend 都把宿主已有的标准代理变量
 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（以及小写形式）传给该 command；这是用户已批准
-网络能力的一部分，支持企业和本地代理。Windows 还要求同一次 invocation 明确投影 `full_access`，才将
-这些变量交给使用当前用户 token 的 command；`allow_all + read_only/workspace_write` 在 runner 前 fail closed，
+网络能力的一部分，支持企业和本地代理。Windows 还要求同一次 invocation 由 `interactionMode=full` 派生
+`filesystem=full_access, network=allow_all` sealed scope，才将
+这些变量交给使用当前用户 token 的 command；无法由当前 interactionMode 与 sealed scope 同时兑现网络/filesystem 的调用在 runner 前 fail closed，
 而非扩大 filesystem scope。network-disabled、policy-proven read-only 和未批准调用继续使用无 proxy 的最小
 环境。代理 URL 可能含认证信息，Shell 输出、模型投影和 session log 不得主动回显其值；代理变量只在
 supervisor/runner 实际 spawn 时从宿主读取，不能写入持久化的 preparation 或 recovery artifact。

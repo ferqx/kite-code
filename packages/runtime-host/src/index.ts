@@ -12,7 +12,6 @@ import type { RuntimeStorage, RuntimeStorageBoundary } from './storage';
 
 export type {
   AgentToolCallState as StateToolCallRecord,
-  AuthorizationSource as StateAuthorizationSource,
   ExecutionTraits as StateExecutionTraits,
   RuntimeEffect as StateRuntimeEffect,
   RuntimeEvent as StateRuntimeEvent,
@@ -195,11 +194,7 @@ export {
   createRuntimeHostInteractionId,
   createRuntimeHostTurnId,
 } from './runtime-identity';
-export type { RuntimeAuthorizationElevationFacts } from './runtime-policy';
-export {
-  assertRuntimeAuthorizationElevation,
-  projectRuntimeObservabilityFact,
-} from './runtime-policy';
+export { projectRuntimeObservabilityFact } from './runtime-policy';
 export type { RuntimeHostToolCallSnapshotInput } from './tool-call-snapshot';
 export { createRuntimeHostToolCallSnapshot } from './tool-call-snapshot';
 

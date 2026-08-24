@@ -15,7 +15,6 @@ import systemPromptCurrent from './prompts/system-prompt-current.txt';
 import { buildCacheableRuntimeContext, buildRuntimeModeSnapshot } from './runtime-context';
 import type {
   BuiltinAgentPhase,
-  BuiltinAuthorizationMode,
   BuiltinInteractionMode,
   BuiltinPlanningStateView,
   BuiltinSandboxBackend,
@@ -33,7 +32,6 @@ export interface ModelContextState {
   workspaceAccess?: 'write';
   phase?: BuiltinAgentPhase;
   interactionMode?: BuiltinInteractionMode;
-  authorization?: { mode: BuiltinAuthorizationMode };
   sandboxBackend?: BuiltinSandboxBackend | 'unknown';
   activeSkillInstructions?: string;
   /** PlanningState for dynamic runtime-state block */
@@ -308,7 +306,6 @@ export function prepareModelContext(
     buildRuntimeModeSnapshot({
       phase: state.phase ?? 'building',
       interactionMode: state.interactionMode ?? 'accept_edits',
-      authorizationMode: state.authorization?.mode ?? 'default',
       sandboxBackend: state.sandboxBackend ?? 'unknown',
       planningState: state.planningState,
       taskId: state.taskId,

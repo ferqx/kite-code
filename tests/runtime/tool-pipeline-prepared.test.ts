@@ -367,7 +367,6 @@ function fixture(
     context: {
       phase: 'building',
       interactionMode: 'accept_edits',
-      authorizationMode: 'default',
       sandboxAvailable: true,
       circuitBreakerTripped: false,
       executionMechanism: 'other',
@@ -397,6 +396,8 @@ function fixture(
     schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
     authorizationKind: 'policy_allow' as const,
     grantUsed: 'none' as const,
+    interactionMode: 'accept_edits' as const,
+    sandboxScope: null,
     policyEffects,
     effectiveEffects: EFFECTS,
     receiptRequirement: 'effect_receipt' as const,
@@ -478,18 +479,20 @@ function fullAccessFixture(): Fixture {
   const governance: AppToolPipelineGovernanceFacts = {
     ...base.input.governance,
     policy: { ...base.input.governance.policy, fullAccessMayBypassApproval: true },
-    context: { ...base.input.governance.context, authorizationMode: 'full_access' },
+    context: { ...base.input.governance.context, interactionMode: 'full' },
   };
   const decision: AppToolPipelineGovernanceDecision = {
     kind: 'allow',
-    authorizationKind: 'approved_call',
-    grantUsed: 'full_access',
+    authorizationKind: 'policy_allow',
+    grantUsed: 'none',
     reservationIds: [],
   };
   const request = {
     ...base.input.request,
-    authorizationKind: 'approved_call' as const,
-    grantUsed: 'full_access' as const,
+    authorizationKind: 'policy_allow' as const,
+    grantUsed: 'none' as const,
+    interactionMode: 'full' as const,
+    sandboxScope: null,
   };
   return {
     ...base,
@@ -510,7 +513,8 @@ describe('RM-16 App prepared tool invocation builder', () => {
       policyDigest,
       authorizationKind: 'policy_allow',
       grantUsed: 'none',
-      authorizationMode: 'default',
+      interactionMode: 'accept_edits',
+      sandboxScope: null,
     });
     const admissionDigest = digestCapabilityValue({
       authorizationDigest,
@@ -559,7 +563,8 @@ describe('RM-16 App prepared tool invocation builder', () => {
         policyDigest: approvalBindingDigest,
         authorizationKind: 'approved_call',
         grantUsed: 'approve_once',
-        authorizationMode: 'default',
+        interactionMode: 'accept_edits',
+        sandboxScope: null,
       }),
     );
 
@@ -633,11 +638,12 @@ describe('RM-16 App prepared tool invocation builder', () => {
     ).toThrow();
   });
 
-  test('accepts a Kernel-proven full-access bypass without inventing an approval envelope', () => {
+  test('accepts Full interaction mode without inventing an approval grant', () => {
     const granted = fullAccessFixture();
     expect(build(granted).prepared.input.request).toMatchObject({
-      authorizationKind: 'approved_call',
-      grantUsed: 'full_access',
+      authorizationKind: 'policy_allow',
+      grantUsed: 'none',
+      interactionMode: 'full',
     });
     expect(() =>
       build({
@@ -646,7 +652,7 @@ describe('RM-16 App prepared tool invocation builder', () => {
           ...granted.input,
           governance: {
             ...granted.input.governance,
-            context: { ...granted.input.governance.context, authorizationMode: 'default' },
+            context: { ...granted.input.governance.context, interactionMode: 'accept_edits' },
           },
         },
       }),
@@ -736,7 +742,7 @@ describe('RM-16 App prepared tool invocation builder', () => {
         ...base,
         input: {
           ...base.input,
-          request: { ...request, grantUsed: 'full_access' },
+          request: { ...request, grantUsed: 'full_access' } as unknown as typeof request,
         },
       }),
     ).toThrow();
@@ -872,12 +878,13 @@ describe('RM-16 App prepared tool invocation builder', () => {
     });
     const governanceInput = Object.freeze({
       classified: classified.value,
+      sessionId: threadId,
       workspace: '/workspace',
       threadId,
+      canonicalWorkspaceIdentity: 'workspace:/workspace',
       context: Object.freeze({
         phase: 'building' as const,
         interactionMode: 'accept_edits' as const,
-        authorizationMode: 'default' as const,
         sandboxAvailable: true,
         circuitBreakerTripped: false,
         gates: Object.freeze({
@@ -919,6 +926,8 @@ describe('RM-16 App prepared tool invocation builder', () => {
         schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
         authorizationKind: 'policy_allow',
         grantUsed: 'none',
+        interactionMode: 'accept_edits',
+        sandboxScope: null,
         policyEffects: {},
         effectiveEffects: classified.value.effectiveEffects,
         receiptRequirement: classified.value.requirements.receipt,
@@ -1047,6 +1056,8 @@ describe('RM-16 App prepared tool invocation builder', () => {
         schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
         authorizationKind: 'policy_allow',
         grantUsed: 'none',
+        interactionMode: 'accept_edits',
+        sandboxScope: null,
         policyEffects: {},
         effectiveEffects: dynamicClassified.value.effectiveEffects,
         receiptRequirement: dynamicClassified.value.requirements.receipt,

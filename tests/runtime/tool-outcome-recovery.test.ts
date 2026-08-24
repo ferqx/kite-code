@@ -2630,6 +2630,8 @@ describe('ToolOutcome Runtime event integration', () => {
       reviewId: 'auto-review',
       toolCallId: 'auto-review-call',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'redacted',
       approval: {} as never,
     });
@@ -3010,6 +3012,8 @@ describe('ToolOutcome Runtime event integration', () => {
         type: 'approval.requested',
         interactionId: 'approval',
         toolCallId: 'approval-call',
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
         createdAt: '2026-08-10T00:00:00.010Z',
         approval: {
           scope: 'once',
@@ -3031,6 +3035,7 @@ describe('ToolOutcome Runtime event integration', () => {
           type: 'approval.rejected',
           interactionId: 'approval',
           toolCallId: 'approval-call',
+          generation: 0,
           reason: 'private',
           createdAt: '2026-08-10T00:00:00.035Z',
         },
@@ -3051,6 +3056,8 @@ describe('ToolOutcome Runtime event integration', () => {
         type: 'approval.requested',
         interactionId: 'approval-success-interaction',
         toolCallId: 'approval-success',
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
         createdAt: '2026-08-10T00:01:00.010Z',
         approval: {
           scope: 'once',
@@ -3072,6 +3079,8 @@ describe('ToolOutcome Runtime event integration', () => {
         interactionId: 'approval-success-interaction',
         toolCallId: 'approval-success',
         grant: 'approve_once',
+        receiptId: 'receipt-approval-success',
+        generation: 0,
         createdAt: '2026-08-10T00:01:00.035Z',
       } as never);
       kernel.processEvent({
@@ -3113,6 +3122,8 @@ describe('ToolOutcome Runtime event integration', () => {
         reviewId: 'auto-review-success-interaction',
         toolCallId: 'auto-review-success',
         toolName: 'shell_execute',
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
         reason: 'private',
         approval: {
           scope: 'once',

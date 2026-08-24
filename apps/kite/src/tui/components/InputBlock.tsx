@@ -9,6 +9,7 @@ import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
 interface InputBlockProps {
+  interactionId?: string;
   question: UserInputPayload;
   provider: TuiUserInputProvider;
   onResolved: (answer: string, answers?: Record<string, string>) => void;
@@ -22,6 +23,7 @@ function recommendedOptionLabel(label: string, recommended: boolean, marker: str
 }
 
 export default function InputBlock({
+  interactionId,
   question,
   provider,
   onResolved,
@@ -36,6 +38,7 @@ export default function InputBlock({
       <MultiQuestionWizard
         question={question}
         items={items}
+        interactionId={interactionId}
         provider={provider}
         onResolved={onResolved}
         t={t}
@@ -48,6 +51,7 @@ export default function InputBlock({
   return (
     <SingleQuestion
       question={question}
+      interactionId={interactionId}
       provider={provider}
       onResolved={onResolved}
       t={t}
@@ -59,12 +63,14 @@ export default function InputBlock({
 // ── 单问题模式：选项 + ⭐ 推荐 + ✎ 自定义 / Single-question mode ──
 
 function SingleQuestion({
+  interactionId,
   question,
   provider,
   onResolved,
   t,
   translate,
 }: {
+  interactionId?: string;
   question: UserInputPayload;
   provider: TuiUserInputProvider;
   onResolved: (answer: string, answers?: Record<string, string>) => void;
@@ -111,7 +117,7 @@ function SingleQuestion({
         if (hasCustom && selected === totalSlots - 1) return;
         const opt = options[selected];
         if (opt) {
-          provider.submitAction({ type: 'input', text: opt.label });
+          provider.submitAction({ type: 'input', interactionId, text: opt.label });
           onResolved(opt.label);
         }
       }
@@ -120,7 +126,7 @@ function SingleQuestion({
 
   const handleSubmit = (value: string) => {
     if (value.trim()) {
-      provider.submitAction({ type: 'input', text: value });
+      provider.submitAction({ type: 'input', interactionId, text: value });
       onResolved(value);
     } else {
       setShowEmptyHint(true);
@@ -220,6 +226,7 @@ function formatMultiQuestionTitle(title: string): string {
 }
 
 function MultiQuestionWizard({
+  interactionId,
   question,
   items,
   provider,
@@ -228,6 +235,7 @@ function MultiQuestionWizard({
   translate,
   wizardEscBackRef,
 }: {
+  interactionId?: string;
   question: UserInputPayload;
   items: NonNullable<UserInputPayload['questions']>;
   provider: TuiUserInputProvider;
@@ -324,7 +332,12 @@ function MultiQuestionWizard({
       const summary = Object.entries(currentAnswers)
         .map(([k, v]) => `${k}: ${v}`)
         .join('; ');
-      provider.submitAction({ type: 'input', text: summary, answers: currentAnswers });
+      provider.submitAction({
+        type: 'input',
+        interactionId,
+        text: summary,
+        answers: currentAnswers,
+      });
       onResolved(summary, currentAnswers);
     }
   }

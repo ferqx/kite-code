@@ -1323,7 +1323,8 @@ function normalizeToolTerminalEvent(
   const createdAt = stringField(payload, 'createdAt') ?? occurredAt;
   const previouslyStarted = call?.startedAt != null || state.tools.active.includes(toolCallId);
   const dispatchState: ToolAuthority['dispatchState'] =
-    call?.status === 'queued' || (call?.status === 'approved' && !previouslyStarted)
+    call?.status === 'queued' ||
+    ((call?.status === 'approved' || call?.status === 'authorized_queued') && !previouslyStarted)
       ? 'not_started'
       : call?.status === 'running' || previouslyStarted
         ? 'started'

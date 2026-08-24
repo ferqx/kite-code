@@ -52,6 +52,82 @@ describe('State event codec', () => {
     );
   });
 
+  test('keeps approval batch and session-clear facts exact and receipt-safe', () => {
+    const commandIdentity = {
+      sessionId: 'session-1',
+      threadId: 'session-1',
+      workspace: '/workspace',
+      canonicalWorkspaceIdentity: 'sha256:workspace',
+      cwd: '/workspace',
+      executor: 'shell',
+      environment: 'sha256:environment',
+      scope: 'sha256:scope',
+      effects: 'sha256:effects',
+      parserRevision: 'parser-v1',
+      executorRevision: 'executor-v1',
+      commandDigest: 'sha256:command',
+    };
+    const batch = {
+      type: 'approval.batch_released',
+      interactionId: 'approval-1',
+      toolCallId: 'tool-1',
+      grant: 'same_command',
+      grantKey: 'grant-key',
+      sessionRevision: 4,
+      generation: 2,
+      commandIdentity,
+      matches: [
+        {
+          interactionId: 'approval-1',
+          toolCallId: 'tool-1',
+          receiptId: 'receipt-1',
+          generation: 2,
+          bindingDigest: 'binding-1',
+        },
+        {
+          interactionId: 'approval-2',
+          toolCallId: 'tool-2',
+          receiptId: 'receipt-2',
+          generation: 2,
+          bindingDigest: 'binding-2',
+        },
+      ],
+      cancelledReviewIds: ['approval-2'],
+      createdAt: '2026-08-25T00:00:00.000Z',
+    } as const;
+    expect(() => assertCurrentRuntimeEvent(batch)).not.toThrow();
+    expect(() => assertCurrentRuntimeEvent({ ...batch, extraAuthority: true })).toThrow(
+      'invalid shape',
+    );
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        ...batch,
+        matches: [{ ...batch.matches[0], extraAuthority: true }],
+      }),
+    ).toThrow('match is invalid');
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        ...batch,
+        matches: [batch.matches[0], { ...batch.matches[1], receiptId: 'receipt-1' }],
+      }),
+    ).toThrow('match is invalid');
+    expect(() =>
+      assertCurrentRuntimeEvent({ ...batch, cancelledReviewIds: ['approval-2', 'approval-2'] }),
+    ).toThrow('cancelled review identities are invalid');
+
+    const cleared = {
+      type: 'approval.session_grants_cleared',
+      sessionId: 'session-1',
+      sessionRevision: 5,
+      generation: 3,
+      clearedAt: '2026-08-25T00:00:01.000Z',
+    } as const;
+    expect(() => assertCurrentRuntimeEvent(cleared)).not.toThrow();
+    expect(() => assertCurrentRuntimeEvent({ ...cleared, localOnly: true })).toThrow(
+      'invalid shape',
+    );
+  });
+
   test('keeps retired session events readable but rejects them from current writes', () => {
     const retiredAdmission = {
       type: 'provider.admission_status',

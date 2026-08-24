@@ -383,17 +383,21 @@ test('cancelling any shell approval aborts the current turn and its running sibl
         },
       },
       {
-        requestAction: async (effect) => {
+        requestAction: async (effect, state) => {
           if (effect.type !== 'request_tool_approval') {
             throw new Error(`Unexpected interaction: ${effect.type}`);
           }
           approvals += 1;
+          const pending = state.pendingApprovals.get(effect.interactionId);
           return approvals === 1
-            ? {
-                type: 'approve',
-                interactionId: effect.interactionId,
-                grant: 'approve_once',
-              }
+            ? pending
+              ? {
+                  type: 'approve',
+                  interactionId: effect.interactionId,
+                  generation: pending.generation,
+                  grant: 'approve_once',
+                }
+              : { type: 'cancel', interactionId: effect.interactionId, reason: 'Missing approval.' }
             : {
                 type: 'cancel',
                 interactionId: effect.interactionId,
@@ -1394,11 +1398,16 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
         },
       },
       {
-        requestAction: async () => ({
-          type: 'approve',
-          interactionId: 'any',
-          grant: 'approve_once',
-        }),
+        requestAction: async (_effect, state) => {
+          const pending = [...state.pendingApprovals.values()][0];
+          if (!pending) throw new Error('Expected a durable approval queue record.');
+          return {
+            type: 'approve',
+            interactionId: pending.interactionId,
+            generation: pending.generation,
+            grant: 'approve_once',
+          };
+        },
       },
     ))
       events.push(event);

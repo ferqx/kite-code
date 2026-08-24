@@ -100,6 +100,8 @@ type MechanismResources = Omit<
   | 'grantUsed'
   | 'authorizationKind'
   | 'policyEffects'
+  | 'interactionMode'
+  | 'sandboxScope'
   | 'signal'
   | 'filesystemRuntime'
 >;
@@ -378,6 +380,8 @@ export function createAppOrdinaryToolPipelineAttemptRuntime(input: {
       schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
       authorizationKind: allowDecision.authorizationKind,
       grantUsed,
+      interactionMode: facts.value.context.interactionMode,
+      sandboxScope: classifiedValue.policyCompilation.sandboxScope ?? null,
       policyEffects: Object.freeze({ ...(classifiedValue.policyCompilation.effects ?? {}) }),
       effectiveEffects: classifiedValue.effectiveEffects,
       receiptRequirement: classifiedValue.requirements.receipt,
@@ -437,6 +441,8 @@ export function createAppOrdinaryToolPipelineAttemptRuntime(input: {
         canonicalArguments: built.prepared.input.arguments,
         grantUsed,
         authorizationKind: allowDecision.authorizationKind,
+        interactionMode: request.interactionMode,
+        sandboxScope: request.sandboxScope,
         policyEffects: request.policyEffects,
         signal: attemptInput.signal,
       });
@@ -711,15 +717,8 @@ export function isAppOrdinaryToolPipelineOperationId(
   return APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_.some((operationId) => operationId === value);
 }
 
-function isPreparedGrantUsed(
-  value: string,
-): value is 'none' | 'approve_once' | 'same_command' | 'full_access' {
-  return (
-    value === 'none' ||
-    value === 'approve_once' ||
-    value === 'same_command' ||
-    value === 'full_access'
-  );
+function isPreparedGrantUsed(value: string): value is 'none' | 'approve_once' | 'same_command' {
+  return value === 'none' || value === 'approve_once' || value === 'same_command';
 }
 
 function stageFailure(

@@ -29,7 +29,7 @@ function stableStringify(value: unknown): string {
   return serialized === undefined ? 'undefined' : serialized;
 }
 
-/** Deterministically bind the State 25 repeat policy to the governed execution target. */
+/** Deterministically bind the State 27 repeat policy to the governed execution target. */
 export function kernelToolDoomLoopFingerprint(request: KernelDoomLoopRequest): string {
   const record =
     request.args !== null && typeof request.args === 'object' && !Array.isArray(request.args)
@@ -44,7 +44,7 @@ export function kernelToolDoomLoopFingerprint(request: KernelDoomLoopRequest): s
   return sha256Hex(stableStringify({ tool: request.name, args: identityArgs }));
 }
 
-/** Evaluate a private fingerprint against immutable State 25 facts. */
+/** Evaluate a private fingerprint against immutable State 27 facts. */
 export function kernelCheckDoomLoopFingerprint(
   tracker: Readonly<Record<string, KernelDoomLoopTrackerEntry>>,
   fingerprint: string,
@@ -67,7 +67,7 @@ export function kernelCheckDoomLoopFingerprint(
   return { blocked: false, fingerprint, count: 0 };
 }
 
-/** Pure State 25 tracker transition. Time is always supplied as an explicit fact. */
+/** Pure State 27 tracker transition. Time is always supplied as an explicit fact. */
 export function kernelUpdateDoomLoopTracker(
   tracker: Readonly<Record<string, KernelDoomLoopTrackerEntry>>,
   fingerprint: string,

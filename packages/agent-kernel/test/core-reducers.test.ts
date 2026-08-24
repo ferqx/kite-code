@@ -107,9 +107,9 @@ const autoReviewApproval = {
 };
 
 describe('State core reducers', () => {
-  test('authorization.changed preserves the complete authorization payload', () => {
+  test('legacy authorization.changed is rejected without a production State event', () => {
     const state = initialState();
-    const next = reduceAuthorizationState(state, {
+    const legacy = {
       type: 'authorization.changed',
       mode: 'full_access',
       commandGrants: {
@@ -123,22 +123,9 @@ describe('State core reducers', () => {
       },
       modeSource: 'user',
       modeGrantedAt: '2026-08-20T00:00:00.000Z',
-    } as unknown as KernelEvent);
-
-    expect(next.authorization).toEqual({
-      mode: 'full_access',
-      commandGrants: {
-        grant: {
-          workspace: '/workspace',
-          threadId: 'thread-1',
-          command: 'bun test',
-          source: 'test',
-          grantedAt: '2026-08-20T00:00:00.000Z',
-        },
-      },
-      modeSource: 'user',
-      modeGrantedAt: '2026-08-20T00:00:00.000Z',
-    });
+    } as const;
+    expect(reduceAuthorizationState(state, legacy as unknown as KernelEvent)).toBe(state);
+    expect(() => reduceAgentState(state, legacy as unknown as KernelEvent)).toThrow();
   });
 
   test('interaction mode changes clear authorization and active-task execution overrides', () => {
@@ -146,12 +133,6 @@ describe('State core reducers', () => {
     const state = {
       ...started,
       mode: 'full' as const,
-      authorization: {
-        ...started.authorization,
-        mode: 'full_access' as const,
-        modeSource: 'user' as const,
-        modeGrantedAt: '2026-08-20T00:00:00.000Z',
-      },
       tasks: {
         ...started.tasks,
         'task-1': { ...started.tasks['task-1']!, executionMode: 'auto' as const },
@@ -165,7 +146,6 @@ describe('State core reducers', () => {
     } as KernelEvent);
 
     expect(next.mode).toBe('accept_edits');
-    expect(next.authorization).toEqual({ mode: 'default', commandGrants: {} });
     expect(next.tasks['task-1']?.executionMode).toBeUndefined();
   });
 
@@ -186,7 +166,7 @@ describe('State core reducers', () => {
       } as unknown as KernelEvent),
     ).toBe(state);
     expect(() =>
-      reduceAgentState(state, { type: 'authorization.changed' } as KernelEvent),
+      reduceAgentState(state, { type: 'authorization.changed' } as unknown as KernelEvent),
     ).toThrow();
   });
 
@@ -230,7 +210,7 @@ describe('State core reducers', () => {
 
   test('auto-review completion closes the interaction and enforces both breaker thresholds', () => {
     const observedAt = Date.parse('2026-08-20T00:00:30.000Z');
-    const state = {
+    const base = {
       ...initialState(),
       tools: {
         calls: {
@@ -246,14 +226,6 @@ describe('State core reducers', () => {
         queue: ['call-1'],
         active: [],
       },
-      interactions: {
-        kind: 'awaiting_auto_review' as const,
-        interactionId: 'review-1',
-        toolCallId: 'call-1',
-        toolName: 'shell_execute',
-        reason: 'review',
-        approval: autoReviewApproval,
-      },
       autoReview: {
         ...initialState().autoReview,
         rejectionHistory: [
@@ -266,6 +238,15 @@ describe('State core reducers', () => {
         ],
       },
     };
+    const state = reduceAuthorizationState(base, {
+      type: 'auto_review.requested',
+      reviewId: 'review-1',
+      toolCallId: 'call-1',
+      toolName: 'shell_execute',
+      reason: 'review',
+      approval: autoReviewApproval,
+      createdAt: '2026-08-20T00:00:00.000Z',
+    } as unknown as KernelEvent);
     const rejected = reduceAuthorizationState(state, {
       type: 'auto_review.completed',
       reviewId: 'review-1',
@@ -282,28 +263,27 @@ describe('State core reducers', () => {
     );
     expect(rejected.autoReview.circuitBreakerTripped).toBe(true);
 
-    const awaitingApproval = {
-      ...rejected,
-      interactions: state.interactions,
-      tools: {
-        ...rejected.tools,
-        calls: {
-          ...rejected.tools.calls,
-          'call-1': { ...rejected.tools.calls['call-1']!, status: 'awaiting_auto_review' as const },
-        },
-      },
-    };
-    const approved = reduceAuthorizationState(awaitingApproval, {
+    const approvedPending = reduceAuthorizationState(base, {
+      type: 'auto_review.requested',
+      reviewId: 'review-1',
+      toolCallId: 'call-1',
+      toolName: 'shell_execute',
+      reason: 'review',
+      approval: autoReviewApproval,
+      createdAt: '2026-08-20T00:00:00.000Z',
+    } as unknown as KernelEvent);
+    const approved = reduceAuthorizationState(approvedPending, {
       type: 'auto_review.completed',
       reviewId: 'review-1',
       toolCallId: 'call-1',
       createdAt: '2026-08-20T00:01:01.000Z',
       result: { ok: true, approved: true, durationMs: 2 },
     } as KernelEvent);
-    expect(approved.autoReview).toMatchObject({
-      consecutiveRejects: 0,
-      rejectionHistory: [],
-      circuitBreakerTripped: false,
+    expect(approved.interactions).toEqual({ kind: 'idle' });
+    expect(approved.tools.calls['call-1']?.status).toBe('authorized_queued');
+    expect(approved.pendingApprovals.get('review-1')).toMatchObject({
+      status: 'authorized_queued',
+      authorizationSource: 'approve_once',
     });
   });
 

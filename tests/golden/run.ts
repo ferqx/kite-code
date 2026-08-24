@@ -17,7 +17,7 @@ export interface GoldenFixture {
   effects: Array<{ events: RuntimeEvent[] }>;
   userActions?: Array<
     | { type: 'input'; text: string }
-    | { type: 'approve'; grant: 'approve_once' | 'same_command' | 'full_access' }
+    | { type: 'approve'; grant: 'approve_once' | 'same_command' }
     | { type: 'approve_plan'; executionMode: 'accept_edits' | 'auto' }
     | { type: 'waive_verification'; reason: string }
     | { type: 'complete_provider_action'; providerDirectoryRevision?: string }
@@ -74,7 +74,16 @@ export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeStat
           if (action.type === 'input')
             return { type: 'input', interactionId: effect.interactionId, text: action.text };
           if (action.type === 'approve')
-            return { type: 'approve', interactionId: effect.interactionId, grant: action.grant };
+            return {
+              type: 'approve',
+              interactionId: effect.interactionId,
+              generation:
+                state.pendingApprovals.get(effect.interactionId)?.generation ??
+                (() => {
+                  throw new Error(`${fixture.name}: approval has no durable queue generation`);
+                })(),
+              grant: action.grant,
+            };
           if (action.type === 'waive_verification') {
             if (effect.type !== 'request_verification_decision') {
               throw new Error(`${fixture.name}: verification waiver without a decision effect`);

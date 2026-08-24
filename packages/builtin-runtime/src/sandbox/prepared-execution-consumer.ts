@@ -517,6 +517,8 @@ function validatePreparedIdentity(input: {
   ) {
     return 'Prepared sandbox plan backend evidence mismatch.';
   }
+  const scopeFailure = validatePreparedScopeEvidence({ prepared, preparation });
+  if (scopeFailure) return scopeFailure;
   if (
     prepared.commandDigest !== preparation.commandDigest ||
     sandboxCommandDigest(prepared.approvedArgv) !== preparation.commandDigest ||
@@ -526,6 +528,38 @@ function validatePreparedIdentity(input: {
   }
   if (!Number.isSafeInteger(prepared.expiresAtMs) || prepared.expiresAtMs <= input.now()) {
     return 'Prepared sandbox plan expired.';
+  }
+  return null;
+}
+
+/**
+ * A prepared plan may only claim a scope that the published backend evidence
+ * says is enforced.  This check is intentionally before the process port and
+ * treats unsupported dimensions as a terminal sandbox denial; an approval or
+ * an uncertain effect must never silently widen a baseline plan to `allow_all`.
+ */
+function validatePreparedScopeEvidence(input: {
+  readonly prepared: Readonly<PreparedSandboxExecution>;
+  readonly preparation: Readonly<SandboxPreparation>;
+}): string | null {
+  const filesystemCapability =
+    input.preparation.filesystemMode === 'allow_all'
+      ? 'full_access'
+      : input.preparation.executionTrust === 'policy_proven_read_only'
+        ? 'read_only'
+        : 'workspace_write';
+  if (
+    input.preparation.filesystemMode === 'allow_all' &&
+    input.preparation.executionTrust === 'policy_proven_read_only'
+  ) {
+    return 'Prepared sandbox scope cannot combine full filesystem access with read-only trust.';
+  }
+  if (input.prepared.backendCapabilities.filesystem[filesystemCapability] !== 'enforced') {
+    return `Prepared sandbox filesystem scope '${filesystemCapability}' is unsupported by backend evidence.`;
+  }
+  const networkCapability = input.preparation.networkMode === 'allow_all' ? 'allowlist' : 'off';
+  if (input.prepared.backendCapabilities.network[networkCapability] !== 'enforced') {
+    return `Prepared sandbox network scope '${networkCapability}' is unsupported by backend evidence.`;
   }
   return null;
 }

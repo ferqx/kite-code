@@ -13,21 +13,12 @@ function facts(overrides: Partial<AutoReviewFacts> = {}): AutoReviewFacts {
 }
 
 describe('State auto-review completion authority', () => {
-  test('accepts only an operation-bound approve_once or same_command grant', () => {
+  test('accepts only the operation-bound approve_once grant', () => {
     expect(decideAutoReview(facts())).toEqual({
       kind: 'accepted_approval',
       reviewId: 'review-1',
       toolCallId: 'tool-1',
       grant: 'approve_once',
-    });
-    expect(
-      decideAutoReview(facts({ grant: 'same_command', reason: 'same command is bounded' })),
-    ).toEqual({
-      kind: 'accepted_approval',
-      reviewId: 'review-1',
-      toolCallId: 'tool-1',
-      grant: 'same_command',
-      reason: 'same command is bounded',
     });
   });
 
@@ -78,12 +69,22 @@ describe('State auto-review completion authority', () => {
     });
   });
 
-  test('never turns full_access or an omitted grant into automatic approval', () => {
-    expect(decideAutoReview(facts({ grant: 'full_access' }))).toMatchObject({
+  test('fails closed for same_command, full_access, and legacy reviewer output shapes', () => {
+    expect(decideAutoReview(facts({ grant: 'same_command' } as never))).toMatchObject({
+      kind: 'request_user_approval',
+      toolCallId: 'tool-1',
+      failureType: 'invalid_response',
+    });
+    expect(decideAutoReview(facts({ grant: 'full_access' } as never))).toMatchObject({
       kind: 'request_user_approval',
       reviewId: 'review-1',
       toolCallId: 'tool-1',
       failureType: 'invalid_response',
+    });
+    expect(decideAutoReview({ kind: 'approve', approved: true, grant: 'approve_once' })).toEqual({
+      kind: 'request_user_approval',
+      failureType: 'invalid_response',
+      reason: 'Auto-review facts are malformed; user approval is required.',
     });
     expect(decideAutoReview(facts({ grant: undefined }))).toMatchObject({
       kind: 'request_user_approval',

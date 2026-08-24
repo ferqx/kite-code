@@ -2,7 +2,6 @@ import { platform as osPlatformFn, type as osTypeFn, release } from 'node:os';
 import type { BaseMessage } from './messages';
 import type {
   BuiltinAgentPhase,
-  BuiltinAuthorizationMode,
   BuiltinInteractionMode,
   BuiltinPlanningStateView,
   BuiltinSandboxBackend,
@@ -46,7 +45,6 @@ export interface RuntimeContextInput {
 export interface RuntimeModeSnapshotInput {
   phase: BuiltinAgentPhase;
   interactionMode: BuiltinInteractionMode;
-  authorizationMode: BuiltinAuthorizationMode;
   sandboxBackend: BuiltinSandboxBackend | 'unknown';
   /** v2: PlanningState for dynamic runtime-state block */
   planningState?: BuiltinPlanningStateView;
@@ -102,7 +100,6 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     '<runtime-state source="runtime.kernel">',
     `phase: ${input.phase}`,
     `interaction_mode: ${input.interactionMode}`,
-    `authorization_mode: ${input.authorizationMode}`,
     `sandbox_backend: ${input.sandboxBackend}`,
     ...(input.taskId ? [`task_id: ${input.taskId}`] : []),
     ...(input.sideEffectsStarted != null
@@ -157,7 +154,7 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     );
   } else {
     lines.push(
-      'Building phase policy: execute the approved task under the current interaction mode and authorization; update_plan for progress tracking; write_plan(action="submit") may request a structural replan while an approved plan is executing; tool policy still enforces approval and sandbox boundaries.',
+      'Building phase policy: execute the approved task under the current interaction mode; update_plan for progress tracking; write_plan(action="submit") may request a structural replan while an approved plan is executing; tool policy still enforces approval and sandbox boundaries.',
     );
   }
   lines.push('</runtime-state>');

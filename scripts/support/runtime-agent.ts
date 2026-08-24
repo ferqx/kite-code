@@ -3,14 +3,14 @@
  *
  * Production callers must provide an already-owned Kernel and effect port to
  * `executeRuntimeTurn`. This root-only helper is the only place that
- * deliberately composes the State 25 App coordinator for existing corpus
+ * deliberately composes the current State App coordinator for existing corpus
  * tests and fixtures.
  */
 
 import { createHash } from 'node:crypto';
 import type { AgentState, RuntimeEvent } from '@kite/agent-kernel';
 import { createChatModel, type SupportedChatModel } from '@kite/builtin-runtime/model';
-import { sandboxSupportsFullMode } from '@kite/builtin-runtime/sandbox';
+import { sandboxBackendAvailable } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
 import type { StateRuntimeStorage } from '#app/bootstrap/runtime/state-runtime';
 import { executeRuntimeTurn, type RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
@@ -38,7 +38,7 @@ const TEST_RUNTIME_RECOVERY_IDENTITY_KEY_ =
   '0000000000000000000000000000000000000000000000000000000000000000';
 
 /**
- * Run one test turn with an explicitly composed State 25/Store 4 Kernel.
+ * Run one test turn with an explicitly composed State/Store Kernel.
  * The helper owns exactly this Kernel and closes it exactly once after the
  * test entry returns or throws.
  */
@@ -64,13 +64,11 @@ export async function* runTestRuntimeAgent(
     store,
     recoveryIdentityKey,
     interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'accept_edits',
-    authorizationMode: input.authorizationMode,
-    authorizationSource: input.authorizationSource,
     phase: 'building',
     sandboxAvailable:
       input.sandboxBackend === 'unknown'
         ? false
-        : sandboxSupportsFullMode(input.sandboxBackend ?? 'none'),
+        : sandboxBackendAvailable(input.sandboxBackend ?? 'none'),
     modelArtifactEvidence: input.modelInvocationRuntime.evidence,
     capabilityArtifactEvidence: input.modelInvocationRuntime.capabilityArtifacts,
   });

@@ -115,7 +115,6 @@ function initialStatusSnapshot(): SessionStatusProjection {
     phase: 'building',
     plan: null,
     pendingPlan: null,
-    authorization: 'default',
     workspaceAccess: 'write',
     cacheHitTokens: 0,
     cacheMissTokens: 0,

@@ -9,15 +9,6 @@ export {
   runtimeHostStateCreateApprovalBindingDigest,
   runtimeHostStateVerifyApprovalBindingDigest,
 } from './approval-binding';
-export type { StateApprovalGrant, StateAuthorizationState } from './authorization';
-export {
-  runtimeHostStateApplyApprovalGrant,
-  runtimeHostStateAuthorizationCommandGrantKey,
-  runtimeHostStateDefaultAuthorization,
-  runtimeHostStateGrantSameCommand,
-  runtimeHostStateHasSameCommandGrant,
-  runtimeHostStateNormalizeAuthorization,
-} from './authorization';
 export { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-frame';
 export type {
   StateDoomLoopCheck,
@@ -194,6 +185,7 @@ export {
   STATE_RUNTIME_FAILURE_MODES_,
 } from './terminal-transition';
 export type {
+  RuntimeHostStateApprovalCommandIdentity,
   RuntimeHostStateSameCommandGrantInput,
   RuntimeHostStateToolGovernanceAuthorizationInput,
   RuntimeHostStateToolGovernanceDecision,
@@ -204,7 +196,10 @@ export type {
   RuntimeHostStateToolGovernancePort,
   RuntimeHostStateToolGovernanceResult,
 } from './tool-governance';
-export { createRuntimeHostStateToolGovernance } from './tool-governance';
+export {
+  createRuntimeHostStateToolGovernance,
+  runtimeHostStateCanAuthorizeToolInFullMode,
+} from './tool-governance';
 export type {
   StateToolDispatchState,
   StateToolExternalEffects,

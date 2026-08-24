@@ -73,7 +73,7 @@ async function executeApprovedRuntimeTool(input: {
     workspace: input.workspace,
     toolName: input.toolName,
     args: input.args,
-    state: { authorizationMode: 'full_access', authorizationSource: 'system' },
+    state: { interactionMode: 'full' },
     execution: input.execution,
   });
   if (!first.events.some((event) => event.type === 'approval.requested')) return first;

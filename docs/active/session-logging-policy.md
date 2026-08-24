@@ -7,12 +7,26 @@
 验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
-相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`。
+相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137。
 
 Session Logger 与 remote observability 是独立通道。启用本地 metadata/content logging 不授予 remote
 telemetry consent；remote consent 也不改变本地 logger mode、retention 或正文排除规则。Runtime 恢复输入与
 日志写入是两个独立域：Session Logger 不能作为 Runtime event source，也不能扩大 content allowlist 或复制
 production Artifact。
+
+## SAQ-10 审批队列日志边界
+
+State 27/SAQ epoch 的 durable approval queue、`same_command` session grant、batch receipt、generation
+与恢复状态属于 Runtime authority，不属于 Session Logger authority。metadata 只记录已有低基数
+approval/review 类型、结果、等待/执行 timing 与 bounded status；不得记录 command、cwd、workspace、
+executor/env、binding digest、receipt identity、parent/child identity 或 grant subject。`approval.requested.createdAt`
+只作为人工等待时长的起点，不能把持久化 queue payload 序列化到日志。
+
+`approval.batch_released`、`session_grants_cleared` 及迟到/过期事件按当前 epoch 的 strict decoder 与
+session/revision/generation 规则投影；未知 key、旧 epoch 或 identity 不完整的事件仍使恢复 fail closed，
+不会由 logger 侧补默认值或复活旧 grant。Auto review 只记录 `approve_once`、`reject` 或 `ask_user` 的
+低基数结果；`same_command` 与 Full 不作为 reviewer grant 写入。Live/replay 必须消费同一 canonical event，
+logger 不能制造 UI-only approval 事实。
 
 ## 模式与组合
 

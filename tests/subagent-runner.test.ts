@@ -15,7 +15,6 @@ import { getRoleConfig } from '@kite/builtin-runtime/subagent';
 import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
-  runtimeHostStateDefaultAuthorization as defaultAuthorizationState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
 } from '@kite/runtime-host/kernel-adapter';
@@ -112,7 +111,6 @@ function directUnitToolDispatcher(input: {
   mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
   skills?: import('@kite/builtin-runtime/skills').SkillManifest[];
   skillOptions?: import('@kite/builtin-runtime/skills').SkillScanOptions;
-  authorization?: import('@kite/runtime-host/kernel-adapter').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   interactionMode?: import('@kite/runtime-contract').InteractionMode;
@@ -134,7 +132,6 @@ function directUnitToolDispatcher(input: {
     workspace: input.workspace,
     recoveryIdentityKey: TEST_RECOVERY_IDENTITY_KEY,
     interactionMode: input.interactionMode ?? 'accept_edits',
-    authorizationMode: input.authorization?.mode === 'full_access' ? 'full_access' : 'default',
     workspaceAccess: input.workspaceAccess ?? 'write',
     phase: input.phase ?? 'building',
   });
@@ -664,7 +661,7 @@ describe('SubAgentRunner integration', () => {
           signal: new AbortController().signal,
           eventSink: mockEventSink().sink,
           model,
-          authorization: { ...defaultAuthorizationState(), mode: 'full_access' },
+          interactionMode: 'full',
           shellExecutor: async (input) => ({
             ...combination,
             command: input.command,
@@ -810,7 +807,7 @@ describe('SubAgentRunner integration', () => {
         signal: new AbortController().signal,
         eventSink: sink,
         model,
-        authorization: { ...defaultAuthorizationState(), mode: 'full_access' },
+        interactionMode: 'full',
       });
 
       expect(existsSync(target)).toBe(false);
@@ -1304,7 +1301,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('inherits full access authorization for uncertain sub-agent verification', async () => {
+  test('inherits full interaction mode for uncertain sub-agent verification', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-verify-'));
     try {
       const { events, sink } = mockEventSink();
@@ -1339,7 +1336,7 @@ describe('SubAgentRunner integration', () => {
         signal: new AbortController().signal,
         eventSink: sink,
         model: model,
-        authorization: { ...defaultAuthorizationState(), mode: 'full_access' },
+        interactionMode: 'full',
         shellExecutor: async (input) => {
           shellExecutions += 1;
           return {

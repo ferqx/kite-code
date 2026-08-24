@@ -253,7 +253,10 @@ export function isConcurrentShellEffectEventCurrent(
     const call = state.tools.calls[invocation.toolCallId];
     return (
       call?.name === 'shell_execute' &&
-      (call.status === 'queued' || call.status === 'approved' || call.status === 'running')
+      (call.status === 'queued' ||
+        call.status === 'approved' ||
+        call.status === 'authorized_queued' ||
+        call.status === 'running')
     );
   }
   if (!('toolCallId' in event) || typeof event.toolCallId !== 'string') return false;
@@ -265,15 +268,29 @@ export function isConcurrentShellEffectEventCurrent(
     case 'auto_review.requested':
       return call.status === 'queued';
     case 'tool.started':
-      return call.status === 'queued' || call.status === 'approved';
+      return (
+        call.status === 'queued' ||
+        call.status === 'approved' ||
+        call.status === 'authorized_queued'
+      );
     case 'capability.invocation_recorded':
-      return call.status === 'queued' || call.status === 'approved' || call.status === 'running';
+      return (
+        call.status === 'queued' ||
+        call.status === 'approved' ||
+        call.status === 'authorized_queued' ||
+        call.status === 'running'
+      );
     case 'tool.progress':
     case 'tool.finished':
       return call.status === 'running';
     case 'tool.failed':
     case 'tool.rejected':
-      return call.status === 'queued' || call.status === 'approved' || call.status === 'running';
+      return (
+        call.status === 'queued' ||
+        call.status === 'approved' ||
+        call.status === 'authorized_queued' ||
+        call.status === 'running'
+      );
     case 'runtime.cancellation_diagnostic':
       return call.status === 'cancelled' || call.status === 'running';
     default:

@@ -108,7 +108,8 @@ git merge -X theirs origin/<branch> --no-edit
 
 ### 模式枚举常量
 
-有限枚举值的业务模式（如 `InteractionMode`、`AuthorizationMode`），禁止在代码中使用裸字符串常量进行判断或赋值。必须通过常量对象引用：
+有限枚举值的业务模式（如 `InteractionMode`），禁止在代码中使用裸字符串常量进行判断或赋值。Full 不再有独立
+`AuthorizationMode`；必须通过 `InteractionMode` 单一权威的常量对象引用：
 
 ```typescript
 // ✅ 正确：使用常量对象

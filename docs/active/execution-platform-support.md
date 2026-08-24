@@ -15,8 +15,20 @@ tests/execution/sandbox-execution-provider.test.ts`、
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、ADR-0131、`release/platform-capabilities/support-matrix.json`、
+相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、ADR-0131、ADR-0137、`release/platform-capabilities/support-matrix.json`、
 `docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
+
+## SAQ-10 scope contract
+
+三平台的发行兼容性与 effectful execution qualification 独立。UI 展示的 scope 必须等于 sealed Runtime boundary、native
+backend evidence 和实际 enforcement；backend `unsupported|unavailable`、evidence 缺失或 projection 不一致都 clean fail
+closed、host/provider call 为零。Full 只由 `interactionMode=full` 表达，不依赖第二个 approval grant，也不因受限 backend unavailable
+而隐式降级。
+
+Planning 非 Full 的 baseline 是 Workspace read-only，Building 非 Full 的 baseline 是 Workspace read/write；已知扩 scope 按
+Accept/Auto 进入 user/reviewer queue。Plan + Full 直接执行 Full scope 但保留 Plan lifecycle。native denial 终结为
+`sandbox_denied`，不换更宽 backend replay；只有 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 才允许一次 host
+availability。
 
 ## 当前支持集合
 
@@ -53,9 +65,10 @@ Ubuntu 24.04 默认 Node 18 的 Docker x64 预检负责捕获误用 `import.meta
 
 ADR-0081 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，普通
 `networkMode=off` 调用以 restricted current-user token、capability-SID ACL 和 Job Object 直接运行
-canonical 真实 Workspace，不创建 staging 副本。按 ADR-0110，只有同时获批 `allow_all + full_access` 的调用
+canonical 真实 Workspace，不创建 staging 副本。按 ADR-0110，只有明确 `interactionMode=full` 且 sealed scope 为
+`filesystem=full_access, network=allow_all` 的调用
 才直接使用当前登录用户 token 与该用户 Schannel profile；不创建本地账号、不请求 UAC、不保存密码或 readiness
-state。`allow_all + read_only/workspace_write` 必须在 user script 前 fail closed，不能借联网授权扩大文件系统
+state。无法由当前 interactionMode/endpoint 同时兑现网络与 filesystem scope 的调用必须在 user script 前 fail closed，不能借联网授权扩大文件系统
 权限。这条网络调用仍进入 Job Object，但不再宣称 restricted-token filesystem ceiling。两条路径都不是 D-04 或
 Full qualification。
 
@@ -63,11 +76,12 @@ direct token 是 lower-assurance backend。WRITE_RESTRICTED 只限制相应 SID 
 Workspace 外普通读取全部被拒绝，也不能为任意 descendant 提供结构性 network-off/allowlist。按 ADR-0131，
 Workspace 内 `.env.*` 不再需要或允许单独 ACL deny。因此 productionSupported 仍为 false，outcome 仍为 excluded。
 但 ADR-0121 将已选 windows_restricted_token 的 TUI/CLI Full 定义为开发期交互模式；它不改变该
-production verdict。只有 host backend=none 才显示“非沙箱环境无法开启full”。
+production verdict。受限 backend=none 时只显示该 backend 的 unsupported/fail-closed 状态；Full 仍由
+`interactionMode=full` 表达，不显示旧 grant，也不触发 host fallback。
 
 ADR-0082/ADR-0101/ADR-0110 对齐 development 权限交互与 Windows TLS 可执行性：protocol V6 接受 Tool Policy
-在单次审批后产生的 `allow_all + full_access`，并要求它使用当前登录用户 token；更窄 filesystem scope 的
-`allow_all` 被 runner 拒绝。精确 runtime version query 等可证明
+在 `interactionMode=full` 或 exact approval 后产生的 sealed scope，并要求 backend contract 明确其实际 token；更窄 filesystem scope 的
+更窄 scope 被 runner 拒绝。精确 runtime version query 等可证明
 本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
 verdict 或 D-04 空支持集。ADR-0088 已删除 AppContainer、private staging 与 repository reconciliation。
 
@@ -82,7 +96,7 @@ scope。它不是 startup downgrade、host Shell 或 native failure replay；三
 ADR-0077、ADR-0080 与 ADR-0081 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
 startup state machine。允许 host fallback 的开发入口只在用户脚本前确认 selected sandbox environment
 或 essential structural startup capability unavailable 时缓存 host Bash/cmd/PowerShell/POSIX，effective
-backend=none 且 Full 不可用。若 static candidate 只有在 durable preparation intent 后才暴露不可用，App 还可
+backend=none 且受限 capability 不可用；Full mode 仍由 interactionMode 表达，实际 boundary 不可用时执行 fail closed。若 static candidate 只有在 durable preparation intent 后才暴露不可用，App 还可
 消费 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 后选择同一 host availability。缺失或损坏的
 pinned runner、低于 API baseline 的系统、或 initial restricted child/token verification failure 都属于这种
 用户命令启动前的 availability 情形。
@@ -112,8 +126,8 @@ physical Win10 behavior。该 baseline 不会让任一 Windows development backe
 
 ADR-0101 将 native invocation protocol 提升到 V6。adapter 与 runner 必须以 manifest 内固定的
 `protocolVersion=6` 相互校验；V6 只描述 direct restricted-token invocation，显式携带 development
-`off | allow_all` authorization projection，并删除 backend mode、AppContainer identity 与 staging
-字段。只有带 `full_access` 的 `allow_all` 必须使用当前登录用户 token；更窄 scope fail closed，非网络
+network `off | allow_all` 与 filesystem `read_only | workspace_write | full_access` sealed-scope projection，并删除 backend mode、AppContainer identity 与 staging
+字段。只有 `interactionMode=full` 且 backend 明确支持 `full_access + allow_all` scope 时才可使用当前登录用户 token；更窄 scope fail closed，非网络
 approved filesystem invocation 暂时携带 protocol compatibility SID，但按 ADR-0132 不安装 protected-path deny。
 V1-V5 runner 必须在 user script 前 fail closed。
 `windows-runner.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
@@ -173,7 +187,7 @@ shell descendant filesystem inheritance；executor 还使用逐 invocation、`07
 fail closed。这些只是未固定的开发 evidence。ADR-0131 之后，Workspace 内
 `.GIT/config` read 与 `.ENV.TEST` write 必须正向通过；旧 run `30705493919` 的名称级负向场景已经过时，
 不得作为当前实现 evidence。按 ADR-0132，旧的 Workspace 外 protected identity native deny 场景同样过时；
-新证据必须证明敏感访问未经 Policy approval 不 dispatch、批准后 `full_access` 不被 native backend 二次拒绝，
+新证据必须证明敏感访问未经 Policy approval 不 dispatch、批准后 sealed scope 不被 native backend 二次拒绝，
 但本次 profile 变化尚无绑定当前 source 的 release-pinned native artifact。
 Seatbelt 没有实现并
 证明每次 Shell invocation 的硬 process-tree 数量上限，forked Skill/local stdio MCP 与两个
@@ -209,7 +223,7 @@ MCP 明确为 false。GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`
 平台证据的唯一 authority；required job 必须在当前 head 上真实运行并上传经独立 verifier 校验的
 不可变 evidence/verification artifact。本地测试或代码存在不能替代该 artifact，也不能提前改变
 `excluded`/空支持集结论。PS-02 的实现验收与平台能力准入分开：没有绑定当前 head 的成功 Actions
-run 时，计划状态只能写 `waiting_ci`，不能把 workflow 存在写成 passed。allowlist 不会映射为 `allow_all`；App composition 对 descendant
+run 时，计划状态只能写 `waiting_ci`，不能把 workflow 存在写成 passed。allowlist 不会映射为 development `allow_all`；App composition 对 descendant
 allowlist 继续 fail closed。
 
 绑定提交 `28e857f8f41913feee5eacd17a2e61fe6cbb439e` 的
@@ -282,7 +296,7 @@ Provider 不启动进程，ready 与 dispatch durable ack 之前也没有 user-c
 `setsid`/detached descendant，不能据此提交 cleanup success。Windows restricted-token preparation/runtime codec
 使用 protocol V6 的严格 framed request/receipt 验证：allocating admission 在 durable intent 后创建唯一 runtime，
 返回 immutable transport；Runtime consumer 在 ready/dispatch ack 后把 runner 交给唯一 Host spawn primitive，且仅在 Job empty、ACL revoke
-与 runtime cleanup 皆确认后提交 disposal。`full_access` 与 `allow_all` 仍是对精确审批调用的 development authority，
+与 runtime cleanup 皆确认后提交 disposal。`filesystem=full_access`/`network=allow_all` 仍只是精确 invocation 的 development execution projection，
 不提供 strict network 或 production Full 资格。只有 Linux
 bubblewrap 的 workspace-scoped confinement 是当前可继续验证的候选；它仍需 native PID namespace/cgroup、完整
 descendant exit 与入口组合证据，不能由本机静态/单元测试升级。旧 Windows direct executor 不再是 production

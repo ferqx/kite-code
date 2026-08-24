@@ -40,7 +40,6 @@ import {
 } from '#app/bootstrap/runtime/subagent/continuation-codec';
 import type { AgentConfig } from '#app/config/index';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { deferResumedSubagentApprovalBehindQueuedSibling } from '../../apps/kite/src/bootstrap/runtime/runtime-tool-effect';
 import { createPipelineSubagentRuntime } from '../../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
 import { normalizeTerminalRuntimeEvent } from '../../apps/kite/src/bootstrap/runtime/terminal-outcome';
 import { createAppToolPipelineComposition } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-composition';
@@ -49,7 +48,6 @@ import {
   buildBlockedToolRequest,
   createKernelApprovalBindingForBlockedSubagent,
   effectiveSubagentInteractionMode,
-  serializeConcurrentSubagentApprovalEvents,
 } from '../../apps/kite/src/runtime/tool-execution/subagent-executor';
 import { toRuntimeSubagentEvent } from '../../apps/kite/src/runtime/tool-execution/terminal-projection';
 import { currentPlanDocument } from '../helpers/current-plan';
@@ -214,9 +212,62 @@ function applyExactApprovalFixture(
   if (!requested || !call) {
     throw new Error(`Missing exact approval fixture for ${toolCallId}: ${JSON.stringify(events)}.`);
   }
-  call.status = 'approved';
-  call.approvalGrant = 'approve_once';
-  call.approvalHash = requested.approval.approvalHash;
+  let next = reduceRuntimeState(state, requested);
+  const pending = next.pendingApprovals.get(
+    requested.type === 'approval.requested' ? requested.interactionId : requested.reviewId,
+  );
+  if (!pending) {
+    throw new Error(`Missing durable approval queue record for ${toolCallId}.`);
+  }
+  if (requested.type === 'auto_review.requested') {
+    next = reduceRuntimeState(next, {
+      type: 'auto_review.completed',
+      reviewId: requested.reviewId,
+      toolCallId,
+      result: {
+        ok: true,
+        approved: true,
+        grant: 'approve_once',
+        reviewerModelName: 'fixture-reviewer',
+        durationMs: 0,
+      },
+    });
+  } else {
+    next = reduceRuntimeState(next, {
+      type: 'approval.granted',
+      interactionId: requested.interactionId,
+      toolCallId,
+      grant: 'approve_once',
+      receiptId: `receipt:${requested.interactionId}:${pending.generation}`,
+      generation: pending.generation,
+    });
+  }
+  Object.assign(state, next);
+}
+
+/**
+ * Restricted child Shell fixtures must carry the same sandbox qualification
+ * fact that production admission receives from the App sandbox coordinator.
+ * The config's `sandbox.enabled` flag is not that runtime fact; omitting this
+ * field should exercise fail-closed production behavior, not make a positive
+ * approval/binding fixture impossible to construct.
+ */
+function availableWorkspaceSandboxContext(input: Parameters<typeof toolAvailabilityContext>[0]) {
+  return {
+    ...toolAvailabilityContext(input),
+    sandboxAvailable: true,
+  };
+}
+
+/** Pass the runtime sandbox qualification through the test-only binding seam. */
+function createSandboxQualifiedApprovalBinding(
+  input: Parameters<typeof createKernelApprovalBindingForBlockedSubagent>[0],
+) {
+  // The production helper currently exposes the availability fact through
+  // its internal exact-policy input. Keep this fixture explicit without
+  // weakening the helper's public test contract or changing production code.
+  const qualifiedInput = { ...input, sandboxAvailable: true };
+  return createKernelApprovalBindingForBlockedSubagent(qualifiedInput);
 }
 
 function v2ExecutingPlanState() {
@@ -292,6 +343,7 @@ async function createExactTaskResumeJourney(input: {
   task: string;
   model: ReturnType<typeof createMockModel>;
   workspace?: string;
+  taskConfig?: AgentConfig;
 }): Promise<{
   state: ReturnType<typeof createRuntimeHostStateInitialState>;
   continuationArtifacts: ReturnType<typeof testSubagentContinuationArtifacts>;
@@ -301,6 +353,7 @@ async function createExactTaskResumeJourney(input: {
   initialEvents: RuntimeEvent[];
 }> {
   const workspace = input.workspace ?? process.cwd();
+  const taskConfig = input.taskConfig ?? EXACT_TASK_RESUME_TEST_CONFIG;
   const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `exact-task-resume-${input.role}`,
@@ -347,7 +400,8 @@ async function createExactTaskResumeJourney(input: {
   await executeTestRuntimeTools({
     state: liveState,
     toolCallIds: ['task'],
-    taskConfig: EXACT_TASK_RESUME_TEST_CONFIG,
+    taskConfig,
+    sandboxAvailable: true,
     taskModel: input.model,
     subagentContinuationArtifacts: continuationArtifacts,
     subagentTaskRequests: taskRequests,
@@ -390,13 +444,16 @@ async function createExactTaskResumeJourney(input: {
     message: `Sub-agent tool '${restored.blockedTool.toolName}' requires approval.`,
     continuation: restored,
   };
-  const approvalBinding = createKernelApprovalBindingForBlockedSubagent({
+  const approvalBinding = createSandboxQualifiedApprovalBinding({
     state: liveState,
     parentToolCallId: 'task',
     blocked,
-    availCtx: toolAvailabilityContext({
+    availCtx: availableWorkspaceSandboxContext({
       workspace: liveState.session.workspace,
       threadId: liveState.session.threadId,
+      config: taskConfig,
+      interactionMode: liveState.mode,
+      phase: 'building',
     }),
     toolPipelineComposition: createAppToolPipelineComposition(testBuiltinToolCatalog()),
   });
@@ -453,6 +510,8 @@ async function createExactTaskResumeJourney(input: {
           review.type === 'approval.requested' ? review.interactionId : review.reviewId,
         toolCallId: 'task',
         grant: 'approve_once',
+        receiptId: 'receipt-task',
+        generation: 0,
       }),
       liveState,
       new Date().toISOString(),
@@ -1100,7 +1159,7 @@ describe('executeTestRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.mode = 'full';
-    state.authorization.mode = 'full_access';
+    state.mode = 'full';
     const longReadOnlyCommands = ['agent-kernel', 'builtin-runtime'].map(
       (workspacePackage) =>
         `ls ${Array.from(
@@ -1185,7 +1244,7 @@ describe('executeTestRuntimeTools', () => {
       expect.objectContaining({
         type: 'tool.failed',
         failure: expect.objectContaining({
-          message: 'Projected State 25 governance facts are invalid.',
+          message: 'Projected State 27 governance facts are invalid.',
         }),
       }),
     );
@@ -1203,48 +1262,49 @@ describe('executeTestRuntimeTools', () => {
     ).toHaveLength(2);
   });
 
-  test('serializes concurrent child approvals without dropping suspended siblings', () => {
-    const approval = {
-      type: 'approval.requested' as const,
-      interactionId: 'approval-a',
-      toolCallId: 'task-a',
-      approval: {} as never,
-    };
-    const serialized = serializeConcurrentSubagentApprovalEvents([
-      [{ type: 'subagent.suspended', toolCallId: 'task-a', snapshot: {} as never }, approval],
-      [
-        {
-          type: 'subagent.completed',
-          subagent: {
-            id: 'child-c',
-            summary: 'Completed while siblings waited for approval.',
-            toolCallCount: 1,
-            durationMs: 10,
-          },
-        },
-        {
-          type: 'tool.finished',
-          toolCallId: 'task-c',
-          name: 'task',
-          result: { ok: true, command: '', exitCode: 0, stdout: 'done', stderr: '' },
-        },
-      ],
-      [
-        { type: 'subagent.suspended', toolCallId: 'task-b', snapshot: {} as never },
-        { ...approval, interactionId: 'approval-b', toolCallId: 'task-b' },
-      ],
-    ]);
-
-    expect(serialized.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
-    expect(serialized.filter((event) => event.type === 'subagent.completed')).toHaveLength(1);
-    expect(
-      serialized.some((event) => event.type === 'tool.finished' && event.toolCallId === 'task-c'),
-    ).toBe(true);
-    expect(serialized.filter((event) => event.type === 'approval.requested')).toHaveLength(1);
-    expect(serialized).toContainEqual({
-      type: 'subagent.approval_deferred',
-      toolCallId: 'task-b',
+  test('reduces concurrent child approvals without dropping either durable request', () => {
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'concurrent-child-durable-requests',
+      userId: 'user',
+      workspace: process.cwd(),
     });
+    for (const [ordinal, toolCallId] of ['task-a', 'task-b'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'parallel-child-model',
+        ordinal,
+        name: 'task',
+        args: { name: toolCallId, subagent_type: 'explore', task: `Explore ${toolCallId}.` },
+        status: 'running',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state = reduceRuntimeState(state, {
+        type: 'approval.requested',
+        interactionId: `approval-${toolCallId}`,
+        toolCallId,
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
+        approval: {
+          scope: 'once',
+          cwd: state.session.workspace,
+          threadId: state.session.threadId,
+          tool: 'shell_execute',
+          command: `cat /tmp/${toolCallId}`,
+          risk: 'read',
+          approvalHash: `${ordinal + 1}`.repeat(64),
+          summary: `Read ${toolCallId}`,
+          reason: 'Known external scope expansion.',
+          expectedEffects: ['Reads one external file'],
+          grantOptions: ['approve_once', 'same_command'],
+          recommendedGrant: 'approve_once',
+        },
+      });
+    }
+
+    expect(state.pendingApprovals.size).toBe(2);
+    expect([...state.pendingApprovals.keys()]).toEqual(['approval-task-a', 'approval-task-b']);
+    expect(state.activeApprovalId).toBe('approval-task-a');
   });
 
   test('uses auto only for concurrent Explore children while preserving parent Auto and Full', () => {
@@ -1312,7 +1372,7 @@ describe('executeTestRuntimeTools', () => {
   test.each([
     'approval.requested',
     'auto_review.requested',
-  ] as const)('makes a repeatedly blocked child yield %s to an older deferred sibling', (type) => {
+  ] as const)('keeps a repeatedly blocked child request canonical for %s', (type) => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'fair-deferred-child-approval',
@@ -1344,6 +1404,8 @@ describe('executeTestRuntimeTools', () => {
             type,
             interactionId: 'current-approval',
             toolCallId: 'current-task',
+            fullModeBypassEligible: false,
+            fullModePolicyBypassAllowed: false,
             approval: {} as never,
           } as const)
         : ({
@@ -1352,18 +1414,19 @@ describe('executeTestRuntimeTools', () => {
             toolCallId: 'current-task',
             toolName: 'shell_execute',
             reason: 'review',
+            fullModeBypassEligible: false,
+            fullModePolicyBypassAllowed: false,
             approval: {} as never,
           } as const);
 
-    const deferred = deferResumedSubagentApprovalBehindQueuedSibling(state, 'current-task', event);
-    expect(deferred).toEqual({
-      type: 'subagent.approval_deferred',
-      toolCallId: 'current-task',
-    });
-    const yielded = reduceRuntimeState(state, deferred);
-    expect(yielded.tools.queue).toEqual(['older-task', 'current-task']);
+    const yielded = reduceRuntimeState(state, event);
+    expect(yielded.tools.queue).toEqual(['older-task']);
     expect(yielded.tools.calls['older-task']?.status).toBe('queued');
-    expect(yielded.tools.calls['current-task']?.status).toBe('queued');
+    expect(
+      yielded.pendingApprovals.get(
+        type === 'approval.requested' ? 'current-approval' : 'current-review',
+      ),
+    ).toBeDefined();
   });
 
   test('surfaces a deferred child approval without restarting the child model', async () => {
@@ -1374,6 +1437,7 @@ describe('executeTestRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.mode = 'auto';
+    state.autoReview.circuitBreakerTripped = true;
     state.tools.calls.task = {
       toolCallId: 'task',
       modelMessageId: 'parallel-task-model',
@@ -1400,20 +1464,31 @@ describe('executeTestRuntimeTools', () => {
     };
     const blocked = {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' as const,
-      toolCallId: 'child-read',
-      toolName: 'read_file',
-      args: { path: '/outside/fixture.txt' },
-      command: '/outside/fixture.txt',
+      toolCallId: 'child-shell',
+      toolName: 'shell_execute',
+      args: { command: 'rg fixture /outside/fixture.txt' },
+      command: 'rg fixture /outside/fixture.txt',
       message: 'blocked',
       continuation,
     };
-    const approvalBinding = createKernelApprovalBindingForBlockedSubagent({
+    const taskConfig: AgentConfig = {
+      apiKey: 'unused',
+      baseURL: 'https://example.invalid',
+      modelName: 'fixture',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: false },
+    };
+    const approvalBinding = createSandboxQualifiedApprovalBinding({
       state,
       parentToolCallId: 'task',
       blocked,
-      availCtx: toolAvailabilityContext({
+      availCtx: availableWorkspaceSandboxContext({
         workspace: state.session.workspace,
         threadId: state.session.threadId,
+        config: taskConfig,
+        interactionMode: state.mode,
+        phase: 'building',
       }),
       toolPipelineComposition: createAppToolPipelineComposition(testBuiltinToolCatalog()),
     });
@@ -1431,14 +1506,8 @@ describe('executeTestRuntimeTools', () => {
     const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['task'],
-      taskConfig: {
-        apiKey: 'unused',
-        baseURL: 'https://example.invalid',
-        modelName: 'fixture',
-        providerName: 'fixture',
-        providerType: 'openai-compatible',
-        sandbox: { enabled: false },
-      },
+      taskConfig,
+      sandboxAvailable: true,
       taskModel: model,
       subagentContinuationArtifacts: continuationArtifacts,
     });
@@ -1497,6 +1566,7 @@ describe('executeTestRuntimeTools', () => {
         providerType: 'openai-compatible',
         sandbox: { enabled: false },
       },
+      sandboxAvailable: true,
       taskModel: model,
       subagentContinuationArtifacts: {
         write: () => {
@@ -1599,7 +1669,16 @@ describe('executeTestRuntimeTools', () => {
       state,
       toolCallIds: ['task-a', 'task-b'],
       taskConfig: config,
+      sandboxAvailable: true,
       taskModel: model,
+      shellExecutor: async ({ command }) => ({
+        ok: false,
+        command,
+        exitCode: -1,
+        stdout: '',
+        stderr: 'command requires approval but was not approved',
+        status: 'rejected' as const,
+      }),
       subagentEventSink: () => {},
     });
 
@@ -1616,15 +1695,15 @@ describe('executeTestRuntimeTools', () => {
       blockedReasonCode,
       blockedReasonCode,
     ]);
-    expect(terminal.filter((event) => event.type === activeReviewType)).toHaveLength(1);
-    expect(terminal.filter((event) => event.type === 'subagent.approval_deferred')).toHaveLength(1);
+    expect(terminal.filter((event) => event.type === activeReviewType)).toHaveLength(2);
+    expect(terminal.filter((event) => event.type === 'subagent.approval_deferred')).toHaveLength(0);
   });
 
   test.each([
     'missing',
     'mismatched',
   ] as const)('fails closed when a child auto-review continuation is %s', async (snapshotState) => {
-    const state = createRuntimeHostStateInitialState({
+    let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: `child-auto-review-${snapshotState}`,
       userId: 'user',
@@ -1638,27 +1717,20 @@ describe('executeTestRuntimeTools', () => {
       status: 'awaiting_auto_review',
       createdAtTurnId: state.turn.turnId,
     };
-    state.interactions = {
-      kind: 'awaiting_auto_review',
-      interactionId: 'review-child',
-      toolCallId: 'task',
-      toolName: 'shell_execute',
-      reason: 'review child command',
-      approval: {
-        scope: 'once',
-        cwd: state.session.workspace,
-        threadId: state.session.threadId,
-        tool: 'shell_execute',
-        command: 'git add fixture.txt',
-        risk: 'vcs_mutation',
-        approvalHash: 'hash',
-        summary: 'Stage fixture.',
-        reason: 'Requires automatic review.',
-        expectedEffects: ['Mutates version control state'],
-        grantOptions: ['approve_once'],
-        recommendedGrant: 'approve_once',
-        subagentId: 'expected-child',
-      },
+    const approval = {
+      scope: 'once' as const,
+      cwd: state.session.workspace,
+      threadId: state.session.threadId,
+      tool: 'shell_execute',
+      command: 'git add fixture.txt',
+      risk: 'vcs_mutation' as const,
+      approvalHash: 'a'.repeat(64),
+      summary: 'Stage fixture.',
+      reason: 'Requires automatic review.',
+      expectedEffects: ['Mutates version control state'],
+      grantOptions: ['approve_once'] as const,
+      recommendedGrant: 'approve_once' as const,
+      subagentId: 'expected-child',
     };
     let continuationArtifacts: ReturnType<typeof installTestPrivateSuspendedSubagent> | undefined;
     if (snapshotState === 'mismatched') {
@@ -1685,6 +1757,16 @@ describe('executeTestRuntimeTools', () => {
         ),
       );
     }
+    state = reduceRuntimeState(state, {
+      type: 'auto_review.requested',
+      reviewId: 'review-child',
+      toolCallId: 'task',
+      toolName: 'shell_execute',
+      reason: 'review child command',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval,
+    });
     const model = createMockModel([]);
     const executor = createTestRuntimeEffectExecutor({
       config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
@@ -1723,7 +1805,7 @@ describe('executeTestRuntimeTools', () => {
     });
     state.mode = mode;
     state.autoReview.circuitBreakerTripped = circuitBreakerTripped;
-    const availCtx = toolAvailabilityContext({
+    const availCtx = availableWorkspaceSandboxContext({
       workspace: state.session.workspace,
       threadId: state.session.threadId,
     });
@@ -1744,7 +1826,7 @@ describe('executeTestRuntimeTools', () => {
         toolRecovery: createToolRecoveryJournal(state.toolRecovery.identityKey),
       },
     };
-    const approvalBinding = createKernelApprovalBindingForBlockedSubagent({
+    const approvalBinding = createSandboxQualifiedApprovalBinding({
       state,
       parentToolCallId: 'task-call',
       blocked,
@@ -1755,6 +1837,7 @@ describe('executeTestRuntimeTools', () => {
     const event = blockedSubagentReviewEvent({
       state,
       parentToolCallId: 'task-call',
+      sandboxAvailable: true,
       blocked: {
         ...blocked,
         approvalBinding,
@@ -1789,7 +1872,7 @@ describe('executeTestRuntimeTools', () => {
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
-    const availCtx = toolAvailabilityContext({
+    const availCtx = availableWorkspaceSandboxContext({
       workspace: state.session.workspace,
       threadId: state.session.threadId,
     });
@@ -1811,7 +1894,7 @@ describe('executeTestRuntimeTools', () => {
         toolRecovery: createToolRecoveryJournal(state.toolRecovery.identityKey),
       },
     };
-    const approvalBinding = createKernelApprovalBindingForBlockedSubagent({
+    const approvalBinding = createSandboxQualifiedApprovalBinding({
       state,
       parentToolCallId: 'task-call',
       blocked,
@@ -1861,6 +1944,7 @@ describe('executeTestRuntimeTools', () => {
         blockedSubagentReviewEvent({
           state,
           parentToolCallId: 'task-call',
+          sandboxAvailable: true,
           blocked: candidate,
           availCtx,
           toolPipelineComposition: createAppToolPipelineComposition(testBuiltinToolCatalog()),
@@ -1874,6 +1958,10 @@ describe('executeTestRuntimeTools', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-subagent-resume-budget-'));
     try {
       const order: string[] = [];
+      const config: AgentConfig = {
+        ...EXACT_TASK_RESUME_TEST_CONFIG,
+        features: { resourceBudget: true, boundedCancellation: true },
+      };
       const journey = await createExactTaskResumeJourney({
         role: 'code',
         task: 'Run the approved command and finish.',
@@ -1889,6 +1977,7 @@ describe('executeTestRuntimeTools', () => {
           { message: aiMessage({ content: 'The command was approved.' }) },
         ]),
         workspace,
+        taskConfig: config,
       });
       const model = createMockModel([{ message: aiMessage({ content: 'Done.' }) }]);
       const mockModel = model.model as typeof model.model & {
@@ -1898,10 +1987,6 @@ describe('executeTestRuntimeTools', () => {
       mockModel.doGenerate = async (...args: unknown[]) => {
         order.push('model-dispatch');
         return generate(...args);
-      };
-      const config: AgentConfig = {
-        ...EXACT_TASK_RESUME_TEST_CONFIG,
-        features: { resourceBudget: true, boundedCancellation: true },
       };
       const host = testRuntimeCapabilityExecutionPort();
       let builtinTaskHostInvokes = 0;
@@ -1914,6 +1999,7 @@ describe('executeTestRuntimeTools', () => {
         state: journey.state,
         toolCallIds: ['task'],
         taskConfig: config,
+        sandboxAvailable: true,
         taskModel: model,
         subagentContinuationArtifacts: journey.continuationArtifacts,
         subagentTaskRequests: journey.taskRequests,
@@ -2036,6 +2122,7 @@ describe('executeTestRuntimeTools', () => {
         state: journey.state,
         toolCallIds: ['task'],
         taskConfig: EXACT_TASK_RESUME_TEST_CONFIG,
+        sandboxAvailable: true,
         taskModel: createMockModel([]),
         subagentContinuationArtifacts: journey.continuationArtifacts,
         subagentTaskRequests: journey.taskRequests,
@@ -2111,6 +2198,7 @@ describe('executeTestRuntimeTools', () => {
         state: journey.state,
         toolCallIds: ['task'],
         taskConfig: EXACT_TASK_RESUME_TEST_CONFIG,
+        sandboxAvailable: true,
         taskModel: createMockModel([]),
         subagentContinuationArtifacts: journey.continuationArtifacts,
         subagentTaskRequests: journey.taskRequests,
@@ -3121,6 +3209,18 @@ describe('executeTestRuntimeTools', () => {
       });
       const { approvalBinding: _originalApprovalBinding, ...blockedWithoutApproval } =
         restored.blockedTool;
+      const restoredForDenied = {
+        ...restored,
+        ...(restored.approvalFacts
+          ? {
+              approvalFacts: {
+                ...restored.approvalFacts,
+                bindingDigest: 'pending',
+                runtimeToolCallId: deniedRuntimeToolCallId,
+              },
+            }
+          : {}),
+      };
       const deniedBlocked = {
         ...blockedWithoutApproval,
         toolCallId: 'child-shell',
@@ -3129,7 +3229,7 @@ describe('executeTestRuntimeTools', () => {
         args: { command: deniedCommand },
         command: deniedCommand,
         message: 'blocked',
-        continuation: restored,
+        continuation: restoredForDenied,
       };
       const deniedChild = {
         ...originalChild,
@@ -3143,21 +3243,39 @@ describe('executeTestRuntimeTools', () => {
         ...state.tools.queue.filter((id) => id !== originalRuntimeToolCallId),
         deniedRuntimeToolCallId,
       ];
-      const deniedApprovalBinding = createKernelApprovalBindingForBlockedSubagent({
+      const deniedApprovalBinding = createSandboxQualifiedApprovalBinding({
         state,
         parentToolCallId: 'task',
         blocked: deniedBlocked,
-        availCtx: toolAvailabilityContext({
+        availCtx: availableWorkspaceSandboxContext({
           workspace: state.session.workspace,
           threadId: state.session.threadId,
+          config: EXACT_TASK_RESUME_TEST_CONFIG,
+          interactionMode: state.mode,
+          phase: 'building',
         }),
         toolPipelineComposition: createAppToolPipelineComposition(testBuiltinToolCatalog()),
       });
       if (!deniedApprovalBinding) {
         throw new Error('Expected an exact read-only ceiling approval binding.');
       }
-      const exactDeniedBlocked = { ...deniedBlocked, approvalBinding: deniedApprovalBinding };
-      const deniedSnapshot = serializeSubagentContinuation(restored, exactDeniedBlocked);
+      const deniedContinuation = {
+        ...restoredForDenied,
+        ...(restoredForDenied.approvalFacts
+          ? {
+              approvalFacts: {
+                ...restoredForDenied.approvalFacts,
+                bindingDigest: deniedApprovalBinding.digest,
+              },
+            }
+          : {}),
+      };
+      const exactDeniedBlocked = {
+        ...deniedBlocked,
+        continuation: deniedContinuation,
+        approvalBinding: deniedApprovalBinding,
+      };
+      const deniedSnapshot = serializeSubagentContinuation(deniedContinuation, exactDeniedBlocked);
       const deniedArtifact = journey.continuationArtifacts.write({
         owner: {
           parentInvocationId: suspended.parentInvocationId,
@@ -3195,6 +3313,7 @@ describe('executeTestRuntimeTools', () => {
         state: journey.state,
         toolCallIds: ['task'],
         taskConfig: EXACT_TASK_RESUME_TEST_CONFIG,
+        sandboxAvailable: true,
         taskModel: createMockModel([
           { message: aiMessage({ content: 'The command was rejected by the read-only ceiling.' }) },
         ]),
@@ -3272,7 +3391,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization = { mode: 'full_access', commandGrants: {} };
+    state.mode = 'full';
     const remoteToolName = '搜索 docs / latest';
     const exposedName = exposedMcpToolName('docs.provider', remoteToolName);
     const descriptor = canonicalMcpDescriptor({
@@ -3366,7 +3485,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization = { mode: 'full_access', commandGrants: {} };
+    state.mode = 'full';
     const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:docs/search',
       revision: 'revision-1',
@@ -4162,7 +4281,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization = { mode: 'full_access', commandGrants: {} };
+    state.mode = 'full';
     state.tools.calls.resource = {
       toolCallId: 'resource',
       modelMessageId: 'model',
@@ -4249,7 +4368,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization = { mode: 'full_access', commandGrants: {} };
+    state.mode = 'full';
     state.tools.calls.resource = {
       toolCallId: 'resource',
       modelMessageId: 'model',
@@ -4345,7 +4464,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization = { mode: 'full_access', commandGrants: {} };
+    state.mode = 'full';
     state.tools.calls.resource = {
       toolCallId: 'resource',
       modelMessageId: 'model',
@@ -4495,6 +4614,7 @@ describe('executeTestRuntimeTools', () => {
     const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['denied'],
+      sandboxAvailable: true,
       shellExecutor: async () => {
         executed = true;
         return { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' };
@@ -4502,14 +4622,9 @@ describe('executeTestRuntimeTools', () => {
     });
 
     expect(executed).toBe(false);
-    expect(events).toEqual([
-      expect.objectContaining({
-        type: 'tool.rejected',
-        toolCallId: 'denied',
-        reason: 'Deferred shell_execute until building phase.',
-        failure: expect.objectContaining({ kind: 'phase_deferred' }),
-      }),
-    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'approval.requested', toolCallId: 'denied' }),
+    );
   });
 
   test('keeps planning write calls as hard policy denials', async () => {
@@ -5062,7 +5177,7 @@ describe('executeTestRuntimeTools', () => {
     }
   });
 
-  test('shell_execute in accept_edits mode requires approval even for a read-only-looking command', async () => {
+  test('Building Accept executes a read-only Shell baseline without approval', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-shell',
@@ -5104,25 +5219,31 @@ describe('executeTestRuntimeTools', () => {
     };
     state.tools.queue = [...state.tools.queue, 'sh'];
 
-    const events = await executeTestRuntimeTools({ state, toolCallIds: ['sh'] });
+    const events = await executeTestRuntimeTools({
+      state,
+      toolCallIds: ['sh'],
+      sandboxAvailable: true,
+      shellExecutor: async ({ command }) => ({
+        ok: true,
+        command,
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      }),
+    });
 
-    // shell_execute is NOT a file edit — should create an approval interaction
-    const approvalRequested = events.find((e) => e.type === 'approval.requested');
-    expect(approvalRequested).toBeDefined();
-
-    // Should NOT have executed directly
-    const finished = events.find((e) => e.type === 'tool.finished');
-    expect(finished).toBeUndefined();
+    expect(events.some((e) => e.type === 'approval.requested')).toBe(false);
+    expect(events.some((e) => e.type === 'tool.finished')).toBe(true);
   });
 
-  test('full_access authorization skips approval for later shell calls', async () => {
+  test('Full interaction mode skips approval for later shell calls', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-full-access-follow-up',
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization.mode = 'full_access';
+    state.mode = 'full';
     state.tools.calls.followUp = {
       toolCallId: 'followUp',
       modelMessageId: 'model',
@@ -5152,14 +5273,14 @@ describe('executeTestRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
-  test('full_access directly runs sensitive external Shell access', async () => {
+  test('Full interaction mode directly runs sensitive external Shell access', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-full-access-sensitive-external',
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization.mode = 'full_access';
+    state.mode = 'full';
     state.tools.calls.sensitive = {
       toolCallId: 'sensitive',
       modelMessageId: 'model',
@@ -5190,7 +5311,7 @@ describe('executeTestRuntimeTools', () => {
     expect(executionEvents.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
-  test('full_access directly writes a sensitive external file', async () => {
+  test('Full interaction mode directly writes a sensitive external file', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-full-sensitive-workspace-'));
     const external = mkdtempSync(join(tmpdir(), 'kite-full-sensitive-external-'));
     try {
@@ -5201,7 +5322,7 @@ describe('executeTestRuntimeTools', () => {
         userId: 'user',
         workspace,
       });
-      state.authorization.mode = 'full_access';
+      state.mode = 'full';
       state.tools.calls.sensitiveFile = {
         toolCallId: 'sensitiveFile',
         modelMessageId: 'model',
@@ -5234,7 +5355,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization.mode = 'full_access';
+    state.mode = 'full';
     for (const [ordinal, toolCallId] of ['first', 'second'].entries()) {
       state.tools.calls[toolCallId] = {
         toolCallId,
@@ -5271,7 +5392,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization.mode = 'full_access';
+    state.mode = 'full';
     const modelMessageId = 'mixed-tool-model';
     state.tools.queue = [...state.tools.queue, 'shell-before', 'question', 'shell-after'];
     state.tools.calls['shell-before'] = {
@@ -5324,6 +5445,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
+    state.mode = 'full';
     for (const [ordinal, toolCallId] of ['first', 'second'].entries()) {
       state.tools.calls[toolCallId] = {
         toolCallId,
@@ -5342,13 +5464,6 @@ describe('executeTestRuntimeTools', () => {
       networkMode: import('@kite/builtin-runtime/sandbox').ShellInput['networkMode'];
       filesystemMode: import('@kite/builtin-runtime/sandbox').ShellInput['filesystemMode'];
     }> = [];
-
-    const approvalEvents = await executeTestRuntimeTools({
-      state,
-      toolCallIds: ['first', 'second'],
-    });
-    applyExactApprovalFixture(state, 'first', approvalEvents);
-    applyExactApprovalFixture(state, 'second', approvalEvents);
 
     const events = await executeTestRuntimeTools({
       state,
@@ -5377,7 +5492,7 @@ describe('executeTestRuntimeTools', () => {
       {
         command: 'pwd',
         fullAccess: false,
-        requiresApproval: true,
+        requiresApproval: false,
         expected: { networkMode: 'disabled' as const, filesystemMode: 'workspace_only' as const },
       },
       {
@@ -5390,7 +5505,7 @@ describe('executeTestRuntimeTools', () => {
         command: 'cat /outside/fixture.txt',
         fullAccess: true,
         requiresApproval: false,
-        expected: { networkMode: 'disabled' as const, filesystemMode: 'allow_all' as const },
+        expected: { networkMode: 'allow_all' as const, filesystemMode: 'allow_all' as const },
       },
     ] as const;
 
@@ -5401,7 +5516,7 @@ describe('executeTestRuntimeTools', () => {
         userId: 'user',
         workspace: process.cwd(),
       });
-      state.authorization.mode = candidate.fullAccess ? 'full_access' : 'default';
+      state.mode = candidate.fullAccess ? 'full' : 'accept_edits';
       const toolCallId = `shell-mode-${index}`;
       state.tools.calls[toolCallId] = {
         toolCallId,
@@ -5505,7 +5620,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization.mode = 'full_access';
+    state.mode = 'full';
     state.tools.calls.stream = {
       toolCallId: 'stream',
       modelMessageId: 'model',
@@ -5572,7 +5687,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization.mode = 'full_access';
+    state.mode = 'full';
     state.tools.calls.stream = {
       toolCallId: 'stream',
       modelMessageId: 'model',
@@ -5695,7 +5810,7 @@ describe('executeTestRuntimeTools', () => {
     expect(shellExecutions).toBe(0);
   });
 
-  test('auto-reviews a read-only-looking Shell command instead of using a fixed allowlist', async () => {
+  test('Auto executes a read-only Shell baseline without a fixed allowlist review', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-auto-unknown-shell',
@@ -5725,10 +5840,10 @@ describe('executeTestRuntimeTools', () => {
       },
     });
 
-    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(true);
+    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(false);
     expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
-    expect(events.some((event) => event.type === 'tool.started')).toBe(false);
-    expect(shellExecutions).toBe(0);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+    expect(shellExecutions).toBe(1);
   });
 
   test('auto-reviews a sensitive external file write before I/O', async () => {
@@ -5770,7 +5885,7 @@ describe('executeTestRuntimeTools', () => {
     }
   });
 
-  test('requires approval for a workspace-only shell write in accept_edits mode', async () => {
+  test('Building Accept executes a workspace-only Shell write directly', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-shell-write',
@@ -5778,29 +5893,6 @@ describe('executeTestRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.mode = 'accept_edits';
-    setTestPlanning(state, {
-      kind: 'executing',
-      document: {
-        planSchemaVersion: 2,
-        planId: 'plan-approved',
-        version: 1,
-        title: 'Test',
-        bodyMarkdown: 'Test plan.',
-        steps: [{ id: 's1', title: 'Do it', status: 'pending' }],
-        structuralDigest: 'abc',
-        createdAtTurnId: state.turn.turnId,
-        updatedAtTurnId: state.turn.turnId,
-        completionEvidence: {
-          schemaVersion: 1,
-          verification: [],
-          execution: [],
-          skipped: [],
-          unresolved: [],
-        },
-      },
-      executionMode: 'accept_edits',
-      approvedAtTurnId: state.turn.turnId,
-    });
     state.tools.calls.shell = {
       toolCallId: 'shell',
       modelMessageId: 'model',
@@ -5823,12 +5915,12 @@ describe('executeTestRuntimeTools', () => {
       },
     });
 
-    expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
-    expect(executed).toBe(false);
-    expect(events.some((event) => event.type === 'tool.finished')).toBe(false);
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(executed).toBe(true);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
-  test('requires approval for a workspace Git mutation in accept_edits mode', async () => {
+  test('Building Accept executes a workspace Git mutation directly', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-local-git',
@@ -5836,29 +5928,6 @@ describe('executeTestRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.mode = 'accept_edits';
-    setTestPlanning(state, {
-      kind: 'executing',
-      document: {
-        planSchemaVersion: 2,
-        planId: 'plan-approved',
-        version: 1,
-        title: 'Test',
-        bodyMarkdown: 'Test plan.',
-        steps: [{ id: 's1', title: 'Do it', status: 'pending' }],
-        structuralDigest: 'abc',
-        createdAtTurnId: state.turn.turnId,
-        updatedAtTurnId: state.turn.turnId,
-        completionEvidence: {
-          schemaVersion: 1,
-          verification: [],
-          execution: [],
-          skipped: [],
-          unresolved: [],
-        },
-      },
-      executionMode: 'accept_edits',
-      approvedAtTurnId: state.turn.turnId,
-    });
     state.tools.calls.git = {
       toolCallId: 'git',
       modelMessageId: 'model',
@@ -5874,15 +5943,17 @@ describe('executeTestRuntimeTools', () => {
     const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['git'],
+      sandboxAvailable: true,
       shellExecutor: async (input) => {
         executed = true;
         return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
       },
     });
 
-    expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
     expect(events.some((event) => event.type === 'auto_review.requested')).toBe(false);
-    expect(executed).toBe(false);
+    expect(executed).toBe(true);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
   test('uses hardened execution for read-only Git only after Full authorizes Shell', async () => {
@@ -5892,7 +5963,7 @@ describe('executeTestRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.authorization.mode = 'full_access';
+    state.mode = 'full';
     const commands = ['git status --short', 'git log --oneline -10'];
     for (const [ordinal, command] of commands.entries()) {
       const toolCallId = `git-read-${ordinal}`;

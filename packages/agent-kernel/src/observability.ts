@@ -160,6 +160,8 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'task.cancelled',
   'approval.requested',
   'approval.granted',
+  'approval.batch_released',
+  'approval.session_grants_cleared',
   'provider.action_required',
   'provider.action_started',
   'provider.action_completed',
@@ -172,7 +174,6 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'provider.admission_waived',
   'provider.admission_cancelled',
   // Decode-only legacy model-admission telemetry; no current producer emits it.
-  'authorization.changed',
   'interaction_mode.changed',
   'auto_review.requested',
   'user_input.cancelled',

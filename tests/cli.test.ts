@@ -81,8 +81,8 @@ describe('cli argument parsing', () => {
     expect(args.approvalHash).toBe('hash-a');
   });
 
-  // 验证 resume 支持当前 thread 的 full_access 授权 / Verify resume accepts full-access grants
-  test('resume accepts full-access grant', () => {
+  // Full is an interaction mode, never an approval grant.
+  test('ignores legacy full-access approval flag', () => {
     const args = parseArgs([
       'resume',
       '--thread',
@@ -92,8 +92,8 @@ describe('cli argument parsing', () => {
       'hash-a',
     ]);
 
-    expect(args.approve).toBe(true);
-    expect(args.approvalGrant).toBe('full_access');
+    expect(args.approve).toBe(false);
+    expect(args.approvalGrant).toBeUndefined();
     expect(args.approvalHash).toBe('hash-a');
   });
 

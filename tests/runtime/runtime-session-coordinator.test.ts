@@ -164,6 +164,8 @@ function autoReviewState(
     toolCallId: 'reviewed-shell',
     toolName,
     reason: 'Requires App review.',
+    fullModeBypassEligible: false,
+    fullModePolicyBypassAllowed: false,
     approval: {
       scope: 'once',
       cwd: '/tmp/retained-coordinator',
@@ -648,7 +650,7 @@ describe('retained TUI session coordinator', () => {
           content: [
             {
               type: 'text' as const,
-              text: '{"decision":"approve","grant":"approve_once","reason":"retained reviewer accepted"}',
+              text: '{"decision":"approve_once","reason":"retained reviewer accepted"}',
             },
           ],
         },
@@ -733,7 +735,9 @@ describe('retained TUI session coordinator', () => {
       type: 'auto_review.completed',
       result: { approved: false, ...(escalated ? { escalatedToUser: true } : {}) },
     });
-    expect(events.some((event) => event.type === 'approval.requested')).toBe(askUser);
+    // Escalation keeps the same durable review identity; it must not synthesize
+    // a second approval.requested event.
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
   });
 
   test('runs deterministic verification without model dispatch', async () => {

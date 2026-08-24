@@ -170,14 +170,11 @@ describe('Builtin operation policy compiler', () => {
     expect(facts.sameCommandMayBypassApproval).toBe(false);
   });
 
-  test('routes every non-critical Shell command through interaction-mode review', () => {
+  test('runs workspace Shell commands in the baseline and reviews only known scope expansion', () => {
     for (const command of [
       'cat package.json',
-      'cat /tmp/external.txt',
       'bun test',
       'custom-build-tool --deploy candidate',
-      'echo hi > /tmp/external.txt',
-      'cp /tmp/source.txt local.txt',
       'touch local.txt',
       'mkdir build',
       'echo hi > local.txt',
@@ -186,10 +183,36 @@ describe('Builtin operation policy compiler', () => {
       'rm -rf $TARGET',
     ]) {
       expect(compile('shell_execute', { command })).toMatchObject({
+        decision: 'allow',
+        allowed: true,
+        requiresApproval: false,
+        requiresSandbox: true,
+        fullAccessMayBypassApproval: false,
+        sameCommandMayBypassApproval: false,
+        sandboxScope: {
+          kind: 'baseline',
+          filesystem: 'workspace_write',
+          network: 'disabled',
+        },
+      });
+    }
+    for (const command of [
+      'cat /tmp/external.txt',
+      'echo hi > /tmp/external.txt',
+      'cp /tmp/source.txt local.txt',
+    ]) {
+      expect(compile('shell_execute', { command })).toMatchObject({
         decision: 'ask',
         allowed: true,
         requiresApproval: true,
+        requiresSandbox: true,
         fullAccessMayBypassApproval: true,
+        sameCommandMayBypassApproval: true,
+        sandboxScope: {
+          kind: 'expanded',
+          filesystem: 'full_access',
+          network: 'disabled',
+        },
       });
     }
     expect(compile('shell_execute', { command: 'sudo rm -rf /' })).toMatchObject({
@@ -200,7 +223,7 @@ describe('Builtin operation policy compiler', () => {
     });
     expect(compile('shell_execute', { command: 'rm -f ~/.ssh/id_ed25519' })).toMatchObject({
       decision: 'ask',
-      risk: 'unknown',
+      risk: 'write_file',
       effects: { externalWrite: true, sensitiveExternalAccess: true },
       fullAccessMayBypassApproval: true,
       sameCommandMayBypassApproval: false,
@@ -213,17 +236,21 @@ describe('Builtin operation policy compiler', () => {
     });
     expect(compile('shell_execute', { command: 'echo 127.0.0.1 x >> /etc/hosts' })).toMatchObject({
       decision: 'ask',
-      risk: 'unknown',
+      risk: 'write_file',
       effects: { externalWrite: true, sensitiveExternalAccess: true },
       fullAccessMayBypassApproval: true,
       sameCommandMayBypassApproval: false,
     });
     expect(
       compile('shell_execute', { command: 'bun test' }, { ...CONTEXT, phase: 'planning' }),
-    ).toMatchObject({ decision: 'deny', phaseConstraint: 'planning' });
+    ).toMatchObject({
+      decision: 'allow',
+      requiresApproval: false,
+      sandboxScope: { kind: 'baseline', filesystem: 'read_only', network: 'disabled' },
+    });
   });
 
-  test('routes Shell Git through the same mode review without a subcommand allowlist', () => {
+  test('keeps Git inside the baseline without a subcommand allowlist and reviews known expansion', () => {
     for (const command of [
       'git status --short',
       'git log --oneline -10',
@@ -238,6 +265,17 @@ describe('Builtin operation policy compiler', () => {
       'env PATH=/usr/bin command git.exe status',
       'C:\\Tools\\Git\\bin\\git.exe status',
       'git workspace-alias',
+    ]) {
+      expect(compile('shell_execute', { command })).toMatchObject({
+        decision: 'allow',
+        allowed: true,
+        requiresApproval: false,
+        fullAccessMayBypassApproval: false,
+        sandboxScope: { kind: 'baseline', filesystem: 'workspace_write' },
+      });
+      expect(compile('shell_execute', { command }).recovery).toBeUndefined();
+    }
+    for (const command of [
       'git push origin main',
       'git -C ../outside status --short',
       'git --git-dir=/tmp/repo/.git status',
@@ -250,6 +288,7 @@ describe('Builtin operation policy compiler', () => {
         allowed: true,
         requiresApproval: true,
         fullAccessMayBypassApproval: true,
+        sandboxScope: { kind: 'expanded' },
       });
       expect(compile('shell_execute', { command }).recovery).toBeUndefined();
     }
@@ -265,12 +304,17 @@ describe('Builtin operation policy compiler', () => {
         { ...CONTEXT, phase: 'planning' },
       ),
     ).toMatchObject({
-      decision: 'deny',
-      phaseConstraint: 'planning',
+      decision: 'ask',
+      requiresApproval: true,
+      sandboxScope: { kind: 'expanded', filesystem: 'workspace_write', network: 'disabled' },
+    });
+    expect(compile('shell_execute', { command: 'git push origin main' })).toMatchObject({
+      decision: 'ask',
+      sandboxScope: { kind: 'expanded', filesystem: 'workspace_write', network: 'allow_all' },
     });
   });
 
-  test('keeps advisory Shell effects without turning them into authorization', () => {
+  test('uses known scope effects for review while uncertainty stays sandbox-confined', () => {
     const corpus = [
       {
         input: { command: 'rm -rf /etc/nginx' },
@@ -280,7 +324,7 @@ describe('Builtin operation policy compiler', () => {
         input: { command: 'rm -rf /tmp/build' },
         expected: {
           decision: 'ask',
-          risk: 'unknown',
+          risk: 'write_file',
           effects: { externalWrite: true },
         },
       },
@@ -288,31 +332,40 @@ describe('Builtin operation policy compiler', () => {
         input: { command: 'bun install' },
         expected: {
           decision: 'ask',
-          risk: 'unknown',
+          risk: 'network',
           effects: { network: true, uncertainEffects: true },
         },
       },
       {
         input: { command: 'git push origin main' },
-        expected: { decision: 'ask', risk: 'unknown', effects: { network: true } },
+        expected: { decision: 'ask', risk: 'network', effects: { network: true } },
       },
       {
         input: { command: 'git commit -m update' },
-        expected: { decision: 'ask', risk: 'unknown' },
+        expected: {
+          decision: 'allow',
+          risk: 'vcs_mutation',
+          sandboxScope: { kind: 'baseline', filesystem: 'workspace_write' },
+        },
       },
       {
         input: { command: 'node script.js' },
-        expected: { decision: 'ask', risk: 'unknown', effects: { uncertainEffects: true } },
+        expected: {
+          decision: 'allow',
+          risk: 'unknown',
+          effects: { uncertainEffects: true },
+          sandboxScope: { kind: 'baseline', filesystem: 'workspace_write' },
+        },
       },
       {
         input: { command: 'rg -f /tmp/kite-patterns src' },
-        expected: { decision: 'ask', risk: 'unknown', effects: { externalRead: true } },
+        expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
       },
       {
         input: { command: 'curl -o /tmp/out https://example.com' },
         expected: {
           decision: 'ask',
-          risk: 'unknown',
+          risk: 'network',
           effects: { network: true, externalWrite: true },
         },
       },
@@ -320,7 +373,7 @@ describe('Builtin operation policy compiler', () => {
         input: { command: 'scp host:/file /tmp/out' },
         expected: {
           decision: 'ask',
-          risk: 'unknown',
+          risk: 'network',
           effects: { network: true, uncertainEffects: true },
         },
       },

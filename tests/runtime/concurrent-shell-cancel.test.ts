@@ -77,6 +77,8 @@ describe('concurrent shell bounded cancellation', () => {
             type: 'approval.requested',
             interactionId: `approval-${toolCallId}`,
             toolCallId,
+            fullModeBypassEligible: false,
+            fullModePolicyBypassAllowed: false,
             approval: {
               scope: 'once',
               cwd: '/',
@@ -213,6 +215,8 @@ describe('concurrent shell bounded cancellation', () => {
             type: 'approval.requested',
             interactionId: `approval-${toolCallId}`,
             toolCallId,
+            fullModeBypassEligible: false,
+            fullModePolicyBypassAllowed: false,
             approval: {
               scope: 'once',
               cwd: '/',

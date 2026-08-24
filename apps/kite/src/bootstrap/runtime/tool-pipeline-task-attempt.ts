@@ -240,6 +240,8 @@ export function createAppTaskToolPipelineAttemptRuntime(input: {
       schema: APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
       authorizationKind: decision.value.authorizationKind,
       grantUsed: decision.value.grantUsed,
+      interactionMode: facts.value.context.interactionMode,
+      sandboxScope: classifiedValue.policyCompilation.sandboxScope ?? null,
       policyEffects: Object.freeze({ ...(classifiedValue.policyCompilation.effects ?? {}) }),
       effectiveEffects: classifiedValue.effectiveEffects,
       receiptRequirement: classifiedValue.requirements.receipt,
@@ -414,15 +416,8 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   );
 }
 
-function isPreparedGrantUsed(
-  value: string,
-): value is 'none' | 'approve_once' | 'same_command' | 'full_access' {
-  return (
-    value === 'none' ||
-    value === 'approve_once' ||
-    value === 'same_command' ||
-    value === 'full_access'
-  );
+function isPreparedGrantUsed(value: string): value is 'none' | 'approve_once' | 'same_command' {
+  return value === 'none' || value === 'approve_once' || value === 'same_command';
 }
 
 function stageFailure(

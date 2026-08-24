@@ -95,7 +95,7 @@ export interface CapabilityDefinition {
   readonly policyCompiler?: CapabilityPolicyCompiler;
 }
 
-/** Exact RM/State 25 turn-scoped binding shape. */
+/** Exact RM/State 27 turn-scoped binding shape. */
 export interface RuntimeExecutionAdapterRegistration<TContext = unknown, TAdapter = unknown> {
   readonly adapterId: string;
   readonly revision: string;

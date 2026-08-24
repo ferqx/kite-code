@@ -3,10 +3,8 @@ export type AppSandboxBackend = 'seatbelt' | 'bubblewrap' | 'windows_restricted_
 
 export type SandboxBackend = AppSandboxBackend;
 
-export function appSandboxSupportsFullMode(backend: AppSandboxBackend): boolean {
+export function appSandboxBackendAvailable(backend: AppSandboxBackend): boolean {
   return (
     backend === 'seatbelt' || backend === 'bubblewrap' || backend === 'windows_restricted_token'
   );
 }
-
-export const sandboxSupportsFullMode = appSandboxSupportsFullMode;

@@ -510,6 +510,34 @@ describe('State context and interaction reducer parity', () => {
     ]);
   });
 
+  test('current-turn abort releases provider admission without treating it as a user decision', () => {
+    let state = reduce(initial(), {
+      type: 'provider.admission_required',
+      interactionId: 'admission-1',
+      providerId: 'provider-1',
+      source: 'explicit',
+      providerStatus: 'login_required',
+      retryable: true,
+    });
+    const pending = state;
+    state = reduce(state, {
+      type: 'turn.aborted',
+      turnId: 'stale-turn',
+      reason: 'stale failure',
+      cause: 'error',
+    });
+    expect(state).toEqual(pending);
+
+    state = reduce(state, {
+      type: 'turn.aborted',
+      turnId: state.turn.turnId,
+      reason: 'admission UI disconnected',
+      cause: 'error',
+    });
+    expect(state.providerAdmission.pending).toEqual([]);
+    expect(state.interactions).toEqual({ kind: 'idle' });
+  });
+
   test('plan review requires the active draft identity and projects the canonical plan', () => {
     let state = initial();
     state = reduce(state, {
