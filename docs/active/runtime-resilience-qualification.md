@@ -186,6 +186,12 @@ cancel 在 signal 前提交、successor 等待 cleanup、dispose 等待 drain，
 失败关闭。`bun run test:runtime:soak` 仍只是 7-case CI profile smoke；它可以形成 RM-06 stage evidence，但不能
 升级为正式 release qualification。当前单-Store lease 没有被解释为 cross-Host Project fence。
 
+focused approval rejection 也必须穿过同一 durable terminal boundary。无未终结 sibling 时，一个 action transaction
+按序提交 `approval.rejected`、`tool.rejected` 与 `turn.aborted(cause=user)`；存在 sibling 时先只终结 exact target，
+等 sibling 自身收敛后由 scheduler `stop` 边界 exactly-once 追加 `turn.aborted`。恢复后重复进入 runner 不得再次追加
+abort，也不得产生新的 `model.requested` 或重放已拒绝 invocation。fault/PTY cleanup 只有观察到该 terminal fact 才能
+结束 fixture；仅看到输入提示符或本地 TUI idle 投影不构成持久化完成证据。
+
 当前链路将 Runtime State input 经纯 `@kite/agent-kernel` transition 后再由 SQLite Store 原子提交；进程内 State 只在
 commit 成功后推进。Required Kernel/reducer 与 scheduling/completion suite 证明 snapshot/terminal/revision 行为
 等价。Host applied receipt 后的

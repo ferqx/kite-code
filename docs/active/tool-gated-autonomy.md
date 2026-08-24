@@ -518,7 +518,8 @@ command deny 仍独立存在，且两者不得重新引入 Workspace 内名称�
    独占屏障；屏障后的读取不得越过它。同一模型消息、同一任务中的连续
    `shell_execute` 逐项完成策略预检并进入 durable approval queue；获批调用先进入
    `authorized_queued`，仍受 scheduler concurrency 和独立 receipt/attempt 约束。单个调用的策略拒绝
-   只终结自身；Approval overlay 的 Esc 只拒绝 focused target；Ctrl+C 才中止整个当前 turn：其余未终结 sibling cancelled，
+   只终结自身；Approval overlay 的 Esc 只拒绝 focused target，不主动取消 sibling，且在 sibling 自身收敛后以一个
+   exactly-once `turn.aborted` 关闭不可继续调模型的拒绝轮次。Ctrl+C 才立即取消整个当前 turn：其余未终结 sibling cancelled，
    已启动执行收到 AbortSignal，Runner 不再继续审批、执行或调用模型。策略拒绝和系统失败不套用这一用户取消语义。Shell 重叠在非 Shell 调用、
    不同模型消息或不同任务边界处截断，不得
    跨越 `ask_user`、方案审核或其他工具。当前事件集合不包含 `tool.execution_ready`；审批推进只接受

@@ -28,6 +28,15 @@ Ctrl+C 才取消 whole turn，迟到 generation/session event 必须 no-op。多
 Tool terminal barrier：reviewer/child capability 尚未完成时，外层 Tool 不得提前 terminal，恢复必须沿原
 parent/child identity 与 queue generation 进行。
 
+UI 已重新出现输入提示符只证明当前 screen projection 可交互，不能证明 Runtime terminal 或 session summary 已
+持久化。涉及审批拒绝、graceful exit、`/resume` 或跨进程恢复的场景必须先用 readonly persistence observer 等待 exact
+`turn.aborted`、session name 或其他目标 durable fact，再关闭进程或打开恢复选择器；observer 必须沿既有 bounded
+lock/protocol 规则轮询，不能通过初始化第二个 Store 干扰 writer。
+
+Planning read-only sandbox baseline 的 PTY 场景必须在入口读取 production backend availability。backend 可用时断言
+baseline direct 且无 approval；不可用时断言 exact mandatory-sandbox failure、零 Workspace execution 与零 host
+fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不得把 hosted runner 恰好缺少 bwrap 解释为产品回归。
+
 ## 已知限制
 
 1. Windows 与 Unix PTY/ConPTY 的控制序列、信号和进程树行为不同；断言必须基于归一化 screen 文本。

@@ -10,10 +10,16 @@ import {
 } from '@kite/runtime-host/kernel-adapter';
 import { projectRuntimeSessionLiveMode } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import {
+  approvalRejectionSettlementEvents,
+  deferredApprovalRejectionTurnAbortEvent,
   eventsForRunCancellation,
   eventsForRuntimeAction,
   type RuntimeUserAction,
 } from '#app/bootstrap/runtime/state-actions';
+import {
+  type RuntimeStateSessionPort,
+  runStateRuntimeLoop,
+} from '#app/bootstrap/runtime/state-runner';
 import { loadAgentConfig, saveInteractionMode } from '#app/config/index';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
@@ -66,6 +72,159 @@ function withStatuses(
 }
 
 describe('SAQ-16/17 — approval interaction semantics', () => {
+  test('focused rejection durably settles the Tool and aborts only an otherwise idle turn', () => {
+    const state = withStatuses(addTool(initialState(), 'shell-a'), [
+      ['shell-a', 'awaiting_approval'],
+    ]);
+    const events = approvalRejectionSettlementEvents(state, [
+      {
+        type: 'approval.rejected',
+        interactionId: 'approval-a',
+        toolCallId: 'shell-a',
+        generation: 0,
+        reason: 'focused rejection',
+      },
+    ]);
+
+    expect(events.map((event) => event.type)).toEqual(['tool.rejected', 'turn.aborted']);
+    expect(events).toEqual([
+      { type: 'tool.rejected', toolCallId: 'shell-a', reason: 'focused rejection' },
+      {
+        type: 'turn.aborted',
+        turnId: state.turn.turnId,
+        reason: 'focused rejection',
+        cause: 'user',
+      },
+    ]);
+  });
+
+  test('focused rejection never cancels a queued sibling', () => {
+    const state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
+      ['shell-a', 'awaiting_approval'],
+      ['shell-b', 'queued'],
+    ]);
+    const events = approvalRejectionSettlementEvents(state, [
+      {
+        type: 'approval.rejected',
+        interactionId: 'approval-a',
+        toolCallId: 'shell-a',
+        generation: 0,
+        reason: 'focused rejection',
+      },
+    ]);
+
+    expect(events.map((event) => event.type)).toEqual(['tool.rejected']);
+    expect(events).not.toContainEqual(expect.objectContaining({ toolCallId: 'shell-b' }));
+  });
+
+  test('after a sibling settles, approval rejection closes the turn exactly once', () => {
+    const state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
+      ['shell-a', 'rejected'],
+      ['shell-b', 'succeeded'],
+    ]);
+    state.tools.calls['shell-a'] = {
+      ...state.tools.calls['shell-a']!,
+      error: 'focused rejection',
+      failure: {
+        kind: 'approval_rejected',
+        message: 'focused rejection',
+        retryable: false,
+        modelFixable: false,
+        needsUserIntervention: false,
+        terminatesTurn: false,
+        journal: true,
+      },
+    };
+
+    const first = deferredApprovalRejectionTurnAbortEvent(state);
+    expect(first).toMatchObject({ type: 'turn.aborted', cause: 'user' });
+    expect(
+      deferredApprovalRejectionTurnAbortEvent({
+        ...state,
+        turn: { ...state.turn, status: 'aborted' },
+      }),
+    ).toBeNull();
+  });
+
+  test('runStateRuntimeLoop defers rejection abort until siblings settle and never replays it', async () => {
+    let state = withStatuses(addTool(addTool(initialState(), 'shell-a'), 'shell-b'), [
+      ['shell-a', 'rejected'],
+      ['shell-b', 'succeeded'],
+    ]);
+    state.tools.calls['shell-a'] = {
+      ...state.tools.calls['shell-a']!,
+      error: 'focused rejection',
+      failure: {
+        kind: 'approval_rejected',
+        message: 'focused rejection',
+        retryable: false,
+        modelFixable: false,
+        needsUserIntervention: false,
+        terminatesTurn: false,
+        journal: true,
+      },
+    };
+    let lastAppliedEvents: RuntimeEvent[] = [];
+    let processEventCalls = 0;
+    let executorCalls = 0;
+    const kernel: RuntimeStateSessionPort = {
+      getState: () => state,
+      processEvent: (event) => {
+        processEventCalls += 1;
+        state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [event];
+        return { status: 'applied', eventId: `event-${processEventCalls}` };
+      },
+      processEventBatch: (events) => {
+        for (const event of events) state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [...events];
+        return lastAppliedEvents;
+      },
+      getLastAppliedEvents: () => lastAppliedEvents,
+      selectPendingEffects: () => [{ type: 'stop' }],
+      acquireRunner: () => 'approval-rejection-runner',
+      releaseRunner: () => undefined,
+      beginEffect: () => {
+        throw new Error('No effect should be started after approval rejection.');
+      },
+      isEffectEventCurrent: () => false,
+      applyEffectEvent: () => false,
+      applyEffectResult: () => false,
+      applyLateResourceReconciliation: () => false,
+      applyAction: () => ({
+        status: 'stale',
+        reason: 'No action should be requested after approval rejection.',
+        telemetry: { type: 'runtime.action_ignored', reason: 'unexpected action' },
+      }),
+    };
+
+    const run = async (): Promise<RuntimeEvent[]> => {
+      const emitted: RuntimeEvent[] = [];
+      for await (const event of runStateRuntimeLoop(
+        kernel,
+        async () => {
+          executorCalls += 1;
+          return [];
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unexpected' }) },
+      )) {
+        emitted.push(event);
+      }
+      return emitted;
+    };
+
+    const first = await run();
+    expect(first.map((event) => event.type)).toEqual(['turn.aborted']);
+    expect(processEventCalls).toBe(1);
+    expect(executorCalls).toBe(0);
+    expect(state.turn.status).toBe('aborted');
+
+    const second = await run();
+    expect(second).toEqual([]);
+    expect(processEventCalls).toBe(1);
+    expect(executorCalls).toBe(0);
+  });
+
   test('never accepts full_access as an approval grant', () => {
     const state: RuntimeState = {
       ...addTool(initialState(), 'shell-a'),

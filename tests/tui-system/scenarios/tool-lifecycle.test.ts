@@ -395,6 +395,15 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       await waitForText(() => tui.viewport(), '❯ 拒绝', 5000);
       const rejectionFrames = tui.markScreen();
       tui.write('\r');
+      await waitForCondition(
+        () => {
+          const observation = observePersistedTurnEvents(workspace, 'Make a directory');
+          if (observation.status !== 'ready' || !observation.value) return false;
+          return observation.value.events.some((event) => event.type === 'turn.aborted');
+        },
+        'approval rejection terminal settlement to become durable',
+        15_000,
+      );
       await waitForTuiReady(tui);
 
       output = tui.viewport();
@@ -412,6 +421,22 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       expect(screenContains(afterRejection, 'node -e "1+1"')).toBe(true);
       expect(screenContains(afterRejection, 'Tool approval rejected by user.')).toBe(true);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
+
+      const observed = requirePersistedRuntimeReady(
+        observePersistedTurnEvents(workspace, 'Make a directory'),
+      );
+      expect(observed).toBeDefined();
+      const rejectionIndex = observed!.events.findIndex(
+        (event) => event.type === 'approval.rejected',
+      );
+      const abortIndex = observed!.events.findIndex((event) => event.type === 'turn.aborted');
+      expect(rejectionIndex).toBeGreaterThanOrEqual(0);
+      expect(abortIndex).toBeGreaterThan(rejectionIndex);
+      expect(
+        observed!.events.some(
+          (event, index) => index > rejectionIndex && event.type === 'model.requested',
+        ),
+      ).toBe(false);
     },
     TIMEOUT,
   );

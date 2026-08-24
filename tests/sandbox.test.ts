@@ -571,7 +571,12 @@ describe('dangerous path detection', () => {
     expect(checkDangerousSearchRoot(homedir(), process.cwd())).not.toBeNull();
     if (process.platform !== 'win32') {
       expect(checkDangerousSearchRoot('/etc', process.cwd())).not.toBeNull();
-      expect(checkDangerousSearchRoot('/tmp', process.cwd())).toBeNull();
+      const neutralSearchRoot = mkdtempSync(join(tmpdir(), 'sandbox-neutral-search-root-'));
+      try {
+        expect(checkDangerousSearchRoot(neutralSearchRoot, process.cwd())).toBeNull();
+      } finally {
+        rmSync(neutralSearchRoot, { recursive: true, force: true });
+      }
     }
     expect(checkDangerousSearchRoot(process.cwd(), process.cwd())).toBeNull();
   });

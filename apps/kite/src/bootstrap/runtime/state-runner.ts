@@ -16,7 +16,11 @@ import {
 import type { RuntimeEffectLeaseExpectation } from '@kite/runtime-host/storage';
 import { classifyFailure } from './failures';
 import { resourceAdmissionTerminalEvents } from './resource-admission-terminal';
-import type { RuntimeActionResult, RuntimeUserAction } from './state-actions';
+import {
+  deferredApprovalRejectionTurnAbortEvent,
+  type RuntimeActionResult,
+  type RuntimeUserAction,
+} from './state-actions';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 import { completedTerminalOutcome, failedTerminalOutcome } from './terminal-outcome';
 
@@ -591,7 +595,14 @@ export async function* runStateRuntimeLoop(
         continue;
       }
 
-      if (effect.type === 'stop') return;
+      if (effect.type === 'stop') {
+        const deferredAbort = deferredApprovalRejectionTurnAbortEvent(kernel.getState());
+        if (deferredAbort) {
+          kernel.processEvent(deferredAbort);
+          yield* kernel.getLastAppliedEvents();
+        }
+        return;
+      }
       if (effect.type === 'recovery_blocked') {
         count += 1;
         const lease = kernel.beginEffect(effect);

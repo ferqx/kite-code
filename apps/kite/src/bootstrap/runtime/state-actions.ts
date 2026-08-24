@@ -462,6 +462,107 @@ export type RuntimeActionResult =
   | { status: 'stale'; reason: string; telemetry: RuntimeEvent }
   | { status: 'rejected'; reason: string; telemetry: RuntimeEvent };
 
+const NON_TERMINAL_TOOL_STATUSES: ReadonlySet<RuntimeState['tools']['calls'][string]['status']> =
+  new Set([
+    'queued',
+    'approved',
+    'authorized_queued',
+    'running',
+    'awaiting_user_input',
+    'awaiting_review',
+    'awaiting_approval',
+    'awaiting_auto_review',
+  ]);
+
+/**
+ * Complete a focused approval rejection at the Runtime/Store boundary.
+ * `approval.rejected` is the user decision and updates the queue projection,
+ * but it is not the terminal Tool fact consumed by lifecycle/replay readers.
+ * The settlement is computed before the decision is committed so the whole
+ * sequence can be persisted atomically by RuntimeSessionCoordinator.
+ */
+export function approvalRejectionSettlementEvents(
+  state: Readonly<RuntimeState>,
+  events: readonly RuntimeEvent[],
+): RuntimeEvent[] {
+  const rejection = events.find(
+    (event): event is Extract<RuntimeEvent, { type: 'approval.rejected' }> =>
+      event.type === 'approval.rejected',
+  );
+  if (!rejection) return [];
+
+  const siblingExists = Object.values(state.tools.calls).some(
+    (call) =>
+      call.toolCallId !== rejection.toolCallId &&
+      NON_TERMINAL_TOOL_STATUSES.has(call.status) &&
+      (call.taskId != null
+        ? call.taskId === state.activeTaskId
+        : call.createdAtTurnId === state.turn.turnId),
+  );
+  const queuedApprovalSibling = [...state.pendingApprovals.values()].some(
+    (pending) =>
+      pending.toolCallId !== rejection.toolCallId &&
+      !['rejected', 'succeeded', 'failed', 'cancelled', 'exhausted'].includes(pending.status),
+  );
+
+  const settled: RuntimeEvent[] = [
+    {
+      type: 'tool.rejected',
+      toolCallId: rejection.toolCallId,
+      reason: rejection.reason,
+    },
+  ];
+  if (!siblingExists && !queuedApprovalSibling && state.turn.status === 'active') {
+    settled.push({
+      type: 'turn.aborted',
+      turnId: state.turn.turnId,
+      reason: rejection.reason,
+      cause: 'user',
+    });
+  }
+  return settled;
+}
+
+/**
+ * A sibling may still be executing when the focused approval is rejected.
+ * Once that sibling reaches a terminal state, the scheduler intentionally
+ * stops on the recorded approval rejection. Close the turn at that stop
+ * boundary instead of leaving an active turn with no runnable effects.
+ */
+export function deferredApprovalRejectionTurnAbortEvent(
+  state: Readonly<RuntimeState>,
+): Extract<RuntimeEvent, { type: 'turn.aborted' }> | null {
+  if (state.turn.status !== 'active') return null;
+  const rejectedApproval = Object.values(state.tools.calls).find(
+    (call) =>
+      call.status === 'rejected' &&
+      call.failure?.kind === 'approval_rejected' &&
+      (call.taskId != null
+        ? call.taskId === state.activeTaskId
+        : call.createdAtTurnId === state.turn.turnId),
+  );
+  if (!rejectedApproval) return null;
+  const unfinishedTool = Object.values(state.tools.calls).some(
+    (call) =>
+      NON_TERMINAL_TOOL_STATUSES.has(call.status) &&
+      (call.taskId != null
+        ? call.taskId === state.activeTaskId
+        : call.createdAtTurnId === state.turn.turnId),
+  );
+  const unfinishedApproval = [...state.pendingApprovals.values()].some(
+    (pending) =>
+      !['rejected', 'succeeded', 'failed', 'cancelled', 'exhausted'].includes(pending.status),
+  );
+  if (unfinishedTool || unfinishedApproval) return null;
+  return {
+    type: 'turn.aborted',
+    turnId: state.turn.turnId,
+    reason:
+      rejectedApproval.error ?? rejectedApproval.failure?.message ?? 'Tool approval rejected.',
+    cause: 'user',
+  };
+}
+
 /** Convert a validated user action to facts.  An invalid action intentionally has no effects. */
 export function eventsForRuntimeAction(
   state: RuntimeState,

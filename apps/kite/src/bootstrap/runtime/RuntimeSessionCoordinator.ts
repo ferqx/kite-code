@@ -28,6 +28,7 @@ import type {
 import { createAppRuntimeEffectExecutor } from './runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from './runtime-effect-dependencies';
 import {
+  approvalRejectionSettlementEvents,
   eventsForRuntimeAction,
   type RuntimeActionResult,
   type RuntimeUserAction,
@@ -643,7 +644,8 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
         this.session.commitApprovalBatch(batchRelease, batchRelease.sessionRevision);
         applied = this.session.getLastAppliedEvents();
       } else {
-        applied = this.session.processEventBatch([...events, ...additionalEvents], {
+        const settlement = approvalRejectionSettlementEvents(this.session.getState(), events);
+        applied = this.session.processEventBatch([...events, ...additionalEvents, ...settlement], {
           source: 'command',
         });
       }

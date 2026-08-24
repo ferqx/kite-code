@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { exposedMcpToolName, McpConnectionManager } from '@kite/builtin-runtime/mcp';
@@ -42,7 +43,7 @@ function allowlist(hosts: string[]) {
 
 function testSandboxPreparationArtifacts(label: string) {
   return new SandboxPreparationArtifactStore({
-    root: join(mkdtempSync(join('/tmp', `kite-network-${label}-`)), 'sandbox-preparations'),
+    root: join(mkdtempSync(join(tmpdir(), `kite-network-${label}-`)), 'sandbox-preparations'),
   });
 }
 

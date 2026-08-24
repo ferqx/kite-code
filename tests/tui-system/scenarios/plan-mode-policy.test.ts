@@ -13,6 +13,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { isSandboxAvailable } from '@kite/builtin-runtime/sandbox';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -29,10 +30,16 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let planningSandboxAvailable = false;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
+    planningSandboxAvailable = isSandboxAvailable();
+
+    const shellValidationSummary = planningSandboxAvailable
+      ? 'Validated commands inside the planning read-only baseline.'
+      : 'Planning baseline failed closed without an available workspace sandbox.';
 
     server.setResponses([
       {
@@ -105,12 +112,14 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           toolResults: [
             {
               toolCallId: 'call_plan_baseline_shell',
-              contentIncludes: [workspace.workspace],
+              contentIncludes: planningSandboxAvailable
+                ? [workspace.workspace]
+                : ['This capability requires an available workspace sandbox.'],
             },
           ],
         },
         message: {
-          content: 'Validated commands inside the planning read-only baseline.',
+          content: shellValidationSummary,
           tool_calls: [
             {
               id: 'call_plan_save_shell',
@@ -118,8 +127,9 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
               args: {
                 action: 'save',
                 title: 'Plan-safe shell validation',
-                body_markdown:
-                  'Record commands validated inside the planning read-only sandbox baseline.',
+                body_markdown: planningSandboxAvailable
+                  ? 'Record commands validated inside the planning read-only sandbox baseline.'
+                  : 'Record that the planning baseline failed closed because no sandbox backend was available.',
                 steps: [{ id: 'validate-shell', title: 'Validate planning shell policy' }],
               },
             },
@@ -189,18 +199,17 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   );
 
   step(
-    'planning Shell baseline executes directly without approval or scope expansion',
+    'planning Shell baseline executes directly when available and otherwise fails closed',
     async () => {
       const task = 'Plan the runtime validation commands';
       tui.write('\x1b[Z');
       await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab 退出计划模式', 5000);
       const conversationFrames = tui.markScreen();
       await submitUserMessage(tui, server, task, { timeout: 15000 });
-      await waitForText(
-        () => tui.viewport(),
-        'Validated commands inside the planning read-only baseline.',
-        15000,
-      );
+      const shellValidationSummary = planningSandboxAvailable
+        ? 'Validated commands inside the planning read-only baseline.'
+        : 'Planning baseline failed closed without an available workspace sandbox.';
+      await waitForText(() => tui.viewport(), shellValidationSummary, 15000);
       await waitForText(() => tui.viewport(), '方案审核', 15_000);
       tui.write('\x1b');
       await waitForCondition(
@@ -211,7 +220,17 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
 
       const output = tui.screenFramesSince(conversationFrames).join('\n');
       expect(screenContains(output, 'Deferred until execution')).toBe(false);
-      expect(screenContains(output, 'Bash Ran: pwd && ls -la')).toBe(true);
+      if (planningSandboxAvailable) {
+        expect(screenContains(output, 'Bash Ran: pwd && ls -la')).toBe(true);
+        expect(
+          screenContains(output, 'This capability requires an available workspace sandbox.'),
+        ).toBe(false);
+      } else {
+        expect(
+          screenContains(output, 'This capability requires an available workspace sandbox.'),
+        ).toBe(true);
+        expect(screenContains(output, workspace.workspace)).toBe(false);
+      }
       expect(screenContains(output, 'Rejected shell_execute during planning phase')).toBe(false);
       expect(screenContains(output, "Tool 'shell_execute' is not available in this context")).toBe(
         false,

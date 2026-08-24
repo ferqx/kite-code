@@ -135,7 +135,7 @@ V1-V5 runner 必须在 user script 前 fail closed。
 仍必须拒绝 V1-V5 或 digest 不一致的 runner。native runner 改动后，只有同一可复现 Windows 构建重新
 生成并提交匹配 pin，才能恢复可用性；不得回退旧协议或手工复用旧 digest。
 当前 canonical digest 为
-`sha256:0ac43acaa585f6fc88fa453bdc0eebf55cdbd33c4ba26da39e1994302374b75d`。
+`sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`。
 
 固定证据来自
 [Platform Capability Probe run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)，

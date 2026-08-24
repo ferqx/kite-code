@@ -1250,6 +1250,7 @@
       "documents": [
         "docs/active/layer-boundary-enforcement.md",
         "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/sqlite-runtime-log-query.md",
         "docs/space/plans/2026-08-19-kite-runtime-modularization-v1-implementation.md"
       ]
     },

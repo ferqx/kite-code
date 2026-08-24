@@ -1,12 +1,14 @@
 # Shell 沙箱边界与并发审批队列优化完成记录
 
-状态：completed（实现、文档与本地全量门禁完成；GitHub Actions 远程门禁待确认）
+状态：completed（实现、文档与本地全量门禁完成；PR #63 首轮 Actions 发现的问题已修复，当前 SHA 远程门禁待重跑）
 
 日期：2026-08-25
 
 方案：[`2026-08-25-shell-sandbox-approval-queue-optimization.md`](../../plans/2026-08-25-shell-sandbox-approval-queue-optimization.md)
 
 ADR：[`ADR-0137`](../../../adr/0137-shell-sandbox-durable-approval-queue.md)
+
+Pull Request：[#63](https://github.com/ferqx/kite-code/pull/63)
 
 ## 1. 决策与 clean cutover
 
@@ -82,12 +84,12 @@ suspension 的定向 TypeScript 诊断为零。上述数字仍不替代最终 `t
 | Gate | 状态 | 证据 |
 | --- | --- | --- |
 | `bun run typecheck` | passed | 根工程与 7 个 Runtime workspace 全部通过 |
-| `bun run test:all` | passed | 默认套件 3544 pass / 6 skip / 0 fail / 15812 expects；7 个 workspace 全绿；39 个隔离 PTY 场景文件全绿 |
+| `bun run test:all` | passed | 最终修复后默认套件 3548 pass / 6 skip / 0 fail / 15825 expects；7 个 workspace 全绿；39 个隔离 PTY 场景文件全绿 |
 | `bun run test:e2e` | passed | 7 pass / 0 fail / 32 expects |
 | `bun run test:runtime:soak` | passed | CI profile 7/7 cases；全部 required terminal evidence、State invariant 与 cleanup 通过，0 orphan |
 | `bun run check:docs-impact` | passed | Documentation impact checks passed |
 | `bun run check:docs` | passed | 文档结构与计划治理通过：83 completed、25 superseded、0 optional |
 | `git diff --check` | passed | 最终实现、测试与文档 diff 无 whitespace error |
-| GitHub Actions required checks | waiting_ci | 待提交/推送当前新任务分支后由主 Agent 观察；本记录不预填链接 |
+| GitHub Actions required checks | waiting_ci | [PR #63](https://github.com/ferqx/kite-code/pull/63) 首轮 [Required run 32775194923](https://github.com/ferqx/kite-code/actions/runs/32775194923) 暴露并已本地修复 ignored source、Windows temp path、sandbox unavailable、PTY durable receipt 与 approval rejection terminal race；当前修复 SHA 待推送重跑，未预先宣称远程通过 |
 
 若任一门禁失败，按源码/测试事实修复后重新运行；不得用 `--no-verify`、删除测试、放宽断言或恢复旧授权兼容路径绕过。

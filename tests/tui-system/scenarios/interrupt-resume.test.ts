@@ -30,7 +30,7 @@ import {
   waitForCondition,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, observePersistedSessionSummaries } from '../harness/test-workspace';
 
 const TIMEOUT = 45000;
 
@@ -78,6 +78,18 @@ describe('TUI PTY System — Interrupt Resume', () => {
       expect(screenContains(output, 'Hello from tui1')).toBe(true);
       expect(screenContains(output, 'Response from the first instance.')).toBe(true);
       expect(screenContains(output, '❯')).toBe(true);
+
+      await waitForCondition(
+        () => {
+          const observation = observePersistedSessionSummaries(workspace);
+          return (
+            observation.status === 'ready' &&
+            observation.value.some((session) => session.name === 'Hello from tui1')
+          );
+        },
+        'exact persisted session summary before graceful exit',
+        10_000,
+      );
     },
     TIMEOUT,
   );
