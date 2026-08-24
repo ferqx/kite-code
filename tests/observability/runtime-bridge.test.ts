@@ -30,7 +30,14 @@ describe('Runtime metric bridge', () => {
         threadId: 'thread-1',
         revision: 1,
         occurredAt: '2026-08-03T00:00:01.000Z',
-        payload: { type: 'model.retry', attempt: 1, maxAttempts: 3, error: 'redacted', delayMs: 1 },
+        payload: {
+          type: 'model.retry',
+          invocationId: 'model-invocation-1',
+          attempt: 1,
+          maxAttempts: 3,
+          error: 'redacted',
+          delayMs: 1,
+        },
       },
       '1970-01-01T00:00:00.000Z',
     );

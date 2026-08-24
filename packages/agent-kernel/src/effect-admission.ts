@@ -183,10 +183,14 @@ export function assertCapabilityToolTerminalBatch(
       if (check.type === 'schema' && check.subject.kind === 'capability_artifact') {
         return [check.subject.invocationId];
       }
-      if (check.type === 'mcp_read_after_write' || check.type === 'external_reference') {
+      if (
+        check.type === 'mcp_read_after_write' ||
+        check.type === 'external_reference' ||
+        check.type === 'receipt'
+      ) {
         return [check.invocationId];
       }
-      return check.type === 'reviewer' ? (check.invocationIds ?? []) : [];
+      return [];
     });
     for (const invocationId of sourceIds) {
       const invocation = state.capabilities.invocations[invocationId];

@@ -8,6 +8,7 @@ export {
   isSilentCancellationMismatch,
   type PlanningModeExitResult,
   type RuntimeProjectIdentity,
+  reconcileRuntimeInteractionMode,
   type SessionDeps,
   SessionRuntime,
 } from './runtime-session';

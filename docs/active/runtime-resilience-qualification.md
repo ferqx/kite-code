@@ -77,8 +77,10 @@ durable ack single-use dispatch identity。POSIX Runtime 在 spawn 前创建 own
 已持有的 `flock` 作为 fd 3 继承给 supervisor；即使 host 在 spawn 返回与 PID/start identity durable ack 之间
 崩溃，restore 也只能在该继承锁可重获后确认 supervisor 已退出。GO 前还必须用 Linux boot ID/start ticks/PGID/
 executable digest 或 Darwin `proc_pidinfo` 微秒 start timeval/PGID/executable digest 精确绑定 supervisor；不得用
-秒级 `ps lstart`，identity mismatch 时不得 signal 可能复用的 PID/PGID。control socket 位于 host-only
-control root，sandbox 只获得独立 data root；首个合法连接后立即停止 listen。release executable 内嵌同一
+秒级 `ps lstart`，identity mismatch 时不得 signal 可能复用的 PID/PGID。control socket 位于独立 private
+base 下的 host-only control root，sandbox 只获得另一 private base 下的 data root；macOS Seatbelt 拒绝整个
+control base，Linux Full 也用只读空 tmpfs 覆盖整个 control base，因而当前及并发 invocation 的 Host-control
+identity 都不可见。首个合法连接后立即停止 listen。release executable 内嵌同一
 supervisor mode，supervisor 只继承显式最小环境，output pipe EOF 使用固定 deadline，超时 abort 且
 `cleanupConfirmed=false`。Darwin Seatbelt 的实际 detached/session negative conformance 位于
 `tests/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
@@ -175,7 +177,7 @@ RM-05 的 deterministic Host contract 额外验证 same-session FIFO、cross-ses
 revision conflict、Host 生命周期内 scoped idempotency、committed Query、history-gap snapshot、stale
 ephemeral drop、slow subscriber 断开，以及 subscriber close 不取消 Runtime work。TUI PTY 继续验证真实
 production bootstrap；不兼容 Store 必须在历史会话加载边界 fail closed，而不能让 Host 组合阶段阻止 TUI
-挂载。
+挂载。会话发现对每个候选 journal 使用有界 batch，并在首个 session-name candidate 后立即停止 current-codec 解码；长会话不得因启动列表投影而全量解码，具体会话的 session-scoped 恢复仍执行全量完整性校验。
 
 RM-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
 acknowledgement、effect lease claim/renew/release 与 restart recovery 切到 Host。Host contract 和 Runtime fault
@@ -198,7 +200,7 @@ fault/soak qualification 仍由独立 workflow 绑定最终 SHA。
 模型 HTTP `429` 属于可重试的 rate-limit failure，但只允许消费统一的 bounded attempt/time budget；attempt budget 包含首次请求，time budget 从第一次可重试失败开始，首次请求在失败前的 wall time 不得提前耗尽重试窗口。长时间 in-flight 后发生 socket/网络错误时，只要 attempt budget 尚有余量就必须观察到第一次 retry。生产分类必须读取 AI SDK `APICallError.statusCode`（并兼容旧 adapter 的 `status`），预算耗尽必须抛出最后一次 429，并由 failure-mode policy 收敛为 `model_retry_exhausted`。本地 HTTP fixture 必须穿透 `createChatModel` 和 provider middleware 证明 429 后恢复；其他 4xx 仍不可重试。
 
 专门验证下游统一取消信号的 wall-clock deadline fixture 必须给 provider 或 interaction 留出在繁忙
-CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若 deadline 在 provider admission 前
+CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若 deadline 在模型 dispatch 前
 到期，这是另一条合法的 fail-closed 路径，不能用来否定取消传播，也不能与 in-flight 断言混为一谈。
 验证“原子完成后慢 consumer 不得反向 abort”的 fixture 同样先保留该调度余量，再让 consumer 明确
 跨过 deadline；不得使用会在 hosted runner 负载下先于 `run.completed` 到期的亚秒窗口制造竞态。

@@ -34,7 +34,6 @@ import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '../../pack
 import type { RuntimeSnapshotCodec } from '../../packages/runtime-host/src/storage';
 import { createStateStorageForTest } from '../../scripts/support/runtime-storage';
 import { createTestModelInvocationHarness } from '../helpers/model-invocation';
-import { testProviderDataAdmission } from '../helpers/runtime-model';
 
 const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
 const snapshot = registry.snapshot();
@@ -206,13 +205,14 @@ function verificationState(sessionId: string) {
     schemaVersion: 1,
     verificationId: 'retained-verification-1',
     taskId: 'verification-task',
-    subject: 'retained verification reviewer route',
+    subject: 'retained deterministic verification route',
     checks: [
       {
-        checkId: 'reviewer',
-        type: 'reviewer',
-        description: 'Review the retained verification evidence.',
-        instructions: 'Confirm the retained verification route.',
+        checkId: 'schema',
+        type: 'schema',
+        description: 'Validate retained deterministic evidence.',
+        subject: { kind: 'literal', value: {} },
+        schema: { type: 'object' },
       },
     ],
     repair: { maxAttempts: 1 },
@@ -346,7 +346,6 @@ function dependencies(
     model: createChatModel(config()),
     builtinToolCatalog,
     capabilityExecution,
-    providerDataAdmission: testProviderDataAdmission,
     runtimeStore: store,
     modelInvocationGateway: runtime.gateway,
     modelEffectCoordinator: runtime.modelEffects,
@@ -649,7 +648,7 @@ describe('retained TUI session coordinator', () => {
           content: [
             {
               type: 'text' as const,
-              text: '{"approved":true,"grant":"approve_once","reason":"retained reviewer accepted"}',
+              text: '{"decision":"approve","grant":"approve_once","reason":"retained reviewer accepted"}',
             },
           ],
         },
@@ -674,7 +673,6 @@ describe('retained TUI session coordinator', () => {
       modelEffectCoordinator,
       builtinToolCatalog,
       capabilityExecution,
-      providerDataAdmission: testProviderDataAdmission,
     };
     const retainedExecutor = createAppRuntimeEffectExecutor(dependencies);
     const events = await retainedExecutor(
@@ -700,7 +698,45 @@ describe('retained TUI session coordinator', () => {
     expect(gatewayCalls).toBe(1);
   });
 
-  test('owns verification reviewer dispatch once', async () => {
+  test.each([
+    ['reject', false, false],
+    ['ask_user', true, true],
+  ] as const)('projects reviewer %s as a distinct Runtime outcome', async (_decision, askUser, escalated) => {
+    const state = autoReviewState(`retained-auto-review-${_decision}`);
+    const dependencies: RuntimeExecutorDependencies = {
+      config: config(),
+      model: createChatModel(config()),
+      modelInvocationGateway: {} as NonNullable<
+        RuntimeExecutorDependencies['modelInvocationGateway']
+      >,
+      modelEffectCoordinator: {
+        reviewToolApproval: async () => ({
+          ok: true,
+          suggestion: {
+            approved: false,
+            ...(askUser ? { requiresUserApproval: true as const } : {}),
+            grant: 'approve_once' as const,
+            reason: askUser ? 'user intent is required' : 'reviewer rejected the operation',
+          },
+        }),
+      } as unknown as NonNullable<RuntimeExecutorDependencies['modelEffectCoordinator']>,
+      builtinToolCatalog,
+      capabilityExecution,
+    };
+
+    const events = await createAppRuntimeEffectExecutor(dependencies)(
+      { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
+      state,
+    );
+
+    expect(events[0]).toMatchObject({
+      type: 'auto_review.completed',
+      result: { approved: false, ...(escalated ? { escalatedToUser: true } : {}) },
+    });
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(askUser);
+  });
+
+  test('runs deterministic verification without model dispatch', async () => {
     const state = verificationState('retained-verification-owner');
     let gatewayCalls = 0;
     let responseSourceCalls = 0;
@@ -727,8 +763,6 @@ describe('retained TUI session coordinator', () => {
       operationExecution: {
         execute: async (attempt) => {
           gatewayCalls += 1;
-          expect(attempt.operationId).toBe(BUILTIN_MODEL_OPERATION_BY_PURPOSE_.verification_review);
-          expect(attempt.purpose).toBe('verification_review');
           return attempt.attempt();
         },
       },
@@ -741,7 +775,6 @@ describe('retained TUI session coordinator', () => {
       modelEffectCoordinator,
       builtinToolCatalog,
       capabilityExecution,
-      providerDataAdmission: testProviderDataAdmission,
     };
     const retainedExecutor = createAppRuntimeEffectExecutor(dependencies);
     const effect = {
@@ -755,8 +788,8 @@ describe('retained TUI session coordinator', () => {
       persistEvents: harness.persistence.persistEvents,
     });
 
-    expect(gatewayCalls).toBe(1);
-    expect(responseSourceCalls).toBe(1);
+    expect(gatewayCalls).toBe(0);
+    expect(responseSourceCalls).toBe(0);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'verification.check_completed',
@@ -766,9 +799,6 @@ describe('retained TUI session coordinator', () => {
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'verification.completed', outcome: 'passed' }),
     );
-
-    expect(gatewayCalls).toBe(1);
-    expect(responseSourceCalls).toBe(1);
   });
 
   test.each([

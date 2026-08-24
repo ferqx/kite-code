@@ -12,16 +12,9 @@ import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   type BuiltinModelOperationExecutionPort,
 } from './operation';
-import {
-  ProviderDataAdmissionError,
-  type ProviderDataAdmissionGate,
-  type ProviderPayloadPart,
-  providerPayloadFromModelPrompt,
-} from './provider-data-admission';
 import { ModelAttemptFailureError, type ModelResponseSource } from './response-source';
 import {
   computeModelSurfaceDigest,
-  computeModelSurfaceDigestLayers,
   computePrivateModelEvidenceDigest,
 } from './surface-canonicalizer';
 import type { CompiledModelSurface } from './surface-compiler';
@@ -33,11 +26,12 @@ export type ModelInvocationInterruptReason =
   | 'attempts_exhausted'
   | 'cancelled'
   | 'cancelled_before_dispatch'
+  | 'attempt_timeout'
   | 'provider_failure'
   | 'surface_identity_changed'
   | 'persistence_unavailable';
 
-export type BuiltinModelEvent = Readonly<{ type: string; [key: string]: any }>;
+export type BuiltinModelEvent = Readonly<{ type: string; [key: string]: unknown }>;
 
 export interface ModelInvocationStateView {
   readonly revision: number;
@@ -70,9 +64,14 @@ export type ModelResourcePlanner = (
 
 const DEFAULT_LIMITS = Object.freeze({
   maxAttempts: 5,
-  perAttemptTimeoutMs: 30_000,
+  // A model request is bounded by its caller's cancellation deadline, not a
+  // gateway-owned wall-clock timer. Zero keeps the legacy persisted field
+  // decode-compatible while disabling the obsolete per-attempt deadline.
+  perAttemptTimeoutMs: 0,
   totalTimeBudgetMs: 60_000,
 });
+
+const RATE_LIMIT_RETRY_SLOT_MS = 500;
 
 function createLiveModelRuntimeIdSource(): ModelRuntimeIdSource {
   return Object.freeze({
@@ -161,6 +160,24 @@ export interface PendingModelCompletion<Event extends BuiltinModelEvent = Builti
 
 export type ModelArtifactWriter = Pick<ModelArtifactStore, 'writeSurface' | 'writeResponse'>;
 
+/**
+ * Content-free correlation for a model invocation that failed after its
+ * durable identity was allocated. Callers may expose the opaque id, but never
+ * the private provider error carried as the cause.
+ */
+export class ModelInvocationExecutionError extends Error {
+  readonly invocationId: string;
+
+  constructor(invocationId: string, cause: unknown) {
+    super(
+      cause instanceof Error ? cause.message : 'Model invocation execution failed.',
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = 'ModelInvocationExecutionError';
+    this.invocationId = invocationId;
+  }
+}
+
 export class ModelInvocationGateway {
   readonly #artifacts: ModelArtifactWriter;
   readonly #source: ModelResponseSource;
@@ -169,6 +186,12 @@ export class ModelInvocationGateway {
   readonly #runtimeIdSource: ModelRuntimeIdSource;
   readonly #planResource: ModelResourcePlanner;
   readonly #operationExecution: BuiltinModelOperationExecutionPort;
+  /**
+   * HTTP 429 is normally shared by every concurrent invocation on one model
+   * route. Keep one route-local retry horizon so sibling Subagents do not all
+   * repeat the same exponential schedule and hit the Provider as a herd.
+   */
+  readonly #nextRateLimitRetryAtByRoute = new Map<string, number>();
 
   constructor(input: {
     artifacts: ModelArtifactWriter;
@@ -193,7 +216,6 @@ export class ModelInvocationGateway {
     compiled: CompiledModelSurface;
     persistence: ModelInvocationPersistence<State, Event>;
     provenance: ModelInvocationProvenanceInput;
-    providerDataAdmission: ProviderDataAdmissionGate;
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
     limits?: Partial<ModelInvocationEnvelope['resource']['limits']>;
@@ -204,25 +226,12 @@ export class ModelInvocationGateway {
     const limits = normalizeLimits(input.limits);
     const initialSurfaceDigest = computeModelSurfaceDigest(input.compiled.surface);
     if (initialSurfaceDigest !== input.compiled.surfaceDigest) {
-      throw new Error('Frozen Model Surface identity changed before admission.');
+      throw new Error('Frozen Model Surface identity changed before dispatch.');
     }
 
-    // Artifact publication precedes both admissions. A later local failure can
+    // Artifact publication precedes resource preparation. A later local failure can
     // only leave an immutable orphan eligible for reachability-based GC.
     const surfaceArtifact = this.#artifacts.writeSurface(input.compiled.surface);
-    const payload = providerPayloadFromSurface(input.compiled);
-    if (typeof input.providerDataAdmission !== 'function') {
-      throw new ProviderDataAdmissionError({
-        admitted: false,
-        reason: 'mandatory_policy_unavailable',
-        routeAlias: 'unresolved',
-      });
-    }
-    const admissionDecision = input.providerDataAdmission(
-      payload,
-      input.compiled.providerDispatchPurpose,
-    );
-    if (!admissionDecision.admitted) throw new ProviderDataAdmissionError(admissionDecision);
     const state = input.persistence.getState();
 
     const resource = this.#planResource(state, {
@@ -235,18 +244,11 @@ export class ModelInvocationGateway {
       ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
     });
     assertResourceMatchesSurface(resource, input.compiled);
-    const layers = computeModelSurfaceDigestLayers(input.compiled.surface);
     const envelope: ModelInvocationEnvelope = {
       schema: MODEL_INVOCATION_ENVELOPE_SCHEMA_,
       surface: {
         artifact: surfaceArtifact,
         surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
-      },
-      admission: {
-        providerAdmissionRevision: admissionDecision.admissionRevision ?? null,
-        routeIdentityDigest: layers.routeIdentityDigest,
-        payloadClassificationDigest: classificationDigest(payload),
-        admitted: true,
       },
       provenance: {
         invocationId,
@@ -269,7 +271,6 @@ export class ModelInvocationGateway {
       surfaceArtifact,
       surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
       routeFingerprint: input.compiled.surface.route.routeFingerprint,
-      admission: envelope.admission,
       budget: envelope.resource.budget,
       limits,
       preparedStateRevision: state.revision,
@@ -289,6 +290,7 @@ export class ModelInvocationGateway {
     let attemptText = '';
     let attemptReasoning = '';
     let interruptionReason: ModelInvocationInterruptReason = 'attempts_exhausted';
+    let lastFailureDiagnostic: ModelFailureDiagnostic | undefined;
     for (let attempt = 1; attempt <= limits.maxAttempts; attempt += 1) {
       if (input.signal?.aborted) {
         await this.#interrupt(input.persistence, envelope, 'cancelled_before_dispatch', 'none');
@@ -331,6 +333,10 @@ export class ModelInvocationGateway {
         attemptEvents.push({ type: 'model.requested', requestId: invocationId, invocationId });
       }
       await persistAck(input.persistence, asModelEvents<Event>(attemptEvents));
+      if (input.signal?.aborted) {
+        await this.#interrupt(input.persistence, envelope, 'cancelled', 'none');
+        throw abortReason(input.signal);
+      }
       if (computeModelSurfaceDigest(input.compiled.surface) !== initialSurfaceDigest) {
         await this.#interrupt(input.persistence, envelope, 'surface_identity_changed', 'none');
         throw new Error('Frozen Model Surface changed after attempt acknowledgement.');
@@ -340,82 +346,100 @@ export class ModelInvocationGateway {
       attemptReasoning = '';
       let visibleReasoningLength = 0;
       const visibleReasoningSegments = new Map<string, string>();
-      const attemptAbort = boundedAttemptSignal(
-        input.signal,
-        attempt === 1
-          ? limits.perAttemptTimeoutMs
-          : Math.min(limits.perAttemptTimeoutMs, remainingMs),
-      );
+      const attemptAbort = boundedAttemptSignal(input.signal, limits.perAttemptTimeoutMs);
       let outcome: Awaited<ReturnType<ModelResponseSource['attempt']>>;
       try {
-        outcome = await this.#operationExecution.execute({
-          operationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_[input.compiled.surface.purpose],
-          purpose: input.compiled.surface.purpose,
-          invocationId,
-          attemptOrdinal: attempt,
-          threadId: envelope.provenance.threadId,
-          turnId: envelope.provenance.turnId,
-          stateRevision: envelope.provenance.stateRevision,
-          surfaceDigest: initialSurfaceDigest,
-          input: Object.freeze({
+        outcome = await waitForAttemptSignal(
+          this.#operationExecution.execute({
+            operationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_[input.compiled.surface.purpose],
             purpose: input.compiled.surface.purpose,
-            invocation_id: invocationId,
-            attempt_ordinal: attempt,
-            thread_id: envelope.provenance.threadId,
-            turn_id: envelope.provenance.turnId,
-            state_revision: envelope.provenance.stateRevision,
-            surface_digest: initialSurfaceDigest,
-          }),
-          signal: attemptAbort.signal,
-          attempt: () =>
-            this.#source.attempt({
-              model: input.model,
-              surface: input.compiled.surface,
-              attemptOrdinal: attempt,
-              signal: attemptAbort.signal,
-              onActivity: attemptAbort.refresh,
-              onTextCumulative: (text) => {
-                attemptText = text;
-                const visible = visibleRetryPrefix(text, attempt, retryBaselineText);
-                if (visible) {
-                  input.emitEphemeral?.(
-                    asModelEvent<Event>({ type: 'model.text_delta', text: visible }),
-                  );
-                }
-              },
-              onReasoningCumulative: (text, segmentId) => {
-                attemptReasoning = text;
-                const visible = visibleRetryPrefix(text, attempt, retryBaselineReasoning);
-                const delta = visible.slice(visibleReasoningLength);
-                visibleReasoningLength = visible.length;
-                if (!delta) return;
-                const segment = `${visibleReasoningSegments.get(segmentId) ?? ''}${delta}`;
-                visibleReasoningSegments.set(segmentId, segment);
-                input.emitEphemeral?.(
-                  asModelEvent<Event>({ type: 'model.reasoning_delta', segmentId, text: segment }),
-                );
-              },
-              onReasoningCompleted: (_text, segmentId) => {
-                const segment = visibleReasoningSegments.get(segmentId);
-                visibleReasoningSegments.delete(segmentId);
-                if (!segment) return;
-                input.emitEphemeral?.(
-                  asModelEvent<Event>({
-                    type: 'model.reasoning_completed',
-                    segmentId,
-                    text: segment,
-                  }),
-                );
-              },
+            invocationId,
+            attemptOrdinal: attempt,
+            threadId: envelope.provenance.threadId,
+            turnId: envelope.provenance.turnId,
+            stateRevision: envelope.provenance.stateRevision,
+            surfaceDigest: initialSurfaceDigest,
+            input: Object.freeze({
+              purpose: input.compiled.surface.purpose,
+              invocation_id: invocationId,
+              attempt_ordinal: attempt,
+              thread_id: envelope.provenance.threadId,
+              turn_id: envelope.provenance.turnId,
+              state_revision: envelope.provenance.stateRevision,
+              surface_digest: initialSurfaceDigest,
             }),
-        });
+            signal: attemptAbort.signal,
+            attempt: () =>
+              this.#source.attempt({
+                model: input.model,
+                surface: input.compiled.surface,
+                attemptOrdinal: attempt,
+                signal: attemptAbort.signal,
+                onActivity: attemptAbort.refresh,
+                onTextCumulative: (text) => {
+                  attemptText = text;
+                  const visible = visibleRetryPrefix(text, attempt, retryBaselineText);
+                  if (visible) {
+                    input.emitEphemeral?.(
+                      asModelEvent<Event>({ type: 'model.text_delta', text: visible }),
+                    );
+                  }
+                },
+                onReasoningCumulative: (text, segmentId) => {
+                  attemptReasoning = text;
+                  const visible = visibleRetryPrefix(text, attempt, retryBaselineReasoning);
+                  const delta = visible.slice(visibleReasoningLength);
+                  visibleReasoningLength = visible.length;
+                  if (!delta) return;
+                  const segment = `${visibleReasoningSegments.get(segmentId) ?? ''}${delta}`;
+                  visibleReasoningSegments.set(segmentId, segment);
+                  input.emitEphemeral?.(
+                    asModelEvent<Event>({
+                      type: 'model.reasoning_delta',
+                      segmentId,
+                      text: segment,
+                    }),
+                  );
+                },
+                onReasoningCompleted: (_text, segmentId) => {
+                  const segment = visibleReasoningSegments.get(segmentId);
+                  visibleReasoningSegments.delete(segmentId);
+                  if (!segment) return;
+                  input.emitEphemeral?.(
+                    asModelEvent<Event>({
+                      type: 'model.reasoning_completed',
+                      segmentId,
+                      text: segment,
+                    }),
+                  );
+                },
+              }),
+          }),
+          attemptAbort.signal,
+        );
       } catch (error) {
         attemptAbort.dispose();
         const dispatchCertainty = responseSourceDispatchCertainty(error);
-        await this.#interrupt(input.persistence, envelope, 'provider_failure', dispatchCertainty);
-        throw error;
+        const reason: ModelInvocationInterruptReason = input.signal?.aborted
+          ? 'cancelled'
+          : attemptAbort.signal.aborted
+            ? 'attempt_timeout'
+            : 'provider_failure';
+        try {
+          await this.#interrupt(input.persistence, envelope, reason, dispatchCertainty);
+        } catch (terminalizationError) {
+          throw new ModelInvocationExecutionError(invocationId, terminalizationError);
+        }
+        throw new ModelInvocationExecutionError(invocationId, error);
       }
       attemptAbort.dispose();
+      if (input.signal?.aborted || attemptAbort.signal.aborted) {
+        const reason: ModelInvocationInterruptReason = input.signal?.aborted
+          ? 'cancelled'
+          : 'attempt_timeout';
+        await this.#interrupt(input.persistence, envelope, reason, 'attempted');
+        throw abortReason(input.signal?.aborted ? input.signal : attemptAbort.signal);
+      }
       if (outcome.kind === 'success') {
         const responseRecord: ModelResponseRecord = {
           schema: MODEL_RESPONSE_RECORD_SCHEMA_,
@@ -427,9 +451,20 @@ export class ModelInvocationGateway {
         };
         const responseArtifact = this.#artifacts.writeResponse(responseRecord);
         const normalized = deepFreeze({ invocationId, ...outcome.response });
-        return this.#pendingCompletion(input.persistence, envelope, responseArtifact, normalized);
+        return this.#pendingCompletion(
+          input.persistence,
+          envelope,
+          responseArtifact,
+          normalized,
+          input.signal,
+        );
       }
-      priorError = new ModelAttemptFailureError(outcome, this.#source.failureError?.(outcome));
+      priorError = new ModelAttemptFailureError(
+        outcome,
+        this.#source.failureError?.(outcome),
+        invocationId,
+      );
+      lastFailureDiagnostic = modelFailureDiagnostic(outcome);
       retryBaselineText = attemptText;
       retryBaselineReasoning = attemptReasoning;
       const transient = outcome.kind === 'retryable_failure';
@@ -446,7 +481,15 @@ export class ModelInvocationGateway {
         interruptionReason = 'cancelled';
       } else if (!transient) interruptionReason = 'provider_failure';
       if (attempt >= limits.maxAttempts || !transient || retryBudgetRemaining <= 0) break;
-      retryDelayMs = retryDelay(attempt, retryBudgetRemaining);
+      const baseRetryDelayMs = retryDelay(attempt, retryBudgetRemaining);
+      retryDelayMs =
+        outcome.classification === 'provider_rate_limited'
+          ? this.#reserveRateLimitRetryDelay(
+              input.compiled.surface.route.routeFingerprint,
+              baseRetryDelayMs,
+              retryBudgetRemaining,
+            )
+          : baseRetryDelayMs;
       // The Source owns one outcome only. Gateway persists retry state and the
       // next attempt receives a separate acknowledgement immediately before it.
       await persistAck(
@@ -454,16 +497,50 @@ export class ModelInvocationGateway {
         asModelEvents<Event>([
           {
             type: 'model.retry',
+            invocationId,
             attempt,
             maxAttempts: limits.maxAttempts,
             error: 'transient_model_connection_error',
             delayMs: retryDelayMs,
+            ...lastFailureDiagnostic,
           },
         ]),
       );
     }
-    await this.#interrupt(input.persistence, envelope, interruptionReason, 'attempted');
-    throw priorError ?? new Error('Model invocation attempt budget was exhausted.');
+    try {
+      await this.#interrupt(
+        input.persistence,
+        envelope,
+        interruptionReason,
+        'attempted',
+        lastFailureDiagnostic,
+      );
+    } catch (terminalizationError) {
+      throw new ModelInvocationExecutionError(invocationId, terminalizationError);
+    }
+    if (priorError) throw priorError;
+    throw new ModelInvocationExecutionError(
+      invocationId,
+      new Error('Model invocation attempt budget was exhausted.'),
+    );
+  }
+
+  #reserveRateLimitRetryDelay(
+    routeFingerprint: string,
+    baseDelayMs: number,
+    remainingMs: number,
+  ): number {
+    const now = this.#now();
+    const earliestRetryAt = now + baseDelayMs;
+    const scheduledRetryAt = Math.max(
+      earliestRetryAt,
+      this.#nextRateLimitRetryAtByRoute.get(routeFingerprint) ?? earliestRetryAt,
+    );
+    this.#nextRateLimitRetryAtByRoute.set(
+      routeFingerprint,
+      scheduledRetryAt + Math.max(RATE_LIMIT_RETRY_SLOT_MS, baseDelayMs),
+    );
+    return Math.max(0, Math.min(scheduledRetryAt - now, remainingMs));
   }
 
   #pendingCompletion<Event extends BuiltinModelEvent>(
@@ -471,6 +548,7 @@ export class ModelInvocationGateway {
     envelope: ModelInvocationEnvelope,
     responseArtifact: ReturnType<ModelArtifactWriter['writeResponse']>,
     response: Readonly<NormalizedModelResponse>,
+    signal?: AbortSignal,
   ): PendingModelCompletion<Event> {
     let committed = false;
     const commitWith = async <T>(
@@ -480,6 +558,10 @@ export class ModelInvocationGateway {
     ): Promise<T> => {
       if (committed) throw new Error('Model completion handle is single-use.');
       committed = true;
+      if (signal?.aborted) {
+        await this.#interrupt(persistence, envelope, 'cancelled', 'attempted');
+        throw abortReason(signal);
+      }
       let finalized: ModelCompletionFinalization<T, Event>;
       try {
         finalized = finalizer(response);
@@ -492,6 +574,10 @@ export class ModelInvocationGateway {
         // control returns; the single-use handle can never retry the Source.
         await this.#interrupt(persistence, envelope, 'persistence_unavailable', 'attempted');
         throw error;
+      }
+      if (signal?.aborted) {
+        await this.#interrupt(persistence, envelope, 'cancelled', 'attempted');
+        throw abortReason(signal);
       }
       const events: BuiltinModelEvent[] = [
         {
@@ -528,6 +614,7 @@ export class ModelInvocationGateway {
     envelope: ModelInvocationEnvelope,
     reasonCode: ModelInvocationInterruptReason,
     dispatchCertainty: 'none' | 'attempted' | 'unknown',
+    failureDiagnostic?: ModelFailureDiagnostic,
   ): Promise<void> {
     const events: BuiltinModelEvent[] = [
       {
@@ -535,6 +622,7 @@ export class ModelInvocationGateway {
         invocationId: envelope.provenance.invocationId,
         dispatchCertainty,
         reasonCode,
+        ...failureDiagnostic,
       },
     ];
     if (envelope.resource.budget.kind === 'reservation') {
@@ -543,7 +631,7 @@ export class ModelInvocationGateway {
           ? {
               type: 'resource_budget.released',
               reservationId: envelope.resource.budget.reservationId,
-              proof: 'local_provider_admission_denied',
+              proof: 'local_pre_dispatch_failure',
             }
           : {
               type: 'resource_budget.unknown',
@@ -553,6 +641,39 @@ export class ModelInvocationGateway {
     }
     await persistAck(persistence, asModelEvents<Event>(events));
   }
+}
+
+type ModelFailureDiagnostic = Readonly<{
+  failureClassification:
+    | 'provider_rate_limited'
+    | 'provider_unavailable'
+    | 'connection_failure'
+    | 'attempt_timeout'
+    | 'provider_rejected'
+    | 'provider_failure'
+    | 'cancelled'
+    | 'transport_aborted';
+  providerStatusCode?: number | null;
+  timedOut?: boolean;
+}>;
+
+function modelFailureDiagnostic(
+  outcome: Exclude<import('@kite/runtime-spi').ModelAttemptOutcome, { kind: 'success' }>,
+): ModelFailureDiagnostic {
+  if (outcome.kind === 'retryable_failure') {
+    return {
+      failureClassification: outcome.classification,
+      providerStatusCode: outcome.retryObservation.providerStatusCode,
+      timedOut: outcome.retryObservation.timedOut,
+    };
+  }
+  if (outcome.kind === 'fatal_failure') {
+    return {
+      failureClassification: outcome.classification,
+      providerStatusCode: outcome.providerStatusCode,
+    };
+  }
+  return { failureClassification: outcome.classification };
 }
 
 export function normalizedModelResponseToAIMessage(
@@ -602,30 +723,6 @@ export function computeModelInvocationPrivateDigest(domain: string, value: unkno
   return computePrivateModelEvidenceDigest(domain, value);
 }
 
-function providerPayloadFromSurface(compiled: CompiledModelSurface): ProviderPayloadPart[] {
-  const prompt = [
-    ...(compiled.surface.request.system
-      ? [{ role: 'system', content: compiled.surface.request.system }]
-      : []),
-    ...compiled.surface.request.messages.map((message) => ({
-      role: message.role,
-      content: message.content.map((part) => {
-        if (part.type === 'text' || part.type === 'reasoning') return { text: part.text };
-        if (part.type === 'tool_call') return part.input;
-        return { output: part.output.value };
-      }),
-    })),
-  ];
-  return providerPayloadFromModelPrompt(prompt);
-}
-
-function classificationDigest(payload: readonly ProviderPayloadPart[]): Sha256Digest {
-  return computeModelInvocationPrivateDigest(
-    'kite.model-payload-classification.v1',
-    payload.map((part) => ({ kind: part.kind, label: part.label })),
-  );
-}
-
 function assertResourceMatchesSurface(
   resource: ModelResourcePreparationPlan,
   compiled: CompiledModelSurface,
@@ -645,11 +742,11 @@ function normalizeLimits(
 ): ModelInvocationEnvelope['resource']['limits'] {
   const limits = { ...DEFAULT_LIMITS, ...input };
   for (const [key, value] of Object.entries(limits)) {
-    if (!Number.isSafeInteger(value) || value < 1) {
+    if (!Number.isSafeInteger(value) || value < (key === 'perAttemptTimeoutMs' ? 0 : 1)) {
       throw new Error(`Model invocation ${key} must be a positive safe integer.`);
     }
   }
-  if (limits.perAttemptTimeoutMs > limits.totalTimeBudgetMs) {
+  if (limits.perAttemptTimeoutMs > 0 && limits.perAttemptTimeoutMs > limits.totalTimeBudgetMs) {
     throw new Error('Model per-attempt timeout exceeds its total time budget.');
   }
   return limits;
@@ -715,10 +812,11 @@ function boundedAttemptSignal(
 ): { signal: AbortSignal; refresh(): void; dispose(): void } {
   const controller = new AbortController();
   let disposed = false;
-  let timer: ReturnType<typeof setTimeout>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const refresh = () => {
     if (disposed || controller.signal.aborted) return;
-    clearTimeout(timer);
+    if (timeoutMs <= 0) return;
+    if (timer) clearTimeout(timer);
     timer = setTimeout(() => controller.abort(new Error('Model attempt timed out.')), timeoutMs);
   };
   const onAbort = () => controller.abort(abortReason(parent!));
@@ -730,10 +828,19 @@ function boundedAttemptSignal(
     refresh,
     dispose: () => {
       disposed = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       parent?.removeEventListener('abort', onAbort);
     },
   };
+}
+
+async function waitForAttemptSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw abortReason(signal);
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 function abortReason(signal: AbortSignal): Error {

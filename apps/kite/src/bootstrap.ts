@@ -21,10 +21,11 @@ import {
   resolveProjectIdentity,
 } from '@kite/runtime-host';
 import type { RuntimeStorage } from '@kite/runtime-host/storage';
-import type {
-  CapabilityExecutionInvocation,
-  CapabilityExecutionPort,
-  RuntimeModule,
+import {
+  type CapabilityExecutionInvocation,
+  type CapabilityExecutionPort,
+  defineRuntimeModule,
+  type RuntimeModule,
 } from '@kite/runtime-spi';
 import {
   assertSqliteSessionMetadataCanOpen,
@@ -52,7 +53,7 @@ import {
   type CliRuntimeBridgeInput,
   createCliRuntimeBridge,
 } from './bootstrap/runtime/CliRuntimeBridge';
-import { createKiteRuntimeExecutionModule } from './bootstrap/runtime/KiteRuntimeExecutionModule';
+import { KITE_RUNTIME_OPERATION_IDS_ } from './bootstrap/runtime/KiteRuntimeExecutionModule';
 import {
   createRuntimeSessionCoordinatorBinding,
   type RuntimeSessionCoordinatorAccess,
@@ -65,6 +66,25 @@ import type {
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
+
+export function createKiteRuntimeExecutionModule<TContext>(input: {
+  readonly executionAdapterId: string;
+  readonly createBridge: (context: TContext) => RuntimeHostExecutionBridge;
+}): RuntimeModule {
+  return defineRuntimeModule({
+    moduleId: 'kite-runtime-execution',
+    providerId: 'kite-runtime-execution',
+    revision: 'app-runtime-current',
+    operationIds: KITE_RUNTIME_OPERATION_IDS_,
+    register: (registry) => {
+      registry.registerExecutionAdapter({
+        adapterId: input.executionAdapterId,
+        revision: 'app-runtime-current',
+        create: input.createBridge,
+      });
+    },
+  });
+}
 
 function createKiteRuntimeStorage(
   checkpointPath: string,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   assertCurrentRuntimeEvent,
+  assertCurrentRuntimeEventForWrite,
   decodeCurrentRuntimeEventJson,
   encodeCurrentRuntimeEventJson,
 } from '../src/codec';
@@ -49,5 +50,47 @@ describe('State event codec', () => {
     expect(decodeCurrentRuntimeEventJson(encodeCurrentRuntimeEventJson(withUnknownField))).toEqual(
       withUnknownField,
     );
+  });
+
+  test('keeps retired session events readable but rejects them from current writes', () => {
+    const retiredAdmission = {
+      type: 'provider.admission_status',
+      status: 'ready',
+      reason: 'admitted',
+      admissionRevision: 'legacy-policy-v1',
+    };
+    expect(() => assertCurrentRuntimeEvent(retiredAdmission)).not.toThrow();
+    expect(() => assertCurrentRuntimeEventForWrite(retiredAdmission)).toThrow(
+      'read-only compatibility data',
+    );
+
+    const retiredReviewer = {
+      type: 'verification.requested',
+      verificationId: 'legacy-verification',
+      mode: 'required',
+      spec: {
+        checks: [{ type: 'reviewer', instructions: 'Review the legacy result.' }],
+      },
+      requestedAt: '2026-08-24T00:00:00.000Z',
+    };
+    expect(() => assertCurrentRuntimeEvent(retiredReviewer)).not.toThrow();
+    expect(() => assertCurrentRuntimeEventForWrite(retiredReviewer)).toThrow(
+      'read-only compatibility data',
+    );
+
+    const retiredSubagentTitle = {
+      type: 'subagent.started',
+      subagent: { id: 'child-1', role: 'explore', task: 'Inspect callers' },
+    };
+    expect(() => assertCurrentRuntimeEvent(retiredSubagentTitle)).not.toThrow();
+    expect(() => assertCurrentRuntimeEventForWrite(retiredSubagentTitle)).toThrow(
+      'read-only compatibility data',
+    );
+    expect(() =>
+      assertCurrentRuntimeEventForWrite({
+        type: 'subagent.started',
+        subagent: { id: 'child-1', role: 'explore', name: 'Inspect callers' },
+      }),
+    ).not.toThrow();
   });
 });

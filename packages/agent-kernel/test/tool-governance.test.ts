@@ -13,6 +13,7 @@ import {
   type ToolGovernanceGateFacts,
   type ToolGovernanceInvocationFact,
   type ToolGovernancePolicyFact,
+  toolGovernanceFactsInvalidReason,
 } from '../src/tool-governance';
 
 const D = 'a'.repeat(64);
@@ -57,7 +58,6 @@ const BASE_POLICY: ToolGovernancePolicyFact = {
   requiresApproval: false,
   risk: 'read',
   reason: 'Read-only policy fact.',
-  userVisibleSummary: 'Read fixture.',
   expectedEffects: ['Reads fixture data'],
 };
 
@@ -288,6 +288,20 @@ describe('State tool governance authorization facts', () => {
       }),
     ).toBe(false);
     expect(
+      toolGovernanceFactsInvalidReason({
+        ...facts(),
+        context: { ...facts().context, callStatus: 'queued' },
+      }),
+    ).toBe('context');
+    expect(toolGovernanceFactsInvalidReason(facts({ invocation: { toolCallId: '' } }))).toBe(
+      'invocation',
+    );
+    expect(
+      toolGovernanceFactsInvalidReason(
+        facts({ invocation: { builtinCatalogRevision: null, dynamicCatalogRevision: D } }),
+      ),
+    ).toBe('identity');
+    expect(
       isValidToolGovernanceFacts(
         facts({
           dynamicMcp: { minimumApproval: 'none', readOnly: true },
@@ -451,7 +465,7 @@ describe('State tool governance authorization facts', () => {
     ).toMatchObject({ code: 'authorization_elevation_denied' });
   });
 
-  test('full_access and interaction full are separate, and static minimum user does not re-upgrade safe facts', () => {
+  test('routes sensitive external access by interaction mode without overriding full access', () => {
     expect(
       authorizeToolGovernance(
         shellFacts({
@@ -466,6 +480,73 @@ describe('State tool governance authorization facts', () => {
         }),
       ),
     ).toEqual({ kind: 'authorized', authorizationKind: 'policy_allow', grantUsed: 'none' });
+    expect(
+      authorizeToolGovernance(
+        shellFacts({
+          policy: {
+            decision: 'ask',
+            allowed: true,
+            requiresApproval: true,
+            risk: 'write_file',
+            effects: { externalWrite: true },
+            fullAccessMayBypassApproval: true,
+          },
+          context: { interactionMode: 'accept_edits', authorizationMode: 'default' },
+        }),
+      ),
+    ).toMatchObject({ kind: 'request_approval' });
+    expect(
+      authorizeToolGovernance(
+        shellFacts({
+          policy: {
+            decision: 'ask',
+            allowed: true,
+            requiresApproval: true,
+            risk: 'read',
+            minimumApproval: 'user',
+            effects: { externalRead: true, sensitiveExternalAccess: true },
+            fullAccessMayBypassApproval: true,
+          },
+          context: { interactionMode: 'full', authorizationMode: 'full_access' },
+        }),
+      ),
+    ).toEqual({ kind: 'authorized', authorizationKind: 'approved_call', grantUsed: 'full_access' });
+    expect(
+      authorizeToolGovernance(
+        shellFacts({
+          policy: {
+            decision: 'ask',
+            allowed: true,
+            requiresApproval: true,
+            risk: 'read',
+            minimumApproval: 'user',
+            effects: { externalRead: true, sensitiveExternalAccess: true },
+            fullAccessMayBypassApproval: true,
+          },
+          context: { interactionMode: 'auto', authorizationMode: 'default' },
+        }),
+      ),
+    ).toMatchObject({ kind: 'request_auto_review' });
+    expect(
+      authorizeToolGovernance(
+        shellFacts({
+          policy: {
+            decision: 'ask',
+            allowed: true,
+            requiresApproval: true,
+            risk: 'read',
+            minimumApproval: 'user',
+            effects: { externalRead: true, sensitiveExternalAccess: true },
+            fullAccessMayBypassApproval: true,
+          },
+          context: {
+            interactionMode: 'auto',
+            authorizationMode: 'default',
+            circuitBreakerTripped: true,
+          },
+        }),
+      ),
+    ).toMatchObject({ kind: 'request_approval' });
     expect(
       authorizeToolGovernance(
         shellFacts({

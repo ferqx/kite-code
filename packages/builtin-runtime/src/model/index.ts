@@ -35,7 +35,6 @@ export * from './operation';
 export * from './primary-effect';
 export * from './private-immutable-artifacts';
 export * from './project-instructions';
-export * from './provider-data-admission';
 export * from './response-source';
 export {
   type AutoReviewResult,

@@ -725,7 +725,7 @@ describe('invokeGovernedTool — search_files', () => {
 });
 
 describe('invokeGovernedTool — shell_execute timeout', () => {
-  it('runs proven-local accept_edits shell commands with networking disabled', async () => {
+  it('requires accept_edits approval for workspace-local shell commands', async () => {
     let capturedNetworkMode: string | undefined;
 
     const result = await invokeGovernedTool({
@@ -745,11 +745,12 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
       },
     });
 
-    expect(result.ok, result.stderr).toBe(true);
-    expect(capturedNetworkMode).toBe('disabled');
+    expect(result.ok).toBe(false);
+    expect(result.stderr).toContain('current interaction mode must review this exact invocation');
+    expect(capturedNetworkMode).toBeUndefined();
   });
 
-  it('runs exact local runtime version queries with networking disabled', async () => {
+  it('requires accept_edits approval for fixed runtime version queries', async () => {
     const capturedNetworkModes: string[] = [];
 
     for (const command of ['node --version', 'npm --version', 'bun --version']) {
@@ -769,10 +770,11 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
           return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
         },
       });
-      expect(result.ok).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.stderr).toContain('current interaction mode must review this exact invocation');
     }
 
-    expect(capturedNetworkModes).toEqual(['disabled', 'disabled', 'disabled']);
+    expect(capturedNetworkModes).toEqual([]);
   });
 
   it('opens networking only for an approved network shell command', async () => {
@@ -867,7 +869,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
 
     expect(result.ok).toBe(true);
     expect(capturedFilesystemMode).toBe('allow_all');
-    expect(capturedNetworkMode).toBe('allow_all');
+    expect(capturedNetworkMode).toBe('disabled');
   });
 
   it('projects both network and external-filesystem approval for curl output files', async () => {
@@ -901,6 +903,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
 
   it('keeps approved workspace-only writes in the native sandbox lane', async () => {
     let capturedFilesystemMode: string | undefined;
+    let capturedNetworkMode: string | undefined;
 
     const result = await invokeGovernedTool({
       workspace: '/ws',
@@ -916,12 +919,14 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
       approvedGrant: 'approve_once',
       shellExecutor: async (input) => {
         capturedFilesystemMode = input.filesystemMode;
+        capturedNetworkMode = input.networkMode;
         return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
       },
     });
 
     expect(result.ok).toBe(true);
     expect(capturedFilesystemMode).toBe('workspace_only');
+    expect(capturedNetworkMode).toBe('disabled');
   });
 
   it('opens networking for a full-access network shell command', async () => {

@@ -10,7 +10,7 @@
 
 Kite Code 尚未发布，生产文件、目录、类型、函数、类、变量和 export 使用领域职责命名，不使用 schema 数字、协议数字或历史实施任务作为实体身份。schema version、protocol version、format epoch 与数据库 format marker 只能作为 metadata 值存在。
 
-最终发布前，调用方必须直接使用唯一入口；仓库不得保留旧名 alias、双 codec、旧数据库 constructor、旧 sidecar fallback、格式选择分支或长期兼容 façade。持久格式不匹配仍严格 fail closed，并继续验证 checksum、Project/Workspace identity、Event/Snapshot revision 与 effect lease。
+最终发布前，调用方必须直接使用唯一入口；仓库不得保留旧名 alias、双 codec、旧数据库 constructor、旧 sidecar fallback、格式选择分支或长期兼容 façade。这里的 clean cutover 约束当前生产入口和当前写格式，不授权破坏已有会话。当前 codec 可以在同一 schema/epoch 内显式读取有限、已知且有测试的退休事件字段；它们只能降级为无副作用或 `inconclusive`，当前生产者不得再写。除此之外的持久格式不匹配仍严格 fail closed，并继续验证 checksum、Project/Workspace identity、Event/Snapshot revision 与 effect lease。
 
 ## 当前组合与目录
 
@@ -20,7 +20,7 @@ Kite Code 尚未发布，生产文件、目录、类型、函数、类、变量�
 - Runtime Contract 的 command/query/notification/projection 与 Runtime SPI 的 capability/execution/model/module port 分文件组合。
 - Kernel 根 state/event union 保持静态，planning/context/verification state 与 event map 位于 `packages/agent-kernel/src/domains/`；Host 按 `host/lifecycle/execution/kernel-adapter/format/process/storage/observability` 归档。
 - Builtin operation module 位于各领域 `runtime-module.ts`；Skill、Subagent、Verification 只通过对应 package subpath 暴露，不再从根 barrel 暴露。
-- SQLite 的只读格式预检位于 `packages/runtime-storage-sqlite/src/preflight.ts`；`adapter.ts` 是唯一数据库生命周期 owner，event/session/snapshot/artifact/authority/effect 子模块共享同一 database context，`transaction.ts` 是唯一 Runtime 原子提交 owner。
+- SQLite 的只读格式预检位于 `packages/runtime-storage-sqlite/src/preflight.ts`；`adapter.ts` 是唯一可写数据库生命周期 owner，`log-query.ts` 的独立 no-follow/read-only reader 只实现 `RuntimeLogQueryPort`，event/session/snapshot/artifact/authority/effect 子模块共享写 database context，`transaction.ts` 是唯一 Runtime 原子提交 owner。
 - App 只接收 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` storage ports，不存在平面 storage bridge。
 - 七 workspace 和依赖方向保持不变，App 负责组合 concrete adapter。
 
@@ -34,5 +34,7 @@ Kite Code 尚未发布，生产文件、目录、类型、函数、类、变量�
 - 已删除的根 barrel、平面 storage port、旧 MCP source/auth spelling 与旧 TUI façade；
 - active 文档中的版本化 State/Store 实体和旧 Runtime Store path；
 - 多于一个 concrete composition root。
+
+这些门禁直接检查当前源码、package manifest 与行为测试；不得提交 generated architecture snapshot、迁移 owner matrix 或 exception allowlist 作为第二事实源。
 
 算法名称中的 IPv4、IPv6、SHA-256 数字不属于代码实体版本。accepted ADR、completed execution record 与 deprecated 历史材料不由该 Gate 改写。

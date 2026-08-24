@@ -177,7 +177,7 @@ const optionSchema = z
   .object({
     label: z.string().trim().min(1),
     description: z.string().trim().min(1),
-    recommended: z.boolean(),
+    recommended: z.boolean().optional(),
   })
   .strict();
 const questionSchema = z
@@ -187,11 +187,11 @@ const questionSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (value.options.filter((option) => option.recommended).length !== 1) {
+    if (value.options.filter((option) => option.recommended === true).length > 1) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['options'],
-        message: 'Exactly one option must set recommended to true',
+        message: 'At most one option may set recommended to true',
       });
     }
   });
@@ -336,6 +336,13 @@ export const BUILTIN_UPDATE_PLAN_SCHEMA_ = z
 
 export const BUILTIN_TASK_PUBLIC_SCHEMA_ = z
   .object({
+    name: z
+      .string()
+      .trim()
+      .min(2)
+      .max(80)
+      .regex(/^[^\r\n]+$/u)
+      .describe('Public sub-agent name that briefly states what the child is doing'),
     subagent_type: z
       .enum(['explore', 'plan', 'code', 'review'])
       .describe('Type of sub-agent to invoke'),
@@ -352,6 +359,12 @@ export const BUILTIN_TASK_PUBLIC_SCHEMA_ = z
 
 export const BUILTIN_TASK_PRIVATE_SCHEMA_ = z
   .object({
+    name: z
+      .string()
+      .trim()
+      .min(2)
+      .max(80)
+      .regex(/^[^\r\n]+$/u),
     subagent_type: z.enum(['explore', 'plan', 'code', 'review']),
     taskArtifact: z
       .object({
@@ -420,7 +433,6 @@ export const BUILTIN_ZOD_SCHEMAS_ = Object.freeze({
   'model:primary': internalSchema,
   'model:compaction': internalSchema,
   'model:auto_review': internalSchema,
-  'model:verification_review': internalSchema,
   'model:subagent': internalSchema,
 } as const);
 

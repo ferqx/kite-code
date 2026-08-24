@@ -264,7 +264,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     PTY 场景应配置 `retry: never`。
 19. selector command（`/permissions`、`/effort`、`/theme`、`/model`）不得通过空格和二级参数
     选择值。PTY 场景以选择器标题为确认回执，在选择器关闭前不得发送下一条命令；场景不得用固定
-    sleep 修补命令提交到 Overlay mount 的 React commit 竞争。
+    sleep 修补命令提交到 Overlay mount 的 React commit 竞争。`/permissions` 确认后必须观察隔离用户
+    配置中的 `interactionMode`，重新启动真实 TUI 并证明该个人选择优先于项目初始默认；只断言当前
+    Footer 变化不能证明持久化。非 `/permissions` 的审批场景必须在 fixture 中显式固定
+    `interactionMode`，不得依赖产品默认或开发机用户配置来选择人工/自动审批路径。
 20. HTTP 429/5xx 属于模型 transient retry 场景。验证终态错误恢复时，mock 必须连续返回足够次数的
     transient failure 以耗尽 production bounded retry budget，并断言 retry UI、实际请求次数、终态错误
     与下一用户 turn 恢复；不得用一次 500 后的默认成功响应声称已经验证错误终态。只验证“不重试”时
@@ -291,7 +294,13 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     `subagent.suspended` 都必须立即停止对应 TUI block 的 spinner/计时，并通过 Runtime 后续事实区分
     “等待自动审查”“自动审查中”和“等待你的批准”；只有最后一种表示需要用户动作。该投影不得依赖
     child 当前是否拥有唯一 approval interrupt。自动或人工获批后必须先恢复当前 active continuation，
-    deferred sibling 不得插队；恢复后的 block 重新进入 running。
+    deferred sibling 不得插队；用户提交“批准”后，TUI 必须立即按当前 interrupt 的 subagent/parent
+    identity 清除该 block 的等待审批投影并重新进入 running；旧/bridge 事件缺失可匹配 identity 时只可
+    回退到唯一的 `awaiting_user` child，存在多个候选时不得猜测。该投影不等待 continuation 的下一条进度事件；
+    同一审批已获本地确认后，迟到的 duplicate `subagent.suspended`/`subagent.approval_deferred`
+    不得把 block 回退为等待审批；下一条 child progress/result/terminal 会结束该去重窗口。
+    durable `approval.granted` 仍是回放与 Runtime 状态的权威事实。拒绝或取消不得乐观清除 interrupt，
+    必须等待 durable terminal event，避免遗漏当前 turn 的终态投影。
     当后续 tool call 必须使用前一 Tool result 中运行时生成的标识时，当前 queue slot 可以使用
     test-only `response(request)` resolver 从已记录的 Mock request 生成该 slot 的 response；resolver
     不能读取 queue cursor、未消费 response、Runtime state 或网络。它仍严格消耗一个 slot，且返回值

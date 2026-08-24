@@ -95,8 +95,6 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecord['status
     case 'subagent.suspended':
     case 'runtime.action_ignored':
       return 'blocked';
-    case 'provider.admission_status':
-      return event.status === 'ready' ? 'ok' : 'blocked';
     case 'runtime.cancellation_diagnostic':
       return 'error';
     case 'model.invocation_interrupted':
@@ -247,6 +245,13 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFields {
         durationMs: event.delayMs,
         retryAttempt: event.attempt,
         retryMaxAttempts: event.maxAttempts,
+        ...(event.failureClassification
+          ? { modelFailureClassification: event.failureClassification }
+          : {}),
+        ...(typeof event.providerStatusCode === 'number'
+          ? { providerStatusCode: event.providerStatusCode }
+          : {}),
+        ...(event.timedOut === true ? { timedOut: true } : {}),
       };
     case 'model.cache_metrics':
       return {
@@ -260,14 +265,6 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFields {
       return event.failure ? { failureKind: event.failure.kind } : {};
     case 'runtime.cancellation_diagnostic':
       return { failureKind: event.failure.kind };
-    case 'provider.admission_status':
-      return {
-        capabilityKind: 'provider_admission',
-        approvalResult: event.reason,
-        ...(safeIdentifier(event.admissionRevision)
-          ? { providerAdmissionRevision: safeIdentifier(event.admissionRevision) }
-          : {}),
-      };
     case 'provider.action_required':
       return { capabilityKind: 'mcp_provider', approvalType: event.action };
     case 'provider.action_completed':
@@ -299,8 +296,17 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFields {
     case 'subagent.tool_result':
       return { toolKind: metadataToolKind(event.subagent.toolName) };
     case 'subagent.completed':
-    case 'subagent.failed':
       return { durationMs: event.subagent.durationMs };
+    case 'subagent.failed':
+      return {
+        durationMs: event.subagent.durationMs,
+        ...(event.subagent.diagnostic
+          ? {
+              subagentFailureCode: event.subagent.diagnostic.code,
+              subagentFailureStage: event.subagent.diagnostic.stage,
+            }
+          : {}),
+      };
     case 'subagent.cache_metrics':
       return {
         inputTokens: event.subagent.inputTokens,

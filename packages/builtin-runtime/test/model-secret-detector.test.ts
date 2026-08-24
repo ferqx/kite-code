@@ -16,7 +16,11 @@ describe('createModelSecretDetector legacy differential corpus', () => {
     ['contains ENV_SECRET_MARKER', 'secret'],
     ['-----BEGIN PRIVATE KEY-----', 'secret'],
     ['api_key=synthetic-value', 'secret'],
+    ['authorization: synthetic-token', 'secret'],
     ['Authorization: Bearer synthetic-token', 'secret'],
+    ['Authorization: Basic dXNlcjpwYXNz', 'secret'],
+    ['accept basic keyboard input', 'clear'],
+    ['readonly authorization:\n  readonly mode: InteractionMode;', 'clear'],
     ['sk-1234567890abcdef', 'secret'],
     ['read /workspace/.env.local', 'secret'],
   ] as const)('classifies %s as %s', (text, verdict) => {

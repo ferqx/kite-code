@@ -26,7 +26,7 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 **叠加态（覆盖阶段动词，但不改变阶段本身）：**
 - Retry: `Retrying` + warning 色
 - Approval 等待: `Waiting` + muted 色
-- Subagent 审批暂停：block 状态切换为 `suspended`，并以 `approvalState` 区分 deferred queue、正在自动审查和等待用户；状态行分别显示 `Review queued`、`Auto-reviewing` 与 `Awaiting approval`，只有最后一种使用 warning 色并表示需要用户动作。自动或人工批准以及 replay 恢复后回到 `running`，取消同时覆盖 `running` 与 `suspended`。
+- Subagent 审批暂停：block 状态切换为 `suspended`，并以 `approvalState` 区分 `queued_auto_review`、`queued_user_approval`、正在自动审查和等待用户；child 卡片分别显示“等待自动审查”、“人工审批排队中”、“自动审查中”与“等待你的批准”，全局状态行对两种排队 route 统一显示 `Review queued`，只有真正的 `Awaiting approval` 使用 warning 色并表示需要用户动作。历史通用 `queued` 仅作兼容投影并保守按人工审批排队处理。自动或人工批准以及 replay 恢复后回到 `running`；done/error/cancelled 必须清除审批态，取消同时覆盖 `running` 与 `suspended`。
 - Input 等待: `Asking` + warning 色
 - Context compaction: `preparing → summarizing → validating`，由 App-only progress action 驱动，不额外写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除。手动与自动压缩都在消息区使用同一个内联动画；该动画不覆盖当前 Agent run 动词。
 - Idle plan mode: `Shift+Tab to exit - describe your task` + muted 色

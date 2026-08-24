@@ -70,20 +70,6 @@ export {
 } from './mcp-config-repository';
 export { expandEnvVars } from './mcp-server-config';
 export type {
-  ProviderDataAdmissionDecision,
-  ProviderDataAdmissionGate,
-  ProviderDataAdmissionReason,
-  ProviderDispatchPurpose,
-  ProviderPayloadKind,
-  ProviderPayloadPart,
-  WorkspaceDataLabel,
-} from './provider-data-admission';
-export {
-  createApprovedProviderDataAdmission,
-  ProviderDataAdmissionError,
-  providerPayloadFromModelPrompt,
-} from './provider-data-admission';
-export type {
   CapabilityMaturity,
   CapabilityProfile,
   CapabilityProfileAdmissionDecision,
@@ -373,6 +359,7 @@ export const configSchema = z.object({
 
 export type KiteCodeConfig = z.infer<typeof configSchema>;
 export type LanguagePreference = z.infer<typeof languagePreferenceSchema>;
+export type InteractionModePreference = z.infer<typeof interactionModeSchema>;
 
 // ── Types ──
 
@@ -525,7 +512,10 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     // Interface language is a personal preference. A repository must not be
     // able to change the language of the workspace trust or approval screens.
     language: user.language,
-    interactionMode: project.interactionMode ?? user.interactionMode,
+    // Permission mode is an explicit personal choice. A trusted repository may
+    // provide the initial default, but it must not overwrite a mode the user
+    // selected and persisted through the TUI.
+    interactionMode: user.interactionMode ?? project.interactionMode,
     features: { ...user.features, ...project.features },
     sessionLogging: project.sessionLogging ?? user.sessionLogging,
     telemetry: user.telemetry,
@@ -572,7 +562,7 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
       default: { provider: 'deepseek', name: 'deepseek-v4-flash' },
     },
     theme: 'dark',
-    interactionMode: 'accept_edits',
+    interactionMode: 'auto',
     features: {},
     telemetry: undefined,
     sandbox: { enabled: true },
@@ -1039,6 +1029,24 @@ export function saveUserLanguage(
     const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
     text = applyEdits(text, modify(text, ['language'], language, fmt));
     writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Persist the personal TUI permission mode for subsequent launches. */
+export function saveInteractionMode(
+  interactionMode: InteractionModePreference,
+  configPath = defaultConfigPath(),
+): boolean {
+  try {
+    const dir = resolve(configPath, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    let text = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '{}';
+    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+    text = applyEdits(text, modify(text, ['interactionMode'], interactionMode, fmt));
+    writeFileSync(configPath, text, { encoding: 'utf-8', mode: 0o600 });
     return true;
   } catch {
     return false;

@@ -41,6 +41,7 @@ export {
 } from './auto-review';
 export {
   assertCurrentRuntimeEvent,
+  assertCurrentRuntimeEventForWrite,
   decodeCurrentRuntimeEventJson,
   encodeCurrentRuntimeEventJson,
 } from './codec';
@@ -364,7 +365,6 @@ export type {
   AgentGitInvocationReceipt,
   AgentInteractionState,
   AgentLoadedCapabilityState,
-  AgentModelAdmissionState,
   AgentModelBudgetState,
   AgentModelInvocationState,
   AgentModelLimitsState,
@@ -480,6 +480,7 @@ export {
   isValidToolApprovalBindingFacts,
   isValidToolGovernanceFacts,
   TOOL_GOVERNANCE_FACTS_SCHEMA_,
+  toolGovernanceFactsInvalidReason,
 } from './tool-governance';
 export type {
   KernelVerificationEffects,

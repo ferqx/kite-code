@@ -241,7 +241,9 @@ describe('Runtime stability invariants', () => {
       database.run("UPDATE runtime_events SET event_json = '{' WHERE session_id = 'corrupt-event'");
       database.close();
 
-      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTest(storePath, { sessionId: 'corrupt-event' })).toThrow(
+        'Runtime format is incompatible',
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -275,7 +277,9 @@ describe('Runtime stability invariants', () => {
         .run(JSON.stringify(corruptedPayload), 'corrupt-snapshot');
       database.close();
 
-      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTest(storePath, { sessionId: 'corrupt-snapshot' })).toThrow(
+        'Runtime format is incompatible',
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

@@ -31,7 +31,6 @@ import {
   executeTestRuntimeTool,
   testBuiltinToolCatalog,
   testCapabilityArtifactWriter,
-  testProviderDataAdmission,
   testWorkspaceFilesystemRuntime,
 } from './helpers/runtime-model';
 import { StreamingMockModel } from './mock-model';
@@ -47,8 +46,9 @@ const unitToolDispatchers = new WeakMap<
 const TEST_RECOVERY_IDENTITY_KEY = '7'.repeat(64);
 type TestSubAgentRunnerInput = Omit<
   import('#app/bootstrap/runtime/subagent/types').SubAgentRunnerInput,
-  'recoveryIdentityKey'
+  'name' | 'recoveryIdentityKey'
 > & {
+  name?: string;
   recoveryIdentityKey?: string;
 };
 
@@ -74,10 +74,10 @@ async function runSubAgent(input: TestSubAgentRunnerInput) {
   const evidence = modelInvocationHarness(input);
   return runSubAgentUnderTest({
     ...input,
+    name: input.name ?? 'Test sub-agent',
     recoveryIdentityKey: input.recoveryIdentityKey ?? TEST_RECOVERY_IDENTITY_KEY,
     builtinToolCatalog: input.builtinToolCatalog ?? testBuiltinToolCatalog(),
     config: completeFixtureConfig(input.config),
-    providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmission,
     modelEffectCoordinator: new BuiltinModelEffectCoordinator(evidence.gateway),
     modelInvocationPersistence: evidence.persistence,
     toolDispatcher: input.toolDispatcher ?? directUnitToolDispatcher(input),
@@ -92,10 +92,10 @@ async function resumeSubAgent(
   return resumeSubAgentUnderTest(
     {
       ...input,
+      name: input.name ?? 'Test sub-agent',
       recoveryIdentityKey: input.recoveryIdentityKey ?? TEST_RECOVERY_IDENTITY_KEY,
       builtinToolCatalog: input.builtinToolCatalog ?? testBuiltinToolCatalog(),
       config: completeFixtureConfig(input.config),
-      providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmission,
       modelEffectCoordinator: new BuiltinModelEffectCoordinator(evidence.gateway),
       modelInvocationPersistence: evidence.persistence,
       toolDispatcher: input.toolDispatcher ?? directUnitToolDispatcher(input),
@@ -288,6 +288,7 @@ describe('SubAgentRunner integration', () => {
         workspace,
         recoveryIdentityKey: TEST_RECOVERY_IDENTITY_KEY,
         role: getRoleConfig('code'),
+        name: 'Check missing dispatcher',
         task: 'Read visible.txt through the required Runtime boundary.',
         interactionMode: 'accept_edits',
         timeoutMs: 5_000,
@@ -308,7 +309,6 @@ describe('SubAgentRunner integration', () => {
         }),
         modelEffectCoordinator: new BuiltinModelEffectCoordinator(harness.gateway),
         modelInvocationPersistence: harness.persistence,
-        providerDataAdmission: testProviderDataAdmission,
       });
 
       expect(result.steps?.find((step) => step.toolName === 'read_file')).toMatchObject({
@@ -664,6 +664,7 @@ describe('SubAgentRunner integration', () => {
           signal: new AbortController().signal,
           eventSink: mockEventSink().sink,
           model,
+          authorization: { ...defaultAuthorizationState(), mode: 'full_access' },
           shellExecutor: async (input) => ({
             ...combination,
             command: input.command,
@@ -751,7 +752,8 @@ describe('SubAgentRunner integration', () => {
       config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: '/tmp/test',
       role: getRoleConfig('explore'),
-      task: 'search for UserService',
+      name: 'Search for UserService',
+      task: '# Search for UserService\n\nInspect the service implementation and report its call sites.',
       timeoutMs: 5000,
       signal: new AbortController().signal,
       eventSink: sink,
@@ -764,8 +766,8 @@ describe('SubAgentRunner integration', () => {
 
     expect(events[0]!.type).toBe('start');
     expect(events[0]!.data.role).toBe('explore');
-    expect(events[0]!.data.task).toBe('Private delegated task');
-    expect(JSON.stringify(events[0])).not.toContain('search for UserService');
+    expect(events[0]!.data.name).toBe('Search for UserService');
+    expect(JSON.stringify(events[0])).not.toContain('Inspect the service implementation');
 
     const doneEvent = events.find((e) => e.type === 'done')!;
     expect(doneEvent.data.summary).toContain('Found');
@@ -1302,7 +1304,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('inherits full access authorization for sub-agent verification commands', async () => {
+  test('inherits full access authorization for uncertain sub-agent verification', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-verify-'));
     try {
       const { events, sink } = mockEventSink();
@@ -1327,6 +1329,7 @@ describe('SubAgentRunner integration', () => {
         ],
       }) as unknown as SupportedChatModel;
 
+      let shellExecutions = 0;
       const result = await runSubAgent({
         config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
         workspace: ws,
@@ -1337,18 +1340,22 @@ describe('SubAgentRunner integration', () => {
         eventSink: sink,
         model: model,
         authorization: { ...defaultAuthorizationState(), mode: 'full_access' },
-        shellExecutor: async (input) => ({
-          ok: true,
-          command: input.command,
-          exitCode: 0,
-          stdout: 'typecheck ok',
-          stderr: '',
-        }),
+        shellExecutor: async (input) => {
+          shellExecutions += 1;
+          return {
+            ok: true,
+            command: input.command,
+            exitCode: 0,
+            stdout: 'typecheck ok',
+            stderr: '',
+          };
+        },
       });
 
       expect(result.ok).toBe(true);
+      expect(shellExecutions).toBe(1);
       const shellResult = events.find(
-        (e) => e.type === 'tool_result' && e.data.toolName === 'shell_execute',
+        (event) => event.type === 'tool_result' && event.data.toolName === 'shell_execute',
       );
       expect(shellResult?.data.ok).toBe(true);
       expect(String(shellResult?.data.summary)).toContain('typecheck ok');
@@ -1436,12 +1443,12 @@ describe('SubAgentRunner integration', () => {
         responses: [
           {
             message: aiMessage({
-              content: 'stage fixture',
+              content: 'push fixture branch',
               tool_calls: [
                 {
                   id: 'tc-auto-review',
                   name: 'shell_execute',
-                  args: { command: 'git add fixture.txt', description: 'Stage fixture' },
+                  args: { command: 'git push origin main', description: 'Push fixture branch' },
                 },
               ],
             }),
@@ -1453,7 +1460,7 @@ describe('SubAgentRunner integration', () => {
         config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
         workspace: ws,
         role: getRoleConfig('code'),
-        task: 'Stage the changed fixture.',
+        task: 'Push the changed fixture branch.',
         interactionMode: 'auto',
         timeoutMs: 5_000,
         signal: new AbortController().signal,
@@ -1856,6 +1863,7 @@ describe('SubAgentRunner integration', () => {
       config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: '/tmp/test',
       role: getRoleConfig('review'),
+      name: 'Review auth.ts',
       task: 'review auth.ts',
       timeoutMs: 5000,
       signal: new AbortController().signal,
@@ -1866,8 +1874,7 @@ describe('SubAgentRunner integration', () => {
     expect(result.ok).toBe(true);
     expect(events[0]!.type).toBe('start');
     expect(events[0]!.data.role).toBe('review');
-    expect(events[0]!.data.task).toBe('Private delegated task');
-    expect(JSON.stringify(events[0])).not.toContain('review auth.ts');
+    expect(events[0]!.data.name).toBe('Review auth.ts');
   });
 
   test('error event when aborted before model invoke', async () => {
@@ -1925,12 +1932,12 @@ describe('SubAgentRunner integration', () => {
       model: model,
     });
 
-    // The abort should cause the subagent to fail
+    // The abort should cause the subagent to fail.
     expect(result.ok).toBe(false);
     expect(events.some((e) => e.type === 'error')).toBe(true);
   });
 
-  test('propagates the role timeout signal into descendant tool admission', async () => {
+  test('classifies the role deadline separately from parent cancellation', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-timeout-'));
     writeFileSync(join(workspace, 'README.md'), 'fixture');
     const { events, sink } = mockEventSink();
@@ -1944,12 +1951,10 @@ describe('SubAgentRunner integration', () => {
         },
       ],
     }) as unknown as SupportedChatModel;
-    let observedSignal: AbortSignal | undefined;
     const descendantResourceAdmission = {
       reserveModel: async () => ({ reservationId: 'model-reservation' }),
       reconcileModel: async () => {},
       reserveTool: async (request: { signal?: AbortSignal }) => {
-        observedSignal = request.signal;
         await new Promise<never>((_, reject) => {
           const onAbort = () => {
             const error = new Error('descendant admission cancelled by role timeout');
@@ -1984,8 +1989,17 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(result.ok).toBe(false);
-      expect(observedSignal?.aborted).toBe(true);
-      expect(events.some((event) => event.type === 'error')).toBe(true);
+      expect(result.terminalStatus).toBe('failed');
+      expect(result.failureDiagnostic?.code).toBe('timed_out');
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'error',
+          data: expect.objectContaining({
+            summary: 'Sub-agent execution timed out.',
+            diagnostic: expect.objectContaining({ code: 'timed_out' }),
+          }),
+        }),
+      );
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -2123,6 +2137,15 @@ describe('SubAgentRunner integration', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(events.some((e) => e.type === 'error')).toBe(true);
+    expect(result.terminalStatus).toBe('cancelled');
+    expect(result.summary).toBe('Cancelled');
+    expect(result.failureDiagnostic).toEqual({
+      code: 'aborted',
+      stage: 'next_round_preparation',
+    });
+    expect(events.find((e) => e.type === 'error')?.data.diagnostic).toEqual({
+      code: 'aborted',
+      stage: 'next_round_preparation',
+    });
   });
 });

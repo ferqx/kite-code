@@ -128,7 +128,6 @@ export async function runAppSkillFork(input: {
       eventSink: input.eventSink,
       signal: params.signal,
       model: params.taskModel,
-      providerDataAdmission: params.providerDataAdmission,
       descendantResourceAdmission: params.descendantResourceAdmission,
       modelEffectCoordinator: params.modelEffectCoordinator,
       modelInvocationPersistence: params.modelInvocationPersistence,
@@ -146,6 +145,7 @@ export async function runAppSkillFork(input: {
       recordFilePreimage: params.recordFilePreimage,
     },
     {
+      name: `Run ${fork.agent} workflow`,
       subagent_type: forkRole(fork.agent),
       task: [
         fork.instructions,

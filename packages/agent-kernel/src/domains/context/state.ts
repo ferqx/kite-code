@@ -42,7 +42,6 @@ export type ContextCompactionErrorKind =
   | 'unsafe_boundary'
   | 'oversized_turn'
   | 'summary_model_failed'
-  | 'provider_admission_denied'
   | 'summary_aborted'
   | 'empty_summary'
   | 'truncated_summary'

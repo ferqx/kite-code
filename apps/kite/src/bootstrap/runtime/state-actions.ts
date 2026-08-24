@@ -30,6 +30,12 @@ export function eventsForRunCancellation(
   reason = 'Cancelled by user.',
   cause: 'user' | 'error' = 'user',
 ): RuntimeEvent[] {
+  // Keyboard cancellation on a visible Tool approval must retain the exact
+  // approval identity even when the Runtime action waiter has not attached
+  // yet. This also cancels every unfinished concurrent sibling atomically.
+  if (cause === 'user' && state.interactions.kind === 'awaiting_tool_approval') {
+    return approvalCancellationEvents(state, state.interactions, reason);
+  }
   // auto_review is never a human approval surface. If a user aborts while it
   // is running, preserve that precise durable reason instead of pretending an
   // approval was rejected or silently escalating it.
@@ -114,6 +120,28 @@ function unfinishedToolCancellationEvents(
     }));
 }
 
+function capabilityWaiverEventsForToolTerminals(
+  state: Readonly<RuntimeState>,
+  toolCallIds: ReadonlySet<string>,
+  reason: string,
+): Array<Extract<RuntimeEvent, { type: 'capability.reconciliation_resolved' }>> {
+  const reconciledAt = new Date().toISOString();
+  return Object.values(state.capabilities.invocations)
+    .filter(
+      (invocation) =>
+        invocation.receiptRequirement &&
+        (invocation.status === 'recorded' || invocation.status === 'running') &&
+        toolCallIds.has(invocation.toolCallId),
+    )
+    .map((invocation) => ({
+      type: 'capability.reconciliation_resolved',
+      invocationId: invocation.invocationId,
+      decision: 'waived',
+      reconciledAt,
+      reason,
+    }));
+}
+
 /**
  * Settle tool ownership left behind by an older run before accepting a fresh
  * user turn. A new turn cannot inherit an in-memory executor from the process
@@ -163,6 +191,15 @@ function approvalCancellationEvents(
   interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_tool_approval' }>,
   reason: string,
 ): RuntimeEvent[] {
+  const siblingCancellations = unfinishedToolCancellationEvents(
+    state,
+    reason,
+    interaction.toolCallId,
+  );
+  const terminalToolCallIds = new Set([
+    interaction.toolCallId,
+    ...siblingCancellations.map((event) => event.toolCallId),
+  ]);
   return [
     {
       type: 'approval.rejected',
@@ -171,7 +208,12 @@ function approvalCancellationEvents(
       reason,
       failure: classifyFailure('approval_rejected', reason),
     },
-    ...unfinishedToolCancellationEvents(state, reason, interaction.toolCallId),
+    ...siblingCancellations,
+    ...capabilityWaiverEventsForToolTerminals(
+      state,
+      terminalToolCallIds,
+      'User cancelled the run and waived reconciliation of the abandoned attempt.',
+    ),
     ...resourceReservationCancellationEvents(state),
     ...resourceWaiterCancellationEvents(state),
     {

@@ -65,6 +65,15 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       },
       {
         message: {
+          content: JSON.stringify({
+            decision: 'approve',
+            grant: 'approve_once',
+            reason: 'The fixture command is bounded to its isolated workspace.',
+          }),
+        },
+      },
+      {
+        message: {
           content: 'Starting the successor shell.',
           tool_calls: [
             {
@@ -73,6 +82,15 @@ describe('TUI PTY System — cancel shell then render successor', () => {
               args: { command: 'pwd' },
             },
           ],
+        },
+      },
+      {
+        message: {
+          content: JSON.stringify({
+            decision: 'approve',
+            grant: 'approve_once',
+            reason: 'The successor fixture command is bounded to its isolated workspace.',
+          }),
         },
       },
       {
@@ -138,7 +156,9 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       await waitForText(() => tui.viewport(), 'cancelled', 2_000);
 
       const successorRequestBaseline = server.getRequestCount();
-      expect(successorRequestBaseline).toBe(1);
+      // The old run made one primary-model request and one Auto reviewer
+      // request before Shell execution began.
+      expect(successorRequestBaseline).toBe(2);
 
       await typeText(tui, 'continue with successor', 0);
       // Record an explicit semantic input lifecycle. The successor is expected

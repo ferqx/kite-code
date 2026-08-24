@@ -2,10 +2,10 @@
 
 状态：active
 读取时机：新增工具或模型失败路径、调整重试/升级策略、修改运行时错误日志时。
-验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts`。
+验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts`。
 
 Runtime failures use the Agent-Kernel-owned `ClassifiedFailure`; App
-`apps/kite/src/bootstrap/runtime/failures.ts` is only the Runtime State type/projection boundary. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
+`apps/kite/src/bootstrap/runtime/failures.ts` is only the Runtime State type/projection boundary. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Auto-review 的 `ask_user` 决定不是失败：它携带 `escalatedToUser`，并在用户批准或拒绝前保持非终态；明确 `reject` 记录 `auto_review_rejected`，技术 reviewer failure 则沿人工审批升级路径处理，不伪造成模型拒绝。
 
 CompletionGuard blocker 是结构化控制状态，不是 `ClassifiedFailure`。Runner 不得仅因为模型 final 被
 `planning_empty/plan_draft_pending/interaction_pending/...` 拒绝，就用业务文案构造
@@ -46,6 +46,28 @@ Events without a valid envelope are rejected before reducer consumption; there i
 Builtin classifier advice 的 detail code 即使属于全局闭集，也必须属于当前 `FailureKind` 的 exhaustive
 允许集合；跨 kind advice 是 `classifier_conflict + unknown/never`，且当次 canonical envelope 本身
 必须通过严格 validator，不能先写入非法 current event 再靠兼容路径降级。
+Host→Kernel 的 `ToolGovernanceFacts` 结构无效时，Host 保留 `kernel_facts_invalid` fail-closed
+语义，但 diagnostic 必须额外携带固定、无敏感数据的类别：`envelope`、`invocation`、`policy`、
+`context`、`admission`、`approval`、`same_command_grant`、`dynamic_mcp`、`nested_skill` 或
+`identity`。类别不得包含命令、路径、参数、Provider 文本或完整 facts；它用于把间歇性投影错误
+精确归因到 DTO 层，而不是放宽执行或根据错误字符串重试。
+Subagent 模型循环的非取消异常不得再统一丢失为无来源的 `Sub-agent execution failed.`。用户可见摘要
+继续保持通用且无内容，但 durable `subagent.failed` 与父 `task` 终态必须携带同一份
+`diagnostic={code,stage,modelInvocationId?}`：code 限定为 `aborted`、`timed_out`、`invalid_input`、
+`consumer_protocol`、`model_step_failed` 或 `internal_error`；stage 限定为 `initialization`、
+`next_round_preparation`、`model_step`、`model_response_validation`、`tool_consumption`、
+`transcript_validation` 或 `terminal_projection`。子 Agent 自身总时限到期使用 `timed_out`，父级或用户信号取消使用
+`aborted`，不得因为二者最终都通过 AbortSignal 唤醒而合并。Provider observation 只接受该闭集和可选 opaque
+模型调用 ID。每条 `model.retry` 必须携带其 exact `invocationId`；重试耗尽或单次调用失败时，Subagent diagnostic
+必须优先使用异常携带的当前失败调用 ID，不能回退到上一条成功调用。若 Gateway 的终态持久化也失败，Task
+边界必须在父 Tool 终态前补写 exact invocation 的 `model.invocation_interrupted`，避免 prepared/dispatching 模型调用
+悬挂。`terminalStatus=failed` 的 child task 是 Runtime execution failure，Builtin 终态映射必须保留
+`builtin_operation_failed`，不得仅因 Task catalog 属于 coordination kind 就改写成 `rejected/policy_denied`。Session
+Logger 只投影 code/stage，不复制 ID、异常原文、任务、命令、路径、参数或模型输出。`Basic` 凭据检测必须验证
+base64 解码后含有 `:`，不得把普通自然语言的 `basic <word>` 当作 credential；`api_key`、`authorization`
+等赋值检测的空白只限同一行，绝不能跨换行把 TypeScript 属性类型误判为 credential。
+模型调用不对已信任 workspace 的上下文执行正文准入或 secret/content inspection。仓库内容的保密记录约束仍由
+Session Logger、Runtime Event 与 telemetry 的正文禁止边界承担。
 Subagent 暂停期间，父 `task` 的当前状态会从 `running` 转为 `awaiting_approval`，授权后再转为
 `approved`；这不能覆盖它已经 dispatch 的历史事实。恢复终态必须依据持久化的 `startedAt`
 或 active ownership 归类为 `dispatchState=started`。恢复中已 dispatch 的 child tool 或后续适配器异常
@@ -127,7 +149,7 @@ production artifact/Workspace/execution boundary、model/MCP、persistence、bud
 process cleanup、compaction/Verification、可选诊断与 rollout。每次解析都显式返回 continue/block/
 degrade、新的自动 effectful invocation 数、durable state、external-effects 状态、稳定 reason、
 用户文案、safe retry、recovery entry、pending verification 和允许的最窄 fallback。resource
-admission 与 run deadline 的生产终态 producer 直接消费该解析结果；conformance suite 将所有
+admission producer 直接消费该解析结果；已删除的 run deadline 不再产生生产终态。conformance suite 将所有
 terminal resolution 通过 Host Runtime State snapshot recovery、Headless CLI 和 TUI 的同一
 Kernel-owned `RunTerminalOutcome` 投影复测。其他 capability producer 只有在显式接入该 table 或增加等价
 entrypoint contract test 后，才能声明相应 production failure-mode coverage；App 入口不得根据

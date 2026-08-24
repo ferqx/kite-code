@@ -1,4 +1,3 @@
-import type { VerificationReviewerResult } from '@kite/runtime-spi';
 import {
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
@@ -10,12 +9,7 @@ import {
   type BuiltinPrimaryModelState,
   executeBuiltinPrimaryModelEffect,
 } from './primary-effect';
-import {
-  type AutoReviewResult,
-  createAutoReviewModel,
-  reviewToolApproval,
-  reviewVerificationEvidence,
-} from './reviewer';
+import { type AutoReviewResult, createAutoReviewModel, reviewToolApproval } from './reviewer';
 import {
   type BuiltinSubagentModelStepInput,
   type BuiltinSubagentModelStepResult,
@@ -29,11 +23,6 @@ import {
  */
 export type BuiltinToolApprovalReviewInput = Omit<
   Parameters<typeof reviewToolApproval>[0],
-  'gateway'
->;
-
-export type BuiltinVerificationReviewInput = Omit<
-  Parameters<typeof reviewVerificationEvidence>[0],
   'gateway'
 >;
 
@@ -75,16 +64,6 @@ export class BuiltinModelEffectCoordinator {
     });
   }
 
-  reviewVerificationEvidence(
-    input: BuiltinVerificationReviewInput,
-  ): Promise<VerificationReviewerResult> {
-    return reviewVerificationEvidence({
-      ...input,
-      ...(input.model || !input.config ? {} : { model: createAutoReviewModel(input.config) }),
-      gateway: this.#gateway,
-    });
-  }
-
   createContextCompactor(
     input: BuiltinContextCompactorInput,
   ): ReturnType<typeof createNarrativeContextCompactor> {
@@ -95,7 +74,6 @@ export class BuiltinModelEffectCoordinator {
       state: input.state,
       projectionEnvironmentDigest: input.projectionEnvironmentDigest,
       signal: input.signal,
-      providerDataAdmission: input.providerDataAdmission,
       gateway: this.#gateway,
     });
     return createNarrativeContextCompactor({

@@ -13,7 +13,6 @@ import {
 } from '@kite/runtime-host/kernel-adapter';
 import {
   MODEL_INVOCATION_PURPOSES_,
-  MODEL_PURPOSE_TO_PROVIDER_DISPATCH_,
   type ModelInvocationPurpose,
   type ModelResponseRecord,
   type PrivateArtifactRef,
@@ -68,12 +67,6 @@ function invokeInput(
       projectionEnvironmentDigest: `sha256:${'1'.repeat(64)}` as const,
       capabilityBindingDigest: `sha256:${'2'.repeat(64)}` as const,
     },
-    providerDataAdmission: () => ({
-      admitted: true,
-      reason: 'admitted' as const,
-      routeAlias: 'test',
-      maxWorkspaceDataClassification: 'confidential' as const,
-    }),
     resourceKind: 'model' as const,
   };
 }
@@ -195,6 +188,12 @@ describe('ModelInvocationGateway', () => {
     expect(
       harness.events.filter((event) => event.type === 'model.invocation_attempt_started'),
     ).toHaveLength(2);
+    expect(harness.events.find((event) => event.type === 'model.retry')).toMatchObject({
+      invocationId: expect.any(String),
+      failureClassification: 'provider_unavailable',
+      providerStatusCode: 503,
+      timedOut: false,
+    });
   });
 
   test('starts the retry time budget at the first transient failure', async () => {
@@ -248,6 +247,88 @@ describe('ModelInvocationGateway', () => {
 
     expect(dispatches).toBe(1);
     expect(harness.events.at(-1)).toMatchObject({ type: 'model.invocation_completed' });
+  });
+
+  test('cancellation wins even when the provider ignores its abort signal', async () => {
+    let dispatches = 0;
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-non-cooperative-provider',
+      transport: async () => {
+        dispatches += 1;
+        return new Promise<never>(() => {});
+      },
+    });
+    const fixture = compiled();
+    const controller = new AbortController();
+
+    const invocation = harness.gateway.invoke({
+      ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+      signal: controller.signal,
+    });
+    while (dispatches === 0) await Bun.sleep(1);
+    controller.abort(new Error('user cancelled'));
+
+    await expect(invocation).rejects.toThrow('user cancelled');
+    expect(harness.events.at(-1)).toMatchObject({
+      type: 'model.invocation_interrupted',
+      dispatchCertainty: 'attempted',
+      reasonCode: 'cancelled',
+    });
+  });
+
+  test('does not dispatch when cancellation arrives while attempt-start evidence is persisted', async () => {
+    let dispatches = 0;
+    const controller = new AbortController();
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-cancel-during-attempt-ack',
+      persist: (events) => {
+        if (events.some((event) => event.type === 'model.invocation_attempt_started')) {
+          controller.abort(new Error('cancelled during attempt acknowledgement'));
+        }
+        return true;
+      },
+      transport: async () => {
+        dispatches += 1;
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+
+    await expect(
+      harness.gateway.invoke({
+        ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('cancelled during attempt acknowledgement');
+    expect(dispatches).toBe(0);
+    expect(harness.events.at(-1)).toMatchObject({
+      type: 'model.invocation_interrupted',
+      dispatchCertainty: 'none',
+      reasonCode: 'cancelled',
+    });
+  });
+
+  test('does not commit a successful response after its caller is cancelled', async () => {
+    const controller = new AbortController();
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-cancel-before-completion-commit',
+      transport: async () => RESPONSE,
+    });
+    const fixture = compiled();
+    const pending = await harness.gateway.invoke({
+      ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+      signal: controller.signal,
+    });
+
+    controller.abort(new Error('cancelled before completion commit'));
+
+    await expect(pending.commit()).rejects.toThrow('cancelled before completion commit');
+    expect(harness.events.some((event) => event.type === 'model.invocation_completed')).toBe(false);
+    expect(harness.events.at(-1)).toMatchObject({
+      type: 'model.invocation_interrupted',
+      dispatchCertainty: 'attempted',
+      reasonCode: 'cancelled',
+    });
   });
 
   test('keeps cumulative retry suppression separate from reasoning segment identity', async () => {
@@ -311,6 +392,54 @@ describe('ModelInvocationGateway', () => {
     }
   });
 
+  test('staggers concurrent retries after a shared route returns HTTP 429', async () => {
+    let waitingFirstAttempts = 0;
+    let releaseFirstAttempts: (() => void) | undefined;
+    const firstAttemptsReady = new Promise<void>((resolve) => {
+      releaseFirstAttempts = resolve;
+    });
+    let dispatches = 0;
+    const retryDelays: number[] = [];
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-shared-rate-limit',
+      now: () => 0,
+      sleep: async (delayMs) => {
+        retryDelays.push(delayMs);
+      },
+      transport: async () => {
+        dispatches += 1;
+        if (dispatches <= 2) {
+          waitingFirstAttempts += 1;
+          if (waitingFirstAttempts === 2) releaseFirstAttempts?.();
+          await firstAttemptsReady;
+          throw Object.assign(new Error('rate limited'), { statusCode: 429 });
+        }
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+
+    const pending = await Promise.all([
+      harness.gateway.invoke({
+        ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+        limits: { maxAttempts: 2 },
+      }),
+      harness.gateway.invoke({
+        ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+        limits: { maxAttempts: 2 },
+      }),
+    ]);
+    await Promise.all(pending.map((completion) => completion.commit()));
+
+    expect(retryDelays.sort((left, right) => left - right)).toEqual([500, 1_000]);
+    expect(
+      harness.events
+        .filter((event) => event.type === 'model.retry')
+        .map((event) => event.delayMs)
+        .sort((left, right) => left - right),
+    ).toEqual([500, 1_000]);
+  });
+
   test('rejects request drift after prepared admission without Provider dispatch', async () => {
     let dispatches = 0;
     const fixture = compiled();
@@ -357,7 +486,7 @@ describe('ModelInvocationGateway', () => {
     expect(dispatches).toBe(0);
     expect(harness.events.at(-1)).toMatchObject({
       type: 'resource_budget.released',
-      proof: 'local_provider_admission_denied',
+      proof: 'local_pre_dispatch_failure',
     });
     expect(harness.events.at(-2)).toMatchObject({
       type: 'model.invocation_interrupted',
@@ -515,8 +644,7 @@ describe('ModelInvocationGateway', () => {
     expect(dispatches).toBe(1);
   });
 
-  test('routes all five closed purposes through the same Gateway contract', async () => {
-    const observed: string[] = [];
+  test('routes all four closed purposes through the same Gateway contract', async () => {
     const operations: string[] = [];
     for (const purpose of MODEL_INVOCATION_PURPOSES_) {
       const harness = createTestModelInvocationHarness({
@@ -532,22 +660,7 @@ describe('ModelInvocationGateway', () => {
       const fixture = compiled(purpose);
       const pending = await harness.gateway.invoke({
         ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
-        providerDataAdmission: (_payload, dispatchPurpose) => {
-          observed.push(`${purpose}:${dispatchPurpose}`);
-          return {
-            admitted: true,
-            reason: 'admitted',
-            routeAlias: 'fixture',
-            admissionRevision: 'fixture-policy-v1',
-            maxWorkspaceDataClassification: 'confidential',
-          };
-        },
-        resourceKind:
-          purpose === 'context_compaction'
-            ? 'compaction'
-            : purpose === 'verification_review'
-              ? 'verification'
-              : 'model',
+        resourceKind: purpose === 'context_compaction' ? 'compaction' : 'model',
       });
       await pending.commit();
       expect(harness.events.some((event) => event.type === 'model.invocation_completed')).toBe(
@@ -555,46 +668,11 @@ describe('ModelInvocationGateway', () => {
       );
     }
 
-    expect(observed).toEqual(
-      MODEL_INVOCATION_PURPOSES_.map(
-        (purpose) => `${purpose}:${MODEL_PURPOSE_TO_PROVIDER_DISPATCH_[purpose]}`,
-      ),
-    );
     expect(operations).toEqual(
       MODEL_INVOCATION_PURPOSES_.map(
         (purpose) => `${purpose}:${BUILTIN_MODEL_OPERATION_BY_PURPOSE_[purpose]}`,
       ),
     );
-  });
-
-  test('denies all five purposes when the configured Provider admission seam is missing', async () => {
-    for (const purpose of MODEL_INVOCATION_PURPOSES_) {
-      let operations = 0;
-      let transports = 0;
-      const harness = createTestModelInvocationHarness({
-        workspace: `/tmp/model-gateway-missing-admission-${purpose}`,
-        transport: async () => {
-          transports += 1;
-          return RESPONSE;
-        },
-        operationExecution: {
-          execute: async (operation) => {
-            operations += 1;
-            return operation.attempt();
-          },
-        },
-      });
-      const fixture = compiled(purpose);
-      const base = invokeInput(fixture.model, fixture.compiled, harness.persistence);
-      await expect(
-        harness.gateway.invoke({
-          ...base,
-          providerDataAdmission: undefined as unknown as typeof base.providerDataAdmission,
-        }),
-      ).rejects.toThrow('mandatory_policy_unavailable');
-      expect(operations).toBe(0);
-      expect(transports).toBe(0);
-    }
   });
 
   test('fails closed before the response source when Model operation selection rejects', async () => {

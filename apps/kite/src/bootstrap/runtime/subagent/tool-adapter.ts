@@ -18,6 +18,7 @@ import {
   validateCapabilityArguments,
 } from '@kite/builtin-runtime/skills';
 import {
+  BuiltinSubagentModelLoopError,
   createBuiltinSubagentModelContext,
   createBuiltinSubagentModelLoopEngine,
   createBuiltinSubagentToolSurface,
@@ -46,10 +47,6 @@ import {
 } from '@kite/runtime-host/kernel-adapter';
 import type { PersistedExecutionJournalEntry } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
-import {
-  denyMissingProviderDataAdmission,
-  ProviderDataAdmissionError,
-} from '#app/config/provider-data-admission';
 import type { AppApprovalBinding } from '../approval-binding';
 import type { ToolExecutionResult } from '../tool-result';
 import type {
@@ -295,7 +292,11 @@ export async function executeSubagentStartWithCoreToolAdapter(
   };
   input.eventSink({
     type: 'start',
-    data: { id, role: normalizedInput.role.role, task: 'Private delegated task' },
+    data: {
+      id,
+      role: normalizedInput.role.role,
+      name: input.name,
+    },
   });
   return executeCoreSubagentToolAdapter(normalizedInput, {
     id,
@@ -502,6 +503,9 @@ async function executeCoreSubagentToolAdapter(
   const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
   let toolRecovery = state.toolRecovery;
   let modelInvocationOrdinal = state.modelInvocationOrdinal;
+  let lastModelInvocationId: string | undefined;
+  let adapterFailureStage: NonNullable<SubAgentResult['failureDiagnostic']>['stage'] =
+    'initialization';
 
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
@@ -588,7 +592,6 @@ async function executeCoreSubagentToolAdapter(
         parentReservationId: input.modelInvocationParentReservationId,
         maxOutputTokens: () => admittedSubagentMaxOutputTokens(input),
       },
-      providerDataAdmission: input.providerDataAdmission ?? denyMissingProviderDataAdmission,
       signal: combinedSignal,
       consumer: {
         consume: async ({
@@ -599,6 +602,7 @@ async function executeCoreSubagentToolAdapter(
           cacheMetrics,
           append,
         }) => {
+          lastModelInvocationId = invocationId;
           // Provider/test implementations may settle entirely in the microtask
           // queue. Yield once per child step so timeout/cancellation timers retain
           // authority over a model that repeatedly returns an unusable tool call.
@@ -1020,10 +1024,7 @@ async function executeCoreSubagentToolAdapter(
                               }) => {
                                 if (!reservationId) return;
                                 if (error) {
-                                  if (
-                                    dispatchState === 'not_started' ||
-                                    error instanceof ProviderDataAdmissionError
-                                  ) {
+                                  if (dispatchState === 'not_started') {
                                     await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
                                       reservationId,
                                     );
@@ -1078,6 +1079,7 @@ async function executeCoreSubagentToolAdapter(
                 {
                   id,
                   role: input.role,
+                  name: input.name,
                   task: input.task,
                   messages: [...transcript, ...appendedMessages],
                   toolCallCount,
@@ -1132,6 +1134,7 @@ async function executeCoreSubagentToolAdapter(
                 const continuation: SubAgentContinuation = {
                   id,
                   role: input.role,
+                  name: input.name,
                   task: input.task,
                   messages: [...transcript, ...appendedMessages],
                   toolCallCount,
@@ -1191,7 +1194,48 @@ async function executeCoreSubagentToolAdapter(
                 totalLines = result.totalLines;
               }
             } catch (e) {
-              if (e instanceof DescendantResourceAdmissionError) throw e;
+              if (e instanceof DescendantResourceAdmissionError) {
+                const parentInvocationId = input.subagentGrantContext?.parentInvocationId;
+                const parentToolCallId = input.modelInvocationParentToolCallId;
+                const childInvocationId = input.childInvocationId;
+                if (!parentInvocationId || !parentToolCallId || !childInvocationId) throw e;
+                clearTimeout(timeoutId);
+                const durationMs = Date.now() - startTime;
+                input.eventSink({
+                  type: 'error',
+                  data: {
+                    id,
+                    error: e.message,
+                    summary: e.message,
+                    toolCallCount,
+                    durationMs,
+                  },
+                });
+                return {
+                  kind: 'terminal' as const,
+                  value: {
+                    ok: false,
+                    summary: e.message,
+                    error: e.message,
+                    terminalStatus: 'failed' as const,
+                    toolCallCount,
+                    durationMs,
+                    resourceAdmissionFailure: {
+                      reason: e.reason,
+                      message: e.message,
+                      parentInvocationId,
+                      parentToolCallId,
+                      childInvocationId,
+                    },
+                    steps,
+                    ...(executionJournal.length > 0 ? { executionJournal } : {}),
+                    ...(Object.keys(exhaustedFingerprints).length > 0
+                      ? { exhaustedFingerprints }
+                      : {}),
+                    toolRecovery,
+                  },
+                };
+              }
               toolOutput = JSON.stringify({
                 ok: false,
                 error: 'Sub-agent tool execution failed.',
@@ -1288,6 +1332,7 @@ async function executeCoreSubagentToolAdapter(
     const modelLoopResult = await modelLoop.run();
     if (modelLoopResult.kind === 'terminal') return modelLoopResult.value;
 
+    adapterFailureStage = 'terminal_projection';
     clearTimeout(timeoutId);
     modelInvocationOrdinal = modelLoopResult.modelInvocationOrdinal;
     const durationMs = Date.now() - startTime;
@@ -1317,16 +1362,38 @@ async function executeCoreSubagentToolAdapter(
       toolRecovery,
     };
   } catch (e) {
-    clearTimeout(timeoutId);
     if (e instanceof DescendantResourceAdmissionError) throw e;
     const durationMs = Date.now() - startTime;
-    const summary =
-      combinedSignal.aborted || (e instanceof Error && e.name === 'AbortError')
+    const timedOut = timeoutController.signal.aborted && !input.signal.aborted;
+    const cancelled =
+      !timedOut &&
+      (input.signal.aborted ||
+        combinedSignal.aborted ||
+        (e instanceof Error && e.name === 'AbortError') ||
+        (e instanceof BuiltinSubagentModelLoopError && e.code === 'aborted'));
+    const summary = timedOut
+      ? 'Sub-agent execution timed out.'
+      : cancelled
         ? 'Cancelled'
         : 'Sub-agent execution failed.';
+    const diagnostic: NonNullable<SubAgentResult['failureDiagnostic']> = {
+      code: timedOut
+        ? 'timed_out'
+        : cancelled
+          ? 'aborted'
+          : e instanceof BuiltinSubagentModelLoopError
+            ? e.code
+            : 'internal_error',
+      stage: e instanceof BuiltinSubagentModelLoopError ? e.stage : adapterFailureStage,
+      ...(e instanceof BuiltinSubagentModelLoopError && e.modelInvocationId
+        ? { modelInvocationId: e.modelInvocationId }
+        : lastModelInvocationId
+          ? { modelInvocationId: lastModelInvocationId }
+          : {}),
+    };
     input.eventSink({
       type: 'error',
-      data: { id, error: summary, summary, toolCallCount, durationMs },
+      data: { id, error: summary, summary, toolCallCount, durationMs, diagnostic },
     });
     return {
       ok: false,
@@ -1334,12 +1401,17 @@ async function executeCoreSubagentToolAdapter(
       toolCallCount,
       durationMs,
       error: summary,
-      terminalStatus: combinedSignal.aborted ? 'cancelled' : 'failed',
+      terminalStatus: cancelled ? 'cancelled' : 'failed',
+      failureDiagnostic: diagnostic,
       steps,
       executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
       exhaustedFingerprints:
         Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
       toolRecovery,
     };
+  } finally {
+    clearTimeout(timeoutId);
+    input.signal.removeEventListener('abort', onAbort);
+    timeoutController.signal.removeEventListener('abort', onAbort);
   }
 }

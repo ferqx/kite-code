@@ -1,7 +1,7 @@
 # Runtime 分级验证治理
 
 状态：active
-读取时机：修改 `VerificationSpec`、验证策略、验证事件/效果、Scheduler 完成语义、Skill verifier、MCP 执行凭据 reviewer、repair/waive/compensation 时。
+读取时机：修改 `VerificationSpec`、验证策略、验证事件/效果、Scheduler 完成语义、Skill verifier、MCP 执行凭据、repair/waive/compensation 时。
 验证：`bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/verification tests/runtime`、`bun run typecheck`、`bun run check:core-boundary`。
 相关：ADR-0008、`docs/space/plans/2026-07-14-mcp-skills-runtime-governance-followup.md`。
 
@@ -11,15 +11,12 @@
 
 有效强度为 `not_required`、`best_effort`、`required` 的单调最大值。Capability effects、Skill contract 和用户明确要求只能提高强度，不能降低既有要求。包含 write、destructive 或 unknown effect 的治理 capability 自动提升为 `required`。
 
-`VerificationSpec` 是持久化、版本化且严格校验的协议。支持文件断言、命令、对象根 JSON Schema、MCP read-after-write、外部引用和独立 reviewer。检查按声明顺序运行；确定性检查应排在 reviewer 之前。MCP read-after-write 必须命中当前 capability revision，变化或不可用时返回 `inconclusive`。Reviewer 收到原始 `ExecutionReceipt`、受限 Artifact Store 内容和结构化 Skill output，不接收主模型的完成结论。
+`VerificationSpec` 是持久化、版本化且严格校验的协议。当前规划器支持文件断言、命令、对象根 JSON Schema、MCP read-after-write、外部引用和已提交成功 Receipt。检查按声明顺序运行；MCP read-after-write 必须命中当前 capability revision，变化或不可用时返回 `inconclusive`。旧会话中的 `reviewer` check 仍可解码，但当前 executor 固定返回 `inconclusive`，不创建模型调用；当前规划器永远不再生成它。
 
-独立 reviewer 使用封闭的 `verification_review` Model Surface purpose，并与 primary、compaction、auto review、
-subagent 共用 `ModelInvocationGateway`。Surface Artifact、Provider data admission、resource reservation 与
-每次 attempt intent 都必须在 transport dispatch 前 durable ack；Response Artifact 与
-`model.invocation_completed` ack 成功前 reviewer 不能解析或消费 response。reviewer terminal 继续引用
-invocation id，Provider admission/ack/key/Artifact failure 不得降级为旧模型调用或被包装成可信
-`inconclusive` 后退款。production reviewer composition 只接当前 Gateway 的 live Source；任何恢复都必须
-复用同一 Runtime State identity、Artifact receipt 与 provider admission，不得引入旁路验证器或 fallback。
+旧 `reviewer` check 只属于历史 replay：current-write admission 明确拒绝新建含 reviewer 的 `verification.requested`，因此它不能由手工事件或新 planner 重新进入当前持久化路径。历史会话仍可读取，并在确定性 executor 中收敛为固定 `inconclusive`。
+
+Verification 不再创建 `verification_review` 模型调用。确定性检查使用已有 receipt、Artifact、Shell 或 MCP evidence；
+任何缺失或不可验证的证据收敛为 `inconclusive`，不得用模型猜测补足。
 
 当 V2 Plan 通过 `update_plan complete_plan=true` 收敛时，每个 `required` verification 必须已经是
 `passed` 或用户 `waived`，并由 Runtime 投影为只含 `verificationId + outcome` 的
@@ -34,23 +31,18 @@ Verification executor 通过 Runtime 中立的 `McpRuntimeProvider` 查找当前
 
 RM-14 后，确定性检查的物理 owner 是
 `@kite/builtin-runtime#executeDeterministicVerificationChecks`。它只接收 JSON-safe State view 与显式注入的
-Shell、MCP、Artifact reader、reviewer、AbortSignal/clock port，拥有文件断言、命令、Schema budget validation、
-read-after-write、外部引用、reviewer evidence assembly、逐项 digest 与 outcome aggregation。它不导入 AgentState、
+Shell、MCP、Artifact reader、AbortSignal/clock port，拥有文件断言、命令、Schema budget validation、
+read-after-write、外部引用、Receipt 检查、逐项 digest 与 outcome aggregation。它不导入 AgentState、
 Runtime Event/Store、Kernel、Host 或 App。App verification effect adapter 负责 Runtime State
 effect/event projection：投影已有 receipt/Skill output，注入同 installation Artifact reader，把 check results 映射回
-既有 `verification.*` event，并保留 repair/compensation lifecycle。Provider data admission denial 是 Host 分类的
-fatal dispatch failure；若先前检查已经执行外部机制，仍以 `knownExternalEffects=unknown` 抛出，不能被吞成可信
-`inconclusive`。
+既有 `verification.*` event，并保留 repair/compensation lifecycle。若先前检查已经执行外部机制而 terminal
+不可信，仍以 `knownExternalEffects=unknown` 收敛，不能被吞成可信 `inconclusive`。
 
 Verification Policy、required 单调强度、repair/waive/compensation 选择与 Completion 仍由 Kernel/Runtime 唯一
 决定。Builtin executor 不能发出 completion、waive 或 authorization，也没有旧 check executor fallback。
-当前 owner 使用 Runtime State、SQLite Store、epoch `kite-runtime-modularization-v1-2026-08-19`，并保持检查顺序、evidence digest、Artifact
-binding 与 Model Gateway reviewer 行为不变。RM-15 已把 reviewer 的具体 Model/Context/Gateway 实现迁到
-`@kite/builtin-runtime/model`，`model:verification_review` 由 `kite-builtin-runtime-verification` 唯一注册；Verification
-effect adapter 仍只注入 reviewer port 并保持同一 failure/unknown-effects 传播，不存在 reviewer fallback。
-Builtin package 的公开 Model surface 已移除可自行注入 Gateway 的 verification reviewer helper；production 与测试均
-通过 `BuiltinModelEffectCoordinator`，由它基于 reviewer 配置创建模型并使用构造时绑定的唯一 Gateway。Reviewer
-结果仍只回到 Verification effect adapter 和 Kernel state，不能直接发出 completion、waive、repair 或 authorization。
+当前 owner 使用 Runtime State、SQLite Store、epoch `kite-runtime-modularization-v1-2026-08-19`，并保持检查顺序、
+evidence digest 与 Artifact binding。Verification effect adapter 只注入确定性 Shell、MCP 与 Artifact reader；不存在
+模型复核、模型 fallback 或单独的模型复核 timeout。
 Schema 与 MCP `outputSchema` admission 只调用 Builtin 的唯一 schema compiler，再以 digest-bound transient facts 交给
 Kernel；真实 Host decision path 与 Runtime State adapter 复用同一投影函数。缺失、错位或 digest mismatch 继续
 fail closed 为 spec corruption，Kernel 不编译 schema，也不保存第二份 validator/diagnostic authority。
@@ -63,17 +55,15 @@ verification。Pipeline 的 `verification_planned` stage 只接受由真实 Arti
 `receipt_committed` token；Controller 不再从临时 adapter 结果或 descriptor 重新拼装 request。
 
 PS-01 后，成功的 `write_file` 与 `edit_file` 也从同一个不可伪造的 committed receipt 规划
-`verification.requested`；它们不再因 builtin family 被 `unsupported_family` 静默跳过。验证 reviewer 读取的
-Capability Artifact 已覆盖 digest-only filesystem observation，正文、原始路径、grant 与 preimage 仍只留在受限
-Provider/Artifact 边界。read/search observation 不创建 mutation verification。
+`verification.requested`；它们不再因 builtin family 被 `unsupported_family` 静默跳过。Capability Artifact 可供显式
+Schema 检查读取，但 Receipt 检查只确认已提交的成功执行事实，不需要读取 Artifact 正文。原始路径、grant 与 preimage
+仍只留在受限 Provider/Artifact 边界。read/search observation 不创建 mutation verification。
 
 Verification executor 的 Artifact reader 与 Tool receipt writer 必须来自同一个 installation composition；
-不再存在模块级默认 Capability store。引用的 success receipt、opaque Artifact、reader、key 或 integrity
-任一不可用时，reviewer check 在模型 dispatch 前返回 `inconclusive`，不能静默省略 Artifact 后让 reviewer
-声明 passed。reader 必须同时验证 Artifact payload owner、canonical result/evidence digest，以及 receipt 与
-Artifact 内 filesystem observation 的双向 exact equality；任一不匹配同样在 reviewer 模型 dispatch 前
-收敛为 `inconclusive`。Concrete Tool/Subagent runner import 由 App/Host static boundary 固定在 Pipeline dispatch
-adapter。
+不再存在模块级默认 Capability store。显式读取 Artifact 的 Schema 检查在引用、reader 或 integrity 不可用时返回
+`inconclusive`；Receipt 检查只在绑定 invocation 已有 committed success receipt 时通过，否则也是 `inconclusive`。
+任何验证检查都不会启动模型，也不会用模型猜测缺失证据。Concrete Tool/Subagent runner import 由 App/Host static
+boundary 固定在 Pipeline dispatch adapter。
 
 所有验证状态变更只通过 `verification.*` Runtime events 进入 reducer。状态包含 attempts、repairAttempts、逐项 evidence digest、waiver 和 compensation 结果；Runtime schema 9 为旧 snapshot 补充空验证投影。
 

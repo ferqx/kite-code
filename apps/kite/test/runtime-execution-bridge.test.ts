@@ -14,10 +14,8 @@ import {
   translateRuntimeCommandToKernelInput,
 } from '@kite/runtime-host/kernel-adapter';
 import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
-import {
-  createKiteRuntimeExecutionModule,
-  KITE_RUNTIME_OPERATION_IDS_,
-} from '../src/bootstrap/runtime/KiteRuntimeExecutionModule';
+import { createKiteRuntimeExecutionModule } from '../src/bootstrap';
+import { KITE_RUNTIME_OPERATION_IDS_ } from '../src/bootstrap/runtime/KiteRuntimeExecutionModule';
 
 function createBridge(handler: {
   recoverSession: RuntimeHostExecutionBridge['recoverSession'];

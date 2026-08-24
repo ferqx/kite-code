@@ -119,7 +119,7 @@ function truncateAnswer(a: string, maxWidth: number): string {
   return clip(lines[0]!, Math.min(maxWidth, 40));
 }
 
-/** Legacy summaries can expose the generated single-question key (`q1: answer`). */
+/** Single-question results can expose the generated key (`q1: answer`). */
 function withoutSingleQuestionKey(answer: string): string {
   const match = /^q\d+:\s*([\s\S]*)$/.exec(answer);
   return match?.[1] || answer;
@@ -149,7 +149,9 @@ function parseAskUserAnswers(
       userInput.answers && Object.keys(userInput.answers).length > 0
         ? userInput.answers
         : undefined;
-    const answer = userInput.answer || '(no answer)';
+    const rawAnswer = userInput.answer || '(no answer)';
+    const answer =
+      !questions || questions.length <= 1 ? withoutSingleQuestionKey(rawAnswer) : rawAnswer;
     return { answer, answerMap, isCancelled: answer === 'Cancelled' };
   }
 
@@ -181,8 +183,7 @@ function parseAskUserAnswers(
     }
   }
   const isCancelled = answer === 'Cancelled' || summary === 'Cancelled';
-  const normalizedAnswer =
-    !userInput && !questions?.length && answer ? withoutSingleQuestionKey(answer) : answer;
+  const normalizedAnswer = !questions?.length && answer ? withoutSingleQuestionKey(answer) : answer;
   return { answer: normalizedAnswer ?? '(no answer)', answerMap, isCancelled };
 }
 

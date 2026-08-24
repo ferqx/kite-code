@@ -23,11 +23,6 @@ import type { SubAgentEventSink } from '@kite/runtime-contract';
 import { committedResourceUsage } from '@kite/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
-import {
-  createApprovedProviderDataAdmission,
-  denyMissingProviderDataAdmission,
-  type ProviderDataAdmissionGate,
-} from '#app/config/provider-data-admission';
 import type { CapabilityExecutionPort } from '#runtime-spi';
 import type { ContextCompactor } from './context-compaction-effect';
 import { resolveContextProjectionEnvironment } from './model-effect';
@@ -64,8 +59,6 @@ export interface RuntimeExecutorDependencies {
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   /** 用于记录文件写入前原像（ADR-0042 §4），缺省时工具写入不留原像。 */
   runtimeStore?: StateRuntimeStorage;
-  /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
-  providerDataAdmission?: ProviderDataAdmissionGate;
   /** Required by every model-bearing production effect. */
   modelInvocationGateway?: ModelInvocationGateway;
   /** App-owned coordinator bound to the exact same Model Gateway. */
@@ -84,26 +77,6 @@ export interface RuntimeExecutorDependencies {
 /** Resolve the configured reviewer timeout with the current bounded default. */
 export function resolveAutoReviewTimeout(config: AgentConfig): number {
   return config.autoReview?.timeoutMs ?? 15_000;
-}
-
-export function reviewerProviderDataAdmission(
-  dependencies: RuntimeExecutorDependencies,
-  reviewerConfig: AgentConfig,
-): ProviderDataAdmissionGate {
-  const sameRoute =
-    reviewerConfig.providerType === dependencies.config.providerType &&
-    reviewerConfig.providerName === dependencies.config.providerName &&
-    reviewerConfig.modelName === dependencies.config.modelName &&
-    reviewerConfig.baseURL === dependencies.config.baseURL;
-  return sameRoute
-    ? (dependencies.providerDataAdmission ?? denyMissingProviderDataAdmission)
-    : createApprovedProviderDataAdmission(reviewerConfig);
-}
-
-export function runtimeProviderDataAdmission(
-  dependencies: RuntimeExecutorDependencies,
-): ProviderDataAdmissionGate {
-  return dependencies.providerDataAdmission ?? denyMissingProviderDataAdmission;
 }
 
 export function resolveRuntimeContextProjectionEnvironment(

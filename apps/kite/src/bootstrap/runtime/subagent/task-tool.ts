@@ -130,7 +130,6 @@ export interface TaskToolDeps {
   eventSink: SubAgentEventSink;
   signal?: AbortSignal;
   model?: SupportedChatModel;
-  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGate;
   descendantResourceAdmission?: DescendantResourceAdmission;
   modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
   modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
@@ -166,7 +165,7 @@ export interface SubagentInvocationIdentity {
 export interface SubagentInvocationRuntime {
   start(
     deps: TaskToolDeps,
-    args: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
+    args: { name: string; subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
   ): Promise<SubAgentResult>;
   resume(
     deps: TaskToolDeps,
@@ -189,7 +188,7 @@ export class SubagentProviderRecoveryRequiredError extends Error {
 
 export async function runTaskSubAgent(
   deps: TaskToolDeps,
-  args: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
+  args: { name: string; subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
 ): Promise<SubAgentResult> {
   if (!deps.subagentRuntime) {
     return failed('Governed Subagent Pipeline runtime is unavailable.');
@@ -201,7 +200,7 @@ export async function runTaskSubAgent(
 export async function executePipelineIssuedSubagentStart(
   composition: GovernedSubagentComposition,
   deps: TaskToolDeps,
-  args: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
+  args: { name: string; subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
 ): Promise<SubAgentResult> {
   if (
     !deps.subagentInvocationIdentity ||
@@ -304,6 +303,7 @@ export async function executePipelineIssuedSubagentStart(
         builtinToolCatalog: deps.builtinToolCatalog,
         workspace: deps.workspace,
         role,
+        name: args.name,
         task: args.task,
         shellExecutor: deps.shellExecutor,
         gitBroker: deps.gitBroker,
@@ -322,7 +322,6 @@ export async function executePipelineIssuedSubagentStart(
         signal: deps.signal ?? new AbortController().signal,
         eventSink: deps.eventSink,
         model: deps.model,
-        providerDataAdmission: deps.providerDataAdmission,
         descendantResourceAdmission: deps.descendantResourceAdmission,
         modelEffectCoordinator: deps.modelEffectCoordinator,
         modelInvocationPersistence: deps.modelInvocationPersistence,
@@ -569,6 +568,7 @@ export async function executePipelineIssuedSubagentResume(
         builtinToolCatalog: deps.builtinToolCatalog,
         workspace: deps.workspace,
         role: continuation.role,
+        name: continuation.name ?? 'Delegated task',
         task: continuation.task,
         shellExecutor: deps.shellExecutor,
         gitBroker: deps.gitBroker,
@@ -587,7 +587,6 @@ export async function executePipelineIssuedSubagentResume(
         signal: deps.signal ?? new AbortController().signal,
         eventSink: deps.eventSink,
         model: deps.model,
-        providerDataAdmission: deps.providerDataAdmission,
         descendantResourceAdmission: deps.descendantResourceAdmission,
         modelEffectCoordinator: deps.modelEffectCoordinator,
         modelInvocationPersistence: deps.modelInvocationPersistence,
@@ -1112,6 +1111,7 @@ function toPrivatePayload(result: SubAgentResult): import('@kite/runtime-spi').J
     durationMs: result.durationMs,
     terminalStatus: result.terminalStatus ?? null,
     error: result.error ?? null,
+    failureDiagnostic: result.failureDiagnostic ?? null,
     resourceAdmissionFailure: result.resourceAdmissionFailure ?? null,
     steps: result.steps ?? [],
     executionJournal: result.executionJournal ?? [],
@@ -1141,7 +1141,9 @@ async function governedRun(
   input: SubAgentRunnerInput,
 ): Promise<SubAgentResult> {
   try {
-    return await run();
+    const result = await run();
+    await settleDanglingFailedModelInvocation(input, result);
+    return result;
   } catch (error) {
     if (!(error instanceof DescendantResourceAdmissionError)) throw error;
     return {
@@ -1163,5 +1165,29 @@ async function governedRun(
         childInvocationId: input.childInvocationId ?? '',
       },
     };
+  }
+}
+
+async function settleDanglingFailedModelInvocation(
+  input: SubAgentRunnerInput,
+  result: SubAgentResult,
+): Promise<void> {
+  const invocationId = result.failureDiagnostic?.modelInvocationId;
+  const persistence = input.modelInvocationPersistence;
+  if (result.ok || !invocationId || !persistence) return;
+  const invocation = persistence.getState().modelInvocations[invocationId];
+  if (!invocation || (invocation.status !== 'prepared' && invocation.status !== 'dispatching')) {
+    return;
+  }
+  const applied = await persistence.persistEvents([
+    {
+      type: 'model.invocation_interrupted',
+      invocationId,
+      dispatchCertainty: invocation.attempts > 0 ? 'attempted' : 'none',
+      reasonCode: 'provider_failure',
+    },
+  ]);
+  if (!applied) {
+    throw new Error('Failed child model invocation could not be terminalized.');
   }
 }

@@ -5,13 +5,13 @@
 读取时机：修改 MCP/Skill catalog、模型工具披露、`tool_search`、Runtime binding、Skill activation 或模型上下文预算策略时。
 
 验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime`、`bun run typecheck`。
-29/20/9 parity 由 Builtin/SPI package tests 与当前 Runtime manifest checks 机械验证；RM-16 final Gate、完成记录
+28/20/8 parity 由 Builtin/SPI package tests 与当前 Runtime manifest checks 机械验证；RM-16 final Gate、完成记录
 与 implementation final SHA 已闭合，RA 不得重新引入第二 catalog/schema authority。
 
 Builtin disclosure 的唯一事实源是一次 `createRuntimeModuleRegistry(createBuiltinRuntimeModules()).snapshot()`
 产生的 `CapabilityRegistrySnapshot`，再由 `createBuiltinToolCatalogProjection()` 投影 `toolSet` 与 entry。
 Builtin parser/schema、availability、effects、traits、descriptor、operation/executor revision 均来自该 frozen
-snapshot；package tests 机械断言 29 entries、20 model-visible、9 internal 及 identity/effects/schema parity。
+snapshot；package tests 机械断言 28 entries、20 model-visible、8 internal 及 identity/effects/schema parity。
 App Tool Pipeline 只接收该 projection 与独立 dynamic-MCP overlay，不能创建第二 registry、snapshot 或
 schema/effects authority。Kernel 只做 governance/admission decision，Host 只提供 generic execution port；源码 caller/owner
 closure 已切到唯一 App/Builtin/Host seams，RM-16 final manifest/docs/journey/fault/soak Gate 已通过。

@@ -1,3 +1,16 @@
+import type {
+  RuntimeLogSessionCursor as ContractRuntimeLogSessionCursor,
+  ListRuntimeLogEventsRequest,
+  ListRuntimeLogSessionsRequest,
+  RuntimeLogErrorCode,
+} from '@kite/runtime-contract';
+
+export {
+  assertListRuntimeLogEventsRequest,
+  assertListRuntimeLogSessionsRequest,
+  RuntimeLogRequestValidationError,
+} from '@kite/runtime-contract';
+
 /**
  * Persistence contracts owned by Runtime Host.
  *
@@ -16,6 +29,8 @@ export interface RuntimeStorageBoundary {
 /** Opaque event/state codec consumed by storage adapters and owned by Host. */
 export interface RuntimeSnapshotCodec<Event = unknown, State = unknown> {
   encodeEvent(event: Event): string;
+  /** Re-encode already-decoded history while preserving read-only compatibility during fork. */
+  encodeHistoricalEvent?(event: Event): string;
   decodeEvent(json: string): Event;
   encodeState(state: State): string;
   decodeState<T = State>(json: string): T;
@@ -134,6 +149,51 @@ export interface SessionStore<Event = unknown, State = unknown> {
   getSessionModelRoute(sessionId: string): RuntimeSessionModelRoute | null;
   setSessionModelRoute(sessionId: string, route: RuntimeSessionModelRoute): void;
   deleteSession(sessionId: string): void;
+}
+
+/**
+ * Read-only durable log query boundary. This is intentionally separate from
+ * SessionStore: callers cannot obtain mutation, transaction, effect,
+ * checkpoint, Artifact, or deletion capabilities through a log reader.
+ */
+export interface RuntimeLogEventRecord<Event = unknown> {
+  readonly sessionId: string;
+  readonly sequence: number;
+  readonly eventId: string;
+  readonly causationId?: string;
+  readonly occurredAt?: string;
+  readonly createdAt: number;
+  /** Current-codec decoded event; never raw SQLite JSON. */
+  readonly event: Event;
+}
+
+export interface RuntimeLogEventReadPage<Event = unknown> {
+  readonly entries: readonly RuntimeLogEventRecord<Event>[];
+  readonly nextCursor?: number;
+  readonly hasMore: boolean;
+  readonly observedLastSequence: number;
+}
+
+export type RuntimeLogQueryErrorCode = RuntimeLogErrorCode;
+export type RuntimeLogSessionCursor = ContractRuntimeLogSessionCursor;
+export type RuntimeLogSessionQuery = ListRuntimeLogSessionsRequest;
+export interface RuntimeLogSessionRecord {
+  readonly sessionId: string;
+  readonly name: string;
+  readonly updatedAt: number;
+  readonly lastSequence: number;
+  readonly model?: { readonly provider: string; readonly name: string };
+}
+export interface RuntimeLogSessionReadPage {
+  readonly entries: readonly RuntimeLogSessionRecord[];
+  readonly nextCursor?: RuntimeLogSessionCursor;
+  readonly hasMore: boolean;
+}
+export type RuntimeLogEventQuery = ListRuntimeLogEventsRequest;
+export interface RuntimeLogQueryPort<Event = unknown> {
+  listSessions(request: RuntimeLogSessionQuery): RuntimeLogSessionReadPage;
+  listEvents(request: RuntimeLogEventQuery): RuntimeLogEventReadPage<Event>;
+  close(): void;
 }
 
 export interface RuntimeTransactionInput<Event = unknown, State = unknown> {

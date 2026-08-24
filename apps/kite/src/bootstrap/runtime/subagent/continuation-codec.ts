@@ -36,6 +36,7 @@ export function serializeSubagentContinuation(
   return encodeSubagentContinuationSnapshot({
     subagentId: continuation.id,
     role: continuation.role.role,
+    name: continuation.name ?? 'Delegated task',
     task: continuation.task,
     messages: continuation.messages.map(serializeMessage),
     toolCallCount: continuation.toolCallCount,
@@ -90,6 +91,7 @@ export function deserializeSubagentContinuation(
     role: snapshot.allowedTools
       ? { ...getRoleConfig(snapshot.role), allowedTools: new Set(snapshot.allowedTools) }
       : getRoleConfig(snapshot.role),
+    name: snapshot.name,
     task: snapshot.task,
     messages: snapshot.messages.map(deserializeMessage),
     toolCallCount: snapshot.toolCallCount,

@@ -72,7 +72,6 @@ const bindingPolicyFact: ToolGovernancePolicyFact = {
   risk: 'execute_code',
   effects: { uncertainEffects: true },
   reason: 'The command requires approval.',
-  userVisibleSummary: 'Run the requested shell command.',
   expectedEffects: ['execute code'],
 };
 

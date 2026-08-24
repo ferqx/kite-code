@@ -73,6 +73,9 @@ export interface MetadataFields {
   cacheMissTokens?: number;
   retryAttempt?: number;
   retryMaxAttempts?: number;
+  modelFailureClassification?: string;
+  providerStatusCode?: number;
+  timedOut?: boolean;
   approvalType?: string;
   approvalResult?: string;
   verificationType?: string;
@@ -80,7 +83,8 @@ export interface MetadataFields {
   compactionInputTokensBefore?: number;
   compactionInputTokensAfter?: number;
   compactionFailureKind?: string;
-  providerAdmissionRevision?: string;
+  subagentFailureCode?: string;
+  subagentFailureStage?: string;
   releaseVersion?: string;
   releaseProfile?: ReleaseProfileMetadata;
   releaseCohort?: string;

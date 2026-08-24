@@ -205,31 +205,71 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
     case 'RESOLVE_INTERRUPT': {
       const b = action.blockId == null ? undefined : findBlockById(state, action.blockId);
-      if (state.interrupt?.kind === 'approval') {
+      const resolution =
+        typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
+      const approvalInterrupt = state.interrupt?.kind === 'approval' ? state.interrupt : undefined;
+      if (approvalInterrupt || action.approvalTarget) {
+        // Only an accepted approval is safe to project optimistically. A
+        // rejection/cancellation must keep the interrupt identity until the
+        // durable approval.rejected event terminalizes the affected turn.
+        if (resolution.action !== 'approve' && resolution.action !== 'approved') return state;
         let withResolved = state;
         if (b?.kind === 'approval') {
-          const resolution =
-            typeof action.resolution === 'string'
-              ? { action: action.resolution }
-              : action.resolution;
           withResolved = replaceBlockById(state, b.id, { ...b, resolved: resolution });
         }
-        const approvedSubagentId = state.interrupt.approval?.subagentId;
-        const now = approvedSubagentId ? Date.now() : undefined;
+        const approvedSubagentId =
+          action.approvalTarget?.subagentId ?? approvalInterrupt?.approval?.subagentId;
+        const approvedParentToolCallId =
+          action.approvalTarget?.parentToolCallId ?? approvalInterrupt?.toolCallId;
+        const suspendedSubagents = withResolved.turns.flatMap((turn) =>
+          turn.blocks.filter(
+            (block): block is Extract<OutputBlock, { kind: 'subagent' }> =>
+              block.kind === 'subagent' && block.status === 'suspended',
+          ),
+        );
+        const identityTarget =
+          (approvedSubagentId == null
+            ? undefined
+            : suspendedSubagents.find((block) => block.subagentId === approvedSubagentId)) ??
+          (approvedParentToolCallId == null
+            ? undefined
+            : suspendedSubagents.find(
+                (block) => block.parentToolCallId === approvedParentToolCallId,
+              ));
+        // Older/live bridge events do not always preserve the parent task id on
+        // the Footer interaction. Runtime still guarantees one canonical human
+        // approval, so a unique awaiting_user projection is a safe fallback.
+        // Never guess when multiple candidates exist.
+        const awaitingUserTargets = suspendedSubagents.filter(
+          (block) =>
+            block.approvalState === 'awaiting_user' ||
+            (block.approvalState == null && block.awaitingApproval === true),
+        );
+        const approvedTarget =
+          identityTarget ?? (awaitingUserTargets.length === 1 ? awaitingUserTargets[0] : undefined);
+        const now = approvedTarget ? Date.now() : undefined;
         const updatedTurns = withResolved.turns.map((turn) => {
           let changed = false;
           const blocks = turn.blocks.map((block) => {
             if (
               block.kind === 'subagent' &&
               block.status === 'suspended' &&
-              block.subagentId === approvedSubagentId
+              block.subagentId === approvedTarget?.subagentId
             ) {
               changed = true;
               return {
                 ...block,
                 status: 'running' as const,
                 ...(now != null ? { startedAt: now } : {}),
+                approvalState: undefined,
                 awaitingApproval: false,
+                approvingStepIndex: undefined,
+                approvalAcknowledged: true,
+                steps: block.steps.map((step) =>
+                  step.status === 'awaiting_approval'
+                    ? { ...step, status: 'pending' as const }
+                    : step,
+                ),
               };
             }
             return block;
@@ -239,7 +279,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         return {
           ...withResolved,
           turns: updatedTurns,
-          interrupt: null,
+          interrupt: approvalInterrupt ? null : withResolved.interrupt,
         };
       }
       if (b?.kind !== 'question') return state;

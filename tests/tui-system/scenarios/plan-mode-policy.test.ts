@@ -123,7 +123,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           toolResults: [
             {
               toolCallId: 'call_plan_pwd_read',
-              contentIncludes: [workspace.workspace],
+              contentIncludes: ['"deferred":true', '"until_phase":"building"'],
             },
             {
               toolCallId: 'call_plan_typecheck_deferred',
@@ -243,7 +243,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       expect(screenContains(output, "Tool 'shell_execute' is not available in this context")).toBe(
         false,
       );
-      expect(screenContains(output, 'Bash Ran: pwd')).toBe(true);
+      expect(screenContains(output, 'Bash Ran: pwd')).toBe(false);
       expect(screenContains(output, '工具授权')).toBe(false);
     },
     TIMEOUT,

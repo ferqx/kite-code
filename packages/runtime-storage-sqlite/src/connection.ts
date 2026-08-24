@@ -18,3 +18,19 @@ export function openSqliteRuntimeConnection(databasePath: string, journalMode: s
     throw error;
   }
 }
+
+/** Open a query-only connection. It never creates a directory, database, or schema. */
+export function openSqliteRuntimeLogConnection(databasePath: string): Database {
+  const db = new Database(
+    databasePath,
+    constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_NOFOLLOW,
+  );
+  try {
+    db.run('PRAGMA busy_timeout = 250');
+    db.run('PRAGMA query_only = ON');
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}

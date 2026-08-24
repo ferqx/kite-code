@@ -9,12 +9,14 @@ import type { ModelRuntimeConfig } from './config';
 import { buildContextProjection, type ContextProjectionEnvironment } from './context-projection';
 import type { SupportedChatModel } from './factory';
 import {
+  type BuiltinModelEvent,
   computeModelInvocationPrivateDigest,
-  type NormalizedModelResponse,
+  type ModelInvocationGateway,
+  type ModelInvocationPersistence,
+  type ModelInvocationStateView,
   normalizedModelResponseToAIMessage,
 } from './invocation-gateway';
 import { humanMessage, systemMessage } from './messages';
-import type { ProviderDataAdmissionGate } from './provider-data-admission';
 import type {
   BuiltinContextCheckpointView,
   BuiltinRuntimeStateView,
@@ -33,7 +35,6 @@ export type ContextCompactionErrorKind =
   | 'unsafe_boundary'
   | 'oversized_turn'
   | 'summary_model_failed'
-  | 'provider_admission_denied'
   | 'summary_aborted'
   | 'empty_summary'
   | 'truncated_summary'
@@ -42,11 +43,14 @@ export type ContextCompactionErrorKind =
   | 'invalid_candidate'
   | 'insufficient_reduction';
 
-interface ContextSummaryGateway {
-  invoke(input: any): Promise<{
-    readonly invocationId: string;
-    commit(): Promise<NormalizedModelResponse>;
-  }>;
+type ContextSummaryGateway = Pick<ModelInvocationGateway, 'invoke'>;
+
+function isContextSummaryPersistence(
+  value: unknown,
+): value is ModelInvocationPersistence<ModelInvocationStateView, BuiltinModelEvent> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const candidate = value as Readonly<Record<string, unknown>>;
+  return typeof candidate.getState === 'function' && typeof candidate.persistEvents === 'function';
 }
 
 export const SUMMARY_SYSTEM_PROMPT = `Summarize settled agent history as one concise Markdown narrative.
@@ -86,13 +90,12 @@ export function createModelContextSummaryGenerator(input: {
   state?: Readonly<BuiltinRuntimeStateView>;
   projectionEnvironmentDigest?: string;
   signal?: AbortSignal;
-  providerDataAdmission: ProviderDataAdmissionGate;
 }): ContextSummaryGenerator {
   return async (request) => {
     if (
       !input.config ||
       !input.gateway ||
-      !input.persistence ||
+      !isContextSummaryPersistence(input.persistence) ||
       !input.state ||
       !input.projectionEnvironmentDigest
     ) {
@@ -124,7 +127,6 @@ export function createModelContextSummaryGenerator(input: {
           [],
         ),
       },
-      providerDataAdmission: input.providerDataAdmission,
       resourceKind: 'compaction',
       signal: input.signal,
     });

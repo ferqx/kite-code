@@ -4,7 +4,7 @@
 
 ## 基本规则
 
-1. `src/core/` 不得依赖 `src/app/` 或 TUI 展示类型。
+1. `packages/agent-kernel/` 不得依赖其他 workspace、I/O runtime 或 TUI 展示类型。
 2. 当前行为发生变化时，必须在同一改动中更新相关 `docs/active/` 文档。
 3. `docs/design/`、`docs/space/plans/`、`docs/space/execution/completed/` 和 `docs/deprecated/` 不是当前实现依据。
 4. 架构决策需要新增 ADR，不得改写已接受 ADR 的历史结论。

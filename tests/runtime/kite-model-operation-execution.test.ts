@@ -86,7 +86,7 @@ function composition() {
 }
 
 describe('Kite Builtin Model operation execution composition', () => {
-  test('routes all five purposes through one supplied Host port exactly once', async () => {
+  test('routes all four current purposes through one supplied Host port exactly once', async () => {
     const composed = composition();
     let sourceCalls = 0;
     for (const [index, purpose] of MODEL_INVOCATION_PURPOSES_.entries()) {
@@ -98,8 +98,8 @@ describe('Kite Builtin Model operation execution composition', () => {
       );
       expect(outcome).toBe(OUTCOME);
     }
-    expect(composed.hostCalls()).toBe(5);
-    expect(sourceCalls).toBe(5);
+    expect(composed.hostCalls()).toBe(4);
+    expect(sourceCalls).toBe(4);
   });
 
   test('rejects purpose, input, and replayed attempt identity before another source call', async () => {

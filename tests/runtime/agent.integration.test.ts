@@ -75,6 +75,9 @@ test('classifies an exhausted model timeout from its structured attempt outcome'
     expect(events.find((event) => event.type === 'model.invocation_interrupted')).toMatchObject({
       type: 'model.invocation_interrupted',
       reasonCode: 'attempts_exhausted',
+      failureClassification: 'attempt_timeout',
+      providerStatusCode: null,
+      timedOut: true,
     });
     expect(events.find((event) => event.type === 'run.error')).toMatchObject({
       type: 'run.error',
@@ -281,7 +284,6 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
       'capability.subagent_cleanup_started',
       'capability.subagent_cleanup_completed',
       'capability.execution_unknown',
-      'provider.admission_status',
       'user.message_appended',
       'turn.started',
       'turn.aborted',
@@ -757,7 +759,6 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       (event) => event !== 'model.cache_metrics' && event !== 'model.context_metrics',
     );
     expect(coreEvents).toEqual([
-      'provider.admission_status',
       'user.message_appended',
       'turn.started',
       'model.invocation_prepared',

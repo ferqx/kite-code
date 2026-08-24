@@ -44,17 +44,32 @@ describe('ACORE-AGENT-01 delegation contract', () => {
 
   test('task schema and Runtime validation share the 8..8000 bounded task contract', () => {
     expect(
-      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({ subagent_type: 'explore', task: '1234567' }).success,
+      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({
+        name: 'Inspect code',
+        subagent_type: 'explore',
+        task: '1234567',
+      }).success,
     ).toBe(false);
     expect(
-      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({ subagent_type: 'explore', task: '       x' }).success,
+      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({
+        name: 'Inspect code',
+        subagent_type: 'explore',
+        task: '       x',
+      }).success,
     ).toBe(false);
     expect(
-      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({ subagent_type: 'explore', task: 'x'.repeat(8001) })
-        .success,
+      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({
+        name: 'Inspect code',
+        subagent_type: 'explore',
+        task: 'x'.repeat(8001),
+      }).success,
     ).toBe(false);
     expect(
-      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({ subagent_type: 'explore', task: 'bounded!' }).success,
+      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({
+        name: 'Inspect code',
+        subagent_type: 'explore',
+        task: 'bounded!',
+      }).success,
     ).toBe(true);
     expect(validateDelegatedTask({ delegatedTask: 'bounded!' }).valid).toBe(true);
   });
@@ -66,8 +81,12 @@ describe('ACORE-AGENT-01 delegation contract', () => {
       integrityIdentifier: `sha256:${'b'.repeat(64)}`,
       byteLength: 256,
     };
-    const raw = { subagent_type: 'review' as const, task: 'Review the fixture implementation.' };
-    const privateArgs = { subagent_type: raw.subagent_type, taskArtifact };
+    const raw = {
+      name: 'Review fixture',
+      subagent_type: 'review' as const,
+      task: 'Review the fixture implementation.',
+    };
+    const privateArgs = { name: raw.name, subagent_type: raw.subagent_type, taskArtifact };
     const mixed = { ...raw, taskArtifact };
 
     // The public schema remains the raw v24 shape, but is now closed so a
@@ -101,6 +120,7 @@ describe('ACORE-AGENT-01 delegation contract', () => {
 
     const projected = projectSubagentResult({
       input: {
+        name: 'Draft architecture plan',
         subagent_type: 'plan',
         task: 'Produce a read-only architecture plan.',
       },
@@ -142,6 +162,7 @@ describe('ACORE-AGENT-01 delegation contract', () => {
           message: 'approval',
           continuation: {
             id: 'child-plan',
+            name: 'Draft architecture plan',
             role: { role: 'plan' },
             task: 'Produce a read-only architecture plan.',
             messages: [],
@@ -154,6 +175,7 @@ describe('ACORE-AGENT-01 delegation contract', () => {
     ]) {
       const terminal = projectSubagentResult({
         input: {
+          name: 'Draft architecture plan',
           subagent_type: 'plan',
           task: 'Produce a read-only architecture plan.',
         },

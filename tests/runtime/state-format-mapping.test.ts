@@ -4,7 +4,6 @@ import {
   mapHistoricalStateToState,
   STATE_STATE_TOP_LEVEL_FIELDS_,
 } from '../reliability-harness/runtime-authority/state-format-mapping';
-import stateShape from '../reliability-harness/runtime-modularization/manifests/runtime-state-shape.generated.json';
 
 test('RA-05 maps every State field into the exact State target without a production decoder', () => {
   const projectId = 'project_mapping_fixture' as const;
@@ -35,9 +34,12 @@ test('RA-05 maps every State field into the exact State target without a product
   });
 
   expect(mapped).toEqual(target);
-  expect([...STATE_STATE_TOP_LEVEL_FIELDS_].map(String).sort()).toEqual(
-    stateShape.facts.fields.map((field) => field.name).sort(),
-  );
+  const initialStateFields = new Set(Object.keys(target));
+  const omittedOptionalFields = [...STATE_STATE_TOP_LEVEL_FIELDS_]
+    .map(String)
+    .filter((field) => !initialStateFields.has(field))
+    .sort();
+  expect(omittedOptionalFields).toEqual(['lastAppliedEventId', 'terminalOutcome']);
   expect(() =>
     mapHistoricalStateToState({
       state: { ...state, unknownAuthority: true },

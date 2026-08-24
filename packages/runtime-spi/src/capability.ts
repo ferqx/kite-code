@@ -183,6 +183,8 @@ export interface CapabilityPolicyEffects {
   readonly externalRead?: true;
   readonly externalWrite?: true;
   readonly uncertainEffects?: true;
+  /** This exact external access needs mode-aware Full/Auto/user authorization. */
+  readonly sensitiveExternalAccess?: true;
 }
 
 export type CapabilityPolicyRisk =

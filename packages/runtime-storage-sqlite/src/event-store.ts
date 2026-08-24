@@ -24,6 +24,12 @@ export function createSqliteEventStore<Event>(input: {
   const selectAllEvents = input.db.query<EventRow, [string]>(
     'SELECT sequence AS id, session_id AS thread_id, event_json, event_id, sequence AS revision, causation_id, occurred_at, created_at FROM runtime_events WHERE session_id = ? ORDER BY sequence ASC',
   );
+  const selectEventSummaryBatch = input.db.query<
+    { event_json: string; sequence: number },
+    [string, number]
+  >(
+    'SELECT event_json, sequence FROM runtime_events WHERE session_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT 32',
+  );
   const selectLastEventPosition = input.db.query<{ id: number | null }, [string]>(
     'SELECT MAX(sequence) AS id FROM runtime_events WHERE session_id = ?',
   );
@@ -105,9 +111,29 @@ export function createSqliteEventStore<Event>(input: {
     }));
   };
 
+  const findFirstSessionSummary = (
+    sessionId: string,
+  ): { readonly isSessionNameCandidate?: boolean; readonly searchText?: string } | null => {
+    if (input.isClosed() || !input.codec.eventSummary) return null;
+    // Session discovery only needs the first naming candidate. Read bounded
+    // batches so a long conversation does not decode its complete journal on
+    // the TUI startup path.
+    let sequence = 0;
+    while (true) {
+      const rows = selectEventSummaryBatch.all(sessionId, sequence);
+      for (const row of rows) {
+        sequence = row.sequence;
+        const summary = input.codec.eventSummary(input.codec.decodeEvent(row.event_json));
+        if (summary?.isSessionNameCandidate) return summary;
+      }
+      if (rows.length < 32) return null;
+    }
+  };
+
   return Object.freeze({
     insertEvents,
     loadEvents,
+    findFirstSessionSummary,
     lastEventPosition,
     revisionAtOrBefore: (sessionId: string, position: number) =>
       selectEventRevisionAtOrBefore.get(sessionId, position)?.revision ?? 0,

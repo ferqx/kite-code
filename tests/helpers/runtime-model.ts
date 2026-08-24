@@ -113,17 +113,6 @@ export function testBuiltinToolCatalog() {
   return TEST_BUILTIN_TOOL_CATALOG_;
 }
 
-/** Explicit test-only policy authority; production never imports this helper. */
-export function testProviderDataAdmission() {
-  return {
-    admitted: true,
-    reason: 'admitted' as const,
-    routeAlias: 'test-runtime-model',
-    policyRevision: 'test-runtime-model-v1',
-    maxWorkspaceDataClassification: 'confidential' as const,
-  };
-}
-
 /** Test composition bound to the same frozen Builtin projection and registry snapshot. */
 export function testToolPipelineComposition(builtinToolCatalog = TEST_BUILTIN_TOOL_CATALOG_) {
   return builtinToolCatalog === TEST_BUILTIN_TOOL_CATALOG_
@@ -378,6 +367,7 @@ export function testSubagentTaskRequests(): import('@kite/builtin-runtime/subage
     {
       parentModelInvocationId: string;
       parentToolCallId: string;
+      name: string;
       role: 'explore' | 'plan' | 'code' | 'review';
       task: string;
     }
@@ -385,7 +375,7 @@ export function testSubagentTaskRequests(): import('@kite/builtin-runtime/subage
   return {
     write: (input) => {
       const artifactId = `pa_${digestCapabilityValue({ input })}`;
-      values.set(artifactId, structuredClone(input));
+      values.set(artifactId, structuredClone({ ...input, name: input.name ?? 'Test sub-agent' }));
       return {
         artifactId,
         kind: 'subagent_task_request',
@@ -402,7 +392,7 @@ export function testSubagentTaskRequests(): import('@kite/builtin-runtime/subage
       ) {
         throw new Error('Test task request Artifact binding is invalid.');
       }
-      return { role: value.role, task: value.task };
+      return { name: value.name, role: value.role, task: value.task };
     },
   };
 }
@@ -500,9 +490,6 @@ export function runTestRuntimeAgent(
           capabilityExecution: input.capabilityExecution ?? testRuntimeCapabilityExecutionPort(),
           modelInvocationRuntime:
             input.modelInvocationRuntime ?? testModelInvocationRuntime(input.workspace),
-          providerDataAdmission:
-            input.providerDataAdmission ??
-            (input.sessionLoggingContentInspector ? undefined : testProviderDataAdmission),
         },
         provider,
         (dependencies) => createTestRuntimeEffectExecutor(dependencies, sandboxPreparationRoots),
@@ -542,7 +529,6 @@ export async function projectTestPrimaryModelEffect(
   } = input;
   const result = await projectPrimaryModelEffect({
     ...controllerInput,
-    providerDataAdmission: controllerInput.providerDataAdmission ?? testProviderDataAdmission,
     modelEffectCoordinator: modelEffectCoordinator ?? new BuiltinModelEffectCoordinator(gateway),
     modelInvocationPersistence: input.modelInvocationPersistence ?? harness.persistence,
     subagentTaskRequests: input.subagentTaskRequests ?? testSubagentTaskRequests(),
@@ -572,7 +558,6 @@ export function createTestRuntimeEffectExecutor(
   const builtinToolCatalog = dependencies.builtinToolCatalog ?? TEST_BUILTIN_TOOL_CATALOG_;
   const executor = createAppRuntimeEffectExecutor({
     ...dependencies,
-    providerDataAdmission: dependencies.providerDataAdmission ?? testProviderDataAdmission,
     ...(shellExecutor ? { shellExecutor } : {}),
     ...(sandboxPreparationArtifacts ? { sandboxPreparationArtifacts } : {}),
     capabilityExecution: dependencies.capabilityExecution ?? testRuntimeCapabilityExecutionPort(),
@@ -618,10 +603,18 @@ export function createTestRuntimeEffectExecutor(
           [toolCallId]: {
             ...call,
             args: {
+              name:
+                'name' in call.args && typeof call.args.name === 'string'
+                  ? call.args.name
+                  : 'Test sub-agent',
               subagent_type: call.args.subagent_type,
               taskArtifact: subagentTaskRequests.write({
                 parentModelInvocationId: call.modelInvocationId,
                 parentToolCallId: toolCallId,
+                name:
+                  'name' in call.args && typeof call.args.name === 'string'
+                    ? call.args.name
+                    : 'Test sub-agent',
                 role: call.args.subagent_type as 'explore' | 'plan' | 'code' | 'review',
                 task: call.args.task,
               }),
@@ -675,10 +668,18 @@ export async function executeTestRuntimeTools(
         preparedCall = {
           ...preparedCall,
           args: {
+            name:
+              'name' in preparedCall.args && typeof preparedCall.args.name === 'string'
+                ? preparedCall.args.name
+                : 'Test sub-agent',
             subagent_type: preparedCall.args.subagent_type,
             taskArtifact: subagentTaskRequests.write({
               parentModelInvocationId: preparedCall.modelInvocationId,
               parentToolCallId: toolCallId,
+              name:
+                'name' in preparedCall.args && typeof preparedCall.args.name === 'string'
+                  ? preparedCall.args.name
+                  : 'Test sub-agent',
               role: preparedCall.args.subagent_type as 'explore' | 'plan' | 'code' | 'review',
               task: preparedCall.args.task,
             }),
@@ -789,7 +790,6 @@ export async function executeTestRuntimeTools(
     const builtinToolCatalog = input.builtinToolCatalog ?? TEST_BUILTIN_TOOL_CATALOG_;
     await executeAppRuntimeTools({
       ...input,
-      providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmission,
       ...(shellExecutor ? { shellExecutor } : {}),
       ...(sandboxPreparationArtifacts ? { sandboxPreparationArtifacts } : {}),
       state: preparedState,

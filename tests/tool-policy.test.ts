@@ -188,7 +188,6 @@ const presentationApprovalBindingDigest = createToolApprovalBindingDigest(
     risk: 'execute_code',
     effects: { uncertainEffects: true },
     reason: 'The command requires approval.',
-    userVisibleSummary: 'Run the requested shell command.',
     expectedEffects: ['execute code'],
   },
 );
@@ -238,8 +237,7 @@ describe('tool policy', () => {
     }
   });
 
-  // 验证普通 shell_execute 执行项目代码时需要审批 / shell_execute commands that run project code require approval
-  test('requires approval for normal shell execution under building phase', () => {
+  test('routes Shell execution through mode review without local command authorization', () => {
     const decision = evaluateToolApproval({
       toolName: shellExecuteRequest.name,
       toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
@@ -248,13 +246,12 @@ describe('tool policy', () => {
 
     expect(decision.allowed).toBe(true);
     expect(decision.requiresApproval).toBe(true);
-    expect(decision.risk).toBe('execute_code');
+    expect(decision.risk).toBe('unknown');
     expect(decision.userVisibleSummary).toContain('bun test');
-    expect(decision.expectedEffects).toContain('Executes local project code');
+    expect(decision.expectedEffects).toContain('Executes an arbitrary shell command');
   });
 
-  // 验证只读 shell_execute 命令按命令风险直通，不再只按工具名审批 / Read-only shell_execute commands are classified by command risk
-  test('allows read-only shell_execute commands without approval', () => {
+  test('does not grant a Shell approval bypass from a fixed read-only command list', () => {
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
       toolArgs: { command: 'pwd' },
@@ -262,11 +259,11 @@ describe('tool policy', () => {
     });
 
     expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(false);
-    expect(decision.risk).toBe('read');
+    expect(decision.requiresApproval).toBe(true);
+    expect(decision.risk).toBe('unknown');
   });
 
-  test('preserves the read-only shell approval fast-path corpus', () => {
+  test('keeps every Shell command outside the planning execution ceiling', () => {
     for (const command of ['ls -la', 'pwd', 'rg TODO src']) {
       const decision = evaluateToolApproval({
         toolName: 'shell_execute',
@@ -275,9 +272,9 @@ describe('tool policy', () => {
         workspace: '/tmp/project',
         threadId: 'thread-a',
       });
-      expect(decision.allowed, command).toBe(true);
+      expect(decision.allowed, command).toBe(false);
       expect(decision.requiresApproval, command).toBe(false);
-      expect(decision.risk, command).toBe('read');
+      expect(decision.reason, command).toContain('planning phase');
     }
   });
 
@@ -291,7 +288,7 @@ describe('tool policy', () => {
 
     expect(decision.allowed).toBe(false);
     expect(decision.requiresApproval).toBe(false);
-    expect(decision.risk).toBe('execute_code');
+    expect(decision.risk).toBe('unknown');
     expect(decision.reason).toContain('planning phase');
   });
 
@@ -316,8 +313,8 @@ describe('tool policy', () => {
       command: 'bun test',
     });
     const decision = evaluateToolApproval({
-      toolName: shellExecuteRequest.name,
-      toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
+      toolName: 'shell_execute',
+      toolArgs: { command: 'bun test' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
@@ -383,7 +380,7 @@ describe('tool policy', () => {
       request: shellExecuteRequest,
     });
 
-    for (const command of ['bun test', 'echo hi > hello.txt', 'git add -A']) {
+    for (const command of ['echo hi > hello.txt', 'git add -A', 'bun test']) {
       const decision = evaluateToolApproval({
         toolName: 'shell_execute',
         toolArgs: { command },
@@ -510,14 +507,40 @@ describe('tool policy', () => {
       threadId: 'thread-a',
       tool: 'shell_execute',
       command: 'bun test',
-      risk: 'execute_code',
+      risk: 'unknown',
       approvalHash: presentationApprovalBindingDigest,
-      summary: decision.userVisibleSummary,
+      summary: 'Approve a shell command',
       reason: decision.reason,
       expectedEffects: decision.expectedEffects,
       grantOptions: ['approve_once', 'same_command', 'full_access'],
       recommendedGrant: 'approve_once',
     });
+  });
+
+  test('keeps shell approval summaries bounded and separate from exact commands', () => {
+    const command = `bun test ${'packages/runtime/'.repeat(40)}`;
+    const request: PendingToolRequest = {
+      ...shellExecuteRequest,
+      args: { command },
+      protectedCommand: command,
+    };
+    const decision = evaluateToolApproval({
+      toolName: request.name,
+      toolArgs: request.args as unknown as Record<string, unknown>,
+      phase: 'building',
+    });
+    const approval = buildToolApproval({
+      workspace: '/tmp/project',
+      threadId: 'thread-a',
+      request,
+      decision,
+      approvalBindingDigest: presentationApprovalBindingDigest,
+    });
+
+    expect(approval.command).toBe(command);
+    expect(approval.summary).toBe('Approve a shell command');
+    expect(approval.summary).not.toContain(command);
+    expect(approval.summary.length).toBeLessThanOrEqual(256);
   });
 
   test('validates the exact Kernel-supplied approval binding', () => {

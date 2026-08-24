@@ -19,7 +19,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { canonicalModelJson } from '@kite/builtin-runtime/model';
 import {
@@ -78,6 +78,7 @@ describe('SandboxExecutionProvider', () => {
         process.env.TMPDIR = isolatedTemp;
         const roots = sandboxRuntimeRootsForPreparation(workspace, 'sha256:absent-runtime');
         expect(existsSync(join(isolatedTemp, 'openpx-sandbox-runtime'))).toBe(false);
+        expect(existsSync(join(isolatedTemp, 'openpx-sandbox-control'))).toBe(false);
         expect(cleanupPosixSandboxRuntimeRootsNoSpawn(roots)).toBe(true);
       } finally {
         if (previousTmpdir === undefined) delete process.env.TMPDIR;
@@ -964,6 +965,7 @@ describe('SandboxExecutionProvider', () => {
         workspace,
         sandboxPreparationDigest(preparation),
       );
+      expect(dirname(runtimeRoots.controlRoot)).not.toBe(dirname(runtimeRoots.dataRoot));
       const externalSentinel = join(workspace, 'external-sentinel');
       if (process.platform !== 'win32') {
         writeFileSync(join(runtimeRoots.dataRoot, 'x'.repeat(255)), 'max-name');

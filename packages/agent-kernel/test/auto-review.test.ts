@@ -31,15 +31,29 @@ describe('State auto-review completion authority', () => {
     });
   });
 
-  test('escalates an explicit reviewer rejection to user approval', () => {
+  test('distinguishes a reviewer rejection from an explicit user-approval escalation', () => {
     const result = decideAutoReview(
       facts({ approved: false, reason: 'the command is broader than the task' }),
     );
     expect(result).toEqual({
-      kind: 'request_user_approval',
+      kind: 'rejected',
       reviewId: 'review-1',
       toolCallId: 'tool-1',
       reason: 'the command is broader than the task',
+    });
+    expect(
+      decideAutoReview(
+        facts({
+          approved: false,
+          requiresUserApproval: true,
+          reason: 'user intent is required',
+        }),
+      ),
+    ).toEqual({
+      kind: 'request_user_approval',
+      reviewId: 'review-1',
+      toolCallId: 'tool-1',
+      reason: 'user intent is required',
     });
   });
 
@@ -82,6 +96,21 @@ describe('State auto-review completion authority', () => {
       reviewId: 'review-1',
       toolCallId: 'tool-1',
       reason: 'contradictory reviewer facts',
+      failureType: 'invalid_response',
+    });
+    expect(
+      decideAutoReview(
+        facts({
+          approved: false,
+          failureType: 'technical',
+          reason: 'contradictory rejection facts',
+        }),
+      ),
+    ).toEqual({
+      kind: 'request_user_approval',
+      reviewId: 'review-1',
+      toolCallId: 'tool-1',
+      reason: 'contradictory rejection facts',
       failureType: 'invalid_response',
     });
   });

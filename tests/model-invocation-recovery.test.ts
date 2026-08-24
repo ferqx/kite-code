@@ -93,12 +93,6 @@ function invokeInput(fixture: ReturnType<typeof createFixture>) {
       projectionEnvironmentDigest: `sha256:${'1'.repeat(64)}` as const,
       capabilityBindingDigest: `sha256:${'2'.repeat(64)}` as const,
     },
-    providerDataAdmission: () => ({
-      admitted: true,
-      reason: 'admitted' as const,
-      routeAlias: 'test',
-      maxWorkspaceDataClassification: 'confidential' as const,
-    }),
     resourceKind: 'model' as const,
   };
 }

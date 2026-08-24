@@ -11,19 +11,18 @@ import type {
   CapabilityRiskClass,
   RuntimeJsonValue,
 } from '@kite/runtime-spi';
-import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite/runtime-spi';
 import {
-  hasBrokeredGitExecutableToken,
   isDestructiveShellCommand,
   isNetworkShellCommand,
   isReadOnlyShellCommand,
   isVcsMutationShellCommand,
-  isWriteShellCommand,
   shellEffectsClassifier,
   taskEffectsClassifier,
 } from './catalog-contract';
 import {
+  checkDangerousCanonicalPath,
   checkDangerousPaths,
+  checkDangerousSearchRoot,
   expandHomeRelativePath,
   isPathInsideWorkspace,
   msys2ToWindowsPath,
@@ -406,116 +405,31 @@ export function shellBuiltinPolicyRule(
     });
   }
 
-  if (
-    context.featureFlags?.brokeredGit === true &&
-    context.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_ &&
-    hasBrokeredGitExecutableToken(command)
-  ) {
-    return denyRule({
-      risk: 'vcs_mutation',
-      reason: 'Git commands are denied through shell_execute by the brokered Git boundary.',
-      userVisibleSummary: 'Use git_inspect for local Git status, diff, log, or branch inspection.',
-      expectedEffects: [
-        'No shell command will be executed',
-        'Use the governed git_inspect capability for local Git inspection',
-      ],
-      effectiveEffects: shellEffectiveEffects(command, context.workspace, declaredEffects)
-        .effectiveEffects,
-      recovery: {
-        disposition: 'never',
-        maximumAdditionalCalls: 0,
-        safeAutomaticRetry: false,
-        capabilityIntent: 'git_inspect',
-      },
-    });
-  }
+  const sensitiveExternalPath = checkDangerousPaths(command, { workspace: context.workspace });
 
-  const dangerousPath = checkDangerousPaths(command);
-  if (dangerousPath) {
+  if (isDestructiveShellCommand(command.toLowerCase()) && isCriticalSystemRemoval(command)) {
     return denyRule({
       risk: 'destructive',
-      reason: `Protected path '${dangerousPath}' cannot be accessed by model-driven Shell.`,
-      userVisibleSummary: `Blocked protected path access: ${dangerousPath}`,
+      reason: 'rm -rf must not delete critical system paths.',
+      userVisibleSummary: `Rejected destructive rm targeting critical system paths: ${command}`,
+      expectedEffects: ['No command will be executed'],
+      effectiveEffects: declaredEffects,
+    });
+  }
+  if (isCriticalSystemGitDestruction(command, context.workspace)) {
+    return denyRule({
+      risk: 'destructive',
+      reason: 'Git must not destructively rewrite a critical system repository.',
+      userVisibleSummary: `Rejected destructive Git targeting a critical system path: ${command}`,
       expectedEffects: ['No command will be executed'],
       effectiveEffects: declaredEffects,
     });
   }
 
-  const destructive = isDestructiveShellCommand(command.toLowerCase());
-  if (destructive) {
-    if (isWorkspaceRootRemoval(command, context.workspace)) {
-      return denyRule({
-        risk: 'destructive',
-        reason: 'rm -rf must not delete workspace code.',
-        userVisibleSummary: `Rejected destructive rm targeting workspace: ${command}`,
-        expectedEffects: ['No command will be executed'],
-        effectiveEffects: declaredEffects,
-      });
-    }
-    if (isCriticalSystemRemoval(command)) {
-      return denyRule({
-        risk: 'destructive',
-        reason: 'rm -rf must not delete critical system paths.',
-        userVisibleSummary: `Rejected destructive rm targeting critical system paths: ${command}`,
-        expectedEffects: ['No command will be executed'],
-        effectiveEffects: declaredEffects,
-      });
-    }
-    if (context.phase === 'planning') {
-      return denyRule({
-        risk: 'write_file',
-        reason:
-          'planning phase allows read-only inspection and plan updates only; rejected shell_execute.',
-        userVisibleSummary:
-          'Plan mode is read-only. This operation did not run and cannot be approved while planning. Use read-only inspection or describe the intended implementation in the plan, then run it after plan approval.',
-        expectedEffects: ['No workspace mutation or code execution will run'],
-        phaseConstraint: 'planning',
-        effectiveEffects: shellEffectiveEffects(command, context.workspace, declaredEffects)
-          .effectiveEffects,
-      });
-    }
-    return askRule({
-      risk: 'write_file',
-      effects: shellPolicyEffects(command, context.workspace),
-      reason: 'rm -rf on non-critical paths; downgraded to write_file risk.',
-      userVisibleSummary: `Remove files: ${command}`,
-      expectedEffects: ['Deletes files and directories outside workspace and system paths'],
-      effectiveEffects: shellEffectiveEffects(command, context.workspace, declaredEffects)
-        .effectiveEffects,
-      fullAccessMayBypassApproval: false,
-      sameCommandMayBypassApproval: false,
-    });
-  }
-
   const shellEffects = shellEffectiveEffects(command, context.workspace, declaredEffects);
-  if (isReadOnlyShellCommand(command)) {
-    if (shellEffects.policyEffects?.externalRead) {
-      return askRule({
-        risk: 'read',
-        effects: shellEffects.policyEffects,
-        reason: 'This shell command reads files outside the workspace.',
-        userVisibleSummary: `Read external files with Shell: ${command}`,
-        expectedEffects: ['Reads files outside the workspace boundary'],
-        effectiveEffects: shellEffects.effectiveEffects,
-        fullAccessMayBypassApproval: false,
-        sameCommandMayBypassApproval: false,
-      });
-    }
-    return allowRule({
-      risk: 'read',
-      reason: 'Command is classified as read-only.',
-      userVisibleSummary: `Run read-only shell command: ${command}`,
-      expectedEffects: [
-        'Reads local workspace or git metadata',
-        'Does not intentionally mutate files',
-      ],
-      effectiveEffects: shellEffects.effectiveEffects,
-    });
-  }
-
   if (context.phase === 'planning') {
     return denyRule({
-      risk: shellRisk(command),
+      risk: 'unknown',
       reason:
         'planning phase allows read-only inspection and plan updates only; rejected shell_execute.',
       userVisibleSummary:
@@ -526,37 +440,37 @@ export function shellBuiltinPolicyRule(
     });
   }
 
-  const risk = shellRisk(command);
+  if (sensitiveExternalPath) {
+    return askRule({
+      risk: 'unknown',
+      effects: {
+        ...shellEffects.policyEffects,
+        sensitiveExternalAccess: true,
+        ...(!shellEffects.policyEffects?.externalRead &&
+        !shellEffects.policyEffects?.externalWrite &&
+        !shellEffects.policyEffects?.uncertainEffects
+          ? { uncertainEffects: true as const }
+          : {}),
+      },
+      reason: `This shell command accesses the sensitive external path '${sensitiveExternalPath}'.`,
+      userVisibleSummary: `Access sensitive external path with Shell: ${sensitiveExternalPath}`,
+      expectedEffects: ['Accesses sensitive data or system configuration outside the workspace'],
+      effectiveEffects: shellEffects.effectiveEffects,
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: false,
+    });
+  }
+
   return askRule({
-    risk,
+    risk: 'unknown',
     effects: shellEffects.policyEffects,
     reason:
-      risk === 'vcs_mutation'
-        ? 'This command mutates version-control state.'
-        : risk === 'write_file'
-          ? 'This shell command may modify workspace files.'
-          : risk === 'network'
-            ? 'This shell command may access the network.'
-            : 'This shell command executes local project code or an arbitrary program.',
-    userVisibleSummary:
-      risk === 'vcs_mutation'
-        ? `Run version-control mutation command: ${command}`
-        : risk === 'write_file'
-          ? `Run workspace-mutating shell command: ${command}`
-          : risk === 'network'
-            ? `Run network-capable shell command: ${command}`
-            : `Run shell command: ${command}`,
-    expectedEffects:
-      risk === 'vcs_mutation'
-        ? ['Mutates git state', 'May change staged files, commits, or branches']
-        : risk === 'write_file'
-          ? [
-              'May modify files inside the workspace',
-              'May create cache, temp, or dependency output',
-            ]
-          : risk === 'network'
-            ? ['May access network resources', 'May write downloaded or generated output']
-            : ['Executes local project code', 'May create cache or temporary output'],
+      'Shell effects are not authorized from a fixed command grammar; the current interaction mode must review this exact invocation.',
+    userVisibleSummary: `Review shell command: ${command}`,
+    expectedEffects: [
+      'Executes an arbitrary shell command',
+      'May read or modify files, access the network, or change external state',
+    ],
     effectiveEffects: shellEffects.effectiveEffects,
     fullAccessMayBypassApproval: true,
     sameCommandMayBypassApproval: true,
@@ -577,6 +491,27 @@ export function fileBuiltinPolicyRule(
   const path = stringField(input, 'path') ?? (isRead ? '.' : '<unknown>');
   if (isRead) {
     const external = isExternalPath(path, context.workspace);
+    const sensitiveExternalPath = external
+      ? (checkDangerousCanonicalPath(path, context.workspace) ??
+        (operationId === 'builtin:read_file'
+          ? null
+          : (checkDangerousSearchRoot(path, context.workspace) ?? path)))
+      : null;
+    if (sensitiveExternalPath) {
+      return askRule({
+        risk: 'read',
+        effects: { externalRead: true, sensitiveExternalAccess: true },
+        reason:
+          operationId === 'builtin:read_file'
+            ? 'This file tool reads a sensitive path outside the workspace.'
+            : 'An external recursive search cannot prove that it will avoid sensitive paths.',
+        userVisibleSummary: `Read sensitive external path: ${path}`,
+        expectedEffects: ['Reads sensitive data outside the workspace boundary'],
+        effectiveEffects: readOnlyEffects(declaredEffects),
+        fullAccessMayBypassApproval: true,
+        sameCommandMayBypassApproval: false,
+      });
+    }
     return allowRule({
       risk: 'read',
       ...(external ? { effects: { externalRead: true } } : {}),
@@ -597,8 +532,7 @@ export function fileBuiltinPolicyRule(
       operationId === 'builtin:write_file' ? 'No file was written.' : 'No file was edited.';
     return denyRule({
       risk: 'write_file',
-      reason:
-        'Plan mode is read-only. Workspace edits must be described in the plan and applied only after plan approval.',
+      reason: `Plan mode is read-only. ${outcome} Describe the intended change in the plan and apply it after plan approval.`,
       userVisibleSummary: `Plan mode is read-only. ${outcome} Describe the intended change in the plan and apply it after plan approval.`,
       expectedEffects: ['No workspace file was modified'],
       phaseConstraint: 'planning',
@@ -606,18 +540,39 @@ export function fileBuiltinPolicyRule(
     });
   }
   const external = isExternalPath(path, context.workspace);
+  const sensitiveExternalPath = external
+    ? checkDangerousCanonicalPath(path, context.workspace)
+    : null;
+  if (!external) {
+    return allowRule({
+      risk: 'write_file',
+      reason: 'File mutation is proven to remain inside the current workspace.',
+      userVisibleSummary: `Modify workspace file: ${path}`,
+      expectedEffects: ['Modifies files inside the workspace', 'May overwrite existing content'],
+      effectiveEffects: declaredEffects,
+    });
+  }
   return askRule({
     risk: 'write_file',
-    ...(external ? { effects: { externalWrite: true } } : {}),
-    reason: external
-      ? 'This tool modifies files outside the workspace.'
-      : 'This tool modifies workspace files.',
+    ...(external
+      ? {
+          effects: {
+            externalWrite: true,
+            ...(sensitiveExternalPath ? { sensitiveExternalAccess: true as const } : {}),
+          },
+        }
+      : {}),
+    reason: sensitiveExternalPath
+      ? 'This tool modifies a sensitive path outside the workspace.'
+      : external
+        ? 'This tool modifies files outside the workspace.'
+        : 'This tool modifies workspace files.',
     userVisibleSummary: `Modify ${external ? 'external ' : 'workspace '}file: ${path}`,
     expectedEffects: external
       ? ['Modifies files outside the workspace boundary', 'May overwrite existing content']
       : ['Modifies files inside the workspace', 'May overwrite existing content'],
     effectiveEffects: external ? { ...declaredEffects, filesystem: 'write' } : declaredEffects,
-    fullAccessMayBypassApproval: !external,
+    fullAccessMayBypassApproval: true,
     sameCommandMayBypassApproval: false,
   });
 }
@@ -749,11 +704,87 @@ function stringField(input: RuntimeJsonValue, key: string): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function shellRisk(command: string): CapabilityPolicyRisk {
-  if (isVcsMutationShellCommand(command.toLowerCase())) return 'vcs_mutation';
-  if (isWriteShellCommand(command.toLowerCase())) return 'write_file';
-  if (isNetworkShellCommand(command.toLowerCase())) return 'network';
-  return 'execute_code';
+const GIT_PATH_VALUE_OPTIONS_ = new Set([
+  '--contents',
+  '--file',
+  '--git-dir',
+  '--output',
+  '--output-directory',
+  '--pathspec-from-file',
+  '--separate-git-dir',
+  '--template',
+  '--work-tree',
+  '-F',
+  '-o',
+]);
+
+function portableExecutableName(value: string): string {
+  return (value.replace(/\\/g, '/').split('/').at(-1) ?? '')
+    .toLowerCase()
+    .replace(/\.(?:cmd|exe)$/u, '');
+}
+
+function tokenizeDirectShellCommand(command: string): string[] | null {
+  const tokens: string[] = [];
+  let token = '';
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  const push = (): void => {
+    if (token.length > 0) tokens.push(token);
+    token = '';
+  };
+  for (const character of command.trim()) {
+    if (escaped) {
+      token += character;
+      escaped = false;
+      continue;
+    }
+    if (character === '\\' && quote === '"') {
+      escaped = true;
+      continue;
+    }
+    if (character === '\\') {
+      token += character;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = null;
+      else token += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      push();
+      continue;
+    }
+    if (/[;&|<>`$(){}\n\r]/u.test(character)) return null;
+    token += character;
+  }
+  if (quote || escaped) return null;
+  push();
+  return tokens;
+}
+
+function resolveGitPath(value: string, cwd: string): string {
+  const normalized = expandHomeRelativePath(msys2ToWindowsPath(value));
+  return isAbsolute(normalized) ? resolve(normalized) : resolve(cwd, normalized);
+}
+
+function gitOptionPath(
+  argument: string,
+  next: string | undefined,
+): Readonly<{ value: string; consumesNext: boolean }> | null {
+  const separator = argument.indexOf('=');
+  const name = separator >= 0 ? argument.slice(0, separator) : argument;
+  if (!GIT_PATH_VALUE_OPTIONS_.has(name)) return null;
+  if (separator >= 0) {
+    const value = argument.slice(separator + 1);
+    return value ? Object.freeze({ value, consumesNext: false }) : null;
+  }
+  return next ? Object.freeze({ value: next, consumesNext: true }) : null;
 }
 
 function shellPolicyEffects(
@@ -777,6 +808,10 @@ function shellPolicyEffects(
   if (writeTargets === null) effects.uncertainEffects = true;
   else if (writeTargets.some((target) => isExternalPath(target, workspace)))
     effects.externalWrite = true;
+  const mutationReadTargets = readOnly ? [] : shellMutationReadTargets(command);
+  if (mutationReadTargets === null) effects.uncertainEffects = true;
+  else if (mutationReadTargets.some((target) => isExternalPath(target, workspace)))
+    effects.externalRead = true;
   const readTargets = [
     ...(readOnly ? shellReadTargets(command) : []),
     ...(isNetworkShellCommand(normalized) ? shellNetworkReadTargets(command) : []),
@@ -826,7 +861,8 @@ function shellWriteTargets(command: string): string[] | null {
   if (['touch', 'mkdir', 'tee', 'rm', 'unlink'].includes(program ?? '')) {
     return paths.length > 0 ? paths : null;
   }
-  if (program === 'cp' || program === 'mv') return paths.length >= 2 ? [paths.at(-1)!] : null;
+  if (program === 'cp') return paths.length >= 2 ? [paths.at(-1)!] : null;
+  if (program === 'mv') return paths.length >= 2 ? paths : null;
   if (program === 'curl' || program === 'wget') {
     const targets: string[] = [];
     for (let index = 1; index < tokens.length; index += 1) {
@@ -838,6 +874,22 @@ function shellWriteTargets(command: string): string[] | null {
     }
     return targets;
   }
+  return null;
+}
+
+function shellMutationReadTargets(command: string): string[] | null {
+  const trimmed = command.trim();
+  if (!trimmed || /[;&|`$(){}[\]*?]/.test(trimmed)) return null;
+  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map(stripQuotes) ?? [];
+  const program = portableExecutableName(tokens[0] ?? '');
+  const operands = tokens
+    .slice(1)
+    .filter((token) => !token.startsWith('-') && !token.includes('>'));
+  if (program === 'cp') return operands.length >= 2 ? operands.slice(0, -1) : null;
+  if (program === 'mv') return [];
+  if (['touch', 'mkdir', 'rm', 'unlink', 'tee', 'echo', 'printf'].includes(program)) return [];
+  if (program === 'cat' && trimmed.includes('>')) return operands;
+  if (portableExecutableName(tokens[0] ?? '') === 'git') return [];
   return null;
 }
 
@@ -943,20 +995,47 @@ function shellTargets(command: string): readonly string[] {
   return tokens.slice(rmIndex + 1).filter((token) => !token.startsWith('-'));
 }
 
-function isWorkspaceRootRemoval(command: string, workspace: string): boolean {
+function isCriticalSystemRemoval(command: string): boolean {
   return shellTargets(command).some((target) => {
-    const clean = stripQuotes(target);
-    if (clean === '.') return true;
-    try {
-      const resolvedTarget = isAbsolute(clean) ? resolve(clean) : resolve(workspace, clean);
-      return resolvedTarget === resolve(workspace);
-    } catch {
-      return true;
-    }
+    return isCriticalSystemTarget(stripQuotes(target));
   });
 }
 
-function isCriticalSystemRemoval(command: string): boolean {
+function isCriticalSystemGitDestruction(command: string, workspace: string): boolean {
+  const tokens = tokenizeDirectShellCommand(command);
+  if (!tokens || portableExecutableName(tokens[0] ?? '') !== 'git') return false;
+  const destructiveOperation = tokens.some((token) =>
+    ['checkout', 'clean', 'reset', 'restore', 'rm'].includes(token.toLowerCase()),
+  );
+  if (!destructiveOperation) return false;
+  let cwd = resolve(workspace);
+  const targets: string[] = [];
+  for (let index = 1; index < tokens.length; index += 1) {
+    const argument = tokens[index]!;
+    if (argument === '-C' && tokens[index + 1]) {
+      cwd = resolveGitPath(tokens[index + 1]!, cwd);
+      targets.push(cwd);
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith('-C') && argument.length > 2) {
+      cwd = resolveGitPath(argument.slice(2), cwd);
+      targets.push(cwd);
+      continue;
+    }
+    const optionPath = gitOptionPath(argument, tokens[index + 1]);
+    if (!optionPath || !['--git-dir', '--work-tree'].some((name) => argument.startsWith(name))) {
+      continue;
+    }
+    targets.push(resolveGitPath(optionPath.value, cwd));
+    if (optionPath.consumesNext) index += 1;
+  }
+  return targets.some(isCriticalSystemTarget);
+}
+
+function isCriticalSystemTarget(value: string): boolean {
+  const normalizedValue = value.replace(/\\/g, '/').toLowerCase();
+  const normalized = normalizedValue === '/' ? '/' : normalizedValue.replace(/\/$/u, '');
   const critical = [
     '/',
     '/etc',
@@ -971,11 +1050,9 @@ function isCriticalSystemRemoval(command: string): boolean {
     'c:/windows',
     'c:/windows/system32',
   ];
-  return shellTargets(command).some((target) => {
-    const lexicalTarget = stripQuotes(target).replace(/\\/g, '/').toLowerCase();
-    const normalized = lexicalTarget === '/' ? '/' : lexicalTarget.replace(/\/$/u, '');
-    return critical.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
-  });
+  return critical.some(
+    (prefix) => normalized === prefix || (prefix !== '/' && normalized.startsWith(`${prefix}/`)),
+  );
 }
 
 function freezeCompilation(value: CapabilityPolicyCompilation): CapabilityPolicyCompilation {

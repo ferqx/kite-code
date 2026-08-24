@@ -66,11 +66,15 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
   function resolve(opt: Option) {
     if (opt.action === 'approve') {
       const grant = opt.grant ?? 'approve_once';
-      provider.submitAction({ type: 'approve', grant });
+      // Queue the local acknowledgement before resolving Runtime's pending
+      // approval promise. Otherwise the durable continuation can clear the
+      // interrupt before React applies RESOLVE_INTERRUPT, leaving the child
+      // card visually suspended until a later progress event arrives.
       onResolved('approve', grant);
+      provider.submitAction({ type: 'approve', grant });
     } else {
-      provider.submitAction({ type: 'reject' });
       onResolved('denied');
+      provider.submitAction({ type: 'reject' });
     }
   }
 
@@ -130,6 +134,13 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       >
         <Text wrap="truncate-end">{approvalLabel}</Text>
       </Box>
+      {approval.reviewFailure ? (
+        <Box marginTop={1} marginLeft={1}>
+          <Text color={t.warning}>
+            ⚠ {translate('approval.autoReviewEscalation', { reason: approval.reviewFailure })}
+          </Text>
+        </Box>
+      ) : null}
       <Box marginTop={1}>
         <OverlayChoiceList
           options={choiceOptions}

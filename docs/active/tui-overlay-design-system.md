@@ -60,3 +60,5 @@ interaction mode；当前 sandbox backend 不支持 `full` 时该项保持可见
 MCP Overlay 的纯视图位于 `McpViews.tsx`，宿主 `McpOverlay.tsx` 保留订阅、路由、键盘和 controller 编排。Server 列表固定采用“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加动作 → 分隔后的快捷键”顺序；工具列表使用“工具数量 / Server 名称”摘要，摘要与首项之间保留一行，所有编号共享同一文本起始列；详情固定先展示状态、传输方式、能力和配置位置，再展示操作区及当前副作用提示；普通连接动作与禁用/移除组之间留一行。破坏性确认使用 warning callout，并默认选择“取消”。布局迁移不得改变 config revision、审批 digest、认证 flow、credential cleanup、catalog binding 或后台连接语义。
 
 First-run/setup wizard 继续使用独立 `FirstRunShell`，不属于本 contract。
+
+主提示词输入框在首次 Ink effect flush 注册 `useInput` handler 后必须立即可编辑；注册完成前不得显示假焦点，也不得使用 `setTimeout`、固定延时或后台初始化完成作为 focus 门禁。启动期间的终端回显抑制由 TUI composition root 在 Ink 初始化前负责；`InputLine` 随后只根据当前 modal Overlay 和终端 DEC focus report 暂停输入。

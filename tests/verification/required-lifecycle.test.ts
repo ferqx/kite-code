@@ -125,10 +125,10 @@ describe('required Verification lifecycle conformance', () => {
     const value = spec({
       checks: [
         {
-          checkId: 'review',
-          type: 'reviewer',
-          description: 'independent review',
-          instructions: 'review immutable evidence',
+          checkId: 'receipt',
+          type: 'receipt',
+          description: 'committed receipt check',
+          invocationId: 'required-invocation',
         },
       ],
       maxAttempts: 0,

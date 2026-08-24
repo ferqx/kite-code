@@ -37,7 +37,12 @@ function childStatus(
     block.approvalState ??
     (block.awaitingApproval || block.status === 'suspended' ? 'awaiting_user' : undefined);
   if (approvalState === 'auto_reviewing') return { text: '自动审查中', tone: 'dim' };
-  if (approvalState === 'queued') return { text: '等待自动审查', tone: 'dim' };
+  if (approvalState === 'queued_auto_review') {
+    return { text: '等待自动审查', tone: 'dim' };
+  }
+  if (approvalState === 'queued_user_approval' || approvalState === 'queued') {
+    return { text: '人工审批排队中', tone: 'dim' };
+  }
   if (approvalState === 'awaiting_user') return { text: '等待你的批准', tone: 'warning' };
   if (block.status === 'running') {
     const elapsed = block.startedAt == null ? '' : ` (${formatElapsed(now - block.startedAt)})`;
@@ -45,10 +50,16 @@ function childStatus(
   }
   if (block.status === 'done') return { text: 'succeeded', tone: 'dim' };
   if (block.status === 'cancelled') return { text: 'Cancelled', tone: 'warning' };
-  return { text: block.error || 'Error', tone: 'error' };
+  const diagnostic = block.failureDiagnostic;
+  return {
+    text: diagnostic
+      ? `${block.error || 'Error'} [${diagnostic.code}/${diagnostic.stage}]`
+      : block.error || 'Error',
+    tone: 'error',
+  };
 }
 
-function currentToolLabel(block: SubagentBlock): string {
+function currentToolLabel(block: SubagentBlock): string | undefined {
   let currentStep: SubagentBlock['steps'][number] | undefined;
   for (let index = block.steps.length - 1; index >= 0; index--) {
     const step = block.steps[index]!;
@@ -61,7 +72,7 @@ function currentToolLabel(block: SubagentBlock): string {
   if (block.status === 'done') return '已完成';
   if (block.status === 'error') return '已停止';
   if (block.status === 'cancelled') return '已取消';
-  return block.steps.length === 0 ? '等待第一个工具调用' : '等待下一步';
+  return block.steps.length === 0 ? 'Working' : subagentStepLabel(block.steps.at(-1)!);
 }
 
 function summarySuffix(blocks: SubagentBlock[]): string {
@@ -192,17 +203,21 @@ const ConcurrentSubAgentBlock = memo(function ConcurrentSubAgentBlock({
             );
             const color =
               status.tone === 'error' ? dt.error : status.tone === 'warning' ? dt.warning : dt.dim;
-            const currentTool = truncateToFit(currentToolLabel(block), Math.max(0, columns - 9));
+            const currentTool = currentToolLabel(block);
             return (
               <Box key={block.subagentId} flexDirection="column" paddingLeft={3}>
                 <Box>
                   <Text color={dt.dim}>{branch}</Text>
                   <Text color={color}>{line}</Text>
                 </Box>
-                <Box>
-                  <Text color={dt.dim}>{nestedBranch}</Text>
-                  <Text color={dt.dim}>{currentTool}</Text>
-                </Box>
+                {currentTool && (
+                  <Box>
+                    <Text color={dt.dim}>{nestedBranch}</Text>
+                    <Text color={dt.dim}>
+                      {truncateToFit(currentTool, Math.max(0, columns - 9))}
+                    </Text>
+                  </Box>
+                )}
               </Box>
             );
           })}

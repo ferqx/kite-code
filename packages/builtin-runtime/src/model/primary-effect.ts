@@ -21,7 +21,6 @@ import {
   normalizedModelResponseToAIMessage,
 } from './invocation-gateway';
 import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
-import type { ProviderDataAdmissionGate } from './provider-data-admission';
 import type { BuiltinRuntimeStateView } from './runtime-view';
 import { compileModelSurface } from './surface-compiler';
 
@@ -130,7 +129,6 @@ export interface BuiltinPrimaryModelEffectInput<
   readonly autoCompaction: BuiltinPrimaryAutoCompactionFacts;
   readonly resourceAdmission?: BuiltinPrimaryModelResourceAdmission;
   readonly persistence?: ModelInvocationPersistence<State, Event>;
-  readonly providerDataAdmission: ProviderDataAdmissionGate;
   readonly compactionReporter?: CompactionReporter;
   readonly signal?: AbortSignal;
   readonly emitEphemeral?: (event: Event) => void;
@@ -320,7 +318,6 @@ export async function executeBuiltinPrimaryModelEffect<
         input.capabilityBindingFacts,
       ),
     },
-    providerDataAdmission: input.providerDataAdmission,
     resourceKind: 'model',
     signal: input.signal,
     emitEphemeral: input.emitEphemeral,

@@ -80,7 +80,6 @@ export {
   formatBuiltinToolParseError,
   formatBuiltinToolSchemaHint,
   gitAvailability,
-  hasBrokeredGitExecutableToken,
   isDestructiveShellCommand,
   isNetworkShellCommand,
   isReadOnlyShellCommand,

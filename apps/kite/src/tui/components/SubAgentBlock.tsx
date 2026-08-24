@@ -113,30 +113,9 @@ function cleanTaskText(text: string): string {
   return text.replace(/^#+\s*/, '').trim();
 }
 
-/** Extract the first meaningful line of a task description as a readable one-liner */
+/** Bound the explicit public sub-agent name for compact display. */
 export function taskLabel(task: string): string {
-  const lines = task.split('\n');
-  // Skip leading markdown headings and blank lines to find the first content line
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]?.trim() ?? '';
-    if (!line) continue; // blank line
-    if (/^#/.test(line)) {
-      const content = line.replace(/^#+\s*/, '');
-      if (content.length >= 15) {
-        // meaningful heading like "# 背景：Kite Code 终端 TUI 应用 — 登录界面设计方案"
-        const plain = content;
-        return plain.length > 80 ? `${plain.slice(0, 77)}...` : plain;
-      }
-      // bare heading like "# Context" — skip
-      continue;
-    }
-    // first non-heading content line
-    const plain = line;
-    return plain.length > 80 ? `${plain.slice(0, 77)}...` : plain;
-  }
-  // fallback: use first line as-is
-  const first = lines[0]?.trim() ?? task;
-  const plain = cleanTaskText(first);
+  const plain = cleanTaskText(task).replace(/\s+/gu, ' ');
   return plain.length > 80 ? `${plain.slice(0, 77)}...` : plain;
 }
 
@@ -224,16 +203,23 @@ export default function SubAgentBlock({
           text:
             approvalState === 'auto_reviewing'
               ? '自动审查中'
-              : approvalState === 'queued'
+              : approvalState === 'queued_auto_review'
                 ? '等待自动审查'
-                : '等待你的批准',
+                : approvalState === 'queued_user_approval' || approvalState === 'queued'
+                  ? '人工审批排队中'
+                  : '等待你的批准',
           color: approvalState === 'awaiting_user' ? dt.warning : dt.dim,
         }
       : { text: `进行中 (${formatElapsed(liveElapsed)})`, color: dt.dim }
     : isCancelled
       ? { text: 'Cancelled', color: dt.warning }
       : isError
-        ? { text: block.error || 'Error', color: dt.error }
+        ? {
+            text: block.failureDiagnostic
+              ? `${block.error || 'Error'} [${block.failureDiagnostic.code}/${block.failureDiagnostic.stage}]`
+              : block.error || 'Error',
+            color: dt.error,
+          }
         : { text: `done! (${formatElapsed(block.durationMs)})`, color: dt.dim };
 
   return (

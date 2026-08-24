@@ -547,7 +547,7 @@ describe('RM-16 App ordinary Tool Pipeline attempt runtime', () => {
     const candidate = input(fixture, {
       name: 'task',
       argumentOrigin: 'runtime_private',
-      rawArguments: { subagent_type: 'explore', taskArtifact },
+      rawArguments: { name: 'Inspect workspace evidence', subagent_type: 'explore', taskArtifact },
     });
     const resolved = fixture.turn.callbacks.resolve(candidate.snapshot, candidate.resolution);
     if (!resolved.ok) throw new Error(resolved.failure.code);
@@ -628,7 +628,7 @@ describe('RM-16 App ordinary Tool Pipeline attempt runtime', () => {
     const candidate = input(fixture, {
       name: 'task',
       argumentOrigin: 'runtime_private',
-      rawArguments: { subagent_type: 'code', taskArtifact },
+      rawArguments: { name: 'Implement delegated change', subagent_type: 'code', taskArtifact },
     });
     const resolved = fixture.turn.callbacks.resolve(candidate.snapshot, candidate.resolution);
     if (!resolved.ok) throw new Error(resolved.failure.code);
@@ -669,6 +669,7 @@ describe('RM-16 App ordinary Tool Pipeline attempt runtime', () => {
       continuation: Object.freeze({
         id: 'subagent-1',
         role: Object.freeze({ role: 'code' as const }),
+        name: 'Implement delegated change',
         task: 'Write the child note.',
         messages: Object.freeze([]),
         toolCallCount: 1,
@@ -779,7 +780,7 @@ describe('RM-16 App ordinary Tool Pipeline attempt runtime', () => {
     const candidate = input(failureFixture, {
       name: 'task',
       argumentOrigin: 'runtime_private',
-      rawArguments: { subagent_type: 'explore', taskArtifact },
+      rawArguments: { name: 'Inspect failed delegation', subagent_type: 'explore', taskArtifact },
     });
     const resolved = failureFixture.turn.callbacks.resolve(
       candidate.snapshot,
@@ -832,6 +833,7 @@ describe('RM-16 App ordinary Tool Pipeline attempt runtime', () => {
       name: 'task',
       argumentOrigin: 'runtime_private',
       rawArguments: {
+        name: 'Inspect malformed delegation',
         subagent_type: 'explore',
         taskArtifact: {
           artifactId: `pa_${'8'.repeat(64)}`,

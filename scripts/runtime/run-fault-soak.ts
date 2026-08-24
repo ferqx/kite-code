@@ -96,17 +96,16 @@ const PROBES: readonly ProbeDefinition[] = [
       'test',
       'tests/model.test.ts',
       'tests/model-invoke.test.ts',
-      'tests/runtime/agent-deadline.test.ts',
+      'tests/model-invocation-gateway.test.ts',
       'tests/runtime/failure-mode-conformance.test.ts',
     ],
-    qualificationLifecycleFiles: ['tests/runtime/agent-deadline.test.ts'],
+    qualificationLifecycleFiles: ['tests/model-invoke.test.ts'],
     terminalEvidence: {
       model_retry_exhausted:
         /\(pass\).*model_rate_limit admits exactly one retry only while the bounded retry budget remains/,
-      deadline_exceeded:
-        /\(pass\).*wakes a pending interaction wait and emits one deadline terminal/,
     },
-    invariantEvidence: /\(pass\).*wakes a pending interaction wait and emits one deadline terminal/,
+    invariantEvidence:
+      /\(pass\).*cancellation wins even when the provider ignores its abort signal/,
   },
   {
     id: 'mcp_churn',

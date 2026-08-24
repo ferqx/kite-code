@@ -72,16 +72,19 @@ terminal 硬编码为 `cancelled`。
 terminal observation；当前自动审批风险判定携带 `escalatedToUser`，属于人工审批前的非终态，不生成
 ToolOutcome 或 tool terminal metric。terminal metrics 各自恰好生成一组
 `tool_total + tool_duration_ms`，不得重复合成。
-Provider admission 状态只记录固定 capability kind 与结构化 reason，不记录 route、endpoint 或 payload。
 revision/cohort 使用最多 64 字符的小写标识格式，digest 只接受
 `sha256:` 加 64 位小写十六进制，release version 最多 32 字符且只接受版本字符；不合法值直接
 省略。release profile 是 `limited | internal | canary | ga` 封闭枚举。
 
 `model.invocation_prepared/attempt_started/completed/interrupted/evidence_unavailable` 只允许记录 event
 type 与结构化 status；metadata mapper 不复制 invocation id、Surface/Response Artifact ref、keyed
-integrity identifier、route fingerprint、admission digest/policy revision、reservation identity、parent
+integrity identifier、route fingerprint、reservation identity、parent
 link、attempt ordinal 或 finish reason。`dispatchCertainty=unknown` 的 interrupted invocation 及 evidence
 unavailable 映射为 `unknown`，显式取消映射为 `cancelled`，其余 interrupted failure 映射为 `error`。
+
+模型重试与最终中断可记录无正文的 `failureClassification`、HTTP `providerStatusCode`（若 SDK 提供）和
+`timedOut`。它们只用于区分限流、服务端不可用、连接失败与本地超时；不得记录 Provider 原始错误、endpoint、
+请求内容或 credential。
 Artifact 正文和 locator 同样永久禁止进入 content logger。生产代码不存在接受任意 RuntimeEvent 的
 全事件/OTel-compatible serializer；唯一正文 projector 只在类型层接受用户消息与模型可见回答。
 

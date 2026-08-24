@@ -32,7 +32,7 @@ effect lease 负责真实 writer fencing。Runtime State、SQLite Store 与 epoc
 
 取消通过 AbortSignal 传播到模型、工具和 Subagent。用户停止当前轮次时，App shell 必须先通过 live Kernel control plane 原子持久化全部未终结工具的 `tool.cancelled` 与带 `cause=user` 的 `turn.aborted`，再触发 AbortSignal；这样活动 Effect lease 会因 revision 前移而失效，队列、active 列表和 transcript 工具调用/结果对共同收敛，不能留下永久 busy 状态。公共 `RunRuntimeAgentInput.signal` 也属于相同的取消边界：无论调用方是否持有 Kernel control，它一旦 abort 必须先写出同一组 durable cancellation facts，再解除 model、tool 或 interaction 等待；不得让 generator 静默结束而把 active turn 留在 Store。该操作只终止当前 turn，不把活动 task 改为 cancelled，下一条用户消息仍可沿当前任务上下文继续。重复取消不得追加重复 Tool Result。TUI 清理运行中 block 只是上述 Runtime 事实的展示投影，不是 Runtime 取消事实本身。
 
-工具审批中的显式“拒绝”与 Esc/取消使用同一整轮语义。Kernel 必须在一个 action batch 中先为当前审批目标写入带 `approval_rejected` failure 的 `approval.rejected`，再为其余未终结 sibling 写入 `tool.cancelled`，最后写入 `turn.aborted(cause=user)`；Runner 随即退出，不再请求后续审批、执行 queued 工具或调用模型。Agent 在观察到该用户审批拒绝时立即 abort 本轮内部执行信号，使已经启动的 Shell、Subagent 或其他可取消执行真正停止；迟到事件由 Effect lease 拒绝。该规则不适用于 `policy_denied`、sandbox 缺失或系统自动审查等非用户拒绝，它们继续按各自失败路径处理。
+工具审批中的显式“拒绝”与 Esc/取消使用同一整轮语义。Kernel 必须在一个 action batch 中先为当前审批目标写入带 `approval_rejected` failure 的 `approval.rejected`，再为其余未终结 sibling 写入 `tool.cancelled`；若这些终态覆盖的 Tool 仍有 `recorded/running` 且要求 receipt 的 Capability invocation，必须在同一 batch 中先写入 exact-invocation `capability.reconciliation_resolved(decision=waived)`，最后才能写入 `turn.aborted(cause=user)`。终态 batch 不得留下任何 outlives-terminal-Tool 的 Capability。Runner 随即退出，不再请求后续审批、执行 queued 工具或调用模型。Agent 在观察到该用户审批拒绝时立即 abort 本轮内部执行信号，使已经启动的 Shell、Subagent 或其他可取消执行真正停止；迟到事件由 Effect lease 拒绝。该规则不适用于 `policy_denied`、sandbox 缺失或系统自动审查等非用户拒绝，它们继续按各自失败路径处理。
 
 方案执行确认（`request_plan_review`）也是执行授权屏障。用户选择取消或按 Esc 时，Kernel 在同一 action batch 中写入 `plan.review_cancelled`，将触发确认的方案工具及其余未终结 sibling 全部写为 `tool.cancelled`，最后写入 `turn.aborted(cause=user)`；方案文档保留为可继续修改的 draft，但当前 turn 立即结束，Runner 不得再次调用模型或进入执行阶段。
 
@@ -53,9 +53,10 @@ drain 或 cleanup receipt 任一未确认时，Tool 与 run 保留 unknown/pendi
 
 TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名称、关键参数和已有输出并显示 `cancelled`；从未开始的 queued 探索工具不计入 `read N files` 等统计；不追加独立的整轮取消提示。实时 Ctrl+C/Esc、durable `tool.cancelled` 与 `turn.aborted(cause=user)` 必须共用同一套纯函数取消投影；该投影必须幂等，且晚到取消不得覆盖 `done/error/timeout/exhausted` 等既有终态。运行中的独立工具卡可能显式携带 `expanded=false`；`expanded` 只控制 Shell/Web Fetch 输出正文，`⎿ cancelled` 等 terminal footer 必须独立于折叠状态始终可见，本地取消不得再通过强制展开正文来换取 footer 可见性。实时取消和 event-log replay 必须得到相同视觉状态与渲染结果。取消后的旧 TUI run 仍可能在后台完成清理；键盘取消必须在 ESC/Ctrl+C 同一输入轮同步触达 SessionRuntime，不能等待 reducer 的 `running=false` effect，否则下一条 prompt 可能在旧 run 仍被视为活动时被静默拒绝。旧 run 的 finally 不得把新 run 的 `running` 状态重置为 idle，下一条 prompt 必须立即显示在消息列表中，并在清理完成后继续执行；RuntimeStore 的单飞等待不得隐藏用户已经提交的消息。正常完成已发出终态 `SET_EXITED` 后，不得再由停止 effect 反向 abort 已完成的 run。取消已请求但清理尚未完成时，输入层必须接受至多一条 successor prompt 并排队等待同一 cleanup barrier；普通仍在运行的 turn 不能借此接受并丢弃并发 prompt，successor run 获得 runtime lease 后必须继续进入模型调度并产生可见响应。 实时 reducer 在插入用户 prompt 时必须同步建立新的 turn 边界，不能把 successor 追加到已取消 turn；输入层先进入 running 再插入 prompt，避免短暂 idle 渲染把旧 turn 与 successor 一起提交到 Ink 的不可变 Static 区。取消后的 successor 若快速连续收到 reasoning completed 与回答增量，仍必须遵守 Thought presentation boundary：在消费回答前等待 Ink 已把运行态 Thought 单独提交并写入终端，不能让取消恢复路径重新把 Thought 与最终文本合并到同一帧。最新 turn 在 running 时可以把连续不可变前缀渐进提交到 Static，但收到终态进入 idle 后必须冻结该分割点：已提交前缀保持不变，新结算的 dynamic tail 继续作为 live tail，直到下一条用户消息建立更新的 turn（或会话 remount）。取消纯思考阶段时尤其不得把刚结算的 Thought 与已经显示的用户提示词在同一终止帧再次提升到 append-only Static；否则 Windows 主屏 scrollback 会留下重复提示词。 运行时事件循环在每次路由前检查本轮 AbortSignal；取消后由 provider 或 generator 排出的迟到 model/tool 事件不得投影到 successor。generator 自己产生 `turn.aborted(cause=user)` 时必须视为已取消；即使 generator 在 AbortSignal 触发后没有再 yield 取消事件、而是直接正常关闭，该 run 的 signal 仍是权威取消事实，必须跳过 `SET_EXITED`，避免旧 run 的终态投影覆盖新 run 的 running 状态。终态响应如果只比已流式文本多出标点或短后缀，必须并回已有文本 block，不得新增一个可见的重复行。只要当前 `model.requested` 的 request ID 仍有效，`model.text_delta` 就必须继续按流式累计事件处理，即使旧 run 的终态竞态曾把全局 `running` 短暂置为 false；不得把 cumulative delta 降级为普通文本事件逐条追加，否则终态协调虽能收敛 reducer 状态，Ink 主屏仍会留下已发布的重复帧。
 
-`boundedCancellation` 启用后，持久化 ResourceBudget deadline 触发同一 execution
-AbortSignal；普通模型、compaction、tool/MCP、Subagent 和 Verification 都继承该信号。deadline
-首先在一个 transaction 中取消未完成工具、将未 dispatch reservation release、将
+execution AbortSignal 会传播给普通模型、compaction、tool/MCP、Subagent 和 Verification；`boundedCancellation`
+控制的是 descendant/process-tree 有界清理资格，不负责创建或关闭运行截止时间。ResourceBudget 持久化本次运行的统一截止时间，App 的 Runtime coordinator 在进入恢复工作前安排计时器，命中后通过 Host-owned abort callback 触发同一根信号。
+新运行必须在向消费者交付 `resource_budget.configured` 之前先安装计时器，不能让暂停拉取事件的消费者延后截止时间生效。截止时间到达后不能另开第二套终止流程。取消首先在一个 transaction 中
+取消未完成工具、将未 dispatch reservation release、将
 `dispatch_started` reservation 标记 `unknown`、取消所有 durable waiter，并写入
 `turn.aborted(cause=error)`，然后才 abort 执行。Abort 必须唤醒 FIFO permit wait，且之后不能
 产生新的 model/tool dispatch；同一信号也必须唤醒没有后台 effect 的 ask_user、Plan/工具审批、
@@ -64,6 +65,12 @@ Verification 和 Provider action/admission 等交互等待。执行链退出后�
 failure=`budget_exceeded`、terminal reason=`budget_exhausted`；存在 unknown reservation 时仍
 保留 `knownExternalEffects=unknown` 和 reconciliation 入口。清理未确认时改为
 failure/reason=`cancel_incomplete`。
+
+这里的“并发资源”不是抽象概念，而是同时占用有限执行名额的具体工作：普通工具调用、Shell 命令、子 Agent，
+以及会修改文件的 writer。当前真正进入等待队列的是普通工具和 Shell；模型与子 Agent 本身仍会记入同一运行账本，
+但不会借用工具等待队列。举例：若普通工具上限为 2，两个读取已在运行，第三个读取会排队；若其中一个还是 Shell，
+它还要同时取得 Shell 名额。等待截止时间取“允许排队多久”和“整次运行还剩多久”中更早的一个。整次运行已经到期时，
+子 Agent 不能再申请新的模型或工具名额；正在等待的项目会被标记为超时并由统一取消负责清理。
 
 若 deadline 命中交互等待时仍有并发 Shell 在后台运行，等待分支不得无限忽略 AbortSignal。
 它必须转发已经到达的工具 terminal 与 `runtime.cancellation_diagnostic`，并在执行器不再合作时解除
@@ -194,6 +201,8 @@ dispatch 前 fail closed，并把唯一 live outer Task attempt 收敛 unknown�
 
 Subagent Provider 的 start/resume 只消费 Pipeline 签发的 single-use grant；resume 使用 snapshot、blocked Runtime
 Tool identity 与保存的 model ordinal 派生独立 continuation lineage，不能把 subagent id 当 continuation id。
+子模型循环因继承的用户或 Host AbortSignal 抛出 typed `aborted` 时，Adapter 必须投影
+`cancelled` 终态与明确的 `Cancelled` 摘要，不能降级为普通 `failed` 或 `Sub-agent execution failed.`；父模型据此只知道该 child 已取消，不能把取消误读成 child 业务/工具故障。
 取消传播到 Local Provider 后只允许一个最长 3 秒的绝对 cleanup grace；prepared 未 activate 的 handle 可证明
 零 Driver I/O 并直接 abandon，active handle 必须 abort、bounded settle 并 reconcile。超时立即终止 observation
 authority、保留 durable cleanup pending 并把已确认 dispatch 收敛为 unknown，不得再次 observe 打开第二个 grace
@@ -214,12 +223,14 @@ expiry、capacity、abandon 与 non-decreasing clock 都只由 Builtin Driver �
 private suspended ref、Artifact schema/key、approval resume、cancel grace、cleanup/reconcile 与 unknown recovery 语义，并由 Runtime State/SQLite Store 持久化。
 
 并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
-可见的 suspended 状态并停止 spinner 与计时；后续 Runtime 事实将其区分为“等待自动审查”、
-“自动审查中”或“等待你的批准”，只有最后一种表示用户必须操作。该展示不能依赖 child 是否占有
+可见的 suspended 状态并停止 spinner 与计时；snapshot 的原始 route 将其区分为“自动审查排队中”或
+“人工审批排队中”，取得 interaction 后再显示“自动审查中”或“等待你的批准”，只有最后一种表示用户必须操作。该展示不能依赖 child 是否占有
 唯一的 approval interaction。只有一个审批可以成为 canonical interaction，其余 continuation 通过
 `subagent.approval_deferred` 排队。snapshot 必须保存原始人工或 auto-review 路由，历史 snapshot
 缺失该字段时保守回退人工审批；重新呈现延后审批不 dispatch、不创建资源 reservation，真正批准
-并恢复 child 时才创建新的 parent attempt。已经获批的 active continuation 必须先于 deferred sibling
+并恢复 child 时才创建新的 parent attempt。`subagent.approval_deferred` 只能表达排队事实，不得覆盖
+snapshot 已给出的 route；任一 child 的 done/error/cancelled 终态都必须清除其 approvalState 与待审批标记，
+不能因为其他 sibling 仍在运行或已经完成而留下幽灵审批。已经获批的 active continuation 必须先于 deferred sibling
 恢复；批准事件立即将 TUI block 切回 running，后续 child step 保持该状态。
 
 Resource budget 为每次 continuation/resume 创建新的 parent attempt reservation；每个子模型及
@@ -227,8 +238,8 @@ Resource budget 为每次 continuation/resume 创建新的 parent attempt reserv
 预留/结算。child permit waiter 按 durable FIFO 等待，取消时必须写入 waiter cancellation；若
 effect lease 已因整轮取消失效，则外层取消事务负责收敛全部 waiting waiter。Provider/tool 在
 dispatch 后抛错时 child reservation 转为 unknown，不得只结算 parent 或静默退款。审批或本地
-策略尚未通过时不得提前创建 child reservation；Provider 最终本地 admission 明确拒绝且尚未
-网络 dispatch 时，只能携带 `local_provider_admission_denied` 证明释放 reservation。取消后迟到的
+策略尚未通过时不得提前创建 child reservation；已证明请求尚未 dispatch 的本地失败只能携带
+`local_pre_dispatch_failure` 证明释放 reservation。取消后迟到的
 child actual usage 只能经 Kernel 的 resource-only late reconciliation 入口提交；该入口不接受
 child tool/model terminal event，不能复活 turn、permit 或后继调用。
 

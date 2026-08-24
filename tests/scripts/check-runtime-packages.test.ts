@@ -16,18 +16,6 @@ function createFixture(): string {
   cpSync(join(process.cwd(), 'package.json'), join(root, 'package.json'));
   cpSync(join(process.cwd(), 'packages'), join(root, 'packages'), { recursive: true });
   cpSync(join(process.cwd(), 'apps'), join(root, 'apps'), { recursive: true });
-  const manifestDirectory = join(
-    root,
-    'tests/reliability-harness/runtime-modularization/manifests',
-  );
-  mkdirSync(manifestDirectory, { recursive: true });
-  cpSync(
-    join(
-      process.cwd(),
-      'tests/reliability-harness/runtime-modularization/manifests/architecture-exceptions.json',
-    ),
-    join(manifestDirectory, 'architecture-exceptions.json'),
-  );
   return root;
 }
 
@@ -251,6 +239,15 @@ describe('runtime workspace package gate', () => {
     expectViolation(root, 'ROOT_WORKSPACE_SCRIPT_INCOMPLETE');
   });
 
+  test('rejects a root script that executes a missing source file', () => {
+    const root = createFixture();
+    updateJson(root, 'package.json', (value) => {
+      const scripts = value.scripts as Record<string, string>;
+      scripts.web = 'bun run src/web-server/index.tsx';
+    });
+    expectViolation(root, 'ROOT_SCRIPT_SOURCE_MISSING');
+  });
+
   test('rejects undeclared internal package imports', () => {
     const root = createFixture();
     updateJson(root, 'packages/builtin-runtime/package.json', (value) => {
@@ -296,29 +293,5 @@ describe('runtime workspace package gate', () => {
     const path = join(root, 'apps/kite/src/alternate-authority.ts');
     writeFileSync(path, `${statement}\nexport const alternateAuthority = true;\n`);
     expectViolation(root, 'COMPOSITION_ROOT_BYPASS');
-  });
-
-  test('rejects broad and stale architecture exceptions', () => {
-    const broadRoot = createFixture();
-    updateJson(
-      broadRoot,
-      'tests/reliability-harness/runtime-modularization/manifests/architecture-exceptions.json',
-      (value) => {
-        value.exceptions = [{ importer: 'apps/kite/**', imported: '@kite/runtime-host' }];
-      },
-    );
-    expectViolation(broadRoot, 'EXCEPTION_BROAD_ALLOWLIST');
-
-    const staleRoot = createFixture();
-    updateJson(
-      staleRoot,
-      'tests/reliability-harness/runtime-modularization/manifests/architecture-exceptions.json',
-      (value) => {
-        value.exceptions = [
-          { importer: 'apps/kite/src/index.ts', imported: '@kite/runtime-contract' },
-        ];
-      },
-    );
-    expectViolation(staleRoot, 'EXCEPTION_STALE');
   });
 });

@@ -171,6 +171,21 @@ function toolBelongsToCurrentWork(
     : call.createdAtTurnId === state.turn.turnId;
 }
 
+/**
+ * A Subagent model invocation queues its tools in the shared durable journal,
+ * but those calls are consumed only by the owning parent Task continuation.
+ * They are evidence/recovery state, not top-level Scheduler work.
+ */
+function parentSchedulerOwnsToolCall(
+  state: AgentState,
+  call: AgentState['tools']['calls'][string],
+): boolean {
+  const modelInvocation = call.modelInvocationId
+    ? state.modelInvocations[call.modelInvocationId]
+    : undefined;
+  return modelInvocation?.purpose !== 'subagent';
+}
+
 function runnableToolIds(state: AgentState): string[] {
   return [...state.tools.queue, ...state.tools.active].filter((toolCallId, index, values) => {
     if (values.indexOf(toolCallId) !== index) return false;
@@ -178,7 +193,8 @@ function runnableToolIds(state: AgentState): string[] {
     return (
       call != null &&
       (call.status === 'queued' || call.status === 'approved') &&
-      toolBelongsToCurrentWork(state, call)
+      toolBelongsToCurrentWork(state, call) &&
+      parentSchedulerOwnsToolCall(state, call)
     );
   });
 }

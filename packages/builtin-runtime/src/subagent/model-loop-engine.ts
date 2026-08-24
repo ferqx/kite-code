@@ -11,7 +11,6 @@ import type {
 } from '../model/invocation-gateway';
 import type { AIMessage, BaseMessage, ToolCall, ToolMessage } from '../model/messages';
 import { isSystemMessage } from '../model/messages';
-import type { ProviderDataAdmissionGate } from '../model/provider-data-admission';
 import type {
   BuiltinSubagentModelStepProvenance,
   BuiltinSubagentModelStepResult,
@@ -93,7 +92,6 @@ export interface BuiltinSubagentModelLoopInput<
     | BuiltinSubagentModelStepProvenance
     | BuiltinSubagentModelLoopProvenanceFactory;
   readonly resource?: BuiltinSubagentModelLoopResourceContext;
-  readonly providerDataAdmission: ProviderDataAdmissionGate;
   readonly consumer?: BuiltinSubagentModelLoopConsumerPort<TTerminal>;
   readonly signal?: AbortSignal;
 }
@@ -113,13 +111,35 @@ export type BuiltinSubagentModelLoopResult<TTerminal> =
   | BuiltinSubagentModelLoopCompleted
   | Readonly<{ kind: 'terminal'; value: TTerminal }>;
 
-export class BuiltinSubagentModelLoopError extends Error {
-  readonly code: 'aborted' | 'invalid_input' | 'consumer_protocol';
+export type BuiltinSubagentModelLoopFailureStage =
+  | 'initialization'
+  | 'next_round_preparation'
+  | 'model_step'
+  | 'model_response_validation'
+  | 'tool_consumption'
+  | 'transcript_validation';
 
-  constructor(code: BuiltinSubagentModelLoopError['code'], message: string) {
+export class BuiltinSubagentModelLoopError extends Error {
+  readonly code:
+    | 'aborted'
+    | 'invalid_input'
+    | 'consumer_protocol'
+    | 'model_step_failed'
+    | 'internal_error';
+  readonly stage: BuiltinSubagentModelLoopFailureStage;
+  readonly modelInvocationId?: string;
+
+  constructor(
+    code: BuiltinSubagentModelLoopError['code'],
+    message: string,
+    stage: BuiltinSubagentModelLoopFailureStage = 'initialization',
+    modelInvocationId?: string,
+  ) {
     super(message);
     this.name = 'BuiltinSubagentModelLoopError';
     this.code = code;
+    this.stage = stage;
+    this.modelInvocationId = modelInvocationId;
   }
 }
 
@@ -163,145 +183,187 @@ async function runLoop<
 ): Promise<BuiltinSubagentModelLoopResult<TTerminal>> {
   const messages = input.initialMessages.map(cloneAndFreezeMessage);
   let modelInvocationOrdinal = input.startModelInvocationOrdinal;
+  let failureStage: BuiltinSubagentModelLoopFailureStage = 'next_round_preparation';
 
-  while (true) {
-    throwIfAborted(input.signal);
-    const transcript = freezeTranscript(messages);
-    const estimatedInputTokens = estimateInputTokens(transcript, input.tools);
-    const nextOrdinal = modelInvocationOrdinal + 1;
-    const provenance = await resolveProvenance(input.provenance, {
-      modelInvocationOrdinal: nextOrdinal,
-      transcript,
-    });
-    const maxOutputTokens = await resolveMaxOutputTokens(input.resource, {
-      modelInvocationOrdinal: nextOrdinal,
-      transcript,
-      estimatedInputTokens,
-    });
-    throwIfAborted(input.signal);
-
-    const modelStep = await input.coordinator.executeSubagentModelStep({
-      config: input.config,
-      model: input.model,
-      tools: input.tools,
-      messages: transcript,
-      ...(input.persistence ? { persistence: input.persistence } : {}),
-      provenance,
-      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
-      estimatedInputTokens,
-      providerDataAdmission: input.providerDataAdmission,
-      ...(input.resource?.parentReservationId
-        ? { parentReservationId: input.resource.parentReservationId }
-        : {}),
-      signal: input.signal,
-    });
-
-    // A response may have been produced and committed before cancellation was
-    // observed. Never pass that response to a consumer in the cancelled path.
-    throwIfAborted(input.signal);
-    modelInvocationOrdinal = nextOrdinal;
-    const response = cloneAndFreezeMessage(modelStep.message);
-    messages.push(response);
-
-    if (!response.tool_calls || response.tool_calls.length === 0) {
-      return Object.freeze({
-        kind: 'completed',
-        invocationId: modelStep.invocationId,
-        message: response,
-        summary: extractText(response.content),
-        cacheMetrics: modelStep.cacheMetrics,
-        modelInvocationOrdinal,
-        messages: freezeTranscript(messages),
+  try {
+    while (true) {
+      failureStage = 'next_round_preparation';
+      throwIfAborted(input.signal);
+      const transcript = freezeTranscript(messages);
+      const estimatedInputTokens = estimateInputTokens(transcript, input.tools);
+      const nextOrdinal = modelInvocationOrdinal + 1;
+      const provenance = await resolveProvenance(input.provenance, {
+        modelInvocationOrdinal: nextOrdinal,
+        transcript,
       });
-    }
-
-    if (!input.consumer) {
-      throw new BuiltinSubagentModelLoopError(
-        'consumer_protocol',
-        'Builtin subagent model loop requires a consumer for tool calls.',
-      );
-    }
-
-    const responseToolCalls = response.tool_calls;
-    const appendedToolCallIds = new Set<string>();
-    let appendOpen = true;
-    const append = (toolMessages: readonly ToolMessage[]): void => {
-      if (!appendOpen || input.signal?.aborted) {
-        throw new BuiltinSubagentModelLoopError(
-          'consumer_protocol',
-          'Subagent tool transcript append is no longer available.',
-        );
-      }
-      if (!Array.isArray(toolMessages)) {
-        throw new BuiltinSubagentModelLoopError(
-          'consumer_protocol',
-          'Subagent consumer append requires ToolMessage values.',
-        );
-      }
-      const expectedIds = new Set(
-        responseToolCalls
-          .map((call) => call.id)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
-      );
-      const clones = toolMessages.map((toolMessage) => {
-        if (!isToolMessageValue(toolMessage)) {
-          throw new BuiltinSubagentModelLoopError(
-            'consumer_protocol',
-            'Subagent consumer append accepts only ToolMessage values.',
-          );
-        }
-        if (!toolMessage.tool_call_id) {
-          throw new BuiltinSubagentModelLoopError(
-            'consumer_protocol',
-            'Subagent ToolMessage requires a tool_call_id.',
-          );
-        }
-        if (expectedIds.size > 0 && !expectedIds.has(toolMessage.tool_call_id)) {
-          throw new BuiltinSubagentModelLoopError(
-            'consumer_protocol',
-            'Subagent ToolMessage does not match the current model tool call.',
-          );
-        }
-        if (appendedToolCallIds.has(toolMessage.tool_call_id)) {
-          throw new BuiltinSubagentModelLoopError(
-            'consumer_protocol',
-            'Subagent ToolMessage duplicates the current model tool call.',
-          );
-        }
-        appendedToolCallIds.add(toolMessage.tool_call_id);
-        return cloneAndFreezeMessage(toolMessage);
+      const maxOutputTokens = await resolveMaxOutputTokens(input.resource, {
+        modelInvocationOrdinal: nextOrdinal,
+        transcript,
+        estimatedInputTokens,
       });
-      messages.push(...clones);
-    };
+      throwIfAborted(input.signal);
 
-    let decision: BuiltinSubagentModelLoopConsumerDecision<TTerminal>;
-    try {
-      decision = await awaitWithAbort(
-        input.consumer.consume({
-          transcript: freezeTranscript(messages),
-          response,
+      failureStage = 'model_step';
+      const modelStep = await input.coordinator.executeSubagentModelStep({
+        config: input.config,
+        model: input.model,
+        tools: input.tools,
+        messages: transcript,
+        ...(input.persistence ? { persistence: input.persistence } : {}),
+        provenance,
+        ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+        estimatedInputTokens,
+        ...(input.resource?.parentReservationId
+          ? { parentReservationId: input.resource.parentReservationId }
+          : {}),
+        signal: input.signal,
+      });
+
+      // A response may have been produced and committed before cancellation was
+      // observed. Never pass that response to a consumer in the cancelled path.
+      failureStage = 'model_response_validation';
+      throwIfAborted(input.signal);
+      modelInvocationOrdinal = nextOrdinal;
+      const response = cloneAndFreezeMessage(modelStep.message);
+      messages.push(response);
+
+      if (!response.tool_calls || response.tool_calls.length === 0) {
+        return Object.freeze({
+          kind: 'completed',
           invocationId: modelStep.invocationId,
-          modelInvocationOrdinal,
+          message: response,
+          summary: extractText(response.content),
           cacheMetrics: modelStep.cacheMetrics,
-          append,
-        }),
-        input.signal,
-      );
-    } finally {
-      appendOpen = false;
-    }
-    throwIfAborted(input.signal);
+          modelInvocationOrdinal,
+          messages: freezeTranscript(messages),
+        });
+      }
 
-    if (!decision || (decision.kind !== 'continue' && decision.kind !== 'terminal')) {
-      throw new BuiltinSubagentModelLoopError(
-        'consumer_protocol',
-        'Subagent consumer returned an invalid decision.',
-      );
-    }
-    if (decision.kind === 'terminal') return decision as BuiltinSubagentModelLoopResult<TTerminal>;
+      if (!input.consumer) {
+        throw new BuiltinSubagentModelLoopError(
+          'consumer_protocol',
+          'Builtin subagent model loop requires a consumer for tool calls.',
+        );
+      }
 
-    assertToolTranscriptComplete(responseToolCalls, appendedToolCallIds);
+      const responseToolCalls = response.tool_calls;
+      const appendedToolCallIds = new Set<string>();
+      let appendOpen = true;
+      const append = (toolMessages: readonly ToolMessage[]): void => {
+        if (!appendOpen || input.signal?.aborted) {
+          throw new BuiltinSubagentModelLoopError(
+            'consumer_protocol',
+            'Subagent tool transcript append is no longer available.',
+          );
+        }
+        if (!Array.isArray(toolMessages)) {
+          throw new BuiltinSubagentModelLoopError(
+            'consumer_protocol',
+            'Subagent consumer append requires ToolMessage values.',
+          );
+        }
+        const expectedIds = new Set(
+          responseToolCalls
+            .map((call) => call.id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        );
+        const clones = toolMessages.map((toolMessage) => {
+          if (!isToolMessageValue(toolMessage)) {
+            throw new BuiltinSubagentModelLoopError(
+              'consumer_protocol',
+              'Subagent consumer append accepts only ToolMessage values.',
+            );
+          }
+          if (!toolMessage.tool_call_id) {
+            throw new BuiltinSubagentModelLoopError(
+              'consumer_protocol',
+              'Subagent ToolMessage requires a tool_call_id.',
+            );
+          }
+          if (expectedIds.size > 0 && !expectedIds.has(toolMessage.tool_call_id)) {
+            throw new BuiltinSubagentModelLoopError(
+              'consumer_protocol',
+              'Subagent ToolMessage does not match the current model tool call.',
+            );
+          }
+          if (appendedToolCallIds.has(toolMessage.tool_call_id)) {
+            throw new BuiltinSubagentModelLoopError(
+              'consumer_protocol',
+              'Subagent ToolMessage duplicates the current model tool call.',
+            );
+          }
+          appendedToolCallIds.add(toolMessage.tool_call_id);
+          return cloneAndFreezeMessage(toolMessage);
+        });
+        messages.push(...clones);
+      };
+
+      failureStage = 'tool_consumption';
+      let decision: BuiltinSubagentModelLoopConsumerDecision<TTerminal>;
+      try {
+        decision = await awaitWithAbort(
+          input.consumer.consume({
+            transcript: freezeTranscript(messages),
+            response,
+            invocationId: modelStep.invocationId,
+            modelInvocationOrdinal,
+            cacheMetrics: modelStep.cacheMetrics,
+            append,
+          }),
+          input.signal,
+        );
+      } finally {
+        appendOpen = false;
+      }
+      throwIfAborted(input.signal);
+
+      if (!decision || (decision.kind !== 'continue' && decision.kind !== 'terminal')) {
+        throw new BuiltinSubagentModelLoopError(
+          'consumer_protocol',
+          'Subagent consumer returned an invalid decision.',
+        );
+      }
+      if (decision.kind === 'terminal')
+        return decision as BuiltinSubagentModelLoopResult<TTerminal>;
+
+      failureStage = 'transcript_validation';
+      assertToolTranscriptComplete(responseToolCalls, appendedToolCallIds);
+    }
+  } catch (error) {
+    throw modelLoopFailureAtStage(error, failureStage);
   }
+}
+
+function modelLoopFailureAtStage(
+  error: unknown,
+  stage: BuiltinSubagentModelLoopFailureStage,
+): BuiltinSubagentModelLoopError {
+  if (error instanceof BuiltinSubagentModelLoopError) {
+    return error.stage === stage
+      ? error
+      : new BuiltinSubagentModelLoopError(
+          error.code,
+          error.message,
+          stage,
+          error.modelInvocationId,
+        );
+  }
+  const modelInvocationId =
+    error &&
+    typeof error === 'object' &&
+    'invocationId' in error &&
+    typeof error.invocationId === 'string' &&
+    error.invocationId.length > 0
+      ? error.invocationId
+      : undefined;
+  return new BuiltinSubagentModelLoopError(
+    stage === 'model_step' ? 'model_step_failed' : 'internal_error',
+    stage === 'model_step'
+      ? 'Subagent model step failed.'
+      : 'Subagent model loop failed internally.',
+    stage,
+    modelInvocationId,
+  );
 }
 
 function validateLoopInput<

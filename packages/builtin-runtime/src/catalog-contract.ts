@@ -512,7 +512,7 @@ export function taskRuntimeParser(revision: string): CapabilityParser {
   return createBuiltinZodParser({
     schema: BUILTIN_TASK_RUNTIME_SCHEMA_,
     parserRevision: revision,
-    knownFields: ['subagent_type', 'task', 'taskArtifact'],
+    knownFields: ['name', 'subagent_type', 'task', 'taskArtifact'],
     schemaDigest: digestCapabilityBindingValue(BUILTIN_JSON_SCHEMAS_['builtin:task']),
   });
 }
@@ -521,7 +521,7 @@ export function taskModelParser(revision: string): CapabilityParser {
   return createBuiltinZodParser({
     parserRevision: revision,
     schemaForContext: taskModelSchema,
-    knownFields: ['subagent_type', 'task'],
+    knownFields: ['name', 'subagent_type', 'task'],
     schemaDigest: digestCapabilityBindingValue(z.toJSONSchema(BUILTIN_TASK_PUBLIC_SCHEMA_)),
   });
 }
@@ -1163,18 +1163,6 @@ export function isReadOnlyShellCommand(command: string): boolean {
   return splitReadOnlySegments(trimmed).every(isReadOnlySegment);
 }
 
-const BROKERED_GIT_EXECUTABLE_TOKEN_ =
-  /(?:^|[\s"'`;&|()=,])(?:(?:[a-z]:)?[\\/][^\s"'`;&|()=,]*[\\/])?git(?:\.exe)?(?=$|[\s"'`;&|()=,])/iu;
-
-/**
- * Conservative Builtin-owned Git token detector. It matches executable
- * tokens in nested/indirect command text and fails closed before a process
- * can start; dotted path substrings such as `.git/config` do not match.
- */
-export function hasBrokeredGitExecutableToken(command: string): boolean {
-  return BROKERED_GIT_EXECUTABLE_TOKEN_.test(command);
-}
-
 function hasUnquotedBraceExpansion(command: string): boolean {
   let quote: "'" | '"' | null = null;
   let escaped = false;
@@ -1251,7 +1239,7 @@ function isReadOnlySegment(segment: string): boolean {
   if (LOCAL_RUNTIME_VERSION_COMMANDS_.has(portableCommand)) {
     return tokens.length === 2 && ['--version', '-v'].includes(stripShellQuotes(tokens[1] ?? ''));
   }
-  if (portableCommand === 'git') return false;
+  if (portableCommand === 'git') return isReadOnlyGit(tokens);
   if (portableCommand === 'file') return isReadOnlyFile(tokens);
   if (portableCommand === 'rg') return isReadOnlyRipgrep(tokens);
   if (portableCommand === 'sed') return isReadOnlySed(tokens);
@@ -1260,6 +1248,93 @@ function isReadOnlySegment(segment: string): boolean {
   if (portableCommand === 'uniq') return isReadOnlyUniq(tokens);
   if (portableCommand === 'awk' || portableCommand === 'xargs') return false;
   return READ_ONLY_SHELL_COMMANDS_.has(portableCommand);
+}
+
+const GIT_STATUS_FLAG_ = new Set([
+  '--ahead-behind',
+  '--branch',
+  '--find-renames',
+  '--ignored',
+  '--no-ahead-behind',
+  '--no-column',
+  '--no-renames',
+  '--porcelain',
+  '--renames',
+  '--short',
+  '--show-stash',
+  '--untracked-files',
+  '-b',
+  '-s',
+  '-z',
+]);
+const GIT_STATUS_VALUE_FLAG_ = new Set([
+  '--column',
+  '--find-renames',
+  '--ignored',
+  '--untracked-files',
+]);
+const GIT_LOG_FLAG_ = new Set([
+  '--all',
+  '--author-date-order',
+  '--date-order',
+  '--decorate',
+  '--first-parent',
+  '--merges',
+  '--no-decorate',
+  '--no-merges',
+  '--oneline',
+  '--reverse',
+  '--topo-order',
+]);
+const GIT_LOG_VALUE_FLAG_ = new Set(['--after', '--before', '--max-count', '--since', '--until']);
+
+/** Closed direct-command grammar for Workspace-only Git metadata inspection. */
+function isReadOnlyGit(tokens: string[]): boolean {
+  const subcommand = stripShellQuotes(tokens[1] ?? '').toLowerCase();
+  if (subcommand === 'status') return isReadOnlyGitStatus(tokens.slice(2));
+  if (subcommand === 'log') return isReadOnlyGitLog(tokens.slice(2));
+  return false;
+}
+
+function isReadOnlyGitStatus(arguments_: string[]): boolean {
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = stripShellQuotes(arguments_[index] ?? '');
+    if (argument === '--') return true;
+    if (!argument.startsWith('-') || argument === '-') continue;
+    if (GIT_STATUS_FLAG_.has(argument) || /^-u(?:no|normal|all)$/u.test(argument)) continue;
+    const name = argument.split('=', 1)[0]!;
+    if (!GIT_STATUS_VALUE_FLAG_.has(name)) return false;
+    if (!argument.includes('=')) {
+      const value = stripShellQuotes(arguments_[index + 1] ?? '');
+      if (!value || value.startsWith('-')) return false;
+      index += 1;
+    }
+  }
+  return true;
+}
+
+function isReadOnlyGitLog(arguments_: string[]): boolean {
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = stripShellQuotes(arguments_[index] ?? '');
+    if (argument === '--') return true;
+    if (!argument.startsWith('-') || argument === '-') continue;
+    if (GIT_LOG_FLAG_.has(argument) || /^-\d+$/u.test(argument) || /^-n\d+$/u.test(argument)) {
+      continue;
+    }
+    if (argument === '-n') {
+      if (!/^\d+$/u.test(stripShellQuotes(arguments_[index + 1] ?? ''))) return false;
+      index += 1;
+      continue;
+    }
+    const name = argument.split('=', 1)[0]!;
+    if (!GIT_LOG_VALUE_FLAG_.has(name)) return false;
+    if (!argument.includes('=')) {
+      const value = stripShellQuotes(arguments_[index + 1] ?? '');
+      if (!value || value.startsWith('-')) return false;
+      index += 1;
+    }
+  }
+  return true;
 }
 
 function stripShellQuotes(value: string): string {

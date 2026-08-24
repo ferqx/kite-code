@@ -197,10 +197,10 @@ describe('verification policy and scheduler', () => {
         spec(
           [
             {
-              checkId: 'review',
-              type: 'reviewer',
-              description: 'review evidence',
-              instructions: 'verify it',
+              checkId: 'receipt',
+              type: 'receipt',
+              description: 'check receipt evidence',
+              invocationId: 'invocation',
             },
           ],
           0,
@@ -262,7 +262,7 @@ describe('verification policy and scheduler', () => {
 });
 
 describe('VerificationSpec execution and recovery', () => {
-  test('runs deterministic file and schema checks before reviewer evidence', async () => {
+  test('runs deterministic file and schema checks in declaration order', async () => {
     let state = activeState();
     writeFileSync(join(state.session.workspace, 'result.json'), '{"ok":true}');
     state = reduceRuntimeState(
@@ -305,7 +305,7 @@ describe('VerificationSpec execution and recovery', () => {
     );
   });
 
-  test('reviewer receives original receipts, artifacts, and skill output', async () => {
+  test('passes a committed capability receipt without a model review', async () => {
     let state = activeState();
     const artifactResult = {
       status: 'success' as const,
@@ -351,45 +351,24 @@ describe('VerificationSpec execution and recovery', () => {
         'required',
         spec([
           {
-            checkId: 'review',
-            type: 'reviewer',
-            description: 'review raw evidence',
-            invocationIds: ['invocation'],
-            activationIds: ['activation'],
-            instructions: 'verify evidence',
+            checkId: 'receipt',
+            type: 'receipt',
+            description: 'check committed receipt',
+            invocationId: 'invocation',
           },
         ]),
       ),
     );
-    let received: unknown;
     const events = await executeVerificationEffect(
       { type: 'run_verification', verificationId: 'verification-1' },
       state,
-      {
-        artifactStore: {
-          read: () => artifactResult,
-          readEnvelope: () => ({
-            artifactFormatVersion: 2,
-            invocationId: 'invocation',
-            result: artifactResult,
-          }),
-        },
-        reviewer: async (input) => {
-          received = input;
-          return { outcome: 'passed', summary: 'evidence confirms success' };
-        },
-      },
+      {},
     );
-    expect(received).toMatchObject({
-      receipts: [{ invocationId: 'invocation', argumentsDigest: 'args' }],
-      artifacts: [{ invocationId: 'invocation', result: { status: 'success' } }],
-      skillOutputs: [{ activationId: 'activation', output: { ok: true } }],
-    });
     state = reduceAll(state, events);
     expect(state.verification.records['verification-1']?.status).toBe('passed');
   });
 
-  test('reviewer fails closed before model dispatch when receipt Artifact access is unavailable', async () => {
+  test('receipt verification does not require reading the result Artifact body', async () => {
     let state = activeState();
     const artifactResult = { status: 'success' as const, content: [] };
     state.capabilities.invocations.invocation = {
@@ -417,40 +396,32 @@ describe('VerificationSpec execution and recovery', () => {
         'required',
         spec([
           {
-            checkId: 'review',
-            type: 'reviewer',
-            description: 'review raw evidence',
-            invocationIds: ['invocation'],
-            instructions: 'verify evidence',
+            checkId: 'receipt',
+            type: 'receipt',
+            description: 'check committed receipt',
+            invocationId: 'invocation',
           },
         ]),
       ),
     );
-    let reviewerCalls = 0;
     const events = await executeVerificationEffect(
       { type: 'run_verification', verificationId: 'verification-1' },
       state,
-      {
-        reviewer: async () => {
-          reviewerCalls += 1;
-          return { outcome: 'passed', summary: 'must not be trusted' };
-        },
-      },
+      {},
     );
 
-    expect(reviewerCalls).toBe(0);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'verification.check_completed',
         result: expect.objectContaining({
-          outcome: 'inconclusive',
-          summary: 'The capability Artifact reader is unavailable.',
+          outcome: 'passed',
+          summary: 'The capability invocation has a committed success receipt.',
         }),
       }),
     );
   });
 
-  test('reviewer fails closed before model dispatch when Artifact owner binding is mismatched', async () => {
+  test('receipt verification depends on the committed receipt, not Artifact owner metadata', async () => {
     let state = activeState();
     const artifactResult = { status: 'success' as const, content: [] };
     state.capabilities.invocations.invocation = {
@@ -478,42 +449,26 @@ describe('VerificationSpec execution and recovery', () => {
         'required',
         spec([
           {
-            checkId: 'review',
-            type: 'reviewer',
-            description: 'review raw evidence',
-            invocationIds: ['invocation'],
-            instructions: 'verify evidence',
+            checkId: 'receipt',
+            type: 'receipt',
+            description: 'check committed receipt',
+            invocationId: 'invocation',
           },
         ]),
       ),
     );
-    let reviewerCalls = 0;
     const events = await executeVerificationEffect(
       { type: 'run_verification', verificationId: 'verification-1' },
       state,
-      {
-        artifactStore: {
-          read: () => artifactResult,
-          readEnvelope: () => ({
-            artifactFormatVersion: 2,
-            invocationId: 'different-invocation',
-            result: artifactResult,
-          }),
-        },
-        reviewer: async () => {
-          reviewerCalls += 1;
-          return { outcome: 'passed', summary: 'must not run' };
-        },
-      },
+      {},
     );
 
-    expect(reviewerCalls).toBe(0);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'verification.check_completed',
         result: expect.objectContaining({
-          outcome: 'inconclusive',
-          summary: 'A capability receipt Artifact could not be verified.',
+          outcome: 'passed',
+          summary: 'The capability invocation has a committed success receipt.',
         }),
       }),
     );

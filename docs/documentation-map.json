@@ -2,9 +2,30 @@
   "version": 1,
   "rules": [
     {
+      "id": "sqlite-runtime-log-query",
+      "sources": [
+        "packages/runtime-contract/src/logs.ts",
+        "packages/runtime-host/src/storage/index.ts",
+        "packages/runtime-storage-sqlite/src/log-query.ts",
+        "apps/kite/src/logs/runtime-log-presentation.ts",
+        "packages/runtime-storage-sqlite/test/log-query.test.ts",
+        "apps/kite/test/runtime-log-presentation.test.ts"
+      ],
+      "documents": [
+        "docs/active/sqlite-runtime-log-query.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/pre-release-architecture.md",
+        "docs/adr/0129-sqlite-runtime-log-query-boundary.md",
+        "docs/space/plans/2026-08-23-sqlite-session-log-server-web.md",
+        "docs/space/plans/index.md"
+      ]
+    },
+    {
       "id": "pre-release-architecture",
       "sources": [
         "scripts/check-pre-release-architecture.ts",
+        "scripts/check-runtime-packages.ts",
+        "scripts/check-core-boundary.ts",
         "apps/kite/src/runtime/**",
         "apps/kite/src/adapters/**",
         "packages/**/src/**"
@@ -12,7 +33,8 @@
       "documents": [
         "docs/active/pre-release-architecture.md",
         "docs/active/layer-boundary-enforcement.md",
-        "docs/active/six-concept-runtime-architecture.md"
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/adr/0130-source-based-architecture-gates.md"
       ]
     },
     {
@@ -452,6 +474,8 @@
         "docs/adr/0111-governed-local-provider-seams.md",
         "docs/adr/0113-descriptor-relative-workspace-mutation-publication.md",
         "docs/adr/0118-trusted-workspace-unrestricted-file-access.md",
+        "docs/adr/0132-sensitive-external-paths-use-exact-approval.md",
+        "docs/adr/0133-mode-aware-sensitive-external-authorization.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
         "docs/space/index.md"
@@ -649,6 +673,7 @@
         ".github/workflows/platform-capability-probe.yml",
         "packages/builtin-runtime/src/tool-catalog.ts",
         "packages/builtin-runtime/src/catalog-contract.ts",
+        "packages/builtin-runtime/src/policy-compiler.ts",
         "packages/agent-kernel/src/tool-governance.ts",
         "packages/runtime-spi/src/tool-pipeline.ts",
         "packages/runtime-host/src/execution/tool-pipeline-coordinator.ts",
@@ -688,7 +713,13 @@
         "docs/adr/0097-brokered-git-capability.md",
         "docs/adr/0049-effect-aware-read-scheduling.md",
         "docs/adr/0118-trusted-workspace-unrestricted-file-access.md",
-        "docs/adr/0119-acknowledged-host-shell-availability-fallback.md"
+        "docs/adr/0119-acknowledged-host-shell-availability-fallback.md",
+        "docs/adr/0131-whole-workspace-sandbox-admission.md",
+        "docs/adr/0132-sensitive-external-paths-use-exact-approval.md",
+        "docs/adr/0133-mode-aware-sensitive-external-authorization.md",
+        "docs/adr/0134-closed-read-only-git-shell-grammar.md",
+        "docs/adr/0135-mode-aware-workspace-authorization-boundary.md",
+        "docs/adr/0136-mode-governed-shell-without-command-allowlists.md"
       ]
     },
     {
@@ -836,19 +867,6 @@
         "docs/adr/0045-streaming-render-complete-block-commit.md",
         "docs/adr/0090-manual-compaction-convergence-and-viability.md",
         "docs/adr/0091-runtime-store-compaction-ownership.md"
-      ]
-    },
-    {
-      "id": "provider-data-policy",
-      "sources": [
-        "apps/kite/src/config/provider-data-admission.ts",
-        "packages/builtin-runtime/src/model/provider-data-admission.ts",
-        "packages/builtin-runtime/src/model/invocation-gateway.ts"
-      ],
-      "documents": [
-        "docs/active/model-provider-boundary.md",
-        "docs/active/feature-flags.md",
-        "docs/book/09-CLI模式与配置.md"
       ]
     },
     {
@@ -1010,8 +1028,6 @@
       "sources": [
         "packages/runtime-spi/src/model-surface.ts",
         "packages/builtin-runtime/src/model/surface-canonicalizer.ts",
-        "apps/kite/src/config/provider-data-admission.ts",
-        "packages/builtin-runtime/src/model/provider-data-admission.ts",
         "tests/model-surface.test.ts"
       ],
       "documents": [
@@ -1215,21 +1231,6 @@
       ]
     },
     {
-      "id": "runtime-modularization-manifests",
-      "sources": [
-        "biome.json",
-        "scripts/check-runtime-modularization-manifests.ts",
-        "scripts/generate-runtime-modularization-manifests.ts",
-        "scripts/runtime-modularization/**",
-        "tests/reliability-harness/runtime-modularization/**",
-        "tests/scripts/runtime-modularization-manifests.test.ts"
-      ],
-      "documents": [
-        "docs/active/layer-boundary-enforcement.md",
-        "docs/space/plans/2026-08-19-kite-runtime-modularization-v1-implementation.md"
-      ]
-    },
-    {
       "id": "runtime-workspace-package-boundaries",
       "sources": [
         "package.json",
@@ -1243,6 +1244,7 @@
         "scripts/run-default-tests.ts",
         "tests/scripts/check-runtime-packages.test.ts"
       ],
+      "excludeSources": ["apps/kite/src/tui/**"],
       "documents": [
         "docs/active/layer-boundary-enforcement.md",
         "docs/active/six-concept-runtime-architecture.md",

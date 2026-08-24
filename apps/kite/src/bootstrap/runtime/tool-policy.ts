@@ -19,10 +19,7 @@ export function buildToolApproval(input: {
   workspace: string;
   threadId: string;
   request: PendingToolRequest;
-  decision: Pick<
-    StateToolGovernancePolicyFact,
-    'risk' | 'userVisibleSummary' | 'reason' | 'expectedEffects'
-  >;
+  decision: Pick<StateToolGovernancePolicyFact, 'risk' | 'reason' | 'expectedEffects'>;
   /** Kernel-computed exact invocation/policy binding for this approval. */
   approvalBindingDigest: string;
   capability?: {
@@ -44,7 +41,7 @@ export function buildToolApproval(input: {
     command: approvalCommand(input.request),
     risk: input.decision.risk,
     approvalHash: input.approvalBindingDigest,
-    summary: input.decision.userVisibleSummary,
+    summary: approvalSummary(input.request, input.decision.risk),
     reason: input.decision.reason,
     expectedEffects: input.decision.expectedEffects,
     grantOptions,
@@ -105,6 +102,29 @@ export function applyApprovalGrant(input: {
 
 function approvalCommand(request: PendingToolRequest): string {
   return request.name === 'shell_execute' ? request.args.command : request.protectedCommand;
+}
+
+/** Presentation-only label. Exact commands remain in ToolApprovalPayload.command. */
+function approvalSummary(
+  request: PendingToolRequest,
+  risk: StateToolGovernancePolicyFact['risk'],
+): string {
+  if (request.name !== 'shell_execute') {
+    const prefix = 'Approve ';
+    return `${prefix}${request.name.slice(0, 256 - prefix.length)}`;
+  }
+  switch (risk) {
+    case 'vcs_mutation':
+      return 'Approve a version-control mutation command';
+    case 'write_file':
+      return 'Approve a workspace-mutating shell command';
+    case 'network':
+      return 'Approve a network-capable shell command';
+    case 'destructive':
+      return 'Approve a destructive shell command';
+    default:
+      return 'Approve a shell command';
+  }
 }
 
 export function defaultPhaseForWorkspaceAccess(_workspaceAccess: WorkspaceAccess): AgentPhase {

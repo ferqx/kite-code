@@ -40,6 +40,7 @@ import {
 } from '#app/bootstrap/runtime/subagent/continuation-codec';
 import type { AgentConfig } from '#app/config/index';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { deferResumedSubagentApprovalBehindQueuedSibling } from '../../apps/kite/src/bootstrap/runtime/runtime-tool-effect';
 import { createPipelineSubagentRuntime } from '../../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
 import { normalizeTerminalRuntimeEvent } from '../../apps/kite/src/bootstrap/runtime/terminal-outcome';
 import { createAppToolPipelineComposition } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-composition';
@@ -47,6 +48,7 @@ import {
   blockedSubagentReviewEvent,
   buildBlockedToolRequest,
   createKernelApprovalBindingForBlockedSubagent,
+  effectiveSubagentInteractionMode,
   serializeConcurrentSubagentApprovalEvents,
 } from '../../apps/kite/src/runtime/tool-execution/subagent-executor';
 import { toRuntimeSubagentEvent } from '../../apps/kite/src/runtime/tool-execution/terminal-projection';
@@ -110,7 +112,11 @@ function privateSuspensionFaultState(status: 'approved' | 'queued' = 'approved')
     modelInvocationId: 'model-parent-private',
     modelMessageId: 'model-message-private',
     name: 'task',
-    args: { subagent_type: 'review', task: 'Review a private continuation failure.' },
+    args: {
+      name: 'Review continuation failure',
+      subagent_type: 'review',
+      task: 'Review a private continuation failure.',
+    },
     status,
     sideEffect: false,
     createdAtTurnId: state.turn.turnId,
@@ -306,6 +312,7 @@ async function createExactTaskResumeJourney(input: {
   const taskArtifact = taskRequests.write({
     parentModelInvocationId,
     parentToolCallId: 'task',
+    name: `Handle ${input.role} delegation`,
     role: input.role,
     task: input.task,
   });
@@ -314,7 +321,7 @@ async function createExactTaskResumeJourney(input: {
     modelInvocationId: parentModelInvocationId,
     modelMessageId: parentModelInvocationId,
     name: 'task',
-    args: { subagent_type: input.role, taskArtifact },
+    args: { name: `Handle ${input.role} delegation`, subagent_type: input.role, taskArtifact },
     status: 'queued',
     sideEffect: input.role === 'code',
     createdAtTurnId: state.turn.turnId,
@@ -358,7 +365,9 @@ async function createExactTaskResumeJourney(input: {
   });
   const suspended = liveState.suspendedSubagents.task;
   if (!suspended) {
-    throw new Error('Exact task resume fixture did not persist a private suspension.');
+    throw new Error(
+      `Exact task resume fixture did not persist a private suspension: ${JSON.stringify(initialEvents)}`,
+    );
   }
   const storedSnapshot = continuationArtifacts.read(suspended.continuationArtifact, {
     parentInvocationId: suspended.parentInvocationId,
@@ -781,7 +790,11 @@ describe('executeTestRuntimeTools', () => {
         toolCallId: 'task',
         modelMessageId: 'protected-model',
         name: 'task',
-        args: { subagent_type: 'code', task: 'write protected skill config' },
+        args: {
+          name: 'Update protected skill config',
+          subagent_type: 'code',
+          task: 'write protected skill config',
+        },
         status: 'queued',
         sideEffect: false,
         createdAtTurnId: state.turn.turnId,
@@ -1079,6 +1092,117 @@ describe('executeTestRuntimeTools', () => {
     expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
   });
 
+  test('keeps governance facts valid when full-authorized children execute read-only shell tools', async () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'parallel-child-shell-governance',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.mode = 'full';
+    state.authorization.mode = 'full_access';
+    const longReadOnlyCommands = ['agent-kernel', 'builtin-runtime'].map(
+      (workspacePackage) =>
+        `ls ${Array.from(
+          { length: 12 },
+          (_, index) => `packages/${workspacePackage}/src/inspection-target-${index}`,
+        ).join(' ')}`,
+    );
+    expect(longReadOnlyCommands.every((command) => command.length > 256)).toBe(true);
+    for (const [ordinal, toolCallId] of ['review-a', 'review-b'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'parallel-child-shell-model',
+        ordinal,
+        name: 'task',
+        args: {
+          subagent_type: 'review',
+          task: `Inspect independent runtime concern ${ordinal + 1} with a shell listing and report evidence.`,
+        },
+        status: 'queued',
+        effectClass: 'read_only',
+        sideEffect: false,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+    }
+    const model = createMockModel([
+      {
+        message: aiMessage({
+          content: 'Inspecting the first workspace.',
+          tool_calls: [
+            {
+              id: 'child-list-a',
+              name: 'shell_execute',
+              args: {
+                command: longReadOnlyCommands[0],
+              },
+            },
+          ],
+        }),
+      },
+      {
+        message: aiMessage({
+          content: 'Inspecting the second workspace.',
+          tool_calls: [
+            {
+              id: 'child-list-b',
+              name: 'shell_execute',
+              args: {
+                command: longReadOnlyCommands[1],
+              },
+            },
+          ],
+        }),
+      },
+      { message: aiMessage({ content: 'First review complete.' }) },
+      { message: aiMessage({ content: 'Second review complete.' }) },
+    ]);
+
+    const events = await executeTestRuntimeTools({
+      state,
+      toolCallIds: ['review-a', 'review-b'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: model,
+      sandboxAvailable: true,
+      shellExecutor: async ({ command }) => ({
+        ok: true,
+        command,
+        exitCode: 0,
+        stdout: process.cwd(),
+        stderr: '',
+      }),
+    });
+
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        failure: expect.objectContaining({
+          message: 'Projected State 25 governance facts are invalid.',
+        }),
+      }),
+    );
+    expect(events.filter((event) => event.type === 'subagent.completed')).toHaveLength(2);
+    expect(
+      events.filter(
+        (event) => event.type === 'tool.finished' && event.toolCallId.startsWith('subagent-tool:'),
+      ),
+    ).toHaveLength(2);
+    expect(
+      events.filter(
+        (event) =>
+          event.type === 'tool.finished' && ['review-a', 'review-b'].includes(event.toolCallId),
+      ),
+    ).toHaveLength(2);
+  });
+
   test('serializes concurrent child approvals without dropping suspended siblings', () => {
     const approval = {
       type: 'approval.requested' as const,
@@ -1089,17 +1213,157 @@ describe('executeTestRuntimeTools', () => {
     const serialized = serializeConcurrentSubagentApprovalEvents([
       [{ type: 'subagent.suspended', toolCallId: 'task-a', snapshot: {} as never }, approval],
       [
+        {
+          type: 'subagent.completed',
+          subagent: {
+            id: 'child-c',
+            summary: 'Completed while siblings waited for approval.',
+            toolCallCount: 1,
+            durationMs: 10,
+          },
+        },
+        {
+          type: 'tool.finished',
+          toolCallId: 'task-c',
+          name: 'task',
+          result: { ok: true, command: '', exitCode: 0, stdout: 'done', stderr: '' },
+        },
+      ],
+      [
         { type: 'subagent.suspended', toolCallId: 'task-b', snapshot: {} as never },
         { ...approval, interactionId: 'approval-b', toolCallId: 'task-b' },
       ],
     ]);
 
     expect(serialized.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
+    expect(serialized.filter((event) => event.type === 'subagent.completed')).toHaveLength(1);
+    expect(
+      serialized.some((event) => event.type === 'tool.finished' && event.toolCallId === 'task-c'),
+    ).toBe(true);
     expect(serialized.filter((event) => event.type === 'approval.requested')).toHaveLength(1);
     expect(serialized).toContainEqual({
       type: 'subagent.approval_deferred',
       toolCallId: 'task-b',
     });
+  });
+
+  test('uses auto only for concurrent Explore children while preserving parent Auto and Full', () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'concurrent-explore-auto-mode',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.mode = 'accept_edits';
+    for (const [ordinal, toolCallId] of ['explore-a', 'explore-b'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'multi-explore-model',
+        ordinal,
+        name: 'task',
+        args: {
+          name: `Explore ${ordinal + 1}`,
+          subagent_type: 'explore',
+          task: `Explore independent area ${ordinal + 1}.`,
+        },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+    }
+
+    expect(effectiveSubagentInteractionMode(state, 'explore-a')).toBe('auto');
+    for (const role of ['plan', 'code', 'review'] as const) {
+      for (const toolCallId of ['explore-a', 'explore-b']) {
+        state.tools.calls[toolCallId] = {
+          ...state.tools.calls[toolCallId]!,
+          args: {
+            name: `${role} sibling`,
+            subagent_type: role,
+            task: `Run the independent ${role} sibling.`,
+          },
+        };
+      }
+      expect(effectiveSubagentInteractionMode(state, 'explore-a')).toBe('accept_edits');
+    }
+    state.tools.calls['explore-a'] = {
+      ...state.tools.calls['explore-a']!,
+      args: {
+        name: 'Explore one',
+        subagent_type: 'explore',
+        task: 'Explore the first independent area.',
+      },
+    };
+    state.tools.calls['explore-b'] = {
+      ...state.tools.calls['explore-b']!,
+      modelMessageId: 'different-model-response',
+      args: {
+        name: 'Explore two',
+        subagent_type: 'explore',
+        task: 'Explore the second independent area.',
+      },
+    };
+    expect(effectiveSubagentInteractionMode(state, 'explore-a')).toBe('accept_edits');
+    state.mode = 'auto';
+    expect(effectiveSubagentInteractionMode(state, 'explore-a')).toBe('auto');
+    state.mode = 'full';
+    expect(effectiveSubagentInteractionMode(state, 'explore-a')).toBe('full');
+  });
+
+  test.each([
+    'approval.requested',
+    'auto_review.requested',
+  ] as const)('makes a repeatedly blocked child yield %s to an older deferred sibling', (type) => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'fair-deferred-child-approval',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    for (const [toolCallId, status] of [
+      ['current-task', 'running'],
+      ['older-task', 'queued'],
+    ] as const) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'multi-explore-model',
+        name: 'task',
+        args: {
+          name: toolCallId,
+          subagent_type: 'explore',
+          task: `Explore ${toolCallId}.`,
+        },
+        status,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.suspendedSubagents[toolCallId] = {} as never;
+    }
+    state.tools.queue = ['older-task'];
+    const event =
+      type === 'approval.requested'
+        ? ({
+            type,
+            interactionId: 'current-approval',
+            toolCallId: 'current-task',
+            approval: {} as never,
+          } as const)
+        : ({
+            type,
+            reviewId: 'current-review',
+            toolCallId: 'current-task',
+            toolName: 'shell_execute',
+            reason: 'review',
+            approval: {} as never,
+          } as const);
+
+    const deferred = deferResumedSubagentApprovalBehindQueuedSibling(state, 'current-task', event);
+    expect(deferred).toEqual({
+      type: 'subagent.approval_deferred',
+      toolCallId: 'current-task',
+    });
+    const yielded = reduceRuntimeState(state, deferred);
+    expect(yielded.tools.queue).toEqual(['older-task', 'current-task']);
+    expect(yielded.tools.calls['older-task']?.status).toBe('queued');
+    expect(yielded.tools.calls['current-task']?.status).toBe('queued');
   });
 
   test('surfaces a deferred child approval without restarting the child model', async () => {
@@ -1114,7 +1378,11 @@ describe('executeTestRuntimeTools', () => {
       toolCallId: 'task',
       modelMessageId: 'parallel-task-model',
       name: 'task',
-      args: { subagent_type: 'review', task: 'Read the external fixture and report evidence.' },
+      args: {
+        name: 'Review external fixture',
+        subagent_type: 'review',
+        task: 'Read the external fixture and report evidence.',
+      },
       status: 'queued',
       effectClass: 'read_only',
       sideEffect: false,
@@ -1263,13 +1531,18 @@ describe('executeTestRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(false);
   });
 
-  test('production executor queues simultaneous child approvals after concurrent dispatch', async () => {
+  test.each([
+    ['accept_edits', 'explore', 'auto_review.requested', 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'],
+    ['accept_edits', 'review', 'approval.requested', 'SUBAGENT_TOOL_REQUIRES_APPROVAL'],
+    ['auto', 'review', 'auto_review.requested', 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'],
+  ] as const)('production executor in %s mode queues simultaneous %s children', async (interactionMode, role, activeReviewType, blockedReasonCode) => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'parallel-child-approvals',
       userId: 'user',
       workspace: process.cwd(),
     });
+    state.mode = interactionMode;
     for (const [ordinal, toolCallId] of ['task-a', 'task-b'].entries()) {
       state.tools.calls[toolCallId] = {
         toolCallId,
@@ -1277,7 +1550,8 @@ describe('executeTestRuntimeTools', () => {
         ordinal,
         name: 'task',
         args: {
-          subagent_type: 'review',
+          name: `${role} external fixture ${ordinal + 1}`,
+          subagent_type: role,
           task: `Read external fixture ${ordinal + 1} and report the independent evidence.`,
         },
         status: 'queued',
@@ -1336,8 +1610,13 @@ describe('executeTestRuntimeTools', () => {
       'subagent-batch:task-a',
       'subagent-batch:task-a',
     ]);
-    expect(terminal.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
-    expect(terminal.filter((event) => event.type === 'approval.requested')).toHaveLength(1);
+    const suspensions = terminal.filter((event) => event.type === 'subagent.suspended');
+    expect(suspensions).toHaveLength(2);
+    expect(suspensions.map((event) => event.snapshot.blockedTool.reasonCode)).toEqual([
+      blockedReasonCode,
+      blockedReasonCode,
+    ]);
+    expect(terminal.filter((event) => event.type === activeReviewType)).toHaveLength(1);
     expect(terminal.filter((event) => event.type === 'subagent.approval_deferred')).toHaveLength(1);
   });
 
@@ -1355,7 +1634,7 @@ describe('executeTestRuntimeTools', () => {
       toolCallId: 'task',
       modelMessageId: 'model',
       name: 'task',
-      args: { subagent_type: 'code', task: 'Modify the fixture.' },
+      args: { name: 'Modify fixture', subagent_type: 'code', task: 'Modify the fixture.' },
       status: 'awaiting_auto_review',
       createdAtTurnId: state.turn.turnId,
     };
@@ -1400,8 +1679,8 @@ describe('executeTestRuntimeTools', () => {
             reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
             toolCallId: 'child-shell',
             toolName: 'shell_execute',
-            args: { command: 'git add fixture.txt' },
-            command: 'git add fixture.txt',
+            args: { command: 'bun test' },
+            command: 'bun test',
           },
         ),
       );
@@ -1452,8 +1731,8 @@ describe('executeTestRuntimeTools', () => {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' as const,
       toolCallId: 'child-shell',
       toolName: 'shell_execute',
-      command: 'git add fixture.txt',
-      args: { command: 'git add fixture.txt' },
+      command: 'bun test',
+      args: { command: 'bun test' },
       message: 'blocked',
       continuation: {
         id: 'child',
@@ -1506,7 +1785,7 @@ describe('executeTestRuntimeTools', () => {
       modelInvocationId: 'child-model-invocation',
       modelMessageId: 'child-model-message',
       name: 'shell_execute',
-      args: { command: 'git add fixture.txt' },
+      args: { command: 'bun test' },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
@@ -1519,8 +1798,8 @@ describe('executeTestRuntimeTools', () => {
       toolCallId: 'child-shell',
       runtimeToolCallId: runtimeChildToolId,
       toolName: 'shell_execute',
-      command: 'git add fixture.txt',
-      args: { command: 'git add fixture.txt' },
+      command: 'bun test',
+      args: { command: 'bun test' },
       message: 'blocked',
       continuation: {
         id: 'child',
@@ -1889,7 +2168,11 @@ describe('executeTestRuntimeTools', () => {
         toolCallId: 'task',
         modelMessageId: 'parent-model',
         name: 'task',
-        args: { subagent_type: 'code', task: 'Run the approved child operation and finish.' },
+        args: {
+          name: 'Run approved child operation',
+          subagent_type: 'code',
+          task: 'Run the approved child operation and finish.',
+        },
         status: 'approved',
         approvalGrant: 'approve_once',
         createdAtTurnId: state.turn.turnId,
@@ -2001,7 +2284,11 @@ describe('executeTestRuntimeTools', () => {
         toolCallId: 'task',
         modelMessageId: 'parent-model',
         name: 'task',
-        args: { subagent_type: 'code', task: 'Write child.txt and then report the result.' },
+        args: {
+          name: 'Write child file',
+          subagent_type: 'code',
+          task: 'Write child.txt and then report the result.',
+        },
         status: 'queued',
         createdAtTurnId: state.turn.turnId,
       };
@@ -2087,7 +2374,11 @@ describe('executeTestRuntimeTools', () => {
         toolCallId: 'task',
         modelMessageId: 'parent-model',
         name: 'task',
-        args: { subagent_type: 'code', task: 'Write child.txt once and then report the result.' },
+        args: {
+          name: 'Write child file once',
+          subagent_type: 'code',
+          task: 'Write child.txt once and then report the result.',
+        },
         status: 'queued',
         createdAtTurnId: state.turn.turnId,
       };
@@ -2693,7 +2984,7 @@ describe('executeTestRuntimeTools', () => {
       toolCallId: 'task',
       modelMessageId: 'model',
       name: 'task',
-      args: { subagent_type: 'code', task: 'Run pwd.' },
+      args: { name: 'Run child working directory check', subagent_type: 'code', task: 'Run pwd.' },
       status: 'approved',
       approvalGrant: 'approve_once',
       createdAtTurnId: state.turn.turnId,
@@ -4174,11 +4465,11 @@ describe('executeTestRuntimeTools', () => {
     expect(
       toRuntimeSubagentEvent({
         type: 'start',
-        data: { id: 'sub-1', role: 'explore', task: 'find callers' },
+        data: { id: 'sub-1', role: 'explore', name: 'find callers' },
       }),
     ).toEqual({
       type: 'subagent.started',
-      subagent: { id: 'sub-1', role: 'explore', task: 'find callers' },
+      subagent: { id: 'sub-1', role: 'explore', name: 'find callers' },
     });
   });
 
@@ -4771,7 +5062,7 @@ describe('executeTestRuntimeTools', () => {
     }
   });
 
-  test('shell_execute in accept_edits mode still requires approval', async () => {
+  test('shell_execute in accept_edits mode requires approval even for a read-only-looking command', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-shell',
@@ -4807,7 +5098,7 @@ describe('executeTestRuntimeTools', () => {
       modelMessageId: 'model',
       ordinal: 0,
       name: 'shell_execute',
-      args: { command: 'npm test' },
+      args: { command: 'pwd' },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
@@ -4836,7 +5127,7 @@ describe('executeTestRuntimeTools', () => {
       toolCallId: 'followUp',
       modelMessageId: 'model',
       name: 'shell_execute',
-      args: { command: 'node -e "console.log(84)"' },
+      args: { command: 'node --version' },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
@@ -4849,7 +5140,7 @@ describe('executeTestRuntimeTools', () => {
       shellExecutor: {
         execute: async () => ({
           ok: true,
-          command: 'node -e "console.log(84)"',
+          command: 'node --version',
           exitCode: 0,
           stdout: '84\n',
           stderr: '',
@@ -4861,13 +5152,89 @@ describe('executeTestRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
-  test('starts an allowed shell without waiting for sibling preflight', async () => {
+  test('full_access directly runs sensitive external Shell access', async () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'runtime-full-access-sensitive-external',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization.mode = 'full_access';
+    state.tools.calls.sensitive = {
+      toolCallId: 'sensitive',
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command: 'cat ~/.ssh/id_ed25519' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'sensitive'];
+    const scopes: Array<
+      NonNullable<import('@kite/builtin-runtime/sandbox').ShellInput['filesystemMode']>
+    > = [];
+    const run = () =>
+      executeTestRuntimeTools({
+        state,
+        toolCallIds: ['sensitive'],
+        sandboxAvailable: true,
+        shellExecutor: async (input) => {
+          if (!input.filesystemMode) throw new Error('Missing prepared filesystem mode.');
+          scopes.push(input.filesystemMode);
+          return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+        },
+      });
+
+    const executionEvents = await run();
+    expect(executionEvents.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(scopes).toEqual(['allow_all']);
+    expect(executionEvents.some((event) => event.type === 'tool.finished')).toBe(true);
+  });
+
+  test('full_access directly writes a sensitive external file', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-full-sensitive-workspace-'));
+    const external = mkdtempSync(join(tmpdir(), 'kite-full-sensitive-external-'));
+    try {
+      const target = join(external, '.env.local');
+      const state = createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: 'runtime-full-access-sensitive-file',
+        userId: 'user',
+        workspace,
+      });
+      state.authorization.mode = 'full_access';
+      state.tools.calls.sensitiveFile = {
+        toolCallId: 'sensitiveFile',
+        modelMessageId: 'model',
+        name: 'write_file',
+        args: { path: target, content: 'fixture=true\n' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, 'sensitiveFile'];
+
+      const events = await executeTestRuntimeTools({
+        state,
+        toolCallIds: ['sensitiveFile'],
+        sandboxAvailable: true,
+      });
+
+      expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+      expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+      expect(readFileSync(target, 'utf8')).toBe('fixture=true\n');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(external, { recursive: true, force: true });
+    }
+  });
+
+  test('starts a full-authorized shell without waiting for sibling preflight', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-parallel-shell-preflight',
       userId: 'user',
       workspace: process.cwd(),
     });
+    state.authorization.mode = 'full_access';
     for (const [ordinal, toolCallId] of ['first', 'second'].entries()) {
       state.tools.calls[toolCallId] = {
         toolCallId,
@@ -4885,6 +5252,7 @@ describe('executeTestRuntimeTools', () => {
     const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['first'],
+      sandboxAvailable: true,
       shellExecutor: async () => {
         executionCount += 1;
         return { ok: true, command: 'pwd', exitCode: 0, stdout: '', stderr: '' };
@@ -5004,12 +5372,12 @@ describe('executeTestRuntimeTools', () => {
     ]);
   });
 
-  test('ordinary prepared shell dispatch preserves the legacy mode differential corpus', async () => {
+  test('ordinary prepared shell dispatch preserves the mode-governed scope corpus', async () => {
     const corpus = [
       {
         command: 'pwd',
         fullAccess: false,
-        requiresApproval: false,
+        requiresApproval: true,
         expected: { networkMode: 'disabled' as const, filesystemMode: 'workspace_only' as const },
       },
       {
@@ -5021,8 +5389,8 @@ describe('executeTestRuntimeTools', () => {
       {
         command: 'cat /outside/fixture.txt',
         fullAccess: true,
-        requiresApproval: true,
-        expected: { networkMode: 'allow_all' as const, filesystemMode: 'allow_all' as const },
+        requiresApproval: false,
+        expected: { networkMode: 'disabled' as const, filesystemMode: 'allow_all' as const },
       },
     ] as const;
 
@@ -5209,7 +5577,7 @@ describe('executeTestRuntimeTools', () => {
       toolCallId: 'stream',
       modelMessageId: 'model',
       name: 'shell_execute',
-      args: { command: 'high-volume-output' },
+      args: { command: 'touch high-volume-output' },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
@@ -5291,7 +5659,118 @@ describe('executeTestRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.started')).toBe(false);
   });
 
-  test('runs a proven workspace-only shell write directly in accept_edits mode', async () => {
+  test('auto-reviews sensitive external Shell access before execution', async () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'runtime-auto-sensitive-external',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.mode = 'auto';
+    state.tools.calls.sensitive = {
+      toolCallId: 'sensitive',
+      modelMessageId: 'model',
+      ordinal: 0,
+      name: 'shell_execute',
+      args: { command: 'cat ~/.ssh/id_ed25519' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'sensitive'];
+    let shellExecutions = 0;
+
+    const events = await executeTestRuntimeTools({
+      state,
+      toolCallIds: ['sensitive'],
+      sandboxAvailable: true,
+      shellExecutor: async (input) => {
+        shellExecutions += 1;
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(true);
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.started')).toBe(false);
+    expect(shellExecutions).toBe(0);
+  });
+
+  test('auto-reviews a read-only-looking Shell command instead of using a fixed allowlist', async () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'runtime-auto-unknown-shell',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.mode = 'auto';
+    state.tools.calls.unknown = {
+      toolCallId: 'unknown',
+      modelMessageId: 'model',
+      ordinal: 0,
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'unknown'];
+    let shellExecutions = 0;
+
+    const events = await executeTestRuntimeTools({
+      state,
+      toolCallIds: ['unknown'],
+      sandboxAvailable: true,
+      shellExecutor: async (input) => {
+        shellExecutions += 1;
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(true);
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.started')).toBe(false);
+    expect(shellExecutions).toBe(0);
+  });
+
+  test('auto-reviews a sensitive external file write before I/O', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-auto-sensitive-workspace-'));
+    const external = mkdtempSync(join(tmpdir(), 'kite-auto-sensitive-external-'));
+    try {
+      const target = join(external, '.env.local');
+      const state = createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: 'runtime-auto-sensitive-file',
+        userId: 'user',
+        workspace,
+      });
+      state.mode = 'auto';
+      state.tools.calls.sensitiveFile = {
+        toolCallId: 'sensitiveFile',
+        modelMessageId: 'model',
+        ordinal: 0,
+        name: 'write_file',
+        args: { path: target, content: 'fixture=true\n' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, 'sensitiveFile'];
+
+      const events = await executeTestRuntimeTools({
+        state,
+        toolCallIds: ['sensitiveFile'],
+        sandboxAvailable: true,
+      });
+
+      expect(events.some((event) => event.type === 'auto_review.requested')).toBe(true);
+      expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+      expect(events.some((event) => event.type === 'tool.started')).toBe(false);
+      expect(existsSync(target)).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+      rmSync(external, { recursive: true, force: true });
+    }
+  });
+
+  test('requires approval for a workspace-only shell write in accept_edits mode', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-shell-write',
@@ -5344,12 +5823,12 @@ describe('executeTestRuntimeTools', () => {
       },
     });
 
-    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
-    expect(executed).toBe(true);
-    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
+    expect(executed).toBe(false);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(false);
   });
 
-  test('requires approval for a Git mutation in accept_edits mode', async () => {
+  test('requires approval for a workspace Git mutation in accept_edits mode', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-local-git',
@@ -5402,7 +5881,48 @@ describe('executeTestRuntimeTools', () => {
     });
 
     expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
+    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(false);
     expect(executed).toBe(false);
+  });
+
+  test('uses hardened execution for read-only Git only after Full authorizes Shell', async () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'runtime-readonly-git-shell',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization.mode = 'full_access';
+    const commands = ['git status --short', 'git log --oneline -10'];
+    for (const [ordinal, command] of commands.entries()) {
+      const toolCallId = `git-read-${ordinal}`;
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'git-read-model',
+        ordinal,
+        name: 'shell_execute',
+        args: { command },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+    }
+    const executed: string[] = [];
+    const events = await executeTestRuntimeTools({
+      state,
+      toolCallIds: ['git-read-0', 'git-read-1'],
+      sandboxAvailable: true,
+      shellExecutor: async (input) => {
+        executed.push(input.command);
+        expect(input.executionTrust).toBe('policy_proven_read_only');
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(false);
+    expect(executed.sort()).toEqual(commands.sort());
+    expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
   });
 
   test('write_file in auto mode inherits accept_edits direct execution', async () => {

@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-23（发布前无版本 clean cutover 与领域模块边界完成）
+最后更新：2026-08-23（新增 SQLite 会话日志 Server/Web 实施方案）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-23-sqlite-session-log-server-web.md`](2026-08-23-sqlite-session-log-server-web.md) | active | P1 | ADR-0129、当前 State26/Store5 SQLite Runtime | SQLite 是唯一会话日志事实源；明确排除 Session Logger/JSONL | LOGWEB-00～04 已完成；后续为 loopback Server/SSE、Web 时间线与跨平台验证 |
 | [`2026-08-23-pre-release-clean-cutover-module-boundaries.md`](2026-08-23-pre-release-clean-cutover-module-boundaries.md) | archived | P0 | ADR-0128、当前 State26/Store5 Runtime | 落实用户提供的《Kite Code 完整模块化优化方案》 | 无版本命名 clean cutover、零 compatibility production path、领域拆分、根 API 收窄、静态 Gate；[完成记录](../execution/completed/2026-08-23-pre-release-clean-cutover-module-boundaries.md) |
 | [`2026-08-19-kite-runtime-modularization-v1-implementation.md`](2026-08-19-kite-runtime-modularization-v1-implementation.md) | completed | P0 | accepted RFC、ADR-0124/0125、baseline `af5a5123` | 只做物理模块化；Authority/Format范围移入RAV1 | RMV1-01 至 RMV1-16 [全部完成](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)；implementation final SHA `e5a64c21`；State 25、Store 4和原epoch保持不变 |
 | [`2026-08-20-kite-runtime-authority-format-v1-implementation.md`](2026-08-20-kite-runtime-authority-format-v1-implementation.md) | archived | P0 | RMV1 completion、ADR-0124/0125、ADR-0127 | 原 RAV1-01～06 evidence 已被简化裁决替代 | 无 key/HMAC/ProjectHandle/global lock/DataOrigin/EgressAuthority/fixed provider policy；State26/Store5 7 tables/2 indexes；[completion](../execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md) |

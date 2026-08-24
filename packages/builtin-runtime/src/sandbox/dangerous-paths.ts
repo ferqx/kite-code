@@ -1,7 +1,11 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { canonicalPathForComparison, msys2ToWindowsPath } from './path-utils';
+import {
+  canonicalPathForComparison,
+  isPathInsideWorkspace,
+  msys2ToWindowsPath,
+} from './path-utils';
 import {
   PROTECTED_WORKSPACE_DIRECTORIES_,
   PROTECTED_WORKSPACE_FILE_PREFIXES_,
@@ -9,9 +13,9 @@ import {
 } from './protected-path';
 
 /**
- * Paths that remain prohibited even when a user grants one invocation access
- * outside the Workspace. These are persistence, credential, and critical
- * system identities rather than ordinary external files or temp directories.
+ * External identities that require mode-aware authorization. They are not
+ * native sandbox deny rules: after authorization the current invocation may
+ * access them.
  */
 const DANGEROUS_PATHS = [
   '.bashrc',
@@ -99,17 +103,70 @@ DANGEROUS_PATH_PATTERNS.push(
   /(?:\s|>|>>|'|"|\/|~|^)(\.env(?:\.[A-Za-z0-9_-]+)+)(?=\s|'|"|$|\/|>)/i,
 );
 
-/** Return the protected identity referenced by command/path text, if any. */
-export function checkDangerousPaths(value: string): string | null {
+export interface DangerousPathCheckOptions {
+  /** A canonical Workspace is one wholly admitted identity, regardless of path name. */
+  readonly workspace?: string;
+}
+
+/** Return the protected identity referenced outside the admitted Workspace, if any. */
+export function checkDangerousPaths(
+  value: string,
+  options: DangerousPathCheckOptions = {},
+): string | null {
   const slashNormalized = value.replace(/\\/g, '/');
   const candidates = [slashNormalized, slashNormalized.replace(/["']/g, '')];
   for (const candidate of candidates) {
     for (const pattern of DANGEROUS_PATH_PATTERNS) {
-      const match = candidate.match(pattern);
-      if (match) return match[1]!;
+      const scanner = new RegExp(
+        pattern.source,
+        pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`,
+      );
+      for (const match of candidate.matchAll(scanner)) {
+        if (
+          options.workspace &&
+          matchedPathIsInsideWorkspace(candidate, match, options.workspace)
+        ) {
+          continue;
+        }
+        return match[1]!;
+      }
     }
   }
   return null;
+}
+
+function matchedPathIsInsideWorkspace(
+  command: string,
+  match: RegExpMatchArray,
+  workspace: string,
+): boolean {
+  const identity = match[1];
+  if (!identity || match.index === undefined) return false;
+  const identityOffset = match[0].lastIndexOf(identity);
+  if (identityOffset < 0) return false;
+  let start = match.index + identityOffset;
+  let end = start + identity.length;
+  const boundary = /[\s<>"'|;&()]/u;
+  while (start > 0 && !boundary.test(command[start - 1]!)) start--;
+  while (end < command.length && !boundary.test(command[end]!)) end++;
+  let token = command.slice(start, end);
+  try {
+    const pwdPrefix = token.match(/^\$(?:PWD|\{PWD\})(?=\/|$)/u)?.[0];
+    if (pwdPrefix) token = `${workspace}${token.slice(pwdPrefix.length)}`;
+    else if (/[$`*?[\]{}]/u.test(token)) return false;
+    const normalized = msys2ToWindowsPath(token);
+    const expanded =
+      normalized === '~'
+        ? homedir()
+        : normalized.startsWith('~/') || normalized.startsWith(`~${sep}`)
+          ? resolve(homedir(), normalized.slice(2))
+          : isAbsolute(normalized)
+            ? normalized
+            : resolve(workspace, normalized);
+    return isPathInsideWorkspace(workspace, canonicalPathForComparison(expanded));
+  } catch {
+    return false;
+  }
 }
 
 export interface FixedDangerousPathIdentity {
@@ -189,10 +246,7 @@ const UNIX_PROTECTED_DIRECTORIES = [
   '/etc/systemd/system',
 ] as const;
 
-/**
- * Canonical fixed identities that stay unavailable even when one invocation
- * receives broad external-filesystem authority.
- */
+/** Canonical fixed identities used to classify approval-sensitive access. */
 export function resolveFixedDangerousPathIdentities(input: {
   workspace: string;
   home?: string;
@@ -253,6 +307,9 @@ export function checkDangerousCanonicalPath(value: string, workspace: string): s
             ? normalized
             : resolve(workspace, normalized);
     const candidate = canonicalPathForComparison(expanded);
+    if (isPathInsideWorkspace(workspace, candidate)) return null;
+    const namedSensitivePath = checkDangerousPaths(candidate);
+    if (namedSensitivePath) return candidate;
     for (const identity of resolveFixedDangerousPathIdentities({ workspace })) {
       const protectedPath = canonicalPathForComparison(identity.path);
       const rel = relative(protectedPath, candidate);
@@ -265,6 +322,35 @@ export function checkDangerousCanonicalPath(value: string, workspace: string): s
       ) {
         return identity.path;
       }
+    }
+  } catch {
+    // Invalid paths are handled by the ordinary path-policy fail-closed path.
+  }
+  return null;
+}
+
+/**
+ * Return a sensitive external identity that a recursive search root could
+ * reach. Workspace members are excluded because the Workspace is admitted as
+ * one complete identity.
+ */
+export function checkDangerousSearchRoot(value: string, workspace: string): string | null {
+  try {
+    const normalized = msys2ToWindowsPath(value);
+    const expanded =
+      normalized === '~'
+        ? homedir()
+        : normalized.startsWith('~/') || normalized.startsWith(`~${sep}`)
+          ? resolve(homedir(), normalized.slice(2))
+          : isAbsolute(normalized)
+            ? normalized
+            : resolve(workspace, normalized);
+    const candidate = canonicalPathForComparison(expanded);
+    if (isPathInsideWorkspace(workspace, candidate)) return null;
+    for (const identity of resolveFixedDangerousPathIdentities({ workspace })) {
+      const protectedPath = canonicalPathForComparison(identity.path);
+      if (isPathInsideWorkspace(workspace, protectedPath)) continue;
+      if (isPathInsideWorkspace(candidate, protectedPath)) return identity.path;
     }
   } catch {
     // Invalid paths are handled by the ordinary path-policy fail-closed path.

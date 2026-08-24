@@ -1,4 +1,9 @@
 export {
+  createSqliteRuntimeLogQueryPort,
+  SqliteRuntimeLogQueryError,
+  type SqliteRuntimeLogQueryInput,
+} from './log-query';
+export {
   assertSqliteRuntimeStorageCanOpen,
   defaultSqliteRuntimeJournalMode,
   SQLITE_RUNTIME_FORMAT_EPOCH,

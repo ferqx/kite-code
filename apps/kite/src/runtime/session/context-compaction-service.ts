@@ -17,7 +17,6 @@ import {
 } from '#app/bootstrap/runtime/runtime-effect-dependencies';
 import type { RuntimeEvent, RuntimeState } from '#app/bootstrap/runtime/state-runtime';
 import { getFeatureFlags } from '#app/config/features';
-import { createApprovedProviderDataAdmission } from '#app/config/provider-data-admission';
 import {
   type ContextCompactionCommandResult,
   contextCompactionRequiresLiveControl,
@@ -48,7 +47,6 @@ export class ContextCompactionService {
   ): RuntimeExecutorDependencies {
     const config = runtime.config;
     const modelRuntime = this.dependencies().modelInvocationRuntimeFactory(runtime.workspace);
-    const providerDataAdmission = createApprovedProviderDataAdmission(config);
     return {
       config,
       model: createChatModel(config),
@@ -63,7 +61,6 @@ export class ContextCompactionService {
       skillOptions: runtime.skillOptions ?? undefined,
       onCompactionProgress: onProgress,
       signal,
-      providerDataAdmission,
       compactionReporter: config.compaction?.localDebug?.enabled
         ? createLocalCompactionDebugReporter({
             enabled: true,

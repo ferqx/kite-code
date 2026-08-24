@@ -162,7 +162,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     ...loadedConfig,
     features: { ...loadedConfig.features, ...args.featureOverrides },
   };
-  const interactionMode = args.interactionMode ?? config.interactionMode ?? 'accept_edits';
+  const interactionMode = args.interactionMode ?? config.interactionMode ?? 'auto';
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
     detectBackend: discoverSandboxBackendCandidate,

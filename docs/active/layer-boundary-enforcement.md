@@ -30,7 +30,7 @@ builtin-runtime   runtime-host ← runtime-storage-sqlite
 - SQLite Storage 只导入 `@kite/runtime-host/storage`，不解释 Kernel/Builtin 语义。
 - `apps/kite/src/bootstrap.ts` 是唯一 concrete composition root。
 
-`check:runtime-packages` 通过 TypeScript module graph、package manifests 与 export facts 验证依赖、环、deep import、唯一 composition root 与 public symbol drift。不得通过 alias、barrel、dynamic import、相对路径或测试 helper 绕过。
+`check:runtime-packages` 直接从 TypeScript module graph、package manifests 与 export facts 验证依赖、环、deep import、唯一 composition root 与 public symbol drift；不提交或比对生成快照。不得通过 alias、barrel、dynamic import、相对路径或测试 helper 绕过。
 
 ## 领域归属
 
@@ -40,7 +40,7 @@ builtin-runtime   runtime-host ← runtime-storage-sqlite
 
 ### Agent Kernel
 
-根 `state.ts` 与 `events.ts` 静态组合 domain state/event map；根 reducer 使用固定顺序调用 `src/core/` 与 `src/domains/` reducer。planning、context 与 verification 已拥有独立 state/event 模块。禁止动态 reducer 注册、caller 注入 domain 或第二 transition owner。
+根 `state.ts` 与 `events.ts` 静态组合 domain state/event map；根 reducer 使用固定顺序调用 `packages/agent-kernel/src/core/` 与 `packages/agent-kernel/src/domains/` reducer。planning、context 与 verification 已拥有独立 state/event 模块。禁止动态 reducer 注册、caller 注入 domain 或第二 transition owner。
 
 ### Runtime SPI
 
@@ -84,6 +84,8 @@ Runtime Session、Tool execution 与 Tool persistence 分别位于 `apps/kite/sr
 
 ## Clean cutover
 
-Kite Code 未发布。生产路径、声明与 exports 使用领域职责名；schema/protocol/format 数字只允许作为 metadata 值。旧 alias、双入口、旧 source、格式迁移、长期 allowlist 与 compatibility façade 必须直接删除。持久格式不匹配仍 fail closed，不迁移、不覆盖、不尝试其他 driver。
+Kite Code 未发布。生产路径、声明与 exports 使用领域职责名；schema/protocol/format 数字只允许作为 metadata 值。旧 alias、双入口、旧 source、格式迁移、长期 allowlist 与 compatibility façade 必须直接删除。该规则不等于删除旧会话的读取能力：同一 schema/epoch 内被明确列出的退休事件字段由当前唯一 codec 单向读取，当前写路径不再产生它们；这不是双 codec 或格式选择。未知持久格式仍 fail closed，不迁移、不覆盖、不尝试其他 driver。
 
 `check:pre-release-architecture` 验证无版本生产路径/声明、无已删除 compatibility 名称、无 Runtime→TUI 反向 import、唯一 composition root、完整领域模块与 active 文档零版本实体。`check:core-boundary` 继续验证 filesystem、sandbox、Host、Kernel、Builtin 与 App 的静态 owner。
+
+`check:runtime-packages` 还会拒绝 root `package.json` 中通过 `bun run` 或 `bun test` 直接执行、但目标文件不存在的脚本；不存在 architecture exception allowlist，非 bootstrap composition authority import 一律失败。

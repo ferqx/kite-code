@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -218,6 +218,26 @@ describe('TUI PTY System — Slash Commands', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       expect(screenContains(tui.viewport(), '自动审批')).toBe(false);
       expect(screenContains(tui.viewport(), '接受编辑')).toBe(true);
+
+      const persistedConfig = readFileSync(workspace.configPath, 'utf8');
+      expect(persistedConfig).toContain('"interactionMode": "accept_edits"');
+
+      // A project may suggest Auto as its initial default, but the explicit
+      // personal selection must remain authoritative on the next launch.
+      writeFileSync(
+        join(workspace.workspace, '.kite-code', 'kite-code.jsonc'),
+        JSON.stringify({ interactionMode: 'auto' }, null, 2),
+      );
+      await tui.killAndWait();
+      tui = await spawnReadyTui({
+        cols: 120,
+        rows: 40,
+        mockServer: server,
+        workspace,
+        noPreConfig: true,
+      });
+      await waitForText(() => tui.viewport(), '接受编辑', 10_000);
+      expect(screenContains(tui.viewport(), '自动审批')).toBe(false);
     },
     TIMEOUT,
   );

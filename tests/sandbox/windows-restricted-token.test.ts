@@ -297,7 +297,7 @@ describe('Windows restricted-token invocation protocol', () => {
     });
   });
 
-  test('adds a distinct protected-path guard SID to approved filesystem calls', () => {
+  test('retains a distinct compatibility SID on approved filesystem calls', () => {
     const values = ['S-1-5-21-1-2-3-4', 'S-1-5-21-5-6-7-8'];
     const result = createWindowsRestrictedTokenDirectWorkspace({
       startupProbe: false,
@@ -375,6 +375,11 @@ describe('Windows restricted-token environment', () => {
     expect(env.PATH).toBe(
       'C:\\runtime;C:\\runtime\\kite-coreutils;C:\\vendor\\isksh;C:\\safe\\bin',
     );
+    expect(env.GIT_CONFIG_NOSYSTEM).toBe('1');
+    expect(env.GIT_CONFIG_GLOBAL).toBe('NUL');
+    expect(env.GIT_OPTIONAL_LOCKS).toBe('0');
+    expect(env.GIT_CONFIG_KEY_0).toBe('core.fsmonitor');
+    expect(env.GIT_CONFIG_VALUE_0).toBe('false');
   });
 
   test('accepts only canonical Bun executable names for the PATH entry', () => {

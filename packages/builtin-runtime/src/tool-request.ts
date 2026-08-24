@@ -64,10 +64,12 @@ type PendingTaskRequest = PendingBuiltinToolRequestBase & {
   readonly name: 'task';
   readonly args:
     | {
+        name: string;
         subagent_type: 'explore' | 'plan' | 'code' | 'review';
         task: string;
       }
     | {
+        name: string;
         subagent_type: 'explore' | 'plan' | 'code' | 'review';
         taskArtifact: import('@kite/runtime-spi').SubagentTaskRequestArtifact;
       };

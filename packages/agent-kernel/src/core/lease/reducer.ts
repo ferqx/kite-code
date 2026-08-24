@@ -399,7 +399,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
         const proof = stringField(payload, 'proof');
         if (
           reservation.state !== 'reserved' &&
-          !(reservation.state === 'dispatch_started' && proof === 'local_provider_admission_denied')
+          !(reservation.state === 'dispatch_started' && proof === 'local_pre_dispatch_failure')
         )
           throw new Error('Only a proven undispatched reservation can be released.');
         next = replaceReservation(active, { ...reservation, state: 'released' });

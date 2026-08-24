@@ -1,8 +1,8 @@
 # 当前规则：Shell 工具平台兼容性
 
 状态：active
-最后更新：2026-08-20
-最后验证：2026-08-20
+最后更新：2026-08-24
+最后验证：2026-08-24
 范围：
 
 - `packages/builtin-runtime/src/planning/runtime-module.ts`（Builtin Shell operation 与参数语义）
@@ -27,6 +27,7 @@
 - `tool-gated-autonomy.md`
 - `project-conventions.md`
 - `file-reading-shared-boundary.md` — MSYS2 路径转换 + readTextContent 边界
+- ADR-0131 — canonical Workspace 不再按隐藏名称二次拒绝
 
 验证：
 
@@ -58,8 +59,12 @@ ADR-0100 的 approved-filesystem lane 是另一条显式 capability 路径，不
 `externalRead`、`externalWrite` 或 `uncertainEffects` 审批通过后，在用户命令启动前把
 `filesystemMode=allow_all` 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
 也不得自行切换 host Shell；只有 ADR-0119 的独立 App availability 条件可选择 host。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
-effects；固定高危身份继续由 Seatbelt deny、bubblewrap protected mount 或 Windows guard SID 保护。Auto
-模式由自动审批模型判断；风险判定或模型异常才升级真人审批。
+effects；Workspace 外固定高危身份由 Tool Policy 分类为 `sensitiveExternalAccess`，授权后 Seatbelt、bubblewrap 或
+Windows runner 不得安装第二层 protected-path deny。canonical Workspace member 不得因名称被拒绝。按
+ADR-0133，Full 直接授权；Auto 模式由自动审批模型选择批准、拒绝或请求真人审批；其他模式请求 exact user
+approval，模型异常或 circuit breaker 也升级真人审批。
+Full 的用户文件系统授权不包含 Kite 自身的 Host-control base：macOS 显式 deny，Linux 对整个 base 投影只读
+空 tmpfs，以隔离当前及并发 invocation 的 supervisor socket、lock 与 identity。
 
 Windows 命令语言候选顺序（只在已获准的 native/test execution 内使用）：
 
@@ -122,8 +127,9 @@ ack 后交给唯一 Host spawn primitive 启动 runner；
 runner 的 Job empty receipt、ACL revoke 与 runtime cleanup 均须在 disposal 前确认。该 backend 是 development
 restricted-token sandbox，能力 registry 仍不把它升级为 strict network/protected-glob 或 production Full 资格。
 
-persistent capability ledger 使用 V2 readiness marker。首次创建、V1 迁移、上次初始化中断或 static
-protected-path set 变化时，runner 在 per-Workspace mutex 内幂等完成 ACL setup；最多等待 30 秒。完成后，
+persistent capability ledger 使用 V3 readiness marker。首次创建、旧版本迁移或上次初始化中断时，runner
+在 per-Workspace mutex 内幂等完成 ACL setup；V3 会恢复并删除 V2 留下的 Workspace 内 protected-path
+DACL snapshot，只保留完整 Workspace root capability。最多等待 30 秒。完成后，
 相同 path set 的并发 invocation 只读 ledger 并走无锁快路径，因此并发 `git status`/短命令不会被 ACL
 初始化串行化，也不会因旧的 2 秒等待窗口误报 ledger busy。ledger 写入使用原子替换，ready marker 只能在
 ACL 操作全部成功后提交。
@@ -135,13 +141,13 @@ POSIX lookup 命中 Windows 无法执行的 extensionless Unix shim；adapter �
 batch shim，不能让 isksh 直接启动 `.cmd` 并把 `C:\Program Files` 等 PATH identity 拆词。command 可以显式调用 bash、cmd.exe、
 pwsh 或 powershell.exe。
 
-Shell read-only fast path 不使用上述通用继承 PATH。Runtime 仅在 Builtin frozen catalog entry 与 Pipeline 重新证明
-命令只读后签发内部 execution trust：POSIX executor 固定以非登录 `/bin/sh -c`
+Shell read-only classifier 不产生 Policy allow。只有 invocation 已按当前 mode 获得授权，且 Builtin frozen
+catalog entry 与 Pipeline 重新证明命令只读后，Runtime 才签发内部 hardened execution trust：POSIX executor 固定以非登录 `/bin/sh -c`
 执行，Windows restricted-token 继续使用密封 shell runtime/Coreutils；二者的继承
 PATH 条目均必须为 Workspace 外可 canonicalize 的绝对目录。相对条目、空条目、
 Workspace 子目录与 symlink alias 被删除；无沙箱 development fallback 也消费同一最小
-环境，不能因 backend 不可用而恢复 Workspace executable replacement。普通需审批 Shell
-仍保留用户工具链和 Homebrew/项目 PATH 语义。
+环境，不能因 backend 不可用而恢复 Workspace executable replacement。其他已获批 Shell 仍保留用户工具链和
+Homebrew/项目 PATH 语义。该 execution trust 只约束如何执行，不跳过 Accept Edits/Auto/Full 的授权判断。
 
 isksh 本身不提供 MSYS2 drive mount。为保持共享 Shell contract，restricted-token adapter 在送入 runner
 前仅转换 shell token boundary 上的字面量 `/x/...` 盘符前缀为 native executable 可接受的 `X:/...`；
@@ -149,11 +155,12 @@ isksh 本身不提供 MSYS2 drive mount。为保持共享 Shell contract，restr
 Tool Result 的 `command` 继续保存用户/模型提交的原始命令，不保存 adapter prelude。变量展开后才产生的
 `/x/...` 不属于该静态兼容层；调用方应使用字面量 POSIX drive path 或 `X:/...` mixed path。
 
-Shell Tool Policy 与 macOS/Linux 共用逐调用网络授权：精确 `node|npm|pnpm|yarn|bun --version|-v`
-按本地只读、network-disabled 执行；明确网络命令和 `node script.js`、`npm run build` 等 uncertain
-script 先审批，批准后仅该 invocation 投影为 `allow_all`。direct profile 接受该开发期授权，但不会
+Shell Tool Policy 与 macOS/Linux 共用逐调用模式治理：精确 `node|npm|pnpm|yarn|bun --version|-v`、明确网络
+命令、`node script.js`、`npm run build` 和未知脚本均先按 Accept Edits、Auto 或 Full 审查；分类出的 network、
+external filesystem 与 uncertain effects 只帮助 reviewer 和 scope projection，不产生免审。批准后仅该 invocation
+投影相应 filesystem/network scope。direct profile 接受该开发期授权，但不会
 structural enforce network-off、arbitrary
-descendant allowlist 或 future root .env.* protection。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
+descendant allowlist。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
 定义的开发期交互模式，不是 production admission；只有 backend=none 时才显示“非沙箱环境无法开启full”。
 
 当且仅当 invocation 已投影为 `allow_all`，macOS/Linux 本地 backend 都把宿主已有的标准代理变量
@@ -168,12 +175,13 @@ supervisor/runner 实际 spawn 时从宿主读取，不能写入持久化的 pre
 使用保留 `WRITE_RESTRICTED`、LUA 与 privilege stripping 的 approved filesystem token；其 mirrored
 user/group/guard restricted SID 只约束写访问，read/execute 仍服从 current user 普通 ACL。普通 Workspace
 invocation 仍使用 capability SID
-ledger，扩权 invocation 不把全局写权限写入 persistent Workspace ledger，也不要求 UAC。显式危险路径
-在 Tool Policy 阶段拒绝；approved token 还携带 restricted-only guard SID，既有固定路径对该 SID 添加
-invocation-scoped deny，并初始化与普通 token 相同的 child-object default DACL，避免变量拼接或间接执行
-绕过字符串检查，同时允许已批准 shell 启动 Node/npm descendant。该 scope 不等于 Full 或 production evidence；
-持久 Workspace capability ledger 只允许保存 Workspace 内 protected path，外部用户配置路径不进入
-该 ledger 或 repair 范围；普通 Workspace token 对外部路径没有 capability allow，写访问仍被拒绝。
+ledger，扩权 invocation 不把全局写权限写入 persistent Workspace ledger，也不要求 UAC。显式敏感路径在 Tool
+Policy 阶段进入模式感知授权；approved token 暂时保留 protocol compatibility SID，但既有固定路径不再对该
+SID 添加 invocation-scoped deny。token 仍初始化与普通 token 相同的 child-object default DACL，并允许已批准
+shell 启动 Node/npm descendant。该 scope 不等于 Full 或 production evidence；
+持久 Workspace capability ledger 只保存完整 Workspace root capability；外部用户配置路径不进入
+该 ledger 或 repair 范围，旧 ledger 中的内部 protected snapshot 会在 V3 migration 中恢复并删除。普通
+Workspace token 对外部路径没有 capability allow，写访问仍被拒绝。
 若同一命令同时需要网络和外部文件系统，Tool Policy 必须同时展示对应 effects，批准后只执行一次。
 
 在 user script 前无法选择或 structural start 该 backend 时，App 进入 `denied`。script 开始后，
@@ -183,6 +191,8 @@ Bash/cmd/PowerShell 上 replay。
 ADR-0088 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V6
 direct Workspace request；runner 和 vendored isksh/coreutils digest 继续固定在
 `release/platform-capabilities/windows-runner.json`。
+本次 native source 语义变化必须由 canonical Windows 构建重新生成 runner 与 manifest digest；旧 pin
+不能证明 V3 ledger migration 或完整 Workspace admission。
 
 ## 7. 超时必须终止整棵进程树
 

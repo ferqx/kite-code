@@ -71,6 +71,8 @@ export interface PersistedExecutionJournalEntry {
 export interface SuspendedSubagentSnapshot {
   subagentId: string;
   role: SubagentRole;
+  /** Public display name chosen by the parent model. */
+  name: string;
   task: string;
   messages: PersistedSubagentMessage[];
   toolCallCount: number;

@@ -1,4 +1,4 @@
-import { assertCurrentRuntimeEvent, type RuntimeEvent } from '@kite/agent-kernel';
+import { assertCurrentRuntimeEventForWrite, type RuntimeEvent } from '@kite/agent-kernel';
 
 /**
  * Host-facing State event admission boundary.
@@ -11,11 +11,11 @@ import { assertCurrentRuntimeEvent, type RuntimeEvent } from '@kite/agent-kernel
 export function runtimeHostStateAssertCurrentRuntimeEvent(
   value: unknown,
 ): asserts value is RuntimeEvent {
-  assertCurrentRuntimeEvent(value);
+  assertCurrentRuntimeEventForWrite(value);
 }
 
 /** Admit an untyped JSON value without intersecting its transport type with the event union. */
 export function runtimeHostStateAdmitCurrentRuntimeEvent(value: unknown): RuntimeEvent {
-  assertCurrentRuntimeEvent(value);
+  assertCurrentRuntimeEventForWrite(value);
   return value;
 }

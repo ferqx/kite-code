@@ -16,7 +16,7 @@ export interface VerificationCapabilityResult {
   providerMeta?: Record<string, unknown>;
 }
 
-/** Minimal immutable receipt projection consumed by an independent reviewer. */
+/** Minimal immutable receipt projection consumed by deterministic verification. */
 export interface VerificationExecutionReceipt {
   invocationId: string;
   toolCallId: string;
@@ -73,9 +73,12 @@ export type VerificationCheck =
       uri?: string;
     })
   | (VerificationCheckBase & {
+      type: 'receipt';
+      invocationId: string;
+    })
+  | (VerificationCheckBase & {
+      /** Read-only compatibility check. Current planners never create it. */
       type: 'reviewer';
-      invocationIds?: readonly string[];
-      activationIds?: readonly string[];
       instructions: string;
     });
 
@@ -95,25 +98,11 @@ export interface VerificationSpec {
 
 export interface VerificationCheckResult {
   checkId: string;
-  /** Independent reviewer invocation, when this check used the model Gateway. */
+  /** Retained only when reading an older verification result. */
   modelInvocationId?: string;
   outcome: VerificationOutcome;
   summary: string;
   evidenceDigest?: string;
   startedAt: string;
   finishedAt: string;
-}
-
-/** The reviewer receives source receipts and immutable artifact payloads, never a main-model verdict. */
-export interface VerificationReviewerInput {
-  instructions: string;
-  receipts: VerificationExecutionReceipt[];
-  artifacts: Array<{ invocationId: string; result: VerificationCapabilityResult }>;
-  skillOutputs: Array<{ activationId: string; output: Record<string, unknown> }>;
-}
-
-export interface VerificationReviewerResult {
-  outcome: VerificationOutcome;
-  summary: string;
-  modelInvocationId?: string;
 }

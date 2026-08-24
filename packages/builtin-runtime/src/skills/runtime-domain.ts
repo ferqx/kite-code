@@ -55,10 +55,10 @@ type SkillVerificationCheck =
     }
   | {
       checkId: string;
-      type: 'reviewer';
+      type: 'schema';
       description: string;
-      activationIds?: string[];
-      instructions: string;
+      subject: { kind: 'skill_output'; activationId: string };
+      schema: Record<string, unknown>;
     };
 
 interface SkillVerificationSpec {
@@ -119,11 +119,11 @@ export function verificationRequestForSkill(input: {
     });
   } else {
     checks.push({
-      checkId: 'skill-output-review',
-      type: 'reviewer',
-      description: 'Review the validated Workflow Contract output as independent evidence.',
-      activationIds: [input.activation.activationId],
-      instructions: `Determine whether the structured output establishes completion of ${input.activation.skillId}.`,
+      checkId: 'skill-output-schema',
+      type: 'schema',
+      description: 'Confirm that the Workflow Contract produced a structured output object.',
+      subject: { kind: 'skill_output', activationId: input.activation.activationId },
+      schema: { type: 'object' },
     });
   }
   const spec: SkillVerificationSpec = {

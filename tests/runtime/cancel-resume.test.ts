@@ -96,6 +96,81 @@ describe('bounded Runtime cancellation', () => {
     { timeout: 10_000 },
   );
 
+  test('enforces a restored expired run deadline with a structured cancellation terminal', async () => {
+    const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-expired-deadline-'));
+    const storePath = join(workspace, 'runtime.db');
+    const threadId = 'expired-run-deadline';
+    try {
+      const state = createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId,
+        userId: 'test',
+        workspace,
+      });
+      const seed = new AgentKernel({
+        store: openStateStoreForTest(storePath),
+        initialState: state,
+        interactionMode: 'accept_edits',
+      });
+      const now = Date.now();
+      seed.processEvent({
+        type: 'resource_budget.configured',
+        runId: 'expired-run',
+        startedAt: new Date(now - 2_000).toISOString(),
+        deadlineAt: new Date(now - 1_000).toISOString(),
+        budget: LIMITED_RESOURCE_BUDGET_,
+      });
+      seed.processEventBatch(
+        eventsForRunCancellation(seed.getState(), 'Seed the successor turn.', 'user'),
+      );
+      seed.close();
+
+      const model = createMockModel([]);
+      const rawModel = model.model as unknown as { doGenerate: () => Promise<never> };
+      rawModel.doGenerate = () => new Promise<never>(() => {});
+      const events: RuntimeEvent[] = [];
+      for await (const event of runTestRuntimeAgent(
+        {
+          task: 'resume under the expired deadline',
+          threadId,
+          userId: 'test',
+          workspace,
+          openStateRuntimeStorage: () => openStateStoreForTest(storePath),
+          model: model as unknown as SupportedChatModel,
+          config: {
+            providerName: 'test',
+            providerType: 'openai-compatible',
+            apiKey: 'test',
+            baseURL: 'http://localhost:1',
+            modelName: 'test',
+            sandbox: { enabled: false },
+            features: { resourceBudget: true, boundedCancellation: true },
+          },
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'turn.aborted', cause: 'error' }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'run.error',
+          failure: expect.objectContaining({ kind: 'cancel_incomplete' }),
+          outcome: expect.objectContaining({
+            status: 'unknown',
+            reasonCode: 'cancel_incomplete',
+            recoveryEntry: 'reconcile',
+          }),
+        }),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('reopens an aborted turn for the next user prompt', async () => {
     const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-cancel-successor-'));
     const storePath = join(workspace, 'runtime.db');

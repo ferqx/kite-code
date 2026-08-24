@@ -6,6 +6,7 @@ import {
   defaultConfigPath,
   loadAgentConfig,
   loadUserLanguage,
+  saveInteractionMode,
   saveModelSelection,
   saveUserLanguage,
 } from '#app/config/index';
@@ -491,6 +492,38 @@ describe('loadAgentConfig', () => {
       expect(config.modelName).toBe('gemma4:31b-cloud');
       expect(config.providerName).toBe('ollama');
       expect(config.providerType).toBe('ollama');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('personal interaction mode setting', () => {
+  test.each([
+    'accept_edits',
+    'auto',
+    'full',
+  ] as const)('persists %s as the next-launch permission mode', (interactionMode) => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-interaction-mode-'));
+    const configPath = join(dir, 'kite-code.jsonc');
+    try {
+      writeFileSync(
+        configPath,
+        `{
+            // Preserve unrelated JSONC while updating the personal preference.
+            "provider": { "ollama": {} }
+          }`,
+      );
+
+      expect(saveInteractionMode(interactionMode, configPath)).toBe(true);
+      expect(readFileSync(configPath, 'utf8')).toContain(`"interactionMode": "${interactionMode}"`);
+      expect(
+        loadAgentConfig({
+          configPath,
+          providerName: 'ollama',
+          modelName: 'qwen-test',
+        }).interactionMode,
+      ).toBe(interactionMode);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

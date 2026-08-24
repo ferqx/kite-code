@@ -239,7 +239,7 @@ describe('verb within working phase', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, {
       type: 'EVENT',
-      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'explore', task: 'scan UI' } },
+      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'explore', name: 'scan UI' } },
     });
 
     const snap = deriveRunStatusSnapshot(state);
@@ -250,13 +250,15 @@ describe('verb within working phase', () => {
 
   test.each([
     ['queued', 'Review queued', 'primary'],
+    ['queued_auto_review', 'Review queued', 'primary'],
+    ['queued_user_approval', 'Review queued', 'primary'],
     ['auto_reviewing', 'Auto-reviewing', 'primary'],
     ['awaiting_user', 'Awaiting approval', 'warning'],
   ] as const)('shows %s child approval state without implying every child needs a user', (approvalState, verb, tone) => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, {
       type: 'EVENT',
-      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'review', task: 'review' } },
+      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'review', name: 'review' } },
     });
     state = {
       ...state,

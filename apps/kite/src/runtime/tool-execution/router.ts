@@ -92,6 +92,7 @@ import {
   AppToolPipelinePersistenceError,
   createAppSharedChildToolDispatcher,
   executeAppTaskToolPipeline,
+  isConcurrentExploreSubagentBatch,
   isCurrentExactChildToolReservation,
   type PrivateSubagentTask,
   serializeConcurrentSubagentApprovalEvents,
@@ -124,7 +125,6 @@ export async function executeAppRuntimeTools(params: {
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
-  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGate;
   descendantResourceAdmission?: import('@kite/runtime-host/kernel-adapter').DescendantResourceAdmission;
   modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
   modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
@@ -136,6 +136,10 @@ export async function executeAppRuntimeTools(params: {
   subagentEventSink?: SubAgentEventSink;
   /** Identity supplied by the scheduler/executor only for one admitted parallel task batch. */
   subagentConcurrencyGroupId?: string;
+  /** True only for an admitted concurrent batch whose every Task role is Explore. */
+  subagentAutoReviewBatch?: boolean;
+  /** Child-only live mode specialization; ordinary parent calls never set it. */
+  interactionModeOverride?: import('@kite/runtime-contract').InteractionMode;
   planArtifactStore?: PlanArtifactStore;
   capabilityArtifactStore?: CapabilityArtifactWriter;
   workspaceFilesystemRuntime?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
@@ -211,6 +215,8 @@ export async function executeAppRuntimeTools(params: {
           : undefined;
       return entry?.executionMechanism === 'subagent' && call?.status === 'queued';
     });
+  const parallelExploreBatch =
+    parallelSubagentBatch && isConcurrentExploreSubagentBatch(params.state, params.toolCallIds);
   if (approvedParallelShellBatch) {
     const batches = await Promise.all(
       params.toolCallIds.map((toolCallId) =>
@@ -232,6 +238,7 @@ export async function executeAppRuntimeTools(params: {
           ...params,
           toolCallIds: [toolCallId],
           subagentConcurrencyGroupId: concurrencyGroupId,
+          subagentAutoReviewBatch: parallelExploreBatch,
           ...(params.emitRuntimeEvent
             ? {
                 emitRuntimeEvent: (event: RuntimeEvent) => {
@@ -344,7 +351,11 @@ export async function executeAppRuntimeTools(params: {
         privateSubagentTask = {
           source: 'private_artifact_v1',
           requestArtifact: taskArtifact as import('@kite/runtime-spi').SubagentTaskRequestArtifact,
-          payload: { subagent_type: privateTask.role, task: privateTask.task },
+          payload: {
+            name: privateTask.name,
+            subagent_type: privateTask.role,
+            task: privateTask.task,
+          },
         };
       } catch {
         events.push({
@@ -623,7 +634,7 @@ export async function executeAppRuntimeTools(params: {
           (frame) => frame.contextMode === 'inline',
         ),
         phase: getAgentPhase(getActivePlanning(liveState)),
-        interactionMode: getEffectiveInteractionMode(liveState),
+        interactionMode: params.interactionModeOverride ?? getEffectiveInteractionMode(liveState),
         turnId: liveState.turn.turnId,
         activeTaskId: liveState.activeTaskId ?? undefined,
         modelMessageId: call.modelMessageId,
@@ -823,7 +834,8 @@ export async function executeAppRuntimeTools(params: {
               threadId: liveState.session.threadId,
               context: Object.freeze({
                 phase: getAgentPhase(planning),
-                interactionMode: getEffectiveInteractionMode(liveState),
+                interactionMode:
+                  params.interactionModeOverride ?? getEffectiveInteractionMode(liveState),
                 authorizationMode: liveState.authorization.mode,
                 ...(liveState.authorization.modeSource
                   ? { authorizationSource: liveState.authorization.modeSource }

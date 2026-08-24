@@ -12,7 +12,6 @@ import {
   type ContextProjectionEnvironment,
   digestProjectionEnvironment,
 } from './context-projection';
-import { ProviderDataAdmissionError } from './provider-data-admission';
 import type { BuiltinContextCheckpointView, BuiltinRuntimeStateView } from './runtime-view';
 
 export type BuiltinContextCompactor = (input: {
@@ -295,19 +294,6 @@ export async function executeBuiltinContextCompaction(input: {
       },
     ];
   } catch (error) {
-    if (error instanceof ProviderDataAdmissionError) {
-      return [
-        failure({
-          pending,
-          sourceRevision,
-          errorKind: 'provider_admission_denied',
-          message: 'Provider data admission denied the compaction request.',
-          retryable: false,
-          reporter: input.reporter,
-          durationMs: elapsed(),
-        }),
-      ];
-    }
     if (error instanceof ContextCompactionValidationError) {
       return [
         failure({

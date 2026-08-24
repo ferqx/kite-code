@@ -50,13 +50,14 @@ export interface SubagentTaskRequestArtifactAccess {
   write(input: {
     parentModelInvocationId: string;
     parentToolCallId: string;
+    name?: string;
     role: 'explore' | 'plan' | 'code' | 'review';
     task: string;
   }): SubagentTaskRequestArtifact;
   read(
     ref: SubagentTaskRequestArtifact,
     expected: { parentModelInvocationId: string; parentToolCallId: string },
-  ): Readonly<{ role: 'explore' | 'plan' | 'code' | 'review'; task: string }>;
+  ): Readonly<{ name: string; role: 'explore' | 'plan' | 'code' | 'review'; task: string }>;
 }
 
 /** Queue-time private request storage; Runtime tool facts retain only its opaque ref. */
@@ -79,12 +80,14 @@ export class SubagentTaskRequestArtifactStore implements SubagentTaskRequestArti
   write(input: {
     parentModelInvocationId: string;
     parentToolCallId: string;
+    name?: string;
     role: 'explore' | 'plan' | 'code' | 'review';
     task: string;
   }): SubagentTaskRequestArtifact {
     try {
       const payload = validateRequestPayload({
         artifactFormatVersion: 1,
+        name: input.name ?? 'Delegated task',
         parentModelInvocationId: input.parentModelInvocationId,
         parentToolCallId: input.parentToolCallId,
         role: input.role,
@@ -103,7 +106,7 @@ export class SubagentTaskRequestArtifactStore implements SubagentTaskRequestArti
   read(
     ref: SubagentTaskRequestArtifact,
     expected: { parentModelInvocationId: string; parentToolCallId: string },
-  ): Readonly<{ role: 'explore' | 'plan' | 'code' | 'review'; task: string }> {
+  ): Readonly<{ name: string; role: 'explore' | 'plan' | 'code' | 'review'; task: string }> {
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(this.#storage.read(ref));
       const parsed: unknown = JSON.parse(text);
@@ -115,7 +118,7 @@ export class SubagentTaskRequestArtifactStore implements SubagentTaskRequestArti
       ) {
         corrupt();
       }
-      return Object.freeze({ role: payload.role, task: payload.task });
+      return Object.freeze({ name: payload.name, role: payload.role, task: payload.task });
     } catch (error) {
       if (error instanceof SubagentTaskArtifactError) {
         if (error.code === 'invalid_task') corrupt();
@@ -258,6 +261,7 @@ function validatePayload(value: unknown): Readonly<SubagentTaskArtifactPayload> 
 
 function validateRequestPayload(value: unknown): Readonly<{
   artifactFormatVersion: 1;
+  name: string;
   parentModelInvocationId: string;
   parentToolCallId: string;
   role: 'explore' | 'plan' | 'code' | 'review';
@@ -268,6 +272,7 @@ function validateRequestPayload(value: unknown): Readonly<{
     !plain(value) ||
     !exact(value, [
       'artifactFormatVersion',
+      'name',
       'parentModelInvocationId',
       'parentToolCallId',
       'role',
@@ -275,6 +280,11 @@ function validateRequestPayload(value: unknown): Readonly<{
       'taskDigest',
     ]) ||
     value.artifactFormatVersion !== 1 ||
+    typeof value.name !== 'string' ||
+    value.name.trim() !== value.name ||
+    value.name.length < 2 ||
+    value.name.length > 80 ||
+    /[\r\n]/u.test(value.name) ||
     typeof value.parentModelInvocationId !== 'string' ||
     !SAFE_ID.test(value.parentModelInvocationId) ||
     typeof value.parentToolCallId !== 'string' ||
@@ -288,6 +298,7 @@ function validateRequestPayload(value: unknown): Readonly<{
   }
   return deepFreeze(structuredClone(value)) as Readonly<{
     artifactFormatVersion: 1;
+    name: string;
     parentModelInvocationId: string;
     parentToolCallId: string;
     role: 'explore' | 'plan' | 'code' | 'review';

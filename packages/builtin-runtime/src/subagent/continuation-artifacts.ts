@@ -162,6 +162,7 @@ function hasContinuationSnapshotKeys(value: Record<string, unknown>): boolean {
   const required = [
     'blockedTool',
     'messages',
+    'name',
     'role',
     'steps',
     'subagentId',

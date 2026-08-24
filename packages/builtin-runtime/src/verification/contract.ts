@@ -7,6 +7,7 @@ const VERIFICATION_CHECK_TYPES_ = new Set<VerificationCheck['type']>([
   'schema',
   'mcp_read_after_write',
   'external_reference',
+  'receipt',
   'reviewer',
 ]);
 
@@ -20,7 +21,6 @@ export function validateBuiltinVerificationSpec(spec: VerificationSpec): string[
   }
   if (spec.checks.length === 0) diagnostics.push('At least one verification check is required.');
   const ids = new Set<string>();
-  let reviewerSeen = false;
   for (const check of spec.checks) {
     if (!check.checkId) diagnostics.push('Every verification check requires checkId.');
     if (ids.has(check.checkId))
@@ -29,10 +29,6 @@ export function validateBuiltinVerificationSpec(spec: VerificationSpec): string[
     if (!VERIFICATION_CHECK_TYPES_.has(check.type)) {
       diagnostics.push(`Unsupported check type '${check.type}'.`);
     }
-    if (reviewerSeen && check.type !== 'reviewer') {
-      diagnostics.push(`${check.checkId}: deterministic checks must run before reviewer checks.`);
-    }
-    reviewerSeen ||= check.type === 'reviewer';
     if (check.type === 'file_assertion') {
       if (!check.path) diagnostics.push(`${check.checkId}: path is required.`);
       if (check.assertion === 'sha256_equals' && !check.expectedDigest) {
@@ -58,8 +54,11 @@ export function validateBuiltinVerificationSpec(spec: VerificationSpec): string[
     if (check.type === 'external_reference' && !check.invocationId) {
       diagnostics.push(`${check.checkId}: invocationId is required.`);
     }
+    if (check.type === 'receipt' && !check.invocationId) {
+      diagnostics.push(`${check.checkId}: invocationId is required.`);
+    }
     if (check.type === 'reviewer' && !check.instructions) {
-      diagnostics.push(`${check.checkId}: reviewer instructions are required.`);
+      diagnostics.push(`${check.checkId}: legacy reviewer instructions are required.`);
     }
   }
   return diagnostics;
@@ -97,11 +96,10 @@ export function createBuiltinCapabilityVerificationRequest(input: {
     });
   }
   checks.push({
-    checkId: 'independent-review',
-    type: 'reviewer',
-    description: 'Review the original execution receipt and immutable evidence.',
-    invocationIds: [input.invocationId],
-    instructions: `Determine whether ${input.capabilityId} achieved its externally visible outcome.`,
+    checkId: 'committed-receipt',
+    type: 'receipt',
+    description: 'Confirm that the capability invocation has a committed success receipt.',
+    invocationId: input.invocationId,
   });
   return Object.freeze({
     type: 'verification.requested',

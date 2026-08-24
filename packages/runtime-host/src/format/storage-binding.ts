@@ -2,6 +2,7 @@ import {
   type AgentState,
   assertAgentStateInvariants,
   assertCurrentRuntimeEvent,
+  assertCurrentRuntimeEventForWrite,
   canForkAgentState,
   decodeCurrentAgentStateJson,
   decodeCurrentRuntimeEventJson,
@@ -37,6 +38,10 @@ function requireState(value: unknown): AgentState {
 function createStateCodec(): RuntimeSnapshotCodec<RuntimeEvent, AgentState> {
   return Object.freeze({
     encodeEvent(event: RuntimeEvent): string {
+      assertCurrentRuntimeEventForWrite(event);
+      return encodeCurrentRuntimeEventJson(event);
+    },
+    encodeHistoricalEvent(event: RuntimeEvent): string {
       assertCurrentRuntimeEvent(event);
       return encodeCurrentRuntimeEventJson(event);
     },

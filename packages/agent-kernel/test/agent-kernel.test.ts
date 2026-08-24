@@ -249,12 +249,6 @@ function completeEvidenceFixture(
       surfaceArtifact: privateRef('model_surface'),
       surfaceIntegrityIdentifier: `sha256:${'5'.repeat(64)}`,
       routeFingerprint: `sha256:${'6'.repeat(64)}`,
-      admission: {
-        providerAdmissionRevision: 'fixture-policy-v1',
-        routeIdentityDigest: `sha256:${'7'.repeat(64)}`,
-        payloadClassificationDigest: `sha256:${'8'.repeat(64)}`,
-        admitted: true,
-      },
       budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
       limits: { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 },
       preparedStateRevision: 0,
@@ -911,6 +905,55 @@ describe('agent kernel package boundary', () => {
     }
   });
 
+  test('reads the two retired Provider-admission shapes without producing new semantics', () => {
+    const diagnostic = {
+      type: 'provider.admission_status',
+      status: 'ready',
+      reason: 'admitted',
+      admissionRevision: 'legacy-policy-v1',
+    } as const;
+    expect(decodeCurrentRuntimeEventJson(JSON.stringify(diagnostic))).toEqual(diagnostic);
+    expect(() =>
+      decodeCurrentRuntimeEventJson(
+        JSON.stringify({ ...diagnostic, unexpectedSecret: 'must-not-propagate' }),
+      ),
+    ).toThrow('invalid shape');
+
+    const prepared = {
+      type: 'model.invocation_prepared',
+      invocationId: 'legacy-invocation',
+      purpose: 'primary_agent',
+      surfaceArtifact: {
+        kind: 'model_surface',
+        artifactId: `pa_${'a'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+        byteLength: 1,
+      },
+      surfaceIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
+      routeFingerprint: `sha256:${'c'.repeat(64)}`,
+      admission: {
+        providerAdmissionRevision: 'legacy-policy-v1',
+        routeIdentityDigest: `sha256:${'d'.repeat(64)}`,
+        payloadClassificationDigest: `sha256:${'e'.repeat(64)}`,
+        admitted: true,
+      },
+      budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+      limits: { maxAttempts: 1, perAttemptTimeoutMs: 0, totalTimeBudgetMs: 1_000 },
+      preparedStateRevision: 0,
+      parentInvocationId: null,
+      parentToolCallId: null,
+    } as const;
+    expect(decodeCurrentRuntimeEventJson(JSON.stringify(prepared))).toEqual(prepared);
+    const state = createInitialAgentState({
+      threadId: 'compatibility-session',
+      userId: 'test',
+      workspace: '/workspace',
+      turnId: 'turn-compatibility',
+      recoveryIdentityKey: IDENTITY_KEY,
+    });
+    expect(reduceAgentState(state, diagnostic as KernelEvent)).toEqual(state);
+  });
+
   test('classifies all 135 events into one static owner or an explicit diagnostic no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
     expect(covered).toHaveLength(135);
@@ -925,7 +968,7 @@ describe('agent kernel package boundary', () => {
     ).toBe(true);
   });
 
-  test('runs the complete 128-case legacy switch corpus and proves seven default diagnostics are no-op', () => {
+  test('runs the complete 128-case compatibility switch corpus and proves seven default diagnostics are no-op', () => {
     const diagnosticSet = new Set<string>(STATE_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);

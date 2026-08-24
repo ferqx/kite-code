@@ -85,7 +85,7 @@ validator；completion event 的顶层 plan status 必须是 `completed`。
 
 ## 工具与策略
 
-Planning 允许读取、搜索、研究、提问、计划维护和只读 Subagent；写文件、非只读 Shell、实现型 Subagent 和权限提升不得执行。所有决定由 Runtime Policy 与 Tool Controller 执行，不由 TUI 或工具描述决定，也不能通过用户审批提升权限绕过 phase 边界。
+Planning 允许结构化读取、搜索、研究、提问、计划维护和只读 Subagent；所有 raw Shell、写文件、实现型 Subagent 和权限提升不得执行。所有决定由 Runtime Policy 与 Tool Controller 执行，不由 TUI 或工具描述决定，也不能通过用户审批或 Full 提升权限绕过 phase 边界。
 
 Planning 的 `task` 不解析 `userGoal` 作委派授权；模型只应为有界、自包含且值得独立调用的 architecture/design 工作选择只读 `plan`，一般证据收集选择 `explore`。Project instruction、Shell context、工具结果或远端内容不能提升 child 的 phase、authorization、预算或 capability ceiling。`code` 与 `review` 在 planning 拒绝且不可审批提升。plan child 终结后，
 Runtime 要求先 `write_plan` save，再以同一 Plan identity submit；不得以
@@ -93,7 +93,7 @@ Runtime 要求先 `write_plan` save，再以同一 Plan identity submit；不得
 可按 ADR-0104 在同一响应中有界并发；依赖其他 child 结果的规划工作仍须串行。只有成功 plan child
 才能进入 CompletionGuard 前的受控 save/submit continuation。
 
-非只读 Shell 在 planning 中仍按 fail-closed 终结该 Tool Call，但 Runtime 将这类结果分类为 `phase_deferred`，而不是通用 `policy_denied`。模型收到的成对 Tool Result 明确包含 `deferred=true`、`until_phase=building`、原始参数和下一步约束：当前阶段不得重试或请求审批，应把命令保留到方案的执行/验证部分，待方案批准进入 building 后重新调用。
+Shell 在 planning 中仍按 fail-closed 终结该 Tool Call，但 Runtime 将这类结果分类为 `phase_deferred`，而不是通用 `policy_denied`。模型收到的成对 Tool Result 明确包含 `deferred=true`、`until_phase=building`、原始参数和下一步约束：当前阶段不得重试或请求审批，应把命令保留到方案的执行/验证部分，待方案批准进入 building 后重新调用。
 
 `write_file`、`edit_file`、实现型 Subagent，以及其他可修改工作区或外部状态的能力，在 planning 中越界时使用 `phase_denied` 硬拒绝，不进入审批。System Prompt 与各工具契约必须先主动要求模型在 planning 中只描述预期变更、不得调用编辑或副作用工具；Runtime 兜底结果再明确返回“工具未运行、当前阶段不可审批、把实现意图写入 Plan、方案批准后执行”。TUI 对文件编辑拒绝保留一条面向用户的只读边界说明，例如 `Plan mode is read-only. No file was written...`，但不把未获准执行的调用物化为 Tool Card，也不得只显示缺少下一步的通用 `Rejected ...`。破坏性 Shell 仍使用硬安全策略拒绝。
 

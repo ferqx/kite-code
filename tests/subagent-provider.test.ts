@@ -130,6 +130,7 @@ function taskProviderJourney(input: { invocationId: string; task?: string }) {
   const taskArtifact = taskRequests.write({
     parentModelInvocationId,
     parentToolCallId: 'pipeline-task',
+    name: 'Inspect provider route',
     role: 'review',
     task,
   });
@@ -144,7 +145,7 @@ function taskProviderJourney(input: { invocationId: string; task?: string }) {
     modelInvocationId: parentModelInvocationId,
     modelMessageId: parentModelInvocationId,
     name: 'task',
-    args: { subagent_type: 'review', taskArtifact },
+    args: { name: 'Inspect provider route', subagent_type: 'review', taskArtifact },
     status: 'queued',
     sideEffect: false,
     createdAtTurnId: state.turn.turnId,
@@ -246,6 +247,7 @@ describe('SubagentProvider grant and Local Provider', () => {
         durationMs: 1,
         terminalStatus: 'completed',
         error: null,
+        failureDiagnostic: null,
         resourceAdmissionFailure: null,
         steps: [],
         executionJournal: [],
@@ -327,6 +329,58 @@ describe('SubagentProvider grant and Local Provider', () => {
           : 'resource terminal is inconsistent',
       );
     }
+  });
+
+  test('retains only the bounded child failure diagnostic across observation', () => {
+    const expected = handle({
+      ...new SubagentGrantAuthority({ idSource: () => 'diagnostic-grant' }).issueStart(binding()),
+    });
+    const privatePayload = JSON.parse(
+      JSON.stringify({
+        ok: false,
+        summary: 'Sub-agent execution failed.',
+        toolCallCount: 3,
+        durationMs: 9,
+        terminalStatus: 'failed',
+        error: 'Sub-agent execution failed.',
+        failureDiagnostic: {
+          code: 'model_step_failed',
+          stage: 'model_step',
+          modelInvocationId: 'model-child-last',
+        },
+        resourceAdmissionFailure: null,
+        steps: [],
+        executionJournal: [],
+        exhaustedFingerprints: {},
+        toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
+        blocked: null,
+      }),
+    ) as import('@kite/runtime-spi').JsonObject;
+    const body = {
+      schema: SUBAGENT_PROVIDER_SCHEMA_,
+      handleId: expected.handleId,
+      childInvocationId: expected.childInvocationId,
+      status: 'failed' as const,
+      summary: 'Sub-agent execution failed.',
+      toolCallCount: 3,
+      durationMs: 9,
+      privatePayload,
+    };
+    const observation = {
+      ...body,
+      observationDigest: `sha256:${createHash('sha256').update(JSON.stringify(body)).digest('hex')}`,
+    };
+
+    expect(
+      subagentResultFromObservation(observation, expected, TEST_RECOVERY_IDENTITY_KEY),
+    ).toMatchObject({
+      failureDiagnostic: {
+        code: 'model_step_failed',
+        stage: 'model_step',
+        modelInvocationId: 'model-child-last',
+      },
+    });
+    expect(JSON.stringify(observation)).not.toContain('private next-round failure detail');
   });
 
   test('binds, expires, and consumes an exact start grant once', async () => {
@@ -987,7 +1041,11 @@ describe('Pipeline-owned Fake Provider negatives', () => {
             },
             subagentRuntime: runtime,
           },
-          { subagent_type: 'review', task: `inspect ${rejectedType}` },
+          {
+            name: `Inspect ${rejectedType}`,
+            subagent_type: 'review',
+            task: `inspect ${rejectedType}`,
+          },
         ),
       ).rejects.toBeInstanceOf(SubagentProviderRecoveryRequiredError);
       expect(driver.pendingRegistrationCount()).toBe(0);
@@ -1059,7 +1117,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
           },
           subagentRuntime: runtime,
         },
-        { subagent_type: 'review', task: 'inspect' },
+        { name: 'Inspect provider path', subagent_type: 'review', task: 'inspect' },
       );
       if (mode === 'deny') {
         expect(await result).toMatchObject({ ok: false, summary: 'denied' });

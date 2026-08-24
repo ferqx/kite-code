@@ -4000,7 +4000,7 @@ describe('eventReducer (blocks model)', () => {
       role: 'explore' | 'plan' | 'code' | 'review',
       task: string,
     ): LegacyRenderAction {
-      return { type: 'EVENT', event: { type: 'subagent_start', data: { id, role, task } } };
+      return { type: 'EVENT', event: { type: 'subagent_start', data: { id, role, name: task } } };
     }
     function saStep(
       id: string,
@@ -4026,10 +4026,6 @@ describe('eventReducer (blocks model)', () => {
         },
       };
     }
-    function saError(id: string, error: string): LegacyRenderAction {
-      return { type: 'EVENT', event: { type: 'subagent_error', data: { id, error } } };
-    }
-
     test('subagent_start creates running subagent block', () => {
       const s = dispatch(fresh(), saStart('sub-1', 'explore', 'find usages'));
       expect(flatBlocks(s)).toHaveLength(1);
@@ -4119,10 +4115,23 @@ describe('eventReducer (blocks model)', () => {
 
     test('subagent_error updates running block to error, preserves steps', () => {
       let s = dispatch(fresh(), saStart('sub-1', 'code', 'impl'));
-      s = dispatch(s, saError('sub-1', 'timeout'));
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'subagent_error',
+          data: {
+            id: 'sub-1',
+            error: 'Sub-agent execution failed.',
+            diagnostic: { code: 'model_step_failed', stage: 'model_step' },
+          },
+        },
+      });
       const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'subagent' }>;
       expect(b.status).toBe('error');
-      expect(b.summary).toBe('timeout');
+      expect(b.summary).toBe('Sub-agent execution failed.');
+      expect(b.failureDiagnostic).toEqual({ code: 'model_step_failed', stage: 'model_step' });
+      expect(b.approvalState).toBeUndefined();
+      expect(b.awaitingApproval).toBe(false);
       expect(b.expanded).toBe(false);
     });
 
@@ -4194,6 +4203,40 @@ describe('eventReducer (blocks model)', () => {
       expect(block.task).toBe('find runtime callers');
     });
 
+    test('keeps namespaced child tool lifecycle events inside the subagent block', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'child-owner', role: 'explore', task: 'inspect the runtime' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.step',
+        subagent: {
+          id: 'child-owner',
+          toolName: 'shell_execute',
+          toolArgs: { command: 'ls' },
+        },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.queued',
+        toolCallId: 'subagent-tool:child-shell',
+        name: 'shell_execute',
+        args: { command: 'ls' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.started',
+        toolCallId: 'subagent-tool:child-shell',
+      });
+
+      expect(state.pendingToolCalls).toEqual({});
+      expect(flatBlocks(state)).toEqual([
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'child-owner',
+          steps: [expect.objectContaining({ toolName: 'shell_execute', status: 'pending' })],
+        }),
+      ]);
+    });
+
     test('projects every durable Sub-agent suspension without waiting for the active approval', () => {
       let state = handleRuntimeEventAction(fresh(), {
         type: 'subagent.started',
@@ -4225,7 +4268,7 @@ describe('eventReducer (blocks model)', () => {
         kind: 'subagent',
         subagentId: 'deferred-subagent',
         status: 'suspended',
-        approvalState: 'queued',
+        approvalState: 'queued_user_approval',
         parentToolCallId: 'task-deferred',
         awaitingApproval: true,
         approvingStepIndex: 0,
@@ -4272,7 +4315,7 @@ describe('eventReducer (blocks model)', () => {
           reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
         }),
       });
-      expect(flatBlocks(state)[0]).toMatchObject({ approvalState: 'queued' });
+      expect(flatBlocks(state)[0]).toMatchObject({ approvalState: 'queued_auto_review' });
 
       state = handleRuntimeEventAction(state, {
         type: 'auto_review.requested',
@@ -4768,6 +4811,244 @@ describe('eventReducer (blocks model)', () => {
       });
 
       expect(granted.interrupt).toBeNull();
+    });
+
+    test('accepted local approval immediately resumes only the interrupted subagent', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'approved-child', role: 'explore', task: 'Inspect files' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.started',
+        subagent: { id: 'queued-sibling', role: 'review', task: 'Review files' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'approved-parent-task',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'approved-child',
+          role: 'explore',
+          parentToolCallId: 'approved-parent-task',
+          blockedToolId: 'approved-child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'queued-parent-task',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'queued-sibling',
+          role: 'review',
+          parentToolCallId: 'queued-parent-task',
+          blockedToolId: 'queued-child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        interactionId: 'approved-interaction',
+        toolCallId: 'approved-parent-task',
+        approval: approval({
+          callId: 'approved-child-shell',
+          subagentId: 'approved-child',
+        }),
+      });
+
+      const resumed = dispatch(state, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      });
+
+      expect(resumed.interrupt).toBeNull();
+      expect(flatBlocks(resumed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'approved-child',
+          status: 'running',
+          approvalState: undefined,
+          awaitingApproval: false,
+        }),
+      );
+      expect(flatBlocks(resumed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'queued-sibling',
+          status: 'suspended',
+          awaitingApproval: true,
+        }),
+      );
+
+      const afterLateDeferred = handleRuntimeEventAction(resumed, {
+        type: 'subagent.approval_deferred',
+        toolCallId: 'approved-parent-task',
+      });
+      expect(flatBlocks(afterLateDeferred)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'approved-child',
+          status: 'running',
+          approvalAcknowledged: true,
+          awaitingApproval: false,
+        }),
+      );
+    });
+
+    test('local rejection keeps the approval until its durable terminal event arrives', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-rejected-locally',
+        toolCallId: 'shell-rejected-locally',
+        approval: approval(),
+      });
+
+      const unresolved = dispatch(requested, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'denied' },
+      });
+
+      expect(unresolved).toBe(requested);
+      expect(unresolved.interrupt?.kind).toBe('approval');
+    });
+
+    test('accepted local approval falls back only to one canonical awaiting-user child', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'legacy-active-child', role: 'explore', task: 'Inspect files' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.started',
+        subagent: { id: 'legacy-queued-sibling', role: 'review', task: 'Review files' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'legacy-active-parent',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'legacy-active-child',
+          role: 'explore',
+          parentToolCallId: 'legacy-active-parent',
+          blockedToolId: 'legacy-active-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'legacy-queued-parent',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'legacy-queued-sibling',
+          role: 'review',
+          parentToolCallId: 'legacy-queued-parent',
+          blockedToolId: 'legacy-queued-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        interactionId: 'legacy-active-approval',
+        toolCallId: 'legacy-active-parent',
+        approval: approval({
+          callId: 'legacy-active-shell',
+          subagentId: 'legacy-active-child',
+        }),
+      });
+      state = {
+        ...state,
+        interrupt: {
+          kind: 'approval',
+          interactionId: 'legacy-active-approval',
+          toolCallId: 'legacy-child-tool-id',
+          approval: approval({ callId: 'legacy-active-shell' }),
+        },
+      };
+
+      const resumed = dispatch(state, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      });
+
+      expect(flatBlocks(resumed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'legacy-active-child',
+          status: 'running',
+          awaitingApproval: false,
+        }),
+      );
+      expect(flatBlocks(resumed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'legacy-queued-sibling',
+          status: 'suspended',
+          approvalState: 'queued_user_approval',
+        }),
+      );
+    });
+
+    test('a completed sibling cannot clear another subagent approval from the Footer', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'waiting-child', role: 'review', task: 'Wait for approval' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.started',
+        subagent: { id: 'completed-child', role: 'explore', task: 'Finish independently' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'waiting-parent-task',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'waiting-child',
+          role: 'review',
+          parentToolCallId: 'waiting-parent-task',
+          blockedToolId: 'waiting-child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        interactionId: 'waiting-approval',
+        toolCallId: 'waiting-parent-task',
+        approval: {
+          ...approval(),
+          callId: 'waiting-child-shell',
+          subagentId: 'waiting-child',
+        },
+      });
+
+      const completed = handleRuntimeEventAction(state, {
+        type: 'subagent.completed',
+        subagent: {
+          id: 'completed-child',
+          summary: 'Finished independently.',
+          toolCallCount: 1,
+          durationMs: 10,
+        },
+      });
+
+      expect(completed.interrupt).toMatchObject({
+        kind: 'approval',
+        interactionId: 'waiting-approval',
+        toolCallId: 'waiting-parent-task',
+      });
+      expect(flatBlocks(completed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'waiting-child',
+          status: 'suspended',
+          awaitingApproval: true,
+        }),
+      );
+      expect(flatBlocks(completed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'completed-child',
+          status: 'done',
+        }),
+      );
     });
 
     test('subagent approval rejection clears the parent task Footer interrupt', () => {
@@ -5333,9 +5614,9 @@ describe('eventReducer (blocks model)', () => {
   // ── Interaction Mode ──
 
   describe('SET_INTERACTION_MODE', () => {
-    test('default interactionMode is ask, authorization is default', () => {
+    test('default interactionMode is auto, authorization is default', () => {
       const s = fresh();
-      expect(s.interactionMode).toBe('accept_edits');
+      expect(s.interactionMode).toBe('auto');
       expect(s.status.authorization).toBe('default');
     });
 
@@ -5359,12 +5640,8 @@ describe('eventReducer (blocks model)', () => {
       expect(s.status.authorization).toBe('default');
     });
 
-    test('toggle cycles ask → auto → full → ask with correct auth', () => {
+    test('toggle cycles auto → full → ask → auto with correct auth', () => {
       let s = fresh();
-      expect(s.interactionMode).toBe('accept_edits');
-      expect(s.status.authorization).toBe('default');
-
-      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
       expect(s.interactionMode).toBe('auto');
       expect(s.status.authorization).toBe('default');
 
@@ -5374,6 +5651,10 @@ describe('eventReducer (blocks model)', () => {
 
       s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
       expect(s.interactionMode).toBe('accept_edits');
+      expect(s.status.authorization).toBe('default');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('auto');
       expect(s.status.authorization).toBe('default');
     });
 
@@ -5846,6 +6127,7 @@ describe('model streaming RuntimeEvent rendering', () => {
     });
     state = handleRuntimeEventAction(state, {
       type: 'model.retry',
+      invocationId: 'request-1',
       attempt: 1,
       maxAttempts: 5,
       error: 'socket disconnected',
@@ -6207,6 +6489,7 @@ describe('model streaming RuntimeEvent rendering', () => {
       type: 'RUNTIME_EVENT',
       event: {
         type: 'model.retry',
+        invocationId: 'partial-answer-request',
         attempt: 1,
         maxAttempts: 5,
         error: 'socket disconnected',
@@ -6243,6 +6526,7 @@ describe('model streaming RuntimeEvent rendering', () => {
     });
     state = handleRuntimeEventAction(state, {
       type: 'model.retry',
+      invocationId: 'divergent-request',
       attempt: 1,
       maxAttempts: 5,
       error: 'socket disconnected',
@@ -6345,7 +6629,6 @@ describe('context compaction RuntimeEvent rendering', () => {
     ['empty_summary', 'unusable compaction summary', true],
     ['truncated_summary', 'unusable compaction summary', true],
     ['unexpected_tool_call', 'unusable compaction summary', true],
-    ['provider_admission_denied', 'Provider data policy', true],
     ['summary_aborted', 'was cancelled', false],
   ] as const)('renders typed %s guidance', (errorKind, expected, isError) => {
     const state = handleRuntimeEventAction(fresh(), {

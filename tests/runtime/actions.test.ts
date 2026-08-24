@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { assertAgentStateInvariants } from '@kite/agent-kernel';
 import {
   createRuntimeHostStateInitialState,
   LIMITED_RESOURCE_BUDGET_,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
 } from '@kite/runtime-host/kernel-adapter';
 import {
   eventsForRunCancellation,
@@ -569,6 +571,126 @@ test('bounded cancellation removes every durable waiter before aborting the turn
     status: 'active',
     waiters: { 'tool:queued': { state: 'cancelled' } },
   });
+});
+
+test('process cancellation on one child approval settles deferred siblings without rewriting completed children', () => {
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'cancel-concurrent-child-approval',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  state.tools.active = ['task-a'];
+  state.tools.queue = ['task-b'];
+  state.tools.calls['task-a'] = {
+    toolCallId: 'task-a',
+    modelMessageId: 'parallel-task-model',
+    name: 'task',
+    args: { name: 'A', subagent_type: 'review', task: 'Review A.' },
+    status: 'awaiting_approval',
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.tools.calls['task-b'] = {
+    toolCallId: 'task-b',
+    modelMessageId: 'parallel-task-model',
+    name: 'task',
+    args: { name: 'B', subagent_type: 'review', task: 'Review B.' },
+    status: 'queued',
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.tools.calls['task-c'] = {
+    toolCallId: 'task-c',
+    modelMessageId: 'parallel-task-model',
+    name: 'task',
+    args: { name: 'C', subagent_type: 'review', task: 'Review C.' },
+    status: 'succeeded',
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.suspendedSubagents['task-a'] = {} as never;
+  state.suspendedSubagents['task-b'] = {} as never;
+  for (const [invocationId, toolCallId] of [
+    ['task-invocation-a', 'task-a'],
+    ['task-invocation-b', 'task-b'],
+  ] as const) {
+    state.capabilities.invocations[invocationId] = {
+      invocationId,
+      toolCallId,
+      capabilityId: 'builtin:task',
+      capabilityRevision: '1'.repeat(64),
+      argumentsDigest: '2'.repeat(64),
+      authorizationDigest: '3'.repeat(64),
+      admissionDigest: '4'.repeat(64),
+      effectiveEffectsDigest: '5'.repeat(64),
+      receiptRequirement: 'control_receipt',
+      status: 'running',
+      recordedAt: '2026-08-24T00:00:00.000Z',
+      startedAt: '2026-08-24T00:00:00.000Z',
+      attemptsStarted: 1,
+    };
+  }
+  state.interactions = {
+    kind: 'awaiting_tool_approval',
+    interactionId: 'approval-a',
+    toolCallId: 'task-a',
+    approval: {
+      scope: 'once',
+      cwd: '/workspace',
+      threadId: state.session.threadId,
+      tool: 'shell_execute',
+      command: 'rg fixture /outside/a.txt',
+      risk: 'execute_code',
+      approvalHash: 'hash-a',
+      summary: 'Inspect external fixture A',
+      reason: 'Requires user approval.',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    },
+  };
+
+  const events = eventsForRunCancellation(state, 'Tool approval cancelled by user.', 'user');
+
+  expect(events).toContainEqual(
+    expect.objectContaining({ type: 'approval.rejected', toolCallId: 'task-a' }),
+  );
+  expect(events).toContainEqual(
+    expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'task-b' }),
+  );
+  expect(events).not.toContainEqual(
+    expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'task-c' }),
+  );
+  expect(events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        type: 'capability.reconciliation_resolved',
+        invocationId: 'task-invocation-a',
+        decision: 'waived',
+      }),
+      expect.objectContaining({
+        type: 'capability.reconciliation_resolved',
+        invocationId: 'task-invocation-b',
+        decision: 'waived',
+      }),
+    ]),
+  );
+  expect(events.at(-1)).toMatchObject({ type: 'turn.aborted', cause: 'user' });
+
+  const cancelled = events.reduce(
+    (current, event) =>
+      reduceRuntimeState(
+        current,
+        normalizeCurrentToolOutcomeEvent(event, current, '2026-08-24T00:00:00.000Z'),
+      ),
+    state,
+  );
+  expect(cancelled.tools.calls['task-a']?.status).toBe('rejected');
+  expect(cancelled.tools.calls['task-b']?.status).toBe('cancelled');
+  expect(cancelled.tools.calls['task-c']?.status).toBe('succeeded');
+  expect(cancelled.capabilities.invocations['task-invocation-a']?.status).toBe('failed');
+  expect(cancelled.capabilities.invocations['task-invocation-b']?.status).toBe('failed');
+  expect(cancelled.suspendedSubagents).toEqual({});
+  expect(cancelled.interactions).toEqual({ kind: 'idle' });
+  expect(() => assertAgentStateInvariants(cancelled)).not.toThrow();
 });
 
 test('approval ignores grants that were not offered by the pending interaction', () => {

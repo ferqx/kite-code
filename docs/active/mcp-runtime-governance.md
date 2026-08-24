@@ -6,7 +6,7 @@
 
 验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-stdio-transport.test.ts tests/mcp-transport-boundary-concurrency.test.ts tests/mcp-credential-broker.test.ts tests/mcp/write-admission.test.ts tests/mcp/write-dispatch-governance.test.ts tests/runtime/tool-controller.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`、`bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0127、`mcp-control-plane.md`、`mcp-authentication.md`、`mcp-project-approval.md`。
+相关：ADR-0127、ADR-0131、`mcp-control-plane.md`、`mcp-authentication.md`、`mcp-project-approval.md`。
 
 ## 唯一 owner 与 binding
 
@@ -30,7 +30,9 @@ Builtin Manager 不导入 `StdioClientTransport`、`cross-spawn`，也不展开 
 
 Host wrapper 先验证 strict `RuntimeControlFrame`，再启动 exact MCP child；ready/terminal control frame 绑定 domain、peer、invocation 与 monotonic sequence。control channel 不包含 secret/HMAC/bootstrap key，也不传给实际 child。JSON-RPC line/read/write/backpressure 都有固定 bounds；wrong peer/invocation、replay、unknown/truncated/oversized、child pre-ready exit 或 cleanup unknown 都 fail closed。
 
-command、path-like argv 与 cwd 在 Host port 前经过 protected-path/effective Workspace 检查。未批准路径、Workspace drift 或 config revision drift 必须保持 Host spawn 为 0。HTTP 不套用 stdio control frame；其真实性来自真实 TLS/OAuth/network boundary。
+command、path-like argv 与 cwd 在 Host port 前经过 protected-path/effective Workspace 检查。canonical Workspace
+member 无论名称是否为 `.git`、`.env` 或 Agent/MCP 配置都允许进入后续 process/surface gate；Workspace 外
+未批准路径、Workspace drift 或 config revision drift 必须保持 Host spawn 为 0。HTTP 不套用 stdio control frame；其真实性来自真实 TLS/OAuth/network boundary。
 
 ## Credential
 

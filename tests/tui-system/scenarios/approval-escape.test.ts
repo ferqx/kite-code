@@ -103,3 +103,56 @@ describe('TUI PTY System — Approval Escape', () => {
     TIMEOUT,
   );
 });
+
+describe('TUI PTY System — Approval Ctrl+C', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace();
+    server.setResponses([
+      {
+        toolContinuation: 'aborted',
+        message: {
+          content: 'I will run the requested command.',
+          tool_calls: [
+            {
+              id: 'call_ctrl_c',
+              name: 'shell_execute',
+              args: { command: 'node -e "2+2"', description: 'test Ctrl+C approval' },
+            },
+          ],
+        },
+      },
+      { message: { content: 'Still alive after approval Ctrl+C.' } },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'Ctrl+C cancels approval without exiting the TUI',
+    async () => {
+      await submitUserMessage(tui, server, 'Run a command', { timeout: 15000 });
+      await waitForText(() => tui.viewport(), '工具授权', 15000);
+
+      tui.write('\x03');
+      await waitForTuiReady(tui);
+
+      await submitUserMessage(tui, server, 'Are you still alive?', { timeout: 15000 });
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Still alive after approval Ctrl+C.',
+        15000,
+      );
+      expect(screenContains(tui.viewport(), 'Still alive after approval Ctrl+C.')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+});

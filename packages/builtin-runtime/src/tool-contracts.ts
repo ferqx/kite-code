@@ -355,10 +355,10 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     returns: {
       format: 'interrupt',
       description:
-        'A user_input request whose questions contain 1-3 items and 2-3 {label, description, recommended} options each.',
+        'A user_input request whose questions contain 1-3 items and 2-3 {label, description, recommended?} options each.',
     },
     constraints:
-      'Use only the canonical questions array. Removed top-level question/options are invalid; exactly one option is recommended and the client always adds free-text input.',
+      'Use only the canonical questions array. Removed top-level question/options are invalid; put the preferred option first and optionally set exactly one recommended=true. The client always adds free-text input.',
     recovery:
       'Correct the canonical questions array once and never pass stringified JSON. User rejection/cancellation is terminal for that interaction and is not auto-retried.',
   },
@@ -381,7 +381,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       ],
     },
     constraints:
-      'Both subagent_type and task are required. task is the concrete self-contained instruction, not a summary for the user. Clarify material ambiguity before dispatch: child agents cannot call ask_user and must return missing prerequisites to the parent. Planning permits only explore/plan; other disclosed roles return a phase-constraint error and never gain writes by implication.',
+      'name, subagent_type and task are required. name is a short public label that states what the child is doing; task is the concrete self-contained instruction. Clarify material ambiguity before dispatch: child agents cannot call ask_user and must return missing prerequisites to the parent. Planning permits only explore/plan; other disclosed roles return a phase-constraint error and never gain writes by implication.',
     recovery:
       'Approval/policy denial and exhausted/unknown child effects are not replayed. Resume only a Runtime-owned continuation; use a new bounded task only after real replan/user/provider progress.',
   },

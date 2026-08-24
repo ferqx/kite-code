@@ -69,7 +69,8 @@ TUI 把该内部诊断直接投影为对话内容。
 
 ## 边界与现状
 
-- TUI 与 CLI `run` 均执行门禁；web 前端当前不做 workspace 信任检查。
+- TUI 与 CLI `run` 均执行门禁；当前没有独立 web 前端入口。
 - workspace 信任是目录级一次性决定，不是逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
+- workspace 信任同时授权 Agent 将其已读取的任意仓库内容用于后续模型上下文。模型调用不会另设正文准入、分类或阻断；敏感内容仍不得进入 Runtime Event、telemetry 或 session metadata；写入、shell、网络、MCP write 等副作用继续受各自的授权与执行边界约束。
 - 门禁求值前只读取惰性配置（JSONC 解析，不执行项目代码）；skill 扫描、MCP 连接与 shell 执行全部发生在门禁通过之后。
 - 通过门禁后才挂载的 `TuiApp` 可将 workspace 传给会话 Header 作为展示快照；该传递不得改变门禁判定顺序，亦不得在未信任分支挂载 Header 或读取会话状态。

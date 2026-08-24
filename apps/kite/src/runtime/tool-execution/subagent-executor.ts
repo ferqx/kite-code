@@ -58,7 +58,6 @@ import {
   createAppToolTurnContext,
 } from '#app/bootstrap/runtime/tool-turn-context';
 import { getFeatureFlags } from '#app/config/features';
-import { ProviderDataAdmissionError } from '#app/config/index';
 import { visibleProjectInstructions } from '#app/runtime/tool-execution/project-instruction-guard';
 import { createCapabilityBinding } from '#builtin-runtime';
 import type {
@@ -233,6 +232,7 @@ export type PrivateSubagentTask = {
   readonly source: 'private_artifact_v1';
   readonly requestArtifact: import('@kite/runtime-spi').SubagentTaskRequestArtifact;
   readonly payload: {
+    readonly name: string;
     readonly subagent_type: 'explore' | 'plan' | 'code' | 'review';
     readonly task: string;
   };
@@ -420,6 +420,7 @@ function isExactTaskBlockedTerminalProjection(
         : undefined;
   if (
     projectedContinuation.id !== expectedContinuation.id ||
+    projectedContinuation.name !== (expectedContinuation.name ?? 'Delegated task') ||
     projectedRole !== expectedContinuation.role.role ||
     (projectedContinuation.modelInvocationOrdinal ?? 0) !==
       (expectedContinuation.modelInvocationOrdinal ?? 0)
@@ -484,6 +485,60 @@ export function buildBlockedToolRequest(
   } as PendingToolRequest;
 }
 
+/** Multi-agent exploration gets model-reviewed autonomy in accept-edits mode.
+ * The identity comes from sibling task calls in one model response, never from
+ * task prose. Full remains full and every other delegated shape inherits the
+ * live parent mode. */
+export function isConcurrentExploreSubagentBatch(
+  state: Readonly<RuntimeState>,
+  toolCallIds: readonly string[],
+): boolean {
+  if (toolCallIds.length < 2) return false;
+  const first = state.tools.calls[toolCallIds[0]!];
+  if (!first?.modelMessageId) return false;
+  return toolCallIds.every((toolCallId) => {
+    const call = state.tools.calls[toolCallId];
+    return (
+      call?.name === 'task' &&
+      call.modelMessageId === first.modelMessageId &&
+      call.createdAtTurnId === first.createdAtTurnId &&
+      isRecordObject(call.args) &&
+      call.args.subagent_type === 'explore'
+    );
+  });
+}
+
+export function effectiveSubagentInteractionMode(
+  state: RuntimeState,
+  parentToolCallId: string,
+  concurrentExploreBatch = false,
+  knownRole?: string,
+): ReturnType<typeof getEffectiveInteractionMode> {
+  const parentMode = getEffectiveInteractionMode(state);
+  if (parentMode !== 'accept_edits') return parentMode;
+  const parent = state.tools.calls[parentToolCallId];
+  const role =
+    (parent && isRecordObject(parent.args) ? parent.args.subagent_type : undefined) ??
+    state.suspendedSubagents[parentToolCallId]?.role ??
+    knownRole;
+  if (parent?.name !== 'task' || role !== 'explore' || !parent.modelMessageId) {
+    return parentMode;
+  }
+  if (concurrentExploreBatch) return 'auto';
+  const exploreSiblingCount = Object.values(state.tools.calls).filter((call) => {
+    const siblingRole = isRecordObject(call.args)
+      ? call.args.subagent_type
+      : state.suspendedSubagents[call.toolCallId]?.role;
+    return (
+      call.name === 'task' &&
+      call.modelMessageId === parent.modelMessageId &&
+      call.createdAtTurnId === parent.createdAtTurnId &&
+      siblingRole === 'explore'
+    );
+  }).length;
+  return exploreSiblingCount > 1 ? 'auto' : parentMode;
+}
+
 export function blockedSubagentReviewEvent(input: {
   state: RuntimeState;
   parentToolCallId: string;
@@ -507,7 +562,7 @@ export function blockedSubagentReviewEvent(input: {
   });
   approval.subagentId = blocked.continuation.id;
 
-  const effectiveMode = getEffectiveInteractionMode(state);
+  const effectiveMode = effectiveSubagentInteractionMode(state, input.parentToolCallId);
   if (
     exact.route === 'auto_review' ||
     (blocked.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' &&
@@ -636,7 +691,7 @@ function exactBlockedSubagentPolicy(input: {
     threadId: state.session.threadId,
     context: Object.freeze({
       phase: getAgentPhase(getActivePlanning(state)),
-      interactionMode: getEffectiveInteractionMode(state),
+      interactionMode: effectiveSubagentInteractionMode(state, input.parentToolCallId),
       authorizationMode: state.authorization.mode,
       ...(state.authorization.modeSource
         ? { authorizationSource: state.authorization.modeSource }
@@ -706,7 +761,7 @@ function exactBlockedSubagentPolicy(input: {
   }
   const autoReviewFallback =
     blocked.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' &&
-    getEffectiveInteractionMode(state) === 'auto' &&
+    effectiveSubagentInteractionMode(state, input.parentToolCallId) === 'auto' &&
     !state.autoReview.circuitBreakerTripped;
   return {
     request: pendingToolRequestFromValidatedInvocation(validated.value, turnPipeline.projection),
@@ -861,6 +916,11 @@ export function createAppSharedChildToolDispatcher(input: {
         ...params,
         state: executionState as RuntimeState,
         toolCallIds: [runtimeToolCallId],
+        interactionModeOverride: effectiveSubagentInteractionMode(
+          beforeQueue,
+          parentToolCallId,
+          params.subagentAutoReviewBatch === true,
+        ),
         signal: childInput.signal,
         emitRuntimeEvent: undefined,
         emitTerminalEventBatch: undefined,
@@ -1126,7 +1186,7 @@ async function prepareAppTaskResumeChild(input: {
         (frame) => frame.contextMode === 'inline',
       ),
       phase: getAgentPhase(getActivePlanning(state)),
-      interactionMode: getEffectiveInteractionMode(state),
+      interactionMode: effectiveSubagentInteractionMode(state, toolCallId),
       turnId: state.turn.turnId,
       activeTaskId: state.activeTaskId ?? undefined,
       toolCallId,
@@ -1255,10 +1315,7 @@ async function prepareAppTaskResumeChild(input: {
             }) => {
               if (!reservationId) return;
               if (error) {
-                if (
-                  dispatchState === 'not_started' ||
-                  error instanceof ProviderDataAdmissionError
-                ) {
+                if (dispatchState === 'not_started') {
                   await params.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
                     reservationId,
                   );
@@ -1666,14 +1723,18 @@ export async function executeAppTaskToolPipeline(input: {
       authorization: makeState().authorization,
       workspaceAccess: makeState().workspaceAccess,
       phase: getAgentPhase(getActivePlanning(makeState())),
-      interactionMode: getEffectiveInteractionMode(makeState()),
+      interactionMode: effectiveSubagentInteractionMode(
+        makeState(),
+        toolCallId,
+        params.subagentAutoReviewBatch === true,
+        privateTask.payload.subagent_type,
+      ),
       projectInstructions: visibleProjectInstructions(makeState(), call.modelMessageId),
       threadId: makeState().session.threadId,
       recoveryIdentityKey: makeState().toolRecovery.identityKey,
       eventSink: emitSubagentEventForTask(params),
       signal: params.signal,
       model: params.taskModel,
-      providerDataAdmission: params.providerDataAdmission,
       descendantResourceAdmission: params.descendantResourceAdmission,
       modelEffectCoordinator: params.modelEffectCoordinator,
       modelInvocationPersistence: params.modelInvocationPersistence,

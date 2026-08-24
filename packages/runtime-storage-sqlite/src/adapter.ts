@@ -122,7 +122,12 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       stateSchemaVersion: this.stateSchemaVersion,
       isClosed: () => this.#closed,
     });
-    const { insertEvents, loadEvents, lastEventPosition: lastEvent } = eventStore;
+    const {
+      insertEvents,
+      loadEvents,
+      findFirstSessionSummary,
+      lastEventPosition: lastEvent,
+    } = eventStore;
     const sessionMetadata = createSqliteSessionMetadataStore<State>({
       db,
       codec: this.#codec,
@@ -284,10 +289,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         return sessionMetadata
           .list(needle ? Math.max(limit, 200) : limit)
           .map((row) => {
-            const first = loadEvents(row.thread_id)
-              .map((entry) => ({ entry, summary: this.#codec.eventSummary?.(entry.event) ?? null }))
-              .find((candidate) => candidate.summary?.isSessionNameCandidate);
-            const firstText = first?.summary?.searchText ?? '';
+            const firstText = findFirstSessionSummary(row.thread_id)?.searchText ?? '';
             return { row, firstText };
           })
           .filter(
@@ -560,7 +562,9 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
           const positions = new Map<number, number>();
           for (const entry of sourceEvents) {
             const eventId = entry.event_id ?? `${targetSessionId}:${entry.revision}`;
-            const serialized = this.#codec.encodeEvent(entry.event);
+            const serialized =
+              this.#codec.encodeHistoricalEvent?.(entry.event) ??
+              this.#codec.encodeEvent(entry.event);
             eventStore.insertSerializedForkEvent({
               sessionId: targetSessionId,
               eventJson: serialized,

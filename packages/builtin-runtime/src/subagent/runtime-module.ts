@@ -84,7 +84,10 @@ export function normalizeAskUserRequest(input: RuntimeJsonValue): UserInputReque
       label: option.label,
       description: option.description,
     }));
-    const recommendedIndex = question.options.findIndex((option) => option.recommended === true);
+    const explicitRecommendedIndex = question.options.findIndex(
+      (option) => option.recommended === true,
+    );
+    const recommendedIndex = explicitRecommendedIndex >= 0 ? explicitRecommendedIndex : 0;
     const recommended = options[recommendedIndex]!.id;
     return {
       id,
@@ -500,6 +503,7 @@ const SUBAGENT_RESULT_KEYS_ = Object.freeze([
   'error',
   'executionJournal',
   'exhaustedFingerprints',
+  'failureDiagnostic',
   'ok',
   'resourceAdmissionFailure',
   'steps',
@@ -538,6 +542,7 @@ type ProjectedSubagentResult = Readonly<{
   readonly durationMs: number;
   readonly terminalStatus?: (typeof SUBAGENT_TERMINAL_STATUSES_)[number];
   readonly error?: string;
+  readonly failureDiagnostic?: RuntimeJsonValue;
   readonly resourceAdmissionFailure?: RuntimeJsonValue;
   readonly steps?: RuntimeJsonValue;
   readonly executionJournal?: RuntimeJsonValue;
@@ -578,6 +583,9 @@ function projectSubagentResultPayload(
   if (Object.hasOwn(value, 'error')) {
     projected.error = requireString(value.error, 'result.error');
   }
+  if (Object.hasOwn(value, 'failureDiagnostic')) {
+    projected.failureDiagnostic = projectFailureDiagnostic(value.failureDiagnostic);
+  }
   if (Object.hasOwn(value, 'resourceAdmissionFailure')) {
     projected.resourceAdmissionFailure = projectResourceAdmissionFailure(
       value.resourceAdmissionFailure,
@@ -604,6 +612,52 @@ function projectSubagentResultPayload(
   }
   return freezeRuntimeJson(projected) as ProjectedSubagentResult;
 }
+
+function projectFailureDiagnostic(value: unknown): RuntimeJsonValue {
+  const record = requirePlainRecord(value, 'result.failureDiagnostic');
+  assertExactKeys(record, SUBAGENT_FAILURE_DIAGNOSTIC_KEYS_, ['code', 'stage']);
+  const code = requireOneOf(record.code, SUBAGENT_FAILURE_CODES_, 'diagnostic.code');
+  const stage = requireOneOf(record.stage, SUBAGENT_FAILURE_STAGES_, 'diagnostic.stage');
+  const projected: Record<string, RuntimeJsonValue> = {
+    code,
+    stage,
+  };
+  if (Object.hasOwn(record, 'modelInvocationId')) {
+    projected.modelInvocationId = requireString(
+      record.modelInvocationId,
+      'diagnostic.modelInvocationId',
+    );
+  }
+  if (Object.hasOwn(record, 'admissionReason')) {
+    throw new Error('Subagent failure diagnostics cannot contain an admission reason.');
+  }
+  return freezeRuntimeJson(projected);
+}
+
+const SUBAGENT_FAILURE_DIAGNOSTIC_KEYS_ = Object.freeze([
+  'code',
+  'stage',
+  'modelInvocationId',
+] as const);
+
+const SUBAGENT_FAILURE_CODES_ = Object.freeze([
+  'aborted',
+  'timed_out',
+  'invalid_input',
+  'consumer_protocol',
+  'model_step_failed',
+  'internal_error',
+] as const);
+
+const SUBAGENT_FAILURE_STAGES_ = Object.freeze([
+  'initialization',
+  'next_round_preparation',
+  'model_step',
+  'model_response_validation',
+  'tool_consumption',
+  'transcript_validation',
+  'terminal_projection',
+] as const);
 
 function projectResourceAdmissionFailure(value: unknown): RuntimeJsonValue {
   const record = requirePlainRecord(value, 'result.resourceAdmissionFailure');
@@ -797,6 +851,7 @@ function projectBlockedContinuation(
       'mcpBindingIds',
       'messages',
       'modelInvocationOrdinal',
+      'name',
       'projectInstructions',
       'role',
       'steps',
@@ -804,9 +859,10 @@ function projectBlockedContinuation(
       'toolCallCount',
       'toolRecovery',
     ],
-    ['id', 'messages', 'role', 'steps', 'task', 'toolCallCount', 'toolRecovery'],
+    ['id', 'messages', 'name', 'role', 'steps', 'task', 'toolCallCount', 'toolRecovery'],
   );
   const id = requireNonEmptyString(continuation.id, 'result.blocked.continuation.id');
+  const name = requireNonEmptyString(continuation.name, 'result.blocked.continuation.name');
   const roleRecord = requirePlainRecord(continuation.role, 'result.blocked.continuation.role');
   const role = subagentRole(roleRecord.role);
   if (!role) throw new Error('Blocked continuation role is invalid.');
@@ -828,6 +884,7 @@ function projectBlockedContinuation(
   const blockedTool = continuationBlockedTool(continuation, blocked);
   return freezeRuntimeJson({
     id,
+    name,
     role,
     modelInvocationOrdinal,
     blockedTool,

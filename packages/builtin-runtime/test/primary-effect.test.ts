@@ -246,24 +246,6 @@ describe('Builtin primary Model effect execution', () => {
     expect(fixture.counts()).toEqual({ operationCalls: 0, sourceCalls: 0, purpose: undefined });
   });
 
-  test('passes provider denial to the Gateway before operation/source dispatch', async () => {
-    const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
-
-    await expect(
-      coordinator.executePrimaryModelEffect({
-        ...baseInput(),
-        providerDataAdmission: () => ({
-          admitted: false,
-          reason: 'provider_secret_denied',
-          routeAlias: 'primary-denied',
-        }),
-        persistence: persistence(stateWithHistory()),
-      }),
-    ).rejects.toThrow('provider_secret_denied');
-    expect(fixture.counts()).toEqual({ operationCalls: 0, sourceCalls: 0, purpose: undefined });
-  });
-
   test('uses the coordinator Gateway once for primary_agent and preserves stable metrics', async () => {
     const fixture = createGatewayFixture();
     const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);

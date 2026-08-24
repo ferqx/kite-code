@@ -82,6 +82,17 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
     }
   }
   switch (value.type) {
+    case 'provider.admission_status':
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.admissionRevision === undefined ? [] : ['admissionRevision']),
+      ]);
+      requireNonEmptyString(value, 'status');
+      requireNonEmptyString(value, 'reason');
+      if (value.admissionRevision !== undefined) {
+        requireNonEmptyString(value, 'admissionRevision');
+      }
+      break;
     case 'approval.granted':
     case 'approval.rejected':
       requireNonEmptyString(value, 'interactionId');
@@ -95,9 +106,27 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         throw new Error('Filesystem observation evidence is invalid.');
       break;
     case 'model.invocation_prepared':
-      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.admission === undefined ? [] : ['admission']),
+      ]);
       requireNonEmptyString(value, 'invocationId');
       requireNonEmptyString(value, 'routeFingerprint');
+      if (value.admission !== undefined) {
+        const admission = value.admission;
+        if (
+          !isRecord(admission) ||
+          Object.keys(admission).sort().join(',') !==
+            'admitted,payloadClassificationDigest,providerAdmissionRevision,routeIdentityDigest' ||
+          (admission.providerAdmissionRevision !== null &&
+            typeof admission.providerAdmissionRevision !== 'string') ||
+          !/^sha256:[0-9a-f]{64}$/u.test(String(admission.routeIdentityDigest)) ||
+          !/^sha256:[0-9a-f]{64}$/u.test(String(admission.payloadClassificationDigest)) ||
+          typeof admission.admitted !== 'boolean'
+        ) {
+          throw new Error('Legacy model invocation admission evidence is invalid.');
+        }
+      }
       break;
     case 'capability.filesystem_intent_recorded': {
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
@@ -364,6 +393,42 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
       break;
     default:
       break;
+  }
+}
+
+/**
+ * Admit a newly produced event. Retired shapes remain readable so existing
+ * sessions can replay and fork, but no current producer may append them.
+ */
+export function assertCurrentRuntimeEventForWrite(value: unknown): asserts value is KernelEvent {
+  assertCurrentRuntimeEvent(value);
+  const event = value as Readonly<Record<string, unknown>>;
+  if (event.type === 'provider.admission_status') {
+    throw new Error('Retired provider admission status is read-only compatibility data.');
+  }
+  if (
+    event.type === 'model.invocation_prepared' &&
+    (Object.hasOwn(event, 'admission') || event.purpose === 'verification_review')
+  ) {
+    throw new Error('Retired model invocation evidence is read-only compatibility data.');
+  }
+  if (event.type === 'verification.requested') {
+    const spec = isRecord(event.spec) ? event.spec : undefined;
+    const checks = Array.isArray(spec?.checks) ? spec.checks : [];
+    if (checks.some((check) => isRecord(check) && check.type === 'reviewer')) {
+      throw new Error('Retired verification reviewer checks are read-only compatibility data.');
+    }
+  }
+  if (event.type === 'subagent.started') {
+    const subagent = isRecord(event.subagent) ? event.subagent : undefined;
+    if (
+      !subagent ||
+      typeof subagent.name !== 'string' ||
+      subagent.name.length === 0 ||
+      Object.hasOwn(subagent, 'task')
+    ) {
+      throw new Error('Retired subagent task titles are read-only compatibility data.');
+    }
   }
 }
 

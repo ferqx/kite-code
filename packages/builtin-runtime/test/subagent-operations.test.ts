@@ -41,6 +41,7 @@ function blockedResult(): Record<string, unknown> {
   const args = { path: 'README.md' };
   const continuation = {
     id: 'child-1',
+    name: 'Inspect README',
     role: {
       role: 'explore',
       systemPrompt: 'private system prompt must not be projected',
@@ -97,7 +98,7 @@ function completedResult(): Record<string, unknown> {
 
 function project(
   result: Record<string, unknown>,
-  input: Record<string, unknown> = { subagent_type: 'explore' },
+  input: Record<string, unknown> = { name: 'Inspect README', subagent_type: 'explore' },
   phase: 'planning' | 'building' = 'building',
 ) {
   return projectSubagentResult({ input, result, phase });
@@ -157,6 +158,7 @@ describe('RM-14 Builtin subagent result projection', () => {
       command: 'cat README.md',
       continuation: {
         id: 'child-1',
+        name: 'Inspect README',
         role: 'explore',
         modelInvocationOrdinal: 2,
         blockedTool: {

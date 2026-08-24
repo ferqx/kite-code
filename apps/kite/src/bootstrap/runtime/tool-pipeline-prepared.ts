@@ -401,7 +401,13 @@ function assertPolicyEffects(
 ): asserts value is Readonly<CapabilityPolicyEffects> {
   assertRuntimeJson(value, label);
   if (!isJsonRecord(value)) fail(`${label} must be a JSON object.`);
-  const allowedKeys = new Set(['network', 'externalRead', 'externalWrite', 'uncertainEffects']);
+  const allowedKeys = new Set([
+    'network',
+    'externalRead',
+    'externalWrite',
+    'uncertainEffects',
+    'sensitiveExternalAccess',
+  ]);
   for (const [key, item] of Object.entries(value)) {
     if (!allowedKeys.has(key) || item !== true) fail(`${label} is invalid.`);
   }
@@ -428,7 +434,6 @@ function policyFactsMatch(
       risk: policy.risk,
       ...(policy.effects ? { effects: policy.effects } : {}),
       reason: policy.reason,
-      userVisibleSummary: policy.userVisibleSummary,
       expectedEffects: policy.expectedEffects,
       ...(policy.requiresSandbox === undefined ? {} : { requiresSandbox: policy.requiresSandbox }),
       ...(policy.phaseConstraint === undefined ? {} : { phaseConstraint: policy.phaseConstraint }),
@@ -865,6 +870,7 @@ function cloneAndDeepFreezePolicyEffects(
     ...(value.externalRead === true ? { externalRead: true } : {}),
     ...(value.externalWrite === true ? { externalWrite: true } : {}),
     ...(value.uncertainEffects === true ? { uncertainEffects: true } : {}),
+    ...(value.sensitiveExternalAccess === true ? { sensitiveExternalAccess: true } : {}),
   };
   return deepFreeze(clone);
 }

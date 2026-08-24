@@ -344,7 +344,7 @@ describe('App Builtin mechanism resolver', () => {
     );
     const noPolicyShell = noPolicyEffect.shell as typeof approvedShell;
     await noPolicyShell.execute({ command: 'curl https://example.test', timeoutMs: 100 });
-    expect(shellInputs[1]?.networkAccess).toBe('approved');
+    expect(shellInputs[1]?.networkAccess).toBe('none');
     expect(shellInputs[1]?.filesystemAccess).toBe('workspace_only');
 
     const policyAllow = baseInput({

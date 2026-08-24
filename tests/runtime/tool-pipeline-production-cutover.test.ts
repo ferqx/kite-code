@@ -258,7 +258,7 @@ function shellState(workspace: string) {
     modelMessageId: 'message-1',
     ordinal: 0,
     name: 'shell_execute',
-    args: { command: 'printf production-shell' },
+    args: { command: 'pwd' },
     status: 'queued',
     createdAtTurnId: state.turn.turnId,
   };

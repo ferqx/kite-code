@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import {
   BROKERED_GIT_FEATURE_REVISION_,
   type PreparedSandboxExecution,
@@ -94,9 +94,6 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
     if (preparation.filesystemMode === 'allow_all') {
       if (this.#options.backend === 'windows_restricted_token') {
         return this.#prepareWindows(grant, canonicalWorkspace);
-      }
-      if (this.#options.backend !== 'seatbelt') {
-        return failure('command_denied', 'sandbox_full_access_would_expose_host_control_root');
       }
     }
     if (this.#options.backend === 'windows_restricted_token') {
@@ -271,6 +268,7 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
             ? 'full_access'
             : (this.#options.filesystemScope ?? 'workspace_write'),
         sandboxRuntimeDir: runtimeRoots.dataRoot,
+        sandboxControlBase: dirname(runtimeRoots.controlRoot),
         runtimeReadOnlyRoots: this.#options.runtimeReadOnlyRoots ?? discoverRuntimeReadOnlyRoots(),
         gitAccess:
           this.#options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_
@@ -285,12 +283,11 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
       const args = generateBwrapArgs(workspace, {
         network: preparation.networkMode,
         sandboxRuntimeDir: runtimeRoots.dataRoot,
+        sandboxControlBase: dirname(runtimeRoots.controlRoot),
         filesystemScope:
           preparation.filesystemMode === 'allow_all'
             ? 'full_access'
             : (this.#options.filesystemScope ?? 'workspace_write'),
-        gitMetadataDeny:
-          this.#options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_,
       });
       const inner = seccomp
         ? [seccomp, shell, '-c', wrappedCommand]

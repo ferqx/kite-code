@@ -80,7 +80,7 @@ describe('protected-path policy V1', () => {
     expect(read.canonicalPath).toBe(canonicalPathForComparison(join(workspace, 'src', 'file.ts')));
   });
 
-  test('allows all file reads and trusted-workspace writes while retaining execute protection', () => {
+  test('admits every operation inside the canonical Workspace', () => {
     const workspace = temporaryDirectory('openpx-protected-rules-');
     const outside = temporaryDirectory('openpx-protected-outside-');
     const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
@@ -99,7 +99,7 @@ describe('protected-path policy V1', () => {
     ]) {
       expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('allow');
       expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('allow');
-      expect(evaluator.evaluate({ path, operation: 'execute' }).outcome).toBe('deny');
+      expect(evaluator.evaluate({ path, operation: 'execute' }).outcome).toBe('allow');
     }
     expect(evaluator.evaluate({ path: outside, operation: 'read' })).toMatchObject({
       outcome: 'allow',
@@ -139,7 +139,7 @@ describe('protected-path policy V1', () => {
     }
   });
 
-  test('matches protected execute identities conservatively across ASCII case aliases', () => {
+  test('does not reinterpret Workspace case aliases as protected identities', () => {
     const workspace = temporaryDirectory('openpx-protected-case-alias-');
     const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
 
@@ -152,7 +152,7 @@ describe('protected-path policy V1', () => {
     ]) {
       expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('allow');
       expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('allow');
-      expect(evaluator.evaluate({ path, operation: 'execute' }).outcome).toBe('deny');
+      expect(evaluator.evaluate({ path, operation: 'execute' }).outcome).toBe('allow');
     }
   });
 
@@ -171,7 +171,7 @@ describe('protected-path policy V1', () => {
     expect(decision.canonicalPath).toBe(canonicalPathForComparison(join(outside, 'new.txt')));
   });
 
-  test('allows protected-looking file aliases while retaining execute denial', () => {
+  test('allows protected-looking inward aliases for every operation', () => {
     const workspace = temporaryDirectory('openpx-protected-inward-symlink-');
     mkdirSync(join(workspace, 'ordinary'));
     writeFileSync(join(workspace, 'ordinary', 'config'), 'ordinary');
@@ -194,8 +194,8 @@ describe('protected-path policy V1', () => {
     });
     expect(evaluator.evaluate({ path: '.git/config', operation: 'write' }).outcome).toBe('allow');
     expect(evaluator.evaluate({ path: '.git/config', operation: 'execute' })).toMatchObject({
-      outcome: 'deny',
-      reason: 'protected_directory',
+      outcome: 'allow',
+      reason: 'allowed_workspace_path',
     });
     if (process.platform !== 'win32') {
       expect(evaluator.evaluate({ path: '.env', operation: 'read' })).toMatchObject({
@@ -207,7 +207,7 @@ describe('protected-path policy V1', () => {
     }
   });
 
-  test('evaluates deny roots before a tighter allowlist', () => {
+  test('does not let a name-based allowlist narrow the canonical Workspace', () => {
     const workspace = temporaryDirectory('openpx-protected-deny-wins-');
     mkdirSync(join(workspace, '.git'));
     const evaluator = createProtectedPathEvaluator({
@@ -217,13 +217,12 @@ describe('protected-path policy V1', () => {
     });
 
     expect(evaluator.evaluate({ path: '.git/config', operation: 'execute' })).toMatchObject({
-      outcome: 'deny',
-      reason: 'protected_directory',
-      matchedRule: '.git',
+      outcome: 'allow',
+      reason: 'allowed_workspace_path',
     });
   });
 
-  test('unions additional deny roots and keeps prompt as a non-allow outcome', () => {
+  test('ignores name-based deny roots inside Workspace and still rejects invalid paths', () => {
     const workspace = temporaryDirectory('openpx-protected-union-');
     mkdirSync(join(workspace, 'private'));
     const deny = createProtectedPathEvaluator({
@@ -233,11 +232,12 @@ describe('protected-path policy V1', () => {
     });
     const prompt = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'prompt' });
 
-    expect(deny.evaluate({ path: 'private/data.txt', operation: 'execute' }).reason).toBe(
-      'additional_deny',
-    );
+    expect(deny.evaluate({ path: 'private/data.txt', operation: 'execute' })).toMatchObject({
+      outcome: 'allow',
+      reason: 'allowed_workspace_path',
+    });
     expect(prompt.evaluate({ path: '.env', operation: 'read' }).outcome).toBe('allow');
-    expect(prompt.evaluate({ path: '.env', operation: 'execute' }).outcome).toBe('prompt');
+    expect(prompt.evaluate({ path: '.env', operation: 'execute' }).outcome).toBe('allow');
     expect(prompt.evaluate({ path: 'bad\0path', operation: 'write' })).toMatchObject({
       outcome: 'prompt',
       reason: 'invalid_path',
@@ -245,7 +245,7 @@ describe('protected-path policy V1', () => {
     });
   });
 
-  test('projects every shared protected rule into the native Seatbelt boundary', () => {
+  test('keeps Workspace identities out of the native Seatbelt deny boundary', () => {
     const workspace = temporaryDirectory('openpx-protected-seatbelt-');
     const profile = generateSandboxProfile(workspace);
     const canonicalWorkspace = canonicalExistingPath(workspace);
@@ -258,12 +258,9 @@ describe('protected-path policy V1', () => {
       const seatbeltPath = resolve(canonicalWorkspace, path)
         .replaceAll('\\', '\\\\')
         .replaceAll('"', '\\"');
-      expect(profile).toContain(seatbeltPath);
+      expect(profile).not.toContain(seatbeltPath);
     }
-    expect(profile).toContain('(regex #"');
-    expect(profile).toContain('[gG][iI][tT]');
-    expect(profile).toContain('[aA][gG][eE][nN][tT][sS]');
-    expect(profile).toContain('[eE][nN][vV]');
+    expect(profile).not.toContain('(deny file-read* file-map-executable file-write*');
   });
 });
 
@@ -390,7 +387,7 @@ describe('path-policy Registry and Harness integration', () => {
     expect(result.result?.stdout).toContain('agent-config');
   });
 
-  test('local stdio MCP rejects a protected cwd before transport creation', async () => {
+  test('local stdio MCP admits every Workspace cwd and executable', async () => {
     const workspace = temporaryDirectory('openpx-protected-mcp-');
     mkdirSync(join(workspace, '.kite-code'));
     const protectedPathEvaluator = createProtectedPathEvaluator({
@@ -406,7 +403,7 @@ describe('path-policy Registry and Harness integration', () => {
         }) as unknown as Client,
       createTransport: () => {
         transports++;
-        return {} as never;
+        throw new Error('transport fixture stop');
       },
     });
 
@@ -416,8 +413,8 @@ describe('path-policy Registry and Harness integration', () => {
         command: 'fixture',
         cwd: join(workspace, '.kite-code'),
       }),
-    ).rejects.toThrow('protected-path policy');
-    expect(transports).toBe(0);
+    ).rejects.toThrow('transport fixture stop');
+    expect(transports).toBe(1);
     expect(manager.getServerStates().get('protected')?.health).toBe('disconnected');
 
     await expect(
@@ -426,18 +423,8 @@ describe('path-policy Registry and Harness integration', () => {
         command: '.git/hooks/server',
         cwd: workspace,
       }),
-    ).rejects.toThrow('executable by protected-path policy');
-    expect(transports).toBe(0);
-
-    await expect(
-      manager.connect('protected-interpreter-argument', {
-        type: 'stdio',
-        command: 'node',
-        args: ['.git/hooks/server.js'],
-        cwd: workspace,
-      }),
-    ).rejects.toThrow('arguments by protected-path policy');
-    expect(transports).toBe(0);
+    ).rejects.toThrow('transport fixture stop');
+    expect(transports).toBe(2);
   });
 
   test('local stdio MCP passes the canonical admitted cwd to its transport factory', async () => {

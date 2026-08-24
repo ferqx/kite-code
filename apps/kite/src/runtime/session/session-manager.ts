@@ -166,6 +166,12 @@ export class SessionManager {
     const coordinatorAccess = this.deps.runtimeSessionCoordinator;
     if (!coordinatorAccess) return undefined;
     const existingCoordinator = coordinatorAccess.get(runtime.threadId);
+    // Interaction mode is mutable session state, not an immutable binding
+    // identity. TUI replay and the prompt submission boundary may project the
+    // latest mode onto SessionRuntime before the Host performs its one-time
+    // recovery ensure, so align the retained coordinator before asserting the
+    // rest of the identity.
+    existingCoordinator?.updateInteractionMode(runtime.interactionMode);
     const modelInvocationRuntime = this.deps.modelInvocationRuntimeFactory(runtime.workspace);
     const identity: RuntimeSessionCoordinatorIdentity = {
       sessionId: runtime.threadId,

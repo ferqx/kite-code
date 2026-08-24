@@ -114,7 +114,7 @@ export function analyzeRuntimePackages(repositoryRoot: string): RuntimePackageAn
       'package.json',
     );
   }
-  validateRootScripts(rootManifest, violations);
+  validateRootScripts(root, rootManifest, violations);
   validateRootPackageEntry(root, rootManifest, violations);
 
   const packages = loadPackages(root, violations);
@@ -128,7 +128,6 @@ export function analyzeRuntimePackages(repositoryRoot: string): RuntimePackageAn
   validatePublicExports(packages, violations);
   validateConsumers(packages, imports, violations);
   validateClientBoundary(root, packages, imports, violations);
-  validateExceptions(root, imports, violations);
 
   const packageEdges = uniqueEdges(
     imports
@@ -288,7 +287,11 @@ function loadPackages(root: string, violations: RuntimePackageViolation[]): Pack
   return packages;
 }
 
-function validateRootScripts(manifest: PackageJson, violations: RuntimePackageViolation[]): void {
+function validateRootScripts(
+  root: string,
+  manifest: PackageJson,
+  violations: RuntimePackageViolation[],
+): void {
   const required: Readonly<Record<string, readonly string[]>> = {
     build: ['scripts/run-runtime-workspace-script.ts build'],
     typecheck: ['tsc --noEmit', 'scripts/run-runtime-workspace-script.ts typecheck'],
@@ -308,6 +311,29 @@ function validateRootScripts(manifest: PackageJson, violations: RuntimePackageVi
       }
     }
   }
+
+  for (const [name, command] of Object.entries(manifest.scripts ?? {})) {
+    if (typeof command !== 'string') continue;
+    for (const source of scriptSourcePaths(command)) {
+      if (isRegularFile(join(root, source))) continue;
+      addViolation(
+        violations,
+        'ROOT_SCRIPT_SOURCE_MISSING',
+        `root ${name} executes missing source ${source}`,
+        'package.json',
+      );
+    }
+  }
+}
+
+function scriptSourcePaths(command: string): string[] {
+  const sources = new Set<string>();
+  const pattern = /(?:^|\s)(?:bun(?:\s+--watch)?\s+run|bun\s+test)\s+([^\s]+)/gu;
+  for (const match of command.matchAll(pattern)) {
+    const candidate = match[1]?.replace(/^['"]|['"]$/gu, '');
+    if (candidate && /\.(?:ts|tsx|js|jsx)$/u.test(candidate)) sources.add(candidate);
+  }
+  return [...sources];
 }
 
 function validateRootPackageEntry(
@@ -1113,7 +1139,6 @@ function validateCompositionRoot(
     .map(([path]) => normalizedRelative(root, path))
     .sort();
   const expectedRoot = 'apps/kite/src/bootstrap.ts';
-  const exactExceptions = loadArchitectureExceptionEdges(root);
   if (roots.length === 0) {
     addViolation(violations, 'COMPOSITION_ROOT_MISSING', `expected ${expectedRoot}`);
   } else if (roots.length > 1) {
@@ -1136,14 +1161,9 @@ function validateCompositionRoot(
     (candidate) => candidate.owner.name === app.name && candidate.targetPackage,
   )) {
     const sourcePath = normalizedRelative(root, edge.source);
-    if (
-      sourcePath === expectedRoot ||
-      sourcePath === 'apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts' ||
-      edge.targetPackage?.name === '@kite/runtime-contract'
-    ) {
+    if (sourcePath === expectedRoot || edge.targetPackage?.name === '@kite/runtime-contract') {
       continue;
     }
-    if (exactExceptions.has(`${sourcePath}\u0000${edge.specifier}`)) continue;
     const authority = compositionAuthorityBinding(edge);
     if (authority) {
       addViolation(
@@ -1194,59 +1214,6 @@ function compositionAuthorityBinding(edge: ImportEdge): string | undefined {
   if (!forbidden) return undefined;
   if (edge.valueBindings.includes('*')) return '*';
   return edge.valueBindings.find((binding) => forbidden.has(binding));
-}
-
-function validateExceptions(
-  root: string,
-  imports: ImportEdge[],
-  violations: RuntimePackageViolation[],
-): void {
-  const path = join(
-    root,
-    'tests/reliability-harness/runtime-modularization/manifests/architecture-exceptions.json',
-  );
-  if (!isRegularFile(path)) return;
-  const manifest = readJson<{ exceptions?: Array<Record<string, unknown>> }>(path);
-  for (const exception of manifest.exceptions ?? []) {
-    const importer = typeof exception.importer === 'string' ? exception.importer : '';
-    const imported = typeof exception.imported === 'string' ? exception.imported : '';
-    if (!importer || !imported || /[*?{}[\]]/.test(importer) || /[*?{}[\]]/.test(imported)) {
-      addViolation(
-        violations,
-        'EXCEPTION_BROAD_ALLOWLIST',
-        'architecture exception must identify one exact importer and import',
-        normalizedRelative(root, path),
-      );
-      continue;
-    }
-    const found = imports.some(
-      (edge) => normalizedRelative(root, edge.source) === importer && edge.specifier === imported,
-    );
-    if (!found) {
-      addViolation(
-        violations,
-        'EXCEPTION_STALE',
-        `architecture exception does not match an observed edge: ${importer} -> ${imported}`,
-        normalizedRelative(root, path),
-      );
-    }
-  }
-}
-
-function loadArchitectureExceptionEdges(root: string): ReadonlySet<string> {
-  const path = join(
-    root,
-    'tests/reliability-harness/runtime-modularization/manifests/architecture-exceptions.json',
-  );
-  if (!isRegularFile(path)) return new Set();
-  const manifest = readJson<{ exceptions?: Array<Record<string, unknown>> }>(path);
-  return new Set(
-    (manifest.exceptions ?? []).flatMap((exception) => {
-      const importer = typeof exception.importer === 'string' ? exception.importer : '';
-      const imported = typeof exception.imported === 'string' ? exception.imported : '';
-      return importer && imported ? [`${importer}\u0000${imported}`] : [];
-    }),
-  );
 }
 
 function parseExportTargets(

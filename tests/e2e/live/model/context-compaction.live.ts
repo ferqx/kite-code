@@ -10,7 +10,6 @@ import {
   type RuntimeState,
 } from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
-import { createApprovedProviderDataAdmission } from '#app/config';
 
 const LIVE_TIMEOUT_MS = Number(process.env.KITE_LIVE_MODEL_TIMEOUT_MS ?? 90_000);
 const required = (name: string): string => {
@@ -82,7 +81,6 @@ try {
   const generate = createModelContextSummaryGenerator({
     model,
     signal: AbortSignal.timeout(LIVE_TIMEOUT_MS),
-    providerDataAdmission: createApprovedProviderDataAdmission(config),
   });
   const compact = createNarrativeContextCompactor({
     generate,

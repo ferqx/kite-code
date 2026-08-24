@@ -43,7 +43,6 @@ export const MODEL_INVOCATION_PURPOSES_ = Object.freeze([
   'primary_agent',
   'context_compaction',
   'auto_review',
-  'verification_review',
   'subagent',
 ] as const);
 
@@ -53,15 +52,13 @@ export type ModelProviderDispatchPurpose =
   | 'primary_model'
   | 'compaction'
   | 'auto_review'
-  | 'verification_review'
   | 'subagent';
 
-/** Closed mapping shared by Surface compilation and Provider data admission. */
+/** Closed mapping shared by Surface compilation and Provider dispatch. */
 export const MODEL_PURPOSE_TO_PROVIDER_DISPATCH_ = Object.freeze({
   primary_agent: 'primary_model',
   context_compaction: 'compaction',
   auto_review: 'auto_review',
-  verification_review: 'verification_review',
   subagent: 'subagent',
 } as const satisfies Readonly<Record<ModelInvocationPurpose, ModelProviderDispatchPurpose>>);
 
@@ -203,7 +200,7 @@ export interface ModelSemanticRequest {
   providerOptions: CanonicalProviderOptions;
 }
 
-/** Complete provider-neutral request semantics, frozen before admission. */
+/** Complete provider-neutral request semantics, frozen before dispatch. */
 export interface ModelSurface {
   schema: typeof MODEL_SURFACE_SCHEMA_;
   purpose: ModelInvocationPurpose;
@@ -216,12 +213,6 @@ export interface ModelInvocationEnvelope {
   surface: {
     artifact: PrivateArtifactRef & { kind: 'model_surface' };
     surfaceIntegrityIdentifier: string;
-  };
-  admission: {
-    providerAdmissionRevision: string | null;
-    routeIdentityDigest: Sha256Digest;
-    payloadClassificationDigest: Sha256Digest;
-    admitted: boolean;
   };
   provenance: {
     invocationId: string;

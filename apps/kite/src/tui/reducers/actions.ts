@@ -25,6 +25,8 @@ export type Action =
   | {
       type: 'RESOLVE_INTERRUPT';
       blockId?: number;
+      /** Child identity captured while the approval Footer is still mounted. */
+      approvalTarget?: { subagentId?: string; parentToolCallId?: string };
       resolution:
         | string
         | {

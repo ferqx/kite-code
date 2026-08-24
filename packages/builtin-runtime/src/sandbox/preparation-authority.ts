@@ -1,7 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { SandboxPreparation } from '@kite/runtime-spi';
-import { checkDangerousPaths } from './dangerous-paths';
 import { sandboxCommandDigest } from './execution/grant-authority';
 import type { SandboxInvocationIdentity, ShellInput } from './shell-contract';
 import {
@@ -20,7 +19,6 @@ import {
 export type BuiltinSandboxPreparationErrorCode =
   | 'workspace_unavailable'
   | 'workspace_mismatch'
-  | 'protected_path'
   | 'shell_unavailable';
 
 export class BuiltinSandboxPreparationError extends Error {
@@ -76,14 +74,6 @@ export function createBuiltinSandboxPreparation(
     throw new BuiltinSandboxPreparationError(
       'workspace_mismatch',
       'Sandbox invocation Workspace mismatch.',
-    );
-  }
-
-  const deniedPath = checkDangerousPaths(input.command);
-  if (deniedPath) {
-    throw new BuiltinSandboxPreparationError(
-      'protected_path',
-      `Rejected: command references protected path '${deniedPath}'`,
     );
   }
 

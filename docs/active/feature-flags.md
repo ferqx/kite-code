@@ -28,10 +28,10 @@ Prompt 分层、项目指令快照、简洁工具契约、phase-stable builtin/M
 | --- | --- | --- |
 | `sessionLoggingPolicy` | `true` | App 注入 resolved logging policy；默认 metadata-only，显式关闭时为 `off` |
 | `resourceBudget` | `false` | 启用 Runtime v19 累计预算 admission、FIFO/compound permit 与恢复语义 |
-| `boundedCancellation` | `false` | 启用 run deadline、统一 AbortSignal 与 descendant/process-tree 有界清理 |
+| `boundedCancellation` | `false` | 启用 descendant/process-tree 的有界清理资格；run deadline 由 `resourceBudget` 持久化并执行，不由该开关创建或关闭 |
 | `terminalOutcome` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
 | `executionBoundary` | `false` | 允许 composition root 消费 release-pinned `ExecutionBoundary`；开启本身不产生平台资格或边界 artifact |
-| `brokeredGit` | `false` | 请求 ADR-0097 typed Git surface；只有 disclosure、dispatch 与 native deny 共用精确 `brokered-git-r1` revision 且平台 evidence 合格时生效 |
+| `brokeredGit` | `false` | 请求 ADR-0097 typed Git surface；ADR-0131 后既有 native-deny qualification 失效，只有后续 ADR 与新鲜平台 evidence 建立不缩小 Workspace 的资格模型时才可生效 |
 | `networkBoundary` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
 | `releaseProfile` | `false` | 请求使用 artifact-pinned Release Profile；没有独立 artifact authority 时 true 不生效且 CLI 拒绝抬高 |
 | `observabilityMetrics` | `false` | 允许 artifact-authorized、用户已 consent 的无正文 metric exporter；普通 CLI 只能设为 false |
@@ -52,8 +52,8 @@ CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除
 启用 bounded cancellation 时，模型不披露 writer、Shell 和 child capability，Controller 同时
 拒绝其执行，不能退回无界副作用路径。
 
-`providerDataPolicy` 与 `remoteMcpEgressPolicy` 已删除。Model 的五种 purpose 固定经过
-configured-provider admission；HTTP MCP 固定经过 transport/endpoint admission、JSON-safe bounded argument
+`providerDataPolicy` 与 `remoteMcpEgressPolicy` 已删除。Model 的四种 purpose 固定经过唯一 Model Gateway；
+HTTP MCP 固定经过 transport/endpoint admission、JSON-safe bounded argument
 inspection 与 shared CredentialBroker。二者都没有 release-pinned route allowlist、DataOrigin/EgressAuthority
 或单次 content permit，也不能通过配置恢复旧实现。
 
@@ -73,9 +73,12 @@ qualification registry。artifact 缺失/非法、Workspace 不匹配、实际�
 为空支持集，因此本 flag 不产生 production artifact 或可运行的 production shell/writer。
 
 `brokeredGit=true` 也不会单独披露 Git。composition 还必须注入精确
-`brokered-git-r1` capability surface、合格的 native metadata read/write deny evidence、共享
-protected-path evaluator 与 App Git process adapter。缺少任一项时 `gitInspect` 为 false；
-不得从 generic `process`/`read_only_only` 推断，也不得回退 raw shell。当前三平台 brokered Git
+`brokered-git-r1` capability surface、共享 protected-path evaluator 与 App Git process adapter，并通过
+后续 ADR 定义的新资格模型。ADR-0131 禁止为了资格重新添加 Workspace `.git` 名称级 deny；缺少任一项时 `gitInspect` 为 false；
+不得从 generic `process`/`read_only_only` 推断。ADR-0134 删除 raw Git token 的强制 broker routing并保留
+`git status`/无 patch `git log` 的 hardened read environment；ADR-0136 要求所有 raw Git 在进入该 environment
+前按 Full、Auto、Accept Edits 治理，不从 read-only grammar、Workspace target 或 local subcommand 推导免审
+授权。这些规则都不推导或冒充 `gitInspect` capability。当前三平台 brokered Git
 qualification 均为 excluded；它们与唯一 Prompt/工具契约路径相互独立。
 
 `networkBoundary` 同样按 user、project、CLI/App 的显式值 deny-wins 组合；全部未指定时默认

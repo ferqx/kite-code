@@ -45,7 +45,13 @@ export function isPreparedRequest(
 
 function isPolicyEffects(value: RuntimeJsonValue | undefined): boolean {
   if (!isJsonRecord(value)) return false;
-  const allowed = new Set(['network', 'externalRead', 'externalWrite', 'uncertainEffects']);
+  const allowed = new Set([
+    'network',
+    'externalRead',
+    'externalWrite',
+    'uncertainEffects',
+    'sensitiveExternalAccess',
+  ]);
   return Object.entries(value).every(([key, item]) => allowed.has(key) && item === true);
 }
 

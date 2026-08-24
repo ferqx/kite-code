@@ -100,7 +100,6 @@ function validateVerificationSpec(specValue: unknown, facts: AgentReducerFacts):
   const checks = spec.checks as readonly unknown[];
   if (checks.length === 0) diagnostics.push('At least one verification check is required.');
   const ids = new Set<string>();
-  let reviewerSeen = false;
   for (const [checkIndex, candidate] of checks.entries()) {
     const check = isRecord(candidate) ? candidate : {};
     const checkId = typeof check.checkId === 'string' ? check.checkId : '';
@@ -115,15 +114,12 @@ function validateVerificationSpec(specValue: unknown, facts: AgentReducerFacts):
         'schema',
         'mcp_read_after_write',
         'external_reference',
+        'receipt',
         'reviewer',
       ].includes(type)
     ) {
       diagnostics.push(`Unsupported check type '${type}'.`);
     }
-    if (reviewerSeen && type !== 'reviewer') {
-      diagnostics.push(`${checkId}: deterministic checks must run before reviewer checks.`);
-    }
-    reviewerSeen ||= type === 'reviewer';
     if (type === 'file_assertion') {
       if (!check.path) diagnostics.push(`${checkId}: path is required.`);
       if (check.assertion === 'sha256_equals' && !check.expectedDigest) {
@@ -152,8 +148,11 @@ function validateVerificationSpec(specValue: unknown, facts: AgentReducerFacts):
     if (type === 'external_reference' && !check.invocationId) {
       diagnostics.push(`${checkId}: invocationId is required.`);
     }
+    if (type === 'receipt' && !check.invocationId) {
+      diagnostics.push(`${checkId}: invocationId is required.`);
+    }
     if (type === 'reviewer' && !check.instructions) {
-      diagnostics.push(`${checkId}: reviewer instructions are required.`);
+      diagnostics.push(`${checkId}: legacy reviewer instructions are required.`);
     }
   }
   return diagnostics;

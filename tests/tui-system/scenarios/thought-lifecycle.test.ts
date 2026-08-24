@@ -48,6 +48,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         model: { default: { provider: 'mock', name: 'mock-model' } },
+        interactionMode: 'auto',
         sandbox: { enabled: false },
       },
       files: {
@@ -305,6 +306,15 @@ describe('TUI PTY System — Thought Lifecycle', () => {
                 args: { command: 'grep "name" package.json' },
               },
             ],
+          },
+        },
+        {
+          message: {
+            content: JSON.stringify({
+              decision: 'approve',
+              grant: 'approve_once',
+              reason: 'The fixture command only reads its isolated workspace.',
+            }),
           },
         },
         {

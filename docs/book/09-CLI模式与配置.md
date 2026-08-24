@@ -35,7 +35,7 @@ spool。该生命周期与 session logging 相互独立，任一 consent 都不�
 | --- | --- |
 | `accept_edits` | 保持更强的人机确认边界 |
 | `auto` | 结合 effect classification 与 auto review 自动推进 |
-| `full` | 提高本地自治度，但不绕过未知/外部写入等强制边界 |
+| `full` | 对当前 invocation 直接授权敏感外部访问与目标不确定脚本，但不绕过关键 destructive、phase 或 capability hard deny |
 
 Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者由 Runtime Policy 分别处理。
 

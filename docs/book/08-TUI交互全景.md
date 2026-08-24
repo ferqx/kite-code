@@ -12,7 +12,7 @@
   → reducer / blocks / status
 ```
 
-多行输入、粘贴、软换行、宽字符和终端 resize 由 InputLine 与专用 hooks 处理；这些行为不进入 Core。
+多行输入、粘贴、软换行、宽字符和终端 resize 由 InputLine 与专用 hooks 处理；这些行为不进入 Core。主输入框在首次 Ink effect flush 注册按键 handler 后立即接受输入，注册完成前不显示光标，也不等待额外计时器或后台初始化；随后只在 modal Overlay 占用交互面或终端 DEC focus report 表示窗口失焦时暂停。
 
 Windows 启用沙箱时，TUI 不因联网身份阻止主输入界面，也不创建本地账户或请求 UAC。已获网络授权的
 Shell 调用使用当前登录用户 token 执行该 exact command；普通本地调用继续使用 restricted token。

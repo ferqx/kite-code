@@ -48,6 +48,7 @@ export {
   type BuiltinSubagentModelLoopConsumerPort,
   type BuiltinSubagentModelLoopCoordinator,
   BuiltinSubagentModelLoopError,
+  type BuiltinSubagentModelLoopFailureStage,
   type BuiltinSubagentModelLoopInput,
   type BuiltinSubagentModelLoopProvenanceContext,
   type BuiltinSubagentModelLoopProvenanceFactory,

@@ -773,7 +773,7 @@ function projectSubagentSuspended(
   input: {
     subagentId?: string;
     parentToolCallId?: string;
-    approvalState: SubagentApprovalState;
+    approvalState?: SubagentApprovalState;
   },
 ): TuiState {
   return {
@@ -790,6 +790,12 @@ function projectSubagentSuspended(
         ) {
           return block;
         }
+        // The Footer can acknowledge an approval before a duplicate
+        // subagent.approval_deferred/suspended projection reaches Ink. Do not
+        // regress the card to "Awaiting your approval" after the user has
+        // already confirmed it. Child progress/result clears this marker so a
+        // later, genuinely new approval may suspend the same child again.
+        if (block.approvalAcknowledged) return block;
         changed = true;
         const stepIndex = block.steps.length - 1;
         const steps = block.steps.map((step, index) =>
@@ -798,7 +804,10 @@ function projectSubagentSuspended(
         return {
           ...block,
           status: 'suspended' as const,
-          approvalState: input.approvalState,
+          // Old/deferred-only facts do not prove automatic-review authority.
+          // Fall back to the conservative human route instead of telling the
+          // user an approval is being reviewed automatically.
+          approvalState: input.approvalState ?? block.approvalState ?? 'queued_user_approval',
           parentToolCallId: input.parentToolCallId ?? block.parentToolCallId,
           awaitingApproval: true,
           approvingStepIndex: stepIndex >= 0 ? stepIndex : undefined,
@@ -830,6 +839,7 @@ function projectSubagentResuming(state: TuiState, parentToolCallId: string): Tui
           approvalState: undefined,
           awaitingApproval: false,
           approvingStepIndex: undefined,
+          approvalAcknowledged: undefined,
           steps: block.steps.map((step) =>
             step.status === 'awaiting_approval' ? { ...step, status: 'pending' as const } : step,
           ),
@@ -872,6 +882,7 @@ function projectSubagentTerminal(
           approvalState: undefined,
           awaitingApproval: false,
           approvingStepIndex: undefined,
+          approvalAcknowledged: undefined,
           expanded: false,
           steps: block.steps.map((step) =>
             step.status === 'awaiting_approval'
@@ -1910,7 +1921,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         kind: 'subagent',
         subagentId: event.data.id,
         role: event.data.role,
-        task: event.data.task,
+        task: event.data.name,
         status: 'running',
         summary: '',
         toolCallCount: 0,
@@ -1943,6 +1954,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         awaitingApproval: false, // 新步骤到来时清除等待状态
         approvalState: undefined,
         approvingStepIndex: undefined,
+        approvalAcknowledged: undefined,
       };
       return replaceBlockById(state, matched.id, next);
     }
@@ -2012,6 +2024,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         awaitingApproval: false,
         approvalState: undefined,
         approvingStepIndex: undefined,
+        approvalAcknowledged: undefined,
       };
       return replaceBlockById(state, matched.id, next);
     }
@@ -2027,6 +2040,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         summary: event.data.summary,
         toolCallCount: event.data.toolCallCount,
         durationMs: event.data.durationMs,
+        failureDiagnostic: undefined,
+        approvalState: undefined,
+        awaitingApproval: false,
+        approvingStepIndex: undefined,
+        approvalAcknowledged: undefined,
         expanded: false,
       };
       return replaceBlockById(state, matched.id, next);
@@ -2046,6 +2064,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         error: summary || undefined,
         toolCallCount: event.data.toolCallCount ?? matched.toolCallCount,
         durationMs: event.data.durationMs ?? matched.durationMs,
+        failureDiagnostic: event.data.diagnostic,
+        approvalState: undefined,
+        awaitingApproval: false,
+        approvingStepIndex: undefined,
+        approvalAcknowledged: undefined,
         expanded: false,
       };
       return replaceBlockById(state, matched.id, next);
@@ -2258,26 +2281,62 @@ function clearTerminalToolApproval(state: TuiState, toolCallId: string): TuiStat
     : state;
 }
 
+/**
+ * Child tools emit their lifecycle on the shared runtime stream so that the
+ * journal remains complete. Their visible progress is instead owned by the
+ * corresponding SubAgentBlock through `subagent.*` events. Rendering these as
+ * ordinary tools as well would make an active Delegating group look as though
+ * its parent had started independent work.
+ */
+function isSubagentInternalToolEvent(event: RuntimePresentationEvent): boolean {
+  switch (event.type) {
+    case 'tool.queued':
+    case 'tool.started':
+    case 'tool.progress':
+    case 'tool.finished':
+    case 'tool.failed':
+    case 'tool.rejected':
+    case 'tool.cancelled':
+      return event.toolCallId.startsWith('subagent-tool:');
+    default:
+      return false;
+  }
+}
+
 export function handleRuntimeEventAction(
   state: TuiState,
   event: RuntimePresentationEvent,
 ): TuiState {
+  if (isSubagentInternalToolEvent(event)) return state;
+
   switch (event.type) {
     case 'subagent.suspended':
       return projectSubagentSuspended(state, {
         subagentId: event.snapshot.subagentId,
         parentToolCallId: event.toolCallId,
-        approvalState: 'queued',
+        approvalState:
+          event.snapshot.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'
+            ? 'queued_auto_review'
+            : 'queued_user_approval',
       });
     case 'subagent.approval_deferred':
       return projectSubagentSuspended(state, {
         parentToolCallId: event.toolCallId,
-        approvalState: 'queued',
       });
     case 'subagent.started':
       return handleEventAction(state, {
         type: 'subagent_start',
-        data: event.subagent,
+        data:
+          'name' in event.subagent
+            ? event.subagent
+            : {
+                id: event.subagent.id,
+                role: event.subagent.role,
+                name: event.subagent.task,
+                ...(event.subagent.concurrencyGroupId === undefined
+                  ? {}
+                  : { concurrencyGroupId: event.subagent.concurrencyGroupId }),
+              },
       });
     case 'subagent.step':
       return handleEventAction(state, {

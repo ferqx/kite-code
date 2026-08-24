@@ -187,23 +187,6 @@ describe('Builtin subagent model effect', () => {
     expect(fixture.counts()).toMatchObject({ operationCalls: 0, sourceCalls: 0 });
   });
 
-  test('fails closed on Provider denial before operation/source dispatch', async () => {
-    const fixture = createFixture();
-    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
-
-    await expect(
-      coordinator.executeSubagentModelStep({
-        ...baseInput(fixture),
-        providerDataAdmission: () => ({
-          admitted: false,
-          reason: 'provider_secret_denied',
-          routeAlias: 'subagent-denied',
-        }),
-      }),
-    ).rejects.toThrow('provider_secret_denied');
-    expect(fixture.counts()).toMatchObject({ operationCalls: 0, sourceCalls: 0 });
-  });
-
   test('fails closed on operation identity mismatch before source dispatch', async () => {
     const fixture = createFixture({ operationMismatch: true });
     const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);

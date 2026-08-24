@@ -1,6 +1,10 @@
 // apps/kite/src/bootstrap/runtime/subagent/types.ts
 import type { BaseMessage } from '@kite/builtin-runtime/model';
-import type { SubAgentEventSink, SubAgentRole } from '@kite/runtime-contract';
+import type {
+  SubAgentEventSink,
+  SubAgentFailureDiagnostic,
+  SubAgentRole,
+} from '@kite/runtime-contract';
 import type {
   DescendantBudgetReservation,
   DescendantResourceAdmission,
@@ -56,6 +60,8 @@ export interface SubAgentRunnerInput {
   config: import('#app/config/index').AgentConfig;
   workspace: string;
   role: SubAgentRoleConfig;
+  /** Public display name supplied explicitly by the parent model. */
+  name: string;
   task: string;
   shellExecutor?: import('@kite/builtin-runtime/sandbox').ShellExecutor;
   gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
@@ -79,7 +85,6 @@ export interface SubAgentRunnerInput {
   /** Parent Runtime private artifact store shared by child execution. */
   recoveryIdentityKey: string;
   model?: import('@kite/builtin-runtime/model').SupportedChatModel;
-  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGate;
   descendantResourceAdmission?: DescendantResourceAdmission;
   modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
   modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
@@ -119,6 +124,7 @@ export interface SubAgentRunnerInput {
 export interface SubAgentContinuation {
   id: string;
   role: SubAgentRoleConfig;
+  name?: string;
   task: string;
   messages: BaseMessage[];
   toolCallCount: number;
@@ -172,6 +178,8 @@ export interface SubAgentResult {
   durationMs: number;
   terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'suspended';
   error?: string;
+  /** Content-free reason retained across the private Provider observation seam. */
+  failureDiagnostic?: SubAgentFailureDiagnostic;
   /** Parent-private typed terminal propagated across the Provider observation seam. */
   resourceAdmissionFailure?: {
     reason: Exclude<RuntimeBudgetAdmissionReason, 'admitted'>;

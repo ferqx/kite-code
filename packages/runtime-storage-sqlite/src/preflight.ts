@@ -307,6 +307,29 @@ function assertCurrentStoreShape(database: Database): void {
   }
 }
 
+/** Validate the marker and schema on the exact already-open connection used by a reader. */
+export function assertCurrentSqliteRuntimeStoreConnection(
+  database: Database,
+): ReadonlyMap<string, string> {
+  const marker = database
+    .query<{ key: string; value: string }, []>(
+      "SELECT key, value FROM runtime_store_meta WHERE key IN ('format_version', 'runtime_format_epoch')",
+    )
+    .all();
+  const values = new Map(marker.map((entry) => [entry.key, entry.value]));
+  if (
+    Number(values.get('format_version')) !== SQLITE_RUNTIME_STORE_SCHEMA_VERSION ||
+    values.get('runtime_format_epoch') !== SQLITE_RUNTIME_FORMAT_EPOCH
+  ) {
+    throw new SqliteRuntimeFormatMismatchError(
+      Number(values.get('format_version')) || null,
+      values.get('runtime_format_epoch') ?? null,
+    );
+  }
+  assertCurrentStoreShape(database);
+  return values;
+}
+
 function openPreflightView(dbPath: string): { database: Database; close: () => void } {
   const walPath = `${dbPath}-wal`;
   const shmPath = `${dbPath}-shm`;
@@ -372,29 +395,17 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
       if (hasData) throw new SqliteRuntimeFormatMismatchError(null, null);
       return;
     }
-    const marker = database
-      .query<{ key: string; value: string }, []>(
-        "SELECT key, value FROM runtime_store_meta WHERE key IN ('format_version', 'runtime_format_epoch')",
-      )
-      .all();
-    const values = new Map(marker.map((entry) => [entry.key, entry.value]));
-    if (
-      Number(values.get('format_version')) !== 5 ||
-      values.get('runtime_format_epoch') !== 'kite-runtime-modularization-v1-2026-08-19'
-    ) {
-      throw new SqliteRuntimeFormatMismatchError(
-        Number(values.get('format_version')) || null,
-        values.get('runtime_format_epoch') ?? null,
-      );
-    }
-    assertCurrentStoreShape(database);
-    if (!codec) return;
+    const values = assertCurrentSqliteRuntimeStoreConnection(database);
+    // A database-wide owner is used for session discovery and must not let one
+    // damaged historical session block every healthy session. Deep event and
+    // snapshot validation belongs to a session-scoped open.
+    if (!codec || !sessionId) return;
     try {
       const events = database
-        .query<{ schema_version: number; event_json: string }, []>(
-          'SELECT schema_version, event_json FROM runtime_events ORDER BY session_id, sequence',
+        .query<{ schema_version: number; event_json: string }, [string]>(
+          'SELECT schema_version, event_json FROM runtime_events WHERE session_id = ? ORDER BY sequence',
         )
-        .all();
+        .all(sessionId);
       for (const event of events) {
         if (event.schema_version !== 26) {
           throw new SqliteRuntimeFormatMismatchError(
@@ -409,15 +420,7 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
       throw new SqliteRuntimeFormatMismatchError(null, null, error);
     }
     try {
-      const sessionIds = sessionId
-        ? [sessionId]
-        : database
-            .query<{ session_id: string }, []>(
-              'SELECT session_id FROM runtime_sessions ORDER BY session_id',
-            )
-            .all()
-            .map((entry) => entry.session_id);
-      for (const currentSessionId of sessionIds) {
+      for (const currentSessionId of [sessionId]) {
         const row = database
           .query<
             {

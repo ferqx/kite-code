@@ -201,7 +201,11 @@ const MODEL_VECTORS: readonly DifferentialVector[] = [
   {
     label: 'task',
     toolName: 'task',
-    input: { subagent_type: 'code', task: 'Implement the requested feature.' },
+    input: {
+      name: 'Implement feature',
+      subagent_type: 'code',
+      task: 'Implement the requested feature.',
+    },
     phase: 'building',
   },
 ];
@@ -325,25 +329,41 @@ const EXTRA_VECTORS: readonly DifferentialVector[] = [
   {
     label: 'task planning code',
     toolName: 'task',
-    input: { subagent_type: 'code', task: 'Implement the requested feature.' },
+    input: {
+      name: 'Implement feature',
+      subagent_type: 'code',
+      task: 'Implement the requested feature.',
+    },
     phase: 'planning',
   },
   {
     label: 'task planning review',
     toolName: 'task',
-    input: { subagent_type: 'review', task: 'Review the requested feature.' },
+    input: {
+      name: 'Review feature',
+      subagent_type: 'review',
+      task: 'Review the requested feature.',
+    },
     phase: 'planning',
   },
   {
     label: 'task planning explore',
     toolName: 'task',
-    input: { subagent_type: 'explore', task: 'Inspect the relevant code paths.' },
+    input: {
+      name: 'Inspect code paths',
+      subagent_type: 'explore',
+      task: 'Inspect the relevant code paths.',
+    },
     phase: 'planning',
   },
   {
     label: 'task planning plan',
     toolName: 'task',
-    input: { subagent_type: 'plan', task: 'Prepare the implementation plan.' },
+    input: {
+      name: 'Prepare implementation plan',
+      subagent_type: 'plan',
+      task: 'Prepare the implementation plan.',
+    },
     phase: 'planning',
   },
   {
@@ -371,27 +391,30 @@ function expectedAuthorizationEligibility(vector: DifferentialVector): Readonly<
     const externalWrite = vector.label === 'file external write';
     return {
       minimumApproval: 'none',
-      fullAccessMayBypassApproval: vector.phase === 'building' && !externalWrite,
+      fullAccessMayBypassApproval: vector.phase === 'building' && externalWrite,
+      sameCommandMayBypassApproval: false,
+    };
+  }
+  if (vector.label === 'search external read') {
+    return {
+      minimumApproval: 'none',
+      fullAccessMayBypassApproval: true,
       sameCommandMayBypassApproval: false,
     };
   }
   if (vector.toolName === 'shell_execute') {
-    if (vector.label === 'shell vcs network' || vector.label === 'shell local vcs mutation') {
+    if (vector.phase === 'planning' || vector.label === 'shell critical-path rm') {
       return {
         minimumApproval: 'user',
         fullAccessMayBypassApproval: false,
         sameCommandMayBypassApproval: false,
       };
     }
-    const reusable = new Set([
-      'shell network client write',
-      'shell uncertain script',
-      'shell external write',
-    ]).has(vector.label);
+    const sensitive = vector.label === 'shell protected path';
     return {
       minimumApproval: 'user',
-      fullAccessMayBypassApproval: reusable,
-      sameCommandMayBypassApproval: reusable,
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: !sensitive,
     };
   }
   return {
@@ -487,9 +510,9 @@ describe('RM-16 S7B Builtin policy corpus', () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.modules)).toBe(true);
     expect(Object.isFrozen(snapshot.capabilities)).toBe(true);
-    expect(projection.entries).toHaveLength(29);
+    expect(projection.entries).toHaveLength(28);
     expect(modelEntries).toHaveLength(20);
-    expect(internalEntries).toHaveLength(9);
+    expect(internalEntries).toHaveLength(8);
     expect(modelEntries.map((entry) => entry.name).sort()).toEqual(
       [...EXPECTED_MODEL_TOOL_NAMES].sort(),
     );

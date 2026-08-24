@@ -2399,7 +2399,11 @@ describe('ToolOutcome Runtime event integration', () => {
         {
           id: 'task-private',
           name: 'task',
-          args: { subagent_type: 'explore', task: 'inspect metadata' },
+          args: {
+            name: 'Inspect recovery metadata',
+            subagent_type: 'explore',
+            task: 'inspect metadata',
+          },
         },
       ],
     });
@@ -2407,7 +2411,11 @@ describe('ToolOutcome Runtime event integration', () => {
       type: 'tool.queued',
       toolCallId: 'task-private',
       name: 'task',
-      args: { subagent_type: 'explore', task: 'inspect metadata' },
+      args: {
+        name: 'Inspect recovery metadata',
+        subagent_type: 'explore',
+        task: 'inspect metadata',
+      },
       modelMessageId: 'parent-model',
     });
     state = reduceRuntimeState(state, { type: 'tool.started', toolCallId: 'task-private' });
@@ -2420,7 +2428,11 @@ describe('ToolOutcome Runtime event integration', () => {
       turnId: state.turn.turnId,
     });
     const projected = projectSubagentResult({
-      input: { subagent_type: 'explore', task: 'inspect metadata' },
+      input: {
+        name: 'Inspect recovery metadata',
+        subagent_type: 'explore',
+        task: 'inspect metadata',
+      },
       phase: 'building',
       result: {
         ok: false,
@@ -2459,6 +2471,7 @@ describe('ToolOutcome Runtime event integration', () => {
           approvalBinding: { private: 'private approval binding' },
           continuation: {
             id: 'private-continuation',
+            name: 'Inspect recovery metadata',
             role: { role: 'explore' },
             task: 'private delegated task',
             messages: [{ role: 'user', content: 'private prompt transcript' }],

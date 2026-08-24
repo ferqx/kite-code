@@ -288,13 +288,6 @@ function fixtureValue(field: string): unknown {
     };
   if (field === 'surfaceIntegrityIdentifier') return `sha256:${'c'.repeat(64)}`;
   if (field === 'routeFingerprint') return `sha256:${'d'.repeat(64)}`;
-  if (field === 'admission')
-    return {
-      providerAdmissionRevision: null,
-      routeIdentityDigest: `sha256:${'e'.repeat(64)}`,
-      payloadClassificationDigest: `sha256:${'f'.repeat(64)}`,
-      admitted: true,
-    };
   if (field === 'limits')
     return { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 };
   if (field === 'preparedStateRevision') return 0;
@@ -1847,7 +1840,7 @@ describe('RM State package parity harness', () => {
     expect(rootNonJson.ok ? '' : rootNonJson.error).toContain('not JSON serializable');
   });
 
-  test('keeps the 136-event codec corpus mechanically comparable', () => {
+  test('keeps the 135-event codec corpus mechanically comparable', () => {
     const eventTypes = Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[];
     expect(eventTypes).toHaveLength(CURRENT_RUNTIME_EVENT_TYPE_COUNT);
 

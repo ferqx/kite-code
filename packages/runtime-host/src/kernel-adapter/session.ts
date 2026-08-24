@@ -35,7 +35,7 @@ import type {
   StateRuntimeEffectPersistenceAcknowledgement,
 } from './effect-runtime';
 
-/** The one State 25 / Store 4 format accepted by this Host session. */
+/** The one current State / Store format accepted by this Host session. */
 export const STATE_RUNTIME_SESSION_FORMAT_ = Object.freeze({
   schemaVersion: 26 as const,
   storeVersion: 5 as const,

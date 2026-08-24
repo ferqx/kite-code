@@ -283,15 +283,15 @@ function verificationValid(
 }
 
 describe('Builtin Tool Pipeline callbacks', () => {
-  test('projects the frozen 29/20/9 catalog and preserves read_file identity', () => {
+  test('projects the frozen 28/20/8 catalog and preserves read_file identity', () => {
     const value = resolveReadFile();
-    expect(value.projection.entries).toHaveLength(29);
+    expect(value.projection.entries).toHaveLength(28);
     expect(value.projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(
       20,
     );
     expect(
       value.projection.entries.filter((entry) => entry.visibility === 'internal'),
-    ).toHaveLength(9);
+    ).toHaveLength(8);
     expect(Object.isFrozen(value.projection)).toBe(true);
     expect(Object.isFrozen(value.projection.entries)).toBe(true);
     expect(Object.isFrozen(value.resolved)).toBe(true);
@@ -451,6 +451,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
   test('maps skill/subagent mechanisms and preserves public/private Task parser seams', () => {
     const value = turnFixture({ hasTaskAdapter: true });
     const publicTaskArguments = {
+      name: 'Inspect fixture task',
       subagent_type: 'explore',
       task: 'Inspect the fixture task.',
     };
@@ -498,6 +499,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
     ).toMatchObject({ valid: false });
 
     const privateArguments = {
+      name: 'Implement fixture task',
       subagent_type: 'code',
       taskArtifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
@@ -647,12 +649,14 @@ describe('Builtin Tool Pipeline callbacks', () => {
 
     for (const subagent_type of ['code', 'review']) {
       const stablePublic = validateTask({
+        name: 'Review planning decision',
         subagent_type,
         task: 'Policy, rather than the parser, owns this planning role decision.',
       });
       expect(stablePublic.ok).toBe(true);
     }
     const widenedPrivate = validateTask({
+      name: 'Inspect planning surface',
       subagent_type: 'explore',
       taskArtifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
@@ -664,6 +668,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
     expect(widenedPrivate.ok).toBe(false);
 
     const planningArguments = {
+      name: 'Inspect planning projection',
       subagent_type: 'plan',
       task: 'Inspect the exact planning projection without widening its parser.',
     };

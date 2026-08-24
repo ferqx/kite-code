@@ -17,12 +17,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import {
-  directoryNamesAt,
-  openDirectoryAt,
-  removeDirectoryTreeAt,
-  removeEmptyDirectoryAt,
-} from './descriptor-relative-cleanup';
+import { directoryNamesAt, removeDirectoryTreeAt } from './descriptor-relative-cleanup';
 
 /** Deterministic Provider allocation recoverable from a durable preparation intent. */
 export function sandboxRuntimeDirForPreparation(
@@ -49,10 +44,11 @@ export function sandboxRuntimeRootsForPreparation(
   workspace: string,
   preparationDigest: string,
 ): PosixSandboxRuntimeRoots {
-  const allocationRoot = sandboxRuntimeDirForPreparation(workspace, preparationDigest);
+  const dataRoot = sandboxRuntimeDirForPreparation(workspace, preparationDigest);
+  const allocationKey = basename(dataRoot);
   return Object.freeze({
-    controlRoot: join(allocationRoot, 'control'),
-    dataRoot: join(allocationRoot, 'data'),
+    controlRoot: join(tmpdir(), 'openpx-sandbox-control', allocationKey),
+    dataRoot,
   });
 }
 
@@ -61,11 +57,8 @@ export function createPosixSandboxRuntimeRootsForPreparation(
   preparationDigest: string,
 ): PosixSandboxRuntimeRoots {
   const roots = sandboxRuntimeRootsForPreparation(workspace, preparationDigest);
-  const allocationRoot = dirname(roots.controlRoot);
-  const base = dirname(allocationRoot);
-  ensurePrivateDirectory(base, true);
-  mkdirSync(allocationRoot, { mode: 0o700 });
-  hardenAndVerifyDirectory(allocationRoot);
+  ensurePrivateDirectory(dirname(roots.controlRoot), true);
+  ensurePrivateDirectory(dirname(roots.dataRoot), true);
   mkdirSync(roots.controlRoot, { mode: 0o700 });
   hardenAndVerifyDirectory(roots.controlRoot);
   mkdirSync(roots.dataRoot, { mode: 0o700 });
@@ -77,21 +70,19 @@ export function createPosixSandboxRuntimeRootsForPreparation(
 export function cleanupPosixSandboxRuntimeRootsNoSpawn(
   roots: Readonly<PosixSandboxRuntimeRoots>,
 ): boolean {
-  if (dirname(roots.controlRoot) !== dirname(roots.dataRoot)) return false;
-  const allocationRoot = dirname(roots.controlRoot);
-  const base = dirname(allocationRoot);
-  if (base !== resolve(tmpdir(), 'openpx-sandbox-runtime')) return false;
-  if (basename(roots.controlRoot) !== 'control' || basename(roots.dataRoot) !== 'data')
+  const controlBase = resolve(tmpdir(), 'openpx-sandbox-control');
+  const dataBase = resolve(tmpdir(), 'openpx-sandbox-runtime');
+  const controlKey = basename(roots.controlRoot);
+  const dataKey = basename(roots.dataRoot);
+  if (
+    dirname(resolve(roots.controlRoot)) !== controlBase ||
+    dirname(resolve(roots.dataRoot)) !== dataBase ||
+    controlKey !== dataKey ||
+    !/^[0-9a-f]{16}-.+/.test(controlKey)
+  ) {
     return false;
-  if (!/^[0-9a-f]{16}-.+/.test(basename(allocationRoot))) return false;
-  let baseFd: number | undefined;
-  let allocationFd: number | undefined;
+  }
   try {
-    // An allocating preparation may fail before it creates even the private
-    // runtime base. Exact absence at that point proves that there is no
-    // allocation to reconcile; every non-ENOENT identity failure below still
-    // fails closed.
-    if (lstatOrNull(base) === null) return true;
     // Darwin exposes no descriptor-relative chflags API. Clear flags only on
     // the two already-validated runtime roots, verify every entry before and
     // after the operation, then let the descriptor-relative remover perform
@@ -100,27 +91,32 @@ export function cleanupPosixSandboxRuntimeRootsNoSpawn(
       if (!prepareDarwinTreeForDescriptorCleanup(roots.dataRoot)) return false;
       if (!prepareDarwinTreeForDescriptorCleanup(roots.controlRoot)) return false;
     }
-    baseFd = openVerified(
-      base,
-      constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),
-    );
-    const baseNames = directoryNamesAt(baseFd);
-    if (!baseNames) return false;
-    if (!baseNames.includes(basename(allocationRoot))) return true;
-    allocationFd = openDirectoryAt(baseFd, basename(allocationRoot));
-    if (allocationFd < 0) return false;
     // Writable sandbox data is always reclaimed before host-only control state.
-    if (!removeDirectoryTreeAt(allocationFd, 'data')) return false;
-    if (!removeDirectoryTreeAt(allocationFd, 'control')) return false;
-    if (directoryNamesAt(allocationFd)?.length !== 0) return false;
-    closeSync(allocationFd);
-    allocationFd = undefined;
-    return removeEmptyDirectoryAt(baseFd, basename(allocationRoot));
+    if (!removeRuntimeTreeAtPrivateBase(dataBase, dataKey)) return false;
+    removeEmptyRuntimeBase(dataBase);
+    if (!removeRuntimeTreeAtPrivateBase(controlBase, controlKey)) return false;
+    removeEmptyRuntimeBase(controlBase);
+    return true;
   } catch {
     return false;
+  }
+}
+
+function removeRuntimeTreeAtPrivateBase(base: string, name: string): boolean {
+  // Preparation can fail before creating either private base. Exact absence
+  // proves that this side has no allocation to reconcile.
+  if (lstatOrNull(base) === null) return true;
+  const baseFd = openVerified(
+    base,
+    constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const names = directoryNamesAt(baseFd);
+    if (!names) return false;
+    if (!names.includes(name)) return true;
+    return removeDirectoryTreeAt(baseFd, name);
   } finally {
-    if (allocationFd !== undefined && allocationFd >= 0) closeSync(allocationFd);
-    if (baseFd !== undefined) closeSync(baseFd);
+    closeSync(baseFd);
   }
 }
 

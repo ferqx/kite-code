@@ -7,7 +7,6 @@ import {
   executeBuiltinContextCompaction,
   expectedCompactionSourceDigest,
   findSafeCompactionBoundary,
-  ProviderDataAdmissionError,
 } from '@kite/builtin-runtime/model';
 import type {
   BuiltinContextCheckpointView,
@@ -157,24 +156,6 @@ describe('executeBuiltinContextCompaction', () => {
       retryable: false,
       message: 'No context compactor is configured.',
       durationMs: 0,
-    });
-
-    const denied = await executeBuiltinContextCompaction({
-      state,
-      compactionId: 'compact-1',
-      compact: async () => {
-        throw new ProviderDataAdmissionError({
-          admitted: false,
-          reason: 'provider_secret_denied',
-          routeAlias: 'fixture-denied',
-        });
-      },
-      now: fixedNow(),
-    });
-    expect(terminal(denied)).toMatchObject({
-      type: 'context.compaction_failed',
-      errorKind: 'provider_admission_denied',
-      retryable: false,
     });
 
     const validation = await executeBuiltinContextCompaction({

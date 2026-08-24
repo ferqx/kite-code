@@ -80,9 +80,6 @@ export function planModelInvocationResource(
   if (Object.values(budget.reservations).some((reservation) => reservation.state === 'unknown')) {
     throw new DescendantResourceAdmissionError('reconciliation_required');
   }
-  if ((input.now ?? new Date()).getTime() >= Date.parse(budget.deadlineAt)) {
-    throw new DescendantResourceAdmissionError('budget_exhausted');
-  }
   if (input.parentReservationId) {
     const parent = budget.reservations[input.parentReservationId];
     if (parent?.state !== 'dispatch_started') {
@@ -487,13 +484,15 @@ export function createDescendantResourceAdmission(input: {
 
   const now = (): Date => input.now?.() ?? new Date();
 
-  const assertRunDeadline = (budget: ActiveResourceBudgetRuntimeState): void => {
-    if (now().getTime() >= Date.parse(budget.deadlineAt)) {
-      throw new DescendantResourceAdmissionError(
-        'budget_exhausted',
-        'Sub-agent run deadline was reached before dispatch.',
-      );
-    }
+  const assertBeforeRunDeadline = (
+    budget: ActiveResourceBudgetRuntimeState,
+    observedAt: Date,
+  ): void => {
+    if (observedAt.getTime() < Date.parse(budget.deadlineAt)) return;
+    throw new DescendantResourceAdmissionError(
+      'budget_exhausted',
+      'The shared run deadline elapsed before descendant dispatch.',
+    );
   };
 
   const descendantInvocationId = (invocationKey: string): string =>
@@ -509,7 +508,7 @@ export function createDescendantResourceAdmission(input: {
         return await withMutation(async () => {
           const budget = refreshProjected();
           assertParentDispatchStarted(budget);
-          assertRunDeadline(budget);
+          assertBeforeRunDeadline(budget, now());
           const reservation: BudgetReservation = {
             version: 1,
             reservationId: crypto.randomUUID(),
@@ -659,7 +658,6 @@ export function createDescendantResourceAdmission(input: {
         if (unresolved) {
           throw new DescendantResourceAdmissionError('reconciliation_required');
         }
-        assertRunDeadline(budget);
         const attemptTime = now();
         const existingWaiter = budget.waiters[invocation.invocationId];
         if (existingWaiter && Date.parse(existingWaiter.deadlineAt) <= attemptTime.getTime()) {
@@ -669,6 +667,7 @@ export function createDescendantResourceAdmission(input: {
           });
           throw new DescendantResourceAdmissionError(saturationReason(invocation));
         }
+        assertBeforeRunDeadline(budget, attemptTime);
         const reservation = reservationFor(budget, invocation, parent.reservationId);
         let candidate: ActiveResourceBudgetRuntimeState = budget;
         const preparationEvents: RuntimeEvent[] = [];
@@ -800,7 +799,7 @@ export function createDescendantResourceAdmission(input: {
       await persistWithProjectionRetry({
         type: 'resource_budget.released',
         reservationId,
-        proof: 'local_provider_admission_denied',
+        proof: 'local_pre_dispatch_failure',
       });
     },
   };
@@ -930,16 +929,6 @@ export function planRuntimeBudgetAdmission(
     return {
       status: 'denied',
       reason: 'budget_unconfigured',
-      effect,
-      preparationEvents: [],
-      dispatchEvents: [],
-      reservationIds: [],
-    };
-  }
-  if (now.getTime() >= Date.parse(initial.deadlineAt)) {
-    return {
-      status: 'denied',
-      reason: 'budget_exhausted',
       effect,
       preparationEvents: [],
       dispatchEvents: [],

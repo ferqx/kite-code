@@ -43,7 +43,7 @@ runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，�
 checkout/Cargo cache 路径并清除 PE 时间戳；
 重新生成 manifest 后必须以 `git diff --exit-code` 证明提交的 runner pin 与构建产物一致。
 
-相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089、ADR-0097、ADR-0110，
+相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089、ADR-0097、ADR-0110、ADR-0131，
 `release/platform-capabilities/windows-runner.json`。
 
 ## 当前 backend 选择
@@ -80,17 +80,17 @@ durable lifecycle adapter，也不得重新加入 `Bun.spawn`、第二个 runner
    它不枚举、复制、hash 或 reconciliation 用户仓库。
 2. runner canonicalize 真实 Workspace 与 invocation-private runtime。command cwd 与 workspace root
    都是真实 Workspace，写入直接落到该 Workspace。
-3. 每个 Workspace 有持久 synthetic capability SID 和 user-owned ledger。root inheritable write ACE
-   保持持久；ledger 在 static protected-path DACL 变更前保存 snapshot，并以规范路径、protected set
-   digest 与 setup 状态约束无锁快路径。
+3. 每个 Workspace 有持久 synthetic capability SID 和 user-owned ledger。root inheritable allow ACE
+   保持持久；V3 ledger 把 canonical Workspace 作为完整身份，并在升级时恢复、删除 V2 留下的内部
+   protected-path DACL snapshot。
 4. 每个 invocation 有单独 runtime capability SID，只授予 invocation runtime。startup probe 使用
    ephemeral Workspace SID，不修改真实 Workspace ledger。
 5. `networkMode=off` 从 current user 派生 write-restricted primary token，使用
    `CreateRestrictedToken` 的 `DISABLE_MAX_PRIVILEGE`、`LUA_TOKEN`、`WRITE_RESTRICTED`
    与 capability SID。
-6. persistent Workspace capability ledger 只持久化根 allow ACE，不把路径名称摘要当作当前对象
-   已受保护的证明。每次 invocation 都在 Workspace mutex 下复核现存 protected object 的 deny ACE；
-   宿主原子替换同名文件后，runner 必须先刷新该对象的 DACL snapshot，再重新施加 deny。
+6. persistent Workspace capability ledger 只持久化根 allow ACE；Workspace member 不再生成或刷新
+   名称级 deny。升级时在 Workspace mutex 下只对仍带旧 capability deny ACE 的 snapshot 执行恢复，
+   已被宿主替换且不再带该 ACE 的对象不会套用 stale snapshot。
 7. 只有同一次 invocation 同时获批 `allow_all` 与 `full_access` 时，native runner 才使用当前登录用户
    token 启动该 exact command，并先把它加入 kill-on-close/active-process-limit Job。它不调用
    `CreateProcessWithLogonW`，也不创建、登录或轮换 `KiteNet*`/其他本地账户。`allow_all` 配合
@@ -121,8 +121,8 @@ adapter 与 runner 必须要求 native invocation `protocolVersion=6`。V6 只�
 `read_only | workspace_write | full_access` authorization projection；`full_access` 只允许来自已批准的单次
 invocation；`allow_all` 也必须同时带有 `full_access`，否则在 user script 前拒绝。未获网络授权的
 `full_access` 要求 `approvedFilesystemGuardSid`，并仍创建去权 restricted token 与 Job Object。已审批
-`allow_all + full_access` 的当前用户 token 不携带该 synthetic SID，runner 不得创建无效的 protected-path
-ACL lease（否则会在不增加约束的情况下逐次改写用户 profile DACL）。V6 继承 V5
+`allow_all + full_access` 的当前用户 token 不携带 Workspace synthetic SID；Workspace 外固定路径仍由
+approved-filesystem guard 保护。V6 继承 V5
 删除的 backend mode、AppContainer identity 与 staging 字段；任何 V1-V5 runner 都在 user script 前
 fail closed。
 
@@ -141,9 +141,9 @@ pretty path 崩溃，导致已验证 runner 无法进入候选包。release test
 local path 的 `WRITE_RESTRICTED` 通过 restricted SID check 限制写入，但 current user 仍可能拥有普通读取
 权限。approved filesystem path 同样保留 `WRITE_RESTRICTED`、LUA 与 privilege stripping，使 read/execute
 只服从 current user 普通 ACL，并让 restricted SID check 仅参与写访问；token 的 restricted SID 集合镜像
-user/group SID 并加入专用 guard，同时保留 Logon/World SID。这样 GitHub runner toolcache 等只向普通用户
-ACL 身份授予执行权的 system/toolchain binary 仍可运行，而既有固定路径对 guard SID 的 write deny ACE
-仍会拒绝写入，宿主当前用户不受该 ACE 影响。approved token 与普通 Workspace token 使用同一
+user/group SID 并加入 compatibility SID，同时保留 Logon/World SID。这样 GitHub runner toolcache 等只向普通用户
+ACL 身份授予执行权的 system/toolchain binary 仍可运行；按 ADR-0132，Workspace 外固定路径不再对该 SID
+安装 write deny ACE。approved token 与普通 Workspace token 使用同一
 Logon/World/capability default DACL 初始化，确保 shell 创建的 pipe 与 Node/npm 等 descendant process
 object 可由该 token 继续访问。只有已审批 `allow_all + full_access` 的网络调用才改用当前用户 token，
 以便 Schannel 读取当前 profile；因此它不保留 restricted-token filesystem ceiling，普通用户 ACL 成为该
@@ -151,22 +151,17 @@ exact 已审批 command 的文件权限边界，也不得安装该 token 无法�
 filesystem scope 的网络调用均被拒绝，不能把 network approval 变成该 filesystem 扩权。
 Job Object 提供进程树数量和终止边界，不单独作为 filesystem 或 network boundary。
 
-该 backend 没有 structural network-off、arbitrary-descendant allowlist 或 future root `.env.*`
-动态名称保证。static protected paths 的 guard deny 与 Workspace ledger 是 native enforcement，但不能冒充
-future-name interception。ledger
-属于 trusted host state；外部 ACL 修改后需要显式 repair，无锁快路径不会在每次调用审计整个 Workspace。
-持久 Workspace capability ledger 只记录 canonical Workspace 内的 protected path；用户目录等外部
-protected path 不得写入该 ledger，因为 Workspace capability 在外部没有 allow ACE，本来就无法通过
-restricted write check。approved filesystem guard 仍可在单次 invocation 内保护既有外部固定路径，
-并在 Job 清空后撤销，不把外部路径交给 Workspace repair。
-Rust 回归测试 `persistent_protected_paths_never_escape_the_workspace` 以纯路径成员判断锁定该边界，
-不依赖 CI host 预先存在特定绝对路径。
+该 backend 没有 structural network-off 或 arbitrary-descendant allowlist。按 ADR-0131，Workspace 内
+`.env.*` 等名称不再需要动态 deny；ledger 属于 trusted host state，并只保留完整 Workspace root capability。
+用户目录等 Workspace 外 protected path 不得写入该 ledger，因为 Workspace capability 在外部没有 allow ACE。
+按 ADR-0132/ADR-0133，approved filesystem invocation 已在 Tool Policy 完成当前模式授权，runner 不再为外部固定路径
+安装 guard deny ACE；compatibility SID 暂时保留以维持 protocol V6，且外部路径不进入 Workspace repair。
 
 因此 `windows_restricted_token` 是 development backend：
 
 - 可以开启 ADR-0121 定义的开发期 Full，但不能以此宣称 production Full qualification；
 - 不能为 arbitrary Shell descendant 资格化 network-off 或 allowlist；
-- 不能承诺 future root `.env.*` 的 production protected-path deny；
+- 不再提供或要求 Workspace 内 `.env.*` protected-path deny；
 - `productionSupported=false`，D-04 仍为 excluded。
 
 Tool Policy 保持逐调用授权：可证明本地的 version query 投影为 `off`；网络命令和 uncertain script
@@ -175,10 +170,12 @@ Tool Policy 保持逐调用授权：可证明本地的 version query 投影为 `
 production network evidence。
 
 文件系统 effects 独立处理：`externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后与其他平台
-相同投影 approved filesystem scope；Auto 模型判断安全时自动批准，判断风险或技术异常时转真人审批。
-该 invocation 不准备或修改 restricted-token Workspace ACL ledger。普通临时目录和外部文件允许执行；
-凭据、持久化入口、关键系统
-文件和 destructive 操作必须在审批前拒绝。命令自身或宿主 ACL 失败仍原样返回。
+相同投影 approved filesystem scope；Full 直接授权，Auto 模型选择批准、拒绝或请求真人审批，技术异常和
+circuit breaker 转真人审批。
+该 invocation 不准备或修改 restricted-token Workspace ACL ledger。canonical Workspace 内全部名称均允许；
+普通临时目录和外部文件可在批准后执行；Workspace 外凭据、持久化入口和关键系统文件进入相同模式感知
+授权，其他模式请求 exact user approval；授权后 runner 不再二次拒绝。关键 destructive 操作仍硬拒绝。
+命令自身或宿主 ACL 失败仍原样返回。
 
 ## startup denial 与 no replay
 
@@ -203,8 +200,8 @@ runner build/Cargo/protocol、Local Provider 及成功 command dispatch conforma
 或 production 资格。
 
 正式 Platform Capability Probe 的 Windows 命令使用正常 persistent Workspace capability，而不是
-startup probe 的 ephemeral Workspace SID，因此 protected-path write 结论必须经过真实 ledger/DACL
-刷新路径。probe Workspace 创建后立即固定 canonical identity，采集与 finally repair 必须共用该值，
+startup probe 的 ephemeral Workspace SID，因此完整 Workspace read/write/execute 与 V3 legacy protected
+snapshot migration 结论必须经过真实 ledger/DACL 刷新路径。probe Workspace 创建后立即固定 canonical identity，采集与 finally repair 必须共用该值，
 不能让 Windows 8.3/长路径 alias 分裂 ledger。probe Workspace 仍是临时目录；采集结束时先调用 runner repair 恢复 snapshot、撤销 root ACE
 并删除 ledger，再删除临时目录。资格 workflow 的 paths gate 必须覆盖 native runner、`vendor/isksh`、
 Windows adapter 使用的 App composition、Builtin sandbox、Host lifecycle、SPI contract 以及 evidence scripts，不能让这些依赖单独变更而跳过原生
@@ -214,7 +211,7 @@ E2E/probe。
 | --- | --- |
 | user script 前 runner pin/OS/token/cleanup structural capability unavailable | App 缓存 backend none/mode denied，不启动 host command；Full 保持不可用 |
 | user script 开始后的 command/timeout/cancel/cleanup failure | selected backend fail closed；不 host replay |
-| static protected-path ACL/ledger recovery failure | fail closed 并保留 diagnostic |
+| legacy protected snapshot migration 或 Workspace ACL/ledger recovery failure | fail closed 并保留 diagnostic |
 | 已审批 `allow_all + full_access` | 当前用户 token 在 Job Object 中运行 exact command；不创建账户、不请求 UAC |
 | 已审批 `allow_all + read_only/workspace_write` | `approved_network_requires_full_filesystem_scope`，不启动 user script，不 host replay |
 | none 请求 Full | disabled/rejected，并显示非沙箱环境无法开启 full |
@@ -222,12 +219,16 @@ E2E/probe。
 
 ADR-0120 开始实现 direct Workspace 的临时 AppContainer strict candidate：它不是 Windows 登录账户，
 不请求 UAC，也不恢复 repository copy。默认零 capability profile 与已批准网络 profile 必须分离；在
-offline network、Workspace 外 read/write、动态 protected-name、Job/ACL/profile cleanup 和两入口 native
+offline network、Workspace 外 read/write/protected identity、Job/ACL/profile cleanup 和两入口 native
 conformance 全部通过前，它仍不是可选择 backend，也不能用于 production Full qualification。开发期 Full
 已由 ADR-0121 的 direct backend 语义提供。
 
-Windows restricted-token 开发 backend 尚不能证明通用 Shell 对 `.git` metadata 的
-独立 read 与 write deny；既有 ACL ledger 和 protected-name 测试不能冒充该证据。
-因此 `brokered-git-r1` 在 Windows production qualification 固定 excluded，直到新
-principal/profile 路径通过 native read/write negative、broker positive/hostile 与入口 composition
-全部证据；不得退回 raw Shell Git。
+按 ADR-0131，Windows restricted-token 开发 backend 不再尝试证明通用 Shell 对 Workspace `.git`
+metadata 的独立 read/write deny；旧 ACL snapshot 会由 V3 ledger migration 恢复并删除。依赖该 deny 的
+`brokered-git-r1` production qualification 固定 excluded，直到后续 ADR 建立不缩小 Workspace 的新证据模型；
+typed broker schema 与 hostile repository 检查保留。按 ADR-0136，Windows 上的每个 raw Shell（包括 direct
+`git status`、无 patch `git log`、local Git mutation 和普通命令）均按 Full、Auto、Accept Edits 当前模式治理，
+不再由闭集 grammar 或 Workspace target 直接授权。命中 ADR-0134 read-only classifier 的已批准命令仍可使用
+hardened environment，并固定关闭 external config、prompt、pager、optional locks 与 fsmonitor；该分类不跳过
+mode review。raw Git token 不被硬拒绝，typed broker qualification 保持独立且不得由 generic process evidence
+推导。

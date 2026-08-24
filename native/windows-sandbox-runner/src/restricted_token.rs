@@ -3,14 +3,16 @@
 //!
 //! This module deliberately does not select a backend or alter filesystem ACLs.
 //! Its narrow contract is to create either a Workspace token or an
-//! approved-filesystem token carrying a restricted-only guard SID. Both use
-//! `WRITE_RESTRICTED`. The module proves that a suspended child received the
-//! expected token and resumes it only after it joins the caller's Job Object.
+//! approved-filesystem token carrying a compatibility restricted SID. Both use
+//! `WRITE_RESTRICTED`. Sensitive-path approval is owned by Tool Policy; the
+//! runner no longer attaches path deny ACEs to that SID. The module proves that
+//! a suspended child received the expected token and resumes it only after it
+//! joins the caller's Job Object.
 //!
 //! A write-restricted token does not make the current user's ordinary read
 //! access disappear. The caller still has to grant
-//! the capability SID only to explicitly allowed write roots and apply any
-//! required protected-path policy before spawning the child.
+//! the capability SID only to explicitly allowed write roots before spawning
+//! the child.
 
 use std::ffi::c_void;
 use std::fmt;
@@ -245,8 +247,8 @@ pub const UNELEVATED_RESTRICTED_TOKEN_FLAGS: CREATE_RESTRICTED_TOKEN_FLAGS =
 
 /// Keeps the child non-elevated and privilege-stripped while applying the
 /// mirrored user/group restricting SIDs only to write access. Read/execute
-/// keeps the invoking user's ordinary ACL semantics, while the guard SID can
-/// still deny writes to fixed protected paths.
+/// keeps the invoking user's ordinary ACL semantics. The compatibility SID
+/// does not install native protected-path denies after Policy authorization.
 pub const APPROVED_FILESYSTEM_RESTRICTED_TOKEN_FLAGS: CREATE_RESTRICTED_TOKEN_FLAGS =
     CREATE_RESTRICTED_TOKEN_FLAGS(DISABLE_MAX_PRIVILEGE.0 | LUA_TOKEN.0 | WRITE_RESTRICTED.0);
 
@@ -705,8 +707,8 @@ pub fn create_unelevated_restricted_token(
 }
 
 /// Build a privilege-stripped restricted token whose ordinary filesystem
-/// checks mirror the current user's ACLs while a restricted-only guard SID
-/// keeps fixed protected paths denied for this invocation.
+/// checks mirror the current user's ACLs while retaining the protocol's
+/// compatibility restricted SID.
 pub fn create_unelevated_approved_filesystem_token(
     base_token: HANDLE,
     protected_guard: &CapabilitySid,
@@ -722,7 +724,7 @@ pub fn create_unelevated_approved_filesystem_token(
     {
         return Err(error(
             "restricted_token_create_failed",
-            "approved filesystem protected-path guard SID is invalid",
+            "approved filesystem compatibility SID is invalid",
         ));
     }
     let user_information = query_token_information(base_token, TokenUser)?;
@@ -1385,11 +1387,11 @@ mod tests {
     }
 
     #[test]
-    fn approved_filesystem_token_remains_restricted_with_a_protected_path_guard() {
+    fn approved_filesystem_token_remains_restricted_with_the_compatibility_sid() {
         if current_process_token_is_restricted().expect("inspect current token") {
             return;
         }
-        let guard = CapabilitySid::generate().expect("protected path guard");
+        let guard = CapabilitySid::generate().expect("compatibility SID");
         let token = create_current_user_approved_filesystem_token(&guard)
             .expect("approved filesystem token");
         verify_restricted_token_handle(token.handle(), std::slice::from_ref(&guard))
@@ -1410,7 +1412,7 @@ mod tests {
         if current_process_token_is_restricted().expect("inspect current token") {
             return;
         }
-        let guard = CapabilitySid::generate().expect("protected path guard");
+        let guard = CapabilitySid::generate().expect("compatibility SID");
         with_current_user_primary_token(|base_token| {
             let expected_logon = logon_sid(base_token)?;
             let expected_world = StableSidBuffer::world()?;

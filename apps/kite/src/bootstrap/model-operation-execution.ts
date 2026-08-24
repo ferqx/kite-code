@@ -21,6 +21,7 @@ export function createKiteModelOperationExecutionPort(
 ): BuiltinModelOperationExecutionPort {
   return Object.freeze({
     async execute(input: Parameters<BuiltinModelOperationExecutionPort['execute']>[0]) {
+      throwIfModelOperationAborted(input.signal);
       if (BUILTIN_MODEL_OPERATION_BY_PURPOSE_[input.purpose] !== input.operationId) {
         throw new Error(
           `Builtin Model operation purpose mismatch: ${input.purpose}:${input.operationId}`,
@@ -85,6 +86,7 @@ export function createKiteModelOperationExecutionPort(
             mechanisms: Object.freeze({
               model: Object.freeze({
                 execute: async (operationId: string, mechanismInput: unknown) => {
+                  throwIfModelOperationAborted(input.signal);
                   if (
                     operationId !== input.operationId ||
                     digestCapabilityBindingValue(mechanismInput) !== inputDigest ||
@@ -123,4 +125,9 @@ export function createKiteModelOperationExecutionPort(
       }
     },
   });
+}
+
+function throwIfModelOperationAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error('Model operation aborted.');
 }

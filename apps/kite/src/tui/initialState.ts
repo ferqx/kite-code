@@ -57,7 +57,7 @@ export const initialState: TuiState = {
   currentModelRequestId: undefined,
   currentModelReasoningStreamed: false,
   currentModelReasoningText: undefined,
-  interactionMode: 'accept_edits',
+  interactionMode: 'auto',
   skillManifests: [],
 };
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,7 +8,6 @@ import {
   BUILTIN_WRITE_PLAN_SCHEMA_,
   buildDescription,
   digestCapabilityBindingValue,
-  hasBrokeredGitExecutableToken,
   isReadOnlyShellCommand,
   TOOL_CONTRACTS,
   toolContractSection,
@@ -28,7 +27,6 @@ import { getFeatureFlags } from '#app/config/features';
 import {
   clearTestToolCache as clearToolCache,
   createTestAgentTools as createAgentTools,
-  executeTestRuntimeTool,
   testBuiltinToolCatalog,
 } from './helpers/runtime-model';
 
@@ -154,78 +152,6 @@ describe('code agent tool definitions', () => {
           .success,
       ).toBe(false);
     }
-  });
-  test('brokered Git shell denial returns stable next capability without native dispatch', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'kite-brokered-git-shell-'));
-    let dispatches = 0;
-    try {
-      const result = await executeTestRuntimeTool({
-        workspace,
-        toolName: 'shell_execute',
-        args: { command: 'git status --short' },
-        execution: {
-          taskConfig: {
-            features: { brokeredGit: true },
-            executionCapabilitySurface: {
-              inProcessReadOnlyTools: null,
-              network: false,
-              process: true,
-              write: false,
-              workspaceWrite: false,
-              shell: true,
-              skillChild: false,
-              localStdioMcp: false,
-              gitInspect: true,
-              brokeredGitFeatureRevision: 'brokered-git-r1',
-            },
-          } as AgentConfig,
-          shellExecutor: async () => {
-            dispatches++;
-            return { ok: true, command: 'git status --short', exitCode: 0, stdout: '', stderr: '' };
-          },
-        },
-      });
-      expect(dispatches).toBe(0);
-      expect(Object.keys(result.state.capabilities.invocations)).toHaveLength(0);
-      expect(result.terminal).toMatchObject({
-        type: 'tool.finished',
-        result: {
-          ok: false,
-          status: 'error',
-          resultMeta: { nextCapability: 'git_inspect' },
-        },
-        classifierAdvice: {
-          disposition: 'never',
-          maximumAdditionalCalls: 0,
-          safeAutomaticRetry: false,
-          capabilityIntent: 'git_inspect',
-        },
-      });
-      expect(result.state.tools.calls[result.toolCallId]?.outcome).toMatchObject({
-        status: 'failed',
-        dispatchState: 'not_started',
-        externalEffects: 'none',
-        recovery: {
-          disposition: 'never',
-          maximumAdditionalCalls: 0,
-          capabilityIntent: 'git_inspect',
-        },
-      });
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
-  test('brokered Git shell detection fails closed for absolute, nested shell and indirect child forms', () => {
-    for (const command of [
-      '/usr/bin/git status --short',
-      'sh -c "git diff -- safe.txt"',
-      "python -c \"import subprocess; subprocess.run(['git','status'])\"",
-      'env PATH=/usr/bin command git.exe status',
-      'C:\\Tools\\Git\\bin\\git.exe status',
-    ]) {
-      expect(hasBrokeredGitExecutableToken(command)).toBe(true);
-    }
-    expect(hasBrokeredGitExecutableToken('printf .git/config')).toBe(false);
   });
   test('brokered Git disclosure requires one matching feature revision and independent axes', () => {
     const gitBroker = {
@@ -493,7 +419,19 @@ describe('code agent tool definitions', () => {
           },
         ],
       }).success,
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: [
+          {
+            ...validQuestion,
+            options: validQuestion.options.map(
+              ({ recommended: _recommended, ...option }) => option,
+            ),
+          },
+        ],
+      }).success,
+    ).toBe(true);
     expect(
       BUILTIN_ASK_USER_SCHEMA_.safeParse({
         questions: [
@@ -556,7 +494,7 @@ describe('code agent tool definitions', () => {
         items: { required?: string[] };
       }
     ).items;
-    expect(optionSchema.required).toEqual(['label', 'description', 'recommended']);
+    expect(optionSchema.required).toEqual(['label', 'description']);
   });
 
   test('ask_user input schema remains capability-descriptor representable', () => {
@@ -635,6 +573,8 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('grep -f patterns.txt input.txt')).toBe(true);
     expect(isReadOnlyShellCommand('file --magic-file=magic input.txt')).toBe(true);
     expect(isReadOnlyShellCommand('sort --random-source seed input.txt')).toBe(true);
+    expect(isReadOnlyShellCommand('git status --short')).toBe(true);
+    expect(isReadOnlyShellCommand('git log --oneline -10')).toBe(true);
     // /dev/null 重定向用于抑制输出，应视为只读安全 / /dev/null redirects for output suppression are read-only safe
     expect(isReadOnlyShellCommand('ls -la src tests 2>/dev/null')).toBe(true);
     expect(isReadOnlyShellCommand("find . -name '*.ts' >/dev/null 2>&1")).toBe(true);
@@ -660,9 +600,8 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('awk \'BEGIN { system("rm hello.txt") }\'')).toBe(false);
     expect(isReadOnlyShellCommand('git branch new-branch')).toBe(false);
     expect(isReadOnlyShellCommand('git branch -d old-branch')).toBe(false);
-    expect(isReadOnlyShellCommand('git status --short')).toBe(false);
     expect(isReadOnlyShellCommand('git diff -- src/app/runner.ts')).toBe(false);
-    expect(isReadOnlyShellCommand('git log -1')).toBe(false);
+    expect(isReadOnlyShellCommand('git log -p -1')).toBe(false);
     expect(isReadOnlyShellCommand('git show HEAD')).toBe(false);
     expect(isReadOnlyShellCommand('git ls-files')).toBe(false);
     expect(isReadOnlyShellCommand('git diff --output=leak.diff')).toBe(false);
@@ -742,18 +681,22 @@ describe('code agent tool definitions', () => {
       featureFlags: getFeatureFlags(),
     };
     expect(
-      builtinEntry('task', context).parseModelInput({ subagent_type: 'code', task: 'write code' })
-        .success,
+      builtinEntry('task', context).parseModelInput({
+        name: 'Write code',
+        subagent_type: 'code',
+        task: 'write code',
+      }).success,
     ).toBe(true);
     expect(
       builtinEntry('task', context).parseModelInput({
+        name: 'Design change',
         subagent_type: 'plan',
         task: 'design change',
       }).success,
     ).toBe(true);
     expect(
       builtinEntry('task', context).classifyEffects(
-        { subagent_type: 'code', task: 'write code' },
+        { name: 'Write code', subagent_type: 'code', task: 'write code' },
         context,
       ),
     ).toMatchObject({ effectClass: 'workspace_write', sideEffect: true });
@@ -1023,7 +966,8 @@ describe('tool contracts (ACI)', () => {
     expect(contract.constraints).toMatch(/Removed top-level question\/options/);
     expect(contract.constraints).toMatch(/client always adds free-text input/);
     expect(contract.returns.description).toContain('questions contain 1-3 items');
-    expect(contract.returns.description).toContain('2-3 {label, description, recommended}');
+    expect(contract.returns.description).toContain('2-3 {label, description, recommended?}');
+    expect(contract.constraints).toMatch(/put the preferred option first/i);
     expect(contract.recovery).toMatch(/canonical questions array.*never pass stringified JSON/);
   });
 

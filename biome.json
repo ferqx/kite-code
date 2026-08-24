@@ -40,11 +40,5 @@
       "trailingCommas": "all",
       "arrowParentheses": "always"
     }
-  },
-  "overrides": [
-    {
-      "includes": ["tests/reliability-harness/runtime-modularization/manifests/*.generated.json"],
-      "formatter": { "enabled": false }
-    }
-  ]
+  }
 }

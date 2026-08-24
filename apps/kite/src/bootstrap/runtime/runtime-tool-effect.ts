@@ -14,7 +14,10 @@ import {
 } from '@kite/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import { executeAppRuntimeTools } from '../../runtime/tool-execution/router';
-import { serializeConcurrentSubagentApprovalEvents } from '../../runtime/tool-execution/subagent-executor';
+import {
+  isConcurrentExploreSubagentBatch,
+  serializeConcurrentSubagentApprovalEvents,
+} from '../../runtime/tool-execution/subagent-executor';
 import { createAppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
 import { classifyFailure } from './failures';
 import { createFilePreimageRecorder } from './file-checkpoints';
@@ -73,6 +76,34 @@ function currentSkillCatalog(
     : undefined;
 }
 
+/**
+ * A resumed child that blocks again must yield the one interaction slot to an
+ * older queued sibling. Otherwise the same long-running child can repeatedly
+ * reclaim approval and starve the original deferred continuation forever.
+ */
+export function deferResumedSubagentApprovalBehindQueuedSibling(
+  state: Readonly<RuntimeState>,
+  currentToolCallId: string,
+  event: RuntimeEvent,
+): RuntimeEvent {
+  if (
+    (event.type !== 'approval.requested' && event.type !== 'auto_review.requested') ||
+    event.toolCallId !== currentToolCallId ||
+    state.suspendedSubagents[currentToolCallId] == null
+  ) {
+    return event;
+  }
+  const hasQueuedSuspendedSibling = state.tools.queue.some(
+    (toolCallId) =>
+      toolCallId !== currentToolCallId &&
+      state.suspendedSubagents[toolCallId] != null &&
+      state.tools.calls[toolCallId]?.status === 'queued',
+  );
+  return hasQueuedSuspendedSibling
+    ? { type: 'subagent.approval_deferred', toolCallId: currentToolCallId }
+    : event;
+}
+
 /** App-owned State projection for the one run_tools effect. */
 export async function executeAppRuntimeToolsEffect(
   effect: Extract<RuntimeEffect, { type: 'run_tools' }>,
@@ -128,6 +159,8 @@ export async function executeAppRuntimeToolsEffect(
       effect.toolCallIds.every((toolCallId) =>
         isBuiltinSubagentTaskToolName(state.tools.calls[toolCallId]?.name),
       );
+    const parallelExploreBatch =
+      parallelSubagentBatch && isConcurrentExploreSubagentBatch(state, effect.toolCallIds);
     const execute = async (toolCallIds: string[], subagentConcurrencyGroupId?: string) => {
       const taskCallId =
         toolCallIds.length === 1 &&
@@ -164,7 +197,10 @@ export async function executeAppRuntimeToolsEffect(
             })
           : undefined;
       const terminalEvents: RuntimeEvent[] = [];
-      const emitOrDefer = (event: RuntimeEvent) => {
+      const emitOrDefer = (rawEvent: RuntimeEvent) => {
+        const event = taskCallId
+          ? deferResumedSubagentApprovalBehindQueuedSibling(state, taskCallId, rawEvent)
+          : rawEvent;
         if (
           event.type === 'tool.file_change' ||
           event.type === 'tool.finished' ||
@@ -209,7 +245,6 @@ export async function executeAppRuntimeToolsEffect(
           signal: dependencies.signal,
           taskConfig: dependencies.config,
           taskModel: dependencies.model,
-          providerDataAdmission: dependencies.providerDataAdmission,
           descendantResourceAdmission,
           modelEffectCoordinator: requireModelEffectCoordinator(dependencies),
           capabilityArtifactStore: dependencies.capabilityArtifactStore,
@@ -230,6 +265,7 @@ export async function executeAppRuntimeToolsEffect(
             : undefined,
           modelInvocationParentReservationId: parentReservationId,
           subagentConcurrencyGroupId,
+          subagentAutoReviewBatch: parallelExploreBatch,
           subagentEventSink,
           emitRuntimeEvent: emitOrDefer,
           emitTerminalEventBatch: (events) => terminalEvents.push(...events),

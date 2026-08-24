@@ -59,9 +59,14 @@ export type AgentVerificationCheck =
   | {
       readonly checkId: string;
       readonly description: string;
+      readonly type: 'receipt';
+      readonly invocationId: string;
+    }
+  | {
+      readonly checkId: string;
+      readonly description: string;
+      /** Read-only compatibility check. Current planners never create it. */
       readonly type: 'reviewer';
-      readonly invocationIds?: readonly string[];
-      readonly activationIds?: readonly string[];
       readonly instructions: string;
     };
 export interface AgentVerificationSpec {

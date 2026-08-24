@@ -1,7 +1,0 @@
-{
-  "format": "kite.runtime-modularization-manifest.v1",
-  "currentTask": "RA-06",
-  "kind": "architecture-exceptions",
-  "policy": "Only exact migration compatibility import edges may be added. Existing single-package seams are baseline facts, not package-boundary exceptions.",
-  "exceptions": []
-}

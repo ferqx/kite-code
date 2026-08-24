@@ -432,10 +432,7 @@ export function reduceResourceBudgetState(
       if (reservation.state === 'released') return active;
       if (
         reservation.state !== 'reserved' &&
-        !(
-          reservation.state === 'dispatch_started' &&
-          event.proof === 'local_provider_admission_denied'
-        )
+        !(reservation.state === 'dispatch_started' && event.proof === 'local_pre_dispatch_failure')
       ) {
         throw new Error('Only a proven undispatched reservation can be released.');
       }

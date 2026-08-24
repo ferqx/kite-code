@@ -6,6 +6,7 @@ export const RUNTIME_CONTRACT_SCHEMA_ = 'kite.runtime-contract.v1' as const;
 
 export * from './capabilities';
 export * from './commands';
+export * from './logs';
 export * from './notifications';
 export * from './observability';
 export * from './presentation';

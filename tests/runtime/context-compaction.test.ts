@@ -14,7 +14,6 @@ import {
   digestProjectionEnvironment,
   executeBuiltinContextCompaction,
   expectedCompactionSourceDigest,
-  ProviderDataAdmissionError,
   serializeToolDescriptors,
 } from '@kite/builtin-runtime/model';
 import {
@@ -136,16 +135,6 @@ describe('eventized context compaction', () => {
             validCheckpoint(state, pending.reason, sourceRevision),
       },
       { name: 'missing compactor' },
-      {
-        name: 'provider denied',
-        compact: () => async () => {
-          throw new ProviderDataAdmissionError({
-            admitted: false,
-            reason: 'provider_secret_denied',
-            routeAlias: 'parity-denied',
-          });
-        },
-      },
       {
         name: 'typed validation failure',
         compact: () => async () => {

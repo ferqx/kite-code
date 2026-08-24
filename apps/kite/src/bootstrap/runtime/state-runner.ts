@@ -14,7 +14,6 @@ import {
   type StateRuntimeEffectPersistenceAcknowledgement,
 } from '@kite/runtime-host/kernel-adapter';
 import type { RuntimeEffectLeaseExpectation } from '@kite/runtime-host/storage';
-import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import { classifyFailure } from './failures';
 import { resourceAdmissionTerminalEvents } from './resource-admission-terminal';
 import type { RuntimeActionResult, RuntimeUserAction } from './state-actions';
@@ -396,18 +395,10 @@ async function* executeEffectWithStreaming(
       return { applied: true, emitted: true };
     }
     if (reservationIds.length > 0) {
-      const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) =>
-        failure instanceof ProviderDataAdmissionError && failure.knownExternalEffects === 'none'
-          ? {
-              type: 'resource_budget.released',
-              reservationId,
-              proof: 'local_provider_admission_denied',
-            }
-          : {
-              type: 'resource_budget.unknown',
-              reservationId,
-            },
-      );
+      const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) => ({
+        type: 'resource_budget.unknown',
+        reservationId,
+      }));
       kernel.applyEffectResult(lease, terminalReservationEvents);
     }
     throw failure;

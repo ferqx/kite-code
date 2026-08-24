@@ -278,7 +278,6 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'surfaceArtifact',
     'surfaceIntegrityIdentifier',
     'routeFingerprint',
-    'admission',
     'budget',
     'limits',
     'preparedStateRevision',
@@ -289,7 +288,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'model.reasoning_delta': ['text'],
   'model.requested': ['requestId'],
   'model.responded': ['messageId'],
-  'model.retry': ['attempt', 'maxAttempts', 'error', 'delayMs'],
+  'model.retry': ['invocationId', 'attempt', 'maxAttempts', 'error', 'delayMs'],
   'model.text_delta': ['text'],
   'network.admission_decided': ['toolCallId', 'decision'],
   'plan.approved': [
@@ -375,6 +374,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'provider.admission_retry_requested': ['interactionId'],
   'provider.admission_satisfied': ['interactionId', 'providerDirectoryRevision'],
   'provider.admission_waived': ['interactionId', 'providerId', 'source', 'reason', 'waivedAt'],
+  /** Read-only compatibility event. Current Runtime has no producer. */
   'provider.admission_status': ['status', 'reason'],
   'provider.readiness_attempt_started': [
     'readinessKey',
@@ -478,7 +478,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
-/** The current State union has exactly 135 discriminants. */
+/** The State union has 134 current events plus one read-only compatibility event. */
 export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 135 as const;
 
 /**
@@ -623,12 +623,20 @@ type ProviderDataAdmissionReason =
 type CapabilitySearchResult = StateCapabilitySearchResult;
 
 type SubAgentRole = 'explore' | 'plan' | 'code' | 'review';
-type SubAgentStartPayload = {
-  id: string;
-  role: SubAgentRole;
-  task: string;
-  concurrencyGroupId?: string;
-};
+type SubAgentStartPayload =
+  | {
+      id: string;
+      role: SubAgentRole;
+      name: string;
+      concurrencyGroupId?: string;
+    }
+  | {
+      /** Read-only compatibility payload written before explicit public names. */
+      id: string;
+      role: SubAgentRole;
+      task: string;
+      concurrencyGroupId?: string;
+    };
 type SubAgentStepPayload = {
   id: string;
   modelInvocationId?: string;
@@ -653,12 +661,31 @@ type SubAgentDonePayload = {
   toolCallCount: number;
   durationMs: number;
 };
+type SubAgentFailureDiagnostic = {
+  code:
+    | 'aborted'
+    | 'timed_out'
+    | 'invalid_input'
+    | 'consumer_protocol'
+    | 'model_step_failed'
+    | 'internal_error';
+  stage:
+    | 'initialization'
+    | 'next_round_preparation'
+    | 'model_step'
+    | 'model_response_validation'
+    | 'tool_consumption'
+    | 'transcript_validation'
+    | 'terminal_projection';
+  modelInvocationId?: string;
+};
 type SubAgentErrorPayload = {
   id: string;
   error: string;
   summary?: string;
   toolCallCount?: number;
   durationMs?: number;
+  diagnostic?: SubAgentFailureDiagnostic;
 };
 type SubAgentCacheMetricsPayload = {
   subagentId: string;
@@ -671,6 +698,7 @@ type ModelInvocationPurpose =
   | 'primary_agent'
   | 'context_compaction'
   | 'auto_review'
+  /** Read-only persisted purpose; no current Gateway operation exists. */
   | 'verification_review'
   | 'subagent';
 type Sha256Digest = `sha256:${string}`;
@@ -688,7 +716,7 @@ type PrivateArtifactRef = {
   integrityIdentifier: string;
   byteLength: number;
 };
-type ModelInvocationAdmission = {
+type RetiredModelInvocationAdmission = {
   providerAdmissionRevision: string | null;
   routeIdentityDigest: Sha256Digest;
   payloadClassificationDigest: Sha256Digest;
@@ -765,7 +793,7 @@ type ResourceBudgetEventMap = {
   'resource_budget.released': {
     type: 'resource_budget.released';
     reservationId: string;
-    proof?: 'local_provider_admission_denied';
+    proof?: 'local_pre_dispatch_failure';
   };
   'resource_budget.unknown': { type: 'resource_budget.unknown'; reservationId: string };
   'resource_budget.waiter_enqueued': {
@@ -1383,7 +1411,8 @@ type StateEventMap = ResourceBudgetEventMap &
       surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
       surfaceIntegrityIdentifier: string;
       routeFingerprint: Sha256Digest;
-      admission: ModelInvocationAdmission;
+      /** Read-only compatibility field. Current producers omit it. */
+      admission?: RetiredModelInvocationAdmission;
       budget: ModelInvocationBudget;
       limits: ModelInvocationLimits;
       preparedStateRevision: number;
@@ -1411,9 +1440,21 @@ type StateEventMap = ResourceBudgetEventMap &
         | 'attempts_exhausted'
         | 'cancelled'
         | 'cancelled_before_dispatch'
+        | 'attempt_timeout'
         | 'provider_failure'
         | 'surface_identity_changed'
         | 'persistence_unavailable';
+      failureClassification?:
+        | 'provider_rate_limited'
+        | 'provider_unavailable'
+        | 'connection_failure'
+        | 'attempt_timeout'
+        | 'provider_rejected'
+        | 'provider_failure'
+        | 'cancelled'
+        | 'transport_aborted';
+      providerStatusCode?: number | null;
+      timedOut?: boolean;
     };
     'model.invocation_evidence_unavailable': {
       type: 'model.invocation_evidence_unavailable';
@@ -1489,10 +1530,18 @@ type StateEventMap = ResourceBudgetEventMap &
     };
     'model.retry': {
       type: 'model.retry';
+      invocationId: string;
       attempt: number;
       maxAttempts: number;
       error: string;
       delayMs: number;
+      failureClassification?:
+        | 'provider_rate_limited'
+        | 'provider_unavailable'
+        | 'connection_failure'
+        | 'attempt_timeout';
+      providerStatusCode?: number | null;
+      timedOut?: boolean;
     };
     'model.cache_metrics': {
       type: 'model.cache_metrics';

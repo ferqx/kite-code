@@ -1,4 +1,3 @@
-import type { VerificationReviewerInput, VerificationReviewerResult } from '@kite/runtime-spi';
 import type { ModelRuntimeConfig } from './config';
 import { createChatModel, type SupportedChatModel } from './factory';
 import {
@@ -9,10 +8,6 @@ import {
   normalizedModelResponseToAIMessage,
 } from './invocation-gateway';
 import { type BaseMessage, humanMessage, systemMessage } from './messages';
-import {
-  ProviderDataAdmissionError,
-  type ProviderDataAdmissionGate,
-} from './provider-data-admission';
 import { compileModelSurface } from './surface-compiler';
 
 export type ShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
@@ -49,6 +44,7 @@ interface ReviewStateView extends ModelInvocationStateView {
 
 export interface AutoReviewSuggestion {
   approved: boolean;
+  requiresUserApproval?: true;
   grant: ShellApprovalGrant;
   reason: string;
   riskAssessment?: 'low' | 'medium' | 'high' | 'critical';
@@ -94,7 +90,6 @@ export async function reviewToolApproval(input: {
   request: PendingToolRequestView;
   context?: ReviewContext;
   timeoutMs?: number;
-  providerDataAdmission: ProviderDataAdmissionGate;
   parentReservationId?: string;
   parentInvocationId?: string;
 }): Promise<AutoReviewResult> {
@@ -139,7 +134,6 @@ export async function reviewToolApproval(input: {
           [],
         ),
       },
-      providerDataAdmission: input.providerDataAdmission,
       resourceKind: 'verification',
       ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
       signal: controller.signal,
@@ -171,105 +165,11 @@ export async function reviewToolApproval(input: {
 
     return { ...reviewResult, modelInvocationId };
   } catch (error) {
-    if (error instanceof ProviderDataAdmissionError) throw error;
     return {
       ok: false,
       ...(modelInvocationId ? { modelInvocationId } : {}),
       reason: error instanceof Error ? error.message : String(error),
       failureType: 'technical',
-    };
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-/** Review post-execution evidence in an isolated prompt with no main-model conclusion. */
-export async function reviewVerificationEvidence(input: {
-  config?: ModelRuntimeConfig;
-  model?: SupportedChatModel;
-  gateway?: ReviewGateway;
-  persistence?: ModelInvocationPersistence<ReviewStateView>;
-  evidence: VerificationReviewerInput;
-  timeoutMs?: number;
-  providerDataAdmission: ProviderDataAdmissionGate;
-  parentReservationId?: string;
-}): Promise<VerificationReviewerResult> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(new Error('verification review timed out')),
-    input.timeoutMs ?? 30_000,
-  );
-  let modelInvocationId: string | undefined;
-  try {
-    if (!input.config || !input.model || !input.gateway || !input.persistence) {
-      throw new Error('ModelInvocationGateway execution context is unavailable.');
-    }
-    const messages = [
-      systemMessage(
-        [
-          'You are an independent post-execution verifier.',
-          'Use only the supplied original receipts, artifacts, and structured workflow outputs.',
-          'Do not trust or infer any main-model claim.',
-          'Return only JSON: {"outcome":"passed|failed|inconclusive","summary":"..."}.',
-        ].join('\n'),
-      ),
-      humanMessage(JSON.stringify(input.evidence)),
-    ];
-    const compiled = compileModelSurface({
-      purpose: 'verification_review',
-      config: input.config,
-      model: input.model,
-      tools: {},
-      messages,
-      maxOutputTokens: 1_000,
-      transport: 'generate',
-    });
-    const state = input.persistence.getState();
-    const pending = await input.gateway.invoke({
-      model: input.model,
-      compiled,
-      persistence: input.persistence,
-      provenance: {
-        contextCheckpointId: state.context.activeCheckpoint?.sourceDigest ?? null,
-        promptContractVersion: 'verification-review-v1',
-        projectionEnvironmentDigest: computeModelInvocationPrivateDigest(
-          'kite.model-projection-environment.v1',
-          { verificationEvidence: input.evidence },
-        ),
-        capabilityBindingDigest: computeModelInvocationPrivateDigest(
-          'kite.model-capability-bindings.v1',
-          [],
-        ),
-      },
-      providerDataAdmission: input.providerDataAdmission,
-      resourceKind: 'verification',
-      ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
-      signal: controller.signal,
-    });
-    modelInvocationId = pending.invocationId;
-    const result = normalizedModelResponseToAIMessage(await pending.commit());
-    const parsed = JSON.parse(modelResponseText(result.content)) as Record<string, unknown>;
-    if (
-      !['passed', 'failed', 'inconclusive'].includes(String(parsed.outcome)) ||
-      typeof parsed.summary !== 'string'
-    ) {
-      return {
-        outcome: 'inconclusive',
-        summary: 'Reviewer returned an invalid response.',
-        modelInvocationId,
-      };
-    }
-    return {
-      outcome: parsed.outcome as VerificationReviewerResult['outcome'],
-      summary: parsed.summary,
-      modelInvocationId,
-    };
-  } catch (error) {
-    if (error instanceof ProviderDataAdmissionError) throw error;
-    return {
-      outcome: 'inconclusive',
-      summary: error instanceof Error ? error.message : String(error),
-      ...(modelInvocationId ? { modelInvocationId } : {}),
     };
   } finally {
     clearTimeout(timeoutId);
@@ -290,7 +190,7 @@ function modelResponseText(content: unknown): string {
 
 const REVIEWER_SYSTEM_PROMPT = [
   'You are a security reviewer for a coding agent execution gateway.',
-  'Your job is to classify tool calls as SAFE or UNSAFE before they execute.',
+  'Your job is to decide whether a tool call may run, must be rejected, or needs user approval.',
   '',
   'SAFETY RULES (ordered by priority):',
   '1. DESTRUCTIVE commands are ALWAYS denied:',
@@ -326,9 +226,14 @@ const REVIEWER_SYSTEM_PROMPT = [
   '- If this same tool was recently rejected, do NOT approve unless the args have changed meaningfully.',
   '- If doom-loop is detected (same call repeated), ALWAYS deny.',
   '',
+  'DECISION RULES:',
+  '- Use "approve" when the call is safe, scoped, and aligned with the user task.',
+  '- Use "reject" when the call is clearly unsafe, unrelated, deceptive, or violates a hard safety rule.',
+  '- Use "ask_user" when safety depends on user intent or authorization that the available context cannot establish.',
+  '',
   'OUTPUT FORMAT: Return ONLY a JSON object:',
   '{',
-  '  "approved": true or false,',
+  '  "decision": "approve" | "reject" | "ask_user",',
   '  "grant": "approve_once" | "same_command" | "full_access",',
   '  "reason": "brief explanation (max 200 chars)",',
   '  "riskAssessment": "low" | "medium" | "high" | "critical"',
@@ -411,7 +316,7 @@ function parseAutoReviewSuggestion(
     };
   }
 
-  if (!parsed || typeof parsed !== 'object') {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return {
       ok: false,
       reason: 'auto review returned a non-object response',
@@ -419,14 +324,64 @@ function parseAutoReviewSuggestion(
     };
   }
   const obj = parsed as Record<string, unknown>;
-  const approved = obj.approved === true;
+  const allowedKeys = new Set(['decision', 'approved', 'grant', 'reason', 'riskAssessment']);
+  if (Object.keys(obj).some((key) => !allowedKeys.has(key))) {
+    return {
+      ok: false,
+      reason: 'auto review returned unknown fields',
+      failureType: 'invalid_response',
+    };
+  }
+  if (
+    (obj.decision !== undefined &&
+      obj.decision !== 'approve' &&
+      obj.decision !== 'reject' &&
+      obj.decision !== 'ask_user') ||
+    (obj.approved !== undefined && typeof obj.approved !== 'boolean')
+  ) {
+    return {
+      ok: false,
+      reason: 'auto review returned an unsupported decision',
+      failureType: 'invalid_response',
+    };
+  }
+  const decision =
+    obj.decision === 'approve' || obj.decision === 'reject' || obj.decision === 'ask_user'
+      ? obj.decision
+      : typeof obj.approved === 'boolean'
+        ? obj.approved
+          ? 'approve'
+          : 'ask_user'
+        : null;
+  if (decision === null) {
+    return {
+      ok: false,
+      reason: 'auto review returned an unsupported decision',
+      failureType: 'invalid_response',
+    };
+  }
+  if (typeof obj.approved === 'boolean' && obj.approved !== (decision === 'approve')) {
+    return {
+      ok: false,
+      reason: 'auto review returned contradictory decision fields',
+      failureType: 'invalid_response',
+    };
+  }
+  const approved = decision === 'approve';
   const grant = typeof obj.grant === 'string' ? obj.grant : 'approve_once';
   const reason = typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim() : '';
-  const riskAssessment =
-    typeof obj.riskAssessment === 'string' &&
-    ['low', 'medium', 'high', 'critical'].includes(obj.riskAssessment)
-      ? (obj.riskAssessment as AutoReviewSuggestion['riskAssessment'])
-      : undefined;
+  if (
+    obj.riskAssessment !== undefined &&
+    (typeof obj.riskAssessment !== 'string' ||
+      !['low', 'medium', 'high', 'critical'].includes(obj.riskAssessment))
+  ) {
+    return {
+      ok: false,
+      reason: 'auto review returned an invalid risk assessment',
+      failureType: 'invalid_response',
+    };
+  }
+  const riskAssessment = obj.riskAssessment as AutoReviewSuggestion['riskAssessment'];
 
   if (!isShellApprovalGrant(grant) || !grantOptions.includes(grant)) {
     return {
@@ -440,8 +395,15 @@ function parseAutoReviewSuggestion(
     ok: true,
     suggestion: {
       approved,
+      ...(decision === 'ask_user' ? { requiresUserApproval: true as const } : {}),
       grant,
-      reason: reason || (approved ? 'auto review approved' : 'auto review rejected'),
+      reason:
+        reason ||
+        (approved
+          ? 'auto review approved'
+          : decision === 'ask_user'
+            ? 'auto review requested user approval'
+            : 'auto review rejected'),
       riskAssessment,
     },
   };

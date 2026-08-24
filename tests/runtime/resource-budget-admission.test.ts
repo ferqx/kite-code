@@ -23,7 +23,6 @@ import {
 } from '#app/bootstrap/runtime/state-runner';
 import { failedTerminalOutcome } from '#app/bootstrap/runtime/terminal-outcome';
 import type { AgentConfig } from '#app/config';
-import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { prepareRuntimeEffectForBudget } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
@@ -273,7 +272,7 @@ describe('runtime resource budget admission', () => {
       reduceRuntimeState(dispatched, {
         type: 'resource_budget.released',
         reservationId,
-        proof: 'local_provider_admission_denied',
+        proof: 'local_pre_dispatch_failure',
       }).resourceBudget,
     ).toMatchObject({
       reservations: { [reservationId]: { state: 'released' } },
@@ -345,7 +344,7 @@ describe('runtime resource budget admission', () => {
     });
   });
 
-  test('blocks descendant dispatch when the persisted run deadline has elapsed', async () => {
+  test('rejects descendant dispatch after the shared run deadline has elapsed', async () => {
     let state = configuredState();
     state.tools.calls['task-deadline'] = {
       toolCallId: 'task-deadline',
@@ -377,13 +376,9 @@ describe('runtime resource budget admission', () => {
       },
     });
 
-    let rejected: unknown;
-    try {
-      await admission.reserveModel({ invocationKey: 'model:late', inputTokens: 1 });
-    } catch (error) {
-      rejected = error;
-    }
-    expect(rejected).toMatchObject({ reason: 'budget_exhausted' });
+    await expect(
+      admission.reserveModel({ invocationKey: 'model:late', inputTokens: 1 }),
+    ).rejects.toMatchObject({ reason: 'budget_exhausted' });
     expect(persisted).toBe(0);
   });
 
@@ -541,16 +536,16 @@ describe('runtime resource budget admission', () => {
     kernel.close();
   });
 
-  test('times out a descendant compound permit with a typed canonical reason', async () => {
+  test('times out a descendant compound permit at the earlier shared run deadline', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,
       maxConcurrentShellInvocations: 1,
-      maxConcurrencyWaitMs: 5,
+      maxConcurrencyWaitMs: 5_000,
     });
     if (state.resourceBudget.status === 'active') {
       state.resourceBudget = {
         ...state.resourceBudget,
-        deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+        deadlineAt: new Date(Date.now() + 200).toISOString(),
       };
     }
     state.tools.calls['task-timeout'] = {
@@ -954,10 +949,12 @@ describe('runtime resource budget admission', () => {
       modelInvocationId: 'parent-model-child-read',
       name: 'task',
       args: {
+        name: 'Read missing fixture',
         subagent_type: 'explore',
         taskArtifact: subagentTaskRequests.write({
           parentModelInvocationId: 'parent-model-child-read',
           parentToolCallId: 'task-child-read',
+          name: 'Read missing fixture',
           role: 'explore',
           task: 'Read the missing fixture once, then stop.',
         }),
@@ -1079,10 +1076,12 @@ describe('runtime resource budget admission', () => {
       modelInvocationId: 'parent-model-terminal',
       name: 'task',
       args: {
+        name: 'Read one file',
         subagent_type: 'explore',
         taskArtifact: subagentTaskRequests.write({
           parentModelInvocationId: 'parent-model-terminal',
           parentToolCallId: 'task-terminal',
+          name: 'Read one file',
           role: 'explore',
           task: 'Read a file.',
         }),
@@ -1229,96 +1228,6 @@ describe('runtime resource budget admission', () => {
     );
   });
 
-  test('propagates the final auto-review Provider denial without user-approval fallback', async () => {
-    let state = configuredState();
-    if (state.resourceBudget.status === 'active') {
-      const now = Date.now();
-      state.resourceBudget = {
-        ...state.resourceBudget,
-        startedAt: new Date(now).toISOString(),
-        deadlineAt: new Date(now + 30_000).toISOString(),
-      };
-    }
-    state = reduceRuntimeState(state, {
-      type: 'tool.queued',
-      toolCallId: 'reviewed-shell',
-      name: 'shell_execute',
-      args: { command: 'printf ok' },
-    });
-    state = reduceRuntimeState(state, {
-      type: 'auto_review.requested',
-      reviewId: 'review-denied',
-      toolCallId: 'reviewed-shell',
-      toolName: 'shell_execute',
-      reason: 'Requires governed review.',
-      approval: {
-        scope: 'once',
-        cwd: '/',
-        threadId: state.session.threadId,
-        tool: 'shell_execute',
-        command: 'printf ok',
-        risk: 'execute_code',
-        approvalHash: 'review-denied-hash',
-        summary: 'Run a fixture command.',
-        reason: 'Requires governed review.',
-        expectedEffects: [],
-        grantOptions: ['approve_once'],
-        recommendedGrant: 'approve_once',
-      },
-    });
-    const store = openStateStoreForTest(':memory:');
-    const kernel = new AgentKernel({
-      store,
-      initialState: state,
-      interactionMode: 'auto',
-    });
-    const model = createMockModel([]);
-    const config: AgentConfig = {
-      apiKey: 'unused',
-      baseURL: 'https://example.invalid',
-      modelName: 'review-model',
-      providerName: 'fixture',
-      providerType: 'openai-compatible',
-      features: { resourceBudget: true },
-      sandbox: { enabled: false },
-    };
-    const executor = createTestRuntimeEffectExecutor({
-      config,
-      model,
-      providerDataAdmission: () => ({
-        admitted: false,
-        reason: 'mandatory_policy_unavailable',
-        routeAlias: 'fixture:denied',
-      }),
-    });
-    const emitted: RuntimeEvent[] = [];
-    let thrown: unknown;
-    try {
-      for await (const event of runStateRuntimeLoop(kernel, executor, {
-        requestAction: async () => {
-          throw new Error('Provider denial must not fall back to user approval.');
-        },
-      })) {
-        emitted.push(event);
-      }
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(model.callCount.count).toBe(0);
-    expect(thrown).toBeInstanceOf(ProviderDataAdmissionError);
-    expect(emitted.some((event) => event.type === 'approval.requested')).toBe(false);
-    expect(emitted.some((event) => event.type === 'approval.rejected')).toBe(false);
-    expect(
-      Object.values(
-        kernel.getState().resourceBudget.status === 'active'
-          ? kernel.getState().resourceBudget.reservations
-          : {},
-      ),
-    ).toEqual([]);
-    kernel.close();
-  });
-
   test('uses the Kernel auto-review decision for risk, technical failure, and approval', () => {
     expect(
       decideAutoReview({
@@ -1326,6 +1235,7 @@ describe('runtime resource budget admission', () => {
         toolCallId: 'tool-risk',
         ok: true,
         approved: false,
+        requiresUserApproval: true,
         grant: 'approve_once',
         reason: 'risk',
       }),
@@ -1350,105 +1260,5 @@ describe('runtime resource budget admission', () => {
         reason: 'safe',
       }),
     ).toMatchObject({ kind: 'accepted_approval', grant: 'approve_once' });
-  });
-
-  test('keeps a verification reservation unknown when Provider denial follows an executed check', async () => {
-    let state = configuredState();
-    if (state.resourceBudget.status === 'active') {
-      const now = Date.now();
-      state.resourceBudget = {
-        ...state.resourceBudget,
-        startedAt: new Date(now).toISOString(),
-        deadlineAt: new Date(now + 30_000).toISOString(),
-      };
-    }
-    state.transcript.final = 'Ready for verification.';
-    state = reduceRuntimeState(state, {
-      type: 'verification.requested',
-      verificationId: 'partial-verification',
-      mode: 'required',
-      spec: {
-        schemaVersion: 1,
-        verificationId: 'partial-verification',
-        subject: 'Partially executed verification',
-        checks: [
-          {
-            checkId: 'command-first',
-            type: 'command',
-            description: 'Execute a local verification command.',
-            command: 'printf ok',
-          },
-          {
-            checkId: 'reviewer-last',
-            type: 'reviewer',
-            description: 'Review the collected evidence.',
-            instructions: 'Confirm the evidence.',
-          },
-        ],
-        repair: { maxAttempts: 0 },
-      },
-      requestedAt: new Date().toISOString(),
-    });
-    const kernel = new AgentKernel({
-      store: openStateStoreForTest(':memory:'),
-      initialState: state,
-      interactionMode: 'auto',
-    });
-    let shellCalls = 0;
-    const config: AgentConfig = {
-      apiKey: 'unused',
-      baseURL: 'https://example.invalid',
-      modelName: 'review-model',
-      providerName: 'fixture',
-      providerType: 'openai-compatible',
-      features: { resourceBudget: true },
-      sandbox: { enabled: false },
-    };
-    const executor = createTestRuntimeEffectExecutor({
-      config,
-      model: createMockModel([]),
-      shellExecutor: async ({ command }) => {
-        shellCalls += 1;
-        return {
-          ok: true,
-          command,
-          exitCode: 0,
-          stdout: 'ok',
-          stderr: '',
-        };
-      },
-      providerDataAdmission: (_payload, purpose) => ({
-        admitted: purpose !== 'verification_review',
-        reason: purpose === 'verification_review' ? 'provider_secret_denied' : 'admitted',
-        routeAlias: 'fixture:review',
-      }),
-    });
-    let thrown: unknown;
-    try {
-      for await (const _event of runStateRuntimeLoop(kernel, executor, {
-        requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
-      })) {
-        // Drain until the reviewer admission denial terminates execution.
-      }
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(shellCalls).toBe(1);
-    expect(thrown).toBeInstanceOf(ProviderDataAdmissionError);
-    expect(thrown).toMatchObject({ knownExternalEffects: 'unknown' });
-    expect(
-      Object.values(
-        kernel.getState().resourceBudget.status === 'active'
-          ? kernel.getState().resourceBudget.reservations
-          : {},
-      ),
-    ).toEqual([
-      expect.objectContaining({
-        resourceKind: 'verification',
-        state: 'unknown',
-      }),
-    ]);
-    kernel.close();
   });
 });

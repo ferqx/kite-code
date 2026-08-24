@@ -16,7 +16,6 @@ import {
   MODEL_ATTEMPT_OUTCOME_SCHEMA_,
   type ModelAttemptOutcome,
   type PrivateArtifactRef,
-  type VerificationReviewerInput,
 } from '@kite/runtime-spi';
 import type {
   BuiltinContextTokenEstimateView,
@@ -33,22 +32,8 @@ const CONFIG: ModelRuntimeConfig = Object.freeze({
 });
 
 const MODEL = createChatModel(CONFIG);
-const PROVIDER_DATA_ADMISSION = () => ({
-  admitted: true,
-  reason: 'admitted' as const,
-  routeAlias: 'coordinator-fixture',
-  maxWorkspaceDataClassification: 'confidential' as const,
-});
-
 type ReviewState = ModelInvocationStateView & {
   readonly context: { readonly activeCheckpoint?: { readonly sourceDigest: string } };
-};
-
-const EVIDENCE: VerificationReviewerInput = {
-  instructions: 'Verify the fixture result.',
-  receipts: [],
-  artifacts: [],
-  skillOutputs: [],
 };
 
 function createPersistence(): ModelInvocationPersistence<ReviewState> {
@@ -93,7 +78,10 @@ function successfulOutcome(text: string): ModelAttemptOutcome {
   };
 }
 
-function createGatewayFixture(input?: { invalidVerificationResponse?: boolean }) {
+function createGatewayFixture(input?: {
+  invalidVerificationResponse?: boolean;
+  autoReviewResponse?: string;
+}) {
   let gatewayInvocations = 0;
   let sourceInvocations = 0;
   let invocationOrdinal = 0;
@@ -107,7 +95,8 @@ function createGatewayFixture(input?: { invalidVerificationResponse?: boolean })
       sourceInvocations += 1;
       const text =
         purpose === 'auto_review'
-          ? '{"approved":true,"grant":"approve_once","reason":"fixture-approved"}'
+          ? (input?.autoReviewResponse ??
+            '{"approved":true,"grant":"approve_once","reason":"fixture-approved"}')
           : purpose === 'context_compaction'
             ? '# Fixture Summary\n\nPreserve the accepted runtime facts.'
             : input?.invalidVerificationResponse
@@ -140,18 +129,6 @@ function createGatewayFixture(input?: { invalidVerificationResponse?: boolean })
     counts: () => ({ gatewayInvocations, sourceInvocations }),
   };
 }
-
-const TOOL_INPUT = {
-  payload: {
-    risk: 'read' as const,
-    expectedEffects: ['read workspace'],
-    grantOptions: ['approve_once' as const],
-    recommendedGrant: 'approve_once' as const,
-    summary: 'Read a fixture file.',
-    reason: 'The operation is read-only.',
-  },
-  request: { id: 'tool-call-fixture', name: 'read_file', args: { path: 'README.md' } },
-};
 
 const COMPACTION_ESTIMATE: BuiltinContextTokenEstimateView = {
   systemTokens: 100,
@@ -211,89 +188,92 @@ function pendingCompaction(state: BuiltinRuntimeStateView) {
 }
 
 describe('BuiltinModelEffectCoordinator', () => {
-  test('routes both reviewer semantics through the one injected Gateway', async () => {
-    const fixture = createGatewayFixture();
+  test.each([
+    [
+      'approve',
+      '{"decision":"approve","grant":"approve_once","reason":"safe"}',
+      { ok: true, suggestion: { approved: true, reason: 'safe' } },
+    ],
+    [
+      'reject',
+      '{"decision":"reject","grant":"approve_once","reason":"unsafe"}',
+      { ok: true, suggestion: { approved: false, reason: 'unsafe' } },
+    ],
+    [
+      'ask_user',
+      '{"decision":"ask_user","grant":"approve_once","reason":"intent required"}',
+      {
+        ok: true,
+        suggestion: {
+          approved: false,
+          requiresUserApproval: true,
+          reason: 'intent required',
+        },
+      },
+    ],
+    [
+      'legacy rejection',
+      '{"approved":false,"grant":"approve_once","reason":"legacy risk"}',
+      {
+        ok: true,
+        suggestion: {
+          approved: false,
+          requiresUserApproval: true,
+          reason: 'legacy risk',
+        },
+      },
+    ],
+  ] as const)('parses the %s auto-review disposition', async (_label, response, expected) => {
+    const fixture = createGatewayFixture({ autoReviewResponse: response });
     const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
-
-    const approval = await coordinator.reviewToolApproval({
-      ...TOOL_INPUT,
-      config: CONFIG,
-      persistence: createPersistence(),
-      providerDataAdmission: PROVIDER_DATA_ADMISSION,
-    });
-    const verification = await coordinator.reviewVerificationEvidence({
-      config: CONFIG,
-      persistence: createPersistence(),
-      evidence: EVIDENCE,
-      providerDataAdmission: PROVIDER_DATA_ADMISSION,
-    });
-
-    expect(approval).toMatchObject({ ok: true, suggestion: { approved: true } });
-    expect(verification).toMatchObject({ outcome: 'passed', summary: 'fixture-passed' });
-    expect(fixture.counts()).toEqual({ gatewayInvocations: 2, sourceInvocations: 2 });
-  });
-
-  test('returns typed unavailable results before the Gateway when context is incomplete', async () => {
-    const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
-
-    const approval = await coordinator.reviewToolApproval({
-      ...TOOL_INPUT,
-      config: undefined,
-      model: MODEL,
-      persistence: undefined,
-      providerDataAdmission: PROVIDER_DATA_ADMISSION,
-    });
-    const verification = await coordinator.reviewVerificationEvidence({
-      config: undefined,
-      model: MODEL,
-      persistence: undefined,
-      evidence: EVIDENCE,
-      providerDataAdmission: PROVIDER_DATA_ADMISSION,
-    });
-
-    expect(approval).toMatchObject({ ok: false, failureType: 'technical' });
-    expect(verification).toMatchObject({ outcome: 'inconclusive' });
-    expect(fixture.counts()).toEqual({ gatewayInvocations: 0, sourceInvocations: 0 });
-  });
-
-  test('propagates provider denial without invoking the Gateway attempt', async () => {
-    const fixture = createGatewayFixture();
-    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
-
-    await expect(
-      coordinator.reviewVerificationEvidence({
-        config: CONFIG,
-        model: MODEL,
-        persistence: createPersistence(),
-        evidence: EVIDENCE,
-        providerDataAdmission: () => ({
-          admitted: false,
-          reason: 'provider_secret_denied',
-          routeAlias: 'coordinator-denied',
-        }),
-      }),
-    ).rejects.toThrow('provider_secret_denied');
-    expect(fixture.counts()).toEqual({ gatewayInvocations: 0, sourceInvocations: 0 });
-  });
-
-  test('preserves inconclusive semantics for an invalid verification response', async () => {
-    const fixture = createGatewayFixture({ invalidVerificationResponse: true });
-    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
-
-    const result = await coordinator.reviewVerificationEvidence({
+    const result = await coordinator.reviewToolApproval({
       config: CONFIG,
       model: MODEL,
       persistence: createPersistence(),
-      evidence: EVIDENCE,
-      providerDataAdmission: PROVIDER_DATA_ADMISSION,
+      payload: {
+        risk: 'read',
+        expectedEffects: ['Reads a sensitive external path'],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+        summary: 'Review sensitive external access',
+        reason: 'Mode-aware auto review is required.',
+      },
+      request: { id: 'reviewed-tool', name: 'read_file', args: { path: '~/.ssh/config' } },
     });
 
-    expect(result).toMatchObject({
-      outcome: 'inconclusive',
-      summary: 'Reviewer returned an invalid response.',
-    });
+    expect(result).toMatchObject(expected);
     expect(fixture.counts()).toEqual({ gatewayInvocations: 1, sourceInvocations: 1 });
+  });
+
+  test.each([
+    [
+      'unknown fields',
+      '{"decision":"approve","grant":"approve_once","reason":"safe","extra":true}',
+      'auto review returned unknown fields',
+    ],
+    [
+      'contradictory fields',
+      '{"decision":"reject","approved":true,"grant":"approve_once","reason":"conflict"}',
+      'auto review returned contradictory decision fields',
+    ],
+  ] as const)('fails closed for auto-review %s', async (_label, response, reason) => {
+    const fixture = createGatewayFixture({ autoReviewResponse: response });
+    const result = await new BuiltinModelEffectCoordinator(fixture.gateway).reviewToolApproval({
+      config: CONFIG,
+      model: MODEL,
+      persistence: createPersistence(),
+      payload: {
+        risk: 'read',
+        expectedEffects: ['Reads a sensitive external path'],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+        summary: 'Review sensitive external access',
+        reason: 'Mode-aware auto review is required.',
+      },
+      request: { id: 'reviewed-tool', name: 'read_file', args: { path: '~/.ssh/config' } },
+    });
+
+    expect(result).toMatchObject({ ok: false, failureType: 'invalid_response', reason });
   });
 
   test('creates one context compactor that uses the injected Gateway once', async () => {
@@ -306,7 +286,6 @@ describe('BuiltinModelEffectCoordinator', () => {
       persistence: createPersistence(),
       state,
       projectionEnvironmentDigest: 'coordinator-compaction-environment',
-      providerDataAdmission: PROVIDER_DATA_ADMISSION,
       maxSummaryTokens: 600,
       maxNarrativeTokens: 600,
     });
@@ -321,57 +300,6 @@ describe('BuiltinModelEffectCoordinator', () => {
     expect(fixture.counts()).toEqual({ gatewayInvocations: 1, sourceInvocations: 1 });
   });
 
-  test('fails without context or on provider denial before any summary attempt', async () => {
-    const missingContextFixture = createGatewayFixture();
-    const missingContextCoordinator = new BuiltinModelEffectCoordinator(
-      missingContextFixture.gateway,
-    );
-    const state = contextStateWithHistory();
-    const missingContextCompactor = missingContextCoordinator.createContextCompactor({
-      config: CONFIG,
-      model: MODEL,
-      persistence: createPersistence(),
-      projectionEnvironmentDigest: 'coordinator-compaction-environment',
-      providerDataAdmission: PROVIDER_DATA_ADMISSION,
-    });
-
-    await expect(
-      missingContextCompactor({
-        state,
-        pending: pendingCompaction(state),
-        sourceRevision: state.revision,
-      }),
-    ).rejects.toThrow('ModelInvocationGateway execution context is unavailable.');
-    expect(missingContextFixture.counts()).toEqual({
-      gatewayInvocations: 0,
-      sourceInvocations: 0,
-    });
-
-    const deniedFixture = createGatewayFixture();
-    const deniedCoordinator = new BuiltinModelEffectCoordinator(deniedFixture.gateway);
-    const deniedCompactor = deniedCoordinator.createContextCompactor({
-      config: CONFIG,
-      model: MODEL,
-      persistence: createPersistence(),
-      state,
-      projectionEnvironmentDigest: 'coordinator-compaction-environment',
-      providerDataAdmission: () => ({
-        admitted: false,
-        reason: 'provider_secret_denied',
-        routeAlias: 'coordinator-denied',
-      }),
-    });
-
-    await expect(
-      deniedCompactor({
-        state,
-        pending: pendingCompaction(state),
-        sourceRevision: state.revision,
-      }),
-    ).rejects.toThrow('provider_secret_denied');
-    expect(deniedFixture.counts()).toEqual({ gatewayInvocations: 0, sourceInvocations: 0 });
-  });
-
   test('rejects low-gain and unsafe boundaries before invoking the summary source', async () => {
     const fixture = createGatewayFixture();
     const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
@@ -382,7 +310,6 @@ describe('BuiltinModelEffectCoordinator', () => {
         persistence: createPersistence(),
         state: contextStateWithHistory(),
         projectionEnvironmentDigest: 'coordinator-compaction-environment',
-        providerDataAdmission: PROVIDER_DATA_ADMISSION,
       });
 
     const lowGainState = contextStateWithHistory(2, 'hello');

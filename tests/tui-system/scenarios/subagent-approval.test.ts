@@ -35,7 +35,11 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        interactionMode: 'accept_edits',
+      },
+    });
     externalFile = join(workspace.home, 'external-subagent-write.txt');
 
     // Response sequence:
@@ -52,6 +56,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
               id: 'call_spawn_subagent',
               name: 'task',
               args: {
+                name: 'Write external test file',
                 subagent_type: 'code',
                 task: `Write a test file at ${externalFile} with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.`,
               },
@@ -75,6 +80,10 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
         },
       },
       {
+        // Keep the resumed child alive long enough to assert that the local
+        // approval acknowledgement updates its card before the next model
+        // response or durable child progress can do so incidentally.
+        delay: 750,
         expectedRequest: {
           toolResults: [
             { toolCallId: 'call_subagent_write', contentIncludes: ['external-subagent-write.txt'] },
@@ -130,6 +139,11 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
       // Approve the tool (default "允许一次" at index 0, press Enter)
       tui.write('\r');
+
+      await waitForText(() => tui.viewport(), '进行中', TIMEOUT);
+      const acknowledged = tui.viewport();
+      expect(screenContains(acknowledged, '等待你的批准')).toBe(false);
+      expect(screenContains(acknowledged, '工具授权')).toBe(false);
 
       // After approval, the sub-agent should continue and complete
       await waitForText(
@@ -192,6 +206,7 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
               id: 'call_spawn_auto_reviewed_subagent',
               name: 'task',
               args: {
+                name: 'Write auto-reviewed file',
                 subagent_type: 'code',
                 task: `Write "auto review succeeded" to ${externalFile}.`,
               },
@@ -325,6 +340,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
               id: 'call_spawn_reader',
               name: 'task',
               args: {
+                name: 'Read workspace data file',
                 subagent_type: 'explore',
                 task: `Read the file at ${join(workspace.workspace, 'data.txt')} using its absolute path. Report the content.`,
               },

@@ -111,6 +111,8 @@ interface Props {
    *  提供此值后，组件会主动按显示宽度折行，避免依赖 Ink Text 的自动
    *  wrap 在终端 resize 时出现行数震荡或字符断裂。 */
   maxWidth?: number;
+  /** Called after Ink has registered this input's active keyboard handler. */
+  onInputReady?: () => void;
 }
 
 function CtrlSafeTextInput({
@@ -126,6 +128,7 @@ function CtrlSafeTextInput({
   disableArrowNav,
   trailingText,
   maxWidth,
+  onInputReady,
 }: Props) {
   const [cursorOffset, setCursorOffset] = useState((originalValue || '').length);
   const cursorOffsetRef = useRef(cursorOffset);
@@ -442,6 +445,12 @@ function CtrlSafeTextInput({
     },
     { isActive: focus },
   );
+
+  // useInput declares its listener effect before this effect. Reporting ready
+  // here lets the parent reveal the cursor only after keyboard delivery exists.
+  useEffect(() => {
+    if (focus) onInputReady?.();
+  }, [focus, onInputReady]);
 
   // ── multi-line or single-line? ──
   if (displayLines.length <= 1) {

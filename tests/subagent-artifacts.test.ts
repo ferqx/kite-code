@@ -188,6 +188,7 @@ describe('private Subagent Artifact namespaces', () => {
     const ref = store.write({
       parentModelInvocationId: 'model-parent',
       parentToolCallId: 'task-call',
+      name: 'Review queue request',
       role: 'review',
       task,
     });
@@ -198,7 +199,7 @@ describe('private Subagent Artifact namespaces', () => {
         parentModelInvocationId: 'model-parent',
         parentToolCallId: 'task-call',
       }),
-    ).toEqual({ role: 'review', task });
+    ).toEqual({ name: 'Review queue request', role: 'review', task });
     for (const expected of [
       { parentModelInvocationId: 'other-model', parentToolCallId: 'task-call' },
       { parentModelInvocationId: 'model-parent', parentToolCallId: 'other-call' },
@@ -213,7 +214,7 @@ describe('private Subagent Artifact namespaces', () => {
         parentModelInvocationId: 'model-parent',
         parentToolCallId: 'task-call',
       }),
-    ).toEqual({ role: 'review', task });
+    ).toEqual({ name: 'Review queue request', role: 'review', task });
   });
 
   test('continuations are private immutable payloads with exact parent, child, and cursor binding', () => {

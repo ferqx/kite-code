@@ -6,19 +6,12 @@ import {
   type BuiltinVerificationReceiptView,
   executeDeterministicVerificationChecks,
 } from '@kite/builtin-runtime/verification';
-import type { VerificationReviewerInput, VerificationReviewerResult } from '@kite/runtime-spi';
-import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
-
-export type VerificationReviewer = (
-  input: VerificationReviewerInput,
-) => Promise<VerificationReviewerResult>;
 
 export interface VerificationExecutorDependencies {
   shellExecutor?: ShellExecutor;
   mcpManager?: McpRuntimeProvider;
   artifactStore?: CapabilityArtifactReader;
-  reviewer?: VerificationReviewer;
   signal?: AbortSignal;
 }
 
@@ -147,8 +140,6 @@ export async function executeVerificationEffect(
               },
             }
           : {}),
-        ...(dependencies.reviewer ? { reviewer: dependencies.reviewer } : {}),
-        isFatalError: (error) => error instanceof ProviderDataAdmissionError,
         ...(dependencies.signal ? { signal: dependencies.signal } : {}),
       },
     });
@@ -169,9 +160,6 @@ export async function executeVerificationEffect(
   } catch (error) {
     if (!(error instanceof BuiltinVerificationDispatchError)) throw error;
     const cause = error.causeValue;
-    if (cause instanceof ProviderDataAdmissionError && error.externalEffectsMayHaveOccurred) {
-      throw new ProviderDataAdmissionError(cause.decision, { knownExternalEffects: 'unknown' });
-    }
     throw cause;
   }
 }

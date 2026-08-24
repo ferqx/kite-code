@@ -9,7 +9,6 @@ export const BUILTIN_MODEL_OPERATION_IDS_ = Object.freeze([
   'model:primary',
   'model:compaction',
   'model:auto_review',
-  'model:verification_review',
   'model:subagent',
 ] as const);
 
@@ -19,7 +18,6 @@ export const BUILTIN_MODEL_OPERATION_BY_PURPOSE_ = Object.freeze({
   primary_agent: 'model:primary',
   context_compaction: 'model:compaction',
   auto_review: 'model:auto_review',
-  verification_review: 'model:verification_review',
   subagent: 'model:subagent',
 } as const satisfies Readonly<Record<ModelInvocationPurpose, BuiltinModelOperationId>>);
 

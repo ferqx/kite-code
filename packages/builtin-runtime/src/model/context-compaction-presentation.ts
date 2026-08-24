@@ -11,7 +11,6 @@ type ContextCompactionTerminalEvent =
         | 'unsafe_boundary'
         | 'oversized_turn'
         | 'summary_model_failed'
-        | 'provider_admission_denied'
         | 'summary_aborted'
         | 'empty_summary'
         | 'truncated_summary'
@@ -64,8 +63,6 @@ export function contextCompactionTerminalNotice(
         return 'The selected model returned an unusable compaction summary; try another model or adjust the compaction summary limits. The original conversation was preserved.';
       case 'summary_model_failed':
         return 'The compaction Provider request failed; check the selected model, credentials, connection, and context/output limits, then retry or run /clear. The original conversation was preserved.';
-      case 'provider_admission_denied':
-        return 'Provider data policy blocked context compaction; review the selected provider policy or choose an approved route. The original conversation was preserved.';
       case 'invalid_candidate':
         return 'The generated compaction checkpoint failed validation; retry /compact. The original conversation was preserved.';
       case 'insufficient_reduction':

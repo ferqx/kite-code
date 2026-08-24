@@ -390,8 +390,8 @@ export type SubAgentRole = 'explore' | 'plan' | 'code' | 'review';
 export interface SubAgentStartPayload {
   id: string;
   role: SubAgentRole;
-  /** Fixed low-information UI label; delegated task content stays in private Artifact storage. */
-  task: string;
+  /** Explicit public name; full delegated task body stays in private Artifact storage. */
+  name: string;
   /** Runtime dispatch identity shared only by siblings admitted in one parallel batch. */
   concurrencyGroupId?: string;
 }
@@ -431,12 +431,38 @@ export interface SubAgentDonePayload {
   durationMs: number;
 }
 
+export type SubAgentFailureCode =
+  | 'aborted'
+  | 'timed_out'
+  | 'invalid_input'
+  | 'consumer_protocol'
+  | 'model_step_failed'
+  | 'internal_error';
+
+export type SubAgentFailureStage =
+  | 'initialization'
+  | 'next_round_preparation'
+  | 'model_step'
+  | 'model_response_validation'
+  | 'tool_consumption'
+  | 'transcript_validation'
+  | 'terminal_projection';
+
+/** Content-free diagnostic safe for durable events and metadata projection. */
+export interface SubAgentFailureDiagnostic {
+  code: SubAgentFailureCode;
+  stage: SubAgentFailureStage;
+  /** Opaque correlation only; session metadata must not copy this identifier. */
+  modelInvocationId?: string;
+}
+
 export interface SubAgentErrorPayload {
   id: string;
   error: string;
   summary?: string;
   toolCallCount?: number;
   durationMs?: number;
+  diagnostic?: SubAgentFailureDiagnostic;
 }
 
 export interface SubAgentCacheMetricsPayload {

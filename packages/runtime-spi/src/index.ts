@@ -123,8 +123,6 @@ export type {
   VerificationExecutionReceipt,
   VerificationMode,
   VerificationOutcome,
-  VerificationReviewerInput,
-  VerificationReviewerResult,
   VerificationSpec,
 } from './verification';
 export {

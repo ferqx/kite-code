@@ -405,7 +405,7 @@ describe('appendEvents + loadEventsStrict round-trip', () => {
     const events: RuntimeEvent[] = [
       {
         type: 'subagent.started',
-        subagent: { id: 'sub-1', role: 'explore', task: 'find runtime callers' },
+        subagent: { id: 'sub-1', role: 'explore', name: 'find runtime callers' },
       },
       {
         type: 'subagent.step',
@@ -435,6 +435,11 @@ describe('appendEvents + loadEventsStrict round-trip', () => {
           summary: 'partial result',
           toolCallCount: 2,
           durationMs: 11,
+          diagnostic: {
+            code: 'internal_error',
+            stage: 'next_round_preparation',
+            modelInvocationId: 'model-sub-2-last',
+          },
         },
       },
       {
@@ -1494,6 +1499,7 @@ describe('persistence edge cases', () => {
     store.appendEvents('corrupt-source', [makeEvent({ toolCallId: 'corrupt-call' })]);
     store.saveNamedSnapshot('corrupt-source', 'safe', currentSnapshot('corrupt-source'));
     store.appendEvents('existing-target', [makeEvent({ toolCallId: 'keep-call' })]);
+    store.saveSnapshot('existing-target', currentSnapshot('existing-target', { marker: 'keep' }));
     store.saveNamedSnapshot(
       'existing-target',
       'keep',
@@ -1507,9 +1513,60 @@ describe('persistence edge cases', () => {
       .run('{broken-json', 'corrupt-source');
     database.close();
 
+    const discovery = openStore(dbPath);
+    discovery.close();
     const before = createHash('sha256').update(readFileSync(dbPath)).digest('hex');
-    expect(() => openStore(dbPath)).toThrow('Runtime format is incompatible');
+    expect(() => openStore(dbPath, { sessionId: 'corrupt-source' })).toThrow(
+      'Runtime format is incompatible',
+    );
     expect(createHash('sha256').update(readFileSync(dbPath)).digest('hex')).toBe(before);
+    const healthy = openStore(dbPath, { sessionId: 'existing-target' });
+    expect(healthy.loadNamedSnapshot('existing-target', 'keep')).toMatchObject({ marker: 'keep' });
+    healthy.close();
+  });
+
+  test('forks a readable retired subagent title without reopening it as a current write', () => {
+    const sourceSessionId = 'retired-subagent-title-source';
+    const targetSessionId = 'retired-subagent-title-target';
+    const store = openStore(dbPath);
+    store.appendEvents(sourceSessionId, [
+      {
+        type: 'subagent.started',
+        subagent: { id: 'legacy-child', role: 'explore', name: 'Inspect old session' },
+      },
+    ]);
+    store.saveSnapshot(sourceSessionId, currentSnapshot(sourceSessionId));
+    store.saveNamedSnapshot(sourceSessionId, 'legacy-title', currentSnapshot(sourceSessionId));
+    store.close();
+
+    const database = new Database(dbPath);
+    database.query('UPDATE runtime_events SET event_json = ? WHERE session_id = ?').run(
+      JSON.stringify({
+        type: 'subagent.started',
+        subagent: { id: 'legacy-child', role: 'explore', task: 'Inspect old session' },
+      }),
+      sourceSessionId,
+    );
+    database.close();
+
+    const reopened = openStore(dbPath, { sessionId: sourceSessionId });
+    expect(reopened.loadEventsStrict(sourceSessionId)[0]?.event).toMatchObject({
+      type: 'subagent.started',
+      subagent: { task: 'Inspect old session' },
+    });
+    expect(
+      reopened.forkSession(
+        sourceSessionId,
+        'legacy-title',
+        targetSessionId,
+        TEST_FORK_RECOVERY_IDENTITY_2,
+      ),
+    ).toBe(true);
+    expect(reopened.loadEventsStrict(targetSessionId)[0]?.event).toMatchObject({
+      type: 'subagent.started',
+      subagent: { task: 'Inspect old session' },
+    });
+    reopened.close();
   });
 
   test('forkSession rejects a parseable but structurally invalid selected snapshot', () => {

@@ -63,12 +63,6 @@ describe('metadata-only session logging', () => {
         },
         surfaceIntegrityIdentifier: SECRET,
         routeFingerprint: `sha256:${'b'.repeat(64)}`,
-        admission: {
-          providerAdmissionRevision: SECRET,
-          routeIdentityDigest: `sha256:${'c'.repeat(64)}`,
-          payloadClassificationDigest: `sha256:${'d'.repeat(64)}`,
-          admitted: true,
-        },
         budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
         limits: { maxAttempts: 5, perAttemptTimeoutMs: 30_000, totalTimeBudgetMs: 60_000 },
         preparedStateRevision: 42,
@@ -175,13 +169,12 @@ describe('metadata-only session logging', () => {
           error: `${SECRET}: ${ABSOLUTE_PATH}`,
           summary: SOURCE_MARKER,
           durationMs: 41,
+          diagnostic: {
+            code: 'internal_error',
+            stage: 'next_round_preparation',
+            modelInvocationId: SECRET,
+          },
         },
-      },
-      {
-        type: 'provider.admission_status',
-        status: 'blocked',
-        reason: 'mandatory_policy_unavailable',
-        admissionRevision: SECRET,
       },
     ];
 
@@ -202,6 +195,8 @@ describe('metadata-only session logging', () => {
     expect(output).toContain('"inputTokens":11');
     expect(output).toContain('"outputTokens":7');
     expect(output).toContain('"toolTotalActiveMs":31');
+    expect(output).toContain('"subagentFailureCode":"internal_error"');
+    expect(output).toContain('"subagentFailureStage":"next_round_preparation"');
   });
 
   test('session boundary schema exposes only explicit release metadata', () => {
@@ -243,18 +238,6 @@ describe('metadata-only session logging', () => {
   });
 
   test('release and provider audit fields accept only bounded low-cardinality values', () => {
-    const provider = mapRuntimeMetadata({
-      type: 'provider.admission_status',
-      status: 'ready',
-      reason: 'admitted',
-      admissionRevision: 'configured-provider',
-    });
-    expect(provider.metadata).toEqual({
-      capabilityKind: 'provider_admission',
-      approvalResult: 'admitted',
-      providerAdmissionRevision: 'configured-provider',
-    });
-
     const invalid = mapSessionBoundaryMetadata('session.start', 'ok', {
       releaseVersion: `2026.7.30-${SECRET}`,
       releaseProfile: SECRET as 'limited',

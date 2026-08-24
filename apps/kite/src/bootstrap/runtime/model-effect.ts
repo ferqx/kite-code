@@ -52,10 +52,6 @@ import {
 import type { CapabilityTurnContext } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
-import {
-  denyMissingProviderDataAdmission,
-  type ProviderDataAdmissionGate,
-} from '#app/config/provider-data-admission';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 import { createAppToolTurnContext } from './tool-turn-context';
 
@@ -350,8 +346,6 @@ export async function projectPrimaryModelEffect(params: {
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
-  /** Production composition must supply the immutable route-policy gate. */
-  providerDataAdmission?: ProviderDataAdmissionGate;
   resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
   /** App-owned coordinator bound to the one Gateway for every Model effect. */
   modelEffectCoordinator: BuiltinModelEffectCoordinator;
@@ -598,7 +592,6 @@ export async function projectPrimaryModelEffect(params: {
     },
     resourceAdmission: params.resourceAdmission,
     persistence: params.modelInvocationPersistence,
-    providerDataAdmission: params.providerDataAdmission ?? denyMissingProviderDataAdmission,
     compactionReporter: params.compactionReporter,
     signal: params.signal,
     emitEphemeral: params.emitRuntimeEvent,
@@ -623,10 +616,12 @@ export async function projectPrimaryModelEffect(params: {
       const durableToolCalls = completion.toolCalls.map((call) => {
         const builtinEntry = builtinEntriesByName.get(call.name);
         if (builtinEntry?.executionMechanism !== 'subagent') return call;
+        const name = call.args.name;
         const role = call.args.subagent_type;
         const task = call.args.task;
         if (
           !params.subagentTaskRequests ||
+          typeof name !== 'string' ||
           !['explore', 'plan', 'code', 'review'].includes(String(role)) ||
           typeof task !== 'string'
         ) {
@@ -635,10 +630,12 @@ export async function projectPrimaryModelEffect(params: {
         return {
           ...call,
           args: {
+            name,
             subagent_type: role,
             taskArtifact: params.subagentTaskRequests.write({
               parentModelInvocationId: completion.invocationId,
               parentToolCallId: call.id,
+              name,
               role: role as 'explore' | 'plan' | 'code' | 'review',
               task,
             }),

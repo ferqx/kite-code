@@ -361,7 +361,6 @@ function fixture(
       requiresApproval: policyCompilation.requiresApproval,
       risk: policyCompilation.risk,
       reason: policyCompilation.reason,
-      userVisibleSummary: policyCompilation.userVisibleSummary,
       expectedEffects: policyCompilation.expectedEffects,
       ...(policyCompilation.effects ? { effects: policyCompilation.effects } : {}),
     },

@@ -347,6 +347,22 @@ describe('Runtime Host State tool governance bridge', () => {
     expect(result.value.dynamicMcp).toBeUndefined();
   });
 
+  test('reports a safe category when projected Kernel facts are malformed', () => {
+    const result = bridge().project(
+      input(ordinaryClassified(), {
+        context: { ...context(), observedAt: -1 },
+      }),
+      admission(),
+    );
+    expect(result).toEqual({
+      ok: false,
+      failure: {
+        code: 'kernel_facts_invalid',
+        diagnostic: 'Projected State 25 governance facts are invalid: context.',
+      },
+    });
+  });
+
   test('preserves the dynamic subject/wrapper split and independent revisions', () => {
     const result = bridge().project(input(dynamicClassified()), admission());
     expect(result.ok).toBe(true);

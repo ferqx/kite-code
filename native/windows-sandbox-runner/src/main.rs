@@ -502,9 +502,9 @@ fn execute_restricted_token_invocation(
     runner_debug("coreutils aliases materialized");
     // A startup probe owns an empty temporary Workspace and supplies a
     // capability that is revoked after the probe. It deliberately has no
-    // protected-path DACL snapshots to recover after a crash. Normal commands
-    // use the persistent ledger and protect only static, currently existing
-    // paths; it does not claim future glob protection.
+    // legacy protected-path DACL snapshots to recover after a crash. Normal
+    // commands use the persistent Workspace ledger; sensitive external paths
+    // are authorized by Tool Policy and therefore do not receive native denies.
     let deny_paths = if direct.ephemeral_workspace_capability_sid.is_some() {
         Vec::new()
     } else {
@@ -711,9 +711,11 @@ fn execute_restricted_token_invocation(
     Ok(())
 }
 
-/// The synthetic protected-path guard constrains the approved-filesystem
-/// restricted token only. Network-approved execution must retain the current
-/// interactive token for Schannel, which cannot carry that synthetic SID.
+/// The compatibility guard identity is present only on the approved-filesystem
+/// restricted token. Tool Policy owns sensitive-path approval and the runner
+/// installs no path deny ACEs after approval. Network-approved execution must
+/// retain the current interactive token for Schannel, which cannot carry the
+/// synthetic SID.
 fn requires_approved_filesystem_guard(network_mode: NetworkMode) -> bool {
     !matches!(network_mode, NetworkMode::AllowAll)
 }
@@ -725,6 +727,7 @@ fn can_use_current_user_network_token(
     matches!(network_mode, NetworkMode::AllowAll)
         && matches!(filesystem_scope, FilesystemScope::FullAccess)
 }
+
 /// Microsoft Coreutils is one static multi-call executable. POSIX shells
 /// resolve utilities by their command name, so materialize a private copy plus
 /// hard-link aliases before the restricted child is launched. The source binary
@@ -1269,17 +1272,6 @@ mod tests {
             FilesystemScope::FullAccess,
         ));
     }
-    use kite_windows_runner::protected_paths::is_dynamic_dotenv_name;
-
-    #[test]
-    fn dynamic_dotenv_name_matches_case_insensitively_without_utf8_panics() {
-        assert!(is_dynamic_dotenv_name(".env.staging"));
-        assert!(is_dynamic_dotenv_name(".ENV.production.local"));
-        assert!(!is_dynamic_dotenv_name(".env"));
-        assert!(!is_dynamic_dotenv_name(".environment"));
-        assert!(!is_dynamic_dotenv_name("é.env.staging"));
-    }
-
     #[test]
     fn windows_10_api_floor_accepts_22h2_and_windows_11_builds() {
         assert!(version_meets_windows_10_22h2_floor(10, 19_045));

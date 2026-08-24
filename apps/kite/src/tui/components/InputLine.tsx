@@ -97,11 +97,11 @@ export default function InputLine({
   const { columns } = useWindowSize();
   const hasWindowFocus = useTerminalFocus();
   const fileMaxHeight = useOverlayHeight(7);
-  // 阻止 Ink 初始化期间输入泄露 / Block input from leaking during Ink init
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    const id = setTimeout(() => setMounted(true), 0);
-    return () => clearTimeout(id);
+  // Keep the cursor hidden until CtrlSafeTextInput confirms that Ink registered
+  // its keyboard listener, without deferring readiness to a later timer turn.
+  const [inputReady, setInputReady] = useState(false);
+  const handleInputReady = useCallback(() => {
+    setInputReady(true);
   }, []);
   // Prevent stale useInput handler from firing after unmount (session switch via key={activeSessionId})
   const mountedRef = useRef(true);
@@ -516,7 +516,9 @@ export default function InputLine({
           onChange={handleChange}
           onSubmit={handleSubmit}
           placeholder={placeholder}
-          focus={mounted && !overlayActive && hasWindowFocus}
+          focus={!overlayActive && hasWindowFocus}
+          showCursor={inputReady}
+          onInputReady={handleInputReady}
           atomicBlock={atomicBlock}
           onRemoveAtomicBlock={clearPasteState}
           onNavigateHistory={handleNavigateHistory}

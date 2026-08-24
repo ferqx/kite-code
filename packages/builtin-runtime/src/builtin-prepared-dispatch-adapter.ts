@@ -230,6 +230,8 @@ function projectBuiltinOperationTerminalResultForEntry(
 
   const text = toolExecutionModelContent(value);
   const structuredContent = cloneBuiltinOperationValue(value);
+  const subagentResult = isRecordObject(value.subagentResult) ? value.subagentResult : undefined;
+  const failedSubagentExecution = subagentResult?.terminalStatus === 'failed';
   const content: readonly RuntimeJsonValue[] =
     text.length === 0 ? Object.freeze([]) : Object.freeze([{ type: 'text' as const, text }]);
   if (value.ok) {
@@ -243,6 +245,7 @@ function projectBuiltinOperationTerminalResultForEntry(
   const failure = Object.freeze({
     code:
       value.terminationReason !== 'cancelled' &&
+      !failedSubagentExecution &&
       (entryKind === 'coordination' || entryKind === 'runtime_action')
         ? 'rejected'
         : 'builtin_operation_failed',

@@ -44,7 +44,31 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Align a restored Kernel with the session preference before any new turn can
+ * dispatch tools. Coordinator identity and the TUI label are mirrors; the
+ * durable Kernel event remains the authority consumed by Tool Governance.
+ */
+export function reconcileRuntimeInteractionMode(
+  control: AuthorizedExecutionControl,
+  mode: RuntimeState['mode'],
+  changedAt = new Date().toISOString(),
+): boolean {
+  if (control.getState().mode === mode) return false;
+  control.processEvent({
+    type: 'interaction_mode.changed',
+    mode,
+    source: 'user',
+    changedAt,
+  });
+  if (control.getState().mode !== mode) {
+    throw new Error('Runtime interaction mode reconciliation was not durably acknowledged.');
+  }
+  return true;
+}
+
 type ModelRetry = {
+  invocationId?: unknown;
   attempt?: unknown;
   maxAttempts?: unknown;
   error?: unknown;
@@ -56,6 +80,7 @@ function asNumber(value: unknown): number {
 }
 
 function asModelRetry(value: unknown): {
+  invocationId?: string;
   attempt: number;
   maxAttempts: number;
   error: string;
@@ -73,6 +98,9 @@ function asModelRetry(value: unknown): {
   const retry = value as ModelRetry;
   const error = toErrorMessage(retry.error);
   return {
+    ...(typeof retry.invocationId === 'string' && retry.invocationId.length > 0
+      ? { invocationId: retry.invocationId }
+      : {}),
     attempt: asNumber(retry.attempt),
     maxAttempts: asNumber(retry.maxAttempts),
     error: error === '' ? String(value) : error,
@@ -274,6 +302,16 @@ export class SessionRuntime {
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
   private _pendingInterrupt: SessionInterruptPayload | null = null;
   private _pendingResolve: ((action: SessionUserAction) => void) | null = null;
+  /**
+   * A durable interaction can reach the TUI before the runner installs its
+   * requestAction waiter (notably while concurrent Subagent siblings drain).
+   * Bind that early UI decision to the exact Runtime interaction instead of
+   * dropping Enter/Esc during the hand-off window.
+   */
+  private _queuedInterruptAction: {
+    interactionId: string;
+    action: SessionUserAction;
+  } | null = null;
   private _activeDispatch: ((action: SessionPresentationAction) => void) | null = null;
   private _contentLoggingDisclosureShown = false;
   private readonly _observabilityBridge: RuntimeMetricBridge | undefined;
@@ -657,6 +695,7 @@ export class SessionRuntime {
       activeRuntimeCoordinator = runtimeCoordinator;
       this.authorizedExecutionControl = runtimeCoordinator.control;
       runtimeCoordinator.updateSandboxAvailable(sandboxSupportsFullMode(effectiveBackend));
+      reconcileRuntimeInteractionMode(runtimeCoordinator.control, this.interactionMode);
 
       // 始终使用代理提供器 — 事件路由由 _foreground 控制
       const runtimeInput: Omit<
@@ -773,11 +812,15 @@ export class SessionRuntime {
       if (Array.isArray(modelRetries)) {
         for (const retry of modelRetries) {
           const parsedRetry = asModelRetry(retry);
+          // A retry without an exact invocation identity cannot be projected
+          // safely when sibling model calls are concurrent.
+          if (!parsedRetry.invocationId) continue;
           if (this._foreground) {
             deps.dispatch({
               type: 'RUNTIME_EVENT',
               event: {
                 type: 'model.retry',
+                invocationId: parsedRetry.invocationId,
                 attempt: parsedRetry.attempt,
                 maxAttempts: parsedRetry.maxAttempts,
                 error: parsedRetry.error,
@@ -787,6 +830,7 @@ export class SessionRuntime {
           } else {
             this._pushToBuffer({
               type: 'model.retry',
+              invocationId: parsedRetry.invocationId,
               attempt: parsedRetry.attempt,
               maxAttempts: parsedRetry.maxAttempts,
               error: parsedRetry.error,
@@ -823,6 +867,7 @@ export class SessionRuntime {
       this._activeExecutionSignal = null;
       this.generator = null;
       this._activeDispatch = null;
+      this._queuedInterruptAction = null;
       // The cleanup barrier covers provider teardown too. A successor must not
       // start while the predecessor can still clear a shared pending action.
       if (generatorStarted && this._foreground) {
@@ -1250,6 +1295,12 @@ export class SessionRuntime {
             return { type: 'cancel' as const };
           }
         }
+        const interactionId = self._currentRuntimeInteractionId();
+        const queued = self._queuedInterruptAction;
+        if (queued) {
+          self._queuedInterruptAction = null;
+          if (queued.interactionId === interactionId) return queued.action;
+        }
         // 使用运行时自身的中断状态，永久等待用户处理
         self._pendingInterrupt = payload;
         return new Promise<SessionUserAction>((resolve) => {
@@ -1283,8 +1334,31 @@ export class SessionRuntime {
       const r = this._pendingResolve;
       this._pendingResolve = null;
       this._pendingInterrupt = null;
+      this._queuedInterruptAction = null;
       r(action);
+      return;
     }
+    const interactionId = this._currentRuntimeInteractionId();
+    if (interactionId && !this._queuedInterruptAction) {
+      this._queuedInterruptAction = { interactionId, action };
+    }
+  }
+
+  private _currentRuntimeInteractionId(): string | null {
+    let interaction: Readonly<RuntimeState>['interactions'] | undefined;
+    try {
+      interaction = this._runtimeSessionCoordinator?.get(this.threadId)?.getState().interactions;
+    } catch {
+      // An idle or closing coordinator may intentionally have no readable
+      // control plane. There is no durable interaction to bind in that state.
+      return null;
+    }
+    if (!interaction || interaction.kind === 'idle' || !('interactionId' in interaction)) {
+      return null;
+    }
+    return typeof interaction.interactionId === 'string' && interaction.interactionId.length > 0
+      ? interaction.interactionId
+      : null;
   }
 }
 

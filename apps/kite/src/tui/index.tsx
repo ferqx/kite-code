@@ -13,6 +13,7 @@ import {
   loadUserLanguage,
   probeAgentConfig,
   saveColorPreset,
+  saveInteractionMode,
   saveUserLanguage,
 } from '#app/config/index';
 import { sessionExportPath } from '#app/config/paths';
@@ -365,7 +366,7 @@ function TuiApp({
 
   const thinkingLevelRef = React.useRef<string | null>(config.reasoningEffort ?? null);
   const interactionModeRef = React.useRef<'accept_edits' | 'auto' | 'full'>(
-    config.interactionMode ?? 'accept_edits',
+    config.interactionMode ?? 'auto',
   );
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
@@ -1235,7 +1236,9 @@ function TuiApp({
   // race where the next prompt is submitted while the old runtime still looks
   // active, so tryReservePrompt() rejects it as an ordinary concurrent prompt.
   const abortForegroundRun = React.useCallback(() => {
-    if (stateRef.current.interrupt || !stateRef.current.running) return;
+    if (!stateRef.current.running) return;
+    const interrupt = stateRef.current.interrupt;
+    if (interrupt && interrupt.kind !== 'approval') return;
     sessionManager.getRuntime(threadIdRef.current)?.abort();
   }, [sessionManager]);
 
@@ -1245,8 +1248,15 @@ function TuiApp({
       // after closing the selector cannot observe the old value.
       sessionManager.getRuntime(threadIdRef.current)?.setInteractionMode(mode);
       interactionModeRef.current = mode;
+      if (!saveInteractionMode(mode)) {
+        dispatch({
+          type: 'LOCAL_TEXT',
+          text: translate('permission.saveFailed'),
+          isError: true,
+        });
+      }
     },
-    [sessionManager],
+    [dispatch, sessionManager, translate],
   );
 
   const runTask = React.useCallback(

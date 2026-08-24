@@ -118,6 +118,27 @@ function inputFor(
 }
 
 describe('Builtin subagent model loop engine', () => {
+  test('retains the exact failed model invocation identity in a bounded loop diagnostic', async () => {
+    const coordinator: BuiltinSubagentModelLoopCoordinator = {
+      executeSubagentModelStep: async () => {
+        throw Object.assign(new Error('private provider failure'), {
+          invocationId: 'failed-child-model-invocation',
+        });
+      },
+    };
+
+    const error = await createBuiltinSubagentModelLoopEngine(inputFor(coordinator))
+      .run()
+      .catch((failure: unknown) => failure);
+
+    expect(error).toMatchObject({
+      code: 'model_step_failed',
+      stage: 'model_step',
+      modelInvocationId: 'failed-child-model-invocation',
+    });
+    expect(String(error)).not.toContain('private provider failure');
+  });
+
   test('runs two model rounds with exact ordinals and controlled ToolMessage append', async () => {
     const first = aiMessage({
       content: '',
@@ -239,6 +260,44 @@ describe('Builtin subagent model loop engine', () => {
       ).run(),
     ).rejects.toMatchObject({ code: 'aborted' });
     expect(fixture.calls).toHaveLength(0);
+  });
+
+  test('classifies a post-tool next-round preparation failure without retaining its message', async () => {
+    const first = aiMessage({
+      tool_calls: [{ id: 'call-preparation', name: 'read_file', args: { path: 'x' } }],
+    });
+    const fixture = coordinatorFor([first]);
+    let preparationCount = 0;
+    const run = createBuiltinSubagentModelLoopEngine(
+      inputFor(fixture.coordinator, {
+        resource: {
+          maxOutputTokens: () => {
+            preparationCount += 1;
+            if (preparationCount === 2) throw new Error('private next-round failure detail');
+            return 128;
+          },
+        },
+        consumer: {
+          consume: ({ append, response }) => {
+            append([
+              toolMessage({
+                content: 'ok',
+                tool_call_id: response.tool_calls![0]!.id!,
+              }),
+            ]);
+            return { kind: 'continue' };
+          },
+        },
+      }),
+    ).run();
+
+    await expect(run).rejects.toMatchObject({
+      code: 'internal_error',
+      stage: 'next_round_preparation',
+      message: 'Subagent model loop failed internally.',
+    });
+    await expect(run).rejects.not.toThrow('private next-round failure detail');
+    expect(fixture.calls).toHaveLength(1);
   });
 
   test('keeps the consumer terminal object unchanged', async () => {

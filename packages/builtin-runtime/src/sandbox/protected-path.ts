@@ -49,13 +49,13 @@ export interface ProtectedPathEvaluator {
 export interface CreateProtectedPathEvaluatorInput {
   workspaceRoot: string;
   mode: ProtectedPathPolicy;
-  /** Additional deny roots are unioned with the built-in protected set. */
+  /** Retained for protocol compatibility; Workspace members are never denied by name. */
   additionalDeniedPaths?: readonly string[];
-  /** Optional tighter allow roots. Built-in and additional denies are evaluated first. */
+  /** Retained for protocol compatibility; the canonical Workspace remains wholly admitted. */
   allowedPaths?: readonly string[];
 }
 
-/** Root-relative directories denied to executable/process surfaces. */
+/** Legacy protected names used only when their canonical identity is outside Workspace. */
 export const PROTECTED_WORKSPACE_DIRECTORIES_ = Object.freeze([
   '.git',
   '.ssh',
@@ -82,7 +82,7 @@ export const PROTECTED_WORKSPACE_DIRECTORIES_ = Object.freeze([
   'Library/LaunchDaemons',
 ] as const);
 
-/** Root-relative files denied to executable/process surfaces. */
+/** Legacy protected filenames used only outside the canonical Workspace. */
 export const PROTECTED_WORKSPACE_FILES_ = Object.freeze([
   '.bashrc',
   '.bash_profile',
@@ -108,7 +108,7 @@ export const PROTECTED_WORKSPACE_FILES_ = Object.freeze([
   'mcp.json',
 ] as const);
 
-/** Root-relative filename prefixes denied to executable/process surfaces. */
+/** Legacy protected filename prefixes used only outside the canonical Workspace. */
 export const PROTECTED_WORKSPACE_FILE_PREFIXES_ = Object.freeze(['.env.'] as const);
 
 function pathFromWorkspace(workspaceRoot: string, candidate: string): string {
@@ -133,44 +133,21 @@ function toLexicalRelativePath(workspaceRoot: string, targetPath: string): strin
   return rel.split(sep).join('/');
 }
 
-function isSameOrDescendant(relativePath: string, rule: string): boolean {
-  const candidateIdentity = relativePath.toLowerCase();
-  const protectedIdentity = rule.toLowerCase();
-  return (
-    candidateIdentity === protectedIdentity || candidateIdentity.startsWith(`${protectedIdentity}/`)
-  );
-}
-
-function isSameProtectedIdentity(relativePath: string | null, rule: string): boolean {
-  return relativePath?.toLowerCase() === rule.toLowerCase();
-}
-
-function startsWithProtectedIdentity(relativePath: string | null, rule: string): boolean {
-  return relativePath?.toLowerCase().startsWith(rule.toLowerCase()) === true;
-}
-
 function denyOutcome(mode: ProtectedPathPolicy): 'deny' | 'prompt' {
   return mode === 'deny' ? 'deny' : 'prompt';
 }
 
 /**
  * Compile the release-owned path boundary once per run. File reads are
- * unrestricted, trusted-workspace mutations are admitted regardless of the
- * workspace's host location or protected-looking name, and external mutations
- * remain pending until the Tool Pipeline supplies an exact approval grant.
- * Execute/process surfaces retain the protected identity rules below.
+ * unrestricted, the canonical Workspace is admitted as one complete identity
+ * for read/write/execute regardless of path name, and external mutations remain
+ * pending until the Tool Pipeline supplies an exact approval grant.
  */
 export function createProtectedPathEvaluator(
   input: CreateProtectedPathEvaluatorInput,
 ): ProtectedPathEvaluator {
   const lexicalWorkspaceRoot = resolve(input.workspaceRoot);
   const workspaceRoot = canonicalPathForComparison(input.workspaceRoot);
-  const additionalDeniedPaths = (input.additionalDeniedPaths ?? []).map((path) =>
-    canonicalPathForComparison(pathFromWorkspace(workspaceRoot, path)),
-  );
-  const allowedPaths = (input.allowedPaths ?? []).map((path) =>
-    canonicalPathForComparison(pathFromWorkspace(workspaceRoot, path)),
-  );
 
   return Object.freeze({
     version: 1 as const,
@@ -222,67 +199,6 @@ export function createProtectedPathEvaluator(
 
       if (relativePath === null) {
         return { ...base, outcome: denyOutcome(input.mode), reason: 'outside_workspace' };
-      }
-
-      const protectedDirectory = PROTECTED_WORKSPACE_DIRECTORIES_.find(
-        (rule) =>
-          isSameOrDescendant(relativePath, rule) ||
-          (lexicalRelativePath !== null && isSameOrDescendant(lexicalRelativePath, rule)),
-      );
-      if (protectedDirectory) {
-        return {
-          ...base,
-          outcome: denyOutcome(input.mode),
-          reason: 'protected_directory',
-          matchedRule: protectedDirectory,
-        };
-      }
-
-      const protectedFile = PROTECTED_WORKSPACE_FILES_.find(
-        (rule) =>
-          isSameProtectedIdentity(relativePath, rule) ||
-          isSameProtectedIdentity(lexicalRelativePath, rule),
-      );
-      if (protectedFile) {
-        return {
-          ...base,
-          outcome: denyOutcome(input.mode),
-          reason: 'protected_file',
-          matchedRule: protectedFile,
-        };
-      }
-
-      const protectedFilePrefix = PROTECTED_WORKSPACE_FILE_PREFIXES_.find(
-        (rule) =>
-          startsWithProtectedIdentity(relativePath, rule) ||
-          startsWithProtectedIdentity(lexicalRelativePath, rule),
-      );
-      if (protectedFilePrefix) {
-        return {
-          ...base,
-          outcome: denyOutcome(input.mode),
-          reason: 'protected_file',
-          matchedRule: protectedFilePrefix,
-        };
-      }
-
-      const additionalDeny = additionalDeniedPaths.find((path) =>
-        isPathInsideWorkspace(path, canonicalPath),
-      );
-      if (additionalDeny) {
-        return {
-          ...base,
-          outcome: denyOutcome(input.mode),
-          reason: 'additional_deny',
-          matchedRule: additionalDeny,
-        };
-      }
-
-      if (
-        allowedPaths.length > 0 &&
-        !allowedPaths.some((path) => isPathInsideWorkspace(path, canonicalPath))
-      ) {
-        return { ...base, outcome: denyOutcome(input.mode), reason: 'outside_allowlist' };
       }
 
       return { ...base, outcome: 'allow', reason: 'allowed_workspace_path' };

@@ -8,7 +8,7 @@
 
 附加验证：`bun run check:core-boundary`、`bun run check:runtime-packages`。
 
-相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110、ADR-0111、ADR-0114、ADR-0115。
+相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110、ADR-0111、ADR-0114、ADR-0115、ADR-0131。
 
 ## 统一执行链路
 
@@ -29,7 +29,7 @@
 
 Builtin capability 的 schema/parser/canonicalizer、availability、effects、traits、contract 与 operation identity
 只来自一个 frozen `CapabilityRegistrySnapshot` 及其 `createBuiltinToolCatalogProjection()`；package tests
-机械断言 projection 为 29 entries、20 model-visible、9 internal，不能在文档或 App bridge 中手工复制这些事实。
+机械断言 projection 为 28 entries、20 model-visible、8 internal，不能在文档或 App bridge 中手工复制这些事实。
 对应 package/manifests checks 与 RM-16 final manifest/docs/journey/fault/soak Gate 均已通过，并由完成记录绑定
 implementation final SHA。
 Kernel 只拥有纯 governance/admission decision，Host 只拥有该 snapshot 对应的 generic execution port，App 只组合
@@ -187,20 +187,37 @@ Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace
 `externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前
 扩大当前 native sandbox 的文件系统 scope。该选择本身不是 host fallback；ADR-0119 的 App availability
 仍只在 native command 尚未启动且 cleanup 已确认时生效，用户命令只能执行一次。Auto
-模式由自动审批模型先判断；模型判定风险或技术异常时才升级真人审批。危险路径和 destructive operation
-必须在审批前终止；canonical file target 与 native protected guard/mount/profile 继续在扩权后执行固定
-deny。网络客户端自身的 output/input 参数必须独立贡献 external filesystem effects；普通临时目录和
+模式由自动审批模型先判断；模型可批准、拒绝或请求真人审批，技术异常、无效响应和 circuit breaker 也升级
+真人审批。显式敏感路径以及因变量、任意脚本或间接 child 无法证明文件目标的 Shell 都投影
+`sensitiveExternalAccess`。Workspace 外固定 credential/persistence/system identity 也必须投影该 fact：Full
+直接授权，Auto 三态审查，其他模式进入 exact user approval；显式敏感 identity 不允许 same-command 静默复用；
+Auto reviewer 的新响应使用 `approve|reject|ask_user`；旧 `approved=false` 只兼容为 `ask_user`，未知或矛盾
+响应 fail closed 到真人审批；
+批准后 native guard/mount/profile 不得二次拒绝。关键 destructive operation 仍在执行前硬拒绝，且不得按名称
+拒绝 Workspace member。网络客户端自身的 output/input 参数必须独立贡献 external filesystem effects；普通临时目录和
 Workspace 外文件不是硬拒绝对象。sealed production admission 仍独立治理，development capability 不形成
 qualification evidence。
 
-Shell 的 read-only fast path 是 Planning、免审批执行、只读 Subagent 和并行 read batch 的共同授权边界，
-不是展示性 hint。分类必须按每个程序的参数与操作数语义 fail closed：只有有限、已验证的只读 grammar
-可以得到 `read_only + sideEffect=false`。能够写文件、修改 Git、启动外部程序或把运行时输入追加为 argv 的
+Shell command surface 不可穷举。按 ADR-0136，Policy 不再把只读、Workspace-only 或 Git subcommand grammar
+当作正向授权；Building 中的每个 `shell_execute` 都产生可审查 `ask`，而不是 fixed-list allow/deny。Auto 先由
+模型 reviewer 结合结构化 effects 与 exact command 选择 `approve|reject|ask_user`；Accept Edits 请求真人 exact
+approval；Full 对允许 bypass 的 invocation 直接授权。该 reviewer 不接管 Planning phase deny、关键系统 hard
+deny 或 native capability qualification。
+新配置与新 TUI 会话默认 Auto；显式配置和 live `/permissions` mode 不被覆盖。内部 Runtime/child grant 缺少
+mode 时仍回退 Accept Edits，以区分“产品推荐的 reviewer 路径”和“缺失授权事实时的 fail-safe 行为”。
+
+Shell 的 read-only classifier 不是 Policy 授权来源，也不能让命令在 Planning 或 Building 中免审。它只用于
+只读 Subagent role ceiling、scheduler metadata，以及已按 mode 授权后选择 hardened execution environment。
+分类仍必须按每个程序的参数与操作数语义 fail closed：只有有限、已验证的只读 grammar 可以得到
+`read_only + sideEffect=false`。能够写文件、修改 Git、启动外部程序或把运行时输入追加为 argv 的
 模式不得进入该 grammar；例如 Git branch mutation/diff output、ripgrep preprocessor、sed write、find
 file-output action、sort output、uniq output operand、`file` compile/uncompress 与 xargs 均属于非只读。CR/LF 多命令、process
 substitution、command substitution、backtick 和可能把安全参数展开成危险 option 的变量 expansion 同样不得
 走只读 fast path；未加引号的 brace expansion 也必须拒绝，避免它在静态检查后合成危险 option。`file`
-的 `-p/--preserve-date` 会恢复被检查文件的 atime，属于元数据写，同样不得归为只读。Scheduler 只并行已经通过这条分类和 Approval Policy 二次确认的调用；RM-09 后它从 Builtin catalog 投影的 `access/resourceScopes/conflictKeys/isolation/causalGroup/interactionBarrier/concurrencyGroup/leaseFenceRequired` 判定 overlap，不读取具体工具名。误分类不能依赖
+的 `-p/--preserve-date` 会恢复被检查文件的 atime，属于元数据写，同样不得归为只读。由于 raw Shell 必须经过
+mode review，它不会作为无需交互的 read batch 成员；RM-09 后 Scheduler 从 Builtin catalog 投影的
+`access/resourceScopes/conflictKeys/isolation/causalGroup/interactionBarrier/concurrencyGroup/leaseFenceRequired`
+判定 overlap，不读取具体工具名。误分类不能依赖
 Workspace sandbox 兜底，因为 development 的 `workspace_only` capability 仍可能允许 Workspace 写入。
 `rg -f/--file` 保持只读，但其 pattern 文件与搜索路径都是读取目标；任一目标位于 Workspace 外时必须进入
 external-read 审批，不得因 option value 没有被当作普通操作数而漏报。`grep` pattern 文件、`file`
@@ -216,9 +233,12 @@ payload 与其他 Shell 调用不能伪造。POSIX 路径使用固定非登录 `
 该最小环境也不继承 `BASH_ENV`/`ENV`、凭据或其他未白名单变量；
 `RIPGREP_CONFIG_PATH` 必须在沙箱 wrapper 中额外 unset，防止普通 `rg` 通过配置文件注入
 `--pre` 子进程。显式 `rg --pre` 仍由参数 grammar 直接拒绝。需审批/副作用 Shell 不使用该信任投影，保持原有工具链 PATH 语义。
-Generic Shell Git 整体不属于 policy-proven read-only：即使 argv 看似只读，repository/config 仍可能通过
-diff/textconv、fsmonitor、external diff 或 filter helper 启动子进程。Git inspection 必须使用 Runtime
-披露的 typed `git_inspect` broker；未披露时不能退回 Shell 的免审批/Planning fast path。
+按 ADR-0136，direct `git status`、不产生 patch 的 `git log` 和其他 raw Git 都先按当前 mode 审查；
+`git status --short`、`git log --oneline -10` 或 Workspace local target 不再产生 direct allow。命中
+ADR-0134 闭集 classifier 的已批准 status/log 仍使用 hardened environment，固定关闭 system/global config、
+credential prompt、pager、external diff、optional locks 与 repository fsmonitor helper。Planning 与关键系统
+destructive hard deny 保持独立。`git_inspect` 仍可作为结构化 capability，但不由 raw Git token 强制路由，
+也不从 generic Shell grant 推导资格。
 
 每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcome`；current reducer
 及其消费者不从其他 result 字段推导 outcome，并且只投影一个成对 ToolMessage。当前 epoch 缺失或
@@ -289,7 +309,7 @@ authorization/interaction-mode widening；不存在生产计数 seam 的“权�
 当前 Runtime snapshot 与 Subagent continuation 都必须携带 journal；缺失即 fail closed quality block，不得补默认 journal 后继续调度。invalid provider raw args 在
 `model.responded/tool.queued` 之前立即替换为固定 `invalid_json + redacted` sentinel；digest fingerprint
 只放独立 canonical-private 字段，event store、transcript 和 diagnostics 不得出现原文，Provider
-projection 也不得出现 fingerprint。当前 auto-review 风险判定升级人工审批，不产生 ToolMessage；
+projection 也不得出现 fingerprint。当前 auto-review 的 `ask_user` 判定升级人工审批，不产生 ToolMessage；
 只有没有 `escalatedToUser` 的历史 auto-review rejection 在 replay/next-model projection 对原 AI tool call
 恰好追加一个 ToolMessage。
 restore 还必须从 toolCallId、canonical fingerprint 与 outcome 重算 failure instance ID，并交叉验证
@@ -315,11 +335,11 @@ continuation journal 与父 identity 不一致的恢复，不能先执行外部�
 lineage-aware compaction：优先保留 active/recent failure，并连同完整 `recoveryOf` ancestor closure 一起
 保留或一起裁剪；历史 terminal ToolCall 可引用已裁剪 lineage，live ToolCall 的 parent 则必须 retained。
 
-phase 不改变 production builtin declaration：Planning 与 Building 使用相同的 edit/write/shell 声明和完整 `task` role schema；当前已绑定动态 MCP 也保持声明稳定，避免 phase 切换破坏 Provider 的工具前缀。动态 Runtime block 和 Builtin catalog description 引导 Planning 只调用只读能力，Runtime Policy/Controller 仍以当前 phase 和 Builtin catalog/dynamic-MCP effective effects 强制裁决：policy-proven read-only Shell、MCP 与 Builtin capability 可运行，edit/write、非只读 Shell、code/review child 和 side-effectful MCP 均不执行、不进入审批，并产生配对的结构化 phase Tool Result。模型可以为有界、自包含、独立且值得额外调用的工作自主选择 `task`；用户明确要求不委派时必须遵守。Capability availability、execution surface、binding 与 Skill lifecycle 仍可改变实际工具面；稳定披露不是授权。
+phase 不改变 production builtin declaration：Planning 与 Building 使用相同的 edit/write/shell 声明和完整 `task` role schema；当前已绑定动态 MCP 也保持声明稳定，避免 phase 切换破坏 Provider 的工具前缀。动态 Runtime block 和 Builtin catalog description 引导 Planning 只调用只读能力，Runtime Policy/Controller 仍以当前 phase 和 Builtin catalog/dynamic-MCP effective effects 强制裁决：具备结构化只读 contract 的 MCP 与 Builtin capability 可运行，全部 Shell、edit/write、code/review child 和 side-effectful MCP 均不执行、不进入审批，并产生配对的结构化 phase Tool Result。模型可以为有界、自包含、独立且值得额外调用的工作自主选择 `task`；用户明确要求不委派时必须遵守。Capability availability、execution surface、binding 与 Skill lifecycle 仍可改变实际工具面；稳定披露不是授权。
 
 `ask_user` 只在主 Agent 工具面中可用。主 Agent 必须在派发 `task` 前澄清会阻断执行的用户意图，并把必要事实写入自包含的 delegated task；Subagent 的所有角色都从工具声明中移除 `ask_user`。child 若发现必要前提仍缺失，只能在最终结果中返回 parent，不得创建用户 interaction。Full/Plan 模式可提问仅指主 Agent 可在委派前提问。
 
-Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只复用 schema 的 trim 后 `8..8000` 长度边界，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。所有内置 Subagent 角色的默认执行超时统一为 30 分钟；角色配置可显式覆盖该默认值。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、interaction mode、authorization、sandbox、protected path、execution surface 和累计预算。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
+Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只复用 schema 的 trim 后 `8..8000` 长度边界，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。所有内置 Subagent 角色的默认执行超时统一为 30 分钟；角色配置可显式覆盖该默认值。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、authorization、sandbox、protected path、execution surface 和累计预算。interaction mode 通常继承 Parent；唯一特化是父级 `accept_edits` 下，同一模型响应内的多个结构化 Explore sibling 使用 Auto reviewer，父级 Full 不降级。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
 审批只解决具体调用的 Runtime policy gate，不能扩大 Subagent role ceiling。explore/plan/review 的
 非只读 Shell 即使在暂停后获得批准，resume 仍必须经过与首次 child loop 相同的只读 executor 并被拒绝。
 plan child 返回后的唯一 continuation 是 `write_plan:save`
@@ -335,7 +355,7 @@ Sub-agent lifecycle attempt，不创建或结算 parent/tool reservation；真�
 parent attempt。已经自动或人工获批的 active continuation 优先于 deferred queued sibling；获批 child
 完成或再次暂停前，后者不得插队占用 canonical interaction。每个 child 的 model/tool reservation
 仍来自父 run 的共享累计预算 ledger（ADR-0104）。自动审查升级人工审批时，`reviewFailure` 必须携带
-reviewer 的风险判断或技术失败原因，TUI 不得把升级表现成无原因的永久等待。Runtime 调用 reviewer
+reviewer 的风险判断或技术失败原因，TUI 必须在审批面板显示该原因，不得把升级表现成无原因的永久等待。当 durable approval interaction 早于 Runtime action waiter 到达 TUI 时，Enter/Esc 决定必须绑定 exact interaction id 排队，waiter 建立后立即消费；错配的后续 interaction 不得继承该决定。Runtime 调用 reviewer
 时必须提供当前用户任务、workspace root，以及可用时的 Subagent 身份和角色；reviewer 不得只依据
 脱离任务语境的单条命令做决定。实际并发派发的 task sibling 共用 Runtime 签发的
 `concurrencyGroupId`，使 TUI 能聚合显示 queued、auto-reviewing、awaiting-user 与恢复后的状态；该字段
@@ -348,8 +368,10 @@ TUI 对 tool 和 Subagent 生命周期的可见标签可以按用户语言本地
 不得绘制 `├─`、竖线或伪父子树。该布局只消费 Runtime 已签发的 group、child status 与 step
 事实，不得改变调度、审批顺序、reservation 或并发判断。
 
-ADR-0097 的 Git 路由不属于 generic Shell 权限。`git_inspect` 只在精确 feature
-revision、`gitInspect` surface 与 App broker 同时存在时披露/执行。Shell 中绝对路径、nested shell 或间接 child 的 Git executable token同样 fail closed。stage、commit 与 remote Git 均不向模型披露，也不得由 interaction mode、Shell grant 或 raw shell fallback 恢复。
+ADR-0134 的 direct status/log 闭集只提供已批准执行的 hardening 分类，不依赖 `gitInspect` surface，也不产生
+Policy allow。typed `git_inspect` 仍只在精确 feature revision、`gitInspect` surface 与 App broker 同时存在时
+披露/执行。ADR-0136 要求 status、log、stage、commit、remote 以及未知 raw Git 全部按 Full、Auto、Accept
+Edits 当前模式治理；它们都不作为 typed model tool 披露。
 Git log revision 使用 broker、Provider schema 与 Builtin catalog 共用的闭集 grammar；Runtime 的预算/资源 admission 与模型 surface 都必须接收同一个 `gitBroker` dependency，避免“已披露但不可执行”或相反的漂移。Git process stdout/stderr 在 App adapter 内流式限界，溢出是 typed terminal，不把异常或 protected 历史正文投影给模型。
 
 V2 写入前还执行项目指令 snapshot guard。edit/write 使用目标路径，shell 与 code task 至少使用已解析 cwd/Workspace 根；若目标首次引入当前模型快照未见的嵌套 `CLAUDE.md`/`AGENTS.md`，或适用文档 digest 已变化，本次副作用以可恢复的 `project_instructions_changed` 拒绝。下一轮重新投影后模型可重新发起，审批与 sandbox 不得绕过此检查。
@@ -404,16 +426,18 @@ Builtin operation receipt/result projection 只产生模型内容、双流内容
 
 静态工具的 Schema、契约与副作用分类收敛到 `packages/builtin-runtime/src/tool-catalog.ts` 投影的 Builtin catalog；
 SPI registry 保留 immutable definition/executor identity，App 只保留 composition/request adapter。RM-10 至
-RM-15 已依次迁移 `tool_search`、Skills/MCP/Web、Filesystem/Git、Shell、Plan/Task 与五类 Model operations。
+RM-15 已依次迁移 `tool_search`、Skills/MCP/Web、Filesystem/Git、Shell、Plan/Task 与四类 Model operations。
 App 的 `read_plan/update_plan/write_plan/task` 没有 concrete executor；Task 的公开模型投影由 Builtin
 `projectSubagentResult()` 唯一产生，完整 child journal/continuation 只走私有 Runtime 通道。一致性不变量由
 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`tests/tool-definitions.test.ts`、`tests/tool-parse-error.test.ts`
-与 RM schema parity 测试棘轮守护：Builtin catalog 的 29/20/9、exact schema/revision/executor/effects、model
+与 RM schema parity 测试棘轮守护：Builtin catalog 的 28/20/8、exact schema/revision/executor/effects、model
 ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only dispatch 均机械验证。shell_execute 的
 模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Builtin/Host execution
-path 必须使用 600000ms 默认硬超时，显式正整数可以覆盖；副作用、只读免审和审计 `action.intent` 全部由命令形态
-派生，审批 payload 不接受模型建议授权或 prefix rule。i10 以 `ls`、`pwd`、`rg` 等 policy-proven 语料守护真实
-Approval Policy 的免审命中率；generic Shell Git 不属于该语料，只读 Git 检查必须走 `git_inspect`。
+path 必须使用 600000ms 默认硬超时，显式正整数可以覆盖；副作用分类和审计 `action.intent` 可由命令形态
+派生，但审批 payload 不接受模型建议授权或 prefix rule。ADR-0136 的回归语料必须证明 `ls`、`pwd`、`rg`、
+direct `git status`/无 patch `git log`、Workspace mutation、local Git 与未知脚本都产生同一种 mode-aware Shell
+review，而固定 classifier 只能保留 advisory effects 或已批准执行的 hardening metadata。typed `git_inspect`
+保持独立可选 capability。
 
 生产静态模型工具面必须直接由 `createBuiltinToolCatalogProjection(snapshot).toolSet` 投影；
 App tool composition 只合并独立 Runtime-issued MCP overlay，不拥有第二 schema/effects table。
@@ -454,8 +478,8 @@ Runtime-action/coordination execute 输出中的 events 在模型投影之外返
 当 run 携带 sealed `ExecutionBoundary` 时，Builtin catalog entry 还从 capability contract 的
 `protectedPathAccesses()` 取得结构化 `path + operation`。Evaluator 同时匹配未 realpath 的 lexical
 Workspace identity 和 canonical target。按 ADR-0118，文件 read 对任何有效路径 allow，Workspace 内
-write 对所有名称 allow，Workspace 外 write 返回 prompt；只有 execute/process 继续应用 protected name 与
-additional deny/allow。Tool Pipeline 在 grant 签发前固定 evaluator revision；Local Provider 再验证
+write 对所有名称 allow，Workspace 外 write 返回 prompt；按 ADR-0131，execute/process 对 Workspace 内所有
+名称同样 allow，additional deny/allow 与 protected name 只能约束 Workspace 外 identity。Tool Pipeline 在 grant 签发前固定 evaluator revision；Local Provider 再验证
 canonical Workspace、`workspace_only | external_read | approved_external` scope 与 no-follow identity。
 read/write/edit 分别声明实际 access，search 声明 root read且不再按 protected 名称过滤。完整 builtin tuple 的
 `filesystem!=none` spec 必须具有该声明，或显式位于闭合例外集：`read_plan`、
@@ -463,18 +487,28 @@ read/write/edit 分别声明实际 access，search 声明 root read且不再按 
 reference allowlist、native sandbox、child Harness、compiled inline/fork adapter 接管。闭合例外测试
 会让新增 filesystem builtin 在遗漏 hook 或边界说明时失败。
 production execution 标记存在但 surface/evaluator 缺失时同样在 adapter I/O 前 fail closed。external mutation
-必须在 adapter I/O 前取得 exact approval；一旦获批，文件 protected-path policy 不再二次拒绝。Shell 仍以
-原生 sandbox profile 为权威，极高风险 command deny 与 `checkDangerousPaths()` defense-in-depth 保持不变。
+与敏感 external read、任何 external recursive search 必须在 adapter I/O 前完成当前模式授权：Full 直接授权、
+Auto 三态审查、其他模式 exact approval；一旦获批，文件 Provider 与 Shell native
+profile 都不得按 protected path 二次拒绝。`checkDangerousPaths()` 是 Policy approval classifier；关键 destructive
+command deny 仍独立存在，且两者不得重新引入 Workspace 内名称级拒绝。
 
 ## 自治规则
 
 1. 普通问答不使用全局 stop-check；没有未决 Effect 或 required verification 时可直接完成。
-2. Read-only Builtin（`read_file`、`search_content`、`search_files`）对任何有效路径免审，Workspace 外使用 observe-only `external_read`。当前受信任 Workspace 无论位于何处，内部 `write_file`/`edit_file` 在 `accept_edits` 可直接执行；外部 mutation 必须先审批并密封为 `approved_external`，批准后不再受文件名称 deny。Local Provider 不从 mode、用户字符串或旧 `allowExternal` boolean 推导 mutation 批准。Windows operation 使用 runtime context 指示的原生路径，并按 ADR-0122 由 locked directory handle 发布；native handle capability 不可用时仍以技术能力不足 fail closed。
+2. Read-only Builtin 对普通有效单文件路径免审并为 Workspace 外读取使用 observe-only `external_read`；敏感
+   external `read_file` 或任何 external recursive search 必须完成模式感知授权。当前受信任 Workspace 无论位于
+   何处，Building 阶段内可证明只作用于其内部的结构化 `write_file`/`edit_file` 可直接执行；raw Shell 与 Git
+   不从该边界获得 direct allow，而是在 Full 直接授权、Auto 三态审查、Accept
+   Edits 请求用户审批并密封为 `approved_external`，批准后不再受文件名称 deny。Local Provider 不从 mode、用户字符串或旧 `allowExternal`
+   boolean 推导批准。Windows operation 使用 runtime context 指示的原生路径，并按 ADR-0122 由 locked directory
+   handle 发布；native handle capability 不可用时仍以技术能力不足 fail closed。
 3. `accept_edits`、`auto`、`full` 是当前唯一可密封到 Subagent grant 的交互模式，只决定交互策略，不取消
    capability schema、revision、minimum approval 或 sandbox 检查；旧的 `default` identity 必须在 Driver/
    Provider I/O 前拒绝。
 4. Authorization grant 只在声明的 thread/workspace/command 范围有效；新 thread 不继承单次授权。
-5. Destructive shell 与未知外部副作用保持保守边界，不能因 full access 或 same-command grant 自动放行。
+5. 空命令、明确的关键系统递归删除和关键系统 repository destructive Git 保持 hard deny。其他所有 Shell
+   不从固定 grammar 推导 allow：Full 可直接授权，Auto 由模型批准、拒绝或升级用户，Accept Edits 请求用户审批；
+   same-command 是否可复用仍由编译策略决定。
 6. 批量 tool calls 必须逐个进入相同策略；一个只读调用不能掩盖同批写入调用。连续调用仅在
    每项都已持久化为 `read_only + sideEffect=false`、属于无交互语义的内置读取工具且
    Approval Policy 再确认无需审批时，才可组成最多 4 项的并行批次。`ask_user`、Plan/
@@ -495,7 +529,7 @@ production execution 标记存在但 surface/evaluator 缺失时同样在 adapte
 8. 方案执行确认是授权屏障。用户取消 `request_plan_review` 时保留方案 draft，但取消方案
    工具和所有未终结 sibling，发出 `turn.aborted(cause=user)`，Runner 立即退出；不得把
    取消投影成成功的 `review_cancelled` Tool Result，也不得继续调用模型。
-9. Planning 的 phase 边界不可审批升级。非只读 `shell_execute` 在该阶段不创建 approval，
+9. Planning 的 phase 边界不可审批升级。所有 `shell_execute` 在该阶段不创建 approval，
    Controller 以 `phase_deferred` 终结本次 Tool Call，并向模型返回原始参数、
    `until_phase=building` 与“写入方案、批准后重新调用”的结构化指引。TUI 消费对应的离屏
    queued 元数据但不生成 Bash 卡、失败提示或 deferred command 行；这不是 Runtime 可自动
@@ -574,5 +608,5 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 （`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`）通过 `InvalidToolRequest` 透传到 `ClassifiedFailure`；
 前两类参数错误映射为 `tool_invalid_args`，`unknown_tool`/`tool_unavailable` 映射为 `tool_not_found`，父 Runtime 与 Subagent 使用同一恢复策略。Builtin `projectSubagentResult()` 只序列化显式 model allowlist（ok、summary、error、toolCallCount、durationMs 与 planning continuation action）；Controller 在私有事件通道合并 child journal，`toolRecovery`、execution journal、exhausted fingerprints、steps/args 与 continuation 不得进入 parent transcript 或下一次 Provider payload。
 
-Subagent 的执行上下文由父 Runtime 显式传递：`interactionMode` 使用当前 live state，恢复不复用挂起时的过期模式；Workspace 先 canonicalize，再同源用于模型 `Workspace`/`CWD` 与工具路径解析。文件编辑的 read-before-edit freshness 使用 Runtime-issued child id 作 actor scope，正常 child loop、阻塞工具获批与恢复后续 loop 必须保持同一 id；Parent 或 sibling 的读取不能为当前 child 授权编辑。
+Subagent 的执行上下文由父 Runtime 显式传递：`interactionMode` 使用当前 live state，并仅对可由同一 model message、turn 和 `subagent_type=explore` 证明的多 Explore sibling 把 `accept_edits` 特化为 `auto`；恢复不复用挂起时的过期模式，也不从展示组或 task 正文猜测。Workspace 先 canonicalize，再同源用于模型 `Workspace`/`CWD` 与工具路径解析。文件编辑的 read-before-edit freshness 使用 Runtime-issued child id 作 actor scope，正常 child loop、阻塞工具获批与恢复后续 loop 必须保持同一 id；Parent 或 sibling 的读取不能为当前 child 授权编辑。
 > Test path synchronization: tool pipeline qualification suites now use domain-neutral filenames; the tested acknowledgement, receipt, and terminal ordering remains unchanged.

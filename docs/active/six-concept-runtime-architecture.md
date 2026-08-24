@@ -43,7 +43,7 @@ Kernel 是唯一 state/event/reducer/scheduler authority：
 - Kernel 不读 clock、random、filesystem、network 或 Provider；Host 必须把 identity、time 与 observed facts 显式投影为 input；
 - schema/protocol/format 数字只作为 metadata 值，不作为类型或文件身份。
 
-State 只有一个当前 persisted shape。格式不匹配、checksum/revision/project/workspace identity 漂移、event tail 非法或 recovery evidence 不完整均 fail closed；不迁移旧格式。
+State 只有一个当前写入 shape。当前 codec 继续读取同一 schema/epoch 内有明确白名单和测试的退休事件字段，以保证旧会话可打开；读取后只保留安全的无副作用或 `inconclusive` 语义，不重新写回旧字段。其他格式不匹配、checksum/revision/project/workspace identity 漂移、event tail 非法或 recovery evidence 不完整均 fail closed；不猜测、不迁移未知格式。
 
 ## Capability、Policy 与 Tool Pipeline
 
@@ -88,15 +88,25 @@ Context 只有一条 current projection 与 compaction 管线。Manual/auto 使�
 
 Gateway 的 retryable attempt 仍由有界 retry policy 收敛；fatal Provider rejection 不重试。App turn
 coordinator 只把 fatal outcome 投影到已有 failure taxonomy，不能将其降级为 `unknown` 或恢复第二套
-retry authority。
+retry authority。同一 Gateway、同一 route 的并发调用观察到 Provider rate limit 后，后续 retry 必须共享
+route-local 退避时隙；不得让 sibling Subagent 以完全相同的指数节奏同时重试并形成惊群。首次调用继续并发，
+共享协调只在真实 `provider_rate_limited` observation 后生效，且实际时隙延迟必须写入各 invocation 自己的
+`model.retry.delayMs`。
 
 TUI 通过 `apps/kite/src/adapters/tui/session-adapter.ts` 获取 typed client surface。TUI 不接触 Kernel state、Host execution control、Builtin executor 或 SQLite handle。
+
+`RuntimeSessionCoordinator` 的 Workspace、Project、user、recovery identity 与 Artifact evidence 是 retained
+Session 的不可变身份，Host recovery 重复 `ensure` 时必须继续严格校验。`interactionMode` 则是可变的、已持久化
+Session 状态：TUI replay、Plan approval 或权限选择把最新模式投影到 `SessionRuntime` 后，`SessionManager` 必须先将
+该模式对齐到既有 coordinator，再校验其余不可变身份。该对齐只更新 coordinator 的 retained mode 镜像，不写第二份
+Runtime State，也不得掩盖 Workspace、Project、recovery key、sandbox 或 Artifact evidence 漂移。
 
 ## SQLite storage
 
 `@kite/runtime-storage-sqlite` 是 Host storage port 的唯一 concrete adapter：
 
-- `adapter.ts` 单独拥有数据库创建、连接与关闭；
+- `adapter.ts` 单独拥有可写数据库创建、连接与关闭；独立 `RuntimeLogQueryPort` reader 只做 current-format、no-follow、query-only durable-log 读取，不能取得写 Store capability；
+- SessionStore 的会话列表投影通过 `event-store.ts` 有界分批解码，找到第一条 session-name candidate 即停止；它不代替打开具体会话时的 strict Event/Snapshot 恢复校验；
 - `preflight.ts` 在写连接前验证 current metadata；
 - event/session/snapshot/artifact/authority/effect 子模块共享同一 database context；
 - `transaction.ts` 是 Runtime event+snapshot 原子提交唯一 owner；
@@ -109,9 +119,9 @@ Ack、Receipt、terminal、recovery、sandbox cleanup、MCP/Subagent lifecycle �
 
 MCP 默认配置来源只有 project 与 user；explicit 是调用方授权的独立文件。project 必须通过配置摘要审批。没有旧 source、迁移 command 或 ambient-environment auth spelling。Runtime 只获得受限 `McpRuntimeProvider`，不能调用配置 mutation 或 Supervisor control API。
 
-Subagent Provider 使用 private task/handle/continuation Artifact、exact parent attempt、resource admission 与 cleanup receipt。并发 sibling approval 只允许一个占据 interaction slot，其余以 durable deferred fact 保留；恢复不能重启已挂起 child model。
+Subagent Provider 使用 private task/handle/continuation Artifact、exact parent attempt、resource admission 与 cleanup receipt。并发 sibling approval 只允许一个占据 interaction slot，其余以 durable deferred fact 保留；恢复不能重启已挂起 child model。已恢复 child 再次阻塞时必须把新 interaction 排在既有 deferred sibling 后面，不能由一个长任务连续抢占并造成审批饥饿。
 
-Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP/reviewer port。Kernel verification state/event map 是唯一 lifecycle authority；App effect 不得自行 waiver、改变 outcome 或制造 evidence。
+Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port。Kernel verification state/event map 是唯一 lifecycle authority；App effect 不得自行 waiver、改变 outcome、调用模型复核或制造 evidence。
 
 ## 完成与静态门禁
 

@@ -14,6 +14,7 @@ export {
 export {
   checkDangerousCanonicalPath,
   checkDangerousPaths,
+  checkDangerousSearchRoot,
   type FixedDangerousPathIdentity,
   resolveFixedDangerousPathIdentities,
 } from './dangerous-paths';

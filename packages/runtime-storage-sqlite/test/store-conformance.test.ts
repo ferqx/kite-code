@@ -11,7 +11,7 @@ import {
   sqliteRuntimeStorePath,
 } from '../src/index';
 
-type Event = { type: string };
+type Event = { type: string; content?: string };
 type State = {
   schemaVersion: 26;
   formatEpoch: string;
@@ -166,6 +166,49 @@ describe('State/Store production format', () => {
     }
   });
 
+  test('stops decoding a session journal after finding its naming event', () => {
+    let decodedEvents = 0;
+    const summaryCodec = {
+      ...codec,
+      decodeEvent: (json: string): Event => {
+        decodedEvents += 1;
+        return JSON.parse(json) as Event;
+      },
+      eventSummary: (event: Event) =>
+        event.type === 'user.message_appended' && event.content
+          ? { isSessionNameCandidate: true, searchText: event.content }
+          : null,
+    };
+    const storage = createSqliteRuntimeStorage<Event, State>({
+      databasePath: ':memory:',
+      codec: summaryCodec,
+    });
+    const events: Event[] = [
+      { type: 'turn.started' },
+      { type: 'user.message_appended', content: 'fast startup' },
+      ...Array.from({ length: 500 }, () => ({ type: 'model.delta' })),
+    ];
+    storage.transactions.commitDecision({
+      sessionId: 'long-session',
+      events,
+      snapshot: state('long-session', events.length),
+      metadata: events.map((_, index) => ({
+        eventId: `event-${index + 1}`,
+        revision: index + 1,
+      })),
+    });
+
+    expect(storage.sessions.listSessions()).toEqual([
+      expect.objectContaining({
+        threadId: 'long-session',
+        name: 'fast startup',
+        needsSmartName: true,
+      }),
+    ]);
+    expect(decodedEvents).toBe(2);
+    storage.close();
+  });
+
   test('rejects legacy metadata before a transaction creates current rows', () => {
     const storage = createSqliteRuntimeStorage<Event, State>({ databasePath: ':memory:', codec });
     expect(() =>
@@ -205,10 +248,17 @@ describe('State/Store production format', () => {
         "UPDATE runtime_snapshots SET state_json = '{\"tampered\":true}' WHERE session_id = 'corrupt'",
       );
       database.close();
+      const discovery = createSqliteRuntimeStorage({
+        databasePath: fixture.path,
+        codec,
+        options: { journalMode: 'delete' },
+      });
+      discovery.close();
       expect(() =>
         createSqliteRuntimeStorage({
           databasePath: fixture.path,
           codec,
+          sessionId: 'corrupt',
           options: { journalMode: 'delete' },
         }),
       ).toThrow(SqliteRuntimeFormatMismatchError);
@@ -233,10 +283,17 @@ describe('State/Store production format', () => {
       const database = new Database(missing.path);
       database.run("DELETE FROM runtime_snapshots WHERE session_id = 'missing'");
       database.close();
+      const discovery = createSqliteRuntimeStorage({
+        databasePath: missing.path,
+        codec,
+        options: { journalMode: 'delete' },
+      });
+      discovery.close();
       expect(() =>
         createSqliteRuntimeStorage({
           databasePath: missing.path,
           codec,
+          sessionId: 'missing',
           options: { journalMode: 'delete' },
         }),
       ).toThrow(SqliteRuntimeFormatMismatchError);

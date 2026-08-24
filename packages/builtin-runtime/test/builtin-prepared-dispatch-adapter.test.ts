@@ -261,6 +261,7 @@ function privateTaskPrepared(
   projectionValue: ReturnType<typeof projection>,
   overrides: Partial<NonDynamicPreparedToolInvocationIdentity> = {},
   argumentsValue: Record<string, unknown> = {
+    name: 'Inspect prepared dispatch',
     subagent_type: 'explore',
     taskArtifact: {
       artifactId: `pa_${'a'.repeat(64)}`,
@@ -458,7 +459,11 @@ describe('Builtin prepared dispatch adapter', () => {
     const publicInput = privateTaskPrepared(
       catalog,
       { argumentOrigin: 'model_public' },
-      { subagent_type: 'explore', task: 'public model task' },
+      {
+        name: 'Inspect public dispatch',
+        subagent_type: 'explore',
+        task: 'public model task',
+      },
     );
     const validPrivateInput = privateTaskPrepared(catalog);
     const missingArtifact = freezeDeep({
@@ -630,6 +635,37 @@ describe('Builtin prepared dispatch adapter', () => {
     expect(
       projectBuiltinOperationTerminalResult(operationValue(false, '', 'bounded domain denial')),
     ).toMatchObject({
+      failure: { code: 'builtin_operation_failed' },
+    });
+  });
+
+  test('does not relabel a failed child model execution as a policy rejection', async () => {
+    const catalog = projection();
+    const input = privateTaskPrepared(catalog);
+    const adapter = createBuiltinPreparedTaskDispatchAdapter({
+      projection: catalog,
+      verifyPreparedIdentity: () => true,
+      port: {
+        dispatch: async ({ prepared: received }) =>
+          executionReceipt(
+            received,
+            Object.freeze({
+              ...(operationValue(false, '', 'Sub-agent execution failed.') as unknown as Record<
+                string,
+                unknown
+              >),
+              subagentResult: Object.freeze({
+                ok: false,
+                terminalStatus: 'failed',
+                summary: 'Sub-agent execution failed.',
+              }),
+            }) as unknown as BuiltinOperationExecutionValue,
+          ),
+      },
+    });
+
+    await expect(adapter.dispatch(input)).resolves.toMatchObject({
+      status: 'error',
       failure: { code: 'builtin_operation_failed' },
     });
   });

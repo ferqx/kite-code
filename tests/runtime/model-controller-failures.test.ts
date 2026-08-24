@@ -136,9 +136,10 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
 });
 
 test('keeps a new Task body and raw digests out of every Runtime and diagnostic projection', async () => {
+  const name = 'Review runtime privacy boundary';
   const task = 'PRIVATE_TASK_SENTINEL_3d95445c review the exact runtime privacy boundary';
   const rawTaskDigest = subagentTaskDigest(task);
-  const rawArgumentsDigest = digestCapabilityValue({ subagent_type: 'review', task });
+  const rawArgumentsDigest = digestCapabilityValue({ name, subagent_type: 'review', task });
   const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'private-task-runtime-projection',
@@ -150,7 +151,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
       message: aiMessage({
         content: '',
         tool_calls: [
-          { id: 'private-task-call', name: 'task', args: { subagent_type: 'review', task } },
+          { id: 'private-task-call', name: 'task', args: { name, subagent_type: 'review', task } },
         ],
       }),
     },
@@ -177,6 +178,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
         id: 'private-task-call',
         name: 'task',
         args: {
+          name,
           subagent_type: 'review',
           taskArtifact: {
             kind: 'subagent_task_request',
@@ -191,7 +193,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
   expect(Object.hasOwn(responded, 'reasoningText')).toBe(false);
   expect(queued).toMatchObject({
     type: 'tool.queued',
-    args: { subagent_type: 'review', taskArtifact: { kind: 'subagent_task_request' } },
+    args: { name, subagent_type: 'review', taskArtifact: { kind: 'subagent_task_request' } },
   });
   let restored = state;
   for (const event of events) restored = reduceRuntimeState(restored, event);
@@ -252,12 +254,20 @@ test('interrupts duplicate provider tool-call ids before publishing or queueing 
           {
             id: 'duplicate-task-call',
             name: 'task',
-            args: { subagent_type: 'review', task: 'first private task' },
+            args: {
+              name: 'Review first delegated request',
+              subagent_type: 'review',
+              task: 'first private task',
+            },
           },
           {
             id: 'duplicate-task-call',
             name: 'task',
-            args: { subagent_type: 'review', task: 'second private task' },
+            args: {
+              name: 'Review second delegated request',
+              subagent_type: 'review',
+              task: 'second private task',
+            },
           },
         ],
       }),
@@ -331,7 +341,7 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
       toolCallId: 'task-private-db',
       modelMessageId: 'model-private-db',
       name: 'task',
-      args: { subagent_type: 'review', task },
+      args: { name: 'Review private continuation', subagent_type: 'review', task },
       status: 'queued',
       effectClass: 'read_only',
       sideEffect: false,
@@ -384,7 +394,11 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
     });
     restored.tools.calls['task-private-db'] = {
       ...state.tools.calls['task-private-db']!,
-      args: { subagent_type: 'review', task: '[private task artifact]' },
+      args: {
+        name: 'Review private continuation',
+        subagent_type: 'review',
+        task: '[private task artifact]',
+      },
     };
     restored.tools.queue = [...restored.tools.queue, 'task-private-db'];
     for (const event of events) restored = reduceRuntimeState(restored, event);

@@ -18,6 +18,7 @@ export interface AutoReviewFacts {
   readonly toolCallId: string;
   readonly ok: boolean;
   readonly approved: boolean;
+  readonly requiresUserApproval?: true;
   readonly grant?: AutoReviewGrant;
   readonly reason?: string;
   readonly failureType?: AutoReviewFailureType;
@@ -39,7 +40,17 @@ export interface AutoReviewUserApprovalDecision {
   readonly failureType?: AutoReviewFailureType;
 }
 
-export type AutoReviewDecision = AutoReviewAcceptedDecision | AutoReviewUserApprovalDecision;
+export interface AutoReviewRejectedDecision {
+  readonly kind: 'rejected';
+  readonly reviewId: string;
+  readonly toolCallId: string;
+  readonly reason: string;
+}
+
+export type AutoReviewDecision =
+  | AutoReviewAcceptedDecision
+  | AutoReviewRejectedDecision
+  | AutoReviewUserApprovalDecision;
 
 export interface CircuitBreakerConfig {
   readonly maxRejections: number;
@@ -160,7 +171,7 @@ function validFacts(value: unknown): value is AutoReviewFacts {
     !exactKeys(
       value,
       ['reviewId', 'toolCallId', 'ok', 'approved'],
-      ['grant', 'reason', 'failureType'],
+      ['grant', 'reason', 'failureType', 'requiresUserApproval'],
     )
   ) {
     return false;
@@ -170,6 +181,8 @@ function validFacts(value: unknown): value is AutoReviewFacts {
     boundedString(value.toolCallId, MAX_IDENTITY_LENGTH) &&
     typeof value.ok === 'boolean' &&
     typeof value.approved === 'boolean' &&
+    (value.requiresUserApproval === undefined || value.requiresUserApproval === true) &&
+    !(value.approved && value.requiresUserApproval === true) &&
     (value.grant === undefined ||
       value.grant === 'approve_once' ||
       value.grant === 'same_command' ||
@@ -215,7 +228,9 @@ export function isValidAutoReviewFacts(value: unknown): value is AutoReviewFacts
  *
  * `ok === true`, `approved === true`, and an operation-bound grant of
  * `approve_once` or `same_command` are all required for automatic acceptance.
- * Every other result, including `full_access`, is a user-approval request.
+ * A canonical reviewer rejection is terminal unless the reviewer explicitly
+ * requests user approval. Technical/invalid results and unsupported grants
+ * always escalate to the user.
  */
 export function decideAutoReview(value: unknown): AutoReviewDecision {
   if (!validFacts(value)) {
@@ -234,16 +249,24 @@ export function decideAutoReview(value: unknown): AutoReviewDecision {
     );
   }
 
-  if (!value.approved) {
-    return requestUserApproval(value, value.reason ?? REVIEWER_REJECTION_REASON, value.failureType);
-  }
-
   if (value.failureType !== undefined) {
     return requestUserApproval(
       value,
-      value.reason ?? 'Auto-review approval carried contradictory failure facts.',
+      value.reason ?? 'Auto-review result carried contradictory failure facts.',
       'invalid_response',
     );
+  }
+
+  if (!value.approved) {
+    if (value.requiresUserApproval === true) {
+      return requestUserApproval(value, value.reason ?? 'Auto-review requested user approval.');
+    }
+    return Object.freeze({
+      kind: 'rejected' as const,
+      reviewId: value.reviewId,
+      toolCallId: value.toolCallId,
+      reason: value.reason ?? REVIEWER_REJECTION_REASON,
+    });
   }
 
   if (value.grant !== 'approve_once' && value.grant !== 'same_command') {

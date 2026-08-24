@@ -6,6 +6,7 @@ import {
   buildWorkspaceExcludedPath,
   isCanonicalPathOutsideWorkspace,
   POLICY_PROVEN_READ_ONLY_EXECUTION,
+  policyProvenReadOnlyGitEnvironment,
 } from '../trusted-readonly-environment';
 import type { FilesystemScope, ShellFilesystemMode, ShellNetworkMode } from '../types';
 import {
@@ -402,6 +403,7 @@ function buildEnvironment(
     if (inheritedPath) pathEntries.push(inheritedPath);
   }
   env.PATH = pathEntries.join(';');
+  if (policyProvenReadOnly) Object.assign(env, policyProvenReadOnlyGitEnvironment('win32'));
   return env;
 }
 
@@ -451,6 +453,9 @@ export function buildWindowsRestrictedTokenEnvForTest(
     if (inheritedPath) pathEntries.push(inheritedPath);
   }
   env.PATH = pathEntries.join(';');
+  if (options.policyProvenReadOnly) {
+    Object.assign(env, policyProvenReadOnlyGitEnvironment('win32'));
+  }
   return env;
 }
 

@@ -21,6 +21,7 @@ import {
   buildUlimitPreamble,
   buildWorkspaceExcludedPath,
   checkDangerousPaths,
+  checkDangerousSearchRoot,
   cleanupSandboxRuntimeDirNoSpawn,
   cleanupWindowsSandboxRuntimeDirNoSpawn,
   createSandboxRuntimeDirForPreparation,
@@ -118,12 +119,29 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(allow file-read* file-read-metadata file-map-executable)');
     expect(profile).toContain('(allow file-write* file-write-create file-write-unlink file-ioctl)');
     expect(profile).toContain('(deny network*)');
-    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+    expect(profile).not.toContain('(deny file-read* file-map-executable file-write*');
   });
 
-  test('approved filesystem scope retains native denies for external credentials', () => {
+  test('approved filesystem scope does not re-deny external credentials', () => {
     const profile = generateSandboxProfile(workspace, { filesystemScope: 'full_access' });
-    expect(profile).toContain(seatbeltSubpath(join(homedir(), '.ssh')));
+    expect(profile).not.toContain(seatbeltSubpath(join(homedir(), '.ssh')));
+  });
+
+  test('approved filesystem scope still excludes the complete Host-control base', () => {
+    const controlBase = mkdtempSync(join(tmpdir(), 'approved-seatbelt-control-'));
+    try {
+      const profile = generateSandboxProfile(workspace, {
+        filesystemScope: 'full_access',
+        sandboxControlBase: controlBase,
+      });
+      expect(profile).toContain(
+        '(deny file-read* file-read-metadata file-map-executable file-write*',
+      );
+      expect(profile).toContain(seatbeltSubpath(realpathSync.native(controlBase)));
+      expect(profile).not.toContain(seatbeltSubpath(join(homedir(), '.ssh')));
+    } finally {
+      rmSync(controlBase, { recursive: true, force: true });
+    }
   });
 
   test('profile imports system.sb as base', () => {
@@ -150,32 +168,23 @@ describe('sandbox profile generation', () => {
     expect(executableSection).not.toContain('/opt/homebrew/share');
   });
 
-  test('profile denies protected workspace paths', () => {
+  test('profile does not deny any path inside the canonical Workspace', () => {
     const profile = generateSandboxProfile(workspace);
-    expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
-    expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
-    expect(profile).toContain(seatbeltLiteralPrefixRegex(join(canonicalWorkspace, '.env.')));
-    expect(profile).toContain('[eE][nN][vV]\\..*$")');
-    if (process.platform === 'darwin') {
-      expect(profile).toContain('/\\.[eE][nN][vV]\\..*$")');
-      expect(profile).not.toContain('\\\\.[eE][nN][vV]');
-    }
-    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+    expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
+    expect(profile).not.toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
+    expect(profile).not.toContain(seatbeltLiteralPrefixRegex(join(canonicalWorkspace, '.env.')));
+    expect(profile).not.toContain('(deny file-read* file-map-executable file-write*');
   });
 
-  test('profile default keeps git access denied', () => {
+  test('profile default admits Workspace git metadata', () => {
     const profile = generateSandboxProfile(workspace);
-    expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
-    expect(profile).toContain('[gG][iI][tT](/.*)?$');
+    expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
   });
 
-  test('brokered revision profile keeps metadata read and write in the same deny rule', () => {
+  test('brokered revision does not reintroduce a Workspace metadata deny', () => {
     const profile = generateSandboxProfile(workspace, { gitAccess: 'deny' });
     const metadata = seatbeltSubpath(join(canonicalWorkspace, '.git'));
-    const metadataIndex = profile.indexOf(metadata);
-    expect(metadataIndex).toBeGreaterThan(0);
-    const denyPrefix = profile.slice(Math.max(0, metadataIndex - 300), metadataIndex);
-    expect(denyPrefix).toContain('(deny file-read* file-map-executable file-write*');
+    expect(profile).not.toContain(metadata);
   });
 
   test('git access allows CLT developer dir and user git config reads', () => {
@@ -189,20 +198,13 @@ describe('sandbox profile generation', () => {
     }
   });
 
-  (process.platform === 'win32' ? test.skip : test)(
-    'git access exempts .git but keeps other protected paths denied',
-    () => {
-      const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
-      // .git directory is readable/writable so git commands can operate.
-      expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
-      expect(profile).not.toContain('[gG][iI][tT](/.*)');
-      // Other protected identities stay denied: shell profiles, credentials, …
-      expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.ssh')));
-      expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.git-credentials')));
-      expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
-      expect(profile).toContain('(deny file-read* file-map-executable file-write*');
-    },
-  );
+  test('git config opt-in does not change complete Workspace admission', () => {
+    const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
+    for (const path of ['.git', '.ssh', '.git-credentials', '.env']) {
+      expect(profile).not.toContain(seatbeltString(join(canonicalWorkspace, path)));
+    }
+    expect(profile).not.toContain('(deny file-read* file-map-executable file-write*');
+  });
 
   test('read-only scope omits workspace from writable filters', () => {
     const profile = generateSandboxProfile(workspace, { filesystemScope: 'read_only' });
@@ -227,14 +229,32 @@ describe('sandbox profile generation', () => {
 describe('approved filesystem execution lane', () => {
   test('keeps bubblewrap namespaces while projecting the approved filesystem', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'approved-bwrap-filesystem-'));
+    const controlBase = mkdtempSync(join(tmpdir(), 'approved-bwrap-control-'));
     try {
-      const args = generateBwrapArgs(workspace, { filesystemScope: 'full_access' });
+      writeFileSync(join(workspace, '.env'), 'workspace-owned');
+      const args = generateBwrapArgs(workspace, {
+        filesystemScope: 'full_access',
+        sandboxControlBase: controlBase,
+      });
       expect(args).toContain('--unshare-pid');
       expect(args).toContain('--unshare-net');
       expect(args).toEqual(expect.arrayContaining(['--bind', '/', '/']));
       expect(args).not.toEqual(expect.arrayContaining(['--tmpfs', '/tmp']));
+      const canonicalControlBase = realpathSync.native(controlBase);
+      expect(args).toEqual(
+        expect.arrayContaining([
+          '--tmpfs',
+          canonicalControlBase,
+          '--remount-ro',
+          canonicalControlBase,
+        ]),
+      );
+      expect(args).not.toEqual(
+        expect.arrayContaining(['--ro-bind', '/dev/null', join(workspace, '.env')]),
+      );
     } finally {
       rmSync(workspace, { recursive: true, force: true });
+      rmSync(controlBase, { recursive: true, force: true });
     }
   });
 });
@@ -493,6 +513,11 @@ describe('policy-proven read-only executable environment', () => {
       expect(env.SSH_AUTH_SOCK).toBeUndefined();
       expect(env.RIPGREP_CONFIG_PATH).toBeUndefined();
       expect(env.OPENAI_API_KEY).toBeUndefined();
+      expect(env.GIT_CONFIG_NOSYSTEM).toBe('1');
+      expect(env.GIT_CONFIG_GLOBAL).toBe('/dev/null');
+      expect(env.GIT_OPTIONAL_LOCKS).toBe('0');
+      expect(env.GIT_CONFIG_KEY_0).toBe('core.fsmonitor');
+      expect(env.GIT_CONFIG_VALUE_0).toBe('false');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -530,6 +555,25 @@ describe('dangerous path detection', () => {
     expect(checkDangerousPaths('printf secret > .env.staging')).toBe('.env.staging');
     expect(checkDangerousPaths('cat ~/.aws/credentials')).toBe('.aws/credentials');
     expect(checkDangerousPaths('cat .npmrc')).toBe('.npmrc');
+  });
+
+  test('does not classify paths inside an admitted Workspace as dangerous', () => {
+    expect(checkDangerousPaths('cat .env', { workspace: process.cwd() })).toBeNull();
+    expect(checkDangerousPaths('printf x > .git/config', { workspace: process.cwd() })).toBeNull();
+    expect(checkDangerousPaths('ls .agents', { workspace: process.cwd() })).toBeNull();
+    expect(checkDangerousPaths('cat ~/.ssh/id_ed25519', { workspace: process.cwd() })).toBe(
+      '.ssh/id_ed25519',
+    );
+    expect(checkDangerousPaths('cat .env ~/.env', { workspace: process.cwd() })).toBe('.env');
+  });
+
+  test('classifies external search roots that can traverse sensitive identities', () => {
+    expect(checkDangerousSearchRoot(homedir(), process.cwd())).not.toBeNull();
+    if (process.platform !== 'win32') {
+      expect(checkDangerousSearchRoot('/etc', process.cwd())).not.toBeNull();
+      expect(checkDangerousSearchRoot('/tmp', process.cwd())).toBeNull();
+    }
+    expect(checkDangerousSearchRoot(process.cwd(), process.cwd())).toBeNull();
   });
 
   test('detects system config tampering', () => {
@@ -659,22 +703,17 @@ describe('bwrap argument generation', () => {
     }
   });
 
-  test('brokered revision masks a .git directory read-only after the workspace bind', () => {
+  test('does not add a special mask for Workspace git metadata', () => {
     mkdirSync(join(workspace, '.git'), { recursive: true });
-    const args = generateBwrapArgs(workspace, { gitMetadataDeny: true });
+    const args = generateBwrapArgs(workspace);
     const workspaceIndex = args.findIndex(
       (value, index) => value === '--bind' && args[index + 1] === canonicalWorkspace,
     );
     const gitIndex = args.findIndex(
       (value, index) => value === '--tmpfs' && args[index + 1] === join(canonicalWorkspace, '.git'),
     );
-    expect(gitIndex).toBeGreaterThan(workspaceIndex);
-    expect(args.slice(gitIndex, gitIndex + 4)).toEqual([
-      '--tmpfs',
-      join(canonicalWorkspace, '.git'),
-      '--remount-ro',
-      join(canonicalWorkspace, '.git'),
-    ]);
+    expect(workspaceIndex).toBeGreaterThanOrEqual(0);
+    expect(gitIndex).toBe(-1);
   });
 
   test('includes essential isolation flags', () => {

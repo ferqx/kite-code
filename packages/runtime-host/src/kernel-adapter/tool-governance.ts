@@ -4,7 +4,6 @@ import {
   authorizationCommandGrantKey,
   authorizeToolGovernance,
   createToolGovernanceCommandDigest,
-  isValidToolGovernanceFacts,
   TOOL_GOVERNANCE_FACTS_SCHEMA_,
   type ToolGovernanceAdmissionFacts,
   type ToolGovernanceApprovalFact,
@@ -16,6 +15,7 @@ import {
   type ToolGovernanceNestedSkillFact,
   type ToolGovernancePolicyFact,
   type ToolGovernanceSameCommandGrantFact,
+  toolGovernanceFactsInvalidReason,
 } from '@kite/agent-kernel';
 import {
   CAPABILITY_POLICY_COMPILATION_SCHEMA_,
@@ -240,8 +240,12 @@ function projectStateFacts<TArguments extends RuntimeJsonValue>(
       ...(governance.dynamicMcp ? { dynamicMcp: dynamicMcpFact(governance) } : {}),
       ...(governance.nestedSkill ? { nestedSkill: nestedSkillFact(governance) } : {}),
     };
-    if (!isValidToolGovernanceFacts(facts)) {
-      return failure('kernel_facts_invalid', 'Projected State 25 governance facts are invalid.');
+    const invalidReason = toolGovernanceFactsInvalidReason(facts);
+    if (invalidReason !== undefined) {
+      return failure(
+        'kernel_facts_invalid',
+        `Projected State 25 governance facts are invalid: ${invalidReason}.`,
+      );
     }
     return success(deepFreeze(facts));
   } catch {
@@ -416,7 +420,6 @@ function policyFact(
     risk: policy.risk,
     ...(policy.effects ? { effects: { ...policy.effects } } : {}),
     reason: policy.reason,
-    userVisibleSummary: policy.userVisibleSummary,
     expectedEffects: [...policy.expectedEffects],
     ...(policy.requiresSandbox === undefined ? {} : { requiresSandbox: policy.requiresSandbox }),
     ...(policy.phaseConstraint === undefined ? {} : { phaseConstraint: policy.phaseConstraint }),

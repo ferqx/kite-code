@@ -160,5 +160,25 @@ export function buildPolicyProvenReadOnlyEnv(
     ...options,
     pathValue: options.pathValue ?? source.PATH,
   });
+  Object.assign(env, policyProvenReadOnlyGitEnvironment(platform));
   return env;
+}
+
+/** Environment ceiling shared by POSIX and Windows policy-proven Git reads. */
+export function policyProvenReadOnlyGitEnvironment(
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
+  return {
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_PAGER: 'cat',
+    GIT_EXTERNAL_DIFF: '',
+    // Command-scope config is applied after repository config and disables
+    // the helper that `git status` can otherwise invoke from a checkout.
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'core.fsmonitor',
+    GIT_CONFIG_VALUE_0: 'false',
+  };
 }

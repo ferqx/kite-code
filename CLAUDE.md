@@ -6,7 +6,7 @@
 
 项目事实的权威顺序为：用户直接指令、源码与测试、`docs/active/` 当前规则、已接受的 ADR、其他历史或设计文档。
 
-1. `src/core/` 不得依赖 `src/app/` 或 TUI 展示类型。
+1. `packages/agent-kernel/` 不得依赖其他 workspace、I/O runtime 或 TUI 展示类型。
 2. 当前行为发生变化时，必须在同一改动中更新相关 `docs/active/` 文档。
 3. `docs/design/`、`docs/space/plans/`、`docs/space/execution/completed/` 和 `docs/deprecated/` 不是当前实现依据。
 4. 架构决策需要新增 ADR，不得改写已接受 ADR 的历史结论。
@@ -39,21 +39,24 @@ TypeScript 发生变化时还必须运行 `bun run typecheck` 和相关测试。
 ## 架构
 
 ```text
-src/protocol/  跨层稳定契约
-src/core/      Agent、Runtime、Capability、Policy、Execution、Verification
-src/app/       CLI/TUI 输入输出适配
+packages/runtime-contract/       client-facing in-process contract
+packages/runtime-spi/            provider-neutral ports
+packages/agent-kernel/           state/event/reducer/scheduler authority
+packages/runtime-host/           lifecycle、execution 与 storage ports
+packages/builtin-runtime/        builtin domain modules
+packages/runtime-storage-sqlite/ SQLite storage adapter
+apps/kite/                       concrete composition、CLI 与 TUI
 ```
 
 核心入口：
 
-- `src/core/runtime/kernel.ts`：状态转换权威；
-- `src/core/runtime/scheduler.ts`：State → Effect；
-- `src/core/runtime/reducer.ts`：Event → State；
-- `src/core/runtime/agent.ts`：模型循环；
-- `src/core/controllers/tool-controller.ts`：统一执行网关；
-- `src/core/capabilities/`：Catalog、Binding、Search；
-- `src/core/verification/`：分级验收；
-- `src/core/runtime/store.ts`：SQLite Event Store 与 Snapshot。
+- `packages/agent-kernel/src/kernel.ts`：状态转换权威；
+- `packages/agent-kernel/src/state.ts`、`events.ts` 与 `reducer.ts`：Kernel persisted projection；
+- `packages/runtime-host/src/execution/`：通用 Tool Pipeline lifecycle；
+- `packages/builtin-runtime/src/`：Capability catalog 与领域执行模块；
+- `packages/runtime-storage-sqlite/src/adapter.ts`：SQLite 生命周期与持久化 adapter；
+- `apps/kite/src/bootstrap.ts`：唯一 concrete composition root；
+- `apps/kite/src/cli/` 与 `apps/kite/src/tui/`：CLI/TUI 输入输出适配。
 
 ## 不变量
 

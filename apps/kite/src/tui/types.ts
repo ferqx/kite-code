@@ -2,6 +2,7 @@ import type {
   AgentPhase,
   AgentPlan,
   AuthorizationMode,
+  SubAgentFailureDiagnostic,
   SubAgentRole,
   ToolApprovalPayload,
   UserInputPayload,
@@ -188,15 +189,25 @@ export type OutputBlock =
       expanded?: boolean;
       cacheHitTokens?: number;
       cacheMissTokens?: number;
+      /** Content-free failure classification safe for the visible diagnostic. */
+      failureDiagnostic?: SubAgentFailureDiagnostic;
       /** Runtime approval phase for a suspended child. This distinguishes a
        * deferred sibling from an active automatic review and a human prompt. */
-      approvalState?: 'queued' | 'auto_reviewing' | 'awaiting_user';
+      approvalState?:
+        | 'queued'
+        | 'queued_auto_review'
+        | 'queued_user_approval'
+        | 'auto_reviewing'
+        | 'awaiting_user';
       /** Parent task tool call that owns the persisted child continuation. */
       parentToolCallId?: string;
       /** 子 agent 正在等待工具审批 / Sub-agent is awaiting tool approval */
       awaitingApproval?: boolean;
       /** 正在等待审批的步骤索引，用于 tool_result 回来后标记 rejected / Step index being approved, used to mark as rejected on tool_result */
       approvingStepIndex?: number;
+      /** Local UI acknowledgement for the current approval. It suppresses a
+       * late duplicate suspension until child progress confirms continuation. */
+      approvalAcknowledged?: boolean;
       /** TUI-only identity for children that started as one concurrent sibling batch. */
       concurrencyGroupId?: string;
     };

@@ -12,7 +12,6 @@ import {
   normalizedModelResponseToAIMessage,
 } from './invocation-gateway';
 import type { AIMessage, BaseMessage } from './messages';
-import type { ProviderDataAdmissionGate } from './provider-data-admission';
 import { compileModelSurface } from './surface-compiler';
 
 /**
@@ -47,7 +46,6 @@ export interface BuiltinSubagentModelStepInput<
   readonly provenance: BuiltinSubagentModelStepProvenance;
   readonly maxOutputTokens?: number;
   readonly estimatedInputTokens: number;
-  readonly providerDataAdmission: ProviderDataAdmissionGate;
   readonly parentReservationId?: string;
   readonly signal?: AbortSignal;
 }
@@ -112,7 +110,6 @@ export async function executeBuiltinSubagentModelStep<
         input.provenance.capabilityBindings,
       ),
     },
-    providerDataAdmission: input.providerDataAdmission,
     resourceKind: 'model',
     ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
     signal: input.signal,

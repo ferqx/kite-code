@@ -30,10 +30,6 @@ import {
 } from '#app/bootstrap/runtime/runtime-effect-dependencies';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
-import {
-  createApprovedProviderDataAdmission,
-  ProviderDataAdmissionError,
-} from '#app/config/provider-data-admission';
 import type { SessionLoggingMode, SessionLoggingPolicy } from '#app/config/session-logging-policy';
 import { resolveSessionLoggingPolicy } from '#app/config/session-logging-policy';
 import {
@@ -154,8 +150,6 @@ export interface RuntimeTurnInput {
   config: AgentConfig;
   /** App-selected concrete Model binding; Core never constructs a Provider model. */
   model: SupportedChatModel;
-  /** Immutable App policy input; tests must inject an explicit fixture authority. */
-  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGate;
   shellExecutor?: ShellExecutor;
   gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
@@ -259,9 +253,6 @@ export async function* executeRuntimeTurn(
   let runDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
   let deadlineCancellationEvents: RuntimeEvent[] = [];
   let deadlineEventsYielded = false;
-  let deadlineTriggered = false;
-  let deadlineTerminalYielded = false;
-  let cancellationIncomplete = false;
   let externalCancellationEvents: RuntimeEvent[] = [];
   let externalCancellationEventsYielded = false;
   if (input.abortExecution && !input.signal) {
@@ -273,9 +264,6 @@ export async function* executeRuntimeTurn(
     if (input.abortExecution) input.abortExecution(reason);
     else localExecutionController!.abort(reason);
   };
-  const providerDataAdmission =
-    input.providerDataAdmission ??
-    createApprovedProviderDataAdmission(input.config, new Date(), sessionLoggingContentInspector);
   const cancelRun = (
     reason = 'Cancelled by user.',
     cause: 'user' | 'error' = 'user',
@@ -289,6 +277,38 @@ export async function* executeRuntimeTurn(
     for (const event of canonicalEvents) collector.recordRuntime(event);
     abortExecution(reason);
     return canonicalEvents;
+  };
+  const cancelForDeadline = (): RuntimeEvent[] => {
+    const cancellationEvents = cancelRun('Runtime deadline exceeded.', 'error');
+    if (cancellationEvents.length === 0) return [];
+    const hasUnknownEffects =
+      kernel.getState().resourceBudget.status === 'active' &&
+      Object.values(kernel.getState().resourceBudget.reservations).some(
+        (reservation) => reservation.state === 'unknown',
+      );
+    const failure = recordRuntimeFailure({
+      kind: hasUnknownEffects ? 'cancel_incomplete' : 'budget_exceeded',
+      message: hasUnknownEffects
+        ? 'Runtime deadline exceeded before cleanup could be confirmed.'
+        : 'Runtime deadline exceeded.',
+      phase: 'building',
+      turnId: kernel.getState().turn.turnId,
+      userVisible: true,
+    });
+    const errorEvent: RuntimeEvent = {
+      type: 'run.error',
+      message: failure.message,
+      recoverable: false,
+      failure: failure.failure,
+      turnId: failure.turnId,
+      outcome: failedTerminalOutcome(failure.failure, {
+        knownExternalEffects: hasUnknownEffects ? 'unknown' : 'known',
+      }),
+    };
+    kernel.processEvent(errorEvent);
+    const canonicalErrorEvents = [...kernel.getLastAppliedEvents()];
+    for (const event of canonicalErrorEvents) collector.recordRuntime(event);
+    return [...cancellationEvents, ...canonicalErrorEvents];
   };
   const externalAbortReason = (): string => {
     const reason = input.signal?.reason;
@@ -304,52 +324,66 @@ export async function* executeRuntimeTurn(
   };
   if (input.signal?.aborted) forwardExternalAbort();
   else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
-  const scheduleRunDeadline = (deadlineAt: string) => {
-    if (!getFeatureFlags(input.config).boundedCancellation || runDeadlineTimer) return;
+  const scheduleRunDeadline = (deadlineAt: string): void => {
+    if (runDeadlineTimer) return;
     const remainingMs = Math.max(0, Date.parse(deadlineAt) - Date.now());
     runDeadlineTimer = setTimeout(() => {
       if (runCancelled || kernel.getState().turn.status !== 'active') return;
-      deadlineTriggered = true;
-      deadlineCancellationEvents = cancelRun(
-        'Runtime deadline exceeded; bounded cancellation started.',
-        'error',
-      );
+      deadlineCancellationEvents = cancelForDeadline();
     }, remainingMs);
-  };
-  const createDeadlineTerminalEvent = (): RuntimeEvent | undefined => {
-    if (!deadlineTriggered || deadlineTerminalYielded) return undefined;
-    deadlineTerminalYielded = true;
-    const unknownReservation =
-      kernel.getState().resourceBudget.status === 'active' &&
-      Object.values(kernel.getState().resourceBudget.reservations).some(
-        (reservation) => reservation.state === 'unknown',
-      );
-    const failure = recordRuntimeFailure({
-      kind: cancellationIncomplete ? 'cancel_incomplete' : 'budget_exceeded',
-      message: cancellationIncomplete
-        ? 'Runtime deadline exceeded and descendant cleanup could not be confirmed.'
-        : 'Runtime deadline exceeded and bounded cancellation completed.',
-      phase: 'building',
-      turnId: kernel.getState().turn.turnId,
-      userVisible: true,
-    });
-    const conformance = resolveFailureMode(
-      cancellationIncomplete ? 'cancel_timeout' : 'budget_exhausted',
-      {
-        knownExternalEffects: cancellationIncomplete || unknownReservation ? 'unknown' : 'known',
-      },
-    );
-    return {
-      type: 'run.error',
-      message: failure.message,
-      recoverable: false,
-      failure: failure.failure,
-      turnId: failure.turnId,
-      outcome: conformance.terminalOutcome!,
-    };
   };
   input.registerRunCancellation?.((reason) => cancelRun(reason));
   try {
+    if (externalCancellationEvents.length > 0) {
+      externalCancellationEventsYielded = true;
+      yield* externalCancellationEvents;
+      return;
+    }
+    if (getFeatureFlags(input.config).resourceBudget) {
+      if (kernel.getState().resourceBudget.status !== 'unconfigured') {
+        if (kernel.getState().resourceBudget.status !== 'active') {
+          const failure = recordRuntimeFailure({
+            kind: 'mandatory_policy_unavailable',
+            message:
+              'ResourceBudget cannot start from a legacy snapshot; start a new production run.',
+            phase: 'building',
+            turnId: kernel.getState().turn.turnId,
+            userVisible: true,
+          });
+          const event: RuntimeEvent = {
+            type: 'run.error',
+            message: failure.message,
+            recoverable: false,
+            failure: failure.failure,
+            turnId: failure.turnId,
+            outcome: failedTerminalOutcome(failure.failure, {
+              knownExternalEffects: 'none',
+            }),
+          };
+          kernel.processEvent(event);
+          collector.recordRuntime(event);
+          yield event;
+          return;
+        }
+      } else {
+        const startedAt = new Date();
+        const event: RuntimeEvent = {
+          type: 'resource_budget.configured',
+          runId: randomUUID(),
+          startedAt: startedAt.toISOString(),
+          deadlineAt: new Date(
+            startedAt.getTime() + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs,
+          ).toISOString(),
+          budget: LIMITED_RESOURCE_BUDGET_,
+        };
+        kernel.processEvent(event);
+        collector.recordRuntime(event);
+        scheduleRunDeadline(event.deadlineAt);
+        yield event;
+      }
+    }
+    const activeBudget = kernel.getState().resourceBudget;
+    if (activeBudget.status === 'active') scheduleRunDeadline(activeBudget.deadlineAt);
     if (hasPendingSubagentProviderRecovery(kernel.getState())) {
       const reconcilePendingSubagents =
         'reconcilePendingSubagents' in modelInvocationRuntime
@@ -430,70 +464,6 @@ export async function* executeRuntimeTurn(
         yield event;
         return;
       }
-    }
-    if (externalCancellationEvents.length > 0) {
-      externalCancellationEventsYielded = true;
-      yield* externalCancellationEvents;
-      return;
-    }
-    if (providerDataAdmission) {
-      const readiness = providerDataAdmission([], 'primary_model');
-      const event: RuntimeEvent = {
-        type: 'provider.admission_status',
-        status: readiness.admitted ? 'ready' : 'blocked',
-        reason: readiness.reason,
-        ...(readiness.admissionRevision ? { admissionRevision: readiness.admissionRevision } : {}),
-      };
-      kernel.processEvent(event);
-      collector.recordRuntime(event);
-      yield event;
-    }
-    if (getFeatureFlags(input.config).resourceBudget) {
-      if (kernel.getState().resourceBudget.status !== 'unconfigured') {
-        if (kernel.getState().resourceBudget.status !== 'active') {
-          const failure = recordRuntimeFailure({
-            kind: 'mandatory_policy_unavailable',
-            message:
-              'ResourceBudget cannot start from a legacy snapshot; start a new production run.',
-            phase: 'building',
-            turnId: kernel.getState().turn.turnId,
-            userVisible: true,
-          });
-          const event: RuntimeEvent = {
-            type: 'run.error',
-            message: failure.message,
-            recoverable: false,
-            failure: failure.failure,
-            turnId: failure.turnId,
-            outcome: failedTerminalOutcome(failure.failure, {
-              knownExternalEffects: 'none',
-            }),
-          };
-          kernel.processEvent(event);
-          collector.recordRuntime(event);
-          yield event;
-          return;
-        }
-      } else {
-        const startedAt = new Date();
-        const event: RuntimeEvent = {
-          type: 'resource_budget.configured',
-          runId: randomUUID(),
-          startedAt: startedAt.toISOString(),
-          deadlineAt: new Date(
-            startedAt.getTime() + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs,
-          ).toISOString(),
-          budget: LIMITED_RESOURCE_BUDGET_,
-        };
-        kernel.processEvent(event);
-        collector.recordRuntime(event);
-        yield event;
-        scheduleRunDeadline(event.deadlineAt);
-      }
-    }
-    const activeBudget = kernel.getState().resourceBudget;
-    if (activeBudget.status === 'active') {
-      scheduleRunDeadline(activeBudget.deadlineAt);
     }
     const resumedInteraction =
       getActiveTask(kernel.getState()) && interactionBelongsToCurrentWork(kernel.getState());
@@ -650,7 +620,6 @@ export async function* executeRuntimeTurn(
             sessionId: input.threadId,
           })
         : undefined,
-      providerDataAdmission,
       modelInvocationGateway,
       modelEffectCoordinator: modelInvocationRuntime.modelEffects,
       capabilityArtifactStore:
@@ -697,7 +666,6 @@ export async function* executeRuntimeTurn(
               skills: input.skills,
               skillOptions: input.skillOptions,
               signal: executionSignal,
-              providerDataAdmission,
               subagentEventSink: () => {},
             })
           : effect,
@@ -715,12 +683,6 @@ export async function* executeRuntimeTurn(
         runCancelled = true;
         exitStatus = 'aborted';
         abortReasonAfterProjection = event.reason;
-      }
-      if (
-        event.type === 'runtime.cancellation_diagnostic' &&
-        event.failure.kind === 'cancel_incomplete'
-      ) {
-        cancellationIncomplete = true;
       }
       // Task lifecycle facts are durable RuntimeEvents, but remain internal to
       // the legacy public stream; UI projections are driven by planning/tool
@@ -742,12 +704,6 @@ export async function* executeRuntimeTurn(
       deadlineEventsYielded = true;
       yield* deadlineCancellationEvents;
     }
-    const deadlineTerminal = createDeadlineTerminalEvent();
-    if (deadlineTerminal) {
-      kernel.processEvent(deadlineTerminal);
-      collector.recordRuntime(deadlineTerminal);
-      yield deadlineTerminal;
-    }
   } catch (error) {
     if (executionSignal.aborted) {
       exitStatus = 'aborted';
@@ -759,27 +715,16 @@ export async function* executeRuntimeTurn(
         deadlineEventsYielded = true;
         yield* deadlineCancellationEvents;
       }
-      const deadlineTerminal = createDeadlineTerminalEvent();
-      if (deadlineTerminal) {
-        kernel.processEvent(deadlineTerminal);
-        collector.recordRuntime(deadlineTerminal);
-        yield deadlineTerminal;
-      }
       return;
     }
     exitStatus = 'fatal';
-    const providerPolicyUnavailable =
-      error instanceof ProviderDataAdmissionError &&
-      error.decision.reason === 'mandatory_policy_unavailable';
     const knownExternalEffects =
-      error instanceof ProviderDataAdmissionError
-        ? error.knownExternalEffects
-        : kernel.getState().resourceBudget.status === 'active' &&
-            Object.values(kernel.getState().resourceBudget.reservations).some(
-              (reservation) => reservation.state === 'unknown',
-            )
-          ? 'unknown'
-          : 'known';
+      kernel.getState().resourceBudget.status === 'active' &&
+      Object.values(kernel.getState().resourceBudget.reservations).some(
+        (reservation) => reservation.state === 'unknown',
+      )
+        ? 'unknown'
+        : 'known';
     const modelFailureMode = exhaustedModelFailureMode(error);
     const fatalModel = fatalModelFailure(error);
     const modelFailureResolution = modelFailureMode
@@ -789,16 +734,7 @@ export async function* executeRuntimeTurn(
         })
       : undefined;
     const failure = recordRuntimeFailure({
-      kind:
-        error instanceof ProviderDataAdmissionError
-          ? providerPolicyUnavailable
-            ? 'mandatory_policy_unavailable'
-            : 'policy_denied'
-          : modelFailureMode
-            ? 'model_retry_exhausted'
-            : fatalModel
-              ? fatalModel.kind
-              : 'unknown',
+      kind: modelFailureMode ? 'model_retry_exhausted' : fatalModel ? fatalModel.kind : 'unknown',
       message: fatalModel?.message ?? (error instanceof Error ? error.message : String(error)),
       phase: 'building',
       turnId: kernel.getState().turn.turnId,

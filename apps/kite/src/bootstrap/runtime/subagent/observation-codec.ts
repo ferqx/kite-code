@@ -17,6 +17,23 @@ const RESOURCE_ADMISSION_FAILURE_REASONS_ = new Set([
   'tool_concurrency_saturated',
   'shell_concurrency_saturated',
 ]);
+const SUBAGENT_FAILURE_CODES_ = new Set([
+  'aborted',
+  'timed_out',
+  'invalid_input',
+  'consumer_protocol',
+  'model_step_failed',
+  'internal_error',
+]);
+const SUBAGENT_FAILURE_STAGES_ = new Set([
+  'initialization',
+  'next_round_preparation',
+  'model_step',
+  'model_response_validation',
+  'tool_consumption',
+  'transcript_validation',
+  'terminal_projection',
+]);
 
 /** Parent-only decoder for the bounded Provider observation envelope. */
 export function subagentResultFromObservation(
@@ -42,6 +59,7 @@ export function subagentResultFromObservation(
     'error',
     'executionJournal',
     'exhaustedFingerprints',
+    'failureDiagnostic',
     'ok',
     'resourceAdmissionFailure',
     'steps',
@@ -68,6 +86,7 @@ export function subagentResultFromObservation(
       payload.terminalStatus as null | string,
     ) ||
     !(payload.error === null || typeof payload.error === 'string') ||
+    !validFailureDiagnostic(payload.failureDiagnostic) ||
     !(
       payload.resourceAdmissionFailure === null ||
       (isRecord(payload.resourceAdmissionFailure) &&
@@ -130,6 +149,16 @@ export function subagentResultFromObservation(
   if (payload.resourceAdmissionFailure !== null && observation.status !== 'failed') {
     throw new Error('Subagent Provider resource terminal is inconsistent.');
   }
+  if (
+    payload.failureDiagnostic !== null &&
+    observation.status !== 'failed' &&
+    observation.status !== 'cancelled'
+  ) {
+    throw new Error('Subagent Provider failure diagnostic is inconsistent.');
+  }
+  const failureDiagnostic = validFailureDiagnostic(payload.failureDiagnostic)
+    ? payload.failureDiagnostic
+    : null;
   return {
     ok: payload.ok,
     summary: payload.summary as string,
@@ -139,6 +168,7 @@ export function subagentResultFromObservation(
       ? { terminalStatus: payload.terminalStatus as SubAgentResult['terminalStatus'] }
       : {}),
     ...(typeof payload.error === 'string' ? { error: payload.error } : {}),
+    ...(failureDiagnostic ? { failureDiagnostic } : {}),
     ...(isRecord(payload.resourceAdmissionFailure)
       ? {
           resourceAdmissionFailure: payload.resourceAdmissionFailure as NonNullable<
@@ -175,6 +205,27 @@ export function subagentResultFromObservation(
         }
       : {}),
   };
+}
+
+function validFailureDiagnostic(
+  value: unknown,
+): value is NonNullable<SubAgentResult['failureDiagnostic']> | null {
+  if (value === null) return true;
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value).sort();
+  const expectedKeys = [
+    'code',
+    'stage',
+    ...(typeof value.modelInvocationId === 'string' ? ['modelInvocationId'] : []),
+  ].sort();
+  return (
+    JSON.stringify(keys) === JSON.stringify(expectedKeys) &&
+    SUBAGENT_FAILURE_CODES_.has(value.code as string) &&
+    SUBAGENT_FAILURE_STAGES_.has(value.stage as string) &&
+    value.admissionReason === undefined &&
+    (value.modelInvocationId === undefined ||
+      (typeof value.modelInvocationId === 'string' && value.modelInvocationId.length > 0))
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

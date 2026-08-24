@@ -30,7 +30,7 @@ export const RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS: Readonly<
     'fault-soak-runtime-budget.test.ts',
   ],
   subagent_cancel_recovery: ['cancel-resume.test.ts'],
-  model_transient_stream: ['agent-deadline.test.ts'],
+  model_transient_stream: ['model-invoke.test.ts'],
   mcp_churn: ['mcp-supervisor.test.ts'],
   runtime_sigkill_recovery: ['fault-injection.test.ts'],
   storage_and_logger_faults: ['fault-injection.test.ts'],

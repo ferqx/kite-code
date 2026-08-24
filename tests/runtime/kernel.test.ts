@@ -335,7 +335,9 @@ describe('AgentKernel durability', () => {
         occurredAt: '2026-08-15T00:00:00.000Z',
       });
 
-      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openPreflightedStore(storePath, threadId)).toThrow(
+        'Runtime format is incompatible',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -364,7 +366,9 @@ describe('AgentKernel durability', () => {
         occurredAt: '2026-08-15T00:00:00.000Z',
       });
 
-      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openPreflightedStore(storePath, threadId)).toThrow(
+        'Runtime format is incompatible',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -438,7 +442,9 @@ describe('AgentKernel durability', () => {
         Reflect.deleteProperty(state, 'toolRecovery');
       });
 
-      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openPreflightedStore(storePath, threadId)).toThrow(
+        'Runtime format is incompatible',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -462,7 +468,9 @@ describe('AgentKernel durability', () => {
         Reflect.deleteProperty(state, 'modelInvocations');
       });
 
-      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openPreflightedStore(storePath, threadId)).toThrow(
+        'Runtime format is incompatible',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -518,7 +526,9 @@ describe('AgentKernel durability', () => {
         store.close();
         mutateStoredStateForKernelFixture(storePath, threadId, mutate);
 
-        expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
+        expect(() => openPreflightedStore(storePath, threadId)).toThrow(
+          'Runtime format is incompatible',
+        );
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -556,7 +566,9 @@ describe('AgentKernel durability', () => {
         } as unknown as (typeof storedState.suspendedSubagents)[string];
       });
 
-      expect(() => openStateStoreForTest(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openPreflightedStore(storePath, threadId)).toThrow(
+        'Runtime format is incompatible',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2125,13 +2137,14 @@ test('a stale concurrent shell lease forwards ephemeral progress without advanci
   kernel.close();
 });
 
-test('production executor overlaps tools from a scheduler read batch', async () => {
+test('production executor overlaps full-authorized shell siblings', async () => {
   const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'parallel-read-executor',
     userId: 'u',
     workspace: '/workspace',
   });
+  state.authorization.mode = 'full_access';
   for (const [toolCallId, command] of [
     ['read-a', 'pwd'],
     ['read-b', 'ls -la'],
@@ -2226,13 +2239,14 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   expect(terminalEvents).toHaveLength(0);
 });
 
-test('production executor all-settled waits for a sibling when another adapter throws', async () => {
+test('production executor all-settled waits for a full-authorized sibling when another adapter throws', async () => {
   const state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'all-settled-production-executor',
     userId: 'u',
     workspace: '/workspace',
   });
+  state.authorization.mode = 'full_access';
   for (const [toolCallId, command] of [
     ['throwing', 'pwd'],
     ['slow', 'ls'],
@@ -2544,6 +2558,7 @@ test('runStateRuntimeLoop drops ephemeral model deltas from a stale effect lease
       if (calls === 1) {
         kernel.processEvent({
           type: 'model.retry',
+          invocationId: 'external-model-invocation',
           attempt: 1,
           maxAttempts: 5,
           error: 'external revision change',

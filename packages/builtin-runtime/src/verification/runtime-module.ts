@@ -37,7 +37,6 @@ const EXECUTION_MECHANISMS_: Readonly<
   'model:primary': 'model',
   'model:compaction': 'model',
   'model:auto_review': 'model',
-  'model:verification_review': 'model',
   'model:subagent': 'model',
 });
 

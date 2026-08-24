@@ -171,6 +171,7 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'provider.admission_satisfied',
   'provider.admission_waived',
   'provider.admission_cancelled',
+  // Decode-only legacy model-admission telemetry; no current producer emits it.
   'authorization.changed',
   'interaction_mode.changed',
   'auto_review.requested',

@@ -6,10 +6,8 @@ import {
   compileBuiltinDynamicMcpPolicy,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
-  hasBrokeredGitExecutableToken,
 } from '@kite/builtin-runtime';
 import {
-  BROKERED_GIT_FEATURE_REVISION_,
   type CapabilityPolicyCompilation,
   type CapabilityPolicyContext,
   createRuntimeModuleRegistry,
@@ -144,9 +142,9 @@ describe('Builtin operation policy compiler', () => {
     const result = projection();
     const model = result.entries.filter((entry) => entry.visibility === 'model');
     const internal = result.entries.filter((entry) => entry.visibility === 'internal');
-    expect(result.entries).toHaveLength(29);
+    expect(result.entries).toHaveLength(28);
     expect(model).toHaveLength(20);
-    expect(internal).toHaveLength(9);
+    expect(internal).toHaveLength(8);
     expect(model.every((entry) => typeof entry.compilePolicy === 'function')).toBe(true);
     expect(internal.every((entry) => !('compilePolicy' in entry))).toBe(true);
     expect(internal.find((entry) => entry.operationId === 'mcp:dynamic_tool')).toBeDefined();
@@ -172,129 +170,107 @@ describe('Builtin operation policy compiler', () => {
     expect(facts.sameCommandMayBypassApproval).toBe(false);
   });
 
-  test('preserves the shell classifier and protected-path matrix', () => {
-    expect(compile('shell_execute', { command: 'cat package.json' })).toMatchObject({
-      decision: 'allow',
-      risk: 'read',
-      requiresApproval: false,
-    });
-    expect(compile('shell_execute', { command: 'cat /tmp/external.txt' })).toMatchObject({
-      decision: 'ask',
-      risk: 'read',
-      effects: { externalRead: true },
-    });
-    expect(compile('shell_execute', { command: 'bun test' })).toMatchObject({
-      decision: 'ask',
-      risk: 'execute_code',
-      fullAccessMayBypassApproval: true,
-      sameCommandMayBypassApproval: true,
-    });
-    expect(compile('shell_execute', { command: 'echo hi > /tmp/external.txt' })).toMatchObject({
-      decision: 'ask',
-      risk: 'write_file',
-      effects: { externalWrite: true },
-      fullAccessMayBypassApproval: true,
-      sameCommandMayBypassApproval: true,
-    });
-    expect(compile('shell_execute', { command: 'rm -rf .' })).toMatchObject({
-      decision: 'deny',
-      risk: 'destructive',
-      fullAccessMayBypassApproval: false,
-      sameCommandMayBypassApproval: false,
-    });
+  test('routes every non-critical Shell command through interaction-mode review', () => {
+    for (const command of [
+      'cat package.json',
+      'cat /tmp/external.txt',
+      'bun test',
+      'custom-build-tool --deploy candidate',
+      'echo hi > /tmp/external.txt',
+      'cp /tmp/source.txt local.txt',
+      'touch local.txt',
+      'mkdir build',
+      'echo hi > local.txt',
+      'rm -rf .',
+      'rm -rf build',
+      'rm -rf $TARGET',
+    ]) {
+      expect(compile('shell_execute', { command })).toMatchObject({
+        decision: 'ask',
+        allowed: true,
+        requiresApproval: true,
+        fullAccessMayBypassApproval: true,
+      });
+    }
     expect(compile('shell_execute', { command: 'sudo rm -rf /' })).toMatchObject({
       decision: 'deny',
       risk: 'destructive',
       fullAccessMayBypassApproval: false,
       sameCommandMayBypassApproval: false,
     });
-    expect(compile('shell_execute', { command: 'rm -rf build' })).toMatchObject({
+    expect(compile('shell_execute', { command: 'rm -f ~/.ssh/id_ed25519' })).toMatchObject({
       decision: 'ask',
-      risk: 'write_file',
-      fullAccessMayBypassApproval: false,
+      risk: 'unknown',
+      effects: { externalWrite: true, sensitiveExternalAccess: true },
+      fullAccessMayBypassApproval: true,
       sameCommandMayBypassApproval: false,
     });
     expect(compile('shell_execute', { command: 'cat ~/.ssh/id_rsa' })).toMatchObject({
-      decision: 'deny',
-      risk: 'destructive',
+      decision: 'ask',
+      effects: { externalRead: true, sensitiveExternalAccess: true },
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(compile('shell_execute', { command: 'echo 127.0.0.1 x >> /etc/hosts' })).toMatchObject({
+      decision: 'ask',
+      risk: 'unknown',
+      effects: { externalWrite: true, sensitiveExternalAccess: true },
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: false,
     });
     expect(
       compile('shell_execute', { command: 'bun test' }, { ...CONTEXT, phase: 'planning' }),
     ).toMatchObject({ decision: 'deny', phaseConstraint: 'planning' });
   });
 
-  test('owns the conservative brokered Git token corpus and avoids dotted-path substrings', () => {
+  test('routes Shell Git through the same mode review without a subcommand allowlist', () => {
     for (const command of [
-      '/usr/bin/git status --short',
-      'sh -c "git diff -- safe.txt"',
-      "python -c \"import subprocess; subprocess.run(['git','status'])\"",
-      'env PATH=/usr/bin command git.exe status',
-      'C:\\Tools\\Git\\bin\\git.exe status',
-    ]) {
-      expect(hasBrokeredGitExecutableToken(command)).toBe(true);
-    }
-    for (const command of [
-      'printf .git/config',
-      'digit status',
-      'legit status',
-      'gitoxide status',
-    ]) {
-      expect(hasBrokeredGitExecutableToken(command)).toBe(false);
-    }
-  });
-
-  test('denies brokered Git shell routes only for the exact feature gate and exposes neutral recovery', () => {
-    const deniedCommands = [
       'git status --short',
+      'git log --oneline -10',
       '/usr/bin/git status --short',
+      'git diff -- safe.txt',
+      'git add safe.txt',
+      'git commit -m update',
+      'git -C . status --short',
+      'git --git-dir=.git status --short',
       'sh -c "git diff -- safe.txt"',
       "python -c \"import subprocess; subprocess.run(['git','status'])\"",
       'env PATH=/usr/bin command git.exe status',
       'C:\\Tools\\Git\\bin\\git.exe status',
-    ];
-    for (const command of deniedCommands) {
+      'git workspace-alias',
+      'git push origin main',
+      'git -C ../outside status --short',
+      'git --git-dir=/tmp/repo/.git status',
+      'git config --global user.name test',
+      'git hash-object /tmp/external.txt',
+      'git diff --no-index safe.txt /tmp/external.txt',
+    ]) {
       expect(compile('shell_execute', { command })).toMatchObject({
-        decision: 'deny',
-        allowed: false,
-        requiresApproval: false,
-        recovery: {
-          disposition: 'never',
-          maximumAdditionalCalls: 0,
-          safeAutomaticRetry: false,
-          capabilityIntent: 'git_inspect',
-        },
+        decision: 'ask',
+        allowed: true,
+        requiresApproval: true,
+        fullAccessMayBypassApproval: true,
       });
+      expect(compile('shell_execute', { command }).recovery).toBeUndefined();
     }
-    const denied = compile('shell_execute', { command: 'git status --short' });
-    expect(Object.isFrozen(denied.recovery)).toBe(true);
-
-    const disabled = compile(
-      'shell_execute',
-      { command: 'git status --short' },
-      {
-        ...CONTEXT,
-        featureFlags: { ...CONTEXT.featureFlags, brokeredGit: false },
-      },
-    );
-    expect(disabled.decision).toBe('ask');
-    expect(disabled.recovery).toBeUndefined();
-
-    const staleRevision = compile(
-      'shell_execute',
-      { command: 'git status --short' },
-      {
-        ...CONTEXT,
-        brokeredGitFeatureRevision: `${BROKERED_GIT_FEATURE_REVISION_}-stale`,
-      },
-    );
-    expect(staleRevision.decision).toBe('ask');
-    expect(staleRevision.recovery).toBeUndefined();
-
-    const dottedPath = compile('shell_execute', { command: 'printf .git/config' });
-    expect(dottedPath.recovery).toBeUndefined();
+    expect(compile('shell_execute', { command: 'git -C /etc clean -fdx' })).toMatchObject({
+      decision: 'deny',
+      risk: 'destructive',
+      fullAccessMayBypassApproval: false,
+    });
+    expect(
+      compile(
+        'shell_execute',
+        { command: 'git commit -m update' },
+        { ...CONTEXT, phase: 'planning' },
+      ),
+    ).toMatchObject({
+      decision: 'deny',
+      phaseConstraint: 'planning',
+    });
   });
 
-  test('covers the fixed Core shell policy corpus without importing Core', () => {
+  test('keeps advisory Shell effects without turning them into authorization', () => {
     const corpus = [
       {
         input: { command: 'rm -rf /etc/nginx' },
@@ -304,7 +280,7 @@ describe('Builtin operation policy compiler', () => {
         input: { command: 'rm -rf /tmp/build' },
         expected: {
           decision: 'ask',
-          risk: 'write_file',
+          risk: 'unknown',
           effects: { externalWrite: true },
         },
       },
@@ -312,31 +288,31 @@ describe('Builtin operation policy compiler', () => {
         input: { command: 'bun install' },
         expected: {
           decision: 'ask',
-          risk: 'write_file',
+          risk: 'unknown',
           effects: { network: true, uncertainEffects: true },
         },
       },
       {
         input: { command: 'git push origin main' },
-        expected: { decision: 'ask', risk: 'vcs_mutation', effects: { network: true } },
+        expected: { decision: 'ask', risk: 'unknown', effects: { network: true } },
       },
       {
         input: { command: 'git commit -m update' },
-        expected: { decision: 'ask', risk: 'vcs_mutation' },
+        expected: { decision: 'ask', risk: 'unknown' },
       },
       {
         input: { command: 'node script.js' },
-        expected: { decision: 'ask', risk: 'execute_code', effects: { uncertainEffects: true } },
+        expected: { decision: 'ask', risk: 'unknown', effects: { uncertainEffects: true } },
       },
       {
         input: { command: 'rg -f /tmp/kite-patterns src' },
-        expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
+        expected: { decision: 'ask', risk: 'unknown', effects: { externalRead: true } },
       },
       {
         input: { command: 'curl -o /tmp/out https://example.com' },
         expected: {
           decision: 'ask',
-          risk: 'network',
+          risk: 'unknown',
           effects: { network: true, externalWrite: true },
         },
       },
@@ -344,7 +320,7 @@ describe('Builtin operation policy compiler', () => {
         input: { command: 'scp host:/file /tmp/out' },
         expected: {
           decision: 'ask',
-          risk: 'network',
+          risk: 'unknown',
           effects: { network: true, uncertainEffects: true },
         },
       },
@@ -361,7 +337,13 @@ describe('Builtin operation policy compiler', () => {
     for (const protectedPath of ['~/.ssh/id_ed25519', '~/.aws/credentials', '~/.env']) {
       expect(
         compile('shell_execute', { command: `cat ${protectedPath}` }, legacyShellContext),
-      ).toMatchObject({ decision: 'deny', requiresApproval: false });
+      ).toMatchObject({
+        decision: 'ask',
+        requiresApproval: true,
+        effects: { externalRead: true, sensitiveExternalAccess: true },
+        fullAccessMayBypassApproval: true,
+        sameCommandMayBypassApproval: false,
+      });
     }
   });
 
@@ -391,18 +373,46 @@ describe('Builtin operation policy compiler', () => {
     expect(compile('read_file', { path: '/tmp/external.txt' }).effects).toEqual({
       externalRead: true,
     });
+    expect(compile('read_file', { path: '~/.ssh/id_ed25519' })).toMatchObject({
+      decision: 'ask',
+      risk: 'read',
+      effects: { externalRead: true, sensitiveExternalAccess: true },
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(compile('read_file', { path: '/tmp/fixture/.env.local' })).toMatchObject({
+      decision: 'ask',
+      effects: { externalRead: true, sensitiveExternalAccess: true },
+    });
+    expect(compile('search_files', { path: '~', pattern: '*' })).toMatchObject({
+      decision: 'ask',
+      risk: 'read',
+      effects: { externalRead: true, sensitiveExternalAccess: true },
+    });
+    expect(compile('search_content', { path: '/tmp', pattern: 'needle' })).toMatchObject({
+      decision: 'ask',
+      effects: { externalRead: true, sensitiveExternalAccess: true },
+    });
     expect(compile('write_file', { path: '/tmp/external.txt', content: 'x' })).toMatchObject({
       decision: 'ask',
       risk: 'write_file',
       effects: { externalWrite: true },
       minimumApproval: 'none',
-      fullAccessMayBypassApproval: false,
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(compile('write_file', { path: '/tmp/fixture/.env.local', content: 'x' })).toMatchObject({
+      decision: 'ask',
+      risk: 'write_file',
+      effects: { externalWrite: true, sensitiveExternalAccess: true },
+      fullAccessMayBypassApproval: true,
       sameCommandMayBypassApproval: false,
     });
     expect(compile('write_file', { path: 'src/local.ts', content: 'x' })).toMatchObject({
-      decision: 'ask',
+      decision: 'allow',
+      requiresApproval: false,
       risk: 'write_file',
-      fullAccessMayBypassApproval: true,
+      fullAccessMayBypassApproval: false,
       sameCommandMayBypassApproval: false,
     });
     expect(
@@ -415,7 +425,11 @@ describe('Builtin operation policy compiler', () => {
     expect(
       compile(
         'task',
-        { subagent_type: 'code', task: 'Implement the requested feature.' },
+        {
+          name: 'Implement feature',
+          subagent_type: 'code',
+          task: 'Implement the requested feature.',
+        },
         {
           ...CONTEXT,
           phase: 'planning',
@@ -425,7 +439,11 @@ describe('Builtin operation policy compiler', () => {
     expect(
       compile(
         'task',
-        { subagent_type: 'explore', task: 'Inspect the relevant code paths.' },
+        {
+          name: 'Inspect code paths',
+          subagent_type: 'explore',
+          task: 'Inspect the relevant code paths.',
+        },
         {
           ...CONTEXT,
           phase: 'planning',
@@ -498,7 +516,11 @@ describe('Builtin operation policy compiler', () => {
       expect(
         compile(
           'task',
-          { subagent_type: role, task: 'Inspect or implement the requested task.' },
+          {
+            name: 'Inspect or implement task',
+            subagent_type: role,
+            task: 'Inspect or implement the requested task.',
+          },
           { ...CONTEXT, phase: 'planning' },
         ),
       ).toMatchObject({ decision: 'deny', phaseConstraint: 'planning' });
@@ -507,13 +529,21 @@ describe('Builtin operation policy compiler', () => {
       expect(
         compile(
           'task',
-          { subagent_type: role, task: 'Inspect the relevant code paths.' },
+          {
+            name: 'Inspect code paths',
+            subagent_type: role,
+            task: 'Inspect the relevant code paths.',
+          },
           { ...CONTEXT, phase: 'planning' },
         ),
       ).toMatchObject({ decision: 'allow', risk: 'plan' });
     }
     expect(
-      compile('task', { subagent_type: 'code', task: 'Implement the requested feature.' }),
+      compile('task', {
+        name: 'Implement feature',
+        subagent_type: 'code',
+        task: 'Implement the requested feature.',
+      }),
     ).toMatchObject({ decision: 'allow', risk: 'plan' });
   });
 });

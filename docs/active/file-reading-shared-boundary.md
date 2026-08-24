@@ -5,7 +5,7 @@
 读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
 验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime tests/sandbox`、`bun run check:core-boundary`、`bun run check:docs-impact`。
 
-相关：ADR-0111、ADR-0113、ADR-0118、ADR-0122。
+相关：ADR-0111、ADR-0113、ADR-0118、ADR-0122、ADR-0131。
 
 ## 设计目标
 
@@ -99,8 +99,10 @@ Workspace: /d/work/my-project
 禁止 production 调用方自行导入旧 `readTextContent` 或 filesystem adapter。
 
 五个 filesystem catalog entry 没有旧执行器；Builtin Runtime executor 把结构化 operation 交给 Host 注入的唯一
-Pipeline dispatcher。读取与搜索可以把 Workspace 外路径密封为 `pathScope=external_read`，不需要 approval；该 scope 只允许 observe，不能
-进入 prepare/commit。Workspace 外 mutation 只有在 Policy 已批准且 sealed operation 为
+Pipeline dispatcher。普通读取可以把 Workspace 外路径密封为 `pathScope=external_read`；敏感 external
+`read_file` 或任何 external recursive search 必须先完成模式感知授权：Full 直接授权、Auto 三态审查、其他
+模式 exact approval。该 scope 只允许 observe，
+不能进入 prepare/commit。Workspace 外 mutation 只有在 Policy 已批准且 sealed operation 为
 `pathScope=approved_external` 时可由 Provider 接受。Workspace 内 mutation 使用 `workspace_only`，Workspace
 物理位置和 `.git`/`.env`/`.ssh`/`.codex`/`.agents` 等名称不产生第二次拒绝。Provider 不从 mode、用户
 字符串或未受治理的 boolean 自行扩大 mutation scope。
@@ -146,18 +148,21 @@ Local Provider 自身提供。ancestor 与 local `.gitignore` 都在 sealed boun
 metadata 都使搜索 fail closed。
 
 文件 path evaluator 仍复用 `canonicalPathForComparison()` 解析最近存在祖先与 symlink identity，并保留
-lexical Workspace identity，但其授权语义按 operation 分开：read 对所有有效路径 allow；write 对 canonical
-Workspace 内目标 allow、对外部目标返回 prompt；execute 继续使用 release-owned protected 名称与 additional
-deny/allow。因而当前受信任 Workspace 可位于任意宿主目录，且其中 `.git`、`.env`、`.ssh`、`.codex`、
+lexical Workspace identity，但其授权语义按 operation 分开：read path evaluator 对有效路径 allow，Policy 对
+敏感 external direct read 与全部 external recursive search 追加模式感知授权；write 对 canonical
+Workspace 内目标 allow、对外部目标返回 prompt；execute 对 Workspace 内目标同样 allow，只对 Workspace 外
+identity 应用整体边界。因而当前受信任 Workspace 可位于任意宿主目录，且其中 `.git`、`.env`、`.ssh`、`.codex`、
 `.agents` 等内容可由文件工具读写；宿主祖先名称不能降低 Workspace 信任。
 
 Builtin frozen catalog 的 entry gate 与 Pipeline 仍会在异步审批后重新捕获 canonical target。外部 read 使用只读
-`external_read`，外部 mutation 必须有 exact approved invocation 才能形成 `approved_external`；已批准 mutation
-不会再因文件名或宿主祖先触发 protected-path 二次拒绝。Local Provider 不导入 Policy，只机械执行空的文件
+`external_read`，其中敏感 direct target 或 external recursive search 先由 Policy 审批；外部 mutation 必须有
+exact approved invocation 才能形成 `approved_external`。已批准 read/mutation 不会再因文件名或宿主祖先触发
+protected-path 二次拒绝。Local Provider 不导入 Policy，只机械执行空的文件
 path-name projection与 scope、canonical/no-follow identity、preimage/stale/ready/commit 约束。symlink/parent
 swap若把 `workspace_only` 目标移到 Workspace 外会拒绝；若仍解析到 Workspace 内的另一路径，则按当前受信任
-Workspace 语义继续执行并由 freshness/TOCTOU evidence 约束。Shell、MCP executable/cwd、typed Git 与原生
-sandbox 仍使用独立的 execute/process protected boundary，不受文件工具开放影响。
+Workspace 语义继续执行并由 freshness/TOCTOU evidence 约束。按 ADR-0131，Shell、MCP executable/cwd 与原生
+sandbox 的 execute/process 投影也不得以内部名称缩小 canonical Workspace；typed Git 仍保留独立 schema、
+repository hostile 检查与 capability routing，但不再依赖 Workspace `.git` 的原生名称级 deny。
 
 ### 搜索遍历的 `.gitignore` 过滤（Local Provider）
 

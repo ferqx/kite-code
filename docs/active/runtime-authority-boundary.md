@@ -39,7 +39,7 @@ Kernel 只拥有纯 Intent、Policy/approval、result acceptance 与 recovery/co
 | POSIX/Windows sandbox | Host 创建的专用 pipe/handle、PID/PGID/Job/process identity、strict bounded control frame、peer/invocation/sequence | 不传 secret，不使用 HMAC，不声称消息层 OS-user isolation |
 | MCP stdio | Host-owned wrapper/process port、固定 command/args/cwd、显式 env、bounded JSON-RPC、ready/terminal control frame | MCP initialize 不是 authority；Builtin 不直接 spawn |
 | MCP HTTP | exact endpoint/boundary、TLS、OAuth/bearer credential、bounded argument inspection | 不增加本地 content-egress permit 或伪远端签名 |
-| Model Provider | resolved route/surface identity、configured-provider admission、Provider TLS/auth、single-attempt transport | 不使用 release-pinned route allowlist 或 DataOrigin/EgressAuthority |
+| Model Provider | resolved route/surface identity、Provider TLS/auth、single-attempt transport | 不使用 release-pinned route allowlist、正文准入或 DataOrigin/EgressAuthority |
 | Credential | shared CredentialBroker、OS keyring、purpose-bound opaque handle、使用点物化 | secret 不进入 Event/State/Receipt/Notification/log |
 | Filesystem/process effect | exact path/process identity、no-follow、prepared operation、native sandbox、cleanup evidence | 不是消息 seal 问题 |
 
@@ -51,7 +51,7 @@ ready 只在 wrapper/runner 验证 control frame 且即将启动 exact child 前
 
 ## SQLite Store 与 Artifact
 
-新 Session 只使用 Runtime State、SQLite Store、`.runtime-state-store.db` 和 epoch `kite-runtime-modularization-v1-2026-08-19`。SQLite Store 当前 exact schema 是 7 tables / 2 indexes；没有 persisted authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event 是 strict canonical JSON，Snapshot 以 SHA-256 checksum 检测损坏。打开数据库会只读预检所有可达 Session/Event/Snapshot；invalid/corrupt/old-format 不能作为 fresh。
+新 Session 只使用 Runtime State、SQLite Store、`.runtime-state-store.db` 和 epoch `kite-runtime-modularization-v1-2026-08-19`。SQLite Store 当前 exact schema 是 7 tables / 2 indexes；没有 persisted authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event 是 strict canonical JSON，Snapshot 以 SHA-256 checksum 检测损坏。写入/恢复 Store 时会校验目标会话的当前 Event/Snapshot；SessionStore 的会话发现只按序解码到第一条命名候选后停止，不以全日志解码阻塞 TUI 启动，具体会话恢复仍走 session-scoped 完整校验。只读日志 reader 打开时只校验数据库 marker 与表结构，并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
 
 不匹配当前 marker 的数据库直接 fail closed。production package 不导出旧 constructor/path，也没有 try-new-catch-old、双写或 mixed-format normalization。
 

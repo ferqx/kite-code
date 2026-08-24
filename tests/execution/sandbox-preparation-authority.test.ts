@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { realpathSync } from 'node:fs';
 import {
-  BuiltinSandboxPreparationError,
   createBuiltinSandboxPreparation,
   SandboxExecutionGrantAuthority,
   type SandboxInvocationIdentity,
@@ -94,18 +93,20 @@ describe('Builtin sandbox preparation authority', () => {
     expect(Object.isFrozen(direct.preparation.resourceLimits)).toBe(true);
   });
 
-  test('rejects protected paths before any lifecycle or provider seam', () => {
+  test('does not re-deny a sensitive external path after Policy approval', () => {
     expect(() =>
       createBuiltinSandboxPreparation(preparationInput('printf x > ~/.ssh/authorized_keys')),
-    ).toThrow(BuiltinSandboxPreparationError);
-    try {
-      createBuiltinSandboxPreparation(preparationInput('cat ~/.ssh/authorized_keys'));
-    } catch (error) {
-      expect(error).toMatchObject({
-        code: 'protected_path',
-        message: expect.stringContaining('authorized_keys'),
-      });
-    }
+    ).not.toThrow();
+    expect(() =>
+      createBuiltinSandboxPreparation(preparationInput('cat ~/.ssh/authorized_keys')),
+    ).not.toThrow();
+  });
+
+  test('does not reject protected-looking paths inside the canonical Workspace', () => {
+    expect(() =>
+      createBuiltinSandboxPreparation(preparationInput('printf x > .env')),
+    ).not.toThrow();
+    expect(() => createBuiltinSandboxPreparation(preparationInput('ls .agents'))).not.toThrow();
   });
 
   test('rejects a Workspace identity mismatch before producing preparation facts', () => {

@@ -133,7 +133,9 @@ describe('Runtime filesystem evidence', () => {
       );
       database.close();
 
-      expect(() => openStateStoreForTest(databasePath)).toThrow('Runtime format is incompatible');
+      expect(() =>
+        openStateStoreForTest(databasePath, { sessionId: 'filesystem-restore-tamper' }),
+      ).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

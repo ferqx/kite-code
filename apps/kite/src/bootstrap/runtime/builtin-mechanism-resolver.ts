@@ -192,10 +192,12 @@ function shellMechanism(
   }
   const command = recordString(input.canonicalArguments, 'command');
   const readOnly = isReadOnlyShellCommand(command);
-  // Preserve the accepted State grant semantics: any durable Shell grant
-  // authorizes the already-governed network mode. App does not reinterpret
-  // the command or narrow a Builtin policy compilation a second time.
-  const networkAccess = input.grantUsed !== 'none' ? 'approved' : 'none';
+  // Authorization and scope remain separate: a durable grant permits the
+  // invocation, while compiled effects select the minimum sandbox lane.
+  const networkEffect = Boolean(
+    input.policyEffects.network || input.policyEffects.uncertainEffects,
+  );
+  const networkAccess = networkEffect && input.grantUsed !== 'none' ? 'approved' : 'none';
   const externalFilesystem = Boolean(
     input.policyEffects.externalRead ||
       input.policyEffects.externalWrite ||

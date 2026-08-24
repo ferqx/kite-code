@@ -38,6 +38,7 @@ export interface ToolGovernanceEffects {
   readonly externalRead?: true;
   readonly externalWrite?: true;
   readonly uncertainEffects?: true;
+  readonly sensitiveExternalAccess?: true;
 }
 
 /** Exact invocation identity and digest facts captured for one proposal. */
@@ -81,7 +82,6 @@ export interface ToolGovernancePolicyFact {
   readonly risk: ToolGovernanceRisk;
   readonly effects?: Readonly<ToolGovernanceEffects>;
   readonly reason: string;
-  readonly userVisibleSummary: string;
   readonly expectedEffects: readonly string[];
   readonly requiresSandbox?: boolean;
   readonly phaseConstraint?: 'planning';
@@ -164,6 +164,19 @@ export interface ToolGovernanceFacts {
   readonly dynamicMcp?: Readonly<ToolGovernanceDynamicMcpFact>;
   readonly nestedSkill?: Readonly<ToolGovernanceNestedSkillFact>;
 }
+
+/** Safe, low-cardinality category for a rejected Host→Kernel facts DTO. */
+export type ToolGovernanceFactsInvalidReason =
+  | 'envelope'
+  | 'invocation'
+  | 'policy'
+  | 'context'
+  | 'admission'
+  | 'approval'
+  | 'same_command_grant'
+  | 'dynamic_mcp'
+  | 'nested_skill'
+  | 'identity';
 
 /**
  * Canonical digest for the exact State 25 same-command grant subject.
@@ -344,7 +357,7 @@ function authorizeValidToolGovernanceFacts(
         : policy.phaseConstraint === 'planning'
           ? 'phase_denied'
           : 'policy_denied',
-      deferred ? 'Deferred shell_execute until building phase.' : policy.userVisibleSummary,
+      deferred ? 'Deferred shell_execute until building phase.' : policy.reason,
     );
   }
 
@@ -492,7 +505,14 @@ function authorizeValidToolGovernanceFacts(
 
 /** Runtime validation for the Host-to-Kernel canonical DTO boundary. */
 export function isValidToolGovernanceFacts(value: unknown): value is ToolGovernanceFacts {
-  if (!plainRecord(value)) return false;
+  return toolGovernanceFactsInvalidReason(value) === undefined;
+}
+
+/** Return only the invalid DTO category; never include rejected fact values. */
+export function toolGovernanceFactsInvalidReason(
+  value: unknown,
+): ToolGovernanceFactsInvalidReason | undefined {
+  if (!plainRecord(value)) return 'envelope';
   if (
     !exactKeys(
       value,
@@ -500,47 +520,48 @@ export function isValidToolGovernanceFacts(value: unknown): value is ToolGoverna
       ['sameCommandGrant', 'dynamicMcp', 'nestedSkill'],
     )
   ) {
-    return false;
+    return 'envelope';
   }
-  if (value.schema !== TOOL_GOVERNANCE_FACTS_SCHEMA_) return false;
-  if (!validInvocation(value.invocation)) return false;
-  if (!validPolicy(value.policy)) return false;
-  if (!validContext(value.context)) return false;
-  if (!validAdmission(value.admission)) return false;
-  if (!validApproval(value.approval)) return false;
+  if (value.schema !== TOOL_GOVERNANCE_FACTS_SCHEMA_) return 'envelope';
+  if (!validInvocation(value.invocation)) return 'invocation';
+  if (!validPolicy(value.policy)) return 'policy';
+  if (!validContext(value.context)) return 'context';
+  if (!validAdmission(value.admission)) return 'admission';
+  if (!validApproval(value.approval)) return 'approval';
   if (value.sameCommandGrant !== undefined && !validSameCommandGrant(value.sameCommandGrant)) {
-    return false;
+    return 'same_command_grant';
   }
-  if (value.dynamicMcp !== undefined && !validDynamicMcp(value.dynamicMcp)) return false;
-  if (value.nestedSkill !== undefined && !validNestedSkill(value.nestedSkill)) return false;
+  if (value.dynamicMcp !== undefined && !validDynamicMcp(value.dynamicMcp)) return 'dynamic_mcp';
+  if (value.nestedSkill !== undefined && !validNestedSkill(value.nestedSkill))
+    return 'nested_skill';
   if (
     value.nestedSkill !== undefined &&
     value.invocation.operationId !== 'builtin:activate_skill'
   ) {
-    return false;
+    return 'nested_skill';
   }
   const hasNestedIdentity =
     value.invocation.nestedCapabilityId !== null &&
     value.invocation.nestedCapabilityRevision !== null &&
     value.invocation.nestedCatalogRevision !== null;
-  if ((value.nestedSkill !== undefined) !== hasNestedIdentity) return false;
+  if ((value.nestedSkill !== undefined) !== hasNestedIdentity) return 'identity';
   if (
     value.policy.operationId !== value.invocation.operationId ||
     value.policy.capabilityRevision !== value.invocation.capabilityRevision ||
     value.policy.parserRevision !== value.invocation.parserRevision ||
     value.policy.effectiveEffectsDigest !== value.invocation.effectiveEffectsDigest
-  ) {
-    return false;
-  }
+  )
+    return 'identity';
   const dynamicInvocation = isDynamicInvocation(value.invocation);
   const dynamicName = value.invocation.exposedToolName.startsWith('mcp__');
-  if (dynamicInvocation !== dynamicName) return false;
-  if (dynamicInvocation !== (value.dynamicMcp !== undefined)) return false;
-  return dynamicInvocation
+  if (dynamicInvocation !== dynamicName) return 'identity';
+  if (dynamicInvocation !== (value.dynamicMcp !== undefined)) return 'identity';
+  const validCatalogIdentity = dynamicInvocation
     ? value.invocation.builtinCatalogRevision === null &&
-        value.invocation.dynamicCatalogRevision !== null
+      value.invocation.dynamicCatalogRevision !== null
     : value.invocation.builtinCatalogRevision !== null &&
-        value.invocation.dynamicCatalogRevision === null;
+      value.invocation.dynamicCatalogRevision === null;
+  return validCatalogIdentity ? undefined : 'identity';
 }
 
 /** Runtime validation for the exact Kernel facts transported in a binding. */
@@ -714,7 +735,11 @@ function nullableDigest(value: unknown): value is string | null {
 function validEffects(value: unknown): value is ToolGovernanceEffects {
   if (
     !plainRecord(value) ||
-    !exactKeys(value, [], ['network', 'externalRead', 'externalWrite', 'uncertainEffects'])
+    !exactKeys(
+      value,
+      [],
+      ['network', 'externalRead', 'externalWrite', 'uncertainEffects', 'sensitiveExternalAccess'],
+    )
   ) {
     return false;
   }
@@ -799,7 +824,6 @@ function validPolicy(value: unknown): value is ToolGovernancePolicyFact {
         'requiresApproval',
         'risk',
         'reason',
-        'userVisibleSummary',
         'expectedEffects',
       ],
       ['effects', 'requiresSandbox', 'phaseConstraint'],
@@ -830,7 +854,6 @@ function validPolicy(value: unknown): value is ToolGovernancePolicyFact {
       'unknown',
     ].includes(String(value.risk)) ||
     !boundedIdentity(value.reason) ||
-    !boundedIdentity(value.userVisibleSummary) ||
     !Array.isArray(value.expectedEffects) ||
     value.expectedEffects.length === 0 ||
     !value.expectedEffects.every(boundedIdentity)

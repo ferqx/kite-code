@@ -1,27 +1,20 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, parse, resolve } from 'node:path';
-import { resolveFixedDangerousPathIdentities } from './dangerous-paths';
-import {
-  PROTECTED_WORKSPACE_DIRECTORIES_,
-  PROTECTED_WORKSPACE_FILE_PREFIXES_,
-  PROTECTED_WORKSPACE_FILES_,
-} from './protected-path';
 import type { FilesystemScope } from './types';
 
-/** Whether the native profile permits git command access to the Workspace `.git` directory. */
+/** Whether the native profile may read the user's external Git configuration. */
 export type SandboxGitAccess = 'deny' | 'allow';
 
 export interface SandboxProfileOptions {
   network?: 'disabled' | 'allow_all';
   filesystemScope?: FilesystemScope;
   sandboxRuntimeDir?: string;
+  sandboxControlBase?: string;
   runtimeReadOnlyRoots?: readonly string[];
   /**
-   * When `'allow'`, the profile exempts the Workspace `.git` directory from the
-   * protected-path deny and reads the user's git config so git commands can run
-   * under the sandbox. Direct `.git` access (file tools, command text) remains
-   * blocked by the tool-policy and `checkDangerousPaths` layers. Defaults to
-   * `'deny'` so callers opt in explicitly (see ADR-0070).
+   * When `'allow'`, the profile additionally reads the user's external Git
+   * configuration. The canonical Workspace itself is always admitted as one
+   * complete filesystem identity, including `.git`.
    */
   gitAccess?: SandboxGitAccess;
 }
@@ -38,6 +31,9 @@ export function generateSandboxProfile(
   const runtimeRoot = options.sandboxRuntimeDir
     ? canonicalExistingPath(options.sandboxRuntimeDir)
     : undefined;
+  const controlBase = options.sandboxControlBase
+    ? canonicalExistingPath(options.sandboxControlBase)
+    : undefined;
   const filesystemScope = options.filesystemScope ?? 'workspace_write';
   const runtimeReadOnlyRoots = canonicalizeReadOnlyRoots(options.runtimeReadOnlyRoots ?? []);
   const gitAccess = options.gitAccess ?? 'deny';
@@ -46,7 +42,7 @@ export function generateSandboxProfile(
     SEATBELT_BASE_POLICY,
     fileReadPolicy(workspaceRoot, runtimeRoot, runtimeReadOnlyRoots, gitAccess, filesystemScope),
     fileWritePolicy(workspaceRoot, runtimeRoot, filesystemScope),
-    protectedPathPolicy(workspaceRoot, gitAccess),
+    hostControlPolicy(controlBase),
     networkPolicy(options.network ?? 'disabled'),
   ]
     .filter(Boolean)
@@ -86,32 +82,6 @@ function subpathFilter(path: string): string {
 
 function literalFilter(path: string): string {
   return `(literal "${seatbeltString(path)}")`;
-}
-
-/** Escape only the delimiter inside Seatbelt's #"..." regex literal. */
-function seatbeltRegex(regex: string): string {
-  return regex.replaceAll('"', '\\"');
-}
-
-function regexFilterForLiteralPrefix(path: string): string {
-  const regex = `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`;
-  return `(regex #"${seatbeltRegex(regex)}")`;
-}
-
-function caseInsensitiveRegexLiteral(path: string): string {
-  return [...path]
-    .map((character) => {
-      if (/^[A-Za-z]$/.test(character)) {
-        return `[${character.toLowerCase()}${character.toUpperCase()}]`;
-      }
-      return /[\\^$.*+?()[\]{}|]/.test(character) ? `\\${character}` : character;
-    })
-    .join('');
-}
-
-function regexFilterForCaseInsensitiveIdentity(path: string, suffix: '' | '(/.*)?' | '.*'): string {
-  const regex = `^${caseInsensitiveRegexLiteral(path)}${suffix}$`;
-  return `(regex #"${seatbeltRegex(regex)}")`;
 }
 
 /** Static process/IPC rules; descendants inherit the same Seatbelt sandbox. */
@@ -287,7 +257,7 @@ function fileWritePolicy(
   filesystemScope: FilesystemScope,
 ): string {
   if (filesystemScope === 'full_access') {
-    return `;; User-approved filesystem scope; fixed protected-path policy still applies.
+    return `;; User-approved filesystem scope for this exact invocation.
 (allow file-write* file-write-create file-write-unlink file-ioctl)`;
   }
   const writableRoots = [runtimeRoot];
@@ -301,85 +271,11 @@ function fileWritePolicy(
   ${filters.join('\n  ')})`;
 }
 
-function protectedPathPolicy(workspaceRoot: string, gitAccess: SandboxGitAccess): string {
-  // When git access is allowed, `.git` is exempted from the native deny so the
-  // git binary can operate on the repository. Other protected identities (Agent
-  // config, credentials, shell profiles, …) stay denied; direct `.git` access
-  // through file tools and shell command text remains blocked by the
-  // tool-policy evaluator and `checkDangerousPaths()` respectively.
-  const protectedDirectories =
-    gitAccess === 'allow'
-      ? PROTECTED_WORKSPACE_DIRECTORIES_.filter((name) => name !== '.git')
-      : PROTECTED_WORKSPACE_DIRECTORIES_;
-  const directoryFilters = protectedDirectories.map((path) =>
-    subpathFilter(resolve(workspaceRoot, path)),
-  );
-  const fileFilters = PROTECTED_WORKSPACE_FILES_.map((path) =>
-    literalFilter(resolve(workspaceRoot, path)),
-  );
-  const filePrefixFilters = PROTECTED_WORKSPACE_FILE_PREFIXES_.map((path) =>
-    regexFilterForLiteralPrefix(resolve(workspaceRoot, path)),
-  );
-  const fixedExternalIdentities = resolveFixedDangerousPathIdentities({
-    workspace: workspaceRoot,
-  }).filter((identity) => {
-    const path = resolve(identity.path);
-    return path !== workspaceRoot && !path.startsWith(`${workspaceRoot}/`);
-  });
-  const fixedExternalFilters = fixedExternalIdentities.map((identity) => {
-    if (identity.kind === 'directory') return subpathFilter(identity.path);
-    if (identity.kind === 'prefix') return regexFilterForLiteralPrefix(identity.path);
-    return literalFilter(identity.path);
-  });
-  const fixedExternalReadWriteFilters = fixedExternalFilters.filter(
-    (_filter, index) => fixedExternalIdentities[index]?.access === 'read_write',
-  );
-  const fixedExternalWriteOnlyFilters = fixedExternalFilters.filter(
-    (_filter, index) => fixedExternalIdentities[index]?.access === 'write_only',
-  );
-  // APFS/HFS+ commonly resolve case aliases to the same filesystem identity.
-  // Keep the exact filters for a compact fast path, then add conservative
-  // ASCII-case-insensitive filters so `.GIT`, `.Agents`, and `.ENV.*` cannot
-  // bypass the native deny even on a differently configured Darwin volume.
-  const caseAliasFilters = [
-    ...protectedDirectories.map((path) =>
-      regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), '(/.*)?'),
-    ),
-    ...PROTECTED_WORKSPACE_FILES_.map((path) =>
-      regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), ''),
-    ),
-    ...PROTECTED_WORKSPACE_FILE_PREFIXES_.map((path) =>
-      regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), '.*'),
-    ),
-    ...fixedExternalIdentities
-      .filter((identity) => identity.access === 'read_write')
-      .map((identity) =>
-        regexFilterForCaseInsensitiveIdentity(
-          identity.path,
-          identity.kind === 'directory' ? '(/.*)?' : identity.kind === 'prefix' ? '.*' : '',
-        ),
-      ),
-  ];
-  const writeOnlyCaseAliasFilters = fixedExternalIdentities
-    .filter((identity) => identity.access === 'write_only')
-    .map((identity) =>
-      regexFilterForCaseInsensitiveIdentity(
-        identity.path,
-        identity.kind === 'directory' ? '(/.*)?' : identity.kind === 'prefix' ? '.*' : '',
-      ),
-    );
-  return `;; Protected paths deny model-driven reads and writes even inside the Workspace.
-(deny file-read* file-map-executable file-write* file-write-create file-write-unlink file-ioctl
-  ${[
-    ...directoryFilters,
-    ...fileFilters,
-    ...filePrefixFilters,
-    ...fixedExternalReadWriteFilters,
-    ...caseAliasFilters,
-  ].join('\n  ')})
-;; Critical system configuration stays readable for runtime compatibility but cannot be changed.
-(deny file-write* file-write-create file-write-unlink file-ioctl
-  ${[...fixedExternalWriteOnlyFilters, ...writeOnlyCaseAliasFilters].join('\n  ')})`;
+function hostControlPolicy(controlBase: string | undefined): string {
+  if (!controlBase) return '';
+  return `;; Host-only supervisor state is outside every model filesystem scope.
+(deny file-read* file-read-metadata file-map-executable file-write* file-write-create file-write-unlink file-ioctl
+  ${subpathFilter(controlBase)})`;
 }
 
 function networkPolicy(mode: 'disabled' | 'allow_all'): string {

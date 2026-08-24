@@ -782,6 +782,47 @@ function assertCapabilityLifecycleEvidence(
 function assertModelInvocations(state: AgentState): void {
   for (const [invocationId, invocationValue] of Object.entries(state.modelInvocations)) {
     const invocation = invocationValue as unknown as UnknownRecord;
+    const allowedKeys = new Set([
+      'attempts',
+      'admission',
+      'budget',
+      'dispatchCertainty',
+      'finishReason',
+      'interruptionReason',
+      'invocationId',
+      'limits',
+      'modelEvidenceUnavailable',
+      'parentInvocationId',
+      'parentToolCallId',
+      'preparedStateRevision',
+      'purpose',
+      'responseArtifact',
+      'routeFingerprint',
+      'status',
+      'surfaceArtifact',
+      'surfaceIntegrityIdentifier',
+    ]);
+    assert(
+      Object.keys(invocation).every((key) => allowedKeys.has(key)),
+      `model invocation ${invocationId} contains an unknown current-format field.`,
+    );
+    const retiredAdmission = recordValue(invocation, 'admission');
+    if (retiredAdmission) {
+      assert(
+        Object.keys(retiredAdmission).sort().join(',') ===
+          'admitted,payloadClassificationDigest,providerAdmissionRevision,routeIdentityDigest' &&
+          (retiredAdmission.providerAdmissionRevision === null ||
+            typeof retiredAdmission.providerAdmissionRevision === 'string') &&
+          /^sha256:[0-9a-f]{64}$/u.test(
+            stringValue(retiredAdmission, 'routeIdentityDigest') ?? '',
+          ) &&
+          /^sha256:[0-9a-f]{64}$/u.test(
+            stringValue(retiredAdmission, 'payloadClassificationDigest') ?? '',
+          ) &&
+          typeof retiredAdmission.admitted === 'boolean',
+        `model invocation ${invocationId} legacy admission evidence is invalid.`,
+      );
+    }
     assert(
       stringValue(invocation, 'invocationId') === invocationId,
       'model invocation identity is invalid.',
@@ -1188,7 +1229,6 @@ function verificationSpecValid(spec: UnknownRecord): boolean {
     return false;
   if (!Array.isArray(spec.checks) || spec.checks.length === 0) return false;
   const ids = new Set<string>();
-  let reviewerSeen = false;
   for (const rawCheck of spec.checks) {
     const check = record(rawCheck);
     if (
@@ -1201,13 +1241,12 @@ function verificationSpecValid(spec: UnknownRecord): boolean {
         'schema',
         'mcp_read_after_write',
         'external_reference',
+        'receipt',
         'reviewer',
       ].includes(stringValue(check, 'type') ?? '')
     )
       return false;
     ids.add(check.checkId);
-    if (reviewerSeen && stringValue(check, 'type') !== 'reviewer') return false;
-    reviewerSeen ||= check.type === 'reviewer';
     if (
       check.type === 'file_assertion' &&
       (!validString(check.path) ||
@@ -1223,6 +1262,7 @@ function verificationSpecValid(spec: UnknownRecord): boolean {
     )
       return false;
     if (check.type === 'external_reference' && !validString(check.invocationId)) return false;
+    if (check.type === 'receipt' && !validString(check.invocationId)) return false;
     if (check.type === 'reviewer' && !validString(check.instructions)) return false;
   }
   return true;

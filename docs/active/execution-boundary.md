@@ -15,7 +15,8 @@ tests/execution/sandbox-execution-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、ADR-0097、`execution-platform-support.md`。
+相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、ADR-0097、ADR-0131、
+`execution-platform-support.md`。
 
 ## Schema ownership
 
@@ -133,27 +134,32 @@ process group，未确认退出时结果 fail closed 并保留 runtime，确认�
 invocation 还会用不递归的 `rmdir` 回收空的共享 runtime 容器；并发 invocation 使容器非空时该步骤
 安全跳过。并发调用不能共享 invocation 目录，writable temp 也不进入 executable-map
 allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；`read_only` 不允许 Workspace 写入。系统与当前 Bun/Node runtime 依赖只有
-显式只读 root；除此之外的 Workspace 外 read/write/create/unlink、指向外部的 symlink，以及
-Workspace 内 Agent/MCP 配置、credential、shell profile 等 protected path 均由 Seatbelt deny，
-`checkDangerousPaths()` 只保留为 defense-in-depth。启用 ADR-0097 的精确
-`brokered-git-r1` revision 时，通用 Shell 的 Seatbelt profile 恢复 Workspace `.git` 原生 deny，
-Linux bubblewrap 同样以 `.git` 目录或 gitfile mask 拒绝 metadata；只有 App 注入的 typed Git broker
-拥有受限 metadata 通道。旧 ADR-0070 Git shell 豁免仅保留给 feature revision 切换前的开发兼容路径，
-不得进入 broker qualification。Shell child 会继承相同 profile。共享规则除 exact literal/subpath 外，还编译 ASCII 大小写不敏感的 anchored regex；因此
-case-insensitive APFS/HFS+ 上的 `.GIT`、`.Agents`、`.ENV.*` alias，以及 case-sensitive volume
-上按混合大小写实际创建的同名 identity，都会由原生边界拒绝。
+显式只读 root；默认 scope 之外的 Workspace 外 read/write/create/unlink 与指向外部的 symlink 继续拒绝。
+若 Policy 对 exact invocation 批准 `allow_all`，则可访问 Workspace 外敏感 identity，native profile 不再
+按名称二次拒绝；网络、进程、资源和真实宿主 ACL/TCC 边界保持不变。
+按 ADR-0131/ADR-0135，canonical Workspace 是完整授权身份：Policy、Seatbelt、bubblewrap 与 Windows runner 不得因
+`.git`、Agent/MCP 配置、credential、shell profile、隐藏名称或大小写别名对内部成员追加 deny；
+Shell child 继承同一整 Workspace scope。`checkDangerousPaths()` 接收 canonical Workspace，把可证明位于其外的
+固定 credential/persistence/system identity 分类为 `sensitiveExternalAccess`，按 ADR-0133 进入模式感知授权，
+不再生成永久 deny；关键 destructive
+command 仍由独立规则硬拒绝。
+Building 阶段内，Policy 对可证明只作用于该 Workspace 的结构化文件 mutation 直接授权；native profile 仍执行
+相同 workspace scope。raw Shell（包括 Git）不从命令 grammar 或 Workspace target 获得授权：Accept Edits 请求
+exact approval，Auto 三态审查，Full 直接授权，并在获批后按 effects 为该 invocation 密封 filesystem scope。
+Planning 拒绝全部 Shell；该规则不改变结构化只读 capability 的 phase 资格。
 Seatbelt 的 `#"..."` regex literal 直接消费正则反斜杠；profile generator 必须只转义该 literal
 的引号 delimiter，保留 `\.` 等单反斜杠 regex token，不能复用普通 Seatbelt string literal 的
 反斜杠转义。生成器测试同时要求单反斜杠模式存在、双反斜杠模式不存在。
 
 密封配置还会从同一份 path evaluator 编译两种投影。每项访问都携带 canonical target、未 realpath 的
 lexical Workspace identity 与 `read`/`write`/`execute` operation；最近存在祖先先经 realpath，尚未创建的
-后缀再拼回。文件 read 对所有有效路径 allow，Workspace 内 write 对全部名称 allow；该 trusted-Workspace
+后缀再拼回。文件 read evaluator 对有效路径 allow，Policy 对敏感 external direct read 或任何 external recursive
+search 要求模式感知授权：Full 直接授权、Auto 三态审查、其他模式 exact approval；Workspace 内 write/execute 对全部名称 allow。该 trusted-Workspace
 规则在 Windows、macOS 与 Linux 相同，不能因为名称看似 `.git`、`.env` 或其他受保护 execute identity 而拒绝
-已授权的文件工具 mutation。Workspace 外 write 返回 prompt 并在 exact approval 后形成 `approved_external`。
-execute/process 投影继续把 Workspace 外路径、
-`.git`、Agent/MCP 配置、credential、shell profile 与 additional deny 作为 protected identity，deny 早于
-allow。PS-01 后 Tool Pipeline 在 grant 签发前固定 evaluator revision，Local Provider 验证 canonical
+已授权的文件工具 mutation。Workspace 外 write 在 Full 直接授权、Auto 三态审查、Accept Edits 请求 exact
+approval，并在获批后形成 `approved_external`。
+execute/process 投影只把 Workspace 外路径作为非 Workspace identity；Workspace 内 additional deny、
+allowlist 或 protected-looking name 不得缩小信任根。PS-01 后 Tool Pipeline 在 grant 签发前固定 evaluator revision，Local Provider 验证 canonical
 Workspace、path scope 与 no-follow target identity；批准后的文件 mutation 不再重新应用 execute deny。
 `read_file`、`write_file`、`edit_file` 和 search spec 通过
 结构化 path-access 声明接入；Registry conformance 从完整 builtin tuple 派生所有
@@ -163,17 +169,17 @@ allowlist、native sandbox、typed Git broker 的 shared protected-path/reposito
 filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 不按 protected 名称剪枝；`.gitignore`
 只作为搜索语义。文件读取即使没有外部 mutation approval也可使用 `external_read`。
 
-Seatbelt profile 直接消费该共享定义的目录/文件集合；Shell 的命令字符串扫描不再是权威 gate。
+Seatbelt profile 只把共享固定目录/文件集合投影到 Workspace 外身份；Shell 的命令字符串扫描不再是权威 gate。
 production execution surface 或 evaluator 任一缺失时，Runner 在任何 builtin adapter I/O 前拒绝。
 普通 Task child 与 forked Skill 的文件工具都继承父级同一 `taskConfig` evaluator。local stdio MCP
 manager 可接收同一 evaluator，并在 transport construction 前以 `execute` operation 拒绝
-protected/outside cwd 与 path-like executable，再把 canonical cwd 和 path-like executable identity
+outside cwd 与 path-like executable，再把 canonical cwd 和 path-like executable identity
 交给 transport factory。sealed transport identity 固定把 `localStdioMcp=false`：在存在真实
 sandbox-backed stdio factory、argv/runtime pinning 与 native child inheritance conformance 前，
 即使 capability surface bit 被错误设为 true 也以 `transport_denied` 拒绝，生产不会构造本地 child。
 typed Git/worktree controller 仍是共享 checkout / worktree placement 的 App 授权主体；模型 Git
-operation 必须走下述 broker，通用 Shell 不能直接访问 `.git`，但文件工具可读写受信任 Workspace 内的
-`.git` 内容。文件访问不获得 Git transaction/locking 语义。
+operation 仍按 Tool Policy 走下述 broker，但 sandbox 不再以 `.git` 路径名阻止通用 Workspace process。
+文件访问不获得 Git transaction/locking 语义。
 
 ### Governed Workspace filesystem seam
 
@@ -220,7 +226,9 @@ cancellation；`cwd` 必须等于冻结的 canonical Workspace。backend discove
 失败回退到第二个 process owner。
 
 POSIX allocation 把 host-only `controlRoot`（socket、lock、identity）与 sandbox-writable `dataRoot`（TMP/cache）
-分开；profile/bind 只能包含 data root，full-access 若会暴露 control root 则 fail closed。目录创建、权限与递归
+放入两个独立 private base；profile/bind 只能包含 data root。即使 full-access 已授权用户文件系统，macOS
+Seatbelt 也显式拒绝整个 control base，Linux mount namespace 则以只读空 tmpfs 覆盖整个 control base，使当前及
+并发 invocation 的 Host-control identity 都不可见。目录创建、权限与递归
 删除通过 no-follow/pinned descriptor 交叉验证，确认完整后代退出后先删 data、再删 control 和 allocation；首个
 合法 control connection 被接收后立即停止 listen。cleanup 失败保持同一 disposal/abandonment intent 为 pending，
 记录 `lastFailure` 与递增 attempt；下一次 recovery 至多执行一次新 attempt，不重新 prepare/spawn，只有成功 receipt
@@ -266,9 +274,10 @@ kernel/launchd/descriptor-owned descendant authority 前，Seatbelt allocating �
 ### Brokered Git access（ADR-0097）
 
 `ExecutionCapabilitySurface` 只投影只读 `gitInspect`，并绑定精确
-`brokered-git-r1` feature revision。Builtin catalog disclosure、Controller dispatch 与 native `.git`
-deny/mask 必须以同一 revision 原子切换；只打开 feature boolean、只披露 Tool 或只改 sandbox
-profile都 fail closed，generic process/read-only fallback 也不能隐式产生 Git capability。
+`brokered-git-r1` feature revision。Builtin catalog disclosure 与 Controller dispatch 继续原子绑定；
+generic process/read-only fallback 不能隐式产生 typed Git capability。ADR-0131 已取消 native `.git`
+deny/mask，因此 ADR-0097 原资格模型无法为当前 profile 产生新 qualified evidence；production
+`gitInspect` 保持 excluded，直到追加 ADR 定义不依赖 Workspace path deny 的资格模型。
 
 `git_inspect` 只接受 `status | diff | log | branch_list` 的逐 operation 严格有界 schema；unknown/无关字段拒绝。path 必须是 literal，相对路径中的 pathspec magic、glob、casefold 与反斜杠形式一律在进程前拒绝。Builtin broker 在任何 Git
 process 前验证 canonical repository/common-dir、Workspace 外受信 binary identity、受限 config、
@@ -277,17 +286,25 @@ attributes、replace refs、grafts 与 shared protected-path evaluator；无法�
 `.gitattributes`、`.git/info/attributes`、grafts、`refs/replace` 与 `packed-refs` 在读取前逐级验证 metadata boundary、拒绝任意 symlink；packed refs 中出现 replace ref 同样视为 hostile。
 命令 argv 和环境由 broker 构造，禁用 system/global config、credential/askpass、hooks、filters、
 pager、external diff 和可执行 attributes。`log` 只返回 hash/time 等 metadata，不读取 subject、blob
-或 protected 内容。每次 terminal 产生绑定 repo、binary、schema、native-deny、operation 与可信
+或 protected 内容。每次 terminal 产生绑定 repo、binary、schema、operation 与可信
 timing 的 typed evidence/receipt；App process adapter 只执行 broker 已准入的 invocation。
 
-Git stage、commit 与远端 fetch/pull/push 不在当前模型工具表中；本地写操作留给用户或独立后续设计，不能由 `auto`、`accept_edits`、Shell 授权或 raw shell fallback 恢复。远端操作仍需独立 network/credential/descendant boundary；
-Shell Git metadata denial 返回稳定 `nextCapability=git_inspect`，远端 Git 返回
-network/credential boundary unavailable，二者都不得回退 raw shell。
+按 ADR-0136，direct `git status`、无 patch `git log` 和其他 raw Git invocation 都先按当前 mode 审查；闭集
+classifier 不再产生免审授权。批准后，匹配 ADR-0134 grammar 的 status/log 仍可使用 hardened Shell
+environment，由 preparation 固定关闭外部 config、prompt、pager、external diff、optional locks 与 repository
+fsmonitor。其他 Git 使用普通获批 Shell environment；remote、external target 和无法证明的 effects 继续作为
+reviewer 与 sandbox scope 的结构化事实。
+`brokered-git-r1` 不按 raw Git token hard deny 或强制返回 `nextCapability=git_inspect`。Planning、关键系统
+destructive 与 capability admission 仍独立治理；typed `git_inspect` 不从 generic Shell authority 推导
+production qualification。
 
-三平台 probe 仅在 native metadata read/write deny 都为 enforced 后，才通过真实 App broker composition 与固定 binary 运行 positive/hostile；TUI/foreground CLI composition 仍是独立证据。probe 分别记录 native metadata read/write deny、broker positive/hostile 与 composition
-identity。当前 macOS、Linux、Windows 都不能同时证明这些证据，因此 brokered Git production
-qualification 明确为 excluded；开发 fixture 通过不产生 production support。
-`qualified` evidence 还必须直接绑定真实 profile revision/digest、protected-rules digest、broker/schema revision、repository/executable/native-deny identity 与 invocation receipt UUID；由标签字符串临时哈希出的值不能作为资格证据。当前 probe 不拥有这组 release evidence，因此即使本地 positive/hostile 控制通过也保持 excluded。
+现有三平台 probe 仍记录旧 native metadata read/write deny 字段，但当前 profile 按设计不会令其
+`enforced`，因此 brokered Git production qualification 明确为 excluded；开发 fixture 通过不产生
+production support。未来 probe 必须随新的追加 ADR 更换资格事实，不能把 Workspace path deny 重新加回。
+未来 `qualified` evidence 必须直接绑定真实 profile revision/digest、protected-rules digest、broker/schema
+revision、repository/executable identity 与 invocation receipt UUID，并符合后续 ADR 定义的新资格事实；
+由标签字符串临时哈希出的值不能作为资格证据。当前 probe 不拥有这组 release evidence，因此即使本地
+positive/hostile 控制通过也保持 excluded。
 
 `createSandboxExecutor()` 已从 production 入口删除；同名函数只存在于
 `tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。Builtin catalog entry 也不接受裸 `shellTool`

@@ -7,8 +7,6 @@ import type {
   VerificationCheckResult,
   VerificationExecutionReceipt,
   VerificationOutcome,
-  VerificationReviewerInput,
-  VerificationReviewerResult,
 } from '@kite/runtime-spi';
 import { digestCapabilityBindingValue } from '../capability-binding';
 import { validateCapabilityArguments } from '../skills/capability-domain';
@@ -59,7 +57,6 @@ export interface BuiltinDeterministicVerificationDependencies {
   readonly shell?: BuiltinVerificationShellPort;
   readonly mcp?: BuiltinVerificationMcpPort;
   readonly readArtifact?: (receipt: BuiltinVerificationReceiptView) => VerificationCapabilityResult;
-  readonly reviewer?: (input: VerificationReviewerInput) => Promise<VerificationReviewerResult>;
   /** Host-classified dispatch failures that must not be reduced to an inconclusive check. */
   readonly isFatalError?: (error: unknown) => boolean;
   readonly signal?: AbortSignal;
@@ -105,8 +102,7 @@ function checkMayDispatchExternalEffect(
 ): boolean {
   return (
     (check.type === 'command' && Boolean(dependencies.shell)) ||
-    (check.type === 'mcp_read_after_write' && Boolean(dependencies.mcp)) ||
-    (check.type === 'reviewer' && Boolean(dependencies.reviewer))
+    (check.type === 'mcp_read_after_write' && Boolean(dependencies.mcp))
   );
 }
 
@@ -121,9 +117,6 @@ async function executeCheck(
     const observation = await observeCheck(check, state, dependencies);
     return {
       checkId: check.checkId,
-      ...('modelInvocationId' in observation && typeof observation.modelInvocationId === 'string'
-        ? { modelInvocationId: observation.modelInvocationId }
-        : {}),
       outcome: observation.outcome,
       summary: observation.summary.slice(0, 2_000),
       evidenceDigest: digestCapabilityBindingValue(observation.evidence),
@@ -150,7 +143,6 @@ async function observeCheck(
   outcome: VerificationOutcome;
   summary: string;
   evidence: unknown;
-  modelInvocationId?: string;
 }> {
   if (check.type === 'file_assertion') {
     const path = insideWorkspace(state.workspace, check.path);
@@ -282,19 +274,29 @@ async function observeCheck(
       evidence: { receipt, references },
     };
   }
-  if (!dependencies.reviewer) {
+  if (check.type === 'receipt') {
+    const receipt = state.receipts[check.invocationId];
+    return {
+      outcome: receipt?.status === 'succeeded' ? 'passed' : 'inconclusive',
+      summary:
+        receipt?.status === 'succeeded'
+          ? 'The capability invocation has a committed success receipt.'
+          : 'A committed success receipt is unavailable.',
+      evidence: receipt ?? null,
+    };
+  }
+  if (check.type === 'reviewer') {
     return {
       outcome: 'inconclusive',
-      summary: 'Independent reviewer is unavailable.',
+      summary: 'Legacy model-based verification is unavailable in the current runtime.',
       evidence: null,
     };
   }
-  const resolved = reviewerInput(check, state, dependencies);
-  if (!resolved.ok) {
-    return { outcome: 'inconclusive', summary: resolved.summary, evidence: null };
-  }
-  const result = await dependencies.reviewer(resolved.input);
-  return { ...result, evidence: resolved.input };
+  return {
+    outcome: 'inconclusive',
+    summary: 'Unsupported deterministic verification check.',
+    evidence: null,
+  };
 }
 
 function resolveSchemaSubject(
@@ -311,53 +313,6 @@ function resolveSchemaSubject(
   } catch {
     return undefined;
   }
-}
-
-function reviewerInput(
-  check: Extract<VerificationCheck, { type: 'reviewer' }>,
-  state: BuiltinVerificationStateView,
-  dependencies: BuiltinDeterministicVerificationDependencies,
-): { ok: true; input: VerificationReviewerInput } | { ok: false; summary: string } {
-  const invocationIds = check.invocationIds ?? [];
-  const receipts = invocationIds
-    .map((id) => state.receipts[id])
-    .filter((receipt): receipt is BuiltinVerificationReceiptView => Boolean(receipt));
-  if (receipts.length !== invocationIds.length) {
-    return { ok: false, summary: 'A referenced capability receipt is unavailable.' };
-  }
-  if (
-    receipts.some(
-      (receipt) =>
-        receipt.status !== 'succeeded' ||
-        !receipt.artifact ||
-        !receipt.resultDigest ||
-        !receipt.evidenceDigest,
-    )
-  ) {
-    return { ok: false, summary: 'A successful capability receipt Artifact is unavailable.' };
-  }
-  if (receipts.length > 0 && !dependencies.readArtifact) {
-    return { ok: false, summary: 'The capability Artifact reader is unavailable.' };
-  }
-  const artifacts: VerificationReviewerInput['artifacts'] = [];
-  for (const receipt of receipts) {
-    try {
-      artifacts.push({
-        invocationId: receipt.invocationId,
-        result: dependencies.readArtifact!(receipt),
-      });
-    } catch {
-      return { ok: false, summary: 'A capability receipt Artifact could not be verified.' };
-    }
-  }
-  const skillOutputs = (check.activationIds ?? []).flatMap((activationId) => {
-    const output = state.skillOutputs[activationId];
-    return output ? [{ activationId, output: { ...output } }] : [];
-  });
-  return {
-    ok: true,
-    input: { instructions: check.instructions, receipts, artifacts, skillOutputs },
-  };
 }
 
 function insideWorkspace(workspace: string, candidate: string): string {

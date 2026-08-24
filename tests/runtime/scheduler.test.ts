@@ -500,7 +500,7 @@ describe('decideNextEffect', () => {
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['tool'] });
   });
 
-  test('batches consecutive approval-free reads', () => {
+  test('batches structured approval-free reads but stops before raw Shell', () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'parallel-reads',
@@ -528,7 +528,7 @@ describe('decideNextEffect', () => {
 
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: ['read-a', 'search', 'status'],
+      toolCallIds: ['read-a', 'search'],
     });
   });
 
@@ -704,13 +704,21 @@ describe('decideNextEffect', () => {
     });
     queueCall(state, 'review-a', {
       name: 'task',
-      args: { subagent_type: 'review', task: 'Review runtime correctness and report evidence.' },
+      args: {
+        name: 'Review runtime correctness',
+        subagent_type: 'review',
+        task: 'Review runtime correctness and report evidence.',
+      },
       effectClass: 'read_only',
       sideEffect: false,
     });
     queueCall(state, 'review-b', {
       name: 'task',
-      args: { subagent_type: 'review', task: 'Review test coverage and report evidence.' },
+      args: {
+        name: 'Review test coverage',
+        subagent_type: 'review',
+        task: 'Review test coverage and report evidence.',
+      },
       effectClass: 'read_only',
       sideEffect: false,
     });
@@ -733,13 +741,21 @@ describe('decideNextEffect', () => {
     });
     queueCall(state, 'code-a', {
       name: 'task',
-      args: { subagent_type: 'code', task: 'Implement the first workspace change.' },
+      args: {
+        name: 'Implement first workspace change',
+        subagent_type: 'code',
+        task: 'Implement the first workspace change.',
+      },
       effectClass: 'workspace_write',
       sideEffect: true,
     });
     queueCall(state, 'code-b', {
       name: 'task',
-      args: { subagent_type: 'code', task: 'Implement the second workspace change.' },
+      args: {
+        name: 'Implement second workspace change',
+        subagent_type: 'code',
+        task: 'Implement the second workspace change.',
+      },
       effectClass: 'workspace_write',
       sideEffect: true,
     });
@@ -760,7 +776,11 @@ describe('decideNextEffect', () => {
     for (let index = 0; index < MAX_PARALLEL_SUBAGENTS + 2; index++) {
       queueCall(state, `review-${index}`, {
         name: 'task',
-        args: { subagent_type: 'review', task: `Review independent concern ${index}.` },
+        args: {
+          name: `Review concern ${index}`,
+          subagent_type: 'review',
+          task: `Review independent concern ${index}.`,
+        },
         effectClass: 'read_only',
         sideEffect: false,
       });
@@ -960,7 +980,11 @@ describe('decideNextEffect', () => {
     });
     queueCall(state, 'deferred-task', {
       name: 'task',
-      args: { subagent_type: 'review', task: 'Review the deferred sibling.' },
+      args: {
+        name: 'Review deferred sibling',
+        subagent_type: 'review',
+        task: 'Review the deferred sibling.',
+      },
       effectClass: 'read_only',
       sideEffect: false,
     });
@@ -970,7 +994,11 @@ describe('decideNextEffect', () => {
       toolCallId: 'approved-task',
       modelMessageId: 'model',
       name: 'task',
-      args: { subagent_type: 'review', task: 'Resume the approved child.' },
+      args: {
+        name: 'Resume approved review',
+        subagent_type: 'review',
+        task: 'Resume the approved child.',
+      },
       status: 'approved',
       createdAtTurnId: state.turn.turnId,
     };
@@ -992,7 +1020,7 @@ describe('decideNextEffect', () => {
     for (const id of ['task-a', 'task-b']) {
       queueCall(state, id, {
         name: 'task',
-        args: { subagent_type: 'review', task: `Review ${id}.` },
+        args: { name: `Review ${id}`, subagent_type: 'review', task: `Review ${id}.` },
         effectClass: 'read_only',
         sideEffect: false,
       });
@@ -1032,6 +1060,174 @@ describe('decideNextEffect', () => {
     expect(state.tools.calls['task-a']?.status).toBe('approved');
     expect(state.tools.calls['task-b']?.status).toBe('queued');
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-a'] });
+  });
+
+  test('never schedules a deferred Subagent child tool ahead of its parent continuation', () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'deferred-child-tool-ownership',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    const parentToolCallId = 'task-deferred';
+    const childToolCallId = 'subagent-tool:deferred-shell';
+    const childModelInvocationId = 'child-model-deferred';
+    state.modelInvocations[childModelInvocationId] = {
+      invocationId: childModelInvocationId,
+      purpose: 'subagent',
+      status: 'completed',
+      surfaceArtifact: {
+        artifactId: `pa_${'a'.repeat(64)}`,
+        kind: 'model_surface',
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+        byteLength: 1,
+      },
+      surfaceIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
+      routeFingerprint: `sha256:${'c'.repeat(64)}`,
+      budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+      limits: { maxAttempts: 1, perAttemptTimeoutMs: 1, totalTimeBudgetMs: 1 },
+      preparedStateRevision: 0,
+      parentInvocationId: 'parent-model',
+      parentToolCallId,
+      attempts: 1,
+      finishReason: 'tool_calls',
+    };
+    state.tools.calls[childToolCallId] = {
+      toolCallId: childToolCallId,
+      modelInvocationId: childModelInvocationId,
+      modelMessageId: childModelInvocationId,
+      name: 'shell_execute',
+      args: { command: 'find packages/runtime-host/src -type f | sort' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls[parentToolCallId] = {
+      toolCallId: parentToolCallId,
+      modelInvocationId: 'parent-model',
+      modelMessageId: 'parent-model',
+      name: 'task',
+      args: { name: 'Inspect runtime', subagent_type: 'explore', task: 'Inspect runtime files.' },
+      status: 'queued',
+      effectClass: 'read_only',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [childToolCallId, parentToolCallId];
+    state.suspendedSubagents[parentToolCallId] = {
+      ...privateSuspensionRecord(parentToolCallId),
+      blockedTool: {
+        ...privateSuspensionRecord(parentToolCallId).blockedTool,
+        runtimeToolCallId: childToolCallId,
+      },
+    };
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: [parentToolCallId],
+    });
+    expect(state.tools.calls[childToolCallId]?.status).toBe('queued');
+  });
+
+  test('keeps completed siblings terminal while serializing concurrent child approvals', () => {
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'mixed-concurrent-child-approvals',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    for (const id of ['task-a', 'task-b', 'task-c']) {
+      queueCall(state, id, {
+        name: 'task',
+        args: { name: `Review ${id}`, subagent_type: 'review', task: `Review ${id}.` },
+        effectClass: 'read_only',
+        sideEffect: false,
+      });
+      state = reduceRuntimeState(state, { type: 'tool.started', toolCallId: id });
+    }
+    for (const id of ['task-a', 'task-b']) {
+      state = reduceRuntimeState(state, {
+        type: 'subagent.suspended',
+        toolCallId: id,
+        snapshot: privateSuspensionRecord(id),
+      });
+    }
+    state = reduceRuntimeState(state, {
+      type: 'approval.requested',
+      interactionId: 'approval-a',
+      toolCallId: 'task-a',
+      approval: {} as never,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'subagent.approval_deferred',
+      toolCallId: 'task-b',
+    });
+    state = reduceRuntimeState(
+      state,
+      normalizeCurrentToolOutcomeEvent(
+        {
+          type: 'tool.finished',
+          toolCallId: 'task-c',
+          name: 'task',
+          result: { ok: true, command: '', exitCode: 0, stdout: 'done', stderr: '' },
+        },
+        state,
+        '2026-08-24T00:00:00.000Z',
+      ),
+    );
+
+    expect(state.interactions).toMatchObject({
+      kind: 'awaiting_tool_approval',
+      interactionId: 'approval-a',
+      toolCallId: 'task-a',
+    });
+    expect(state.tools.calls['task-a']?.status).toBe('awaiting_approval');
+    expect(state.tools.calls['task-b']?.status).toBe('queued');
+    expect(state.tools.calls['task-c']?.status).toBe('succeeded');
+    expect(Object.keys(state.suspendedSubagents).sort()).toEqual(['task-a', 'task-b']);
+    expect(decideNextEffect(state)).toEqual({
+      type: 'request_tool_approval',
+      interactionId: 'approval-a',
+      toolCallId: 'task-a',
+    });
+
+    state = reduceRuntimeState(state, {
+      type: 'approval.granted',
+      interactionId: 'approval-a',
+      toolCallId: 'task-a',
+      grant: 'approve_once',
+    });
+    expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-a'] });
+
+    state = reduceRuntimeState(
+      state,
+      normalizeCurrentToolOutcomeEvent(
+        {
+          type: 'tool.finished',
+          toolCallId: 'task-a',
+          name: 'task',
+          result: { ok: true, command: '', exitCode: 0, stdout: 'resumed', stderr: '' },
+        },
+        state,
+        '2026-08-24T00:00:01.000Z',
+      ),
+    );
+    expect(state.tools.calls['task-a']?.status).toBe('succeeded');
+    expect(state.tools.calls['task-c']?.status).toBe('succeeded');
+    expect(Object.keys(state.suspendedSubagents)).toEqual(['task-b']);
+    expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-b'] });
+
+    state = reduceRuntimeState(state, {
+      type: 'approval.requested',
+      interactionId: 'approval-b',
+      toolCallId: 'task-b',
+      approval: {} as never,
+    });
+    expect(decideNextEffect(state)).toEqual({
+      type: 'request_tool_approval',
+      interactionId: 'approval-b',
+      toolCallId: 'task-b',
+    });
+    expect(state.tools.calls['task-c']?.status).toBe('succeeded');
   });
 
   test('resumes a queued tool after auto-review approval', () => {

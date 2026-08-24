@@ -147,12 +147,6 @@ function envelope(surfaceArtifactId: string, invocationId: string): ModelInvocat
       },
       surfaceIntegrityIdentifier: `sha256:${'4'.repeat(64)}`,
     },
-    admission: {
-      providerAdmissionRevision: 'policy-r1',
-      routeIdentityDigest: digest('5'),
-      payloadClassificationDigest: digest('6'),
-      admitted: true,
-    },
     provenance: {
       invocationId,
       threadId: 'thread-1',
@@ -181,12 +175,11 @@ function envelope(surfaceArtifactId: string, invocationId: string): ModelInvocat
 }
 
 describe('Model Surface protocol', () => {
-  test('keeps the five model purposes in an exhaustive one-to-one Provider mapping', () => {
+  test('keeps the four model purposes in an exhaustive one-to-one Provider mapping', () => {
     expect(MODEL_INVOCATION_PURPOSES_).toEqual([
       'primary_agent',
       'context_compaction',
       'auto_review',
-      'verification_review',
       'subagent',
     ]);
     expect(Object.keys(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_)).toEqual([
@@ -196,10 +189,9 @@ describe('Model Surface protocol', () => {
       'primary_model',
       'compaction',
       'auto_review',
-      'verification_review',
       'subagent',
     ]);
-    expect(new Set(Object.values(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_)).size).toBe(5);
+    expect(new Set(Object.values(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_)).size).toBe(4);
   });
 
   test('keeps response records JSON-safe without exposing an artifact path', () => {
@@ -407,7 +399,7 @@ describe('Model Surface layered digests', () => {
     }
   });
 
-  test('keeps invocation, admission, resource, time, process, and artifact identity outside surfaceDigest', () => {
+  test('keeps invocation, resource, time, process, and artifact identity outside surfaceDigest', () => {
     const surface = baseSurface();
     const before = computeModelSurfaceDigest(surface);
     const first = envelope('opaque-artifact-a', 'invocation-a');
@@ -415,7 +407,6 @@ describe('Model Surface layered digests', () => {
     second.provenance.threadId = 'thread-2';
     second.provenance.turnId = 'turn-2';
     second.provenance.stateRevision = 900;
-    second.admission.admitted = false;
     second.resource = {
       budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
       limits: { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 },

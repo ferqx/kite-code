@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  assertListRuntimeLogEventsRequest,
+  assertListRuntimeLogSessionsRequest,
   assertRuntimeCommand,
   isRuntimeCommand,
   RUNTIME_COMMAND_SCHEMA_,
@@ -50,5 +52,30 @@ describe('runtime contract package boundary', () => {
       subscribe: async function* () {},
     };
     expect(access).toBeDefined();
+  });
+
+  test('validates bounded opaque log cursors without SQLite or HTTP types', () => {
+    expect(() =>
+      assertListRuntimeLogSessionsRequest({
+        limit: 2,
+        cursor: { updatedAt: 10, sessionId: 'session-1' },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertListRuntimeLogEventsRequest({
+        sessionId: 'session-1',
+        direction: 'forward',
+        limit: 2,
+        afterSequence: 1,
+        beforeSequence: 2,
+      }),
+    ).toThrow('mutually exclusive');
+    expect(() =>
+      assertListRuntimeLogEventsRequest({
+        sessionId: 'session-1',
+        direction: 'forward',
+        limit: 201,
+      }),
+    ).toThrow('1 to 200');
   });
 });

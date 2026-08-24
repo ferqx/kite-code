@@ -32,7 +32,7 @@ import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
 import type { ThemePreset } from './theme';
 import { useTheme } from './theme';
-import type { TuiState } from './types';
+import type { OutputBlock, TuiState } from './types';
 
 export type { Action } from './reducers';
 export { createInitialState, eventReducer };
@@ -158,7 +158,10 @@ export default function App({
     layeredOverlayEscRef,
     onTogglePlanMode,
     () => {
-      if (state.interrupt) provider.submitAction({ type: 'cancel' });
+      if (state.interrupt) {
+        provider.submitAction({ type: 'cancel' });
+        if (state.interrupt.kind === 'approval') onAbort?.();
+      }
     },
     onAbort,
   );
@@ -278,7 +281,60 @@ export default function App({
     return undefined;
   }, [state.interrupt, state.turns]);
 
-  const resolveApproval = useCallback((_action: string, _grant?: string) => undefined, []);
+  const resolveApproval = useCallback(
+    (action: string, grant?: string) => {
+      // Runtime remains the durable source of truth, but an accepted approval
+      // has already been submitted synchronously by ApprovalBlock. Project that
+      // acknowledgement immediately so a suspended child does not keep saying
+      // "Awaiting your approval" until the continuation emits its next event.
+      // Rejections stay durable-event-driven because approval.rejected owns the
+      // terminal projection for the interrupted turn.
+      if (action !== 'approve') return;
+      const approvalInterrupt = state.interrupt?.kind === 'approval' ? state.interrupt : undefined;
+      const suspendedSubagents = state.turns.flatMap((turn) =>
+        turn.blocks.filter(
+          (block): block is Extract<OutputBlock, { kind: 'subagent' }> =>
+            block.kind === 'subagent' && block.status === 'suspended',
+        ),
+      );
+      const identityTarget =
+        (approvalInterrupt?.approval?.subagentId == null
+          ? undefined
+          : suspendedSubagents.find(
+              (block) => block.subagentId === approvalInterrupt.approval?.subagentId,
+            )) ??
+        (approvalInterrupt?.toolCallId == null
+          ? undefined
+          : suspendedSubagents.find(
+              (block) => block.parentToolCallId === approvalInterrupt.toolCallId,
+            ));
+      const awaitingUserTargets = suspendedSubagents.filter(
+        (block) =>
+          block.approvalState === 'awaiting_user' ||
+          (block.approvalState == null && block.awaitingApproval === true),
+      );
+      const approvalTarget =
+        identityTarget ?? (awaitingUserTargets.length === 1 ? awaitingUserTargets[0] : undefined);
+      dispatch({
+        type: 'RESOLVE_INTERRUPT',
+        ...(approvalTarget == null
+          ? {}
+          : {
+              approvalTarget: {
+                subagentId: approvalTarget.subagentId,
+                ...(approvalTarget.parentToolCallId == null
+                  ? {}
+                  : { parentToolCallId: approvalTarget.parentToolCallId }),
+              },
+            }),
+        resolution: {
+          action: 'approved',
+          ...(grant === undefined ? {} : { grant }),
+        },
+      });
+    },
+    [dispatch, state.interrupt, state.turns],
+  );
 
   const resolveInput = useCallback(
     (_answer: string, _answers?: Record<string, string>) => undefined,
@@ -345,7 +401,10 @@ export default function App({
         onToggleReason={onToggleReason}
         onToggleToolExpand={onToggleToolExpand}
         onToggleSubagentExpand={onToggleSubagentExpand}
-        overlayActive={overlayActive}
+        // Footer interactions own Enter/Escape while visible. Passing the
+        // complete capture boundary prevents the approval-confirming Enter
+        // from also toggling the last dynamic tool/Subagent card.
+        overlayActive={overlayOrInterrupt}
         awaitingApproval={awaitingApproval}
         awaitingInput={awaitingInput}
         columns={columns}
@@ -374,6 +433,9 @@ export default function App({
           )}
           {activeApproval && (
             <ApprovalBlock
+              key={`${state.interrupt?.interactionId ?? 'legacy'}:${
+                state.interrupt?.toolCallId ?? 'unknown-tool'
+              }:${activeApproval.approvalHash}`}
               approval={activeApproval}
               provider={provider}
               onResolved={resolveApproval}

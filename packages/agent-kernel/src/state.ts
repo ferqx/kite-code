@@ -245,7 +245,7 @@ export interface AgentPrivateArtifactRef {
   readonly integrityIdentifier: string;
   readonly byteLength: number;
 }
-export interface AgentModelAdmissionState {
+export interface AgentRetiredModelAdmissionState {
   readonly providerAdmissionRevision: string | null;
   readonly routeIdentityDigest: string;
   readonly payloadClassificationDigest: string;
@@ -276,7 +276,8 @@ export interface AgentModelInvocationState {
   readonly surfaceArtifact: AgentPrivateArtifactRef & { readonly kind: 'model_surface' };
   readonly surfaceIntegrityIdentifier: string;
   readonly routeFingerprint: string;
-  readonly admission: AgentModelAdmissionState;
+  /** Retained only when restoring an older session. Current producers omit it. */
+  readonly admission?: AgentRetiredModelAdmissionState;
   readonly budget: AgentModelBudgetState;
   readonly limits: AgentModelLimitsState;
   readonly preparedStateRevision: number;
@@ -298,6 +299,7 @@ export interface AgentModelInvocationState {
     | 'attempts_exhausted'
     | 'cancelled'
     | 'cancelled_before_dispatch'
+    | 'attempt_timeout'
     | 'provider_failure'
     | 'surface_identity_changed'
     | 'persistence_unavailable';

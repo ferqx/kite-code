@@ -23,6 +23,7 @@ import type {
 import { loadSession } from '../apps/kite/src/bootstrap/runtime/session-persistence';
 import {
   isSilentCancellationMismatch,
+  reconcileRuntimeInteractionMode,
   type SessionDeps,
   SessionManager,
   SessionRuntime,
@@ -55,7 +56,6 @@ import {
   runTestRuntimeAgent,
   testBuiltinToolCatalog,
   testModelInvocationRuntime,
-  testProviderDataAdmission,
   testRuntimeCapabilityExecutionPort,
 } from './helpers/runtime-model';
 import { createMockModel } from './mock-model';
@@ -165,21 +165,30 @@ function installTestOnlyRuntimeTurnAdapter(
   deps: SessionDeps,
   threadId: string,
 ): RuntimeSessionCoordinatorAccess {
+  let interactionMode: RuntimeState['mode'] = deps.config.interactionMode ?? 'accept_edits';
+  const modeState = (): Readonly<RuntimeState> =>
+    ({ mode: interactionMode }) as Readonly<RuntimeState>;
+  const processModeEvent = (event: RuntimeEvent): void => {
+    if (event.type === 'interaction_mode.changed') interactionMode = event.mode;
+  };
   const unavailableState = (): never => {
     throw new Error('test-only State control is unavailable while no turn is active');
   };
   const coordinator = {
     sessionId: threadId,
     control: {
-      getState: unavailableState,
-      processEvent: unavailableState,
-      processEventBatch: unavailableState,
+      getState: modeState,
+      processEvent: processModeEvent,
+      processEventBatch: (events) => {
+        for (const event of events) processModeEvent(event);
+        return events;
+      },
       cancelRun: () => [],
     },
     session: {} as RuntimeSessionCoordinator['session'],
     recoveryChanged: false,
     lifecycle: 'idle' as const,
-    getState: unavailableState,
+    getState: modeState,
     getStateRuntimeStorage: unavailableState,
     isTurnActive: () => false,
     beginTurn: () => undefined,
@@ -194,7 +203,6 @@ function installTestOnlyRuntimeTurnAdapter(
         {
           ...input,
           openStateRuntimeStorage: deps.openStateRuntimeStorage,
-          providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmission,
         },
         provider,
       ),
@@ -317,6 +325,70 @@ describe('interaction mode admission', () => {
 });
 
 describe('SessionManager', () => {
+  test('reconciles a mutable TUI interaction mode before Host recovery re-ensures identity', () => {
+    const deps = makeDeps();
+    deps.config = { ...deps.config, interactionMode: 'accept_edits' };
+    let retainedMode: SessionRuntime['interactionMode'] = 'accept_edits';
+    const readRetainedMode = (): SessionRuntime['interactionMode'] => retainedMode;
+    let registered = false;
+    const unavailable = (): never => {
+      throw new Error('unused test coordinator operation');
+    };
+    const coordinator = {
+      sessionId: '',
+      control: {
+        getState: unavailable,
+        processEvent: unavailable,
+        processEventBatch: unavailable,
+        cancelRun: () => [],
+      },
+      session: {} as RuntimeSessionCoordinator['session'],
+      recoveryChanged: false,
+      lifecycle: 'idle' as const,
+      getState: unavailable,
+      getStateRuntimeStorage: unavailable,
+      isTurnActive: () => false,
+      beginTurn: () => undefined,
+      endTurn: () => undefined,
+      updateInteractionMode: (mode: SessionRuntime['interactionMode']) => {
+        retainedMode = mode;
+      },
+      updateSandboxAvailable: () => undefined,
+      getSandboxAvailable: () => undefined,
+      setActiveCancelRun: () => undefined,
+      clearActiveCancelRun: () => undefined,
+      executeTurn: unavailable,
+      createRuntimeEffectPort: unavailable,
+      executePendingCompaction: unavailable,
+      waitForIdle: async () => undefined,
+      close: async () => undefined,
+    } satisfies RuntimeSessionCoordinator;
+    deps.runtimeSessionCoordinator = {
+      ensure: (identity) => {
+        if (registered && identity.interactionMode !== retainedMode) {
+          throw new Error('Runtime session identity drifted.');
+        }
+        registered = true;
+        retainedMode = identity.interactionMode;
+        return coordinator;
+      },
+      get: () => (registered ? coordinator : undefined),
+      release: async () => undefined,
+      close: async () => undefined,
+    };
+    const workspace = '/tmp/ws';
+    const manager = new SessionManager(deps);
+    const threadId = manager.createSession(workspace, {
+      projectId: 'project_test',
+      canonicalWorkspaceDigest: `sha256:${createHash('sha256').update(workspace).digest('hex')}`,
+    });
+
+    manager.getRuntime(threadId)!.interactionMode = 'auto';
+
+    expect(manager.recoverRuntimeState(threadId)).toBe(false);
+    expect(readRetainedMode()).toBe('auto');
+  });
+
   test('does not restore an approval resolved after the rolling snapshot', async () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-resolved-approval-'));
     const checkpointPath = join(root, 'checkpoints.sqlite');
@@ -1802,7 +1874,7 @@ describe('SessionManager', () => {
           threadId,
           '0'.repeat(64),
         ),
-      ).rejects.toThrow('Runtime format is incompatible');
+      ).rejects.toThrow('Runtime session retired-session-tail is unavailable: corrupted');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2101,6 +2173,41 @@ describe('SessionRuntime', () => {
     }
   });
 
+  test('reconciles a restored Kernel mode before the next turn uses its governance state', () => {
+    const kernel = restoreStateKernelCoordinator({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'restored-mode-reconciliation',
+      userId: 'tui',
+      workspace: '/tmp/ws',
+      store: openStateStoreForTest(':memory:'),
+      interactionMode: 'accept_edits',
+      sandboxAvailable: true,
+    });
+    const control = {
+      getState: () => kernel.getState(),
+      processEvent: (event: RuntimeEvent) => {
+        kernel.processEvent(event);
+      },
+      processEventBatch: (events: RuntimeEvent[]) => kernel.processEventBatch(events),
+      cancelRun: () => [],
+    };
+    try {
+      const revision = kernel.getState().revision;
+
+      expect(reconcileRuntimeInteractionMode(control, 'auto', '2026-08-24T00:00:00.000Z')).toBe(
+        true,
+      );
+      expect(kernel.getState().mode).toBe('auto');
+      expect(kernel.getState().revision).toBe(revision + 1);
+      expect(reconcileRuntimeInteractionMode(control, 'auto', '2026-08-24T00:00:01.000Z')).toBe(
+        false,
+      );
+      expect(kernel.getState().revision).toBe(revision + 1);
+    } finally {
+      kernel.close();
+    }
+  });
+
   test('does not advance retained identity when the durable mode event is rejected', () => {
     const rt = makeRuntime();
     let mirroredMode: SessionRuntime['interactionMode'] = 'accept_edits';
@@ -2326,10 +2433,10 @@ describe('SessionRuntime', () => {
         subject: 'release result',
         checks: [
           {
-            checkId: 'review',
-            type: 'reviewer',
-            description: 'review evidence',
-            instructions: 'verify release',
+            checkId: 'receipt',
+            type: 'receipt',
+            description: 'check release receipt',
+            invocationId: 'release-invocation',
           },
         ],
         repair: { maxAttempts: 0 },
@@ -2712,7 +2819,7 @@ describe('SessionRuntime', () => {
         modelName: 'test',
         providerName: 'test',
         providerType: 'openai-compatible' as const,
-        interactionMode: 'auto' as const,
+        interactionMode: 'full' as const,
         sandbox: { enabled: true },
       },
       provider: new TuiUserInputProvider(),
@@ -3005,10 +3112,80 @@ describe('SessionRuntime', () => {
     ).toBeNull();
   });
 
-  test('resolveInterrupt is no-op when no pending resolve', () => {
+  test('resolveInterrupt is no-op when no pending resolve or durable interaction', () => {
     const rt = makeRuntime();
     // should not throw
     rt.resolveInterrupt({ type: 'cancel' } as unknown as TuiAction);
+  });
+
+  test('queues an early UI decision until the Runtime interaction waiter attaches', async () => {
+    const deps = makeDeps();
+    deps.runtimeSessionCoordinator = {
+      get: () => ({
+        getState: () => ({
+          interactions: {
+            kind: 'awaiting_tool_approval',
+            interactionId: 'approval-race-1',
+          },
+        }),
+      }),
+    } as unknown as RuntimeSessionCoordinatorAccess;
+    const rt = new SessionRuntime('approval-race', '/tmp/ws', deps);
+    const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
+
+    rt.resolveInterrupt({ type: 'approve', grant: 'approve_once' });
+
+    await expect(proxy.requestAction({ kind: 'approval', approval: {} })).resolves.toEqual({
+      type: 'approve',
+      grant: 'approve_once',
+    });
+  });
+
+  test('queues an early Escape cancellation until the Runtime interaction waiter attaches', async () => {
+    const deps = makeDeps();
+    deps.runtimeSessionCoordinator = {
+      get: () => ({
+        getState: () => ({
+          interactions: {
+            kind: 'awaiting_tool_approval',
+            interactionId: 'approval-race-escape',
+          },
+        }),
+      }),
+    } as unknown as RuntimeSessionCoordinatorAccess;
+    const rt = new SessionRuntime('approval-race-escape', '/tmp/ws', deps);
+    const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
+
+    rt.resolveInterrupt({ type: 'cancel' });
+
+    await expect(proxy.requestAction({ kind: 'approval', approval: {} })).resolves.toEqual({
+      type: 'cancel',
+    });
+  });
+
+  test('does not carry an early UI decision into a different Runtime interaction', async () => {
+    const deps = makeDeps();
+    let interactionId = 'approval-race-1';
+    deps.runtimeSessionCoordinator = {
+      get: () => ({
+        getState: () => ({
+          interactions: {
+            kind: 'awaiting_tool_approval',
+            interactionId,
+          },
+        }),
+      }),
+    } as unknown as RuntimeSessionCoordinatorAccess;
+    const rt = new SessionRuntime('approval-race', '/tmp/ws', deps);
+    const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
+
+    rt.resolveInterrupt({ type: 'cancel' });
+    interactionId = 'approval-race-2';
+    const waiting = proxy.requestAction({ kind: 'approval', approval: {} });
+    await Bun.sleep(0);
+    rt.resolveInterrupt({ type: 'approve', grant: 'approve_once' });
+
+    await expect(waiting).resolves.toEqual({ type: 'approve', grant: 'approve_once' });
   });
 
   // ── _pushToBuffer (via private access) ──

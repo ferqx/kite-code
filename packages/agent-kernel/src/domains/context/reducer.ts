@@ -11,7 +11,6 @@ import {
 } from '../../reducer-utils';
 import type {
   AgentContextState,
-  AgentModelAdmissionState,
   AgentModelBudgetState,
   AgentModelInvocationState,
   AgentModelLimitsState,
@@ -37,7 +36,6 @@ const COMPACTION_ERROR_KINDS: readonly ContextCompactionErrorKind[] = [
   'unsafe_boundary',
   'oversized_turn',
   'summary_model_failed',
-  'provider_admission_denied',
   'summary_aborted',
   'empty_summary',
   'truncated_summary',
@@ -251,7 +249,6 @@ function modelPurpose(value: unknown): AgentModelInvocationState['purpose'] | un
   return value === 'primary_agent' ||
     value === 'context_compaction' ||
     value === 'auto_review' ||
-    value === 'verification_review' ||
     value === 'subagent'
     ? value
     : undefined;
@@ -284,6 +281,7 @@ function modelInterruptionReason(
     value === 'attempts_exhausted' ||
     value === 'cancelled' ||
     value === 'cancelled_before_dispatch' ||
+    value === 'attempt_timeout' ||
     value === 'provider_failure' ||
     value === 'surface_identity_changed' ||
     value === 'persistence_unavailable'
@@ -317,28 +315,6 @@ function privateArtifact<K extends 'model_surface' | 'model_response'>(
     return undefined;
   }
   return { kind, artifactId, integrityIdentifier, byteLength };
-}
-
-function modelAdmission(value: unknown): AgentModelAdmissionState | undefined {
-  const candidate = objectValue(value);
-  if (!candidate) return undefined;
-  const providerAdmissionRevision = candidate.providerAdmissionRevision;
-  const routeIdentityDigest = nonEmptyStringField(candidate, 'routeIdentityDigest');
-  const payloadClassificationDigest = nonEmptyStringField(candidate, 'payloadClassificationDigest');
-  if (
-    (providerAdmissionRevision !== null && typeof providerAdmissionRevision !== 'string') ||
-    !routeIdentityDigest ||
-    !payloadClassificationDigest ||
-    typeof candidate.admitted !== 'boolean'
-  ) {
-    return undefined;
-  }
-  return {
-    providerAdmissionRevision: providerAdmissionRevision as string | null,
-    routeIdentityDigest,
-    payloadClassificationDigest,
-    admitted: candidate.admitted,
-  };
 }
 
 function modelBudget(value: unknown): AgentModelBudgetState | undefined {
@@ -696,7 +672,6 @@ export function reduceContextState(
       const surfaceArtifact = privateArtifact(payload.surfaceArtifact, 'model_surface');
       const surfaceIntegrityIdentifier = nonEmptyStringField(payload, 'surfaceIntegrityIdentifier');
       const routeFingerprint = nonEmptyStringField(payload, 'routeFingerprint');
-      const admission = modelAdmission(payload.admission);
       const budget = modelBudget(payload.budget);
       const limits = modelLimits(payload.limits);
       const preparedStateRevision = numberField(payload, 'preparedStateRevision');
@@ -709,7 +684,6 @@ export function reduceContextState(
         !surfaceArtifact ||
         !surfaceIntegrityIdentifier ||
         !routeFingerprint ||
-        !admission ||
         !budget ||
         !limits ||
         !isSafeNonNegativeInteger(preparedStateRevision) ||
@@ -729,7 +703,6 @@ export function reduceContextState(
             surfaceArtifact,
             surfaceIntegrityIdentifier,
             routeFingerprint,
-            admission,
             budget,
             limits,
             preparedStateRevision,

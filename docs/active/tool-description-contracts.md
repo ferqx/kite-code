@@ -1,8 +1,8 @@
 # 当前规则：工具描述即契约
 
 状态：active
-最后更新：2026-08-21
-最后验证：2026-08-21
+最后更新：2026-08-24
+最后验证：2026-08-24
 范围：
 
 - `packages/builtin-runtime/src/tool-contracts.ts`
@@ -44,8 +44,8 @@
 
 当前单一事实源是已冻结的 `CapabilityRegistrySnapshot`：
 `createBuiltinToolCatalogProjection()` 从同一 SPI snapshot 投影模型 ToolSet、parser/canonicalizer、
-availability、effects、traits、descriptor 与 operation/executor revision。包测试机械断言该 projection 的 29
-个 operation 中恰有 20 个 `visibility: model` 和 9 个 `visibility: internal`，并逐项比较 schema、revision、
+availability、effects、traits、descriptor 与 operation/executor revision。包测试机械断言该 projection 的 28
+个 operation 中恰有 20 个 `visibility: model` 和 8 个 `visibility: internal`，并逐项比较 schema、revision、
 executor revision 与 effects；这些数字不是手工文档事实。App Tool Pipeline 与 Tool Controller 只消费 projection，不能重新声明
 schema、parser、effects 或 executor owner。旧 Core Tool Runner 已物理删除；Kernel 只拥有 governance/admission decision。
 源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，RM-16 final
@@ -67,7 +67,7 @@ Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen
 - 任何失败指导投影都只能读取 Builtin contract 的规范化 `recovery` 结果；禁止维护按工具名分支的第二份 recovery guidance。test-only 兼容体也必须遵守同一规则。
 - 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
 - `task` 契约首句必须说明只委派有界、自包含且值得隔离调用的工作；模型自主选择 role，架构或设计规划使用只读 `plan`，只读审查使用 `review`，仅在用户任务要求实施时使用 `code`。多个有价值且独立的任务应在同一响应中作为 sibling calls 派发，让 Runtime 在共享预算内有界并发；依赖前序结果的任务以及写范围重叠的 code tasks 必须串行。用户明确要求不委派时必须遵守。完整 role schema 在 Planning/Building 保持稳定，Planning 中 code/review 由 Runtime Policy 返回 phase constraint。public JSON 必须回传终态 `terminalStatus`（存在时）以区分 completed、failed、cancelled 与 exhausted；只额外允许成功 planning plan child 产生 governed `nextActions`，不得让字段表与文字说明漂移。
-- `task` 的 raw 模型输入形态是严格闭合的 `{subagent_type, task}`；Model Controller 必须在 queue commit 前把正文写入 private Artifact，durable 形态只允许独立的 `{subagent_type, taskArtifact}` 严格分支。二者不得混合，否则 Builtin parser 与 Tool Pipeline 必须在 hydration、Provider 与 child dispatch 前返回 `invalid_arguments`。当前格式不恢复已持久化 raw Task，也不把 private 字段暴露到模型 schema。
+- `task` 的 raw 模型输入形态是严格闭合的 `{name, subagent_type, task}`。`name` 是主 Agent 显式提供、用于 TUI 与 Runtime Event 的公开名称，必须简短说明子 Agent 正在做什么；它本来就是展示字段，不按隐私数据处理，也不得再从任务正文第一行推导。Model Controller 必须在 queue commit 前把任务正文写入 private Artifact，durable 形态只允许独立的 `{name, subagent_type, taskArtifact}` 严格分支。二者不得混合，否则 Builtin parser 与 Tool Pipeline 必须在 hydration、Provider 与 child dispatch 前返回 `invalid_arguments`。当前格式不恢复已持久化 raw Task，也不把任务正文暴露到模型 schema。
 - `git_inspect` 仅描述 status/diff/log/branch-list 的 typed broker；不能把 raw shell、Git 写操作或 remote Git 写成 fallback。
 - 五个 filesystem 工具的 path 文案必须与 ADR-0118 一致：read/search 接受 Workspace-relative、absolute 与
   `~` 路径且不把外部读取描述成审批；write/edit 对受信任 Workspace 内路径可直接执行，对 Workspace 外
@@ -118,9 +118,9 @@ Builtin result projection 的完整文本（含 marker）都必须保持在 64 K
 
 ### `ask_user` 模型输入边界
 
-`ask_user` 的模型参数只有一种规范形态：顶层必须且只能使用 `questions` 数组，单问题也是长度为 1 的数组。每次调用包含 1-3 个问题，每个问题包含 `question` 和 2-3 个 `{label, description, recommended}` 选项，且必须有且仅有一个选项设置 `recommended: true`，其余选项设置为 `recommended: false`。模型不得提交顶层 `question`/`options`、`recommended` 或 `allow_free_text`，也不得显式添加 `Other` 选项。
+`ask_user` 的模型参数只有一种规范形态：顶层必须且只能使用 `questions` 数组，单问题也是长度为 1 的数组。每次调用包含 1-3 个问题，每个问题包含 `question` 和 2-3 个 `{label, description, recommended?}` 选项。推荐选项必须排在首位；`recommended` 仅为可选的显式标记，最多一个选项可设置为 `true`。模型不得提交顶层 `question`/`options`、`recommended` 或 `allow_free_text`，也不得显式添加 `Other` 选项。
 
-Builtin catalog 的输入 schema/parser 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`normalizeAskUserRequest()` 在 schema 校验后生成稳定的问题/选项 ID，并根据选项上的 `recommended: true` 派生内部推荐项，再为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
+Builtin catalog 的输入 schema/parser 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`normalizeAskUserRequest()` 在 schema 校验后生成稳定的问题/选项 ID；使用显式 `recommended: true`，否则稳定回退到首项，派生内部推荐项，再为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
 
 `ask_user` 只属于主 Agent 的模型工具面。`task` 必须在派发前携带已澄清的自包含指令；所有 child role 都从工具声明中移除 `ask_user`。若仍缺少必要前提，child 必须在最终结果中报告给 parent，不得打开或转交用户交互。Full/Plan 模式允许提问仅指主 Agent 可在委派前调用 `ask_user`。
 

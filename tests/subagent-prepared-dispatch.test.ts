@@ -59,6 +59,7 @@ assertTaskEntry(taskEntryCandidate);
 const TASK_ENTRY: TaskCatalogEntry = taskEntryCandidate;
 
 const TASK_ARGUMENTS = Object.freeze({
+  name: 'Implement delegated fixture',
   subagent_type: 'code' as const,
   taskArtifact: Object.freeze({
     artifactId: `pa_${'a'.repeat(64)}`,

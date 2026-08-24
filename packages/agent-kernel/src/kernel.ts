@@ -1,4 +1,4 @@
-import { assertCurrentRuntimeEvent } from './codec';
+import { assertCurrentRuntimeEventForWrite } from './codec';
 import type { KernelEvent, KernelEventEnvelope } from './events';
 import { sha256Hex } from './hash';
 import {
@@ -241,7 +241,7 @@ export function decide<
   const payloads: Event[] = [];
   const envelopes: KernelEventEnvelope<Event>[] = [];
   for (const [index, candidate] of input.events.entries()) {
-    assertCurrentRuntimeEvent(candidate);
+    assertCurrentRuntimeEventForWrite(candidate);
     const eventFact = facts.eventFacts[index]!;
     const normalized = normalizeAgentEvent(candidate, nextState, eventFact.occurredAt);
     const eventId = digestAgentEvent(normalized);

@@ -20,7 +20,7 @@
 
 6. **人机交互停止计时**：进入审批、提问或方案评审等待时，承载该交互前置过程的当前 Thought 必须置为 `active=false` 并冻结 `totalElapsedMs`。工具审批载荷只进入 Footer interrupt，标题内展示待授权命令；审批目标在 `tool.started` 前仍不物化，同批的其他未来调用也不进入渲染树。用户阅读、审批或输入答案的耗时不计入任何 Thought 模型时长。
 
-7. **队列事实与展示事实分离**：Runtime 会先为同一模型响应中的全部工具发出 `tool.queued`。TUI 只把 callId/name/args 保存在会话级临时 `pendingToolCalls`，不创建 `tool_card` 或 `tool_summary`；该映射必须随会话快照保存并由 event-log replay 重建，避免切换或恢复投影后丢失后续 `tool.started` / 终态事件的名称与参数。只有收到 `tool.started`，或在开始前直接失败且需要展示诊断时才物化。审批请求与待授权命令只显示在 Footer；用户拒绝或取消任一工具审批时，审批目标和其他未开始 sibling 的临时元数据直接删除，不留下消息块，整个当前 turn 转为空闲。已经开始的 sibling 保留并按 cancelled 终态收尾。OutputArea 不再推断执行前沿，也不负责隐藏未来 queued 块（ADR-0049）。
+7. **队列事实与展示事实分离**：Runtime 会先为同一模型响应中的全部工具发出 `tool.queued`。TUI 只把 callId/name/args 保存在会话级临时 `pendingToolCalls`，不创建 `tool_card` 或 `tool_summary`；该映射必须随会话快照保存并由 event-log replay 重建，避免切换或恢复投影后丢失后续 `tool.started` / 终态事件的名称与参数。只有收到 `tool.started`，或在开始前直接失败且需要展示诊断时才物化。审批请求与待授权命令只显示在 Footer；用户拒绝或取消任一工具审批时，审批目标和其他未开始 sibling 的临时元数据直接删除，不留下消息块，整个当前 turn 转为空闲。已经开始的 sibling 保留并按 cancelled 终态收尾。`subagent-tool:*` 是例外：其完整生命周期仍保留在 Runtime/journal，但 TUI 不得把它写入 `pendingToolCalls` 或物化为通用工具卡；可见进度仅由所属 `SubAgentBlock` 的 `subagent.*` 事件更新，避免并发 `Delegating` 仍活动时混入看似父 Agent 后续工作的独立卡片。OutputArea 不再推断执行前沿，也不负责隐藏未来 queued 块（ADR-0049）。
 
 8. **副作用感知调度**：TUI 只负责按事件边界截断 Thought，不重排、拆批或取消 Runtime 工具。Agent Kernel Scheduler 可把连续、已证明 `read_only + sideEffect=false`、无交互语义且无需审批的内置读取组成最多 4 项的并行批次；交互、Plan/Skill/Task/Tool Search、动态 MCP、写入、未知或审批调用保持独占并截断批次。批内调用各自收到 `tool.started` 后进入同一活动 Thought，并按各自 `tool_done` 渐进更新。
 

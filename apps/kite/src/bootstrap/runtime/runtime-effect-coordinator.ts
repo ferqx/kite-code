@@ -19,7 +19,6 @@ import {
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
 } from '@kite/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
-import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import { readPrivateSuspendedSubagent } from '../../runtime/tool-execution/subagent-executor';
 import {
   type ContextCompactor,
@@ -30,8 +29,6 @@ import {
   type RuntimeExecutorDependencies,
   resolveAutoReviewTimeout,
   resolveRuntimeContextProjectionEnvironment,
-  reviewerProviderDataAdmission,
-  runtimeProviderDataAdmission,
 } from './runtime-effect-dependencies';
 import { executeAppRuntimeToolsEffect } from './runtime-tool-effect';
 import type {
@@ -162,7 +159,6 @@ export function createAppRuntimeEffectExecutor(
           state,
           projectionEnvironmentDigest: digestProjectionEnvironment(projectionEnvironment),
           signal: dependencies.signal,
-          providerDataAdmission: runtimeProviderDataAdmission(dependencies),
           maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
           maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
           maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
@@ -239,28 +235,11 @@ export function createAppRuntimeEffectExecutor(
       effect.type === 'repair_verification' ||
       effect.type === 'run_verification_compensation'
     ) {
-      const { modelEffectCoordinator } = requireModelCoordinatorDependencies(dependencies);
       return executeVerificationEffect(effect, state, {
         shellExecutor: dependencies.shellExecutor,
         mcpManager: dependencies.mcpManager,
         artifactStore: dependencies.capabilityArtifactStore,
         signal: dependencies.signal,
-        reviewer: async (evidence) => {
-          const reviewerConfig = resolveAutoReviewConfig(dependencies.config);
-          return modelEffectCoordinator.reviewVerificationEvidence({
-            config: reviewerConfig,
-            persistence: executionContext
-              ? {
-                  getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
-                  persistEvents: executionContext.persistEvents,
-                }
-              : undefined,
-            evidence,
-            timeoutMs: dependencies.config.autoReview?.timeoutMs ?? 30_000,
-            providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
-            parentReservationId: executionContext?.reservationIds[0],
-          });
-        },
       });
     }
     if (effect.type !== 'call_model') {
@@ -292,7 +271,6 @@ export function createAppRuntimeEffectExecutor(
       signal: dependencies.signal,
       emitRuntimeEvent: emit,
       compactionReporter: dependencies.compactionReporter,
-      providerDataAdmission: runtimeProviderDataAdmission(dependencies),
       resourceAdmission: effect.resourceEstimate,
       modelEffectCoordinator,
       modelInvocationPersistence,
@@ -441,7 +419,6 @@ async function projectAutoReviewEffect(
           : {}),
       },
       timeoutMs: resolveAutoReviewTimeout(dependencies.config),
-      providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
       parentInvocationId: call.modelInvocationId,
     });
     const reviewReason = result.suggestion?.reason ?? result.reason;
@@ -450,11 +427,13 @@ async function projectAutoReviewEffect(
       toolCallId: effect.toolCallId,
       ok: result.ok,
       approved: result.suggestion?.approved ?? false,
+      ...(result.suggestion?.requiresUserApproval ? { requiresUserApproval: true as const } : {}),
       ...(result.suggestion?.grant ? { grant: result.suggestion.grant } : {}),
       ...(reviewReason ? { reason: reviewReason } : {}),
       ...(result.failureType ? { failureType: result.failureType } : {}),
     });
     const accepted = decision.kind === 'accepted_approval';
+    const escalated = decision.kind === 'request_user_approval';
 
     const completed: RuntimeEvent = {
       type: 'auto_review.completed',
@@ -465,7 +444,7 @@ async function projectAutoReviewEffect(
         ? {
             ok: true,
             approved: accepted,
-            ...(!accepted ? { escalatedToUser: true as const } : {}),
+            ...(escalated ? { escalatedToUser: true as const } : {}),
             ...(accepted ? { grant: decision.grant } : {}),
             reason: accepted ? reviewReason : decision.reason,
             reviewerModelName: reviewerConfig.modelName ?? reviewerConfig.providerName ?? 'unknown',
@@ -480,7 +459,7 @@ async function projectAutoReviewEffect(
             durationMs: Date.now() - startTime,
           },
     };
-    if (!accepted) {
+    if (escalated) {
       return [
         completed,
         {
@@ -496,7 +475,6 @@ async function projectAutoReviewEffect(
     }
     return [completed];
   } catch (error) {
-    if (error instanceof ProviderDataAdmissionError) throw error;
     const reason = error instanceof Error ? error.message : String(error);
     const decision = decideAutoReview({
       reviewId: effect.reviewId,

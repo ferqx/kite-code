@@ -126,6 +126,23 @@ describe('builtin runtime package boundary', () => {
         },
       ],
     });
+
+    expect(
+      normalizeAskUserRequest({
+        questions: [
+          {
+            question: 'Choose a scope?',
+            options: [
+              { label: 'Focused', description: 'Cover the critical path.' },
+              { label: 'Complete', description: 'Cover the full rollout.' },
+            ],
+          },
+        ],
+      }),
+    ).toMatchObject({
+      recommended: 'q1-o1',
+      questions: [{ recommended: 'q1-o1' }],
+    });
   });
 
   test('owns the accepted Kite-specific domain vocabulary', () => {
@@ -163,7 +180,7 @@ describe('builtin runtime package boundary', () => {
   test('registers the exact RM-10 through RM-15 owners and executors', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     expect(registry.operationOwner(TOOL_SEARCH_CAPABILITY_ID_)).toBe('kite-builtin-runtime');
-    expect(registry.snapshot().capabilities).toHaveLength(29);
+    expect(registry.snapshot().capabilities).toHaveLength(28);
     expect(registry.capability(TOOL_SEARCH_CAPABILITY_ID_)).toMatchObject({
       capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
       revision: TOOL_SEARCH_CAPABILITY_REVISION_,
@@ -246,7 +263,7 @@ describe('builtin runtime package boundary', () => {
     });
   });
 
-  test('projects all 29 registered operations and exactly 20 model tools', () => {
+  test('projects all 28 registered operations and exactly 20 model tools', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
@@ -259,9 +276,9 @@ describe('builtin runtime package boundary', () => {
         featureFlags: { brokeredGit: true, skillWorkflow: true, skillActivation: true },
       },
     });
-    expect(projection.entries).toHaveLength(29);
+    expect(projection.entries).toHaveLength(28);
     expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(20);
-    expect(projection.entries.filter((entry) => entry.visibility === 'internal')).toHaveLength(9);
+    expect(projection.entries.filter((entry) => entry.visibility === 'internal')).toHaveLength(8);
     const expectedMechanisms: Readonly<Record<string, CapabilityExecutionMechanism>> = {
       'builtin:tool_search': 'catalog',
       'builtin:web_fetch': 'web',
@@ -290,10 +307,9 @@ describe('builtin runtime package boundary', () => {
       'model:primary': 'model',
       'model:compaction': 'model',
       'model:auto_review': 'model',
-      'model:verification_review': 'model',
       'model:subagent': 'model',
     };
-    expect(Object.keys(expectedMechanisms)).toHaveLength(29);
+    expect(Object.keys(expectedMechanisms)).toHaveLength(28);
     expect(projection.entries.map((entry) => entry.operationId).sort()).toEqual(
       Object.keys(expectedMechanisms).sort(),
     );
@@ -859,6 +875,7 @@ describe('builtin runtime package boundary', () => {
       enum: ['explore', 'plan', 'code', 'review'],
     });
     const privateInput = {
+      name: 'Inspect delegated code',
       subagent_type: 'explore',
       taskArtifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
@@ -871,7 +888,7 @@ describe('builtin runtime package boundary', () => {
     expect(task.parseModelInput(privateInput).success).toBe(false);
     expect(
       task.parseModelInput(
-        { subagent_type: 'plan', task: 'inspect the architecture' },
+        { name: 'Inspect architecture', subagent_type: 'plan', task: 'inspect the architecture' },
         {
           phase: 'planning',
         },

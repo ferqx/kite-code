@@ -50,6 +50,7 @@
 | `../active/completion-guard.md` | active | CompletionGuard V1、完成前的可审计 blocker 与一次纠正语义 | 修改 Runtime 完成语义、Scheduler、Runner、Plan/Skill 生命周期或相关测试时必读。 |
 | `../active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
 | `../active/session-logging-policy.md` | active | Session logger 的 off/metadata/content 组合、metadata allowlist 与正文禁止边界 | 修改 SessionLogCollector、日志事件映射、日志目录创建或 sessionLoggingPolicyV1 时必读。 |
+| `../active/sqlite-runtime-log-query.md` | active | SQLite Runtime Store 的只读会话与事件查询、展示投影与数据边界 | 修改 Runtime Store event/session 数据、日志查询 Contract、SQLite reader、App 日志展示投影，或实现本地日志 Server/Web 时。 |
 | `../active/execution-platform-support.md` | active | 生产执行平台的原生能力探针、技术结论与治理准入矩阵 | 修改 sandbox backend、process-tree/network 边界、TUI/CLI 入口组合或平台发布支持声明时必读。 |
 | `../active/execution-boundary.md` | active | Release-pinned ExecutionBoundaryV1、sealed qualification registry 与 production composition gate | 修改生产执行边界、sandbox capability projection、只读 fallback catalog 或 executionBoundaryV1 flag 时必读。 |
 | `../active/windows-shell-sandbox.md` | active | Windows Shell 沙箱 — direct restricted-token、受管 Online 身份与 strict qualification 边界 | 修改 Windows execution backend、native runner、ACL/Job/ledger、受管身份、native 协议或 Windows filesystem/network/Full/fallback 边界时必读。 |

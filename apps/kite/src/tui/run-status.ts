@@ -114,7 +114,12 @@ function activeBlockVerb(state: TuiState): { verb: string; tone: RunStatusTone }
   if (autoReview?.kind === 'subagent') return { verb: 'Auto-reviewing', tone: 'primary' };
   const queuedReview = findBlock(
     state,
-    (b) => b.kind === 'subagent' && b.status === 'suspended' && b.approvalState === 'queued',
+    (b) =>
+      b.kind === 'subagent' &&
+      b.status === 'suspended' &&
+      (b.approvalState === 'queued' ||
+        b.approvalState === 'queued_auto_review' ||
+        b.approvalState === 'queued_user_approval'),
   );
   if (queuedReview?.kind === 'subagent') return { verb: 'Review queued', tone: 'primary' };
   // Subagent running

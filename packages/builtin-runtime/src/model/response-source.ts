@@ -29,14 +29,20 @@ export interface ModelResponseSource {
 
 export class ModelAttemptFailureError extends Error {
   readonly outcome: Exclude<ModelAttemptOutcome, { kind: 'success' }>;
+  readonly invocationId?: string;
 
-  constructor(outcome: Exclude<ModelAttemptOutcome, { kind: 'success' }>, cause?: Error) {
+  constructor(
+    outcome: Exclude<ModelAttemptOutcome, { kind: 'success' }>,
+    cause?: Error,
+    invocationId?: string,
+  ) {
     super(
       `MODEL_ATTEMPT_${outcome.kind.toUpperCase()}:${outcome.classification}`,
       cause ? { cause } : undefined,
     );
     this.name = 'ModelAttemptFailureError';
     this.outcome = outcome;
+    this.invocationId = invocationId;
   }
 }
 
