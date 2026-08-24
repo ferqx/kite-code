@@ -61,9 +61,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    持久事件等 semantic receipt 的场景预算必须分离；慢 CI 不能因输入框先清空而把后者缩短到
    delivery budget。跨进程回放场景的 test deadline 还必须覆盖独立的持久事件预算和后续 restart/
    selector replay，不得让外层测试先于其语义阶段超时。
-   Bracketed paste 必须使用 `pasteText()` 取得当前活动输入的精确回执；只有整个 PTY
-   transaction 丢失且输入仍可证明为空时才能有界重试。部分、变形或 focus 改变后的
-   delivery 必须 fail closed，不得重放并冒险重复用户内容。
+   普通单行多词模型消息与显式 paste/多行输入必须由 `pasteText()` 以单个 bracketed-paste
+   transaction 投递，并取得当前活动输入的完整等值回执。没有回执不能证明 transaction 未到达 Ink，
+   因而不得重放；部分、变形、延迟或 focus 改变后的 delivery 必须 fail closed，不得冒险重复用户内容。
    需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自
@@ -77,7 +77,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    `one hundred` 的成功回执。该 projection 不是任意光标位置的通用编辑器状态解析器。它不能把视觉
    光标当作逻辑空格，也不能因此删除用户真实输入的 leading/trailing blank。显式换行与重复空白可以
    做等价规范化，但逻辑词边界和前导空白不能被删除：它们会把普通消息改义，
-   也会把 `/command` 变成普通文本。replacement 输入重试必须按已尝试字符确定性回滚到空基线，并
+   也会把 `/command` 变成普通文本。逐字符 replacement 输入重试必须按已尝试字符确定性回滚到空基线，并
    额外清除 VT 投影可能裁掉的 bounded whitespace；不能仅因输入投影看起来为空就停止回滚。
    `typeText()` 默认要求空输入语义：主输入或搜索框若已有残留，先恢复为空再
    输入；确实追加到合法非空输入时必须显式传入 `append: true`，例如 Shift+Enter 多行输入。追加重试

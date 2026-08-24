@@ -11,6 +11,7 @@ export async function sleep(ms: number): Promise<void> {
 
 const INPUT_SETTLE_MS = 100;
 const INPUT_ECHO_TIMEOUT_MS = 2_000;
+const INPUT_PASTE_ECHO_TIMEOUT_MS = 5_000;
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
@@ -319,10 +320,10 @@ export async function typeText(
     /\s/u.test(text) &&
     !text.startsWith('/')
   ) {
-    // A trailing blank is not rendered consistently by every Ink surface, so
-    // it cannot provide a per-character semantic receipt. Deliver ordinary
-    // multi-word main-input text as one bracketed-paste transaction and use
-    // pasteText's exact all-or-nothing viewport receipt instead.
+    // Internal spaces are not projected consistently enough for a safe
+    // per-character receipt on every Ink/PTY surface. Deliver the complete
+    // replacement as one transaction, but never replay it: an unobserved
+    // write may still have reached Ink and a retry could duplicate user text.
     await pasteText(tui, text, {
       echoTimeoutMs: options.testTiming?.echoTimeoutMs,
       settleMs: options.testTiming?.settleMs,
@@ -427,9 +428,9 @@ export async function typeText(
 
 /**
  * Deliver one bracketed-paste transaction and require an exact active-input
- * receipt. A PTY may occasionally drop the whole transaction before Ink sees
- * it; retry only while the input is still provably empty. Partial or altered
- * delivery fails closed because replaying could duplicate user content.
+ * receipt. An absent receipt cannot prove that Ink did not receive the write,
+ * so this helper never replays the transaction. Partial, altered, or delayed
+ * delivery fails closed instead of risking duplicate user content.
  */
 export async function pasteText(
   tui: PtyProcess,
@@ -444,35 +445,28 @@ export async function pasteText(
   }
 
   const expectedValue = normalizeInputEcho(text);
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= INPUT_DELIVERY_ATTEMPTS; attempt++) {
-    tui.write(`\x1b[200~${text}\x1b[201~`);
-    await sleep(testTiming.settleMs ?? INPUT_SETTLE_MS);
-    try {
-      await waitForInputEcho(
-        tui,
-        expectedValue,
-        initial.kind,
-        false,
-        testTiming.echoTimeoutMs ?? INPUT_ECHO_TIMEOUT_MS,
-      );
-      return;
-    } catch (error) {
-      lastError = error;
-      await tui.settleScreen();
-      const current = activeInput(tui.inputViewport());
-      if (!current || current.kind !== initial.kind || current.value.length > 0) {
-        throw new Error('Bracketed paste produced a partial or altered input; refusing replay', {
-          cause: error,
-        });
-      }
+  tui.write(`\x1b[200~${text}\x1b[201~`);
+  await sleep(testTiming.settleMs ?? INPUT_SETTLE_MS);
+  try {
+    await waitForInputEcho(
+      tui,
+      expectedValue,
+      initial.kind,
+      false,
+      testTiming.echoTimeoutMs ?? INPUT_PASTE_ECHO_TIMEOUT_MS,
+    );
+  } catch (error) {
+    await tui.settleScreen();
+    const current = activeInput(tui.inputViewport());
+    if (!current || current.kind !== initial.kind || current.value.length > 0) {
+      throw new Error('Bracketed paste produced a partial or altered input; refusing replay', {
+        cause: error,
+      });
     }
+    throw new Error('Bracketed paste produced no exact receipt; refusing replay', {
+      cause: error,
+    });
   }
-
-  throw new Error(
-    `PTY bracketed-paste delivery failed after ${INPUT_DELIVERY_ATTEMPTS} empty-input attempt(s)`,
-    { cause: lastError },
-  );
 }
 
 /** Type into a masked field whose real value cannot be confirmed from PTY output. */

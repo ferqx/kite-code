@@ -60,14 +60,14 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
 }
 
 describe('TUI input helpers', () => {
-  test('pasteText retries only when the entire PTY transaction is dropped', async () => {
+  test('pasteText delivers one exact transaction when the receipt is observed', async () => {
     let currentInput = '';
     let attempts = 0;
     const tui = fakePty(
       (data) => {
         if (!data.startsWith('\x1b[200~')) return;
         attempts++;
-        if (attempts >= 2) currentInput = 'Line1\nLine2';
+        currentInput = 'Line1\nLine2';
       },
       () => currentInput,
     );
@@ -75,8 +75,30 @@ describe('TUI input helpers', () => {
 
     await pasteText(tui, 'Line1\nLine2', { echoTimeoutMs: 20, settleMs: 0 });
 
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
     expect(currentInput).toBe('Line1\nLine2');
+  });
+
+  test('pasteText never replays an unacknowledged transaction', async () => {
+    let attempts = 0;
+    let logicalInput = '';
+    const tui = fakePty(
+      (data) => {
+        if (!data.startsWith('\x1b[200~')) return;
+        attempts++;
+        logicalInput += data.slice('\x1b[200~'.length, -'\x1b[201~'.length);
+      },
+      // Simulate Ink having consumed the paste while a delayed VT projection
+      // still looks empty. Replaying here would duplicate logical user input.
+      () => '',
+    );
+
+    await expect(
+      pasteText(tui, 'Line1\nLine2', { echoTimeoutMs: 20, settleMs: 0 }),
+    ).rejects.toThrow('no exact receipt; refusing replay');
+
+    expect(attempts).toBe(1);
+    expect(logicalInput).toBe('Line1\nLine2');
   });
 
   test('pasteText refuses to replay a partial transaction', async () => {
@@ -134,7 +156,7 @@ describe('TUI input helpers', () => {
     expect(rendered).toContain('\r\n');
   });
 
-  test('typeText retries when PTY delivery drops an internal word-boundary space', async () => {
+  test('typeText retries an appended transaction when PTY delivery drops a word-boundary space', async () => {
     let rendered = '';
     let attempt = 0;
     const tui = fakePty(

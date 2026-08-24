@@ -119,8 +119,8 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     对 Kitty Shift+Enter 的协议协商。Shift+Enter 到软换行的键解析由 Ink 组件测试覆盖；PTY 默认
     场景用 bracketed paste 验证多行值从输入控件进入真实 model request 的端到端语义。不得发送一个
     未被协商的 CSI-u 序列、只检查两段文本仍可见，就声称已经验证软换行。
-    Harness 通过 `pasteText()` 验证完整活动输入回执；仅当整次 PTY 写入丢失且字段仍为空时
-    有界重试，任何部分交付都拒绝重放。
+    Harness 通过 `pasteText()` 验证完整活动输入回执；未观察到回执也不得重发 transaction，任何未确认、
+    部分或变形交付都 fail closed。
 19. Mock request 回执只在显式 request baseline 之后匹配最新真实 user turn；Kernel 注入的
     `<runtime-state ...>` 消息不属于用户输入。输入提交的 Enter 重试必须在活动字段离开提交值、
     新 request 或新 modal 出现时停止，避免同一个重试跨过焦点边界执行下一层操作。普通模型消息
@@ -133,9 +133,10 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     逻辑内部空格必须进入等值回执，不能全量删除。它不声称区分任意光标位置上的真实 inverse blank；
     普通 `viewport()` 仍保留用户实际看到的画面。main readiness 也必须使用该 input projection 判断空输入，并另用普通
     viewport 验证可见 chrome；不能让视觉光标阻止 idle 判定。逐字符 PTY delivery 必须在发送下一个
-    非空白字节前观察到当前活动输入可投影的精确 prefix receipt。部分 Ink surface 不投影尾随空格，因而 ordinary
-    multi-word main input 使用一次 bracketed-paste transaction 和 exact all-or-nothing viewport receipt；selector/search
-    等仍需逐 prefix 验证。replacement 重试必须先逐回执清空当前可见输入，
+    非空白字节前观察到当前活动输入可投影的精确 prefix receipt。ordinary multi-word main input 与显式 paste/
+    多行输入使用一次 bracketed-paste transaction 和 exact all-or-nothing viewport receipt；回显超时不能证明
+    transaction 未交付，因此不得重放。selector/search 继续逐 prefix 验证。
+    replacement 重试必须先逐回执清空当前可见输入，
     再有界清理 projection 不可见的尾随空白，不能盲发整段退格与尚未排空的 PTY 字节竞争，否则会把重试文本
     追加到首次部分交付。Enter delivery
     与 semantic receipt 使用独立 timeout；后者继续使用 request/event 场景预算。持久事件加进程重启
