@@ -1,6 +1,6 @@
 # Shell 沙箱边界与并发审批队列优化完成记录
 
-状态：completed（实现、文档与本地全量门禁完成；PR #63 前两轮 Actions 发现的问题已修复，当前修复 SHA 远程门禁待重跑）
+状态：completed（实现、文档与本地全量门禁完成；PR #63 多轮 Actions 发现的问题已修复，当前修复 SHA 远程门禁待重跑）
 
 日期：2026-08-25
 
@@ -38,7 +38,7 @@ Pull Request：[#63](https://github.com/ferqx/kite-code/pull/63)
 | SAQ-02 | `packages/agent-kernel/test/approval-queue.test.ts`；`packages/runtime-storage-sqlite/test/approval-queue-recovery.test.ts`；`tests/runtime/subagent-approval-queue.test.ts` | State 27 queue/generation/sequence/replay contract |
 | SAQ-03 | `packages/agent-kernel/test/authorization.test.ts`；`packages/agent-kernel/test/auto-review.test.ts`；`packages/runtime-host/test/approval-batch-recovery.test.ts` | 两 grant、旧 Full/旧 reviewer shape fail closed、完整 identity |
 | SAQ-04 | `tests/runtime/subagent-approval-queue.test.ts`；`packages/runtime-host/test/approval-batch-recovery.test.ts`；`packages/runtime-storage-sqlite/test/approval-queue-recovery.test.ts` | batch release、独立 receipt、revision race、reopen/fault contract |
-| SAQ-05 | `tests/subagent-runner.test.ts`；`tests/subagent-prepared-dispatch.test.ts`；`tests/subagent-continuation-codec.test.ts` | B 写集冻结；Human/Auto Subagent PTY 已通过，关键 continuation 与 terminal barrier 已具名覆盖 |
+| SAQ-05 | `tests/subagent-runner.test.ts`；`tests/subagent-prepared-dispatch.test.ts`；`tests/subagent-continuation-codec.test.ts` | B 写集冻结；本地 Human/Auto Subagent PTY 已通过，关键 continuation 与 terminal barrier 已具名覆盖；最终 Linux evidence 由 required checks 登记 |
 | SAQ-06 | `packages/builtin-runtime/test/prepared-execution-consumer.test.ts`；`tests/runtime/tool-pipeline-prepared.test.ts`；`tests/runtime/concurrent-shell-cancel.test.ts` | pre-GO zero host call、post-GO unknown/no replay、cleanup boundary |
 | SAQ-07 | `tests/runtime/approval-interaction-semantics.test.ts`；`tests/session-manager.test.ts`；`tests/tui-system/scenarios/sandbox-mode.test.ts` | interactionMode revision、`/permissions` persistence、Full independent availability |
 | SAQ-08 | `tests/tui-reducer.test.ts`；`tests/tui.test.ts tests/tui-replay-blocks.test.ts`（selected 573 pass / 0 fail）；`tests/tui-system/scenarios/approval-escape.test.ts` | queue projection、focused input、generation guards、Enter/Esc/Ctrl+C |
@@ -62,7 +62,7 @@ legacy shape、stale generation、跨 turn、late result、rollback、restart、
 | ---: | --- | --- |
 | 1 | `packages/agent-kernel/test/shell-policy-matrix.test.ts`、`tests/shell-exec.test.ts` | Building baseline direct、无命令白名单 |
 | 2 | `packages/builtin-runtime/test/sandbox-scope-contract.test.ts`、`tests/sandbox/platform-backends.test.ts` | hidden/.git/.agents scope parity |
-| 3 | `tests/runtime/tool-pipeline-ordinary-attempt.test.ts`、`tests/runtime/tool-pipeline-prepared.test.ts`、`packages/runtime-host/test/approval-batch-recovery.test.ts` | exact approval、single dispatch、Host atomicity |
+| 3 | `tests/runtime/tool-pipeline-ordinary-attempt.test.ts`、`tests/runtime/tool-pipeline-prepared.test.ts`、`packages/runtime-host/test/approval-batch-recovery.test.ts`、`tests/runtime/approval-interaction-semantics.test.ts`、`tests/tui-system/scenarios/tool-lifecycle.test.ts` | exact approval、single dispatch、Host atomicity、拒绝后 exactly-once terminal 且无模型续接 |
 | 4 | `packages/agent-kernel/test/auto-review.test.ts`、`tests/runtime/model-controller-failures.test.ts`、`tests/runtime/approval-interaction-semantics.test.ts` | Auto approve/reject/ask_user |
 | 5 | `tests/tui-system/scenarios/plan-mode-policy.test.ts`、`tests/tui-system/scenarios/sandbox-mode.test.ts` | Building/Planning Full direct，Plan lifecycle |
 | 6 | `packages/agent-kernel/test/shell-policy-matrix.test.ts`、`tests/runtime/tool-controller.test.ts` | Planning read-only baseline、写能力不静默扩展 |
@@ -88,13 +88,13 @@ legacy shape、stale generation、跨 turn、late result、rollback、restart、
 | Gate | 状态 | 证据 |
 | --- | --- | --- |
 | `bun run typecheck` | passed | 根工程与 7 个 Runtime workspace 全部通过 |
-| `bun run test:all` | passed | 最终修复后默认套件 3552 pass / 6 skip / 0 fail / 15839 expects；7 个 workspace 全绿；39 个隔离 PTY 场景文件全绿 |
+| `bun run test:all` | passed | 最终修复后默认套件 3552 pass / 6 skip / 0 fail / 15846 expects；7 个 workspace 全绿；39 个隔离 PTY 场景文件全绿 |
 | `bun run test:e2e` | passed | 7 pass / 0 fail / 32 expects |
-| `bun run test:runtime:soak` | passed | CI profile 7/7 cases；全部 required terminal evidence、State invariant 与 cleanup 通过，0 orphan；Bun 1.4 digest `sha256:f1cfb5e204d6d45f1f4117ea11714e50f9151d975f5ba36eba3d6e9912dd2543`，CI 同版 Bun 1.3.14 digest `sha256:e263c62c323c6f60279a74633ee5c4745d218584478e489dc32e6e3ecef0a430` |
+| `bun run test:runtime:soak` | passed | CI profile 7/7 cases；全部 required terminal evidence、State invariant 与 cleanup 通过，0 orphan；最终本地 Bun 1.4 digest `sha256:ff96f85d54895dbd898e733ae3e32c088ed4d7c42df458bc6555e19a833764f8`，最近远程 Bun 1.3.14 digest `sha256:e263c62c323c6f60279a74633ee5c4745d218584478e489dc32e6e3ecef0a430` |
 | `bun run check:core-boundary` / `check:runtime-packages` | passed | Core boundary 通过；7 packages / 12 edges / 单一 App composition root |
 | `bun run check:docs-impact` | passed | Documentation impact checks passed |
 | `bun run check:docs` | passed | 文档结构与计划治理通过：83 completed、25 superseded、0 optional |
 | `git diff --check` / `bun run format:check` | passed | 无 whitespace error；Biome 0 error（23 warnings / 6 infos 为既有非阻断诊断） |
-| GitHub Actions required checks | waiting_ci | [PR #63](https://github.com/ferqx/kite-code/pull/63) 首轮 [Required run 32775194923](https://github.com/ferqx/kite-code/actions/runs/32775194923) 与第二轮 [Required run 32778382920](https://github.com/ferqx/kite-code/actions/runs/32778382920)、[platform run 32778382909](https://github.com/ferqx/kite-code/actions/runs/32778382909) 暴露 ignored source、Windows temp/path preparation abort、sandbox unavailable、PTY durable receipt/session ordering 与 approval rejection terminal race；当前修复 SHA 待推送重跑，未预先宣称远程通过 |
+| GitHub Actions required checks | waiting_ci | [PR #63](https://github.com/ferqx/kite-code/pull/63) 的最近 [Required run 32786178950](https://github.com/ferqx/kite-code/actions/runs/32786178950) 已让 unit/quality/runtime-e2e/compaction/fault-soak 与 TUI shard 1/2 通过，只剩 shard 0 的 Planning unavailable 零执行断言和 shard 3 的新 Session bootstrap/compact ordering；本改动已用 durable dispatch evidence 与 per-Session readiness 修复，待推送重跑，未预先宣称远程通过 |
 
 若任一门禁失败，按源码/测试事实修复后重新运行；不得用 `--no-verify`、删除测试、放宽断言或恢复旧授权兼容路径绕过。

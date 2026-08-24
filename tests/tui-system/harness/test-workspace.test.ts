@@ -10,6 +10,8 @@ import {
 import {
   createTestWorkspace,
   observePersistedCommandSession,
+  observePersistedSessionCommandEvents,
+  observePersistedSessionEvents,
   observePersistedSessionIds,
   observePersistedSessionSummaries,
   observePersistedTurnEvents,
@@ -91,6 +93,12 @@ describe('TUI persisted Runtime observers', () => {
     expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
       status: 'not_created',
     });
+    expect(
+      observePersistedSessionCommandEvents(workspace, 'thread-a', '/compact marker'),
+    ).toMatchObject({ status: 'not_created' });
+    expect(observePersistedSessionEvents(workspace, 'thread-a')).toMatchObject({
+      status: 'not_created',
+    });
     expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
       status: 'not_created',
     });
@@ -118,6 +126,12 @@ describe('TUI persisted Runtime observers', () => {
     expect(observePersistedSessionIds(workspace)).toMatchObject({ status: 'initializing' });
     expect(observePersistedSessionSummaries(workspace)).toMatchObject({ status: 'initializing' });
     expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
+      status: 'initializing',
+    });
+    expect(
+      observePersistedSessionCommandEvents(workspace, 'thread-a', '/compact marker'),
+    ).toMatchObject({ status: 'initializing' });
+    expect(observePersistedSessionEvents(workspace, 'thread-a')).toMatchObject({
       status: 'initializing',
     });
     expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
@@ -201,6 +215,35 @@ describe('TUI persisted Runtime observers', () => {
       expect(observePersistedCommandSession(workspace, '/compact other')).toMatchObject({
         status: 'ready',
         value: undefined,
+      });
+      expect(
+        observePersistedSessionCommandEvents(workspace, 'thread-a', '/compact marker'),
+      ).toMatchObject({
+        status: 'ready',
+        value: [
+          { type: 'user.command_invoked', commandId: 'command-a' },
+          { type: 'user.message_appended', messageId: 'message-a' },
+          { type: 'turn.started', turnId: 'turn-a' },
+          { type: 'completion.blocked', turnId: 'turn-a' },
+          { type: 'model.requested', requestId: 'correction-request-a' },
+          { type: 'run.completed', turnId: 'turn-a' },
+          { type: 'turn.completed', turnId: 'turn-a' },
+        ],
+      });
+      expect(
+        observePersistedSessionCommandEvents(workspace, 'thread-other', '/compact marker'),
+      ).toMatchObject({ status: 'ready', value: undefined });
+      expect(observePersistedSessionEvents(workspace, 'thread-a')).toMatchObject({
+        status: 'ready',
+        value: [
+          { type: 'user.command_invoked', commandId: 'command-a' },
+          { type: 'user.message_appended', messageId: 'message-a' },
+          { type: 'turn.started', turnId: 'turn-a' },
+          { type: 'completion.blocked', turnId: 'turn-a' },
+          { type: 'model.requested', requestId: 'correction-request-a' },
+          { type: 'run.completed', turnId: 'turn-a' },
+          { type: 'turn.completed', turnId: 'turn-a' },
+        ],
       });
       expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
         status: 'ready',

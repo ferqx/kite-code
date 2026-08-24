@@ -74,6 +74,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   readonly #manager: SessionManager;
   readonly #access: RuntimeHostCoordinatorPort;
   readonly #sessions = new Map<string, SessionAuthority>();
+  readonly #sessionReadiness = new Map<string, Promise<void>>();
   readonly #runtimeClients = new Map<string, object>();
   readonly #managerMembers = new Map<PropertyKey, unknown>();
   readonly #pendingRuns = new Map<string, PendingRun>();
@@ -346,7 +347,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
                 projectId: project.projectId,
                 canonicalWorkspaceDigest: project.workspaceDigest,
               });
-              void this.#access.command({
+              this.#trackSessionReadiness(sessionId, {
                 schema: RUNTIME_COMMAND_SCHEMA_,
                 commandId: this.#nextCommandId(sessionId, 'create'),
                 type: 'create_session',
@@ -357,13 +358,20 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
             };
           }
           if (property === 'dispose') {
-            return (): Promise<void> => this.#access[Symbol.asyncDispose]();
+            return async (): Promise<void> => {
+              await this.#awaitAllSessionReadiness();
+              await this.#access[Symbol.asyncDispose]();
+            };
           }
           if (property === 'abortAll') {
-            return (): Promise<void> => this.#access.cancelAllSessions('TUI shutdown requested.');
+            return async (): Promise<void> => {
+              await this.#awaitAllSessionReadiness();
+              await this.#access.cancelAllSessions('TUI shutdown requested.');
+            };
           }
           if (property === 'cancelRuntimeOperations') {
             return async (sessionId: string): Promise<void> => {
+              await this.#awaitSessionReadiness(sessionId);
               await this.#access.cancelSession(sessionId, 'Session operation cancelled.');
               await this.#access.waitForSessionIdle(sessionId);
             };
@@ -371,7 +379,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
           if (property === 'registerSession') {
             return (sessionId: string, workspace: string): object => {
               const runtime = target.registerSession(sessionId, workspace);
-              void this.#access.command({
+              this.#trackSessionReadiness(sessionId, {
                 schema: RUNTIME_COMMAND_SCHEMA_,
                 commandId: this.#nextCommandId(sessionId, 'resume'),
                 type: 'resume_session',
@@ -402,6 +410,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
           }
           if (property === 'removeRuntime') {
             return async (sessionId: string): Promise<void> => {
+              await this.#awaitSessionReadiness(sessionId);
               const authority = this.#sessions.get(sessionId);
               if (authority) {
                 const receipt = await this.#access.command({
@@ -417,6 +426,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
               await target.releaseRuntimeSessionCoordinator(sessionId);
               target.removeRuntimeAfterHostClose(sessionId);
               this.#runtimeClients.delete(sessionId);
+              this.#sessionReadiness.delete(sessionId);
             };
           }
           if (property === 'handleContextCompaction') {
@@ -426,6 +436,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
               onProgress?: ContextCompactionProgress,
               onCommand?: ContextCompactionCommand,
             ): Promise<ContextCompactionResult | undefined> => {
+              await this.#awaitSessionReadiness(sessionId);
               const commandId = this.#nextCommandId(sessionId, 'compact');
               const deferred = createDeferred();
               const pending: PendingCompaction = {
@@ -455,6 +466,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
           }
           if (property === 'handleContextReset') {
             return async (sessionId: string): Promise<ContextCompactionResult | undefined> => {
+              await this.#awaitSessionReadiness(sessionId);
               const commandId = this.#nextCommandId(sessionId, 'reset');
               const pending: PendingCompaction = { ...createDeferred() };
               this.#pendingCompactions.set(commandId, pending);
@@ -482,6 +494,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
               scope: 'code_and_conversation' | 'code_only' | 'conversation_only';
               workspace: string;
             }): Promise<RewindResult | undefined> => {
+              await this.#awaitSessionReadiness(input.sourceThreadId);
               const commandId = this.#nextCommandId(input.sourceThreadId, 'rewind');
               const pending: PendingRewind = { workspace: input.workspace };
               this.#pendingRewinds.set(commandId, pending);
@@ -523,6 +536,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
             requestedPhase?: Parameters<SessionRuntime['runTask']>[2],
             initialSkills?: Parameters<SessionRuntime['runTask']>[3],
           ): Promise<void> => {
+            await this.#awaitSessionReadiness(target.threadId);
             const commandId = this.#nextCommandId(target.threadId, 'turn');
             const pending: PendingRun = {
               dependencies,
@@ -550,30 +564,41 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
           };
         }
         if (property === 'waitForRunCompletion') {
-          return (): Promise<void> => this.#access.waitForSessionIdle(target.threadId);
+          return async (): Promise<void> => {
+            await this.#awaitSessionReadiness(target.threadId);
+            await this.#access.waitForSessionIdle(target.threadId);
+          };
         }
         if (property === 'abort') {
           return (): void => {
-            void this.#access.command({
-              schema: RUNTIME_COMMAND_SCHEMA_,
-              commandId: this.#nextCommandId(target.threadId, 'cancel'),
-              type: 'cancel_turn',
-              sessionId: target.threadId,
-              expectedRevision: this.#revision(target.threadId),
-              turnId: target.threadId,
-            });
+            void this.#awaitSessionReadiness(target.threadId)
+              .then(() =>
+                this.#access.command({
+                  schema: RUNTIME_COMMAND_SCHEMA_,
+                  commandId: this.#nextCommandId(target.threadId, 'cancel'),
+                  type: 'cancel_turn',
+                  sessionId: target.threadId,
+                  expectedRevision: this.#revision(target.threadId),
+                  turnId: target.threadId,
+                }),
+              )
+              .catch(() => {});
           };
         }
         if (property === 'setInteractionMode') {
           return (mode: 'accept_edits' | 'auto' | 'full'): void => {
-            void this.#access.command({
-              schema: RUNTIME_COMMAND_SCHEMA_,
-              commandId: this.#nextCommandId(target.threadId, 'mode'),
-              type: 'set_interaction_mode',
-              sessionId: target.threadId,
-              expectedRevision: this.#revision(target.threadId),
-              mode,
-            });
+            void this.#awaitSessionReadiness(target.threadId)
+              .then(() =>
+                this.#access.command({
+                  schema: RUNTIME_COMMAND_SCHEMA_,
+                  commandId: this.#nextCommandId(target.threadId, 'mode'),
+                  type: 'set_interaction_mode',
+                  sessionId: target.threadId,
+                  expectedRevision: this.#revision(target.threadId),
+                  mode,
+                }),
+              )
+              .catch(() => {});
           };
         }
         const value = Reflect.get(target, property, target) as unknown;
@@ -651,6 +676,31 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
 
   #revision(sessionId: string): number {
     return this.#sessions.get(sessionId)?.revision ?? 0;
+  }
+
+  #trackSessionReadiness(
+    sessionId: string,
+    command: Extract<RuntimeCommand, { type: 'create_session' | 'resume_session' }>,
+  ): void {
+    const previous = this.#sessionReadiness.get(sessionId) ?? Promise.resolve();
+    const readiness = previous.then(async () => {
+      const receipt = await this.#access.command(command);
+      this.#assertApplied(receipt);
+    });
+    this.#sessionReadiness.set(sessionId, readiness);
+    // Creation remains a synchronous client API, so attach a rejection
+    // observer here. Promise-returning follow-up operations still await and
+    // surface the same failure; synchronous fire-and-forget methods attach
+    // their own sinks instead of racing an absent Host authority.
+    void readiness.catch(() => {});
+  }
+
+  async #awaitSessionReadiness(sessionId: string): Promise<void> {
+    await this.#sessionReadiness.get(sessionId);
+  }
+
+  async #awaitAllSessionReadiness(): Promise<void> {
+    await Promise.allSettled(this.#sessionReadiness.values());
   }
 
   #nextCommandId(sessionId: string, operation: string): string {

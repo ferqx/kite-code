@@ -20,7 +20,11 @@ import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedTurnEvents,
+  type PersistedTurnEvent,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -229,11 +233,40 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         expect(
           screenContains(output, 'This capability requires an available workspace sandbox.'),
         ).toBe(true);
-        // The workspace identity is part of the ordinary TUI chrome and is not
-        // evidence that the denied Shell reached the host.  The execution card
-        // is the canonical live-path distinction: a pre-GO sandbox denial must
-        // never project a completed Bash invocation.
-        expect(screenContains(output, 'Bash Ran: pwd && ls -la')).toBe(false);
+        let persistedEvents: PersistedTurnEvent[] | undefined;
+        await waitForCondition(
+          () => {
+            const observation = observePersistedTurnEvents(workspace, task);
+            if (observation.status !== 'ready' || !observation.value) return false;
+            const failed = observation.value.events.find(
+              (event) =>
+                event.type === 'tool.failed' &&
+                event.toolCallId === 'call_plan_baseline_shell' &&
+                typeof event.failure === 'object' &&
+                event.failure !== null &&
+                'kind' in event.failure &&
+                event.failure.kind === 'mandatory_policy_unavailable',
+            );
+            if (!failed) return false;
+            persistedEvents = observation.value.events;
+            return true;
+          },
+          'Runtime Store to persist the mandatory sandbox denial',
+          20_000,
+        );
+        if (!persistedEvents) throw new Error('Persisted planning denial observation was lost.');
+        expect(
+          persistedEvents.some(
+            (event) =>
+              event.type === 'capability.invocation_recorded' &&
+              event.toolCallId === 'call_plan_baseline_shell',
+          ),
+        ).toBe(false);
+        expect(
+          persistedEvents.some(
+            (event) => event.type === 'capability.sandbox_execution_dispatch_intent_recorded',
+          ),
+        ).toBe(false);
       }
       expect(screenContains(output, 'Rejected shell_execute during planning phase')).toBe(false);
       expect(screenContains(output, "Tool 'shell_execute' is not available in this context")).toBe(

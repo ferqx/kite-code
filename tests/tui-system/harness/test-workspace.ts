@@ -209,6 +209,62 @@ export function observePersistedCommandSession(
   });
 }
 
+/**
+ * Read the durable event suffix for one exact slash command in one exact
+ * session.  Session identity is part of the query because Runtime event
+ * sequence numbers are session-local; ordering equal command strings across
+ * sessions by sequence would select the wrong owner after a session switch.
+ */
+export function observePersistedSessionCommandEvents(
+  workspace: Pick<TestWorkspace, 'home'>,
+  sessionId: string,
+  command: string,
+): PersistedRuntimeObservation<PersistedTurnEvent[] | undefined> {
+  return readPersistedRuntime(workspace, (database) => {
+    const commandEvent = database
+      .query<{ id: number }, [string, string]>(`
+        SELECT sequence AS id
+        FROM runtime_events
+        WHERE session_id = ?
+          AND json_extract(event_json, '$.type') = 'user.command_invoked'
+          AND json_extract(event_json, '$.command') = ?
+        ORDER BY sequence DESC
+        LIMIT 1
+      `)
+      .get(sessionId, command);
+    if (!commandEvent) return undefined;
+
+    return database
+      .query<{ event_json: string }, [string, number]>(`
+        SELECT event_json
+        FROM runtime_events
+        WHERE session_id = ?
+          AND sequence >= ?
+        ORDER BY sequence ASC
+      `)
+      .all(sessionId, commandEvent.id)
+      .map(({ event_json }) => parsePersistedRuntimeEvent(event_json));
+  });
+}
+
+/** Read every durable Runtime event owned by one exact session. */
+export function observePersistedSessionEvents(
+  workspace: Pick<TestWorkspace, 'home'>,
+  sessionId: string,
+): PersistedRuntimeObservation<PersistedTurnEvent[]> {
+  return readPersistedRuntime(workspace, (database) =>
+    database
+      .query<{ event_json: string }, [string]>(`
+        SELECT event_json
+        FROM runtime_events
+        WHERE session_id = ?
+        ORDER BY sequence ASC
+      `)
+      .all(sessionId)
+      .map(({ event_json }) => parsePersistedRuntimeEvent(event_json)),
+  );
+}
+
 /** Resolve the exact session carrying a durable user message event. */
 export function observePersistedUserMessageSession(
   workspace: Pick<TestWorkspace, 'home'>,
@@ -234,6 +290,19 @@ export type PersistedTurnEvent = {
   turnId?: string;
   [field: string]: unknown;
 };
+
+function parsePersistedRuntimeEvent(eventJson: string): PersistedTurnEvent {
+  const event: unknown = JSON.parse(eventJson);
+  if (
+    typeof event !== 'object' ||
+    event === null ||
+    !('type' in event) ||
+    typeof event.type !== 'string'
+  ) {
+    throw new Error('Persisted Runtime event is not valid');
+  }
+  return event as PersistedTurnEvent;
+}
 
 /**
  * Read one exact user turn from the isolated child Runtime Store. The observer
@@ -293,18 +362,7 @@ export function observePersistedTurnEvents(
         ORDER BY sequence ASC
       `)
       .all(message.thread_id, turn.id, nextTurn?.id ?? Number.MAX_SAFE_INTEGER)
-      .map(({ event_json }) => {
-        const event: unknown = JSON.parse(event_json);
-        if (
-          typeof event !== 'object' ||
-          event === null ||
-          !('type' in event) ||
-          typeof event.type !== 'string'
-        ) {
-          throw new Error('Persisted Runtime event is not valid');
-        }
-        return event as PersistedTurnEvent;
-      });
+      .map(({ event_json }) => parsePersistedRuntimeEvent(event_json));
     return { threadId: message.thread_id, turnId: turn.turn_id, events };
   });
 }

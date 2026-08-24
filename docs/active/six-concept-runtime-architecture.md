@@ -94,6 +94,11 @@ route-local 退避时隙；不得让 sibling Subagent 以完全相同的指数�
 `model.retry.delayMs`。
 
 TUI 通过 `apps/kite/src/adapters/tui/session-adapter.ts` 获取 typed client surface。TUI 不接触 Kernel state、Host execution control、Builtin executor 或 SQLite handle。
+`runtime-bridge.ts` 将同步的 TUI Session surface 串到异步 Host command authority：每个新建或恢复 Session
+先持有自己的 bootstrap readiness promise，后续 turn、compaction、reset、mode、cancel、rewind 与 close
+必须等待该 exact Session 的 `create_session` / `resume_session` applied receipt，再读取 committed revision 并
+提交命令。空 Session 可以在首个 Runtime event 前没有 transcript，但不能让 follow-up command 抢跑到尚未
+建立的 Host authority，也不能因跨 Session 的本地 sequence 排序把命令归给旧 Session。
 
 `RuntimeSessionCoordinator` 的 Workspace、Project、user、recovery identity 与 Artifact evidence 是 retained
 Session 的不可变身份，Host recovery 重复 `ensure` 时必须继续严格校验。`interactionMode` 则是可变的、已持久化
