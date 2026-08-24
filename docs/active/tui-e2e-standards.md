@@ -259,6 +259,11 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     `sandbox-mode` 中 `/permissions` 无参数场景只证明开发 composition 打开 interaction mode 选择器，
     选择器中的 Full 可见且独立于 sandbox availability；受限 backend 不可用时只证明 clean fail-closed，
     两者都不是 native sandbox、release admission 或 production platform qualification 证据。
+    只验证人工审批/拒绝闭环的默认 scenario 必须使用不依赖 native Shell sandbox 的确定性 scope
+    boundary（例如隔离 HOME 下、Workspace 外的 `write_file`），并显式固定 `interactionMode=accept_edits`；
+    不得用在 hosted Linux 无 backend 时会先 mandatory fail-closed 的 `shell_execute` 充当 approval fixture。
+    Planning baseline 的 unavailable 分支应以 exact mandatory-sandbox failure 和没有 Bash execution card
+    证明零执行；TUI header 正常展示的 canonical Workspace identity 不是 host dispatch 证据。
     同一 scenario 的 `/release` 只证明普通开发入口显示 `artifact_disabled`，不代表 embedded
     profile、Sigstore、artifact attestation、平台制品或任一 production Gate 已通过。
 18. 远程 HTTP MCP Tool 场景必须使用生产 TUI 组合根，验证 exact endpoint/network boundary、共享
@@ -298,6 +303,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     `subagent.suspended` 都必须立即停止对应 TUI block 的 spinner/计时，并通过 Runtime 后续事实区分
     “等待自动审查”“自动审查中”和“等待你的批准”；只有最后一种表示需要用户动作。该投影不得依赖
     child 当前是否拥有唯一 approval interrupt。自动或人工获批后必须先恢复当前 active continuation，
+    人工 Enter 的 receipt 必须同时证明目标 child 已离开“等待你的批准”、Approval overlay 已关闭，且
+    出现 canonical `authorized_queued` 或该 child 的 running successor；父 Task 卡片中预先存在的通用
+    “执行中”不能单独充当目标 approval acknowledgement。
     sibling 不得插队；Enter 必须提交 exact interactionId/generation，且只能在 canonical release event
     后投影 `authorized_queued`。Esc 只拒绝当前可见焦点，Ctrl+C 才取消 whole turn；旧/bridge 事件缺失
     可匹配 identity 时必须 no-op，存在多个候选时不得猜测。迟到的 duplicate suspension/review/release

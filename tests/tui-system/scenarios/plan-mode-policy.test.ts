@@ -229,7 +229,11 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         expect(
           screenContains(output, 'This capability requires an available workspace sandbox.'),
         ).toBe(true);
-        expect(screenContains(output, workspace.workspace)).toBe(false);
+        // The workspace identity is part of the ordinary TUI chrome and is not
+        // evidence that the denied Shell reached the host.  The execution card
+        // is the canonical live-path distinction: a pre-GO sandbox denial must
+        // never project a completed Bash invocation.
+        expect(screenContains(output, 'Bash Ran: pwd && ls -la')).toBe(false);
       }
       expect(screenContains(output, 'Rejected shell_execute during planning phase')).toBe(false);
       expect(screenContains(output, "Tool 'shell_execute' is not available in this context")).toBe(

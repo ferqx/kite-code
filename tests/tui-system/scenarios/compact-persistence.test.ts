@@ -80,10 +80,12 @@ describe('TUI PTY System — /compact persistence', () => {
           return (
             screenContains(viewport, '会话列表') &&
             screenContains(viewport, '搜索') &&
-            !screenContains(viewport, 'Loading...')
+            screenHasSessionRow(viewport, targetSession!.name, { active: false }) &&
+            !screenContains(viewport, 'Loading...') &&
+            !screenContains(viewport, '加载中...')
           );
         },
-        'session selector chrome to finish its initial load',
+        'session selector target row and controls to finish their initial load',
         10_000,
       );
 

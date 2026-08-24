@@ -17,7 +17,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { basename } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -327,20 +328,29 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        interactionMode: 'accept_edits',
+      },
+    });
+    externalFile = join(workspace.home, 'tool-lifecycle-rejected.txt');
     server.setResponses([
       {
         toolContinuation: 'aborted',
         message: {
-          content: 'I will run a command.',
+          content: 'I will write the requested file.',
           tool_calls: [
             {
-              id: 'call_shell',
-              name: 'shell_execute',
-              args: { command: 'node -e "1+1"', description: 'test lifecycle approval' },
+              id: 'call_write_external',
+              name: 'write_file',
+              args: {
+                path: externalFile,
+                content: 'This external write must be rejected.',
+              },
             },
           ],
         },
@@ -368,7 +378,6 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
           return (
             screenContains(viewport, '工具授权') &&
             screenContains(viewport, '❯ 允许一次') &&
-            screenContains(viewport, '本次会话允许') &&
             screenContains(viewport, '拒绝') &&
             screenContains(viewport, '↑↓ 导航  Enter 确认  Esc 取消')
           );
@@ -385,12 +394,10 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       expect(screenContains(output, '[接受编辑]')).toBe(false);
 
       // ── 3. 验证渲染顺序：模型文字在审批块之前 / Verify order: text before approval ──
-      const order = assertOrder(output, 'I will run a command', '工具授权');
+      const order = assertOrder(output, 'I will write the requested file', '工具授权');
       expect(order.pass).toBe(true);
 
       // ── 4. 拒绝：导航到 Deny 确认 / Deny: navigate to Deny and confirm ──
-      tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '❯ 本次会话允许', 5000);
       tui.write('\x1b[B');
       await waitForText(() => tui.viewport(), '❯ 拒绝', 5000);
       const rejectionFrames = tui.markScreen();
@@ -418,9 +425,10 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         false,
       );
       // The rejected tool call remains in the message list as a settled fact.
-      expect(screenContains(afterRejection, 'node -e "1+1"')).toBe(true);
+      expect(screenContains(afterRejection, 'tool-lifecycle-rejected.txt')).toBe(true);
       expect(screenContains(afterRejection, 'Tool approval rejected by user.')).toBe(true);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
+      expect(existsSync(externalFile)).toBe(false);
 
       const observed = requirePersistedRuntimeReady(
         observePersistedTurnEvents(workspace, 'Make a directory'),
@@ -429,9 +437,13 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       const rejectionIndex = observed!.events.findIndex(
         (event) => event.type === 'approval.rejected',
       );
+      const toolRejectedIndex = observed!.events.findIndex(
+        (event) => event.type === 'tool.rejected',
+      );
       const abortIndex = observed!.events.findIndex((event) => event.type === 'turn.aborted');
       expect(rejectionIndex).toBeGreaterThanOrEqual(0);
-      expect(abortIndex).toBeGreaterThan(rejectionIndex);
+      expect(toolRejectedIndex).toBeGreaterThan(rejectionIndex);
+      expect(abortIndex).toBeGreaterThan(toolRejectedIndex);
       expect(
         observed!.events.some(
           (event, index) => index > rejectionIndex && event.type === 'model.requested',
