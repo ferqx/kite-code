@@ -322,8 +322,9 @@ export async function typeText(
   ) {
     // Internal spaces are not projected consistently enough for a safe
     // per-character receipt on every Ink/PTY surface. Deliver the complete
-    // replacement as one transaction, but never replay it: an unobserved
-    // write may still have reached Ink and a retry could duplicate user text.
+    // replacement as one transaction. The PTY transport may retry only after
+    // Bun reports that zero bytes were accepted and then signals drain; an
+    // accepted or ambiguous write is never replayed from viewport state.
     await pasteText(tui, text, {
       echoTimeoutMs: options.testTiming?.echoTimeoutMs,
       settleMs: options.testTiming?.settleMs,
@@ -428,9 +429,10 @@ export async function typeText(
 
 /**
  * Deliver one bracketed-paste transaction and require an exact active-input
- * receipt. An absent receipt cannot prove that Ink did not receive the write,
- * so this helper never replays the transaction. Partial, altered, or delayed
- * delivery fails closed instead of risking duplicate user content.
+ * receipt. An absent viewport receipt cannot prove that Ink did not receive
+ * the write, so this helper never replays an accepted or ambiguous
+ * transaction. Partial, altered, or delayed delivery fails closed instead of
+ * risking duplicate user content.
  */
 export async function pasteText(
   tui: PtyProcess,
@@ -445,7 +447,7 @@ export async function pasteText(
   }
 
   const expectedValue = normalizeInputEcho(text);
-  tui.write(`\x1b[200~${text}\x1b[201~`);
+  await tui.writeExact(`\x1b[200~${text}\x1b[201~`);
   await sleep(testTiming.settleMs ?? INPUT_SETTLE_MS);
   try {
     await waitForInputEcho(

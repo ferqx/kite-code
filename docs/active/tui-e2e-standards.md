@@ -62,8 +62,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    delivery budget。跨进程回放场景的 test deadline 还必须覆盖独立的持久事件预算和后续 restart/
    selector replay，不得让外层测试先于其语义阶段超时。
    普通单行多词模型消息与显式 paste/多行输入必须由 `pasteText()` 以单个 bracketed-paste
-   transaction 投递，并取得当前活动输入的完整等值回执。没有回执不能证明 transaction 未到达 Ink，
-   因而不得重放；部分、变形、延迟或 focus 改变后的 delivery 必须 fail closed，不得冒险重复用户内容。
+   transaction 投递，并取得当前活动输入的完整等值回执。只有 Bun PTY transport 明确返回 0 accepted
+   bytes，且随后发出 drain，才允许重新尝试整次 transaction；非零部分写入必须 fail closed。缺少 VT/Ink
+   回执不能证明已接受的 transaction 未到达 Ink，因而不得据此重放；变形、延迟或 focus 改变后的 delivery
+   同样必须 fail closed，不得冒险重复用户内容。
    需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自

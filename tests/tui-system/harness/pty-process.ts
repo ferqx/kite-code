@@ -52,6 +52,11 @@ export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust';
 export interface PtyProcess {
   /** Write keystrokes and return the output checkpoint immediately before the action. */
   write(data: string): PtyOutputMark;
+  /**
+   * Write one indivisible input transaction. A zero-byte transport rejection
+   * may be retried after Bun reports drain; a partial write fails closed.
+   */
+  writeExact(data: string): Promise<PtyOutputMark>;
   /** Set raw mode on the terminal (disables line buffering) */
   setRawMode(enabled: boolean): PtyOutputMark;
   /** Resize the terminal (may not trigger resize event on Windows) */
@@ -95,6 +100,43 @@ export interface PtyOutputBuffer {
   mark(): PtyOutputMark;
   output(): string;
   outputSince(mark: PtyOutputMark): string;
+}
+
+export interface ExactPtyInputWriter {
+  write(data: string): number;
+  drainSequence(): number;
+  waitForDrain(afterSequence: number): Promise<void>;
+}
+
+/**
+ * Deliver an exact PTY input transaction without guessing from screen state.
+ * Bun's byte-count receipt is the only authority that permits a retry: zero
+ * means no bytes were accepted, while a partial write is ambiguous and must
+ * fail closed instead of replaying any prefix.
+ */
+export async function writeExactPtyInput(
+  data: string,
+  writer: ExactPtyInputWriter,
+  maxAttempts = 3,
+): Promise<void> {
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new Error('Exact PTY input maxAttempts must be a positive integer');
+  }
+  const byteLength = new TextEncoder().encode(data).byteLength;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const drainSequence = writer.drainSequence();
+    const written = writer.write(data);
+    if (written === byteLength) return;
+    if (written !== 0) {
+      throw new Error(
+        `Exact PTY input was partially accepted (${written}/${byteLength} bytes); refusing replay`,
+      );
+    }
+    if (attempt === maxAttempts) {
+      throw new Error(`Exact PTY input was rejected with zero bytes after ${maxAttempts} attempts`);
+    }
+    await writer.waitForDrain(drainSequence);
+  }
 }
 
 /**
@@ -400,6 +442,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   let lastActionMark = outputBuffer.mark();
   let exited = false;
   let exitResolver: ((code: number) => void) | null = null;
+  let inputDrainSequence = 0;
   const exitPromise = new Promise<number>((resolve) => {
     exitResolver = resolve;
   });
@@ -451,6 +494,9 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
         const receivedThrough = outputBuffer.append(chunk);
         void terminalScreen.append(chunk).then(() => outputBuffer.publishThrough(receivedThrough));
       },
+      drain() {
+        inputDrainSequence++;
+      },
     },
   });
   let ownedProcessGroupId: number | undefined;
@@ -499,6 +545,18 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     screenDisposed = true;
   }
 
+  async function waitForInputDrain(afterSequence: number): Promise<void> {
+    const timeoutMs = 5_000;
+    const deadline = Date.now() + timeoutMs;
+    while (!exited && inputDrainSequence <= afterSequence && Date.now() < deadline) {
+      await tuiSystemDelay(25);
+    }
+    if (exited) throw new Error('PTY child exited while waiting for input drain');
+    if (inputDrainSequence <= afterSequence) {
+      throw new Error(`PTY input did not drain within ${timeoutMs}ms`);
+    }
+  }
+
   async function killAndWaitImpl(): Promise<boolean> {
     const wasRunning = !exited;
 
@@ -534,6 +592,20 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       if (!exited && proc.terminal) {
         proc.terminal.write(data);
       }
+      return lastActionMark;
+    },
+
+    async writeExact(data: string) {
+      lastActionMark = outputBuffer.mark();
+      if (exited || !proc.terminal) throw new Error('Cannot write exact input to an exited PTY');
+      await writeExactPtyInput(data, {
+        write(value) {
+          if (exited || !proc.terminal) return 0;
+          return proc.terminal.write(value);
+        },
+        drainSequence: () => inputDrainSequence,
+        waitForDrain: waitForInputDrain,
+      });
       return lastActionMark;
     },
 

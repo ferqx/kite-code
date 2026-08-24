@@ -33,6 +33,11 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
       onWrite(data);
       return lastActionMark as ReturnType<PtyProcess['markOutput']>;
     },
+    async writeExact(data) {
+      lastActionMark = output().length;
+      onWrite(data);
+      return lastActionMark as ReturnType<PtyProcess['markOutput']>;
+    },
     setRawMode() {
       lastActionMark = output().length;
       return lastActionMark as ReturnType<PtyProcess['markOutput']>;

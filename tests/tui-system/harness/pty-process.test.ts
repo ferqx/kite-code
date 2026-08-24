@@ -9,6 +9,7 @@ import {
   verifiedOwnedProcessGroupId,
   waitForPtyExit,
   waitForPtyExitCode,
+  writeExactPtyInput,
 } from './pty-process';
 import type { TestWorkspace } from './test-workspace';
 
@@ -18,6 +19,68 @@ test('keeps ordinary TUI groups detached but joins the fault-soak owned group', 
   expect(shouldDetachTuiProcess('darwin', 'attempt-nonce')).toBe(false);
   expect(shouldDetachTuiProcess('linux', 'attempt-nonce')).toBe(false);
   expect(shouldDetachTuiProcess('win32', undefined)).toBe(false);
+});
+
+describe('exact PTY input transport', () => {
+  test('accepts one complete byte-count receipt without waiting for drain', async () => {
+    const writes: string[] = [];
+    let drainWaits = 0;
+
+    await writeExactPtyInput('Ask a question', {
+      write(data) {
+        writes.push(data);
+        return new TextEncoder().encode(data).byteLength;
+      },
+      drainSequence: () => 0,
+      async waitForDrain() {
+        drainWaits++;
+      },
+    });
+
+    expect(writes).toEqual(['Ask a question']);
+    expect(drainWaits).toBe(0);
+  });
+
+  test('retries only after an explicit zero-byte receipt and drain', async () => {
+    const receipts = [0, new TextEncoder().encode('Ask a question').byteLength];
+    let writes = 0;
+    let drainSequence = 0;
+
+    await writeExactPtyInput('Ask a question', {
+      write() {
+        return receipts[writes++]!;
+      },
+      drainSequence: () => drainSequence,
+      async waitForDrain(afterSequence) {
+        expect(afterSequence).toBe(0);
+        drainSequence++;
+      },
+    });
+
+    expect(writes).toBe(2);
+    expect(drainSequence).toBe(1);
+  });
+
+  test('fails closed on a partial byte receipt without waiting or replaying', async () => {
+    let writes = 0;
+    let drainWaits = 0;
+
+    await expect(
+      writeExactPtyInput('Ask a question', {
+        write() {
+          writes++;
+          return 3;
+        },
+        drainSequence: () => 0,
+        async waitForDrain() {
+          drainWaits++;
+        },
+      }),
+    ).rejects.toThrow('partially accepted');
+
+    expect(writes).toBe(1);
+    expect(drainWaits).toBe(0);
+  });
 });
 
 describe('waitForPtyExit', () => {
