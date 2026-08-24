@@ -262,7 +262,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     只验证人工审批/拒绝闭环的默认 scenario 必须使用不依赖 native Shell sandbox 的确定性 scope
     boundary（例如隔离 HOME 下、Workspace 外的 `write_file`），并显式固定 `interactionMode=accept_edits`；
     不得用在 hosted Linux 无 backend 时会先 mandatory fail-closed 的 `shell_execute` 充当 approval fixture。
-    Planning baseline 的 unavailable 分支应以 exact mandatory-sandbox failure、目标 Tool 没有
+    Planning baseline 的 unavailable 分支应以 exact
+    `tool.rejected(failure.kind=mandatory_policy_unavailable)`、目标 Tool 没有
     `capability.invocation_recorded` 且该 turn 没有 sandbox dispatch intent 证明零执行；失败态 Bash 卡片与
     TUI header 正常展示的 canonical Workspace identity 都只是展示事实，不是 host dispatch 证据。
     同一 scenario 的 `/release` 只证明普通开发入口显示 `artifact_disabled`，不代表 embedded

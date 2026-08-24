@@ -240,7 +240,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
             if (observation.status !== 'ready' || !observation.value) return false;
             const failed = observation.value.events.find(
               (event) =>
-                event.type === 'tool.failed' &&
+                event.type === 'tool.rejected' &&
                 event.toolCallId === 'call_plan_baseline_shell' &&
                 typeof event.failure === 'object' &&
                 event.failure !== null &&
