@@ -129,7 +129,7 @@ describe('TUI input helpers', () => {
       () => rendered,
     );
 
-    await typeText(tui, 'long wrapped input', 0);
+    await typeText(tui, 'long wrapped input', { delayMs: 0, append: true });
 
     expect(rendered).toContain('\r\n');
   });
@@ -150,7 +150,7 @@ describe('TUI input helpers', () => {
       () => rendered,
     );
 
-    await typeText(tui, 'one hundred', FAST_RETRY);
+    await typeText(tui, 'one hundred', { ...FAST_RETRY, append: true });
 
     expect(attempt).toBe(2);
     expect(rendered).toBe('one hundred');
@@ -269,7 +269,7 @@ describe('TUI input helpers', () => {
     );
     tui.viewport = () => `❯ ${currentInput}`;
 
-    await typeText(tui, 'Ask me', FAST_RETRY);
+    await typeText(tui, 'Ask me', { ...FAST_RETRY, append: true });
 
     expect(attempts).toBe(2);
     expect(currentInput).toBe('Ask me');
@@ -367,7 +367,6 @@ describe('TUI input helpers', () => {
     let transcript = '';
     let searchInput = '';
     let attempt = 0;
-    let deliveryCharacters = 0;
     const tui = fakePty(
       (data) => {
         transcript += data;
@@ -375,8 +374,7 @@ describe('TUI input helpers', () => {
           searchInput = searchInput.slice(0, -1);
           return;
         }
-        if (deliveryCharacters % 'session 1'.length === 0) attempt++;
-        deliveryCharacters++;
+        if (data === 's' && searchInput.length === 0) attempt++;
         if (attempt >= 2) searchInput += data;
       },
       () => transcript,
@@ -430,6 +428,27 @@ describe('TUI input helpers', () => {
     expect(active).toBe(true);
   });
 
+  test('activateSessionSearch does not assume the first session row is selected', async () => {
+    let selected = 2;
+    let upWrites = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data !== '\x1b[A') return;
+        upWrites += 1;
+        selected = Math.max(-1, selected - 1);
+      },
+      () => '',
+    );
+    tui.viewport = () =>
+      `── 会话列表 ── 3 / 3 ──\n${selected === -1 ? '  ❯ 搜索:' : '    搜索: —'}\n${selected === 0 ? '  ❯' : '   '} session 1\n${selected === 1 ? '  ❯' : '   '} session 2\n${selected === 2 ? '  ❯' : '   '} session 3`;
+    tui.inputViewport = tui.viewport;
+
+    await activateSessionSearch(tui, 250);
+
+    expect(selected).toBe(-1);
+    expect(upWrites).toBe(3);
+  });
+
   test('typeText does not accept a long message already present in history', async () => {
     const message =
       'This is a very long test message that exceeds one hundred characters and already appears in history';
@@ -450,7 +469,7 @@ describe('TUI input helpers', () => {
     );
     tui.viewport = () => `❯ ${message}\n\nresponse\n────────\n❯ ${currentInput}`;
 
-    await typeText(tui, message, FAST_RETRY);
+    await typeText(tui, message, { ...FAST_RETRY, append: true });
 
     expect(attempt).toBe(2);
     expect(currentInput).toBe(message);

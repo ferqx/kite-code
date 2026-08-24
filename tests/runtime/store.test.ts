@@ -1221,6 +1221,28 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
+  test('orders same-second recovery points by durable event position', () => {
+    const store = openStore(dbPath);
+    store.appendEvents('rewind-order', [makeEvent({ toolCallId: 'first' })]);
+    store.saveNamedSnapshot(
+      'rewind-order',
+      'zz-older-name',
+      currentSnapshot('rewind-order', { testVersion: 1 }),
+    );
+    store.appendEvents('rewind-order', [makeEvent({ toolCallId: 'second' })]);
+    store.saveNamedSnapshot(
+      'rewind-order',
+      'aa-newer-name',
+      currentSnapshot('rewind-order', { testVersion: 2 }),
+    );
+
+    expect(store.listNamedSnapshots('rewind-order').map((entry) => entry.snapshotId)).toEqual([
+      'aa-newer-name',
+      'zz-older-name',
+    ]);
+    store.close();
+  });
+
   test('lists the next user message and recorded file impact for rewind previews', () => {
     const store = openStore(dbPath);
     store.appendEvents('rewind-preview', [

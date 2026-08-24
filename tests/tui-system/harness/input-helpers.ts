@@ -193,13 +193,16 @@ export async function activateSessionSearch(tui: PtyProcess, timeoutMs = 5_000):
     throw new Error('Cannot activate session search because the session selector is not visible.');
   }
 
-  tui.write('\x1b[A');
   const effectiveTimeout = tuiWaitTimeout(timeoutMs);
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     await tui.settleScreen();
     const input = activeInput(tui.inputViewport());
     if (input?.kind === 'session-search' && input.value === '') return;
+    // Session recency is intentionally not inferred from the second-granularity
+    // updated_at projection. Move one semantic row at a time until the search
+    // surface owns input, regardless of which session row was initially selected.
+    tui.write('\x1b[A');
     await sleep(tuiPollInterval(25));
   }
   throw new Error(
@@ -213,6 +216,7 @@ async function waitForInputEcho(
   expectedKind: ActiveInput['kind'] | undefined,
   allowFocusTransfer: boolean,
   timeoutMs: number,
+  allowCompletionPrefix = false,
 ): Promise<void> {
   const effectiveTimeout = tuiWaitTimeout(timeoutMs);
   const start = Date.now();
@@ -222,7 +226,8 @@ async function waitForInputEcho(
     const current = activeInput(tui.inputViewport());
     lastInput = current;
     if (
-      current?.value === expectedValue &&
+      (current?.value === expectedValue ||
+        (allowCompletionPrefix && current?.value.startsWith(expectedValue))) &&
       (current.kind === expectedKind || (allowFocusTransfer && expectedValue.length > 0))
     ) {
       return;
@@ -307,6 +312,23 @@ export async function typeText(
     initial = await clearActiveInputTo(tui, '', initial.kind, options.testTiming);
   }
   const baselineValue = options.append ? initial.value : '';
+  if (
+    !options.append &&
+    initial.kind === 'main' &&
+    baselineValue.length === 0 &&
+    /\s/u.test(text) &&
+    !text.startsWith('/')
+  ) {
+    // A trailing blank is not rendered consistently by every Ink surface, so
+    // it cannot provide a per-character semantic receipt. Deliver ordinary
+    // multi-word main-input text as one bracketed-paste transaction and use
+    // pasteText's exact all-or-nothing viewport receipt instead.
+    await pasteText(tui, text, {
+      echoTimeoutMs: options.testTiming?.echoTimeoutMs,
+      settleMs: options.testTiming?.settleMs,
+    });
+    return;
+  }
   const expectedValue = `${baselineValue}${normalizeInputEcho(text)}`;
   const characters = Array.from(text);
   const attempts = characters.length <= INPUT_RETRY_LIMIT ? INPUT_DELIVERY_ATTEMPTS : 1;
@@ -319,6 +341,21 @@ export async function typeText(
         tui.write(ch);
         delivered += ch;
         if (delayMs > 0) await sleep(delayMs);
+
+        // `terminal.write()` is fire-and-forget.  Under Bun 1.3 on a busy CI
+        // runner, a later character can still be queued while the viewport
+        // has already advanced.  Confirm each prefix before sending the next
+        // byte so a retry can never race an undrained input transaction.
+        if (!/\s$/u.test(ch)) {
+          await waitForInputEcho(
+            tui,
+            normalizeInputEcho(delivered),
+            initial.kind,
+            !options.append && baselineValue.length === 0,
+            options.testTiming?.echoTimeoutMs ?? INPUT_ECHO_TIMEOUT_MS,
+            text.startsWith('/'),
+          );
+        }
         if (SELECTOR_COMMAND_PREFIX.test(delivered) && index < characters.length - 1) {
           // Ink first commits the command match and only then installs the
           // argument selector's key handlers. On slower CI hosts, sending the
@@ -353,13 +390,16 @@ export async function typeText(
       lastError = error;
       if (attempt === attempts) break;
       if (!options.append && baselineValue.length === 0) {
-        // The VT projection trims a whitespace-only input line. Rolling back
-        // only until activeInput() looks empty can therefore leave invisible
-        // spaces behind, changing the next user message or `/command`. A
-        // replacement transaction owns an empty baseline, so it is safe to
-        // delete every attempted character plus a bounded stale-whitespace
-        // margin even when some bytes were never delivered.
-        await clearInput(tui, characters.length + INPUT_RETRY_EMPTY_BASELINE_MARGIN, {
+        // First drain the actual visible transaction one receipt at a time.
+        // Sending a blind character-count of backspaces can overtake bytes
+        // still queued in the PTY and leave the retried text appended to the
+        // first attempt (for example `messageMes`).
+        initial = await clearActiveInputTo(tui, '', initial.kind, options.testTiming);
+
+        // The VT projection may omit a whitespace-only line.  Only after the
+        // visible input has been proven empty is it safe to spend a bounded
+        // margin on those non-visible bytes.
+        await clearInput(tui, INPUT_RETRY_EMPTY_BASELINE_MARGIN, {
           requireReceipt: false,
           delayMs: options.testTiming?.retryBackspaceDelayMs,
         });

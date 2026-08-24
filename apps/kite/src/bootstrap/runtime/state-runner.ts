@@ -17,6 +17,7 @@ import type { RuntimeEffectLeaseExpectation } from '@kite/runtime-host/storage';
 import { classifyFailure } from './failures';
 import { resourceAdmissionTerminalEvents } from './resource-admission-terminal';
 import {
+  approvalRejectionSettlementEvents,
   deferredApprovalRejectionTurnAbortEvent,
   type RuntimeActionResult,
   type RuntimeUserAction,
@@ -861,6 +862,7 @@ export async function* runStateRuntimeLoop(
             throw error;
           }
         }
+        const actionState = kernel.getState();
         const actionResult = kernel.applyAction(
           action,
           effect.type === 'request_provider_action'
@@ -873,7 +875,22 @@ export async function* runStateRuntimeLoop(
           yield actionResult.telemetry;
           continue;
         }
-        const events = actionResult.events;
+        let events = actionResult.events;
+        // RuntimeSessionCoordinator commits approval settlement atomically,
+        // while lightweight Host harnesses may only persist the user decision
+        // in applyAction. Keep the provider→runner path equivalent without
+        // duplicating facts from the atomic production path.
+        if (
+          actionResult.status === 'applied' &&
+          events.some((event) => event.type === 'approval.rejected') &&
+          !events.some((event) => event.type === 'tool.rejected')
+        ) {
+          const settlement = approvalRejectionSettlementEvents(actionState, events);
+          if (settlement.length > 0) {
+            const persistedSettlement = kernel.processEventBatch(settlement);
+            events = [...events, ...persistedSettlement];
+          }
+        }
         // Rejecting one focused tool approval is a terminal result for that
         // exact invocation only; the durable queue advances to its next
         // record. Only an explicit whole-turn cancel drains background work.

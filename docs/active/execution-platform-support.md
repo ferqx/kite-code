@@ -292,6 +292,11 @@ production execution。composition 的 startup discovery 只解析静态候选�
 执行。RM-13 后 consumer 只验证 durable identity 并调用 `@kite/runtime-host` 的唯一 process supervisor；
 Provider 不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
 
+App composition 的 preparation abort 不依赖平台 probe 主动观察 `AbortSignal`：一旦 controller 轮换，当前
+`prepare()` waiter 必须立即以 typed abort 收敛，下一次 `prepare()` 重新执行 discovery。旧 probe 的迟到结果或异常
+仍由组合层消费以避免未处理 rejection，但不得写入 cache、选择 backend 或触发 host/native dispatch。该边界保证
+Windows 等平台的阻塞式 discovery 不能占住 Runtime shutdown 或 Actions workflow，同时保持 discovery allocation-free。
+
 当前 Local Provider 对 Darwin Seatbelt 返回 `seatbelt_descendant_containment_unproven`：process group 无法覆盖
 `setsid`/detached descendant，不能据此提交 cleanup success。Windows restricted-token preparation/runtime codec
 使用 protocol V6 的严格 framed request/receipt 验证：allocating admission 在 durable intent 后创建唯一 runtime，

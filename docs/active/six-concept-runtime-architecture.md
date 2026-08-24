@@ -101,12 +101,17 @@ Session 状态：TUI replay、Plan approval 或权限选择把最新模式投影
 该模式对齐到既有 coordinator，再校验其余不可变身份。该对齐只更新 coordinator 的 retained mode 镜像，不写第二份
 Runtime State，也不得掩盖 Workspace、Project、recovery key、sandbox 或 Artifact evidence 漂移。
 
+Approval rejection 的 durable settlement 同样只由当前 turn 的事实决定：Runner 在 sibling 收敛后的 `stop` 边界
+只检查 `createdAtTurnId` 等于 live `turnId` 的 rejected call、未终结 Tool 与 queue record；`activeTaskId` 不能替代
+turn identity，否则同一 Task 的旧 rejection 会错误终止 successor turn。
+
 ## SQLite storage
 
 `@kite/runtime-storage-sqlite` 是 Host storage port 的唯一 concrete adapter：
 
 - `adapter.ts` 单独拥有可写数据库创建、连接与关闭；独立 `RuntimeLogQueryPort` reader 只做 current-format、no-follow、query-only durable-log 读取，不能取得写 Store capability；
 - SessionStore 的会话列表投影通过 `event-store.ts` 有界分批解码，找到第一条 session-name candidate 即停止；它不代替打开具体会话时的 strict Event/Snapshot 恢复校验；
+- 命名恢复点按 durable `event_position` 降序投影；秒级 `created_at` 与 snapshot 名称都不承担同秒内的恢复时序；
 - `preflight.ts` 在写连接前验证 current metadata；
 - event/session/snapshot/artifact/authority/effect 子模块共享同一 database context；
 - `transaction.ts` 是 Runtime event+snapshot 原子提交唯一 owner；

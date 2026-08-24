@@ -252,7 +252,21 @@ function signalOwnedProcessTree(
   try {
     process.kill(-processGroupId, signal);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return;
+    if (code === 'EPERM') {
+      // Bun 1.4 on Darwin can surface EPERM for a negative-PGID process.kill
+      // from an aborted AsyncLocalStorage context even though the exact,
+      // same-user detached group was verified immediately before cleanup.
+      // The native POSIX utility reaches the same already-proven group and
+      // keeps the fallback disjoint from any PID or shell expansion.
+      const fallback = Bun.spawnSync(
+        ['/bin/kill', `-${signal.slice(3)}`, '--', String(-processGroupId)],
+        { stdout: 'ignore', stderr: 'ignore' },
+      );
+      if (fallback.exitCode === 0 || !processGroupExists(processGroupId)) return;
+    }
+    throw error;
   }
 }
 

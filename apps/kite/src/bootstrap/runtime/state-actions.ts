@@ -209,6 +209,11 @@ function approvalCancellationEvents(
       reason,
       failure: classifyFailure('approval_rejected', reason),
     },
+    {
+      type: 'tool.rejected',
+      toolCallId: interaction.toolCallId,
+      reason,
+    },
     ...siblingCancellations,
     ...capabilityWaiverEventsForToolTerminals(
       state,
@@ -491,28 +496,43 @@ export function approvalRejectionSettlementEvents(
   );
   if (!rejection) return [];
 
+  const toolAlreadySettled = events.some(
+    (event) => event.type === 'tool.rejected' && event.toolCallId === rejection.toolCallId,
+  );
+  const turnAlreadyAborted = events.some(
+    (event) => event.type === 'turn.aborted' && event.turnId === state.turn.turnId,
+  );
+
   const siblingExists = Object.values(state.tools.calls).some(
     (call) =>
       call.toolCallId !== rejection.toolCallId &&
       NON_TERMINAL_TOOL_STATUSES.has(call.status) &&
-      (call.taskId != null
-        ? call.taskId === state.activeTaskId
-        : call.createdAtTurnId === state.turn.turnId),
+      call.createdAtTurnId === state.turn.turnId,
   );
-  const queuedApprovalSibling = [...state.pendingApprovals.values()].some(
-    (pending) =>
+  const queuedApprovalSibling = [...state.pendingApprovals.values()].some((pending) => {
+    const call = state.tools.calls[pending.toolCallId];
+    return (
+      call?.createdAtTurnId === state.turn.turnId &&
       pending.toolCallId !== rejection.toolCallId &&
-      !['rejected', 'succeeded', 'failed', 'cancelled', 'exhausted'].includes(pending.status),
-  );
+      !['rejected', 'succeeded', 'failed', 'cancelled', 'exhausted'].includes(pending.status)
+    );
+  });
 
-  const settled: RuntimeEvent[] = [
-    {
-      type: 'tool.rejected',
-      toolCallId: rejection.toolCallId,
-      reason: rejection.reason,
-    },
-  ];
-  if (!siblingExists && !queuedApprovalSibling && state.turn.status === 'active') {
+  const settled: RuntimeEvent[] = toolAlreadySettled
+    ? []
+    : [
+        {
+          type: 'tool.rejected',
+          toolCallId: rejection.toolCallId,
+          reason: rejection.reason,
+        },
+      ];
+  if (
+    !turnAlreadyAborted &&
+    !siblingExists &&
+    !queuedApprovalSibling &&
+    state.turn.status === 'active'
+  ) {
     settled.push({
       type: 'turn.aborted',
       turnId: state.turn.turnId,
@@ -537,22 +557,20 @@ export function deferredApprovalRejectionTurnAbortEvent(
     (call) =>
       call.status === 'rejected' &&
       call.failure?.kind === 'approval_rejected' &&
-      (call.taskId != null
-        ? call.taskId === state.activeTaskId
-        : call.createdAtTurnId === state.turn.turnId),
+      call.createdAtTurnId === state.turn.turnId,
   );
   if (!rejectedApproval) return null;
   const unfinishedTool = Object.values(state.tools.calls).some(
     (call) =>
-      NON_TERMINAL_TOOL_STATUSES.has(call.status) &&
-      (call.taskId != null
-        ? call.taskId === state.activeTaskId
-        : call.createdAtTurnId === state.turn.turnId),
+      NON_TERMINAL_TOOL_STATUSES.has(call.status) && call.createdAtTurnId === state.turn.turnId,
   );
-  const unfinishedApproval = [...state.pendingApprovals.values()].some(
-    (pending) =>
-      !['rejected', 'succeeded', 'failed', 'cancelled', 'exhausted'].includes(pending.status),
-  );
+  const unfinishedApproval = [...state.pendingApprovals.values()].some((pending) => {
+    const call = state.tools.calls[pending.toolCallId];
+    return (
+      call?.createdAtTurnId === state.turn.turnId &&
+      !['rejected', 'succeeded', 'failed', 'cancelled', 'exhausted'].includes(pending.status)
+    );
+  });
   if (unfinishedTool || unfinishedApproval) return null;
   return {
     type: 'turn.aborted',

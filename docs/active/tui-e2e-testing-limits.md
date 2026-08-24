@@ -63,6 +63,9 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
    descendant PID。该限定范围的 lifecycle series 只用于本地/CI 诊断，不代表 session switch、tool lifecycle、
    model reconnect 或生产平台 admission；多个 PTY scenario、父 runner 趋势或跨进程差值也不能替代它。Windows
    无通用 `/proc/self/fd` 或平台不能检查 owned descendant PID 时，相关指标标记为 unsupported，不得伪造通过。
+   POSIX harness 终止已确认拥有的独立 process group 时，若 Bun 对负 PGID 的 `kill()` 返回 `EPERM`，只可在
+   重新验证精确负 PGID 后调用原生 `/bin/kill` 发送同一信号；不得经过 shell、扩大到单 PID/其他进程组，或把
+   未确认的清理伪装成成功。
 9. PTY 原始输出仍是累积流，因此“原始字节里曾出现 `❯`”不能证明当前输入焦点可用。Harness
    生成带类型的 byte checkpoint；跨 checkpoint 的 UTF-8 code point 不归入动作后输出。每次
    write/resize/raw-mode 动作都更新 checkpoint，输入提交还必须通过本次输入回显与本次 mock
@@ -129,8 +132,12 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     和 Ink continuation row，并用输入宽度区分省略英文词间空格的 soft wrap 与直接拼接的 hard wrap；
     逻辑内部空格必须进入等值回执，不能全量删除。它不声称区分任意光标位置上的真实 inverse blank；
     普通 `viewport()` 仍保留用户实际看到的画面。main readiness 也必须使用该 input projection 判断空输入，并另用普通
-    viewport 验证可见 chrome；不能让视觉光标阻止 idle 判定。replacement 重试必须
-    确定性删除已尝试字符与 bounded 隐藏空白，避免残留空格改变下一次输入类别。Enter delivery
+    viewport 验证可见 chrome；不能让视觉光标阻止 idle 判定。逐字符 PTY delivery 必须在发送下一个
+    非空白字节前观察到当前活动输入可投影的精确 prefix receipt。部分 Ink surface 不投影尾随空格，因而 ordinary
+    multi-word main input 使用一次 bracketed-paste transaction 和 exact all-or-nothing viewport receipt；selector/search
+    等仍需逐 prefix 验证。replacement 重试必须先逐回执清空当前可见输入，
+    再有界清理 projection 不可见的尾随空白，不能盲发整段退格与尚未排空的 PTY 字节竞争，否则会把重试文本
+    追加到首次部分交付。Enter delivery
     与 semantic receipt 使用独立 timeout；后者继续使用 request/event 场景预算。持久事件加进程重启
     的复合场景还要让 test deadline 覆盖完整 event receipt 与 restart replay，两者不能争用短输入预算。
 20. suite runner 默认在进程隔离和单 runner 串行顺序不变的前提下运行所有选中 scenario，末尾一次性汇总失败；

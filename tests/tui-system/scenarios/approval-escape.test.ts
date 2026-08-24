@@ -12,6 +12,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -25,12 +26,15 @@ describe('TUI PTY System — Approval Escape', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
+    externalFile = join(workspace.home, 'approval-escape-external.txt');
 
-    // Response #1: shell_execute tool call that needs approval
+    // Response #1: an external write_file call that needs approval on every
+    // platform, including Linux CI hosts without a native Shell sandbox.
     // Response #2: normal response for the second user message after Escape cancel
     server.setResponses([
       {
@@ -40,8 +44,11 @@ describe('TUI PTY System — Approval Escape', () => {
           tool_calls: [
             {
               id: 'call_1',
-              name: 'shell_execute',
-              args: { command: 'node -e "1+1"', description: 'test escape approval' },
+              name: 'write_file',
+              args: {
+                path: externalFile,
+                content: 'This write must be cancelled by Escape.',
+              },
             },
           ],
         },
@@ -108,10 +115,12 @@ describe('TUI PTY System — Approval Ctrl+C', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
+    externalFile = join(workspace.home, 'approval-ctrl-c-external.txt');
     server.setResponses([
       {
         toolContinuation: 'aborted',
@@ -120,8 +129,11 @@ describe('TUI PTY System — Approval Ctrl+C', () => {
           tool_calls: [
             {
               id: 'call_ctrl_c',
-              name: 'shell_execute',
-              args: { command: 'node -e "2+2"', description: 'test Ctrl+C approval' },
+              name: 'write_file',
+              args: {
+                path: externalFile,
+                content: 'This write must be cancelled by Ctrl+C.',
+              },
             },
           ],
         },

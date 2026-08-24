@@ -1,6 +1,6 @@
 # Shell 沙箱边界与并发审批队列优化完成记录
 
-状态：completed（实现、文档与本地全量门禁完成；PR #63 首轮 Actions 发现的问题已修复，当前 SHA 远程门禁待重跑）
+状态：completed（实现、文档与本地全量门禁完成；PR #63 前两轮 Actions 发现的问题已修复，当前修复 SHA 远程门禁待重跑）
 
 日期：2026-08-25
 
@@ -41,16 +41,20 @@ Pull Request：[#63](https://github.com/ferqx/kite-code/pull/63)
 | SAQ-05 | `tests/subagent-runner.test.ts`；`tests/subagent-prepared-dispatch.test.ts`；`tests/subagent-continuation-codec.test.ts` | B 写集冻结；Human/Auto Subagent PTY 已通过，关键 continuation 与 terminal barrier 已具名覆盖 |
 | SAQ-06 | `packages/builtin-runtime/test/prepared-execution-consumer.test.ts`；`tests/runtime/tool-pipeline-prepared.test.ts`；`tests/runtime/concurrent-shell-cancel.test.ts` | pre-GO zero host call、post-GO unknown/no replay、cleanup boundary |
 | SAQ-07 | `tests/runtime/approval-interaction-semantics.test.ts`；`tests/session-manager.test.ts`；`tests/tui-system/scenarios/sandbox-mode.test.ts` | interactionMode revision、`/permissions` persistence、Full independent availability |
-| SAQ-08 | `tests/tui-reducer.test.ts`；`tests/tui.test.ts tests/tui-replay-blocks.test.ts`（selected 574 pass / 0 fail）；`tests/tui-system/scenarios/approval-escape.test.ts` | queue projection、focused input、generation guards、Enter/Esc/Ctrl+C |
+| SAQ-08 | `tests/tui-reducer.test.ts`；`tests/tui.test.ts tests/tui-replay-blocks.test.ts`（selected 573 pass / 0 fail）；`tests/tui-system/scenarios/approval-escape.test.ts` | queue projection、focused input、generation guards、Enter/Esc/Ctrl+C |
 | SAQ-09 | `tests/tui-system/scenarios/subagent-approval.test.ts`；`tests/tui-system/scenarios/interrupt.test.ts`；`tests/sandbox/platform-capability-probe.test.ts` | recovery/PTY/platform contract；Auto Subagent terminal barrier 已由具名 PTY 回归覆盖，platform remote evidence 仍待最终门禁 |
 | SAQ-10 | 本记录、ADR-0137、active docs、`docs/documentation-map.json`、Plans 注册表 | 文档写集完成；最终全量与 GitHub required checks 不在本记录预先宣称 |
 
 本轮阶段性实测登记（均为具名定向证据，不替代最终 root/full suite）：agent-kernel 131、runtime-host 137、
-builtin-runtime 198、runtime-storage-sqlite 13；核心组合 153；platform 102（另有 3 项 native skip）、Seatbelt 32、
-fault/replay 35、TUI selected 574、session 134。Human/Auto Subagent PTY：3/0/26；关键 PTY 文件（approval 2、
+builtin-runtime 198、runtime-storage-sqlite 13；核心组合 153；跨平台 Bun 1.3.14 bundle 126 pass（另有 4 项 native skip）、
+Seatbelt 32、fault/replay 35、TUI selected 573、TUI reducer 280。Human/Auto Subagent PTY：3/0/26；关键 PTY 文件（approval 2、
 cancel-successor 1、interrupt-resume 1、interrupt 4、plan 1、sandbox 1、subagent 3、tool-approve 1）均已具名
 回归。B 写集另有 `tests/subagent-runner.test.ts` 34 pass / 158 expects，runner/executor/bootstrap subagent/
 suspension 的定向 TypeScript 诊断为零。上述数字仍不替代最终 `test:all`、根 typecheck 或 GitHub required checks。
+
+仓库未提供可靠的全仓 coverage threshold script；因此本记录不虚构一个全仓覆盖百分比。触达范围的覆盖证据由上表、
+下述 20 场景逐项映射、State/Store/Host fault+replay、三平台 contract 以及真实 PTY journey 共同组成，并同时包含
+legacy shape、stale generation、跨 turn、late result、rollback、restart、unsupported backend 等负向分支。
 
 ## 3. 20 个验收场景具名映射
 
@@ -84,12 +88,13 @@ suspension 的定向 TypeScript 诊断为零。上述数字仍不替代最终 `t
 | Gate | 状态 | 证据 |
 | --- | --- | --- |
 | `bun run typecheck` | passed | 根工程与 7 个 Runtime workspace 全部通过 |
-| `bun run test:all` | passed | 最终修复后默认套件 3548 pass / 6 skip / 0 fail / 15825 expects；7 个 workspace 全绿；39 个隔离 PTY 场景文件全绿 |
+| `bun run test:all` | passed | 最终修复后默认套件 3552 pass / 6 skip / 0 fail / 15839 expects；7 个 workspace 全绿；39 个隔离 PTY 场景文件全绿 |
 | `bun run test:e2e` | passed | 7 pass / 0 fail / 32 expects |
-| `bun run test:runtime:soak` | passed | CI profile 7/7 cases；全部 required terminal evidence、State invariant 与 cleanup 通过，0 orphan |
+| `bun run test:runtime:soak` | passed | CI profile 7/7 cases；全部 required terminal evidence、State invariant 与 cleanup 通过，0 orphan；Bun 1.4 digest `sha256:f1cfb5e204d6d45f1f4117ea11714e50f9151d975f5ba36eba3d6e9912dd2543`，CI 同版 Bun 1.3.14 digest `sha256:e263c62c323c6f60279a74633ee5c4745d218584478e489dc32e6e3ecef0a430` |
+| `bun run check:core-boundary` / `check:runtime-packages` | passed | Core boundary 通过；7 packages / 12 edges / 单一 App composition root |
 | `bun run check:docs-impact` | passed | Documentation impact checks passed |
 | `bun run check:docs` | passed | 文档结构与计划治理通过：83 completed、25 superseded、0 optional |
-| `git diff --check` | passed | 最终实现、测试与文档 diff 无 whitespace error |
-| GitHub Actions required checks | waiting_ci | [PR #63](https://github.com/ferqx/kite-code/pull/63) 首轮 [Required run 32775194923](https://github.com/ferqx/kite-code/actions/runs/32775194923) 暴露并已本地修复 ignored source、Windows temp path、sandbox unavailable、PTY durable receipt 与 approval rejection terminal race；当前修复 SHA 待推送重跑，未预先宣称远程通过 |
+| `git diff --check` / `bun run format:check` | passed | 无 whitespace error；Biome 0 error（23 warnings / 6 infos 为既有非阻断诊断） |
+| GitHub Actions required checks | waiting_ci | [PR #63](https://github.com/ferqx/kite-code/pull/63) 首轮 [Required run 32775194923](https://github.com/ferqx/kite-code/actions/runs/32775194923) 与第二轮 [Required run 32778382920](https://github.com/ferqx/kite-code/actions/runs/32778382920)、[platform run 32778382909](https://github.com/ferqx/kite-code/actions/runs/32778382909) 暴露 ignored source、Windows temp/path preparation abort、sandbox unavailable、PTY durable receipt/session ordering 与 approval rejection terminal race；当前修复 SHA 待推送重跑，未预先宣称远程通过 |
 
 若任一门禁失败，按源码/测试事实修复后重新运行；不得用 `--no-verify`、删除测试、放宽断言或恢复旧授权兼容路径绕过。

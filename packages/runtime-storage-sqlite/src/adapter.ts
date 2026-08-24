@@ -185,7 +185,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       { name: string; event_position: number; created_at: number; affected_file_count: number },
       [string]
     >(
-      `SELECT s.name, s.event_position, s.created_at, (SELECT COUNT(DISTINCT p.path) FROM runtime_file_preimages p WHERE p.session_id = s.session_id AND p.event_position > s.event_position) AS affected_file_count FROM runtime_named_snapshots s WHERE s.session_id = ? ORDER BY s.created_at DESC, s.name DESC`,
+      `SELECT s.name, s.event_position, s.created_at, (SELECT COUNT(DISTINCT p.path) FROM runtime_file_preimages p WHERE p.session_id = s.session_id AND p.event_position > s.event_position) AS affected_file_count FROM runtime_named_snapshots s WHERE s.session_id = ? ORDER BY s.event_position DESC, s.name DESC`,
     );
     const selectNamedSnapshotEntry = db.query<NamedSnapshotRow, [string, string]>(
       'SELECT session_id AS thread_id, name, event_position, state_json, revision AS state_revision, state_checksum, schema_version, created_at FROM runtime_named_snapshots WHERE session_id = ? AND name = ?',

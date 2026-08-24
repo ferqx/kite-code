@@ -615,7 +615,10 @@ describe('App sandbox composition', () => {
       sandboxEnabled: true,
       resolveBackend: async (): Promise<'bubblewrap'> => {
         if (resolveMode === 'fast-success') return 'bubblewrap';
-        await new Promise((resolveAwait) => setTimeout(resolveAwait, 30));
+        // A platform probe can be genuinely unbounded (for example while a
+        // Windows runner/process is being torn down).  abortPreparation must
+        // settle the caller without waiting for that probe to return.
+        await new Promise<never>(() => {});
         return 'bubblewrap';
       },
       createNativeExecutor: () => async (input) => ({

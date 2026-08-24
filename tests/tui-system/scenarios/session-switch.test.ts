@@ -29,6 +29,7 @@ import {
 import {
   createTestWorkspace,
   observePersistedSessionIds,
+  observePersistedSessionSummaries,
   requirePersistedRuntimeReady,
 } from '../harness/test-workspace';
 
@@ -129,15 +130,18 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForText(() => tui.viewport(), 'Session 2 response', 15000);
       await waitForCondition(
         () => {
-          const observation = observePersistedSessionIds(workspace);
+          const observation = observePersistedSessionSummaries(workspace);
           if (observation.status !== 'ready') return false;
-          const current = observation.value;
+          const current = observation.value.map((session) => session.threadId);
+          const names = new Set(observation.value.map((session) => session.name));
           return (
             current.length === sessionIdsBeforeNew.length + 1 &&
-            sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
+            sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId)) &&
+            names.has('Message in session 1') &&
+            names.has('Message in session 2')
           );
         },
-        'Runtime Store to persist the distinct session created by /new',
+        'Runtime Store to persist both exact session summaries before /resume',
         10_000,
       );
 
@@ -169,7 +173,6 @@ describe('TUI PTY System — Session Switching', () => {
             screenContains(viewport, '导航') &&
             screenHasSessionRow(viewport, 'Message in session 1', { active: false }) &&
             screenHasSessionRow(viewport, 'Message in session 2', {
-              selected: true,
               active: true,
             }) &&
             !screenContains(viewport, 'Loading...')

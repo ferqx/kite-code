@@ -424,6 +424,7 @@ describe('runtime user actions', () => {
     } else {
       expect(events.map((event) => event.type)).toEqual([
         'approval.rejected',
+        'tool.rejected',
         'tool.cancelled',
         'tool.cancelled',
         'turn.aborted',
@@ -435,6 +436,7 @@ describe('runtime user actions', () => {
           toolCallId: 'shell-1',
           reason: 'Cancelled with Ctrl+C.',
         }),
+        expect.objectContaining({ type: 'tool.rejected', toolCallId: 'shell-1' }),
         expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'shell-running' }),
         expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'read-queued' }),
         expect.objectContaining({

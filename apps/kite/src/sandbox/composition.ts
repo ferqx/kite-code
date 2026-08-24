@@ -58,6 +58,54 @@ export type AppShellExecutor = AppPreparedShellExecutionCarrier & {
 /** Thrown by prepare() when the attempt was aborted by abortPreparation(). */
 export const SANDBOX_PREPARATION_ABORTED_REASON = 'sandbox_preparation_aborted';
 
+/**
+ * Discovery is allocation-free, but a platform resolver may still be waiting
+ * on an OS probe.  Rotating the preparation controller must settle the
+ * caller immediately; otherwise a Windows probe that does not observe the
+ * signal can hold the Runtime shutdown path until the workflow timeout.
+ * The resolver promise is still observed after abort so a late rejection
+ * cannot become an unhandled rejection, while its result is never selected.
+ */
+function awaitPreparationAbortable<T>(
+  operation: PromiseLike<T> | T,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error(SANDBOX_PREPARATION_ABORTED_REASON));
+
+  return new Promise<T>((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const cleanup = (): void => {
+      signal.removeEventListener('abort', onAbort);
+    };
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectPromise(new Error(SANDBOX_PREPARATION_ABORTED_REASON));
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+    Promise.resolve(operation).then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (signal.aborted) {
+          rejectPromise(new Error(SANDBOX_PREPARATION_ABORTED_REASON));
+          return;
+        }
+        resolvePromise(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        rejectPromise(error);
+      },
+    );
+  });
+}
+
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
 }
@@ -159,12 +207,15 @@ export function createPreparedAppShellExecutor(input: {
       // Yield an event-loop turn before any synchronous backend discovery or
       // native executor initialization is attempted, so an early startup
       // prewarm never blocks the first render.
-      await (input.yieldBeforeResolve ?? yieldToEventLoop)();
+      await awaitPreparationAbortable(
+        (input.yieldBeforeResolve ?? yieldToEventLoop)(),
+        attemptSignal,
+      );
       assertNotAborted();
 
       let backend: SandboxBackend;
       try {
-        const resolved = await input.resolveBackend();
+        const resolved = await awaitPreparationAbortable(input.resolveBackend(), attemptSignal);
         assertNotAborted();
         backend = typeof resolved === 'string' ? resolved : resolved.backend;
         if (backend === 'none') {

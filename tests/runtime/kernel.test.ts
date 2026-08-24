@@ -1442,7 +1442,7 @@ test.each([
   }
 
   if (interactionKind === 'awaiting_tool_approval') {
-    expect(events).toEqual(['approval.rejected', 'turn.aborted']);
+    expect(events).toEqual(['approval.rejected', 'tool.rejected', 'turn.aborted']);
     expect(executedEffects).toEqual([]);
   } else if (interactionKind === 'awaiting_review') {
     expect(events).toEqual(['plan.review_cancelled', 'tool.cancelled', 'turn.aborted']);
@@ -1526,7 +1526,7 @@ test('runStateRuntimeLoop closes a suspended subagent when its approval is cance
     events.push(event.type);
   }
 
-  expect(events).toEqual(['approval.rejected', 'turn.aborted']);
+  expect(events).toEqual(['approval.rejected', 'tool.rejected', 'turn.aborted']);
   expect(kernel.getState().interactions.kind).toBe('idle');
   expect(kernel.getState().suspendedSubagents).toEqual({});
   expect(kernel.getState().tools.calls['task-1']?.status).toBe('rejected');

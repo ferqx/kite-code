@@ -176,8 +176,13 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
         return { status: 'applied', eventId: `event-${processEventCalls}` };
       },
       processEventBatch: (events) => {
-        for (const event of events) state = reduceRuntimeState(state, event);
-        lastAppliedEvents = [...events];
+        const normalizedEvents = events.map((event) =>
+          event.type === 'tool.rejected'
+            ? normalizeCurrentToolOutcomeEvent(event, state, '2026-08-25T00:00:01.000Z')
+            : event,
+        );
+        for (const event of normalizedEvents) state = reduceRuntimeState(state, event);
+        lastAppliedEvents = normalizedEvents;
         return lastAppliedEvents;
       },
       getLastAppliedEvents: () => lastAppliedEvents,
@@ -223,6 +228,183 @@ describe('SAQ-16/17 — approval interaction semantics', () => {
     expect(second).toEqual([]);
     expect(processEventCalls).toBe(1);
     expect(executorCalls).toBe(0);
+  });
+
+  test('provider waiter path settles a rejection when applyAction returns only the decision', async () => {
+    let state = reduceRuntimeState(addTool(initialState(), 'shell-a'), {
+      type: 'approval.requested',
+      interactionId: 'approval-a',
+      toolCallId: 'shell-a',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval: approval(),
+    });
+    let lastAppliedEvents: RuntimeEvent[] = [];
+    let processEventCalls = 0;
+    let providerCalls = 0;
+    let executorCalls = 0;
+    const kernel: RuntimeStateSessionPort = {
+      getState: () => state,
+      processEvent: (event) => {
+        processEventCalls += 1;
+        state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [event];
+        return { status: 'applied', eventId: `event-${processEventCalls}` };
+      },
+      processEventBatch: (events) => {
+        const normalizedEvents = events.map((event) =>
+          event.type === 'tool.rejected'
+            ? normalizeCurrentToolOutcomeEvent(event, state, '2026-08-25T00:00:01.000Z')
+            : event,
+        );
+        for (const event of normalizedEvents) state = reduceRuntimeState(state, event);
+        lastAppliedEvents = normalizedEvents;
+        return lastAppliedEvents;
+      },
+      getLastAppliedEvents: () => lastAppliedEvents,
+      selectPendingEffects: () =>
+        state.turn.status === 'active' && state.interactions.kind === 'awaiting_tool_approval'
+          ? [{ type: 'request_tool_approval', interactionId: 'approval-a', toolCallId: 'shell-a' }]
+          : [{ type: 'stop' }],
+      acquireRunner: () => 'provider-waiter-runner',
+      releaseRunner: () => undefined,
+      beginEffect: () => {
+        throw new Error('No executor effect should be started.');
+      },
+      isEffectEventCurrent: () => false,
+      applyEffectEvent: () => false,
+      applyEffectResult: () => false,
+      applyLateResourceReconciliation: () => false,
+      applyAction: (action) => {
+        const event: RuntimeEvent = {
+          type: 'approval.rejected',
+          interactionId: 'interactionId' in action ? action.interactionId : 'unexpected',
+          toolCallId: 'shell-a',
+          generation: action.type === 'reject' ? action.generation : 0,
+          reason: 'provider rejection',
+          outcome: {
+            schemaVersion: 1,
+            status: 'rejected',
+            failure: { kind: 'approval_rejected', detailCode: 'approval_rejected' },
+            dispatchState: 'not_started',
+            externalEffects: 'none',
+            replaySafety: 'pre_dispatch',
+            recovery: {
+              disposition: 'never',
+              maximumAdditionalCalls: 0,
+              requiresNewModelResponse: false,
+              safeAutomaticRetry: false,
+            },
+            timing: { source: 'runtime_boundary' },
+          },
+        };
+        state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [event];
+        return { status: 'applied', events: [event] };
+      },
+    };
+
+    const run = async (): Promise<RuntimeEvent[]> => {
+      const emitted: RuntimeEvent[] = [];
+      for await (const event of runStateRuntimeLoop(
+        kernel,
+        async () => {
+          executorCalls += 1;
+          return [];
+        },
+        {
+          requestAction: async () => {
+            providerCalls += 1;
+            return {
+              type: 'reject' as const,
+              interactionId: 'approval-a',
+              generation: 0,
+            };
+          },
+        },
+      )) {
+        emitted.push(event);
+      }
+      return emitted;
+    };
+
+    const first = await run();
+    expect(first.map((event) => event.type)).toEqual([
+      'approval.rejected',
+      'tool.rejected',
+      'turn.aborted',
+    ]);
+    expect(providerCalls).toBe(1);
+    expect(executorCalls).toBe(0);
+    expect(state.turn.status).toBe('aborted');
+
+    const second = await run();
+    expect(second).toEqual([]);
+    expect(processEventCalls).toBe(0);
+    expect(providerCalls).toBe(1);
+    expect(executorCalls).toBe(0);
+  });
+
+  test('an old approval rejection cannot abort the next turn of the same Task', async () => {
+    let state = withStatuses(addTool(initialState(), 'old-shell'), [['old-shell', 'rejected']]);
+    state.activeTaskId = 'task-same-across-turns';
+    state.tools.calls['old-shell'] = {
+      ...state.tools.calls['old-shell']!,
+      taskId: state.activeTaskId,
+      failure: {
+        kind: 'approval_rejected',
+        message: 'old rejection',
+        retryable: false,
+        modelFixable: false,
+        needsUserIntervention: false,
+        terminatesTurn: false,
+        journal: true,
+      },
+    };
+    state = reduceRuntimeState(state, { type: 'turn.started', turnId: 'next-turn' });
+    let processEventCalls = 0;
+    let lastAppliedEvents: RuntimeEvent[] = [];
+    const kernel: RuntimeStateSessionPort = {
+      getState: () => state,
+      processEvent: (event) => {
+        processEventCalls += 1;
+        state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [event];
+        return { status: 'applied', eventId: `event-${processEventCalls}` };
+      },
+      processEventBatch: (events) => {
+        for (const event of events) state = reduceRuntimeState(state, event);
+        lastAppliedEvents = [...events];
+        return lastAppliedEvents;
+      },
+      getLastAppliedEvents: () => lastAppliedEvents,
+      selectPendingEffects: () => [{ type: 'stop' }],
+      acquireRunner: () => 'cross-turn-runner',
+      releaseRunner: () => undefined,
+      beginEffect: () => {
+        throw new Error('No effect should be started.');
+      },
+      isEffectEventCurrent: () => false,
+      applyEffectEvent: () => false,
+      applyEffectResult: () => false,
+      applyLateResourceReconciliation: () => false,
+      applyAction: () => ({
+        status: 'stale',
+        reason: 'No action should be requested.',
+        telemetry: { type: 'runtime.action_ignored', reason: 'unexpected action' },
+      }),
+    };
+
+    const emitted: RuntimeEvent[] = [];
+    for await (const event of runStateRuntimeLoop(kernel, async () => [], {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unexpected' }),
+    })) {
+      emitted.push(event);
+    }
+
+    expect(emitted).toEqual([]);
+    expect(processEventCalls).toBe(0);
+    expect(state.turn).toMatchObject({ turnId: 'next-turn', status: 'active' });
   });
 
   test('never accepts full_access as an approval grant', () => {
