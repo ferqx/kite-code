@@ -1,32 +1,39 @@
 # Builtin Runtime
 
-Private home for Kite-specific runtime semantics. `createBuiltinRuntimeModules()`
-is the frozen composition surface for the domain modules, which register the
-unique Runtime SPI owner and executor for every Builtin operation.
-The frozen snapshot contains exactly 20 model-visible tools and 9 internal
-operations; package tests derive both counts and every schema, description,
-effect, capability revision, and executor revision from those registrations.
-These package-level facts are not by themselves proof of production cutover:
-the App/Host composition must pass its exact frozen snapshot to every caller,
-and the architecture manifests close only after every production caller uses
-the same frozen snapshot.
+## 定位
 
-`createBuiltinToolCatalogProjection()` derives the immutable model-visible
-catalog and schema-only AI SDK `ToolSet` from that registered SPI snapshot. It
-also exposes an exact-operation dispatch method that delegates to the Host's
-single `CapabilityExecutionPort`; it never selects a second handler. Each entry
-carries one current description, the Builtin-owned strict parser and unknown-
-field observer, typed availability, dynamic effects, scheduler traits,
-minimum-approval metadata, and a strict runtime descriptor.
+`@kite-ai/builtin-runtime` 是 Kite-specific capability、模型、工具、MCP、Sandbox、Subagent 与 Verification 语义 owner。
 
-Domain runtime modules live under `git`, `model`, `planning`, `subagent`, and
-`verification`. Skill, Subagent, and Verification APIs are available only from
-their package subpaths; the root barrel is reserved for module composition and
-cross-domain capability surfaces.
+## 拥有职责
 
-`mcp:dynamic_tool` remains one internal wrapper around the Host-supplied MCP
-runtime and never enters the 20-tool model surface. `builtin:ask_user` remains
-an interrupt owned by the Runtime/Kernel-to-client user-input terminal; catalog
-dispatch rejects it before calling an execution port. The `task` model parser and ToolSet expose
-only the public planning-mode schema; its private `taskArtifact` branch is
-runtime-only.
+- 通过 `createBuiltinRuntimeModules()` 注册唯一 Builtin operation owner 与 executor。
+- 从一个 frozen SPI snapshot 投影 parser、schema、description、availability、effects、traits 与 revision。
+- 实现具体 filesystem、git、model、planning、sandbox、MCP、Skill、Subagent 和 Verification mechanism。
+
+## 不拥有职责
+
+- 不依赖 Kernel、Host、SQLite 或 App。
+- 不持久化 Kernel State，不决定 authorization，不创建第二 dispatcher。
+- 不把 `mcp:dynamic_tool` 或 `builtin:ask_user` 暴露为普通模型工具。
+
+## 允许依赖
+
+只允许 workspace 依赖 `@kite-ai/runtime-contract` 与 `@kite-ai/runtime-spi`；外部依赖只服务具体 Builtin mechanism。
+
+## 公开入口
+
+根入口只负责 module composition 和跨域 capability；filesystem、git、mcp、model、planning、sandbox、skills、subagent、verification 使用已声明 subpath。
+
+## 关键不变量
+
+- 当前 snapshot 固定包含 20 个 model-visible tools 和 9 个 internal operations。
+- App/Host/catalog/executor 必须使用同一个 snapshot。
+- 任何 terminal uncertainty 不转换为成功或 fallback。
+
+## 测试
+
+`bun test packages/builtin-runtime/test`
+
+## 文档影响
+
+模块局部变化更新本 README；授权、Model、MCP 或 Tool Pipeline 跨包语义同时更新对应 `docs/active/` authority。

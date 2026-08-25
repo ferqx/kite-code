@@ -130,8 +130,8 @@
         "packageDefaultTest": "bun run scripts/run-default-tests.ts",
         "runnerSource": "// synthetic runner\nrunMain();\nrunIsolated();\n",
         "processIsolatedTests": [
-          "tests/runtime/capability-artifacts.test.ts",
-          "tests/runtime/plan-artifacts.test.ts"
+          "tests/isolated/runtime/capability-artifacts.test.ts",
+          "tests/isolated/runtime/plan-artifacts.test.ts"
         ]
       }
     },

@@ -299,7 +299,7 @@ function validateRootScripts(
   const required: Readonly<Record<string, readonly string[]>> = {
     build: ['scripts/run-runtime-workspace-script.ts build'],
     typecheck: ['tsc --noEmit', 'scripts/run-runtime-workspace-script.ts typecheck'],
-    test: ['scripts/run-default-tests.ts', 'scripts/run-runtime-workspace-script.ts test'],
+    test: ['scripts/run-default-tests.ts'],
     'check:runtime-packages': ['scripts/check-runtime-packages.ts'],
   };
   for (const [script, fragments] of Object.entries(required)) {

@@ -1,0 +1,648 @@
+/**
+ * 沙箱执行器集成测试 — 仅在 macOS 运行
+ * Sandbox executor integration tests — macOS only
+ *
+ * 这些测试验证 sandbox-exec 的实际隔离效果。在非 macOS 平台上全部跳过。
+ * These tests verify actual sandbox-exec isolation. Skipped on non-macOS platforms.
+ */
+import { describe, expect, test } from 'bun:test';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createSandboxExecutor } from '../helpers/sandbox-executor';
+import { startTestHttpServer } from '../helpers/test-http-server';
+
+const isMacOS = process.platform === 'darwin';
+
+function setupWorkspace() {
+  const ws = mkdtempSync(join(tmpdir(), 'kite-code-sandbox-test-'));
+  return ws;
+}
+
+function cleanupWorkspace(ws: string) {
+  rmSync(ws, { recursive: true, force: true });
+}
+
+describe('sandbox executor integration', () => {
+  if (!isMacOS) {
+    test('reports that Seatbelt integration requires macOS', () => {
+      expect(process.platform).not.toBe('darwin');
+    });
+    return;
+  }
+
+  test('executes commands within workspace successfully', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'pwd' });
+      expect(result.processCleanup?.confirmedExited).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(ws);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('can read files within workspace', async () => {
+    const ws = setupWorkspace();
+    try {
+      writeFileSync(join(ws, 'hello.txt'), 'hello sandbox');
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'cat hello.txt' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('hello sandbox');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('strips ripgrep config that could inject a preprocessor', async () => {
+    const ws = setupWorkspace();
+    const previousConfig = process.env.RIPGREP_CONFIG_PATH;
+    const previousPath = process.env.PATH;
+    try {
+      writeFileSync(join(ws, 'needle.txt'), 'needle\n');
+      writeFileSync(join(ws, 'rg.config'), '--pre\ntouch injected-by-rg\n');
+      const fakeRipgrep = join(ws, 'rg');
+      writeFileSync(
+        fakeRipgrep,
+        `#!/bin/sh
+if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
+/usr/bin/grep "$1" "$2"
+`,
+      );
+      chmodSync(fakeRipgrep, 0o755);
+      process.env.RIPGREP_CONFIG_PATH = join(ws, 'rg.config');
+      process.env.PATH = `${ws}:${previousPath ?? ''}`;
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'rg needle needle.txt' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('needle');
+      expect(existsSync(join(ws, 'injected-by-rg'))).toBe(false);
+    } finally {
+      if (previousConfig === undefined) delete process.env.RIPGREP_CONFIG_PATH;
+      else process.env.RIPGREP_CONFIG_PATH = previousConfig;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('policy-proven reads exclude Workspace executables from PATH', async () => {
+    const ws = setupWorkspace();
+    const previousPath = process.env.PATH;
+    try {
+      const fakeLs = join(ws, 'ls');
+      writeFileSync(fakeLs, '#!/bin/sh\ntouch workspace-path-executed\n');
+      chmodSync(fakeLs, 0o755);
+      process.env.PATH = `${ws}:${previousPath ?? ''}`;
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: 'ls',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(result.ok).toBe(true);
+      expect(existsSync(join(ws, 'workspace-path-executed'))).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('fallback /bin/sh can read the workspace when SHELL is absent', async () => {
+    const ws = setupWorkspace();
+    const previousShell = process.env.SHELL;
+    writeFileSync(join(ws, 'fallback-readable.txt'), 'fallback-readable');
+    try {
+      delete process.env.SHELL;
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'cat fallback-readable.txt' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('fallback-readable');
+    } finally {
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('can write files within workspace', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      await executor({ workspace: ws, command: 'echo created > sandbox-test.txt' });
+      const result = await executor({ workspace: ws, command: 'cat sandbox-test.txt' });
+      expect(result.stdout).toContain('created');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('can execute the controlled Bun runtime without granting its root write access', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'bun --version' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout.trim()).toBe(Bun.version);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('emits live stderr progress before later stdout', async () => {
+    const ws = setupWorkspace();
+    try {
+      const events: Array<{ chunk: string; stream: 'stdout' | 'stderr' }> = [];
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+
+      const result = await executor({
+        workspace: ws,
+        command: "printf 'err-first\\n' >&2; sleep 0.2; printf 'out-late\\n'",
+        onProgress: (chunk, stream) => {
+          events.push({ chunk, stream });
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(events[0]).toEqual({ chunk: 'err-first', stream: 'stderr' });
+      expect(events.map((e) => e.chunk)).toEqual(['err-first', 'out-late']);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('stops long-running commands after timeoutMs', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const startedAt = Date.now();
+
+      const result = await executor({
+        workspace: ws,
+        command: 'sleep 5',
+        timeoutMs: 100,
+      });
+
+      expect(Date.now() - startedAt).toBeLessThan(2000);
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).toBe(124);
+      expect(result.stderr).toContain('timed out');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies file read outside workspace at the OS boundary', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.kite-code-sandbox-test-${process.pid}`);
+    writeFileSync(externalFile, 'secret');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `cat "${externalFile}"`,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.stdout).not.toContain('secret');
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies broad system configuration reads', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'cat /private/etc/hosts' });
+      expect(result.ok).toBe(false);
+      expect(result.stdout).toBe('');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('uses and removes an invocation-private runtime directory', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `printf secret > "$TMPDIR/secret"; printf '%s' "$TMPDIR"`,
+      });
+      expect(result.ok).toBe(true);
+      const runtimeTmp = result.stdout;
+      expect(runtimeTmp).toContain('openpx-sandbox-runtime');
+      expect(existsSync(runtimeTmp)).toBe(false);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('concurrent invocations cannot share runtime directories', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const [first, second] = await Promise.all([
+        executor({ workspace: ws, command: `printf '%s' "$TMPDIR"; sleep 0.05` }),
+        executor({ workspace: ws, command: `printf '%s' "$TMPDIR"; sleep 0.05` }),
+      ]);
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      expect(first.stdout).not.toBe(second.stdout);
+      expect(existsSync(first.stdout)).toBe(false);
+      expect(existsSync(second.stdout)).toBe(false);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('hostile runtime modes are recovered without throwing or leaving residue', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command:
+          'printf %s "$TMPDIR" > runtime-path.txt; mkdir -p "$TMPDIR/nested/deeper"; printf flagged > "$TMPDIR/nested/deeper/flagged"; chflags uchg,uappnd "$TMPDIR/nested/deeper/flagged"; chmod 000 "$TMPDIR/nested/deeper"; chflags uchg,uappnd "$TMPDIR/nested/deeper"; chmod 000 "$TMPDIR/nested"; chflags uchg,uappnd "$TMPDIR/nested"; chmod 000 "$TMPDIR/.."',
+      });
+      expect(result.processCleanup?.confirmedExited).toBe(true);
+      const runtimeTmp = await Bun.file(join(ws, 'runtime-path.txt')).text();
+      expect(existsSync(runtimeTmp)).toBe(false);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('normal shell exit terminates background descendants before runtime cleanup returns', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command:
+          'sleep 30 </dev/null >/dev/null 2>&1 & child=$!; printf "%s\\n%s" "$child" "$TMPDIR"',
+      });
+
+      const [pidText, runtimeTmp] = result.stdout.split('\n');
+      if (!pidText || !runtimeTmp) throw new Error('Expected background PID and runtime path.');
+      const childPid = Number(pidText);
+      expect(result.ok).toBe(true);
+      expect(result.processCleanup?.confirmedExited).toBe(true);
+      expect(Number.isSafeInteger(childPid)).toBe(true);
+      expect(existsSync(runtimeTmp)).toBe(false);
+      expect(() => process.kill(childPid, 0)).toThrow();
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies file write outside workspace at the OS boundary', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.kite-code-sandbox-test-write-${process.pid}`);
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `echo hello > "${externalFile}"`,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).not.toBe(0);
+      expect(existsSync(externalFile)).toBe(false);
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies unlink outside workspace at the OS boundary', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.kite-code-sandbox-unlink-${process.pid}`);
+    writeFileSync(externalFile, 'keep');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: `rm "${externalFile}"` });
+      expect(result.ok).toBe(false);
+      expect(existsSync(externalFile)).toBe(true);
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies symlink escape to a file outside workspace', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.kite-code-sandbox-link-${process.pid}`);
+    writeFileSync(externalFile, 'outside-secret');
+    symlinkSync(externalFile, join(ws, 'outside-link'));
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'cat outside-link' });
+      expect(result.ok).toBe(false);
+      expect(result.stdout).not.toContain('outside-secret');
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('allows protected-looking paths inside workspace', async () => {
+    const ws = setupWorkspace();
+    mkdirSync(join(ws, '.SSH'));
+    writeFileSync(join(ws, '.SSH', 'config'), 'protected');
+    writeFileSync(join(ws, '.ENV.TEST'), 'keep');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      // Construct the identity at runtime so the native profile, not the
+      // command-text defense in depth, remains the mechanism under test.
+      const read = await executor({ workspace: ws, command: `p=.S; cat "\${p}SH/config"` });
+      const write = await executor({
+        workspace: ws,
+        command: `p=.E; echo changed > "\${p}NV.TEST"`,
+      });
+      expect(read.ok).toBe(true);
+      expect(read.stdout).toContain('protected');
+      expect(write.ok).toBe(true);
+      expect(await Bun.file(join(ws, '.ENV.TEST')).text()).toContain('changed');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('allows git access to workspace .git inside the sandbox', async () => {
+    const ws = setupWorkspace();
+    mkdirSync(join(ws, '.GIT'));
+    writeFileSync(join(ws, '.GIT', 'config'), 'repo-config');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      // Construct the identity at runtime so this reaches the native profile.
+      const result = await executor({ workspace: ws, command: `p=.g; cat "\${p}it/config"` });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('repo-config');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('runs closed read-only Git status and log without invoking repository fsmonitor', async () => {
+    const ws = setupWorkspace();
+    const runGit = (args: string[]) => {
+      const result = Bun.spawnSync(['git', ...args], {
+        cwd: ws,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      expect(result.exitCode).toBe(0);
+    };
+    try {
+      runGit(['init']);
+      writeFileSync(join(ws, 'tracked.txt'), 'tracked\n');
+      runGit(['add', 'tracked.txt']);
+      runGit([
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '-m',
+        'initial',
+      ]);
+      const fsmonitor = join(ws, 'fsmonitor.sh');
+      writeFileSync(fsmonitor, '#!/bin/sh\ntouch fsmonitor-ran\nexit 0\n');
+      chmodSync(fsmonitor, 0o700);
+      runGit(['config', 'core.fsmonitor', './fsmonitor.sh']);
+
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const status = await executor({
+        workspace: ws,
+        command: 'git status --short',
+        executionTrust: 'policy_proven_read_only',
+      });
+      const log = await executor({
+        workspace: ws,
+        command: 'git log --oneline -10',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(status.ok).toBe(true);
+      expect(log.ok).toBe(true);
+      expect(log.stdout).toContain('initial');
+      expect(existsSync(join(ws, 'fsmonitor-ran'))).toBe(false);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('child shells inherit the same filesystem boundary', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.kite-code-sandbox-child-${process.pid}`);
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `sh -c 'echo bypass > "${externalFile}"'`,
+      });
+      expect(result.ok).toBe(false);
+      expect(existsSync(externalFile)).toBe(false);
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('unsupported expanded filesystem scope fails closed before Seatbelt execution', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(tmpdir(), `kite-code-approved-external-${process.pid}.txt`);
+    try {
+      rmSync(externalFile, { force: true });
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `printf approved > "${externalFile}"`,
+        filesystemMode: 'allow_all',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(existsSync(externalFile)).toBe(false);
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('unsupported sensitive external scope never reaches Seatbelt execution', async () => {
+    const ws = setupWorkspace();
+    const externalRoot = mkdtempSync(join(tmpdir(), 'kite-code-approved-sensitive-'));
+    const sensitiveDirectory = join(externalRoot, '.ssh');
+    const sensitiveFile = join(sensitiveDirectory, 'config');
+    try {
+      mkdirSync(sensitiveDirectory);
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `printf approved > "${sensitiveFile}"; cat "${sensitiveFile}"`,
+        filesystemMode: 'allow_all',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(existsSync(sensitiveFile)).toBe(false);
+    } finally {
+      rmSync(externalRoot, { recursive: true, force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('an unsupported expansion cannot bypass the admitted Workspace baseline', async () => {
+    const ws = setupWorkspace();
+    writeFileSync(join(ws, '.ENV.SECRET'), 'must-not-read');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `p=.E; cat "\${p}NV.SECRET"`,
+        filesystemMode: 'allow_all',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(result.stdout).not.toContain('must-not-read');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('unsupported filesystem expansion cannot start before network isolation', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(tmpdir(), `kite-code-approved-sandboxed-${process.pid}.txt`);
+    const server = startTestHttpServer({ fetch: () => new Response('must-not-arrive') });
+    try {
+      rmSync(externalFile, { force: true });
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `printf approved > "${externalFile}"; curl -s --connect-timeout 1 http://127.0.0.1:${server.port}`,
+        filesystemMode: 'allow_all',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(existsSync(externalFile)).toBe(false);
+      expect(result.stdout).not.toContain('must-not-arrive');
+    } finally {
+      server.stop(true);
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('enforces read-only workspace scope natively', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({
+        enabled: true,
+        workspace: ws,
+        filesystemScope: 'read_only',
+      });
+      const result = await executor({ workspace: ws, command: 'echo denied > read-only.txt' });
+      expect(result.ok).toBe(false);
+      expect(existsSync(join(ws, 'read-only.txt'))).toBe(false);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('fails closed when expanded network scope lacks accepted backend evidence', async () => {
+    const ws = setupWorkspace();
+    const server = startTestHttpServer({
+      fetch: () => new Response('sandbox-network-ok'),
+    });
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const url = `http://127.0.0.1:${server.port}`;
+      const blocked = await executor({
+        workspace: ws,
+        command: `curl -s --connect-timeout 1 ${url}`,
+      });
+      const allowed = await executor({
+        workspace: ws,
+        command: `curl -s --connect-timeout 1 ${url}`,
+        networkMode: 'allow_all',
+      });
+
+      expect(blocked.ok).toBe(false);
+      expect(allowed.ok).toBe(false);
+      expect(allowed.terminationReason).toBe('sandbox_denied');
+      expect(allowed.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(allowed.stdout).not.toContain('sandbox-network-ok');
+    } finally {
+      server.stop(true);
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('kills commands exceeding CPU time limit', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({
+        enabled: true,
+        workspace: ws,
+        resourceLimits: { cpuTime: 3 },
+      });
+      // 无限循环应在约 3 秒后被 ulimit -t 杀死
+      const result = await executor({
+        workspace: ws,
+        command: 'while true; do :; done',
+        // Seatbelt may suppress SIGXCPU delivery. The executor timeout keeps
+        // this regression test bounded while cpuTime still configures ulimit.
+        timeoutMs: 4_000,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).not.toBe(0);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  }, 10_000);
+
+  test('allows commands targeting protected-looking paths inside Workspace', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: 'echo alias ls=evil >> .bashrc',
+      });
+      expect(result.ok).toBe(true);
+      expect(await Bun.file(join(ws, '.bashrc')).text()).toContain('alias ls=evil');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('disabled executor falls back to unsandboxed execution', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: false, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: 'echo unsandboxed',
+      });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('unsandboxed');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+});

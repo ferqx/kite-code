@@ -38,7 +38,7 @@ authenticate、project approval 和 confirm route，以及 selection、draft 和
 产生 move/confirm/back，再由 controller 调用 Builtin 的 retry、typed mutation、摘要决定和 auth flow；Builtin
 不依赖 Select 或 TUI 展示类型。
 
-普通交互 Overlay 共用 `OverlayFrame` 与 `OverlayPrimitives`。Frame 统一标题、正文、可选消息、带整行分隔线的浅色非粗体快捷键及外层间距；Summary、Section、ListRow、DetailList、Message、ImpactNotice 和 EmptyState 统一内容层级。标题与正文、摘要与后续区域、分组线与组内容、问题或警告与选项、字段标题与输入行、正文与消息/快捷键之间各保留一个空白行；页面不得复制选择箭头、选中背景或用空白 Text 固定高度。副作用选择通过共享 ImpactNotice 说明直接结果和不受影响的边界。MCP 宿主保留 route/input/controller 编排，`McpViews` 只负责纯视图。完整当前 contract 见 [`../active/tui-overlay-design-system.md`](../active/tui-overlay-design-system.md)。
+普通交互 Overlay 共用 `OverlayFrame` 与 `OverlayPrimitives`。Frame 统一标题、正文、可选消息、带整行分隔线的浅色非粗体快捷键及外层间距；Summary、Section、ListRow、DetailList、Message、ImpactNotice 和 EmptyState 统一内容层级。完整 current contract 见 [App TUI 交互规范](../../apps/kite/docs/tui-interaction.md)。
 
 模型选择器的展示身份是 `provider + model name`，不能仅以 model name 作为 React key、当前项或 reducer action 的标识；这样配置中的同名跨-provider route 不会被合并或误选。
 
@@ -50,7 +50,7 @@ authenticate、project approval 和 confirm route，以及 selection、draft 和
 
 静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。交互式入口直接使用终端主屏缓冲区，不启用 Ink alternate screen；运行内容保留在终端原生 scrollback 中，退出时不恢复进入 TUI 前的旧画面。实际同批派发的多个子 Agent 使用一张 Thought-like `Delegating · N agents` 聚合卡，默认显示各 child 的任务与状态，Enter 展开后才显示步骤尾，全组终态后以一条 `Delegated` 摘要进入历史。聚合卡与 Footer 的 `Working` 状态之间固定保留一行视觉间距。动态区依据终端行列预算压缩步骤和 child 摘要，并在计入该间距后仍保持低于 Ink 整屏阈值；空间不足时保持紧凑态，避免清屏并重置用户的原生滚动位置。聚合和折叠不修改完整运行事实。输入框内的大粘贴可显示占位符以保持编辑可用；发送后的用户消息最多显示 30 个实际视觉行，超出时保留开头和结尾，并以不计入行数的 `【已省略 N 行】` 标记中间内容；完整原文仍提交给 Runtime 并持久化。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
 
-Header 是每个会话写入 Static scrollback 的启动快照：低对比度圆角边框包裹 `──◆ Kite Code` 品牌字标，品牌行、模型和工作区在边框内统一左对齐。它不承担 working/error 等实时状态；同一会话切换模型时不重绘历史 Header，当前模型继续由 Footer 展示。窄屏会隐藏推理强度，并从中部截断过长路径。完整视觉与状态契约见 [`../active/tui-session-startup-card.md`](../active/tui-session-startup-card.md)。
+Header 是每个会话写入 Static scrollback 的启动快照：低对比度圆角边框包裹 `──◆ Kite Code` 品牌字标，品牌行、模型和工作区在边框内统一左对齐。它不承担 working/error 等实时状态；完整视觉与状态契约见 [App TUI 交互规范](../../apps/kite/docs/tui-interaction.md)。
 
 ## 7.4 会话前后台
 
@@ -68,4 +68,4 @@ TUI bridge 与 `SessionManager` 只通过 App `RuntimeSessionCoordinator` 使用
 
 ## 7.5 边界规则
 
-`agent-kernel`、`runtime-host` 与 `builtin-runtime` 不得导入 TUI 类型或格式化函数；截断、折叠、颜色、preview 和用户文案属于 `apps/kite` 层。见 [`../active/layer-boundary-enforcement.md`](../active/layer-boundary-enforcement.md)。
+`agent-kernel`、`runtime-host` 与 `builtin-runtime` 不得导入 TUI 类型或格式化函数；截断、折叠、颜色、preview 和用户文案属于 `apps/kite` 层。见 [Runtime 架构](../active/six-concept-runtime-architecture.md)。

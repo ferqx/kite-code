@@ -111,7 +111,7 @@ export interface ExactPtyInputWriter {
 /**
  * Deliver one PTY input transaction without replaying it.
  *
- * Bun 1.3's Terminal.write() return value is only the number of bytes flushed
+ * Bun's Terminal.write() return value is only the number of bytes flushed
  * synchronously; the writer has already buffered the remaining tail. It can
  * therefore return zero or a partial count even though the entire input was
  * accepted. Bun 1.4 reports the full accepted length instead. The count is not

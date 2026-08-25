@@ -179,7 +179,7 @@ function fixture(platform: ProductionArtifactPlatform = 'linux-x64') {
     productVersion: '1.0.0',
     commitSha: COMMIT,
     buildTimestamp: '2026-08-02T00:00:00.000Z',
-    bunVersion: '1.3.14',
+    bunVersion: '1.4.0',
     payloadSha256: sha256(payload),
     releaseProfileDigest: sha256('release-profile'),
     lockfileDigest: sha256('lockfile'),

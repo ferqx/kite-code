@@ -6,7 +6,7 @@
 
 验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`。
 
-相关：[`layer-boundary-enforcement.md`](layer-boundary-enforcement.md)、[`pre-release-architecture.md`](pre-release-architecture.md)、ADR-0128、ADR-0137、ADR-0138。
+相关：ADR-0128、ADR-0137、ADR-0138、ADR-0140；模块局部边界见各 workspace README。
 
 ## 总览
 
@@ -161,3 +161,9 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 - `check:runtime-packages`：七 workspace、依赖图、exports、deep import、cycle 与 composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。
+
+## Workspace 文档与测试 owner
+
+Package/App 的职责、允许依赖、公开入口与局部不变量由各自 README 拥有；本页只定义跨 workspace 的 Runtime
+authority 和依赖方向。TUI 展示与系统测试规范位于 `apps/kite/docs/`，测试归属与默认执行位于
+`tests/README.md`。ADR、book、plan、completed、design、deprecated 和索引不替代 current authority。

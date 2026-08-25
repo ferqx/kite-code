@@ -17,6 +17,7 @@ const FORMAL_QUALIFICATION_SEED = 1729;
 const FORMAL_QUALIFICATION_ITERATIONS = 8;
 const FORMAL_PER_CASE_TIMEOUT_MS = 180_000;
 const FORMAL_WORKFLOW = 'runtime-resilience-qualification.yml';
+export const FORMAL_QUALIFICATION_BUN_VERSION = '1.4.0';
 
 export interface RuntimeFaultSoakQualificationExpectation {
   repository: string;
@@ -84,7 +85,12 @@ export function verifyRuntimeFaultSoakQualification(
   const environment = record(report.environment);
   addMismatch(errors, 'environment.platform', environment?.platform, 'linux');
   addMismatch(errors, 'environment.arch', environment?.arch, 'x64');
-  addMismatch(errors, 'environment.bunVersion', environment?.bunVersion, '1.3.14');
+  addMismatch(
+    errors,
+    'environment.bunVersion',
+    environment?.bunVersion,
+    FORMAL_QUALIFICATION_BUN_VERSION,
+  );
 
   const source = record(report.source);
   addMismatch(errors, 'source.kind', source?.kind, 'github_actions');

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { documentationPatternBase, documentationPatternError } from './check-docs-impact';
 
 const root = process.cwd();
 const activeDir = join(root, 'docs', 'active');
@@ -7,9 +8,12 @@ const requiredMetadata = ['状态：active', '读取时机：', '验证：'];
 let failed = false;
 
 interface DocumentationMap {
+  version?: number;
   rules?: Array<{
     id: string;
     sources?: string[];
+    excludeSources?: string[];
+    authorities?: string[];
     documents?: string[];
   }>;
 }
@@ -83,10 +87,54 @@ function checkDocumentationMap(): void {
     fail('docs/documentation-map.json is not valid JSON.');
     return;
   }
-  for (const rule of map.rules ?? []) {
-    for (const path of [...(rule.sources ?? []), ...(rule.documents ?? [])]) {
-      if (!path.includes('*') && !existsSync(join(root, path))) {
-        fail(`docs/documentation-map.json rule ${rule.id} references missing path: ${path}`);
+  if (map.version !== 2) fail('docs/documentation-map.json must use version 2.');
+  const rules = map.rules ?? [];
+  if (rules.length === 0) fail('docs/documentation-map.json must contain non-empty rules.');
+  const ids = new Set<string>();
+  for (const rule of rules) {
+    if (!rule.id?.trim()) fail('docs/documentation-map.json contains a rule without an id.');
+    if (ids.has(rule.id))
+      fail(`docs/documentation-map.json contains duplicate rule id: ${rule.id}`);
+    ids.add(rule.id);
+    if (rule.documents !== undefined) {
+      fail(`docs/documentation-map.json rule ${rule.id} still uses retired documents.`);
+    }
+    if (!rule.sources || rule.sources.length === 0) {
+      fail(`docs/documentation-map.json rule ${rule.id} must have non-empty sources.`);
+    }
+    if (!rule.authorities || rule.authorities.length === 0) {
+      fail(`docs/documentation-map.json rule ${rule.id} must have non-empty authorities.`);
+    }
+    for (const pattern of [...(rule.sources ?? []), ...(rule.excludeSources ?? [])]) {
+      const patternError = documentationPatternError(pattern);
+      if (patternError) {
+        fail(
+          `docs/documentation-map.json rule ${rule.id} has invalid pattern ${pattern}: ${patternError}`,
+        );
+        continue;
+      }
+      const base = documentationPatternBase(pattern);
+      if (!existsSync(join(root, base))) {
+        fail(`docs/documentation-map.json rule ${rule.id} references missing source: ${pattern}`);
+      }
+    }
+    for (const authority of rule.authorities ?? []) {
+      const isCurrentAuthority =
+        authority === 'README.md' ||
+        authority === 'README.zh-CN.md' ||
+        authority === 'docs/README.md' ||
+        /^docs\/(?:active|runbooks)\/[^/]+\.md$/u.test(authority) ||
+        /^(?:packages|apps)\/[^/]+\/README\.md$/u.test(authority) ||
+        /^(?:packages|apps)\/[^/]+\/docs\/.+\.md$/u.test(authority) ||
+        authority === 'tests/README.md';
+      if (!isCurrentAuthority) {
+        fail(
+          `docs/documentation-map.json rule ${rule.id} uses non-current authority: ${authority}`,
+        );
+      } else if (!existsSync(join(root, authority))) {
+        fail(
+          `docs/documentation-map.json rule ${rule.id} references missing authority: ${authority}`,
+        );
       }
     }
   }
@@ -109,7 +157,17 @@ if (!existsSync(activeDir)) {
 for (const path of [
   join(root, 'README.md'),
   join(root, 'README.zh-CN.md'),
-  ...collectMarkdownFiles(join(root, 'docs')),
+  join(root, 'docs', 'README.md'),
+  join(root, 'docs', 'AGENTS.md'),
+  ...collectMarkdownFiles(join(root, 'docs', 'active')),
+  ...collectMarkdownFiles(join(root, 'docs', 'book')),
+  ...collectMarkdownFiles(join(root, 'docs', 'runbooks')),
+  join(root, 'docs', 'adr', 'README.md'),
+  join(root, 'docs', 'space', 'index.md'),
+  join(root, 'docs', 'space', 'plans', 'index.md'),
+  ...collectMarkdownFiles(join(root, 'packages')),
+  ...collectMarkdownFiles(join(root, 'apps')),
+  join(root, 'tests', 'README.md'),
 ]) {
   if (existsSync(path)) checkInternalMarkdownLinks(path, readFileSync(path, 'utf8'));
 }

@@ -4,7 +4,7 @@
 
 读取时机：修改 Plan Artifact、plan_review、planning/building 阶段、计划工具、计划恢复或 TUI 计划交互时。
 
-验证：`bun test tests/runtime/agent.integration.test.ts tests/runtime/completion-guard.test.ts tests/runtime/plan-actions.test.ts tests/runtime/plan-artifacts.test.ts tests/runtime/plan-persistence.test.ts tests/runtime/plan-state.test.ts tests/runtime/plan-tools.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-runner.test.ts tests/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
+验证：`bun test apps/kite/test/isolated/runtime/agent.integration.test.ts apps/kite/test/runtime/completion-guard.test.ts apps/kite/test/runtime/plan-actions.test.ts tests/isolated/runtime/plan-artifacts.test.ts tests/integration/runtime/plan-persistence.test.ts tests/integration/runtime/plan-state.test.ts tests/integration/runtime-contract/plan-tools.test.ts apps/kite/test/isolated/runtime/task-plan-lifecycle.test.ts packages/builtin-runtime/test/subagent-delegation-contract.test.ts apps/kite/test/subagent-runner.test.ts apps/kite/test/isolated/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
 
 相关：ADR-0002、ADR-0137、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
 

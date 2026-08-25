@@ -5,13 +5,13 @@
 读取时机：修改 `ExecutionBoundary`、production composition root、sandbox capability
 projection、release-controlled execution policy 或对应 feature flag 时。
 
-验证：`bun test tests/sandbox/execution-boundary.test.ts tests/sandbox/network-boundary.test.ts
-tests/sandbox/network-boundary-concurrency.test.ts tests/runtime/tool-controller.test.ts
-tests/config/features.test.ts tests/sandbox/status-projection.test.ts
-tests/workspace/worktree-controller.test.ts tests/mcp-transport-boundary.test.ts
-tests/mcp-transport-boundary-concurrency.test.ts tests/git-broker.test.ts
-tests/runtime/git-tool-controller.test.ts tests/execution/workspace-filesystem-provider.test.ts
-tests/execution/sandbox-execution-provider.test.ts`、
+验证：`bun test apps/kite/test/isolated/sandbox/execution-boundary.test.ts apps/kite/test/sandbox/network-boundary.test.ts
+apps/kite/test/sandbox/network-boundary-concurrency.test.ts apps/kite/test/isolated/runtime/tool-controller.test.ts
+apps/kite/test/config/features.test.ts apps/kite/test/sandbox/status-projection.test.ts
+tests/isolated/workspace/worktree-controller.test.ts tests/integration/builtin-runtime/mcp-transport-boundary.test.ts
+packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts apps/kite/test/git-broker.test.ts
+apps/kite/test/runtime/git-tool-controller.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts
+apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
@@ -267,7 +267,7 @@ Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证
 Runtime schema v26 或 `kite-runtime-modularization-v1-2026-08-19` format epoch。
 
 Darwin 的 supervisor negative conformance 由
-`tests/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后
+`apps/kite/test/isolated/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后
 `cleanupConfirmed` 必须保持 `false`。恢复同样传递 `descendantContainmentProven=false`，所以只终止已绑定
 supervisor group 不会伪造完整后代清理 receipt。`launchd.plist(5)` 的 `AbandonProcessGroup=false`
 只覆盖同一 process group，`sandbox(7)` 的继承语义不提供生命周期 authority；在 macOS 没有可验证的

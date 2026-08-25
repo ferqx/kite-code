@@ -4,9 +4,12 @@
 
 读取时机：修改 MCP discovery、动态工具绑定、transport、credential、MCP policy、Tool/Resource 调用或结果归一化时。
 
-验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-stdio-transport.test.ts tests/mcp-transport-boundary-concurrency.test.ts tests/mcp-credential-broker.test.ts tests/mcp/write-admission.test.ts tests/mcp/write-dispatch-governance.test.ts tests/runtime/tool-controller.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test apps/kite/test/mcp.test.ts tests/integration/mcp-manager.test.ts tests/integration/mcp-stdio-transport.test.ts packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts packages/builtin-runtime/test/mcp-credential-broker.test.ts apps/kite/test/mcp/write-admission.test.ts packages/builtin-runtime/test/mcp/write-dispatch-governance.test.ts apps/kite/test/isolated/runtime/tool-controller.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`、`bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0127、ADR-0131、`mcp-control-plane.md`、`mcp-authentication.md`、`mcp-project-approval.md`。
+
+MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.0`，不得与 Required CI
+形成第二套 Bun 基线。
 
 ## 唯一 owner 与 binding
 

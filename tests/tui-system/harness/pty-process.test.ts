@@ -35,7 +35,7 @@ describe('exact PTY input transport', () => {
     expect(writes).toEqual(['Ask a question']);
   });
 
-  test('does not replay when Bun 1.3 reports zero synchronously flushed bytes', async () => {
+  test('does not replay when Bun reports zero synchronously flushed bytes', async () => {
     let writes = 0;
 
     await writeExactPtyInput('Ask a question', {
@@ -48,7 +48,7 @@ describe('exact PTY input transport', () => {
     expect(writes).toBe(1);
   });
 
-  test('does not replay a Bun 1.3 partial synchronous flush count', async () => {
+  test('does not replay a Bun partial synchronous flush count', async () => {
     let writes = 0;
 
     await writeExactPtyInput('Ask a question', {

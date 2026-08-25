@@ -3,7 +3,7 @@
 状态：active
 范围：TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界
 读取时机：修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done/text/model_requested）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks/settleActiveThought）、`compaction.ts`（折叠引擎）时必读。
-验证：`bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/runtime/agent.integration.test.ts tests/model-invoke.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle cancel-successor-render`
+验证：`bun test apps/kite/test/tui-reducer.test.ts apps/kite/test/tui-layout.test.tsx apps/kite/test/isolated/runtime/agent.integration.test.ts apps/kite/test/model-invoke.test.ts apps/kite/test/isolated/session-manager.test.ts apps/kite/test/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle cancel-successor-render`
 最后更新：2026-08-15
 
 ## 约束
@@ -95,5 +95,5 @@
 - `apps/kite/src/tui/render/useStaticContent.tsx` — isSettled / blockFingerprint for tool_summary
 - `apps/kite/src/tui/App.tsx` — explorationSummaryIds 初始状态
 - `apps/kite/src/tui/reducers/agentReducer.ts` — cancelRunningBlocks 处理 tool_summary
-- `tests/tui-reducer.test.ts` — 预整合测试
-- `tests/context.test.ts` — 折叠测试
+- `apps/kite/test/tui-reducer.test.ts` — 预整合测试
+- `tests/integration/builtin-runtime/context.test.ts` — 折叠测试

@@ -52,7 +52,7 @@ manifest `commitSha` 精确匹配；GitHub 临时 merge ref 不能充当最终�
 Bun runtime；三平台候选分别在对应 GitHub-hosted runner 上生成。Ink 的可选 React devtools 路径在
 生产候选构建时固定为空实现，不成为依赖或网络下载入口。
 Standalone resolver 必须覆盖七个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
-不得穿过 `apps/kite/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun 1.3.14 把反斜杠
+不得穿过 `apps/kite/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun standalone 把反斜杠
 symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。
 
 源码通过 Bun 运行时继续使用 `@napi-rs/keyring` 的系统凭据库。由于 Bun standalone 不能在三平台上
@@ -96,7 +96,7 @@ matrix 或 approved registry。
 ## GitHub-hosted workflow
 
 `.github/workflows/release-candidate.yml` 在 pull request、`main` push 和手动触发时运行
-`macos-15`、`ubuntu-24.04`、`windows-2025` 矩阵。每个 job 安装锁定 Bun 版本，执行定向 release
+`macos-15`、`ubuntu-24.04`、`windows-2025` 矩阵。每个 job 安装正式基线 Bun `1.4.0`，执行定向 release
 tests、native build/verify/smoke 和 TUI startup scenario，然后上传候选 artifact。
 Platform Capability Probe 的 Windows 临时 Workspace 在采集前固定 canonical path identity，并在
 写出 evidence artifact 前以同一 identity repair persistent ACL ledger；8.3 alias 不能分裂采集与清理。

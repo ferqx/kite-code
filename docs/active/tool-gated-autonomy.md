@@ -437,7 +437,7 @@ SPI registry 保留 immutable definition/executor identity，App 只保留 compo
 RM-15 已依次迁移 `tool_search`、Skills/MCP/Web、Filesystem/Git、Shell、Plan/Task 与四类 Model operations。
 App 的 `read_plan/update_plan/write_plan/task` 没有 concrete executor；Task 的公开模型投影由 Builtin
 `projectSubagentResult()` 唯一产生，完整 child journal/continuation 只走私有 Runtime 通道。一致性不变量由
-`packages/builtin-runtime/test/builtin-runtime.test.ts`、`tests/tool-definitions.test.ts`、`tests/tool-parse-error.test.ts`
+`packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite/test/tool-definitions.test.ts`、`tests/integration/tool-parse-error.test.ts`
 与 RM schema parity 测试棘轮守护：Builtin catalog 的 28/20/8、exact schema/revision/executor/effects、model
 ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only dispatch 均机械验证。shell_execute 的
 模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Builtin/Host execution

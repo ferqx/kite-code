@@ -758,8 +758,15 @@ const protocolRoot = join(sourceRoot, 'protocol');
 const controllersRoot = join(coreRoot, 'controllers');
 const toolPipelineRoot = join(coreRoot, 'execution', 'tool-pipeline');
 const scriptsRoot = join(root, 'scripts');
-const appsRoot = join(root, 'apps');
 const packagesRoot = join(root, 'packages');
+const appSourceRoot = join(root, 'apps', 'kite', 'src');
+const packageSourceRoots = existsSync(packagesRoot)
+  ? readdirSync(packagesRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(packagesRoot, entry.name, 'src'))
+      .filter(existsSync)
+  : [];
+const productionSourceRoots = [sourceRoot, appSourceRoot, ...packageSourceRoots, scriptsRoot];
 const checkerFile = resolve(root, 'scripts/check-core-boundary.ts');
 const violations = [
   ...forbiddenImports('core must not import app', coreRoot, sourceRoot, [appRoot]),
@@ -789,7 +796,7 @@ const violations = [
     coreRoot,
     /['"]modelInvocations['"]\s+in\s+/,
   ),
-  ...[sourceRoot, appsRoot, packagesRoot, scriptsRoot].flatMap((productionRoot) =>
+  ...productionSourceRoots.flatMap((productionRoot) =>
     find(
       'retired Core Tool Runner symbols must not exist in production source',
       productionRoot,
@@ -837,7 +844,7 @@ const violations = [
   ),
   ...forbiddenLegacyFilesystemExecutionImports(sourceRoot, coreRoot),
   ...forbiddenCapabilityFilesystemNodeImports(sourceRoot, coreRoot),
-  ...forbiddenProductionTestHelperImports(root, [sourceRoot, appsRoot, packagesRoot, scriptsRoot]),
+  ...forbiddenProductionTestHelperImports(root, productionSourceRoots),
   ...find(
     'planning state is reducer-owned',
     join(root, 'src/core'),

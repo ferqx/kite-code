@@ -12,8 +12,8 @@ import { aiMessage } from '@kite-ai/builtin-runtime/model';
 import { loadMcpConfigCatalog } from '#app/config';
 import { decideProjectMcpServer } from '#app/config/mcp-project-approvals';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { createMockModel } from '../helpers/mock-model';
 import { runTestRuntimeAgent } from '../helpers/runtime-model';
-import { createMockModel } from '../mock-model';
 
 const serverName = process.env.MCP_E2E_SERVER_NAME;
 const expectedScope = process.env.MCP_E2E_EXPECTED_SCOPE;

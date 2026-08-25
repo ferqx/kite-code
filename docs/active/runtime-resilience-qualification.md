@@ -4,9 +4,9 @@
 
 读取时机：修改 Runtime 持久化/恢复、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts tests/execution/posix-supervisor.test.ts tests/runtime/store.test.ts tests/mcp-manager.test.ts`、`bun test tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts tests/runtime/agent.integration.test.ts tests/runtime/event-codec.test.ts tests/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test apps/kite/test/model-invocation-gateway.test.ts apps/kite/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite/test/isolated/execution/posix-supervisor.test.ts apps/kite/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite/test/subagent-artifacts.test.ts apps/kite/test/subagent-provider.test.ts apps/kite/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
-相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`tui-e2e-testing-limits.md`、ADR-0115、ADR-0116、Task 1C.7。
+相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite/docs/tui-system-testing.md`、ADR-0115、ADR-0116、Task 1C.7。
 
 ## 两级运行契约
 
@@ -94,7 +94,7 @@ control base，Linux Full 也用只读空 tmpfs 覆盖整个 control base，因�
 identity 都不可见。首个合法连接后立即停止 listen。release executable 内嵌同一
 supervisor mode，supervisor 只继承显式最小环境，output pipe EOF 使用固定 deadline，超时 abort 且
 `cleanupConfirmed=false`。Darwin Seatbelt 的实际 detached/session negative conformance 位于
-`tests/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
+`apps/kite/test/isolated/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
 `descendantContainmentProven=false` 传给 reconciliation，保留 pending cleanup authority。Apple
 `launchd.plist(5)` 仅定义同 process group 的 kill 行为，不能替代 detached/session descendant 的
 kernel/descriptor owner；因此 Seatbelt 当前直接 backend unavailable。Windows 也因 handle-relative
@@ -135,7 +135,7 @@ seed 只决定每轮 case 的旋转顺序；不能减少固定 case 集，也不
 
 报告 schema 当前为 v2，并包含 runner revision、seed、profile、平台/Bun 版本、逐 attempt 的状态/清理/resource series、每个 case 的 p50/p95/p99、状态不变量、资源摘要和 SHA-256 canonical digest。CI 报告可记录 `source.kind=local`；qualification 只有在 `source.kind=github_actions` 且 repository、40 位 head SHA、完整 ref、workflow 文件名、GitHub `workflow_ref`/`workflow_sha`、run ID 和正整数 run attempt 全部存在时才可能为 `passed`，缺失时必须为 `inconclusive`。这些字段和 retained attempt evidence 都进入 canonical digest，不能靠 artifact 页面上的旁证补写。digest 是完整性字段，不是单独的真实性证明；真实性根是成功的 GitHub Actions run、由可信 GitHub context 提供的 expected identity 以及被审查 head。`runnerBudgetUsage` 只表示外层 probe invocation 与 wall-clock 上限；`runtimeBudgetUsage` 仅来自 long-runtime case 中 `runTestRuntimeAgent → executeRuntimeTurn` workload 的 actual reconciled/committed `ResourceBudget` ledger receipt，reducer-only 合成状态不得作为该证据，二者也不得混写。Qualification 的每个 long-runtime attempt 必须保留 9 条 receipt provenance；每条 receipt 还必须与同一条 process resource lifecycle 在 case、iteration、lifecycle、PID、sequence、attempt nonce、OS process-start identity 和 group nonce 上完全匹配，错轮或未绑定的 receipt 一律使该证据 unsupported。
 
-正式 workflow 在上传前运行 `scripts/runtime/verify-fault-soak-qualification.ts`。verifier 以 workflow 的可信 GitHub context 重新匹配 source identity、重算 report digest，再从 retained attempts 重新构建 case/aggregate 摘要；它要求 Linux x64/Bun 1.3.14、固定 7 case、每 case 8/8 通过、合计 56/56 probe、精确 wall time、完整 terminal/state assertion、零 orphan/residual、long-runtime 每项资源 128 个 measured 样本、其他 case 每项 64 个样本、全部资源不超阈值，以及 long-runtime 分 8 个 attempt 的 72 条带 provenance Runtime ledger receipt。runner 或 verifier 任一失败都使 workflow 失败；artifact 即使被保留也只是诊断材料，不能登记为通过证据。
+正式 workflow 在上传前运行 `scripts/runtime/verify-fault-soak-qualification.ts`。verifier 以 workflow 的可信 GitHub context 重新匹配 source identity、重算 report digest，再从 retained attempts 重新构建 case/aggregate 摘要；它要求 Linux x64/Bun 1.4.0、固定 7 case、每 case 8/8 通过、合计 56/56 probe、精确 wall time、完整 terminal/state assertion、零 orphan/residual、long-runtime 每项资源 128 个 measured 样本、其他 case 每项 64 个样本、全部资源不超阈值，以及 long-runtime 分 8 个 attempt 的 72 条带 provenance Runtime ledger receipt。runner 或 verifier 任一失败都使 workflow 失败；artifact 即使被保留也只是诊断材料，不能登记为通过证据。
 
 `terminalTaxonomyAssertions` 表示“通过的 probe 对该终态分类完成过断言”的覆盖次数，不是线上事件发生频率。runner 只能从对应测试的 `(pass)` evidence 中提取该字段，不能因为进程 exit=0 就按 manifest 硬编码覆盖；任一固定 case 缺少必需分类证据时直接失败。不得把它解释为 incident count 或成功率。
 

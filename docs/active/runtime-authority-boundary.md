@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime authority、identity、Grant/Receipt、持久化、子进程协议、Model/MCP transport、Credential broker 或 Runtime State/SQLite Store 时。
 
-验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts tests/execution/posix-supervisor.test.ts tests/sandbox/windows-restricted-token.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite/test/keyless-runtime-cutover.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
+验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts apps/kite/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
 相关：ADR-0123/0124/0125、ADR-0127。
 

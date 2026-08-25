@@ -11,9 +11,9 @@
 - `packages/runtime-host/src/process/**`（唯一 process spawn/supervision）
 - `apps/kite/src/sandbox/`（native/host-shell availability composition）
 - `packages/runtime-host/src/process/spawn.ts`、`process-tree.ts`（Host process/lifecycle primitive）
-- `tests/shell-exec.test.ts`（Shell 集成测试）
-- `tests/tools.test.ts`（Shell 工具单元测试）
-- `tests/sandbox/windows-restricted-token.test.ts`（Windows 受管 PATH 投影）
+- `tests/isolated/shell-exec.test.ts`（Shell 集成测试）
+- `tests/isolated/tools.test.ts`（Shell 工具单元测试）
+- `tests/qualification/sandbox/windows-restricted-token.test.ts`（Windows 受管 PATH 投影）
 
 读取时机：
 
@@ -124,7 +124,7 @@ Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-i
 
 ## 5. 集成测试与 production composition 分层
 
-`tests/shell-exec.test.ts` 使用 `tests/helpers/sandbox-executor.ts` 的显式 native/test oracle，而不是
+`tests/isolated/shell-exec.test.ts` 使用 `tests/helpers/sandbox-executor.ts` 的显式 native/test oracle，而不是
 production/TUI composition。该 helper 可在测试中注入裸 `shellTool` 以固定 Shell 选择、流式输出、
 超时与取消 oracle，但 Runtime/App static gate 禁止 production 导入该 helper 或重建同名入口。
 真实 filesystem/network sandbox enforcement 由 `test:sandbox:smoke:native` 和
@@ -216,7 +216,7 @@ Shell 命令未提供 `timeout_ms` 时必须使用 600000ms 的默认硬超时�
 
 - Windows 在命令启动后立即关联 Job Object术语（作业对象），并在 guard 建立及终止根 Shell 前扩展已知原生 process snapshot术语（进程快照）。终止整个 Job 后仍须清扫关联前已经启动的后代；根 Shell 在 graceful 等待期内先退出不得跳过该 sweep，因为未被 Job 追踪的后代可能已重设 parent。原生句柄不可用时降级为 `taskkill /T /F`。原生终止必须保留 process handle术语（进程句柄）并等待其进入终态后再返回。
 - Unix 启动命令时创建独立 process group术语（进程组）。终止时先向整组发送 `SIGTERM` 并等待 500ms；仍存活时发送 `SIGKILL`，再进行最多 2 秒的退出确认。忽略 SIGTERM 的后代必须由强制阶段清理。
-- `tests/shell-exec.test.ts` 必须记录实际后代 PID，并断言超时或取消结果返回时该 PID 已不再存活；取消测试还必须证明不会等待显式超时到期。
+- `tests/isolated/shell-exec.test.ts` 必须记录实际后代 PID，并断言超时或取消结果返回时该 PID 已不再存活；取消测试还必须证明不会等待显式超时到期。
 - Windows 回归测试还必须故意在 Job 关联前启动后代，验证关联竞态中的逃逸进程同样被清理。
 
 Shell result 必须返回结构化 `processCleanup`：是否确认退出、是否进入 forced 阶段和未确认

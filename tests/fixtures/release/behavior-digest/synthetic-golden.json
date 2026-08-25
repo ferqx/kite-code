@@ -56,7 +56,7 @@
     "buildRecipe": {
       "schemaVersion": 1,
       "inputIdentity": "kite.build-recipe.v1",
-      "digest": "sha256:ac6d0e1aacc950cb3821c37794bf19434dc4a26a892a79882a421002f9d1a46d"
+      "digest": "sha256:41bac03a305e443c2c4169c60a1e3ca9649358b51b4a170b3d6847a98203638d"
     },
     "lockfile": {
       "schemaVersion": 1,
@@ -64,5 +64,5 @@
       "digest": "sha256:99b5aafda63ffd5f1e2bc20b5259dde3fbb8fc727d047c77e53833bef00c6348"
     }
   },
-  "aggregateDigest": "sha256:bb329e66f539345f1f633b66291fb98ef9c23f8742101a09167601cd6c522b7e"
+  "aggregateDigest": "sha256:9dae5253feaa15846e6c04d49de6903ed2f6589923a36ecc016953bfaffa0ff4"
 }

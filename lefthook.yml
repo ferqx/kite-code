@@ -3,7 +3,7 @@ pre-commit:
     protected-branch:
       run: bun run check:protected-branch
     docs-impact:
-      run: bun run check:docs-impact
+      run: bun run check:docs-impact --scope=staged
     format:
       glob: "*.{ts,tsx,json,jsonc,yml,yaml}"
       run: node node_modules/@biomejs/biome/bin/biome check --write --no-errors-on-unmatched {staged_files}

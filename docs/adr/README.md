@@ -141,3 +141,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0137](0137-shell-sandbox-durable-approval-queue.md) | accepted | Sandbox-first phase/mode 矩阵、两类 grant 与 durable approval queue |
 | [0138](0138-silent-session-format-compatibility.md) | accepted | 未知历史格式静默忽略；已知会话按选择懒迁移并剥离旧权限 |
 | [0139](0139-session-admission-restart-reconciliation.md) | accepted | Session admission 先完成跨进程 cleanup/recovery，再重载事件尾并投影终态 |
+| [0140](0140-workspace-documentation-authority-v2.md) | accepted | Workspace README/本地文档拥有模块规则，active 只拥有跨包当前行为，影响门禁按真实 diff 检查 |
+| [0141](0141-test-ownership-and-layered-execution-v2.md) | accepted | 测试按 package、App、integration、qualification 与 isolated 归属，并采用分层并行执行 |

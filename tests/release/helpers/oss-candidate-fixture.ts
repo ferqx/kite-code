@@ -31,7 +31,7 @@ export async function createOssCandidateFixture(
     commitSha: 'a'.repeat(40),
     sourceDate: '2026-08-04T00:00:00.000Z',
     sourceDirty: false,
-    bunVersion: '1.3.14',
+    bunVersion: '1.4.0',
     target: { ...target, compileMode: 'native' },
     integrity: 'sha256-only-unsigned',
     defaultCapabilities: {
