@@ -76,7 +76,10 @@ attempt/preparation intent 后得到 typed `backend_unavailable + pre_dispatch +
 完整 Runtime invocation identity/lifecycle；已启动、取消、超时或 cleanup unknown 的 native 调用绝不重放。
 
 `/permissions` 无参数打开 selector；确认后持久化用户默认和当前 Session 的 `interaction_mode.changed`。清除 Session grants
-使用 canonical `session_grants_cleared(sessionId, sessionRevision, generation)`，不改变 mode。受限 backend unavailable 时可以
+使用 canonical `session_grants_cleared(sessionId, sessionRevision, generation)`，不改变 mode。该事件先提升 Session 的
+approval generation：仍由 `same_command` 保持 `authorized_queued` 且尚未 dispatch 的调用恢复为原 route 的等待状态，所有仍可交互的
+queue record 同步重绑到新 generation 后才重新暴露人工焦点；已 running 或由独立 receipt 授权的调用不被撤销。Kernel 与 TUI 必须从
+同一 durable event 得到相同投影，旧 generation 的 Enter/Esc 继续 no-op，不能留下永远无法解决的旧焦点。受限 backend unavailable 时可以
 报告 unsupported/fail closed，但不得把 Full 降级为审批 grant；Full 只由 interactionMode 表达。扩 scope 的 exact invocation
 按 phase/mode 进入 direct、Auto reviewer 或 user approval；native denial 不切换 host、不 replay。Workspace 内 hidden names 与
 `.git` 不触发 basename deny，hard deny 与 Host-control 隔离继续有效。
@@ -181,6 +184,9 @@ production qualification。
 获批后进入 `authorized_queued`，不等待 sibling 共同收敛，也不跳过 Scheduler concurrency；每个 invocation 有独立 receipt/attempt。
 TUI 同一时刻只显示 `activeApprovalId` 对应且可见的人工请求，后台 auto-review 或 off-screen request 不夺取 Footer；解决后一个
 审批时不得重置已经运行的 sibling Shell 的 `startedAt` 或累计耗时。
+`approval.batch_released` 的 `cancelledReviewIds` 只终止仍未匹配、未运行且未终态的 auto-review record；同一 interaction 已在
+`matches` 中获得独立 receipt 时，即使 reviewer id 同时出现在取消列表，Kernel 与 TUI 都必须保留其 `authorized_queued` 结果，不能由
+后处理取消覆盖原子 batch 的授权事实。
 
 Subagent 内部工具触发审批时，持久化 interaction 由 parent `task` Tool Call 拥有，child/runtime id 保存在 continuation 与
 approval facts 中用于精确恢复。只有同一 model message/turn 中并发的多个 Explore children 在非 Full parent 下派生 Auto；single

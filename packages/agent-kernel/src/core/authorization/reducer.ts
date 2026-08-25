@@ -276,13 +276,25 @@ function sameCommandIdentity(
   );
 }
 
-function restorePendingAfterClear(pending: AgentPendingApproval): AgentPendingApproval {
+function restorePendingAfterClear(
+  pending: AgentPendingApproval,
+  generation = pending.generation,
+): AgentPendingApproval {
   const status = pending.route === 'auto' ? 'auto_reviewing' : 'awaiting_user';
   return pendingWithStatus(pending, status, {
+    generation,
     fullModeBypassEligible: false,
     authorizationSource: undefined,
     receiptId: undefined,
   });
+}
+
+function pendingNeedsGenerationRebase(pending: AgentPendingApproval): boolean {
+  return (
+    !terminalApprovalStatus(pending.status) &&
+    pending.status !== 'authorized_queued' &&
+    pending.status !== 'running'
+  );
 }
 
 /** Authorization and mode facts have one compile-time reducer owner. */
@@ -692,12 +704,17 @@ export function reduceAuthorizationState(state: AgentState, event: KernelEvent):
           pending.authorizationSource === 'same_command' &&
           pending.status === 'authorized_queued'
         ) {
-          const restored = restorePendingAfterClear(pending);
+          const restored = restorePendingAfterClear(pending, generation);
           pendingApprovals.set(interactionId, restored);
           next = pendingToolStatus(
             { ...next, pendingApprovals },
             pending.toolCallId,
             restored.route === 'auto' ? 'awaiting_auto_review' : 'awaiting_approval',
+          );
+        } else if (pendingNeedsGenerationRebase(pending)) {
+          pendingApprovals.set(
+            interactionId,
+            pendingWithStatus(pending, pending.status, { generation }),
           );
         }
       }

@@ -4940,6 +4940,104 @@ describe('eventReducer (blocks model)', () => {
         },
       );
       expect(state.sessionCommandGrants?.size).toBe(0);
+      expect(state.pendingApprovals?.get('approval-batch-a')).toMatchObject({
+        status: 'awaiting_user',
+        generation: 3,
+      });
+      expect(state.pendingApprovals?.get('approval-batch-b')).toMatchObject({
+        status: 'awaiting_user',
+        generation: 3,
+      });
+      expect(state.activeApprovalId).toBe('approval-batch-a');
+      expect(state.interrupt).toMatchObject({
+        kind: 'approval',
+        interactionId: 'approval-batch-a',
+      });
+    });
+
+    test('keeps a batch-matched auto-review sibling authorized when cancelling its reviewer', () => {
+      const commandIdentity = {
+        sessionId: 't1',
+        threadId: 't1',
+        workspace: '/tmp/workspace',
+        canonicalWorkspaceIdentity: 'workspace-digest',
+        cwd: '/tmp/workspace',
+        executor: 'shell_execute',
+        environment: 'test',
+        scope: 'workspace_write',
+        effects: 'filesystem:write',
+        parserRevision: 'parser-1',
+        commandDigest: 'command-digest',
+      } as const;
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'auto_review.requested',
+        ...APPROVAL_EVENT_METADATA,
+        reviewId: 'auto-review-sibling',
+        toolCallId: 'shell-auto',
+        toolName: 'shell_execute',
+        reason: 'Review matching Shell command.',
+        queueSequence: 1,
+        queueGeneration: 2,
+        approval: approval({ callId: 'shell-auto', command: 'echo same' }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'auto_review.requested',
+        ...APPROVAL_EVENT_METADATA,
+        reviewId: 'auto-review-unmatched',
+        toolCallId: 'shell-auto-unmatched',
+        toolName: 'shell_execute',
+        reason: 'Review a different Shell command.',
+        queueSequence: 2,
+        queueGeneration: 2,
+        approval: approval({ callId: 'shell-auto-unmatched', command: 'echo other' }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
+        interactionId: 'human-sibling',
+        toolCallId: 'shell-human',
+        queueSequence: 3,
+        queueGeneration: 2,
+        approval: approval({ callId: 'shell-human', command: 'echo same' }),
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.batch_released',
+        interactionId: 'human-sibling',
+        toolCallId: 'shell-human',
+        grant: 'same_command',
+        grantKey: 'same-command:key',
+        sessionRevision: 7,
+        generation: 2,
+        commandIdentity,
+        matches: [
+          {
+            interactionId: 'human-sibling',
+            toolCallId: 'shell-human',
+            receiptId: 'receipt-human',
+            generation: 2,
+          },
+          {
+            interactionId: 'auto-review-sibling',
+            toolCallId: 'shell-auto',
+            receiptId: 'receipt-auto',
+            generation: 2,
+          },
+        ],
+        cancelledReviewIds: ['auto-review-sibling', 'auto-review-unmatched'],
+        createdAt: '2026-08-25T00:00:00.000Z',
+      });
+
+      expect(state.pendingApprovals?.get('auto-review-sibling')).toMatchObject({
+        status: 'authorized_queued',
+        grant: 'same_command',
+        receiptId: 'receipt-auto',
+        result: 'authorized',
+      });
+      expect(state.pendingApprovals?.get('auto-review-unmatched')).toMatchObject({
+        status: 'cancelled',
+        result: 'cancelled',
+      });
     });
 
     test('guards Session grant projection by active session, generation, and revision', () => {

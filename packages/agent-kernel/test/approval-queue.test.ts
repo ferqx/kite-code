@@ -212,6 +212,86 @@ describe('durable approval queue', () => {
     expect(projection.pendingApprovals.get('approval-b').receiptId).toBe('receipt-b');
   });
 
+  test('clearing a Session grant rebases every restored live approval before Enter or Esc', () => {
+    const queued = reduce(
+      initialState(),
+      toolQueued('call-a'),
+      approvalRequested('approval-a', 'call-a'),
+      toolQueued('call-b'),
+      approvalRequested('approval-b', 'call-b'),
+      toolQueued('call-c', 'pwd'),
+      approvalRequested('approval-c', 'call-c', {
+        command: 'pwd',
+        commandIdentity: commandIdentity({ commandDigest: 'command-digest-pwd' }),
+      }),
+    );
+    const released = reduce(queued, sameCommandBatchEvent());
+    const generation = released.approvalGeneration + 1;
+    const cleared = reduce(released, {
+      type: 'approval.session_grants_cleared',
+      sessionId: released.session.threadId,
+      sessionRevision: released.revision,
+      generation,
+      clearedAt: '2026-08-25T00:00:02.000Z',
+    } as KernelEvent);
+
+    expect(cleared.approvalGeneration).toBe(generation);
+    expect(cleared.activeApprovalId).toBe('approval-a');
+    expect(cleared.pendingApprovals.get('approval-a')).toMatchObject({
+      status: 'awaiting_user',
+      generation,
+    });
+    expect(cleared.pendingApprovals.get('approval-b')).toMatchObject({
+      status: 'awaiting_user',
+      generation,
+    });
+    expect(cleared.pendingApprovals.get('approval-c')).toMatchObject({
+      status: 'awaiting_user',
+      generation,
+    });
+
+    const rejected = reduce(cleared, {
+      type: 'approval.rejected',
+      interactionId: 'approval-a',
+      toolCallId: 'call-a',
+      generation,
+      reason: 'No longer approved.',
+      outcome: {
+        schemaVersion: 1,
+        status: 'rejected',
+        failure: { kind: 'approval_rejected', detailCode: 'approval_rejected' },
+        dispatchState: 'not_started',
+        externalEffects: 'none',
+        replaySafety: 'pre_dispatch',
+        recovery: {
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+          requiresNewModelResponse: false,
+          safeAutomaticRetry: false,
+        },
+        timing: { source: 'runtime_boundary' },
+      },
+    } as KernelEvent);
+    expect(rejected.pendingApprovals.get('approval-a')?.status).toBe('rejected');
+    expect(rejected.activeApprovalId).toBe('approval-b');
+
+    const approved = reduce(rejected, {
+      type: 'approval.granted',
+      interactionId: 'approval-b',
+      toolCallId: 'call-b',
+      grant: 'approve_once',
+      receiptId: 'receipt-after-clear',
+      generation,
+      createdAt: '2026-08-25T00:00:03.000Z',
+    } as KernelEvent);
+    expect(approved.pendingApprovals.get('approval-b')).toMatchObject({
+      status: 'authorized_queued',
+      generation,
+      receiptId: 'receipt-after-clear',
+    });
+    expect(approved.activeApprovalId).toBe('approval-c');
+  });
+
   test('same_command matching includes every grant subject and rejects a single-field mismatch', () => {
     const queued = reduce(
       initialState(),

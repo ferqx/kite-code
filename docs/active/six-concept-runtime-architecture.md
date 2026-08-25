@@ -134,7 +134,7 @@ Ack、Receipt、terminal、recovery、sandbox cleanup、MCP/Subagent lifecycle �
 
 MCP 默认配置来源只有 project 与 user；explicit 是调用方授权的独立文件。project 必须通过配置摘要审批。没有旧 source、迁移 command 或 ambient-environment auth spelling。Runtime 只获得受限 `McpRuntimeProvider`，不能调用配置 mutation 或 Supervisor control API。
 
-Subagent Provider 使用 private task/handle/continuation Artifact、exact parent attempt、resource admission 与 cleanup receipt。并发 sibling approval 共享 State 27 Session durable queue；每个 child 保留 route、generation、sequence 与 binding facts，只有当前可见 `activeApprovalId` 占据人工焦点，其余记录按 FIFO 保留。恢复不能重启已挂起 child model；已恢复 child 再次阻塞时必须按 queue sequence 排在既有请求后面，不能由一个长任务连续抢占并造成审批饥饿。
+Subagent Provider 使用 private task/handle/continuation Artifact、exact parent attempt、resource admission 与 cleanup receipt。并发 sibling approval 共享 State 27 Session durable queue；每个 child 保留 route、generation、sequence 与 binding facts，只有当前可见 `activeApprovalId` 占据人工焦点，其余记录按 FIFO 保留。清除 Session command grants 时，Kernel 与 TUI 从同一个 canonical event 将被撤销的 `same_command` 调用恢复到原 route，并在重新暴露焦点前把仍可交互的 queue record 重绑到新 generation；batch release 中已匹配并签发 receipt 的 auto-review sibling 不得再被 reviewer-cancellation 列表覆盖。恢复不能重启已挂起 child model；已恢复 child 再次阻塞时必须按 queue sequence 排在既有请求后面，不能由一个长任务连续抢占并造成审批饥饿。
 
 Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port。Kernel verification state/event map 是唯一 lifecycle authority；App effect 不得自行 waiver、改变 outcome、调用模型复核或制造 evidence。
 

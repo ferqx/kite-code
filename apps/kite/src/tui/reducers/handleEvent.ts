@@ -130,6 +130,13 @@ function interactionMatches(
 }
 
 const APPROVAL_FOCUS_STATUSES: readonly TuiApprovalStatus[] = ['queued_user', 'awaiting_user'];
+const TERMINAL_APPROVAL_STATUSES: readonly TuiApprovalStatus[] = [
+  'succeeded',
+  'failed',
+  'cancelled',
+  'rejected',
+  'expired',
+];
 
 function approvalQueue(state: TuiState): Map<string, TuiPendingApproval> {
   return new Map(state.pendingApprovals ?? []);
@@ -137,6 +144,14 @@ function approvalQueue(state: TuiState): Map<string, TuiPendingApproval> {
 
 function approvalNeedsFocus(status: TuiApprovalStatus): boolean {
   return APPROVAL_FOCUS_STATUSES.includes(status);
+}
+
+function approvalIsTerminal(status: TuiApprovalStatus): boolean {
+  return TERMINAL_APPROVAL_STATUSES.includes(status);
+}
+
+function approvalNeedsGenerationRebase(status: TuiApprovalStatus): boolean {
+  return !approvalIsTerminal(status) && status !== 'authorized_queued' && status !== 'running';
 }
 
 function nextApprovalId(queue: ReadonlyMap<string, TuiPendingApproval>): string | null {
@@ -3465,15 +3480,20 @@ export function handleRuntimeEventAction(
         : [];
       for (const interactionId of cancelledReviewIds) {
         const pending = queue.get(interactionId);
-        if (pending) {
-          queue.set(interactionId, {
-            ...pending,
-            status: 'cancelled',
-            grant: undefined,
-            matchCount: matches.length,
-            result: 'cancelled',
-          });
-        }
+        if (
+          pending?.route !== 'auto' ||
+          pending.status === 'authorized_queued' ||
+          pending.status === 'running' ||
+          approvalIsTerminal(pending.status)
+        )
+          continue;
+        queue.set(interactionId, {
+          ...pending,
+          status: 'cancelled',
+          grant: undefined,
+          matchCount: matches.length,
+          result: 'cancelled',
+        });
       }
       let next = projectApprovalQueue(state, queue);
       if (event.grantKey) {
@@ -3513,12 +3533,30 @@ export function handleRuntimeEventAction(
       ) {
         return state;
       }
-      return {
-        ...state,
-        sessionCommandGrants: new Map(),
-        sessionCommandGrantGeneration: eventGeneration,
-        sessionCommandGrantRevision: eventRevision,
-      };
+      const queue = approvalQueue(state);
+      for (const [interactionId, pending] of queue) {
+        if (pending.grant === 'same_command' && pending.status === 'authorized_queued') {
+          queue.set(interactionId, {
+            ...pending,
+            status: pending.route === 'auto' ? 'auto_reviewing' : 'awaiting_user',
+            generation: eventGeneration,
+            grant: undefined,
+            receiptId: undefined,
+            result: undefined,
+          });
+        } else if (approvalNeedsGenerationRebase(pending.status)) {
+          queue.set(interactionId, { ...pending, generation: eventGeneration });
+        }
+      }
+      return projectApprovalQueue(
+        {
+          ...state,
+          sessionCommandGrants: new Map(),
+          sessionCommandGrantGeneration: eventGeneration,
+          sessionCommandGrantRevision: eventRevision,
+        },
+        queue,
+      );
     }
     case 'approval.rejected': {
       const outcome = canonicalToolOutcome(event);
