@@ -181,7 +181,8 @@ production bootstrap。未知 Store/profile 在只读发现阶段静默忽略，
 session-name candidate 后停止；具体会话仍执行全量 checksum/sequence/identity 校验，失败只隔离该 session。
 current target 的格式判定复用 current Store preflight；合法的 `WAL present / SHM absent` 恢复形态必须在隔离副本中重建
 SHM 后继续打开，不能误报为未知 target 或让 exact session import 静默失效。marker、表/索引或 WAL 真正损坏仍 fail closed。
-历史 source 的同一 WAL/无 SHM 形态也只在 no-follow 临时副本中重建；source database/WAL/SHM 的 identity 与字节保持只读。
+历史 source 只要存在 WAL 或 SHM sidecar 就必须通过 no-follow 隔离副本读取；不得让只读 SQLite 连接接触并更新真实 SHM
+共享索引。WAL/无 SHM 形态只在副本中重建，source database/WAL/SHM 的 identity、mtime 与字节保持不变。
 CLI explicit resume 在 `create_session` 前完成该边界，失败不得创建同 ID 空会话。State 26 file preimage 不导入；current-format
 named snapshot/preimage 还必须满足 head 上界、Workspace containment 和无 traversal，否则只隔离 exact session。
 

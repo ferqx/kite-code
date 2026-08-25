@@ -120,7 +120,8 @@ snapshot/event/named recovery point 损坏只使该会话打开失败，健康�
 该审计同时复现了合法的 `WAL present / SHM absent` current target 形态：旧分类器会把它误判为未知 target，导致会话选择后
 没有执行导入。当前实现改为复用隔离的 current Store preflight 重建临时 WAL 索引，并增加精确回归；named recovery point
 不再被静默丢弃，任一语义/identity 失败都只隔离所选会话。
-历史 source 的 WAL/无 SHM 形态同样在 no-follow 临时副本中恢复，且源 sidecar 不变；CLI 在创建 Runtime session 前先完成
+历史 source 的任意 WAL/SHM sidecar 形态同样只在 no-follow 临时副本中读取，且源 sidecar identity、mtime 与字节不变；
+这避免只读 SQLite 连接更新真实 SHM 后被 source fingerprint 自身拒绝。CLI 在创建 Runtime session 前先完成
 exact resume preparation，损坏历史不会被同 ID 空会话遮蔽。current-format named snapshot/preimage 还验证 head 上界、
 Workspace containment、traversal 与 NUL。
 

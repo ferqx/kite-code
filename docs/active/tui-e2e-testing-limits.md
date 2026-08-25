@@ -152,7 +152,8 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     才能使汇总 `tui-system` 门禁成功。`KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required
     的默认证据模式。
 21. Runtime format compatibility 必须分三条真实 TUI 证据：未知 source 静默忽略且不阻止新会话；已知历史会话在
-    `/resume` 中无迁移标签、选中前 target 无该 session、选中后 exactly-once 可读；源 database/WAL/SHM 字节始终不改。
+    `/resume` 中无迁移标签、选中前 target 无该 session、选中后 exactly-once 可读；fixture 必须包含同时存在 WAL+SHM
+    的真实 sidecar 形态，并证明源 database/WAL/SHM 的 identity、mtime 与字节始终不改。
     单个损坏会话只能显示脱敏 session-scoped failure，健康历史会话与普通输入继续可用。当前 target 使用 canonical
     Workspace identity 和 epoch 派生路径，`runtime-authority.key` 仍不得创建。
 

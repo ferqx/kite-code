@@ -50,7 +50,8 @@ Header 使用 Ink `Static` 写入 scrollback，但模型或推理强度切换后
 单个损坏会话不得使其他会话消失或进入全局 unavailable 状态。选择失败不得留下半注册 Runtime、切换 active session、复活旧 interaction mode，或显示底层异常原文。删除历史会话必须持久化 source/session tombstone，避免下次启动重新出现在 selector。
 SQLite current target 即使处于合法的 `WAL present / SHM absent` 重启形态，也必须先由隔离 preflight 重建临时 WAL 索引再进行
 隐式导入；不得因此显示上述失败提示。该提示只属于所选会话自身的数据/身份/格式校验失败。
-历史 source 缺少可重建 SHM 时也只在临时副本中重建，不创建 source sidecar。State 26 的 file preimage 不进入 current
+历史 source 只要存在 WAL 或 SHM 就通过临时副本读取；只读 SQLite 连接不得接触真实 SHM。缺少可重建 SHM 时也只在
+副本中重建，不创建 source sidecar。State 26 的 file preimage 不进入 current
 Store；历史会话仍可阅读，但旧 `/rewind` 文件写 authority 不复活。named recovery point 不完整时整个 selected session 失败，
 不能以“成功打开”为名静默删掉 checkpoint。
 

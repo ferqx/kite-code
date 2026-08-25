@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   createSqliteRuntimeCompatibilityWriter,
@@ -489,23 +489,40 @@ describe('SQLite compatibility store', () => {
     );
   });
 
-  test('reads a live WAL snapshot directly and leaves the source database and sidecars untouched', () => {
+  test('reads an existing WAL and SHM only through an isolated snapshot', () => {
     const fixture = temporaryDirectory();
     let liveWriter: Database | undefined;
     try {
-      const sourcePath = join(fixture.path, 'wal.db');
-      createStore(sourcePath);
-      liveWriter = new Database(sourcePath);
+      const livePath = join(fixture.path, 'live-wal.db');
+      const sourcePath = join(fixture.path, 'copied-wal.db');
+      createStore(livePath);
+      liveWriter = new Database(livePath);
       liveWriter.run('PRAGMA journal_mode = WAL');
       liveWriter.run(
         'INSERT INTO runtime_sessions (session_id, project_id, workspace_digest, state_schema, format_epoch, revision, name) VALUES (?, ?, ?, ?, ?, ?, ?)',
         ['wal-session', 'p', 'w', 26, legacyEpoch, 1, 'wal'],
       );
-      const before = readBytes(sourcePath);
+      liveWriter.run('PRAGMA wal_checkpoint(TRUNCATE)');
+      expect(existsSync(`${livePath}-wal`)).toBe(true);
+      expect(existsSync(`${livePath}-shm`)).toBe(true);
+      copyFileSync(livePath, sourcePath);
+      copyFileSync(`${livePath}-wal`, `${sourcePath}-wal`);
+      copyFileSync(`${livePath}-shm`, `${sourcePath}-shm`);
+      const paths = [sourcePath, `${sourcePath}-wal`, `${sourcePath}-shm`];
+      const before = paths.map((path) => ({
+        bytes: readBytes(path),
+        mtimeMs: statSync(path).mtimeMs,
+      }));
+
       const source = discoverSqliteRuntimeCompatibilitySource(sourcePath);
       expect(source?.listSessions().map((session) => session.sessionId)).toContain('wal-session');
-      expect(readBytes(sourcePath)).toEqual(before);
       source?.close();
+      for (const [index, path] of paths.entries()) {
+        const expected = before[index];
+        if (!expected) throw new Error(`Missing source fingerprint for ${path}.`);
+        expect(readBytes(path)).toEqual(expected.bytes);
+        expect(statSync(path).mtimeMs).toBe(expected.mtimeMs);
+      }
     } finally {
       liveWriter?.close();
       fixture.cleanup();

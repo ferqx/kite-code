@@ -233,9 +233,13 @@ function lstatIfPresent(path: string): ReturnType<typeof lstatSync> | undefined 
 }
 
 /**
- * Open a read-only SQLite view directly. A caller must wrap each logical read
- * in `BEGIN`/`COMMIT`; SQLite then pins one WAL snapshot for that read without
- * copying or mutating the live database.
+ * Open a read-only SQLite view. A caller must wrap each logical read in
+ * `BEGIN`/`COMMIT` so SQLite pins one snapshot for that read.
+ *
+ * A SQLITE_OPEN_READONLY connection may still update an existing SHM shared
+ * index. Therefore any source with WAL/SHM sidecars is read only through the
+ * isolated snapshot view; otherwise our own SQLite open could mutate the
+ * source fingerprint and make a healthy legacy Store disappear.
  */
 function openReadonlyView(databasePath: string): ReadonlyDatabaseView {
   assertNoFollowDatabasePath(databasePath);
@@ -250,11 +254,10 @@ function openReadonlyView(databasePath: string): ReadonlyDatabaseView {
       );
     }
   }
-  if (wal && !shm) {
-    // SHM is a rebuildable WAL index. SQLite cannot always open a read-only
-    // database in this valid restart/copy shape because it has nowhere to
-    // create the missing index. Rebuild it only beside an isolated no-follow
-    // snapshot; never create or modify a source sidecar.
+  if (wal || shm) {
+    // SHM is a rebuildable WAL index, but it is not immutable merely because
+    // the database handle is read-only. Rebuild/use all sidecar state only
+    // beside an isolated no-follow snapshot; never touch the source sidecars.
     return openSqliteReadonlySnapshotView(databasePath);
   }
   const database = new Database(

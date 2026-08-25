@@ -51,7 +51,7 @@ ready 只在 wrapper/runner 验证 control frame 且即将启动 exact child 前
 
 ## SQLite Store 与 Artifact
 
-新 Session 只使用 Runtime State、SQLite Store、`.runtime-state-store.db` 和 epoch `kite-runtime-modularization-v1-2026-08-19`。SQLite Store 当前 exact schema 是 7 tables / 2 indexes；没有 persisted authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event 是 strict canonical JSON，Snapshot 以 SHA-256 checksum 检测损坏。写入/恢复 Store 时会校验目标会话的当前 Event/Snapshot；SessionStore 的会话发现只按序解码到第一条命名候选后停止，不以全日志解码阻塞 TUI 启动，具体会话恢复仍走 session-scoped 完整校验。只读日志 reader 打开时只校验数据库 marker 与表结构，并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
+新 Session 只使用 State 27/SAQ epoch 与 epoch 派生的 `.runtime-state-store-{generation}.db` current target。State 26/Store 5 的 canonical `.runtime-state-store.db` 只属于 ADR-0138 明确支持的只读历史 source。SQLite Store 当前 exact schema 是 7 tables / 2 indexes；没有 persisted authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event 是 strict canonical JSON，Snapshot 以 SHA-256 checksum 检测损坏。写入/恢复 Store 时会校验目标会话的当前 Event/Snapshot；SessionStore 的会话发现只按序解码到第一条命名候选后停止，不以全日志解码阻塞 TUI 启动，具体会话恢复仍走 session-scoped 完整校验。历史 source 只要存在 WAL/SHM sidecar 就必须在隔离副本中读取；`SQLITE_OPEN_READONLY` 不足以保证 SHM 不被更新，真实 source 的 identity、mtime 与字节不得变化。只读日志 reader 打开时只校验数据库 marker 与表结构，并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
 
 不匹配当前 marker 的数据库直接 fail closed。production package 不导出旧 constructor/path，也没有 try-new-catch-old、双写或 mixed-format normalization。
 

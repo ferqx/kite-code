@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { LEGACY_STATE26_FORMAT_EPOCH, LEGACY_STATE26_SCHEMA_VERSION } from '@kite/agent-kernel';
 import { resolveProjectIdentity } from '@kite/runtime-host';
@@ -34,6 +34,7 @@ function checksum(value: string): string {
 
 function seedState26Session(checkpointPath: string, workspace: string): string {
   const sourcePath = sqliteRuntimeStorePath(checkpointPath);
+  const seedPath = `${sourcePath}.seed`;
   const identity = resolveProjectIdentity(workspace);
   const event = {
     type: 'user.message_appended',
@@ -86,7 +87,7 @@ function seedState26Session(checkpointPath: string, workspace: string): string {
     workspaceAccess: 'write',
     tasks: {},
   });
-  const database = new Database(sourcePath);
+  const database = new Database(seedPath);
   for (const ddl of SQLITE_RUNTIME_DDL) database.run(ddl);
   database.run(
     "INSERT INTO runtime_store_meta (key, value) VALUES ('format_version', '5'), ('runtime_format_epoch', ?)",
@@ -130,6 +131,17 @@ function seedState26Session(checkpointPath: string, workspace: string): string {
       1,
     ],
   );
+  // Reproduce a normal post-checkpoint SQLite source with both sidecars. A
+  // read-only connection may still update SHM, so production must inspect
+  // this shape only through its isolated snapshot view.
+  database.run('PRAGMA journal_mode = WAL');
+  database.run("UPDATE runtime_sessions SET updated_at = 2 WHERE session_id = 'legacy-session-1'");
+  database.run('PRAGMA wal_checkpoint(TRUNCATE)');
+  expect(existsSync(`${seedPath}-wal`)).toBe(true);
+  expect(existsSync(`${seedPath}-shm`)).toBe(true);
+  copyFileSync(seedPath, sourcePath);
+  copyFileSync(`${seedPath}-wal`, `${sourcePath}-wal`);
+  copyFileSync(`${seedPath}-shm`, `${sourcePath}-shm`);
   database.close();
   return sourcePath;
 }
@@ -197,14 +209,17 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
   let workspace: ReturnType<typeof createTestWorkspace>;
   let checkpointPath: string;
   let sourcePath: string;
-  let sourceHex: string;
+  let sourceFingerprint: readonly { readonly hex: string; readonly mtimeMs: number }[];
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
     checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
     sourcePath = seedState26Session(checkpointPath, workspace.workspace);
-    sourceHex = readFileSync(sourcePath).toString('hex');
+    sourceFingerprint = [sourcePath, `${sourcePath}-wal`, `${sourcePath}-shm`].map((path) => ({
+      hex: readFileSync(path).toString('hex'),
+      mtimeMs: statSync(path).mtimeMs,
+    }));
     server.setResponses([]);
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
@@ -230,7 +245,12 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
     expect(screenContains(output, MESSAGE)).toBe(true);
     expect(screenContains(output, '历史会话打开失败')).toBe(false);
     expect(currentStoreHasLegacySession(checkpointPath)).toBe(true);
-    expect(readFileSync(sourcePath).toString('hex')).toBe(sourceHex);
+    for (const [index, path] of [sourcePath, `${sourcePath}-wal`, `${sourcePath}-shm`].entries()) {
+      const expected = sourceFingerprint[index];
+      if (!expected) throw new Error(`Missing source fingerprint for ${path}.`);
+      expect(readFileSync(path).toString('hex')).toBe(expected.hex);
+      expect(statSync(path).mtimeMs).toBe(expected.mtimeMs);
+    }
   });
 
   test(

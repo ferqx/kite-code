@@ -66,7 +66,7 @@ Builtin operation module 位于各领域 `runtime-module.ts`。根 barrel 只暴
 
 `adapter.ts` 单独拥有 database lifecycle。`schema.ts`、`event-store.ts`、`session-store.ts`、`snapshot-store.ts`、`artifact-store.ts`、`authority-ledger.ts` 与 `effect-leases.ts` 共享 adapter 创建的同一 database context。`transaction.ts` 是 Runtime event+snapshot 原子提交的唯一 owner。
 
-App 只取得 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` ports；平面 storage interface、alternate current-writer constructor、dual write 与 alternate-driver retry 均不存在。SQLite 的历史 source reader/import ledger 是独立只读边界，不进入这些 current execution ports。
+App 只取得 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` ports；平面 storage interface、alternate current-writer constructor、dual write 与 alternate-driver retry 均不存在。SQLite 的历史 source reader/import ledger 是独立只读边界，不进入这些 current execution ports；source 存在 WAL/SHM 时只能使用 SQLite 包内的 no-follow 隔离 snapshot，不能把真实 SHM handle 或 sidecar mutation capability 交给 Host/App。
 
 ### App 与 TUI
 
