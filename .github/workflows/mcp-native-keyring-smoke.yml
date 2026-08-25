@@ -7,14 +7,14 @@ on:
       - package.json
       - bun.lock
       - packages/builtin-runtime/src/mcp/credential-store.ts
-      - tests/mcp-keyring-platform-smoke.test.ts
+      - tests/qualification/mcp-keyring-platform-smoke.test.ts
       - .github/workflows/mcp-native-keyring-smoke.yml
   pull_request:
     paths:
       - package.json
       - bun.lock
       - packages/builtin-runtime/src/mcp/credential-store.ts
-      - tests/mcp-keyring-platform-smoke.test.ts
+      - tests/qualification/mcp-keyring-platform-smoke.test.ts
       - .github/workflows/mcp-native-keyring-smoke.yml
 
 permissions:
@@ -41,7 +41,7 @@ jobs:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - if: runner.os != 'Linux'
-        run: bun test tests/mcp-keyring-platform-smoke.test.ts
+        run: bun test tests/qualification/mcp-keyring-platform-smoke.test.ts
       - if: runner.os == 'Linux'
         name: Start Secret Service and run smoke
         shell: bash
@@ -53,5 +53,5 @@ jobs:
             mkdir -p "$XDG_RUNTIME_DIR"
             chmod 700 "$XDG_RUNTIME_DIR"
             eval "$(printf %s ci-keyring | gnome-keyring-daemon --unlock --components=secrets)"
-            bun test tests/mcp-keyring-platform-smoke.test.ts
+            bun test tests/qualification/mcp-keyring-platform-smoke.test.ts
           '

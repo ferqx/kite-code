@@ -17,6 +17,16 @@
       "authorities": ["docs/README.md", "docs/active/documentation-language.md"]
     },
     {
+      "id": "root-package-manifest",
+      "sources": ["package.json"],
+      "authorities": [
+        "docs/README.md",
+        "tests/README.md",
+        "docs/active/execution-platform-support.md",
+        "docs/active/six-concept-runtime-architecture.md"
+      ]
+    },
+    {
       "id": "runtime-contract",
       "sources": ["packages/runtime-contract/src/**", "packages/runtime-contract/package.json"],
       "authorities": [
@@ -155,7 +165,6 @@
     {
       "id": "runtime-workspace-boundaries",
       "sources": [
-        "package.json",
         "bun.lock",
         "tsconfig.json",
         "scripts/check-core-boundary.ts",
@@ -169,7 +178,6 @@
     {
       "id": "test-system",
       "sources": [
-        "package.json",
         "scripts/run-default-tests.ts",
         "scripts/run-owned-tests.ts",
         "scripts/test-suite.ts",

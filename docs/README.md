@@ -26,7 +26,8 @@ GitHub Actions 与正式 qualification 统一使用 Bun `1.4.0`。所有 `setup-
 `documentation-map.json` 只映射拥有当前行为的生产源码、package manifest 和测试/发布基础设施。普通测试、
 fixture 与 owner-local 文档不因位于 workspace 目录内而触发架构 authority。被专业规则覆盖的 Model、MCP、
 Sandbox、TUI、qualification 或 observability 路径必须从通用 owner 规则排除；代表路径矩阵负责防止规则重新
-膨胀或跨语义满足。
+膨胀或跨语义满足。根 `package.json` 同时承载安装、测试和 workspace 配置，使用独立
+`root-package-manifest` 规则，由实际发生变化的 current authority 承接，不强迫修改无关 Runtime 文档。
 
 ## 并发开发
 

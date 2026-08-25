@@ -35,4 +35,10 @@ describe('CI Bun baseline', () => {
       expect(source, name).not.toContain('cancel-in-progress: true');
     }
   });
+
+  test('keeps the native keyring workflow on the qualification-owned test path', () => {
+    const workflow = readFileSync(join(workflowRoot, 'mcp-native-keyring-smoke.yml'), 'utf8');
+    expect(workflow).toContain('tests/qualification/mcp-keyring-platform-smoke.test.ts');
+    expect(workflow).not.toContain('tests/mcp-keyring-platform-smoke.test.ts');
+  });
 });
