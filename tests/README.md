@@ -72,4 +72,5 @@ fail-closed 和历史恢复测试继续保留，但使用领域化 compatibility
 `bun run test` 验证默认执行，系统/qualification 使用各自显式命令。
 `tests/integration/scripts/ci-bun-baseline.test.ts` 验证所有 `setup-bun` workflow 与 formal qualification
 共同 pin Bun `1.4.0`，Required workflow 只取消同一 PR/ref 的过期运行，并确保 native keyring smoke 的
-path filter 与执行命令共同指向 `tests/qualification/mcp-keyring-platform-smoke.test.ts`。
+path filter 与执行命令共同指向 `tests/qualification/mcp-keyring-platform-smoke.test.ts`。同一测试还验证
+execution-boundary workflow 的触发路径与 adversarial command 全部使用迁移后的 current owner。

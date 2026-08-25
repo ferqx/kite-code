@@ -41,4 +41,28 @@ describe('CI Bun baseline', () => {
     expect(workflow).toContain('tests/qualification/mcp-keyring-platform-smoke.test.ts');
     expect(workflow).not.toContain('tests/mcp-keyring-platform-smoke.test.ts');
   });
+
+  test('keeps execution-boundary triggers and commands on current test owners', () => {
+    const workflow = readFileSync(join(workflowRoot, 'execution-boundary-conformance.yml'), 'utf8');
+    const currentPaths = [
+      'apps/kite/test/policies/protected-path.test.ts',
+      'apps/kite/test/sandbox/network-boundary.test.ts',
+      'apps/kite/test/sandbox/network-boundary-concurrency.test.ts',
+      'tests/qualification/sandbox/process-tree-limit.test.ts',
+      'tests/isolated/workspace/worktree-controller.test.ts',
+      'tests/integration/builtin-runtime/mcp-transport-boundary.test.ts',
+      'packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts',
+    ];
+    const retiredPaths = [
+      'tests/policies/protected-path.test.ts',
+      'tests/sandbox/network-boundary.test.ts',
+      'tests/sandbox/network-boundary-concurrency.test.ts',
+      'tests/workspace/worktree-controller.test.ts',
+      'tests/mcp-transport-boundary.test.ts',
+      'tests/mcp-transport-boundary-concurrency.test.ts',
+    ];
+
+    for (const path of currentPaths) expect(workflow, path).toContain(path);
+    for (const path of retiredPaths) expect(workflow, path).not.toContain(path);
+  });
 });

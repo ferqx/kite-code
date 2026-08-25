@@ -15,6 +15,9 @@ apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
+`.github/workflows/execution-boundary-conformance.yml` 的 path filter 与 adversarial command 必须共同覆盖
+上述 App、qualification、isolated、integration 和 package owner 路径；迁移测试时不得只更新其中一侧。
+
 相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、ADR-0097、ADR-0131、ADR-0137、
 `execution-platform-support.md`。
 
