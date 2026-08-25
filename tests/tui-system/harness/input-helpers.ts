@@ -12,8 +12,6 @@ export async function sleep(ms: number): Promise<void> {
 const INPUT_SETTLE_MS = 100;
 const INPUT_ECHO_TIMEOUT_MS = 2_000;
 const INPUT_PASTE_ECHO_TIMEOUT_MS = 5_000;
-const INPUT_READY_PROBE_ECHO_TIMEOUT_MS = 750;
-const INPUT_READY_PROBE = '~';
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
@@ -243,6 +241,20 @@ async function waitForInputEcho(
   );
 }
 
+async function waitForFocusedMainInputReady(tui: PtyProcess, timeoutMs: number): Promise<void> {
+  const effectiveTimeout = tuiWaitTimeout(timeoutMs);
+  const start = Date.now();
+  while (Date.now() - start < effectiveTimeout) {
+    await tui.settleScreen();
+    if (tui.focusedMainInputReady()) return;
+    await sleep(tuiPollInterval(25));
+  }
+  throw new Error(
+    `Timeout (${effectiveTimeout}ms) waiting for the focused main input listener. ` +
+      `Input viewport:\n${tui.inputViewport().slice(-1_000)}`,
+  );
+}
+
 async function clearActiveInputTo(
   tui: PtyProcess,
   targetValue: string,
@@ -441,26 +453,11 @@ export async function pasteText(
   testTiming: Pick<InputDeliveryTestTiming, 'echoTimeoutMs' | 'settleMs'> = {},
 ): Promise<void> {
   if (text.length === 0) throw new Error('pasteText requires non-empty text');
-  await tui.settleScreen();
-  if (!tui.focusedMainInputReady()) {
-    // ANSI styling can be disabled in a real fixture, making InputLine's
-    // inverse readiness cursor unobservable. Prove the listener instead with
-    // one reversible character transaction. typeText's ordered cleanup makes
-    // a delayed first probe safe: any buffered marker is followed by enough
-    // backspaces before the bounded retry, and the successful probe is then
-    // restored to the exact empty baseline before the non-replayable paste.
-    const probeTiming: InputDeliveryTestTiming = {
-      echoTimeoutMs: Math.min(
-        testTiming.echoTimeoutMs ?? INPUT_READY_PROBE_ECHO_TIMEOUT_MS,
-        INPUT_READY_PROBE_ECHO_TIMEOUT_MS,
-      ),
-      settleMs: 0,
-      retryBackspaceDelayMs: 10,
-      restoreTimeoutMs: testTiming.echoTimeoutMs ?? INPUT_ECHO_TIMEOUT_MS,
-    };
-    await typeText(tui, INPUT_READY_PROBE, { delayMs: 0, testTiming: probeTiming });
-    await clearActiveInputTo(tui, '', 'main', probeTiming);
-  }
+  // The PTY fixture forces ANSI modifiers so InputLine's inverse cursor is a
+  // deterministic, side-effect-free listener receipt even under CI. Never
+  // probe readiness by writing a character into the user's input: a delayed
+  // probe can outlive its cleanup and contaminate the following paste.
+  await waitForFocusedMainInputReady(tui, testTiming.echoTimeoutMs ?? INPUT_PASTE_ECHO_TIMEOUT_MS);
   await tui.settleScreen();
   const initial = activeInput(tui.inputViewport());
   if (!initial || initial.value.length > 0) {

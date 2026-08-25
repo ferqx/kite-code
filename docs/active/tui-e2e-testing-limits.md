@@ -120,8 +120,8 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     场景用 bracketed paste 验证多行值从输入控件进入真实 model request 的端到端语义。不得发送一个
     未被协商的 CSI-u 序列、只检查两段文本仍可见，就声称已经验证软换行。
     Harness 通过 `pasteText()` 验证完整活动输入回执，并在唯一一次 transport write 前证明 focused
-    `InputLine` 已注册键盘 listener：反色光标 marker 可观测时直接使用；ANSI styling 不可观测时，先
-    逐回执输入一个可逆单字符 probe，再退格恢复精确空基线。Bun 1.3 的返回值是同步 flush 计数，不是
+    `InputLine` 已注册键盘 listener：test-owned PTY 必须显式强制 ANSI modifier，只接受反色光标 marker，
+    不得通过写入字符、再退格的方式探测 readiness。Bun 1.3 的返回值是同步 flush 计数，不是
     accepted-byte receipt；0 或部分计数同样可能已经 buffer 全部输入，POSIX drain 也不能提供可移植的
     重放边界。因此任意 byte count、缺失 VT 回执或变形交付都不得触发粘贴重发，只能 fail closed。
 19. Mock request 回执只在显式 request baseline 之后匹配最新真实 user turn；Kernel 注入的
@@ -138,8 +138,8 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     viewport 验证可见 chrome；不能让视觉光标阻止 idle 判定。逐字符 PTY delivery 必须在发送下一个
     非空白字节前观察到当前活动输入可投影的精确 prefix receipt。ordinary multi-word main input 与显式 paste/
     多行输入使用一次 bracketed-paste transaction 和 exact all-or-nothing viewport receipt；在写入前还必须
-    从 real prompt 的 inverse cursor 或“单字符精确回显后恢复空值”的可逆 probe 证明 focused main handler
-    ready，不能把 overlay 的反色 row 当作 input readiness。Bun 1.3/1.4 对 `Terminal.write()` byte count 的
+    从 real prompt 的 inverse cursor 证明 focused main handler ready；测试 PTY 必须强制 ANSI modifier，
+    marker 不可达则 fail closed，不能写字符探测，也不能把 overlay 的反色 row 当作 input readiness。Bun 1.3/1.4 对 `Terminal.write()` byte count 的
     定义不同，该返回值和 drain 都不是 transport admission 权威。回显超时不能证明已接受的 transaction
     未交付，因此不得重放。selector/search 继续逐 prefix 验证。
     replacement 重试必须先逐回执清空当前可见输入，

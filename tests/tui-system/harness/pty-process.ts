@@ -458,6 +458,11 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     Object.assign(childEnv, opts.workspace.env);
   }
   childEnv.TERM = 'xterm-256color';
+  // The input harness observes InputLine's inverse cursor as the application-
+  // level readiness receipt. Chalk disables modifiers automatically on CI,
+  // so make ANSI deterministic for this test-owned PTY instead of probing the
+  // user's input with a character that could arrive after its cleanup.
+  childEnv.FORCE_COLOR = '3';
   const detachTuiProcess = shouldDetachTuiProcess(
     process.platform,
     childEnv.KITE_FAULT_SOAK_PROCESS_NONCE,

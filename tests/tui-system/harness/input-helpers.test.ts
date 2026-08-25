@@ -89,8 +89,10 @@ describe('TUI input helpers', () => {
     let currentInput = '';
     let ready = false;
     let readyWhenWritten = false;
+    const writes: string[] = [];
     const tui = fakePty(
       (data) => {
+        writes.push(data);
         if (data === '~') {
           if (ready) currentInput = '~';
           return;
@@ -114,26 +116,7 @@ describe('TUI input helpers', () => {
     await pasteText(tui, 'Ready message', { echoTimeoutMs: 50, settleMs: 0 });
 
     expect(readyWhenWritten).toBe(true);
-  });
-
-  test('pasteText uses a reversible probe when ANSI readiness styling is unavailable', async () => {
-    let currentInput = '';
-    const writes: string[] = [];
-    const tui = fakePty(
-      (data) => {
-        writes.push(data);
-        if (data === '~') currentInput = '~';
-        else if (data === '\x7f') currentInput = currentInput.slice(0, -1);
-        else if (data.startsWith('\x1b[200~')) currentInput = 'Plain fixture message';
-      },
-      () => currentInput,
-    );
-    tui.focusedMainInputReady = () => false;
-    tui.viewport = () => `❯ ${currentInput}`;
-
-    await pasteText(tui, 'Plain fixture message', { echoTimeoutMs: 50, settleMs: 0 });
-
-    expect(writes).toEqual(['~', '\x7f', '\x1b[200~Plain fixture message\x1b[201~']);
+    expect(writes).toEqual(['\x1b[200~Ready message\x1b[201~']);
   });
 
   test('pasteText never replays an unacknowledged transaction', async () => {

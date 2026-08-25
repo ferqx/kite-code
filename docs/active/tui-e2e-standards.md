@@ -63,9 +63,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    selector replay，不得让外层测试先于其语义阶段超时。
    普通单行多词模型消息与显式 paste/多行输入必须由 `pasteText()` 以单个 bracketed-paste
    transaction 投递，并取得当前活动输入的完整等值回执。首次启动或 Session remount 后，helper 必须先
-   证明主 `InputLine` listener ready：优先使用 listener 注册后才出现的反色光标 marker；ANSI styling
-   不可观测时，使用一个逐回执、可逆的单字符 probe，并在粘贴前恢复精确空基线。choice overlay 的反色
-   选中行不能充当 readiness。Bun 1.3 的 `Terminal.write()` 返回值只是同步 flush 字节数，返回 0 或部分
+   证明主 `InputLine` listener ready：测试 PTY 显式强制 ANSI modifier，并只接受 listener 注册后才出现的
+   反色光标 marker；不得向用户输入字段写字符来探测 readiness，choice overlay 的反色选中行也不能充当
+   readiness。marker 不可达时必须 fail closed。Bun 1.3 的 `Terminal.write()` 返回值只是同步 flush 字节数，返回 0 或部分
    长度时剩余输入仍可能已进入内部 buffer；Bun 1.4 才报告全量 accepted length。因此 byte-count/drain
    不能作为跨版本重放权威，bracketed-paste transaction 只能写入一次。缺少 VT/Ink 回执不能证明已接受
    的 transaction 未到达 Ink，因而不得据此重放；变形、延迟或 focus 改变后的 delivery 同样必须
