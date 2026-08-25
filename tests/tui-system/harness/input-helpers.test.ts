@@ -50,6 +50,7 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
     inputViewport() {
       return this.viewport();
     },
+    focusedMainInputReady: () => true,
     scrollback: output,
     transcript: output,
     settleScreen: async () => {},
@@ -82,6 +83,57 @@ describe('TUI input helpers', () => {
 
     expect(attempts).toBe(1);
     expect(currentInput).toBe('Line1\nLine2');
+  });
+
+  test('pasteText waits for the focused main input handler before dispatching', async () => {
+    let currentInput = '';
+    let ready = false;
+    let readyWhenWritten = false;
+    const tui = fakePty(
+      (data) => {
+        if (data === '~') {
+          if (ready) currentInput = '~';
+          return;
+        }
+        if (data === '\x7f') {
+          currentInput = currentInput.slice(0, -1);
+          return;
+        }
+        if (!data.startsWith('\x1b[200~')) return;
+        readyWhenWritten = ready;
+        currentInput = 'Ready message';
+      },
+      () => currentInput,
+    );
+    (tui as PtyProcess & { focusedMainInputReady(): boolean }).focusedMainInputReady = () => ready;
+    tui.viewport = () => `❯ ${currentInput}`;
+    setTimeout(() => {
+      ready = true;
+    }, 5);
+
+    await pasteText(tui, 'Ready message', { echoTimeoutMs: 50, settleMs: 0 });
+
+    expect(readyWhenWritten).toBe(true);
+  });
+
+  test('pasteText uses a reversible probe when ANSI readiness styling is unavailable', async () => {
+    let currentInput = '';
+    const writes: string[] = [];
+    const tui = fakePty(
+      (data) => {
+        writes.push(data);
+        if (data === '~') currentInput = '~';
+        else if (data === '\x7f') currentInput = currentInput.slice(0, -1);
+        else if (data.startsWith('\x1b[200~')) currentInput = 'Plain fixture message';
+      },
+      () => currentInput,
+    );
+    tui.focusedMainInputReady = () => false;
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await pasteText(tui, 'Plain fixture message', { echoTimeoutMs: 50, settleMs: 0 });
+
+    expect(writes).toEqual(['~', '\x7f', '\x1b[200~Plain fixture message\x1b[201~']);
   });
 
   test('pasteText never replays an unacknowledged transaction', async () => {

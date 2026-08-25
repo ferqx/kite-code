@@ -22,64 +22,43 @@ test('keeps ordinary TUI groups detached but joins the fault-soak owned group', 
 });
 
 describe('exact PTY input transport', () => {
-  test('accepts one complete byte-count receipt without waiting for drain', async () => {
+  test('writes one transaction when Bun reports the complete synchronous flush count', async () => {
     const writes: string[] = [];
-    let drainWaits = 0;
 
     await writeExactPtyInput('Ask a question', {
       write(data) {
         writes.push(data);
         return new TextEncoder().encode(data).byteLength;
       },
-      drainSequence: () => 0,
-      async waitForDrain() {
-        drainWaits++;
-      },
     });
 
     expect(writes).toEqual(['Ask a question']);
-    expect(drainWaits).toBe(0);
   });
 
-  test('retries only after an explicit zero-byte receipt and drain', async () => {
-    const receipts = [0, new TextEncoder().encode('Ask a question').byteLength];
+  test('does not replay when Bun 1.3 reports zero synchronously flushed bytes', async () => {
     let writes = 0;
-    let drainSequence = 0;
 
     await writeExactPtyInput('Ask a question', {
       write() {
-        return receipts[writes++]!;
-      },
-      drainSequence: () => drainSequence,
-      async waitForDrain(afterSequence) {
-        expect(afterSequence).toBe(0);
-        drainSequence++;
+        writes++;
+        return 0;
       },
     });
 
-    expect(writes).toBe(2);
-    expect(drainSequence).toBe(1);
+    expect(writes).toBe(1);
   });
 
-  test('fails closed on a partial byte receipt without waiting or replaying', async () => {
+  test('does not replay a Bun 1.3 partial synchronous flush count', async () => {
     let writes = 0;
-    let drainWaits = 0;
 
-    await expect(
-      writeExactPtyInput('Ask a question', {
-        write() {
-          writes++;
-          return 3;
-        },
-        drainSequence: () => 0,
-        async waitForDrain() {
-          drainWaits++;
-        },
-      }),
-    ).rejects.toThrow('partially accepted');
+    await writeExactPtyInput('Ask a question', {
+      write() {
+        writes++;
+        return 3;
+      },
+    });
 
     expect(writes).toBe(1);
-    expect(drainWaits).toBe(0);
   });
 });
 

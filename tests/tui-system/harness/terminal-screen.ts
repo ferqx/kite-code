@@ -25,6 +25,8 @@ export interface HeadlessTerminalScreen {
    * at input end. Removes CtrlSafeTextInput's synthetic inverse-space cursor.
    */
   inputViewport(): string;
+  /** Whether the focused main prompt has mounted its inverse cursor readiness marker. */
+  focusedMainInputReady(): boolean;
   /** Text retained by the terminal buffer, including scrollback. */
   scrollback(): string;
   /** Wait until all queued PTY bytes and resizes have been parsed. */
@@ -125,6 +127,48 @@ function bufferText(
 }
 
 /**
+ * InputLine deliberately reveals its inverse cursor only after Ink has
+ * registered the active keyboard listener. Find the real prompt (rather than
+ * an overlay row that also uses `❯`) by requiring its continuation rows to end
+ * at InputLine's bottom separator, then inspect only that input range.
+ */
+function focusedMainInputReady(terminal: Terminal): boolean {
+  const buffer = terminal.buffer.active;
+  const start = buffer.viewportY;
+  const end = Math.min(buffer.viewportY + terminal.rows, buffer.length);
+
+  for (let promptRow = end - 1; promptRow >= start; promptRow--) {
+    const promptLine = buffer.getLine(promptRow);
+    if (!promptLine || !/^\s*❯(?:\s|$)/u.test(promptLine.translateToString(true))) continue;
+
+    let separatorRow = -1;
+    for (let row = promptRow + 1; row < end; row++) {
+      const line = buffer.getLine(row);
+      if (!line) break;
+      const text = line.translateToString(true);
+      if (/^\s*[─━═]+\s*$/u.test(text)) {
+        separatorRow = row;
+        break;
+      }
+      if (!line.isWrapped && text.trim().length > 0) break;
+    }
+    if (separatorRow < 0) continue;
+
+    for (let row = promptRow; row < separatorRow; row++) {
+      const line = buffer.getLine(row);
+      if (!line) continue;
+      for (let column = 0; column < terminal.cols; column++) {
+        const cell = line.getCell(column);
+        if (cell?.isInverse()) return true;
+      }
+    }
+    return false;
+  }
+
+  return false;
+}
+
+/**
  * Model the terminal state produced by the PTY stream. Raw transcripts retain
  * erased Ink frames, so they are useful for diagnostics but not UI assertions.
  */
@@ -213,6 +257,9 @@ export function createHeadlessTerminalScreen(
         },
         { omitPromptCursor: true },
       );
+    },
+    focusedMainInputReady() {
+      return focusedMainInputReady(terminal);
     },
     scrollback() {
       return bufferText(terminal, { start: 0, end: terminal.buffer.active.length });

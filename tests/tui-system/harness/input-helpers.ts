@@ -12,6 +12,8 @@ export async function sleep(ms: number): Promise<void> {
 const INPUT_SETTLE_MS = 100;
 const INPUT_ECHO_TIMEOUT_MS = 2_000;
 const INPUT_PASTE_ECHO_TIMEOUT_MS = 5_000;
+const INPUT_READY_PROBE_ECHO_TIMEOUT_MS = 750;
+const INPUT_READY_PROBE = '~';
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
@@ -321,10 +323,9 @@ export async function typeText(
     !text.startsWith('/')
   ) {
     // Internal spaces are not projected consistently enough for a safe
-    // per-character receipt on every Ink/PTY surface. Deliver the complete
-    // replacement as one transaction. The PTY transport may retry only after
-    // Bun reports that zero bytes were accepted and then signals drain; an
-    // accepted or ambiguous write is never replayed from viewport state.
+    // per-character receipt on every Ink/PTY surface. Wait for the focused
+    // handler, then deliver the complete replacement once. Bun's byte-count
+    // result cannot authorize a replay across supported runtime versions.
     await pasteText(tui, text, {
       echoTimeoutMs: options.testTiming?.echoTimeoutMs,
       settleMs: options.testTiming?.settleMs,
@@ -440,6 +441,26 @@ export async function pasteText(
   testTiming: Pick<InputDeliveryTestTiming, 'echoTimeoutMs' | 'settleMs'> = {},
 ): Promise<void> {
   if (text.length === 0) throw new Error('pasteText requires non-empty text');
+  await tui.settleScreen();
+  if (!tui.focusedMainInputReady()) {
+    // ANSI styling can be disabled in a real fixture, making InputLine's
+    // inverse readiness cursor unobservable. Prove the listener instead with
+    // one reversible character transaction. typeText's ordered cleanup makes
+    // a delayed first probe safe: any buffered marker is followed by enough
+    // backspaces before the bounded retry, and the successful probe is then
+    // restored to the exact empty baseline before the non-replayable paste.
+    const probeTiming: InputDeliveryTestTiming = {
+      echoTimeoutMs: Math.min(
+        testTiming.echoTimeoutMs ?? INPUT_READY_PROBE_ECHO_TIMEOUT_MS,
+        INPUT_READY_PROBE_ECHO_TIMEOUT_MS,
+      ),
+      settleMs: 0,
+      retryBackspaceDelayMs: 10,
+      restoreTimeoutMs: testTiming.echoTimeoutMs ?? INPUT_ECHO_TIMEOUT_MS,
+    };
+    await typeText(tui, INPUT_READY_PROBE, { delayMs: 0, testTiming: probeTiming });
+    await clearActiveInputTo(tui, '', 'main', probeTiming);
+  }
   await tui.settleScreen();
   const initial = activeInput(tui.inputViewport());
   if (!initial || initial.value.length > 0) {

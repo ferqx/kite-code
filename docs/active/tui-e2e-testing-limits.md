@@ -119,8 +119,11 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     对 Kitty Shift+Enter 的协议协商。Shift+Enter 到软换行的键解析由 Ink 组件测试覆盖；PTY 默认
     场景用 bracketed paste 验证多行值从输入控件进入真实 model request 的端到端语义。不得发送一个
     未被协商的 CSI-u 序列、只检查两段文本仍可见，就声称已经验证软换行。
-    Harness 通过 `pasteText()` 验证完整活动输入回执；只有 Bun PTY 返回 0 accepted bytes 并发出 drain
-    才能安全重试 transport write。非零部分交付、缺失 VT 回执或变形交付都 fail closed，不得重发。
+    Harness 通过 `pasteText()` 验证完整活动输入回执，并在唯一一次 transport write 前证明 focused
+    `InputLine` 已注册键盘 listener：反色光标 marker 可观测时直接使用；ANSI styling 不可观测时，先
+    逐回执输入一个可逆单字符 probe，再退格恢复精确空基线。Bun 1.3 的返回值是同步 flush 计数，不是
+    accepted-byte receipt；0 或部分计数同样可能已经 buffer 全部输入，POSIX drain 也不能提供可移植的
+    重放边界。因此任意 byte count、缺失 VT 回执或变形交付都不得触发粘贴重发，只能 fail closed。
 19. Mock request 回执只在显式 request baseline 之后匹配最新真实 user turn；Kernel 注入的
     `<runtime-state ...>` 消息不属于用户输入。输入提交的 Enter 重试必须在活动字段离开提交值、
     新 request 或新 modal 出现时停止，避免同一个重试跨过焦点边界执行下一层操作。普通模型消息
@@ -134,9 +137,11 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     普通 `viewport()` 仍保留用户实际看到的画面。main readiness 也必须使用该 input projection 判断空输入，并另用普通
     viewport 验证可见 chrome；不能让视觉光标阻止 idle 判定。逐字符 PTY delivery 必须在发送下一个
     非空白字节前观察到当前活动输入可投影的精确 prefix receipt。ordinary multi-word main input 与显式 paste/
-    多行输入使用一次 bracketed-paste transaction 和 exact all-or-nothing viewport receipt；Bun 的 byte-count
-    receipt 是 transport admission 权威，只有明确的 zero-byte rejection + drain 允许重试。回显超时不能证明
-    已接受的 transaction 未交付，因此不得重放。selector/search 继续逐 prefix 验证。
+    多行输入使用一次 bracketed-paste transaction 和 exact all-or-nothing viewport receipt；在写入前还必须
+    从 real prompt 的 inverse cursor 或“单字符精确回显后恢复空值”的可逆 probe 证明 focused main handler
+    ready，不能把 overlay 的反色 row 当作 input readiness。Bun 1.3/1.4 对 `Terminal.write()` byte count 的
+    定义不同，该返回值和 drain 都不是 transport admission 权威。回显超时不能证明已接受的 transaction
+    未交付，因此不得重放。selector/search 继续逐 prefix 验证。
     replacement 重试必须先逐回执清空当前可见输入，
     再有界清理 projection 不可见的尾随空白，不能盲发整段退格与尚未排空的 PTY 字节竞争，否则会把重试文本
     追加到首次部分交付。Enter delivery
