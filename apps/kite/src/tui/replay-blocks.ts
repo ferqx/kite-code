@@ -220,6 +220,10 @@ export function sessionDataToUI(data: SessionData): {
   const runtimeEvents = data.runtimeEvents;
   let state = createInitialState();
   for (const event of runtimeEvents) state = handleRuntimeEventAction(state, event);
+  // The restored Kernel snapshot is authoritative. Historical presentation
+  // events may contain an older mode transition, but replay must never grant
+  // permissions that the migrated/current State no longer carries.
+  state = { ...state, interactionMode: data.interactionMode };
   if (!state.interrupt && data.interrupt) {
     const callIds = new Map(
       state.turns.flatMap((turn) =>

@@ -6,7 +6,7 @@
 
 验证：`bun run test:tui:harness`、`bun run test:tui:system`、`bun test tests/tui-layout.test.tsx tests/tui-reducer.test.ts`。
 
-相关：ADR-0137、`docs/active/tui-e2e-standards.md`、`docs/active/authorization.md`。
+相关：ADR-0137、ADR-0138、`docs/active/tui-e2e-standards.md`、`docs/active/authorization.md`。
 
 ## 当前能力
 
@@ -151,9 +151,10 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     Required 可通过 `KITE_TUI_SYSTEM_SHARD=<index>/<count>` 在独立 runner 间稳定分片，所有分片通过后
     才能使汇总 `tui-system` 门禁成功。`KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required
     的默认证据模式。
-21. keyless Runtime cutover 场景必须通过真实 TUI startup 使用 canonical Workspace identity 创建 Runtime State/SQLite Store target
-    database，同时断言 `runtime-authority.key` 未被创建；它还要证明旧 shim/SQLite Store bytes 未被读取、迁移或
-    改写。普通 startup fixture 不预置安装密钥，缺少该文件不能进入 ErrorBoundary 或阻止会话启动。
+21. Runtime format compatibility 必须分三条真实 TUI 证据：未知 source 静默忽略且不阻止新会话；已知历史会话在
+    `/resume` 中无迁移标签、选中前 target 无该 session、选中后 exactly-once 可读；源 database/WAL/SHM 字节始终不改。
+    单个损坏会话只能显示脱敏 session-scoped failure，健康历史会话与普通输入继续可用。当前 target 使用 canonical
+    Workspace identity 和 epoch 派生路径，`runtime-authority.key` 仍不得创建。
 
 ## 分层选择
 
@@ -165,5 +166,7 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
 同一 thread 的多轮继续由 Runtime State/SQLite Store 与 App `RuntimeSessionCoordinator` 注入所需 Kernel、effect
 coordinator 和 concrete Model 后调用 `executeRuntimeTurn()` 恢复；App turn entry 不自行打开第二 Kernel、
 创建第二 coordinator 或选择第二 Model。
-RA-06 后 TUI persistence observers、startup fixtures 与 file-rewind probes 使用独立 `.runtime-state-store.db` target path；旧 SQLite Store path 与曾由 header shim 占用的 `.runtime-state-store.db` 只用于明确的 incompatible-format / cutover negative fixture，不作为生产观察路径，也不阻止新 epoch 初始化。
-> 路径同步：TUI system 场景引用当前无版本命名的 runtime state/store 测试路径。
+TUI persistence observers、startup fixtures 与 file-rewind probes 使用 production epoch-derived current target path；历史
+canonical path 只作为 readonly source fixture。Harness 必须从 production path helper 取得 current target，不能硬编码旧路径，
+也不能通过初始化第二个 writer 干扰被测进程。
+> 路径同步：TUI system 场景引用 production runtime store path helper。

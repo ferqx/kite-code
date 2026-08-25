@@ -63,12 +63,12 @@ describe('TUI PTY System — Startup', () => {
   );
 
   step(
-    'reports historical session loading failure through normal TUI rendering',
+    'silently ignores an unknown historical Store without blocking the fresh session',
     async () => {
-      const output = await waitForText(() => tui.scrollback(), '历史会话服务不可用', 10_000);
-      expect(screenContains(output, '已创建新会话')).toBe(false);
-      expect(screenContains(output, '请输入 /resume 重试')).toBe(true);
-      expect(screenContains(output, '/new 明确创建会话')).toBe(false);
+      const output = tui.viewport();
+      expect(screenContains(output, '❯')).toBe(true);
+      expect(screenContains(output, '历史会话服务不可用')).toBe(false);
+      expect(screenContains(output, '请输入 /resume 重试')).toBe(false);
       expect(screenContains(output, 'RuntimeStore format')).toBe(false);
       expect(screenContains(output, '999')).toBe(false);
     },
@@ -76,10 +76,11 @@ describe('TUI PTY System — Startup', () => {
   );
 
   step(
-    'does not expose the underlying session-list error in the sessions overlay',
+    'shows an empty normal selector without exposing the ignored Store marker',
     async () => {
       await submitCommand(tui, '/resume');
-      const output = await waitForText(() => tui.viewport(), '无法加载历史会话', 10_000);
+      const output = await waitForText(() => tui.viewport(), '暂无历史会话', 10_000);
+      expect(screenContains(output, '无法加载历史会话')).toBe(false);
       expect(screenContains(output, 'RuntimeStore format')).toBe(false);
       expect(screenContains(output, '999')).toBe(false);
       tui.write('\x1b');

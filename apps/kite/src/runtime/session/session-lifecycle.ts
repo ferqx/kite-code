@@ -27,9 +27,7 @@ export class SessionLifecycleService {
   }
 
   loadPersistedSession(threadId: string) {
-    return loadSession(
-      this.deps.openStateRuntimeStorage,
-      threadId,
+    return loadSession(this.deps.openStateRuntimeStorage, threadId, () =>
       this.deps.resolveRecoveryIdentity(threadId),
     );
   }

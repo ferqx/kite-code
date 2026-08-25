@@ -59,6 +59,10 @@ export interface CliRuntimeAccessInput {
 }
 
 export interface CliMainDependencies {
+  readonly prepareRuntimeSessionResume: (
+    checkpointPath: string,
+    sessionId: string,
+  ) => 'ready' | 'not_found' | 'failed';
   readonly createRuntimeAccess: (
     input: CliRuntimeAccessInput,
   ) => RuntimeAccess & Partial<AsyncDisposable>;
@@ -121,10 +125,8 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     console.log(`Windows network sandbox is ${status.state}.`);
     return;
   }
-  if (args.command === 'resume') {
-    throw new Error(
-      'Legacy checkpoint sessions are not compatible with the Runtime Kernel. Start a new task.',
-    );
+  if (args.command === 'resume' && !args.task?.trim()) {
+    throw new Error('resume requires --task (or positional task text) to continue the session.');
   }
 
   // Workspace trust gate (docs/active/workspace-trust.md). `run` executes
@@ -231,6 +233,15 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   });
 
   const task = args.task ?? '';
+  if (args.command === 'resume') {
+    const preparation = dependencies.prepareRuntimeSessionResume(
+      args.checkpointPath,
+      args.threadId,
+    );
+    if (preparation !== 'ready') {
+      throw new Error('Historical session could not be opened; no new session was created.');
+    }
+  }
   const skillOptions = skillDirs(args.workspace);
   const initialSkillActivations = args.skills.map((name) => ({
     skillId: `skill:${name}`,
@@ -273,10 +284,26 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     if (createReceipt.status !== 'applied' && createReceipt.status !== 'idempotent_replay') {
       throw new Error(`Runtime session rejected: ${createReceipt.code}`);
     }
-    const afterRevision =
+    let afterRevision =
       createReceipt.status === 'applied' ? createReceipt.revision : createReceipt.originalRevision;
     const subscription = access.subscribe({ sessionId: args.threadId, afterRevision });
     iterator = subscription[Symbol.asyncIterator]();
+    if (args.command === 'resume') {
+      const resumeReceipt = await access.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: `cli-resume:${args.threadId}`,
+        type: 'resume_session',
+        sessionId: args.threadId,
+        afterRevision,
+      });
+      if (resumeReceipt.status !== 'applied' && resumeReceipt.status !== 'idempotent_replay') {
+        throw new Error(`Runtime session resume rejected: ${resumeReceipt.code}`);
+      }
+      afterRevision =
+        resumeReceipt.status === 'applied'
+          ? resumeReceipt.revision
+          : resumeReceipt.originalRevision;
+    }
     const startReceipt = await access.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
       commandId: `cli-turn:${args.threadId}:1`,
@@ -428,7 +455,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   }
   return {
     command,
-    task: command === 'run' ? value('--task', positionalTask(argv)) : '',
+    task: command === 'run' || command === 'resume' ? value('--task', positionalTask(argv)) : '',
     threadId: explicitThread || (command === 'run' ? freshThreadId() : 'default-thread'),
     userId: value('--user', 'default-user'),
     workspace: resolve(value('--workspace', cwd)),
@@ -459,7 +486,7 @@ function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
 }
 
 function positionalTask(argv: string[]): string {
-  if (argv[0] !== 'run') return '';
+  if (argv[0] !== 'run' && argv[0] !== 'resume') return '';
   const optionNamesWithValues = new Set([
     '--task',
     '--thread',
@@ -493,7 +520,7 @@ function freshThreadId(): string {
 function printHelp(): void {
   console.log(`Usage:
   bun run agent run --task "Create hello.txt"
-  bun run agent resume --thread default-thread --approve
+  bun run agent resume --thread default-thread --task "Continue the task"
   bun run agent sandbox status
   bun run agent sandbox setup
 
@@ -512,12 +539,7 @@ Options:
   --telemetry-status     Print redacted telemetry consent/export status and exit
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
-  --approve              Approve tool call on resume
-  --approve-same-command Approve same future commands
   --trust-workspace      Record trust for --workspace and continue (source=config)
-  --approval-hash <hash> Approval hash
-  --replace-command <cmd> Replace pending command
-  --answer <text>        Answer user input interrupt
   --ask                  Ask before every tool (default)
   --auto                 Auto-review tools, ask when uncertain
   --full           Run with full permissions, never ask

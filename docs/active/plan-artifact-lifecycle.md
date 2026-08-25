@@ -47,9 +47,10 @@
 - V2 Artifact metadata 可保存 `PlanCompletionEvidence`，但只允许 verification ID/outcome、
   terminal tool-call ID/outcome、skipped step ID/reason code 和 unresolved kind/reference ID；不得保存
   prompt/tool body、路径、命令、stdout 或任意错误正文；
-- 当前 Runtime 只创建和接受 PlanDocument V2；Runtime snapshot 还必须具有精确 schema version 与 format
-  epoch。旧 RuntimeStore 不迁移、不 replay、不改写，也不存在 recovery-only Plan 工具面；打开不兼容
-  会话时在 decode/dispatch 前返回明确错误。既有 Artifact 文件不主动删除或搬移。
+- 当前 Runtime 只创建和接受 PlanDocument V2；current snapshot 仍必须具有精确 schema version 与 format
+  epoch。ADR-0138 的已知历史会话迁移只保留已终结 Plan/Task 展示历史，不读取或搬移旧 Plan Artifact，
+  不建立 recovery-only Plan 工具面，也不恢复 active plan authority；未知格式静默忽略，损坏只让该会话
+  打开失败。既有 Artifact 文件不主动删除或搬移。
 
 详细实施方案见 [`2026-07-13-plan-artifact-lifecycle.md`](../space/plans/2026-07-13-plan-artifact-lifecycle.md)。
 > 测试路径同步：当前 runtime state/store conformance 测试使用无版本文件名和嵌套

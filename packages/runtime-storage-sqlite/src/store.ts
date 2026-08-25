@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { RuntimeStorageBoundary } from '@kite/runtime-host/storage';
 import { createSqliteRuntimeStorageAdapter } from './adapter';
 import {
@@ -37,4 +38,28 @@ export function createSqliteRuntimeStorage<Event = unknown, State = unknown>(
 export function sqliteRuntimeStorePath(checkpointPath: string): string {
   if (checkpointPath === ':memory:') return ':memory:';
   return `${checkpointPath.replace(/\.sqlite$/u, '')}.runtime-state-store.db`;
+}
+
+/**
+ * Derive one opaque Store generation from its semantic format epoch.
+ *
+ * An incompatible future writer therefore receives a different file instead
+ * of trying to preflight/open the previous generation as current. The epoch
+ * itself remains an internal contract and is not exposed in the file name.
+ */
+export function sqliteRuntimeStorePathForEpoch(
+  checkpointPath: string,
+  formatEpoch: string,
+): string {
+  if (checkpointPath === ':memory:') return ':memory:';
+  if (!formatEpoch || formatEpoch.includes('\0')) {
+    throw new Error('SQLite Runtime format epoch is invalid.');
+  }
+  const generation = createHash('sha256').update(formatEpoch).digest('hex').slice(0, 16);
+  return `${checkpointPath.replace(/\.sqlite$/u, '')}.runtime-state-store-${generation}.db`;
+}
+
+/** Stable target path within the current semantic Runtime format generation. */
+export function sqliteCurrentRuntimeStorePath(checkpointPath: string): string {
+  return sqliteRuntimeStorePathForEpoch(checkpointPath, SQLITE_RUNTIME_FORMAT_EPOCH);
 }

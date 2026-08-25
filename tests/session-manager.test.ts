@@ -1876,6 +1876,20 @@ describe('SessionManager', () => {
     expect(mgr.getActiveId()).toBe(id2);
   });
 
+  test('switchSession restores the target foreground state for load rollback', () => {
+    const mgr = makeManager();
+    const id1 = mgr.createSession('/tmp/ws');
+    const id2 = mgr.createSession('/tmp/ws');
+    const rt1 = mgr.getRuntime(id1)!;
+
+    mgr.switchSession(id2, id1);
+    expect((rt1 as unknown as RuntimeWithForeground)._foreground).toBe(true);
+    mgr.switchSession(id1, id2);
+    expect((rt1 as unknown as RuntimeWithForeground)._foreground).toBe(false);
+    mgr.switchSession(id2, id1);
+    expect((rt1 as unknown as RuntimeWithForeground)._foreground).toBe(true);
+  });
+
   test('switchSession preserves a pending interrupt on the outgoing session', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');

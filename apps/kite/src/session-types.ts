@@ -1,4 +1,4 @@
-import type { AgentPlan, PlanArtifactRef } from '@kite/runtime-contract';
+import type { AgentPlan, InteractionMode, PlanArtifactRef } from '@kite/runtime-contract';
 import type { RuntimePresentationEvent } from '#app/tui/runtime-presentation';
 
 export interface SessionInfo {
@@ -24,4 +24,5 @@ export interface SessionData {
   readonly modelName: string;
   readonly thinkingLevel: string | null;
   readonly plan: AgentPlan | null;
+  readonly interactionMode: InteractionMode;
 }

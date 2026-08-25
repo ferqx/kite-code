@@ -1,5 +1,5 @@
 import packageJson from '../../package.json' with { type: 'json' };
-import { createKiteCliRuntimeAccess } from '../bootstrap';
+import { createKiteCliRuntimeAccess, prepareKiteRuntimeSessionResume } from '../bootstrap';
 import { runKiteInternalMcpStdioChild } from '../bootstrap/mcp-stdio-composition';
 import { main } from './index';
 
@@ -9,6 +9,7 @@ export async function runCli(): Promise<void> {
     return;
   }
   await main({
+    prepareRuntimeSessionResume: prepareKiteRuntimeSessionResume,
     createRuntimeAccess: createKiteCliRuntimeAccess,
   });
 }

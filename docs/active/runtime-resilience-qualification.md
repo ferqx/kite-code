@@ -164,7 +164,7 @@ Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/recon
 transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
 reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
 重发。当前定向 recovery journey 覆盖这些边界；response source/catalog 继续使用 ack-before-lookup、
-strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；当前使用 schema v26、SQLite Store 与 epoch `kite-runtime-modularization-v1-2026-08-19`。
+strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；当前 writer 使用 State 27、SQLite Store 与 SAQ epoch。State 26/Store 5/`kite-runtime-modularization-v1-2026-08-19` 只属于 ADR-0138 明确支持的只读历史 source profile，不能进入当前执行路径。
 
 RM-04 production Store 由 App 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
 旧 SQLite Store production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning Runtime State type view。CLI、TUI、Kernel 与
@@ -176,8 +176,14 @@ lock 释放后只允许一次成功提交；不能因为重试重复事件。
 RM-05 的 deterministic Host contract 额外验证 same-session FIFO、cross-session concurrency、bridge 前
 revision conflict、Host 生命周期内 scoped idempotency、committed Query、history-gap snapshot、stale
 ephemeral drop、slow subscriber 断开，以及 subscriber close 不取消 Runtime work。TUI PTY 继续验证真实
-production bootstrap；不兼容 Store 必须在历史会话加载边界 fail closed，而不能让 Host 组合阶段阻止 TUI
-挂载。会话发现对每个候选 journal 使用有界 batch，并在首个 session-name candidate 后立即停止 current-codec 解码；长会话不得因启动列表投影而全量解码，具体会话的 session-scoped 恢复仍执行全量完整性校验。
+production bootstrap。未知 Store/profile 在只读发现阶段静默忽略，不能让 Host 组合阶段阻止 TUI 挂载或当前 Store 写入；
+明确支持的历史 profile 只在用户选中 exact session 后原子导入。会话发现对每个候选 journal 使用有界 batch，并在首个
+session-name candidate 后停止；具体会话仍执行全量 checksum/sequence/identity 校验，失败只隔离该 session。
+current target 的格式判定复用 current Store preflight；合法的 `WAL present / SHM absent` 恢复形态必须在隔离副本中重建
+SHM 后继续打开，不能误报为未知 target 或让 exact session import 静默失效。marker、表/索引或 WAL 真正损坏仍 fail closed。
+历史 source 的同一 WAL/无 SHM 形态也只在 no-follow 临时副本中重建；source database/WAL/SHM 的 identity 与字节保持只读。
+CLI explicit resume 在 `create_session` 前完成该边界，失败不得创建同 ID 空会话。State 26 file preimage 不导入；current-format
+named snapshot/preimage 还必须满足 head 上界、Workspace containment 和无 traversal，否则只隔离 exact session。
 
 RM-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
 acknowledgement、effect lease claim/renew/release 与 restart recovery 切到 Host。Host contract 和 Runtime fault
@@ -210,5 +216,9 @@ CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若
 到期，这是另一条合法的 fail-closed 路径，不能用来否定取消传播，也不能与 in-flight 断言混为一谈。
 验证“原子完成后慢 consumer 不得反向 abort”的 fixture 同样先保留该调度余量，再让 consumer 明确
 跨过 deadline；不得使用会在 hosted runner 负载下先于 `run.completed` 到期的亚秒窗口制造竞态。
-RA-06 target Runtime State/SQLite Store is the production path for new sessions；qualification separately proves old SQLite Store remains untouched and old sessions fail closed rather than being migrated or used as fallback. Target commits reject explicit legacy snapshot metadata instead of normalizing it；corrupt Event/Snapshot、writer mismatch、fork/rollback/delete inconsistency 与 multi-session corruption 都必须在 dispatch 前 fail closed。内部 Runtime/Artifact key、authority ledger 与 key-loss Gate 已删除。
+RA-06 current Runtime State/SQLite Store 是新会话的唯一 production writer；qualification 分别证明未知 source 被静默忽略，
+已知历史 source 保持 byte-for-byte 不变，且选中的单个 session exactly-once 导入。current write API 仍拒绝历史 metadata；迁移
+只能经过 ADR-0138 的 readonly-source/atomic-target boundary，并清除旧 authority/effect。corrupt Event/Snapshot、writer
+mismatch、fork/rollback/delete inconsistency 只隔离受影响 session，且都必须在 dispatch 前 fail closed；健康会话与新会话
+继续可用。内部 Runtime/Artifact key、authority ledger 与 key-loss Gate 已删除。
 > 路径同步：runtime resilience 验证引用当前无版本命名的 state/store 实现路径；格式版本仍由 metadata 校验。

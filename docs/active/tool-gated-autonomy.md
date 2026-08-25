@@ -121,8 +121,9 @@ adapter result 字段；其他 post-dispatch 异常仍按 unknown 收敛。dispa
 Subagent task adapter 与 Builtin catalog/Host dispatch；Provider-neutral MCP contract、readiness 与 Policy metadata 仍可作为
 Pipeline 输入。Verification 读取侧必须复用 production composition 注入的同一 Capability Artifact access，
 不存在模块级默认 store；reader/key/artifact 缺失会在 reviewer 模型 dispatch 前收敛为 `inconclusive`。
-迁移不增加 runtime fallback flag。SAQ clean cutover 已统一切换 State 27/SQLite Store/SAQ epoch；旧 dispatch、旧 approval grant
-和旧单槽 shape 不进入新 epoch。
+迁移不增加 runtime execution fallback flag。SAQ clean cutover 已统一切换 State 27/SQLite Store/SAQ epoch；ADR-0138
+只允许选中已知历史会话后导入安全 transcript/Task/Plan 投影，旧 dispatch、旧 approval grant、effect authority 和旧单槽
+shape 不进入新 epoch，未知 source 静默忽略。
 
 ### Workspace filesystem Provider（PS-01）
 
@@ -423,7 +424,7 @@ Builtin operation receipt/result projection 只产生模型内容、双流内容
 
 `update_plan` 也已作为 capability-backed `runtime_action` 接入 Builtin catalog：Builtin executor 是唯一 operation handler，App 注入的 Plan Runtime mechanism 限定 building/executing 的 V2 Plan，精确校验 `plan_id + version + structural_digest` 与稳定 step ID，拒绝重复更新、终态回退、all-skipped completion、缺 Runtime receipt/required verification 的完成请求，以及 command/path/stdout/evidence self-report；接受后只从 Runtime state 投影 metadata-only evidence，并产生带相同 identity 的 `plan.progress_updated`、可选 `plan.completed` 与模型结果。
 
-`write_plan` 已作为 capability-backed `runtime_action` 接入 Builtin catalog：Builtin executor 经注入 mechanism 保持 save→submit 两阶段 Artifact 协议、幂等保存、版本冲突、replan 元数据、review interrupt 和同批后续调用取消；首次 save 后的 save/submit/replan 共用严格 identity 校验，新 write 只产生 PlanDocument V2。当前 epoch 不接受缺少当前 Plan/Runtime 格式身份的历史状态，因此不存在 recovery-only 工具面或 legacy governance 分支。
+`write_plan` 已作为 capability-backed `runtime_action` 接入 Builtin catalog：Builtin executor 经注入 mechanism 保持 save→submit 两阶段 Artifact 协议、幂等保存、版本冲突、replan 元数据、review interrupt 和同批后续调用取消；首次 save 后的 save/submit/replan 共用严格 identity 校验，新 write 只产生 PlanDocument V2。当前 execution path 不接受缺少当前 Plan/Runtime 格式身份的状态；历史会话兼容投影会终结旧 active lifecycle，因此不存在 recovery-only 工具面或 legacy governance 分支。
 
 静态工具的 Schema、契约与副作用分类收敛到 `packages/builtin-runtime/src/tool-catalog.ts` 投影的 Builtin catalog；
 SPI registry 保留 immutable definition/executor identity，App 只保留 composition/request adapter。RM-10 至

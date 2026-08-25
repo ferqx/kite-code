@@ -551,6 +551,38 @@ export function assertCurrentRuntimeEventForWrite(value: unknown): asserts value
       throw new Error('Retired verification reviewer checks are read-only compatibility data.');
     }
   }
+  if (event.type === 'approval.requested') {
+    const approval = isRecord(event.approval) ? event.approval : undefined;
+    const grantOptions = Array.isArray(approval?.grantOptions) ? approval.grantOptions : [];
+    if (
+      approval?.recommendedGrant === 'full_access' ||
+      grantOptions.some((grant) => grant === 'full_access')
+    ) {
+      throw new Error('Legacy full_access approval data is read-only compatibility data.');
+    }
+  }
+  if (event.type === 'approval.rejected' && Object.hasOwn(event, 'outcomeV1')) {
+    throw new Error('Legacy approval rejection data is read-only compatibility data.');
+  }
+  if (event.type === 'auto_review.requested') {
+    const approval = isRecord(event.approval) ? event.approval : undefined;
+    const grantOptions = Array.isArray(approval?.grantOptions) ? approval.grantOptions : [];
+    if (
+      approval?.recommendedGrant === 'full_access' ||
+      grantOptions.some((grant) => grant === 'full_access')
+    ) {
+      throw new Error('Legacy full_access review data is read-only compatibility data.');
+    }
+  }
+  if (event.type === 'auto_review.completed') {
+    const result = isRecord(event.result) ? event.result : undefined;
+    if (
+      Object.hasOwn(event, 'outcomeV1') ||
+      (result?.grant !== undefined && result.grant !== 'approve_once')
+    ) {
+      throw new Error('Legacy auto-review data is read-only compatibility data.');
+    }
+  }
   if (event.type === 'subagent.started') {
     const subagent = isRecord(event.subagent) ? event.subagent : undefined;
     if (

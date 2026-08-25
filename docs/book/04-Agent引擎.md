@@ -105,7 +105,7 @@ child waiter promotion 与 reservation 原子提交，wait deadline/Abort 有界
 穿透 Task 执行链并由同一 terminal adapter 生成 `run.error + turn.aborted`。迟到 child usage 只能
 经 resource-only reconciliation 写入，不能携带工具终态或恢复调度。
 
-当前 Runtime state（schema v26）的终态使用 `RunTerminalOutcome`。展示层读取 reason code、external
+当前 Runtime state（State 27 / SAQ epoch）的终态使用 `RunTerminalOutcome`。展示层读取 reason code、external
 effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
 `status=completed` 可进入完成展示。
 

@@ -4,18 +4,23 @@ import {
   assertCurrentRuntimeEvent,
   assertCurrentRuntimeEventForWrite,
   canForkAgentState,
+  classifyAgentStateFormat,
+  convertLegacyRuntimeEventJson,
+  decodeAgentStateWithCompatibility,
   decodeCurrentAgentStateJson,
   decodeCurrentRuntimeEventJson,
   encodeCurrentAgentStateJson,
   encodeCurrentRuntimeEventJson,
   isCurrentAgentStateSnapshot,
   isCurrentPendingInteractionRequest,
+  LEGACY_STATE26_FORMAT_EPOCH,
+  LEGACY_STATE26_SCHEMA_VERSION,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeEvent,
   rebindForkAgentState,
 } from '@kite/agent-kernel';
-import type { RuntimeSnapshotCodec } from '../storage';
+import type { RuntimeCompatibleRecordFormat, RuntimeSnapshotCodec } from '../storage';
 
 export interface RuntimeHostStateStorageBinding {
   readonly codec: RuntimeSnapshotCodec<RuntimeEvent, AgentState>;
@@ -48,11 +53,67 @@ function createStateCodec(): RuntimeSnapshotCodec<RuntimeEvent, AgentState> {
     decodeEvent(json: string): RuntimeEvent {
       return decodeCurrentRuntimeEventJson(json);
     },
+    decodeCompatibleEvent(
+      json: string,
+      format: RuntimeCompatibleRecordFormat,
+    ): RuntimeEvent | null {
+      if (
+        format.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION &&
+        format.formatEpoch === RUNTIME_STATE_FORMAT_EPOCH
+      ) {
+        try {
+          return decodeCurrentRuntimeEventJson(json);
+        } catch {
+          return null;
+        }
+      }
+      const converted = convertLegacyRuntimeEventJson(json);
+      if (
+        format.schemaVersion !== LEGACY_STATE26_SCHEMA_VERSION ||
+        format.formatEpoch !== LEGACY_STATE26_FORMAT_EPOCH ||
+        converted.status !== 'converted'
+      )
+        return null;
+      try {
+        assertCurrentRuntimeEvent(converted.event);
+        return converted.event;
+      } catch {
+        return null;
+      }
+    },
     encodeState(state: AgentState): string {
       return encodeCurrentAgentStateJson(requireState(state));
     },
     decodeState<T = AgentState>(json: string): T {
       return decodeCurrentAgentStateJson(json) as unknown as T;
+    },
+    decodeCompatibleState(json: string, format: RuntimeCompatibleRecordFormat): AgentState | null {
+      let value: unknown;
+      try {
+        value = JSON.parse(json) as unknown;
+      } catch {
+        return null;
+      }
+      const classification = classifyAgentStateFormat(value);
+      if (
+        classification === 'current' &&
+        format.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION &&
+        format.formatEpoch === RUNTIME_STATE_FORMAT_EPOCH
+      ) {
+        try {
+          return decodeCurrentAgentStateJson(json);
+        } catch {
+          return null;
+        }
+      }
+      if (
+        classification !== 'state26' ||
+        format.schemaVersion !== LEGACY_STATE26_SCHEMA_VERSION ||
+        format.formatEpoch !== LEGACY_STATE26_FORMAT_EPOCH
+      )
+        return null;
+      const migrated = decodeAgentStateWithCompatibility(json);
+      return migrated.status === 'migrated' ? migrated.state : null;
     },
     eventSummary(event: RuntimeEvent) {
       assertCurrentRuntimeEvent(event);

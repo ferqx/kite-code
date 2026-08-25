@@ -138,3 +138,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0134](0134-closed-read-only-git-shell-grammar.md) | partially superseded by ADR-0136 | status/log grammar 只保留已批准执行的 hardening 用途，不再产生免审授权 |
 | [0135](0135-mode-aware-workspace-authorization-boundary.md) | partially superseded by ADR-0136 | 文件工具边界保留；Shell/Git 的 Workspace grammar 直通已取消 |
 | [0136](0136-mode-governed-shell-without-command-allowlists.md) | accepted | Raw Shell 不再由固定命令 grammar 免审；统一按 Accept Edits、Auto、Full 治理 |
+| [0137](0137-shell-sandbox-durable-approval-queue.md) | accepted | Sandbox-first phase/mode 矩阵、两类 grant 与 durable approval queue |
+| [0138](0138-silent-session-format-compatibility.md) | accepted | 未知历史格式静默忽略；已知会话按选择懒迁移并剥离旧权限 |

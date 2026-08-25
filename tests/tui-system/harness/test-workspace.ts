@@ -22,7 +22,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sqliteRuntimeStorePath } from '@kite/runtime-storage-sqlite';
+import { sqliteCurrentRuntimeStorePath } from '@kite/runtime-storage-sqlite';
 
 export interface TestWorkspace {
   /** Temp HOME directory */
@@ -104,7 +104,7 @@ function persistedRuntimeObservationFailure(
 }
 
 function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
-  return sqliteRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite'));
+  return sqliteCurrentRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite'));
 }
 
 /**

@@ -3,6 +3,13 @@ import { assertAgentStateInvariants } from './invariants';
 import { createToolRecoveryJournal } from './recovery';
 import { eventRecord, recordField, stringField } from './reducer-utils';
 import { type AgentState, RUNTIME_STATE_FORMAT_EPOCH, RUNTIME_STATE_SCHEMA_VERSION } from './state';
+import {
+  classifyStateFormat,
+  migrateState26To27,
+  type StateMigrationResult,
+} from './state-migration';
+
+export type { StateMigrationResult } from './state-migration';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -26,6 +33,33 @@ export function decodeCurrentAgentStateJson(serialized: string): AgentState {
   assertAgentStateInvariants(hydrated);
   return hydrated;
 }
+
+/**
+ * Decode the current snapshot or lazily project the one explicitly supported
+ * legacy snapshot. Unknown formats are returned as `unsupported` so callers
+ * can skip an individual session without taking down the session service.
+ */
+export function decodeCompatibleAgentStateJson(serialized: string): StateMigrationResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized) as unknown;
+  } catch {
+    return { status: 'unsupported' };
+  }
+  if (classifyStateFormat(value) === 'current') {
+    try {
+      return {
+        status: 'migrated',
+        state: decodeCurrentAgentStateJson(serialized),
+      } satisfies StateMigrationResult;
+    } catch {
+      return { status: 'unsupported' };
+    }
+  }
+  return migrateState26To27(value);
+}
+
+export const decodeAgentStateWithCompatibility = decodeCompatibleAgentStateJson;
 
 export function encodeCurrentAgentStateJson(state: AgentState): string {
   assertAgentStateInvariants(state);

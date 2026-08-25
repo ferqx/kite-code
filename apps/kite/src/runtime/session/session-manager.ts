@@ -368,6 +368,7 @@ export class SessionManager {
       fromRt.setForeground(false);
     }
     this.sessionRegistry.activeId = toId;
+    this.sessionRegistry.runtimes.get(toId)?.setForeground(true);
   }
 
   /** 创建会话快照列表。
@@ -404,8 +405,17 @@ export class SessionManager {
   registerSession(threadId: string, workspace: string): SessionRuntime {
     const storage = this.deps.openStateRuntimeStorage(threadId);
     let persisted: RuntimeState | null;
+    let persistedName: string | undefined;
     try {
       persisted = storage.sessions.loadSnapshot<RuntimeState>(threadId);
+      try {
+        persistedName = storage.sessions
+          .listSessions()
+          .find((entry) => entry.threadId === threadId)?.name;
+      } catch {
+        // Session metadata is presentation-only. A malformed/unknown row must
+        // not turn an otherwise successfully loaded session into a failure.
+      }
     } finally {
       storage.close();
     }
@@ -431,6 +441,7 @@ export class SessionManager {
       },
       projectIdentity,
     );
+    if (persistedName) rt.name = persistedName;
     rt.notifyInterrupt = () => {
       this.snapshotCallback?.(rt.threadId);
     };

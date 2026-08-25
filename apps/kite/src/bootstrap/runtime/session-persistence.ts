@@ -42,6 +42,16 @@ export interface SessionData {
   modelName: string;
   thinkingLevel: string | null;
   plan: AgentPlan | null;
+  interactionMode: RuntimeState['mode'];
+}
+
+function closeStoreQuietly(store: StateRuntimeStorage | undefined): void {
+  try {
+    store?.close();
+  } catch {
+    // Session discovery remains best effort even when an unknown source
+    // cannot cleanly close its read handle.
+  }
 }
 
 export function formatLocalDateTime(timestamp: number): string {
@@ -65,11 +75,17 @@ function mapSession(info: RuntimeSessionInfo): SessionInfo {
 export async function listSessions(
   openStateRuntimeStorage: OpenStateRuntimeStorage,
 ): Promise<SessionInfo[]> {
-  const store = openStateRuntimeStorage();
+  let store: StateRuntimeStorage | undefined;
   try {
+    store = openStateRuntimeStorage();
     return store.sessions.listSessions().map(mapSession);
+  } catch {
+    // Session discovery is advisory. An unknown/legacy Store must not make
+    // the current TUI session unavailable; the storage owner may expose only
+    // the rows that are readable by the current codec.
+    return [];
   } finally {
-    store.close();
+    closeStoreQuietly(store);
   }
 }
 
@@ -77,24 +93,34 @@ export async function searchSessions(
   openStateRuntimeStorage: OpenStateRuntimeStorage,
   query: string,
 ): Promise<SessionInfo[]> {
-  const store = openStateRuntimeStorage();
+  let store: StateRuntimeStorage | undefined;
   try {
+    store = openStateRuntimeStorage();
     return store.sessions.listSessions(query).map(mapSession);
+  } catch {
+    // Search has the same availability contract as the initial discovery:
+    // unreadable/unknown history is an empty result, not a global failure.
+    return [];
   } finally {
-    store.close();
+    closeStoreQuietly(store);
   }
 }
 
 export async function loadSession(
   openStateRuntimeStorage: OpenStateRuntimeStorage,
   threadId: string,
-  recoveryIdentityKey: string,
+  recoveryIdentity: string | (() => string),
 ): Promise<SessionData | null> {
   const store = openStateRuntimeStorage(threadId);
   try {
     const snapshot = store.sessions.loadSnapshotRecord<RuntimeState>(threadId);
     const lastEventPosition = store.sessions.getLastEventPosition(threadId);
     if (!snapshot && lastEventPosition === 0) return null;
+    // The first snapshot read is the lazy compatibility boundary. Resolve the
+    // Host recovery identity only afterwards so getOrCreate can project the
+    // imported State identity instead of allocating an unrelated fresh key.
+    const recoveryIdentityKey =
+      typeof recoveryIdentity === 'function' ? recoveryIdentity() : recoveryIdentity;
     const restored = restoreRuntimeHostStateSession({
       sessions: store.sessions,
       sessionId: threadId,
@@ -107,7 +133,11 @@ export async function loadSession(
     });
     const { state } = restored;
     if (state.recoveryState.kind !== 'normal') {
-      throw new Error(`Runtime session ${threadId} is unavailable: ${state.recoveryState.kind}.`);
+      const reason =
+        state.recoveryState.kind === 'corrupted' ? ` ${state.recoveryState.reason}` : '';
+      throw new Error(
+        `Runtime session ${threadId} is unavailable: ${state.recoveryState.kind}.${reason}`,
+      );
     }
     const events = store.sessions
       .loadEventsStrict(threadId)
@@ -141,6 +171,7 @@ export async function loadSession(
       modelName: modelRoute?.name ?? '',
       thinkingLevel: null,
       plan,
+      interactionMode: state.mode,
     };
   } finally {
     store.close();

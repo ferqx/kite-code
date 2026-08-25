@@ -7,7 +7,7 @@
 验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
-相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137。
+相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137、ADR-0138。
 
 Session Logger 与 remote observability 是独立通道。启用本地 metadata/content logging 不授予 remote
 telemetry consent；remote consent 也不改变本地 logger mode、retention 或正文排除规则。Runtime 恢复输入与
@@ -23,8 +23,9 @@ executor/env、binding digest、receipt identity、parent/child identity 或 gra
 只作为人工等待时长的起点，不能把持久化 queue payload 序列化到日志。
 
 `approval.batch_released`、`session_grants_cleared` 及迟到/过期事件按当前 epoch 的 strict decoder 与
-session/revision/generation 规则投影；未知 key、旧 epoch 或 identity 不完整的事件仍使恢复 fail closed，
-不会由 logger 侧补默认值或复活旧 grant。Auto review 只记录 `approve_once`、`reject` 或 `ask_user` 的
+session/revision/generation 规则投影；当前格式中的未知 key 或 identity 不完整仍使该会话恢复 fail closed。
+ADR-0138 的已知历史 profile 会在 logger 之前把旧 approval/review/未知 event 转为 inert fact，未知 profile 静默
+忽略；logger 不补默认值、不参与迁移，也不复活旧 grant。Auto review 只记录 `approve_once`、`reject` 或 `ask_user` 的
 低基数结果；`same_command` 与 Full 不作为 reviewer grant 写入。Live/replay 必须消费同一 canonical event，
 logger 不能制造 UI-only approval 事实。
 
@@ -78,9 +79,9 @@ revision、未知字段名/值和 classifier/provider 正文永不进入 Session
 人工审批后继续累计真实 approval wait，而不是
 UI wall clock；成功 terminal 同样保留 approval wait 与 `totalActiveMs`。reducer、模型恢复 guidance、
 Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影。持久
-event 必须通过当前 epoch 的 strict payload decoder 与 SQLite Store checksum/metadata 校验；未知、退役或身份不完整
-的事件直接把恢复标记为 corrupted，不进入 reducer、TUI replay 或 logger。在线路径不存在
-旧 decoder，也不能用旧字段覆盖 canonical outcome；TUI 不得把所有 approval/auto-review/cancel
+event 必须通过当前 epoch 的 strict payload decoder 与 SQLite Store checksum/metadata 校验；当前 session 中未知或身份不完整
+的事件直接把该会话恢复标记为 corrupted，不进入 reducer、TUI replay 或 logger。历史 profile 的兼容转换发生在独立
+readonly import 边界，在线 writer/reducer 不存在旧 decoder，也不能用旧字段覆盖 canonical outcome；TUI 不得把所有 approval/auto-review/cancel
 terminal 硬编码为 `cancelled`。
 `approval.rejected` 与没有 `escalatedToUser` 标记的历史拒绝型 `auto_review.completed` 是 canonical tool
 terminal observation；当前自动审批风险判定携带 `escalatedToUser`，属于人工审批前的非终态，不生成

@@ -29,6 +29,7 @@ const APPROVAL_EVENT_METADATA = {
 function data(
   runtimeEvents: RuntimeEvent[],
   interrupt: SessionData['interrupt'] = null,
+  interactionMode: SessionData['interactionMode'] = 'accept_edits',
 ): SessionData {
   return {
     threadId: 'thread',
@@ -39,6 +40,7 @@ function data(
     modelName: 'test',
     thinkingLevel: null,
     plan: null,
+    interactionMode,
   };
 }
 
@@ -211,24 +213,28 @@ describe('TUI replay interaction recovery', () => {
   test('restores the approved plan execution mode for the Footer', () => {
     const plan = { name: 'Plan', description: 'Do it', status: 'pending' as const, steps: [] };
     const result = sessionDataToUI(
-      data([
-        { type: 'tool.queued', toolCallId: 'plan-1', name: 'write_plan', args: {} },
-        {
-          type: 'plan.review_requested',
-          interactionId: 'plan-interaction',
-          toolCallId: 'plan-1',
-          ...CURRENT_TEST_PLAN_REVIEW_FACTS,
-          plan,
-          planSummary: plan.description,
-        },
-        {
-          type: 'plan.approved',
-          interactionId: 'plan-interaction',
-          toolCallId: 'plan-1',
-          ...CURRENT_TEST_PLAN_IDENTITY,
-          executionMode: 'auto',
-        },
-      ]),
+      data(
+        [
+          { type: 'tool.queued', toolCallId: 'plan-1', name: 'write_plan', args: {} },
+          {
+            type: 'plan.review_requested',
+            interactionId: 'plan-interaction',
+            toolCallId: 'plan-1',
+            ...CURRENT_TEST_PLAN_REVIEW_FACTS,
+            plan,
+            planSummary: plan.description,
+          },
+          {
+            type: 'plan.approved',
+            interactionId: 'plan-interaction',
+            toolCallId: 'plan-1',
+            ...CURRENT_TEST_PLAN_IDENTITY,
+            executionMode: 'auto',
+          },
+        ],
+        null,
+        'auto',
+      ),
     );
 
     expect(result.interactionMode).toBe('auto');
@@ -257,6 +263,21 @@ describe('TUI replay interaction recovery', () => {
         {
           type: 'interaction_mode.changed',
           mode: 'accept_edits',
+          source: 'user',
+          changedAt: '2026-08-14T12:00:00.000Z',
+        },
+      ]),
+    );
+
+    expect(result.interactionMode).toBe('accept_edits');
+  });
+
+  test('uses restored Kernel mode instead of a stale historical Full event', () => {
+    const result = sessionDataToUI(
+      data([
+        {
+          type: 'interaction_mode.changed',
+          mode: 'full',
           source: 'user',
           changedAt: '2026-08-14T12:00:00.000Z',
         },

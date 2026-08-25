@@ -6,7 +6,7 @@
 
 验证：`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`、`bun run typecheck`。
 
-相关：[`pre-release-architecture.md`](pre-release-architecture.md)、[`six-concept-runtime-architecture.md`](six-concept-runtime-architecture.md)、ADR-0128。
+相关：[`pre-release-architecture.md`](pre-release-architecture.md)、[`six-concept-runtime-architecture.md`](six-concept-runtime-architecture.md)、ADR-0128、ADR-0138。
 
 ## 固定依赖方向
 
@@ -50,7 +50,7 @@ builtin-runtime   runtime-host ← runtime-storage-sqlite
 
 Host 源码按 `host/`、`lifecycle/`、`execution/`、`kernel-adapter/`、`format/`、`process/`、`storage/`、`observability/` 归档：
 
-- `format/` 解析 persisted bytes 并验证 current format；
+- `format/` 解析 persisted bytes，严格验证 current format，并为 App 明确指定的历史 profile 提供纯 read-side 投影；
 - `kernel-adapter/` 翻译 Host facts 与 Kernel input；
 - `lifecycle/` 管理 effect、cancellation、cleanup 与 recovery；
 - `execution/` 管理通用 capability、Tool Pipeline 与 context compilation；
@@ -66,7 +66,7 @@ Builtin operation module 位于各领域 `runtime-module.ts`。根 barrel 只暴
 
 `adapter.ts` 单独拥有 database lifecycle。`schema.ts`、`event-store.ts`、`session-store.ts`、`snapshot-store.ts`、`artifact-store.ts`、`authority-ledger.ts` 与 `effect-leases.ts` 共享 adapter 创建的同一 database context。`transaction.ts` 是 Runtime event+snapshot 原子提交的唯一 owner。
 
-App 只取得 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` ports；平面 storage interface、alternate constructor、格式选择、dual write 与 alternate-driver retry 均不存在。
+App 只取得 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` ports；平面 storage interface、alternate current-writer constructor、dual write 与 alternate-driver retry 均不存在。SQLite 的历史 source reader/import ledger 是独立只读边界，不进入这些 current execution ports。
 
 ### App 与 TUI
 
@@ -84,8 +84,8 @@ Runtime Session、Tool execution 与 Tool persistence 分别位于 `apps/kite/sr
 
 ## Clean cutover
 
-Kite Code 未发布。生产路径、声明与 exports 使用领域职责名；schema/protocol/format 数字只允许作为 metadata 值。旧 alias、双入口、旧 source、格式迁移、长期 allowlist 与 compatibility façade 必须直接删除。该规则不等于删除旧会话的读取能力：同一 schema/epoch 内被明确列出的退休事件字段由当前唯一 codec 单向读取，当前写路径不再产生它们；这不是双 codec 或格式选择。未知持久格式仍 fail closed，不迁移、不覆盖、不尝试其他 driver。
+Kite Code 未发布。生产执行路径、声明与 exports 使用领域职责名；schema/protocol/format 数字只允许作为 metadata 或显式历史 profile identity。旧 alias、双 writer、旧 reducer/driver fallback 与长期宽松 allowlist 必须删除。ADR-0138 允许的兼容面只存在于 Kernel migration、Host codec、SQLite readonly source 和 App composition：未知持久格式静默忽略；明确支持的历史 profile 在用户选中 exact session 后单向导入当前 generation。失败只隔离该 session，source 不覆盖、不改写，当前 writer/Policy/dispatch 永不选择旧格式。
 
-`check:pre-release-architecture` 验证无版本生产路径/声明、无已删除 compatibility 名称、无 Runtime→TUI 反向 import、唯一 composition root、完整领域模块与 active 文档零版本实体。`check:core-boundary` 继续验证 filesystem、sandbox、Host、Kernel、Builtin 与 App 的静态 owner。
+`check:pre-release-architecture` 验证无版本 production path、兼容实体只出现在上述封闭 owner、无 Runtime→TUI 反向 import、唯一 composition root 与完整领域模块。`check:core-boundary` 继续验证 filesystem、sandbox、Host、Kernel、Builtin 与 App 的静态 owner。
 
 `check:runtime-packages` 还会拒绝 root `package.json` 中通过 `bun run` 或 `bun test` 直接执行、但目标文件不存在的脚本；不存在 architecture exception allowlist，非 bootstrap composition authority import 一律失败。

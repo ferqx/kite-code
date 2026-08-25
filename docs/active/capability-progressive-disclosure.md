@@ -87,6 +87,7 @@ profile 均为空或 off。
 
 V2 不再按 Runtime phase 裁剪已经发现并绑定的动态 MCP：同一 binding/revision 在 Planning 与 Building 保持相同模型声明，避免 phase 切换破坏工具前缀缓存。Planning 调用仍由 Tool Controller 读取 binding 的 effective effects：全部为 `none/read` 才可执行；任何 `write`、`destructive`、`unknown` 或缺失可信 policy 的能力都以 phase constraint 拒绝且不进入审批/Provider dispatch。Catalog、binding revision、execution surface 与 feature flags 变化仍会重建披露，这是 capability freshness，不是 phase 授权。
 
-不兼容 Runtime format 不进入 Capability disclosure：snapshot 的 schema version 或 format epoch 不精确匹配时，
-Kernel 在模型表面和 Provider 调用生成前失败。当前 Runtime 不为旧 Plan 建立 recovery-only capability surface。
+不兼容 Runtime format 不进入 Capability disclosure：未知 source 在会话发现阶段静默忽略；已知历史会话必须先经
+ADR-0138 迁移为 current State 并清空旧 binding/invocation。current snapshot 的 schema/epoch 不精确匹配时，Kernel
+仍在模型表面和 Provider 调用生成前使该会话失败。当前 Runtime 不为旧 Plan 建立 recovery-only capability surface。
 > 路径同步：能力运行时引用当前无版本命名的 state/store 路径；不引入兼容 alias。

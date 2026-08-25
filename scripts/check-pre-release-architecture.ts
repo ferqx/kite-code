@@ -13,7 +13,8 @@ const productionRoots = [
   join(root, 'native'),
 ].filter(existsSync);
 const versionedPath = /(?:^|[/_.-])(?:v\d+|state\d+|store\d+|rmv\d+|rav\d+)(?:[/_.-]|$)/iu;
-const versionedEntity = /(?:V\d+|State\d+|Store\d+|RMV\d+|RAV\d+|Legacy|Compat)/iu;
+const versionedEntity = /(?:V\d+|State\d+|Store\d+|RMV\d+|RAV\d+)/iu;
+const historicalReadEntity = /(?:Legacy|Compat)/u;
 const oldRuntimePath = /\.runtime-(?:v\d+|state\d+-store\d+)\.db/iu;
 const sqliteFormatBranch = /\b(?:targetFormat|formatProfile|compatibilityMode|legacyStore)\b/u;
 const removedProductionNames =
@@ -122,13 +123,31 @@ function isVersionedEntity(name: string): boolean {
   return versionedEntity.test(withoutAlgorithmNames);
 }
 
+function ownsHistoricalSessionReadBoundary(relativePath: string): boolean {
+  return (
+    relativePath === 'packages/agent-kernel/src/state-migration.ts' ||
+    relativePath === 'packages/agent-kernel/src/state-codec.ts' ||
+    relativePath === 'packages/agent-kernel/src/index.ts' ||
+    relativePath === 'packages/runtime-host/src/storage/index.ts' ||
+    relativePath === 'packages/runtime-host/src/format/storage-binding.ts' ||
+    relativePath === 'packages/runtime-storage-sqlite/src/compatibility.ts' ||
+    relativePath === 'packages/runtime-storage-sqlite/src/index.ts' ||
+    relativePath === 'apps/kite/src/bootstrap/runtime/state-store-compatibility.ts' ||
+    relativePath === 'apps/kite/src/bootstrap.ts'
+  );
+}
+
 function inspectSource(path: string): void {
   const relativePath = relative(root, path);
   const source = readFileSync(path, 'utf8');
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   const visitNode = (node: ts.Node): void => {
     const name = declarationName(node);
-    if (name && isVersionedEntity(name.text)) {
+    if (
+      name &&
+      (isVersionedEntity(name.text) || historicalReadEntity.test(name.text)) &&
+      !ownsHistoricalSessionReadBoundary(relativePath)
+    ) {
       const position = sourceFile.getLineAndCharacterOfPosition(name.getStart(sourceFile));
       violations.push(
         `${relativePath}:${position.line + 1}: versioned production entity ${name.text}`,

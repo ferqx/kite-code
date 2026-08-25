@@ -26,14 +26,31 @@ export interface RuntimeStorageBoundary {
   readonly formatEpoch: string;
 }
 
+/**
+ * Persisted record identity supplied only to the read-side compatibility
+ * decoder.  The current writer never selects a format through this object.
+ */
+export interface RuntimeCompatibleRecordFormat {
+  readonly schemaVersion: number;
+  readonly formatEpoch: string;
+}
+
 /** Opaque event/state codec consumed by storage adapters and owned by Host. */
 export interface RuntimeSnapshotCodec<Event = unknown, State = unknown> {
   encodeEvent(event: Event): string;
   /** Re-encode already-decoded history while preserving read-only compatibility during fork. */
   encodeHistoricalEvent?(event: Event): string;
   decodeEvent(json: string): Event;
+  /**
+   * Decode one explicitly supported historical event into the current
+   * in-memory event contract. Unknown formats return null and stay isolated
+   * to their source session.
+   */
+  decodeCompatibleEvent?(json: string, format: RuntimeCompatibleRecordFormat): Event | null;
   encodeState(state: State): string;
   decodeState<T = State>(json: string): T;
+  /** Read-side State migration. Current encodeState remains single-format. */
+  decodeCompatibleState?(json: string, format: RuntimeCompatibleRecordFormat): State | null;
   eventSummary?(event: Event): {
     readonly isSessionNameCandidate?: boolean;
     readonly searchText?: string;

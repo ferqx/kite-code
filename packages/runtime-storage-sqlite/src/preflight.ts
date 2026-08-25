@@ -330,7 +330,15 @@ export function assertCurrentSqliteRuntimeStoreConnection(
   return values;
 }
 
-function openPreflightView(dbPath: string): { database: Database; close: () => void } {
+/**
+ * Open a no-follow read snapshot without mutating the source Store. When a
+ * WAL exists, the database and sidecars are copied into an isolated directory
+ * so SQLite may rebuild an absent SHM index there.
+ */
+export function openSqliteReadonlySnapshotView(dbPath: string): {
+  database: Database;
+  close: () => void;
+} {
   const walPath = `${dbPath}-wal`;
   const shmPath = `${dbPath}-shm`;
   assertNoFollowDatabasePath(dbPath);
@@ -383,7 +391,7 @@ export function assertSqliteRuntimeStorageCanOpen<Event = unknown, State = unkno
   if (dbPath === ':memory:') return;
   assertNoFollowDatabasePath(dbPath);
   if (!existsSync(dbPath)) return;
-  const view = openPreflightView(dbPath);
+  const view = openSqliteReadonlySnapshotView(dbPath);
   try {
     const database = view.database;
     const hasMeta = tableExists(database, 'runtime_store_meta');

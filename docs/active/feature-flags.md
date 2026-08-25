@@ -10,9 +10,9 @@ Runtime 功能开关注册在 `apps/kite/src/config/features.ts`。配置从用�
 
 新增开关必须默认 `false` 并覆盖两个取值的测试。Kite Code 未发布；当 current 路径成为唯一生产语义后，必须删除旧分支与对应 flag，不保留回滚 alias。只有 ADR 已接受且 production TUI 路径具有端到端覆盖时，开关才可默认 `true`。
 
-Production Runtime format 不受 feature flag 控制。RA-06 已直接切换到 schema v26、SQLite Store 与
-`kite-runtime-modularization-v1-2026-08-19`；不存在 SQLite Store reader、旧 dispatch composition 或 runtime rollback flag。
-这项 format authority 不适用上面的普通功能 rollout 保留期。
+Production Runtime format 不受 feature flag 控制。当前 writer 直接使用 State 27/SAQ epoch；ADR-0138 的已知历史
+source reader/import 是无开关的 session data compatibility boundary，不恢复旧 dispatch composition 或 runtime rollback flag。
+未知 profile 静默忽略。这项 format authority 不适用上面的普通功能 rollout 保留期。
 
 例外是 ADR-0007 已明确替换旧 MCP adapter，ADR-0020 已完成稳定按需加载。因此 `capabilityCatalog`、`mcpRuntimeBinding` 和 `toolSearch` 默认 `true`；关闭其中任一个仍只是 fail-closed 诊断覆盖，绝不能重新启用旧 MCP 执行路径。
 
@@ -44,8 +44,8 @@ activation/workflow，并继续检查 dependency revision、route/platform 和�
 Compaction）全部 `under_development/off`。
 
 `resourceBudget` 单独打开不会让 production run 自动获得资格：它只允许新 run 建立 limited preset
-ledger。Runtime restore 只接受当前精确 format epoch，旧 snapshot 在进入 budget reducer 前即
-fail closed。关闭任一开关时，production profile 必须 fail closed；开发 profile 才可显式使用旧路径。用户、项目和 CLI 覆盖
+ledger。Runtime restore 只接受当前精确 format epoch；已知历史 snapshot 必须先经无 authority 的 session import，未知
+source 不进入 budget reducer。关闭任一开关时，production profile 必须 fail closed；开发 profile 才可显式使用旧路径。用户、项目和 CLI 覆盖
 不能放宽批准 policy/budget。`terminalOutcome=false` 只用于 rollout 回退，不允许 production
 客户端把 `unknown`、`blocked`、`budget_exhausted` 或 `resource_saturated` 显示成完成；
 CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除。启用 resource budget 但未

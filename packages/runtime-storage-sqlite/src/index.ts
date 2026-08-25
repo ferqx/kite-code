@@ -1,4 +1,23 @@
 export {
+  createSqliteRuntimeCompatibilityWriter,
+  discoverSqliteRuntimeCompatibilitySource,
+  SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES,
+  type SqliteRuntimeCompatibilityEvent,
+  type SqliteRuntimeCompatibilityFilePreimage,
+  type SqliteRuntimeCompatibilityImportResult,
+  type SqliteRuntimeCompatibilityMigrator,
+  type SqliteRuntimeCompatibilityNamedSnapshot,
+  type SqliteRuntimeCompatibilitySession,
+  type SqliteRuntimeCompatibilitySessionSummary,
+  type SqliteRuntimeCompatibilitySnapshot,
+  type SqliteRuntimeCompatibilitySource,
+  type SqliteRuntimeCompatibilitySourceProfile,
+  type SqliteRuntimeCompatibilitySourceReference,
+  type SqliteRuntimeCompatibilityTargetEvent,
+  type SqliteRuntimeCompatibilityTargetSession,
+  type SqliteRuntimeCompatibilityWriter,
+} from './compatibility';
+export {
   createSqliteRuntimeLogQueryPort,
   SqliteRuntimeLogQueryError,
   type SqliteRuntimeLogQueryInput,
@@ -28,5 +47,7 @@ export {
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
   SQLITE_RUNTIME_DDL,
+  sqliteCurrentRuntimeStorePath,
   sqliteRuntimeStorePath,
+  sqliteRuntimeStorePathForEpoch,
 } from './store';

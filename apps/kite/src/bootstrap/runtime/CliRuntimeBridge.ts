@@ -139,6 +139,13 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     if ('sessionId' in command && command.sessionId !== this.#input.sessionId) {
       return { receipt: this.#notFound(command) };
     }
+    if (command.type === 'resume_session') {
+      // Host recovery has already run before prepare. Ensuring the coordinator
+      // here binds the exact imported/current State before a successor turn;
+      // no compatibility marker is projected to the CLI.
+      this.#ensureCoordinator();
+      return { receipt: this.#applied(command) };
+    }
     if (command.type === 'start_turn') {
       if (this.#running) return { receipt: this.#rejected(command, 'runtime_busy') };
       this.#running = true;

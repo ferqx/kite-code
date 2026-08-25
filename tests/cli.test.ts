@@ -38,6 +38,13 @@ describe('cli argument parsing', () => {
     expect(args.threadId).toBe('default-thread');
   });
 
+  test('resume accepts a successor task without exposing compatibility flags', () => {
+    const args = parseArgs(['resume', '--thread', 'conversation-a', 'continue safely']);
+
+    expect(args.threadId).toBe('conversation-a');
+    expect(args.task).toBe('continue safely');
+  });
+
   // 验证 resume 支持用户输入回答，用于恢复 ask_user 中断 / Verify resume accepts user answers for ask_user interrupts
   test('resume accepts a user answer for clarification interrupts', () => {
     const args = parseArgs(['resume', '--thread', 'conversation-a', '--answer', '使用最小实现']);

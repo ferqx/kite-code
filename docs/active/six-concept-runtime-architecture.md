@@ -6,7 +6,7 @@
 
 验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`。
 
-相关：[`layer-boundary-enforcement.md`](layer-boundary-enforcement.md)、[`pre-release-architecture.md`](pre-release-architecture.md)、ADR-0128、ADR-0137。
+相关：[`layer-boundary-enforcement.md`](layer-boundary-enforcement.md)、[`pre-release-architecture.md`](pre-release-architecture.md)、ADR-0128、ADR-0137、ADR-0138。
 
 ## 总览
 
@@ -43,7 +43,7 @@ Kernel 是唯一 state/event/reducer/scheduler authority：
 - Kernel 不读 clock、random、filesystem、network 或 Provider；Host 必须把 identity、time 与 observed facts 显式投影为 input；
 - schema/protocol/format 数字只作为 metadata 值，不作为类型或文件身份。
 
-State 只有一个当前写入 shape。当前 codec 继续读取同一 schema/epoch 内有明确白名单和测试的退休事件字段，以保证旧会话可打开；读取后只保留安全的无副作用或 `inconclusive` 语义，不重新写回旧字段。其他格式不匹配、checksum/revision/project/workspace identity 漂移、event tail 非法或 recovery evidence 不完整均 fail closed；不猜测、不迁移未知格式。
+State 只有一个当前写入 shape。当前 codec 继续读取同一 schema/epoch 内有明确白名单和测试的退休事件字段；ADR-0138 另外允许 exact 已知历史 profile 在选中单个会话后投影为当前 State。迁移只保留安全历史，清空 approval/grant/effect authority；未知格式在发现阶段静默忽略，不猜测、不改写。checksum/revision/project/workspace identity 漂移、event tail 非法或 recovery evidence 不完整仍只让所属会话 fail closed。
 
 ## Capability、Policy 与 Tool Pipeline
 
@@ -119,14 +119,14 @@ turn identity，否则同一 Task 的旧 rejection 会错误终止 successor tur
 
 `@kite/runtime-storage-sqlite` 是 Host storage port 的唯一 concrete adapter：
 
-- `adapter.ts` 单独拥有可写数据库创建、连接与关闭；独立 `RuntimeLogQueryPort` reader 只做 current-format、no-follow、query-only durable-log 读取，不能取得写 Store capability；
+- `adapter.ts` 单独拥有当前数据库创建、连接与关闭；独立 `RuntimeLogQueryPort` reader 只做 current-format、no-follow、query-only durable-log 读取，不能取得写 Store capability；`compatibility.ts` 只拥有历史 source 的 readonly discovery、atomic target import ledger 与 tombstone；
 - SessionStore 的会话列表投影通过 `event-store.ts` 有界分批解码，找到第一条 session-name candidate 即停止；它不代替打开具体会话时的 strict Event/Snapshot 恢复校验；
 - 命名恢复点按 durable `event_position` 降序投影；秒级 `created_at` 与 snapshot 名称都不承担同秒内的恢复时序；
 - `preflight.ts` 在写连接前验证 current metadata；
 - event/session/snapshot/artifact/authority/effect 子模块共享同一 database context；
 - `transaction.ts` 是 Runtime event+snapshot 原子提交唯一 owner；
 - App 只取得 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` ports；
-- 不存在平面 bridge、alternate constructor、format selector、dual write、migration 或 alternate-driver retry。
+- 不存在平面 bridge、alternate current-writer constructor、format selector、dual write 或 alternate-driver retry；历史 import 不是 execution fallback。
 
 Ack、Receipt、terminal、recovery、sandbox cleanup、MCP/Subagent lifecycle 与 effect lease 仍保持原有事务顺序。拆分不允许复制 transaction、Store、reducer 或 recovery identity owner。
 
@@ -142,7 +142,7 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 
 生产命名使用领域职责；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。当前架构由以下 Gate 共同验证：
 
-- `check:pre-release-architecture`：命名、目录、旧 compatibility symbol、唯一 composition root、Runtime→TUI、SQLite 格式选择与 required domain files；
+- `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；
 - `check:runtime-packages`：七 workspace、依赖图、exports、deep import、cycle 与 composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。

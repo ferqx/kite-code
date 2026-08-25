@@ -65,7 +65,6 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const HISTORICAL_SESSION_LIST_FAILURE_TEXT = '  ⎿  历史会话服务不可用，请输入 /resume 重试。';
 const HISTORICAL_SESSION_LOAD_FAILURE_TEXT =
   '  ⎿  历史会话打开失败，当前会话未受影响；请稍后通过 /resume 重试。';
 
@@ -617,54 +616,20 @@ function TuiApp({
     void _requestTuiExit?.();
   }, [dispatch]);
 
-  // Load historical sessions from DB on startup, but always start fresh.
+  // Start with one fresh in-memory session. Historical entries are discovered
+  // by the selector and are deliberately not registered here: registration
+  // opens/reconciles a Runtime and must happen only after a selected session
+  // has passed its implicit compatibility load.
   React.useEffect(() => {
-    sessionManager
-      .listPersistedSessions()
-      .then((dbSessions: Array<{ threadId: string; name: string }>) => {
-        for (const s of dbSessions) {
-          if (!sessionManager.hasRuntime(s.threadId)) {
-            const rt = sessionManager.registerSession(s.threadId, workspace);
-            rt.dormant = true;
-            sessionManager.setName(s.threadId, s.name);
-          }
-        }
-
-        // Always start a new session — user switches to historical ones via /resume
-        const newId = sessionManager.createSession(workspace);
-        threadIdRef.current = newId;
-
-        dispatch({
-          type: 'SET_SESSIONS',
-          sessions: sessionManager.getSnapshot(),
-        });
-      })
-      .catch(() => {
-        // Historical session failures stay inside the TUI render contract. Do not
-        // create a replacement session or write raw diagnostics to stderr.
-        dispatch({
-          type: 'SET_SESSIONS',
-          sessions: sessionManager.getSnapshot(),
-        });
-        dispatch({
-          type: 'SET_SESSION_SERVICE_UNAVAILABLE',
-          unavailable: true,
-        });
-        dispatch({
-          type: 'LOCAL_TEXT',
-          text: HISTORICAL_SESSION_LIST_FAILURE_TEXT,
-        });
-      });
-  }, [
-    sessionManager.registerSession,
-    sessionManager.setName,
-    sessionManager.hasRuntime,
-    sessionManager.createSession,
-    workspace,
-    sessionManager.getSnapshot,
-    sessionManager.listPersistedSessions,
-    dispatch,
-  ]);
+    // Always start a new session — user switches to historical ones via
+    // /resume. A discovery failure is therefore unable to block new input.
+    const newId = sessionManager.createSession(workspace);
+    threadIdRef.current = newId;
+    dispatch({
+      type: 'SET_SESSIONS',
+      sessions: sessionManager.getSnapshot(),
+    });
+  }, [sessionManager.createSession, workspace, sessionManager.getSnapshot, dispatch]);
 
   /** 从 DB 加载指定会话的完整状态（LOAD_SESSION_PENDING 的实际逻辑） */
   const loadSessionById = React.useCallback(
@@ -672,21 +637,10 @@ function TuiApp({
       // Increment generation: supersedes any in-flight loads
       const gen = ++loadGenerationRef.current;
 
-      // Ensure SessionManager switches to this session (handles dormant & SessionSelector loads)
+      // Keep the currently active Runtime/projection intact until the target
+      // has loaded. Historical sessions are registered only after this load;
+      // this is the implicit compatibility boundary for known old formats.
       const oldId = sessionManager.getActiveId();
-      if (oldId !== threadId) {
-        if (!sessionManager.hasRuntime(threadId)) {
-          sessionManager.registerSession(threadId, workspace);
-        }
-        sessionManager.switchSession(oldId, threadId);
-        const rt = sessionManager.getRuntime(threadId);
-        if (rt) {
-          rt.setForeground(true);
-          rt.dormant = false;
-        }
-      }
-      threadIdRef.current = threadId;
-      conversationHistoryRef.current = [];
 
       dispatch({ type: 'LOAD_SESSION_PENDING', threadId });
 
@@ -694,24 +648,30 @@ function TuiApp({
         const result = await sessionManager.loadPersistedSession(threadId);
         // If a newer load was issued while this was loading, discard
         if (loadGenerationRef.current !== gen) return;
-        if (!result) {
-          dispatch({
-            type: 'LOAD_SESSION',
-            threadId,
-            blocks: [
-              {
-                id: 1,
-                kind: 'text',
-                content: `Session ${threadId} has no saved checkpoints.`,
-              },
-            ],
-            interrupt: null,
-            modelProvider: '',
-            modelName: '',
-            thinkingLevel: null,
-          });
-          return;
+        if (!result) throw new Error(`Session ${threadId} has no saved checkpoints.`);
+
+        // Do not create a live Runtime for a session that failed its load or
+        // compatibility conversion. The previous active session remains the
+        // only foreground Runtime until all target data is ready.
+        if (!sessionManager.hasRuntime(threadId))
+          sessionManager.registerSession(threadId, workspace);
+        if (oldId !== threadId) {
+          sessionManager.switchSession(oldId, threadId);
+          const rt = sessionManager.getRuntime(threadId);
+          if (rt) {
+            rt.setForeground(true);
+            rt.dormant = false;
+          }
         }
+        threadIdRef.current = threadId;
+        conversationHistoryRef.current = [];
+        // The target was intentionally absent from the startup projection;
+        // publish it only after the compatibility load and Runtime registration
+        // have succeeded.
+        dispatch({
+          type: 'SET_SESSIONS',
+          sessions: sessionManager.getSnapshot(),
+        });
 
         const resumedConfig = resolveConfigForResume(
           sessionManager.getDefaultConfig(),
@@ -806,9 +766,7 @@ function TuiApp({
     async (action: Action) => {
       // Intercept NEW_SESSION to create runtime via SessionManager
       if (action.type === 'NEW_SESSION') {
-        // Ignore /new for an already-active empty session. User input is
-        // separately blocked while historical storage is unavailable because
-        // an in-memory session could not make its first durable Kernel write.
+        // Ignore /new for an already-active empty session.
         if (stateRef.current.turns.length === 0 && sessionManager.getActiveId()) return;
         // Prevent concurrent NEW_SESSION from creating ghost sessions
         if (creatingSessionRef.current) return;
@@ -822,10 +780,6 @@ function TuiApp({
         threadIdRef.current = newId;
         // The reducer will use this threadId to create the snapshot
         dispatch({ type: 'NEW_SESSION', threadId: newId });
-        dispatch({
-          type: 'SET_SESSION_SERVICE_UNAVAILABLE',
-          unavailable: false,
-        });
         dispatch({
           type: 'SET_SESSIONS',
           sessions: sessionManager.getSnapshot(),
@@ -904,8 +858,10 @@ function TuiApp({
 
         const incomingRt = sessionManager.getRuntime(newId);
 
-        // Dormant session (loaded from DB, state not yet hydrated): load full state
-        if (incomingRt?.dormant) {
+        // Historical sessions are intentionally not registered at startup.
+        // A missing Runtime therefore follows the same implicit load path as
+        // a dormant one; only an already hydrated Runtime can switch directly.
+        if (!incomingRt || incomingRt.dormant) {
           await loadSessionById(newId);
           return;
         }
@@ -1409,12 +1365,6 @@ function TuiApp({
         return;
       }
 
-      // Historical storage failure blocks new work until the backing Runtime
-      // Store can be reopened. A new in-memory TUI session would still fail on
-      // its first durable Kernel write, so only /resume retry is available.
-      if (stateRef.current.sessionServiceUnavailable && !/^\/resume(?:\s|$)/i.test(value.trim())) {
-        return;
-      }
       // Plan mode is a sticky TUI input policy across completed conversations.
       // Pass it explicitly for every plain prompt so the new Core Task cannot
       // silently fall back to building while the Footer still says plan.

@@ -4,7 +4,7 @@
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
 验证：`bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/policies`
 
-相关：ADR-0118、ADR-0119、ADR-0131、ADR-0132、ADR-0133、ADR-0137、
+相关：ADR-0118、ADR-0119、ADR-0131、ADR-0132、ADR-0133、ADR-0137、ADR-0138、
 `tool-gated-autonomy.md`、`cancel-resume-cleanup.md`、`plan-mode-implementation.md`。
 
 ## 概述
@@ -58,7 +58,8 @@ interface SessionApprovalState {
 ```
 
 `PendingApproval` 保存 parent/child/runtime identity、原始 route、binding digest、scope/effects、sequence、generation、createdAt
-和状态。历史旧 grant/event 只可被 strict codec 识别为 inert history；未知字段、旧 epoch、缺 identity 或 Full grant 都 fail closed。
+和状态。ADR-0138 的已知历史 profile 会把旧 grant/review/event 只读投影为 inert history；未知 profile 静默忽略。
+当前格式中的未知字段、缺 identity 或 Full grant 仍使该单个会话 fail closed，不能影响其他会话或恢复 live authority。
 
 ## 硬规则（Agent Kernel authorization domain）
 
@@ -213,7 +214,7 @@ App 不创建第二 reviewer model，也不存在 direct helper、第二 Gateway
 identity；Shell 的完整命令只保存在载荷的 `command` 字段。命令长度和展示文案变化不得改变 Kernel
 授权结论，也不得使 otherwise valid 的治理事实失效。
 
-Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling；遇到非 Shell 调用、不同模型消息、不同任务、`ask_user` 或方案审核时，Runner 必须等待已启动 Shell 收敛，不能跨过交互和副作用边界。`approval.rejected` 必须携带对应 `toolCallId`。Approval overlay 的用户 Esc 只将 focused target 记为 rejected 并推进焦点；不相关 sibling 保持排队。Ctrl+C 才将当前 turn 的 queued/awaiting/authorized/running sibling 记为 cancelled，写入 `turn.aborted(cause=user)` 并停止已启动执行。策略拒绝、sandbox 缺失和系统审查失败不是用户取消，但审批目标仍保留对应终态记录。`approve_once` 与 `same_command` 的授权范围和溯源规则保持不变，一个调用的单次授权不会扩散给其他命令。当前事件集合不包含 `tool.execution_ready`；未知或退役的持久事件在 reducer 前作为 corruption 拒绝。
+Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling；遇到非 Shell 调用、不同模型消息、不同任务、`ask_user` 或方案审核时，Runner 必须等待已启动 Shell 收敛，不能跨过交互和副作用边界。`approval.rejected` 必须携带对应 `toolCallId`。Approval overlay 的用户 Esc 只将 focused target 记为 rejected 并推进焦点；不相关 sibling 保持排队。Ctrl+C 才将当前 turn 的 queued/awaiting/authorized/running sibling 记为 cancelled，写入 `turn.aborted(cause=user)` 并停止已启动执行。策略拒绝、sandbox 缺失和系统审查失败不是用户取消，但审批目标仍保留对应终态记录。`approve_once` 与 `same_command` 的授权范围和溯源规则保持不变，一个调用的单次授权不会扩散给其他命令。当前事件集合不包含 `tool.execution_ready`；State 26 已知历史 journal 中的未知或旧授权 event 只转为无副作用 `runtime.action_ignored`，current journal 的未知 event 仍只使所属会话恢复失败。
 
 ## 入口覆盖
 
@@ -225,8 +226,9 @@ Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling
 | System (禁止签发 grant)  | `'system'` | Auto reviewer / Kernel validation              |
 
 TUI 入口通过 `buildRunAgentParams` → `RuntimeSessionCoordinator` 传递 live `interactionMode`；Full 不再映射为第二个
-authorization mode。Kernel 初始化/restore 只接受 State 27/SAQ epoch 的 mode、queue、grants 与 revision；历史旧 Full/grant
-字段保持 inert，production transition decision 由 `@kite/agent-kernel` 拥有，App coordinator 不复制该 decision。
+authorization mode。Kernel 在线初始化/restore 只接受 State 27/SAQ epoch 的 mode、queue、grants 与 revision；已知历史会话
+必须先经纯迁移清空 queue/grant/receipt/effect 并把旧 Full 降级，未知 source 不进入 Kernel。production transition decision
+由 `@kite/agent-kernel` 拥有，App coordinator 不复制该 decision。
 
 当 Runtime 正在回复时，`/permissions` 的选择同样必须立即生效：`SessionRuntime` 通过 live
 Kernel control 持久化 `interaction_mode.changed`。事件只能来自显式用户选择，并带 `source: user` 与

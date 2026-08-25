@@ -48,8 +48,8 @@ coordinator、direct model caller 与 fallback 均不存在。RM-16 最终 manif
 
 已删除的模型 Provider admission 不再有生产者或调用链，但旧会话仍可读。兼容范围只有两个已知旧事实：
 `provider.admission_status` 作为 reducer 无副作用的诊断事件回放，旧 `model.invocation_prepared.admission` 作为
-可选历史证据保留；当前生产者永远不再写二者。schema v26 与同一 epoch 不接受其他未知形状，也没有
-try-new-catch-old、双写或重新启用 admission 的分支。Kernel/Host 的 current-write admission 会拒绝退休事件、退休字段、旧 Subagent `task` 标题与 `verification_review` purpose；历史 fork 使用单独的 compatibility encoder 保留原事件。这是“旧数据只读、当前数据只写新形状”的单向兼容。
+可选历史证据保留；当前生产者永远不再写二者。当前 schema/epoch 不接受其他未知形状，也没有
+try-new-catch-old、双写或重新启用 admission 的分支。Kernel/Host 的 current-write admission 会拒绝退休事件、退休字段、旧 Subagent `task` 标题与 `verification_review` purpose；ADR-0138 的 State 26 source import 将旧授权/未知 event 降为 inert history，并清空 model invocation execution authority。这是“旧数据只读、当前数据只写新形状”的单向兼容。
 
 MS-03/MS-04 已作为同一个模型迁移 series 接线。`buildContextProjection()` 仍是 primary 最终消息事实源；
 每类调用都先由 `compileModelSurface()` 生成并冻结唯一 Surface，再交给
@@ -116,10 +116,11 @@ live Source。
 
 production composition 使用 owner-only `~/.kite-code/model-artifacts/`，不创建或加载 Artifact
 installation key。既有 Artifact 缺失、损坏或路径/权限 identity 不安全时不得覆盖或回退无 evidence dispatch。
-Runtime schema 保持 v26、format epoch `kite-runtime-modularization-v1-2026-08-19`；
+Runtime 使用 State 27/SAQ epoch；
 `modelInvocations` 是当前格式的必需 evidence 投影，字段缺失属于 corruption，不从旧 transcript/config
-反推历史 Surface。同一 schema/epoch 内已列明的旧 Provider admission 事件形状仍可回放；其他未知格式数据在
-Gateway 或 Provider dispatch 前进入 `incompatible_runtime_format`。
+反推历史 Surface。同一 schema/epoch 内已列明的旧 Provider admission 事件形状仍可回放；未知 source 不进入
+Gateway，已知历史会话导入也会清空旧 model invocation authority。任何 current session 的格式或 evidence 损坏都在
+Gateway/Provider dispatch 前使该会话 fail closed。
 
 restore/fork 对 completed invocation 严格读取并交叉校验 Surface/Response ref、route 与 invocation identity；
 Artifact 缺失或损坏时保留已经 ack 的 transcript，但记录

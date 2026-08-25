@@ -6,11 +6,15 @@
 
 方案：[`2026-08-25-shell-sandbox-approval-queue-optimization.md`](../../plans/2026-08-25-shell-sandbox-approval-queue-optimization.md)
 
-ADR：[`ADR-0137`](../../../adr/0137-shell-sandbox-durable-approval-queue.md)
+ADR：[`ADR-0137`](../../../adr/0137-shell-sandbox-durable-approval-queue.md)、
+[`ADR-0138`](../../../adr/0138-silent-session-format-compatibility.md)
 
 Pull Request：[#63](https://github.com/ferqx/kite-code/pull/63)
 
 ## 1. 决策与 clean cutover
+
+后续持久格式兼容决策见 ADR-0138：本记录中的 clean cutover 仍约束当前 writer、queue/grant 和执行权威，但不再表示
+已知历史会话必须不可达。State 26/Store 5 会话可在选中后静默导入安全历史投影；未知格式静默忽略，旧授权不复活。
 
 方案一已完成 State 27/SAQ epoch 的 clean cutover：
 
@@ -96,5 +100,28 @@ legacy shape、stale generation、跨 turn、late result、rollback、restart、
 | `bun run check:docs` | passed | 文档结构与计划治理通过：83 completed、25 superseded、0 optional |
 | `git diff --check` / `bun run format:check` | passed | 无 whitespace error；Biome 0 error（23 warnings / 6 infos 为既有非阻断诊断） |
 | GitHub Actions required checks | passed | [PR #63](https://github.com/ferqx/kite-code/pull/63) implementation HEAD `7200f2da`： [Required 32794845123](https://github.com/ferqx/kite-code/actions/runs/32794845123) 的 unit、quality、runtime-e2e、compaction、fault-soak、TUI shard 0/1/2/3 与 aggregate 全绿；[Platform 32794845103](https://github.com/ferqx/kite-code/actions/runs/32794845103) 的 Ubuntu 24.04、macOS 15 ARM64、Windows 2025 x64 全绿；[OSS RC](https://github.com/ferqx/kite-code/actions/runs/32794845109)、[Execution Boundary](https://github.com/ferqx/kite-code/actions/runs/32794845100)、[Session ACL](https://github.com/ferqx/kite-code/actions/runs/32794845169)、[MCP keyring](https://github.com/ferqx/kite-code/actions/runs/32794845198) 全绿 |
+
+## 5. ADR-0138 历史会话兼容后续
+
+State 27/SAQ clean cutover 后续按用户升级兼容要求新增 ADR-0138。current writer 与执行权威仍只接受 State 27；Store 发现
+静默忽略未知 schema/epoch，明确的 State 26/Store 5 profile 只在用户选中 exact session 后原子导入。迁移终止旧 active
+turn/task，清空旧 Full、approval/grant/receipt、invocation、effect lease、Subagent continuation 与 recovery authority；
+State 26 file preimage 也作为旧 effect authority 清空。未知旧 event 只保留为 inert journal fact。单个
+snapshot/event/named recovery point 损坏只使该会话打开失败，健康历史和
+新会话继续可用，TUI 不再进入全局历史服务不可用状态。
+
+具名验证入口为 `packages/agent-kernel/test/state-migration.test.ts`、
+`packages/runtime-host/test/state-compatibility.test.ts`、
+`packages/runtime-storage-sqlite/test/compatibility-store.test.ts`、
+`apps/kite/test/state-store-compatibility.test.ts`、`apps/kite/test/session-compatibility.test.ts` 与
+`tests/tui-system/scenarios/session-legacy-compatibility.test.ts`。真实用户 Store 的只读备份审计覆盖 35 个 State 26 会话：
+35/35 完成 lazy import 与 current Host restore；诊断副本随后删除，source Store 未作为 writer 打开。
+
+该审计同时复现了合法的 `WAL present / SHM absent` current target 形态：旧分类器会把它误判为未知 target，导致会话选择后
+没有执行导入。当前实现改为复用隔离的 current Store preflight 重建临时 WAL 索引，并增加精确回归；named recovery point
+不再被静默丢弃，任一语义/identity 失败都只隔离所选会话。
+历史 source 的 WAL/无 SHM 形态同样在 no-follow 临时副本中恢复，且源 sidecar 不变；CLI 在创建 Runtime session 前先完成
+exact resume preparation，损坏历史不会被同 ID 空会话遮蔽。current-format named snapshot/preimage 还验证 head 上界、
+Workspace containment、traversal 与 NUL。
 
 若任一门禁失败，按源码/测试事实修复后重新运行；不得用 `--no-verify`、删除测试、放宽断言或恢复旧授权兼容路径绕过。

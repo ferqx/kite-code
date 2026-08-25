@@ -289,7 +289,14 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         return sessionMetadata
           .list(needle ? Math.max(limit, 200) : limit)
           .map((row) => {
-            const firstText = findFirstSessionSummary(row.thread_id)?.searchText ?? '';
+            let firstText = '';
+            try {
+              firstText = findFirstSessionSummary(row.thread_id)?.searchText ?? '';
+            } catch {
+              // Session summaries are advisory. One malformed/unknown event
+              // may make that session unopenable, but it must not remove every
+              // healthy session from discovery.
+            }
             return { row, firstText };
           })
           .filter(

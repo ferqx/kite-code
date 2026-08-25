@@ -428,6 +428,8 @@ export {
 } from './state';
 export {
   canForkAgentState,
+  decodeAgentStateWithCompatibility,
+  decodeCompatibleAgentStateJson,
   decodeCurrentAgentStateJson,
   encodeCurrentAgentStateJson,
   hasPendingSandboxCleanupAuthority,
@@ -436,6 +438,26 @@ export {
   isCurrentPendingInteractionRequest,
   rebindForkAgentState,
 } from './state-codec';
+export type {
+  LegacyRuntimeEventConversionResult,
+  StateFormatClassification,
+  StateMigrationFailure,
+  StateMigrationResult,
+} from './state-migration';
+export {
+  classifyAgentStateFormat,
+  classifyStateFormat,
+  convertLegacyRuntimeEvent,
+  convertLegacyRuntimeEventJson,
+  convertState26RuntimeEvent,
+  isLegacyState26Snapshot,
+  LEGACY_STATE26_FORMAT_EPOCH,
+  LEGACY_STATE26_SCHEMA_VERSION,
+  migrateCompatibleAgentState,
+  migrateLegacyAgentState,
+  migrateState26Event,
+  migrateState26To27,
+} from './state-migration';
 export type { RunTerminalOutcome, RuntimeTerminalStatus } from './terminal-outcome';
 export {
   completedTerminalOutcome,

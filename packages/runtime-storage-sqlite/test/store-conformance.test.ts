@@ -209,6 +209,49 @@ describe('State/Store production format', () => {
     storage.close();
   });
 
+  test('keeps healthy sessions discoverable when one session summary event is malformed', () => {
+    const fixture = temporaryDatabase();
+    try {
+      const summaryCodec = {
+        ...codec,
+        eventSummary: (event: Event) =>
+          event.type === 'user.message_appended' && event.content
+            ? { isSessionNameCandidate: true, searchText: event.content }
+            : null,
+      };
+      const storage = createSqliteRuntimeStorage<Event, State>({
+        databasePath: fixture.path,
+        codec: summaryCodec,
+        options: { journalMode: 'delete' },
+      });
+      for (const sessionId of ['healthy', 'broken']) {
+        storage.transactions.commitDecision({
+          sessionId,
+          events: [{ type: 'user.message_appended', content: sessionId }],
+          snapshot: state(sessionId),
+          metadata: [{ eventId: `${sessionId}-event`, revision: 1 }],
+        });
+      }
+      storage.close();
+      const database = new Database(fixture.path);
+      database.run("UPDATE runtime_events SET event_json = '{broken' WHERE session_id = 'broken'");
+      database.close();
+
+      const reopened = createSqliteRuntimeStorage<Event, State>({
+        databasePath: fixture.path,
+        codec: summaryCodec,
+        options: { journalMode: 'delete' },
+      });
+      expect(reopened.sessions.listSessions()).toEqual(
+        expect.arrayContaining([expect.objectContaining({ threadId: 'healthy', name: 'healthy' })]),
+      );
+      expect(() => reopened.sessions.loadEventsStrict('broken')).toThrow();
+      reopened.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('rejects legacy metadata before a transaction creates current rows', () => {
     const storage = createSqliteRuntimeStorage<Event, State>({ databasePath: ':memory:', codec });
     expect(() =>
