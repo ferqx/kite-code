@@ -699,6 +699,7 @@ export async function waitForTuiReady(
         return (
           input?.kind === 'main' &&
           input.value === '' &&
+          screenContains(viewport, '❯') &&
           screenContains(viewport, 'Kite Code') &&
           screenContains(viewport, 'mock-model') &&
           !screenContains(viewport, 'Loading...') &&

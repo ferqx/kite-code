@@ -221,7 +221,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
 10. `tool_search` 在对话区按用户可理解的发现过程渲染：运行中显示 `Searching for tools…`，成功后显示 `Searched for tools`，并以 `Provider · Tool` 树列出 names-only 命中项；catalog revision 切换期间返回的 last-known names 使用同一树结构，但不得暗示已签发 Binding。只有当前结果和 last-known names 都为空时才显示 `No matching tools found`，失败使用独立状态文案。真实 MCP 调用仍是独立工具块，名称从协议形式 `mcp__provider__tool` 映射为 `provider · tool`。展示层不得从模型回答或任意参数猜测自然语言动作。
 11. 所有 scenario 必须通过 `spawnReadyTui()` 启动；普通场景使用默认 `main` readiness，
     first-run 与 workspace trust 场景分别显式选择 `first-run-provider`、`workspace-trust`。
-    仅出现标题或 prompt 不构成可交互就绪。普通场景由 harness
+    默认 `main` readiness 必须在同一稳定 frame 中同时证明品牌/model/workspace chrome、空的活动主
+    输入投影和用户实际可见的 `❯` prompt；仅出现标题、隐藏的 input listener marker 或尚未完成的
+    分帧 prompt 都不构成可交互就绪。普通场景由 harness
     预写 `source: 'test'` 信任记录，验证门禁本身时使用
     `createTestWorkspace({ enforceWorkspaceTrust: true })`。子进程环境采用 allowlist，只继承平台启动、
     临时目录、locale、时区和 CI 所需变量，再叠加 fixture 显式环境；不得继承开发机密钥、代理、
