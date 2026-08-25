@@ -7,7 +7,7 @@ import type { RuntimeEvent } from '@kite/agent-kernel';
 import { createToolRecoveryJournal } from '@kite/agent-kernel';
 import { createCapabilityBinding } from '@kite/builtin-runtime';
 import { McpConnectionManager, McpProviderError } from '@kite/builtin-runtime/mcp';
-import { buildContextProjection } from '@kite/builtin-runtime/model';
+import { aiMessage, buildContextProjection } from '@kite/builtin-runtime/model';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type {
   BuiltinPreparedShellExecutionInput,
@@ -45,6 +45,7 @@ import {
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
 import { createTestRuntimeEffectExecutor, testBuiltinToolCatalog } from '../helpers/runtime-model';
+import { createMockModel } from '../mock-model';
 
 function createRuntimeHostStateInitialState(
   input: Parameters<typeof createRuntimeHostStateInitialStateRaw>[0],
@@ -2337,6 +2338,85 @@ test('production executor all-settled waits for a full-authorized sibling when a
   expect(runtimeState.tools.calls.slow?.status).toBe('succeeded');
   expect(JSON.stringify(persistedEvents)).not.toContain('private adapter failure');
   expect(terminal).toHaveLength(0);
+});
+
+test('production executor keeps capability and Tool terminals atomic when four Subagents fail together', async () => {
+  let state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'parallel-subagent-terminal-barrier',
+    userId: 'u',
+    workspace: process.cwd(),
+  });
+  const toolCallIds = ['review-a', 'review-b', 'review-c', 'review-d'];
+  for (const [ordinal, toolCallId] of toolCallIds.entries()) {
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId,
+      modelInvocationId: 'parallel-subagent-parent-model',
+      modelMessageId: 'parallel-subagent-parent-message',
+      ordinal,
+      name: 'task',
+      args: {
+        name: `Review ${ordinal + 1}`,
+        subagent_type: 'review',
+        task: `Review independent Runtime concern ${ordinal + 1}.`,
+      },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+  }
+  const model = createMockModel([
+    {
+      message: aiMessage({ content: 'This response is rejected by the fixture.' }),
+      error: 'parallel Subagent Provider failure',
+    },
+  ]);
+  const executor = createTestRuntimeEffectExecutor({
+    config: {
+      providerName: 'test',
+      providerType: 'openai-compatible',
+      apiKey: 'test',
+      baseURL: 'http://localhost:1',
+      modelName: 'test',
+      sandbox: { enabled: false },
+    },
+    model,
+  });
+  const persistedEvents: RuntimeEvent[] = [];
+  let runtimeState = state;
+  const persist = async (events: RuntimeEvent[]): Promise<boolean> => {
+    persistedEvents.push(...events);
+    runtimeState = reduceKernelTestEvents(runtimeState, events);
+    return true;
+  };
+
+  const terminal = await executor({ type: 'run_tools', toolCallIds }, state, undefined, {
+    reservationIds: [],
+    getState: () => runtimeState,
+    persistEvent: async (event) => persist([event]),
+    persistEvents: persist,
+    persistAttemptStartEvents: persist,
+    persistTerminalRecoveryEvents: persist,
+  });
+  if (terminal.length > 0) runtimeState = reduceKernelTestEvents(runtimeState, terminal);
+
+  expect(
+    Object.values(runtimeState.capabilities.invocations).filter((invocation) => {
+      const call = runtimeState.tools.calls[invocation.toolCallId];
+      return (
+        (invocation.status === 'recorded' || invocation.status === 'running') &&
+        call != null &&
+        ['succeeded', 'failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status)
+      );
+    }),
+  ).toEqual([]);
+  expect(toolCallIds.map((toolCallId) => runtimeState.tools.calls[toolCallId]?.status)).toEqual([
+    'failed',
+    'failed',
+    'failed',
+    'failed',
+  ]);
+  expect(JSON.stringify(persistedEvents)).not.toContain('parallel Subagent Provider failure');
 });
 
 test('production executor commits provider recovery after the originating tool failure', async () => {

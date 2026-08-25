@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type AgentState,
+  assertAgentStateInvariants,
   assertCapabilityToolTerminalBatch,
   attachSuspendedCapabilityTerminals,
   createInitialAgentState,
@@ -8,6 +9,8 @@ import {
   isConcurrentShellEffectBatchCurrent,
   isConcurrentShellEffectEventCurrent,
   type KernelEvent,
+  normalizeAgentEvent,
+  reduce,
   suspendedCapabilityTerminalRequirements,
 } from '../src';
 
@@ -101,6 +104,64 @@ describe('State effect admission policy', () => {
     expect(() => assertCapabilityToolTerminalBatch(state, lease, [batch[0]!])).toThrow(
       /atomic batch/u,
     );
+  });
+
+  test('closes every live capability before a Tool terminal, including recorded invocations', () => {
+    const state = runningShellState();
+    const invocation = state.capabilities.invocations.invocation;
+    if (!invocation) throw new Error('capability fixture is missing');
+    const {
+      receiptRequirement: _receiptRequirement,
+      startedAt: _startedAt,
+      ...recordedInvocation
+    } = invocation;
+    const liveState: AgentState = {
+      ...state,
+      capabilities: {
+        ...state.capabilities,
+        invocations: {
+          invocation: {
+            ...recordedInvocation,
+            status: 'running',
+            startedAt: invocation.startedAt,
+          },
+          recorded: {
+            ...recordedInvocation,
+            invocationId: 'recorded',
+            status: 'recorded',
+          },
+        },
+      },
+    };
+    const reconciled: KernelEvent = {
+      type: 'capability.reconciliation_resolved',
+      invocationId: 'invocation',
+      decision: 'confirmed_failure',
+      reconciledAt: '2026-08-20T00:00:02.000Z',
+      reason: 'The owning Tool was cancelled.',
+    };
+    const cancelled: KernelEvent = {
+      type: 'tool.cancelled',
+      toolCallId: 'shell',
+      reason: 'user cancellation',
+    };
+
+    expect(suspendedCapabilityTerminalRequirements(liveState, [cancelled, reconciled])).toEqual([
+      { invocationId: 'recorded', toolCallId: 'shell' },
+    ]);
+    const batch = attachSuspendedCapabilityTerminals(liveState, [cancelled, reconciled], {
+      recorded: '2026-08-20T00:00:02.000Z',
+    });
+    expect(batch.map((event) => event.type)).toEqual([
+      'capability.reconciliation_resolved',
+      'capability.execution_unknown',
+      'tool.cancelled',
+    ]);
+    let settled = liveState;
+    for (const event of batch) {
+      settled = reduce(settled, [normalizeAgentEvent(event, settled, '2026-08-20T00:00:02.000Z')]);
+    }
+    expect(() => assertAgentStateInvariants(settled)).not.toThrow();
   });
 
   test('rejects late cancelled results and admits only exact live Shell identities', () => {

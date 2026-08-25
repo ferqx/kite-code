@@ -1,6 +1,8 @@
 export type HistoricalSessionOpenStage =
   | 'persisted_load'
   | 'runtime_registration'
+  | 'runtime_recovery'
+  | 'persisted_reload'
   | 'runtime_switch'
   | 'presentation_replay'
   | 'context_projection';

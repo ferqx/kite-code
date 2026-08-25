@@ -162,6 +162,12 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
     failure；这证明 App 使用完整 persisted Workspace/Project identity，而不是偶然依赖相同路径。
     单个损坏会话只能显示脱敏 session-scoped failure，健康历史会话与普通输入继续可用。当前 target 使用 canonical
     Workspace identity 和 epoch 派生路径，`runtime-authority.key` 仍不得创建。
+22. 跨进程非终态恢复必须让 fixture 在退出前观察到 exact queued/started/approval/continuation facts，再模拟正常退出或
+    hard interruption。重开 target 后必须等待 Host readiness 与 post-recovery Store revision，分别断言未 dispatch work
+    cancelled、dispatched work unknown/no replay、Subagent/sandbox cleanup receipt、有效 durable queue 保留，以及 Tool/
+    Subagent/模型流不再显示 running spinner。同一进程 Session switch 的后台运行对照必须保持 live，避免把 navigation
+    错测成 restart。恢复等待期间切换到另一个已注册 Session、重复选择同 target 和迟到失败还要验证 navigation token：旧
+    结果不得覆盖 active turns/context，也不得清理较新 load 正在使用的 dormant Runtime。
 
 ## 分层选择
 

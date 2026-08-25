@@ -643,27 +643,66 @@ function TuiApp({
   /** 从 DB 加载指定会话的完整状态（LOAD_SESSION_PENDING 的实际逻辑） */
   const loadSessionById = React.useCallback(
     async (threadId: string) => {
-      const token = sessionNavigation.beginLoad();
+      const token = sessionNavigation.beginLoad(threadId);
 
       // Keep the currently active Runtime/projection intact until the target
       // has loaded. Historical sessions are registered only after this load;
       // this is the implicit compatibility boundary for known old formats.
       const oldId = sessionManager.getActiveId();
       let stage: HistoricalSessionOpenStage = 'persisted_load';
+      let registeredForLoad = false;
+
+      const cleanupStaleRegistration = async (): Promise<void> => {
+        if (
+          !registeredForLoad ||
+          sessionManager.getActiveId() === threadId ||
+          sessionNavigation.isLoadingTarget(threadId)
+        ) {
+          return;
+        }
+        try {
+          await sessionManager.removeRuntime(threadId);
+        } catch (cleanupError) {
+          historicalSessionDebug(
+            'stale cleanup failed stage=%s error=%s',
+            stage,
+            classifyHistoricalSessionOpenFailure(stage, cleanupError),
+          );
+        }
+      };
 
       dispatch({ type: 'LOAD_SESSION_PENDING', threadId });
 
       try {
-        const result = await sessionManager.loadPersistedSession(threadId);
-        const committed = sessionNavigation.commit(token, () => {
-          if (!result) throw new Error(`Session ${threadId} has no saved checkpoints.`);
+        let result = await sessionManager.loadPersistedSession(threadId);
+        if (!result) throw new Error(`Session ${threadId} has no saved checkpoints.`);
+        if (!sessionNavigation.isCurrent(token)) return;
 
-          // Do not create a live Runtime for a session that failed its load or
-          // compatibility conversion. The previous active session remains the
-          // only foreground Runtime until all target data is ready.
-          stage = 'runtime_registration';
-          if (!sessionManager.hasRuntime(threadId))
-            sessionManager.registerSession(threadId, workspace);
+        // Register without publishing the target as active. Host resume owns
+        // restart cleanup; historical replay must wait for that durable
+        // boundary and then reload the advanced event tail.
+        stage = 'runtime_registration';
+        if (!sessionManager.hasRuntime(threadId)) {
+          const runtime = sessionManager.registerSession(threadId, workspace);
+          runtime.dormant = true;
+          registeredForLoad = true;
+        }
+        stage = 'runtime_recovery';
+        await sessionManager.waitForSessionReady(threadId);
+        if (!sessionNavigation.isCurrent(token)) {
+          await cleanupStaleRegistration();
+          return;
+        }
+        stage = 'persisted_reload';
+        const recovered = await sessionManager.loadPersistedSession(threadId);
+        if (!recovered) throw new Error(`Session ${threadId} has no saved checkpoints.`);
+        result = recovered;
+        if (!sessionNavigation.isCurrent(token)) {
+          await cleanupStaleRegistration();
+          return;
+        }
+
+        const committed = sessionNavigation.commit(token, () => {
           stage = 'runtime_switch';
           if (oldId !== threadId) {
             sessionManager.switchSession(oldId, threadId);
@@ -734,7 +773,10 @@ function TuiApp({
         });
         if (!committed) return;
       } catch (error) {
-        if (!sessionNavigation.isCurrent(token)) return;
+        if (!sessionNavigation.isCurrent(token)) {
+          await cleanupStaleRegistration();
+          return;
+        }
         historicalSessionDebug(
           'open failed stage=%s error=%s',
           stage,

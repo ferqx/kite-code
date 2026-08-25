@@ -280,6 +280,34 @@ export function createAppRuntimeEffectExecutor(
   };
 }
 
+function autoReviewCompletionEvents(
+  state: Readonly<RuntimeState>,
+  completed: Extract<RuntimeEvent, { type: 'auto_review.completed' }>,
+  occurredAt: string,
+): RuntimeEvent[] {
+  const terminalRejection =
+    completed.result.approved !== true && completed.result.escalatedToUser !== true;
+  if (!terminalRejection) return [completed];
+
+  const reason = completed.result.reason || 'Auto-review rejected the suspended operation.';
+  const capabilityTerminals = Object.values(state.capabilities.invocations)
+    .filter(
+      (invocation) =>
+        invocation.toolCallId === completed.toolCallId &&
+        (invocation.status === 'recorded' || invocation.status === 'running'),
+    )
+    .map(
+      (invocation): RuntimeEvent => ({
+        type: 'capability.reconciliation_resolved',
+        invocationId: invocation.invocationId,
+        decision: 'confirmed_failure',
+        reconciledAt: occurredAt,
+        reason,
+      }),
+    );
+  return [...capabilityTerminals, completed];
+}
+
 /** State adapter around the Kernel decision and Builtin reviewer coordinator. */
 async function projectAutoReviewEffect(
   effect: Extract<RuntimeEffect, { type: 'run_auto_review' }>,
@@ -300,7 +328,8 @@ async function projectAutoReviewEffect(
   const suspended = state.suspendedSubagents[effect.toolCallId];
   const subagentId = pending.approval.subagentId;
   if (subagentId && (!suspended || suspended.subagentId !== subagentId)) {
-    return [
+    return autoReviewCompletionEvents(
+      state,
       {
         type: 'auto_review.completed',
         reviewId: effect.reviewId,
@@ -313,7 +342,8 @@ async function projectAutoReviewEffect(
           durationMs: 0,
         },
       },
-    ];
+      dependencies.now?.() ?? new Date().toISOString(),
+    );
   }
   let reviewedCall: { id: string; name: string; args: unknown };
   if (subagentId && suspended) {
@@ -330,7 +360,8 @@ async function projectAutoReviewEffect(
         args: snapshot.blockedTool.args,
       };
     } catch {
-      return [
+      return autoReviewCompletionEvents(
+        state,
         {
           type: 'auto_review.completed',
           reviewId: effect.reviewId,
@@ -343,7 +374,8 @@ async function projectAutoReviewEffect(
             durationMs: 0,
           },
         },
-      ];
+        dependencies.now?.() ?? new Date().toISOString(),
+      );
     }
   } else {
     reviewedCall = { id: call.toolCallId, name: call.name, args: call.args };
@@ -359,7 +391,8 @@ async function projectAutoReviewEffect(
     builtinToolCatalog,
   );
   if (!parsed?.ok) {
-    return [
+    return autoReviewCompletionEvents(
+      state,
       {
         type: 'auto_review.completed',
         reviewId: effect.reviewId,
@@ -375,7 +408,8 @@ async function projectAutoReviewEffect(
           durationMs: 0,
         },
       },
-    ];
+      dependencies.now?.() ?? new Date().toISOString(),
+    );
   }
   const request = parsed.request;
   const observedAt = Date.now();
@@ -440,7 +474,7 @@ async function projectAutoReviewEffect(
     const accepted = decision.kind === 'accepted_approval';
     const escalated = decision.kind === 'request_user_approval';
 
-    const completed: RuntimeEvent = {
+    const completed: Extract<RuntimeEvent, { type: 'auto_review.completed' }> = {
       type: 'auto_review.completed',
       reviewId: effect.reviewId,
       toolCallId: effect.toolCallId,
@@ -479,7 +513,11 @@ async function projectAutoReviewEffect(
     // auto review escalates to the user. The Kernel reducer advances that
     // record to awaiting_user from this completion fact; emitting a second
     // approval.requested would duplicate the invocation and lose FIFO identity.
-    return [completed];
+    return autoReviewCompletionEvents(
+      currentState,
+      completed,
+      dependencies.now?.() ?? new Date().toISOString(),
+    );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     const decision = decideAutoReview({

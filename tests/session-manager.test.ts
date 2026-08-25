@@ -543,27 +543,33 @@ describe('SessionManager', () => {
     expect(replayed.approvalGeneration).toBe(1);
   });
 
-  test('reconciles a mutable TUI interaction mode before Host recovery re-ensures identity', () => {
+  test('reconciles a mutable TUI interaction mode before Host recovery re-ensures identity', async () => {
     const deps = makeDeps();
     deps.config = { ...deps.config, interactionMode: 'accept_edits' };
     let retainedMode: SessionRuntime['interactionMode'] = 'accept_edits';
     const readRetainedMode = (): SessionRuntime['interactionMode'] => retainedMode;
     let registered = false;
+    const coordinatorState = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'mode-recovery',
+      userId: 'tui-user',
+      workspace: '/tmp/ws',
+    });
     const unavailable = (): never => {
       throw new Error('unused test coordinator operation');
     };
     const coordinator = {
       sessionId: '',
       control: {
-        getState: unavailable,
+        getState: () => coordinatorState,
         processEvent: unavailable,
-        processEventBatch: unavailable,
+        processEventBatch: (events: RuntimeEvent[]) => events,
         cancelRun: () => [],
       },
       session: {} as RuntimeSessionCoordinator['session'],
       recoveryChanged: false,
       lifecycle: 'idle' as const,
-      getState: unavailable,
+      getState: () => coordinatorState,
       getStateRuntimeStorage: unavailable,
       isTurnActive: () => false,
       beginTurn: () => undefined,
@@ -604,7 +610,7 @@ describe('SessionManager', () => {
 
     manager.getRuntime(threadId)!.interactionMode = 'auto';
 
-    expect(manager.recoverRuntimeState(threadId)).toBe(false);
+    expect(await manager.recoverRuntimeState(threadId)).toBe(false);
     expect(readRetainedMode()).toBe('auto');
   });
 
@@ -1071,7 +1077,7 @@ describe('SessionManager', () => {
     try {
       mgr.registerSession(threadId, '/tmp/ws');
       openStoreCalls = 0;
-      expect(mgr.recoverRuntimeState(threadId)).toBe(false);
+      expect(await mgr.recoverRuntimeState(threadId)).toBe(false);
       expect(ensureCalls).toBe(2);
       const first = await mgr.executeHostCompaction(threadId);
       expect(

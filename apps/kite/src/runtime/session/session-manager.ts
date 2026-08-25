@@ -4,6 +4,7 @@ import type {
   RuntimeSessionCoordinator,
   RuntimeSessionCoordinatorIdentity,
 } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
+import { reconcileRuntimeSessionAfterRestart } from '#app/bootstrap/runtime/session-restart-recovery';
 import type { RuntimeEvent, RuntimeState } from '#app/bootstrap/runtime/state-runtime';
 import type { AgentConfig } from '#app/config/index';
 import { ContextCompactionService } from '#app/runtime/session/context-compaction-service';
@@ -182,10 +183,20 @@ export class SessionManager {
   }
 
   /** Bridge-only restart reconciliation. Runtime Host decides when it runs. */
-  recoverRuntimeState(threadId: string): boolean {
+  async recoverRuntimeState(threadId: string): Promise<boolean> {
     const runtime = this.sessionRegistry.runtimes.get(threadId);
     if (!runtime) return false;
-    return this.ensureRuntimeCoordinator(runtime)?.recoveryChanged ?? false;
+    const coordinator = this.ensureRuntimeCoordinator(runtime);
+    if (!coordinator) return false;
+    const recovery = await reconcileRuntimeSessionAfterRestart({
+      control: coordinator.control,
+      modelInvocationRuntime: this.deps.modelInvocationRuntimeFactory(runtime.workspace),
+      ...(this.deps.shellExecutor ? { shellExecutor: this.deps.shellExecutor } : {}),
+    });
+    if (!recovery.complete) {
+      throw new Error(`Runtime session restart recovery failed: ${recovery.failure ?? 'unknown'}.`);
+    }
+    return coordinator.recoveryChanged || recovery.changed;
   }
 
   private ensureRuntimeCoordinator(runtime: SessionRuntime): RuntimeSessionCoordinator | undefined {

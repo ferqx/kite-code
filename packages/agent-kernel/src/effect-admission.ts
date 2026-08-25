@@ -20,7 +20,8 @@ type CapabilityTerminalEvent = Extract<
     type:
       | 'capability.execution_succeeded'
       | 'capability.execution_failed'
-      | 'capability.execution_unknown';
+      | 'capability.execution_unknown'
+      | 'capability.reconciliation_resolved';
   }
 >;
 
@@ -28,7 +29,8 @@ function isCapabilityTerminalEvent(event: RuntimeEvent): event is CapabilityTerm
   return (
     event.type === 'capability.execution_succeeded' ||
     event.type === 'capability.execution_failed' ||
-    event.type === 'capability.execution_unknown'
+    event.type === 'capability.execution_unknown' ||
+    event.type === 'capability.reconciliation_resolved'
   );
 }
 
@@ -60,92 +62,104 @@ export function suspendedCapabilityTerminalRequirements(
   const requirements: SuspendedCapabilityTerminalRequirement[] = [];
   for (const event of events) {
     if (!isToolTerminalEvent(event)) continue;
-    const invocation = Object.values(state.capabilities.invocations).find(
-      (candidate) =>
-        candidate.toolCallId === event.toolCallId &&
-        candidate.status === 'running' &&
-        Boolean(candidate.receiptRequirement),
-    );
-    if (!invocation || terminalInvocationIds.has(invocation.invocationId)) continue;
-    terminalInvocationIds.add(invocation.invocationId);
-    requirements.push({
-      invocationId: invocation.invocationId,
-      toolCallId: invocation.toolCallId,
-    });
+    for (const invocation of Object.values(state.capabilities.invocations)) {
+      if (
+        invocation.toolCallId !== event.toolCallId ||
+        (invocation.status !== 'recorded' && invocation.status !== 'running') ||
+        terminalInvocationIds.has(invocation.invocationId)
+      ) {
+        continue;
+      }
+      terminalInvocationIds.add(invocation.invocationId);
+      requirements.push({
+        invocationId: invocation.invocationId,
+        toolCallId: invocation.toolCallId,
+      });
+    }
   }
   return requirements;
 }
 
-/** Close a suspended governed capability receipt in the same atomic Tool-terminal batch. */
+/** Close every live capability in the same atomic Tool-terminal batch. */
 export function attachSuspendedCapabilityTerminals(
   state: Readonly<AgentState>,
   events: readonly RuntimeEvent[],
   finishedAtByInvocationId: Readonly<Record<string, string>>,
 ): readonly RuntimeEvent[] {
   const output: RuntimeEvent[] = [];
+  const suppliedTerminals = new Map(
+    events.filter(isCapabilityTerminalEvent).map((event) => [event.invocationId, event]),
+  );
+  const emittedTerminalIds = new Set<string>();
   for (const event of events) {
+    if (isCapabilityTerminalEvent(event)) {
+      if (!emittedTerminalIds.has(event.invocationId)) {
+        output.push(event);
+        emittedTerminalIds.add(event.invocationId);
+      }
+      continue;
+    }
     if (!isToolTerminalEvent(event)) {
       output.push(event);
       continue;
     }
-    const invocation = Object.values(state.capabilities.invocations).find(
-      (candidate) =>
-        candidate.toolCallId === event.toolCallId &&
-        candidate.status === 'running' &&
-        Boolean(candidate.receiptRequirement),
-    );
-    if (
-      !invocation ||
-      output.some(
-        (candidate) =>
-          isCapabilityTerminalEvent(candidate) &&
-          candidate.invocationId === invocation.invocationId,
-      )
-    ) {
-      output.push(event);
-      continue;
-    }
-    const finishedAt = finishedAtByInvocationId[invocation.invocationId];
-    if (!finishedAt || !Number.isFinite(Date.parse(finishedAt))) {
-      throw new Error(
-        `Suspended capability terminal ${invocation.invocationId} requires a valid Host timestamp.`,
-      );
-    }
-    if (!invocation.artifact || !invocation.resultDigest || !invocation.evidenceDigest) {
-      output.push({
-        type: 'capability.execution_unknown',
-        invocationId: invocation.invocationId,
-        reason: 'Suspended Tool terminal has no committed capability result evidence.',
-        finishedAt,
-      });
-    } else if (event.type === 'tool.finished' && event.result.ok) {
-      output.push({
-        type: 'capability.execution_succeeded',
-        invocationId: invocation.invocationId,
-        resultDigest: invocation.resultDigest,
-        evidenceDigest: invocation.evidenceDigest,
-        finishedAt,
-        artifact: invocation.artifact,
-        ...(invocation.externalReferences
-          ? { externalReferences: invocation.externalReferences }
-          : {}),
-      });
-    } else {
-      const error =
-        event.type === 'tool.finished'
-          ? event.result.stderr || 'Suspended Tool interaction did not succeed.'
-          : event.type === 'tool.failed'
-            ? event.failure.message
-            : event.reason;
-      output.push({
-        type: 'capability.execution_failed',
-        invocationId: invocation.invocationId,
-        error,
-        resultDigest: invocation.resultDigest,
-        evidenceDigest: invocation.evidenceDigest,
-        finishedAt,
-        artifact: invocation.artifact,
-      });
+    for (const invocation of Object.values(state.capabilities.invocations)) {
+      if (
+        invocation.toolCallId !== event.toolCallId ||
+        (invocation.status !== 'recorded' && invocation.status !== 'running') ||
+        emittedTerminalIds.has(invocation.invocationId)
+      ) {
+        continue;
+      }
+      const supplied = suppliedTerminals.get(invocation.invocationId);
+      if (supplied) {
+        output.push(supplied);
+        emittedTerminalIds.add(invocation.invocationId);
+        continue;
+      }
+      const finishedAt = finishedAtByInvocationId[invocation.invocationId];
+      if (!finishedAt || !Number.isFinite(Date.parse(finishedAt))) {
+        throw new Error(
+          `Suspended capability terminal ${invocation.invocationId} requires a valid Host timestamp.`,
+        );
+      }
+      if (!invocation.artifact || !invocation.resultDigest || !invocation.evidenceDigest) {
+        output.push({
+          type: 'capability.execution_unknown',
+          invocationId: invocation.invocationId,
+          reason: 'Suspended Tool terminal has no committed capability result evidence.',
+          finishedAt,
+        });
+      } else if (event.type === 'tool.finished' && event.result.ok) {
+        output.push({
+          type: 'capability.execution_succeeded',
+          invocationId: invocation.invocationId,
+          resultDigest: invocation.resultDigest,
+          evidenceDigest: invocation.evidenceDigest,
+          finishedAt,
+          artifact: invocation.artifact,
+          ...(invocation.externalReferences
+            ? { externalReferences: invocation.externalReferences }
+            : {}),
+        });
+      } else {
+        const error =
+          event.type === 'tool.finished'
+            ? event.result.stderr || 'Suspended Tool interaction did not succeed.'
+            : event.type === 'tool.failed'
+              ? event.failure.message
+              : event.reason;
+        output.push({
+          type: 'capability.execution_failed',
+          invocationId: invocation.invocationId,
+          error,
+          resultDigest: invocation.resultDigest,
+          evidenceDigest: invocation.evidenceDigest,
+          finishedAt,
+          artifact: invocation.artifact,
+        });
+      }
+      emittedTerminalIds.add(invocation.invocationId);
     }
     output.push(event);
   }

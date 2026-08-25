@@ -107,6 +107,12 @@ capability terminal。Kernel 只原子接受 capability receipt 与匹配的 `to
 terminal batch。伪造、失败或缺失 receipt 不能产生 verification。Tool terminal 的 canonical projection 也已
 移入 Pipeline receipt stage，Controller 只保留 branch orchestration。
 
+Host 的 Tool-terminal admission 会扫描 exact Tool identity 下全部 `recorded|running` capability invocation，而不是
+只选择第一个 running 或带 receipt 的调用；调用方已提供的 terminal/reconciliation 会被移到 Tool terminal 之前，
+其余缺少可信结果证据的调用原子补成 `capability.execution_unknown`。`auto_review.completed` 的明确拒绝会在 App
+effect coordinator 中先为 suspended parent 写 `capability.reconciliation_resolved(confirmed_failure)`，再提交 reviewer
+终态；`ask_user` 或技术异常升级人工只推进原 queue record，不能终结 parent Tool 或留下半终态。
+
 `recorded` 与 `dispatched` 同样是进程内 opaque stage authority，而不是可由结构类型自证的 DTO。只有
 Host coordinator 在 invocation 与 attempt batch durable ack 后签发 authentic
 `RecordedInvocation`；同一 attempt 只能签发一个绑定 exact recorded/result identity 的

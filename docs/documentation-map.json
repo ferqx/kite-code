@@ -114,8 +114,11 @@
         "tests/mcp-manager.test.ts",
         "tests/model-invoke.test.ts",
         "tests/model.test.ts",
+        "tests/tui-system/scenarios/interrupt-resume.test.ts",
+        "tests/runtime/session-restart-recovery.test.ts",
         "packages/runtime-storage-sqlite/src/**",
         "apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts",
+        "apps/kite/src/bootstrap/runtime/session-restart-recovery.ts",
         "apps/kite/src/bootstrap/runtime/state-runner.ts"
       ],
       "documents": [
@@ -494,6 +497,7 @@
         "packages/runtime-storage-sqlite/src/**",
         "tests/runtime/storage-adapter.test.ts",
         "apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts",
+        "apps/kite/src/bootstrap/runtime/session-restart-recovery.ts",
         "apps/kite/src/runtime/session/**",
         "apps/kite/src/adapters/tui/runtime-bridge.ts",
         "apps/kite/src/bootstrap/runtime/session-persistence.ts",
@@ -540,6 +544,7 @@
         "apps/kite/src/tui/replay-blocks.ts",
         "apps/kite/src/tui/session-navigation.ts",
         "apps/kite/src/tui/session-open-diagnostic.ts",
+        "apps/kite/src/bootstrap/runtime/session-restart-recovery.ts",
         "apps/kite/test/session-compatibility.test.ts",
         "apps/kite/test/session-navigation.test.ts",
         "apps/kite/test/session-open-diagnostic.test.ts",
@@ -547,7 +552,8 @@
         "apps/kite/test/state-store-project-identity-compatibility.test.ts",
         "tests/cli.test.ts",
         "tests/tui-system/scenarios/startup.test.ts",
-        "tests/tui-system/scenarios/session-legacy-compatibility.test.ts"
+        "tests/tui-system/scenarios/session-legacy-compatibility.test.ts",
+        "tests/runtime/session-restart-recovery.test.ts"
       ],
       "documents": [
         "docs/active/authorization.md",
@@ -564,6 +570,7 @@
         "docs/active/tui-e2e-testing-limits.md",
         "docs/active/tui-session-startup-card.md",
         "docs/adr/0138-silent-session-format-compatibility.md",
+        "docs/adr/0139-session-admission-restart-reconciliation.md",
         "docs/space/plans/2026-08-25-shell-sandbox-approval-queue-optimization.md",
         "docs/space/execution/completed/2026-08-25-shell-sandbox-approval-queue-optimization.md",
         "docs/space/plans/index.md"

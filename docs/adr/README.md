@@ -140,3 +140,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0136](0136-mode-governed-shell-without-command-allowlists.md) | accepted | Raw Shell 不再由固定命令 grammar 免审；统一按 Accept Edits、Auto、Full 治理 |
 | [0137](0137-shell-sandbox-durable-approval-queue.md) | accepted | Sandbox-first phase/mode 矩阵、两类 grant 与 durable approval queue |
 | [0138](0138-silent-session-format-compatibility.md) | accepted | 未知历史格式静默忽略；已知会话按选择懒迁移并剥离旧权限 |
+| [0139](0139-session-admission-restart-reconciliation.md) | accepted | Session admission 先完成跨进程 cleanup/recovery，再重载事件尾并投影终态 |

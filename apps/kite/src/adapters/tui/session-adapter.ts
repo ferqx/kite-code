@@ -5,6 +5,8 @@ export type TuiSessionManager = Omit<SessionManager, 'abortAll' | 'dispose' | 'r
   abortAll(): Promise<void>;
   dispose(): Promise<void>;
   removeRuntime(sessionId: string): Promise<void>;
+  /** Wait for Host resume admission, restart cleanup and durable recovery. */
+  waitForSessionReady(sessionId: string): Promise<void>;
 };
 
 export type TuiSessionManagerDependencies = Omit<

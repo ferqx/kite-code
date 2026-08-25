@@ -1,6 +1,7 @@
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
+  runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
   runtimeHostStateInteractionToolCall as interactionToolCall,
   runtimeHostStateToolCallBelongsToCurrentWork as toolCallBelongsToCurrentWork,
 } from '@kite/runtime-host/kernel-adapter';
@@ -172,6 +173,96 @@ export function eventsForSupersededTurnRecovery(
     ...resourceReservationCancellationEvents(state),
     ...resourceWaiterCancellationEvents(state),
     ...(state.turn.status === 'active'
+      ? [
+          {
+            type: 'turn.aborted' as const,
+            turnId: state.turn.turnId,
+            reason,
+            cause: 'error' as const,
+          },
+        ]
+      : []),
+  ];
+}
+
+/**
+ * Settle work whose in-memory executor belonged to a process that no longer
+ * exists, while retaining exact durable interactions/continuations that a
+ * recovery-capable client may still resume.
+ *
+ * A running Tool crossed the dispatch boundary, so its result is unknown and
+ * must never be replayed. Work that had not started is cancelled by recovery.
+ * The turn remains active only while a current durable interaction or
+ * Subagent continuation still owns it.
+ */
+export function eventsForRestartedSessionRecovery(
+  state: Readonly<RuntimeState>,
+  reason = 'Runtime process ended before the operation completed.',
+): RuntimeEvent[] {
+  const resumableToolCallIds = new Set<string>();
+  if (interactionBelongsToCurrentWork(state)) {
+    const interactionCall = interactionToolCall(state);
+    if (interactionCall) resumableToolCallIds.add(interactionCall.toolCallId);
+  }
+  for (const pending of state.pendingApprovals.values()) {
+    const call = state.tools.calls[pending.toolCallId];
+    if (
+      call &&
+      toolCallBelongsToCurrentWork(state, call) &&
+      !TERMINAL_TOOL_STATUSES.has(call.status) &&
+      pending.status !== 'succeeded' &&
+      pending.status !== 'failed' &&
+      pending.status !== 'cancelled' &&
+      pending.status !== 'rejected' &&
+      pending.status !== 'expired'
+    ) {
+      resumableToolCallIds.add(call.toolCallId);
+    }
+  }
+  for (const toolCallId of Object.keys(state.suspendedSubagents)) {
+    const call = state.tools.calls[toolCallId];
+    if (
+      call &&
+      toolCallBelongsToCurrentWork(state, call) &&
+      !TERMINAL_TOOL_STATUSES.has(call.status)
+    ) {
+      resumableToolCallIds.add(toolCallId);
+    }
+  }
+
+  const unfinished = Object.values(state.tools.calls)
+    .filter((call) => toolCallBelongsToCurrentWork(state, call))
+    .filter((call) => !TERMINAL_TOOL_STATUSES.has(call.status))
+    .filter((call) => !resumableToolCallIds.has(call.toolCallId));
+  const toolEvents: RuntimeEvent[] = unfinished.map((call) =>
+    call.status === 'running'
+      ? {
+          type: 'tool.failed' as const,
+          toolCallId: call.toolCallId,
+          failure: classifyFailure('unknown', reason),
+        }
+      : {
+          type: 'tool.cancelled' as const,
+          toolCallId: call.toolCallId,
+          reason,
+        },
+  );
+  const hasResumableProviderInteraction =
+    state.interactions.kind === 'awaiting_provider_action' ||
+    state.interactions.kind === 'awaiting_provider_admission';
+  const turnCanResume = resumableToolCallIds.size > 0 || hasResumableProviderInteraction;
+  const hasInterruptedWork =
+    unfinished.length > 0 ||
+    Object.values(state.modelInvocations).some(
+      (invocation) =>
+        invocation.status === 'interrupted' && invocation.interruptionReason === 'runtime_restored',
+    );
+
+  return [
+    ...toolEvents,
+    ...resourceReservationCancellationEvents(state),
+    ...resourceWaiterCancellationEvents(state),
+    ...(state.turn.status === 'active' && hasInterruptedWork && !turnCanResume
       ? [
           {
             type: 'turn.aborted' as const,

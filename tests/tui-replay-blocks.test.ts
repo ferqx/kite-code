@@ -3,7 +3,13 @@ import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { ToolApprovalPayload } from '@kite/runtime-contract';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import type { SessionData } from '../apps/kite/src/bootstrap/runtime/session-persistence';
-import { sessionDataToUI, TUI_REPLAY_CANCELLED_TEXT } from '../apps/kite/src/tui/replay-blocks';
+import { createInitialState } from '../apps/kite/src/tui/initialState';
+import {
+  recoverPendingInteractionsForTui,
+  sessionDataToUI,
+  TUI_REPLAY_CANCELLED_TEXT,
+  TUI_REPLAY_UNKNOWN_TEXT,
+} from '../apps/kite/src/tui/replay-blocks';
 import { CURRENT_TEST_PLAN_IDENTITY, CURRENT_TEST_PLAN_REVIEW_FACTS } from './helpers/current-plan';
 import { currentRuntimeEvents } from './helpers/current-runtime-event';
 
@@ -86,7 +92,7 @@ describe('TUI replay interaction recovery', () => {
     );
   });
 
-  test('does not cancel a tool that crossed the started boundary', () => {
+  test('settles a tool that crossed the started boundary as unknown instead of leaving it running', () => {
     const result = sessionDataToUI(
       data([
         {
@@ -108,10 +114,11 @@ describe('TUI replay interaction recovery', () => {
 
     expect(result.interrupt).toBeNull();
     expect(cards(result)).toContainEqual(
-      expect.objectContaining({ callId: 'tool-1', status: 'running' }),
-    );
-    expect(cards(result).find((card) => card.callId === 'tool-1')?.summary).not.toBe(
-      TUI_REPLAY_CANCELLED_TEXT,
+      expect.objectContaining({
+        callId: 'tool-1',
+        status: 'error',
+        summary: TUI_REPLAY_UNKNOWN_TEXT,
+      }),
     );
   });
 
@@ -148,11 +155,80 @@ describe('TUI replay interaction recovery', () => {
 
     expect(result.interrupt).toBeNull();
     expect(result.pendingToolCalls).toEqual({});
-    expect(cards(result).some((card) => card.summary === TUI_REPLAY_CANCELLED_TEXT)).toBe(false);
+    expect(cards(result)).toContainEqual(
+      expect.objectContaining({
+        callId: 'external-write',
+        status: 'error',
+        summary: TUI_REPLAY_UNKNOWN_TEXT,
+      }),
+    );
     // Replay owns no Runtime event and leaves the canonical fact untouched for
     // the next client to recover as an unknown invocation.
     expect(events).toHaveLength(3);
     expect(events[1]).toMatchObject({ type: 'capability.invocation_recorded' });
+  });
+
+  test('settles running Subagents and unfinished model text during cross-process replay', () => {
+    const result = sessionDataToUI(
+      data([
+        {
+          type: 'subagent.started',
+          subagent: {
+            id: 'review-agent',
+            role: 'review',
+            task: 'Review the Runtime recovery boundary.',
+          },
+        },
+        {
+          type: 'model.text_delta',
+          text: 'partial response',
+        },
+      ]),
+    );
+
+    expect(result.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: 'subagent',
+        subagentId: 'review-agent',
+        status: 'error',
+        summary: TUI_REPLAY_UNKNOWN_TEXT,
+      }),
+    );
+    expect(result.blocks).toContainEqual(
+      expect.objectContaining({ kind: 'text', streaming: false }),
+    );
+  });
+
+  test('does not turn an approval-suspended Subagent back into a running spinner', () => {
+    const initial = createInitialState();
+    initial.turns = [
+      {
+        blocks: [
+          {
+            id: 1,
+            kind: 'subagent',
+            subagentId: 'approval-suspended-child',
+            role: 'review',
+            task: 'Review storage boundaries.',
+            status: 'suspended',
+            summary: 'Waiting for approval',
+            toolCallCount: 1,
+            durationMs: 10,
+            steps: [],
+            awaitingApproval: true,
+            approvalState: 'awaiting_user',
+          },
+        ],
+      },
+    ];
+
+    const recovered = recoverPendingInteractionsForTui(initial, []);
+    expect(recovered.turns[0]?.blocks[0]).toMatchObject({
+      kind: 'subagent',
+      status: 'cancelled',
+      summary: TUI_REPLAY_CANCELLED_TEXT,
+      awaitingApproval: false,
+    });
   });
 
   test('recovers ask_user without leaving a pending input prompt', () => {

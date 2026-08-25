@@ -6,12 +6,15 @@ import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
+  runtimeHostStateNormalizeToolOutcomeEvent,
   type ToolCallStatus,
 } from '@kite/runtime-host/kernel-adapter';
 import {
+  eventsForRestartedSessionRecovery,
   eventsForSupersededTurnRecovery,
   type RuntimeUserAction,
 } from '#app/bootstrap/runtime/state-actions';
+import { normalizeTerminalRuntimeEvent } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   StateHostSessionHarness as AgentKernel,
@@ -443,5 +446,57 @@ describe('session state-machine terminal matrix', () => {
       }
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  test('restart settles non-resumable siblings without discarding a durable approval continuation', () => {
+    const initial = waitingToolState('approval', 'approval-tool');
+    initial.activeTaskId = 'active-task';
+    initial.tasks['active-task'] = {
+      taskId: 'active-task',
+      userGoal: 'Review the repository with concurrent workers.',
+      status: 'active',
+      startedAtTurnId: initial.turn.turnId,
+      sideEffectsStarted: true,
+      planning: { kind: 'building_without_plan' },
+      planHistory: [],
+    };
+    initial.tools.calls['running-sibling'] = {
+      toolCallId: 'running-sibling',
+      taskId: 'active-task',
+      modelMessageId: 'model-concurrent-review',
+      name: 'task',
+      args: { role: 'review' },
+      status: 'running',
+      createdAtTurnId: initial.turn.turnId,
+    };
+    initial.tools.calls['approval-tool'] = {
+      ...initial.tools.calls['approval-tool']!,
+      taskId: 'active-task',
+    };
+
+    const events = eventsForRestartedSessionRecovery(initial);
+    const replayed = events.reduce((state, event) => {
+      const terminal = normalizeTerminalRuntimeEvent(event);
+      return reduceRuntimeState(
+        state,
+        runtimeHostStateNormalizeToolOutcomeEvent(terminal, state, '2026-08-25T00:00:01.000Z'),
+      );
+    }, structuredClone(initial));
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'running-sibling',
+        failure: expect.objectContaining({ kind: 'unknown', retryable: false }),
+      }),
+    );
+    expect(
+      events.some((event) => event.type === 'tool.failed' && event.toolCallId === 'approval-tool'),
+    ).toBe(false);
+    expect(events.some((event) => event.type === 'turn.aborted')).toBe(false);
+    expect(replayed.tools.calls['running-sibling']?.status).toBe('failed');
+    expect(replayed.tools.calls['approval-tool']?.status).toBe('awaiting_approval');
+    expect(replayed.interactions.kind).toBe('awaiting_tool_approval');
+    expect(replayed.turn.status).toBe('active');
   });
 });

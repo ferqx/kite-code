@@ -35,6 +35,17 @@ Subagent continuation 或 Runtime interaction 的 suspension 保持可恢复，�
 批次闭合其已记录结果 Artifact。测试必须覆盖 no-intent-no-dispatch、artifact crash point、atomic terminal、
 unknown reconciliation 与 restart 后零重复 dispatch。
 
+任何会把 Tool 推入 `succeeded|failed|rejected|cancelled|exhausted` 的 durable batch，都必须同时闭合同一 Tool 下的
+全部 `recorded|running` capability invocation，而不只处理第一个带 receipt 的 running invocation。已有可信 Artifact
+时提交对应 success/failure receipt；无法确认时先提交 `capability.execution_unknown`，用户放弃 reconciliation 时提交
+`capability.reconciliation_resolved(waived)`。`auto_review.completed` 的明确拒绝与 `approval.rejected` 虽不是
+`tool.*` 事件，但会间接产生 Tool 终态，因而受同一原子屏障约束；技术性自动审查失败转人工时不得终结父 Tool。
+
+跨进程 Session admission 必须在 TUI replay 前执行同一恢复纪律：Host 通用 restart facts 提交后，App 立即完成
+Subagent Provider handle 与 sandbox preparation cleanup，随后按 dispatch certainty 收敛非可恢复 Tool；TUI 只有在
+readiness 完成并重新读取 Store head 后才能切换与渲染。具备 exact durable approval/continuation 的 suspension 保留，
+其他 running Tool/Subagent/model stream 不得在重开后继续显示为 live，也不得因展示收敛触发 Provider 重放。
+
 PS-01 已让 Subagent 内部 filesystem tool 由 parent Runtime 建立 namespaced queue，并递归执行同一完整
 Tool Pipeline；PS-03 又把 child lifecycle/observation 接到唯一 `SubagentProvider`/Local composition。启动顺序
 固定为外层 attempt exact ack → private dispatch intent → Provider prepare（零 Driver/Gateway/tool I/O）→ private

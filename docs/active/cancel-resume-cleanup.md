@@ -28,11 +28,18 @@ execution bridge 前 fail closed。当前没有进程级 single-Host global lock
 effect lease 负责真实 writer fencing。Runtime State、SQLite Store 与 State 27/SAQ epoch 是唯一 production format；旧单槽
 approval/旧 Full grant 不进入新 reducer。
 
+跨进程 `resume_session` 还是 TUI historical replay 的前置屏障。Coordinator 的通用 model/capability/resource recovery
+之后，App 必须通过同一 Kernel control 立即完成 Subagent Provider handle 与 sandbox preparation 的异步 cleanup；只有
+receipt 已确认，才把不再拥有 live executor 的 Tool 收敛为 cancelled 或 unknown failure。未 dispatch 的非可恢复调用可以
+取消；已 running/intent-acked 且无 terminal receipt 的调用必须标 unknown、禁止重放。exact durable approval、
+`authorized_queued` receipt 和有效 Subagent continuation 继续保留，不能为清除 spinner 而写成用户拒绝。TUI 必须 await
+Host readiness，再重新读取 recovery 后的 event tail；注册前读取的 SessionData 不能用于最终 replay。
+
 ## Runtime 取消语义
 
 取消通过 AbortSignal 传播到模型、工具和 Subagent。用户停止当前轮次时，App shell 必须先通过 live Kernel control plane 原子持久化全部未终结工具的 `tool.cancelled` 与带 `cause=user` 的 `turn.aborted`，再触发 AbortSignal；这样活动 Effect lease 会因 revision 前移而失效，队列、active 列表和 transcript 工具调用/结果对共同收敛，不能留下永久 busy 状态。公共 `RunRuntimeAgentInput.signal` 也属于相同的取消边界：无论调用方是否持有 Kernel control，它一旦 abort 必须先写出同一组 durable cancellation facts，再解除 model、tool 或 interaction 等待；不得让 generator 静默结束而把 active turn 留在 Store。该操作只终止当前 turn，不把活动 task 改为 cancelled，下一条用户消息仍可沿当前任务上下文继续。重复取消不得追加重复 Tool Result。TUI 清理运行中 block 只是上述 Runtime 事实的展示投影，不是 Runtime 取消事实本身。
 
-工具审批的显式 reject 与 whole-turn cancel 是不同动作。Kernel 对 Approval overlay 的 Esc 校验 exact interactionId/generation，在同一个 durable action batch 中写入 focused `approval.rejected` 与对应 `tool.rejected`，随后推进下一个人工 focus，不取消无关 sibling；若本轮已无其他未终结 Tool/approval，该批次同时写入 `turn.aborted(cause=user)`。存在 queued/running/awaiting sibling 时，本轮保持 active 直到 sibling 自身收敛；最后一个 sibling 终态后，Runner 在 approval-rejection `stop` 边界 exactly-once 持久化 `turn.aborted(cause=user)`，不得再次调用模型，也不得重放已拒绝工具。该 stop 判定只读取 `createdAtTurnId` 精确属于当前 turn 的 rejected call、Tool 与 queue record；同一 Task 在旧 turn 留下的终态不能中止 successor turn。Ctrl+C 才会主动写入其余未终结 sibling 的 `tool.cancelled`、必要的 `capability.reconciliation_resolved(decision=waived)` 与 `turn.aborted(cause=user)`。终态 batch 不得留下任何 outlives-terminal-Tool 的 Capability。Runner 在 Ctrl+C 后不再请求后续审批、执行 queued 工具或调用模型；策略拒绝、sandbox 缺失或系统自动审查失败继续按各自 failure path 处理。
+工具审批的显式 reject 与 whole-turn cancel 是不同动作。Kernel 对 Approval overlay 的 Esc 校验 exact interactionId/generation，在同一个 durable action batch 中写入 focused `approval.rejected` 与对应 `tool.rejected`，随后推进下一个人工 focus，不取消无关 sibling；若本轮已无其他未终结 Tool/approval，该批次同时写入 `turn.aborted(cause=user)`。存在 queued/running/awaiting sibling 时，本轮保持 active 直到 sibling 自身收敛；最后一个 sibling 终态后，Runner 在 approval-rejection `stop` 边界 exactly-once 持久化 `turn.aborted(cause=user)`，不得再次调用模型，也不得重放已拒绝工具。该 stop 判定只读取 `createdAtTurnId` 精确属于当前 turn 的 rejected call、Tool 与 queue record；同一 Task 在旧 turn 留下的终态不能中止 successor turn。Ctrl+C 才会主动写入其余未终结 sibling 的 `tool.cancelled`、必要的 `capability.reconciliation_resolved(decision=waived)` 与 `turn.aborted(cause=user)`。终态 batch 必须闭合同一 Tool 下全部 `recorded|running` Capability，不能只处理第一个 invocation 或只处理带 receipt 的 invocation；缺少可信 terminal evidence 时以 `capability.execution_unknown` fail closed，绝不能留下 outlives-terminal-Tool。Runner 在 Ctrl+C 后不再请求后续审批、执行 queued 工具或调用模型；策略拒绝、sandbox 缺失或系统自动审查失败继续按各自 failure path 处理。
 
 方案执行确认（`request_plan_review`）也是执行授权屏障。用户选择取消或按 Esc 时，Kernel 在同一 action batch 中写入 `plan.review_cancelled`，将触发确认的方案工具及其余未终结 sibling 全部写为 `tool.cancelled`，最后写入 `turn.aborted(cause=user)`；方案文档保留为可继续修改的 draft，但当前 turn 立即结束，Runner 不得再次调用模型或进入执行阶段。
 
@@ -107,6 +114,11 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 reducer transition 中把当前可见 turns 保存到 outgoing snapshot、加载目标 replay turns 并推进 `sessionKey`。否则旧会话
 内容会被错绑到目标 snapshot，用户按“会话 A → 会话 B → 会话 A”切回时得到空白投影。该不变量由
 `tests/tui-reducer.test.ts` 的 historical load 链路和 `session-legacy-compatibility` PTY 连续切回场景共同验证。
+跨进程 target 注册后先保持 dormant，直到 `resume_session` recovery 与第二次 persisted load 完成才切换前台；因此
+Runtime restart 写入的 `capability.execution_unknown`、`tool.failed|cancelled`、`model.invocation_interrupted` 与
+`turn.aborted` 必须进入本次 replay，而不是等下一条 prompt 或下一次 `/resume` 才可见。崩溃遗留的运行中 Tool/Subagent/
+模型流不得继续显示 spinner；TUI 对已跨执行边界的调用显示结果未知，对未开始的 pending 显示本地恢复取消，且不向源 Store
+伪造用户动作。同进程 direct switch 仍只回放 live buffer，不触发 restart cleanup。
 异步 historical load 与已注册 Runtime 的内存切换还必须共享唯一 navigation generation authority：`/new`、删除和任何
 direct switch 都先使旧 token 失效；旧 load 的 success、failure 或 rollback 只有 token 仍 current 时才能注册 Runtime、切换
 active identity、提交 replay/context 或改变 TUI。`loadingSessionId` 只是展示状态，不能充当异步取消权威。每次 reducer 合并
@@ -292,4 +304,6 @@ revision identity 在一个 Store transaction 中登记 grant、匹配等待调�
 Subagent route 只有同一 model message/turn 的并发 Explore children（且 parent 非 Full）派生 Auto；single Explore、plan/code/review
 继承 parent，Full 不降级。Continuation 必须持久化 route、generation、sequence、bindingDigest、parent/child/runtime identity；
 resume 先恢复 queue/grant/continuation，再恢复 capability attempt，最后允许 owner Tool terminal。reviewer terminal 不能结束
-outer Tool；每个 capability invocation 必须先获得 Result/ack。live/replay/restart 使用相同 generation/session guards。
+outer Tool；自动审查明确拒绝时，必须在同一个 batch 先将 parent capability 收敛为 confirmed failure，再让 outer Tool
+进入 rejected；技术异常或显式 ask_user 只推进原 queue record，不得终结 parent。每个 capability invocation 必须先获得
+Result/ack 或显式 unknown/reconciliation 终态。live/replay/restart 使用相同 generation/session guards。

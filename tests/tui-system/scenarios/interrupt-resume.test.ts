@@ -39,6 +39,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
   const step = journey.step;
   let tui1: PtyProcess;
   let tui2: PtyProcess;
+  let tui3: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
@@ -53,7 +54,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
 
   afterAll(async () => {
     await cleanupTuiSystemFixtures({
-      tuis: [tui1, tui2],
+      tuis: [tui1, tui2, tui3],
       mockServers: [server],
       workspaces: [workspace],
     });
@@ -190,6 +191,65 @@ describe('TUI PTY System — Interrupt Resume', () => {
       expect(screenContains(afterLoad, 'Response from the first instance.')).toBe(true);
       // TUI must remain responsive with prompt visible
       expect(screenContains(afterLoad, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  step(
+    'terminate the TUI during an active model turn',
+    async () => {
+      server.setResponses([
+        {
+          message: { content: 'This response must not survive the terminated owner.' },
+          delay: 10_000,
+        },
+      ]);
+      await submitUserMessage(tui2, server, 'Interrupted model turn before restart', {
+        timeout: 15_000,
+      });
+      await waitForText(() => tui2.viewport(), 'Interrupted model turn before restart', 10_000);
+      expect(server.getRequestCount()).toBeGreaterThan(1);
+      expect(
+        screenContains(tui2.viewport(), 'This response must not survive the terminated owner.'),
+      ).toBe(false);
+
+      expect(await tui2.killAndWait()).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  step(
+    'restart and load the interrupted session → historical content remains but no running state survives',
+    async () => {
+      server.setResponses([]);
+      tui3 = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+      await submitCommand(tui3, '/resume');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui3.viewport(), 'Hello from tui1', {
+            selected: true,
+            active: false,
+          }) && !screenContains(tui3.viewport(), 'Loading...'),
+        'interrupted session row to become selectable after restart recovery',
+        15_000,
+      );
+      tui3.write('\r');
+      await waitForCondition(
+        () =>
+          screenContains(tui3.viewport(), 'Interrupted model turn before restart') &&
+          screenContains(tui3.viewport(), '❯'),
+        'post-recovery Session event tail to finish replaying',
+        15_000,
+      );
+
+      const restored = tui3.viewport();
+      expect(screenContains(restored, 'Hello from tui1')).toBe(true);
+      expect(screenContains(restored, 'Interrupted model turn before restart')).toBe(true);
+      expect(screenContains(restored, 'This response must not survive the terminated owner.')).toBe(
+        false,
+      );
+      expect(screenContains(restored, 'Thinking')).toBe(false);
+      expect(screenContains(restored, 'Working')).toBe(false);
     },
     TIMEOUT,
   );

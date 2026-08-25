@@ -1780,7 +1780,12 @@ describe('executeTestRuntimeTools', () => {
     );
 
     expect(model.callCount.count).toBe(0);
-    expect(events).toEqual([
+    expect(events.map((event) => event.type)).toEqual(
+      snapshotState === 'mismatched'
+        ? ['capability.reconciliation_resolved', 'auto_review.completed']
+        : ['auto_review.completed'],
+    );
+    expect(events.at(-1)).toEqual(
       expect.objectContaining({
         type: 'auto_review.completed',
         result: expect.objectContaining({
@@ -1789,7 +1794,21 @@ describe('executeTestRuntimeTools', () => {
           reason: expect.stringContaining('continuation'),
         }),
       }),
-    ]);
+    );
+
+    let settled = state;
+    for (const event of events) {
+      settled = reduceRuntimeState(
+        settled,
+        normalizeCurrentToolOutcomeEvent(event, settled, '2026-08-25T00:00:01.000Z'),
+      );
+    }
+    expect(settled.tools.calls.task?.status).toBe('rejected');
+    expect(
+      Object.values(settled.capabilities.invocations)
+        .filter((invocation) => invocation.toolCallId === 'task')
+        .map((invocation) => invocation.status),
+    ).not.toContain('running');
   });
 
   test.each([

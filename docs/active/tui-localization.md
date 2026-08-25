@@ -30,6 +30,12 @@
 开发者显式启用的 `kite-session` 诊断只输出固定 stage 与闭集 failure code，不属于用户文案，且不得输出
 thread/session identity、路径或自由错误正文。
 
+跨进程历史 replay 对失去 live executor 的非终态只生成 TUI-local 恢复摘要：未 dispatch work 显示恢复取消，
+已跨执行边界的 Tool/Subagent 显示结果未知且不会自动重试，未闭合模型文本停止 streaming。该摘要属于 Kite
+自有文案，不能复用 Provider 错误正文，也不能被写回 Runtime Store 或解释为用户取消；同进程 Session 切换不生成
+这些摘要。当前 pure replay reducer 沿用既有中文基准文字，后续接入 catalog 时只能在 render 边界翻译，不能改变
+canonical status、interaction identity 或 live/replay 收敛结果。
+
 ## SAQ-10 审批与模式文案
 
 审批队列的本地化只改变标题、状态和快捷键说明，不改变 canonical event 或 action payload。`queued_user`、

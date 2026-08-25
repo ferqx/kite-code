@@ -58,6 +58,11 @@ snapshot → resolve → validate → classify → authorize/admit
 
 Kernel 拥有 authorization、approval binding、resource admission 与 ToolOutcome decision。Builtin 拥有 parser、effects 与具体机制。Host 拥有 attempt claim、effect lease、generic lifecycle 与 cleanup。App 只组合这些 owner，并将持久阶段映射到 `runtime/tool-persistence/` 的唯一实现。
 
+Host 的通用 event-batch admission 是 capability/Tool 终态屏障：任何直接 `tool.*` terminal 都会先闭合同一 Tool 下全部
+`recorded|running` capability invocation；App 中会间接终结 Tool 的 reviewer/approval producer 也必须在同一 batch 提供
+等价 terminal fact。该屏障按 Tool identity 匹配全部 invocation，不依赖可选 receipt 字段，也不能在 invariant 失败后用
+取消外层 turn 掩盖半终态。
+
 Filesystem mutation 必须在同一 acknowledged attempt 下提交 intent、mutation-ready、preimage Artifact 与 terminal observation；Subagent suspension 必须提交 parent attempt、private continuation Artifact、blocked Tool identity 与 exact review event。任何 clone、cross-parent、stale revision 或持久失败都在 dispatch/terminal 发布前 fail closed。
 
 ## Execution 与 Host lifecycle
@@ -104,6 +109,12 @@ Ctrl+C 的同步 TUI surface 在返回前先调用真实 SessionRuntime 取消�
 若 notification 在读取 revision 与 Host admission 之间前移 committed revision，bridge 使用 conflict 回执中的最新
 revision 和新 command ID 重试；不可重试的拒绝投影为 `run.error`，不能静默丢弃。该同步适配不创建第二 mailbox、
 receipt cache 或 root-controller authority，Host lifecycle 仍只在 applied receipt 后执行自己的 abort。
+
+历史 Session 的 `resume_session` 还是 presentation admission barrier：先在唯一 Coordinator 中提交通用 restart facts，
+再完成 Subagent Provider/sandbox process authority cleanup，随后 TUI await readiness、重读 Store head，最后才提交前台
+navigation。第一次 compatibility/persisted load 只用于注册 admission，不能在 recovery 改写 revision 后继续作为 replay
+输入。非可恢复 running Tool 收敛为 unknown failure，未 dispatch work 安全取消；exact durable interaction、approval queue
+与 continuation 保留。TUI crash projection 只停止 spinner、显示 unknown 或本地取消，不产生用户批准、拒绝或取消事实。
 
 `RuntimeSessionCoordinator` 的 Workspace、Project、user、recovery identity 与 Artifact evidence 是 retained
 Session 的不可变身份，Host recovery 重复 `ensure` 时必须继续严格校验。`interactionMode` 则是可变的、已持久化

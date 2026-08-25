@@ -1,11 +1,12 @@
 import type { SessionData } from '#app/session-types';
 import { createInitialState } from './initialState.js';
 import { handleEventAction, handleRuntimeEventAction } from './reducers/handleEvent.js';
-import { findBlockById, replaceBlockById } from './reducers/helpers.js';
+import { finalizeLastTurnStreaming, findBlockById, replaceBlockById } from './reducers/helpers.js';
 import type { RuntimePresentationEvent } from './runtime-presentation';
 import type { InterruptState, OutputBlock, TuiState } from './types.js';
 
 export const TUI_REPLAY_CANCELLED_TEXT = '用户取消执行（会话恢复时交互未完成）';
+export const TUI_REPLAY_UNKNOWN_TEXT = '执行已中断，退出前的结果无法确认；不会自动重试';
 
 function withoutPendingTool(state: TuiState, toolCallId: string): TuiState {
   if (!state.pendingToolCalls[toolCallId]) return state;
@@ -71,6 +72,39 @@ function locallyCancelTool(state: TuiState, toolCallId: string): TuiState {
   );
 }
 
+function locallyMarkToolUnknown(state: TuiState, toolCallId: string): TuiState {
+  const materialized = materializeReplayTool(state, toolCallId);
+  const active = materialized.turns
+    .flatMap((turn) => turn.blocks)
+    .some(
+      (block) =>
+        (block.kind === 'tool_card' &&
+          block.callId === toolCallId &&
+          (block.status === 'queued' || block.status === 'running')) ||
+        (block.kind === 'tool_summary' &&
+          block.tools.some(
+            (tool) =>
+              tool.callId === toolCallId && (tool.status === 'queued' || tool.status === 'running'),
+          )),
+    );
+  if (!active) return withoutPendingTool(materialized, toolCallId);
+  const name = visibleToolName(materialized, toolCallId);
+  if (!name) return withoutPendingTool(materialized, toolCallId);
+  return withoutPendingTool(
+    handleEventAction(materialized, {
+      type: 'tool_done',
+      data: {
+        call_id: toolCallId,
+        name,
+        ok: false,
+        summary: TUI_REPLAY_UNKNOWN_TEXT,
+        status: 'error',
+      },
+    }),
+    toolCallId,
+  );
+}
+
 function locallyResolveQuestion(state: TuiState, blockId: number): TuiState {
   const block = findBlockById(state, blockId);
   if (block?.kind !== 'question') return state;
@@ -130,7 +164,9 @@ function clearRecoveredInteractionUi(
         block.kind === 'subagent' && block.status === 'suspended' && block.awaitingApproval
           ? {
               ...block,
-              status: 'running' as const,
+              status: 'cancelled' as const,
+              summary: TUI_REPLAY_CANCELLED_TEXT,
+              error: TUI_REPLAY_CANCELLED_TEXT,
               awaitingApproval: false,
               approvingStepIndex: undefined,
             }
@@ -166,6 +202,15 @@ export function recoverPendingInteractionsForTui(
     (event): event is Extract<RuntimePresentationEvent, { type: 'auto_review.requested' }> =>
       event.type === 'auto_review.requested',
   );
+  const durablyAuthorizedToolCalls = new Set(
+    runtimeEvents.flatMap((event) => {
+      if (event.type === 'approval.granted') return [event.toolCallId];
+      if (event.type === 'approval.batch_released') {
+        return event.matches.map((match: { toolCallId: string }) => match.toolCallId);
+      }
+      return [];
+    }),
+  );
 
   let next = state;
   for (const request of requestedAutoReviews) {
@@ -197,14 +242,55 @@ export function recoverPendingInteractionsForTui(
     // A started call or durable invocation intent crossed the side-effect
     // boundary. Do not manufacture a cancelled result; that outcome remains
     // unknown and belongs to Runtime reconciliation.
-    if (toolCallId && !executionOutcomeUnknown) next = locallyCancelTool(next, toolCallId);
+    if (toolCallId) {
+      next = executionOutcomeUnknown
+        ? locallyMarkToolUnknown(next, toolCallId)
+        : locallyCancelTool(next, toolCallId);
+    }
     if (pending.kind === 'input') next = locallyResolveQuestion(next, pending.blockId);
     next = clearRecoveredInteractionUi(next, {
       toolCallId,
       clearPendingPlan: pending.kind === 'plan_review',
     });
   }
-  return next;
+
+  const unknownToolCalls = new Set([...startedToolCalls, ...uncertainToolCalls]);
+  for (const toolCallId of unknownToolCalls) next = locallyMarkToolUnknown(next, toolCallId);
+  for (const toolCallId of Object.keys(next.pendingToolCalls)) {
+    if (durablyAuthorizedToolCalls.has(toolCallId)) continue;
+    next = unknownToolCalls.has(toolCallId)
+      ? locallyMarkToolUnknown(next, toolCallId)
+      : locallyCancelTool(next, toolCallId);
+  }
+
+  next = {
+    ...next,
+    turns: next.turns.map((turn) => ({
+      blocks: turn.blocks.map((block) => {
+        if (block.kind !== 'subagent') return block;
+        if (block.status === 'suspended') {
+          return {
+            ...block,
+            status: 'cancelled' as const,
+            summary: TUI_REPLAY_CANCELLED_TEXT,
+            error: TUI_REPLAY_CANCELLED_TEXT,
+            awaitingApproval: false,
+            approvingStepIndex: undefined,
+          };
+        }
+        if (block.status !== 'running') return block;
+        return {
+          ...block,
+          status: 'error' as const,
+          summary: TUI_REPLAY_UNKNOWN_TEXT,
+          error: TUI_REPLAY_UNKNOWN_TEXT,
+          awaitingApproval: false,
+          approvingStepIndex: undefined,
+        };
+      }),
+    })),
+  };
+  return finalizeLastTurnStreaming(next);
 }
 
 /** Replay is intentionally RuntimePresentationEvent-only.  Graph checkpoint messages are

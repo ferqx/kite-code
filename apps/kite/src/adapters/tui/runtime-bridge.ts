@@ -103,7 +103,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     publish: (notification: RuntimeNotification) => void,
   ): Promise<void> {
     const authority = this.#sessions.get(sessionId);
-    if (!this.#manager.recoverRuntimeState(sessionId) || !authority) return;
+    if (!(await this.#manager.recoverRuntimeState(sessionId)) || !authority) return;
     authority.revision += 1;
     publish(this.#notification(sessionId, 'session'));
   }
@@ -396,6 +396,11 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
                 sessionId,
               });
               return this.#runtimeClient(runtime);
+            };
+          }
+          if (property === 'waitForSessionReady') {
+            return async (sessionId: string): Promise<void> => {
+              await this.#awaitSessionReadiness(sessionId);
             };
           }
           if (property === 'getRuntime') {

@@ -7,6 +7,8 @@ import {
   runtimeHostStateNormalizeToolOutcomeEvent,
 } from '@kite/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { createTestRuntimeEffectExecutor } from '../helpers/runtime-model';
+import { createMockModel } from '../mock-model';
 
 const OCCURRED_AT = '2026-08-25T00:00:00.000Z';
 const RECOVERY_KEY = '0'.repeat(64);
@@ -21,7 +23,7 @@ function initial(): RuntimeState {
   });
 }
 
-function approvalEvent(result: 'approve' | 'escalate') {
+function approvalEvent(result: 'approve' | 'escalate' | 'reject') {
   return {
     type: 'auto_review.completed' as const,
     reviewId: 'review-parent-1',
@@ -36,15 +38,23 @@ function approvalEvent(result: 'approve' | 'escalate') {
             reviewerModelName: 'fixture',
             durationMs: 1,
           }
-        : {
-            ok: false as const,
-            approved: false as const,
-            escalatedToUser: true as const,
-            failureType: 'invalid_response' as const,
-            reason: 'reviewer response is not canonical',
-            reviewerModelName: 'fixture',
-            durationMs: 1,
-          },
+        : result === 'escalate'
+          ? {
+              ok: false as const,
+              approved: false as const,
+              escalatedToUser: true as const,
+              failureType: 'invalid_response' as const,
+              reason: 'reviewer response is not canonical',
+              reviewerModelName: 'fixture',
+              durationMs: 1,
+            }
+          : {
+              ok: true as const,
+              approved: false as const,
+              reason: 'reviewer rejected the child operation',
+              reviewerModelName: 'fixture',
+              durationMs: 1,
+            },
   } satisfies RuntimeEvent;
 }
 
@@ -159,5 +169,40 @@ describe('auto-review parent lifecycle', () => {
     expect(next.pendingApprovals.has('review-parent-1')).toBe(false);
     const late = reduceRuntimeState(next, approvalEvent('approve'));
     expect(late).toEqual(next);
+  });
+
+  test('a reviewer rejection settles the suspended parent capability before its Tool terminal', async () => {
+    const state = suspendedParentState();
+    const executor = createTestRuntimeEffectExecutor({
+      config: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        modelName: 'fixture',
+        sandbox: { enabled: false },
+      },
+      model: createMockModel([]),
+    });
+
+    const events = await executor(
+      { type: 'run_auto_review', reviewId: 'review-parent-1', toolCallId: 'task-parent-1' },
+      state,
+    );
+    expect(events.map((event) => event.type)).toEqual([
+      'capability.reconciliation_resolved',
+      'auto_review.completed',
+    ]);
+
+    let after = state;
+    for (const event of events) {
+      after = reduceRuntimeState(
+        after,
+        runtimeHostStateNormalizeToolOutcomeEvent(event, after, OCCURRED_AT),
+      );
+    }
+    assertAgentStateInvariants(after);
+    expect(after.capabilities.invocations['parent-invocation-1']?.status).toBe('failed');
+    expect(after.tools.calls['task-parent-1']?.status).toBe('rejected');
   });
 });
