@@ -14,33 +14,10 @@ import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
-
-async function waitForCompleteStartupSurface(tui: PtyProcess): Promise<string> {
-  let readyViewport = '';
-  await waitForCondition(
-    () => {
-      const viewport = tui.viewport();
-      if (
-        !screenContains(viewport, 'workspace') ||
-        !screenContains(viewport, '❯') ||
-        !screenContains(viewport, 'Kite Code') ||
-        !screenContains(viewport, 'mock-model') ||
-        screenContains(viewport, '/model')
-      ) {
-        return false;
-      }
-      readyViewport = viewport;
-      return true;
-    },
-    'complete startup prompt surface',
-    10_000,
-  );
-  return readyViewport;
-}
 
 describe('TUI PTY System — Startup', () => {
   const journey = createTuiSystemJourney();
@@ -74,39 +51,16 @@ describe('TUI PTY System — Startup', () => {
   });
 
   step(
-    'renders the prompt, footer, and Kite Code branding in a CI-backed PTY',
+    'keeps the fresh session interactive while silently ignoring an unknown historical Store',
     async () => {
-      // The initial readiness receipt can be followed by the asynchronous
-      // incompatible-Store projection. Observe one complete current viewport
-      // without replaying the one-shot input focus handshake or using raw
-      // cumulative output as a prompt receipt.
-      const output = await waitForCompleteStartupSurface(tui);
-      expect(screenContains(output, '❯')).toBe(true);
-      expect(screenContains(output, 'Kite Code')).toBe(true);
-      expect(screenContains(output, 'mock-model')).toBe(true);
-      expect(screenContains(output, '/model')).toBe(false);
-    },
-    TIMEOUT,
-  );
-
-  step(
-    'silently ignores an unknown historical Store without blocking the fresh session',
-    async () => {
-      const output = await waitForCompleteStartupSurface(tui);
-      expect(screenContains(output, '❯')).toBe(true);
-      expect(screenContains(output, '历史会话服务不可用')).toBe(false);
-      expect(screenContains(output, '请输入 /resume 重试')).toBe(false);
-      expect(screenContains(output, 'RuntimeStore format')).toBe(false);
-      expect(screenContains(output, '999')).toBe(false);
-    },
-    TIMEOUT,
-  );
-
-  step(
-    'shows an empty normal selector without exposing the ignored Store marker',
-    async () => {
+      // spawnReadyTui already proves the complete brand/model/prompt surface
+      // and focused empty input in one frame. Exercise that input after the
+      // asynchronous Store discovery instead of requiring Windows ConPTY to
+      // retain the header and prompt in the same 40-row viewport repaint.
       await submitCommand(tui, '/resume');
       const output = await waitForText(() => tui.viewport(), '暂无历史会话', 10_000);
+      expect(screenContains(output, '历史会话服务不可用')).toBe(false);
+      expect(screenContains(output, '请输入 /resume 重试')).toBe(false);
       expect(screenContains(output, '无法加载历史会话')).toBe(false);
       expect(screenContains(output, 'RuntimeStore format')).toBe(false);
       expect(screenContains(output, '999')).toBe(false);

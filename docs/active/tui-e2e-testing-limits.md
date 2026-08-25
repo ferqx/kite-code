@@ -154,9 +154,10 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
 21. Runtime format compatibility 必须分三条真实 TUI 证据：未知 source 静默忽略且不阻止新会话；已知历史会话在
     `/resume` 中无迁移标签、选中前 target 无该 session、选中后 exactly-once 可读；fixture 必须包含同时存在 WAL+SHM
     的真实 sidecar 形态，并证明源 database/WAL/SHM 的 identity、mtime 与字节始终不改。
-    未知 source 的后台发现可以在初始 `spawnReadyTui()` receipt 后再触发一次当前帧投影；startup 场景必须等待
-    当前 viewport 同帧包含完整 workspace/品牌/model/prompt surface，不能重复消费一次性 input focus marker，也不能
-    用累积 PTY 输出里的旧 prompt 证明 fresh session 仍可交互。
+    未知 source 的后台发现可以在初始 `spawnReadyTui()` receipt 后再触发一次当前帧投影；startup 场景必须在该
+    投影后通过一次 action-scoped 输入回执及其产品语义结果（例如 `/resume` 的正常空 selector）证明 fresh session
+    仍可交互，不能重复消费一次性 input focus marker、要求有限行 Windows viewport 同帧保留 header 与 prompt，
+    也不能用累积 PTY 输出里的旧 prompt 作为证明。
     已知历史 fixture 的持久 Workspace 必须与启动 TUI 的 worktree 不同，并断言选中后仍恢复消息且不显示 session-scoped
     failure；这证明 App 使用完整 persisted Workspace/Project identity，而不是偶然依赖相同路径。
     单个损坏会话只能显示脱敏 session-scoped failure，健康历史会话与普通输入继续可用。当前 target 使用 canonical

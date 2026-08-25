@@ -224,8 +224,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     默认 `main` readiness 必须在同一稳定 frame 中同时证明品牌/model/workspace chrome、空的活动主
     输入投影和用户实际可见的 `❯` prompt；仅出现标题、隐藏的 input listener marker 或尚未完成的
     分帧 prompt 都不构成可交互就绪。`spawnReadyTui()` 已经拥有一次主输入 focus/readiness handshake；
-    startup journey 的后续 checkpoint 只能等待当前 viewport 在同一帧具备完整 workspace/品牌/model/prompt
-    surface，不能再次消费该一次性 input marker。不得直接 `waitForText('❯')`，也不得让未产生 fresh output
+    startup journey 若要证明异步启动投影后仍可交互，必须通过 `submitCommand()` 等 action-scoped 输入回执和
+    对应的产品语义结果证明，不能要求 Windows ConPTY 在有限行 viewport 的一次重绘中继续同时保留 header 与
+    prompt，也不能再次消费该一次性 input marker。不得直接 `waitForText('❯')`，也不得让未产生 fresh output
     的全局 quiescence 等待复用早先累积帧。普通场景由 harness
     预写 `source: 'test'` 信任记录，验证门禁本身时使用
     `createTestWorkspace({ enforceWorkspaceTrust: true })`。子进程环境采用 allowlist，只继承平台启动、
