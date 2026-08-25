@@ -186,7 +186,8 @@ SHM 后继续打开，不能误报为未知 target 或让 exact session import �
 CLI explicit resume 在 `create_session` 前完成该边界，失败不得创建同 ID 空会话。State 26 file preimage 不导入；current-format
 named snapshot/preimage 还必须满足 head 上界、Workspace containment 和无 traversal，否则只隔离 exact session。
 State 26 的旧 Project ID 只有在 source session row 与 decoded State identity 完全一致、Workspace 为当前仍存在的绝对路径，
-且用 Coordinator 相同的 canonical realpath 算法重算出的 digest 与持久 evidence 相等时，才可静默映射为确定性的当前
+且用 Runtime Host `resolveProjectIdentity()`（也是 Coordinator admission 的唯一 Project digest owner）重算出的 digest
+与持久 evidence 相等时，才可静默映射为确定性的当前
 `project_<digest>` identity；named snapshot 必须通过同一映射。相对路径、已删除 Workspace、digest drift、row/state
 mismatch 或当前 State 27 identity 都不得被兼容器猜测重写。旧 source 继续 byte-for-byte 不变，无法证明 identity 的失败只
 隔离所选 session。对应正反、symlink 与 removed-workspace 证据位于

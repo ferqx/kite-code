@@ -110,6 +110,10 @@ Session 的不可变身份，Host recovery 重复 `ensure` 时必须继续严格
 Session 状态：TUI replay、Plan approval 或权限选择把最新模式投影到 `SessionRuntime` 后，`SessionManager` 必须先将
 该模式对齐到既有 coordinator，再校验其余不可变身份。该对齐只更新 coordinator 的 retained mode 镜像，不写第二份
 Runtime State，也不得掩盖 Workspace、Project、recovery key、sandbox 或 Artifact evidence 漂移。
+Project digest 的唯一 canonicalizer 是 Runtime Host `resolveProjectIdentity()`：Coordinator admission 复用该
+resolver 验证持久 digest。Builtin `canonicalPathForComparison()` 继续负责 sandbox/Tool 的 Windows
+case-insensitive containment 与 equality，但不得再对它的 case-folded spelling 二次哈希；否则 drive letter、8.3
+alias 或 native realpath casing 会让同一个 Workspace 在 fresh session 创建时产生两个 Project identity。
 
 Approval rejection 的 durable settlement 同样只由当前 turn 的事实决定：Runner 在 sibling 收敛后的 `stop` 边界
 只检查 `createdAtTurnId` 等于 live `turnId` 的 rejected call、未终结 Tool 与 queue record；`activeTaskId` 不能替代

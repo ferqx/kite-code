@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ContextCompactionCheckpoint, RuntimeEvent } from '@kite/agent-kernel';
 import {
@@ -11,8 +11,7 @@ import {
   createChatModel,
   expectedCompactionSourceDigest,
 } from '@kite/builtin-runtime/model';
-import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
-import type { RuntimeHostExecutionServices } from '@kite/runtime-host';
+import { type RuntimeHostExecutionServices, resolveProjectIdentity } from '@kite/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
@@ -39,6 +38,9 @@ const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
 const snapshot = registry.snapshot();
 const builtinToolCatalog = createBuiltinToolCatalogProjection(snapshot);
 const capabilityExecution = createRuntimeHostCapabilityExecutionPortFromSnapshot(snapshot);
+const retainedWorkspaceRoot = mkdtempSync(join(tmpdir(), 'kite-retained-workspace-'));
+const retainedWorkspace = join(retainedWorkspaceRoot, 'workspace');
+mkdirSync(retainedWorkspace);
 
 function runtimeStoreView(
   services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>,
@@ -54,11 +56,10 @@ function runtimeStoreView(
 }
 
 function projectIdentityForWorkspace(workspace: string) {
+  const project = resolveProjectIdentity(workspace);
   return {
     projectId: 'project_retained_coordinator',
-    canonicalWorkspaceDigest: `sha256:${createHash('sha256')
-      .update(canonicalPathForComparison(workspace))
-      .digest('hex')}` as const,
+    canonicalWorkspaceDigest: project.workspaceDigest,
   };
 }
 
@@ -73,7 +74,7 @@ function modelRuntime(workspace: string, state: RuntimeState): InstalledKiteRunt
 }
 
 function identity(sessionId: string): RuntimeSessionCoordinatorIdentity {
-  const workspace = '/tmp/retained-coordinator';
+  const workspace = retainedWorkspace;
   return {
     sessionId,
     userId: 'tui-user',
@@ -99,8 +100,8 @@ function requestedState(sessionId: string) {
   const state = createRuntimeHostStateInitialState({
     threadId: sessionId,
     userId: 'tui-user',
-    workspace: '/tmp/retained-coordinator',
-    ...projectIdentityForWorkspace('/tmp/retained-coordinator'),
+    workspace: retainedWorkspace,
+    ...projectIdentityForWorkspace(retainedWorkspace),
     recoveryIdentityKey: 'a'.repeat(64),
   });
   state.transcript.messages = [
@@ -148,8 +149,8 @@ function autoReviewState(
   let state = createRuntimeHostStateInitialState({
     threadId: sessionId,
     userId: 'tui-user',
-    workspace: '/tmp/retained-coordinator',
-    ...projectIdentityForWorkspace('/tmp/retained-coordinator'),
+    workspace: retainedWorkspace,
+    ...projectIdentityForWorkspace(retainedWorkspace),
     recoveryIdentityKey: 'a'.repeat(64),
   });
   state = reduceRuntimeState(state, {
@@ -168,7 +169,7 @@ function autoReviewState(
     fullModePolicyBypassAllowed: false,
     approval: {
       scope: 'once',
-      cwd: '/tmp/retained-coordinator',
+      cwd: retainedWorkspace,
       threadId: sessionId,
       tool: toolName,
       command: 'printf retained',
@@ -188,8 +189,8 @@ function verificationState(sessionId: string) {
   const state = createRuntimeHostStateInitialState({
     threadId: sessionId,
     userId: 'tui-user',
-    workspace: '/tmp/retained-coordinator',
-    ...projectIdentityForWorkspace('/tmp/retained-coordinator'),
+    workspace: retainedWorkspace,
+    ...projectIdentityForWorkspace(retainedWorkspace),
     recoveryIdentityKey: 'a'.repeat(64),
   });
   state.activeTaskId = 'verification-task';
@@ -257,16 +258,16 @@ function checkpointFor(
   };
 }
 
-function createFixture(
-  sessionId: string,
-  state = createRuntimeHostStateInitialState({
-    threadId: sessionId,
-    userId: 'tui-user',
-    workspace: '/tmp/retained-coordinator',
-    ...projectIdentityForWorkspace('/tmp/retained-coordinator'),
-    recoveryIdentityKey: 'a'.repeat(64),
-  }),
-) {
+function createFixture(sessionId: string, requested?: RuntimeState, workspace = retainedWorkspace) {
+  const state =
+    requested ??
+    createRuntimeHostStateInitialState({
+      threadId: sessionId,
+      userId: 'tui-user',
+      workspace,
+      ...projectIdentityForWorkspace(workspace),
+      recoveryIdentityKey: 'a'.repeat(64),
+    });
   const root = mkdtempSync(join(process.cwd(), '.kite-retained-coordinator-'));
   const databasePath = join(root, 'runtime.db');
   const stateStorage = createRuntimeHostStateStorageBinding();
@@ -309,7 +310,7 @@ function createFixture(
     events: [],
     snapshot: state,
   });
-  const runtime = modelRuntime('/tmp/retained-coordinator', state);
+  const runtime = modelRuntime(workspace, state);
   const binding = createRuntimeSessionCoordinatorBinding();
   let factoryCalls = 0;
   const factory = (workspace: string) => {
@@ -356,6 +357,46 @@ function dependencies(
 }
 
 describe('retained TUI session coordinator', () => {
+  afterAll(() => {
+    rmSync(retainedWorkspaceRoot, { recursive: true, force: true });
+  });
+
+  test('admits the durable Project identity resolved for one existing Workspace', async () => {
+    const sessionId = 'retained-resolved-project-identity';
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'kite-resolved-project-identity-'));
+    const workspace = join(workspaceRoot, 'WorkspaceWithANameLongerThanEight');
+    mkdirSync(workspace);
+    const project = resolveProjectIdentity(workspace);
+    const state = createRuntimeHostStateInitialState({
+      threadId: sessionId,
+      userId: 'tui-user',
+      workspace,
+      projectId: project.projectId,
+      canonicalWorkspaceDigest: project.workspaceDigest,
+      recoveryIdentityKey: 'a'.repeat(64),
+    });
+    const fixture = createFixture(sessionId, state, workspace);
+    const access = fixture.binding.access();
+    try {
+      expect(() =>
+        access.ensure({
+          sessionId,
+          userId: 'tui-user',
+          workspace,
+          projectId: project.projectId,
+          canonicalWorkspaceDigest: project.workspaceDigest,
+          interactionMode: 'accept_edits',
+          recoveryIdentityKey: 'a'.repeat(64),
+        }),
+      ).not.toThrow();
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   test('Host recovery ensures one Kernel/composition identity and fails closed on drift or double bind', async () => {
     const sessionId = 'retained-identity';
     const fixture = createFixture(sessionId);

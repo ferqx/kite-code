@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
   assertRestoredCapabilityArtifactEvidence,
   type BuiltinToolCatalogProjection,
@@ -11,6 +10,7 @@ import {
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import {
   type RuntimeHostExecutionServices,
+  resolveProjectIdentity,
   restoreRuntimeHostStateSession,
 } from '@kite/runtime-host';
 import {
@@ -189,11 +189,14 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   ) {
     this.sessionId = identity.sessionId;
     this.#workspace = canonicalPathForComparison(identity.workspace);
-    const workspaceDigest =
-      `sha256:${createHash('sha256').update(this.#workspace).digest('hex')}` as const;
+    // Project identity owns its canonical filesystem spelling. Sandbox path
+    // comparison intentionally case-folds Windows paths, but re-hashing that
+    // separate projection would invalidate durable identities created from
+    // native realpaths (notably 8.3 aliases and drive-letter casing).
+    const projectIdentity = resolveProjectIdentity(identity.workspace);
     if (
       !identity.projectId.startsWith('project_') ||
-      identity.canonicalWorkspaceDigest !== workspaceDigest
+      identity.canonicalWorkspaceDigest !== projectIdentity.workspaceDigest
     ) {
       throw new Error('Runtime session Project identity is invalid.');
     }
