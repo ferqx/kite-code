@@ -9,7 +9,9 @@ import type { ProjectIdentity } from '@kite/runtime-spi';
  */
 export function resolveProjectIdentity(workspace: string): ProjectIdentity {
   if (!workspace) throw new Error('Workspace must be non-empty.');
-  const canonicalWorkspace = realpathSync.native(resolve(workspace));
+  const resolvedWorkspace = realpathSync.native(resolve(workspace));
+  const canonicalWorkspace =
+    process.platform === 'win32' ? resolvedWorkspace.toLowerCase() : resolvedWorkspace;
   const digest = `sha256:${createHash('sha256').update(canonicalWorkspace).digest('hex')}` as const;
   return Object.freeze({
     projectId: `project_${digest.slice('sha256:'.length)}`,

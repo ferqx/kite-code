@@ -12,7 +12,7 @@
 
 Agent Kernel、Runtime Host、Builtin Runtime 与 App composition 位于同一可信进程。Package/export、对象 checksum 或 HMAC 不能隔离同一进程中的恶意代码，因此同进程 typed seam 不使用 secret-key authenticity。Client input、磁盘 bytes、子进程输出、远端 endpoint 和 OS resource identity仍在各自真实边界重新验证。
 
-当前不建立持久 Project authority。Project identity 是 canonical Workspace 的确定性标识；Session 创建只接受 Workspace/Session facts。不存在 `ProjectIdentityStore`、`ProjectHandle`、installation revision/nonce/expiry，也不存在进程级 single-Host 全局锁。App 仍是唯一 composition root，Host/Store operation 仍各有一个 production owner。
+当前不建立持久 Project authority。Project identity 是 canonical Workspace 的确定性标识；Windows 上 canonical Workspace 在摘要前统一为不区分大小写的路径表示，确保 identity 生成与 Runtime 校验采用同一语义。Session 创建只接受 Workspace/Session facts。不存在 `ProjectIdentityStore`、`ProjectHandle`、installation revision/nonce/expiry，也不存在进程级 single-Host 全局锁。App 仍是唯一 composition root，Host/Store operation 仍各有一个 production owner。
 
 ## Authority sequence
 

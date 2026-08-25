@@ -500,6 +500,7 @@
         "apps/kite/src/bootstrap/runtime/state-runtime.ts"
       ],
       "documents": [
+        "docs/active/runtime-authority-boundary.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/cancel-resume-cleanup.md",
         "docs/active/layer-boundary-enforcement.md",
@@ -583,6 +584,7 @@
         "apps/kite/src/bootstrap/runtime/turn-coordinator.ts"
       ],
       "documents": [
+        "docs/active/runtime-authority-boundary.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/layer-boundary-enforcement.md",
         "docs/active/runtime-resilience-qualification.md",
@@ -1268,6 +1270,7 @@
         "apps/kite/src/bootstrap/runtime/**"
       ],
       "documents": [
+        "docs/active/runtime-authority-boundary.md",
         "docs/active/cancel-resume-cleanup.md",
         "docs/active/execution-boundary.md",
         "docs/active/completion-guard.md",
@@ -1305,6 +1308,7 @@
       ],
       "excludeSources": ["apps/kite/src/tui/**"],
       "documents": [
+        "docs/active/runtime-authority-boundary.md",
         "docs/active/layer-boundary-enforcement.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/sqlite-runtime-log-query.md",
@@ -1374,6 +1378,7 @@
         "tests/tui-system/scenarios/sandbox-mode.test.ts"
       ],
       "documents": [
+        "docs/active/runtime-authority-boundary.md",
         "docs/active/authorization.md",
         "docs/active/tool-gated-autonomy.md",
         "docs/active/cancel-resume-cleanup.md",

@@ -11,7 +11,7 @@ describe('Workspace project identity', () => {
       const workspace = join(root, 'workspace');
       const alias = join(root, 'alias');
       await mkdir(workspace);
-      await symlink(workspace, alias);
+      await symlink(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
       const first = resolveProjectIdentity(workspace);
       const second = resolveProjectIdentity(alias);
       expect(second).toEqual(first);
@@ -20,4 +20,14 @@ describe('Workspace project identity', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test.skipIf(process.platform !== 'win32')(
+    'normalizes Windows path case before deriving the workspace digest',
+    () => {
+      const lowerCaseIdentity = resolveProjectIdentity(process.cwd().toLowerCase());
+      const upperCaseIdentity = resolveProjectIdentity(process.cwd().toUpperCase());
+
+      expect(upperCaseIdentity).toEqual(lowerCaseIdentity);
+    },
+  );
 });
