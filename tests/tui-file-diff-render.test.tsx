@@ -24,10 +24,10 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import type { ReactElement, ReactNode } from 'react';
-import BlockRenderer from '../src/app/tui/components/BlockRenderer';
-import { renderFileSummary } from '../src/app/tui/components/ToolCardBlock';
-import { darkTheme } from '../src/app/tui/theme';
-import type { OutputBlock } from '../src/app/tui/types';
+import BlockRenderer from '../apps/kite/src/tui/components/BlockRenderer';
+import { renderFileSummary } from '../apps/kite/src/tui/components/ToolCardBlock';
+import { darkTheme } from '../apps/kite/src/tui/theme';
+import type { OutputBlock } from '../apps/kite/src/tui/types';
 
 interface LabeledLine {
   /** 继承自最近祖先 Box 的背景色 / bg inherited from nearest ancestor Box */

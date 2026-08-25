@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadMcpConfigCatalog } from '@/core/config';
+import { loadMcpConfigCatalog } from '#app/config';
 import {
   computeProjectMcpConfigDigest,
   decideProjectMcpServer,
-} from '@/core/config/mcp-project-approvals';
+} from '#app/config/mcp-project-approvals';
 
 describe('project MCP approval', () => {
   let root: string;
@@ -20,9 +20,9 @@ describe('project MCP approval', () => {
     root = mkdtempSync(join(tmpdir(), 'kite-mcp-approval-'));
     home = join(root, 'home');
     workspace = join(root, 'workspace');
-    sourcePath = join(workspace, '.mcp.json');
+    sourcePath = join(workspace, '.kite-code', 'mcp.json');
     mkdirSync(join(home, '.kite-code'), { recursive: true });
-    mkdirSync(workspace, { recursive: true });
+    mkdirSync(join(workspace, '.kite-code'), { recursive: true });
     previousHome = process.env.KITE_CODE_HOME;
     previousCwd = process.cwd();
     process.env.KITE_CODE_HOME = home;
@@ -43,22 +43,22 @@ describe('project MCP approval', () => {
   test('digest is key-order independent but includes array order and unknown fields', () => {
     const first = computeProjectMcpConfigDigest({
       serverName: 'project',
-      sourceKind: 'project_mcp_json',
+      sourceKind: 'project',
       rawConfig: { command: 'node', args: ['a', 'b'], futureBehavior: true },
     });
     const reordered = computeProjectMcpConfigDigest({
       serverName: 'project',
-      sourceKind: 'project_mcp_json',
+      sourceKind: 'project',
       rawConfig: { futureBehavior: true, args: ['a', 'b'], command: 'node' },
     });
     const changedArray = computeProjectMcpConfigDigest({
       serverName: 'project',
-      sourceKind: 'project_mcp_json',
+      sourceKind: 'project',
       rawConfig: { command: 'node', args: ['b', 'a'], futureBehavior: true },
     });
     const changedUnknown = computeProjectMcpConfigDigest({
       serverName: 'project',
-      sourceKind: 'project_mcp_json',
+      sourceKind: 'project',
       rawConfig: { command: 'node', args: ['a', 'b'], futureBehavior: false },
     });
 
@@ -128,31 +128,6 @@ describe('project MCP approval', () => {
     const changed = loadMcpConfigCatalog();
     expect(changed.projectApprovals[0]?.status).toBe('pending_approval');
     expect(changed.connectableServers.project).toBeUndefined();
-  });
-
-  test('keeps Phase 0 project_mcp_json approval records valid for the legacy source', () => {
-    const raw = { command: 'node', args: ['server.js'] };
-    writeProjectConfig(raw);
-    const legacyDigest = computeProjectMcpConfigDigest({
-      serverName: 'project',
-      sourceKind: 'project_mcp_json',
-      rawConfig: raw,
-    });
-    expect(
-      decideProjectMcpServer({
-        workspace,
-        serverName: 'project',
-        sourceKind: 'project_mcp_json',
-        sourcePath,
-        expectedConfigDigest: legacyDigest,
-        decision: 'approved',
-      }).status,
-    ).toBe('recorded');
-
-    const catalog = loadMcpConfigCatalog();
-    expect(catalog.effective.get('project')?.source.kind).toBe('project_mcp_json');
-    expect(catalog.effective.get('project')?.approvalStatus).toBe('approved');
-    expect(catalog.connectableServers.project?.command).toBe('node');
   });
 
   test('reject persists and config change returns to pending', () => {

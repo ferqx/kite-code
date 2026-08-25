@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  DEFAULT_CIRCUIT_BREAKER_CONFIG,
-  evaluateCircuitBreaker,
-  type RejectionEntry,
-} from '../../src/core/execution/circuit-breaker';
+  DEFAULT_CIRCUIT_BREAKER_CONFIG_ as DEFAULT_CIRCUIT_BREAKER_CONFIG,
+  evaluateAutoReviewCircuitBreaker as evaluateCircuitBreaker,
+  type AutoReviewRejectionEntry as RejectionEntry,
+} from '@kite/agent-kernel';
 
 const cfg = DEFAULT_CIRCUIT_BREAKER_CONFIG;
 
@@ -34,7 +34,7 @@ describe('evaluateCircuitBreaker — approval path', () => {
 
   test('approval prunes old history entries outside window', () => {
     const old = makeEntry('shell_execute', 'old rejection', Date.now() - 60_000); // 60s ago, window is 30s
-    const result = evaluateCircuitBreaker(1, [old], cfg, false);
+    const result = evaluateCircuitBreaker(1, [old], cfg, false, undefined, Date.now());
     expect(result.newRejectionHistory).toHaveLength(0); // old entry pruned
     expect(result.newConsecutiveRejects).toBe(0);
   });
@@ -116,6 +116,7 @@ describe('evaluateCircuitBreaker — rejection path', () => {
       cfg,
       true,
       makeEntry('new-tool', 'new rejection'),
+      now,
     );
     // Old entries should be pruned, only the new one remains
     expect(result.newRejectionHistory).toHaveLength(1);

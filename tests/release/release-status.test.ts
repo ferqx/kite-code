@@ -1,35 +1,35 @@
 import { describe, expect, test } from 'bun:test';
-import { parseArgs } from '../../src/app/cli/index';
-import {
-  createReleaseControlledAgentConfigV1,
-  type ReleaseCompositionV1,
-  resolveReleaseCompositionV1,
-} from '../../src/app/release/composition-root';
-import {
-  formatReleaseStatusV1,
-  projectReleaseStatusV1,
-} from '../../src/app/release/status-projection';
 import {
   type AgentConfig,
-  EMBEDDED_RELEASE_PROFILES_V1,
-  SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1,
-} from '../../src/core/config';
+  EMBEDDED_RELEASE_PROFILES_,
+  SUPPORTED_PRODUCTION_EXECUTION_TARGETS_,
+} from '#app/config';
+import { parseArgs } from '../../apps/kite/src/cli/index';
+import {
+  createReleaseControlledAgentConfig,
+  type ReleaseComposition,
+  resolveReleaseComposition,
+} from '../../apps/kite/src/release/composition-root';
+import {
+  formatReleaseStatus,
+  projectReleaseStatus,
+} from '../../apps/kite/src/release/status-projection';
 
-function config(releaseProfileV1 = false): AgentConfig {
+function config(releaseProfile = false): AgentConfig {
   return {
     apiKey: 'must-not-appear',
     baseURL: 'https://secret-route.example.test',
     modelName: 'private-model',
     providerName: 'private-provider',
     providerType: 'openai-compatible',
-    features: { releaseProfileV1 },
+    features: { releaseProfile },
     sandbox: { enabled: true },
   };
 }
 
 describe('App release composition and status projection', () => {
   test('keeps ordinary development entrypoints inactive without artifact authority', () => {
-    const composition = resolveReleaseCompositionV1({
+    const composition = resolveReleaseComposition({
       config: config(true),
       artifactReleaseProfileV1Enabled: false,
       profileId: 'internal-dogfood',
@@ -41,13 +41,13 @@ describe('App release composition and status projection', () => {
       production: false,
       reason: 'artifact_disabled',
     });
-    expect(formatReleaseStatusV1(projectReleaseStatusV1({ composition }))).toContain(
+    expect(formatReleaseStatus(projectReleaseStatus({ composition }))).toContain(
       'Release control: inactive (artifact_disabled)',
     );
   });
 
   test('composes an artifact-authorized internal ceiling before Runtime creation', () => {
-    const composition = resolveReleaseCompositionV1({
+    const composition = resolveReleaseComposition({
       config: config(true),
       artifactReleaseProfileV1Enabled: true,
       profileId: 'internal-dogfood',
@@ -60,7 +60,7 @@ describe('App release composition and status projection', () => {
       ],
     });
     expect(composition.active).toBe(true);
-    const controlled = createReleaseControlledAgentConfigV1({
+    const controlled = createReleaseControlledAgentConfig({
       config: config(true),
       composition,
     });
@@ -73,7 +73,7 @@ describe('App release composition and status projection', () => {
   });
 
   test('keeps distribution candidates separate from artifact authority and execution support', () => {
-    const composition = resolveReleaseCompositionV1({
+    const composition = resolveReleaseComposition({
       config: config(true),
       artifactReleaseProfileV1Enabled: true,
       profileId: 'limited-production',
@@ -86,12 +86,12 @@ describe('App release composition and status projection', () => {
       production: true,
       reason: 'production_artifact_authority_unconfigured',
     });
-    expect(SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1).toEqual([]);
+    expect(SUPPORTED_PRODUCTION_EXECUTION_TARGETS_).toEqual([]);
   });
 
   test('rejects every production profile before an authenticated artifact receipt exists', () => {
     expect(
-      resolveReleaseCompositionV1({
+      resolveReleaseComposition({
         config: config(true),
         artifactReleaseProfileV1Enabled: true,
         profileId: 'limited-production',
@@ -104,7 +104,7 @@ describe('App release composition and status projection', () => {
       reason: 'production_artifact_authority_unconfigured',
     });
     expect(
-      resolveReleaseCompositionV1({
+      resolveReleaseComposition({
         config: config(true),
         artifactReleaseProfileV1Enabled: true,
         profileId: 'internal-dogfood',
@@ -125,10 +125,10 @@ describe('App release composition and status projection', () => {
       active: true,
       production: true,
       distributionTargetIdentity: 'macos-15-arm64',
-      profile: EMBEDDED_RELEASE_PROFILES_V1['internal-dogfood'],
-    } as const satisfies ReleaseCompositionV1;
+      profile: EMBEDDED_RELEASE_PROFILES_['internal-dogfood'],
+    } as const satisfies ReleaseComposition;
     expect(() =>
-      createReleaseControlledAgentConfigV1({
+      createReleaseControlledAgentConfig({
         config: config(true),
         composition: forgedInternal,
       }),
@@ -138,10 +138,10 @@ describe('App release composition and status projection', () => {
       version: 1,
       active: true,
       production: true,
-      profile: EMBEDDED_RELEASE_PROFILES_V1['limited-production'],
-    } as unknown as ReleaseCompositionV1;
+      profile: EMBEDDED_RELEASE_PROFILES_['limited-production'],
+    } as unknown as ReleaseComposition;
     expect(() =>
-      createReleaseControlledAgentConfigV1({
+      createReleaseControlledAgentConfig({
         config: config(true),
         composition: forgedMissingIdentity,
       }),
@@ -152,24 +152,24 @@ describe('App release composition and status projection', () => {
       active: true,
       production: true,
       distributionTargetIdentity: 'future-supported-target',
-      profile: EMBEDDED_RELEASE_PROFILES_V1['limited-production'],
-    } as unknown as ReleaseCompositionV1;
+      profile: EMBEDDED_RELEASE_PROFILES_['limited-production'],
+    } as unknown as ReleaseComposition;
     expect(() =>
-      createReleaseControlledAgentConfigV1({
+      createReleaseControlledAgentConfig({
         config: config(true),
         composition: forgedUnsupportedIdentity,
       }),
     ).toThrow('production_artifact_authority_unconfigured');
 
     const forgedEnabledCapability = structuredClone(
-      EMBEDDED_RELEASE_PROFILES_V1['limited-production'],
+      EMBEDDED_RELEASE_PROFILES_['limited-production'],
     );
     forgedEnabledCapability.capabilities.shell = {
       maturity: 'experimental',
       maxRollout: 'canary',
     };
     expect(() =>
-      createReleaseControlledAgentConfigV1({
+      createReleaseControlledAgentConfig({
         config: config(true),
         composition: {
           version: 1,
@@ -183,25 +183,25 @@ describe('App release composition and status projection', () => {
   });
 
   test('status reveals release decisions but no credentials, paths, or route identities', () => {
-    const composition = resolveReleaseCompositionV1({
+    const composition = resolveReleaseComposition({
       config: config(true),
       artifactReleaseProfileV1Enabled: true,
       profileId: 'internal-dogfood',
       production: false,
     });
-    const serialized = JSON.stringify(projectReleaseStatusV1({ composition }));
+    const serialized = JSON.stringify(projectReleaseStatus({ composition }));
     expect(serialized).toContain('internal-dogfood');
     expect(serialized).not.toContain('must-not-appear');
     expect(serialized).not.toContain('secret-route');
     expect(serialized).not.toContain('private-provider');
   });
 
-  test('CLI can tighten releaseProfileV1 but cannot grant artifact authority', () => {
-    expect(() => parseArgs(['run', '--feature', 'releaseProfileV1=true'])).toThrow(
+  test('CLI can tighten releaseProfile but cannot grant artifact authority', () => {
+    expect(() => parseArgs(['run', '--feature', 'releaseProfile=true'])).toThrow(
       'release-controlled',
     );
-    expect(parseArgs(['run', '--feature', 'releaseProfileV1=false']).featureOverrides).toEqual({
-      releaseProfileV1: false,
+    expect(parseArgs(['run', '--feature', 'releaseProfile=false']).featureOverrides).toEqual({
+      releaseProfile: false,
     });
     expect(parseArgs(['run', '--release-status']).releaseStatus).toBe(true);
   });

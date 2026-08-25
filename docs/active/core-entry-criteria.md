@@ -1,10 +1,11 @@
-# Core entry criteria
+# Runtime package entry criteria
 
 状态：active
-读取时机：新增或重构 `src/core/` 功能、状态机、策略或执行引擎前。
-验证：对应分类所要求的单测、golden/replay 测试、ADR 与 `bun run check:core-boundary`。
+读取时机：新增或重构 Runtime capability、Kernel 状态机、策略、Host 生命周期或 App composition 前。
+验证：对应分类所要求的单测、产品恢复测试、ADR、`bun run check:core-boundary` 与 `bun run check:runtime-packages`。
 
-Classify every feature entering `src/core/` before implementation.
+实现前先按 production owner 分类，并把代码放入 `agent-kernel`、`runtime-host`、`runtime-spi`、
+`builtin-runtime`、`runtime-contract` 或 `apps/kite` 的唯一正确边界；已删除的 `src/core/` 不能重新成为落点。
 
 | Category | Meaning | Minimum evidence |
 |---|---|---|
@@ -15,4 +16,6 @@ Classify every feature entering `src/core/` before implementation.
 
 Existing examples: web/MCP/skills are Capabilities; auto and plan modes are Policy + Lifecycle; the Runtime Kernel is an Engine; loop mode is Policy + Lifecycle + Engine.
 
-Before merge, confirm category, required tests/docs, feature-flag need, InteractionState impact, lifecycle states, authorization/policy routing, and layer-boundary impact.
+Before merge, confirm category, production owner, required tests/docs, feature-flag need, State impact,
+lifecycle states, authorization/policy routing, and package-boundary impact. Capability 具体语义属于 Builtin，
+纯确定性决策属于 Kernel，通用生命周期属于 Host，具体依赖组合只属于 App。

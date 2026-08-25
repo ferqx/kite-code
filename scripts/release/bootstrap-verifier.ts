@@ -6,10 +6,10 @@ import {
   decodeSyntheticSignature,
   ReleaseArtifactError,
   type ReleaseArtifactLayout,
-  type ReleaseManifestV1,
+  type ReleaseManifest,
   releaseArtifactLayout,
   SYNTHETIC_PUBLIC_KEY_PEM,
-  type SyntheticSignatureBundleV1,
+  type SyntheticSignatureBundle,
 } from './artifact-layout';
 import { sha256Digest } from './canonical-json';
 
@@ -18,8 +18,8 @@ const MAX_SIGNATURE_BUNDLE_BYTES = 128 * 1024;
 
 export interface VerifiedSyntheticArtifact {
   layout: ReleaseArtifactLayout;
-  manifest: ReleaseManifestV1;
-  signature: SyntheticSignatureBundleV1;
+  manifest: ReleaseManifest;
+  signature: SyntheticSignatureBundle;
   canonicalManifestBytes: Uint8Array;
   /** Execute/load only these verified bytes; do not reopen `layout.payload`. */
   payloadBytes: Uint8Array;
@@ -65,7 +65,7 @@ export function verifyBootstrapArtifact(directory: string): VerifiedSyntheticArt
   if (sha256Digest(payloadBytes) !== manifest.payloadSha256) {
     throw new ReleaseArtifactError(
       'payload_digest_mismatch',
-      'Payload sha256 does not match ReleaseManifestV1.payloadSha256.',
+      'Payload sha256 does not match ReleaseManifest.payloadSha256.',
     );
   }
 

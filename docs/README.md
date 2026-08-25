@@ -2,7 +2,7 @@
 
 AI 请先读 [AGENTS.md](AGENTS.md) 获取简明工作流。本文件是 AI 与开发者共用的入口。
 
-当前总体架构见 [Kite Code 六概念 Runtime 架构](active/six-concept-runtime-architecture.md)：它把物理上的 `protocol → core → app` 三层与 Core 内部的 Agent、Runtime Kernel、Capability、Policy、Execution、Verification 六概念统一起来。
+当前总体架构见 [Kite Code 六概念 Runtime 架构](active/six-concept-runtime-architecture.md)：它以 `packages/runtime-contract`、`runtime-spi`、`agent-kernel`、`runtime-host`、`builtin-runtime`、`runtime-storage-sqlite` 与 `apps/kite` 的 workspace 依赖方向，落实 Agent、Runtime Kernel、Capability、Policy、Execution、Verification 六概念。
 
 ## 权威顺序
 

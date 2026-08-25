@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { sha256Digest } from '../../scripts/release/canonical-json';
-import { buildReleaseEvidenceBundleV1 } from '../../scripts/release/evidence-bundle';
+import { buildReleaseEvidenceBundle } from '../../scripts/release/evidence-bundle';
 import {
-  buildMaintainerSecurityReviewRecordV1,
-  type ReleaseArtifactIdentityV1,
-  type ReleaseEvidenceResultV1,
+  buildMaintainerSecurityReviewRecord,
+  type ReleaseArtifactIdentity,
+  type ReleaseEvidenceResult,
 } from '../../scripts/release/evidence-schema';
-import { buildSyntheticFoundationGateRecordV1 } from '../../scripts/release/foundation-gate';
+import { buildSyntheticFoundationGateRecord } from '../../scripts/release/foundation-gate';
 import {
-  buildReleaseGatePolicyV1,
-  evaluateReleaseGateV1,
-  type ReleaseGatePolicyV1,
+  buildReleaseGatePolicy,
+  evaluateReleaseGate,
+  type ReleaseGatePolicy,
 } from '../../scripts/release/gate-evaluator';
 
 const COMMIT = 'a'.repeat(40);
@@ -22,9 +22,9 @@ function digest(value: string): `sha256:${string}` {
 
 function policy(
   mode: 'synthetic_foundation' | 'github_release' = 'synthetic_foundation',
-): ReleaseGatePolicyV1 {
-  return buildReleaseGatePolicyV1({
-    schema: 'ReleaseGatePolicyV1',
+): ReleaseGatePolicy {
+  return buildReleaseGatePolicy({
+    schema: 'ReleaseGatePolicy',
     policyId: 'release-foundation-policy-v1',
     mode,
     canonicalRepository: 'ferqx/kite-code',
@@ -74,7 +74,7 @@ function policy(
   });
 }
 
-function artifactIdentity(gatePolicyDigest: string): ReleaseArtifactIdentityV1 {
+function artifactIdentity(gatePolicyDigest: string): ReleaseArtifactIdentity {
   return {
     canonicalRepository: 'ferqx/kite-code',
     repositoryId: 'R_kgDOSKbi8g',
@@ -88,10 +88,10 @@ function artifactIdentity(gatePolicyDigest: string): ReleaseArtifactIdentityV1 {
 }
 
 function result(
-  identity: ReleaseArtifactIdentityV1,
-  input: Pick<ReleaseEvidenceResultV1, 'evidenceId' | 'kind' | 'gate'> &
-    Partial<Pick<ReleaseEvidenceResultV1, 'capability' | 'status'>>,
-): ReleaseEvidenceResultV1 {
+  identity: ReleaseArtifactIdentity,
+  input: Pick<ReleaseEvidenceResult, 'evidenceId' | 'kind' | 'gate'> &
+    Partial<Pick<ReleaseEvidenceResult, 'capability' | 'status'>>,
+): ReleaseEvidenceResult {
   return {
     evidenceId: input.evidenceId,
     kind: input.kind,
@@ -142,8 +142,8 @@ function fixture(options?: { verificationStatus?: 'passed' | 'failed'; omitG0?: 
       }),
     );
   }
-  const evidence = buildReleaseEvidenceBundleV1({
-    schema: 'ReleaseEvidenceV1',
+  const evidence = buildReleaseEvidenceBundle({
+    schema: 'ReleaseEvidence',
     evidenceBundleId: 'release-foundation-v1',
     generatedAt: EVALUATED_AT,
     artifactIdentity: identity,
@@ -157,16 +157,16 @@ function fixture(options?: { verificationStatus?: 'passed' | 'failed'; omitG0?: 
 }
 
 function githubResult(
-  identity: ReleaseArtifactIdentityV1,
-  input: Pick<ReleaseEvidenceResultV1, 'evidenceId' | 'kind' | 'gate'> &
-    Partial<Pick<ReleaseEvidenceResultV1, 'capability' | 'status'>> & {
+  identity: ReleaseArtifactIdentity,
+  input: Pick<ReleaseEvidenceResult, 'evidenceId' | 'kind' | 'gate'> &
+    Partial<Pick<ReleaseEvidenceResult, 'capability' | 'status'>> & {
       endedAt?: string;
       startedAt?: string;
       actorIdentity?: string;
       reviewerIdentity?: string;
       workflowSha?: string;
     },
-): ReleaseEvidenceResultV1 {
+): ReleaseEvidenceResult {
   const common = {
     evidenceId: input.evidenceId,
     kind: input.kind,
@@ -196,8 +196,8 @@ function githubResult(
       runAttempt: 1,
       actorIdentity: input.actorIdentity ?? reviewerIdentity,
     };
-    const maintainerReview = buildMaintainerSecurityReviewRecordV1({
-      schema: 'MaintainerSecurityReviewRecordV1',
+    const maintainerReview = buildMaintainerSecurityReviewRecord({
+      schema: 'MaintainerSecurityReviewRecord',
       reviewMode: 'single_maintainer',
       reviewerIdentity,
       reviewedAt,
@@ -276,7 +276,7 @@ function githubFixture(options?: {
 }) {
   const gatePolicy = policy('github_release');
   const identity = artifactIdentity(gatePolicy.policyDigest);
-  const results: ReleaseEvidenceResultV1[] = [
+  const results: ReleaseEvidenceResult[] = [
     githubResult(identity, {
       evidenceId: 'required-ci',
       kind: 'required_ci',
@@ -322,8 +322,8 @@ function githubFixture(options?: {
       }),
     );
   }
-  const evidence = buildReleaseEvidenceBundleV1({
-    schema: 'ReleaseEvidenceV1',
+  const evidence = buildReleaseEvidenceBundle({
+    schema: 'ReleaseEvidence',
     evidenceBundleId: 'github-release-candidate-v1',
     generatedAt: EVALUATED_AT,
     artifactIdentity: identity,
@@ -354,7 +354,7 @@ function githubFixture(options?: {
 
 describe('deterministic release Gate evaluator', () => {
   test('produces the non-distributable MS:2A-F foundation record', () => {
-    const record = buildSyntheticFoundationGateRecordV1();
+    const record = buildSyntheticFoundationGateRecord();
     expect(record.fixtureClass).toBe('synthetic_non_production');
     expect(record.distributable).toBe(false);
     expect(record.realSigningEnabled).toBe(false);
@@ -364,13 +364,13 @@ describe('deterministic release Gate evaluator', () => {
 
   test('replays an identity-bound synthetic foundation decision', () => {
     const { gatePolicy, identity, evidence } = fixture();
-    const first = evaluateReleaseGateV1({
+    const first = evaluateReleaseGate({
       policy: gatePolicy,
       evidence,
       artifactIdentity: identity,
       evaluatedAt: EVALUATED_AT,
     });
-    const replay = evaluateReleaseGateV1({
+    const replay = evaluateReleaseGate({
       policy: structuredClone(gatePolicy),
       evidence: structuredClone(evidence),
       artifactIdentity: structuredClone(identity),
@@ -392,7 +392,7 @@ describe('deterministic release Gate evaluator', () => {
 
   test('disables only the affected capability for a G3 failure', () => {
     const { gatePolicy, identity, evidence } = fixture({ verificationStatus: 'failed' });
-    const decision = evaluateReleaseGateV1({
+    const decision = evaluateReleaseGate({
       policy: gatePolicy,
       evidence,
       artifactIdentity: identity,
@@ -410,7 +410,7 @@ describe('deterministic release Gate evaluator', () => {
 
   test('blocks missing global evidence and artifact/policy identity mismatch', () => {
     const missing = fixture({ omitG0: true });
-    const missingDecision = evaluateReleaseGateV1({
+    const missingDecision = evaluateReleaseGate({
       policy: missing.gatePolicy,
       evidence: missing.evidence,
       artifactIdentity: missing.identity,
@@ -421,7 +421,7 @@ describe('deterministic release Gate evaluator', () => {
 
     const complete = fixture();
     const mismatched = { ...complete.identity, profileDigest: digest('other-profile') };
-    const mismatchDecision = evaluateReleaseGateV1({
+    const mismatchDecision = evaluateReleaseGate({
       policy: complete.gatePolicy,
       evidence: complete.evidence,
       artifactIdentity: mismatched,
@@ -436,7 +436,7 @@ describe('deterministic release Gate evaluator', () => {
     const identity = artifactIdentity(githubPolicy.policyDigest);
     const synthetic = fixture();
     const { bundleDigest: _bundleDigest, ...syntheticMaterial } = synthetic.evidence;
-    const evidence = buildReleaseEvidenceBundleV1({
+    const evidence = buildReleaseEvidenceBundle({
       ...syntheticMaterial,
       artifactIdentity: identity,
       results: synthetic.evidence.results.map((entry) => ({
@@ -444,7 +444,7 @@ describe('deterministic release Gate evaluator', () => {
         artifactIdentity: identity,
       })),
     });
-    const decision = evaluateReleaseGateV1({
+    const decision = evaluateReleaseGate({
       policy: githubPolicy,
       evidence,
       artifactIdentity: identity,
@@ -459,7 +459,7 @@ describe('deterministic release Gate evaluator', () => {
 
   test('requires exactly one fresh global maintainer security review policy item', () => {
     const material = {
-      schema: 'ReleaseGatePolicyV1' as const,
+      schema: 'ReleaseGatePolicy' as const,
       policyId: 'invalid-github-policy',
       mode: 'github_release' as const,
       canonicalRepository: 'ferqx/kite-code',
@@ -479,9 +479,9 @@ describe('deterministic release Gate evaluator', () => {
         },
       ],
     };
-    expect(() => buildReleaseGatePolicyV1(material)).toThrow('exactly one');
+    expect(() => buildReleaseGatePolicy(material)).toThrow('exactly one');
     expect(() =>
-      buildReleaseGatePolicyV1({
+      buildReleaseGatePolicy({
         ...material,
         requirements: [
           ...material.requirements,
@@ -510,7 +510,7 @@ describe('deterministic release Gate evaluator', () => {
 
   test('accepts a fresh candidate-bound single-maintainer review', () => {
     const valid = githubFixture();
-    const decision = evaluateReleaseGateV1({
+    const decision = evaluateReleaseGate({
       policy: valid.gatePolicy,
       evidence: valid.evidence,
       artifactIdentity: valid.identity,
@@ -521,7 +521,7 @@ describe('deterministic release Gate evaluator', () => {
     expect(decision.requirements.at(-1)?.status).toBe('passed');
 
     const missing = githubFixture({ omitSecurityReview: true });
-    const missingDecision = evaluateReleaseGateV1({
+    const missingDecision = evaluateReleaseGate({
       policy: missing.gatePolicy,
       evidence: missing.evidence,
       artifactIdentity: missing.identity,
@@ -533,7 +533,7 @@ describe('deterministic release Gate evaluator', () => {
     ]);
 
     const mismatchedIdentity = { ...valid.identity, behaviorDigest: digest('other-behavior') };
-    const mismatchedDecision = evaluateReleaseGateV1({
+    const mismatchedDecision = evaluateReleaseGate({
       policy: valid.gatePolicy,
       evidence: valid.evidence,
       artifactIdentity: mismatchedIdentity,
@@ -567,7 +567,7 @@ describe('deterministic release Gate evaluator', () => {
         'stale_evidence',
       ],
     ] as const) {
-      const decision = evaluateReleaseGateV1({
+      const decision = evaluateReleaseGate({
         policy: fixtureValue.gatePolicy,
         evidence: fixtureValue.evidence,
         artifactIdentity: fixtureValue.identity,
@@ -586,7 +586,7 @@ describe('deterministic release Gate evaluator', () => {
       securityStatus: 'failed',
       waiveSecurityFailure: true,
     });
-    const decision = evaluateReleaseGateV1({
+    const decision = evaluateReleaseGate({
       policy: fixtureValue.gatePolicy,
       evidence: fixtureValue.evidence,
       artifactIdentity: fixtureValue.identity,
@@ -605,7 +605,7 @@ describe('deterministic release Gate evaluator', () => {
   test('does not allow maintainer acceptance to close a P0 or P1 risk', () => {
     const valid = githubFixture();
     const { bundleDigest: _bundleDigest, ...material } = valid.evidence;
-    const evidence = buildReleaseEvidenceBundleV1({
+    const evidence = buildReleaseEvidenceBundle({
       ...material,
       risks: [
         {
@@ -616,7 +616,7 @@ describe('deterministic release Gate evaluator', () => {
         },
       ],
     });
-    const decision = evaluateReleaseGateV1({
+    const decision = evaluateReleaseGate({
       policy: valid.gatePolicy,
       evidence,
       artifactIdentity: valid.identity,
@@ -631,7 +631,7 @@ describe('deterministic release Gate evaluator', () => {
 
   test('rejects extra unrequired results instead of treating them as approval', () => {
     const fixtureValue = githubFixture({ omitSecurityReview: true, extraResult: true });
-    const decision = evaluateReleaseGateV1({
+    const decision = evaluateReleaseGate({
       policy: fixtureValue.gatePolicy,
       evidence: fixtureValue.evidence,
       artifactIdentity: fixtureValue.identity,
@@ -646,7 +646,7 @@ describe('deterministic release Gate evaluator', () => {
 
   test('disables every capability on any global failure', () => {
     const fixtureValue = githubFixture({ omitG0: true });
-    const decision = evaluateReleaseGateV1({
+    const decision = evaluateReleaseGate({
       policy: fixtureValue.gatePolicy,
       evidence: fixtureValue.evidence,
       artifactIdentity: fixtureValue.identity,
@@ -663,8 +663,8 @@ describe('deterministic release Gate evaluator', () => {
   });
 
   test('keeps a capability disabled when its policy has no applicable requirement', () => {
-    const gatePolicy = buildReleaseGatePolicyV1({
-      schema: 'ReleaseGatePolicyV1',
+    const gatePolicy = buildReleaseGatePolicy({
+      schema: 'ReleaseGatePolicy',
       policyId: 'synthetic-no-applicable-capability-requirement',
       mode: 'synthetic_foundation',
       canonicalRepository: 'ferqx/kite-code',
@@ -677,8 +677,8 @@ describe('deterministic release Gate evaluator', () => {
       requirements: [],
     });
     const identity = artifactIdentity(gatePolicy.policyDigest);
-    const evidence = buildReleaseEvidenceBundleV1({
-      schema: 'ReleaseEvidenceV1',
+    const evidence = buildReleaseEvidenceBundle({
+      schema: 'ReleaseEvidence',
       evidenceBundleId: 'synthetic-no-applicable-capability-requirement',
       generatedAt: EVALUATED_AT,
       artifactIdentity: identity,
@@ -688,7 +688,7 @@ describe('deterministic release Gate evaluator', () => {
       risks: [],
       exceptions: [],
     });
-    const decision = evaluateReleaseGateV1({
+    const decision = evaluateReleaseGate({
       policy: gatePolicy,
       evidence,
       artifactIdentity: identity,

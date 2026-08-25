@@ -4,17 +4,17 @@ import { canonicalJson, sha256DomainSeparated } from './canonical-json';
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const timestampSchema = z.iso.datetime({ offset: true });
 
-export const ROLLOUT_CAPABILITIES_V1 = Object.freeze([
+export const ROLLOUT_CAPABILITIES_ = Object.freeze([
   'verification',
   'mcp_write',
   'skills_readonly',
   'skills_effectful',
   'manual_compaction',
 ] as const);
-export type RolloutCapabilityV1 = (typeof ROLLOUT_CAPABILITIES_V1)[number];
+export type RolloutCapability = (typeof ROLLOUT_CAPABILITIES_)[number];
 
-export const ROLLOUT_STAGES_V1 = Object.freeze(['internal', 'external_canary'] as const);
-export type RolloutStageV1 = (typeof ROLLOUT_STAGES_V1)[number];
+export const ROLLOUT_STAGES_ = Object.freeze(['internal', 'external_canary'] as const);
+export type RolloutStage = (typeof ROLLOUT_STAGES_)[number];
 
 const COMMON_INTERNAL_DEPENDENCIES = ['evaluation', 'operations_dashboard', 'kill_switch'] as const;
 const COMMON_EXTERNAL_DEPENDENCIES = [
@@ -26,7 +26,7 @@ const COMMON_EXTERNAL_DEPENDENCIES = [
   'incident_rehearsal',
 ] as const;
 
-const CAPABILITY_DEPENDENCIES: Readonly<Record<RolloutCapabilityV1, readonly string[]>> =
+const CAPABILITY_DEPENDENCIES: Readonly<Record<RolloutCapability, readonly string[]>> =
   Object.freeze({
     verification: [...COMMON_INTERNAL_DEPENDENCIES],
     mcp_write: [
@@ -55,7 +55,7 @@ const CAPABILITY_DEPENDENCIES: Readonly<Record<RolloutCapabilityV1, readonly str
     ],
   });
 
-const rolloutIdentityV1Schema = z
+const rolloutIdentitySchema = z
   .object({
     artifactDigest: digestSchema,
     profileDigest: digestSchema,
@@ -66,9 +66,9 @@ const rolloutIdentityV1Schema = z
   })
   .strict();
 
-const dependencyDecisionV1Schema = rolloutIdentityV1Schema
+const dependencyDecisionSchema = rolloutIdentitySchema
   .extend({
-    schema: z.literal('CapabilityRolloutDependencyDecisionV1'),
+    schema: z.literal('CapabilityRolloutDependencyDecision'),
     dependency: z.string().regex(/^[a-z][a-z0-9_]{0,95}$/),
     status: z.literal('passed'),
     verifiedAt: timestampSchema,
@@ -77,13 +77,13 @@ const dependencyDecisionV1Schema = rolloutIdentityV1Schema
   })
   .strict();
 
-export const capabilityRolloutAdmissionInputV1Schema = z
+export const capabilityRolloutAdmissionInputSchema = z
   .object({
-    schema: z.literal('CapabilityRolloutAdmissionInputV1'),
-    capability: z.enum(ROLLOUT_CAPABILITIES_V1),
-    stage: z.enum(ROLLOUT_STAGES_V1),
-    identity: rolloutIdentityV1Schema,
-    dependencies: z.array(dependencyDecisionV1Schema).max(64),
+    schema: z.literal('CapabilityRolloutAdmissionInput'),
+    capability: z.enum(ROLLOUT_CAPABILITIES_),
+    stage: z.enum(ROLLOUT_STAGES_),
+    identity: rolloutIdentitySchema,
+    dependencies: z.array(dependencyDecisionSchema).max(64),
     safety: z
       .object({
         g0Count: z.number().int().nonnegative(),
@@ -96,27 +96,25 @@ export const capabilityRolloutAdmissionInputV1Schema = z
   })
   .strict();
 
-export type CapabilityRolloutAdmissionInputV1 = z.infer<
-  typeof capabilityRolloutAdmissionInputV1Schema
->;
+export type CapabilityRolloutAdmissionInput = z.infer<typeof capabilityRolloutAdmissionInputSchema>;
 
-export interface CapabilityRolloutAdmissionDecisionV1 {
-  schema: 'CapabilityRolloutAdmissionDecisionV1';
-  capability: RolloutCapabilityV1;
-  requestedStage: RolloutStageV1;
+export interface CapabilityRolloutAdmissionDecision {
+  schema: 'CapabilityRolloutAdmissionDecision';
+  capability: RolloutCapability;
+  requestedStage: RolloutStage;
   status: 'blocked';
   admissionEligible: false;
   effectiveRollout: 'off';
   cohortPercent: 0;
-  identity: z.infer<typeof rolloutIdentityV1Schema>;
+  identity: z.infer<typeof rolloutIdentitySchema>;
   dependencyDecisionDigests: `sha256:${string}`[];
   reasonCodes: string[];
   decisionDigest: `sha256:${string}`;
 }
 
-export function requiredRolloutDependenciesV1(
-  capability: RolloutCapabilityV1,
-  stage: RolloutStageV1,
+export function requiredRolloutDependencies(
+  capability: RolloutCapability,
+  stage: RolloutStage,
 ): readonly string[] {
   const capabilityDependencies = CAPABILITY_DEPENDENCIES[capability];
   return stage === 'internal'
@@ -128,10 +126,10 @@ export function requiredRolloutDependenciesV1(
  * Admission-only Gate. It never changes a profile, expands a cohort, or trusts
  * caller-authored dependency summaries as production authority.
  */
-export function evaluateCapabilityRolloutAdmissionV1(
+export function evaluateCapabilityRolloutAdmission(
   rawInput: unknown,
-): CapabilityRolloutAdmissionDecisionV1 {
-  const input = capabilityRolloutAdmissionInputV1Schema.parse(rawInput);
+): CapabilityRolloutAdmissionDecision {
+  const input = capabilityRolloutAdmissionInputSchema.parse(rawInput);
   const reasons = new Set<string>(['authenticated_rollout_authority_not_configured']);
   const decisions = new Map<string, (typeof input.dependencies)[number]>();
 
@@ -154,7 +152,7 @@ export function evaluateCapabilityRolloutAdmissionV1(
     }
   }
 
-  for (const dependency of requiredRolloutDependenciesV1(input.capability, input.stage)) {
+  for (const dependency of requiredRolloutDependencies(input.capability, input.stage)) {
     if (!decisions.has(dependency)) reasons.add(`dependency_missing:${dependency}`);
   }
   if (input.safety.g0Count > 0) reasons.add('g0_observed');
@@ -164,8 +162,8 @@ export function evaluateCapabilityRolloutAdmissionV1(
   }
   if (input.safety.verificationBypassCount > 0) reasons.add('verification_bypass_observed');
 
-  const withoutDigest: Omit<CapabilityRolloutAdmissionDecisionV1, 'decisionDigest'> = {
-    schema: 'CapabilityRolloutAdmissionDecisionV1',
+  const withoutDigest: Omit<CapabilityRolloutAdmissionDecision, 'decisionDigest'> = {
+    schema: 'CapabilityRolloutAdmissionDecision',
     capability: input.capability,
     requestedStage: input.stage,
     status: 'blocked',

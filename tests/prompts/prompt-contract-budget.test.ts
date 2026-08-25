@@ -1,17 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '@/core/config';
-import { buildStaticSystemPrompt } from '@/core/model/context';
-import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
-import { countTokens } from '@/core/token-counter';
-import { createAgentTools } from '@/core/tools/definitions';
+import {
+  buildCacheableRuntimeContext,
+  buildStaticSystemPrompt,
+  countTokens,
+} from '@kite/builtin-runtime/model';
+import { createTestAgentTools as createAgentTools } from '../helpers/runtime-model';
 
-function measure(version: 'legacy' | 'v2') {
-  const config = {
-    features: { promptContractV2: version === 'v2' },
-  } as AgentConfig;
-  const tools = createAgentTools({ workspace: 'D:\\workspace', phase: 'building', config });
+function measure() {
+  const tools = createAgentTools({ workspace: 'D:\\workspace', phase: 'building' });
   const system = [
-    buildStaticSystemPrompt('agent', undefined, undefined, version),
+    buildStaticSystemPrompt('agent'),
     buildCacheableRuntimeContext({ workspace: 'D:\\workspace' }),
   ].join('\n\n');
   const toolEntries = Object.entries(tools).map(([name, value]) => {
@@ -27,30 +25,29 @@ function measure(version: 'legacy' | 'v2') {
   return { systemTokens, toolTokens, totalTokens: systemTokens + toolTokens, tools: toolEntries };
 }
 
-describe('Prompt Contract V2 token budget', () => {
-  test('uses at most 70 percent of the legacy stable prompt and builtin tool surface', () => {
-    const legacy = measure('legacy');
-    const v2 = measure('v2');
-    expect(v2.totalTokens).toBeLessThanOrEqual(Math.floor(legacy.totalTokens * 0.7));
-    expect(v2.systemTokens).toBeLessThan(legacy.systemTokens);
+describe('Prompt contract token budget', () => {
+  test('keeps the current prompt and builtin tool surface within the fixed budget', () => {
+    const current = measure();
+    expect(current.totalTokens).toBeLessThan(18_000);
+    expect(current.systemTokens).toBeGreaterThan(0);
   });
 
-  test('keeps each V2 builtin description bounded', () => {
-    const v2 = measure('v2');
-    for (const tool of v2.tools) {
+  test('keeps each current builtin description bounded', () => {
+    const current = measure();
+    for (const tool of current.tools) {
       expect(String(tool.description).length, `${tool.name} description`).toBeLessThan(1_200);
     }
   });
 
   test('removes lexical planning triggers and stale Skill tool guidance', () => {
-    const prompt = buildStaticSystemPrompt('agent', undefined, undefined, 'v2');
+    const prompt = buildStaticSystemPrompt('agent');
     expect(prompt).not.toContain('Trigger: planning is REQUIRED');
     expect(prompt).not.toContain('Use the `Skill` tool');
     expect(prompt).toContain('activate_skill');
   });
 
   test('turns valuable bounded work into the autonomous planning task contract', () => {
-    const prompt = buildStaticSystemPrompt('agent', undefined, undefined, 'v2');
+    const prompt = buildStaticSystemPrompt('agent');
     expect(prompt).toContain('Use subagents autonomously');
     expect(prompt).toContain('independent enough to justify an isolated model call');
     expect(prompt).toContain('`subagent_type` and a concrete self-contained `task`');

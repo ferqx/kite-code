@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "profileId": "skills-effectful",
+  "capability": "skills_effectful",
+  "requiredFeatureFlags": ["skillActivation", "skillWorkflow"],
+  "state": {
+    "maturity": "under_development",
+    "maxRollout": "off"
+  },
+  "dependencies": [
+    {
+      "dependencyId": "capability.skills-readonly",
+      "expectedRevision": "stable-v1"
+    },
+    {
+      "dependencyId": "capability.verification",
+      "expectedRevision": "stable-v1"
+    }
+  ],
+  "routeAllowlist": [],
+  "platformAllowlist": [],
+  "evidence": {
+    "freshnessSeconds": 0,
+    "requiredGates": ["G3", "G4", "G5"]
+  },
+  "rollback": {
+    "disableNewAdmission": true,
+    "preserveReceipts": true,
+    "preserveRequiredVerification": true,
+    "cohortPercent": 0
+  }
+}

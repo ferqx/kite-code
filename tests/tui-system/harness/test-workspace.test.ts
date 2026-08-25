@@ -2,15 +2,82 @@ import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRuntimeStore, runtimeStorePathFor } from '@/core/runtime/store';
+import {
+  createSqliteRuntimeStorage,
+  SQLITE_RUNTIME_FORMAT_EPOCH,
+  SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+  sqliteCurrentRuntimeStorePath,
+} from '@kite/runtime-storage-sqlite';
 import {
   createTestWorkspace,
   observePersistedCommandSession,
+  observePersistedSessionCommandEvents,
+  observePersistedSessionEvents,
   observePersistedSessionIds,
   observePersistedSessionSummaries,
   observePersistedTurnEvents,
   type TestWorkspace,
 } from './test-workspace';
+
+function writeStoreObserverFixture(
+  databasePath: string,
+  sessionId: string,
+  events: readonly Record<string, unknown>[],
+  name = '',
+) {
+  type State = {
+    schemaVersion: number;
+    formatEpoch: string;
+    revision: number;
+    session: {
+      threadId: string;
+      projectId: string;
+      canonicalWorkspaceDigest: string;
+    };
+  };
+  const storage = createSqliteRuntimeStorage<Record<string, unknown>, State>({
+    databasePath,
+    codec: {
+      encodeEvent: JSON.stringify,
+      decodeEvent: JSON.parse,
+      encodeState: JSON.stringify,
+      decodeState: <T>(json: string) => JSON.parse(json) as T,
+      snapshotMetadata: (state) => ({
+        stateRevision: state.revision,
+        schemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+      }),
+      sessionIdentity: (state) => ({
+        projectId: state.session.projectId,
+        canonicalWorkspaceDigest: state.session.canonicalWorkspaceDigest,
+      }),
+      rebindForkState: (state, targetSessionId) => ({
+        ...state,
+        session: { ...state.session, threadId: targetSessionId },
+      }),
+    },
+    options: { journalMode: 'delete' },
+  });
+  storage.transactions.commitDecision({
+    sessionId,
+    events,
+    snapshot: {
+      schemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
+      revision: events.length,
+      session: {
+        threadId: sessionId,
+        projectId: `project_${sessionId}`,
+        canonicalWorkspaceDigest: `sha256:${'a'.repeat(64)}`,
+      },
+    },
+    metadata: events.map((_event, index) => ({
+      eventId: `${sessionId}:event:${index + 1}`,
+      revision: index + 1,
+    })),
+  });
+  if (name) storage.sessions.setSessionName(sessionId, name);
+  return storage;
+}
 
 describe('TUI persisted Runtime observers', () => {
   let workspace: TestWorkspace | undefined;
@@ -30,6 +97,12 @@ describe('TUI persisted Runtime observers', () => {
     expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
       status: 'not_created',
     });
+    expect(
+      observePersistedSessionCommandEvents(workspace, 'thread-a', '/compact marker'),
+    ).toMatchObject({ status: 'not_created' });
+    expect(observePersistedSessionEvents(workspace, 'thread-a')).toMatchObject({
+      status: 'not_created',
+    });
     expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
       status: 'not_created',
     });
@@ -37,7 +110,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database path is a directory', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = sqliteCurrentRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     mkdirSync(runtimePath);
@@ -49,7 +122,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('treats an existing database without Runtime schema as not ready', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = sqliteCurrentRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     new Database(runtimePath).close();
@@ -59,6 +132,12 @@ describe('TUI persisted Runtime observers', () => {
     expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
       status: 'initializing',
     });
+    expect(
+      observePersistedSessionCommandEvents(workspace, 'thread-a', '/compact marker'),
+    ).toMatchObject({ status: 'initializing' });
+    expect(observePersistedSessionEvents(workspace, 'thread-a')).toMatchObject({
+      status: 'initializing',
+    });
     expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
       status: 'initializing',
     });
@@ -66,7 +145,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database is corrupt', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = sqliteCurrentRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     writeFileSync(runtimePath, 'not a sqlite database');
@@ -78,41 +157,44 @@ describe('TUI persisted Runtime observers', () => {
 
   test('reads exact persistence evidence without competing with the child writer', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = sqliteCurrentRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    const store = createRuntimeStore(runtimePath);
-    store.appendEvents('thread-a', [
-      {
-        type: 'user.command_invoked',
-        commandId: 'command-a',
-        command: '/compact marker',
-      },
-      {
-        type: 'user.message_appended',
-        messageId: 'message-a',
-        content: 'turn marker',
-      },
-      { type: 'turn.started', turnId: 'turn-a' },
-      {
-        type: 'completion.blocked',
-        turnId: 'turn-a',
-        guardVersion: 'completion_guard_v1',
-        code: 'plan_draft_pending',
-        nextAction: 'submit_plan',
-        planning: 'planning_draft',
-        correctionAttempt: 1,
-      },
-      { type: 'model.requested', requestId: 'correction-request-a' },
-      {
-        type: 'run.completed',
-        turnId: 'turn-a',
-        output: 'completed',
-        completionGuardVersion: 'completion_guard_v1',
-      },
-      { type: 'turn.completed', turnId: 'turn-a' },
-    ]);
-    store.setSessionName('thread-a', 'Command session');
+    const store = writeStoreObserverFixture(
+      runtimePath,
+      'thread-a',
+      [
+        {
+          type: 'user.command_invoked',
+          commandId: 'command-a',
+          command: '/compact marker',
+        },
+        {
+          type: 'user.message_appended',
+          messageId: 'message-a',
+          content: 'turn marker',
+        },
+        { type: 'turn.started', turnId: 'turn-a' },
+        {
+          type: 'completion.blocked',
+          turnId: 'turn-a',
+          guardVersion: 'completion_guard_v1',
+          code: 'plan_draft_pending',
+          nextAction: 'submit_plan',
+          planning: 'planning_draft',
+          correctionAttempt: 1,
+        },
+        { type: 'model.requested', requestId: 'correction-request-a' },
+        {
+          type: 'run.completed',
+          turnId: 'turn-a',
+          output: 'completed',
+          completionGuardVersion: 'completion_guard_v1',
+        },
+        { type: 'turn.completed', turnId: 'turn-a' },
+      ],
+      'Command session',
+    );
     store.close();
 
     // BEGIN IMMEDIATE holds the single writer slot. A harness observer that
@@ -137,6 +219,35 @@ describe('TUI persisted Runtime observers', () => {
       expect(observePersistedCommandSession(workspace, '/compact other')).toMatchObject({
         status: 'ready',
         value: undefined,
+      });
+      expect(
+        observePersistedSessionCommandEvents(workspace, 'thread-a', '/compact marker'),
+      ).toMatchObject({
+        status: 'ready',
+        value: [
+          { type: 'user.command_invoked', commandId: 'command-a' },
+          { type: 'user.message_appended', messageId: 'message-a' },
+          { type: 'turn.started', turnId: 'turn-a' },
+          { type: 'completion.blocked', turnId: 'turn-a' },
+          { type: 'model.requested', requestId: 'correction-request-a' },
+          { type: 'run.completed', turnId: 'turn-a' },
+          { type: 'turn.completed', turnId: 'turn-a' },
+        ],
+      });
+      expect(
+        observePersistedSessionCommandEvents(workspace, 'thread-other', '/compact marker'),
+      ).toMatchObject({ status: 'ready', value: undefined });
+      expect(observePersistedSessionEvents(workspace, 'thread-a')).toMatchObject({
+        status: 'ready',
+        value: [
+          { type: 'user.command_invoked', commandId: 'command-a' },
+          { type: 'user.message_appended', messageId: 'message-a' },
+          { type: 'turn.started', turnId: 'turn-a' },
+          { type: 'completion.blocked', turnId: 'turn-a' },
+          { type: 'model.requested', requestId: 'correction-request-a' },
+          { type: 'run.completed', turnId: 'turn-a' },
+          { type: 'turn.completed', turnId: 'turn-a' },
+        ],
       });
       expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
         status: 'ready',
@@ -165,11 +276,10 @@ describe('TUI persisted Runtime observers', () => {
 
   test('matches RuntimeStore name fallback when the first user message is empty', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = sqliteCurrentRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    const store = createRuntimeStore(runtimePath);
-    store.appendEvents('thread-empty', [
+    const store = writeStoreObserverFixture(runtimePath, 'thread-empty', [
       {
         type: 'user.message_appended',
         messageId: 'message-empty',

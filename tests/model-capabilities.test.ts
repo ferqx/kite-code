@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '../src/core/config';
-import { resolveModelCapabilities, usableInputBudget } from '../src/core/model/model-capabilities';
+import { resolveModelCapabilities, usableInputBudget } from '@kite/builtin-runtime/model';
+import type { AgentConfig } from '#app/config';
 
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
@@ -81,31 +81,6 @@ describe('ResolvedModelCapabilities', () => {
     expect(result.streamingSource).toBeUndefined();
     expect(usableInputBudget(result).usableInputTokens).toBeUndefined();
     expect(usableInputBudget(result).reservedOutputTokens).toBeUndefined();
-  });
-
-  test('compatibility fields retain compatibility_config source', () => {
-    const result = resolveModelCapabilities({
-      config: config({
-        modelKwargs: {
-          contextWindowTokens: 12_000,
-          maxTokens: 1_000,
-          tokenizerFamily: 'compatible-tokenizer',
-          supportsUsageMetadata: false,
-          streaming: true,
-        },
-      }),
-    });
-    expect(result).toMatchObject({
-      contextWindowTokens: 12_000,
-      contextWindowSource: 'compatibility_config',
-      maxOutputTokens: 1_000,
-      maxOutputTokensSource: 'compatibility_config',
-      tokenizerSource: 'compatibility_config',
-      supportsUsageMetadata: false,
-      supportsUsageMetadataSource: 'compatibility_config',
-      streaming: true,
-      streamingSource: 'compatibility_config',
-    });
   });
 
   test('computes usable input from output reservation and provider safety margin', () => {

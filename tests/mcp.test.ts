@@ -1,13 +1,14 @@
 // MCP core unit tests
 import { afterEach, describe, expect, it } from 'bun:test';
-import { createSnapshot, descriptorRevision } from '../src/core/capabilities/catalog';
+import { normalizeMcpToolResult } from '@kite/builtin-runtime/mcp';
 import {
   compileCapabilitySchema,
+  createCapabilitySnapshot,
+  descriptorRevision,
   validateCapabilityArguments,
-} from '../src/core/capabilities/schema';
-import { expandEnvVars } from '../src/core/config/index';
-import { normalizeMcpToolResult } from '../src/core/mcp/result-normalizer';
-import type { CapabilityDescriptor } from '../src/protocol/capabilities';
+} from '@kite/builtin-runtime/skills';
+import type { CapabilityDescriptor } from '@kite/runtime-contract';
+import { expandEnvVars } from '#app/config/index';
 
 // ─── capability schema and revisions ─────────────────────────────
 
@@ -27,7 +28,9 @@ describe('capability schema', () => {
 
   it('rejects non-object and malformed schemas instead of widening to any', () => {
     expect(compileCapabilitySchema({ type: 'string' }).ok).toBe(false);
-    expect(compileCapabilitySchema({ type: 'object', properties: { x: 1 } }).ok).toBe(false);
+    const malformed = { type: 'object', properties: { x: 1 } };
+    expect(compileCapabilitySchema(malformed).ok).toBe(false);
+    expect(compileCapabilitySchema(malformed).ok).toBe(false);
   });
 
   it('changes a snapshot revision when a same-count tool changes', () => {
@@ -55,8 +58,8 @@ describe('capability schema', () => {
       };
       return { ...base, revision: descriptorRevision(base) };
     };
-    expect(createSnapshot([descriptor(schema)]).revision).not.toBe(
-      createSnapshot([descriptor({ type: 'object', properties: {} })]).revision,
+    expect(createCapabilitySnapshot([descriptor(schema)]).revision).not.toBe(
+      createCapabilitySnapshot([descriptor({ type: 'object', properties: {} })]).revision,
     );
   });
 });

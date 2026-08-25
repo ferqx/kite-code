@@ -11,43 +11,38 @@ import {
 } from 'node:fs';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { z } from 'zod';
-import { composeAppGitBrokerV1, resolveAppGitExecutableV1 } from '../../src/app/git/composition';
-import { composeAppSandboxExecutorV1 } from '../../src/app/sandbox/composition';
-import type { AgentConfig } from '../../src/core/config';
 import {
   buildWindowsRestrictedTokenEnvForTest,
-  createWindowsRestrictedTokenDirectWorkspaceV1,
+  cleanupWindowsSandboxRuntimeDirNoSpawn,
+  createWindowsRestrictedTokenDirectWorkspace,
   createWindowsRestrictedTokenInvocationName,
-  wrapWindowsRestrictedTokenCommandV1,
-} from '../../src/core/execution/sandbox-execution/windows-preparation';
-import { generateBwrapArgs } from '../../src/core/sandbox/bwrap';
-import { readExecutionEnvironmentIdentityV1 } from '../../src/core/sandbox/environment-identity';
-import { detectSandboxBackend, type SandboxBackend } from '../../src/core/sandbox/platform';
-import {
-  currentProcessTreeCapabilityV1,
-  type ProcessTreeHardLimitMechanismV1,
-} from '../../src/core/sandbox/process-tree-capability';
-import { generateSandboxProfile } from '../../src/core/sandbox/profile';
-import { findApplySeccomp } from '../../src/core/sandbox/seccomp';
-import {
-  cleanupSandboxRuntimeDir,
-  createSandboxRuntimeDir,
-} from '../../src/core/sandbox/shell-wrapper';
-import {
-  resolveWindowsSandboxRunnerV1,
+  createWindowsSandboxRuntimeDirForPreparation,
+  currentProcessTreeCapability,
+  detectSandboxBackend,
+  findApplySeccomp,
+  generateBwrapArgs,
+  generateSandboxProfile,
+  type ProcessTreeHardLimitMechanism,
+  readExecutionEnvironmentIdentity,
+  resolveWindowsSandboxRunner,
+  type SandboxBackend,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
-} from '../../src/core/sandbox/windows-runner';
+  wrapWindowsRestrictedTokenCommand,
+} from '@kite/builtin-runtime/sandbox';
+import { z } from 'zod';
+import type { AgentConfig } from '#app/config';
+import { composeAppGitBroker, resolveAppGitExecutable } from '../../apps/kite/src/git/composition';
+import { composeAppSandboxExecutor } from '../../apps/kite/src/sandbox/composition';
 import { canonicalJsonBytes } from './canonical-json';
 
 export type NativeProbeVerdict = 'enforced' | 'unsupported' | 'unavailable';
 export type PlatformSupportOutcome = 'supported' | 'read_only_only' | 'excluded';
-export type GithubHostedRunnerClassV1 =
+export type GithubHostedRunnerClass =
   | 'macos-15-arm64-github-hosted'
   | 'ubuntu-24.04-x64-github-hosted'
   | 'windows-2025-x64-github-hosted';
 
-const GITHUB_HOSTED_RUNNER_CLASSES_V1 = new Set<GithubHostedRunnerClassV1>([
+const GITHUB_HOSTED_RUNNER_CLASSES_ = new Set<GithubHostedRunnerClass>([
   'macos-15-arm64-github-hosted',
   'ubuntu-24.04-x64-github-hosted',
   'windows-2025-x64-github-hosted',
@@ -55,7 +50,7 @@ const GITHUB_HOSTED_RUNNER_CLASSES_V1 = new Set<GithubHostedRunnerClassV1>([
 
 const nativeProbeVerdictSchema = z.enum(['enforced', 'unsupported', 'unavailable']);
 const boundedIdentitySchema = z.string().trim().min(1).max(512);
-export const platformCapabilitySourceV1Schema = z
+export const platformCapabilitySourceSchema = z
   .object({
     repository: z.literal('ferqx/kite-code'),
     repositoryId: z.literal('1218896626'),
@@ -108,7 +103,7 @@ const filesystemEvidenceSchema = z
   })
   .strict();
 
-export const platformCapabilityEvidenceV1Schema = z
+export const platformCapabilityEvidenceSchema = z
   .object({
     version: z.literal(1),
     evidenceId: z.string().uuid(),
@@ -179,7 +174,7 @@ export const platformCapabilityEvidenceV1Schema = z
           });
         }
       }),
-    source: platformCapabilitySourceV1Schema.optional(),
+    source: platformCapabilitySourceSchema.optional(),
     environmentIdentity: z.object({ exactOsVersion: nativeProbeVerdictSchema }).strict(),
     backendIsolation: z.object({ syscallFilter: nativeProbeVerdictSchema }).strict(),
     entrypoints: z
@@ -216,7 +211,7 @@ export const platformCapabilityEvidenceV1Schema = z
   })
   .strict();
 
-export interface PlatformCapabilityEvidenceV1 {
+export interface PlatformCapabilityEvidence {
   version: 1;
   evidenceId: string;
   capturedAt: string;
@@ -266,7 +261,7 @@ export interface PlatformCapabilityEvidenceV1 {
     workflowSha: string;
     runId: string;
     runAttempt: string;
-    runnerClass: GithubHostedRunnerClassV1;
+    runnerClass: GithubHostedRunnerClass;
   };
   environmentIdentity: {
     exactOsVersion: NativeProbeVerdict;
@@ -303,7 +298,7 @@ export interface PlatformCapabilityEvidenceV1 {
   };
   processTree: {
     /** Additive V1 field; absent legacy artifacts normalize to `none`. */
-    hardCountMechanism?: ProcessTreeHardLimitMechanismV1;
+    hardCountMechanism?: ProcessTreeHardLimitMechanism;
     hardCountLimit: Exclude<NativeProbeVerdict, 'unavailable'>;
     killWithoutResidualDescendants: Exclude<NativeProbeVerdict, 'unavailable'>;
   };
@@ -319,16 +314,16 @@ export interface PlatformCapabilityEvidenceV1 {
   digest: string;
 }
 
-type EvidenceWithoutDigest = Omit<PlatformCapabilityEvidenceV1, 'digest'>;
-type PlatformCapabilityProbeInputV1 = Omit<
+type EvidenceWithoutDigest = Omit<PlatformCapabilityEvidence, 'digest'>;
+type PlatformCapabilityProbeInput = Omit<
   EvidenceWithoutDigest,
   'outcome' | 'productionSupported' | 'limitations'
 >;
-type FilesystemProbeResult = PlatformCapabilityEvidenceV1['filesystem'] & {
+type FilesystemProbeResult = PlatformCapabilityEvidence['filesystem'] & {
   shellGrandchildDeny: NativeProbeVerdict;
 };
 
-export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEvidenceV1> {
+export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEvidence> {
   const backend = detectSandboxBackend();
   const root = mkdtempSync(join(tmpdir(), 'kite-platform-capability-probe-'));
   const lexicalWorkspace = join(root, 'workspace');
@@ -348,7 +343,7 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
   );
 
   try {
-    const environmentIdentity = readExecutionEnvironmentIdentityV1();
+    const environmentIdentity = readExecutionEnvironmentIdentity();
     const { shellGrandchildDeny, ...filesystem } = await probeFilesystem(
       backend,
       workspace,
@@ -422,7 +417,7 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
     };
     return {
       ...withoutDigest,
-      digest: computePlatformCapabilityEvidenceDigestV1(withoutDigest),
+      digest: computePlatformCapabilityEvidenceDigest(withoutDigest),
     };
   } finally {
     try {
@@ -436,7 +431,7 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
 }
 
 function repairWindowsRestrictedTokenProbeWorkspace(workspace: string): void {
-  const runner = resolveWindowsSandboxRunnerV1();
+  const runner = resolveWindowsSandboxRunner();
   if (!runner) return;
   const repair = Bun.spawnSync([runner.path, '--repair-restricted-token', workspace], {
     stdout: 'ignore',
@@ -450,7 +445,7 @@ function repairWindowsRestrictedTokenProbeWorkspace(workspace: string): void {
 }
 
 export function evaluatePlatformSupport(
-  evidence: PlatformCapabilityProbeInputV1,
+  evidence: PlatformCapabilityProbeInput,
 ): PlatformSupportOutcome {
   const hardCountMechanism = evidence.processTree.hardCountMechanism ?? 'none';
   const selectedNetworkBoundary =
@@ -802,11 +797,11 @@ async function probeNetworkOff(
 async function probeProcessTree(
   backend: SandboxBackend,
   workspace: string,
-): Promise<PlatformCapabilityEvidenceV1['processTree']> {
+): Promise<PlatformCapabilityEvidence['processTree']> {
   if (backend === 'windows_restricted_token') {
-    const runner = resolveWindowsSandboxRunnerV1();
+    const runner = resolveWindowsSandboxRunner();
     if (!runner) {
-      const projection = currentProcessTreeCapabilityV1(backend);
+      const projection = currentProcessTreeCapability(backend);
       return {
         hardCountMechanism: projection.hardCountMechanism,
         hardCountLimit: projection.hardCountLimit,
@@ -830,7 +825,7 @@ async function probeProcessTree(
       ].join('; '),
       timeoutMs: 5_000,
     });
-    const projection = currentProcessTreeCapabilityV1(backend, {
+    const projection = currentProcessTreeCapability(backend, {
       hardLimitMechanism: 'windows_job_active_process_limit',
       hardLimitConformancePassed:
         hardLimit.ok && hardLimit.stdout.split('\n').some((line) => line.trim() === 'limited'),
@@ -844,7 +839,7 @@ async function probeProcessTree(
     };
   }
   if (backend !== 'bubblewrap') {
-    const projection = currentProcessTreeCapabilityV1(backend);
+    const projection = currentProcessTreeCapability(backend);
     return {
       hardCountMechanism: projection.hardCountMechanism,
       hardCountLimit: projection.hardCountLimit,
@@ -853,7 +848,7 @@ async function probeProcessTree(
   }
   const python = Bun.which('python3');
   if (!python) {
-    const projection = currentProcessTreeCapabilityV1(backend);
+    const projection = currentProcessTreeCapability(backend);
     return {
       hardCountMechanism: projection.hardCountMechanism,
       hardCountLimit: projection.hardCountLimit,
@@ -895,7 +890,7 @@ async function probeProcessTree(
     command: `${python} cgroup-pids-conformance.py`,
     timeoutMs: 5_000,
   });
-  const projection = currentProcessTreeCapabilityV1(backend, {
+  const projection = currentProcessTreeCapability(backend, {
     hardLimitMechanism: 'cgroup_pids',
     hardLimitConformancePassed: hardLimit.ok,
     // A POSIX process-group receipt cannot prove that a setsid/double-fork
@@ -941,8 +936,8 @@ export async function probeBrokeredGit(
   root: string,
   nativeShellReadDeny: NativeProbeVerdict,
   nativeShellWriteDeny: NativeProbeVerdict,
-  entrypoints: PlatformCapabilityEvidenceV1['entrypoints'],
-): Promise<PlatformCapabilityEvidenceV1['brokeredGit']> {
+  entrypoints: PlatformCapabilityEvidence['entrypoints'],
+): Promise<PlatformCapabilityEvidence['brokeredGit']> {
   const base = {
     featureRevision: 'brokered-git-r1' as const,
     nativeShellReadDeny,
@@ -966,7 +961,7 @@ export async function probeBrokeredGit(
       reason: 'native_metadata_write_deny_unproven',
     };
   }
-  const executable = resolveAppGitExecutableV1();
+  const executable = resolveAppGitExecutable();
   if (!executable || backend === 'none') {
     return {
       ...base,
@@ -1024,7 +1019,7 @@ export async function probeBrokeredGit(
       modelName: 'qualification-only',
       providerName: 'qualification-only',
       providerType: 'openai-compatible',
-      features: { brokeredGitV1: true },
+      features: { brokeredGit: true },
       sandbox: { enabled: true },
       executionBoundary: {
         filesystemScope: 'workspace_write',
@@ -1050,7 +1045,7 @@ export async function probeBrokeredGit(
         brokeredGitFeatureRevision: 'brokered-git-r1',
       },
     } as AgentConfig;
-    const broker = composeAppGitBrokerV1({
+    const broker = composeAppGitBroker({
       workspace,
       executable,
       config,
@@ -1108,7 +1103,7 @@ export async function probeBrokeredGit(
 async function probeEntrypoints(
   backend: SandboxBackend,
   _workspace: string,
-): Promise<PlatformCapabilityEvidenceV1['entrypoints']> {
+): Promise<PlatformCapabilityEvidence['entrypoints']> {
   if (backend === 'none') return { tui: 'unavailable', foregroundCli: 'unavailable' };
   // Importing the shared composition helper is not evidence that both real App
   // roots still install it. Keep both verdicts unavailable until the workflow
@@ -1125,7 +1120,7 @@ function technicalAppExecutor(
   workspace: string,
   maxProcessTreeTasks: number,
 ) {
-  return composeAppSandboxExecutorV1({
+  return composeAppSandboxExecutor({
     entrypoint,
     workspace,
     config: {
@@ -1160,7 +1155,7 @@ function technicalAppExecutor(
 export function githubEvidenceSource(
   environment: { platform: NodeJS.Platform; arch: string },
   env: NodeJS.ProcessEnv = process.env,
-): { source?: PlatformCapabilityEvidenceV1['source'] } {
+): { source?: PlatformCapabilityEvidence['source'] } {
   const values = {
     repository: env.QUALIFICATION_REPOSITORY,
     repositoryId: env.QUALIFICATION_REPOSITORY_ID,
@@ -1177,7 +1172,7 @@ export function githubEvidenceSource(
   if (Object.values(values).some((value) => !value?.trim())) {
     throw new Error('Formal platform qualification source identity is incomplete.');
   }
-  if (!GITHUB_HOSTED_RUNNER_CLASSES_V1.has(values.runnerClass as GithubHostedRunnerClassV1)) {
+  if (!GITHUB_HOSTED_RUNNER_CLASSES_.has(values.runnerClass as GithubHostedRunnerClass)) {
     throw new Error('Formal platform qualification runner class is not recognized.');
   }
   if (values.repository !== 'ferqx/kite-code' || values.repositoryId !== '1218896626') {
@@ -1206,26 +1201,26 @@ export function githubEvidenceSource(
     throw new Error('Formal platform qualification run identity is invalid.');
   }
   const expectedEnvironment: Record<
-    GithubHostedRunnerClassV1,
+    GithubHostedRunnerClass,
     { platform: NodeJS.Platform; arch: string }
   > = {
     'macos-15-arm64-github-hosted': { platform: 'darwin', arch: 'arm64' },
     'ubuntu-24.04-x64-github-hosted': { platform: 'linux', arch: 'x64' },
     'windows-2025-x64-github-hosted': { platform: 'win32', arch: 'x64' },
   };
-  const expected = expectedEnvironment[values.runnerClass as GithubHostedRunnerClassV1];
+  const expected = expectedEnvironment[values.runnerClass as GithubHostedRunnerClass];
   if (environment.platform !== expected.platform || environment.arch !== expected.arch) {
     throw new Error('Formal platform qualification runner class does not match the runtime.');
   }
   return {
     source: {
       ...(values as Record<keyof typeof values, string>),
-      runnerClass: values.runnerClass as GithubHostedRunnerClassV1,
+      runnerClass: values.runnerClass as GithubHostedRunnerClass,
     },
   };
 }
 
-function syscallFilterVerdict(evidence: PlatformCapabilityProbeInputV1): NativeProbeVerdict {
+function syscallFilterVerdict(evidence: PlatformCapabilityProbeInput): NativeProbeVerdict {
   // Early V1 artifacts did not carry this additive field. Missing evidence is
   // never inferred from backend discovery; it normalizes fail-closed.
   return evidence.backendIsolation?.syscallFilter ?? 'unsupported';
@@ -1286,7 +1281,7 @@ async function runSandboxCommand(
     return { available: false, code: -1 };
   } finally {
     if (invocation.runtimeDir) {
-      cleanupSandboxRuntimeDir(invocation.runtimeDir);
+      cleanupWindowsSandboxRuntimeDirNoSpawn(invocation.runtimeDir);
     }
   }
 }
@@ -1331,9 +1326,19 @@ function sandboxInvocation(
     };
   }
   if (backend === 'windows_restricted_token') {
-    const runner = resolveWindowsSandboxRunnerV1();
+    const runner = resolveWindowsSandboxRunner();
     if (!runner) return undefined;
-    const runtimeRoot = createSandboxRuntimeDir(workspace);
+    const preparationDigest = createHash('sha256')
+      .update('kite.platform-capability-probe.runtime.v1\0')
+      .update(workspace)
+      .update('\0')
+      .update(command)
+      .update('\0')
+      .update(JSON.stringify(options))
+      .update('\0')
+      .update(randomUUID())
+      .digest('hex');
+    const runtimeRoot = createWindowsSandboxRuntimeDirForPreparation(workspace, preparationDigest);
     const sandboxEnv = buildWindowsRestrictedTokenEnvForTest(
       process.env,
       runtimeRoot,
@@ -1347,9 +1352,9 @@ function sandboxInvocation(
       // Formal capability evidence must exercise the same persistent
       // Workspace ledger and protected-path DACL refresh path as user commands.
       // runPlatformCapabilityProbe repairs this temporary ledger before cleanup.
-      directWorkspace: createWindowsRestrictedTokenDirectWorkspaceV1({ startupProbe: false }),
+      directWorkspace: createWindowsRestrictedTokenDirectWorkspace({ startupProbe: false }),
       invocationName: createWindowsRestrictedTokenInvocationName(),
-      commandLine: wrapWindowsRestrictedTokenCommandV1(command),
+      commandLine: wrapWindowsRestrictedTokenCommand(command),
       cwd: workspace,
       env: sandboxEnv,
       filesystemScope: options.filesystemScope ?? 'workspace_write',
@@ -1524,22 +1529,20 @@ export function collectLimitations(
   return limitations;
 }
 
-export function computePlatformCapabilityEvidenceDigestV1(
-  evidence: Omit<PlatformCapabilityEvidenceV1, 'digest'>,
+export function computePlatformCapabilityEvidenceDigest(
+  evidence: Omit<PlatformCapabilityEvidence, 'digest'>,
 ): string {
   return `sha256:${createHash('sha256').update(canonicalJsonBytes(evidence)).digest('hex')}`;
 }
 
-export function encodePlatformCapabilityEvidenceV1(
-  evidence: PlatformCapabilityEvidenceV1,
-): Uint8Array {
-  platformCapabilityEvidenceV1Schema.parse(evidence);
+export function encodePlatformCapabilityEvidence(evidence: PlatformCapabilityEvidence): Uint8Array {
+  platformCapabilityEvidenceSchema.parse(evidence);
   return canonicalJsonBytes(evidence);
 }
 
 if (import.meta.main) {
   const evidence = await runPlatformCapabilityProbe();
-  const encoded = encodePlatformCapabilityEvidenceV1(evidence);
+  const encoded = encodePlatformCapabilityEvidence(evidence);
   const outputPath = process.argv[2];
   if (outputPath) writeFileSync(resolve(outputPath), encoded, { flag: 'wx', mode: 0o600 });
   process.stdout.write(`${new TextDecoder().decode(encoded)}\n`);

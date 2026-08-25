@@ -4,11 +4,11 @@
 
 最后更新：2026-08-07
 
-范围：`src/app/tui/Header.tsx`、`src/app/tui/App.tsx`、`src/app/tui/index.tsx`、`tests/tui-layout.test.tsx`、`tests/tui-mock-render.test.tsx`、`tests/tui-system/scenarios/startup.test.ts`
+范围：`apps/kite/src/tui/Header.tsx`、`apps/kite/src/tui/App.tsx`、`apps/kite/src/tui/index.tsx`、`tests/tui-layout.test.tsx`、`tests/tui-mock-render.test.tsx`、`tests/tui-system/scenarios/startup.test.ts`
 
 读取时机：修改 TUI Header、启动品牌、会话切换后的顶部信息、模型或工作区启动信息、Header 窄屏布局时。
 
-验证：`bun test tests/tui-layout.test.tsx tests/tui-mock-render.test.tsx`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/startup.test.ts`、`bun run typecheck`、`bun run check:docs-impact`、`bun run check:docs`。
+验证：`bun test tests/tui-layout.test.tsx tests/tui-mock-render.test.tsx`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/startup.test.ts tests/tui-system/scenarios/session-legacy-compatibility.test.ts`、`bun run typecheck`、`bun run check:docs-impact`、`bun run check:docs`。
 
 ## 视觉契约
 
@@ -37,20 +37,33 @@ Header 使用 Ink `Static` 写入 scrollback，但模型或推理强度切换后
 
 新会话、会话切换或恢复导致 `sessionKey` 变化时，Header 使用该会话当时的状态建立新快照；`useStaticContent` 负责清屏并按既有 Static 规则重新输出。
 
-## 历史会话加载失败
+## 历史会话兼容与加载失败
 
-启动时读取历史会话索引失败，不得让 TUI 挂载失败，也不得通过 `console.error`、裸 `stderr` 或其他终端日志通道暴露数据库错误、路径、堆栈或内部异常文本。当前界面进入历史会话服务不可用状态，只允许用户显式执行 `/resume` 重试；不得提供 `/new` 作为绕过，因为它的首次 Kernel 持久化仍会命中同一个不可用 Store。普通任务输入必须被阻止，避免在没有可用 RuntimeStore 时静默丢失用户消息。
+启动直接建立可写的新会话，不预注册或批量迁移历史会话。`/resume` 列表对当前 Store 和显式支持的历史 source 只做 metadata-first 发现；历史会话以普通名称展示，不出现“旧版”“迁移”“兼容”等标签。未知 Store/schema/epoch 静默忽略，不得让 TUI 挂载失败、阻止普通输入，或通过 `console.error`、裸 `stderr` 暴露数据库错误、路径、堆栈和内部异常。
 
-正常的 `LOCAL_TEXT` 提示为：
+用户选中某个已知历史会话后，App 才在注册/切换 Runtime 之前进行 session-scoped 导入和完整 snapshot/event/identity 校验。恢复后的 Workspace path 与 Project digest 必须作为同一持久 identity 交给 Session Runtime；即使当前 TUI 从另一个 worktree 启动，也不得把当前启动路径与历史 digest 混合。Coordinator admission 成功后才能把 Runtime 放入 Session registry，失败不得留下 ghost session。成功时无提示进入会话；失败时保持当前会话和输入能力，只显示：
 
 ```text
-  ⎿  历史会话服务不可用，请输入 /resume 重试。
+  ⎿  历史会话打开失败，当前会话未受影响；请稍后通过 /resume 重试。
 ```
 
-`/resume` 加载成功后清除该状态；加载失败则继续显示会话服务错误。用户手动打开某个历史会话失败时，同样只显示脱敏的 TUI 提示；不得把底层异常原文拼接到渲染文本中。
+单个损坏会话不得使其他会话消失或进入全局 unavailable 状态。选择失败不得留下半注册 Runtime、切换 active session、复活旧 interaction mode，或显示底层异常原文。删除历史会话必须持久化 source/session tombstone，避免下次启动重新出现在 selector。
+SQLite current target 即使处于合法的 `WAL present / SHM absent` 重启形态，也必须先由隔离 preflight 重建临时 WAL 索引再进行
+隐式导入；不得因此显示上述失败提示。该提示只属于所选会话自身的数据/身份/格式校验失败。
+历史 source 只要存在 WAL 或 SHM 就通过临时副本读取；只读 SQLite 连接不得接触真实 SHM。缺少可重建 SHM 时也只在
+副本中重建，不创建 source sidecar。State 26 的 file preimage 不进入 current
+Store；历史会话仍可阅读，但旧 `/rewind` 文件写 authority 不复活。named recovery point 不完整时整个 selected session 失败，
+不能以“成功打开”为名静默删掉 checkpoint。
+
+## Fatal startup boundary
+
+若错误发生在 React error boundary，退出提示不得统一猜测为 Model Provider 配置问题，只显示 Enter/Esc
+退出，不建议运行 `kite-code setup`。Runtime/Artifact 不创建 installation key，因此不存在 key-loss startup
+screen。旧 `project-identities.json` 与历史 Runtime Store 不是当前 target；PTY 回归必须证明未知 source 被静默忽略、
+已知 source 只在选择后导入、源字节保持不变，并以 canonical Workspace identity 初始化 epoch 派生的当前 Store。
 
 ## 边界
 
-- Header 只消费 App 层已有的展示状态，不向 Core 添加 TUI 类型或依赖。
+- Header 只消费 App 层已有的展示状态，不向 Kernel、Host 或 Builtin 添加 TUI 类型或依赖。
 - 不在启动 Header 中加入 token、cache、Git 分支、授权模式或运行阶段；这些属于动态状态区。
 - 不使用 DEC 双倍宽高等终端专有字体控制序列；品牌标识只由普通 Unicode 和 Ink 样式构成。

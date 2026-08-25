@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { acceptRuntimeAction, rejectRuntimeAction } from '@/core/runtime/action-emission';
-import type { RuntimeEvent } from '@/core/runtime/events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { acceptRuntimeAction, rejectRuntimeAction } from '@kite/runtime-host/kernel-adapter';
 
 describe('Runtime Action emission boundary', () => {
   test('a rejection cannot carry domain events', () => {

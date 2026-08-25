@@ -1,21 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import { dirname } from 'node:path';
+import {
+  createMcpTransportAdmissionReceipt,
+  createMcpTransportBoundaryIdentity,
+  DefaultMcpSupervisor,
+  McpConnectionManager,
+  type McpTransportAdmissionRequest,
+  type McpTransportBoundaryController,
+} from '@kite/builtin-runtime/mcp';
+import type {
+  ExecutionBoundary,
+  ExecutionCapabilitySurface,
+  NetworkDecisionReceipt,
+} from '@kite/builtin-runtime/sandbox';
+import {
+  createNetworkBoundaryFetch,
+  createProtectedPathEvaluator,
+  networkBoundaryPolicyFromExecutionBoundary,
+} from '@kite/builtin-runtime/sandbox';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
-import {
-  createMcpTransportAdmissionReceiptV1,
-  createMcpTransportBoundaryIdentityV1,
-  DefaultMcpSupervisor,
-  type McpTransportAdmissionRequestV1,
-  type McpTransportBoundaryControllerV1,
-} from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import type { NetworkDecisionReceiptV1 } from '@/core/sandbox/network-enforcer';
-import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '@/core/sandbox/network-policy';
-import type { ExecutionBoundaryV1, ExecutionCapabilitySurfaceV1 } from '@/core/sandbox/types';
+import { createInMemoryMcpConfigRepository } from './helpers/mcp-test-composition';
 
 const workspace = process.cwd();
-const executionBoundary: ExecutionBoundaryV1 = {
+const executionBoundary: ExecutionBoundary = {
   filesystemScope: 'workspace_write',
   workspaceRoot: workspace,
   networkMode: 'allowlist',
@@ -26,7 +34,7 @@ const executionBoundary: ExecutionBoundaryV1 = {
   sandboxRequired: true,
   sandboxUnavailable: 'fail',
 };
-const executionSurface: ExecutionCapabilitySurfaceV1 = {
+const executionSurface: ExecutionCapabilitySurface = {
   inProcessReadOnlyTools: null,
   network: true,
   process: true,
@@ -38,14 +46,18 @@ const executionSurface: ExecutionCapabilitySurfaceV1 = {
   gitInspect: false,
   brokeredGitFeatureRevision: null,
 };
-const networkPolicy = networkBoundaryPolicyFromExecutionBoundaryV1(executionBoundary, true);
+const networkPolicy = networkBoundaryPolicyFromExecutionBoundary(executionBoundary, true);
 const safeHttpTransportOptions = {
   transportNetworkPolicy: networkPolicy,
-  transportRecordNetworkDecision: async (_decision: NetworkDecisionReceiptV1) => {},
+  transportRecordNetworkDecision: async (_decision: NetworkDecisionReceipt) => {},
 };
+const protectedPathEvaluator = createProtectedPathEvaluator({
+  workspaceRoot: workspace,
+  mode: 'deny',
+});
 
 function boundaryIdentity(surface = executionSurface) {
-  return createMcpTransportBoundaryIdentityV1({
+  return createMcpTransportBoundaryIdentity({
     workspaceRoot: workspace,
     executionBoundary,
     executionSurface: surface,
@@ -56,14 +68,14 @@ function boundaryIdentity(surface = executionSurface) {
 }
 
 function controller(
-  requests: McpTransportAdmissionRequestV1[],
+  requests: McpTransportAdmissionRequest[],
   identity = boundaryIdentity(),
-): McpTransportBoundaryControllerV1 {
+): McpTransportBoundaryController {
   return {
     identity,
     async admit(request) {
       requests.push(request);
-      return createMcpTransportAdmissionReceiptV1(request);
+      return createMcpTransportAdmissionReceipt(request);
     },
   };
 }
@@ -112,7 +124,7 @@ describe('MCP transport execution boundary', () => {
   });
 
   test('validates connect and every Tool/Resource invocation before SDK dispatch', async () => {
-    const requests: McpTransportAdmissionRequestV1[] = [];
+    const requests: McpTransportAdmissionRequest[] = [];
     const calls = { tool: 0, resource: 0 };
     let sdkConnectCalls = 0;
     const identity = boundaryIdentity();
@@ -195,7 +207,7 @@ describe('MCP transport execution boundary', () => {
   });
 
   test('rejects stale boundary and endpoint identities before consulting admission or transport', async () => {
-    const requests: McpTransportAdmissionRequestV1[] = [];
+    const requests: McpTransportAdmissionRequest[] = [];
     const calls = { tool: 0, resource: 0 };
     const identity = boundaryIdentity();
     const manager = new McpConnectionManager({
@@ -249,7 +261,7 @@ describe('MCP transport execution boundary', () => {
         identity,
         async admit(request) {
           return {
-            ...createMcpTransportAdmissionReceiptV1(request),
+            ...createMcpTransportAdmissionReceipt(request),
             endpointRevision: 'forged-endpoint',
           };
         },
@@ -273,7 +285,7 @@ describe('MCP transport execution boundary', () => {
   });
 
   test('rejects non-canonical endpoint config and network-policy mismatch before SDK dispatch', async () => {
-    const requests: McpTransportAdmissionRequestV1[] = [];
+    const requests: McpTransportAdmissionRequest[] = [];
     let sdkConnectCalls = 0;
     const createClient = () => {
       const client = fakeClient({ tool: 0, resource: 0 });
@@ -318,8 +330,8 @@ describe('MCP transport execution boundary', () => {
   });
 
   test('re-admits every actual HTTP redirect hop through the pinned network boundary', async () => {
-    const requests: McpTransportAdmissionRequestV1[] = [];
-    const decisions: NetworkDecisionReceiptV1[] = [];
+    const requests: McpTransportAdmissionRequest[] = [];
+    const decisions: NetworkDecisionReceipt[] = [];
     const pinnedRequests: Array<{ url: string; address: string; invocationId: string }> = [];
     const identity = boundaryIdentity();
     const client = fakeClient({ tool: 0, resource: 0 });
@@ -349,6 +361,14 @@ describe('MCP transport execution boundary', () => {
       transportRecordNetworkDecision: async (decision) => {
         decisions.push(decision);
       },
+      createNetworkBoundaryFetch: (policy, options) =>
+        createNetworkBoundaryFetch(policy, {
+          resolver: options.resolver,
+          recordDecision: options.recordDecision,
+          toolCallId: options.toolCallId,
+          invocationIdFactory: options.invocationIdFactory,
+          request: options.request,
+        }),
       transportPinnedRequest: async ({ url, admission }) => {
         pinnedRequests.push({
           url: url.href,
@@ -384,7 +404,7 @@ describe('MCP transport execution boundary', () => {
   });
 
   test('requires a fresh admission for notification-driven inventory refresh', async () => {
-    const requests: McpTransportAdmissionRequestV1[] = [];
+    const requests: McpTransportAdmissionRequest[] = [];
     const identity = boundaryIdentity();
     let toolListCalls = 0;
     let refresh: (() => Promise<void>) | undefined;
@@ -422,7 +442,7 @@ describe('MCP transport execution boundary', () => {
   });
 
   test('checks canonical Workspace identity before Supervisor catalog or transport work', async () => {
-    const requests: McpTransportAdmissionRequestV1[] = [];
+    const requests: McpTransportAdmissionRequest[] = [];
     let catalogLoads = 0;
     const manager = new McpConnectionManager({
       transportBoundaryRequired: true,
@@ -431,10 +451,10 @@ describe('MCP transport execution boundary', () => {
     });
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => {
+      repository: createInMemoryMcpConfigRepository(() => {
         catalogLoads += 1;
         throw new Error('must not load');
-      },
+      }),
     });
     await expect(supervisor.start(dirname(workspace))).rejects.toMatchObject({
       code: 'workspace_mismatch',
@@ -444,7 +464,7 @@ describe('MCP transport execution boundary', () => {
   });
 
   test('applies independent local-stdio and remote-HTTP surface axes before admission', async () => {
-    const requests: McpTransportAdmissionRequestV1[] = [];
+    const requests: McpTransportAdmissionRequest[] = [];
     const deniedSurface = { ...executionSurface, network: false, localStdioMcp: false };
     const httpDeniedManager = new McpConnectionManager({
       transportBoundaryRequired: true,
@@ -457,7 +477,8 @@ describe('MCP transport execution boundary', () => {
 
     const localStillExcludedManager = new McpConnectionManager({
       transportBoundaryRequired: true,
-      transportBoundary: controller(requests, boundaryIdentity(executionSurface)),
+      transportBoundary: controller(requests, boundaryIdentity(deniedSurface)),
+      protectedPathEvaluator,
       createClient: () => fakeClient({ tool: 0, resource: 0 }),
     });
     await expect(

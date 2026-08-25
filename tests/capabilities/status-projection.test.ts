@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
-  formatCapabilityStatusV1,
-  projectCapabilityStatusV1,
-} from '../../src/app/release/capability-status';
+  evaluateCapabilityProfileAdmission,
+  parseCapabilityProfile,
+} from '#app/config/release-capabilities';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
-  evaluateCapabilityProfileAdmissionV1,
-  parseCapabilityProfileV1,
-} from '../../src/core/config/release-capabilities';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+  formatCapabilityStatus,
+  projectCapabilityStatus,
+} from '../../apps/kite/src/release/capability-status';
 
 function verificationProfile() {
-  return parseCapabilityProfileV1(
+  return parseCapabilityProfile(
     JSON.parse(
       readFileSync(
-        join(import.meta.dir, '../../release/capability-profiles/verification-v1.json'),
+        join(import.meta.dir, '../../release/capability-profiles/verification.json'),
         'utf8',
       ),
     ),
@@ -50,14 +50,19 @@ function requiredRequest(): RuntimeEvent {
 describe('capability status projection', () => {
   test('keeps status presentation unable to bypass admission', () => {
     const profile = verificationProfile();
-    const admission = evaluateCapabilityProfileAdmissionV1({
+    const admission = evaluateCapabilityProfileAdmission({
       profile,
       embeddedCeiling: { maturity: 'under_development', maxRollout: 'off' },
-      features: { verificationV1: true },
+      features: { verification: true },
       dependencies: {},
     });
-    const state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace: '.' });
-    const status = projectCapabilityStatusV1({
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'thread',
+      userId: 'user',
+      workspace: '.',
+    });
+    const status = projectCapabilityStatus({
       profile,
       admission,
       executionBoundary: 'local',
@@ -72,13 +77,18 @@ describe('capability status projection', () => {
 
   test('renders independent completion facts and never a single ambiguous status', () => {
     const profile = verificationProfile();
-    const admission = evaluateCapabilityProfileAdmissionV1({
+    const admission = evaluateCapabilityProfileAdmission({
       profile,
       embeddedCeiling: { maturity: 'under_development', maxRollout: 'off' },
-      features: { verificationV1: false },
+      features: { verification: false },
       dependencies: {},
     });
-    let state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace: '.' });
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'thread',
+      userId: 'user',
+      workspace: '.',
+    });
     state = reduceRuntimeState(state, requiredRequest());
     state.transcript.final = 'The model says the work is done.';
     state.terminalOutcome = {
@@ -90,7 +100,7 @@ describe('capability status projection', () => {
       recoveryEntry: 'none',
       pendingVerification: true,
     };
-    const status = projectCapabilityStatusV1({
+    const status = projectCapabilityStatus({
       profile,
       admission,
       executionBoundary: 'local',
@@ -98,7 +108,7 @@ describe('capability status projection', () => {
       state,
       verificationFeatureEnabled: false,
     });
-    const output = formatCapabilityStatusV1(status);
+    const output = formatCapabilityStatus(status);
     expect(output).toContain('Agent final: present');
     expect(output).toContain('Runtime terminal: completed');
     expect(output).toContain('Plan lifecycle: building_without_plan');

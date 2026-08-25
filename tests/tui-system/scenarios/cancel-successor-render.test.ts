@@ -45,7 +45,10 @@ describe('TUI PTY System — cancel shell then render successor', () => {
     workspace = createTestWorkspace({
       configOverrides: {
         language: 'en-US',
-        interactionMode: 'auto',
+        // The fixture disables native sandboxing to exercise a synthetic slow
+        // process-tree cleanup. Full is the only Shell mode admitted without
+        // a restricted sandbox backend.
+        interactionMode: 'full',
         sandbox: { enabled: false },
       },
     });
@@ -138,6 +141,8 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       await waitForText(() => tui.viewport(), 'cancelled', 2_000);
 
       const successorRequestBaseline = server.getRequestCount();
+      // Workspace-baseline Shell executes directly in Auto. The cancelled run
+      // therefore made exactly one primary-model request and no reviewer call.
       expect(successorRequestBaseline).toBe(1);
 
       await typeText(tui, 'continue with successor', 0);

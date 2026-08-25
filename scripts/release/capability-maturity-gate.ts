@@ -1,8 +1,5 @@
 import { z } from 'zod';
-import {
-  type ReleaseCapability,
-  releaseCapabilitySchema,
-} from '../../src/core/config/release-capabilities';
+import { type ReleaseCapability, releaseCapabilitySchema } from '#app/config/release-capabilities';
 import { canonicalJson, sha256DomainSeparated } from './canonical-json';
 
 const MATURITY_EVIDENCE_DIGEST_DOMAIN = 'kite.release.capability-maturity-evidence.v1';
@@ -17,13 +14,13 @@ const recordIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,127}$/);
 const timestampSchema = z.iso.datetime({ offset: true });
 const SINGLE_MAINTAINER_IDENTITY = 'github:@ferqx';
 
-export const CAPABILITY_MATURITY_STAGES_V1 = Object.freeze(['canary', 'beta', 'stable'] as const);
-export type CapabilityMaturityStageV1 = (typeof CAPABILITY_MATURITY_STAGES_V1)[number];
+export const CAPABILITY_MATURITY_STAGES_ = Object.freeze(['canary', 'beta', 'stable'] as const);
+export type CapabilityMaturityStage = (typeof CAPABILITY_MATURITY_STAGES_)[number];
 
-const maturityStageSchema = z.enum(CAPABILITY_MATURITY_STAGES_V1);
+const maturityStageSchema = z.enum(CAPABILITY_MATURITY_STAGES_);
 
 /** Exact release/evaluator identity shared by every decision in one maturity chain. */
-export const capabilityMaturityIdentityV1Schema = z
+export const capabilityMaturityIdentitySchema = z
   .object({
     payloadDigest: digestSchema,
     profileDigest: digestSchema,
@@ -41,22 +38,22 @@ export const capabilityMaturityIdentityV1Schema = z
   })
   .strict();
 
-export type CapabilityMaturityIdentityV1 = z.infer<typeof capabilityMaturityIdentityV1Schema>;
+export type CapabilityMaturityIdentity = z.infer<typeof capabilityMaturityIdentitySchema>;
 
-const previousMaturityDecisionV1Schema = z
+const previousMaturityDecisionSchema = z
   .object({
-    schema: z.literal('CapabilityMaturityPreviousDecisionV1'),
+    schema: z.literal('CapabilityMaturityPreviousDecision'),
     stage: maturityStageSchema,
     status: z.literal('passed'),
     decisionId: recordIdSchema,
     windowId: recordIdSchema,
     decidedAt: timestampSchema,
-    identity: capabilityMaturityIdentityV1Schema,
+    identity: capabilityMaturityIdentitySchema,
     decisionDigest: digestSchema,
   })
   .strict();
 
-const preregistrationV1Schema = z
+const preregistrationSchema = z
   .object({
     registrationId: recordIdSchema,
     registeredAt: timestampSchema,
@@ -72,7 +69,7 @@ const preregistrationV1Schema = z
   })
   .strict();
 
-const humanApprovalV1Schema = z
+const humanApprovalSchema = z
   .object({
     approvalId: recordIdSchema,
     approverIdentity: z.literal(SINGLE_MAINTAINER_IDENTITY),
@@ -83,7 +80,7 @@ const humanApprovalV1Schema = z
   })
   .strict();
 
-const maturityObservationV1Schema = z
+const maturityObservationSchema = z
   .object({
     evidenceClass: z.enum(['contract_only', 'production_observation']),
     startedAt: timestampSchema,
@@ -99,7 +96,7 @@ const maturityObservationV1Schema = z
         G5: z.enum(['passed', 'failed', 'blocked', 'not_run']),
       })
       .strict(),
-    humanApprovals: z.array(humanApprovalV1Schema).length(1),
+    humanApprovals: z.array(humanApprovalSchema).length(1),
     userUnderstanding: z
       .object({
         responseCount: z.number().int().nonnegative(),
@@ -121,24 +118,24 @@ const maturityObservationV1Schema = z
   })
   .strict();
 
-export const capabilityMaturityEvidenceMaterialV1Schema = z
+export const capabilityMaturityEvidenceMaterialSchema = z
   .object({
-    schema: z.literal('CapabilityMaturityEvidenceMaterialV1'),
+    schema: z.literal('CapabilityMaturityEvidenceMaterial'),
     decisionId: recordIdSchema,
     windowId: recordIdSchema,
     targetStage: maturityStageSchema,
-    identity: capabilityMaturityIdentityV1Schema,
-    previousDecision: previousMaturityDecisionV1Schema.nullable(),
-    preregistration: preregistrationV1Schema,
-    observation: maturityObservationV1Schema,
+    identity: capabilityMaturityIdentitySchema,
+    previousDecision: previousMaturityDecisionSchema.nullable(),
+    preregistration: preregistrationSchema,
+    observation: maturityObservationSchema,
   })
   .strict();
 
-export type CapabilityMaturityEvidenceMaterialV1 = z.infer<
-  typeof capabilityMaturityEvidenceMaterialV1Schema
+export type CapabilityMaturityEvidenceMaterial = z.infer<
+  typeof capabilityMaturityEvidenceMaterialSchema
 >;
 
-const maturityAuthenticationV1Schema = z.discriminatedUnion('kind', [
+const maturityAuthenticationSchema = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('unconfigured'),
@@ -158,20 +155,20 @@ const maturityAuthenticationV1Schema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
-export const capabilityMaturityEvidenceV1Schema = z
+export const capabilityMaturityEvidenceSchema = z
   .object({
-    schema: z.literal('CapabilityMaturityEvidenceV1'),
-    material: capabilityMaturityEvidenceMaterialV1Schema,
+    schema: z.literal('CapabilityMaturityEvidence'),
+    material: capabilityMaturityEvidenceMaterialSchema,
     materialDigest: digestSchema,
-    authentication: maturityAuthenticationV1Schema,
+    authentication: maturityAuthenticationSchema,
   })
   .strict();
 
-export type CapabilityMaturityEvidenceV1 = z.infer<typeof capabilityMaturityEvidenceV1Schema>;
+export type CapabilityMaturityEvidence = z.infer<typeof capabilityMaturityEvidenceSchema>;
 
 // No production maturity producer/attestation authority has been approved. This
 // registry is deliberately source-owned and cannot be injected by a caller.
-interface TrustedCapabilityMaturityAuthorityV1 {
+interface TrustedCapabilityMaturityAuthority {
   authorityIdentity: string;
   verifierIdentity: string;
   capabilities: readonly ReleaseCapability[];
@@ -180,23 +177,23 @@ interface TrustedCapabilityMaturityAuthorityV1 {
   verificationReceiptDigest: `sha256:${string}`;
   verifiedAt: string;
 }
-const TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1: readonly TrustedCapabilityMaturityAuthorityV1[] =
+const TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_: readonly TrustedCapabilityMaturityAuthority[] =
   Object.freeze([]);
 /**
  * Deliberately empty until prior-decision and maintainer-approval
  * artifact verifiers exist. Populating only the authority allowlist above can
  * never make caller-authored chain or approval summaries eligible.
  */
-const VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1: readonly string[] = Object.freeze([]);
-const VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1: readonly string[] = Object.freeze([]);
-const PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_V1 = true as const;
+const VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_: readonly string[] = Object.freeze([]);
+const VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_: readonly string[] = Object.freeze([]);
+const PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_ = true as const;
 
-export interface CapabilityMaturityGateDecisionV1 {
-  schema: 'CapabilityMaturityGateDecisionV1';
+export interface CapabilityMaturityGateDecision {
+  schema: 'CapabilityMaturityGateDecision';
   status: 'passed' | 'blocked';
   promotionEligible: boolean;
-  targetStage: CapabilityMaturityStageV1;
-  identity: CapabilityMaturityIdentityV1;
+  targetStage: CapabilityMaturityStage;
+  identity: CapabilityMaturityIdentity;
   decisionId: string | null;
   windowId: string | null;
   evidenceDigest: `sha256:${string}` | null;
@@ -205,19 +202,15 @@ export interface CapabilityMaturityGateDecisionV1 {
   decisionDigest: `sha256:${string}`;
 }
 
-export function computeCapabilityMaturityEvidenceDigestV1(
-  rawMaterial: unknown,
-): `sha256:${string}` {
-  const material = capabilityMaturityEvidenceMaterialV1Schema.parse(rawMaterial);
+export function computeCapabilityMaturityEvidenceDigest(rawMaterial: unknown): `sha256:${string}` {
+  const material = capabilityMaturityEvidenceMaterialSchema.parse(rawMaterial);
   return sha256DomainSeparated(MATURITY_EVIDENCE_DIGEST_DOMAIN, canonicalJson(material));
 }
 
 /** Strictly rebuild the signed subject before any Gate interpretation. */
-export function verifyCapabilityMaturityEvidenceV1(
-  rawEvidence: unknown,
-): CapabilityMaturityEvidenceV1 {
-  const evidence = capabilityMaturityEvidenceV1Schema.parse(rawEvidence);
-  const rebuiltDigest = computeCapabilityMaturityEvidenceDigestV1(evidence.material);
+export function verifyCapabilityMaturityEvidence(rawEvidence: unknown): CapabilityMaturityEvidence {
+  const evidence = capabilityMaturityEvidenceSchema.parse(rawEvidence);
+  const rebuiltDigest = computeCapabilityMaturityEvidenceDigest(evidence.material);
   if (evidence.materialDigest !== rebuiltDigest) {
     throw new Error(`Capability maturity material digest mismatch: expected ${rebuiltDigest}.`);
   }
@@ -234,41 +227,40 @@ export function verifyCapabilityMaturityEvidenceV1(
  * prior-decision and maintainer-approval registries remain empty until real signed
  * evidence is verified and reviewed.
  */
-export function evaluateCapabilityMaturityGateV1(input: {
-  targetStage: CapabilityMaturityStageV1;
-  expectedIdentity: CapabilityMaturityIdentityV1;
+export function evaluateCapabilityMaturityGate(input: {
+  targetStage: CapabilityMaturityStage;
+  expectedIdentity: CapabilityMaturityIdentity;
   evaluatedAt: string;
   evidence?: unknown;
-}): CapabilityMaturityGateDecisionV1 {
+}): CapabilityMaturityGateDecision {
   const targetStage = maturityStageSchema.parse(input.targetStage);
-  const expectedIdentity = capabilityMaturityIdentityV1Schema.parse(input.expectedIdentity);
+  const expectedIdentity = capabilityMaturityIdentitySchema.parse(input.expectedIdentity);
   const evaluatedAtMs = parseTimestamp(input.evaluatedAt, 'Gate evaluation time');
   const trustRegistryDigest = sha256DomainSeparated(
     'kite.release.capability-maturity-authority-registry.v1',
     canonicalJson({
-      authorities: TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1,
-      previousDecisions: VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1,
-      maintainerApprovals: VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1,
-      exactRecordLookupImplemented:
-        PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_V1,
+      authorities: TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_,
+      previousDecisions: VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_,
+      maintainerApprovals: VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_,
+      exactRecordLookupImplemented: PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_,
     }),
   );
   const reasons = new Set<string>();
-  if (TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1.length === 0) {
+  if (TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_.length === 0) {
     reasons.add('authenticated_maturity_authority_not_configured');
   }
-  let evidence: CapabilityMaturityEvidenceV1 | undefined;
+  let evidence: CapabilityMaturityEvidence | undefined;
 
   if (input.evidence === undefined) {
     reasons.add('maturity_evidence_missing');
   } else {
-    evidence = verifyCapabilityMaturityEvidenceV1(input.evidence);
+    evidence = verifyCapabilityMaturityEvidence(input.evidence);
     evaluateEvidence({ evidence, expectedIdentity, targetStage, evaluatedAtMs, reasons });
   }
 
   const promotionEligible = reasons.size === 0;
   const withoutDigest = {
-    schema: 'CapabilityMaturityGateDecisionV1' as const,
+    schema: 'CapabilityMaturityGateDecision' as const,
     status: promotionEligible ? ('passed' as const) : ('blocked' as const),
     promotionEligible,
     targetStage,
@@ -289,9 +281,9 @@ export function evaluateCapabilityMaturityGateV1(input: {
 }
 
 function evaluateEvidence(input: {
-  evidence: CapabilityMaturityEvidenceV1;
-  expectedIdentity: CapabilityMaturityIdentityV1;
-  targetStage: CapabilityMaturityStageV1;
+  evidence: CapabilityMaturityEvidence;
+  expectedIdentity: CapabilityMaturityIdentity;
+  targetStage: CapabilityMaturityStage;
   evaluatedAtMs: number;
   reasons: Set<string>;
 }): void {
@@ -303,7 +295,7 @@ function evaluateEvidence(input: {
   if (authentication.kind === 'unconfigured') {
     input.reasons.add('evidence_authentication_unconfigured');
   } else if (
-    !TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1.some(
+    !TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_.some(
       (authority) =>
         authority.authorityIdentity === authentication.authorityIdentity &&
         authority.verifierIdentity === authentication.verifierIdentity &&
@@ -320,7 +312,7 @@ function evaluateEvidence(input: {
     input.reasons.add('real_observation_missing');
   }
 
-  const expectedPrevious: Record<CapabilityMaturityStageV1, CapabilityMaturityStageV1 | null> = {
+  const expectedPrevious: Record<CapabilityMaturityStage, CapabilityMaturityStage | null> = {
     canary: null,
     beta: 'canary',
     stable: 'beta',
@@ -339,7 +331,7 @@ function evaluateEvidence(input: {
       input.reasons.add('observation_window_id_reused');
     compareIdentity(previousDecision.identity, input.expectedIdentity, 'previous', input.reasons);
     if (
-      !VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1.includes(previousDecision.decisionDigest)
+      !VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_.includes(previousDecision.decisionDigest)
     ) {
       input.reasons.add('verified_previous_maturity_decision_not_configured');
     }
@@ -397,7 +389,7 @@ function evaluateEvidence(input: {
   if (
     observation.humanApprovals.some(
       ({ recordDigest }) =>
-        !VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1.includes(recordDigest),
+        !VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_.includes(recordDigest),
     )
   ) {
     input.reasons.add('verified_maintainer_approval_not_configured');
@@ -453,8 +445,8 @@ function evaluateEvidence(input: {
 }
 
 function compareIdentity(
-  actual: CapabilityMaturityIdentityV1,
-  expected: CapabilityMaturityIdentityV1,
+  actual: CapabilityMaturityIdentity,
+  expected: CapabilityMaturityIdentity,
   prefix: string,
   reasons: Set<string>,
 ): void {

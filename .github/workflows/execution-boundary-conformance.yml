@@ -4,11 +4,17 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "src/core/config/release-*.ts"
-      - "src/core/sandbox/**"
-      - "src/core/mcp/**"
-      - "src/app/release/**"
-      - "src/app/workspace/**"
+      - "apps/kite/src/config/execution-boundary.ts"
+      - "apps/kite/src/config/execution-qualification.ts"
+      - "apps/kite/src/config/release-*.ts"
+      - "packages/builtin-runtime/src/sandbox/**"
+      - "packages/builtin-runtime/src/planning/runtime-module.ts"
+      - "packages/runtime-host/src/process/**"
+      - "packages/runtime-spi/src/sandbox-execution-provider.ts"
+      - "apps/kite/src/sandbox/**"
+      - "packages/builtin-runtime/src/mcp/**"
+      - "apps/kite/src/release/**"
+      - "apps/kite/src/workspace/**"
       - "scripts/release/**"
       - "release/platform-capabilities/**"
       - "tests/release/**"

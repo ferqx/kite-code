@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from './canonical-json';
-import { type StableCapabilityDecisionV1, validateGaSelectionV1 } from './ga-selection';
+import { type StableCapabilityDecision, validateGaSelection } from './ga-selection';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const timestampSchema = z.iso.datetime({ offset: true });
 const identityFieldSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,127}$/);
 
-export const GA_ASSEMBLY_DEPENDENCIES_V1 = Object.freeze([
+export const GA_ASSEMBLY_DEPENDENCIES_ = Object.freeze([
   'candidate_decision',
   'artifact_decision',
   'profile_decision',
@@ -14,7 +14,7 @@ export const GA_ASSEMBLY_DEPENDENCIES_V1 = Object.freeze([
   'cohort_decision',
 ] as const);
 
-const gaAssemblyCandidateIdentityV1Schema = z
+const gaAssemblyCandidateIdentitySchema = z
   .object({
     candidateId: identityFieldSchema,
     artifactDigest: digestSchema,
@@ -24,12 +24,12 @@ const gaAssemblyCandidateIdentityV1Schema = z
   })
   .strict();
 
-export type GAAssemblyCandidateIdentityV1 = z.infer<typeof gaAssemblyCandidateIdentityV1Schema>;
+export type GAAssemblyCandidateIdentity = z.infer<typeof gaAssemblyCandidateIdentitySchema>;
 
-const gaAssemblyDependencyDecisionV1Schema = gaAssemblyCandidateIdentityV1Schema
+const gaAssemblyDependencyDecisionSchema = gaAssemblyCandidateIdentitySchema
   .extend({
-    schema: z.literal('GAAssemblyDependencyDecisionV1'),
-    dependency: z.enum(GA_ASSEMBLY_DEPENDENCIES_V1),
+    schema: z.literal('GAAssemblyDependencyDecision'),
+    dependency: z.enum(GA_ASSEMBLY_DEPENDENCIES_),
     status: z.literal('passed'),
     selectionDigest: digestSchema,
     verifierIdentity: z.string().trim().min(1).max(256),
@@ -38,9 +38,9 @@ const gaAssemblyDependencyDecisionV1Schema = gaAssemblyCandidateIdentityV1Schema
   })
   .strict();
 
-const schemaRollbackReportV1Schema = z
+const schemaRollbackReportSchema = z
   .object({
-    schema: z.literal('ReleaseSchemaRollbackReportV1'),
+    schema: z.literal('ReleaseSchemaRollbackReport'),
     status: z.literal('contract_replay_passed'),
     fixtureClass: z.literal('synthetic_contract_only'),
     productionEvidence: z.literal(false),
@@ -52,9 +52,9 @@ const schemaRollbackReportV1Schema = z
   })
   .strict();
 
-const compatibilityReportV1Schema = z
+const compatibilityReportSchema = z
   .object({
-    schema: z.literal('GACompatibilityReportV1'),
+    schema: z.literal('GACompatibilityReport'),
     fixtureClass: z.literal('synthetic_contract_only'),
     status: z.literal('contract_replay_passed'),
     productionEvidence: z.literal(false),
@@ -65,31 +65,31 @@ const compatibilityReportV1Schema = z
   })
   .strict();
 
-const rollbackReplayV1Schema = z
+const rollbackReplaySchema = z
   .object({
-    schema: z.literal('GAAssemblyRollbackReplayV1'),
-    candidate: gaAssemblyCandidateIdentityV1Schema,
+    schema: z.literal('GAAssemblyRollbackReplay'),
+    candidate: gaAssemblyCandidateIdentitySchema,
     selectionDigest: digestSchema,
     verifierIdentity: z.string().trim().min(1).max(256),
     completedAt: timestampSchema,
     verificationReceiptDigest: digestSchema,
-    report: schemaRollbackReportV1Schema,
+    report: schemaRollbackReportSchema,
   })
   .strict();
 
-const compatibilityReplayV1Schema = z
+const compatibilityReplaySchema = z
   .object({
-    schema: z.literal('GAAssemblyCompatibilityReplayV1'),
-    candidate: gaAssemblyCandidateIdentityV1Schema,
+    schema: z.literal('GAAssemblyCompatibilityReplay'),
+    candidate: gaAssemblyCandidateIdentitySchema,
     selectionDigest: digestSchema,
     verifierIdentity: z.string().trim().min(1).max(256),
     completedAt: timestampSchema,
     verificationReceiptDigest: digestSchema,
-    report: compatibilityReportV1Schema,
+    report: compatibilityReportSchema,
   })
   .strict();
 
-const maintainerReviewScopeV1Schema = z.tuple([
+const maintainerReviewScopeSchema = z.tuple([
   z.literal('candidate'),
   z.literal('artifact'),
   z.literal('profile'),
@@ -100,28 +100,28 @@ const maintainerReviewScopeV1Schema = z.tuple([
   z.literal('compatibility'),
 ]);
 
-const maintainerReviewMaterialV1Schema = z
+const maintainerReviewMaterialSchema = z
   .object({
-    schema: z.literal('GAAssemblyMaintainerReviewV1'),
+    schema: z.literal('GAAssemblyMaintainerReview'),
     status: z.literal('passed'),
     reviewMode: z.literal('single_maintainer'),
-    candidate: gaAssemblyCandidateIdentityV1Schema,
+    candidate: gaAssemblyCandidateIdentitySchema,
     selectionDigest: digestSchema,
     rollbackReportDigest: digestSchema,
     compatibilityReportDigest: digestSchema,
-    scope: maintainerReviewScopeV1Schema,
+    scope: maintainerReviewScopeSchema,
     releaseOwnerIdentity: z.string().trim().min(1).max(256),
     reviewerIdentity: z.string().trim().min(1).max(256),
     reviewedAt: timestampSchema,
   })
   .strict();
 
-const maintainerReviewV1Schema = maintainerReviewMaterialV1Schema
+const maintainerReviewSchema = maintainerReviewMaterialSchema
   .extend({ decisionDigest: digestSchema })
   .strict()
   .superRefine((value, context) => {
     const { decisionDigest, ...material } = value;
-    const expected = computeGaMaintainerReviewDecisionDigestV1(material);
+    const expected = computeGaMaintainerReviewDecisionDigest(material);
     if (decisionDigest !== expected) {
       context.addIssue({
         code: 'custom',
@@ -131,30 +131,28 @@ const maintainerReviewV1Schema = maintainerReviewMaterialV1Schema
     }
   });
 
-export function computeGaMaintainerReviewDecisionDigestV1(material: unknown): `sha256:${string}` {
-  const parsed = maintainerReviewMaterialV1Schema.parse(material);
+export function computeGaMaintainerReviewDecisionDigest(material: unknown): `sha256:${string}` {
+  const parsed = maintainerReviewMaterialSchema.parse(material);
   return sha256DomainSeparated('kite.release.ga-maintainer-review.v1', canonicalJson(parsed));
 }
 
-export const gaAssemblyInputV1Schema = z
+export const gaAssemblyInputSchema = z
   .object({
-    schema: z.literal('GAAssemblyInputV1'),
+    schema: z.literal('GAAssemblyInput'),
     assemblyId: identityFieldSchema,
     assembledAt: timestampSchema,
-    candidate: gaAssemblyCandidateIdentityV1Schema,
+    candidate: gaAssemblyCandidateIdentitySchema,
     selection: z.unknown(),
     stableCapabilityDecisions: z.array(z.unknown()).max(64),
-    dependencies: z
-      .array(gaAssemblyDependencyDecisionV1Schema)
-      .max(GA_ASSEMBLY_DEPENDENCIES_V1.length),
-    maintainerReview: maintainerReviewV1Schema.nullable(),
-    rollbackReplay: rollbackReplayV1Schema.nullable(),
-    compatibilityReplay: compatibilityReplayV1Schema.nullable(),
+    dependencies: z.array(gaAssemblyDependencyDecisionSchema).max(GA_ASSEMBLY_DEPENDENCIES_.length),
+    maintainerReview: maintainerReviewSchema.nullable(),
+    rollbackReplay: rollbackReplaySchema.nullable(),
+    compatibilityReplay: compatibilityReplaySchema.nullable(),
   })
   .strict();
 
-export interface GAAssemblyDecisionV1 {
-  schema: 'GAAssemblyDecisionV1';
+export interface GAAssemblyDecision {
+  schema: 'GAAssemblyDecision';
   status: 'passed' | 'blocked';
   gaEligible: boolean;
   distributable: boolean;
@@ -163,7 +161,7 @@ export interface GAAssemblyDecisionV1 {
   milestone: null;
   assemblyId: string;
   assembledAt: string;
-  candidate: GAAssemblyCandidateIdentityV1;
+  candidate: GAAssemblyCandidateIdentity;
   selectionDigest: `sha256:${string}`;
   dependencyDecisionDigests: `sha256:${string}`[];
   maintainerReviewDecisionDigest: `sha256:${string}` | null;
@@ -173,7 +171,7 @@ export interface GAAssemblyDecisionV1 {
   assemblyDigest: `sha256:${string}`;
 }
 
-interface TrustedGAAssemblyAuthorityV1 {
+interface TrustedGAAssemblyAuthority {
   authorityId: string;
   dependencyVerifierIdentities: readonly string[];
   reviewerIdentities: readonly string[];
@@ -182,33 +180,31 @@ interface TrustedGAAssemblyAuthorityV1 {
     kind: 'rollback' | 'compatibility';
     verifierIdentity: string;
     verificationReceiptDigest: string;
-    candidate: GAAssemblyCandidateIdentityV1;
+    candidate: GAAssemblyCandidateIdentity;
     selectionDigest: string;
     reportDigest: string;
   }[];
 }
 
-const TRUSTED_GA_ASSEMBLY_AUTHORITIES_V1: readonly TrustedGAAssemblyAuthorityV1[] = Object.freeze(
-  [],
-);
+const TRUSTED_GA_ASSEMBLY_AUTHORITIES_: readonly TrustedGAAssemblyAuthority[] = Object.freeze([]);
 
 /**
  * Pure GA assembly/replay Gate. It performs no I/O and has no publish path.
  * Production assembly remains impossible until a source-owned authenticated
  * authority registry and verifier are deliberately implemented.
  */
-export function evaluateGaAssemblyV1(rawInput: unknown): GAAssemblyDecisionV1 {
-  const input = gaAssemblyInputV1Schema.parse(rawInput);
-  const validation = validateGaSelectionV1(
+export function evaluateGaAssembly(rawInput: unknown): GAAssemblyDecision {
+  const input = gaAssemblyInputSchema.parse(rawInput);
+  const validation = validateGaSelection(
     input.selection,
-    input.stableCapabilityDecisions as readonly StableCapabilityDecisionV1[],
+    input.stableCapabilityDecisions as readonly StableCapabilityDecision[],
   );
   const reasons = new Set<string>();
-  if (TRUSTED_GA_ASSEMBLY_AUTHORITIES_V1.length === 0) {
+  if (TRUSTED_GA_ASSEMBLY_AUTHORITIES_.length === 0) {
     reasons.add('authenticated_ga_assembly_authority_not_configured');
   }
   const dependencies = new Map<
-    (typeof GA_ASSEMBLY_DEPENDENCIES_V1)[number],
+    (typeof GA_ASSEMBLY_DEPENDENCIES_)[number],
     (typeof input.dependencies)[number]
   >();
 
@@ -224,13 +220,13 @@ export function evaluateGaAssemblyV1(rawInput: unknown): GAAssemblyDecisionV1 {
       reasons.add(`dependency_selection_mismatch:${dependency.dependency}`);
     }
   }
-  for (const dependency of GA_ASSEMBLY_DEPENDENCIES_V1) {
+  for (const dependency of GA_ASSEMBLY_DEPENDENCIES_) {
     if (!dependencies.has(dependency)) reasons.add(`dependency_missing:${dependency}`);
   }
   if (
-    TRUSTED_GA_ASSEMBLY_AUTHORITIES_V1.length > 0 &&
+    TRUSTED_GA_ASSEMBLY_AUTHORITIES_.length > 0 &&
     input.dependencies.some((dependency) =>
-      TRUSTED_GA_ASSEMBLY_AUTHORITIES_V1.every(
+      TRUSTED_GA_ASSEMBLY_AUTHORITIES_.every(
         (authority) =>
           !authority.dependencyVerifierIdentities.includes(dependency.verifierIdentity),
       ),
@@ -259,14 +255,14 @@ export function evaluateGaAssemblyV1(rawInput: unknown): GAAssemblyDecisionV1 {
     reasons,
   });
   if (
-    TRUSTED_GA_ASSEMBLY_AUTHORITIES_V1.length > 0 &&
+    TRUSTED_GA_ASSEMBLY_AUTHORITIES_.length > 0 &&
     [
       { kind: 'rollback' as const, replay: input.rollbackReplay },
       { kind: 'compatibility' as const, replay: input.compatibilityReplay },
     ].some(
       ({ kind, replay }) =>
         replay &&
-        TRUSTED_GA_ASSEMBLY_AUTHORITIES_V1.every(
+        TRUSTED_GA_ASSEMBLY_AUTHORITIES_.every(
           (authority) =>
             !authority.replayRecords.some(
               (record) =>
@@ -300,8 +296,8 @@ export function evaluateGaAssemblyV1(rawInput: unknown): GAAssemblyDecisionV1 {
       reasons.add('maintainer_security_review_identity_mismatch');
     }
     if (
-      TRUSTED_GA_ASSEMBLY_AUTHORITIES_V1.length > 0 &&
-      TRUSTED_GA_ASSEMBLY_AUTHORITIES_V1.every(
+      TRUSTED_GA_ASSEMBLY_AUTHORITIES_.length > 0 &&
+      TRUSTED_GA_ASSEMBLY_AUTHORITIES_.every(
         (authority) =>
           !authority.reviewerIdentities.includes(review.reviewerIdentity) ||
           !authority.reviewDecisionDigests.includes(review.decisionDigest),
@@ -346,8 +342,8 @@ export function evaluateGaAssemblyV1(rawInput: unknown): GAAssemblyDecisionV1 {
   }
 
   const gaEligible = reasons.size === 0;
-  const withoutDigest: Omit<GAAssemblyDecisionV1, 'assemblyDigest'> = {
-    schema: 'GAAssemblyDecisionV1',
+  const withoutDigest: Omit<GAAssemblyDecision, 'assemblyDigest'> = {
+    schema: 'GAAssemblyDecision',
     status: gaEligible ? 'passed' : 'blocked',
     gaEligible,
     distributable: gaEligible,
@@ -380,11 +376,8 @@ export function evaluateGaAssemblyV1(rawInput: unknown): GAAssemblyDecisionV1 {
 
 function validateReplayBinding(input: {
   label: 'rollback' | 'compatibility';
-  replay:
-    | z.infer<typeof rollbackReplayV1Schema>
-    | z.infer<typeof compatibilityReplayV1Schema>
-    | null;
-  candidate: GAAssemblyCandidateIdentityV1;
+  replay: z.infer<typeof rollbackReplaySchema> | z.infer<typeof compatibilityReplaySchema> | null;
+  candidate: GAAssemblyCandidateIdentity;
   selectionDigest: string;
   reasons: Set<string>;
 }): void {
@@ -409,8 +402,8 @@ function validateReplayBinding(input: {
 }
 
 function sameCandidate(
-  left: GAAssemblyCandidateIdentityV1,
-  right: GAAssemblyCandidateIdentityV1,
+  left: GAAssemblyCandidateIdentity,
+  right: GAAssemblyCandidateIdentity,
 ): boolean {
   return (
     left.candidateId === right.candidateId &&

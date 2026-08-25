@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { evaluateAutoCompactionAdmissionV1 } from '../../scripts/release/auto-compaction-admission';
+import { evaluateAutoCompactionAdmission } from '../../scripts/release/auto-compaction-admission';
 
 const digest = `sha256:${'b'.repeat(64)}` as const;
 const input = {
-  schema: 'AutoCompactionAdmissionInputV1',
+  schema: 'AutoCompactionAdmissionInput',
   artifactDigest: digest,
   profileDigest: digest,
   routeDigest: digest,
@@ -29,7 +29,7 @@ const dependencyIds = [
 ] as const;
 
 const dependencies = dependencyIds.map((dependency) => ({
-  schema: 'AutoCompactionDependencyDecisionV1' as const,
+  schema: 'AutoCompactionDependencyDecision' as const,
   dependency,
   status: 'passed' as const,
   artifactDigest: digest,
@@ -43,7 +43,7 @@ const dependencies = dependencyIds.map((dependency) => ({
 
 describe('external auto-compaction admission contract', () => {
   test('keeps auto off with zero model/checkpoint effects while evidence is absent', () => {
-    const result = evaluateAutoCompactionAdmissionV1(input);
+    const result = evaluateAutoCompactionAdmission(input);
     expect(result).toMatchObject({
       status: 'blocked',
       liveAdmissionEligible: false,
@@ -56,7 +56,7 @@ describe('external auto-compaction admission contract', () => {
   });
 
   test('keeps shape-valid dependency fixtures contract-only and live-off', () => {
-    const result = evaluateAutoCompactionAdmissionV1({
+    const result = evaluateAutoCompactionAdmission({
       ...input,
       dependencies,
     });
@@ -76,11 +76,11 @@ describe('external auto-compaction admission contract', () => {
 
   test('G0/G1 and unknown fields fail closed', () => {
     expect(
-      evaluateAutoCompactionAdmissionV1({
+      evaluateAutoCompactionAdmission({
         ...input,
         safetyObservation: { ...input.safetyObservation, g0Count: 1, g1Count: 1 },
       }).reasonCodes,
     ).toEqual(expect.arrayContaining(['g0_observed', 'g1_observed']));
-    expect(() => evaluateAutoCompactionAdmissionV1({ ...input, hiddenGrant: true })).toThrow();
+    expect(() => evaluateAutoCompactionAdmission({ ...input, hiddenGrant: true })).toThrow();
   });
 });

@@ -5,7 +5,7 @@
 终态范围（ADR-0069）：2A.0–2A.8、2A.10、2A.11 按普通开源候选的 build、manifest/checksum、
 install/start/rollback、三平台 CI、RC 文档和 G0/G1 记为 `completed`；2A.9 远程 signed rollout service
 记为 `superseded`。Sigstore、attestation、notarization 与 Authenticode 不再阻塞首发，也不得冒充已取得。
-当前状态见 `release/oss-first-release/task-status-v2.json`。
+当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：

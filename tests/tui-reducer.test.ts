@@ -1,20 +1,29 @@
 import { describe, expect, test } from 'bun:test';
-import type { Action } from '../src/app/tui/App';
-import { eventReducer as canonicalEventReducer, createInitialState } from '../src/app/tui/App';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { ToolApprovalPayload, UserInputPayload } from '@kite/runtime-contract';
+import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
+import type { Action } from '../apps/kite/src/tui/App';
+import {
+  eventReducer as canonicalEventReducer,
+  createInitialState,
+} from '../apps/kite/src/tui/App';
 import {
   projectToolCancelled,
   projectUserCancelledTurn,
-} from '../src/app/tui/reducers/cancellation-projection';
-import { buildToolSummaryLine } from '../src/app/tui/reducers/consolidateTools';
+} from '../apps/kite/src/tui/reducers/cancellation-projection';
+import { buildToolSummaryLine } from '../apps/kite/src/tui/reducers/consolidateTools';
 import {
   handleRuntimeEventAction as handleCanonicalRuntimeEventAction,
   handleEventAction,
   type RenderEvent,
-} from '../src/app/tui/reducers/handleEvent';
-import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
-import type { RuntimeEvent } from '../src/core/runtime/events';
-import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
-import type { DurableSuspendedSubagentV1 } from '../src/protocol/subagent';
+} from '../apps/kite/src/tui/reducers/handleEvent';
+import type {
+  InterruptState,
+  OutputBlock,
+  SessionSnapshot,
+  TuiSessionCommandGrant,
+  TuiState,
+} from '../apps/kite/src/tui/types';
 import { CURRENT_TEST_PLAN_IDENTITY, CURRENT_TEST_PLAN_REVIEW_FACTS } from './helpers/current-plan';
 import { currentRuntimeEvent } from './helpers/current-runtime-event';
 
@@ -29,7 +38,7 @@ function privateSuspensionSnapshot(input: {
   blockedToolId: string;
   toolName: string;
   reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
-}): DurableSuspendedSubagentV1 {
+}): DurableSuspendedSubagent {
   return {
     storage: 'private_artifact_v1',
     subagentId: input.subagentId,
@@ -39,7 +48,7 @@ function privateSuspensionSnapshot(input: {
     continuationArtifact: {
       artifactId: `pa_${'b'.repeat(64)}`,
       kind: 'subagent_continuation',
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 1,
     },
     parentInvocationId: `parent-${input.parentToolCallId}`,
@@ -89,7 +98,10 @@ function tcEvt(
 ): LegacyRenderAction {
   return {
     type: 'EVENT',
-    event: { type: 'tool_call', data: { call_id: callId, name, args, status } },
+    event: {
+      type: 'tool_call',
+      data: { call_id: callId, name, args, status: status ?? 'running' },
+    },
   };
 }
 function tsEvt(callId: string): LegacyRenderAction {
@@ -130,6 +142,10 @@ function approval(data: Partial<ToolApprovalPayload> = {}): ToolApprovalPayload 
     ...data,
   };
 }
+const APPROVAL_EVENT_METADATA = {
+  fullModeBypassEligible: false,
+  fullModePolicyBypassAllowed: false,
+} as const;
 function question(data: Partial<UserInputPayload> = {}): UserInputPayload {
   return { question: 'What?', options: [], allow_free_text: true, ...data };
 }
@@ -1391,7 +1407,7 @@ describe('eventReducer (blocks model)', () => {
         s,
         tcEvt('c2', 'shell_execute', {
           intent: 'inspect',
-          command: '  ls -la src/app/tui  ',
+          command: '  ls -la apps/kite/src/tui  ',
         }),
       );
 
@@ -1565,7 +1581,7 @@ describe('eventReducer (blocks model)', () => {
             inputTokens: 100,
             outputTokens: 30,
             hitRate: 0.5,
-            standard: {} as import('@/protocol/events').PromptCacheStandardEvaluation,
+            standard: {} as import('@kite/runtime-contract').PromptCacheStandardEvaluation,
           },
         },
       });
@@ -1584,7 +1600,7 @@ describe('eventReducer (blocks model)', () => {
             inputTokens: 2000,
             outputTokens: 80,
             hitRate: 0.9,
-            standard: {} as import('@/protocol/events').PromptCacheStandardEvaluation,
+            standard: {} as import('@kite/runtime-contract').PromptCacheStandardEvaluation,
           },
         },
       });
@@ -1712,7 +1728,7 @@ describe('eventReducer (blocks model)', () => {
       expect(flatBlocks(s)[0]!.kind).toBe('question');
       expect(s.interrupt?.kind).toBe('input');
     });
-    test('RESOLVE_INTERRUPT clears an off-screen approval', () => {
+    test('legacy approval without an interaction identity is not resolved by a local action', () => {
       let s = fresh();
       const a = approval();
       s = dispatch(s, { type: 'EVENT', event: { type: 'need_approval', data: a } });
@@ -1721,7 +1737,7 @@ describe('eventReducer (blocks model)', () => {
         resolution: { action: 'approved', grant: 'approve_once' },
       });
       expect(flatBlocks(s)).toHaveLength(0);
-      expect(s.interrupt).toBeNull();
+      expect(s.interrupt).toMatchObject({ kind: 'approval', approval: a });
     });
     test('RESOLVE_INTERRUPT marks question as resolved', () => {
       let s = fresh();
@@ -2016,6 +2032,7 @@ describe('eventReducer (blocks model)', () => {
 
       s = handleRuntimeEventAction(s, {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-1',
         toolCallId: 'bash-1',
         approval: {
@@ -2086,6 +2103,7 @@ describe('eventReducer (blocks model)', () => {
       s = handleRuntimeEventAction(s, { type: 'tool.started', toolCallId: 'bash-1' });
       s = handleRuntimeEventAction(s, {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-2',
         toolCallId: 'bash-2',
         approval: {
@@ -2135,6 +2153,7 @@ describe('eventReducer (blocks model)', () => {
       };
       s = handleRuntimeEventAction(s, {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-2',
         toolCallId: 'bash-2',
         approval: {
@@ -2376,19 +2395,13 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'CTRL_C' });
       expect(s.exitRequested).toBe(true);
     });
-    test('SWITCH_AUTH toggles default <-> full_access', () => {
+    test('legacy SWITCH_AUTH cannot create an approval grant', () => {
       let s = fresh();
       s = dispatch(s, { type: 'SWITCH_AUTH', mode: 'toggle' });
-      expect(s.status.authorization).toBe('full_access');
+      expect(s.interactionMode).toBe('auto');
       s = dispatch(s, { type: 'SWITCH_AUTH', mode: 'toggle' });
-      expect(s.status.authorization).toBe('default');
-    });
-    test('SWITCH_AUTH with explicit mode sets authorization directly', () => {
-      let s = fresh();
-      s = dispatch(s, { type: 'SWITCH_AUTH', mode: 'full_access' });
-      expect(s.status.authorization).toBe('full_access');
-      s = dispatch(s, { type: 'SWITCH_AUTH', mode: 'default' });
-      expect(s.status.authorization).toBe('default');
+      expect(s.interactionMode).toBe('auto');
+      expect(s.status).not.toHaveProperty('authorization');
     });
     test('SET_PHASE transitions between planning and building', () => {
       let s = fresh();
@@ -2409,19 +2422,16 @@ describe('eventReducer (blocks model)', () => {
       );
       expect(s.status.phase).toBe('building');
     });
-    test('TOGGLE_PLAN_MODE toggles phase and resets auth', () => {
+    test('TOGGLE_PLAN_MODE toggles phase without changing interaction mode', () => {
       let s = fresh();
-      // 先设为 full_access / Start with full_access
-      s = dispatch(s, { type: 'SWITCH_AUTH', mode: 'full_access' });
-      expect(s.status.authorization).toBe('full_access');
       // 切换到 planning / Toggle to planning
       s = dispatch(s, { type: 'TOGGLE_PLAN_MODE' });
       expect(s.status.phase).toBe('planning');
-      expect(s.status.authorization).toBe('default');
+      expect(s.interactionMode).toBe('auto');
       // 切回 building，auth 保持 / Toggle back, auth stays
       s = dispatch(s, { type: 'TOGGLE_PLAN_MODE' });
       expect(s.status.phase).toBe('building');
-      expect(s.status.authorization).toBe('default');
+      expect(s.interactionMode).toBe('auto');
     });
     test('need_plan_review sets interrupt and pendingPlan, resolved via RESOLVE_PLAN_REVIEW', () => {
       const eventPayload = {
@@ -2611,6 +2621,7 @@ describe('eventReducer (blocks model)', () => {
           data: {
             call_id: 'plan-1',
             name: 'update_plan',
+            status: 'running',
             args: {
               name: 'Test Plan',
               description: 'A great plan',
@@ -3679,6 +3690,70 @@ describe('eventReducer (blocks model)', () => {
       expect(next.activeSessionId).toBe('new');
     });
 
+    test('historical load keeps the outgoing projection active until LOAD_SESSION saves it', () => {
+      const snapshot = (threadId: string, active: boolean): SessionSnapshot => ({
+        threadId,
+        name: threadId,
+        workspace: '/tmp',
+        active,
+        running: false,
+        pendingInterrupt: false,
+        interrupt: null,
+        plan: null,
+        status: initialState.status,
+        turns: [],
+      });
+      let state: TuiState = {
+        ...initialState,
+        activeSessionId: 'latest',
+        loadingSessionId: 'other',
+        sessions: [snapshot('latest', true)],
+        turns: [
+          {
+            blocks: [{ id: 1, kind: 'text', content: 'latest session message' }],
+          },
+        ],
+      };
+
+      // SessionManager has already switched its Runtime owner to `other`, but
+      // the TUI has not committed LOAD_SESSION yet. The list refresh may add
+      // the target snapshot, but must not rebind the still-visible turns.
+      state = eventReducer(state, {
+        type: 'SET_SESSIONS',
+        sessions: [snapshot('latest', false), snapshot('other', true)],
+      });
+      expect(state.activeSessionId).toBe('latest');
+      expect(
+        state.sessions.filter((session) => session.active).map((session) => session.threadId),
+      ).toEqual(['latest']);
+
+      state = eventReducer(state, {
+        type: 'LOAD_SESSION',
+        threadId: 'other',
+        blocks: [{ id: 2, kind: 'text', content: 'other session message' }],
+        interrupt: null,
+        modelProvider: 'mock',
+        modelName: 'mock',
+        thinkingLevel: 'max',
+      });
+      expect(state.activeSessionId).toBe('other');
+      expect(
+        state.sessions.filter((session) => session.active).map((session) => session.threadId),
+      ).toEqual(['other']);
+      expect(
+        flatBlocks(state).map((block) => (block.kind === 'text' ? block.content : block.kind)),
+      ).toEqual(['other session message']);
+
+      state = eventReducer(state, { type: 'SWITCH_SESSION', threadId: 'latest' });
+      expect(state.activeSessionId).toBe('latest');
+      expect(
+        state.sessions.filter((session) => session.active).map((session) => session.threadId),
+      ).toEqual(['latest']);
+      expect(
+        flatBlocks(state).map((block) => (block.kind === 'text' ? block.content : block.kind)),
+      ).toEqual(['latest session message']);
+    });
+
     test('SWITCH_SESSION preserves blocks on outgoing session and restores from incoming', () => {
       const sessions: SessionSnapshot[] = [
         {
@@ -3988,7 +4063,7 @@ describe('eventReducer (blocks model)', () => {
       role: 'explore' | 'plan' | 'code' | 'review',
       task: string,
     ): LegacyRenderAction {
-      return { type: 'EVENT', event: { type: 'subagent_start', data: { id, role, task } } };
+      return { type: 'EVENT', event: { type: 'subagent_start', data: { id, role, name: task } } };
     }
     function saStep(
       id: string,
@@ -4014,10 +4089,6 @@ describe('eventReducer (blocks model)', () => {
         },
       };
     }
-    function saError(id: string, error: string): LegacyRenderAction {
-      return { type: 'EVENT', event: { type: 'subagent_error', data: { id, error } } };
-    }
-
     test('subagent_start creates running subagent block', () => {
       const s = dispatch(fresh(), saStart('sub-1', 'explore', 'find usages'));
       expect(flatBlocks(s)).toHaveLength(1);
@@ -4107,10 +4178,23 @@ describe('eventReducer (blocks model)', () => {
 
     test('subagent_error updates running block to error, preserves steps', () => {
       let s = dispatch(fresh(), saStart('sub-1', 'code', 'impl'));
-      s = dispatch(s, saError('sub-1', 'timeout'));
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'subagent_error',
+          data: {
+            id: 'sub-1',
+            error: 'Sub-agent execution failed.',
+            diagnostic: { code: 'model_step_failed', stage: 'model_step' },
+          },
+        },
+      });
       const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'subagent' }>;
       expect(b.status).toBe('error');
-      expect(b.summary).toBe('timeout');
+      expect(b.summary).toBe('Sub-agent execution failed.');
+      expect(b.failureDiagnostic).toEqual({ code: 'model_step_failed', stage: 'model_step' });
+      expect(b.approvalState).toBeUndefined();
+      expect(b.awaitingApproval).toBe(false);
       expect(b.expanded).toBe(false);
     });
 
@@ -4182,6 +4266,40 @@ describe('eventReducer (blocks model)', () => {
       expect(block.task).toBe('find runtime callers');
     });
 
+    test('keeps namespaced child tool lifecycle events inside the subagent block', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'child-owner', role: 'explore', task: 'inspect the runtime' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.step',
+        subagent: {
+          id: 'child-owner',
+          toolName: 'shell_execute',
+          toolArgs: { command: 'ls' },
+        },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.queued',
+        toolCallId: 'subagent-tool:child-shell',
+        name: 'shell_execute',
+        args: { command: 'ls' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.started',
+        toolCallId: 'subagent-tool:child-shell',
+      });
+
+      expect(state.pendingToolCalls).toEqual({});
+      expect(flatBlocks(state)).toEqual([
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'child-owner',
+          steps: [expect.objectContaining({ toolName: 'shell_execute', status: 'pending' })],
+        }),
+      ]);
+    });
+
     test('projects every durable Sub-agent suspension without waiting for the active approval', () => {
       let state = handleRuntimeEventAction(fresh(), {
         type: 'subagent.started',
@@ -4213,7 +4331,7 @@ describe('eventReducer (blocks model)', () => {
         kind: 'subagent',
         subagentId: 'deferred-subagent',
         status: 'suspended',
-        approvalState: 'queued',
+        approvalState: 'queued_user_approval',
         parentToolCallId: 'task-deferred',
         awaitingApproval: true,
         approvingStepIndex: 0,
@@ -4260,10 +4378,11 @@ describe('eventReducer (blocks model)', () => {
           reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
         }),
       });
-      expect(flatBlocks(state)[0]).toMatchObject({ approvalState: 'queued' });
+      expect(flatBlocks(state)[0]).toMatchObject({ approvalState: 'queued_auto_review' });
 
       state = handleRuntimeEventAction(state, {
         type: 'auto_review.requested',
+        ...APPROVAL_EVENT_METADATA,
         reviewId: 'review-child',
         toolCallId: 'parent-task',
         toolName: 'shell_execute',
@@ -4274,6 +4393,10 @@ describe('eventReducer (blocks model)', () => {
         status: 'suspended',
         approvalState: 'auto_reviewing',
       });
+      // Automatic review is durable queue state, not a human approval surface.
+      // It must not steal the Footer focus or create an approval interrupt.
+      expect(state.activeApprovalId).toBeNull();
+      expect(state.interrupt).toBeNull();
 
       state = handleRuntimeEventAction(state, {
         type: 'auto_review.completed',
@@ -4309,6 +4432,7 @@ describe('eventReducer (blocks model)', () => {
       });
       state = handleRuntimeEventAction(state, {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'human-child',
         toolCallId: 'parent-task',
         approval: approval({ subagentId: 'approval-phases', callId: 'child-shell' }),
@@ -4554,7 +4678,7 @@ describe('eventReducer (blocks model)', () => {
       expect(userBlocks[0]).not.toHaveProperty('runtimeEchoPending');
     });
     test('replays identical consecutive prompts as distinct turns', () => {
-      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
         { type: 'user.message_appended', messageId: 'u-1', content: '继续' },
         { type: 'turn.started', turnId: 'turn-1' },
         { type: 'model.requested', requestId: 'request-1' },
@@ -4625,7 +4749,7 @@ describe('eventReducer (blocks model)', () => {
 
     test('renders model text, tool lifecycle, file changes, and terminal errors in event order', () => {
       let state = fresh();
-      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
         { type: 'user.message_appended', messageId: 'u1', content: 'Inspect the file' },
         {
           type: 'model.responded',
@@ -4676,19 +4800,20 @@ describe('eventReducer (blocks model)', () => {
     });
 
     test('keeps approval in Footer while user input and plan review use their own projections', () => {
-      const approvalEvent: import('../src/core/runtime/events').RuntimeEvent = {
+      const approvalEvent: import('@kite/agent-kernel').RuntimeEvent = {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-1',
         toolCallId: 'write-1',
         approval: approval(),
       };
-      const inputEvent: import('../src/core/runtime/events').RuntimeEvent = {
+      const inputEvent: import('@kite/agent-kernel').RuntimeEvent = {
         type: 'user_input.requested',
         interactionId: 'input-1',
         toolCallId: 'ask-1',
         request: question(),
       };
-      const reviewEvent: import('../src/core/runtime/events').RuntimeEvent = {
+      const reviewEvent: import('@kite/agent-kernel').RuntimeEvent = {
         type: 'plan.review_requested',
         interactionId: 'plan-1',
         toolCallId: 'plan-call',
@@ -4701,7 +4826,7 @@ describe('eventReducer (blocks model)', () => {
       expect(flatBlocks(approvalState)).toHaveLength(0);
       expect(approvalState.interrupt).toMatchObject({
         kind: 'approval',
-        approval: approvalEvent.approval,
+        approval: approvalEvent.type === 'approval.requested' ? approvalEvent.approval : undefined,
       });
 
       const inputState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: inputEvent });
@@ -4716,6 +4841,7 @@ describe('eventReducer (blocks model)', () => {
     test('durable approval grant clears the Footer interrupt during replay', () => {
       const requested = handleRuntimeEventAction(fresh(), {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-1',
         toolCallId: 'shell-1',
         approval: approval(),
@@ -4725,7 +4851,9 @@ describe('eventReducer (blocks model)', () => {
         type: 'approval.granted',
         interactionId: 'approval-1',
         toolCallId: 'shell-1',
-        grant: 'same_command',
+        grant: 'approve_once',
+        receiptId: 'receipt-approval-1',
+        generation: 0,
       });
 
       expect(requested.interrupt?.kind).toBe('approval');
@@ -4736,6 +4864,7 @@ describe('eventReducer (blocks model)', () => {
       const childApproval = { ...approval(), callId: 'child-shell' };
       const requested = handleRuntimeEventAction(fresh(), {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-child',
         toolCallId: 'parent-task',
         approval: childApproval,
@@ -4752,10 +4881,590 @@ describe('eventReducer (blocks model)', () => {
         type: 'approval.granted',
         interactionId: 'approval-child',
         toolCallId: 'parent-task',
-        grant: 'same_command',
+        grant: 'approve_once',
+        receiptId: 'receipt-approval-child',
+        generation: 0,
       });
 
       expect(granted.interrupt).toBeNull();
+    });
+
+    test('retains every queued approval and atomically projects same-command release', () => {
+      const commandIdentity = {
+        sessionId: 't1',
+        threadId: 't1',
+        workspace: '/tmp/workspace',
+        canonicalWorkspaceIdentity: 'workspace-digest',
+        cwd: '/tmp/workspace',
+        executor: 'shell_execute',
+        environment: 'test',
+        scope: 'workspace_write',
+        effects: 'filesystem:write',
+        parserRevision: 'parser-1',
+        commandDigest: 'command-digest',
+      } as const;
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
+        interactionId: 'approval-batch-a',
+        toolCallId: 'shell-batch-a',
+        queueSequence: 4,
+        queueGeneration: 2,
+        approval: approval({
+          callId: 'shell-batch-a',
+          command: 'echo same',
+          approvalHash: 'hash-a',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
+        interactionId: 'approval-batch-b',
+        toolCallId: 'shell-batch-b',
+        queueSequence: 5,
+        queueGeneration: 2,
+        approval: approval({
+          callId: 'shell-batch-b',
+          command: 'echo same',
+          approvalHash: 'hash-b',
+        }),
+      });
+
+      expect(state.pendingApprovals?.size).toBe(2);
+      expect(state.activeApprovalId).toBe('approval-batch-a');
+      expect(state.interrupt).toMatchObject({ interactionId: 'approval-batch-a' });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.batch_released',
+        interactionId: 'approval-batch-a',
+        toolCallId: 'shell-batch-a',
+        grant: 'same_command',
+        grantKey: 'same-command:key',
+        sessionRevision: 7,
+        generation: 2,
+        commandIdentity,
+        matches: [
+          {
+            interactionId: 'approval-batch-a',
+            toolCallId: 'shell-batch-a',
+            receiptId: 'receipt-a',
+            generation: 2,
+            bindingDigest: 'binding-a',
+          },
+          {
+            interactionId: 'approval-batch-b',
+            toolCallId: 'shell-batch-b',
+            receiptId: 'receipt-b',
+            generation: 2,
+            bindingDigest: 'binding-b',
+          },
+        ],
+        createdAt: '2026-08-25T00:00:00.000Z',
+      });
+
+      expect(state.interrupt).toBeNull();
+      expect(state.activeApprovalId).toBeNull();
+      expect(state.pendingApprovals?.get('approval-batch-a')).toMatchObject({
+        status: 'authorized_queued',
+        grant: 'same_command',
+        receiptId: 'receipt-a',
+        matchCount: 2,
+      });
+      expect(state.pendingApprovals?.get('approval-batch-b')).toMatchObject({
+        status: 'authorized_queued',
+        grant: 'same_command',
+        receiptId: 'receipt-b',
+        matchCount: 2,
+      });
+      expect(state.sessionCommandGrants?.get('same-command:key')).toMatchObject({
+        grantKey: 'same-command:key',
+        generation: 2,
+      });
+
+      const staleSession = handleRuntimeEventAction(
+        { ...state, activeSessionId: 'other-session' },
+        {
+          type: 'approval.session_grants_cleared',
+          sessionId: 't1',
+          sessionRevision: 8,
+          generation: 3,
+          clearedAt: '2026-08-25T00:01:00.000Z',
+        },
+      );
+      expect(staleSession.sessionCommandGrants?.size).toBe(1);
+
+      state = handleRuntimeEventAction(
+        { ...state, activeSessionId: 't1' },
+        {
+          type: 'approval.session_grants_cleared',
+          sessionId: 't1',
+          sessionRevision: 8,
+          generation: 3,
+          clearedAt: '2026-08-25T00:01:00.000Z',
+        },
+      );
+      expect(state.sessionCommandGrants?.size).toBe(0);
+      expect(state.pendingApprovals?.get('approval-batch-a')).toMatchObject({
+        status: 'awaiting_user',
+        generation: 3,
+      });
+      expect(state.pendingApprovals?.get('approval-batch-b')).toMatchObject({
+        status: 'awaiting_user',
+        generation: 3,
+      });
+      expect(state.activeApprovalId).toBe('approval-batch-a');
+      expect(state.interrupt).toMatchObject({
+        kind: 'approval',
+        interactionId: 'approval-batch-a',
+      });
+    });
+
+    test('keeps a batch-matched auto-review sibling authorized when cancelling its reviewer', () => {
+      const commandIdentity = {
+        sessionId: 't1',
+        threadId: 't1',
+        workspace: '/tmp/workspace',
+        canonicalWorkspaceIdentity: 'workspace-digest',
+        cwd: '/tmp/workspace',
+        executor: 'shell_execute',
+        environment: 'test',
+        scope: 'workspace_write',
+        effects: 'filesystem:write',
+        parserRevision: 'parser-1',
+        commandDigest: 'command-digest',
+      } as const;
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'auto_review.requested',
+        ...APPROVAL_EVENT_METADATA,
+        reviewId: 'auto-review-sibling',
+        toolCallId: 'shell-auto',
+        toolName: 'shell_execute',
+        reason: 'Review matching Shell command.',
+        queueSequence: 1,
+        queueGeneration: 2,
+        approval: approval({ callId: 'shell-auto', command: 'echo same' }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'auto_review.requested',
+        ...APPROVAL_EVENT_METADATA,
+        reviewId: 'auto-review-unmatched',
+        toolCallId: 'shell-auto-unmatched',
+        toolName: 'shell_execute',
+        reason: 'Review a different Shell command.',
+        queueSequence: 2,
+        queueGeneration: 2,
+        approval: approval({ callId: 'shell-auto-unmatched', command: 'echo other' }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
+        interactionId: 'human-sibling',
+        toolCallId: 'shell-human',
+        queueSequence: 3,
+        queueGeneration: 2,
+        approval: approval({ callId: 'shell-human', command: 'echo same' }),
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.batch_released',
+        interactionId: 'human-sibling',
+        toolCallId: 'shell-human',
+        grant: 'same_command',
+        grantKey: 'same-command:key',
+        sessionRevision: 7,
+        generation: 2,
+        commandIdentity,
+        matches: [
+          {
+            interactionId: 'human-sibling',
+            toolCallId: 'shell-human',
+            receiptId: 'receipt-human',
+            generation: 2,
+          },
+          {
+            interactionId: 'auto-review-sibling',
+            toolCallId: 'shell-auto',
+            receiptId: 'receipt-auto',
+            generation: 2,
+          },
+        ],
+        cancelledReviewIds: ['auto-review-sibling', 'auto-review-unmatched'],
+        createdAt: '2026-08-25T00:00:00.000Z',
+      });
+
+      expect(state.pendingApprovals?.get('auto-review-sibling')).toMatchObject({
+        status: 'authorized_queued',
+        grant: 'same_command',
+        receiptId: 'receipt-auto',
+        result: 'authorized',
+      });
+      expect(state.pendingApprovals?.get('auto-review-unmatched')).toMatchObject({
+        status: 'cancelled',
+        result: 'cancelled',
+      });
+    });
+
+    test('guards Session grant projection by active session, generation, and revision', () => {
+      const commandIdentity = {
+        sessionId: 'session-a',
+        threadId: 'session-a',
+        workspace: '/tmp/workspace',
+        canonicalWorkspaceIdentity: 'workspace-digest',
+        cwd: '/tmp/workspace',
+        executor: 'shell_execute',
+        environment: 'test',
+        scope: 'workspace_write',
+        effects: 'filesystem:write',
+        parserRevision: 'parser-1',
+        commandDigest: 'command-digest',
+      } as const;
+      let state: TuiState = {
+        ...fresh(),
+        activeSessionId: 'session-a',
+      };
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.batch_released',
+        interactionId: 'approval-a',
+        toolCallId: 'shell-a',
+        grant: 'same_command',
+        grantKey: 'same-command:key',
+        sessionRevision: 20,
+        generation: 4,
+        commandIdentity,
+        matches: [
+          {
+            interactionId: 'approval-a',
+            toolCallId: 'shell-a',
+            receiptId: 'receipt-a',
+            generation: 4,
+            bindingDigest: 'binding-a',
+          },
+        ],
+        createdAt: '2026-08-25T00:00:00.000Z',
+      });
+      expect(state.sessionCommandGrants?.size).toBe(1);
+      expect(state.sessionCommandGrantGeneration).toBe(4);
+      expect(state.sessionCommandGrantRevision).toBe(20);
+
+      const lateClear = handleRuntimeEventAction(state, {
+        type: 'approval.session_grants_cleared',
+        sessionId: 'session-a',
+        sessionRevision: 19,
+        generation: 3,
+        clearedAt: '2026-08-25T00:00:01.000Z',
+      });
+      expect(lateClear.sessionCommandGrants?.size).toBe(1);
+      expect(lateClear.sessionCommandGrantGeneration).toBe(4);
+      expect(lateClear.sessionCommandGrantRevision).toBe(20);
+
+      const freshClear = handleRuntimeEventAction(lateClear, {
+        type: 'approval.session_grants_cleared',
+        sessionId: 'session-a',
+        sessionRevision: 21,
+        generation: 5,
+        clearedAt: '2026-08-25T00:00:02.000Z',
+      });
+      expect(freshClear.sessionCommandGrants?.size).toBe(0);
+      expect(freshClear.sessionCommandGrantGeneration).toBe(5);
+      expect(freshClear.sessionCommandGrantRevision).toBe(21);
+
+      const snapshot = (
+        threadId: string,
+        active: boolean,
+        grants: ReadonlyMap<string, TuiSessionCommandGrant>,
+        generation: number,
+        revision: number,
+      ): SessionSnapshot => ({
+        threadId,
+        name: threadId,
+        workspace: '/tmp',
+        active,
+        running: false,
+        pendingInterrupt: false,
+        interrupt: null,
+        plan: null,
+        status: fresh().status,
+        turns: [],
+        sessionCommandGrants: grants,
+        sessionCommandGrantGeneration: generation,
+        sessionCommandGrantRevision: revision,
+      });
+      const grantValue = lateClear.sessionCommandGrants?.get('same-command:key');
+      if (!grantValue) throw new Error('Expected durable Session grant projection.');
+      let switched: TuiState = {
+        ...freshClear,
+        activeSessionId: 'session-a',
+        sessionCommandGrants: new Map([['same-command:key', grantValue]]),
+        sessionCommandGrantGeneration: 4,
+        sessionCommandGrantRevision: 20,
+        sessions: [
+          snapshot('session-a', true, new Map([['same-command:key', grantValue]]), 4, 20),
+          snapshot('session-b', false, new Map(), 0, 0),
+        ],
+      };
+      switched = eventReducer(switched, { type: 'SWITCH_SESSION', threadId: 'session-b' });
+      expect(switched.activeSessionId).toBe('session-b');
+      expect(switched.sessionCommandGrants?.size).toBe(0);
+      const foreignClear = handleRuntimeEventAction(switched, {
+        type: 'approval.session_grants_cleared',
+        sessionId: 'session-a',
+        sessionRevision: 21,
+        generation: 5,
+        clearedAt: '2026-08-25T00:00:03.000Z',
+      });
+      expect(foreignClear.sessionCommandGrants?.size).toBe(0);
+      switched = eventReducer(switched, { type: 'SWITCH_SESSION', threadId: 'session-a' });
+      expect(switched.activeSessionId).toBe('session-a');
+      expect(switched.sessionCommandGrants?.size).toBe(1);
+      expect(switched.sessionCommandGrantGeneration).toBe(4);
+      expect(switched.sessionCommandGrantRevision).toBe(20);
+    });
+
+    test('accepted local approval acknowledges one queue entry without synthetic resume', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'approved-child', role: 'explore', task: 'Inspect files' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.started',
+        subagent: { id: 'queued-sibling', role: 'review', task: 'Review files' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'approved-parent-task',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'approved-child',
+          role: 'explore',
+          parentToolCallId: 'approved-parent-task',
+          blockedToolId: 'approved-child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'queued-parent-task',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'queued-sibling',
+          role: 'review',
+          parentToolCallId: 'queued-parent-task',
+          blockedToolId: 'queued-child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
+        interactionId: 'approved-interaction',
+        toolCallId: 'approved-parent-task',
+        approval: approval({
+          callId: 'approved-child-shell',
+          subagentId: 'approved-child',
+        }),
+      });
+
+      const resumed = dispatch(state, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      });
+
+      expect(resumed.interrupt).toBeNull();
+      expect(flatBlocks(resumed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'approved-child',
+          status: 'suspended',
+          approvalState: 'awaiting_user',
+          awaitingApproval: true,
+        }),
+      );
+      expect(flatBlocks(resumed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'queued-sibling',
+          status: 'suspended',
+          awaitingApproval: true,
+        }),
+      );
+
+      const afterLateDeferred = handleRuntimeEventAction(resumed, {
+        type: 'subagent.approval_deferred',
+        toolCallId: 'approved-parent-task',
+      });
+      expect(flatBlocks(afterLateDeferred)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'approved-child',
+          status: 'suspended',
+          awaitingApproval: true,
+        }),
+      );
+    });
+
+    test('local rejection projects a terminal queue state and waits for Runtime cleanup', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
+        interactionId: 'approval-rejected-locally',
+        toolCallId: 'shell-rejected-locally',
+        approval: approval(),
+      });
+
+      const unresolved = dispatch(requested, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'denied' },
+      });
+
+      expect(unresolved).not.toBe(requested);
+      expect(unresolved.interrupt).toBeNull();
+      expect(unresolved.activeApprovalId).toBeNull();
+      expect(unresolved.pendingApprovals?.get('approval-rejected-locally')).toMatchObject({
+        status: 'rejected',
+        result: 'rejected',
+      });
+    });
+
+    test('accepted local approval targets only one canonical awaiting-user child', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'legacy-active-child', role: 'explore', task: 'Inspect files' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.started',
+        subagent: { id: 'legacy-queued-sibling', role: 'review', task: 'Review files' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'legacy-active-parent',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'legacy-active-child',
+          role: 'explore',
+          parentToolCallId: 'legacy-active-parent',
+          blockedToolId: 'legacy-active-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'legacy-queued-parent',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'legacy-queued-sibling',
+          role: 'review',
+          parentToolCallId: 'legacy-queued-parent',
+          blockedToolId: 'legacy-queued-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
+        interactionId: 'legacy-active-approval',
+        toolCallId: 'legacy-active-parent',
+        approval: approval({
+          callId: 'legacy-active-shell',
+          subagentId: 'legacy-active-child',
+        }),
+      });
+      state = {
+        ...state,
+        interrupt: {
+          kind: 'approval',
+          interactionId: 'legacy-active-approval',
+          toolCallId: 'legacy-child-tool-id',
+          approval: approval({ callId: 'legacy-active-shell' }),
+        },
+      };
+
+      const resumed = dispatch(state, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      });
+
+      expect(flatBlocks(resumed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'legacy-active-child',
+          status: 'suspended',
+          approvalState: 'awaiting_user',
+          awaitingApproval: true,
+        }),
+      );
+      expect(flatBlocks(resumed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'legacy-queued-sibling',
+          status: 'suspended',
+          approvalState: 'queued_user_approval',
+        }),
+      );
+    });
+
+    test('a completed sibling cannot clear another subagent approval from the Footer', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'waiting-child', role: 'review', task: 'Wait for approval' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.started',
+        subagent: { id: 'completed-child', role: 'explore', task: 'Finish independently' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'waiting-parent-task',
+        snapshot: privateSuspensionSnapshot({
+          subagentId: 'waiting-child',
+          role: 'review',
+          parentToolCallId: 'waiting-parent-task',
+          blockedToolId: 'waiting-child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
+        interactionId: 'waiting-approval',
+        toolCallId: 'waiting-parent-task',
+        approval: {
+          ...approval(),
+          callId: 'waiting-child-shell',
+          subagentId: 'waiting-child',
+        },
+      });
+
+      const completed = handleRuntimeEventAction(state, {
+        type: 'subagent.completed',
+        subagent: {
+          id: 'completed-child',
+          summary: 'Finished independently.',
+          toolCallCount: 1,
+          durationMs: 10,
+        },
+      });
+
+      expect(completed.interrupt).toMatchObject({
+        kind: 'approval',
+        interactionId: 'waiting-approval',
+        toolCallId: 'waiting-parent-task',
+      });
+      expect(flatBlocks(completed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'waiting-child',
+          status: 'suspended',
+          awaitingApproval: true,
+        }),
+      );
+      expect(flatBlocks(completed)).toContainEqual(
+        expect.objectContaining({
+          kind: 'subagent',
+          subagentId: 'completed-child',
+          status: 'done',
+        }),
+      );
     });
 
     test('subagent approval rejection clears the parent task Footer interrupt', () => {
@@ -4777,6 +5486,7 @@ describe('eventReducer (blocks model)', () => {
       });
       requested = handleRuntimeEventAction(requested, {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-child-rejected',
         toolCallId: 'parent-task',
         approval: {
@@ -4790,6 +5500,7 @@ describe('eventReducer (blocks model)', () => {
         type: 'approval.rejected',
         interactionId: 'approval-child-rejected',
         toolCallId: 'parent-task',
+        generation: 0,
         reason: 'Rejected by user.',
       });
 
@@ -4804,6 +5515,7 @@ describe('eventReducer (blocks model)', () => {
     test('a stale approval grant cannot clear a different active approval', () => {
       const requested = handleRuntimeEventAction(fresh(), {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-current',
         toolCallId: 'shell-current',
         approval: approval(),
@@ -4814,6 +5526,8 @@ describe('eventReducer (blocks model)', () => {
         interactionId: 'approval-stale',
         toolCallId: 'shell-stale',
         grant: 'approve_once',
+        receiptId: 'receipt-stale',
+        generation: 0,
       });
 
       expect(unchanged.interrupt).toEqual(requested.interrupt);
@@ -4826,6 +5540,7 @@ describe('eventReducer (blocks model)', () => {
     test('a delayed approval terminal with the same interaction but another tool cannot clear it', () => {
       const requested = handleRuntimeEventAction(fresh(), {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-current',
         toolCallId: 'shell-current',
         approval: approval(),
@@ -4836,6 +5551,8 @@ describe('eventReducer (blocks model)', () => {
         interactionId: 'approval-current',
         toolCallId: 'shell-stale',
         grant: 'approve_once',
+        receiptId: 'receipt-stale-tool',
+        generation: 0,
       });
 
       expect(unchanged).toEqual(requested);
@@ -4844,6 +5561,7 @@ describe('eventReducer (blocks model)', () => {
     test('a stale approval rejection cannot clear or mutate a different active approval', () => {
       const requested = handleRuntimeEventAction(fresh(), {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-current',
         toolCallId: 'shell-current',
         approval: approval(),
@@ -4853,6 +5571,7 @@ describe('eventReducer (blocks model)', () => {
         type: 'approval.rejected',
         interactionId: 'approval-stale',
         toolCallId: 'shell-stale',
+        generation: 0,
         reason: 'Stale rejection.',
       });
 
@@ -4917,7 +5636,7 @@ describe('eventReducer (blocks model)', () => {
     });
 
     test('plan review cancellation has identical live and replay projections without a banner', () => {
-      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
         {
           type: 'tool.queued',
           toolCallId: 'plan-call',
@@ -4996,6 +5715,7 @@ describe('eventReducer (blocks model)', () => {
         type: 'RUNTIME_EVENT',
         event: {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'approval-rejected',
           toolCallId: 'shell-rejected',
           approval: approval(),
@@ -5007,6 +5727,7 @@ describe('eventReducer (blocks model)', () => {
           type: 'approval.rejected',
           interactionId: 'approval-rejected',
           toolCallId: 'shell-rejected',
+          generation: 0,
           reason: 'Rejected by user.',
         },
       });
@@ -5053,6 +5774,7 @@ describe('eventReducer (blocks model)', () => {
       });
       approvalState = handleRuntimeEventAction(approvalState, {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'canonical-approval',
         toolCallId: 'canonical-approval-rejected',
         approval: approval(),
@@ -5061,8 +5783,9 @@ describe('eventReducer (blocks model)', () => {
         type: 'approval.rejected',
         interactionId: 'canonical-approval',
         toolCallId: 'canonical-approval-rejected',
+        generation: 0,
         reason: 'redacted',
-        outcomeV1: rejectedOutcome,
+        outcome: rejectedOutcome,
       });
       expect(
         flatBlocks(approvalState).find(
@@ -5086,7 +5809,7 @@ describe('eventReducer (blocks model)', () => {
           reviewerModelName: 'test',
           durationMs: 1,
         },
-        outcomeV1: {
+        outcome: {
           ...rejectedOutcome,
           failure: {
             kind: 'auto_review_rejected' as const,
@@ -5127,7 +5850,7 @@ describe('eventReducer (blocks model)', () => {
     });
 
     test('keeps planning shell deferrals out of the message list', () => {
-      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
         {
           type: 'tool.queued',
           toolCallId: 'typecheck',
@@ -5181,7 +5904,7 @@ describe('eventReducer (blocks model)', () => {
     test('renders a planning edit denial as guidance without a tool card', () => {
       const reason =
         'Plan mode is read-only. No file was edited. Describe the intended change in the plan and apply it after plan approval.';
-      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
         {
           type: 'tool.queued',
           toolCallId: 'edit-denied',
@@ -5240,6 +5963,7 @@ describe('eventReducer (blocks model)', () => {
         },
         {
           type: 'approval.requested' as const,
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'approval-rejected',
           toolCallId: 'shell-rejected',
           approval: approval(),
@@ -5248,6 +5972,7 @@ describe('eventReducer (blocks model)', () => {
           type: 'approval.rejected' as const,
           interactionId: 'approval-rejected',
           toolCallId: 'shell-rejected',
+          generation: 0,
           reason: 'Approval cancelled by user.',
         },
         {
@@ -5292,10 +6017,9 @@ describe('eventReducer (blocks model)', () => {
 
     test('updates cache statistics and keeps non-visual lifecycle facts out of the message list', () => {
       let state = fresh();
-      const nonVisual: import('../src/core/runtime/events').RuntimeEvent[] = [
+      const nonVisual: import('@kite/agent-kernel').RuntimeEvent[] = [
         { type: 'turn.started', turnId: 'turn-1' },
         { type: 'model.requested', requestId: 'request-1' },
-        { type: 'authorization.changed', mode: 'default' },
         { type: 'turn.completed', turnId: 'turn-1' },
       ];
       for (const event of nonVisual) state = dispatch(state, { type: 'RUNTIME_EVENT', event });
@@ -5321,62 +6045,53 @@ describe('eventReducer (blocks model)', () => {
   // ── Interaction Mode ──
 
   describe('SET_INTERACTION_MODE', () => {
-    test('default interactionMode is ask, authorization is default', () => {
+    test('default interactionMode is auto', () => {
       const s = fresh();
-      expect(s.interactionMode).toBe('accept_edits');
-      expect(s.status.authorization).toBe('default');
+      expect(s.interactionMode).toBe('auto');
     });
 
-    test('sets interactionMode to auto, authorization stays default', () => {
+    test('sets interactionMode to auto', () => {
       const s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'auto' });
       expect(s.interactionMode).toBe('auto');
-      expect(s.status.authorization).toBe('default');
     });
 
-    test('sets interactionMode to full, authorization becomes full_access', () => {
+    test('sets interactionMode to full without creating an approval grant', () => {
       const s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
       expect(s.interactionMode).toBe('full');
-      expect(s.status.authorization).toBe('full_access');
+      expect(s.status).not.toHaveProperty('authorization');
     });
 
-    test('switching from full to ask resets authorization to default', () => {
+    test('switching from full to accept_edits keeps mode state orthogonal', () => {
       let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
-      expect(s.status.authorization).toBe('full_access');
       s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'accept_edits' });
       expect(s.interactionMode).toBe('accept_edits');
-      expect(s.status.authorization).toBe('default');
+      expect(s.status).not.toHaveProperty('authorization');
     });
 
-    test('toggle cycles ask → auto → full → ask with correct auth', () => {
+    test('toggle cycles auto → full → ask → auto', () => {
       let s = fresh();
+      expect(s.interactionMode).toBe('auto');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
+      expect(s.interactionMode).toBe('full');
+
+      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
       expect(s.interactionMode).toBe('accept_edits');
-      expect(s.status.authorization).toBe('default');
 
       s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
       expect(s.interactionMode).toBe('auto');
-      expect(s.status.authorization).toBe('default');
-
-      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
-      expect(s.interactionMode).toBe('full');
-      expect(s.status.authorization).toBe('full_access');
-
-      s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
-      expect(s.interactionMode).toBe('accept_edits');
-      expect(s.status.authorization).toBe('default');
     });
 
-    test('toggle from auto goes to full with full_access', () => {
+    test('toggle from auto goes to full', () => {
       let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'auto' });
       s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
       expect(s.interactionMode).toBe('full');
-      expect(s.status.authorization).toBe('full_access');
     });
 
-    test('toggle from full goes to ask with default auth', () => {
+    test('toggle from full goes to accept_edits', () => {
       let s = dispatch(fresh(), { type: 'SET_INTERACTION_MODE', mode: 'full' });
       s = dispatch(s, { type: 'SET_INTERACTION_MODE', mode: 'toggle' });
       expect(s.interactionMode).toBe('accept_edits');
-      expect(s.status.authorization).toBe('default');
     });
   });
 });
@@ -5834,6 +6549,7 @@ describe('model streaming RuntimeEvent rendering', () => {
     });
     state = handleRuntimeEventAction(state, {
       type: 'model.retry',
+      invocationId: 'request-1',
       attempt: 1,
       maxAttempts: 5,
       error: 'socket disconnected',
@@ -6195,6 +6911,7 @@ describe('model streaming RuntimeEvent rendering', () => {
       type: 'RUNTIME_EVENT',
       event: {
         type: 'model.retry',
+        invocationId: 'partial-answer-request',
         attempt: 1,
         maxAttempts: 5,
         error: 'socket disconnected',
@@ -6231,6 +6948,7 @@ describe('model streaming RuntimeEvent rendering', () => {
     });
     state = handleRuntimeEventAction(state, {
       type: 'model.retry',
+      invocationId: 'divergent-request',
       attempt: 1,
       maxAttempts: 5,
       error: 'socket disconnected',
@@ -6333,7 +7051,6 @@ describe('context compaction RuntimeEvent rendering', () => {
     ['empty_summary', 'unusable compaction summary', true],
     ['truncated_summary', 'unusable compaction summary', true],
     ['unexpected_tool_call', 'unusable compaction summary', true],
-    ['provider_admission_denied', 'Provider data policy', true],
     ['summary_aborted', 'was cancelled', false],
   ] as const)('renders typed %s guidance', (errorKind, expected, isError) => {
     const state = handleRuntimeEventAction(fresh(), {
@@ -6496,7 +7213,7 @@ describe('context compaction RuntimeEvent rendering', () => {
     expect(state.status.contextSnapshot?.inputTokensBefore).toBeUndefined();
   });
 
-  test('projects terminal tool status from ToolOutcomeV1 instead of the legacy result status', () => {
+  test('projects terminal tool status from ToolOutcome instead of the legacy result status', () => {
     let state = handleRuntimeEventAction(fresh(), {
       type: 'tool.queued',
       toolCallId: 'timeout-tool',
@@ -6516,7 +7233,7 @@ describe('context compaction RuntimeEvent rendering', () => {
         stderr: 'private',
         status: 'error',
       },
-      outcomeV1: {
+      outcome: {
         schemaVersion: 1,
         status: 'timed_out',
         failure: { kind: 'tool_timeout', detailCode: 'timed_out' },

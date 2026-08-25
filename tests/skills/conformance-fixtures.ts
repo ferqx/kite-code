@@ -1,17 +1,17 @@
-import type { SkillWorkflowContract } from '@/core/skills/workflow';
-import type { CapabilityDescriptor, EffectProfile } from '@/protocol/capabilities';
+import type { SkillWorkflowContract } from '@kite/builtin-runtime/skills';
+import type { CapabilityDescriptor, EffectProfile } from '@kite/runtime-contract';
 
 const EFFECTFUL = new Set<EffectProfile[keyof EffectProfile]>(['write', 'destructive', 'unknown']);
 
-export type SkillEffectClassV1 = 'readonly' | 'effectful';
+export type SkillEffectClass = 'readonly' | 'effectful';
 
-export function classifySkillEffectsV1(input: {
+export function classifySkillEffects(input: {
   contract: Pick<
     SkillWorkflowContract,
     'effectiveEffects' | 'effectiveMinimumApproval' | 'effectiveCapabilityCeiling'
   >;
   dependencies: readonly Pick<CapabilityDescriptor, 'effectiveEffects'>[];
-}): SkillEffectClassV1 {
+}): SkillEffectClass {
   const effects = [
     ...Object.values(input.contract.effectiveEffects),
     ...input.dependencies.flatMap((dependency) => Object.values(dependency.effectiveEffects)),
@@ -19,8 +19,8 @@ export function classifySkillEffectsV1(input: {
   return effects.some((effect) => EFFECTFUL.has(effect)) ? 'effectful' : 'readonly';
 }
 
-export function evaluateSkillClassAdmissionV1(input: {
-  effectClass: SkillEffectClassV1;
+export function evaluateSkillClassAdmission(input: {
+  effectClass: SkillEffectClass;
   source: 'builtin' | 'admin' | 'project' | 'user';
   adminAllowlisted: boolean;
   workspaceTrusted: boolean;
@@ -43,8 +43,8 @@ export function evaluateSkillClassAdmissionV1(input: {
   });
 }
 
-export function qualifySkillContractOnlyV1(input: {
-  effectClass: SkillEffectClassV1;
+export function qualifySkillContractOnly(input: {
+  effectClass: SkillEffectClass;
   formalTaskEvidence: 'passed' | 'failed' | 'not_observed';
   dependencyRevisionMatches: boolean;
   maliciousInstructionDetected: boolean;

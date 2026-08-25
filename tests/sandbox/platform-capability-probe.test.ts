@@ -6,13 +6,13 @@ import {
   deniedReadVerdict,
   evaluatePlatformSupport,
   githubEvidenceSource,
-  type PlatformCapabilityEvidenceV1,
-  platformCapabilityEvidenceV1Schema,
+  type PlatformCapabilityEvidence,
+  platformCapabilityEvidenceSchema,
   probeBrokeredGit,
 } from '../../scripts/release/platform-capability-probe';
 
 type ProbeInput = Omit<
-  Omit<PlatformCapabilityEvidenceV1, 'digest'>,
+  Omit<PlatformCapabilityEvidence, 'digest'>,
   'outcome' | 'productionSupported' | 'limitations'
 >;
 
@@ -126,7 +126,7 @@ describe('platform capability probe admission', () => {
       limitations: ['fixture'],
       digest: `sha256:${'a'.repeat(64)}`,
     };
-    expect(platformCapabilityEvidenceV1Schema.safeParse(candidate).success).toBe(false);
+    expect(platformCapabilityEvidenceSchema.safeParse(candidate).success).toBe(false);
   });
   const githubSource = {
     QUALIFICATION_REPOSITORY: 'ferqx/kite-code',
@@ -148,10 +148,9 @@ describe('platform capability probe admission', () => {
       'utf8',
     );
     for (const path of [
-      'src/core/tools/path-utils.ts',
-      'src/core/tools/shell.ts',
-      'src/core/tools/stream-output.ts',
-      'src/core/types.ts',
+      'packages/builtin-runtime/src/sandbox/**',
+      'packages/runtime-host/src/process/**',
+      'apps/kite/src/sandbox/**',
       'vendor/isksh/**',
     ]) {
       expect(workflow).toContain(`- "${path}"`);
@@ -187,14 +186,13 @@ describe('platform capability probe admission', () => {
       expect(workflow).toContain(binding);
     }
 
-    // Required tests/probe/verifier/upload are before the explicitly marked
-    // candidate-only diagnostics; none of those required steps may be
-    // tolerated as an unsuccessful best-effort run.
-    const candidateDiagnostics = workflow.indexOf("      - if: always() && runner.os == 'Linux'");
-    expect(candidateDiagnostics).toBeGreaterThan(0);
-    const requiredSteps = workflow.slice(0, candidateDiagnostics);
+    // The retired evaluation-only diagnostics must not survive the cutover;
+    // every remaining probe/verifier/upload step is required.
+    const requiredSteps = workflow;
     expect(requiredSteps).not.toContain('continue-on-error: true');
-    expect(workflow.slice(candidateDiagnostics)).toContain('candidate-only');
+    expect(workflow).not.toContain('scripts/evals/');
+    expect(workflow).not.toContain('tests/evals/');
+    expect(workflow).not.toContain('candidate-only');
 
     const macosStepStart = requiredSteps.indexOf(
       'name: macOS Seatbelt profile and fail-closed contracts',

@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { sep } from 'node:path';
+import type { McpAuthResult, McpServerControlState, McpServerKey } from '@kite/builtin-runtime/mcp';
 import { render } from 'ink-testing-library';
 import McpOverlay from '@/app/tui/mcp/McpOverlay';
 import { buildServerActions, derivePrimaryStatus, moveSelection } from '@/app/tui/mcp/model';
 import type { McpController, McpControllerSnapshot } from '@/app/tui/mcp/types';
-import type { McpAuthResult, McpServerControlState, McpServerKey } from '@/core/mcp';
 
 /** Poll the latest rendered frame until the predicate holds, so async effect
  *  timing (auth→detail return) does not depend on a fixed sleep across hosts. */
@@ -102,7 +102,7 @@ class FakeController implements McpController {
         revision: 'snapshot-1',
         generation: 1,
         servers: Object.freeze([...servers]),
-        sourceRevisions: Object.freeze({ local: 'local-1', project: 'project-1', user: 'user-1' }),
+        sourceRevisions: Object.freeze({ project: 'project-1', user: 'user-1' }),
       }),
       ...(message ? { message } : {}),
     });
@@ -161,7 +161,7 @@ class AutoReturnAuthController implements McpController {
         revision: 'snapshot-1',
         generation: 1,
         servers: Object.freeze([...servers]),
-        sourceRevisions: Object.freeze({ local: 'local-1', project: 'project-1', user: 'user-1' }),
+        sourceRevisions: Object.freeze({ project: 'project-1', user: 'user-1' }),
       }),
       ...(message ? { message } : {}),
     });
@@ -374,25 +374,24 @@ describe('MCP management overlay', () => {
     expect(controller.enabled).toEqual(['github:true']);
   });
 
-  test('folds compatibility sources into project or user groups', () => {
-    const legacyProject = server({
-      key: Object.freeze({ name: 'legacy-project', source: 'project_mcp_json' }),
-      source: 'project_mcp_json',
-      sourcePath: '/workspace/.mcp.json',
+  test('groups current project and user sources', () => {
+    const project = server({
+      key: Object.freeze({ name: 'project-server', source: 'project' }),
+      source: 'project',
+      sourcePath: '/workspace/.kite-code/mcp.json',
     });
-    const legacyUser = server({
-      key: Object.freeze({ name: 'legacy-user', source: 'user_legacy' }),
-      source: 'user_legacy',
-      sourcePath: '/home/user/.kite-code/kite-code.jsonc',
+    const user = server({
+      key: Object.freeze({ name: 'user-server', source: 'user' }),
+      source: 'user',
+      sourcePath: '/home/user/.kite-code/mcp.json',
     });
-    const controller = new FakeController([legacyProject, legacyUser]);
+    const controller = new FakeController([project, user]);
     const { lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
     expect(lastFrame()).toContain('项目');
-    expect(lastFrame()).toContain('/workspace/.mcp.json · 5 个工具');
+    expect(lastFrame()).toContain('/workspace/.kite-code/mcp.json · 5 个工具');
     expect(lastFrame()).toContain('用户');
-    expect(lastFrame()).toContain('/home/user/.kite-code/kite-code.jsonc · 5 个工具');
-    expect(lastFrame()).not.toContain('Legacy MCPs');
+    expect(lastFrame()).toContain('/home/user/.kite-code/mcp.json · 5 个工具');
   });
 
   test('opens a windowed tools list from a connected server', async () => {

@@ -124,3 +124,20 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0120](0120-windows-strict-appcontainer-profile.md) | accepted | Windows strict Full 候选使用临时 AppContainer profile，不恢复仓库 staging |
 | [0121](0121-windows-development-full-mode.md) | accepted | 已选 direct restricted-token backend 可使用开发期 Full，不改变 production 资格 |
 | [0122](0122-windows-handle-locked-workspace-mutation.md) | accepted | Windows Workspace mutation 用 directory-handle lock 安全发布 |
+| [0123](0123-runtime-modularization-authority-cutover.md) | accepted | Runtime Modularization V1 建立 Client/Host/Kernel/Provider 新权威，现有 ADR 不再作为重构方案审核门槛 |
+| [0124](0124-runtime-modularization-staged-delivery.md) | accepted | 将 Runtime 物理模块化与 Authority/Format 升级拆为连续 RMV1/RAV1，并采用 runtime-spi、builtin-runtime 包边界 |
+| [0125](0125-accepted-rfc-staged-revision.md) | accepted | 允许将 ADR-0124 的分期事实同步回 accepted RFC，并以新摘要标识当前接受版本 |
+| [0126](0126-remove-runtime-installation-authority-key.md) | superseded by ADR-0127 | 删除长期 Runtime installation key；其保留的 ProjectHandle/child material/authority ledger 后续继续删除 |
+| [0127](0127-remove-rav1-speculative-authority.md) | accepted | 删除 ProjectHandle/single-Host lock、内部密钥/HMAC、伪 provenance/egress ledger 与固定 Provider policy，仅保留真实边界 |
+| [0128](0128-pre-release-clean-cutover-module-boundaries.md) | accepted | 未发布阶段采用无版本命名 clean cutover、领域 subpath 与唯一 composition root；版本只作为 metadata |
+| [0129](0129-sqlite-runtime-log-query-boundary.md) | accepted | SQLite Runtime Log 的只读查询边界 |
+| [0130](0130-source-based-architecture-gates.md) | accepted | 架构门禁直接验证源码，不提交生成快照或迁移清单 |
+| [0131](0131-whole-workspace-sandbox-admission.md) | accepted | Sandbox 将 canonical Workspace 作为完整授权身份，不再按内部路径名称拒绝 |
+| [0132](0132-sensitive-external-paths-use-exact-approval.md) | accepted | Workspace 外敏感路径进入 exact approval；批准后 native sandbox 不再二次拒绝 |
+| [0133](0133-mode-aware-sensitive-external-authorization.md) | accepted | 外部敏感访问按 Full、Auto 与普通模式分别直接授权、模型三态审查或请求用户审批 |
+| [0134](0134-closed-read-only-git-shell-grammar.md) | partially superseded by ADR-0136 | status/log grammar 只保留已批准执行的 hardening 用途，不再产生免审授权 |
+| [0135](0135-mode-aware-workspace-authorization-boundary.md) | partially superseded by ADR-0136 | 文件工具边界保留；Shell/Git 的 Workspace grammar 直通已取消 |
+| [0136](0136-mode-governed-shell-without-command-allowlists.md) | accepted | Raw Shell 不再由固定命令 grammar 免审；统一按 Accept Edits、Auto、Full 治理 |
+| [0137](0137-shell-sandbox-durable-approval-queue.md) | accepted | Sandbox-first phase/mode 矩阵、两类 grant 与 durable approval queue |
+| [0138](0138-silent-session-format-compatibility.md) | accepted | 未知历史格式静默忽略；已知会话按选择懒迁移并剥离旧权限 |
+| [0139](0139-session-admission-restart-reconciliation.md) | accepted | Session admission 先完成跨进程 cleanup/recovery，再重载事件尾并投影终态 |

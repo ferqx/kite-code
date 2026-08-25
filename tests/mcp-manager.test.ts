@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import {
+  createBuiltinCredentialBroker,
+  McpConnectionManager,
+  type McpConnectionManagerOptions,
+  type McpCredentialKey,
+  type McpResource,
+  MemoryMcpCredentialStore,
+  normalizeMcpToolResult,
+} from '@kite/builtin-runtime/mcp';
+import { createRuntimeHostMcpStdioProcessPort } from '@kite/runtime-host';
+import {
   type OAuthClientProvider,
   UnauthorizedError,
 } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -9,14 +19,27 @@ import {
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { type McpCredentialKey, type McpResource, MemoryMcpCredentialStore } from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import { normalizeMcpToolResult } from '@/core/mcp/result-normalizer';
 import { startTestHttpServer } from './helpers/test-http-server';
+
+const testProtectedPathEvaluator = {
+  workspaceRoot: process.cwd(),
+  evaluate: ({ path }: { path: string }) => ({
+    outcome: 'allow' as const,
+    reason: 'explicit_test_fixture',
+    canonicalPath: resolve(path),
+  }),
+};
+
+function createManager(options: McpConnectionManagerOptions = {}) {
+  return new McpConnectionManager({
+    ...options,
+    protectedPathEvaluator: testProtectedPathEvaluator,
+  });
+}
 
 describe('McpConnectionManager governance fixture', () => {
   test('uses a typed provider failure when a direct call targets an unavailable server', async () => {
-    const manager = new McpConnectionManager();
+    const manager = createManager();
     expect(manager.getProviderDirectorySnapshot()).toEqual({
       revision: expect.any(String),
       entries: [],
@@ -28,7 +51,8 @@ describe('McpConnectionManager governance fixture', () => {
     });
   });
 
-  const manager = new McpConnectionManager();
+  const stdioProcessPort = createRuntimeHostMcpStdioProcessPort();
+  const manager = createManager({ stdioProcessPort });
 
   afterEach(async () => {
     await manager.disconnectAll();
@@ -119,7 +143,7 @@ describe('McpConnectionManager governance fixture', () => {
         setNotificationHandler: () => {},
       },
     ] as unknown as Client[];
-    const emptyRefreshManager = new McpConnectionManager({
+    const emptyRefreshManager = createManager({
       createClient: () => clients[clientIndex++]!,
       createTransport: () => ({}) as never,
     });
@@ -152,7 +176,7 @@ describe('McpConnectionManager governance fixture', () => {
         if (schema === ToolListChangedNotificationSchema) toolHandler = handler;
       },
     } as unknown as Client;
-    const notificationManager = new McpConnectionManager({
+    const notificationManager = createManager({
       createClient: () => client,
       createTransport: () => ({}) as never,
     });
@@ -204,7 +228,7 @@ describe('McpConnectionManager governance fixture', () => {
         if (schema === ResourceListChangedNotificationSchema) resourceHandler = handler;
       },
     } as unknown as Client;
-    const resourceManager = new McpConnectionManager({
+    const resourceManager = createManager({
       createClient: () => client,
       createTransport: () => ({}) as never,
     });
@@ -313,7 +337,7 @@ describe('McpConnectionManager governance fixture', () => {
   });
 
   test('publishes immutable state and invalidates capabilities before disconnect returns', async () => {
-    const manager = new McpConnectionManager();
+    const manager = createManager({ stdioProcessPort });
     let notifications = 0;
     const unsubscribe = manager.subscribe(() => {
       notifications += 1;
@@ -344,7 +368,7 @@ describe('McpConnectionManager governance fixture', () => {
       fakeClient({ connect: () => firstGate.promise, close: async () => firstCloses++ }),
       fakeClient({ connect: () => secondGate.promise }),
     ];
-    const manager = new McpConnectionManager({
+    const manager = createManager({
       createClient: () => clients.shift()!,
       createTransport: () => ({}) as never,
     });
@@ -367,7 +391,7 @@ describe('McpConnectionManager governance fixture', () => {
   });
 
   test('publishes a typed diagnostic when transport construction fails', async () => {
-    const manager = new McpConnectionManager();
+    const manager = createManager();
     await expect(
       manager.connect('invalid-url', { type: 'http', url: 'not a valid url' }, 1),
     ).rejects.toThrow();
@@ -388,7 +412,7 @@ describe('McpConnectionManager governance fixture', () => {
       }),
       fakeClient({}),
     ];
-    const manager = new McpConnectionManager({
+    const manager = createManager({
       createClient: () => clients.shift()!,
       createTransport: (_config, authProvider) => {
         expect(authProvider).toBeDefined();
@@ -422,7 +446,7 @@ describe('McpConnectionManager governance fixture', () => {
   test('requests authorization when OAuth discovery requires authentication', async () => {
     const provider = {} as OAuthClientProvider;
     const config = { type: 'http' as const, url: 'https://mcp.example.com/mcp' };
-    const manager = new McpConnectionManager({
+    const manager = createManager({
       createClient: () =>
         ({
           connect: async () => {},
@@ -508,7 +532,11 @@ describe('McpConnectionManager governance fixture', () => {
         return Response.json({ jsonrpc: '2.0', id: message.id, result });
       },
     });
-    const bearerManager = new McpConnectionManager({ credentialStore: store });
+    const credentialBroker = createBuiltinCredentialBroker({ store });
+    const credentialHandle = await credentialBroker.issueForKey(key, {
+      purpose: 'mcp.transport',
+    });
+    const bearerManager = createManager({ credentialBroker });
     try {
       await bearerManager.connect('bearer', {
         type: 'http',
@@ -519,7 +547,7 @@ describe('McpConnectionManager governance fixture', () => {
           credentialRef: 'work-account',
           scheme: 'Bearer',
         },
-        credentialKey: key,
+        credentialHandle,
       });
       expect(observedAuthorization).toBe('Bearer bearer-secret');
       expect(JSON.stringify(bearerManager.getServerStates().get('bearer')?.config)).not.toContain(
@@ -529,6 +557,33 @@ describe('McpConnectionManager governance fixture', () => {
       await bearerManager.disconnectAll();
       fixture.stop(true);
     }
+  });
+
+  test('fails closed before transport construction when a direct Manager lacks the shared broker', async () => {
+    const brokerlessManager = createManager();
+    await expect(
+      brokerlessManager.connect('brokerless', {
+        type: 'http',
+        url: 'https://never-dispatched.example.test/mcp',
+        auth: {
+          type: 'credential',
+          header: 'Authorization',
+          credentialRef: 'missing-profile',
+          scheme: 'Bearer',
+        },
+        credentialHandle: {
+          handleId: 'cred_missing',
+          projectId: 'project_test',
+          provider: 'brokerless',
+          profile: 'missing-profile',
+          purpose: 'mcp.transport',
+          expiresAt: '2999-01-01T00:00:00.000Z',
+          revocationRevision: 0,
+        },
+      }),
+    ).rejects.toThrow('credential broker is unavailable');
+    expect(brokerlessManager.getServerStates().has('brokerless')).toBe(false);
+    await brokerlessManager.disconnectAll();
   });
 });
 
@@ -545,7 +600,7 @@ function managerWithCall(
     setNotificationHandler: () => {},
     callTool,
   } as unknown as Client;
-  return new McpConnectionManager({
+  return createManager({
     createClient: () => client,
     createTransport: () => ({}) as never,
   });

@@ -5,15 +5,15 @@ import {
   encodeReleaseManifest,
   encodeSyntheticSignature,
   type ReleaseArtifactLayout,
-  type ReleaseManifestV1,
+  type ReleaseManifest,
   releaseArtifactLayout,
   SYNTHETIC_PUBLIC_KEY_SHA256,
   SYNTHETIC_SIGNATURE_KIND,
   SYNTHETIC_TRUST_ROOT_ID,
-  type SyntheticSignatureBundleV1,
+  type SyntheticSignatureBundle,
 } from './artifact-layout';
 import { canonicalJsonBytes, sha256Digest, sha256DomainSeparated } from './canonical-json';
-import { assembleReleaseManifestV1 } from './generate-manifest';
+import { assembleReleaseManifest } from './generate-manifest';
 
 const SYNTHETIC_PRIVATE_KEY_PEM = `-----BEGIN PRIVATE KEY-----
 MC4CAQAwBQYDK2VwBCIEIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f
@@ -27,13 +27,13 @@ const DEFAULT_SYNTHETIC_PAYLOAD = new TextEncoder().encode(
 export interface BuildSyntheticArtifactOptions {
   directory: string;
   payload?: Uint8Array;
-  manifest?: Omit<ReleaseManifestV1, 'payloadSha256' | 'version'>;
+  manifest?: Omit<ReleaseManifest, 'payloadSha256' | 'version'>;
 }
 
 export interface BuiltSyntheticArtifact {
   layout: ReleaseArtifactLayout;
-  manifest: ReleaseManifestV1;
-  signature: SyntheticSignatureBundleV1;
+  manifest: ReleaseManifest;
+  signature: SyntheticSignatureBundle;
 }
 
 /**
@@ -50,14 +50,14 @@ export function buildSyntheticArtifact(
   assertWritableFixtureTarget(layout.signature);
 
   const payload = new Uint8Array(options.payload ?? DEFAULT_SYNTHETIC_PAYLOAD);
-  const manifest = assembleReleaseManifestV1({
+  const manifest = assembleReleaseManifest({
     payloadBytes: payload,
     fields: options.manifest ?? defaultSyntheticManifestFields(),
     distributionMode: 'synthetic_non_distributable',
   });
   const manifestBytes = encodeReleaseManifest(manifest);
   const signatureBytes = sign(null, manifestBytes, createPrivateKey(SYNTHETIC_PRIVATE_KEY_PEM));
-  const signature: SyntheticSignatureBundleV1 = {
+  const signature: SyntheticSignatureBundle = {
     version: 1,
     kind: SYNTHETIC_SIGNATURE_KIND,
     signedObject: 'canonical-release-manifest-v1',
@@ -77,7 +77,7 @@ export function buildSyntheticArtifact(
 }
 
 export function defaultSyntheticManifestFields(): Omit<
-  ReleaseManifestV1,
+  ReleaseManifest,
   'payloadSha256' | 'version'
 > {
   return {
@@ -90,7 +90,7 @@ export function defaultSyntheticManifestFields(): Omit<
     agentContractDigest: fixtureDigest('agent-contract'),
     modelVisibleToolRegistryDigest: fixtureDigest('model-visible-tool-registry'),
     defaultConfigDigest: fixtureDigest('default-config'),
-    providerDataPolicyDigest: fixtureDigest('provider-data-policy'),
+    providerRouteDigest: fixtureDigest('provider-route'),
     releaseGatePolicyDigest: fixtureDigest('release-gate-policy'),
     runtimeSchedulingPolicyDigest: fixtureDigest('runtime-scheduling-policy'),
     buildRecipeDigest: fixtureDigest('build-recipe'),

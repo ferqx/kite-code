@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
-import type { McpConfigCatalog, McpConfigRepository, McpServerConfigEntry } from '@/core/config';
+import type { McpServerConfig, McpServerState } from '@kite/builtin-runtime/mcp';
 import {
   DefaultMcpSupervisor,
   diagnoseMcpError,
   type McpConnectionManagerControlPlane,
-} from '@/core/mcp';
-import type { McpServerConfig, McpServerState } from '@/core/mcp/types';
-import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
+} from '@kite/builtin-runtime/mcp';
+import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
+import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import type { McpConfigCatalog, McpConfigRepository, McpServerConfigEntry } from '#app/config';
+import { createInMemoryMcpConfigRepository } from './helpers/mcp-test-composition';
 
 class FakeManager implements McpConnectionManagerControlPlane {
   readonly states = new Map<string, McpServerState>();
@@ -136,7 +137,7 @@ describe('McpSupervisor', () => {
     });
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => catalog(),
+      repository: createInMemoryMcpConfigRepository(() => catalog()),
     });
     const observed: string[] = [];
     supervisor.subscribe(() => {
@@ -173,7 +174,7 @@ describe('McpSupervisor', () => {
     const manager = new FakeManager();
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => catalog(),
+      repository: createInMemoryMcpConfigRepository(() => catalog()),
     });
 
     await supervisor.start('/workspace');
@@ -221,7 +222,7 @@ describe('McpSupervisor', () => {
     manager.discoveredResources = [{ uri: 'docs://guide', name: 'Guide' }];
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => catalog(),
+      repository: createInMemoryMcpConfigRepository(() => catalog()),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -239,7 +240,10 @@ describe('McpSupervisor', () => {
 
   test('retry reloads the approval/config gate and advances generation', async () => {
     const manager = new FakeManager();
-    const supervisor = new DefaultMcpSupervisor({ manager, loadCatalog: () => catalog() });
+    const supervisor = new DefaultMcpSupervisor({
+      manager,
+      repository: createInMemoryMcpConfigRepository(() => catalog()),
+    });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
     const key = supervisor.getSnapshot().servers[0]!.key;
@@ -251,14 +255,9 @@ describe('McpSupervisor', () => {
     await supervisor.stop();
   });
 
-  test('connects static-auth HTTP servers without registering an OAuth recovery flow', async () => {
+  test('connects non-OAuth HTTP servers without registering an OAuth recovery flow', async () => {
     const manager = new FakeManager();
-    const remote = httpEntry('remote', {
-      type: 'environment',
-      header: 'Authorization',
-      env: 'MCP_TOKEN',
-      scheme: 'Bearer',
-    });
+    const remote = httpEntry('remote', { type: 'none' });
     const remoteCatalog: McpConfigCatalog = {
       entries: [remote],
       effective: new Map([['remote', remote]]),
@@ -266,11 +265,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
     });
 
     await supervisor.start('/workspace');
@@ -297,11 +296,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
         now += milliseconds;
@@ -329,11 +328,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -351,7 +350,7 @@ describe('McpSupervisor', () => {
     const stdioManager = new FakeManager();
     const stdioSupervisor = new DefaultMcpSupervisor({
       manager: stdioManager,
-      loadCatalog: () => catalog(),
+      repository: createInMemoryMcpConfigRepository(() => catalog()),
     });
     await stdioSupervisor.start('/workspace');
     await Bun.sleep(0);
@@ -384,11 +383,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => multiCatalog,
+      repository: createInMemoryMcpConfigRepository(multiCatalog),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -416,11 +415,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -448,11 +447,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -486,11 +485,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
     });
     await supervisor.start('/workspace');
     const initialAttempts = manager.reconnects.length;
@@ -515,11 +514,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
         now += milliseconds;
@@ -556,11 +555,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
         now += milliseconds;
@@ -595,7 +594,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     let releaseLoad = () => {};
     let loadCount = 0;
@@ -650,11 +649,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepository(remoteCatalog),
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
         now += milliseconds;
@@ -715,11 +714,11 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => policyCatalog,
+      repository: createInMemoryMcpConfigRepository(policyCatalog),
     });
 
     await supervisor.start('/workspace');
@@ -811,7 +810,7 @@ function catalog(): McpConfigCatalog {
     ],
     diagnostics: [],
     workspace: '/workspace',
-    sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+    sourceRevisions: { project: 'project', user: 'user' },
   };
 }
 

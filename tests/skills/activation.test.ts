@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'bun:test';
-import { createSnapshot, descriptorRevision } from '../../src/core/capabilities/catalog';
-import { getFeatureFlags } from '../../src/core/config/features';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
 import {
+  createCapabilitySnapshot,
+  descriptorRevision,
   evaluateSkillActivation,
   skillFrameInvalidationReason,
-} from '../../src/core/skills/activation';
-import type { SkillCatalogSnapshot } from '../../src/core/skills/catalog';
-import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
+} from '@kite/builtin-runtime/skills';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import { getFeatureFlags } from '#app/config/features';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { executeTestRuntimeTools } from '../helpers/runtime-model';
 
 const catalog: SkillCatalogSnapshot = {
   revision: 'catalog-r1',
@@ -95,7 +96,8 @@ const catalog: SkillCatalogSnapshot = {
 };
 
 function activeState() {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread',
     userId: 'user',
     workspace: '/workspace',
@@ -132,7 +134,7 @@ describe('Skill Workflow activation', () => {
     const result = evaluateSkillActivation({
       state: activeState(),
       catalog,
-      flags: getFeatureFlags({ features: { skillWorkflowV1: true, skillActivationV2: true } }),
+      flags: getFeatureFlags({ features: { skillWorkflow: true, skillActivation: true } }),
       request: {
         skillId: 'skill:read-report',
         input: { report: 'daily' },
@@ -155,7 +157,7 @@ describe('Skill Workflow activation', () => {
   });
 
   it('rejects malformed input and invalidates frames after revision drift', () => {
-    const flags = getFeatureFlags({ features: { skillWorkflowV1: true, skillActivationV2: true } });
+    const flags = getFeatureFlags({ features: { skillWorkflow: true, skillActivation: true } });
     const invalid = evaluateSkillActivation({
       state: activeState(),
       catalog,
@@ -217,13 +219,13 @@ describe('Skill Workflow activation', () => {
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('activate');
-    const events = await executeRuntimeTools({
+    state.tools.queue = [...state.tools.queue, 'activate'];
+    const events = await executeTestRuntimeTools({
       state,
       toolCallIds: ['activate'],
       skillCatalog: {
         ...catalog,
-        capabilities: createSnapshot([descriptor]),
+        capabilities: createCapabilitySnapshot([descriptor]),
         entries: catalog.entries.map((entry) => ({ ...entry, descriptor })),
       },
       taskConfig: {
@@ -234,9 +236,9 @@ describe('Skill Workflow activation', () => {
         providerType: 'openai-compatible',
         sandbox: { enabled: false },
         features: {
-          toolSearchV1: true,
-          skillWorkflowV1: true,
-          skillActivationV2: true,
+          toolSearch: true,
+          skillWorkflow: true,
+          skillActivation: true,
         },
       },
     });

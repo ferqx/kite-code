@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_FEATURE_FLAGS } from '@/core/config/features';
-import { resolveMcpToolPolicy } from '@/core/mcp/tool-policy';
+import { resolveMcpToolPolicy } from '@kite/builtin-runtime/mcp';
+import { DEFAULT_FEATURE_FLAGS } from '#app/config/features';
 import {
-  evaluateMcpWriteAdmissionV1,
-  type McpWriteInvocationFactsV1,
-  type McpWriteRouteContractV1,
+  evaluateMcpWriteAdmission,
+  type McpWriteInvocationFacts,
+  type McpWriteRouteContract,
 } from './write-contract-fixtures';
 
 const now = new Date('2026-08-02T00:00:00.000Z');
 
-function route(): McpWriteRouteContractV1 {
+function route(): McpWriteRouteContract {
   const policy = resolveMcpToolPolicy(
     {
       type: 'http',
@@ -35,7 +35,6 @@ function route(): McpWriteRouteContractV1 {
     policyDigest: 'policy-v1',
     effects: policy.effectiveEffects,
     minimumApproval: policy.minimumApproval,
-    providerDataPolicyRevision: 'provider-data-v1',
     idempotency: 'reconciliation_only',
     reconciliation: 'required',
     rateLimitPerMinute: 10,
@@ -45,7 +44,7 @@ function route(): McpWriteRouteContractV1 {
   };
 }
 
-function invocation(contract = route()): McpWriteInvocationFactsV1 {
+function invocation(contract = route()): McpWriteInvocationFacts {
   return {
     providerIdentity: contract.operatorIdentity,
     serverIdentity: contract.serverIdentity,
@@ -55,19 +54,17 @@ function invocation(contract = route()): McpWriteInvocationFactsV1 {
     schemaDigest: contract.schemaDigest,
     policyDigest: contract.policyDigest,
     bindingCurrent: true,
-    providerDataPolicyAdmitted: true,
-    egressApproved: true,
     networkBoundaryQualified: true,
   };
 }
 
 describe('MCP write admission contract', () => {
   test('keeps production write off when the production route is empty', () => {
-    const decision = evaluateMcpWriteAdmissionV1({
+    const decision = evaluateMcpWriteAdmission({
       flags: {
-        mcpExecutionRecordV1: true,
-        mcpProviderActionV1: true,
-        verificationV1: true,
+        mcpExecutionRecord: true,
+        mcpProviderAction: true,
+        verification: true,
       },
       invocation: invocation(),
       now,
@@ -79,11 +76,11 @@ describe('MCP write admission contract', () => {
   });
 
   test('fails closed when any required default-off feature is disabled', () => {
-    expect(DEFAULT_FEATURE_FLAGS.mcpExecutionRecordV1).toBe(false);
-    expect(DEFAULT_FEATURE_FLAGS.mcpProviderActionV1).toBe(false);
-    expect(DEFAULT_FEATURE_FLAGS.verificationV1).toBe(false);
+    expect(DEFAULT_FEATURE_FLAGS.mcpExecutionRecord).toBe(false);
+    expect(DEFAULT_FEATURE_FLAGS.mcpProviderAction).toBe(false);
+    expect(DEFAULT_FEATURE_FLAGS.verification).toBe(false);
     const contract = route();
-    const decision = evaluateMcpWriteAdmissionV1({
+    const decision = evaluateMcpWriteAdmission({
       flags: DEFAULT_FEATURE_FLAGS,
       route: contract,
       invocation: invocation(contract),
@@ -91,20 +88,20 @@ describe('MCP write admission contract', () => {
     });
     expect(decision.status).toBe('blocked');
     expect(decision.reasonCodes).toEqual([
-      'flag_off:mcpExecutionRecordV1',
-      'flag_off:mcpProviderActionV1',
-      'flag_off:verificationV1',
+      'flag_off:mcpExecutionRecord',
+      'flag_off:mcpProviderAction',
+      'flag_off:verification',
     ]);
   });
 
-  test('requires exact route, binding, policy, egress and network facts', () => {
+  test('requires exact route, binding, policy and network facts', () => {
     const contract = route();
     const facts = invocation(contract);
-    const decision = evaluateMcpWriteAdmissionV1({
+    const decision = evaluateMcpWriteAdmission({
       flags: {
-        mcpExecutionRecordV1: true,
-        mcpProviderActionV1: true,
-        verificationV1: true,
+        mcpExecutionRecord: true,
+        mcpProviderAction: true,
+        verification: true,
       },
       route: contract,
       invocation: {
@@ -114,8 +111,6 @@ describe('MCP write admission contract', () => {
         schemaDigest: 'stale-schema',
         policyDigest: 'stale-policy',
         bindingCurrent: false,
-        providerDataPolicyAdmitted: false,
-        egressApproved: false,
         networkBoundaryQualified: false,
       },
       now,
@@ -123,11 +118,9 @@ describe('MCP write admission contract', () => {
     expect(decision.status).toBe('blocked');
     expect(decision.reasonCodes).toEqual([
       'binding_stale',
-      'egress_not_approved',
       'endpoint_revision_mismatch',
       'network_boundary_unqualified',
       'policy_digest_mismatch',
-      'provider_data_policy_denied',
       'schema_digest_mismatch',
       'tool_revision_mismatch',
     ]);
@@ -136,11 +129,11 @@ describe('MCP write admission contract', () => {
   test('admits only an exact fresh write route at user approval', () => {
     const contract = route();
     expect(
-      evaluateMcpWriteAdmissionV1({
+      evaluateMcpWriteAdmission({
         flags: {
-          mcpExecutionRecordV1: true,
-          mcpProviderActionV1: true,
-          verificationV1: true,
+          mcpExecutionRecord: true,
+          mcpProviderAction: true,
+          verification: true,
         },
         route: contract,
         invocation: invocation(contract),

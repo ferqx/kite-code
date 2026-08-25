@@ -15,12 +15,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
-import { ActiveSessionLease, SESSION_LOG_LEASE_FILE } from '@/core/session-logger';
-import { runSessionLogMaintenance } from '@/core/session-logger/retention';
+import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
+import { ActiveSessionLease, SESSION_LOG_LEASE_FILE } from '#app/session-logger';
+import { runSessionLogMaintenance } from '#app/session-logger/retention';
 
 const roots: string[] = [];
-const POLICY: SessionLoggingPolicyV1 = {
+const POLICY: SessionLoggingPolicy = {
   version: 1,
   mode: 'metadata',
   retentionDays: 7,
@@ -163,27 +163,6 @@ describe('session log retention and migration', () => {
     expect(report.quarantinedSessions).toBe(1);
     expect(report.capacitySatisfied).toBe(true);
     expect(readFileSync(target, 'utf8')).toBe('must remain');
-  });
-
-  test('moves a legacy in-root quarantine aside without scanning its contents', () => {
-    const root = createRoot();
-    const legacy = join(root, '_quarantine');
-    mkdirSync(legacy, { mode: 0o700 });
-    for (let index = 0; index < 600; index++) {
-      mkdirSync(join(legacy, `legacy-${index}`), { mode: 0o700 });
-    }
-
-    const report = runSessionLogMaintenance(POLICY, {
-      root,
-      maxEntries: 4,
-      reserveBytes: 0,
-    });
-
-    expect(report.capacitySatisfied).toBe(true);
-    expect(report.bounded).toBe(false);
-    expect(report.quarantinedSessions).toBe(1);
-    expect(existsSync(legacy)).toBe(false);
-    expect(readdirSync(quarantineRoot(root))).toHaveLength(1);
   });
 
   test('moves unknown root entries aside so they do not permanently block logging', () => {

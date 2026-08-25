@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "profileId": "auto-compaction",
+  "capability": "auto_compaction",
+  "requiredFeatureFlags": ["contextCompaction", "contextCompactionAuto"],
+  "state": {
+    "maturity": "under_development",
+    "maxRollout": "off"
+  },
+  "dependencies": [
+    {
+      "dependencyId": "capability.manual-compaction",
+      "expectedRevision": "stable-v1"
+    },
+    {
+      "dependencyId": "runtime.context-compaction",
+      "expectedRevision": "v2"
+    }
+  ],
+  "routeAllowlist": [],
+  "platformAllowlist": [],
+  "evidence": {
+    "freshnessSeconds": 0,
+    "requiredGates": ["G3", "G4", "G5"]
+  },
+  "rollback": {
+    "disableNewAdmission": true,
+    "preserveReceipts": true,
+    "preserveRequiredVerification": true,
+    "cohortPercent": 0
+  }
+}

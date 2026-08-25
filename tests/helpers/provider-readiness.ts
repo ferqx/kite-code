@@ -1,30 +1,36 @@
-import { ProviderReadinessCoordinatorV1 } from '@/core/execution/tool-pipeline';
-import type { McpRuntimeProvider } from '@/core/mcp';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import type { RuntimeState } from '@/core/runtime/state';
+import { normalizeAgentEvent, type RuntimeEvent } from '@kite/agent-kernel';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
+import { ProviderReadinessCoordinator } from '#app/bootstrap/runtime/provider-readiness';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
-export function createProviderReadinessTestHarnessV1(
+export function createProviderReadinessTestHarness(
   provider: McpRuntimeProvider,
   initialState: RuntimeState,
-  beforePersist?: (event: import('@/core/runtime/events').RuntimeEvent) => boolean | undefined,
+  beforePersist?: (event: RuntimeEvent) => boolean | undefined,
 ): {
-  providerReadinessCoordinator: ProviderReadinessCoordinatorV1;
+  providerReadinessCoordinator: ProviderReadinessCoordinator;
   getRuntimeState: () => Readonly<RuntimeState>;
-  persistRuntimeEvent: (event: import('@/core/runtime/events').RuntimeEvent) => Promise<boolean>;
-  persistRuntimeEvents: (
-    events: import('@/core/runtime/events').RuntimeEvent[],
-  ) => Promise<boolean>;
+  persistRuntimeEvent: (event: RuntimeEvent) => Promise<boolean>;
+  persistRuntimeEvents: (events: RuntimeEvent[]) => Promise<boolean>;
 } {
   let state = initialState;
-  const persistRuntimeEvents = async (
-    events: import('@/core/runtime/events').RuntimeEvent[],
-  ): Promise<boolean> => {
+  const persistRuntimeEvents = async (events: RuntimeEvent[]): Promise<boolean> => {
     if (events.some((event) => beforePersist?.(event) === false)) return false;
-    for (const event of events) state = reduceRuntimeState(state, event);
+    for (const event of events) {
+      const previousRevision = state.revision;
+      state = {
+        ...reduceRuntimeState(
+          state,
+          normalizeAgentEvent(event, state, new Date().toISOString()) as RuntimeEvent,
+        ),
+        revision: previousRevision + 1,
+      };
+    }
     return true;
   };
   return {
-    providerReadinessCoordinator: new ProviderReadinessCoordinatorV1(provider),
+    providerReadinessCoordinator: new ProviderReadinessCoordinator(provider),
     getRuntimeState: () => state,
     persistRuntimeEvent: async (event) => persistRuntimeEvents([event]),
     persistRuntimeEvents,

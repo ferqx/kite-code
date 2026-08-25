@@ -1,7 +1,9 @@
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
-import { isToolOutcomeV1 } from '../../src/core/runtime/tool-outcome';
-import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { isToolOutcome } from '@kite/agent-kernel';
+import {
+  createRuntimeHostStateInitialState,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
+} from '@kite/runtime-host/kernel-adapter';
 
 const TEST_OCCURRED_AT = '2026-08-15T00:00:00.000Z';
 
@@ -10,9 +12,10 @@ const TEST_OCCURRED_AT = '2026-08-15T00:00:00.000Z';
  * Production events receive the same canonical outcome before persistence.
  */
 export function currentRuntimeEvent(event: RuntimeEvent): RuntimeEvent {
-  if ('outcomeV1' in event && isToolOutcomeV1(event.outcomeV1)) return event;
+  if ('outcome' in event && isToolOutcome(event.outcome)) return event;
 
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'current-event-test',
     userId: 'test-user',
     workspace: '/workspace',
@@ -42,11 +45,11 @@ export function currentRuntimeEvent(event: RuntimeEvent): RuntimeEvent {
       sideEffect: name === 'shell_execute',
     };
     if (event.type !== 'approval.rejected' && event.type !== 'auto_review.completed') {
-      state.tools.active.push(toolCallId);
+      state.tools.active = [...state.tools.active, toolCallId];
     }
   }
 
-  return normalizeCurrentToolOutcomeEventV1(event, state, TEST_OCCURRED_AT);
+  return normalizeCurrentToolOutcomeEvent(event, state, TEST_OCCURRED_AT);
 }
 
 export function currentRuntimeEvents(events: RuntimeEvent[]): RuntimeEvent[] {

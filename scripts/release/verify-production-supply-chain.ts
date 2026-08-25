@@ -22,46 +22,46 @@ import { gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import { decodeReleaseManifest } from './artifact-layout';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
-import { verifyReleaseEvidenceBundleV1 } from './evidence-bundle';
+import { verifyReleaseEvidenceBundle } from './evidence-bundle';
 import {
-  type MaintainerSecurityReviewRecordV1,
-  maintainerSecurityReviewRecordV1Schema,
-  type ProductionReleaseReplayEvidenceRecordV1,
-  productionReleaseReplayEvidenceRecordV1Schema,
+  type MaintainerSecurityReviewRecord,
+  maintainerSecurityReviewRecordSchema,
+  type ProductionReleaseReplayEvidenceRecord,
+  productionReleaseReplayEvidenceRecordSchema,
 } from './evidence-schema';
 import {
-  evaluateReleaseGateV1,
-  verifyReleaseGateDecisionV1,
-  verifyReleaseGatePolicyV1,
+  evaluateReleaseGate,
+  verifyReleaseGateDecision,
+  verifyReleaseGatePolicy,
 } from './gate-evaluator';
 import {
-  buildCosignKeylessBlobVerificationCommandV1,
-  buildGithubArtifactAttestationVerificationCommandV1,
-  buildPlatformSignatureVerificationCommandsV1,
+  buildCosignKeylessBlobVerificationCommand,
+  buildGithubArtifactAttestationVerificationCommand,
+  buildPlatformSignatureVerificationCommands,
   GITHUB_ACTIONS_OIDC_ISSUER,
-  PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1,
+  PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_,
   PRODUCTION_RELEASE_REPOSITORY,
   PRODUCTION_RELEASE_REPOSITORY_NODE_ID,
   PRODUCTION_RELEASE_REPOSITORY_NUMERIC_ID,
   PRODUCTION_RELEASE_WORKFLOW_PATH,
-  type ProductionArtifactPlatformV1,
-  type ProductionNativeSignerExpectationV1,
-  type ProductionReleaseExpectedIdentityV1,
-  productionReleaseCertificateIdentityV1,
-  productionReleaseRunInvocationUriV1,
+  type ProductionArtifactPlatform,
+  type ProductionNativeSignerExpectation,
+  type ProductionReleaseExpectedIdentity,
+  productionReleaseCertificateIdentity,
+  productionReleaseRunInvocationUri,
 } from './production-supply-chain-commands';
 
-interface TrustedProductionSupplyChainVerifierV1 {
+interface TrustedProductionSupplyChainVerifier {
   trustedVerifierCommit: string;
   workflowPath: string;
 }
 
 // Enabling production admission is a governed source change. Runtime input
 // cannot inject a verifier commit or turn this registry on.
-const TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_V1: readonly TrustedProductionSupplyChainVerifierV1[] =
+const TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_: readonly TrustedProductionSupplyChainVerifier[] =
   Object.freeze([]);
 export const PRODUCTION_SUPPLY_CHAIN_ADMISSION_ENABLED =
-  TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_V1.length > 0;
+  TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_.length > 0;
 const RELEASE_GATE_IDS = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5'] as const;
 const COMMAND_TIMEOUT_MS = 30_000;
 const MAINTAINER_REVIEW_IDENTITY = 'github:@ferqx';
@@ -128,14 +128,14 @@ const githubAttestationOutputSchema = z
   )
   .min(1);
 
-export interface TrustedToolReceiptV1 {
+export interface TrustedToolReceipt {
   path: string;
   sha256: `sha256:${string}`;
 }
 
-export interface ProductionSupplyChainCliInputV1 {
-  expected: ProductionReleaseExpectedIdentityV1;
-  platform: ProductionArtifactPlatformV1;
+export interface ProductionSupplyChainCliInput {
+  expected: ProductionReleaseExpectedIdentity;
+  platform: ProductionArtifactPlatform;
   paths: {
     payload: string;
     nativeLauncher: string;
@@ -153,12 +153,12 @@ export interface ProductionSupplyChainCliInputV1 {
     platformSignatureBundle?: string;
   };
   tools: {
-    gh: TrustedToolReceiptV1;
-    cosign: TrustedToolReceiptV1;
-    platformVerifier?: TrustedToolReceiptV1;
-    macosPolicyVerifier?: TrustedToolReceiptV1;
+    gh: TrustedToolReceipt;
+    cosign: TrustedToolReceipt;
+    platformVerifier?: TrustedToolReceipt;
+    macosPolicyVerifier?: TrustedToolReceipt;
   };
-  nativeSigner: ProductionNativeSignerExpectationV1;
+  nativeSigner: ProductionNativeSignerExpectation;
   expectedGateDecisionDigest: string;
 }
 
@@ -256,15 +256,15 @@ const productionSupplyChainInputSchema = z
     }
   });
 
-export interface CommandExecutionResultV1 {
+export interface CommandExecutionResult {
   exitCode: number;
   stdout: string;
   stderr: string;
   timedOut?: boolean;
 }
 
-export interface ProductionSupplyChainVerifierDependenciesV1 {
-  execute(command: readonly string[], timeoutMs: number): CommandExecutionResultV1;
+export interface ProductionSupplyChainVerifierDependencies {
+  execute(command: readonly string[], timeoutMs: number): CommandExecutionResult;
   runtime: { platform: NodeJS.Platform; arch: string };
   now(): Date;
 }
@@ -292,10 +292,10 @@ export class ProductionSupplyChainVerificationError extends Error {
   }
 }
 
-export function parseProductionSupplyChainCliInputV1(
+export function parseProductionSupplyChainCliInput(
   argv: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
-): ProductionSupplyChainCliInputV1 {
+): ProductionSupplyChainCliInput {
   const flags = parseFlags(argv);
   const value = (flag: string, environment: string): string | undefined =>
     flags.get(flag) ?? env[environment];
@@ -359,8 +359,8 @@ export function parseProductionSupplyChainCliInputV1(
       `unknown platform ${platform}`,
     );
   }
-  const typedPlatform = platform as ProductionArtifactPlatformV1;
-  let nativeSigner: ProductionNativeSignerExpectationV1;
+  const typedPlatform = platform as ProductionArtifactPlatform;
+  let nativeSigner: ProductionNativeSignerExpectation;
   if (typedPlatform === 'linux-x64') {
     nativeSigner = { platform: typedPlatform, kind: 'github_actions_keyless' };
   } else if (typedPlatform === 'macos-arm64') {
@@ -404,7 +404,7 @@ export function parseProductionSupplyChainCliInputV1(
       timestampRequired: true,
     };
   }
-  const tool = (name: string, envName: string): TrustedToolReceiptV1 => ({
+  const tool = (name: string, envName: string): TrustedToolReceipt => ({
     path: required(`--${name}-path`, `KITE_RELEASE_${envName}_PATH`),
     sha256: parseDigest(`--${name}-sha256`, `KITE_RELEASE_${envName}_SHA256`),
   });
@@ -457,9 +457,9 @@ export function parseProductionSupplyChainCliInputV1(
   };
 }
 
-export function verifyProductionSupplyChainAdmissionV1(
-  input: ProductionSupplyChainCliInputV1,
-  dependencies: ProductionSupplyChainVerifierDependenciesV1,
+export function verifyProductionSupplyChainAdmission(
+  input: ProductionSupplyChainCliInput,
+  dependencies: ProductionSupplyChainVerifierDependencies,
 ) {
   const parsedInput = productionSupplyChainInputSchema.safeParse(input);
   if (!parsedInput.success) {
@@ -468,7 +468,7 @@ export function verifyProductionSupplyChainAdmissionV1(
       parsedInput.error.issues.map((issue) => issue.message).join('; '),
     );
   }
-  input = parsedInput.data as ProductionSupplyChainCliInputV1;
+  input = parsedInput.data as ProductionSupplyChainCliInput;
   const parsedIdentity = expectedIdentitySchema.safeParse(input.expected);
   const parsedGateDigest = digestSchema.safeParse(input.expectedGateDecisionDigest);
   if (!parsedIdentity.success || !parsedGateDigest.success) {
@@ -494,7 +494,7 @@ export function verifyProductionSupplyChainAdmissionV1(
       rollbackReport: snapshots.digests.rollbackReport,
       compatibilityReport: snapshots.digests.compatibilityReport,
     };
-    const launcherArchivePath = PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1[input.platform];
+    const launcherArchivePath = PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_[input.platform];
     const platformSigningSubject = verifyArchiveLayout(
       paths.payload,
       launcherArchivePath,
@@ -566,7 +566,7 @@ export function verifyProductionSupplyChainAdmissionV1(
     });
 
     runRequiredCommand(
-      buildCosignKeylessBlobVerificationCommandV1({
+      buildCosignKeylessBlobVerificationCommand({
         cosignPath,
         subjectPath: paths.manifest,
         bundlePath: paths.sigstoreBundle,
@@ -591,7 +591,7 @@ export function verifyProductionSupplyChainAdmissionV1(
       compatibilityReport: paths.compatibilityReport,
     })) {
       const result = runRequiredCommand(
-        buildGithubArtifactAttestationVerificationCommandV1({
+        buildGithubArtifactAttestationVerificationCommand({
           ghPath,
           subjectPath,
           bundlePath: paths.githubAttestationBundle,
@@ -609,7 +609,7 @@ export function verifyProductionSupplyChainAdmissionV1(
       });
     }
 
-    const platformCommands = buildPlatformSignatureVerificationCommandsV1({
+    const platformCommands = buildPlatformSignatureVerificationCommands({
       platform: input.platform,
       subjectPath: platformSigningSubject,
       expected: parsedIdentity.data,
@@ -654,7 +654,7 @@ export function verifyProductionSupplyChainAdmissionV1(
       }
     }
 
-    const trustedVerifier = TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_V1.find(
+    const trustedVerifier = TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_.find(
       (candidate) =>
         candidate.trustedVerifierCommit === parsedIdentity.data.trustedVerifierCommit &&
         candidate.workflowPath === parsedIdentity.data.workflowPath,
@@ -677,7 +677,7 @@ export function verifyProductionSupplyChainAdmissionV1(
     });
     const receiptMaterial = productionAccepted
       ? {
-          schema: 'ProductionSupplyChainAdmissionReceiptV1' as const,
+          schema: 'ProductionSupplyChainAdmissionReceipt' as const,
           identity: parsedIdentity.data,
           platform: input.platform,
           subjects: subjectDigests,
@@ -741,7 +741,7 @@ function parseFlags(argv: readonly string[]): Map<string, string> {
   return flags;
 }
 
-type SnapshotRole = keyof ProductionSupplyChainCliInputV1['paths'];
+type SnapshotRole = keyof ProductionSupplyChainCliInput['paths'];
 const SNAPSHOT_LIMITS: Readonly<Record<SnapshotRole, number>> = Object.freeze({
   payload: 256 * 1024 * 1024,
   nativeLauncher: 64 * 1024 * 1024,
@@ -759,7 +759,7 @@ const SNAPSHOT_LIMITS: Readonly<Record<SnapshotRole, number>> = Object.freeze({
   platformSignatureBundle: 8 * 1024 * 1024,
 });
 
-function snapshotInputs(paths: ProductionSupplyChainCliInputV1['paths']): {
+function snapshotInputs(paths: ProductionSupplyChainCliInput['paths']): {
   root: string;
   paths: Record<SnapshotRole, string>;
   digests: Record<SnapshotRole, `sha256:${string}`>;
@@ -820,7 +820,7 @@ function snapshotInputs(paths: ProductionSupplyChainCliInputV1['paths']): {
 
 function requireTrustedTool(
   name: string,
-  receipt: TrustedToolReceiptV1,
+  receipt: TrustedToolReceipt,
   trustedTools: Map<string, `sha256:${string}`>,
 ): string {
   try {
@@ -846,7 +846,7 @@ function requireTrustedTool(
   }
 }
 
-const PROTECTED_WINDOWS_TOOL_PATHS_V1 = new Set(
+const PROTECTED_WINDOWS_TOOL_PATHS_ = new Set(
   [
     'C:\\Program Files\\GitHub CLI\\gh.exe',
     'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
@@ -854,14 +854,14 @@ const PROTECTED_WINDOWS_TOOL_PATHS_V1 = new Set(
   ].map((path) => windowsPath.normalize(path).toLowerCase()),
 );
 
-export function isProtectedWindowsToolPathV1(path: string): boolean {
+export function isProtectedWindowsToolPath(path: string): boolean {
   if (!windowsPath.isAbsolute(path)) return false;
-  return PROTECTED_WINDOWS_TOOL_PATHS_V1.has(windowsPath.normalize(path).toLowerCase());
+  return PROTECTED_WINDOWS_TOOL_PATHS_.has(windowsPath.normalize(path).toLowerCase());
 }
 
 function requireOsProtectedToolPath(path: string): void {
   if (process.platform === 'win32') {
-    if (!isProtectedWindowsToolPathV1(path)) {
+    if (!isProtectedWindowsToolPath(path)) {
       throw new Error('Windows tool is outside the exact system-volume protected allowlist');
     }
     return;
@@ -897,8 +897,8 @@ function requireSafeGeneratedFileDigest(path: string): `sha256:${string}` {
 }
 
 function assertNativePlatform(
-  platform: ProductionArtifactPlatformV1,
-  runtime: ProductionSupplyChainVerifierDependenciesV1['runtime'],
+  platform: ProductionArtifactPlatform,
+  runtime: ProductionSupplyChainVerifierDependencies['runtime'],
 ): void {
   const expected = {
     'linux-x64': { platform: 'linux', arch: 'x64' },
@@ -926,7 +926,7 @@ function verifyArchiveLayout(
   archivePath: string,
   launcherArchivePath: string,
   launcherPath: string,
-  platform: ProductionArtifactPlatformV1,
+  platform: ProductionArtifactPlatform,
   extractionRoot: string,
 ): string {
   try {
@@ -1080,8 +1080,8 @@ function parseTarOctal(bytes: Uint8Array): number {
 
 function verifyCanonicalManifest(input: {
   path: string;
-  expected: ProductionReleaseExpectedIdentityV1;
-  platform: ProductionArtifactPlatformV1;
+  expected: ProductionReleaseExpectedIdentity;
+  platform: ProductionArtifactPlatform;
   payloadDigest: string;
 }): void {
   try {
@@ -1108,7 +1108,7 @@ function verifyCanonicalManifest(input: {
 }
 
 function expectedArtifactIdentity(input: {
-  expected: ProductionReleaseExpectedIdentityV1;
+  expected: ProductionReleaseExpectedIdentity;
   manifestPath: string;
   payloadDigest: string;
   manifestDigest: string;
@@ -1129,13 +1129,13 @@ function expectedArtifactIdentity(input: {
 function verifyProductionReplayEvidence(input: {
   path: string;
   kind: 'schema_rollback' | 'ga_compatibility';
-  expected: ProductionReleaseExpectedIdentityV1;
+  expected: ProductionReleaseExpectedIdentity;
   manifestPath: string;
   payloadDigest: string;
   manifestDigest: string;
-}): ProductionReleaseReplayEvidenceRecordV1 {
+}): ProductionReleaseReplayEvidenceRecord {
   try {
-    const parsed = productionReleaseReplayEvidenceRecordV1Schema.parse(
+    const parsed = productionReleaseReplayEvidenceRecordSchema.parse(
       JSON.parse(readFileSync(input.path, 'utf8')),
     );
     const candidate = expectedArtifactIdentity(input);
@@ -1159,16 +1159,16 @@ function verifyProductionReplayEvidence(input: {
 
 function verifySecurityReviewEvidence(input: {
   path: string;
-  expected: ProductionReleaseExpectedIdentityV1;
+  expected: ProductionReleaseExpectedIdentity;
   manifestPath: string;
-  platform: ProductionArtifactPlatformV1;
+  platform: ProductionArtifactPlatform;
   payloadDigest: string;
   manifestDigest: string;
-  rollbackReport: ProductionReleaseReplayEvidenceRecordV1;
-  compatibilityReport: ProductionReleaseReplayEvidenceRecordV1;
-}): MaintainerSecurityReviewRecordV1 {
+  rollbackReport: ProductionReleaseReplayEvidenceRecord;
+  compatibilityReport: ProductionReleaseReplayEvidenceRecord;
+}): MaintainerSecurityReviewRecord {
   try {
-    const parsed = maintainerSecurityReviewRecordV1Schema.parse(
+    const parsed = maintainerSecurityReviewRecordSchema.parse(
       JSON.parse(readFileSync(input.path, 'utf8')),
     );
     const manifest = decodeReleaseManifest(readFileSync(input.manifestPath));
@@ -1186,7 +1186,7 @@ function verifySecurityReviewEvidence(input: {
       !Buffer.from(canonicalJsonBytes(parsed.candidate)).equals(
         Buffer.from(canonicalJsonBytes(candidate)),
       ) ||
-      parsed.routeIdentity !== manifest.providerDataPolicyDigest ||
+      parsed.routeIdentity !== manifest.providerRouteDigest ||
       parsed.platformIdentity !== platformIdentity ||
       parsed.rollbackReportDigest !== input.rollbackReport.recordDigest ||
       parsed.compatibilityReportDigest !== input.compatibilityReport.recordDigest ||
@@ -1204,7 +1204,7 @@ function verifySecurityReviewEvidence(input: {
   }
 }
 
-interface VerifiedReleaseGateContextV1 {
+interface VerifiedReleaseGateContext {
   evaluatedAt: string;
   reviewMaxAgeSeconds: number;
   executionWindows: ReadonlyArray<{ startedAt: string; endedAt: string }>;
@@ -1212,10 +1212,10 @@ interface VerifiedReleaseGateContextV1 {
 
 function verifyGithubMaintainerReviewActor(input: {
   ghPath: string;
-  expected: ProductionReleaseExpectedIdentityV1;
-  securityReview: MaintainerSecurityReviewRecordV1;
-  gateContext: VerifiedReleaseGateContextV1;
-  dependencies: ProductionSupplyChainVerifierDependenciesV1;
+  expected: ProductionReleaseExpectedIdentity;
+  securityReview: MaintainerSecurityReviewRecord;
+  gateContext: VerifiedReleaseGateContext;
+  dependencies: ProductionSupplyChainVerifierDependencies;
   trustedTools: ReadonlyMap<string, `sha256:${string}`>;
 }): void {
   const result = runRequiredCommand(
@@ -1285,22 +1285,22 @@ function verifyGateDecision(input: {
   policyPath: string;
   evidenceBundlePath: string;
   securityReviewPath: string;
-  expected: ProductionReleaseExpectedIdentityV1;
+  expected: ProductionReleaseExpectedIdentity;
   expectedDecisionDigest: string;
   payloadDigest: string;
   manifestDigest: string;
   manifestPath: string;
-}): VerifiedReleaseGateContextV1 {
+}): VerifiedReleaseGateContext {
   try {
-    const policy = verifyReleaseGatePolicyV1(JSON.parse(readFileSync(input.policyPath, 'utf8')));
-    const evidence = verifyReleaseEvidenceBundleV1(
+    const policy = verifyReleaseGatePolicy(JSON.parse(readFileSync(input.policyPath, 'utf8')));
+    const evidence = verifyReleaseEvidenceBundle(
       JSON.parse(readFileSync(input.evidenceBundlePath, 'utf8')),
     );
-    const parsed = verifyReleaseGateDecisionV1(JSON.parse(readFileSync(input.path, 'utf8')));
-    const reviewRecord = maintainerSecurityReviewRecordV1Schema.parse(
+    const parsed = verifyReleaseGateDecision(JSON.parse(readFileSync(input.path, 'utf8')));
+    const reviewRecord = maintainerSecurityReviewRecordSchema.parse(
       JSON.parse(readFileSync(input.securityReviewPath, 'utf8')),
     );
-    const replayed = evaluateReleaseGateV1({
+    const replayed = evaluateReleaseGate({
       policy,
       evidence,
       artifactIdentity: parsed.artifactIdentity,
@@ -1355,8 +1355,8 @@ function verifyGateDecision(input: {
 }
 
 function matchesExpectedReleaseExecution(
-  result: ReturnType<typeof verifyReleaseEvidenceBundleV1>['results'][number],
-  expected: ProductionReleaseExpectedIdentityV1,
+  result: ReturnType<typeof verifyReleaseEvidenceBundle>['results'][number],
+  expected: ProductionReleaseExpectedIdentity,
 ): boolean {
   const execution = result.executionIdentity;
   if (
@@ -1388,13 +1388,13 @@ function matchesExpectedReleaseExecution(
 
 function runRequiredCommand(
   command: readonly string[],
-  dependencies: ProductionSupplyChainVerifierDependenciesV1,
+  dependencies: ProductionSupplyChainVerifierDependencies,
   trustedTools: ReadonlyMap<string, `sha256:${string}`>,
   code:
     | 'security_review_unverified'
     | 'cryptographic_verification_failed'
     | 'platform_signature_unverified',
-): CommandExecutionResultV1 {
+): CommandExecutionResult {
   const toolPath = command[0];
   const expectedDigest = toolPath ? trustedTools.get(toolPath) : undefined;
   if (!toolPath || !expectedDigest || fileDigest(toolPath) !== expectedDigest) {
@@ -1423,7 +1423,7 @@ function verifyGithubAttestationOutput(input: {
   output: string;
   subjectPath: string;
   subjectDigest: string;
-  expected: ProductionReleaseExpectedIdentityV1;
+  expected: ProductionReleaseExpectedIdentity;
 }): void {
   let parsed: z.infer<typeof githubAttestationOutputSchema>;
   try {
@@ -1456,8 +1456,8 @@ function verifyGithubAttestationOutput(input: {
     input.expected.workflowSha,
     input.expected.commit,
     input.expected.ref,
-    productionReleaseCertificateIdentityV1(input.expected),
-    productionReleaseRunInvocationUriV1(input.expected),
+    productionReleaseCertificateIdentity(input.expected),
+    productionReleaseRunInvocationUri(input.expected),
     GITHUB_ACTIONS_OIDC_ISSUER,
   ];
   if (requiredCertificateValues.some((value) => !certificateValues.has(value))) {
@@ -1478,7 +1478,7 @@ function collectScalarValues(value: unknown): string[] {
   return [];
 }
 
-function executeCommand(command: readonly string[], timeoutMs: number): CommandExecutionResultV1 {
+function executeCommand(command: readonly string[], timeoutMs: number): CommandExecutionResult {
   const result = spawnSync(command[0]!, command.slice(1), {
     encoding: 'utf8',
     timeout: timeoutMs,
@@ -1493,8 +1493,8 @@ function executeCommand(command: readonly string[], timeoutMs: number): CommandE
 }
 
 if (import.meta.main) {
-  const input = parseProductionSupplyChainCliInputV1(process.argv.slice(2));
-  const result = verifyProductionSupplyChainAdmissionV1(input, {
+  const input = parseProductionSupplyChainCliInput(process.argv.slice(2));
+  const result = verifyProductionSupplyChainAdmission(input, {
     execute: executeCommand,
     runtime: { platform: process.platform, arch: process.arch },
     now: () => new Date(),

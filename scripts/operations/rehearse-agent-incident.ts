@@ -1,18 +1,18 @@
 import {
-  adaptSyntheticRehearsalToReleaseEvidenceV1,
-  buildSyntheticIncidentRehearsalV1,
-  verifyIncidentRehearsalReportV1,
+  adaptSyntheticRehearsalToReleaseEvidence,
+  buildSyntheticIncidentRehearsal,
+  verifyIncidentRehearsalReport,
 } from './rehearsal-evidence';
 
-export function runSyntheticIncidentRehearsalV1() {
-  const report = buildSyntheticIncidentRehearsalV1();
-  verifyIncidentRehearsalReportV1(report);
+export function runSyntheticIncidentRehearsal() {
+  const report = buildSyntheticIncidentRehearsal();
+  verifyIncidentRehearsalReport(report);
   return {
     report,
-    evidence: adaptSyntheticRehearsalToReleaseEvidenceV1(report),
+    evidence: adaptSyntheticRehearsalToReleaseEvidence(report),
   };
 }
 
 if (import.meta.main) {
-  console.log(JSON.stringify(runSyntheticIncidentRehearsalV1(), null, 2));
+  console.log(JSON.stringify(runSyntheticIncidentRehearsal(), null, 2));
 }

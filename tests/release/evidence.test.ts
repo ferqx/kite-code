@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { sha256Digest } from '../../scripts/release/canonical-json';
 import {
-  buildReleaseEvidenceBundleV1,
-  type ReleaseEvidenceBundleInputV1,
-  verifyReleaseEvidenceBundleV1,
+  buildReleaseEvidenceBundle,
+  type ReleaseEvidenceBundleInput,
+  verifyReleaseEvidenceBundle,
 } from '../../scripts/release/evidence-bundle';
 import {
   RELEASE_EVIDENCE_KINDS,
   RELEASE_EVIDENCE_SCHEMA,
-  type ReleaseArtifactIdentityV1,
-  releaseEvidenceV1Schema,
+  type ReleaseArtifactIdentity,
+  releaseEvidenceSchema,
 } from '../../scripts/release/evidence-schema';
 
 const COMMIT = 'a'.repeat(40);
@@ -19,7 +19,7 @@ function digest(value: string): `sha256:${string}` {
   return sha256Digest(value);
 }
 
-function artifactIdentity(): ReleaseArtifactIdentityV1 {
+function artifactIdentity(): ReleaseArtifactIdentity {
   return {
     canonicalRepository: 'ferqx/kite-code',
     repositoryId: 'R_kgDOSKbi8g',
@@ -32,7 +32,7 @@ function artifactIdentity(): ReleaseArtifactIdentityV1 {
   };
 }
 
-function input(): ReleaseEvidenceBundleInputV1 {
+function input(): ReleaseEvidenceBundleInput {
   const identity = artifactIdentity();
   return {
     schema: RELEASE_EVIDENCE_SCHEMA,
@@ -69,26 +69,26 @@ function input(): ReleaseEvidenceBundleInputV1 {
   };
 }
 
-describe('ReleaseEvidenceV1', () => {
+describe('ReleaseEvidence', () => {
   test('keeps limited cohort SLO distinct from later capability canary SLO evidence', () => {
     expect(RELEASE_EVIDENCE_KINDS).toContain('limited_slo');
     expect(RELEASE_EVIDENCE_KINDS).toContain('canary_slo');
   });
 
   test('builds and independently verifies a canonical identity-bound bundle', () => {
-    const bundle = buildReleaseEvidenceBundleV1(input());
+    const bundle = buildReleaseEvidenceBundle(input());
     expect(bundle.bundleDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(verifyReleaseEvidenceBundleV1(structuredClone(bundle))).toEqual(bundle);
+    expect(verifyReleaseEvidenceBundle(structuredClone(bundle))).toEqual(bundle);
   });
 
   test('rejects digest tampering and result identity splicing', () => {
-    const bundle = buildReleaseEvidenceBundleV1(input());
+    const bundle = buildReleaseEvidenceBundle(input());
     expect(() =>
-      verifyReleaseEvidenceBundleV1({ ...bundle, bundleDigest: digest('tampered') }),
+      verifyReleaseEvidenceBundle({ ...bundle, bundleDigest: digest('tampered') }),
     ).toThrow('digest mismatch');
     const otherIdentity = { ...bundle.artifactIdentity, payloadSha256: digest('other') };
     expect(() =>
-      releaseEvidenceV1Schema.parse({
+      releaseEvidenceSchema.parse({
         ...bundle,
         results: [{ ...bundle.results[0], artifactIdentity: otherIdentity }],
       }),
@@ -98,14 +98,14 @@ describe('ReleaseEvidenceV1', () => {
   test('keeps synthetic roots non-distributable and rejects G0/G1 exceptions', () => {
     const base = input();
     expect(() =>
-      releaseEvidenceV1Schema.parse({
-        ...buildReleaseEvidenceBundleV1(base),
+      releaseEvidenceSchema.parse({
+        ...buildReleaseEvidenceBundle(base),
         nonDistributable: false,
       }),
     ).toThrow('non-distributable');
     expect(() =>
-      releaseEvidenceV1Schema.parse({
-        ...buildReleaseEvidenceBundleV1(base),
+      releaseEvidenceSchema.parse({
+        ...buildReleaseEvidenceBundle(base),
         exceptions: [
           {
             exceptionId: 'waive-g1',
@@ -123,10 +123,10 @@ describe('ReleaseEvidenceV1', () => {
   });
 
   test('rejects unknown fields that could smuggle raw user content', () => {
-    const bundle = buildReleaseEvidenceBundleV1(input());
-    expect(() => releaseEvidenceV1Schema.parse({ ...bundle, rawUserContent: 'secret' })).toThrow();
+    const bundle = buildReleaseEvidenceBundle(input());
+    expect(() => releaseEvidenceSchema.parse({ ...bundle, rawUserContent: 'secret' })).toThrow();
     expect(() =>
-      releaseEvidenceV1Schema.parse({
+      releaseEvidenceSchema.parse({
         ...bundle,
         results: [{ ...bundle.results[0], transcript: 'secret' }],
       }),

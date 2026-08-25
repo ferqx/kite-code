@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  createBuiltinCredentialBroker,
   KiteMcpOAuthProvider,
   type McpCredentialKey,
   MemoryMcpCredentialStore,
   revokeMcpOAuthToken,
-} from '@/core/mcp';
+} from '@kite/builtin-runtime/mcp';
 
 const KEY: McpCredentialKey = {
   workspaceKey: 'workspace',
@@ -13,12 +14,14 @@ const KEY: McpCredentialKey = {
   profile: 'oauth',
 };
 
+const broker = (store: MemoryMcpCredentialStore) => createBuiltinCredentialBroker({ store });
+
 describe('KiteMcpOAuthProvider', () => {
   test('persists SDK client, token, verifier, and discovery state in one isolated profile', async () => {
     const store = new MemoryMcpCredentialStore();
     const redirects: string[] = [];
     const provider = new KiteMcpOAuthProvider({
-      credentialStore: store,
+      credentialBroker: broker(store),
       credentialKey: KEY,
       redirectUrl: new URL('http://127.0.0.1:43119/oauth/callback'),
       scopes: ['mcp:tools', 'profile'],
@@ -74,7 +77,7 @@ describe('KiteMcpOAuthProvider', () => {
       updatedAt: '2026-07-16T00:00:00.000Z',
     });
     const oauth = new KiteMcpOAuthProvider({
-      credentialStore: store,
+      credentialBroker: broker(store),
       credentialKey: KEY,
       redirectUrl: new URL('http://127.0.0.1:43119/oauth/callback'),
       clientId: 'configured-client',
@@ -103,7 +106,7 @@ describe('KiteMcpOAuthProvider', () => {
     expect(
       () =>
         new KiteMcpOAuthProvider({
-          credentialStore: new MemoryMcpCredentialStore(),
+          credentialBroker: broker(new MemoryMcpCredentialStore()),
           credentialKey: KEY,
           redirectUrl: new URL('https://example.com/oauth/callback'),
         }),
@@ -149,7 +152,7 @@ describe('KiteMcpOAuthProvider', () => {
 
 function provider(store: MemoryMcpCredentialStore, key: McpCredentialKey) {
   return new KiteMcpOAuthProvider({
-    credentialStore: store,
+    credentialBroker: broker(store),
     credentialKey: key,
     redirectUrl: new URL('http://127.0.0.1:43119/oauth/callback'),
   });

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { GovernedMetricExporterV1 } from '../../src/app/observability/governed-exporter';
-import { createMetricSampleV1 } from '../../src/core/observability/metrics';
+import { createMetricSample } from '@kite/runtime-host';
+import { GovernedMetricExporter } from '../../apps/kite/src/observability/governed-exporter';
 
-const sample = createMetricSampleV1({
+const sample = createMetricSample({
   name: 'run_total',
   observedAt: '2026-08-03T00:00:00.000Z',
   attributes: { outcome: 'completed', reason: 'completed' },
@@ -11,7 +11,7 @@ const sample = createMetricSampleV1({
 describe('governed metric exporter', () => {
   test('exports canonical metadata only through an approved transport alias', async () => {
     const sent: Array<{ endpointAlias: string; contentType: string; body: Uint8Array }> = [];
-    const exporter = new GovernedMetricExporterV1({
+    const exporter = new GovernedMetricExporter({
       endpointAlias: 'kite-operations-v1',
       approvedEndpointAliases: new Set(['kite-operations-v1']),
       transport: {
@@ -28,7 +28,7 @@ describe('governed metric exporter', () => {
     });
     const payload = JSON.parse(new TextDecoder().decode(sent[0]!.body));
     expect(payload).toMatchObject({
-      schema: 'GovernedMetricExportEnvelopeV1',
+      schema: 'GovernedMetricExportEnvelope',
       sequence: 1,
       sampleCount: 1,
       samples: [sample],
@@ -40,7 +40,7 @@ describe('governed metric exporter', () => {
   test('rejects unapproved aliases and bounded payload violations before transport', async () => {
     expect(
       () =>
-        new GovernedMetricExporterV1({
+        new GovernedMetricExporter({
           endpointAlias: 'caller-supplied',
           approvedEndpointAliases: new Set(),
           transport: { send: async () => {} },
@@ -48,7 +48,7 @@ describe('governed metric exporter', () => {
     ).toThrow('not approved');
 
     let calls = 0;
-    const exporter = new GovernedMetricExporterV1({
+    const exporter = new GovernedMetricExporter({
       endpointAlias: 'kite-operations-v1',
       approvedEndpointAliases: new Set(['kite-operations-v1']),
       maximumBatchSamples: 1,
@@ -66,7 +66,7 @@ describe('governed metric exporter', () => {
 
   test('shutdown is idempotent and prevents later export', async () => {
     let shutdowns = 0;
-    const exporter = new GovernedMetricExporterV1({
+    const exporter = new GovernedMetricExporter({
       endpointAlias: 'kite-operations-v1',
       approvedEndpointAliases: new Set(['kite-operations-v1']),
       transport: {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildStaticSystemPrompt } from '@/core/model/context';
+import { buildStaticSystemPrompt } from '@kite/builtin-runtime/model';
 
 /**
  * Contract: Complex planning work reads/searches before proposing a structural plan.
@@ -10,7 +10,8 @@ import { buildStaticSystemPrompt } from '@/core/model/context';
  */
 test('system prompt instructs read-only exploration before plan submission', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toContain('read-only exploration first');
+  expect(prompt).toContain('Planning is read-only');
+  expect(prompt).toContain('Read files before editing');
 });
 
 test('system prompt requires reading existing code before proposing a plan', () => {
@@ -20,23 +21,14 @@ test('system prompt requires reading existing code before proposing a plan', () 
   expect(prompt).toMatch(/read|search|explore|gather|understand/i);
 });
 
-test('system prompt submits an initial plan without a redundant draft save', () => {
+test('system prompt keeps executable validation in building', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toMatch(/write the complete plan once with `write_plan`\s+\(action="save"\)/);
-  expect(prompt).toMatch(/Use\s+a\s+new\s+`save`\s+only\s+for\s+an\s+explicit\s+revision/);
-});
-
-test('system prompt defers executable validation without requesting approval in planning', () => {
-  const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toContain('Tests, typechecks, builds, installs, and project scripts');
-  expect(prompt).toContain('`phase_deferred` shell result is not an approval request');
-  expect(prompt).toMatch(/do not\s+retry it during planning/);
+  expect(prompt).toContain(
+    'leave tests, builds, installs, formatting, generation, and mutations in the plan for Building',
+  );
 });
 
 test('system prompt directs planning edits into the Plan instead of an approval request', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toContain('never call `write_file` or `edit_file`');
-  expect(prompt).toContain('Describe the exact intended file changes in the Plan');
-  expect(prompt).toContain('`phase_denied` result means the tool did not run');
-  expect(prompt).toContain('any capability that can mutate workspace or external state');
+  expect(prompt).toContain('do not call file-writing or side-effectful tools');
 });

@@ -2,29 +2,20 @@
 
 状态：active
 读取时机：修改 MCP auth schema、Credential Store、HTTP header 注入、OAuth provider/coordinator、loopback callback、browser opener、认证状态投影或独立认证提示时。
-验证：`bun test tests/mcp-credential-store.test.ts tests/mcp-oauth-provider.test.ts tests/mcp-auth-coordinator.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-manager.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-panel.test.tsx`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-authentication.test.ts`、`KITE_RUN_NATIVE_KEYRING_SMOKE=1 bun test tests/mcp-keyring-platform-smoke.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。`.github/workflows/mcp-native-keyring-smoke.yml` 在 macOS、Windows、Ubuntu 三个平台运行同一原生 smoke；backend 或原生依赖变化必须维持三个 job 通过。
-相关：ADR-0013、ADR-0018、[`mcp-control-plane.md`](mcp-control-plane.md)、[`mcp-config-management.md`](mcp-config-management.md)、`src/core/mcp/credential-store.ts`、`src/core/mcp/oauth-provider.ts`、`src/core/mcp/auth-coordinator.ts`、`src/app/tui/mcp/McpOverlay.tsx`。
+验证：`bun test packages/builtin-runtime/test tests/mcp* tests/tui-system`、`bun run typecheck`、`bun run check:core-boundary`。`.github/workflows/mcp-native-keyring-smoke.yml` 在 macOS、Windows、Ubuntu 三个平台运行同一原生 smoke；backend 或原生依赖变化必须维持三个 job 通过。
+相关：ADR-0013、ADR-0018、[`mcp-control-plane.md`](mcp-control-plane.md)、[`mcp-config-management.md`](mcp-config-management.md)、`packages/builtin-runtime/src/mcp/credential-store.ts`、`packages/builtin-runtime/src/mcp/oauth-provider.ts`、`packages/builtin-runtime/src/mcp/auth-coordinator.ts`、`apps/kite/src/tui/mcp/McpOverlay.tsx`。
 
 ## 凭据持久化
 
-生产 `NativeMcpCredentialStore` 只调用 `@napi-rs/keyring` 原生 API，不执行 keychain CLI，不保存明文/加密 JSON fallback。backend 状态为 `available`、`locked` 或 `unavailable`；后两者必须 fail closed。测试与 CI 可注入 `MemoryMcpCredentialStore`，生产默认构造不得使用 fake。
+生产只在一个 `BuiltinCredentialBroker` composition 内构造 `NativeMcpCredentialStore`；Manager、AuthCoordinator 与 OAuth provider 都必须接收同一个 broker，不得各自创建 store。Native store 只调用 `@napi-rs/keyring` 原生 API，不执行 keychain CLI，不保存明文/加密 JSON fallback。backend 状态为 `available`、`locked` 或 `unavailable`；后两者必须 fail closed。测试与 CI 可显式注入 `MemoryMcpCredentialStore`，生产默认构造不得使用 fake。
 
-Credential key 由 canonical workspace key、配置 source、Server 名称和 auth profile 组成，并经过 domain-separated SHA-256 后作为 OS vault account。material 可包含静态 secret 或 OAuth tokens、dynamic client information、PKCE verifier、discovery state 与更新时间。Core/control/TUI 只投影是否存在，不投影 material。原生读取返回的缓冲在解析后清零；普通配置、Runtime Event、session log 和诊断不得包含 material。
+Credential key 由 canonical workspace key、配置 source、Server 名称和 auth profile 组成，并经过 domain-separated SHA-256 后作为 OS vault account。跨 operation 只传 project/provider/profile/purpose/expiry/revocation 绑定的 opaque `CredentialHandle`；material 可包含静态 secret 或 OAuth tokens、dynamic client information、PKCE verifier、discovery state 与更新时间，但只在 broker-local header materialization 中短暂读取。Runtime control/TUI 只投影是否存在，不投影 material。原生读取返回的缓冲在解析后清零；普通配置、Runtime Event、session log 和诊断不得包含 material。
 
 `disable`、source shadow、reconfigure 或直接 Repository mutation 不删除 credential。TUI Remove 通过 Supervisor 在删除配置后对仍注册的 OAuth target 执行本地 logout/clear；不默认 remote revoke。credential cleanup 失败时配置删除仍已生效，TUI 必须报告部分完成，不能宣称凭据也已清理。其他调用方仍需显式 logout/clear；remote revoke 只有在授权服务器提供 revocation endpoint 且调用方明确请求时执行。
 
 ## 配置引用
 
-普通 JSONC 的 `auth` 只适用于 HTTP transport，支持：
-
-```jsonc
-{
-  "type": "environment",
-  "header": "Authorization",
-  "env": "MCP_TOKEN",
-  "scheme": "Bearer"
-}
-```
+普通 JSONC 的 `auth` 只适用于 HTTP transport。production 允许 `credential` 与 `oauth` profile reference：
 
 ```jsonc
 {
@@ -45,7 +36,11 @@ Credential key 由 canonical workspace key、配置 source、Server 名称和 au
 }
 ```
 
-环境变量只在 transport 构造时读取。credential/client secret 配置只保存 profile reference；inline `clientSecret` 被 schema 拒绝。TUI 不收集或写入这些字段。未配置 `auth` 的 HTTP Server 可在真实 401 后走 OAuth discovery；显式 `oauth` metadata 只用于 scope、client id 和 profile 覆盖。显式 `none`、`environment` 或 `credential` 不会被认证恢复流程自动升级为 OAuth。
+当前 `auth` schema 只接受 `none`、`credential` 与 `oauth`；其他 spelling 在配置解析时直接无效，
+不存在旧 auth 名称的 codec、Manager 分支或 ambient `process.env` credential 路径。credential/client
+secret 配置只保存 profile reference；inline `clientSecret` 被 schema 拒绝。TUI 不收集或写入这些字段。
+未配置 `auth` 的 HTTP Server 可在真实 401 后走 OAuth discovery；显式 `oauth` metadata 只用于
+scope、client id 和 profile 覆盖。显式 `none` 或 `credential` 不会被认证恢复流程自动升级为 OAuth。
 
 ## OAuth 生命周期
 

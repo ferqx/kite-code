@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  buildIncidentRehearsalReceiptV1,
-  computeIncidentRehearsalBundleDigestV1,
-  computeIncidentRehearsalLedgerDigestV1,
-  verifyIncidentRehearsalEvidenceV1,
+  buildIncidentRehearsalReceipt,
+  computeIncidentRehearsalBundleDigest,
+  computeIncidentRehearsalLedgerDigest,
+  verifyIncidentRehearsalEvidence,
 } from '../../scripts/operations/incident-rehearsal-ledger';
-import { INCIDENT_REHEARSAL_SCENARIOS_V1 } from '../../scripts/operations/rehearsal-evidence';
+import { INCIDENT_REHEARSAL_SCENARIOS_ } from '../../scripts/operations/rehearsal-evidence';
 import { canonicalJson, sha256DomainSeparated } from '../../scripts/release/canonical-json';
 
 const digest = (label: string): `sha256:${string}` =>
   sha256DomainSeparated('kite.operations.incident-rehearsal-test.v1', label);
 const source = {
-  schema: 'IncidentRehearsalSourceV1',
+  schema: 'IncidentRehearsalSource',
   repository: 'ferqx/kite-code',
   repositoryId: 'R_kgDOSKbi8g',
   headSha: 'a'.repeat(40),
@@ -50,9 +50,9 @@ function fixture() {
     canonicalJson(artifactIdentity),
   );
   let previousReceiptDigest: string | null = null;
-  const receipts = INCIDENT_REHEARSAL_SCENARIOS_V1.map((scenario, index) => {
-    const receipt = buildIncidentRehearsalReceiptV1({
-      schema: 'IncidentRehearsalReceiptV1',
+  const receipts = INCIDENT_REHEARSAL_SCENARIOS_.map((scenario, index) => {
+    const receipt = buildIncidentRehearsalReceipt({
+      schema: 'IncidentRehearsalReceipt',
       sequence: index + 1,
       scenario,
       sourceDigest,
@@ -71,16 +71,16 @@ function fixture() {
     return receipt;
   });
   const material = {
-    schema: 'IncidentRehearsalEvidenceV1' as const,
+    schema: 'IncidentRehearsalEvidence' as const,
     executionClass: 'contract_conformance' as const,
     source,
     artifactIdentity,
     routeDigest,
     cohortDigest,
     receipts,
-    ledgerDigest: computeIncidentRehearsalLedgerDigestV1(receipts),
+    ledgerDigest: computeIncidentRehearsalLedgerDigest(receipts),
   };
-  const bundleDigest = computeIncidentRehearsalBundleDigestV1(material);
+  const bundleDigest = computeIncidentRehearsalBundleDigest(material);
   return {
     evidence: {
       ...material,
@@ -100,7 +100,7 @@ function fixture() {
 
 describe('retained incident rehearsal ledger', () => {
   test('rebuilds all eight scenarios but remains blocked without production authority', () => {
-    expect(verifyIncidentRehearsalEvidenceV1(fixture())).toMatchObject({
+    expect(verifyIncidentRehearsalEvidence(fixture())).toMatchObject({
       status: 'blocked',
       evidenceEligible: false,
       verifiedScenarioCount: 8,
@@ -114,11 +114,11 @@ describe('retained incident rehearsal ledger', () => {
   test('rejects receipt-chain tampering and source identity splicing', () => {
     const chain = fixture();
     chain.evidence.receipts[1]!.previousReceiptDigest = null;
-    expect(() => verifyIncidentRehearsalEvidenceV1(chain)).toThrow('order or chain');
+    expect(() => verifyIncidentRehearsalEvidence(chain)).toThrow('order or chain');
 
     const sourceSplice = fixture();
     expect(() =>
-      verifyIncidentRehearsalEvidenceV1({
+      verifyIncidentRehearsalEvidence({
         ...sourceSplice,
         expectedSource: { ...source, runId: '999' },
       }),
@@ -129,7 +129,7 @@ describe('retained incident rehearsal ledger', () => {
     const candidate = fixture();
     const first = candidate.evidence.receipts[0]!;
     const { receiptDigest: _receiptDigest, ...material } = first;
-    candidate.evidence.receipts[0] = buildIncidentRehearsalReceiptV1({
+    candidate.evidence.receipts[0] = buildIncidentRehearsalReceipt({
       ...material,
       outcome: 'failed',
       staleProcessOrSessionCount: 1,
@@ -137,14 +137,14 @@ describe('retained incident rehearsal ledger', () => {
     let previous: string | null = null;
     candidate.evidence.receipts = candidate.evidence.receipts.map((receipt) => {
       const { receiptDigest: _digest, ...receiptMaterial } = receipt;
-      const rebuilt = buildIncidentRehearsalReceiptV1({
+      const rebuilt = buildIncidentRehearsalReceipt({
         ...receiptMaterial,
         previousReceiptDigest: previous,
       });
       previous = rebuilt.receiptDigest;
       return rebuilt;
     });
-    candidate.evidence.ledgerDigest = computeIncidentRehearsalLedgerDigestV1(
+    candidate.evidence.ledgerDigest = computeIncidentRehearsalLedgerDigest(
       candidate.evidence.receipts,
     );
     const {
@@ -152,9 +152,9 @@ describe('retained incident rehearsal ledger', () => {
       authentication: _authentication,
       ...evidenceMaterial
     } = candidate.evidence;
-    candidate.evidence.bundleDigest = computeIncidentRehearsalBundleDigestV1(evidenceMaterial);
+    candidate.evidence.bundleDigest = computeIncidentRehearsalBundleDigest(evidenceMaterial);
     candidate.evidence.authentication.subjectDigest = candidate.evidence.bundleDigest;
-    const result = verifyIncidentRehearsalEvidenceV1(candidate);
+    const result = verifyIncidentRehearsalEvidence(candidate);
     expect(result.status).toBe('failed');
     expect(result.reasonCodes).toEqual(
       expect.arrayContaining([

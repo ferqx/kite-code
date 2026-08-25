@@ -23,6 +23,7 @@ import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { sqliteCurrentRuntimeStorePath } from '@kite/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -33,10 +34,10 @@ import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
-const NOTES_V1 = 'v1 原始内容\n中间行\n';
-const NOTES_V2 = 'v2 第一次修改\n中间行\n';
-const NOTES_V3 = 'v3 第二次修改\n中间行\n';
-const NOTES_V4 = 'v4 第三次修改\n中间行\n';
+const INITIAL_NOTES = 'v1 原始内容\n中间行\n';
+const FIRST_NOTES_UPDATE = 'v2 第一次修改\n中间行\n';
+const SECOND_NOTES_UPDATE = 'v3 第二次修改\n中间行\n';
+const THIRD_NOTES_UPDATE = 'v4 第三次修改\n中间行\n';
 
 describe('TUI PTY System — File Rewind', () => {
   const journey = createTuiSystemJourney();
@@ -48,7 +49,7 @@ describe('TUI PTY System — File Rewind', () => {
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
-      files: { 'notes.md': NOTES_V1 },
+      files: { 'notes.md': INITIAL_NOTES },
     });
 
     // Turn 1/2/3: overwrite notes.md V1 → V2 → V3 → V4, with a follow-up each turn.
@@ -57,7 +58,11 @@ describe('TUI PTY System — File Rewind', () => {
         message: {
           content: 'I will update your notes.',
           tool_calls: [
-            { id: 'call_rw1', name: 'write_file', args: { path: 'notes.md', content: NOTES_V2 } },
+            {
+              id: 'call_rw1',
+              name: 'write_file',
+              args: { path: 'notes.md', content: FIRST_NOTES_UPDATE },
+            },
           ],
         },
       },
@@ -71,7 +76,11 @@ describe('TUI PTY System — File Rewind', () => {
         message: {
           content: 'I will update your notes again.',
           tool_calls: [
-            { id: 'call_rw2', name: 'write_file', args: { path: 'notes.md', content: NOTES_V3 } },
+            {
+              id: 'call_rw2',
+              name: 'write_file',
+              args: { path: 'notes.md', content: SECOND_NOTES_UPDATE },
+            },
           ],
         },
       },
@@ -85,7 +94,11 @@ describe('TUI PTY System — File Rewind', () => {
         message: {
           content: 'I will update your notes a third time.',
           tool_calls: [
-            { id: 'call_rw3', name: 'write_file', args: { path: 'notes.md', content: NOTES_V4 } },
+            {
+              id: 'call_rw3',
+              name: 'write_file',
+              args: { path: 'notes.md', content: THIRD_NOTES_UPDATE },
+            },
           ],
         },
       },
@@ -120,7 +133,7 @@ describe('TUI PTY System — File Rewind', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // Disk holds the latest version after all three turns.
-      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V4);
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(THIRD_NOTES_UPDATE);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
@@ -150,12 +163,15 @@ describe('TUI PTY System — File Rewind', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // 磁盘层断言：文件回到 S2 时刻的 V3 / disk is back to V3 (state at S2)
-      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V3);
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(SECOND_NOTES_UPDATE);
 
       // 会话恢复使用 fork：源会话和新会话都仍在 Runtime Store 中。
-      const runtimeDb = new Database(join(workspace.home, '.kite-code', 'checkpoints.runtime.db'), {
-        readonly: true,
-      });
+      const runtimeDb = new Database(
+        sqliteCurrentRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite')),
+        {
+          readonly: true,
+        },
+      );
       const sessionCount = runtimeDb
         .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
         .get()?.count;
@@ -187,11 +203,14 @@ describe('TUI PTY System — File Rewind', () => {
         20000,
       );
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V2);
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(FIRST_NOTES_UPDATE);
 
-      const runtimeDb = new Database(join(workspace.home, '.kite-code', 'checkpoints.runtime.db'), {
-        readonly: true,
-      });
+      const runtimeDb = new Database(
+        sqliteCurrentRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite')),
+        {
+          readonly: true,
+        },
+      );
       const sessionCount = runtimeDb
         .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
         .get()?.count;

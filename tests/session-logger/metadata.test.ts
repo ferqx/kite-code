@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { sessionLogDir } from '@/core/config/paths';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { classifyFailure } from '@/core/runtime/failures';
-import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { classifyToolOutcome } from '@kite/agent-kernel';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
+import { sessionLogDir } from '#app/config/paths';
 import {
-  mapRuntimeMetadataV1,
-  mapSessionBoundaryMetadataV1,
+  mapRuntimeMetadata,
+  mapSessionBoundaryMetadata,
   SessionLogCollector,
-} from '@/core/session-logger';
+} from '#app/session-logger';
 
 const FRONTEND = 'metadata-test';
 const SECRET = 'UNIQUE_SECRET_1A2_91c53d';
@@ -18,7 +18,7 @@ const COMMAND = `curl -H 'Authorization: Bearer ${SECRET}' https://example.inval
 const SOURCE_MARKER = `function source_${SECRET}() { return '${SECRET}'; }`;
 const PRIVATE_LINEAGE = 'a'.repeat(64);
 const PRIVATE_SCHEMA_REVISION = 'private-schema';
-const FAILED_OUTCOME = classifyToolOutcomeV1({
+const FAILED_OUTCOME = classifyToolOutcome({
   status: 'failed',
   failure: classifyFailure('tool_runtime_error', 'redacted'),
   authority: { dispatchState: 'started', externalEffects: 'unknown' },
@@ -58,17 +58,11 @@ describe('metadata-only session logging', () => {
         surfaceArtifact: {
           artifactId: SECRET,
           kind: 'model_surface',
-          integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'a'.repeat(64)}`,
           byteLength: 123,
         },
         surfaceIntegrityIdentifier: SECRET,
         routeFingerprint: `sha256:${'b'.repeat(64)}`,
-        admission: {
-          providerDataPolicyRevision: SECRET,
-          routeIdentityDigest: `sha256:${'c'.repeat(64)}`,
-          payloadClassificationDigest: `sha256:${'d'.repeat(64)}`,
-          admitted: true,
-        },
         budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
         limits: { maxAttempts: 5, perAttemptTimeoutMs: 30_000, totalTimeBudgetMs: 60_000 },
         preparedStateRevision: 42,
@@ -81,7 +75,7 @@ describe('metadata-only session logging', () => {
         responseArtifact: {
           artifactId: SECRET,
           kind: 'model_response',
-          integrityIdentifier: `hmac-sha256:${'e'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'e'.repeat(64)}`,
           byteLength: 321,
         },
         finishReason: 'stop',
@@ -110,7 +104,7 @@ describe('metadata-only session logging', () => {
           stderr: `${ABSOLUTE_PATH}: ${SECRET}`,
           toolTokenCount: 13,
         },
-        outcomeV1: {
+        outcome: {
           ...FAILED_OUTCOME,
           lineage: { failureInstanceId: PRIVATE_LINEAGE },
           timing: { source: 'runtime_boundary', executionMs: 17, totalActiveMs: 31 },
@@ -126,12 +120,14 @@ describe('metadata-only session logging', () => {
         type: 'tool.failed',
         toolCallId: SECRET,
         failure: classifyFailure('tool_runtime_error', `${SECRET}: ${ABSOLUTE_PATH}`),
-        outcomeV1: FAILED_OUTCOME,
+        outcome: FAILED_OUTCOME,
       },
       {
         type: 'approval.requested',
         interactionId: SECRET,
         toolCallId: SECRET,
+        fullModeBypassEligible: false,
+        fullModePolicyBypassAllowed: false,
         approval: {
           scope: 'once',
           cwd: ABSOLUTE_PATH,
@@ -175,18 +171,16 @@ describe('metadata-only session logging', () => {
           error: `${SECRET}: ${ABSOLUTE_PATH}`,
           summary: SOURCE_MARKER,
           durationMs: 41,
+          diagnostic: {
+            code: 'internal_error',
+            stage: 'next_round_preparation',
+            modelInvocationId: SECRET,
+          },
         },
-      },
-      {
-        type: 'provider.data_policy_status',
-        status: 'blocked',
-        reason: 'mandatory_policy_unavailable',
-        registryDigest: SECRET,
-        policyRevision: SECRET,
       },
     ];
 
-    const output = JSON.stringify(fixtures.map(mapRuntimeMetadataV1));
+    const output = JSON.stringify(fixtures.map(mapRuntimeMetadata));
     for (const forbidden of [
       SECRET,
       ABSOLUTE_PATH,
@@ -203,10 +197,12 @@ describe('metadata-only session logging', () => {
     expect(output).toContain('"inputTokens":11');
     expect(output).toContain('"outputTokens":7');
     expect(output).toContain('"toolTotalActiveMs":31');
+    expect(output).toContain('"subagentFailureCode":"internal_error"');
+    expect(output).toContain('"subagentFailureStage":"next_round_preparation"');
   });
 
   test('session boundary schema exposes only explicit release metadata', () => {
-    const record = mapSessionBoundaryMetadataV1('session.start', 'ok', {
+    const record = mapSessionBoundaryMetadata('session.start', 'ok', {
       releaseVersion: '2026.7.30',
       releaseProfile: 'limited',
       releaseCohort: 'phase-1',
@@ -226,16 +222,16 @@ describe('metadata-only session logging', () => {
   });
 
   test('model evidence status is projected without private invocation fields', () => {
-    const interrupted = mapRuntimeMetadataV1({
+    const interrupted = mapRuntimeMetadata({
       type: 'model.invocation_interrupted',
       invocationId: SECRET,
       dispatchCertainty: 'unknown',
       reasonCode: 'runtime_restored',
     });
-    const unavailable = mapRuntimeMetadataV1({
+    const unavailable = mapRuntimeMetadata({
       type: 'model.invocation_evidence_unavailable',
       invocationId: SECRET,
-      reasonCode: 'key_unavailable',
+      reasonCode: 'artifact_missing',
     });
 
     expect(interrupted).toMatchObject({ status: 'unknown', metadata: {} });
@@ -244,21 +240,7 @@ describe('metadata-only session logging', () => {
   });
 
   test('release and provider audit fields accept only bounded low-cardinality values', () => {
-    const provider = mapRuntimeMetadataV1({
-      type: 'provider.data_policy_status',
-      status: 'ready',
-      reason: 'admitted',
-      registryDigest: `sha256:${'a'.repeat(64)}`,
-      policyRevision: 'm0-empty-2026-07-30',
-    });
-    expect(provider.metadata).toEqual({
-      capabilityKind: 'provider_data_policy',
-      approvalResult: 'admitted',
-      providerPolicyDigest: `sha256:${'a'.repeat(64)}`,
-      providerPolicyRevision: 'm0-empty-2026-07-30',
-    });
-
-    const invalid = mapSessionBoundaryMetadataV1('session.start', 'ok', {
+    const invalid = mapSessionBoundaryMetadata('session.start', 'ok', {
       releaseVersion: `2026.7.30-${SECRET}`,
       releaseProfile: SECRET as 'limited',
       releaseCohort: `phase-${SECRET}`,
@@ -293,7 +275,7 @@ describe('metadata-only session logging', () => {
         stdout: SOURCE_MARKER,
         stderr: ABSOLUTE_PATH,
       },
-      outcomeV1: FAILED_OUTCOME,
+      outcome: FAILED_OUTCOME,
     });
     await collector.finalize('fatal');
 

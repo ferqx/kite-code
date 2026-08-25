@@ -4,7 +4,7 @@
 
 终态范围（ADR-0069）：1C.1–1C.8 的资源预算、有界取消、终态、fault 与 soak 本地边界全部保留并记为
 `completed`。长期资格窗口不再阻塞首发；测试失败或 `inconclusive` 仍不得包装成通过。当前状态见
-`release/oss-first-release/task-status-v2.json`。
+`release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：

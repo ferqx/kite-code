@@ -3,23 +3,22 @@ import {
   type AIMessage,
   aiMessage,
   type BaseMessage,
+  buildCanonicalFrames,
+  buildModelMessages,
+  buildStaticSystemPrompt,
   humanMessage,
   isAIMessage,
   isHumanMessage,
   isToolMessage,
-  type ToolMessage,
-  toolMessage,
-} from '../src/core/messages';
-import {
-  buildModelMessages,
-  buildStaticSystemPrompt,
   reorderInterleavedMessages,
   sanitizeToolCallPairs,
-} from '../src/core/model/context';
-import { buildCanonicalFrames } from '../src/core/model/context-frame-builder';
-import { serializeFramesToMessages } from '../src/core/model/context-serializer';
-import { validateFramePairs, validateMessagePairs } from '../src/core/model/context-validator';
-import type { SkillManifest } from '../src/core/skills/types';
+  serializeFramesToMessages,
+  type ToolMessage,
+  toolMessage,
+  validateFramePairs,
+  validateMessagePairs,
+} from '@kite/builtin-runtime/model';
+import type { SkillManifest } from '@kite/builtin-runtime/skills';
 import { currentPlanDocument } from './helpers/current-plan';
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
@@ -201,7 +200,8 @@ describe('model context protocol', () => {
 
     expect(messages[2]!.type).toBe('human');
     expect(String(messages[2]!.content)).toContain('runtime.kernel');
-    expect(String(messages[2]!.content)).toContain('authorization_mode');
+    expect(String(messages[2]!.content)).toContain('interaction_mode: accept_edits');
+    expect(String(messages[2]!.content)).not.toContain('authorization_mode');
   });
 
   // 验证 plan 尾部 HumanMessage 仍然注入，但不再有 workspaceAccess 提醒 / Verify plan HumanMessage still injected without workspaceAccess reminder
@@ -246,8 +246,8 @@ describe('buildStaticSystemPrompt with skills', () => {
   test('uses static MCP usage rules instead of per-tool name injection', () => {
     const prompt = buildStaticSystemPrompt('agent');
 
-    // MCP usage rules are in the static system prompt
-    expect(prompt).toContain('MCP Capability Usage');
+    // MCP usage rules are in the static system prompt.
+    expect(prompt).toContain('For MCP inventory');
     expect(prompt).toContain('list_mcp_tools');
     expect(prompt).toContain('tool_search');
     // Per-tool names are no longer injected
@@ -277,7 +277,7 @@ describe('buildStaticSystemPrompt with skills', () => {
     expect(prompt).not.toContain('## Available Skills');
   });
 
-  test('does not include section when skills undefined (backwards compat)', () => {
+  test('does not include section when skills are undefined', () => {
     const prompt = buildStaticSystemPrompt('agent');
     expect(prompt).not.toContain('## Available Skills');
   });

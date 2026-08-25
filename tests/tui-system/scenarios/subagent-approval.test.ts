@@ -20,7 +20,12 @@ import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForCondition,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -35,7 +40,11 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        interactionMode: 'accept_edits',
+      },
+    });
     externalFile = join(workspace.home, 'external-subagent-write.txt');
 
     // Response sequence:
@@ -52,6 +61,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
               id: 'call_spawn_subagent',
               name: 'task',
               args: {
+                name: 'Write external test file',
                 subagent_type: 'code',
                 task: `Write a test file at ${externalFile} with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.`,
               },
@@ -75,6 +85,10 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
         },
       },
       {
+        // Keep the resumed child alive long enough to assert that the local
+        // approval acknowledgement updates its card before the next model
+        // response or durable child progress can do so incidentally.
+        delay: 750,
         expectedRequest: {
           toolResults: [
             { toolCallId: 'call_subagent_write', contentIncludes: ['external-subagent-write.txt'] },
@@ -130,6 +144,26 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
       // Approve the tool (default "允许一次" at index 0, press Enter)
       tui.write('\r');
+
+      // The optimistic `approving` projection may be shorter than one Ink
+      // frame.  Require the first canonical post-grant child state instead:
+      // either the durable authorized queue acknowledgement or its immediate
+      // running successor.
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            !screenContains(viewport, '等待你的批准') &&
+            !screenContains(viewport, '工具授权') &&
+            (screenContains(viewport, '已授权 · 等待执行') || screenContains(viewport, '执行中'))
+          );
+        },
+        'exact child approval to leave the human queue after its durable acknowledgement',
+        TIMEOUT,
+      );
+      const acknowledged = tui.viewport();
+      expect(screenContains(acknowledged, '等待你的批准')).toBe(false);
+      expect(screenContains(acknowledged, '工具授权')).toBe(false);
 
       // After approval, the sub-agent should continue and complete
       await waitForText(
@@ -192,6 +226,7 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
               id: 'call_spawn_auto_reviewed_subagent',
               name: 'task',
               args: {
+                name: 'Write auto-reviewed file',
                 subagent_type: 'code',
                 task: `Write "auto review succeeded" to ${externalFile}.`,
               },
@@ -229,8 +264,7 @@ describe('TUI PTY System — Sub-agent Automatic Review', () => {
             delay: 750,
             message: {
               content: JSON.stringify({
-                approved: true,
-                grant: 'approve_once',
+                decision: 'approve_once',
                 reason: 'The requested fixture write is scoped and reversible.',
                 riskAssessment: 'low',
               }),
@@ -325,6 +359,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
               id: 'call_spawn_reader',
               name: 'task',
               args: {
+                name: 'Read workspace data file',
                 subagent_type: 'explore',
                 task: `Read the file at ${join(workspace.workspace, 'data.txt')} using its absolute path. Report the content.`,
               },

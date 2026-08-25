@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compileSkillWorkflow } from '@/core/skills/workflow';
-import type { CapabilityDescriptor } from '@/protocol/capabilities';
-import { classifySkillEffectsV1, evaluateSkillClassAdmissionV1 } from './conformance-fixtures';
+import { compileSkillWorkflow } from '@kite/builtin-runtime/skills';
+import type { CapabilityDescriptor } from '@kite/runtime-contract';
+import { classifySkillEffects, evaluateSkillClassAdmission } from './conformance-fixtures';
 
 let root: string;
 
@@ -86,7 +86,7 @@ describe('Skill readonly/effectful classification contract', () => {
     const dependency = descriptor({ filesystem: 'read', network: 'none', externalState: 'none' });
     const result = compile(dependency);
     expect(result.diagnostics).toEqual([]);
-    expect(classifySkillEffectsV1({ contract: result.contract!, dependencies: [dependency] })).toBe(
+    expect(classifySkillEffects({ contract: result.contract!, dependencies: [dependency] })).toBe(
       'readonly',
     );
   });
@@ -99,13 +99,13 @@ describe('Skill readonly/effectful classification contract', () => {
     const dependency = descriptor({ filesystem: 'read', network: 'none', externalState });
     const result = compile(dependency);
     expect(result.contract?.effectiveEffects.externalState).toBe(externalState);
-    expect(classifySkillEffectsV1({ contract: result.contract!, dependencies: [dependency] })).toBe(
+    expect(classifySkillEffects({ contract: result.contract!, dependencies: [dependency] })).toBe(
       'effectful',
     );
   });
 
   test('keeps project readonly Skills blocked without trust and an allowlist', () => {
-    const decision = evaluateSkillClassAdmissionV1({
+    const decision = evaluateSkillClassAdmission({
       effectClass: 'readonly',
       source: 'project',
       adminAllowlisted: false,
@@ -125,7 +125,7 @@ describe('Skill readonly/effectful classification contract', () => {
 
   test('requires Verification for every effectful Skill', () => {
     expect(
-      evaluateSkillClassAdmissionV1({
+      evaluateSkillClassAdmission({
         effectClass: 'effectful',
         source: 'admin',
         adminAllowlisted: true,

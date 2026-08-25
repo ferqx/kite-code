@@ -19,14 +19,14 @@ import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:p
 import { z } from 'zod';
 import {
   defaultOssCandidateArchivePath,
-  ossCandidateManifestV1Schema,
+  ossCandidateManifestSchema,
   type VerifiedOssCandidate,
   verifyOssCandidate,
 } from './oss-candidate';
 
 const markerSchema = z
   .object({
-    schema: z.literal('KiteCodeManagedInstallV1'),
+    schema: z.literal('KiteCodeManagedInstall'),
     version: z.literal(1),
     canonicalRoot: z.string().min(1),
     currentCandidateId: z.string().regex(/^[a-f0-9]{24}$/),
@@ -70,7 +70,7 @@ export async function installOssCandidate(input: {
   assertMarkerWriteReady(root);
   activateRelease(root, releaseRoot, candidate.manifest.target.os === 'win32');
   const marker: InstallMarker = {
-    schema: 'KiteCodeManagedInstallV1',
+    schema: 'KiteCodeManagedInstall',
     version: 1,
     canonicalRoot: realpathSync.native(root),
     currentCandidateId: candidate.candidateId,
@@ -155,7 +155,7 @@ function verifyMaterializedRelease(releaseRoot: string, candidateId: string) {
   const manifestBytes = new Uint8Array(readRegularFile(join(releaseRoot, 'manifest.json')));
   const actualCandidateId = createHash('sha256').update(manifestBytes).digest('hex').slice(0, 24);
   if (actualCandidateId !== candidateId) throw new Error('Managed release manifest was replaced.');
-  const manifest = ossCandidateManifestV1Schema.parse(
+  const manifest = ossCandidateManifestSchema.parse(
     JSON.parse(new TextDecoder().decode(manifestBytes)),
   );
   for (const entry of manifest.files) {

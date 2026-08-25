@@ -1,0 +1,50 @@
+{
+  "name": "approval-approve-once",
+  "description": "An approve_once request persists one durable authorized queue record.",
+  "initialEvents": [
+    {
+      "type": "tool.queued",
+      "toolCallId": "call-1",
+      "name": "shell_execute",
+      "args": { "command": "bun test" }
+    }
+  ],
+  "effects": [
+    {
+      "events": [
+        {
+          "type": "approval.requested",
+          "interactionId": "approval-1",
+          "toolCallId": "call-1",
+          "approvalRoute": "user",
+          "fullModeBypassEligible": false,
+          "fullModePolicyBypassAllowed": false,
+          "queueGeneration": 0,
+          "queueSequence": 0,
+          "createdAt": "2026-08-02T00:00:00.000Z",
+          "approval": {
+            "scope": "once",
+            "cwd": "/tmp/golden",
+            "threadId": "golden",
+            "tool": "shell_execute",
+            "command": "bun test",
+            "risk": "execute_code",
+            "approvalHash": "hash",
+            "summary": "Run tests",
+            "reason": "execution",
+            "expectedEffects": [],
+            "grantOptions": ["approve_once", "same_command"],
+            "recommendedGrant": "approve_once"
+          }
+        }
+      ]
+    }
+  ],
+  "userActions": [{ "type": "approve", "grant": "approve_once" }],
+  "expectedEffects": ["run_tools", "request_tool_approval"],
+  "expectedEvents": ["approval.requested", "approval.granted"],
+  "expectedFinalState": {
+    "interactions.kind": "idle",
+    "tools.calls.call-1.status": "authorized_queued"
+  }
+}

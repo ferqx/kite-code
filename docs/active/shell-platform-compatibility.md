@@ -1,16 +1,16 @@
 # 当前规则：Shell 工具平台兼容性
 
 状态：active
-最后更新：2026-08-17
-最后验证：2026-08-17
+最后更新：2026-08-24
+最后验证：2026-08-24
 范围：
 
-- `src/core/tools/shell.ts`（Shell 执行、bash 选择逻辑）
-- `src/core/tools/trusted-readonly-environment.ts`（只读快路的最小环境与 canonical PATH）
-- `src/core/tools/stream-output.ts`（有界 stdout/stderr capture 与逻辑行组装）
-- `src/core/tools/process-tree.ts`（超时后的进程树终止）
-- `src/core/sandbox/executor.ts`（沙箱包装执行）
-- `src/core/tools/bash-path.ts`（bash 路径探测）
+- `packages/builtin-runtime/src/planning/runtime-module.ts`（Builtin Shell operation 与参数语义）
+- `packages/builtin-runtime/src/planning/runtime-module.ts`（`builtin:shell_execute` 唯一领域 executor）
+- `packages/builtin-runtime/src/sandbox/`（Sandbox/环境领域投影）
+- `packages/runtime-host/src/process/**`（唯一 process spawn/supervision）
+- `apps/kite/src/sandbox/`（native/host-shell availability composition）
+- `packages/runtime-host/src/process/spawn.ts`、`process-tree.ts`（Host process/lifecycle primitive）
 - `tests/shell-exec.test.ts`（Shell 集成测试）
 - `tests/tools.test.ts`（Shell 工具单元测试）
 - `tests/sandbox/windows-restricted-token.test.ts`（Windows 受管 PATH 投影）
@@ -27,21 +27,43 @@
 - `tool-gated-autonomy.md`
 - `project-conventions.md`
 - `file-reading-shared-boundary.md` — MSYS2 路径转换 + readTextContent 边界
+- ADR-0131 — canonical Workspace 不再按隐藏名称二次拒绝
+- ADR-0137 — sandbox-first phase/mode 与 durable approval queue
 
 验证：
 
-- `bun test tests/shell-exec.test.ts`
-- `bun test tests/stream-output.test.ts tests/tui-tool-progress.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`
+- `bun test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/sandbox`
 - `bun run test:sandbox:smoke:native`（显式宿主机 native sandbox smoke）
-- `tests/sandbox-executor.test.ts` 的 `RIPGREP_CONFIG_PATH` 用例使用临时受控 `rg` 夹具验证子进程环境，不依赖 CI runner 预装 ripgrep。
-- `bun test tests/tools.test.ts`
 - `bun run typecheck`
 
 ---
 
+## SAQ-10 当前 contract
+
+Planning 非 Full 的 Workspace read-only baseline 与 Building 非 Full 的 Workspace read/write baseline 内 Shell 可直接 dispatch；
+已知扩 filesystem/network/process scope 才按 Accept/Auto 进入 user/reviewer approval queue。Planning/Building Full 由
+`interactionMode=full` 直接表达并保持 Plan lifecycle，不产生 approval grant。命令名、Git subcommand、read-only classifier 和
+hidden basename 都不是 raw Shell 的授权来源；hard deny 仍不可覆盖。
+
+State 27 的 `pendingApprovals`/`activeApprovalId`/generation/sequence/Session grants 是唯一 queue authority。same-command 使用完整
+Session/workspace/cwd/executor/environment/scope/effects/parser-executor revision identity，并以一个 Store transaction 产生独立
+receipts、`authorized_queued` 和 batch event。Approval Enter 是 exact-once，Approval Esc 只 focused reject，Ctrl+C 才 whole-turn
+cancel；late generation/session event no-op。UI scope 必须等于 sealed boundary 与 backend evidence；unsupported 时 clean fail closed，
+不能改用 host replay。
+
 ## 1. Shell 解析与受治理执行
 
-Native Shell 解析发生在已获 durable sandbox dispatch authority 的 Runtime consumer 内。TUI 与 foreground
+`shell_execute` 的 schema、revision、receipt projection 与 executor 由 Builtin Runtime module 唯一拥有；
+App Tool Pipeline 只保留 descriptor/policy composition，不再拥有第二 command executor。Native Shell 解析发生在已获 durable sandbox dispatch
+authority 的 Runtime lifecycle consumer 内，实际异步进程创建、POSIX supervisor、output drain 与 process-tree
+termination 只由 Runtime Host primitive 执行。Builtin 通过 invocation-scoped mechanism 接收结果，不得直接
+访问 Host、异常回退到旧 executor 或形成第二个 handler。
+
+这里的 Builtin authority 来自冻结 SPI registry snapshot 的 catalog entry。Kernel 只裁决 governance/admission facts，Host 只提供通用
+process/lifecycle mechanism；源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，但 RM-16 final manifest/docs/journey/fault/soak
+Gate 尚未完成，不能把 scoped closure 误称为 RM-16 completed。
+
+TUI 与 foreground
 CLI 的 startup discovery 只返回静态 candidate；Windows restricted-token 由 Local allocating Provider 在 durable
 intent 后生成 transport，并在用户命令前保留 fail-closed 的 runner/OS/cleanup 失败处理。按 ADR-0119，App 可以在 startup
 unavailable，或 exact `backend_unavailable + pre_dispatch + cleanupConfirmed` 后选择 host interpreter；该调用
@@ -49,10 +71,14 @@ unavailable，或 exact `backend_unavailable + pre_dispatch + cleanupConfirmed` 
 
 ADR-0100 的 approved-filesystem lane 是另一条显式 capability 路径，不是 backend fallback：
 `externalRead`、`externalWrite` 或 `uncertainEffects` 审批通过后，在用户命令启动前把
-`filesystemMode=allow_all` 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
+相应的 sealed filesystem scope 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
 也不得自行切换 host Shell；只有 ADR-0119 的独立 App availability 条件可选择 host。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
-effects；固定高危身份继续由 Seatbelt deny、bubblewrap protected mount 或 Windows guard SID 保护。Auto
-模式由自动审批模型判断；风险判定或模型异常才升级真人审批。
+effects；Workspace 外固定高危身份由 Tool Policy 分类为 `sensitiveExternalAccess`，授权后 Seatbelt、bubblewrap 或
+Windows runner 不得安装第二层 protected-path deny。canonical Workspace member 不得因名称被拒绝。按
+ADR-0133，Full 直接授权；Auto 模式由自动审批模型选择批准、拒绝或请求真人审批；其他模式请求 exact user
+approval，模型异常或 circuit breaker 也升级真人审批。
+Full 的用户文件系统授权不包含 Kite 自身的 Host-control base：macOS 显式 deny，Linux 对整个 base 投影只读
+空 tmpfs，以隔离当前及并发 invocation 的 supervisor socket、lock 与 identity。
 
 Windows 命令语言候选顺序（只在已获准的 native/test execution 内使用）：
 
@@ -75,6 +101,7 @@ pwsh -NoProfile -Command ... 或 powershell.exe -NoProfile -Command ...。
 该桩需要 Hyper-V，未启用时报 `HCS_E_HYPERV_NOT_INSTALLED`。
 
 **强制规则**：
+
 - 选择系统 bash 时，**优先通过 `git` 路径推导**（`<git>/../bin/bash.exe` 或 `<git>/../usr/bin/bash.exe`），不依赖 `Bun.which("bash")`
 - 仅在 git 不可用时，才使用 `Bun.which("bash")`，且**必须排除 `SystemRoot` 下的路径**
 - 判断逻辑：路径转小写 + 正斜杠后调用 `isWslStubPath()` 检查
@@ -99,7 +126,7 @@ Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-i
 
 `tests/shell-exec.test.ts` 使用 `tests/helpers/sandbox-executor.ts` 的显式 native/test oracle，而不是
 production/TUI composition。该 helper 可在测试中注入裸 `shellTool` 以固定 Shell 选择、流式输出、
-超时与取消 oracle，但 Core/App static gate 禁止 production 导入该 helper 或重建同名入口。
+超时与取消 oracle，但 Runtime/App static gate 禁止 production 导入该 helper 或重建同名入口。
 真实 filesystem/network sandbox enforcement 由 `test:sandbox:smoke:native` 和
 `.github/workflows/platform-capability-probe.yml` 独立验证，不能从默认 Shell suite 推导。
 
@@ -109,12 +136,14 @@ windows_restricted_token 的 protocol/native compatibility implementation 创建
 WRITE_RESTRICTED current-user token，携带 Workspace 与 invocation-runtime capability SID；它验证 suspended
 child，关联 Job，然后在 canonical 真实 Workspace 中 resume。它不创建 whole-repository staging copy，
 正常 native path 不要求 administrator approval。Local Provider 在 durable preparation intent 后创建 invocation
-runtime、封装为 immutable `windows_restricted_token_v1` transport，并由 Runtime consumer 唯一地启动 runner；
+runtime、封装为 immutable `windows_restricted_token_v1` transport，并由 Runtime consumer 在 ready/dispatch
+ack 后交给唯一 Host spawn primitive 启动 runner；
 runner 的 Job empty receipt、ACL revoke 与 runtime cleanup 均须在 disposal 前确认。该 backend 是 development
 restricted-token sandbox，能力 registry 仍不把它升级为 strict network/protected-glob 或 production Full 资格。
 
-persistent capability ledger 使用 V2 readiness marker。首次创建、V1 迁移、上次初始化中断或 static
-protected-path set 变化时，runner 在 per-Workspace mutex 内幂等完成 ACL setup；最多等待 30 秒。完成后，
+persistent capability ledger 使用 V3 readiness marker。首次创建、旧版本迁移或上次初始化中断时，runner
+在 per-Workspace mutex 内幂等完成 ACL setup；V3 会恢复并删除 V2 留下的 Workspace 内 protected-path
+DACL snapshot，只保留完整 Workspace root capability。最多等待 30 秒。完成后，
 相同 path set 的并发 invocation 只读 ledger 并走无锁快路径，因此并发 `git status`/短命令不会被 ACL
 初始化串行化，也不会因旧的 2 秒等待窗口误报 ledger busy。ledger 写入使用原子替换，ready marker 只能在
 ACL 操作全部成功后提交。
@@ -126,13 +155,13 @@ POSIX lookup 命中 Windows 无法执行的 extensionless Unix shim；adapter �
 batch shim，不能让 isksh 直接启动 `.cmd` 并把 `C:\Program Files` 等 PATH identity 拆词。command 可以显式调用 bash、cmd.exe、
 pwsh 或 powershell.exe。
 
-Shell read-only fast path 不使用上述通用继承 PATH。Runtime 仅在 Registry 重新证明
-命令只读后签发内部 execution trust：POSIX executor 固定以非登录 `/bin/sh -c`
+Shell read-only classifier 不产生 Policy allow。只有 invocation 已按当前 mode 获得授权，且 Builtin frozen
+catalog entry 与 Pipeline 重新证明命令只读后，Runtime 才签发内部 hardened execution trust：POSIX executor 固定以非登录 `/bin/sh -c`
 执行，Windows restricted-token 继续使用密封 shell runtime/Coreutils；二者的继承
 PATH 条目均必须为 Workspace 外可 canonicalize 的绝对目录。相对条目、空条目、
 Workspace 子目录与 symlink alias 被删除；无沙箱 development fallback 也消费同一最小
-环境，不能因 backend 不可用而恢复 Workspace executable replacement。普通需审批 Shell
-仍保留用户工具链和 Homebrew/项目 PATH 语义。
+环境，不能因 backend 不可用而恢复 Workspace executable replacement。其他已获批 Shell 仍保留用户工具链和
+Homebrew/项目 PATH 语义。该 execution trust 只约束如何执行，不跳过 Accept Edits/Auto/Full 的授权判断。
 
 isksh 本身不提供 MSYS2 drive mount。为保持共享 Shell contract，restricted-token adapter 在送入 runner
 前仅转换 shell token boundary 上的字面量 `/x/...` 盘符前缀为 native executable 可接受的 `X:/...`；
@@ -140,17 +169,20 @@ isksh 本身不提供 MSYS2 drive mount。为保持共享 Shell contract，restr
 Tool Result 的 `command` 继续保存用户/模型提交的原始命令，不保存 adapter prelude。变量展开后才产生的
 `/x/...` 不属于该静态兼容层；调用方应使用字面量 POSIX drive path 或 `X:/...` mixed path。
 
-Shell Tool Policy 与 macOS/Linux 共用逐调用网络授权：精确 `node|npm|pnpm|yarn|bun --version|-v`
-按本地只读、network-disabled 执行；明确网络命令和 `node script.js`、`npm run build` 等 uncertain
-script 先审批，批准后仅该 invocation 投影为 `allow_all`。direct profile 接受该开发期授权，但不会
+Shell Tool Policy 与 macOS/Linux 共用逐调用模式治理：精确 `node|npm|pnpm|yarn|bun --version|-v`、明确网络
+命令、`node script.js`、`npm run build` 和未知脚本都按当前 phase/mode facts 处理；baseline 内 direct，扩 scope 才进入
+Accept/Auto/Full route。分类出的 network、external filesystem 与 uncertain effects 只帮助 reviewer 和 scope projection，不产生免审。批准后仅该 invocation
+投影相应 filesystem/network scope。direct profile 接受该开发期授权，但不会
 structural enforce network-off、arbitrary
-descendant allowlist 或 future root .env.* protection。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
-定义的开发期交互模式，不是 production qualification；只有 backend=none 时才显示“非沙箱环境无法开启full”。
+descendant allowlist。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
+定义的开发期交互模式，不是 production admission；backend unavailable 不会改变 Full interaction mode，但实际执行 boundary
+不可用时必须 fail closed。
 
-当且仅当 invocation 已投影为 `allow_all`，macOS/Linux 本地 backend 都把宿主已有的标准代理变量
+当且仅当 invocation 已投影为 `network=allow_all` sealed scope，macOS/Linux 本地 backend 都把宿主已有的标准代理变量
 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（以及小写形式）传给该 command；这是用户已批准
-网络能力的一部分，支持企业和本地代理。Windows 还要求同一次 invocation 明确投影 `full_access`，才将
-这些变量交给使用当前用户 token 的 command；`allow_all + read_only/workspace_write` 在 runner 前 fail closed，
+网络能力的一部分，支持企业和本地代理。Windows 还要求同一次 invocation 由 `interactionMode=full` 派生
+`filesystem=full_access, network=allow_all` sealed scope，才将
+这些变量交给使用当前用户 token 的 command；无法由当前 interactionMode 与 sealed scope 同时兑现网络/filesystem 的调用在 runner 前 fail closed，
 而非扩大 filesystem scope。network-disabled、policy-proven read-only 和未批准调用继续使用无 proxy 的最小
 环境。代理 URL 可能含认证信息，Shell 输出、模型投影和 session log 不得主动回显其值；代理变量只在
 supervisor/runner 实际 spawn 时从宿主读取，不能写入持久化的 preparation 或 recovery artifact。
@@ -159,12 +191,13 @@ supervisor/runner 实际 spawn 时从宿主读取，不能写入持久化的 pre
 使用保留 `WRITE_RESTRICTED`、LUA 与 privilege stripping 的 approved filesystem token；其 mirrored
 user/group/guard restricted SID 只约束写访问，read/execute 仍服从 current user 普通 ACL。普通 Workspace
 invocation 仍使用 capability SID
-ledger，扩权 invocation 不把全局写权限写入 persistent Workspace ledger，也不要求 UAC。显式危险路径
-在 Tool Policy 阶段拒绝；approved token 还携带 restricted-only guard SID，既有固定路径对该 SID 添加
-invocation-scoped deny，并初始化与普通 token 相同的 child-object default DACL，避免变量拼接或间接执行
-绕过字符串检查，同时允许已批准 shell 启动 Node/npm descendant。该 scope 不等于 Full 或 production evidence；
-持久 Workspace capability ledger 只允许保存 Workspace 内 protected path，外部用户配置路径不进入
-该 ledger 或 repair 范围；普通 Workspace token 对外部路径没有 capability allow，写访问仍被拒绝。
+ledger，扩权 invocation 不把全局写权限写入 persistent Workspace ledger，也不要求 UAC。显式敏感路径在 Tool
+Policy 阶段进入模式感知授权；approved token 暂时保留 protocol compatibility SID，但既有固定路径不再对该
+SID 添加 invocation-scoped deny。token 仍初始化与普通 token 相同的 child-object default DACL，并允许已批准
+shell 启动 Node/npm descendant。该 scope 不等于 Full 或 production evidence；
+持久 Workspace capability ledger 只保存完整 Workspace root capability；外部用户配置路径不进入
+该 ledger 或 repair 范围，旧 ledger 中的内部 protected snapshot 会在 V3 migration 中恢复并删除。普通
+Workspace token 对外部路径没有 capability allow，写访问仍被拒绝。
 若同一命令同时需要网络和外部文件系统，Tool Policy 必须同时展示对应 effects，批准后只执行一次。
 
 在 user script 前无法选择或 structural start 该 backend 时，App 进入 `denied`。script 开始后，
@@ -173,7 +206,9 @@ Bash/cmd/PowerShell 上 replay。
 
 ADR-0088 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V6
 direct Workspace request；runner 和 vendored isksh/coreutils digest 继续固定在
-`release/platform-capabilities/windows-runner-v1.json`。
+`release/platform-capabilities/windows-runner.json`。
+本次 native source 语义变化必须由 canonical Windows 构建重新生成 runner 与 manifest digest；旧 pin
+不能证明 V3 ledger migration 或完整 Workspace admission。
 
 ## 7. 超时必须终止整棵进程树
 
@@ -190,4 +225,4 @@ descendant 数。Tool Controller 只能把这些安全事实写入 result metada
 Bun spawn 不直接消费 AbortSignal，整棵树的取消由 ProcessTreeGuard 唯一负责，避免只终止
 root process。
 
-stdout/stderr reader 必须持续 drain 子进程管道，但执行期每路最多保留 256 KiB head+tail；超过上限时写入明确 capture omission marker，不能继续持有完整输出副本。实时 progress 按完整逻辑行发布，单个未终止长行最多保留 16 KiB tail；CRLF 在进入事件层前规范为 LF 行语义。Windows restricted-token runner 的任意二进制 frame 必须先用跨 frame `TextDecoder` 解码并经过同一有界行缓冲，禁止把 8 KiB transport chunk 当成一行或在 frame 边界插入假换行。最终模型投影仍继续使用 Registry 的每路 4000 字符 head+tail 边界。
+stdout/stderr reader 必须持续 drain 子进程管道，但执行期每路最多保留 256 KiB head+tail；超过上限时写入明确 capture omission marker，不能继续持有完整输出副本。实时 progress 按完整逻辑行发布，单个未终止长行最多保留 16 KiB tail；CRLF 在进入事件层前规范为 LF 行语义。Windows restricted-token runner 的任意二进制 frame 必须先用跨 frame `TextDecoder` 解码并经过同一有界行缓冲，禁止把 8 KiB transport chunk 当成一行或在 frame 边界插入假换行。最终模型投影仍继续使用 `packages/builtin-runtime/src/filesystem/projection.ts` 的每路 4000 字符 head+tail 边界。

@@ -2,7 +2,7 @@
  * PTY Process Harness — spawn and control a TUI subprocess with real PTY.
  *
  * Uses Bun.spawn({ terminal }) (verified working in Phase 0) to create
- * a TTY-connected child process running `bun run src/app/tui/index.tsx`.
+ * a TTY-connected child process running `bun run apps/kite/src/tui/executable.tsx`.
  *
  * Output is collected via the terminal's `data` callback. Keystrokes are
  * sent via `terminal.write()`. Terminal resize via `terminal.resize()`.
@@ -10,7 +10,7 @@
 
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { trustWorkspace } from '@/core/config/workspace-trust';
+import { trustWorkspace } from '#app/config/workspace-trust';
 import {
   currentTuiSystemStepSignal,
   throwIfTuiSystemStepAborted,
@@ -41,8 +41,6 @@ export interface PtyProcessOptions {
   workspace?: TestWorkspace;
   /** Skip writing mock config — use for first-run/setup tests */
   noPreConfig?: boolean;
-  /** Use the test-only composition root that issues one permit per remote MCP invocation. */
-  remoteMcpEgressPermitResolver?: 'allow-each-invocation';
   /** Launch an already-built standalone executable instead of the source entrypoint. */
   executablePath?: string;
   /** Launch a test-owned TypeScript composition root through Bun. */
@@ -54,6 +52,11 @@ export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust';
 export interface PtyProcess {
   /** Write keystrokes and return the output checkpoint immediately before the action. */
   write(data: string): PtyOutputMark;
+  /**
+   * Write one indivisible input transaction exactly once. Bun's versioned
+   * byte-count return cannot authorize replay.
+   */
+  writeExact(data: string): Promise<PtyOutputMark>;
   /** Set raw mode on the terminal (disables line buffering) */
   setRawMode(enabled: boolean): PtyOutputMark;
   /** Resize the terminal (may not trigger resize event on Windows) */
@@ -62,6 +65,8 @@ export interface PtyProcess {
   viewport(): string;
   /** Get the end-cursor input projection used by harness-owned input actions. */
   inputViewport(): string;
+  /** Whether the focused main InputLine has registered its Ink keyboard listener. */
+  focusedMainInputReady(): boolean;
   /** Get the terminal buffer retained above and within the current viewport. */
   scrollback(): string;
   /** Get all raw PTY output for diagnostics only (includes erased frames and ANSI). */
@@ -97,6 +102,24 @@ export interface PtyOutputBuffer {
   mark(): PtyOutputMark;
   output(): string;
   outputSince(mark: PtyOutputMark): string;
+}
+
+export interface ExactPtyInputWriter {
+  write(data: string): number;
+}
+
+/**
+ * Deliver one PTY input transaction without replaying it.
+ *
+ * Bun 1.3's Terminal.write() return value is only the number of bytes flushed
+ * synchronously; the writer has already buffered the remaining tail. It can
+ * therefore return zero or a partial count even though the entire input was
+ * accepted. Bun 1.4 reports the full accepted length instead. The count is not
+ * a cross-version delivery receipt, so exactly-once harness input must write
+ * once and wait for the application's semantic projection.
+ */
+export async function writeExactPtyInput(data: string, writer: ExactPtyInputWriter): Promise<void> {
+  writer.write(data);
 }
 
 /**
@@ -254,7 +277,21 @@ function signalOwnedProcessTree(
   try {
     process.kill(-processGroupId, signal);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return;
+    if (code === 'EPERM') {
+      // Bun 1.4 on Darwin can surface EPERM for a negative-PGID process.kill
+      // from an aborted AsyncLocalStorage context even though the exact,
+      // same-user detached group was verified immediately before cleanup.
+      // The native POSIX utility reaches the same already-proven group and
+      // keeps the fallback disjoint from any PID or shell expansion.
+      const fallback = Bun.spawnSync(
+        ['/bin/kill', `-${signal.slice(3)}`, '--', String(-processGroupId)],
+        { stdout: 'ignore', stderr: 'ignore' },
+      );
+      if (fallback.exitCode === 0 || !processGroupExists(processGroupId)) return;
+    }
+    throw error;
   }
 }
 
@@ -286,17 +323,10 @@ export async function terminateOwnedProcessTree(
 }
 
 export function resolveTuiLaunchPaths(
-  opts: Pick<
-    PtyProcessOptions,
-    'cwd' | 'workspace' | 'remoteMcpEgressPermitResolver' | 'executablePath' | 'entryPath'
-  >,
+  opts: Pick<PtyProcessOptions, 'cwd' | 'workspace' | 'executablePath' | 'entryPath'>,
   projectRoot = process.cwd(),
 ): { cwd: string; entryPath: string } {
-  const explicitRoots = [
-    opts.executablePath,
-    opts.entryPath,
-    opts.remoteMcpEgressPermitResolver,
-  ].filter(Boolean);
+  const explicitRoots = [opts.executablePath, opts.entryPath].filter(Boolean);
   if (explicitRoots.length > 1) {
     throw new Error('A TUI launch can select only one explicit test composition root.');
   }
@@ -305,9 +335,7 @@ export function resolveTuiLaunchPaths(
     entryPath:
       opts.executablePath ??
       opts.entryPath ??
-      (opts.remoteMcpEgressPermitResolver === 'allow-each-invocation'
-        ? join(projectRoot, 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx')
-        : join(projectRoot, 'src/app/tui/index.tsx')),
+      join(projectRoot, 'apps/kite/src/tui/executable.tsx'),
   };
 }
 
@@ -384,7 +412,6 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     mkdirSync(homeDir, { recursive: true });
     const configFilePath = join(homeDir, 'kite-code.jsonc');
     writeFileSync(configFilePath, userConfigStr);
-
     // Also write to workspace dir's .kite-code/ (project-level config,
     // resolved via projectConfigPath() if cwd is set to workspace)
     const wsDir = join(opts.workspace.workspace, '.kite-code');
@@ -431,6 +458,11 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     Object.assign(childEnv, opts.workspace.env);
   }
   childEnv.TERM = 'xterm-256color';
+  // The input harness observes InputLine's inverse cursor as the application-
+  // level readiness receipt. Chalk disables modifiers automatically on CI,
+  // so make ANSI deterministic for this test-owned PTY instead of probing the
+  // user's input with a character that could arrive after its cleanup.
+  childEnv.FORCE_COLOR = '3';
   const detachTuiProcess = shouldDetachTuiProcess(
     process.platform,
     childEnv.KITE_FAULT_SOAK_PROCESS_NONCE,
@@ -535,6 +567,18 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       return lastActionMark;
     },
 
+    async writeExact(data: string) {
+      lastActionMark = outputBuffer.mark();
+      if (exited || !proc.terminal) throw new Error('Cannot write exact input to an exited PTY');
+      await writeExactPtyInput(data, {
+        write(value) {
+          if (exited || !proc.terminal) return 0;
+          return proc.terminal.write(value);
+        },
+      });
+      return lastActionMark;
+    },
+
     setRawMode(enabled: boolean) {
       lastActionMark = outputBuffer.mark();
       if (!exited && proc.terminal && typeof proc.terminal.setRawMode === 'function') {
@@ -558,6 +602,10 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
 
     inputViewport(): string {
       return terminalScreen.inputViewport();
+    },
+
+    focusedMainInputReady(): boolean {
+      return terminalScreen.focusedMainInputReady();
     },
 
     scrollback(): string {
@@ -630,7 +678,7 @@ export async function spawnReadyTui(
   } catch (error) {
     await tui.killAndWait().catch(() => {});
     throw new Error(
-      `TUI failed ${readiness} readiness. Last output:\n${stripAnsi(tui.transcript()).slice(-1_500)}`,
+      `TUI failed ${readiness} readiness. Last output:\n${stripAnsi(tui.transcript()).slice(-8_000)}`,
       { cause: error },
     );
   }
@@ -651,6 +699,7 @@ export async function waitForTuiReady(
         return (
           input?.kind === 'main' &&
           input.value === '' &&
+          screenContains(viewport, '❯') &&
           screenContains(viewport, 'Kite Code') &&
           screenContains(viewport, 'mock-model') &&
           !screenContains(viewport, 'Loading...') &&

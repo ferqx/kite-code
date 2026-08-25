@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { TuiUserInputProvider } from '../src/app/tui/provider';
+import { TuiUserInputProvider } from '../apps/kite/src/tui/provider';
 import {
   shouldAbortStoppedRun,
   shouldProjectRunExited,
   shouldSetIdleAfterRun,
-} from '../src/app/tui/run-lifecycle';
+} from '../apps/kite/src/tui/run-lifecycle';
 
 describe('TuiUserInputProvider', () => {
   test('TUI reducer exposes RuntimeEvent as its only streamed event action', () => {
     const root = dirname(import.meta.dir);
-    const actions = readFileSync(join(root, 'src/app/tui/reducers/actions.ts'), 'utf8');
-    const reducer = readFileSync(join(root, 'src/app/tui/reducers/index.ts'), 'utf8');
+    const actions = readFileSync(join(root, 'apps/kite/src/tui/reducers/actions.ts'), 'utf8');
+    const reducer = readFileSync(join(root, 'apps/kite/src/tui/reducers/index.ts'), 'utf8');
 
     expect(actions).not.toContain("type: 'EVENT'");
     expect(reducer).not.toContain("action.type === 'EVENT'");
@@ -74,6 +74,8 @@ describe('TuiUserInputProvider', () => {
 
     const actionPromise = provider.requestAction({
       kind: 'approval',
+      interactionId: 'approval-1',
+      generation: 1,
       approval: {
         scope: 'once',
         cwd: '/tmp',
@@ -97,7 +99,12 @@ describe('TuiUserInputProvider', () => {
     await Bun.sleep(10);
     expect(resolved).toBe(false);
 
-    provider.submitAction({ type: 'approve', grant: 'approve_once' });
+    provider.submitAction({
+      type: 'approve',
+      interactionId: 'approval-1',
+      generation: 1,
+      grant: 'approve_once',
+    });
     const result = await actionPromise;
     expect(result.type).toBe('approve');
   });
@@ -111,6 +118,7 @@ describe('TuiUserInputProvider', () => {
     const provider = new TuiUserInputProvider();
     const payload = {
       kind: 'input' as const,
+      interactionId: 'input-1',
       question: { question: 'What?', options: [], allow_free_text: true },
     };
 
@@ -127,6 +135,8 @@ describe('TuiUserInputProvider', () => {
 
     const promise = provider.requestAction({
       kind: 'approval',
+      interactionId: 'approval-2',
+      generation: 1,
       approval: {
         scope: 'once',
         cwd: '/tmp',
@@ -147,5 +157,55 @@ describe('TuiUserInputProvider', () => {
     const result = await promise;
     expect(result.type).toBe('cancel');
     expect(provider.getPendingInterrupt()).toBeNull();
+  });
+
+  test('ignores stale approval generation and de-duplicates the exact pair', async () => {
+    const provider = new TuiUserInputProvider();
+    const promise = provider.requestAction({
+      kind: 'approval',
+      interactionId: 'approval-generation-2',
+      generation: 2,
+      approval: {
+        scope: 'once',
+        cwd: '/tmp',
+        threadId: 't1',
+        tool: 'shell_execute',
+        command: 'echo hi',
+        risk: 'execute_code',
+        approvalHash: 'abc-generation',
+        summary: 'run echo',
+        reason: 'test',
+        expectedEffects: [],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+      },
+    });
+
+    provider.submitAction({
+      type: 'approve',
+      interactionId: 'approval-generation-2',
+      generation: 1,
+      grant: 'approve_once',
+    });
+    await Bun.sleep(5);
+    expect(provider.getPendingInterrupt()?.interactionId).toBe('approval-generation-2');
+
+    provider.submitAction({
+      type: 'approve',
+      interactionId: 'approval-generation-2',
+      generation: 2,
+      grant: 'approve_once',
+    });
+    provider.submitAction({
+      type: 'approve',
+      interactionId: 'approval-generation-2',
+      generation: 2,
+      grant: 'approve_once',
+    });
+    await expect(promise).resolves.toMatchObject({
+      type: 'approve',
+      interactionId: 'approval-generation-2',
+      generation: 2,
+    });
   });
 });

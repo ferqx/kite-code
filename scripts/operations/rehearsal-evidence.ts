@@ -1,6 +1,6 @@
 import { canonicalJson, sha256DomainSeparated } from '../release/canonical-json';
 
-export const INCIDENT_REHEARSAL_SCENARIOS_V1 = Object.freeze([
+export const INCIDENT_REHEARSAL_SCENARIOS_ = Object.freeze([
   'capability_off',
   'cohort_zero',
   'artifact_rollback',
@@ -11,10 +11,10 @@ export const INCIDENT_REHEARSAL_SCENARIOS_V1 = Object.freeze([
   'mandatory_admin_policy_unavailable',
 ] as const);
 
-export type IncidentRehearsalScenarioV1 = (typeof INCIDENT_REHEARSAL_SCENARIOS_V1)[number];
+export type IncidentRehearsalScenario = (typeof INCIDENT_REHEARSAL_SCENARIOS_)[number];
 
-export interface IncidentRehearsalReportV1 {
-  schema: 'IncidentRehearsalReportV1';
+export interface IncidentRehearsalReport {
+  schema: 'IncidentRehearsalReport';
   fixtureClass: 'synthetic_contract_only';
   generatedAt: '1970-01-01T00:00:00.000Z';
   operator: 'github:@ferqx';
@@ -23,7 +23,7 @@ export interface IncidentRehearsalReportV1 {
   operationsReady: false;
   status: 'contract_replay_passed';
   scenarios: readonly {
-    scenario: IncidentRehearsalScenarioV1;
+    scenario: IncidentRehearsalScenario;
     outcome: 'passed_contract';
     actionReceipt: 'synthetic_no_external_effect';
     staleProcessOrSessionCount: 0;
@@ -32,8 +32,8 @@ export interface IncidentRehearsalReportV1 {
   reportDigest: `sha256:${string}`;
 }
 
-export interface OperationsEvidenceAdapterV1 {
-  schema: 'OperationsEvidenceAdapterV1';
+export interface OperationsEvidenceAdapter {
+  schema: 'OperationsEvidenceAdapter';
   gate: 'G4';
   kind: 'incident_rehearsal';
   status: 'not_run';
@@ -42,9 +42,9 @@ export interface OperationsEvidenceAdapterV1 {
   nonDistributable: true;
 }
 
-function reportWithoutDigest(): Omit<IncidentRehearsalReportV1, 'reportDigest'> {
+function reportWithoutDigest(): Omit<IncidentRehearsalReport, 'reportDigest'> {
   return {
-    schema: 'IncidentRehearsalReportV1',
+    schema: 'IncidentRehearsalReport',
     fixtureClass: 'synthetic_contract_only',
     generatedAt: '1970-01-01T00:00:00.000Z',
     operator: 'github:@ferqx',
@@ -52,7 +52,7 @@ function reportWithoutDigest(): Omit<IncidentRehearsalReportV1, 'reportDigest'> 
     nonDistributable: true,
     operationsReady: false,
     status: 'contract_replay_passed',
-    scenarios: INCIDENT_REHEARSAL_SCENARIOS_V1.map((scenario) => ({
+    scenarios: INCIDENT_REHEARSAL_SCENARIOS_.map((scenario) => ({
       scenario,
       outcome: 'passed_contract' as const,
       actionReceipt: 'synthetic_no_external_effect' as const,
@@ -62,7 +62,7 @@ function reportWithoutDigest(): Omit<IncidentRehearsalReportV1, 'reportDigest'> 
   };
 }
 
-export function buildSyntheticIncidentRehearsalV1(): IncidentRehearsalReportV1 {
+export function buildSyntheticIncidentRehearsal(): IncidentRehearsalReport {
   const report = reportWithoutDigest();
   return {
     ...report,
@@ -73,19 +73,19 @@ export function buildSyntheticIncidentRehearsalV1(): IncidentRehearsalReportV1 {
   };
 }
 
-export function verifyIncidentRehearsalReportV1(report: IncidentRehearsalReportV1): void {
-  const expected = buildSyntheticIncidentRehearsalV1();
+export function verifyIncidentRehearsalReport(report: IncidentRehearsalReport): void {
+  const expected = buildSyntheticIncidentRehearsal();
   if (canonicalJson(report) !== canonicalJson(expected)) {
     throw new Error('Incident rehearsal report identity or canonical digest mismatch.');
   }
 }
 
-export function adaptSyntheticRehearsalToReleaseEvidenceV1(
-  report: IncidentRehearsalReportV1,
-): OperationsEvidenceAdapterV1 {
-  verifyIncidentRehearsalReportV1(report);
+export function adaptSyntheticRehearsalToReleaseEvidence(
+  report: IncidentRehearsalReport,
+): OperationsEvidenceAdapter {
+  verifyIncidentRehearsalReport(report);
   return {
-    schema: 'OperationsEvidenceAdapterV1',
+    schema: 'OperationsEvidenceAdapter',
     gate: 'G4',
     kind: 'incident_rehearsal',
     status: 'not_run',

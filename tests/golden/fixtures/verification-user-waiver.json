@@ -18,10 +18,10 @@
         "subject": "external release",
         "checks": [
           {
-            "checkId": "review",
-            "type": "reviewer",
-            "description": "review release evidence",
-            "instructions": "verify the release"
+            "checkId": "receipt",
+            "type": "receipt",
+            "description": "check committed release receipt",
+            "invocationId": "missing-release-invocation"
           }
         ],
         "repair": { "maxAttempts": 0 }
@@ -41,9 +41,9 @@
           "type": "verification.check_completed",
           "verificationId": "verification-waive",
           "result": {
-            "checkId": "review",
+            "checkId": "receipt",
             "outcome": "inconclusive",
-            "summary": "provider unavailable",
+            "summary": "A committed success receipt is unavailable.",
             "startedAt": "2026-07-15T00:00:01.000Z",
             "finishedAt": "2026-07-15T00:00:02.000Z"
           }

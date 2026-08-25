@@ -1,1 +1,1 @@
-export * from '@/core/mcp/write-governance';
+export * from '@kite/builtin-runtime/mcp';

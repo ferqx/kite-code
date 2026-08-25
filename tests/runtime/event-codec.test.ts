@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import ts from 'typescript';
 import {
+  assertAgentStateInvariants,
   assertCurrentRuntimeEvent,
   decodeCurrentRuntimeEventJson,
-} from '@/core/runtime/event-codec';
-import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+} from '@kite/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import ts from 'typescript';
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
@@ -61,13 +61,13 @@ describe('current RuntimeEvent codec', () => {
     const taskArtifact = {
       artifactId: `pa_${'b'.repeat(64)}`,
       kind: 'subagent_task',
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 128,
     } as const;
     const handleArtifact = {
       artifactId: `pa_${'d'.repeat(64)}`,
       kind: 'subagent_handle',
-      integrityIdentifier: `hmac-sha256:${'e'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'e'.repeat(64)}`,
       byteLength: 256,
     } as const;
     const events = [
@@ -87,7 +87,7 @@ describe('current RuntimeEvent codec', () => {
         attempt: 1,
         dispatchIntentDigest: digest,
         handleArtifact,
-        handleIntegrityIdentifier: `hmac-sha256:${'f'.repeat(64)}`,
+        handleIntegrityIdentifier: `sha256:${'f'.repeat(64)}`,
         recordedAt: at,
       },
       {
@@ -141,7 +141,8 @@ describe('current RuntimeEvent codec', () => {
   });
 
   test('rejects malformed Subagent lifecycle state combinations during restore validation', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'subagent-lifecycle-invariant',
       userId: 'user',
       workspace: '/workspace',
@@ -167,7 +168,7 @@ describe('current RuntimeEvent codec', () => {
         taskArtifact: {
           artifactId: `pa_${'6'.repeat(64)}`,
           kind: 'subagent_task',
-          integrityIdentifier: `hmac-sha256:${'7'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'7'.repeat(64)}`,
           byteLength: 128,
         },
         dispatchIntentDigest: `sha256:${'8'.repeat(64)}`,
@@ -176,10 +177,10 @@ describe('current RuntimeEvent codec', () => {
         handleArtifact: {
           artifactId: `pa_${'9'.repeat(64)}`,
           kind: 'subagent_handle',
-          integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'a'.repeat(64)}`,
           byteLength: 256,
         },
-        handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        handleIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
         handleRecordedAt: '2026-08-17T00:00:00.000Z',
         observationStatus: 'blocked',
         observedAt: '2026-08-17T00:00:00.000Z',
@@ -190,7 +191,7 @@ describe('current RuntimeEvent codec', () => {
         cleanupCompletedAt: '2026-08-17T00:00:00.000Z',
       },
     };
-    expect(() => assertRuntimeStateInvariants(state)).not.toThrow();
+    expect(() => assertAgentStateInvariants(state)).not.toThrow();
     for (const [label, mutate] of [
       [
         'attempt',
@@ -229,15 +230,15 @@ describe('current RuntimeEvent codec', () => {
     ] as const) {
       const malformed = structuredClone(state);
       mutate(malformed);
-      expect(() => assertRuntimeStateInvariants(malformed), label).toThrow(
+      expect(() => assertAgentStateInvariants(malformed), label).toThrow(
         /invalid Provider lifecycle evidence/u,
       );
     }
   });
 
   test('required-field manifest exactly matches the RuntimeEvent union', () => {
-    const eventsPath = resolve('src/core/runtime/events.ts');
-    const codecPath = resolve('src/core/runtime/event-codec.ts');
+    const eventsPath = resolve('packages/agent-kernel/src/events.ts');
+    const codecPath = eventsPath;
     const program = ts.createProgram([eventsPath, codecPath], {
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       strict: true,

@@ -2,14 +2,17 @@
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadMcpConfig } from '@/core/config';
-import { decideProjectMcpServer } from '@/core/config/mcp-project-approvals';
-import { createRemoteMcpEgressPermitV1 } from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import { aiMessage } from '@/core/messages';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { createRuntimeStore } from '@/core/runtime/store';
-import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import {
+  createBuiltinCredentialBroker,
+  McpConnectionManager,
+  MemoryMcpCredentialStore,
+} from '@kite/builtin-runtime/mcp';
+import { aiMessage } from '@kite/builtin-runtime/model';
+import { loadMcpConfigCatalog } from '#app/config';
+import { decideProjectMcpServer } from '#app/config/mcp-project-approvals';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const serverName = process.env.MCP_E2E_SERVER_NAME;
@@ -23,9 +26,9 @@ const runtimeDir = join(workspace, '.kite-code');
 const storePath = join(runtimeDir, `mcp-e2e-${serverName}.db`);
 mkdirSync(runtimeDir, { recursive: true });
 
-let loaded = loadMcpConfig();
+let catalog = loadMcpConfigCatalog();
 if (process.env.MCP_E2E_APPROVE_PROJECT === '1') {
-  const approval = loaded.catalog.projectApprovals.find((view) => view.name === serverName);
+  const approval = catalog.projectApprovals.find((view) => view.name === serverName);
   if (!approval) throw new Error(`Project MCP server '${serverName}' has no approval view.`);
   const decision = decideProjectMcpServer({
     workspace,
@@ -38,14 +41,44 @@ if (process.env.MCP_E2E_APPROVE_PROJECT === '1') {
   if (decision.status !== 'recorded') {
     throw new Error(`Project MCP approval failed: ${decision.status}`);
   }
-  loaded = loadMcpConfig();
+  catalog = loadMcpConfigCatalog();
 }
-const serverConfig = loaded.servers[serverName];
+const serverConfig = catalog.connectableServers[serverName];
 if (!serverConfig) throw new Error(`MCP server '${serverName}' was not loaded from config.`);
 
-const manager = new McpConnectionManager();
+const credentialStore = new MemoryMcpCredentialStore();
+const credentialBroker = createBuiltinCredentialBroker({ store: credentialStore });
+let connectionConfig = serverConfig;
+if (serverConfig.type === 'http' && secret) {
+  const key = {
+    workspaceKey: workspace,
+    source: expectedScope === 'project' ? ('project' as const) : ('user' as const),
+    server: serverName,
+    profile: 'default',
+  };
+  await credentialStore.put(key, {
+    version: 1,
+    kind: 'bearer',
+    secret,
+    updatedAt: '2026-08-22T00:00:00.000Z',
+  });
+  const credentialHandle = await credentialBroker.issueForKey(key, { purpose: 'mcp.transport' });
+  const { headers: _rawHeaders, ...withoutRawHeaders } = serverConfig;
+  connectionConfig = {
+    ...withoutRawHeaders,
+    auth: {
+      type: 'credential',
+      header: 'Authorization',
+      credentialRef: `${serverName}:default`,
+      scheme: 'Bearer',
+    },
+    credentialHandle,
+  };
+}
+
+const manager = new McpConnectionManager({ credentialBroker });
 try {
-  await manager.connect(serverName, serverConfig);
+  await manager.connect(serverName, connectionConfig);
   const descriptor = manager.findCapability(`mcp:${serverName}/authenticated_echo`);
   if (!descriptor) throw new Error('Authenticated MCP capability was not discovered.');
 
@@ -77,20 +110,15 @@ try {
     { message: aiMessage({ content: `Authenticated ${expectedScope} MCP call completed.` }) },
   ]);
   const events: RuntimeEvent[] = [];
-  for await (const event of runRuntimeAgent(
+  for await (const event of runTestRuntimeAgent(
     {
       task: `Call the authenticated ${expectedScope} MCP server.`,
       threadId: `mcp-e2e-${serverName}`,
       userId: 'e2e',
       workspace,
-      runtimeStorePath: storePath,
+      openStateRuntimeStorage: () => openStateStoreForTest(storePath),
       model,
       mcpManager: manager,
-      remoteMcpEgressPermitResolver: (request) =>
-        createRemoteMcpEgressPermitV1({
-          request,
-          expiresAt: new Date(Date.now() + 60_000),
-        }),
       config: {
         providerName: 'test',
         providerType: 'openai-compatible',
@@ -99,25 +127,33 @@ try {
         modelName: 'test',
         sandbox: { enabled: true },
         features: {
-          capabilityCatalogV1: true,
-          mcpRuntimeBindingV1: true,
-          toolSearchV1: true,
-          mcpExecutionRecordV1: true,
-          remoteMcpEgressPolicyV1: true,
+          capabilityCatalog: true,
+          mcpRuntimeBinding: true,
+          toolSearch: true,
+          mcpExecutionRecord: true,
         },
       },
     },
     {
-      requestAction: async (effect) =>
-        process.env.MCP_E2E_APPROVE_TOOL === '1'
-          ? { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' }
-          : { type: 'cancel', interactionId: effect.interactionId },
+      requestAction: async (effect, state) => {
+        if (process.env.MCP_E2E_APPROVE_TOOL !== '1') {
+          return { type: 'cancel', interactionId: effect.interactionId };
+        }
+        const pending = state.pendingApprovals.get(effect.interactionId);
+        if (!pending) throw new Error('Approval effect has no durable queue record.');
+        return {
+          type: 'approve',
+          interactionId: effect.interactionId,
+          generation: pending.generation,
+          grant: 'approve_once',
+        };
+      },
     },
   )) {
     events.push(event);
   }
 
-  const store = createRuntimeStore(storePath);
+  const store = openStateStoreForTest(storePath);
   const persisted = store.loadEventsStrict(`mcp-e2e-${serverName}`).map((entry) => entry.event);
   store.close();
   const serialized = JSON.stringify({ events, persisted });

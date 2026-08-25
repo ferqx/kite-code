@@ -1,15 +1,19 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentConfig } from '@/core/config';
-import { humanMessage } from '@/core/messages';
-import { ModelInvocationGatewayV1 } from '@/core/model/invocation-gateway';
-import { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
-import { createLiveModelResponseSourceV1 } from '@/core/model/response-source';
-import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
-import { PrivateArtifactStorageError } from '@/core/persistence/private-immutable-artifacts';
-import { createAgentKernel } from '@/core/runtime/kernel';
+import {
+  compileModelSurface,
+  createLiveModelResponseSource,
+  humanMessage,
+  ModelArtifactStore,
+  ModelInvocationGateway,
+  PrivateArtifactStorageError,
+} from '@kite/builtin-runtime/model';
+import type { AgentConfig } from '#app/config';
+import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../scripts/support/runtime-storage';
+import { testBuiltinModelOperationExecutionPort } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
 const CONFIG: AgentConfig = {
@@ -29,15 +33,18 @@ const RESPONSE = Object.freeze({
 });
 
 function createFixture(threadId: string) {
-  const directory = mkdtempSync(join(tmpdir(), 'kite-model-recovery-'));
+  const directory = mkdtempSync(join(process.cwd(), '.kite-model-recovery-'));
   const storePath = join(directory, 'runtime.db');
   const workspace = join(directory, 'workspace');
-  const artifacts = new ModelArtifactStoreV1({
+  const projectIdentity = {
+    projectId: `project_${threadId}`,
+    canonicalWorkspaceDigest: `sha256:${createHash('sha256').update(workspace).digest('hex')}`,
+  } as const;
+  const artifacts = new ModelArtifactStore({
     root: join(directory, 'model-artifacts'),
-    integrityKey: new Uint8Array(32).fill(7),
   });
   const model = createMockModel([]);
-  const compiled = compileModelSurfaceV1({
+  const compiled = compileModelSurface({
     purpose: 'primary_agent',
     config: CONFIG,
     model,
@@ -45,18 +52,31 @@ function createFixture(threadId: string) {
     tools: {},
     transport: 'generate',
   });
-  const gateway = new ModelInvocationGatewayV1({
+  const gateway = new ModelInvocationGateway({
     artifacts,
-    source: createLiveModelResponseSourceV1(async () => RESPONSE),
+    source: createLiveModelResponseSource(async () => RESPONSE),
+    operationExecution: testBuiltinModelOperationExecutionPort(),
     sleep: async () => {},
   });
-  const kernel = createAgentKernel({
+  const kernel = restoreStateKernelCoordinator({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'test',
     workspace,
-    storePath,
+    ...projectIdentity,
+    store: openStateStoreForTest(storePath),
   });
-  return { directory, storePath, workspace, artifacts, model, compiled, gateway, kernel };
+  return {
+    directory,
+    storePath,
+    workspace,
+    projectIdentity,
+    artifacts,
+    model,
+    compiled,
+    gateway,
+    kernel,
+  };
 }
 
 function invokeInput(fixture: ReturnType<typeof createFixture>) {
@@ -73,7 +93,6 @@ function invokeInput(fixture: ReturnType<typeof createFixture>) {
       projectionEnvironmentDigest: `sha256:${'1'.repeat(64)}` as const,
       capabilityBindingDigest: `sha256:${'2'.repeat(64)}` as const,
     },
-    providerDataPolicyRequired: false,
     resourceKind: 'model' as const,
   };
 }
@@ -99,15 +118,18 @@ describe('model invocation evidence recovery', () => {
         fixture.kernel.runtimeStore.forkCurrentSession(
           'model-evidence-source',
           'model-evidence-fork',
+          'f'.repeat(64),
         ),
       ).toBe(true);
       fixture.kernel.close();
 
-      const restored = createAgentKernel({
+      const restored = restoreStateKernelCoordinator({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-source',
         userId: 'test',
         workspace: fixture.workspace,
-        storePath: fixture.storePath,
+        ...fixture.projectIdentity,
+        store: openStateStoreForTest(fixture.storePath),
         modelArtifactEvidence: { status: 'available', reader: fixture.artifacts },
       });
       expect(restored.getState().transcript.final).toBe('restored');
@@ -119,17 +141,17 @@ describe('model invocation evidence recovery', () => {
       ).toBeUndefined();
       restored.close();
 
-      const fork = createAgentKernel({
+      const fork = restoreStateKernelCoordinator({
+        recoveryIdentityKey: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
         threadId: 'model-evidence-fork',
         userId: 'test',
         workspace: fixture.workspace,
-        storePath: fixture.storePath,
+        ...fixture.projectIdentity,
+        store: openStateStoreForTest(fixture.storePath),
         modelArtifactEvidence: { status: 'available', reader: fixture.artifacts },
       });
       expect(fork.getState().transcript.final).toBe('restored');
-      expect(fork.getState().modelInvocations[invocationId]).toMatchObject({
-        status: 'completed',
-      });
+      expect(fork.getState().modelInvocations[invocationId]).toMatchObject({ status: 'completed' });
       expect(
         fork.getState().modelInvocations[invocationId]?.modelEvidenceUnavailable,
       ).toBeUndefined();
@@ -161,11 +183,13 @@ describe('model invocation evidence recovery', () => {
       const missing = () => {
         throw new PrivateArtifactStorageError('artifact_missing', 'fixture artifact missing');
       };
-      const restored = createAgentKernel({
+      const restored = restoreStateKernelCoordinator({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-missing',
         userId: 'test',
         workspace: fixture.workspace,
-        storePath: fixture.storePath,
+        ...fixture.projectIdentity,
+        store: openStateStoreForTest(fixture.storePath),
         modelArtifactEvidence: {
           status: 'available',
           reader: { readSurface: missing, readResponse: missing },
@@ -209,12 +233,14 @@ describe('model invocation evidence recovery', () => {
       );
       preparedFixture.kernel.close();
 
-      const preparedRestore = createAgentKernel({
+      const preparedRestore = restoreStateKernelCoordinator({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-prepared',
         userId: 'test',
         workspace: preparedFixture.workspace,
-        storePath: preparedFixture.storePath,
-        modelArtifactEvidence: { status: 'unavailable', reason: 'key_unavailable' },
+        ...preparedFixture.projectIdentity,
+        store: openStateStoreForTest(preparedFixture.storePath),
+        modelArtifactEvidence: { status: 'available', reader: preparedFixture.artifacts },
       });
       expect(preparedRestore.getState().modelInvocations[preparedId]).toMatchObject({
         status: 'interrupted',
@@ -236,12 +262,14 @@ describe('model invocation evidence recovery', () => {
       );
       dispatchedFixture.kernel.close();
 
-      const dispatchedRestore = createAgentKernel({
+      const dispatchedRestore = restoreStateKernelCoordinator({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-dispatched',
         userId: 'test',
         workspace: dispatchedFixture.workspace,
-        storePath: dispatchedFixture.storePath,
-        modelArtifactEvidence: { status: 'unavailable', reason: 'key_unavailable' },
+        ...dispatchedFixture.projectIdentity,
+        store: openStateStoreForTest(dispatchedFixture.storePath),
+        modelArtifactEvidence: { status: 'available', reader: dispatchedFixture.artifacts },
       });
       expect(dispatchedRestore.getState().modelInvocations[invocationId]).toMatchObject({
         status: 'interrupted',

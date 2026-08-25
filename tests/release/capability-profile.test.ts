@@ -2,22 +2,22 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  type CapabilityProfileV1,
-  evaluateCapabilityProfileAdmissionV1,
-  parseCapabilityProfileV1,
-} from '../../src/core/config/release-capabilities';
+  type CapabilityProfile,
+  evaluateCapabilityProfileAdmission,
+  parseCapabilityProfile,
+} from '#app/config/release-capabilities';
 
 const profilePaths = [
-  'auto-compaction-v1.json',
-  'manual-compaction-v1.json',
-  'mcp-write-v1.json',
-  'skills-effectful-v1.json',
-  'skills-readonly-v1.json',
-  'verification-v1.json',
+  'auto-compaction.json',
+  'manual-compaction.json',
+  'mcp-write.json',
+  'skills-effectful.json',
+  'skills-readonly.json',
+  'verification.json',
 ] as const;
 
-function loadProfile(name: (typeof profilePaths)[number]): CapabilityProfileV1 {
-  return parseCapabilityProfileV1(
+function loadProfile(name: (typeof profilePaths)[number]): CapabilityProfile {
+  return parseCapabilityProfile(
     JSON.parse(
       readFileSync(join(import.meta.dir, '../../release/capability-profiles', name), 'utf8'),
     ),
@@ -53,37 +53,37 @@ describe('capability profile contract', () => {
   });
 
   test('is strict, canonical, and requires explicit platform/freshness before enabling', () => {
-    const profile = structuredClone(loadProfile('verification-v1.json')) as CapabilityProfileV1 & {
+    const profile = structuredClone(loadProfile('verification.json')) as CapabilityProfile & {
       unknown?: boolean;
     };
     profile.unknown = true;
-    expect(() => parseCapabilityProfileV1(profile)).toThrow();
+    expect(() => parseCapabilityProfile(profile)).toThrow();
 
-    const enabled = structuredClone(loadProfile('verification-v1.json'));
+    const enabled = structuredClone(loadProfile('verification.json'));
     enabled.state = { maturity: 'experimental', maxRollout: 'internal' };
-    expect(() => parseCapabilityProfileV1(enabled)).toThrow(
+    expect(() => parseCapabilityProfile(enabled)).toThrow(
       'enabled capability profiles require an explicit platform allowlist',
     );
 
-    const unsorted = structuredClone(loadProfile('verification-v1.json'));
+    const unsorted = structuredClone(loadProfile('verification.json'));
     unsorted.dependencies.reverse();
-    expect(() => parseCapabilityProfileV1(unsorted)).toThrow(
+    expect(() => parseCapabilityProfile(unsorted)).toThrow(
       'dependencies must be unique and sorted',
     );
 
-    const nonCanonical = structuredClone(loadProfile('verification-v1.json'));
+    const nonCanonical = structuredClone(loadProfile('verification.json'));
     nonCanonical.profileId = ' verification-v1';
-    expect(() => parseCapabilityProfileV1(nonCanonical)).toThrow(
+    expect(() => parseCapabilityProfile(nonCanonical)).toThrow(
       'identities must not contain surrounding whitespace',
     );
   });
 
   test('fails closed for disabled feature, embedded off ceiling, and unknown dependencies', () => {
-    const profile = loadProfile('verification-v1.json');
-    const decision = evaluateCapabilityProfileAdmissionV1({
+    const profile = loadProfile('verification.json');
+    const decision = evaluateCapabilityProfileAdmission({
       profile,
       embeddedCeiling: { maturity: 'under_development', maxRollout: 'off' },
-      features: { verificationV1: false },
+      features: { verification: false },
       dependencies: {},
     });
     expect(decision).toEqual({
@@ -102,21 +102,21 @@ describe('capability profile contract', () => {
   });
 
   test('cannot widen the embedded ceiling even when every dependency is ready', () => {
-    const candidate = structuredClone(loadProfile('verification-v1.json'));
+    const candidate = structuredClone(loadProfile('verification.json'));
     candidate.state = { maturity: 'experimental', maxRollout: 'internal' };
     candidate.platformAllowlist = ['linux-x64'];
     candidate.evidence.freshnessSeconds = 86_400;
-    const profile = parseCapabilityProfileV1(candidate);
+    const profile = parseCapabilityProfile(candidate);
     const dependencies = Object.fromEntries(
       profile.dependencies.map(({ dependencyId, expectedRevision }) => [
         dependencyId,
         { status: 'ready' as const, revision: expectedRevision },
       ]),
     );
-    const decision = evaluateCapabilityProfileAdmissionV1({
+    const decision = evaluateCapabilityProfileAdmission({
       profile,
       embeddedCeiling: { maturity: 'under_development', maxRollout: 'off' },
-      features: { verificationV1: true },
+      features: { verification: true },
       dependencies,
       platform: 'linux-x64',
     });
@@ -130,15 +130,15 @@ describe('capability profile contract', () => {
   });
 
   test('requires exact dependency revisions and admitted platform identity', () => {
-    const candidate = structuredClone(loadProfile('verification-v1.json'));
+    const candidate = structuredClone(loadProfile('verification.json'));
     candidate.state = { maturity: 'experimental', maxRollout: 'internal' };
     candidate.platformAllowlist = ['linux-x64'];
     candidate.evidence.freshnessSeconds = 86_400;
-    const profile = parseCapabilityProfileV1(candidate);
-    const decision = evaluateCapabilityProfileAdmissionV1({
+    const profile = parseCapabilityProfile(candidate);
+    const decision = evaluateCapabilityProfileAdmission({
       profile,
       embeddedCeiling: { maturity: 'experimental', maxRollout: 'canary' },
-      features: { verificationV1: true },
+      features: { verification: true },
       dependencies: {
         'runtime.required-verification': { status: 'ready', revision: 'stale' },
         'runtime.schema': { status: 'blocked', revision: '21' },
@@ -157,11 +157,11 @@ describe('capability profile contract', () => {
   });
 
   test('admits only when every feature, dependency, Gate, platform, and freshness fact passes', () => {
-    const candidate = structuredClone(loadProfile('verification-v1.json'));
+    const candidate = structuredClone(loadProfile('verification.json'));
     candidate.state = { maturity: 'experimental', maxRollout: 'internal' };
     candidate.platformAllowlist = ['linux-x64'];
     candidate.evidence.freshnessSeconds = 86_400;
-    const profile = parseCapabilityProfileV1(candidate);
+    const profile = parseCapabilityProfile(candidate);
     const dependencies = Object.fromEntries(
       profile.dependencies.map(({ dependencyId, expectedRevision }) => [
         dependencyId,
@@ -169,10 +169,10 @@ describe('capability profile contract', () => {
       ]),
     );
     expect(
-      evaluateCapabilityProfileAdmissionV1({
+      evaluateCapabilityProfileAdmission({
         profile,
         embeddedCeiling: { maturity: 'experimental', maxRollout: 'canary' },
-        features: { verificationV1: true },
+        features: { verification: true },
         dependencies,
         platform: 'linux-x64',
         evidence: {

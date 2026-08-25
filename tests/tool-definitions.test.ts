@@ -1,31 +1,76 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentConfig } from '../src/core/config';
-import { getFeatureFlags } from '../src/core/config/features';
 import {
-  containsBrokeredGitInvocationV1,
-  invokeGovernedTool,
-} from '../src/core/harness/tool-runner';
-import { exposedMcpToolName } from '../src/core/mcp';
-import { isReadOnlyShellCommand } from '../src/core/policies/shell-classification';
-import { clearToolCache, createAgentTools } from '../src/core/tools/definitions';
-import { builtinToolRegistry } from '../src/core/tools/registry/builtins';
-import { askUserSpec } from '../src/core/tools/registry/builtins/ask-user';
-import { gitInspectInputSchema } from '../src/core/tools/registry/builtins/git';
-import { searchContentSpec } from '../src/core/tools/registry/builtins/search-content';
-import { searchFilesSpec } from '../src/core/tools/registry/builtins/search-files';
-import { writePlanSpec } from '../src/core/tools/registry/builtins/write-plan';
-import { dispatchRegisteredTool } from '../src/core/tools/registry/dispatch';
-import {
+  BUILTIN_ASK_USER_SCHEMA_,
+  BUILTIN_GIT_INSPECT_SCHEMA_,
+  BUILTIN_WRITE_PLAN_SCHEMA_,
   buildDescription,
-  normalizeToolContract,
+  digestCapabilityBindingValue,
+  isReadOnlyShellCommand,
   TOOL_CONTRACTS,
+  toolContractSection,
   WRITE_PLAN_CONTRACT,
-} from '../src/core/tools/tool-contracts';
-import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/capabilities';
-import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+} from '@kite/builtin-runtime';
+import {
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
+  workspaceFilesystemProtectedBoundaryDigest,
+} from '@kite/builtin-runtime/filesystem';
+import { exposedMcpToolName } from '@kite/builtin-runtime/mcp';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
+import type { CapabilityTurnContext, WorkspaceFilesystemObserveOperation } from '@kite/runtime-spi';
+import type { AgentConfig } from '#app/config';
+import { getFeatureFlags } from '#app/config/features';
+import {
+  clearTestToolCache as clearToolCache,
+  createTestAgentTools as createAgentTools,
+  testBuiltinToolCatalog,
+} from './helpers/runtime-model';
+
+function createNativeFilesystemSearch(workspace: string) {
+  const authority = new WorkspaceFilesystemGrantAuthority({
+    idSource: (() => {
+      let id = 0;
+      return () => `tool-definitions-search-grant-${++id}`;
+    })(),
+  });
+  const evaluator = createProtectedPathEvaluator({ workspaceRoot: workspace, mode: 'deny' });
+  const unsignedBoundary = {
+    schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
+    ...structuredClone(evaluator.projectFilesystemBoundary()),
+  };
+  const protectedBoundary = {
+    ...unsignedBoundary,
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsignedBoundary),
+  };
+  const binding = {
+    threadId: 'tool-definitions-search-thread',
+    turnId: 'tool-definitions-search-turn',
+    toolCallId: 'tool-definitions-search-call',
+    invocationId: 'tool-definitions-search-invocation',
+    attempt: 1,
+    intentDigest: `sha256:${'4'.repeat(64)}`,
+    searchBoundaryDigest: protectedBoundary.boundaryDigest,
+    capabilityRevision: 'tool-definitions-search-capability',
+    effectDigest: 'tool-definitions-search-effect',
+    canonicalWorkspace: realpathSync(workspace),
+    protectedPathRevision: 'tool-definitions-search-protected-path',
+    approvalSummary: 'tool definitions native search fixture',
+  };
+  const provider = new LocalWorkspaceFilesystemProvider(authority.verifier());
+  return (operation: WorkspaceFilesystemObserveOperation) =>
+    provider.observe({
+      grant: authority.issueObserveGrant({
+        binding,
+        operation,
+        protectedBoundary,
+        ttlMs: 30_000,
+      }),
+    });
+}
 
 // Helper: AI SDK tools are in a ToolSet (Record<string, Tool>), not an array.
 // Tool names are the Record keys; tool lookup is `tools[name]`.
@@ -36,7 +81,6 @@ import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspac
 // validate 返回 { success } 校验结果。
 interface ToolSchemaLike {
   jsonSchema: { type?: string } | PromiseLike<{ type?: string }>;
-  validate: (value: unknown) => { success: boolean } | PromiseLike<{ success: boolean }>;
 }
 
 // ask_user 规范 questions-only JSON Schema 的窄结构投影（min/max 约束）。
@@ -60,99 +104,61 @@ function toolNames(tools: Record<string, unknown>): string[] {
   return Object.keys(tools);
 }
 
+function builtinEntry(name: string, context: CapabilityTurnContext = {}) {
+  const entry = testBuiltinToolCatalog()
+    .forTurn(context)
+    .entries.find((candidate) => candidate.visibility === 'model' && candidate.name === name);
+  if (!entry) throw new Error(`Builtin catalog entry is unavailable: ${name}`);
+  return entry;
+}
+
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe('code agent tool definitions', () => {
   test('git_inspect uses operation-discriminated strict schemas without irrelevant fields', () => {
-    expect(gitInspectInputSchema.safeParse({ operation: 'status', revision: 'HEAD' }).success).toBe(
-      false,
-    );
     expect(
-      gitInspectInputSchema.safeParse({ operation: 'branch_list', paths: ['safe.txt'] }).success,
+      BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'status', revision: 'HEAD' }).success,
     ).toBe(false);
     expect(
-      gitInspectInputSchema.safeParse({ operation: 'diff', max_records: 5, paths: ['safe.txt'] })
+      BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'branch_list', paths: ['safe.txt'] })
         .success,
     ).toBe(false);
     expect(
-      gitInspectInputSchema.safeParse({
+      BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({
+        operation: 'diff',
+        max_records: 5,
+        paths: ['safe.txt'],
+      }).success,
+    ).toBe(false);
+    expect(
+      BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({
         operation: 'log',
         paths: ['safe.txt'],
         revision: 'HEAD',
       }).success,
     ).toBe(true);
-    expect(gitInspectInputSchema.safeParse({ operation: 'unknown' }).success).toBe(false);
+    expect(BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'unknown' }).success).toBe(false);
   });
 
   test('git log revision grammar is identical at Provider and Registry boundaries', () => {
     for (const revision of ['HEAD', 'abcdef0', 'refs/heads/main', 'refs/tags/v1']) {
       expect(
-        gitInspectInputSchema.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
+        BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
           .success,
       ).toBe(true);
     }
     for (const revision of ['--all', 'HEAD~1', 'main', 'refs/remotes/origin/main', 'HEAD;echo']) {
       expect(
-        gitInspectInputSchema.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
+        BUILTIN_GIT_INSPECT_SCHEMA_.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
           .success,
       ).toBe(false);
     }
-  });
-  test('brokered Git shell denial returns stable next capability without native dispatch', async () => {
-    let dispatches = 0;
-    const result = await invokeGovernedTool({
-      workspace: '/workspace',
-      request: {
-        source: 'builtin',
-        name: 'shell_execute',
-        args: { command: 'git status --short' },
-        reason: 'fixture',
-        protectedCommand: 'git status --short',
-      },
-      taskConfig: {
-        features: { brokeredGitV1: true },
-        executionCapabilitySurface: {
-          inProcessReadOnlyTools: null,
-          network: false,
-          process: true,
-          write: false,
-          workspaceWrite: false,
-          shell: true,
-          skillChild: false,
-          localStdioMcp: false,
-          gitInspect: true,
-          brokeredGitFeatureRevision: 'brokered-git-r1',
-        },
-      } as AgentConfig,
-      shellExecutor: async () => {
-        dispatches++;
-        return { ok: true, command: 'git status --short', exitCode: 0, stdout: '', stderr: '' };
-      },
-    });
-    expect(dispatches).toBe(0);
-    expect(result).toMatchObject({
-      ok: false,
-      status: 'rejected',
-      resultMeta: { nextCapability: 'git_inspect' },
-    });
-  });
-  test('brokered Git shell detection fails closed for absolute, nested shell and indirect child forms', () => {
-    for (const command of [
-      '/usr/bin/git status --short',
-      'sh -c "git diff -- safe.txt"',
-      "python -c \"import subprocess; subprocess.run(['git','status'])\"",
-      'env PATH=/usr/bin command git.exe status',
-      'C:\\Tools\\Git\\bin\\git.exe status',
-    ]) {
-      expect(containsBrokeredGitInvocationV1(command)).toBe(true);
-    }
-    expect(containsBrokeredGitInvocationV1('printf .git/config')).toBe(false);
   });
   test('brokered Git disclosure requires one matching feature revision and independent axes', () => {
     const gitBroker = {
       featureRevision: 'brokered-git-r1' as const,
       inspect: async () => ({ ok: true, output: '' }),
     };
-    const baseConfig = { features: { brokeredGitV1: true } } as AgentConfig;
+    const baseConfig = { features: { brokeredGit: true } } as AgentConfig;
     expect(
       toolNames(createAgentTools({ workspace: '/workspace', config: baseConfig, gitBroker })),
     ).not.toContain('git_inspect');
@@ -228,7 +234,7 @@ describe('code agent tool definitions', () => {
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       exposedToolName: 'mcp__fixture__read',
-      schemaDigest: 'schema-1',
+      schemaDigest: digestCapabilityBindingValue(descriptor.inputSchema),
       issuedForTurnId: 'turn-1',
     };
     const tools = createAgentTools({
@@ -240,7 +246,7 @@ describe('code agent tool definitions', () => {
     expect('execute' in tools.mcp__fixture__read!).toBe(false);
   });
 
-  test('Prompt V2 keeps bound MCP declarations stable while policy owns planning effects', () => {
+  test('current Prompt keeps bound MCP declarations stable while policy owns planning effects', () => {
     const base: CapabilityDescriptor = {
       capabilityId: 'mcp:fixture/read',
       revision: 'revision-1',
@@ -262,7 +268,7 @@ describe('code agent tool definitions', () => {
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       exposedToolName: name,
-      schemaDigest: `schema-${name}`,
+      schemaDigest: digestCapabilityBindingValue(descriptor.inputSchema),
       issuedForTurnId: 'turn-1',
     });
     const writeDescriptor: CapabilityDescriptor = {
@@ -274,7 +280,6 @@ describe('code agent tool definitions', () => {
     const tools = createAgentTools({
       workspace: '/workspace',
       phase: 'planning',
-      config: { features: { promptContractV2: true } } as AgentConfig,
       mcpBindings: [
         { descriptor: base, binding: binding('mcp__fixture__read', base) },
         { descriptor: writeDescriptor, binding: binding('mcp__fixture__write', writeDescriptor) },
@@ -283,7 +288,6 @@ describe('code agent tool definitions', () => {
     const buildingTools = createAgentTools({
       workspace: '/workspace',
       phase: 'building',
-      config: { features: { promptContractV2: true } } as AgentConfig,
       mcpBindings: [
         { descriptor: base, binding: binding('mcp__fixture__read', base) },
         { descriptor: writeDescriptor, binding: binding('mcp__fixture__write', writeDescriptor) },
@@ -338,7 +342,7 @@ describe('code agent tool definitions', () => {
   });
 
   test('write_plan approval contract returns the complete top-level plan identity', () => {
-    const contract = normalizeToolContract(WRITE_PLAN_CONTRACT.sections);
+    const contract = toolContractSection(WRITE_PLAN_CONTRACT.sections);
     expect(contract.returns.fields).toEqual(
       expect.arrayContaining(['plan_id', 'version', 'structural_digest']),
     );
@@ -357,12 +361,9 @@ describe('code agent tool definitions', () => {
         { id: 'remove-old', title: 'Remove old code' },
       ],
     };
-    const parsed = builtinToolRegistry.parseToolCall(
-      { name: 'write_plan', args: input },
-      { workspace: '/tmp' },
-    );
-    expect(parsed?.ok).toBe(true);
-    if (parsed?.ok) expect(parsed.args).toEqual(writePlanSpec.inputSchema.parse(input));
+    const parsed = builtinEntry('write_plan', { workspace: '/tmp' }).parseModelInput(input);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual(BUILTIN_WRITE_PLAN_SCHEMA_.parse(input));
   });
 
   test('write_plan schema requires a complete save document', async () => {
@@ -374,26 +375,22 @@ describe('code agent tool definitions', () => {
     // a root-level anyOf is serialized as type=null by some providers.
     expect(jsonSchema.type).toBe('object');
 
-    expect((await schema.validate({ action: 'save' })).success).toBe(false);
+    expect(BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({ action: 'save' }).success).toBe(false);
     expect(
-      (
-        await schema.validate({
-          action: 'save',
-          title: 'Login page',
-          body_markdown: 'Implement the login flow and authentication boundary.',
-          steps: [{ id: 'build-login', title: 'Build the login interface' }],
-        })
-      ).success,
+      BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({
+        action: 'save',
+        title: 'Login page',
+        body_markdown: 'Implement the login flow and authentication boundary.',
+        steps: [{ id: 'build-login', title: 'Build the login interface' }],
+      }).success,
     ).toBe(true);
     expect(
-      (
-        await schema.validate({
-          action: 'submit',
-          plan_id: 'plan-1',
-          version: 1,
-          structural_digest: 'digest-1',
-        })
-      ).success,
+      BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({
+        action: 'submit',
+        plan_id: 'plan-1',
+        version: 1,
+        structural_digest: 'digest-1',
+      }).success,
     ).toBe(true);
   });
 
@@ -412,73 +409,76 @@ describe('code agent tool definitions', () => {
       ],
     };
 
-    expect((await schema.validate({ questions: [validQuestion] })).success).toBe(true);
+    expect(BUILTIN_ASK_USER_SCHEMA_.safeParse({ questions: [validQuestion] }).success).toBe(true);
     expect(
-      (
-        await schema.validate({
-          questions: [
-            {
-              ...validQuestion,
-              options: validQuestion.options.map((option) => ({ ...option, recommended: false })),
-            },
-          ],
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: [
+          {
+            ...validQuestion,
+            options: validQuestion.options.map((option) => ({ ...option, recommended: false })),
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: [
+          {
+            ...validQuestion,
+            options: validQuestion.options.map(
+              ({ recommended: _recommended, ...option }) => option,
+            ),
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: [
+          {
+            ...validQuestion,
+            options: validQuestion.options.map((option) => ({ ...option, recommended: true })),
+          },
+        ],
+      }).success,
     ).toBe(false);
     expect(
-      (
-        await schema.validate({
-          questions: [
-            {
-              ...validQuestion,
-              options: validQuestion.options.map((option) => ({ ...option, recommended: true })),
-            },
-          ],
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: [
+          {
+            ...validQuestion,
+            options: [
+              { ...validQuestion.options[0], id: 'legacy-option-id' },
+              validQuestion.options[1],
+            ],
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(BUILTIN_ASK_USER_SCHEMA_.safeParse({}).success).toBe(false);
+    expect(BUILTIN_ASK_USER_SCHEMA_.safeParse({ question: validQuestion.question }).success).toBe(
+      false,
+    );
+    expect(
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: [validQuestion],
+        question: validQuestion.question,
+      }).success,
     ).toBe(false);
     expect(
-      (
-        await schema.validate({
-          questions: [
-            {
-              ...validQuestion,
-              options: [
-                { ...validQuestion.options[0], id: 'legacy-option-id' },
-                validQuestion.options[1],
-              ],
-            },
-          ],
-        })
-      ).success,
-    ).toBe(false);
-    expect((await schema.validate({})).success).toBe(false);
-    expect((await schema.validate({ question: validQuestion.question })).success).toBe(false);
-    expect(
-      (
-        await schema.validate({
-          questions: [validQuestion],
-          question: validQuestion.question,
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: [{ ...validQuestion, id: 'legacy-question-id' }],
+      }).success,
     ).toBe(false);
     expect(
-      (
-        await schema.validate({
-          questions: [{ ...validQuestion, id: 'legacy-question-id' }],
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: [{ ...validQuestion, options: validQuestion.options.slice(0, 1) }],
+      }).success,
     ).toBe(false);
     expect(
-      (
-        await schema.validate({
-          questions: [{ ...validQuestion, options: validQuestion.options.slice(0, 1) }],
-        })
-      ).success,
-    ).toBe(false);
-    expect(
-      (await schema.validate({ questions: Array.from({ length: 4 }, () => validQuestion) }))
-        .success,
+      BUILTIN_ASK_USER_SCHEMA_.safeParse({
+        questions: Array.from({ length: 4 }, () => validQuestion),
+      }).success,
     ).toBe(false);
 
     const json = schema.jsonSchema as unknown as AskUserJsonSchema;
@@ -494,11 +494,11 @@ describe('code agent tool definitions', () => {
         items: { required?: string[] };
       }
     ).items;
-    expect(optionSchema.required).toEqual(['label', 'description', 'recommended']);
+    expect(optionSchema.required).toEqual(['label', 'description']);
   });
 
   test('ask_user input schema remains capability-descriptor representable', () => {
-    const descriptor = builtinToolRegistry.descriptorOf(askUserSpec);
+    const descriptor = builtinEntry('ask_user').descriptor;
     expect(descriptor.inputSchema).toMatchObject({
       type: 'object',
       required: ['questions'],
@@ -527,31 +527,38 @@ describe('code agent tool definitions', () => {
     mkdirSync(join(workspace, 'src'), { recursive: true });
     writeFileSync(join(workspace, 'package.json'), '{}\n');
     writeFileSync(join(workspace, 'src', 'alpha.ts'), 'const marker = "needle";\n');
-    const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace });
+    // The native Builtin Provider performs both searches directly; no shell
+    // executor or second Runtime registry participates in this path.
+    const search = createNativeFilesystemSearch(workspace);
+    const filesOutcome = await search({
+      kind: 'search_files',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: 'package.json',
+    });
+    const contentOutcome = await search({
+      kind: 'search_content',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: 'needle',
+    });
 
-    // 迁移后（ADR-0043 S1.2）搜索工具的模型条目为 schema-only，
-    // 执行经 Registry dispatch 验证（原生搜索，不触碰 shell）。
-    const filesOutcome = await dispatchRegisteredTool(
-      searchFilesSpec,
-      { pattern: 'package.json' },
-      { workspace, workspaceFilesystem },
-    );
-    const contentOutcome = await dispatchRegisteredTool(
-      searchContentSpec,
-      { pattern: 'needle' },
-      { workspace, workspaceFilesystem },
-    );
+    expect(filesOutcome.ok).toBe(true);
+    if (!filesOutcome.ok || filesOutcome.observation.kind !== 'search_files') {
+      throw new Error('native search_files unexpectedly failed');
+    }
+    expect(filesOutcome.observation.matches).toEqual(['package.json']);
+    expect(`${filesOutcome.observation.matches.join('\n')}\n`).toBe('package.json\n');
 
-    expect(filesOutcome.dispatched).toBe(true);
-    expect(contentOutcome.dispatched).toBe(true);
-    if (filesOutcome.dispatched) {
-      expect(filesOutcome.output.ok).toBe(true);
-      expect(filesOutcome.output.stdout).toContain('package.json');
+    expect(contentOutcome.ok).toBe(true);
+    if (!contentOutcome.ok || contentOutcome.observation.kind !== 'search_content') {
+      throw new Error('native search_content unexpectedly failed');
     }
-    if (contentOutcome.dispatched) {
-      expect(contentOutcome.output.ok).toBe(true);
-      expect(contentOutcome.output.stdout).toContain('src/alpha.ts:1:const marker = "needle";');
-    }
+    const contentMatches = contentOutcome.observation.matches.map(
+      (match) => `${match.path}:${match.line}:${match.text}`,
+    );
+    expect(contentMatches).toEqual(['src/alpha.ts:1:const marker = "needle";']);
+    expect(`${contentMatches.join('\n')}\n`).toBe('src/alpha.ts:1:const marker = "needle";\n');
   });
 
   // 验证常见只读 shell 命令被正确分类为只读 / Common read-only shell commands are correctly classified as read-only
@@ -566,6 +573,8 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('grep -f patterns.txt input.txt')).toBe(true);
     expect(isReadOnlyShellCommand('file --magic-file=magic input.txt')).toBe(true);
     expect(isReadOnlyShellCommand('sort --random-source seed input.txt')).toBe(true);
+    expect(isReadOnlyShellCommand('git status --short')).toBe(true);
+    expect(isReadOnlyShellCommand('git log --oneline -10')).toBe(true);
     // /dev/null 重定向用于抑制输出，应视为只读安全 / /dev/null redirects for output suppression are read-only safe
     expect(isReadOnlyShellCommand('ls -la src tests 2>/dev/null')).toBe(true);
     expect(isReadOnlyShellCommand("find . -name '*.ts' >/dev/null 2>&1")).toBe(true);
@@ -591,9 +600,8 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('awk \'BEGIN { system("rm hello.txt") }\'')).toBe(false);
     expect(isReadOnlyShellCommand('git branch new-branch')).toBe(false);
     expect(isReadOnlyShellCommand('git branch -d old-branch')).toBe(false);
-    expect(isReadOnlyShellCommand('git status --short')).toBe(false);
     expect(isReadOnlyShellCommand('git diff -- src/app/runner.ts')).toBe(false);
-    expect(isReadOnlyShellCommand('git log -1')).toBe(false);
+    expect(isReadOnlyShellCommand('git log -p -1')).toBe(false);
     expect(isReadOnlyShellCommand('git show HEAD')).toBe(false);
     expect(isReadOnlyShellCommand('git ls-files')).toBe(false);
     expect(isReadOnlyShellCommand('git diff --output=leak.diff')).toBe(false);
@@ -641,13 +649,11 @@ describe('code agent tool definitions', () => {
     const planningTools = createAgentTools({
       workspace: '/tmp',
       phase: 'planning',
-      authorization: { mode: 'default', commandGrants: {} },
       workspaceAccess: 'write',
     });
     const buildingTools = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'full_access', commandGrants: {} },
       workspaceAccess: 'write',
     });
 
@@ -655,10 +661,9 @@ describe('code agent tool definitions', () => {
     expect(toolNames(buildingTools)).toEqual(toolNames(planningTools));
   });
 
-  test('Prompt V2 keeps builtin declarations stable across planning and building', () => {
-    const config = { features: { promptContractV2: true } } as AgentConfig;
-    const planningTools = createAgentTools({ workspace: '/tmp', phase: 'planning', config });
-    const buildingTools = createAgentTools({ workspace: '/tmp', phase: 'building', config });
+  test('keeps builtin declarations stable across planning and building', () => {
+    const planningTools = createAgentTools({ workspace: '/tmp', phase: 'planning' });
+    const buildingTools = createAgentTools({ workspace: '/tmp', phase: 'building' });
 
     expect(toolNames(planningTools)).toEqual(toolNames(buildingTools));
     expect(toolNames(planningTools)).toContain('edit_file');
@@ -666,59 +671,41 @@ describe('code agent tool definitions', () => {
     expect(toolNames(planningTools)).toContain('shell_execute');
   });
 
-  test('Prompt V2 keeps task schema stable and leaves planning role denial to policy', () => {
+  test('keeps task schema stable and leaves planning role denial to policy', () => {
     const context = {
       workspace: '/tmp',
       phase: 'planning' as const,
       hasTaskAdapter: true,
-      featureFlags: { ...getFeatureFlags(), promptContractV2: true },
+      featureFlags: getFeatureFlags(),
     };
     expect(
-      builtinToolRegistry.parseToolCall(
-        { name: 'task', args: { subagent_type: 'code', task: 'write code' } },
-        context,
-      ).ok,
+      builtinEntry('task', context).parseModelInput({
+        name: 'Write code',
+        subagent_type: 'code',
+        task: 'write code',
+      }).success,
     ).toBe(true);
     expect(
-      builtinToolRegistry.parseToolCall(
-        { name: 'task', args: { subagent_type: 'plan', task: 'design change' } },
-        context,
-      ).ok,
+      builtinEntry('task', context).parseModelInput({
+        name: 'Design change',
+        subagent_type: 'plan',
+        task: 'design change',
+      }).success,
     ).toBe(true);
     expect(
-      builtinToolRegistry.effectsOf('task', { subagent_type: 'code', task: 'write code' }, context),
+      builtinEntry('task', context).classifyEffects(
+        { name: 'Write code', subagent_type: 'code', task: 'write code' },
+        context,
+      ),
     ).toMatchObject({ effectClass: 'workspace_write', sideEffect: true });
   });
 
-  test('legacy planning uses the same explore/plan-only task role ceiling', () => {
-    const context = {
-      workspace: '/tmp',
-      phase: 'planning' as const,
-      hasTaskAdapter: true,
-      featureFlags: { ...getFeatureFlags(), promptContractV2: false },
-    };
-    expect(
-      builtinToolRegistry.parseToolCall(
-        { name: 'task', args: { subagent_type: 'review', task: 'Review current architecture.' } },
-        context,
-      ).ok,
-    ).toBe(false);
-    expect(
-      builtinToolRegistry.parseToolCall(
-        { name: 'task', args: { subagent_type: 'explore', task: 'Inspect current architecture.' } },
-        context,
-      ).ok,
-    ).toBe(true);
-  });
-
-  test('Prompt V2 planning task surface preserves autonomous delegation and role guidance', async () => {
-    const config = {
-      features: { ...getFeatureFlags(), promptContractV2: true },
-    } as AgentConfig;
+  test('planning task surface preserves autonomous delegation and role guidance', async () => {
+    clearToolCache();
     const tools = createAgentTools({
       workspace: '/tmp',
       phase: 'planning',
-      config,
+      config: {} as AgentConfig,
       subagentEventSink: () => {},
     });
     const task = tools.task!;
@@ -749,36 +736,17 @@ describe('code agent tool definitions', () => {
     expect(String(task.description)).toContain('Planning permits only explore/plan');
   });
 
-  test('invalidates tool cache when same-sized command grants change', () => {
-    const grantA = {
-      'grant-a': {
-        workspace: '/tmp',
-        threadId: 'thread-1',
-        command: 'bun test a',
-        source: 'test' as const,
-        grantedAt: '2026-01-01T00:00:00.000Z',
-      },
-    };
-    const grantB = {
-      'grant-b': {
-        workspace: '/tmp',
-        threadId: 'thread-1',
-        command: 'bun test b',
-        source: 'test' as const,
-        grantedAt: '2026-01-01T00:00:00.000Z',
-      },
-    };
-
+  test('invalidates tool cache when the session identity changes', () => {
     const toolsA = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: grantA },
+      threadId: 'thread-1',
       workspaceAccess: 'write',
     });
     const toolsB = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: grantB },
+      threadId: 'thread-2',
       workspaceAccess: 'write',
     });
 
@@ -792,7 +760,7 @@ describe('code agent tool definitions', () => {
     const tools = createAgentTools({
       workspace: '/tmp',
       config: {
-        features: { skillWorkflowV1: true, skillActivationV2: true },
+        features: { skillWorkflow: true, skillActivation: true },
       } as unknown as AgentConfig,
       skillCatalog: {
         revision: 'skills-r1',
@@ -824,7 +792,7 @@ describe('code agent tool definitions', () => {
     expect(tools.activate_skill).toBeDefined();
   });
 
-  test('legacy prompt skill inputs do not change builtin tools', () => {
+  test('unactivated Skill metadata does not change builtin tools', () => {
     const baseNames = toolNames(createAgentTools({ workspace: '/tmp' }));
 
     const withSkill = createAgentTools({
@@ -876,7 +844,7 @@ describe('tool contracts (ACI)', () => {
 
   test('every contract has complete structured facts', () => {
     for (const name of registeredTools) {
-      const contract = normalizeToolContract(TOOL_CONTRACTS.get(name)!.sections);
+      const contract = toolContractSection(TOOL_CONTRACTS.get(name)!.sections);
       expect(contract.summary.length).toBeGreaterThan(10);
       expect(contract.useWhen.length).toBeGreaterThan(20);
       expect(contract.constraints.length).toBeGreaterThan(20);
@@ -889,7 +857,7 @@ describe('tool contracts (ACI)', () => {
   test('contract description embeds every independently owned fact', () => {
     for (const name of registeredTools) {
       const contract = TOOL_CONTRACTS.get(name)!;
-      const normalized = normalizeToolContract(contract.sections);
+      const normalized = toolContractSection(contract.sections);
       expect(contract.description).toContain(normalized.summary);
       expect(contract.description).toContain(normalized.useWhen);
       expect(contract.description).toContain(normalized.constraints);
@@ -911,26 +879,27 @@ describe('tool contracts (ACI)', () => {
       const contract = TOOL_CONTRACTS.get(name)!;
       const toolObj = tools[name];
       expect(toolObj).toBeDefined();
-      expect(toolObj?.description).toBe(contract.description);
+      expect(toolObj?.description).toBe(buildDescription(contract.sections, 'catalog'));
     }
   });
 
   test('contracts normalize to concise truthful model descriptions', () => {
     for (const name of registeredTools) {
       const contract = TOOL_CONTRACTS.get(name)!;
-      const normalized = normalizeToolContract(contract.sections);
+      const normalized = toolContractSection(contract.sections);
       expect(normalized.summary.length, `${name}: missing summary`).toBeGreaterThan(0);
       expect(normalized.useWhen.length, `${name}: missing useWhen`).toBeGreaterThan(0);
       expect(normalized.returns.description.length, `${name}: missing returns`).toBeGreaterThan(0);
-      expect(buildDescription(contract.sections, 'v2').length).toBeLessThan(1_200);
+      expect(buildDescription(contract.sections, 'catalog').length).toBeLessThan(1_200);
     }
   });
 
   test('keeps Provider strict disabled for builtin tools', () => {
+    clearToolCache();
     const tools = createAgentTools({
       workspace: '/tmp/test-workspace',
       phase: 'planning',
-      config: { features: { promptContractV2: true } } as AgentConfig,
+      config: {} as AgentConfig,
       toolSearch: true,
       subagentEventSink: () => {},
     });
@@ -941,7 +910,7 @@ describe('tool contracts (ACI)', () => {
 
   test('file and web tools declare their actual text projection', () => {
     for (const name of ['read_file', 'edit_file', 'write_file', 'web_fetch']) {
-      const normalized = normalizeToolContract(TOOL_CONTRACTS.get(name)!.sections);
+      const normalized = toolContractSection(TOOL_CONTRACTS.get(name)!.sections);
       expect(normalized.returns.format).toBe('text');
       expect(normalized.returns.description).not.toMatch(/^JSON:/i);
     }
@@ -949,7 +918,7 @@ describe('tool contracts (ACI)', () => {
 
   // shell_execute 的特殊契约要求 / shell_execute-specific contract requirements
   test('shell_execute contract covers command-shaped approval rejection', () => {
-    const contract = normalizeToolContract(TOOL_CONTRACTS.get('shell_execute')!.sections);
+    const contract = toolContractSection(TOOL_CONTRACTS.get('shell_execute')!.sections);
     expect(contract.useWhen).not.toMatch(/intent=|grant_request|prefix_rule/);
     expect(contract.useWhen).toMatch(/during planning only for a proven read-only/i);
     expect(contract.constraints).toMatch(/intent, grant_request, prefix_rule/);
@@ -962,7 +931,7 @@ describe('tool contracts (ACI)', () => {
 
   test('file mutation contracts keep planning changes in the Plan', () => {
     for (const name of ['edit_file', 'write_file']) {
-      const contract = normalizeToolContract(TOOL_CONTRACTS.get(name)!.sections);
+      const contract = toolContractSection(TOOL_CONTRACTS.get(name)!.sections);
       expect(contract.useWhen).toMatch(/building/i);
       expect(contract.recovery).toMatch(/planning|deferred/i);
       expect(contract.recovery).toMatch(/plan|approval/i);
@@ -971,12 +940,13 @@ describe('tool contracts (ACI)', () => {
   });
 
   test('ask_user contract exposes only the canonical questions shape', () => {
-    const contract = normalizeToolContract(TOOL_CONTRACTS.get('ask_user')!.sections);
+    const contract = toolContractSection(TOOL_CONTRACTS.get('ask_user')!.sections);
     expect(contract.useWhen).toMatch(/single question is an array with one item/);
     expect(contract.constraints).toMatch(/Removed top-level question\/options/);
     expect(contract.constraints).toMatch(/client always adds free-text input/);
     expect(contract.returns.description).toContain('questions contain 1-3 items');
-    expect(contract.returns.description).toContain('2-3 {label, description, recommended}');
+    expect(contract.returns.description).toContain('2-3 {label, description, recommended?}');
+    expect(contract.constraints).toMatch(/put the preferred option first/i);
     expect(contract.recovery).toMatch(/canonical questions array.*never pass stringified JSON/);
   });
 
@@ -1000,14 +970,12 @@ describe('tool contracts (ACI)', () => {
     const a = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
       workspaceAccess: 'write',
       interactionMode: 'auto',
     });
     const b = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
       workspaceAccess: 'write',
       interactionMode: 'auto',
     });
@@ -1082,9 +1050,8 @@ describe('tool contracts (ACI)', () => {
     expect(schemaChanged).not.toBe(first);
   });
 
-  test('Prompt V2 phase changes preserve the complete builtin provider declaration', async () => {
+  test('phase changes preserve the complete builtin provider declaration', async () => {
     clearToolCache();
-    const config = { features: { promptContractV2: true } } as AgentConfig;
     const declaration = async (tools: Record<string, unknown>) =>
       Promise.all(
         Object.entries(tools).map(async ([name, value]) => {
@@ -1099,59 +1066,44 @@ describe('tool contracts (ACI)', () => {
     const planning = createAgentTools({
       workspace: '/tmp',
       phase: 'planning',
-      config,
       subagentEventSink: () => {},
-      authorization: { mode: 'default', commandGrants: {} },
     });
     const building = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      config,
       subagentEventSink: () => {},
-      authorization: { mode: 'default', commandGrants: {} },
     });
     expect(await declaration(planning)).toEqual(await declaration(building));
   });
 
-  test('different authorization mode produces different cache key (cache miss)', () => {
+  test('different interaction mode produces different cache key (cache miss)', () => {
     clearToolCache();
-    const defaultAuth = createAgentTools({
+    const acceptEdits = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
+      interactionMode: 'accept_edits',
     });
-    const fullAccess = createAgentTools({
+    const full = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'full_access', commandGrants: {} },
+      interactionMode: 'full',
     });
-    expect(defaultAuth).not.toBe(fullAccess);
+    expect(acceptEdits).not.toBe(full);
   });
 
-  test('different commandGrants produces different cache key (cache miss)', () => {
+  test('different thread identity produces different cache key (cache miss)', () => {
     clearToolCache();
-    const noGrants = createAgentTools({
+    const threadA = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
+      threadId: 'thread-a',
     });
-    const withGrants = createAgentTools({
+    const threadB = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: {
-        mode: 'default',
-        commandGrants: {
-          'thread-x::/tmp::bun test': {
-            workspace: '/tmp',
-            threadId: 'thread-x',
-            command: 'bun test',
-            source: 'test' as const,
-            grantedAt: '2026-01-01T00:00:00.000Z',
-          },
-        },
-      },
+      threadId: 'thread-b',
     });
-    expect(noGrants).not.toBe(withGrants);
+    expect(threadA).not.toBe(threadB);
   });
 
   test('different interactionMode produces different cache key (cache miss)', () => {
@@ -1159,13 +1111,11 @@ describe('tool contracts (ACI)', () => {
     const auto = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
       interactionMode: 'auto',
     });
     const ask = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      authorization: { mode: 'default', commandGrants: {} },
       interactionMode: 'accept_edits',
     });
     expect(auto).not.toBe(ask);

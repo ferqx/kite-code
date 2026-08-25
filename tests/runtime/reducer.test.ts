@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { classifyFailure } from '../../src/core/runtime/failures';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '../../src/core/runtime/reducer';
-import type { RuntimeState } from '../../src/core/runtime/state';
-import {
-  computePlanStructuralDigest,
-  createInitialRuntimeState,
-  getActivePlanning,
-  setActivePlanning,
-} from '../../src/core/runtime/state';
-import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type {
   AgentPlan,
   AgentPlanStep,
   PlanDocument,
   PlanningState,
   ToolApprovalPayload,
-} from '../../src/protocol/events';
-import type { DurableSuspendedSubagentV1 } from '../../src/protocol/subagent';
+} from '@kite/runtime-contract';
+import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
+import {
+  createRuntimeHostStateInitialState,
+  getActivePlanning,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
+  setActivePlanning,
+} from '@kite/runtime-host/kernel-adapter';
+import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDocument, currentPlanDraftedEvent } from '../helpers/current-plan';
 
 // ── 测试辅助函数 / Test helpers ──
@@ -40,7 +40,7 @@ function planning(state: RuntimeState): PlanningTestView {
 function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
   return reduceCanonicalRuntimeState(
     state,
-    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+    normalizeCurrentToolOutcomeEvent(event, state, '2026-08-11T00:00:00.000Z'),
   );
 }
 
@@ -59,7 +59,8 @@ function makePlan(name: string = 'Test Plan', steps: string[] = ['step 1', 'step
 }
 
 function makeInitialState(overrides?: Partial<RuntimeState>): RuntimeState {
-  const base = createInitialRuntimeState({
+  const base = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread-1',
     userId: 'user-1',
     workspace: '/tmp/test',
@@ -83,8 +84,8 @@ function makeActivePlanState(
 }
 
 function makeSuspendedSubagentSnapshot(
-  overrides?: Partial<DurableSuspendedSubagentV1>,
-): DurableSuspendedSubagentV1 {
+  overrides?: Partial<DurableSuspendedSubagent>,
+): DurableSuspendedSubagent {
   return {
     storage: 'private_artifact_v1',
     subagentId: 'subagent-1',
@@ -94,7 +95,7 @@ function makeSuspendedSubagentSnapshot(
     continuationArtifact: {
       artifactId: `pa_${'b'.repeat(64)}`,
       kind: 'subagent_continuation',
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 1,
     },
     parentInvocationId: 'parent-invocation-1',
@@ -559,6 +560,7 @@ describe('reduceRuntimeState — plan lifecycle', () => {
       type: 'approval.rejected',
       interactionId: 'approval-mismatch',
       toolCallId: 'other-tool',
+      generation: 0,
       reason: 'Rejected by user.',
     });
 
@@ -725,9 +727,9 @@ describe('reduceRuntimeState — tool lifecycle', () => {
       startedAt: '2026-08-14T00:00:00.000Z',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.active.push('task');
+    state.tools.active = [...state.tools.active, 'task'];
 
-    const normalized = normalizeCurrentToolOutcomeEventV1(
+    const normalized = normalizeCurrentToolOutcomeEvent(
       {
         type: 'tool.failed',
         toolCallId: 'task',
@@ -739,7 +741,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
 
     expect(normalized).toMatchObject({
       type: 'tool.failed',
-      outcomeV1: {
+      outcome: {
         dispatchState: 'started',
         externalEffects: 'unknown',
         replaySafety: 'none',
@@ -807,7 +809,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
         status: 'running',
         createdAtTurnId: state.turn.turnId,
       };
-      state.tools.active.push(toolCallId);
+      state.tools.active = [...state.tools.active, toolCallId];
     }
     const finish = (toolCallId: string): RuntimeEvent => ({
       type: 'tool.finished',
@@ -1111,6 +1113,8 @@ describe('reduceRuntimeState — tool lifecycle', () => {
       type: 'approval.requested',
       interactionId: 'approval-cancel',
       toolCallId: 'tool-cancel',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       approval: makeToolApproval('bun test'),
     });
 
@@ -1272,30 +1276,20 @@ describe('reduceRuntimeState — suspended subagents', () => {
       toolCallId: 'task-1',
       snapshot,
     });
-    const awaitingApproval: RuntimeState = {
-      ...suspended,
-      tools: {
-        ...suspended.tools,
-        calls: {
-          ...suspended.tools.calls,
-          'task-1': {
-            ...suspended.tools.calls['task-1']!,
-            status: 'awaiting_approval',
-          },
-        },
-      },
-      interactions: {
-        kind: 'awaiting_tool_approval',
-        interactionId: 'approval-1',
-        toolCallId: 'task-1',
-        approval: makeToolApproval('pwd'),
-      },
-    };
+    const awaitingApproval = reduceRuntimeState(suspended, {
+      type: 'approval.requested',
+      interactionId: 'approval-1',
+      toolCallId: 'task-1',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval: makeToolApproval('pwd'),
+    });
 
     const next = reduceRuntimeState(awaitingApproval, {
       type: 'approval.rejected',
       interactionId: 'approval-1',
       toolCallId: 'task-1',
+      generation: 0,
       reason: 'Cancelled by user.',
     });
 
@@ -1430,6 +1424,8 @@ describe('reduceRuntimeState — interaction state', () => {
       type: 'approval.requested',
       interactionId: 'approval-1',
       toolCallId: 'tool-10',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       approval: approvalPayload,
     };
 
@@ -1439,39 +1435,40 @@ describe('reduceRuntimeState — interaction state', () => {
     if (next.interactions.kind === 'awaiting_tool_approval') {
       expect(next.interactions.interactionId).toBe('approval-1');
       expect(next.interactions.toolCallId).toBe('tool-10');
-      expect(next.interactions.approval).toBe(approvalPayload);
+      expect(next.interactions.approval).toEqual(approvalPayload);
     }
   });
 
   // 验证 approval.granted 清除交互回 idle
   test('approval.granted clears interaction back to idle', () => {
-    const state: RuntimeState = {
-      ...makeInitialState(),
-      interactions: {
-        kind: 'awaiting_tool_approval',
-        interactionId: 'approval-1',
-        toolCallId: 'tool-10',
-        approval: {
-          scope: 'once',
-          cwd: '/tmp',
-          threadId: 'thread-1',
-          tool: 'shell_execute',
-          command: 'npm install',
-          risk: 'execute_code' as const,
-          approvalHash: 'abc',
-          summary: 'install',
-          reason: 'need deps',
-          expectedEffects: [],
-          grantOptions: ['approve_once'],
-          recommendedGrant: 'approve_once',
-        },
+    const state = reduceRuntimeState(makeInitialState(), {
+      type: 'approval.requested',
+      interactionId: 'approval-1',
+      toolCallId: 'tool-10',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval: {
+        scope: 'once',
+        cwd: '/tmp',
+        threadId: 'thread-1',
+        tool: 'shell_execute',
+        command: 'npm install',
+        risk: 'execute_code',
+        approvalHash: 'abc',
+        summary: 'install',
+        reason: 'need deps',
+        expectedEffects: [],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
       },
-    };
+    });
     const event: RuntimeEvent = {
       type: 'approval.granted',
       interactionId: 'approval-1',
       toolCallId: 'tool-10',
       grant: 'approve_once',
+      receiptId: 'receipt-approval-1',
+      generation: 0,
     };
 
     const next = reduceRuntimeState(state, event);
@@ -1481,32 +1478,32 @@ describe('reduceRuntimeState — interaction state', () => {
 
   // 验证 approval.rejected 清除交互回 idle
   test('approval.rejected clears interaction back to idle', () => {
-    const state: RuntimeState = {
-      ...makeInitialState(),
-      interactions: {
-        kind: 'awaiting_tool_approval',
-        interactionId: 'approval-2',
-        toolCallId: 'tool-11',
-        approval: {
-          scope: 'once',
-          cwd: '/tmp',
-          threadId: 'thread-1',
-          tool: 'shell_execute',
-          command: 'rm -rf /',
-          risk: 'destructive' as const,
-          approvalHash: 'xyz',
-          summary: 'delete all',
-          reason: 'cleanup',
-          expectedEffects: [],
-          grantOptions: ['approve_once'],
-          recommendedGrant: 'approve_once',
-        },
+    const state = reduceRuntimeState(makeInitialState(), {
+      type: 'approval.requested',
+      interactionId: 'approval-2',
+      toolCallId: 'tool-11',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval: {
+        scope: 'once',
+        cwd: '/tmp',
+        threadId: 'thread-1',
+        tool: 'shell_execute',
+        command: 'rm -rf /',
+        risk: 'destructive',
+        approvalHash: 'xyz',
+        summary: 'delete all',
+        reason: 'cleanup',
+        expectedEffects: [],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
       },
-    };
+    });
     const event: RuntimeEvent = {
       type: 'approval.rejected',
       interactionId: 'approval-2',
       toolCallId: 'tool-11',
+      generation: 0,
       reason: 'too dangerous',
     };
 
@@ -1633,65 +1630,18 @@ describe('reduceRuntimeState — immutability', () => {
 // ── 运行时环境 / Runtime environment ──
 
 describe('reduceRuntimeState — runtime environment', () => {
-  // 验证 authorization.changed 更新授权模式
-  test('authorization.changed updates authorization mode', () => {
-    const state = makeInitialState();
-    expect(state.authorization.mode).toBe('default');
-
-    const event: RuntimeEvent = {
-      type: 'authorization.changed',
-      mode: 'full_access',
-    };
-
-    const next = reduceRuntimeState(state, event);
-    expect(next.authorization.mode).toBe('full_access');
-  });
-
-  // 验证 authorization.changed 保留 commandGrants 等字段
-  test('authorization.changed preserves other authorization fields', () => {
-    const state: RuntimeState = {
-      ...makeInitialState(),
-      authorization: {
-        mode: 'default',
-        commandGrants: {
-          key1: {
-            workspace: '/ws',
-            threadId: 't1',
-            command: 'ls',
-            source: 'test' as const,
-            grantedAt: '2026-01-01T00:00:00.000Z',
-          },
-        },
-      },
-    };
-    const event: RuntimeEvent = {
-      type: 'authorization.changed',
-      mode: 'full_access',
-    };
-
-    const next = reduceRuntimeState(state, event);
-    expect(next.authorization.mode).toBe('full_access');
-    expect(next.authorization.commandGrants.key1).toBeDefined();
-    expect(next.authorization.commandGrants.key1!.command).toBe('ls');
-  });
-
-  test('authorization.changed can persist replacement command grants', () => {
+  test('interaction_mode.changed is the sole Full authority', () => {
     const state = makeInitialState();
     const next = reduceRuntimeState(state, {
-      type: 'authorization.changed',
-      mode: 'default',
-      commandGrants: {
-        cmd: {
-          workspace: '/ws',
-          threadId: 'thread-1',
-          command: 'bun test',
-          source: 'test' as const,
-          grantedAt: '2026-01-01T00:00:00.000Z',
-        },
-      },
+      type: 'interaction_mode.changed',
+      mode: 'full',
+      source: 'user',
+      changedAt: '2026-08-25T00:00:00.000Z',
     });
 
-    expect(next.authorization.commandGrants.cmd!.command).toBe('bun test');
+    expect(next.mode).toBe('full');
+    expect(next.interactionModeRevision).toBe(1);
+    expect(next.sessionCommandGrants).toEqual(new Map());
   });
 });
 
@@ -2815,6 +2765,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'rev-1',
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
       approval,
       createdAt: '2026-08-11T00:00:00.000Z',
@@ -2850,6 +2802,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'rev-1',
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
       approval,
     });
@@ -2868,7 +2822,7 @@ describe('reduceRuntimeState — auto-review events', () => {
     };
     const next = reduceRuntimeState(awaiting, event);
     expect(next.interactions.kind).toBe('idle');
-    expect(next.tools.calls['tool-99']!.status).toBe('approved');
+    expect(next.tools.calls['tool-99']!.status).toBe('authorized_queued');
     // Regression: approvalGrant must be set so defense-in-depth doesn't reject
     expect(next.tools.calls['tool-99']!.approvalGrant).toBe('approve_once');
     // Circuit breaker should reset on approval
@@ -2893,6 +2847,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'rev-1',
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
       approval,
     });
@@ -2930,6 +2886,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'review-child',
       toolCallId: 'task-auto',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'review child command',
       approval,
     });
@@ -2969,6 +2927,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'rev-risk',
       toolCallId: 'tool-risk',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
       approval,
     });
@@ -2985,17 +2945,10 @@ describe('reduceRuntimeState — auto-review events', () => {
         durationMs: 50,
       },
     });
-    expect(reviewed.interactions.kind).toBe('awaiting_auto_review');
-    expect(reviewed.tools.calls['tool-risk']!.status).toBe('awaiting_auto_review');
-
-    const escalated = reduceRuntimeState(reviewed, {
-      type: 'approval.requested',
-      interactionId: 'approval-after-risk',
-      toolCallId: 'tool-risk',
-      approval,
-    });
-    expect(escalated.interactions.kind).toBe('awaiting_tool_approval');
-    expect(escalated.tools.calls['tool-risk']!.status).toBe('awaiting_approval');
+    expect(reviewed.interactions.kind).toBe('awaiting_tool_approval');
+    expect(reviewed.tools.calls['tool-risk']!.status).toBe('awaiting_approval');
+    expect(reviewed.pendingApprovals.has('rev-risk')).toBe(true);
+    expect(reviewed.pendingApprovals.get('rev-risk')?.route).toBe('user');
   });
 
   test('auto_review technical failure remains non-terminal until approval.requested follows', () => {
@@ -3012,6 +2965,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'rev-technical',
       toolCallId: 'tool-technical',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
       approval,
     });
@@ -3022,23 +2977,17 @@ describe('reduceRuntimeState — auto-review events', () => {
       result: {
         ok: false,
         approved: false,
+        escalatedToUser: true,
         failureType: 'technical',
         reason: 'provider timeout',
         reviewerModelName: 'haiku',
         durationMs: 100,
       },
     });
-    expect(failed.interactions.kind).toBe('awaiting_auto_review');
-    expect(failed.tools.calls['tool-technical']!.status).toBe('awaiting_auto_review');
-
-    const escalated = reduceRuntimeState(failed, {
-      type: 'approval.requested',
-      interactionId: 'approval-after-review-failure',
-      toolCallId: 'tool-technical',
-      approval,
-    });
-    expect(escalated.interactions.kind).toBe('awaiting_tool_approval');
-    expect(escalated.tools.calls['tool-technical']!.status).toBe('awaiting_approval');
+    expect(failed.interactions.kind).toBe('awaiting_tool_approval');
+    expect(failed.tools.calls['tool-technical']!.status).toBe('awaiting_approval');
+    expect(failed.pendingApprovals.has('rev-technical')).toBe(true);
+    expect(failed.pendingApprovals.get('rev-technical')?.route).toBe('user');
   });
 
   test('auto_review.completed ignores mismatched reviewId', () => {
@@ -3058,6 +3007,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'rev-1',
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
       approval,
     });
@@ -3096,6 +3047,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'rev-1',
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'auto-review for tool approval',
       approval,
     });
@@ -3140,6 +3093,8 @@ describe('reduceRuntimeState — auto-review events', () => {
       reviewId: 'rev-1',
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
       reason: 'test',
       approval,
     });

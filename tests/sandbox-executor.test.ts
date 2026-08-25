@@ -44,7 +44,7 @@ describe('sandbox executor integration', () => {
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({ workspace: ws, command: 'pwd' });
-      expect(result.ok).toBe(true);
+      expect(result.processCleanup?.confirmedExited).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(ws);
     } finally {
@@ -278,7 +278,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         command:
           'printf %s "$TMPDIR" > runtime-path.txt; mkdir -p "$TMPDIR/nested/deeper"; printf flagged > "$TMPDIR/nested/deeper/flagged"; chflags uchg,uappnd "$TMPDIR/nested/deeper/flagged"; chmod 000 "$TMPDIR/nested/deeper"; chflags uchg,uappnd "$TMPDIR/nested/deeper"; chmod 000 "$TMPDIR/nested"; chflags uchg,uappnd "$TMPDIR/nested"; chmod 000 "$TMPDIR/.."',
       });
-      expect(result.ok).toBe(true);
+      expect(result.processCleanup?.confirmedExited).toBe(true);
       const runtimeTmp = await Bun.file(join(ws, 'runtime-path.txt')).text();
       expect(existsSync(runtimeTmp)).toBe(false);
     } finally {
@@ -358,7 +358,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
     }
   });
 
-  test('denies protected paths inside workspace', async () => {
+  test('allows protected-looking paths inside workspace', async () => {
     const ws = setupWorkspace();
     mkdirSync(join(ws, '.SSH'));
     writeFileSync(join(ws, '.SSH', 'config'), 'protected');
@@ -372,10 +372,10 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         workspace: ws,
         command: `p=.E; echo changed > "\${p}NV.TEST"`,
       });
-      expect(read.ok).toBe(false);
-      expect(read.stdout).not.toContain('protected');
-      expect(write.ok).toBe(false);
-      expect(await Bun.file(join(ws, '.ENV.TEST')).text()).toBe('keep');
+      expect(read.ok).toBe(true);
+      expect(read.stdout).toContain('protected');
+      expect(write.ok).toBe(true);
+      expect(await Bun.file(join(ws, '.ENV.TEST')).text()).toContain('changed');
     } finally {
       cleanupWorkspace(ws);
     }
@@ -391,6 +391,54 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
       const result = await executor({ workspace: ws, command: `p=.g; cat "\${p}it/config"` });
       expect(result.ok).toBe(true);
       expect(result.stdout).toContain('repo-config');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('runs closed read-only Git status and log without invoking repository fsmonitor', async () => {
+    const ws = setupWorkspace();
+    const runGit = (args: string[]) => {
+      const result = Bun.spawnSync(['git', ...args], {
+        cwd: ws,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      expect(result.exitCode).toBe(0);
+    };
+    try {
+      runGit(['init']);
+      writeFileSync(join(ws, 'tracked.txt'), 'tracked\n');
+      runGit(['add', 'tracked.txt']);
+      runGit([
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.invalid',
+        'commit',
+        '-m',
+        'initial',
+      ]);
+      const fsmonitor = join(ws, 'fsmonitor.sh');
+      writeFileSync(fsmonitor, '#!/bin/sh\ntouch fsmonitor-ran\nexit 0\n');
+      chmodSync(fsmonitor, 0o700);
+      runGit(['config', 'core.fsmonitor', './fsmonitor.sh']);
+
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const status = await executor({
+        workspace: ws,
+        command: 'git status --short',
+        executionTrust: 'policy_proven_read_only',
+      });
+      const log = await executor({
+        workspace: ws,
+        command: 'git log --oneline -10',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(status.ok).toBe(true);
+      expect(log.ok).toBe(true);
+      expect(log.stdout).toContain('initial');
+      expect(existsSync(join(ws, 'fsmonitor-ran'))).toBe(false);
     } finally {
       cleanupWorkspace(ws);
     }
@@ -413,7 +461,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
     }
   });
 
-  test('an approved external filesystem invocation is not denied by Seatbelt', async () => {
+  test('unsupported expanded filesystem scope fails closed before Seatbelt execution', async () => {
     const ws = setupWorkspace();
     const externalFile = join(tmpdir(), `kite-code-approved-external-${process.pid}.txt`);
     try {
@@ -424,15 +472,40 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         command: `printf approved > "${externalFile}"`,
         filesystemMode: 'allow_all',
       });
-      expect(result.ok).toBe(true);
-      expect(existsSync(externalFile)).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(existsSync(externalFile)).toBe(false);
     } finally {
       rmSync(externalFile, { force: true });
       cleanupWorkspace(ws);
     }
   });
 
-  test('approved filesystem scope retains the native protected-path deny', async () => {
+  test('unsupported sensitive external scope never reaches Seatbelt execution', async () => {
+    const ws = setupWorkspace();
+    const externalRoot = mkdtempSync(join(tmpdir(), 'kite-code-approved-sensitive-'));
+    const sensitiveDirectory = join(externalRoot, '.ssh');
+    const sensitiveFile = join(sensitiveDirectory, 'config');
+    try {
+      mkdirSync(sensitiveDirectory);
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `printf approved > "${sensitiveFile}"; cat "${sensitiveFile}"`,
+        filesystemMode: 'allow_all',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(existsSync(sensitiveFile)).toBe(false);
+    } finally {
+      rmSync(externalRoot, { recursive: true, force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('an unsupported expansion cannot bypass the admitted Workspace baseline', async () => {
     const ws = setupWorkspace();
     writeFileSync(join(ws, '.ENV.SECRET'), 'must-not-read');
     try {
@@ -443,13 +516,15 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         filesystemMode: 'allow_all',
       });
       expect(result.ok).toBe(false);
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
       expect(result.stdout).not.toContain('must-not-read');
     } finally {
       cleanupWorkspace(ws);
     }
   });
 
-  test('approved filesystem scope does not disable Seatbelt network isolation', async () => {
+  test('unsupported filesystem expansion cannot start before network isolation', async () => {
     const ws = setupWorkspace();
     const externalFile = join(tmpdir(), `kite-code-approved-sandboxed-${process.pid}.txt`);
     const server = startTestHttpServer({ fetch: () => new Response('must-not-arrive') });
@@ -461,8 +536,10 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         command: `printf approved > "${externalFile}"; curl -s --connect-timeout 1 http://127.0.0.1:${server.port}`,
         filesystemMode: 'allow_all',
       });
-      expect(existsSync(externalFile)).toBe(true);
       expect(result.ok).toBe(false);
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(existsSync(externalFile)).toBe(false);
       expect(result.stdout).not.toContain('must-not-arrive');
     } finally {
       server.stop(true);
@@ -487,7 +564,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
     }
   });
 
-  test('applies network permission independently to each sandboxed command', async () => {
+  test('fails closed when expanded network scope lacks accepted backend evidence', async () => {
     const ws = setupWorkspace();
     const server = startTestHttpServer({
       fetch: () => new Response('sandbox-network-ok'),
@@ -506,8 +583,10 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
       });
 
       expect(blocked.ok).toBe(false);
-      expect(allowed.ok).toBe(true);
-      expect(allowed.stdout).toBe('sandbox-network-ok');
+      expect(allowed.ok).toBe(false);
+      expect(allowed.terminationReason).toBe('sandbox_denied');
+      expect(allowed.sandboxFailure?.stage).toBe('pre_dispatch');
+      expect(allowed.stdout).not.toContain('sandbox-network-ok');
     } finally {
       server.stop(true);
       cleanupWorkspace(ws);
@@ -537,7 +616,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
     }
   }, 10_000);
 
-  test('rejects commands targeting dangerous file paths', async () => {
+  test('allows commands targeting protected-looking paths inside Workspace', async () => {
     const ws = setupWorkspace();
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
@@ -545,9 +624,8 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         workspace: ws,
         command: 'echo alias ls=evil >> .bashrc',
       });
-      expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('Rejected');
-      expect(result.stderr).toContain('.bashrc');
+      expect(result.ok).toBe(true);
+      expect(await Bun.file(join(ws, '.bashrc')).text()).toContain('alias ls=evil');
     } finally {
       cleanupWorkspace(ws);
     }

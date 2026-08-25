@@ -78,6 +78,17 @@ function importedFiles(root: string): Array<{ file: string; line: number; specif
 }
 
 function resolveImport(file: string, specifier: string, sourceRoot: string): string | null {
+  if (specifier.startsWith('@/tests/')) {
+    return resolve(dirname(sourceRoot), 'tests', specifier.slice('@/tests/'.length));
+  }
+  if (specifier.startsWith('@/app/sandbox/')) {
+    const relocated = resolve(
+      dirname(sourceRoot),
+      'apps/kite/src/sandbox',
+      specifier.slice('@/app/sandbox/'.length),
+    );
+    if (resolveSourceModule(relocated)) return relocated;
+  }
   if (specifier.startsWith('@/')) return resolve(sourceRoot, specifier.slice(2));
   if (specifier.startsWith('.')) return resolve(dirname(file), specifier);
   return null;
@@ -185,70 +196,6 @@ function forbiddenImports(
   });
 }
 
-function forbiddenToolSpecCalls(root: string, sourceRoot: string): Violation[] {
-  const allowed = (file: string) =>
-    file.endsWith(`${sep}harness${sep}tool-runner.ts`) ||
-    file.endsWith(`${sep}tools${sep}registry${sep}dispatch.ts`);
-  return sourceFiles(root).flatMap((file) => {
-    if (allowed(file)) return [];
-    const source = parsedSource(file);
-    const dispatchNames = new Set(['dispatchRegisteredTool']);
-    const concreteSpecNames = new Set<string>();
-    for (const statement of source.statements) {
-      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
-        continue;
-      }
-      const target = resolveImport(file, statement.moduleSpecifier.text, sourceRoot);
-      const bindings = statement.importClause?.namedBindings;
-      if (!target || !bindings || !ts.isNamedImports(bindings)) continue;
-      for (const element of bindings.elements) {
-        const imported = element.propertyName?.text ?? element.name.text;
-        if (
-          target.endsWith(`${sep}tools${sep}registry${sep}dispatch`) &&
-          imported === 'dispatchRegisteredTool'
-        ) {
-          dispatchNames.add(element.name.text);
-        }
-        if (
-          target.includes(`${sep}tools${sep}registry${sep}builtins${sep}`) &&
-          imported.endsWith('Spec')
-        ) {
-          concreteSpecNames.add(element.name.text);
-        }
-      }
-    }
-
-    const violations: Violation[] = [];
-    const unwrap = (expression: ts.Expression): ts.Expression => {
-      let current = expression;
-      while (ts.isParenthesizedExpression(current)) current = current.expression;
-      return current;
-    };
-    const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node)) {
-        const expression = unwrap(node.expression);
-        const directDispatch = ts.isIdentifier(expression) && dispatchNames.has(expression.text);
-        const directSpecMethod =
-          ts.isPropertyAccessExpression(expression) &&
-          ts.isIdentifier(expression.expression) &&
-          concreteSpecNames.has(expression.expression.text) &&
-          ['execute', 'preExecute', 'projectResult'].includes(expression.name.text);
-        if (directDispatch || directSpecMethod) {
-          violations.push({
-            check: 'ToolSpec dispatch must stay behind invokeGovernedTool',
-            file,
-            line: lineOf(source, node),
-            text: node.getText(source),
-          });
-        }
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(source);
-    return violations;
-  });
-}
-
 function forbiddenModelDispatchImports(roots: string[], sourceRoot: string): Violation[] {
   const responseSource = resolve(sourceRoot, 'core/model/response-source');
   const transport = resolve(sourceRoot, 'core/model/transport');
@@ -284,12 +231,18 @@ function forbiddenModelDispatchImports(roots: string[], sourceRoot: string): Vio
 
 function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Violation[] {
   const dispatchAdapter = resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch');
-  const subagentRuntime = resolve(sourceRoot, 'core/execution/tool-pipeline/subagent-runtime');
+  const preparedSubagentAdapter = resolve(
+    sourceRoot,
+    'core/execution/tool-pipeline/subagent-capability-dispatch-adapter',
+  );
+  const relocatedSubagentRoot = resolve(
+    dirname(sourceRoot),
+    'apps/kite/src/bootstrap/runtime/subagent',
+  );
+  const taskTool = resolve(relocatedSubagentRoot, 'task-tool');
   const concreteProviderModules = [
-    resolve(sourceRoot, 'core/harness/tool-runner'),
-    resolve(sourceRoot, 'core/subagent/runner'),
-    resolve(sourceRoot, 'core/subagent/task-tool'),
-    resolve(sourceRoot, 'core/tools/registry/dispatch'),
+    resolve(relocatedSubagentRoot, 'tool-adapter'),
+    resolve(relocatedSubagentRoot, 'task-tool'),
   ];
   return roots.flatMap((root) =>
     importedFiles(root).flatMap(({ file, line, specifier }) => {
@@ -298,8 +251,7 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
       const normalizedTarget = target?.replace(/\.(?:ts|tsx)$/, '');
       if (
         normalizedFile === dispatchAdapter ||
-        (normalizedFile === subagentRuntime &&
-          normalizedTarget === resolve(sourceRoot, 'core/subagent/task-tool'))
+        (normalizedFile === preparedSubagentAdapter && normalizedTarget === taskTool)
       )
         return [];
       if (!normalizedTarget || !concreteProviderModules.includes(normalizedTarget)) return [];
@@ -316,43 +268,17 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
 }
 
 function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
-  const localProvider = normalizedModulePath(resolve(sourceRoot, 'core/subagent/local-provider'));
-  const composition = normalizedModulePath(resolve(sourceRoot, 'core/subagent/composition'));
-  const driver = normalizedModulePath(resolve(sourceRoot, 'core/subagent/child-runtime-driver'));
-  const runner = normalizedModulePath(resolve(sourceRoot, 'core/subagent/runner'));
-  const taskTool = normalizedModulePath(resolve(sourceRoot, 'core/subagent/task-tool'));
-  const pipelineRuntime = normalizedModulePath(
-    resolve(sourceRoot, 'core/execution/tool-pipeline/subagent-runtime'),
+  const relocatedSubagentRoot = resolve(
+    dirname(sourceRoot),
+    'apps/kite/src/bootstrap/runtime/subagent',
+  );
+  const toolAdapter = normalizedModulePath(resolve(relocatedSubagentRoot, 'tool-adapter'));
+  const taskTool = normalizedModulePath(resolve(relocatedSubagentRoot, 'task-tool'));
+  const preparedSubagentAdapter = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/tool-pipeline/subagent-capability-dispatch-adapter'),
   );
   const dispatch = normalizedModulePath(
     resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch'),
-  );
-  const harness = normalizedModulePath(resolve(sourceRoot, 'core/harness/tool-runner'));
-  const installationComposition = normalizedModulePath(
-    resolve(sourceRoot, 'core/model/invocation-composition'),
-  );
-  const forbiddenAuthorityRoots = [
-    resolve(sourceRoot, 'core/policies'),
-    resolve(sourceRoot, 'core/runtime'),
-    resolve(sourceRoot, 'app'),
-  ];
-  const localFile = resolveSourceModule(resolve(sourceRoot, 'core/subagent/local-provider'));
-  const closure = localFile ? importClosure(localFile, sourceRoot) : [];
-  const authorityViolations = closure.flatMap((file) =>
-    importedFiles(dirname(file)).flatMap(({ file: importer, line, specifier }) => {
-      if (normalizedModulePath(importer) !== normalizedModulePath(file)) return [];
-      const target = resolveImport(importer, specifier, sourceRoot);
-      if (!target || !forbiddenAuthorityRoots.some((root) => isWithin(target, root))) return [];
-      return [
-        {
-          check:
-            'LocalSubagentProvider dependency closure must not own policy, Runtime, or App authority',
-          file: importer,
-          line,
-          text: specifier,
-        },
-      ];
-    }),
   );
   const concreteViolations = importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
     if (!runtimeImportedSpecifiers(file).includes(specifier)) return [];
@@ -361,14 +287,9 @@ function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
     if (!target) return [];
     const imported = normalizedModulePath(target);
     const allowed =
-      (imported === localProvider && (importer === composition || importer === driver)) ||
-      (imported === driver && importer === composition) ||
-      (imported === runner && importer === driver) ||
-      (imported === composition &&
-        (importer === pipelineRuntime || importer === installationComposition)) ||
-      (imported === taskTool &&
-        (importer === pipelineRuntime || importer === dispatch || importer === harness));
-    if (![localProvider, driver, runner, composition, taskTool].includes(imported) || allowed) {
+      (imported === toolAdapter && importer === taskTool) ||
+      (imported === taskTool && (importer === dispatch || importer === preparedSubagentAdapter));
+    if (![toolAdapter, taskTool].includes(imported) || allowed) {
       return [];
     }
     return [
@@ -381,24 +302,21 @@ function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
     ];
   });
   return [
-    ...authorityViolations,
     ...concreteViolations,
+    ...find(
+      'installed Subagent composition must remain private to the installation root',
+      sourceRoot,
+      /\bsubagentComposition\b/,
+    ),
     ...find(
       'precomputed Subagent result bypass must not exist in production',
       sourceRoot,
       /\bprecomputedSubagentResult\b/,
     ),
     ...find(
-      'installed Subagent composition must remain private to the installation root',
-      sourceRoot,
-      /\bsubagentComposition\b/,
-      (file) => normalizedModulePath(file) === installationComposition,
-    ),
-    ...find(
-      'raw Subagent runner calls must stay inside ChildRuntimeDriver',
+      'retired Core Subagent runner calls must not exist',
       sourceRoot,
       /\b(?:runSubAgent|resumeSubAgent)\s*\(/,
-      (file) => normalizedModulePath(file) === runner || normalizedModulePath(file) === driver,
     ),
   ];
 }
@@ -488,19 +406,28 @@ function forbiddenSandboxProviderAuthority(sourceRoot: string): Violation[] {
 }
 
 function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
+  const relocatedAppSandbox = resolve(dirname(sourceRoot), 'apps/kite/src/sandbox');
+  const appSandboxRoot = existsSync(relocatedAppSandbox)
+    ? relocatedAppSandbox
+    : resolve(sourceRoot, 'app/sandbox');
   const localProvider = normalizedModulePath(
     resolve(sourceRoot, 'core/execution/sandbox-execution/local-provider'),
   );
-  const composition = normalizedModulePath(
-    resolve(sourceRoot, 'core/execution/sandbox-execution/composition'),
-  );
   const acknowledgedHostShell = normalizedModulePath(
-    resolve(sourceRoot, 'app/sandbox/acknowledged-host-shell'),
+    resolve(appSandboxRoot, 'acknowledged-host-shell'),
   );
-  const appSandboxComposition = normalizedModulePath(
-    resolve(sourceRoot, 'app/sandbox/composition'),
+  const coreShell = normalizedModulePath(resolve(sourceRoot, 'core/tools/shell'));
+  const appSandboxComposition = normalizedModulePath(resolve(appSandboxRoot, 'composition'));
+  const composition = normalizedModulePath(
+    existsSync(relocatedAppSandbox)
+      ? resolve(appSandboxRoot, 'governed-local-sandbox')
+      : resolve(sourceRoot, 'core/execution/sandbox-execution/composition'),
   );
-  const directLocalImports = importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
+  const sandboxImports = [
+    ...importedFiles(sourceRoot),
+    ...(appSandboxRoot.startsWith(sourceRoot) ? [] : importedFiles(appSandboxRoot)),
+  ];
+  const directLocalImports = sandboxImports.flatMap(({ file, line, specifier }) => {
     const target = resolveImport(file, specifier, sourceRoot);
     if (
       !target ||
@@ -518,29 +445,46 @@ function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
       },
     ];
   });
-  const hostShellOwnerViolations = importedFiles(sourceRoot).flatMap(
-    ({ file, line, specifier }) => {
-      const target = resolveImport(file, specifier, sourceRoot);
-      if (
-        !target ||
-        normalizedModulePath(target) !== acknowledgedHostShell ||
-        normalizedModulePath(file) === appSandboxComposition
-      ) {
-        return [];
-      }
-      return [
-        {
-          check: 'Acknowledged host Shell availability fallback has one App composition owner',
-          file,
-          line,
-          text: specifier,
-        },
-      ];
-    },
-  );
+  const hostShellOwnerViolations = sandboxImports.flatMap(({ file, line, specifier }) => {
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (
+      !target ||
+      normalizedModulePath(target) !== acknowledgedHostShell ||
+      normalizedModulePath(file) === appSandboxComposition
+    ) {
+      return [];
+    }
+    return [
+      {
+        check: 'Acknowledged host Shell availability fallback has one App composition owner',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+  const acknowledgedHostCoreShellImports = sandboxImports.flatMap(({ file, line, specifier }) => {
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (
+      !target ||
+      normalizedModulePath(target) !== coreShell ||
+      normalizedModulePath(file) !== acknowledgedHostShell
+    ) {
+      return [];
+    }
+    return [
+      {
+        check: 'Acknowledged host Shell must use Builtin semantics, not Core shell value imports',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
   return [
     ...directLocalImports,
     ...hostShellOwnerViolations,
+    ...acknowledgedHostCoreShellImports,
     ...find(
       'legacy createSandboxExecutor production entry must not exist',
       sourceRoot,
@@ -659,7 +603,6 @@ function forbiddenLegacyFilesystemExecutionImports(
     resolve(coreRoot, 'harness'),
     resolve(coreRoot, 'execution/tool-pipeline'),
     resolve(coreRoot, 'execution/workspace-filesystem'),
-    resolve(coreRoot, 'tools/registry'),
   ];
 
   return importedFiles(coreRoot).flatMap(({ file, line, specifier }) => {
@@ -697,7 +640,6 @@ function forbiddenCapabilityFilesystemNodeImports(
     resolve(coreRoot, 'harness'),
     resolve(coreRoot, 'execution/tool-pipeline'),
     resolve(coreRoot, 'execution/workspace-filesystem'),
-    resolve(coreRoot, 'tools/registry'),
   ];
 
   return importedFiles(coreRoot).flatMap(({ file, line, specifier }) => {
@@ -722,21 +664,23 @@ function forbiddenCapabilityFilesystemNodeImports(
 
 function forbiddenProductionTestHelperImports(
   projectRoot: string,
-  sourceRoot: string,
+  productionRoots: readonly string[],
 ): Violation[] {
   const testHelpersRoot = resolve(projectRoot, 'tests/helpers');
-  return importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
-    const target = resolveImport(file, specifier, sourceRoot);
-    if (!target || !isWithin(target, testHelpersRoot)) return [];
-    return [
-      {
-        check: 'production source must not import test helper providers',
-        file,
-        line,
-        text: specifier,
-      },
-    ];
-  });
+  return productionRoots.flatMap((productionRoot) =>
+    importedFiles(productionRoot).flatMap(({ file, line, specifier }) => {
+      const target = resolveImport(file, specifier, resolve(projectRoot, 'src'));
+      if (!target || !isWithin(target, testHelpersRoot)) return [];
+      return [
+        {
+          check: 'production source must not import test helper providers',
+          file,
+          line,
+          text: specifier,
+        },
+      ];
+    }),
+  );
 }
 
 function forbiddenProviderSdkCalls(roots: string[]): Violation[] {
@@ -814,6 +758,9 @@ const protocolRoot = join(sourceRoot, 'protocol');
 const controllersRoot = join(coreRoot, 'controllers');
 const toolPipelineRoot = join(coreRoot, 'execution', 'tool-pipeline');
 const scriptsRoot = join(root, 'scripts');
+const appsRoot = join(root, 'apps');
+const packagesRoot = join(root, 'packages');
+const checkerFile = resolve(root, 'scripts/check-core-boundary.ts');
 const violations = [
   ...forbiddenImports('core must not import app', coreRoot, sourceRoot, [appRoot]),
   ...forbiddenImports('protocol must not import core or app', protocolRoot, sourceRoot, [
@@ -835,27 +782,29 @@ const violations = [
   ...find(
     'CUT-01 forbids legacy Runtime authority shapes in production source',
     sourceRoot,
-    /\b(?:LegacyCapabilityArtifactRefV1|legacy_v24)\b/,
+    /\b(?:LegacyCapabilityArtifactRef|legacy_v24)\b/,
   ),
   ...find(
     'CUT-01 forbids same-epoch Model invocation index normalization',
     coreRoot,
     /['"]modelInvocations['"]\s+in\s+/,
   ),
+  ...[sourceRoot, appsRoot, packagesRoot, scriptsRoot].flatMap((productionRoot) =>
+    find(
+      'retired Core Tool Runner symbols must not exist in production source',
+      productionRoot,
+      /\b(?:invokeGovernedTool|completedTaskExecutionResult|containsBrokeredGitInvocation)\b/,
+      (file) => resolve(file) === checkerFile,
+    ),
+  ),
   ...find(
     'Windows sandbox process adapters are Runtime-consumer-only',
     sourceRoot,
-    /\b(?:executeWindowsRestrictedTokenPreparedV1|reconcileWindowsRestrictedTokenPreparedV1)\b/,
+    /\b(?:executeWindowsRestrictedTokenPrepared|reconcileWindowsRestrictedTokenPrepared)\b/,
     (file) =>
       file.endsWith(`${sep}sandbox-execution${sep}windows-runtime.ts`) ||
       file.endsWith(`${sep}sandbox-execution${sep}consumer.ts`) ||
       file.endsWith(`${sep}sandbox-execution${sep}recovery.ts`),
-  ),
-  ...find(
-    'Shell ToolSpec must fail closed without the Pipeline sandbox consumer',
-    resolve(sourceRoot, 'core/tools/registry/builtins'),
-    /\bshellTool\b/,
-    (file) => !file.endsWith(`${sep}builtins${sep}shell-execute.ts`),
   ),
   ...forbiddenConcreteWorkspaceFilesystemImports(sourceRoot),
   ...forbiddenFilesystemObservationAuthorityImports(sourceRoot),
@@ -863,7 +812,7 @@ const violations = [
   ...find(
     'Tool dispatch stage authority issuers must only be called by the dispatch adapter',
     sourceRoot,
-    /\b(?:issueAcknowledgedRecordedInvocationV1|issueAdapterDispatchedOutcomeV1|issueConfirmedFailureDispatchedOutcomeV1)\b/,
+    /\b(?:issueAcknowledgedRecordedInvocation|issueAdapterDispatchedOutcome|issueConfirmedFailureDispatchedOutcome)\b/,
     (file) =>
       normalizedModulePath(file) ===
         normalizedModulePath(
@@ -875,7 +824,7 @@ const violations = [
   ...find(
     'filesystem observation authority issuer must only be called by the Workspace Pipeline dispatcher',
     sourceRoot,
-    /\bissueWorkspaceFilesystemObservationAuthorityV1\b/,
+    /\bissueWorkspaceFilesystemObservationAuthority\b/,
     (file) =>
       normalizedModulePath(file) ===
         normalizedModulePath(
@@ -888,8 +837,7 @@ const violations = [
   ),
   ...forbiddenLegacyFilesystemExecutionImports(sourceRoot, coreRoot),
   ...forbiddenCapabilityFilesystemNodeImports(sourceRoot, coreRoot),
-  ...forbiddenProductionTestHelperImports(root, sourceRoot),
-  ...forbiddenToolSpecCalls(coreRoot, sourceRoot),
+  ...forbiddenProductionTestHelperImports(root, [sourceRoot, appsRoot, packagesRoot, scriptsRoot]),
   ...find(
     'planning state is reducer-owned',
     join(root, 'src/core'),

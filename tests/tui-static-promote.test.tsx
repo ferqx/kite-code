@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
-import { isBlockSettledInRun } from '../src/app/tui/render/useStaticContent';
-import { getDarkTheme, ThemeContext } from '../src/app/tui/theme';
-import type { OutputBlock } from '../src/app/tui/types';
+import OutputArea, { useStaticContent } from '../apps/kite/src/tui/OutputArea';
+import { isBlockSettledInRun } from '../apps/kite/src/tui/render/useStaticContent';
+import { getDarkTheme, ThemeContext } from '../apps/kite/src/tui/theme';
+import type { OutputBlock } from '../apps/kite/src/tui/types';
 
 type ToolStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseArgs } from '../src/app/cli/index';
+import { parseArgs } from '../apps/kite/src/cli/index';
 
 // 测试 CLI 命令行参数解析逻辑 / Test CLI argument parsing logic
 describe('cli argument parsing', () => {
@@ -36,6 +36,13 @@ describe('cli argument parsing', () => {
     const args = parseArgs(['resume', '--approve']);
 
     expect(args.threadId).toBe('default-thread');
+  });
+
+  test('resume accepts a successor task without exposing compatibility flags', () => {
+    const args = parseArgs(['resume', '--thread', 'conversation-a', 'continue safely']);
+
+    expect(args.threadId).toBe('conversation-a');
+    expect(args.task).toBe('continue safely');
   });
 
   // 验证 resume 支持用户输入回答，用于恢复 ask_user 中断 / Verify resume accepts user answers for ask_user interrupts
@@ -81,8 +88,8 @@ describe('cli argument parsing', () => {
     expect(args.approvalHash).toBe('hash-a');
   });
 
-  // 验证 resume 支持当前 thread 的 full_access 授权 / Verify resume accepts full-access grants
-  test('resume accepts full-access grant', () => {
+  // Full is an interaction mode, never an approval grant.
+  test('ignores legacy full-access approval flag', () => {
     const args = parseArgs([
       'resume',
       '--thread',
@@ -92,20 +99,9 @@ describe('cli argument parsing', () => {
       'hash-a',
     ]);
 
-    expect(args.approve).toBe(true);
-    expect(args.approvalGrant).toBe('full_access');
+    expect(args.approve).toBe(false);
+    expect(args.approvalGrant).toBeUndefined();
     expect(args.approvalHash).toBe('hash-a');
-  });
-
-  // 验证 run 命令的 --mode 参数（read-only/plan 已移除，退回 auto）/ Verify run --mode accepts write/builder, others default to auto
-  test('run accepts explicit workspace access mode values', () => {
-    const args = parseArgs(['run', '--mode', 'read-only', '--task', 'Create hello.txt']);
-    const planArgs = parseArgs(['run', '--mode', 'plan', '--task', 'Create hello.txt']);
-    const writeArgs = parseArgs(['run', '--mode', 'write', '--task', 'Create hello.txt']);
-
-    expect(args.mode).toBe('auto');
-    expect(planArgs.mode).toBe('auto');
-    expect(writeArgs.mode).toBe('write');
   });
 
   // 验证 --skill 参数解析为单值 / Verify --skill flag is parsed

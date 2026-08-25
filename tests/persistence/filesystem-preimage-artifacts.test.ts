@@ -4,23 +4,21 @@ import { chmodSync, mkdtempSync, rmSync, statSync, unlinkSync, writeFileSync } f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  FilesystemPreimageArtifactErrorV1,
-  FilesystemPreimageArtifactStoreV1,
-} from '@/core/persistence/filesystem-preimage-artifacts';
+  FilesystemPreimageArtifactError,
+  FilesystemPreimageArtifactStore,
+} from '@kite/builtin-runtime/filesystem';
 
-const INTEGRITY_KEY = Buffer.alloc(32, 0x51);
 const roots: string[] = [];
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe('FilesystemPreimageArtifactStoreV1', () => {
-  test('publishes owner-only immutable evidence under opaque keyed references', () => {
+describe('FilesystemPreimageArtifactStore', () => {
+  test('publishes owner-only immutable evidence under path-free content references', () => {
     const storageRoot = root();
-    const store = new FilesystemPreimageArtifactStoreV1({
+    const store = new FilesystemPreimageArtifactStore({
       root: storageRoot,
-      integrityKey: INTEGRITY_KEY,
     });
     const input = artifactInput('private preimage');
 
@@ -30,7 +28,7 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
     expect(second).toEqual(first);
     expect(first).toMatchObject({ kind: 'filesystem_preimage' });
     expect(first.artifactId).toMatch(/^pa_[0-9a-f]{64}$/u);
-    expect(first.integrityIdentifier).toMatch(/^hmac-sha256:[0-9a-f]{64}$/u);
+    expect(first.integrityIdentifier).toMatch(/^sha256:[0-9a-f]{64}$/u);
     const rawDigest = createHash('sha256').update(input.preimage.content!).digest('hex');
     expect(first.artifactId).not.toContain(rawDigest);
     expect(first.integrityIdentifier).not.toContain(rawDigest);
@@ -45,9 +43,8 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
 
   test('fails closed for missing and tampered immutable evidence', () => {
     const storageRoot = root();
-    const store = new FilesystemPreimageArtifactStoreV1({
+    const store = new FilesystemPreimageArtifactStore({
       root: storageRoot,
-      integrityKey: INTEGRITY_KEY,
     });
     const missing = store.write(artifactInput('missing evidence'));
     unlinkSync(artifactPath(storageRoot, missing.artifactId));
@@ -62,16 +59,14 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
 
   test('rejects wrong owners, malformed preimages, and broad storage roots', () => {
     const storageRoot = root();
-    const store = new FilesystemPreimageArtifactStoreV1({
+    const store = new FilesystemPreimageArtifactStore({
       root: storageRoot,
-      integrityKey: INTEGRITY_KEY,
     });
     const ref = store.write(artifactInput('owned evidence'));
-    const otherOwner = new FilesystemPreimageArtifactStoreV1({
+    const otherOwner = new FilesystemPreimageArtifactStore({
       root: storageRoot,
-      integrityKey: Buffer.alloc(32, 0x52),
     });
-    expectArtifactError(() => otherOwner.read(ref), 'artifact_corrupt');
+    expect(otherOwner.read(ref)).toEqual(store.read(ref));
 
     expectArtifactError(
       () =>
@@ -87,10 +82,7 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
 
     const broad = join(storageRoot, '..');
     expectArtifactError(
-      () =>
-        new FilesystemPreimageArtifactStoreV1({ root: broad, integrityKey: INTEGRITY_KEY }).write(
-          artifactInput('broad root'),
-        ),
+      () => new FilesystemPreimageArtifactStore({ root: broad }).write(artifactInput('broad root')),
       'storage_boundary_violation',
     );
   });
@@ -123,14 +115,14 @@ function root(): string {
 
 function expectArtifactError(
   operation: () => unknown,
-  code: FilesystemPreimageArtifactErrorV1['code'],
+  code: FilesystemPreimageArtifactError['code'],
 ): void {
   try {
     operation();
-    throw new Error('expected FilesystemPreimageArtifactErrorV1');
+    throw new Error('expected FilesystemPreimageArtifactError');
   } catch (error) {
-    expect(error).toBeInstanceOf(FilesystemPreimageArtifactErrorV1);
-    if (!(error instanceof FilesystemPreimageArtifactErrorV1)) throw error;
+    expect(error).toBeInstanceOf(FilesystemPreimageArtifactError);
+    if (!(error instanceof FilesystemPreimageArtifactError)) throw error;
     expect(error.code).toBe(code);
   }
 }

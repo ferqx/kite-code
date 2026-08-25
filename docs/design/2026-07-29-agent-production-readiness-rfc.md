@@ -17,7 +17,6 @@
 - [`../active/verification-governance.md`](../active/verification-governance.md)
 - [`../active/plan-state-reminder.md`](../active/plan-state-reminder.md)
 - [`../active/model-provider-boundary.md`](../active/model-provider-boundary.md)
-- [`../active/real-model-test-boundary.md`](../active/real-model-test-boundary.md)
 - [`../space/plans/2026-07-29-agent-production-readiness-roadmap.md`](../space/plans/2026-07-29-agent-production-readiness-roadmap.md)
 - [`../space/plans/2026-07-29-agent-production-local-data-privacy.md`](../space/plans/2026-07-29-agent-production-local-data-privacy.md)
 

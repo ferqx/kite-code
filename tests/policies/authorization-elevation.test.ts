@@ -1,57 +1,31 @@
 import { expect, test } from 'bun:test';
-import { applyApprovalGrant } from '@/core/harness/tool-policy';
-import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 
-test('authorization elevation requires a sandbox', () => {
-  expect(() =>
-    assertAuthorizationElevation({ mode: 'full_access', sandboxAvailable: false }),
-  ).toThrow('requires an available workspace sandbox');
-});
+const recoveryIdentityKey = '0000000000000000000000000000000000000000000000000000000000000000';
 
-test('automated paths cannot elevate to full access', () => {
-  expect(() =>
-    assertAuthorizationElevation({
-      mode: 'full_access',
-      source: 'system',
-      sandboxAvailable: true,
-      autoReview: true,
-    }),
-  ).toThrow('auto-review cannot grant');
-  expect(() =>
-    assertAuthorizationElevation({
-      mode: 'full_access',
-      source: 'system',
-      sandboxAvailable: true,
-      loopMode: true,
-    }),
-  ).toThrow('loop-mode cannot auto-elevate');
-});
-
-test('records explicit test provenance for injected authorization', () => {
-  const state = createInitialRuntimeState({
+test('Full is represented by interactionMode alone', () => {
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey,
     threadId: 'test-thread',
     userId: 'u',
     workspace: '/',
-    authorizationMode: 'full_access',
-    authorizationSource: 'test',
+    interactionMode: 'full',
   });
-  expect(state.authorization).toMatchObject({ modeSource: 'test' });
 
-  const grant = applyApprovalGrant({
-    authorization: state.authorization,
-    grant: 'same_command',
-    workspace: '/',
+  expect(state.mode).toBe('full');
+  expect('authorization' in state).toBe(false);
+});
+
+test('changing interaction mode does not create an authorization grant', () => {
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey,
     threadId: 'test-thread',
-    source: 'test',
-    request: {
-      source: 'builtin' as const,
-      id: 'call',
-      name: 'shell_execute',
-      args: { command: 'pwd' },
-      reason: 'test authorization source',
-      protectedCommand: 'pwd',
-    },
+    userId: 'u',
+    workspace: '/',
+    interactionMode: 'accept_edits',
   });
-  expect(Object.values(grant.commandGrants)[0]).toMatchObject({ source: 'test' });
+
+  expect(state.mode).toBe('accept_edits');
+  expect(state.sessionCommandGrants).toEqual(new Map());
+  expect(state.pendingApprovals).toEqual(new Map());
 });

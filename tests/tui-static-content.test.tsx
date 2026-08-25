@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import { useStaticContent } from '../src/app/tui/OutputArea';
-import type { OutputBlock, Turn } from '../src/app/tui/types';
+import { useStaticContent } from '../apps/kite/src/tui/OutputArea';
+import type { OutputBlock, Turn } from '../apps/kite/src/tui/types';
 
 function makeTurn(ids: number[], kind: 'user' | 'text'): Turn {
   return {

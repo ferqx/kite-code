@@ -6,15 +6,15 @@ import {
   RUNTIME_FAULT_SOAK_CASE_IDS,
   RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS,
   RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS,
-  type RuntimeFaultSoakAttemptV2,
-  type RuntimeFaultSoakMetricEvidenceV2,
+  type RuntimeFaultSoakAttempt,
+  type RuntimeFaultSoakMetricEvidence,
 } from '../../scripts/runtime/fault-soak-report';
 
 function unsupported(reason: string) {
   return { supported: false as const, reason };
 }
 
-function attempts(iterations = 1): RuntimeFaultSoakAttemptV2[] {
+function attempts(iterations = 1): RuntimeFaultSoakAttempt[] {
   return RUNTIME_FAULT_SOAK_CASE_IDS.flatMap((caseId) =>
     Array.from({ length: iterations }, (_, index) => ({
       caseId,
@@ -62,8 +62,8 @@ function attempts(iterations = 1): RuntimeFaultSoakAttemptV2[] {
 
 function lifecycleMetric(
   values: ReadonlyArray<{ before: number; after: number }>,
-  attempt: RuntimeFaultSoakAttemptV2,
-): { supported: true; value: RuntimeFaultSoakMetricEvidenceV2 } {
+  attempt: RuntimeFaultSoakAttempt,
+): { supported: true; value: RuntimeFaultSoakMetricEvidence } {
   const point = (sequence: number, value: { before: number; after: number }) => ({
     sequence,
     ...value,
@@ -93,8 +93,8 @@ function lifecycleMetric(
 }
 
 function qualificationBudget(
-  attempt: RuntimeFaultSoakAttemptV2,
-): RuntimeFaultSoakAttemptV2['runtimeBudgetUsage'] {
+  attempt: RuntimeFaultSoakAttempt,
+): RuntimeFaultSoakAttempt['runtimeBudgetUsage'] {
   if (attempt.caseId !== 'long_runtime_replay' || !attempt.runtimeBudgetUsage.supported) {
     return attempt.runtimeBudgetUsage;
   }
@@ -187,7 +187,7 @@ describe('runtime fault soak report', () => {
             attempt,
           ),
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -240,7 +240,7 @@ describe('runtime fault soak report', () => {
             attempt,
           ),
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -249,7 +249,7 @@ describe('runtime fault soak report', () => {
     expect(report.failureCodes).toContain('long_runtime_replay:rssBytes_sustained_growth');
   });
 
-  test('fails qualification on a large within-attempt increase even without a cross-run slope', () => {
+  test('fails qualification on a large retained increase even without a cross-run slope', () => {
     const values = attempts(8).map((attempt) => ({
       ...attempt,
       runtimeBudgetUsage: qualificationBudget(attempt),
@@ -265,19 +265,79 @@ describe('runtime fault soak report', () => {
         Object.keys(attempt.resources).map((metric) => [
           metric,
           lifecycleMetric(
-            Array.from({ length: 8 }, (_, index) => ({
-              before: 1,
-              after: metric === 'rssBytes' && index === 4 ? 1_000_000_000 : 1,
-            })),
+            Array.from({ length: 8 }, (_, index) => {
+              const retained = metric === 'rssBytes' && index >= 4 ? 1_000_000_000 : 1;
+              return { before: retained, after: retained };
+            }),
             attempt,
           ),
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);
     expect(report.status).toBe('failed');
     expect(report.failureCodes).toContain('long_runtime_replay:rssBytes_attempt_growth');
+  });
+
+  test('does not classify a released per-lifecycle peak as retained growth', () => {
+    const values = attempts(8).map((attempt) => ({
+      ...attempt,
+      runtimeBudgetUsage: qualificationBudget(attempt),
+      cleanup: {
+        ...attempt.cleanup,
+        orphanPids: { supported: true as const, value: [] },
+        orphanWorktrees: { supported: true as const, value: [] },
+      },
+      resources: Object.fromEntries(
+        Object.keys(attempt.resources).map((metric) => [
+          metric,
+          lifecycleMetric(
+            Array.from({ length: 8 }, (_, index) => ({
+              before: 1,
+              after: metric === 'fileDescriptors' && index === 4 ? 1_000_000_000 : 1,
+            })),
+            attempt,
+          ),
+        ]),
+      ) as RuntimeFaultSoakAttempt['resources'],
+    }));
+
+    const report = build('qualification', values, 8);
+    const transientCase = report.cases.find((entry) => entry.id === 'model_transient_stream');
+    expect(transientCase?.resources.fileDescriptors).toMatchObject({ maxGrowth: 0 });
+    expect(report.failureCodes).not.toContain(
+      'model_transient_stream:fileDescriptors_attempt_growth',
+    );
+  });
+
+  test('does not classify a two-boundary allocator plateau as retained growth', () => {
+    const values = attempts(8).map((attempt) => ({
+      ...attempt,
+      runtimeBudgetUsage: qualificationBudget(attempt),
+      cleanup: {
+        ...attempt.cleanup,
+        orphanPids: { supported: true as const, value: [] },
+        orphanWorktrees: { supported: true as const, value: [] },
+      },
+      resources: Object.fromEntries(
+        Object.keys(attempt.resources).map((metric) => [
+          metric,
+          lifecycleMetric(
+            Array.from({ length: 8 }, (_, index) => {
+              const plateau = metric === 'rssBytes' && (index === 4 || index === 5);
+              return { before: plateau ? 1_000_000_000 : 1, after: plateau ? 1_000_000_000 : 1 };
+            }),
+            attempt,
+          ),
+        ]),
+      ) as RuntimeFaultSoakAttempt['resources'],
+    }));
+
+    const report = build('qualification', values, 8);
+    const longRuntime = report.cases.find((entry) => entry.id === 'long_runtime_replay');
+    expect(longRuntime?.resources.rssBytes).toMatchObject({ maxGrowth: 0 });
+    expect(report.failureCodes).not.toContain('long_runtime_replay:rssBytes_attempt_growth');
   });
 
   test('keeps fresh-process cold-start growth diagnostic and qualification inconclusive', () => {
@@ -300,7 +360,7 @@ describe('runtime fault soak report', () => {
             },
           },
         ]),
-      ) as RuntimeFaultSoakAttemptV2['resources'],
+      ) as RuntimeFaultSoakAttempt['resources'],
     }));
 
     const report = build('qualification', values, 8);

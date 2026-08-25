@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createMetricSampleV1,
-  MAX_METRIC_SAMPLE_BYTES_V1,
+  createMetricSample,
+  MAX_METRIC_SAMPLE_BYTES_,
   METRIC_ATTRIBUTE_KEYS,
-  METRIC_DEFINITIONS_V1,
-  parseMetricSampleV1,
-} from '../../src/core/observability/metrics';
+  METRIC_DEFINITIONS_,
+  parseMetricSample,
+} from '@kite/runtime-host';
 
 const NOW = '2026-08-02T00:00:00.000Z';
 
 describe('production metric schema v1', () => {
   test('covers every required low-content domain and resource signal', () => {
-    const names = Object.keys(METRIC_DEFINITIONS_V1);
+    const names = Object.keys(METRIC_DEFINITIONS_);
     for (const prefix of [
       'run_',
       'turn_',
@@ -52,7 +52,7 @@ describe('production metric schema v1', () => {
   });
 
   test('every definition is versioned, bounded, owned, and classified as no-content', () => {
-    for (const definition of Object.values(METRIC_DEFINITIONS_V1)) {
+    for (const definition of Object.values(METRIC_DEFINITIONS_)) {
       expect(definition.version).toBe(1);
       expect(definition.cardinalityLimit).toBeGreaterThan(0);
       expect(definition.producer.length).toBeGreaterThan(0);
@@ -66,28 +66,28 @@ describe('production metric schema v1', () => {
 
   test('sample construction rejects content-bearing or undeclared labels', () => {
     expect(() =>
-      createMetricSampleV1({
+      createMetricSample({
         name: 'run_total',
         observedAt: NOW,
         attributes: { workspace: '/secret/path' } as never,
       }),
     ).toThrow('does not allow attribute workspace');
     expect(() =>
-      createMetricSampleV1({
+      createMetricSample({
         name: 'run_total',
         observedAt: NOW,
         attributes: { route: 'not-allowed-on-run' },
       }),
     ).toThrow('does not allow attribute route');
     expect(() =>
-      createMetricSampleV1({
+      createMetricSample({
         name: 'run_total',
         observedAt: NOW,
         attributes: { outcome: 'completed', reason: 'secret-error-message' },
       }),
     ).toThrow('unknown enum value');
     expect(() =>
-      createMetricSampleV1({
+      createMetricSample({
         name: 'model_request_total',
         observedAt: NOW,
         attributes: { outcome: 'success', route: 'SECRET_ROUTE' },
@@ -96,40 +96,40 @@ describe('production metric schema v1', () => {
   });
 
   test('reporter-boundary parsing rejects unknown fields and forged definition fields', () => {
-    const sample = createMetricSampleV1({ name: 'run_total', observedAt: NOW });
-    expect(() => parseMetricSampleV1({ ...sample, prompt: 'SECRET' })).toThrow('unknown fields');
-    expect(() => parseMetricSampleV1({ ...sample, kind: 'gauge' })).toThrow(
+    const sample = createMetricSample({ name: 'run_total', observedAt: NOW });
+    expect(() => parseMetricSample({ ...sample, prompt: 'SECRET' })).toThrow('unknown fields');
+    expect(() => parseMetricSample({ ...sample, kind: 'gauge' })).toThrow(
       'does not match its definition',
     );
   });
 
   test('reporter-boundary parsing folds lowercase content-bearing aliases without a release registry', () => {
-    const sample = createMetricSampleV1({
+    const sample = createMetricSample({
       name: 'model_request_total',
       observedAt: NOW,
       attributes: { outcome: 'success', route: 'secret-customer-acme-token' },
     });
-    expect(parseMetricSampleV1(sample).attributes.route).toBe('custom/unknown');
+    expect(parseMetricSample(sample).attributes.route).toBe('custom/unknown');
     expect(
-      parseMetricSampleV1(sample, { route: new Set(['secret-customer-acme-token']) }).attributes
+      parseMetricSample(sample, { route: new Set(['secret-customer-acme-token']) }).attributes
         .route,
     ).toBe('secret-customer-acme-token');
   });
 
   test('sample construction rejects invalid numeric and temporal data', () => {
     expect(() =>
-      createMetricSampleV1({ name: 'read_batch_size', value: Number.NaN, observedAt: NOW }),
+      createMetricSample({ name: 'read_batch_size', value: Number.NaN, observedAt: NOW }),
     ).toThrow('finite and non-negative');
     expect(() =>
-      createMetricSampleV1({ name: 'read_batch_size', value: -1, observedAt: NOW }),
+      createMetricSample({ name: 'read_batch_size', value: -1, observedAt: NOW }),
     ).toThrow('finite and non-negative');
     expect(() =>
-      createMetricSampleV1({ name: 'read_batch_size', value: 1, observedAt: 'not-a-date' }),
+      createMetricSample({ name: 'read_batch_size', value: 1, observedAt: 'not-a-date' }),
     ).toThrow('ISO-8601');
   });
 
   test('the allowlisted sample shape has an explicit serialized size ceiling', () => {
-    const sample = createMetricSampleV1({
+    const sample = createMetricSample({
       name: 'release_rollout_total',
       observedAt: NOW,
       attributes: {
@@ -139,7 +139,7 @@ describe('production metric schema v1', () => {
       },
     });
     expect(new TextEncoder().encode(JSON.stringify(sample)).byteLength).toBeLessThanOrEqual(
-      MAX_METRIC_SAMPLE_BYTES_V1,
+      MAX_METRIC_SAMPLE_BYTES_,
     );
   });
 });

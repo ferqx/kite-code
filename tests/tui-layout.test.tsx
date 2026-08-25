@@ -1,51 +1,52 @@
 import { describe, expect, test } from 'bun:test';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@kite/runtime-contract';
 import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
 import stringWidth from 'string-width';
-import App from '../src/app/tui/App';
-import ApprovalBlock from '../src/app/tui/components/ApprovalBlock';
+import App from '../apps/kite/src/tui/App';
+import ApprovalBlock from '../apps/kite/src/tui/components/ApprovalBlock';
 import BlockRenderer, {
   MAX_USER_MESSAGE_LINES,
   visibleUserMessageLines,
-} from '../src/app/tui/components/BlockRenderer';
-import HelpPanel from '../src/app/tui/components/HelpPanel';
-import InputBlock from '../src/app/tui/components/InputBlock';
-import InputLine from '../src/app/tui/components/InputLine';
+} from '../apps/kite/src/tui/components/BlockRenderer';
+import HelpPanel from '../apps/kite/src/tui/components/HelpPanel';
+import InputBlock from '../apps/kite/src/tui/components/InputBlock';
+import InputLine from '../apps/kite/src/tui/components/InputLine';
 import MarkdownBlock, {
   groupLines,
   updateMarkdownParseCache,
-} from '../src/app/tui/components/MarkdownBlock';
-import ModelSelector, { modelOptionId } from '../src/app/tui/components/ModelSelector';
-import PlanReviewBlock from '../src/app/tui/components/PlanReviewBlock';
-import { SPINNER, spinnerIndexForElapsed } from '../src/app/tui/components/render-utils';
-import StartupScreen from '../src/app/tui/components/StartupScreen';
-import SubAgentBlock from '../src/app/tui/components/SubAgentBlock';
-import TaskProgressBlock from '../src/app/tui/components/TaskProgressBlock';
-import DiffPreview from '../src/app/tui/DiffPreview';
-import Footer from '../src/app/tui/Footer';
-import Header, { formatHeaderWorkspace } from '../src/app/tui/Header';
-import { I18nProvider } from '../src/app/tui/i18n';
-import { createInitialState } from '../src/app/tui/initialState';
+} from '../apps/kite/src/tui/components/MarkdownBlock';
+import ModelSelector, { modelOptionId } from '../apps/kite/src/tui/components/ModelSelector';
+import PlanReviewBlock from '../apps/kite/src/tui/components/PlanReviewBlock';
+import { SPINNER, spinnerIndexForElapsed } from '../apps/kite/src/tui/components/render-utils';
+import StartupScreen from '../apps/kite/src/tui/components/StartupScreen';
+import SubAgentBlock from '../apps/kite/src/tui/components/SubAgentBlock';
+import TaskProgressBlock from '../apps/kite/src/tui/components/TaskProgressBlock';
+import DiffPreview from '../apps/kite/src/tui/DiffPreview';
+import Footer from '../apps/kite/src/tui/Footer';
+import Header, { formatHeaderWorkspace } from '../apps/kite/src/tui/Header';
+import { I18nProvider } from '../apps/kite/src/tui/i18n';
+import { createInitialState } from '../apps/kite/src/tui/initialState';
 import OutputArea, {
   aggregateConcurrentSubagents,
   concurrentSubagentStepLimit,
   useStaticContent,
-} from '../src/app/tui/OutputArea';
-import { TuiUserInputProvider } from '../src/app/tui/provider';
-import { type Action, eventReducer as canonicalEventReducer } from '../src/app/tui/reducers';
-import type { RunStatusSnapshot } from '../src/app/tui/run-status';
-import StatsLine from '../src/app/tui/StatsLine';
-import StatusBar from '../src/app/tui/StatusBar';
+} from '../apps/kite/src/tui/OutputArea';
+import { TuiUserInputProvider } from '../apps/kite/src/tui/provider';
+import { type Action, eventReducer as canonicalEventReducer } from '../apps/kite/src/tui/reducers';
+import type { RunStatusSnapshot } from '../apps/kite/src/tui/run-status';
+import StatsLine from '../apps/kite/src/tui/StatsLine';
+import StatusBar from '../apps/kite/src/tui/StatusBar';
 import type {
   FileChangeRecord,
   OutputBlock,
   StatusState,
+  TuiPendingApproval,
   TuiState,
   Turn,
-} from '../src/app/tui/types';
-import type { RuntimeEvent } from '../src/core/runtime/events';
-import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
+} from '../apps/kite/src/tui/types';
 import { currentRuntimeEvent } from './helpers/current-runtime-event';
 
 // ── Shared helpers ──
@@ -64,7 +65,6 @@ function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
     phase: 'building',
     plan: null,
     pendingPlan: null,
-    authorization: 'full_access',
     workspaceAccess: 'write',
     cacheHitTokens: 0,
     cacheMissTokens: 0,
@@ -112,8 +112,28 @@ function fakeApproval(overrides: Partial<ToolApprovalPayload> = {}): ToolApprova
     summary: 'Run unit tests',
     reason: 'Agent wants to verify changes',
     expectedEffects: ['runs jest', 'outputs results'],
-    grantOptions: ['approve_once', 'same_command', 'full_access'],
+    grantOptions: ['approve_once', 'same_command'],
     recommendedGrant: 'approve_once',
+    ...overrides,
+  };
+}
+
+function fakePendingApproval(
+  approvalPayload: ToolApprovalPayload,
+  overrides: Partial<TuiPendingApproval> = {},
+): TuiPendingApproval {
+  const interactionId = overrides.interactionId ?? 'approval-test';
+  const toolCallId = overrides.toolCallId ?? approvalPayload.callId ?? 'tool-test';
+  const generation = overrides.generation ?? approvalPayload.queueGeneration ?? 1;
+  return {
+    interactionId,
+    toolCallId,
+    route: overrides.route ?? approvalPayload.approvalRoute ?? 'user',
+    status: overrides.status ?? 'awaiting_user',
+    sequence: overrides.sequence ?? 0,
+    generation,
+    approval: approvalPayload,
+    approvalHash: approvalPayload.approvalHash,
     ...overrides,
   };
 }
@@ -388,19 +408,19 @@ describe('StatsLine', () => {
   });
 
   test('shows [Auto] for auto mode in the English fallback locale', () => {
-    const status = fakeStatus({ authorization: 'default' });
+    const status = fakeStatus();
     const { lastFrame } = render(<StatsLine status={status} running interactionMode="auto" />);
     expect(lastFrame()).toContain('[Auto]');
   });
 
   test('shows [Full access] for full mode in the English fallback locale', () => {
-    const status = fakeStatus({ authorization: 'full_access' });
+    const status = fakeStatus();
     const { lastFrame } = render(<StatsLine status={status} running interactionMode="full" />);
     expect(lastFrame()).toContain('[Full access]');
   });
 
   test('shows no label for accept_edits mode (default)', () => {
-    const status = fakeStatus({ authorization: 'default' });
+    const status = fakeStatus();
     const { lastFrame } = render(
       <StatsLine status={status} running interactionMode="accept_edits" />,
     );
@@ -1096,6 +1116,58 @@ describe('ApprovalBlock', () => {
     expect(lastFrame()).toContain('│ bun run typecheck 2>\\ /tmp/typecheck.log');
   });
 
+  test('shows why an automatic review escalated to the user', () => {
+    const approval = fakeApproval({
+      reviewFailure: 'The command target could not be proven from the available context.',
+    });
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+
+    expect(lastFrame()).toContain(
+      'Auto-review requested your decision: The command target could not be proven',
+    );
+  });
+
+  test('renders durable queue identity, route, match count, and actual scope', () => {
+    const approvalPayload = fakeApproval({
+      approvalRoute: 'auto',
+      queueSequence: 7,
+      queueGeneration: 3,
+      matchingPendingCount: 2,
+      sandboxScope: {
+        filesystem: 'workspace_write',
+        network: 'off',
+        backend: 'none',
+        enforcement: 'unsupported',
+      },
+    });
+    const { lastFrame } = render(
+      <ApprovalBlock
+        approval={approvalPayload}
+        provider={fakeProvider()}
+        onResolved={onResolved}
+        queueEntry={fakePendingApproval(approvalPayload, {
+          interactionId: 'approval-queue-7',
+          sequence: 7,
+          generation: 3,
+          route: 'auto',
+          status: 'authorized_queued',
+          matchCount: 2,
+          actualSandboxScope: approvalPayload.sandboxScope,
+        })}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Auto review');
+    expect(frame).toContain('Queue #7');
+    expect(frame).toContain('Generation 3');
+    expect(frame).toContain('2 matching requests');
+    expect(frame).toContain('workspace_write');
+    expect(frame).toContain('unsupported');
+    expect(frame).toContain('Authorized · queued to run');
+  });
+
   test('shows three grant options', () => {
     const approval = fakeApproval();
     const { lastFrame } = render(
@@ -1160,11 +1232,13 @@ describe('ApprovalBlock', () => {
 
   test('recognizes raw terminal arrow sequences when selecting a grant', async () => {
     const resolved: Array<{ action: string; grant?: string }> = [];
+    const approvalPayload = fakeApproval();
     const { stdin } = render(
       <ApprovalBlock
-        approval={fakeApproval()}
+        approval={approvalPayload}
         provider={fakeProvider()}
         onResolved={(action, grant) => resolved.push({ action, grant })}
+        queueEntry={fakePendingApproval(approvalPayload)}
       />,
     );
 
@@ -1754,7 +1828,7 @@ function OutputAreaTestWrap({
   turns: { blocks: OutputBlock[] }[];
   onToggleReason: () => void;
   awaitingApproval?: boolean;
-  compactionPhase?: import('../src/core/model/context-compaction-presentation').ContextCompactionProgressPhase;
+  compactionPhase?: import('@kite/builtin-runtime/model').ContextCompactionProgressPhase;
 }) {
   const {
     staticItems,
@@ -1840,11 +1914,28 @@ describe('concurrent subagent dynamic height', () => {
     expect(frame.match(/└─ Explore/g)).toHaveLength(1);
     expect(frame).not.toContain('├─ Explore');
     expect(frame.match(/进行中 \(\d+s\)/g)).toHaveLength(4);
-    expect(frame.match(/等待下一步/g)).toHaveLength(4);
-    expect(frame).not.toContain('child_1_step_10');
+    expect(frame).not.toContain('等待下一步');
+    expect(frame.match(/child_[1-4]_step_10/g)).toHaveLength(4);
     expect(frame.endsWith('\n')).toBe(true);
     // The production App adds the four-row running Footer/prompt below OutputArea.
     expect(frame.split('\n').length + 4).toBeLessThan(24);
+  });
+
+  test('shows Working for a newly started child without tool output', () => {
+    const newlyStarted = childBlocks.map((block) =>
+      block.kind === 'subagent' ? { ...block, steps: [] } : block,
+    );
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={newlyStarted}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+
+    expect((lastFrame() ?? '').match(/Working/g)).toHaveLength(4);
   });
 
   test("shows each child's unresolved tool on its reserved compact activity row", () => {
@@ -1946,7 +2037,7 @@ describe('concurrent subagent dynamic height', () => {
     }
 
     const view = render(<Harness />);
-    expect(view.lastFrame()).not.toContain('child_1_step_10');
+    expect(view.lastFrame()).toContain('child_1_step_10');
     view.stdin.write('\r');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(toggledIds).toEqual([4]);
@@ -1954,7 +2045,7 @@ describe('concurrent subagent dynamic height', () => {
     view.stdin.write('\r');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(toggledIds).toEqual([4, 4]);
-    expect(view.lastFrame()).not.toContain('child_1_step_10');
+    expect(view.lastFrame()).toContain('child_1_step_10');
   });
 
   test.each([8, 12, 16])('keeps the compact group below a %i-row viewport', (rows) => {
@@ -2089,7 +2180,7 @@ describe('concurrent subagent dynamic height', () => {
             ...block,
             status: 'suspended' as const,
             awaitingApproval: true,
-            approvalState: 'queued' as const,
+            approvalState: 'queued_auto_review' as const,
           }
         : block,
     );
@@ -2125,6 +2216,16 @@ describe('concurrent subagent dynamic height', () => {
       />,
     );
     expect(view.lastFrame()).toContain('等待你的批准');
+
+    const queuedUser = awaitingUser.map((block, index) =>
+      block.kind === 'subagent' && index === 0
+        ? { ...block, approvalState: 'queued_user_approval' as const }
+        : block,
+    );
+    view.rerender(
+      <OutputAreaTestWrap running={true} turns={[{ blocks: queuedUser }]} onToggleReason={noop} />,
+    );
+    expect(view.lastFrame()).toContain('人工审批排队中');
   });
 });
 
@@ -2502,6 +2603,28 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('Step1');
   });
 
+  test('hides the generated q1 key from a structured single ask_user answer', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-single-q1',
+      name: 'ask_user',
+      args: { questions: [{ id: 'scope', question: '这次「优化方案」主要想覆盖哪个方向？' }] },
+      status: 'done',
+      summary: '',
+      expanded: true,
+      userInput: { answer: 'q1: 测试/CI 验证提速' },
+    };
+
+    const frame =
+      render(
+        <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('User: 测试/CI 验证提速');
+    expect(frame).not.toContain('User: q1:');
+  });
+
   test('retains plain-text summary fallback for ask_user answers', () => {
     const block: OutputBlock = {
       id: 1,
@@ -2814,7 +2937,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: true,
           summary: 'ok',
           status: 'done',
@@ -2822,7 +2945,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c2',
           name: 'read_file',
-          args: { path: 'src/app/tui/types.ts' },
+          args: { path: 'apps/kite/src/tui/types.ts' },
           ok: false,
           summary: '',
           status: 'running',
@@ -2889,7 +3012,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'read-1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           status: 'done',
           ok: true,
           summary: 'Read App.tsx',
@@ -2932,7 +3055,7 @@ describe('BlockRenderer', () => {
       expect(frame).toContain(`reason ${line}`);
     }
     expect(frame).not.toContain('reason six');
-    expect(frame).toContain('...');
+    expect(frame).toMatch(/\.\.\.|…/u);
   });
 
   test('Thought activity window removes blank lines before taking the head', () => {
@@ -2972,7 +3095,7 @@ describe('BlockRenderer', () => {
       expect(frame).toContain(`kept ${line} line`);
     }
     expect(frame).not.toContain('discarded sixth line');
-    expect(frame).toContain('...');
+    expect(frame).toMatch(/…|\.\.\./u);
     expect(frame).not.toMatch(/\n\s*\n/u);
   });
 
@@ -3184,7 +3307,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: false,
           summary: '',
           status: 'running',
@@ -3219,7 +3342,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: true,
           summary: 'ok',
           status: 'done',
@@ -3250,7 +3373,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: true,
           summary: 'ok',
           status: 'done',
@@ -3284,7 +3407,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: true,
           summary: 'ok',
           status: 'done',
@@ -3407,7 +3530,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: false,
           summary: '',
           status: 'running',
@@ -3759,10 +3882,10 @@ describe('Block spacing', () => {
       {
         id: 1,
         kind: 'text',
-        content: '应用层在 src/app/：\n\n- tui/ — React Ink TUI 主界面\n',
+        content: '应用层在 apps/kite/src/：\n\n- tui/ — React Ink TUI 主界面\n',
       },
       { id: 2, kind: 'text', content: '- cli/ — Headless CLI\n' },
-      { id: 3, kind: 'text', content: '- web-server/ — Hono Web 服务' },
+      { id: 3, kind: 'text', content: '- runtime/ — App Runtime 服务' },
     ];
 
     const { lastFrame } = render(
@@ -3771,10 +3894,10 @@ describe('Block spacing', () => {
     const lines = (lastFrame() ?? '').split('\n');
     const tui = lines.findIndex((line) => line.includes('tui/'));
     const cli = lines.findIndex((line) => line.includes('cli/'));
-    const web = lines.findIndex((line) => line.includes('web-server/'));
+    const runtime = lines.findIndex((line) => line.includes('runtime/'));
 
     expect(cli - tui).toBe(1);
-    expect(web - cli).toBe(1);
+    expect(runtime - cli).toBe(1);
   });
 
   test('slash command user block has 0 gap to result', () => {
@@ -4180,7 +4303,7 @@ describe('OutputArea', () => {
         subagent: {
           id: 'subagent-1',
           toolName: 'read_file',
-          toolArgs: { path: 'src/app/tui/session-manager.ts' },
+          toolArgs: { path: 'apps/kite/src/tui/session-manager.ts' },
         },
       },
       {
@@ -4216,6 +4339,99 @@ describe('OutputArea', () => {
     expect(frame).toContain('Locate runtime event consumers');
     expect(frame).toContain('Read session-manager.ts');
     expect(frame).toContain('done!');
+  });
+
+  test('replays interleaved child tool lifecycles only inside the active Delegating group', () => {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'subagent.started',
+        subagent: {
+          id: 'interleaved-explore',
+          role: 'explore',
+          task: 'Inspect runtime files',
+          concurrencyGroupId: 'interleaved-batch',
+        },
+      },
+      {
+        type: 'subagent.started',
+        subagent: {
+          id: 'interleaved-review',
+          role: 'review',
+          task: 'Review runtime behavior',
+          concurrencyGroupId: 'interleaved-batch',
+        },
+      },
+      {
+        type: 'subagent.step',
+        subagent: {
+          id: 'interleaved-explore',
+          toolName: 'shell_execute',
+          toolArgs: { command: 'ls -la' },
+        },
+      },
+      {
+        type: 'tool.queued',
+        toolCallId: 'subagent-tool:interleaved-shell',
+        name: 'shell_execute',
+        args: { command: 'ls -la' },
+      },
+      { type: 'tool.started', toolCallId: 'subagent-tool:interleaved-shell' },
+      {
+        type: 'subagent.step',
+        subagent: {
+          id: 'interleaved-review',
+          toolName: 'read_file',
+          toolArgs: { path: 'README.md' },
+        },
+      },
+      {
+        type: 'tool.queued',
+        toolCallId: 'subagent-tool:interleaved-read',
+        name: 'read_file',
+        args: { path: 'README.md' },
+      },
+      { type: 'tool.started', toolCallId: 'subagent-tool:interleaved-read' },
+      {
+        type: 'tool.finished',
+        toolCallId: 'subagent-tool:interleaved-shell',
+        name: 'shell_execute',
+        result: {
+          ok: true,
+          command: 'ls -la',
+          exitCode: 0,
+          stdout: 'README.md',
+          stderr: '',
+        },
+      },
+      {
+        type: 'subagent.tool_result',
+        subagent: {
+          id: 'interleaved-explore',
+          toolName: 'shell_execute',
+          ok: true,
+          summary: 'listed workspace',
+        },
+      },
+    ];
+    const state = events.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+
+    expect(state.pendingToolCalls).toEqual({});
+    expect(
+      state.turns.flatMap((turn) => turn.blocks).filter((block) => block.kind === 'tool_card'),
+    ).toEqual([]);
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running turns={state.turns} onToggleReason={noop} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame.match(/Delegating · 2 agents/g)).toHaveLength(1);
+    expect(frame).toContain('Explore · Inspect runtime files');
+    expect(frame).toContain('Review · Review runtime behavior');
+    expect(frame).not.toContain('● Bash Ran:');
   });
 
   test('aggregates only RuntimeEvent siblings carrying the same dispatch identity', () => {
@@ -4600,7 +4816,7 @@ describe('OutputArea', () => {
         id: 1,
         kind: 'approval',
         approval: fakeApproval(),
-        resolved: { action: 'approve', grant: 'full_access' },
+        resolved: { action: 'approve', grant: 'same_command' },
       },
     ];
     const { lastFrame } = render(
@@ -4753,6 +4969,31 @@ describe('App', () => {
     expect(lastFrame()).toContain('Auto');
     expect(lastFrame()).not.toContain('permission-input-marker');
     expect(lastFrame()?.match(/claude-opus/g) ?? []).toHaveLength(1);
+  });
+
+  test('keeps Full orthogonal to sandbox availability and exposes session grants', async () => {
+    let cleared = 0;
+    const view = render(
+      <App
+        state={fakeState({ showPermissionSelector: true })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        sandboxBackend="none"
+        sessionGrantCount={2}
+        onClearSessionGrants={() => {
+          cleared += 1;
+        }}
+      />,
+    );
+    const frame = view.lastFrame() ?? '';
+    expect(frame).toContain('Full');
+    expect(frame).toContain('Session grants: 2');
+    expect(frame).not.toContain('unavailable');
+
+    view.stdin.write('c');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(cleared).toBe(1);
   });
 
   test('refreshes the header and Footer when thinking effort changes', () => {
@@ -4936,6 +5177,241 @@ describe('App', () => {
     expect(frame).not.toContain('[接受编辑]');
   });
 
+  test('Enter immediately acknowledges an accepted approval in local TUI state', async () => {
+    const actions: Action[] = [];
+    const approval = fakeApproval({ subagentId: 'child-local' });
+    const pending = fakePendingApproval(approval, {
+      interactionId: 'approval-child-local',
+      toolCallId: 'parent-task-local',
+      childSubagentId: 'child-local',
+    });
+    const view = render(
+      <App
+        state={fakeState({
+          running: true,
+          pendingApprovals: new Map([[pending.interactionId, pending]]),
+          activeApprovalId: pending.interactionId,
+          interrupt: {
+            kind: 'approval',
+            interactionId: pending.interactionId,
+            toolCallId: pending.toolCallId,
+            approval,
+          },
+        })}
+        dispatch={(action) => actions.push(action)}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(actions).toContainEqual({
+      type: 'RESOLVE_INTERRUPT',
+      resolution: { action: 'approved', grant: 'approve_once' },
+    });
+  });
+
+  test('approval Enter cannot also expand the active Subagent card', async () => {
+    const actions: Action[] = [];
+    const approval = fakeApproval({ subagentId: 'approval-child-no-key-leak' });
+    const pending = fakePendingApproval(approval, {
+      interactionId: 'approval-no-key-leak',
+      toolCallId: 'parent-task-no-key-leak',
+      childSubagentId: 'approval-child-no-key-leak',
+    });
+    const activeChild: Extract<OutputBlock, { kind: 'subagent' }> = {
+      id: 1,
+      kind: 'subagent',
+      subagentId: 'approval-child-no-key-leak',
+      parentToolCallId: 'parent-task-no-key-leak',
+      role: 'explore',
+      task: 'Inspect runtime',
+      status: 'suspended',
+      summary: '',
+      toolCallCount: 1,
+      durationMs: 10,
+      startedAt: Date.now() - 10,
+      awaitingApproval: true,
+      approvalState: 'awaiting_user',
+      steps: [
+        {
+          toolName: 'shell_execute',
+          toolArgs: { command: 'find apps/kite/src -type f' },
+          status: 'awaiting_approval',
+        },
+      ],
+    };
+    const view = render(
+      <App
+        state={fakeState({
+          running: true,
+          turns: [{ blocks: [activeChild] }],
+          pendingApprovals: new Map([[pending.interactionId, pending]]),
+          activeApprovalId: pending.interactionId,
+          interrupt: {
+            kind: 'approval',
+            interactionId: pending.interactionId,
+            toolCallId: activeChild.parentToolCallId,
+            approval,
+          },
+        })}
+        dispatch={(action) => actions.push(action)}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(actions).toContainEqual(
+      expect.objectContaining({
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      }),
+    );
+    expect(actions.some((action) => action.type === 'TOGGLE_SUBAGENT_EXPAND')).toBe(false);
+  });
+
+  test('resets approval selection when the next deferred subagent interaction is presented', async () => {
+    const provider = fakeProvider();
+    const firstApproval = fakeApproval({ command: 'find first' });
+    const secondApproval = fakeApproval({ command: 'find second', approvalHash: 'second-hash' });
+    const firstState = fakeState({
+      running: true,
+      interrupt: {
+        kind: 'approval',
+        interactionId: 'approval-first',
+        toolCallId: 'task-first',
+        approval: firstApproval,
+      },
+    });
+    const view = render(
+      <App state={firstState} dispatch={noop} onToggleReason={noop} provider={provider} />,
+    );
+
+    view.stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(view.lastFrame()).toContain('❯ Allow for this session');
+
+    view.rerender(
+      <App
+        state={fakeState({
+          running: true,
+          interrupt: {
+            kind: 'approval',
+            interactionId: 'approval-second',
+            toolCallId: 'task-second',
+            approval: secondApproval,
+          },
+        })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={provider}
+      />,
+    );
+
+    expect(view.lastFrame()).toContain('│ find second');
+    expect(view.lastFrame()).toContain('❯ Allow once');
+    expect(view.lastFrame()).not.toContain('❯ Allow for this session');
+  });
+
+  test('Escape rejects only the focused approval without aborting the whole run', async () => {
+    let aborts = 0;
+    const actions: Action[] = [];
+    const approvalPayload = fakeApproval();
+    const pending = fakePendingApproval(approvalPayload, {
+      interactionId: 'approval-cancel',
+      toolCallId: 'task-cancel',
+    });
+    const view = render(
+      <App
+        state={fakeState({
+          running: true,
+          pendingApprovals: new Map([[pending.interactionId, pending]]),
+          activeApprovalId: pending.interactionId,
+          interrupt: {
+            kind: 'approval',
+            interactionId: pending.interactionId,
+            toolCallId: pending.toolCallId,
+            approval: approvalPayload,
+          },
+        })}
+        dispatch={(action) => actions.push(action)}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        onAbort={() => {
+          aborts += 1;
+        }}
+      />,
+    );
+
+    view.stdin.write('\u001b');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(aborts).toBe(0);
+    expect(actions).toContainEqual({
+      type: 'RESOLVE_INTERRUPT',
+      resolution: { action: 'reject' },
+    });
+  });
+
+  test('Ctrl+C aborts the whole turn while an approval is visible', async () => {
+    let aborts = 0;
+    const actions: Action[] = [];
+    const view = render(
+      <App
+        state={fakeState({
+          running: true,
+          interrupt: {
+            kind: 'approval',
+            interactionId: 'approval-ctrl-c',
+            toolCallId: 'task-ctrl-c',
+            approval: fakeApproval(),
+          },
+        })}
+        dispatch={(action) => actions.push(action)}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        onAbort={() => {
+          aborts += 1;
+        }}
+      />,
+    );
+
+    view.stdin.write('\u0003');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(aborts).toBe(1);
+    expect(actions.some((action) => action.type === 'RESOLVE_INTERRUPT')).toBe(false);
+  });
+
+  test('Escape cancels ask_user without aborting the whole run', async () => {
+    let aborts = 0;
+    const view = render(
+      <App
+        state={fakeState({
+          running: true,
+          turns: [{ blocks: [{ id: 1, kind: 'question', question: fakeQuestion() }] }],
+          interrupt: { kind: 'input', blockId: 1, interactionId: 'input-cancel' },
+        })}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        onAbort={() => {
+          aborts += 1;
+        }}
+      />,
+    );
+
+    view.stdin.write('\u001b');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(aborts).toBe(0);
+  });
+
   test('hides run status once final assistant text is visible', () => {
     const state = fakeState({
       running: true,
@@ -5028,7 +5504,7 @@ describe('App', () => {
               id: 1,
               kind: 'approval',
               approval,
-              resolved: { action: 'approve', grant: 'full_access' },
+              resolved: { action: 'approve', grant: 'same_command' },
             },
           ],
         },
@@ -5043,7 +5519,7 @@ describe('App', () => {
 
   test('renders children when provided', () => {
     const state = fakeState();
-    const InputLine = require('../src/app/tui/components/InputLine').default;
+    const InputLine = require('../apps/kite/src/tui/components/InputLine').default;
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()}>
         <InputLine mode="prompt" onSubmit={noop} workspace={process.cwd()} />
@@ -5112,8 +5588,36 @@ describe('SubAgentBlock rendering', () => {
     expect(lastFrame()).toContain('●');
   });
 
+  test('renders the bounded child failure diagnostic without an opaque invocation id', () => {
+    const block: Extract<OutputBlock, { kind: 'subagent' }> = {
+      id: 1,
+      kind: 'subagent',
+      subagentId: 'failed-child',
+      role: 'explore',
+      task: 'inspect runtime',
+      status: 'error',
+      summary: 'Sub-agent execution failed.',
+      error: 'Sub-agent execution failed.',
+      toolCallCount: 2,
+      durationMs: 10,
+      steps: [],
+      failureDiagnostic: {
+        code: 'model_step_failed',
+        stage: 'model_step',
+        modelInvocationId: 'opaque-model-invocation',
+      },
+    };
+    const { lastFrame } = render(<SubAgentBlock block={block} />);
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('[model_step_failed/model_step]');
+    expect(frame).not.toContain('opaque-model-invocation');
+  });
+
   test.each([
-    ['queued', '等待自动审查'],
+    ['queued', '人工审批排队中'],
+    ['queued_auto_review', '等待自动审查'],
+    ['queued_user_approval', '人工审批排队中'],
     ['auto_reviewing', '自动审查中'],
     ['awaiting_user', '等待你的批准'],
   ] as const)('renders a suspended subagent in the %s approval phase', (approvalState, label) => {
@@ -5208,9 +5712,9 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).toContain('Explore');
   });
 
-  test('long task text is truncated to first line in block', () => {
+  test('explicit public sub-agent name is displayed and bounded', () => {
     const longTask =
-      'find all usages of the UserService class across the entire codebase including tests\n\nDetailed instructions:\n- Check every file';
+      'find all usages of the UserService class across the codebase including tests and validate every relevant file';
     const block = {
       id: 1,
       kind: 'subagent' as const,
@@ -5225,10 +5729,8 @@ describe('SubAgentBlock rendering', () => {
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
     const frame = lastFrame() ?? '';
-    // First line should be visible
     expect(frame).toContain('find all usages of the UserService class');
-    // Second line should NOT be visible
-    expect(frame).not.toContain('Detailed instructions');
+    expect(frame).toMatch(/…|\.\.\./u);
   });
 
   test('done block shows done! after steps', () => {

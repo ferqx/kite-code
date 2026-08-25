@@ -1,24 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildRunAgentParams } from '@/app/tui/run-agent';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { aiMessage, createModelSecretDetector } from '@kite/builtin-runtime/model';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   type AgentConfig,
   loadAgentConfig,
-  resolveSessionLoggingPolicyV1,
-  type SessionLoggingPolicyV1,
-} from '@/core/config';
-import { sessionLogDir } from '@/core/config/paths';
-import { aiMessage } from '@/core/messages';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { classifyFailure } from '@/core/runtime/failures';
-import { createRuntimeSecretDetectorV1, SessionLogCollector } from '@/core/session-logger';
+  resolveSessionLoggingPolicy,
+  type SessionLoggingPolicy,
+} from '#app/config';
+import { sessionLogDir } from '#app/config/paths';
+import { SessionLogCollector } from '#app/session-logger';
+import { buildRunAgentParams } from '../../apps/kite/src/bootstrap/runtime/runtime-agent-input';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { CURRENT_TEST_PLAN_REVIEW_FACTS } from '../helpers/current-plan';
-import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
+import { runTestRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
-const CONTENT_ARTIFACT_POLICY: SessionLoggingPolicyV1 = {
+const CONTENT_ARTIFACT_POLICY: SessionLoggingPolicy = {
   version: 1,
   mode: 'content',
   retentionDays: 7,
@@ -42,14 +42,14 @@ function ollamaConfig(extra = ''): string {
         "models": [{ "name": "fixture", "default": true }]
       }
     },
-    "features": { "sessionLoggingPolicyV1": true }
+    "features": { "sessionLoggingPolicy": true }
     ${extra}
   }`;
 }
 
 describe('session logger composition', () => {
   test('passes the complete resolved retention and capacity policy into the writer', async () => {
-    let receivedPolicy: SessionLoggingPolicyV1 | undefined;
+    let receivedPolicy: SessionLoggingPolicy | undefined;
     const collector = new SessionLogCollector(
       'policy-forwarding',
       '/workspace',
@@ -69,23 +69,23 @@ describe('session logger composition', () => {
   });
 
   test('requires both artifact permission and explicit user opt-in for content mode', () => {
-    expect(resolveSessionLoggingPolicyV1({ enabled: false }).mode).toBe('off');
-    expect(resolveSessionLoggingPolicyV1({ enabled: true }).mode).toBe('metadata');
+    expect(resolveSessionLoggingPolicy({ enabled: false }).mode).toBe('off');
+    expect(resolveSessionLoggingPolicy({ enabled: true }).mode).toBe('metadata');
     expect(
-      resolveSessionLoggingPolicyV1({
+      resolveSessionLoggingPolicy({
         enabled: true,
         artifactPolicy: CONTENT_ARTIFACT_POLICY,
       }).mode,
     ).toBe('metadata');
     expect(
-      resolveSessionLoggingPolicyV1({
+      resolveSessionLoggingPolicy({
         enabled: true,
         artifactPolicy: CONTENT_ARTIFACT_POLICY,
         user: { mode: 'content' },
       }).mode,
     ).toBe('content');
     expect(() =>
-      resolveSessionLoggingPolicyV1({
+      resolveSessionLoggingPolicy({
         enabled: true,
         artifactPolicy: CONTENT_ARTIFACT_POLICY,
         user: { mode: 'content' },
@@ -95,7 +95,7 @@ describe('session logger composition', () => {
   });
 
   test('loads user content opt-in only under a content-capable artifact', () => {
-    const root = mkdtempSync(join(tmpdir(), 'openpx-logging-config-'));
+    const root = mkdtempSync(join(process.cwd(), '.openpx-logging-config-'));
     try {
       const configPath = join(root, 'kite-code.jsonc');
       writeFileSync(configPath, ollamaConfig(',\n"sessionLogging": { "mode": "content" }'));
@@ -114,7 +114,7 @@ describe('session logger composition', () => {
   });
 
   test('rejects project content opt-in even when the user and artifact permit content', () => {
-    const root = mkdtempSync(join(tmpdir(), 'openpx-logging-project-'));
+    const root = mkdtempSync(join(process.cwd(), '.openpx-logging-project-'));
     const userHome = join(root, 'home');
     const workspace = join(root, 'workspace');
     const userConfigDir = join(userHome, '.kite-code');
@@ -332,6 +332,7 @@ describe('session logger composition', () => {
         type: 'approval.rejected',
         interactionId: 'approval',
         toolCallId: 'shell',
+        generation: 0,
         reason: forbidden.approvalReason,
       },
       {
@@ -496,19 +497,19 @@ describe('session logger composition', () => {
   });
 
   test('Runtime content composition persists clear text and rejects a known arbitrary secret', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'openpx-content-runtime-'));
+    const root = mkdtempSync(join(process.cwd(), '.openpx-content-runtime-'));
     const previousHome = process.env.KITE_CODE_HOME;
     const secret = 'ULTRA_PRIVATE_SECRET_MARKER_7391';
     process.env.KITE_CODE_HOME = root;
     try {
       const events: RuntimeEvent[] = [];
-      for await (const event of runRuntimeAgent(
+      for await (const event of runTestRuntimeAgent(
         {
           task: 'CLEAR_USER_MESSAGE_MARKER',
           userId: 'u',
           threadId: 'content-runtime',
           workspace: root,
-          runtimeStorePath: join(root, 'runtime.db'),
+          openStateRuntimeStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
           config: {
             apiKey: secret,
             baseURL: 'https://example.invalid',
@@ -544,7 +545,7 @@ describe('session logger composition', () => {
   });
 
   test('runtime secret detector returns unknown for text beyond its inspection bound', () => {
-    const inspector = createRuntimeSecretDetectorV1({
+    const inspector = createModelSecretDetector({
       knownSecrets: [],
       environment: {},
       maxInspectionChars: 4,
@@ -553,7 +554,7 @@ describe('session logger composition', () => {
   });
 
   test('writer construction failure reports once and does not stop the Runtime', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'openpx-logging-failure-'));
+    const root = mkdtempSync(join(process.cwd(), '.openpx-logging-failure-'));
     const blockedHome = join(root, 'home');
     mkdirSync(blockedHome, { recursive: true });
     writeFileSync(join(blockedHome, '.kite-code'), 'not a directory');
@@ -562,13 +563,13 @@ describe('session logger composition', () => {
     const diagnostics: string[] = [];
     const events: RuntimeEvent[] = [];
     try {
-      for await (const event of runRuntimeAgent(
+      for await (const event of runTestRuntimeAgent(
         {
           task: 'Complete despite logging failure.',
           userId: 'u',
           threadId: 'logging-failure',
           workspace: root,
-          runtimeStorePath: join(root, 'runtime.db'),
+          openStateRuntimeStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
           config: {
             apiKey: 'unused',
             baseURL: 'https://example.invalid',

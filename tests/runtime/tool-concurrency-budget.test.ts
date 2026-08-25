@@ -1,21 +1,27 @@
 import { describe, expect, test } from 'bun:test';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
 import {
-  createZeroResourceUsageV1,
-  LIMITED_RESOURCE_BUDGET_V1,
-} from '@/core/runtime/resource-budget';
-import { planRuntimeBudgetAdmissionV1 } from '@/core/runtime/resource-budget-admission';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+  createRuntimeHostStateInitialState,
+  createZeroResourceUsage,
+  LIMITED_RESOURCE_BUDGET_,
+  planRuntimeBudgetAdmission,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function withQueuedTools(names: string[]): RuntimeState {
-  let state = createInitialRuntimeState({ threadId: 'tools', userId: 'u', workspace: '/' });
+  let state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'tools',
+    userId: 'u',
+    workspace: '/',
+  });
   state = reduceRuntimeState(state, {
     type: 'resource_budget.configured',
     runId: 'run-tools',
     startedAt: '2026-07-30T00:00:00Z',
     deadlineAt: '2026-07-30T00:30:00Z',
     budget: {
-      ...LIMITED_RESOURCE_BUDGET_V1,
+      ...LIMITED_RESOURCE_BUDGET_,
       maxConcurrentToolInvocations: 2,
       maxConcurrentShellInvocations: 1,
     },
@@ -41,7 +47,7 @@ describe('tool concurrency budget', () => {
       resourceBudget: {
         ...state.resourceBudget,
         budget: {
-          ...LIMITED_RESOURCE_BUDGET_V1,
+          ...LIMITED_RESOURCE_BUDGET_,
           maxConcurrentSubagents: 2,
         },
       } as Extract<RuntimeState['resourceBudget'], { status: 'active' }>,
@@ -53,7 +59,7 @@ describe('tool concurrency budget', () => {
       };
     }
 
-    const plan = planRuntimeBudgetAdmissionV1(
+    const plan = planRuntimeBudgetAdmission(
       state,
       { type: 'run_tools', toolCallIds: ['call-0', 'call-1', 'call-2'] },
       new Date('2026-07-30T00:00:01Z'),
@@ -69,7 +75,7 @@ describe('tool concurrency budget', () => {
 
   test('shrinks a batch to available permits and queues the remainder in FIFO order', () => {
     let state = withQueuedTools(['read_file', 'search_files', 'read_file']);
-    const running = createZeroResourceUsageV1('versioned_upper_bound', 'test-v1');
+    const running = createZeroResourceUsage('versioned_upper_bound', 'test-v1');
     running.counters.toolInvocations = 1;
     running.gauges.activeToolInvocations = 1;
     state = reduceRuntimeState(state, {
@@ -89,7 +95,7 @@ describe('tool concurrency budget', () => {
       reservationId: 'existing',
     });
 
-    const plan = planRuntimeBudgetAdmissionV1(
+    const plan = planRuntimeBudgetAdmission(
       state,
       { type: 'run_tools', toolCallIds: ['call-0', 'call-1', 'call-2'] },
       new Date('2026-07-30T00:00:01Z'),
@@ -105,7 +111,7 @@ describe('tool concurrency budget', () => {
 
   test('never grants the tool half of a compound shell permit', () => {
     let state = withQueuedTools(['shell_execute']);
-    const running = createZeroResourceUsageV1('versioned_upper_bound', 'test-v1');
+    const running = createZeroResourceUsage('versioned_upper_bound', 'test-v1');
     running.counters.toolInvocations = 1;
     running.gauges.activeToolInvocations = 1;
     running.gauges.activeShellInvocations = 1;
@@ -125,7 +131,7 @@ describe('tool concurrency budget', () => {
       type: 'resource_budget.dispatch_started',
       reservationId: 'running-shell',
     });
-    const plan = planRuntimeBudgetAdmissionV1(
+    const plan = planRuntimeBudgetAdmission(
       state,
       { type: 'run_tools', toolCallIds: ['call-0'] },
       new Date('2026-07-30T00:00:01Z'),

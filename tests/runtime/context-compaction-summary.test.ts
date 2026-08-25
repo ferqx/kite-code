@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test';
+import type { ContextTokenEstimate } from '@kite/builtin-runtime/model';
 import {
   createNarrativeContextCompactor,
+  findSafeCompactionBoundary,
   normalizeCompactionSummary,
   serializeCompactionSummary,
-} from '../../src/core/model/compaction-summary';
-import { findSafeCompactionBoundary } from '../../src/core/model/compaction-v2';
-import type { ContextTokenEstimate } from '../../src/core/model/context-budget';
-import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
+} from '@kite/builtin-runtime/model';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 
 const estimate: ContextTokenEstimate = {
   systemTokens: 100,
@@ -19,7 +22,8 @@ const estimate: ContextTokenEstimate = {
 };
 
 function stateWithHistory(turns = 6): RuntimeState {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'narrative',
     userId: 'user',
     workspace: '/workspace',
@@ -112,9 +116,11 @@ describe('narrative context compaction', () => {
 
   test('keeps a stable single-checkpoint digest chain across 20 incremental replacements', async () => {
     const state = stateWithHistory(3);
-    for (const message of state.transcript.messages) {
-      if (message.kind === 'user') message.content += ' additional context'.repeat(300);
-    }
+    state.transcript.messages = state.transcript.messages.map((message) =>
+      message.kind === 'user'
+        ? { ...message, content: `${message.content}${' additional context'.repeat(300)}` }
+        : message,
+    );
     const compact = createNarrativeContextCompactor({
       generate: async () => `Updated narrative ${state.transcript.messages.length}.`,
     });
@@ -134,14 +140,17 @@ describe('narrative context compaction', () => {
       state.context.activeCheckpoint = checkpoint;
       previousId = compactionId;
       const ordinal = state.transcript.messages.length;
-      state.transcript.messages.push({
-        kind: 'user',
-        messageId: `message-${ordinal}`,
-        turnId: `turn-${ordinal}`,
-        ordinal,
-        createdAt: new Date(Date.UTC(2026, 6, 22, 0, 1, ordinal)).toISOString(),
-        content: `Increment ${index}: ${'new settled context '.repeat(700)}`,
-      });
+      state.transcript.messages = [
+        ...state.transcript.messages,
+        {
+          kind: 'user',
+          messageId: `message-${ordinal}`,
+          turnId: `turn-${ordinal}`,
+          ordinal,
+          createdAt: new Date(Date.UTC(2026, 6, 22, 0, 1, ordinal)).toISOString(),
+          content: `Increment ${index}: ${'new settled context '.repeat(700)}`,
+        },
+      ];
     }
     expect(digests).toHaveLength(20);
     expect(state.context.activeCheckpoint?.compactionId).toBe('chain-19');
@@ -180,9 +189,9 @@ describe('narrative context compaction', () => {
 
   test('rejects low-gain history before invoking the summary Provider', async () => {
     const state = stateWithHistory(2);
-    for (const message of state.transcript.messages) {
-      if (message.kind === 'user') message.content = 'hello';
-    }
+    state.transcript.messages = state.transcript.messages.map((message) =>
+      message.kind === 'user' ? { ...message, content: 'hello' } : message,
+    );
     let calls = 0;
     const compact = createNarrativeContextCompactor({
       generate: async () => {

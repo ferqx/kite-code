@@ -2,13 +2,20 @@
 // 验证每个 tool_call 有且只有一个 tool result，sanitize 不删除 plan 反馈
 
 import { describe, expect, test } from 'bun:test';
-import { aiMessage, humanMessage, toolMessage } from '../../src/core/messages';
-import { sanitizeToolCallPairs } from '../../src/core/model/context';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState, getActivePlanning } from '../../src/core/runtime/state';
-import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
-import type { AgentPlan } from '../../src/protocol/events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import {
+  aiMessage,
+  humanMessage,
+  sanitizeToolCallPairs,
+  toolMessage,
+} from '@kite/builtin-runtime/model';
+import type { AgentPlan } from '@kite/runtime-contract';
+import {
+  createRuntimeHostStateInitialState,
+  getActivePlanning,
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
+} from '@kite/runtime-host/kernel-adapter';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent, emptyCurrentPlanEvidence } from '../helpers/current-plan';
 
 function makePlan(name = 'Test'): AgentPlan {
@@ -25,7 +32,8 @@ function draftEvent(plan: AgentPlan, toolCallId: string, planId: string) {
 }
 
 function currentPlanningState() {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 't1',
     userId: 'u1',
     workspace: '/tmp',
@@ -95,7 +103,7 @@ describe('transcript integrity', () => {
       (current, event) =>
         reduceRuntimeState(
           current,
-          normalizeCurrentToolOutcomeEventV1(event, current, '2026-08-11T00:00:00.000Z'),
+          normalizeCurrentToolOutcomeEvent(event, current, '2026-08-11T00:00:00.000Z'),
         ),
       state,
     );

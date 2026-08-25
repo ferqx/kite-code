@@ -1,63 +1,63 @@
 import {
-  WorkspaceFilesystemGrantErrorV1,
-  type WorkspaceFilesystemGrantVerifierV1,
-} from '@/core/execution/workspace-filesystem/grant-authority';
+  WorkspaceFilesystemGrantError,
+  type WorkspaceFilesystemGrantVerifier,
+} from '@kite/builtin-runtime/filesystem';
 import type {
-  FilesystemCommitGrantV1,
-  FilesystemObserveGrantV1,
-  FilesystemPrepareGrantV1,
-  WorkspaceFilesystemCommittedMutationV1,
-  WorkspaceFilesystemObserveObservationV1,
-  WorkspaceFilesystemPreparedMutationV1,
-  WorkspaceFilesystemProviderResultV1,
-  WorkspaceFilesystemProviderV1,
-} from '@/protocol/workspace-filesystem-provider';
+  FilesystemCommitGrant,
+  FilesystemObserveGrant,
+  FilesystemPrepareGrant,
+  WorkspaceFilesystemCommittedMutation,
+  WorkspaceFilesystemObserveObservation,
+  WorkspaceFilesystemPreparedMutation,
+  WorkspaceFilesystemProvider,
+  WorkspaceFilesystemProviderResult,
+} from '@kite/runtime-spi';
 
 type MaybePromise<Value> = Value | Promise<Value>;
 
-export interface ScriptableFakeWorkspaceFilesystemProviderScriptsV1 {
+export interface ScriptableFakeWorkspaceFilesystemProviderScripts {
   readonly observe?: (input: {
-    readonly grant: Readonly<FilesystemObserveGrantV1>;
+    readonly grant: Readonly<FilesystemObserveGrant>;
     readonly signal?: AbortSignal;
-  }) => MaybePromise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemObserveObservationV1>>;
+  }) => MaybePromise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemObserveObservation>>;
   readonly prepareMutation?: (input: {
-    readonly grant: Readonly<FilesystemPrepareGrantV1>;
+    readonly grant: Readonly<FilesystemPrepareGrant>;
     readonly signal?: AbortSignal;
-  }) => MaybePromise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemPreparedMutationV1>>;
+  }) => MaybePromise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemPreparedMutation>>;
   readonly commitMutation?: (input: {
-    readonly grant: Readonly<FilesystemCommitGrantV1>;
+    readonly grant: Readonly<FilesystemCommitGrant>;
     readonly signal?: AbortSignal;
-  }) => MaybePromise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemCommittedMutationV1>>;
+  }) => MaybePromise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemCommittedMutation>>;
 }
 
-export interface ScriptableFakeWorkspaceFilesystemProviderCallsV1 {
+export interface ScriptableFakeWorkspaceFilesystemProviderCalls {
   readonly observe: number;
   readonly prepareMutation: number;
   readonly commitMutation: number;
 }
 
 /** Test-only Provider with explicit scripts and no Local or filesystem fallback. */
-export class ScriptableFakeWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemProviderV1 {
-  readonly #verifier: WorkspaceFilesystemGrantVerifierV1;
-  readonly #scripts: ScriptableFakeWorkspaceFilesystemProviderScriptsV1;
+export class ScriptableFakeWorkspaceFilesystemProvider implements WorkspaceFilesystemProvider {
+  readonly #verifier: WorkspaceFilesystemGrantVerifier;
+  readonly #scripts: ScriptableFakeWorkspaceFilesystemProviderScripts;
   readonly #calls = { observe: 0, prepareMutation: 0, commitMutation: 0 };
 
   constructor(
-    verifier: WorkspaceFilesystemGrantVerifierV1,
-    scripts: ScriptableFakeWorkspaceFilesystemProviderScriptsV1 = {},
+    verifier: WorkspaceFilesystemGrantVerifier,
+    scripts: ScriptableFakeWorkspaceFilesystemProviderScripts = {},
   ) {
     this.#verifier = verifier;
     this.#scripts = scripts;
   }
 
-  calls(): ScriptableFakeWorkspaceFilesystemProviderCallsV1 {
+  calls(): ScriptableFakeWorkspaceFilesystemProviderCalls {
     return Object.freeze({ ...this.#calls });
   }
 
   async observe(input: {
-    readonly grant: FilesystemObserveGrantV1;
+    readonly grant: FilesystemObserveGrant;
     readonly signal?: AbortSignal;
-  }): Promise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemObserveObservationV1>> {
+  }): Promise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemObserveObservation>> {
     try {
       assertNotAborted(input.signal);
       const grant = this.#verifier.verifyObserve(input.grant);
@@ -72,9 +72,9 @@ export class ScriptableFakeWorkspaceFilesystemProviderV1 implements WorkspaceFil
   }
 
   async prepareMutation(input: {
-    readonly grant: FilesystemPrepareGrantV1;
+    readonly grant: FilesystemPrepareGrant;
     readonly signal?: AbortSignal;
-  }): Promise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemPreparedMutationV1>> {
+  }): Promise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemPreparedMutation>> {
     try {
       assertNotAborted(input.signal);
       const grant = this.#verifier.verifyPrepare(input.grant);
@@ -89,9 +89,9 @@ export class ScriptableFakeWorkspaceFilesystemProviderV1 implements WorkspaceFil
   }
 
   async commitMutation(input: {
-    readonly grant: FilesystemCommitGrantV1;
+    readonly grant: FilesystemCommitGrant;
     readonly signal?: AbortSignal;
-  }): Promise<WorkspaceFilesystemProviderResultV1<WorkspaceFilesystemCommittedMutationV1>> {
+  }): Promise<WorkspaceFilesystemProviderResult<WorkspaceFilesystemCommittedMutation>> {
     try {
       assertNotAborted(input.signal);
       const grant = this.#verifier.verifyAndConsumeCommit(input.grant);
@@ -106,19 +106,15 @@ export class ScriptableFakeWorkspaceFilesystemProviderV1 implements WorkspaceFil
   }
 }
 
-function fakeDenied<Observation>(
-  purpose: string,
-): WorkspaceFilesystemProviderResultV1<Observation> {
+function fakeDenied<Observation>(purpose: string): WorkspaceFilesystemProviderResult<Observation> {
   return deepFreeze({
     ok: false,
     failure: { code: 'fake_denied', message: `Scriptable Fake denied ${purpose}.` },
   });
 }
 
-function fakeFailure<Observation>(
-  error: unknown,
-): WorkspaceFilesystemProviderResultV1<Observation> {
-  if (error instanceof WorkspaceFilesystemGrantErrorV1) {
+function fakeFailure<Observation>(error: unknown): WorkspaceFilesystemProviderResult<Observation> {
+  if (error instanceof WorkspaceFilesystemGrantError) {
     return deepFreeze({ ok: false, failure: { code: error.code, message: error.message } });
   }
   if (error instanceof FakeCancellationError) {

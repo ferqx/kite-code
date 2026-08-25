@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
-import OverlayFrame, { OverlayShortcutBar } from '../src/app/tui/components/OverlayFrame';
-import { OverlayEmptyState, OverlayMessage } from '../src/app/tui/components/OverlayPrimitives';
+import OverlayFrame, { OverlayShortcutBar } from '../apps/kite/src/tui/components/OverlayFrame';
+import {
+  OverlayEmptyState,
+  OverlayMessage,
+} from '../apps/kite/src/tui/components/OverlayPrimitives';
 
 describe('OverlayFrame contract', () => {
   test('owns title, content, optional message, and footer spacing', () => {

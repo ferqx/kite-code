@@ -2,11 +2,11 @@ import { createPrivateKey, sign } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  disableOnlyRolloutManifestV1Schema,
-  encodeDisableOnlyRolloutManifestV1,
-  encodeSyntheticRolloutSignatureV1,
-  type SyntheticRolloutSignatureV1,
-} from '../../src/app/release/rollout-manifest-loader';
+  disableOnlyRolloutManifestSchema,
+  encodeDisableOnlyRolloutManifest,
+  encodeSyntheticRolloutSignature,
+  type SyntheticRolloutSignature,
+} from '../../apps/kite/src/release/rollout-manifest-loader';
 import { parseCanonicalJson, sha256Digest } from './canonical-json';
 
 const SYNTHETIC_ROLLOUT_PRIVATE_KEYS = Object.freeze({
@@ -20,9 +20,9 @@ MC4CAQAwBQYDK2VwBCIEICAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/
 `,
 });
 
-export interface SignedSyntheticRolloutFixtureV1 {
+export interface SignedSyntheticRolloutFixture {
   manifestBytes: Uint8Array;
-  signature: SyntheticRolloutSignatureV1;
+  signature: SyntheticRolloutSignature;
   signatureBytes: Uint8Array;
 }
 
@@ -30,13 +30,13 @@ export interface SignedSyntheticRolloutFixtureV1 {
  * Test-only signer. Both private keys are deliberately committed fixtures and
  * can never establish production authenticity or distributable authority.
  */
-export function signSyntheticRolloutManifestV1(
+export function signSyntheticRolloutManifest(
   manifestValue: unknown,
-): SignedSyntheticRolloutFixtureV1 {
-  const manifest = disableOnlyRolloutManifestV1Schema.parse(manifestValue);
-  const manifestBytes = encodeDisableOnlyRolloutManifestV1(manifest);
+): SignedSyntheticRolloutFixture {
+  const manifest = disableOnlyRolloutManifestSchema.parse(manifestValue);
+  const manifestBytes = encodeDisableOnlyRolloutManifest(manifest);
   const privateKey = SYNTHETIC_ROLLOUT_PRIVATE_KEYS[manifest.keyId];
-  const signature: SyntheticRolloutSignatureV1 = {
+  const signature: SyntheticRolloutSignature = {
     version: 1,
     kind: 'synthetic-rollout-ed25519-fixture-v1',
     keyId: manifest.keyId,
@@ -48,7 +48,7 @@ export function signSyntheticRolloutManifestV1(
   return {
     manifestBytes,
     signature,
-    signatureBytes: encodeSyntheticRolloutSignatureV1(signature),
+    signatureBytes: encodeSyntheticRolloutSignature(signature),
   };
 }
 
@@ -56,7 +56,7 @@ if (import.meta.main) {
   const manifestPath = resolve(process.argv[2] ?? 'rollout-manifest.json');
   const signaturePath = resolve(process.argv[3] ?? 'rollout-manifest.sig.json');
   const manifest = parseCanonicalJson(readFileSync(manifestPath));
-  const signed = signSyntheticRolloutManifestV1(manifest);
+  const signed = signSyntheticRolloutManifest(manifest);
   writeFileSync(signaturePath, signed.signatureBytes, { mode: 0o600, flag: 'wx' });
   process.stdout.write(
     `${JSON.stringify({ mode: 'synthetic_non_distributable', realRolloutSigningEnabled: false, manifestSha256: signed.signature.manifestSha256 })}\n`,

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   isRewindCheckpointAvailable,
   rewindFileOutcomeNotes,
-} from '../src/app/tui/hooks/useRewindHandler';
+} from '../apps/kite/src/tui/hooks/useRewindHandler';
 
 describe('rewindFileOutcomeNotes', () => {
   test('does not claim there were no files when every restore failed', () => {

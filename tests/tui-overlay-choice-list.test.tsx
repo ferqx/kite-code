@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
-import OverlayChoiceList from '../src/app/tui/components/OverlayChoiceList';
+import OverlayChoiceList from '../apps/kite/src/tui/components/OverlayChoiceList';
 
 describe('OverlayChoiceList', () => {
   test('renders a safe default separately from the destructive option', () => {

@@ -8,7 +8,7 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { runtimeStorePathFor } from '@/core/runtime/store';
+import { sqliteRuntimeStorePath } from '@kite/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
@@ -33,7 +33,7 @@ describe('TUI PTY System — Startup', () => {
 
     // Seed an incompatible Runtime Store so startup listSessions() fails in a
     // deterministic way without making the TUI process itself fail to mount.
-    const runtimeStorePath = runtimeStorePathFor(
+    const runtimeStorePath = sqliteRuntimeStorePath(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     const database = new Database(runtimeStorePath);
@@ -51,35 +51,17 @@ describe('TUI PTY System — Startup', () => {
   });
 
   step(
-    'renders the prompt, footer, and Kite Code branding in a CI-backed PTY',
+    'keeps the fresh session interactive while silently ignoring an unknown historical Store',
     async () => {
-      const output = await waitForText(() => tui.viewport(), 'workspace', 10_000);
-      expect(screenContains(output, '❯')).toBe(true);
-      expect(screenContains(output, 'Kite Code')).toBe(true);
-      expect(screenContains(output, 'mock-model')).toBe(true);
-      expect(screenContains(output, '/model')).toBe(false);
-    },
-    TIMEOUT,
-  );
-
-  step(
-    'reports historical session loading failure through normal TUI rendering',
-    async () => {
-      const output = await waitForText(() => tui.scrollback(), '历史会话服务不可用', 10_000);
-      expect(screenContains(output, '已创建新会话')).toBe(false);
-      expect(screenContains(output, '请输入 /resume 重试')).toBe(true);
-      expect(screenContains(output, '/new 明确创建会话')).toBe(false);
-      expect(screenContains(output, 'RuntimeStore format')).toBe(false);
-      expect(screenContains(output, '999')).toBe(false);
-    },
-    TIMEOUT,
-  );
-
-  step(
-    'does not expose the underlying session-list error in the sessions overlay',
-    async () => {
+      // spawnReadyTui already proves the complete brand/model/prompt surface
+      // and focused empty input in one frame. Exercise that input after the
+      // asynchronous Store discovery instead of requiring Windows ConPTY to
+      // retain the header and prompt in the same 40-row viewport repaint.
       await submitCommand(tui, '/resume');
-      const output = await waitForText(() => tui.viewport(), '无法加载历史会话', 10_000);
+      const output = await waitForText(() => tui.viewport(), '暂无历史会话', 10_000);
+      expect(screenContains(output, '历史会话服务不可用')).toBe(false);
+      expect(screenContains(output, '请输入 /resume 重试')).toBe(false);
+      expect(screenContains(output, '无法加载历史会话')).toBe(false);
       expect(screenContains(output, 'RuntimeStore format')).toBe(false);
       expect(screenContains(output, '999')).toBe(false);
       tui.write('\x1b');

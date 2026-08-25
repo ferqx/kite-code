@@ -16,18 +16,18 @@ import {
 } from 'node:fs';
 import { version as osVersion, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite/builtin-runtime/model';
 import {
   sessionLogDir,
   sessionLogFrontendDir,
   sessionLogRoot,
   userKiteCodeDir,
-} from '../../src/core/config/paths';
-import type { SessionLoggingPolicyV1 } from '../../src/core/config/session-logging-policy';
-import { SESSION_LOG_LEASE_FILE } from '../../src/core/session-logger/active-session-lease';
-import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '../../src/core/session-logger/secure-storage';
-import { SessionLogWriter } from '../../src/core/session-logger/writer';
+} from '#app/config/paths';
+import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
+import { SESSION_LOG_LEASE_FILE } from '../../apps/kite/src/session-logger/active-session-lease';
+import { SessionLogWriter } from '../../apps/kite/src/session-logger/writer';
 
-const SMOKE_POLICY: SessionLoggingPolicyV1 = {
+const SMOKE_POLICY: SessionLoggingPolicy = {
   version: 1,
   mode: 'metadata',
   retentionDays: 7,
@@ -38,7 +38,7 @@ const SMOKE_POLICY: SessionLoggingPolicyV1 = {
   includeToolContent: false,
 };
 
-export interface SessionLogAclSmokeEvidenceV1 {
+export interface SessionLogAclSmokeEvidence {
   version: 1;
   evidenceId: string;
   capturedAt: string;
@@ -53,7 +53,7 @@ export interface SessionLogAclSmokeEvidenceV1 {
   atomicTerminal: 'verified';
 }
 
-export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidenceV1> {
+export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidence> {
   const root = mkdtempSync(join(tmpdir(), 'kite-session-log-acl-smoke-'));
   const previousHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = root;

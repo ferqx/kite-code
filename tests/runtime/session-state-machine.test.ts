@@ -1,18 +1,27 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { eventsForSupersededTurnRecovery, type RuntimeUserAction } from '@/core/runtime/actions';
-import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { decideNextEffect } from '@/core/runtime/scheduler';
+import type { AgentPendingApproval } from '@kite/agent-kernel';
 import {
-  createInitialRuntimeState,
+  createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
+  runtimeHostStateNormalizeToolOutcomeEvent,
   type ToolCallStatus,
-} from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+} from '@kite/runtime-host/kernel-adapter';
+import {
+  eventsForRestartedSessionRecovery,
+  eventsForSupersededTurnRecovery,
+  type RuntimeUserAction,
+} from '#app/bootstrap/runtime/state-actions';
+import { normalizeTerminalRuntimeEvent } from '#app/bootstrap/runtime/terminal-outcome';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import {
+  StateHostSessionHarness as AgentKernel,
+  restoreStateHostSessionHarness as restoreStateKernelCoordinator,
+} from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
 
 type InteractionCase = {
@@ -23,7 +32,8 @@ type InteractionCase = {
 };
 
 function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: string): RuntimeState {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `state-machine-${kind}`,
     userId: 'user',
     workspace: '/workspace',
@@ -42,7 +52,7 @@ function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: strin
           : 'awaiting_approval',
     createdAtTurnId: state.turn.turnId,
   };
-  state.tools.queue.push(toolCallId);
+  state.tools.queue = [...state.tools.queue, toolCallId];
   if (kind === 'input') {
     state.interactions = {
       kind: 'awaiting_user_input',
@@ -51,25 +61,46 @@ function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: strin
       request: { question: 'Continue?', options: [], allow_free_text: true },
     };
   } else if (kind === 'approval') {
+    const approval = {
+      scope: 'once' as const,
+      cwd: '/workspace',
+      threadId: state.session.threadId,
+      tool: 'shell_execute',
+      command: 'pwd',
+      risk: 'execute_code' as const,
+      approvalHash: 'approval-hash',
+      summary: 'Run pwd',
+      reason: 'State-machine test',
+      expectedEffects: [],
+      grantOptions: ['approve_once'] as const,
+      recommendedGrant: 'approve_once' as const,
+    };
     state.interactions = {
       kind: 'awaiting_tool_approval',
       interactionId: 'approval-interaction',
       toolCallId,
-      approval: {
-        scope: 'once',
-        cwd: '/workspace',
-        threadId: state.session.threadId,
-        tool: 'shell_execute',
-        command: 'pwd',
-        risk: 'execute_code',
-        approvalHash: 'approval-hash',
-        summary: 'Run pwd',
-        reason: 'State-machine test',
-        expectedEffects: [],
-        grantOptions: ['approve_once'],
-        recommendedGrant: 'approve_once',
-      },
+      approval,
     };
+    const pending: AgentPendingApproval = {
+      interactionId: 'approval-interaction',
+      toolCallId,
+      route: 'user',
+      bindingDigest: 'approval-hash',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      approval,
+      invocation: {},
+      sequence: 0,
+      generation: 0,
+      createdAt: '2026-08-25T00:00:00.000Z',
+      status: 'awaiting_user',
+      state: 'awaiting_user',
+    };
+    (state.pendingApprovals as Map<string, AgentPendingApproval>).set(
+      pending.interactionId,
+      pending,
+    );
+    state.activeApprovalId = pending.interactionId;
   } else {
     const document = currentPlanDocument({
       planId: 'plan-state-machine',
@@ -132,7 +163,8 @@ function stableProjection(state: RuntimeState) {
 }
 
 function crossTaskResidueState(): RuntimeState {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'state-machine-cross-task',
     userId: 'user',
     workspace: '/workspace',
@@ -167,22 +199,44 @@ function crossTaskResidueState(): RuntimeState {
     status: 'awaiting_approval',
     createdAtTurnId: 'older-turn',
   };
-  state.tools.queue.push('old');
-  state.transcript.messages.push({
-    kind: 'assistant',
-    messageId: 'older-model',
-    turnId: 'older-turn',
-    ordinal: 0,
-    createdAt: '2026-08-18T00:00:00.000Z',
-    toolCalls: [{ id: 'old', name: 'task', args: {} }],
-  });
+  state.tools.queue = [...state.tools.queue, 'old'];
+  state.transcript.messages = [
+    ...state.transcript.messages,
+    {
+      kind: 'assistant',
+      messageId: 'older-model',
+      turnId: 'older-turn',
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
+      toolCalls: [{ id: 'old', name: 'task', args: {} }],
+    },
+  ];
   state.interactions = {
     kind: 'awaiting_tool_approval',
     interactionId: 'old-interaction',
     toolCallId: 'old',
     approval: {} as never,
   };
-  state.suspendedSubagents.old = { toolRecovery: state.toolRecovery } as never;
+  state.suspendedSubagents.old = {
+    storage: 'private_artifact_v1',
+    subagentId: 'old-subagent',
+    role: 'review',
+    continuationId: `continuation-${'a'.repeat(64)}`,
+    modelInvocationOrdinal: 0,
+    continuationArtifact: {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'subagent_continuation',
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+    },
+    parentInvocationId: 'old-parent-invocation',
+    parentAttempt: 1,
+    blockedTool: {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
+      toolCallId: 'old-child-tool',
+      toolName: 'shell_execute',
+    },
+  };
   state.skills.frames.old = {
     activationId: 'old',
     skillId: 'old-skill',
@@ -234,14 +288,15 @@ const cases: InteractionCase[] = [
     action: {
       type: 'approve',
       interactionId: 'approval-interaction',
+      generation: 0,
       grant: 'approve_once',
     },
-    expectedToolStatus: 'approved',
+    expectedToolStatus: 'authorized_queued',
   },
   {
     name: 'tool approval rejected',
     initial: () => waitingToolState('approval', 'approval-tool'),
-    action: { type: 'reject', interactionId: 'approval-interaction' },
+    action: { type: 'reject', interactionId: 'approval-interaction', generation: 0 },
     expectedToolStatus: 'rejected',
   },
   {
@@ -288,10 +343,10 @@ const cases: InteractionCase[] = [
 describe('session state-machine terminal matrix', () => {
   for (const scenario of cases) {
     test(`${scenario.name} has identical live, replay, and restart projections`, () => {
-      const directory = mkdtempSync(join(tmpdir(), 'kite-session-state-machine-'));
+      const directory = mkdtempSync(join(process.cwd(), '.kite-session-state-machine-'));
       const storePath = join(directory, 'runtime.sqlite');
       const initial = scenario.initial();
-      const store = createRuntimeStore(storePath);
+      const store = openStateStoreForTest(storePath);
       store.saveSnapshot(initial.session.threadId, initial);
       const kernel = new AgentKernel({
         store,
@@ -315,11 +370,12 @@ describe('session state-machine terminal matrix', () => {
         expect(stableProjection(replay)).toEqual(stableProjection(live));
 
         kernel.close();
-        const restored = createAgentKernel({
+        const restored = restoreStateKernelCoordinator({
+          recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: initial.session.threadId,
           userId: initial.session.userId,
           workspace: initial.session.workspace,
-          storePath,
+          store: openStateStoreForTest(storePath),
           interactionMode: 'accept_edits',
           sandboxAvailable: true,
         });
@@ -340,10 +396,10 @@ describe('session state-machine terminal matrix', () => {
   }
 
   test('cross-Task residue recovery is identical live, replayed, and after restart', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'kite-session-cross-task-'));
+    const directory = mkdtempSync(join(process.cwd(), '.kite-session-cross-task-'));
     const storePath = join(directory, 'runtime.sqlite');
     const initial = crossTaskResidueState();
-    const store = createRuntimeStore(storePath);
+    const store = openStateStoreForTest(storePath);
     store.saveSnapshot(initial.session.threadId, initial);
     const kernel = new AgentKernel({
       store,
@@ -368,11 +424,12 @@ describe('session state-machine terminal matrix', () => {
       expect(crossTaskProjection(replay)).toEqual(crossTaskProjection(live));
 
       kernel.close();
-      const restored = createAgentKernel({
+      const restored = restoreStateKernelCoordinator({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: initial.session.threadId,
         userId: initial.session.userId,
         workspace: initial.session.workspace,
-        storePath,
+        store: openStateStoreForTest(storePath),
         interactionMode: 'accept_edits',
         sandboxAvailable: true,
       });
@@ -389,5 +446,57 @@ describe('session state-machine terminal matrix', () => {
       }
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  test('restart settles non-resumable siblings without discarding a durable approval continuation', () => {
+    const initial = waitingToolState('approval', 'approval-tool');
+    initial.activeTaskId = 'active-task';
+    initial.tasks['active-task'] = {
+      taskId: 'active-task',
+      userGoal: 'Review the repository with concurrent workers.',
+      status: 'active',
+      startedAtTurnId: initial.turn.turnId,
+      sideEffectsStarted: true,
+      planning: { kind: 'building_without_plan' },
+      planHistory: [],
+    };
+    initial.tools.calls['running-sibling'] = {
+      toolCallId: 'running-sibling',
+      taskId: 'active-task',
+      modelMessageId: 'model-concurrent-review',
+      name: 'task',
+      args: { role: 'review' },
+      status: 'running',
+      createdAtTurnId: initial.turn.turnId,
+    };
+    initial.tools.calls['approval-tool'] = {
+      ...initial.tools.calls['approval-tool']!,
+      taskId: 'active-task',
+    };
+
+    const events = eventsForRestartedSessionRecovery(initial);
+    const replayed = events.reduce((state, event) => {
+      const terminal = normalizeTerminalRuntimeEvent(event);
+      return reduceRuntimeState(
+        state,
+        runtimeHostStateNormalizeToolOutcomeEvent(terminal, state, '2026-08-25T00:00:01.000Z'),
+      );
+    }, structuredClone(initial));
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'running-sibling',
+        failure: expect.objectContaining({ kind: 'unknown', retryable: false }),
+      }),
+    );
+    expect(
+      events.some((event) => event.type === 'tool.failed' && event.toolCallId === 'approval-tool'),
+    ).toBe(false);
+    expect(events.some((event) => event.type === 'turn.aborted')).toBe(false);
+    expect(replayed.tools.calls['running-sibling']?.status).toBe('failed');
+    expect(replayed.tools.calls['approval-tool']?.status).toBe('awaiting_approval');
+    expect(replayed.interactions.kind).toBe('awaiting_tool_approval');
+    expect(replayed.turn.status).toBe('active');
   });
 });

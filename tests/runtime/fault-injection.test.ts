@@ -1,12 +1,17 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
-import { createAgentKernel } from '@/core/runtime/kernel';
-import { getActivePlanning } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+import { assertAgentStateInvariants } from '@kite/agent-kernel';
+import {
+  createRuntimeHostStateInitialState,
+  getActivePlanning,
+} from '@kite/runtime-host/kernel-adapter';
+import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
+import {
+  openStateStoreForTest,
+  testStateProjectIdentityForWorkspace,
+} from '../../scripts/support/runtime-storage';
 
 const childFixture = join(import.meta.dir, '..', 'fixtures', 'runtime-fault-soak-child.ts');
 
@@ -53,8 +58,25 @@ async function waitForExit(proc: ReturnType<typeof Bun.spawn>, timeoutMs = 7000)
 }
 
 describe('Runtime production fault injection', () => {
+  const seedStoreSession = (storePath: string, sessionId: string, journalMode?: 'delete'): void => {
+    const store = openStateStoreForTest(storePath, {
+      ...(journalMode ? { options: { journalMode } } : {}),
+    });
+    store.saveSnapshot(
+      sessionId,
+      createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: sessionId,
+        userId: 'fault-soak',
+        workspace: process.cwd(),
+        ...testStateProjectIdentityForWorkspace(process.cwd()),
+      }),
+    );
+    store.close();
+  };
+
   test('abrupt process termination preserves intent, Plan, Verification, and unknown dispatch', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-runtime-sigkill-'));
+    const root = mkdtempSync(join(process.cwd(), '.kite-runtime-sigkill-'));
     const storePath = join(root, 'runtime.db');
     try {
       const proc = Bun.spawn([process.execPath, childFixture, 'crash-state', storePath], {
@@ -66,11 +88,12 @@ describe('Runtime production fault injection', () => {
       proc.kill('SIGKILL');
       await proc.exited;
 
-      const recovered = createAgentKernel({
+      const recovered = restoreStateKernelCoordinator({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'crash-recovery',
         userId: 'fault-soak',
         workspace: process.cwd(),
-        storePath,
+        store: openStateStoreForTest(storePath),
       });
       const state = recovered.getState();
       expect(state.resourceBudget).toMatchObject({
@@ -82,7 +105,7 @@ describe('Runtime production fault injection', () => {
         mode: 'required',
         status: 'pending',
       });
-      expect(() => assertRuntimeStateInvariants(state)).not.toThrow();
+      expect(() => assertAgentStateInvariants(state)).not.toThrow();
       recovered.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -90,11 +113,11 @@ describe('Runtime production fault injection', () => {
   });
 
   test('storage fault waits through a real SQLite writer lock and commits exactly once', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-runtime-busy-'));
+    const root = mkdtempSync(join(process.cwd(), '.kite-runtime-busy-'));
     const storePath = join(root, 'runtime.db');
     let blocker: Database | undefined;
     try {
-      createRuntimeStore(storePath).close();
+      seedStoreSession(storePath, 'sqlite-busy');
       blocker = new Database(storePath);
       blocker.run('BEGIN IMMEDIATE');
       const proc = Bun.spawn([process.execPath, childFixture, 'append-event', storePath], {
@@ -113,7 +136,7 @@ describe('Runtime production fault injection', () => {
       blocker = undefined;
       expect(await waitForExit(proc)).toBe(0);
 
-      const reopened = createRuntimeStore(storePath);
+      const reopened = openStateStoreForTest(storePath);
       expect(reopened.loadEventsStrict('sqlite-busy')).toHaveLength(1);
       reopened.close();
     } finally {
@@ -128,19 +151,21 @@ describe('Runtime production fault injection', () => {
   });
 
   test('storage fault rolls back an injected SQLite full write without corrupting recovery', () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-runtime-full-'));
+    const root = mkdtempSync(join(process.cwd(), '.kite-runtime-full-'));
     const storePath = join(root, 'runtime.db');
     try {
-      createRuntimeStore(storePath, { journalMode: 'delete' }).close();
+      seedStoreSession(storePath, 'sqlite-full', 'delete');
       const database = new Database(storePath);
       const pageCount = database.query<{ page_count: number }, []>('PRAGMA page_count').get();
       if (!pageCount) throw new Error('Expected SQLite page count');
       database.run(`PRAGMA max_page_count = ${pageCount.page_count}`);
       database.close();
 
-      const store = createRuntimeStore(storePath, {
-        journalMode: 'delete',
-        faultInjectionMaxPageCount: pageCount.page_count,
+      const store = openStateStoreForTest(storePath, {
+        options: {
+          journalMode: 'delete',
+          faultInjectionMaxPageCount: pageCount.page_count,
+        },
       });
       expect(() =>
         store.appendEvents('sqlite-full', [
@@ -153,14 +178,17 @@ describe('Runtime production fault injection', () => {
       ).toThrow(/database or disk is full/i);
       store.close();
 
-      const reopened = createRuntimeStore(storePath, { journalMode: 'delete' });
+      const reopened = openStateStoreForTest(storePath, {
+        options: { journalMode: 'delete' },
+      });
       expect(reopened.loadEventsStrict('sqlite-full')).toEqual([]);
       reopened.close();
-      const recovered = createAgentKernel({
+      const recovered = restoreStateKernelCoordinator({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'sqlite-full',
         userId: 'fault-soak',
         workspace: process.cwd(),
-        storePath,
+        store: openStateStoreForTest(storePath),
       });
       expect(recovered.getState().recoveryState).toEqual({ kind: 'normal' });
       recovered.close();

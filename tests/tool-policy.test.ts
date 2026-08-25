@@ -1,16 +1,177 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentSessionCommandGrant } from '@kite/agent-kernel';
+import { createToolApprovalBindingDigest } from '@kite/agent-kernel';
+import type { PendingToolRequest } from '@kite/builtin-runtime';
 import {
-  applyApprovalGrant,
+  type BuiltinModelToolCatalogEntry,
+  type BuiltinToolCapabilityProjection,
+  compileBuiltinDynamicMcpPolicy,
+} from '@kite/builtin-runtime';
+import type { CapabilityPolicyCompilation, RuntimeJsonValue } from '@kite/runtime-spi';
+import {
   buildToolApproval,
-  defaultAuthorizationState,
-  grantSameCommand,
-  hashToolApprovalRequest,
-  hasSameCommandGrant,
   replaceApprovalCommand,
   validateApprovalHash,
-} from '../src/core/harness/tool-policy';
-import type { PendingToolRequest } from '../src/core/harness/tool-requests';
-import { evaluateToolApproval } from '../src/core/policies/approval-policy';
+} from '#app/bootstrap/runtime/tool-policy';
+import { testBuiltinToolCatalog } from './helpers/runtime-model';
+
+type EvaluateToolApprovalParams = {
+  readonly toolName: string;
+  readonly toolArgs: Record<string, unknown>;
+  readonly phase: 'planning' | 'building';
+  readonly workspace?: string;
+  readonly threadId?: string;
+  readonly interactionMode?: 'auto' | 'accept_edits' | 'full';
+  readonly sessionId?: string;
+  readonly canonicalWorkspaceIdentity?: string;
+  readonly cwd?: string;
+  readonly executor?: string;
+  readonly environment?: string;
+  readonly scope?: string;
+  readonly effectsDigest?: string;
+  readonly parserRevision?: string;
+  readonly executorRevision?: string;
+  readonly sessionCommandGrant?: Readonly<AgentSessionCommandGrant> | null;
+  readonly mcpPolicy?: {
+    readonly effects: {
+      readonly filesystem: 'none' | 'read' | 'write' | 'destructive';
+      readonly network: 'none' | 'read' | 'write' | 'destructive';
+      readonly externalState: 'none' | 'read' | 'write' | 'destructive';
+    };
+    readonly minimumApproval: 'none' | 'auto_review' | 'user';
+  };
+  readonly capability?: BuiltinToolCapabilityProjection;
+};
+
+function commandDigest(command: string): string {
+  return command.trim();
+}
+
+function grantSameCommand(input: {
+  workspace: string;
+  threadId: string;
+  command: string;
+  sessionId?: string;
+  canonicalWorkspaceIdentity?: string;
+  cwd?: string;
+  executor?: string;
+  environment?: string;
+  scope?: string;
+  effectsDigest?: string;
+  parserRevision?: string;
+  executorRevision?: string;
+}): AgentSessionCommandGrant {
+  return {
+    grant: 'same_command',
+    grantKey: 'fixture-grant',
+    sessionId: input.sessionId ?? 'session-a',
+    threadId: input.threadId,
+    workspace: input.workspace,
+    canonicalWorkspaceIdentity: input.canonicalWorkspaceIdentity ?? input.workspace,
+    cwd: input.cwd ?? input.workspace,
+    executor: input.executor ?? 'shell',
+    environment: input.environment ?? 'env-v1',
+    scope: input.scope ?? 'workspace_only',
+    effects: input.effectsDigest ?? 'effects-v1',
+    parserRevision: input.parserRevision ?? 'parser-v1',
+    executorRevision: input.executorRevision ?? 'executor-v1',
+    commandDigest: commandDigest(input.command),
+    createdAt: '2026-01-01T00:00:00.000Z',
+    generation: 1,
+  };
+}
+
+type TestApprovalDecision = Pick<
+  CapabilityPolicyCompilation,
+  | 'decision'
+  | 'allowed'
+  | 'requiresApproval'
+  | 'risk'
+  | 'effects'
+  | 'reason'
+  | 'userVisibleSummary'
+  | 'expectedEffects'
+  | 'phaseConstraint'
+> & {
+  readonly grantUsed: 'none' | 'same_command';
+};
+
+function policyCompilationFor(params: EvaluateToolApprovalParams): CapabilityPolicyCompilation {
+  const entry = testBuiltinToolCatalog().entries.find(
+    (candidate): candidate is BuiltinModelToolCatalogEntry =>
+      candidate.visibility === 'model' && candidate.name === params.toolName,
+  );
+  if (entry) {
+    return entry.compilePolicy(params.toolArgs as RuntimeJsonValue, {
+      workspace: params.workspace ?? '',
+      threadId: params.threadId,
+      phase: params.phase,
+    });
+  }
+  const effects = params.mcpPolicy?.effects ?? {
+    filesystem: 'none' as const,
+    network: 'write' as const,
+    externalState: 'write' as const,
+  };
+  return compileBuiltinDynamicMcpPolicy({
+    operationId: 'mcp:dynamic_tool',
+    capabilityRevision: 'test-mcp-capability-v1',
+    parserRevision: 'test-mcp-parser-v1',
+    exposedToolName: params.toolName as `mcp__${string}`,
+    effectiveEffects: effects,
+    minimumApproval: params.mcpPolicy?.minimumApproval ?? 'user',
+    phase: params.phase,
+    workspace: params.workspace ?? '',
+  });
+}
+
+function evaluateToolApproval(params: EvaluateToolApprovalParams): TestApprovalDecision {
+  const compilation = policyCompilationFor(params);
+  let grantUsed: TestApprovalDecision['grantUsed'] = 'none';
+  const command =
+    params.toolName === 'shell_execute' && typeof params.toolArgs.command === 'string'
+      ? params.toolArgs.command
+      : undefined;
+  const sameCommand =
+    command !== undefined &&
+    params.workspace !== undefined &&
+    params.threadId !== undefined &&
+    params.sessionCommandGrant !== undefined &&
+    params.sessionCommandGrant !== null &&
+    params.sessionCommandGrant.sessionId === (params.sessionId ?? '') &&
+    params.sessionCommandGrant.threadId === params.threadId &&
+    params.sessionCommandGrant.workspace === params.workspace &&
+    params.sessionCommandGrant.canonicalWorkspaceIdentity ===
+      (params.canonicalWorkspaceIdentity ?? '') &&
+    params.sessionCommandGrant.cwd === (params.cwd ?? '') &&
+    params.sessionCommandGrant.executor === (params.executor ?? '') &&
+    params.sessionCommandGrant.environment === (params.environment ?? '') &&
+    params.sessionCommandGrant.scope === (params.scope ?? '') &&
+    params.sessionCommandGrant.effects === (params.effectsDigest ?? '') &&
+    params.sessionCommandGrant.parserRevision === (params.parserRevision ?? '') &&
+    params.sessionCommandGrant.executorRevision === (params.executorRevision ?? '') &&
+    params.sessionCommandGrant.commandDigest === commandDigest(command);
+  if (compilation.allowed && compilation.requiresApproval) {
+    if (params.interactionMode === 'full' && compilation.fullAccessMayBypassApproval) {
+      // Full is an interaction mode, never an approval grant.
+      grantUsed = 'none';
+    } else if (sameCommand && compilation.sameCommandMayBypassApproval) grantUsed = 'same_command';
+  }
+  const fullModeBypass =
+    params.interactionMode === 'full' && compilation.fullAccessMayBypassApproval;
+  return {
+    decision: grantUsed === 'none' ? compilation.decision : 'allow',
+    allowed: compilation.allowed,
+    requiresApproval: compilation.requiresApproval && grantUsed === 'none' && !fullModeBypass,
+    risk: compilation.risk,
+    ...(compilation.effects ? { effects: compilation.effects } : {}),
+    reason: compilation.reason,
+    userVisibleSummary: compilation.userVisibleSummary,
+    expectedEffects: compilation.expectedEffects,
+    ...(compilation.phaseConstraint ? { phaseConstraint: compilation.phaseConstraint } : {}),
+    grantUsed,
+  };
+}
 
 const shellExecuteRequest: PendingToolRequest = {
   source: 'builtin',
@@ -20,6 +181,61 @@ const shellExecuteRequest: PendingToolRequest = {
   reason: 'Model requested shell_execute tool call',
   protectedCommand: 'bun test',
 };
+
+const sameCommandIdentity = {
+  sessionId: 'session-a',
+  canonicalWorkspaceIdentity: '/tmp/project',
+  cwd: '/tmp/project',
+  executor: 'shell',
+  environment: 'env-v1',
+  scope: 'workspace_only',
+  effectsDigest: 'effects-v1',
+  parserRevision: 'parser-v1',
+  executorRevision: 'executor-v1',
+} as const;
+
+const presentationApprovalBindingDigest = createToolApprovalBindingDigest(
+  {
+    workspace: '/tmp/project',
+    threadId: 'thread-a',
+    turnId: 'turn-a',
+    modelMessageId: 'model-a',
+    toolCallId: 'call-shell',
+    exposedToolName: 'shell_execute',
+    operationId: 'builtin:shell_execute',
+    capabilityId: 'builtin:shell_execute',
+    capabilityRevision: '1'.repeat(64),
+    executorRevision: null,
+    descriptorRevision: '2'.repeat(64),
+    parserRevision: '3'.repeat(64),
+    schemaDigest: '4'.repeat(64),
+    argumentsDigest: '5'.repeat(64),
+    effectiveEffectsDigest: '6'.repeat(64),
+    bindingId: null,
+    builtinCatalogRevision: '7'.repeat(64),
+    dynamicCatalogRevision: null,
+    nestedCapabilityId: null,
+    nestedCapabilityRevision: null,
+    nestedCatalogRevision: null,
+    commandDigest: '8'.repeat(64),
+  },
+  {
+    operationId: 'builtin:shell_execute',
+    capabilityRevision: '1'.repeat(64),
+    parserRevision: '3'.repeat(64),
+    effectiveEffectsDigest: '6'.repeat(64),
+    minimumApproval: 'user',
+    fullAccessMayBypassApproval: false,
+    sameCommandMayBypassApproval: false,
+    decision: 'ask',
+    allowed: true,
+    requiresApproval: true,
+    risk: 'execute_code',
+    effects: { uncertainEffects: true },
+    reason: 'The command requires approval.',
+    expectedEffects: ['execute code'],
+  },
+);
 
 // 统一工具安全策略单元测试 / Unified tool policy unit tests
 describe('tool policy', () => {
@@ -66,8 +282,7 @@ describe('tool policy', () => {
     }
   });
 
-  // 验证普通 shell_execute 执行项目代码时需要审批 / shell_execute commands that run project code require approval
-  test('requires approval for normal shell execution under building phase', () => {
+  test('allows the Building workspace baseline directly without a grant', () => {
     const decision = evaluateToolApproval({
       toolName: shellExecuteRequest.name,
       toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
@@ -75,14 +290,13 @@ describe('tool policy', () => {
     });
 
     expect(decision.allowed).toBe(true);
-    expect(decision.requiresApproval).toBe(true);
-    expect(decision.risk).toBe('execute_code');
+    expect(decision.requiresApproval).toBe(false);
+    expect(decision.risk).toBe('unknown');
     expect(decision.userVisibleSummary).toContain('bun test');
-    expect(decision.expectedEffects).toContain('Executes local project code');
+    expect(decision.expectedEffects).toContain('Runs inside the workspace sandbox baseline');
   });
 
-  // 验证只读 shell_execute 命令按命令风险直通，不再只按工具名审批 / Read-only shell_execute commands are classified by command risk
-  test('allows read-only shell_execute commands without approval', () => {
+  test('keeps baseline shell commands direct without a command allowlist', () => {
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
       toolArgs: { command: 'pwd' },
@@ -91,10 +305,10 @@ describe('tool policy', () => {
 
     expect(decision.allowed).toBe(true);
     expect(decision.requiresApproval).toBe(false);
-    expect(decision.risk).toBe('read');
+    expect(decision.risk).toBe('unknown');
   });
 
-  test('preserves the read-only shell approval fast-path corpus', () => {
+  test('allows the Planning workspace read-only baseline directly', () => {
     for (const command of ['ls -la', 'pwd', 'rg TODO src']) {
       const decision = evaluateToolApproval({
         toolName: 'shell_execute',
@@ -105,22 +319,20 @@ describe('tool policy', () => {
       });
       expect(decision.allowed, command).toBe(true);
       expect(decision.requiresApproval, command).toBe(false);
-      expect(decision.risk, command).toBe('read');
+      expect(decision.risk, command).toBe('unknown');
     }
   });
 
-  // 验证规划阶段拒绝执行类工具，即使工作区访问权限错误地为 write / Planning phase rejects execution tools even if workspace access is write
-  test('rejects shell execution during planning phase', () => {
+  test('keeps Planning baseline shell execution direct', () => {
     const decision = evaluateToolApproval({
       toolName: shellExecuteRequest.name,
       toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
       phase: 'planning',
     });
 
-    expect(decision.allowed).toBe(false);
+    expect(decision.allowed).toBe(true);
     expect(decision.requiresApproval).toBe(false);
-    expect(decision.risk).toBe('execute_code');
-    expect(decision.reason).toContain('planning phase');
+    expect(decision.risk).toBe('unknown');
   });
 
   // 验证高危命令默认拒绝，不进入普通审批 / High-risk shell commands are denied instead of routed to normal approval
@@ -136,20 +348,22 @@ describe('tool policy', () => {
     expect(decision.risk).toBe('destructive');
   });
 
-  // 验证 same_command 授权命中后，同一 thread/workspace 的同一命令不再审批 / same_command grants bypass approval for the exact command in the same thread and workspace
+  // same_command is a Session grant over the complete execution identity.
   test('allows same-command shell execution without approval after a command grant', () => {
-    const authorization = grantSameCommand(defaultAuthorizationState(), {
+    const sessionCommandGrant = grantSameCommand({
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      command: 'bun test',
+      command: 'curl https://example.com',
+      ...sameCommandIdentity,
     });
     const decision = evaluateToolApproval({
-      toolName: shellExecuteRequest.name,
-      toolArgs: shellExecuteRequest.args as unknown as Record<string, unknown>,
+      toolName: 'shell_execute',
+      toolArgs: { command: 'curl https://example.com' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      ...sameCommandIdentity,
+      sessionCommandGrant,
     });
 
     expect(decision.allowed).toBe(true);
@@ -157,22 +371,23 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('same_command');
   });
 
-  // 验证 same_command 只看 command.trim() / same_command matching uses the exact trimmed command
-  test('same-command grant ignores surrounding command whitespace', () => {
-    const authorization = grantSameCommand(defaultAuthorizationState(), {
+  test('same-command grant canonicalizes command whitespace but preserves other identity fields', () => {
+    const sessionCommandGrant = grantSameCommand({
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      command: 'bun test',
+      command: 'curl https://example.com',
+      ...sameCommandIdentity,
     });
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
       toolArgs: {
-        command: '  bun test  ',
+        command: '  curl https://example.com  ',
       },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      ...sameCommandIdentity,
+      sessionCommandGrant,
     });
 
     expect(decision.allowed).toBe(true);
@@ -180,20 +395,22 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('same_command');
   });
 
-  // 验证不同命令不会命中 same_command 授权 / Different commands do not match a same_command grant
+  // Different commands do not match a same_command grant.
   test('does not apply same-command grant to a different command', () => {
-    const authorization = grantSameCommand(defaultAuthorizationState(), {
+    const sessionCommandGrant = grantSameCommand({
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      command: 'bun test',
+      command: 'curl https://example.com',
+      ...sameCommandIdentity,
     });
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
-      toolArgs: { command: 'bun run typecheck' },
+      toolArgs: { command: 'curl https://other.example.com' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      ...sameCommandIdentity,
+      sessionCommandGrant,
     });
 
     expect(decision.allowed).toBe(true);
@@ -201,49 +418,32 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('none');
   });
 
-  // 验证 full_access 当前 thread 内允许非 destructive 的 shell_execute / full_access allows non-destructive shell commands
-  test('allows shell execution risk classes under full access', () => {
-    const authorization = applyApprovalGrant({
-      authorization: defaultAuthorizationState(),
-      grant: 'full_access',
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-
-    for (const command of ['bun test', 'echo hi > hello.txt', 'git add -A']) {
+  // Full is a mode, not a persisted approval grant.
+  test('allows shell execution risk classes under Full interaction mode without a grant', () => {
+    for (const command of ['echo hi > hello.txt', 'git add -A', 'bun test']) {
       const decision = evaluateToolApproval({
         toolName: 'shell_execute',
         toolArgs: { command },
         phase: 'building',
         workspace: '/tmp/project',
         threadId: 'thread-a',
-        authorization,
+        interactionMode: 'full',
       });
 
       expect(decision.allowed).toBe(true);
       expect(decision.requiresApproval).toBe(false);
-      expect(decision.grantUsed).toBe('full_access');
+      expect(decision.grantUsed).toBe('none');
     }
   });
 
-  // 验证 destructive 命令在 full_access 下仍然被拒绝 / destructive commands are denied even under full_access
-  test('denies destructive commands even under full access', () => {
-    const authorization = applyApprovalGrant({
-      authorization: defaultAuthorizationState(),
-      grant: 'full_access',
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-
+  test('denies destructive commands even under Full interaction mode', () => {
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
       toolArgs: { command: 'sudo rm -rf /' },
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      interactionMode: 'full',
     });
 
     expect(decision.allowed).toBe(false);
@@ -251,12 +451,13 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('none');
   });
 
-  // 验证 destructive 命令在 same_command grant 下仍然被拒绝 / destructive commands are denied even with same_command grant
+  // Destructive commands remain hard denied even with a same_command grant.
   test('denies destructive commands even with same_command grant', () => {
-    const authorization = grantSameCommand(defaultAuthorizationState(), {
+    const sessionCommandGrant = grantSameCommand({
       workspace: '/tmp/project',
       threadId: 'thread-a',
       command: 'sudo rm -rf /',
+      ...sameCommandIdentity,
     });
 
     const decision = evaluateToolApproval({
@@ -265,7 +466,8 @@ describe('tool policy', () => {
       phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      authorization,
+      ...sameCommandIdentity,
+      sessionCommandGrant,
     });
 
     expect(decision.allowed).toBe(false);
@@ -273,46 +475,17 @@ describe('tool policy', () => {
     expect(decision.grantUsed).toBe('none');
   });
 
-  // 验证 approve_once 不写入 command grant，same_command 和 full_access 才更新 thread 授权状态 / Grant updates are explicit and thread-scoped
-  test('applies approval grants to thread authorization state', () => {
-    const initial = defaultAuthorizationState();
-    const approveOnce = applyApprovalGrant({
-      authorization: initial,
-      grant: 'approve_once',
+  test('approve_once is per-call and cannot create a Full or Session grant', () => {
+    const decision = evaluateToolApproval({
+      toolName: shellExecuteRequest.name,
+      toolArgs: { command: 'curl https://example.com' },
+      phase: 'building',
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      request: shellExecuteRequest,
+      interactionMode: 'accept_edits',
     });
-    const sameCommand = applyApprovalGrant({
-      authorization: initial,
-      grant: 'same_command',
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-    const fullAccess = applyApprovalGrant({
-      authorization: initial,
-      grant: 'full_access',
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-
-    expect(
-      hasSameCommandGrant(approveOnce, {
-        workspace: '/tmp/project',
-        threadId: 'thread-a',
-        command: 'bun test',
-      }),
-    ).toBe(false);
-    expect(
-      hasSameCommandGrant(sameCommand, {
-        workspace: '/tmp/project',
-        threadId: 'thread-a',
-        command: 'bun test',
-      }),
-    ).toBe(true);
-    expect(fullAccess.mode).toBe('full_access');
+    expect(decision.requiresApproval).toBe(true);
+    expect(decision.grantUsed).toBe('none');
   });
 
   // 验证审批 payload 由 runtime 基于工具请求和策略生成 / Approval payload is generated by the runtime from request and policy
@@ -328,6 +501,7 @@ describe('tool policy', () => {
       threadId: 'thread-a',
       request: shellExecuteRequest,
       decision,
+      approvalBindingDigest: presentationApprovalBindingDigest,
     });
 
     expect(approval).toEqual({
@@ -337,43 +511,46 @@ describe('tool policy', () => {
       threadId: 'thread-a',
       tool: 'shell_execute',
       command: 'bun test',
-      risk: 'execute_code',
-      approvalHash: hashToolApprovalRequest({
-        workspace: '/tmp/project',
-        threadId: 'thread-a',
-        request: shellExecuteRequest,
-      }),
-      summary: decision.userVisibleSummary,
+      risk: 'unknown',
+      approvalHash: presentationApprovalBindingDigest,
+      summary: 'Approve a shell command',
       reason: decision.reason,
       expectedEffects: decision.expectedEffects,
-      grantOptions: ['approve_once', 'same_command', 'full_access'],
+      grantOptions: ['approve_once', 'same_command'],
       recommendedGrant: 'approve_once',
     });
   });
 
-  // 验证审批 hash 绑定到具体工具参数，避免恢复时错位执行 / Approval hash is bound to exact tool arguments
-  test('hashes the exact approval request', () => {
-    const first = hashToolApprovalRequest({
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
+  test('keeps shell approval summaries bounded and separate from exact commands', () => {
+    const command = `bun test ${'packages/runtime/'.repeat(40)}`;
+    const request: PendingToolRequest = {
+      ...shellExecuteRequest,
+      args: { command },
+      protectedCommand: command,
+    };
+    const decision = evaluateToolApproval({
+      toolName: request.name,
+      toolArgs: request.args as unknown as Record<string, unknown>,
+      phase: 'building',
     });
-    const changedCommand = hashToolApprovalRequest({
+    const approval = buildToolApproval({
       workspace: '/tmp/project',
       threadId: 'thread-a',
-      request: {
-        source: 'builtin' as const,
-        id: 'call-shell',
-        name: 'shell_execute' as const,
-        args: { command: 'bun test tests/graph.test.ts' },
-        reason: 'Model requested shell_execute tool call',
-        protectedCommand: 'bun test tests/graph.test.ts',
-      },
+      request,
+      decision,
+      approvalBindingDigest: presentationApprovalBindingDigest,
     });
 
-    expect(validateApprovalHash({ approvalHash: first }, first)).toBe(true);
-    expect(validateApprovalHash({ approvalHash: 'wrong' }, first)).toBe(false);
-    expect(changedCommand).not.toBe(first);
+    expect(approval.command).toBe(command);
+    expect(approval.summary).toBe('Approve a shell command');
+    expect(approval.summary).not.toContain(command);
+    expect(approval.summary.length).toBeLessThanOrEqual(256);
+  });
+
+  test('validates the exact Kernel-supplied approval binding', () => {
+    const binding = 'a'.repeat(64);
+    expect(validateApprovalHash({ approvalHash: binding }, binding)).toBe(true);
+    expect(validateApprovalHash({ approvalHash: 'wrong' }, binding)).toBe(false);
   });
 
   // read_mcp_resource tool policy tests

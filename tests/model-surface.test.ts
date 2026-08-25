@@ -1,32 +1,32 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  canonicalModelJsonV1,
-  computeCanonicalProviderOptionsDigestV1,
-  computeModelRouteIdentityDigestV1,
-  computeModelSurfaceDigestLayersV1,
-  computeModelSurfaceDigestV1,
-  computeResolvedModelCapabilitiesDigestV1,
+  canonicalModelJson,
+  computeCanonicalProviderOptionsDigest,
+  computeModelRouteIdentityDigest,
+  computeModelSurfaceDigest,
+  computeModelSurfaceDigestLayers,
+  computeResolvedModelCapabilitiesDigest,
   ModelSurfaceCanonicalizationError,
-} from '@/core/model/surface-canonicalizer';
+} from '@kite/builtin-runtime/model';
 import {
-  type CanonicalJsonObjectV1,
-  MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
-  MODEL_INVOCATION_PURPOSES_V1,
-  MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1,
-  MODEL_RESPONSE_RECORD_SCHEMA_V1,
-  MODEL_SURFACE_SCHEMA_V1,
-  type ModelInvocationEnvelopeV1,
-  type ModelResponseRecordV1,
-  type ModelSurfaceV1,
-  type Sha256DigestV1,
-} from '@/protocol/model-surface';
+  type CanonicalJsonObject,
+  MODEL_INVOCATION_ENVELOPE_SCHEMA_,
+  MODEL_INVOCATION_PURPOSES_,
+  MODEL_PURPOSE_TO_PROVIDER_DISPATCH_,
+  MODEL_RESPONSE_RECORD_SCHEMA_,
+  MODEL_SURFACE_SCHEMA_,
+  type ModelInvocationEnvelope,
+  type ModelResponseRecord,
+  type ModelSurface,
+  type Sha256Digest,
+} from '@kite/runtime-spi';
 
-function digest(hex: string): Sha256DigestV1 {
+function digest(hex: string): Sha256Digest {
   return `sha256:${hex.repeat(64)}`;
 }
 
-function baseSurface(): ModelSurfaceV1 {
-  const capabilities: ModelSurfaceV1['request']['resolvedCapabilities']['value'] = {
+function baseSurface(): ModelSurface {
+  const capabilities: ModelSurface['request']['resolvedCapabilities']['value'] = {
     providerName: 'mock-provider',
     modelName: 'mock-model',
     contextWindowTokens: 32_768,
@@ -34,7 +34,7 @@ function baseSurface(): ModelSurfaceV1 {
     maxOutputTokens: 2_048,
     maxOutputTokensSource: 'adapter_runtime',
     tokenizerFamily: 'mock-tokenizer',
-    tokenizerSource: 'compatibility_config',
+    tokenizerSource: 'adapter_runtime',
     supportsUsageMetadata: true,
     supportsUsageMetadataSource: 'adapter_runtime',
     supportsPromptCache: false,
@@ -44,13 +44,13 @@ function baseSurface(): ModelSurfaceV1 {
     streaming: true,
     streamingSource: null,
   };
-  const providerOptions: CanonicalJsonObjectV1 = {
+  const providerOptions: CanonicalJsonObject = {
     mock: {
       thinking: { type: 'disabled' },
     },
   };
   return {
-    schema: MODEL_SURFACE_SCHEMA_V1,
+    schema: MODEL_SURFACE_SCHEMA_,
     purpose: 'primary_agent',
     route: {
       providerKind: 'mock',
@@ -109,49 +109,43 @@ function baseSurface(): ModelSurfaceV1 {
       sdkRetry: { maxRetries: 0 },
       resolvedCapabilities: {
         value: capabilities,
-        digest: computeResolvedModelCapabilitiesDigestV1(capabilities),
+        digest: computeResolvedModelCapabilitiesDigest(capabilities),
       },
       providerOptions: {
         kind: 'inline',
         value: providerOptions,
-        digest: computeCanonicalProviderOptionsDigestV1(providerOptions),
+        digest: computeCanonicalProviderOptionsDigest(providerOptions),
       },
     },
   };
 }
 
-function cloneSurface(surface = baseSurface()): ModelSurfaceV1 {
-  return JSON.parse(JSON.stringify(surface)) as ModelSurfaceV1;
+function cloneSurface(surface = baseSurface()): ModelSurface {
+  return JSON.parse(JSON.stringify(surface)) as ModelSurface;
 }
 
-function refreshNestedDigests(surface: ModelSurfaceV1): void {
-  surface.request.resolvedCapabilities.digest = computeResolvedModelCapabilitiesDigestV1(
+function refreshNestedDigests(surface: ModelSurface): void {
+  surface.request.resolvedCapabilities.digest = computeResolvedModelCapabilitiesDigest(
     surface.request.resolvedCapabilities.value,
   );
   if (surface.request.providerOptions.kind === 'inline') {
-    surface.request.providerOptions.digest = computeCanonicalProviderOptionsDigestV1(
+    surface.request.providerOptions.digest = computeCanonicalProviderOptionsDigest(
       surface.request.providerOptions.value,
     );
   }
 }
 
-function envelope(surfaceArtifactId: string, invocationId: string): ModelInvocationEnvelopeV1 {
+function envelope(surfaceArtifactId: string, invocationId: string): ModelInvocationEnvelope {
   return {
-    schema: MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
+    schema: MODEL_INVOCATION_ENVELOPE_SCHEMA_,
     surface: {
       artifact: {
         artifactId: surfaceArtifactId,
         kind: 'model_surface',
-        integrityIdentifier: `hmac-sha256:${'3'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'3'.repeat(64)}`,
         byteLength: 4_096,
       },
-      surfaceIntegrityIdentifier: `hmac-sha256:${'4'.repeat(64)}`,
-    },
-    admission: {
-      providerDataPolicyRevision: 'policy-r1',
-      routeIdentityDigest: digest('5'),
-      payloadClassificationDigest: digest('6'),
-      admitted: true,
+      surfaceIntegrityIdentifier: `sha256:${'4'.repeat(64)}`,
     },
     provenance: {
       invocationId,
@@ -181,32 +175,30 @@ function envelope(surfaceArtifactId: string, invocationId: string): ModelInvocat
 }
 
 describe('Model Surface protocol', () => {
-  test('keeps the five model purposes in an exhaustive one-to-one Provider mapping', () => {
-    expect(MODEL_INVOCATION_PURPOSES_V1).toEqual([
+  test('keeps the four model purposes in an exhaustive one-to-one Provider mapping', () => {
+    expect(MODEL_INVOCATION_PURPOSES_).toEqual([
       'primary_agent',
       'context_compaction',
       'auto_review',
-      'verification_review',
       'subagent',
     ]);
-    expect(Object.keys(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1)).toEqual([
-      ...MODEL_INVOCATION_PURPOSES_V1,
+    expect(Object.keys(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_)).toEqual([
+      ...MODEL_INVOCATION_PURPOSES_,
     ]);
-    expect(Object.values(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1)).toEqual([
+    expect(Object.values(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_)).toEqual([
       'primary_model',
       'compaction',
       'auto_review',
-      'verification_review',
       'subagent',
     ]);
-    expect(new Set(Object.values(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1)).size).toBe(5);
+    expect(new Set(Object.values(MODEL_PURPOSE_TO_PROVIDER_DISPATCH_)).size).toBe(4);
   });
 
   test('keeps response records JSON-safe without exposing an artifact path', () => {
-    const response: ModelResponseRecordV1 = {
-      schema: MODEL_RESPONSE_RECORD_SCHEMA_V1,
+    const response: ModelResponseRecord = {
+      schema: MODEL_RESPONSE_RECORD_SCHEMA_,
       invocationId: 'invocation-1',
-      surfaceIntegrityIdentifier: `hmac-sha256:${'4'.repeat(64)}`,
+      surfaceIntegrityIdentifier: `sha256:${'4'.repeat(64)}`,
       route: baseSurface().route,
       response: {
         message: {
@@ -225,7 +217,7 @@ describe('Model Surface protocol', () => {
       nativeReplayState: null,
     };
 
-    const encoded = canonicalModelJsonV1(response);
+    const encoded = canonicalModelJson(response);
     expect(encoded).toContain('"invocationId":"invocation-1"');
     expect(encoded).not.toContain('relativePath');
     expect(encoded).not.toContain('endpoint');
@@ -234,12 +226,12 @@ describe('Model Surface protocol', () => {
 
 describe('private model evidence canonical JSON', () => {
   test('orders object keys while preserving semantic array order and exact text bytes', () => {
-    expect(canonicalModelJsonV1({ z: 1, a: { y: 2, x: 3 } })).toBe('{"a":{"x":3,"y":2},"z":1}');
-    expect(canonicalModelJsonV1({ values: ['a', 'b'] })).not.toBe(
-      canonicalModelJsonV1({ values: ['b', 'a'] }),
+    expect(canonicalModelJson({ z: 1, a: { y: 2, x: 3 } })).toBe('{"a":{"x":3,"y":2},"z":1}');
+    expect(canonicalModelJson({ values: ['a', 'b'] })).not.toBe(
+      canonicalModelJson({ values: ['b', 'a'] }),
     );
-    expect(canonicalModelJsonV1({ text: 'line\n' })).not.toBe(
-      canonicalModelJsonV1({ text: 'line\r\n' }),
+    expect(canonicalModelJson({ text: 'line\n' })).not.toBe(
+      canonicalModelJson({ text: 'line\r\n' }),
     );
   });
 
@@ -252,44 +244,44 @@ describe('private model evidence canonical JSON', () => {
     ['custom prototype', new (class Evidence {})()],
     ['lone surrogate', { value: '\ud800' }],
   ])('rejects non-JSON evidence: %s', (_name, value) => {
-    expect(() => canonicalModelJsonV1(value)).toThrow(ModelSurfaceCanonicalizationError);
+    expect(() => canonicalModelJson(value)).toThrow(ModelSurfaceCanonicalizationError);
   });
 
   test('rejects sparse arrays, accessors, symbol fields, and cycles', () => {
     const sparse = new Array(2);
     sparse[1] = 'present';
-    expect(() => canonicalModelJsonV1(sparse)).toThrow(/sparse/);
+    expect(() => canonicalModelJson(sparse)).toThrow(/sparse/);
 
     const accessor = {} as Record<string, unknown>;
     Object.defineProperty(accessor, 'value', { enumerable: true, get: () => 'secret' });
-    expect(() => canonicalModelJsonV1(accessor)).toThrow(/accessor/);
+    expect(() => canonicalModelJson(accessor)).toThrow(/accessor/);
 
     const symbol = { value: true } as Record<PropertyKey, unknown>;
     symbol[Symbol('private')] = true;
-    expect(() => canonicalModelJsonV1(symbol)).toThrow(/symbol/);
+    expect(() => canonicalModelJson(symbol)).toThrow(/symbol/);
 
     const cycle: { self?: unknown } = {};
     cycle.self = cycle;
-    expect(() => canonicalModelJsonV1(cycle)).toThrow(/circular/);
+    expect(() => canonicalModelJson(cycle)).toThrow(/circular/);
   });
 });
 
 describe('Model Surface layered digests', () => {
   test('is stable across object insertion order and returns distinct digest domains', () => {
     const first = baseSurface();
-    const reordered = JSON.parse(canonicalModelJsonV1(first)) as ModelSurfaceV1;
-    const layers = computeModelSurfaceDigestLayersV1(first);
+    const reordered = JSON.parse(canonicalModelJson(first)) as ModelSurface;
+    const layers = computeModelSurfaceDigestLayers(first);
 
-    expect(computeModelSurfaceDigestV1(reordered)).toBe(layers.surfaceDigest);
-    expect(layers.routeIdentityDigest).toBe(computeModelRouteIdentityDigestV1(first.route));
+    expect(computeModelSurfaceDigest(reordered)).toBe(layers.surfaceDigest);
+    expect(layers.routeIdentityDigest).toBe(computeModelRouteIdentityDigest(first.route));
     expect(layers.surfaceDigest).not.toBe(layers.routeIdentityDigest);
     expect(layers.resolvedCapabilitiesDigest).not.toBe(layers.providerOptionsDigest);
   });
 
   test('changes for every provider dispatch semantic layer', () => {
     const original = baseSurface();
-    const originalDigest = computeModelSurfaceDigestV1(original);
-    const variants: Array<[string, (surface: ModelSurfaceV1) => void]> = [
+    const originalDigest = computeModelSurfaceDigest(original);
+    const variants: Array<[string, (surface: ModelSurface) => void]> = [
       [
         'purpose',
         (surface) => {
@@ -403,26 +395,25 @@ describe('Model Surface layered digests', () => {
       const candidate = cloneSurface(original);
       mutate(candidate);
       refreshNestedDigests(candidate);
-      expect(computeModelSurfaceDigestV1(candidate), name).not.toBe(originalDigest);
+      expect(computeModelSurfaceDigest(candidate), name).not.toBe(originalDigest);
     }
   });
 
-  test('keeps invocation, admission, resource, time, process, and artifact identity outside surfaceDigest', () => {
+  test('keeps invocation, resource, time, process, and artifact identity outside surfaceDigest', () => {
     const surface = baseSurface();
-    const before = computeModelSurfaceDigestV1(surface);
+    const before = computeModelSurfaceDigest(surface);
     const first = envelope('opaque-artifact-a', 'invocation-a');
     const second = envelope('opaque-artifact-b', 'invocation-b');
     second.provenance.threadId = 'thread-2';
     second.provenance.turnId = 'turn-2';
     second.provenance.stateRevision = 900;
-    second.admission.admitted = false;
     second.resource = {
       budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
       limits: { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 },
     };
 
-    expect(canonicalModelJsonV1(first)).not.toBe(canonicalModelJsonV1(second));
-    expect(computeModelSurfaceDigestV1(surface)).toBe(before);
+    expect(canonicalModelJson(first)).not.toBe(canonicalModelJson(second));
+    expect(computeModelSurfaceDigest(surface)).toBe(before);
   });
 
   test('keeps Provider option storage representation and opaque locator outside surfaceDigest', () => {
@@ -435,7 +426,7 @@ describe('Model Surface layered digests', () => {
       artifact: {
         artifactId: 'opaque-options-a',
         kind: 'provider_options',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 128,
       },
       contentDigest,
@@ -445,25 +436,23 @@ describe('Model Surface layered digests', () => {
       throw new Error('expected artifact');
     }
     relocated.request.providerOptions.artifact.artifactId = 'opaque-options-b';
-    relocated.request.providerOptions.artifact.integrityIdentifier = `hmac-sha256:${'c'.repeat(64)}`;
+    relocated.request.providerOptions.artifact.integrityIdentifier = `sha256:${'c'.repeat(64)}`;
     relocated.request.providerOptions.artifact.byteLength = 256;
 
-    expect(computeModelSurfaceDigestV1(artifactBacked)).toBe(computeModelSurfaceDigestV1(inline));
-    expect(computeModelSurfaceDigestV1(relocated)).toBe(
-      computeModelSurfaceDigestV1(artifactBacked),
-    );
+    expect(computeModelSurfaceDigest(artifactBacked)).toBe(computeModelSurfaceDigest(inline));
+    expect(computeModelSurfaceDigest(relocated)).toBe(computeModelSurfaceDigest(artifactBacked));
   });
 
   test('fails closed on stale nested evidence digests', () => {
     const staleCapabilities = cloneSurface();
     staleCapabilities.request.resolvedCapabilities.value.contextWindowTokens = 64_000;
-    expect(() => computeModelSurfaceDigestV1(staleCapabilities)).toThrow(/capability digest/);
+    expect(() => computeModelSurfaceDigest(staleCapabilities)).toThrow(/capability digest/);
 
     const staleOptions = cloneSurface();
     if (staleOptions.request.providerOptions.kind === 'inline') {
       staleOptions.request.providerOptions.value = { mock: { thinking: { type: 'enabled' } } };
     }
-    expect(() => computeModelSurfaceDigestV1(staleOptions)).toThrow(/options digest/);
+    expect(() => computeModelSurfaceDigest(staleOptions)).toThrow(/options digest/);
   });
 });
 
@@ -471,18 +460,18 @@ describe('Model Surface fail-closed contract', () => {
   test('rejects unknown top-level and nested fields', () => {
     const top = cloneSurface() as unknown as Record<string, unknown>;
     top.legacy = true;
-    expect(() => computeModelSurfaceDigestV1(top as unknown as ModelSurfaceV1)).toThrow(
+    expect(() => computeModelSurfaceDigest(top as unknown as ModelSurface)).toThrow(
       /unsupported or missing fields/,
     );
 
     const nested = cloneSurface();
     (nested.route as unknown as Record<string, unknown>).baseURL = 'https://private.invalid';
-    expect(() => computeModelSurfaceDigestV1(nested)).toThrow(/unsupported or missing fields/);
+    expect(() => computeModelSurfaceDigest(nested)).toThrow(/unsupported or missing fields/);
   });
 
   test('rejects credential-bearing Provider options without echoing secret values', () => {
     const secret = 'UNIQUE_MODEL_SURFACE_SECRET_MARKER';
-    const unsafeOptions: CanonicalJsonObjectV1[] = [
+    const unsafeOptions: CanonicalJsonObject[] = [
       { mock: { headers: { Authorization: `Bearer ${secret}` } } },
       { mock: { api_token: secret } },
       { mock: { authToken: secret } },
@@ -498,7 +487,7 @@ describe('Model Surface fail-closed contract', () => {
 
     for (const value of unsafeOptions) {
       try {
-        computeCanonicalProviderOptionsDigestV1(value);
+        computeCanonicalProviderOptionsDigest(value);
         throw new Error('expected Provider options to be rejected');
       } catch (error) {
         expect(error).toBeInstanceOf(ModelSurfaceCanonicalizationError);
@@ -510,7 +499,7 @@ describe('Model Surface fail-closed contract', () => {
   test('requires Provider options and tool schemas to remain JSON objects at runtime', () => {
     for (const invalid of [null, [], 'inline', 42]) {
       expect(() =>
-        computeCanonicalProviderOptionsDigestV1(invalid as unknown as CanonicalJsonObjectV1),
+        computeCanonicalProviderOptionsDigest(invalid as unknown as CanonicalJsonObject),
       ).toThrow(ModelSurfaceCanonicalizationError);
     }
 
@@ -518,8 +507,8 @@ describe('Model Surface fail-closed contract', () => {
     if (invalidOptions.request.providerOptions.kind !== 'inline') {
       throw new Error('expected inline');
     }
-    invalidOptions.request.providerOptions.value = [] as unknown as CanonicalJsonObjectV1;
-    expect(() => computeModelSurfaceDigestV1(invalidOptions)).toThrow(
+    invalidOptions.request.providerOptions.value = [] as unknown as CanonicalJsonObject;
+    expect(() => computeModelSurfaceDigest(invalidOptions)).toThrow(
       ModelSurfaceCanonicalizationError,
     );
 
@@ -527,10 +516,10 @@ describe('Model Surface fail-closed contract', () => {
     invalidSchema.request.tools = [
       {
         ...invalidSchema.request.tools[0]!,
-        inputSchema: [] as unknown as CanonicalJsonObjectV1,
+        inputSchema: [] as unknown as CanonicalJsonObject,
       },
     ];
-    expect(() => computeModelSurfaceDigestV1(invalidSchema)).toThrow(
+    expect(() => computeModelSurfaceDigest(invalidSchema)).toThrow(
       ModelSurfaceCanonicalizationError,
     );
   });
@@ -543,7 +532,7 @@ describe('Model Surface fail-closed contract', () => {
       endpoint: `https://${secret}.invalid`,
     });
     try {
-      computeModelSurfaceDigestV1(surface);
+      computeModelSurfaceDigest(surface);
       throw new Error('expected route identity to be rejected');
     } catch (error) {
       expect(error).toBeInstanceOf(ModelSurfaceCanonicalizationError);
@@ -554,19 +543,19 @@ describe('Model Surface fail-closed contract', () => {
   test('rejects endpoint-shaped route values even without unknown fields', () => {
     const unsafeProvider = cloneSurface();
     unsafeProvider.route.providerKind = 'https://private.invalid';
-    expect(() => computeModelRouteIdentityDigestV1(unsafeProvider.route)).toThrow(
+    expect(() => computeModelRouteIdentityDigest(unsafeProvider.route)).toThrow(
       ModelSurfaceCanonicalizationError,
     );
 
     const unsafeModel = cloneSurface();
     unsafeModel.route.modelName = 'model:https://private.invalid?credential=opaque';
-    expect(() => computeModelRouteIdentityDigestV1(unsafeModel.route)).toThrow(
+    expect(() => computeModelRouteIdentityDigest(unsafeModel.route)).toThrow(
       ModelSurfaceCanonicalizationError,
     );
 
     const rawEndpointModel = cloneSurface();
     rawEndpointModel.route.modelName = 'api.openai.com/v1';
-    expect(() => computeModelRouteIdentityDigestV1(rawEndpointModel.route)).toThrow(
+    expect(() => computeModelRouteIdentityDigest(rawEndpointModel.route)).toThrow(
       ModelSurfaceCanonicalizationError,
     );
 
@@ -576,12 +565,12 @@ describe('Model Surface fail-closed contract', () => {
       artifact: {
         artifactId: 'https://private.invalid/options',
         kind: 'provider_options',
-        integrityIdentifier: `hmac-sha256:${'d'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'d'.repeat(64)}`,
         byteLength: 64,
       },
       contentDigest: digest('e'),
     };
-    expect(() => computeModelSurfaceDigestV1(endpointLocator)).toThrow(
+    expect(() => computeModelSurfaceDigest(endpointLocator)).toThrow(
       ModelSurfaceCanonicalizationError,
     );
   });
@@ -589,7 +578,7 @@ describe('Model Surface fail-closed contract', () => {
   test('requires route and replay-owner adapter protocol versions to agree', () => {
     const protocolMismatch = cloneSurface();
     protocolMismatch.route.replayOwner.adapterProtocolVersion = 'adapter-protocol-v2';
-    expect(() => computeModelRouteIdentityDigestV1(protocolMismatch.route)).toThrow(
+    expect(() => computeModelRouteIdentityDigest(protocolMismatch.route)).toThrow(
       ModelSurfaceCanonicalizationError,
     );
   });
@@ -597,7 +586,7 @@ describe('Model Surface fail-closed contract', () => {
   test('rejects executable tool closures and unsupported provider-native message parts', () => {
     const closure = cloneSurface();
     Object.assign(closure.request.tools[0]!, { execute: () => 'not evidence' });
-    expect(() => computeModelSurfaceDigestV1(closure)).toThrow(ModelSurfaceCanonicalizationError);
+    expect(() => computeModelSurfaceDigest(closure)).toThrow(ModelSurfaceCanonicalizationError);
 
     const nativePart = cloneSurface();
     nativePart.request.messages = [
@@ -605,25 +594,23 @@ describe('Model Surface fail-closed contract', () => {
         role: 'user',
         content: [{ type: 'image', data: new Uint8Array([1, 2, 3]) }],
       },
-    ] as unknown as ModelSurfaceV1['request']['messages'];
-    expect(() => computeModelSurfaceDigestV1(nativePart)).toThrow(
-      ModelSurfaceCanonicalizationError,
-    );
+    ] as unknown as ModelSurface['request']['messages'];
+    expect(() => computeModelSurfaceDigest(nativePart)).toThrow(ModelSurfaceCanonicalizationError);
 
     const nullPart = cloneSurface();
     nullPart.request.messages = [
       { role: 'assistant', content: [null] },
-    ] as unknown as ModelSurfaceV1['request']['messages'];
-    expect(() => computeModelSurfaceDigestV1(nullPart)).toThrow(ModelSurfaceCanonicalizationError);
+    ] as unknown as ModelSurface['request']['messages'];
+    expect(() => computeModelSurfaceDigest(nullPart)).toThrow(ModelSurfaceCanonicalizationError);
   });
 
   test('rejects attempts to enable SDK retry or multi-step execution', () => {
     const retry = cloneSurface();
     (retry.request.sdkRetry as { maxRetries: number }).maxRetries = 1;
-    expect(() => computeModelSurfaceDigestV1(retry)).toThrow(/SDK retries/);
+    expect(() => computeModelSurfaceDigest(retry)).toThrow(/SDK retries/);
 
     const multiStep = cloneSurface();
     (multiStep.request.stopPolicy as { kind: string; maxSteps: number }).maxSteps = 2;
-    expect(() => computeModelSurfaceDigestV1(multiStep)).toThrow(/single-step/);
+    expect(() => computeModelSurfaceDigest(multiStep)).toThrow(/single-step/);
   });
 });

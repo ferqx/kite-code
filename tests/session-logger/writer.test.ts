@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sessionLogDir } from '@/core/config/paths';
+import { sessionLogDir } from '#app/config/paths';
 
 const TEST_FRONTEND = 'test';
 const TEST_THREAD = 'test-session-logger-writer';
@@ -39,7 +39,7 @@ describe('SessionLogWriter', () => {
 
   test('单条写入 + finalize 后文件内容正确', async () => {
     // 动态导入以隔离模块状态
-    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    const { SessionLogWriter } = await import('#app/session-logger/writer');
     cleanup();
 
     const writer = new SessionLogWriter(TEST_FRONTEND, TEST_THREAD);
@@ -59,7 +59,7 @@ describe('SessionLogWriter', () => {
   });
 
   test('多条写入在同一文件中，顺序正确', async () => {
-    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    const { SessionLogWriter } = await import('#app/session-logger/writer');
     cleanup();
 
     const writer = new SessionLogWriter(TEST_FRONTEND, TEST_THREAD);
@@ -77,7 +77,7 @@ describe('SessionLogWriter', () => {
   });
 
   test('finalize 时缓冲为空不会产生空行', async () => {
-    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    const { SessionLogWriter } = await import('#app/session-logger/writer');
     cleanup();
 
     const writer = new SessionLogWriter(TEST_FRONTEND, TEST_THREAD);
@@ -92,7 +92,7 @@ describe('SessionLogWriter', () => {
   });
 
   test('write 超 BATCH_SIZE 触发异步写盘，finalize 后数据完整', async () => {
-    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    const { SessionLogWriter } = await import('#app/session-logger/writer');
     cleanup();
 
     const writer = new SessionLogWriter(TEST_FRONTEND, TEST_THREAD);
@@ -111,7 +111,7 @@ describe('SessionLogWriter', () => {
   });
 
   test('异步写盘 + finalize 不产生数据交错', async () => {
-    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    const { SessionLogWriter } = await import('#app/session-logger/writer');
     cleanup();
 
     const writer = new SessionLogWriter(TEST_FRONTEND, TEST_THREAD);
@@ -141,7 +141,7 @@ describe('SessionLogWriter', () => {
   });
 
   test('序列化失败后立即熔断且诊断回调异常不会传播', async () => {
-    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    const { SessionLogWriter } = await import('#app/session-logger/writer');
     cleanup();
     let diagnostics = 0;
     const writer = new SessionLogWriter(TEST_FRONTEND, TEST_THREAD, 'events', () => {
@@ -160,7 +160,7 @@ describe('SessionLogWriter', () => {
   });
 
   test('首批异步写失败后不执行已排队的后续批次', async () => {
-    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    const { SessionLogWriter } = await import('#app/session-logger/writer');
     cleanup();
     let appendCalls = 0;
     let diagnostics = 0;

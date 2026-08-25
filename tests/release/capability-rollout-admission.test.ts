@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  evaluateCapabilityRolloutAdmissionV1,
-  type RolloutCapabilityV1,
-  type RolloutStageV1,
-  requiredRolloutDependenciesV1,
+  evaluateCapabilityRolloutAdmission,
+  type RolloutCapability,
+  type RolloutStage,
+  requiredRolloutDependencies,
 } from '../../scripts/release/capability-rollout-admission';
 
 const digest = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`;
@@ -16,14 +16,14 @@ const identity = {
   capabilityContractDigest: digest('6'),
 } as const;
 
-function input(capability: RolloutCapabilityV1, stage: RolloutStageV1) {
+function input(capability: RolloutCapability, stage: RolloutStage) {
   return {
-    schema: 'CapabilityRolloutAdmissionInputV1' as const,
+    schema: 'CapabilityRolloutAdmissionInput' as const,
     capability,
     stage,
     identity,
-    dependencies: requiredRolloutDependenciesV1(capability, stage).map((dependency, index) => ({
-      schema: 'CapabilityRolloutDependencyDecisionV1' as const,
+    dependencies: requiredRolloutDependencies(capability, stage).map((dependency, index) => ({
+      schema: 'CapabilityRolloutDependencyDecision' as const,
       dependency,
       status: 'passed' as const,
       ...identity,
@@ -49,7 +49,7 @@ describe('capability rollout admission', () => {
     'skills_effectful',
     'manual_compaction',
   ] as const)('keeps %s internal rollout off without authenticated authority', (capability) => {
-    const decision = evaluateCapabilityRolloutAdmissionV1(input(capability, 'internal'));
+    const decision = evaluateCapabilityRolloutAdmission(input(capability, 'internal'));
     expect(decision).toMatchObject({
       capability,
       requestedStage: 'internal',
@@ -66,7 +66,7 @@ describe('capability rollout admission', () => {
     candidate.dependencies = candidate.dependencies.filter(
       (dependency) => dependency.dependency === 'evaluation',
     );
-    const decision = evaluateCapabilityRolloutAdmissionV1(candidate);
+    const decision = evaluateCapabilityRolloutAdmission(candidate);
     expect(decision.reasonCodes).toEqual(
       expect.arrayContaining([
         'dependency_missing:internal_rollout',
@@ -86,7 +86,7 @@ describe('capability rollout admission', () => {
     candidate.safety.g0Count = 1;
     candidate.safety.duplicateOrUnauthorizedEffectCount = 1;
     candidate.safety.verificationBypassCount = 1;
-    const decision = evaluateCapabilityRolloutAdmissionV1(candidate);
+    const decision = evaluateCapabilityRolloutAdmission(candidate);
     expect(decision.reasonCodes).toEqual(
       expect.arrayContaining([
         `dependency_identity_mismatch:${candidate.dependencies[0]!.dependency}:artifactDigest`,
@@ -97,6 +97,6 @@ describe('capability rollout admission', () => {
     );
 
     candidate.dependencies.push({ ...candidate.dependencies[0]! });
-    expect(() => evaluateCapabilityRolloutAdmissionV1(candidate)).toThrow('duplicated');
+    expect(() => evaluateCapabilityRolloutAdmission(candidate)).toThrow('duplicated');
   });
 });

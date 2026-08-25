@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-18（可信 Runtime 收敛计划已完成并归档）
+最后更新：2026-08-25（新增 Shell 沙箱边界与并发审批队列优化方案）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,11 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-25-shell-sandbox-approval-queue-optimization.md`](2026-08-25-shell-sandbox-approval-queue-optimization.md) | archived | P0 | ADR-0133、ADR-0136、当前 Runtime/Store/Sandbox/TUI | 方案一已实施；ADR-0137 定义当前 SAQ 契约，ADR-0138 后续补充未知格式静默忽略与已知会话懒迁移；本地全量、required checks 与三平台 probe 已通过 | Sandbox-first phase/mode 矩阵、两类 grant、durable approval queue、same-command 原子批量释放、Plan + Full 正交；[完成记录](../execution/completed/2026-08-25-shell-sandbox-approval-queue-optimization.md) |
+| [`2026-08-23-sqlite-session-log-server-web.md`](2026-08-23-sqlite-session-log-server-web.md) | active | P1 | ADR-0129、当前 State26/Store5 SQLite Runtime | SQLite 是唯一会话日志事实源；明确排除 Session Logger/JSONL | LOGWEB-00～04 已完成；后续为 loopback Server/SSE、Web 时间线与跨平台验证 |
+| [`2026-08-23-pre-release-clean-cutover-module-boundaries.md`](2026-08-23-pre-release-clean-cutover-module-boundaries.md) | archived | P0 | ADR-0128、当前 State26/Store5 Runtime | 落实用户提供的《Kite Code 完整模块化优化方案》 | 无版本命名 clean cutover、零 compatibility production path、领域拆分、根 API 收窄、静态 Gate；[完成记录](../execution/completed/2026-08-23-pre-release-clean-cutover-module-boundaries.md) |
+| [`2026-08-19-kite-runtime-modularization-v1-implementation.md`](2026-08-19-kite-runtime-modularization-v1-implementation.md) | completed | P0 | accepted RFC、ADR-0124/0125、baseline `af5a5123` | 只做物理模块化；Authority/Format范围移入RAV1 | RMV1-01 至 RMV1-16 [全部完成](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)；implementation final SHA `e5a64c21`；State 25、Store 4和原epoch保持不变 |
+| [`2026-08-20-kite-runtime-authority-format-v1-implementation.md`](2026-08-20-kite-runtime-authority-format-v1-implementation.md) | archived | P0 | RMV1 completion、ADR-0124/0125、ADR-0127 | 原 RAV1-01～06 evidence 已被简化裁决替代 | 无 key/HMAC/ProjectHandle/global lock/DataOrigin/EgressAuthority/fixed provider policy；State26/Store5 7 tables/2 indexes；[completion](../execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md) |
 | [2026-08-16-trustworthy-runtime-convergence.md](2026-08-16-trustworthy-runtime-convergence.md) | archived | P0 | Runtime Kernel、Context Projection、ToolSpec Registry、当前 execution/verification 边界 | [完成记录](../execution/completed/2026-08-18-trustworthy-runtime-convergence.md) | MS/TP/RP/PS 全部任务及 CUT-01 已完成；Production Runtime 已切换为 schema v25、epoch `kite-runtime-2026-08-18`，旧格式无迁移、无 dispatch、无 fallback。PS-02 三平台证据仍全部 `excluded`、`productionSupported=false`，support set 保持为空；PS-03 closed synthetic strict replay 仍只属于 evaluation qualification |
 | [`2026-08-15-runtime-architecture-convergence.md`](2026-08-15-runtime-architecture-convergence.md) | archived | P0 | Runtime Kernel、ToolSpec Registry、当前三层边界 | [完成记录](../execution/completed/2026-08-15-runtime-architecture-convergence.md) | 精确 format epoch、历史在线路径清场、单一 Runtime 协议与唯一 Tool invocation pipeline 已完成；剩余 SCC 无重复权威证据，按停止条件不继续拆分 |
 | [`2026-08-15-tui-i18n-zh-en.md`](2026-08-15-tui-i18n-zh-en.md) | active | P1 | TUI Overlay contract、CJK wrap、workspace trust gate | — | 首批：用户级 language、catalog/Provider、`/language`、信任/首启/帮助/状态栏；其余表面与双语言 PTY 验证进行中 |

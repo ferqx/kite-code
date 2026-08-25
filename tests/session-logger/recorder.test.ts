@@ -1,128 +1,78 @@
-// tests/session-logger/recorder.test.ts
-// 验证 RuntimeEvent → TraceRecord 映射
-
 import { describe, expect, test } from 'bun:test';
-import { recordRuntimeEvent } from '@/core/session-logger/recorder';
+import { recordContentRuntimeEvent } from '#app/session-logger/recorder';
 
 const TRACE = 'aaaaaaaaaaaaaaaabbbbbbbbbbbbbbbb';
 const PARENT = 'cccccccccccccccc';
 
-describe('recordRuntimeEvent — compaction telemetry', () => {
-  test('records the rejected approval tool identity', () => {
-    const record = recordRuntimeEvent(
+describe('recordContentRuntimeEvent', () => {
+  test('projects only allowlisted user text and redacts credential shapes', () => {
+    const record = recordContentRuntimeEvent(
       {
-        type: 'approval.rejected',
-        interactionId: 'approval-rejected',
-        toolCallId: 'shell-rejected',
-        reason: 'Rejected by user.',
+        type: 'user.message_appended',
+        messageId: 'private-message-id',
+        content: 'Use password="super-secret-value".',
       },
       TRACE,
       PARENT,
     );
 
-    expect(record.attributes['kite_code.tool.call_id']).toBe('shell-rejected');
+    expect(record).toMatchObject({
+      traceId: TRACE,
+      parentSpanId: PARENT,
+      name: 'user.message',
+      kind: 1,
+      attributes: {
+        'kite_code.text.length': 34,
+        'kite_code.text.content': 'Use password="[REDACTED]".',
+      },
+      status: { code: 'OK', message: '' },
+    });
+    expect(JSON.stringify(record)).not.toContain('private-message-id');
+    expect(JSON.stringify(record)).not.toContain('super-secret-value');
   });
 
-  test('persists completed token savings and real effect duration', () => {
-    const r = recordRuntimeEvent(
-      {
-        type: 'context.compaction_completed',
-        compactionId: 'compact-1',
-        sourceRevision: 3,
-        durationMs: 27,
-        checkpoint: {
-          compactionId: 'compact-1',
-          version: 1,
-          sourceRevision: 3,
-          sourceDigest: 'sha256:source',
-          coveredThroughMessageId: 'message-1',
-          coveredThroughTurnId: 'turn-1',
-          summary: 'Retain the important historical facts.',
-          inputTokensBefore: 10_000,
-          inputTokensAfter: 4_000,
-          reason: 'auto',
-          createdAt: '2026-07-21T00:00:00.000Z',
-        },
-      },
-      TRACE,
-      PARENT,
-    );
-    expect(r.name).toBe('context.compaction.completed');
-    expect(r.attributes['kite_code.compaction.tokens_saved']).toBe(6_000);
-    expect(r.attributes['kite_code.compaction.duration_ms']).toBe(27);
-  });
-
-  test('persists validation failure and model context pressure', () => {
-    const failed = recordRuntimeEvent(
-      {
-        type: 'context.compaction_failed',
-        compactionId: 'compact-2',
-        sourceRevision: 4,
-        errorKind: 'invalid_candidate',
-        message: 'fabricated question',
-        retryable: false,
-        durationMs: 12,
-      },
-      TRACE,
-      PARENT,
-    );
-    expect(failed.attributes['kite_code.compaction.error_kind']).toBe('invalid_candidate');
-    expect(failed.status.code).toBe('ERROR');
-
-    const pressure = recordRuntimeEvent(
-      {
-        type: 'model.context_metrics',
-        modelName: 'adapter-only',
-        contextWindowTokens: 32_000,
-        usableInputTokens: 28_976,
-        reservedOutputTokens: 2_000,
-        providerSafetyMarginTokens: 1_024,
-        totalInputTokens: 27_000,
-        utilization: 0.9318,
-        status: 'compact_due',
-        estimate: {
-          systemTokens: 1_000,
-          toolSchemaTokens: 1_000,
-          transcriptTokens: 24_000,
-          summaryTokens: 0,
-          dynamicRuntimeTokens: 500,
-          framingTokens: 500,
-          totalInputTokens: 27_000,
-        },
-      },
-      TRACE,
-      PARENT,
-    );
-    expect(pressure.name).toBe('model.context_metrics');
-    expect(pressure.attributes['kite_code.context.utilization']).toBe(0.9318);
-  });
-
-  test('model.responded — 记录模型调用耗时（规则 22：Thought 计时与日志回放的依据）', () => {
-    const r = recordRuntimeEvent(
+  test('projects model-visible text without reasoning or tool data', () => {
+    const record = recordContentRuntimeEvent(
       {
         type: 'model.responded',
-        messageId: 'msg-1',
-        durationMs: 2093,
-        text: 'Let me read the core files systematically.',
-        reasoningText: 'The user wants to understand the TUI module.',
+        messageId: 'private-model-id',
+        text: 'Visible answer',
+        reasoningText: 'PRIVATE_REASONING',
+        toolCalls: [
+          {
+            id: 'private-tool-call',
+            name: 'read_file',
+            args: { path: '/private/path' },
+          },
+        ],
       },
       TRACE,
       PARENT,
     );
-    expect(r.name).toBe('runtime.model.responded');
-    expect(r.kind).toBe(3);
-    expect(r.attributes['kite_code.model.message_id']).toBe('msg-1');
-    expect(r.attributes['kite_code.model.duration_ms']).toBe(2093);
-    expect(r.attributes['kite_code.text.content']).toContain('core files');
-    expect(r.attributes['kite_code.reason.content']).toBeUndefined();
-    expect(JSON.stringify(r)).not.toContain('TUI module');
 
-    // 旧事件无 durationMs 时不写入该属性（回放走创建→settle 墙钟回退）
-    const legacy = recordRuntimeEvent(
-      { type: 'model.responded', messageId: 'msg-2' },
+    expect(record.name).toBe('model.message');
+    expect(record.kind).toBe(3);
+    expect(record.attributes).toEqual({
+      'kite_code.text.length': 14,
+      'kite_code.text.content': 'Visible answer',
+    });
+    const serialized = JSON.stringify(record);
+    expect(serialized).not.toContain('PRIVATE_REASONING');
+    expect(serialized).not.toContain('private-tool-call');
+    expect(serialized).not.toContain('/private/path');
+  });
+
+  test('caps retained content without admitting arbitrary RuntimeEvent fields', () => {
+    const content = 'x'.repeat(10_001);
+    const record = recordContentRuntimeEvent(
+      { type: 'model.responded', messageId: 'model-long', text: content },
       TRACE,
       PARENT,
     );
-    expect(legacy.attributes['kite_code.model.duration_ms']).toBeUndefined();
+
+    expect(record.attributes['kite_code.text.length']).toBe(10_001);
+    expect(record.attributes['kite_code.text.content']).toBe(
+      `${'x'.repeat(10_000)}…(truncated, 10001 total)`,
+    );
   });
 });

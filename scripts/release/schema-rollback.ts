@@ -13,9 +13,9 @@ const durableFactSchema = z
   })
   .strict();
 
-export const releaseSchemaRollbackFixtureV1Schema = z
+export const releaseSchemaRollbackFixtureSchema = z
   .object({
-    schema: z.literal('ReleaseSchemaRollbackFixtureV1'),
+    schema: z.literal('ReleaseSchemaRollbackFixture'),
     fixtureClass: z.literal('synthetic_contract_only'),
     sourceSchemaVersion: z.number().int().positive(),
     candidateSchemaVersion: z.number().int().positive(),
@@ -31,8 +31,8 @@ export const releaseSchemaRollbackFixtureV1Schema = z
   })
   .strict();
 
-export interface ReleaseSchemaRollbackReportV1 {
-  schema: 'ReleaseSchemaRollbackReportV1';
+export interface ReleaseSchemaRollbackReport {
+  schema: 'ReleaseSchemaRollbackReport';
   status: 'contract_replay_passed';
   fixtureClass: 'synthetic_contract_only';
   productionEvidence: false;
@@ -43,10 +43,10 @@ export interface ReleaseSchemaRollbackReportV1 {
   reportDigest: `sha256:${string}`;
 }
 
-export function verifyReleaseSchemaRollbackFixtureV1(
+export function verifyReleaseSchemaRollbackFixture(
   rawFixture: unknown,
-): ReleaseSchemaRollbackReportV1 {
-  const fixture = releaseSchemaRollbackFixtureV1Schema.parse(rawFixture);
+): ReleaseSchemaRollbackReport {
+  const fixture = releaseSchemaRollbackFixtureSchema.parse(rawFixture);
   if (fixture.candidateSchemaVersion < fixture.sourceSchemaVersion) {
     throw new Error('Candidate schema cannot precede the source schema.');
   }
@@ -88,8 +88,8 @@ export function verifyReleaseSchemaRollbackFixtureV1(
     'kite.release.schema-rollback-fixture.v1',
     canonicalJson(fixture),
   );
-  const withoutDigest: Omit<ReleaseSchemaRollbackReportV1, 'reportDigest'> = {
-    schema: 'ReleaseSchemaRollbackReportV1',
+  const withoutDigest: Omit<ReleaseSchemaRollbackReport, 'reportDigest'> = {
+    schema: 'ReleaseSchemaRollbackReport',
     status: 'contract_replay_passed',
     fixtureClass: 'synthetic_contract_only',
     productionEvidence: false,

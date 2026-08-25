@@ -5,7 +5,7 @@
 终态范围（ADR-0069）：5.1、5.2、5A.1、5A.2、5.3A、5B.1–5B.3、5.3B、5C.1、5C.2、5.3C、5.4 的
 本地 profile/status/conformance/adversarial/security Gate 记为 `completed`；所有 dogfood、canary 与
 maturity Task 已被取代。Verification、MCP write 与 Skills 仍受默认关闭、显式用户开启和 embedded
-ceiling 约束。当前状态见 `release/oss-first-release/task-status-v2.json`。
+ceiling 约束。当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P1
 依赖：

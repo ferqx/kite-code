@@ -5,14 +5,13 @@ import { join } from 'node:path';
 import {
   CapabilityArtifactError,
   CapabilityArtifactStore,
-  capabilityResultDigestV1,
-  capabilityResultEvidenceDigestV1,
-  readBoundCapabilityArtifactV1,
-} from '@/core/persistence/capability-artifacts';
-import type { CapabilityArtifactRef } from '@/protocol/capabilities';
+  capabilityResultDigest,
+  capabilityResultEvidenceDigest,
+  readBoundCapabilityArtifact,
+} from '@kite/builtin-runtime';
+import type { CapabilityArtifactRef } from '@kite/runtime-contract';
 
 const invocationId = 'a'.repeat(64);
-const integrityKey = Buffer.alloc(32, 7);
 const previousHome = process.env.KITE_CODE_HOME;
 let tempHome: string | undefined;
 
@@ -27,7 +26,7 @@ describe('CapabilityArtifactStore', () => {
   test('stores structured result content outside Runtime state and verifies its digest on read', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const store = new CapabilityArtifactStore({ integrityKey });
+    const store = new CapabilityArtifactStore();
     const result = {
       status: 'success' as const,
       content: [{ type: 'text', text: 'sensitive provider output' }],
@@ -37,7 +36,7 @@ describe('CapabilityArtifactStore', () => {
     const ref = store.write(invocationId, result);
     expect(ref.kind).toBe('capability_result');
     expect(ref.artifactId).toMatch(/^pa_[0-9a-f]{64}$/);
-    expect(ref.integrityIdentifier).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
+    expect(ref.integrityIdentifier).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(ref.byteLength).toBeGreaterThan(0);
     expect(store.read(ref)).toEqual(result);
     expect(store.readEnvelope(ref)).toMatchObject({
@@ -50,7 +49,7 @@ describe('CapabilityArtifactStore', () => {
   test('binds owner, result/evidence digests, and filesystem observation symmetrically', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-binding-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const store = new CapabilityArtifactStore({ integrityKey });
+    const store = new CapabilityArtifactStore();
     const observation = {
       actorIdentityDigest: 'a'.repeat(64),
       lexicalTargetDigest: `sha256:${'b'.repeat(64)}`,
@@ -66,35 +65,35 @@ describe('CapabilityArtifactStore', () => {
     const ref = store.write(invocationId, result);
     const binding = {
       invocationId,
-      resultDigest: capabilityResultDigestV1(result),
-      evidenceDigest: capabilityResultEvidenceDigestV1(result),
+      resultDigest: capabilityResultDigest(result),
+      evidenceDigest: capabilityResultEvidenceDigest(result),
       filesystemObservation: observation,
     };
 
-    expect(readBoundCapabilityArtifactV1(store, ref, binding)).toEqual(result);
+    expect(readBoundCapabilityArtifact(store, ref, binding)).toEqual(result);
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, { ...binding, invocationId: 'wrong-owner' }),
+      readBoundCapabilityArtifact(store, ref, { ...binding, invocationId: 'wrong-owner' }),
     ).toThrow('does not match its Runtime receipt');
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, {
+      readBoundCapabilityArtifact(store, ref, {
         ...binding,
         resultDigest: 'f'.repeat(64),
       }),
     ).toThrow('does not match its Runtime receipt');
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, {
+      readBoundCapabilityArtifact(store, ref, {
         ...binding,
         evidenceDigest: 'f'.repeat(64),
       }),
     ).toThrow('does not match its Runtime receipt');
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, {
+      readBoundCapabilityArtifact(store, ref, {
         ...binding,
         filesystemObservation: { ...observation, contentDigest: `sha256:${'f'.repeat(64)}` },
       }),
     ).toThrow('filesystem observation');
     expect(() =>
-      readBoundCapabilityArtifactV1(store, ref, {
+      readBoundCapabilityArtifact(store, ref, {
         invocationId,
         resultDigest: binding.resultDigest,
         evidenceDigest: binding.evidenceDigest,
@@ -105,7 +104,7 @@ describe('CapabilityArtifactStore', () => {
   test('rejects oversize results and unsafe invocation IDs', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-limit-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const store = new CapabilityArtifactStore({ integrityKey, maxArtifactBytes: 20 });
+    const store = new CapabilityArtifactStore({ maxArtifactBytes: 20 });
     expect(() =>
       store.write(invocationId, { status: 'success', content: [{ type: 'text', text: 'x' }] }),
     ).toThrow(CapabilityArtifactError);
@@ -117,7 +116,7 @@ describe('CapabilityArtifactStore', () => {
   test('rejects a legacy capability Artifact reference after the epoch cutover', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-legacy-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const store = new CapabilityArtifactStore({ integrityKey });
+    const store = new CapabilityArtifactStore();
     const legacyRef = {
       artifactId: invocationId,
       relativePath: `capability-results/${invocationId}.json`,

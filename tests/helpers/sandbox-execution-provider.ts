@@ -1,41 +1,41 @@
-import {
-  type SandboxExecutionGrantVerifierV1,
-  sandboxCleanupDigestV1,
-  sandboxPreparedPlanDigestV1,
-} from '@/core/execution/sandbox-execution';
 import type {
-  PreparedSandboxExecutionV1,
-  SandboxCleanupGrantV1,
-  SandboxExecutionProviderResultV1,
-  SandboxExecutionProviderV1,
-  SandboxPreparationGrantV1,
-  SandboxPreparationResourceSemanticsV1,
-} from '@/protocol/sandbox-execution-provider';
+  PreparedSandboxExecution,
+  SandboxCleanupGrant,
+  SandboxExecutionProvider,
+  SandboxExecutionProviderResult,
+  SandboxPreparationGrant,
+  SandboxPreparationResourceSemantics,
+} from '@kite/runtime-spi';
+import {
+  type SandboxExecutionGrantVerifier,
+  sandboxCleanupDigest,
+  sandboxPreparedPlanDigest,
+} from '#app/sandbox/runtime-execution';
 
-type FakeCleanupResult = SandboxExecutionProviderResultV1<{ readonly disposed: true }>;
+type FakeCleanupResult = SandboxExecutionProviderResult<{ readonly disposed: true }>;
 type FakePreparedCleanup = (
-  grant: Readonly<SandboxCleanupGrantV1>,
-  prepared: Readonly<PreparedSandboxExecutionV1>,
+  grant: Readonly<SandboxCleanupGrant>,
+  prepared: Readonly<PreparedSandboxExecution>,
 ) => FakeCleanupResult;
-type FakeIntentCleanup = (grant: Readonly<SandboxCleanupGrantV1>) => FakeCleanupResult;
+type FakeIntentCleanup = (grant: Readonly<SandboxCleanupGrant>) => FakeCleanupResult;
 
-export class ScriptableFakeSandboxExecutionProviderV1 implements SandboxExecutionProviderV1 {
-  readonly resourceSemantics: SandboxPreparationResourceSemanticsV1;
-  readonly #verifier: SandboxExecutionGrantVerifierV1;
+export class ScriptableFakeSandboxExecutionProvider implements SandboxExecutionProvider {
+  readonly resourceSemantics: SandboxPreparationResourceSemantics;
+  readonly #verifier: SandboxExecutionGrantVerifier;
   readonly #prepare: (
-    grant: Readonly<SandboxPreparationGrantV1>,
-  ) => SandboxExecutionProviderResultV1<PreparedSandboxExecutionV1>;
+    grant: Readonly<SandboxPreparationGrant>,
+  ) => SandboxExecutionProviderResult<PreparedSandboxExecution>;
   readonly #dispose?: FakePreparedCleanup;
   readonly #reconcile?: FakePreparedCleanup;
   readonly #reconcileIntent?: FakeIntentCleanup;
   readonly #counts = { prepare: 0, dispose: 0, reconcile: 0 };
 
   constructor(input: {
-    verifier: SandboxExecutionGrantVerifierV1;
-    resourceSemantics?: SandboxPreparationResourceSemanticsV1;
+    verifier: SandboxExecutionGrantVerifier;
+    resourceSemantics?: SandboxPreparationResourceSemantics;
     prepare: (
-      grant: Readonly<SandboxPreparationGrantV1>,
-    ) => SandboxExecutionProviderResultV1<PreparedSandboxExecutionV1>;
+      grant: Readonly<SandboxPreparationGrant>,
+    ) => SandboxExecutionProviderResult<PreparedSandboxExecution>;
     dispose?: FakePreparedCleanup;
     reconcile?: FakePreparedCleanup;
     reconcilePreparationIntent?: FakeIntentCleanup;
@@ -52,15 +52,15 @@ export class ScriptableFakeSandboxExecutionProviderV1 implements SandboxExecutio
     return { ...this.#counts };
   }
 
-  async prepare(input: { grant: SandboxPreparationGrantV1; signal?: AbortSignal }) {
+  async prepare(input: { grant: SandboxPreparationGrant; signal?: AbortSignal }) {
     const grant = this.#verifier.verify(input.grant);
     this.#counts.prepare++;
     return this.#prepare(grant);
   }
 
   async dispose(input: {
-    grant: SandboxCleanupGrantV1;
-    prepared: PreparedSandboxExecutionV1;
+    grant: SandboxCleanupGrant;
+    prepared: PreparedSandboxExecution;
     signal?: AbortSignal;
   }) {
     const grant = this.#verifyPreparedCleanup(input.grant, input.prepared, 'dispose');
@@ -69,8 +69,8 @@ export class ScriptableFakeSandboxExecutionProviderV1 implements SandboxExecutio
   }
 
   async reconcile(input: {
-    grant: SandboxCleanupGrantV1;
-    prepared: PreparedSandboxExecutionV1;
+    grant: SandboxCleanupGrant;
+    prepared: PreparedSandboxExecution;
     signal?: AbortSignal;
   }) {
     const grant = this.#verifyPreparedCleanup(input.grant, input.prepared, 'reconcile');
@@ -78,7 +78,7 @@ export class ScriptableFakeSandboxExecutionProviderV1 implements SandboxExecutio
     return this.#reconcile?.(grant, input.prepared) ?? success();
   }
 
-  async reconcilePreparationIntent(input: { grant: SandboxCleanupGrantV1; signal?: AbortSignal }) {
+  async reconcilePreparationIntent(input: { grant: SandboxCleanupGrant; signal?: AbortSignal }) {
     const grant = this.#verifier.verifyCleanup(input.grant);
     if (
       grant.purpose !== 'reconcile_preparation_intent' ||
@@ -91,15 +91,15 @@ export class ScriptableFakeSandboxExecutionProviderV1 implements SandboxExecutio
   }
 
   #verifyPreparedCleanup(
-    source: SandboxCleanupGrantV1,
-    prepared: PreparedSandboxExecutionV1,
+    source: SandboxCleanupGrant,
+    prepared: PreparedSandboxExecution,
     purpose: 'dispose' | 'reconcile',
-  ): Readonly<SandboxCleanupGrantV1> {
+  ): Readonly<SandboxCleanupGrant> {
     const grant = this.#verifier.verifyCleanup(source);
     if (
       grant.purpose !== purpose ||
-      grant.preparedPlanDigest !== sandboxPreparedPlanDigestV1(prepared) ||
-      grant.cleanupDigest !== sandboxCleanupDigestV1(prepared.cleanup)
+      grant.preparedPlanDigest !== sandboxPreparedPlanDigest(prepared) ||
+      grant.cleanupDigest !== sandboxCleanupDigest(prepared.cleanup)
     ) {
       throw new Error('Fake sandbox prepared cleanup identity mismatch.');
     }

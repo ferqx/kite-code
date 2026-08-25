@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '@/core/config/index';
-import type { GitBrokerV1 } from '@/core/git/broker';
-import { AgentKernel } from '@/core/runtime/kernel';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
-import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
+import type { GitBroker } from '@kite/builtin-runtime/git';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { AgentConfig } from '#app/config/index';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { executeTestRuntimeTools } from '../helpers/runtime-model';
 
 function config(): AgentConfig {
   return {
-    features: { brokeredGitV1: true },
+    features: { brokeredGit: true },
     executionCapabilitySurface: {
       inProcessReadOnlyTools: null,
       network: false,
@@ -27,7 +27,7 @@ function config(): AgentConfig {
 describe('ACORE-GIT Controller and Kernel integration', () => {
   test('Registry failure persists one strict typed outcome with stable Git detail and no replay', async () => {
     let inspectDispatches = 0;
-    const broker: GitBrokerV1 = {
+    const broker: GitBroker = {
       featureRevision: 'brokered-git-r1',
       inspect: async () => {
         inspectDispatches++;
@@ -39,11 +39,12 @@ describe('ACORE-GIT Controller and Kernel integration', () => {
         };
       },
     };
-    const store = createRuntimeStore(':memory:');
+    const store = openStateStoreForTest(':memory:');
     const kernel = new AgentKernel({
       store,
       interactionMode: 'accept_edits',
-      initialState: createInitialRuntimeState({
+      initialState: createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'git-controller-outcome',
         userId: 'user',
         workspace: '/workspace',
@@ -60,7 +61,7 @@ describe('ACORE-GIT Controller and Kernel integration', () => {
         effectClass: 'read_only',
         sideEffect: false,
       });
-      const events = await executeRuntimeTools({
+      const events = await executeTestRuntimeTools({
         state: kernel.getState(),
         toolCallIds: ['git-inspect'],
         gitBroker: broker,
@@ -69,7 +70,7 @@ describe('ACORE-GIT Controller and Kernel integration', () => {
       expect(inspectDispatches).toBe(1);
       expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(1);
       kernel.processEventBatch(events);
-      expect(kernel.getState().tools.calls['git-inspect']?.outcomeV1).toMatchObject({
+      expect(kernel.getState().tools.calls['git-inspect']?.outcome).toMatchObject({
         status: 'failed',
         failure: { kind: 'tool_runtime_error', detailCode: 'protected_path_denied' },
         dispatchState: 'started',

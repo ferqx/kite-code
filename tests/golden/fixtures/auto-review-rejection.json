@@ -18,6 +18,11 @@
           "toolCallId": "call-1",
           "toolName": "shell_execute",
           "reason": "network",
+          "fullModeBypassEligible": false,
+          "fullModePolicyBypassAllowed": false,
+          "queueGeneration": 0,
+          "queueSequence": 0,
+          "createdAt": "2026-08-02T00:00:00.000Z",
           "approval": {
             "scope": "once",
             "cwd": "/tmp/golden",

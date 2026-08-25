@@ -9,6 +9,7 @@ import {
   verifiedOwnedProcessGroupId,
   waitForPtyExit,
   waitForPtyExitCode,
+  writeExactPtyInput,
 } from './pty-process';
 import type { TestWorkspace } from './test-workspace';
 
@@ -18,6 +19,47 @@ test('keeps ordinary TUI groups detached but joins the fault-soak owned group', 
   expect(shouldDetachTuiProcess('darwin', 'attempt-nonce')).toBe(false);
   expect(shouldDetachTuiProcess('linux', 'attempt-nonce')).toBe(false);
   expect(shouldDetachTuiProcess('win32', undefined)).toBe(false);
+});
+
+describe('exact PTY input transport', () => {
+  test('writes one transaction when Bun reports the complete synchronous flush count', async () => {
+    const writes: string[] = [];
+
+    await writeExactPtyInput('Ask a question', {
+      write(data) {
+        writes.push(data);
+        return new TextEncoder().encode(data).byteLength;
+      },
+    });
+
+    expect(writes).toEqual(['Ask a question']);
+  });
+
+  test('does not replay when Bun 1.3 reports zero synchronously flushed bytes', async () => {
+    let writes = 0;
+
+    await writeExactPtyInput('Ask a question', {
+      write() {
+        writes++;
+        return 0;
+      },
+    });
+
+    expect(writes).toBe(1);
+  });
+
+  test('does not replay a Bun 1.3 partial synchronous flush count', async () => {
+    let writes = 0;
+
+    await writeExactPtyInput('Ask a question', {
+      write() {
+        writes++;
+        return 3;
+      },
+    });
+
+    expect(writes).toBe(1);
+  });
 });
 
 describe('waitForPtyExit', () => {
@@ -101,21 +143,7 @@ describe('resolveTuiLaunchPaths', () => {
 
     expect(resolveTuiLaunchPaths({ workspace }, '/project')).toEqual({
       cwd: '/tmp/kite-code-workspace',
-      entryPath: join('/project', 'src/app/tui/index.tsx'),
-    });
-  });
-
-  test('uses the explicit test composition root only for admitted remote MCP scenarios', () => {
-    const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;
-
-    expect(
-      resolveTuiLaunchPaths(
-        { workspace, remoteMcpEgressPermitResolver: 'allow-each-invocation' },
-        '/project',
-      ),
-    ).toEqual({
-      cwd: '/tmp/kite-code-workspace',
-      entryPath: join('/project', 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx'),
+      entryPath: join('/project', 'apps/kite/src/tui/executable.tsx'),
     });
   });
 
@@ -131,13 +159,6 @@ describe('resolveTuiLaunchPaths', () => {
       cwd: '/tmp/kite-code-workspace',
       entryPath: '/opt/kite-code/bin/kite-tui',
     });
-    expect(() =>
-      resolveTuiLaunchPaths({
-        workspace,
-        executablePath: '/opt/kite-code/bin/kite-tui',
-        remoteMcpEgressPermitResolver: 'allow-each-invocation',
-      }),
-    ).toThrow('only one explicit');
   });
   test('uses a test-owned TypeScript composition root', () => {
     const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;

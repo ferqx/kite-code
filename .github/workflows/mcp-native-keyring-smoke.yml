@@ -6,14 +6,14 @@ on:
     paths:
       - package.json
       - bun.lock
-      - src/core/mcp/credential-store.ts
+      - packages/builtin-runtime/src/mcp/credential-store.ts
       - tests/mcp-keyring-platform-smoke.test.ts
       - .github/workflows/mcp-native-keyring-smoke.yml
   pull_request:
     paths:
       - package.json
       - bun.lock
-      - src/core/mcp/credential-store.ts
+      - packages/builtin-runtime/src/mcp/credential-store.ts
       - tests/mcp-keyring-platform-smoke.test.ts
       - .github/workflows/mcp-native-keyring-smoke.yml
 

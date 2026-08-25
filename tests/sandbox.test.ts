@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -12,29 +13,46 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { parseArgs } from '../src/app/cli/index';
-import { buildPosixSupervisorEnvironmentV1 } from '../src/core/execution/sandbox-execution/posix-supervisor';
-import { generateBwrapArgs } from '../src/core/sandbox/bwrap';
-import { resolveSandboxExitCode } from '../src/core/sandbox/executor';
-import { detectSandboxBackend, isSandboxAvailable } from '../src/core/sandbox/platform';
-import { generateSandboxProfile } from '../src/core/sandbox/profile';
-import { findApplySeccomp, resolveSeccompPath } from '../src/core/sandbox/seccomp';
 import {
   buildEnvExportSnippet,
   buildEnvStripSnippet,
   buildHardenedEnv,
-  buildUlimitPreamble,
-  checkDangerousPaths,
-  cleanupSandboxRuntimeDir,
-  createSandboxRuntimeDir,
-} from '../src/core/sandbox/shell-wrapper';
-import { DEFAULT_RESOURCE_LIMITS } from '../src/core/sandbox/types';
-import { shellTool } from '../src/core/tools/shell';
-import {
   buildPolicyProvenReadOnlyEnv,
+  buildUlimitPreamble,
   buildWorkspaceExcludedPath,
-} from '../src/core/tools/trusted-readonly-environment';
+  checkDangerousPaths,
+  checkDangerousSearchRoot,
+  cleanupSandboxRuntimeDirNoSpawn,
+  cleanupWindowsSandboxRuntimeDirNoSpawn,
+  createSandboxRuntimeDirForPreparation,
+  createWindowsSandboxRuntimeDirForPreparation,
+  DEFAULT_RESOURCE_LIMITS,
+  detectSandboxBackend,
+  findApplySeccomp,
+  generateBwrapArgs,
+  generateSandboxProfile,
+  isSandboxAvailable,
+  projectApprovedProxyEnvironment,
+  resolveSandboxExitCode,
+  resolveSeccompPath,
+} from '@kite/builtin-runtime/sandbox';
+import { buildPosixSupervisorEnvironment } from '@kite/runtime-host';
+import { parseArgs } from '../apps/kite/src/cli/index';
 import { createSandboxExecutor } from './helpers/sandbox-executor';
+import { shellTool } from './helpers/shell-executor';
+
+function createTestRuntimeDir(workspace: string, label: string): string {
+  const preparationDigest = `sandbox-test:${label}:${randomUUID()}`;
+  return process.platform === 'win32'
+    ? createWindowsSandboxRuntimeDirForPreparation(workspace, preparationDigest)
+    : createSandboxRuntimeDirForPreparation(workspace, preparationDigest);
+}
+
+function cleanupTestRuntimeDir(runtimeDir: string): boolean {
+  return process.platform === 'win32'
+    ? cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeDir)
+    : cleanupSandboxRuntimeDirNoSpawn(runtimeDir);
+}
 
 function seatbeltString(path: string): string {
   return path.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
@@ -101,12 +119,29 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(allow file-read* file-read-metadata file-map-executable)');
     expect(profile).toContain('(allow file-write* file-write-create file-write-unlink file-ioctl)');
     expect(profile).toContain('(deny network*)');
-    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+    expect(profile).not.toContain('(deny file-read* file-map-executable file-write*');
   });
 
-  test('approved filesystem scope retains native denies for external credentials', () => {
+  test('approved filesystem scope does not re-deny external credentials', () => {
     const profile = generateSandboxProfile(workspace, { filesystemScope: 'full_access' });
-    expect(profile).toContain(seatbeltSubpath(join(homedir(), '.ssh')));
+    expect(profile).not.toContain(seatbeltSubpath(join(homedir(), '.ssh')));
+  });
+
+  test('approved filesystem scope still excludes the complete Host-control base', () => {
+    const controlBase = mkdtempSync(join(tmpdir(), 'approved-seatbelt-control-'));
+    try {
+      const profile = generateSandboxProfile(workspace, {
+        filesystemScope: 'full_access',
+        sandboxControlBase: controlBase,
+      });
+      expect(profile).toContain(
+        '(deny file-read* file-read-metadata file-map-executable file-write*',
+      );
+      expect(profile).toContain(seatbeltSubpath(realpathSync.native(controlBase)));
+      expect(profile).not.toContain(seatbeltSubpath(join(homedir(), '.ssh')));
+    } finally {
+      rmSync(controlBase, { recursive: true, force: true });
+    }
   });
 
   test('profile imports system.sb as base', () => {
@@ -133,32 +168,23 @@ describe('sandbox profile generation', () => {
     expect(executableSection).not.toContain('/opt/homebrew/share');
   });
 
-  test('profile denies protected workspace paths', () => {
+  test('profile does not deny any path inside the canonical Workspace', () => {
     const profile = generateSandboxProfile(workspace);
-    expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
-    expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
-    expect(profile).toContain(seatbeltLiteralPrefixRegex(join(canonicalWorkspace, '.env.')));
-    expect(profile).toContain('[eE][nN][vV]\\..*$")');
-    if (process.platform === 'darwin') {
-      expect(profile).toContain('/\\.[eE][nN][vV]\\..*$")');
-      expect(profile).not.toContain('\\\\.[eE][nN][vV]');
-    }
-    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+    expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
+    expect(profile).not.toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
+    expect(profile).not.toContain(seatbeltLiteralPrefixRegex(join(canonicalWorkspace, '.env.')));
+    expect(profile).not.toContain('(deny file-read* file-map-executable file-write*');
   });
 
-  test('profile default keeps git access denied', () => {
+  test('profile default admits Workspace git metadata', () => {
     const profile = generateSandboxProfile(workspace);
-    expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
-    expect(profile).toContain('[gG][iI][tT](/.*)?$');
+    expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
   });
 
-  test('brokered revision profile keeps metadata read and write in the same deny rule', () => {
+  test('brokered revision does not reintroduce a Workspace metadata deny', () => {
     const profile = generateSandboxProfile(workspace, { gitAccess: 'deny' });
     const metadata = seatbeltSubpath(join(canonicalWorkspace, '.git'));
-    const metadataIndex = profile.indexOf(metadata);
-    expect(metadataIndex).toBeGreaterThan(0);
-    const denyPrefix = profile.slice(Math.max(0, metadataIndex - 300), metadataIndex);
-    expect(denyPrefix).toContain('(deny file-read* file-map-executable file-write*');
+    expect(profile).not.toContain(metadata);
   });
 
   test('git access allows CLT developer dir and user git config reads', () => {
@@ -172,20 +198,13 @@ describe('sandbox profile generation', () => {
     }
   });
 
-  (process.platform === 'win32' ? test.skip : test)(
-    'git access exempts .git but keeps other protected paths denied',
-    () => {
-      const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
-      // .git directory is readable/writable so git commands can operate.
-      expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
-      expect(profile).not.toContain('[gG][iI][tT](/.*)');
-      // Other protected identities stay denied: shell profiles, credentials, …
-      expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.ssh')));
-      expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.git-credentials')));
-      expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
-      expect(profile).toContain('(deny file-read* file-map-executable file-write*');
-    },
-  );
+  test('git config opt-in does not change complete Workspace admission', () => {
+    const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
+    for (const path of ['.git', '.ssh', '.git-credentials', '.env']) {
+      expect(profile).not.toContain(seatbeltString(join(canonicalWorkspace, path)));
+    }
+    expect(profile).not.toContain('(deny file-read* file-map-executable file-write*');
+  });
 
   test('read-only scope omits workspace from writable filters', () => {
     const profile = generateSandboxProfile(workspace, { filesystemScope: 'read_only' });
@@ -210,14 +229,32 @@ describe('sandbox profile generation', () => {
 describe('approved filesystem execution lane', () => {
   test('keeps bubblewrap namespaces while projecting the approved filesystem', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'approved-bwrap-filesystem-'));
+    const controlBase = mkdtempSync(join(tmpdir(), 'approved-bwrap-control-'));
     try {
-      const args = generateBwrapArgs(workspace, { filesystemScope: 'full_access' });
+      writeFileSync(join(workspace, '.env'), 'workspace-owned');
+      const args = generateBwrapArgs(workspace, {
+        filesystemScope: 'full_access',
+        sandboxControlBase: controlBase,
+      });
       expect(args).toContain('--unshare-pid');
       expect(args).toContain('--unshare-net');
       expect(args).toEqual(expect.arrayContaining(['--bind', '/', '/']));
       expect(args).not.toEqual(expect.arrayContaining(['--tmpfs', '/tmp']));
+      const canonicalControlBase = realpathSync.native(controlBase);
+      expect(args).toEqual(
+        expect.arrayContaining([
+          '--tmpfs',
+          canonicalControlBase,
+          '--remount-ro',
+          canonicalControlBase,
+        ]),
+      );
+      expect(args).not.toEqual(
+        expect.arrayContaining(['--ro-bind', '/dev/null', join(workspace, '.env')]),
+      );
     } finally {
       rmSync(workspace, { recursive: true, force: true });
+      rmSync(controlBase, { recursive: true, force: true });
     }
   });
 });
@@ -243,7 +280,7 @@ describe('shell wrapper utilities', () => {
 
   test('hardened env retains safe variables', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'hardened-env');
     try {
       process.env.TEST_KEEP_VAR = 'keep-me';
       const env = buildHardenedEnv(ws, runtimeDir);
@@ -259,16 +296,20 @@ describe('shell wrapper utilities', () => {
 
   test('approved POSIX network supervisor projects proxy settings only at spawn', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-proxy-env-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'proxy-env');
     try {
-      const offline = buildPosixSupervisorEnvironmentV1(runtimeDir, 'disabled', {
+      const source = {
         HTTP_PROXY: 'http://proxy.example.test:8080',
         no_proxy: 'localhost,127.0.0.1',
-      });
-      const approved = buildPosixSupervisorEnvironmentV1(runtimeDir, 'allow_all', {
-        HTTP_PROXY: 'http://proxy.example.test:8080',
-        no_proxy: 'localhost,127.0.0.1',
-      });
+      };
+      const offline = buildPosixSupervisorEnvironment(
+        runtimeDir,
+        projectApprovedProxyEnvironment({ networkMode: 'disabled', source }),
+      );
+      const approved = buildPosixSupervisorEnvironment(
+        runtimeDir,
+        projectApprovedProxyEnvironment({ networkMode: 'allow_all', source }),
+      );
       expect(offline.HTTP_PROXY).toBeUndefined();
       expect(offline.no_proxy).toBeUndefined();
       expect(approved.HTTP_PROXY).toBe('http://proxy.example.test:8080');
@@ -281,7 +322,7 @@ describe('shell wrapper utilities', () => {
 
   test('hardened env redirects temp and cache paths to sandbox runtime dir', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'redirected-env');
     try {
       const env = buildHardenedEnv(ws, runtimeDir);
       // HOME is inherited from parent (real user home), not redirected
@@ -301,8 +342,8 @@ describe('shell wrapper utilities', () => {
 
   test('runtime directories are private and unique per invocation', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-test-'));
-    const first = createSandboxRuntimeDir(ws);
-    const second = createSandboxRuntimeDir(ws);
+    const first = createTestRuntimeDir(ws, 'unique-first');
+    const second = createTestRuntimeDir(ws, 'unique-second');
     try {
       expect(first).not.toBe(second);
       if (process.platform !== 'win32') {
@@ -322,7 +363,7 @@ describe('shell wrapper utilities', () => {
   )('runtime cleanup recovers nested hostile modes without following symlinks', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-cleanup-test-'));
     const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-external-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'hostile-modes');
     const nested = join(runtimeDir, 'nested');
     const deeper = join(nested, 'deeper');
     const flagged = join(deeper, 'flagged');
@@ -345,12 +386,12 @@ describe('shell wrapper utilities', () => {
     }
     chmodSync(runtimeDir, 0o000);
     try {
-      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(cleanupTestRuntimeDir(runtimeDir)).toBe(true);
       expect(existsSync(runtimeDir)).toBe(false);
       expect(existsSync(external)).toBe(true);
       expect(statSync(external).mode & 0o777).toBe(0o755);
     } finally {
-      cleanupSandboxRuntimeDir(runtimeDir);
+      cleanupTestRuntimeDir(runtimeDir);
       rmSync(external, { recursive: true, force: true });
       rmSync(ws, { recursive: true, force: true });
     }
@@ -359,11 +400,11 @@ describe('shell wrapper utilities', () => {
   test('runtime cleanup unlinks a dangling root symlink without touching its former target', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-link-cleanup-test-'));
     const external = join(tmpdir(), `sandbox-runtime-missing-target-${process.pid}-${Date.now()}`);
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'dangling-link');
     rmSync(runtimeDir, { recursive: true, force: true });
     symlinkSync(external, runtimeDir, directoryLinkType());
     try {
-      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(cleanupTestRuntimeDir(runtimeDir)).toBe(true);
       expect(existsSync(runtimeDir)).toBe(false);
       expect(existsSync(external)).toBe(false);
     } finally {
@@ -376,13 +417,13 @@ describe('shell wrapper utilities', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-root-link-test-'));
     const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-root-target-test-'));
     const marker = join(external, 'keep.txt');
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'root-link');
     writeFileSync(marker, 'keep');
     chmodSync(external, 0o755);
     rmSync(runtimeDir, { recursive: true, force: true });
     symlinkSync(external, runtimeDir, directoryLinkType());
     try {
-      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(cleanupTestRuntimeDir(runtimeDir)).toBe(true);
       expect(existsSync(runtimeDir)).toBe(false);
       expect(existsSync(marker)).toBe(true);
       if (process.platform !== 'win32') {
@@ -398,7 +439,7 @@ describe('shell wrapper utilities', () => {
   test('runtime cleanup rejects paths outside its private base', () => {
     const outside = mkdtempSync(join(tmpdir(), 'sandbox-cleanup-reject-test-'));
     try {
-      expect(cleanupSandboxRuntimeDir(outside)).toBe(false);
+      expect(cleanupTestRuntimeDir(outside)).toBe(false);
       expect(existsSync(outside)).toBe(true);
     } finally {
       rmSync(outside, { recursive: true, force: true });
@@ -472,6 +513,11 @@ describe('policy-proven read-only executable environment', () => {
       expect(env.SSH_AUTH_SOCK).toBeUndefined();
       expect(env.RIPGREP_CONFIG_PATH).toBeUndefined();
       expect(env.OPENAI_API_KEY).toBeUndefined();
+      expect(env.GIT_CONFIG_NOSYSTEM).toBe('1');
+      expect(env.GIT_CONFIG_GLOBAL).toBe('/dev/null');
+      expect(env.GIT_OPTIONAL_LOCKS).toBe('0');
+      expect(env.GIT_CONFIG_KEY_0).toBe('core.fsmonitor');
+      expect(env.GIT_CONFIG_VALUE_0).toBe('false');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -509,6 +555,30 @@ describe('dangerous path detection', () => {
     expect(checkDangerousPaths('printf secret > .env.staging')).toBe('.env.staging');
     expect(checkDangerousPaths('cat ~/.aws/credentials')).toBe('.aws/credentials');
     expect(checkDangerousPaths('cat .npmrc')).toBe('.npmrc');
+  });
+
+  test('does not classify paths inside an admitted Workspace as dangerous', () => {
+    expect(checkDangerousPaths('cat .env', { workspace: process.cwd() })).toBeNull();
+    expect(checkDangerousPaths('printf x > .git/config', { workspace: process.cwd() })).toBeNull();
+    expect(checkDangerousPaths('ls .agents', { workspace: process.cwd() })).toBeNull();
+    expect(checkDangerousPaths('cat ~/.ssh/id_ed25519', { workspace: process.cwd() })).toBe(
+      '.ssh/id_ed25519',
+    );
+    expect(checkDangerousPaths('cat .env ~/.env', { workspace: process.cwd() })).toBe('.env');
+  });
+
+  test('classifies external search roots that can traverse sensitive identities', () => {
+    expect(checkDangerousSearchRoot(homedir(), process.cwd())).not.toBeNull();
+    if (process.platform !== 'win32') {
+      expect(checkDangerousSearchRoot('/etc', process.cwd())).not.toBeNull();
+      const neutralSearchRoot = mkdtempSync(join(tmpdir(), 'sandbox-neutral-search-root-'));
+      try {
+        expect(checkDangerousSearchRoot(neutralSearchRoot, process.cwd())).toBeNull();
+      } finally {
+        rmSync(neutralSearchRoot, { recursive: true, force: true });
+      }
+    }
+    expect(checkDangerousSearchRoot(process.cwd(), process.cwd())).toBeNull();
   });
 
   test('detects system config tampering', () => {
@@ -638,22 +708,17 @@ describe('bwrap argument generation', () => {
     }
   });
 
-  test('brokered revision masks a .git directory read-only after the workspace bind', () => {
+  test('does not add a special mask for Workspace git metadata', () => {
     mkdirSync(join(workspace, '.git'), { recursive: true });
-    const args = generateBwrapArgs(workspace, { gitMetadataDeny: true });
+    const args = generateBwrapArgs(workspace);
     const workspaceIndex = args.findIndex(
       (value, index) => value === '--bind' && args[index + 1] === canonicalWorkspace,
     );
     const gitIndex = args.findIndex(
       (value, index) => value === '--tmpfs' && args[index + 1] === join(canonicalWorkspace, '.git'),
     );
-    expect(gitIndex).toBeGreaterThan(workspaceIndex);
-    expect(args.slice(gitIndex, gitIndex + 4)).toEqual([
-      '--tmpfs',
-      join(canonicalWorkspace, '.git'),
-      '--remount-ro',
-      join(canonicalWorkspace, '.git'),
-    ]);
+    expect(workspaceIndex).toBeGreaterThanOrEqual(0);
+    expect(gitIndex).toBe(-1);
   });
 
   test('includes essential isolation flags', () => {
@@ -676,7 +741,7 @@ describe('bwrap argument generation', () => {
   });
 
   test('mounts /tmp before Workspace and runtime child binds', () => {
-    const runtimeDir = createSandboxRuntimeDir(workspace);
+    const runtimeDir = createTestRuntimeDir(workspace, 'bwrap-mount');
     try {
       const args = generateBwrapArgs(workspace, { sandboxRuntimeDir: runtimeDir });
       const tmpfsIndex = args.findIndex(
@@ -693,7 +758,7 @@ describe('bwrap argument generation', () => {
       expect(workspaceIndex).toBeGreaterThan(tmpfsIndex);
       expect(runtimeIndex).toBeGreaterThan(tmpfsIndex);
     } finally {
-      cleanupSandboxRuntimeDir(runtimeDir);
+      cleanupTestRuntimeDir(runtimeDir);
     }
   });
 
@@ -848,7 +913,7 @@ describe('seccomp resolution', () => {
   test('resolveSeccompPath copies binary when outside workspace', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'seccomp-test-'));
     const srcDir = mkdtempSync(join(tmpdir(), 'seccomp-src-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'seccomp');
     try {
       const srcBinary = join(srcDir, 'apply-seccomp');
       await Bun.write(srcBinary, '#!/bin/sh\necho fake');

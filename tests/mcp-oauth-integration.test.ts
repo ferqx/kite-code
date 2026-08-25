@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { McpConfigCatalog } from '@/core/config';
-import type { CallbackServerFactory } from '@/core/mcp';
+import type { CallbackServerFactory } from '@kite/builtin-runtime/mcp';
 import {
+  createBuiltinCredentialBroker,
   DefaultMcpAuthCoordinator,
   DefaultMcpSupervisor,
   MemoryMcpCredentialStore,
-} from '@/core/mcp';
+} from '@kite/builtin-runtime/mcp';
+import type { McpConfigCatalog } from '#app/config';
+import { createInMemoryMcpConfigRepository } from './helpers/mcp-test-composition';
 import { startTestHttpServer } from './helpers/test-http-server';
 
 describe('HTTP MCP OAuth integration', () => {
@@ -125,8 +127,11 @@ describe('HTTP MCP OAuth integration', () => {
         close: async () => {},
       };
     };
+    const credentialBroker = createBuiltinCredentialBroker({
+      store: new MemoryMcpCredentialStore(),
+    });
     const authCoordinator = new DefaultMcpAuthCoordinator({
-      credentialStore: new MemoryMcpCredentialStore(),
+      credentialBroker,
       browserOpener: {
         open: async (url) => {
           opened.push(url.toString());
@@ -135,8 +140,9 @@ describe('HTTP MCP OAuth integration', () => {
       startCallbackServer: callbackFactory,
     });
     const supervisor = new DefaultMcpSupervisor({
+      credentialBroker,
       authCoordinator,
-      loadCatalog: () => catalog(`${fixture.url.origin}/mcp`),
+      repository: createInMemoryMcpConfigRepository(() => catalog(`${fixture.url.origin}/mcp`)),
     });
 
     await supervisor.start(process.cwd());
@@ -197,7 +203,7 @@ function catalog(url: string): McpConfigCatalog {
     projectApprovals: [],
     diagnostics: [],
     workspace: process.cwd(),
-    sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+    sourceRevisions: { project: 'project', user: 'user' },
   };
 }
 

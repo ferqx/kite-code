@@ -2,25 +2,21 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
 import {
-  canonicalModelJsonV1,
-  computeCanonicalProviderOptionsDigestV1,
-  computeResolvedModelCapabilitiesDigestV1,
-} from '@/core/model/surface-canonicalizer';
-import {
+  canonicalModelJson,
+  computeCanonicalProviderOptionsDigest,
+  computeResolvedModelCapabilitiesDigest,
+  ModelArtifactStore,
   PrivateArtifactStorageError,
-  PrivateImmutableArtifactStorageV1,
-} from '@/core/persistence/private-immutable-artifacts';
+  PrivateImmutableArtifactStorage,
+} from '@kite/builtin-runtime/model';
 import {
-  MODEL_RESPONSE_RECORD_SCHEMA_V1,
-  MODEL_SURFACE_SCHEMA_V1,
-  type ModelResponseRecordV1,
-  type ModelSurfaceV1,
-} from '@/protocol/model-surface';
+  MODEL_RESPONSE_RECORD_SCHEMA_,
+  MODEL_SURFACE_SCHEMA_,
+  type ModelResponseRecord,
+  type ModelSurface,
+} from '@kite/runtime-spi';
 
-const INTEGRITY_KEY = Buffer.alloc(32, 0x51);
-const OTHER_KEY = Buffer.alloc(32, 0x52);
 let tempRoot: string | undefined;
 
 afterEach(() => {
@@ -33,7 +29,7 @@ function artifactRoot(): string {
   return join(tempRoot, 'model-artifacts');
 }
 
-function surface(): ModelSurfaceV1 {
+function surface(): ModelSurface {
   const capabilities = {
     providerName: 'fixture-provider',
     modelName: 'fixture-model',
@@ -54,7 +50,7 @@ function surface(): ModelSurfaceV1 {
   };
   const providerOptions = { fixture: { thinking: 'disabled' } };
   return {
-    schema: MODEL_SURFACE_SCHEMA_V1,
+    schema: MODEL_SURFACE_SCHEMA_,
     purpose: 'primary_agent',
     route: {
       providerKind: 'fixture-provider',
@@ -88,22 +84,22 @@ function surface(): ModelSurfaceV1 {
       sdkRetry: { maxRetries: 0 },
       resolvedCapabilities: {
         value: capabilities,
-        digest: computeResolvedModelCapabilitiesDigestV1(capabilities),
+        digest: computeResolvedModelCapabilitiesDigest(capabilities),
       },
       providerOptions: {
         kind: 'inline',
         value: providerOptions,
-        digest: computeCanonicalProviderOptionsDigestV1(providerOptions),
+        digest: computeCanonicalProviderOptionsDigest(providerOptions),
       },
     },
   };
 }
 
-function response(modelSurface = surface()): ModelResponseRecordV1 {
+function response(modelSurface = surface()): ModelResponseRecord {
   return {
-    schema: MODEL_RESPONSE_RECORD_SCHEMA_V1,
+    schema: MODEL_RESPONSE_RECORD_SCHEMA_,
     invocationId: 'invocation-fixture-1',
-    surfaceIntegrityIdentifier: `hmac-sha256:${'3'.repeat(64)}`,
+    surfaceIntegrityIdentifier: `sha256:${'3'.repeat(64)}`,
     route: modelSurface.route,
     response: {
       message: {
@@ -130,10 +126,9 @@ function response(modelSurface = surface()): ModelResponseRecordV1 {
 }
 
 function rawStorage(root: string) {
-  return new PrivateImmutableArtifactStorageV1({
+  return new PrivateImmutableArtifactStorage({
     root,
     namespace: 'model-artifacts',
-    integrityKey: INTEGRITY_KEY,
     partitions: [
       { kind: 'model_surface', directory: 'surfaces', extension: '.json' },
       { kind: 'model_response', directory: 'responses', extension: '.json' },
@@ -143,10 +138,10 @@ function rawStorage(root: string) {
   });
 }
 
-describe('ModelArtifactStoreV1', () => {
+describe('ModelArtifactStore', () => {
   test('stores canonical Surface and response evidence in independent opaque partitions', () => {
     const root = artifactRoot();
-    const store = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const store = new ModelArtifactStore({ root });
     const modelSurface = surface();
     const modelResponse = response(modelSurface);
 
@@ -160,21 +155,21 @@ describe('ModelArtifactStoreV1', () => {
     expect(JSON.stringify(surfaceRef)).not.toContain('private');
     expect(JSON.stringify(responseRef)).not.toContain('private');
     expect(readFileSync(join(root, 'surfaces', `${surfaceRef.artifactId}.json`), 'utf8')).toBe(
-      canonicalModelJsonV1(modelSurface),
+      canonicalModelJson(modelSurface),
     );
     expect(readFileSync(join(root, 'responses', `${responseRef.artifactId}.json`), 'utf8')).toBe(
-      canonicalModelJsonV1(modelResponse),
+      canonicalModelJson(modelResponse),
     );
   });
 
   test('stores provider options by semantic digest without exposing their storage locator', () => {
     const root = artifactRoot();
-    const store = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const store = new ModelArtifactStore({ root });
     const value = { fixture: { thinking: 'disabled', seed: 7 } };
 
     const stored = store.writeProviderOptions(value);
 
-    expect(stored.contentDigest).toBe(computeCanonicalProviderOptionsDigestV1(value));
+    expect(stored.contentDigest).toBe(computeCanonicalProviderOptionsDigest(value));
     expect(store.readProviderOptions(stored.artifact, stored.contentDigest)).toEqual(value);
     expect(stored.artifact.kind).toBe('provider_options');
     expect(JSON.stringify(stored.artifact)).not.toContain(stored.contentDigest);
@@ -185,18 +180,18 @@ describe('ModelArtifactStoreV1', () => {
 
   test('rejects validly stored but non-canonical or schema-invalid response artifacts', () => {
     const root = artifactRoot();
-    const modelStore = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const modelStore = new ModelArtifactStore({ root });
     const storage = rawStorage(root);
     const invalid = { ...response(), unexpected: 'field' };
     const invalidRef = storage.write(
       'model_response',
-      Buffer.from(canonicalModelJsonV1(invalid), 'utf8'),
+      Buffer.from(canonicalModelJson(invalid), 'utf8'),
     );
     expect(() => modelStore.readResponse(invalidRef)).toThrow(PrivateArtifactStorageError);
 
     const nonCanonicalRef = storage.write(
       'model_response',
-      Buffer.from(`{ "schema": ${JSON.stringify(MODEL_RESPONSE_RECORD_SCHEMA_V1)} }`, 'utf8'),
+      Buffer.from(`{ "schema": ${JSON.stringify(MODEL_RESPONSE_RECORD_SCHEMA_)} }`, 'utf8'),
     );
     expect(() => modelStore.readResponse(nonCanonicalRef)).toThrow(PrivateArtifactStorageError);
 
@@ -213,13 +208,13 @@ describe('ModelArtifactStoreV1', () => {
     expect(getterCalled).toBe(false);
   });
 
-  test('fails closed when the integrity key is lost and never repairs corrupted evidence', () => {
+  test('reopens without a key and never repairs corrupted evidence', () => {
     const root = artifactRoot();
-    const writer = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const writer = new ModelArtifactStore({ root });
     const ref = writer.writeSurface(surface());
 
-    const wrongKeyStore = new ModelArtifactStoreV1({ root, integrityKey: OTHER_KEY });
-    expect(() => wrongKeyStore.readSurface(ref)).toThrow(PrivateArtifactStorageError);
+    const reopened = new ModelArtifactStore({ root });
+    expect(reopened.readSurface(ref)).toEqual(surface());
 
     const target = join(root, 'surfaces', `${ref.artifactId}.json`);
     writeFileSync(target, '{}', 'utf8');
@@ -230,7 +225,7 @@ describe('ModelArtifactStoreV1', () => {
 
   test('keeps reachable Surface evidence while collecting old orphan responses', () => {
     const root = artifactRoot();
-    const store = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const store = new ModelArtifactStore({ root });
     const surfaceRef = store.writeSurface(surface());
     const responseRef = store.writeResponse(response());
 

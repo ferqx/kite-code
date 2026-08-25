@@ -1,25 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createCgroupPidsUnitNameV1,
-  isCgroupPidsPathV1,
-  isCgroupPidsUnitNameV1,
-} from '@/core/execution/sandbox-execution/cgroup-pids-contract';
-import {
-  buildCgroupPidsKillInvocationV1,
-  LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_V1,
-  parseCgroupPidsEmptyV1,
-  parseCgroupPidsPopulatedV1,
-  parseLinuxCgroupScopeIdentityV1,
-} from '@/core/execution/sandbox-execution/linux-cgroup-scope';
-import {
-  buildCgroupPidsInvocationV1,
-  findUsableCgroupPidsRunnerV1,
-} from '@/core/sandbox/cgroup-pids';
+  buildCgroupPidsInvocation,
+  buildCgroupPidsKillInvocation,
+  createCgroupPidsUnitName,
+  findUsableCgroupPidsRunner,
+  isCgroupPidsPath,
+  isCgroupPidsUnitName,
+  LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_,
+  parseCgroupPidsEmpty,
+  parseCgroupPidsPopulated,
+  parseLinuxCgroupScopeIdentity,
+} from '@kite/builtin-runtime/sandbox';
 
 describe('cgroup v2 pids invocation', () => {
   test('builds an argv-only transient user scope with an exact task ceiling', () => {
     expect(
-      buildCgroupPidsInvocationV1({
+      buildCgroupPidsInvocation({
         runner: {
           mechanism: 'systemd_user_scope_tasks_max',
           executable: '/usr/bin/systemd-run',
@@ -56,7 +52,7 @@ describe('cgroup v2 pids invocation', () => {
       systemctlExecutable: '/usr/bin/systemctl',
     };
     expect(() =>
-      buildCgroupPidsInvocationV1({
+      buildCgroupPidsInvocation({
         runner,
         maxTasks: 0,
         command: ['/bin/true'],
@@ -64,7 +60,7 @@ describe('cgroup v2 pids invocation', () => {
       }),
     ).toThrow('positive integer');
     expect(() =>
-      buildCgroupPidsInvocationV1({
+      buildCgroupPidsInvocation({
         runner,
         maxTasks: 1,
         command: [],
@@ -80,7 +76,7 @@ describe('cgroup v2 pids invocation', () => {
       systemctlExecutable: '/usr/bin/systemctl',
     };
     expect(() =>
-      buildCgroupPidsInvocationV1({
+      buildCgroupPidsInvocation({
         runner,
         maxTasks: 1,
         command: ['/bin/true'],
@@ -91,19 +87,19 @@ describe('cgroup v2 pids invocation', () => {
 
   test('requires a cgroup path to terminate at the exact Runtime-owned unit', () => {
     const unit = 'kite-sandbox-12345678-1234-4234-8234-123456789abc.scope';
-    expect(isCgroupPidsUnitNameV1(unit)).toBe(true);
-    expect(isCgroupPidsPathV1(`/user.slice/user-1000.slice/${unit}`, unit)).toBe(true);
-    expect(isCgroupPidsPathV1(`/user.slice/user-1000.slice/other.scope`, unit)).toBe(false);
-    expect(isCgroupPidsPathV1(`/user.slice/../${unit}`, unit)).toBe(false);
-    expect(isCgroupPidsPathV1(`/user.slice//${unit}`, unit)).toBe(false);
-    expect(() => createCgroupPidsUnitNameV1('ABCDEF12')).toThrow('unit identity is invalid');
-    expect(() => createCgroupPidsUnitNameV1('--------')).toThrow('unit identity is invalid');
+    expect(isCgroupPidsUnitName(unit)).toBe(true);
+    expect(isCgroupPidsPath(`/user.slice/user-1000.slice/${unit}`, unit)).toBe(true);
+    expect(isCgroupPidsPath(`/user.slice/user-1000.slice/other.scope`, unit)).toBe(false);
+    expect(isCgroupPidsPath(`/user.slice/../${unit}`, unit)).toBe(false);
+    expect(isCgroupPidsPath(`/user.slice//${unit}`, unit)).toBe(false);
+    expect(() => createCgroupPidsUnitName('ABCDEF12')).toThrow('unit identity is invalid');
+    expect(() => createCgroupPidsUnitName('--------')).toThrow('unit identity is invalid');
   });
 
   test('projects consumer kill-all argv without invoking systemd', () => {
     const unitName = 'kite-sandbox-12345678-1234-4234-8234-123456789abc.scope';
     expect(
-      buildCgroupPidsKillInvocationV1({
+      buildCgroupPidsKillInvocation({
         scope: {
           unitName,
           runnerExecutable: '/usr/bin/systemd-run',
@@ -121,19 +117,19 @@ describe('cgroup v2 pids invocation', () => {
       '--signal=SIGKILL',
       'kite-sandbox-12345678-1234-4234-8234-123456789abc.scope',
     ]);
-    expect(parseCgroupPidsPopulatedV1('populated 0\nfrozen 0\n')).toBe(false);
-    expect(parseCgroupPidsPopulatedV1('populated 1\nfrozen 0\n')).toBe(true);
-    expect(parseCgroupPidsPopulatedV1('populated 0\npopulated 1\n')).toBeUndefined();
-    expect(parseCgroupPidsPopulatedV1('populated  0\n')).toBeUndefined();
-    expect(parseCgroupPidsPopulatedV1('not-a-cgroup-events-file')).toBeUndefined();
-    expect(parseCgroupPidsEmptyV1('')).toBe(true);
-    expect(parseCgroupPidsEmptyV1('\n')).toBeUndefined();
-    expect(parseCgroupPidsEmptyV1('1234\n')).toBe(false);
+    expect(parseCgroupPidsPopulated('populated 0\nfrozen 0\n')).toBe(false);
+    expect(parseCgroupPidsPopulated('populated 1\nfrozen 0\n')).toBe(true);
+    expect(parseCgroupPidsPopulated('populated 0\npopulated 1\n')).toBeUndefined();
+    expect(parseCgroupPidsPopulated('populated  0\n')).toBeUndefined();
+    expect(parseCgroupPidsPopulated('not-a-cgroup-events-file')).toBeUndefined();
+    expect(parseCgroupPidsEmpty('')).toBe(true);
+    expect(parseCgroupPidsEmpty('\n')).toBeUndefined();
+    expect(parseCgroupPidsEmpty('1234\n')).toBe(false);
   });
 
   test('keeps private unit authority disjoint from an argv/path mismatch', () => {
     const unitName = 'kite-sandbox-12345678-1234-4234-8234-123456789abc.scope';
-    const argv = buildCgroupPidsInvocationV1({
+    const argv = buildCgroupPidsInvocation({
       runner: {
         mechanism: 'systemd_user_scope_tasks_max',
         executable: '/usr/bin/systemd-run',
@@ -144,14 +140,14 @@ describe('cgroup v2 pids invocation', () => {
       unitName,
     });
     const candidate = {
-      schema: LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_V1,
+      schema: LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_,
       unitName,
       runnerExecutable: '/usr/bin/systemd-run',
       systemctlExecutable: '/usr/bin/systemctl',
       cgroupPath: `/user.slice/user-1000.slice/${unitName}`,
     } as const;
     expect(
-      parseLinuxCgroupScopeIdentityV1({
+      parseLinuxCgroupScopeIdentity({
         argv,
         candidate,
       }),
@@ -164,15 +160,15 @@ describe('cgroup v2 pids invocation', () => {
         cgroupPath: `/user.slice/user-1000.slice/${unitName}`,
       },
     });
-    expect(parseLinuxCgroupScopeIdentityV1({ argv, candidate: {} }).invalid).toBe(true);
+    expect(parseLinuxCgroupScopeIdentity({ argv, candidate: {} }).invalid).toBe(true);
     expect(
-      parseLinuxCgroupScopeIdentityV1({
+      parseLinuxCgroupScopeIdentity({
         argv,
         candidate: { ...candidate, unexpected: true },
       }).invalid,
     ).toBe(true);
     expect(
-      parseLinuxCgroupScopeIdentityV1({
+      parseLinuxCgroupScopeIdentity({
         argv: [
           '/usr/bin/systemd-run',
           '--user',
@@ -192,7 +188,7 @@ describe('cgroup v2 pids invocation', () => {
       }).invalid,
     ).toBe(true);
     expect(
-      parseLinuxCgroupScopeIdentityV1({
+      parseLinuxCgroupScopeIdentity({
         argv: [
           ...argv.slice(0, 9),
           '--unit=kite-sandbox-22345678-1234-4234-8234-123456789abc.scope',
@@ -202,19 +198,19 @@ describe('cgroup v2 pids invocation', () => {
       }).invalid,
     ).toBe(true);
     expect(
-      parseLinuxCgroupScopeIdentityV1({
+      parseLinuxCgroupScopeIdentity({
         argv: [...argv.slice(0, 10), `--unit=${unitName}`, ...argv.slice(10)],
         candidate,
       }).invalid,
     ).toBe(true);
     expect(
-      parseLinuxCgroupScopeIdentityV1({
+      parseLinuxCgroupScopeIdentity({
         argv: [...argv.slice(0, 9), ...argv.slice(10), `--unit=${unitName}`],
         candidate,
       }).invalid,
     ).toBe(true);
     expect(() =>
-      buildCgroupPidsKillInvocationV1({
+      buildCgroupPidsKillInvocation({
         scope: {
           ...candidate,
           systemctlExecutable: '/usr/bin/../bin/systemctl',
@@ -224,6 +220,6 @@ describe('cgroup v2 pids invocation', () => {
   });
 
   test('does not advertise a runner before durable scope authority exists', () => {
-    expect(findUsableCgroupPidsRunnerV1()).toBeNull();
+    expect(findUsableCgroupPidsRunner()).toBeNull();
   });
 });

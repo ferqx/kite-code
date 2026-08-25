@@ -13,9 +13,9 @@ const releaseFileSchema = z
   })
   .strict();
 
-export const ossCandidateManifestV1Schema = z
+export const ossCandidateManifestSchema = z
   .object({
-    schema: z.literal('KiteCodeOssCandidateManifestV1'),
+    schema: z.literal('KiteCodeOssCandidateManifest'),
     version: z.literal(1),
     productVersion: z.string().trim().min(1).max(128),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -42,7 +42,7 @@ export const ossCandidateManifestV1Schema = z
   })
   .strict();
 
-export type OssCandidateManifestV1 = z.infer<typeof ossCandidateManifestV1Schema>;
+export type OssCandidateManifest = z.infer<typeof ossCandidateManifestSchema>;
 
 export interface OssReleaseTarget {
   id: string;
@@ -54,7 +54,7 @@ export interface OssReleaseTarget {
 export interface VerifiedOssCandidate {
   archivePath: string;
   archiveSha256: `sha256:${string}`;
-  manifest: OssCandidateManifestV1;
+  manifest: OssCandidateManifest;
   manifestBytes: Uint8Array;
   manifestSha256: `sha256:${string}`;
   candidateId: string;
@@ -74,8 +74,8 @@ const RELEASE_ASSETS = [
  */
 const WINDOWS_SANDBOX_RELEASE_ASSETS = [
   [
-    'release/platform-capabilities/windows-runner-v1.json',
-    'release/platform-capabilities/windows-runner-v1.json',
+    'release/platform-capabilities/windows-runner.json',
+    'release/platform-capabilities/windows-runner.json',
   ],
   [
     'native/windows-sandbox-runner/target/release/kite-windows-runner.exe',
@@ -88,6 +88,39 @@ const WINDOWS_SANDBOX_RELEASE_ASSETS = [
   ['vendor/isksh/LICENSE-MIT', 'vendor/isksh/LICENSE-MIT'],
   ['vendor/isksh/LICENSE.coreutils', 'vendor/isksh/LICENSE.coreutils'],
 ] as const;
+
+/**
+ * Resolve every workspace package export directly to repository source. Bun
+ * 1.3.14 on Windows can crash while pretty-printing a backslash path reached
+ * through a workspace symlink, so standalone builds must never enter those
+ * node_modules links.
+ */
+export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>> = Object.freeze({
+  '@kite/kite': 'apps/kite/src/index.ts',
+  '@kite/kite/cli': 'apps/kite/src/cli/executable.ts',
+  '@kite/kite/tui': 'apps/kite/src/tui/executable.tsx',
+  '@kite/agent-kernel': 'packages/agent-kernel/src/index.ts',
+  '@kite/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
+  '@kite/builtin-runtime/capability': 'packages/builtin-runtime/src/capability.ts',
+  '@kite/builtin-runtime/filesystem': 'packages/builtin-runtime/src/filesystem/index.ts',
+  '@kite/builtin-runtime/git': 'packages/builtin-runtime/src/git/index.ts',
+  '@kite/builtin-runtime/mcp': 'packages/builtin-runtime/src/mcp/index.ts',
+  '@kite/builtin-runtime/model': 'packages/builtin-runtime/src/model/index.ts',
+  '@kite/builtin-runtime/planning': 'packages/builtin-runtime/src/planning/index.ts',
+  '@kite/builtin-runtime/sandbox': 'packages/builtin-runtime/src/sandbox/index.ts',
+  '@kite/builtin-runtime/skills': 'packages/builtin-runtime/src/skills/index.ts',
+  '@kite/builtin-runtime/subagent': 'packages/builtin-runtime/src/subagent/index.ts',
+  '@kite/builtin-runtime/verification': 'packages/builtin-runtime/src/verification/index.ts',
+  '@kite/builtin-runtime/web': 'packages/builtin-runtime/src/web/index.ts',
+  '@kite/runtime-contract': 'packages/runtime-contract/src/index.ts',
+  '@kite/runtime-host': 'packages/runtime-host/src/index.ts',
+  '@kite/runtime-host/kernel-adapter': 'packages/runtime-host/src/kernel-adapter/index.ts',
+  '@kite/runtime-host/observability': 'packages/runtime-host/src/observability/index.ts',
+  '@kite/runtime-host/storage': 'packages/runtime-host/src/storage/index.ts',
+  '@kite/runtime-spi': 'packages/runtime-spi/src/index.ts',
+  '@kite/runtime-spi/model': 'packages/runtime-spi/src/model-surface.ts',
+  '@kite/runtime-storage-sqlite': 'packages/runtime-storage-sqlite/src/index.ts',
+});
 
 export function currentOssReleaseTarget(): OssReleaseTarget {
   return resolveOssReleaseTarget(process.platform, process.arch);
@@ -152,8 +185,8 @@ export async function buildOssCandidate(
   const executableSuffix = releaseTarget.executableSuffix;
   const cliPath = join(stageDirectory, `kite${executableSuffix}`);
   const tuiPath = join(stageDirectory, `kite-tui${executableSuffix}`);
-  await compileOssReleaseExecutableV1('scripts/release/entrypoints/cli.ts', cliPath);
-  await compileOssReleaseExecutableV1('scripts/release/entrypoints/tui.ts', tuiPath);
+  await compileOssReleaseExecutable('scripts/release/entrypoints/cli.ts', cliPath);
+  await compileOssReleaseExecutable('scripts/release/entrypoints/tui.ts', tuiPath);
   if (process.platform !== 'win32') {
     chmodSync(cliPath, 0o755);
     chmodSync(tuiPath, 0o755);
@@ -173,8 +206,8 @@ export async function buildOssCandidate(
   const releaseFiles = [...archiveFiles]
     .map(([path, bytes]) => ({ path, sha256: sha256(bytes), size: bytes.byteLength }))
     .sort((left, right) => left.path.localeCompare(right.path));
-  const manifest: OssCandidateManifestV1 = ossCandidateManifestV1Schema.parse({
-    schema: 'KiteCodeOssCandidateManifestV1',
+  const manifest: OssCandidateManifest = ossCandidateManifestSchema.parse({
+    schema: 'KiteCodeOssCandidateManifest',
     version: 1,
     productVersion,
     commitSha,
@@ -216,7 +249,7 @@ export async function verifyOssCandidate(
     throw new Error('Archive contains unsupported or non-regular entries.');
   }
   const manifestBytes = requiredFile(files, 'manifest.json');
-  const manifest = ossCandidateManifestV1Schema.parse(parseJson(manifestBytes, 'manifest'));
+  const manifest = ossCandidateManifestSchema.parse(parseJson(manifestBytes, 'manifest'));
   if (expectedTargetId && manifest.target.id !== expectedTargetId) {
     throw new Error(`Candidate target ${manifest.target.id} does not match ${expectedTargetId}.`);
   }
@@ -264,7 +297,7 @@ export async function createSmokeVariantCandidate(
   const files = new Map<string, Uint8Array>();
   for (const entry of verified.manifest.files)
     files.set(entry.path, requiredFile(verified.files, entry.path));
-  const manifest = ossCandidateManifestV1Schema.parse({
+  const manifest = ossCandidateManifestSchema.parse({
     ...verified.manifest,
     productVersion: `${verified.manifest.productVersion}-smoke-next`,
   });
@@ -272,7 +305,7 @@ export async function createSmokeVariantCandidate(
   return verifyOssCandidate(archivePath, manifest.target.id);
 }
 
-export function executableArchivePaths(manifest: OssCandidateManifestV1): {
+export function executableArchivePaths(manifest: OssCandidateManifest): {
   cli: string;
   tui: string;
 } {
@@ -280,7 +313,7 @@ export function executableArchivePaths(manifest: OssCandidateManifestV1): {
   return { cli: `bin/kite${suffix}`, tui: `bin/kite-tui${suffix}` };
 }
 
-export async function compileOssReleaseExecutableV1(
+export async function compileOssReleaseExecutable(
   entrypoint: string,
   outfile: string,
 ): Promise<void> {
@@ -306,6 +339,63 @@ export async function compileOssReleaseExecutableV1(
       {
         name: 'standalone-release-stubs',
         setup(builder) {
+          const resolveSource = (base: string): string | undefined => {
+            for (const candidate of [
+              base,
+              `${base}.ts`,
+              `${base}.tsx`,
+              `${base}.js`,
+              `${base}.jsx`,
+              `${base}.json`,
+              join(base, 'index.ts'),
+              join(base, 'index.tsx'),
+              join(base, 'index.js'),
+            ]) {
+              try {
+                if (statSync(candidate).isFile()) return candidate;
+              } catch {
+                // Try the next canonical source extension.
+              }
+            }
+            return undefined;
+          };
+          builder.onResolve({ filter: /^\.\.?\// }, (args) => {
+            const base = resolve(dirname(args.importer), args.path);
+            const path = resolveSource(base);
+            return path ? { path } : undefined;
+          });
+          builder.onResolve({ filter: /^(?:#|@\/)/ }, (args) => {
+            const exact =
+              {
+                '#agent-kernel': 'packages/agent-kernel/src/index.ts',
+                '#builtin-runtime': 'packages/builtin-runtime/src/index.ts',
+                '#builtin-runtime/sandbox': 'packages/builtin-runtime/src/sandbox/index.ts',
+                '#builtin-runtime/mcp': 'packages/builtin-runtime/src/mcp/index.ts',
+                '#builtin-runtime/model': 'packages/builtin-runtime/src/model/index.ts',
+                '#builtin-runtime/web': 'packages/builtin-runtime/src/web/index.ts',
+                '#runtime-spi': 'packages/runtime-spi/src/index.ts',
+                '#runtime-host': 'packages/runtime-host/src/index.ts',
+              }[args.path] ?? undefined;
+            if (exact) return { path: resolve(repositoryRoot, exact) };
+            const prefix = [
+              ['#app/', 'apps/kite/src/'],
+              ['#builtin-runtime/sandbox/', 'packages/builtin-runtime/src/sandbox/'],
+              ['#runtime-host/', 'packages/runtime-host/src/'],
+              ['@/', 'src/'],
+            ] as const;
+            for (const [specifier, directory] of prefix) {
+              if (!args.path.startsWith(specifier)) continue;
+              const path = resolveSource(
+                resolve(repositoryRoot, directory, args.path.slice(specifier.length)),
+              );
+              return path ? { path } : undefined;
+            }
+            return undefined;
+          });
+          builder.onResolve({ filter: /^@kite\// }, (args) => {
+            const entrypoint = STANDALONE_WORKSPACE_ENTRYPOINTS_[args.path];
+            return entrypoint ? { path: resolve(repositoryRoot, entrypoint) } : undefined;
+          });
           builder.onResolve({ filter: /^react-devtools-core$/ }, () => ({
             path: 'react-devtools-core',
             namespace: 'kite-release-stub',
@@ -347,12 +437,12 @@ export async function compileOssReleaseExecutableV1(
 
 export async function writeOssCandidateArchive(input: {
   archivePath: string;
-  manifest: OssCandidateManifestV1;
+  manifest: OssCandidateManifest;
   files: ReadonlyMap<string, Uint8Array>;
 }): Promise<void> {
   const archivePath = resolve(input.archivePath);
   mkdirSync(dirname(archivePath), { recursive: true, mode: 0o700 });
-  const manifest = ossCandidateManifestV1Schema.parse(input.manifest);
+  const manifest = ossCandidateManifestSchema.parse(input.manifest);
   const manifestBytes = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
   const entries: Record<string, Uint8Array | string> = {
     'CHECKSUMS.sha256': encodeChecksums(manifest.files),

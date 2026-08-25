@@ -11,7 +11,7 @@ interface ProcessResourceSample {
   handles?: number;
 }
 
-interface ProcessResourceRecordV2 {
+interface ProcessResourceRecord {
   version: 2;
   kind: 'process_resource';
   pid: number;
@@ -119,7 +119,7 @@ if (telemetryFile) {
     await settleSameProcessResourceSample(repeatCount);
     const after = sample();
     const descendants = descendantPids(process.pid);
-    const record: ProcessResourceRecordV2 = {
+    const record: ProcessResourceRecord = {
       version: 2,
       kind: 'process_resource',
       pid: process.pid,

@@ -1,23 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { RELEASE_CAPABILITIES } from '@/core/config/release-capabilities';
-import {
-  evaluateGaSelectionGateV1,
-  validateGaSelectionV1,
-} from '../../scripts/release/ga-selection';
+import { RELEASE_CAPABILITIES } from '#app/config/release-capabilities';
+import { evaluateGaSelectionGate, validateGaSelection } from '../../scripts/release/ga-selection';
 
 const digest = `sha256:${'a'.repeat(64)}` as const;
 
 describe('GA capability selection contract', () => {
   test('keeps the repository selection empty, explicit, and blocked', () => {
     const selection = JSON.parse(
-      readFileSync(resolve('release/ga-selection-v1.json'), 'utf8'),
+      readFileSync(resolve('release/ga-selection.json'), 'utf8'),
     ) as unknown;
-    const validation = validateGaSelectionV1(selection, []);
+    const validation = validateGaSelection(selection, []);
     expect(validation.selection.selectedCapabilities).toEqual([]);
     expect(validation.selection.forcedOffCapabilities).toEqual([...RELEASE_CAPABILITIES].sort());
-    const gate = evaluateGaSelectionGateV1({
+    const gate = evaluateGaSelectionGate({
       validation,
       candidate: {
         artifactDigest: digest,
@@ -58,9 +55,9 @@ describe('GA capability selection contract', () => {
       ),
       approvedBy: ['fixture:release-owner'],
     } as const;
-    expect(() => validateGaSelectionV1(selected, [])).toThrow('fresh stable decision');
+    expect(() => validateGaSelection(selected, [])).toThrow('fresh stable decision');
     expect(
-      validateGaSelectionV1(selected, [
+      validateGaSelection(selected, [
         {
           capability: 'verification',
           stableMilestone: 'MS:5A-STABLE',
@@ -71,7 +68,7 @@ describe('GA capability selection contract', () => {
       ]).selection.selectedCapabilities,
     ).toHaveLength(1);
     expect(() =>
-      validateGaSelectionV1(
+      validateGaSelection(
         { ...selected, forcedOffCapabilities: selected.forcedOffCapabilities.slice(1) },
         [
           {
@@ -87,11 +84,12 @@ describe('GA capability selection contract', () => {
   });
 
   test('rejects duplicate, overlapping, unknown, and schema-injected selections', () => {
-    const base = JSON.parse(
-      readFileSync(resolve('release/ga-selection-v1.json'), 'utf8'),
-    ) as Record<string, unknown>;
+    const base = JSON.parse(readFileSync(resolve('release/ga-selection.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
     expect(() =>
-      validateGaSelectionV1(
+      validateGaSelection(
         {
           ...base,
           forcedOffCapabilities: ['shell', 'shell'],
@@ -99,9 +97,9 @@ describe('GA capability selection contract', () => {
         [],
       ),
     ).toThrow();
-    expect(() => validateGaSelectionV1({ ...base, hiddenGrant: true }, [])).toThrow();
+    expect(() => validateGaSelection({ ...base, hiddenGrant: true }, [])).toThrow();
     expect(() =>
-      validateGaSelectionV1({ ...base, forcedOffCapabilities: ['unknown_capability'] }, []),
+      validateGaSelection({ ...base, forcedOffCapabilities: ['unknown_capability'] }, []),
     ).toThrow();
   });
 });

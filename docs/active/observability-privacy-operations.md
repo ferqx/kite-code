@@ -9,13 +9,12 @@
 当前运营范围只有本地 metadata-only 结构化状态、health/status、disable-only kill switch、incident
 runbook 与本地 rehearsal。项目不建立 external cohort、长期服务等级/error-budget 资格、分阶段运营
 观察或远程托管 observability 路线；这些内容不再是产品规则、发布 Gate 或未来 Task。
-ADR-0112 允许的 synthetic Evaluation cassette 正文不属于 observability 数据；reporter、metric、status 与
-observability artifact 都不能读取 cassette 或 Production Model Artifact，也不能把 replay approval 当作
-telemetry consent。
+当前版本不包含 synthetic evaluation cassette。reporter、metric、status 与 observability artifact 都不能读取
+Production Model Artifact 或任何未来实验输入，也不能把 Runtime restore/replay authority 当作 telemetry consent。
 
 ## 数据与启用边界
 
-`observabilityMetricsV1=false`，普通 CLI/TUI 入口没有 artifact telemetry authority 或默认网络 transport。
+`observabilityMetrics=false`，普通 CLI/TUI 入口没有 artifact telemetry authority 或默认网络 transport。
 project 配置只能关闭观测能力，不能开启远程发送、提供 endpoint secret 或扩大 release ceiling。仓库中
 保留的 exporter/composition contract 在缺少 release authority 或 transport 时固定注入 no-op reporter；
 它们只证明不可达路径 fail closed，不构成受支持的远程 telemetry 产品面。
@@ -26,21 +25,38 @@ allowlist 只接受有限 metric/attribute 枚举与有限数值；单样本 can
 metric、日志、报告或 artifact。未知 route/capability 只能折叠为固定低基数 alias，不能携带原值。
 运行时权限切换的 `interaction_mode.changed` 是 Runtime Store 审计事实，不产生 observability metric 或
 属性；其 user source 与时间戳不得通过观测通道外发。
-`completion.blocked` 同样只保留为 Runtime Store 的 completion lifecycle 审计事实；observability mapper
-不得为它创建 metric 或属性。事件只包含固定低基数的 blocker code、next action、计划阶段与 correction attempt，
+TUI 历史会话打开的 `NODE_DEBUG=kite-session` 是显式 opt-in 的本地诊断，不是 metric 或远程 transport。
+它只允许输出固定 admission/replay stage 和闭集 failure code；即使本地启用，也不得输出 thread/session ID、
+Workspace/Store path、Project digest、事件正文或原始异常。cleanup failure 使用同一约束，且只作为 primary
+打开失败的 secondary diagnostic。
+`completion.blocked` 同样只保留为 Runtime Store 的 completion lifecycle 审计事实；Kernel 的
+`projectRuntimeEventToObservabilityFact` 不得为它创建 fact，Builtin projector 也不得为它创建 metric 或属性。事件只包含固定低基数的 blocker code、next action、计划阶段与 correction attempt，
 不得包含 prompt、模型或工具正文、路径、命令、自由错误或身份信息。
 Model Gateway 的 `model.invocation_prepared/attempt_started/completed/interrupted/evidence_unavailable` 也只
-属于 Runtime Store evidence；observability mapper 为它们生成零 metric。invocation id、Surface/Response
+属于 Runtime Store evidence；Kernel fact projector 为它们生成零 fact。invocation id、Surface/Response
 Artifact ref、integrity identifier、route/admission digest、reservation 与 parent link 不进入观测属性。
 Provider readiness 的 intent、waiter、attempt、succeeded/failed 事件同样只属于 Runtime Store evidence，
-observability mapper 为它们生成零 metric；事件只允许有界 ID/digest、状态、时间戳与闭集 failure，绝不包含
+Kernel fact projector 为它们生成零 fact；事件只允许有界 ID/digest、状态、时间戳与闭集 failure，绝不包含
 endpoint、认证信息、tool args 或 provider 返回正文。
 Tool Pipeline 的 `capability.invocation_recorded/execution_started/execution_result_recorded/
-execution_succeeded/execution_failed/execution_unknown/reconciliation_resolved` 也生成零 metric。invocation 与
+execution_succeeded/execution_failed/execution_unknown/reconciliation_resolved` 也生成零 fact。invocation 与
 Tool identity、arguments/authorization/admission/effect/result/evidence digest、attempt ordinal、idempotency
 key、Capability Artifact ref/locator、external reference、错误或 reconciliation 文本都不得进入属性。
-既有 `model.responded` duration/usage 与 `model.retry` 低基数计数继续走原 allowlist，不能从 private
-invocation event 补充高基数关联。
+既有 `model.responded` duration/usage 与 `model.retry` 低基数计数继续走 Kernel fact projector 和
+Builtin projector 的 allowlist，不能从 private invocation event 补充高基数关联。
+
+## Owner 与注入链
+
+Runtime Event 到 secret-free observation fact 只有一个 owner：`@kite/agent-kernel` 的纯函数
+`projectRuntimeEventToObservabilityFact`。它只读取闭集事件字段，优先使用 envelope `occurredAt`，无 envelope
+时使用调用方明确提供的 fallback 时间戳；不复制 State、Store、receipt identity、正文或自由错误。
+`@kite/builtin-runtime` 的 `createBuiltinObservabilityProjector` 只消费 typed fact、model、receipt、resource、release
+与 task-stage DTO，并生成 metric draft；它不导入 Runtime Event 或 Host schema。Metric name、字段与数值约束仍只有
+`@kite/runtime-host` 的现有 metric schema 在 `createMetricSample` 边界校验。
+`apps/kite` 的 Runtime bridge 只负责把 Builtin draft 交给 Host reporter，并吞掉 projector、schema 或 reporter 异常，不能改变
+Runtime outcome。旧 `src/core/observability/runtime-fact.ts` 兼容 seam 已删除；App `RuntimeSessionCoordinator` 与 CLI
+只经 `@kite/runtime-host` 的窄 `projectRuntimeObservabilityFact` port 调用同一 Kernel projector。禁止恢复
+旧 mapper/shim 或在 Contract、Builtin、App 复制 Event→fact 语义。
 
 Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低优先级样本并只记录本地 drop 计数。
 序列化、flush 或 shutdown 失败不得改变 Runtime outcome。CLI 退出执行有界 shutdown；TUI 的 `/exit`、
@@ -60,3 +76,4 @@ Alert Owner 为 `github:@ferqx`，backup 为 `none (single-maintainer)`。本地
 metadata-only detection、containment、credential-rotation 与 rollback 场景；结果明确标记
 `synthetic_contract_only`，不冒充真实事故、外部用户或线上运营证据。旧 retained-evidence verifier 可以
 继续作为篡改、重排、重复和 source-splice 的负向测试资产，但不产生运营 milestone。
+> 路径同步：runtime state/store 实现已采用无版本文件名，观测与持久格式 metadata 语义不变。

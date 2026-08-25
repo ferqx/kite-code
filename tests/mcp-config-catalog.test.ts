@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadMcpConfig, loadMcpConfigCatalog } from '@/core/config';
+import { loadMcpConfigCatalog } from '#app/config';
 
 describe('MCP source-aware config catalog', () => {
   let root: string;
@@ -30,17 +30,13 @@ describe('MCP source-aware config catalog', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  test('uses project > user > legacy precedence without fallback', () => {
+  test('uses project over user precedence without fallback', () => {
     writeFileSync(
       join(home, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { shared: { command: 'user-server' } } }),
     );
     writeFileSync(
       join(workspace, '.kite-code', 'mcp.json'),
-      JSON.stringify({ mcpServers: { shared: { command: 'legacy-project-server' } } }),
-    );
-    writeFileSync(
-      join(workspace, '.kite-code', 'kite-code.jsonc'),
       JSON.stringify({ mcpServers: { shared: { command: 'project-server' } } }),
     );
 
@@ -64,10 +60,10 @@ describe('MCP source-aware config catalog', () => {
       JSON.stringify({ mcpServers: { shared: { command: 'project-server' } } }),
     );
 
-    const loaded = loadMcpConfig();
-    expect(loaded.catalog.effective.get('shared')?.source.kind).toBe('project');
-    expect(loaded.catalog.effective.get('shared')?.approvalStatus).toBe('pending_approval');
-    expect(loaded.servers.shared).toBeUndefined();
+    const catalog = loadMcpConfigCatalog();
+    expect(catalog.effective.get('shared')?.source.kind).toBe('project');
+    expect(catalog.effective.get('shared')?.approvalStatus).toBe('pending_approval');
+    expect(catalog.connectableServers.shared).toBeUndefined();
   });
 
   test('explicit config is caller-authorized and does not merge workspace sources', () => {
@@ -77,18 +73,18 @@ describe('MCP source-aware config catalog', () => {
       JSON.stringify({ mcpServers: { explicit: { command: 'explicit-server' } } }),
     );
     writeFileSync(
-      join(workspace, '.mcp.json'),
+      join(workspace, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { project: { command: 'project-server' } } }),
     );
 
-    const loaded = loadMcpConfig(explicitPath);
-    expect(Object.keys(loaded.servers)).toEqual(['explicit']);
-    expect(loaded.catalog.entries[0]?.source.kind).toBe('explicit');
+    const catalog = loadMcpConfigCatalog({ configPath: explicitPath });
+    expect(Object.keys(catalog.connectableServers)).toEqual(['explicit']);
+    expect(catalog.entries[0]?.source.kind).toBe('explicit');
   });
 
   test('keeps invalid project entries visible but non-connectable', () => {
     writeFileSync(
-      join(workspace, '.mcp.json'),
+      join(workspace, '.kite-code', 'mcp.json'),
       JSON.stringify({ mcpServers: { broken: { type: 'http' } } }),
     );
 
@@ -100,7 +96,7 @@ describe('MCP source-aware config catalog', () => {
 
   test('redacts HTTP credentials and query parameters from the approval view', () => {
     writeFileSync(
-      join(workspace, '.mcp.json'),
+      join(workspace, '.kite-code', 'mcp.json'),
       JSON.stringify({
         mcpServers: {
           remote: {
@@ -120,7 +116,7 @@ describe('MCP source-aware config catalog', () => {
 
   test('keeps only credential references and OAuth metadata in normalized config', () => {
     writeFileSync(
-      join(home, '.kite-code', 'kite-code.jsonc'),
+      join(home, '.kite-code', 'mcp.json'),
       JSON.stringify({
         mcpServers: {
           bearer: {
@@ -159,7 +155,7 @@ describe('MCP source-aware config catalog', () => {
 
   test('rejects inline OAuth client secrets instead of silently ignoring them', () => {
     writeFileSync(
-      join(home, '.kite-code', 'kite-code.jsonc'),
+      join(home, '.kite-code', 'mcp.json'),
       JSON.stringify({
         mcpServers: {
           oauth: {
@@ -177,7 +173,7 @@ describe('MCP source-aware config catalog', () => {
 
   test('rejects authentication configuration on stdio servers', () => {
     writeFileSync(
-      join(home, '.kite-code', 'kite-code.jsonc'),
+      join(home, '.kite-code', 'mcp.json'),
       JSON.stringify({
         mcpServers: {
           local: {

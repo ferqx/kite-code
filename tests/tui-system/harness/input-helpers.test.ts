@@ -33,6 +33,11 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
       onWrite(data);
       return lastActionMark as ReturnType<PtyProcess['markOutput']>;
     },
+    async writeExact(data) {
+      lastActionMark = output().length;
+      onWrite(data);
+      return lastActionMark as ReturnType<PtyProcess['markOutput']>;
+    },
     setRawMode() {
       lastActionMark = output().length;
       return lastActionMark as ReturnType<PtyProcess['markOutput']>;
@@ -45,6 +50,7 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
     inputViewport() {
       return this.viewport();
     },
+    focusedMainInputReady: () => true,
     scrollback: output,
     transcript: output,
     settleScreen: async () => {},
@@ -60,14 +66,14 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
 }
 
 describe('TUI input helpers', () => {
-  test('pasteText retries only when the entire PTY transaction is dropped', async () => {
+  test('pasteText delivers one exact transaction when the receipt is observed', async () => {
     let currentInput = '';
     let attempts = 0;
     const tui = fakePty(
       (data) => {
         if (!data.startsWith('\x1b[200~')) return;
         attempts++;
-        if (attempts >= 2) currentInput = 'Line1\nLine2';
+        currentInput = 'Line1\nLine2';
       },
       () => currentInput,
     );
@@ -75,8 +81,64 @@ describe('TUI input helpers', () => {
 
     await pasteText(tui, 'Line1\nLine2', { echoTimeoutMs: 20, settleMs: 0 });
 
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(1);
     expect(currentInput).toBe('Line1\nLine2');
+  });
+
+  test('pasteText waits for the focused main input handler before dispatching', async () => {
+    let currentInput = '';
+    let ready = false;
+    let readyWhenWritten = false;
+    const writes: string[] = [];
+    const tui = fakePty(
+      (data) => {
+        writes.push(data);
+        if (data === '~') {
+          if (ready) currentInput = '~';
+          return;
+        }
+        if (data === '\x7f') {
+          currentInput = currentInput.slice(0, -1);
+          return;
+        }
+        if (!data.startsWith('\x1b[200~')) return;
+        readyWhenWritten = ready;
+        currentInput = 'Ready message';
+      },
+      () => currentInput,
+    );
+    (tui as PtyProcess & { focusedMainInputReady(): boolean }).focusedMainInputReady = () => ready;
+    tui.viewport = () => `❯ ${currentInput}`;
+    setTimeout(() => {
+      ready = true;
+    }, 5);
+
+    await pasteText(tui, 'Ready message', { echoTimeoutMs: 50, settleMs: 0 });
+
+    expect(readyWhenWritten).toBe(true);
+    expect(writes).toEqual(['\x1b[200~Ready message\x1b[201~']);
+  });
+
+  test('pasteText never replays an unacknowledged transaction', async () => {
+    let attempts = 0;
+    let logicalInput = '';
+    const tui = fakePty(
+      (data) => {
+        if (!data.startsWith('\x1b[200~')) return;
+        attempts++;
+        logicalInput += data.slice('\x1b[200~'.length, -'\x1b[201~'.length);
+      },
+      // Simulate Ink having consumed the paste while a delayed VT projection
+      // still looks empty. Replaying here would duplicate logical user input.
+      () => '',
+    );
+
+    await expect(
+      pasteText(tui, 'Line1\nLine2', { echoTimeoutMs: 20, settleMs: 0 }),
+    ).rejects.toThrow('no exact receipt; refusing replay');
+
+    expect(attempts).toBe(1);
+    expect(logicalInput).toBe('Line1\nLine2');
   });
 
   test('pasteText refuses to replay a partial transaction', async () => {
@@ -129,12 +191,12 @@ describe('TUI input helpers', () => {
       () => rendered,
     );
 
-    await typeText(tui, 'long wrapped input', 0);
+    await typeText(tui, 'long wrapped input', { delayMs: 0, append: true });
 
     expect(rendered).toContain('\r\n');
   });
 
-  test('typeText retries when PTY delivery drops an internal word-boundary space', async () => {
+  test('typeText retries an appended transaction when PTY delivery drops a word-boundary space', async () => {
     let rendered = '';
     let attempt = 0;
     const tui = fakePty(
@@ -150,7 +212,7 @@ describe('TUI input helpers', () => {
       () => rendered,
     );
 
-    await typeText(tui, 'one hundred', FAST_RETRY);
+    await typeText(tui, 'one hundred', { ...FAST_RETRY, append: true });
 
     expect(attempt).toBe(2);
     expect(rendered).toBe('one hundred');
@@ -269,7 +331,7 @@ describe('TUI input helpers', () => {
     );
     tui.viewport = () => `❯ ${currentInput}`;
 
-    await typeText(tui, 'Ask me', FAST_RETRY);
+    await typeText(tui, 'Ask me', { ...FAST_RETRY, append: true });
 
     expect(attempts).toBe(2);
     expect(currentInput).toBe('Ask me');
@@ -367,7 +429,6 @@ describe('TUI input helpers', () => {
     let transcript = '';
     let searchInput = '';
     let attempt = 0;
-    let deliveryCharacters = 0;
     const tui = fakePty(
       (data) => {
         transcript += data;
@@ -375,8 +436,7 @@ describe('TUI input helpers', () => {
           searchInput = searchInput.slice(0, -1);
           return;
         }
-        if (deliveryCharacters % 'session 1'.length === 0) attempt++;
-        deliveryCharacters++;
+        if (data === 's' && searchInput.length === 0) attempt++;
         if (attempt >= 2) searchInput += data;
       },
       () => transcript,
@@ -430,6 +490,27 @@ describe('TUI input helpers', () => {
     expect(active).toBe(true);
   });
 
+  test('activateSessionSearch does not assume the first session row is selected', async () => {
+    let selected = 2;
+    let upWrites = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data !== '\x1b[A') return;
+        upWrites += 1;
+        selected = Math.max(-1, selected - 1);
+      },
+      () => '',
+    );
+    tui.viewport = () =>
+      `── 会话列表 ── 3 / 3 ──\n${selected === -1 ? '  ❯ 搜索:' : '    搜索: —'}\n${selected === 0 ? '  ❯' : '   '} session 1\n${selected === 1 ? '  ❯' : '   '} session 2\n${selected === 2 ? '  ❯' : '   '} session 3`;
+    tui.inputViewport = tui.viewport;
+
+    await activateSessionSearch(tui, 250);
+
+    expect(selected).toBe(-1);
+    expect(upWrites).toBe(3);
+  });
+
   test('typeText does not accept a long message already present in history', async () => {
     const message =
       'This is a very long test message that exceeds one hundred characters and already appears in history';
@@ -450,7 +531,7 @@ describe('TUI input helpers', () => {
     );
     tui.viewport = () => `❯ ${message}\n\nresponse\n────────\n❯ ${currentInput}`;
 
-    await typeText(tui, message, FAST_RETRY);
+    await typeText(tui, message, { ...FAST_RETRY, append: true });
 
     expect(attempt).toBe(2);
     expect(currentInput).toBe(message);

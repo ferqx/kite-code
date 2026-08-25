@@ -5,7 +5,7 @@
 读取时机：修改 Footer、高度测量、窗口 resize、InputLine 或 overlay 布局，或怀疑缩放行为异常时。
 
 验证：`bun test tests/tui-layout.test.tsx tests/tui-extra-space.test.tsx tests/tui-system/scenarios/resize.test.ts`。
-范围：`src/app/tui/index.tsx`、`src/app/tui/components/InputLine.tsx`、`src/app/tui/components/OverlayFrame.tsx`、`src/app/tui/components/OverlayChoiceList.tsx`、`src/app/tui/components/OverlaySearchInput.tsx`、`src/app/tui/components/ApprovalBlock.tsx`、`src/app/tui/components/InputBlock.tsx`、`src/app/tui/components/PlanReviewBlock.tsx`、`src/app/tui/hooks/useOverlayHeight.ts`、`src/app/tui/hooks/useSlashSuggestions.ts`、`src/app/tui/render/useStaticContent.tsx`
+范围：`apps/kite/src/tui/index.tsx`、`apps/kite/src/tui/components/InputLine.tsx`、`apps/kite/src/tui/components/OverlayFrame.tsx`、`apps/kite/src/tui/components/OverlayChoiceList.tsx`、`apps/kite/src/tui/components/OverlaySearchInput.tsx`、`apps/kite/src/tui/components/ApprovalBlock.tsx`、`apps/kite/src/tui/components/InputBlock.tsx`、`apps/kite/src/tui/components/PlanReviewBlock.tsx`、`apps/kite/src/tui/hooks/useOverlayHeight.ts`、`apps/kite/src/tui/hooks/useSlashSuggestions.ts`、`apps/kite/src/tui/render/useStaticContent.tsx`
 
 ## 最终方案（2026-06-15）
 
@@ -54,13 +54,13 @@ resize 事件
 
 | 文件 | 变更 |
 |------|------|
-| `src/app/tui/index.tsx` | `inputValueRef` + `resizeKey` state + 仅宽度收窄时递增的 resize 事件监听 + `<App key={\`${resizeKey}:${overlaySurfaceKey(state)}\`} resizeGeneration={resizeKey}>` |
-| `src/app/tui/render/useStaticContent.tsx` | `resizeGeneration` prop → `\x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J` 清屏 + 缓冲；`useEffect` → `\x1B[?2026l` 关闭缓冲；移除两阶段 showContent 状态机 |
-| `src/app/tui/App.tsx` | 新增 `resizeGeneration?: number` prop，透传到 `useStaticContent` |
-| `src/app/tui/components/InputLine.tsx` | `initialValue`/`onValueChange` props，`useEffect` 同步值到父组件 |
-| `src/app/tui/hooks/useOverlayHeight.ts` | 移除手动 resize 监听，直接读 `stdout.rows` |
-| `src/app/tui/hooks/useResizeCleanup.ts` | 删除（dead code） |
-| `src/app/tui/App.tsx` | 移除 `useResizeCleanup` 导入和调用 |
+| `apps/kite/src/tui/index.tsx` | `inputValueRef` + `resizeKey` state + 仅宽度收窄时递增的 resize 事件监听 + `<App key={\`${resizeKey}:${overlaySurfaceKey(state)}\`} resizeGeneration={resizeKey}>` |
+| `apps/kite/src/tui/render/useStaticContent.tsx` | `resizeGeneration` prop → `\x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J` 清屏 + 缓冲；`useEffect` → `\x1B[?2026l` 关闭缓冲；移除两阶段 showContent 状态机 |
+| `apps/kite/src/tui/App.tsx` | 新增 `resizeGeneration?: number` prop，透传到 `useStaticContent` |
+| `apps/kite/src/tui/components/InputLine.tsx` | `initialValue`/`onValueChange` props，`useEffect` 同步值到父组件 |
+| `apps/kite/src/tui/hooks/useOverlayHeight.ts` | 移除手动 resize 监听，直接读 `stdout.rows` |
+| `apps/kite/src/tui/hooks/useResizeCleanup.ts` | 删除（dead code） |
+| `apps/kite/src/tui/App.tsx` | 移除 `useResizeCleanup` 导入和调用 |
 
 ### 验证
 

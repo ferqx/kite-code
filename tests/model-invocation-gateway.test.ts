@@ -1,20 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '@/core/config';
-import { humanMessage } from '@/core/messages';
-import type { ModelArtifactWriterV1 } from '@/core/model/invocation-gateway';
-import { computeModelSurfaceDigestV1 } from '@/core/model/surface-canonicalizer';
-import { type CompiledModelSurfaceV1, compileModelSurfaceV1 } from '@/core/model/surface-compiler';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import type { ModelArtifactWriter } from '@kite/builtin-runtime/model';
 import {
-  MODEL_INVOCATION_PURPOSES_V1,
-  MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1,
-  type ModelInvocationPurposeV1,
-  type ModelResponseRecordV1,
-  type PrivateArtifactRefV1,
-} from '@/protocol/model-surface';
-import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
+  type CompiledModelSurface,
+  compileModelSurface,
+  computeModelSurfaceDigest,
+  humanMessage,
+} from '@kite/builtin-runtime/model';
+import {
+  createRuntimeHostStateInitialState,
+  LIMITED_RESOURCE_BUDGET_,
+} from '@kite/runtime-host/kernel-adapter';
+import {
+  MODEL_INVOCATION_PURPOSES_,
+  type ModelInvocationPurpose,
+  type ModelResponseRecord,
+  type PrivateArtifactRef,
+} from '@kite/runtime-spi';
+import type { AgentConfig } from '#app/config';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { createTestModelInvocationHarness } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
 const CONFIG: AgentConfig = {
@@ -33,11 +38,11 @@ const RESPONSE = Object.freeze({
   providerMetadata: { responseId: 'response-fixture', rawFinishReason: 'stop' },
 });
 
-function compiled(purpose: ModelInvocationPurposeV1 = 'primary_agent') {
+function compiled(purpose: ModelInvocationPurpose = 'primary_agent') {
   const model = createMockModel([]);
   return {
     model,
-    compiled: compileModelSurfaceV1({
+    compiled: compileModelSurface({
       purpose,
       config: CONFIG,
       model,
@@ -50,8 +55,8 @@ function compiled(purpose: ModelInvocationPurposeV1 = 'primary_agent') {
 
 function invokeInput(
   model: ReturnType<typeof createMockModel>,
-  surface: CompiledModelSurfaceV1,
-  persistence: ReturnType<typeof createTestModelInvocationHarnessV1>['persistence'],
+  surface: CompiledModelSurface,
+  persistence: ReturnType<typeof createTestModelInvocationHarness>['persistence'],
 ) {
   return {
     model,
@@ -62,7 +67,6 @@ function invokeInput(
       projectionEnvironmentDigest: `sha256:${'1'.repeat(64)}` as const,
       capabilityBindingDigest: `sha256:${'2'.repeat(64)}` as const,
     },
-    providerDataPolicyRequired: false,
     resourceKind: 'model' as const,
   };
 }
@@ -70,25 +74,43 @@ function invokeInput(
 function ref<K extends 'model_surface' | 'model_response'>(
   kind: K,
   suffix: string,
-): PrivateArtifactRefV1 & { kind: K } {
+): PrivateArtifactRef & { kind: K } {
   return {
     artifactId: `artifact-${suffix}`,
     kind,
-    integrityIdentifier: `hmac-sha256:${suffix.repeat(64).slice(0, 64)}`,
+    integrityIdentifier: `sha256:${suffix.repeat(64).slice(0, 64)}`,
     byteLength: 1,
   };
 }
 
-describe('ModelInvocationGatewayV1', () => {
+describe('ModelInvocationGateway', () => {
+  test('does not require the retired State Project identity authority', async () => {
+    let dispatches = 0;
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-missing-project',
+      preserveMissingProjectIdentity: true,
+      transport: async () => {
+        dispatches += 1;
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+
+    await expect(
+      harness.gateway.invoke(invokeInput(fixture.model, fixture.compiled, harness.persistence)),
+    ).resolves.toBeDefined();
+    expect(dispatches).toBe(1);
+  });
+
   test('does not dispatch when Surface artifact publication fails', async () => {
     let dispatches = 0;
-    const artifacts: ModelArtifactWriterV1 = {
+    const artifacts: ModelArtifactWriter = {
       writeSurface: () => {
         throw new Error('surface storage unavailable');
       },
       writeResponse: () => ref('model_response', 'b'),
     };
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-artifact-failure',
       artifacts,
       transport: async () => {
@@ -108,7 +130,7 @@ describe('ModelInvocationGatewayV1', () => {
   test('does not dispatch when prepared evidence is not acknowledged', async () => {
     let dispatches = 0;
     const persistedTypes: string[][] = [];
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-prepared-rejection',
       persist: (events) => {
         persistedTypes.push(events.map((event) => event.type));
@@ -131,7 +153,7 @@ describe('ModelInvocationGatewayV1', () => {
   test('acknowledges every retry attempt before the corresponding dispatch', async () => {
     const order: string[] = [];
     let dispatches = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-retry-order',
       persist: (events) => {
         for (const event of events) {
@@ -166,12 +188,18 @@ describe('ModelInvocationGatewayV1', () => {
     expect(
       harness.events.filter((event) => event.type === 'model.invocation_attempt_started'),
     ).toHaveLength(2);
+    expect(harness.events.find((event) => event.type === 'model.retry')).toMatchObject({
+      invocationId: expect.any(String),
+      failureClassification: 'provider_unavailable',
+      providerStatusCode: 503,
+      timedOut: false,
+    });
   });
 
   test('starts the retry time budget at the first transient failure', async () => {
     let now = 0;
     let dispatches = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-retry-budget',
       now: () => now,
       transport: async () => {
@@ -194,9 +222,118 @@ describe('ModelInvocationGatewayV1', () => {
     expect(dispatches).toBe(2);
   });
 
+  test('keeps an active streaming attempt alive beyond the inactivity timeout', async () => {
+    let dispatches = 0;
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-stream-activity',
+      transport: async (input) => {
+        dispatches += 1;
+        await Bun.sleep(30);
+        if (input.signal?.aborted) throw input.signal.reason;
+        input.onActivity?.();
+        await Bun.sleep(30);
+        if (input.signal?.aborted) throw input.signal.reason;
+        input.onActivity?.();
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+
+    const pending = await harness.gateway.invoke({
+      ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+      limits: { maxAttempts: 1, perAttemptTimeoutMs: 50, totalTimeBudgetMs: 100 },
+    });
+    await pending.commit();
+
+    expect(dispatches).toBe(1);
+    expect(harness.events.at(-1)).toMatchObject({ type: 'model.invocation_completed' });
+  });
+
+  test('cancellation wins even when the provider ignores its abort signal', async () => {
+    let dispatches = 0;
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-non-cooperative-provider',
+      transport: async () => {
+        dispatches += 1;
+        return new Promise<never>(() => {});
+      },
+    });
+    const fixture = compiled();
+    const controller = new AbortController();
+
+    const invocation = harness.gateway.invoke({
+      ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+      signal: controller.signal,
+    });
+    while (dispatches === 0) await Bun.sleep(1);
+    controller.abort(new Error('user cancelled'));
+
+    await expect(invocation).rejects.toThrow('user cancelled');
+    expect(harness.events.at(-1)).toMatchObject({
+      type: 'model.invocation_interrupted',
+      dispatchCertainty: 'attempted',
+      reasonCode: 'cancelled',
+    });
+  });
+
+  test('does not dispatch when cancellation arrives while attempt-start evidence is persisted', async () => {
+    let dispatches = 0;
+    const controller = new AbortController();
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-cancel-during-attempt-ack',
+      persist: (events) => {
+        if (events.some((event) => event.type === 'model.invocation_attempt_started')) {
+          controller.abort(new Error('cancelled during attempt acknowledgement'));
+        }
+        return true;
+      },
+      transport: async () => {
+        dispatches += 1;
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+
+    await expect(
+      harness.gateway.invoke({
+        ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('cancelled during attempt acknowledgement');
+    expect(dispatches).toBe(0);
+    expect(harness.events.at(-1)).toMatchObject({
+      type: 'model.invocation_interrupted',
+      dispatchCertainty: 'none',
+      reasonCode: 'cancelled',
+    });
+  });
+
+  test('does not commit a successful response after its caller is cancelled', async () => {
+    const controller = new AbortController();
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-cancel-before-completion-commit',
+      transport: async () => RESPONSE,
+    });
+    const fixture = compiled();
+    const pending = await harness.gateway.invoke({
+      ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+      signal: controller.signal,
+    });
+
+    controller.abort(new Error('cancelled before completion commit'));
+
+    await expect(pending.commit()).rejects.toThrow('cancelled before completion commit');
+    expect(harness.events.some((event) => event.type === 'model.invocation_completed')).toBe(false);
+    expect(harness.events.at(-1)).toMatchObject({
+      type: 'model.invocation_interrupted',
+      dispatchCertainty: 'attempted',
+      reasonCode: 'cancelled',
+    });
+  });
+
   test('keeps cumulative retry suppression separate from reasoning segment identity', async () => {
     const ephemeral: Array<{ type: string; segmentId?: string; text?: string }> = [];
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-reasoning-segments',
       transport: async (input) => {
         input.onReasoningCumulative?.('first', 'segment-a');
@@ -227,12 +364,12 @@ describe('ModelInvocationGatewayV1', () => {
   });
 
   test('bounds HTTP 429 retries and never retries a non-transient 4xx', async () => {
-    for (const [statusCode, expectedDispatches, expectedReason] of [
-      [429, 3, 'attempts_exhausted'],
-      [401, 1, 'provider_failure'],
+    for (const [statusCode, expectedDispatches, expectedReason, expectedError] of [
+      [429, 3, 'attempts_exhausted', 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_rate_limited'],
+      [401, 1, 'provider_failure', 'MODEL_ATTEMPT_FATAL_FAILURE:provider_rejected'],
     ] as const) {
       let dispatches = 0;
-      const harness = createTestModelInvocationHarnessV1({
+      const harness = createTestModelInvocationHarness({
         workspace: `/tmp/model-gateway-http-${statusCode}`,
         transport: async () => {
           dispatches += 1;
@@ -245,7 +382,7 @@ describe('ModelInvocationGatewayV1', () => {
           ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
           limits: { maxAttempts: 3 },
         }),
-      ).rejects.toThrow(`HTTP ${statusCode}`);
+      ).rejects.toThrow(expectedError);
       expect(dispatches).toBe(expectedDispatches);
       expect(harness.events.at(-1)).toMatchObject({
         type: 'model.invocation_interrupted',
@@ -255,18 +392,67 @@ describe('ModelInvocationGatewayV1', () => {
     }
   });
 
+  test('staggers concurrent retries after a shared route returns HTTP 429', async () => {
+    let waitingFirstAttempts = 0;
+    let releaseFirstAttempts: (() => void) | undefined;
+    const firstAttemptsReady = new Promise<void>((resolve) => {
+      releaseFirstAttempts = resolve;
+    });
+    let dispatches = 0;
+    const retryDelays: number[] = [];
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-shared-rate-limit',
+      now: () => 0,
+      sleep: async (delayMs) => {
+        retryDelays.push(delayMs);
+      },
+      transport: async () => {
+        dispatches += 1;
+        if (dispatches <= 2) {
+          waitingFirstAttempts += 1;
+          if (waitingFirstAttempts === 2) releaseFirstAttempts?.();
+          await firstAttemptsReady;
+          throw Object.assign(new Error('rate limited'), { statusCode: 429 });
+        }
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+
+    const pending = await Promise.all([
+      harness.gateway.invoke({
+        ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+        limits: { maxAttempts: 2 },
+      }),
+      harness.gateway.invoke({
+        ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+        limits: { maxAttempts: 2 },
+      }),
+    ]);
+    await Promise.all(pending.map((completion) => completion.commit()));
+
+    expect(retryDelays.sort((left, right) => left - right)).toEqual([500, 1_000]);
+    expect(
+      harness.events
+        .filter((event) => event.type === 'model.retry')
+        .map((event) => event.delayMs)
+        .sort((left, right) => left - right),
+    ).toEqual([500, 1_000]);
+  });
+
   test('rejects request drift after prepared admission without Provider dispatch', async () => {
     let dispatches = 0;
     const fixture = compiled();
     const mutableSurface = structuredClone(fixture.compiled.surface);
-    const mutableCompiled: CompiledModelSurfaceV1 = {
+    const mutableCompiled: CompiledModelSurface = {
       ...fixture.compiled,
       surface: mutableSurface,
-      surfaceDigest: computeModelSurfaceDigestV1(mutableSurface),
+      surfaceDigest: computeModelSurfaceDigest(mutableSurface),
     };
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createInitialRuntimeState({
+      createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-drift',
         userId: 'test',
         workspace: '/tmp/model-gateway-drift',
@@ -275,11 +461,11 @@ describe('ModelInvocationGatewayV1', () => {
         type: 'resource_budget.configured',
         runId: 'gateway-drift-run',
         startedAt: new Date(startedAt).toISOString(),
-        deadlineAt: new Date(startedAt + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs).toISOString(),
-        budget: LIMITED_RESOURCE_BUDGET_V1,
+        deadlineAt: new Date(startedAt + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs).toISOString(),
+        budget: LIMITED_RESOURCE_BUDGET_,
       },
     );
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-drift',
       state: initial,
       persist: (events) => {
@@ -300,7 +486,7 @@ describe('ModelInvocationGatewayV1', () => {
     expect(dispatches).toBe(0);
     expect(harness.events.at(-1)).toMatchObject({
       type: 'resource_budget.released',
-      proof: 'local_provider_admission_denied',
+      proof: 'local_pre_dispatch_failure',
     });
     expect(harness.events.at(-2)).toMatchObject({
       type: 'model.invocation_interrupted',
@@ -319,11 +505,11 @@ describe('ModelInvocationGatewayV1', () => {
   test('does not expose a response when the completion receipt batch is rejected', async () => {
     let responseWritten = false;
     const rejectedBatches: string[][] = [];
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-terminal-rejection',
       artifacts: {
         writeSurface: () => ref('model_surface', 'a'),
-        writeResponse: (_record: ModelResponseRecordV1) => {
+        writeResponse: (_record: ModelResponseRecord) => {
           responseWritten = true;
           return ref('model_response', 'b');
         },
@@ -365,7 +551,8 @@ describe('ModelInvocationGatewayV1', () => {
     const batches: string[][] = [];
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createInitialRuntimeState({
+      createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-budget',
         userId: 'test',
         workspace: '/tmp/model-gateway-atomic',
@@ -374,11 +561,11 @@ describe('ModelInvocationGatewayV1', () => {
         type: 'resource_budget.configured',
         runId: 'gateway-run',
         startedAt: new Date(startedAt).toISOString(),
-        deadlineAt: new Date(startedAt + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs).toISOString(),
-        budget: LIMITED_RESOURCE_BUDGET_V1,
+        deadlineAt: new Date(startedAt + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs).toISOString(),
+        budget: LIMITED_RESOURCE_BUDGET_,
       },
     );
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-atomic',
       state: initial,
       persist: (events) => {
@@ -426,7 +613,7 @@ describe('ModelInvocationGatewayV1', () => {
 
   test('terminalizes an attempted invocation when synchronous completion finalization fails', async () => {
     let dispatches = 0;
-    const harness = createTestModelInvocationHarnessV1({
+    const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-finalizer-fault',
       transport: async () => {
         dispatches += 1;
@@ -457,32 +644,23 @@ describe('ModelInvocationGatewayV1', () => {
     expect(dispatches).toBe(1);
   });
 
-  test('routes all five closed purposes through the same Gateway contract', async () => {
-    const observed: string[] = [];
-    for (const purpose of MODEL_INVOCATION_PURPOSES_V1) {
-      const harness = createTestModelInvocationHarnessV1({
+  test('routes all four closed purposes through the same Gateway contract', async () => {
+    const operations: string[] = [];
+    for (const purpose of MODEL_INVOCATION_PURPOSES_) {
+      const harness = createTestModelInvocationHarness({
         workspace: `/tmp/model-gateway-${purpose}`,
         transport: async () => RESPONSE,
+        operationExecution: {
+          execute: async (operation) => {
+            operations.push(`${operation.purpose}:${operation.operationId}`);
+            return operation.attempt();
+          },
+        },
       });
       const fixture = compiled(purpose);
       const pending = await harness.gateway.invoke({
         ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
-        providerDataPolicyRequired: true,
-        providerDataAdmission: (_payload, dispatchPurpose) => {
-          observed.push(`${purpose}:${dispatchPurpose}`);
-          return {
-            admitted: true,
-            reason: 'admitted',
-            routeAlias: 'fixture',
-            policyRevision: 'fixture-policy-v1',
-          };
-        },
-        resourceKind:
-          purpose === 'context_compaction'
-            ? 'compaction'
-            : purpose === 'verification_review'
-              ? 'verification'
-              : 'model',
+        resourceKind: purpose === 'context_compaction' ? 'compaction' : 'model',
       });
       await pending.commit();
       expect(harness.events.some((event) => event.type === 'model.invocation_completed')).toBe(
@@ -490,10 +668,29 @@ describe('ModelInvocationGatewayV1', () => {
       );
     }
 
-    expect(observed).toEqual(
-      MODEL_INVOCATION_PURPOSES_V1.map(
-        (purpose) => `${purpose}:${MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1[purpose]}`,
+    expect(operations).toEqual(
+      MODEL_INVOCATION_PURPOSES_.map(
+        (purpose) => `${purpose}:${BUILTIN_MODEL_OPERATION_BY_PURPOSE_[purpose]}`,
       ),
     );
+  });
+
+  test('fails closed before the response source when Model operation selection rejects', async () => {
+    let sourceCalls = 0;
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-operation-rejected',
+      transport: async () => {
+        sourceCalls += 1;
+        return RESPONSE;
+      },
+      operationExecution: {
+        execute: () => Promise.reject(new Error('model operation identity rejected')),
+      },
+    });
+    const fixture = compiled('primary_agent');
+    await expect(
+      harness.gateway.invoke(invokeInput(fixture.model, fixture.compiled, harness.persistence)),
+    ).rejects.toThrow('model operation identity rejected');
+    expect(sourceCalls).toBe(0);
   });
 });

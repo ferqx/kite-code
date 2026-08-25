@@ -20,7 +20,7 @@ ADR-0068/ADR-0069 已取代 2026-07-29 生产计划组的企业式首发 Gate �
 `docs/space/execution/completed/2026-08-04-single-maintainer-open-source-first-release.md`；十个旧 Phase
 子计划均标记 `superseded`，只保留 Task ID、详细设计和历史证据。
 
-当前 Task 权威是 `release/oss-first-release/task-status-v2.json`：108 个 Task 精确分类为 83
+当前 Task 权威是 `release/oss-first-release/task-status.json`：108 个 Task 精确分类为 83
 `completed`、25 `superseded`、0 optional。没有发生的外部签名、attestation 或运营事实不得登记为通过。
 
 文档门禁运行：

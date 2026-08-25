@@ -7,19 +7,13 @@ use kite_windows_runner::restricted_token::{self, CapabilitySid};
 use kite_windows_runner::{
     build_bash_command_line, build_busybox_sh_command_line, build_isksh_command_line, sha256_file,
 };
-use serde::Deserialize;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
 
 const WINDOWS_10_22H2_BUILD: u32 = 19_045;
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum RunnerInboundFrame {
-    Cancel,
-}
 
 #[link(name = "ntdll")]
 extern "system" {
@@ -137,13 +131,32 @@ fn run() -> i32 {
             return 1;
         }
     };
-    let request: InvocationRequest = match serde_json::from_slice(&request_payload) {
-        Ok(request) => request,
+    let candidate_invocation_id = match serde_json::from_slice::<ControlFrame>(&request_payload) {
+        Ok(frame) => frame.invocation_id,
         Err(error) => {
-            eprintln!("kite-windows-runner: invalid request json: {error}");
+            eprintln!("kite-windows-runner: invalid request frame: {error}");
             return 1;
         }
     };
+    let request_frame = match decode_control_frame::<InvocationRequest>(
+        &request_payload,
+        "request",
+        HOST_PEER_ID,
+        &candidate_invocation_id,
+        0,
+    ) {
+        Ok(frame) => frame,
+        Err(error) => {
+            eprintln!("kite-windows-runner: invalid request frame: {error}");
+            return 1;
+        }
+    };
+    let request_invocation_id = request_frame.frame.invocation_id;
+    let request = request_frame.payload;
+    if request_invocation_id != request.invocation_name {
+        eprintln!("kite-windows-runner: request identity does not bind invocation name");
+        return 2;
+    }
     if request.version != PROTOCOL_VERSION {
         eprintln!(
             "kite-windows-runner: protocol version mismatch: expected {}, got {}",
@@ -212,12 +225,52 @@ fn run() -> i32 {
         eprintln!("kite-windows-runner: invalid trusted invocation name");
         return 2;
     }
+    let output_writer = ControlFrameWriter::new(&request.invocation_name);
+    if let Err(error) = output_writer.write(
+        "ready",
+        &ReadyPayload {
+            invocation_name: request.invocation_name.clone(),
+            runtime_validated: true,
+        },
+    ) {
+        eprintln!("kite-windows-runner: ready write failed: {error}");
+        return 1;
+    }
+    let go_payload = {
+        let mut stdin = std::io::stdin().lock();
+        decode_frame(&mut stdin)
+    };
+    let go_payload = match go_payload {
+        Ok(payload) => payload,
+        Err(error) => {
+            eprintln!("kite-windows-runner: failed to read GO frame: {error}");
+            return 1;
+        }
+    };
+    let go = match decode_control_frame::<GoPayload>(
+        &go_payload,
+        "go",
+        HOST_PEER_ID,
+        &request.invocation_name,
+        1,
+    ) {
+        Ok(frame) => frame.payload,
+        Err(error) => {
+            eprintln!("kite-windows-runner: invalid GO frame: {error}");
+            return 1;
+        }
+    };
+    if go.invocation_name != request.invocation_name || !go.supervisor_acknowledged {
+        eprintln!("kite-windows-runner: GO did not bind supervisor acknowledgement");
+        return 1;
+    }
     let result = execute_restricted_token_invocation(
         &request,
         &request.invocation_name,
         &shell_path,
         &coreutils_path,
         shell_kind,
+        output_writer,
     );
     if let Err(error) = result {
         eprintln!("kite-windows-runner: {error}");
@@ -260,14 +313,32 @@ fn run_cleanup() -> i32 {
             return 1;
         }
     };
-    let request: InvocationRequest = match serde_json::from_slice(&request_payload) {
-        Ok(request) => request,
+    let candidate_invocation_id = match serde_json::from_slice::<ControlFrame>(&request_payload) {
+        Ok(frame) => frame.invocation_id,
         Err(error) => {
-            eprintln!("kite-windows-runner: cleanup invalid request json: {error}");
+            eprintln!("kite-windows-runner: cleanup invalid request frame: {error}");
             return 1;
         }
     };
-    if request.version != PROTOCOL_VERSION || !valid_invocation_name(&request.invocation_name) {
+    let request_frame = match decode_control_frame::<InvocationRequest>(
+        &request_payload,
+        "request",
+        HOST_PEER_ID,
+        &candidate_invocation_id,
+        0,
+    ) {
+        Ok(frame) => frame,
+        Err(error) => {
+            eprintln!("kite-windows-runner: cleanup invalid request: {error}");
+            return 1;
+        }
+    };
+    let request_invocation_id = request_frame.frame.invocation_id;
+    let request = request_frame.payload;
+    if request.version != PROTOCOL_VERSION
+        || request_invocation_id != request.invocation_name
+        || !valid_invocation_name(&request.invocation_name)
+    {
         eprintln!("kite-windows-runner: cleanup request is invalid");
         return 2;
     }
@@ -412,6 +483,7 @@ fn execute_restricted_token_invocation(
     shell_path: &std::path::Path,
     coreutils_path: &std::path::Path,
     shell_kind: ShellRuntime,
+    output_writer: ControlFrameWriter,
 ) -> Result<(), String> {
     let direct = &request.direct_workspace;
     let network_authorized = matches!(request.network_mode, NetworkMode::AllowAll);
@@ -430,9 +502,9 @@ fn execute_restricted_token_invocation(
     runner_debug("coreutils aliases materialized");
     // A startup probe owns an empty temporary Workspace and supplies a
     // capability that is revoked after the probe. It deliberately has no
-    // protected-path DACL snapshots to recover after a crash. Normal commands
-    // use the persistent ledger and protect only static, currently existing
-    // paths; it does not claim future glob protection.
+    // legacy protected-path DACL snapshots to recover after a crash. Normal
+    // commands use the persistent Workspace ledger; sensitive external paths
+    // are authorized by Tool Policy and therefore do not receive native denies.
     let deny_paths = if direct.ephemeral_workspace_capability_sid.is_some() {
         Vec::new()
     } else {
@@ -556,10 +628,22 @@ fn execute_restricted_token_invocation(
 
     let cancel_event = job::create_cancel_event().map_err(|error| error.to_string())?;
     cleanup.track_handles(&[cancel_event]);
-    spawn_cancel_watcher(cancel_event);
+    let cancel_watcher = CancelWatcher::spawn(cancel_event, name.to_string())?;
+    // From this point the watcher owns the right to use cancel_event. No
+    // error unwind may close it behind that thread; joined paths close it
+    // explicitly, detached paths leave it to process-exit cleanup.
+    cleanup.forget_handles(&[cancel_event]);
 
-    let stdout_forwarder = drain_and_forward(stdout_read, OutboundKind::Stdout);
-    let stderr_forwarder = drain_and_forward(stderr_read, OutboundKind::Stderr);
+    let stdout_forwarder = drain_and_forward(
+        stdout_read,
+        OutboundKind::Stdout,
+        output_writer.clone(),
+    );
+    let stderr_forwarder = drain_and_forward(
+        stderr_read,
+        OutboundKind::Stderr,
+        output_writer.clone(),
+    );
     let (timed_out, cancelled) =
         job::wait_for_process(child.process_handle(), cancel_event, request.timeout_ms)
             .map_err(|error| error.to_string())?;
@@ -585,10 +669,9 @@ fn execute_restricted_token_invocation(
     // retry `--cleanup` with the same capability SID after a runner crash.
     let acl_cleanup = cleanup.finish_security();
     runner_debug("runtime ACLs revoked");
-    cleanup.forget_handles(&[cancel_event, stdout_read, stderr_read]);
+    cleanup.forget_handles(&[stdout_read, stderr_read]);
     cleanup.forget_job();
     unsafe {
-        let _ = CloseHandle(cancel_event);
         if !stdout_forced_closed {
             let _ = CloseHandle(stdout_read);
         }
@@ -619,23 +702,20 @@ fn execute_restricted_token_invocation(
             && cleanup_confirmed
             && !stdout_forced_closed
             && !stderr_forced_closed,
-        // Protocol V1 retains this historic field name. In direct mode it is
-        // an adapter-generated invocation identity.
+        // The runner protocol carries the adapter-generated invocation identity.
         invocation_name: name.to_string(),
         error,
     };
-    let encoded =
-        encode_frame(&OutboundFrame::Exit { receipt }).map_err(|error| error.to_string())?;
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    out.write_all(&encoded).map_err(|error| error.to_string())?;
-    out.flush().map_err(|error| error.to_string())?;
+    output_writer.write("exit", &receipt)?;
+    cancel_watcher.stop_and_join()?;
     Ok(())
 }
 
-/// The synthetic protected-path guard constrains the approved-filesystem
-/// restricted token only. Network-approved execution must retain the current
-/// interactive token for Schannel, which cannot carry that synthetic SID.
+/// The compatibility guard identity is present only on the approved-filesystem
+/// restricted token. Tool Policy owns sensitive-path approval and the runner
+/// installs no path deny ACEs after approval. Network-approved execution must
+/// retain the current interactive token for Schannel, which cannot carry the
+/// synthetic SID.
 fn requires_approved_filesystem_guard(network_mode: NetworkMode) -> bool {
     !matches!(network_mode, NetworkMode::AllowAll)
 }
@@ -647,6 +727,7 @@ fn can_use_current_user_network_token(
     matches!(network_mode, NetworkMode::AllowAll)
         && matches!(filesystem_scope, FilesystemScope::FullAccess)
 }
+
 /// Microsoft Coreutils is one static multi-call executable. POSIX shells
 /// resolve utilities by their command name, so materialize a private copy plus
 /// hard-link aliases before the restricted child is launched. The source binary
@@ -778,6 +859,47 @@ fn materialize_coreutils_aliases(
     Ok(())
 }
 
+#[derive(Clone)]
+struct ControlFrameWriter {
+    invocation_id: String,
+    next_sequence: Arc<Mutex<u64>>,
+}
+
+impl ControlFrameWriter {
+    fn new(invocation_id: &str) -> Self {
+        Self {
+            invocation_id: invocation_id.to_string(),
+            next_sequence: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    fn write<T: serde::Serialize>(&self, frame_type: &str, payload: &T) -> Result<(), String> {
+        let mut sequence = self
+            .next_sequence
+            .lock()
+            .map_err(|_| "control output sequence lock poisoned".to_string())?;
+        let encoded = encode_control_frame(
+            frame_type,
+            &self.invocation_id,
+            RUNNER_PEER_ID,
+            *sequence,
+            payload,
+        )
+        .map_err(|error| error.to_string())?;
+        let stdout = std::io::stdout();
+        let mut output = stdout.lock();
+        output
+            .write_all(&encoded)
+            .map_err(|error| format!("control output write failed: {error}"))?;
+        output
+            .flush()
+            .map_err(|error| format!("control output flush failed: {error}"))?;
+        *sequence = (*sequence).saturating_add(1);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
 enum OutboundKind {
     Stdout,
     Stderr,
@@ -791,7 +913,11 @@ const _: fn() = || {
     let _ = std::mem::size_of::<SendHandle>();
 };
 
-fn drain_and_forward(handle: HANDLE, kind: OutboundKind) -> std::thread::JoinHandle<u64> {
+fn drain_and_forward(
+    handle: HANDLE,
+    kind: OutboundKind,
+    writer: ControlFrameWriter,
+) -> std::thread::JoinHandle<u64> {
     let wrapped = SendHandle(handle);
     std::thread::spawn(move || {
         // Move the whole Send wrapper into the closure first; a direct
@@ -815,15 +941,11 @@ fn drain_and_forward(handle: HANDLE, kind: OutboundKind) -> std::thread::JoinHan
                 let data =
                     base64::engine::general_purpose::STANDARD.encode(&buffer[..read as usize]);
                 total += read as u64;
-                let frame = match kind {
-                    OutboundKind::Stdout => OutboundFrame::Stdout { data },
-                    OutboundKind::Stderr => OutboundFrame::Stderr { data },
+                let frame_type = match kind {
+                    OutboundKind::Stdout => "stdout",
+                    OutboundKind::Stderr => "stderr",
                 };
-                if let Ok(encoded) = encode_frame(&frame) {
-                    let mut out = std::io::stdout().lock();
-                    let _ = out.write_all(&encoded);
-                    let _ = out.flush();
-                }
+                let _ = writer.write(frame_type, &OutputPayload { data });
             }
         }
         total
@@ -858,27 +980,121 @@ fn join_forwarder(
     Ok((bytes, forced_closed))
 }
 
-fn spawn_cancel_watcher(cancel_event: HANDLE) -> std::thread::JoinHandle<()> {
-    let wrapped = SendHandle(cancel_event);
-    std::thread::spawn(move || {
-        let taken = wrapped;
-        let cancel_event = taken.0;
-        let mut stdin = std::io::stdin().lock();
-        match decode_frame(&mut stdin) {
-            Ok(payload) => match serde_json::from_slice::<RunnerInboundFrame>(&payload) {
-                Ok(RunnerInboundFrame::Cancel) | Err(_) => {
-                    job::signal_cancel(cancel_event);
+struct CancelWatcher {
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+    cancel_event: Option<HANDLE>,
+}
+
+impl CancelWatcher {
+    fn spawn(
+        cancel_event: HANDLE,
+        invocation_id: String,
+    ) -> Result<Self, String> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        // windows::HANDLE is not Send. Transfer only its stable numeric value;
+        // CancelWatcher keeps the sole close owner and joins before closing it.
+        let cancel_event_address = cancel_event.0 as usize;
+        let handle = std::thread::Builder::new()
+            .name("kite-windows-cancel-watcher".to_string())
+            .spawn(move || {
+                let cancel_event = HANDLE(cancel_event_address as *mut core::ffi::c_void);
+                let stdin_handle = match unsafe {
+                    windows::Win32::System::Console::GetStdHandle(
+                        windows::Win32::System::Console::STD_INPUT_HANDLE,
+                    )
+                } {
+                    Ok(handle) => handle,
+                    Err(_) => {
+                        job::signal_cancel(cancel_event);
+                        return;
+                    }
+                };
+                loop {
+                    if thread_stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let mut available = 0u32;
+                    let mut header = [0u8; 4];
+                    let mut header_read = 0u32;
+                    let peek = unsafe {
+                        windows::Win32::System::Pipes::PeekNamedPipe(
+                            stdin_handle,
+                            Some(header.as_mut_ptr().cast()),
+                            header.len() as u32,
+                            Some(&mut header_read),
+                            Some(&mut available),
+                            None,
+                        )
+                    };
+                    if peek.is_err() {
+                        job::signal_cancel(cancel_event);
+                        return;
+                    }
+                    if available < 4 || header_read < 4 {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    let length = u32::from_le_bytes(header);
+                    if length > MAX_FRAME_BYTES as u32 {
+                        job::signal_cancel(cancel_event);
+                        return;
+                    }
+                    if available < 4u32.saturating_add(length) {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        continue;
+                    }
+                    let mut stdin = std::io::stdin().lock();
+                    match decode_frame(&mut stdin) {
+                        Ok(payload) => {
+                            let _ = decode_control_frame::<CancelPayload>(
+                                &payload,
+                                "cancel",
+                                HOST_PEER_ID,
+                                &invocation_id,
+                                2,
+                            );
+                            job::signal_cancel(cancel_event);
+                        }
+                        Err(_) => job::signal_cancel(cancel_event),
+                    }
+                    return;
                 }
-            },
-            // EOF on stdin means the adapter is gone (crash or close). The
-            // Job Object KILL_ON_JOB_CLOSE backstop then terminates the
-            // tree after we exit; signaling cancel here makes the shutdown
-            // deterministic instead of waiting out the timeout.
-            Err(_) => {
-                job::signal_cancel(cancel_event);
+            })
+            .map_err(|error| format!("cancel watcher spawn failed: {error}"))?;
+        Ok(Self {
+            stop,
+            handle: Some(handle),
+            cancel_event: Some(cancel_event),
+        })
+    }
+
+    fn stop_and_join(mut self) -> Result<(), String> {
+        self.stop.store(true, Ordering::Release);
+        let result = self
+            .handle
+            .take()
+            .expect("cancel watcher handle must exist")
+            .join()
+            .map_err(|_| "cancel watcher panicked".to_string());
+        // Drop is the sole HANDLE close owner and runs only after this join.
+        result
+    }
+}
+
+impl Drop for CancelWatcher {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+        if let Some(cancel_event) = self.cancel_event.take() {
+            unsafe {
+                let _ = CloseHandle(cancel_event);
             }
         }
-    })
+    }
 }
 
 fn close_pipe_pair(pair: (HANDLE, HANDLE)) {
@@ -933,16 +1149,24 @@ fn create_pipe_pair() -> Result<(HANDLE, HANDLE), String> {
         let mut write = HANDLE::default();
         windows::Win32::System::Pipes::CreatePipe(&mut read, &mut write, None, 0)
             .map_err(|error| format!("CreatePipe failed: {error}"))?;
-        let _ = windows::Win32::Foundation::SetHandleInformation(
+        if let Err(error) = windows::Win32::Foundation::SetHandleInformation(
             read,
             windows::Win32::Foundation::HANDLE_FLAG_INHERIT.0,
             windows::Win32::Foundation::HANDLE_FLAGS(0),
-        );
-        let _ = windows::Win32::Foundation::SetHandleInformation(
+        ) {
+            let _ = CloseHandle(read);
+            let _ = CloseHandle(write);
+            return Err(format!("SetHandleInformation(pipe read) failed: {error}"));
+        }
+        if let Err(error) = windows::Win32::Foundation::SetHandleInformation(
             write,
             windows::Win32::Foundation::HANDLE_FLAG_INHERIT.0,
             windows::Win32::Foundation::HANDLE_FLAG_INHERIT,
-        );
+        ) {
+            let _ = CloseHandle(read);
+            let _ = CloseHandle(write);
+            return Err(format!("SetHandleInformation(pipe write) failed: {error}"));
+        }
         Ok((read, write))
     }
 }
@@ -1048,17 +1272,6 @@ mod tests {
             FilesystemScope::FullAccess,
         ));
     }
-    use kite_windows_runner::protected_paths::is_dynamic_dotenv_name;
-
-    #[test]
-    fn dynamic_dotenv_name_matches_case_insensitively_without_utf8_panics() {
-        assert!(is_dynamic_dotenv_name(".env.staging"));
-        assert!(is_dynamic_dotenv_name(".ENV.production.local"));
-        assert!(!is_dynamic_dotenv_name(".env"));
-        assert!(!is_dynamic_dotenv_name(".environment"));
-        assert!(!is_dynamic_dotenv_name("é.env.staging"));
-    }
-
     #[test]
     fn windows_10_api_floor_accepts_22h2_and_windows_11_builds() {
         assert!(version_meets_windows_10_22h2_floor(10, 19_045));
@@ -1118,4 +1331,5 @@ mod tests {
         assert!(text.contains("USERPROFILE=C:\\Users\\CurrentUser\0"));
         assert!(block.ends_with(&[0, 0]));
     }
+
 }

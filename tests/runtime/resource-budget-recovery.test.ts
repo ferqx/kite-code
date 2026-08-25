@@ -1,17 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAgentKernel } from '@/core/runtime/kernel';
 import {
-  createZeroResourceUsageV1,
-  LIMITED_RESOURCE_BUDGET_V1,
-} from '@/core/runtime/resource-budget';
+  createZeroResourceUsage,
+  LIMITED_RESOURCE_BUDGET_,
+} from '@kite/runtime-host/kernel-adapter';
+import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 
 const paths: string[] = [];
 
 function databasePath(): string {
-  const path = join(tmpdir(), `kite-resource-budget-${crypto.randomUUID()}.db`);
+  const path = join(process.cwd(), `.kite-resource-budget-${crypto.randomUUID()}.db`);
   paths.push(path);
   return path;
 }
@@ -25,22 +25,23 @@ afterEach(() => {
 });
 
 describe('resource budget recovery', () => {
-  test('round-trips durable reservation state through RuntimeStore', () => {
+  test('round-trips durable reservation state through StateRuntimeStorage', () => {
     const storePath = databasePath();
-    const kernel = createAgentKernel({
+    const kernel = restoreStateKernelCoordinator({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'budget-recovery',
       userId: 'u',
       workspace: '/',
-      storePath,
+      store: openStateStoreForTest(storePath),
     });
     kernel.processEvent({
       type: 'resource_budget.configured',
       runId: 'run-1',
       startedAt: '2026-07-30T00:00:00Z',
       deadlineAt: '2026-07-30T00:30:00Z',
-      budget: LIMITED_RESOURCE_BUDGET_V1,
+      budget: LIMITED_RESOURCE_BUDGET_,
     });
-    const upper = createZeroResourceUsageV1('versioned_upper_bound', 'test-v1');
+    const upper = createZeroResourceUsage('versioned_upper_bound', 'test-v1');
     upper.counters.toolInvocations = 1;
     upper.gauges.activeToolInvocations = 1;
     kernel.processEvent({
@@ -61,11 +62,12 @@ describe('resource budget recovery', () => {
     });
     kernel.close();
 
-    const recovered = createAgentKernel({
+    const recovered = restoreStateKernelCoordinator({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'budget-recovery',
       userId: 'u',
       workspace: '/',
-      storePath,
+      store: openStateStoreForTest(storePath),
     });
     expect(recovered.getState().resourceBudget).toMatchObject({
       status: 'active',

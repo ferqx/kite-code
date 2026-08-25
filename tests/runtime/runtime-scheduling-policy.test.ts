@@ -1,16 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  computeRuntimeSchedulingPolicyDigestV1,
-  createRuntimeSchedulingPolicyV1,
-} from '@/core/runtime/runtime-scheduling-policy';
+  computeRuntimeSchedulingPolicyDigest,
+  createRuntimeSchedulingPolicy,
+} from '@kite/agent-kernel';
 
-describe('RuntimeSchedulingPolicyV1', () => {
+describe('RuntimeSchedulingPolicy', () => {
   test('exports the canonical scheduler snapshot consumed by release tooling', () => {
-    const policy = createRuntimeSchedulingPolicyV1();
+    const policy = createRuntimeSchedulingPolicy();
     expect(policy).toMatchObject({
       version: 1,
-      parallelRead: { ceiling: 4, barrier: 'interaction_write_or_unknown' },
+      parallelRead: {
+        concurrencyGroup: 'parallel-read',
+        ceiling: 4,
+        barrier: 'interaction_write_or_unknown',
+      },
       parallelSubagent: {
+        concurrencyGroup: 'parallel-subagent',
         ceiling: 4,
         scope: 'same_task_and_model_message',
         admission: 'approval_free_and_shared_budget',
@@ -25,10 +30,9 @@ describe('RuntimeSchedulingPolicyV1', () => {
       },
       lateEventPolicy: 'diagnostic_or_reconciliation_only',
     });
-    expect(policy.parallelRead.allowlist).toContain('read_file');
-    expect(computeRuntimeSchedulingPolicyDigestV1(policy)).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(computeRuntimeSchedulingPolicyDigestV1()).toBe(
-      computeRuntimeSchedulingPolicyDigestV1(structuredClone(policy)),
+    expect(computeRuntimeSchedulingPolicyDigest(policy)).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(computeRuntimeSchedulingPolicyDigest()).toBe(
+      computeRuntimeSchedulingPolicyDigest(structuredClone(policy)),
     );
   });
 });

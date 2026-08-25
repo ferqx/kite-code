@@ -1,0 +1,41 @@
+{
+  "name": "@kite/builtin-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./filesystem": "./src/filesystem/index.ts",
+    "./capability": "./src/capability.ts",
+    "./git": "./src/git/index.ts",
+    "./mcp": "./src/mcp/index.ts",
+    "./subagent": "./src/subagent/index.ts",
+    "./skills": "./src/skills/index.ts",
+    "./verification": "./src/verification/index.ts",
+    "./model": "./src/model/index.ts",
+    "./planning": "./src/planning/index.ts",
+    "./sandbox": "./src/sandbox/index.ts",
+    "./web": "./src/web/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test ./test"
+  },
+  "dependencies": {
+    "@kite/runtime-contract": "workspace:*",
+    "@kite/runtime-spi": "workspace:*",
+    "@ai-sdk/openai-compatible": "^3.0.7",
+    "@mozilla/readability": "^0.6.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@napi-rs/keyring": "1.3.0",
+    "ajv": "^8.17.1",
+    "ai": "^7.0.19",
+    "gpt-tokenizer": "^3.4.0",
+    "jsdom": "^26.1.0",
+    "turndown": "^7.2.1",
+    "yaml": "^2.9.0",
+    "zod": "^4.3.6"
+  }
+}

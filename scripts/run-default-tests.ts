@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const PROCESS_ISOLATED_TEST_FILES = [
+  'tests/execution/posix-supervisor.test.ts',
   'tests/mcp-config-catalog.test.ts',
   'tests/mcp-config-repository.test.ts',
   'tests/mcp-project-approval.test.ts',
@@ -21,6 +22,8 @@ const PROCESS_ISOLATED_TEST_FILES = [
 ] as const;
 
 const DEFAULT_IGNORES = [
+  'packages/**',
+  'apps/**',
   'tests/tui-system/scenarios/**',
   'tests/tui-system/smoke/**',
   'tests/pty-spike/**',

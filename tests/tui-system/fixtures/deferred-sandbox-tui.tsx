@@ -1,7 +1,7 @@
-import type { AppShellExecutorV1, AppShellRuntimeDecisionV1 } from '@/app/sandbox/composition';
-import { runTui } from '@/app/tui/index';
+import { runTui } from '@kite/kite/tui';
+import type { AppShellExecutor, AppShellRuntimeDecision } from '@/app/sandbox/composition';
 
-const preparation = new Promise<AppShellRuntimeDecisionV1>(() => {});
+const preparation = new Promise<AppShellRuntimeDecision>(() => {});
 
 const shellExecutor = (async (input) => {
   await preparation;
@@ -12,7 +12,7 @@ const shellExecutor = (async (input) => {
     stdout: '',
     stderr: 'unreachable deferred sandbox fixture',
   };
-}) as AppShellExecutorV1;
+}) as AppShellExecutor;
 shellExecutor.prepare = () => preparation;
 
 runTui({ shellExecutor });

@@ -1,17 +1,17 @@
 #!/usr/bin/env bun
 
-import { loadMcpConfig } from '@/core/config';
-import { McpConnectionManager } from '@/core/mcp/manager';
+import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import { loadMcpConfigCatalog } from '#app/config';
 
-const loaded = loadMcpConfig();
+const catalog = loadMcpConfigCatalog();
 const manager = new McpConnectionManager();
 try {
-  await manager.connectAll(loaded.servers);
+  await manager.connectAll(catalog.connectableServers);
   console.log(
     JSON.stringify({
-      connectable: Object.keys(loaded.servers),
+      connectable: Object.keys(catalog.connectableServers),
       states: [...manager.getServerStates().keys()],
-      approvals: loaded.catalog.projectApprovals.map((view) => ({
+      approvals: catalog.projectApprovals.map((view) => ({
         name: view.name,
         status: view.status,
       })),

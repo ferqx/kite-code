@@ -2,13 +2,14 @@
  * PTY System Test — Tool Approve (A) Flow
  *
  * Verifies the full approve flow: tool call → approve → tool executes → agent continues.
- * Native sandbox enforcement is covered by smoke/native-sandbox.test.ts; this
- * deterministic scenario explicitly disables it and verifies the actual tool
- * result sent back to the model.
- * Also verifies block rendering for the reasoning and completed shell card.
+ * Native Shell sandbox enforcement is covered separately. This deterministic
+ * scenario uses an external file mutation so approval can be exercised without
+ * weakening restricted-mode Shell admission when no sandbox backend exists.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -22,14 +23,21 @@ describe('TUI PTY System — Tool Approve', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let approvalMarkerPath: string;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
-      configOverrides: { sandbox: { enabled: false } },
+      configOverrides: {
+        interactionMode: 'accept_edits',
+        sandbox: { enabled: false },
+      },
     });
+    approvalMarkerPath = join(workspace.home, 'kite-tui-approval-marker.txt');
 
-    // Response #1: shell_execute tool call (needs approval in any mode)
+    // Response #1: a known external-scope file mutation. This exact invocation
+    // takes the approval route and, once approved, executes without asking the
+    // model to issue it again.
     // Response #2: what the agent says AFTER the tool executes
     server.setResponses([
       {
@@ -39,10 +47,10 @@ describe('TUI PTY System — Tool Approve', () => {
           tool_calls: [
             {
               id: 'call_1',
-              name: 'shell_execute',
+              name: 'write_file',
               args: {
-                command: 'bun -e "console.log(\'TUI_APPROVAL_EXECUTED\')"',
-                description: 'emit deterministic approval marker',
+                path: approvalMarkerPath,
+                content: 'TUI_APPROVAL_EXECUTED\n',
               },
             },
           ],
@@ -53,8 +61,7 @@ describe('TUI PTY System — Tool Approve', () => {
           toolResults: [
             {
               toolCallId: 'call_1',
-              contentIncludes: ['TUI_APPROVAL_EXECUTED'],
-              contentExcludes: ['sandbox_apply: Operation not permitted'],
+              contentIncludes: ['kite-tui-approval-marker.txt'],
             },
           ],
         },
@@ -70,6 +77,7 @@ describe('TUI PTY System — Tool Approve', () => {
   });
 
   afterAll(async () => {
+    rmSync(approvalMarkerPath, { force: true });
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
@@ -91,9 +99,8 @@ describe('TUI PTY System — Tool Approve', () => {
       // Approve the tool ("允许一次" is default selected at index 0, press Enter)
       const executionFrames = tui.markScreen();
       tui.write('\r');
-
       // The fixture serves the follow-up only after seeing the marker in the
-      // tool result request, so this cannot pass on a failed sandbox launch.
+      // tool result request, so this cannot pass on a skipped file mutation.
       await waitForText(() => tui.outputSinceLastAction(), 'APPROVAL_FLOW_COMPLETE', 15000);
 
       const afterOutput = tui.viewport();
@@ -103,9 +110,7 @@ describe('TUI PTY System — Tool Approve', () => {
       const executionHistory = tui.screenFramesSince(executionFrames).join('\n');
       expect(screenContains(executionHistory, 'TUI_APPROVAL_EXECUTED')).toBe(true);
       expect(screenContains(executionHistory, 'exit: error')).toBe(false);
-      expect(screenContains(executionHistory, 'sandbox_apply: Operation not permitted')).toBe(
-        false,
-      );
+      expect(readFileSync(approvalMarkerPath, 'utf8')).toBe('TUI_APPROVAL_EXECUTED\n');
       expect(screenContains(afterOutput, 'APPROVAL_FLOW_COMPLETE')).toBe(true);
 
       // TUI should recover — prompt visible

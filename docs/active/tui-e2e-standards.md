@@ -6,9 +6,13 @@
 
 验证：`bun run test:tui:harness`、`bun run test:tui:system`、`bun run test:tui:system:core`；取消后 scrollback 单次提示词回归可定向运行 `bun run scripts/run-tui-system-tests.ts interrupt`。
 
+相关：ADR-0137、`docs/active/authorization.md`、`docs/active/cancel-resume-cleanup.md`。
+
 ## 测试边界
 
-PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、`runRuntimeAgent()`、Runtime Store、SessionRuntime、RuntimeEvent reducer 和 Ink 渲染。只允许 mock 模型服务及必要的外部 provider；不得 mock TUI、Kernel 或 reducer 主链路。
+PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、App `RuntimeSessionCoordinator`、
+`executeRuntimeTurn()`、Runtime State/SQLite Store、RuntimeEvent reducer 和 Ink 渲染。只允许 mock
+模型服务及必要的外部 provider；不得 mock TUI、Kernel 或 reducer 主链路。
 
 ## Harness 结构
 
@@ -30,9 +34,10 @@ cacheable context、唯一 Runtime block、phase-stable V2 工具声明和 Runti
 链路证据，但仍是本地确定性 Provider，不能表述为真实模型
 A/B、release artifact 或平台资格证据。
 
-权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions` 选择器保留 Full
-能力说明并显示环境警告，默认 metadata session logging 不显示普通 mode 状态；测试同时验证 Full
-不可选择、content logging 披露没有被普通 metadata 路径误触发。
+权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions` 选择器仍保留
+Full 能力说明，Full 由 `interactionMode=full` 表达，不因受限 sandbox backend 不可用而转成旧 grant
+或隐藏；实际受限执行在 backend 不可用时 clean fail closed。默认 metadata session logging 不显示
+普通 mode 状态；测试同时验证 content logging 披露没有被普通 metadata 路径误触发。
 
 MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：列表通过“状态 + 选中行 +
 添加入口”组合确认数据已加载，详情通过操作区确认已经打开；项目审批与 OAuth 恢复分别等待
@@ -56,9 +61,15 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    持久事件等 semantic receipt 的场景预算必须分离；慢 CI 不能因输入框先清空而把后者缩短到
    delivery budget。跨进程回放场景的 test deadline 还必须覆盖独立的持久事件预算和后续 restart/
    selector replay，不得让外层测试先于其语义阶段超时。
-   Bracketed paste 必须使用 `pasteText()` 取得当前活动输入的精确回执；只有整个 PTY
-   transaction 丢失且输入仍可证明为空时才能有界重试。部分、变形或 focus 改变后的
-   delivery 必须 fail closed，不得重放并冒险重复用户内容。
+   普通单行多词模型消息与显式 paste/多行输入必须由 `pasteText()` 以单个 bracketed-paste
+   transaction 投递，并取得当前活动输入的完整等值回执。首次启动或 Session remount 后，helper 必须先
+   证明主 `InputLine` listener ready：测试 PTY 显式强制 ANSI modifier，并只接受 listener 注册后才出现的
+   反色光标 marker；不得向用户输入字段写字符来探测 readiness，choice overlay 的反色选中行也不能充当
+   readiness。marker 不可达时必须 fail closed。Bun 1.3 的 `Terminal.write()` 返回值只是同步 flush 字节数，返回 0 或部分
+   长度时剩余输入仍可能已进入内部 buffer；Bun 1.4 才报告全量 accepted length。因此 byte-count/drain
+   不能作为跨版本重放权威，bracketed-paste transaction 只能写入一次。缺少 VT/Ink 回执不能证明已接受
+   的 transaction 未到达 Ink，因而不得据此重放；变形、延迟或 focus 改变后的 delivery 同样必须
+   fail closed，不得冒险重复用户内容。
    需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自
@@ -72,7 +83,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    `one hundred` 的成功回执。该 projection 不是任意光标位置的通用编辑器状态解析器。它不能把视觉
    光标当作逻辑空格，也不能因此删除用户真实输入的 leading/trailing blank。显式换行与重复空白可以
    做等价规范化，但逻辑词边界和前导空白不能被删除：它们会把普通消息改义，
-   也会把 `/command` 变成普通文本。replacement 输入重试必须按已尝试字符确定性回滚到空基线，并
+   也会把 `/command` 变成普通文本。逐字符 replacement 输入重试必须按已尝试字符确定性回滚到空基线，并
    额外清除 VT 投影可能裁掉的 bounded whitespace；不能仅因输入投影看起来为空就停止回滚。
    `typeText()` 默认要求空输入语义：主输入或搜索框若已有残留，先恢复为空再
    输入；确实追加到合法非空输入时必须显式传入 `append: true`，例如 Shift+Enter 多行输入。追加重试
@@ -167,7 +178,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    需要证明输入或 slash command 可跨进程恢复时，当前 viewport 只证明渲染，不证明 SQLite 已提交；
    退出进程前必须同时读取隔离 Runtime Store，确认目标 event 已持久化。轮询持久化证据时必须使用
    SQLite readonly 连接和精确 event 字段查询；不得调用会设置 journal mode、执行 schema migration
-   或创建索引的生产 `createRuntimeStore()` 初始化路径，否则观察器会与被测 TUI writer 竞争。
+   或创建索引的 production SQLite storage adapter 初始化路径，否则观察器会与被测 TUI writer 竞争。
    持久化观察使用独立且有界的语义预算，不得复用短输入 delivery timeout；共享 CI 的 writer 延迟不能
    被误报为输入或 session-switch 回归，但超过该持久化预算仍必须失败。
    条件轮询一旦取得满足断言的 readonly observation，后续断言应复用该 observation；不得立即发起第二次
@@ -210,7 +221,13 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
 10. `tool_search` 在对话区按用户可理解的发现过程渲染：运行中显示 `Searching for tools…`，成功后显示 `Searched for tools`，并以 `Provider · Tool` 树列出 names-only 命中项；catalog revision 切换期间返回的 last-known names 使用同一树结构，但不得暗示已签发 Binding。只有当前结果和 last-known names 都为空时才显示 `No matching tools found`，失败使用独立状态文案。真实 MCP 调用仍是独立工具块，名称从协议形式 `mcp__provider__tool` 映射为 `provider · tool`。展示层不得从模型回答或任意参数猜测自然语言动作。
 11. 所有 scenario 必须通过 `spawnReadyTui()` 启动；普通场景使用默认 `main` readiness，
     first-run 与 workspace trust 场景分别显式选择 `first-run-provider`、`workspace-trust`。
-    仅出现标题或 prompt 不构成可交互就绪。普通场景由 harness
+    默认 `main` readiness 必须在同一稳定 frame 中同时证明品牌/model/workspace chrome、空的活动主
+    输入投影和用户实际可见的 `❯` prompt；仅出现标题、隐藏的 input listener marker 或尚未完成的
+    分帧 prompt 都不构成可交互就绪。`spawnReadyTui()` 已经拥有一次主输入 focus/readiness handshake；
+    startup journey 若要证明异步启动投影后仍可交互，必须通过 `submitCommand()` 等 action-scoped 输入回执和
+    对应的产品语义结果证明，不能要求 Windows ConPTY 在有限行 viewport 的一次重绘中继续同时保留 header 与
+    prompt，也不能再次消费该一次性 input marker。不得直接 `waitForText('❯')`，也不得让未产生 fresh output
+    的全局 quiescence 等待复用早先累积帧。普通场景由 harness
     预写 `source: 'test'` 信任记录，验证门禁本身时使用
     `createTestWorkspace({ enforceWorkspaceTrust: true })`。子进程环境采用 allowlist，只继承平台启动、
     临时目录、locale、时区和 CI 所需变量，再叠加 fixture 显式环境；不得继承开发机密钥、代理、
@@ -246,26 +263,33 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     场景应使用显式 opt-in smoke，并在运行时确认后端存在；默认 suite 只验证可人为固定的
     负向/降级路径。授权、policy 和 reducer 的完整分支必须由注入能力状态的确定性单元或
     Runtime 集成测试覆盖，不能让 GitHub runner 是否预装 `bwrap` 改变默认测试结果。若默认
-    scenario 不验证 Shell，fixture 必须显式注入 `mode=denied` 的 `AppShellExecutorV1`，并
+    scenario 不验证 Shell，fixture 必须显式注入 `mode=denied` 的 `AppShellExecutor`，并
     保持零底层命令。需要验证 Shell 审批或展示链路时，必须注入 test-owned 的完整
     sandbox preparation lifecycle/Runtime consumer 或显式 native oracle，并从真实 Tool result 校验唯一
     marker；关闭 native sandbox 只能得到 `denied`，不得恢复裸 host command。不得让
     `sandbox_apply`/`bwrap` 失败后仍靠模型固定回答通过。
     `sandbox-mode` 中 `/permissions` 无参数场景只证明开发 composition 打开 interaction mode 选择器，
-    选择器中的 Full 不可选场景只证明 sandbox 关闭时 Full 不可选；两者都不是 native sandbox、
-    release admission 或 production platform qualification 证据。
+    选择器中的 Full 可见且独立于 sandbox availability；受限 backend 不可用时只证明 clean fail-closed，
+    两者都不是 native sandbox、release admission 或 production platform qualification 证据。
+    只验证人工审批/拒绝闭环的默认 scenario 必须使用不依赖 native Shell sandbox 的确定性 scope
+    boundary（例如隔离 HOME 下、Workspace 外的 `write_file`），并显式固定 `interactionMode=accept_edits`；
+    不得用在 hosted Linux 无 backend 时会先 mandatory fail-closed 的 `shell_execute` 充当 approval fixture。
+    Planning baseline 的 unavailable 分支应以 exact
+    `tool.rejected(failure.kind=mandatory_policy_unavailable)`、目标 Tool 没有
+    `capability.invocation_recorded` 且该 turn 没有 sandbox dispatch intent 证明零执行；失败态 Bash 卡片与
+    TUI header 正常展示的 canonical Workspace identity 都只是展示事实，不是 host dispatch 证据。
     同一 scenario 的 `/release` 只证明普通开发入口显示 `artifact_disabled`，不代表 embedded
     profile、Sigstore、artifact attestation、平台制品或任一 production Gate 已通过。
-18. 远程 HTTP MCP 正文调用不得沿用旧的隐式外发前置条件。验证默认边界时使用生产 TUI
-    组合根，并断言 `remoteMcpEgressPolicyV1=false` 产生零 `tools/call` 请求；验证认证恢复、
-    失败隔离等需要成功外发的其他主题时，场景必须在同一个 Bun test 内显式开启该 flag，
-    并通过 `remoteMcpEgressPermitResolver: 'allow-each-invocation'` 选择仅测试组合根。该组合根
-    为每个 invocation 签发独立短时 permit，不得由全局 harness、环境变量或生产入口自动放行。
-    scenario contract 会拒绝只配置 flag 或只注入 permit issuer 的半配置场景。自动重试与
-    permit replay 属于 MCP policy/integration 层；不以重试为主题的 PTY 场景应配置 `retry: never`。
+18. 远程 HTTP MCP Tool 场景必须使用生产 TUI 组合根，验证 exact endpoint/network boundary、共享
+    CredentialBroker、JSON-safe bounded argument inspection 与真实 `tools/call` 结果。不得注入已删除的
+    egress flag/permit issuer，也不得用全局 harness 或环境变量绕过 transport admission。不以重试为主题的
+    PTY 场景应配置 `retry: never`。
 19. selector command（`/permissions`、`/effort`、`/theme`、`/model`）不得通过空格和二级参数
     选择值。PTY 场景以选择器标题为确认回执，在选择器关闭前不得发送下一条命令；场景不得用固定
-    sleep 修补命令提交到 Overlay mount 的 React commit 竞争。
+    sleep 修补命令提交到 Overlay mount 的 React commit 竞争。`/permissions` 确认后必须观察隔离用户
+    配置中的 `interactionMode`，重新启动真实 TUI 并证明该个人选择优先于项目初始默认；只断言当前
+    Footer 变化不能证明持久化。非 `/permissions` 的审批场景必须在 fixture 中显式固定
+    `interactionMode`，不得依赖产品默认或开发机用户配置来选择人工/自动审批路径。
 20. HTTP 429/5xx 属于模型 transient retry 场景。验证终态错误恢复时，mock 必须连续返回足够次数的
     transient failure 以耗尽 production bounded retry budget，并断言 retry UI、实际请求次数、终态错误
     与下一用户 turn 恢复；不得用一次 500 后的默认成功响应声称已经验证错误终态。只验证“不重试”时
@@ -287,12 +311,20 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     fixture 选择的角色一致（例如只读检查使用 `explore`/`review`，实现修改使用 `code`）；项目文档、
     fixture 注释或模型 canned response 不得扩大 phase、authorization、预算或角色能力 ceiling。
     多个独立 Subagent fixture 应验证同一 model response 的 sibling lifecycle 可以交错且各自保持稳定
-    ID；依赖型或写范围重叠的 fixture 仍必须串行。若多个 child 同时暂停，场景必须验证只呈现一个
-    canonical approval，其余 continuation 排队且随后恢复时不重新调用 child model。每个 durable
+    ID；依赖型或写范围重叠的 fixture 仍必须串行。若多个 child 同时暂停，场景必须验证所有请求都
+    保留在 durable approval queue，只有当前可见的 `awaiting_user` entry 拥有 Footer/ApprovalBlock，
+    其余 child 按 route、generation、sequence 排队且随后恢复时不重新调用 child model。每个 durable
     `subagent.suspended` 都必须立即停止对应 TUI block 的 spinner/计时，并通过 Runtime 后续事实区分
     “等待自动审查”“自动审查中”和“等待你的批准”；只有最后一种表示需要用户动作。该投影不得依赖
     child 当前是否拥有唯一 approval interrupt。自动或人工获批后必须先恢复当前 active continuation，
-    deferred sibling 不得插队；恢复后的 block 重新进入 running。
+    人工 Enter 的 receipt 必须同时证明目标 child 已离开“等待你的批准”、Approval overlay 已关闭，且
+    出现 canonical `authorized_queued` 或该 child 的 running successor；父 Task 卡片中预先存在的通用
+    “执行中”不能单独充当目标 approval acknowledgement。
+    sibling 不得插队；Enter 必须提交 exact interactionId/generation，且只能在 canonical release event
+    后投影 `authorized_queued`。Esc 只拒绝当前可见焦点，Ctrl+C 才取消 whole turn；旧/bridge 事件缺失
+    可匹配 identity 时必须 no-op，存在多个候选时不得猜测。迟到的 duplicate suspension/review/release
+    不得把 block 回退为等待审批；下一条 child progress/result/terminal 会结束该去重窗口。拒绝或取消不得
+    乐观清除 interrupt，必须等待 durable terminal event，避免遗漏当前 turn 的终态投影。
     当后续 tool call 必须使用前一 Tool result 中运行时生成的标识时，当前 queue slot 可以使用
     test-only `response(request)` resolver 从已记录的 Mock request 生成该 slot 的 response；resolver
     不能读取 queue cursor、未消费 response、Runtime state 或网络。它仍严格消耗一个 slot，且返回值
@@ -327,7 +359,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     耗尽后明确失败。场景不得自行用 sleep 或无回执的单次 `write('\\r')` 替代。
 28. 共享 choice overlay 的场景必须验证当前 viewport 中的完整标题、全部可见选项、默认选中项和
     footer，再发送导航或确认键。删除等破坏性确认必须覆盖安全默认项，先等待目标选中 marker 再
-    提交；Enter 选择安全默认和 Esc 都要证明持久状态未变。具有 browse/confirm 两层的 overlay
+    提交；确认删除后必须先等待 confirm overlay 确实消失，再观察 Store 删除，不能把底层仍可见的主输入
+    当作确认动作已被 Ink 接收。Enter 选择安全默认和 Esc 都要证明持久状态未变。具有 browse/confirm 两层的 overlay
     必须证明 Esc 先返回内层而不是关闭整个面板。`/rewind` 的状态化 journey 还要同时验证文件内容、
     fork 后的 Runtime Store session 数和新会话继续回退的恢复点链，不能只依赖成功提示文本。
 29. 只为观察 selector 或补全结果而调用 `typeText()` 的场景，若不提交该输入，必须在测试结束前

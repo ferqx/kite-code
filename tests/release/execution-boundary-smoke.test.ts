@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSyntheticArtifact } from '../../scripts/release/build-artifact';
 import {
-  runExecutionBoundaryArtifactSmokeV1,
-  verifyExecutionBoundarySmokeReportV1,
+  runExecutionBoundaryArtifactSmoke,
+  verifyExecutionBoundarySmokeReport,
 } from '../../scripts/release/execution-boundary-smoke';
 
 const roots: string[] = [];
@@ -16,7 +16,7 @@ afterEach(() => {
 
 function matrix(): unknown {
   return JSON.parse(
-    readFileSync('release/platform-capabilities/support-matrix-v1.json', 'utf8'),
+    readFileSync('release/platform-capabilities/support-matrix.json', 'utf8'),
   ) as unknown;
 }
 
@@ -25,7 +25,7 @@ describe('execution boundary artifact smoke', () => {
     const directory = mkdtempSync(join(tmpdir(), 'kite-execution-artifact-smoke-'));
     roots.push(directory);
     buildSyntheticArtifact({ directory });
-    const report = runExecutionBoundaryArtifactSmokeV1({
+    const report = runExecutionBoundaryArtifactSmoke({
       artifactDirectory: directory,
       supportMatrix: matrix(),
     });
@@ -35,7 +35,7 @@ describe('execution boundary artifact smoke', () => {
     expect(report.excludedTargets).toHaveLength(3);
     expect(report.excludedTargets.every(({ outcome }) => outcome === 'excluded')).toBe(true);
     expect(report.adversarialCases).toHaveLength(8);
-    expect(verifyExecutionBoundarySmokeReportV1(structuredClone(report))).toEqual(report);
+    expect(verifyExecutionBoundarySmokeReport(structuredClone(report))).toEqual(report);
   });
 
   test('rejects a matrix that silently adds production support', () => {
@@ -45,7 +45,7 @@ describe('execution boundary artifact smoke', () => {
     const widened = matrix() as { productionSupportedPlatforms: string[] };
     widened.productionSupportedPlatforms = ['ubuntu-24.04/bubblewrap'];
     expect(() =>
-      runExecutionBoundaryArtifactSmokeV1({
+      runExecutionBoundaryArtifactSmoke({
         artifactDirectory: directory,
         supportMatrix: widened,
       }),
@@ -56,12 +56,12 @@ describe('execution boundary artifact smoke', () => {
     const directory = mkdtempSync(join(tmpdir(), 'kite-execution-artifact-smoke-'));
     roots.push(directory);
     buildSyntheticArtifact({ directory });
-    const report = runExecutionBoundaryArtifactSmokeV1({
+    const report = runExecutionBoundaryArtifactSmoke({
       artifactDirectory: directory,
       supportMatrix: matrix(),
     });
     expect(() =>
-      verifyExecutionBoundarySmokeReportV1({
+      verifyExecutionBoundarySmokeReport({
         ...report,
         excludedTargets: report.excludedTargets.slice(1),
       }),

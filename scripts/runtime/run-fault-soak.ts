@@ -17,12 +17,12 @@ import {
   type OptionalMetric,
   RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS,
   RUNTIME_FAULT_SOAK_RUNNER_REVISION,
-  type RuntimeBudgetUsageEvidenceV2,
-  type RuntimeFaultSoakAttemptV2,
+  type RuntimeBudgetUsageEvidence,
+  type RuntimeFaultSoakAttempt,
   type RuntimeFaultSoakCaseId,
-  type RuntimeFaultSoakMetricEvidenceV2,
+  type RuntimeFaultSoakMetricEvidence,
   type RuntimeFaultSoakProfile,
-  type RuntimeFaultSoakSourceV2,
+  type RuntimeFaultSoakSource,
 } from './fault-soak-report';
 import { readOsProcessStartIdentity } from './process-start-identity';
 
@@ -96,17 +96,18 @@ const PROBES: readonly ProbeDefinition[] = [
       'test',
       'tests/model.test.ts',
       'tests/model-invoke.test.ts',
-      'tests/runtime/agent-deadline.test.ts',
+      'tests/model-invocation-gateway.test.ts',
       'tests/runtime/failure-mode-conformance.test.ts',
     ],
-    qualificationLifecycleFiles: ['tests/runtime/agent-deadline.test.ts'],
+    qualificationLifecycleFiles: ['tests/model-invoke.test.ts'],
     terminalEvidence: {
       model_retry_exhausted:
         /\(pass\).*model_rate_limit admits exactly one retry only while the bounded retry budget remains/,
       deadline_exceeded:
-        /\(pass\).*wakes a pending interaction wait and emits one deadline terminal/,
+        /\(pass\).*model_timeout admits exactly one retry only while the bounded retry budget remains/,
     },
-    invariantEvidence: /\(pass\).*wakes a pending interaction wait and emits one deadline terminal/,
+    invariantEvidence:
+      /\(pass\).*cancellation wins even when the provider ignores its abort signal/,
   },
   {
     id: 'mcp_churn',
@@ -182,7 +183,7 @@ interface RunnerOptions {
   seed: number;
   perCaseTimeoutMs: number;
   output?: string;
-  source: RuntimeFaultSoakSourceV2;
+  source: RuntimeFaultSoakSource;
 }
 
 function positiveInteger(value: string | undefined, name: string): number {
@@ -211,7 +212,7 @@ export function boundedFaultSoakProbeTimeoutMs(
   );
 }
 
-function parseSource(args: readonly string[]): RuntimeFaultSoakSourceV2 {
+function parseSource(args: readonly string[]): RuntimeFaultSoakSource {
   const values = {
     repository: readOption(args, '--source-repository'),
     headSha: readOption(args, '--source-head-sha'),
@@ -448,7 +449,7 @@ export interface TelemetryRecord {
   after: TelemetryRecord['before'];
 }
 
-export interface RuntimeBudgetTelemetryRecord extends RuntimeBudgetUsageEvidenceV2 {
+export interface RuntimeBudgetTelemetryRecord extends RuntimeBudgetUsageEvidence {
   version: 2;
   kind: 'runtime_budget_usage';
   pid: number;
@@ -500,7 +501,7 @@ export function runtimeBudgetUsage(
   attemptNonce: string,
   iteration: number,
   expectedSamples: number,
-): OptionalMetric<readonly RuntimeBudgetUsageEvidenceV2[]> {
+): OptionalMetric<readonly RuntimeBudgetUsageEvidence[]> {
   const candidates = records.filter(
     (record) =>
       record.caseId === caseId &&
@@ -586,7 +587,7 @@ export function runtimeBudgetUsage(
 function telemetryPair(
   records: readonly TelemetryRecord[],
   key: keyof TelemetryRecord['before'],
-): OptionalMetric<RuntimeFaultSoakMetricEvidenceV2> {
+): OptionalMetric<RuntimeFaultSoakMetricEvidence> {
   const first = records[0]?.before[key];
   const last = records.at(-1)?.after[key];
   return typeof first === 'number' && typeof last === 'number'
@@ -617,7 +618,7 @@ export function qualificationTelemetryMetric(
   records: readonly TelemetryRecord[],
   key: keyof TelemetryRecord['before'],
   options: QualificationTelemetryOptions,
-): OptionalMetric<RuntimeFaultSoakMetricEvidenceV2> {
+): OptionalMetric<RuntimeFaultSoakMetricEvidence> {
   if (!Number.isInteger(options.repeatCount) || options.repeatCount < 9) {
     return unsupported('qualification requires one warm-up and eight measured reruns');
   }
@@ -655,7 +656,7 @@ export function qualificationTelemetryMetric(
     }
   }
   const series: Extract<
-    RuntimeFaultSoakMetricEvidenceV2,
+    RuntimeFaultSoakMetricEvidence,
     { kind: 'same_process_lifecycle' }
   >['series'][number][] = [];
   for (const group of groups.values()) {
@@ -829,7 +830,7 @@ async function runProbe(
   options: RunnerOptions,
   root: string,
   processTimeoutMs: number,
-): Promise<RuntimeFaultSoakAttemptV2> {
+): Promise<RuntimeFaultSoakAttempt> {
   const probeRoot = join(root, `${String(iteration).padStart(3, '0')}-${definition.id}`);
   const telemetryFile = join(probeRoot, 'child-telemetry.jsonl');
   const worktreesBefore = registeredWorktrees();
@@ -959,7 +960,7 @@ async function runProbe(
       });
     }
     return definition.id === 'tui_lifecycle_churn'
-      ? unsupported<RuntimeFaultSoakMetricEvidenceV2>(tuiTelemetryReason)
+      ? unsupported<RuntimeFaultSoakMetricEvidence>(tuiTelemetryReason)
       : telemetryPair(telemetry.resources, key);
   };
   const terminalTaxonomyAssertions = Object.fromEntries(
@@ -1024,7 +1025,7 @@ function failedRunnerAttempt(
   definition: ProbeDefinition,
   iteration: number,
   failureCode: 'global_deadline_exhausted' | 'runner_exception',
-): RuntimeFaultSoakAttemptV2 {
+): RuntimeFaultSoakAttempt {
   const reason = `runner did not execute accepted evidence: ${failureCode}`;
   return {
     caseId: definition.id,
@@ -1057,7 +1058,7 @@ export async function runRuntimeFaultSoak(
   const root = mkdtempSync(join(tmpdir(), 'kite-runtime-fault-soak-'));
   const startedAt = new Date().toISOString();
   const hardDeadlineAt = Date.now() + options.iterations * PROBES.length * options.perCaseTimeoutMs;
-  const attempts: RuntimeFaultSoakAttemptV2[] = [];
+  const attempts: RuntimeFaultSoakAttempt[] = [];
   try {
     for (let iteration = 1; iteration <= options.iterations; iteration++) {
       for (const definition of rotatedProbes(options.seed, iteration)) {

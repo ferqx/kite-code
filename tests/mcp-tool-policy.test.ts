@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { resolve } from 'node:path';
+import { createCapabilityBinding } from '@kite/builtin-runtime';
+import {
+  isMcpToolEnabled,
+  McpConnectionManager,
+  type McpServerConfig,
+  resolveMcpToolPolicy,
+} from '@kite/builtin-runtime/mcp';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
-import { createBinding } from '@/core/capabilities/catalog';
-import { isMcpToolEnabled, type McpServerConfig, resolveMcpToolPolicy } from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
 
 describe('MCP Tool visibility and policy', () => {
   const managers: McpConnectionManager[] = [];
@@ -152,9 +157,11 @@ describe('MCP Tool visibility and policy', () => {
     });
     const beforeSnapshot = manager.getCapabilitySnapshot();
     const before = manager.findCapability('mcp:fixture/read')!;
-    const binding = createBinding({
-      descriptor: before,
+    const binding = createCapabilityBinding({
+      capabilityId: before.capabilityId,
+      capabilityRevision: before.revision,
       exposedToolName: 'mcp__fixture__read',
+      inputSchema: before.inputSchema ?? {},
       turnId: 'turn-1',
     });
 
@@ -200,5 +207,13 @@ function managerWithTools(
   return new McpConnectionManager({
     createClient: () => client,
     createTransport: () => ({}) as never,
+    protectedPathEvaluator: {
+      workspaceRoot: process.cwd(),
+      evaluate: ({ path }) => ({
+        outcome: 'allow',
+        reason: 'explicit_test_fixture',
+        canonicalPath: resolve(path),
+      }),
+    },
   });
 }

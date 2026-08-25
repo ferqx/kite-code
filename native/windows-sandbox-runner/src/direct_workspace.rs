@@ -3,9 +3,9 @@
 //! The direct backend deliberately keeps its Workspace capability ACL across
 //! invocations: removing and re-adding an inheritable root ACE per command is
 //! slow and is unsafe when commands overlap or the runner crashes.  A small
-//! user-owned ledger records the random capability SID and every protected-path
-//! DACL snapshot before it is changed, so a later explicit repair can restore
-//! the original ACLs without guessing.
+//! user-owned ledger records the random capability SID. V3 also restores and
+//! removes legacy protected-path DACL snapshots because the canonical Workspace
+//! is now one wholly admitted identity.
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -25,8 +25,7 @@ use crate::protocol::FilesystemScope;
 use crate::restricted_token::CapabilitySid;
 use crate::sha256_hex;
 
-const LEGACY_LEDGER_VERSION: u32 = 1;
-const LEDGER_VERSION: u32 = 2;
+const LEDGER_VERSION: u32 = 3;
 const MUTEX_WAIT_MS: u32 = 30_000;
 const STATE_DIR_ENV: &str = "KITE_WINDOWS_RESTRICTED_TOKEN_STATE_DIR";
 
@@ -216,17 +215,16 @@ pub fn prepare_direct_workspace(
 
         // An approved-network invocation runs under the interactive user's
         // primary token so Schannel can access that user's credential store.
-        // That token cannot carry the synthetic guard SID, so writing a guard
-        // ACE would neither constrain the child nor be safe as a filesystem
-        // boundary. Skip the lease entirely instead of rewriting every
-        // protected profile path for no effect.
+        // That token cannot carry the compatibility restricted SID. Tool Policy
+        // already owns sensitive-path authorization and supplies no protected
+        // paths, so skip the obsolete lease path entirely.
         if matches!(filesystem_scope, FilesystemScope::FullAccess)
             && enforce_approved_filesystem_guard
         {
             let guard_sid = approved_filesystem_guard_sid.ok_or_else(|| {
                 error(
                     "restricted_token_protected_guard_invalid",
-                    "full_access requires an invocation protected-path guard SID",
+                    "full_access requires the protocol compatibility SID",
                 )
             })?;
             let guard = CapabilitySid::parse(guard_sid).map_err(|source| {
@@ -276,8 +274,8 @@ pub fn prepare_direct_workspace(
 
 /// Explicit repair/uninstall primitive.  It is intentionally not run as an
 /// ordinary command cleanup because persistent ACLs are the normal direct
-/// backend state.  Recovery restores protected-path snapshots before removing
-/// the Workspace root capability ACE and ledger.
+/// backend state. Recovery restores any legacy protected-path snapshots before
+/// removing the Workspace root capability ACE and ledger.
 pub fn repair_persistent_workspace_capability(workspace_root: &str) -> Result<bool> {
     let workspace_root = canonical_directory(workspace_root, "workspace")?;
     with_workspace_lock(&workspace_root, || {
@@ -354,7 +352,13 @@ fn ensure_persistent_workspace_capability(
             ledger
         };
         let setup_matches = ledger_setup_matches(&ledger, &paths_digest);
-        if !setup_matches {
+        let capability = CapabilitySid::parse(&ledger.capability_sid)
+            .map_err(|source| error("restricted_token_ledger_invalid", source.to_string()))?;
+        let obsolete_snapshots = ledger
+            .protected_dacl_snapshots
+            .iter()
+            .any(|stored| !existing_paths.iter().any(|path| path_equal(path, &stored.path)));
+        if !setup_matches || obsolete_snapshots {
             // Persist an incomplete marker before any ACL mutation. A crash leaves
             // the next invocation with an unambiguous instruction to revalidate
             // and finish setup under the same per-Workspace mutex.
@@ -364,8 +368,45 @@ fn ensure_persistent_workspace_capability(
             write_ledger(&path, &ledger)?;
         }
 
-        let capability = CapabilitySid::parse(&ledger.capability_sid)
-            .map_err(|source| error("restricted_token_ledger_invalid", source.to_string()))?;
+        if obsolete_snapshots {
+            for stored in ledger.protected_dacl_snapshots.iter().rev() {
+                if existing_paths
+                    .iter()
+                    .any(|desired| path_equal(desired, &stored.path))
+                {
+                    continue;
+                }
+                if !is_workspace_member_path(workspace_root, &stored.path) {
+                    return Err(error(
+                        "restricted_token_ledger_invalid",
+                        "stored protected path is outside the Workspace",
+                    ));
+                }
+                if Path::new(&stored.path).exists() {
+                    let deny_present = acl::has_ace_for_sid(
+                        &stored.path,
+                        capability.as_psid(),
+                        acl::ACCESS_DENIED_ACE_TYPE,
+                    )
+                    .map_err(|source| {
+                        error("restricted_token_acl_repair_failed", source.to_string())
+                    })?;
+                    if deny_present {
+                        let snapshot = decode_snapshot(stored)?;
+                        acl::restore_dacl_snapshot(&snapshot).map_err(|source| {
+                            error("restricted_token_acl_repair_failed", source.to_string())
+                        })?;
+                    }
+                }
+            }
+            ledger.protected_dacl_snapshots.retain(|stored| {
+                existing_paths
+                    .iter()
+                    .any(|desired| path_equal(desired, &stored.path))
+            });
+            write_ledger(&path, &ledger)?;
+        }
+
         let workspace_grant_present = acl::has_ace_for_sid(
             workspace_root,
             capability.as_psid(),
@@ -526,7 +567,7 @@ fn store_root() -> Result<PathBuf> {
     Ok(PathBuf::from(base)
         .join("Kite Code")
         .join("sandbox")
-        .join("restricted-token-v1"))
+        .join("restricted-token"))
 }
 
 fn ledger_path(workspace_root: &str) -> Result<PathBuf> {
@@ -539,12 +580,12 @@ fn load_ledger(path: &Path, workspace_root: &str) -> Result<WorkspaceCapabilityL
         .map_err(|source| error("restricted_token_ledger_read_failed", source.to_string()))?;
     let ledger: WorkspaceCapabilityLedger = serde_json::from_str(&text)
         .map_err(|source| error("restricted_token_ledger_invalid", source.to_string()))?;
-    if ![LEGACY_LEDGER_VERSION, LEDGER_VERSION].contains(&ledger.version)
+    if !matches!(ledger.version, 2 | LEDGER_VERSION)
         || !path_equal(&ledger.workspace_root, workspace_root)
     {
         return Err(error(
             "restricted_token_ledger_invalid",
-            "ledger version or Workspace identity does not match",
+            "ledger version is not migratable or Workspace identity does not match",
         ));
     }
     Ok(ledger)
@@ -716,7 +757,7 @@ mod tests {
         ledger.setup_complete = false;
         assert!(!ledger_setup_matches(&ledger, &digest));
         ledger.setup_complete = true;
-        ledger.version = LEGACY_LEDGER_VERSION;
+        ledger.version = 2;
         assert!(!ledger_setup_matches(&ledger, &digest));
         ledger.version = LEDGER_VERSION;
         assert!(!ledger_setup_matches(&ledger, "different"));

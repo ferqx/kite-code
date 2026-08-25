@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 `OverlayFrame`、通用 Overlay primitive、MCP 管理页、会话/模型/恢复点选择器、帮助/命令建议、审批、问答或方案审核表面时。
 验证：`bun test tests/overlay-frame.test.tsx tests/tui-overlay-choice-list.test.tsx tests/tui-slash-suggestion-overlay.test.tsx tests/tui-checkpoint-selector.test.tsx tests/mcp-panel.test.tsx tests/tui-layout.test.tsx`、`bun run typecheck`、相关 TUI PTY scenario。
-相关：[`../space/plans/2026-08-04-tui-overlay-design-system.md`](../space/plans/2026-08-04-tui-overlay-design-system.md)、`src/app/tui/components/OverlayFrame.tsx`、`src/app/tui/components/OverlayPrimitives.tsx`。
+相关：[`../space/plans/2026-08-04-tui-overlay-design-system.md`](../space/plans/2026-08-04-tui-overlay-design-system.md)、`apps/kite/src/tui/components/OverlayFrame.tsx`、`apps/kite/src/tui/components/OverlayPrimitives.tsx`。
 
 ## 区域 contract
 
@@ -34,6 +34,8 @@
 
 问答、审批和确认页遵循相同边界：问题/上下文、分隔线或 warning callout 与后续选项之间保留一个空白行；连续 callout 之间也保留一个空白行。带显式字段标题的文本输入在标题与输入行之间保留一个空白行，输入值与其辅助说明仍属于同一字段组。`ask_user` 只有一个问题时采用紧凑单题布局：问题文本并入 Overlay 标题，不显示多步进度条，也不在正文重复问题；包含多个问题时，当前问题标题位于左侧，当前步骤计数通过 Overlay 的右侧 meta 区域显示为 `n / total`；标题仅显示当前问题正文，不显示测试用的“多问题测试 N：”前缀，同样不显示额外步骤条或正文重复问题；推荐项仅显示一个 `（推荐）` 标记，即使历史或外部选项标签本身已经带有该后缀；选择“其他（自定义输入）”时，上下键移动到该选项行即在原列表中直接显示输入框，其他选项仍保持可见，回车只提交输入内容；已完成回答的 ask_user 交互在重新进入会话时不得再次弹出；历史工具卡把 `ask_user` 显示为“询问用户”：单题标题只展示一次问题，明细为 `User: 回答`，不得泄露内部生成键（如 `q1:`）或仅供选择时使用的 `（推荐）` 标记；多题标题为“已回答 N 项”，各 `问题: 回答` 同级明细只保留首行 `└─`；审批、方案审核和 MCP provider recovery/admission 等其他用户交互也必须依据对应的终态事件清除恢复中的浮层。
 
+审批 Overlay 只绑定 durable queue 的当前 `activeApprovalId`，后台 `pendingApprovals` 不等于当前可见焦点；Input 或 Plan review 位于前台时，排队审批不能接管 Footer 或快捷键。Enter 和 Esc 必须携带当前记录的 exact `interactionId` 与 `generation`，前者提交 `approve_once` 或 `same_command`，后者只拒绝当前聚焦审批；迟到或重复 action 为 no-op。清除 Session grants 的 canonical event 必须先把恢复的 `same_command` 记录与其他仍可交互记录投影到新 generation，再重新选择 Overlay 焦点，不能让卡片继续提交旧 generation。Ctrl+C 始终取消整轮，包括 queued、awaiting、authorized 和 running siblings，不能退化为 focused reject。`queued_auto` 与 `auto_reviewing` 只投影自动审查状态，不显示人工审批 Overlay；`approval.batch_released` 已匹配并获得 receipt 的 auto record 保持 `authorized_queued`，即使同一 id 也出现在 reviewer 取消列表中，只有未匹配且未运行的 auto review 才投影 cancelled。只有 canonical granted、batch released 或 rejected 事件可确认终态，展示层不得本地猜测 acknowledgement。
+
 动作涉及删除、禁用、重连、认证、配置写入、权限批准或状态恢复时，当前选项下方必须动态显示边界说明，
 文案优先使用“将……”说明直接结果，再用“不会…… / …会保留 / 可恢复”界定影响边界；普通导航、查看
 和无副作用选择不显示提示。文案在紧凑 action 列表中优先使用 `OverlayChoiceList` 的 `description`
@@ -41,7 +43,7 @@
 
 ## 页面与状态边界
 
-List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime/Core 事实仍由各 Overlay 宿主拥有。
+List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime facts 仍由各 Overlay 宿主拥有。
 
 模型选择器以 `provider + model name` 作为选项 identity 和当前项判定，而不是只使用 model
 name；每个 provider 都占独立的加粗 accent 色标题行，并与 model name 文本列对齐；标题与首项紧邻，不同分组之间固定保留一行间距，标题下的选项只展示 model name，
@@ -55,8 +57,10 @@ name；每个 provider 都占独立的加粗 accent 色标题行，并与 model 
 同一单一交互边界：打开后必须隐藏输入提示、Footer 状态栏和输入中的 slash suggestion Overlay，避免
 同时出现多个交互表面。`/permissions`、`/effort`、`/theme`、`/language` 不接受选择参数；直接确认命令后分别打开
 选择器，只有在 Overlay 中确认选项才会改变值。权限选择器显示当前 mode，并在确认选项后才更新
-interaction mode；当前 sandbox backend 不支持 `full` 时该项保持可见但不可选择，并显示原因。Windows 的 restricted-token backend 在 development 构建中支持 `full`，因此帮助和权限选择器必须将 `accept_edits/auto/full` 作为可用模式显示；production 构建仍遵从平台能力门禁。`/language` 使用用户级 `language` 偏好，确认后立即切换当前 TUI 的文案；其选项和通用快捷键说明必须从当前 locale 的 catalog 读取。
+interaction mode；`full` 是唯一的 unrestricted interaction authority，不依赖 restricted sandbox backend 是否可用，也不得显示旧 `full_access` grant 警告或降级为其他 mode。受限模式仍必须在 backend 不可兑现其 scope 时 fail closed。`/permissions` 同时显示当前 Session 的 `same_command` grant 数量，并通过 canonical `approval.session_grants_cleared` 清除；清除不得改变 interaction mode，且 session/revision/generation 不匹配的迟到投影必须 no-op。`/language` 使用用户级 `language` 偏好，确认后立即切换当前 TUI 的文案；其选项和通用快捷键说明必须从当前 locale 的 catalog 读取。
 
 MCP Overlay 的纯视图位于 `McpViews.tsx`，宿主 `McpOverlay.tsx` 保留订阅、路由、键盘和 controller 编排。Server 列表固定采用“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加动作 → 分隔后的快捷键”顺序；工具列表使用“工具数量 / Server 名称”摘要，摘要与首项之间保留一行，所有编号共享同一文本起始列；详情固定先展示状态、传输方式、能力和配置位置，再展示操作区及当前副作用提示；普通连接动作与禁用/移除组之间留一行。破坏性确认使用 warning callout，并默认选择“取消”。布局迁移不得改变 config revision、审批 digest、认证 flow、credential cleanup、catalog binding 或后台连接语义。
 
 First-run/setup wizard 继续使用独立 `FirstRunShell`，不属于本 contract。
+
+主提示词输入框在首次 Ink effect flush 注册 `useInput` handler 后必须立即可编辑；注册完成前不得显示假焦点，也不得使用 `setTimeout`、固定延时或后台初始化完成作为 focus 门禁。启动期间的终端回显抑制由 TUI composition root 在 Ink 初始化前负责；`InputLine` 随后只根据当前 modal Overlay 和终端 DEC focus report 暂停输入。

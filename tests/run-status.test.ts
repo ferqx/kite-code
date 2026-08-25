@@ -1,20 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import type { Action } from '../src/app/tui/App';
+import type { Action } from '../apps/kite/src/tui/App';
 import {
   createInitialState,
   eventReducer,
   shouldDisablePromptInput,
   shouldShowRunStatus,
-} from '../src/app/tui/App';
-import { formatElapsed, formatToolResultForDisplay } from '../src/app/tui/components/render-utils';
-import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
-import type { RunStatusTone } from '../src/app/tui/run-status';
+} from '../apps/kite/src/tui/App';
+import {
+  formatElapsed,
+  formatToolResultForDisplay,
+} from '../apps/kite/src/tui/components/render-utils';
+import { handleEventAction, type RenderEvent } from '../apps/kite/src/tui/reducers/handleEvent';
+import type { RunStatusTone } from '../apps/kite/src/tui/run-status';
 import {
   deriveRunStatusSnapshot,
   formatRunStatusLine,
   phaseBaseTone,
-} from '../src/app/tui/run-status';
-import type { OutputBlock, TuiState } from '../src/app/tui/types';
+} from '../apps/kite/src/tui/run-status';
+import type { OutputBlock, TuiState } from '../apps/kite/src/tui/types';
 
 type LegacyRenderAction = { type: 'EVENT'; event: RenderEvent };
 type TestAction = Action | LegacyRenderAction;
@@ -32,7 +35,10 @@ function toolCall(
 ): LegacyRenderAction {
   return {
     type: 'EVENT',
-    event: { type: 'tool_call', data: { call_id: callId, name, args, status } },
+    event: {
+      type: 'tool_call',
+      data: { call_id: callId, name, args, status: status ?? 'running' },
+    },
   };
 }
 
@@ -233,7 +239,7 @@ describe('verb within working phase', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, {
       type: 'EVENT',
-      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'explore', task: 'scan UI' } },
+      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'explore', name: 'scan UI' } },
     });
 
     const snap = deriveRunStatusSnapshot(state);
@@ -244,13 +250,15 @@ describe('verb within working phase', () => {
 
   test.each([
     ['queued', 'Review queued', 'primary'],
+    ['queued_auto_review', 'Review queued', 'primary'],
+    ['queued_user_approval', 'Review queued', 'primary'],
     ['auto_reviewing', 'Auto-reviewing', 'primary'],
     ['awaiting_user', 'Awaiting approval', 'warning'],
   ] as const)('shows %s child approval state without implying every child needs a user', (approvalState, verb, tone) => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, {
       type: 'EVENT',
-      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'review', task: 'review' } },
+      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'review', name: 'review' } },
     });
     state = {
       ...state,
@@ -537,7 +545,12 @@ describe('tool_progress liveOutput', () => {
       type: 'EVENT',
       event: {
         type: 'tool_call',
-        data: { call_id: callId, name: 'shell_execute', args: { command: 'echo hello' } },
+        data: {
+          call_id: callId,
+          name: 'shell_execute',
+          args: { command: 'echo hello' },
+          status: 'running',
+        },
       } satisfies RenderEvent,
     });
 

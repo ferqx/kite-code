@@ -1,13 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import {
-  ProviderReadinessCoordinatorV1,
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
+import {
+  ProviderReadinessCoordinator,
   ProviderReadinessUnknownError,
-} from '@/core/execution/tool-pipeline';
-import type { McpRuntimeProvider } from '@/core/mcp';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+} from '#app/bootstrap/runtime/provider-readiness';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = () => {};
@@ -55,7 +58,8 @@ function persistenceHarness(input?: { reject?: (event: RuntimeEvent) => boolean 
   getState: () => Readonly<RuntimeState>;
   persistEvent: (event: RuntimeEvent) => Promise<boolean>;
 } {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'provider-readiness',
     userId: 'user',
     workspace: '/workspace',
@@ -80,7 +84,7 @@ const request = {
   toolCallId: 'tool-1',
 } as const;
 
-describe('ProviderReadinessCoordinatorV1', () => {
+describe('ProviderReadinessCoordinator', () => {
   test('performs zero provider calls when the intent acknowledgement fails', async () => {
     let calls = 0;
     const provider = providerFixture({
@@ -91,7 +95,7 @@ describe('ProviderReadinessCoordinatorV1', () => {
     const persistence = persistenceHarness({
       reject: (event) => event.type === 'provider.readiness_intent_recorded',
     });
-    const coordinator = new ProviderReadinessCoordinatorV1(provider);
+    const coordinator = new ProviderReadinessCoordinator(provider);
 
     await expect(coordinator.ensureReady(request, persistence)).rejects.toMatchObject({
       code: 'PROVIDER_READINESS_PERSISTENCE_UNAVAILABLE',
@@ -111,7 +115,7 @@ describe('ProviderReadinessCoordinatorV1', () => {
       },
     });
     const persistence = persistenceHarness();
-    const coordinator = new ProviderReadinessCoordinatorV1(provider);
+    const coordinator = new ProviderReadinessCoordinator(provider);
 
     const first = coordinator.ensureReady(request, persistence);
     const second = coordinator.ensureReady({ ...request, toolCallId: 'tool-2' }, persistence);
@@ -139,7 +143,7 @@ describe('ProviderReadinessCoordinatorV1', () => {
     const persistence = persistenceHarness({
       reject: (event) => event.type === 'provider.readiness_succeeded',
     });
-    const firstCoordinator = new ProviderReadinessCoordinatorV1(provider);
+    const firstCoordinator = new ProviderReadinessCoordinator(provider);
 
     await expect(firstCoordinator.ensureReady(request, persistence)).rejects.toBeInstanceOf(
       ProviderReadinessUnknownError,
@@ -149,7 +153,7 @@ describe('ProviderReadinessCoordinatorV1', () => {
       'attempted',
     );
 
-    const restoredCoordinator = new ProviderReadinessCoordinatorV1(provider);
+    const restoredCoordinator = new ProviderReadinessCoordinator(provider);
     await expect(restoredCoordinator.ensureReady(request, persistence)).rejects.toBeInstanceOf(
       ProviderReadinessUnknownError,
     );
@@ -166,7 +170,7 @@ describe('ProviderReadinessCoordinatorV1', () => {
       },
     });
     const persistence = persistenceHarness();
-    const coordinator = new ProviderReadinessCoordinatorV1(provider, {
+    const coordinator = new ProviderReadinessCoordinator(provider, {
       now: () => now,
       ttlMs: 500,
     });
@@ -187,8 +191,8 @@ describe('ProviderReadinessCoordinatorV1', () => {
 
   test('keeps Provider readiness out of Controller and discovery paths', () => {
     for (const relativePath of [
-      '../../src/core/controllers/tool-controller.ts',
-      '../../src/core/tools/registry/builtins/tool-search.ts',
+      '../../apps/kite/src/runtime/tool-execution/router.ts',
+      '../../packages/builtin-runtime/src/tool-search.ts',
     ]) {
       const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
       expect(source).not.toContain('.ensureProviderReady');

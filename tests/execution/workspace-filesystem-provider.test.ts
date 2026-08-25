@@ -12,31 +12,29 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
-  LocalWorkspaceFilesystemProviderV1,
-  WorkspaceFilesystemGrantAuthorityV1,
-  workspaceFilesystemTargetEvidenceV1,
-} from '@/core/execution/workspace-filesystem';
-import {
-  workspaceFilesystemMutationReadyDigestV1,
-  workspaceFilesystemProtectedBoundaryDigestV1,
-} from '@/core/execution/workspace-filesystem/grant-authority';
-import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+  LocalWorkspaceFilesystemProvider,
+  WorkspaceFilesystemGrantAuthority,
+  workspaceFilesystemMutationReadyDigest,
+  workspaceFilesystemProtectedBoundaryDigest,
+  workspaceFilesystemTargetEvidence,
+} from '@kite/builtin-runtime/filesystem';
+import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import type {
-  FilesystemObserveGrantV1,
-  WorkspaceFilesystemGrantBindingV1,
-  WorkspaceFilesystemMutationOperationV1,
-  WorkspaceFilesystemObserveOperationV1,
-  WorkspaceFilesystemProtectedBoundaryV1,
-  WorkspaceFilesystemProviderFailureCodeV1,
-  WorkspaceFilesystemProviderResultV1,
-} from '@/protocol/workspace-filesystem-provider';
-import { ScriptableFakeWorkspaceFilesystemProviderV1 } from '../helpers/workspace-filesystem-provider';
+  FilesystemObserveGrant,
+  WorkspaceFilesystemGrantBinding,
+  WorkspaceFilesystemMutationOperation,
+  WorkspaceFilesystemObserveOperation,
+  WorkspaceFilesystemProtectedBoundary,
+  WorkspaceFilesystemProviderFailureCode,
+  WorkspaceFilesystemProviderResult,
+} from '@kite/runtime-spi';
+import { ScriptableFakeWorkspaceFilesystemProvider } from '../helpers/workspace-filesystem-provider';
 
 const workspaces: string[] = [];
 const PREIMAGE_ARTIFACT = Object.freeze({
   artifactId: `pa_${'a'.repeat(64)}`,
   kind: 'filesystem_preimage' as const,
-  integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+  integrityIdentifier: `sha256:${'b'.repeat(64)}`,
   byteLength: 42,
 });
 
@@ -44,7 +42,7 @@ afterEach(() => {
   for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true });
 });
 
-describe('WorkspaceFilesystemProviderV1 contract', () => {
+describe('WorkspaceFilesystemProvider contract', () => {
   test('observe preserves bounded read and search semantics with durable target evidence', async () => {
     const harness = createHarness();
     mkdirSync(join(harness.workspace, 'src'));
@@ -64,7 +62,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     expect(read.observation.rawContent).toBe('first\nneedle\nthird\n');
     expect(read.observation.totalLines).toBe(3);
     expect(read.observation.targetEvidence).toEqual(
-      workspaceFilesystemTargetEvidenceV1(read.observation.target),
+      workspaceFilesystemTargetEvidence(read.observation.target),
     );
     expect(Object.isFrozen(read.observation.targetEvidence)).toBe(true);
 
@@ -205,7 +203,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
       'approvalSummary',
     ] as const;
     for (const field of bindingFields) {
-      const fake = new ScriptableFakeWorkspaceFilesystemProviderV1(harness.authority.verifier());
+      const fake = new ScriptableFakeWorkspaceFilesystemProvider(harness.authority.verifier());
       const tampered = { ...structuredClone(original), [field]: `${original[field]}-tampered` };
       expectFailure(await fake.observe({ grant: tampered }), 'invalid_grant');
       expect(fake.calls()).toEqual({ observe: 0, prepareMutation: 0, commitMutation: 0 });
@@ -217,9 +215,9 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
       protectedBoundary: harness.protectedBoundary,
       ttlMs: 100,
     });
-    const confused = new ScriptableFakeWorkspaceFilesystemProviderV1(harness.authority.verifier());
+    const confused = new ScriptableFakeWorkspaceFilesystemProvider(harness.authority.verifier());
     expectFailure(
-      await confused.observe({ grant: prepare as unknown as FilesystemObserveGrantV1 }),
+      await confused.observe({ grant: prepare as unknown as FilesystemObserveGrant }),
       'invalid_grant',
     );
     expect(confused.calls().observe).toBe(0);
@@ -228,7 +226,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
       harness,
       observeOperation({ kind: 'search_files', path: '.', pattern: '*' }),
     );
-    const tamperedBoundary = new ScriptableFakeWorkspaceFilesystemProviderV1(
+    const tamperedBoundary = new ScriptableFakeWorkspaceFilesystemProvider(
       harness.authority.verifier(),
     );
     expectFailure(
@@ -245,7 +243,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     );
     expect(tamperedBoundary.calls().observe).toBe(0);
 
-    const tamperedPrepare = new ScriptableFakeWorkspaceFilesystemProviderV1(
+    const tamperedPrepare = new ScriptableFakeWorkspaceFilesystemProvider(
       harness.authority.verifier(),
     );
     expectFailure(
@@ -258,9 +256,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
 
     const prepared = await prepareMutation(harness, prepare.operation);
     const commitGrant = issueCommitGrant(harness, prepare.operation, prepared, 100);
-    const fakeCommit = new ScriptableFakeWorkspaceFilesystemProviderV1(
-      harness.authority.verifier(),
-    );
+    const fakeCommit = new ScriptableFakeWorkspaceFilesystemProvider(harness.authority.verifier());
     expectFailure(
       await fakeCommit.commitMutation({
         grant: { ...structuredClone(commitGrant), approvalSummary: 'different-approval' },
@@ -274,7 +270,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     expect(fakeCommit.calls().commitMutation).toBe(1);
 
     harness.setNow(1_100);
-    const expired = new ScriptableFakeWorkspaceFilesystemProviderV1(harness.authority.verifier());
+    const expired = new ScriptableFakeWorkspaceFilesystemProvider(harness.authority.verifier());
     expectFailure(await expired.observe({ grant: original }), 'expired_grant');
     expect(expired.calls().observe).toBe(0);
   });
@@ -482,7 +478,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
       protectedBoundary: harness.protectedBoundary,
       ttlMs: 1_000,
     });
-    const fake = new ScriptableFakeWorkspaceFilesystemProviderV1(harness.authority.verifier());
+    const fake = new ScriptableFakeWorkspaceFilesystemProvider(harness.authority.verifier());
     const controller = new AbortController();
     controller.abort();
     expectFailure(await fake.observe({ grant, signal: controller.signal }), 'cancelled');
@@ -538,7 +534,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
       },
     ];
     for (const tampered of mutations) {
-      const fake = new ScriptableFakeWorkspaceFilesystemProviderV1(harness.authority.verifier());
+      const fake = new ScriptableFakeWorkspaceFilesystemProvider(harness.authority.verifier());
       expectFailure(await fake.commitMutation({ grant: tampered }), 'invalid_grant');
       expect(fake.calls().commitMutation).toBe(0);
     }
@@ -569,23 +565,22 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
 
 function createHarness(): {
   workspace: string;
-  binding: WorkspaceFilesystemGrantBindingV1;
-  protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1;
-  authority: WorkspaceFilesystemGrantAuthorityV1;
-  local: LocalWorkspaceFilesystemProviderV1;
+  binding: WorkspaceFilesystemGrantBinding;
+  protectedBoundary: WorkspaceFilesystemProtectedBoundary;
+  authority: WorkspaceFilesystemGrantAuthority;
+  local: LocalWorkspaceFilesystemProvider;
   setNow(value: number): void;
 } {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-workspace-provider-'));
   workspaces.push(workspace);
   let now = 1_000;
   let id = 0;
-  const authority = new WorkspaceFilesystemGrantAuthorityV1({
-    integrityKey: new Uint8Array(32).fill(7),
+  const authority = new WorkspaceFilesystemGrantAuthority({
     now: () => now,
     idSource: () => `grant-${++id}`,
   });
   const protectedBoundary = createProtectedBoundary(workspace);
-  const binding: WorkspaceFilesystemGrantBindingV1 = {
+  const binding: WorkspaceFilesystemGrantBinding = {
     threadId: 'thread-1',
     turnId: 'turn-1',
     toolCallId: 'tool-call-1',
@@ -604,7 +599,7 @@ function createHarness(): {
     binding,
     protectedBoundary,
     authority,
-    local: new LocalWorkspaceFilesystemProviderV1(authority.verifier()),
+    local: new LocalWorkspaceFilesystemProvider(authority.verifier()),
     setNow: (value) => {
       now = value;
     },
@@ -612,20 +607,20 @@ function createHarness(): {
 }
 
 function observeOperation(
-  operation: WithoutPathScope<WorkspaceFilesystemObserveOperationV1>,
-): WorkspaceFilesystemObserveOperationV1 {
-  return { ...operation, pathScope: 'workspace_only' } as WorkspaceFilesystemObserveOperationV1;
+  operation: WithoutPathScope<WorkspaceFilesystemObserveOperation>,
+): WorkspaceFilesystemObserveOperation {
+  return { ...operation, pathScope: 'workspace_only' } as WorkspaceFilesystemObserveOperation;
 }
 
 function mutationOperation(
-  operation: WithoutPathScope<WorkspaceFilesystemMutationOperationV1>,
-): WorkspaceFilesystemMutationOperationV1 {
-  return { ...operation, pathScope: 'workspace_only' } as WorkspaceFilesystemMutationOperationV1;
+  operation: WithoutPathScope<WorkspaceFilesystemMutationOperation>,
+): WorkspaceFilesystemMutationOperation {
+  return { ...operation, pathScope: 'workspace_only' } as WorkspaceFilesystemMutationOperation;
 }
 
 async function prepareMutation(
   harness: ReturnType<typeof createHarness>,
-  operation: WorkspaceFilesystemMutationOperationV1,
+  operation: WorkspaceFilesystemMutationOperation,
 ) {
   const result = await harness.local.prepareMutation({
     grant: harness.authority.issuePrepareGrant({
@@ -641,7 +636,7 @@ async function prepareMutation(
 
 async function commitPrepared(
   harness: ReturnType<typeof createHarness>,
-  operation: WorkspaceFilesystemMutationOperationV1,
+  operation: WorkspaceFilesystemMutationOperation,
 ) {
   const prepared = await prepareMutation(harness, operation);
   return harness.local.commitMutation({
@@ -651,7 +646,7 @@ async function commitPrepared(
 
 function issueCommitGrant(
   harness: ReturnType<typeof createHarness>,
-  operation: WorkspaceFilesystemMutationOperationV1,
+  operation: WorkspaceFilesystemMutationOperation,
   prepared: Awaited<ReturnType<typeof prepareMutation>>,
   ttlMs = 1_000,
 ) {
@@ -667,7 +662,7 @@ function issueCommitGrant(
   };
   const ready = {
     ...unsigned,
-    readyDigest: workspaceFilesystemMutationReadyDigestV1(unsigned),
+    readyDigest: workspaceFilesystemMutationReadyDigest(unsigned),
   };
   const authorization = harness.authority.acknowledgeMutationReady({
     binding: harness.binding,
@@ -681,7 +676,7 @@ function issueCommitGrant(
 
 function issueSearchGrant(
   harness: ReturnType<typeof createHarness>,
-  operation: WorkspaceFilesystemObserveOperationV1,
+  operation: WorkspaceFilesystemObserveOperation,
   policy: {
     additionalDeniedPaths?: readonly string[];
     allowedPaths?: readonly string[];
@@ -708,8 +703,8 @@ function createProtectedBoundary(
     additionalDeniedPaths?: readonly string[];
     allowedPaths?: readonly string[];
   } = {},
-): WorkspaceFilesystemProtectedBoundaryV1 {
-  const projection = createProtectedPathEvaluatorV1({
+): WorkspaceFilesystemProtectedBoundary {
+  const projection = createProtectedPathEvaluator({
     workspaceRoot: workspace,
     mode: 'deny',
     ...policy,
@@ -720,13 +715,13 @@ function createProtectedBoundary(
   };
   return {
     ...unsigned,
-    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsigned),
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigest(unsigned),
   };
 }
 
 function expectFailure(
-  result: WorkspaceFilesystemProviderResultV1<unknown>,
-  code: WorkspaceFilesystemProviderFailureCodeV1,
+  result: WorkspaceFilesystemProviderResult<unknown>,
+  code: WorkspaceFilesystemProviderFailureCode,
 ): void {
   expect(result.ok).toBe(false);
   if (result.ok) throw new Error('expected Provider failure');

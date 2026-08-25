@@ -2,18 +2,20 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentConfig } from '@/core/config';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
-import { buildContextProjection } from '@/core/model/context-projection';
 import {
+  buildContextProjection,
+  countTokens,
   formatProjectInstructionSnapshot,
   MAX_PROJECT_INSTRUCTION_TOKENS,
   resolveProjectInstructionSnapshot,
-} from '@/core/model/project-instructions';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { countTokens } from '@/core/token-counter';
-import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+} from '@kite/builtin-runtime/model';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { AgentConfig } from '#app/config';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import {
+  executeTestRuntimeTools,
+  testRuntimeCapabilityExecutionPort,
+} from './helpers/runtime-model';
 
 const roots: string[] = [];
 
@@ -101,20 +103,27 @@ describe('project instruction snapshot', () => {
   test('projects refreshed instructions after the durable transcript and before runtime state', () => {
     const root = workspace();
     writeFileSync(join(root, 'AGENTS.md'), 'project rule');
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: root });
-    state.transcript.messages.push({
-      kind: 'user',
-      messageId: 'm1',
-      turnId: state.turn.turnId,
-      ordinal: 0,
-      createdAt: '2026-08-18T00:00:00.000Z',
-      content: 'current user request',
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: root,
     });
+    state.transcript.messages = [
+      ...state.transcript.messages,
+      {
+        kind: 'user',
+        messageId: 'm1',
+        turnId: state.turn.turnId,
+        ordinal: 0,
+        createdAt: '2026-08-18T00:00:00.000Z',
+        content: 'current user request',
+      },
+    ];
     const snapshot = resolveProjectInstructionSnapshot({ workspace: root });
     const projection = buildContextProjection({
       role: 'agent',
       state,
-      promptContractVersion: 'v2',
       projectInstructions: snapshot,
       sandboxBackend: 'seatbelt',
     });
@@ -137,7 +146,8 @@ describe('project instruction snapshot', () => {
     mkdirSync(join(root, 'src'));
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
-    let state = createInitialRuntimeState({
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'thread-target',
       userId: 'user',
       workspace: root,
@@ -154,73 +164,134 @@ describe('project instruction snapshot', () => {
     ]);
   });
 
-  test('rejects a first write when a nested instruction was not visible to the model', async () => {
+  test('rejects an unseen nested instruction before Host and accepts a refreshed retry', async () => {
     const root = workspace();
     mkdirSync(join(root, 'src'), { recursive: true });
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
-    const visible = resolveProjectInstructionSnapshot({ workspace: root });
-    const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace: root });
-    const result = await invokeGovernedTool({
-      workspace: root,
-      workspaceFilesystem,
-      request: {
-        source: 'builtin',
+    const createState = (visibleTarget: boolean) => {
+      let state = createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0'.repeat(64),
+        threadId: visibleTarget ? 'instruction-refreshed' : 'instruction-unseen',
+        userId: 'user',
+        workspace: root,
+      });
+      state.mode = 'accept_edits';
+      if (visibleTarget) {
+        state = reduceRuntimeState(state, {
+          type: 'user.message_appended',
+          messageId: 'prior-user-message',
+          content: 'Update src/new.ts after reading its project instructions.',
+        });
+      }
+      state.tools.calls.write = {
+        toolCallId: 'write',
+        modelMessageId: visibleTarget ? 'model-refreshed' : 'model-unseen',
+        ordinal: 0,
         name: 'write_file',
         args: { path: 'src/new.ts', content: 'export {};' },
-        reason: 'test',
-        protectedCommand: 'write_file src/new.ts',
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, 'write'];
+      return state;
+    };
+    const config = {
+      apiKey: 'fixture',
+      baseURL: 'https://example.invalid',
+      providerName: 'fixture',
+      modelName: 'fixture',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: false },
+    } as AgentConfig;
+    const host = testRuntimeCapabilityExecutionPort();
+    let hostCalls = 0;
+    const capabilityExecution = Object.freeze({
+      invoke: async (invocation: Parameters<typeof host.invoke>[0]) => {
+        hostCalls += 1;
+        return host.invoke(invocation);
       },
-      phase: 'building',
-      taskConfig: { features: { promptContractV2: true } } as AgentConfig,
-      projectInstructionSnapshot: visible,
     });
-    expect(result.ok).toBe(false);
-    expect(result.stderr).toContain('project_instructions_changed');
-    expect(result.stderr).toContain('src/AGENTS.md');
+
+    const rejected = await executeTestRuntimeTools({
+      state: createState(false),
+      toolCallIds: ['write'],
+      taskConfig: config,
+      capabilityExecution,
+    });
+    expect(rejected).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.rejected',
+        toolCallId: 'write',
+        reason: expect.stringContaining('project_instructions_changed'),
+      }),
+    );
+    expect(
+      rejected.filter(
+        (event) =>
+          event.type === 'capability.invocation_recorded' ||
+          event.type === 'capability.execution_started',
+      ),
+    ).toEqual([]);
+    expect(hostCalls).toBe(0);
     expect(existsSync(join(root, 'src', 'new.ts'))).toBe(false);
+
+    const retried = await executeTestRuntimeTools({
+      state: createState(true),
+      toolCallIds: ['write'],
+      taskConfig: config,
+      capabilityExecution,
+    });
+    expect(retried.filter((event) => event.type === 'tool.rejected')).toEqual([]);
+    expect(retried.filter((event) => event.type === 'tool.finished')).toHaveLength(1);
+    expect(hostCalls).toBe(1);
+    expect(existsSync(join(root, 'src', 'new.ts'))).toBe(true);
   });
 
-  test('rejects a write when an already visible instruction digest changes', async () => {
+  test('always runs the snapshot guard after the prompt contract clean cutover', async () => {
     const root = workspace();
-    writeFileSync(join(root, 'AGENTS.md'), 'old rule');
-    const visible = resolveProjectInstructionSnapshot({ workspace: root });
-    const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace: root });
-    writeFileSync(join(root, 'AGENTS.md'), 'new rule');
-    const result = await invokeGovernedTool({
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'instruction-guard-disabled',
+      userId: 'user',
       workspace: root,
-      workspaceFilesystem,
-      request: {
-        source: 'builtin',
-        name: 'write_file',
-        args: { path: 'new.ts', content: 'export {};' },
-        reason: 'test',
-        protectedCommand: 'write_file new.ts',
-      },
-      phase: 'building',
-      taskConfig: { features: { promptContractV2: true } } as AgentConfig,
-      projectInstructionSnapshot: visible,
     });
-    expect(result.ok).toBe(false);
-    expect(result.stderr).toContain('project_instructions_changed');
-    expect(result.stderr).toContain('AGENTS.md');
-    expect(existsSync(join(root, 'new.ts'))).toBe(false);
-    const refreshed = resolveProjectInstructionSnapshot({ workspace: root });
-    const retry = await invokeGovernedTool({
-      workspace: root,
-      workspaceFilesystem,
-      request: {
-        source: 'builtin',
-        name: 'write_file',
-        args: { path: 'new.ts', content: 'export {};' },
-        reason: 'test',
-        protectedCommand: 'write_file new.ts',
-      },
-      phase: 'building',
-      taskConfig: { features: { promptContractV2: true } } as AgentConfig,
-      projectInstructionSnapshot: refreshed,
+    state.mode = 'accept_edits';
+    state.tools.calls.write = {
+      toolCallId: 'write',
+      modelMessageId: 'model-disabled',
+      ordinal: 0,
+      name: 'write_file',
+      args: { path: 'src/disabled.ts', content: 'export {};' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'write'];
+    const host = testRuntimeCapabilityExecutionPort();
+    let hostCalls = 0;
+    const events = await executeTestRuntimeTools({
+      state,
+      toolCallIds: ['write'],
+      taskConfig: {
+        apiKey: 'fixture',
+        baseURL: 'https://example.invalid',
+        providerName: 'fixture',
+        modelName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      } as AgentConfig,
+      capabilityExecution: Object.freeze({
+        invoke: async (invocation: Parameters<typeof host.invoke>[0]) => {
+          hostCalls += 1;
+          return host.invoke(invocation);
+        },
+      }),
     });
-    expect(retry.ok).toBe(true);
-    expect(existsSync(join(root, 'new.ts'))).toBe(true);
+    expect(events.filter((event) => event.type === 'tool.rejected')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'tool.finished')).toEqual([]);
+    expect(hostCalls).toBe(0);
+    expect(existsSync(join(root, 'src', 'disabled.ts'))).toBe(false);
   });
 });

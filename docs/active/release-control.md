@@ -34,9 +34,10 @@ candidate payload 解析这些文件；缺失、替换或 digest 不匹配时仍
 `bun run scripts/release/build-windows-runner.ts`：该入口把 checkout 与 Cargo cache 的绝对路径映射到
 固定虚拟路径，固定使用 Rust toolchain 自带的 `rust-lld`，并禁止 PE linker 写入墙钟时间戳。因此
 固定 toolchain 的 clean build 可在本地与 GitHub-hosted Windows runner 上生成同一 runner digest，workflow 才能在打包前用 committed
-manifest pin 执行 `git diff --exit-code`。直接调用 Cargo 不得用于生成或验证 release pin。
+manifest pin 执行 `git diff --exit-code`。native runner 源码变更必须在同一候选提交刷新该 pin；
+直接调用 Cargo 不得用于生成或验证 release pin。
 当前 0.8.3/V6 runner pin 为
-`sha256:c3db39e375af63a68757b8e453a34862606dcf2a9640fbcf81104fed3f7ee4ce`；Windows candidate 与
+`sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`；Windows candidate 与
 Platform Capability Probe 都必须在打包或原生 E2E 前重建出该精确摘要。
 `tests/release/supply-chain-workflow.test.ts` 固定 workflow 对该入口的调用顺序，并校验路径重映射与
 linker、路径重映射与时间戳清除参数不会被后续 Actions 修改静默移除。
@@ -50,6 +51,9 @@ manifest `commitSha` 精确匹配；GitHub 临时 merge ref 不能充当最终�
 构建器只接受与当前 host OS/architecture 完全一致的 native target，不 cross-compile，也不下载另一平台的
 Bun runtime；三平台候选分别在对应 GitHub-hosted runner 上生成。Ink 的可选 React devtools 路径在
 生产候选构建时固定为空实现，不成为依赖或网络下载入口。
+Standalone resolver 必须覆盖七个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
+不得穿过 `apps/kite/node_modules/@kite/*` workspace symlink。该不变量避免 Windows Bun 1.3.14 把反斜杠
+symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。
 
 源码通过 Bun 运行时继续使用 `@napi-rs/keyring` 的系统凭据库。由于 Bun standalone 不能在三平台上
 稳定封装该 N-API binding，预构建候选把该 adapter 固定为方法级 `unavailable`：构造和普通启动不失败，
@@ -65,11 +69,10 @@ release notes 中披露，解除前预构建候选不声称支持持久 MCP 凭�
 启动 payload。GitHub-hosted candidate job 额外使用 `--require-clean-source`，dirty-source manifest
 不得上传为候选 artifact。
 
-Platform Capability workflow 中的 Linux full-chain candidate diagnostic 不是候选包的 release gate。它在显式 opt-in
-下独立编译当前 release CLI/TUI entrypoint 并执行 native bubblewrap/supervisor-helper fixture；输出只属于 owner-only
-`candidate_only` evaluation artifact。CLI 要求显式 worktree-external `--output`，writer 强制 canonical owner-only POSIX `0700`
-parent、no-symlink 与 exclusive regular file；workflow 只在 runner temp 的 `0700` 子目录中准备该诊断输出。任何 `unavailable`、`unsupported`、缺失或 `passed` 都不改变 G0/G1、production
-support matrix 或 approved registry。正式候选仍必须通过 `bun run release:verify`；该诊断不启动正式候选，也不能替代 release smoke。
+旧 Linux full-chain evaluation diagnostic 及其 workflow job 已删除，不属于当前候选包或 release gate。Platform
+Capability workflow 只运行本页列出的 native probe、verifier 与 release evidence；不得从已删除脚本恢复
+`candidate_only` artifact 或用可选诊断替代 `bun run release:verify`、release smoke、G0/G1、production support
+matrix 或 approved registry。
 
 ## 安装、回滚和卸载
 
@@ -84,6 +87,9 @@ support matrix 或 approved registry。正式候选仍必须通过 `bun run rele
 
 `bun run release:smoke` 在新临时目录中完成 verify、install、CLI help/version、TUI version/start probe、
 第二候选安装、rollback 和 uninstall。任一步非零都使 smoke 失败。
+候选启动与 MCP stdio wrapper smoke 不创建、读取或要求 `runtime-authority.key`/Artifact key；Project identity
+只使用 canonical Workspace digest，SQLite Store 使用 strict canonical record 与 snapshot checksum。模型 API credential 与 MCP OAuth/
+系统 keyring 仍按各自产品边界处理，不得因 Runtime 撤钥而回退到环境变量或明文文件。
 固定 `--help`/`--version` 启动失败时，报告只保留退出码与 stdout/stderr 各 240 个清洗后的字符；这些
 入口不读取 Provider 凭据或模型正文，诊断不写入候选 artifact。
 

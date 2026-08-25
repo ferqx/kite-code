@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import {
+  type BaseMessage,
+  compileModelSurface,
+  createChatModel,
+  createModelContextSummaryGenerator,
+  humanMessage,
+  type ModelProviderOptions,
+  normalizedModelResponseToAIMessage,
+  type SupportedChatModel,
+} from '@kite/builtin-runtime/model';
 import { jsonSchema, type ToolSet, tool } from 'ai';
 import { z } from 'zod';
-import type { AgentConfig } from '../src/core/config';
-import { type BaseMessage, humanMessage } from '../src/core/messages';
-import { createModelContextSummaryGenerator } from '../src/core/model/compaction-summary';
-import {
-  createChatModel,
-  type ModelProviderOptions,
-  type SupportedChatModel,
-} from '../src/core/model/factory';
-import { normalizedModelResponseToAIMessageV1 } from '../src/core/model/invocation-gateway';
-import { compileModelSurfaceV1 } from '../src/core/model/surface-compiler';
-import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
+import type { AgentConfig } from '#app/config';
+import { createTestModelInvocationHarness } from './helpers/model-invocation';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 
 const servers: Array<ReturnType<typeof createMockModelServer>> = [];
@@ -79,7 +80,7 @@ async function invokeGatewayModel(params: {
       ];
     }),
   ) as ToolSet;
-  const compiled = compileModelSurfaceV1({
+  const compiled = compileModelSurface({
     purpose: 'primary_agent',
     config,
     model: params.model,
@@ -89,7 +90,7 @@ async function invokeGatewayModel(params: {
     providerOptions: params.providerOptions,
     transport: params.streaming ? 'stream' : 'generate',
   });
-  const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
+  const harness = createTestModelInvocationHarness({ workspace: process.cwd() });
   const pending = await harness.gateway.invoke({
     model: params.model,
     compiled,
@@ -99,7 +100,6 @@ async function invokeGatewayModel(params: {
       projectionEnvironmentDigest: `sha256:${'1'.repeat(64)}`,
       capabilityBindingDigest: `sha256:${'2'.repeat(64)}`,
     },
-    providerDataPolicyRequired: false,
     resourceKind: 'model',
     limits: { maxAttempts: params.streamRetryOptions?.maxAttempts ?? 5 },
     signal: params.signal,
@@ -113,7 +113,7 @@ async function invokeGatewayModel(params: {
       }
     },
   });
-  const response = normalizedModelResponseToAIMessageV1(await pending.commit());
+  const response = normalizedModelResponseToAIMessage(await pending.commit());
   for (const event of harness.events) {
     if (event.type === 'model.retry') {
       params.onRetry?.(event.attempt, event.maxAttempts, event.error, event.delayMs);
@@ -219,7 +219,7 @@ describe('ModelInvocationGateway transport', () => {
     model.compactionProviderOptions = { deepseek: { thinking: { type: 'disabled' } } };
     server.setResponses([{ message: { content: 'bounded summary' } }]);
 
-    const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
+    const harness = createTestModelInvocationHarness({ workspace: process.cwd() });
     const generate = createModelContextSummaryGenerator({
       config,
       model,

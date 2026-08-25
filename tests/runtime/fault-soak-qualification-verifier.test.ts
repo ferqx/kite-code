@@ -8,9 +8,9 @@ import {
   RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS,
   RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS,
   RUNTIME_FAULT_SOAK_RUNNER_REVISION,
-  type RuntimeBudgetUsageEvidenceV2,
-  type RuntimeFaultSoakAttemptV2,
-  type RuntimeFaultSoakMetricEvidenceV2,
+  type RuntimeBudgetUsageEvidence,
+  type RuntimeFaultSoakAttempt,
+  type RuntimeFaultSoakMetricEvidence,
 } from '../../scripts/runtime/fault-soak-report';
 import { verifyRuntimeFaultSoakQualification } from '../../scripts/runtime/verify-fault-soak-qualification';
 
@@ -37,9 +37,9 @@ const expectation = {
   workflowSha: source.workflowSha,
 };
 
-function lifecycleMetric(attempt: RuntimeFaultSoakAttemptV2): {
+function lifecycleMetric(attempt: RuntimeFaultSoakAttempt): {
   supported: true;
-  value: RuntimeFaultSoakMetricEvidenceV2;
+  value: RuntimeFaultSoakMetricEvidence;
 } {
   const point = (sequence: number) => ({
     sequence,
@@ -71,9 +71,9 @@ function lifecycleMetric(attempt: RuntimeFaultSoakAttemptV2): {
 }
 
 function budgetReceipt(
-  attempt: Pick<RuntimeFaultSoakAttemptV2, 'caseId' | 'iteration'>,
+  attempt: Pick<RuntimeFaultSoakAttempt, 'caseId' | 'iteration'>,
   sequence: number,
-): RuntimeBudgetUsageEvidenceV2 {
+): RuntimeBudgetUsageEvidence {
   return {
     source: 'actual_runtime_ledger',
     provenance: {
@@ -102,7 +102,7 @@ function budgetReceipt(
 function validReport() {
   const attempts = RUNTIME_FAULT_SOAK_CASE_IDS.flatMap((caseId) =>
     Array.from({ length: 8 }, (_, index) => {
-      const attempt: RuntimeFaultSoakAttemptV2 = {
+      const attempt: RuntimeFaultSoakAttempt = {
         caseId,
         iteration: index + 1,
         status: 'passed',

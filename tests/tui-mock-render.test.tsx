@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import CompactionProgress from '../src/app/tui/components/CompactionProgress';
-import Header from '../src/app/tui/Header';
-import type { RunStatusSnapshot } from '../src/app/tui/run-status';
-import StatusBar, { runStatusColor } from '../src/app/tui/StatusBar';
-import { darkTheme } from '../src/app/tui/theme';
+import CompactionProgress from '../apps/kite/src/tui/components/CompactionProgress';
+import Header from '../apps/kite/src/tui/Header';
+import type { RunStatusSnapshot } from '../apps/kite/src/tui/run-status';
+import StatusBar, { runStatusColor } from '../apps/kite/src/tui/StatusBar';
+import { darkTheme } from '../apps/kite/src/tui/theme';
 
 function fakeStatus() {
   return {

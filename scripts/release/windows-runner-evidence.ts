@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
-  parseWindowsSandboxRunnerManifestV1,
+  parseWindowsSandboxRunnerManifest,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
-} from '../../src/core/sandbox/windows-runner';
+} from '@kite/builtin-runtime/sandbox';
 
 /**
  * Produce the release-pinned Windows runner manifest. The digest is computed
@@ -21,7 +21,7 @@ const RUNNER_RELEASE_PATH = 'release/windows-shell-runner/kite-windows-runner.ex
 const RUNNER_DEV_PATH = 'native/windows-sandbox-runner/target/release/kite-windows-runner.exe';
 const SHELL_RUNTIME_PATH = 'vendor/isksh';
 const SHELL_RUNTIME = 'isksh' as const;
-const MANIFEST_PATH = 'release/platform-capabilities/windows-runner-v1.json';
+const MANIFEST_PATH = 'release/platform-capabilities/windows-runner.json';
 
 function resolveProjectRoot(): string {
   return resolve(import.meta.dirname, '..', '..');
@@ -78,7 +78,7 @@ const manifest = {
   coreutilsDigest,
 };
 
-if (!parseWindowsSandboxRunnerManifestV1(manifest)) {
+if (!parseWindowsSandboxRunnerManifest(manifest)) {
   console.error('windows-runner-evidence: produced manifest is not a valid V1 pin.');
   process.exit(1);
 }

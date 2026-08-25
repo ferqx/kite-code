@@ -31,9 +31,10 @@ MCP Tools 通过三个内置只读工具按意图使用：
 当配置携带 sealed production execution boundary 时，remote HTTP 的 connect、inventory、
 resource、Tool 与 OAuth 操作都要求绑定 Workspace、boundary/run/profile/network revision、endpoint
 revision 和 invocation/tool-call 的单次 receipt；SDK fetch 对每个 request/redirect hop 重新执行
-DNS/private/allowlist/pinned-address admission，不读取环境 proxy。当前 production TUI 没有 receipt
-controller，因此仍在 Provider lookup/readiness 前拒绝；local stdio 在 native child conformance 前
-始终排除。这是安全基础设施，不是 MCP production availability 声明。
+DNS/private/allowlist/pinned-address admission，不读取环境 proxy。Remote HTTP 仍由 TLS/OAuth/network
+与逐 operation egress receipt 约束。Local stdio 只经 Host-owned authenticated wrapper 和 neutral process port；
+普通未 qualification 的 TUI 不注入该 port，因此项目审批只记录决定、进程仍为零。installed candidate smoke
+单独验证 standalone private wrapper，不把开发入口冒充 production availability。
 
 ## 11.3 Health 与恢复
 
@@ -41,7 +42,7 @@ Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circ
 
 Provider directory 让 Agent 区分不存在、等待项目批准、被拒绝、disabled、需要登录、连接中、失败和 quarantine。调用边界使用 typed provider failure，不从 SDK 错误字符串猜测恢复策略。Directory 和公共搜索摘要不包含 URL、command、secret、raw error、schema、capability ID 或调用句柄。
 
-默认关闭的 `mcpProviderActionV1` 把可恢复 failure 转成独立 Runtime 交互：原 Tool Call 先终结，随后才请求 App shell 执行 login、approve 或 retry。Runtime 只保存固定动作与结果码，不保存旧参数、binding、approval 或认证材料。成功恢复后必须进入新 turn 再从当前 catalog 签发 binding；defer/failure 不会重放旧调用。TUI 使用既有 foreground/background interrupt surface 收集决定，并由 App controller 复用 Supervisor 的 login、project approval 与 retry。
+默认关闭的 `mcpProviderAction` 把可恢复 failure 转成独立 Runtime 交互：原 Tool Call 先终结，随后才请求 App shell 执行 login、approve 或 retry。Runtime 只保存固定动作与结果码，不保存旧参数、binding、approval 或认证材料。成功恢复后必须进入新 turn 再从当前 catalog 签发 binding；defer/failure 不会重放旧调用。TUI 使用既有 foreground/background interrupt surface 收集决定，并由 App controller 复用 Supervisor 的 login、project approval 与 retry。
 
 同一 flag 让 `required` 获得任务准入语义。新 Agent run 在模型执行前接受 ready/degraded，其他 required Provider 进入稳定排序的持久 gate。Retry 由 App shell 执行；用户可以为当前 session 记录 waiver，或取消 run。Waiver 包含 provider/source/固定 reason/time，但不使任何 Tool 可见或可调用。
 
@@ -49,7 +50,7 @@ Provider directory 让 Agent 区分不存在、等待项目批准、被拒绝、
 
 ## 11.4 MCP 凭据与 OAuth
 
-HTTP 静态认证在配置中只保存环境变量名或 credential profile。生产 `McpCredentialStore` 使用原生 OS vault，不存在 JSON、加密文件或 keychain CLI fallback。Supervisor 在连接时附加 workspace/source/Server/profile 身份；Manager 只在 transport 构造期间把 secret 解析为 header。inline client secret 被拒绝，client secret 也必须通过独立 profile 引用。
+HTTP 静态认证在配置中只保存 credential profile。生产只组合一个 Builtin CredentialBroker，私有使用原生 OS vault，不存在 JSON、加密文件、keychain CLI、raw environment header 或 Manager/Auth/OAuth 各自 store fallback。跨层只传 purpose-bound opaque handle；broker 只在 transport 构造期间把 secret materialize 为 header。inline client secret 被拒绝，client secret 也必须通过独立 profile 引用。
 
 HTTP 401 与 connection health 分开投影为 `login_required`。后台连接不打开浏览器；用户从 Server Detail 进入认证页并选择“打开浏览器”后，Coordinator 才绑定 127.0.0.1 随机端口并驱动 SDK discovery、dynamic registration、PKCE 和 state-bound callback。成功 code exchange 后 Manager 创建新连接并重新 discovery；已有 token 可在重启时静默恢复。callback timeout/cancel 关闭 listener，refresh 失败进入 `reauth_required`，任何恢复都不自动重放旧 Tool Call。
 
@@ -57,7 +58,7 @@ ADR-0018 替代 ADR-0012 的 UI 结论：`/mcp` 承担显式 Login 恢复，但�
 
 ## 11.5 Skill Workflow
 
-Skill Workflow 的实现与契约已存在，但默认 fail closed：`skillActivationV2` 和 `skillWorkflowV1` 都必须显式开启，缺少任一 flag 时 activation 被拒绝。因此下面描述的是两个 flag 同时启用后的生命周期，不应把默认安装视为已经可激活 Skill。
+Skill Workflow 的实现与契约已存在，但默认 fail closed：`skillActivation` 和 `skillWorkflow` 都必须显式开启，缺少任一 flag 时 activation 被拒绝。因此下面描述的是两个 flag 同时启用后的生命周期，不应把默认安装视为已经可激活 Skill。
 
 Kite Skill 是严格 YAML frontmatter 加正文/资源组成的版本化 Workflow Contract，而不是普通 Prompt 片段。编译结果声明：
 
@@ -84,18 +85,12 @@ Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入�
 
 Resource discovery 与 Tool discovery 分离：需要盘点 Provider 和 Tool 时用 `list_mcp_tools`，需要可执行能力时用 `tool_search`，需要 MCP 内容 URI 时用 `list_mcp_resources` / `read_mcp_resource`。三类 MCP 概念（Provider、Tool、Resource）正交：任何一个为空不自动推出另外两个为空。当前不支持 `@resource` 输入补全和 Resource Templates。
 
-Remote HTTP MCP Tool 还有独立内容外发门禁。最终参数非空时，Runtime 使用脱敏 route identity
-和规范化参数 digest 请求 `RemoteMcpEgressPermitV1`；许可与 Tool Approval、模型 Provider
-consent、read-only annotation 和 network allowlist 正交。每个并发 invocation 使用独立 nonce，
-Manager 在 SDK 调用前校验进程内 ledger，Runtime Store 再把 nonce digest 与无正文 receipt
-同事务唯一持久化，重启或并行进程 replay 均在零请求处拒绝并保存 `permit_replayed`。最终参数还会
-在 ToolController 和 Manager 两处执行有界 secret 检查；credential 字段/形状、受保护路径以及
-无法完成检查的输入都不能通过 permit 外发。边界在任何异步授权前创建 immutable JSON-safe 深
-快照，schema、检查、digest 和最终 SDK request 使用同一份内容，禁止 accessor/custom serializer
-造成签署后变更。permit 最长五分钟；空参数 HTTP Tool 和 local stdio 不消费该 permit；这不表示
-stdio 已有 production admission。sealed transport identity 固定把 local stdio 关闭；真实 sandbox
-factory、argv/runtime pinning 与 native child inheritance conformance 完成前，surface bit、审批或
-配置都不能重新打开。Tool Search/discovery 只处理元数据，也不会触发正文许可。
+Remote HTTP MCP Tool 在 SDK request 前对最终参数创建一次 immutable JSON-safe bounded snapshot；schema、
+secret inspection、argument digest 与 wire request 使用同一份内容，禁止 accessor/custom serializer/cycle
+造成检查后变更。credential 字段/形状、受保护路径和无法完成检查的输入直接拒绝。普通合法参数不需要
+DataOrigin/EgressAuthority、nonce permit 或 Store ledger；真实边界是 Tool policy/approval、exact endpoint、
+TLS/network admission 与共享 CredentialBroker。Local stdio 由 Host-owned process port、exact command/argv/cwd、
+strict control frame 与 release capability surface 控制，不加载内部 Runtime key。Tool Search/discovery 只处理元数据。
 
 完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。
 

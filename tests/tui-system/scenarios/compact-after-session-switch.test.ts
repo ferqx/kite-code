@@ -1,11 +1,10 @@
 /**
  * PTY System Test — /compact survives session switch
  *
- * Verifies that the /compact slash command produces a visible response
- * (either "Not enough messages to compact." or compaction events) after
- * switching between sessions. Regression test for the Ink 7 useInput
- * stale closure bug where slash commands silently fail after the
- * InputLine component remounts via key={activeSessionId}.
+ * Verifies that the /compact slash command reaches the exact active Session
+ * and durably records its terminal result after a switch. Regression test for the
+ * Ink 7 useInput stale closure bug where slash commands silently fail after
+ * the InputLine component remounts via key={activeSessionId}.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
@@ -13,14 +12,14 @@ import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import {
-  screenContains,
-  stripAnsi,
-  waitForCondition,
-  waitForOutputQuiescence,
-  waitForText,
-} from '../harness/terminal-screen';
-import { createTestWorkspace, observePersistedSessionIds } from '../harness/test-workspace';
+  createTestWorkspace,
+  observePersistedSessionCommandEvents,
+  observePersistedSessionEvents,
+  observePersistedSessionIds,
+  type PersistedTurnEvent,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -31,6 +30,7 @@ describe('TUI PTY System — /compact after session switch', () => {
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let sessionIdsBeforeNew: string[] = [];
+  let sessionOneEventCount = 0;
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -46,36 +46,34 @@ describe('TUI PTY System — /compact after session switch', () => {
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
-  // ── Session 1 — /compact should produce a visible response ──
+  // ── Session 1 — establish a durable Runtime owner, then /compact ──
 
   step(
-    '/compact in session 1 produces a response',
+    '/compact in session 1 commits a terminal result',
     async () => {
-      const screenStart = tui.markScreen();
-      await submitCommand(tui, '/compact');
+      await submitUserMessage(tui, server, 'Session 1 message', { timeout: 15000 });
+      await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
+      await waitForCondition(
+        () => {
+          const observation = observePersistedSessionIds(workspace);
+          if (observation.status !== 'ready' || observation.value.length !== 1) return false;
+          sessionIdsBeforeNew = observation.value;
+          return true;
+        },
+        'Runtime Store to persist session 1 before /compact',
+        20_000,
+      );
 
-      // /compact is a slash command — it should NOT trigger a model call.
-      // The response is LOCAL_TEXT: either "Not enough messages to compact."
-      // or compaction queued/completed events.
-      await waitForText(() => tui.outputSinceLastAction(), 'Not enough messages', 10000);
-
-      const output = tui.screenFramesSince(screenStart).join('\n');
-      const clean = stripAnsi(output);
-      console.log('  output after /compact (session 1):', clean.slice(-500));
-
-      // At minimum, the /compact command text should appear as USER_MESSAGE.
-      const hasCompactCommand = screenContains(output, '/compact');
-      expect(hasCompactCommand).toBe(true);
-
-      // And there should be some response text.
-      const hasResponse =
-        screenContains(output, 'Not enough messages') ||
-        screenContains(output, 'compaction') ||
-        screenContains(output, 'Compacting');
-      expect(hasResponse).toBe(true);
-
-      // Prompt still visible — TUI responsive.
-      expect(screenContains(tui.viewport(), '❯')).toBe(true);
+      const events = await submitCompactAndObserve(sessionIdsBeforeNew[0]!);
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'user.command_invoked', command: '/compact' }),
+      );
+      expectCompactFailure(events);
+      const sessionEvents = observePersistedSessionEvents(workspace, sessionIdsBeforeNew[0]!);
+      if (sessionEvents.status !== 'ready') {
+        throw new Error('Session 1 durable event observation was lost.');
+      }
+      sessionOneEventCount = sessionEvents.value.length;
     },
     TIMEOUT,
   );
@@ -85,32 +83,14 @@ describe('TUI PTY System — /compact after session switch', () => {
   step(
     '/new creates session 2',
     async () => {
-      // Send a message first so /new is not ignored.
-      await submitUserMessage(tui, server, 'Session 1 message', { timeout: 15000 });
-      await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
-
-      // Retain the ready observation from the polling attempt. A separate
-      // SQLite read can legitimately see the writer's short-lived lock after
-      // the successful poll and would turn durable evidence into a test race.
-      let persistedSessionIds: string[] | undefined;
-      await waitForCondition(
-        () => {
-          const observation = observePersistedSessionIds(workspace);
-          if (observation.status !== 'ready' || observation.value.length !== 1) return false;
-          persistedSessionIds = observation.value;
-          return true;
-        },
-        'Runtime Store to persist session 1 before /new',
-        20_000,
-      );
-      if (!persistedSessionIds) throw new Error('Runtime Store persistence observation was lost.');
-      sessionIdsBeforeNew = persistedSessionIds;
-      await submitCommand(tui, '/new');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-
-      const output = tui.viewport();
-      console.log('  output after /new:', stripAnsi(output).slice(-500));
-      expect(screenContains(output, '❯')).toBe(true);
+      await submitCommand(tui, '/new', undefined, {
+        acceptWhen: (viewport) =>
+          screenContains(viewport, '❯') &&
+          !screenContains(viewport, 'Session 1 message') &&
+          !screenContains(viewport, 'Session 1 response'),
+        requireAcceptWhen: true,
+        semanticReceiptTimeoutMs: 20_000,
+      });
     },
     TIMEOUT,
   );
@@ -120,43 +100,20 @@ describe('TUI PTY System — /compact after session switch', () => {
   // the useInput handler must still invoke the slash command callback.
 
   step(
-    '/compact in session 2 produces a response (regression)',
+    '/compact in session 2 commits an exact-session result (regression)',
     async () => {
-      const screenStart = tui.markScreen();
-      await submitCommand(tui, '/compact');
-
-      await waitForText(() => tui.outputSinceLastAction(), 'Not enough messages', 10000);
-      await waitForCondition(
-        () => {
-          const observation = observePersistedSessionIds(workspace);
-          if (observation.status !== 'ready') return false;
-          const current = observation.value;
-          return (
-            current.length === sessionIdsBeforeNew.length + 1 &&
-            sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
-          );
-        },
-        'Runtime Store to persist the distinct session created by /new',
-        20_000,
+      const observed = await submitCompactAndObserveNewSession(sessionIdsBeforeNew);
+      expect(sessionIdsBeforeNew).not.toContain(observed.sessionId);
+      const events = observed.events;
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'context.compaction_requested', reason: 'manual' }),
       );
-
-      const output = tui.screenFramesSince(screenStart).join('\n');
-      const clean = stripAnsi(output);
-      console.log('  output after /compact (session 2):', clean.slice(-500));
-
-      // /compact command should appear.
-      const hasCompactCommand = screenContains(output, '/compact');
-      expect(hasCompactCommand).toBe(true);
-
-      // Response must be visible — if useInput stale, nothing appears.
-      const hasResponse =
-        screenContains(output, 'Not enough messages') ||
-        screenContains(output, 'compaction') ||
-        screenContains(output, 'Compacting');
-      expect(hasResponse).toBe(true);
-
-      // TUI still responsive.
-      expect(screenContains(tui.viewport(), '❯')).toBe(true);
+      expectCompactFailure(events);
+      const oldSessionEvents = observePersistedSessionEvents(workspace, sessionIdsBeforeNew[0]!);
+      if (oldSessionEvents.status !== 'ready') {
+        throw new Error('Session 1 durable event observation was lost after /new.');
+      }
+      expect(oldSessionEvents.value).toHaveLength(sessionOneEventCount);
     },
     TIMEOUT,
   );
@@ -166,4 +123,92 @@ describe('TUI PTY System — /compact after session switch', () => {
     () => journey.run(),
     TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
   );
+
+  async function submitCompactAndObserve(sessionId: string): Promise<PersistedTurnEvent[]> {
+    let events: PersistedTurnEvent[] | undefined;
+    await submitCommand(tui, '/compact', undefined, {
+      acceptWhen: () => {
+        const observation = observePersistedSessionCommandEvents(workspace, sessionId, '/compact');
+        if (observation.status !== 'ready' || !observation.value) return false;
+        const terminal = observation.value.find(
+          (event) =>
+            event.type === 'context.compaction_failed' ||
+            event.type === 'context.compaction_completed',
+        );
+        if (!terminal) return false;
+        events = observation.value;
+        return true;
+      },
+      requireAcceptWhen: true,
+      semanticReceiptTimeoutMs: 30_000,
+    });
+    if (!events) throw new Error('Durable /compact result observation was lost.');
+    return events;
+  }
+
+  async function submitCompactAndObserveNewSession(
+    excludedSessionIds: readonly string[],
+  ): Promise<{ sessionId: string; events: PersistedTurnEvent[] }> {
+    let observed: { sessionId: string; events: PersistedTurnEvent[] } | undefined;
+    try {
+      await submitCommand(tui, '/compact', undefined, {
+        acceptWhen: () => {
+          const sessions = observePersistedSessionIds(workspace);
+          if (sessions.status !== 'ready') return false;
+          const next = sessions.value.filter(
+            (sessionId) => !excludedSessionIds.includes(sessionId),
+          );
+          if (next.length !== 1) return false;
+          const events = observePersistedSessionEvents(workspace, next[0]!);
+          if (events.status !== 'ready') return false;
+          if (
+            !events.value.some(
+              (event) =>
+                event.type === 'context.compaction_failed' ||
+                event.type === 'context.compaction_completed',
+            )
+          ) {
+            return false;
+          }
+          observed = { sessionId: next[0]!, events: events.value };
+          return true;
+        },
+        requireAcceptWhen: true,
+        semanticReceiptTimeoutMs: 10_000,
+      });
+    } catch (error) {
+      const sessions = observePersistedSessionIds(workspace);
+      const sessionEvents =
+        sessions.status === 'ready'
+          ? sessions.value.map((sessionId) => ({
+              sessionId,
+              commandObservation: observePersistedSessionCommandEvents(
+                workspace,
+                sessionId,
+                '/compact',
+              ),
+              allEvents: observePersistedSessionEvents(workspace, sessionId),
+            }))
+          : [];
+      throw new Error(
+        `New-session /compact did not reach its durable owner. Sessions=${JSON.stringify(
+          sessions,
+        )}; commandEvents=${JSON.stringify(sessionEvents)}; viewport=${JSON.stringify(
+          tui.viewport(),
+        )}`,
+        { cause: error },
+      );
+    }
+    if (!observed) throw new Error('Durable new-session /compact result observation was lost.');
+    return observed;
+  }
+
+  function expectCompactFailure(events: PersistedTurnEvent[]): void {
+    const terminal = events.find((event) => event.type === 'context.compaction_failed');
+    expect(terminal).toMatchObject({
+      type: 'context.compaction_failed',
+      retryable: false,
+    });
+    expect(String(terminal?.message)).toContain('Not enough');
+  }
 });

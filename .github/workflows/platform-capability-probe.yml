@@ -4,29 +4,22 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - "src/core/sandbox/**"
-      - "src/core/config/execution-boundary.ts"
-      - "src/core/config/execution-qualification.ts"
-      - "src/core/config/release-profile.ts"
-      - "src/core/config/index.ts"
-      - "src/core/sandbox/types.ts"
-      - "src/protocol/sandbox-execution-provider.ts"
-      - "src/core/execution/sandbox-execution/**"
-      - "src/app/sandbox/**"
-      - "src/app/cli/index.ts"
-      - "src/app/tui/session-manager.ts"
+      - "packages/builtin-runtime/src/sandbox/**"
+      - "packages/builtin-runtime/src/planning/runtime-module.ts"
+      - "packages/runtime-host/src/process/**"
+      - "packages/runtime-spi/src/sandbox-execution-provider.ts"
+      - "apps/kite/src/sandbox/**"
+      - "apps/kite/src/config/execution-boundary.ts"
+      - "apps/kite/src/config/execution-qualification.ts"
+      - "apps/kite/src/config/release-profile.ts"
+      - "apps/kite/src/config/index.ts"
+      - "apps/kite/src/cli/index.ts"
+      - "apps/kite/src/adapters/tui/**"
       - "scripts/release/entrypoints/cli.ts"
       - "scripts/release/entrypoints/tui.ts"
       - "scripts/release/oss-candidate.ts"
-      - "src/core/tools/process-tree.ts"
-      - "src/core/tools/path-utils.ts"
-      - "src/core/tools/shell.ts"
-      - "src/core/tools/stream-output.ts"
-      - "src/core/types.ts"
       - "scripts/release/platform-capability-probe.ts"
       - "scripts/release/verify-platform-capability-evidence.ts"
-      - "scripts/evals/linux-cgroup-descendant-cleanup.ts"
-      - "scripts/evals/linux-full-chain.ts"
       - "scripts/release/windows-runner-evidence.ts"
       - "native/windows-sandbox-runner/**"
       - "vendor/isksh/**"
@@ -41,8 +34,6 @@ on:
       - "tests/sandbox/platform-capability-probe.test.ts"
       - "tests/sandbox/platform-capability-verifier.test.ts"
       - "tests/sandbox/execution-boundary.test.ts"
-      - "tests/evals/linux-cgroup-descendant-cleanup.test.ts"
-      - "tests/evals/linux-full-chain.test.ts"
       - "tests/sandbox/windows-restricted-token.test.ts"
       - "tests/execution/**"
       - ".github/workflows/platform-capability-probe.yml"
@@ -90,8 +81,9 @@ jobs:
           rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal
           rustup override set 1.97.1-x86_64-pc-windows-gnu
       - name: Cross-platform exclusion contracts
+        timeout-minutes: 10
         run: >-
-          bun test
+          bun test --max-concurrency=1
           tests/sandbox/platform-backends.test.ts
           tests/sandbox/cgroup-pids.test.ts
           tests/sandbox/app-sandbox-composition.test.ts
@@ -101,7 +93,6 @@ jobs:
           tests/sandbox/execution-boundary.test.ts
           tests/sandbox/windows-restricted-token.test.ts
           tests/execution/sandbox-execution-provider.test.ts
-          tests/evals/linux-full-chain.test.ts
       - if: runner.os == 'macOS'
         name: macOS Seatbelt profile and fail-closed contracts
         run: bun test tests/sandbox.test.ts
@@ -121,7 +112,7 @@ jobs:
         run: bun run scripts/release/windows-runner-evidence.ts
       - if: runner.os == 'Windows'
         name: Verify committed Windows runner pin
-        run: git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json
+        run: git diff --exit-code -- release/platform-capabilities/windows-runner.json
       - if: runner.os == 'Windows'
         name: Windows restricted-token native fail-closed conformance
         env:
@@ -140,46 +131,3 @@ jobs:
             platform-capability-verification.json
           if-no-files-found: error
           overwrite: false
-      - if: always() && runner.os == 'Linux'
-        name: Linux cgroup descendant cleanup diagnostic (candidate-only)
-        continue-on-error: true
-        env:
-          KITE_RUN_LINUX_CGROUP_DESCENDANT_CLEANUP: '1'
-          KITE_LINUX_CGROUP_DESCENDANT_CLEANUP_OUTPUT: >-
-            ${{ runner.temp }}/kite-linux-cgroup-descendant-cleanup-${{ github.run_id }}-${{ github.run_attempt }}.json
-        run: >-
-          bun run scripts/evals/linux-cgroup-descendant-cleanup.ts
-          --output "$KITE_LINUX_CGROUP_DESCENDANT_CLEANUP_OUTPUT"
-      - if: always() && runner.os == 'Linux'
-        name: Upload Linux cgroup descendant cleanup diagnostic
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        continue-on-error: true
-        with:
-          name: linux-cgroup-descendant-cleanup-${{ matrix.os }}
-          path: >-
-            ${{ runner.temp }}/kite-linux-cgroup-descendant-cleanup-${{ github.run_id }}-${{ github.run_attempt }}.json
-          if-no-files-found: warn
-      - if: always() && runner.os == 'Linux'
-        name: Linux full-chain candidate diagnostic
-        continue-on-error: true
-        env:
-          KITE_RUN_LINUX_FULL_CHAIN: '1'
-          KITE_LINUX_FULL_CHAIN_OUTPUT_DIR: >-
-            ${{ runner.temp }}/kite-linux-full-chain-${{ github.run_id }}-${{ github.run_attempt }}
-          KITE_LINUX_FULL_CHAIN_OUTPUT: >-
-            ${{ runner.temp }}/kite-linux-full-chain-${{ github.run_id }}-${{ github.run_attempt }}/candidate.json
-        run: >-
-          umask 077 &&
-          mkdir -p "$KITE_LINUX_FULL_CHAIN_OUTPUT_DIR" &&
-          chmod 700 "$KITE_LINUX_FULL_CHAIN_OUTPUT_DIR" &&
-          bun run scripts/evals/linux-full-chain.ts
-          --output "$KITE_LINUX_FULL_CHAIN_OUTPUT"
-      - if: always() && runner.os == 'Linux'
-        name: Upload Linux full-chain candidate diagnostic
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        continue-on-error: true
-        with:
-          name: linux-full-chain-${{ matrix.os }}
-          path: >-
-            ${{ runner.temp }}/kite-linux-full-chain-${{ github.run_id }}-${{ github.run_attempt }}/candidate.json
-          if-no-files-found: warn

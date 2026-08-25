@@ -22,7 +22,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runtimeStorePathFor } from '@/core/runtime/store';
+import { sqliteCurrentRuntimeStorePath } from '@kite/runtime-storage-sqlite';
 
 export interface TestWorkspace {
   /** Temp HOME directory */
@@ -104,7 +104,7 @@ function persistedRuntimeObservationFailure(
 }
 
 function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
-  return runtimeStorePathFor(join(workspace.home, '.kite-code', 'checkpoints.sqlite'));
+  return sqliteCurrentRuntimeStorePath(join(workspace.home, '.kite-code', 'checkpoints.sqlite'));
 }
 
 /**
@@ -138,7 +138,7 @@ export function observePersistedSessionIds(
   return readPersistedRuntime(workspace, (database) =>
     database
       .query<{ thread_id: string }, []>(
-        'SELECT thread_id FROM runtime_sessions ORDER BY thread_id ASC',
+        'SELECT session_id AS thread_id FROM runtime_sessions ORDER BY session_id ASC',
       )
       .all()
       .map((session) => session.thread_id),
@@ -153,18 +153,18 @@ export function observePersistedSessionSummaries(
     database
       .query<PersistedSessionRow, []>(`
         SELECT
-          session.thread_id,
+          session.session_id AS thread_id,
           COALESCE(
             NULLIF(session.name, ''),
             NULLIF((
               SELECT json_extract(event.event_json, '$.content')
               FROM runtime_events event
-              WHERE event.thread_id = session.thread_id
+              WHERE event.session_id = session.session_id
                 AND json_extract(event.event_json, '$.type') = 'user.message_appended'
-              ORDER BY event.id ASC
+              ORDER BY event.sequence ASC
               LIMIT 1
             ), ''),
-            session.thread_id
+            session.session_id
           ) AS name
         FROM runtime_sessions session
         ORDER BY session.updated_at DESC
@@ -184,29 +184,85 @@ export function observePersistedCommandSession(
     const row = database
       .query<PersistedSessionRow, [string]>(`
         SELECT
-          session.thread_id,
+          session.session_id AS thread_id,
           COALESCE(
             NULLIF(session.name, ''),
             NULLIF((
               SELECT json_extract(first_event.event_json, '$.content')
               FROM runtime_events first_event
-              WHERE first_event.thread_id = session.thread_id
+              WHERE first_event.session_id = session.session_id
                 AND json_extract(first_event.event_json, '$.type') = 'user.message_appended'
-              ORDER BY first_event.id ASC
+              ORDER BY first_event.sequence ASC
               LIMIT 1
             ), ''),
-            session.thread_id
+            session.session_id
           ) AS name
         FROM runtime_events command_event
-        JOIN runtime_sessions session ON session.thread_id = command_event.thread_id
+        JOIN runtime_sessions session ON session.session_id = command_event.session_id
         WHERE json_extract(command_event.event_json, '$.type') = 'user.command_invoked'
           AND json_extract(command_event.event_json, '$.command') = ?
-        ORDER BY command_event.id DESC
+        ORDER BY command_event.sequence DESC
         LIMIT 1
       `)
       .get(command);
     return row ? { threadId: row.thread_id, name: row.name } : undefined;
   });
+}
+
+/**
+ * Read the durable event suffix for one exact slash command in one exact
+ * session.  Session identity is part of the query because Runtime event
+ * sequence numbers are session-local; ordering equal command strings across
+ * sessions by sequence would select the wrong owner after a session switch.
+ */
+export function observePersistedSessionCommandEvents(
+  workspace: Pick<TestWorkspace, 'home'>,
+  sessionId: string,
+  command: string,
+): PersistedRuntimeObservation<PersistedTurnEvent[] | undefined> {
+  return readPersistedRuntime(workspace, (database) => {
+    const commandEvent = database
+      .query<{ id: number }, [string, string]>(`
+        SELECT sequence AS id
+        FROM runtime_events
+        WHERE session_id = ?
+          AND json_extract(event_json, '$.type') = 'user.command_invoked'
+          AND json_extract(event_json, '$.command') = ?
+        ORDER BY sequence DESC
+        LIMIT 1
+      `)
+      .get(sessionId, command);
+    if (!commandEvent) return undefined;
+
+    return database
+      .query<{ event_json: string }, [string, number]>(`
+        SELECT event_json
+        FROM runtime_events
+        WHERE session_id = ?
+          AND sequence >= ?
+        ORDER BY sequence ASC
+      `)
+      .all(sessionId, commandEvent.id)
+      .map(({ event_json }) => parsePersistedRuntimeEvent(event_json));
+  });
+}
+
+/** Read every durable Runtime event owned by one exact session. */
+export function observePersistedSessionEvents(
+  workspace: Pick<TestWorkspace, 'home'>,
+  sessionId: string,
+): PersistedRuntimeObservation<PersistedTurnEvent[]> {
+  return readPersistedRuntime(workspace, (database) =>
+    database
+      .query<{ event_json: string }, [string]>(`
+        SELECT event_json
+        FROM runtime_events
+        WHERE session_id = ?
+        ORDER BY sequence ASC
+      `)
+      .all(sessionId)
+      .map(({ event_json }) => parsePersistedRuntimeEvent(event_json)),
+  );
 }
 
 /** Resolve the exact session carrying a durable user message event. */
@@ -217,11 +273,11 @@ export function observePersistedUserMessageSession(
   return readPersistedRuntime(workspace, (database) => {
     const row = database
       .query<{ thread_id: string }, [string]>(`
-        SELECT thread_id
+        SELECT session_id AS thread_id
         FROM runtime_events
         WHERE json_extract(event_json, '$.type') = 'user.message_appended'
           AND json_extract(event_json, '$.content') = ?
-        ORDER BY id DESC
+        ORDER BY sequence DESC
         LIMIT 1
       `)
       .get(content);
@@ -234,6 +290,19 @@ export type PersistedTurnEvent = {
   turnId?: string;
   [field: string]: unknown;
 };
+
+function parsePersistedRuntimeEvent(eventJson: string): PersistedTurnEvent {
+  const event: unknown = JSON.parse(eventJson);
+  if (
+    typeof event !== 'object' ||
+    event === null ||
+    !('type' in event) ||
+    typeof event.type !== 'string'
+  ) {
+    throw new Error('Persisted Runtime event is not valid');
+  }
+  return event as PersistedTurnEvent;
+}
 
 /**
  * Read one exact user turn from the isolated child Runtime Store. The observer
@@ -249,11 +318,11 @@ export function observePersistedTurnEvents(
   return readPersistedRuntime(workspace, (database) => {
     const message = database
       .query<{ thread_id: string; id: number }, [string]>(`
-        SELECT thread_id, id
+        SELECT session_id AS thread_id, sequence AS id
         FROM runtime_events
         WHERE json_extract(event_json, '$.type') = 'user.message_appended'
           AND json_extract(event_json, '$.content') = ?
-        ORDER BY id DESC
+        ORDER BY sequence DESC
         LIMIT 1
       `)
       .get(userMessage);
@@ -261,12 +330,12 @@ export function observePersistedTurnEvents(
 
     const turn = database
       .query<{ id: number; turn_id: string | null }, [string, number]>(`
-        SELECT id, json_extract(event_json, '$.turnId') AS turn_id
+        SELECT sequence AS id, json_extract(event_json, '$.turnId') AS turn_id
         FROM runtime_events
-        WHERE thread_id = ?
-          AND id > ?
+        WHERE session_id = ?
+          AND sequence > ?
           AND json_extract(event_json, '$.type') = 'turn.started'
-        ORDER BY id ASC
+        ORDER BY sequence ASC
         LIMIT 1
       `)
       .get(message.thread_id, message.id);
@@ -274,12 +343,12 @@ export function observePersistedTurnEvents(
 
     const nextTurn = database
       .query<{ id: number }, [string, number]>(`
-        SELECT id
+        SELECT sequence AS id
         FROM runtime_events
-        WHERE thread_id = ?
-          AND id > ?
+        WHERE session_id = ?
+          AND sequence > ?
           AND json_extract(event_json, '$.type') = 'turn.started'
-        ORDER BY id ASC
+        ORDER BY sequence ASC
         LIMIT 1
       `)
       .get(message.thread_id, turn.id);
@@ -287,24 +356,13 @@ export function observePersistedTurnEvents(
       .query<{ event_json: string }, [string, number, number]>(`
         SELECT event_json
         FROM runtime_events
-        WHERE thread_id = ?
-          AND id >= ?
-          AND id < ?
-        ORDER BY id ASC
+        WHERE session_id = ?
+          AND sequence >= ?
+          AND sequence < ?
+        ORDER BY sequence ASC
       `)
       .all(message.thread_id, turn.id, nextTurn?.id ?? Number.MAX_SAFE_INTEGER)
-      .map(({ event_json }) => {
-        const event: unknown = JSON.parse(event_json);
-        if (
-          typeof event !== 'object' ||
-          event === null ||
-          !('type' in event) ||
-          typeof event.type !== 'string'
-        ) {
-          throw new Error('Persisted Runtime event is not valid');
-        }
-        return event as PersistedTurnEvent;
-      });
+      .map(({ event_json }) => parsePersistedRuntimeEvent(event_json));
     return { threadId: message.thread_id, turnId: turn.turn_id, events };
   });
 }

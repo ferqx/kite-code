@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  evaluateReleaseCandidateAssemblyV1,
-  RC_CRITICAL_INPUTS_V1,
-  RC_DEPENDENCIES_V1,
+  evaluateReleaseCandidateAssembly,
+  RC_CRITICAL_INPUTS_,
+  RC_DEPENDENCIES_,
 } from '../../scripts/release/assemble-rc';
 
 const digest = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`;
@@ -27,7 +27,7 @@ function input() {
     schema_rollback_report: digest('b'),
   } as const;
   return {
-    schema: 'ReleaseCandidateAssemblyInputV1' as const,
+    schema: 'ReleaseCandidateAssemblyInput' as const,
     candidateId: 'rc-local-contract-v1',
     artifactIdentity,
     detachedManifestDigest: criticalDigests.detached_manifest,
@@ -36,8 +36,8 @@ function input() {
     supplyChainVerificationDigest: criticalDigests.supply_chain_verification,
     gateReplayDigest: criticalDigests.gate_replay,
     schemaRollbackReportDigest: criticalDigests.schema_rollback_report,
-    criticalInputs: RC_CRITICAL_INPUTS_V1.map((kind) => ({
-      schema: 'ReleaseCandidateCriticalInputVerificationV1' as const,
+    criticalInputs: RC_CRITICAL_INPUTS_.map((kind) => ({
+      schema: 'ReleaseCandidateCriticalInputVerification' as const,
       kind,
       digest: criticalDigests[kind],
       artifactIdentity,
@@ -45,8 +45,8 @@ function input() {
       verificationReceiptDigest: digest('c'),
       verifiedAt: '2026-08-03T00:00:00.000Z',
     })),
-    dependencies: RC_DEPENDENCIES_V1.map((dependency, index) => ({
-      schema: 'ReleaseCandidateDependencyDecisionV1' as const,
+    dependencies: RC_DEPENDENCIES_.map((dependency, index) => ({
+      schema: 'ReleaseCandidateDependencyDecision' as const,
       dependency,
       status: 'passed' as const,
       artifactIdentity,
@@ -60,7 +60,7 @@ function input() {
 
 describe('Release Candidate assembly Gate', () => {
   test('binds all dependencies but refuses to write or publish without production authority', () => {
-    expect(evaluateReleaseCandidateAssemblyV1(input())).toMatchObject({
+    expect(evaluateReleaseCandidateAssembly(input())).toMatchObject({
       status: 'blocked',
       candidateEligible: false,
       distributable: false,
@@ -80,7 +80,7 @@ describe('Release Candidate assembly Gate', () => {
       ...artifactIdentity,
       payloadSha256: digest('0'),
     };
-    const result = evaluateReleaseCandidateAssemblyV1(candidate);
+    const result = evaluateReleaseCandidateAssembly(candidate);
     expect(result.reasonCodes).toContain(
       `dependency_artifact_identity_mismatch:${candidate.dependencies[0]!.dependency}`,
     );
@@ -92,18 +92,18 @@ describe('Release Candidate assembly Gate', () => {
     candidate.dependencies[candidate.dependencies.length - 1] = {
       ...candidate.dependencies[0]!,
     };
-    expect(() => evaluateReleaseCandidateAssemblyV1(candidate)).toThrow('duplicated');
+    expect(() => evaluateReleaseCandidateAssembly(candidate)).toThrow('duplicated');
   });
 
   test('binds every critical input and rejects digest or identity splicing', () => {
-    const originalAssemblyDigest = evaluateReleaseCandidateAssemblyV1(input()).assemblyDigest;
-    for (const [index, kind] of RC_CRITICAL_INPUTS_V1.entries()) {
+    const originalAssemblyDigest = evaluateReleaseCandidateAssembly(input()).assemblyDigest;
+    for (const [index, kind] of RC_CRITICAL_INPUTS_.entries()) {
       const candidate = input();
       candidate.criticalInputs[index] = {
         ...candidate.criticalInputs[index]!,
         digest: digest('d'),
       };
-      const result = evaluateReleaseCandidateAssemblyV1(candidate);
+      const result = evaluateReleaseCandidateAssembly(candidate);
       expect(result.reasonCodes).toContain(`critical_input_digest_mismatch:${kind}`);
       expect(result.assemblyDigest).not.toBe(originalAssemblyDigest);
     }
@@ -113,7 +113,7 @@ describe('Release Candidate assembly Gate', () => {
       ...identitySplice.criticalInputs[0]!,
       artifactIdentity: { ...artifactIdentity, behaviorDigest: digest('e') },
     };
-    expect(evaluateReleaseCandidateAssemblyV1(identitySplice).reasonCodes).toContain(
+    expect(evaluateReleaseCandidateAssembly(identitySplice).reasonCodes).toContain(
       'critical_input_artifact_identity_mismatch:detached_manifest',
     );
   });

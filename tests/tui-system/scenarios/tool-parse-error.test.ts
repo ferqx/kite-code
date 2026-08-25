@@ -19,7 +19,6 @@ import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../h
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
-  stripAnsi,
   waitForCondition,
   waitForOutputQuiescence,
   waitForText,
@@ -52,7 +51,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
       },
       {
         expectedRequest: {
-          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['Invalid input'] }],
+          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['tool_invalid_args'] }],
         },
         message: { content: 'Kernel recovered after the invalid tool input.' },
         delay: 50,
@@ -77,14 +76,17 @@ describe('TUI PTY System — Tool Parse Error', () => {
     async () => {
       await submitUserMessage(tui, server, 'Run a broken command', { timeout: 15000 });
 
-      await waitForText(() => tui.outputSinceLastAction(), 'Invalid input', 15000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Kernel recovered after the invalid tool input.',
+        15000,
+      );
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
           return (
-            (screenContains(viewport, 'Bash') || screenContains(viewport, 'Cancelled')) &&
-            screenContains(viewport, 'Invalid input') &&
+            screenContains(viewport, 'Kernel recovered after the invalid tool input.') &&
             screenContains(viewport, '❯')
           );
         },
@@ -93,17 +95,9 @@ describe('TUI PTY System — Tool Parse Error', () => {
       );
 
       const output = tui.viewport();
-      const clean = stripAnsi(output);
-      console.log('  output after parse error:', clean.slice(-500));
-
       // TUI must still be alive with prompt
       expect(screenContains(output, '❯')).toBe(true);
-
-      // Verify the tool was handled: the tool card should be visible (cancelled/error state)
-      // The mock returns shell_execute with broken args → tool card shows "Bash"
-      const hasToolHandled = screenContains(output, 'Bash') || screenContains(output, 'Cancelled');
-      expect(hasToolHandled).toBe(true);
-      expect(screenContains(output, 'Invalid input')).toBe(true);
+      expect(screenContains(output, 'Kernel recovered after the invalid tool input.')).toBe(true);
     },
     TIMEOUT,
   );

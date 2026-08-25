@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import stringWidth from 'string-width';
-import SlashSuggestionOverlay from '../src/app/tui/components/SlashSuggestionOverlay';
-import type { SlashSuggestionData } from '../src/app/tui/hooks/useSlashSuggestions';
+import SlashSuggestionOverlay from '../apps/kite/src/tui/components/SlashSuggestionOverlay';
+import type { SlashSuggestionData } from '../apps/kite/src/tui/hooks/useSlashSuggestions';
 
 const commandSuggestion: SlashSuggestionData = {
   kind: 'command',

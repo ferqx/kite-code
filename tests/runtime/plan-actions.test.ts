@@ -1,9 +1,12 @@
 // ── Plan Mode v2 审批行为测试 / Plan approval action tests ──
 // 验证 plan_review_decision 的 approve/revise/cancel 事件生成
 import { describe, expect, test } from 'bun:test';
-import { eventsForRuntimeAction, type RuntimeUserAction } from '../../src/core/runtime/actions';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
-import type { AgentPlan } from '../../src/protocol/events';
+import type { AgentPlan } from '@kite/runtime-contract';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import {
+  eventsForRuntimeAction,
+  type RuntimeUserAction,
+} from '#app/bootstrap/runtime/state-actions';
 import { currentPlanDocument } from '../helpers/current-plan';
 
 function makePlan(name = 'Test'): AgentPlan {
@@ -16,7 +19,8 @@ function makePlan(name = 'Test'): AgentPlan {
 }
 
 function makeAwaitingReviewState() {
-  const base = createInitialRuntimeState({
+  const base = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 't1',
     userId: 'u1',
     workspace: '/tmp',
@@ -150,9 +154,8 @@ describe('plan_review_decision actions', () => {
     };
 
     const events = eventsForRuntimeAction(state, action);
-    // No authorization.changed event for plan approvals
-    const authEvents = events.filter((e) => e.type === 'authorization.changed');
-    expect(authEvents).toHaveLength(0);
+    // Plan approval changes lifecycle/mode only; it never creates a shell grant.
+    expect(events.some((e) => e.type === 'approval.granted')).toBe(false);
   });
 
   test('revise → plan.revision_requested + tool.finished with feedback', () => {
@@ -307,7 +310,8 @@ describe('plan_review_decision actions', () => {
   });
 
   test('idle interaction → no events for any action type', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
       workspace: '/tmp',

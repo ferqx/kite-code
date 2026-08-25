@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  composeReleaseProfileV1,
-  EMBEDDED_RELEASE_PROFILES_V1,
-  parseReleaseProfileV1,
+  composeReleaseProfile,
+  EMBEDDED_RELEASE_PROFILES_,
+  parseReleaseProfile,
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
+  type ReleaseProfile,
   ReleaseProfileEscalationError,
-  type ReleaseProfileRestrictionLayerV1,
-  type ReleaseProfileV1,
-} from '../../src/core/config';
+  type ReleaseProfileRestrictionLayer,
+} from '#app/config';
 
-function broadProfile(): ReleaseProfileV1 {
-  const profile = structuredClone(EMBEDDED_RELEASE_PROFILES_V1['limited-production']);
+function broadProfile(): ReleaseProfile {
+  const profile = structuredClone(EMBEDDED_RELEASE_PROFILES_['limited-production']);
   profile.capabilities = Object.fromEntries(
     RELEASE_CAPABILITIES.map((capability) => [
       capability,
@@ -51,7 +51,6 @@ function broadProfile(): ReleaseProfileV1 {
     providerRouteAllowlist: ['route-a', 'route-b'],
     providerRouteDenylist: [],
     maxWorkspaceDataClassification: 'confidential',
-    allowRemoteMcpContentEgress: true,
     allowProductionContentEvaluation: false,
   };
   profile.logging = {
@@ -70,10 +69,10 @@ function broadProfile(): ReleaseProfileV1 {
     minimumApproval: 'none',
     minimumVerification: 'not_required',
   };
-  return parseReleaseProfileV1(profile);
+  return parseReleaseProfile(profile);
 }
 
-const ADMIN_RESTRICTION: ReleaseProfileRestrictionLayerV1 = {
+const ADMIN_RESTRICTION: ReleaseProfileRestrictionLayer = {
   source: 'admin',
   restrictions: {
     capabilities: {
@@ -102,7 +101,7 @@ const ADMIN_RESTRICTION: ReleaseProfileRestrictionLayerV1 = {
   },
 };
 
-const USER_RESTRICTION: ReleaseProfileRestrictionLayerV1 = {
+const USER_RESTRICTION: ReleaseProfileRestrictionLayer = {
   source: 'user',
   restrictions: {
     capabilities: { shell: { enabled: false }, plan: { maxRollout: 'internal' } },
@@ -113,16 +112,15 @@ const USER_RESTRICTION: ReleaseProfileRestrictionLayerV1 = {
       protectedPaths: ['/user-protected'],
     },
     resources: { maxTurns: 40, maxModelRequests: 20 },
-    data: { allowRemoteMcpContentEgress: false },
     logging: { defaultMode: 'off', allowContentOptIn: false, retentionDays: 7 },
     telemetry: { allowed: false },
     requirements: { minimumApproval: 'user', minimumVerification: 'required' },
   },
 };
 
-describe('ReleaseProfileV1 monotonic composition', () => {
+describe('ReleaseProfile monotonic composition', () => {
   test('uses deny-wins, intersections, unions, minima and stricter risk orders', () => {
-    const effective = composeReleaseProfileV1({
+    const effective = composeReleaseProfile({
       embedded: broadProfile(),
       layers: [ADMIN_RESTRICTION, USER_RESTRICTION],
     });
@@ -146,7 +144,6 @@ describe('ReleaseProfileV1 monotonic composition', () => {
     expect(effective.data.providerRouteAllowlist).toEqual(['route-a']);
     expect(effective.data.providerRouteDenylist).toEqual(['route-denied']);
     expect(effective.data.maxWorkspaceDataClassification).toBe('internal');
-    expect(effective.data.allowRemoteMcpContentEgress).toBe(false);
     expect(effective.logging.defaultMode).toBe('off');
     expect(effective.logging.allowContentOptIn).toBe(false);
     expect(effective.logging.retentionDays).toBe(7);
@@ -160,11 +157,11 @@ describe('ReleaseProfileV1 monotonic composition', () => {
 
   test('is order independent for security results and never mutates the ceiling', () => {
     const ceiling = broadProfile();
-    const forward = composeReleaseProfileV1({
+    const forward = composeReleaseProfile({
       embedded: ceiling,
       layers: [ADMIN_RESTRICTION, USER_RESTRICTION],
     });
-    const reversed = composeReleaseProfileV1({
+    const reversed = composeReleaseProfile({
       embedded: ceiling,
       layers: [USER_RESTRICTION, ADMIN_RESTRICTION],
     });
@@ -174,7 +171,7 @@ describe('ReleaseProfileV1 monotonic composition', () => {
   });
 
   test('preserves an empty allowlist as network-off', () => {
-    const effective = composeReleaseProfileV1({
+    const effective = composeReleaseProfile({
       embedded: broadProfile(),
       layers: [
         {
@@ -188,7 +185,7 @@ describe('ReleaseProfileV1 monotonic composition', () => {
   });
 
   test('removes denylisted identities from intersected allowlists', () => {
-    const effective = composeReleaseProfileV1({
+    const effective = composeReleaseProfile({
       embedded: broadProfile(),
       layers: [
         {
@@ -214,7 +211,7 @@ describe('ReleaseProfileV1 monotonic composition', () => {
     const projectCeiling = broadProfile();
     projectCeiling.resources.maxTurns = 10;
     expect(() =>
-      composeReleaseProfileV1({
+      composeReleaseProfile({
         embedded: projectCeiling,
         layers: [{ source: 'project', restrictions: { resources: { maxTurns: 11 } } }],
       }),
@@ -223,7 +220,7 @@ describe('ReleaseProfileV1 monotonic composition', () => {
     const cliCeiling = broadProfile();
     cliCeiling.capabilities.shell.maxRollout = 'off';
     expect(() =>
-      composeReleaseProfileV1({
+      composeReleaseProfile({
         embedded: cliCeiling,
         layers: [{ source: 'cli', restrictions: { capabilities: { shell: { enabled: true } } } }],
       }),
@@ -232,7 +229,7 @@ describe('ReleaseProfileV1 monotonic composition', () => {
     const userCeiling = broadProfile();
     userCeiling.requirements.minimumApproval = 'auto_review';
     expect(() =>
-      composeReleaseProfileV1({
+      composeReleaseProfile({
         embedded: userCeiling,
         layers: [
           {
@@ -247,7 +244,7 @@ describe('ReleaseProfileV1 monotonic composition', () => {
   test('adding any generated resource restriction never increases a limit', () => {
     const ceiling = broadProfile();
     for (let requested = 0; requested <= ceiling.resources.maxTurns; requested += 5) {
-      const effective = composeReleaseProfileV1({
+      const effective = composeReleaseProfile({
         embedded: ceiling,
         layers: [
           {
@@ -263,7 +260,7 @@ describe('ReleaseProfileV1 monotonic composition', () => {
 
   test('fails closed on unknown security fields and capability names', () => {
     expect(() =>
-      composeReleaseProfileV1({
+      composeReleaseProfile({
         embedded: broadProfile(),
         layers: [
           {
@@ -274,7 +271,7 @@ describe('ReleaseProfileV1 monotonic composition', () => {
       }),
     ).toThrow();
     expect(() =>
-      composeReleaseProfileV1({
+      composeReleaseProfile({
         embedded: broadProfile(),
         layers: [
           {

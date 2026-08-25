@@ -12,6 +12,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -25,12 +26,15 @@ describe('TUI PTY System — Approval Escape', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
+    externalFile = join(workspace.home, 'approval-escape-external.txt');
 
-    // Response #1: shell_execute tool call that needs approval
+    // Response #1: an external write_file call that needs approval on every
+    // platform, including Linux CI hosts without a native Shell sandbox.
     // Response #2: normal response for the second user message after Escape cancel
     server.setResponses([
       {
@@ -40,8 +44,11 @@ describe('TUI PTY System — Approval Escape', () => {
           tool_calls: [
             {
               id: 'call_1',
-              name: 'shell_execute',
-              args: { command: 'node -e "1+1"', description: 'test escape approval' },
+              name: 'write_file',
+              args: {
+                path: externalFile,
+                content: 'This write must be cancelled by Escape.',
+              },
             },
           ],
         },
@@ -99,6 +106,64 @@ describe('TUI PTY System — Approval Escape', () => {
       expect(screenContains(finalOutput, 'Second message received after cancel.')).toBe(true);
       // TUI should still be idle with prompt visible after agent responds
       expect(screenContains(finalOutput, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — Approval Ctrl+C', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace();
+    externalFile = join(workspace.home, 'approval-ctrl-c-external.txt');
+    server.setResponses([
+      {
+        toolContinuation: 'aborted',
+        message: {
+          content: 'I will run the requested command.',
+          tool_calls: [
+            {
+              id: 'call_ctrl_c',
+              name: 'write_file',
+              args: {
+                path: externalFile,
+                content: 'This write must be cancelled by Ctrl+C.',
+              },
+            },
+          ],
+        },
+      },
+      { message: { content: 'Still alive after approval Ctrl+C.' } },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'Ctrl+C cancels approval without exiting the TUI',
+    async () => {
+      await submitUserMessage(tui, server, 'Run a command', { timeout: 15000 });
+      await waitForText(() => tui.viewport(), '工具授权', 15000);
+
+      tui.write('\x03');
+      await waitForTuiReady(tui);
+
+      await submitUserMessage(tui, server, 'Are you still alive?', { timeout: 15000 });
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Still alive after approval Ctrl+C.',
+        15000,
+      );
+      expect(screenContains(tui.viewport(), 'Still alive after approval Ctrl+C.')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );

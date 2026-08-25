@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { randomBytes } from 'node:crypto';
-import { NativeMcpCredentialStore } from '@/core/mcp';
+import { NativeMcpCredentialStore } from '@kite/builtin-runtime/mcp';
 
 const nativeSmoke = process.env.KITE_RUN_NATIVE_KEYRING_SMOKE === '1' ? test : test.skip;
 

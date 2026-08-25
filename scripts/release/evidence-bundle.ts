@@ -1,34 +1,32 @@
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
 import {
-  parseReleaseEvidenceV1,
-  type ReleaseEvidenceV1,
-  releaseEvidenceV1Schema,
+  parseReleaseEvidence,
+  type ReleaseEvidence,
+  releaseEvidenceSchema,
 } from './evidence-schema';
 
 const RELEASE_EVIDENCE_DIGEST_DOMAIN = 'release-evidence-bundle-v1';
 
-export type ReleaseEvidenceBundleInputV1 = Omit<ReleaseEvidenceV1, 'bundleDigest'>;
+export type ReleaseEvidenceBundleInput = Omit<ReleaseEvidence, 'bundleDigest'>;
 
-export function computeReleaseEvidenceBundleDigestV1(
-  input: ReleaseEvidenceBundleInputV1,
+export function computeReleaseEvidenceBundleDigest(
+  input: ReleaseEvidenceBundleInput,
 ): `sha256:${string}` {
   return sha256DomainSeparated(RELEASE_EVIDENCE_DIGEST_DOMAIN, canonicalJsonBytes(input));
 }
 
-export function buildReleaseEvidenceBundleV1(
-  input: ReleaseEvidenceBundleInputV1,
-): ReleaseEvidenceV1 {
+export function buildReleaseEvidenceBundle(input: ReleaseEvidenceBundleInput): ReleaseEvidence {
   const candidate = {
     ...input,
-    bundleDigest: computeReleaseEvidenceBundleDigestV1(input),
+    bundleDigest: computeReleaseEvidenceBundleDigest(input),
   };
-  return releaseEvidenceV1Schema.parse(candidate);
+  return releaseEvidenceSchema.parse(candidate);
 }
 
-export function verifyReleaseEvidenceBundleV1(value: unknown): ReleaseEvidenceV1 {
-  const parsed = parseReleaseEvidenceV1(value);
+export function verifyReleaseEvidenceBundle(value: unknown): ReleaseEvidence {
+  const parsed = parseReleaseEvidence(value);
   const { bundleDigest, ...material } = parsed;
-  const expected = computeReleaseEvidenceBundleDigestV1(material);
+  const expected = computeReleaseEvidenceBundleDigest(material);
   if (bundleDigest !== expected) {
     throw new Error(`Release evidence bundle digest mismatch: expected ${expected}.`);
   }

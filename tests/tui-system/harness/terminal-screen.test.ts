@@ -60,6 +60,27 @@ describe('headless terminal screen', () => {
     screen.dispose();
   });
 
+  test('detects InputLine keyboard readiness from the focused prompt cursor', async () => {
+    const screen = createHeadlessTerminalScreen(20, 3);
+    expect(screen.focusedMainInputReady()).toBe(false);
+    screen.append(new TextEncoder().encode('❯  x\x1b[7m \x1b[27m\r\n────────'));
+    await screen.settled();
+
+    expect(screen.focusedMainInputReady()).toBe(true);
+    screen.dispose();
+  });
+
+  test('does not mistake an inverse choice row for a ready main input', async () => {
+    const screen = createHeadlessTerminalScreen(40, 5);
+    screen.append(
+      new TextEncoder().encode('❯ \r\n────────\r\n  \x1b[7m❯ option\x1b[27m\r\nEnter 确认'),
+    );
+    await screen.settled();
+
+    expect(screen.focusedMainInputReady()).toBe(false);
+    screen.dispose();
+  });
+
   test('input projection uses the real prompt when a choice overlay also has a selected row', async () => {
     const screen = createHeadlessTerminalScreen(40, 8);
     screen.append(

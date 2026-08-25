@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { qualifyLimitedSloV1 } from '../../scripts/operations/qualify-limited-slo';
+import { qualifyLimitedSlo } from '../../scripts/operations/qualify-limited-slo';
 
 const digest = `sha256:${'a'.repeat(64)}` as const;
 const commit = 'a'.repeat(40);
@@ -23,7 +23,7 @@ const metrics = {
   reverted: 0,
 };
 const observation = {
-  schema: 'LimitedCohortObservationV1',
+  schema: 'LimitedCohortObservation',
   artifactIdentity,
   routeDigest: digest,
   cohortDigest: digest,
@@ -67,7 +67,7 @@ const observation = {
   metrics,
 } as const;
 const approvedPolicy = {
-  schema: 'AgentProductionSloV1',
+  schema: 'AgentProductionSlo',
   policyId: 'agent-production-v1',
   status: 'approved',
   approvalMilestone: 'MS:LIM-APPROVED',
@@ -100,7 +100,7 @@ const approvedPolicy = {
 
 describe('limited cohort SLO Gate', () => {
   test('keeps the repository baseline blocked while thresholds are unconfigured', () => {
-    const result = qualifyLimitedSloV1({
+    const result = qualifyLimitedSlo({
       policy: {
         ...approvedPolicy,
         status: 'baseline_unconfigured',
@@ -124,7 +124,7 @@ describe('limited cohort SLO Gate', () => {
   });
 
   test('blocks no-data, any G0/G1, insufficient windows, and unavailable containment', () => {
-    const result = qualifyLimitedSloV1({
+    const result = qualifyLimitedSlo({
       policy: approvedPolicy,
       observation: {
         ...observation,
@@ -154,8 +154,8 @@ describe('limited cohort SLO Gate', () => {
   });
 
   test('keeps a deterministic fixture contract-only without minting external evidence', () => {
-    const first = qualifyLimitedSloV1({ policy: approvedPolicy, observation });
-    const second = qualifyLimitedSloV1({ policy: approvedPolicy, observation });
+    const first = qualifyLimitedSlo({ policy: approvedPolicy, observation });
+    const second = qualifyLimitedSlo({ policy: approvedPolicy, observation });
     expect(first).toEqual(second);
     expect(first).toMatchObject({
       status: 'blocked',

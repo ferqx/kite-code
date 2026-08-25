@@ -48,6 +48,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         model: { default: { provider: 'mock', name: 'mock-model' } },
+        // Thought rendering is independent from sandbox qualification. Use the
+        // canonical Full interaction mode so this PTY suite remains portable;
+        // restricted Shell sandbox admission is covered by the platform and
+        // sandbox-mode contract suites.
+        interactionMode: 'full',
         sandbox: { enabled: false },
       },
       files: {

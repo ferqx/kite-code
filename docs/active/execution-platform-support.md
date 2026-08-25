@@ -9,14 +9,26 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 tests/sandbox/platform-capability-probe.test.ts tests/sandbox/platform-capability-verifier.test.ts tests/sandbox/execution-boundary.test.ts
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
 tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
-tests/execution/sandbox-execution-provider.test.ts tests/evals/linux-full-chain.test.ts`、
+tests/execution/sandbox-execution-provider.test.ts`、
 `bun test tests/postinstall.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、`release/platform-capabilities/support-matrix-v1.json`、
+相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、ADR-0131、ADR-0137、`release/platform-capabilities/support-matrix.json`、
 `docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
+
+## SAQ-10 scope contract
+
+三平台的发行兼容性与 effectful execution qualification 独立。UI 展示的 scope 必须等于 sealed Runtime boundary、native
+backend evidence 和实际 enforcement；backend `unsupported|unavailable`、evidence 缺失或 projection 不一致都 clean fail
+closed、host/provider call 为零。Full 只由 `interactionMode=full` 表达，不依赖第二个 approval grant，也不因受限 backend unavailable
+而隐式降级。
+
+Planning 非 Full 的 baseline 是 Workspace read-only，Building 非 Full 的 baseline 是 Workspace read/write；已知扩 scope 按
+Accept/Auto 进入 user/reviewer queue。Plan + Full 直接执行 Full scope 但保留 Plan lifecycle。native denial 终结为
+`sandbox_denied`，不换更宽 backend replay；只有 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 才允许一次 host
+availability。
 
 ## 当前支持集合
 
@@ -30,12 +42,12 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标。发行/�
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
 Docker、WSL2 和架构模拟只作开发预检。
 
-ADR-0097 的 brokered Git 另有独立资格证据组：同一 feature revision 必须同时
-证明通用 Shell 对 repository metadata 的 read/write deny、broker positive/hostile 路径、
-schema/binary/repository identity 与 TUI/foreground CLI composition。当前三平台 probe 都明确
-记录 `brokeredGit.currentOutcome=excluded`；probe 不会用代码存在替代证据：只有 native read/write deny 均 enforced 时才运行真实 App broker positive/hostile/binary identity，TUI/CLI 入口仍需各自证明。不能同时证明 native read/write deny 的平台
-不得披露 `gitInspect`，也不能用 generic read/process 证据替代。
-qualification artifact 还必须携带真实 profile/protected-rules digest 与 broker/schema/repository/executable/native-deny/invocation receipt identity；label hash 或只执行 positive fixture 都不足以标记 qualified。因此当前三个 production 平台继续 excluded。
+ADR-0097 的 brokered Git 仍有独立 typed schema、broker positive/hostile、binary/repository identity 与
+TUI/foreground CLI composition 证据组。但 ADR-0131 已取消通用 Shell 对 Workspace `.git` metadata 的
+名称级 read/write deny；依赖该 native deny 的既有 qualification 模型不再可满足，当前三平台
+`brokeredGit.currentOutcome` 固定为 `excluded`。probe 不得用代码存在、generic read/process evidence 或
+旧 protected-path artifact 替代新的治理决定。后续若要披露 `gitInspect`，必须先由追加 ADR 定义不缩小
+Workspace 的资格模型，并取得新鲜 broker/schema/repository/executable/invocation receipt 与入口证据。
 
 源码安装仍以 Bun 为包管理器；候选版本另使用 Bun standalone executable、manifest/checksum 和安全
 安装器，不要求目标机预装 Node。开发依赖安装的 `postinstall` 仍由 package script 显式通过系统 `node` 启动。
@@ -49,25 +61,27 @@ Ubuntu 24.04 默认 Node 18 的 Docker x64 预检负责捕获误用 `import.meta
 | --- | --- | --- | --- |
 | macOS 15 | Seatbelt | excluded | fresh candidate artifact 证明 filesystem 与 network-off，但没有硬 process-tree 上限、cleanup、Skill/MCP 继承与入口组合证据 |
 | Ubuntu 24.04 | none（bubblewrap namespace probe 不可用） | excluded | runner 不能启动所需 namespace；没有 filesystem、process-tree、继承与入口组合证据 |
-| Windows 10 22H2+（Win11 为主要原生证据） | windows_restricted_token（默认开发 backend） | excluded | direct token 缺少结构性网络、动态 root .env.* 与 strict production 资格 |
+| Windows 10 22H2+（Win11 为主要原生证据） | windows_restricted_token（默认开发 backend） | excluded | direct token 缺少结构性网络与 strict production 资格；V3 ledger migration 尚待新 runner artifact |
 
 ADR-0081 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，普通
 `networkMode=off` 调用以 restricted current-user token、capability-SID ACL 和 Job Object 直接运行
-canonical 真实 Workspace，不创建 staging 副本。按 ADR-0110，只有同时获批 `allow_all + full_access` 的调用
+canonical 真实 Workspace，不创建 staging 副本。按 ADR-0110，只有明确 `interactionMode=full` 且 sealed scope 为
+`filesystem=full_access, network=allow_all` 的调用
 才直接使用当前登录用户 token 与该用户 Schannel profile；不创建本地账号、不请求 UAC、不保存密码或 readiness
-state。`allow_all + read_only/workspace_write` 必须在 user script 前 fail closed，不能借联网授权扩大文件系统
+state。无法由当前 interactionMode/endpoint 同时兑现网络与 filesystem scope 的调用必须在 user script 前 fail closed，不能借联网授权扩大文件系统
 权限。这条网络调用仍进入 Job Object，但不再宣称 restricted-token filesystem ceiling。两条路径都不是 D-04 或
 Full qualification。
 
 direct token 是 lower-assurance backend。WRITE_RESTRICTED 只限制相应 SID 的写入检查；它不能证明
-Workspace 外普通读取全部被拒绝，不能为任意 descendant 提供结构性 network-off/allowlist，也不能用已有
-ACL deny 代替未来 root .env.* 的动态保护。因此 productionSupported 仍为 false，outcome 仍为 excluded。
+Workspace 外普通读取全部被拒绝，也不能为任意 descendant 提供结构性 network-off/allowlist。按 ADR-0131，
+Workspace 内 `.env.*` 不再需要或允许单独 ACL deny。因此 productionSupported 仍为 false，outcome 仍为 excluded。
 但 ADR-0121 将已选 windows_restricted_token 的 TUI/CLI Full 定义为开发期交互模式；它不改变该
-production verdict。只有 host backend=none 才显示“非沙箱环境无法开启full”。
+production verdict。受限 backend=none 时只显示该 backend 的 unsupported/fail-closed 状态；Full 仍由
+`interactionMode=full` 表达，不显示旧 grant，也不触发 host fallback。
 
 ADR-0082/ADR-0101/ADR-0110 对齐 development 权限交互与 Windows TLS 可执行性：protocol V6 接受 Tool Policy
-在单次审批后产生的 `allow_all + full_access`，并要求它使用当前登录用户 token；更窄 filesystem scope 的
-`allow_all` 被 runner 拒绝。精确 runtime version query 等可证明
+在 `interactionMode=full` 或 exact approval 后产生的 sealed scope，并要求 backend contract 明确其实际 token；更窄 filesystem scope 的
+更窄 scope 被 runner 拒绝。精确 runtime version query 等可证明
 本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
 verdict 或 D-04 空支持集。ADR-0088 已删除 AppContainer、private staging 与 repository reconciliation。
 
@@ -82,7 +96,7 @@ scope。它不是 startup downgrade、host Shell 或 native failure replay；三
 ADR-0077、ADR-0080 与 ADR-0081 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
 startup state machine。允许 host fallback 的开发入口只在用户脚本前确认 selected sandbox environment
 或 essential structural startup capability unavailable 时缓存 host Bash/cmd/PowerShell/POSIX，effective
-backend=none 且 Full 不可用。若 static candidate 只有在 durable preparation intent 后才暴露不可用，App 还可
+backend=none 且受限 capability 不可用；Full mode 仍由 interactionMode 表达，实际 boundary 不可用时执行 fail closed。若 static candidate 只有在 durable preparation intent 后才暴露不可用，App 还可
 消费 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 后选择同一 host availability。缺失或损坏的
 pinned runner、低于 API baseline 的系统、或 initial restricted child/token verification failure 都属于这种
 用户命令启动前的 availability 情形。
@@ -91,10 +105,10 @@ windows_restricted_token 的正常 probe 和执行不扫描、复制或 hash 用
 render 后异步启动 probe。
 
 正式 Windows capability evidence 使用临时 Workspace 运行正常 persistent capability ledger 路径，
-而不是 application startup 的 ephemeral preflight 模式；这样 static protected-path write 与 ledger
-refresh 才是运行时同构证据。证据采集结束必须显式 repair 临时 Workspace 的 DACL snapshot/root ACE/ledger
+而不是 application startup 的 ephemeral preflight 模式；这样完整 Workspace admission 与 V3 legacy snapshot
+migration/ledger refresh 才是运行时同构证据。证据采集结束必须显式 repair 临时 Workspace 的 DACL snapshot/root ACE/ledger
 后再删除目录。`.github/workflows/platform-capability-probe.yml` 的 paths gate 同时覆盖 native source、
-vendored `isksh`、Windows sandbox 直接依赖的 Core tool/runtime 文件和 release evidence scripts。
+vendored `isksh`、Windows sandbox 直接依赖的 App/Builtin/Host/SPI 文件和 release evidence scripts。
 
 backend 选中后，user command 一旦可能启动就绝不跨 environment replay。只有 typed
 `backend_unavailable + pre_dispatch + cleanupConfirmed` 证明 native 用户命令未启动且 abandonment 已 durable
@@ -112,14 +126,16 @@ physical Win10 behavior。该 baseline 不会让任一 Windows development backe
 
 ADR-0101 将 native invocation protocol 提升到 V6。adapter 与 runner 必须以 manifest 内固定的
 `protocolVersion=6` 相互校验；V6 只描述 direct restricted-token invocation，显式携带 development
-`off | allow_all` authorization projection，并删除 backend mode、AppContainer identity 与 staging
-字段。只有带 `full_access` 的 `allow_all` 必须使用当前登录用户 token；更窄 scope fail closed，非网络
-approved filesystem invocation 使用 guard SID。
+network `off | allow_all` 与 filesystem `read_only | workspace_write | full_access` sealed-scope projection，并删除 backend mode、AppContainer identity 与 staging
+字段。只有 `interactionMode=full` 且 backend 明确支持 `full_access + allow_all` scope 时才可使用当前登录用户 token；更窄 scope fail closed，非网络
+approved filesystem invocation 暂时携带 protocol compatibility SID，但按 ADR-0132 不安装 protected-path deny。
 V1-V5 runner 必须在 user script 前 fail closed。
-`windows-runner-v1.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
+`windows-runner.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
 仓库当前 release pin 已由 canonical Windows build 固定为 0.8.3/V6 及其对应 binary digest；adapter
 仍必须拒绝 V1-V5 或 digest 不一致的 runner。native runner 改动后，只有同一可复现 Windows 构建重新
 生成并提交匹配 pin，才能恢复可用性；不得回退旧协议或手工复用旧 digest。
+当前 canonical digest 为
+`sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`。
 
 固定证据来自
 [Platform Capability Probe run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)，
@@ -151,7 +167,7 @@ Workspace-bound 只读工具、network-off 和两个入口组合证据；当前�
 
 backend discovery、sandbox 命令成功、顶层 shell invocation permit、PID namespace、
 `--die-with-parent`、child 自然退出或 proxy 环境变量都不是对应能力的 enforcement evidence。
-`ProcessTreeCapabilityEvidenceV1` 把 hard-count limiter 与 termination cleanup 分开投影；只有具名的
+`ProcessTreeCapabilityEvidence` 把 hard-count limiter 与 termination cleanup 分开投影；只有具名的
 cgroup pids、Windows Job active-process limit 或已接受等价机制同时通过 native conformance，
 前者才能为 `enforced`。成功清理 process group/Job descendants 不会提升 hard-count verdict。
 探针无法执行或不能证明时按 `unavailable/unsupported` 处理，最终结论为 `excluded`。
@@ -164,16 +180,15 @@ gate 才能改变已关闭 D-04 的空支持集并产生 production support 声�
 `supported`，只能在另行验证的无进程 fallback 条件下产生 `read_only_only`。
 
 当前 macOS 本机增量 probe 已能证明 Workspace read/write、Workspace read-only、Workspace 外
-read/write、protected Git/Agent config/credential/shell profile、symlink escape、network-off 和
+read/write、symlink escape、network-off 和
 shell descendant filesystem inheritance；executor 还使用逐 invocation、`0700`、结束清理且不
 共享的 runtime temp，返回前请求终止已跟踪 process group；未确认退出时 fail closed 并保留 runtime，
 确认后才以不跟随 symlink 的物理清理恢复 hostile mode/BSD immutable flag，删除不能确认时也
-fail closed。profile 还拒绝读取未列为 runtime
-dependency 的 `/private/etc/hosts`。这些只是
-未固定的开发 evidence。当前候选 profile 还从共享 protected-path 定义生成大小写不敏感的
-anchored regex，并由 native smoke 对 `.GIT/config` read 与 `.ENV.TEST` write 做负向验证；绑定
-`e6e0ffb51115c3380a1dcc340dd1627b3bdd0970` 的 Platform Capability Probe run `30705493919`
-已通过该候选场景。这仍是 raw candidate evidence，不是 release-pinned production qualification。
+fail closed。这些只是未固定的开发 evidence。ADR-0131 之后，Workspace 内
+`.GIT/config` read 与 `.ENV.TEST` write 必须正向通过；旧 run `30705493919` 的名称级负向场景已经过时，
+不得作为当前实现 evidence。按 ADR-0132，旧的 Workspace 外 protected identity native deny 场景同样过时；
+新证据必须证明敏感访问未经 Policy approval 不 dispatch、批准后 sealed scope 不被 native backend 二次拒绝，
+但本次 profile 变化尚无绑定当前 source 的 release-pinned native artifact。
 Seatbelt 没有实现并
 证明每次 Shell invocation 的硬 process-tree 数量上限，forked Skill/local stdio MCP 与两个
 production composition entrypoint 也尚未形成 native evidence，因此 outcome 仍必须是
@@ -194,7 +209,7 @@ Workspace 或其他宿主路径。Ubuntu workflow 区分“namespace probe 可�
 “runner 禁止 user namespace 因而明确排除”；后者保持 `backend=none`，不能用绿色 workflow
 伪装 bubblewrap native qualification。probe 还单独投影 bubblewrap `syscallFilter` 强度；vendored
 binary 存在但没有 negative syscall conformance 时仍为 `unavailable`，并产生稳定 limitation。
-protected path、syscall filter、硬 process-tree 上限和完整 child/入口继承未证明时，Linux 结论
+审批前 Policy/dispatch boundary、审批后 control-root 隐藏、syscall filter、硬 process-tree 上限和完整 child/入口继承未证明时，Linux 结论
 继续是 `excluded`。
 
 当前本地增量实现把 TUI 与 foreground CLI 收敛到同一个 App sandbox composition root，并为
@@ -208,7 +223,7 @@ MCP 明确为 false。GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`
 平台证据的唯一 authority；required job 必须在当前 head 上真实运行并上传经独立 verifier 校验的
 不可变 evidence/verification artifact。本地测试或代码存在不能替代该 artifact，也不能提前改变
 `excluded`/空支持集结论。PS-02 的实现验收与平台能力准入分开：没有绑定当前 head 的成功 Actions
-run 时，计划状态只能写 `waiting_ci`，不能把 workflow 存在写成 passed。allowlist 不会映射为 `allow_all`；App composition 对 descendant
+run 时，计划状态只能写 `waiting_ci`，不能把 workflow 存在写成 passed。allowlist 不会映射为 development `allow_all`；App composition 对 descendant
 allowlist 继续 fail closed。
 
 绑定提交 `28e857f8f41913feee5eacd17a2e61fe6cbb439e` 的
@@ -219,43 +234,12 @@ conformance、probe、独立 verifier 与 artifact upload，因此 PS-02 的实�
 `sha256:ba0016cc5d92e544e05fc9ce4f2aed5929134f3a20a59d2a576247a56b5dcff4`，Ubuntu 为
 `sha256:9023330ff608f959aeaadc529299f0074051bda31e21b1dfdd9ec0d914d6c077`，Windows 为
 `sha256:35d2422de603a53b191e047c02d55a152fa8c6d6f1809228902e33d369205548`。这只消除
-`waiting_ci`，不改变空 support set，也不把 candidate-only Linux diagnostics 纳入 production evidence。
+`waiting_ci`，不改变空 support set。当前版本已移除 evaluation-only Linux diagnostics；平台支持只消费本页列出的
+production contract tests、原生 probe 与 verifier artifact。未来诊断必须重新建立独立计划，不能恢复旧评测脚本。
 
-`scripts/evals/linux-cgroup-descendant-cleanup.ts` 只提供独立的 evaluation-only candidate diagnostic。
-它默认不分配 native scope；只有 workflow 或操作者显式设置
-`KITE_RUN_LINUX_CGROUP_DESCENDANT_CLEANUP=1`（或传入 `--native`）时，才会申请 Runtime-owned
-user scope，并验证 exact unit/`ControlGroup`、`pids.max`、fork `EAGAIN`、setsid/double-fork descendant
-ownership、exact `systemctl kill --kill-who=all` 以及 path 消失前的 `populated=0`/空
-`cgroup.procs`。非 Linux、缺 user systemd/cgroup v2 pids/controller/binaries、identity mismatch、scope
-提前消失或任一 cleanup/ownership 失败均只输出结构化 `unavailable`/`unsupported`。报告是 owner-only、canonical
-low-information、`candidate_only` artifact，独立于 `platform-capability-evidence`、support matrix、approved
-registry 与 verifier；失败分支先写入 fixture 私有 stop sentinel 并 bounded settle，cooperative stop 不能替代
-exact kill/empty evidence；workflow 只上传诊断 artifact，运行或失败都不能提升平台支持结论。
+## ExecutionBoundary schema 与 composition gate
 
-新增的 `scripts/evals/linux-full-chain.ts` 是第二个彼此独立的 evaluation-only candidate diagnostic。只有
-workflow 或操作者显式设置 `KITE_RUN_LINUX_FULL_CHAIN=1`（或传入 `--native`），且运行平台为 Linux 时，才会
-编译实际 release CLI/TUI entrypoint，分别将其作为内嵌 POSIX supervisor，使用真实 bubblewrap workspace/PID/network
-namespace 运行 setsid/double-fork fixture，并以宿主 `/proc` 的唯一 fixture token 与重新校验的 process-start identity
-确认 descendant 已观察到且最终退出。这里的 full-chain 仅指 native bubblewrap → POSIX supervisor helper → compiled
-CLI/TUI entrypoint 的组合链路；Provider/consumer 的 durable preparation lifecycle 与 cgroup hard-count 由独立
-production negative contract / cgroup diagnostic 覆盖，不由该 artifact 声称。namespace、workspace isolation、CLI/TUI
-compiled entrypoint、supervisor cleanup 或 descendant exit 任一失败均只产生结构化 `unavailable`/`unsupported`；non-Linux 在 binary probe 前安全
-返回 `unavailable`。所有 token-owned process 都经过有界 stop/reap，身份无法重新确认或 runtime 删除无法确认时保持
-cleanup failure，绝不升级为通过；detached descendant 在 setsid/double-fork 后将三路 stdio 安全重定向到 `/dev/null`，同时保留
-token 与宿主 process-start identity 可观测性，避免后代持有 supervisor output pipe。release executable 构建显式绑定
-repository root 与仓库 `tsconfig.json`，不得依赖 Bun 在不同平台或文件系统上自动推断 alias/root；compile 仍关闭
-dotenv、bunfig 与 package.json 自动加载。报告为 owner-only、canonical、low-information、`candidate_only` artifact；
-CLI 必须显式提供 `--output`，不默认写入 cwd 或 worktree。writer 先校验报告 digest，再要求
-输出位于 source worktree 之外的 canonical parent；parent 及新建祖先必须是当前 owner、POSIX `0700` 且全路径无 symlink，
-随后才以 no-follow exclusive regular file 与 `nlink=1` 发布，writer API 本身也 fail closed。独立于
-artifact 的 `coverage` 固定为 `bubblewrap_supervisor_release_entrypoints_only`，独立于
-`platform-capability-evidence`、support matrix、approved registry、release verifier 与 production Provider；该 workflow
-诊断在 runner temp 下先创建 owner-only `0700` 子目录；运行、缺失或失败都不能改变当前 excluded/空支持集，也不是 release gate；
-缺失输出的 upload 使用 warning/continue-on-error。
-
-## ExecutionBoundaryV1 schema 与 composition gate
-
-Task 1B.1 已在 Core 冻结 `ExecutionBoundaryV1`：filesystem 只允许
+`ExecutionBoundary` 由 Builtin sandbox contract 冻结，App config 只负责 production 解析：filesystem 只允许
 `read_only | workspace_write | full_access`，network 只允许 `off | allowlist`，local/private
 network 固定为 `false`，process-tree 上限必须是有限正整数。Workspace root 在解析时使用真实
 路径 canonicalize，并与 Workspace Trust 共用 `canonicalWorkspaceKey()`；allowlist 只接受精确
@@ -267,7 +251,7 @@ fallback 取 fail。不同 canonical Workspace 的边界禁止组合。
 
 production composition gate 不接受单一 `sandboxAvailable`，也不接受调用方传入 raw
 `supported | read_only_only`。它只读取
-`release/platform-capabilities/approved-execution-qualifications-v1.json`，校验固定 revision/digest，
+`release/platform-capabilities/approved-execution-qualifications.json`，校验固定 revision/digest，
 再按实际 OS release/version、architecture、Bun、backend、network mode 和 TUI/foreground CLI
 入口精确解析 qualification。probe 与 resolver 共用 canonical environment identity producer，且
 Windows identity 直接读取 Runtime 的 OS version API，不启动 PowerShell/CIM 子进程，避免冷启动或
@@ -291,7 +275,7 @@ Runner 都必须按 descriptor effects 拒绝进程内 writer；`network=off` �
 governed file read 对 Workspace 外路径仍只使用 observe-only `external_read`；external mutation 需要
 writer surface 与 exact approval，不能由只读 surface 或普通审批提升 capability ceiling。
 
-`loadProductionAgentConfig()` 是 2A composition root 必须使用的 Core 配置准入入口，并在返回
+`loadProductionAgentConfig()` 是 App composition root 必须使用的配置准入入口，并在返回
 任何可供 Runtime/进程使用的配置前完成 sealed gate；它不改变当前开发 TUI/CLI。当前静态
 support matrix 与批准 qualification registry 都是空支持集，1B.1 schema 或技术评估 fixture
 不能自行提升为 release approval。未来改变 registry 必须绑定新的固定 evidence/manifest，不能
@@ -302,16 +286,22 @@ CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enab
 `--no-sandbox` 等价 restriction 必须在 composition 阶段拒绝，不能获得 shell/process surface；
 成功的 production config 固定 `sandbox.enabled=true`，后续入口必须直接消费该 sealed config。
 
-PS-02 后三种 native backend 共享 `SandboxExecutionProviderV1` 协议，但共享协议不代表三者当前都可进入
+PS-02 后三种 native backend 共享 `SandboxExecutionProvider` 协议，但共享协议不代表三者当前都可进入
 production execution。composition 的 startup discovery 只解析静态候选；bubblewrap/cgroup 等会启动进程或申请
-资源的 usability probe 必须等 allocating preparation intent durable ack 后才由 Runtime consumer 执行。Provider
-不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
+资源的 usability probe 必须等 allocating preparation intent durable ack 后才由 Runtime lifecycle consumer
+执行。RM-13 后 consumer 只验证 durable identity 并调用 `@kite/runtime-host` 的唯一 process supervisor；
+Provider 不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
+
+App composition 的 preparation abort 不依赖平台 probe 主动观察 `AbortSignal`：一旦 controller 轮换，当前
+`prepare()` waiter 必须立即以 typed abort 收敛，下一次 `prepare()` 重新执行 discovery。旧 probe 的迟到结果或异常
+仍由组合层消费以避免未处理 rejection，但不得写入 cache、选择 backend 或触发 host/native dispatch。该边界保证
+Windows 等平台的阻塞式 discovery 不能占住 Runtime shutdown 或 Actions workflow，同时保持 discovery allocation-free。
 
 当前 Local Provider 对 Darwin Seatbelt 返回 `seatbelt_descendant_containment_unproven`：process group 无法覆盖
 `setsid`/detached descendant，不能据此提交 cleanup success。Windows restricted-token preparation/runtime codec
 使用 protocol V6 的严格 framed request/receipt 验证：allocating admission 在 durable intent 后创建唯一 runtime，
-返回 immutable transport；Runtime consumer 在 ready/dispatch ack 后唯一启动 runner，并且仅在 Job empty、ACL revoke
-与 runtime cleanup 皆确认后提交 disposal。`full_access` 与 `allow_all` 仍是对精确审批调用的 development authority，
+返回 immutable transport；Runtime consumer 在 ready/dispatch ack 后把 runner 交给唯一 Host spawn primitive，且仅在 Job empty、ACL revoke
+与 runtime cleanup 皆确认后提交 disposal。`filesystem=full_access`/`network=allow_all` 仍只是精确 invocation 的 development execution projection，
 不提供 strict network 或 production Full 资格。只有 Linux
 bubblewrap 的 workspace-scoped confinement 是当前可继续验证的候选；它仍需 native PID namespace/cgroup、完整
 descendant exit 与入口组合证据，不能由本机静态/单元测试升级。旧 Windows direct executor 不再是 production
@@ -327,14 +317,16 @@ sandbox restriction；二者都不是 detached/session descendant 的 owner/desc
 清理或 `proc_pidinfo` 身份读取都不能提升 Darwin 资格；没有新增原生 authority 前，allocating
 Seatbelt 继续 blocked/fail closed。
 `.github/workflows/platform-capability-probe.yml` 的 PR path gate 也覆盖
-`src/core/execution/sandbox-execution/**`、`src/protocol/sandbox-execution-provider.ts`、平台 probe
+`packages/builtin-runtime/src/sandbox/**`、`packages/runtime-host/src/**`、
+`packages/runtime-spi/src/sandbox-execution-provider.ts`、`apps/kite/src/sandbox/**` 与平台 probe
 脚本和 `tests/execution/**`；macOS required job 只运行 Seatbelt profile、Provider fail-closed contract 与
 POSIX supervisor detached/session negative/conformance，不再把旧 direct Seatbelt executor 的成功执行当作
 资格 oracle；Linux 运行对应 native bubblewrap candidate，三平台共同运行 `sandbox-execution-provider`
 contract。该 CI 运行只产生非生产候选 evidence，不改变当前空支持集。
 
-Windows 代码物理拆为 no-spawn `windows-preparation.ts` 与仅由 Runtime consumer/recovery 导入的
-`windows-runtime.ts`；静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。Local Provider
+Windows 代码物理拆为 Builtin-owned no-spawn `packages/builtin-runtime/src/sandbox/execution/windows-preparation.ts`
+与仅由 Runtime consumer/recovery 导入的 `windows-runtime.ts` lifecycle adapter；后者只能调用 Host spawn
+primitive。静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。Local Provider
 生成 transport 但不启动进程；当前
 Provider evidence 不把 direct restricted-token 尚未由 accepted qualification 证明的 Workspace 外 read、结构性
 network-off、syscall filter 或 process-tree hard-limit 维度标为 enforced；consumer 必须与 sealed expected
@@ -345,13 +337,16 @@ sandbox 可用，但不能解释为 production support。
 
 ## PS-02 原生证据边界（ADR-0116）
 
-PS-02 的 protocol、Pipeline、allocating lifecycle、consumer-owned spawn、recovery 与 no-bypass
+PS-02 的 protocol、Pipeline、allocating lifecycle、Host-owned spawn、recovery 与 no-bypass
 实现可以由定向 contract/conformance 测试验收；当前开发机不是三平台原生证据来源。原生平台资格只由
 `.github/workflows/platform-capability-probe.yml` 的 required GitHub-hosted matrix 提供。矩阵 job
 必须先通过声明的 native conformance，再运行 probe、独立 verifier 与 `if-no-files-found: error`
 的 artifact upload；任一 required step、source identity、canonical digest 或 artifact 缺失都使 job
 失败。Linux cgroup descendant cleanup 与 full-chain 仍是显式 opt-in candidate-only diagnostic，不能
 冒充该 evidence。
+Cross-platform exclusion contracts 在每个 runner 内固定 `max-concurrency=1` 并有 10 分钟硬上限；尤其
+Windows 不得让多个 Bun sandbox/process lifecycle fixture 并行持有 native handle，测试完成后进程不收敛
+也必须以 timeout 失败，不能无限占用 matrix 或跳过后续 Cargo/native E2E。
 
 该证据边界不改变当前 backend 的 fail-closed 行为或 production support 空集。workflow 配置、fake/DI、
 Docker、WSL、emulation 与本机非目标 OS 均不能宣称某次原生 Actions run 已通过；未绑定当前 head 的
@@ -416,5 +411,5 @@ Git replacement objects 在最小环境中固定禁用；common-dir replacement 
 重新创建，只有已经 active 的 worktree 才能轮换 recovery lease。
 
 Review handoff 对 tracked 内容使用 binary diff，对 untracked owned regular file 生成有界、SHA-256
-绑定、base64 binary-safe 的 `KITE_UNTRACKED_FILE_V1` 内容记录。symlink、特殊文件、硬链接、超限、
+绑定、base64 binary-safe 的 `KITE_UNTRACKED_FILE_` 内容记录。symlink、特殊文件、硬链接、超限、
 owner/path/前后快照变化全部 fail closed；changed-files 只有文件名而没有内容的 handoff 不再成立。

@@ -86,16 +86,14 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
     expect(pkg.scripts?.['test:model:live']).toContain('tests/e2e/live/model/');
     expect(pkg.scripts?.['test:model:live']).toContain('bun run');
-    expect(pkg.scripts?.['test:first-decision:live']).toBe(
-      'bun run scripts/evals/first-decision-eval.ts',
-    );
+    expect(pkg.scripts?.['test:first-decision:live']).toBeUndefined();
     expect(pkg.scripts?.['test:prompt:live']).toBeUndefined();
-    expect(pkg.scripts?.['test:prompt-cache:live']).toBe(
-      'bun run scripts/evals/prompt-cache-transition.ts',
-    );
-    expect(pkg.scripts?.['test:task-journey:live']).toBe(
-      'bun run scripts/evals/live-task-journey.ts',
-    );
+    expect(pkg.scripts?.['test:prompt-cache:live']).toBeUndefined();
+    expect(pkg.scripts?.['test:task-journey:live']).toBeUndefined();
+    expect(pkg.scripts?.['test:provider:smoke']).toBeUndefined();
+    expect(pkg.scripts?.['eval:replay:required']).toBeUndefined();
+    expect(pkg.scripts?.['eval:replay:record']).toBeUndefined();
+    expect(pkg.scripts?.['eval:r2:manifest']).toBeUndefined();
     expect(pkg.scripts?.['test:tui:system']).toContain('scripts/run-tui-system-tests.ts');
     expect(pkg.scripts?.['test:tui:harness']).toContain('tests/tui-system/harness/');
     expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain('tests/sandbox-executor.test.ts');

@@ -1,10 +1,13 @@
 import { deepStrictEqual, ok } from 'node:assert';
-import type { RuntimeUserAction } from '@/core/runtime/actions';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { AgentKernel } from '@/core/runtime/kernel';
-import { runRuntimeLoop } from '@/core/runtime/runner';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
+import type { RuntimeUserAction } from '#app/bootstrap/runtime/state-actions';
+import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 
 export interface GoldenFixture {
   name: string;
@@ -14,7 +17,7 @@ export interface GoldenFixture {
   effects: Array<{ events: RuntimeEvent[] }>;
   userActions?: Array<
     | { type: 'input'; text: string }
-    | { type: 'approve'; grant: 'approve_once' | 'same_command' | 'full_access' }
+    | { type: 'approve'; grant: 'approve_once' | 'same_command' }
     | { type: 'approve_plan'; executionMode: 'accept_edits' | 'auto' }
     | { type: 'waive_verification'; reason: string }
     | { type: 'complete_provider_action'; providerDirectoryRevision?: string }
@@ -38,12 +41,13 @@ function getByPath(value: unknown, path: string): unknown {
  * their output stable and their failures useful as kernel regressions.
  */
 export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeState> {
-  const base = createInitialRuntimeState({
+  const base = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `golden-${fixture.name}`,
     userId: 'golden-user',
     workspace: '/tmp/golden',
   });
-  const store = createRuntimeStore(':memory:');
+  const store = openStateStoreForTest(':memory:');
   const kernel = new AgentKernel({
     store,
     initialState: { ...base, ...fixture.initialState },
@@ -56,7 +60,7 @@ export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeStat
   const actions = [...(fixture.userActions ?? [])];
   const observedEffects: string[] = [];
   try {
-    for await (const event of runRuntimeLoop(
+    for await (const event of runStateRuntimeLoop(
       kernel,
       async (effect) => {
         observedEffects.push(effect.type);
@@ -70,7 +74,16 @@ export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeStat
           if (action.type === 'input')
             return { type: 'input', interactionId: effect.interactionId, text: action.text };
           if (action.type === 'approve')
-            return { type: 'approve', interactionId: effect.interactionId, grant: action.grant };
+            return {
+              type: 'approve',
+              interactionId: effect.interactionId,
+              generation:
+                state.pendingApprovals.get(effect.interactionId)?.generation ??
+                (() => {
+                  throw new Error(`${fixture.name}: approval has no durable queue generation`);
+                })(),
+              grant: action.grant,
+            };
           if (action.type === 'waive_verification') {
             if (effect.type !== 'request_verification_decision') {
               throw new Error(`${fixture.name}: verification waiver without a decision effect`);

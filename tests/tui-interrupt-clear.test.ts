@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { shouldCancelClearedInterrupt } from '../src/app/tui/interrupt-clear';
-import type { InterruptState } from '../src/app/tui/types';
+import { shouldCancelClearedInterrupt } from '../apps/kite/src/tui/interrupt-clear';
+import type { InterruptState } from '../apps/kite/src/tui/types';
 
 describe('TUI interrupt clear handling', () => {
   const approvalInterrupt: InterruptState = { kind: 'approval', blockId: 1 };

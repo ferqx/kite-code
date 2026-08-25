@@ -72,7 +72,7 @@ describe('ordinary open-source release candidate workflow', () => {
       'rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal',
       'bun run scripts/release/build-windows-runner.ts',
       'bun run scripts/release/windows-runner-evidence.ts',
-      'git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json',
+      'git diff --exit-code -- release/platform-capabilities/windows-runner.json',
       'bun run release:build',
     ];
     let previousIndex = -1;
@@ -83,7 +83,7 @@ describe('ordinary open-source release candidate workflow', () => {
     }
 
     for (const asset of [
-      'release/platform-capabilities/windows-runner-v1.json',
+      'release/platform-capabilities/windows-runner.json',
       'native/windows-sandbox-runner/target/release/kite-windows-runner.exe',
       'vendor/isksh/isksh.exe',
       'vendor/isksh/coreutils.exe',
@@ -95,15 +95,14 @@ describe('ordinary open-source release candidate workflow', () => {
     }
   });
 
-  test('keeps real Provider calls explicit, low-volume, and artifact-free', () => {
-    expect(workflow).toContain('run_live_provider_smoke');
-    expect(workflow).toContain("github.event_name == 'workflow_dispatch'");
-    expect(workflow).toContain('DEEPSEEK_API_KEY:');
-    expect(workflow).toContain('OPENCODE_API_KEY:');
-    expect(workflow).not.toContain('DASHSCOPE_API_KEY:');
-    expect(workflow).toContain('bun run test:provider:smoke -- --provider all');
-    const liveJob = workflow.slice(workflow.indexOf('  live-provider-smoke:'));
-    expect(liveJob).not.toContain('upload-artifact');
+  test('does not ship the retired evaluation or live-Provider jobs', () => {
+    expect(workflow).not.toContain('live-provider-smoke');
+    expect(workflow).not.toContain('run_live_provider_smoke');
+    expect(workflow).not.toContain('DEEPSEEK_API_KEY:');
+    expect(workflow).not.toContain('OPENCODE_API_KEY:');
+    expect(workflow).not.toContain('test:provider:smoke');
+    expect(workflow).not.toContain('scripts/evals/');
+    expect(workflow).not.toContain('tests/evals/');
   });
 
   test('pins all third-party Actions to immutable commits', () => {

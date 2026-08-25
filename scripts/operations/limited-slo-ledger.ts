@@ -1,13 +1,13 @@
 import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from '../release/canonical-json';
-import { releaseArtifactIdentityV1Schema } from '../release/evidence-schema';
+import { releaseArtifactIdentitySchema } from '../release/evidence-schema';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const commitSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const timestampSchema = z.iso.datetime({ offset: true });
 const MAX_RETAINED_SAMPLES = 10_000;
 
-export const limitedSloGithubSourceV1Schema = z
+export const limitedSloGithubSourceSchema = z
   .object({
     repository: z.literal('ferqx/kite-code'),
     repositoryId: z.literal('R_kgDOSKbi8g'),
@@ -38,7 +38,7 @@ export const limitedSloGithubSourceV1Schema = z
     }
   });
 
-export const limitedSloG0V1Schema = z
+export const limitedSloG0Schema = z
   .object({
     unauthorized_side_effects: z.number().int().nonnegative(),
     secret_or_content_egress: z.number().int().nonnegative(),
@@ -50,7 +50,7 @@ export const limitedSloG0V1Schema = z
 
 const admissionMaterialSchema = z
   .object({
-    schema: z.literal('LimitedSloAdmissionV1'),
+    schema: z.literal('LimitedSloAdmission'),
     sequence: z.number().int().positive().max(MAX_RETAINED_SAMPLES),
     admissionId: z.string().regex(/^admission_[a-f0-9]{32}$/),
     previousAdmissionDigest: digestSchema.nullable(),
@@ -59,13 +59,13 @@ const admissionMaterialSchema = z
   })
   .strict();
 
-export const limitedSloAdmissionV1Schema = admissionMaterialSchema.extend({
+export const limitedSloAdmissionSchema = admissionMaterialSchema.extend({
   admissionDigest: digestSchema,
 });
 
 const terminalReceiptMaterialSchema = z
   .object({
-    schema: z.literal('LimitedSloTerminalReceiptV1'),
+    schema: z.literal('LimitedSloTerminalReceipt'),
     sequence: z.number().int().positive().max(MAX_RETAINED_SAMPLES),
     terminalReceiptId: z.string().regex(/^terminal_[a-f0-9]{32}$/),
     admissionId: z.string().regex(/^admission_[a-f0-9]{32}$/),
@@ -81,7 +81,7 @@ const terminalReceiptMaterialSchema = z
     falseCompletion: z.boolean(),
     integrated: z.boolean(),
     reverted: z.boolean(),
-    g0: limitedSloG0V1Schema,
+    g0: limitedSloG0Schema,
     g1Failures: z.number().int().nonnegative(),
   })
   .strict()
@@ -102,19 +102,19 @@ const terminalReceiptMaterialSchema = z
     }
   });
 
-export const limitedSloTerminalReceiptV1Schema = terminalReceiptMaterialSchema.safeExtend({
+export const limitedSloTerminalReceiptSchema = terminalReceiptMaterialSchema.safeExtend({
   terminalDigest: digestSchema,
 });
 
 const ledgerMaterialSchema = z
   .object({
-    schema: z.literal('LimitedSloSampleLedgerV1'),
+    schema: z.literal('LimitedSloSampleLedger'),
     policyDigest: digestSchema,
     limitedApprovalDecisionDigest: digestSchema,
-    artifactIdentity: releaseArtifactIdentityV1Schema,
+    artifactIdentity: releaseArtifactIdentitySchema,
     routeDigest: digestSchema,
     cohortDigest: digestSchema,
-    source: limitedSloGithubSourceV1Schema,
+    source: limitedSloGithubSourceSchema,
     startedAt: timestampSchema,
     endedAt: timestampSchema,
     droppedSampleCount: z.literal(0),
@@ -123,25 +123,25 @@ const ledgerMaterialSchema = z
     ownerAvailabilityReceiptDigest: digestSchema,
     killSwitchAvailable: z.boolean(),
     killSwitchReceiptDigest: digestSchema,
-    admissions: z.array(limitedSloAdmissionV1Schema).max(MAX_RETAINED_SAMPLES),
-    terminalReceipts: z.array(limitedSloTerminalReceiptV1Schema).max(MAX_RETAINED_SAMPLES),
+    admissions: z.array(limitedSloAdmissionSchema).max(MAX_RETAINED_SAMPLES),
+    terminalReceipts: z.array(limitedSloTerminalReceiptSchema).max(MAX_RETAINED_SAMPLES),
   })
   .strict();
 
-export const limitedSloSampleLedgerV1Schema = ledgerMaterialSchema.extend({
+export const limitedSloSampleLedgerSchema = ledgerMaterialSchema.extend({
   ledgerDigest: digestSchema,
 });
 
-export type LimitedSloGithubSourceV1 = z.infer<typeof limitedSloGithubSourceV1Schema>;
-export type LimitedSloAdmissionMaterialV1 = z.infer<typeof admissionMaterialSchema>;
-export type LimitedSloAdmissionV1 = z.infer<typeof limitedSloAdmissionV1Schema>;
-export type LimitedSloTerminalReceiptMaterialV1 = z.infer<typeof terminalReceiptMaterialSchema>;
-export type LimitedSloTerminalReceiptV1 = z.infer<typeof limitedSloTerminalReceiptV1Schema>;
-export type LimitedSloSampleLedgerMaterialV1 = z.infer<typeof ledgerMaterialSchema>;
-export type LimitedSloSampleLedgerV1 = z.infer<typeof limitedSloSampleLedgerV1Schema>;
+export type LimitedSloGithubSource = z.infer<typeof limitedSloGithubSourceSchema>;
+export type LimitedSloAdmissionMaterial = z.infer<typeof admissionMaterialSchema>;
+export type LimitedSloAdmission = z.infer<typeof limitedSloAdmissionSchema>;
+export type LimitedSloTerminalReceiptMaterial = z.infer<typeof terminalReceiptMaterialSchema>;
+export type LimitedSloTerminalReceipt = z.infer<typeof limitedSloTerminalReceiptSchema>;
+export type LimitedSloSampleLedgerMaterial = z.infer<typeof ledgerMaterialSchema>;
+export type LimitedSloSampleLedger = z.infer<typeof limitedSloSampleLedgerSchema>;
 
-export interface LimitedSloRebuildV1 {
-  schema: 'LimitedSloRebuildV1';
+export interface LimitedSloRebuild {
+  schema: 'LimitedSloRebuild';
   startedAt: string;
   endedAt: string;
   sampleCount: number;
@@ -150,7 +150,7 @@ export interface LimitedSloRebuildV1 {
   ownerAvailable: boolean;
   killSwitchAvailable: boolean;
   droppedSampleCount: 0;
-  g0: z.infer<typeof limitedSloG0V1Schema>;
+  g0: z.infer<typeof limitedSloG0Schema>;
   g1Failures: number;
   denominators: {
     tasks: number;
@@ -171,61 +171,59 @@ export interface LimitedSloRebuildV1 {
   rebuildDigest: `sha256:${string}`;
 }
 
-export function computeLimitedSloAdmissionDigestV1(
-  input: LimitedSloAdmissionMaterialV1,
+export function computeLimitedSloAdmissionDigest(
+  input: LimitedSloAdmissionMaterial,
 ): `sha256:${string}` {
   const material = admissionMaterialSchema.parse(input);
   return sha256DomainSeparated('kite.operations.limited-slo-admission.v1', canonicalJson(material));
 }
 
-export function buildLimitedSloAdmissionV1(
-  input: LimitedSloAdmissionMaterialV1,
-): LimitedSloAdmissionV1 {
+export function buildLimitedSloAdmission(input: LimitedSloAdmissionMaterial): LimitedSloAdmission {
   const material = admissionMaterialSchema.parse(input);
-  return limitedSloAdmissionV1Schema.parse({
+  return limitedSloAdmissionSchema.parse({
     ...material,
-    admissionDigest: computeLimitedSloAdmissionDigestV1(material),
+    admissionDigest: computeLimitedSloAdmissionDigest(material),
   });
 }
 
-export function computeLimitedSloTerminalDigestV1(
-  input: LimitedSloTerminalReceiptMaterialV1,
+export function computeLimitedSloTerminalDigest(
+  input: LimitedSloTerminalReceiptMaterial,
 ): `sha256:${string}` {
   const material = terminalReceiptMaterialSchema.parse(input);
   return sha256DomainSeparated('kite.operations.limited-slo-terminal.v1', canonicalJson(material));
 }
 
-export function buildLimitedSloTerminalReceiptV1(
-  input: LimitedSloTerminalReceiptMaterialV1,
-): LimitedSloTerminalReceiptV1 {
+export function buildLimitedSloTerminalReceipt(
+  input: LimitedSloTerminalReceiptMaterial,
+): LimitedSloTerminalReceipt {
   const material = terminalReceiptMaterialSchema.parse(input);
-  return limitedSloTerminalReceiptV1Schema.parse({
+  return limitedSloTerminalReceiptSchema.parse({
     ...material,
-    terminalDigest: computeLimitedSloTerminalDigestV1(material),
+    terminalDigest: computeLimitedSloTerminalDigest(material),
   });
 }
 
-export function computeLimitedSloLedgerDigestV1(
-  input: LimitedSloSampleLedgerMaterialV1,
+export function computeLimitedSloLedgerDigest(
+  input: LimitedSloSampleLedgerMaterial,
 ): `sha256:${string}` {
   const material = ledgerMaterialSchema.parse(input);
   return sha256DomainSeparated('kite.operations.limited-slo-ledger.v1', canonicalJson(material));
 }
 
-export function buildLimitedSloSampleLedgerV1(
-  input: LimitedSloSampleLedgerMaterialV1,
-): LimitedSloSampleLedgerV1 {
+export function buildLimitedSloSampleLedger(
+  input: LimitedSloSampleLedgerMaterial,
+): LimitedSloSampleLedger {
   const material = ledgerMaterialSchema.parse(input);
-  const ledger = limitedSloSampleLedgerV1Schema.parse({
+  const ledger = limitedSloSampleLedgerSchema.parse({
     ...material,
-    ledgerDigest: computeLimitedSloLedgerDigestV1(material),
+    ledgerDigest: computeLimitedSloLedgerDigest(material),
   });
-  verifyLimitedSloSampleLedgerV1(ledger);
+  verifyLimitedSloSampleLedger(ledger);
   return ledger;
 }
 
-export function verifyLimitedSloSampleLedgerV1(raw: unknown): LimitedSloSampleLedgerV1 {
-  const ledger = limitedSloSampleLedgerV1Schema.parse(raw);
+export function verifyLimitedSloSampleLedger(raw: unknown): LimitedSloSampleLedger {
+  const ledger = limitedSloSampleLedgerSchema.parse(raw);
   if (Date.parse(ledger.endedAt) < Date.parse(ledger.startedAt)) {
     throw new Error('Limited SLO ledger observation window is invalid.');
   }
@@ -240,7 +238,7 @@ export function verifyLimitedSloSampleLedgerV1(raw: unknown): LimitedSloSampleLe
     throw new Error('Limited SLO source identity does not match the release artifact identity.');
   }
 
-  const admissions = new Map<string, LimitedSloAdmissionV1>();
+  const admissions = new Map<string, LimitedSloAdmission>();
   let previousAdmission: string | null = null;
   let previousAdmittedAt = Number.NEGATIVE_INFINITY;
   for (const [index, admission] of ledger.admissions.entries()) {
@@ -254,7 +252,7 @@ export function verifyLimitedSloSampleLedgerV1(raw: unknown): LimitedSloSampleLe
       throw new Error('Limited SLO ledger contains a duplicate admission identity.');
     }
     const { admissionDigest, ...material } = admission;
-    if (admissionDigest !== computeLimitedSloAdmissionDigestV1(material)) {
+    if (admissionDigest !== computeLimitedSloAdmissionDigest(material)) {
       throw new Error('Limited SLO admission digest mismatch.');
     }
     if (Date.parse(admission.admittedAt) < Date.parse(ledger.startedAt)) {
@@ -292,7 +290,7 @@ export function verifyLimitedSloSampleLedgerV1(raw: unknown): LimitedSloSampleLe
     }
     terminalByAdmission.add(terminal.admissionId);
     const { terminalDigest, ...material } = terminal;
-    if (terminalDigest !== computeLimitedSloTerminalDigestV1(material)) {
+    if (terminalDigest !== computeLimitedSloTerminalDigest(material)) {
       throw new Error('Limited SLO terminal receipt digest mismatch.');
     }
     if (
@@ -312,14 +310,14 @@ export function verifyLimitedSloSampleLedgerV1(raw: unknown): LimitedSloSampleLe
   }
 
   const { ledgerDigest, ...material } = ledger;
-  if (ledgerDigest !== computeLimitedSloLedgerDigestV1(material)) {
+  if (ledgerDigest !== computeLimitedSloLedgerDigest(material)) {
     throw new Error('Limited SLO ledger digest mismatch.');
   }
   return ledger;
 }
 
-export function rebuildLimitedSloObservationV1(raw: unknown): LimitedSloRebuildV1 {
-  const ledger = verifyLimitedSloSampleLedgerV1(raw);
+export function rebuildLimitedSloObservation(raw: unknown): LimitedSloRebuild {
+  const ledger = verifyLimitedSloSampleLedger(raw);
   const samples = ledger.terminalReceipts;
   const tasks = ledger.admissions.length;
   const recovery = samples.filter((sample) => sample.recoveryRequired);
@@ -339,7 +337,7 @@ export function rebuildLimitedSloObservationV1(raw: unknown): LimitedSloRebuildV
     g1Failures += sample.g1Failures;
   }
   const withoutDigest = {
-    schema: 'LimitedSloRebuildV1' as const,
+    schema: 'LimitedSloRebuild' as const,
     startedAt: ledger.startedAt,
     endedAt: ledger.endedAt,
     sampleCount: tasks,

@@ -106,6 +106,9 @@ describe('TUI PTY System — Workspace Trust', () => {
   step(
     'a trusted workspace skips the prompt on restart',
     async () => {
+      // RA-04 admits only one Runtime Host for a workspace. Release the
+      // original TUI's Host lease before starting the restarted process.
+      await tui.killAndWait();
       const proc = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
       restarted = proc;
       expect(screenContains(proc.viewport(), GATE_TEXT)).toBe(false);

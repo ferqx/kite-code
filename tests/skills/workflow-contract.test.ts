@@ -2,13 +2,17 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getFeatureFlags } from '@/core/config/features';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { evaluateSkillActivation, skillFrameInvalidationReason } from '@/core/skills/activation';
-import { refreshSkillCatalog } from '@/core/skills/catalog';
-import { activateSkillLifecycle, completeSkillLifecycle } from '@/core/skills/lifecycle';
-import { compileSkillWorkflow } from '@/core/skills/workflow';
+import {
+  activateSkillLifecycle,
+  compileSkillWorkflow,
+  completeSkillLifecycle,
+  evaluateSkillActivation,
+  refreshSkillCatalog,
+  skillFrameInvalidationReason,
+} from '@kite/builtin-runtime/skills';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import { getFeatureFlags } from '#app/config/features';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 let root: string;
 
@@ -103,7 +107,8 @@ describe('Skill Workflow Contract conformance', () => {
     const projectRoot = join(root, 'project');
     writeSkill(projectRoot);
     const snapshot = catalog(projectRoot);
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'skill-contract-flags',
       userId: 'user',
       workspace: root,
@@ -176,7 +181,8 @@ describe('Skill Workflow Contract conformance', () => {
     const projectRoot = join(root, 'project');
     const directory = writeSkill(projectRoot);
     const firstCatalog = catalog(projectRoot);
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'skill-contract-drift',
       userId: 'user',
       workspace: root,
@@ -186,7 +192,7 @@ describe('Skill Workflow Contract conformance', () => {
     const activation = evaluateSkillActivation({
       state,
       catalog: firstCatalog,
-      flags: getFeatureFlags({ features: { skillWorkflowV1: true, skillActivationV2: true } }),
+      flags: getFeatureFlags({ features: { skillWorkflow: true, skillActivation: true } }),
       request: {
         skillId: entry.descriptor.capabilityId,
         input: { target: 'README.md' },
@@ -210,7 +216,8 @@ describe('Skill Workflow Contract conformance', () => {
     const projectRoot = join(root, 'project');
     writeSkill(projectRoot);
     const snapshot = catalog(projectRoot);
-    let state = createInitialRuntimeState({
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'skill-contract-completion',
       userId: 'user',
       workspace: root,
@@ -220,7 +227,7 @@ describe('Skill Workflow Contract conformance', () => {
     const activation = evaluateSkillActivation({
       state,
       catalog: snapshot,
-      flags: getFeatureFlags({ features: { skillWorkflowV1: true, skillActivationV2: true } }),
+      flags: getFeatureFlags({ features: { skillWorkflow: true, skillActivation: true } }),
       request: {
         skillId: entry.descriptor.capabilityId,
         input: { target: 'README.md' },
@@ -259,7 +266,8 @@ describe('Skill Workflow Contract conformance', () => {
       `---\n${MANIFEST.replace('allow_implicit: false', 'allow_implicit: true').replace('mode: inline', 'mode: fork')}\n---\n\nForked contract.\n`,
     );
     const snapshot = catalog(projectRoot);
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'skill-contract-fork',
       userId: 'user',
       workspace: root,
@@ -270,7 +278,7 @@ describe('Skill Workflow Contract conformance', () => {
       {
         state,
         catalog: snapshot,
-        flags: getFeatureFlags({ features: { skillWorkflowV1: true, skillActivationV2: true } }),
+        flags: getFeatureFlags({ features: { skillWorkflow: true, skillActivation: true } }),
         verificationEnabled: true,
         runFork: async () => ({ ok: true, summary: 'not-json', toolCallCount: 0, durationMs: 1 }),
       },
@@ -286,7 +294,7 @@ describe('Skill Workflow Contract conformance', () => {
       {
         state,
         catalog: snapshot,
-        flags: getFeatureFlags({ features: { skillWorkflowV1: true, skillActivationV2: true } }),
+        flags: getFeatureFlags({ features: { skillWorkflow: true, skillActivation: true } }),
         verificationEnabled: true,
         runFork: async () => ({
           ok: true,

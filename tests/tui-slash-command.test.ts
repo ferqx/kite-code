@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseSlashCommand } from '../src/app/tui/hooks/useSlashCommand';
+import { parseSlashCommand } from '../apps/kite/src/tui/hooks/useSlashCommand';
 
 describe('parseSlashCommand', () => {
   test('returns null for non-slash input', () => {

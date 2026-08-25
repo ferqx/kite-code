@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { verifyBootstrapArtifact } from './bootstrap-verifier';
 import { canonicalJsonBytes, parseCanonicalJson, sha256Digest } from './canonical-json';
 
-export const RELEASE_PLATFORM_IDENTITIES_V1 = [
+export const RELEASE_PLATFORM_IDENTITIES_ = [
   'macos-15-seatbelt',
   'ubuntu-24.04-bubblewrap',
   'windows-server-2025-none',
@@ -12,11 +12,11 @@ export const RELEASE_PLATFORM_IDENTITIES_V1 = [
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
-export const syntheticPlatformLauncherIdentityV1Schema = z
+export const syntheticPlatformLauncherIdentitySchema = z
   .object({
     version: z.literal(1),
     kind: z.literal('synthetic-platform-launcher-identity-v1'),
-    platform: z.enum(RELEASE_PLATFORM_IDENTITIES_V1),
+    platform: z.enum(RELEASE_PLATFORM_IDENTITIES_),
     launcherSha256: digestSchema,
     canonicalManifestDigest: digestSchema,
     nativeSignatureStatus: z.literal('not_verified_synthetic_fixture'),
@@ -26,15 +26,15 @@ export const syntheticPlatformLauncherIdentityV1Schema = z
   })
   .strict();
 
-export type SyntheticPlatformLauncherIdentityV1 = z.infer<
-  typeof syntheticPlatformLauncherIdentityV1Schema
+export type SyntheticPlatformLauncherIdentity = z.infer<
+  typeof syntheticPlatformLauncherIdentitySchema
 >;
 
-export interface BlockedPlatformArtifactSmokeV1 {
+export interface BlockedPlatformArtifactSmoke {
   version: 1;
   status: 'blocked';
   reason: 'production_support_set_empty';
-  platform: SyntheticPlatformLauncherIdentityV1['platform'];
+  platform: SyntheticPlatformLauncherIdentity['platform'];
   nonDistributable: true;
   productionArtifact: false;
   checks: {
@@ -59,13 +59,13 @@ export class PlatformArtifactSmokeError extends Error {
  * Verify exact synthetic artifact and launcher bytes without executing either.
  * D-04 has no production-supported target, so success remains a blocked record.
  */
-export function runPlatformArtifactSmokeV1(input: {
+export function runPlatformArtifactSmoke(input: {
   artifactDirectory: string;
   launcherBytes: Uint8Array;
   launcherIdentity: unknown;
-}): BlockedPlatformArtifactSmokeV1 {
+}): BlockedPlatformArtifactSmoke {
   const artifact = verifyBootstrapArtifact(input.artifactDirectory);
-  const parsed = syntheticPlatformLauncherIdentityV1Schema.safeParse(input.launcherIdentity);
+  const parsed = syntheticPlatformLauncherIdentitySchema.safeParse(input.launcherIdentity);
   if (!parsed.success) throw new PlatformArtifactSmokeError('launcher_identity_invalid');
   const launcherIdentity = parsed.data;
   if (launcherIdentity.launcherSha256 !== sha256Digest(input.launcherBytes)) {
@@ -91,12 +91,12 @@ export function runPlatformArtifactSmokeV1(input: {
   };
 }
 
-export function createSyntheticPlatformLauncherIdentityV1(input: {
-  platform: SyntheticPlatformLauncherIdentityV1['platform'];
+export function createSyntheticPlatformLauncherIdentity(input: {
+  platform: SyntheticPlatformLauncherIdentity['platform'];
   launcherBytes: Uint8Array;
   canonicalManifestDigest: `sha256:${string}`;
-}): SyntheticPlatformLauncherIdentityV1 {
-  return syntheticPlatformLauncherIdentityV1Schema.parse({
+}): SyntheticPlatformLauncherIdentity {
+  return syntheticPlatformLauncherIdentitySchema.parse({
     version: 1,
     kind: 'synthetic-platform-launcher-identity-v1',
     platform: input.platform,
@@ -114,7 +114,7 @@ if (import.meta.main) {
   const launcherPath = resolve(process.argv[3] ?? 'scripts/release/bootstrap-verifier.ts');
   const identityPath = process.argv[4];
   if (!identityPath) throw new Error('A synthetic launcher identity JSON path is required.');
-  const result = runPlatformArtifactSmokeV1({
+  const result = runPlatformArtifactSmoke({
     artifactDirectory,
     launcherBytes: readFileSync(launcherPath),
     launcherIdentity: parseCanonicalJson(readFileSync(resolve(identityPath))),

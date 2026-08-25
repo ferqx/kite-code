@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { buildSyntheticFoundationGateRecordV1 } from '../../scripts/release/foundation-gate';
-import { replayReleaseGateV1 } from '../../scripts/release/gate-replay';
+import { buildSyntheticFoundationGateRecord } from '../../scripts/release/foundation-gate';
+import { replayReleaseGate } from '../../scripts/release/gate-replay';
 
 describe('Release Gate replay', () => {
   test('rebuilds the retained foundation decision byte-for-byte', () => {
-    const fixture = buildSyntheticFoundationGateRecordV1();
-    const result = replayReleaseGateV1({
+    const fixture = buildSyntheticFoundationGateRecord();
+    const result = replayReleaseGate({
       policy: fixture.policy,
       evidence: fixture.evidence,
       artifactIdentity: fixture.evidence.artifactIdentity,
@@ -21,9 +21,9 @@ describe('Release Gate replay', () => {
   });
 
   test('rejects a retained decision that does not match the retained inputs', () => {
-    const fixture = buildSyntheticFoundationGateRecordV1();
+    const fixture = buildSyntheticFoundationGateRecord();
     expect(() =>
-      replayReleaseGateV1({
+      replayReleaseGate({
         policy: fixture.policy,
         evidence: fixture.evidence,
         artifactIdentity: fixture.evidence.artifactIdentity,

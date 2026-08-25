@@ -1,14 +1,14 @@
 import {
-  type ProductionDistributionTargetIdentityV1,
-  parseProductionDistributionTargetIdentityV1,
-} from '../../src/core/config/release-profile';
-import { type ReleaseManifestV1, validateReleaseManifest } from './artifact-layout';
-import { type BehaviorDigestV1, generateBehaviorDigestV1 } from './behavior-digest';
+  type ProductionDistributionTargetIdentity,
+  parseProductionDistributionTargetIdentity,
+} from '#app/config/release-profile';
+import { type ReleaseManifest, validateReleaseManifest } from './artifact-layout';
+import { type BehaviorDigest, generateBehaviorDigest } from './behavior-digest';
 import { sha256Digest } from './canonical-json';
 
 export const PRODUCTION_RELEASE_ASSEMBLY_ENABLED = false as const;
 
-export interface ReleaseManifestIdentityFieldsV1 {
+export interface ReleaseManifestIdentityFields {
   productVersion: string;
   commitSha: string;
   buildTimestamp: string;
@@ -18,7 +18,7 @@ export interface ReleaseManifestIdentityFieldsV1 {
   agentContractDigest: `sha256:${string}`;
   modelVisibleToolRegistryDigest: `sha256:${string}`;
   defaultConfigDigest: `sha256:${string}`;
-  providerDataPolicyDigest: `sha256:${string}`;
+  providerRouteDigest: `sha256:${string}`;
   releaseGatePolicyDigest: `sha256:${string}`;
   runtimeSchedulingPolicyDigest: `sha256:${string}`;
   buildRecipeDigest: `sha256:${string}`;
@@ -28,12 +28,12 @@ export interface ReleaseManifestIdentityFieldsV1 {
   supportedProviderTypes: string[];
 }
 
-export function assembleReleaseManifestV1(input: {
+export function assembleReleaseManifest(input: {
   payloadBytes: Uint8Array;
-  fields: ReleaseManifestIdentityFieldsV1;
+  fields: ReleaseManifestIdentityFields;
   distributionMode: 'synthetic_non_distributable' | 'production';
   distributionTargetIdentity?: string;
-}): ReleaseManifestV1 {
+}): ReleaseManifest {
   if (input.distributionMode === 'synthetic_non_distributable') {
     if (input.distributionTargetIdentity !== undefined) {
       throw new Error(
@@ -41,7 +41,7 @@ export function assembleReleaseManifestV1(input: {
       );
     }
   } else {
-    const distributionTargetIdentity = parseProductionDistributionTargetIdentityV1(
+    const distributionTargetIdentity = parseProductionDistributionTargetIdentity(
       input.distributionTargetIdentity,
     );
     if (
@@ -58,7 +58,7 @@ export function assembleReleaseManifestV1(input: {
       'Production release assembly is disabled until real signing and distribution qualification are enabled.',
     );
   }
-  const manifest: ReleaseManifestV1 = {
+  const manifest: ReleaseManifest = {
     version: 1,
     ...structuredClone(input.fields),
     payloadSha256: sha256Digest(input.payloadBytes),
@@ -67,7 +67,7 @@ export function assembleReleaseManifestV1(input: {
   return Object.freeze(manifest);
 }
 
-export function generateReleaseManifestV1(input: {
+export function generateReleaseManifest(input: {
   payloadBytes: Uint8Array;
   productVersion: string;
   commitSha: string;
@@ -78,17 +78,17 @@ export function generateReleaseManifestV1(input: {
   distributionTargetIdentity?: string;
   supportedProviderTypes: string[];
   behaviorInput: unknown;
-}): { manifest: ReleaseManifestV1; behavior: BehaviorDigestV1 } {
-  const behavior = generateBehaviorDigestV1(input.behaviorInput);
+}): { manifest: ReleaseManifest; behavior: BehaviorDigest } {
+  const behavior = generateBehaviorDigest(input.behaviorInput);
   const items = behavior.items;
   const distributionMode =
     behavior.inputClass === 'production_resolved'
       ? ('production' as const)
       : ('synthetic_non_distributable' as const);
-  let distributionTargetIdentity: ProductionDistributionTargetIdentityV1 | undefined;
+  let distributionTargetIdentity: ProductionDistributionTargetIdentity | undefined;
   let supportedPlatforms = input.supportedPlatforms;
   if (distributionMode === 'production') {
-    distributionTargetIdentity = parseProductionDistributionTargetIdentityV1(
+    distributionTargetIdentity = parseProductionDistributionTargetIdentity(
       input.distributionTargetIdentity,
     );
     supportedPlatforms = [distributionTargetIdentity];
@@ -97,7 +97,7 @@ export function generateReleaseManifestV1(input: {
       'Synthetic release generation cannot consume a production distribution target.',
     );
   }
-  const manifest = assembleReleaseManifestV1({
+  const manifest = assembleReleaseManifest({
     payloadBytes: input.payloadBytes,
     distributionMode,
     distributionTargetIdentity,
@@ -111,7 +111,7 @@ export function generateReleaseManifestV1(input: {
       agentContractDigest: items.agentSystemContract.digest,
       modelVisibleToolRegistryDigest: items.toolRegistry.digest,
       defaultConfigDigest: items.defaultConfiguration.digest,
-      providerDataPolicyDigest: items.providerDataPolicy.digest,
+      providerRouteDigest: items.providerRoute.digest,
       releaseGatePolicyDigest: items.gatePolicy.digest,
       runtimeSchedulingPolicyDigest: items.runtimeSchedulingPolicy.digest,
       buildRecipeDigest: items.buildRecipe.digest,

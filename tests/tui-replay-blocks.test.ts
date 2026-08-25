@@ -1,9 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionDataToUI, TUI_REPLAY_CANCELLED_TEXT } from '../src/app/tui/replay-blocks';
-import type { SessionData } from '../src/core/persistence/sessions';
-import type { RuntimeEvent } from '../src/core/runtime/events';
-import { classifyFailure } from '../src/core/runtime/failures';
-import type { ToolApprovalPayload } from '../src/protocol/events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { ToolApprovalPayload } from '@kite/runtime-contract';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
+import type { SessionData } from '../apps/kite/src/bootstrap/runtime/session-persistence';
+import { createInitialState } from '../apps/kite/src/tui/initialState';
+import {
+  recoverPendingInteractionsForTui,
+  sessionDataToUI,
+  TUI_REPLAY_CANCELLED_TEXT,
+  TUI_REPLAY_UNKNOWN_TEXT,
+} from '../apps/kite/src/tui/replay-blocks';
 import { CURRENT_TEST_PLAN_IDENTITY, CURRENT_TEST_PLAN_REVIEW_FACTS } from './helpers/current-plan';
 import { currentRuntimeEvents } from './helpers/current-runtime-event';
 
@@ -21,10 +27,15 @@ const approval = {
   grantOptions: ['approve_once'],
   recommendedGrant: 'approve_once',
 } as unknown as ToolApprovalPayload;
+const APPROVAL_EVENT_METADATA = {
+  fullModeBypassEligible: false,
+  fullModePolicyBypassAllowed: false,
+} as const;
 
 function data(
   runtimeEvents: RuntimeEvent[],
   interrupt: SessionData['interrupt'] = null,
+  interactionMode: SessionData['interactionMode'] = 'accept_edits',
 ): SessionData {
   return {
     threadId: 'thread',
@@ -35,7 +46,7 @@ function data(
     modelName: 'test',
     thinkingLevel: null,
     plan: null,
-    planAuthMode: null,
+    interactionMode,
   };
 }
 
@@ -59,6 +70,7 @@ describe('TUI replay interaction recovery', () => {
           },
           {
             type: 'approval.requested',
+            ...APPROVAL_EVENT_METADATA,
             interactionId: 'approval-1',
             toolCallId: 'tool-1',
             approval,
@@ -80,7 +92,7 @@ describe('TUI replay interaction recovery', () => {
     );
   });
 
-  test('does not cancel a tool that crossed the started boundary', () => {
+  test('settles a tool that crossed the started boundary as unknown instead of leaving it running', () => {
     const result = sessionDataToUI(
       data([
         {
@@ -90,16 +102,23 @@ describe('TUI replay interaction recovery', () => {
           args: { command: 'echo ok' },
         },
         { type: 'tool.started', toolCallId: 'tool-1' },
-        { type: 'approval.requested', interactionId: 'approval-1', toolCallId: 'tool-1', approval },
+        {
+          type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
+          interactionId: 'approval-1',
+          toolCallId: 'tool-1',
+          approval,
+        },
       ]),
     );
 
     expect(result.interrupt).toBeNull();
     expect(cards(result)).toContainEqual(
-      expect.objectContaining({ callId: 'tool-1', status: 'running' }),
-    );
-    expect(cards(result).find((card) => card.callId === 'tool-1')?.summary).not.toBe(
-      TUI_REPLAY_CANCELLED_TEXT,
+      expect.objectContaining({
+        callId: 'tool-1',
+        status: 'error',
+        summary: TUI_REPLAY_UNKNOWN_TEXT,
+      }),
     );
   });
 
@@ -125,6 +144,7 @@ describe('TUI replay interaction recovery', () => {
       },
       {
         type: 'approval.requested',
+        ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-external-write',
         toolCallId: 'external-write',
         approval,
@@ -135,11 +155,80 @@ describe('TUI replay interaction recovery', () => {
 
     expect(result.interrupt).toBeNull();
     expect(result.pendingToolCalls).toEqual({});
-    expect(cards(result).some((card) => card.summary === TUI_REPLAY_CANCELLED_TEXT)).toBe(false);
+    expect(cards(result)).toContainEqual(
+      expect.objectContaining({
+        callId: 'external-write',
+        status: 'error',
+        summary: TUI_REPLAY_UNKNOWN_TEXT,
+      }),
+    );
     // Replay owns no Runtime event and leaves the canonical fact untouched for
     // the next client to recover as an unknown invocation.
     expect(events).toHaveLength(3);
     expect(events[1]).toMatchObject({ type: 'capability.invocation_recorded' });
+  });
+
+  test('settles running Subagents and unfinished model text during cross-process replay', () => {
+    const result = sessionDataToUI(
+      data([
+        {
+          type: 'subagent.started',
+          subagent: {
+            id: 'review-agent',
+            role: 'review',
+            task: 'Review the Runtime recovery boundary.',
+          },
+        },
+        {
+          type: 'model.text_delta',
+          text: 'partial response',
+        },
+      ]),
+    );
+
+    expect(result.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: 'subagent',
+        subagentId: 'review-agent',
+        status: 'error',
+        summary: TUI_REPLAY_UNKNOWN_TEXT,
+      }),
+    );
+    expect(result.blocks).toContainEqual(
+      expect.objectContaining({ kind: 'text', streaming: false }),
+    );
+  });
+
+  test('does not turn an approval-suspended Subagent back into a running spinner', () => {
+    const initial = createInitialState();
+    initial.turns = [
+      {
+        blocks: [
+          {
+            id: 1,
+            kind: 'subagent',
+            subagentId: 'approval-suspended-child',
+            role: 'review',
+            task: 'Review storage boundaries.',
+            status: 'suspended',
+            summary: 'Waiting for approval',
+            toolCallCount: 1,
+            durationMs: 10,
+            steps: [],
+            awaitingApproval: true,
+            approvalState: 'awaiting_user',
+          },
+        ],
+      },
+    ];
+
+    const recovered = recoverPendingInteractionsForTui(initial, []);
+    expect(recovered.turns[0]?.blocks[0]).toMatchObject({
+      kind: 'subagent',
+      status: 'cancelled',
+      summary: TUI_REPLAY_CANCELLED_TEXT,
+      awaitingApproval: false,
+    });
   });
 
   test('recovers ask_user without leaving a pending input prompt', () => {
@@ -200,24 +289,28 @@ describe('TUI replay interaction recovery', () => {
   test('restores the approved plan execution mode for the Footer', () => {
     const plan = { name: 'Plan', description: 'Do it', status: 'pending' as const, steps: [] };
     const result = sessionDataToUI(
-      data([
-        { type: 'tool.queued', toolCallId: 'plan-1', name: 'write_plan', args: {} },
-        {
-          type: 'plan.review_requested',
-          interactionId: 'plan-interaction',
-          toolCallId: 'plan-1',
-          ...CURRENT_TEST_PLAN_REVIEW_FACTS,
-          plan,
-          planSummary: plan.description,
-        },
-        {
-          type: 'plan.approved',
-          interactionId: 'plan-interaction',
-          toolCallId: 'plan-1',
-          ...CURRENT_TEST_PLAN_IDENTITY,
-          executionMode: 'auto',
-        },
-      ]),
+      data(
+        [
+          { type: 'tool.queued', toolCallId: 'plan-1', name: 'write_plan', args: {} },
+          {
+            type: 'plan.review_requested',
+            interactionId: 'plan-interaction',
+            toolCallId: 'plan-1',
+            ...CURRENT_TEST_PLAN_REVIEW_FACTS,
+            plan,
+            planSummary: plan.description,
+          },
+          {
+            type: 'plan.approved',
+            interactionId: 'plan-interaction',
+            toolCallId: 'plan-1',
+            ...CURRENT_TEST_PLAN_IDENTITY,
+            executionMode: 'auto',
+          },
+        ],
+        null,
+        'auto',
+      ),
     );
 
     expect(result.interactionMode).toBe('auto');
@@ -255,6 +348,21 @@ describe('TUI replay interaction recovery', () => {
     expect(result.interactionMode).toBe('accept_edits');
   });
 
+  test('uses restored Kernel mode instead of a stale historical Full event', () => {
+    const result = sessionDataToUI(
+      data([
+        {
+          type: 'interaction_mode.changed',
+          mode: 'full',
+          source: 'user',
+          changedAt: '2026-08-14T12:00:00.000Z',
+        },
+      ]),
+    );
+
+    expect(result.interactionMode).toBe('accept_edits');
+  });
+
   test('recovers an interrupted auto_review without creating human approval UI', () => {
     const result = sessionDataToUI(
       data([
@@ -266,6 +374,7 @@ describe('TUI replay interaction recovery', () => {
         },
         {
           type: 'auto_review.requested',
+          ...APPROVAL_EVENT_METADATA,
           reviewId: 'review-1',
           toolCallId: 'tool-2',
           toolName: 'shell_execute',
@@ -296,6 +405,7 @@ describe('TUI replay interaction recovery', () => {
         },
         {
           type: 'auto_review.requested',
+          ...APPROVAL_EVENT_METADATA,
           reviewId: 'legacy-review',
           toolCallId: 'tool-legacy-review',
           toolName: 'shell_execute',
@@ -328,6 +438,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'approved-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'approval-granted',
           toolCallId: 'approved-tool',
           approval,
@@ -337,6 +448,8 @@ describe('TUI replay interaction recovery', () => {
           interactionId: 'approval-granted',
           toolCallId: 'approved-tool',
           grant: 'approve_once',
+          receiptId: 'receipt-approved-tool',
+          generation: 0,
         },
       ]),
     );
@@ -345,6 +458,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'rejected-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'approval-rejected',
           toolCallId: 'rejected-tool',
           approval,
@@ -353,6 +467,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'approval.rejected',
           interactionId: 'approval-rejected',
           toolCallId: 'rejected-tool',
+          generation: 0,
           reason: 'Tool approval cancelled by user.',
         },
       ]),
@@ -377,6 +492,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'started-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'approval-started',
           toolCallId: 'started-tool',
           approval,
@@ -402,6 +518,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'started-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'stale-approval',
           toolCallId: 'started-tool',
           approval: { ...approval, callId: 'started-tool' },
@@ -410,6 +527,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'rejected-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'rejected-approval',
           toolCallId: 'rejected-tool',
           approval: { ...approval, callId: 'rejected-tool' },
@@ -418,6 +536,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'approval.rejected',
           interactionId: 'rejected-approval',
           toolCallId: 'rejected-tool',
+          generation: 0,
           reason: 'Tool approval cancelled by user.',
         },
       ]),
@@ -439,6 +558,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'finished-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'stale-completed-approval',
           toolCallId: 'finished-tool',
           approval: { ...approval, callId: 'finished-tool' },
@@ -452,6 +572,7 @@ describe('TUI replay interaction recovery', () => {
         { type: 'tool.queued', toolCallId: 'rejected-tool', name: 'shell_execute', args: {} },
         {
           type: 'approval.requested',
+          ...APPROVAL_EVENT_METADATA,
           interactionId: 'rejected-approval',
           toolCallId: 'rejected-tool',
           approval: { ...approval, callId: 'rejected-tool' },
@@ -460,6 +581,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'approval.rejected',
           interactionId: 'rejected-approval',
           toolCallId: 'rejected-tool',
+          generation: 0,
           reason: 'Tool approval cancelled by user.',
         },
       ]),

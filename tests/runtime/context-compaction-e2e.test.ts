@@ -1,21 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  type ContextCompactor,
-  executeContextCompaction,
-} from '../../src/core/controllers/compaction-controller';
-import { expectedCompactionSourceDigest } from '../../src/core/model/compaction-summary';
-import type { ContextTokenEstimate } from '../../src/core/model/context-budget';
+import type { ContextCompactionCheckpoint } from '@kite/agent-kernel';
+import type { ContextTokenEstimate } from '@kite/builtin-runtime/model';
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
-} from '../../src/core/model/context-projection';
-import type { ContextCompactionCheckpoint } from '../../src/core/runtime/context-compaction';
-import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
-import { AgentKernel } from '../../src/core/runtime/kernel';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { decideNextEffect } from '../../src/core/runtime/scheduler';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
-import { createRuntimeStore } from '../../src/core/runtime/store';
+  expectedCompactionSourceDigest,
+} from '@kite/builtin-runtime/model';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import {
+  type ContextCompactor,
+  executeContextCompaction,
+} from '#app/bootstrap/runtime/context-compaction-effect';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
+import { createTestRuntimeEffectExecutor, testBuiltinToolCatalog } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const estimate: ContextTokenEstimate = {
@@ -29,7 +29,12 @@ const estimate: ContextTokenEstimate = {
 };
 
 function requested(reason: 'manual' | 'auto' = 'manual') {
-  const state = createInitialRuntimeState({ threadId: 'e2e', userId: 'u', workspace: '/ws' });
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'e2e',
+    userId: 'u',
+    workspace: '/ws',
+  });
   state.transcript.messages = [
     {
       kind: 'user',
@@ -167,7 +172,7 @@ describe('narrative compaction e2e', () => {
   test('revision-stale results are rejected by the Kernel lease', () => {
     const state = requested();
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openStateStoreForTest(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -179,7 +184,7 @@ describe('narrative compaction e2e', () => {
 
   test('Runtime effect lease suppresses a duplicate compaction dispatch', async () => {
     const state = requested();
-    const store = createRuntimeStore(':memory:');
+    const store = openStateStoreForTest(':memory:');
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -216,10 +221,11 @@ describe('narrative compaction e2e', () => {
       },
       model: createMockModel([]),
       runtimeStore: store,
-      contextCompactor,
+      builtinToolCatalog: testBuiltinToolCatalog(),
+      testContextCompactor: contextCompactor,
     };
-    const firstExecutor = createRuntimeEffectExecutor(dependencies);
-    const secondExecutor = createRuntimeEffectExecutor(dependencies);
+    const firstExecutor = createTestRuntimeEffectExecutor(dependencies);
+    const secondExecutor = createTestRuntimeEffectExecutor(dependencies);
 
     try {
       const first = firstExecutor({ type: 'compact_context', compactionId: 'compact-1' }, state);
@@ -243,6 +249,53 @@ describe('narrative compaction e2e', () => {
       );
     } finally {
       release();
+      store.close();
+    }
+  });
+
+  test('a lost Runtime effect lease prevents compaction Provider dispatch', async () => {
+    const state = requested();
+    const store = openStateStoreForTest(':memory:');
+    let compactorCalls = 0;
+    const runtimeStore = {
+      ...store,
+      effects: { ...store.effects, renew: () => false },
+    };
+    const executor = createTestRuntimeEffectExecutor({
+      config: {
+        providerName: 'test',
+        providerType: 'openai-compatible' as const,
+        apiKey: 'test',
+        baseURL: 'http://localhost:1',
+        modelName: 'test',
+        sandbox: { enabled: true },
+      },
+      model: createMockModel([]),
+      runtimeStore,
+      builtinToolCatalog: testBuiltinToolCatalog(),
+      testContextCompactor: async ({ sourceRevision, pending, projectionEnvironment }) => {
+        compactorCalls += 1;
+        return checkpointFor(
+          state,
+          pending.reason,
+          sourceRevision,
+          'This Provider must never be called.',
+          projectionEnvironment,
+        );
+      },
+    });
+
+    try {
+      expect(
+        await executor({ type: 'compact_context', compactionId: 'compact-1' }, state),
+      ).toContainEqual(
+        expect.objectContaining({
+          type: 'context.compaction_failed',
+          message: 'Runtime effect lease was lost before dispatch.',
+        }),
+      );
+      expect(compactorCalls).toBe(0);
+    } finally {
       store.close();
     }
   });

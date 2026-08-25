@@ -2,70 +2,55 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_FEATURE_FLAGS, getFeatureFlags, parseFeatureOverride } from '#app/config/features';
+import { loadAgentConfig } from '#app/config/index';
 import { parseArgs } from '@/app/cli/index';
-import {
-  DEFAULT_FEATURE_FLAGS,
-  getFeatureFlags,
-  parseFeatureOverride,
-} from '@/core/config/features';
-import { loadAgentConfig } from '@/core/config/index';
-import { resolveAutoReviewTimeout } from '@/core/runtime/executor';
+import { resolveAutoReviewTimeout } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
 
 describe('feature flags', () => {
   test('uses registered defaults and accepts partial config overrides', () => {
     expect(getFeatureFlags()).toEqual(DEFAULT_FEATURE_FLAGS);
-    expect(getFeatureFlags({ features: { autoReviewV2: true } }).autoReviewV2).toBe(true);
-    expect(getFeatureFlags({ features: { autoReviewV2: true } }).loopMode).toBe(false);
-    expect(getFeatureFlags().capabilityCatalogV1).toBe(true);
-    expect(getFeatureFlags().mcpRuntimeBindingV1).toBe(true);
-    expect(getFeatureFlags().toolSearchV1).toBe(true);
-    expect(getFeatureFlags().contextCompactionV2).toBe(true);
-    expect(getFeatureFlags().contextCompactionAutoV1).toBe(false);
-    expect(getFeatureFlags().contextCompactionManualV1).toBe(true);
-    expect(getFeatureFlags().verificationV1).toBe(false);
-    expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
-    expect(getFeatureFlags().sessionLoggingPolicyV1).toBe(true);
-    expect(getFeatureFlags().providerDataPolicyV1).toBe(false);
-    expect(getFeatureFlags().remoteMcpEgressPolicyV1).toBe(false);
-    expect(getFeatureFlags().resourceBudgetV1).toBe(false);
-    expect(getFeatureFlags().boundedCancellationV1).toBe(false);
-    expect(getFeatureFlags().terminalOutcomeV1).toBe(false);
-    expect(getFeatureFlags().executionBoundaryV1).toBe(false);
-    expect(getFeatureFlags().networkBoundaryV1).toBe(false);
-    expect(getFeatureFlags().observabilityMetricsV1).toBe(false);
-    expect(getFeatureFlags().promptContractV2).toBe(true);
-    expect(getFeatureFlags({ features: { promptContractV2: false } }).promptContractV2).toBe(false);
-    expect(getFeatureFlags({ features: { promptContractV2: true } }).promptContractV2).toBe(true);
-    expect(
-      getFeatureFlags({ features: { boundedCancellationV1: true } }).boundedCancellationV1,
-    ).toBe(true);
-    expect(getFeatureFlags({ features: { verificationV1: true } }).verificationV1).toBe(true);
-    expect(getFeatureFlags({ features: { mcpRuntimeBindingV1: true } }).mcpRuntimeBindingV1).toBe(
+    expect(getFeatureFlags({ features: { autoReview: true } }).autoReview).toBe(true);
+    expect(getFeatureFlags({ features: { autoReview: true } }).loopMode).toBe(false);
+    expect(getFeatureFlags().capabilityCatalog).toBe(true);
+    expect(getFeatureFlags().mcpRuntimeBinding).toBe(true);
+    expect(getFeatureFlags().toolSearch).toBe(true);
+    expect(getFeatureFlags().contextCompaction).toBe(true);
+    expect(getFeatureFlags().contextCompactionAuto).toBe(false);
+    expect(getFeatureFlags().contextCompactionManual).toBe(true);
+    expect(getFeatureFlags().verification).toBe(false);
+    expect(getFeatureFlags().mcpProviderAction).toBe(false);
+    expect(getFeatureFlags().sessionLoggingPolicy).toBe(true);
+    expect(getFeatureFlags().resourceBudget).toBe(false);
+    expect(getFeatureFlags().boundedCancellation).toBe(false);
+    expect(getFeatureFlags().terminalOutcome).toBe(false);
+    expect(getFeatureFlags().executionBoundary).toBe(false);
+    expect(getFeatureFlags().networkBoundary).toBe(false);
+    expect(getFeatureFlags().observabilityMetrics).toBe(false);
+    expect(getFeatureFlags({ features: { boundedCancellation: true } }).boundedCancellation).toBe(
       true,
     );
+    expect(getFeatureFlags({ features: { verification: true } }).verification).toBe(true);
+    expect(getFeatureFlags({ features: { mcpRuntimeBinding: true } }).mcpRuntimeBinding).toBe(true);
   });
 
   test('parses CLI overrides and rejects unknown flags', () => {
-    expect(parseFeatureOverride('autoReviewV2')).toEqual({ autoReviewV2: true });
-    expect(parseFeatureOverride('autoReviewV2=false')).toEqual({ autoReviewV2: false });
-    expect(parseFeatureOverride('mcpRuntimeBindingV1')).toEqual({ mcpRuntimeBindingV1: true });
-    expect(parseFeatureOverride('mcpProviderActionV1')).toEqual({ mcpProviderActionV1: true });
-    expect(parseFeatureOverride('verificationV1=false')).toEqual({ verificationV1: false });
-    expect(parseFeatureOverride('contextCompactionAutoV1')).toEqual({
-      contextCompactionAutoV1: true,
+    expect(parseFeatureOverride('autoReview')).toEqual({ autoReview: true });
+    expect(parseFeatureOverride('autoReview=false')).toEqual({ autoReview: false });
+    expect(parseFeatureOverride('mcpRuntimeBinding')).toEqual({ mcpRuntimeBinding: true });
+    expect(parseFeatureOverride('mcpProviderAction')).toEqual({ mcpProviderAction: true });
+    expect(parseFeatureOverride('verification=false')).toEqual({ verification: false });
+    expect(parseFeatureOverride('contextCompactionAuto')).toEqual({
+      contextCompactionAuto: true,
     });
-    expect(parseFeatureOverride('resourceBudgetV1')).toEqual({ resourceBudgetV1: true });
-    expect(parseFeatureOverride('boundedCancellationV1')).toEqual({
-      boundedCancellationV1: true,
+    expect(parseFeatureOverride('resourceBudget')).toEqual({ resourceBudget: true });
+    expect(parseFeatureOverride('boundedCancellation')).toEqual({
+      boundedCancellation: true,
     });
-    expect(parseFeatureOverride('terminalOutcomeV1=false')).toEqual({ terminalOutcomeV1: false });
-    expect(parseFeatureOverride('executionBoundaryV1')).toEqual({ executionBoundaryV1: true });
-    expect(parseFeatureOverride('networkBoundaryV1')).toEqual({ networkBoundaryV1: true });
-    expect(parseFeatureOverride('remoteMcpEgressPolicyV1')).toEqual({
-      remoteMcpEgressPolicyV1: true,
-    });
-    expect(parseFeatureOverride('promptContractV2=true')).toEqual({ promptContractV2: true });
-    expect(parseFeatureOverride('promptContractV2=false')).toEqual({ promptContractV2: false });
+    expect(parseFeatureOverride('terminalOutcome=false')).toEqual({ terminalOutcome: false });
+    expect(parseFeatureOverride('executionBoundary')).toEqual({ executionBoundary: true });
+    expect(parseFeatureOverride('networkBoundary')).toEqual({ networkBoundary: true });
+    expect(() => parseFeatureOverride('promptContract=false')).toThrow('Unknown feature flag');
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });
 
@@ -75,43 +60,40 @@ describe('feature flags', () => {
       const configPath = join(dir, 'kite-code.jsonc');
       writeFileSync(
         configPath,
-        '{ "features": { "autoReviewV2": true, "promptContractV2": true }, "provider": { "ollama": {} } }',
+        '{ "features": { "autoReview": true }, "provider": { "ollama": {} } }',
       );
       const loaded = loadAgentConfig({ configPath, providerName: 'ollama' });
-      expect(loaded.features).toEqual({
-        autoReviewV2: true,
-        promptContractV2: true,
-      });
+      expect(loaded.features).toEqual({ autoReview: true });
       expect(loaded.sessionLoggingPolicy?.mode).toBe('metadata');
       expect(
-        parseArgs(['run', '--feature', 'autoReviewV2=false', '--feature', 'loopMode'])
+        parseArgs(['run', '--feature', 'autoReview=false', '--feature', 'loopMode'])
           .featureOverrides,
-      ).toEqual({ autoReviewV2: false, loopMode: true });
+      ).toEqual({ autoReview: false, loopMode: true });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test('rejects CLI attempts to enable release-controlled execution boundaries', () => {
-    expect(() => parseArgs(['run', '--feature', 'executionBoundaryV1'])).toThrow(
+    expect(() => parseArgs(['run', '--feature', 'executionBoundary'])).toThrow(
       'release-controlled',
     );
-    expect(() => parseArgs(['run', '--feature', 'networkBoundaryV1=true'])).toThrow(
+    expect(() => parseArgs(['run', '--feature', 'networkBoundary=true'])).toThrow(
       'release-controlled',
     );
-    expect(parseArgs(['run', '--feature', 'networkBoundaryV1=false']).featureOverrides).toEqual({
-      networkBoundaryV1: false,
+    expect(parseArgs(['run', '--feature', 'networkBoundary=false']).featureOverrides).toEqual({
+      networkBoundary: false,
     });
-    expect(() => parseArgs(['run', '--feature', 'observabilityMetricsV1=true'])).toThrow(
+    expect(() => parseArgs(['run', '--feature', 'observabilityMetrics=true'])).toThrow(
       'release-controlled',
     );
-    expect(
-      parseArgs(['run', '--feature', 'observabilityMetricsV1=false']).featureOverrides,
-    ).toEqual({ observabilityMetricsV1: false });
+    expect(parseArgs(['run', '--feature', 'observabilityMetrics=false']).featureOverrides).toEqual({
+      observabilityMetrics: false,
+    });
     expect(parseArgs(['run', '--telemetry-status']).telemetryStatus).toBe(true);
   });
 
-  test('keeps the legacy reviewer timeout until autoReviewV2 is enabled', () => {
+  test('uses the configured reviewer timeout independently of rollout admission', () => {
     const config = {
       apiKey: '',
       baseURL: 'http://localhost:11434',
@@ -121,7 +103,7 @@ describe('feature flags', () => {
       sandbox: { enabled: true },
       autoReview: { timeoutMs: 321 },
     };
-    expect(resolveAutoReviewTimeout({ ...config, features: { autoReviewV2: false } })).toBe(15_000);
-    expect(resolveAutoReviewTimeout({ ...config, features: { autoReviewV2: true } })).toBe(321);
+    expect(resolveAutoReviewTimeout({ ...config, features: { autoReview: false } })).toBe(321);
+    expect(resolveAutoReviewTimeout({ ...config, features: { autoReview: true } })).toBe(321);
   });
 });

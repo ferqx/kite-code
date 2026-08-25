@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { McpConnectionManager } from '@/core/mcp/manager';
+import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 
 const endpoint = 'https://docs.langchain.com/mcp';
 const searchTool = 'search_docs_by_lang_chain';

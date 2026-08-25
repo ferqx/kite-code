@@ -54,7 +54,7 @@ for (const plan of plans) {
   if (!source.includes('状态：superseded'))
     failures.push(`${plan}: must remain a superseded historical plan`);
   if (!source.includes('ADR-0069')) failures.push(`${plan}: missing ADR-0069 terminal-scope note`);
-  if (!source.includes('release/oss-first-release/task-status-v2.json')) {
+  if (!source.includes('release/oss-first-release/task-status.json')) {
     failures.push(`${plan}: missing current Task status authority`);
   }
   const headingIds = [...source.matchAll(/^### Task ([^：:\n]+)[：:]/gm)].map((match) => match[1]);
@@ -71,9 +71,7 @@ if (new Set(allTaskIds).size !== allTaskIds.length)
   failures.push('historical Task IDs are not unique');
 
 const registry = registrySchema.parse(
-  JSON.parse(
-    readFileSync(join(root, 'release', 'oss-first-release', 'task-status-v2.json'), 'utf8'),
-  ),
+  JSON.parse(readFileSync(join(root, 'release', 'oss-first-release', 'task-status.json'), 'utf8')),
 );
 const categories = registry.categories;
 if (categories.first_release_required.status !== 'completed') {

@@ -1,13 +1,13 @@
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { computePlanStructuralDigest } from '@/core/runtime/state';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type {
   AgentPlan,
   PlanArtifactRef,
-  PlanCompletionEvidenceV1,
+  PlanCompletionEvidence,
   PlanDocument,
-} from '@/protocol/events';
+} from '@kite/runtime-contract';
 
-export function emptyCurrentPlanEvidence(): PlanCompletionEvidenceV1 {
+export function emptyCurrentPlanEvidence(): PlanCompletionEvidence {
   return {
     schemaVersion: 1,
     verification: [],
@@ -55,7 +55,7 @@ export function currentPlanArtifact(
 export function currentPlanDocument(
   input: Omit<PlanDocument, 'planSchemaVersion' | 'completionEvidence' | 'artifact'> & {
     taskId?: string;
-    completionEvidence?: PlanCompletionEvidenceV1;
+    completionEvidence?: PlanCompletionEvidence;
     artifact?: PlanArtifactRef;
   },
 ): PlanDocument {

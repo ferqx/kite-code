@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-18（可信 Runtime 收敛计划已完成并归档）
+最后更新：2026-08-23（RAV1 production implementation、三平台 Platform/OSS 与正式 7×8 qualification/verifier 已闭合）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -21,12 +21,12 @@
 | 记录 | 状态 | 范围 | 读取时机 |
 | --- | --- | --- | --- |
 | `../active/six-concept-runtime-architecture.md` | active | Agent、Runtime Kernel、Capability、Policy、Execution、Verification 总体架构 | 修改跨模块 Runtime 架构、能力治理、执行或完成语义时。 |
+| `../active/runtime-authority-boundary.md` | active | RAV1 authority sequence、可信域、attacker、持久完整性、真实 process boundary 与短生命周期 frame material | 修改 identity、Grant/Receipt、持久完整性、子进程协议、Model/MCP transport、Credential broker 或 State/Store cutover 时。 |
 | `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
 | `../active/plan-state-reminder.md` | active | Runtime 动态状态投影与缓存敏感消息布局 | 修改 `src/core/model/context.ts`、`runtime-context.ts`、Plan/Mode/Verification 投影时。 |
 | `../active/model-provider-boundary.md` | active | AI SDK provider 配置、适配器和专有行为 | 修改 `src/core/config`、`src/core/model` 或 provider 文档时。 |
 | `../active/private-artifact-storage.md` | active | Model evidence 的私有不可变存储、keyed opaque ref、原子发布与全 fork reachability GC | 修改 private immutable storage primitive、Model Artifact Store、权限、完整性 key、retention 或 GC 时。 |
 | `../active/tool-gated-autonomy.md` | active | Capability 执行、审批、授权、sandbox 与完成边界 | 修改 Tool Controller、Runtime Policy、Scheduler 或能力执行测试时。 |
-| `../active/real-model-test-boundary.md` | active | 测试发现、真实模型端到端套件、package 脚本 | 修改测试命名、`package.json` 测试脚本或真实模型套件。 |
 | `../active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
 | `../active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
 | `../active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
@@ -44,11 +44,13 @@
 | `../active/tui-localization.md` | active | TUI 中英文文案、用户级 `language` 偏好、地区解析、Static 重建与展示层边界 | 修改 TUI 本地化、`/language`、自有交互文案、语言切换或启动前 locale 读取时。 |
 | `../active/tui-e2e-testing-limits.md` | active | PTY 能力、平台差异与测试分层边界 | 编写 TUI E2E、处理 PTY flaky 或选择测试层次时。 |
 | `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
+| `../active/pre-release-architecture.md` | active | 未发布阶段的无版本命名 clean cutover、唯一 composition root、兼容路径零保留与静态门禁 | 修改生产标识符、包导出、兼容路径、模块边界或发布前架构门禁时必读。 |
 | `../active/plan-mode-implementation.md` | active | Plan Artifact、planning/building、plan_review 与恢复 | 修改 Plan 生命周期、工具、策略或 TUI 审核交互时。 |
 | `../active/plan-artifact-lifecycle.md` | active | Plan Artifact 持久化、提交校验、审核交互与 Runtime 恢复边界 | 修改 `write_plan`、Plan review、Task 生命周期、Runtime Context、TUI/CLI 审核展示或会话恢复时必读。 |
 | `../active/completion-guard.md` | active | CompletionGuard V1、完成前的可审计 blocker 与一次纠正语义 | 修改 Runtime 完成语义、Scheduler、Runner、Plan/Skill 生命周期或相关测试时必读。 |
 | `../active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
 | `../active/session-logging-policy.md` | active | Session logger 的 off/metadata/content 组合、metadata allowlist 与正文禁止边界 | 修改 SessionLogCollector、日志事件映射、日志目录创建或 sessionLoggingPolicyV1 时必读。 |
+| `../active/sqlite-runtime-log-query.md` | active | SQLite Runtime Store 的只读会话与事件查询、展示投影与数据边界 | 修改 Runtime Store event/session 数据、日志查询 Contract、SQLite reader、App 日志展示投影，或实现本地日志 Server/Web 时。 |
 | `../active/execution-platform-support.md` | active | 生产执行平台的原生能力探针、技术结论与治理准入矩阵 | 修改 sandbox backend、process-tree/network 边界、TUI/CLI 入口组合或平台发布支持声明时必读。 |
 | `../active/execution-boundary.md` | active | Release-pinned ExecutionBoundaryV1、sealed qualification registry 与 production composition gate | 修改生产执行边界、sandbox capability projection、只读 fallback catalog 或 executionBoundaryV1 flag 时必读。 |
 | `../active/windows-shell-sandbox.md` | active | Windows Shell 沙箱 — direct restricted-token、受管 Online 身份与 strict qualification 边界 | 修改 Windows execution backend、native runner、ACL/Job/ledger、受管身份、native 协议或 Windows filesystem/network/Full/fallback 边界时必读。 |
@@ -68,11 +70,7 @@
 | `../active/capability-progressive-disclosure.md` | active | MCP/Skill 大目录按预算披露、metadata 搜索、下一轮有限 binding 与 fail-closed | 修改 capability catalog、模型工具上下文、`capability_search`、MCP binding 或 Skill activation 可见性时必读。 |
 | `../active/release-control.md` | active | Release Profile、canonical artifact/evidence、Gate replay 与 disabled production 边界 | 修改 release manifest/profile、artifact verifier、Gate 或 rollout 时必读。 |
 | `../active/open-source-first-release.md` | active | 单维护者开源首发的 G0/G1、候选包、真实 Provider smoke、能力默认关闭与状态权威 | 修改首发 Gate、候选 workflow、安装器、真实 Provider smoke 或 108 Task 状态时必读。 |
-| `../active/opencode-go-journey-evaluation-policy.md` | active | OpenCode/Go journey 评估的准入、证据和判定边界 | 修改相关 journey 评估、fixture、资格证据或发布结论时必读。 |
-| `../active/agent-task-evaluation.md` | active | Agent task suite、oracle、重复运行、dogfood 与产品验收证据 | 修改 Agent task case、fixture、threshold、human review 或 evaluation adapter 时必读。 |
-| `../active/model-replay-evaluation-policy.md` | active | Keyless model replay 的 cassette 内容域、suite authority、risk promotion 与 baseline 更新边界 | 修改 record/replay source、cassette、fixture、oracle、normalizer 或 replay gate 时必读。 |
 | `../active/observability-privacy-operations.md` | active | 无正文 metric、consent、dashboard/SLO、alert、incident 与单维护者运营 | 修改 observability、telemetry status、SLO/alert 或 incident rehearsal 时必读。 |
-| `../active/compaction-release-qualification.md` | active | Compaction 结构/语义/continuation/route qualification 与 no-compaction handoff | 修改 compaction evaluator、route qualification、rollout 或 handoff 时必读。 |
 | `../active/capability-release-tracks.md` | active | Verification、MCP write、Skills readonly/effectful profile、admission 与 maturity 边界 | 修改 capability profile、Verification release、MCP write 或 Skill effect 分类时必读。 |
 
 ## 理解记录
@@ -110,6 +108,7 @@
 | `backlog/tui-issues.md` | active | TUI 待修复项清单：已知缺口、清理方向、依赖项。 |
 | `backlog/2026-06-01-deep-user-audit.md` | active | B14-B26 工程债务清单：死代码、缓存竞态、schema 臃肿、语言一致性等。 |
 | `backlog/2026-06-08-product-experience-gaps.md` | active | B27-B33 产品体验缺口：跨会话记忆、Web Search、默认模型、Diff 渲染、Token 展示等。 |
+| `backlog/2026-08-22-macos-isolated-execution-backend.md` | backlog | B34 macOS 真正隔离命令执行后端：以受管理 VM 或等价调用级 process-tree authority 替代未证明的 Seatbelt containment。 |
 
 ## Plans（实施计划）
 
@@ -119,6 +118,30 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md` | completed | 记录 ADR-0127 简化切换、过度设计删除、State26/Store5、用户 model 修复保留、本地 Gate 与 final-SHA GitHub qualification。 |
+| `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | superseded | ADR-0127 已删除该记录中的推测性 key/authority inventory；仅保留历史。 |
+| `execution/completed/2026-08-22-rav1-01-project-layered-identity.md` | superseded | ProjectIdentityStore/ProjectHandle 已删除；当前只有 canonical Workspace identity。 |
+| `execution/completed/2026-08-22-rav1-02-grant-receipt-authenticity.md` | superseded | persisted authority 与 child key/HMAC 已删除；当前使用 strict Store/control frame。 |
+| `execution/completed/2026-08-22-rav1-03-data-origin-egress-credential.md` | superseded | DataOrigin/EgressAuthority/permit 已删除；真实 CredentialBroker 保留。 |
+| `execution/completed/2026-08-22-rav1-04-single-host-invariant.md` | superseded | 进程级 single-Host lock 已删除；SQLite transaction/revision/lease 保留。 |
+| `execution/completed/2026-08-22-rav1-05-state26-store5-conformance.md` | superseded | authority ledger 版本已删除；当前 Store5 exact DDL 为 7 tables/2 indexes。 |
+| `execution/completed/2026-08-22-rav1-06-new-epoch-cutover.md` | superseded | 旧 SHA qualification 不证明 ADR-0127 后实现；总计划已重开。 |
+| `execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md` | completed | 记录 RMV1-16 静态 Kernel domains、29 个 Builtin operation、唯一 composition root、Legacy/central owner 清零、State25/Store4/原 epoch 保持及全量 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-15-model-context.md` | completed | 记录 RMV1-15 Model Surface、Gateway/transport/response source、Context/Prompt/Compaction/Reviewer 的 SPI/Builtin/App ownership、Legacy operation 清零与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-14-verification-subagent.md` | completed | 记录 RMV1-14 Verification/Subagent/Plan/Task operation、private SPI、deterministic executor、Child Driver ownership 与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-13-shell-sandbox.md` | completed | 记录 RMV1-13 Shell/Sandbox、Host process supervisor、App availability composition、Legacy 删除与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-12-filesystem-read-write.md` | completed | 记录 RMV1-12 Filesystem/Git SPI、Builtin executor、Local Provider、grant/evidence 与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-10-tool-search-pilot-slice.md` | completed | 记录 RMV1-10 Host execution port、唯一 Builtin `tool_search` vertical slice、Legacy 删除与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-11-skills-context-mcp-read.md` | completed | 记录 RMV1-11 Skills/Context/MCP/Web 物理 ownership、Provider 边界收敛、Legacy 删除与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-09-capability-binding-execution-traits-scheduler.md` | completed | 记录 RMV1-09 唯一 Builtin binding provider、SPI pure arbitration、State 25 traits projection、Kernel name-free scheduler 与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-08-runtime-spi-registry-legacy-module.md` | completed | 记录 RMV1-08 私有 Runtime SPI、冻结 Registry、Host lifecycle、唯一 LegacyRuntimeModule、29 operation owner 与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-07-pure-kernel-extraction.md` | completed | 记录 RMV1-07 纯 Kernel transition owner、Host `KernelInput`/`DecisionFacts` translation、Store 4 commit-before-memory、单次 `AuthorizedEffect`、Legacy 删除与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-06-host-lifecycle-cancellation-recovery.md` | completed | 记录 RMV1-06 Host root AbortController、cleanup barrier、durable-before-signal、transaction acknowledgement、单-Store effect lease fencing、restart recovery 与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-04-storage-port-v4-adapter.md` | completed | 记录 RMV1-04 Host storage ports、唯一 v4 adapter、四类 transaction mapping、App 注入与 Store4/State25/原 epoch/restore/fault Gate。 |
+| `execution/completed/2026-08-20-rmv1-05-runtime-host-session-registry-mailbox.md` | completed | 记录 RMV1-05 Host production RuntimeAccess、SessionRegistry/FIFO mailbox、并发/冲突/幂等、committed Query、gap snapshot、有界 stream、单 legacy bridge 与 Required Gate。 |
+| `execution/completed/2026-08-20-rmv1-03-runtime-contract-app-relocation.md` | completed | 记录 RMV1-03 Runtime Contract、CLI/TUI App 迁移、单一 LegacyRuntimeAccess、root executable shim 与 Client authority 静态/journey Gate；State 25、Store 4 和原 epoch 保持不变。 |
+| `execution/completed/2026-08-20-rmv1-02-workspace-package-gates.md` | completed | 记录 RMV1-02 六包+App workspace、根 build/typecheck/test 编排、依赖/exports/唯一组合根静态 Gate；production owner 与 CLI/TUI 入口尚未迁移，RAV1 仍 blocked。 |
+| `execution/completed/2026-08-20-rmv1-01-baseline-manifests.md` | completed | 记录 RMV1-01 State/Event/Store/package/export baseline、owner/delete/source 清单、完整性 verifier 与 journey/replay/fault/CI soak Gate；RMV1 仍 active，RAV1 仍 blocked。 |
 | `execution/completed/2026-08-18-trustworthy-runtime-convergence.md` | completed | 记录 Model/Tool/Replay/三条 Provider seam 与 CUT-01 schema v25/epoch 收敛；旧格式无迁移、无 dispatch、无 fallback。 |
 | `execution/completed/2026-08-18-ps02-sandbox-provider-native-fail-closed-evidence.md` | completed | 记录 PS-02 Sandbox Provider seam 实现与绑定 head 的三平台 Required native fail-closed evidence；不提升空 production support set。 |
 | `execution/completed/2026-08-09-prompt-contract-v2.md` | completed | 记录 Prompt Contract V2 四层投影、项目指令、工具/MCP 契约、59.85% token 降幅、真实模型 A/B 与完整 Windows 门禁。 |

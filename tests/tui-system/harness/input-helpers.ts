@@ -11,6 +11,7 @@ export async function sleep(ms: number): Promise<void> {
 
 const INPUT_SETTLE_MS = 100;
 const INPUT_ECHO_TIMEOUT_MS = 2_000;
+const INPUT_PASTE_ECHO_TIMEOUT_MS = 5_000;
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
@@ -193,13 +194,16 @@ export async function activateSessionSearch(tui: PtyProcess, timeoutMs = 5_000):
     throw new Error('Cannot activate session search because the session selector is not visible.');
   }
 
-  tui.write('\x1b[A');
   const effectiveTimeout = tuiWaitTimeout(timeoutMs);
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     await tui.settleScreen();
     const input = activeInput(tui.inputViewport());
     if (input?.kind === 'session-search' && input.value === '') return;
+    // Session recency is intentionally not inferred from the second-granularity
+    // updated_at projection. Move one semantic row at a time until the search
+    // surface owns input, regardless of which session row was initially selected.
+    tui.write('\x1b[A');
     await sleep(tuiPollInterval(25));
   }
   throw new Error(
@@ -213,6 +217,7 @@ async function waitForInputEcho(
   expectedKind: ActiveInput['kind'] | undefined,
   allowFocusTransfer: boolean,
   timeoutMs: number,
+  allowCompletionPrefix = false,
 ): Promise<void> {
   const effectiveTimeout = tuiWaitTimeout(timeoutMs);
   const start = Date.now();
@@ -222,7 +227,8 @@ async function waitForInputEcho(
     const current = activeInput(tui.inputViewport());
     lastInput = current;
     if (
-      current?.value === expectedValue &&
+      (current?.value === expectedValue ||
+        (allowCompletionPrefix && current?.value.startsWith(expectedValue))) &&
       (current.kind === expectedKind || (allowFocusTransfer && expectedValue.length > 0))
     ) {
       return;
@@ -232,6 +238,20 @@ async function waitForInputEcho(
   throw new Error(
     `Timeout (${effectiveTimeout}ms) waiting for active input value ${JSON.stringify(expectedValue)}; ` +
       `last active input was ${JSON.stringify(lastInput)}. Input viewport:\n${tui.inputViewport().slice(-1_000)}`,
+  );
+}
+
+async function waitForFocusedMainInputReady(tui: PtyProcess, timeoutMs: number): Promise<void> {
+  const effectiveTimeout = tuiWaitTimeout(timeoutMs);
+  const start = Date.now();
+  while (Date.now() - start < effectiveTimeout) {
+    await tui.settleScreen();
+    if (tui.focusedMainInputReady()) return;
+    await sleep(tuiPollInterval(25));
+  }
+  throw new Error(
+    `Timeout (${effectiveTimeout}ms) waiting for the focused main input listener. ` +
+      `Input viewport:\n${tui.inputViewport().slice(-1_000)}`,
   );
 }
 
@@ -307,6 +327,23 @@ export async function typeText(
     initial = await clearActiveInputTo(tui, '', initial.kind, options.testTiming);
   }
   const baselineValue = options.append ? initial.value : '';
+  if (
+    !options.append &&
+    initial.kind === 'main' &&
+    baselineValue.length === 0 &&
+    /\s/u.test(text) &&
+    !text.startsWith('/')
+  ) {
+    // Internal spaces are not projected consistently enough for a safe
+    // per-character receipt on every Ink/PTY surface. Wait for the focused
+    // handler, then deliver the complete replacement once. Bun's byte-count
+    // result cannot authorize a replay across supported runtime versions.
+    await pasteText(tui, text, {
+      echoTimeoutMs: options.testTiming?.echoTimeoutMs,
+      settleMs: options.testTiming?.settleMs,
+    });
+    return;
+  }
   const expectedValue = `${baselineValue}${normalizeInputEcho(text)}`;
   const characters = Array.from(text);
   const attempts = characters.length <= INPUT_RETRY_LIMIT ? INPUT_DELIVERY_ATTEMPTS : 1;
@@ -319,6 +356,21 @@ export async function typeText(
         tui.write(ch);
         delivered += ch;
         if (delayMs > 0) await sleep(delayMs);
+
+        // `terminal.write()` is fire-and-forget.  Under Bun 1.3 on a busy CI
+        // runner, a later character can still be queued while the viewport
+        // has already advanced.  Confirm each prefix before sending the next
+        // byte so a retry can never race an undrained input transaction.
+        if (!/\s$/u.test(ch)) {
+          await waitForInputEcho(
+            tui,
+            normalizeInputEcho(delivered),
+            initial.kind,
+            !options.append && baselineValue.length === 0,
+            options.testTiming?.echoTimeoutMs ?? INPUT_ECHO_TIMEOUT_MS,
+            text.startsWith('/'),
+          );
+        }
         if (SELECTOR_COMMAND_PREFIX.test(delivered) && index < characters.length - 1) {
           // Ink first commits the command match and only then installs the
           // argument selector's key handlers. On slower CI hosts, sending the
@@ -353,13 +405,16 @@ export async function typeText(
       lastError = error;
       if (attempt === attempts) break;
       if (!options.append && baselineValue.length === 0) {
-        // The VT projection trims a whitespace-only input line. Rolling back
-        // only until activeInput() looks empty can therefore leave invisible
-        // spaces behind, changing the next user message or `/command`. A
-        // replacement transaction owns an empty baseline, so it is safe to
-        // delete every attempted character plus a bounded stale-whitespace
-        // margin even when some bytes were never delivered.
-        await clearInput(tui, characters.length + INPUT_RETRY_EMPTY_BASELINE_MARGIN, {
+        // First drain the actual visible transaction one receipt at a time.
+        // Sending a blind character-count of backspaces can overtake bytes
+        // still queued in the PTY and leave the retried text appended to the
+        // first attempt (for example `messageMes`).
+        initial = await clearActiveInputTo(tui, '', initial.kind, options.testTiming);
+
+        // The VT projection may omit a whitespace-only line.  Only after the
+        // visible input has been proven empty is it safe to spend a bounded
+        // margin on those non-visible bytes.
+        await clearInput(tui, INPUT_RETRY_EMPTY_BASELINE_MARGIN, {
           requireReceipt: false,
           delayMs: options.testTiming?.retryBackspaceDelayMs,
         });
@@ -378,7 +433,7 @@ export async function typeText(
     }
   }
 
-  const tail = stripAnsi(tui.transcript()).slice(-1_000);
+  const tail = stripAnsi(tui.transcript()).slice(-8_000);
   throw new Error(
     `PTY input delivery failed after ${attempts} attempt(s) for ${JSON.stringify(text)}. Last output:\n${tail}`,
     { cause: lastError },
@@ -387,9 +442,10 @@ export async function typeText(
 
 /**
  * Deliver one bracketed-paste transaction and require an exact active-input
- * receipt. A PTY may occasionally drop the whole transaction before Ink sees
- * it; retry only while the input is still provably empty. Partial or altered
- * delivery fails closed because replaying could duplicate user content.
+ * receipt. An absent viewport receipt cannot prove that Ink did not receive
+ * the write, so this helper never replays an accepted or ambiguous
+ * transaction. Partial, altered, or delayed delivery fails closed instead of
+ * risking duplicate user content.
  */
 export async function pasteText(
   tui: PtyProcess,
@@ -397,6 +453,11 @@ export async function pasteText(
   testTiming: Pick<InputDeliveryTestTiming, 'echoTimeoutMs' | 'settleMs'> = {},
 ): Promise<void> {
   if (text.length === 0) throw new Error('pasteText requires non-empty text');
+  // The PTY fixture forces ANSI modifiers so InputLine's inverse cursor is a
+  // deterministic, side-effect-free listener receipt even under CI. Never
+  // probe readiness by writing a character into the user's input: a delayed
+  // probe can outlive its cleanup and contaminate the following paste.
+  await waitForFocusedMainInputReady(tui, testTiming.echoTimeoutMs ?? INPUT_PASTE_ECHO_TIMEOUT_MS);
   await tui.settleScreen();
   const initial = activeInput(tui.inputViewport());
   if (!initial || initial.value.length > 0) {
@@ -404,35 +465,28 @@ export async function pasteText(
   }
 
   const expectedValue = normalizeInputEcho(text);
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= INPUT_DELIVERY_ATTEMPTS; attempt++) {
-    tui.write(`\x1b[200~${text}\x1b[201~`);
-    await sleep(testTiming.settleMs ?? INPUT_SETTLE_MS);
-    try {
-      await waitForInputEcho(
-        tui,
-        expectedValue,
-        initial.kind,
-        false,
-        testTiming.echoTimeoutMs ?? INPUT_ECHO_TIMEOUT_MS,
-      );
-      return;
-    } catch (error) {
-      lastError = error;
-      await tui.settleScreen();
-      const current = activeInput(tui.inputViewport());
-      if (!current || current.kind !== initial.kind || current.value.length > 0) {
-        throw new Error('Bracketed paste produced a partial or altered input; refusing replay', {
-          cause: error,
-        });
-      }
+  await tui.writeExact(`\x1b[200~${text}\x1b[201~`);
+  await sleep(testTiming.settleMs ?? INPUT_SETTLE_MS);
+  try {
+    await waitForInputEcho(
+      tui,
+      expectedValue,
+      initial.kind,
+      false,
+      testTiming.echoTimeoutMs ?? INPUT_PASTE_ECHO_TIMEOUT_MS,
+    );
+  } catch (error) {
+    await tui.settleScreen();
+    const current = activeInput(tui.inputViewport());
+    if (!current || current.kind !== initial.kind || current.value.length > 0) {
+      throw new Error('Bracketed paste produced a partial or altered input; refusing replay', {
+        cause: error,
+      });
     }
+    throw new Error('Bracketed paste produced no exact receipt; refusing replay', {
+      cause: error,
+    });
   }
-
-  throw new Error(
-    `PTY bracketed-paste delivery failed after ${INPUT_DELIVERY_ATTEMPTS} empty-input attempt(s)`,
-    { cause: lastError },
-  );
 }
 
 /** Type into a masked field whose real value cannot be confirmed from PTY output. */

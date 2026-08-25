@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { verifyReleaseSchemaRollbackFixtureV1 } from '../../scripts/release/schema-rollback';
+import { verifyReleaseSchemaRollbackFixture } from '../../scripts/release/schema-rollback';
 
 const digest = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`;
 const facts = [
@@ -30,7 +30,7 @@ const facts = [
 ] as const;
 
 const fixture = {
-  schema: 'ReleaseSchemaRollbackFixtureV1',
+  schema: 'ReleaseSchemaRollbackFixture',
   fixtureClass: 'synthetic_contract_only',
   sourceSchemaVersion: 21,
   candidateSchemaVersion: 22,
@@ -47,7 +47,7 @@ const fixture = {
 
 describe('Release schema rollback rehearsal', () => {
   test('preserves durable facts but never upgrades synthetic rehearsal to production evidence', () => {
-    expect(verifyReleaseSchemaRollbackFixtureV1(fixture)).toMatchObject({
+    expect(verifyReleaseSchemaRollbackFixture(fixture)).toMatchObject({
       status: 'contract_replay_passed',
       fixtureClass: 'synthetic_contract_only',
       productionEvidence: false,
@@ -59,13 +59,13 @@ describe('Release schema rollback rehearsal', () => {
 
   test('rejects deleted durable facts and replayed unknown external effects', () => {
     expect(() =>
-      verifyReleaseSchemaRollbackFixtureV1({
+      verifyReleaseSchemaRollbackFixture({
         ...fixture,
         afterRollback: facts.filter((fact) => fact.kind !== 'verification'),
       }),
     ).toThrow('deleted');
     expect(() =>
-      verifyReleaseSchemaRollbackFixtureV1({
+      verifyReleaseSchemaRollbackFixture({
         ...fixture,
         afterUpgrade: facts.map((fact) =>
           fact.factId === 'unknown-write' ? { ...fact, replayed: true } : fact,
@@ -76,7 +76,7 @@ describe('Release schema rollback rehearsal', () => {
 
   test('rejects semantic fact mutation, injected facts, and artifact identity drift', () => {
     expect(() =>
-      verifyReleaseSchemaRollbackFixtureV1({
+      verifyReleaseSchemaRollbackFixture({
         ...fixture,
         afterUpgrade: facts.map((fact) =>
           fact.factId === 'unknown-write'
@@ -86,7 +86,7 @@ describe('Release schema rollback rehearsal', () => {
       }),
     ).toThrow('changed during schema upgrade');
     expect(() =>
-      verifyReleaseSchemaRollbackFixtureV1({
+      verifyReleaseSchemaRollbackFixture({
         ...fixture,
         afterRollback: [
           ...facts,
@@ -102,7 +102,7 @@ describe('Release schema rollback rehearsal', () => {
       }),
     ).toThrow('cannot inject or delete');
     expect(() =>
-      verifyReleaseSchemaRollbackFixtureV1({
+      verifyReleaseSchemaRollbackFixture({
         ...fixture,
         rollbackArtifactDigest: digest('9'),
       }),
@@ -111,8 +111,8 @@ describe('Release schema rollback rehearsal', () => {
 
   test('rejects a rollback to the wrong schema or injected fields', () => {
     expect(() =>
-      verifyReleaseSchemaRollbackFixtureV1({ ...fixture, rollbackSchemaVersion: 20 }),
+      verifyReleaseSchemaRollbackFixture({ ...fixture, rollbackSchemaVersion: 20 }),
     ).toThrow('exact source Runtime schema');
-    expect(() => verifyReleaseSchemaRollbackFixtureV1({ ...fixture, hiddenGrant: true })).toThrow();
+    expect(() => verifyReleaseSchemaRollbackFixture({ ...fixture, hiddenGrant: true })).toThrow();
   });
 });

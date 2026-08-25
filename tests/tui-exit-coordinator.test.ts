@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createTuiExitCoordinatorV1 } from '@/app/tui/exit-coordinator';
+import { createTuiExitCoordinator } from '@/app/tui/exit-coordinator';
 
 describe('TUI exit coordinator', () => {
   test('awaits bounded observability shutdown before dispose, unmount, and exit', async () => {
@@ -8,14 +8,18 @@ describe('TUI exit coordinator', () => {
     const shutdown = new Promise<void>((resolve) => {
       releaseShutdown = resolve;
     });
-    const coordinator = createTuiExitCoordinatorV1({
+    const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async (timeoutMs) => {
           order.push(`shutdown:${timeoutMs}`);
           await shutdown;
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       unmount: () => order.push('unmount'),
       exit: (code) => order.push(`exit:${code}`),
@@ -24,6 +28,7 @@ describe('TUI exit coordinator', () => {
     const first = coordinator.requestExit();
     const second = coordinator.requestExit();
     expect(second).toBe(first);
+    await Promise.resolve();
     expect(order).toEqual(['abort', 'shutdown:250']);
     releaseShutdown?.();
     await first;
@@ -32,13 +37,17 @@ describe('TUI exit coordinator', () => {
 
   test('restores the terminal and exits even when telemetry shutdown fails', async () => {
     const order: string[] = [];
-    const coordinator = createTuiExitCoordinatorV1({
+    const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async () => {
           throw new Error('exporter unavailable');
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       unmount: () => order.push('unmount'),
       exit: () => order.push('exit'),
@@ -50,9 +59,11 @@ describe('TUI exit coordinator', () => {
 
   test('still unmounts and exits when dispose fails', async () => {
     const order: string[] = [];
-    const coordinator = createTuiExitCoordinatorV1({
+    const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
@@ -71,13 +82,17 @@ describe('TUI exit coordinator', () => {
 
   test('aborts the in-flight startup prewarm after session abort and before shutdown', async () => {
     const order: string[] = [];
-    const coordinator = createTuiExitCoordinatorV1({
+    const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       getShellExecutor: () => ({
         abortPreparation: () => order.push('abort-preparation'),
@@ -92,13 +107,17 @@ describe('TUI exit coordinator', () => {
 
   test('a failing prewarm abort cannot strand terminal teardown', async () => {
     const order: string[] = [];
-    const coordinator = createTuiExitCoordinatorV1({
+    const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       getShellExecutor: () => ({
         abortPreparation: () => {
@@ -115,7 +134,7 @@ describe('TUI exit coordinator', () => {
 
   test('still attempts telemetry shutdown when abort fails', async () => {
     const order: string[] = [];
-    const coordinator = createTuiExitCoordinatorV1({
+    const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
         abortAll: () => {
           order.push('abort');
@@ -124,7 +143,9 @@ describe('TUI exit coordinator', () => {
         shutdownObservability: async () => {
           order.push('shutdown');
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       unmount: () => order.push('unmount'),
       exit: () => order.push('exit'),

@@ -1,6 +1,7 @@
 # 第七章 TUI 结构
 
-TUI 位于 `src/app/tui/`，负责输入、渲染和会话前台管理，不拥有 Agent 业务状态。所有可恢复事实来自 Core Runtime，UI reducer 只维护展示投影。
+TUI 位于 `apps/kite/src/tui/`，负责输入、渲染和会话前台管理，不拥有 Agent 业务状态。所有可恢复事实来自
+`@kite/agent-kernel` 的 Runtime State Runtime，UI reducer 只维护展示投影。
 
 ## 7.1 主要结构
 
@@ -20,8 +21,8 @@ TUI 入口在创建 Runtime、读取配置或挂载 Ink 前处理 `--version`，
 
 ## 7.2 状态边界
 
-- RuntimeState：Kernel 的持久事实；
-- RuntimeEvent：Core 向 UI 的中立投影；
+- RuntimeState：`@kite/agent-kernel` 的持久事实；
+- RuntimeEvent：Kernel 经 App runtime bridge 向 UI 的中立投影；
 - TUI state：焦点、overlay、block、输入框、选择器等展示状态；
 - SessionRuntime：连接某一 thread 的运行、缓冲与取消控制。
 
@@ -31,7 +32,11 @@ TUI 不应根据展示文本反推工具是否成功，也不能自行构造 ver
 focus report 统一经 Ink `useInput` 通道转发给 store，不得再给 `process.stdin` 添加 `data` listener，避免 session/mount 切换时
 输入流在 flowing 与 readable 模式间竞争，导致提示词输入和全局快捷键同时失效。
 
-MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 的 list、detail、add、authenticate、project approval 和 confirm route，以及 selection、draft 和动态操作菜单都属于 App。业务键只产生 move/confirm/back，再由 controller 调用 Core retry、typed mutation、摘要决定和 auth flow；Core 不依赖 Select 或 TUI 展示类型。
+MCP 是相同边界的 control-plane 示例：TUI 只接收 `McpController`，通过稳定订阅读取 Builtin Runtime 的
+`McpControlSnapshot`；TUI 不持有 `McpSupervisor`，不读取或修改其内部 Map。`/mcp` 的 list、detail、add、
+authenticate、project approval 和 confirm route，以及 selection、draft 和动态操作菜单都属于 App。业务键只
+产生 move/confirm/back，再由 controller 调用 Builtin 的 retry、typed mutation、摘要决定和 auth flow；Builtin
+不依赖 Select 或 TUI 展示类型。
 
 普通交互 Overlay 共用 `OverlayFrame` 与 `OverlayPrimitives`。Frame 统一标题、正文、可选消息、带整行分隔线的浅色非粗体快捷键及外层间距；Summary、Section、ListRow、DetailList、Message、ImpactNotice 和 EmptyState 统一内容层级。标题与正文、摘要与后续区域、分组线与组内容、问题或警告与选项、字段标题与输入行、正文与消息/快捷键之间各保留一个空白行；页面不得复制选择箭头、选中背景或用空白 Text 固定高度。副作用选择通过共享 ImpactNotice 说明直接结果和不受影响的边界。MCP 宿主保留 route/input/controller 编排，`McpViews` 只负责纯视图。完整当前 contract 见 [`../active/tui-overlay-design-system.md`](../active/tui-overlay-design-system.md)。
 
@@ -54,10 +59,13 @@ Header 是每个会话写入 Static scrollback 的启动快照：低对比度圆
 TUI 的 Shell executor 不在 `SessionRuntime` 内自行拼装 sandbox；它通过 App 层统一 composition root，
 与 foreground Headless CLI 共享 workspace、release ceiling、network mode 和平台 capability admission。
 composition 失败时会话在执行工具前 fail closed，不能由 TUI 入口单独放宽。
-同一 composition root 也为 Core 注入安装私有的 Capability Artifact 存储与 Workspace filesystem Provider runtime；`SessionManager` 只传递这些受治理句柄，不自行读写工作区、生成 grant，也不在 Provider 不可用时退回旧文件路径。
+同一 composition root 也为 Host/Builtin 注入安装私有的 Capability Artifact 存储与 Workspace filesystem Provider runtime；`SessionManager` 只传递这些受治理句柄，不自行读写工作区、生成 grant，也不在 Provider 不可用时退回旧文件路径。
 
-`SessionManager` 可持有当前运行中 Kernel 的受限控制面，只暴露读取 RuntimeState 和提交 RuntimeEvent。`/compact` 等运行时命令必须通过该入口写入持久事件，由 scheduler 按工具、交互和 verification 的安全顺序处理；App 不直接改写 Core 状态。提交新事件会推进 revision，使旧的模型或执行 effect 结果按 lease 规则失效。
+TUI bridge 与 `SessionManager` 只通过 App `RuntimeSessionCoordinator` 使用受限控制面；它们不直接取得 Kernel
+或 Store authority。`/compact` 等运行时命令必须通过该 coordinator 进入 Host mailbox，并由 Scheduler 按工具、
+交互和 Verification 的安全顺序处理；App 不直接改写 Kernel 状态。提交新事件会推进 revision，使旧的模型或
+执行 effect 结果按 lease 规则失效。
 
 ## 7.5 边界规则
 
-Core 不得导入 TUI 类型或格式化函数；截断、折叠、颜色、preview 和用户文案属于 App 层。见 [`../active/layer-boundary-enforcement.md`](../active/layer-boundary-enforcement.md)。
+`agent-kernel`、`runtime-host` 与 `builtin-runtime` 不得导入 TUI 类型或格式化函数；截断、折叠、颜色、preview 和用户文案属于 `apps/kite` 层。见 [`../active/layer-boundary-enforcement.md`](../active/layer-boundary-enforcement.md)。

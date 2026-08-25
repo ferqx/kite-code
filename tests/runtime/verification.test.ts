@@ -2,20 +2,20 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McpConnectionManager } from '@/core/mcp/manager';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { resolveKernelVerificationMode as resolveVerificationMode } from '@kite/agent-kernel';
+import { capabilityResultDigest, capabilityResultEvidenceDigest } from '@kite/builtin-runtime';
+import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import { verificationRequestForSkill } from '@kite/builtin-runtime/skills';
 import {
-  capabilityResultDigestV1,
-  capabilityResultEvidenceDigestV1,
-} from '@/core/persistence/capability-artifacts';
-import { eventsForRuntimeAction } from '@/core/runtime/actions';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { decideNextEffect } from '@/core/runtime/scheduler';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
-import { executeVerificationEffect } from '@/core/verification/executor';
-import { resolveVerificationMode } from '@/core/verification/policy';
-import { verificationRequestForSkill } from '@/core/verification/requests';
-import type { VerificationSpecV1 } from '@/protocol/verification';
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
+import type { VerificationSpec } from '@kite/runtime-spi';
+import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { executeVerificationEffect } from '../../apps/kite/src/bootstrap/runtime/verification-effect';
+import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 const roots: string[] = [];
 
@@ -27,7 +27,12 @@ function activeState(): RuntimeState {
   const workspace = join(tmpdir(), `kite-verification-${crypto.randomUUID()}`);
   mkdirSync(workspace, { recursive: true });
   roots.push(workspace);
-  const state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace });
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'thread',
+    userId: 'user',
+    workspace,
+  });
   state.activeTaskId = 'task';
   state.tasks.task = {
     taskId: 'task',
@@ -42,7 +47,7 @@ function activeState(): RuntimeState {
   return state;
 }
 
-function spec(checks: VerificationSpecV1['checks'], maxAttempts = 1): VerificationSpecV1 {
+function spec(checks: VerificationSpec['checks'], maxAttempts = 1): VerificationSpec {
   return {
     schemaVersion: 1,
     verificationId: 'verification-1',
@@ -55,7 +60,7 @@ function spec(checks: VerificationSpecV1['checks'], maxAttempts = 1): Verificati
 
 function request(
   mode: 'not_required' | 'best_effort' | 'required',
-  value: VerificationSpecV1,
+  value: VerificationSpec,
 ): RuntimeEvent {
   return {
     type: 'verification.requested',
@@ -192,10 +197,10 @@ describe('verification policy and scheduler', () => {
         spec(
           [
             {
-              checkId: 'review',
-              type: 'reviewer',
-              description: 'review evidence',
-              instructions: 'verify it',
+              checkId: 'receipt',
+              type: 'receipt',
+              description: 'check receipt evidence',
+              invocationId: 'invocation',
             },
           ],
           0,
@@ -257,7 +262,7 @@ describe('verification policy and scheduler', () => {
 });
 
 describe('VerificationSpec execution and recovery', () => {
-  test('runs deterministic file and schema checks before reviewer evidence', async () => {
+  test('runs deterministic file and schema checks in declaration order', async () => {
     let state = activeState();
     writeFileSync(join(state.session.workspace, 'result.json'), '{"ok":true}');
     state = reduceRuntimeState(
@@ -300,7 +305,7 @@ describe('VerificationSpec execution and recovery', () => {
     );
   });
 
-  test('reviewer receives original receipts, artifacts, and skill output', async () => {
+  test('passes a committed capability receipt without a model review', async () => {
     let state = activeState();
     const artifactResult = {
       status: 'success' as const,
@@ -316,12 +321,12 @@ describe('VerificationSpec execution and recovery', () => {
       effectiveEffectsDigest: 'effects',
       status: 'succeeded',
       recordedAt: '2026-07-15T00:00:00.000Z',
-      resultDigest: capabilityResultDigestV1(artifactResult),
-      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      resultDigest: capabilityResultDigest(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigest(artifactResult),
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 1,
       },
     };
@@ -346,45 +351,24 @@ describe('VerificationSpec execution and recovery', () => {
         'required',
         spec([
           {
-            checkId: 'review',
-            type: 'reviewer',
-            description: 'review raw evidence',
-            invocationIds: ['invocation'],
-            activationIds: ['activation'],
-            instructions: 'verify evidence',
+            checkId: 'receipt',
+            type: 'receipt',
+            description: 'check committed receipt',
+            invocationId: 'invocation',
           },
         ]),
       ),
     );
-    let received: unknown;
     const events = await executeVerificationEffect(
       { type: 'run_verification', verificationId: 'verification-1' },
       state,
-      {
-        artifactStore: {
-          read: () => artifactResult,
-          readEnvelope: () => ({
-            artifactFormatVersion: 2,
-            invocationId: 'invocation',
-            result: artifactResult,
-          }),
-        },
-        reviewer: async (input) => {
-          received = input;
-          return { outcome: 'passed', summary: 'evidence confirms success' };
-        },
-      },
+      {},
     );
-    expect(received).toMatchObject({
-      receipts: [{ invocationId: 'invocation', argumentsDigest: 'args' }],
-      artifacts: [{ invocationId: 'invocation', result: { status: 'success' } }],
-      skillOutputs: [{ activationId: 'activation', output: { ok: true } }],
-    });
     state = reduceAll(state, events);
     expect(state.verification.records['verification-1']?.status).toBe('passed');
   });
 
-  test('reviewer fails closed before model dispatch when receipt Artifact access is unavailable', async () => {
+  test('receipt verification does not require reading the result Artifact body', async () => {
     let state = activeState();
     const artifactResult = { status: 'success' as const, content: [] };
     state.capabilities.invocations.invocation = {
@@ -397,12 +381,12 @@ describe('VerificationSpec execution and recovery', () => {
       effectiveEffectsDigest: 'effects',
       status: 'succeeded',
       recordedAt: '2026-07-15T00:00:00.000Z',
-      resultDigest: capabilityResultDigestV1(artifactResult),
-      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      resultDigest: capabilityResultDigest(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigest(artifactResult),
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 1,
       },
     };
@@ -412,40 +396,32 @@ describe('VerificationSpec execution and recovery', () => {
         'required',
         spec([
           {
-            checkId: 'review',
-            type: 'reviewer',
-            description: 'review raw evidence',
-            invocationIds: ['invocation'],
-            instructions: 'verify evidence',
+            checkId: 'receipt',
+            type: 'receipt',
+            description: 'check committed receipt',
+            invocationId: 'invocation',
           },
         ]),
       ),
     );
-    let reviewerCalls = 0;
     const events = await executeVerificationEffect(
       { type: 'run_verification', verificationId: 'verification-1' },
       state,
-      {
-        reviewer: async () => {
-          reviewerCalls += 1;
-          return { outcome: 'passed', summary: 'must not be trusted' };
-        },
-      },
+      {},
     );
 
-    expect(reviewerCalls).toBe(0);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'verification.check_completed',
         result: expect.objectContaining({
-          outcome: 'inconclusive',
-          summary: 'The capability Artifact reader is unavailable.',
+          outcome: 'passed',
+          summary: 'The capability invocation has a committed success receipt.',
         }),
       }),
     );
   });
 
-  test('reviewer fails closed before model dispatch when Artifact owner binding is mismatched', async () => {
+  test('receipt verification depends on the committed receipt, not Artifact owner metadata', async () => {
     let state = activeState();
     const artifactResult = { status: 'success' as const, content: [] };
     state.capabilities.invocations.invocation = {
@@ -458,12 +434,12 @@ describe('VerificationSpec execution and recovery', () => {
       effectiveEffectsDigest: 'effects',
       status: 'succeeded',
       recordedAt: '2026-07-15T00:00:00.000Z',
-      resultDigest: capabilityResultDigestV1(artifactResult),
-      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      resultDigest: capabilityResultDigest(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigest(artifactResult),
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 1,
       },
     };
@@ -473,42 +449,26 @@ describe('VerificationSpec execution and recovery', () => {
         'required',
         spec([
           {
-            checkId: 'review',
-            type: 'reviewer',
-            description: 'review raw evidence',
-            invocationIds: ['invocation'],
-            instructions: 'verify evidence',
+            checkId: 'receipt',
+            type: 'receipt',
+            description: 'check committed receipt',
+            invocationId: 'invocation',
           },
         ]),
       ),
     );
-    let reviewerCalls = 0;
     const events = await executeVerificationEffect(
       { type: 'run_verification', verificationId: 'verification-1' },
       state,
-      {
-        artifactStore: {
-          read: () => artifactResult,
-          readEnvelope: () => ({
-            artifactFormatVersion: 2,
-            invocationId: 'different-invocation',
-            result: artifactResult,
-          }),
-        },
-        reviewer: async () => {
-          reviewerCalls += 1;
-          return { outcome: 'passed', summary: 'must not run' };
-        },
-      },
+      {},
     );
 
-    expect(reviewerCalls).toBe(0);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'verification.check_completed',
         result: expect.objectContaining({
-          outcome: 'inconclusive',
-          summary: 'A capability receipt Artifact could not be verified.',
+          outcome: 'passed',
+          summary: 'The capability invocation has a committed success receipt.',
         }),
       }),
     );

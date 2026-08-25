@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { TuiMcpController } from '@/app/tui/mcp/controller';
 import type {
   McpAuthResult,
   McpControlSnapshot,
   McpRuntimeProvider,
   McpServerKey,
   McpSupervisor,
-} from '@/core/mcp';
+} from '@kite/builtin-runtime/mcp';
+import { TuiMcpController } from '@/app/tui/mcp/controller';
 
 function createSupervisor(): {
   supervisor: McpSupervisor;

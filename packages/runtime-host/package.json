@@ -1,0 +1,23 @@
+{
+  "name": "@kite/runtime-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./observability": "./src/observability/index.ts",
+    "./storage": "./src/storage/index.ts",
+    "./kernel-adapter": "./src/kernel-adapter/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./src/observability/index.ts ./src/storage/index.ts --outdir ./dist --target bun",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test ./test"
+  },
+  "dependencies": {
+    "@kite/agent-kernel": "workspace:*",
+    "@kite/runtime-contract": "workspace:*",
+    "@kite/runtime-spi": "workspace:*"
+  }
+}

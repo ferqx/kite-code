@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyFailure, type FailureKind } from '@/core/runtime/failures';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import { classifyToolOutcome } from '@kite/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import { classifyFailure, type FailureKind } from '#app/bootstrap/runtime/failures';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 const kinds: FailureKind[] = [
   'model_invalid_tool_args',
@@ -91,7 +91,12 @@ describe('failure classification', () => {
 
   test('persists structured metadata on the failed tool record', () => {
     const queued = reduceRuntimeState(
-      createInitialRuntimeState({ threadId: 'failure', userId: 'u', workspace: '/' }),
+      createRuntimeHostStateInitialState({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: 'failure',
+        userId: 'u',
+        workspace: '/',
+      }),
       { type: 'tool.queued', toolCallId: 'call', name: 'read_file', args: {} },
     );
     const failure = classifyFailure('tool_runtime_error', 'disk unavailable');
@@ -99,7 +104,7 @@ describe('failure classification', () => {
       type: 'tool.failed',
       toolCallId: 'call',
       failure,
-      outcomeV1: classifyToolOutcomeV1({
+      outcome: classifyToolOutcome({
         status: 'failed',
         failure,
         authority: { dispatchState: 'not_started', externalEffects: 'none' },
@@ -128,7 +133,7 @@ describe('failure classification', () => {
       type: 'tool.failed',
       toolCallId: 'call',
       failure,
-      outcomeV1: state.tools.calls.call!.outcomeV1!,
+      outcome: state.tools.calls.call!.outcome!,
     });
     expect(replayed.transcript.messages).toHaveLength(state.transcript.messages.length);
   });

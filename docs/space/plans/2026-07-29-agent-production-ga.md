@@ -4,7 +4,7 @@
 
 终态范围（ADR-0069）：6A.1–6A.4、6B.1、6B.2、6B.4 均已被取代；普通跨版本兼容/回滚与文档收敛
 （6B.3/6B.5）记为 `completed`。Auto Compaction 首版不受支持；项目不建设 enterprise GA promotion
-体系。当前状态见 `release/oss-first-release/task-status-v2.json`。
+体系。当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P1
 依赖：

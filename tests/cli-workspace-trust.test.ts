@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { trustWorkspace } from '@/core/config/workspace-trust';
+import { trustWorkspace } from '#app/config/workspace-trust';
 
-const cliPath = join(import.meta.dir, '..', 'src', 'app', 'cli', 'index.ts');
+const cliPath = join(import.meta.dir, '..', 'apps', 'kite', 'src', 'cli', 'executable.ts');
 const NOT_TRUSTED = 'Workspace is not trusted';
 
 /**

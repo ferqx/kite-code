@@ -11,30 +11,33 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { planArtifactPath } from '@/core/persistence/plan-artifact-paths';
-import { PlanArtifactError, PlanArtifactStore } from '@/core/persistence/plan-artifacts';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '@/core/runtime/reducer';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { BUILTIN_WRITE_PLAN_SCHEMA_ } from '@kite/builtin-runtime';
 import {
   computePlanStructuralDigest,
-  createInitialRuntimeState,
+  PlanArtifactError,
+  PlanArtifactStore,
+  planArtifactPath,
+} from '@kite/builtin-runtime/planning';
+import type { PlanDocument } from '@kite/runtime-contract';
+import {
+  createRuntimeHostStateInitialState,
   getActivePlanning,
-} from '@/core/runtime/state';
-import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
-import { writePlanInputSchema } from '@/core/tools/registry/builtins/write-plan';
-import type { PlanDocument } from '@/protocol/events';
-import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
+  runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
+} from '@kite/runtime-host/kernel-adapter';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { executeTestRuntimeTools } from '../helpers/runtime-model';
 
 let home: string;
 let previousHome: string | undefined;
 
 function reduceRuntimeState(
-  state: ReturnType<typeof createInitialRuntimeState>,
+  state: ReturnType<typeof createRuntimeHostStateInitialState>,
   event: RuntimeEvent,
-): ReturnType<typeof createInitialRuntimeState> {
+): ReturnType<typeof createRuntimeHostStateInitialState> {
   return reduceCanonicalRuntimeState(
     state,
-    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+    normalizeCurrentToolOutcomeEvent(event, state, '2026-08-11T00:00:00.000Z'),
   );
 }
 
@@ -69,7 +72,7 @@ const validWrite = {
 };
 
 function withCall(
-  state: ReturnType<typeof createInitialRuntimeState>,
+  state: ReturnType<typeof createRuntimeHostStateInitialState>,
   toolCallId: string,
   name: string,
   args: Record<string, unknown>,
@@ -102,7 +105,8 @@ async function executingPlanFixture(store: PlanArtifactStore, suffix: string) {
     body_markdown: 'Preserve the reviewed structure while resetting one execution revision.',
     steps: [{ id: 'verify-replan', title: 'Verify the replacement revision' }],
   };
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `artifact-replan-${suffix}`,
     userId: 'user',
     workspace: home,
@@ -118,7 +122,7 @@ async function executingPlanFixture(store: PlanArtifactStore, suffix: string) {
     taskId,
     source: 'user_command',
   });
-  const firstEvents = await executeRuntimeTools({
+  const firstEvents = await executeTestRuntimeTools({
     state: withCall(state, `save-${suffix}-v1`, 'write_plan', { action: 'save', ...input }),
     toolCallIds: [`save-${suffix}-v1`],
     planArtifactStore: store,
@@ -314,20 +318,20 @@ describe('Plan Artifact persistence and two-phase review', () => {
   });
 
   test('enforces PlanDocument V2 title, body, step, count, and identity schema limits', () => {
-    expect(writePlanInputSchema.safeParse({ ...validWrite, title: 'bad\ntitle' }).success).toBe(
-      false,
-    );
     expect(
-      writePlanInputSchema.safeParse({ ...validWrite, body_markdown: 'too short' }).success,
+      BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({ ...validWrite, title: 'bad\ntitle' }).success,
     ).toBe(false);
     expect(
-      writePlanInputSchema.safeParse({
+      BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({ ...validWrite, body_markdown: 'too short' }).success,
+    ).toBe(false);
+    expect(
+      BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({
         ...validWrite,
         steps: [{ id: 'inspect', title: 'bad\nstep' }],
       }).success,
     ).toBe(false);
     expect(
-      writePlanInputSchema.safeParse({
+      BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({
         ...validWrite,
         steps: [
           { id: 'same', title: 'First step' },
@@ -336,7 +340,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       }).success,
     ).toBe(false);
     expect(
-      writePlanInputSchema.safeParse({
+      BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({
         ...validWrite,
         steps: Array.from({ length: 13 }, (_, index) => ({
           id: `step-${index}`,
@@ -614,7 +618,8 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('save returns metadata only, then submit reads the saved Artifact without creating v2', async () => {
     const store = new PlanArtifactStore();
-    let state = createInitialRuntimeState({
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'artifact-runtime',
       userId: 'user',
       workspace: home,
@@ -632,7 +637,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     });
 
     const draft = document();
-    const saveEvents = await executeRuntimeTools({
+    const saveEvents = await executeTestRuntimeTools({
       state: withCall(state, 'save-1', 'write_plan', {
         action: 'save',
         title: draft.title,
@@ -659,7 +664,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     expect(saveResult.result.stdout).not.toContain(draft.bodyMarkdown);
     for (const event of saveEvents) state = reduceRuntimeState(state, event);
 
-    const missingIdentity = await executeRuntimeTools({
+    const missingIdentity = await executeTestRuntimeTools({
       state: withCall(state, 'save-missing-identity', 'write_plan', {
         action: 'save',
         title: 'Revised Artifact-backed plan',
@@ -672,7 +677,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     expect(missingIdentity).toContainEqual(
       expect.objectContaining({ type: 'tool.rejected', reason: 'plan_identity_required' }),
     );
-    const staleIdentity = await executeRuntimeTools({
+    const staleIdentity = await executeTestRuntimeTools({
       state: withCall(state, 'save-stale-identity', 'write_plan', {
         action: 'save',
         plan_id: saved.plan_id,
@@ -689,7 +694,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       expect.objectContaining({ type: 'tool.rejected', reason: 'plan_identity_mismatch' }),
     );
 
-    const loadedEvents = await executeRuntimeTools({
+    const loadedEvents = await executeTestRuntimeTools({
       state: withCall(state, 'read-1', 'read_plan', {
         plan_id: saved.plan_id,
         version: saved.version,
@@ -709,7 +714,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       });
     }
 
-    const submitEvents = await executeRuntimeTools({
+    const submitEvents = await executeTestRuntimeTools({
       state: withCall(state, 'submit-1', 'write_plan', {
         action: 'submit',
         plan_id: saved.plan_id,
@@ -731,7 +736,8 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('reuses the canonical Artifact document for an unchanged strict-identity save in a later turn', async () => {
     const store = new PlanArtifactStore();
-    let state = createInitialRuntimeState({
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'artifact-idempotent-save',
       userId: 'user',
       workspace: home,
@@ -753,7 +759,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       steps: [{ id: 'verify-canonical', title: 'Verify canonical document reuse' }],
     };
 
-    const firstEvents = await executeRuntimeTools({
+    const firstEvents = await executeTestRuntimeTools({
       state: withCall(state, 'save-canonical-1', 'write_plan', { action: 'save', ...input }),
       toolCallIds: ['save-canonical-1'],
       planArtifactStore: store,
@@ -766,7 +772,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     if (!canonicalArtifact) throw new Error('first save did not persist an Artifact');
 
     state = reduceRuntimeState(state, { type: 'turn.started', turnId: 'later-turn' });
-    const secondEvents = await executeRuntimeTools({
+    const secondEvents = await executeTestRuntimeTools({
       state: withCall(state, 'save-canonical-2', 'write_plan', {
         action: 'save',
         plan_id: canonicalDocument.planId,
@@ -792,13 +798,25 @@ describe('Plan Artifact persistence and two-phase review', () => {
     const repeatedDraft = secondEvents.find((event) => event.type === 'plan.drafted');
     expect(repeatedDraft?.type).toBe('plan.drafted');
     if (repeatedDraft?.type === 'plan.drafted') {
-      const substitutedStatus = structuredClone(repeatedDraft);
-      substitutedStatus.plan.steps[0]!.status = 'completed';
+      const substitutedStatus = {
+        ...repeatedDraft,
+        plan: {
+          ...repeatedDraft.plan,
+          steps: repeatedDraft.plan.steps.map((step, index) =>
+            index === 0 ? { ...step, status: 'completed' as const } : step,
+          ),
+        },
+      };
       expect(reduceRuntimeState(state, substitutedStatus)).toBe(state);
 
-      const substitutedArtifact = structuredClone(repeatedDraft);
-      if (!substitutedArtifact.artifact) throw new Error('repeat save omitted Artifact');
-      substitutedArtifact.artifact.displayPath += '.substituted';
+      if (!repeatedDraft.artifact) throw new Error('repeat save omitted Artifact');
+      const substitutedArtifact = {
+        ...repeatedDraft,
+        artifact: {
+          ...repeatedDraft.artifact,
+          displayPath: `${repeatedDraft.artifact.displayPath}.substituted`,
+        },
+      };
       expect(reduceRuntimeState(state, substitutedArtifact)).toBe(state);
     }
     for (const event of secondEvents) state = reduceRuntimeState(state, event);
@@ -814,7 +832,8 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('retries the first save after Artifact publication without a committed Runtime event', async () => {
     const store = new PlanArtifactStore();
-    let state = createInitialRuntimeState({
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'artifact-first-save-crash',
       userId: 'user',
       workspace: home,
@@ -832,7 +851,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     });
 
     const executeSave = (toolCallId: string) =>
-      executeRuntimeTools({
+      executeTestRuntimeTools({
         state: withCall(state, toolCallId, 'write_plan', validWrite),
         toolCallIds: [toolCallId],
         planArtifactStore: store,
@@ -861,7 +880,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       type: 'turn.started',
       turnId: `replan-${action}-turn`,
     });
-    const saveEvents = await executeRuntimeTools({
+    const saveEvents = await executeTestRuntimeTools({
       state: withCall(state, `replan-${action}-save`, 'write_plan', {
         action: 'save',
         plan_id: fixture.executingDocument.planId,
@@ -878,7 +897,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     if (saved.kind !== 'replanning_draft') throw new Error('replan revision was not saved');
     const submitEvents =
       action === 'submit'
-        ? await executeRuntimeTools({
+        ? await executeTestRuntimeTools({
             state: withCall(state, `replan-${action}-submit`, 'write_plan', {
               action: 'submit',
               plan_id: saved.document.planId,
@@ -943,7 +962,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       reason: 'same_structure_initial',
       supersedesPlanVersion: fixture.executingDocument.version,
     });
-    const firstRevisionEvents = await executeRuntimeTools({
+    const firstRevisionEvents = await executeTestRuntimeTools({
       state: withCall(state, 'save-initial-replan', 'write_plan', {
         action: 'save',
         plan_id: fixture.executingDocument.planId,
@@ -972,7 +991,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     if (!canonicalRevision.artifact) throw new Error('new revision omitted Artifact');
 
     state = reduceRuntimeState(state, { type: 'turn.started', turnId: 'repeat-replan-turn' });
-    const repeatEvents = await executeRuntimeTools({
+    const repeatEvents = await executeTestRuntimeTools({
       state: withCall(state, 'save-initial-replan-again', 'write_plan', {
         action: 'save',
         plan_id: canonicalRevision.planId,
@@ -1000,7 +1019,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       reason: 'same_structure_initial_submit',
       supersedesPlanVersion: fixture.executingDocument.version,
     });
-    const saveEvents = await executeRuntimeTools({
+    const saveEvents = await executeTestRuntimeTools({
       state: withCall(state, 'save-initial-replan', 'write_plan', {
         action: 'save',
         plan_id: fixture.executingDocument.planId,
@@ -1014,7 +1033,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     for (const event of saveEvents) state = reduceRuntimeState(state, event);
     const saved = getActivePlanning(state);
     if (saved.kind !== 'replanning_draft') throw new Error('new revision was not saved');
-    const submitEvents = await executeRuntimeTools({
+    const submitEvents = await executeTestRuntimeTools({
       state: withCall(state, 'submit-initial-replan', 'write_plan', {
         action: 'submit',
         plan_id: saved.document.planId,
@@ -1048,7 +1067,8 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('a new top-level task starts a fresh plan at v1', async () => {
     const store = new PlanArtifactStore();
-    let state = createInitialRuntimeState({
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'task-isolation-runtime',
       userId: 'user',
       workspace: home,
@@ -1061,7 +1081,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     });
     const firstTaskId = state.activeTaskId;
     if (!firstTaskId) throw new Error('first task was not created');
-    const firstSaveEvents = await executeRuntimeTools({
+    const firstSaveEvents = await executeTestRuntimeTools({
       state: withCall(state, 'save-a', 'write_plan', {
         action: 'save',
         title: 'Feature A',
@@ -1094,7 +1114,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     const secondTaskId = state.activeTaskId;
     if (!secondTaskId) throw new Error('second task was not created');
 
-    const secondSaveEvents = await executeRuntimeTools({
+    const secondSaveEvents = await executeTestRuntimeTools({
       state: withCall(state, 'save-b', 'write_plan', {
         action: 'save',
         title: 'Feature B',

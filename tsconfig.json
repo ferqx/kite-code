@@ -5,7 +5,7 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "types": ["bun-types"],
+    "types": ["bun"],
     "noEmit": true,
 
     "strict": true,
@@ -23,7 +23,23 @@
     "allowUnreachableCode": false,
 
     "paths": {
-      "@/*": ["./src/*"]
+      "@kite/kite/cli": ["./apps/kite/src/cli/executable.ts"],
+      "@kite/kite/tui": ["./apps/kite/src/tui/executable.tsx"],
+      "@/app/sandbox/*": ["./apps/kite/src/sandbox/*"],
+      "@/app/*": ["./apps/kite/src/*"],
+      "@/*": ["./src/*"],
+      "#agent-kernel": ["./packages/agent-kernel/src/index.ts"],
+      "#builtin-runtime": ["./packages/builtin-runtime/src/index.ts"],
+      "#builtin-runtime/sandbox": ["./packages/builtin-runtime/src/sandbox/index.ts"],
+      "#builtin-runtime/sandbox/*": ["./packages/builtin-runtime/src/sandbox/*"],
+      "#builtin-runtime/mcp": ["./packages/builtin-runtime/src/mcp/index.ts"],
+      "#builtin-runtime/model": ["./packages/builtin-runtime/src/model/index.ts"],
+      "#builtin-runtime/web": ["./packages/builtin-runtime/src/web/index.ts"],
+      "#runtime-spi": ["./packages/runtime-spi/src/index.ts"],
+      "#runtime-host": ["./packages/runtime-host/src/index.ts"],
+      "#runtime-host/*": ["./packages/runtime-host/src/*"],
+      "#app/*": ["./apps/kite/src/*"],
+      "#runtime-support/*": ["./scripts/support/*"]
     },
 
     "skipLibCheck": true

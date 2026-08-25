@@ -2,24 +2,24 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeInProcessReadOnlyToolCatalogDigestV1 } from '@/core/config';
-import { evaluateExecutionBoundaryQualificationV1 } from '@/core/config/execution-boundary';
 import {
-  currentProcessTreeCapabilityV1,
-  type ExecutionBoundaryV1,
-  type ProductionExecutionQualificationV1,
-} from '@/core/sandbox';
+  currentProcessTreeCapability,
+  type ExecutionBoundary,
+  type ProductionExecutionQualification,
+} from '@kite/builtin-runtime/sandbox';
+import { computeInProcessReadOnlyToolCatalogDigest } from '#app/config';
+import { evaluateExecutionBoundaryQualification } from '#app/config/execution-boundary';
 
 function qualification(
   workspace: string,
   processTreeLimit: 'enforced' | 'unsupported',
-): { boundary: ExecutionBoundaryV1; qualification: ProductionExecutionQualificationV1 } {
+): { boundary: ExecutionBoundary; qualification: ProductionExecutionQualification } {
   const catalog = {
     version: 1 as const,
     revision: 'empty-negative-conformance-v1',
     tools: [],
   };
-  const boundary: ExecutionBoundaryV1 = {
+  const boundary: ExecutionBoundary = {
     filesystemScope: 'workspace_write',
     workspaceRoot: workspace,
     networkMode: 'off',
@@ -67,7 +67,7 @@ function qualification(
       },
       inProcessReadOnlyTools: {
         ...catalog,
-        digest: computeInProcessReadOnlyToolCatalogDigestV1(catalog),
+        digest: computeInProcessReadOnlyToolCatalogDigest(catalog),
       },
     },
   };
@@ -80,7 +80,7 @@ describe('native process-tree hard-limit projection', () => {
     'windows_restricted_token',
     'none',
   ] as const)('keeps the current %s backend hard limit unsupported', (backend) => {
-    expect(currentProcessTreeCapabilityV1(backend)).toEqual({
+    expect(currentProcessTreeCapability(backend)).toEqual({
       hardCountMechanism: 'none',
       hardCountLimit: 'unsupported',
       terminationCleanup: 'unsupported',
@@ -91,7 +91,7 @@ describe('native process-tree hard-limit projection', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-process-limit-'));
     try {
       const fixture = qualification(workspace, 'unsupported');
-      const decision = evaluateExecutionBoundaryQualificationV1({
+      const decision = evaluateExecutionBoundaryQualification({
         featureEnabled: true,
         workspaceRoot: workspace,
         ...fixture,
@@ -110,7 +110,7 @@ describe('native process-tree hard-limit projection', () => {
 
   test('projects windows Job active-process limit only from native conformance', () => {
     expect(
-      currentProcessTreeCapabilityV1('windows_restricted_token', {
+      currentProcessTreeCapability('windows_restricted_token', {
         hardLimitMechanism: 'windows_job_active_process_limit',
         hardLimitConformancePassed: true,
         terminationCleanupConformancePassed: true,
@@ -121,7 +121,7 @@ describe('native process-tree hard-limit projection', () => {
       terminationCleanup: 'enforced',
     });
     expect(
-      currentProcessTreeCapabilityV1('windows_restricted_token', {
+      currentProcessTreeCapability('windows_restricted_token', {
         hardLimitMechanism: 'windows_job_active_process_limit',
         hardLimitConformancePassed: false,
         terminationCleanupConformancePassed: true,
@@ -131,7 +131,7 @@ describe('native process-tree hard-limit projection', () => {
 
   test('projects cgroup pids only from separate hard-limit and cleanup conformance', () => {
     expect(
-      currentProcessTreeCapabilityV1('bubblewrap', {
+      currentProcessTreeCapability('bubblewrap', {
         hardLimitMechanism: 'cgroup_pids',
         hardLimitConformancePassed: true,
         terminationCleanupConformancePassed: true,
@@ -142,7 +142,7 @@ describe('native process-tree hard-limit projection', () => {
       terminationCleanup: 'enforced',
     });
     expect(
-      currentProcessTreeCapabilityV1('bubblewrap', {
+      currentProcessTreeCapability('bubblewrap', {
         hardLimitMechanism: 'cgroup_pids',
         hardLimitConformancePassed: true,
         terminationCleanupConformancePassed: false,

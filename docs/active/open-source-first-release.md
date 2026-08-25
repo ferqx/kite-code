@@ -2,11 +2,11 @@
 
 状态：active
 
-读取时机：修改发布脚本、安装器、候选版本 workflow、真实 Provider smoke、生产路线图、Task 状态或首发能力边界时。
+读取时机：修改发布脚本、安装器、候选版本 workflow、生产路线图、Task 状态或首发能力边界时。
 
-验证：`bun test tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts tests/evals/live-provider-smoke.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
+验证：`bun test tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
 
-相关：ADR-0068、ADR-0069、ADR-0093、`release/oss-first-release/task-status-v2.json`、`.github/workflows/release-candidate.yml`。
+相关：ADR-0068、ADR-0069、ADR-0093、`release/oss-first-release/task-status.json`、`.github/workflows/release-candidate.yml`。
 
 首发 Gate、候选构建命令和限制以本文件及 `release/oss-first-release/` 为权威，不要求在面向使用者的
 `README.md` 中重复维护。
@@ -21,29 +21,16 @@ smoke 通过。
 CI 将默认 scenario 清单稳定分到四个相互独立的 runner，并由同名 `tui-system` 汇总 gate 在所有分片成功后
 才报告成功。这不会将 PTY 并发或单个分片通过误作完整 G0 证据。
 
-Required workflow 还运行获批六 case Model replay evaluation gate。checkout/setup/install 可按 CI 基础设施需要
-访问网络；依赖安装完成后的 replay command 只消费版本控制中的 strict manifest/cassette 与本地 qualification
-tests，并进入由外层已知可达 loopback 反向探针确认的 OS network isolation，无 API key、Provider transport 或
-live fallback。Linux job 在该命令前显式安装发行版 `bubblewrap`；GitHub-hosted runner 用非交互式 `sudo`
-只启动该 wrapper 来建立 mount/PID/network namespace、只读绑定必需系统根/checkout/Bun runtime
-directory 与私有 HOME；任何仓库代码运行前，系统 `setpriv` 再降回 runner identity、清空 groups/capability、
-建立 `NoNewPrivs`。隔离子进程还机械核对 network namespace、UID/groups、
-`NoNewPrivs`、capability sets、sudo 不可恢复与 loopback 反向探针。该 Required 依赖与结果不进入 production
-platform support set。
-workflow 不包含 record/baseline 更新命令。它证明冻结 attempt outcome 下的回归边界，不替代 G1 真实
-Provider smoke，也不使 production composition 获得 replay route。
+当前版本不包含 evaluation、record/replay baseline 或真实 Provider smoke job。后续重新建立 evaluation 时必须
+以新的计划、数据边界和独立门禁重新准入，不能恢复已删除脚本或把产品 replay/restore 语义当作评测框架。
 
 Required workflow 同时覆盖 `main`、`compact` 与 `man`；其中 `man` 的单父直接推送会失败，只接受通过
 Pull Request 产生的合并提交。本地 pre-commit 守卫提供更早的反馈，远端分支保护仍是最终写入控制面。
 
 `G1` 只判断普通发布可用性：GitHub-hosted macOS、Ubuntu、Windows 原生构建、安装、启动和
-TUI/CLI smoke 通过；DeepSeek `deepseek-v4-flash` 与 OpenCode Go OpenAI-compatible route 各完成一次
-低成本真实调用；release notes 与已知限制和候选内容一致。
+TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
-任一测试失败、缺失真实 Provider 凭据或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成
-成功。真实 Provider runner 只从环境变量或本机配置解析 secret；stdout、stderr、报告和 artifact
-只能包含 provider alias、model、耗时、usage 与布尔结果，不包含 key、endpoint query、prompt 或
-response 正文。
+任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
 ## 制品与安装
 
@@ -86,6 +73,6 @@ Release/Security 人员或 production evaluator authority。旧 fail-closed cont
 
 ## 状态权威
 
-`release/oss-first-release/task-status-v2.json` 精确覆盖原 108 个 Task。当前终态为 83 `completed`、
+`release/oss-first-release/task-status.json` 精确覆盖原 108 个 Task。当前终态为 83 `completed`、
 25 `superseded`、0 optional；不存在 pending、in-progress 或发布后路线图 Task。各旧 Phase 计划保留
 Task 说明和历史证据，但其 execution binding 与 milestone 不再决定发布状态。

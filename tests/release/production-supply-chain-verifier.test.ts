@@ -5,37 +5,34 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
-import { buildReleaseEvidenceBundleV1 } from '../../scripts/release/evidence-bundle';
+import { buildReleaseEvidenceBundle } from '../../scripts/release/evidence-bundle';
 import {
-  buildMaintainerSecurityReviewRecordV1,
-  buildProductionReleaseReplayEvidenceRecordV1,
-  type ReleaseEvidenceResultV1,
+  buildMaintainerSecurityReviewRecord,
+  buildProductionReleaseReplayEvidenceRecord,
+  type ReleaseEvidenceResult,
 } from '../../scripts/release/evidence-schema';
+import { buildReleaseGatePolicy, evaluateReleaseGate } from '../../scripts/release/gate-evaluator';
 import {
-  buildReleaseGatePolicyV1,
-  evaluateReleaseGateV1,
-} from '../../scripts/release/gate-evaluator';
-import {
-  buildCosignKeylessBlobVerificationCommandV1,
-  buildGithubArtifactAttestationVerificationCommandV1,
-  buildPlatformSignatureVerificationCommandsV1,
-  PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1,
+  buildCosignKeylessBlobVerificationCommand,
+  buildGithubArtifactAttestationVerificationCommand,
+  buildPlatformSignatureVerificationCommands,
+  PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_,
   PRODUCTION_RELEASE_REPOSITORY,
   PRODUCTION_RELEASE_REPOSITORY_NODE_ID,
   PRODUCTION_RELEASE_REPOSITORY_NUMERIC_ID,
   PRODUCTION_RELEASE_WORKFLOW_PATH,
-  type ProductionArtifactPlatformV1,
-  type ProductionReleaseExpectedIdentityV1,
-  productionReleaseCertificateIdentityV1,
-  productionReleaseRunInvocationUriV1,
+  type ProductionArtifactPlatform,
+  type ProductionReleaseExpectedIdentity,
+  productionReleaseCertificateIdentity,
+  productionReleaseRunInvocationUri,
 } from '../../scripts/release/production-supply-chain-commands';
 import {
-  isProtectedWindowsToolPathV1,
+  isProtectedWindowsToolPath,
   PRODUCTION_SUPPLY_CHAIN_ADMISSION_ENABLED,
-  type ProductionSupplyChainCliInputV1,
+  type ProductionSupplyChainCliInput,
   ProductionSupplyChainVerificationError,
-  parseProductionSupplyChainCliInputV1,
-  verifyProductionSupplyChainAdmissionV1,
+  parseProductionSupplyChainCliInput,
+  verifyProductionSupplyChainAdmission,
 } from '../../scripts/release/verify-production-supply-chain';
 
 const COMMIT = '1'.repeat(40);
@@ -43,7 +40,7 @@ const WORKFLOW_SHA = '2'.repeat(40);
 const TRUSTED_VERIFIER_COMMIT = '3'.repeat(40);
 const REVIEWER = 'github:@ferqx';
 
-function identity(): ProductionReleaseExpectedIdentityV1 {
+function identity(): ProductionReleaseExpectedIdentity {
   const ref = 'refs/tags/v1.0.0';
   return {
     repository: PRODUCTION_RELEASE_REPOSITORY,
@@ -103,7 +100,7 @@ function writeTarOctal(buffer: Buffer, offset: number, length: number, value: nu
   buffer[offset + length - 1] = 0;
 }
 
-function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
+function fixture(platform: ProductionArtifactPlatform = 'linux-x64') {
   const root = mkdtempSync(join(tmpdir(), 'kite-production-supply-chain-'));
   const paths = {
     payload: join(root, `kite-${platform}.tar.gz`),
@@ -125,7 +122,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
   writeFileSync(paths.nativeLauncher, launcher, { mode: 0o700 });
   const payload = tarGz([
     {
-      path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1[platform],
+      path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_[platform],
       bytes: launcher,
       mode: 0o755,
     },
@@ -145,8 +142,8 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
       : []),
   ]);
   writeFileSync(paths.payload, payload);
-  const gatePolicy = buildReleaseGatePolicyV1({
-    schema: 'ReleaseGatePolicyV1',
+  const gatePolicy = buildReleaseGatePolicy({
+    schema: 'ReleaseGatePolicy',
     policyId: 'production-release-policy-v1',
     mode: 'github_release',
     canonicalRepository: PRODUCTION_RELEASE_REPOSITORY,
@@ -189,7 +186,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     agentContractDigest: sha256('agent-contract'),
     modelVisibleToolRegistryDigest: sha256('tool-registry'),
     defaultConfigDigest: sha256('default-config'),
-    providerDataPolicyDigest: sha256('provider-policy'),
+    providerRouteDigest: sha256('provider-policy'),
     releaseGatePolicyDigest: gatePolicy.policyDigest,
     runtimeSchedulingPolicyDigest: sha256('scheduling-policy'),
     buildRecipeDigest: sha256('build-recipe'),
@@ -220,8 +217,8 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     profileDigest: manifest.releaseProfileDigest,
     gatePolicyDigest: manifest.releaseGatePolicyDigest,
   };
-  const rollbackReport = buildProductionReleaseReplayEvidenceRecordV1({
-    schema: 'ProductionReleaseReplayEvidenceRecordV1',
+  const rollbackReport = buildProductionReleaseReplayEvidenceRecord({
+    schema: 'ProductionReleaseReplayEvidenceRecord',
     kind: 'schema_rollback',
     productionEvidence: true,
     status: 'passed',
@@ -231,8 +228,8 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     reportDigest: sha256('rollback-report'),
     verificationReceiptDigest: sha256('rollback-verification-receipt'),
   });
-  const compatibilityReport = buildProductionReleaseReplayEvidenceRecordV1({
-    schema: 'ProductionReleaseReplayEvidenceRecordV1',
+  const compatibilityReport = buildProductionReleaseReplayEvidenceRecord({
+    schema: 'ProductionReleaseReplayEvidenceRecord',
     kind: 'ga_compatibility',
     productionEvidence: true,
     status: 'passed',
@@ -256,8 +253,8 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     runAttempt: identity().runAttempt,
     actorIdentity: REVIEWER,
   };
-  const securityReview = buildMaintainerSecurityReviewRecordV1({
-    schema: 'MaintainerSecurityReviewRecordV1',
+  const securityReview = buildMaintainerSecurityReviewRecord({
+    schema: 'MaintainerSecurityReviewRecord',
     reviewMode: 'single_maintainer',
     reviewerIdentity: REVIEWER,
     reviewedAt: '2026-08-02T01:00:00.000Z',
@@ -266,7 +263,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     execution: reviewExecution,
     ref: identity().ref,
     trustedVerifierCommit: TRUSTED_VERIFIER_COMMIT,
-    routeIdentity: manifest.providerDataPolicyDigest,
+    routeIdentity: manifest.providerRouteDigest,
     platformIdentity: manifest.supportedPlatforms[0]!,
     rollbackReportDigest: rollbackReport.recordDigest,
     compatibilityReportDigest: compatibilityReport.recordDigest,
@@ -282,7 +279,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     ],
   });
   writeFileSync(paths.securityReviewEvidence, JSON.stringify(securityReview));
-  const githubExecution = (job: string): ReleaseEvidenceResultV1['executionIdentity'] => ({
+  const githubExecution = (job: string): ReleaseEvidenceResult['executionIdentity'] => ({
     source: 'github_actions',
     canonicalRepository: PRODUCTION_RELEASE_REPOSITORY,
     repositoryId: PRODUCTION_RELEASE_REPOSITORY_NODE_ID,
@@ -305,7 +302,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     ['g3', 'agent_task_suite', 'G3'],
     ['g4', 'incident_rehearsal', 'G4'],
   ] as const;
-  const results: ReleaseEvidenceResultV1[] = automaticKinds.map(([evidenceId, kind, gate]) => ({
+  const results: ReleaseEvidenceResult[] = automaticKinds.map(([evidenceId, kind, gate]) => ({
     evidenceId,
     kind,
     gate,
@@ -344,8 +341,8 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     summary: 'Candidate-bound single-maintainer security review.',
     maintainerReview: securityReview,
   });
-  const evidenceBundle = buildReleaseEvidenceBundleV1({
-    schema: 'ReleaseEvidenceV1',
+  const evidenceBundle = buildReleaseEvidenceBundle({
+    schema: 'ReleaseEvidence',
     evidenceBundleId: 'production-release-evidence-v1',
     generatedAt: '2026-08-02T01:05:00.000Z',
     artifactIdentity: securityReview.candidate,
@@ -355,7 +352,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     risks: [],
     exceptions: [],
   });
-  const gateDecision = evaluateReleaseGateV1({
+  const gateDecision = evaluateReleaseGate({
     policy: gatePolicy,
     evidence: evidenceBundle,
     artifactIdentity: securityReview.candidate,
@@ -401,7 +398,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
             timestampCertificateSha256: 'D'.repeat(64),
             timestampRequired: true,
           } as const);
-  const input: ProductionSupplyChainCliInputV1 = {
+  const input: ProductionSupplyChainCliInput = {
     expected: identity(),
     platform,
     paths,
@@ -435,7 +432,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
 }
 
 function attestationOutput(input: {
-  expected: ProductionReleaseExpectedIdentityV1;
+  expected: ProductionReleaseExpectedIdentity;
   subjectPath: string;
   digest: string;
 }) {
@@ -446,8 +443,8 @@ function attestationOutput(input: {
     workflowSha: input.expected.workflowSha,
     sourceDigest: input.expected.commit,
     sourceRef: input.expected.ref,
-    san: productionReleaseCertificateIdentityV1(input.expected),
-    runInvocation: productionReleaseRunInvocationUriV1(input.expected),
+    san: productionReleaseCertificateIdentity(input.expected),
+    runInvocation: productionReleaseRunInvocationUri(input.expected),
   };
   return JSON.stringify([
     {
@@ -468,15 +465,13 @@ function attestationOutput(input: {
 
 describe('production supply-chain command builders', () => {
   test('pins Windows tools to exact system-volume protected installation paths', () => {
-    expect(isProtectedWindowsToolPathV1('C:\\Program Files\\GitHub CLI\\gh.exe')).toBe(true);
-    expect(isProtectedWindowsToolPathV1('C:\\Program Files\\PowerShell\\7\\pwsh.exe')).toBe(true);
-    expect(isProtectedWindowsToolPathV1('C:\\Program Files\\Kite Verifiers\\cosign.exe')).toBe(
-      true,
-    );
-    expect(isProtectedWindowsToolPathV1('D:\\Program Files\\evil\\evil.exe')).toBe(false);
-    expect(isProtectedWindowsToolPathV1('C:\\Program Files\\evil\\evil.exe')).toBe(false);
+    expect(isProtectedWindowsToolPath('C:\\Program Files\\GitHub CLI\\gh.exe')).toBe(true);
+    expect(isProtectedWindowsToolPath('C:\\Program Files\\PowerShell\\7\\pwsh.exe')).toBe(true);
+    expect(isProtectedWindowsToolPath('C:\\Program Files\\Kite Verifiers\\cosign.exe')).toBe(true);
+    expect(isProtectedWindowsToolPath('D:\\Program Files\\evil\\evil.exe')).toBe(false);
+    expect(isProtectedWindowsToolPath('C:\\Program Files\\evil\\evil.exe')).toBe(false);
     expect(
-      isProtectedWindowsToolPathV1(
+      isProtectedWindowsToolPath(
         'C:\\Program Files\\PowerShell\\7\\..\\..\\..\\Users\\runneradmin\\pwsh.exe',
       ),
     ).toBe(false);
@@ -485,14 +480,14 @@ describe('production supply-chain command builders', () => {
   test('pins keyless and GitHub verification to expected CLI identity', () => {
     const expected = identity();
     expect(
-      buildCosignKeylessBlobVerificationCommandV1({
+      buildCosignKeylessBlobVerificationCommand({
         cosignPath: '/usr/bin/cosign',
         subjectPath: '/release/manifest.json',
         bundlePath: '/release/manifest.sigstore.json',
         expected,
       }),
-    ).toContain(productionReleaseCertificateIdentityV1(expected));
-    const github = buildGithubArtifactAttestationVerificationCommandV1({
+    ).toContain(productionReleaseCertificateIdentity(expected));
+    const github = buildGithubArtifactAttestationVerificationCommand({
       ghPath: '/usr/bin/gh',
       subjectPath: '/release/payload.tar.gz',
       bundlePath: '/release/attestations.jsonl',
@@ -505,7 +500,7 @@ describe('production supply-chain command builders', () => {
 
   test('pins macOS Developer ID/notarization and Windows signer, chain, and timestamp', () => {
     const expected = identity();
-    const mac = buildPlatformSignatureVerificationCommandsV1({
+    const mac = buildPlatformSignatureVerificationCommands({
       platform: 'macos-arm64',
       subjectPath: '/release/Kite.app',
       expected,
@@ -530,7 +525,7 @@ describe('production supply-chain command builders', () => {
     expect(mac[1]).toContain('--extract-certificates');
     expect(mac[2]).toContain('--assess');
 
-    const windows = buildPlatformSignatureVerificationCommandsV1({
+    const windows = buildPlatformSignatureVerificationCommands({
       platform: 'windows-x64',
       subjectPath: 'C:\\release\\kite.exe',
       expected,
@@ -588,9 +583,9 @@ describe('production supply-chain command builders', () => {
         KITE_RELEASE_COSIGN_SHA256: value.input.tools.cosign.sha256,
         KITE_RELEASE_GATE_DECISION_DIGEST: value.input.expectedGateDecisionDigest,
       };
-      expect(parseProductionSupplyChainCliInputV1([], env).expected).toEqual(expected);
+      expect(parseProductionSupplyChainCliInput([], env).expected).toEqual(expected);
       expect(() =>
-        parseProductionSupplyChainCliInputV1([], {
+        parseProductionSupplyChainCliInput([], {
           ...env,
           KITE_RELEASE_REF: 'refs/heads/main',
         }),
@@ -666,7 +661,7 @@ describe('production supply-chain admission verifier skeleton', () => {
     const value = fixture();
     const commands: string[][] = [];
     try {
-      const result = verifyProductionSupplyChainAdmissionV1(
+      const result = verifyProductionSupplyChainAdmission(
         value.input,
         dependencies(value, commands),
       );
@@ -700,7 +695,7 @@ describe('production supply-chain admission verifier skeleton', () => {
     try {
       const base = dependencies(value, []);
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(
+        verifyProductionSupplyChainAdmission(
           {
             ...value.input,
             tools: {
@@ -712,7 +707,7 @@ describe('production supply-chain admission verifier skeleton', () => {
         ),
       ).toThrow(/verifier_binary_mismatch/);
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, {
+        verifyProductionSupplyChainAdmission(value.input, {
           ...base,
           execute(command) {
             if (command.includes('api')) {
@@ -735,7 +730,7 @@ describe('production supply-chain admission verifier skeleton', () => {
         }),
       ).toThrow(/security_review_unverified/);
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(
+        verifyProductionSupplyChainAdmission(
           {
             ...value.input,
             expected: { ...value.input.expected, trustedVerifierCommit: '4'.repeat(40) },
@@ -744,7 +739,7 @@ describe('production supply-chain admission verifier skeleton', () => {
         ),
       ).toThrow(/gate_not_approved/);
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(
+        verifyProductionSupplyChainAdmission(
           {
             ...value.input,
             nativeSigner: {
@@ -769,19 +764,19 @@ describe('production supply-chain admission verifier skeleton', () => {
           ),
         }),
       );
-      expect(() => verifyProductionSupplyChainAdmissionV1(value.input, base)).toThrow(
+      expect(() => verifyProductionSupplyChainAdmission(value.input, base)).toThrow(
         /gate_not_approved/,
       );
       writeFileSync(value.paths.gateDecision, JSON.stringify(gate));
 
       writeFileSync(value.paths.nativeLauncher, 'different-launcher');
-      expect(() => verifyProductionSupplyChainAdmissionV1(value.input, base)).toThrow(
+      expect(() => verifyProductionSupplyChainAdmission(value.input, base)).toThrow(
         /archive_layout_mismatch/,
       );
       writeFileSync(value.paths.nativeLauncher, 'signed-launcher-bytes');
 
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, {
+        verifyProductionSupplyChainAdmission(value.input, {
           ...base,
           execute(command) {
             if (
@@ -804,13 +799,13 @@ describe('production supply-chain admission verifier skeleton', () => {
     try {
       const base = dependencies(value, []);
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, {
+        verifyProductionSupplyChainAdmission(value.input, {
           ...base,
           now: () => new Date('2026-08-02T02:01:00.001Z'),
         }),
       ).toThrow(/security_review_unverified/);
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(
+        verifyProductionSupplyChainAdmission(
           {
             ...value.input,
             expected: { ...value.input.expected, runId: '654321' },
@@ -824,7 +819,7 @@ describe('production supply-chain admission verifier skeleton', () => {
         value.paths.rollbackReport,
         JSON.stringify({ ...rollback, reportDigest: sha256('spliced-rollback-report') }),
       );
-      expect(() => verifyProductionSupplyChainAdmissionV1(value.input, base)).toThrow(
+      expect(() => verifyProductionSupplyChainAdmission(value.input, base)).toThrow(
         /gate_not_approved/,
       );
     } finally {
@@ -839,7 +834,7 @@ describe('production supply-chain admission verifier skeleton', () => {
       linkSync(value.paths.sbom, value.paths.provenance);
       const commands: string[][] = [];
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, dependencies(value, commands)),
+        verifyProductionSupplyChainAdmission(value.input, dependencies(value, commands)),
       ).toThrow(/input_missing_or_unsafe/);
       expect(commands).toEqual([]);
     } finally {
@@ -854,7 +849,7 @@ describe('production supply-chain admission verifier skeleton', () => {
       const unprotectedGh = join(value.root, 'unprotected-gh');
       writeFileSync(unprotectedGh, 'attacker-controlled-tool', { mode: 0o500 });
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(
+        verifyProductionSupplyChainAdmission(
           {
             ...value.input,
             tools: {
@@ -878,34 +873,34 @@ describe('production supply-chain admission verifier skeleton', () => {
       writeFileSync(
         value.paths.payload,
         tarGz([
-          { path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1['linux-x64'], bytes: launcher },
+          { path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_['linux-x64'], bytes: launcher },
           { path: 'pax-header', bytes: new TextEncoder().encode('path=kite/bin/kite'), type: 'x' },
         ]),
       );
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, dependencies(value, [])),
+        verifyProductionSupplyChainAdmission(value.input, dependencies(value, [])),
       ).toThrow(/archive_layout_mismatch/);
 
       writeFileSync(
         value.paths.payload,
         tarGz([
-          { path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1['linux-x64'], bytes: launcher },
+          { path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_['linux-x64'], bytes: launcher },
           { path: 'kite/bin//', type: '5' },
         ]),
       );
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, dependencies(value, [])),
+        verifyProductionSupplyChainAdmission(value.input, dependencies(value, [])),
       ).toThrow(/archive_layout_mismatch/);
 
       writeFileSync(
         value.paths.payload,
         tarGz([
-          { path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1['linux-x64'], bytes: launcher },
+          { path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_['linux-x64'], bytes: launcher },
           { path: 'kite/bin/./kite', bytes: new TextEncoder().encode('attacker-launcher') },
         ]),
       );
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, dependencies(value, [])),
+        verifyProductionSupplyChainAdmission(value.input, dependencies(value, [])),
       ).toThrow(/archive_layout_mismatch/);
     } finally {
       rmSync(value.root, { recursive: true, force: true });
@@ -920,7 +915,7 @@ describe('production supply-chain admission verifier skeleton', () => {
         value.paths.payload,
         tarGz([
           {
-            path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1['macos-arm64'],
+            path: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_['macos-arm64'],
             bytes: new TextEncoder().encode('signed-launcher-bytes'),
           },
           {
@@ -930,7 +925,7 @@ describe('production supply-chain admission verifier skeleton', () => {
         ]),
       );
       expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, dependencies(value, commands)),
+        verifyProductionSupplyChainAdmission(value.input, dependencies(value, commands)),
       ).toThrow(/archive_layout_mismatch/);
       expect(commands).toEqual([]);
     } finally {
@@ -945,7 +940,7 @@ describe('production supply-chain admission verifier skeleton', () => {
       try {
         const commands: string[][] = [];
         expect(() =>
-          verifyProductionSupplyChainAdmissionV1(value.input, dependencies(value, commands)),
+          verifyProductionSupplyChainAdmission(value.input, dependencies(value, commands)),
         ).not.toThrow();
         expect(
           commands.filter((command) => command.includes('--extract-certificates')),
@@ -963,7 +958,7 @@ describe('production supply-chain admission verifier skeleton', () => {
           expect(command.at(-1)).not.toContain('/Contents/MacOS/kite');
         }
         expect(() =>
-          verifyProductionSupplyChainAdmissionV1(
+          verifyProductionSupplyChainAdmission(
             {
               ...value.input,
               nativeSigner: {
@@ -976,7 +971,7 @@ describe('production supply-chain admission verifier skeleton', () => {
         ).toThrow('leaf certificate digest');
         const base = dependencies(value, []);
         expect(() =>
-          verifyProductionSupplyChainAdmissionV1(value.input, {
+          verifyProductionSupplyChainAdmission(value.input, {
             ...base,
             execute(command) {
               const result = base.execute(command);

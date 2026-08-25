@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '../../src/core/config';
-import { aiMessage } from '../../src/core/messages';
-import type { ContextPreflight, ContextTokenEstimate } from '../../src/core/model/context-budget';
-import { decideAutomaticContextCompaction } from '../../src/core/model/context-compaction-decision';
-import { manualContextCompactionEvent } from '../../src/core/model/context-compaction-manual';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
-import { invokeTestRuntimeModelV1 as invokeRuntimeModel } from '../helpers/runtime-model';
+import type { ContextPreflight, ContextTokenEstimate } from '@kite/builtin-runtime/model';
+import {
+  aiMessage,
+  decideAutomaticContextCompaction,
+  manualContextCompactionEvent,
+} from '@kite/builtin-runtime/model';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
+import type { AgentConfig } from '#app/config';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { projectTestPrimaryModelEffect } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function estimate(totalInputTokens: number): ContextTokenEstimate {
@@ -36,7 +41,8 @@ function preflight(
 }
 
 function historicalState(): RuntimeState {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'auto-compaction',
     userId: 'user',
     workspace: '/workspace',
@@ -62,12 +68,14 @@ function config(): AgentConfig {
     providerType: 'openai-compatible',
     sandbox: { enabled: false },
     features: {
-      contextCompactionV2: true,
-      contextCompactionAutoV1: true,
+      contextCompaction: true,
+      contextCompactionAuto: true,
     },
-    modelKwargs: {
+    modelCapabilities: {
       contextWindowTokens: 8_000,
       maxOutputTokens: 1_000,
+    },
+    modelKwargs: {
       providerSafetyMarginTokens: 500,
     },
     compaction: { autoMode: 'live' },
@@ -126,7 +134,7 @@ describe('automatic context compaction', () => {
       currentConfig.compaction = { autoMode: mode };
       const mock = createMockModel([{ message: aiMessage({ content: `called-${mode}` }) }]);
       let requested = 0;
-      const events = await invokeRuntimeModel({
+      const events = await projectTestPrimaryModelEffect({
         model: mock,
         state,
         config: currentConfig,
@@ -154,7 +162,11 @@ describe('automatic context compaction', () => {
     }
 
     const liveMock = createMockModel([{ message: aiMessage({ content: 'must not be called' }) }]);
-    const liveEvents = await invokeRuntimeModel({ model: liveMock, state, config: config() });
+    const liveEvents = await projectTestPrimaryModelEffect({
+      model: liveMock,
+      state,
+      config: config(),
+    });
     expect(liveMock.callCount.count).toBe(0);
     expect(liveEvents).toContainEqual(
       expect.objectContaining({
@@ -286,10 +298,10 @@ describe('automatic context compaction', () => {
       },
     ]);
     const wideConfig = config();
-    wideConfig.modelKwargs = { contextWindowTokens: 128_000, maxOutputTokens: 1_000 };
-    await expect(invokeRuntimeModel({ model: mock, state, config: wideConfig })).rejects.toThrow(
-      'maximum context length exceeded',
-    );
+    wideConfig.modelCapabilities = { contextWindowTokens: 128_000, maxOutputTokens: 1_000 };
+    await expect(
+      projectTestPrimaryModelEffect({ model: mock, state, config: wideConfig }),
+    ).rejects.toThrow('MODEL_ATTEMPT_FATAL_FAILURE:provider_failure');
     expect(state.context.pendingCompaction).toBeUndefined();
     expect(state.context.hardBlock).toBeUndefined();
     expect(manualContextCompactionEvent({ state, config: wideConfig })).toMatchObject({
@@ -315,8 +327,12 @@ describe('automatic context compaction', () => {
     };
     const mock = createMockModel([{ message: aiMessage({ content: 'continued' }) }]);
     const wideConfig = config();
-    wideConfig.modelKwargs = { contextWindowTokens: 128_000, maxOutputTokens: 1_000 };
-    const events = await invokeRuntimeModel({ model: mock, state, config: wideConfig });
+    wideConfig.modelCapabilities = { contextWindowTokens: 128_000, maxOutputTokens: 1_000 };
+    const events = await projectTestPrimaryModelEffect({
+      model: mock,
+      state,
+      config: wideConfig,
+    });
     const metrics = events.find((event) => event.type === 'model.context_metrics');
     expect(metrics?.type).toBe('model.context_metrics');
     if (metrics?.type === 'model.context_metrics') {

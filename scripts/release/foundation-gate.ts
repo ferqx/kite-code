@@ -1,7 +1,7 @@
 import { sha256DomainSeparated } from './canonical-json';
-import { buildReleaseEvidenceBundleV1 } from './evidence-bundle';
-import type { ReleaseArtifactIdentityV1 } from './evidence-schema';
-import { buildReleaseGatePolicyV1, evaluateReleaseGateV1 } from './gate-evaluator';
+import { buildReleaseEvidenceBundle } from './evidence-bundle';
+import type { ReleaseArtifactIdentity } from './evidence-schema';
+import { buildReleaseGatePolicy, evaluateReleaseGate } from './gate-evaluator';
 
 const SYNTHETIC_COMMIT = '0000000000000000000000000000000000000000';
 const FIXTURE_TIME = '1970-01-01T00:00:00.000Z';
@@ -10,9 +10,9 @@ function fixtureDigest(subject: string): `sha256:${string}` {
   return sha256DomainSeparated(`foundation-gate-fixture/${subject}`, subject);
 }
 
-export function buildSyntheticFoundationGateRecordV1() {
-  const policy = buildReleaseGatePolicyV1({
-    schema: 'ReleaseGatePolicyV1',
+export function buildSyntheticFoundationGateRecord() {
+  const policy = buildReleaseGatePolicy({
+    schema: 'ReleaseGatePolicy',
     policyId: 'release-contract-foundation-v1',
     mode: 'synthetic_foundation',
     canonicalRepository: 'ferqx/kite-code',
@@ -37,7 +37,7 @@ export function buildSyntheticFoundationGateRecordV1() {
       },
     ],
   });
-  const artifactIdentity: ReleaseArtifactIdentityV1 = {
+  const artifactIdentity: ReleaseArtifactIdentity = {
     canonicalRepository: policy.canonicalRepository,
     repositoryId: policy.repositoryId,
     commit: SYNTHETIC_COMMIT,
@@ -72,8 +72,8 @@ export function buildSyntheticFoundationGateRecordV1() {
     },
     summary: 'Non-distributable synthetic release-contract qualification fixture.',
   });
-  const evidence = buildReleaseEvidenceBundleV1({
-    schema: 'ReleaseEvidenceV1',
+  const evidence = buildReleaseEvidenceBundle({
+    schema: 'ReleaseEvidence',
     evidenceBundleId: 'release-contract-foundation-v1',
     generatedAt: FIXTURE_TIME,
     artifactIdentity,
@@ -86,14 +86,14 @@ export function buildSyntheticFoundationGateRecordV1() {
     risks: [],
     exceptions: [],
   });
-  const decision = evaluateReleaseGateV1({
+  const decision = evaluateReleaseGate({
     policy,
     evidence,
     artifactIdentity,
     evaluatedAt: FIXTURE_TIME,
   });
   return Object.freeze({
-    schema: 'ReleaseFoundationGateRecordV1' as const,
+    schema: 'ReleaseFoundationGateRecord' as const,
     fixtureClass: 'synthetic_non_production' as const,
     distributable: false as const,
     realSigningEnabled: false as const,
@@ -105,5 +105,5 @@ export function buildSyntheticFoundationGateRecordV1() {
 }
 
 if (import.meta.main) {
-  process.stdout.write(`${JSON.stringify(buildSyntheticFoundationGateRecordV1(), null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(buildSyntheticFoundationGateRecord(), null, 2)}\n`);
 }
