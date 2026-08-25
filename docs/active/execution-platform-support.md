@@ -10,7 +10,6 @@ tests/sandbox/platform-capability-probe.test.ts tests/sandbox/platform-capabilit
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
 tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
 tests/execution/sandbox-execution-provider.test.ts`、
-`bun test tests/postinstall.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
@@ -50,12 +49,9 @@ TUI/foreground CLI composition 证据组。但 ADR-0131 已取消通用 Shell �
 Workspace 的资格模型，并取得新鲜 broker/schema/repository/executable/invocation receipt 与入口证据。
 
 源码安装仍以 Bun 为包管理器；候选版本另使用 Bun standalone executable、manifest/checksum 和安全
-安装器，不要求目标机预装 Node。开发依赖安装的 `postinstall` 仍由 package script 显式通过系统 `node` 启动。
-该 bootstrap 必须只使用 Node 18 可初始化的 ESM 路径/加载 API；导入模块不得安装 Hook，只有直接
-执行脚本才可尝试通过已保证存在的 `bun x` 安装 lefthook，不得额外假设系统提供 npm/npx。
-lefthook 安装失败继续是非关键开发工具故障，不能阻断依赖安装。
-Ubuntu 24.04 默认 Node 18 的 Docker x64 预检负责捕获误用 `import.meta.dirname` 等较新全局属性；
-该预检不替代 GitHub-hosted 原生平台 artifact。
+安装器，不要求目标机预装 Node。开发依赖安装不再执行仓库自定义 root `postinstall`；Git hook 安装由
+`lefthook` 包自身的安装生命周期负责，不下载仓库管理的备用二进制，也不修改 `node_modules` 内的上游文件。
+lefthook 安装失败继续是非关键开发工具故障，不能阻断应用构建或发行验证。
 
 | runner 候选 | backend 候选 | 当前结论 | 主要缺口 |
 | --- | --- | --- | --- |
