@@ -1,6 +1,6 @@
 # Shell 沙箱边界与并发审批队列优化完成记录
 
-状态：completed（SAQ-00～SAQ-10、20 个验收场景、本地全量与实现 HEAD `7200f2da` 的 GitHub Actions 全部通过）
+状态：completed（SAQ-00～SAQ-10、20 个验收场景、本地全量与实现提交 `4bfd721d` 的 GitHub Actions 全部通过）
 
 日期：2026-08-25
 
@@ -38,7 +38,7 @@ Pull Request：[#63](https://github.com/ferqx/kite-code/pull/63)
 | Task | 具名产出/验证入口 | 当前登记 |
 | --- | --- | --- |
 | SAQ-00 | `docs/adr/0137-shell-sandbox-durable-approval-queue.md`；`packages/agent-kernel/test/authorization.test.ts`；`packages/builtin-runtime/test/model-effect-coordinator.test.ts` | contract clean cutover；legacy shape fail closed 已纳入定向回归 |
-| SAQ-01 | `packages/agent-kernel/test/shell-policy-matrix.test.ts`；`packages/builtin-runtime/test/sandbox-scope-contract.test.ts`；`tests/sandbox/platform-backends.test.ts` | 22 tests 中目标矩阵与 protected-name evidence 已具名；三平台 native qualification 已由 Platform run 32794845103 通过 |
+| SAQ-01 | `packages/agent-kernel/test/shell-policy-matrix.test.ts`；`packages/builtin-runtime/test/sandbox-scope-contract.test.ts`；`tests/sandbox/platform-backends.test.ts` | 22 tests 中目标矩阵与 protected-name evidence 已具名；三平台 native qualification 已由 Platform run 32831682408 通过 |
 | SAQ-02 | `packages/agent-kernel/test/approval-queue.test.ts`；`packages/runtime-storage-sqlite/test/approval-queue-recovery.test.ts`；`tests/runtime/subagent-approval-queue.test.ts` | State 27 queue/generation/sequence/replay contract |
 | SAQ-03 | `packages/agent-kernel/test/authorization.test.ts`；`packages/agent-kernel/test/auto-review.test.ts`；`packages/runtime-host/test/approval-batch-recovery.test.ts` | 两 grant、旧 Full/旧 reviewer shape fail closed、完整 identity |
 | SAQ-04 | `tests/runtime/subagent-approval-queue.test.ts`；`packages/runtime-host/test/approval-batch-recovery.test.ts`；`packages/runtime-storage-sqlite/test/approval-queue-recovery.test.ts` | batch release、独立 receipt、revision race、reopen/fault contract |
@@ -92,14 +92,14 @@ legacy shape、stale generation、跨 turn、late result、rollback、restart、
 | Gate | 状态 | 证据 |
 | --- | --- | --- |
 | `bun run typecheck` | passed | 根工程与 7 个 Runtime workspace 全部通过 |
-| `bun run test:all` | passed | 最终修复后默认套件 3559 pass / 6 skip / 0 fail / 15857 expects；7 个 workspace 全绿；39 个隔离 PTY 场景文件全绿 |
+| `bun run test:all` | passed | 最终修复后默认套件 3574 pass / 6 skip / 0 fail / 15911 expects；7 个 workspace 全绿；40 个隔离 PTY 场景文件全绿 |
 | `bun run test:e2e` | passed | 7 pass / 0 fail / 32 expects |
 | `bun run test:runtime:soak` | passed | CI profile 7/7 cases；全部 required terminal evidence、State invariant 与 cleanup 通过，0 orphan / 0 residual；最终本地 Bun 1.3.14 digest `sha256:f1626624df178cfd6f5c9acbc4bf878df6da4352bef2cdad15b18fbad80ad066`，Required Bun 1.3.14 digest `sha256:79a0db167c4b83fb65bf22ad4d5d3e663c776fdd47fb6eb6af12bbc628451d0f` |
 | `bun run check:core-boundary` / `check:runtime-packages` | passed | Core boundary 通过；7 packages / 12 edges / 单一 App composition root |
 | `bun run check:docs-impact` | passed | Documentation impact checks passed |
 | `bun run check:docs` | passed | 文档结构与计划治理通过：83 completed、25 superseded、0 optional |
 | `git diff --check` / `bun run format:check` | passed | 无 whitespace error；Biome 0 error（23 warnings / 6 infos 为既有非阻断诊断） |
-| GitHub Actions required checks | passed | [PR #63](https://github.com/ferqx/kite-code/pull/63) implementation HEAD `7200f2da`： [Required 32794845123](https://github.com/ferqx/kite-code/actions/runs/32794845123) 的 unit、quality、runtime-e2e、compaction、fault-soak、TUI shard 0/1/2/3 与 aggregate 全绿；[Platform 32794845103](https://github.com/ferqx/kite-code/actions/runs/32794845103) 的 Ubuntu 24.04、macOS 15 ARM64、Windows 2025 x64 全绿；[OSS RC](https://github.com/ferqx/kite-code/actions/runs/32794845109)、[Execution Boundary](https://github.com/ferqx/kite-code/actions/runs/32794845100)、[Session ACL](https://github.com/ferqx/kite-code/actions/runs/32794845169)、[MCP keyring](https://github.com/ferqx/kite-code/actions/runs/32794845198) 全绿 |
+| GitHub Actions required checks | passed | [PR #63](https://github.com/ferqx/kite-code/pull/63) implementation commit `4bfd721d`： [Required 32831682469](https://github.com/ferqx/kite-code/actions/runs/32831682469) 的 unit、quality、runtime-e2e、compaction、fault-soak、TUI shard 0/1/2/3 与 aggregate 全绿；[Platform 32831682408](https://github.com/ferqx/kite-code/actions/runs/32831682408) 的 Ubuntu 24.04、macOS 15 ARM64、Windows 2025 x64 全绿；[OSS RC 32831682393](https://github.com/ferqx/kite-code/actions/runs/32831682393)、[Execution Boundary 32831682417](https://github.com/ferqx/kite-code/actions/runs/32831682417)、[Session ACL 32831682443](https://github.com/ferqx/kite-code/actions/runs/32831682443)、[MCP keyring 32831682234](https://github.com/ferqx/kite-code/actions/runs/32831682234) 全绿 |
 
 ## 5. ADR-0138 历史会话兼容后续
 
@@ -127,5 +127,9 @@ Workspace containment、traversal 与 NUL。
 真实 TUI 重试还覆盖“历史会话来自原仓库、当前进程从另一个 worktree 启动”：导入后的 Runtime 使用持久 State 中成对的
 Workspace/Project identity，Coordinator admission 在 registry publication 前完成；因此不会把当前 checkout path 与旧 digest
 混合，也不会在 admission 失败后留下 ghost runtime。
+后续 Session 导航回归还覆盖 latest → historical → latest 的消息恢复、延迟 historical load 与已注册 Session 直接切换的
+generation 竞争、readiness rejection 后 fail-complete cleanup，以及三个 State 26 Session 连续导入/切换。Project digest
+继续保留 Runtime Host native canonical realpath 的 durable 算法；Coordinator 复用同一 resolver 校验，Builtin sandbox 的
+Windows case-folded comparison path 不再被二次哈希，因此既支持 Windows 8.3/drive spelling，也不改写已有会话 identity。
 
 若任一门禁失败，按源码/测试事实修复后重新运行；不得用 `--no-verify`、删除测试、放宽断言或恢复旧授权兼容路径绕过。
