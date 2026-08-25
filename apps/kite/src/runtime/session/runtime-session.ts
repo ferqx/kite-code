@@ -512,6 +512,17 @@ export class SessionRuntime {
     return persisted;
   }
 
+  /** Surface an asynchronous Host command failure through the canonical Runtime event stream. */
+  reportRuntimeFailure(message: string): void {
+    const event: RuntimeEvent = {
+      type: 'run.error',
+      message,
+      recoverable: false,
+    };
+    if (this._activeDispatch) this._routeRuntimeEvent(event, this._activeDispatch);
+    else this._pushToBuffer(event);
+  }
+
   abort(): void {
     this.persistCancellation();
     this._manualCompactionAbortController?.abort('Cancelled by user.');

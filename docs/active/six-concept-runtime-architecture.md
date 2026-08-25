@@ -99,6 +99,11 @@ TUI 通过 `apps/kite/src/adapters/tui/session-adapter.ts` 获取 typed client s
 必须等待该 exact Session 的 `create_session` / `resume_session` applied receipt，再读取 committed revision 并
 提交命令。空 Session 可以在首个 Runtime event 前没有 transcript，但不能让 follow-up command 抢跑到尚未
 建立的 Host authority，也不能因跨 Session 的本地 sequence 排序把命令归给旧 Session。
+Ctrl+C 的同步 TUI surface 在返回前先调用真实 SessionRuntime 取消，使 Provider、Shell preparation 与交互 waiter
+立即收到本地 AbortSignal；随后仍须通过同一 Host command authority 提交 durable `cancel_turn` 并消费回执。
+若 notification 在读取 revision 与 Host admission 之间前移 committed revision，bridge 使用 conflict 回执中的最新
+revision 和新 command ID 重试；不可重试的拒绝投影为 `run.error`，不能静默丢弃。该同步适配不创建第二 mailbox、
+receipt cache 或 root-controller authority，Host lifecycle 仍只在 applied receipt 后执行自己的 abort。
 
 `RuntimeSessionCoordinator` 的 Workspace、Project、user、recovery identity 与 Artifact evidence 是 retained
 Session 的不可变身份，Host recovery 重复 `ensure` 时必须继续严格校验。`interactionMode` 则是可变的、已持久化

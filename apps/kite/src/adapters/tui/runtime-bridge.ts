@@ -62,6 +62,8 @@ interface PendingRewind {
   result?: RewindResult;
 }
 
+const TUI_CANCEL_REVISION_RETRY_LIMIT = 8;
+
 export function createTuiRuntimeClient(
   input: SessionDeps,
   createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPort,
@@ -571,18 +573,17 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
         }
         if (property === 'abort') {
           return (): void => {
-            void this.#awaitSessionReadiness(target.threadId)
-              .then(() =>
-                this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_,
-                  commandId: this.#nextCommandId(target.threadId, 'cancel'),
-                  type: 'cancel_turn',
-                  sessionId: target.threadId,
-                  expectedRevision: this.#revision(target.threadId),
-                  turnId: target.threadId,
-                }),
-              )
-              .catch(() => {});
+            // Ctrl+C is a synchronous TUI API. Stop the live Runtime before
+            // returning so a Host revision race cannot leave provider or
+            // Shell work running after the UI has accepted the cancellation.
+            target.abort();
+            void this.#cancelTurn(target).catch((error) => {
+              target.reportRuntimeFailure(
+                error instanceof Error
+                  ? error.message
+                  : `TUI Runtime cancellation failed: ${String(error)}`,
+              );
+            });
           };
         }
         if (property === 'setInteractionMode') {
@@ -608,6 +609,33 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     });
     this.#runtimeClients.set(runtime.threadId, client);
     return client;
+  }
+
+  async #cancelTurn(runtime: SessionRuntime): Promise<void> {
+    await this.#awaitSessionReadiness(runtime.threadId);
+    let expectedRevision = this.#revision(runtime.threadId);
+    for (let attempt = 0; attempt < TUI_CANCEL_REVISION_RETRY_LIMIT; attempt += 1) {
+      const receipt = await this.#access.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: this.#nextCommandId(runtime.threadId, 'cancel'),
+        type: 'cancel_turn',
+        sessionId: runtime.threadId,
+        expectedRevision,
+        turnId: runtime.threadId,
+      });
+      if (receipt.status === 'applied' || receipt.status === 'idempotent_replay') return;
+      if (
+        receipt.status === 'conflict' &&
+        receipt.code === 'revision_conflict' &&
+        Number.isSafeInteger(receipt.currentRevision) &&
+        receipt.currentRevision! >= 0
+      ) {
+        expectedRevision = receipt.currentRevision!;
+        continue;
+      }
+      throw new Error(`TUI Runtime cancellation rejected: ${receipt.code}`);
+    }
+    throw new Error('TUI Runtime cancellation rejected: revision_conflict');
   }
 
   #publishPresentation(

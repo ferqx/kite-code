@@ -9,6 +9,8 @@ import {
   type BuiltinPreparedShellExecutionInput,
   SandboxPreparationArtifactStore,
 } from '@kite/builtin-runtime/sandbox';
+import type { RuntimeCommand, RuntimeCommandReceipt } from '@kite/runtime-contract';
+import type { RuntimeHostCoordinatorPort } from '@kite/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
@@ -16,6 +18,7 @@ import {
 } from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { createTuiRuntimeClient } from '../apps/kite/src/adapters/tui/runtime-bridge';
 import type {
   RuntimeSessionCoordinator,
   RuntimeSessionCoordinatorAccess,
@@ -2338,6 +2341,126 @@ describe('SessionManager', () => {
     const snap2 = snapshots.find((s) => s.threadId === id2)!;
     expect(snap1.active).toBe(false);
     expect(snap2.active).toBe(true);
+  });
+});
+
+describe('TUI Runtime cancellation bridge', () => {
+  function hostFixture(
+    cancelReceipt: (
+      command: Extract<RuntimeCommand, { type: 'cancel_turn' }>,
+      attempt: number,
+    ) => RuntimeCommandReceipt,
+  ): {
+    host: RuntimeHostCoordinatorPort;
+    cancelCommands: Array<Extract<RuntimeCommand, { type: 'cancel_turn' }>>;
+    firstCancel: Promise<void>;
+  } {
+    const cancelCommands: Array<Extract<RuntimeCommand, { type: 'cancel_turn' }>> = [];
+    let observeFirstCancel!: () => void;
+    const firstCancel = new Promise<void>((resolve) => {
+      observeFirstCancel = resolve;
+    });
+    const host = {
+      command: async (command: RuntimeCommand): Promise<RuntimeCommandReceipt> => {
+        if (command.type === 'create_session') {
+          return {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: command.bootstrapSessionId!,
+            revision: 0,
+          };
+        }
+        if (command.type === 'cancel_turn') {
+          cancelCommands.push(command);
+          if (cancelCommands.length === 1) observeFirstCancel();
+          return cancelReceipt(command, cancelCommands.length);
+        }
+        throw new Error(`Unexpected Runtime command in cancellation fixture: ${command.type}`);
+      },
+      query: async () => ({
+        status: 'rejected' as const,
+        queryType: 'get_session_projection' as const,
+        code: 'unsupported' as const,
+      }),
+      subscribe: () =>
+        (async function* emptyNotifications() {
+          yield* [];
+        })(),
+      cancelSession: async () => undefined,
+      cancelAllSessions: async () => undefined,
+      waitForSessionIdle: async () => undefined,
+      isSessionOperationActive: () => false,
+      [Symbol.asyncDispose]: async () => undefined,
+    } satisfies RuntimeHostCoordinatorPort;
+    return { host, cancelCommands, firstCancel };
+  }
+
+  function clientWithHost(host: RuntimeHostCoordinatorPort) {
+    return createTuiRuntimeClient(
+      makeDeps(),
+      () => host,
+      () => ({
+        projectId: 'project_tui-cancel-test',
+        revision: 0,
+        workspaceDigest: `sha256:${'1'.repeat(64)}`,
+      }),
+    );
+  }
+
+  test('aborts the live Runtime synchronously and reconciles a revision-conflicted durable receipt', async () => {
+    const fixture = hostFixture((command, attempt) =>
+      attempt === 1
+        ? {
+            status: 'conflict',
+            commandId: command.commandId,
+            code: 'revision_conflict',
+            currentRevision: 4,
+          }
+        : {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: command.sessionId,
+            revision: 5,
+          },
+    );
+    const manager = clientWithHost(fixture.host);
+    const sessionId = manager.createSession('/tmp/tui-cancel');
+    const runtime = manager.getRuntime(sessionId)!;
+    const controller = new AbortController();
+    (runtime as unknown as { abortController: AbortController | null }).abortController =
+      controller;
+
+    runtime.abort();
+
+    expect(controller.signal.aborted).toBe(true);
+    await fixture.firstCancel;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fixture.cancelCommands).toHaveLength(2);
+    expect(fixture.cancelCommands.map((command) => command.expectedRevision)).toEqual([0, 4]);
+    expect(fixture.cancelCommands[1]!.commandId).not.toBe(fixture.cancelCommands[0]!.commandId);
+  });
+
+  test('surfaces a durable cancellation rejection after the Runtime is stopped', async () => {
+    const fixture = hostFixture((command) => ({
+      status: 'rejected',
+      commandId: command.commandId,
+      code: 'invalid_command',
+    }));
+    const manager = clientWithHost(fixture.host);
+    const sessionId = manager.createSession('/tmp/tui-cancel-rejected');
+    const runtime = manager.getRuntime(sessionId)!;
+
+    runtime.abort();
+
+    await fixture.firstCancel;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(runtime.eventBuffer).toContainEqual({
+      type: 'run.error',
+      message: 'TUI Runtime cancellation rejected: invalid_command',
+      recoverable: false,
+    });
   });
 });
 
