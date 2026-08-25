@@ -14,7 +14,7 @@
 ## 交付结论
 
 RMV1-06 已把 production execution lifecycle、Cancellation、Store 4 transaction acknowledgement、effect
-lease supervision 与 restart recovery 原子切到 `@kite/runtime-host`：
+lease supervision 与 restart recovery 原子切到 `@kite-ai/runtime-host`：
 
 - `SessionLifecycleSupervisor` 为每个长期 turn/compaction 创建唯一 root `AbortController`，把工作排在 mailbox
   外，并以 predecessor cleanup promise 作为同 Session successor barrier；

@@ -1,4 +1,4 @@
-export type { SandboxPreparationLifecycle } from '@kite/runtime-spi';
+export type { SandboxPreparationLifecycle } from '@kite-ai/runtime-spi';
 export { projectApprovedProxyEnvironment } from './approved-proxy-environment';
 export { generateBwrapArgs } from './bwrap';
 export { findUsableCgroupPidsRunner } from './cgroup-pids';

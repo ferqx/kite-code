@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   FilesystemPreimageArtifactError,
   FilesystemPreimageArtifactStore,
-} from '@kite/builtin-runtime/filesystem';
+} from '@kite-ai/builtin-runtime/filesystem';
 
 const roots: string[] = [];
 

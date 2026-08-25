@@ -134,9 +134,9 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 
 `toolSearch`（原 `capabilitySearch`）控制能力渐进披露：MCP Tool 数量在 1–20 之间且其 schema 估算 token 未超过 disclosure budget 时可直接 binding；否则只有在整体 catalog 仍适合该预算时才直接披露，超出预算则通过 `tool_search` 搜索发现。Skill 依 Provider tool-call 支持与剩余上下文预算独立决策。
 
-Builtin capability registry 的六个计算原语已按 ADR-0027 完成单路径切换；`@kite/runtime-spi` 只保存
+Builtin capability registry 的六个计算原语已按 ADR-0027 完成单路径切换；`@kite-ai/runtime-spi` 只保存
 neutral registry/descriptor contract，具体 schema、availability、effects 与 executor owner 位于
-`@kite/builtin-runtime`，不再接受 `toolSpecRegistry` 配置。
+`@kite-ai/builtin-runtime`，不再接受 `toolSpecRegistry` 配置。
 
 生产治理的 `resourceBudget`、`boundedCancellation`、`terminalOutcome`、`executionBoundary`、
 `networkBoundary`、`releaseProfile` 和 `observabilityMetrics` 均默认关闭。Logger flag 开启时 Runtime 只写

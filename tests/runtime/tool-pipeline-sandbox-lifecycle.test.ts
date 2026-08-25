@@ -1,24 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 
 import {
   SandboxPreparationArtifactStore,
   sandboxPreparationDigest,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   createDeterministicRuntimeIdSource,
   createRuntimeHostSandboxPreparedProcessExecutionPort,
   type RuntimeHostExecutionServices,
   type StateRuntimeState,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   createRuntimeHostStateSession,
   type StateRuntimeSessionInput,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   ExecutionBackendCapabilities,
   NonDynamicOperationId,
@@ -28,7 +28,7 @@ import type {
   SandboxExecutionDispatchIntentAcknowledgement,
   SandboxPreparation,
   ToolPipelineAttemptAcknowledgement,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   AppToolPipelineSandboxLifecycleError,
   createAppToolPipelineSandboxLifecycle,

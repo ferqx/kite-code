@@ -2,7 +2,7 @@ import {
   RUNTIME_NOTIFICATION_SCHEMA_,
   type RuntimeNotification,
   type RuntimeSubscription,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type { SessionRegistry } from './session-registry';
 
 export const RUNTIME_HOST_DURABLE_HISTORY_LIMIT = 256;

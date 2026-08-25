@@ -1,4 +1,7 @@
-import type { SandboxPreparationArtifactStore, ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import type {
+  SandboxPreparationArtifactStore,
+  ShellExecutor,
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   hasPendingSandboxPreparationRecovery,
   SANDBOX_PREPARATION_RECOVERY_,

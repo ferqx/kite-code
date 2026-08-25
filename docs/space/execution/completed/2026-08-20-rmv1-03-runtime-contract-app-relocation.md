@@ -16,9 +16,9 @@ Agent State、Runtime Event、Runtime Store、Kernel、Executor 或具体 builti
 package AST Gate 和负向测试固定。
 
 `src/app/cli`、`src/app/tui`、Git、Observability、Release 与 Workspace App 源码已物理迁入
-`apps/kite/src/`。release entrypoint 与根 scripts 指向 `@kite/kite/cli`、`@kite/kite/tui`；根
+`apps/kite/src/`。release entrypoint 与根 scripts 指向 `@kite-ai/kite/cli`、`@kite-ai/kite/tui`；根
 `src/index.ts` 只重导出两个 executable，不再构造 Runtime 或导出 Core Runtime surface。standalone release
-compiler 对所有 `@kite/*` public entrypoint 做精确映射，实际编译 CLI 的 POSIX supervisor 测试通过。
+compiler 对所有 `@kite-ai/*` public entrypoint 做精确映射，实际编译 CLI 的 POSIX supervisor 测试通过。
 
 ## Contract 与单一兼容路径
 

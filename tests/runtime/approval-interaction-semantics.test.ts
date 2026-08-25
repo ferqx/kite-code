@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertCurrentRuntimeEvent, type RuntimeEvent } from '@kite/agent-kernel';
+import { assertCurrentRuntimeEvent, type RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { projectRuntimeSessionLiveMode } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import {
   approvalRejectionSettlementEvents,

@@ -27,7 +27,7 @@ builtin-runtime   runtime-host ← runtime-storage-sqlite
 - Agent Kernel 不依赖其他 workspace，不读 clock、random、Node/Bun 或 I/O。
 - Runtime Host 只依赖 Contract、SPI 与 Kernel；不得解释具体 Builtin 工具语义。
 - Builtin Runtime 只依赖 Contract 与 SPI；不得导入 Host、Kernel 或 App。
-- SQLite Storage 只导入 `@kite/runtime-host/storage`，不解释 Kernel/Builtin 语义。
+- SQLite Storage 只导入 `@kite-ai/runtime-host/storage`，不解释 Kernel/Builtin 语义。
 - `apps/kite/src/bootstrap.ts` 是唯一 concrete composition root。
 
 `check:runtime-packages` 直接从 TypeScript module graph、package manifests 与 export facts 验证依赖、环、deep import、唯一 composition root 与 public symbol drift；不提交或比对生成快照。不得通过 alias、barrel、dynamic import、相对路径或测试 helper 绕过。
@@ -62,7 +62,7 @@ Host 启动一个冻结 RuntimeModule registry snapshot；所有 arbitration、e
 
 ### Builtin Runtime
 
-Builtin operation module 位于各领域 `runtime-module.ts`。根 barrel 只暴露模块组合和跨领域 capability surface；Skill、Subagent 与 Verification 必须分别从 `@kite/builtin-runtime/skills`、`/subagent`、`/verification` 导入。Schema、parser、description、effects、availability、traits、provider 与 executor revision 都来自同一冻结 catalog projection。
+Builtin operation module 位于各领域 `runtime-module.ts`。根 barrel 只暴露模块组合和跨领域 capability surface；Skill、Subagent 与 Verification 必须分别从 `@kite-ai/builtin-runtime/skills`、`/subagent`、`/verification` 导入。Schema、parser、description、effects、availability、traits、provider 与 executor revision 都来自同一冻结 catalog projection。
 
 ### SQLite Storage
 

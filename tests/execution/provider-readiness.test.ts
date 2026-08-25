@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   ProviderReadinessCoordinator,
   ProviderReadinessUnknownError,

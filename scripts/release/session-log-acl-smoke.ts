@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { version as osVersion, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite/builtin-runtime/model';
+import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite-ai/builtin-runtime/model';
 import {
   sessionLogDir,
   sessionLogFrontendDir,

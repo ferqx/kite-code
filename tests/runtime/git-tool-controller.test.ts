@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { GitBroker } from '@kite/builtin-runtime/git';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { GitBroker } from '@kite-ai/builtin-runtime/git';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config/index';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createMetricSample } from '@kite/runtime-host';
+import { createMetricSample } from '@kite-ai/runtime-host';
 import { type AgentConfig, EMBEDDED_RELEASE_PROFILES_ } from '#app/config';
 import type { TelemetryConsentGrant } from '@/app/observability/consent';
 import { composeExternalCanaryObservability } from '@/app/observability/external-canary';

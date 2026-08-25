@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import {
   PrivateArtifactStorageError,
   PrivateImmutableArtifactStorage,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 
 type FixtureKind = 'surface' | 'response';
 

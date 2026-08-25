@@ -1,4 +1,4 @@
-import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
+import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
 import type { Dispatch } from 'react';
 import { useCallback } from 'react';
 import type { Action } from '../reducers/actions';

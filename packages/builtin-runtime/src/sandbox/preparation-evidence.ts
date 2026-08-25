@@ -1,7 +1,7 @@
 import type {
   SandboxPreparationIntentRecord,
   SandboxPreparationReadyRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import { digestCapabilityValue } from '../skills/capability-domain';
 
 export function sandboxPreparationIntentDigest(

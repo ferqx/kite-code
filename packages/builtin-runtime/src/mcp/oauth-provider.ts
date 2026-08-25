@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { CredentialHandle } from '@kite/runtime-spi';
+import type { CredentialHandle } from '@kite-ai/runtime-spi';
 import type {
   OAuthClientProvider,
   OAuthDiscoveryState,

@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   createRuntimeHostToolCallSnapshot,
   type RuntimeHostToolCallSnapshotInput,
-} from '@kite/runtime-host';
-import type { ToolArgumentOrigin } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host';
+import type { ToolArgumentOrigin } from '@kite-ai/runtime-spi';
 
 const BASE: RuntimeHostToolCallSnapshotInput = {
   toolCallId: 'call-1',

@@ -18,7 +18,7 @@
 // 子 Agent 事件通过 subagentEventSink → emitAndRecord() 写入，
 // parentSpanId 使用当前活跃的 node span，归入主日志文件（子 agent 不创建独立日志）。
 
-import type { StateRuntimeEvent as RuntimeEvent } from '@kite/runtime-host';
+import type { StateRuntimeEvent as RuntimeEvent } from '@kite-ai/runtime-host';
 import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
 import { genSpanId, genTraceId } from './ids';
 import { mapRuntimeMetadata, mapSessionBoundaryMetadata } from './metadata-mapper';

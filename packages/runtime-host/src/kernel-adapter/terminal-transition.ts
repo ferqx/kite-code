@@ -12,7 +12,7 @@ import {
   type RuntimeFailureMode,
   type RuntimeTerminalStatus,
   resolveFailureMode,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 /** Generic Host bindings over deterministic State terminal and failure-mode policy. */
 export type StateRunTerminalOutcome = RunTerminalOutcome;

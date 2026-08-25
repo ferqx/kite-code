@@ -1,11 +1,11 @@
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
 import type {
   AgentPlan,
   PlanArtifactRef,
   PlanCompletionEvidence,
   PlanDocument,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 
 export function emptyCurrentPlanEvidence(): PlanCompletionEvidence {
   return {

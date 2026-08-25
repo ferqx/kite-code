@@ -1,8 +1,8 @@
-import { compileCapabilitySchema } from '@kite/builtin-runtime/skills';
+import { compileCapabilitySchema } from '@kite-ai/builtin-runtime/skills';
 import {
   type RuntimeHostStateVerificationSchemaAdmissions,
   runtimeHostStateVerificationSchemaAdmissionDigest,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type { RuntimeEvent } from './state-runtime';
 
 /**

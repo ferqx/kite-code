@@ -10,7 +10,7 @@ import {
   parseCgroupPidsEmpty,
   parseCgroupPidsPopulated,
   parseLinuxCgroupScopeIdentity,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 
 describe('cgroup v2 pids invocation', () => {
   test('builds an argv-only transient user scope with an exact task ceiling', () => {

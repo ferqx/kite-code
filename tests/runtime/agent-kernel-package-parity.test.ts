@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   type AgentState,
   admitRecoveryAttempt as admitPackageRecoveryAttempt,
@@ -69,18 +69,18 @@ import {
   STATE_DIAGNOSTIC_EVENT_TYPES,
   STATE_EVENT_REDUCER_COVERAGE,
   verificationSchemaAdmissionDigest,
-} from '@kite/agent-kernel';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
-import { compileCapabilitySchema } from '@kite/builtin-runtime/skills';
-import type { PlanDocument } from '@kite/runtime-contract';
-import { createDeterministicRuntimeIdSource } from '@kite/runtime-host';
+} from '@kite-ai/agent-kernel';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
+import { compileCapabilitySchema } from '@kite-ai/builtin-runtime/skills';
+import type { PlanDocument } from '@kite-ai/runtime-contract';
+import { createDeterministicRuntimeIdSource } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
-import type { VerificationCheck } from '@kite/runtime-spi';
-import { SQLITE_RUNTIME_STORE_SCHEMA_VERSION } from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { VerificationCheck } from '@kite-ai/runtime-spi';
+import { SQLITE_RUNTIME_STORE_SCHEMA_VERSION } from '@kite-ai/runtime-storage-sqlite';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { normalizeTerminalRuntimeEvent } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';

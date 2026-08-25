@@ -1,4 +1,4 @@
-import type { RuntimeCommand } from '@kite/runtime-contract';
+import type { RuntimeCommand } from '@kite-ai/runtime-contract';
 
 export type RuntimeCommandOwner = 'host' | 'kernel';
 

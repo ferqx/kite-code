@@ -5,7 +5,7 @@ import {
   VERIFICATION_CAPABILITY_REVISIONS_,
   VERIFICATION_OPERATION_IDS_,
   VERIFICATION_PROVIDER_ID_,
-} from '@kite/builtin-runtime/verification';
+} from '@kite-ai/builtin-runtime/verification';
 import { createBuiltinRuntimeModules } from '#builtin-runtime';
 import { createRuntimeModuleRegistry } from '#runtime-spi';
 import { KITE_RUNTIME_OPERATION_IDS_ } from '../../apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule';

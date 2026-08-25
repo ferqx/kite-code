@@ -4,7 +4,7 @@ import type {
   CapabilityResult,
   PrivateCapabilityArtifactRef,
   WorkspaceFilesystemObservationRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import { digestCapabilityBindingValue as digestCapability } from './capability-binding';
 import {
   canonicalModelJson,
@@ -65,7 +65,7 @@ export interface CapabilityArtifactBinding {
   readonly invocationId: string;
   readonly resultDigest: string;
   readonly evidenceDigest: string;
-  readonly filesystemObservation?: import('@kite/runtime-contract').WorkspaceFilesystemObservationRecord;
+  readonly filesystemObservation?: import('@kite-ai/runtime-contract').WorkspaceFilesystemObservationRecord;
 }
 
 export interface CapabilityArtifactEvidenceInvocation {

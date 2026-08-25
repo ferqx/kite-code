@@ -8,9 +8,9 @@ import {
   type GitProcessAdapter,
   type GitProcessRequest,
   qualifyBrokeredGitNativeDeny,
-} from '@kite/builtin-runtime/git';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
-import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/git';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
+import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#app/config/index';
 import { composeAppGitBroker } from '@/app/git/composition';
 import { createAppGitProcessAdapter } from '@/app/git/process-adapter';

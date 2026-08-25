@@ -2,13 +2,13 @@
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   createBuiltinCredentialBroker,
   McpConnectionManager,
   MemoryMcpCredentialStore,
-} from '@kite/builtin-runtime/mcp';
-import { aiMessage } from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/mcp';
+import { aiMessage } from '@kite-ai/builtin-runtime/model';
 import { loadMcpConfigCatalog } from '#app/config';
 import { decideProjectMcpServer } from '#app/config/mcp-project-approvals';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

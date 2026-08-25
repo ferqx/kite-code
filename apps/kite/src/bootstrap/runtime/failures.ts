@@ -1,4 +1,4 @@
-import { type McpProviderError, mcpProviderFailurePolicyFacts } from '@kite/builtin-runtime/mcp';
+import { type McpProviderError, mcpProviderFailurePolicyFacts } from '@kite-ai/builtin-runtime/mcp';
 import {
   runtimeHostStateClassifyFailure,
   runtimeHostStateFailureKindForToolParseFailure,
@@ -8,7 +8,7 @@ import {
   type StateFailureKind,
   type StateTerminalReasonCode,
   type StateToolParseFailureCode,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 
 /** App-only provider/logging projection over the Kernel-owned State taxonomy. */
 

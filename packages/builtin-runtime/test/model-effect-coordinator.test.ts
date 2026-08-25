@@ -11,12 +11,12 @@ import {
   type ModelInvocationStateView,
   type ModelResponseSource,
   type ModelRuntimeConfig,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   MODEL_ATTEMPT_OUTCOME_SCHEMA_,
   type ModelAttemptOutcome,
   type PrivateArtifactRef,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type {
   BuiltinContextTokenEstimateView,
   BuiltinRuntimeStateView,

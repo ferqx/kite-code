@@ -2,7 +2,7 @@ import {
   MODEL_ATTEMPT_OUTCOME_SCHEMA_,
   type ModelAttemptOutcome,
   type ModelSurface,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { isTransientModelConnectionError } from './deepseek';
 import type { SupportedChatModel } from './factory';
 import { invokeModelTransportSingleAttempt, type ModelTransportResponse } from './transport';

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { projectRuntimeEventToObservabilityFact } from '@kite/agent-kernel';
+import { projectRuntimeEventToObservabilityFact } from '@kite-ai/agent-kernel';
 import {
   createBuiltinObservabilityProjector,
   LowCardinalityAliasMapper,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import type { ClassifiedFailure } from '#app/bootstrap/runtime/failures';
 
 const NOW = '2026-08-02T00:00:00.000Z';

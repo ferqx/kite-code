@@ -4,9 +4,9 @@ import {
   createBuiltinContextCompilerPort,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
-import type { BuiltinModelOperationExecutionPort } from '@kite/builtin-runtime/model';
-import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime';
+import type { BuiltinModelOperationExecutionPort } from '@kite-ai/builtin-runtime/model';
+import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHost,
   createRuntimeHostBoundary,
@@ -18,14 +18,14 @@ import {
   type RuntimeHostExecutionBridge,
   type RuntimeHostExecutionServices,
   resolveProjectIdentity,
-} from '@kite/runtime-host';
-import type { RuntimeStorage } from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host';
+import type { RuntimeStorage } from '@kite-ai/runtime-host/storage';
 import {
   type CapabilityExecutionInvocation,
   type CapabilityExecutionPort,
   defineRuntimeModule,
   type RuntimeModule,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   assertSqliteSessionMetadataCanOpen,
   createSqliteRuntimeCompatibilityWriter,
@@ -43,7 +43,7 @@ import {
   sqliteCurrentRuntimeStorePath,
   sqliteRuntimeStorePath,
   sqliteRuntimeStorePathForEpoch,
-} from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/runtime-storage-sqlite';
 import { createTuiRuntimeClient } from './adapters/tui/runtime-bridge';
 import type {
   TuiSessionManager,

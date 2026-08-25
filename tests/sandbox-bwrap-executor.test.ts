@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { detectSandboxBackend } from '@kite/builtin-runtime/sandbox';
+import { detectSandboxBackend } from '@kite-ai/builtin-runtime/sandbox';
 import { createSandboxExecutor } from './helpers/sandbox-executor';
 
 const hasNativeBubblewrap = detectSandboxBackend() === 'bubblewrap';

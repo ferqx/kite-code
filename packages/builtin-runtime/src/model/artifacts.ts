@@ -5,8 +5,8 @@ import type {
   PrivateArtifactKind,
   PrivateArtifactRef,
   Sha256Digest,
-} from '@kite/runtime-spi';
-import { MODEL_RESPONSE_RECORD_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { MODEL_RESPONSE_RECORD_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { modelArtifactRoot } from './artifact-paths';
 import {
   type PrivateArtifactGarbageCollectionOptions,

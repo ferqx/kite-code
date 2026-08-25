@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import { createWebMechanismPort } from '#app/bootstrap/runtime/tool-provider-services';
 import {
   BuiltinMechanismAuthorityError,

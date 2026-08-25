@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import type {
   CapabilityToolKind,
   ClassifiedInvocation,
@@ -12,8 +12,8 @@ import type {
   ToolCallSnapshot,
   ToolPipelineResolutionContext,
   ValidatedInvocation,
-} from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import { createCapabilityBinding, digestCapabilityBindingValue } from '../src/capability-binding';
 import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '../src/index';
 import { createBuiltinRuntimeToolPipelineCallbacks } from '../src/runtime-tool-pipeline-callbacks';
@@ -485,9 +485,9 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
     const source = await Bun.file(
       new URL('../src/runtime-tool-pipeline-callbacks.ts', import.meta.url),
     ).text();
-    expect(source).not.toContain('@kite/runtime-host');
+    expect(source).not.toContain('@kite-ai/runtime-host');
     expect(source).not.toContain('#runtime-host');
-    expect(source).not.toContain('@kite/agent-kernel');
+    expect(source).not.toContain('@kite-ai/agent-kernel');
     expect(source).not.toContain('#agent-kernel');
     expect(source).not.toContain('#app/');
     expect(source).not.toContain('src/core/');

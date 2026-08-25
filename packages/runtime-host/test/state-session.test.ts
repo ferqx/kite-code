@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite/agent-kernel';
-import type { RuntimeHostExecutionServices } from '@kite/runtime-host';
+import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite-ai/agent-kernel';
+import type { RuntimeHostExecutionServices } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateSession,
   type StateRuntimeSessionInput,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CheckpointPort,
   RuntimeTransactionInput,
   SessionStore,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 
 const NOW = '2026-08-21T00:00:00.000Z';
 const RECOVERY_KEY = 'a'.repeat(64);

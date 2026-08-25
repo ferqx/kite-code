@@ -1,5 +1,5 @@
 {
-  "name": "@kite/runtime-storage-sqlite",
+  "name": "@kite-ai/runtime-storage-sqlite",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,6 +13,6 @@
     "test": "bun test ./test"
   },
   "dependencies": {
-    "@kite/runtime-host": "workspace:*"
+    "@kite-ai/runtime-host": "workspace:*"
   }
 }

@@ -5,7 +5,7 @@ import type {
   PreparedToolInvocation,
   RuntimeJsonValue,
   ToolPipelineOutcomeDispatch,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_,
   AppToolPipelineAttemptRouterError,

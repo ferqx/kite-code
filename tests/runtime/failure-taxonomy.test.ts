@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateResolveFailureMode as resolveFailureMode,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure, terminalReasonForFailure } from '#app/bootstrap/runtime/failures';
 import {
   completedTerminalOutcome,

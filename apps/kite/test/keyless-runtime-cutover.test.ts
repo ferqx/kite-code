@@ -1,8 +1,8 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveProjectIdentity } from '@kite/runtime-host';
-import { sqliteRuntimeStorePath } from '@kite/runtime-storage-sqlite';
+import { resolveProjectIdentity } from '@kite-ai/runtime-host';
+import { sqliteRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 
 test('target epoch starts without creating or loading an installation authority key', () => {
   const root = mkdtempSync(join(process.cwd(), '.kite-keyless-runtime-cutover-'));

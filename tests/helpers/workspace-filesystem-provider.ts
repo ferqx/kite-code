@@ -1,7 +1,7 @@
 import {
   WorkspaceFilesystemGrantError,
   type WorkspaceFilesystemGrantVerifier,
-} from '@kite/builtin-runtime/filesystem';
+} from '@kite-ai/builtin-runtime/filesystem';
 import type {
   FilesystemCommitGrant,
   FilesystemObserveGrant,
@@ -11,7 +11,7 @@ import type {
   WorkspaceFilesystemPreparedMutation,
   WorkspaceFilesystemProvider,
   WorkspaceFilesystemProviderResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 type MaybePromise<Value> = Value | Promise<Value>;
 

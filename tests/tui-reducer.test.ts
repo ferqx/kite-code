@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { ToolApprovalPayload, UserInputPayload } from '@kite/runtime-contract';
-import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { ToolApprovalPayload, UserInputPayload } from '@kite-ai/runtime-contract';
+import type { DurableSuspendedSubagent } from '@kite-ai/runtime-spi';
 import type { Action } from '../apps/kite/src/tui/App';
 import {
   eventReducer as canonicalEventReducer,
@@ -1581,7 +1581,7 @@ describe('eventReducer (blocks model)', () => {
             inputTokens: 100,
             outputTokens: 30,
             hitRate: 0.5,
-            standard: {} as import('@kite/runtime-contract').PromptCacheStandardEvaluation,
+            standard: {} as import('@kite-ai/runtime-contract').PromptCacheStandardEvaluation,
           },
         },
       });
@@ -1600,7 +1600,7 @@ describe('eventReducer (blocks model)', () => {
             inputTokens: 2000,
             outputTokens: 80,
             hitRate: 0.9,
-            standard: {} as import('@kite/runtime-contract').PromptCacheStandardEvaluation,
+            standard: {} as import('@kite-ai/runtime-contract').PromptCacheStandardEvaluation,
           },
         },
       });
@@ -4678,7 +4678,7 @@ describe('eventReducer (blocks model)', () => {
       expect(userBlocks[0]).not.toHaveProperty('runtimeEchoPending');
     });
     test('replays identical consecutive prompts as distinct turns', () => {
-      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
+      const events: import('@kite-ai/agent-kernel').RuntimeEvent[] = [
         { type: 'user.message_appended', messageId: 'u-1', content: '继续' },
         { type: 'turn.started', turnId: 'turn-1' },
         { type: 'model.requested', requestId: 'request-1' },
@@ -4749,7 +4749,7 @@ describe('eventReducer (blocks model)', () => {
 
     test('renders model text, tool lifecycle, file changes, and terminal errors in event order', () => {
       let state = fresh();
-      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
+      const events: import('@kite-ai/agent-kernel').RuntimeEvent[] = [
         { type: 'user.message_appended', messageId: 'u1', content: 'Inspect the file' },
         {
           type: 'model.responded',
@@ -4800,20 +4800,20 @@ describe('eventReducer (blocks model)', () => {
     });
 
     test('keeps approval in Footer while user input and plan review use their own projections', () => {
-      const approvalEvent: import('@kite/agent-kernel').RuntimeEvent = {
+      const approvalEvent: import('@kite-ai/agent-kernel').RuntimeEvent = {
         type: 'approval.requested',
         ...APPROVAL_EVENT_METADATA,
         interactionId: 'approval-1',
         toolCallId: 'write-1',
         approval: approval(),
       };
-      const inputEvent: import('@kite/agent-kernel').RuntimeEvent = {
+      const inputEvent: import('@kite-ai/agent-kernel').RuntimeEvent = {
         type: 'user_input.requested',
         interactionId: 'input-1',
         toolCallId: 'ask-1',
         request: question(),
       };
-      const reviewEvent: import('@kite/agent-kernel').RuntimeEvent = {
+      const reviewEvent: import('@kite-ai/agent-kernel').RuntimeEvent = {
         type: 'plan.review_requested',
         interactionId: 'plan-1',
         toolCallId: 'plan-call',
@@ -5636,7 +5636,7 @@ describe('eventReducer (blocks model)', () => {
     });
 
     test('plan review cancellation has identical live and replay projections without a banner', () => {
-      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
+      const events: import('@kite-ai/agent-kernel').RuntimeEvent[] = [
         {
           type: 'tool.queued',
           toolCallId: 'plan-call',
@@ -5850,7 +5850,7 @@ describe('eventReducer (blocks model)', () => {
     });
 
     test('keeps planning shell deferrals out of the message list', () => {
-      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
+      const events: import('@kite-ai/agent-kernel').RuntimeEvent[] = [
         {
           type: 'tool.queued',
           toolCallId: 'typecheck',
@@ -5904,7 +5904,7 @@ describe('eventReducer (blocks model)', () => {
     test('renders a planning edit denial as guidance without a tool card', () => {
       const reason =
         'Plan mode is read-only. No file was edited. Describe the intended change in the plan and apply it after plan approval.';
-      const events: import('@kite/agent-kernel').RuntimeEvent[] = [
+      const events: import('@kite-ai/agent-kernel').RuntimeEvent[] = [
         {
           type: 'tool.queued',
           toolCallId: 'edit-denied',
@@ -6017,7 +6017,7 @@ describe('eventReducer (blocks model)', () => {
 
     test('updates cache statistics and keeps non-visual lifecycle facts out of the message list', () => {
       let state = fresh();
-      const nonVisual: import('@kite/agent-kernel').RuntimeEvent[] = [
+      const nonVisual: import('@kite-ai/agent-kernel').RuntimeEvent[] = [
         { type: 'turn.started', turnId: 'turn-1' },
         { type: 'model.requested', requestId: 'request-1' },
         { type: 'turn.completed', turnId: 'turn-1' },

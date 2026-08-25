@@ -4,9 +4,9 @@ import type {
   MutableContextCompactionCheckpoint as ContextCompactionCheckpoint,
   ContextCompactionRequestedEvent,
   RuntimeEvent,
-} from '@kite/agent-kernel';
-import { createContextCorrectnessBlock, normalizeContextRuntimeState } from '@kite/agent-kernel';
-import type { ContextTokenEstimate } from '@kite/builtin-runtime/model';
+} from '@kite-ai/agent-kernel';
+import { createContextCorrectnessBlock, normalizeContextRuntimeState } from '@kite-ai/agent-kernel';
+import type { ContextTokenEstimate } from '@kite-ai/builtin-runtime/model';
 import {
   buildContextProjection,
   ContextCompactionValidationError,
@@ -15,12 +15,12 @@ import {
   executeBuiltinContextCompaction,
   expectedCompactionSourceDigest,
   serializeToolDescriptors,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { executeContextCompaction } from '#app/bootstrap/runtime/context-compaction-effect';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';

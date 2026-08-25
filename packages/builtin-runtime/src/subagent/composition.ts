@@ -1,4 +1,4 @@
-import type { SubagentProvider } from '@kite/runtime-spi';
+import type { SubagentProvider } from '@kite-ai/runtime-spi';
 import { SubagentGrantAuthority } from './grant-authority';
 import {
   type BuiltinSubagentTaskArtifactAccess,

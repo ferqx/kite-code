@@ -5,15 +5,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   MAX_MODEL_READ_FILE_CHARS_,
   type PendingToolRequest,
   toolRequestFromCall,
-} from '@kite/builtin-runtime';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { RuntimeHostToolExecutionResult } from '@kite/runtime-host/kernel-adapter';
-import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite/runtime-host/storage';
+} from '@kite-ai/builtin-runtime';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import type { RuntimeHostToolExecutionResult } from '@kite-ai/runtime-host/kernel-adapter';
+import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite-ai/runtime-host/storage';
 import type { AgentConfig } from '#app/config';
 import type { RuntimeJsonValue } from '#runtime-spi';
 import {

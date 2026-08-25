@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { PlanDocument } from '@kite/runtime-contract';
+import type { PlanDocument } from '@kite-ai/runtime-contract';
 
 /**
  * Compute the structural digest of a PlanDocument, excluding mutable step

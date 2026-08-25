@@ -1,5 +1,5 @@
-import type { StateRuntimeEvent, StateRuntimeState } from '@kite/runtime-host';
-import type { PreparedToolInvocationIdentity } from '@kite/runtime-spi';
+import type { StateRuntimeEvent, StateRuntimeState } from '@kite-ai/runtime-host';
+import type { PreparedToolInvocationIdentity } from '@kite-ai/runtime-spi';
 import type { AppToolPipelinePreparedRequest } from '#app/bootstrap/runtime/tool-pipeline-prepared';
 import { AppStateToolPipelinePersistenceError } from './contracts';
 import { includesAcknowledgedRevision } from './recovery-committer';

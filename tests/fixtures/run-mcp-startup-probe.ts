@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import { McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
 import { loadMcpConfigCatalog } from '#app/config';
 
 const catalog = loadMcpConfigCatalog();

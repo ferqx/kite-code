@@ -1,4 +1,4 @@
-import type { ContextCompactionProgressPhase } from '@kite/runtime-contract';
+import type { ContextCompactionProgressPhase } from '@kite-ai/runtime-contract';
 import { Box, Static, useInput } from 'ink';
 import React, { type ReactNode, useMemo, useRef } from 'react';
 import BlockRenderer from './components/BlockRenderer';

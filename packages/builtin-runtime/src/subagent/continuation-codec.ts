@@ -3,7 +3,7 @@ import type {
   JsonValue,
   SubagentApprovalFacts,
   SuspendedSubagentSnapshot,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from '../capability-binding';
 
 const MAX_APPROVAL_FACT_IDENTITY_LENGTH = 256;

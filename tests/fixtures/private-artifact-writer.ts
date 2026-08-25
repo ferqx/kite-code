@@ -1,4 +1,4 @@
-import { PrivateImmutableArtifactStorage } from '@kite/builtin-runtime/model';
+import { PrivateImmutableArtifactStorage } from '@kite-ai/builtin-runtime/model';
 
 const root = process.env.KITE_PRIVATE_ARTIFACT_TEST_ROOT;
 const payload = process.env.KITE_PRIVATE_ARTIFACT_TEST_PAYLOAD;

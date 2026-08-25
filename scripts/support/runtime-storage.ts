@@ -1,13 +1,13 @@
 /** Root-only composition of the current Host State codec and SQLite Store. */
 
 import { createHash } from 'node:crypto';
-import type { AgentState, RuntimeEvent } from '@kite/agent-kernel';
+import type { AgentState, RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateStorageBinding,
   type RuntimeHostLeasePort,
   type RuntimeHostTransactionPort,
-} from '@kite/runtime-host';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   ArtifactPort,
   CheckpointPort,
@@ -22,12 +22,12 @@ import type {
   RuntimeStorageBoundary,
   RuntimeTransactionInput,
   SessionStore,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 import {
   createSqliteRuntimeStorage,
   type SqliteRuntimeStorageOptions,
   sqliteRuntimeStorePath,
-} from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/runtime-storage-sqlite';
 
 const CURRENT_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
 

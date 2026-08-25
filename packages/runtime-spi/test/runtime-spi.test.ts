@@ -6,7 +6,7 @@ import {
   createRuntimeModuleRegistry,
   defineRuntimeModule,
   type RuntimeModuleRegistryWriter,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const capability: CapabilityDefinition = {
   capabilityId: 'builtin:test',

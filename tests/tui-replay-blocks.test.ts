@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { ToolApprovalPayload } from '@kite/runtime-contract';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { ToolApprovalPayload } from '@kite-ai/runtime-contract';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import type { SessionData } from '../apps/kite/src/bootstrap/runtime/session-persistence';
 import { createInitialState } from '../apps/kite/src/tui/initialState';

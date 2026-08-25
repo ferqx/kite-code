@@ -1,4 +1,4 @@
-import type { MetricExporter } from '@kite/runtime-host';
+import type { MetricExporter } from '@kite-ai/runtime-host';
 import {
   admitProductionDistributionTargetIdentity,
   parseReleaseProfile,

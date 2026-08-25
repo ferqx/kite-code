@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import type { CredentialHandle } from '@kite/runtime-spi';
+import type { CredentialHandle } from '@kite-ai/runtime-spi';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { BrowserOpener } from './browser-opener';
 import { NativeBrowserOpener } from './browser-opener';

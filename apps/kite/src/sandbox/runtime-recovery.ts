@@ -1,5 +1,5 @@
-import { digestCapabilityBindingValue } from '@kite/builtin-runtime/capability';
-import type { SandboxPreparationArtifactStore } from '@kite/builtin-runtime/sandbox';
+import { digestCapabilityBindingValue } from '@kite-ai/builtin-runtime/capability';
+import type { SandboxPreparationArtifactStore } from '@kite-ai/builtin-runtime/sandbox';
 import {
   cleanupPosixSandboxRuntimeRootsNoSpawn,
   decodeWindowsRestrictedTokenPreparedTransport,
@@ -8,9 +8,9 @@ import {
   sandboxDisposalLifecycleIntentDigest,
   sandboxPreparedPlanDigest,
   sandboxRuntimeRootsForPreparation,
-} from '@kite/builtin-runtime/sandbox';
-import { reconcilePosixSupervisor } from '@kite/runtime-host';
-import type { SandboxExecutionProvider } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { reconcilePosixSupervisor } from '@kite-ai/runtime-host';
+import type { SandboxExecutionProvider } from '@kite-ai/runtime-spi';
 import type { RuntimeEvent, RuntimeState } from '../bootstrap/runtime/state-runtime';
 import { reconcileWindowsRestrictedTokenPrepared } from './windows-restricted-token-runtime';
 
@@ -175,7 +175,7 @@ export async function reconcileSandboxPreparationAfterCrash(input: {
   const ready = invocation?.sandboxPreparationReady;
   if (!invocation || !ready) return false;
   if (invocation.sandboxDisposal?.status === 'completed') return true;
-  let prepared: Readonly<import('@kite/runtime-spi').PreparedSandboxExecution>;
+  let prepared: Readonly<import('@kite-ai/runtime-spi').PreparedSandboxExecution>;
   try {
     prepared = input.artifacts.read(ready.preparationArtifact);
   } catch {

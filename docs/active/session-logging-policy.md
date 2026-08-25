@@ -31,7 +31,7 @@ logger 不能制造 UI-only approval 事实。
 
 ## 模式与组合
 
-RM-04 将 TUI 的累计 token stats SQLite 访问移入 `@kite/runtime-storage-sqlite` 的显式
+RM-04 将 TUI 的累计 token stats SQLite 访问移入 `@kite-ai/runtime-storage-sqlite` 的显式
 `SessionMetadataPort`；SessionManager 只接收注入的 `save/loadAll/close` port，不再持有 raw SQLite handle。
 token stats 仍是 App session metadata，不是 Session Logger、Runtime State/Event 或 remote telemetry，既有
 `session_stats` 布局、journal 策略和隐私边界均未改变。
@@ -150,7 +150,7 @@ collector 在 content 路径先按 event type allowlist 拒绝事件，再调用
 或 thread 标识，content 模式不生成 `summary.json` 或独立 error log。正文进入 mapper 前还必须
 取得可信 runtime secret detector 的结构化 `clear` 结论；detector 缺失、返回 unknown/secret
 或抛错时拒绝该正文。Regex 脱敏只能作为 clear 结论后的纵深防御，不能作为允许落盘的依据。
-唯一 detector owner 是 `@kite/builtin-runtime/model` 的 `createModelSecretDetector`。CLI/TUI
+唯一 detector owner 是 `@kite-ai/builtin-runtime/model` 的 `createModelSecretDetector`。CLI/TUI
 composition 与 App run composition 都使用它，以当前 Runtime 持有的 API key 与 credential 类环境
 变量建立 exact-match secret 集合，并叠加保守 secret shape/protected-path 检测；不存在第二 detector
 别名、实现或 fallback。这样既确保披露为 content 时 clear 正文实际可写，也确保命中 secret 的整条

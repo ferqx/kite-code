@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import {
   createZeroResourceUsage,
   LIMITED_RESOURCE_BUDGET_,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 

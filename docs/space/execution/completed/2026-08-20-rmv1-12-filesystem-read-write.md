@@ -15,9 +15,9 @@
 
 RMV1-12 已把 Filesystem read/search/write/edit 与 typed Git inspect 物理迁入目标边界：
 
-- `@kite/runtime-spi` 唯一拥有 JSON-safe `WorkspaceFilesystemProviderV1`、operation/observation/grant contract 与
+- `@kite-ai/runtime-spi` 唯一拥有 JSON-safe `WorkspaceFilesystemProviderV1`、operation/observation/grant contract 与
   Git broker contract；根 `src/protocol/` 旧路径只保留 RMV1-16 前的 compatibility re-export；
-- `@kite/builtin-runtime` 唯一拥有 Local Workspace Provider、grant/evidence、diff/projection、descriptor-relative
+- `@kite-ai/builtin-runtime` 唯一拥有 Local Workspace Provider、grant/evidence、diff/projection、descriptor-relative
   commit、Git broker/qualification，以及 6 个 concrete executor；Core 旧实现路径只保留 compatibility re-export；
 - `builtin:read_file`、`builtin:search_content`、`builtin:search_files`、`builtin:write_file`、
   `builtin:edit_file`、`builtin:git_inspect` 已从 `LegacyRuntimeModule` 原子删除；对应 Core ToolSpec 只保留完全相同的

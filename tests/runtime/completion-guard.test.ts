@@ -1,20 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   decideCompletion,
   decidePlannedCompletion,
   decideUnplannedCompletion,
-} from '@kite/agent-kernel';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
-import { createDeterministicRuntimeIdSource } from '@kite/runtime-host';
+} from '@kite-ai/agent-kernel';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
+import { createDeterministicRuntimeIdSource } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
   setActivePlanning,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {

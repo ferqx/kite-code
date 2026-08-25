@@ -4,8 +4,8 @@ import {
   createInitialAgentState,
   encodeCurrentAgentStateJson,
   type RuntimeEvent,
-} from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
+} from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 
 const RECOVERY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 

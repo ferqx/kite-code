@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import type { ContextTokenEstimate } from '@kite/builtin-runtime/model';
+import type { ContextTokenEstimate } from '@kite-ai/builtin-runtime/model';
 import {
   createChatModel,
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 
 const LIVE_TIMEOUT_MS = Number(process.env.KITE_LIVE_MODEL_TIMEOUT_MS ?? 90_000);

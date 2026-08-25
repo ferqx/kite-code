@@ -15,14 +15,14 @@
 
 RMV1-08 已把 production Runtime module registry 与 lifecycle 原子切到私有 SPI/Host 边界：
 
-- `@kite/runtime-spi` 冻结 `RuntimeModuleV1` manifest/lifecycle、Capability definition/binding/executor、
+- `@kite-ai/runtime-spi` 冻结 `RuntimeModuleV1` manifest/lifecycle、Capability definition/binding/executor、
   Execution request/grant/receipt/context、ContextSource/ContextCompiler port、Receipt normalizer 与受控 execution
   adapter；这些是可信进程内私有契约，不是公开 Plugin ABI 或恶意代码隔离；
 - Registry 对 module ID、provider ID、operation owner、Capability ID、Executor、ContextSource、normalizer 与
   adapter 执行 exact duplicate rejection，Executor 必须匹配 Capability provider/revision；不存在 last-wins；
 - scoped registration writer 在每个同步 `register()` 返回后封闭；module 按声明顺序启动、反向释放，生命周期
   调用有界；partial startup 释放全部 module 并 fail closed，不形成 degraded fallback；
-- `@kite/runtime-host#createRuntimeHost` 对同一 module list 只构造一次 Registry，start 先完成 module lifecycle 再
+- `@kite-ai/runtime-host#createRuntimeHost` 对同一 module list 只构造一次 Registry，start 先完成 module lifecycle 再
   hydrate/recover；Host 从固定 ID 取得唯一 execution bridge，已删除独立 `createLegacyAccess` /
   `RuntimeHostExecutionBridgeFactory` 旁路；
 - Host dispose 先关闭 bridge，再反向释放 module，最后关闭 Store 4 storage；bridge 或 module cleanup 失败仍会
@@ -43,7 +43,7 @@ owner manifest 中的单一 legacy production entry 执行。后续 vertical sli
 
 App 对 SPI 的迁移兼容边只登记两条精确 exception：
 
-- `LegacyRuntimeModule.ts -> @kite/runtime-spi`；
+- `LegacyRuntimeModule.ts -> @kite-ai/runtime-spi`；
 - `LegacyRuntimeModule.ts -> ./LegacyRuntimeAccess`。
 
 两条 exception 都有 owner、理由和 RMV1-16 到期 Task；package checker 实际使用精确 edge，而不是目录 allowlist。

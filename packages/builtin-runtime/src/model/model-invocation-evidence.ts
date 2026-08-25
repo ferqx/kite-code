@@ -1,4 +1,4 @@
-import type { PrivateArtifactRef } from '@kite/runtime-spi';
+import type { PrivateArtifactRef } from '@kite-ai/runtime-spi';
 import type { ModelArtifactStore } from './artifacts';
 import { PrivateArtifactStorageError } from './private-immutable-artifacts';
 import { canonicalModelJson } from './surface-canonicalizer';

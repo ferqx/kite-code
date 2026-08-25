@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { PlanArtifactRef, PlanDocument } from '@kite/runtime-contract';
+import type { PlanArtifactRef, PlanDocument } from '@kite-ai/runtime-contract';
 import { userKiteCodeDir } from '../model/artifact-paths';
 import { planArtifactPath, planArtifactRoot } from './plan-artifact-paths';
 import { hasValidPlanRevisionMetadata, isPlanDocument, isPlanStepMetadata } from './plan-document';

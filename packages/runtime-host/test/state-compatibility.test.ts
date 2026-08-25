@@ -3,8 +3,8 @@ import {
   type AgentState,
   createInitialAgentState,
   encodeCurrentAgentStateJson,
-} from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
+} from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 
 const RECOVERY_KEY = 'c'.repeat(64);
 const LEGACY_FORMAT = {

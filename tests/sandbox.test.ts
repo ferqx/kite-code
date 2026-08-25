@@ -35,8 +35,8 @@ import {
   projectApprovedProxyEnvironment,
   resolveSandboxExitCode,
   resolveSeccompPath,
-} from '@kite/builtin-runtime/sandbox';
-import { buildPosixSupervisorEnvironment } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { buildPosixSupervisorEnvironment } from '@kite-ai/runtime-host';
 import { parseArgs } from '../apps/kite/src/cli/index';
 import { createSandboxExecutor } from './helpers/sandbox-executor';
 import { shellTool } from './helpers/shell-executor';

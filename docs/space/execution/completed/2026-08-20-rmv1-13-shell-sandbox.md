@@ -15,12 +15,12 @@
 
 RMV1-13 已把 Shell/Sandbox operation 与 process supervision 物理迁入目标边界：
 
-- `@kite/runtime-spi` 唯一拥有 JSON-safe `SandboxExecutionProviderV1`、prepared plan、cleanup、failure 与 receipt
+- `@kite-ai/runtime-spi` 唯一拥有 JSON-safe `SandboxExecutionProviderV1`、prepared plan、cleanup、failure 与 receipt
   contract；根 `src/protocol/sandbox-execution-provider.ts` 只保留 RMV1-16 前的 compatibility re-export；
-- `@kite/builtin-runtime` 唯一拥有 `builtin:shell_execute` definition/executor，以及 Sandbox backend、grant、Local
+- `@kite-ai/builtin-runtime` 唯一拥有 `builtin:shell_execute` definition/executor，以及 Sandbox backend、grant、Local
   Provider、protected-path、network、platform preparation 与 no-spawn qualification 领域语义；Core 旧实现路径只保留
   compatibility re-export；
-- `@kite/runtime-host` 唯一拥有异步 process spawn primitive、POSIX supervisor、process identity/lock、bounded output
+- `@kite-ai/runtime-host` 唯一拥有异步 process spawn primitive、POSIX supervisor、process identity/lock、bounded output
   drain 与 process-tree cleanup；POSIX child、Windows lifecycle adapter 和 host-shell adapter 都只能调用该 primitive；
 - `apps/kite/src/sandbox/` 唯一组合 native/host-shell availability；RMV1 迁移期通过待 RMV1-16 删除的 Core
   compatibility exports 访问 concrete Sandbox implementation，未新增第二 concrete package composition root 或

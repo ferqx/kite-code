@@ -1,5 +1,5 @@
 {
-  "name": "@kite/kite",
+  "name": "@kite-ai/kite",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,11 +18,11 @@
     "test": "bun test ./test"
   },
   "dependencies": {
-    "@kite/builtin-runtime": "workspace:*",
-    "@kite/runtime-contract": "workspace:*",
-    "@kite/runtime-host": "workspace:*",
-    "@kite/runtime-spi": "workspace:*",
-    "@kite/runtime-storage-sqlite": "workspace:*",
+    "@kite-ai/builtin-runtime": "workspace:*",
+    "@kite-ai/runtime-contract": "workspace:*",
+    "@kite-ai/runtime-host": "workspace:*",
+    "@kite-ai/runtime-spi": "workspace:*",
+    "@kite-ai/runtime-storage-sqlite": "workspace:*",
     "@inkjs/ui": "^2.0.0",
     "chalk": "^5.6.2",
     "ink": "^7.1.1",

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
+import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite-ai/runtime-contract';
 import type {
   CapabilityToolKind,
   NonDynamicOperationId,
@@ -8,8 +8,8 @@ import type {
   ToolArgumentOrigin,
   ToolCallSnapshot,
   ToolPipelineResolutionContext,
-} from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from '../src/capability-binding';
 import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '../src/index';
 import { createBuiltinToolPipelineCallbacks } from '../src/tool-pipeline-callbacks';
@@ -1084,7 +1084,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
     const source = await Bun.file(
       new URL('../src/tool-pipeline-callbacks.ts', import.meta.url),
     ).text();
-    for (const forbidden of ['@kite/runtime-host', '@kite/agent-kernel', '#app', '@/core']) {
+    for (const forbidden of ['@kite-ai/runtime-host', '@kite-ai/agent-kernel', '#app', '@/core']) {
       expect(source).not.toContain(forbidden);
     }
     expect(source).not.toContain('switch (call.name)');

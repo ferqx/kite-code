@@ -2,8 +2,8 @@ import type {
   BuiltinOperationExecutionValue,
   BuiltinWorkspaceFilesystemTerminalVerifier,
   CapabilityArtifactWriter,
-} from '@kite/builtin-runtime';
-import type { StateRuntimeEvent, StateRuntimeState } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime';
+import type { StateRuntimeEvent, StateRuntimeState } from '@kite-ai/runtime-host';
 import type {
   PreparedToolInvocation,
   SandboxPreparationArtifactPort,
@@ -12,7 +12,7 @@ import type {
   WorkspaceFilesystemDurableEvidencePort,
   WorkspaceFilesystemEditObservationPort,
   WorkspaceFilesystemMutationDurableEvidencePort,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 export const APP_STATE_TOOL_PIPELINE_PERSISTENCE_SCHEMA_ =
   'kite.app-state-tool-pipeline-persistence.v1' as const;

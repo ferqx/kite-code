@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import type { RuntimeEventMetadata, StoredRuntimeEvent } from '@kite/runtime-host/storage';
+import type { RuntimeEventMetadata, StoredRuntimeEvent } from '@kite-ai/runtime-host/storage';
 import { type EventRow, eventMetadataAt, type SqliteRuntimeSnapshotCodec } from './preflight';
 
 /** Event persistence over the adapter's one database connection. */

@@ -13,8 +13,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import { workspaceFilesystemContentHash as fileContentHash } from '@kite/builtin-runtime/filesystem';
-import type { RuntimeHostFilePreimageRecorder } from '@kite/runtime-host/storage';
+import { workspaceFilesystemContentHash as fileContentHash } from '@kite-ai/builtin-runtime/filesystem';
+import type { RuntimeHostFilePreimageRecorder } from '@kite-ai/runtime-host/storage';
 import type { StateRuntimeStorage } from './state-runtime';
 
 function normalizeEOL(content: string): string {

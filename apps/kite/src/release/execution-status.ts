@@ -4,7 +4,7 @@ import type {
   ExecutionCapabilitySurface,
   SandboxBackend,
   SandboxRuntime,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import type { AgentConfig } from '#app/config';
 
 export const EXECUTION_STATUS_CAPABILITIES_ = [

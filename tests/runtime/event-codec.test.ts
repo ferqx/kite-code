@@ -4,8 +4,8 @@ import {
   assertAgentStateInvariants,
   assertCurrentRuntimeEvent,
   decodeCurrentRuntimeEventJson,
-} from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import ts from 'typescript';
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {

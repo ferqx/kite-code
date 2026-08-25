@@ -11,8 +11,8 @@ export {
   sandboxCommandDigest,
   sandboxPreparationDigest,
   sandboxPreparedPlanDigest,
-} from '@kite/builtin-runtime/sandbox';
-export type { SandboxPreparationLifecycle } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/sandbox';
+export type { SandboxPreparationLifecycle } from '@kite-ai/runtime-spi';
 export {
   hasPendingSandboxPreparationRecovery,
   reconcilePendingSandboxPreparationsAfterCrash,

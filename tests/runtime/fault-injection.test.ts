@@ -2,11 +2,11 @@ import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { assertAgentStateInvariants } from '@kite/agent-kernel';
+import { assertAgentStateInvariants } from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
 import {
   openStateStoreForTest,

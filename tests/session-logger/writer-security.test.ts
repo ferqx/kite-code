@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite/builtin-runtime/model';
+import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite-ai/builtin-runtime/model';
 import { sessionLogDir, sessionLogFrontendDir, sessionLogRoot } from '#app/config/paths';
 import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
 import { SessionLogCollector } from '#app/session-logger/collector';

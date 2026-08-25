@@ -4,7 +4,7 @@ import {
   isRuntimeControlFrame,
   RUNTIME_CONTROL_FRAME_SCHEMA_,
   type RuntimeControlFrameInput,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   createRuntimeControlFrame,
   verifyRuntimeControlFrame,

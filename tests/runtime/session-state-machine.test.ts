@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentPendingApproval } from '@kite/agent-kernel';
+import type { AgentPendingApproval } from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
   runtimeHostStateNormalizeToolOutcomeEvent,
   type ToolCallStatus,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   eventsForRestartedSessionRecovery,
   eventsForSupersededTurnRecovery,

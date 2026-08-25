@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { BuiltinMechanismAuthorityError, mergeBuiltinMechanismBundle } from '@kite/builtin-runtime';
+import {
+  BuiltinMechanismAuthorityError,
+  mergeBuiltinMechanismBundle,
+} from '@kite-ai/builtin-runtime';
 
 describe('Builtin mechanism authority', () => {
   test('accepts one exact frozen mechanism and freezes the merged bundle', () => {

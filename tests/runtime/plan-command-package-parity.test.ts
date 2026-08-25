@@ -6,16 +6,16 @@ import {
   decideWritePlanCommand,
   type PlanCommandStateFacts,
   planCommandPhase,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import {
   createBuiltinPlanDocument,
   type PlanArtifactContent,
   type PlanArtifactStore,
   projectBuiltinPublicPlan,
-} from '@kite/builtin-runtime/planning';
-import type { PlanDocument, PlanningState } from '@kite/runtime-contract';
-import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/planning';
+import type { PlanDocument, PlanningState } from '@kite-ai/runtime-contract';
+import type { RuntimeState } from '@kite-ai/runtime-host/kernel-adapter';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   readPlanAction,
   updatePlanAction,

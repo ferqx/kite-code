@@ -28,7 +28,7 @@ import {
   type SandboxBackend,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
   wrapWindowsRestrictedTokenCommand,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import { z } from 'zod';
 import type { AgentConfig } from '#app/config';
 import { composeAppGitBroker, resolveAppGitExecutable } from '../../apps/kite/src/git/composition';

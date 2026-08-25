@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyToolOutcome } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import { classifyToolOutcome } from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure, type FailureKind } from '#app/bootstrap/runtime/failures';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 

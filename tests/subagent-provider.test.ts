@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { createToolRecoveryJournal } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import { aiMessage, BuiltinModelEffectCoordinator } from '@kite/builtin-runtime/model';
-import type { SubagentLifecycleArtifactAccess } from '@kite/builtin-runtime/subagent';
+import { createToolRecoveryJournal } from '@kite-ai/agent-kernel';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import { aiMessage, BuiltinModelEffectCoordinator } from '@kite-ai/builtin-runtime/model';
+import type { SubagentLifecycleArtifactAccess } from '@kite-ai/builtin-runtime/subagent';
 import {
   BuiltinChildRuntimeDriver,
   type LocalSubagentLifecycleDriver,
@@ -11,15 +11,15 @@ import {
   SubagentGrantAuthority,
   type SubagentTaskArtifactAccess,
   subagentTaskDigest,
-} from '@kite/builtin-runtime/subagent';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/subagent';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   SubagentDelegationGrant,
   SubagentHandle,
   SubagentProvider,
   SubagentResumeGrant,
-} from '@kite/runtime-spi';
-import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { subagentResultFromObservation } from '#app/bootstrap/runtime/subagent/observation-codec';
 import { SubagentProviderRecoveryRequiredError } from '#app/bootstrap/runtime/subagent/task-tool';
 import type { AgentConfig } from '#app/config/index';
@@ -91,7 +91,7 @@ const TEST_LIFECYCLE_ARTIFACTS: SubagentLifecycleArtifactAccess = {
 function lifecyclePersistence(
   invocationId: string,
   attempt = 1,
-  reject?: (events: import('@kite/agent-kernel').RuntimeEvent[]) => boolean,
+  reject?: (events: import('@kite-ai/agent-kernel').RuntimeEvent[]) => boolean,
 ) {
   let state = createRuntimeHostStateInitialState({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
@@ -115,7 +115,7 @@ function lifecyclePersistence(
   };
   return {
     getState: () => state,
-    persistEvents: async (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
+    persistEvents: async (events: import('@kite-ai/agent-kernel').RuntimeEvent[]) => {
       if (reject?.(events)) return false;
       for (const event of events) state = reduceRuntimeState(state, event);
       return true;
@@ -154,7 +154,7 @@ function taskProviderJourney(input: { invocationId: string; task?: string }) {
   return {
     state,
     taskRequests,
-    persistRuntimeEvents: async (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
+    persistRuntimeEvents: async (events: import('@kite-ai/agent-kernel').RuntimeEvent[]) => {
       for (const event of events) state = reduceRuntimeState(state, event);
       return true;
     },
@@ -255,7 +255,7 @@ describe('SubagentProvider grant and Local Provider', () => {
         toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
         blocked: null,
       }),
-    ) as import('@kite/runtime-spi').JsonObject;
+    ) as import('@kite-ai/runtime-spi').JsonObject;
     const body = {
       schema: SUBAGENT_PROVIDER_SCHEMA_,
       handleId: 'other-handle',
@@ -355,7 +355,7 @@ describe('SubagentProvider grant and Local Provider', () => {
         toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
         blocked: null,
       }),
-    ) as import('@kite/runtime-spi').JsonObject;
+    ) as import('@kite-ai/runtime-spi').JsonObject;
     const body = {
       schema: SUBAGENT_PROVIDER_SCHEMA_,
       handleId: expected.handleId,
@@ -929,7 +929,9 @@ class FakeProvider implements SubagentProvider {
 
 async function executeAppTaskWithFakeProvider(input: {
   mode: 'deny' | 'crash' | 'stale' | 'recovery';
-  persistRuntimeEvents?: (events: import('@kite/agent-kernel').RuntimeEvent[]) => Promise<boolean>;
+  persistRuntimeEvents?: (
+    events: import('@kite-ai/agent-kernel').RuntimeEvent[],
+  ) => Promise<boolean>;
 }) {
   const journey = taskProviderJourney({ invocationId: `app-task-${input.mode}` });
   const fake = new FakeProvider(input.mode);

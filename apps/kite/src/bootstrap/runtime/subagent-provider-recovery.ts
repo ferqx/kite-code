@@ -1,12 +1,12 @@
 import type {
   SubagentLifecycleArtifactAccess,
   SubagentTaskArtifactAccess,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 import {
   type BuiltinChildRuntimeDriver,
   type GovernedSubagentComposition as BuiltinGovernedSubagentComposition,
   subagentDispatchIntentDigest,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<
@@ -69,7 +69,7 @@ export async function reconcilePendingSubagentProvidersAfterCrash(input: {
     if (!pending.handleArtifact) {
       cleanupConfirmed = true;
     } else {
-      let handle: Readonly<import('@kite/runtime-spi').SubagentHandle>;
+      let handle: Readonly<import('@kite-ai/runtime-spi').SubagentHandle>;
       try {
         handle = input.composition.lifecycleArtifacts.read(
           pending.handleArtifact,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { runtimeHostStateAssertCurrentRuntimeEvent } from '@kite/runtime-host';
+import { runtimeHostStateAssertCurrentRuntimeEvent } from '@kite-ai/runtime-host';
 
 describe('Runtime Host State event codec boundary', () => {
   test('preserves the current required-field and unknown-field admission semantics', () => {

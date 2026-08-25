@@ -1,6 +1,6 @@
 import { debuglog } from 'node:util';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
 import { render, useApp } from 'ink';
 import React from 'react';
 import {
@@ -117,7 +117,7 @@ export interface TuiBootstrapProps {
   /** Single composition-root injection; presentation never constructs Runtime authority. */
   createSessionManager?: TuiSessionManagerFactory;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
-  model?: import('@kite/builtin-runtime/model').SupportedChatModel;
+  model?: import('@kite-ai/builtin-runtime/model').SupportedChatModel;
   /** Optional App-owned Shell runtime injection used by composition and system tests. */
   shellExecutor?: AppShellExecutor;
 }
@@ -128,7 +128,7 @@ interface TuiAppProps {
   languagePreference: LanguagePreference;
   onLanguageSelect: (language: LanguagePreference) => boolean;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
-  injectModel?: import('@kite/builtin-runtime/model').SupportedChatModel;
+  injectModel?: import('@kite-ai/builtin-runtime/model').SupportedChatModel;
   shellExecutor?: AppShellExecutor;
 }
 

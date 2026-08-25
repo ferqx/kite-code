@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { SkillScanOptions } from '@kite/runtime-contract';
+import type { SkillScanOptions } from '@kite-ai/runtime-contract';
 
 /** 动态解析 KITE_CODE_DIR，确保运行时修改 KITE_CODE_HOME 生效（e2e 测试需要） */
 function getKiteCodeDir(): string {

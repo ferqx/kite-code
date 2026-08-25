@@ -17,8 +17,8 @@ import {
   toolMessage,
   validateFramePairs,
   validateMessagePairs,
-} from '@kite/builtin-runtime/model';
-import type { SkillManifest } from '@kite/builtin-runtime/skills';
+} from '@kite-ai/builtin-runtime/model';
+import type { SkillManifest } from '@kite-ai/builtin-runtime/skills';
 import { currentPlanDocument } from './helpers/current-plan';
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic

@@ -1,24 +1,24 @@
 import type {
   BuiltinModelToolCatalogEntry,
   BuiltinOperationExecutionValue,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   type PendingToolRequest,
   pendingToolRequestFromValidatedInvocation,
   toolRequestFromCall,
-} from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import { exposedMcpToolName, type McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { createCapabilitySnapshot } from '@kite/builtin-runtime/skills';
-import type { SubagentContinuationArtifactAccess } from '@kite/builtin-runtime/subagent';
-import { rejectShellOutsideSubAgentRoleCeiling } from '@kite/builtin-runtime/subagent';
-import type { SubAgentEventSink } from '@kite/runtime-contract';
-import { type CapabilityDescriptor, getAgentPhase } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import { exposedMcpToolName, type McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import { createCapabilitySnapshot } from '@kite-ai/builtin-runtime/skills';
+import type { SubagentContinuationArtifactAccess } from '@kite-ai/builtin-runtime/subagent';
+import { rejectShellOutsideSubAgentRoleCeiling } from '@kite-ai/builtin-runtime/subagent';
+import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
+import { type CapabilityDescriptor, getAgentPhase } from '@kite-ai/runtime-contract';
 import {
   bestEffortRegularFileSize,
   createRuntimeHostToolCallSnapshot,
   createRuntimeHostInteractionId as genInteractionId,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   runtimeHostStateActiveSkillFrames as activeSkillFramesForCurrentWork,
   DescendantResourceAdmissionError,
@@ -30,7 +30,7 @@ import {
   runtimeHostStateCreateApprovalBindingDigest,
   type StateToolGovernancePolicyFact,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   type AppApprovalBinding,
   appApprovalBindingForPresentation,
@@ -221,7 +221,7 @@ export function readPrivateSuspendedSubagent(
 
 export type PrivateSubagentTask = {
   readonly source: 'private_artifact_v1';
-  readonly requestArtifact: import('@kite/runtime-spi').SubagentTaskRequestArtifact;
+  readonly requestArtifact: import('@kite-ai/runtime-spi').SubagentTaskRequestArtifact;
   readonly payload: {
     readonly name: string;
     readonly subagent_type: 'explore' | 'plan' | 'code' | 'review';
@@ -245,20 +245,20 @@ function isResumeAuthorizedToolCall(call: RuntimeToolCall | undefined): boolean 
 
 export function forkToolCeiling(input: {
   capabilityCeiling: readonly string[];
-  builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
+  builtinToolCatalog: import('@kite-ai/builtin-runtime').BuiltinToolCatalogProjection;
   mcpManager?: McpRuntimeProvider;
   turnId: string;
 }): {
   allowedTools: Set<string>;
   mcpBindings: Array<{
-    binding: import('@kite/runtime-contract').CapabilityBinding;
-    descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
+    binding: import('@kite-ai/runtime-contract').CapabilityBinding;
+    descriptor: import('@kite-ai/runtime-contract').CapabilityDescriptor;
   }>;
 } | null {
   const tools = new Set<string>();
   const mcpBindings: Array<{
-    binding: import('@kite/runtime-contract').CapabilityBinding;
-    descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
+    binding: import('@kite-ai/runtime-contract').CapabilityBinding;
+    descriptor: import('@kite-ai/runtime-contract').CapabilityDescriptor;
   }> = [];
   for (const capabilityId of input.capabilityCeiling) {
     const builtinEntry = input.builtinToolCatalog.entries.find(
@@ -458,7 +458,7 @@ function isRecordObject(value: unknown): value is Readonly<Record<string, unknow
 export function buildBlockedToolRequest(
   blocked: { toolCallId: string; toolName: string; args: Record<string, unknown>; command: string },
   availCtx: AppToolTurnContext,
-  builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection,
+  builtinToolCatalog: import('@kite-ai/builtin-runtime').BuiltinToolCatalogProjection,
 ): PendingToolRequest {
   const parsed = toolRequestFromCall(
     { id: blocked.toolCallId, name: blocked.toolName, args: blocked.args },
@@ -1010,7 +1010,7 @@ export function createAppSharedChildToolDispatcher(input: {
       );
       if (approval) {
         const approvalBinding = appApprovalBindingForPresentation(
-          approval.approval as unknown as import('@kite/runtime-contract').ToolApprovalPayload,
+          approval.approval as unknown as import('@kite-ai/runtime-contract').ToolApprovalPayload,
         );
         if (!approvalBinding) {
           return {
@@ -1128,7 +1128,7 @@ interface AppTaskResumeChildPreparation {
   readonly continuation: RestoredSubAgentContinuation;
   readonly toolResult: ToolExecutionResult;
   readonly mcpBindings: readonly {
-    readonly binding: import('@kite/runtime-contract').CapabilityBinding;
+    readonly binding: import('@kite-ai/runtime-contract').CapabilityBinding;
     readonly descriptor: CapabilityDescriptor;
   }[];
 }
@@ -1146,7 +1146,7 @@ async function prepareAppTaskResumeChild(input: {
   readonly continuation: RestoredSubAgentContinuation;
   readonly availCtx: AppToolTurnContext;
   readonly toolPipelineComposition: AppToolPipelineComposition;
-  readonly builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
+  readonly builtinToolCatalog: import('@kite-ai/builtin-runtime').BuiltinToolCatalogProjection;
   readonly childToolDispatcher: SubAgentToolDispatcher;
   readonly signal: AbortSignal;
 }): Promise<
@@ -1845,7 +1845,7 @@ export async function executeAppTaskToolPipeline(input: {
       return null;
     }
     const presentationBinding = appApprovalBindingForPresentation(
-      review.approval as unknown as import('@kite/runtime-contract').ToolApprovalPayload,
+      review.approval as unknown as import('@kite-ai/runtime-contract').ToolApprovalPayload,
     );
     const approvalQueue = live as RuntimeState & {
       approvalGeneration?: number;

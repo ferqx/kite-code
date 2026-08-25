@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { failClosedBuiltinToolCapability as failClosedToolCapability } from '@kite/builtin-runtime';
+import { failClosedBuiltinToolCapability as failClosedToolCapability } from '@kite-ai/builtin-runtime';
 import { testBuiltinToolCatalog } from '../helpers/runtime-model';
 
 function entry(name: string) {

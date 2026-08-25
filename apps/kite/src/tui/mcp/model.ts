@@ -1,4 +1,4 @@
-import type { McpServerControlState, McpServerKey } from '@kite/builtin-runtime/mcp';
+import type { McpServerControlState, McpServerKey } from '@kite-ai/builtin-runtime/mcp';
 
 export type McpPrimaryStatus =
   | 'approval_required'

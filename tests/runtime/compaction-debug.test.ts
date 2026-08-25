@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   secureWindowsOwnerOnlyPath,
   writeLocalCompactionDebugRecord,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 
 describe('local compaction debug', () => {
   test('is opt-in, atomic, redacted, owner-only, and session-isolated', () => {

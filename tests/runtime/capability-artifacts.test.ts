@@ -8,8 +8,8 @@ import {
   capabilityResultDigest,
   capabilityResultEvidenceDigest,
   readBoundCapabilityArtifact,
-} from '@kite/builtin-runtime';
-import type { CapabilityArtifactRef } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime';
+import type { CapabilityArtifactRef } from '@kite-ai/runtime-contract';
 
 const invocationId = 'a'.repeat(64);
 const previousHome = process.env.KITE_CODE_HOME;

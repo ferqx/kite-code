@@ -4,7 +4,7 @@ import {
   BoundedProgressLineBuffer,
   SHELL_CAPTURE_MAX_CHARS,
   SHELL_PROGRESS_LINE_MAX_CHARS,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import { readWithProgress } from './helpers/shell-executor';
 
 describe('bounded shell output', () => {

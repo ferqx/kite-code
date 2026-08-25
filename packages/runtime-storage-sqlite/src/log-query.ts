@@ -7,12 +7,12 @@ import type {
   RuntimeLogSessionQuery,
   RuntimeLogSessionReadPage,
   RuntimeSnapshotCodec,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 import {
   assertListRuntimeLogEventsRequest,
   assertListRuntimeLogSessionsRequest,
   RuntimeLogRequestValidationError,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 import { openSqliteRuntimeLogConnection } from './connection';
 import {
   assertCurrentSqliteRuntimeStoreConnection,

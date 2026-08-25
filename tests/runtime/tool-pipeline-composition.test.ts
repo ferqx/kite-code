@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import { createAppToolPipelineComposition } from '#app/bootstrap/runtime/tool-pipeline-composition';
 
 function createComposition() {

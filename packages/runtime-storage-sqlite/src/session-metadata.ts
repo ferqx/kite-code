@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { existsSync, lstatSync } from 'node:fs';
-import type { SessionMetadataPort } from '@kite/runtime-host/storage';
+import type { SessionMetadataPort } from '@kite-ai/runtime-host/storage';
 
 export interface SessionTokenStats {
   readonly cacheHitTokens: number;

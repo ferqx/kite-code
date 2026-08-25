@@ -19,6 +19,8 @@
 
 词典位于 `apps/kite/src/tui/i18n/`，英文 catalog 是 key 集合的编译期基准，中文 catalog 必须覆盖完全相同的 key。组件经 `I18nProvider` 和 `useI18n()` 取得文案、数字、日期和时长 formatter；Runtime packages 不得导入该目录或存储翻译后的文本。
 
+TUI 源码与本地化测试引用 Runtime workspace package 时统一使用 `@kite-ai/*` scope；不得使用旧 scope 作为导入、fixture 或边界断言中的 package identity。
+
 仅翻译 Kite Code 自有的标题、选项、状态、快捷键和安全说明。用户输入、模型回复、工具/MCP 原始输出、Provider 和模型名、命令 token、路径、URL、配置键和未知错误正文保持原样。外部错误可使用本地化的外围说明，但诊断参数不得被翻译或改写。
 
 语言变化是展示 identity 的变化。`useStaticContent` 必须把已解析语言纳入 `presentationKey`，使 Ink 的 `<Static>` 与动态输出按同步输出边界重新构建；不得追加旧语言和新语言两份历史内容。

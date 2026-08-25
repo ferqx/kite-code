@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { McpServerConfig } from '@kite/builtin-runtime/mcp';
+import type { McpServerConfig } from '@kite-ai/builtin-runtime/mcp';
 import { applyEdits, modify, type ParseError, parse } from 'jsonc-parser';
 import {
   loadMcpConfigCatalog,

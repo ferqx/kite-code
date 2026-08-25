@@ -15,13 +15,13 @@
 
 RMV1-09 已把 Capability binding provider 与 name-free scheduling authority 原子切到目标边界：
 
-- `@kite/runtime-spi` 冻结 Capability definition、disclosure、binding、proposal、intent 与 authorized effect 的进程内
+- `@kite-ai/runtime-spi` 冻结 Capability definition、disclosure、binding、proposal、intent 与 authorized effect 的进程内
   contract，并提供 immutable Registry snapshot 与纯 arbitration；arbitration 只校验精确 capability/revision/schema/binding
   identity，返回 typed failure，不执行 Policy、grant、Provider 或 operation；
-- `@kite/builtin-runtime#createCapabilityBindingV1` 是唯一 production binding provider，继续产生与 State 25 完全相同的
+- `@kite-ai/builtin-runtime#createCapabilityBindingV1` 是唯一 production binding provider，继续产生与 State 25 完全相同的
   `CapabilityBindingV1` shape 与 canonical SHA-256；旧 Catalog 方法只保留为调用该 provider 的 compatibility wrapper，
   不存在第二套 digest 或 binding owner；
-- `@kite/agent-kernel` 新增纯 `ExecutionTraitsV1`、`ResourceScopeV1` 与 batch selector，只基于 access、resource
+- `@kite-ai/agent-kernel` 新增纯 `ExecutionTraitsV1`、`ResourceScopeV1` 与 batch selector，只基于 access、resource
   scope、conflict key、isolation、causal/concurrency group、interaction barrier 与 lease requirement 作确定性裁决；
 - ToolSpec 静态声明 execution traits，Core 在调度前以已冻结 ToolSpec、State 25 已持久化 call classification 与 causal
   identity 做投影，不向 State/Event 增加字段；

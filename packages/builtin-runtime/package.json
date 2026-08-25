@@ -1,5 +1,5 @@
 {
-  "name": "@kite/builtin-runtime",
+  "name": "@kite-ai/builtin-runtime",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -24,8 +24,8 @@
     "test": "bun test ./test"
   },
   "dependencies": {
-    "@kite/runtime-contract": "workspace:*",
-    "@kite/runtime-spi": "workspace:*",
+    "@kite-ai/runtime-contract": "workspace:*",
+    "@kite-ai/runtime-spi": "workspace:*",
     "@ai-sdk/openai-compatible": "^3.0.7",
     "@mozilla/readability": "^0.6.0",
     "@modelcontextprotocol/sdk": "^1.29.0",

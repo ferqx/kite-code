@@ -21,9 +21,9 @@
 
 RMV1-15 已把 Model、Context、Compaction 与 Reviewer 物理迁入目标边界：
 
-- `@kite/runtime-spi` 唯一拥有 Model Surface contract；根 `src/protocol/model-surface.ts` 只保留 RMV1-16 前
+- `@kite-ai/runtime-spi` 唯一拥有 Model Surface contract；根 `src/protocol/model-surface.ts` 只保留 RMV1-16 前
   compatibility re-export；
-- `@kite/builtin-runtime` 唯一拥有 Gateway、transport、response source、Surface compiler/canonicalizer、消息与
+- `@kite-ai/builtin-runtime` 唯一拥有 Gateway、transport、response source、Surface compiler/canonicalizer、消息与
   token、Artifact、Context compiler/projection/serialization、Prompt assembly、Compaction 与 reviewer 具体语义；
 - `model:primary`、`model:compaction`、`model:auto_review`、`model:verification_review` 与 `model:subagent`
   五个 operation 均由 RMV1-15 Builtin module 唯一注册并执行；六个 Builtin module 合计拥有全部 29 个 operation，

@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { assertAgentStateInvariants } from '@kite/agent-kernel';
+import { assertAgentStateInvariants } from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateInitialState,
   LIMITED_RESOURCE_BUDGET_,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   eventsForRunCancellation,
   eventsForRuntimeAction,

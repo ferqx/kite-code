@@ -9,7 +9,7 @@ import type {
   ToolPipelineOutcomeDispatch,
   ToolPipelinePersistence,
   ToolPipelineSuspension,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 /**
  * This is the Host's attempt/ack/dispatch seam. Resolution, validation,

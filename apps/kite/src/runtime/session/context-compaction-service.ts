@@ -8,8 +8,8 @@ import {
   inspectManualContextCompaction,
   manualContextCompactionEvent,
   resolveModelCapabilities,
-} from '@kite/builtin-runtime/model';
-import type { ContextStatusSnapshot } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/model';
+import type { ContextStatusSnapshot } from '@kite-ai/runtime-contract';
 import type { RuntimeSessionCoordinator } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import {
   type RuntimeExecutorDependencies,
@@ -42,7 +42,7 @@ export class ContextCompactionService {
     coordinator: RuntimeSessionCoordinator,
     signal: AbortSignal | undefined,
     onProgress: (
-      phase: import('@kite/runtime-contract').ContextCompactionProgressPhase | undefined,
+      phase: import('@kite-ai/runtime-contract').ContextCompactionProgressPhase | undefined,
     ) => void,
   ): RuntimeExecutorDependencies {
     const config = runtime.config;
@@ -76,7 +76,7 @@ export class ContextCompactionService {
     threadId: string,
     customInstructions?: string,
     onProgress?: (
-      phase: import('@kite/runtime-contract').ContextCompactionProgressPhase | undefined,
+      phase: import('@kite-ai/runtime-contract').ContextCompactionProgressPhase | undefined,
     ) => void,
     onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
   ): Promise<ContextCompactionCommandResult> {
@@ -92,7 +92,7 @@ export class ContextCompactionService {
     threadId: string,
     customInstructions?: string,
     onProgress?: (
-      phase: import('@kite/runtime-contract').ContextCompactionProgressPhase | undefined,
+      phase: import('@kite-ai/runtime-contract').ContextCompactionProgressPhase | undefined,
     ) => void,
     onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
     signal?: AbortSignal,
@@ -104,7 +104,7 @@ export class ContextCompactionService {
     threadId: string,
     customInstructions?: string,
     onProgress?: (
-      phase: import('@kite/runtime-contract').ContextCompactionProgressPhase | undefined,
+      phase: import('@kite-ai/runtime-contract').ContextCompactionProgressPhase | undefined,
     ) => void,
     onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
     signal?: AbortSignal,

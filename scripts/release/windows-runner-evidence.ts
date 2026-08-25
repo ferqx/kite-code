@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import {
   parseWindowsSandboxRunnerManifest,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 
 /**
  * Produce the release-pinned Windows runner manifest. The digest is computed

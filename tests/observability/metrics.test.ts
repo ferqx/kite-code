@@ -5,7 +5,7 @@ import {
   METRIC_ATTRIBUTE_KEYS,
   METRIC_DEFINITIONS_,
   parseMetricSample,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 
 const NOW = '2026-08-02T00:00:00.000Z';
 

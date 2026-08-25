@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { RUNTIME_COMMAND_SCHEMA_, RUNTIME_QUERY_SCHEMA_ } from '@kite/runtime-contract';
+import { RUNTIME_COMMAND_SCHEMA_, RUNTIME_QUERY_SCHEMA_ } from '@kite-ai/runtime-contract';
 import { createKiteCliRuntimeAccess } from '../../apps/kite/src/bootstrap';
 import { createMockModelServer } from '../tui-system/harness/fixtures';
 

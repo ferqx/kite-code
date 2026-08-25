@@ -4,7 +4,7 @@ import type {
   CanonicalModelMessage,
   ModelFinishReason,
   ModelSurface,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   generateText,
   jsonSchema,

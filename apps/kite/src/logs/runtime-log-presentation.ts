@@ -2,12 +2,12 @@ import type {
   RuntimeLogEventDetail,
   RuntimeLogEventEntry,
   RuntimeLogEventPage,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import {
   type StateRuntimeEvent as RuntimeEvent,
   runtimeHostStateAssertCurrentRuntimeEvent,
-} from '@kite/runtime-host';
-import type { RuntimeLogEventReadPage, RuntimeLogEventRecord } from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host';
+import type { RuntimeLogEventReadPage, RuntimeLogEventRecord } from '@kite-ai/runtime-host/storage';
 
 const MAX_PRESENTATION_TEXT_CODE_POINTS = 4_000;
 const SECRET_PATTERNS = [

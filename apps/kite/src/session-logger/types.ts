@@ -12,7 +12,7 @@ import type {
   StateToolOutcomeStatus as ToolOutcomeStatus,
   StateToolRecoveryDisposition as ToolRecoveryDisposition,
   StateUnknownToolFieldsObservation as UnknownToolFieldsObservation,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 
 // ── OTel 兼容的 Trace 记录 ──
 

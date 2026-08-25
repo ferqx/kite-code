@@ -103,7 +103,7 @@ apps/kite/bootstrap.ts
   `-> builtin-runtime
 ```
 
-`agent-kernel` 不依赖其他 `@kite/*` package。跨包只允许 package exports，禁止 deep import 和依赖环。
+`agent-kernel` 不依赖其他 `@kite-ai/*` package。跨包只允许 package exports，禁止 deep import 和依赖环。
 
 ### 2.2 Runtime Host 的上限
 
@@ -480,7 +480,7 @@ bun run scripts/check-runtime-modularization-manifests.ts
 
 Gate：同一输入 replay digest、State 25 snapshot和terminal outcome一致；通过后 stop-and-report。
 
-完成证据：[`2026-08-20-rmv1-07-pure-kernel-extraction.md`](../execution/completed/2026-08-20-rmv1-07-pure-kernel-extraction.md)。production transition owner 已切到无 ambient authority 的 `@kite/agent-kernel`；Host command translation、canonical `DecisionFacts`、Store 4 commit-before-memory、单次 `AuthorizedEffect` 与唯一 legacy adapter 已闭合。旧 `RuntimeKernelControl`/`createAgentKernel` symbol 删除，State 25 domain reducer 只作为 RMV1-16 前的固定 compile-time binding；Required Kernel/scheduling/replay/package/manifest Gate 均通过，State 25、Store 4 与原 epoch 未改变。
+完成证据：[`2026-08-20-rmv1-07-pure-kernel-extraction.md`](../execution/completed/2026-08-20-rmv1-07-pure-kernel-extraction.md)。production transition owner 已切到无 ambient authority 的 `@kite-ai/agent-kernel`；Host command translation、canonical `DecisionFacts`、Store 4 commit-before-memory、单次 `AuthorizedEffect` 与唯一 legacy adapter 已闭合。旧 `RuntimeKernelControl`/`createAgentKernel` symbol 删除，State 25 domain reducer 只作为 RMV1-16 前的固定 compile-time binding；Required Kernel/scheduling/replay/package/manifest Gate 均通过，State 25、Store 4 与原 epoch 未改变。
 
 ### RMV1-08：Runtime SPI、Registry 与 Legacy executor（已完成）
 

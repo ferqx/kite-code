@@ -1,13 +1,13 @@
 // MCP core unit tests
 import { afterEach, describe, expect, it } from 'bun:test';
-import { normalizeMcpToolResult } from '@kite/builtin-runtime/mcp';
+import { normalizeMcpToolResult } from '@kite-ai/builtin-runtime/mcp';
 import {
   compileCapabilitySchema,
   createCapabilitySnapshot,
   descriptorRevision,
   validateCapabilityArguments,
-} from '@kite/builtin-runtime/skills';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/skills';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import { expandEnvVars } from '#app/config/index';
 
 // ─── capability schema and revisions ─────────────────────────────

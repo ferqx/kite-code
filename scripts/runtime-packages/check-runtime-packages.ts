@@ -3,35 +3,39 @@ import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node
 import ts from 'typescript';
 
 export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
-  ['@kite/runtime-contract', 'packages/runtime-contract'],
-  ['@kite/agent-kernel', 'packages/agent-kernel'],
-  ['@kite/runtime-spi', 'packages/runtime-spi'],
-  ['@kite/runtime-host', 'packages/runtime-host'],
-  ['@kite/runtime-storage-sqlite', 'packages/runtime-storage-sqlite'],
-  ['@kite/builtin-runtime', 'packages/builtin-runtime'],
-  ['@kite/kite', 'apps/kite'],
+  ['@kite-ai/runtime-contract', 'packages/runtime-contract'],
+  ['@kite-ai/agent-kernel', 'packages/agent-kernel'],
+  ['@kite-ai/runtime-spi', 'packages/runtime-spi'],
+  ['@kite-ai/runtime-host', 'packages/runtime-host'],
+  ['@kite-ai/runtime-storage-sqlite', 'packages/runtime-storage-sqlite'],
+  ['@kite-ai/builtin-runtime', 'packages/builtin-runtime'],
+  ['@kite-ai/kite', 'apps/kite'],
 ] as const);
 
 const EXPECTED_WORKSPACES = ['packages/*', 'apps/*'] as const;
 
 const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  '@kite/runtime-contract': [],
-  '@kite/agent-kernel': [],
-  '@kite/runtime-spi': ['@kite/runtime-contract'],
-  '@kite/runtime-host': ['@kite/agent-kernel', '@kite/runtime-contract', '@kite/runtime-spi'],
-  '@kite/runtime-storage-sqlite': ['@kite/runtime-host'],
-  '@kite/builtin-runtime': ['@kite/runtime-contract', '@kite/runtime-spi'],
-  '@kite/kite': [
-    '@kite/builtin-runtime',
-    '@kite/runtime-contract',
-    '@kite/runtime-host',
-    '@kite/runtime-spi',
-    '@kite/runtime-storage-sqlite',
+  '@kite-ai/runtime-contract': [],
+  '@kite-ai/agent-kernel': [],
+  '@kite-ai/runtime-spi': ['@kite-ai/runtime-contract'],
+  '@kite-ai/runtime-host': [
+    '@kite-ai/agent-kernel',
+    '@kite-ai/runtime-contract',
+    '@kite-ai/runtime-spi',
+  ],
+  '@kite-ai/runtime-storage-sqlite': ['@kite-ai/runtime-host'],
+  '@kite-ai/builtin-runtime': ['@kite-ai/runtime-contract', '@kite-ai/runtime-spi'],
+  '@kite-ai/kite': [
+    '@kite-ai/builtin-runtime',
+    '@kite-ai/runtime-contract',
+    '@kite-ai/runtime-host',
+    '@kite-ai/runtime-spi',
+    '@kite-ai/runtime-storage-sqlite',
   ],
 });
 
 const FORBIDDEN_PUBLIC_NAMES: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
-  '@kite/runtime-contract': [
+  '@kite-ai/runtime-contract': [
     /AgentState/,
     /KernelEvent/,
     /RuntimeEvent/,
@@ -40,10 +44,10 @@ const FORBIDDEN_PUBLIC_NAMES: Readonly<Record<string, readonly RegExp[]>> = Obje
     /EffectIntent/,
     /ExecutionGrant/,
   ],
-  '@kite/agent-kernel': [/RuntimeHost/, /RuntimeStore/, /Provider/, /Executor/, /Sqlite/i],
-  '@kite/runtime-spi': [/RuntimeHost/, /RuntimeStore/, /Sqlite/, /BuiltinRuntimeImplementation/],
-  '@kite/runtime-host': [/Sqlite/, /BuiltinRuntime/],
-  '@kite/builtin-runtime': [/RuntimeHost/, /RuntimeStore/, /AgentState/, /KernelEvent/],
+  '@kite-ai/agent-kernel': [/RuntimeHost/, /RuntimeStore/, /Provider/, /Executor/, /Sqlite/i],
+  '@kite-ai/runtime-spi': [/RuntimeHost/, /RuntimeStore/, /Sqlite/, /BuiltinRuntimeImplementation/],
+  '@kite-ai/runtime-host': [/Sqlite/, /BuiltinRuntime/],
+  '@kite-ai/builtin-runtime': [/RuntimeHost/, /RuntimeStore/, /AgentState/, /KernelEvent/],
 });
 
 export interface RuntimePackageViolation {
@@ -146,7 +150,7 @@ export function analyzeRuntimePackages(repositoryRoot: string): RuntimePackageAn
       path: entry.relativePath,
       exports: [...entry.exportTargets.keys()].sort(),
       dependencies: Object.keys(entry.manifest.dependencies ?? {})
-        .filter((name) => name.startsWith('@kite/'))
+        .filter((name) => name.startsWith('@kite-ai/'))
         .sort(),
       sourceFiles: entry.sourceFiles.map((file) => normalizedRelative(root, file)),
       testFiles: entry.testFiles.map((file) => normalizedRelative(root, file)),
@@ -237,10 +241,10 @@ function loadPackages(root: string, violations: RuntimePackageViolation[]): Pack
     }
 
     const declaredInternal = Object.keys(manifest.dependencies ?? {})
-      .filter((name) => name.startsWith('@kite/'))
+      .filter((name) => name.startsWith('@kite-ai/'))
       .sort();
     for (const dependency of Object.keys(manifest.dependencies ?? {}).filter(
-      (name) => !name.startsWith('@kite/'),
+      (name) => !name.startsWith('@kite-ai/'),
     )) {
       validateExternalDependency(expectedName, dependency, relativePath, violations);
     }
@@ -508,7 +512,7 @@ function validateImports(
     }
 
     if (edge.specifier.startsWith('@/')) {
-      if (edge.owner.name !== '@kite/kite') {
+      if (edge.owner.name !== '@kite-ai/kite') {
         addViolation(
           violations,
           'FORBIDDEN_ROOT_ALIAS_IMPORT',
@@ -590,13 +594,13 @@ function validateImports(
       );
     }
     if (
-      edge.owner.name === '@kite/runtime-storage-sqlite' &&
-      edge.specifier !== '@kite/runtime-host/storage'
+      edge.owner.name === '@kite-ai/runtime-storage-sqlite' &&
+      edge.specifier !== '@kite-ai/runtime-host/storage'
     ) {
       addViolation(
         violations,
         'FORBIDDEN_DIRECT_DEPENDENCY',
-        'runtime-storage-sqlite may import only @kite/runtime-host/storage',
+        'runtime-storage-sqlite may import only @kite-ai/runtime-host/storage',
         sourcePath,
       );
     }
@@ -609,7 +613,7 @@ function validateExternalDependency(
   path: string,
   violations: RuntimePackageViolation[],
 ): void {
-  if (owner === '@kite/agent-kernel' || owner === '@kite/runtime-spi') {
+  if (owner === '@kite-ai/agent-kernel' || owner === '@kite-ai/runtime-spi') {
     addViolation(
       violations,
       'FORBIDDEN_EXTERNAL_DEPENDENCY',
@@ -617,7 +621,7 @@ function validateExternalDependency(
       `${path}/package.json`,
     );
   }
-  if (isUiPackage(dependency) && owner !== '@kite/kite') {
+  if (isUiPackage(dependency) && owner !== '@kite-ai/kite') {
     addViolation(
       violations,
       'FORBIDDEN_UI_IMPORT',
@@ -625,7 +629,7 @@ function validateExternalDependency(
       `${path}/package.json`,
     );
   }
-  if (owner === '@kite/runtime-host' && /sqlite/i.test(dependency)) {
+  if (owner === '@kite-ai/runtime-host' && /sqlite/i.test(dependency)) {
     addViolation(
       violations,
       'FORBIDDEN_CONCRETE_PROVIDER_IMPORT',
@@ -644,9 +648,9 @@ function validateExternalImport(
   const specifier = edge.specifier;
   if (specifier.startsWith('node:') || specifier.startsWith('bun:')) {
     if (
-      owner === '@kite/runtime-contract' ||
-      owner === '@kite/agent-kernel' ||
-      owner === '@kite/runtime-spi'
+      owner === '@kite-ai/runtime-contract' ||
+      owner === '@kite-ai/agent-kernel' ||
+      owner === '@kite-ai/runtime-spi'
     ) {
       addViolation(
         violations,
@@ -655,7 +659,7 @@ function validateExternalImport(
         sourcePath,
       );
     }
-    if (owner === '@kite/runtime-host' && specifier === 'bun:sqlite') {
+    if (owner === '@kite-ai/runtime-host' && specifier === 'bun:sqlite') {
       addViolation(
         violations,
         'FORBIDDEN_CONCRETE_PROVIDER_IMPORT',
@@ -699,7 +703,8 @@ function validateAmbientAuthority(
   violations: RuntimePackageViolation[],
 ): void {
   for (const entry of packages) {
-    if (entry.name !== '@kite/runtime-contract' && entry.name !== '@kite/agent-kernel') continue;
+    if (entry.name !== '@kite-ai/runtime-contract' && entry.name !== '@kite-ai/agent-kernel')
+      continue;
     for (const path of entry.sourceFiles) {
       const sourcePath = normalizedRelative(root, path);
       const text = readFileSync(path, 'utf8');
@@ -739,7 +744,7 @@ function validateAmbientAuthority(
         );
       }
       const ambientPatterns: Array<[RegExp, string, string]> = [];
-      if (entry.name === '@kite/agent-kernel') {
+      if (entry.name === '@kite-ai/agent-kernel') {
         ambientPatterns.push(
           [
             /\bDate\s*\.\s*now\s*\(/,
@@ -925,7 +930,7 @@ function validateConsumers(
       );
     }
     for (const dependency of Object.keys(entry.manifest.dependencies ?? {}).filter((name) =>
-      name.startsWith('@kite/'),
+      name.startsWith('@kite-ai/'),
     )) {
       if (
         !imports.some(
@@ -949,20 +954,20 @@ function validateClientBoundary(
   imports: ImportEdge[],
   violations: RuntimePackageViolation[],
 ): void {
-  const app = packages.find((entry) => entry.name === '@kite/kite');
+  const app = packages.find((entry) => entry.name === '@kite-ai/kite');
   if (!app) return;
   const clientPrefix = /apps\/kite\/src\/(cli|tui)\//;
   const forbiddenRootRuntime = [
     '@/core/runtime/actions',
     '@/core/runtime/agent',
     '@/core/runtime/effects',
-    '@kite/agent-kernel',
+    '@kite-ai/agent-kernel',
     '@/core/runtime/executor',
     '@/core/runtime/file-checkpoints',
     '@/core/runtime/kernel',
     '@/core/runtime/runner',
     '@/core/runtime/scheduler',
-    '@kite/runtime-host',
+    '@kite-ai/runtime-host',
     '@/core/runtime/store',
   ];
   for (const edge of imports.filter((candidate) => candidate.owner.name === app.name)) {
@@ -1120,12 +1125,12 @@ function validateCompositionRoot(
   imports: ImportEdge[],
   violations: RuntimePackageViolation[],
 ): string[] {
-  const app = packages.find((entry) => entry.name === '@kite/kite');
+  const app = packages.find((entry) => entry.name === '@kite-ai/kite');
   if (!app) return [];
   const concretePackages = new Set([
-    '@kite/runtime-host',
-    '@kite/runtime-storage-sqlite',
-    '@kite/builtin-runtime',
+    '@kite-ai/runtime-host',
+    '@kite-ai/runtime-storage-sqlite',
+    '@kite-ai/builtin-runtime',
   ]);
   const importsByFile = new Map<string, Set<string>>();
   for (const edge of imports.filter((candidate) => candidate.owner.name === app.name)) {
@@ -1147,7 +1152,7 @@ function validateCompositionRoot(
     addViolation(violations, 'COMPOSITION_ROOT_BYPASS', `composition is in ${roots[0]}`);
   }
   const bootstrapImports = importsByFile.get(join(root, expectedRoot)) ?? new Set<string>();
-  for (const required of ALLOWED_DIRECT_DEPENDENCIES['@kite/kite'] ?? []) {
+  for (const required of ALLOWED_DIRECT_DEPENDENCIES['@kite-ai/kite'] ?? []) {
     if (!bootstrapImports.has(required)) {
       addViolation(
         violations,
@@ -1161,7 +1166,7 @@ function validateCompositionRoot(
     (candidate) => candidate.owner.name === app.name && candidate.targetPackage,
   )) {
     const sourcePath = normalizedRelative(root, edge.source);
-    if (sourcePath === expectedRoot || edge.targetPackage?.name === '@kite/runtime-contract') {
+    if (sourcePath === expectedRoot || edge.targetPackage?.name === '@kite-ai/runtime-contract') {
       continue;
     }
     const authority = compositionAuthorityBinding(edge);
@@ -1194,17 +1199,17 @@ function validateCompositionRoot(
 function compositionAuthorityBinding(edge: ImportEdge): string | undefined {
   const packageName = edge.targetPackage?.name;
   if (!packageName || edge.valueBindings.length === 0) return undefined;
-  if (packageName === '@kite/runtime-storage-sqlite') {
+  if (packageName === '@kite-ai/runtime-storage-sqlite') {
     return edge.valueBindings[0] ?? '*';
   }
   const exact: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
-    '@kite/runtime-host': new Set([
+    '@kite-ai/runtime-host': new Set([
       'createRuntimeHost',
       'createRuntimeHostBoundary',
       'createRuntimeHostStateStorageBinding',
     ]),
-    '@kite/runtime-spi': new Set(['createRuntimeModuleRegistry', 'defineRuntimeModule']),
-    '@kite/builtin-runtime': new Set([
+    '@kite-ai/runtime-spi': new Set(['createRuntimeModuleRegistry', 'defineRuntimeModule']),
+    '@kite-ai/builtin-runtime': new Set([
       'createBuiltinContextCompilerPort',
       'createBuiltinRuntimeModules',
       'createBuiltinToolCatalogProjection',
@@ -1285,7 +1290,7 @@ function containsIdentifier(source: ts.SourceFile, name: string): boolean {
 }
 
 function internalPackageName(specifier: string): string | undefined {
-  if (!specifier.startsWith('@kite/')) return undefined;
+  if (!specifier.startsWith('@kite-ai/')) return undefined;
   const [scope, name] = specifier.split('/');
   return scope && name ? `${scope}/${name}` : undefined;
 }

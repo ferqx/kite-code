@@ -3,8 +3,8 @@ import type {
   ExecutionReceipt,
   RuntimeJsonValue,
   RuntimeModule,
-} from '@kite/runtime-spi';
-import { defineRuntimeModule } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { defineRuntimeModule } from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from './capability-binding';
 import type {
   BuiltinCapabilitySearchCandidate,

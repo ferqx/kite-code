@@ -209,7 +209,7 @@ describe('check-core-boundary', () => {
       'src/core/runtime/store.ts': 'export const store = true;\n',
       'apps/kite/src/tui/view.ts': 'export const view = true;\n',
       'src/core/execution/workspace-filesystem/local-provider.ts':
-        "import { policy } from '@kite/builtin-runtime/sandbox';\n" +
+        "import { policy } from '@kite-ai/builtin-runtime/sandbox';\n" +
         "import { approval } from '@/core/policies/approval-policy.ts';\n" +
         "export { event } from '../../runtime/reducer.ts';\n" +
         "export const loadState = () => import('../../runtime/reducer.js');\n" +
@@ -239,7 +239,7 @@ describe('check-core-boundary', () => {
         'export interface WorkspaceFilesystemProvider {}\n',
       'src/core/execution/workspace-filesystem/local-provider.ts':
         "import { readFile } from 'node:fs/promises';\n" +
-        "import type { WorkspaceFilesystemProvider } from '@kite/runtime-spi';\n" +
+        "import type { WorkspaceFilesystemProvider } from '@kite-ai/runtime-spi';\n" +
         'export const provider: WorkspaceFilesystemProvider = {};\nvoid readFile;\n',
     });
     expect(result.exitCode).toBe(0);
@@ -249,10 +249,10 @@ describe('check-core-boundary', () => {
   test('rejects Sandbox Provider authority and process spawn', () => {
     const result = fixture({
       'src/core/policies/approval-policy.ts': 'export const approval = true;\n',
-      '@kite/agent-kernel.ts': 'export const event = true;\n',
+      '@kite-ai/agent-kernel.ts': 'export const event = true;\n',
       'src/core/execution/sandbox-execution/local-provider.ts':
         "import { approval } from '@/core/policies/approval-policy';\n" +
-        "import { event } from '@kite/agent-kernel';\n" +
+        "import { event } from '@kite-ai/agent-kernel';\n" +
         "Bun.spawn(['forbidden']);\nvoid approval; void event;\n",
     });
     expect(result.exitCode).toBe(1);
@@ -270,7 +270,7 @@ describe('check-core-boundary', () => {
       'src/core/execution/sandbox-execution/allocating-helper.ts':
         "export const allocate = () => Bun.spawn(['forbidden']);\n",
       'src/core/controllers/sandbox-bypass.ts':
-        "import { LocalSandboxExecutionProvider } from '@kite/builtin-runtime/sandbox';\n" +
+        "import { LocalSandboxExecutionProvider } from '@kite-ai/builtin-runtime/sandbox';\n" +
         "import { shellTool } from '@/core/tools/shell';\n" +
         'export const createSandboxExecutor = () => new LocalSandboxExecutionProvider(shellTool);\n',
       'src/core/tools/shell.ts': 'export const shellTool = true;\n',
@@ -287,8 +287,8 @@ describe('check-core-boundary', () => {
   test('requires the acknowledged host Shell factory to use Builtin semantics', () => {
     const allowed = fixture({
       'src/app/sandbox/acknowledged-host-shell.ts':
-        "import { createBuiltinShellExecutor } from '@kite/builtin-runtime/sandbox';\n" +
-        "import { createRuntimeHostProcessExecutionPort } from '@kite/runtime-host';\n" +
+        "import { createBuiltinShellExecutor } from '@kite-ai/builtin-runtime/sandbox';\n" +
+        "import { createRuntimeHostProcessExecutionPort } from '@kite-ai/runtime-host';\n" +
         'export const createAcknowledgedHostShellExecutor = () =>\n' +
         '  createBuiltinShellExecutor(createRuntimeHostProcessExecutionPort());\n',
       'src/app/sandbox/composition.ts':
@@ -376,7 +376,7 @@ describe('check-core-boundary', () => {
       'src/core/execution/workspace-filesystem/index.ts':
         'export const LocalWorkspaceFilesystemProvider = {};\n',
       'src/core/model/invocation-composition.ts':
-        "import { LocalWorkspaceFilesystemProvider } from '@kite/builtin-runtime/filesystem';\nvoid LocalWorkspaceFilesystemProvider;\n",
+        "import { LocalWorkspaceFilesystemProvider } from '@kite-ai/builtin-runtime/filesystem';\nvoid LocalWorkspaceFilesystemProvider;\n",
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain('Core boundary checks passed.');

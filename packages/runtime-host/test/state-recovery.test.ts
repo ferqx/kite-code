@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { createInitialAgentState } from '@kite/agent-kernel';
+import { createInitialAgentState } from '@kite-ai/agent-kernel';
 import {
   isRuntimeHostStateToolRecoveryInvalid,
   projectRuntimeHostStateRestartRecoveryEvents,
   runtimeHostStateRestartRecoveryCapabilityInvocationIds,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 

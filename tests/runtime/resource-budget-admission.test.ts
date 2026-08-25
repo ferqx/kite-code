@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { decideAutoReview } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { decideAutoReview } from '@kite-ai/agent-kernel';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 
-import { aiMessage } from '@kite/builtin-runtime/model';
+import { aiMessage } from '@kite-ai/builtin-runtime/model';
 import {
   createDescendantResourceAdmission,
   createRuntimeHostStateInitialState,
@@ -15,7 +15,7 @@ import {
   type RuntimeState,
   reconciliationEventsForReservations,
   runtimeHostStateResolveFailureMode as resolveFailureMode,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   resolveResourceAdmissionFailureOutcome,
@@ -413,7 +413,7 @@ describe('runtime resource budget admission', () => {
       interactionMode: 'accept_edits',
     });
     const batches: string[][] = [];
-    const persistEvents = async (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
+    const persistEvents = async (events: import('@kite-ai/agent-kernel').RuntimeEvent[]) => {
       kernel.processEventBatch(events);
       batches.push(events.map((event) => event.type));
       return true;
@@ -498,7 +498,7 @@ describe('runtime resource budget admission', () => {
       initialState: state,
       interactionMode: 'accept_edits',
     });
-    const persistEvents = async (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
+    const persistEvents = async (events: import('@kite-ai/agent-kernel').RuntimeEvent[]) => {
       kernel.processEventBatch(events);
       return true;
     };
@@ -902,7 +902,7 @@ describe('runtime resource budget admission', () => {
       initialState: state,
       interactionMode: 'accept_edits',
     });
-    const events: import('@kite/agent-kernel').RuntimeEvent[] = [];
+    const events: import('@kite-ai/agent-kernel').RuntimeEvent[] = [];
     const model = createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]);
     const config: AgentConfig = {
       apiKey: 'unused',
@@ -1119,7 +1119,7 @@ describe('runtime resource budget admission', () => {
       workspaceFilesystemRuntime: testWorkspaceFilesystemRuntime(state.session.workspace),
       subagentEventSink: () => {},
     });
-    const events: import('@kite/agent-kernel').RuntimeEvent[] = [];
+    const events: import('@kite-ai/agent-kernel').RuntimeEvent[] = [];
     for await (const event of runStateRuntimeLoop(kernel, executor, {
       requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
     })) {

@@ -5,7 +5,7 @@ import {
   LIMITED_RESOURCE_BUDGET_,
   planRuntimeBudgetAdmission,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function withQueuedTools(names: string[]): RuntimeState {

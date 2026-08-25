@@ -2,19 +2,19 @@ import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { assertAgentStateInvariants, assertCurrentRuntimeEvent } from '@kite/agent-kernel';
-import { capabilityResultDigest, capabilityResultEvidenceDigest } from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { assertAgentStateInvariants, assertCurrentRuntimeEvent } from '@kite-ai/agent-kernel';
+import { capabilityResultDigest, capabilityResultEvidenceDigest } from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   workspaceFilesystemIntentDigest,
   workspaceFilesystemMutationReadyDigest,
-} from '@kite/builtin-runtime/filesystem';
+} from '@kite-ai/builtin-runtime/filesystem';
 import type {
   WorkspaceFilesystemIntentRecord,
   WorkspaceFilesystemMutationReadyRecord,
-} from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-contract';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { restoreStateStateFromStore as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

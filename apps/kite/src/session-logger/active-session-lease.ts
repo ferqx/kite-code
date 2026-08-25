@@ -21,7 +21,7 @@ import {
   type SecureSessionLogDirectoryBinding,
   type SecureSessionStorageOptions,
   writeSessionLogJsonAtomically,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 
 export const SESSION_LOG_LEASE_FILE = '.active-session-lease.json';
 export const SESSION_LOG_TERMINAL_FILE = 'terminal.json';

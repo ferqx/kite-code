@@ -21,7 +21,7 @@ import {
   suspendedCapabilityTerminalRequirements,
   taskIdentityAllocationKey,
   type VerificationSchemaAdmissionFact,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import type {
   RuntimeHostExecutionServices,
   RuntimeLeaseRequirement,

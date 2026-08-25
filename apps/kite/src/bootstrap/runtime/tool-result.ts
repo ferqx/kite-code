@@ -1,5 +1,5 @@
-import type { BuiltinShellIntent } from '@kite/builtin-runtime';
-import type { RuntimeHostToolExecutionResult } from '@kite/runtime-host/kernel-adapter';
+import type { BuiltinShellIntent } from '@kite-ai/builtin-runtime';
+import type { RuntimeHostToolExecutionResult } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AppApprovalBinding } from './approval-binding';
 import type { SubAgentResult } from './subagent/types';
 

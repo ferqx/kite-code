@@ -3,10 +3,10 @@ import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
   createCapabilityBinding,
-} from '@kite/builtin-runtime';
-import { createBuiltinSubagentToolSurface } from '@kite/builtin-runtime/subagent';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime';
+import { createBuiltinSubagentToolSurface } from '@kite-ai/builtin-runtime/subagent';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 
 function catalog() {
   return createBuiltinToolCatalogProjection(

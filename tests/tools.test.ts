@@ -20,13 +20,13 @@ import {
   WorkspaceFilesystemGrantAuthority,
   workspaceFilesystemMutationReadyDigest,
   workspaceFilesystemProtectedBoundaryDigest,
-} from '@kite/builtin-runtime/filesystem';
+} from '@kite-ai/builtin-runtime/filesystem';
 import {
   createProtectedPathEvaluator,
   isPathInsideWorkspace,
   msys2ToWindowsPath,
   normalizeMsys2PathsInText,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import type {
   WorkspaceFilesystemCommittedMutation,
   WorkspaceFilesystemMutationOperation,
@@ -34,7 +34,7 @@ import type {
   WorkspaceFilesystemObserveOperation,
   WorkspaceFilesystemPreparedMutation,
   WorkspaceFilesystemProviderResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   assertInsideWorkspace,
   buildPolicyProvenReadOnlyHostShellInvocations,

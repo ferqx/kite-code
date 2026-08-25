@@ -1,4 +1,4 @@
-import type { AgentPlan, PlanArtifactRef, PlanDocument, PlanStep } from '@kite/runtime-contract';
+import type { AgentPlan, PlanArtifactRef, PlanDocument, PlanStep } from '@kite-ai/runtime-contract';
 import { isPlanCompletionEvidence } from './plan-evidence';
 import { computePlanStructuralDigest } from './plan-hashes';
 

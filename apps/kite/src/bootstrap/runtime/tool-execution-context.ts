@@ -1,4 +1,4 @@
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import type {
   NetworkBoundaryPolicy,
   NetworkDecisionRecorder,
@@ -6,11 +6,11 @@ import type {
   ShellExecutor,
   ShellFilesystemMode,
   ShellNetworkMode,
-} from '@kite/builtin-runtime/sandbox';
-import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
-import type { BuiltinPlanningExecutionMechanism } from '@kite/builtin-runtime/subagent';
-import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
-import type { CapabilityAvailabilityContext, CapabilityKind } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/sandbox';
+import type { SkillCatalogSnapshot } from '@kite-ai/builtin-runtime/skills';
+import type { BuiltinPlanningExecutionMechanism } from '@kite-ai/builtin-runtime/subagent';
+import type { RuntimeState } from '@kite-ai/runtime-host/kernel-adapter';
+import type { CapabilityAvailabilityContext, CapabilityKind } from '@kite-ai/runtime-spi';
 import type { FeatureFlags } from '#app/config/features';
 import type { SubAgentResult } from './subagent/types';
 
@@ -47,7 +47,7 @@ export interface ToolExecutionContext extends ToolAvailabilityContext {
     }) => Promise<SubAgentResult | null>;
   };
   planRuntime?: BuiltinPlanningExecutionMechanism;
-  workspaceFilesystem?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemInvocationDispatcher;
+  workspaceFilesystem?: import('@kite-ai/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemInvocationDispatcher;
   allowExternalPaths?: boolean;
   writeTarget?: {
     path: string;
@@ -58,5 +58,5 @@ export interface ToolExecutionContext extends ToolAvailabilityContext {
   invocationInput?: unknown;
   beforeExecute?: () => void | Promise<void>;
   protectedPathEvaluator?: ProtectedPathEvaluator;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
 }

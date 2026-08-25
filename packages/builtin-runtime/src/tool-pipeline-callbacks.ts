@@ -30,11 +30,11 @@ import type {
   ToolResolutionResult,
   ToolValidationResult,
   ValidatedInvocation,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   CAPABILITY_POLICY_COMPILATION_SCHEMA_,
   TOOL_PIPELINE_STAGE_SCHEMA_,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from './capability-binding';
 import type { BuiltinModelToolCatalogEntry, BuiltinToolCatalogProjection } from './tool-catalog';
 
@@ -1161,7 +1161,7 @@ function parserAuthorityForEntry(
 function nestedSkillFacts(
   resolved: Readonly<ResolvedInvocation>,
   descriptor: ToolPipelineCapabilityDescriptor,
-  disclosure: import('@kite/runtime-spi').ToolPipelineCapabilityDisclosure,
+  disclosure: import('@kite-ai/runtime-spi').ToolPipelineCapabilityDisclosure,
   approvalSummary: string,
 ): RuntimeJsonValue {
   const effectiveEffects = freezeEffects(descriptor.effectiveEffects);
@@ -1186,7 +1186,7 @@ function nestedSkillFacts(
 
 interface PreparedNestedSkillFacts {
   readonly descriptor: ToolPipelineCapabilityDescriptor;
-  readonly disclosure: import('@kite/runtime-spi').ToolPipelineCapabilityDisclosure;
+  readonly disclosure: import('@kite-ai/runtime-spi').ToolPipelineCapabilityDisclosure;
   readonly effectiveEffects: CapabilityEffects;
   readonly effectiveEffectsDigest: string;
   readonly minimumApproval: 'none' | 'auto_review' | 'user';
@@ -1229,7 +1229,7 @@ function preparedNestedSkillFacts(
   return {
     descriptor: descriptor as unknown as ToolPipelineCapabilityDescriptor,
     disclosure:
-      disclosure as unknown as import('@kite/runtime-spi').ToolPipelineCapabilityDisclosure,
+      disclosure as unknown as import('@kite-ai/runtime-spi').ToolPipelineCapabilityDisclosure,
     effectiveEffects: {
       filesystem: effects.filesystem,
       network: effects.network,

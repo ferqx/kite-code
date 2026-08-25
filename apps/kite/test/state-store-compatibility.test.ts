@@ -9,8 +9,11 @@ import {
   LEGACY_STATE26_SCHEMA_VERSION,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
-} from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBinding, resolveProjectIdentity } from '@kite/runtime-host';
+} from '@kite-ai/agent-kernel';
+import {
+  createRuntimeHostStateStorageBinding,
+  resolveProjectIdentity,
+} from '@kite-ai/runtime-host';
 import {
   createSqliteRuntimeCompatibilityWriter,
   createSqliteRuntimeStorage,
@@ -19,7 +22,7 @@ import {
   type SqliteRuntimeCompatibilitySession,
   sqliteCurrentRuntimeStorePath,
   sqliteRuntimeStorePath,
-} from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/runtime-storage-sqlite';
 import {
   compatibilitySourcePaths,
   compatibleSessionList,

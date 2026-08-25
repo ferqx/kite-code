@@ -3,11 +3,11 @@ import {
   capabilityResultDigest,
   capabilityResultEvidenceDigest,
   projectBuiltinToolResultDigests,
-} from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import { createBuiltinCapabilityVerificationRequest } from '@kite/builtin-runtime/verification';
-import type { CapabilityResult } from '@kite/runtime-contract';
-import type { StateRuntimeEvent, StateRuntimeState } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import { createBuiltinCapabilityVerificationRequest } from '@kite-ai/builtin-runtime/verification';
+import type { CapabilityResult } from '@kite-ai/runtime-contract';
+import type { StateRuntimeEvent, StateRuntimeState } from '@kite-ai/runtime-host';
 import {
   type RuntimeHostToolExecutionResult,
   runtimeHostStateAdmitRecoveryAttempt,
@@ -19,7 +19,7 @@ import {
   runtimeHostStateToolFailureInstanceId,
   runtimeHostStateToolInvocationFingerprint,
   type StateClassifiedFailure,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CapabilityToolTerminalFailure,
   CapabilityToolTerminalResult,
@@ -32,7 +32,7 @@ import type {
   ToolPipelineRetryableCommit,
   ToolPipelineSuspensionCommit,
   ToolPipelineUnknownOutcome,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { resourceAdmissionFailureEvent } from '#app/bootstrap/runtime/resource-admission-terminal';
 import type { AppToolPipelinePreparedRequest } from '#app/bootstrap/runtime/tool-pipeline-prepared';
 import { createAppToolPipelineSandboxLifecycle } from '#app/bootstrap/runtime/tool-pipeline-sandbox-lifecycle';

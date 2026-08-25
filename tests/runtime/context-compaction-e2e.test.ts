@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { ContextCompactionCheckpoint } from '@kite/agent-kernel';
-import type { ContextTokenEstimate } from '@kite/builtin-runtime/model';
+import type { ContextCompactionCheckpoint } from '@kite-ai/agent-kernel';
+import type { ContextTokenEstimate } from '@kite-ai/builtin-runtime/model';
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
   expectedCompactionSourceDigest,
-} from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/model';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   type ContextCompactor,
   executeContextCompaction,

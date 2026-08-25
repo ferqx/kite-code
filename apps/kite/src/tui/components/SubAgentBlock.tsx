@@ -1,4 +1,4 @@
-import type { SubAgentRole } from '@kite/runtime-contract';
+import type { SubAgentRole } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import { useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';

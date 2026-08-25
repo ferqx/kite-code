@@ -3,7 +3,7 @@ import {
   RUNTIME_COMMAND_SCHEMA_,
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeCommand,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import {
   createRuntimeHost,
   createRuntimeHostBoundary,
@@ -12,18 +12,18 @@ import {
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionAdapterContext,
   runtimeHostStateAssertCurrentRuntimeEvent,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   runtimeCommandFromKernelInput,
   translateRuntimeCommandToKernelInput,
-} from '@kite/runtime-host/kernel-adapter';
-import { createArtifactPort, type RuntimeStorageBoundary } from '@kite/runtime-host/storage';
-import type { CapabilityExecutionInvocation, CapabilityExecutionPort } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import { createArtifactPort, type RuntimeStorageBoundary } from '@kite-ai/runtime-host/storage';
+import type { CapabilityExecutionInvocation, CapabilityExecutionPort } from '@kite-ai/runtime-spi';
 import {
   createRuntimeModuleRegistry,
   defineRuntimeModule,
   type RuntimeModuleRegistry,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { runtimeCommandOwner } from '../src/host/command-router';
 import {
   deferred,

@@ -3,14 +3,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { AgentPlan } from '@kite/runtime-contract';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { AgentPlan } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   RUNTIME_STATE_SCHEMA_VERSION,
-} from '@kite/runtime-host/kernel-adapter';
-import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { DurableSuspendedSubagent } from '@kite-ai/runtime-spi';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';

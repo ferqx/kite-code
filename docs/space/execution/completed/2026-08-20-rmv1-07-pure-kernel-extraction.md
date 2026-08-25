@@ -13,7 +13,7 @@
 
 ## 交付结论
 
-RMV1-07 已把 production transition decision 原子切到私有纯包 `@kite/agent-kernel`：
+RMV1-07 已把 production transition decision 原子切到私有纯包 `@kite-ai/agent-kernel`：
 
 - `decide` 处理 session/revision admission、事件规范化、digest/idempotency、逐事件 reduce/invariant、envelope 与
   pending-effect selection；`reduce` 和 `selectPendingEffects` 提供相同纯边界；
@@ -23,7 +23,7 @@ RMV1-07 已把 production transition decision 原子切到私有纯包 `@kite/ag
   State 25 的 4096 条 bounded tail；
 - package import closure 不含 Node/Bun/process/Date/random/timer/network、Store、Host、SPI、App、Provider 或
   Executor authority；
-- `@kite/runtime-host` 唯一把 Contract Command 翻译成私有 `KernelInput`，并在 bridge 前验证 command owner、
+- `@kite-ai/runtime-host` 唯一把 Contract Command 翻译成私有 `KernelInput`，并在 bridge 前验证 command owner、
   session、causation 与 revision identity；
 - `AgentKernel.processEvent/processEventBatch` 先消费纯 decision，再通过 App 注入的 Store 4 port 原子提交
   event/snapshot；只有 commit 成功才推进进程内 State；
@@ -50,7 +50,7 @@ State 25 的具体 event normalization、domain reducer、invariant 与 schedule
 ## Replay authority
 
 Pure Kernel public entry 与 implementation 已加入 Required qualification import closure。closure 算法升级为
-`typescript-preprocess-workspace-import-closure-v2`，精确解析 `#agent-kernel` 与 `@kite/*` workspace exports：
+`typescript-preprocess-workspace-import-closure-v2`，精确解析 `#agent-kernel` 与 `@kite-ai/*` workspace exports：
 
 - entrypoint：PS-03 journey source/test 与 `packages/agent-kernel/src/index.ts`；
 - file count：257；

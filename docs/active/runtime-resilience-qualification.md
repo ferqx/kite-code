@@ -217,7 +217,7 @@ focused approval rejection 也必须穿过同一 durable terminal boundary。无
 abort，也不得产生新的 `model.requested` 或重放已拒绝 invocation。fault/PTY cleanup 只有观察到该 terminal fact 才能
 结束 fixture；仅看到输入提示符或本地 TUI idle 投影不构成持久化完成证据。
 
-当前链路将 Runtime State input 经纯 `@kite/agent-kernel` transition 后再由 SQLite Store 原子提交；进程内 State 只在
+当前链路将 Runtime State input 经纯 `@kite-ai/agent-kernel` transition 后再由 SQLite Store 原子提交；进程内 State 只在
 commit 成功后推进。Required Kernel/reducer 与 scheduling/completion suite 证明 snapshot/terminal/revision 行为
 等价。Host applied receipt 后的
 `AuthorizedEffect` 精确绑定 execution identity，App adapter 只允许单次消费和 exact match；mismatch、重复消费

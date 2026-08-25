@@ -8,7 +8,7 @@ import {
   interactionBelongsToCurrentWork,
   interactionToolCall,
   toolCallBelongsToCurrentWork,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 export const runtimeHostStateDecideCompletion = decideCompletion;
 

@@ -1,4 +1,4 @@
-import type { SubagentHandle, SubagentHandleArtifactRef } from '@kite/runtime-spi';
+import type { SubagentHandle, SubagentHandleArtifactRef } from '@kite-ai/runtime-spi';
 import {
   canonicalModelJson,
   PrivateArtifactStorageError,

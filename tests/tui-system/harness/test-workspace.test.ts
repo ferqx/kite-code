@@ -7,7 +7,7 @@ import {
   SQLITE_RUNTIME_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   sqliteCurrentRuntimeStorePath,
-} from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/runtime-storage-sqlite';
 import {
   createTestWorkspace,
   observePersistedCommandSession,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveModelCapabilities, usableInputBudget } from '@kite/builtin-runtime/model';
+import { resolveModelCapabilities, usableInputBudget } from '@kite-ai/builtin-runtime/model';
 import type { AgentConfig } from '#app/config';
 
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {

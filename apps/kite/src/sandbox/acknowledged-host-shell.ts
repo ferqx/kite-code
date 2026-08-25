@@ -1,5 +1,5 @@
-import { createBuiltinShellExecutor, type ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostProcessExecutionPort } from '@kite/runtime-host';
+import { createBuiltinShellExecutor, type ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import { createRuntimeHostProcessExecutionPort } from '@kite-ai/runtime-host';
 
 /**
  * The single App-owned construction point for ADR-0119 host-shell

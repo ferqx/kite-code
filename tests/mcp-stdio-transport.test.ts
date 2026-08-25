@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import { createMcpStdioTransport, McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostMcpStdioProcessPort } from '@kite/runtime-host';
+import { createMcpStdioTransport, McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
+import { createRuntimeHostMcpStdioProcessPort } from '@kite-ai/runtime-host';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 const workspace = process.cwd();

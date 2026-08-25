@@ -18,7 +18,7 @@ import {
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
   windowsApprovedNetworkScopeError,
   wrapWindowsRestrictedTokenCommand,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   createWindowsSandboxControlSession,
   decodeWindowsSandboxRunnerFrame,

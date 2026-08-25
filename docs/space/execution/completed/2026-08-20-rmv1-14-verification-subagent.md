@@ -15,9 +15,9 @@
 
 RMV1-14 已把 Verification、Subagent 与配套 Plan/Task operation 物理迁入目标边界：
 
-- `@kite/runtime-spi` 唯一拥有 JSON-safe Subagent Provider、continuation 与 Verification contract；根
+- `@kite-ai/runtime-spi` 唯一拥有 JSON-safe Subagent Provider、continuation 与 Verification contract；根
   `src/protocol/subagent-provider.ts`、`subagent.ts`、`verification.ts` 只保留 RMV1-16 前 compatibility re-export；
-- `@kite/builtin-runtime` 唯一拥有 `builtin:ask_user/read_plan/update_plan/write_plan/task`、
+- `@kite-ai/builtin-runtime` 唯一拥有 `builtin:ask_user/read_plan/update_plan/write_plan/task`、
   `subagent:start/resume`、`verification:deterministic` 八个 operation，以及 deterministic Verification executor、
   Subagent grant/provider/continuation/ceiling/replay/Child Driver 和结果投影；
 - Core Plan/Task ToolSpec 已收窄为 capability-backed schema/Policy declaration，不再拥有 executor/projector；

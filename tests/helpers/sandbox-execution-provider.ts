@@ -5,7 +5,7 @@ import type {
   SandboxExecutionProviderResult,
   SandboxPreparationGrant,
   SandboxPreparationResourceSemantics,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   type SandboxExecutionGrantVerifier,
   sandboxCleanupDigest,

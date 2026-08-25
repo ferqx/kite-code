@@ -1,26 +1,29 @@
-import type { BuiltinToolCatalogProjection, CapabilityArtifactAccess } from '@kite/builtin-runtime';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type {
+  BuiltinToolCatalogProjection,
+  CapabilityArtifactAccess,
+} from '@kite-ai/builtin-runtime';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import type {
   CompactionReporter,
   ContextCompactionProgressPhase,
   ModelInvocationGateway,
   SupportedChatModel,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   buildContextProjection,
   preflightModelContext,
   resolveModelCapabilities,
-} from '@kite/builtin-runtime/model';
-import type { PlanArtifactStore } from '@kite/builtin-runtime/planning';
-import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime/skills';
+} from '@kite-ai/builtin-runtime/model';
+import type { PlanArtifactStore } from '@kite-ai/builtin-runtime/planning';
+import type { SandboxBackend, ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import type { SkillManifest, SkillScanOptions } from '@kite-ai/builtin-runtime/skills';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
   type SkillCatalogSnapshot,
-} from '@kite/builtin-runtime/skills';
-import type { SubAgentEventSink } from '@kite/runtime-contract';
-import { committedResourceUsage } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/skills';
+import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
+import { committedResourceUsage } from '@kite-ai/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
 import type { CapabilityExecutionPort } from '#runtime-spi';
@@ -36,7 +39,7 @@ export interface RuntimeExecutorDependencies {
   /** App-owned wall clock used for durable State effect facts; tests may inject it. */
   now?: () => string;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   /** Host-owned immutable Runtime SPI registry execution port. */
@@ -62,15 +65,15 @@ export interface RuntimeExecutorDependencies {
   /** Required by every model-bearing production effect. */
   modelInvocationGateway?: ModelInvocationGateway;
   /** App-owned coordinator bound to the exact same Model Gateway. */
-  modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
+  modelEffectCoordinator?: import('@kite-ai/builtin-runtime/model').BuiltinModelEffectCoordinator;
   /** Installation-private capability receipt writer; never synthesized at dispatch time. */
   capabilityArtifactStore?: CapabilityArtifactAccess;
   /** Explicit Local/Test filesystem Provider composition; no runtime fallback exists. */
-  workspaceFilesystemRuntime?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
-  sandboxPreparationArtifacts?: import('@kite/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
+  workspaceFilesystemRuntime?: import('@kite-ai/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
+  sandboxPreparationArtifacts?: import('@kite-ai/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
   subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactory;
-  subagentContinuationArtifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
-  subagentTaskRequests?: import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
+  subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
+  subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   /** Independent user/admin authorization source for one remote MCP invocation. */
 }
 

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 
 const recoveryIdentityKey = '0000000000000000000000000000000000000000000000000000000000000000';
 

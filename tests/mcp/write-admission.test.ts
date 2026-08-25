@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveMcpToolPolicy } from '@kite/builtin-runtime/mcp';
+import { resolveMcpToolPolicy } from '@kite-ai/builtin-runtime/mcp';
 import { DEFAULT_FEATURE_FLAGS } from '#app/config/features';
 import {
   evaluateMcpWriteAdmission,

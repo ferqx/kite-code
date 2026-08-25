@@ -64,17 +64,17 @@ describe('Builtin sandbox authority', () => {
     expect(contract).toContain('export interface SandboxInvocationIdentity');
     expect(contract).toContain('SandboxPreparationLifecycle,');
     expect(source(sandboxIndexPath)).toContain(
-      "export type { SandboxPreparationLifecycle } from '@kite/runtime-spi';",
+      "export type { SandboxPreparationLifecycle } from '@kite-ai/runtime-spi';",
     );
     expect(contract).not.toContain('export interface SandboxPreparationLifecycle');
-    expect(contract).not.toMatch(/@\/core|@kite\/runtime-host/);
+    expect(contract).not.toMatch(/@\/core|@kite-ai\/runtime-host/);
   });
 
   test('owns Shell semantics over a generic injected process port', () => {
     const executor = source(shellExecutorPath);
     expect(executor).toContain('export function createBuiltinShellExecutor');
     expect(executor).toContain('ShellProcessPort');
-    expect(executor).not.toContain('@kite/runtime-host');
+    expect(executor).not.toContain('@kite-ai/runtime-host');
     expect(executor).not.toContain('@/core/');
     expect(executor).not.toMatch(/Bun\.spawn(?:Sync)?\s*\(/);
     expect(executor).not.toContain('node:child_process');
@@ -87,7 +87,7 @@ describe('Builtin sandbox authority', () => {
   test('preparation authority is pure and cannot import Core or Host lifecycle', () => {
     const preparation = source(preparationAuthorityPath);
     expect(preparation).toContain('export function createBuiltinSandboxPreparation');
-    expect(preparation).not.toMatch(/@\/core|@kite\/runtime-host/);
+    expect(preparation).not.toMatch(/@\/core|@kite-ai\/runtime-host/);
     expect(preparation).not.toMatch(/Runtime(?:Event|State)|persistEvents|recordPreparation/);
     expect(preparation).not.toMatch(/Bun\.spawn(?:Sync)?\s*\(/);
   });

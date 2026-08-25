@@ -3,7 +3,7 @@ import { isAbsolute } from 'node:path';
 import type {
   FilesystemPreimageArtifactRef,
   WorkspaceFilesystemMutationReadyRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type {
   FilesystemCommitGrant,
   FilesystemObserveGrant,
@@ -18,11 +18,11 @@ import type {
   WorkspaceFilesystemProviderFailureCode,
   WorkspaceFilesystemTargetEvidence,
   WorkspaceFilesystemTargetIdentity,
-} from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { validateWorkspaceFilesystemMutationReadyRecord } from './evidence';
 
-export type { WorkspaceFilesystemGrantVerifier } from '@kite/runtime-spi';
+export type { WorkspaceFilesystemGrantVerifier } from '@kite-ai/runtime-spi';
 
 export {
   validateWorkspaceFilesystemIntentRecord,

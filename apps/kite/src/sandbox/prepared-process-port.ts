@@ -2,14 +2,14 @@ import {
   decodeWindowsRestrictedTokenPreparedTransport,
   type ShellInput,
   type ShellResult,
-} from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostSandboxPreparedProcessExecutionPort } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { createRuntimeHostSandboxPreparedProcessExecutionPort } from '@kite-ai/runtime-host';
 import type {
   SandboxExecutionBackend,
   SandboxPreparedProcessCleanup,
   SandboxPreparedProcessExecutionPort,
   SandboxPreparedProcessExecutionResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { executeWindowsRestrictedTokenPrepared } from './windows-restricted-token-runtime';
 
 /** App selects the platform adapter; Host remains the generic process owner. */

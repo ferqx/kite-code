@@ -2,14 +2,14 @@ import type {
   BuiltinPreparedShellExecutionInput,
   ResourceLimits,
   SandboxBackend,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   createBuiltinPreparedShellExecutionConsumer,
   findUsableBubblewrap,
   findUsableCgroupPidsRunner,
   LocalSandboxExecutionProvider,
   SandboxExecutionGrantAuthority,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import { createAppSandboxPreparedProcessExecutionPort } from './prepared-process-port';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
@@ -29,7 +29,7 @@ export interface GovernedLocalSandboxCompositionOptions {
   readonly protectedPathRevision: string;
   readonly filesystemScope?: 'read_only' | 'workspace_write';
   readonly runtimeReadOnlyRoots?: readonly string[];
-  readonly brokeredGitFeatureRevision?: typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
+  readonly brokeredGitFeatureRevision?: typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
   readonly maxProcessTreeTasks?: number;
   readonly resourceLimits?: Partial<ResourceLimits>;
 }

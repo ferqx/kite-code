@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { McpServerConfig } from '@kite/builtin-runtime/mcp';
+import type { McpServerConfig } from '@kite-ai/builtin-runtime/mcp';
 import { type ParseError, parse } from 'jsonc-parser';
 import {
   canonicalWorkspaceKey,

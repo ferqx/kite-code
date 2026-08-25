@@ -1,5 +1,5 @@
-import { projectRuntimeEventToObservabilityFact as projectKernelRuntimeObservabilityFact } from '@kite/agent-kernel';
-import type { ObservabilityRuntimeFact } from '@kite/runtime-contract';
+import { projectRuntimeEventToObservabilityFact as projectKernelRuntimeObservabilityFact } from '@kite-ai/agent-kernel';
+import type { ObservabilityRuntimeFact } from '@kite-ai/runtime-contract';
 
 /** Host projection port; App never imports Kernel event or policy authority. */
 export function projectRuntimeObservabilityFact(

@@ -1,7 +1,7 @@
 # 第七章 TUI 结构
 
 TUI 位于 `apps/kite/src/tui/`，负责输入、渲染和会话前台管理，不拥有 Agent 业务状态。所有可恢复事实来自
-`@kite/agent-kernel` 的 Runtime State Runtime，UI reducer 只维护展示投影。
+`@kite-ai/agent-kernel` 的 Runtime State Runtime，UI reducer 只维护展示投影。
 
 ## 7.1 主要结构
 
@@ -21,7 +21,7 @@ TUI 入口在创建 Runtime、读取配置或挂载 Ink 前处理 `--version`，
 
 ## 7.2 状态边界
 
-- RuntimeState：`@kite/agent-kernel` 的持久事实；
+- RuntimeState：`@kite-ai/agent-kernel` 的持久事实；
 - RuntimeEvent：Kernel 经 App runtime bridge 向 UI 的中立投影；
 - TUI state：焦点、overlay、block、输入框、选择器等展示状态；
 - SessionRuntime：连接某一 thread 的运行、缓冲与取消控制。

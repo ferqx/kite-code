@@ -2,16 +2,16 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { resolveKernelVerificationMode as resolveVerificationMode } from '@kite/agent-kernel';
-import { capabilityResultDigest, capabilityResultEvidenceDigest } from '@kite/builtin-runtime';
-import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import { verificationRequestForSkill } from '@kite/builtin-runtime/skills';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { resolveKernelVerificationMode as resolveVerificationMode } from '@kite-ai/agent-kernel';
+import { capabilityResultDigest, capabilityResultEvidenceDigest } from '@kite-ai/builtin-runtime';
+import { McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
+import { verificationRequestForSkill } from '@kite-ai/builtin-runtime/skills';
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
-import type { VerificationSpec } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { VerificationSpec } from '@kite-ai/runtime-spi';
 import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeVerificationEffect } from '../../apps/kite/src/bootstrap/runtime/verification-effect';

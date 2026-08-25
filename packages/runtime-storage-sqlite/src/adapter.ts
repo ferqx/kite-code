@@ -11,7 +11,7 @@ import type {
   RuntimeStorage,
   SessionStore,
   StoredRuntimeEvent,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 import { resolveSqliteArtifactStore } from './artifact-store';
 import { createSqliteRecoveryIdentityLedger } from './authority-ledger';
 import { openSqliteRuntimeConnection } from './connection';

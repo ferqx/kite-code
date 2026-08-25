@@ -1,4 +1,4 @@
-import type { BuiltinWorkspaceFilesystemInvocationDispatcher } from '@kite/builtin-runtime/filesystem';
+import type { BuiltinWorkspaceFilesystemInvocationDispatcher } from '@kite-ai/builtin-runtime/filesystem';
 import {
   type BuiltinGitExecutionMechanism,
   type BuiltinMechanismRecord,

@@ -1,4 +1,4 @@
-import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite/runtime-spi';
+import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite-ai/runtime-spi';
 import { isDescriptorAdmittedByInProcessReadOnlyCatalog } from './in-process-read-only';
 import type { ExecutionCapabilitySurface } from './types';
 

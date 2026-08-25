@@ -1,10 +1,10 @@
-import { CapabilityArtifactStore } from '@kite/builtin-runtime';
+import { CapabilityArtifactStore } from '@kite-ai/builtin-runtime';
 import {
   type BuiltinWorkspaceFilesystemRuntime,
   FilesystemPreimageArtifactStore,
   LocalWorkspaceFilesystemProvider,
   WorkspaceFilesystemGrantAuthority,
-} from '@kite/builtin-runtime/filesystem';
+} from '@kite-ai/builtin-runtime/filesystem';
 import {
   BuiltinModelEffectCoordinator,
   type BuiltinModelOperationExecutionPort,
@@ -12,12 +12,12 @@ import {
   type ModelArtifactEvidenceAvailability,
   ModelArtifactStore,
   ModelInvocationGateway,
-} from '@kite/builtin-runtime/model';
-import { PlanArtifactStore } from '@kite/builtin-runtime/planning';
+} from '@kite-ai/builtin-runtime/model';
+import { PlanArtifactStore } from '@kite-ai/builtin-runtime/planning';
 import {
   canonicalPathForComparison,
   SandboxPreparationArtifactStore,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   BuiltinChildRuntimeDriver,
   createGovernedLocalSubagentComposition,
@@ -30,8 +30,8 @@ import {
   SubagentTaskArtifactStore,
   type SubagentTaskRequestArtifactAccess,
   SubagentTaskRequestArtifactStore,
-} from '@kite/builtin-runtime/subagent';
-import { planModelInvocationResource } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/subagent';
+import { planModelInvocationResource } from '@kite-ai/runtime-host/kernel-adapter';
 import { userKiteCodeDir } from '#app/config/paths';
 import type { RuntimeState } from './runtime/state-runtime';
 import {

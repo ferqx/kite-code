@@ -3,7 +3,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
-import type { McpStdioProcessPort } from '@kite/runtime-spi';
+import type { McpStdioProcessPort } from '@kite-ai/runtime-spi';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';

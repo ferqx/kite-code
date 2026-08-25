@@ -1,6 +1,6 @@
 // ── Agent 生命周期（运行/空闲/退出）、中断、授权、Ctrl+C/Esc ──
 
-import { InteractionMode } from '@kite/runtime-contract';
+import { InteractionMode } from '@kite-ai/runtime-contract';
 import type { OutputBlock, TuiApprovalStatus, TuiPendingApproval, TuiState } from '../types';
 import type { Action } from './actions';
 import { projectUserCancelledTurn } from './cancellation-projection';

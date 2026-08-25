@@ -8,12 +8,12 @@ import type {
   GitInspectRequest,
   GitInvocationReceipt,
   GitShellDenyEvidence,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   BROKERED_GIT_FEATURE_REVISION_,
   GIT_BROKER_REVISION_,
   GIT_OPERATION_SCHEMA_REVISION_,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { qualifyBrokeredGitNativeDeny } from './qualification';
 
 export interface BuiltinProtectedPathEvaluator {

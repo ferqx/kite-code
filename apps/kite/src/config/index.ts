@@ -5,7 +5,7 @@ import type {
   ExecutionBoundaryAdmission,
   ExecutionCapabilitySurface,
   ProductionExecutionEntrypoint,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
 import { admitProductionExecutionBoundary } from './execution-boundary';
@@ -401,7 +401,7 @@ export interface AgentConfig {
   /** Exact capability surface admitted by the sealed production gate. */
   executionCapabilitySurface?: ExecutionCapabilitySurface;
   /** Release-owned native evidence; never accepted from project/user config. */
-  brokeredGitShellDenyEvidence?: import('@kite/runtime-spi').GitShellDenyEvidence;
+  brokeredGitShellDenyEvidence?: import('@kite-ai/runtime-spi').GitShellDenyEvidence;
   /** Resolved artifact + user + project session logging policy. */
   sessionLoggingPolicy?: SessionLoggingPolicy;
   /** Source-aware telemetry preferences; App consent composition remains authoritative. */

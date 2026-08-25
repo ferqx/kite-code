@@ -2,24 +2,24 @@ import {
   type BuiltinOperationExecutionValue,
   type BuiltinShellExecutionResult,
   createBuiltinPreparedToolDispatchAdapter,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   type BuiltinWorkspaceFilesystemActorIdentity,
   type BuiltinWorkspaceFilesystemRewindProjection,
   type BuiltinWorkspaceFilesystemRuntime,
   createBuiltinWorkspaceFilesystemMutationDispatcher,
   createBuiltinWorkspaceFilesystemReadDispatcher,
-} from '@kite/builtin-runtime/filesystem';
+} from '@kite-ai/builtin-runtime/filesystem';
 import type {
   ProtectedPathEvaluator,
   SandboxPreparationArtifactStore,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import type {
   RuntimeHostCommittedToolInvocationAuthority,
   RuntimeHostRetryableToolInvocationAuthority,
   RuntimeHostSuspendedToolInvocationAuthority,
-} from '@kite/runtime-host';
-import type { RuntimeHostStateToolGovernanceAuthorizationInput } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host';
+import type { RuntimeHostStateToolGovernanceAuthorizationInput } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CapabilityExecutionPort,
   CapabilityToolTerminalResult,
@@ -31,8 +31,8 @@ import type {
   ToolPipelinePlanReviewRequestedEvent,
   ToolPipelineResolutionContext,
   ToolPipelineStageFailure,
-} from '@kite/runtime-spi';
-import { TOOL_PIPELINE_STAGE_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { TOOL_PIPELINE_STAGE_SCHEMA_ } from '@kite-ai/runtime-spi';
 import type { AppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
 import type { AppPreparedShellExecutionPort } from '../../sandbox/prepared-tool-pipeline';
 import {

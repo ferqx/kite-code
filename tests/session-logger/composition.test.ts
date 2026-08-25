@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { aiMessage, createModelSecretDetector } from '@kite/builtin-runtime/model';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { aiMessage, createModelSecretDetector } from '@kite-ai/builtin-runtime/model';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   type AgentConfig,

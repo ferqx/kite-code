@@ -10,8 +10,8 @@
 
 ## 结论
 
-RMV1-04 已把 Runtime persistence production API 迁到 `@kite/runtime-host/storage` port 与
-`@kite/runtime-storage-sqlite` 的唯一 `LegacyV4StorageAdapter`。`apps/kite/src/bootstrap.ts` 是唯一 concrete
+RMV1-04 已把 Runtime persistence production API 迁到 `@kite-ai/runtime-host/storage` port 与
+`@kite-ai/runtime-storage-sqlite` 的唯一 `LegacyV4StorageAdapter`。`apps/kite/src/bootstrap.ts` 是唯一 concrete
 storage 创建者，并通过 `createRuntimeHost({ storage, modules })` 注入。CLI、TUI、Kernel、session persistence
 helper 与 `apps/kite/src/bootstrap/legacy/` 不再持有 raw SQLite handle，也不再按路径自行创建 Store。
 

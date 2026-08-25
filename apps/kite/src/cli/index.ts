@@ -4,14 +4,14 @@ import {
   resolveSandboxRuntime,
   resolveWindowsManagedNetworkSetupStatus,
   setupWindowsManagedNetwork,
-} from '@kite/builtin-runtime/sandbox';
-import type { InteractionMode, ShellApprovalGrant } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/sandbox';
+import type { InteractionMode, ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import {
   RUNTIME_COMMAND_SCHEMA_,
   type RuntimeAccess,
   type RuntimeNotification,
   type RuntimeNotificationEvent,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import { type FeatureFlags, getFeatureFlags } from '#app/config/features';
 import {
   type AgentConfig,
@@ -82,7 +82,7 @@ export interface ParsedArgs {
   answer?: string;
   trustWorkspace: boolean;
   sandbox: boolean;
-  interactionMode?: import('@kite/runtime-contract').InteractionMode;
+  interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
   skills: string[];
   featureOverrides: Partial<FeatureFlags>;
   tracePath?: string;

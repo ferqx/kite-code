@@ -1,4 +1,4 @@
-import { type AgentState, type KernelEvent, reduceAgentState } from '@kite/agent-kernel';
+import { type AgentState, type KernelEvent, reduceAgentState } from '@kite-ai/agent-kernel';
 import { projectVerificationSchemaAdmissions } from '#app/bootstrap/runtime/verification-schema-admission';
 
 export {
@@ -9,7 +9,7 @@ export {
   recordRecoveryFailure,
   toolFailureInstanceId,
   toolInvocationFingerprint,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 /** Test-only adapter for the exact State reducer plus composed schema facts. */
 export function reduceRuntimeState<State extends AgentState>(

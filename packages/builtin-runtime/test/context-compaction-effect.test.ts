@@ -7,7 +7,7 @@ import {
   executeBuiltinContextCompaction,
   expectedCompactionSourceDigest,
   findSafeCompactionBoundary,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import type {
   BuiltinContextCheckpointView,
   BuiltinRuntimeStateView,

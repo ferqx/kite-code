@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { assertAgentStateInvariants } from '@kite/agent-kernel';
-import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { assertAgentStateInvariants } from '@kite-ai/agent-kernel';
+import type { RuntimeState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createTestRuntimeEffectExecutor } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';

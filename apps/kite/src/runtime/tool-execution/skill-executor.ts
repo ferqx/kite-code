@@ -1,10 +1,10 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import type { SubAgentEventSink } from '@kite/runtime-contract';
-import { getAgentPhase } from '@kite/runtime-contract';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
+import { getAgentPhase } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateEffectiveInteractionMode as getEffectiveInteractionMode,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   SubagentInvocationIdentity,
   SubagentInvocationRuntime,
@@ -32,9 +32,9 @@ export interface AppSkillForkRequest {
  */
 export async function runAppSkillFork(input: {
   readonly params: AppRuntimeToolExecutionInput;
-  readonly call: Readonly<import('@kite/runtime-host').StateToolCallRecord>;
+  readonly call: Readonly<import('@kite-ai/runtime-host').StateToolCallRecord>;
   readonly toolCallId: string;
-  readonly builtinProjection: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
+  readonly builtinProjection: import('@kite-ai/builtin-runtime').BuiltinToolCatalogProjection;
   readonly childToolDispatcher: SubAgentToolDispatcher;
   readonly eventSink: SubAgentEventSink;
   readonly subagentRuntime: SubagentInvocationRuntime;

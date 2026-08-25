@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { projectRuntimeEventToObservabilityFact } from '@kite/agent-kernel';
-import { createBuiltinObservabilityProjector } from '@kite/builtin-runtime';
-import { BufferedMetricReporter } from '@kite/runtime-host';
+import { projectRuntimeEventToObservabilityFact } from '@kite-ai/agent-kernel';
+import { createBuiltinObservabilityProjector } from '@kite-ai/builtin-runtime';
+import { BufferedMetricReporter } from '@kite-ai/runtime-host';
 import { RuntimeMetricBridge } from '../../apps/kite/src/observability/runtime-bridge';
 
 describe('Runtime metric bridge', () => {

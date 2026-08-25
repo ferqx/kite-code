@@ -1,4 +1,4 @@
-import type { ContextCompactionProgressPhase } from '@kite/runtime-contract';
+import type { ContextCompactionProgressPhase } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import { useTheme } from '../theme';
 import { useBlinkDot } from './use-blink-dot';

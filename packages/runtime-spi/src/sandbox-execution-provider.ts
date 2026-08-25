@@ -4,7 +4,7 @@ import type {
   SandboxExecutionBackend as RuntimeContractSandboxExecutionBackend,
   SandboxPreparationArtifactRef as RuntimeContractSandboxPreparationArtifactRef,
   SandboxPreparationResourceSemantics as RuntimeContractSandboxPreparationResourceSemantics,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 
 export const SANDBOX_EXECUTION_PROVIDER_SCHEMA_ = 'kite.sandbox-execution-provider.v1' as const;
 

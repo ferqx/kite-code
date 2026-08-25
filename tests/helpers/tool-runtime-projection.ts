@@ -3,17 +3,17 @@ import {
   type BuiltinToolCatalogProjection,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
-import type { SupportedChatModel } from '@kite/builtin-runtime/model';
-import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
-import { createBuiltinModelToolSurfaceFromProjection } from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime';
+import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
+import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import type { SkillCatalogSnapshot } from '@kite-ai/builtin-runtime/skills';
+import { createBuiltinModelToolSurfaceFromProjection } from '@kite-ai/builtin-runtime/subagent';
 import type {
   CapabilityBinding,
   CapabilityDescriptor,
   SubAgentEventSink,
-} from '@kite/runtime-contract';
-import { type CapabilityTurnContext, createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-contract';
+import { type CapabilityTurnContext, createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import {
   type AppToolTurnContext,
   createAppToolTurnContext,
@@ -23,21 +23,21 @@ import type { AgentConfig } from '#app/config/index';
 export interface CreateAgentToolsInput {
   workspace: string;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
-  mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
+  mcpManager?: import('@kite-ai/builtin-runtime/mcp').McpRuntimeProvider;
   mcpBindings?: Array<{ binding: CapabilityBinding; descriptor: CapabilityDescriptor }>;
   toolSearch?: boolean;
-  skills?: import('@kite/builtin-runtime/skills').SkillManifest[];
-  skillOptions?: import('@kite/builtin-runtime/skills').SkillScanOptions;
+  skills?: import('@kite-ai/builtin-runtime/skills').SkillManifest[];
+  skillOptions?: import('@kite-ai/builtin-runtime/skills').SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;
   activeSkillFrames?: Array<{ activationId: string }>;
   config?: AgentConfig;
   subagentEventSink?: SubAgentEventSink;
   model?: SupportedChatModel;
   threadId?: string;
-  workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
-  phase?: import('@kite/runtime-contract').AgentPhase;
-  interactionMode?: import('@kite/runtime-contract').InteractionMode;
+  workspaceAccess?: import('@kite-ai/runtime-contract').WorkspaceAccess;
+  phase?: import('@kite-ai/runtime-contract').AgentPhase;
+  interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
   turnId?: string;
   taskId?: string;
   activeTaskId?: string;

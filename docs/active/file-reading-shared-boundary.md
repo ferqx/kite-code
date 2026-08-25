@@ -14,8 +14,8 @@ Workspace filesystem I/O 都不能绕过 Tool Pipeline 的 durable intent 与 pu
 
 ## 当前生产权威（PS-01 + RM-12）
 
-生产文件能力的唯一 contract seam 是 `@kite/runtime-spi` 的 `WorkspaceFilesystemProvider`，其三个 purpose
-隔离入口为 `observe`、`prepareMutation` 与 `commitMutation`。`@kite/builtin-runtime/filesystem` 的
+生产文件能力的唯一 contract seam 是 `@kite-ai/runtime-spi` 的 `WorkspaceFilesystemProvider`，其三个 purpose
+隔离入口为 `observe`、`prepareMutation` 与 `commitMutation`。`@kite-ai/builtin-runtime/filesystem` 的
 `LocalWorkspaceFilesystemProvider`、grant/evidence、diff 与 descriptor-relative internal helper 是唯一可以为
 受治理文件工具导入 host filesystem/native API 的生产 backend。五个 Builtin catalog filesystem entry 只保留 schema、Policy、approval、protected-path 与 ExecutionTraits，不再含
 `execute/projectResult`。`kite-builtin-runtime-git` 是 `read_file/search_content/search_files/write_file/edit_file`

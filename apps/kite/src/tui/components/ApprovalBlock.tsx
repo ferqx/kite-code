@@ -1,4 +1,4 @@
-import type { ShellApprovalGrant, ToolApprovalPayload } from '@kite/runtime-contract';
+import type { ShellApprovalGrant, ToolApprovalPayload } from '@kite-ai/runtime-contract';
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '#app/tui/provider';

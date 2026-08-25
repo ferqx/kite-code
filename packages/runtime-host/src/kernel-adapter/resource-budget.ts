@@ -7,7 +7,7 @@ import type {
   ResourceReservation,
   ResourceReservationState,
   ResourceWaiter,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 export const RESOURCE_BUDGET_VERSION = 1 as const;
 

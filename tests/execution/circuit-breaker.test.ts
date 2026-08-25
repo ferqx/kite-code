@@ -3,7 +3,7 @@ import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG_ as DEFAULT_CIRCUIT_BREAKER_CONFIG,
   evaluateAutoReviewCircuitBreaker as evaluateCircuitBreaker,
   type AutoReviewRejectionEntry as RejectionEntry,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 const cfg = DEFAULT_CIRCUIT_BREAKER_CONFIG;
 

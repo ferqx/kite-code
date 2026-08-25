@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import type { ContextTokenEstimate } from '@kite/builtin-runtime/model';
+import type { ContextTokenEstimate } from '@kite-ai/builtin-runtime/model';
 import {
   createNarrativeContextCompactor,
   findSafeCompactionBoundary,
   normalizeCompactionSummary,
   serializeCompactionSummary,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 
 const estimate: ContextTokenEstimate = {
   systemTokens: 100,

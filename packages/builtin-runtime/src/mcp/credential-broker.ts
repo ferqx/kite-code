@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { CredentialBroker, CredentialHandle } from '@kite/runtime-spi';
+import type { CredentialBroker, CredentialHandle } from '@kite-ai/runtime-spi';
 import type {
   McpCredentialKey,
   McpCredentialMaterial,

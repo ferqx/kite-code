@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { METRIC_DEFINITIONS_ } from '@kite/runtime-host';
+import { METRIC_DEFINITIONS_ } from '@kite-ai/runtime-host';
 import { parseDocument } from 'yaml';
 
 describe('production dashboard and SLO contract', () => {

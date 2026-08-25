@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { CallbackServerFactory } from '@kite/builtin-runtime/mcp';
+import type { CallbackServerFactory } from '@kite-ai/builtin-runtime/mcp';
 import {
   createBuiltinCredentialBroker,
   DefaultMcpAuthCoordinator,
   DefaultMcpSupervisor,
   MemoryMcpCredentialStore,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import type { McpConfigCatalog } from '#app/config';
 import { createInMemoryMcpConfigRepository } from './helpers/mcp-test-composition';
 import { startTestHttpServer } from './helpers/test-http-server';

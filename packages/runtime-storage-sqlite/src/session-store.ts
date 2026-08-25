@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import type { RuntimeSessionModelRoute } from '@kite/runtime-host/storage';
+import type { RuntimeSessionModelRoute } from '@kite-ai/runtime-host/storage';
 import {
   SqliteRuntimeFormatMismatchError,
   type SqliteRuntimeSnapshotCodec,

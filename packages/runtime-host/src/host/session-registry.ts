@@ -1,4 +1,4 @@
-import type { RuntimeSessionProjection } from '@kite/runtime-contract';
+import type { RuntimeSessionProjection } from '@kite-ai/runtime-contract';
 import { SessionMailbox } from '../session-mailbox';
 
 export class SessionRegistry {

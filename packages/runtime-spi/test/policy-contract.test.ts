@@ -7,7 +7,7 @@ import {
   createRuntimeModuleRegistry,
   defineRuntimeModule,
   type RuntimeJsonValue,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const context: CapabilityPolicyContext = Object.freeze({
   workspace: '/tmp/workspace',

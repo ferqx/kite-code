@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import {
   resolveWindowsManagedNetworkSetupStatus,
   setupWindowsManagedNetwork,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 
 const runner = () =>
   ({ path: 'C:\\kite-windows-runner.exe' }) as NonNullable<
-    ReturnType<typeof import('@kite/builtin-runtime/sandbox').resolveWindowsSandboxRunner>
+    ReturnType<typeof import('@kite-ai/builtin-runtime/sandbox').resolveWindowsSandboxRunner>
   >;
 
 describe('Windows approved-network execution', () => {

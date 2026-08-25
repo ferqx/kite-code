@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { ExecutionBoundary } from '@kite/builtin-runtime/sandbox';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import type { ExecutionBoundary } from '@kite-ai/builtin-runtime/sandbox';
 import {
   createNetworkBoundaryEnforcer,
   createNetworkBoundaryFetch,
@@ -8,9 +8,9 @@ import {
   NetworkBoundaryError,
   type NetworkResolvedAddress,
   networkBoundaryPolicyFromExecutionBoundary,
-} from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
-import type { RuntimeJsonValue } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
+import type { RuntimeJsonValue } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#app/config';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

@@ -2,7 +2,7 @@ import type {
   SubagentDelegationGrant,
   SubagentHandle,
   SubagentResumeGrant,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from '../capability-binding';
 
 /** One canonical identity shared by dispatch intent publication and restore verification. */

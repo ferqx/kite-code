@@ -1,11 +1,11 @@
-import { createBuiltinObservabilityProjector } from '@kite/builtin-runtime';
+import { createBuiltinObservabilityProjector } from '@kite-ai/builtin-runtime';
 import {
   BufferedMetricReporter,
   type MetricExporter,
   type MetricReporter,
   NoopMetricReporter,
   projectRuntimeObservabilityFact,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import { allowedMetricNamesForConsent, type TelemetryConsentStatus } from './consent';
 import { RuntimeMetricBridge } from './runtime-bridge';
 

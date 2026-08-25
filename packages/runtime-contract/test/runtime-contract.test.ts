@@ -9,7 +9,7 @@ import {
   RUNTIME_CONTRACT_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 
 describe('runtime contract package boundary', () => {
   test('is a frozen private in-process Contract', () => {

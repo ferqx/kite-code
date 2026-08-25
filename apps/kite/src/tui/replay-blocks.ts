@@ -327,7 +327,7 @@ export function sessionDataToUI(data: SessionData): {
               approval: data.interrupt.callId
                 ? ({
                     callId: data.interrupt.callId,
-                  } as unknown as import('@kite/runtime-contract').ToolApprovalPayload)
+                  } as unknown as import('@kite-ai/runtime-contract').ToolApprovalPayload)
                 : undefined,
               blockId: callIds.get(data.interrupt.callId ?? ''),
             }

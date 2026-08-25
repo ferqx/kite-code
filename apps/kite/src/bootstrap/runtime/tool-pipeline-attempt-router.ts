@@ -4,7 +4,7 @@ import type {
   ToolPipelineDispatchOutcome,
   ToolPipelineOutcomeDispatch,
   ToolPipelinePreparedIdentityVerificationResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 export const APP_TOOL_PIPELINE_ATTEMPT_ROUTER_SCHEMA_ =
   'kite.app.tool-pipeline-attempt-router.v1' as const;

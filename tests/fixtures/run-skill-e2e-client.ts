@@ -2,8 +2,8 @@
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { refreshSkillCatalog } from '@kite/builtin-runtime/skills';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { refreshSkillCatalog } from '@kite-ai/builtin-runtime/skills';
 import { skillDirs } from '#app/config/paths';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { runTestRuntimeAgent } from '../helpers/runtime-model';

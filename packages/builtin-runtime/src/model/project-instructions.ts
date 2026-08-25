@@ -5,7 +5,7 @@ import type {
   CapabilityEffects,
   CapabilityExecutionMechanism,
   RuntimeJsonValue,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { BuiltinRuntimeStateView } from './runtime-view';
 import { countTokens } from './token-counter';
 

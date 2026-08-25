@@ -13,7 +13,7 @@ import {
   createBuiltinToolCatalogProjection,
   createBuiltinToolPipelineCallbacks,
   digestCapabilityBindingValue,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   BuiltinWorkspaceFilesystemMutationCommitUnknownError,
   type BuiltinWorkspaceFilesystemRuntime,
@@ -21,13 +21,13 @@ import {
   FilesystemPreimageArtifactStore,
   LocalWorkspaceFilesystemProvider,
   WorkspaceFilesystemGrantAuthority,
-} from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import type {
   CapabilityArtifactRef,
   CapabilityResult,
   WorkspaceFilesystemObservationRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type {
   CapabilityToolKind,
   ExecutionReceipt,
@@ -44,8 +44,8 @@ import type {
   WorkspaceFilesystemPersistedMutationIntent,
   WorkspaceFilesystemPersistedMutationReady,
   WorkspaceFilesystemProvider,
-} from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 
 const FIXED_NOW = new Date('2026-08-22T00:00:00.000Z');
 
@@ -690,7 +690,7 @@ describe('Builtin Workspace filesystem mutation dispatcher', () => {
     const source = await Bun.file(
       new URL('../src/filesystem/mutation-dispatcher.ts', import.meta.url),
     ).text();
-    expect(source).not.toMatch(/@kite\/(?:runtime-host|agent-kernel)|#app|@\/core/u);
+    expect(source).not.toMatch(/@kite-ai\/(?:runtime-host|agent-kernel)|#app|@\/core/u);
     expect(source).not.toContain('createRuntimeModuleRegistry');
     expect(source).not.toContain('RuntimeStore');
     expect(source).not.toContain('catchOld');

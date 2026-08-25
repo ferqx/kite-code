@@ -1,5 +1,5 @@
 {
-  "name": "@kite/runtime-spi",
+  "name": "@kite-ai/runtime-spi",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,6 +14,6 @@
     "test": "bun test ./test"
   },
   "dependencies": {
-    "@kite/runtime-contract": "workspace:*"
+    "@kite-ai/runtime-contract": "workspace:*"
   }
 }

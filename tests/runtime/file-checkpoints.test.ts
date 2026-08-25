@@ -4,9 +4,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { workspaceFilesystemContentHash as fileContentHash } from '@kite/builtin-runtime/filesystem';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { workspaceFilesystemContentHash as fileContentHash } from '@kite-ai/builtin-runtime/filesystem';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   createFilePreimageRecorder,
   previewFilesToCheckpoint,

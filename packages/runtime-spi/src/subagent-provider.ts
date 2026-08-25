@@ -1,7 +1,7 @@
 import type {
   SubagentHandleArtifactRef as RuntimeContractSubagentHandleArtifactRef,
   SubagentTaskArtifact as RuntimeContractSubagentTaskArtifact,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type { JsonObject } from './subagent';
 
 /** JSON-safe authority context values crossing the private Subagent SPI. */

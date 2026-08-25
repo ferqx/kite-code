@@ -1,35 +1,35 @@
-import type { CapabilityArtifactWriter } from '@kite/builtin-runtime';
-import { pendingToolRequestFromValidatedInvocation } from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import type { CapabilityArtifactWriter } from '@kite-ai/builtin-runtime';
+import { pendingToolRequestFromValidatedInvocation } from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   capabilityChangedProviderError,
   isMcpProviderError,
   type McpRuntimeProvider,
   providerErrorFromDirectoryEntry,
-} from '@kite/builtin-runtime/mcp';
-import type { SupportedChatModel } from '@kite/builtin-runtime/model';
-import type { PlanArtifactStore } from '@kite/builtin-runtime/planning';
-import type { NetworkDecisionRecorder, ShellExecutor } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/mcp';
+import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
+import type { PlanArtifactStore } from '@kite-ai/builtin-runtime/planning';
+import type { NetworkDecisionRecorder, ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
 import {
   createProtectedPathEvaluator,
   networkBoundaryPolicyFromExecutionBoundary,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import type {
   SkillCatalogSnapshot,
   SkillManifest,
   SkillScanOptions,
-} from '@kite/builtin-runtime/skills';
-import { createCapabilitySnapshot } from '@kite/builtin-runtime/skills';
+} from '@kite-ai/builtin-runtime/skills';
+import { createCapabilitySnapshot } from '@kite-ai/builtin-runtime/skills';
 import {
   isBuiltinSubagentTaskToolName,
   normalizeAskUserRequest,
-} from '@kite/builtin-runtime/subagent';
-import type { SubAgentEventSink } from '@kite/runtime-contract';
-import { getAgentPhase } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/subagent';
+import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
+import { getAgentPhase } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostToolCallSnapshot,
   createRuntimeHostInteractionId as genInteractionId,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   runtimeHostStateActiveSkillFrames as activeSkillFramesForCurrentWork,
   DescendantResourceAdmissionError,
@@ -41,8 +41,8 @@ import {
   runtimeHostStateCreateApprovalBindingDigest,
   runtimeHostStateToolFailureInstanceId as toolFailureInstanceId,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
-} from '@kite/runtime-host/kernel-adapter';
-import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite-ai/runtime-host/storage';
 import { bindAppApprovalBinding } from '#app/bootstrap/runtime/approval-binding';
 import {
   classifyFailure,
@@ -110,11 +110,11 @@ export async function executeAppRuntimeTools(params: {
   state: RuntimeState;
   toolCallIds: string[];
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   /** Host-owned registry execution port for Runtime SPI capability owners. */
   capabilityExecution?: CapabilityExecutionPort;
-  builtinToolCatalog?: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
+  builtinToolCatalog?: import('@kite-ai/builtin-runtime').BuiltinToolCatalogProjection;
   /** Stable App composition derived from the same frozen Builtin projection. */
   toolPipelineComposition: AppToolPipelineComposition;
   /** The one effect-scoped Host/Builtin attempt runtime for ordinary cutover operations. */
@@ -128,9 +128,9 @@ export async function executeAppRuntimeTools(params: {
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
-  descendantResourceAdmission?: import('@kite/runtime-host/kernel-adapter').DescendantResourceAdmission;
-  modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
-  modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
+  descendantResourceAdmission?: import('@kite-ai/runtime-host/kernel-adapter').DescendantResourceAdmission;
+  modelEffectCoordinator?: import('@kite-ai/builtin-runtime/model').BuiltinModelEffectCoordinator;
+  modelInvocationPersistence?: import('@kite-ai/builtin-runtime/model').ModelInvocationPersistence<
     RuntimeState,
     RuntimeEvent
   >;
@@ -142,7 +142,7 @@ export async function executeAppRuntimeTools(params: {
   /** True only for an admitted concurrent batch whose every Task role is Explore. */
   subagentAutoReviewBatch?: boolean;
   /** Child-only live mode specialization; ordinary parent calls never set it. */
-  interactionModeOverride?: import('@kite/runtime-contract').InteractionMode;
+  interactionModeOverride?: import('@kite-ai/runtime-contract').InteractionMode;
   /**
    * A resumed child may use the exact already-acknowledged parent approval.
    * This is an in-memory execution hint bound to the parent receipt; it never
@@ -160,8 +160,8 @@ export async function executeAppRuntimeTools(params: {
   >;
   planArtifactStore?: PlanArtifactStore;
   capabilityArtifactStore?: CapabilityArtifactWriter;
-  workspaceFilesystemRuntime?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
-  sandboxPreparationArtifacts?: import('@kite/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
+  workspaceFilesystemRuntime?: import('@kite-ai/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
+  sandboxPreparationArtifacts?: import('@kite-ai/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
   /** Exact sandbox qualification fact captured by the App/Core coordinator. */
   sandboxAvailable?: boolean;
   /** Deterministic observation used only for persisted same-command expiry. */
@@ -171,8 +171,8 @@ export async function executeAppRuntimeTools(params: {
   authorizationFromLoopMode?: boolean;
   /** Explicit qualification seam; production omits it and uses the sole Local Provider composition. */
   subagentRuntimeFactory?: import('#app/bootstrap/runtime/subagent/pipeline-runtime').AppSubagentRuntimeFactory;
-  subagentContinuationArtifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
-  subagentTaskRequests?: import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
+  subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
+  subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   /** StateRuntimeStorage-backed acknowledgement required before an automatic provider replay. */
@@ -192,7 +192,7 @@ export async function executeAppRuntimeTools(params: {
   beforeAdmissionByToolCallId?: Readonly<
     Record<
       string,
-      () => Promise<import('@kite/runtime-host/kernel-adapter').DescendantBudgetReservation>
+      () => Promise<import('@kite-ai/runtime-host/kernel-adapter').DescendantBudgetReservation>
     >
   >;
   /** Child resource admission hook entered only after invocation acknowledgement. */
@@ -368,7 +368,7 @@ export async function executeAppRuntimeTools(params: {
       }
       try {
         const privateTask = params.subagentTaskRequests.read(
-          taskArtifact as import('@kite/runtime-spi').SubagentTaskRequestArtifact,
+          taskArtifact as import('@kite-ai/runtime-spi').SubagentTaskRequestArtifact,
           {
             parentModelInvocationId: call.modelInvocationId,
             parentToolCallId: toolCallId,
@@ -377,7 +377,8 @@ export async function executeAppRuntimeTools(params: {
         if (privateTask.role !== role) throw new Error('Subagent role is cross-bound.');
         privateSubagentTask = {
           source: 'private_artifact_v1',
-          requestArtifact: taskArtifact as import('@kite/runtime-spi').SubagentTaskRequestArtifact,
+          requestArtifact:
+            taskArtifact as import('@kite-ai/runtime-spi').SubagentTaskRequestArtifact,
           payload: {
             name: privateTask.name,
             subagent_type: privateTask.role,
@@ -1244,7 +1245,7 @@ export async function executeAppRuntimeTools(params: {
                           afterDispatch: async (settlement: {
                             readonly attempt: number;
                             readonly result?: Readonly<
-                              import('@kite/builtin-runtime').BuiltinOperationExecutionValue
+                              import('@kite-ai/builtin-runtime').BuiltinOperationExecutionValue
                             >;
                             readonly error?: unknown;
                           }) => {

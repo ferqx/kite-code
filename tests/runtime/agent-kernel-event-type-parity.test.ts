@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type {
   RuntimeEvent as CoreRuntimeEvent,
   KernelEvent as PackageKernelEvent,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 type Assert<T extends true> = T;
 type CoreToPackage = Assert<CoreRuntimeEvent extends PackageKernelEvent ? true : false>;

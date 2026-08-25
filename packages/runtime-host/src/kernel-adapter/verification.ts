@@ -1,4 +1,4 @@
-import { type AgentReducerFacts, verificationSchemaAdmissionDigest } from '@kite/agent-kernel';
+import { type AgentReducerFacts, verificationSchemaAdmissionDigest } from '@kite-ai/agent-kernel';
 
 export type RuntimeHostStateVerificationSchemaAdmissions =
   AgentReducerFacts['verificationSchemaAdmissions'];

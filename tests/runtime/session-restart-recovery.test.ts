@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { reconcileRuntimeSessionAfterRestart } from '#app/bootstrap/runtime/session-restart-recovery';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

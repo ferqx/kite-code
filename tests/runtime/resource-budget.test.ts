@@ -8,7 +8,7 @@ import {
   type ResourceUsage,
   reduceResourceBudgetState,
   tightenResourceBudget,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 
 function usage(input?: {
   toolInvocations?: number;

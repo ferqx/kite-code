@@ -7,9 +7,9 @@ import {
   createInitialAgentState,
   type KernelEvent,
   reduceAgentState,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
-import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
+import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 
 type JsonRecord = Record<string, any>;
 

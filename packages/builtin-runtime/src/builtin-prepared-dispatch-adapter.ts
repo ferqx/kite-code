@@ -8,7 +8,7 @@ import type {
   RuntimeJsonValue,
   ToolPipelineDispatch,
   ToolPipelinePreparedIdentityVerifier,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from './capability-binding';
 import {
   authorizeBuiltinWorkspaceFilesystemTerminalClone,

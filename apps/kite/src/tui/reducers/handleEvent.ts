@@ -1,8 +1,8 @@
 // ── TUI render-event handler ──
 
-import { contextCompactionTerminalNotice } from '@kite/builtin-runtime/model';
-import type * as Protocol from '@kite/runtime-contract';
-import type { ToolApprovalPayload } from '@kite/runtime-contract';
+import { contextCompactionTerminalNotice } from '@kite-ai/builtin-runtime/model';
+import type * as Protocol from '@kite-ai/runtime-contract';
+import type { ToolApprovalPayload } from '@kite-ai/runtime-contract';
 import {
   canonicalToolOutcome,
   projectTerminalOutcome,

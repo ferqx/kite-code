@@ -1,6 +1,6 @@
 import { homedir } from 'node:os';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import type { WorkspaceFilesystemProtectedBoundary } from '@kite/runtime-spi';
+import type { WorkspaceFilesystemProtectedBoundary } from '@kite-ai/runtime-spi';
 import {
   canonicalPathForComparison,
   isPathInsideWorkspace,

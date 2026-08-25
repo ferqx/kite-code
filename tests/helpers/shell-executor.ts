@@ -1,12 +1,12 @@
-import { createBuiltinShellExecutor, type ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostProcessExecutionPort } from '@kite/runtime-host';
+import { createBuiltinShellExecutor, type ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import { createRuntimeHostProcessExecutionPort } from '@kite-ai/runtime-host';
 
 /** Test-only bare Host shell. Production receives an acknowledged App executor. */
 export const shellTool: ShellExecutor = createBuiltinShellExecutor(
   createRuntimeHostProcessExecutionPort(),
 );
 
-export type { ShellExecutor, ShellInput, ShellResult } from '@kite/builtin-runtime/sandbox';
+export type { ShellExecutor, ShellInput, ShellResult } from '@kite-ai/builtin-runtime/sandbox';
 export {
   appendTimeoutMessage,
   assertInsideWorkspace,
@@ -15,5 +15,5 @@ export {
   DEFAULT_SHELL_TIMEOUT_MS,
   resolveShellTimeoutMs,
   timeoutMessage,
-} from '@kite/builtin-runtime/sandbox';
-export { readRuntimeHostProcessOutput as readWithProgress } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/sandbox';
+export { readRuntimeHostProcessOutput as readWithProgress } from '@kite-ai/runtime-host';

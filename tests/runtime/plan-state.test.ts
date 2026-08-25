@@ -1,14 +1,14 @@
 // ── Plan Mode v2 状态转换测试 / State transition tests ──
 // 验证 PlanningState 的完整生命周期流转
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
-import type { AgentPlan, PlanDocument, PlanningState } from '@kite/runtime-contract';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
+import type { AgentPlan, PlanDocument, PlanningState } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 

@@ -1,11 +1,11 @@
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import {
   createChatModel,
   createModelSecretDetector,
   type SupportedChatModel,
-} from '@kite/builtin-runtime/model';
-import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import type { SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/model';
+import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import type { SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
 import type { AgentConfig } from '#app/config/index';
 import { defaultCheckpointPath } from '#app/config/paths';
 import type { SandboxBackend } from '#app/sandbox/types';
@@ -17,7 +17,7 @@ export interface BuildRunTaskParams {
   workspace: string;
   config: AgentConfig;
   shellExecutor: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   signal: AbortSignal;
   thinkingLevel: string | null;
   skills: SkillManifest[];

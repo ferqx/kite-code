@@ -3,8 +3,8 @@ import type {
   RuntimeNotification,
   RuntimeQuery,
   RuntimeQueryResult,
-} from '@kite/runtime-contract';
-import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-contract';
+import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite-ai/runtime-spi';
 import type { RuntimeHostKernelInput } from '../kernel-adapter/input';
 import type { RuntimeHostExecutionServices } from '../lifecycle/effect-supervisor';
 

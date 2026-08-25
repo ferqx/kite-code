@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { McpServerConfig, McpServerState } from '@kite/builtin-runtime/mcp';
+import type { McpServerConfig, McpServerState } from '@kite-ai/builtin-runtime/mcp';
 import {
   DefaultMcpSupervisor,
   type McpConnectionManagerControlPlane,
-} from '@kite/builtin-runtime/mcp';
-import { createCapabilitySnapshot, descriptorRevision } from '@kite/builtin-runtime/skills';
-import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/mcp';
+import { createCapabilitySnapshot, descriptorRevision } from '@kite-ai/builtin-runtime/skills';
+import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite-ai/runtime-contract';
 import type { McpConfigCatalog, McpServerConfigEntry } from '#app/config/mcp-config';
 import type { McpConfigCommand, McpConfigRepository } from '#app/config/mcp-config-repository';
 

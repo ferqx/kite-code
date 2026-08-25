@@ -3,19 +3,19 @@ import {
   type BuiltinOperationExecutionValue,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   createCapabilitySnapshot,
   descriptorRevision,
   type SkillCatalogSnapshot,
   type SkillWorkflowContract,
-} from '@kite/builtin-runtime/skills';
-import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/skills';
+import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostCapabilityExecutionPortFromSnapshot,
   createRuntimeHostToolCallSnapshot,
-} from '@kite/runtime-host';
-import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host';
+import { runtimeHostStateCreateApprovalBindingDigest } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CapabilityExecutionInvocation,
   CapabilityExecutionPort,
@@ -26,8 +26,8 @@ import type {
   ToolPipelineReceiptCommit,
   ToolPipelineSuspensionCommit,
   WorkspaceFilesystemEditObservationQuery,
-} from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import { createAppToolPipelineComposition } from '#app/bootstrap/runtime/tool-pipeline-composition';
 import {
   createAppOrdinaryToolPipelineAttemptRuntime,

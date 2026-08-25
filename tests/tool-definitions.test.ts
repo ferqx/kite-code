@@ -12,16 +12,19 @@ import {
   TOOL_CONTRACTS,
   toolContractSection,
   WRITE_PLAN_CONTRACT,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   LocalWorkspaceFilesystemProvider,
   WorkspaceFilesystemGrantAuthority,
   workspaceFilesystemProtectedBoundaryDigest,
-} from '@kite/builtin-runtime/filesystem';
-import { exposedMcpToolName } from '@kite/builtin-runtime/mcp';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
-import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
-import type { CapabilityTurnContext, WorkspaceFilesystemObserveOperation } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { exposedMcpToolName } from '@kite-ai/builtin-runtime/mcp';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
+import type { CapabilityBinding, CapabilityDescriptor } from '@kite-ai/runtime-contract';
+import type {
+  CapabilityTurnContext,
+  WorkspaceFilesystemObserveOperation,
+} from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#app/config';
 import { getFeatureFlags } from '#app/config/features';
 import {

@@ -8,7 +8,7 @@
 ## 权威与依赖
 
 `McpSupervisor` 是 MCP 连接 control plane 的唯一 App 入口。RM-11 后 Manager/Supervisor、SDK client、认证、
-credential、transport 与目录投影实现由 `@kite/builtin-runtime/mcp` 物理拥有；App composition
+credential、transport 与目录投影实现由 `@kite-ai/builtin-runtime/mcp` 物理拥有；App composition
 只注入 `McpConfigRepository` 与通用 network boundary fetch。它立即发布 configured、disabled、pending、rejected、
 invalid 和 shadowed 条目，再通过内部唯一的 `McpConnectionManager`/SDK client 路径连接可连接 Server。单个 Server
 失败不阻塞 TUI mount 或其他 Server。

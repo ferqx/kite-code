@@ -9,9 +9,9 @@ import {
   decodeCurrentRuntimeEventJson,
   type RuntimeEvent,
   reduceAgentState,
-} from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
-import type { RuntimeSnapshotCodec } from '@kite/runtime-host/storage';
+} from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
+import type { RuntimeSnapshotCodec } from '@kite-ai/runtime-host/storage';
 import {
   createStateStorageForTest,
   withTestStateProjectIdentity,

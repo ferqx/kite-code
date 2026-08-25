@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { assertAgentStateInvariants } from '@kite/agent-kernel';
-import { aiMessage } from '@kite/builtin-runtime/model';
-import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
-import { committedResourceUsage } from '@kite/runtime-host/kernel-adapter';
+import { assertAgentStateInvariants } from '@kite-ai/agent-kernel';
+import { aiMessage } from '@kite-ai/builtin-runtime/model';
+import type { RuntimeState } from '@kite-ai/runtime-host/kernel-adapter';
+import { committedResourceUsage } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AuthorizedExecutionControl } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import { readOsProcessStartIdentity } from '../../scripts/runtime/process-start-identity';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

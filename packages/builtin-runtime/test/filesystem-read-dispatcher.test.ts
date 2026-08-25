@@ -9,14 +9,14 @@ import {
   createBuiltinToolPipelineCallbacks,
   digestCapabilityBindingValue,
   verifyBuiltinWorkspaceFilesystemTerminal,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   type BuiltinWorkspaceFilesystemRuntime,
   createBuiltinWorkspaceFilesystemReadDispatcher,
   LocalWorkspaceFilesystemProvider,
   WorkspaceFilesystemGrantAuthority,
-} from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import type {
   CapabilityToolKind,
   ExecutionReceipt,
@@ -29,8 +29,8 @@ import type {
   WorkspaceFilesystemIntentDraft,
   WorkspaceFilesystemPersistedIntent,
   WorkspaceFilesystemProvider,
-} from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 
 const FIXED_NOW = new Date('2026-08-22T00:00:00.000Z');
 const DYNAMIC_REVISION = 'd'.repeat(64);
@@ -510,7 +510,7 @@ describe('Builtin Workspace filesystem read dispatcher', () => {
       '../src/filesystem/observation-authority.ts',
     ]) {
       const source = await Bun.file(new URL(relative, import.meta.url)).text();
-      expect(source).not.toMatch(/@kite\/(?:runtime-host|agent-kernel)|#app|@\/core/u);
+      expect(source).not.toMatch(/@kite-ai\/(?:runtime-host|agent-kernel)|#app|@\/core/u);
       expect(source).not.toContain('createRuntimeModuleRegistry');
       expect(source).not.toContain('RuntimeStore');
     }

@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { PreparedSandboxExecution, SandboxPreparationArtifactRef } from '@kite/runtime-spi';
+import type { PreparedSandboxExecution, SandboxPreparationArtifactRef } from '@kite-ai/runtime-spi';
 import {
   canonicalModelJson,
   PrivateArtifactStorageError,

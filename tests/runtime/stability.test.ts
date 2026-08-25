@@ -2,9 +2,9 @@ import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { AgentInvariantError, assertAgentStateInvariants } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { AgentInvariantError, assertAgentStateInvariants } from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   StateHostSessionHarness as AgentKernel,
   restoreStateHostSessionHarness as restoreStateKernelCoordinator,

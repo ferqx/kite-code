@@ -1,5 +1,5 @@
-import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
-import type { CapabilityTurnContext } from '@kite/runtime-spi';
+import type { CapabilityBinding, CapabilityDescriptor } from '@kite-ai/runtime-contract';
+import type { CapabilityTurnContext } from '@kite-ai/runtime-spi';
 import { dynamicTool, jsonSchema, type ToolSet } from 'ai';
 import { digestCapabilityBindingValue } from '../capability-binding';
 import type { ExecutionCapabilitySurface } from '../sandbox';

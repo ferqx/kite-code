@@ -2,12 +2,12 @@ import {
   type BuiltinRuntimeToolPipelineCallbacks,
   type BuiltinToolCatalogProjection,
   createBuiltinRuntimeToolPipelineCallbacks,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   createRuntimeHostStateToolGovernance,
   type RuntimeHostStateToolGovernancePort,
-} from '@kite/runtime-host/kernel-adapter';
-import type { CapabilityTurnContext } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { CapabilityTurnContext } from '@kite-ai/runtime-spi';
 
 /**
  * The per-turn App projection of the one frozen Builtin catalog.

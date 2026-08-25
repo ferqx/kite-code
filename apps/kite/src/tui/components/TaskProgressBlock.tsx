@@ -1,4 +1,4 @@
-import type { AgentPlan, PlanStatus } from '@kite/runtime-contract';
+import type { AgentPlan, PlanStatus } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import { useTheme } from '#app/tui/theme';
 

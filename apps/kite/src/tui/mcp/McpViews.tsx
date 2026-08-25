@@ -1,4 +1,4 @@
-import type { McpServerControlState } from '@kite/builtin-runtime/mcp';
+import type { McpServerControlState } from '@kite-ai/builtin-runtime/mcp';
 import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import { projectMcpConfigPath, userMcpConfigPath } from '#app/config';

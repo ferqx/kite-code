@@ -16,7 +16,7 @@ import {
   type ToolRecoveryJournal,
   toolFailureInstanceId,
   toolInvocationFingerprint,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 export const runtimeHostStateAdvanceToolRecoveryResponse = advanceToolRecoveryResponse;
 export const runtimeHostStateAdmitRecoveryAttempt = admitRecoveryAttempt;

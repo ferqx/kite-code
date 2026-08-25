@@ -4,8 +4,8 @@ import {
   createBuiltinSandboxPreparation,
   SandboxExecutionGrantAuthority,
   type SandboxInvocationIdentity,
-} from '@kite/builtin-runtime/sandbox';
-import type { SandboxExecutionProvider } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/sandbox';
+import type { SandboxExecutionProvider } from '@kite-ai/runtime-spi';
 import { createBuiltinSandboxExecutionConsumerForTest } from '../helpers/sandbox-executor';
 
 const workspace = realpathSync.native(process.cwd());

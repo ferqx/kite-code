@@ -5,7 +5,7 @@ import {
   type RuntimeHostRetryableToolInvocationAuthority,
   type RuntimeHostSuspendedToolInvocationAuthority,
   type RuntimeHostToolPipelineAttemptCoordinator,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import type {
   CapabilityToolTerminalResult,
   PreparedToolInvocationIdentity,
@@ -13,7 +13,7 @@ import type {
   RuntimeJsonValue,
   ToolPipelineOutcomeDispatch,
   ToolPipelinePersistence,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 /**
  * The App-only composition of the Host attempt boundary and injected SPI

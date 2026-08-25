@@ -1,7 +1,7 @@
 // ── Skills 扫描 ──
 
-import { scanCompiledSkillManifests } from '@kite/builtin-runtime/skills';
-import type { SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
+import { scanCompiledSkillManifests } from '@kite-ai/builtin-runtime/skills';
+import type { SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
 import type { Dispatch } from 'react';
 import React from 'react';
 import { skillDirs } from '#app/config/paths';

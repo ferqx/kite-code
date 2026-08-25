@@ -13,12 +13,12 @@ import {
   type ModelInvocationPersistence,
   type ModelResponseSource,
   type ModelRuntimeConfig,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   MODEL_ATTEMPT_OUTCOME_SCHEMA_,
   type ModelAttemptOutcome,
   type PrivateArtifactRef,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const CONFIG: ModelRuntimeConfig = Object.freeze({
   apiKey: 'primary-effect-fixture-key',

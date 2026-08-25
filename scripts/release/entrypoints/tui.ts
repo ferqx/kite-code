@@ -1,10 +1,10 @@
-import { runTui } from '@kite/kite/tui';
+import { runTui } from '@kite-ai/kite/tui';
 import {
   isMcpStdioWrapperInvocation,
   MCP_STDIO_WRAPPER_ENTRYPOINT_,
   runMcpStdioChildRuntime,
   runPosixSupervisorChild,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import packageJson from '../../../package.json' with { type: 'json' };
 
 const supervisorMode = process.argv.indexOf('--kite-internal-posix-supervisor-v1');

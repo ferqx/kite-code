@@ -4,8 +4,8 @@ import {
   kernelCheckDoomLoopFingerprint,
   kernelToolDoomLoopFingerprint,
   kernelUpdateDoomLoopTracker,
-} from '@kite/agent-kernel';
-import type { PendingToolRequest } from '@kite/builtin-runtime';
+} from '@kite-ai/agent-kernel';
+import type { PendingToolRequest } from '@kite-ai/builtin-runtime';
 
 type DoomLoopTrackerEntry = KernelDoomLoopTrackerEntry;
 

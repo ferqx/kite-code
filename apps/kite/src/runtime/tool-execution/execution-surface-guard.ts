@@ -5,9 +5,9 @@ import {
   isPathInsideWorkspace,
   msys2ToWindowsPath,
   networkBoundaryPolicyFromExecutionBoundary,
-} from '@kite/builtin-runtime/sandbox';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import type { CapabilityPolicyRecovery } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/sandbox';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
+import type { CapabilityPolicyRecovery } from '@kite-ai/runtime-spi';
 import type { RuntimeEvent } from '#app/bootstrap/runtime/state-runtime';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';

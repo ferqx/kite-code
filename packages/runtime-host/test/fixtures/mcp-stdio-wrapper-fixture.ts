@@ -1,4 +1,4 @@
-import { canonicalControlFrameJson, RUNTIME_CONTROL_FRAME_SCHEMA_ } from '@kite/runtime-spi';
+import { canonicalControlFrameJson, RUNTIME_CONTROL_FRAME_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { createRuntimeControlFrame } from '../../src/kernel-adapter/control-frame';
 import {
   MCP_STDIO_CONTROL_DOMAIN_,

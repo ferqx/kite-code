@@ -19,7 +19,7 @@ import type {
   ArtifactPort,
   RuntimeEventMetadata,
   RuntimeSnapshotCodec,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 
 export const SQLITE_RUNTIME_STATE_SCHEMA_VERSION = 27;
 export const SQLITE_RUNTIME_STORE_SCHEMA_VERSION = 5;

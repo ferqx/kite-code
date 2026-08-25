@@ -3,19 +3,19 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createToolRecoveryJournal } from '@kite/agent-kernel';
-import { createCapabilityBinding } from '@kite/builtin-runtime';
-import { McpConnectionManager, McpProviderError } from '@kite/builtin-runtime/mcp';
-import { aiMessage, buildContextProjection } from '@kite/builtin-runtime/model';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { createToolRecoveryJournal } from '@kite-ai/agent-kernel';
+import { createCapabilityBinding } from '@kite-ai/builtin-runtime';
+import { McpConnectionManager, McpProviderError } from '@kite-ai/builtin-runtime/mcp';
+import { aiMessage, buildContextProjection } from '@kite-ai/builtin-runtime/model';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
 import type {
   BuiltinPreparedShellExecutionInput,
   ShellExecutor,
-} from '@kite/builtin-runtime/sandbox';
-import { SandboxPreparationArtifactStore } from '@kite/builtin-runtime/sandbox';
-import { descriptorRevision } from '@kite/builtin-runtime/skills';
-import { createDeterministicRuntimeIdSource } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { SandboxPreparationArtifactStore } from '@kite-ai/builtin-runtime/sandbox';
+import { descriptorRevision } from '@kite-ai/builtin-runtime/skills';
+import { createDeterministicRuntimeIdSource } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState as createRuntimeHostStateInitialStateRaw,
   getActivePlanning,
@@ -23,7 +23,7 @@ import {
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectRuntimeSchedulerFacts } from '#app/bootstrap/runtime/scheduler-facts';
 import { eventsForRunCancellation } from '#app/bootstrap/runtime/state-actions';
@@ -1134,7 +1134,7 @@ test('Kernel replay cannot complete a V2 plan while an external read awaits appr
     userId: 'u',
     workspace: '/workspace',
   });
-  const document: import('@kite/runtime-contract').PlanDocument = {
+  const document: import('@kite-ai/runtime-contract').PlanDocument = {
     planSchemaVersion: 2,
     planId: 'approval-plan',
     version: 2,

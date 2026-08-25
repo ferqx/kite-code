@@ -4,7 +4,7 @@ import {
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeNotification,
   type RuntimeSessionProjection,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import {
   NotificationProjector,
   RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT,

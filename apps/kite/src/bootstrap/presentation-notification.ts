@@ -1,4 +1,4 @@
-import { RUNTIME_NOTIFICATION_SCHEMA_, type RuntimeNotification } from '@kite/runtime-contract';
+import { RUNTIME_NOTIFICATION_SCHEMA_, type RuntimeNotification } from '@kite-ai/runtime-contract';
 import type { RuntimeEvent } from './runtime/state-runtime';
 
 interface RuntimeStreamIdentity {

@@ -1,4 +1,4 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   type BuiltinInternalOperationCatalogEntry,
   type BuiltinMechanismRecord,

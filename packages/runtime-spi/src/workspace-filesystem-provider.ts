@@ -1,7 +1,7 @@
 import type {
   FilesystemPreimageArtifactRef,
   WorkspaceFilesystemMutationReadyRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 
 /** Protocol-first contract for the governed Workspace filesystem seam (ADR-0111). */
 

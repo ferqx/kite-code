@@ -3,7 +3,7 @@ import {
   isValidToolApprovalBindingFacts,
   type ToolGovernanceInvocationFact,
   type ToolGovernancePolicyFact,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 export type StateToolGovernanceInvocationFact = ToolGovernanceInvocationFact;
 export type StateToolGovernancePolicyFact = ToolGovernancePolicyFact;

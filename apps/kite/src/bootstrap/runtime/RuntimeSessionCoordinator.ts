@@ -1,26 +1,26 @@
 import {
   assertRestoredCapabilityArtifactEvidence,
   type BuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   type ModelArtifactEvidenceAvailability,
   verifyCompletedModelInvocationEvidence,
   verifyPendingModelInvocationEvidence,
-} from '@kite/builtin-runtime/model';
-import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/model';
+import { canonicalPathForComparison } from '@kite-ai/builtin-runtime/sandbox';
 import {
   type RuntimeHostExecutionServices,
   resolveProjectIdentity,
   restoreRuntimeHostStateSession,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateSession,
   projectRuntimeHostStateRestartRecoveryEvents,
   runtimeHostStateRestartRecoveryCapabilityInvocationIds,
   type StateRuntimeSession,
   type StateRuntimeSessionEffectLease,
-} from '@kite/runtime-host/kernel-adapter';
-import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite-ai/runtime-spi';
 import type {
   InstalledKiteRuntimeComposition,
   InstalledKiteRuntimeCompositionFactory,
@@ -64,7 +64,7 @@ export interface RuntimeSessionCoordinatorIdentity {
   readonly recoveryIdentityKey: string;
   readonly sandboxAvailable?: boolean;
   readonly modelArtifactEvidence?: ModelArtifactEvidenceAvailability;
-  readonly capabilityArtifactEvidence?: import('@kite/builtin-runtime').CapabilityArtifactReader;
+  readonly capabilityArtifactEvidence?: import('@kite-ai/builtin-runtime').CapabilityArtifactReader;
 }
 
 export function projectRuntimeSessionLiveMode(
@@ -162,7 +162,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   #interactionModeRevision = 0;
   readonly #modelArtifactEvidence: ModelArtifactEvidenceAvailability | undefined;
   readonly #capabilityArtifactEvidence:
-    | import('@kite/builtin-runtime').CapabilityArtifactReader
+    | import('@kite-ai/builtin-runtime').CapabilityArtifactReader
     | undefined;
   readonly #services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
   readonly #capabilities: CapabilityExecutionPort;

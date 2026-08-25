@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { SerializedToolDescriptor } from '@kite/builtin-runtime/model';
+import type { SerializedToolDescriptor } from '@kite-ai/builtin-runtime/model';
 import {
   addToolSchemasToEstimate,
   estimateContextTokens,
   humanMessage,
   preflightModelContext,
   systemMessage,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 
 function makeDescriptor(
   name: string,

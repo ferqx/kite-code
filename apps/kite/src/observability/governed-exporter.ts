@@ -1,4 +1,4 @@
-import type { MetricExporter, MetricSample } from '@kite/runtime-host';
+import type { MetricExporter, MetricSample } from '@kite-ai/runtime-host';
 import { canonicalJsonBytes, sha256DomainSeparated } from '../release/canonical-json';
 
 export interface GovernedMetricTransport {

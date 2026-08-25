@@ -1,10 +1,10 @@
-import type { PendingToolRequest } from '@kite/builtin-runtime';
-import type { ShellApprovalGrant, ToolApprovalPayload } from '@kite/runtime-contract';
+import type { PendingToolRequest } from '@kite-ai/builtin-runtime';
+import type { ShellApprovalGrant, ToolApprovalPayload } from '@kite-ai/runtime-contract';
 import type {
   RuntimeHostStateApprovalCommandIdentity,
   StateToolGovernanceInvocationFact,
   StateToolGovernancePolicyFact,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 
 /** App-only presentation bridge; authorization identity remains Kernel-owned. */
 export function buildToolApproval(input: {

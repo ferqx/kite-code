@@ -5,7 +5,7 @@ import type {
   McpRuntimeProvider,
   McpServerKey,
   McpSupervisor,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import { TuiMcpController } from '@/app/tui/mcp/controller';
 
 function createSupervisor(): {

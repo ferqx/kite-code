@@ -1,6 +1,6 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { isMcpProviderError, mcpProviderFailurePolicyFacts } from '@kite/builtin-runtime/mcp';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import { isMcpProviderError, mcpProviderFailurePolicyFacts } from '@kite-ai/builtin-runtime/mcp';
 import { type ClassifiedFailure, classifyFailure } from './failures';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 

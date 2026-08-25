@@ -1,4 +1,4 @@
-import type { CapabilityDescriptor as RuntimeCapabilityDescriptor } from '@kite/runtime-contract';
+import type { CapabilityDescriptor as RuntimeCapabilityDescriptor } from '@kite-ai/runtime-contract';
 import type {
   CapabilityApproval,
   CapabilityAvailabilityDecision,
@@ -24,11 +24,11 @@ import type {
   ExecutionReceipt,
   RuntimeJsonValue,
   RuntimeModuleRegistry,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   CAPABILITY_EXECUTION_MECHANISMS_,
   capabilityBindingIdentityFailure,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { dynamicTool, jsonSchema, type ToolSet } from 'ai';
 import { digestCapabilityBindingValue } from './capability-binding';
 import { projectBuiltinExecutionTraits } from './catalog-contract';

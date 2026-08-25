@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { CapabilityBinding } from '@kite/runtime-spi';
+import type { CapabilityBinding } from '@kite-ai/runtime-spi';
 
 export interface CreateCapabilityBindingInput {
   readonly capabilityId: string;

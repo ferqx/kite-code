@@ -1,13 +1,13 @@
 import {
   type BuiltinShellExecutionResult,
   classifyBuiltinShellIntent,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import type {
   BuiltinPreparedShellExecutionInput,
   BuiltinPreparedShellExecutionResult,
   ShellExecutor,
   ShellResult,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 
 /**
  * App-local discovery key for the one Shell execution port selected during

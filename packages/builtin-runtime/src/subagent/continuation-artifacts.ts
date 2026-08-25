@@ -1,4 +1,7 @@
-import type { SubagentContinuationArtifactRef, SuspendedSubagentSnapshot } from '@kite/runtime-spi';
+import type {
+  SubagentContinuationArtifactRef,
+  SuspendedSubagentSnapshot,
+} from '@kite-ai/runtime-spi';
 import {
   canonicalModelJson,
   PrivateArtifactStorageError,

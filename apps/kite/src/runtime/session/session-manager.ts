@@ -1,5 +1,5 @@
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { ContextStatusSnapshot, SkillManifest } from '@kite/runtime-contract';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import type { ContextStatusSnapshot, SkillManifest } from '@kite-ai/runtime-contract';
 import type {
   RuntimeSessionCoordinator,
   RuntimeSessionCoordinatorIdentity,
@@ -297,7 +297,7 @@ export class SessionManager {
     threadId: string,
     customInstructions?: string,
     onProgress?: (
-      phase: import('@kite/runtime-contract').ContextCompactionProgressPhase | undefined,
+      phase: import('@kite-ai/runtime-contract').ContextCompactionProgressPhase | undefined,
     ) => void,
     onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
   ): Promise<ContextCompactionCommandResult> {
@@ -314,7 +314,7 @@ export class SessionManager {
     threadId: string,
     customInstructions?: string,
     onProgress?: (
-      phase: import('@kite/runtime-contract').ContextCompactionProgressPhase | undefined,
+      phase: import('@kite-ai/runtime-contract').ContextCompactionProgressPhase | undefined,
     ) => void,
     onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
     signal?: AbortSignal,

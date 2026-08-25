@@ -3,17 +3,17 @@ import {
   RUNTIME_COMMAND_SCHEMA_,
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeCommand,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import {
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionBridge,
   type RuntimeHostPreparedExecution,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   runtimeCommandFromKernelInput,
   translateRuntimeCommandToKernelInput,
-} from '@kite/runtime-host/kernel-adapter';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import { createKiteRuntimeExecutionModule } from '../src/bootstrap';
 import { KITE_RUNTIME_OPERATION_IDS_ } from '../src/bootstrap/runtime/KiteRuntimeExecutionModule';
 

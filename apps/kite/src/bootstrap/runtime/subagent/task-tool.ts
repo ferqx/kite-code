@@ -1,13 +1,13 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { SupportedChatModel } from '@kite/builtin-runtime/model';
-import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
-import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime/skills';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
+import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import { canonicalPathForComparison } from '@kite-ai/builtin-runtime/sandbox';
+import type { SkillManifest, SkillScanOptions } from '@kite-ai/builtin-runtime/skills';
 import type {
   SubagentLifecycleArtifactAccess,
   SubagentTaskArtifactAccess,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 import {
   type BuiltinChildRuntimeDriver,
   type BuiltinChildRuntimeResumeRegistration,
@@ -18,17 +18,17 @@ import {
   type LocalSubagentDriverResult,
   subagentDispatchIntentDigest,
   subagentTaskDigest,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 import {
   runtimeHostStateCreateToolRecoveryJournal as createToolRecoveryJournal,
   type DescendantResourceAdmission,
   DescendantResourceAdmissionError,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   SubagentDelegationGrant,
   SubagentHandle,
   SubagentResumeGrant,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#app/config/index';
 import { computeExecutionBoundaryDigest } from '#app/config/index';
 import type { ToolExecutionResult } from '../tool-result';
@@ -112,24 +112,24 @@ function createCoreSubagentResumeRegistration(input: {
 }
 
 export interface TaskToolDeps {
-  builtinToolCatalog?: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
+  builtinToolCatalog?: import('@kite-ai/builtin-runtime').BuiltinToolCatalogProjection;
   config: AgentConfig;
   workspace: string;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   allowedTools?: Set<string>;
   mcpBindings?: Array<{
-    binding: import('@kite/runtime-contract').CapabilityBinding;
-    descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
+    binding: import('@kite-ai/runtime-contract').CapabilityBinding;
+    descriptor: import('@kite-ai/runtime-contract').CapabilityDescriptor;
   }>;
-  workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
-  phase?: import('@kite/runtime-contract').AgentPhase;
+  workspaceAccess?: import('@kite-ai/runtime-contract').WorkspaceAccess;
+  phase?: import('@kite-ai/runtime-contract').AgentPhase;
   /** Current parent Runtime interaction mode, inherited by the child execution. */
-  interactionMode: import('@kite/runtime-contract').InteractionMode;
-  projectInstructions?: import('@kite/builtin-runtime/model').ProjectInstructionSnapshot;
+  interactionMode: import('@kite-ai/runtime-contract').InteractionMode;
+  projectInstructions?: import('@kite-ai/builtin-runtime/model').ProjectInstructionSnapshot;
   threadId?: string;
   /** Exact live parent Runtime recovery identity; child execution cannot synthesize one. */
   recoveryIdentityKey: string;
@@ -137,15 +137,15 @@ export interface TaskToolDeps {
   signal?: AbortSignal;
   model?: SupportedChatModel;
   descendantResourceAdmission?: DescendantResourceAdmission;
-  modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
-  modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
-    import('@kite/runtime-host/kernel-adapter').RuntimeState,
-    import('@kite/runtime-host').StateRuntimeEvent
+  modelEffectCoordinator?: import('@kite-ai/builtin-runtime/model').BuiltinModelEffectCoordinator;
+  modelInvocationPersistence?: import('@kite-ai/builtin-runtime/model').ModelInvocationPersistence<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeState,
+    import('@kite-ai/runtime-host').StateRuntimeEvent
   >;
   /** Outer Runtime lifecycle facts; distinct from ModelInvocationGateway persistence. */
   subagentLifecyclePersistence?: {
-    getState(): Readonly<import('@kite/runtime-host/kernel-adapter').RuntimeState>;
-    persistEvents(events: import('@kite/runtime-host').StateRuntimeEvent[]): Promise<boolean>;
+    getState(): Readonly<import('@kite-ai/runtime-host/kernel-adapter').RuntimeState>;
+    persistEvents(events: import('@kite-ai/runtime-host').StateRuntimeEvent[]): Promise<boolean>;
   };
   modelInvocationParentId?: string;
   modelInvocationParentToolCallId?: string;
@@ -156,7 +156,7 @@ export interface TaskToolDeps {
   toolDispatcher?: import('./types').SubAgentToolDispatcher;
   maxDepth?: number;
   /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0042 §4）。 */
-  recordFilePreimage?: import('@kite/runtime-host/storage').RuntimeHostFilePreimageRecorder;
+  recordFilePreimage?: import('@kite-ai/runtime-host/storage').RuntimeHostFilePreimageRecorder;
 }
 
 export interface SubagentInvocationIdentity {
@@ -755,8 +755,8 @@ function stableBudgetCeiling(
 async function recordSubagentDispatchIntent(
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrant
-    | import('@kite/runtime-spi').SubagentResumeGrant
+    | import('@kite-ai/runtime-spi').SubagentDelegationGrant
+    | import('@kite-ai/runtime-spi').SubagentResumeGrant
   >,
 ): Promise<string> {
   if (!deps.subagentLifecyclePersistence) {
@@ -797,14 +797,14 @@ async function recordSubagentHandleReady(
   composition: GovernedSubagentComposition,
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrant
-    | import('@kite/runtime-spi').SubagentResumeGrant
+    | import('@kite-ai/runtime-spi').SubagentDelegationGrant
+    | import('@kite-ai/runtime-spi').SubagentResumeGrant
   >,
-  handle: import('@kite/runtime-spi').SubagentHandle,
+  handle: import('@kite-ai/runtime-spi').SubagentHandle,
   dispatchIntentDigest: string,
 ): Promise<boolean> {
   if (!deps.subagentLifecyclePersistence) return false;
-  let handleArtifact: import('@kite/runtime-spi').SubagentHandleArtifactRef;
+  let handleArtifact: import('@kite-ai/runtime-spi').SubagentHandleArtifactRef;
   try {
     handleArtifact = composition.lifecycleArtifacts.write(handle, composition.grants.verifier());
   } catch {
@@ -836,11 +836,11 @@ async function recordSubagentHandleReady(
 async function recordSubagentObservation(
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrant
-    | import('@kite/runtime-spi').SubagentResumeGrant
+    | import('@kite-ai/runtime-spi').SubagentDelegationGrant
+    | import('@kite-ai/runtime-spi').SubagentResumeGrant
   >,
   dispatchIntentDigest: string,
-  status: import('@kite/runtime-spi').SubagentObservation['status'],
+  status: import('@kite-ai/runtime-spi').SubagentObservation['status'],
 ): Promise<boolean> {
   if (!deps.modelInvocationPersistence) return false;
   if (!deps.subagentLifecyclePersistence) return false;
@@ -869,8 +869,8 @@ async function recordSubagentObservation(
 async function finalizeUndispatchedSubagentIntent(
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrant
-    | import('@kite/runtime-spi').SubagentResumeGrant
+    | import('@kite-ai/runtime-spi').SubagentDelegationGrant
+    | import('@kite-ai/runtime-spi').SubagentResumeGrant
   >,
   dispatchIntentDigest: string,
 ): Promise<boolean> {
@@ -943,10 +943,10 @@ async function finalizeSubagentCleanup(
   composition: GovernedSubagentComposition,
   deps: TaskToolDeps,
   grant: Readonly<
-    | import('@kite/runtime-spi').SubagentDelegationGrant
-    | import('@kite/runtime-spi').SubagentResumeGrant
+    | import('@kite-ai/runtime-spi').SubagentDelegationGrant
+    | import('@kite-ai/runtime-spi').SubagentResumeGrant
   >,
-  handle: import('@kite/runtime-spi').SubagentHandle,
+  handle: import('@kite-ai/runtime-spi').SubagentHandle,
   dispatchIntentDigest: string,
 ): Promise<boolean> {
   if (!deps.modelInvocationPersistence) return false;
@@ -1115,7 +1115,7 @@ function toLocalSubagentDriverResult(
   };
 }
 
-function toPrivatePayload(result: SubAgentResult): import('@kite/runtime-spi').JsonObject {
+function toPrivatePayload(result: SubAgentResult): import('@kite-ai/runtime-spi').JsonObject {
   const payload = {
     ok: result.ok,
     summary: result.summary,
@@ -1145,7 +1145,7 @@ function toPrivatePayload(result: SubAgentResult): import('@kite/runtime-spi').J
         })
       : null,
   };
-  return JSON.parse(JSON.stringify(payload)) as import('@kite/runtime-spi').JsonObject;
+  return JSON.parse(JSON.stringify(payload)) as import('@kite-ai/runtime-spi').JsonObject;
 }
 
 async function governedRun(

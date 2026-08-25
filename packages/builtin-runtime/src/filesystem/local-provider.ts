@@ -33,8 +33,8 @@ import type {
   WorkspaceFilesystemProviderResult,
   WorkspaceFilesystemStatIdentity,
   WorkspaceFilesystemTargetIdentity,
-} from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 import {
   assertDescriptorRelativeMutationSupported,
   atomicReplaceInLockedWindowsDirectory,

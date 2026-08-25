@@ -51,12 +51,12 @@ describe('runtime workspace package gate', () => {
   test('rejects package cycles even when the new edge is declared', () => {
     const root = createFixture();
     updateJson(root, 'packages/runtime-contract/package.json', (value) => {
-      value.dependencies = { '@kite/runtime-spi': 'workspace:*' };
+      value.dependencies = { '@kite-ai/runtime-spi': 'workspace:*' };
     });
     updateText(
       root,
       'packages/runtime-contract/src/index.ts',
-      (value) => `import '@kite/runtime-spi';\n${value}`,
+      (value) => `import '@kite-ai/runtime-spi';\n${value}`,
     );
     expectViolation(root, 'PACKAGE_CYCLE');
   });
@@ -64,7 +64,7 @@ describe('runtime workspace package gate', () => {
   test('rejects unexported deep imports', () => {
     const root = createFixture();
     updateText(root, 'apps/kite/src/bootstrap.ts', (value) =>
-      value.replace("from '@kite/runtime-host'", "from '@kite/runtime-host/src/index.ts'"),
+      value.replace("from '@kite-ai/runtime-host'", "from '@kite-ai/runtime-host/src/index.ts'"),
     );
     expectViolation(root, 'DEEP_IMPORT_NOT_EXPORTED');
   });
@@ -80,9 +80,9 @@ describe('runtime workspace package gate', () => {
   });
 
   test.each([
-    ["import type {} from '@kite/builtin-runtime';", 'type-only'],
-    ["void import('@kite/builtin-runtime');", 'dynamic'],
-    ["require('@kite/builtin-runtime');", 'require'],
+    ["import type {} from '@kite-ai/builtin-runtime';", 'type-only'],
+    ["void import('@kite-ai/builtin-runtime');", 'dynamic'],
+    ["require('@kite-ai/builtin-runtime');", 'require'],
   ])('rejects forbidden %s imports', (statement) => {
     const root = createFixture();
     updateText(root, 'packages/runtime-host/src/index.ts', (value) => `${statement}\n${value}`);
@@ -92,12 +92,12 @@ describe('runtime workspace package gate', () => {
   test('reports forbidden dependencies through upstream package closures', () => {
     const root = createFixture();
     updateJson(root, 'packages/runtime-contract/package.json', (value) => {
-      value.dependencies = { '@kite/agent-kernel': 'workspace:*' };
+      value.dependencies = { '@kite-ai/agent-kernel': 'workspace:*' };
     });
     updateText(
       root,
       'packages/runtime-contract/src/index.ts',
-      (value) => `import '@kite/agent-kernel';\n${value}`,
+      (value) => `import '@kite-ai/agent-kernel';\n${value}`,
     );
     expectViolation(root, 'FORBIDDEN_TRANSITIVE_DEPENDENCY');
   });
@@ -252,7 +252,7 @@ describe('runtime workspace package gate', () => {
     const root = createFixture();
     updateJson(root, 'packages/builtin-runtime/package.json', (value) => {
       const dependencies = value.dependencies as Record<string, string>;
-      delete dependencies['@kite/runtime-spi'];
+      delete dependencies['@kite-ai/runtime-spi'];
     });
     expectViolation(root, 'UNDECLARED_INTERNAL_DEPENDENCY');
   });
@@ -264,9 +264,9 @@ describe('runtime workspace package gate', () => {
     writeFileSync(
       path,
       [
-        "import '@kite/runtime-host';",
-        "import '@kite/runtime-storage-sqlite';",
-        "import '@kite/builtin-runtime';",
+        "import '@kite-ai/runtime-host';",
+        "import '@kite-ai/runtime-storage-sqlite';",
+        "import '@kite-ai/builtin-runtime';",
         'export const alternate = true;',
       ].join('\n'),
     );
@@ -274,20 +274,20 @@ describe('runtime workspace package gate', () => {
   });
 
   test.each([
-    ["import { createRuntimeHost } from '@kite/runtime-host';", 'createRuntimeHost'],
+    ["import { createRuntimeHost } from '@kite-ai/runtime-host';", 'createRuntimeHost'],
     [
-      "import { createRuntimeModuleRegistry } from '@kite/runtime-spi';",
+      "import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';",
       'createRuntimeModuleRegistry',
     ],
     [
-      "import { createBuiltinRuntimeModules } from '@kite/builtin-runtime';",
+      "import { createBuiltinRuntimeModules } from '@kite-ai/builtin-runtime';",
       'createBuiltinRuntimeModules',
     ],
     [
-      "import { createSqliteRuntimeStorage } from '@kite/runtime-storage-sqlite';",
+      "import { createSqliteRuntimeStorage } from '@kite-ai/runtime-storage-sqlite';",
       'createSqliteRuntimeStorage',
     ],
-    ["import '@kite/runtime-storage-sqlite';", '*'],
+    ["import '@kite-ai/runtime-storage-sqlite';", '*'],
   ])('rejects non-bootstrap composition authority %s', (statement, _binding) => {
     const root = createFixture();
     const path = join(root, 'apps/kite/src/alternate-authority.ts');

@@ -3,24 +3,24 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { aiMessage } from '@kite/builtin-runtime/model';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { aiMessage } from '@kite-ai/builtin-runtime/model';
 import {
   type BuiltinPreparedShellExecutionInput,
   SandboxPreparationArtifactStore,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeCommand,
   type RuntimeCommandReceipt,
-} from '@kite/runtime-contract';
-import type { RuntimeHostCoordinatorPort, RuntimeHostExecutionBridge } from '@kite/runtime-host';
+} from '@kite-ai/runtime-contract';
+import type { RuntimeHostCoordinatorPort, RuntimeHostExecutionBridge } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
   translateRuntimeCommandToKernelInput,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createTuiRuntimeClient } from '../apps/kite/src/adapters/tui/runtime-bridge';
@@ -3282,7 +3282,7 @@ describe('SessionRuntime', () => {
           throw new Error('agent must not inspect the model after prepare was aborted');
         },
       },
-    ) as import('@kite/builtin-runtime/model').SupportedChatModel;
+    ) as import('@kite-ai/builtin-runtime/model').SupportedChatModel;
 
     const run = rt.runTask('must not start', {
       dispatch: (action) => actions.push(action),
@@ -3647,7 +3647,7 @@ describe('SessionRuntime', () => {
     const model = {
       model: streamingModel,
       capabilityMetadata: { streaming: true },
-    } as import('@kite/builtin-runtime/model').SupportedChatModel;
+    } as import('@kite-ai/builtin-runtime/model').SupportedChatModel;
     const deps: SessionDeps = {
       ...makeDeps(),
       config: {

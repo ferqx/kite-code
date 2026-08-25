@@ -3,13 +3,13 @@ import type {
   ListRuntimeLogEventsRequest,
   ListRuntimeLogSessionsRequest,
   RuntimeLogErrorCode,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 
 export {
   assertListRuntimeLogEventsRequest,
   assertListRuntimeLogSessionsRequest,
   RuntimeLogRequestValidationError,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 
 /**
  * Persistence contracts owned by Runtime Host.

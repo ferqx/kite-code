@@ -3,15 +3,15 @@ import type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
   McpProviderDirectoryStatus,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import {
   buildMcpInventory,
   type McpInventoryResult,
   type McpInventorySuccess,
   mcpProviderInventoryNextAction,
-} from '@kite/builtin-runtime/mcp';
-import { createCapabilitySnapshot } from '@kite/builtin-runtime/skills';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/mcp';
+import { createCapabilitySnapshot } from '@kite-ai/builtin-runtime/skills';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 
 // ── helpers ──
 
@@ -72,7 +72,7 @@ function providerEntry(opts: {
     ...(opts.diagnosticCode
       ? {
           diagnosticCode:
-            opts.diagnosticCode as import('@kite/builtin-runtime/mcp').McpDiagnosticCode,
+            opts.diagnosticCode as import('@kite-ai/builtin-runtime/mcp').McpDiagnosticCode,
         }
       : {}),
   };

@@ -1,9 +1,9 @@
 import {
   type BuiltinCapabilityTurnContext,
   createBuiltinCapabilityTurnContext,
-} from '@kite/builtin-runtime';
-import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
-import type { CapabilityTurnContext } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime';
+import type { SkillCatalogSnapshot } from '@kite-ai/builtin-runtime/skills';
+import type { CapabilityTurnContext } from '@kite-ai/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
 
@@ -17,7 +17,7 @@ export interface AppToolTurnContextInput {
   readonly modelMessageId?: string;
   readonly toolCallId?: string;
   readonly phase?: CapabilityTurnContext['phase'];
-  readonly interactionMode?: import('@kite/runtime-contract').InteractionMode;
+  readonly interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
   readonly workspaceTrust?: CapabilityTurnContext['workspaceTrust'];
   readonly hasTaskAdapter?: boolean;
   readonly hasGitBroker?: boolean;
@@ -27,7 +27,7 @@ export interface AppToolTurnContextInput {
 }
 
 export type AppToolTurnContext = BuiltinCapabilityTurnContext & {
-  readonly interactionMode?: import('@kite/runtime-contract').InteractionMode;
+  readonly interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
 };
 
 /** App projects ambient configuration into immutable Builtin turn facts once. */

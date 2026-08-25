@@ -4,7 +4,7 @@ import {
   isMcpStdioWrapperInvocation,
   MCP_STDIO_WRAPPER_ENTRYPOINT_,
   runMcpStdioChildRuntime,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 
 /** App composition of the one Host-owned authenticated MCP stdio process mechanism. */
 export function createInstalledMcpStdioProcessPort() {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ToolApprovalPayload } from '@kite/runtime-contract';
+import type { ToolApprovalPayload } from '@kite-ai/runtime-contract';
 import {
   type CapabilityToolTerminalResult,
   type DynamicMcpPreparedToolInvocationIdentity,
@@ -36,7 +36,7 @@ import {
   type ToolPipelineTaskSubagentSuspension,
   type ToolPipelineTaskSubagentSuspensionEvent,
   type ToolRecordedAttemptIdentity,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 function dynamicResolvedTarget(): DynamicMcpToolTarget {
   return {
@@ -1253,9 +1253,9 @@ describe('runtime SPI tool pipeline contract', () => {
   test('does not import package authorities or app aliases', async () => {
     const source = await Bun.file(new URL('../src/tool-pipeline.ts', import.meta.url)).text();
     for (const forbidden of [
-      '@kite/runtime-host',
-      '@kite/agent-kernel',
-      '@kite/builtin-runtime',
+      '@kite-ai/runtime-host',
+      '@kite-ai/agent-kernel',
+      '@kite-ai/builtin-runtime',
       '#app',
       '@/core',
     ]) {

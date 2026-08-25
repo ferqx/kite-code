@@ -7,7 +7,7 @@ import {
   type StateRuntimeFailureMode as RuntimeFailureMode,
   type RuntimeState,
   runtimeHostStateResolveFailureMode as resolveFailureMode,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectTerminalOutcome } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';

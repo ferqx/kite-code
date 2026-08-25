@@ -1,4 +1,4 @@
-import type { SubagentRole } from '@kite/runtime-spi';
+import type { SubagentRole } from '@kite-ai/runtime-spi';
 import type { SupportedChatModel } from '../model/factory';
 
 export interface BuiltinSubagentRoleConfig {

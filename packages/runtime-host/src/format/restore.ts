@@ -8,7 +8,7 @@ import {
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   reduce,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import type { RuntimeRestoreBoundary, SessionStore, StoredRuntimeEvent } from '../storage';
 
 export type StateRuntimeRestoreSource = 'fresh' | 'restored' | 'incompatible' | 'corrupted';

@@ -3,7 +3,7 @@ import {
   TOOL_PIPELINE_STAGE_SCHEMA_,
   type ToolArgumentOrigin,
   type ToolCallSnapshotResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const MAX_IDENTITY_LENGTH_ = 256;
 const SNAPSHOT_KEYS_ = Object.freeze([

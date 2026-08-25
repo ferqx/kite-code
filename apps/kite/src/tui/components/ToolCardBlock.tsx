@@ -1,4 +1,4 @@
-import type { UserInputResult } from '@kite/runtime-contract';
+import type { UserInputResult } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import SyntaxHighlight from 'ink-syntax-highlight';
 import React, { memo, useEffect, useRef, useState } from 'react';

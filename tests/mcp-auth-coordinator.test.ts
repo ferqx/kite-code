@@ -6,7 +6,7 @@ import {
   DefaultMcpAuthCoordinator,
   type McpAuthTarget,
   MemoryMcpCredentialStore,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 
 describe('MCP auth coordinator', () => {

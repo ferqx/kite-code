@@ -3,7 +3,7 @@ import {
   RUNTIME_CONTROL_FRAME_SCHEMA_,
   type RuntimeControlFrame,
   type RuntimeControlFrameInput,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 /** Create a frozen process-control frame. The inherited pipe/socket is the peer boundary. */
 export function createRuntimeControlFrame<T>(

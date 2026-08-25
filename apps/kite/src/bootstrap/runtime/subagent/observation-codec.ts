@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { runtimeHostStateNormalizeToolRecoveryJournal } from '@kite/runtime-host/kernel-adapter';
+import { runtimeHostStateNormalizeToolRecoveryJournal } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   SubagentHandle,
   SubagentObservation,
   SuspendedSubagentSnapshot,
-} from '@kite/runtime-spi';
-import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { deserializeSubagentContinuation } from './continuation-codec';
 import type { SubAgentResult } from './types';
 

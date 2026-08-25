@@ -11,7 +11,7 @@ import type {
   CapabilityRiskClass,
   CapabilitySandboxScopeFact,
   RuntimeJsonValue,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from './capability-binding';
 import {
   isDestructiveShellCommand,

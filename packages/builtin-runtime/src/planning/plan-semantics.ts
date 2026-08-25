@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AgentPlan, PlanDocument, PlanStep } from '@kite/runtime-contract';
+import type { AgentPlan, PlanDocument, PlanStep } from '@kite-ai/runtime-contract';
 import { isPlanDocument } from './plan-document';
 import { computePlanStructuralDigest } from './plan-hashes';
 

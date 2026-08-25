@@ -11,20 +11,20 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { BUILTIN_WRITE_PLAN_SCHEMA_ } from '@kite/builtin-runtime';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { BUILTIN_WRITE_PLAN_SCHEMA_ } from '@kite-ai/builtin-runtime';
 import {
   computePlanStructuralDigest,
   PlanArtifactError,
   PlanArtifactStore,
   planArtifactPath,
-} from '@kite/builtin-runtime/planning';
-import type { PlanDocument } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/planning';
+import type { PlanDocument } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeTestRuntimeTools } from '../helpers/runtime-model';
 

@@ -1,4 +1,4 @@
-import type { AgentPlan, PlanArtifactRef } from '@kite/runtime-contract';
+import type { AgentPlan, PlanArtifactRef } from '@kite-ai/runtime-contract';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { type MutableRefObject, useState } from 'react';

@@ -5,7 +5,7 @@ import {
   kernelCheckDoomLoopFingerprint,
   kernelToolDoomLoopFingerprint,
   kernelUpdateDoomLoopTracker,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 export type StateDoomLoopCheck = KernelDoomLoopCheck;
 export type StateDoomLoopRequest = KernelDoomLoopRequest;

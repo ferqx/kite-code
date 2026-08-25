@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createBuiltinSubagentModelContext } from '@kite/builtin-runtime/subagent';
+import { createBuiltinSubagentModelContext } from '@kite-ai/builtin-runtime/subagent';
 
 describe('Builtin subagent model context', () => {
   test('owns the canonical Workspace/CWD and code-role Skill disclosure', () => {

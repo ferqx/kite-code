@@ -1,4 +1,4 @@
-import type { ExecutionBackendCapabilities, SandboxExecutionBackend } from '@kite/runtime-spi';
+import type { ExecutionBackendCapabilities, SandboxExecutionBackend } from '@kite-ai/runtime-spi';
 
 /** Conservative, accepted evidence projection. Discovery never upgrades an unsupported dimension. */
 export function sandboxBackendCapabilities(

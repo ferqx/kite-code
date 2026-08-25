@@ -6,15 +6,15 @@ import {
   createCapabilityBinding,
   digestCapabilityBindingValue,
   pendingToolRequestFromValidatedInvocation,
-} from '@kite/builtin-runtime';
-import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
-import { createRuntimeHostStateToolGovernance } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime';
+import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite-ai/runtime-contract';
+import { createRuntimeHostStateToolGovernance } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   type ClassifiedInvocation,
   createRuntimeModuleRegistry,
   type ToolCallSnapshot,
   type ToolPipelineResolutionContext,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const STAGE_SCHEMA_ = 'kite.tool-pipeline-stage.v1' as const;
 const TURN_ID = 'turn-governance-integration';

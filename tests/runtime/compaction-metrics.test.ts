@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createCompactionMetrics } from '@kite/builtin-runtime/model';
+import { createCompactionMetrics } from '@kite-ai/builtin-runtime/model';
 
 const compactionMetrics = createCompactionMetrics();
 

@@ -1,4 +1,4 @@
-import type { SubagentDelegationGrant, SubagentResumeGrant } from '@kite/runtime-spi';
+import type { SubagentDelegationGrant, SubagentResumeGrant } from '@kite-ai/runtime-spi';
 import type { LocalSubagentDriverResult, LocalSubagentLifecycleDriver } from './local-provider';
 
 const DEFAULT_PENDING_REGISTRATION_TTL_MS = 5 * 60_000;

@@ -1,4 +1,4 @@
-import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite/runtime-contract';
+import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite-ai/runtime-contract';
 import type {
   CapabilityApproval,
   CapabilityApprovalSummaryProjector,

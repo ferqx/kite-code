@@ -13,7 +13,7 @@ export {
   secureWindowsOwnerOnlyPath,
   unlinkSecureFileIfIdentity,
   writeSessionLogJsonAtomically,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 export {
   ActiveSessionLease,
   type ActiveSessionLeaseOptions,

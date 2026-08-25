@@ -7,7 +7,7 @@ import {
   type TerminalReasonCode,
   type ToolParseFailureCode,
   terminalReasonForRuntimeFailure,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 /** Generic Host bindings over the deterministic State failure taxonomy. */
 export type StateClassifiedFailure = ClassifiedFailure;

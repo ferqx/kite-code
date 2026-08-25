@@ -1,7 +1,7 @@
 import type {
   SandboxExecutionProviderFailureCode,
   SandboxPreparationLifecycle,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { NetworkDecisionRecorder } from './network-enforcer';
 import type { NetworkBoundaryPolicy } from './network-policy';
 import type { ShellFilesystemMode, ShellNetworkMode } from './types';

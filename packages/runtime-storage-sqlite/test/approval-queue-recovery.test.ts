@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
+import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 
 import { createSqliteRuntimeStorage } from '../src/index';
 

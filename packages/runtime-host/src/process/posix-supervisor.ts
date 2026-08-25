@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
-import type { PreparedSandboxExecution, RuntimeControlFrame } from '@kite/runtime-spi';
+import type { PreparedSandboxExecution, RuntimeControlFrame } from '@kite-ai/runtime-spi';
 import {
   createRuntimeControlFrame,
   verifyRuntimeControlFrame,

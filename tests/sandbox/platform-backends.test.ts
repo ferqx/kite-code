@@ -3,7 +3,7 @@ import {
   BUBBLEWRAP_USABILITY_PROBE_ARGS,
   selectSandboxBackend,
   usableBubblewrapPath,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 
 describe('platform backend exclusion projection', () => {
   test.each([

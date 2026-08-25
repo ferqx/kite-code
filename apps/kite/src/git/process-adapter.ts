@@ -2,7 +2,7 @@ import type {
   GitProcessAdapter,
   GitProcessRequest,
   GitProcessResult,
-} from '@kite/builtin-runtime/git';
+} from '@kite-ai/builtin-runtime/git';
 
 async function consume(
   stream: ReadableStream<Uint8Array> | null,

@@ -1,7 +1,7 @@
-import type { AgentPlan, PlanArtifactRef, PlanDocument } from '@kite/runtime-contract';
-import { restoreRuntimeHostStateSession } from '@kite/runtime-host';
-import { runtimeHostStateActivePlanning as getActivePlanning } from '@kite/runtime-host/kernel-adapter';
-import type { RuntimeSessionInfo } from '@kite/runtime-host/storage';
+import type { AgentPlan, PlanArtifactRef, PlanDocument } from '@kite-ai/runtime-contract';
+import { restoreRuntimeHostStateSession } from '@kite-ai/runtime-host';
+import { runtimeHostStateActivePlanning as getActivePlanning } from '@kite-ai/runtime-host/kernel-adapter';
+import type { RuntimeSessionInfo } from '@kite-ai/runtime-host/storage';
 import type { RuntimeEvent, RuntimeState, StateRuntimeStorage } from './state-runtime';
 
 export type OpenStateRuntimeStorage = (threadId?: string) => StateRuntimeStorage;

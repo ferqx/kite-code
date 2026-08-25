@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectRuntimeSchedulerFacts } from '#app/bootstrap/runtime/scheduler-facts';
 import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';

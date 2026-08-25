@@ -10,7 +10,7 @@ import type {
   ToolPipelineOutcomeDispatch,
   ToolPipelinePersistence,
   ToolPipelinePreparedIdentityVerifier,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   type AppToolPipelineAttemptComposition,
   createAppToolPipelineAttemptComposition,

@@ -5,20 +5,20 @@ import {
   projectStateRestartRecoveryEvents,
   type RuntimeEffect,
   stateRestartRecoveryCapabilityInvocationIds,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import {
   assertRestoredCapabilityArtifactEvidence,
   type CapabilityArtifactReader,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   type ModelArtifactEvidenceAvailability,
   verifyCompletedModelInvocationEvidence,
   verifyPendingModelInvocationEvidence,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   type RuntimeHostExecutionServices,
   restoreRuntimeHostStateSession,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateSession,
   isStateRuntimeEffectDeferred,
@@ -26,11 +26,11 @@ import {
   type StateRuntimeEffectPersistenceAcknowledgement,
   type StateRuntimeSession,
   type StateRuntimeSessionEffectLease,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   RuntimeEffectLeaseExpectation,
   RuntimeRestoreBoundary,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 import {
   eventsForRuntimeAction,
   type RuntimeActionResult,

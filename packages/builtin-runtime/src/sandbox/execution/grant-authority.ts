@@ -6,7 +6,7 @@ import type {
   SandboxPreparation,
   SandboxPreparationGrant,
   SandboxPreparationResourceSemantics,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from '../../capability-binding';
 
 export interface SandboxPreparationIntentRecord {

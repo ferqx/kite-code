@@ -6,10 +6,10 @@ import type {
   McpProviderDirectorySnapshot,
   McpResourceDirectorySnapshot,
   McpRuntimeProvider,
-} from '@kite/builtin-runtime/mcp';
-import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
-import type { CapabilitySnapshot } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/mcp';
+import type { SkillCatalogSnapshot } from '@kite-ai/builtin-runtime/skills';
+import type { CapabilitySnapshot } from '@kite-ai/runtime-contract';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { createPreparedAppShellExecutor } from '#app/sandbox/composition';
 import {
   executeTestRuntimeTools,

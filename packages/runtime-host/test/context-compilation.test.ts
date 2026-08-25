@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHost } from '@kite/runtime-host';
+import { createRuntimeHost } from '@kite-ai/runtime-host';
 import {
   type ContextCompilerPort,
   type ContextFragmentCandidate,
   type ContextSourceRequest,
   defineRuntimeModule,
   type RuntimeModule,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { TestExecutionBridge, testRuntimeModules, testStorage } from './helpers';
 
 function contextModule(

@@ -6,13 +6,13 @@ import type {
   ProductionExecutionEntrypoint,
   ProductionExecutionQualification,
   ProductionExecutionQualificationRegistry,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   discoverSandboxBackendCandidate,
   type ExecutionEnvironmentIdentity,
   readExecutionEnvironmentIdentity,
-} from '@kite/builtin-runtime/sandbox';
-import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { BROKERED_GIT_FEATURE_REVISION_ } from '@kite-ai/runtime-spi';
 import { z } from 'zod';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);

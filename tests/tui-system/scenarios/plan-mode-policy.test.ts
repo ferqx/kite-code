@@ -13,7 +13,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { isSandboxAvailable } from '@kite/builtin-runtime/sandbox';
+import { isSandboxAvailable } from '@kite-ai/builtin-runtime/sandbox';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';

@@ -1,5 +1,5 @@
 {
-  "name": "@kite/runtime-contract",
+  "name": "@kite-ai/runtime-contract",
   "version": "0.0.0",
   "private": true,
   "type": "module",

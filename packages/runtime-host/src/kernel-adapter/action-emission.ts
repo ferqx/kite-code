@@ -1,4 +1,4 @@
-import type { KernelEvent as RuntimeEvent } from '@kite/agent-kernel';
+import type { KernelEvent as RuntimeEvent } from '@kite-ai/agent-kernel';
 
 /**
  * Stable boundary between a Runtime domain command and its model-facing

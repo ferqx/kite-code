@@ -35,7 +35,7 @@ inventory/resource 和动态 Tool 继续 fail closed。local stdio 在 native co
 
 RM-11 后，`list_mcp_tools`、`list_mcp_resources`、`read_mcp_resource` 与动态 MCP Tool 的 schema 由
 Builtin frozen catalog 或独立 dynamic-MCP descriptor route 暴露；concrete execution 与 inventory/resource semantics
-只由 `@kite/builtin-runtime` module 拥有。App Tool Pipeline 与 `tool_search` 一样只保留调用所需的
+只由 `@kite-ai/builtin-runtime` module 拥有。App Tool Pipeline 与 `tool_search` 一样只保留调用所需的
 availability/Policy/result projection，不再拥有另一份 schema/effect authority。Controller
 在当前调用点读取一次 MCP/Skill catalog 与脱敏 Provider Directory，并把 `tool_search` descriptor 确定性排序、
 复制、冻结到 `ExecutionRequest.facts`；Provider execution context 不含 `providerFacts/providerServices` 旁路。
@@ -58,8 +58,8 @@ environment 的受限 MCP mechanism。搜索与 inventory 不调用或等待 Pro
 
 搜索只负责发现，不负责授权。MCP 调用仍必须携带 Runtime-issued binding，并继续经过 schema、policy、approval、execution record 和 verification；Skill activation 在该 flag 开启时必须匹配本轮 disclosure，猜测 Skill ID 会被拒绝。关闭 flag 只恢复现有的治理型全量 binding 路径，不恢复旧 MCP adapter 或 Prompt Skill 正文注入。
 
-RM-09 起，turn-scoped binding 的精确 DTO 位于私有 `@kite/runtime-spi`，唯一构造者是
-`@kite/builtin-runtime#createCapabilityBinding`。它保留既有 `bindingId/schemaDigest` canonical SHA-256 字节和
+RM-09 起，turn-scoped binding 的精确 DTO 位于私有 `@kite-ai/runtime-spi`，唯一构造者是
+`@kite-ai/builtin-runtime#createCapabilityBinding`。它保留既有 `bindingId/schemaDigest` canonical SHA-256 字节和
 Runtime State 字段；不读取 Policy、approval 或 Provider。RM-10 的 Host execution port 只从启动时冻结的 Registry
 snapshot 核对 capability/provider/executor/revision/schema、request、grant、attempt 与 receipt identity，并对
 `invocationId + attemptId` 做单次 claim；它不解释搜索 facts，也不签发额外授权。`tool_search` 必须先经过既有

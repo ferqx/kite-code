@@ -1,5 +1,5 @@
-import type { CapabilityApproval } from '@kite/runtime-contract';
-import type { VerificationMode } from '@kite/runtime-spi';
+import type { CapabilityApproval } from '@kite-ai/runtime-contract';
+import type { VerificationMode } from '@kite-ai/runtime-spi';
 import { z } from 'zod';
 import {
   type CapabilityReleaseState,

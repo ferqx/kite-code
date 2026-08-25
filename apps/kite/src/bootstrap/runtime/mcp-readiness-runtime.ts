@@ -1,9 +1,12 @@
-import { BuiltinMcpExecutionUnknownError, type BuiltinMcpRuntimePort } from '@kite/builtin-runtime';
+import {
+  BuiltinMcpExecutionUnknownError,
+  type BuiltinMcpRuntimePort,
+} from '@kite-ai/builtin-runtime';
 import {
   McpProviderError,
   type McpProviderFailureKind,
   type McpProviderRecoveryAction,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import {
   type ProviderReadinessCoordinator,
   type ProviderReadinessPersistence,

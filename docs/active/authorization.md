@@ -196,7 +196,7 @@ request，Ctrl+C 才提交 whole-turn cancel。每个新的 canonical interactio
 deferred slot 或 local acknowledgment。
 
 auto-review 的 Model/Prompt/response parsing 属于 Builtin reviewer；是否接受 reviewer 结果则由
-`@kite/agent-kernel#decideAutoReview` 对 JSON-safe facts 纯确定性裁决。reviewer 只接受 operation-bound 的
+`@kite-ai/agent-kernel#decideAutoReview` 对 JSON-safe facts 纯确定性裁决。reviewer 只接受 operation-bound 的
 `approve_once|reject|ask_user`，不得签发 `same_command` 或 Full；技术失败、未知字段、矛盾 failure facts 或缺失 grant
 升级真人审批。Kernel 不生成 UUID、时间或事件；Runtime State adapter
 只为 Kernel 的 `request_user_approval` 决策补 interaction identity 并投影现有事件，App 不能重写一份升级规则。
@@ -228,7 +228,7 @@ Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling
 TUI 入口通过 `buildRunAgentParams` → `RuntimeSessionCoordinator` 传递 live `interactionMode`；Full 不再映射为第二个
 authorization mode。Kernel 在线初始化/restore 只接受 State 27/SAQ epoch 的 mode、queue、grants 与 revision；已知历史会话
 必须先经纯迁移清空 queue/grant/receipt/effect 并把旧 Full 降级，未知 source 不进入 Kernel。production transition decision
-由 `@kite/agent-kernel` 拥有，App coordinator 不复制该 decision。
+由 `@kite-ai/agent-kernel` 拥有，App coordinator 不复制该 decision。
 
 当 Runtime 正在回复时，`/permissions` 的选择同样必须立即生效：`SessionRuntime` 通过 live
 Kernel control 持久化 `interaction_mode.changed`。事件只能来自显式用户选择，并带 `source: user` 与

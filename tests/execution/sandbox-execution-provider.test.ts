@@ -20,8 +20,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { canonicalModelJson } from '@kite/builtin-runtime/model';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { canonicalModelJson } from '@kite-ai/builtin-runtime/model';
 import {
   cleanupPosixSandboxRuntimeRootsNoSpawn,
   cleanupWindowsSandboxRuntimeDirNoSpawn,
@@ -35,8 +35,8 @@ import {
   sandboxPreparationIntentDigest,
   sandboxRuntimeDirForPreparation,
   sandboxRuntimeRootsForPreparation,
-} from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   NonDynamicOperationId,
   PreparedSandboxExecution,
@@ -44,7 +44,7 @@ import type {
   SandboxPreparation,
   SandboxPreparationLifecycle,
   ToolPipelineAttemptAcknowledgement,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { createAppToolPipelineSandboxLifecycle } from '#app/bootstrap/runtime/tool-pipeline-sandbox-lifecycle';
 import {
   reconcilePendingSandboxPreparationsAfterCrash,

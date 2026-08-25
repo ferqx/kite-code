@@ -19,9 +19,9 @@ Accepted RFC revision SHA-256：`a8fd3f35b5ca2331ff800c5a71f8a7907da5f6c5d11778b
 
 RMV1-16 已完成 Runtime 的最终物理闭合：
 
-- `@kite/agent-kernel` 以 11 个编译期固定 domain 组合纯确定性 State 25 reducer，不持有 I/O、Store、Model、Prompt、ToolSet 或 Provider authority；
-- `@kite/runtime-host` 只持有通用 Session/mailbox、transaction、effect lifecycle、prepared authority、process supervision 与 recovery 机制；
-- `@kite/runtime-spi` 是私有、无行为的编译边界，`@kite/builtin-runtime` 唯一拥有具体 Context/Prompt/Skill/Model/Capability 语义；
+- `@kite-ai/agent-kernel` 以 11 个编译期固定 domain 组合纯确定性 State 25 reducer，不持有 I/O、Store、Model、Prompt、ToolSet 或 Provider authority；
+- `@kite-ai/runtime-host` 只持有通用 Session/mailbox、transaction、effect lifecycle、prepared authority、process supervision 与 recovery 机制；
+- `@kite-ai/runtime-spi` 是私有、无行为的编译边界，`@kite-ai/builtin-runtime` 唯一拥有具体 Context/Prompt/Skill/Model/Capability 语义；
 - 六个 Builtin module 的冻结 registry snapshot 精确拥有 29 个 operation，其中 20 个 model-visible、9 个 internal；App bootstrap 是唯一 concrete composition root；
 - Tool Pipeline、Model、Compaction、Reviewer、Verification、Subagent、Skill、MCP、Filesystem、Shell/Sandbox 的 production caller 均已切到 package owner；dynamic MCP 与 `ask_user` 保持各自独立边界；
 - Legacy Runtime access/module/session handlers、central executor/controller/registry、root compatibility shim、App 到旧 Core 的 production import 和 architecture exception 已删除；没有 fallback、双写、双 handler 或第二 registry。

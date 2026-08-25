@@ -38,7 +38,7 @@ import {
   toolFailureInstanceId,
   toolInvocationFingerprint,
   verificationSchemaAdmissionDigest,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const INITIAL_STATE_FIXTURE_JSON =

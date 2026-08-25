@@ -7,7 +7,7 @@ import type {
   ExecutionCapabilitySurface,
   ShellExecutor,
   ShellInput,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   composeAppSandboxExecutor,
   createPreparedAppShellExecutor,

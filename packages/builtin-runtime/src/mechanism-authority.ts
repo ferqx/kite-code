@@ -1,4 +1,4 @@
-import type { CapabilityExecutionMechanism } from '@kite/runtime-spi';
+import type { CapabilityExecutionMechanism } from '@kite-ai/runtime-spi';
 
 /**
  * The mechanism map is an invocation authority, not an open-ended bag of

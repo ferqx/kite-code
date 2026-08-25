@@ -9,8 +9,8 @@ import type {
   SubagentProviderResult,
   SubagentResumeGrant,
   SubagentTaskArtifact,
-} from '@kite/runtime-spi';
-import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { SubagentGrantError, type SubagentGrantVerifier } from './grant-authority';
 
 const DEFAULT_TOMBSTONE_TTL_MS = 5 * 60_000;
@@ -465,7 +465,7 @@ function failure(
 }
 
 function typedFailure(
-  code: import('@kite/runtime-spi').SubagentProviderFailureCode,
+  code: import('@kite-ai/runtime-spi').SubagentProviderFailureCode,
   message: string,
 ) {
   return { ok: false, failure: { code, message } } as const;

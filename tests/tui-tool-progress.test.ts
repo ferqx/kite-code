@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import { createInitialState } from '../apps/kite/src/tui/App';
 import { handleRuntimeEventAction } from '../apps/kite/src/tui/reducers/handleEvent';
 import type { OutputBlock, TuiState } from '../apps/kite/src/tui/types';

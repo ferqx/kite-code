@@ -2,15 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
-import type { AgentPlan } from '@kite/runtime-contract';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
+import type { AgentPlan } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   getEffectiveInteractionMode,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';

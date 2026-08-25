@@ -19,7 +19,7 @@ import {
   type SecureSessionLogDirectoryBinding,
   type SecureSessionStorageOptions,
   unlinkSecureFileIfIdentity,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   sessionLogDir,
   sessionLogFrontendDir,

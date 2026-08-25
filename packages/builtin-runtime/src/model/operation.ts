@@ -3,7 +3,7 @@ import type {
   ModelInvocationPurpose,
   RuntimeJsonValue,
   Sha256Digest,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 export const BUILTIN_MODEL_OPERATION_IDS_ = Object.freeze([
   'model:primary',

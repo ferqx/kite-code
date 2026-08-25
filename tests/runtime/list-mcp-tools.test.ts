@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { toolRequestFromCall } from '@kite/builtin-runtime';
+import { toolRequestFromCall } from '@kite-ai/builtin-runtime';
 import type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
   McpResourceDirectorySnapshot,
   McpRuntimeProvider,
-} from '@kite/builtin-runtime/mcp';
-import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/mcp';
+import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite-ai/runtime-contract';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { createCapabilityBinding } from '#builtin-runtime';
 import {
   createTestAgentTools as createAgentTools,

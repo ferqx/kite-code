@@ -1,4 +1,4 @@
-import type { WorkspaceFilesystemObservationRecord } from '@kite/runtime-contract';
+import type { WorkspaceFilesystemObservationRecord } from '@kite-ai/runtime-contract';
 import type {
   WorkspaceFilesystemCommittedMutation,
   WorkspaceFilesystemObserveObservation,
@@ -6,7 +6,7 @@ import type {
   WorkspaceFilesystemPreimageObservation,
   WorkspaceFilesystemProvider,
   WorkspaceFilesystemProviderFailure,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { CapabilityArtifactReader } from '../capability-artifacts';
 import type { WorkspaceFilesystemGrantAuthority } from './grant-authority';
 import type { FilesystemPreimageArtifactWriter } from './preimage-artifacts';

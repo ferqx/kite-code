@@ -1,11 +1,11 @@
-import type { BuiltinToolCatalogProjection } from '@kite/builtin-runtime';
-import { getAgentPhase } from '@kite/runtime-contract';
+import type { BuiltinToolCatalogProjection } from '@kite-ai/builtin-runtime';
+import { getAgentPhase } from '@kite-ai/runtime-contract';
 import type {
   StateExecutionTraits as ExecutionTraits,
   StateRuntimeState as RuntimeState,
   StateRuntimeSchedulerFacts as SchedulerFacts,
-} from '@kite/runtime-host';
-import { runtimeHostStateActivePlanning } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host';
+import { runtimeHostStateActivePlanning } from '@kite-ai/runtime-host/kernel-adapter';
 
 type ToolCallRecord = RuntimeState['tools']['calls'][string];
 

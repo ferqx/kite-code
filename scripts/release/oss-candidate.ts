@@ -96,30 +96,30 @@ const WINDOWS_SANDBOX_RELEASE_ASSETS = [
  * node_modules links.
  */
 export const STANDALONE_WORKSPACE_ENTRYPOINTS_: Readonly<Record<string, string>> = Object.freeze({
-  '@kite/kite': 'apps/kite/src/index.ts',
-  '@kite/kite/cli': 'apps/kite/src/cli/executable.ts',
-  '@kite/kite/tui': 'apps/kite/src/tui/executable.tsx',
-  '@kite/agent-kernel': 'packages/agent-kernel/src/index.ts',
-  '@kite/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
-  '@kite/builtin-runtime/capability': 'packages/builtin-runtime/src/capability.ts',
-  '@kite/builtin-runtime/filesystem': 'packages/builtin-runtime/src/filesystem/index.ts',
-  '@kite/builtin-runtime/git': 'packages/builtin-runtime/src/git/index.ts',
-  '@kite/builtin-runtime/mcp': 'packages/builtin-runtime/src/mcp/index.ts',
-  '@kite/builtin-runtime/model': 'packages/builtin-runtime/src/model/index.ts',
-  '@kite/builtin-runtime/planning': 'packages/builtin-runtime/src/planning/index.ts',
-  '@kite/builtin-runtime/sandbox': 'packages/builtin-runtime/src/sandbox/index.ts',
-  '@kite/builtin-runtime/skills': 'packages/builtin-runtime/src/skills/index.ts',
-  '@kite/builtin-runtime/subagent': 'packages/builtin-runtime/src/subagent/index.ts',
-  '@kite/builtin-runtime/verification': 'packages/builtin-runtime/src/verification/index.ts',
-  '@kite/builtin-runtime/web': 'packages/builtin-runtime/src/web/index.ts',
-  '@kite/runtime-contract': 'packages/runtime-contract/src/index.ts',
-  '@kite/runtime-host': 'packages/runtime-host/src/index.ts',
-  '@kite/runtime-host/kernel-adapter': 'packages/runtime-host/src/kernel-adapter/index.ts',
-  '@kite/runtime-host/observability': 'packages/runtime-host/src/observability/index.ts',
-  '@kite/runtime-host/storage': 'packages/runtime-host/src/storage/index.ts',
-  '@kite/runtime-spi': 'packages/runtime-spi/src/index.ts',
-  '@kite/runtime-spi/model': 'packages/runtime-spi/src/model-surface.ts',
-  '@kite/runtime-storage-sqlite': 'packages/runtime-storage-sqlite/src/index.ts',
+  '@kite-ai/kite': 'apps/kite/src/index.ts',
+  '@kite-ai/kite/cli': 'apps/kite/src/cli/executable.ts',
+  '@kite-ai/kite/tui': 'apps/kite/src/tui/executable.tsx',
+  '@kite-ai/agent-kernel': 'packages/agent-kernel/src/index.ts',
+  '@kite-ai/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
+  '@kite-ai/builtin-runtime/capability': 'packages/builtin-runtime/src/capability.ts',
+  '@kite-ai/builtin-runtime/filesystem': 'packages/builtin-runtime/src/filesystem/index.ts',
+  '@kite-ai/builtin-runtime/git': 'packages/builtin-runtime/src/git/index.ts',
+  '@kite-ai/builtin-runtime/mcp': 'packages/builtin-runtime/src/mcp/index.ts',
+  '@kite-ai/builtin-runtime/model': 'packages/builtin-runtime/src/model/index.ts',
+  '@kite-ai/builtin-runtime/planning': 'packages/builtin-runtime/src/planning/index.ts',
+  '@kite-ai/builtin-runtime/sandbox': 'packages/builtin-runtime/src/sandbox/index.ts',
+  '@kite-ai/builtin-runtime/skills': 'packages/builtin-runtime/src/skills/index.ts',
+  '@kite-ai/builtin-runtime/subagent': 'packages/builtin-runtime/src/subagent/index.ts',
+  '@kite-ai/builtin-runtime/verification': 'packages/builtin-runtime/src/verification/index.ts',
+  '@kite-ai/builtin-runtime/web': 'packages/builtin-runtime/src/web/index.ts',
+  '@kite-ai/runtime-contract': 'packages/runtime-contract/src/index.ts',
+  '@kite-ai/runtime-host': 'packages/runtime-host/src/index.ts',
+  '@kite-ai/runtime-host/kernel-adapter': 'packages/runtime-host/src/kernel-adapter/index.ts',
+  '@kite-ai/runtime-host/observability': 'packages/runtime-host/src/observability/index.ts',
+  '@kite-ai/runtime-host/storage': 'packages/runtime-host/src/storage/index.ts',
+  '@kite-ai/runtime-spi': 'packages/runtime-spi/src/index.ts',
+  '@kite-ai/runtime-spi/model': 'packages/runtime-spi/src/model-surface.ts',
+  '@kite-ai/runtime-storage-sqlite': 'packages/runtime-storage-sqlite/src/index.ts',
 });
 
 export function currentOssReleaseTarget(): OssReleaseTarget {
@@ -392,7 +392,7 @@ export async function compileOssReleaseExecutable(
             }
             return undefined;
           });
-          builder.onResolve({ filter: /^@kite\// }, (args) => {
+          builder.onResolve({ filter: /^@kite-ai\// }, (args) => {
             const entrypoint = STANDALONE_WORKSPACE_ENTRYPOINTS_[args.path];
             return entrypoint ? { path: resolve(repositoryRoot, entrypoint) } : undefined;
           });

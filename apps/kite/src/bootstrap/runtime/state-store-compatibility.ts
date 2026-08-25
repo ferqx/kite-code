@@ -3,15 +3,15 @@ import {
   LEGACY_STATE26_FORMAT_EPOCH,
   LEGACY_STATE26_SCHEMA_VERSION,
   resolveProjectIdentity,
-} from '@kite/runtime-host';
-import type { RuntimeSnapshotCodec } from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host';
+import type { RuntimeSnapshotCodec } from '@kite-ai/runtime-host/storage';
 import type {
   SqliteRuntimeCompatibilityFilePreimage,
   SqliteRuntimeCompatibilityMigrator,
   SqliteRuntimeCompatibilityNamedSnapshot,
   SqliteRuntimeCompatibilityTargetEvent,
   SqliteRuntimeCompatibilityTargetSession,
-} from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/runtime-storage-sqlite';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 const HISTORICAL_STATE_SCHEMA = LEGACY_STATE26_SCHEMA_VERSION;

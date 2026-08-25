@@ -1,7 +1,7 @@
 import type {
   WorkspaceFilesystemIntentRecord,
   WorkspaceFilesystemMutationReadyRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type {
   PreparedToolInvocation,
   RuntimeJsonValue,
@@ -19,8 +19,8 @@ import type {
   WorkspaceFilesystemProtectedBoundary,
   WorkspaceFilesystemProvider,
   WorkspaceFilesystemProviderFailure,
-} from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { readBoundCapabilityArtifact } from '../capability-artifacts';
 import { digestCapabilityBindingValue } from '../capability-binding';
 import type { ProtectedPathEvaluator } from '../sandbox/protected-path';

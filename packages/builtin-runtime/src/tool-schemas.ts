@@ -1,4 +1,4 @@
-import type { RuntimeJsonValue } from '@kite/runtime-spi';
+import type { RuntimeJsonValue } from '@kite-ai/runtime-spi';
 import { z } from 'zod';
 import { isGitRevision } from './git/broker';
 

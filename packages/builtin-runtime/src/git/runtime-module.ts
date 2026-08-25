@@ -1,4 +1,4 @@
-import type { WorkspaceFilesystemObservationRecord } from '@kite/runtime-contract';
+import type { WorkspaceFilesystemObservationRecord } from '@kite-ai/runtime-contract';
 import type {
   CapabilityEffects,
   CapabilityExecutionContext,
@@ -17,8 +17,8 @@ import type {
   WorkspaceFilesystemOperation,
   WorkspaceFilesystemPreimageObservation,
   WorkspaceFilesystemProviderFailure,
-} from '@kite/runtime-spi';
-import { defineRuntimeModule } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { defineRuntimeModule } from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from '../capability-binding';
 import {
   builtinExecutionTraits,

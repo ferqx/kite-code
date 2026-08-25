@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { McpServerConfig, McpServerState } from '@kite/builtin-runtime/mcp';
+import type { McpServerConfig, McpServerState } from '@kite-ai/builtin-runtime/mcp';
 import {
   DefaultMcpSupervisor,
   diagnoseMcpError,
   type McpConnectionManagerControlPlane,
-} from '@kite/builtin-runtime/mcp';
-import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/mcp';
+import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite-ai/runtime-contract';
 import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import type { McpConfigCatalog, McpConfigRepository, McpServerConfigEntry } from '#app/config';
 import { createInMemoryMcpConfigRepository } from './helpers/mcp-test-composition';

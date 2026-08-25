@@ -6,7 +6,7 @@ import type {
   ContextSourceRequest,
   RuntimeJsonValue,
   RuntimeModuleRegistryWriter,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from './capability-binding';
 import { MODEL_PROVIDER_ID_ } from './model/runtime-module';
 

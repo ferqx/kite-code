@@ -1,4 +1,4 @@
-import type { McpServerControlState, McpServerKey } from '@kite/builtin-runtime/mcp';
+import type { McpServerControlState, McpServerKey } from '@kite-ai/builtin-runtime/mcp';
 import { Box, useInput } from 'ink';
 import {
   type MutableRefObject,

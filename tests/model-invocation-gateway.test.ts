@@ -1,22 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import type { ModelArtifactWriter } from '@kite/builtin-runtime/model';
+import type { ModelArtifactWriter } from '@kite-ai/builtin-runtime/model';
 import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   type CompiledModelSurface,
   compileModelSurface,
   computeModelSurfaceDigest,
   humanMessage,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   createRuntimeHostStateInitialState,
   LIMITED_RESOURCE_BUDGET_,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   MODEL_INVOCATION_PURPOSES_,
   type ModelInvocationPurpose,
   type ModelResponseRecord,
   type PrivateArtifactRef,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createTestModelInvocationHarness } from './helpers/model-invocation';

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   APP_BUILTIN_PREPARED_DISPATCH_PORT_SCHEMA_,
   AppBuiltinPreparedDispatchPortError,

@@ -3,7 +3,7 @@ import type {
   RuntimeJsonValue,
   ToolPipelineReceiptRequirement,
   ToolPipelineRetryEligibility,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { AppToolPipelinePreparedRequest } from '#app/bootstrap/runtime/tool-pipeline-prepared';
 
 export function isPreparedRequest(

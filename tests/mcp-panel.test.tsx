@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { sep } from 'node:path';
-import type { McpAuthResult, McpServerControlState, McpServerKey } from '@kite/builtin-runtime/mcp';
+import type {
+  McpAuthResult,
+  McpServerControlState,
+  McpServerKey,
+} from '@kite-ai/builtin-runtime/mcp';
 import { render } from 'ink-testing-library';
 import McpOverlay from '@/app/tui/mcp/McpOverlay';
 import { buildServerActions, derivePrimaryStatus, moveSelection } from '@/app/tui/mcp/model';

@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite/agent-kernel';
+import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite-ai/agent-kernel';
 import {
   type RuntimeHostExecutionServices,
   restoreRuntimeHostStateSession,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import type {
   CheckpointPort,
   RuntimeSnapshotMetadata,
   SessionStore,
   StoredRuntimeEvent,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 const SNAPSHOT_METADATA: RuntimeSnapshotMetadata = {

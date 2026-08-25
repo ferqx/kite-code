@@ -1,4 +1,4 @@
-import type { VerificationCheck, VerificationSpec } from '@kite/runtime-spi';
+import type { VerificationCheck, VerificationSpec } from '@kite-ai/runtime-spi';
 import { compileCapabilitySchema, digestCapabilityValue } from '../skills/capability-domain';
 
 const VERIFICATION_CHECK_TYPES_ = new Set<VerificationCheck['type']>([

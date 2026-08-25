@@ -17,8 +17,8 @@ import {
   WorkspaceFilesystemGrantAuthority,
   workspaceFilesystemMutationReadyDigest,
   workspaceFilesystemProtectedBoundaryDigest,
-} from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import type {
   WorkspaceFilesystemGrantBinding,
   WorkspaceFilesystemMutationOperation,
@@ -26,7 +26,7 @@ import type {
   WorkspaceFilesystemPreparedMutation,
   WorkspaceFilesystemProtectedBoundary,
   WorkspaceFilesystemProviderResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const PREIMAGE_ARTIFACT = Object.freeze({
   artifactId: `pa_${'a'.repeat(64)}`,

@@ -2,37 +2,37 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createToolRecoveryJournal } from '@kite/agent-kernel';
-import { CapabilityArtifactStore, createCapabilityBinding } from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { createToolRecoveryJournal } from '@kite-ai/agent-kernel';
+import { CapabilityArtifactStore, createCapabilityBinding } from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   exposedMcpToolName,
   McpConnectionManager,
   McpProviderError,
-} from '@kite/builtin-runtime/mcp';
-import { aiMessage } from '@kite/builtin-runtime/model';
-import { createCapabilitySnapshot, descriptorRevision } from '@kite/builtin-runtime/skills';
-import type { SubagentLifecycleArtifactAccess } from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/mcp';
+import { aiMessage } from '@kite-ai/builtin-runtime/model';
+import { createCapabilitySnapshot, descriptorRevision } from '@kite-ai/builtin-runtime/skills';
+import type { SubagentLifecycleArtifactAccess } from '@kite-ai/builtin-runtime/subagent';
 import {
   BuiltinChildRuntimeDriver,
   getRoleConfig,
   SubagentGrantAuthority,
   type SubagentTaskArtifactAccess,
   subagentTaskDigest,
-} from '@kite/builtin-runtime/subagent';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/subagent';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   setActivePlanning,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   SUBAGENT_PROVIDER_SCHEMA_,
   type SubagentHandle,
   type SubagentProvider,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
@@ -2609,7 +2609,7 @@ describe('executeTestRuntimeTools', () => {
       availability: 'available',
       diagnostics: [],
     });
-    const skillCatalog: import('@kite/builtin-runtime/skills').SkillCatalogSnapshot = {
+    const skillCatalog: import('@kite-ai/builtin-runtime/skills').SkillCatalogSnapshot = {
       revision: 'skill-catalog-retry',
       capabilities: createCapabilitySnapshot([skillDescriptor]),
       entries: [
@@ -2880,7 +2880,7 @@ describe('executeTestRuntimeTools', () => {
       availability: 'available',
       diagnostics: [],
     });
-    const skillCatalog: import('@kite/builtin-runtime/skills').SkillCatalogSnapshot = {
+    const skillCatalog: import('@kite-ai/builtin-runtime/skills').SkillCatalogSnapshot = {
       revision: 'inline-skill-catalog',
       capabilities: createCapabilitySnapshot([descriptor]),
       entries: [
@@ -5310,7 +5310,7 @@ describe('executeTestRuntimeTools', () => {
     };
     state.tools.queue = [...state.tools.queue, 'sensitive'];
     const scopes: Array<
-      NonNullable<import('@kite/builtin-runtime/sandbox').ShellInput['filesystemMode']>
+      NonNullable<import('@kite-ai/builtin-runtime/sandbox').ShellInput['filesystemMode']>
     > = [];
     const run = () =>
       executeTestRuntimeTools({
@@ -5480,8 +5480,8 @@ describe('executeTestRuntimeTools', () => {
     let running = 0;
     let maximumRunning = 0;
     const executionScopes: Array<{
-      networkMode: import('@kite/builtin-runtime/sandbox').ShellInput['networkMode'];
-      filesystemMode: import('@kite/builtin-runtime/sandbox').ShellInput['filesystemMode'];
+      networkMode: import('@kite-ai/builtin-runtime/sandbox').ShellInput['networkMode'];
+      filesystemMode: import('@kite-ai/builtin-runtime/sandbox').ShellInput['filesystemMode'];
     }> = [];
 
     const events = await executeTestRuntimeTools({
@@ -5547,8 +5547,8 @@ describe('executeTestRuntimeTools', () => {
       };
       state.tools.queue = [...state.tools.queue, toolCallId];
       const scopes: Array<{
-        networkMode: import('@kite/builtin-runtime/sandbox').ShellInput['networkMode'];
-        filesystemMode: import('@kite/builtin-runtime/sandbox').ShellInput['filesystemMode'];
+        networkMode: import('@kite-ai/builtin-runtime/sandbox').ShellInput['networkMode'];
+        filesystemMode: import('@kite-ai/builtin-runtime/sandbox').ShellInput['filesystemMode'];
       }> = [];
       const run = () =>
         executeTestRuntimeTools({
@@ -5600,7 +5600,9 @@ describe('executeTestRuntimeTools', () => {
       state.tools.queue = [...state.tools.queue, toolCallId];
       const observed: boolean[] = [];
       const capabilityExecution = {
-        invoke: async (invocation: import('@kite/runtime-spi').CapabilityExecutionInvocation) => {
+        invoke: async (
+          invocation: import('@kite-ai/runtime-spi').CapabilityExecutionInvocation,
+        ) => {
           const mechanisms = invocation.environment.mechanisms as Readonly<Record<string, unknown>>;
           const filesystem = mechanisms.filesystem as Readonly<{ allowExternalPaths: boolean }>;
           observed.push(filesystem.allowExternalPaths);

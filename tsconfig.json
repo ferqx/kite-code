@@ -23,8 +23,8 @@
     "allowUnreachableCode": false,
 
     "paths": {
-      "@kite/kite/cli": ["./apps/kite/src/cli/executable.ts"],
-      "@kite/kite/tui": ["./apps/kite/src/tui/executable.tsx"],
+      "@kite-ai/kite/cli": ["./apps/kite/src/cli/executable.ts"],
+      "@kite-ai/kite/tui": ["./apps/kite/src/tui/executable.tsx"],
       "@/app/sandbox/*": ["./apps/kite/src/sandbox/*"],
       "@/app/*": ["./apps/kite/src/*"],
       "@/*": ["./src/*"],

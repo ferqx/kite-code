@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildStaticSystemPrompt } from '@kite/builtin-runtime/model';
+import { buildStaticSystemPrompt } from '@kite-ai/builtin-runtime/model';
 import { testBuiltinToolCatalog } from '../helpers/runtime-model';
 
 test('full-mode contract allows ask_user for plan clarification', () => {

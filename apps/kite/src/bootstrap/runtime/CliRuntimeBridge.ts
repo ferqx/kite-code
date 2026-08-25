@@ -1,7 +1,7 @@
-import type { GitBroker } from '@kite/builtin-runtime/git';
-import { createChatModel, createModelSecretDetector } from '@kite/builtin-runtime/model';
-import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import type { InteractionMode, SkillScanOptions } from '@kite/runtime-contract';
+import type { GitBroker } from '@kite-ai/builtin-runtime/git';
+import { createChatModel, createModelSecretDetector } from '@kite-ai/builtin-runtime/model';
+import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import type { InteractionMode, SkillScanOptions } from '@kite-ai/runtime-contract';
 import {
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
@@ -13,13 +13,16 @@ import {
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
-} from '@kite/runtime-contract';
-import type { RuntimeHostExecutionBridge, RuntimeHostPreparedExecution } from '@kite/runtime-host';
+} from '@kite-ai/runtime-contract';
+import type {
+  RuntimeHostExecutionBridge,
+  RuntimeHostPreparedExecution,
+} from '@kite-ai/runtime-host';
 import {
   type RuntimeHostKernelInput,
   runtimeCommandFromKernelInput,
-} from '@kite/runtime-host/kernel-adapter';
-import type { ProjectIdentity } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { ProjectIdentity } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#app/config';
 import { appSandboxBackendAvailable, type SandboxBackend } from '#app/sandbox/types';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';

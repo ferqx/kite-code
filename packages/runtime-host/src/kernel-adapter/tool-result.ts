@@ -1,11 +1,11 @@
-import type { AgentPlan, AgentToolResultMeta, RuntimeEvent } from '@kite/agent-kernel';
+import type { AgentPlan, AgentToolResultMeta, RuntimeEvent } from '@kite-ai/agent-kernel';
 import type {
   CapabilityResult,
   ShellGrantUsed,
   WorkspaceAccess,
   WorkspaceFilesystemObservationRecord,
-} from '@kite/runtime-contract';
-import type { SandboxExecutionProviderFailureCode } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-contract';
+import type { SandboxExecutionProviderFailureCode } from '@kite-ai/runtime-spi';
 
 /** Generic shell-shaped result carried across Host/App execution seams. */
 export interface RuntimeHostShellResult {
@@ -45,7 +45,7 @@ export type RuntimeHostToolExecutionResult<
   TIntent = unknown,
 > = RuntimeHostShellResult & {
   runtimeEvents?: RuntimeEvent[];
-  classifierAdvice?: import('@kite/agent-kernel').ToolOutcomeClassifierAdvice;
+  classifierAdvice?: import('@kite-ai/agent-kernel').ToolOutcomeClassifierAdvice;
   classifierDiagnostic?: 'classifier_threw';
   resultMeta?: AgentToolResultMeta;
   status?: 'success' | 'error' | 'rejected' | 'exhausted';

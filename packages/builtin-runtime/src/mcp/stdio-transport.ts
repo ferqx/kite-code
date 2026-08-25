@@ -1,4 +1,4 @@
-import type { McpStdioProcessHandle, McpStdioProcessPort } from '@kite/runtime-spi';
+import type { McpStdioProcessHandle, McpStdioProcessPort } from '@kite-ai/runtime-spi';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   type JSONRPCMessage,

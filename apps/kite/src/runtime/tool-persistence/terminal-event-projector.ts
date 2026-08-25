@@ -1,10 +1,10 @@
-import type { StateRuntimeEvent } from '@kite/runtime-host';
+import type { StateRuntimeEvent } from '@kite-ai/runtime-host';
 import type {
   CapabilityToolTerminalResult,
   PreparedToolInvocation,
   RuntimeJsonValue,
   ToolPipelineAttemptAcknowledgement,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   AppStateToolPipelinePersistenceError,
   type CreateAppStateToolPipelinePersistenceInput,

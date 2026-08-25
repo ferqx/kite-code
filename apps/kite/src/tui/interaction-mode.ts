@@ -1,4 +1,4 @@
-import { InteractionMode } from '@kite/runtime-contract';
+import { InteractionMode } from '@kite-ai/runtime-contract';
 import { appSandboxBackendAvailable, type SandboxBackend } from '#app/sandbox/types';
 
 export type TuiInteractionMode =

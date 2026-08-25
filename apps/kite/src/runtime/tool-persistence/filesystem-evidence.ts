@@ -1,15 +1,15 @@
 import type {
   BuiltinWorkspaceFilesystemTerminalVerificationResult,
   BuiltinWorkspaceFilesystemTerminalVerifier,
-} from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import type { StateRuntimeState } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import type { StateRuntimeState } from '@kite-ai/runtime-host';
 import type {
   RuntimeJsonValue,
   ToolPipelineAttemptAcknowledgement,
   ToolPipelineReceiptCommit,
   WorkspaceFilesystemEditObservationQuery,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   AppStateToolPipelinePersistenceError,
   type StateBuiltinOperationStructuredContent,

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { RuntimeStorageBoundary } from '@kite/runtime-host/storage';
+import type { RuntimeStorageBoundary } from '@kite-ai/runtime-host/storage';
 import { createSqliteRuntimeStorageAdapter } from './adapter';
 import {
   SQLITE_RUNTIME_FORMAT_EPOCH,

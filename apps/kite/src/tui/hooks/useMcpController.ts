@@ -6,11 +6,11 @@ import {
   type McpRuntimeProvider,
   type McpTransportAdmissionRequest,
   MemoryMcpCredentialStore,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import {
   createProtectedPathEvaluator,
   networkBoundaryPolicyFromExecutionBoundary,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import React, { useSyncExternalStore } from 'react';
 import { createInstalledMcpStdioProcessPort } from '#app/bootstrap/mcp-stdio-composition';
 import { type AgentConfig, DefaultMcpConfigRepository } from '#app/config';

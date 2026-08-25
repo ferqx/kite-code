@@ -1,14 +1,14 @@
-import { isBuiltinOperationExecutionValue } from '@kite/builtin-runtime';
-import type { CapabilityFailure, CapabilityResult } from '@kite/runtime-contract';
+import { isBuiltinOperationExecutionValue } from '@kite-ai/builtin-runtime';
+import type { CapabilityFailure, CapabilityResult } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateAdmitCurrentRuntimeEvent,
   type StateRuntimeEvent,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import type {
   CapabilityToolTerminalResult,
   RuntimeJsonValue,
   ToolPipelineSuspendedExecutionResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   AppStateToolPipelinePersistenceError,
   type StateBuiltinOperationStructuredContent,

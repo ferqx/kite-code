@@ -2,10 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createToolRecoveryJournal } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import { aiMessage, PrivateImmutableArtifactStorage } from '@kite/builtin-runtime/model';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { createToolRecoveryJournal } from '@kite-ai/agent-kernel';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import { aiMessage, PrivateImmutableArtifactStorage } from '@kite-ai/builtin-runtime/model';
 import {
   BuiltinChildRuntimeDriver,
   getRoleConfig,
@@ -18,9 +18,9 @@ import {
   SubagentTaskRequestArtifactStore,
   subagentDispatchIntentDigest,
   subagentTaskDigest,
-} from '@kite/builtin-runtime/subagent';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
-import type { SubagentHandle } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/subagent';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
+import type { SubagentHandle } from '@kite-ai/runtime-spi';
 import {
   serializeSubagentContinuation,
   subagentContinuationCursorId,

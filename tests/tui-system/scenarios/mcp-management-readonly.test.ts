@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { exposedMcpToolName } from '@kite/builtin-runtime/mcp';
+import { exposedMcpToolName } from '@kite-ai/builtin-runtime/mcp';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';

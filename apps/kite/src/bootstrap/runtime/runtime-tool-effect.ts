@@ -1,17 +1,17 @@
-import { verifyBuiltinWorkspaceFilesystemTerminal } from '@kite/builtin-runtime';
-import { sandboxBackendAvailable } from '@kite/builtin-runtime/sandbox';
+import { verifyBuiltinWorkspaceFilesystemTerminal } from '@kite-ai/builtin-runtime';
+import { sandboxBackendAvailable } from '@kite-ai/builtin-runtime/sandbox';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
   type SkillCatalogSnapshot,
-} from '@kite/builtin-runtime/skills';
-import { isBuiltinSubagentTaskToolName } from '@kite/builtin-runtime/subagent';
-import type { SubAgentEventSink } from '@kite/runtime-contract';
-import { createRuntimeHostInteractionId } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/skills';
+import { isBuiltinSubagentTaskToolName } from '@kite-ai/builtin-runtime/subagent';
+import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
+import { createRuntimeHostInteractionId } from '@kite-ai/runtime-host';
 import {
   createDescendantResourceAdmission,
   DescendantResourceAdmissionError,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import { executeAppRuntimeTools } from '../../runtime/tool-execution/router';
 import { isConcurrentExploreSubagentBatch } from '../../runtime/tool-execution/subagent-executor';
@@ -249,7 +249,7 @@ export async function executeAppRuntimeToolsEffect(
           ...(executionContext
             ? {
                 recordNetworkDecision: async (
-                  decision: import('@kite/builtin-runtime/sandbox').NetworkDecisionReceipt,
+                  decision: import('@kite-ai/builtin-runtime/sandbox').NetworkDecisionReceipt,
                 ) => {
                   const applied = await executionContext.persistEvent({
                     type: 'network.admission_decided',

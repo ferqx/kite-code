@@ -9,7 +9,7 @@ import type {
   SandboxPreparationLifecycle,
   SandboxPreparedProcessExecutionPort,
   SandboxPreparedProcessExecutionResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   createBuiltinPreparedShellExecutionConsumer,
   createBuiltinSandboxPreparation,

@@ -25,18 +25,18 @@ import {
   TOOL_SEARCH_CAPABILITY_ID_,
   TOOL_SEARCH_CAPABILITY_REVISION_,
   TOOL_SEARCH_EXECUTOR_REVISION_,
-} from '@kite/builtin-runtime';
-import { McpProviderError } from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime';
+import { McpProviderError } from '@kite-ai/builtin-runtime/mcp';
 import {
   normalizeAskUserRequest,
   SUBAGENT_CAPABILITY_REVISIONS_,
   SUBAGENT_OPERATION_IDS_,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 import {
   VERIFICATION_CAPABILITY_REVISIONS_,
   VERIFICATION_OPERATION_IDS_,
-} from '@kite/builtin-runtime/verification';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/verification';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import {
   type CapabilityExecutionInvocation,
   type CapabilityExecutionMechanism,
@@ -44,7 +44,7 @@ import {
   type CapabilityTurnContext,
   createRuntimeModuleRegistry,
   type RuntimeJsonValue,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 function catalogInvocation(input: {
   operationId: string;
@@ -1603,7 +1603,7 @@ describe('builtin runtime package boundary', () => {
   test('has no Workspace, MCP manager, or Model dependency', () => {
     const source = readFileSync(new URL('../src/tool-search.ts', import.meta.url), 'utf8');
     for (const forbidden of [
-      '@kite/builtin-runtime/mcp',
+      '@kite-ai/builtin-runtime/mcp',
       'McpRuntimeProvider',
       'SkillCatalogSnapshot',
       'SupportedChatModel',

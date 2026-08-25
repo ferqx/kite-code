@@ -1,4 +1,4 @@
-import { type ArtifactPort, createArtifactPort } from '@kite/runtime-host/storage';
+import { type ArtifactPort, createArtifactPort } from '@kite-ai/runtime-host/storage';
 
 /** Resolve the adapter's Artifact port once; SQLite never interprets artifact payloads. */
 export function resolveSqliteArtifactStore(artifacts?: ArtifactPort): ArtifactPort {

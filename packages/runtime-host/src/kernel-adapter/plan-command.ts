@@ -12,8 +12,8 @@ import {
   type ReadPlanCommand,
   type UpdatePlanCommand,
   type WritePlanCommand,
-} from '@kite/agent-kernel';
-import type { PlanStep } from '@kite/runtime-contract';
+} from '@kite-ai/agent-kernel';
+import type { PlanStep } from '@kite-ai/runtime-contract';
 import type { RuntimeState } from './initial';
 
 /**

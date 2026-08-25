@@ -3,7 +3,7 @@ import {
   buildCacheableRuntimeContext,
   buildStaticSystemPrompt,
   countTokens,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import { createTestAgentTools as createAgentTools } from '../helpers/runtime-model';
 
 function measure() {

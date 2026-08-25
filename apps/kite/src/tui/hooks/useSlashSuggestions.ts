@@ -1,4 +1,4 @@
-import type { SkillManifest } from '@kite/runtime-contract';
+import type { SkillManifest } from '@kite-ai/runtime-contract';
 import { type SetStateAction, useMemo, useState } from 'react';
 import { type MessageKey, useI18n } from '../i18n';
 

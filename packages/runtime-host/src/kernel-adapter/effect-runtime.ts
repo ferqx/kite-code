@@ -1,4 +1,4 @@
-import type { RuntimeEffect, RuntimeEvent, RuntimeState } from '@kite/agent-kernel';
+import type { RuntimeEffect, RuntimeEvent, RuntimeState } from '@kite-ai/agent-kernel';
 import type { RuntimeEffectLeaseExpectation } from '../storage';
 
 /** Mutable in-process lease for one State 27 effect attempt. */

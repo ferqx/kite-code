@@ -1,4 +1,4 @@
-import type { UserInputPayload } from '@kite/runtime-contract';
+import type { UserInputPayload } from '@kite-ai/runtime-contract';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { type MutableRefObject, useEffect, useState } from 'react';

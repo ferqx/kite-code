@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createMetricSample } from '@kite/runtime-host';
+import { createMetricSample } from '@kite-ai/runtime-host';
 import { GovernedMetricExporter } from '../../apps/kite/src/observability/governed-exporter';
 
 const sample = createMetricSample({

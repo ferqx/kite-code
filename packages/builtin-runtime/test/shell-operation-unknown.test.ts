@@ -4,8 +4,8 @@ import {
   createBuiltinRuntimeModules,
   PLANNING_CAPABILITY_REVISION_,
   PLANNING_EXECUTOR_REVISION_,
-} from '@kite/builtin-runtime';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 
 function request() {
   return {

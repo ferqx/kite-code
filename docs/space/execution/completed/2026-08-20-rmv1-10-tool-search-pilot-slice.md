@@ -15,11 +15,11 @@
 
 RMV1-10 已把 `builtin:tool_search` 作为首个完整 vertical slice 原子切到目标 Runtime 边界：
 
-- `@kite/runtime-spi` 定义 `CapabilityExecutionInvocationV1` 与 `CapabilityExecutionPortV1`，继续只作为私有编译
+- `@kite-ai/runtime-spi` 定义 `CapabilityExecutionInvocationV1` 与 `CapabilityExecutionPortV1`，继续只作为私有编译
   边界，不解释 Policy、Provider 语义或授权；
-- `@kite/runtime-host#createRuntimeHostCapabilityExecutionPortV1` 对启动时冻结的 Registry 做 exact arbitration，
+- `@kite-ai/runtime-host#createRuntimeHostCapabilityExecutionPortV1` 对启动时冻结的 Registry 做 exact arbitration，
   校验 binding、request、grant、attempt 与 receipt identity，并按 `invocationId + attemptId` 单次 claim；
-- `@kite/builtin-runtime#createToolSearchRuntimeModuleV1` 注册唯一 Capability definition 与 executor，只消费已复制、
+- `@kite-ai/builtin-runtime#createToolSearchRuntimeModuleV1` 注册唯一 Capability definition 与 executor，只消费已复制、
   冻结的 catalog/provider JSON facts；descriptor 还会确定性排序，executor 不持有 Workspace、MCP Manager、Skill
   catalog 或 Model handle；
 - Core `tool_search` ToolSpec 只保留 schema、availability、effects 与 Policy surface，类型上禁止

@@ -1,4 +1,4 @@
-import { runTui } from '@kite/kite/tui';
+import { runTui } from '@kite-ai/kite/tui';
 import type { AppShellExecutor } from '@/app/sandbox/composition';
 import {
   APP_PREPARED_SHELL_EXECUTION_,

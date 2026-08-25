@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@kite/runtime-contract';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
@@ -1828,7 +1828,7 @@ function OutputAreaTestWrap({
   turns: { blocks: OutputBlock[] }[];
   onToggleReason: () => void;
   awaitingApproval?: boolean;
-  compactionPhase?: import('@kite/builtin-runtime/model').ContextCompactionProgressPhase;
+  compactionPhase?: import('@kite-ai/builtin-runtime/model').ContextCompactionProgressPhase;
 }) {
   const {
     staticItems,

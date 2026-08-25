@@ -8,7 +8,7 @@ import {
   type ModelProviderOptions,
   normalizedModelResponseToAIMessage,
   type SupportedChatModel,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import { jsonSchema, type ToolSet, tool } from 'ai';
 import { z } from 'zod';
 import type { AgentConfig } from '#app/config';

@@ -150,8 +150,8 @@ digest。当前仓库 pin 已由 canonical Windows build 提升为 0.8.3/V6，�
 digest `sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`；后续任何 native
 runner 变更都必须重新运行同一可复现构建并提交新的 digest，不能只改 protocol、版本或 manifest 文本，
 也不能复用旧 binary digest。
-Windows candidate 的 standalone resolver 还必须把 `@kite/builtin-runtime/sandbox` 及其他 workspace public
-exports 直接映射到仓库 source，禁止经过 `node_modules/@kite/*` symlink；否则 Bun 1.3.14 会因反斜杠
+Windows candidate 的 standalone resolver 还必须把 `@kite-ai/builtin-runtime/sandbox` 及其他 workspace public
+exports 直接映射到仓库 source，禁止经过 `node_modules/@kite-ai/*` symlink；否则 Bun 1.3.14 会因反斜杠
 pretty path 崩溃，导致已验证 runner 无法进入候选包。release test 从 package exports 机械验证该闭包。
 
 ## 能力边界

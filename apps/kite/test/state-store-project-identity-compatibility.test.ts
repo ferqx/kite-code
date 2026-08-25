@@ -9,10 +9,13 @@ import {
   LEGACY_STATE26_SCHEMA_VERSION,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
-} from '@kite/agent-kernel';
-import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateStorageBinding, resolveProjectIdentity } from '@kite/runtime-host';
-import type { SqliteRuntimeCompatibilitySession } from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/agent-kernel';
+import { canonicalPathForComparison } from '@kite-ai/builtin-runtime/sandbox';
+import {
+  createRuntimeHostStateStorageBinding,
+  resolveProjectIdentity,
+} from '@kite-ai/runtime-host';
+import type { SqliteRuntimeCompatibilitySession } from '@kite-ai/runtime-storage-sqlite';
 import { createKiteRuntimeCompatibilityMigrator } from '../src/bootstrap/runtime/state-store-compatibility';
 
 const RECOVERY_KEY = 'a'.repeat(64);

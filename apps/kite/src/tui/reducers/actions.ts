@@ -1,7 +1,10 @@
 // ── Action 类型定义 ──
 // 从 App.tsx 中抽出，避免 reducers 和 App.tsx 之间的循环依赖
 
-import type { ContextCompactionProgressPhase, ContextStatusSnapshot } from '@kite/runtime-contract';
+import type {
+  ContextCompactionProgressPhase,
+  ContextStatusSnapshot,
+} from '@kite-ai/runtime-contract';
 import type { RuntimeCheckpointEntry, RuntimePresentationEvent } from '../runtime-presentation';
 import type { InterruptState, OutputBlock, RewindScope, TuiState } from '../types';
 
@@ -85,7 +88,7 @@ export type Action =
   | { type: 'LIST_SKILLS' }
   | {
       type: 'SET_SKILL_MANIFESTS';
-      manifests: import('@kite/builtin-runtime/skills').SkillManifest[];
+      manifests: import('@kite-ai/builtin-runtime/skills').SkillManifest[];
     }
   | { type: 'SWITCH_SESSION'; threadId: string }
   | { type: 'SET_SESSIONS'; sessions: TuiState['sessions'] }

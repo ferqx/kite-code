@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { ModelResponseSource } from '@kite/builtin-runtime/model';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { ModelResponseSource } from '@kite-ai/builtin-runtime/model';
 import {
   type BuiltinModelOperationAttempt,
   type BuiltinModelOperationExecutionPort,
@@ -10,14 +10,14 @@ import {
   ModelInvocationGateway,
   type ModelInvocationPersistence,
   type SingleAttemptTransport,
-} from '@kite/builtin-runtime/model';
-import type { RuntimeIdSource } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/model';
+import type { RuntimeIdSource } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   planModelInvocationResource,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
-import type { ModelResponseRecord, ModelSurface, PrivateArtifactRef } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { ModelResponseRecord, ModelSurface, PrivateArtifactRef } from '@kite-ai/runtime-spi';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function artifactRef<K extends 'model_surface' | 'model_response'>(

@@ -15,7 +15,7 @@ import {
   assertSecureOwnedRegularFile,
   ensureSecureSessionLogDirectory,
   type SecureSessionStorageOptions,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import { sessionLogRoot } from '#app/config/paths';
 import type { SessionLoggingPolicy } from '#app/config/session-logging-policy';
 import {

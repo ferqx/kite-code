@@ -1,7 +1,7 @@
 import type {
   BuiltinModelToolCatalogEntry,
   BuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 
 /** Resolve one model-visible Builtin entry from the frozen turn projection. */
 export function modelBuiltinEntry(

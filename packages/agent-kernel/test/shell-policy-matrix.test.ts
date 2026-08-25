@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { shellBuiltinPolicyRule } from '@kite/builtin-runtime';
+import { shellBuiltinPolicyRule } from '@kite-ai/builtin-runtime';
 import type {
   CapabilityEffects,
   CapabilityPolicyCompilation,
   CapabilityPolicyContext,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   authorizeToolGovernance,
   createToolApprovalBindingDigest,

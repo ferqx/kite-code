@@ -1,4 +1,4 @@
-import { authorizeEffect } from '@kite/agent-kernel';
+import { authorizeEffect } from '@kite-ai/agent-kernel';
 import {
   assertRuntimeCommand,
   RUNTIME_QUERY_SCHEMA_,
@@ -9,13 +9,13 @@ import {
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
   type RuntimeSubscription,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type {
   CapabilityDefinition,
   CapabilityRegistrySnapshot,
   ContextCompilerPort,
   RuntimeModuleRegistry,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '../execution/capability-execution';
 import {
   createRuntimeHostContextCompilationPortFromSnapshot,

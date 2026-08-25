@@ -5,7 +5,7 @@ import type {
   ContextFragmentCandidate,
   RuntimeJsonValue,
   RuntimeModuleRegistry,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 export interface RuntimeHostContextCompilationRequest {
   readonly sessionId: string;

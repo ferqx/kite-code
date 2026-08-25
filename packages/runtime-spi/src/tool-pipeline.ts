@@ -3,7 +3,7 @@ import type {
   CapabilityDescriptor as RuntimeCapabilityDescriptor,
   CapabilityDisclosure as RuntimeCapabilityDisclosure,
   ToolApprovalPayload,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type {
   CapabilityApproval,
   CapabilityAvailabilityContext,

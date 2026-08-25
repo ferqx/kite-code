@@ -1,4 +1,4 @@
-import type { RuntimeNotificationEvent } from '@kite/runtime-contract';
+import type { RuntimeNotificationEvent } from '@kite-ai/runtime-contract';
 
 /** Presentation-only event; it carries no Runtime authority. */
 // biome-ignore lint/suspicious/noExplicitAny: TUI reducers refine event-specific fields by discriminant.

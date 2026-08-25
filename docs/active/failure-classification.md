@@ -34,7 +34,7 @@ external effect certainty 必须保守为 unknown、recovery=never，并进入 r
 
 Current Runtime format uses one Agent-Kernel-owned canonical `ToolOutcome` envelope on every current terminal
 event. The classifier, validator, recovery advice, timing normalization and failure-lineage derivation live only in
-`@kite/agent-kernel`; the App Runtime State adapter contains no second algorithm. The
+`@kite-ai/agent-kernel`; the App Runtime State adapter contains no second algorithm. The
 envelope closes status, `FailureKind`/detail code, dispatch and external-effect
 certainty, recovery ceiling/lineage, Runtime-boundary timing and low-cardinality unknown-field observation.
 Policy/approval and dispatch/effect facts are authoritative; Builtin catalog classifiers may only tighten them.
@@ -144,7 +144,7 @@ verification failed/inconclusive, mandatory policy unavailable, blocked, and unk
 `completed` is the only projection with `complete=true`; `unknown` requires reconciliation and is
 never safe to retry automatically.
 
-`resolveFailureMode()` 是 `@kite/agent-kernel` 中 RFC failure-mode matrix 的规范 policy table。封闭的 mode 集合覆盖
+`resolveFailureMode()` 是 `@kite-ai/agent-kernel` 中 RFC failure-mode matrix 的规范 policy table。封闭的 mode 集合覆盖
 production artifact/Workspace/execution boundary、model/MCP、persistence、budget/concurrency/
 process cleanup、compaction/Verification、可选诊断与 rollout。每次解析都显式返回 continue/block/
 degrade、新的自动 effectful invocation 数、durable state、external-effects 状态、稳定 reason、

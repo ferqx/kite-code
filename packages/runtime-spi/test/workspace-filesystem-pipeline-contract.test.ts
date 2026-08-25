@@ -5,7 +5,7 @@ import type {
   WorkspaceFilesystemIntentRecord,
   WorkspaceFilesystemMutationReadyRecord,
   WorkspaceFilesystemObservationRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type { RuntimeJsonValue } from '../src/capability';
 import type {
   NonDynamicOperationId,
@@ -284,7 +284,7 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
       new URL('../src/workspace-filesystem-pipeline.ts', import.meta.url),
     ).text();
     expect(source).not.toMatch(/from\s+['"]node:/u);
-    expect(source).not.toMatch(/from\s+['"]@kite\/(?!runtime-contract)/u);
+    expect(source).not.toMatch(/from\s+['"]@kite-ai\/(?!runtime-contract)/u);
     expect(source).not.toMatch(/\b(?:RuntimeHost|RuntimeStore|BuiltinRuntime|AgentState)\b/u);
     expect(JSON.parse(JSON.stringify(persistedIntent('builtin:search_files')))).toEqual(
       persistedIntent('builtin:search_files'),
@@ -626,7 +626,7 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
       new URL('../src/workspace-filesystem-pipeline.ts', import.meta.url),
     ).text();
     expect(source).not.toMatch(/from\s+['"]node:/u);
-    expect(source).not.toMatch(/from\s+['"]@kite\/(?!runtime-contract)/u);
+    expect(source).not.toMatch(/from\s+['"]@kite-ai\/(?!runtime-contract)/u);
     expect(source).not.toMatch(
       /\b(?:RuntimeHost|RuntimeStore|BuiltinRuntime|AgentState|WorkspaceFilesystemPreparedMutation|PreimageArtifactPort)\b/u,
     );

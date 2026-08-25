@@ -2,19 +2,19 @@
 // 验证每个 tool_call 有且只有一个 tool result，sanitize 不删除 plan 反馈
 
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   aiMessage,
   humanMessage,
   sanitizeToolCallPairs,
   toolMessage,
-} from '@kite/builtin-runtime/model';
-import type { AgentPlan } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/model';
+import type { AgentPlan } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent, emptyCurrentPlanEvidence } from '../helpers/current-plan';
 

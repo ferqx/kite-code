@@ -9,5 +9,5 @@ Skill, Model, and Capability semantics remain outside Host.
 Host code is grouped by `host`, `lifecycle`, `execution`, `kernel-adapter`,
 `format`, `process`, `storage`, and `observability`. The root package exports
 stable Host lifecycle/composition ports; Kernel fact translation is available
-only through `@kite/runtime-host/kernel-adapter`. Persisted bytes remain in
+only through `@kite-ai/runtime-host/kernel-adapter`. Persisted bytes remain in
 `format`, and process supervision remains in `process`.

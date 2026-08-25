@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type {
   BuiltinOperationExecutionValue,
   BuiltinPreparedToolDispatchInput,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   BUILTIN_PREPARED_CALL_FACTS_SCHEMA_,
   BuiltinPreparedToolDispatchError,
@@ -14,7 +14,7 @@ import {
   projectBuiltinDynamicMcpExecutionReceiptTerminalResult,
   projectBuiltinExecutionReceiptTerminalResult,
   projectBuiltinOperationTerminalResult,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import type {
   CapabilityTurnContext,
   DynamicMcpPreparedToolInvocationIdentity,
@@ -24,8 +24,8 @@ import type {
   PreparedToolInvocation,
   RuntimeJsonValue,
   ToolPipelinePreparedIdentityVerifier,
-} from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 
 const turnContext: CapabilityTurnContext = Object.freeze({
   hasTaskAdapter: true,
@@ -564,8 +564,8 @@ describe('Builtin prepared dispatch adapter', () => {
     const source = await Bun.file(
       new URL('../src/builtin-prepared-dispatch-adapter.ts', import.meta.url),
     ).text();
-    expect(source).not.toContain('@kite/runtime-host');
-    expect(source).not.toContain('@kite/agent-kernel');
+    expect(source).not.toContain('@kite-ai/runtime-host');
+    expect(source).not.toContain('@kite-ai/agent-kernel');
     expect(source).not.toContain('createRuntimeModuleRegistry');
     expect(source).not.toContain('createBuiltinToolCatalogProjection(');
     expect(source).not.toContain('catch-old');
@@ -1014,8 +1014,8 @@ describe('Builtin prepared dispatch adapter', () => {
     const source = await Bun.file(
       new URL('../src/builtin-prepared-dispatch-adapter.ts', import.meta.url),
     ).text();
-    expect(source).not.toContain('@kite/runtime-host');
-    expect(source).not.toContain('@kite/agent-kernel');
+    expect(source).not.toContain('@kite-ai/runtime-host');
+    expect(source).not.toContain('@kite-ai/agent-kernel');
     expect(source).not.toContain('createRuntimeModuleRegistry');
     expect(source).not.toContain('CapabilityExecutionPort');
     expect(source).not.toContain('catch-old');

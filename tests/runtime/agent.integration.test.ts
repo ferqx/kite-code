@@ -1,16 +1,16 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import type { SupportedChatModel } from '@kite/builtin-runtime/model';
-import { aiMessage, BuiltinModelEffectCoordinator } from '@kite/builtin-runtime/model';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
+import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
+import { aiMessage, BuiltinModelEffectCoordinator } from '@kite-ai/builtin-runtime/model';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
-import { MODEL_ATTEMPT_OUTCOME_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import { MODEL_ATTEMPT_OUTCOME_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { requiredProviderAdmissionEvents } from '#app/bootstrap/runtime/turn-coordinator';
 import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

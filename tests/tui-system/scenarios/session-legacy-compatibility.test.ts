@@ -2,13 +2,13 @@ import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { LEGACY_STATE26_FORMAT_EPOCH, LEGACY_STATE26_SCHEMA_VERSION } from '@kite/agent-kernel';
-import { resolveProjectIdentity } from '@kite/runtime-host';
+import { LEGACY_STATE26_FORMAT_EPOCH, LEGACY_STATE26_SCHEMA_VERSION } from '@kite-ai/agent-kernel';
+import { resolveProjectIdentity } from '@kite-ai/runtime-host';
 import {
   SQLITE_RUNTIME_DDL,
   sqliteCurrentRuntimeStorePath,
   sqliteRuntimeStorePath,
-} from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';

@@ -1,12 +1,12 @@
-import { AGENT_KERNEL_BOUNDARY_ } from '@kite/agent-kernel';
-import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite/runtime-contract';
+import { AGENT_KERNEL_BOUNDARY_ } from '@kite-ai/agent-kernel';
+import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite-ai/runtime-contract';
 import {
   type CapabilityRegistrySnapshot,
   type ContextCompilerPort,
   createRuntimeModuleRegistry,
   type RuntimeModule,
   type RuntimeModuleRegistry,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { DefaultRuntimeHost, type RuntimeHost } from './host/runtime-host';
 import type { RuntimeStorage, RuntimeStorageBoundary } from './storage';
 
@@ -17,13 +17,13 @@ export type {
   RuntimeEvent as StateRuntimeEvent,
   RuntimeState as StateRuntimeState,
   SchedulerFacts as StateRuntimeSchedulerFacts,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 // Historical format markers are exposed through the Host compatibility seam.
 // App composition must not depend directly on the deterministic Kernel.
 export {
   LEGACY_STATE26_FORMAT_EPOCH,
   LEGACY_STATE26_SCHEMA_VERSION,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 export { bestEffortRegularFileSize } from './artifact-metadata';
 export type { RuntimeHostCapabilityExecutionFailureCode } from './execution/capability-execution';
 export {

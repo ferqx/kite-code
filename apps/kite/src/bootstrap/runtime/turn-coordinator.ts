@@ -1,20 +1,20 @@
 import { randomUUID } from 'node:crypto';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { ContextCompactionProgressPhase } from '@kite/builtin-runtime/model';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import type { ContextCompactionProgressPhase } from '@kite-ai/builtin-runtime/model';
 import {
   createLocalCompactionDebugReporter,
   createModelSecretDetector,
   ModelAttemptFailureError,
   type SupportedChatModel,
-} from '@kite/builtin-runtime/model';
-import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime/skills';
+} from '@kite-ai/builtin-runtime/model';
+import type { SandboxBackend, ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import type { SkillManifest, SkillScanOptions } from '@kite-ai/builtin-runtime/skills';
 import {
   createSkillCapabilityResolver,
   evaluateSkillActivation,
   refreshSkillCatalog,
-} from '@kite/builtin-runtime/skills';
-import type { InteractionMode } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/skills';
+import type { InteractionMode } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
@@ -22,7 +22,7 @@ import {
   LIMITED_RESOURCE_BUDGET_,
   runtimeHostStateResolveFailureMode as resolveFailureMode,
   type StateRuntimeEffectExecutor,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   prepareRuntimeEffectForBudget,
   type RuntimeExecutorDependencies,
@@ -150,7 +150,7 @@ export interface RuntimeTurnInput {
   /** App-selected concrete Model binding; Core never constructs a Provider model. */
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   /** Runtime Host registry port; required by capability-backed production tools. */
   capabilityExecution?: CapabilityExecutionPort;
@@ -161,25 +161,25 @@ export interface RuntimeTurnInput {
   /** App-selected Model/Artifact/Subagent mechanisms; Core never constructs a concrete owner. */
   modelInvocationRuntime: {
     /** App projection of the Host's one frozen Builtin capability snapshot. */
-    builtinToolCatalog: import('@kite/builtin-runtime').BuiltinToolCatalogProjection;
+    builtinToolCatalog: import('@kite-ai/builtin-runtime').BuiltinToolCatalogProjection;
     /** App-owned pipeline composition derived from that exact projection. */
     toolPipelineComposition?: AppToolPipelineComposition;
     /** App-owned single Plan Artifact store; absent only for unavailable composition. */
-    planArtifacts?: import('@kite/builtin-runtime/planning').PlanArtifactStore;
-    gateway?: import('@kite/builtin-runtime/model').ModelInvocationGateway;
-    modelEffects?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
-    evidence?: import('@kite/builtin-runtime/model').ModelArtifactEvidenceAvailability;
-    capabilityArtifacts?: import('@kite/builtin-runtime').CapabilityArtifactAccess;
-    workspaceFilesystem?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
-    sandboxPreparationArtifacts?: import('@kite/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
+    planArtifacts?: import('@kite-ai/builtin-runtime/planning').PlanArtifactStore;
+    gateway?: import('@kite-ai/builtin-runtime/model').ModelInvocationGateway;
+    modelEffects?: import('@kite-ai/builtin-runtime/model').BuiltinModelEffectCoordinator;
+    evidence?: import('@kite-ai/builtin-runtime/model').ModelArtifactEvidenceAvailability;
+    capabilityArtifacts?: import('@kite-ai/builtin-runtime').CapabilityArtifactAccess;
+    workspaceFilesystem?: import('@kite-ai/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
+    sandboxPreparationArtifacts?: import('@kite-ai/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
     subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactory;
     reconcilePendingSubagents?: (
       persistence: Parameters<
         typeof import('./subagent-provider-recovery').reconcilePendingSubagentProvidersAfterCrash
       >[0]['persistence'],
     ) => Promise<boolean>;
-    subagentContinuationArtifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
-    subagentTaskRequests?: import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
+    subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
+    subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   };
   interactionMode?: InteractionMode;
   /** 初始执行阶段 / Initial execution phase */

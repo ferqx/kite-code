@@ -1,4 +1,4 @@
-import { InteractionMode } from '@kite/runtime-contract';
+import { InteractionMode } from '@kite-ai/runtime-contract';
 import { Box, Text, useStdout } from 'ink';
 import stringWidth from 'string-width';
 import { useI18n } from './i18n';

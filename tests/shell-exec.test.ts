@@ -6,8 +6,8 @@ import {
   findSystemBash,
   gatherSystemBashCandidates,
   isWslStubPath,
-} from '@kite/builtin-runtime/sandbox';
-import { guardProcessTree } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { guardProcessTree } from '@kite-ai/runtime-host';
 import { createSandboxExecutor } from './helpers/sandbox-executor';
 import { buildHostShellInvocations } from './helpers/shell-executor';
 

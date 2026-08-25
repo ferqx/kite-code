@@ -5,19 +5,19 @@ import {
   createBuiltinToolCatalogProjection,
   createToolSearchProviderFacts,
   verifyBuiltinWorkspaceFilesystemTerminal,
-} from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+} from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   type BuiltinWorkspaceFilesystemRuntime,
   LocalWorkspaceFilesystemProvider,
   WorkspaceFilesystemGrantAuthority,
-} from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import {
   createRuntimeHostCapabilityExecutionPortFromSnapshot,
   createRuntimeHostToolCallSnapshot,
-} from '@kite/runtime-host';
-import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host';
+import { runtimeHostStateCreateApprovalBindingDigest } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CapabilityExecutionInvocation,
   CapabilityExecutionPort,
@@ -29,8 +29,8 @@ import type {
   WorkspaceFilesystemEditObservationQuery,
   WorkspaceFilesystemIntentDraft,
   WorkspaceFilesystemPersistedIntent,
-} from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import { createAppToolPipelineComposition } from '#app/bootstrap/runtime/tool-pipeline-composition';
 import {
   APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_,

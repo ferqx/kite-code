@@ -4,7 +4,7 @@ import type {
   RuntimeSnapshotMetadata,
   RuntimeStorage,
   RuntimeTransactionInput,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 import {
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeRevisionConflictError,

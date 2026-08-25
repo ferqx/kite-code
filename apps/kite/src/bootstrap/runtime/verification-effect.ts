@@ -1,11 +1,14 @@
-import { type CapabilityArtifactReader, readBoundCapabilityArtifact } from '@kite/builtin-runtime';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { assertInsideWorkspace, type ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import {
+  type CapabilityArtifactReader,
+  readBoundCapabilityArtifact,
+} from '@kite-ai/builtin-runtime';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import { assertInsideWorkspace, type ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
 import {
   BuiltinVerificationDispatchError,
   type BuiltinVerificationReceiptView,
   executeDeterministicVerificationChecks,
-} from '@kite/builtin-runtime/verification';
+} from '@kite-ai/builtin-runtime/verification';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
 
 export interface VerificationExecutorDependencies {

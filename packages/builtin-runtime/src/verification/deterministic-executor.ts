@@ -7,7 +7,7 @@ import type {
   VerificationCheckResult,
   VerificationExecutionReceipt,
   VerificationOutcome,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from '../capability-binding';
 import { validateCapabilityArguments } from '../skills/capability-domain';
 

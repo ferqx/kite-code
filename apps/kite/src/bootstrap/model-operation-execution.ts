@@ -2,13 +2,13 @@ import {
   type BuiltinToolCatalogProjection,
   createCapabilityBinding,
   digestCapabilityBindingValue,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   type BuiltinModelOperationExecutionPort,
-} from '@kite/builtin-runtime/model';
-import { RuntimeHostCapabilityExecutionError } from '@kite/runtime-host';
-import type { CapabilityExecutionPort } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/model';
+import { RuntimeHostCapabilityExecutionError } from '@kite-ai/runtime-host';
+import type { CapabilityExecutionPort } from '@kite-ai/runtime-spi';
 
 /**
  * The single App composition seam between the Builtin Model gateway and the

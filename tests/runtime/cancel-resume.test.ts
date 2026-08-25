@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { SupportedChatModel } from '@kite/builtin-runtime/model';
-import { aiMessage } from '@kite/builtin-runtime/model';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
+import { aiMessage } from '@kite-ai/builtin-runtime/model';
 import {
   createRuntimeHostStateInitialState,
   createZeroResourceUsage,
   LIMITED_RESOURCE_BUDGET_,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { resolveContextProjectionEnvironment } from '#app/bootstrap/runtime/model-effect';
 import type { AuthorizedExecutionControl } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import { eventsForRunCancellation } from '#app/bootstrap/runtime/state-actions';
@@ -61,7 +61,8 @@ describe('bounded Runtime cancellation', () => {
               userId: 'test',
               workspace,
               openStateRuntimeStorage: () => openStateStoreForTest(storePath),
-              model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
+              model:
+                model as unknown as import('@kite-ai/builtin-runtime/model').SupportedChatModel,
               config,
               signal: controller.signal,
             },
@@ -277,7 +278,7 @@ describe('bounded Runtime cancellation', () => {
           userId: 'test',
           workspace,
           openStateRuntimeStorage: () => openStateStoreForTest(storePath),
-          model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
+          model: model as unknown as import('@kite-ai/builtin-runtime/model').SupportedChatModel,
           config,
         },
         { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
@@ -357,7 +358,7 @@ describe('bounded Runtime cancellation', () => {
           userId: 'test',
           workspace,
           openStateRuntimeStorage: () => openStateStoreForTest(storePath),
-          model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
+          model: model as unknown as import('@kite-ai/builtin-runtime/model').SupportedChatModel,
           config,
         },
         { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
@@ -515,7 +516,7 @@ describe('bounded Runtime cancellation', () => {
           userId: 'test',
           workspace,
           openStateRuntimeStorage: () => openStateStoreForTest(storePath),
-          model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
+          model: model as unknown as import('@kite-ai/builtin-runtime/model').SupportedChatModel,
           config,
         },
         { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },

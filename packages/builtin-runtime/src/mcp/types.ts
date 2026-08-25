@@ -46,7 +46,7 @@ export interface McpServerConfig {
   headers?: Record<string, string>;
   auth?: McpAuthConfig;
   /** Opaque Builtin credential authority handle attached by the Supervisor. */
-  credentialHandle?: import('@kite/runtime-spi').CredentialHandle;
+  credentialHandle?: import('@kite-ai/runtime-spi').CredentialHandle;
   /** Server annotations are ignored unless this explicit local trust decision is present. */
   trust?: 'untrusted' | 'trusted' | McpTrustedProvenance;
   /** Optional allowlist applied before disabledTools and exact per-tool overrides. */

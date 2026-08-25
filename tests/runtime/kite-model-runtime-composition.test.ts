@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BuiltinModelOperationExecutionPort } from '@kite/builtin-runtime/model';
+import type { BuiltinModelOperationExecutionPort } from '@kite-ai/builtin-runtime/model';
 import { createInstalledKiteRuntimeCompositionFactory } from '#app/bootstrap/model-runtime-composition';
 
 const previousKiteCodeHome = process.env.KITE_CODE_HOME;

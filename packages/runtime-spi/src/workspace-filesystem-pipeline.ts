@@ -4,7 +4,7 @@ import type {
   WorkspaceFilesystemIntentRecord,
   WorkspaceFilesystemMutationReadyRecord,
   WorkspaceFilesystemObservationRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type { RuntimeJsonValue } from './capability';
 import type { PreparedToolInvocation, ToolPipelineAttemptAcknowledgement } from './tool-pipeline';
 import type {

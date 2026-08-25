@@ -1,4 +1,4 @@
-export type { WorkspaceFilesystemGrantVerifier } from '@kite/runtime-spi';
+export type { WorkspaceFilesystemGrantVerifier } from '@kite-ai/runtime-spi';
 export {
   assertDescriptorRelativeMutationSupported,
   atomicReplaceInLockedWindowsDirectory,

@@ -1,10 +1,10 @@
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { AgentPlan } from '@kite/runtime-contract';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { AgentPlan } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   createZeroResourceUsage,
   LIMITED_RESOURCE_BUDGET_,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   openStateStoreForTest,

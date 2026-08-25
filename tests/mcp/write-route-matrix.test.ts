@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { resolveMcpToolPolicy } from '@kite/builtin-runtime/mcp';
+import { resolveMcpToolPolicy } from '@kite-ai/builtin-runtime/mcp';
 import {
   type McpWriteRouteContract,
   parseMcpWriteRouteRegistry,

@@ -1,4 +1,4 @@
-import type { EffectProfile, PlanningState } from '@kite/runtime-contract';
+import type { EffectProfile, PlanningState } from '@kite-ai/runtime-contract';
 import type {
   CapabilityProfile,
   CapabilityProfileAdmissionDecision,

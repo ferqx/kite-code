@@ -2,22 +2,22 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import { normalizeToolRecoveryJournal } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import type { SupportedChatModel } from '@kite/builtin-runtime/model';
+import { normalizeToolRecoveryJournal } from '@kite-ai/agent-kernel';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
 import {
   type AIMessage,
   aiMessage,
   BuiltinModelEffectCoordinator,
   resolveProjectInstructionSnapshot,
-} from '@kite/builtin-runtime/model';
-import { getRoleConfig } from '@kite/builtin-runtime/subagent';
-import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/model';
+import { getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
+import type { CapabilityBinding, CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { appApprovalBindingForPresentation } from '#app/bootstrap/runtime/approval-binding';
 import {
   executeSubagentResumeWithCoreToolAdapter as resumeSubAgentUnderTest,
@@ -106,17 +106,17 @@ async function resumeSubAgent(
 function directUnitToolDispatcher(input: {
   workspace: string;
   config: AgentConfig;
-  shellExecutor?: import('@kite/builtin-runtime/sandbox').ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
-  mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
-  skills?: import('@kite/builtin-runtime/skills').SkillManifest[];
-  skillOptions?: import('@kite/builtin-runtime/skills').SkillScanOptions;
-  workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
-  phase?: import('@kite/runtime-contract').AgentPhase;
-  interactionMode?: import('@kite/runtime-contract').InteractionMode;
+  shellExecutor?: import('@kite-ai/builtin-runtime/sandbox').ShellExecutor;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
+  mcpManager?: import('@kite-ai/builtin-runtime/mcp').McpRuntimeProvider;
+  skills?: import('@kite-ai/builtin-runtime/skills').SkillManifest[];
+  skillOptions?: import('@kite-ai/builtin-runtime/skills').SkillScanOptions;
+  workspaceAccess?: import('@kite-ai/runtime-contract').WorkspaceAccess;
+  phase?: import('@kite-ai/runtime-contract').AgentPhase;
+  interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
   threadId?: string;
-  projectInstructions?: import('@kite/builtin-runtime/model').ProjectInstructionSnapshot;
-  recordFilePreimage?: import('@kite/runtime-host/storage').RuntimeHostFilePreimageRecorder;
+  projectInstructions?: import('@kite-ai/builtin-runtime/model').ProjectInstructionSnapshot;
+  recordFilePreimage?: import('@kite-ai/runtime-host/storage').RuntimeHostFilePreimageRecorder;
 }): import('#app/bootstrap/runtime/subagent/types').SubAgentToolDispatcher {
   const identity = input as object;
   const cached = unitToolDispatchers.get(identity);
@@ -156,7 +156,7 @@ function directUnitToolDispatcher(input: {
       const executed = await executeTestRuntimeTool({
         workspace: input.workspace,
         toolName: child.request.name,
-        args: child.request.args as import('@kite/runtime-spi').RuntimeJsonValue,
+        args: child.request.args as import('@kite-ai/runtime-spi').RuntimeJsonValue,
         toolCallId: runtimeToolCallId,
         modelMessageId: child.modelInvocationId,
         state: runtimeState,

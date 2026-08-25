@@ -13,7 +13,7 @@
 Plan 是 Runtime Kernel 管理的版本化 Artifact，不是模型消息中的临时字段。所有生命周期变化通过 `plan.*` Runtime events 进入 reducer；Scheduler 根据计划和交互状态产生模型调用、审核请求或执行 Effect。
 
 Builtin frozen catalog 已把 `read_plan`、`write_plan`、`update_plan` 的 model schema、parser、effects、
-availability、revision 与 operation owner 收口到 `@kite/builtin-runtime`，并通过唯一 SPI snapshot 投影；
+availability、revision 与 operation owner 收口到 `@kite-ai/builtin-runtime`，并通过唯一 SPI snapshot 投影；
 `apps/kite/src/bootstrap/runtime/plan-runtime.ts` 是 App 的 Runtime State/SQLite Store persistence/effect bridge，不是第二 schema authority。
 Runtime Action 使用统一发射协议：成功结果携带按提交顺序排列的
 `RuntimeEvent[]`，拒绝结果不得携带领域事件。`read_plan`、`write_plan` 与 `update_plan`

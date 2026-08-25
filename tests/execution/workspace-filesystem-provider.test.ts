@@ -17,8 +17,8 @@ import {
   workspaceFilesystemMutationReadyDigest,
   workspaceFilesystemProtectedBoundaryDigest,
   workspaceFilesystemTargetEvidence,
-} from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import type {
   FilesystemObserveGrant,
   WorkspaceFilesystemGrantBinding,
@@ -27,7 +27,7 @@ import type {
   WorkspaceFilesystemProtectedBoundary,
   WorkspaceFilesystemProviderFailureCode,
   WorkspaceFilesystemProviderResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { ScriptableFakeWorkspaceFilesystemProvider } from '../helpers/workspace-filesystem-provider';
 
 const workspaces: string[] = [];

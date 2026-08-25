@@ -10,17 +10,17 @@ import {
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type {
   RuntimeHostCoordinatorPort,
   RuntimeHostExecutionBridge,
   RuntimeHostPreparedExecution,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   type RuntimeHostKernelInput,
   runtimeCommandFromKernelInput,
-} from '@kite/runtime-host/kernel-adapter';
-import type { ProjectIdentity } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { ProjectIdentity } from '@kite-ai/runtime-spi';
 import { projectRuntimeEphemeralNotification } from '../../bootstrap/presentation-notification';
 import type { RuntimeEvent } from '../../bootstrap/runtime/state-runtime';
 import { type SessionDeps, SessionManager, type SessionRuntime } from '../../runtime/session';

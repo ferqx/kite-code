@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { BuiltinModelToolCatalogEntry } from '@kite/builtin-runtime';
+import type { BuiltinModelToolCatalogEntry } from '@kite-ai/builtin-runtime';
 import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
   formatBuiltinToolParseError,
   formatBuiltinToolSchemaHint,
-} from '@kite/builtin-runtime';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 
 function modelEntry(name: string): BuiltinModelToolCatalogEntry {
   const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());

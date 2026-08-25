@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   chooseCapabilityDisclosure,
   createCapabilityBinding,
@@ -7,16 +7,16 @@ import {
   modelVisibleCapabilitySchema,
   searchCapabilitySnapshot,
   searchUnavailableProviders,
-} from '@kite/builtin-runtime';
-import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import { aiMessage } from '@kite/builtin-runtime/model';
-import { createCapabilitySnapshot, descriptorRevision } from '@kite/builtin-runtime/skills';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime';
+import { McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
+import { aiMessage } from '@kite-ai/builtin-runtime/model';
+import { createCapabilitySnapshot, descriptorRevision } from '@kite-ai/builtin-runtime/skills';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config/index';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {

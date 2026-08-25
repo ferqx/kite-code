@@ -16,11 +16,11 @@ import type {
   ExecutionBoundaryAdmissionReason,
   InProcessReadOnlyToolCatalog,
   ProductionExecutionQualification,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   isDescriptorAdmittedByInProcessReadOnlyCatalog,
   readExecutionEnvironmentIdentity,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_,
   admitProductionExecutionBoundary,

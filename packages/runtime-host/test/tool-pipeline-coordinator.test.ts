@@ -4,7 +4,7 @@ import {
   type RuntimeHostToolInvocationOutcomeAuthority,
   type RuntimeHostToolPipelineAttemptCoordinator,
   RuntimeHostToolPipelineAttemptCoordinatorError,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import type {
   CapabilityToolTerminalResult,
   NonDynamicOperationId,
@@ -21,7 +21,7 @@ import type {
   ToolPipelineSuspendedExecutionResult,
   ToolPipelineSuspension,
   ToolPipelineTaskSubagentSuspension,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const operationId = 'builtin:fixture' as NonDynamicOperationId;
 
@@ -1576,7 +1576,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
     const source = await Bun.file(
       new URL('../src/execution/tool-pipeline-coordinator.ts', import.meta.url),
     ).text();
-    for (const forbidden of ['@kite/builtin-runtime', '#app', '@/core', 'src/core']) {
+    for (const forbidden of ['@kite-ai/builtin-runtime', '#app', '@/core', 'src/core']) {
       expect(source).not.toContain(forbidden);
     }
   });

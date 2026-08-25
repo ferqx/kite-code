@@ -5,7 +5,7 @@ import type {
   McpServerConfig,
   McpServerKey,
   McpSupervisor,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import type { McpWritableScope } from '#app/config';
 import {
   decideProjectMcpServer,

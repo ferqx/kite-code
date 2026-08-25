@@ -2,7 +2,7 @@
 // AI SDK-compatible mock model for tests.
 // Replaces the old StreamingMockModel that extended BaseChatModel.
 
-import type { AIMessage, BaseMessage, SupportedChatModel } from '@kite/builtin-runtime/model';
+import type { AIMessage, BaseMessage, SupportedChatModel } from '@kite-ai/builtin-runtime/model';
 import type { LanguageModel } from 'ai';
 
 export interface MockResponse {

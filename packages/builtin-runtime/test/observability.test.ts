@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { OBSERVABILITY_METRIC_DRAFT_SCHEMA_ } from '@kite/runtime-contract';
+import { OBSERVABILITY_METRIC_DRAFT_SCHEMA_ } from '@kite-ai/runtime-contract';
 import {
   createBuiltinObservabilityProjector,
   LowCardinalityAliasMapper,

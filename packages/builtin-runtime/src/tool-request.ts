@@ -1,15 +1,15 @@
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import type {
   CapabilityExecutionMechanism,
   CapabilityTurnContext,
   ValidatedInvocation as RuntimeValidatedInvocation,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { BuiltinModelToolCatalogEntry, BuiltinToolCatalogProjection } from './tool-catalog';
 import type { KnownToolName } from './tool-contracts';
 
 export type BuiltinToolAvailabilityContext = CapabilityTurnContext & {
   readonly workspace: string;
-  readonly interactionMode?: import('@kite/runtime-contract').InteractionMode;
+  readonly interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
 };
 
 export interface BuiltinValidatedInvocationProjection {
@@ -71,7 +71,7 @@ type PendingTaskRequest = PendingBuiltinToolRequestBase & {
     | {
         name: string;
         subagent_type: 'explore' | 'plan' | 'code' | 'review';
-        taskArtifact: import('@kite/runtime-spi').SubagentTaskRequestArtifact;
+        taskArtifact: import('@kite-ai/runtime-spi').SubagentTaskRequestArtifact;
       };
 };
 

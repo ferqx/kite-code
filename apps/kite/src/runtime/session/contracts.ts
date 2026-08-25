@@ -1,7 +1,7 @@
 import type {
   McpProviderDirectoryStatus,
   McpProviderRecoveryAction,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import type {
   AgentPhase,
   AgentPlan,
@@ -11,9 +11,9 @@ import type {
   ToolApprovalPayload,
   UserInputPayload,
   WorkspaceAccess,
-} from '@kite/runtime-contract';
-import { InteractionMode } from '@kite/runtime-contract';
-import type { StateRuntimeEvent } from '@kite/runtime-host';
+} from '@kite-ai/runtime-contract';
+import { InteractionMode } from '@kite-ai/runtime-contract';
+import type { StateRuntimeEvent } from '@kite-ai/runtime-host';
 import type { SandboxBackend } from '#app/sandbox/types';
 
 export type SessionUserAction =
@@ -82,7 +82,7 @@ export interface SessionStatusProjection {
   thinkingMode: string;
   reasoningEnabled?: boolean;
   retryState: { attempt: number; maxAttempts: number; error: string; delayMs: number } | null;
-  contextSnapshot?: import('@kite/runtime-contract').ContextStatusSnapshot;
+  contextSnapshot?: import('@kite-ai/runtime-contract').ContextStatusSnapshot;
 }
 
 export interface SessionListProjection {

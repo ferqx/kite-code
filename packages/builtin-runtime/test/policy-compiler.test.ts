@@ -6,12 +6,12 @@ import {
   compileBuiltinDynamicMcpPolicy,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   type CapabilityPolicyCompilation,
   type CapabilityPolicyContext,
   createRuntimeModuleRegistry,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const CONTEXT: CapabilityPolicyContext = Object.freeze({
   workspace: '/tmp/kite-policy-workspace',

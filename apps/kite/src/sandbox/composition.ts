@@ -4,11 +4,11 @@ import type {
   ExecutionCapabilitySurface,
   ProductionExecutionEntrypoint,
   ShellExecutor,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   discoverSandboxBackendCandidate,
   type SandboxBackend,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import { computeExecutionBoundaryDigest } from '#app/config/execution-boundary';
 import { createAcknowledgedHostShellExecutor } from './acknowledged-host-shell';
 import { createGovernedLocalSandboxExecutor } from './governed-local-sandbox';

@@ -1,8 +1,8 @@
 import type {
   McpProviderDirectoryStatus,
   McpProviderRecoveryAction,
-} from '@kite/builtin-runtime/mcp';
-import type { UserInputPayload } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/mcp';
+import type { UserInputPayload } from '@kite-ai/runtime-contract';
 
 export function providerActionInput(
   providerId: string,

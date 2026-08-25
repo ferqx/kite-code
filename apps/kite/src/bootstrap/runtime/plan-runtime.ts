@@ -1,23 +1,23 @@
-import type { BuiltinRuntimeEventValue } from '@kite/builtin-runtime';
+import type { BuiltinRuntimeEventValue } from '@kite-ai/builtin-runtime';
 import {
   createBuiltinPlanDocument,
   isBuiltinSavedReplanRevision,
   PlanArtifactError,
   type PlanArtifactStore,
   projectBuiltinPublicPlan,
-} from '@kite/builtin-runtime/planning';
+} from '@kite-ai/builtin-runtime/planning';
 import type {
   BuiltinPlanActionResult,
   BuiltinPlanningExecutionMechanism,
   BuiltinReadPlanInput,
   BuiltinUpdatePlanInput,
   BuiltinWritePlanInput,
-} from '@kite/builtin-runtime/subagent';
-import type { PlanArtifactRef } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/subagent';
+import type { PlanArtifactRef } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostInteractionId as genInteractionId,
   type StateRuntimeEvent as RuntimeEvent,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   acceptRuntimeAction,
   getActivePlanning,
@@ -31,7 +31,7 @@ import {
   runtimeHostStatePlanCommandFacts,
   runtimeHostStatePlanCompletionBlocker,
   runtimeHostStateProjectPlanCompletionEvidence,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 
 export interface PlanRuntimeContext {
   state: RuntimeState;

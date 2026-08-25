@@ -12,7 +12,7 @@ import {
   RUNTIME_STATE_SCHEMA_VERSION as KERNEL_STATE_SCHEMA_VERSION,
   type PlanningState,
   type WorkspaceAccess,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import { createLiveRuntimeIdSource, type RuntimeIdSource } from '../runtime-id-source';
 
 /**

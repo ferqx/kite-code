@@ -11,7 +11,7 @@ import {
   type ToolOutcomeStatus,
   type ToolRecoveryDisposition,
   type UnknownToolFieldsObservation,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 export type StateToolDispatchState = ToolDispatchState;
 export type StateToolExternalEffects = ToolExternalEffects;

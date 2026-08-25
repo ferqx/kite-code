@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { BuiltinWorkspaceFilesystemInvocationDispatcher } from '@kite/builtin-runtime/filesystem';
+import type { BuiltinWorkspaceFilesystemInvocationDispatcher } from '@kite-ai/builtin-runtime/filesystem';
 import {
   AppBuiltinMechanismResolverError,
   type AppBuiltinPreassembledMechanismResolverInput,

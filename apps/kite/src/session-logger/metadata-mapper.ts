@@ -1,8 +1,8 @@
-import type { StateRuntimeEvent as RuntimeEvent } from '@kite/runtime-host';
+import type { StateRuntimeEvent as RuntimeEvent } from '@kite-ai/runtime-host';
 import {
   runtimeHostStateCanonicalToolOutcome as canonicalToolOutcome,
   type StateToolOutcome as ToolOutcome,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type { MetadataEventRecord, MetadataFields, SessionMetadataContext } from './types';
 
 const BUILTIN_TOOL_KINDS = new Set([

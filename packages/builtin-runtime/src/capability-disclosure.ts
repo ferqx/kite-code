@@ -3,8 +3,8 @@ import type {
   CapabilitySearchCandidate,
   CapabilitySearchProviderDiagnostic,
   CapabilitySnapshot,
-} from '@kite/runtime-contract';
-import type { RuntimeJsonValue } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-contract';
+import type { RuntimeJsonValue } from '@kite-ai/runtime-spi';
 import { safeCapabilityMetadata } from './mcp/capability-domain';
 import type { McpDiagnosticCode } from './mcp/diagnostics';
 import { isMcpProviderUnavailable, mcpProviderSearchNextAction } from './mcp/provider-status';

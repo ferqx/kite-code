@@ -1,7 +1,7 @@
 import type {
   GitShellDenyEvidence,
   ExecutionBackendCapabilities as SpiExecutionBackendCapabilities,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { SandboxBackend } from './platform';
 
 export type ExecutionBackendCapabilities = SpiExecutionBackendCapabilities;
@@ -92,7 +92,7 @@ export interface ProductionExecutionQualification {
     localStdioMcp: boolean;
     /** Optional brokered-Git qualification; absence means both Git axes are excluded. */
     brokeredGit?: {
-      featureRevision: typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
+      featureRevision: typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
       inspect: boolean;
       shellDenyEvidence: GitShellDenyEvidence;
     };
@@ -125,7 +125,7 @@ export interface ExecutionCapabilitySurface {
   gitInspect: boolean;
   /** Disclosure, dispatch and native shell metadata deny must match this exact revision. */
   brokeredGitFeatureRevision:
-    | typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_
+    | typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_
     | null;
 }
 

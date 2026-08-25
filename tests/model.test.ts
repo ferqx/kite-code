@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createChatModel } from '@kite/builtin-runtime/model';
+import { createChatModel } from '@kite-ai/builtin-runtime/model';
 import type { AgentConfig } from '#app/config/index';
 
 describe('model provider factory', () => {

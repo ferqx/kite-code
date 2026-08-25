@@ -1,23 +1,23 @@
-import { toolRequestFromCall } from '@kite/builtin-runtime';
+import { toolRequestFromCall } from '@kite-ai/builtin-runtime';
 import {
   digestProjectionEnvironment,
   type ModelInvocationPersistence,
   resolveAutoReviewConfig,
   resolveModelCapabilities,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
   type SkillCatalogSnapshot,
-} from '@kite/builtin-runtime/skills';
-import type { SubAgentEventSink } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/skills';
+import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateDecideAutoReview as decideAutoReview,
   deferredStateRuntimeEffect,
   runtimeHostStateCheckDoomLoopFingerprint,
   runtimeHostStateToolDoomLoopFingerprint,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import { readPrivateSuspendedSubagent } from '../../runtime/tool-execution/subagent-executor';
 import {
@@ -153,7 +153,7 @@ export function createAppRuntimeEffectExecutor(
           persistence: {
             getState: () =>
               (executionContext.getState?.() ??
-                state) as import('@kite/runtime-host').StateRuntimeState,
+                state) as import('@kite-ai/runtime-host').StateRuntimeState,
             persistEvents: executionContext.persistEvents,
           },
           state,

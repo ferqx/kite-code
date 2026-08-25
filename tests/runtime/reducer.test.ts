@@ -1,21 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
 import type {
   AgentPlan,
   AgentPlanStep,
   PlanDocument,
   PlanningState,
   ToolApprovalPayload,
-} from '@kite/runtime-contract';
-import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-contract';
+import type { RuntimeState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   setActivePlanning,
-} from '@kite/runtime-host/kernel-adapter';
-import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { DurableSuspendedSubagent } from '@kite-ai/runtime-spi';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDocument, currentPlanDraftedEvent } from '../helpers/current-plan';

@@ -22,7 +22,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sqliteCurrentRuntimeStorePath } from '@kite/runtime-storage-sqlite';
+import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 
 export interface TestWorkspace {
   /** Temp HOME directory */

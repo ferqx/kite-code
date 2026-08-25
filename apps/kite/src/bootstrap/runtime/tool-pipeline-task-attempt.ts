@@ -1,12 +1,12 @@
 import {
   type BuiltinOperationExecutionValue,
   createBuiltinPreparedTaskDispatchAdapter,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import type {
   RuntimeHostCommittedToolInvocationAuthority,
   RuntimeHostSuspendedToolInvocationAuthority,
-} from '@kite/runtime-host';
-import type { RuntimeHostStateToolGovernanceAuthorizationInput } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host';
+import type { RuntimeHostStateToolGovernanceAuthorizationInput } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CapabilityExecutionPort,
   CapabilityToolTerminalResult,
@@ -18,7 +18,7 @@ import type {
   ToolPipelineResolutionContext,
   ToolPipelineStageFailure,
   ToolPipelineTaskSubagentSuspension,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { AppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
 import {
   type CreateAppBuiltinPreparedDispatchPortInput,

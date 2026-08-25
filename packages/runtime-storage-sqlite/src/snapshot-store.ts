@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import type { RuntimeSnapshotMetadata } from '@kite/runtime-host/storage';
+import type { RuntimeSnapshotMetadata } from '@kite-ai/runtime-host/storage';
 import {
   checksum,
   type NamedSnapshotRow,

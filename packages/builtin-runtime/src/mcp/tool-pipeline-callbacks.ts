@@ -1,4 +1,4 @@
-import type { CapabilityDescriptor as RuntimeCapabilityDescriptor } from '@kite/runtime-contract';
+import type { CapabilityDescriptor as RuntimeCapabilityDescriptor } from '@kite-ai/runtime-contract';
 import type {
   CapabilityApproval,
   CapabilityBinding,
@@ -28,11 +28,11 @@ import type {
   ToolResolutionResult,
   ToolValidationResult,
   ValidatedInvocation,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   CAPABILITY_POLICY_COMPILATION_SCHEMA_,
   TOOL_PIPELINE_STAGE_SCHEMA_,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from '../capability-binding';
 import {
   BUILTIN_DYNAMIC_MCP_OPERATION_ID_,
@@ -987,7 +987,7 @@ function sameDynamicWrapper(
 }
 
 function bindingMatchesDynamicSubject(
-  binding: Readonly<CapabilityBinding | import('@kite/runtime-contract').CapabilityBinding>,
+  binding: Readonly<CapabilityBinding | import('@kite-ai/runtime-contract').CapabilityBinding>,
   identity: Readonly<DynamicMcpPreparedToolInvocationIdentity>,
 ): boolean {
   return (
@@ -1003,7 +1003,7 @@ function bindingMatchesDynamicSubject(
 function factsMatchIdentity(
   facts: BuiltinDynamicMcpSubjectFacts,
   identity: Readonly<DynamicMcpPreparedToolInvocationIdentity>,
-  binding: Readonly<CapabilityBinding | import('@kite/runtime-contract').CapabilityBinding>,
+  binding: Readonly<CapabilityBinding | import('@kite-ai/runtime-contract').CapabilityBinding>,
 ): boolean {
   const descriptor = facts.descriptor;
   const effectsDigest = digestCapabilityBindingValue(descriptor.effectiveEffects);
@@ -1172,7 +1172,7 @@ function descriptorRevisionIsValid(descriptor: Readonly<RuntimeCapabilityDescrip
 }
 
 function validBindingId(
-  binding: Readonly<CapabilityBinding | import('@kite/runtime-contract').CapabilityBinding>,
+  binding: Readonly<CapabilityBinding | import('@kite-ai/runtime-contract').CapabilityBinding>,
 ): boolean {
   return (
     typeof binding.bindingId === 'string' &&
@@ -1253,11 +1253,11 @@ function freezeToolCall(call: Readonly<ToolCallSnapshot>): Readonly<ToolCallSnap
 }
 
 function freezeAvailabilityContext(
-  context: Readonly<import('@kite/runtime-spi').CapabilityAvailabilityContext>,
-): Readonly<import('@kite/runtime-spi').CapabilityAvailabilityContext> {
+  context: Readonly<import('@kite-ai/runtime-spi').CapabilityAvailabilityContext>,
+): Readonly<import('@kite-ai/runtime-spi').CapabilityAvailabilityContext> {
   return freezeJson(
     context as unknown as RuntimeJsonValue,
-  ) as unknown as import('@kite/runtime-spi').CapabilityAvailabilityContext;
+  ) as unknown as import('@kite-ai/runtime-spi').CapabilityAvailabilityContext;
 }
 
 function freezeEffects(value: CapabilityEffects): Readonly<CapabilityEffects> {

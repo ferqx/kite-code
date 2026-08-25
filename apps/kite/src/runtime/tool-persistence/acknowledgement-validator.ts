@@ -1,11 +1,11 @@
-import type { StateRuntimeState } from '@kite/runtime-host';
+import type { StateRuntimeState } from '@kite-ai/runtime-host';
 import type {
   ToolPipelineAttemptAcknowledgement,
   ToolPipelineReceiptCommit,
   ToolPipelineRetryableCommit,
   ToolPipelineSuspensionCommit,
   ToolPipelineUnknownOutcome,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { AppStateToolPipelinePersistenceError } from './contracts';
 
 export function assertSupportedAcknowledgement(

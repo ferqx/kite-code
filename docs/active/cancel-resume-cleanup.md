@@ -248,8 +248,8 @@ wall-clock 回拨不能复活旧 hint；hint 被驱逐或过期只能返回
 `recovery_required`，不能把缺失状态解释为 stopped。startup recovery 在 Scheduler 前执行相同路径；确认 cleanup
 前 fork 和新 attempt 都被阻断。
 
-以上协议与生命周期的物理 owner 已切到 Builtin Runtime：`@kite/runtime-spi` 定义 JSON-safe
-Subagent/Provider/continuation contract，`@kite/builtin-runtime` 拥有 sealed grant、Local Provider、唯一 composition、
+以上协议与生命周期的物理 owner 已切到 Builtin Runtime：`@kite-ai/runtime-spi` 定义 JSON-safe
+Subagent/Provider/continuation contract，`@kite-ai/builtin-runtime` 拥有 sealed grant、Local Provider、唯一 composition、
 continuation JSON/cursor、role ceiling、replay binding 与 `BuiltinChildRuntimeDriver`。App composition root 只构造一个
 Builtin Driver/composition，`apps/kite/src/bootstrap/runtime/subagent/task-tool.ts` 的 Runtime State registration adapter
 仅以 invocation-scoped callback 注入 tool/receipt translation。缺少调用者已经解析的 Model 或同一

@@ -1,4 +1,4 @@
-import type { CapabilityTurnContext } from '@kite/runtime-spi';
+import type { CapabilityTurnContext } from '@kite-ai/runtime-spi';
 import type { SkillCatalogSnapshot } from './skills/catalog';
 
 export interface BuiltinCapabilityTurnContextInput {

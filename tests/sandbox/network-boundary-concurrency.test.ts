@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { exposedMcpToolName, McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import type { ExecutionBoundary, ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { exposedMcpToolName, McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
+import type { ExecutionBoundary, ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
 import {
   type BuiltinPreparedShellExecutionInput,
   createNetworkBoundaryFetch,
@@ -13,8 +13,8 @@ import {
   type NetworkResolvedAddress,
   networkBoundaryPolicyFromExecutionBoundary,
   SandboxPreparationArtifactStore,
-} from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
   projectAppHostShellResult,

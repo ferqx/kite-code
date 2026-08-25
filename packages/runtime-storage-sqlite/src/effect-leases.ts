@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import type { EffectLeasePort } from '@kite/runtime-host/storage';
+import type { EffectLeasePort } from '@kite-ai/runtime-host/storage';
 
 export interface SqliteEffectLeaseStore {
   readonly port: EffectLeasePort;

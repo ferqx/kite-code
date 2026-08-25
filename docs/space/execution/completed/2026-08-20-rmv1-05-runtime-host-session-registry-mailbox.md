@@ -13,7 +13,7 @@
 
 ## 交付结论
 
-RMV1-05 已把 production `RuntimeAccess` 从 App legacy adapter 切到 `@kite/runtime-host`：
+RMV1-05 已把 production `RuntimeAccess` 从 App legacy adapter 切到 `@kite-ai/runtime-host`：
 
 - `DefaultRuntimeHost` 实现 `command/query/subscribe/start/AsyncDispose`；
 - `SessionRegistry` 为每个 Session 保留一个稳定 mailbox 和最后 committed Client projection；

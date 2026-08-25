@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { BuiltinOperationExecutionValue } from '@kite/builtin-runtime';
+import type { BuiltinOperationExecutionValue } from '@kite-ai/builtin-runtime';
 import {
   BUILTIN_PREPARED_CALL_FACTS_SCHEMA_,
   createBuiltinPreparedTaskDispatchAdapter,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
   digestCapabilityBindingValue,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import type {
   ExecutionReceipt,
   NonDynamicOperationId,
@@ -16,7 +16,7 @@ import type {
   ToolPipelineAttemptAcknowledgement,
   ToolPipelineOutcomeDispatch,
   ToolPipelinePersistence,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { createAppToolPipelineAttemptComposition } from '#app/bootstrap/runtime/tool-pipeline-attempt-composition';
 import { createRuntimeModuleRegistry } from '#runtime-spi';
 

@@ -1,9 +1,9 @@
-import type { NetworkBoundaryPolicy } from '@kite/builtin-runtime/sandbox';
+import type { NetworkBoundaryPolicy } from '@kite-ai/builtin-runtime/sandbox';
 import {
   createNetworkBoundaryFetch,
   type NetworkDecisionRecorder,
-} from '@kite/builtin-runtime/sandbox';
-import type { SkillActivationContext } from '@kite/builtin-runtime/skills';
+} from '@kite-ai/builtin-runtime/sandbox';
+import type { SkillActivationContext } from '@kite-ai/builtin-runtime/skills';
 import type {
   BuiltinSkillExecutionMechanism,
   BuiltinWebExecutionMechanism,

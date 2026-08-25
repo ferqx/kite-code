@@ -9,13 +9,13 @@ import {
   ModelArtifactStore,
   PrivateArtifactStorageError,
   PrivateImmutableArtifactStorage,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   MODEL_RESPONSE_RECORD_SCHEMA_,
   MODEL_SURFACE_SCHEMA_,
   type ModelResponseRecord,
   type ModelSurface,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 let tempRoot: string | undefined;
 

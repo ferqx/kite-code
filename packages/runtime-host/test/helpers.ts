@@ -6,19 +6,19 @@ import {
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import {
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionBridge,
   type RuntimeHostExecutionServices,
   type RuntimeHostPreparedExecution,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   type RuntimeHostKernelInput,
   runtimeCommandFromKernelInput,
-} from '@kite/runtime-host/kernel-adapter';
-import type { RuntimeStorage } from '@kite/runtime-host/storage';
-import { defineRuntimeModule, type RuntimeModule } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { RuntimeStorage } from '@kite-ai/runtime-host/storage';
+import { defineRuntimeModule, type RuntimeModule } from '@kite-ai/runtime-spi';
 
 export function projection(sessionId: string, revision: number): RuntimeSessionProjection {
   return {

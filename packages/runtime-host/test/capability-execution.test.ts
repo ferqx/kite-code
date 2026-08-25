@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import {
   createRuntimeHostCapabilityExecutionPortFromSnapshot,
   RuntimeHostCapabilityExecutionError,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   type CapabilityExecutionInvocation,
   type CapabilityExecutor,
   createRuntimeModuleRegistry,
   defineRuntimeModule,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const CAPABILITY_ID = 'builtin:fixture';
 const CAPABILITY_REVISION = 'capability-1';

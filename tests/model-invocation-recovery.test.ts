@@ -9,7 +9,7 @@ import {
   ModelArtifactStore,
   ModelInvocationGateway,
   PrivateArtifactStorageError,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import type { AgentConfig } from '#app/config';
 import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../scripts/support/runtime-storage';

@@ -1,5 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import type { RuntimeRecoveryIdentityPort } from '@kite/runtime-host/storage';
+import type { RuntimeRecoveryIdentityPort } from '@kite-ai/runtime-host/storage';
 import {
   assertNonEmptySessionId,
   isCanonicalRecoveryIdentity,

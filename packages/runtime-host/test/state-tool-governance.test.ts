@@ -5,17 +5,17 @@ import {
   approvalCommandGrantKey,
   createToolApprovalBindingDigest,
   createToolGovernanceCommandDigest,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateToolGovernance,
   type RuntimeHostStateToolGovernanceAuthorizationInput,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   CAPABILITY_POLICY_COMPILATION_SCHEMA_,
   type CapabilityEffects,
   type ClassifiedInvocation,
   type ToolPipelineGovernanceProjection,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const A = 'a'.repeat(64);
 const B = 'b'.repeat(64);

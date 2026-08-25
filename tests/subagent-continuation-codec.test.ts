@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { ToolGovernanceInvocationFact, ToolGovernancePolicyFact } from '@kite/agent-kernel';
+import type { ToolGovernanceInvocationFact, ToolGovernancePolicyFact } from '@kite-ai/agent-kernel';
 import {
   classifyToolOutcome,
   createToolApprovalBindingDigest,
   createToolRecoveryJournal,
   recordRecoveryFailure,
-} from '@kite/agent-kernel';
-import type { AIMessage } from '@kite/builtin-runtime/model';
+} from '@kite-ai/agent-kernel';
+import type { AIMessage } from '@kite-ai/builtin-runtime/model';
 import {
   aiMessage,
   humanMessage,
@@ -16,8 +16,8 @@ import {
   isToolMessage,
   systemMessage,
   toolMessage,
-} from '@kite/builtin-runtime/model';
-import { getRoleConfig } from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/model';
+import { getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   deserializeSubagentContinuation,
@@ -528,7 +528,7 @@ describe('sub-agent continuation codec', () => {
           command: 'read src/index.ts',
         },
       }),
-    ) as import('@kite/runtime-spi').SuspendedSubagentSnapshot;
+    ) as import('@kite-ai/runtime-spi').SuspendedSubagentSnapshot;
 
     expect(() =>
       deserializeSubagentContinuation(legacySnapshot, TEST_RECOVERY_IDENTITY_KEY),

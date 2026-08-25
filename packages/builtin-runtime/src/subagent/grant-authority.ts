@@ -5,8 +5,8 @@ import type {
   SubagentHandle,
   SubagentProviderFailureCode,
   SubagentResumeGrant,
-} from '@kite/runtime-spi';
-import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 
 const DEFAULT_TTL_MS = 5 * 60_000;
 const MAX_CONSUMED_GRANT_TOMBSTONES = 4_096;

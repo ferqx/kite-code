@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { ProjectIdentity } from '@kite/runtime-spi';
+import type { ProjectIdentity } from '@kite-ai/runtime-spi';
 
 /**
  * Resolve the Workspace identity directly from its canonical path. There is

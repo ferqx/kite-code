@@ -1,4 +1,4 @@
-import type { CapabilityBinding } from '@kite/runtime-contract';
+import type { CapabilityBinding } from '@kite-ai/runtime-contract';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics, type PromptCacheMetrics } from './cache-metrics';
 import type { ModelRuntimeConfig } from './config';

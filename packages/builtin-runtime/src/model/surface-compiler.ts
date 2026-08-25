@@ -12,7 +12,7 @@ import {
   type ModelSurface,
   type ResolvedModelCapabilitiesValue,
   type Sha256Digest,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { ToolSet } from 'ai';
 import type { ModelRuntimeConfig } from './config';
 import {

@@ -1,8 +1,8 @@
-import type { BuiltinToolCatalogProjection } from '@kite/builtin-runtime';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { sandboxBackendAvailable } from '@kite/builtin-runtime/sandbox';
-import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
-import { projectRuntimeObservabilityFact } from '@kite/runtime-host';
+import type { BuiltinToolCatalogProjection } from '@kite-ai/builtin-runtime';
+import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
+import { sandboxBackendAvailable } from '@kite-ai/builtin-runtime/sandbox';
+import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
+import { projectRuntimeObservabilityFact } from '@kite-ai/runtime-host';
 import type {
   AuthorizedExecutionControl,
   RuntimeSessionCoordinator,
@@ -565,7 +565,7 @@ export class SessionRuntime {
       dispatch: (action: SessionPresentationAction) => void;
       provider: SessionUserInputProvider;
       config: AgentConfig;
-      model?: import('@kite/builtin-runtime/model').SupportedChatModel;
+      model?: import('@kite-ai/builtin-runtime/model').SupportedChatModel;
     },
     requestedPhase?: AgentPhase,
     initialSkillActivations?: Array<{

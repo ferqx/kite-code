@@ -3,17 +3,17 @@ import {
   capabilityResultDigest,
   capabilityResultEvidenceDigest,
   isBuiltinOperationExecutionValue,
-} from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+} from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   runtimeHostStateAdmitCurrentRuntimeEvent,
   type StateRuntimeEvent,
   type StateRuntimeState,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   runtimeHostStateNormalizeToolRecoveryJournal,
   runtimeHostStateToolRecoveryJournalInvalid,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   PreparedToolInvocation,
   PrivateSuspendedSubagentRecord,
@@ -22,7 +22,7 @@ import type {
   ToolPipelineSuspendedExecutionResult,
   ToolPipelineSuspensionCommit,
   ToolPipelineTaskSubagentSuspension,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   AppStateToolPipelinePersistenceError,
   type CreateAppStateToolPipelinePersistenceInput,

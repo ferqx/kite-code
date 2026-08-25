@@ -1,39 +1,39 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 
 import {
   LocalWorkspaceFilesystemProvider,
   verifyBuiltinWorkspaceFilesystemTerminal,
   WorkspaceFilesystemGrantAuthority,
-} from '@kite/builtin-runtime/filesystem';
-import { BuiltinModelEffectCoordinator } from '@kite/builtin-runtime/model';
-import { PlanArtifactStore } from '@kite/builtin-runtime/planning';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { BuiltinModelEffectCoordinator } from '@kite-ai/builtin-runtime/model';
+import { PlanArtifactStore } from '@kite-ai/builtin-runtime/planning';
 import {
   canonicalPathForComparison,
   SandboxPreparationArtifactStore,
   type ShellExecutor,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   BuiltinChildRuntimeDriver,
   createGovernedLocalSubagentComposition,
   subagentTaskDigest,
-} from '@kite/builtin-runtime/subagent';
-import { createRuntimeHostInteractionId } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/subagent';
+import { createRuntimeHostInteractionId } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeHostStateInitialStateInput,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   PrivateSuspendedSubagentRecord,
   RuntimeJsonValue,
   SubagentHandle,
   SuspendedSubagentSnapshot,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { projectPrimaryModelEffect } from '#app/bootstrap/runtime/model-effect';
 import { ProviderReadinessCoordinator } from '#app/bootstrap/runtime/provider-readiness';
 import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
@@ -135,14 +135,14 @@ export function testSubagentComposition() {
   const tasks = new Map<
     string,
     {
-      owner: import('@kite/builtin-runtime/subagent').SubagentTaskArtifactOwner;
+      owner: import('@kite-ai/builtin-runtime/subagent').SubagentTaskArtifactOwner;
       task: string;
       taskDigest: string;
-      ref: import('@kite/runtime-spi').SubagentTaskArtifact;
+      ref: import('@kite-ai/runtime-spi').SubagentTaskArtifact;
     }
   >();
   const handles = new Map<string, SubagentHandle>();
-  const taskArtifacts: import('@kite/builtin-runtime/subagent').SubagentTaskArtifactAccess = {
+  const taskArtifacts: import('@kite-ai/builtin-runtime/subagent').SubagentTaskArtifactAccess = {
     write: ({ owner, task }) => {
       const taskDigest = subagentTaskDigest(task);
       const artifactId = `pa_${digestCapabilityValue({ owner, taskDigest })}`;
@@ -180,7 +180,7 @@ export function testSubagentComposition() {
       };
     },
   };
-  const lifecycleArtifacts: import('@kite/builtin-runtime/subagent').SubagentLifecycleArtifactAccess =
+  const lifecycleArtifacts: import('@kite-ai/builtin-runtime/subagent').SubagentLifecycleArtifactAccess =
     {
       write: (handle, verifier) => {
         const verified = verifier.verifyHandle(handle);
@@ -206,12 +206,12 @@ export function testSubagentComposition() {
   });
 }
 
-export function testSubagentContinuationArtifacts(): import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess {
+export function testSubagentContinuationArtifacts(): import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess {
   const values = new Map<
     string,
     {
-      owner: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactOwner;
-      snapshot: import('@kite/runtime-spi').SuspendedSubagentSnapshot;
+      owner: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactOwner;
+      snapshot: import('@kite-ai/runtime-spi').SuspendedSubagentSnapshot;
     }
   >();
   return {
@@ -250,11 +250,11 @@ export function testPrivateSuspendedSubagent(
     parentInvocationId: string;
     parentAttempt: number;
     parentToolCallId: string;
-    artifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
+    artifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
   },
 ): {
   record: PrivateSuspendedSubagentRecord;
-  artifacts: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
+  artifacts: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
 } {
   const artifacts = options.artifacts ?? testSubagentContinuationArtifacts();
   const continuationId = subagentContinuationCursorId(snapshot);
@@ -302,9 +302,9 @@ export function installTestPrivateSuspendedSubagent(
   options: {
     parentInvocationId?: string;
     parentAttempt?: number;
-    artifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
+    artifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
   } = {},
-): import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess {
+): import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess {
   const parentInvocationId = options.parentInvocationId ?? `test-parent-${toolCallId}`;
   const parentAttempt = options.parentAttempt ?? 1;
   const { record, artifacts } = testPrivateSuspendedSubagent(snapshot, {
@@ -361,7 +361,7 @@ export function installTestPrivateSuspendedSubagent(
   return artifacts;
 }
 
-export function testSubagentTaskRequests(): import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess {
+export function testSubagentTaskRequests(): import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess {
   const values = new Map<
     string,
     {
@@ -411,7 +411,7 @@ export function testModelInvocationRuntime(workspace: string) {
 
 export function testWorkspaceFilesystemRuntime(
   workspace: string,
-  capabilityArtifacts?: import('@kite/builtin-runtime').CapabilityArtifactReader,
+  capabilityArtifacts?: import('@kite-ai/builtin-runtime').CapabilityArtifactReader,
 ) {
   const grants = new WorkspaceFilesystemGrantAuthority();
   return {
@@ -424,7 +424,7 @@ export function testWorkspaceFilesystemRuntime(
         invocationId: string;
         operationDigest: string;
         targetIdentityDigest: string;
-        preimage: import('@kite/runtime-spi').WorkspaceFilesystemPreimageObservation;
+        preimage: import('@kite-ai/runtime-spi').WorkspaceFilesystemPreimageObservation;
       }) => {
         const identity = digestCapabilityValue(input);
         return {
@@ -443,11 +443,11 @@ export function testCapabilityArtifactWriter() {
     string,
     {
       invocationId: string;
-      result: import('@kite/runtime-contract').CapabilityResult;
+      result: import('@kite-ai/runtime-contract').CapabilityResult;
     }
   >();
   return {
-    write: (invocationId: string, result: import('@kite/runtime-contract').CapabilityResult) => {
+    write: (invocationId: string, result: import('@kite-ai/runtime-contract').CapabilityResult) => {
       const identity = digestCapabilityValue({ invocationId, result });
       const ref = {
         artifactId: `pa_${identity}`,
@@ -458,12 +458,12 @@ export function testCapabilityArtifactWriter() {
       artifacts.set(ref.artifactId, { invocationId, result: structuredClone(result) });
       return ref;
     },
-    read: (ref: import('@kite/runtime-contract').CapabilityArtifactRef) => {
+    read: (ref: import('@kite-ai/runtime-contract').CapabilityArtifactRef) => {
       const envelope = artifacts.get(ref.artifactId);
       if (!envelope) throw new Error('Test Capability Artifact is unavailable.');
       return structuredClone(envelope.result);
     },
-    readEnvelope: (ref: import('@kite/runtime-contract').CapabilityArtifactRef) => {
+    readEnvelope: (ref: import('@kite-ai/runtime-contract').CapabilityArtifactRef) => {
       const envelope = artifacts.get(ref.artifactId);
       if (!envelope) throw new Error('Test Capability Artifact is unavailable.');
       return {
@@ -509,7 +509,7 @@ export async function projectTestPrimaryModelEffect(
     'builtinToolCatalog' | 'modelEffectCoordinator'
   > & {
     builtinToolCatalog?: Parameters<typeof projectPrimaryModelEffect>[0]['builtinToolCatalog'];
-    modelInvocationGateway?: import('@kite/builtin-runtime/model').ModelInvocationGateway;
+    modelInvocationGateway?: import('@kite-ai/builtin-runtime/model').ModelInvocationGateway;
     modelEffectCoordinator?: BuiltinModelEffectCoordinator;
   },
 ) {
@@ -701,11 +701,11 @@ export async function executeTestRuntimeTools(
       state: preparedState,
     });
     let readinessState = preparedState;
-    const observedEvents: import('@kite/agent-kernel').RuntimeEvent[] = [];
+    const observedEvents: import('@kite-ai/agent-kernel').RuntimeEvent[] = [];
     const readinessCoordinator = input.mcpManager
       ? (input.providerReadinessCoordinator ?? new ProviderReadinessCoordinator(input.mcpManager))
       : input.providerReadinessCoordinator;
-    const applyObserved = (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
+    const applyObserved = (events: import('@kite-ai/agent-kernel').RuntimeEvent[]) => {
       for (const event of events) {
         if (!input.emitRuntimeEvent || event.type !== 'tool.progress') observedEvents.push(event);
         const normalized = normalizeCurrentToolOutcomeEvent(
@@ -717,7 +717,7 @@ export async function executeTestRuntimeTools(
       }
     };
     const persistRuntimeEvents = async (
-      events: import('@kite/agent-kernel').RuntimeEvent[],
+      events: import('@kite-ai/agent-kernel').RuntimeEvent[],
     ): Promise<boolean> => {
       const applied = input.persistRuntimeEvents
         ? await input.persistRuntimeEvents(events)
@@ -737,7 +737,7 @@ export async function executeTestRuntimeTools(
       }
       return applied;
     };
-    const persistRuntimeEvent = async (event: import('@kite/agent-kernel').RuntimeEvent) =>
+    const persistRuntimeEvent = async (event: import('@kite-ai/agent-kernel').RuntimeEvent) =>
       persistRuntimeEvents([event]);
     const capabilityArtifacts = input.capabilityArtifactStore ?? testCapabilityArtifactWriter();
     const shellExecutor = testPreparedShellExecutor(input.shellExecutor);
@@ -747,7 +747,7 @@ export async function executeTestRuntimeTools(
         ? createTestSandboxPreparationArtifactStore(sandboxPreparationRoots)
         : undefined);
     const persistStrictToolPipelineEvents = async (
-      events: import('@kite/agent-kernel').RuntimeEvent[],
+      events: import('@kite-ai/agent-kernel').RuntimeEvent[],
     ): Promise<boolean> => {
       const beforeRevision = readinessState.revision;
       const applied = await persistRuntimeEvents(events);

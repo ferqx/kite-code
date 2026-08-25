@@ -4,7 +4,7 @@ import {
   type CapabilityExecutionPort,
   type CapabilityRegistrySnapshot,
   type ExecutionReceipt,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 export type RuntimeHostCapabilityExecutionFailureCode =
   | 'binding_invalid'

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { SandboxPreparationIntentRecord } from '@kite/runtime-contract';
+import type { SandboxPreparationIntentRecord } from '@kite-ai/runtime-contract';
 import type {
   PreparedSandboxExecution,
   SandboxExecutionBackend,
@@ -13,7 +13,7 @@ import type {
   SandboxPreparedProcessCleanup,
   SandboxPreparedProcessExecutionResult,
   SandboxPreparedProcessUnknownResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { digestCapabilityBindingValue } from '../capability-binding';
 import { projectApprovedProxyEnvironment } from './approved-proxy-environment';
 import { sandboxBackendCapabilities } from './execution/backend-capabilities';
@@ -64,7 +64,7 @@ export interface BuiltinPreparedShellExecutionConsumerOptions {
   readonly resourceSemantics?: SandboxExecutionProvider['resourceSemantics'];
   readonly backend: Exclude<SandboxExecutionBackend, 'none'>;
   readonly grants: SandboxExecutionGrantAuthority;
-  readonly preparedProcess: import('@kite/runtime-spi').SandboxPreparedProcessExecutionPort;
+  readonly preparedProcess: import('@kite-ai/runtime-spi').SandboxPreparedProcessExecutionPort;
   readonly canonicalWorkspace: string;
   readonly executionBoundaryDigest: string;
   readonly protectedPathRevision: string;

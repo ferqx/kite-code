@@ -3,9 +3,9 @@ import {
   createGitBroker,
   type GitBroker,
   qualifyBrokeredGitNativeDeny,
-} from '@kite/builtin-runtime/git';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
-import { BROKERED_GIT_FEATURE_REVISION_, type GitShellDenyEvidence } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/git';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
+import { BROKERED_GIT_FEATURE_REVISION_, type GitShellDenyEvidence } from '@kite-ai/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
 import { createAppGitProcessAdapter } from './process-adapter';

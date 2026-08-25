@@ -4,9 +4,9 @@ import {
   createMcpTransportBoundaryIdentity,
   McpConnectionManager,
   type McpTransportAdmissionRequest,
-} from '@kite/builtin-runtime/mcp';
-import type { ExecutionBoundary } from '@kite/builtin-runtime/sandbox';
-import { networkBoundaryPolicyFromExecutionBoundary } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/mcp';
+import type { ExecutionBoundary } from '@kite-ai/builtin-runtime/sandbox';
+import { networkBoundaryPolicyFromExecutionBoundary } from '@kite-ai/builtin-runtime/sandbox';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 describe('MCP transport boundary concurrency', () => {

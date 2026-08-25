@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { CapabilityExecutionContext, ExecutionReceipt } from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+import type { CapabilityExecutionContext, ExecutionReceipt } from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import { McpProviderError, type McpProviderFailureKind } from '../src/mcp/provider-errors';
 import {
   BuiltinMcpExecutionUnknownError,

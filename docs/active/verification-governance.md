@@ -30,7 +30,7 @@ receipt reference 缺失时使用 `effect_evidence_required`；两者都绑定�
 Verification executor 通过 Runtime 中立的 `McpRuntimeProvider` 查找当前 descriptor 并执行 MCP read-after-write，不依赖 Supervisor control snapshot 或 TUI。`/mcp` 状态列表显示 ready 不能替代 verification 的 revision 复核。
 
 RM-14 后，确定性检查的物理 owner 是
-`@kite/builtin-runtime#executeDeterministicVerificationChecks`。它只接收 JSON-safe State view 与显式注入的
+`@kite-ai/builtin-runtime#executeDeterministicVerificationChecks`。它只接收 JSON-safe State view 与显式注入的
 Shell、MCP、Artifact reader、AbortSignal/clock port，拥有文件断言、命令、Schema budget validation、
 read-after-write、外部引用、Receipt 检查、逐项 digest 与 outcome aggregation。它不导入 AgentState、
 Runtime Event/Store、Kernel、Host 或 App。App verification effect adapter 负责 Runtime State

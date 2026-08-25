@@ -15,7 +15,7 @@
 
 RMV1-11 已把 Skills、Context ports、MCP connect/discovery/read 与 Web fetch 物理迁入目标边界：
 
-- `@kite/builtin-runtime` 的 RMV1-11 module 唯一拥有 8 个 operation：Web fetch、MCP inventory/resource/dynamic
+- `@kite-ai/builtin-runtime` 的 RMV1-11 module 唯一拥有 8 个 operation：Web fetch、MCP inventory/resource/dynamic
   Tool 与三个 Skill lifecycle operation；`tool_search` module 继续独立拥有第 9 个已迁移 operation；
 - Skill workflow/catalog/activation/lifecycle 实现位于 Builtin `skills/`，Core 只保留 RMV1-16 前的兼容导出；
   调用点把 Agent State 投影为冻结的 active task/workspace/Skill frames 最小 view；

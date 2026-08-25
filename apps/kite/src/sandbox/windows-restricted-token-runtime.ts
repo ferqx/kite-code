@@ -1,4 +1,4 @@
-import type { ShellInput, ShellResult } from '@kite/builtin-runtime/sandbox';
+import type { ShellInput, ShellResult } from '@kite-ai/builtin-runtime/sandbox';
 import {
   appendTimeoutMessage,
   cleanupWindowsSandboxRuntimeDirNoSpawn,
@@ -8,13 +8,13 @@ import {
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
   type WindowsRestrictedTokenPreparedTransport,
   type WindowsSandboxRunner,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   BoundedOutputBuffer,
   BoundedProgressLineBuffer,
   readRuntimeHostProcessOutput as readWithProgress,
   spawnRuntimeHostProcess,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 
 /**
  * The direct restricted-token runner has no large workspace staging phase.

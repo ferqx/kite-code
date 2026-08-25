@@ -3,20 +3,20 @@ import type {
   BuiltinModelToolCatalogEntry,
   BuiltinModelToolSet,
   BuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   createBuiltinCapabilityTurnContext,
   toolExecutionModelContent,
   toolRequestFromCall,
-} from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import type { BaseMessage } from '@kite/builtin-runtime/model';
-import { countTokens, toolMessage } from '@kite/builtin-runtime/model';
-import { msys2ToWindowsPath } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import type { BaseMessage } from '@kite-ai/builtin-runtime/model';
+import { countTokens, toolMessage } from '@kite-ai/builtin-runtime/model';
+import { msys2ToWindowsPath } from '@kite-ai/builtin-runtime/sandbox';
 import {
   canonicalizeCapabilityArguments,
   validateCapabilityArguments,
-} from '@kite/builtin-runtime/skills';
+} from '@kite-ai/builtin-runtime/skills';
 import {
   BuiltinSubagentModelLoopError,
   createBuiltinSubagentModelContext,
@@ -24,12 +24,12 @@ import {
   createBuiltinSubagentToolSurface,
   getRoleConfig,
   rejectShellOutsideSubAgentRoleCeiling,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 import {
   bestEffortRegularFileSize,
   type StateRuntimeEvent as RuntimeEvent,
-} from '@kite/runtime-host';
-import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host';
+import type { RuntimeState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   runtimeHostStateAdmitRecoveryAttempt as admitRecoveryAttempt,
   runtimeHostStateAdvanceToolRecoveryResponse as advanceToolRecoveryResponse,
@@ -44,8 +44,8 @@ import {
   runtimeHostStateRecordToolOwnedProgress as recordToolOwnedProgress,
   type StateToolOutcome as ToolOutcome,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
-} from '@kite/runtime-host/kernel-adapter';
-import type { PersistedExecutionJournalEntry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { PersistedExecutionJournalEntry } from '@kite-ai/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AppApprovalBinding } from '../approval-binding';
 import type { ToolExecutionResult } from '../tool-result';
@@ -73,10 +73,10 @@ function createSubagentToolTurnContext(input: {
   gitBroker?: SubAgentRunnerInput['gitBroker'];
   eventSink?: SubAgentRunnerInput['eventSink'];
   toolSearchEnabled?: boolean;
-  skillCatalog?: import('@kite/builtin-runtime/skills').SkillCatalogSnapshot;
+  skillCatalog?: import('@kite-ai/builtin-runtime/skills').SkillCatalogSnapshot;
   activeSkillFrames?: readonly { activationId: string }[];
-  phase?: import('@kite/runtime-contract').AgentPhase;
-  interactionMode?: import('@kite/runtime-contract').InteractionMode;
+  phase?: import('@kite-ai/runtime-contract').AgentPhase;
+  interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
   threadId?: string;
   turnId?: string;
   taskId?: string;
@@ -230,7 +230,7 @@ function approvalRequiredBlock(
 
 function effectiveInteractionMode(
   input: SubAgentRunnerInput,
-): import('@kite/runtime-contract').InteractionMode {
+): import('@kite-ai/runtime-contract').InteractionMode {
   return input.interactionMode ?? 'accept_edits';
 }
 
@@ -485,7 +485,7 @@ async function executeCoreSubagentToolAdapter(
     // Phase 5: journal tracking for subagent tool executions
     executionJournal: PersistedExecutionJournalEntry[];
     exhaustedFingerprints: Record<string, true>;
-    toolRecovery: import('@kite/runtime-host/kernel-adapter').StateToolRecoveryJournal;
+    toolRecovery: import('@kite-ai/runtime-host/kernel-adapter').StateToolRecoveryJournal;
   },
 ): Promise<SubAgentResult> {
   const id = state.id;
@@ -609,9 +609,9 @@ async function executeCoreSubagentToolAdapter(
           await new Promise((resolveStep) => setTimeout(resolveStep, 0));
           if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
           modelInvocationOrdinal = currentInvocationOrdinal;
-          const appendedMessages: import('@kite/builtin-runtime/model').ToolMessage[] = [];
+          const appendedMessages: import('@kite-ai/builtin-runtime/model').ToolMessage[] = [];
           const appendToolMessage = (
-            message: import('@kite/builtin-runtime/model').ToolMessage,
+            message: import('@kite-ai/builtin-runtime/model').ToolMessage,
           ): void => {
             append([message]);
             appendedMessages.push(message);

@@ -1,4 +1,4 @@
-import type { SubagentTaskArtifact, SubagentTaskRequestArtifact } from '@kite/runtime-spi';
+import type { SubagentTaskArtifact, SubagentTaskRequestArtifact } from '@kite-ai/runtime-spi';
 import {
   canonicalModelJson,
   PrivateArtifactStorageError,

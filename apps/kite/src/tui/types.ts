@@ -8,7 +8,7 @@ import type {
   UserInputPayload,
   UserInputResult,
   WorkspaceAccess,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 
 /** 合并工具摘要中的单条工具记录 / Single tool entry in a consolidated summary */
 export interface ConsolidatedToolEntry {
@@ -293,7 +293,7 @@ export interface TuiState {
   showMcp: boolean;
   showRewind: boolean;
   checkpoints: import('./runtime-presentation').RuntimeCheckpointEntry[];
-  skillManifests: import('@kite/runtime-contract').SkillManifest[];
+  skillManifests: import('@kite-ai/runtime-contract').SkillManifest[];
   ctrlCPressed: boolean;
   sessionKey: number;
   exitRequested: boolean;
@@ -336,7 +336,7 @@ export interface TuiState {
   terminalCompactionNotices?: Record<string, 'completed' | 'failed' | 'cancelled'>;
   /** Ephemeral presentation for the active context compaction. */
   compactionProgress?: {
-    phase: import('@kite/runtime-contract').ContextCompactionProgressPhase;
+    phase: import('@kite-ai/runtime-contract').ContextCompactionProgressPhase;
     source: 'manual' | 'automatic';
   };
 }
@@ -365,8 +365,8 @@ export type InterruptState =
       planId?: string;
       version?: number;
       structuralDigest?: string;
-      plan?: import('@kite/runtime-contract').AgentPlan;
-      artifact?: import('@kite/runtime-contract').PlanArtifactRef;
+      plan?: import('@kite-ai/runtime-contract').AgentPlan;
+      artifact?: import('@kite-ai/runtime-contract').PlanArtifactRef;
     };
 
 export interface RetryState {
@@ -393,7 +393,7 @@ export interface StatusState {
   /** Hidden only when the selected model configuration explicitly sets `reasoning: false`. */
   reasoningEnabled?: boolean;
   retryState: RetryState | null;
-  contextSnapshot?: import('@kite/runtime-contract').ContextStatusSnapshot;
+  contextSnapshot?: import('@kite-ai/runtime-contract').ContextStatusSnapshot;
 }
 
 export interface SessionSnapshot {
@@ -405,7 +405,7 @@ export interface SessionSnapshot {
   pendingInterrupt: boolean;
   /** Full interrupt state for session-switch restoration. Set on switch-away, read on switch-back. */
   interrupt: InterruptState | null;
-  plan: import('@kite/runtime-contract').AgentPlan | null;
+  plan: import('@kite-ai/runtime-contract').AgentPlan | null;
   /** Last explicit Session interaction mode; Plan execution mode is orthogonal. */
   interactionMode?: InteractionMode;
   status: StatusState;

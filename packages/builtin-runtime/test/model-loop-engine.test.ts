@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AIMessage, BaseMessage, ToolMessage } from '@kite/builtin-runtime/model';
+import type { AIMessage, BaseMessage, ToolMessage } from '@kite-ai/builtin-runtime/model';
 import {
   aiMessage,
   type BuiltinModelEvent,
@@ -10,11 +10,11 @@ import {
   type ModelInvocationStateView,
   type ModelRuntimeConfig,
   toolMessage,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   type BuiltinSubagentModelLoopCoordinator,
   createBuiltinSubagentModelLoopEngine,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 import type { ToolSet } from 'ai';
 
 const CONFIG: ModelRuntimeConfig = Object.freeze({

@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ContextCompactionCheckpoint, RuntimeEvent } from '@kite/agent-kernel';
+import type { ContextCompactionCheckpoint, RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   BuiltinModelEffectCoordinator,
@@ -10,13 +10,13 @@ import {
   type ContextProjectionEnvironment,
   createChatModel,
   expectedCompactionSourceDigest,
-} from '@kite/builtin-runtime/model';
-import { type RuntimeHostExecutionServices, resolveProjectIdentity } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/model';
+import { type RuntimeHostExecutionServices, resolveProjectIdentity } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
-import type { VerificationSpec } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { VerificationSpec } from '@kite-ai/runtime-spi';
 import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '#builtin-runtime';
 import { createRuntimeHostStateStorageBinding } from '#runtime-host';
 import { createRuntimeModuleRegistry } from '#runtime-spi';

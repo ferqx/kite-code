@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import { McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
 import {
   canonicalExistingPath,
   canonicalPathForComparison,
@@ -11,7 +11,7 @@ import {
   PROTECTED_WORKSPACE_DIRECTORIES_,
   PROTECTED_WORKSPACE_FILE_PREFIXES_,
   PROTECTED_WORKSPACE_FILES_,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { AgentConfig } from '#app/config';
 import type { RuntimeJsonValue } from '#runtime-spi';

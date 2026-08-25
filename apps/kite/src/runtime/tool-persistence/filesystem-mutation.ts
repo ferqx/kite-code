@@ -1,4 +1,4 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import type {
   PreparedToolInvocation,
   RuntimeJsonValue,
@@ -15,8 +15,8 @@ import type {
   WorkspaceFilesystemPersistedMutationIntent,
   WorkspaceFilesystemPersistedMutationReady,
   WorkspaceFilesystemPreparedMutationEvidence,
-} from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { assertAcknowledgementState, assertOpenAcknowledgement } from './acknowledgement-validator';
 import {
   AppStateToolPipelinePersistenceError,

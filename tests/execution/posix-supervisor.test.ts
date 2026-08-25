@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { projectApprovedProxyEnvironment } from '@kite/builtin-runtime/sandbox';
-import type { RuntimeHostSandboxPreparationLifecycle } from '@kite/runtime-host';
+import { projectApprovedProxyEnvironment } from '@kite-ai/builtin-runtime/sandbox';
+import type { RuntimeHostSandboxPreparationLifecycle } from '@kite-ai/runtime-host';
 import {
   buildPosixSupervisorEnvironment,
   createPosixSupervisorLock,
@@ -13,8 +13,8 @@ import {
   readComparablePosixProcessStartIdentity,
   reconcilePosixSupervisor,
   terminatePosixSupervisor,
-} from '@kite/runtime-host';
-import type { PreparedSandboxExecution, SandboxPreparationLifecycle } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host';
+import type { PreparedSandboxExecution, SandboxPreparationLifecycle } from '@kite-ai/runtime-spi';
 import { sandboxBackendCapabilities } from '#app/sandbox/runtime-execution';
 import { compileOssReleaseExecutable } from '../../scripts/release/oss-candidate';
 

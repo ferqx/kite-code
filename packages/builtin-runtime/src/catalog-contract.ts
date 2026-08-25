@@ -19,7 +19,7 @@ import type {
   CapabilityTurnContext,
   CapabilityUnknownFieldObservation,
   RuntimeJsonValue,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { z } from 'zod';
 import { digestCapabilityBindingValue } from './capability-binding';
 import { buildDescription, getToolContract, toolContractSection } from './tool-contracts';
@@ -174,7 +174,7 @@ export function projectBuiltinExecutionTraits(
   declaration: CapabilityExecutionTraitsDeclaration | undefined,
   _input: RuntimeJsonValue,
   context: CapabilityTurnContext,
-  effects: import('@kite/runtime-spi').CapabilityInvocationEffects,
+  effects: import('@kite-ai/runtime-spi').CapabilityInvocationEffects,
 ): CapabilityExecutionTraits {
   const access =
     effects.effectClass === 'read_only' && effects.sideEffect === false
@@ -1407,7 +1407,7 @@ function readOnlyEffects(effects: NonNullable<CapabilityDefinition['effects']>):
 function riskFromInvocationEffects(
   effectClass: 'read_only' | 'plan_only' | 'workspace_write' | 'external_side_effect' | 'unknown',
   effects: CapabilityEffects,
-): import('@kite/runtime-spi').CapabilityRiskClass {
+): import('@kite-ai/runtime-spi').CapabilityRiskClass {
   if (
     effects.filesystem === 'destructive' ||
     effects.network === 'destructive' ||

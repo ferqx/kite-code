@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentSessionCommandGrant } from '@kite/agent-kernel';
-import { createToolApprovalBindingDigest } from '@kite/agent-kernel';
-import type { PendingToolRequest } from '@kite/builtin-runtime';
+import type { AgentSessionCommandGrant } from '@kite-ai/agent-kernel';
+import { createToolApprovalBindingDigest } from '@kite-ai/agent-kernel';
+import type { PendingToolRequest } from '@kite-ai/builtin-runtime';
 import {
   type BuiltinModelToolCatalogEntry,
   type BuiltinToolCapabilityProjection,
   compileBuiltinDynamicMcpPolicy,
-} from '@kite/builtin-runtime';
-import type { CapabilityPolicyCompilation, RuntimeJsonValue } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime';
+import type { CapabilityPolicyCompilation, RuntimeJsonValue } from '@kite-ai/runtime-spi';
 import {
   buildToolApproval,
   replaceApprovalCommand,

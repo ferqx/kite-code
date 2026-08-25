@@ -7,17 +7,17 @@ import {
   McpConnectionManager,
   type McpTransportAdmissionRequest,
   type McpTransportBoundaryController,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import type {
   ExecutionBoundary,
   ExecutionCapabilitySurface,
   NetworkDecisionReceipt,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   createNetworkBoundaryFetch,
   createProtectedPathEvaluator,
   networkBoundaryPolicyFromExecutionBoundary,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createInMemoryMcpConfigRepository } from './helpers/mcp-test-composition';

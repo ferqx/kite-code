@@ -14,12 +14,12 @@ import {
   LocalWorkspaceFilesystemProvider,
   WorkspaceFilesystemGrantAuthority,
   workspaceFilesystemProtectedBoundaryDigest,
-} from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import type {
   WorkspaceFilesystemObserveObservation,
   WorkspaceFilesystemObserveOperation,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 async function builtinFilesystemFixture(workspace: string) {
   const authority = new WorkspaceFilesystemGrantAuthority({

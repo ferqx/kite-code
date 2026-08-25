@@ -11,7 +11,7 @@ import {
   type ModelSurface,
   type ResolvedModelCapabilitiesValue,
   type Sha256Digest,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const UTF8_ENCODER = new TextEncoder();
 const PRIVATE_MODEL_DIGEST_PREFIX = 'kite-code-private-model-evidence-v1\0';

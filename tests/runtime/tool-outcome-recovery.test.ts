@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import {
   admitRecoveryAttempt,
   advanceToolRecoveryResponse,
@@ -22,19 +22,22 @@ import {
   type ToolOutcome,
   toolFailureInstanceId,
   toolInvocationFingerprint,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import {
   createCapabilityBinding,
   projectBuiltinUnknownToolFieldsObservation,
-} from '@kite/builtin-runtime';
-import { McpConnectionManager, McpProviderError } from '@kite/builtin-runtime/mcp';
-import { buildContextProjection } from '@kite/builtin-runtime/model';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
-import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import { canonicalizeCapabilityArguments, descriptorRevision } from '@kite/builtin-runtime/skills';
-import { projectSubagentResult } from '@kite/builtin-runtime/subagent';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime';
+import { McpConnectionManager, McpProviderError } from '@kite-ai/builtin-runtime/mcp';
+import { buildContextProjection } from '@kite-ai/builtin-runtime/model';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
+import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import {
+  canonicalizeCapabilityArguments,
+  descriptorRevision,
+} from '@kite-ai/builtin-runtime/skills';
+import { projectSubagentResult } from '@kite-ai/builtin-runtime/subagent';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
@@ -2666,11 +2669,11 @@ describe('ToolOutcome Runtime event integration', () => {
     const paired = projection.providerMessages.filter(
       (message) =>
         (message.type === 'ai' &&
-          (message as import('@kite/builtin-runtime/model').AIMessage).tool_calls?.some(
+          (message as import('@kite-ai/builtin-runtime/model').AIMessage).tool_calls?.some(
             (call) => call.id === 'auto-review-call',
           )) ||
         (message.type === 'tool' &&
-          (message as import('@kite/builtin-runtime/model').ToolMessage).tool_call_id ===
+          (message as import('@kite-ai/builtin-runtime/model').ToolMessage).tool_call_id ===
             'auto-review-call'),
     );
     expect(paired.map((message) => message.type)).toEqual(['ai', 'tool']);

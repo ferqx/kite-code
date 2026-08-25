@@ -1,26 +1,26 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { BuiltinWorkspaceFilesystemTerminalVerifier } from '@kite/builtin-runtime';
-import { isBuiltinOperationExecutionValue } from '@kite/builtin-runtime';
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { BuiltinWorkspaceFilesystemTerminalVerifier } from '@kite-ai/builtin-runtime';
+import { isBuiltinOperationExecutionValue } from '@kite-ai/builtin-runtime';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   workspaceFilesystemIntentDigest,
   workspaceFilesystemMutationReadyDigest,
   workspaceFilesystemOperationDigest,
   workspaceFilesystemStringDigest,
-} from '@kite/builtin-runtime/filesystem';
-import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
 import {
   createDeterministicRuntimeIdSource,
   createRuntimeHostToolPipelineAttemptCoordinator,
   type RuntimeHostExecutionServices,
   type StateRuntimeState,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   createRuntimeHostStateSession,
   type StateRuntimeSessionInput,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CapabilityToolTerminalResult,
   DynamicMcpPreparedToolInvocationIdentity,
@@ -32,8 +32,8 @@ import type {
   ToolPipelineAttemptAcknowledgement,
   ToolPipelineSuspendedExecutionResult,
   ToolPipelineTaskSubagentSuspension,
-} from '@kite/runtime-spi';
-import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite-ai/runtime-spi';
 import {
   createAppStateToolPipelinePersistence,
   type StateBuiltinOperationStructuredContent,

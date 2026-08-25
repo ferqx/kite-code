@@ -1,4 +1,4 @@
-import type { ShellApprovalGrant } from '@kite/runtime-contract';
+import type { ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import type { SessionInterruptPayload, SessionUserAction } from '#app/runtime/session/contracts';
 
 export type TuiAction =

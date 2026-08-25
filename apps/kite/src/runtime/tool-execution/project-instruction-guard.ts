@@ -1,10 +1,10 @@
-import type { BuiltinModelToolCatalogEntry } from '@kite/builtin-runtime';
+import type { BuiltinModelToolCatalogEntry } from '@kite-ai/builtin-runtime';
 import {
   checkProjectInstructionSnapshotFreshness,
   projectProjectInstructionGuardTarget,
   resolveProjectInstructionSnapshot,
-} from '@kite/builtin-runtime/model';
-import type { RuntimeJsonValue } from '@kite/runtime-spi';
+} from '@kite-ai/builtin-runtime/model';
+import type { RuntimeJsonValue } from '@kite-ai/runtime-spi';
 import type { RuntimeState } from '#app/bootstrap/runtime/state-runtime';
 
 export function projectInstructionGuardFailure(input: {

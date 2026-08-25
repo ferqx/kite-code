@@ -60,7 +60,7 @@ apps/kite local log server
   └── RuntimeLogQueryPort
           │
           ▼
-@kite/runtime-storage-sqlite read-only log reader
+@kite-ai/runtime-storage-sqlite read-only log reader
   ├── current format preflight
   ├── current RuntimeEvent codec
   ├── runtime_sessions cursor query
@@ -74,9 +74,9 @@ SQLite Runtime Store（唯一事实源）
 
 | 层 | Owner | 职责 | 禁止事项 |
 | --- | --- | --- | --- |
-| HTTP/Web DTO | `@kite/runtime-contract` | 分页请求、日志投影、错误与完整性 DTO | 不出现 SQLite、Kernel State、Artifact path |
-| 查询机制 Port | `@kite/runtime-host/storage` | 定义只读 session/event cursor 语义 | 不解释具体事件业务内容 |
-| SQLite Reader | `@kite/runtime-storage-sqlite` | 只读连接、current-format preflight、分页 SQL、codec decode | 不建表、不写 snapshot/event、不返回 raw `event_json` |
+| HTTP/Web DTO | `@kite-ai/runtime-contract` | 分页请求、日志投影、错误与完整性 DTO | 不出现 SQLite、Kernel State、Artifact path |
+| 查询机制 Port | `@kite-ai/runtime-host/storage` | 定义只读 session/event cursor 语义 | 不解释具体事件业务内容 |
+| SQLite Reader | `@kite-ai/runtime-storage-sqlite` | 只读连接、current-format preflight、分页 SQL、codec decode | 不建表、不写 snapshot/event、不返回 raw `event_json` |
 | 日志展示投影 | `apps/kite` | RuntimeEvent → Web-safe typed view | 不成为第二 reducer、classifier 或 replay authority |
 | Server composition | `apps/kite` | loopback listener、鉴权、路由、SSE、资源生命周期 | 不持有写 Port，不执行 Runtime command |
 | Browser UI | `apps/kite` Web surface | 会话列表、过滤、时间线、详情、连接状态 | 不推导 Runtime authority，不直接读取文件 |

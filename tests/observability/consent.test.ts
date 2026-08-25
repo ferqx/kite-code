@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { METRIC_DEFINITIONS_ } from '@kite/runtime-host';
+import { METRIC_DEFINITIONS_ } from '@kite-ai/runtime-host';
 import { composeObservability } from '../../apps/kite/src/observability/composition';
 import {
   projectTelemetryStatus,

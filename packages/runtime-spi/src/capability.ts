@@ -117,7 +117,7 @@ export interface CapabilityTurnContext {
   readonly toolCallId?: string;
   readonly phase?: 'planning' | 'building';
   /** Live Session interaction mode; Full is execution authority, never a grant. */
-  readonly interactionMode?: import('@kite/runtime-contract').InteractionMode;
+  readonly interactionMode?: import('@kite-ai/runtime-contract').InteractionMode;
   readonly brokeredGitFeatureRevision?: string | null;
   readonly hasTaskAdapter?: boolean;
   readonly hasGitBroker?: boolean;

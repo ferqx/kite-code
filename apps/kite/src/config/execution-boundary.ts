@@ -12,7 +12,7 @@ import type {
   ProductionExecutionEntrypoint,
   ProductionExecutionQualification,
   ProductionExecutionQualificationRegistry,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import { z } from 'zod';
 import {
   loadApprovedProductionExecutionQualificationRegistry,

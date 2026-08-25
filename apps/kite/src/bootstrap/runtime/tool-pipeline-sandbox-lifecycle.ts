@@ -1,4 +1,4 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import {
   type SandboxPreparationArtifactStore,
   sandboxAbandonmentLifecycleIntentDigest,
@@ -7,14 +7,14 @@ import {
   sandboxPreparationIntentDigest,
   sandboxPreparationReadyDigest,
   sandboxPreparedPlanDigest,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   createRuntimeHostSandboxPreparationLifecycle,
   type RuntimeHostSandboxLifecycleEvidence,
   type RuntimeHostSandboxLifecycleEvidenceVerificationResult,
   type StateRuntimeEvent,
   type StateRuntimeState,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 import type {
   PreparedSandboxExecution,
   PreparedToolInvocation,
@@ -28,7 +28,7 @@ import type {
   SandboxPreparationLifecycle,
   SandboxPreparationReadyAcknowledgement,
   ToolPipelineAttemptAcknowledgement,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 export const APP_TOOL_PIPELINE_SANDBOX_LIFECYCLE_SCHEMA_ =
   'kite.app.tool-pipeline-sandbox-lifecycle.v1' as const;

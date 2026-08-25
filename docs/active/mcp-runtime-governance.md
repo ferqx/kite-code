@@ -46,7 +46,7 @@ Execution capability surface 在 disclosure 和 dispatch 前应用 filesystem/ne
 
 Project MCP declaration 在 transport construction 前通过 Workspace/source/name/raw-config digest approval。pending/rejected/changed/invalid 项不进入 Manager。Execution approval、annotation trust 和 Tool approval 是三个独立事实。
 
-MCP protocol result 被归一化为 `@kite/runtime-contract` 的唯一 JSON-safe `CapabilityResult`。每个真实 Tool attempt 在协议请求前 durable ack；已知 terminal 写入 private Capability Artifact，并与 Tool terminal 原子提交。write/unknown effect 在 dispatch 后缺可信 terminal 时保持 `execution_unknown`，不因 SDK/provider error 自动重放。Safe-read retry 仍要求新的 Runtime attempt acknowledgement。
+MCP protocol result 被归一化为 `@kite-ai/runtime-contract` 的唯一 JSON-safe `CapabilityResult`。每个真实 Tool attempt 在协议请求前 durable ack；已知 terminal 写入 private Capability Artifact，并与 Tool terminal 原子提交。write/unknown effect 在 dispatch 后缺可信 terminal 时保持 `execution_unknown`，不因 SDK/provider error 自动重放。Safe-read retry 仍要求新的 Runtime attempt acknowledgement。
 
 `McpSupervisor` 是唯一 App-facing control plane；Runtime 只依赖 `McpRuntimeProvider`，TUI 只依赖 App controller 和 immutable control snapshot。Generation token 阻止 late connect/discovery/list-changed 恢复旧能力。Provider action/required-provider admission 使用持久 Runtime interaction；waiver 只释放当前 admission，不创造 descriptor、binding 或 availability。
 

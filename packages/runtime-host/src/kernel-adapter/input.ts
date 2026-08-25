@@ -1,5 +1,5 @@
-import type { KernelInput } from '@kite/agent-kernel';
-import type { RuntimeCommand } from '@kite/runtime-contract';
+import type { KernelInput } from '@kite-ai/agent-kernel';
+import type { RuntimeCommand } from '@kite-ai/runtime-contract';
 import { type RuntimeCommandOwner, runtimeCommandOwner } from '../host/command-router';
 
 export interface RuntimeCommandKernelEvent {

@@ -9,7 +9,7 @@ import type {
   ToolResolutionResult,
   ToolValidationResult,
   ValidatedInvocation,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   type BuiltinDynamicMcpToolPipelineCallbacks,
   createBuiltinDynamicMcpToolPipelineCallbacks,

@@ -5,7 +5,7 @@ import {
   createMetricSample,
   type MetricExporter,
   NoopMetricReporter,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 
 const NOW = '2026-08-02T00:00:00.000Z';
 const sample = (name: 'read_batch_size' | 'run_total' | 'runtime_hard_block_total') =>

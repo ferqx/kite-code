@@ -8,8 +8,8 @@ import type {
   SandboxPreparation,
   SandboxPreparationArtifactPort,
   SandboxPreparationArtifactRef,
-} from '@kite/runtime-spi';
-import { SANDBOX_EXECUTION_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { SANDBOX_EXECUTION_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 import {
   createRuntimeHostSandboxPreparationLifecycle,
   createRuntimeHostSandboxPreparedProcessExecutionPort,
@@ -516,7 +516,7 @@ describe('Runtime Host sandbox lifecycle', () => {
       'utf8',
     );
     expect(lifecycleSource).not.toMatch(
-      /(?:from\s+|import\s*\()\s*['"](?:@kite\/(?:builtin-runtime|agent-kernel)|#app|@\/core)/,
+      /(?:from\s+|import\s*\()\s*['"](?:@kite-ai\/(?:builtin-runtime|agent-kernel)|#app|@\/core)/,
     );
     expect(lifecycleSource).not.toMatch(/\b(?:State|Store4|RuntimeEvent|createHash|createHmac)\b/);
 

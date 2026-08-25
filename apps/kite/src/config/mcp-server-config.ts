@@ -1,5 +1,5 @@
-import type { McpServerConfig } from '@kite/builtin-runtime/mcp';
-import type { EffectProfile } from '@kite/runtime-contract';
+import type { McpServerConfig } from '@kite-ai/builtin-runtime/mcp';
+import type { EffectProfile } from '@kite-ai/runtime-contract';
 import { z } from 'zod';
 
 const authHeaderSchema = z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/);

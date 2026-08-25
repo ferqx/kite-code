@@ -4,7 +4,7 @@ import {
   runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
   runtimeHostStateInteractionToolCall as interactionToolCall,
   runtimeHostStateToolCallBelongsToCurrentWork as toolCallBelongsToCurrentWork,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from './failures';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
@@ -504,7 +504,7 @@ export type RuntimeUserAction =
       type: 'approve';
       interactionId: string;
       generation: number;
-      grant: import('@kite/runtime-contract').ShellApprovalGrant;
+      grant: import('@kite-ai/runtime-contract').ShellApprovalGrant;
     }
   | { type: 'reject'; interactionId: string; generation: number; reason?: string }
   // ── Plan Mode v2: unified plan_review_decision ──
@@ -545,8 +545,8 @@ export type RuntimeUserAction =
         | {
             kind: 'retry';
             outcome: 'unavailable';
-            providerStatus: import('@kite/builtin-runtime/mcp').McpProviderDirectoryStatus;
-            diagnosticCode?: import('@kite/builtin-runtime/mcp').McpProviderDirectoryEntry['diagnosticCode'];
+            providerStatus: import('@kite-ai/builtin-runtime/mcp').McpProviderDirectoryStatus;
+            diagnosticCode?: import('@kite-ai/builtin-runtime/mcp').McpProviderDirectoryEntry['diagnosticCode'];
           }
         | { kind: 'waive' }
         | { kind: 'cancel' };

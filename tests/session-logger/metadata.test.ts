@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { classifyToolOutcome } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { classifyToolOutcome } from '@kite-ai/agent-kernel';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { sessionLogDir } from '#app/config/paths';
 import {

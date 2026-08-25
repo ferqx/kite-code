@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { assertAgentStateInvariants } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { assertAgentStateInvariants } from '@kite-ai/agent-kernel';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 function queuedEvent(index: number): RuntimeEvent {

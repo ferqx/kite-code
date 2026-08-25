@@ -4,7 +4,7 @@ import {
   type ModelInvocationEnvelope,
   type ModelResponseRecord,
   type Sha256Digest,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { ModelArtifactStore } from './artifacts';
 import type { SupportedChatModel } from './factory';
 import { type AIMessage, aiMessage } from './messages';
@@ -658,7 +658,7 @@ type ModelFailureDiagnostic = Readonly<{
 }>;
 
 function modelFailureDiagnostic(
-  outcome: Exclude<import('@kite/runtime-spi').ModelAttemptOutcome, { kind: 'success' }>,
+  outcome: Exclude<import('@kite-ai/runtime-spi').ModelAttemptOutcome, { kind: 'success' }>,
 ): ModelFailureDiagnostic {
   if (outcome.kind === 'retryable_failure') {
     return {

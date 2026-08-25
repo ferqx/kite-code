@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createRuntimeHostMcpStdioProcessPort, parseMcpStdioJsonLine } from '@kite/runtime-host';
+import { createRuntimeHostMcpStdioProcessPort, parseMcpStdioJsonLine } from '@kite-ai/runtime-host';
 import { cleanupTuiSystemFixtures } from '../../tests/tui-system/harness/fixture-lifecycle';
 import { createMockModelServer } from '../../tests/tui-system/harness/fixtures';
 import { spawnReadyTui } from '../../tests/tui-system/harness/pty-process';

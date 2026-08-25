@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import type { McpWriteDispatchGuard, McpWriteDispatchRequest } from '@kite/builtin-runtime/mcp';
-import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import type { McpWriteDispatchGuard, McpWriteDispatchRequest } from '@kite-ai/builtin-runtime/mcp';
+import { McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 describe('MCP write dispatch governance integration', () => {

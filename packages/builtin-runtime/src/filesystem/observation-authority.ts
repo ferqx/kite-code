@@ -1,7 +1,7 @@
 import type {
   WorkspaceFilesystemMutationReadyRecord,
   WorkspaceFilesystemObservationRecord,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import type {
   CapabilityToolTerminalResult,
   PreparedToolInvocation,
@@ -12,7 +12,7 @@ import type {
   WorkspaceFilesystemPersistedIntent,
   WorkspaceFilesystemPersistedMutationIntent,
   WorkspaceReadFileObservation,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import type { BuiltinOperationExecutionValue } from '../model/runtime-module';
 import { validateWorkspaceFilesystemMutationReadyRecord } from './evidence';
 import {

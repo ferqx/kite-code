@@ -47,15 +47,15 @@ Builtin projector 的 allowlist，不能从 private invocation event 补充高�
 
 ## Owner 与注入链
 
-Runtime Event 到 secret-free observation fact 只有一个 owner：`@kite/agent-kernel` 的纯函数
+Runtime Event 到 secret-free observation fact 只有一个 owner：`@kite-ai/agent-kernel` 的纯函数
 `projectRuntimeEventToObservabilityFact`。它只读取闭集事件字段，优先使用 envelope `occurredAt`，无 envelope
 时使用调用方明确提供的 fallback 时间戳；不复制 State、Store、receipt identity、正文或自由错误。
-`@kite/builtin-runtime` 的 `createBuiltinObservabilityProjector` 只消费 typed fact、model、receipt、resource、release
+`@kite-ai/builtin-runtime` 的 `createBuiltinObservabilityProjector` 只消费 typed fact、model、receipt、resource、release
 与 task-stage DTO，并生成 metric draft；它不导入 Runtime Event 或 Host schema。Metric name、字段与数值约束仍只有
-`@kite/runtime-host` 的现有 metric schema 在 `createMetricSample` 边界校验。
+`@kite-ai/runtime-host` 的现有 metric schema 在 `createMetricSample` 边界校验。
 `apps/kite` 的 Runtime bridge 只负责把 Builtin draft 交给 Host reporter，并吞掉 projector、schema 或 reporter 异常，不能改变
 Runtime outcome。旧 `src/core/observability/runtime-fact.ts` 兼容 seam 已删除；App `RuntimeSessionCoordinator` 与 CLI
-只经 `@kite/runtime-host` 的窄 `projectRuntimeObservabilityFact` port 调用同一 Kernel projector。禁止恢复
+只经 `@kite-ai/runtime-host` 的窄 `projectRuntimeObservabilityFact` port 调用同一 Kernel projector。禁止恢复
 旧 mapper/shim 或在 Contract、Builtin、App 复制 Event→fact 语义。
 
 Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低优先级样本并只记录本地 drop 计数。

@@ -21,7 +21,7 @@ Agent → Capability → Policy → Execution → Verification
 | 概念 | 当前 owner | 核心职责 |
 | --- | --- | --- |
 | Agent | App Session/turn coordinator + Builtin Model Gateway | 从已提交 Runtime 投影构造模型输入，消费模型响应并请求下一步；不直接授权或持久化 |
-| Runtime Kernel | `@kite/agent-kernel` | 纯 state transition、静态 reducer、scheduler、completion、recovery 与 invariant |
+| Runtime Kernel | `@kite-ai/agent-kernel` | 纯 state transition、静态 reducer、scheduler、completion、recovery 与 invariant |
 | Capability | Runtime SPI registry + Builtin domain modules | 定义、发现、披露、绑定、解析与选择唯一 executor |
 | Policy | Kernel governance + Builtin effect facts | 基于显式事实决定 allow/deny/approval/admission；不执行副作用 |
 | Execution | Runtime Host lifecycle + Builtin concrete mechanisms + App composition | ack 后执行一次，形成 receipt/unknown/terminal，并完成 cleanup |
@@ -29,9 +29,9 @@ Agent → Capability → Policy → Execution → Verification
 
 ## Client Contract 与 SPI
 
-`@kite/runtime-contract` 是 client-facing in-process contract。command、query、notification 与 projection 分别位于独立模块；presentation/capability/observability 只携带中立数据。Contract 不包含 Kernel state、Host lifecycle、Provider handle、SQLite 类型或 TUI block。
+`@kite-ai/runtime-contract` 是 client-facing in-process contract。command、query、notification 与 projection 分别位于独立模块；presentation/capability/observability 只携带中立数据。Contract 不包含 Kernel state、Host lifecycle、Provider handle、SQLite 类型或 TUI block。
 
-`@kite/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
+`@kite-ai/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
 
 ## Runtime Kernel
 
@@ -132,7 +132,7 @@ turn identity，否则同一 Task 的旧 rejection 会错误终止 successor tur
 
 ## SQLite storage
 
-`@kite/runtime-storage-sqlite` 是 Host storage port 的唯一 concrete adapter：
+`@kite-ai/runtime-storage-sqlite` 是 Host storage port 的唯一 concrete adapter：
 
 - `adapter.ts` 单独拥有当前数据库创建、连接与关闭；独立 `RuntimeLogQueryPort` reader 只做 current-format、no-follow、query-only durable-log 读取，不能取得写 Store capability；`compatibility.ts` 只拥有历史 source 的 readonly discovery、atomic target import ledger 与 tombstone；
 - SessionStore 的会话列表投影通过 `event-store.ts` 有界分批解码，找到第一条 session-name candidate 即停止；它不代替打开具体会话时的 strict Event/Snapshot 恢复校验；

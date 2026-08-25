@@ -1,7 +1,10 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
-import { capabilityChangedProviderError, type McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import type { RuntimeJsonValue } from '@kite/runtime-spi';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
+import {
+  capabilityChangedProviderError,
+  type McpRuntimeProvider,
+} from '@kite-ai/builtin-runtime/mcp';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
+import type { RuntimeJsonValue } from '@kite-ai/runtime-spi';
 import {
   type ProviderReadinessCoordinator,
   ProviderReadinessPersistenceError,

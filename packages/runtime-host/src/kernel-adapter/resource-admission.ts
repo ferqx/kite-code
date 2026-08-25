@@ -4,8 +4,8 @@ import type {
   RuntimeEffect,
   KernelEvent as RuntimeEvent,
   AgentState as RuntimeState,
-} from '@kite/agent-kernel';
-import type { ModelInvocationEnvelope } from '@kite/runtime-spi';
+} from '@kite-ai/agent-kernel';
+import type { ModelInvocationEnvelope } from '@kite-ai/runtime-spi';
 import {
   type ActiveResourceBudgetRuntimeState,
   type BudgetReservation,

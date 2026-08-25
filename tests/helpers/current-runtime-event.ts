@@ -1,9 +1,9 @@
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { isToolOutcome } from '@kite/agent-kernel';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { isToolOutcome } from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 
 const TEST_OCCURRED_AT = '2026-08-15T00:00:00.000Z';
 

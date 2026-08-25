@@ -3,8 +3,8 @@ import type {
   CompactionReporter,
   ContextCompactionProgressPhase,
   ContextProjectionEnvironment,
-} from '@kite/builtin-runtime/model';
-import { executeBuiltinContextCompaction } from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
+import { executeBuiltinContextCompaction } from '@kite-ai/builtin-runtime/model';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 type PendingContextCompaction = NonNullable<RuntimeState['context']['pendingCompaction']>;

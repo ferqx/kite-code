@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   computeRuntimeSchedulingPolicyDigest,
   createRuntimeSchedulingPolicy,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 
 describe('RuntimeSchedulingPolicy', () => {
   test('exports the canonical scheduler snapshot consumed by release tooling', () => {

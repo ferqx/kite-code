@@ -1,12 +1,12 @@
 // ── Plan Mode v2 交互屏障测试 / Interaction barrier tests ──
 // 验证 write_plan / ask_user / approval 作为 barrier 阻止后续 sibling tool calls
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import type { AgentPlan } from '@kite/runtime-contract';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import type { AgentPlan } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 

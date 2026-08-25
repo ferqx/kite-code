@@ -4,14 +4,14 @@ import type {
   StateRuntimeEffect,
   StateRuntimeEvent,
   StateRuntimeState,
-} from '@kite/runtime-host';
-import type { StateRuntimeEffectExecutor } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host';
+import type { StateRuntimeEffectExecutor } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CheckpointPort,
   RuntimeEffectLeaseExpectation as HostRuntimeEffectLeaseExpectation,
   RuntimeRecoveryIdentityPort,
   SessionStore,
-} from '@kite/runtime-host/storage';
+} from '@kite-ai/runtime-host/storage';
 
 /** App-private names for the exact RM State 27 Host boundary. */
 export type RuntimeEffect = StateRuntimeEffect;

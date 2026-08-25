@@ -1,4 +1,4 @@
-import type { BuiltinObservabilityProjector } from '@kite/builtin-runtime';
+import type { BuiltinObservabilityProjector } from '@kite-ai/builtin-runtime';
 import {
   OBSERVABILITY_METRIC_DRAFT_SCHEMA_,
   type ObservabilityFailureFact,
@@ -9,14 +9,14 @@ import {
   type ObservabilityResourceFact,
   type ObservabilityRuntimeFact,
   type ObservabilityTaskStageFact,
-} from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
 import {
   createMetricSample,
   METRIC_DEFINITIONS_,
   type MetricName,
   type MetricReporter,
   type MetricSample,
-} from '@kite/runtime-host';
+} from '@kite-ai/runtime-host';
 
 /** Shared Runtime-to-metadata pipeline for foreground, background and subagent callers. */
 export class RuntimeMetricBridge {

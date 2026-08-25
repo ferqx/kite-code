@@ -30,14 +30,14 @@ import {
   LocalWorkspaceFilesystemProvider,
   WorkspaceFilesystemGrantAuthority,
   workspaceFilesystemProtectedBoundaryDigest,
-} from '@kite/builtin-runtime/filesystem';
-import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/filesystem';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import type {
   WorkspaceFilesystemObserveOperation,
   WorkspaceReadFileOperation,
   WorkspaceSearchContentOperation,
   WorkspaceSearchFilesOperation,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const DIR_COUNT = 25;
 const FILES_PER_DIR = 24;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createInitialAgentState, projectStateRestartRecoveryEvents } from '@kite/agent-kernel';
+import { createInitialAgentState, projectStateRestartRecoveryEvents } from '@kite-ai/agent-kernel';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 

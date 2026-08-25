@@ -1,6 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { SandboxPreparation } from '@kite/runtime-spi';
+import type { SandboxPreparation } from '@kite-ai/runtime-spi';
 import { sandboxCommandDigest } from './execution/grant-authority';
 import type { SandboxInvocationIdentity, ShellInput } from './shell-contract';
 import {

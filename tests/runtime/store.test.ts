@@ -6,14 +6,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { sandboxPreparationIntentDigest } from '@kite/builtin-runtime/sandbox';
-import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { sandboxPreparationIntentDigest } from '@kite-ai/builtin-runtime/sandbox';
+import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@kite-ai/runtime-contract';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeRevisionConflictError,
-} from '@kite/runtime-storage-sqlite';
+} from '@kite-ai/runtime-storage-sqlite';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {

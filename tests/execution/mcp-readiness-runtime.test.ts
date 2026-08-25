@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite/agent-kernel';
-import { BuiltinMcpExecutionUnknownError } from '@kite/builtin-runtime';
-import { McpProviderError, type McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import { BuiltinMcpExecutionUnknownError } from '@kite-ai/builtin-runtime';
+import { McpProviderError, type McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { createAppMcpReadinessRuntime } from '#app/bootstrap/runtime/mcp-readiness-runtime';
 import { ProviderReadinessCoordinator } from '#app/bootstrap/runtime/provider-readiness';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';

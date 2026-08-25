@@ -26,6 +26,8 @@ tests/tui-system/
 测试必须使用隔离的临时 HOME、workspace、配置和 Runtime 数据库。禁止读取开发机真实密钥、用户配置或会话数据。
 Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动真实 TUI 的文件属于串行
 `tui-system` job。两者不得在 system runner 中重复执行。
+Harness、fixture 与 scenario 引用 Runtime workspace package 时统一使用 `@kite-ai/*` scope；不得保留
+旧 scope 导入或用旧 scope 编写 package-boundary 正则断言。
 
 Prompt Contract 迁移必须有 production-mode PTY scenario：通过正常 layered config 显式开启候选
 flag，以 `NODE_ENV=production` 启动真实 TUI composition root，并从本地 mock Provider 收到的实际

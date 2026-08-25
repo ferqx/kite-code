@@ -1,4 +1,4 @@
-import { BROKERED_GIT_FEATURE_REVISION_, type GitShellDenyEvidence } from '@kite/runtime-spi';
+import { BROKERED_GIT_FEATURE_REVISION_, type GitShellDenyEvidence } from '@kite-ai/runtime-spi';
 
 export type BrokeredGitQualificationDecision =
   | { outcome: 'qualified'; evidence: GitShellDenyEvidence }

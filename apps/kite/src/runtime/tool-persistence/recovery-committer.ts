@@ -1,5 +1,5 @@
-import type { StateRuntimeEvent, StateRuntimeState } from '@kite/runtime-host';
-import type { ToolPipelineUnknownOutcome } from '@kite/runtime-spi';
+import type { StateRuntimeEvent, StateRuntimeState } from '@kite-ai/runtime-host';
+import type { ToolPipelineUnknownOutcome } from '@kite-ai/runtime-spi';
 import { AppStateToolPipelinePersistenceError } from './contracts';
 
 export function includesAcknowledgedRevision(

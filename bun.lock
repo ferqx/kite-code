@@ -32,12 +32,12 @@
       },
       "devDependencies": {
         "@biomejs/biome": "^2.5.0",
-        "@kite/agent-kernel": "workspace:*",
-        "@kite/builtin-runtime": "workspace:*",
-        "@kite/runtime-contract": "workspace:*",
-        "@kite/runtime-host": "workspace:*",
-        "@kite/runtime-spi": "workspace:*",
-        "@kite/runtime-storage-sqlite": "workspace:*",
+        "@kite-ai/agent-kernel": "workspace:*",
+        "@kite-ai/builtin-runtime": "workspace:*",
+        "@kite-ai/runtime-contract": "workspace:*",
+        "@kite-ai/runtime-host": "workspace:*",
+        "@kite-ai/runtime-spi": "workspace:*",
+        "@kite-ai/runtime-storage-sqlite": "workspace:*",
         "@types/bun": "latest",
         "@types/react": "^19.2.14",
         "@xterm/headless": "6.0.0",
@@ -47,15 +47,15 @@
       },
     },
     "apps/kite": {
-      "name": "@kite/kite",
+      "name": "@kite-ai/kite",
       "version": "0.1.0",
       "dependencies": {
         "@inkjs/ui": "^2.0.0",
-        "@kite/builtin-runtime": "workspace:*",
-        "@kite/runtime-contract": "workspace:*",
-        "@kite/runtime-host": "workspace:*",
-        "@kite/runtime-spi": "workspace:*",
-        "@kite/runtime-storage-sqlite": "workspace:*",
+        "@kite-ai/builtin-runtime": "workspace:*",
+        "@kite-ai/runtime-contract": "workspace:*",
+        "@kite-ai/runtime-host": "workspace:*",
+        "@kite-ai/runtime-spi": "workspace:*",
+        "@kite-ai/runtime-storage-sqlite": "workspace:*",
         "chalk": "^5.6.2",
         "ink": "^7.1.1",
         "ink-scroll-list": "^0.4.1",
@@ -69,16 +69,16 @@
       },
     },
     "packages/agent-kernel": {
-      "name": "@kite/agent-kernel",
+      "name": "@kite-ai/agent-kernel",
       "version": "0.0.0",
     },
     "packages/builtin-runtime": {
-      "name": "@kite/builtin-runtime",
+      "name": "@kite-ai/builtin-runtime",
       "version": "0.0.0",
       "dependencies": {
         "@ai-sdk/openai-compatible": "^3.0.7",
-        "@kite/runtime-contract": "workspace:*",
-        "@kite/runtime-spi": "workspace:*",
+        "@kite-ai/runtime-contract": "workspace:*",
+        "@kite-ai/runtime-spi": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "@mozilla/readability": "^0.6.0",
         "@napi-rs/keyring": "1.3.0",
@@ -92,30 +92,30 @@
       },
     },
     "packages/runtime-contract": {
-      "name": "@kite/runtime-contract",
+      "name": "@kite-ai/runtime-contract",
       "version": "0.0.0",
     },
     "packages/runtime-host": {
-      "name": "@kite/runtime-host",
+      "name": "@kite-ai/runtime-host",
       "version": "0.0.0",
       "dependencies": {
-        "@kite/agent-kernel": "workspace:*",
-        "@kite/runtime-contract": "workspace:*",
-        "@kite/runtime-spi": "workspace:*",
+        "@kite-ai/agent-kernel": "workspace:*",
+        "@kite-ai/runtime-contract": "workspace:*",
+        "@kite-ai/runtime-spi": "workspace:*",
       },
     },
     "packages/runtime-spi": {
-      "name": "@kite/runtime-spi",
+      "name": "@kite-ai/runtime-spi",
       "version": "0.0.0",
       "dependencies": {
-        "@kite/runtime-contract": "workspace:*",
+        "@kite-ai/runtime-contract": "workspace:*",
       },
     },
     "packages/runtime-storage-sqlite": {
-      "name": "@kite/runtime-storage-sqlite",
+      "name": "@kite-ai/runtime-storage-sqlite",
       "version": "0.0.0",
       "dependencies": {
-        "@kite/runtime-host": "workspace:*",
+        "@kite-ai/runtime-host": "workspace:*",
       },
     },
   },
@@ -180,19 +180,19 @@
 
     "@inkjs/ui": ["@inkjs/ui@2.0.0", "https://registry.npmmirror.com/@inkjs/ui/-/ui-2.0.0.tgz", { "dependencies": { "chalk": "^5.3.0", "cli-spinners": "^3.0.0", "deepmerge": "^4.3.1", "figures": "^6.1.0" }, "peerDependencies": { "ink": ">=5" } }, "sha512-5+8fJmwtF9UvikzLfph9sA+LS+l37Ij/szQltkuXLOAXwNkBX9innfzh4pLGXIB59vKEQUtc6D4qGvhD7h3pAg=="],
 
-    "@kite/agent-kernel": ["@kite/agent-kernel@workspace:packages/agent-kernel"],
+    "@kite-ai/agent-kernel": ["@kite-ai/agent-kernel@workspace:packages/agent-kernel"],
 
-    "@kite/builtin-runtime": ["@kite/builtin-runtime@workspace:packages/builtin-runtime"],
+    "@kite-ai/builtin-runtime": ["@kite-ai/builtin-runtime@workspace:packages/builtin-runtime"],
 
-    "@kite/kite": ["@kite/kite@workspace:apps/kite"],
+    "@kite-ai/kite": ["@kite-ai/kite@workspace:apps/kite"],
 
-    "@kite/runtime-contract": ["@kite/runtime-contract@workspace:packages/runtime-contract"],
+    "@kite-ai/runtime-contract": ["@kite-ai/runtime-contract@workspace:packages/runtime-contract"],
 
-    "@kite/runtime-host": ["@kite/runtime-host@workspace:packages/runtime-host"],
+    "@kite-ai/runtime-host": ["@kite-ai/runtime-host@workspace:packages/runtime-host"],
 
-    "@kite/runtime-spi": ["@kite/runtime-spi@workspace:packages/runtime-spi"],
+    "@kite-ai/runtime-spi": ["@kite-ai/runtime-spi@workspace:packages/runtime-spi"],
 
-    "@kite/runtime-storage-sqlite": ["@kite/runtime-storage-sqlite@workspace:packages/runtime-storage-sqlite"],
+    "@kite-ai/runtime-storage-sqlite": ["@kite-ai/runtime-storage-sqlite@workspace:packages/runtime-storage-sqlite"],
 
     "@mixmark-io/domino": ["@mixmark-io/domino@2.2.0", "https://registry.npmmirror.com/@mixmark-io/domino/-/domino-2.2.0.tgz", {}, "sha512-Y28PR25bHXUg88kCV7nivXrP2Nj2RueZ3/l/jdx6J9f8J4nsEGcgX0Qe6lt7Pa+J79+kPiJU3LguR6O/6zrLOw=="],
 
@@ -672,7 +672,7 @@
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "https://registry.npmmirror.com/zod-to-json-schema/-/zod-to-json-schema-3.25.2.tgz", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 
-    "@kite/builtin-runtime/jsdom": ["jsdom@26.1.0", "https://registry.npmmirror.com/jsdom/-/jsdom-26.1.0.tgz", { "dependencies": { "cssstyle": "^4.2.1", "data-urls": "^5.0.0", "decimal.js": "^10.5.0", "html-encoding-sniffer": "^4.0.0", "http-proxy-agent": "^7.0.2", "https-proxy-agent": "^7.0.6", "is-potential-custom-element-name": "^1.0.1", "nwsapi": "^2.2.16", "parse5": "^7.2.1", "rrweb-cssom": "^0.8.0", "saxes": "^6.0.0", "symbol-tree": "^3.2.4", "tough-cookie": "^5.1.1", "w3c-xmlserializer": "^5.0.0", "webidl-conversions": "^7.0.0", "whatwg-encoding": "^3.1.1", "whatwg-mimetype": "^4.0.0", "whatwg-url": "^14.1.1", "ws": "^8.18.0", "xml-name-validator": "^5.0.0" }, "peerDependencies": { "canvas": "^3.0.0" }, "optionalPeers": ["canvas"] }, "sha512-Cvc9WUhxSMEo4McES3P7oK3QaXldCfNWp7pl2NNeiIFlCoLr3kfq9kb1fxftiwk1FLV7CvpvDfonxtzUDeSOPg=="],
+    "@kite-ai/builtin-runtime/jsdom": ["jsdom@26.1.0", "https://registry.npmmirror.com/jsdom/-/jsdom-26.1.0.tgz", { "dependencies": { "cssstyle": "^4.2.1", "data-urls": "^5.0.0", "decimal.js": "^10.5.0", "html-encoding-sniffer": "^4.0.0", "http-proxy-agent": "^7.0.2", "https-proxy-agent": "^7.0.6", "is-potential-custom-element-name": "^1.0.1", "nwsapi": "^2.2.16", "parse5": "^7.2.1", "rrweb-cssom": "^0.8.0", "saxes": "^6.0.0", "symbol-tree": "^3.2.4", "tough-cookie": "^5.1.1", "w3c-xmlserializer": "^5.0.0", "webidl-conversions": "^7.0.0", "whatwg-encoding": "^3.1.1", "whatwg-mimetype": "^4.0.0", "whatwg-url": "^14.1.1", "ws": "^8.18.0", "xml-name-validator": "^5.0.0" }, "peerDependencies": { "canvas": "^3.0.0" }, "optionalPeers": ["canvas"] }, "sha512-Cvc9WUhxSMEo4McES3P7oK3QaXldCfNWp7pl2NNeiIFlCoLr3kfq9kb1fxftiwk1FLV7CvpvDfonxtzUDeSOPg=="],
 
     "@types/node/undici-types": ["undici-types@8.3.0", "https://registry.npmmirror.com/undici-types/-/undici-types-8.3.0.tgz", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
 
@@ -700,19 +700,19 @@
 
     "yargs/string-width": ["string-width@4.2.3", "https://registry.npmmirror.com/string-width/-/string-width-4.2.3.tgz", { "dependencies": { "emoji-regex": "^8.0.0", "is-fullwidth-code-point": "^3.0.0", "strip-ansi": "^6.0.1" } }, "sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g=="],
 
-    "@kite/builtin-runtime/jsdom/data-urls": ["data-urls@5.0.0", "https://registry.npmmirror.com/data-urls/-/data-urls-5.0.0.tgz", { "dependencies": { "whatwg-mimetype": "^4.0.0", "whatwg-url": "^14.0.0" } }, "sha512-ZYP5VBHshaDAiVZxjbRVcFJpc+4xGgT0bK3vzy1HLN8jTO975HEbuYzZJcHoQEY5K1a0z8YayJkyVETa08eNTg=="],
+    "@kite-ai/builtin-runtime/jsdom/data-urls": ["data-urls@5.0.0", "https://registry.npmmirror.com/data-urls/-/data-urls-5.0.0.tgz", { "dependencies": { "whatwg-mimetype": "^4.0.0", "whatwg-url": "^14.0.0" } }, "sha512-ZYP5VBHshaDAiVZxjbRVcFJpc+4xGgT0bK3vzy1HLN8jTO975HEbuYzZJcHoQEY5K1a0z8YayJkyVETa08eNTg=="],
 
-    "@kite/builtin-runtime/jsdom/html-encoding-sniffer": ["html-encoding-sniffer@4.0.0", "https://registry.npmmirror.com/html-encoding-sniffer/-/html-encoding-sniffer-4.0.0.tgz", { "dependencies": { "whatwg-encoding": "^3.1.1" } }, "sha512-Y22oTqIU4uuPgEemfz7NDJz6OeKf12Lsu+QC+s3BVpda64lTiMYCyGwg5ki4vFxkMwQdeZDl2adZoqUgdFuTgQ=="],
+    "@kite-ai/builtin-runtime/jsdom/html-encoding-sniffer": ["html-encoding-sniffer@4.0.0", "https://registry.npmmirror.com/html-encoding-sniffer/-/html-encoding-sniffer-4.0.0.tgz", { "dependencies": { "whatwg-encoding": "^3.1.1" } }, "sha512-Y22oTqIU4uuPgEemfz7NDJz6OeKf12Lsu+QC+s3BVpda64lTiMYCyGwg5ki4vFxkMwQdeZDl2adZoqUgdFuTgQ=="],
 
-    "@kite/builtin-runtime/jsdom/parse5": ["parse5@7.3.0", "https://registry.npmmirror.com/parse5/-/parse5-7.3.0.tgz", { "dependencies": { "entities": "^6.0.0" } }, "sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw=="],
+    "@kite-ai/builtin-runtime/jsdom/parse5": ["parse5@7.3.0", "https://registry.npmmirror.com/parse5/-/parse5-7.3.0.tgz", { "dependencies": { "entities": "^6.0.0" } }, "sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw=="],
 
-    "@kite/builtin-runtime/jsdom/tough-cookie": ["tough-cookie@5.1.2", "https://registry.npmmirror.com/tough-cookie/-/tough-cookie-5.1.2.tgz", { "dependencies": { "tldts": "^6.1.32" } }, "sha512-FVDYdxtnj0G6Qm/DhNPSb8Ju59ULcup3tuJxkFb5K8Bv2pUXILbf0xZWU8PX8Ov19OXljbUyveOFwRMwkXzO+A=="],
+    "@kite-ai/builtin-runtime/jsdom/tough-cookie": ["tough-cookie@5.1.2", "https://registry.npmmirror.com/tough-cookie/-/tough-cookie-5.1.2.tgz", { "dependencies": { "tldts": "^6.1.32" } }, "sha512-FVDYdxtnj0G6Qm/DhNPSb8Ju59ULcup3tuJxkFb5K8Bv2pUXILbf0xZWU8PX8Ov19OXljbUyveOFwRMwkXzO+A=="],
 
-    "@kite/builtin-runtime/jsdom/webidl-conversions": ["webidl-conversions@7.0.0", "https://registry.npmmirror.com/webidl-conversions/-/webidl-conversions-7.0.0.tgz", {}, "sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g=="],
+    "@kite-ai/builtin-runtime/jsdom/webidl-conversions": ["webidl-conversions@7.0.0", "https://registry.npmmirror.com/webidl-conversions/-/webidl-conversions-7.0.0.tgz", {}, "sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g=="],
 
-    "@kite/builtin-runtime/jsdom/whatwg-mimetype": ["whatwg-mimetype@4.0.0", "https://registry.npmmirror.com/whatwg-mimetype/-/whatwg-mimetype-4.0.0.tgz", {}, "sha512-QaKxh0eNIi2mE9p2vEdzfagOKHCcj1pJ56EEHGQOVxp8r9/iszLUUV7v89x9O1p/T+NlTM5W7jW6+cz4Fq1YVg=="],
+    "@kite-ai/builtin-runtime/jsdom/whatwg-mimetype": ["whatwg-mimetype@4.0.0", "https://registry.npmmirror.com/whatwg-mimetype/-/whatwg-mimetype-4.0.0.tgz", {}, "sha512-QaKxh0eNIi2mE9p2vEdzfagOKHCcj1pJ56EEHGQOVxp8r9/iszLUUV7v89x9O1p/T+NlTM5W7jW6+cz4Fq1YVg=="],
 
-    "@kite/builtin-runtime/jsdom/whatwg-url": ["whatwg-url@14.2.0", "https://registry.npmmirror.com/whatwg-url/-/whatwg-url-14.2.0.tgz", { "dependencies": { "tr46": "^5.1.0", "webidl-conversions": "^7.0.0" } }, "sha512-De72GdQZzNTUBBChsXueQUnPKDkg/5A5zp7pFDuQAj5UFoENpiACU0wlCvzpAGnTkj++ihpKwKyYewn/XNUbKw=="],
+    "@kite-ai/builtin-runtime/jsdom/whatwg-url": ["whatwg-url@14.2.0", "https://registry.npmmirror.com/whatwg-url/-/whatwg-url-14.2.0.tgz", { "dependencies": { "tr46": "^5.1.0", "webidl-conversions": "^7.0.0" } }, "sha512-De72GdQZzNTUBBChsXueQUnPKDkg/5A5zp7pFDuQAj5UFoENpiACU0wlCvzpAGnTkj++ihpKwKyYewn/XNUbKw=="],
 
     "cli-highlight/chalk/ansi-styles": ["ansi-styles@4.3.0", "https://registry.npmmirror.com/ansi-styles/-/ansi-styles-4.3.0.tgz", { "dependencies": { "color-convert": "^2.0.1" } }, "sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg=="],
 
@@ -736,16 +736,16 @@
 
     "yargs/string-width/strip-ansi": ["strip-ansi@6.0.1", "https://registry.npmmirror.com/strip-ansi/-/strip-ansi-6.0.1.tgz", { "dependencies": { "ansi-regex": "^5.0.1" } }, "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A=="],
 
-    "@kite/builtin-runtime/jsdom/parse5/entities": ["entities@6.0.1", "https://registry.npmmirror.com/entities/-/entities-6.0.1.tgz", {}, "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g=="],
+    "@kite-ai/builtin-runtime/jsdom/parse5/entities": ["entities@6.0.1", "https://registry.npmmirror.com/entities/-/entities-6.0.1.tgz", {}, "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g=="],
 
-    "@kite/builtin-runtime/jsdom/tough-cookie/tldts": ["tldts@6.1.86", "https://registry.npmmirror.com/tldts/-/tldts-6.1.86.tgz", { "dependencies": { "tldts-core": "^6.1.86" }, "bin": { "tldts": "bin/cli.js" } }, "sha512-WMi/OQ2axVTf/ykqCQgXiIct+mSQDFdH2fkwhPwgEwvJ1kSzZRiinb0zF2Xb8u4+OqPChmyI6MEu4EezNJz+FQ=="],
+    "@kite-ai/builtin-runtime/jsdom/tough-cookie/tldts": ["tldts@6.1.86", "https://registry.npmmirror.com/tldts/-/tldts-6.1.86.tgz", { "dependencies": { "tldts-core": "^6.1.86" }, "bin": { "tldts": "bin/cli.js" } }, "sha512-WMi/OQ2axVTf/ykqCQgXiIct+mSQDFdH2fkwhPwgEwvJ1kSzZRiinb0zF2Xb8u4+OqPChmyI6MEu4EezNJz+FQ=="],
 
-    "@kite/builtin-runtime/jsdom/whatwg-url/tr46": ["tr46@5.1.1", "https://registry.npmmirror.com/tr46/-/tr46-5.1.1.tgz", { "dependencies": { "punycode": "^2.3.1" } }, "sha512-hdF5ZgjTqgAntKkklYw0R03MG2x/bSzTtkxmIRw/sTNV8YXsCJ1tfLAX23lhxhHJlEf3CRCOCGGWw3vI3GaSPw=="],
+    "@kite-ai/builtin-runtime/jsdom/whatwg-url/tr46": ["tr46@5.1.1", "https://registry.npmmirror.com/tr46/-/tr46-5.1.1.tgz", { "dependencies": { "punycode": "^2.3.1" } }, "sha512-hdF5ZgjTqgAntKkklYw0R03MG2x/bSzTtkxmIRw/sTNV8YXsCJ1tfLAX23lhxhHJlEf3CRCOCGGWw3vI3GaSPw=="],
 
     "cssstyle/@asamuzakjp/css-color/@csstools/css-color-parser/@csstools/color-helpers": ["@csstools/color-helpers@5.1.0", "https://registry.npmmirror.com/@csstools/color-helpers/-/color-helpers-5.1.0.tgz", {}, "sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA=="],
 
     "yargs/string-width/strip-ansi/ansi-regex": ["ansi-regex@5.0.1", "https://registry.npmmirror.com/ansi-regex/-/ansi-regex-5.0.1.tgz", {}, "sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ=="],
 
-    "@kite/builtin-runtime/jsdom/tough-cookie/tldts/tldts-core": ["tldts-core@6.1.86", "https://registry.npmmirror.com/tldts-core/-/tldts-core-6.1.86.tgz", {}, "sha512-Je6p7pkk+KMzMv2XXKmAE3McmolOQFdxkKw0R8EYNr7sELW46JqnNeTX8ybPiQgvg1ymCoF8LXs5fzFaZvJPTA=="],
+    "@kite-ai/builtin-runtime/jsdom/tough-cookie/tldts/tldts-core": ["tldts-core@6.1.86", "https://registry.npmmirror.com/tldts-core/-/tldts-core-6.1.86.tgz", {}, "sha512-Je6p7pkk+KMzMv2XXKmAE3McmolOQFdxkKw0R8EYNr7sELW46JqnNeTX8ybPiQgvg1ymCoF8LXs5fzFaZvJPTA=="],
   }
 }

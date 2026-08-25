@@ -11,7 +11,7 @@ import {
   type McpStdioReadyProof,
   type McpStdioTerminalProof,
   RUNTIME_CONTROL_FRAME_SCHEMA_,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   createRuntimeControlFrame,
   verifyRuntimeControlFrame,

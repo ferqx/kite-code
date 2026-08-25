@@ -8,9 +8,9 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { AgentState, RuntimeEvent } from '@kite/agent-kernel';
-import { createChatModel, type SupportedChatModel } from '@kite/builtin-runtime/model';
-import { sandboxBackendAvailable } from '@kite/builtin-runtime/sandbox';
+import type { AgentState, RuntimeEvent } from '@kite-ai/agent-kernel';
+import { createChatModel, type SupportedChatModel } from '@kite-ai/builtin-runtime/model';
+import { sandboxBackendAvailable } from '@kite-ai/builtin-runtime/sandbox';
 import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
 import type { StateRuntimeStorage } from '#app/bootstrap/runtime/state-runtime';
 import { executeRuntimeTurn, type RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
@@ -46,7 +46,7 @@ export async function* runTestRuntimeAgent(
   input: TestRuntimeAgentInput,
   provider: RuntimeActionProvider,
   createRuntimeEffectPort: (dependencies: RuntimeExecutorDependencies) => RuntimeEffectExecutor,
-): AsyncGenerator<import('@kite/agent-kernel').RuntimeEvent> {
+): AsyncGenerator<import('@kite-ai/agent-kernel').RuntimeEvent> {
   const store = input.openStateRuntimeStorage(input.threadId) as TestRuntimeStore<
     RuntimeEvent,
     AgentState

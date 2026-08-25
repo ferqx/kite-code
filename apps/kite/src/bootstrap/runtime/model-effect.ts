@@ -9,47 +9,47 @@ import type {
   BuiltinModelToolCatalogEntry,
   BuiltinModelToolSet,
   BuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   chooseCapabilityDisclosure,
   createCapabilityBinding,
   failClosedBuiltinToolCapability as failClosedToolCapability,
   projectBuiltinUnknownToolFieldsObservation,
   searchableCapabilitySnapshot,
-} from '@kite/builtin-runtime';
-import { exposedMcpToolName, type McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime';
+import { exposedMcpToolName, type McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import type {
   BuiltinModelEffectCoordinator,
   CompactionReporter,
   SupportedChatModel,
-} from '@kite/builtin-runtime/model';
+} from '@kite-ai/builtin-runtime/model';
 import {
   type ContextProjectionEnvironment,
   type ModelInvocationPersistence,
   resolveModelCapabilities,
   resolveProjectInstructionSnapshot,
   serializeToolDescriptors,
-} from '@kite/builtin-runtime/model';
-import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/model';
+import type { SandboxBackend, ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
 import type {
   SkillCatalogSnapshot,
   SkillManifest,
   SkillScanOptions,
-} from '@kite/builtin-runtime/skills';
+} from '@kite-ai/builtin-runtime/skills';
 import {
   canonicalizeCapabilityArguments,
   skillFrameInvalidationReason,
-} from '@kite/builtin-runtime/skills';
-import { createBuiltinModelToolSurfaceFromProjection } from '@kite/builtin-runtime/subagent';
-import { getAgentPhase, type SubAgentEventSink } from '@kite/runtime-contract';
+} from '@kite-ai/builtin-runtime/skills';
+import { createBuiltinModelToolSurfaceFromProjection } from '@kite-ai/builtin-runtime/subagent';
+import { getAgentPhase, type SubAgentEventSink } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateActiveSkillFrames as activeSkillFramesForCurrentWork,
   runtimeHostStateClassifyFailure as classifyFailure,
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateEffectiveInteractionMode as getEffectiveInteractionMode,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
-} from '@kite/runtime-host/kernel-adapter';
-import type { CapabilityTurnContext } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { CapabilityTurnContext } from '@kite-ai/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
@@ -198,7 +198,7 @@ export function resolveContextProjectionEnvironment(input: {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -206,10 +206,10 @@ export function resolveContextProjectionEnvironment(input: {
   subagentEventSink?: SubAgentEventSink;
   signal?: AbortSignal;
   mcpBindings?: Array<{
-    binding: import('@kite/runtime-contract').CapabilityBinding;
-    descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
+    binding: import('@kite-ai/runtime-contract').CapabilityBinding;
+    descriptor: import('@kite-ai/runtime-contract').CapabilityDescriptor;
   }>;
-  disclosedDescriptors?: import('@kite/runtime-contract').CapabilityDescriptor[];
+  disclosedDescriptors?: import('@kite-ai/runtime-contract').CapabilityDescriptor[];
   sandboxBackend?: SandboxBackend | 'unknown';
   builtinToolCatalog: BuiltinToolCatalogProjection;
   projectedTools?: BuiltinModelToolSet;
@@ -334,7 +334,7 @@ export async function projectPrimaryModelEffect(params: {
   state: RuntimeState;
   config: AgentConfig;
   shellExecutor?: ShellExecutor;
-  gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
+  gitBroker?: import('@kite-ai/builtin-runtime/git').GitBroker;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
@@ -349,7 +349,7 @@ export async function projectPrimaryModelEffect(params: {
   /** App-owned coordinator bound to the one Gateway for every Model effect. */
   modelEffectCoordinator: BuiltinModelEffectCoordinator;
   modelInvocationPersistence?: ModelInvocationPersistence<RuntimeState, RuntimeEvent>;
-  subagentTaskRequests?: import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
+  subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   builtinToolCatalog: BuiltinToolCatalogProjection;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;

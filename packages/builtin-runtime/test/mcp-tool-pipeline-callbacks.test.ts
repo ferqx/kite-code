@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { CapabilityDescriptor } from '@kite/runtime-contract';
+import type { CapabilityDescriptor } from '@kite-ai/runtime-contract';
 import type {
   DynamicMcpPreparedToolInvocationIdentity,
   NonDynamicPreparedToolInvocationIdentity,
@@ -7,8 +7,8 @@ import type {
   RuntimeJsonValue,
   ToolCallSnapshot,
   ToolPipelineResolutionContext,
-} from '@kite/runtime-spi';
-import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import { createCapabilityBinding, digestCapabilityBindingValue } from '../src/capability-binding';
 import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '../src/index';
 import {
@@ -101,7 +101,7 @@ function prepareDynamic(value: ReturnType<typeof fixture>): PreparedToolInvocati
     (entry) => entry.visibility === 'internal' && entry.operationId === 'mcp:dynamic_tool',
   );
   if (wrapperEntry?.visibility !== 'internal') throw new Error('wrapper missing');
-  const target = resolved.value.target as import('@kite/runtime-spi').DynamicMcpToolTarget;
+  const target = resolved.value.target as import('@kite-ai/runtime-spi').DynamicMcpToolTarget;
   if (!target.isDynamicMcp) throw new Error('dynamic target missing');
   const identity: DynamicMcpPreparedToolInvocationIdentity = {
     invocationId: 'invocation-1',
@@ -167,7 +167,7 @@ describe('Builtin dynamic MCP Tool Pipeline callbacks', () => {
       capabilityId: value.subject.capabilityId,
       providerId: value.subject.provider.id,
     });
-    const target = result.value.target as import('@kite/runtime-spi').DynamicMcpToolTarget;
+    const target = result.value.target as import('@kite-ai/runtime-spi').DynamicMcpToolTarget;
     expect(target.subject.exposedToolName).toBe(MCP_NAME);
     expect(target.runtimeWrapper.capabilityId).toBe('mcp:dynamic_tool');
     expect(target.runtimeWrapper.builtinProjectionRevision).toBe(value.projection.revision);

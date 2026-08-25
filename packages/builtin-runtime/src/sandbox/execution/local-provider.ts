@@ -11,7 +11,7 @@ import {
   type SandboxExecutionProviderResult,
   type SandboxPreparation,
   type SandboxPreparationGrant,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { generateBwrapArgs } from '../bwrap';
 import type { CgroupPidsRunner } from '../cgroup-pids-contract';
 import { discoverRuntimeReadOnlyRoots, generateSandboxProfile } from '../profile';

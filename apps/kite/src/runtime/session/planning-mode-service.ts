@@ -1,8 +1,8 @@
-import { getAgentPhase } from '@kite/runtime-contract';
+import { getAgentPhase } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
-} from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type { AuthorizedExecutionControl } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import type { RuntimeEvent } from '#app/bootstrap/runtime/state-runtime';
 import type { PlanningModeExitResult } from './runtime-session';

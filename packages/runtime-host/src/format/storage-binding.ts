@@ -19,7 +19,7 @@ import {
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeEvent,
   rebindForkAgentState,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import type { RuntimeCompatibleRecordFormat, RuntimeSnapshotCodec } from '../storage';
 
 export interface RuntimeHostStateStorageBinding {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createKiteRuntimeBoundary } from '@kite/kite';
+import { createKiteRuntimeBoundary } from '@kite-ai/kite';
 
 describe('Kite target composition root', () => {
   test('composes the RA package boundaries on the target Runtime format', () => {

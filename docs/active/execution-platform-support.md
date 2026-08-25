@@ -289,7 +289,7 @@ CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enab
 PS-02 后三种 native backend 共享 `SandboxExecutionProvider` 协议，但共享协议不代表三者当前都可进入
 production execution。composition 的 startup discovery 只解析静态候选；bubblewrap/cgroup 等会启动进程或申请
 资源的 usability probe 必须等 allocating preparation intent durable ack 后才由 Runtime lifecycle consumer
-执行。RM-13 后 consumer 只验证 durable identity 并调用 `@kite/runtime-host` 的唯一 process supervisor；
+执行。RM-13 后 consumer 只验证 durable identity 并调用 `@kite-ai/runtime-host` 的唯一 process supervisor；
 Provider 不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
 
 App composition 的 preparation abort 不依赖平台 probe 主动观察 `AbortSignal`：一旦 controller 轮换，当前

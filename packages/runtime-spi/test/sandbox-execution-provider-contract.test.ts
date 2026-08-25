@@ -334,7 +334,7 @@ describe('runtime SPI sandbox execution provider contract', () => {
       'utf8',
     );
     expect(source).not.toMatch(
-      /(?:from\s+|import\s*\()\s*['"](?:@kite\/(?:builtin-runtime|runtime-host|agent-kernel)|#app|@\/core)/,
+      /(?:from\s+|import\s*\()\s*['"](?:@kite-ai\/(?:builtin-runtime|runtime-host|agent-kernel)|#app|@\/core)/,
     );
     expect(source).not.toMatch(
       /\b(?:State|Store4|RuntimeEvent|WeakMap|WeakSet|createHash|createHmac)\b/,

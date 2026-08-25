@@ -1,4 +1,4 @@
-import type { PlanCompletionEvidence } from '@kite/runtime-contract';
+import type { PlanCompletionEvidence } from '@kite-ai/runtime-contract';
 
 const SAFE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const SAFE_REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/;

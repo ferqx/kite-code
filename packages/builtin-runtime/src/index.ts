@@ -1,5 +1,5 @@
-import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite/runtime-contract';
-import type { RuntimeModule } from '@kite/runtime-spi';
+import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite-ai/runtime-contract';
+import type { RuntimeModule } from '@kite-ai/runtime-spi';
 import { createGitRuntimeModule } from './git/runtime-module';
 import { createModelRuntimeModule } from './model/runtime-module';
 import { createPlanningRuntimeModule } from './planning/runtime-module';
@@ -7,7 +7,7 @@ import { createSubagentRuntimeModule } from './subagent/runtime-module';
 import { createToolSearchRuntimeModule } from './tool-search';
 import { createVerificationRuntimeModule } from './verification/runtime-module';
 
-export type { WorkspaceFilesystemGrantVerifier } from '@kite/runtime-spi';
+export type { WorkspaceFilesystemGrantVerifier } from '@kite-ai/runtime-spi';
 export type {
   BuiltinPreparedTaskDispatchAdapter,
   BuiltinPreparedToolDispatchAdapter,

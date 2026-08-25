@@ -1,9 +1,9 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import type {
   RuntimeHostStateToolGovernanceDecision,
   RuntimeHostStateToolGovernanceFacts,
-} from '@kite/runtime-host/kernel-adapter';
-import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/runtime-host/kernel-adapter';
+import { runtimeHostStateCreateApprovalBindingDigest } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CapabilityEffects,
   CapabilityPolicyEffects,
@@ -21,7 +21,7 @@ import type {
   ToolPipelineGovernanceInvocationProjection,
   ToolPipelineReceiptRequirement,
   ToolPipelineRetryEligibility,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 export const APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_ =
   'kite.tool-pipeline-prepared-request.v1' as const;

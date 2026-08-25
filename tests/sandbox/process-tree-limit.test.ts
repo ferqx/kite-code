@@ -6,7 +6,7 @@ import {
   currentProcessTreeCapability,
   type ExecutionBoundary,
   type ProductionExecutionQualification,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import { computeInProcessReadOnlyToolCatalogDigest } from '#app/config';
 import { evaluateExecutionBoundaryQualification } from '#app/config/execution-boundary';
 

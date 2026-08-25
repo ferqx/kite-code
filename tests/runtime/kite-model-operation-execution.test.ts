@@ -2,19 +2,19 @@ import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   type BuiltinModelOperationAttempt,
-} from '@kite/builtin-runtime/model';
-import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/model';
+import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '@kite-ai/runtime-host';
 import {
   type CapabilityExecutionPort,
   createRuntimeModuleRegistry,
   MODEL_ATTEMPT_OUTCOME_SCHEMA_,
   MODEL_INVOCATION_PURPOSES_,
   type ModelAttemptOutcome,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import { createKiteModelOperationExecutionPort } from '#app/bootstrap/model-operation-execution';
 
 const OUTCOME: ModelAttemptOutcome = Object.freeze({

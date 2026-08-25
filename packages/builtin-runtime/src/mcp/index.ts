@@ -7,7 +7,7 @@ export type {
   McpStdioProcessPort,
   McpStdioReadyProof,
   McpStdioTerminalProof,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 export type { CompiledCapabilitySchema, JsonSchema } from '../skills/capability-domain';
 export {
   canonicalizeCapabilityArguments,

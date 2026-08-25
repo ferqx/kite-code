@@ -8,8 +8,8 @@ import {
   type McpResource,
   MemoryMcpCredentialStore,
   normalizeMcpToolResult,
-} from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostMcpStdioProcessPort } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/mcp';
+import { createRuntimeHostMcpStdioProcessPort } from '@kite-ai/runtime-host';
 import {
   type OAuthClientProvider,
   UnauthorizedError,

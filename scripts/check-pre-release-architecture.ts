@@ -39,7 +39,7 @@ function directNamedExports(path: string): ReadonlySet<string> {
 
 const builtinDomainImports = new Map<string, ReadonlySet<string>>([
   [
-    '@kite/builtin-runtime/skills',
+    '@kite-ai/builtin-runtime/skills',
     new Set([
       'SkillActivationEvaluation',
       'SkillActivationRequest',
@@ -71,7 +71,7 @@ const builtinDomainImports = new Map<string, ReadonlySet<string>>([
     ]),
   ],
   [
-    '@kite/builtin-runtime/verification',
+    '@kite-ai/builtin-runtime/verification',
     new Set([
       'BuiltinCapabilityVerificationRequest',
       'createBuiltinCapabilityVerificationRequest',
@@ -94,7 +94,7 @@ const builtinDomainImports = new Map<string, ReadonlySet<string>>([
     ]),
   ],
   [
-    '@kite/builtin-runtime/subagent',
+    '@kite-ai/builtin-runtime/subagent',
     directNamedExports('packages/builtin-runtime/src/subagent/index.ts'),
   ],
 ]);
@@ -165,7 +165,7 @@ function inspectSource(path: string): void {
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === '@kite/builtin-runtime' &&
+      node.moduleSpecifier.text === '@kite-ai/builtin-runtime' &&
       node.importClause?.namedBindings &&
       ts.isNamedImports(node.importClause.namedBindings)
     ) {
@@ -182,7 +182,7 @@ function inspectSource(path: string): void {
     if (
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === '@kite/runtime-host' &&
+      node.moduleSpecifier.text === '@kite-ai/runtime-host' &&
       node.importClause?.namedBindings &&
       ts.isNamedImports(node.importClause.namedBindings)
     ) {
@@ -191,7 +191,7 @@ function inspectSource(path: string): void {
         if (!runtimeHostKernelAdapterExports.has(imported)) continue;
         const position = sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile));
         violations.push(
-          `${relativePath}:${position.line + 1}: import ${imported} from @kite/runtime-host/kernel-adapter instead of the root barrel`,
+          `${relativePath}:${position.line + 1}: import ${imported} from @kite-ai/runtime-host/kernel-adapter instead of the root barrel`,
         );
       }
     }

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   SUBAGENT_CAPABILITY_REVISIONS_,
   SUBAGENT_OPERATION_IDS_,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 import { createBuiltinRuntimeModules } from '#builtin-runtime';
 import { createRuntimeModuleRegistry } from '#runtime-spi';
 

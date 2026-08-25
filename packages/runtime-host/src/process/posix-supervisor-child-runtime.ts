@@ -1,5 +1,5 @@
 import { connect } from 'node:net';
-import type { RuntimeControlFrame } from '@kite/runtime-spi';
+import type { RuntimeControlFrame } from '@kite-ai/runtime-spi';
 import {
   createRuntimeControlFrame,
   verifyRuntimeControlFrame,

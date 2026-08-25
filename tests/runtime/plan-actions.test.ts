@@ -1,8 +1,8 @@
 // ── Plan Mode v2 审批行为测试 / Plan approval action tests ──
 // 验证 plan_review_decision 的 approve/revise/cancel 事件生成
 import { describe, expect, test } from 'bun:test';
-import type { AgentPlan } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+import type { AgentPlan } from '@kite-ai/runtime-contract';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   eventsForRuntimeAction,
   type RuntimeUserAction,

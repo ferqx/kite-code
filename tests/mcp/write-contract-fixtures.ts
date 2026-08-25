@@ -1,1 +1,1 @@
-export * from '@kite/builtin-runtime/mcp';
+export * from '@kite-ai/builtin-runtime/mcp';

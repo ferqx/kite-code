@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import { createCapabilityBinding } from '@kite/builtin-runtime';
+import { createCapabilityBinding } from '@kite-ai/builtin-runtime';
 import {
   isMcpToolEnabled,
   McpConnectionManager,
   type McpServerConfig,
   resolveMcpToolPolicy,
-} from '@kite/builtin-runtime/mcp';
+} from '@kite-ai/builtin-runtime/mcp';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 

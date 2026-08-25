@@ -4,8 +4,8 @@ import {
   currentContextPreflight,
   inspectManualContextCompaction,
   manualContextCompactionEvent,
-} from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/model';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 

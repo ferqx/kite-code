@@ -1,6 +1,6 @@
-import type { McpProviderRecoveryAction } from '@kite/builtin-runtime/mcp';
-import type { SubAgentEventSink } from '@kite/runtime-contract';
-import { createRuntimeHostInteractionId } from '@kite/runtime-host';
+import type { McpProviderRecoveryAction } from '@kite-ai/builtin-runtime/mcp';
+import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
+import { createRuntimeHostInteractionId } from '@kite-ai/runtime-host';
 import type { ClassifiedFailure } from '#app/bootstrap/runtime/failures';
 import type { RuntimeEvent } from '#app/bootstrap/runtime/state-runtime';
 

@@ -9,8 +9,8 @@ import type {
   ObservabilityRuntimeFact,
   ObservabilityTaskStageFact,
   ObservabilityToolStatus,
-} from '@kite/runtime-contract';
-import { OBSERVABILITY_METRIC_DRAFT_SCHEMA_ } from '@kite/runtime-contract';
+} from '@kite-ai/runtime-contract';
+import { OBSERVABILITY_METRIC_DRAFT_SCHEMA_ } from '@kite-ai/runtime-contract';
 
 const SAFE_ALIAS_PATTERN = /^[a-z0-9][a-z0-9._:-]{0,47}$/;
 

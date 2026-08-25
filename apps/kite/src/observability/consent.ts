@@ -1,4 +1,4 @@
-import type { MetricName } from '@kite/runtime-host';
+import type { MetricName } from '@kite-ai/runtime-host';
 
 export const TELEMETRY_METRIC_CATEGORIES_ = [
   'run_turn',

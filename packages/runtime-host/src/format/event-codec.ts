@@ -1,4 +1,4 @@
-import { assertCurrentRuntimeEventForWrite, type RuntimeEvent } from '@kite/agent-kernel';
+import { assertCurrentRuntimeEventForWrite, type RuntimeEvent } from '@kite-ai/agent-kernel';
 
 /**
  * Host-facing State event admission boundary.

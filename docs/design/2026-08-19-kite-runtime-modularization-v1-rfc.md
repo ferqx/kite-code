@@ -271,7 +271,7 @@ Sub-agent V1 继续共享父 Session storage，以 `actorId` / `contextLineageId
 
 ### 8.1 Client boundary
 
-Client 只依赖 `@kite/runtime-contract`，只可：
+Client 只依赖 `@kite-ai/runtime-contract`，只可：
 
 ```text
 command(RuntimeCommand)
@@ -377,8 +377,8 @@ apps/kite/bootstrap.ts
 
 | Package | 允许依赖 | 禁止依赖 |
 | --- | --- | --- |
-| `runtime-contract` | 第三方 schema/标准库中无环境副作用的最小依赖 | 其他 `@kite/*`、Node/Bun、UI |
-| `agent-kernel` | 无其他 `@kite/*`；纯 TS helper | Node/Bun、Store、Provider、Host、App |
+| `runtime-contract` | 第三方 schema/标准库中无环境副作用的最小依赖 | 其他 `@kite-ai/*`、Node/Bun、UI |
+| `agent-kernel` | 无其他 `@kite-ai/*`；纯 TS helper | Node/Bun、Store、Provider、Host、App |
 | `runtime-spi` | `runtime-contract` | Kernel、Host implementation、Store、App、具体 builtin implementation |
 | `runtime-host` | Contract、Kernel、Runtime SPI | SQLite、具体 builtin、TUI |
 | `runtime-storage-sqlite` | Host storage exports | Kernel internals、builtin、App |
@@ -641,7 +641,7 @@ RAV1 设计 State 26 时再决定如何把 Work-local state 收入 `ActiveWorkSt
 
 ```json
 {
-  "name": "@kite/runtime-spi",
+  "name": "@kite-ai/runtime-spi",
   "private": true
 }
 ```
@@ -1090,7 +1090,7 @@ ObservationIntent(resource, scope, classification)
 
 ## 22. Storage Ports 与 SQLite Adapter
 
-Storage Port 定义在 `@kite/runtime-host/storage`。Host 不依赖 SQLite；SQLite adapter 不依赖 Kernel internals。
+Storage Port 定义在 `@kite-ai/runtime-host/storage`。Host 不依赖 SQLite；SQLite adapter 不依赖 Kernel internals。
 
 ```ts
 export interface RuntimeStorage {
@@ -1441,7 +1441,7 @@ RAV1-05才允许在production不可达的独立路径设计State 26、Store 5与
 
 Implementation 必须新增或扩展静态门禁：
 
-1. `runtime-contract` 不导入任何 `@kite/*`；
+1. `runtime-contract` 不导入任何 `@kite-ai/*`；
 2. `agent-kernel` 不导入 `node:`、Bun、process、Host、Runtime SPI、Store、App；禁止 `Date.now()` / `crypto.randomUUID()`；
 3. `runtime-spi` 只依赖 Contract；
 4. `runtime-host` 不导入 SQLite 或具体 builtin；
@@ -1634,12 +1634,12 @@ package dependency cycles = 0
 
 | Package | V1 公共 export | 不 export |
 | --- | --- | --- |
-| `@kite/runtime-contract` | RuntimeAccess、Commands、Queries、Subscriptions、Notifications、Client projections / errors / schemas | AgentState、KernelEvent、EffectIntent、Grant、Store |
-| `@kite/agent-kernel` | AgentState、KernelInput、KernelEvent、KernelDecision、decide/reduce/selectPendingEffects、authority/evidence domain types | Host、Provider executor、Store、Node/Bun handles |
-| `@kite/runtime-spi` | RuntimeModule/Registry、CapabilityDefinition/Binding DTO、Executor、ExecutionRequest/Grant/Receipt、ContextSource/ContextCompilerPort、lifecycle/normalizer/adapter | Kernel state/event、Host implementation、Store、具体builtin |
-| `@kite/runtime-host` | createRuntimeHost、RuntimeHost、storage ports、Host config / diagnostics | Concrete SQLite、Builtin implementations、TUI |
-| `@kite/runtime-storage-sqlite` | createSqliteRuntimeStorage、SQLite-specific config / typed open errors | Kernel / Provider types、raw DB authority to Client |
-| `@kite/builtin-runtime` | createBuiltinRuntimeModules、按`filesystem / shell / mcp / skill-runtime / verification / subagent-runtime / model-runtime / model-context`的module factory子路径 | Host、Store、AgentState、KernelEvent |
+| `@kite-ai/runtime-contract` | RuntimeAccess、Commands、Queries、Subscriptions、Notifications、Client projections / errors / schemas | AgentState、KernelEvent、EffectIntent、Grant、Store |
+| `@kite-ai/agent-kernel` | AgentState、KernelInput、KernelEvent、KernelDecision、decide/reduce/selectPendingEffects、authority/evidence domain types | Host、Provider executor、Store、Node/Bun handles |
+| `@kite-ai/runtime-spi` | RuntimeModule/Registry、CapabilityDefinition/Binding DTO、Executor、ExecutionRequest/Grant/Receipt、ContextSource/ContextCompilerPort、lifecycle/normalizer/adapter | Kernel state/event、Host implementation、Store、具体builtin |
+| `@kite-ai/runtime-host` | createRuntimeHost、RuntimeHost、storage ports、Host config / diagnostics | Concrete SQLite、Builtin implementations、TUI |
+| `@kite-ai/runtime-storage-sqlite` | createSqliteRuntimeStorage、SQLite-specific config / typed open errors | Kernel / Provider types、raw DB authority to Client |
+| `@kite-ai/builtin-runtime` | createBuiltinRuntimeModules、按`filesystem / shell / mcp / skill-runtime / verification / subagent-runtime / model-runtime / model-context`的module factory子路径 | Host、Store、AgentState、KernelEvent |
 
 `apps/kite/src/bootstrap.ts` 组合这些 factory，向 CLI / TUI 只传 `RuntimeAccess` 与 App-local presentation/config dependencies。
 

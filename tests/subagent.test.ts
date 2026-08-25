@@ -4,7 +4,7 @@ import {
   BUILTIN_ROLES,
   DEFAULT_SUBAGENT_TIMEOUT_MS,
   getRoleConfig,
-} from '@kite/builtin-runtime/subagent';
+} from '@kite-ai/builtin-runtime/subagent';
 
 describe('内置角色定义', () => {
   it('应包含 4 个角色', () => {

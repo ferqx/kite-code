@@ -4,7 +4,7 @@ import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
   digestCapabilityBindingValue,
-} from '@kite/builtin-runtime';
+} from '@kite-ai/builtin-runtime';
 import {
   type CapabilityExecutionInvocation,
   type CapabilityExecutionPort,
@@ -13,7 +13,7 @@ import {
   createRuntimeModuleRegistry,
   type ExecutionReceipt,
   type RuntimeJsonValue,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 const WORKSPACE = '/tmp/kite-policy-workspace';
 

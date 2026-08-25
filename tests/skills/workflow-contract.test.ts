@@ -9,8 +9,8 @@ import {
   evaluateSkillActivation,
   refreshSkillCatalog,
   skillFrameInvalidationReason,
-} from '@kite/builtin-runtime/skills';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
+} from '@kite-ai/builtin-runtime/skills';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 

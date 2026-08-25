@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { resolveSandboxRuntime } from '@kite/builtin-runtime/sandbox';
+import { resolveSandboxRuntime } from '@kite-ai/builtin-runtime/sandbox';
 
 describe('resolveSandboxRuntime', () => {
   test('default discovery never launches a backend usability probe', () => {

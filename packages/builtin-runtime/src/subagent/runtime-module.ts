@@ -1,4 +1,4 @@
-import type { UserInputRequest } from '@kite/runtime-contract';
+import type { UserInputRequest } from '@kite-ai/runtime-contract';
 import type {
   CapabilityEffects,
   CapabilityExecutionContext,
@@ -9,8 +9,8 @@ import type {
   RuntimeModule,
   RuntimeModuleRegistryWriter,
   SubagentRole,
-} from '@kite/runtime-spi';
-import { defineRuntimeModule } from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
+import { defineRuntimeModule } from '@kite-ai/runtime-spi';
 import type { z } from 'zod';
 import { digestCapabilityBindingValue } from '../capability-binding';
 import {

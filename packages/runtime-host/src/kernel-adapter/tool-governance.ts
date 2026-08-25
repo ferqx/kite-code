@@ -17,7 +17,7 @@ import {
   type ToolGovernancePolicyFact,
   type ToolGovernanceSameCommandGrantFact,
   toolGovernanceFactsInvalidReason,
-} from '@kite/agent-kernel';
+} from '@kite-ai/agent-kernel';
 import {
   CAPABILITY_POLICY_COMPILATION_SCHEMA_,
   type ClassifiedInvocation,
@@ -28,7 +28,7 @@ import {
   type ToolPipelineGovernanceNestedSkillProjection,
   type ToolPipelineGovernanceOrdinaryInvocationProjection,
   type ToolPipelineGovernanceProjection,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 
 /** Host-facing aliases keep App composition from depending on Agent Kernel directly. */
 export type RuntimeHostStateToolGovernanceFacts = ToolGovernanceFacts;

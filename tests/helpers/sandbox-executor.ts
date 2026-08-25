@@ -5,7 +5,7 @@ import type {
   SandboxBackend,
   ShellExecutor,
   ShellResult,
-} from '@kite/builtin-runtime/sandbox';
+} from '@kite-ai/builtin-runtime/sandbox';
 import {
   createBuiltinPreparedShellExecutionConsumer,
   detectSandboxBackend,
@@ -13,8 +13,8 @@ import {
   findUsableCgroupPidsRunner,
   LocalSandboxExecutionProvider,
   sandboxPreparationIntentDigest,
-} from '@kite/builtin-runtime/sandbox';
-import { executePosixSupervised } from '@kite/runtime-host';
+} from '@kite-ai/builtin-runtime/sandbox';
+import { executePosixSupervised } from '@kite-ai/runtime-host';
 import type {
   PreparedSandboxExecution,
   SandboxPreparation,
@@ -22,7 +22,7 @@ import type {
   SandboxPreparedProcessCleanup,
   SandboxPreparedProcessExecutionPort,
   SandboxPreparedProcessExecutionResult,
-} from '@kite/runtime-spi';
+} from '@kite-ai/runtime-spi';
 import {
   SandboxExecutionGrantAuthority,
   sandboxPreparationDigest,
@@ -290,7 +290,7 @@ export function createSandboxExecutor(
     maxProcessTreeTasks?: number;
     startupProbe?: boolean;
     selectedBackend?: SandboxBackend;
-    brokeredGitFeatureRevision?: typeof import('@kite/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
+    brokeredGitFeatureRevision?: typeof import('@kite-ai/runtime-spi').BROKERED_GIT_FEATURE_REVISION_;
     executionBoundaryDigest?: string;
     protectedPathRevision?: string;
   },
