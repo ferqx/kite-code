@@ -276,6 +276,11 @@ describe('TUI PTY System — Session Lifecycle', () => {
       await waitForText(() => tui.viewport(), '❯ 永久删除', 5_000);
 
       tui.write('\r');
+      await waitForCondition(
+        () => !screenContains(tui.viewport(), '删除确认'),
+        'delete confirmation to close after Enter',
+        5_000,
+      );
       await waitForTuiReady(tui);
       const deletedSessionId = sessionIdsBeforeNew[0]!;
       await waitForCondition(

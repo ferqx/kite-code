@@ -1,3 +1,4 @@
+import { debuglog } from 'node:util';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
 import { render, useApp } from 'ink';
@@ -53,6 +54,11 @@ import type {
   ContextCompactionResult,
   RuntimePresentationEvent,
 } from './runtime-presentation';
+import { SessionNavigationAuthority } from './session-navigation';
+import {
+  classifyHistoricalSessionOpenFailure,
+  type HistoricalSessionOpenStage,
+} from './session-open-diagnostic';
 import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } from './theme';
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
@@ -67,6 +73,7 @@ function toErrorMessage(error: unknown): string {
 
 const HISTORICAL_SESSION_LOAD_FAILURE_TEXT =
   '  ⎿  历史会话打开失败，当前会话未受影响；请稍后通过 /resume 重试。';
+const historicalSessionDebug = debuglog('kite-session');
 
 function resolveConfigForResume(
   currentConfig: AgentConfig,
@@ -308,11 +315,14 @@ function TuiApp({
   const conversationHistoryRef = React.useRef<string[]>([]);
   // Lazy init — only create thread when user sends first message
   const threadIdRef = React.useRef<string>('');
-  // Generation counter for session loads: a new LOAD_SESSION_PENDING increments this.
-  // Each async handler captures its generation; if a newer load started, the old one
-  // discards its result, preventing the first-to-resolve Promise from overwriting the
-  // later-initiated load's state.
-  const loadGenerationRef = React.useRef(0);
+  // One ordering authority covers asynchronous historical loads and every
+  // foreground identity change. Reducer loading state is presentation only;
+  // it must never be used to decide whether a delayed load may commit.
+  const sessionNavigationRef = React.useRef<SessionNavigationAuthority | null>(null);
+  if (!sessionNavigationRef.current) {
+    sessionNavigationRef.current = new SessionNavigationAuthority();
+  }
+  const sessionNavigation = sessionNavigationRef.current;
   // Prevent concurrent NEW_SESSION from creating ghost sessions
   const creatingSessionRef = React.useRef(false);
   // A cancelled run may still be unwinding while the next prompt has already
@@ -555,7 +565,6 @@ function TuiApp({
       workspace,
       sessionManager,
       threadIdRef,
-      loadGenerationRef,
       conversationHistoryRef,
       thinkingLevelRef,
       skillManifestsRef,
@@ -634,100 +643,123 @@ function TuiApp({
   /** 从 DB 加载指定会话的完整状态（LOAD_SESSION_PENDING 的实际逻辑） */
   const loadSessionById = React.useCallback(
     async (threadId: string) => {
-      // Increment generation: supersedes any in-flight loads
-      const gen = ++loadGenerationRef.current;
+      const token = sessionNavigation.beginLoad();
 
       // Keep the currently active Runtime/projection intact until the target
       // has loaded. Historical sessions are registered only after this load;
       // this is the implicit compatibility boundary for known old formats.
       const oldId = sessionManager.getActiveId();
+      let stage: HistoricalSessionOpenStage = 'persisted_load';
 
       dispatch({ type: 'LOAD_SESSION_PENDING', threadId });
 
       try {
         const result = await sessionManager.loadPersistedSession(threadId);
-        // If a newer load was issued while this was loading, discard
-        if (loadGenerationRef.current !== gen) return;
-        if (!result) throw new Error(`Session ${threadId} has no saved checkpoints.`);
+        const committed = sessionNavigation.commit(token, () => {
+          if (!result) throw new Error(`Session ${threadId} has no saved checkpoints.`);
 
-        // Do not create a live Runtime for a session that failed its load or
-        // compatibility conversion. The previous active session remains the
-        // only foreground Runtime until all target data is ready.
-        if (!sessionManager.hasRuntime(threadId))
-          sessionManager.registerSession(threadId, workspace);
-        if (oldId !== threadId) {
-          sessionManager.switchSession(oldId, threadId);
-          const rt = sessionManager.getRuntime(threadId);
-          if (rt) {
-            rt.setForeground(true);
-            rt.dormant = false;
+          // Do not create a live Runtime for a session that failed its load or
+          // compatibility conversion. The previous active session remains the
+          // only foreground Runtime until all target data is ready.
+          stage = 'runtime_registration';
+          if (!sessionManager.hasRuntime(threadId))
+            sessionManager.registerSession(threadId, workspace);
+          stage = 'runtime_switch';
+          if (oldId !== threadId) {
+            sessionManager.switchSession(oldId, threadId);
+            const rt = sessionManager.getRuntime(threadId);
+            if (rt) {
+              rt.setForeground(true);
+              rt.dormant = false;
+            }
           }
-        }
-        threadIdRef.current = threadId;
-        conversationHistoryRef.current = [];
-        // The target was intentionally absent from the startup projection;
-        // publish it only after the compatibility load and Runtime registration
-        // have succeeded.
-        dispatch({
-          type: 'SET_SESSIONS',
-          sessions: sessionManager.getSnapshot(),
-        });
+          threadIdRef.current = threadId;
+          conversationHistoryRef.current = [];
+          // The target was intentionally absent from the startup projection;
+          // publish it only after the compatibility load and Runtime registration
+          // have succeeded.
+          dispatch({
+            type: 'SET_SESSIONS',
+            sessions: sessionManager.getSnapshot(),
+          });
 
-        const resumedConfig = resolveConfigForResume(
-          sessionManager.getDefaultConfig(),
-          result.modelProvider,
-          result.modelName,
+          const resumedConfig = resolveConfigForResume(
+            sessionManager.getDefaultConfig(),
+            result.modelProvider,
+            result.modelName,
+          );
+          sessionManager.setSessionConfig(threadId, resumedConfig);
+          const thinkingLevel = result.thinkingLevel ?? 'max';
+          thinkingLevelRef.current = thinkingLevel;
+
+          stage = 'presentation_replay';
+          const {
+            blocks,
+            interrupt,
+            interactionMode,
+            pendingToolCalls,
+            recoveredPendingInteraction,
+          } = sessionDataToUI(result);
+          const runtime = sessionManager.getRuntime(threadId);
+          if (runtime) {
+            runtime.localReplayRecovery = recoveredPendingInteraction;
+            runtime.interactionMode = interactionMode;
+          }
+          dispatch({
+            type: 'LOAD_SESSION',
+            threadId,
+            blocks,
+            interrupt,
+            pendingToolCalls,
+            modelProvider: resumedConfig.providerName,
+            modelName: resumedConfig.modelName,
+            thinkingLevel,
+            reasoningEnabled: resumedConfig.reasoningExplicitlyDisabled !== true,
+            interactionMode,
+          });
+          if (
+            result.runtimeEvents.some(
+              (event: RuntimePresentationEvent) => event.type === 'user.message_appended',
+            )
+          ) {
+            stage = 'context_projection';
+            const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
+            if (contextSnapshot) {
+              dispatch({
+                type: 'SET_CONTEXT_SNAPSHOT',
+                snapshot: contextSnapshot,
+              });
+            }
+          }
+        });
+        if (!committed) return;
+      } catch (error) {
+        if (!sessionNavigation.isCurrent(token)) return;
+        historicalSessionDebug(
+          'open failed stage=%s error=%s',
+          stage,
+          classifyHistoricalSessionOpenFailure(stage, error),
         );
-        sessionManager.setSessionConfig(threadId, resumedConfig);
-        const thinkingLevel = result.thinkingLevel ?? 'max';
-        thinkingLevelRef.current = thinkingLevel;
-
-        const {
-          blocks,
-          interrupt,
-          interactionMode,
-          pendingToolCalls,
-          recoveredPendingInteraction,
-        } = sessionDataToUI(result);
-        const runtime = sessionManager.getRuntime(threadId);
-        if (runtime) {
-          runtime.localReplayRecovery = recoveredPendingInteraction;
-          runtime.interactionMode = interactionMode;
-        }
-        dispatch({
-          type: 'LOAD_SESSION',
-          threadId,
-          blocks,
-          interrupt,
-          pendingToolCalls,
-          modelProvider: resumedConfig.providerName,
-          modelName: resumedConfig.modelName,
-          thinkingLevel,
-          reasoningEnabled: resumedConfig.reasoningExplicitlyDisabled !== true,
-          interactionMode,
-        });
-        if (
-          result.runtimeEvents.some(
-            (event: RuntimePresentationEvent) => event.type === 'user.message_appended',
-          )
-        ) {
-          const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
-          if (loadGenerationRef.current !== gen) return;
-          if (contextSnapshot) {
-            dispatch({
-              type: 'SET_CONTEXT_SNAPSHOT',
-              snapshot: contextSnapshot,
-            });
-          }
-        }
-      } catch {
-        if (loadGenerationRef.current !== gen) return;
         // Roll back SessionManager: if we switched to a different session and the
         // load failed, revert the switch and remove the orphaned runtime.
         if (oldId !== threadId) {
           sessionManager.switchSession(threadId, oldId);
           threadIdRef.current = oldId;
-          await sessionManager.removeRuntime(threadId);
+          try {
+            await sessionManager.removeRuntime(threadId);
+          } catch (cleanupError) {
+            // The primary admission/replay failure is the reason this open did
+            // not commit. Host cleanup is secondary and must not suppress the
+            // isolated TUI failure projection or make the previous session
+            // unusable. The bridge keeps cleanup fail-closed and reports its
+            // bounded cause only through the opt-in diagnostic channel.
+            historicalSessionDebug(
+              'rollback failed stage=%s error=%s',
+              stage,
+              classifyHistoricalSessionOpenFailure(stage, cleanupError),
+            );
+          }
+          if (!sessionNavigation.isCurrent(token)) return;
           // Keep the previously active TUI projection intact. LOAD_SESSION would
           // make the failed target appear active again even though SessionManager
           // has already rolled back to oldId.
@@ -759,7 +791,7 @@ function TuiApp({
         });
       }
     },
-    [dispatch, sessionManager, workspace],
+    [dispatch, sessionManager, sessionNavigation, workspace],
   );
 
   const dispatchSessionLoad = React.useCallback(
@@ -774,8 +806,7 @@ function TuiApp({
         // Flush token stats for outgoing session before leaving it
         const oldId = sessionManager.getActiveId();
         if (oldId) sessionManager.saveTokenStats(oldId, stateRef.current.status, true);
-        // Supersede any in-flight LOAD_SESSION_PENDING
-        loadGenerationRef.current++;
+        sessionNavigation.invalidatePendingLoad();
         const newId = sessionManager.createSession(workspace);
         threadIdRef.current = newId;
         // The reducer will use this threadId to create the snapshot
@@ -845,6 +876,10 @@ function TuiApp({
       if (action.type === 'SWITCH_SESSION') {
         const oldId = sessionManager.getActiveId();
         const newId = action.threadId;
+        // A direct in-memory switch is a newer foreground decision than any
+        // pending historical load, including a repeated selection while the
+        // older Promise is still unresolved.
+        sessionNavigation.invalidatePendingLoad();
         if (oldId === newId) {
           // Same session — no-op
           return;
@@ -899,7 +934,7 @@ function TuiApp({
         const wasActive = threadId === sessionManager.getActiveId();
         // Invalidate any in-flight loadSessionById for this threadId to prevent
         // stale load from restoring the deleted session.
-        loadGenerationRef.current++;
+        sessionNavigation.invalidatePendingLoad();
         await sessionManager.cancelRuntimeOperations(threadId);
         try {
           await sessionManager.deletePersistedSession(threadId);
@@ -963,7 +998,7 @@ function TuiApp({
       }
       dispatch(action);
     },
-    [dispatch, sessionManager, workspace, loadSessionById],
+    [dispatch, sessionManager, sessionNavigation, workspace, loadSessionById],
   );
 
   const runTaskBridge = React.useCallback(

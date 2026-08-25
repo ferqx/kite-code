@@ -537,8 +537,13 @@
         "apps/kite/src/runtime/session/session-manager.ts",
         "apps/kite/src/tui/index.tsx",
         "apps/kite/src/tui/replay-blocks.ts",
+        "apps/kite/src/tui/session-navigation.ts",
+        "apps/kite/src/tui/session-open-diagnostic.ts",
         "apps/kite/test/session-compatibility.test.ts",
+        "apps/kite/test/session-navigation.test.ts",
+        "apps/kite/test/session-open-diagnostic.test.ts",
         "apps/kite/test/state-store-compatibility.test.ts",
+        "apps/kite/test/state-store-project-identity-compatibility.test.ts",
         "tests/cli.test.ts",
         "tests/tui-system/scenarios/startup.test.ts",
         "tests/tui-system/scenarios/session-legacy-compatibility.test.ts"

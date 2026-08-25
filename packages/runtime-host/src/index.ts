@@ -18,6 +18,12 @@ export type {
   RuntimeState as StateRuntimeState,
   SchedulerFacts as StateRuntimeSchedulerFacts,
 } from '@kite/agent-kernel';
+// Historical format markers are exposed through the Host compatibility seam.
+// App composition must not depend directly on the deterministic Kernel.
+export {
+  LEGACY_STATE26_FORMAT_EPOCH,
+  LEGACY_STATE26_SCHEMA_VERSION,
+} from '@kite/agent-kernel';
 export { bestEffortRegularFileSize } from './artifact-metadata';
 export type { RuntimeHostCapabilityExecutionFailureCode } from './execution/capability-execution';
 export {

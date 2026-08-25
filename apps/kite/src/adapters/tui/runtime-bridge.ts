@@ -142,9 +142,14 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     const runtime = this.#manager.getRuntime(sessionId);
     if (!authority) return { receipt: this.#notFound(command) };
     if (command.type === 'close_session') {
-      runtime?.persistCancellation('Runtime session closed.');
+      // An explicit close can race with the end of an operation, or arrive
+      // after an admission-only cleanup has already released the Runtime.
+      // Only a live Host operation owns a cancellation fact; manufacturing one
+      // for an idle target mutates durable State and revision without work.
+      const operationActive = this.#access.isSessionOperationActive(sessionId);
+      if (operationActive) runtime?.persistCancellation('Runtime session closed.');
       authority.lifecycle = 'closed';
-      authority.revision += 1;
+      if (operationActive) authority.revision += 1;
       return { receipt: this.#applied(command, sessionId) };
     }
     if (!runtime) return { receipt: this.#notFound(command) };
@@ -220,6 +225,9 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     reason: string,
     _publish: (notification: RuntimeNotification) => void,
   ): Promise<void> {
+    // Keep explicit Host cancellation semantics intact. Admission-only load
+    // rollback never enters this path: it releases the local bridge/runtime
+    // state without issuing close_session or shutdownSession.
     this.#manager.getRuntime(sessionId)?.persistCancellation(reason);
   }
 
@@ -412,23 +420,90 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
           }
           if (property === 'removeRuntime') {
             return async (sessionId: string): Promise<void> => {
-              await this.#awaitSessionReadiness(sessionId);
-              const authority = this.#sessions.get(sessionId);
-              if (authority) {
-                const receipt = await this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_,
-                  commandId: this.#nextCommandId(sessionId, 'close'),
-                  type: 'close_session',
-                  sessionId,
-                  expectedRevision: authority.revision,
-                });
-                this.#assertApplied(receipt);
-                await this.#access.waitForSessionIdle(sessionId);
+              let cleanupError: unknown;
+              const rememberError = (error: unknown): void => {
+                cleanupError ??= error;
+              };
+
+              let readinessSettled = false;
+              try {
+                await this.#awaitSessionReadiness(sessionId);
+                readinessSettled = true;
+              } catch (error) {
+                // A rejected resume/create admission still leaves a local
+                // Runtime that must be removed. Preserve the rejection for
+                // the caller, but do not strand the registration behind it.
+                rememberError(error);
               }
-              await target.releaseRuntimeSessionCoordinator(sessionId);
-              target.removeRuntimeAfterHostClose(sessionId);
-              this.#runtimeClients.delete(sessionId);
-              this.#sessionReadiness.delete(sessionId);
+
+              let operationActive = false;
+              try {
+                operationActive = this.#access.isSessionOperationActive(sessionId);
+              } catch (error) {
+                // If the Host cannot answer, fail closed and attempt the
+                // draining close path before releasing the coordinator.
+                operationActive = true;
+                rememberError(error);
+              }
+              // A settled admission owns a Host lifecycle entry even when it
+              // never started work. Close that entry without manufacturing a
+              // cancellation fact; a failed admission has no confirmed Host
+              // lifecycle to close. An observed live operation remains a
+              // fail-closed close candidate even if readiness reporting failed.
+              const shouldCloseHost = readinessSettled || operationActive;
+
+              try {
+                const authority = this.#sessions.get(sessionId);
+                let closeApplied = false;
+                if (authority && shouldCloseHost) {
+                  try {
+                    const receipt = await this.#access.command({
+                      schema: RUNTIME_COMMAND_SCHEMA_,
+                      commandId: this.#nextCommandId(sessionId, 'close'),
+                      type: 'close_session',
+                      sessionId,
+                      expectedRevision: authority.revision,
+                    });
+                    this.#assertApplied(receipt);
+                    closeApplied = true;
+                  } catch (error) {
+                    rememberError(error);
+                  }
+                }
+
+                // A failed close can leave a scheduled operation alive;
+                // always make one bounded drain attempt before releasing
+                // the State coordinator and manager registration. This also
+                // covers a Host operation whose local bridge authority was
+                // lost while readiness was failing.
+                if (closeApplied || operationActive) {
+                  try {
+                    await this.#access.waitForSessionIdle(sessionId);
+                  } catch (error) {
+                    rememberError(error);
+                  }
+                }
+              } catch (error) {
+                rememberError(error);
+              }
+
+              try {
+                await target.releaseRuntimeSessionCoordinator(sessionId);
+              } catch (error) {
+                rememberError(error);
+              }
+
+              try {
+                target.removeRuntimeAfterHostClose(sessionId);
+              } catch (error) {
+                rememberError(error);
+              } finally {
+                this.#runtimeClients.delete(sessionId);
+                this.#sessionReadiness.delete(sessionId);
+                this.#sessions.delete(sessionId);
+              }
+
+              if (cleanupError !== undefined) throw cleanupError;
             };
           }
           if (property === 'handleContextCompaction') {

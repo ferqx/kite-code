@@ -9,12 +9,17 @@ import {
   type BuiltinPreparedShellExecutionInput,
   SandboxPreparationArtifactStore,
 } from '@kite/builtin-runtime/sandbox';
-import type { RuntimeCommand, RuntimeCommandReceipt } from '@kite/runtime-contract';
-import type { RuntimeHostCoordinatorPort } from '@kite/runtime-host';
+import {
+  RUNTIME_QUERY_SCHEMA_,
+  type RuntimeCommand,
+  type RuntimeCommandReceipt,
+} from '@kite/runtime-contract';
+import type { RuntimeHostCoordinatorPort, RuntimeHostExecutionBridge } from '@kite/runtime-host';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
+  translateRuntimeCommandToKernelInput,
 } from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
@@ -2561,6 +2566,215 @@ describe('TUI Runtime cancellation bridge', () => {
       type: 'run.error',
       message: 'TUI Runtime cancellation rejected: invalid_command',
       recoverable: false,
+    });
+  });
+
+  function cleanupHostFixture(deps: SessionDeps = makeDeps()) {
+    let bridge!: RuntimeHostExecutionBridge;
+    let operationActive = false;
+    let rejectNextReadiness = false;
+    const commands: RuntimeCommand[] = [];
+    const receipts = new Map<string, RuntimeCommandReceipt>();
+    const host = {
+      command: async (command: RuntimeCommand): Promise<RuntimeCommandReceipt> => {
+        commands.push(command);
+        if (
+          (command.type === 'create_session' || command.type === 'resume_session') &&
+          rejectNextReadiness
+        ) {
+          rejectNextReadiness = false;
+          throw new Error('readiness failed');
+        }
+        const prepared = await bridge.prepare(
+          translateRuntimeCommandToKernelInput(command),
+          () => undefined,
+        );
+        receipts.set(command.commandId, prepared.receipt);
+        if (command.type === 'close_session') operationActive = false;
+        return prepared.receipt;
+      },
+      query: async (query: Parameters<RuntimeHostCoordinatorPort['query']>[0]) => ({
+        status: 'rejected' as const,
+        queryType: query.type,
+        code: 'unsupported' as const,
+      }),
+      subscribe: () =>
+        (async function* emptyNotifications() {
+          yield* [];
+        })(),
+      cancelSession: async (sessionId: string, reason?: string) => {
+        await bridge.shutdownSession(sessionId, reason ?? 'test cancellation', () => undefined);
+        operationActive = false;
+      },
+      cancelAllSessions: async () => undefined,
+      waitForSessionIdle: async () => undefined,
+      isSessionOperationActive: () => operationActive,
+      [Symbol.asyncDispose]: async () => undefined,
+    } satisfies RuntimeHostCoordinatorPort;
+    const manager = createTuiRuntimeClient(
+      deps,
+      (createdBridge) => {
+        bridge = createdBridge;
+        return host;
+      },
+      () => ({
+        projectId: 'project_tui-cleanup-test',
+        revision: 0,
+        workspaceDigest: `sha256:${'2'.repeat(64)}`,
+      }),
+    );
+    return {
+      bridge,
+      commands,
+      host,
+      manager,
+      receipts,
+      rejectNextReadiness: () => {
+        rejectNextReadiness = true;
+      },
+      setOperationActive: (active: boolean) => {
+        operationActive = active;
+      },
+    };
+  }
+
+  function installCancellationCounter(runtime: SessionRuntime) {
+    let calls = 0;
+    runtime.authorizedExecutionControl = {
+      getState: () => ({ context: { pendingCompaction: undefined } }) as unknown as RuntimeState,
+      processEvent: () => undefined,
+      processEventBatch: () => [],
+      cancelRun: () => {
+        calls += 1;
+        return [];
+      },
+    };
+    return () => calls;
+  }
+
+  test('admission-only target cleanup leaves the old active session and target revision/events untouched', async () => {
+    const fixture = cleanupHostFixture();
+    const oldId = fixture.manager.createSession('/tmp/old-active');
+    const oldRuntime = fixture.manager.getRuntime(oldId)!;
+    const oldCancelCalls = installCancellationCounter(oldRuntime);
+    const targetId = 'historical-target-cleanup';
+    const targetRuntime = fixture.manager.registerSession(targetId, '/tmp/historical-target');
+    const targetCancelCalls = installCancellationCounter(targetRuntime);
+
+    await fixture.manager.removeRuntime(targetId);
+
+    expect(fixture.manager.getActiveId()).toBe(oldId);
+    expect(fixture.manager.getRuntime(oldId)).toBeDefined();
+    expect(fixture.manager.getRuntime(targetId)).toBeUndefined();
+    expect(oldCancelCalls()).toBe(0);
+    expect(targetCancelCalls()).toBe(0);
+    expect(targetRuntime.eventBuffer).toEqual([]);
+
+    const admissionClose = fixture.commands.find(
+      (command): command is Extract<RuntimeCommand, { type: 'close_session' }> =>
+        command.type === 'close_session' && command.sessionId === targetId,
+    );
+    expect(admissionClose).toBeDefined();
+    expect(fixture.receipts.get(admissionClose!.commandId)).toMatchObject({
+      status: 'applied',
+      revision: 0,
+    });
+    await expect(
+      fixture.bridge.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      sessions: [expect.objectContaining({ sessionId: oldId, lifecycle: 'open', revision: 0 })],
+    });
+  });
+
+  test('readiness rejection still removes the target and allows a later resume retry', async () => {
+    const fixture = cleanupHostFixture();
+    const sessionId = 'readiness-retry-target';
+    fixture.rejectNextReadiness();
+    fixture.manager.registerSession(sessionId, '/tmp/readiness-retry');
+
+    await expect(fixture.manager.removeRuntime(sessionId)).rejects.toThrow('readiness failed');
+
+    expect(fixture.manager.getRuntime(sessionId)).toBeUndefined();
+    expect(
+      fixture.commands.filter(
+        (command) => command.type === 'close_session' && command.sessionId === sessionId,
+      ),
+    ).toHaveLength(0);
+
+    fixture.manager.registerSession(sessionId, '/tmp/readiness-retry');
+    await fixture.manager.removeRuntime(sessionId);
+    expect(fixture.manager.getRuntime(sessionId)).toBeUndefined();
+    expect(
+      fixture.commands.filter(
+        (command) => command.type === 'close_session' && command.sessionId === sessionId,
+      ),
+    ).toHaveLength(1);
+  });
+
+  test('release failure still removes the manager runtime and preserves the primary readiness error', async () => {
+    const deps = makeDeps();
+    const coordinatorAccess = installTestOnlyRuntimeTurnAdapter(
+      deps,
+      'release-failure-coordinator',
+    );
+    deps.runtimeSessionCoordinator = {
+      ...coordinatorAccess,
+      release: async () => {
+        throw new Error('coordinator release failed');
+      },
+    };
+    const fixture = cleanupHostFixture(deps);
+    fixture.rejectNextReadiness();
+    const sessionId = fixture.manager.createSession('/tmp/release-failure');
+
+    await expect(fixture.manager.removeRuntime(sessionId)).rejects.toThrow('readiness failed');
+    expect(fixture.manager.getRuntime(sessionId)).toBeUndefined();
+  });
+
+  test('an active operation is cancelled once across cancellation and final runtime cleanup', async () => {
+    const fixture = cleanupHostFixture();
+    const sessionId = 'active-target-cleanup';
+    const runtime = fixture.manager.registerSession(sessionId, '/tmp/active-target');
+    const cancellationCalls = installCancellationCounter(runtime);
+    fixture.setOperationActive(true);
+
+    await fixture.manager.cancelRuntimeOperations(sessionId);
+    await fixture.manager.removeRuntime(sessionId);
+
+    expect(cancellationCalls()).toBe(1);
+    expect(fixture.manager.getRuntime(sessionId)).toBeUndefined();
+    const closeCommand = fixture.commands.find(
+      (command): command is Extract<RuntimeCommand, { type: 'close_session' }> =>
+        command.type === 'close_session' && command.sessionId === sessionId,
+    );
+    expect(closeCommand).toBeDefined();
+    // cancelRuntimeOperations owns the canonical cancellation. The later
+    // close only releases Host/bridge authority and must not write another.
+    expect(fixture.receipts.get(closeCommand!.commandId)).toMatchObject({
+      status: 'applied',
+      revision: 0,
+    });
+  });
+
+  test('direct cleanup of an active operation persists one canonical cancellation before draining', async () => {
+    const fixture = cleanupHostFixture();
+    const sessionId = 'direct-active-cleanup';
+    const runtime = fixture.manager.registerSession(sessionId, '/tmp/direct-active');
+    const cancellationCalls = installCancellationCounter(runtime);
+    fixture.setOperationActive(true);
+
+    await fixture.manager.removeRuntime(sessionId);
+
+    expect(cancellationCalls()).toBe(1);
+    const closeCommand = fixture.commands.find(
+      (command): command is Extract<RuntimeCommand, { type: 'close_session' }> =>
+        command.type === 'close_session' && command.sessionId === sessionId,
+    );
+    expect(closeCommand).toBeDefined();
+    expect(fixture.receipts.get(closeCommand!.commandId)).toMatchObject({
+      status: 'applied',
+      revision: 1,
     });
   });
 });

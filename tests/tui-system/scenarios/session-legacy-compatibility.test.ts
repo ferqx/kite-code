@@ -20,6 +20,12 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const SESSION_ID = 'legacy-session-1';
 const SESSION_NAME = 'Original compatible session';
 const MESSAGE = 'State 26 message remains visible';
+const SECOND_SESSION_ID = 'legacy-session-2';
+const SECOND_SESSION_NAME = 'Second compatible session';
+const SECOND_MESSAGE = 'Second State 26 message remains visible';
+const THIRD_SESSION_ID = 'legacy-session-3';
+const THIRD_SESSION_NAME = 'Third compatible session';
+const THIRD_MESSAGE = 'Third State 26 message remains visible';
 const MALFORMED_SESSION_ID = 'malformed-legacy-session';
 const MALFORMED_SESSION_NAME = 'Broken compatible session';
 
@@ -30,6 +36,112 @@ function checksum(value: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function insertState26Session(
+  database: Database,
+  input: {
+    sessionId: string;
+    name: string;
+    message: string;
+    ordinal: number;
+    workspace: string;
+    projectId: string;
+    workspaceDigest: string;
+  },
+): void {
+  const messageId = `legacy-message-${input.ordinal}`;
+  const eventId = `legacy-event-${input.ordinal}`;
+  const turnId = `legacy-turn-${input.ordinal}`;
+  const event = {
+    type: 'user.message_appended',
+    messageId,
+    content: input.message,
+  };
+  const stateJson = JSON.stringify({
+    schemaVersion: LEGACY_STATE26_SCHEMA_VERSION,
+    formatEpoch: LEGACY_STATE26_FORMAT_EPOCH,
+    revision: 1,
+    appliedEventIds: [eventId],
+    session: {
+      threadId: input.sessionId,
+      userId: 'tui',
+      workspace: input.workspace,
+      projectId: input.projectId,
+      canonicalWorkspaceDigest: input.workspaceDigest,
+    },
+    turn: { turnId, turnIndex: 1, status: 'completed' },
+    transcript: {
+      messages: [
+        {
+          messageId,
+          turnId,
+          ordinal: 0,
+          createdAt: '2026-08-25T00:00:00.000Z',
+          kind: 'user',
+          content: input.message,
+        },
+      ],
+    },
+    context: {
+      history: [],
+      autoGuard: {
+        recentAutomaticCompactions: [],
+        consecutiveLowGain: 0,
+        disabledUntilManualAction: false,
+        recoveryAttempted: false,
+      },
+    },
+    toolRecovery: {
+      schemaVersion: 1,
+      identityKey: 'e'.repeat(64),
+      failures: {},
+      order: [],
+      progressRevision: 0,
+      qualityGuard: { blocked: false, observedFailures: 0 },
+    },
+    mode: 'accept_edits',
+    workspaceAccess: 'write',
+    tasks: {},
+  });
+  database.run(
+    'INSERT INTO runtime_sessions (session_id, project_id, workspace_digest, state_schema, format_epoch, revision, name, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      input.sessionId,
+      input.projectId,
+      input.workspaceDigest,
+      LEGACY_STATE26_SCHEMA_VERSION,
+      LEGACY_STATE26_FORMAT_EPOCH,
+      1,
+      input.name,
+      4 - input.ordinal,
+    ],
+  );
+  database.run(
+    'INSERT INTO runtime_snapshots (session_id, schema_version, format_epoch, revision, state_json, event_position, state_checksum, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [
+      input.sessionId,
+      LEGACY_STATE26_SCHEMA_VERSION,
+      LEGACY_STATE26_FORMAT_EPOCH,
+      1,
+      stateJson,
+      1,
+      checksum(stateJson),
+      1,
+    ],
+  );
+  database.run(
+    'INSERT INTO runtime_events (session_id, event_id, sequence, schema_version, event_json, occurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [
+      input.sessionId,
+      eventId,
+      1,
+      LEGACY_STATE26_SCHEMA_VERSION,
+      JSON.stringify(event),
+      '2026-08-25T00:00:00.000Z',
+      1,
+    ],
+  );
 }
 
 function seedState26Session(checkpointPath: string, workspace: string): string {
@@ -131,6 +243,24 @@ function seedState26Session(checkpointPath: string, workspace: string): string {
       1,
     ],
   );
+  insertState26Session(database, {
+    sessionId: SECOND_SESSION_ID,
+    name: SECOND_SESSION_NAME,
+    message: SECOND_MESSAGE,
+    ordinal: 2,
+    workspace,
+    projectId: identity.projectId,
+    workspaceDigest: identity.workspaceDigest,
+  });
+  insertState26Session(database, {
+    sessionId: THIRD_SESSION_ID,
+    name: THIRD_SESSION_NAME,
+    message: THIRD_MESSAGE,
+    ordinal: 3,
+    workspace,
+    projectId: identity.projectId,
+    workspaceDigest: identity.workspaceDigest,
+  });
   // Reproduce a normal post-checkpoint SQLite source with both sidecars. A
   // read-only connection may still update SHM, so production must inspect
   // this shape only through its isolated snapshot view.
@@ -186,7 +316,7 @@ function seedMalformedState26Session(checkpointPath: string, workspace: string):
   return sourcePath;
 }
 
-function currentStoreHasLegacySession(checkpointPath: string): boolean {
+function currentStoreHasLegacySession(checkpointPath: string, sessionId = SESSION_ID): boolean {
   const database = new Database(sqliteCurrentRuntimeStorePath(checkpointPath), { readonly: true });
   try {
     return Boolean(
@@ -194,7 +324,7 @@ function currentStoreHasLegacySession(checkpointPath: string): boolean {
         .query<{ count: number }, [string]>(
           'SELECT COUNT(*) AS count FROM runtime_sessions WHERE session_id = ?',
         )
-        .get(SESSION_ID)?.count,
+        .get(sessionId)?.count,
     );
   } finally {
     database.close();
@@ -253,6 +383,39 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
       expect(readFileSync(path).toString('hex')).toBe(expected.hex);
       expect(statSync(path).mtimeMs).toBe(expected.mtimeMs);
     }
+  });
+
+  step('serializes two more lazy imports and switches on the same live Runtime owner', async () => {
+    await submitCommand(tui, '/resume');
+    await waitForText(() => tui.viewport(), SECOND_SESSION_NAME, 10_000);
+    tui.write('\x1b[B');
+    await waitForText(() => tui.viewport(), `❯ ${SECOND_SESSION_NAME}`, 10_000);
+    tui.write('\r');
+    let output = await waitForText(() => tui.viewport(), SECOND_MESSAGE, 15_000);
+    expect(screenContains(output, '历史会话打开失败')).toBe(false);
+    expect(currentStoreHasLegacySession(checkpointPath, SECOND_SESSION_ID)).toBe(true);
+
+    await submitCommand(tui, '/resume');
+    await waitForText(() => tui.viewport(), THIRD_SESSION_NAME, 10_000);
+    tui.write('\x1b[B');
+    await waitForText(() => tui.viewport(), `❯ ${SECOND_SESSION_NAME}`, 10_000);
+    tui.write('\x1b[B');
+    await waitForText(() => tui.viewport(), `❯ ${THIRD_SESSION_NAME}`, 10_000);
+    tui.write('\r');
+    output = await waitForText(() => tui.viewport(), THIRD_MESSAGE, 15_000);
+    expect(screenContains(output, '历史会话打开失败')).toBe(false);
+    expect(currentStoreHasLegacySession(checkpointPath, THIRD_SESSION_ID)).toBe(true);
+  });
+
+  step('switches back to the first loaded session without losing its rendered turns', async () => {
+    await submitCommand(tui, '/resume');
+    await waitForText(() => tui.viewport(), `❯ ${SESSION_NAME}`, 10_000);
+    tui.write('\r');
+    const output = await waitForText(() => tui.viewport(), `❯ ${MESSAGE}`, 15_000);
+    expect(screenContains(output, MESSAGE)).toBe(true);
+    expect(screenContains(output, THIRD_MESSAGE)).toBe(false);
+    expect(screenContains(output, '会话列表')).toBe(false);
+    expect(screenContains(output, '历史会话打开失败')).toBe(false);
   });
 
   test(

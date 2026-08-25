@@ -102,6 +102,22 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 
 “切换会话”是否表示取消属于 App 适配层交互语义，不是 Kernel 规则（ADR-0050）。当前 TUI 把新建或切换到另一会话仅视为前台路由变化：离开会话继续在后台运行，审批与 Plan review 保留为 durable pending interaction，只有用户显式提交取消动作时才写入 `turn.aborted`。
 
+历史会话打开采用两阶段前台提交：SessionManager 可以先完成目标 Runtime 的注册与切换，但 metadata-only
+`SET_SESSIONS` 在 `LOAD_SESSION_PENDING` 期间不得提前改变 TUI 的 `activeSessionId`。只有 `LOAD_SESSION` 才能在同一
+reducer transition 中把当前可见 turns 保存到 outgoing snapshot、加载目标 replay turns 并推进 `sessionKey`。否则旧会话
+内容会被错绑到目标 snapshot，用户按“会话 A → 会话 B → 会话 A”切回时得到空白投影。该不变量由
+`tests/tui-reducer.test.ts` 的 historical load 链路和 `session-legacy-compatibility` PTY 连续切回场景共同验证。
+异步 historical load 与已注册 Runtime 的内存切换还必须共享唯一 navigation generation authority：`/new`、删除和任何
+direct switch 都先使旧 token 失效；旧 load 的 success、failure 或 rollback 只有 token 仍 current 时才能注册 Runtime、切换
+active identity、提交 replay/context 或改变 TUI。`loadingSessionId` 只是展示状态，不能充当异步取消权威。每次 reducer 合并
+Session 列表后，`sessions[].active` 必须从唯一 `activeSessionId` 派生，pending target 不得提前形成第二 active authority。
+延迟 load、registered switch、stale rejection 与重复 target token 由 `apps/kite/test/session-navigation.test.ts` 验证。
+历史 target 仅完成 admission、尚无 Host operation/effect lease 时，打开失败的 `removeRuntime` 属于资源回滚，不得伪造
+`close_session` cancellation 或推进 durable revision；已有 active operation 或显式删除仍走 canonical cancel/close，并且只写
+一次取消。readiness、close 或 coordinator release 失败不能让 target 留在 Runtime/client/readiness/authority map：cleanup 必须
+best-effort 执行所有释放步骤、保留首个错误供上层作为 secondary diagnostic，并允许随后重新 register exact session。
+对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于 `tests/session-manager.test.ts`。
+
 未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。App 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
 
 工具授权被用户拒绝时，TUI 必须将该工具卡投影为 `cancelled` 而非 `error`；即使旧事件只携带用户拒绝文本而没有 `cancelled` status，也必须同样归一。对 Shell/Web Fetch 卡，只显示一行拒绝说明，不再附加 `exit: error` 等 terminal footer。

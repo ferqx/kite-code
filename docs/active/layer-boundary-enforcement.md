@@ -51,6 +51,8 @@ builtin-runtime   runtime-host ← runtime-storage-sqlite
 Host 源码按 `host/`、`lifecycle/`、`execution/`、`kernel-adapter/`、`format/`、`process/`、`storage/`、`observability/` 归档：
 
 - `format/` 解析 persisted bytes，严格验证 current format，并为 App 明确指定的历史 profile 提供纯 read-side 投影；
+- Host 根 export 只为 App compatibility composition 转发已知历史 profile 的 schema/epoch metadata marker；
+  App 不得为读取这些 marker 直接导入 Kernel，marker 也不得进入 current writer、Policy 或 execution 选择；
 - `kernel-adapter/` 翻译 Host facts 与 Kernel input；
 - `lifecycle/` 管理 effect、cancellation、cleanup 与 recovery；
 - `execution/` 管理通用 capability、Tool Pipeline 与 context compilation；

@@ -10,7 +10,7 @@ import {
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
 } from '@kite/agent-kernel';
-import { createRuntimeHostStateStorageBinding } from '@kite/runtime-host';
+import { createRuntimeHostStateStorageBinding, resolveProjectIdentity } from '@kite/runtime-host';
 import {
   createSqliteRuntimeCompatibilityWriter,
   createSqliteRuntimeStorage,
@@ -104,6 +104,8 @@ function currentSession(eventJson = JSON.stringify(EVENT)): SqliteRuntimeCompati
 }
 
 function legacySession(eventJson: string): SqliteRuntimeCompatibilitySession {
+  const workspace = process.cwd();
+  const identity = resolveProjectIdentity(workspace);
   const stateJson = JSON.stringify({
     schemaVersion: LEGACY_STATE26_SCHEMA_VERSION,
     formatEpoch: LEGACY_STATE26_FORMAT_EPOCH,
@@ -112,9 +114,9 @@ function legacySession(eventJson: string): SqliteRuntimeCompatibilitySession {
     session: {
       threadId: 'session-1',
       userId: 'user-1',
-      workspace: '/workspace',
+      workspace,
       projectId: 'project-1',
-      canonicalWorkspaceDigest: `sha256:${'d'.repeat(64)}`,
+      canonicalWorkspaceDigest: identity.workspaceDigest,
     },
     turn: { turnId: 'turn-1', turnIndex: 1, status: 'completed' },
     transcript: { messages: [] },
@@ -143,6 +145,8 @@ function legacySession(eventJson: string): SqliteRuntimeCompatibilitySession {
     ...currentSession(eventJson),
     session: {
       ...currentSession(eventJson).session,
+      projectId: 'project-1',
+      workspaceDigest: identity.workspaceDigest,
       stateSchemaVersion: LEGACY_STATE26_SCHEMA_VERSION,
       formatEpoch: LEGACY_STATE26_FORMAT_EPOCH,
     },
@@ -424,6 +428,42 @@ describe('Kite Runtime Store compatibility composition', () => {
       });
       restarted.storage.close();
       expect(readFileSync(sourcePath)).toEqual(sourceBytes);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('lazily imports through an already-open Runtime owner before restoring the session', async () => {
+    const directory = mkdtempSync(join(process.cwd(), '.kite-app-live-import-'));
+    const checkpointPath = join(directory, 'checkpoints.sqlite');
+    const sourcePath = sqliteRuntimeStorePath(checkpointPath);
+    const fixture = legacySession(JSON.stringify(EVENT));
+    try {
+      writeLegacyStore(sourcePath, fixture);
+      const owner = createKiteRuntimeStorageOwner(checkpointPath);
+
+      // TUI startup opens the current Store before /resume. The selected
+      // historical row must still become visible on that same long-lived
+      // owner immediately after the independent compatibility transaction.
+      expect(owner.storage.sessions.listSessions()).toEqual([
+        expect.objectContaining({ threadId: fixture.session.sessionId }),
+      ]);
+      expect(owner.storage.sessions.loadSnapshot(fixture.session.sessionId)).toMatchObject({
+        schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+      });
+      owner.storage.close();
+
+      const restoredOwner = createKiteRuntimeStorageOwner(checkpointPath);
+      await expect(
+        loadSession(
+          () => restoredOwner.storage as unknown as StateRuntimeStorage,
+          fixture.session.sessionId,
+          'e'.repeat(64),
+        ),
+      ).resolves.toMatchObject({
+        threadId: fixture.session.sessionId,
+        interactionMode: 'accept_edits',
+      });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

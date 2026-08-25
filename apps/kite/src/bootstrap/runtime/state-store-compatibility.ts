@@ -1,4 +1,9 @@
 import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
+import {
+  LEGACY_STATE26_FORMAT_EPOCH,
+  LEGACY_STATE26_SCHEMA_VERSION,
+  resolveProjectIdentity,
+} from '@kite/runtime-host';
 import type { RuntimeSnapshotCodec } from '@kite/runtime-host/storage';
 import type {
   SqliteRuntimeCompatibilityFilePreimage,
@@ -9,7 +14,65 @@ import type {
 } from '@kite/runtime-storage-sqlite';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
-const HISTORICAL_STATE_SCHEMA = 26;
+const HISTORICAL_STATE_SCHEMA = LEGACY_STATE26_SCHEMA_VERSION;
+
+interface CompatibilitySessionIdentity {
+  readonly sessionId: string;
+  readonly projectId: string;
+  readonly workspaceDigest: string;
+}
+
+function coordinatorProjectIdentity(
+  workspace: string,
+): { readonly projectId: string; readonly workspaceDigest: string } | null {
+  if (!workspace || workspace.includes('\0') || !isAbsolute(workspace)) return null;
+  try {
+    return resolveProjectIdentity(workspace);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeState26Identity(
+  state: RuntimeState,
+  expected: CompatibilitySessionIdentity,
+): RuntimeState | null {
+  const session = state.session;
+  if (
+    !expected.sessionId ||
+    !expected.projectId ||
+    !/^sha256:[a-f0-9]{64}$/u.test(expected.workspaceDigest) ||
+    session.threadId !== expected.sessionId ||
+    session.projectId !== expected.projectId ||
+    session.canonicalWorkspaceDigest !== expected.workspaceDigest
+  ) {
+    return null;
+  }
+  const identity = coordinatorProjectIdentity(session.workspace);
+  if (!identity || identity.workspaceDigest !== expected.workspaceDigest) return null;
+  const deterministicProjectId = identity.projectId;
+  if (/^project_[a-f0-9]{64}$/u.test(session.projectId)) {
+    return session.projectId === deterministicProjectId ? state : null;
+  }
+  return {
+    ...state,
+    session: {
+      ...session,
+      projectId: deterministicProjectId,
+    },
+  };
+}
+
+function safeSessionIdentity(
+  codec: RuntimeSnapshotCodec<RuntimeEvent, RuntimeState>,
+  state: RuntimeState,
+): { readonly projectId: string; readonly canonicalWorkspaceDigest: string } | null {
+  try {
+    return codec.sessionIdentity?.(state) ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function currentFilePreimages(
   input: readonly SqliteRuntimeCompatibilityFilePreimage[],
@@ -60,19 +123,30 @@ function migrateNamedSnapshot(
     readonly projectId: string;
     readonly workspaceDigest: string;
   },
+  normalizeLegacyIdentity: boolean,
 ): SqliteRuntimeCompatibilityNamedSnapshot | null {
-  const state = codec.decodeCompatibleState?.(snapshot.stateJson, {
+  if (
+    normalizeLegacyIdentity &&
+    (snapshot.schemaVersion !== LEGACY_STATE26_SCHEMA_VERSION ||
+      snapshot.formatEpoch !== LEGACY_STATE26_FORMAT_EPOCH)
+  ) {
+    return null;
+  }
+  const decoded = codec.decodeCompatibleState?.(snapshot.stateJson, {
     schemaVersion: snapshot.schemaVersion,
     formatEpoch: snapshot.formatEpoch,
   });
+  if (!decoded) return null;
+  const state = normalizeLegacyIdentity ? normalizeState26Identity(decoded, expected) : decoded;
   if (!state) return null;
   const metadata = codec.snapshotMetadata(state);
-  const identity = codec.sessionIdentity?.(state);
+  const identity = safeSessionIdentity(codec, state);
   if (
     metadata.stateRevision !== snapshot.revision ||
     state.session.threadId !== expected.sessionId ||
     !identity ||
-    identity.projectId !== expected.projectId ||
+    identity.projectId !==
+      (normalizeLegacyIdentity ? state.session.projectId : expected.projectId) ||
     identity.canonicalWorkspaceDigest !== expected.workspaceDigest
   )
     return null;
@@ -105,18 +179,37 @@ export function createKiteRuntimeCompatibilityMigrator(
   codec: RuntimeSnapshotCodec<RuntimeEvent, RuntimeState>,
 ): SqliteRuntimeCompatibilityMigrator {
   return (input, source): SqliteRuntimeCompatibilityTargetSession | null => {
-    const state = codec.decodeCompatibleState?.(input.snapshot.stateJson, {
+    const normalizeLegacyIdentity =
+      source.stateSchemaVersion === HISTORICAL_STATE_SCHEMA &&
+      source.formatEpoch === LEGACY_STATE26_FORMAT_EPOCH;
+    if (
+      normalizeLegacyIdentity &&
+      (input.snapshot.schemaVersion !== LEGACY_STATE26_SCHEMA_VERSION ||
+        input.snapshot.formatEpoch !== LEGACY_STATE26_FORMAT_EPOCH)
+    ) {
+      return null;
+    }
+    const decoded = codec.decodeCompatibleState?.(input.snapshot.stateJson, {
       schemaVersion: input.snapshot.schemaVersion,
       formatEpoch: input.snapshot.formatEpoch,
     });
+    if (!decoded) return null;
+    const state = normalizeLegacyIdentity
+      ? normalizeState26Identity(decoded, {
+          sessionId: input.session.sessionId,
+          projectId: input.session.projectId,
+          workspaceDigest: input.session.workspaceDigest,
+        })
+      : decoded;
     if (!state) return null;
     const stateMetadata = codec.snapshotMetadata(state);
-    const identity = codec.sessionIdentity?.(state);
+    const identity = safeSessionIdentity(codec, state);
     if (
       stateMetadata.stateRevision !== input.snapshot.revision ||
       state.session.threadId !== input.session.sessionId ||
       !identity ||
-      identity.projectId !== input.session.projectId ||
+      identity.projectId !==
+        (normalizeLegacyIdentity ? state.session.projectId : input.session.projectId) ||
       identity.canonicalWorkspaceDigest !== input.session.workspaceDigest
     ) {
       return null;
@@ -170,11 +263,17 @@ export function createKiteRuntimeCompatibilityMigrator(
 
     const namedSnapshots: SqliteRuntimeCompatibilityNamedSnapshot[] = [];
     for (const snapshot of input.namedSnapshots) {
-      const migrated = migrateNamedSnapshot(snapshot, state.formatEpoch, codec, {
-        sessionId: input.session.sessionId,
-        projectId: input.session.projectId,
-        workspaceDigest: input.session.workspaceDigest,
-      });
+      const migrated = migrateNamedSnapshot(
+        snapshot,
+        state.formatEpoch,
+        codec,
+        {
+          sessionId: input.session.sessionId,
+          projectId: input.session.projectId,
+          workspaceDigest: input.session.workspaceDigest,
+        },
+        normalizeLegacyIdentity,
+      );
       // A named recovery point belongs to the selected session's durable
       // history. Silently dropping one would make a superficially successful
       // import incomplete and could change /rewind semantics. Keep the failure
@@ -188,10 +287,13 @@ export function createKiteRuntimeCompatibilityMigrator(
       source.stateSchemaVersion,
     );
     if (!filePreimages) return null;
+    const targetProjectId = state.session.projectId;
+    const targetWorkspaceDigest = state.session.canonicalWorkspaceDigest;
+    if (!targetProjectId || !targetWorkspaceDigest) return null;
     return {
       sessionId: input.session.sessionId,
-      projectId: input.session.projectId,
-      workspaceDigest: input.session.workspaceDigest,
+      projectId: targetProjectId,
+      workspaceDigest: targetWorkspaceDigest,
       name: input.session.name,
       modelProvider: input.session.modelProvider,
       modelName: input.session.modelName,

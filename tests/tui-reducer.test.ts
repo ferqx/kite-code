@@ -3690,6 +3690,70 @@ describe('eventReducer (blocks model)', () => {
       expect(next.activeSessionId).toBe('new');
     });
 
+    test('historical load keeps the outgoing projection active until LOAD_SESSION saves it', () => {
+      const snapshot = (threadId: string, active: boolean): SessionSnapshot => ({
+        threadId,
+        name: threadId,
+        workspace: '/tmp',
+        active,
+        running: false,
+        pendingInterrupt: false,
+        interrupt: null,
+        plan: null,
+        status: initialState.status,
+        turns: [],
+      });
+      let state: TuiState = {
+        ...initialState,
+        activeSessionId: 'latest',
+        loadingSessionId: 'other',
+        sessions: [snapshot('latest', true)],
+        turns: [
+          {
+            blocks: [{ id: 1, kind: 'text', content: 'latest session message' }],
+          },
+        ],
+      };
+
+      // SessionManager has already switched its Runtime owner to `other`, but
+      // the TUI has not committed LOAD_SESSION yet. The list refresh may add
+      // the target snapshot, but must not rebind the still-visible turns.
+      state = eventReducer(state, {
+        type: 'SET_SESSIONS',
+        sessions: [snapshot('latest', false), snapshot('other', true)],
+      });
+      expect(state.activeSessionId).toBe('latest');
+      expect(
+        state.sessions.filter((session) => session.active).map((session) => session.threadId),
+      ).toEqual(['latest']);
+
+      state = eventReducer(state, {
+        type: 'LOAD_SESSION',
+        threadId: 'other',
+        blocks: [{ id: 2, kind: 'text', content: 'other session message' }],
+        interrupt: null,
+        modelProvider: 'mock',
+        modelName: 'mock',
+        thinkingLevel: 'max',
+      });
+      expect(state.activeSessionId).toBe('other');
+      expect(
+        state.sessions.filter((session) => session.active).map((session) => session.threadId),
+      ).toEqual(['other']);
+      expect(
+        flatBlocks(state).map((block) => (block.kind === 'text' ? block.content : block.kind)),
+      ).toEqual(['other session message']);
+
+      state = eventReducer(state, { type: 'SWITCH_SESSION', threadId: 'latest' });
+      expect(state.activeSessionId).toBe('latest');
+      expect(
+        state.sessions.filter((session) => session.active).map((session) => session.threadId),
+      ).toEqual(['latest']);
+      expect(
+        flatBlocks(state).map((block) => (block.kind === 'text' ? block.content : block.kind)),
+      ).toEqual(['latest session message']);
+    });
+
     test('SWITCH_SESSION preserves blocks on outgoing session and restores from incoming', () => {
       const sessions: SessionSnapshot[] = [
         {

@@ -25,6 +25,11 @@
 
 当前已接入的表面包括 workspace 信任、首次 Provider/API key/配置错误界面、帮助与 slash command 描述、通用偏好选择器、权限/推理深度/主题选择、回退检查点（含确认、文件影响和日期）、会话和模型选择器、审批、问答、计划审核、问答工具卡片的标题/取消状态、运行状态栏和语言选择器。其余 TUI 表面迁移前可以保留既有基准文字，但不得声称已完成全界面覆盖；新增自有文案应优先进入 catalog，并按实施计划补齐双语言测试。
 
+历史会话打开失败继续使用不含原始异常的本地外围说明，并只隔离被选中的会话；Workspace path、Store
+错误、Project identity 和事件正文不得进入 UI。兼容导入成功时不显示迁移提示；未知格式也不显示错误。
+开发者显式启用的 `kite-session` 诊断只输出固定 stage 与闭集 failure code，不属于用户文案，且不得输出
+thread/session identity、路径或自由错误正文。
+
 ## SAQ-10 审批与模式文案
 
 审批队列的本地化只改变标题、状态和快捷键说明，不改变 canonical event 或 action payload。`queued_user`、

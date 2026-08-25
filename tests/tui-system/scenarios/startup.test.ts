@@ -13,7 +13,7 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
-import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -53,7 +53,13 @@ describe('TUI PTY System — Startup', () => {
   step(
     'renders the prompt, footer, and Kite Code branding in a CI-backed PTY',
     async () => {
-      const output = await waitForText(() => tui.viewport(), 'workspace', 10_000);
+      await waitForText(() => tui.viewport(), 'workspace', 10_000);
+      // spawnReadyTui already performs the shared semantic main-input readiness
+      // handshake. Re-run the same helper here so this checkpoint proves the
+      // prompt is focused and empty without relying on a raw prompt glyph or a
+      // global quiescence window over historical viewport output.
+      await waitForTuiReady(tui, 'main', workspace);
+      const output = tui.viewport();
       expect(screenContains(output, '❯')).toBe(true);
       expect(screenContains(output, 'Kite Code')).toBe(true);
       expect(screenContains(output, 'mock-model')).toBe(true);

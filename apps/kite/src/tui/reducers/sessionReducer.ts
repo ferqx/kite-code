@@ -125,11 +125,11 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
             }
           : s,
       );
-      const sessions = sessionsWithSaved.map((s) =>
-        s.threadId === action.threadId
+      const sessions = sessionsWithSaved.map((s) => ({
+        ...s,
+        active: s.threadId === action.threadId,
+        ...(s.threadId === action.threadId
           ? {
-              ...s,
-              active: true,
               status: {
                 ...s.status,
                 modelProvider: action.modelProvider || s.status.modelProvider,
@@ -139,8 +139,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
                 contextSnapshot: undefined,
               },
             }
-          : s,
-      );
+          : {}),
+      }));
       const target = sessions.find((s) => s.threadId === action.threadId);
       const loadedTurns = reconstructTurns(action.blocks);
       const nextId = Math.max(state.nextBlockId, maxBlockIdInTurns(loadedTurns) + 1);
@@ -206,10 +206,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       };
     }
     case 'SWITCH_SESSION': {
-      const sessions = state.sessions.map((s) =>
-        s.threadId === state.activeSessionId
+      const sessions = state.sessions.map((s) => ({
+        ...s,
+        ...(s.threadId === state.activeSessionId
           ? {
-              ...s,
               turns: state.turns,
               status: state.status,
               interrupt: state.interrupt,
@@ -221,12 +221,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               sessionCommandGrants: state.sessionCommandGrants,
               sessionCommandGrantGeneration: state.sessionCommandGrantGeneration,
               sessionCommandGrantRevision: state.sessionCommandGrantRevision,
-              active: false,
             }
-          : s.threadId === action.threadId
-            ? { ...s, active: true }
-            : s,
-      );
+          : {}),
+        active: s.threadId === action.threadId,
+      }));
       const target = sessions.find((s) => s.threadId === action.threadId);
       const targetTurns = target?.turns ?? [];
       return {
@@ -301,10 +299,23 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         return incoming;
       });
       const activeIncoming = action.sessions.find((s) => s.active);
+      // A historical open switches the Runtime owner before presentation
+      // replay is committed. During that bounded window, keep the TUI bound
+      // to the outgoing session so LOAD_SESSION can save the visible turns
+      // into the correct snapshot atomically. Adopting the Runtime's target
+      // here would associate the outgoing turns with the target and leave the
+      // original session blank when the user switches back.
+      const activeSessionId = state.loadingSessionId
+        ? state.activeSessionId
+        : (activeIncoming?.threadId ?? state.activeSessionId);
+      const sessions = mergedSessions.map((session) => ({
+        ...session,
+        active: session.threadId === activeSessionId,
+      }));
       return {
         ...state,
-        sessions: mergedSessions,
-        activeSessionId: activeIncoming?.threadId ?? state.activeSessionId,
+        sessions,
+        activeSessionId,
       };
     }
     case 'SET_SESSION_SERVICE_UNAVAILABLE':

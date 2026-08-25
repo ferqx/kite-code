@@ -223,7 +223,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     first-run 与 workspace trust 场景分别显式选择 `first-run-provider`、`workspace-trust`。
     默认 `main` readiness 必须在同一稳定 frame 中同时证明品牌/model/workspace chrome、空的活动主
     输入投影和用户实际可见的 `❯` prompt；仅出现标题、隐藏的 input listener marker 或尚未完成的
-    分帧 prompt 都不构成可交互就绪。普通场景由 harness
+    分帧 prompt 都不构成可交互就绪。若 startup 场景需要在 journey checkpoint 再次证明输入就绪，
+    必须复用 `waitForTuiReady()`；不得直接 `waitForText('❯')`，也不得让未产生 fresh output 的全局
+    quiescence 等待复用早先累积帧。普通场景由 harness
     预写 `source: 'test'` 信任记录，验证门禁本身时使用
     `createTestWorkspace({ enforceWorkspaceTrust: true })`。子进程环境采用 allowlist，只继承平台启动、
     临时目录、locale、时区和 CI 所需变量，再叠加 fixture 显式环境；不得继承开发机密钥、代理、
@@ -355,7 +357,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     耗尽后明确失败。场景不得自行用 sleep 或无回执的单次 `write('\\r')` 替代。
 28. 共享 choice overlay 的场景必须验证当前 viewport 中的完整标题、全部可见选项、默认选中项和
     footer，再发送导航或确认键。删除等破坏性确认必须覆盖安全默认项，先等待目标选中 marker 再
-    提交；Enter 选择安全默认和 Esc 都要证明持久状态未变。具有 browse/confirm 两层的 overlay
+    提交；确认删除后必须先等待 confirm overlay 确实消失，再观察 Store 删除，不能把底层仍可见的主输入
+    当作确认动作已被 Ink 接收。Enter 选择安全默认和 Esc 都要证明持久状态未变。具有 browse/confirm 两层的 overlay
     必须证明 Esc 先返回内层而不是关闭整个面板。`/rewind` 的状态化 journey 还要同时验证文件内容、
     fork 后的 Runtime Store session 数和新会话继续回退的恢复点链，不能只依赖成功提示文本。
 29. 只为观察 selector 或补全结果而调用 `typeText()` 的场景，若不提交该输入，必须在测试结束前
