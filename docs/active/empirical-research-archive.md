@@ -32,7 +32,7 @@
 
 验证：
 
-- `bun test tests/docs-space.test.ts`
+- `bun test tests/integration/docs-space.test.ts`
 - `git diff --check`
 
 ## 规则
@@ -75,7 +75,7 @@
 
 ## 测试期望
 
-`tests/docs-space.test.ts` 应继续保证：
+`tests/integration/docs-space.test.ts` 应继续保证：
 
 - 所有 active 记录都由 `docs/space/index.md` 的兼容索引覆盖。
 - active 记录包含中文元数据标签。

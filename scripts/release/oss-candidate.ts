@@ -90,8 +90,8 @@ const WINDOWS_SANDBOX_RELEASE_ASSETS = [
 ] as const;
 
 /**
- * Resolve every workspace package export directly to repository source. Bun
- * 1.3.14 on Windows can crash while pretty-printing a backslash path reached
+ * Resolve every workspace package export directly to repository source. Bun standalone on
+ * Windows can crash while pretty-printing a backslash path reached
  * through a workspace symlink, so standalone builds must never enter those
  * node_modules links.
  */

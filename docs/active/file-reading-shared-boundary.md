@@ -289,10 +289,10 @@ capability surface 不得把文件工具读取误分类为原生进程 external-
 
 ```bash
 bun run typecheck
-bun test tests/tools.test.ts
-bun test tests/tool-definitions.test.ts tests/tool-policy.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/context.test.ts
-bun test tests/subagent-approval.test.ts
-bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/session-manager.test.ts
+bun test tests/isolated/tools.test.ts
+bun test apps/kite/test/tool-definitions.test.ts apps/kite/test/tool-policy.test.ts apps/kite/test/isolated/runtime/agent.integration.test.ts apps/kite/test/subagent-runner.test.ts tests/integration/builtin-runtime/context.test.ts
+bun test tests/tui-system/scenarios/subagent-approval.test.ts
+bun test apps/kite/test/tui-reducer.test.ts apps/kite/test/tui-layout.test.tsx apps/kite/test/isolated/session-manager.test.ts
 ```
 
 ### LOAD_SESSION 未设置 nextBlockId + blockIndex 删除（`sessionReducer.ts`、`handleEvent.ts`、`helpers.ts`）
@@ -337,5 +337,5 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
 
 - [Shell 平台兼容性](shell-platform-compatibility.md) — bash 选择策略、MSYS2 DLL 依赖
 - [工具描述契约](tool-description-contracts.md) — 工具 ACI 契约
-- [分层边界强制](layer-boundary-enforcement.md) — core 层边界约束
-- [TUI useStaticContent 引用稳定性](tui-reference-stability.md) — useStaticContent 引用稳定性方案
+- [Runtime 架构](six-concept-runtime-architecture.md) — workspace 与 authority 边界
+- [TUI 渲染规范](../../apps/kite/docs/tui-rendering.md) — Static、引用稳定与终端渲染

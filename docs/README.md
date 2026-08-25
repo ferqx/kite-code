@@ -2,23 +2,44 @@
 
 AI 请先读 [AGENTS.md](AGENTS.md) 获取简明工作流。本文件是 AI 与开发者共用的入口。
 
-当前总体架构见 [Kite Code 六概念 Runtime 架构](active/six-concept-runtime-architecture.md)：它以 `packages/runtime-contract`、`runtime-spi`、`agent-kernel`、`runtime-host`、`builtin-runtime`、`runtime-storage-sqlite` 与 `apps/kite` 的 workspace 依赖方向，落实 Agent、Runtime Kernel、Capability、Policy、Execution、Verification 六概念。
+当前总体架构见 [Kite Code 六概念 Runtime 架构](active/six-concept-runtime-architecture.md)。每个 workspace 的职责、依赖、公开入口与局部不变量由自身 README 定义；跨包行为、安全、恢复、发布与运维规则位于 `active/`。
 
 ## 权威顺序
 
 1. 用户、system 与 developer 的直接指令。
 2. 当前源码与测试。
-3. 与改动范围匹配的 `active/` 记录。
-4. `adr/` 中已接受的 ADR。
-5. 计划、调研、完成记录与外部参考。
-6. `design/` 和 `deprecated/` 永远不是当前实现依据。
+3. 改动所属 workspace README 及其索引的本地 current 文档。
+4. 与改动范围匹配的 `active/` 跨包记录。
+5. `adr/` 中已接受的 ADR。
+6. book、计划、调研、完成记录与外部参考。
+7. `design/` 和 `deprecated/` 永远不是当前实现依据。
 
-代码与 active 记录冲突时，必须在同一改动中更新 active 记录，不得静默保留过期文档。
+代码与 current authority 冲突时，必须在同一改动中更新 owner 文档；跨包行为变化同时更新 active 记录，不得静默保留过期文档。
+
+## 工程环境基线
+
+GitHub Actions 与正式 qualification 统一使用 Bun `1.4.0`。所有 `setup-bun` workflow 必须显式 pin
+该版本；版本变更必须同时更新 workflow、formal verifier、测试夹具和对应 current authority。
+
+## 映射精度
+
+`documentation-map.json` 只映射拥有当前行为的生产源码、package manifest 和测试/发布基础设施。普通测试、
+fixture 与 owner-local 文档不因位于 workspace 目录内而触发架构 authority。被专业规则覆盖的 Model、MCP、
+Sandbox、TUI、qualification 或 observability 路径必须从通用 owner 规则排除；代表路径矩阵负责防止规则重新
+膨胀或跨语义满足。根 `package.json` 同时承载安装、测试和 workspace 配置，使用独立
+`root-package-manifest` 规则，由实际发生变化的 current authority 承接，不强迫修改无关 Runtime 文档。
+
+## 并发开发
+
+每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree
+的完整状态，pre-commit 使用 `staged`，CI 使用 `range`。同一 current authority 不能由两个任务并发拥有；
+后开始的任务必须等待、rebase 并重新验证。不得建立文档锁服务、临时 authority 副本或兼容重定向来规避冲突。
 
 ## 目录职责
 
-- `active/` — 当前行为、不变量、边界和操作指引。
-- `book/` — 面向新开发者和评审者的解释性导览；它不定义当前行为，冲突时必须回到源码、测试和对应的 `active/` 记录。
+- `packages/*/README.md`、`apps/*/README.md` 与 workspace `docs/` — 模块局部当前职责、边界和验证。
+- `active/` — 跨 workspace 当前行为、安全、恢复、持久化、发布和运维指引。
+- `book/` — 面向新开发者和评审者的解释性导览；它不定义当前行为，冲突时必须回到源码、测试和对应的 workspace/active authority。
 - `design/` — 未来 RFC 与提案；批准后必须先转入 `space/plans/` 才能实施。
 - `adr/` — 已接受的架构决策；不改写历史，使用新 ADR 替代旧决定。
 - `deprecated/` — 不得作为实现依据的历史材料。
@@ -36,7 +57,7 @@ design/RFC → space/plan → 实施 + active/ + ADR（架构级变更）
                          不再有效时迁入 deprecated/
 ```
 
-每份新 `active/` 记录必须包含：
+每份新跨包 `active/` 记录必须包含：
 
 ```markdown
 状态：active
@@ -45,4 +66,4 @@ design/RFC → space/plan → 实施 + active/ + ADR（架构级变更）
 相关：关联 ADR、计划或代码入口（可选）。
 ```
 
-新文档必须使用 `active/` 路径。
+模块局部文档使用 workspace `docs/` 路径并由 README 索引；ADR、book、plan、completed、design、deprecated 和索引不得出现在 `documentation-map.json` 的 `authorities` 中。相关决策见 ADR-0140。

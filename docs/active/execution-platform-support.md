@@ -5,11 +5,11 @@
 读取时机：修改 sandbox backend、production execution admission、process-tree 限制、
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
-验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/cgroup-pids.test.ts tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/process-tree-limit.test.ts
-tests/sandbox/platform-capability-probe.test.ts tests/sandbox/platform-capability-verifier.test.ts tests/sandbox/execution-boundary.test.ts
-tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
-tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
-tests/execution/sandbox-execution-provider.test.ts`、
+验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
+tests/qualification/sandbox/platform-capability-probe.test.ts tests/qualification/sandbox/platform-capability-verifier.test.ts apps/kite/test/isolated/sandbox/execution-boundary.test.ts
+apps/kite/test/sandbox/network-boundary.test.ts apps/kite/test/sandbox/network-boundary-concurrency.test.ts
+apps/kite/test/git-broker.test.ts apps/kite/test/runtime/git-tool-controller.test.ts
+apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
@@ -35,7 +35,7 @@ availability。
 关闭。ADR-0068 明确该空集合只阻止对应 Shell、writer、MCP write、effectful Skill 等能力，不再阻止
 生成和安装普通开源 TUI/CLI 候选包。候选包与 effectful capability 支持声明是两个独立结论：
 
-Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标。发行/启动/PTY/路径/ACL/keyring
+Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 GitHub workflow 统一 pin Bun `1.4.0`。发行/启动/PTY/路径/ACL/keyring
 兼容性与 effectful execution capability 是两个 Gate：某个平台可以通过普通 TUI/CLI 发行验证，
 但其 Shell、writer、Skill child 或 local stdio MCP 仍可因原生隔离证据不足而关闭。常规三平台
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
@@ -304,7 +304,7 @@ descendant exit 与入口组合证据，不能由本机静态/单元测试升级
 或 public barrel 入口。此 seam 不改变 qualification registry，当前空支持集仍为空。
 
 Darwin 的 native negative conformance 还会在
-`tests/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
+`apps/kite/test/isolated/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
 session descendant；即使 supervisor 的 PGID 被终止，测试也必须得到
 `cleanupConfirmed=false`，并回收该 fixture。系统 `launchd.plist(5)` 的
 `AbandonProcessGroup=false` 只承诺终止与 job 相同的 process group，`sandbox(7)` 只描述新进程继承

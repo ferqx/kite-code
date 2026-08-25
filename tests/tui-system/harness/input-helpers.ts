@@ -357,8 +357,8 @@ export async function typeText(
         delivered += ch;
         if (delayMs > 0) await sleep(delayMs);
 
-        // `terminal.write()` is fire-and-forget.  Under Bun 1.3 on a busy CI
-        // runner, a later character can still be queued while the viewport
+        // `terminal.write()` is fire-and-forget. On a busy Bun CI runner,
+        // a later character can still be queued while the viewport
         // has already advanced.  Confirm each prefix before sending the next
         // byte so a retry can never race an undrained input transaction.
         if (!/\s$/u.test(ch)) {

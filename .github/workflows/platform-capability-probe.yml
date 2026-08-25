@@ -24,18 +24,16 @@ on:
       - "native/windows-sandbox-runner/**"
       - "vendor/isksh/**"
       - "release/platform-capabilities/**"
-      - "tests/sandbox.test.ts"
-      - "tests/sandbox-executor.test.ts"
-      - "tests/sandbox-bwrap-executor.test.ts"
-      - "tests/sandbox/platform-backends.test.ts"
-      - "tests/sandbox/process-tree-limit.test.ts"
-      - "tests/sandbox/cgroup-pids.test.ts"
-      - "tests/sandbox/app-sandbox-composition.test.ts"
-      - "tests/sandbox/platform-capability-probe.test.ts"
-      - "tests/sandbox/platform-capability-verifier.test.ts"
-      - "tests/sandbox/execution-boundary.test.ts"
-      - "tests/sandbox/windows-restricted-token.test.ts"
-      - "tests/execution/**"
+      - "apps/kite/test/isolated/sandbox.test.ts"
+      - "tests/qualification/sandbox-executor.test.ts"
+      - "tests/qualification/sandbox-bwrap-executor.test.ts"
+      - "packages/builtin-runtime/test/sandbox/platform-backends.test.ts"
+      - "tests/qualification/sandbox/**"
+      - "apps/kite/test/sandbox/**"
+      - "apps/kite/test/isolated/sandbox/**"
+      - "apps/kite/test/execution/**"
+      - "apps/kite/test/isolated/execution/**"
+      - "tests/integration/execution/**"
       - ".github/workflows/platform-capability-probe.yml"
 
 permissions:
@@ -71,7 +69,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
       - run: bun install --frozen-lockfile
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes bubblewrap curl
@@ -84,24 +82,24 @@ jobs:
         timeout-minutes: 10
         run: >-
           bun test --max-concurrency=1
-          tests/sandbox/platform-backends.test.ts
-          tests/sandbox/cgroup-pids.test.ts
-          tests/sandbox/app-sandbox-composition.test.ts
-          tests/sandbox/process-tree-limit.test.ts
-          tests/sandbox/platform-capability-probe.test.ts
-          tests/sandbox/platform-capability-verifier.test.ts
-          tests/sandbox/execution-boundary.test.ts
-          tests/sandbox/windows-restricted-token.test.ts
-          tests/execution/sandbox-execution-provider.test.ts
+          packages/builtin-runtime/test/sandbox/platform-backends.test.ts
+          tests/qualification/sandbox/cgroup-pids.test.ts
+          apps/kite/test/sandbox/app-sandbox-composition.test.ts
+          tests/qualification/sandbox/process-tree-limit.test.ts
+          tests/qualification/sandbox/platform-capability-probe.test.ts
+          tests/qualification/sandbox/platform-capability-verifier.test.ts
+          apps/kite/test/isolated/sandbox/execution-boundary.test.ts
+          tests/qualification/sandbox/windows-restricted-token.test.ts
+          apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts
       - if: runner.os == 'macOS'
         name: macOS Seatbelt profile and fail-closed contracts
-        run: bun test tests/sandbox.test.ts
+        run: bun test apps/kite/test/isolated/sandbox.test.ts
       - if: runner.os == 'macOS' || runner.os == 'Linux'
         name: POSIX supervisor native negative and conformance
-        run: bun test --parallel=1 --max-concurrency=1 tests/execution/posix-supervisor.test.ts
+        run: bun test --parallel=1 --max-concurrency=1 apps/kite/test/isolated/execution/posix-supervisor.test.ts
       - if: runner.os == 'Linux'
         name: Linux native bubblewrap candidate
-        run: bun test tests/sandbox.test.ts tests/sandbox-bwrap-executor.test.ts
+        run: bun test apps/kite/test/isolated/sandbox.test.ts tests/qualification/sandbox-bwrap-executor.test.ts
       - if: runner.os == 'Windows'
         name: Build Windows sandbox runner
         run: bun run scripts/release/build-windows-runner.ts
@@ -117,7 +115,7 @@ jobs:
         name: Windows restricted-token native fail-closed conformance
         env:
           KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E: '1'
-        run: bun test --max-concurrency=1 tests/sandbox/windows-restricted-token.test.ts
+        run: bun test --max-concurrency=1 tests/qualification/sandbox/windows-restricted-token.test.ts
       - run: bun run scripts/release/platform-capability-probe.ts platform-capability-evidence.json
       - run: >-
           bun run scripts/release/verify-platform-capability-evidence.ts

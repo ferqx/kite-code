@@ -13,7 +13,7 @@
   "scripts": {
     "build": "bun build ./src/index.ts ./src/observability/index.ts ./src/storage/index.ts --outdir ./dist --target bun",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test ./test"
+    "test": "bun run ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
     "@kite-ai/agent-kernel": "workspace:*",

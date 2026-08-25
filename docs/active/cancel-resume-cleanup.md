@@ -113,7 +113,7 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 `SET_SESSIONS` 在 `LOAD_SESSION_PENDING` 期间不得提前改变 TUI 的 `activeSessionId`。只有 `LOAD_SESSION` 才能在同一
 reducer transition 中把当前可见 turns 保存到 outgoing snapshot、加载目标 replay turns 并推进 `sessionKey`。否则旧会话
 内容会被错绑到目标 snapshot，用户按“会话 A → 会话 B → 会话 A”切回时得到空白投影。该不变量由
-`tests/tui-reducer.test.ts` 的 historical load 链路和 `session-legacy-compatibility` PTY 连续切回场景共同验证。
+`apps/kite/test/tui-reducer.test.ts` 的 historical load 链路和 `session-format-compatibility` PTY 连续切回场景共同验证。
 跨进程 target 注册后先保持 dormant，直到 `resume_session` recovery 与第二次 persisted load 完成才切换前台；因此
 Runtime restart 写入的 `capability.execution_unknown`、`tool.failed|cancelled`、`model.invocation_interrupted` 与
 `turn.aborted` 必须进入本次 replay，而不是等下一条 prompt 或下一次 `/resume` 才可见。崩溃遗留的运行中 Tool/Subagent/
@@ -128,7 +128,7 @@ Session 列表后，`sessions[].active` 必须从唯一 `activeSessionId` 派生
 `close_session` cancellation 或推进 durable revision；已有 active operation 或显式删除仍走 canonical cancel/close，并且只写
 一次取消。readiness、close 或 coordinator release 失败不能让 target 留在 Runtime/client/readiness/authority map：cleanup 必须
 best-effort 执行所有释放步骤、保留首个错误供上层作为 secondary diagnostic，并允许随后重新 register exact session。
-对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于 `tests/session-manager.test.ts`。
+对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于 `apps/kite/test/isolated/session-manager.test.ts`。
 
 未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。App 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
 

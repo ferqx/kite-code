@@ -6,18 +6,18 @@
 已审批网络 token、Shell runtime policy、Windows filesystem/network boundary、Platform Capability
 Probe，或 Windows Full/fallback UI 状态时。
 
-验证：`bun test tests/tool-definitions.test.ts tests/tool-runner.test.ts
-tests/sandbox/platform-backends.test.ts tests/sandbox/windows-restricted-token.test.ts
-tests/sandbox/windows-network-setup.test.ts tests/sandbox/platform-capability-probe.test.ts
-tests/sandbox/platform-capability-verifier.test.ts tests/sandbox/process-tree-limit.test.ts
-tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/execution-boundary.test.ts
-tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
-tests/tui-exit-coordinator.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts`、
+验证：`bun test apps/kite/test/tool-definitions.test.ts apps/kite/test/tool-runner.test.ts
+packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts
+tests/qualification/sandbox/windows-network-setup.test.ts tests/qualification/sandbox/platform-capability-probe.test.ts
+tests/qualification/sandbox/platform-capability-verifier.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
+apps/kite/test/sandbox/app-sandbox-composition.test.ts apps/kite/test/isolated/sandbox/execution-boundary.test.ts
+apps/kite/test/git-broker.test.ts apps/kite/test/runtime/git-tool-controller.test.ts
+apps/kite/test/tui-exit-coordinator.test.ts apps/kite/test/isolated/session-manager.test.ts apps/kite/test/tui-reducer.test.ts`、
 `bun run typecheck`、`bun run check:docs`。native runner
 变更还必须运行 `cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml` 和 release
 script 指定的 Win11 native E2E/probe。direct backend E2E 为
 `KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E=1 bun test --max-concurrency=1
-tests/sandbox/windows-restricted-token.test.ts`；它必须经 App composition，并由 test-only Runtime lifecycle
+tests/qualification/sandbox/windows-restricted-token.test.ts`；它必须经 App composition，并由 test-only Runtime lifecycle
 oracle 先 ack preparation intent。当前 Local Provider 随后必须以
 数据化的 `windows_restricted_token_v1` prepared transport 通过 ready/dispatch lifecycle；native E2E 使用
 `printf SANDBOX_OK` 断言受限 token runner 的实际 stdout、Job cleanup 与 `disposed=true` disposal receipt。
@@ -151,7 +151,7 @@ digest `sha256:bd83cc949494c9fde20b7b58a4f08a35055bfaa9b9f6a0eef5be11490bfb2ecd`
 runner 变更都必须重新运行同一可复现构建并提交新的 digest，不能只改 protocol、版本或 manifest 文本，
 也不能复用旧 binary digest。
 Windows candidate 的 standalone resolver 还必须把 `@kite-ai/builtin-runtime/sandbox` 及其他 workspace public
-exports 直接映射到仓库 source，禁止经过 `node_modules/@kite-ai/*` symlink；否则 Bun 1.3.14 会因反斜杠
+exports 直接映射到仓库 source，禁止经过 `node_modules/@kite-ai/*` symlink；否则 Windows Bun standalone 可能因反斜杠
 pretty path 崩溃，导致已验证 runner 无法进入候选包。release test 从 package exports 机械验证该闭包。
 
 ## 能力边界

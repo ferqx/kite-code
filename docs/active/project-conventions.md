@@ -24,7 +24,7 @@
 
 验证：
 
-- `bun test tests/docs-space.test.ts`
+- `bun test tests/integration/docs-space.test.ts`
 
 > CLAUDE.md 之外的补充约定。需要时查阅，不占用每次会话的上下文。
 
@@ -103,7 +103,7 @@ git merge -X theirs origin/<branch> --no-edit
 - **通用 lifecycle/lease/dispatch 机制**定义在 `packages/runtime-host/`；具体配置、平台和 UI 组合只定义在 `apps/kite/`。
 - package 依赖必须满足 `runtime-contract → ∅`、`agent-kernel → ∅`、`runtime-spi → runtime-contract`、`runtime-host → agent-kernel/runtime-contract/runtime-spi`、`builtin-runtime → runtime-contract/runtime-spi`；App 可以组合全部目标 package，不允许反向依赖。
 - Runtime packages 禁止导入 `apps/kite/src/tui/` 的任何符号，禁止做展示层文本格式化（截断+省略号+展示文案）。
-- 详细的分层边界强制规则见 `layer-boundary-enforcement.md`。
+- 详细的 workspace 与 authority 边界见 `six-concept-runtime-architecture.md` 和各 workspace README。
 - 同层模块之间的类型引用用正常 `import`，不用内联 `import()`（除接口字段定义中的紧凑写法外）。
 
 ### 模式枚举常量

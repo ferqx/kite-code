@@ -5,14 +5,32 @@ import { verifyBootstrapArtifact } from './bootstrap-verifier';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
 
 const ADVERSARIAL_CASES = [
-  ['filesystem_symlink_and_path_traversal', 'tests/policies/protected-path.test.ts'],
-  ['network_dns_redirect_and_private_destination', 'tests/sandbox/network-boundary.test.ts'],
-  ['network_parallel_receipt_isolation', 'tests/sandbox/network-boundary-concurrency.test.ts'],
-  ['mcp_transport_receipt_and_revision_isolation', 'tests/mcp-transport-boundary.test.ts'],
-  ['mcp_parallel_sibling_isolation', 'tests/mcp-transport-boundary-concurrency.test.ts'],
-  ['process_tree_hard_limit_and_orphan_cleanup', 'tests/sandbox/process-tree-limit.test.ts'],
-  ['sandbox_missing_fail_closed', 'tests/sandbox/execution-boundary.test.ts'],
-  ['worktree_collision_ownership_and_cleanup', 'tests/workspace/worktree-controller.test.ts'],
+  ['filesystem_symlink_and_path_traversal', 'apps/kite/test/policies/protected-path.test.ts'],
+  [
+    'network_dns_redirect_and_private_destination',
+    'apps/kite/test/sandbox/network-boundary.test.ts',
+  ],
+  [
+    'network_parallel_receipt_isolation',
+    'apps/kite/test/sandbox/network-boundary-concurrency.test.ts',
+  ],
+  [
+    'mcp_transport_receipt_and_revision_isolation',
+    'tests/integration/builtin-runtime/mcp-transport-boundary.test.ts',
+  ],
+  [
+    'mcp_parallel_sibling_isolation',
+    'packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts',
+  ],
+  [
+    'process_tree_hard_limit_and_orphan_cleanup',
+    'tests/qualification/sandbox/process-tree-limit.test.ts',
+  ],
+  ['sandbox_missing_fail_closed', 'apps/kite/test/isolated/sandbox/execution-boundary.test.ts'],
+  [
+    'worktree_collision_ownership_and_cleanup',
+    'tests/isolated/workspace/worktree-controller.test.ts',
+  ],
 ] as const;
 
 interface SupportMatrix {

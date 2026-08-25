@@ -31,20 +31,7 @@
 | `../active/empirical-research-archive.md` | active | 真实模型实验、缓存/性能研究、provider 行为研究、可复用实验归档 | 运行或解释真实 provider 实验、缓存命中率实验、多轮 agent 行为实验，或用户要求研究结论可沉淀。 |
 | `../active/tool-description-contracts.md` | active | 工具描述契约、ACI 原则、契约结构与验证测试 | 创建或修改工具定义、工具描述、工具行为实现；新增工具注册。 |
 | `../active/project-conventions.md` | active | 文档语言、注释规范、测试纪律、CLI 行为、提交粒度、仓库卫生、TypeScript 类型安全 | 修改 Markdown 文档、测试、CLI、提交规范、仓库布局约束或 TypeScript 类型声明时。 |
-| `../active/tui-e2e-standards.md` | active | TUI E2E/PTTY 测试标准、PTY harness、mock model server、真实终端覆盖边界 | 编写或修改 TUI E2E/PTTY 测试、调整 mock server 行为、新增真实终端场景。 |
-| `../active/tui-textinput-wrapping-spec.md` | active | `CtrlSafeTextInput` 软换行、光标边界、IME 空格清理、CJK/ASCII 混合输入行为 | 修改 `CtrlSafeTextInput` 软换行、光标移动、IME 处理或 `maxWidth` 传播逻辑时。 |
-| `../active/tui-run-status-bar.md` | active | Run Status Bar 3 阶段单向状态行 — Thinking → Working → Finishing 只进不退 + 渐变动画 + arc spinner + timer 性能架构 | 修改 `StatusBar.tsx`、`run-status.ts`、`App.tsx`（shouldShowRunStatus）、Footer.tsx 或相关测试时必读。 |
-| `../active/tui-session-startup-card.md` | active | TUI 会话启动卡、Header 品牌信息与主界面就绪边界 | 修改 `Header.tsx`、启动卡布局、主界面 readiness 或相关 PTY 测试时必读。 |
-| `../active/tui-footer-resize-stability.md` | active | TUI 终端缩放刷新方案 — resize 事件驱动 + key remount + 输入保留 + DEC 同步输出缓冲 | 修改 TUI resize 逻辑、缩放行为异常时必读。 |
-| `../active/tui-dec-synchronized-output.md` | active | TUI DEC 同步输出缓冲 — `\x1B[?2026h/l` 帧刷新，消除 resize/会话切换的空白期和抖动 | 修改 `useStaticContent`、TUI 屏切换逻辑、缓冲/渲染时序时必读。 |
 | `../active/cancel-resume-cleanup.md` | active | Cancel/Resume、Effect lease、工具消息对与 Subagent continuation | 修改取消、恢复、消息清理或 continuation 时。 |
-| `../active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
-| `../active/tui-overlay-design-system.md` | active | TUI Overlay 四区骨架、内容 primitive、列表层级与交互词汇 | 修改通用 Overlay、MCP 管理页、选择器、帮助、审批、问答或方案审核表面时。 |
-| `../active/tui-reference-stability.md` | active | TUI useStaticContent 引用稳定性 — ref+fingerprint 替代 useMemo 的缓存层，消除 timer/spinner 引发的引用级联和重复渲染 | 修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。 |
-| `../active/tui-localization.md` | active | TUI 中英文文案、用户级 `language` 偏好、地区解析、Static 重建与展示层边界 | 修改 TUI 本地化、`/language`、自有交互文案、语言切换或启动前 locale 读取时。 |
-| `../active/tui-e2e-testing-limits.md` | active | PTY 能力、平台差异与测试分层边界 | 编写 TUI E2E、处理 PTY flaky 或选择测试层次时。 |
-| `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
-| `../active/pre-release-architecture.md` | active | 未发布阶段的无版本命名 clean cutover、唯一 composition root、兼容路径零保留与静态门禁 | 修改生产标识符、包导出、兼容路径、模块边界或发布前架构门禁时必读。 |
 | `../active/plan-mode-implementation.md` | active | Plan Artifact、planning/building、plan_review 与恢复 | 修改 Plan 生命周期、工具、策略或 TUI 审核交互时。 |
 | `../active/plan-artifact-lifecycle.md` | active | Plan Artifact 持久化、提交校验、审核交互与 Runtime 恢复边界 | 修改 `write_plan`、Plan review、Task 生命周期、Runtime Context、TUI/CLI 审核展示或会话恢复时必读。 |
 | `../active/completion-guard.md` | active | CompletionGuard V1、完成前的可审计 blocker 与一次纠正语义 | 修改 Runtime 完成语义、Scheduler、Runner、Plan/Skill 生命周期或相关测试时必读。 |

@@ -43,7 +43,7 @@ export const TUI_FAULT_SOAK_PROBE_ARGS = [
 ] as const;
 const telemetryPreload = resolve(
   process.cwd(),
-  'tests/runtime/harness/fault-soak-telemetry-preload.ts',
+  'tests/qualification/runtime/harness/fault-soak-telemetry-preload.ts',
 );
 const testCaseRunner = resolve(process.cwd(), 'scripts/runtime/run-fault-soak-test-case.ts');
 
@@ -61,16 +61,18 @@ const PROBES: readonly ProbeDefinition[] = [
     id: 'long_runtime_replay',
     args: [
       'test',
-      'tests/runtime/fault-soak-long-runtime-lifecycle.test.ts',
-      'tests/runtime/agent.integration.test.ts',
-      'tests/runtime/context-compaction.test.ts',
-      'tests/runtime/fault-soak-runtime-budget.test.ts',
+      'tests/qualification/runtime/fault-soak-long-runtime-lifecycle.test.ts',
+      'apps/kite/test/isolated/runtime/agent.integration.test.ts',
+      'apps/kite/test/runtime/context-compaction.test.ts',
+      'tests/qualification/runtime/fault-soak-runtime-budget.test.ts',
     ],
     qualificationLifecycleFiles: [
-      'tests/runtime/fault-soak-long-runtime-lifecycle.test.ts',
-      'tests/runtime/fault-soak-runtime-budget.test.ts',
+      'tests/qualification/runtime/fault-soak-long-runtime-lifecycle.test.ts',
+      'tests/qualification/runtime/fault-soak-runtime-budget.test.ts',
     ],
-    qualificationPrewarmFiles: ['tests/runtime/fault-soak-long-runtime-lifecycle.test.ts'],
+    qualificationPrewarmFiles: [
+      'tests/qualification/runtime/fault-soak-long-runtime-lifecycle.test.ts',
+    ],
     terminalEvidence: {
       completed: /\(pass\).*replays a long deterministic event stream without violating invariants/,
     },
@@ -79,8 +81,12 @@ const PROBES: readonly ProbeDefinition[] = [
   },
   {
     id: 'subagent_cancel_recovery',
-    args: ['test', 'tests/runtime/cancel-resume.test.ts', 'tests/subagent-runner.test.ts'],
-    qualificationLifecycleFiles: ['tests/runtime/cancel-resume.test.ts'],
+    args: [
+      'test',
+      'apps/kite/test/runtime/cancel-resume.test.ts',
+      'apps/kite/test/subagent-runner.test.ts',
+    ],
+    qualificationLifecycleFiles: ['apps/kite/test/runtime/cancel-resume.test.ts'],
     terminalEvidence: {
       cancelled:
         /\(pass\).*restores cancelled waiters, unknown dispatches, and cancel-incomplete terminal facts/,
@@ -94,12 +100,12 @@ const PROBES: readonly ProbeDefinition[] = [
     id: 'model_transient_stream',
     args: [
       'test',
-      'tests/model.test.ts',
-      'tests/model-invoke.test.ts',
-      'tests/model-invocation-gateway.test.ts',
-      'tests/runtime/failure-mode-conformance.test.ts',
+      'apps/kite/test/model.test.ts',
+      'apps/kite/test/model-invoke.test.ts',
+      'apps/kite/test/model-invocation-gateway.test.ts',
+      'apps/kite/test/runtime/failure-mode-conformance.test.ts',
     ],
-    qualificationLifecycleFiles: ['tests/model-invoke.test.ts'],
+    qualificationLifecycleFiles: ['apps/kite/test/model-invoke.test.ts'],
     terminalEvidence: {
       model_retry_exhausted:
         /\(pass\).*model_rate_limit admits exactly one retry only while the bounded retry budget remains/,
@@ -113,12 +119,12 @@ const PROBES: readonly ProbeDefinition[] = [
     id: 'mcp_churn',
     args: [
       'test',
-      'tests/mcp-manager.test.ts',
-      'tests/mcp-supervisor.test.ts',
-      'tests/runtime/tool-controller.test.ts',
-      'tests/runtime/failure-mode-conformance.test.ts',
+      'tests/integration/mcp-manager.test.ts',
+      'apps/kite/test/mcp-supervisor.test.ts',
+      'apps/kite/test/isolated/runtime/tool-controller.test.ts',
+      'apps/kite/test/runtime/failure-mode-conformance.test.ts',
     ],
-    qualificationLifecycleFiles: ['tests/mcp-supervisor.test.ts'],
+    qualificationLifecycleFiles: ['apps/kite/test/mcp-supervisor.test.ts'],
     terminalEvidence: {
       mcp_unavailable: /\(pass\).*degrades a real stdio provider that exits during an invocation/,
       reconciliation_required:
@@ -131,12 +137,12 @@ const PROBES: readonly ProbeDefinition[] = [
     id: 'runtime_sigkill_recovery',
     args: [
       'test',
-      'tests/runtime/fault-injection.test.ts',
-      'tests/runtime/failure-mode-conformance.test.ts',
+      'tests/qualification/runtime/fault-injection.test.ts',
+      'apps/kite/test/runtime/failure-mode-conformance.test.ts',
       '-t',
       'abrupt process termination|never continues or degrades while prior external effects remain unknown',
     ],
-    qualificationLifecycleFiles: ['tests/runtime/fault-injection.test.ts'],
+    qualificationLifecycleFiles: ['tests/qualification/runtime/fault-injection.test.ts'],
     terminalEvidence: {
       reconciliation_required:
         /\(pass\).*never continues or degrades while prior external effects remain unknown/,
@@ -148,13 +154,13 @@ const PROBES: readonly ProbeDefinition[] = [
     id: 'storage_and_logger_faults',
     args: [
       'test',
-      'tests/runtime/fault-injection.test.ts',
-      'tests/session-logger/composition.test.ts',
-      'tests/runtime/failure-mode-conformance.test.ts',
+      'tests/qualification/runtime/fault-injection.test.ts',
+      'apps/kite/test/isolated/session-logger/composition.test.ts',
+      'apps/kite/test/runtime/failure-mode-conformance.test.ts',
       '-t',
       'storage fault|writer construction failure|covers every failure mode|disk_full propagates known external-effect evidence',
     ],
-    qualificationLifecycleFiles: ['tests/runtime/fault-injection.test.ts'],
+    qualificationLifecycleFiles: ['tests/qualification/runtime/fault-injection.test.ts'],
     terminalEvidence: {
       persistence_unavailable:
         /\(pass\).*disk_full propagates known external-effect evidence instead of inventing none/,

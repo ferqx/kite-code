@@ -1,75 +1,87 @@
-/**
- * Default deterministic test boundary.
- *
- * Bun's non-isolated runner shares process.cwd() and process.env across test
- * files. A small legacy set intentionally mutates those globals to exercise
- * user/project path resolution, so those files must run in their own process.
- * Bun per-file isolation is not used because the current Ink/Yoga ESM stack
- * cannot initialize reliably under that mode.
- */
+import { resolve } from 'node:path';
+import {
+  collectTestFiles,
+  partitionTestFiles,
+  runTestJob,
+  runTestJobs,
+  shardTestFiles,
+  type TestJob,
+  testParallelism,
+} from './test-suite';
 
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-const PROCESS_ISOLATED_TEST_FILES = [
-  'tests/execution/posix-supervisor.test.ts',
-  'tests/mcp-config-catalog.test.ts',
-  'tests/mcp-config-repository.test.ts',
-  'tests/mcp-project-approval.test.ts',
-  'tests/runtime/capability-artifacts.test.ts',
-  'tests/runtime/plan-artifacts.test.ts',
+const root = resolve(import.meta.dir, '..');
+const workspaces = [
+  'packages/runtime-contract',
+  'packages/agent-kernel',
+  'packages/runtime-spi',
+  'packages/runtime-host',
+  'packages/runtime-storage-sqlite',
+  'packages/builtin-runtime',
+  'apps/kite',
 ] as const;
 
-const DEFAULT_IGNORES = [
-  'packages/**',
-  'apps/**',
-  'tests/tui-system/scenarios/**',
-  'tests/tui-system/smoke/**',
-  'tests/pty-spike/**',
-  'tests/sandbox-executor.test.ts',
-  'tests/sandbox-bwrap-executor.test.ts',
-  ...PROCESS_ISOLATED_TEST_FILES,
-] as const;
-
-async function runTestProcess(args: string[]): Promise<number> {
-  const testHome = realpathSync(mkdtempSync(join(tmpdir(), 'openpx-default-test-home-')));
-  try {
-    const platformTimeout = process.platform === 'win32' ? ['--timeout=30000'] : [];
-    const child = Bun.spawn(
-      [process.execPath, 'test', '--no-orphans', ...platformTimeout, ...args],
-      {
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          HOME: testHome,
-          KITE_CODE_HOME: testHome,
-          ...(process.platform === 'win32' ? { USERPROFILE: testHome } : {}),
-        },
-        stdin: 'inherit',
-        stdout: 'inherit',
-        stderr: 'inherit',
-      },
-    );
-    return await child.exited;
-  } finally {
-    rmSync(testHome, { recursive: true, force: true });
+const concurrency = testParallelism();
+const workspaceJobs: TestJob[] = [];
+const isolatedFiles: string[] = [];
+for (const workspace of workspaces) {
+  const partition = partitionTestFiles(collectTestFiles(resolve(root, workspace, 'test')));
+  const shards = shardTestFiles(partition.parallel, workspace === 'apps/kite' ? concurrency : 1);
+  for (const [index, files] of shards.entries()) {
+    workspaceJobs.push({
+      label: workspace + (shards.length > 1 ? `:shard-${index + 1}/${shards.length}` : ''),
+      files,
+    });
   }
+  isolatedFiles.push(...partition.isolated);
 }
 
-const mainExit = await runTestProcess([
-  '--max-concurrency=1',
-  '--only-failures',
-  ...DEFAULT_IGNORES.map((pattern) => `--path-ignore-patterns=${pattern}`),
-]);
-if (mainExit !== 0) process.exit(mainExit);
+const rootSuites = [
+  'tests/integration',
+  'tests/golden',
+  'tests/release',
+  'tests/e2e/local',
+  'tests/tui-system/harness',
+];
+const integrationJobs: TestJob[] = [];
+let integrationFileCount = 0;
+for (const suite of rootSuites) {
+  const partition = partitionTestFiles(collectTestFiles(resolve(root, suite)));
+  isolatedFiles.push(...partition.isolated);
+  const shards = shardTestFiles(
+    partition.parallel,
+    suite === 'tests/integration' ? concurrency : 1,
+  );
+  for (const [index, files] of shards.entries()) {
+    integrationJobs.push({
+      label: suite + (shards.length > 1 ? `:shard-${index + 1}/${shards.length}` : ''),
+      files,
+    });
+    integrationFileCount += files.length;
+  }
+}
+isolatedFiles.push(...collectTestFiles(resolve(root, 'tests/isolated')));
 
-for (const file of PROCESS_ISOLATED_TEST_FILES) {
-  console.log(`\n[default-test] isolated process: ${file}`);
-  const exitCode = await runTestProcess(['--max-concurrency=1', file]);
+console.log(`[test] workspace parallelism=${concurrency}`);
+const workspaceExit = await runTestJobs(root, workspaceJobs, concurrency);
+if (workspaceExit !== 0) process.exit(workspaceExit);
+
+const integrationExit = await runTestJobs(root, integrationJobs, concurrency);
+if (integrationExit !== 0) process.exit(integrationExit);
+
+for (const file of isolatedFiles.sort()) {
+  const exitCode = await runTestJob(
+    root,
+    { label: `isolated:${file.split(/[\\/]/u).at(-1)}`, files: [file] },
+    { maxConcurrency: 1 },
+  );
   if (exitCode !== 0) process.exit(exitCode);
 }
 
 console.log(
-  `\n[default-test] passed main suite and ${PROCESS_ISOLATED_TEST_FILES.length} process-isolated files`,
+  '\n[test] passed workspaceFiles=' +
+    workspaceJobs.reduce((count, job) => count + job.files.length, 0) +
+    ' integrationFiles=' +
+    integrationFileCount +
+    ' isolatedFiles=' +
+    isolatedFiles.length,
 );

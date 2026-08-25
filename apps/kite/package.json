@@ -15,7 +15,7 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target bun --external react-devtools-core",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test ./test"
+    "test": "bun run ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
     "@kite-ai/builtin-runtime": "workspace:*",

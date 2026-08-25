@@ -10,7 +10,7 @@
   "scripts": {
     "build": "bun build ./src/index.ts ./src/session-metadata.ts --outdir ./dist --target bun",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test ./test"
+    "test": "bun run ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
     "@kite-ai/runtime-host": "workspace:*"

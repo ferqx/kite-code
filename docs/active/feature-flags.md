@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：新增、删除或调整 runtime feature flag、配置合并、CLI 覆盖或灰度策略时。
-验证：`bun test tests/config/features.test.ts`、`bun run test:tui:system prompt-contract-v2-production`。
+验证：`bun test apps/kite/test/config/features.test.ts`、`bun run test:tui:system prompt-contract-v2-production`。
 
 Runtime 功能开关注册在 `apps/kite/src/config/features.ts`。配置从用户级和项目级 `kite-code.jsonc` 的可选 `features` 对象读取；项目值覆盖用户值。
 
