@@ -223,9 +223,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     first-run 与 workspace trust 场景分别显式选择 `first-run-provider`、`workspace-trust`。
     默认 `main` readiness 必须在同一稳定 frame 中同时证明品牌/model/workspace chrome、空的活动主
     输入投影和用户实际可见的 `❯` prompt；仅出现标题、隐藏的 input listener marker 或尚未完成的
-    分帧 prompt 都不构成可交互就绪。若 startup 场景需要在 journey checkpoint 再次证明输入就绪，
-    必须复用 `waitForTuiReady()`；不得直接 `waitForText('❯')`，也不得让未产生 fresh output 的全局
-    quiescence 等待复用早先累积帧。普通场景由 harness
+    分帧 prompt 都不构成可交互就绪。`spawnReadyTui()` 已经拥有一次主输入 focus/readiness handshake；
+    startup journey 的后续 checkpoint 只能等待当前 viewport 在同一帧具备完整 workspace/品牌/model/prompt
+    surface，不能再次消费该一次性 input marker。不得直接 `waitForText('❯')`，也不得让未产生 fresh output
+    的全局 quiescence 等待复用早先累积帧。普通场景由 harness
     预写 `source: 'test'` 信任记录，验证门禁本身时使用
     `createTestWorkspace({ enforceWorkspaceTrust: true })`。子进程环境采用 allowlist，只继承平台启动、
     临时目录、locale、时区和 CI 所需变量，再叠加 fixture 显式环境；不得继承开发机密钥、代理、
