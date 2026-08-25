@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
   collectTestFiles,
@@ -25,7 +25,7 @@ describe('test discovery boundaries V2', () => {
       relative(join(repoRoot, 'tests'), path).replaceAll('\\', '/'),
     );
     expect(paths.filter((path) => !allowed.has(path.split('/')[0]!))).toEqual([]);
-    expect(readdirSync(join(repoRoot, 'tests', 'runtime'), { withFileTypes: true })).toEqual([]);
+    expect(existsSync(join(repoRoot, 'tests', 'runtime'))).toBe(false);
   });
 
   test('partitions process-global files away from parallel-safe tests', () => {

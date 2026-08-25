@@ -17,7 +17,8 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 - `tests/tui-system/`、`tests/e2e/`、`tests/release/`、`tests/golden/`：稳定专用套件。
 - `tests/fixtures/`、`tests/helpers/`、`tests/reliability-harness/`：非测试辅助资源。
 
-根 `tests/` 不保存散落测试文件，也不使用泛化 `tests/runtime/` 作为第二 owner。
+根 `tests/` 不保存散落测试文件，也不使用泛化 `tests/runtime/` 作为第二 owner；clean checkout 中该目录
+必须不存在，不能依赖 Git 不跟踪的本地空目录满足 discovery gate。
 
 ## Import 边界
 
