@@ -41,7 +41,7 @@ Header 使用 Ink `Static` 写入 scrollback，但模型或推理强度切换后
 
 启动直接建立可写的新会话，不预注册或批量迁移历史会话。`/resume` 列表对当前 Store 和显式支持的历史 source 只做 metadata-first 发现；历史会话以普通名称展示，不出现“旧版”“迁移”“兼容”等标签。未知 Store/schema/epoch 静默忽略，不得让 TUI 挂载失败、阻止普通输入，或通过 `console.error`、裸 `stderr` 暴露数据库错误、路径、堆栈和内部异常。
 
-用户选中某个已知历史会话后，App 才在注册/切换 Runtime 之前进行 session-scoped 导入和完整 snapshot/event/identity 校验。成功时无提示进入会话；失败时保持当前会话和输入能力，只显示：
+用户选中某个已知历史会话后，App 才在注册/切换 Runtime 之前进行 session-scoped 导入和完整 snapshot/event/identity 校验。恢复后的 Workspace path 与 Project digest 必须作为同一持久 identity 交给 Session Runtime；即使当前 TUI 从另一个 worktree 启动，也不得把当前启动路径与历史 digest 混合。Coordinator admission 成功后才能把 Runtime 放入 Session registry，失败不得留下 ghost session。成功时无提示进入会话；失败时保持当前会话和输入能力，只显示：
 
 ```text
   ⎿  历史会话打开失败，当前会话未受影响；请稍后通过 /resume 重试。

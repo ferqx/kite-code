@@ -124,5 +124,8 @@ snapshot/event/named recovery point 损坏只使该会话打开失败，健康�
 这避免只读 SQLite 连接更新真实 SHM 后被 source fingerprint 自身拒绝。CLI 在创建 Runtime session 前先完成
 exact resume preparation，损坏历史不会被同 ID 空会话遮蔽。current-format named snapshot/preimage 还验证 head 上界、
 Workspace containment、traversal 与 NUL。
+真实 TUI 重试还覆盖“历史会话来自原仓库、当前进程从另一个 worktree 启动”：导入后的 Runtime 使用持久 State 中成对的
+Workspace/Project identity，Coordinator admission 在 registry publication 前完成；因此不会把当前 checkout path 与旧 digest
+混合，也不会在 admission 失败后留下 ghost runtime。
 
 若任一门禁失败，按源码/测试事实修复后重新运行；不得用 `--no-verify`、删除测试、放宽断言或恢复旧授权兼容路径绕过。

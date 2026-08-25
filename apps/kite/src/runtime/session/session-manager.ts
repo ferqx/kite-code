@@ -432,9 +432,13 @@ export class SessionManager {
     if (this.deps.runtimeSessionCoordinator && !projectIdentity) {
       throw new Error('Persisted State Session is missing its Project identity.');
     }
+    // Workspace and Project identity are one persisted security identity. A
+    // historical session selected from another checkout must not combine the
+    // caller's current workspace with the restored Project digest.
+    const effectiveWorkspace = persisted?.session.workspace ?? workspace;
     const rt = new SessionRuntime(
       threadId,
-      workspace,
+      effectiveWorkspace,
       {
         ...this.deps,
         config: this.defaultConfig,
@@ -445,8 +449,11 @@ export class SessionManager {
     rt.notifyInterrupt = () => {
       this.snapshotCallback?.(rt.threadId);
     };
-    this.sessionRegistry.runtimes.set(threadId, rt);
+    // Coordinator admission validates the complete persisted identity. Keep
+    // registration atomic so a failure cannot leave a ghost Runtime that a
+    // later selector attempt mistakes for a hydrated session.
     this.ensureRuntimeCoordinator(rt);
+    this.sessionRegistry.runtimes.set(threadId, rt);
     return rt;
   }
 

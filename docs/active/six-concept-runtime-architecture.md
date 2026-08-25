@@ -43,7 +43,7 @@ Kernel 是唯一 state/event/reducer/scheduler authority：
 - Kernel 不读 clock、random、filesystem、network 或 Provider；Host 必须把 identity、time 与 observed facts 显式投影为 input；
 - schema/protocol/format 数字只作为 metadata 值，不作为类型或文件身份。
 
-State 只有一个当前写入 shape。当前 codec 继续读取同一 schema/epoch 内有明确白名单和测试的退休事件字段；ADR-0138 另外允许 exact 已知历史 profile 在选中单个会话后投影为当前 State。迁移只保留安全历史，清空 approval/grant/effect authority；未知格式在发现阶段静默忽略，不猜测、不改写。checksum/revision/project/workspace identity 漂移、event tail 非法或 recovery evidence 不完整仍只让所属会话 fail closed。
+State 只有一个当前写入 shape。当前 codec 继续读取同一 schema/epoch 内有明确白名单和测试的退休事件字段；ADR-0138 另外允许 exact 已知历史 profile 在选中单个会话后投影为当前 State。迁移只保留安全历史，清空 approval/grant/effect authority；未知格式在发现阶段静默忽略，不猜测、不改写。恢复 Session 时，State 的 Workspace path 与 Project digest 是不可拆分的 retained identity，不能与调用方当前 checkout 路径混合；Coordinator admission 必须先于 Session registry publication。checksum/revision/project/workspace identity 漂移、event tail 非法或 recovery evidence 不完整仍只让所属会话 fail closed。
 
 ## Capability、Policy 与 Tool Pipeline
 

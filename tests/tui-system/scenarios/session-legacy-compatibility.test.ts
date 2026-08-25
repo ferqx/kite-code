@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { LEGACY_STATE26_FORMAT_EPOCH, LEGACY_STATE26_SCHEMA_VERSION } from '@kite/agent-kernel';
 import { resolveProjectIdentity } from '@kite/runtime-host';
@@ -215,7 +215,9 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
     checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
-    sourcePath = seedState26Session(checkpointPath, workspace.workspace);
+    const historicalWorkspace = join(workspace.home, 'historical-project');
+    mkdirSync(historicalWorkspace, { recursive: true });
+    sourcePath = seedState26Session(checkpointPath, historicalWorkspace);
     sourceFingerprint = [sourcePath, `${sourcePath}-wal`, `${sourcePath}-shm`].map((path) => ({
       hex: readFileSync(path).toString('hex'),
       mtimeMs: statSync(path).mtimeMs,

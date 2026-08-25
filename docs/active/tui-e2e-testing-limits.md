@@ -154,6 +154,8 @@ fallback。后者是确定性的 fail-closed 平台证据，不得 skip，也不
 21. Runtime format compatibility 必须分三条真实 TUI 证据：未知 source 静默忽略且不阻止新会话；已知历史会话在
     `/resume` 中无迁移标签、选中前 target 无该 session、选中后 exactly-once 可读；fixture 必须包含同时存在 WAL+SHM
     的真实 sidecar 形态，并证明源 database/WAL/SHM 的 identity、mtime 与字节始终不改。
+    已知历史 fixture 的持久 Workspace 必须与启动 TUI 的 worktree 不同，并断言选中后仍恢复消息且不显示 session-scoped
+    failure；这证明 App 使用完整 persisted Workspace/Project identity，而不是偶然依赖相同路径。
     单个损坏会话只能显示脱敏 session-scoped failure，健康历史会话与普通输入继续可用。当前 target 使用 canonical
     Workspace identity 和 epoch 派生路径，`runtime-authority.key` 仍不得创建。
 

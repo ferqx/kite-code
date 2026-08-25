@@ -2012,6 +2012,93 @@ describe('SessionManager', () => {
     expect(snapshots[0]!.active).toBe(false); // not active by default
   });
 
+  test('registerSession restores the persisted workspace identity across checkouts', () => {
+    const root = mkdtempSync(join(process.cwd(), '.kite-session-workspace-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const threadId = 'persisted-workspace-session';
+    const historicalWorkspace = join(root, 'historical-workspace');
+    const currentWorkspace = join(root, 'current-worktree');
+    const digest = createHash('sha256').update(historicalWorkspace).digest('hex');
+    const deps = makeDeps(checkpointPath);
+    try {
+      const state = createRuntimeHostStateInitialState({
+        recoveryIdentityKey: 'a'.repeat(64),
+        threadId,
+        userId: 'tui-user',
+        workspace: historicalWorkspace,
+        projectId: `project_${digest}`,
+        canonicalWorkspaceDigest: `sha256:${digest}`,
+      });
+      const store = deps.openStateRuntimeStorage(threadId);
+      try {
+        store.sessions.saveSnapshot(threadId, state);
+      } finally {
+        store.close();
+      }
+      const coordinatorAccess = installTestOnlyRuntimeTurnAdapter(deps, threadId);
+      let admittedWorkspace: string | undefined;
+      deps.runtimeSessionCoordinator = {
+        ...coordinatorAccess,
+        ensure: (identity) => {
+          admittedWorkspace = identity.workspace;
+          return coordinatorAccess.ensure(identity);
+        },
+      };
+
+      const manager = new SessionManager(deps);
+      const runtime = manager.registerSession(threadId, currentWorkspace);
+
+      expect(runtime.workspace).toBe(historicalWorkspace);
+      expect(admittedWorkspace).toBe(historicalWorkspace);
+      expect(manager.hasRuntime(threadId)).toBe(true);
+    } finally {
+      deps.tokenStatsStorage.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('registerSession leaves no ghost runtime when coordinator admission fails', () => {
+    const root = mkdtempSync(join(process.cwd(), '.kite-session-register-failure-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const threadId = 'failed-register-session';
+    const workspace = join(root, 'workspace');
+    const digest = createHash('sha256').update(workspace).digest('hex');
+    const deps = makeDeps(checkpointPath);
+    try {
+      const state = createRuntimeHostStateInitialState({
+        recoveryIdentityKey: 'b'.repeat(64),
+        threadId,
+        userId: 'tui-user',
+        workspace,
+        projectId: `project_${digest}`,
+        canonicalWorkspaceDigest: `sha256:${digest}`,
+      });
+      const store = deps.openStateRuntimeStorage(threadId);
+      try {
+        store.sessions.saveSnapshot(threadId, state);
+      } finally {
+        store.close();
+      }
+      deps.runtimeSessionCoordinator = {
+        ensure: () => {
+          throw new Error('coordinator admission rejected');
+        },
+        get: () => undefined,
+        release: async () => undefined,
+        close: async () => undefined,
+      };
+
+      const manager = new SessionManager(deps);
+      expect(() => manager.registerSession(threadId, workspace)).toThrow(
+        'coordinator admission rejected',
+      );
+      expect(manager.hasRuntime(threadId)).toBe(false);
+    } finally {
+      deps.tokenStatsStorage.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // ── getSnapshot ──
 
   test('getSnapshot reflects running state', () => {
