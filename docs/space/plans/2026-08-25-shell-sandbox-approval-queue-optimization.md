@@ -1,6 +1,6 @@
 # Shell 沙箱边界与并发审批队列优化方案（方案一）
 
-状态：completed（待最终远程门禁确认）
+状态：archived（SAQ-00～SAQ-10、本地全量与 GitHub Actions 已收敛）
 
 日期：2026-08-25
 
@@ -10,8 +10,8 @@
 `docs/active/authorization.md`、`docs/active/tool-gated-autonomy.md`、
 `docs/active/plan-mode-implementation.md`。
 
-> 本文件记录已实施并收敛的方案一。当前行为以源码、测试、`docs/active/` 和 ADR-0137 为准；本文件保留
-> Task 顺序、验收矩阵和回滚约束，最终远程 required checks 由完成记录补写，不在此处预先宣称通过。
+> 本文件记录已实施并归档的方案一。当前行为以源码、测试、`docs/active/` 和 ADR-0137 为准；本文件保留
+> Task 顺序、验收矩阵和回滚约束。最终本地与远程证据见完成记录。
 
 ## 1. 目标
 
@@ -396,5 +396,7 @@ git diff --check
 `approve_once|same_command|reject`、interactionMode-only Full、Explore-only Auto、atomic batch receipts、
 generation/revision stale no-op、三平台 scope projection/fail-closed 和 live/replay parity。
 
-文档完成记录列出 SAQ-00～SAQ-10 与 20 个验收场景的具名测试入口。`bun run test:all`、文档门禁、最终 GitHub Actions
-required checks 和 PR 链接只有在主 Agent 实际运行并观察到结果后才能填入；未知结果保持 pending/waiting_ci。
+文档完成记录列出 SAQ-00～SAQ-10 与 20 个验收场景的具名测试入口。主 Agent 已实际运行本地全量门禁，并观察
+[Required](https://github.com/ferqx/kite-code/actions/runs/32794845123)、
+[Platform Capability Probe](https://github.com/ferqx/kite-code/actions/runs/32794845103) 与其余 PR workflows 全部通过；
+具体 job、测试数字和 fault/soak digest 见完成记录。
