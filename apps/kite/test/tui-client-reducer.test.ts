@@ -512,9 +512,9 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
   });
 
-  test('attaches reasoning that trails model.responded without appending the answer again', () => {
-    const requestId = 'request-reasoning-last';
-    const answer = 'One reasoning-last answer.';
+  test('keeps late reasoning owned by its answer after a later notice block', () => {
+    const requestId = 'request-reasoning-after-notice';
+    const answer = 'The original answer.';
     let state = createInitialState();
     for (const event of [
       { type: 'model.requested', requestId },
@@ -522,17 +522,120 @@ describe('closed RuntimeClientEvent reducer', () => {
       {
         type: 'model.responded',
         requestId,
-        messageId: 'message-reasoning-last',
-        durationMs: 900,
+        messageId: 'message-reasoning-after-notice',
+        durationMs: 800,
         toolCallCount: 0,
         summary: answer,
+      },
+      {
+        type: 'session.notice',
+        code: 'reconnected',
+        message: 'Runtime reconnected.',
+      },
+      {
+        type: 'reasoning.activity',
+        requestId,
+        state: 'completed',
+        segmentId: 'reasoning-after-notice',
+        text: 'Late correlated reasoning.',
+      },
+    ] satisfies RuntimeClientEvent[]) {
+      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    }
+
+    const blocks = state.turns.flatMap((turn) => turn.blocks);
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        kind: 'text',
+        content: answer,
+        modelRequestId: requestId,
+        thoughtContent: 'Late correlated reasoning.',
+      }),
+      expect.objectContaining({ kind: 'text', content: 'Runtime reconnected.' }),
+    ]);
+    expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
+  });
+
+  test('detaches a pure Thought when content interleaves between reasoning packets', () => {
+    const requestId = 'request-reasoning-last';
+    const answer = 'One reasoning-last answer.';
+    const trailingReasoning = 'Inspecting the curl result before answering.';
+    let state = createInitialState();
+    const dispatch = (event: RuntimeClientEvent) => {
+      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    };
+
+    for (const event of [
+      { type: 'model.requested', requestId },
+      {
+        type: 'reasoning.activity',
+        requestId,
+        state: 'streaming',
+        segmentId: 'reasoning-last',
+        text: 'Inspecting the curl result',
+      },
+      { type: 'model.text_delta', requestId, text: answer },
+    ] satisfies RuntimeClientEvent[]) {
+      dispatch(event);
+    }
+
+    // The first visible answer closes its content-free Thought immediately.
+    // The pending caption remains correlated until model.responded tells us
+    // whether it is a final answer or tool-bearing narration.
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: false,
+        responsePending: true,
+        pendingCaption: answer,
+        modelRequestId: requestId,
+      }),
+    ]);
+    expect(state.thoughtPhaseStatus).toBe('awaiting_terminal');
+
+    for (const event of [
+      {
+        type: 'reasoning.activity',
+        requestId,
+        state: 'streaming',
+        segmentId: 'reasoning-last',
+        text: trailingReasoning,
       },
       {
         type: 'reasoning.activity',
         requestId,
         state: 'completed',
         segmentId: 'reasoning-last',
-        text: 'Reasoning completed after the durable response.',
+        text: trailingReasoning,
+      },
+    ] satisfies RuntimeClientEvent[]) {
+      dispatch(event);
+    }
+
+    // A completed trailing segment enriches the text block off-screen; it
+    // cannot recreate the active Thought whose preview would leak the raw
+    // reasoning below the visible answer.
+    expect(state.turns.flatMap((turn) => turn.blocks)).toEqual([
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: false,
+        responsePending: true,
+        pendingCaption: answer,
+        modelRequestId: requestId,
+      }),
+    ]);
+    expect(state.turns.flatMap((turn) => turn.blocks)).not.toContainEqual(
+      expect.objectContaining({ kind: 'tool_summary', active: true }),
+    );
+
+    for (const event of [
+      {
+        type: 'model.responded',
+        requestId,
+        messageId: 'message-reasoning-last',
+        durationMs: 7_323,
+        toolCallCount: 0,
+        summary: answer,
       },
       {
         type: 'run.terminal',
@@ -541,18 +644,72 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: answer,
       },
     ] satisfies RuntimeClientEvent[]) {
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+      dispatch(event);
     }
 
     const blocks = state.turns.flatMap((turn) => turn.blocks);
     expect(blocks.filter((block) => block.kind === 'text' && block.content === answer)).toEqual([
       expect.objectContaining({
         kind: 'text',
-        thoughtElapsedMs: 900,
-        thoughtContent: 'Reasoning completed after the durable response.',
+        thoughtElapsedMs: 7_323,
+        thoughtContent: trailingReasoning,
       }),
     ]);
     expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
+    expect(
+      blocks.filter((block) => block.kind === 'text' && block.content === answer),
+    ).toHaveLength(1);
+  });
+
+  test('reactivates a pending caption when its terminal declares tools', () => {
+    const requestId = 'request-content-before-tool-terminal';
+    const caption = 'Checking the matching files now.';
+    let state = createInitialState();
+    for (const event of [
+      { type: 'model.requested', requestId },
+      {
+        type: 'reasoning.activity',
+        requestId,
+        state: 'completed',
+        segmentId: 'reasoning-before-tool-terminal',
+        text: 'Selecting the next search.',
+      },
+      { type: 'model.text_delta', requestId, text: 'Checking the matching ' },
+      { type: 'model.text_delta', requestId, text: caption },
+      {
+        type: 'model.responded',
+        requestId,
+        messageId: 'message-content-before-tool-terminal',
+        durationMs: 1_200,
+        toolCallCount: 1,
+        summary: caption,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'content-before-tool-terminal-search',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        arguments: { pattern: 'README' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'content-before-tool-terminal-search' },
+    ] satisfies RuntimeClientEvent[]) {
+      state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
+    }
+
+    const blocks = state.turns.flatMap((turn) => turn.blocks);
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        kind: 'tool_summary',
+        active: true,
+        responsePending: false,
+        modelRequestId: requestId,
+        captions: [caption],
+        pendingCaption: undefined,
+        summaryLine: 'searched 1 file pattern',
+      }),
+    ]);
+    expect(blocks.some((block) => block.kind === 'text')).toBe(false);
   });
 
   test('keeps standalone tools hidden until started, then closes the active Thought before its named card', () => {
@@ -1169,6 +1326,10 @@ describe('closed RuntimeClientEvent reducer', () => {
         toolCallCount: 2,
         summary: caption,
       },
+      // The durable response has already declared exploration tools, but
+      // their started facts have not reached the Client pump yet. This late
+      // narration still belongs to the same active tool-bearing Thought.
+      { type: 'model.text_delta', requestId: 'request-late-caption', text: caption },
       {
         type: 'tool.queued',
         toolId: 'late-search-1',
@@ -1178,9 +1339,6 @@ describe('closed RuntimeClientEvent reducer', () => {
         summary: 'Queued.',
       },
       { type: 'tool.started', toolId: 'late-search-1' },
-      // Ephemeral delivery is allowed to trail the durable model terminal and
-      // even the first tool start. It must not close or duplicate the phase.
-      { type: 'model.text_delta', requestId: 'request-late-caption', text: caption },
       {
         type: 'tool.queued',
         toolId: 'late-search-2',

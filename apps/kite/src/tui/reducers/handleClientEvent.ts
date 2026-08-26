@@ -235,10 +235,6 @@ function findModelAnswerText(state: TuiState, requestId: string): ModelTextBlock
   return undefined;
 }
 
-function isLastVisibleBlock(state: TuiState, block: OutputBlock): boolean {
-  return state.turns.at(-1)?.blocks.at(-1)?.id === block.id;
-}
-
 function precedingToolSummary(
   state: TuiState,
   followingBlockId: number,
@@ -335,7 +331,7 @@ function projectReasoningActivity(
     currentModelReasoningText: segmentText,
   };
   const answer = findModelAnswerText(cached, event.requestId);
-  if (answer && isLastVisibleBlock(cached, answer)) {
+  if (answer) {
     if (event.state !== 'completed') return cached;
     // The durable final response can overtake the provider's completed
     // reasoning packet during reconnect/replay. When it immediately follows
@@ -353,6 +349,11 @@ function projectReasoningActivity(
         ...appendCompletedReasoning(preceding, segmentText),
       });
     }
+    // A durable final answer is sufficient ownership even when another
+    // terminal projection has subsequently appended a visible block. Late
+    // reasoning belongs to that answer's closed invocation; it must never
+    // reopen a live Thought (which would replay the reasoning payload until
+    // the following terminal arrives).
     return replaceBlockById(cached, answer.id, {
       ...answer,
       thoughtContent: segmentText,
@@ -399,6 +400,16 @@ function projectModelTextDelta(
   // model fact, not a second assistant paragraph.
   if (last?.kind === 'text' && !last.streaming && last.content === text) return state;
   const summary = findSummaryById(state, state.currentThoughtSummaryId);
+  if (
+    summary?.responsePending &&
+    state.thoughtPhaseStatus === 'awaiting_terminal' &&
+    summary.modelRequestId === event.requestId
+  ) {
+    return replaceBlockById(state, summary.id, {
+      ...summary,
+      pendingCaption: mergeCumulativeText(summary.pendingCaption, text),
+    });
+  }
   if (summary?.active && state.thoughtPhaseStatus !== 'awaiting_terminal') {
     // Durable delivery can overtake the ephemeral stream: a tool-bearing
     // model.responded clears currentModelRequestId and deliberately keeps the
@@ -410,6 +421,23 @@ function projectModelTextDelta(
       summary.modelRequestId === event.requestId ||
       state.toolBearingModelRequestId === event.requestId
     ) {
+      // A content-free Thought created by reasoning must end as soon as its
+      // own response text becomes visible. Retaining it as a caption leaves
+      // the summary active, so a later reasoning completion reopens the
+      // activity window below the answer. A durable response that
+      // already declared tools is tool-bearing even before tool.started
+      // materializes its first entry, and must retain its narration here.
+      if (summary.tools.length === 0 && state.toolBearingModelRequestId !== event.requestId) {
+        return {
+          ...replaceBlockById(state, summary.id, {
+            ...summary,
+            active: false,
+            responsePending: true,
+            pendingCaption: mergeCumulativeText(summary.pendingCaption, text),
+          }),
+          thoughtPhaseStatus: 'awaiting_terminal',
+        };
+      }
       const captions = summary.captions ?? [];
       const lastCaption = captions.at(-1);
       const repeatsConfirmedCaption =

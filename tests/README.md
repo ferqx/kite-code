@@ -69,7 +69,9 @@ compatibility import、ephemeral→durable transcript 与 live/replay reducer �
 验证 reasoning delta/completed 都走无 revision 的 Server presentation route，以及 tool-bearing durable terminal
 先于累计 text delta 时连续探索工具仍聚合为同一 Thought；模型展示 `requestId` 贯穿
 Kernel/Contract/Protocol/history mapper，正文先于 reasoning 或 terminal 越过 ephemeral delta 时，最终正文、
-Thinking 与工具聚合仍各自只有一个 block owner。会创建真实
+Thinking 与工具聚合仍各自只有一个 block owner。TUI harness 还以逐帧
+`reasoning prefix → content → reasoning suffix → terminal` 验证正文首帧关闭纯 reasoning 活动态，后到 reasoning 只
+补充隐藏 Thought metadata；live 与重启 `/resume` 都不得泄漏后缀、恢复活动圆点或重复回答。会创建真实
 child、socket、SQLite file、cwd 或 global process environment 的 App tests 必须留在 `apps/kite/test/isolated/`，由默认
 runner 逐文件、逐进程串行执行，不能为了提速改成共享进程。
 

@@ -13,6 +13,42 @@ async function requestModel(
 }
 
 describe('mock model fixture', () => {
+  test('interleaves reasoning chunks around visible content before terminal SSE frames', async () => {
+    const server = createMockModelServer();
+    try {
+      server.setResponses([
+        {
+          message: {
+            content_chunks: ['VISIBLE_BODY'],
+            reasoning_chunks: ['REASONING_PREFIX', 'REASONING_SUFFIX'],
+          },
+          stream_frame_sequence: ['reasoning', 'content', 'reasoning'],
+        },
+      ]);
+
+      const response = await fetch(`${server.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [], stream: true }),
+      });
+      const frames = (await response.text())
+        .split('\n\n')
+        .filter((frame) => frame.startsWith('data: '))
+        .map((frame) => frame.slice('data: '.length));
+
+      expect(response.status).toBe(200);
+      expect(frames).toHaveLength(5);
+      expect(JSON.parse(frames[0]!).choices[0].delta.reasoning_content).toBe('REASONING_PREFIX');
+      expect(JSON.parse(frames[1]!).choices[0].delta.content).toBe('VISIBLE_BODY');
+      expect(JSON.parse(frames[2]!).choices[0].delta.reasoning_content).toBe('REASONING_SUFFIX');
+      expect(JSON.parse(frames[3]!).choices[0].finish_reason).toBe('stop');
+      expect(frames[4]).toBe('[DONE]');
+      expect(() => server.assertComplete()).not.toThrow();
+    } finally {
+      server.stop();
+    }
+  });
+
   test('consumes configured responses once instead of wrapping the queue', async () => {
     const server = createMockModelServer();
     try {

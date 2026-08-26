@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitUserMessage } from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
+  screenHasSessionRow,
   stripAnsi,
   waitForCondition,
   waitForOutputQuiescence,
@@ -142,6 +143,155 @@ describe('TUI PTY System — model delivery races', () => {
       expect(clean.split('GREETING_ANSWER_ONCE')).toHaveLength(2);
       expect(clean.indexOf('Thinking ')).toBeLessThan(clean.indexOf('GREETING_ANSWER_ONCE'));
       expect(server.getRequests()[0]?.body.stream).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — late reasoning after visible content', () => {
+  let tui: PtyProcess;
+  let resumedTui: PtyProcess | undefined;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        provider: {
+          mock: {
+            type: 'deepseek',
+            apiKey: 'test-key',
+            baseURL: server.baseURL,
+            model: 'mock-model',
+            models: [{ name: 'mock-model', default: true, streaming: true }],
+          },
+        },
+        model: { default: { provider: 'mock', name: 'mock-model' } },
+        sandbox: { enabled: false },
+      },
+    });
+    // Deliberately model the screenshot race: a partial reasoning segment opens
+    // a pure Thought, visible text becomes its pending caption, then a late
+    // suffix/completion arrives before the terminal stop/[DONE].
+    server.setResponses([
+      {
+        message: {
+          content_chunks: ['LATE_REASONING_ANSWER_ONCE: the visible answer.'],
+          reasoning_chunks: [
+            'LATE_REASONING_PREFIX_MARKER: may render only before answer. ',
+            'LATE_REASONING_SUFFIX_MARKER: must never render.',
+          ],
+        },
+        stream_frame_sequence: ['reasoning', 'content', 'reasoning'],
+        // Keep prefix/content observable, then deliver the late suffix and
+        // terminal back-to-back so the durable completion can overtake it.
+        stream_frame_delays: [350, 350, 0, 0],
+      },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({
+      tuis: [tui, resumedTui],
+      mockServers: [server],
+      workspaces: [workspace],
+    });
+  });
+
+  test(
+    'keeps an interleaved Thought settled in every live and replayed terminal frame',
+    async () => {
+      const responseFrames = tui.markScreen();
+      await submitUserMessage(tui, server, 'Reproduce late reasoning', { timeout: 15_000 });
+
+      // The fixture emitted the reasoning prefix before this answer, and delays
+      // the suffix plus terminal after it.
+      await waitForText(() => tui.viewport(), 'LATE_REASONING_ANSWER_ONCE', 10_000);
+      const answerFrameIndex = tui
+        .screenFramesSince(responseFrames)
+        .findIndex((frame) => screenContains(frame, 'LATE_REASONING_ANSWER_ONCE'));
+      expect(answerFrameIndex).toBeGreaterThanOrEqual(0);
+
+      // Wait for the late completed-reasoning projection before looking for a
+      // settled terminal state. A normal output-quiescence window is shorter
+      // than this fixture's per-frame delay, so it is not a terminal signal.
+      await waitForCondition(
+        () =>
+          tui.screenFramesSince(responseFrames).some((frame) => screenContains(frame, 'Thinking ')),
+        'the compact header created by the late reasoning frame',
+        10_000,
+      );
+      const thinkingFrameIndex = tui
+        .screenFramesSince(responseFrames)
+        .findIndex((frame) => screenContains(frame, 'Thinking '));
+      // The initial header is created by the reasoning prefix; the answer
+      // then arrives as its pending caption before the suffix/terminal.
+      expect(thinkingFrameIndex).toBeLessThan(answerFrameIndex);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 10_000, 750);
+
+      const frames = tui.screenFramesSince(responseFrames);
+      const liveFrames = stripAnsi(frames.join('\n'));
+      const postAnswerFrames = stripAnsi(frames.slice(answerFrameIndex).join('\n'));
+      const clean = stripAnsi(tui.scrollback());
+      const compactLines = clean.split('\n').map((line) => line.trim());
+      const thinkingHeader = compactLines.findIndex((line) => /^Thinking \d+s$/.test(line));
+
+      expect(clean.match(/Thinking \d+s/g) ?? []).toHaveLength(1);
+      // A prefix may be shown in the existing active Thought before text is
+      // visible. Once the answer arrives, that window must never reappear.
+      expect(postAnswerFrames).not.toContain('LATE_REASONING_PREFIX_MARKER');
+      expect(postAnswerFrames).not.toContain('LATE_REASONING_SUFFIX_MARKER');
+      expect(postAnswerFrames).not.toContain('● Thinking');
+      expect(liveFrames).not.toContain('LATE_REASONING_SUFFIX_MARKER');
+      expect(clean).not.toContain('● Thinking');
+      expect(clean).not.toContain('LATE_REASONING_PREFIX_MARKER');
+      expect(clean).not.toContain('LATE_REASONING_SUFFIX_MARKER');
+      expect(clean).not.toContain('执行中');
+      expect(clean.split('LATE_REASONING_ANSWER_ONCE')).toHaveLength(2);
+      expect(compactLines.indexOf('LATE_REASONING_ANSWER_ONCE: the visible answer.')).toBe(
+        thinkingHeader + 2,
+      );
+      expect(compactLines[thinkingHeader + 1]).toBe('');
+      expect(server.getRequests()[0]?.body.stream).toBe(true);
+
+      // Persist the settled live projection, then load it through the normal
+      // PTY resume flow. A replay must not resurrect the transient spinner,
+      // private reasoning string, or a duplicate answer block.
+      await submitCommand(tui, '/exit');
+      await tui.waitForExit();
+      server.setResponses([]);
+      resumedTui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+      await submitCommand(resumedTui, '/resume');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(resumedTui!.viewport(), 'Reproduce late reasoning', {
+            active: false,
+          }),
+        'the late-reasoning session to appear in /resume',
+        10_000,
+      );
+      resumedTui.write('\x1b[B');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(resumedTui!.viewport(), 'Reproduce late reasoning', {
+            selected: true,
+            active: false,
+          }),
+        'the persisted late-reasoning session row to become selected',
+        5_000,
+      );
+      resumedTui.write('\r');
+      await waitForText(() => resumedTui!.viewport(), 'LATE_REASONING_ANSWER_ONCE', 15_000);
+
+      const replay = stripAnsi(resumedTui.scrollback());
+      expect(replay.match(/Thinking \d+s/g) ?? []).toHaveLength(1);
+      expect(replay).not.toContain('● Thinking');
+      expect(replay).not.toContain('LATE_REASONING_PREFIX_MARKER');
+      expect(replay).not.toContain('LATE_REASONING_SUFFIX_MARKER');
+      expect(replay).not.toContain('执行中');
+      expect(replay.split('LATE_REASONING_ANSWER_ONCE')).toHaveLength(2);
     },
     TIMEOUT,
   );

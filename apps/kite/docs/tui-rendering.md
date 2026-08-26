@@ -50,7 +50,10 @@
   都必须把 `searched N ...` 与后续 `Thinking` 组装为一个题头，不能要求创建新会话规避乱序。
 - reasoning segment、旁白 caption、探索工具与模型调用跨多个 request 仍进入一个阶段块。streaming delta
   只缓存，completed reasoning 才更新活动窗口；第一条文本使块进入 `awaiting_terminal`，terminal 声明后续
-  工具时重新激活并由 started 确认 caption，否则文本脱离为最终回答。live 与 history replay 共用该状态机。
+  工具时重新激活并由 started 确认 caption，否则文本脱离为最终回答。同一 request 出现
+  `reasoning prefix → visible text → reasoning suffix` 时，prefix 只可在正文前的活动窗口显示；正文首帧必须
+  关闭纯 reasoning summary，后到的 reasoning 只能补充回答的隐藏 Thought metadata，不能把答案留作 caption、
+  重新显示原始 reasoning 或恢复活动圆点。live 与 history replay 共用该状态机。
 - reasoning delta/completed 都是无 State revision 的 ephemeral presentation fact，Server composition 必须按原序
   交给 client sink，不能把 completed 误送 durable revision sink。durable `model.responded(toolCallCount>0)` 可以
   先于同一回复的累计 text delta 抵达；该迟到 narration 仍属于当前活跃阶段，不得关闭 Thought、重复 caption

@@ -29,8 +29,22 @@ export interface MockResponse {
   delay?: number;
   /** Delay between SSE frames, used to assert progressive rendering. */
   chunk_delay?: number;
+  /**
+   * Optional delays after individual emitted SSE frames. Entries override
+   * `chunk_delay`; omitted entries fall back to it. This keeps frame order
+   * fixed while allowing a terminal to immediately follow a late delta.
+   */
+  stream_frame_delays?: number[];
   /** Test-only SSE ordering override for exercising cross-channel delivery races. */
   stream_frame_order?: 'reasoning_first' | 'content_first';
+  /**
+   * Emit individual content/reasoning chunks in this exact SSE order.
+   * Each entry consumes one chunk from its respective `*_chunks` array; the
+   * normal terminal stop/[DONE] frames always follow the sequence. This takes
+   * precedence over `stream_frame_order` and is intended for delivery-race
+   * regressions that need a partial reasoning segment on both sides of text.
+   */
+  stream_frame_sequence?: Array<'content' | 'reasoning'>;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
   /** Inject an invalid JSON SSE data frame. */
   malformed_sse?: boolean;
@@ -323,23 +337,16 @@ export function createMockModelServer(): MockModelServer {
           };
           if (resolvedResponse.malformed_sse) write('data: {not-json}\n\n');
 
-          const writeContentFrames = () => {
-            for (const contentChunk of resolvedResponse.message?.content_chunks ?? [content]) {
-              write(
-                `data: ${JSON.stringify({
-                  choices: [{ index: 0, delta: { content: contentChunk }, finish_reason: null }],
-                })}\n\n`,
-              );
-            }
+          const contentChunks = resolvedResponse.message?.content_chunks ?? [content];
+          const reasoningChunks = resolvedResponse.message?.reasoning_chunks ?? [reasoningContent];
+          const writeContentFrame = (contentChunk: string) => {
+            write(
+              `data: ${JSON.stringify({
+                choices: [{ index: 0, delta: { content: contentChunk }, finish_reason: null }],
+              })}\n\n`,
+            );
           };
-
-          if (resolvedResponse.stream_frame_order === 'content_first') writeContentFrames();
-
-          // Send reasoning_content delta (DeepSeek-style thinking)
-          for (const reasoningChunk of resolvedResponse.message?.reasoning_chunks ?? [
-            reasoningContent,
-          ]) {
-            if (!reasoningChunk) continue;
+          const writeReasoningFrame = (reasoningChunk: string) => {
             write(
               `data: ${JSON.stringify({
                 choices: [
@@ -351,6 +358,31 @@ export function createMockModelServer(): MockModelServer {
                 ],
               })}\n\n`,
             );
+          };
+          const writeContentFrames = () => {
+            for (const contentChunk of contentChunks) writeContentFrame(contentChunk);
+          };
+          const writeReasoningFrames = () => {
+            for (const reasoningChunk of reasoningChunks) {
+              if (reasoningChunk) writeReasoningFrame(reasoningChunk);
+            }
+          };
+
+          if (resolvedResponse.stream_frame_sequence) {
+            let contentIndex = 0;
+            let reasoningIndex = 0;
+            for (const frame of resolvedResponse.stream_frame_sequence) {
+              if (frame === 'content') {
+                const contentChunk = contentChunks[contentIndex++];
+                if (contentChunk) writeContentFrame(contentChunk);
+              } else {
+                const reasoningChunk = reasoningChunks[reasoningIndex++];
+                if (reasoningChunk) writeReasoningFrame(reasoningChunk);
+              }
+            }
+          } else {
+            if (resolvedResponse.stream_frame_order === 'content_first') writeContentFrames();
+            writeReasoningFrames();
           }
 
           if (toolCalls && toolCalls.length > 0) {
@@ -408,7 +440,12 @@ export function createMockModelServer(): MockModelServer {
           }
 
           // Default provider order keeps reasoning before visible content.
-          if (resolvedResponse.stream_frame_order !== 'content_first') writeContentFrames();
+          if (
+            !resolvedResponse.stream_frame_sequence &&
+            resolvedResponse.stream_frame_order !== 'content_first'
+          ) {
+            writeContentFrames();
+          }
 
           if (resolvedResponse.disconnect_after_content) {
             write(
@@ -430,21 +467,25 @@ export function createMockModelServer(): MockModelServer {
             write('data: [DONE]\n\n');
           }
 
-          const body =
-            resolvedResponse.chunk_delay && resolvedResponse.chunk_delay > 0
-              ? new ReadableStream<Uint8Array>({
-                  async start(controller) {
-                    const encoder = new TextEncoder();
-                    for (const frame of sseFrames) {
-                      controller.enqueue(encoder.encode(frame));
-                      await new Promise((resolve) =>
-                        setTimeout(resolve, resolvedResponse.chunk_delay),
-                      );
-                    }
-                    controller.close();
-                  },
-                })
-              : sseFrames.join('');
+          const hasFrameDelay =
+            (resolvedResponse.chunk_delay !== undefined && resolvedResponse.chunk_delay > 0) ||
+            resolvedResponse.stream_frame_delays !== undefined;
+          const body = hasFrameDelay
+            ? new ReadableStream<Uint8Array>({
+                async start(controller) {
+                  const encoder = new TextEncoder();
+                  for (const [frameIndex, frame] of sseFrames.entries()) {
+                    controller.enqueue(encoder.encode(frame));
+                    const delay =
+                      resolvedResponse.stream_frame_delays?.[frameIndex] ??
+                      resolvedResponse.chunk_delay ??
+                      0;
+                    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+                  }
+                  controller.close();
+                },
+              })
+            : sseFrames.join('');
           return new Response(body, {
             headers: { 'content-type': 'text/event-stream' },
           });

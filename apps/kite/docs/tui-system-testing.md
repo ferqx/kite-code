@@ -35,7 +35,9 @@
 - Thought journey 必须覆盖 durable terminal 与 ephemeral delta 的允许乱序、reasoning completion 的 Server
   presentation route、连续探索工具聚合、caption 紧凑行距，以及 viewport 与原生 scrollback 都不重复；
   mock Provider 可用 `stream_frame_order: 'content_first'` 构造正文先于 reasoning 的真实 SSE 乱序，
-  并验证相同 `requestId` 最终只形成一个回答块。
+  或用 `stream_frame_sequence` 与 `stream_frame_delays` 精确构造
+  `reasoning prefix → content → reasoning suffix → terminal`。后者必须逐帧断言正文出现后不再展示 reasoning
+  原文或活动 Thinking 圆点，并验证 settled live 与重启 `/resume` 最终只形成一个题头和一个回答块。
 - 取消、审批、Session 切换、恢复、resize 和 streaming 测试必须等待各自 exact receipt/readiness，不放宽 identity 或 lifecycle。
 
 ## 验证
