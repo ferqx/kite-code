@@ -320,6 +320,101 @@ describe('Runtime Server', () => {
     await second.connection.close();
   });
 
+  test('retains outbound byte reservations until slow sends settle across connections', async () => {
+    const runtime = new FakeRuntime();
+    runtime.querySessions = Array.from({ length: 3 }, (_, index) => ({
+      schema: 'kite.runtime-projection.v1' as const,
+      sessionId: `session-large-${index}`,
+      revision: 1,
+      displayName: 'x'.repeat(256),
+      lifecycle: 'open' as const,
+    }));
+    const server = new RuntimeServer(
+      { runtime, admission: allowAdmission },
+      {
+        ...serverOptions(),
+        limits: { maxOutboundBytes: 1_400 },
+        globalLimits: { maxQueuedBytes: 1_400 },
+      },
+    );
+    const slowTransport = new TestConnection();
+    const secondTransport = new TestConnection();
+    const slowConnection = server.open(slowTransport);
+    server.open(secondTransport);
+    await initializeTransport(slowTransport);
+    await initializeTransport(secondTransport);
+
+    const gate = deferred<void>();
+    slowTransport.sendGate = gate.promise;
+    slowTransport.push({
+      jsonrpc: '2.0',
+      id: 'query-held',
+      method: 'runtime/query',
+      params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
+    });
+    await eventually(() => slowTransport.sendCalls === 2);
+
+    secondTransport.push({
+      jsonrpc: '2.0',
+      id: 'query-over-budget',
+      method: 'runtime/query',
+      params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
+    });
+    await eventually(() => secondTransport.closed);
+
+    gate.resolve();
+    await eventually(() =>
+      slowTransport.sent.some((message) => 'id' in message && message.id === 'query-held'),
+    );
+
+    const recoveredTransport = new TestConnection();
+    const recoveredConnection = server.open(recoveredTransport);
+    await initializeTransport(recoveredTransport);
+    recoveredTransport.push({
+      jsonrpc: '2.0',
+      id: 'query-recovered',
+      method: 'runtime/query',
+      params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
+    });
+    await eventually(() =>
+      recoveredTransport.sent.some(
+        (message) => 'id' in message && message.id === 'query-recovered',
+      ),
+    );
+
+    const rejectGate = deferred<void>();
+    recoveredTransport.sendGate = rejectGate.promise;
+    recoveredTransport.failNextSend = true;
+    recoveredTransport.push({
+      jsonrpc: '2.0',
+      id: 'query-rejected',
+      method: 'runtime/query',
+      params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
+    });
+    await eventually(() => recoveredTransport.sendCalls === 3);
+    rejectGate.resolve();
+    await eventually(() => recoveredTransport.closed);
+
+    const finalTransport = new TestConnection();
+    const finalConnection = server.open(finalTransport);
+    await initializeTransport(finalTransport);
+    finalTransport.push({
+      jsonrpc: '2.0',
+      id: 'query-after-rejection',
+      method: 'runtime/query',
+      params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
+    });
+    await eventually(() =>
+      finalTransport.sent.some(
+        (message) => 'id' in message && message.id === 'query-after-rejection',
+      ),
+    );
+
+    await slowConnection.close();
+    await recoveredConnection.close();
+    await finalConnection.close();
+  });
+
   test('preserves session-index reset boundaries without synthesizing a session notification', async () => {
     const runtime = new FakeRuntime();
     runtime.notifications = [
@@ -530,6 +625,51 @@ describe('Runtime Server', () => {
     });
   });
 
+  test('resets an ahead session cursor to the authoritative watermark before ready', async () => {
+    const runtime = new FakeRuntime();
+    runtime.sessionProjectionRevision = 3;
+    runtime.notifications = [durableNotification(4)];
+    const pair = createPair(runtime);
+    const messages = pair.client.messages()[Symbol.asyncIterator]();
+    await initializePair(pair, messages);
+
+    await pair.client.send({
+      jsonrpc: '2.0',
+      id: 'subscribe-ahead',
+      method: 'runtime/subscribe',
+      params: { subscription: { scope: 'session', sessionId: 'session-1', afterRevision: 5 } },
+    });
+
+    expect(await next(messages)).toMatchObject({
+      id: 'subscribe-ahead',
+      result: { subscriptionId: 'subscription-1' },
+    });
+    expect(await next(messages)).toMatchObject({
+      method: 'runtime/subscription',
+      params: {
+        message: {
+          type: 'reset',
+          sessions: [{ sessionId: 'session-1', revision: 3 }],
+        },
+      },
+    });
+    expect(await next(messages)).toMatchObject({
+      method: 'runtime/subscription',
+      params: { message: { type: 'ready', scope: 'session' } },
+    });
+    expect(runtime.subscriptions).toHaveLength(2);
+    expect(runtime.subscriptions.at(-1)?.spec).toEqual({
+      scope: 'session',
+      sessionId: 'session-1',
+      afterRevision: 3,
+    });
+    expect(await next(messages)).toMatchObject({
+      method: 'runtime/subscription',
+      params: { message: { type: 'notification', revision: 4 } },
+    });
+    expect(pair.connection.state).toBe('active');
+  });
+
   test('returns the acquired iterator when the subscribe ack cannot be written', async () => {
     const runtime = new FakeRuntime();
     const transport = new TestConnection();
@@ -578,6 +718,36 @@ describe('Runtime Server', () => {
           message.params.message.type === 'ready',
       ),
     ).toBeFalse();
+  });
+
+  test('closes the logical connection when a Host subscription ends after ready', async () => {
+    const runtime = new FakeRuntime();
+    runtime.sessionProjectionRevision = 1;
+    runtime.notifications = [durableNotification(1)];
+    runtime.endAfterNotifications = true;
+    const transport = new TestConnection();
+    const server = new RuntimeServer({ runtime, admission: allowAdmission }, serverOptions());
+    const connection = server.open(transport);
+    transport.push(initialize);
+    await eventually(() => transport.sent.length === 1);
+    transport.push({
+      jsonrpc: '2.0',
+      id: 'subscribe-ended-live',
+      method: 'runtime/subscribe',
+      params: { subscription: { scope: 'session', sessionId: 'session-1' } },
+    });
+
+    await eventually(() => transport.closed);
+    expect(connection.state).toBe('closed');
+    expect(runtime.iteratorReturns).toBe(1);
+    expect(
+      transport.sent.some(
+        (message) =>
+          'method' in message &&
+          message.method === 'runtime/subscription' &&
+          message.params.message.type === 'ready',
+      ),
+    ).toBeTrue();
   });
 
   test('closes only a slow logical connection and returns its iterator', async () => {
@@ -694,9 +864,17 @@ function emptyIndex(): RuntimeAccessNotification[] {
 class FakeRuntime implements RuntimeAccess {
   commands: RuntimeCommand[] = [];
   queries: RuntimeQuery[] = [];
+  subscriptions: RuntimeSubscription[] = [];
   notifications: RuntimeAccessNotification[] = [];
   iteratorReturns = 0;
   commandGate: Promise<void> | undefined;
+  querySessions: Array<{
+    schema: 'kite.runtime-projection.v1';
+    sessionId: string;
+    revision: number;
+    displayName?: string;
+    lifecycle: 'open';
+  }> = [];
   sessionProjectionRevision: number | undefined;
   endAfterNotifications = false;
 
@@ -732,10 +910,11 @@ class FakeRuntime implements RuntimeAccess {
             },
           };
     }
-    return { status: 'ok' as const, queryType: query.type, sessions: [] };
+    return { status: 'ok' as const, queryType: query.type, sessions: this.querySessions };
   }
 
-  subscribe(_subscription: RuntimeSubscription): AsyncIterable<RuntimeAccessNotification> {
+  subscribe(subscription: RuntimeSubscription): AsyncIterable<RuntimeAccessNotification> {
+    this.subscriptions.push(subscription);
     const notifications = [...this.notifications];
     const runtime = this;
     return {
@@ -765,6 +944,8 @@ class TestConnection implements RuntimeServerLogicalMessageConnection {
   readonly sent: RuntimeProtocolMessage[] = [];
   closed = false;
   failNextSend = false;
+  sendCalls = 0;
+  sendGate: Promise<void> | undefined;
   readonly incoming = this.#incoming;
 
   push(value: unknown): void {
@@ -772,6 +953,8 @@ class TestConnection implements RuntimeServerLogicalMessageConnection {
   }
 
   async send(message: RuntimeProtocolMessage): Promise<void> {
+    this.sendCalls += 1;
+    await this.sendGate;
     if (this.failNextSend) {
       this.failNextSend = false;
       throw new Error('simulated write failure');
@@ -783,6 +966,13 @@ class TestConnection implements RuntimeServerLogicalMessageConnection {
     this.closed = true;
     this.#incoming.close();
   }
+}
+
+async function initializeTransport(transport: TestConnection): Promise<void> {
+  transport.push(initialize);
+  await eventually(() =>
+    transport.sent.some((message) => 'id' in message && message.id === 'initialize-1'),
+  );
 }
 
 class AsyncValues<T> implements AsyncIterable<T> {

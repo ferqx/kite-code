@@ -8,6 +8,9 @@
 
 - 管理 Protocol request correlation、connection generation、显式 reconnect 与 subscription resubscribe。
 - 维护 Session/index/ephemeral 的 observable snapshot，使用 connection generation 隔离旧连接消息，并在 index reset end 原子替换 session 列表。
+- connection generation 变化时清空旧 generation 的 Session/stream snapshot，使所有旧 `ready` 与 revision
+  立即失效；只有新 generation 的 authoritative reset/replay 与 subscription ready 边界可以重新建立 Session。
+  新 Server 可以合法建立 revision 更低的当前投影，Client 不得在 resubscribe 前用 stale revision 发命令。
 - 结构性实现 `RuntimeAccess`：`command/execute`、`query` 与同步返回 `AsyncIterable` 的
   `subscribe({ spec, signal? })`。每个订阅拥有独立有界队列，Abort 或 iterator `return()` 会释放远端订阅。
 - 定义 framing-neutral transport 和只读、exact DTO 的 `RuntimeHistoryClient` 接口；`loadSession` 返回完整

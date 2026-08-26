@@ -789,7 +789,8 @@ encode/decode/encode 稳定；malformed/oversized/batch/version mismatch fail cl
 完成证据：Host Session index publisher、线性化 subscription、全请求 task limit、bounded per-connection/global
 及 InProcess 双向 logical-message queue、drain 与共享 InProcess hub 已落盘；并发 initialize 只成功一次，
 subscription 非正常结束会关闭逻辑连接触发 Client 重连；ack/ready、large reset、gap、slow consumer、cleanup
-与 Host integration tests 通过。
+与 Host integration tests 通过。review Gate 进一步固定 cursor 超过 Host watermark 时 ack 后发送 authoritative
+reset/ready，以及 queued 与 in-flight send 全程共同占用 connection/global byte reservation。
 
 交付：Host session-index publisher/indexRevision/tombstone、线性化 subscription 注册、same-revision
 projection divergence fail-closed，
@@ -804,7 +805,8 @@ cleanup、package import boundary 全部通过。
 ### KRSV1-04：Runtime Client 与 snapshot store（已完成）
 
 完成证据：RPC correlation、显式 reconnect/resubscribe、generation isolation、bounded subscription queue、atomic
-Session/index snapshot store 与 Runtime History Client 已落盘；fake/real Server tests、typecheck 与 browser build 通过。
+Session/index snapshot store 与 Runtime History Client 已落盘；generation 变化会清空旧 Session snapshot/ready，
+新 generation 可 authoritative 建立 revision 更低的当前投影；fake/real Server tests、typecheck 与 browser build 通过。
 
 交付：`@kite-ai/runtime-client`、request correlation、command/query、subscribe/unsubscribe、connection
 generation、reconnect/resubscribe、Session/index/stream store、Runtime History Client interface/adapters、

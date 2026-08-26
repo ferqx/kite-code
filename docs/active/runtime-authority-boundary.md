@@ -54,7 +54,7 @@ Kernel 只拥有纯 Intent、Policy/approval、result acceptance 与 recovery/co
 | Boundary | 当前机制 | 明确不提供的保证 |
 | --- | --- | --- |
 | 同进程 command/grant/receipt | strict schema、exact identity、freeze、TTL、single-use、revision/CAS | 不使用 secret key；不抵御恶意同进程代码 |
-| Runtime Protocol / Server | exact codec/allowlist/limits、App admission、bounded per-connection queue、ack-before-notification | 不创建 Runtime/Store/Kernel authority，不把 transport success 当作 domain fact |
+| Runtime Protocol / Server | exact codec/allowlist/limits、App admission、queued+in-flight byte reservation、cursor-ahead reset、ack-before-notification | 不创建 Runtime/Store/Kernel authority，不把 transport success 当作 domain fact |
 | SQLite Store | Runtime State exact codec、SQLite Store marker、canonical event JSON、snapshot checksum、transaction/revision/effect lease | checksum 不是同用户 writer authenticity |
 | Private Artifact | SHA-256 内容寻址、canonical schema、owner-only/no-follow、atomic publish、严格回读 | 不创建 installation key；digest 可被有写权限者重算 |
 | POSIX/Windows sandbox | Host 创建的专用 pipe/handle、PID/PGID/Job/process identity、strict bounded control frame、peer/invocation/sequence | 不传 secret，不使用 HMAC，不声称消息层 OS-user isolation |

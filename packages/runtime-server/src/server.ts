@@ -598,8 +598,10 @@ class Subscription {
   readonly #onClose: () => void;
   readonly #controller = new AbortController();
   #iterator: AsyncIterator<RuntimeAccessNotification> | undefined;
+  #effectiveSpec: RuntimeSubscriptionSpec;
   #phase: 'initial' | 'live' = 'initial';
   #initialSessionRevision: number | undefined;
+  #initialSessionReset: Extract<RuntimeSubscriptionMessage, { type: 'reset' }> | undefined;
   #closed = false;
 
   constructor(
@@ -614,6 +616,7 @@ class Subscription {
     this.id = id;
     this.generation = generation;
     this.#spec = spec;
+    this.#effectiveSpec = spec;
     this.#runtime = runtime;
     this.#publish = publish;
     this.#onFailure = onFailure;
@@ -621,7 +624,10 @@ class Subscription {
   }
 
   acquire(): void {
-    const iterable = this.#runtime.subscribe({ spec: this.#spec, signal: this.#controller.signal });
+    const iterable = this.#runtime.subscribe({
+      spec: this.#effectiveSpec,
+      signal: this.#controller.signal,
+    });
     this.#iterator = iterable[Symbol.asyncIterator]();
   }
 
@@ -649,6 +655,22 @@ class Subscription {
       throw new Error('Session projection watermark is invalid.');
     }
     this.#initialSessionRevision = revision;
+    if (this.#spec.afterRevision !== undefined && this.#spec.afterRevision > revision) {
+      const projection = mapRuntimeQueryResultToProtocol(result);
+      if (
+        !projection ||
+        !('status' in projection) ||
+        !('queryType' in projection) ||
+        projection.status !== 'ok' ||
+        projection.queryType !== 'get_session_projection'
+      ) {
+        throw new Error('Session projection reset is unavailable.');
+      }
+      this.#initialSessionReset = { type: 'reset', sessions: [projection.session] };
+      await this.#iterator?.return?.();
+      this.#effectiveSpec = { ...this.#spec, afterRevision: revision };
+      this.acquire();
+    }
   }
 
   async close(): Promise<void> {
@@ -687,6 +709,11 @@ class Subscription {
       const watermark = this.#initialSessionRevision;
       const afterRevision = this.#spec.scope === 'session' ? this.#spec.afterRevision : undefined;
       if (watermark === undefined || afterRevision === watermark) {
+        if (!(await this.#publish({ type: 'ready', scope: 'session' }))) return;
+        this.#phase = 'live';
+      } else if (afterRevision !== undefined && afterRevision > watermark) {
+        const reset = this.#initialSessionReset;
+        if (!reset || !(await this.#publish(reset))) return;
         if (!(await this.#publish({ type: 'ready', scope: 'session' }))) return;
         this.#phase = 'live';
       }
@@ -732,19 +759,22 @@ class Subscription {
 
 type OutboundMessageKind = 'response' | 'durable' | 'ephemeral' | 'control';
 
+interface OutboundItem {
+  readonly message: RuntimeProtocolMessage;
+  readonly bytes: number;
+  readonly kind: OutboundMessageKind;
+  readonly resolve: (accepted: boolean) => void;
+}
+
 class OutboundQueue {
   readonly #limits: RuntimeServerLimits;
   readonly #connection: RuntimeServerLogicalMessageConnection;
   readonly #reserveBytes: (delta: number) => boolean;
   readonly #onOverflow: () => void;
-  readonly #items: Array<{
-    message: RuntimeProtocolMessage;
-    bytes: number;
-    kind: OutboundMessageKind;
-    resolve: (accepted: boolean) => void;
-  }> = [];
+  readonly #items: OutboundItem[] = [];
   readonly #idleWaiters = new Set<() => void>();
   #bytes = 0;
+  #messageCount = 0;
   #sending = false;
   #closed = false;
 
@@ -784,6 +814,7 @@ class OutboundQueue {
     return new Promise<boolean>((resolve) => {
       this.#items.push({ message, bytes, kind, resolve });
       this.#bytes += bytes;
+      this.#messageCount += 1;
       void this.#drain();
     });
   }
@@ -792,11 +823,10 @@ class OutboundQueue {
     if (this.#closed) return;
     this.#closed = true;
     for (const item of this.#items.splice(0)) {
-      this.#reserveBytes(-item.bytes);
+      this.#release(item);
       item.resolve(false);
     }
-    this.#bytes = 0;
-    this.#notifyIdle();
+    if (!this.#sending) this.#notifyIdle();
   }
 
   whenIdle(): Promise<void> {
@@ -814,12 +844,12 @@ class OutboundQueue {
           this.#notifyIdle();
           return;
         }
-        this.#bytes -= item.bytes;
-        this.#reserveBytes(-item.bytes);
         try {
           await this.#connection.send(item.message);
+          this.#release(item);
           item.resolve(true);
         } catch {
+          this.#release(item);
           item.resolve(false);
           this.#onOverflow();
           return;
@@ -834,7 +864,7 @@ class OutboundQueue {
   #canAccept(bytes: number): boolean {
     return (
       bytes <= this.#limits.maxOutboundBytes &&
-      this.#items.length < this.#limits.maxOutboundMessages &&
+      this.#messageCount < this.#limits.maxOutboundMessages &&
       this.#bytes + bytes <= this.#limits.maxOutboundBytes
     );
   }
@@ -844,15 +874,20 @@ class OutboundQueue {
       const item = this.#items[index];
       if (item?.kind !== 'ephemeral') continue;
       this.#items.splice(index, 1);
-      this.#bytes -= item.bytes;
-      this.#reserveBytes(-item.bytes);
+      this.#release(item);
       item.resolve(true);
       if (
-        this.#items.length < this.#limits.maxOutboundMessages &&
+        this.#messageCount < this.#limits.maxOutboundMessages &&
         this.#bytes < this.#limits.maxOutboundBytes
       )
         return;
     }
+  }
+
+  #release(item: OutboundItem): void {
+    this.#bytes -= item.bytes;
+    this.#messageCount -= 1;
+    this.#reserveBytes(-item.bytes);
   }
 
   #notifyIdle(): void {

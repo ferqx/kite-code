@@ -67,6 +67,44 @@ describe('Runtime Snapshot Store', () => {
     expect(store.getSnapshot().sessions['session-1']?.historyResyncRequired).toBeTrue();
   });
 
+  test('drops a prior connection projection before accepting an older replacement snapshot', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active', serverInstanceId: 'server-old' });
+    store.applySessionNotification({
+      connectionGeneration: 1,
+      subscriptionGeneration: 1,
+      notification: durable(projection('session-1', 10)),
+      reset: true,
+      ready: true,
+    });
+    expect(store.getSnapshot().sessions['session-1']).toMatchObject({
+      projection: { revision: 10 },
+      ready: true,
+    });
+
+    store.setConnection({ generation: 2, status: 'reconnecting' });
+    expect(store.getSnapshot().sessions).toEqual({});
+
+    store.setConnection({
+      generation: 2,
+      status: 'active',
+      serverInstanceId: 'server-replacement',
+    });
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 2,
+        subscriptionGeneration: 1,
+        notification: durable(projection('session-1', 2)),
+        ready: true,
+      }),
+    ).toBe('applied');
+    expect(store.getSnapshot().sessions['session-1']).toMatchObject({
+      projection: { revision: 2 },
+      subscriptionGeneration: 1,
+      ready: true,
+    });
+  });
+
   test('ignores out-of-order index revisions after an atomic reset', () => {
     const store = new RuntimeSnapshotStore();
     store.setConnection({ generation: 1, status: 'active' });

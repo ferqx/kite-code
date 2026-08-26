@@ -73,6 +73,10 @@ Thinking 与工具聚合仍各自只有一个 block owner。会创建真实
 child、socket、SQLite file、cwd 或 global process environment 的 App tests 必须留在 `apps/kite/test/isolated/`，由默认
 runner 逐文件、逐进程串行执行，不能为了提速改成共享进程。
 
+Runtime Server/Client owner tests 还必须固定 reconnect generation 立即失效 Session readiness、cursor 超过
+Host watermark 时以 current snapshot reset/ready 收敛，以及 blocked carrier 的 in-flight send 在 settle 前继续
+占用 connection/global encoded-byte budget。
+
 三个显式 transport scripts 也都是隔离套件：`bun run test:runtime:stdio` 覆盖实际 child/stdio lifecycle，
 `bun run test:runtime:websocket` 覆盖一次性 bootstrap、cookie、loopback socket 与 browser reference，
 `bun run test:runtime:transport` 以同一 raw JSON-RPC matrix 覆盖 InProcess、真实 stdio child 与真实 development

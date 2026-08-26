@@ -105,6 +105,10 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
               indexRevision: 0,
               ready: false,
             },
+            // Session revisions are scoped to the server connection. A replacement
+            // may legitimately seed an older projection, so keep no prior
+            // generation projection available while subscriptions re-establish.
+            sessions: {},
             streams: {},
           }
         : {}),

@@ -32,8 +32,12 @@ Server/Host composition 由 `apps/kite` 拥有。
 
 - backend 是 `RuntimeAccess + RuntimeServerAdmissionPort`；admission 只裁定已冻结 operation 的 connection/role，并注入 App-owned Workspace facts。Server 不取得额外 Runtime authority，也不从 request body 或 client metadata 提升 authority。
 - 输入和 InProcess message 一律通过同一 Protocol codec/limits；未知、超限或未初始化请求 fail closed。
-- subscribe 先取得 Host iterator 并缓冲，再写 ack；顺序是 ack、replay/reset、initial item、ready/end、live。慢 consumer 只关闭所属 connection，并 return 所有 iterator；不会取消 Runtime work。
-- outbound 同时受 count 和 encoded-byte 上限；drain 时发出 `server/draining` 并清理连接资源。没有 sidecar、dual write 或 old-path fallback。
+- subscribe 先取得 Host iterator 并缓冲，再写 ack；顺序是 ack、replay/reset、initial item、ready/end、live。
+  `afterRevision` 超过 Host watermark 时，ack 后立即发送 authoritative current snapshot/reset 与 ready，不能等待
+  一个无法到达的旧边界。慢 consumer 只关闭所属 connection，并 return 所有 iterator；不会取消 Runtime work。
+- outbound 同时受 count 和 encoded-byte 上限；已经从队列取出但尚未 settle 的 send 仍占 connection/global
+  byte reservation，只有 send resolve/reject 后释放。drain 时发出 `server/draining` 并清理连接资源。没有
+  sidecar、dual write 或 old-path fallback。
 
 ## 测试
 
