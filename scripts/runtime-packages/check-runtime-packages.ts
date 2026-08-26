@@ -7,6 +7,8 @@ export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
   ['@kite-ai/runtime-protocol', 'packages/runtime-protocol'],
   ['@kite-ai/runtime-server', 'packages/runtime-server'],
   ['@kite-ai/runtime-client', 'packages/runtime-client'],
+  ['@kite-ai/kite-app-contract', 'packages/kite-app-contract'],
+  ['@kite-ai/kite-local-runtime', 'packages/kite-local-runtime'],
   ['@kite-ai/agent-kernel', 'packages/agent-kernel'],
   ['@kite-ai/runtime-spi', 'packages/runtime-spi'],
   ['@kite-ai/runtime-host', 'packages/runtime-host'],
@@ -22,6 +24,12 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   '@kite-ai/runtime-protocol': ['@kite-ai/runtime-contract'],
   '@kite-ai/runtime-server': ['@kite-ai/runtime-contract', '@kite-ai/runtime-protocol'],
   '@kite-ai/runtime-client': ['@kite-ai/runtime-contract', '@kite-ai/runtime-protocol'],
+  '@kite-ai/kite-app-contract': ['@kite-ai/runtime-contract'],
+  '@kite-ai/kite-local-runtime': [
+    '@kite-ai/kite-app-contract',
+    '@kite-ai/runtime-client',
+    '@kite-ai/runtime-protocol',
+  ],
   '@kite-ai/agent-kernel': [],
   '@kite-ai/runtime-spi': ['@kite-ai/runtime-contract'],
   '@kite-ai/runtime-host': [
@@ -33,6 +41,7 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   '@kite-ai/builtin-runtime': ['@kite-ai/runtime-contract', '@kite-ai/runtime-spi'],
   '@kite-ai/kite-cli': [
     '@kite-ai/builtin-runtime',
+    '@kite-ai/kite-app-contract',
     '@kite-ai/runtime-client',
     '@kite-ai/runtime-contract',
     '@kite-ai/runtime-host',
@@ -59,6 +68,15 @@ const FORBIDDEN_PUBLIC_NAMES: Readonly<Record<string, readonly RegExp[]>> = Obje
   '@kite-ai/runtime-protocol': [/RuntimeHost/, /Sqlite/, /BuiltinRuntime/],
   '@kite-ai/runtime-server': [/Sqlite/, /BuiltinRuntime/],
   '@kite-ai/runtime-client': [/RuntimeHost/, /Sqlite/, /BuiltinRuntime/],
+  '@kite-ai/kite-app-contract': [
+    /RuntimeHost/,
+    /RuntimeServer/,
+    /Sqlite/,
+    /Credential/,
+    /ServiceDescriptor/,
+    /Process/,
+  ],
+  '@kite-ai/kite-local-runtime': [/RuntimeHost/, /RuntimeServer/, /Sqlite/, /BuiltinRuntime/],
   '@kite-ai/builtin-runtime': [/RuntimeHost/, /RuntimeStore/, /AgentState/, /KernelEvent/],
 });
 
@@ -706,6 +724,7 @@ function validateExternalImport(
       owner === '@kite-ai/runtime-protocol' ||
       owner === '@kite-ai/runtime-server' ||
       owner === '@kite-ai/runtime-client' ||
+      owner === '@kite-ai/kite-app-contract' ||
       owner === '@kite-ai/agent-kernel' ||
       owner === '@kite-ai/runtime-spi'
     ) {
@@ -1218,7 +1237,17 @@ function validateCompositionRoot(
     addViolation(violations, 'COMPOSITION_ROOT_BYPASS', `composition is in ${roots[0]}`);
   }
   const bootstrapImports = importsByFile.get(join(root, expectedRoot)) ?? new Set<string>();
-  for (const required of ALLOWED_DIRECT_DEPENDENCIES['@kite-ai/kite-cli'] ?? []) {
+  const requiredCompositionDependencies = [
+    '@kite-ai/builtin-runtime',
+    '@kite-ai/runtime-client',
+    '@kite-ai/runtime-contract',
+    '@kite-ai/runtime-host',
+    '@kite-ai/runtime-protocol',
+    '@kite-ai/runtime-server',
+    '@kite-ai/runtime-spi',
+    '@kite-ai/runtime-storage-sqlite',
+  ] as const;
+  for (const required of requiredCompositionDependencies) {
     if (!bootstrapImports.has(required)) {
       addViolation(
         violations,

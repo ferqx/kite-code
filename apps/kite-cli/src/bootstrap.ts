@@ -68,8 +68,8 @@ import {
   sqliteRuntimeStorePathForEpoch,
 } from '@kite-ai/runtime-storage-sqlite';
 import type {
-  TuiSessionManager,
-  TuiSessionManagerDependencies,
+  TuiRuntimeClientDependencies,
+  TuiRuntimeClientFacade,
 } from './adapters/tui/session-adapter';
 import { createKiteModelOperationExecutionPort } from './bootstrap/model-operation-execution';
 import {
@@ -680,8 +680,8 @@ export function createKiteCliRuntimeAccess(
 }
 
 export function createKiteTuiSessionManager(
-  input: TuiSessionManagerDependencies,
-): TuiSessionManager {
+  input: TuiRuntimeClientDependencies,
+): TuiRuntimeClientFacade {
   const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
   const tokenStatsStorage = createSqliteSessionTokenStats({
     databasePath: `${sqliteRuntimeStorePath(input.checkpointPath)}.session-metadata.db`,

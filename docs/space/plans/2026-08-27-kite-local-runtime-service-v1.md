@@ -963,7 +963,21 @@ KLSV1-06/07，rename阶段不重复重型验证。
 
 回滚：纯路径 rename 整体回滚；零行为和格式变化。
 
-### KLSV1-02：Frontend contract、Native substrate 与 client/server seam
+### KLSV1-02：Frontend contract、Native substrate 与 client/server seam（已完成）
+
+完成证据：新增 browser-safe `@kite-ai/kite-app-contract` 与只有 `./client`/`./service` 出口的 Bun/Node-only
+`@kite-ai/kite-local-runtime`。App Contract 为 Workspace Trust（含 revision CAS）、Provider/model、MCP、Skill、
+execution/release status 提供独立 exact no-secret codec 和 closed `KiteAppControlClient`；Native package 固定 descriptor、
+token、lock、state layout、lifecycle/raw credential codec、`LocalKiteConnection`/manager interfaces 与 exact
+`kite-local-runtime-contract-v1` revision，但不实现 listener、filesystem mutation、spawn 或 lifecycle state machine。
+CLI 的 Runtime/History facade 已删除 `Omit<SessionManager>`、Manager/SessionRuntime Proxy、Reflect fallback、dynamic member
+cache 与 set trap；新增 App Control InProcess adapter，让 9 个当前 use case 的 request/response 都经过同一 exact codec。
+
+Package graph 当前为 12 workspaces / 25 edges，唯一 composition root 仍是 `apps/kite-cli/src/bootstrap.ts`；两个新 package
+已加入 build/typecheck/default test、standalone resolver 与 documentation-map 互斥 owner。12-workspace typecheck/build、
+runtime package/core/pre-release/test-ownership Gate、42 个 package checker tests、12 个 package codec tests、9-use-case
+App Control/facade/history tests、release resolver tests、docs impact/docs 与 browser/native build 全部通过。该状态不表示
+TUI direct config/MCP/Skill dependency 已迁移、Service/listener/process 已存在或默认 Store 已切换。
 
 交付：
 

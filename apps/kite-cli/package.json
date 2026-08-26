@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@kite-ai/builtin-runtime": "workspace:*",
+    "@kite-ai/kite-app-contract": "workspace:*",
     "@kite-ai/runtime-client": "workspace:*",
     "@kite-ai/runtime-contract": "workspace:*",
     "@kite-ai/runtime-host": "workspace:*",

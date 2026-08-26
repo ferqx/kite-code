@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { RuntimeState } from '@kite-ai/agent-kernel';
@@ -55,10 +55,29 @@ test('TUI App composition receives safe live and terminal events through its Run
   });
 
   try {
+    const bridgeSource = readFileSync(
+      join(import.meta.dir, '../../src/bootstrap/runtime/TuiRuntimeBridge.ts'),
+      'utf8',
+    );
+    const facadeSource = readFileSync(
+      join(import.meta.dir, '../../src/adapters/tui/session-adapter.ts'),
+      'utf8',
+    );
+    expect(bridgeSource).not.toContain('new Proxy');
+    expect(bridgeSource).not.toContain('Reflect.get');
+    expect(bridgeSource).not.toContain('Reflect.set');
+    expect(facadeSource).not.toContain('Omit<SessionManager');
+
     const sessionId = manager.createSession(workspace);
     await manager.waitForSessionReady(sessionId);
     const runtime = manager.getRuntime(sessionId);
     expect(runtime).toBeDefined();
+    expect('recoverRuntimeState' in manager).toBe(false);
+    expect('executeHostCompaction' in manager).toBe(false);
+    expect('runtimeSessionCoordinator' in manager).toBe(false);
+    expect('authorizedExecutionControl' in runtime!).toBe(false);
+    expect('getPendingInteractionCommandPort' in runtime!).toBe(false);
+    expect('reportRuntimeFailure' in runtime!).toBe(false);
 
     const events: RuntimeClientEvent[] = [];
     try {

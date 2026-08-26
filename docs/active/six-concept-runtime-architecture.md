@@ -33,26 +33,42 @@ Agent → Capability → Policy → Execution → Verification
 
 `@kite-ai/runtime-spi` 是 provider-neutral compile-time port。capability、execution、model context 与 module lifecycle 分文件定义；filesystem、sandbox、MCP、Subagent、Verification 与 Tool Pipeline 继续使用独立 domain port。SPI 不拥有具体 Builtin schema、Policy decision、Host session 或 App composition。
 
-## Runtime Server V1：十个 workspace 与唯一 composition
+## Runtime Server 与 Local Service client contract：十二个 workspace、一个当前 composition
 
-Runtime package Gate 固定检查十个 runtime workspaces：`runtime-contract`、`runtime-protocol`、`runtime-server`、`runtime-client`、`agent-kernel`、`runtime-spi`、`runtime-host`、`runtime-storage-sqlite`、`builtin-runtime` 与 `apps/kite-cli`。它们不是十个可互换 Runtime；依赖和 authority 必须保持下列层级：
+Runtime package Gate 当前检查十二个 workspaces：`runtime-contract`、`runtime-protocol`、`runtime-server`、
+`runtime-client`、`kite-app-contract`、`kite-local-runtime`、`agent-kernel`、`runtime-spi`、`runtime-host`、
+`runtime-storage-sqlite`、`builtin-runtime` 与 `apps/kite-cli`。它们不是可互换 Runtime；依赖和 authority 必须
+保持下列层级：
 
 ```text
 runtime-contract ─────────────────────────────────────────→ ∅
 runtime-protocol ─────────────────────────────────────────→ runtime-contract
 runtime-client ───────────────────────────────────────────→ runtime-contract + runtime-protocol
 runtime-server ───────────────────────────────────────────→ runtime-contract + runtime-protocol
+kite-app-contract ────────────────────────────────────────→ runtime-contract
+kite-local-runtime ───────────────────────────────────────→ app-contract + client + protocol
 agent-kernel ─────────────────────────────────────────────→ ∅
 runtime-spi ──────────────────────────────────────────────→ runtime-contract
 runtime-host ─────────────────────────────────────────────→ agent-kernel + runtime-contract + runtime-spi
 runtime-storage-sqlite ───────────────────────────────────→ runtime-host
 builtin-runtime ──────────────────────────────────────────→ runtime-contract + runtime-spi
-apps/kite-cli ────────────────────────────────────────────────→ client + server + host + builtin + sqlite + protocol + contract + spi
+apps/kite-cli ─────────────────────────────────────────────→ app-contract + client + server + host + builtin + sqlite + protocol + contract + spi
 ```
 
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 JSON-RPC V1 DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
 
-`apps/kite-cli/src/bootstrap.ts` 是唯一 concrete Runtime composition root：它创建唯一 Host/Store/Kernel/Builtin assembly，注入 Workspace admission 与 concrete carrier I/O，并组合 Client 和 Server。App 是 listener、local auth、carrier lifecycle 与 exhaustive local history adaptation 的唯一 owner。不存在 sidecar Runtime Server、第二 composition root、第二 Store writer、dual write、alternate transport execution path、`try-new-catch-old` fallback 或 legacy Host bridge。
+`@kite-ai/kite-app-contract` 只导出当前 Workspace Trust、Provider/model、MCP、Skill 与 authoritative status
+journey 所需的 no-secret exact DTO/codec 和 closed client methods；它是 browser-safe repo-private contract，不拥有
+I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` 只有 `./client` 与 `./service` Native
+出口：当前只冻结 descriptor/token/lock/lifecycle/raw credential codec、state-layout 和 connector interfaces，不实现
+listener、spawn、filesystem mutation、Store 或 Runtime composition。它不得依赖 Host、Server、Builtin、SQLite、UI 或
+任一 App source。
+
+KLSV1-02 阶段 `apps/kite-cli/src/bootstrap.ts` 仍是唯一 concrete Runtime composition root：它创建唯一
+Host/Store/Kernel/Builtin assembly，注入 Workspace admission 与 concrete carrier I/O，并组合 Client 和 Server。
+App 已用 explicit InProcess Runtime/History/App Control facade 固定 client seam，但 production 仍未启动独立 Service。
+不存在 sidecar Runtime Server、第二 composition root、第二 Store writer、dual write、alternate transport execution path、
+`try-new-catch-old` fallback 或 legacy Host bridge。
 
 ## Runtime Kernel
 

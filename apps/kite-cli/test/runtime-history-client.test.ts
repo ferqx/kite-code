@@ -15,9 +15,11 @@ describe('Kite Runtime History Client adapter', () => {
       join(import.meta.dir, '../src/bootstrap/runtime/TuiRuntimeBridge.ts'),
       'utf8',
     );
-    expect(bridge).toContain("return (query = '') => this.#history.listPersistedSessions(query);");
     expect(bridge).toContain(
-      'return (sessionId: string) => this.#history.loadPersistedSession(sessionId);',
+      "listPersistedSessions: (query = '') => this.#history.listPersistedSessions(query),",
+    );
+    expect(bridge).toContain(
+      'loadPersistedSession: (sessionId: string) => this.#history.loadPersistedSession(sessionId),',
     );
     expect(bridge).not.toContain('target.listPersistedSessions(');
     expect(bridge).not.toContain('target.loadPersistedSession(');

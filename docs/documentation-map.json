@@ -61,6 +61,33 @@
       ]
     },
     {
+      "id": "kite-app-contract",
+      "sources": ["packages/kite-app-contract/src/**", "packages/kite-app-contract/package.json"],
+      "authorities": [
+        "packages/kite-app-contract/README.md",
+        "docs/active/six-concept-runtime-architecture.md"
+      ]
+    },
+    {
+      "id": "kite-local-runtime-client",
+      "sources": ["packages/kite-local-runtime/src/**", "packages/kite-local-runtime/package.json"],
+      "excludeSources": ["packages/kite-local-runtime/src/service/**"],
+      "authorities": [
+        "packages/kite-local-runtime/README.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
+      "id": "kite-local-runtime-service-state",
+      "sources": ["packages/kite-local-runtime/src/service/**"],
+      "authorities": [
+        "packages/kite-local-runtime/README.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
       "id": "agent-kernel",
       "sources": ["packages/agent-kernel/src/**", "packages/agent-kernel/package.json"],
       "excludeSources": [

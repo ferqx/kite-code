@@ -6,6 +6,8 @@ const WORKSPACES = [
   'packages/runtime-protocol',
   'packages/runtime-server',
   'packages/runtime-client',
+  'packages/kite-app-contract',
+  'packages/kite-local-runtime',
   'packages/agent-kernel',
   'packages/runtime-spi',
   'packages/runtime-host',

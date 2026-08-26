@@ -53,6 +53,10 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 ## Runtime Server V1 owner 与 transport 测试
 
+默认 workspace runner 当前覆盖十二个 workspace。`packages/kite-app-contract/test/` 验证 browser-safe、no-secret、
+exact App Control codec；`packages/kite-local-runtime/test/` 验证 Native descriptor/token/lock/lifecycle/credential codec
+与无 I/O state layout。两者当前都不是 Service process、listener、reconnect 或平台 qualification evidence。
+
 KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 
 - `packages/runtime-contract/test/runtime-contract.test.ts`

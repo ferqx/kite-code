@@ -24,8 +24,8 @@ import { projectStateRuntimeEventForPresentation } from '#kite-cli/runtime-clien
 import { type AppShellExecutor, composeAppSandboxExecutor } from '#kite-cli/sandbox/composition';
 import type { SandboxBackend } from '#kite-cli/sandbox/types';
 import type {
-  TuiSessionManager as SessionManager,
-  TuiSessionManagerFactory,
+  TuiRuntimeClientFacade as SessionManager,
+  TuiRuntimeClientFacadeFactory,
 } from '../adapters/tui/session-adapter';
 import { composeObservability } from '../observability/composition';
 import { resolveTelemetryConsent } from '../observability/consent';
@@ -112,7 +112,7 @@ function overlaySurfaceKey(state: import('./types').TuiState): string {
 
 export interface TuiBootstrapProps {
   /** Single composition-root injection; presentation never constructs Runtime authority. */
-  createSessionManager?: TuiSessionManagerFactory;
+  createSessionManager?: TuiRuntimeClientFacadeFactory;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   model?: import('@kite-ai/builtin-runtime/model').SupportedChatModel;
   /** Optional App-owned Shell runtime injection used by composition and system tests. */
@@ -120,7 +120,7 @@ export interface TuiBootstrapProps {
 }
 
 interface TuiAppProps {
-  createSessionManager: TuiSessionManagerFactory;
+  createSessionManager: TuiRuntimeClientFacadeFactory;
   config: AgentConfig;
   workspace: string;
   languagePreference: LanguagePreference;

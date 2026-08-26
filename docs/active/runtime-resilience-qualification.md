@@ -16,6 +16,12 @@ Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runt
 
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 
+Local Service client substrate 当前只固定 resilience contract：descriptor/lock/token/lifecycle/credential payload 必须 exact，
+Local connection 不携带 control token，reconnect 不自动重放 Runtime 或 App Control mutation，response 丢失收敛为
+`outcome_unknown → exact state query → explicit decision`。`kite-local-runtime` 尚未实现 filesystem、listener、spawn、
+ensure/stop state machine 或真实 reconnect，因此本段不构成 concurrent ensure、stale recovery、busy stop 或平台 process
+evidence；这些证据必须随 Service implementation 在 KLSV1-04/05/07 增加，不能用 codec unit test代替。
+
 本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 ADR-0053。
 
 本 tranche 的 implementation head `f3646fec1d99db053304dfc013806caf0e3d8272` 已形成三平台 PR CI evidence：

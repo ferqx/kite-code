@@ -42,6 +42,7 @@ import {
   testRuntimeCapabilityExecutionPort,
 } from '../../../../tests/helpers/runtime-model';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import type { TuiSessionFacade } from '../../src/adapters/tui/session-adapter';
 import type {
   RuntimeSessionCoordinator,
   RuntimeSessionCoordinatorAccess,
@@ -2717,9 +2718,9 @@ describe('TUI Runtime cancellation bridge', () => {
             evidence: Parameters<RuntimeSessionCoordinator['commitCloseSessionCommand']>[1],
           ) => {
             if (operationActive) {
-              manager
-                .getRuntime(identity.sessionId)
-                ?.authorizedExecutionControl?.cancelRun('Runtime session closed.');
+              (
+                manager.getRuntime(identity.sessionId) as unknown as SessionRuntime
+              )?.authorizedExecutionControl?.cancelRun('Runtime session closed.');
               revision += 1;
             }
             return { receipt: receipt(evidence), events: [], wasActive: operationActive };
@@ -2797,9 +2798,9 @@ describe('TUI Runtime cancellation bridge', () => {
         })(),
       cancelSession: async (sessionId: string, reason?: string) => {
         await bridge.shutdownSession(sessionId, reason ?? 'test cancellation', () => undefined);
-        manager
-          .getRuntime(sessionId)
-          ?.authorizedExecutionControl?.cancelRun(reason ?? 'test cancellation');
+        (
+          manager.getRuntime(sessionId) as unknown as SessionRuntime
+        )?.authorizedExecutionControl?.cancelRun(reason ?? 'test cancellation');
         operationActive = false;
       },
       cancelAllSessions: async () => undefined,
@@ -2859,9 +2860,10 @@ describe('TUI Runtime cancellation bridge', () => {
     };
   }
 
-  function installCancellationCounter(runtime: SessionRuntime) {
+  function installCancellationCounter(runtime: TuiSessionFacade) {
     let calls = 0;
-    runtime.authorizedExecutionControl = {
+    const runtimeInternals = runtime as unknown as SessionRuntime;
+    runtimeInternals.authorizedExecutionControl = {
       getState: () => ({ context: { pendingCompaction: undefined } }) as unknown as RuntimeState,
       processEvent: () => undefined,
       processEventBatch: () => [],

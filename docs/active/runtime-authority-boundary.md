@@ -34,6 +34,14 @@ State、Store handle 和 settlement callback 仍禁止。该本地内容不进�
 
 Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 
+Local Service 的预备 contract 不改变上述可信域。`kite-app-contract` 只允许 no-secret exact projection/action；
+raw Provider API key、MCP OAuth 与 Service lifecycle 只存在于 `kite-local-runtime` Native codec。Local descriptor 只包含
+instance/PID/start time、exact loopback endpoint、Protocol/client-contract revision、server version 与 build ID；token、
+Workspace、Store/executable path、credential 与 Session 字段由 strict codec 拒绝。`access`/`control` token 是不同
+restart-scoped material，connection interface不取得 control token。当前只有 codec/state-layout/interface，没有 listener、
+file owner、process manager 或第二 Runtime composition；这些预备类型不能被解释为健康证明、Host fencing 或 persisted
+Project authority。
+
 ## Authority sequence
 
 ```text

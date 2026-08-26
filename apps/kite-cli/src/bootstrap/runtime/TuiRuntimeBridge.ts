@@ -30,7 +30,11 @@ import type {
 } from '@kite-ai/runtime-host/storage';
 import type { ProjectIdentity } from '@kite-ai/runtime-spi';
 import { getFeatureFlags } from '#kite-cli/config/features';
-import type { TuiSessionManager } from '../../adapters/tui/session-adapter';
+import type {
+  TuiRuntimeClientFacade,
+  TuiSessionFacade,
+  TuiSessionRunDependencies,
+} from '../../adapters/tui/session-adapter';
 import { type SessionDeps, SessionManager, type SessionRuntime } from '../../runtime/session';
 import {
   createRuntimeCommandIdAllocator,
@@ -95,7 +99,7 @@ export function createTuiRuntimeClient(
   createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPort,
   resolveProjectIdentity: (workspace: string) => ProjectIdentity,
   commandIds: RuntimeCommandIdAllocator = createRuntimeCommandIdAllocator(),
-): TuiSessionManager {
+): TuiRuntimeClientFacade {
   return new TuiRuntimeBridge(input, createHost, resolveProjectIdentity, commandIds).client;
 }
 
@@ -105,8 +109,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   readonly #history: ReturnType<typeof createTuiHistoryFacade>;
   readonly #sessions = new Map<string, SessionAuthority>();
   readonly #sessionReadiness = new Map<string, Promise<void>>();
-  readonly #runtimeClients = new Map<string, object>();
-  readonly #managerMembers = new Map<PropertyKey, unknown>();
+  readonly #runtimeClients = new Map<string, TuiSessionFacade>();
   readonly #pendingRuns = new Map<string, PendingRun>();
   readonly #pendingCompactions = new Map<string, PendingCompaction>();
   readonly #pendingRewinds = new Map<string, PendingRewind>();
@@ -123,7 +126,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   readonly #allocateRecoveryIdentity: SessionDeps['allocateRecoveryIdentity'];
   readonly #admittedWorkspace: string;
   readonly #commandIds: RuntimeCommandIdAllocator;
-  readonly client: TuiSessionManager;
+  readonly client: TuiRuntimeClientFacade;
 
   constructor(
     input: SessionDeps & { readonly workspace: string },
@@ -975,452 +978,485 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     }
   }
 
-  #createManagerClient(): TuiSessionManager {
-    return new Proxy(this.#manager, {
-      get: (target, property) => {
-        if (this.#managerMembers.has(property)) return this.#managerMembers.get(property);
-        const member = (() => {
-          if (property === 'createSession') {
-            return (workspace: string): string => {
-              this.#assertAdmittedWorkspace(workspace);
-              const project = this.#resolveProjectIdentity(workspace);
-              const sessionId = target.createSession(workspace, {
-                projectId: project.projectId,
-                canonicalWorkspaceDigest: project.workspaceDigest,
-              });
-              this.#trackSessionReadiness(sessionId, {
-                schema: RUNTIME_COMMAND_SCHEMA_,
-                commandId: this.#nextCommandId(sessionId, 'create'),
-                type: 'create_session',
-                workspace,
-                bootstrapSessionId: sessionId,
-              });
-              return sessionId;
-            };
-          }
-          if (property === 'dispose') {
-            return async (): Promise<void> => {
-              await this.#awaitAllSessionReadiness();
-              for (const controller of this.#subscriptionControllers.values()) controller.abort();
-              await this.#access[Symbol.asyncDispose]();
-            };
-          }
-          if (property === 'abortAll') {
-            return async (): Promise<void> => {
-              await this.#awaitAllSessionReadiness();
-              await this.#access.cancelAllSessions('TUI shutdown requested.');
-            };
-          }
-          if (property === 'cancelRuntimeOperations') {
-            return async (sessionId: string): Promise<void> => {
-              await this.#awaitSessionReadiness(sessionId);
-              const runtime = target.getRuntime(sessionId);
-              if (runtime) await this.#cancelTurn(runtime);
-              await this.#access.waitForSessionIdle(sessionId);
-            };
-          }
-          if (property === 'registerSession') {
-            return (sessionId: string, workspace: string): object => {
-              this.#assertAdmittedWorkspace(workspace);
-              const runtime = target.registerSession(sessionId, workspace);
-              this.#trackSessionReadiness(sessionId, {
-                schema: RUNTIME_COMMAND_SCHEMA_,
-                commandId: this.#nextCommandId(sessionId, 'resume'),
-                type: 'resume_session',
-                sessionId,
-              });
-              return this.#runtimeClient(runtime);
-            };
-          }
-          if (property === 'waitForSessionReady') {
-            return async (sessionId: string): Promise<void> => {
-              await this.#awaitSessionReadiness(sessionId);
-            };
-          }
-          if (property === 'clearSessionCommandGrants') {
-            return async (sessionId: string): Promise<RuntimeCommandReceipt> => {
-              await this.#awaitSessionReadiness(sessionId);
+  #createManagerClient(): TuiRuntimeClientFacade {
+    const target = this.#manager;
+    const client: TuiRuntimeClientFacade = {
+      createSession: (workspace: string): string => {
+        this.#assertAdmittedWorkspace(workspace);
+        const project = this.#resolveProjectIdentity(workspace);
+        const sessionId = target.createSession(workspace, {
+          projectId: project.projectId,
+          canonicalWorkspaceDigest: project.workspaceDigest,
+        });
+        this.#trackSessionReadiness(sessionId, {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: this.#nextCommandId(sessionId, 'create'),
+          type: 'create_session',
+          workspace,
+          bootstrapSessionId: sessionId,
+        });
+        return sessionId;
+      },
+      dispose: async (): Promise<void> => {
+        await this.#awaitAllSessionReadiness();
+        for (const controller of this.#subscriptionControllers.values()) controller.abort();
+        await this.#access[Symbol.asyncDispose]();
+      },
+      abortAll: async (): Promise<void> => {
+        await this.#awaitAllSessionReadiness();
+        await this.#access.cancelAllSessions('TUI shutdown requested.');
+      },
+      cancelRuntimeOperations: async (sessionId: string): Promise<void> => {
+        await this.#awaitSessionReadiness(sessionId);
+        const runtime = target.getRuntime(sessionId);
+        if (runtime) await this.#cancelTurn(runtime);
+        await this.#access.waitForSessionIdle(sessionId);
+      },
+      registerSession: (sessionId: string, workspace: string): TuiSessionFacade => {
+        this.#assertAdmittedWorkspace(workspace);
+        const runtime = target.registerSession(sessionId, workspace);
+        this.#trackSessionReadiness(sessionId, {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: this.#nextCommandId(sessionId, 'resume'),
+          type: 'resume_session',
+          sessionId,
+        });
+        return this.#runtimeClient(runtime);
+      },
+      waitForSessionReady: async (sessionId: string): Promise<void> => {
+        await this.#awaitSessionReadiness(sessionId);
+      },
+      clearSessionCommandGrants: async (sessionId: string): Promise<RuntimeCommandReceipt> => {
+        await this.#awaitSessionReadiness(sessionId);
+        const receipt = await this.#access.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: this.#nextCommandId(sessionId, 'clear-grants'),
+          type: 'clear_session_command_grants',
+          sessionId,
+          expectedRevision: this.#revision(sessionId),
+        });
+        this.#assertApplied(receipt);
+        return receipt;
+      },
+      listRewindCheckpoints: async (
+        sessionId: string,
+      ): Promise<readonly RuntimeCheckpointProjection[]> => {
+        await this.#awaitSessionReadiness(sessionId);
+        const result = await this.#access.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'list_checkpoints',
+          sessionId,
+        });
+        return result.status === 'ok' && result.queryType === 'list_checkpoints'
+          ? (result.checkpoints ?? [])
+          : [];
+      },
+      previewRewind: async (
+        sessionId: string,
+        checkpointId: string,
+      ): Promise<RuntimeRewindPreviewProjection | null> => {
+        await this.#awaitSessionReadiness(sessionId);
+        const result = await this.#access.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'get_rewind_preview',
+          sessionId,
+          checkpointId,
+        });
+        return result.status === 'ok' && result.queryType === 'get_rewind_preview'
+          ? (result.rewindPreview ?? null)
+          : null;
+      },
+      getSessionProjection: async (sessionId: string): Promise<RuntimeSessionProjection | null> => {
+        await this.#awaitSessionReadiness(sessionId);
+        const result = await this.#access.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'get_session_projection',
+          sessionId,
+        });
+        return result.status === 'ok' && result.queryType === 'get_session_projection'
+          ? (result.session ?? null)
+          : null;
+      },
+      listPersistedSessions: (query = '') => this.#history.listPersistedSessions(query),
+      loadPersistedSession: (sessionId: string) => this.#history.loadPersistedSession(sessionId),
+      getRuntime: (sessionId: string): TuiSessionFacade | undefined => {
+        const runtime = target.getRuntime(sessionId);
+        return runtime ? this.#runtimeClient(runtime) : undefined;
+      },
+      forkRecoveredSessionForContinuation: (sessionId: string): TuiSessionFacade | undefined => {
+        const runtime = target.forkRecoveredSessionForContinuation(sessionId);
+        if (!runtime) return undefined;
+        if (!this.#sessions.has(runtime.threadId)) {
+          this.#sessions.set(runtime.threadId, {
+            revision: 0,
+            workspace: runtime.workspace,
+            lifecycle: 'open',
+          });
+        }
+        return this.#runtimeClient(runtime);
+      },
+      deletePersistedSession: async (sessionId: string): Promise<void> => {
+        await this.#awaitSessionReadiness(sessionId);
+        const authority = this.#sessions.get(sessionId);
+        if (!authority) throw new Error(`Unknown TUI session: ${sessionId}`);
+        const receipt = await this.#access.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: this.#nextCommandId(sessionId, 'delete'),
+          type: 'delete_session',
+          sessionId,
+          expectedRevision: authority.revision,
+        });
+        this.#assertApplied(receipt);
+
+        // The Runtime Host has already atomically removed durable State and
+        // retained the receipt. Release only App-local handles; never issue a
+        // close command that could rebuild the snapshot.
+        await target.releaseRuntimeSessionCoordinator(sessionId);
+        target.removeRuntimeAfterHostClose(sessionId);
+        this.#subscriptionControllers.get(sessionId)?.abort();
+        this.#subscriptionControllers.delete(sessionId);
+        this.#subscriptionReadiness.delete(sessionId);
+        this.#runtimeClients.delete(sessionId);
+        this.#sessionReadiness.delete(sessionId);
+        this.#sessions.delete(sessionId);
+      },
+      removeRuntime: async (sessionId: string): Promise<void> => {
+        let cleanupError: unknown;
+        const rememberError = (error: unknown): void => {
+          cleanupError ??= error;
+        };
+
+        let readinessSettled = false;
+        try {
+          await this.#awaitSessionReadiness(sessionId);
+          readinessSettled = true;
+        } catch (error) {
+          // A rejected resume/create admission still leaves a local Runtime
+          // that must be removed. Preserve the rejection for the caller, but
+          // do not strand the registration behind it.
+          rememberError(error);
+        }
+
+        let operationActive = false;
+        try {
+          operationActive = this.#access.isSessionOperationActive(sessionId);
+        } catch (error) {
+          // If the Host cannot answer, fail closed and attempt the draining
+          // close path before releasing the coordinator.
+          operationActive = true;
+          rememberError(error);
+        }
+        // A settled admission owns a Host lifecycle entry even when it never
+        // started work. Close that entry without manufacturing a cancellation
+        // fact; a failed admission has no confirmed Host lifecycle to close.
+        const shouldCloseHost = readinessSettled || operationActive;
+
+        try {
+          const authority = this.#sessions.get(sessionId);
+          let closeApplied = false;
+          if (authority && shouldCloseHost) {
+            try {
               const receipt = await this.#access.command({
                 schema: RUNTIME_COMMAND_SCHEMA_,
-                commandId: this.#nextCommandId(sessionId, 'clear-grants'),
-                type: 'clear_session_command_grants',
-                sessionId,
-                expectedRevision: this.#revision(sessionId),
-              });
-              this.#assertApplied(receipt);
-              return receipt;
-            };
-          }
-          if (property === 'listRewindCheckpoints') {
-            return async (sessionId: string): Promise<readonly RuntimeCheckpointProjection[]> => {
-              await this.#awaitSessionReadiness(sessionId);
-              const result = await this.#access.query({
-                schema: 'kite.runtime-query.v1',
-                type: 'list_checkpoints',
-                sessionId,
-              });
-              return result.status === 'ok' && result.queryType === 'list_checkpoints'
-                ? (result.checkpoints ?? [])
-                : [];
-            };
-          }
-          if (property === 'previewRewind') {
-            return async (
-              sessionId: string,
-              checkpointId: string,
-            ): Promise<RuntimeRewindPreviewProjection | null> => {
-              await this.#awaitSessionReadiness(sessionId);
-              const result = await this.#access.query({
-                schema: 'kite.runtime-query.v1',
-                type: 'get_rewind_preview',
-                sessionId,
-                checkpointId,
-              });
-              return result.status === 'ok' && result.queryType === 'get_rewind_preview'
-                ? (result.rewindPreview ?? null)
-                : null;
-            };
-          }
-          if (property === 'getSessionProjection') {
-            return async (sessionId: string): Promise<RuntimeSessionProjection | null> => {
-              await this.#awaitSessionReadiness(sessionId);
-              const result = await this.#access.query({
-                schema: 'kite.runtime-query.v1',
-                type: 'get_session_projection',
-                sessionId,
-              });
-              return result.status === 'ok' && result.queryType === 'get_session_projection'
-                ? (result.session ?? null)
-                : null;
-            };
-          }
-          if (property === 'listPersistedSessions') {
-            return (query = '') => this.#history.listPersistedSessions(query);
-          }
-          if (property === 'loadPersistedSession') {
-            return (sessionId: string) => this.#history.loadPersistedSession(sessionId);
-          }
-          if (property === 'getRuntime') {
-            return (sessionId: string): object | undefined => {
-              const runtime = target.getRuntime(sessionId);
-              return runtime ? this.#runtimeClient(runtime) : undefined;
-            };
-          }
-          if (property === 'forkRecoveredSessionForContinuation') {
-            return (sessionId: string): object | undefined => {
-              const runtime = target.forkRecoveredSessionForContinuation(sessionId);
-              if (!runtime) return undefined;
-              if (!this.#sessions.has(runtime.threadId)) {
-                this.#sessions.set(runtime.threadId, {
-                  revision: 0,
-                  workspace: runtime.workspace,
-                  lifecycle: 'open',
-                });
-              }
-              return this.#runtimeClient(runtime);
-            };
-          }
-          if (property === 'deletePersistedSession') {
-            return async (sessionId: string): Promise<void> => {
-              await this.#awaitSessionReadiness(sessionId);
-              const authority = this.#sessions.get(sessionId);
-              if (!authority) throw new Error(`Unknown TUI session: ${sessionId}`);
-              const receipt = await this.#access.command({
-                schema: RUNTIME_COMMAND_SCHEMA_,
-                commandId: this.#nextCommandId(sessionId, 'delete'),
-                type: 'delete_session',
+                commandId: this.#nextCommandId(sessionId, 'close'),
+                type: 'close_session',
                 sessionId,
                 expectedRevision: authority.revision,
               });
               this.#assertApplied(receipt);
-
-              // The Runtime Host has already atomically removed durable State
-              // and retained the receipt. Release only App-local handles;
-              // never issue a close command that could rebuild the snapshot.
-              await target.releaseRuntimeSessionCoordinator(sessionId);
-              target.removeRuntimeAfterHostClose(sessionId);
-              this.#subscriptionControllers.get(sessionId)?.abort();
-              this.#subscriptionControllers.delete(sessionId);
-              this.#subscriptionReadiness.delete(sessionId);
-              this.#runtimeClients.delete(sessionId);
-              this.#sessionReadiness.delete(sessionId);
-              this.#sessions.delete(sessionId);
-            };
+              closeApplied = true;
+            } catch (error) {
+              rememberError(error);
+            }
           }
-          if (property === 'removeRuntime') {
-            return async (sessionId: string): Promise<void> => {
-              let cleanupError: unknown;
-              const rememberError = (error: unknown): void => {
-                cleanupError ??= error;
-              };
 
-              let readinessSettled = false;
-              try {
-                await this.#awaitSessionReadiness(sessionId);
-                readinessSettled = true;
-              } catch (error) {
-                // A rejected resume/create admission still leaves a local
-                // Runtime that must be removed. Preserve the rejection for
-                // the caller, but do not strand the registration behind it.
-                rememberError(error);
-              }
-
-              let operationActive = false;
-              try {
-                operationActive = this.#access.isSessionOperationActive(sessionId);
-              } catch (error) {
-                // If the Host cannot answer, fail closed and attempt the
-                // draining close path before releasing the coordinator.
-                operationActive = true;
-                rememberError(error);
-              }
-              // A settled admission owns a Host lifecycle entry even when it
-              // never started work. Close that entry without manufacturing a
-              // cancellation fact; a failed admission has no confirmed Host
-              // lifecycle to close. An observed live operation remains a
-              // fail-closed close candidate even if readiness reporting failed.
-              const shouldCloseHost = readinessSettled || operationActive;
-
-              try {
-                const authority = this.#sessions.get(sessionId);
-                let closeApplied = false;
-                if (authority && shouldCloseHost) {
-                  try {
-                    const receipt = await this.#access.command({
-                      schema: RUNTIME_COMMAND_SCHEMA_,
-                      commandId: this.#nextCommandId(sessionId, 'close'),
-                      type: 'close_session',
-                      sessionId,
-                      expectedRevision: authority.revision,
-                    });
-                    this.#assertApplied(receipt);
-                    closeApplied = true;
-                  } catch (error) {
-                    rememberError(error);
-                  }
-                }
-
-                // A failed close can leave a scheduled operation alive;
-                // always make one bounded drain attempt before releasing
-                // the State coordinator and manager registration. This also
-                // covers a Host operation whose local bridge authority was
-                // lost while readiness was failing.
-                if (closeApplied || operationActive) {
-                  try {
-                    await this.#access.waitForSessionIdle(sessionId);
-                  } catch (error) {
-                    rememberError(error);
-                  }
-                }
-              } catch (error) {
-                rememberError(error);
-              }
-
-              try {
-                await target.releaseRuntimeSessionCoordinator(sessionId);
-              } catch (error) {
-                rememberError(error);
-              }
-
-              try {
-                target.removeRuntimeAfterHostClose(sessionId);
-              } catch (error) {
-                rememberError(error);
-              } finally {
-                this.#subscriptionControllers.get(sessionId)?.abort();
-                this.#subscriptionControllers.delete(sessionId);
-                this.#subscriptionReadiness.delete(sessionId);
-                this.#runtimeClients.delete(sessionId);
-                this.#sessionReadiness.delete(sessionId);
-                this.#sessions.delete(sessionId);
-              }
-
-              if (cleanupError !== undefined) throw cleanupError;
-            };
+          // A failed close can leave a scheduled operation alive; always make
+          // one bounded drain attempt before releasing local registrations.
+          if (closeApplied || operationActive) {
+            try {
+              await this.#access.waitForSessionIdle(sessionId);
+            } catch (error) {
+              rememberError(error);
+            }
           }
-          if (property === 'handleContextCompaction') {
-            return async (
-              sessionId: string,
-              instructions?: string,
-              onProgress?: ContextCompactionProgress,
-              onCommand?: ContextCompactionCommand,
-            ): Promise<ContextCompactionResult | undefined> => {
-              await this.#awaitSessionReadiness(sessionId);
-              const commandId = this.#nextCommandId(sessionId, 'compact');
-              const deferred = createDeferred();
-              const pending: PendingCompaction = {
-                instructions,
-                onProgress,
-                onCommand,
-                ...deferred,
-              };
-              this.#pendingCompactions.set(commandId, pending);
-              try {
-                const receipt = await this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_,
-                  commandId,
-                  type: 'compact_session',
-                  sessionId,
-                  expectedRevision: this.#revision(sessionId),
-                  mode: 'manual',
-                  ...(instructions === undefined ? {} : { instructions }),
-                });
-                this.#assertApplied(receipt);
-                await pending.completion;
-                return pending.result;
-              } finally {
-                this.#pendingCompactions.delete(commandId);
-              }
-            };
-          }
-          if (property === 'handleContextReset') {
-            return async (sessionId: string): Promise<ContextCompactionResult | undefined> => {
-              await this.#awaitSessionReadiness(sessionId);
-              const commandId = this.#nextCommandId(sessionId, 'reset');
-              const pending: PendingCompaction = { ...createDeferred() };
-              this.#pendingCompactions.set(commandId, pending);
-              try {
-                const receipt = await this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_,
-                  commandId,
-                  type: 'compact_session',
-                  sessionId,
-                  expectedRevision: this.#revision(sessionId),
-                  mode: 'reset',
-                });
-                this.#assertApplied(receipt);
-                await pending.completion;
-                return pending.result;
-              } finally {
-                this.#pendingCompactions.delete(commandId);
-              }
-            };
-          }
-          if (property === 'executeRewind') {
-            return async (input: {
-              sourceThreadId: string;
-              snapshotId: string;
-              scope: 'code_and_conversation' | 'code_only' | 'conversation_only';
-              workspace: string;
-            }): Promise<RewindResult | undefined> => {
-              await this.#awaitSessionReadiness(input.sourceThreadId);
-              const commandId = this.#nextCommandId(input.sourceThreadId, 'rewind');
-              const pending: PendingRewind = {
-                workspace: input.workspace,
-                ...createDeferred(),
-              };
-              this.#pendingRewinds.set(commandId, pending);
-              try {
-                const receipt = await this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_,
-                  commandId,
-                  type: 'rewind_session',
-                  sessionId: input.sourceThreadId,
-                  expectedRevision: this.#revision(input.sourceThreadId),
-                  checkpointId: input.snapshotId,
-                  scope:
-                    input.scope === 'code_and_conversation'
-                      ? 'conversation_and_workspace'
-                      : input.scope,
-                });
-                this.#assertApplied(receipt);
-                await pending.completion;
-                return pending.result;
-              } finally {
-                this.#pendingRewinds.delete(commandId);
-              }
-            };
-          }
-          const value = Reflect.get(target, property, target) as unknown;
-          return typeof value === 'function' ? value.bind(target) : value;
-        })();
-        if (typeof member === 'function') this.#managerMembers.set(property, member);
-        return member;
+        } catch (error) {
+          rememberError(error);
+        }
+
+        try {
+          await target.releaseRuntimeSessionCoordinator(sessionId);
+        } catch (error) {
+          rememberError(error);
+        }
+
+        try {
+          target.removeRuntimeAfterHostClose(sessionId);
+        } catch (error) {
+          rememberError(error);
+        } finally {
+          this.#subscriptionControllers.get(sessionId)?.abort();
+          this.#subscriptionControllers.delete(sessionId);
+          this.#subscriptionReadiness.delete(sessionId);
+          this.#runtimeClients.delete(sessionId);
+          this.#sessionReadiness.delete(sessionId);
+          this.#sessions.delete(sessionId);
+        }
+
+        if (cleanupError !== undefined) throw cleanupError;
       },
-    }) as unknown as TuiSessionManager;
+      handleContextCompaction: async (
+        sessionId: string,
+        instructions?: string,
+        onProgress?: ContextCompactionProgress,
+        onCommand?: ContextCompactionCommand,
+      ): Promise<ContextCompactionResult> => {
+        await this.#awaitSessionReadiness(sessionId);
+        const commandId = this.#nextCommandId(sessionId, 'compact');
+        const deferred = createDeferred();
+        const pending: PendingCompaction = {
+          instructions,
+          onProgress,
+          onCommand,
+          ...deferred,
+        };
+        this.#pendingCompactions.set(commandId, pending);
+        try {
+          const receipt = await this.#access.command({
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId,
+            type: 'compact_session',
+            sessionId,
+            expectedRevision: this.#revision(sessionId),
+            mode: 'manual',
+            ...(instructions === undefined ? {} : { instructions }),
+          });
+          this.#assertApplied(receipt);
+          await pending.completion;
+          if (!pending.result) throw new Error('Runtime compaction result is unavailable.');
+          return pending.result;
+        } finally {
+          this.#pendingCompactions.delete(commandId);
+        }
+      },
+      handleContextReset: async (sessionId: string): Promise<ContextCompactionResult> => {
+        await this.#awaitSessionReadiness(sessionId);
+        const commandId = this.#nextCommandId(sessionId, 'reset');
+        const pending: PendingCompaction = { ...createDeferred() };
+        this.#pendingCompactions.set(commandId, pending);
+        try {
+          const receipt = await this.#access.command({
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId,
+            type: 'compact_session',
+            sessionId,
+            expectedRevision: this.#revision(sessionId),
+            mode: 'reset',
+          });
+          this.#assertApplied(receipt);
+          await pending.completion;
+          if (!pending.result) throw new Error('Runtime reset result is unavailable.');
+          return pending.result;
+        } finally {
+          this.#pendingCompactions.delete(commandId);
+        }
+      },
+      executeRewind: async (input): Promise<RewindResult> => {
+        await this.#awaitSessionReadiness(input.sourceThreadId);
+        const commandId = this.#nextCommandId(input.sourceThreadId, 'rewind');
+        const pending: PendingRewind = {
+          workspace: input.workspace,
+          ...createDeferred(),
+        };
+        this.#pendingRewinds.set(commandId, pending);
+        try {
+          const receipt = await this.#access.command({
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId,
+            type: 'rewind_session',
+            sessionId: input.sourceThreadId,
+            expectedRevision: this.#revision(input.sourceThreadId),
+            checkpointId: input.snapshotId,
+            scope:
+              input.scope === 'code_and_conversation' ? 'conversation_and_workspace' : input.scope,
+          });
+          this.#assertApplied(receipt);
+          await pending.completion;
+          if (!pending.result) throw new Error('Runtime rewind result is unavailable.');
+          return pending.result;
+        } finally {
+          this.#pendingRewinds.delete(commandId);
+        }
+      },
+      getActiveId: () => target.getActiveId(),
+      switchSession: (fromId: string, toId: string) => target.switchSession(fromId, toId),
+      getSnapshot: (previous) => target.getSnapshot(previous),
+      setSnapshotCallback: (callback) => target.setSnapshotCallback(callback),
+      onInterruptPending: (threadId) => target.onInterruptPending(threadId),
+      onStatusChange: (threadId) => target.onStatusChange(threadId),
+      setName: (threadId, name) => target.setName(threadId, name),
+      saveTokenStats: (threadId, status, immediate) =>
+        target.saveTokenStats(threadId, status, immediate),
+      setSessionConfig: (threadId, config, options) =>
+        target.setSessionConfig(threadId, config, options),
+      getDefaultConfig: () => target.getDefaultConfig(),
+      buildContextStatusSnapshot: (threadId) => target.buildContextStatusSnapshot(threadId),
+      handleContextDisplay: (threadId) => target.handleContextDisplay(threadId),
+      generateAndPersistSessionName: (threadId, task) =>
+        target.generateAndPersistSessionName(threadId, task),
+      hasRuntime: (threadId) => target.hasRuntime(threadId),
+      updateSkillManifests: (manifests) => target.updateSkillManifests(manifests),
+      updateMcpRuntimeProvider: (provider) => target.updateMcpRuntimeProvider(provider),
+      updateMcpRecoveryController: (controller) => target.updateMcpRecoveryController(controller),
+      shutdownObservability: (timeoutMs) => target.shutdownObservability(timeoutMs),
+    };
+    return client;
   }
 
-  #runtimeClient(runtime: SessionRuntime): object {
+  #runtimeClient(runtime: SessionRuntime): TuiSessionFacade {
     const existing = this.#runtimeClients.get(runtime.threadId);
     if (existing) return existing;
-    const client = new Proxy(runtime, {
-      get: (target, property) => {
-        if (property === 'runTask') {
-          return async (
-            task: string,
-            dependencies: Parameters<SessionRuntime['runTask']>[1],
-            requestedPhase?: Parameters<SessionRuntime['runTask']>[2],
-            initialSkills?: Parameters<SessionRuntime['runTask']>[3],
-          ): Promise<void> => {
-            await this.#awaitSessionReadiness(target.threadId);
-            await this.#ensureSessionSubscription(target.threadId, dependencies.dispatch);
-            const commandId = this.#nextCommandId(target.threadId, 'turn');
-            const pending: PendingRun = {
-              dependencies,
-              requestedPhase,
-              initialSkills,
-              ...createDeferred(),
-            };
-            this.#pendingRuns.set(commandId, pending);
-            try {
-              const receipt = await this.#access.command({
-                schema: RUNTIME_COMMAND_SCHEMA_,
-                commandId,
-                type: 'start_turn',
-                sessionId: target.threadId,
-                expectedRevision: this.#revision(target.threadId),
-                input: task,
-                ...(requestedPhase === undefined ? {} : { phase: requestedPhase }),
-                ...(initialSkills === undefined ? {} : { initialSkills }),
-              });
-              this.#assertApplied(receipt);
-              await pending.completion;
-            } finally {
-              this.#pendingRuns.delete(commandId);
-            }
-          };
-        }
-        if (property === 'waitForRunCompletion') {
-          return async (): Promise<void> => {
-            await this.#awaitSessionReadiness(target.threadId);
-            await this.#access.waitForSessionIdle(target.threadId);
-          };
-        }
-        if (property === 'abort') {
-          return (): void => {
-            // Cancellation is a Runtime command. The Host commits the exact
-            // turn identity before its lifecycle supervisor aborts execution;
-            // the Client must never become a second State/lifecycle owner.
-            void this.#cancelTurn(target).catch((error) => {
-              target.reportRuntimeFailure(
-                error instanceof Error
-                  ? error.message
-                  : `TUI Runtime cancellation failed: ${String(error)}`,
-              );
-            });
-          };
-        }
-        if (property === 'setInteractionMode') {
-          return (mode: 'accept_edits' | 'auto' | 'full'): void => {
-            void this.#awaitSessionReadiness(target.threadId)
-              .then(() =>
-                this.#access.command({
-                  schema: RUNTIME_COMMAND_SCHEMA_,
-                  commandId: this.#nextCommandId(target.threadId, 'mode'),
-                  type: 'set_interaction_mode',
-                  sessionId: target.threadId,
-                  expectedRevision: this.#revision(target.threadId),
-                  mode,
-                }),
-              )
-              .catch(() => {});
-          };
-        }
-        const value = Reflect.get(target, property, target) as unknown;
-        return typeof value === 'function' ? value.bind(target) : value;
+    const client: TuiSessionFacade = {
+      get threadId(): string {
+        return runtime.threadId;
       },
-      set: (target, property, value) => Reflect.set(target, property, value, target),
-    });
+      get workspace(): string {
+        return runtime.workspace;
+      },
+      get agentLoopActive(): boolean {
+        return runtime.agentLoopActive;
+      },
+      get pendingInterrupt(): boolean {
+        return runtime.pendingInterrupt;
+      },
+      set pendingInterrupt(value: boolean) {
+        runtime.pendingInterrupt = value;
+      },
+      get name(): string {
+        return runtime.name;
+      },
+      get eventBuffer() {
+        return runtime.eventBuffer;
+      },
+      get config() {
+        return runtime.config;
+      },
+      set config(config) {
+        runtime.config = config;
+      },
+      get conversationHistory() {
+        return runtime.conversationHistory;
+      },
+      set conversationHistory(history) {
+        runtime.conversationHistory = history;
+      },
+      get thinkingLevel() {
+        return runtime.thinkingLevel;
+      },
+      set thinkingLevel(level) {
+        runtime.thinkingLevel = level;
+      },
+      get interactionMode() {
+        return runtime.interactionMode;
+      },
+      set interactionMode(mode) {
+        runtime.interactionMode = mode;
+      },
+      get dormant() {
+        return runtime.dormant;
+      },
+      set dormant(value) {
+        runtime.dormant = value;
+      },
+      get localReplayRecovery() {
+        return runtime.localReplayRecovery;
+      },
+      set localReplayRecovery(value) {
+        runtime.localReplayRecovery = value;
+      },
+      tryReservePrompt: () => runtime.tryReservePrompt(),
+      waitForRunCompletion: async (): Promise<void> => {
+        await this.#awaitSessionReadiness(runtime.threadId);
+        await this.#access.waitForSessionIdle(runtime.threadId);
+      },
+      runTask: async (
+        task: string,
+        dependencies: TuiSessionRunDependencies,
+        requestedPhase,
+        initialSkills,
+      ): Promise<void> => {
+        await this.#awaitSessionReadiness(runtime.threadId);
+        await this.#ensureSessionSubscription(runtime.threadId, dependencies.dispatch);
+        const commandId = this.#nextCommandId(runtime.threadId, 'turn');
+        const pending: PendingRun = {
+          dependencies,
+          requestedPhase,
+          initialSkills,
+          ...createDeferred(),
+        };
+        this.#pendingRuns.set(commandId, pending);
+        try {
+          const receipt = await this.#access.command({
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId,
+            type: 'start_turn',
+            sessionId: runtime.threadId,
+            expectedRevision: this.#revision(runtime.threadId),
+            input: task,
+            ...(requestedPhase === undefined ? {} : { phase: requestedPhase }),
+            ...(initialSkills === undefined ? {} : { initialSkills }),
+          });
+          this.#assertApplied(receipt);
+          await pending.completion;
+        } finally {
+          this.#pendingRuns.delete(commandId);
+        }
+      },
+      abort: (): void => {
+        // Cancellation is a Runtime command. The Host commits the exact turn
+        // identity before its lifecycle supervisor aborts execution; the
+        // Client must never become a second State/lifecycle owner.
+        void this.#cancelTurn(runtime).catch((error) => {
+          runtime.reportRuntimeFailure(
+            error instanceof Error
+              ? error.message
+              : `TUI Runtime cancellation failed: ${String(error)}`,
+          );
+        });
+      },
+      setForeground: (foreground: boolean): void => runtime.setForeground(foreground),
+      setInteractionMode: (mode): void => {
+        void this.#awaitSessionReadiness(runtime.threadId)
+          .then(() =>
+            this.#access.command({
+              schema: RUNTIME_COMMAND_SCHEMA_,
+              commandId: this.#nextCommandId(runtime.threadId, 'mode'),
+              type: 'set_interaction_mode',
+              sessionId: runtime.threadId,
+              expectedRevision: this.#revision(runtime.threadId),
+              mode,
+            }),
+          )
+          .catch(() => {});
+      },
+      setDormant: (dormant: boolean): void => {
+        runtime.dormant = dormant;
+      },
+      setLocalReplayRecovery: (recovered: boolean): void => {
+        runtime.localReplayRecovery = recovered;
+      },
+      setInteractionModeMirror: (mode): void => {
+        runtime.interactionMode = mode;
+      },
+      setThinkingLevel: (level: string | null): void => {
+        runtime.thinkingLevel = level;
+      },
+      setConversationHistory: (history: readonly string[]): void => {
+        runtime.conversationHistory = [...history];
+      },
+      appendBufferedEvents: (events): void => {
+        runtime.eventBuffer.push(...events);
+      },
+    };
     this.#runtimeClients.set(runtime.threadId, client);
     return client;
   }

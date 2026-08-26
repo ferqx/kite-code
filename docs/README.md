@@ -39,6 +39,10 @@ carrier 与跨 transport qualification 分成独立映射规则；通用 Runtime
 fixture。后续新增 Service 或 package 时，只有在 source 与 owner README 实际存在的同一改动中才加入 V2
 规则，不以无效 future path 或空 workspace 预占 documentation owner。
 
+Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-contract` 与 Bun/Node-only
+`kite-local-runtime`；前者使用独立 App Control source owner，后者的 Native client 与 Service state primitive
+使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
+
 ## 并发开发
 
 每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree

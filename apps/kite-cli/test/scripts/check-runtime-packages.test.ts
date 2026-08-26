@@ -41,10 +41,10 @@ function expectViolation(root: string, code: string): void {
 }
 
 describe('runtime workspace package gate', () => {
-  test('accepts the authoritative nine-package and App graph', () => {
+  test('accepts the authoritative eleven-package and App graph', () => {
     const analysis = analyzeRuntimePackages(process.cwd());
     expect(analysis.violations).toEqual([]);
-    expect(analysis.packages).toHaveLength(10);
+    expect(analysis.packages).toHaveLength(12);
     expect(analysis.compositionRoots).toEqual(['apps/kite-cli/src/bootstrap.ts']);
   });
 

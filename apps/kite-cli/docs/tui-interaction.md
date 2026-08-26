@@ -13,6 +13,12 @@
   向前分页读取 complete closed transcript，并与 live 事件共用 reducer。短期 subscription replay/gap reset
   不是完整 history source。
 - TUI 不直接 import 或持有 Runtime Host、SQLite/Store、Kernel、Builtin executor、RuntimeLogQueryPort 或 transport/server concrete type；它不自建 mailbox、receipt、recovery 或 SQLite fallback。
+- TUI 的 InProcess client surface 是显式 `TuiRuntimeClientFacade` / `TuiSessionFacade` method 与字段清单；不得从
+  `SessionManager` 推导类型，也不得使用 Proxy、Reflect fallback、动态 member cache 或 set trap 让 implementation
+  新成员自动进入 TUI。新增 surface 必须同时修改 interface、adapter 与 fake-client/conformance tests。
+- Workspace Trust、Provider/model、MCP、Skill 与 status 已有逐方法 exact App Control InProcess conformance adapter，
+  request/response 都通过 browser-safe codec。当前 TUI direct dependency 尚未在 KLSV1-02 切到这些 client methods；
+  在 owner split 前不得把 adapter 存在写成 Service 已运行或跨进程 journey 已完成。
 
 ## 单一交互表面
 

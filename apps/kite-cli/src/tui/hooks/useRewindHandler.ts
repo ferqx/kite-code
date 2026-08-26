@@ -5,7 +5,7 @@ import type {
 import type { Dispatch } from 'react';
 import React from 'react';
 import { loadAgentConfig } from '#kite-cli/config';
-import type { TuiSessionManager as SessionManager } from '../../adapters/tui/session-adapter';
+import type { TuiRuntimeClientFacade as SessionManager } from '../../adapters/tui/session-adapter';
 import type { Action } from '../reducers/actions';
 import { sessionDataToUI } from '../replay-blocks';
 import type { RewindFileOutcome, RewindFilePreview } from '../runtime-presentation';
