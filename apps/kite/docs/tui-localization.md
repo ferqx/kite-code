@@ -16,6 +16,8 @@
 - 中文是默认仓库 current 文档语言；产品可见 locale 至少保持现有中文/英文目录完整。
 - 路径、命令、模型名、Provider 名、schema 字段和用户/模型原文不翻译。
 - 可见错误只使用已脱敏的 bounded projection，不把 Provider 原文、credential、Artifact locator 或内部 identity 拼入译文。
+- Approval 的 queue sequence、generation 与 interaction ID 是内部 durable identity，不注册可见翻译 key；面板只翻译
+  人工/自动 route、匹配请求数量与用户动作，settlement 仍使用未展示的 exact identity。
 - 推荐标记、动作动词和快捷键说明由 catalog 统一生成，页面不得维护第二份同义字符串。
 
 ## 布局

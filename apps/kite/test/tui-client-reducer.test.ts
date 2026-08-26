@@ -4,6 +4,7 @@ import type { RuntimeEvent } from '../src/bootstrap/runtime/state-runtime';
 import { projectRuntimeClientEvent } from '../src/runtime-client/event-projector';
 import { createInitialState } from '../src/tui/App';
 import { eventReducer } from '../src/tui/reducers';
+import { sessionDataToUI } from '../src/tui/replay-blocks';
 
 describe('closed RuntimeClientEvent reducer', () => {
   test('renders a durable user prompt once by message identity across replay', () => {
@@ -989,6 +990,161 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(blocks).toContainEqual(
       expect.objectContaining({ kind: 'text', content: 'Project overview.' }),
     );
+  });
+
+  test('replays late final reasoning into the preceding post-Bash search Thought', () => {
+    const events = [
+      {
+        type: 'user.message',
+        messageId: 'post-bash-resume-user',
+        kind: 'task',
+        text: 'Give me a project overview.',
+      },
+      {
+        type: 'model.requested',
+        requestId: 'post-bash-resume-searches',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'post-bash-resume-searches',
+        messageId: 'post-bash-resume-searches-message',
+        durationMs: 2_000,
+        toolCallCount: 3,
+      },
+      {
+        type: 'tool.queued',
+        toolId: 'post-bash-resume-bash',
+        toolName: 'shell_execute',
+        presentation: 'standalone',
+        arguments: { command: 'git status --short' },
+        summary: 'Queued.',
+      },
+      { type: 'tool.started', toolId: 'post-bash-resume-bash' },
+      ...(['CLAUDE.md', 'package.json'] as const).flatMap(
+        (pattern, index): RuntimeClientEvent[] => {
+          const toolId = `post-bash-resume-search-${index}`;
+          return [
+            {
+              type: 'tool.queued' as const,
+              toolId,
+              toolName: 'search_files',
+              presentation: 'exploration' as const,
+              arguments: { pattern },
+              summary: 'Queued.',
+            },
+            { type: 'tool.started' as const, toolId },
+            {
+              type: 'tool.finished' as const,
+              toolId,
+              toolName: 'search_files',
+              presentation: 'exploration' as const,
+              result: { ok: true as const, exitCode: 0, stdout: pattern, stderr: '' },
+              summary: 'Completed.',
+            },
+          ];
+        },
+      ),
+      // The independent Bash terminal arrives after both searches. It owns
+      // the earlier standalone card and must not close their aggregate.
+      {
+        type: 'tool.finished',
+        toolId: 'post-bash-resume-bash',
+        toolName: 'shell_execute',
+        presentation: 'standalone',
+        result: { ok: true, exitCode: 0, stdout: '', stderr: '' },
+        summary: 'Completed.',
+      },
+      { type: 'model.requested', requestId: 'post-bash-resume-final' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'post-bash-resume-final',
+        state: 'completed',
+        segmentId: 'post-bash-resume-final-reasoning',
+        text: 'Synthesizing the search results.',
+      },
+      {
+        type: 'model.responded',
+        requestId: 'post-bash-resume-final',
+        messageId: 'post-bash-resume-final-message',
+        durationMs: 14_000,
+        toolCallCount: 0,
+        summary: 'POST_BASH_RESUME_DONE',
+      },
+      {
+        type: 'run.terminal',
+        runId: 'post-bash-resume-run',
+        status: 'completed',
+        summary: 'POST_BASH_RESUME_DONE',
+      },
+    ] satisfies RuntimeClientEvent[];
+    const reduce = (runtimeEvents: readonly RuntimeClientEvent[], initial = createInitialState()) =>
+      runtimeEvents.reduce(
+        (state, event) => eventReducer(state, { type: 'RUNTIME_EVENT', event }),
+        initial,
+      );
+    const assertProjection = (blocks: ReturnType<typeof reduce>['turns'][number]['blocks']) => {
+      const summaries = blocks.filter(
+        (block): block is Extract<(typeof blocks)[number], { kind: 'tool_summary' }> =>
+          block.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]).toEqual(
+        expect.objectContaining({
+          hasThinking: true,
+          modelMs: 14_000,
+          totalElapsedMs: 14_000,
+          summaryLine: 'searched 2 file patterns',
+          modelRequestId: 'post-bash-resume-final',
+        }),
+      );
+      expect(summaries[0]?.timeline).toContainEqual(
+        expect.objectContaining({ kind: 'thinking', text: 'Synthesizing the search results.' }),
+      );
+      expect(
+        blocks.filter((block) => block.kind === 'text' && block.thoughtElapsedMs !== undefined),
+      ).toHaveLength(0);
+    };
+
+    const bashTerminalIndex = events.findIndex(
+      (event) => event.type === 'tool.finished' && event.toolId === 'post-bash-resume-bash',
+    );
+    const afterBashTerminal = reduce(events.slice(0, bashTerminalIndex + 1));
+    const activeSearchSummary = afterBashTerminal.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.kind === 'tool_summary');
+    expect(activeSearchSummary).toEqual(
+      expect.objectContaining({ active: true, summaryLine: 'searched 2 file patterns' }),
+    );
+    expect(afterBashTerminal.currentThoughtSummaryId).toBe(activeSearchSummary?.id);
+
+    assertProjection(reduce(events).turns.flatMap((turn) => turn.blocks));
+
+    const replay = sessionDataToUI({
+      threadId: 'post-bash-resume-session',
+      messages: [],
+      runtimeEvents: events,
+      interrupt: null,
+      modelProvider: 'test',
+      modelName: 'test',
+      thinkingLevel: null,
+      plan: null,
+      interactionMode: 'accept_edits',
+    });
+    assertProjection(replay.blocks);
+
+    // Durable terminal delivery may still overtake completed reasoning during
+    // replay. It must enrich the preceding tool summary, not the final text.
+    const reasoningIndex = events.findIndex((event) => event.type === 'reasoning.activity');
+    const modelRespondedIndex = events.findIndex(
+      (event) => event.type === 'model.responded' && event.requestId === 'post-bash-resume-final',
+    );
+    const terminalBeforeReasoning = [
+      ...events.slice(0, reasoningIndex),
+      events[modelRespondedIndex]!,
+      events[reasoningIndex]!,
+      ...events.slice(modelRespondedIndex + 1),
+    ];
+    assertProjection(reduce(terminalBeforeReasoning).turns.flatMap((turn) => turn.blocks));
   });
 
   test('keeps late narration and following searches in the tool-bearing Thought', () => {

@@ -146,12 +146,6 @@ export default function ApprovalBlock({
       <Box marginTop={1} marginLeft={1} flexDirection="column">
         <Text color={t.dim}>
           {route === 'auto' ? translate('approval.routeAuto') : translate('approval.routeUser')}
-          {queueEntry
-            ? [
-                translate('approval.queuePosition', { sequence: queueEntry.sequence }),
-                translate('approval.queueGeneration', { generation: queueEntry.generation }),
-              ].join(' · ')
-            : ''}
         </Text>
         {queueEntry?.matchCount != null && queueEntry.matchCount > 1 && (
           <Text color={t.dim}>

@@ -15,16 +15,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitUserMessage } from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
+  screenHasSessionRow,
   stripAnsi,
   waitForCondition,
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, observePersistedUserMessageSession } from '../harness/test-workspace';
 
 const TIMEOUT = 40000;
 
@@ -137,12 +138,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(screenContains(output, 'PHASE_ONE')).toBe(false);
       expect(screenContains(output, 'PHASE_TWO')).toBe(false);
       const lines = clean.split('\n').map((line) => line.trim());
-      expect(lines.indexOf('先查看项目入口和核心配置。')).toBe(
-        lines.findIndex((line) => line.startsWith('Thinking ')) + 1,
-      );
-      expect(lines.indexOf('继续搜索源码和文档目录。')).toBe(
-        lines.indexOf('先查看项目入口和核心配置。') + 1,
-      );
+      const headerIndex = lines.findIndex((line) => line.startsWith('Thinking '));
+      const firstCaptionIndex = lines.indexOf('先查看项目入口和核心配置。');
+      expect(firstCaptionIndex).toBe(headerIndex + 2);
+      expect(lines[firstCaptionIndex - 1]).toBe('');
+      expect(lines.indexOf('继续搜索源码和文档目录。')).toBe(firstCaptionIndex + 1);
 
       // ── Settled 后工具步骤折叠，保留统计摘要 ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
@@ -431,7 +431,12 @@ describe('TUI PTY System — Thought Lifecycle', () => {
               {
                 id: 'post-bash-shell',
                 name: 'shell_execute',
-                args: { command: 'printf "status-ok\\n"' },
+                // Keep Bash running until both searches have completed. The
+                // standalone terminal then arrives after the aggregate, which
+                // is the persisted ordering from the project-overview report.
+                args: {
+                  command: `bun -e "await Bun.sleep(200); console.log('status-ok')"`,
+                },
               },
               {
                 id: 'post-bash-search-a',
@@ -475,6 +480,62 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(clean.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
       expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
       expect(tui.scrollback()).not.toContain('● Find');
+
+      await waitForCondition(
+        () => {
+          const observation = observePersistedUserMessageSession(
+            workspace,
+            'Inspect after a standalone command',
+          );
+          return observation.status === 'ready' && observation.value !== undefined;
+        },
+        'post-Bash project overview to persist before restart',
+        10_000,
+      );
+
+      // Re-open the same persisted session after a real process restart. A
+      // fresh current row is expected; `/resume` must select the historical
+      // overview rather than relying on a new-session projection.
+      await submitCommand(tui, '/exit');
+      await tui.waitForExit();
+      server.setResponses([]);
+      tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+      await submitCommand(tui, '/resume');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui.viewport(), 'Inspect after a standalone', {
+            active: false,
+          }) && !screenContains(tui.viewport(), 'Loading...'),
+        'historical post-Bash session to appear in /resume',
+        10_000,
+      );
+      tui.write('\x1b[B');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui.viewport(), 'Inspect after a standalone', {
+            selected: true,
+            active: false,
+          }),
+        'historical post-Bash session to be selected',
+        5_000,
+      );
+      tui.write('\r');
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return screenContains(viewport, 'POST_BASH_DONE') && screenContains(viewport, '❯');
+        },
+        'historical post-Bash overview to finish replaying',
+        15_000,
+      );
+
+      const replay = stripAnsi(tui.viewport());
+      const searchLines = replay
+        .split('\n')
+        .filter((line) => line.includes('searched 2 file patterns'));
+      expect(searchLines).toHaveLength(1);
+      expect(searchLines[0]).toMatch(/Thinking \d+s.*searched 2 file patterns/u);
+      expect(replay.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
     },
     TIMEOUT,
   );
@@ -585,19 +646,28 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           line.startsWith('Thinking ') && line.includes('read 8 files, searched 4 file patterns'),
       );
       expect(firstThinking).toBeGreaterThan(-1);
-      captions.forEach((caption, index) => {
-        expect(lines[firstThinking + index + 1]).toBe(caption);
+      captions.slice(0, -1).forEach((caption, index) => {
+        expect(lines[firstThinking + index + 2]).toBe(caption);
       });
+      expect(lines[firstThinking + 1]).toBe('');
+
+      // The fifth narration trails the settled first Thought as final text;
+      // it receives the same single-row block gap, not a duplicated caption
+      // paragraph gap. The four confirmed captions remain consecutive.
+      const lastCaption = lines.indexOf(captions.at(-1)!);
+      expect(lastCaption).toBe(lines.indexOf(captions.at(-2)!) + 2);
+      expect(lines[lastCaption - 1]).toBe('');
 
       const bash = lines.findIndex((line) => line.startsWith('● Bash Ran:'));
-      expect(bash).toBeGreaterThan(firstThinking + captions.length);
+      expect(bash).toBeGreaterThan(lastCaption);
       const secondThinking = lines.findIndex(
         (line, index) =>
           index > bash && line.startsWith('Thinking ') && line.includes('searched 2 file patterns'),
       );
       expect(secondThinking).toBeGreaterThan(bash);
       expect(lines).not.toContain('searched 2 file patterns');
-      expect(lines[secondThinking + 1]).toBe(
+      expect(lines[secondThinking + 1]).toBe('');
+      expect(lines[secondThinking + 2]).toBe(
         'PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。',
       );
       expect(tui.scrollback()).not.toContain('● Find');
@@ -706,9 +776,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(screenContains(output, 'Thinking ')).toBe(true);
       expect(clean).not.toContain('Let me think about the problem');
       const compactLines = clean.split('\n').map((line) => line.trim());
+      const thinkingOnlyHeader = compactLines.findIndex((line) => line.startsWith('Thinking '));
       expect(compactLines.indexOf('THINK_ONLY_DONE: thought it through.')).toBe(
-        compactLines.findIndex((line) => line.startsWith('Thinking ')) + 1,
+        thinkingOnlyHeader + 2,
       );
+      expect(compactLines[thinkingOnlyHeader + 1]).toBe('');
 
       // ── Settled 后无 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);

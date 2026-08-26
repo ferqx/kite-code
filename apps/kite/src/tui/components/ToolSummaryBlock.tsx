@@ -323,7 +323,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
           <Text color={dt.dim}>{`  ${summaryLabel}`}</Text>
         </Box>
         {captionContent !== '' && (
-          <Box paddingLeft={2}>
+          <Box marginTop={1} paddingLeft={2}>
             <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
           </Box>
         )}
@@ -341,7 +341,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
         <Text color={dt.dim}>{summaryLabel}</Text>
       </Box>
       {captionContent !== '' && (
-        <Box paddingLeft={2}>
+        <Box marginTop={1} paddingLeft={2}>
           <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
         </Box>
       )}

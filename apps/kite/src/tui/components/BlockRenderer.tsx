@@ -83,17 +83,6 @@ function gapFrom(prevBlock?: OutputBlock, block?: OutputBlock) {
   if (prevBlock.kind === 'user' && prevBlock.content.startsWith('/') && block?.kind !== 'user') {
     return { marginTop: 0, marginBottom: 0 } as const;
   }
-  // A settled Thinking phase and its final answer are one visual sequence.
-  // Whether the phase carried tools or remained content-free, do not insert a
-  // blank row between its compact header/captions and the following answer.
-  if (
-    prevBlock.kind === 'tool_summary' &&
-    !prevBlock.active &&
-    prevBlock.hasThinking === true &&
-    block?.kind === 'text'
-  ) {
-    return { marginTop: 0, marginBottom: 0 } as const;
-  }
   const previousList = listBlockIdentity(prevBlock, 'last');
   if (previousList && previousList === listBlockIdentity(block, 'first')) {
     return { marginTop: 0, marginBottom: 0 } as const;
@@ -172,7 +161,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
           {block.thoughtElapsedMs != null && (
             <Text color={dt.dim}>Thinking {formatElapsed(block.thoughtElapsedMs)}</Text>
           )}
-          <Box>
+          <Box marginTop={block.thoughtElapsedMs != null ? 1 : 0}>
             <MarkdownBlock
               content={block.content}
               streaming={block.streaming}

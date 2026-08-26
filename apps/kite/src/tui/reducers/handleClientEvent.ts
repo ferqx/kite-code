@@ -239,6 +239,32 @@ function isLastVisibleBlock(state: TuiState, block: OutputBlock): boolean {
   return state.turns.at(-1)?.blocks.at(-1)?.id === block.id;
 }
 
+function precedingToolSummary(
+  state: TuiState,
+  followingBlockId: number,
+): Extract<OutputBlock, { kind: 'tool_summary' }> | undefined {
+  const blocks = state.turns.at(-1)?.blocks;
+  const index = blocks?.findIndex((block) => block.id === followingBlockId) ?? -1;
+  const previous = index > 0 ? blocks?.[index - 1] : undefined;
+  return previous?.kind === 'tool_summary' && previous.tools.length > 0 ? previous : undefined;
+}
+
+function appendCompletedReasoning(
+  summary: Extract<OutputBlock, { kind: 'tool_summary' }>,
+  text: string,
+): Pick<Extract<OutputBlock, { kind: 'tool_summary' }>, 'timeline' | 'nextTimelineSeq'> {
+  const timeline = summary.timeline ?? [];
+  const last = timeline.at(-1);
+  if (last?.kind === 'thinking' && last.text === text) return {};
+  return {
+    timeline: [
+      ...timeline,
+      { seq: summary.nextTimelineSeq ?? timeline.length, kind: 'thinking' as const, text },
+    ],
+    nextTimelineSeq: (summary.nextTimelineSeq ?? timeline.length) + 1,
+  };
+}
+
 function removeBlockById(state: TuiState, blockId: number): TuiState {
   const turns = state.turns.map((turn) => ({
     blocks: turn.blocks.filter((block) => block.id !== blockId),
@@ -311,6 +337,22 @@ function projectReasoningActivity(
   const answer = findModelAnswerText(cached, event.requestId);
   if (answer && isLastVisibleBlock(cached, answer)) {
     if (event.state !== 'completed') return cached;
+    // The durable final response can overtake the provider's completed
+    // reasoning packet during reconnect/replay. When it immediately follows
+    // an exploration summary, that reasoning owns the same visual phase—not
+    // a second, text-attached Thinking header.
+    const preceding = precedingToolSummary(cached, answer.id);
+    if (preceding) {
+      const durationMs = answer.modelDurationMs;
+      return replaceBlockById(cached, preceding.id, {
+        ...preceding,
+        ...(durationMs === undefined ? {} : { modelMs: durationMs, totalElapsedMs: durationMs }),
+        modelRequestId: event.requestId,
+        hasThought: true,
+        hasThinking: true,
+        ...appendCompletedReasoning(preceding, segmentText),
+      });
+    }
     return replaceBlockById(cached, answer.id, {
       ...answer,
       thoughtContent: segmentText,
@@ -327,23 +369,12 @@ function projectReasoningActivity(
   const summary = findSummaryById(next, next.currentThoughtSummaryId);
   if (!summary) return next;
   const text = next.currentModelReasoningText ?? event.text;
-  const timeline = summary.timeline ?? [];
-  const last = timeline.at(-1);
-  const alreadyCommitted = last?.kind === 'thinking' && last.text === text;
   return replaceBlockById(next, summary.id, {
     ...summary,
     hasThought: true,
     hasThinking: true,
     latestActivity: { kind: 'thinking', text },
-    ...(alreadyCommitted
-      ? {}
-      : {
-          timeline: [
-            ...timeline,
-            { seq: summary.nextTimelineSeq ?? timeline.length, kind: 'thinking' as const, text },
-          ],
-          nextTimelineSeq: (summary.nextTimelineSeq ?? timeline.length) + 1,
-        }),
+    ...appendCompletedReasoning(summary, text),
   });
 }
 
@@ -835,6 +866,15 @@ function findSummaryById(
   return block?.kind === 'tool_summary' ? block : undefined;
 }
 
+function standaloneStartedBeforeCurrentThought(state: TuiState, toolId: string): boolean {
+  const current = findSummaryById(state, state.currentThoughtSummaryId);
+  const standalone = findBlock(
+    state,
+    (block) => block.kind === 'tool_card' && block.callId === toolId,
+  );
+  return current !== undefined && standalone?.kind === 'tool_card' && standalone.id < current.id;
+}
+
 function updateSafeSummaryEntry(
   state: TuiState,
   summary: Extract<OutputBlock, { kind: 'tool_summary' }>,
@@ -1064,8 +1104,10 @@ function finishSafeClientTool(
       result?.totalLines,
     );
   }
+  const shouldSettleCurrentThought =
+    presentation === 'standalone' && !standaloneStartedBeforeCurrentThought(state, toolId);
   return updateSafeTool(
-    presentation === 'standalone' ? settleCurrentThought(state) : state,
+    shouldSettleCurrentThought ? settleCurrentThought(state) : state,
     toolId,
     displayName ?? toolName,
     status,

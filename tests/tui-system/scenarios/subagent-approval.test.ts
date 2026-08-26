@@ -134,7 +134,9 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
       // Verify approval dialog content
       expect(screenContains(beforeApprove, '工具授权')).toBe(true);
-      expect(screenContains(beforeApprove, '人工审批队列')).toBe(true);
+      expect(screenContains(beforeApprove, '人工审批')).toBe(true);
+      expect(screenContains(beforeApprove, '人工审批队列')).toBe(false);
+      expect(screenContains(beforeApprove, '代次')).toBe(false);
       // Local presentation retains the concrete file target while approval
       // authority remains bound to the closed interaction identity.
       expect(externalFile.startsWith(workspace.workspace)).toBe(false);

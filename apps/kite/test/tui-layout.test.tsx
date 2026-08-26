@@ -1133,7 +1133,7 @@ describe('ApprovalBlock', () => {
     expect(frame).toContain('Deny');
   });
 
-  test('renders durable queue identity without an approval payload', () => {
+  test('hides durable queue identity while retaining user-facing approval status', () => {
     const approval = fakeClientApproval({ interactionId: 'approval-queue-7', generation: 3 });
     const { lastFrame } = render(
       <ApprovalBlock
@@ -1149,8 +1149,9 @@ describe('ApprovalBlock', () => {
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Auto review');
-    expect(frame).toContain('Queue #7');
-    expect(frame).toContain('Generation 3');
+    expect(frame).not.toContain('Queue #7');
+    expect(frame).not.toContain('Generation 3');
+    expect(frame).not.toContain('approval-queue-7');
     expect(frame).toContain('2 matching requests');
     expect(frame).not.toContain('workspace_write');
   });
@@ -2919,15 +2920,17 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 标题行 = 累加时长 + 合并统计；旁白位于标题之下、步骤树之上
+    // 标题行 = 累加时长 + 合并统计；旁白与标题之间保留一行，随后位于步骤树之上
     expect(frame).toContain('Thinking 13s · read 2 files');
     expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
     expect(frame).toContain('继续检查运行时边界。');
     expect(frame).toContain('Now the remaining pieces.');
     const compactLines = frame.split('\n').map((line) => line.trim());
-    expect(compactLines.indexOf('继续检查运行时边界。')).toBe(
-      compactLines.indexOf('让我系统地阅读 TUI 模块的核心文件。') + 1,
-    );
+    const headerLine = compactLines.findIndex((line) => line.includes('Thinking 13s'));
+    const firstCaptionLine = compactLines.indexOf('让我系统地阅读 TUI 模块的核心文件。');
+    expect(firstCaptionLine).toBe(headerLine + 2);
+    expect(compactLines[headerLine + 1]).toBe('');
+    expect(compactLines.indexOf('继续检查运行时边界。')).toBe(firstCaptionLine + 1);
     expect(compactLines.indexOf('Now the remaining pieces.')).toBe(
       compactLines.indexOf('继续检查运行时边界。') + 1,
     );
@@ -3467,7 +3470,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 题头 + 正文同一块：无圆点，紧凑相邻
+    // 题头 + 正文同一块：无圆点，但保留一个空白视觉行
     expect(frame).toContain('Thinking 24s');
     expect(frame).toContain('── TUI 模块全面解析 ──');
     expect(frame).not.toContain('●');
@@ -3475,7 +3478,8 @@ describe('BlockRenderer', () => {
     const lines = frame.split('\n');
     const headerIndex = lines.findIndex((line) => line.includes('Thinking 24s'));
     const contentIndex = lines.findIndex((line) => line.includes('TUI 模块全面解析'));
-    expect(contentIndex - headerIndex).toBe(1);
+    expect(contentIndex - headerIndex).toBe(2);
+    expect(lines[headerIndex + 1]?.trim()).toBe('');
     // 题头两空格缩进，文字起始列与工具块名字列对齐
     expect(frame).toContain('  Thinking 24s');
   });
@@ -3674,7 +3678,7 @@ describe('Block spacing', () => {
     );
   });
 
-  test('settled pure-thinking summary → text stays compact', () => {
+  test('settled pure-thinking summary → text keeps one-row separation', () => {
     assertGap(
       {
         id: 1,
@@ -3693,11 +3697,11 @@ describe('Block spacing', () => {
         content: '__BLOCK_1__',
         _marker: '__BLOCK_1__',
       } as unknown as OutputBlock,
-      0,
+      1,
     );
   });
 
-  test('settled Thinking tool summary → final text stays compact', () => {
+  test('settled Thinking tool summary → final text keeps one-row separation', () => {
     assertGap(
       {
         id: 1,
@@ -3726,7 +3730,7 @@ describe('Block spacing', () => {
         content: '__BLOCK_1__',
         _marker: '__BLOCK_1__',
       } as unknown as OutputBlock,
-      0,
+      1,
     );
   });
 
