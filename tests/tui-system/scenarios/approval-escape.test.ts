@@ -30,7 +30,9 @@ describe('TUI PTY System — Approval Escape', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      configOverrides: { interactionMode: 'accept_edits' },
+    });
     externalFile = join(workspace.home, 'approval-escape-external.txt');
 
     // Response #1: an external write_file call that needs approval on every
@@ -119,7 +121,9 @@ describe('TUI PTY System — Approval Ctrl+C', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      configOverrides: { interactionMode: 'accept_edits' },
+    });
     externalFile = join(workspace.home, 'approval-ctrl-c-external.txt');
     server.setResponses([
       {

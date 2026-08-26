@@ -19,6 +19,16 @@ project 配置只能关闭观测能力，不能开启远程发送、提供 endpo
 保留的 exporter/composition contract 在缺少 release authority 或 transport 时固定注入 no-op reporter；
 它们只证明不可达路径 fail closed，不构成受支持的远程 telemetry 产品面。
 
+development/reference carrier 的一次性 bootstrap bearer、会话 cookie、token、Host/Origin 与
+Workspace/Store authority identity 不属于诊断输入，也不得写入 Runtime Store。protocol/presentation event 正文
+同样不属于诊断输入；carrier 仅可发出固定、无内容的连接/背压代码，不能把上述内容复制到文本日志（包括
+stderr）、Session Logger、metric、health/status、report 或 observability artifact。canonical Runtime Event
+本身是否持久化只由 Runtime Store contract 决定，不由 observability 规则删除。
+
+ADR-0143 允许用户本地 TUI/CLI 的 closed presentation event 保留 reasoning、工具参数/结果与普通路径；该
+产品展示面不是 observability。其正文可以进入 canonical Runtime Session history 并由 History Client 回放，
+但不得复制到本节定义的 metric、health、diagnostic stderr、reporter 或运营 artifact。
+
 结构化 metric 在创建和 reporter 边界都由严格 schema 重建，拒绝 unknown 字段和伪造 definition。
 allowlist 只接受有限 metric/attribute 枚举与有限数值；单样本 canonical JSON 上限 1024 bytes。prompt、
 模型或工具正文、路径、命令、自由错误、secret、credential 与任意 user/project identity 都不得进入
@@ -63,8 +73,8 @@ Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低�
 双 Ctrl+C、SIGINT、SIGTERM 与 fatal ErrorBoundary 共用幂等 exit coordinator，并在退出前执行两个各
 不超过 250ms 的 flush/shutdown 阶段。当前开发 composition 没有 transport，因此链路实际为 no-op。
 
-CLI `--telemetry-status` 与 TUI `/telemetry` 只显示脱敏的本地启用状态，不显示 endpoint、secret、
-Workspace path 或正文。普通开发入口固定显示 `artifact_disabled`。
+CLI `--telemetry-status` 只显示脱敏的本地启用状态，不显示 endpoint、secret、Workspace path 或正文。
+普通开发入口固定显示 `artifact_disabled`；TUI 不提供 telemetry slash 命令。
 
 ## 本地运营闭环
 

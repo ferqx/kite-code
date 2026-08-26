@@ -92,8 +92,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         currentThoughtSummaryId: undefined,
         thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
+        toolBearingModelRequestId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
+        currentModelReasoningRequestId: undefined,
         sessionKey: state.sessionKey + 1,
         status: newStatus,
         interactionMode: state.interactionMode,
@@ -174,8 +176,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         currentThoughtSummaryId: undefined,
         thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
+        toolBearingModelRequestId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
+        currentModelReasoningRequestId: undefined,
         // Compaction progress is an ephemeral projection owned by the session
         // that emitted it. Never carry it across a durable session reload: a
         // stale progress value would keep the restored prompt disabled.
@@ -249,8 +253,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         currentThoughtSummaryId: undefined,
         thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
+        toolBearingModelRequestId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
+        currentModelReasoningRequestId: undefined,
         sessionKey: state.sessionKey + 1,
         ctrlCPressed: false,
         exitRequested: false,
@@ -351,7 +357,6 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         id: state.nextBlockId,
         kind: 'user',
         content: action.text,
-        ...(state.running ? { runtimeEchoPending: true } : {}),
       };
       return appendUserMessage(state, block);
     }

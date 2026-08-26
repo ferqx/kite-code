@@ -189,6 +189,11 @@ describe('TUI PTY System — MCP Select management', () => {
     await waitForText(() => tui!.outputSinceLastAction(), 'REMOTE_MCP_CALL_HANDLED', 20_000);
 
     expect(toolCalls).toBe(1);
+    // Dynamic MCP names and call arguments remain in the durable tool result
+    // (asserted by the mock response above), never in client presentation.
+    expect(tui.scrollback()).toContain('MCP tool');
+    expect(tui.scrollback()).not.toContain(remoteToolName);
+    expect(tui.scrollback()).not.toContain('must not leave the process');
     expect(tui.scrollback()).not.toContain('Remote MCP content egress denied');
   }, 40_000);
 
@@ -475,11 +480,15 @@ describe('TUI PTY System — MCP Select management', () => {
     // MCP tool name may appear in the first request's tool list in 'all' mode.
     expect(JSON.stringify(requests[1]?.body)).toContain(exposedToolName);
     expect(JSON.stringify(requests[2]?.messages)).toContain('documentation result from MCP');
-    expect(tui.scrollback()).toContain('Searched for tools');
-    expect(tui.scrollback()).toContain(`docs · ${remoteToolName}`);
-    expect(tui.screenFramesSince(conversationFrames).join('\n')).not.toContain(
-      `mcp__docs__${remoteToolName}`,
-    );
+    const clientConversation = tui.screenFramesSince(conversationFrames).join('\n');
+    // Dynamic MCP execution must retain a concrete label; it must not regress
+    // to the generic `● Tool` card that hides which lifecycle is running.
+    expect(tui.scrollback()).toContain('● mcp:dynamic_tool');
+    expect(tui.scrollback()).not.toContain('● Tool');
+    expect(clientConversation).toContain(remoteToolName);
+    expect(clientConversation).not.toContain(`mcp__docs__${remoteToolName}`);
+    expect(clientConversation).not.toContain('runtime binding');
+    expect(clientConversation).not.toContain('documentation result from MCP');
 
     await submitUserMessage(tui, server, 'call the same MCP tool again', {
       delayMs: 20,
@@ -506,7 +515,8 @@ describe('TUI PTY System — MCP Select management', () => {
       20_000,
     );
     expect(tui.scrollback()).toContain('Listed MCP resources');
-    expect(tui.scrollback()).toContain('docs · docs://langgraph/overview');
+    expect(tui.scrollback()).toContain('docs://langgraph/overview');
+    expect(tui.scrollback()).not.toContain('LangGraph resource content from MCP resources/read.');
     const resourceRequests = server.getRequests();
     expect(resourceRequests).toHaveLength(8);
     expect(JSON.stringify(resourceRequests[7]?.messages)).toContain(

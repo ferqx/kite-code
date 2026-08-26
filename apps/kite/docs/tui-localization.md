@@ -6,6 +6,8 @@
 
 - 用户级 `language` 偏好是 locale authority；`/language` 只打开选择器，确认后立即切换当前 TUI。
 - 所有 Kite Code 自有标题、状态、快捷键、空态、错误和交互说明从统一 catalog 读取。
+- Slash command 的名称与帮助来自共享 command metadata；catalog 只为实际注册的 TUI command 提供说明。
+  发布与遥测状态由既有配置/CLI 入口负责，TUI 不注册 `/release` 或 `/telemetry`，也不保留其孤立译文。
 - Runtime event、command、failure code、status 枚举和 provider 返回值保持稳定英文机器值，不进入翻译 key。
 - 状态推导先生成稳定语义值，渲染边界再映射当前 locale；禁止从译文反推状态。
 

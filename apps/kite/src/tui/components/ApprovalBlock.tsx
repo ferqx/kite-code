@@ -1,4 +1,4 @@
-import type { ShellApprovalGrant, ToolApprovalPayload } from '@kite-ai/runtime-contract';
+import type { RuntimeClientInteraction, ShellApprovalGrant } from '@kite-ai/runtime-contract';
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '#app/tui/provider';
@@ -9,7 +9,7 @@ import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
 export interface ApprovalBlockProps {
-  approval: ToolApprovalPayload;
+  approval: Extract<RuntimeClientInteraction, { readonly kind: 'approval' }>;
   provider: TuiUserInputProvider;
   onResolved: (action: string, grant?: string) => void;
   queueEntry?: TuiPendingApproval;
@@ -19,16 +19,6 @@ interface Option {
   label: string;
   action: 'approve' | 'deny';
   grant?: ShellApprovalGrant;
-}
-
-function approvalToolCategory(tool: string, translate: ReturnType<typeof useI18n>['t']): string {
-  if (tool === 'shell_execute') return 'Shell';
-  if (tool === 'write_file' || tool === 'edit_file') return translate('approval.fileEdit');
-  if (tool === 'task') return 'Subagent';
-  if (tool.startsWith('mcp__')) return 'MCP';
-  return (
-    tool.replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ').trim() || translate('approval.genericTool')
-  );
 }
 
 export default function ApprovalBlock({
@@ -42,27 +32,16 @@ export default function ApprovalBlock({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
   const rawInputBuffer = useRef('');
-  const approvalLabel = (approval.command || approval.summary || approval.tool)
-    .replace(/\s+/gu, ' ')
-    .trim();
-  const isCommand = approval.tool === 'shell_execute';
-  const toolCategory = approvalToolCategory(approval.tool, translate);
-  const route =
-    queueEntry?.route ??
-    approval.approvalRoute ??
-    (approval.tool === 'shell_execute' ? 'user' : 'user');
-  const generation = queueEntry?.generation ?? approval.queueGeneration;
-  const scope = queueEntry?.actualSandboxScope ?? approval.sandboxScope;
-  const scopeLabel = scope
-    ? [scope.filesystem, scope.network, scope.backend, scope.enforcement].join(' · ')
-    : undefined;
+  const approvalLabel = approval.summary ?? approval.title ?? translate('approval.genericTool');
+  const route = queueEntry?.route ?? 'user';
+  const generation = approval.generation;
   const visibleOptions: Option[] = [
     { label: translate('approval.once'), action: 'approve', grant: 'approve_once' },
     { label: translate('approval.session'), action: 'approve', grant: 'same_command' },
     { label: translate('approval.deny'), action: 'deny' },
   ];
   const options = visibleOptions.filter(
-    (option) => option.action === 'deny' || approval.grantOptions.includes(option.grant!),
+    (option) => option.action === 'deny' || approval.grants.includes(option.grant!),
   );
   const choiceOptions = options.map((option) => ({
     id: option.grant ?? 'deny',
@@ -71,18 +50,20 @@ export default function ApprovalBlock({
       option.grant === 'approve_once'
         ? translate('approval.onceDescription')
         : option.grant === 'same_command'
-          ? translate(
-              isCommand ? 'approval.sessionCommandDescription' : 'approval.sessionToolDescription',
-            )
-          : translate(
-              isCommand ? 'approval.denyCommandDescription' : 'approval.denyToolDescription',
-            ),
+          ? translate('approval.sessionToolDescription')
+          : translate('approval.denyToolDescription'),
   }));
 
   function resolve(opt: Option) {
     // Approval actions are accepted only with the focused durable identity
     // pair. Legacy/off-screen cards without that pair cannot grant anything.
-    if (!queueEntry?.interactionId || generation == null) return;
+    if (
+      !queueEntry?.interactionId ||
+      queueEntry.interactionId !== approval.interactionId ||
+      queueEntry.generation !== generation
+    ) {
+      return;
+    }
     if (opt.action === 'approve') {
       const grant = opt.grant ?? 'approve_once';
       // Queue the local acknowledgement before resolving Runtime's pending
@@ -139,7 +120,7 @@ export default function ApprovalBlock({
 
   return (
     <OverlayFrame
-      title={translate('approval.title', { tool: toolCategory })}
+      title={translate('approval.title', { tool: translate('approval.genericTool') })}
       footer={
         <OverlayShortcutBar
           shortcuts={[
@@ -179,22 +160,10 @@ export default function ApprovalBlock({
               : translate('approval.matchCount', { count: queueEntry.matchCount })}
           </Text>
         )}
-        <Text color={t.dim}>
-          {scopeLabel
-            ? translate('approval.scope', { scope: scopeLabel })
-            : translate('approval.scopeUnavailable')}
-        </Text>
         {queueEntry?.status === 'authorized_queued' && (
           <Text color={t.success}>{translate('approval.authorizedQueued')}</Text>
         )}
       </Box>
-      {approval.reviewFailure ? (
-        <Box marginTop={1} marginLeft={1}>
-          <Text color={t.warning}>
-            ⚠ {translate('approval.autoReviewEscalation', { reason: approval.reviewFailure })}
-          </Text>
-        </Box>
-      ) : null}
       <Box marginTop={1}>
         <OverlayChoiceList
           options={choiceOptions}

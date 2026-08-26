@@ -1,10 +1,8 @@
 /**
  * PTY System Test — Thought 预整合生命周期
  *
- * 验证 M0 TUI pre-consolidation 机制：
- * 1. reason + 探索工具 → 合并为一个 Thought 块，文本输出 → 关闭
- * 2. 多阶段思考 → 同一 Thought 内累积（中间不间断）
- * 3. 多轮对话 → 每轮产生独立的 Thought 块
+ * 验证客户端安全投影下的工具聚合生命周期：工具类别仍可合并，最终回答仍
+ * 可见；reasoning 文本不会作为 RuntimeClientEvent 的展示数据泄漏。
  *
  * 模拟消息结构：
  *   每个 MockResponse 可含 reasoning_content / tool_calls / content，
@@ -22,6 +20,7 @@ import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
+  waitForCondition,
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
@@ -94,6 +93,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         {
           message: {
             reasoning_content: 'PHASE_ONE: checking the project config.',
+            content: '先查看项目入口和核心配置。',
             tool_calls: [{ id: 't1', name: 'read_file', args: { path: 'CLAUDE.md' } }],
           },
         },
@@ -104,6 +104,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
           message: {
             reasoning_content: 'PHASE_TWO: also searching the source tree.',
+            content: '继续搜索源码和文档目录。',
             tool_calls: [
               { id: 't2', name: 'search_files', args: { pattern: 'CLAUDE.md', path: '.' } },
             ],
@@ -127,15 +128,76 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // ── 单一阶段块：两轮工具合并统计（ADR-0030 / 规则 24）──
+      // Adjacent closed categories merge across model requests. Local
+      // reasoning reached the reducer but is folded out of the settled view.
       expect(screenContains(output, 'Thinking ')).toBe(true);
-      expect(screenContains(output, '· read 1 file, searched 1 file pattern')).toBe(true);
+      expect(screenContains(output, 'read 1 file, searched 1 file pattern')).toBe(true);
+      expect(screenContains(output, '先查看项目入口和核心配置。')).toBe(true);
+      expect(screenContains(output, '继续搜索源码和文档目录。')).toBe(true);
+      expect(screenContains(output, 'PHASE_ONE')).toBe(false);
+      expect(screenContains(output, 'PHASE_TWO')).toBe(false);
+      const lines = clean.split('\n').map((line) => line.trim());
+      expect(lines.indexOf('先查看项目入口和核心配置。')).toBe(
+        lines.findIndex((line) => line.startsWith('Thinking ')) + 1,
+      );
+      expect(lines.indexOf('继续搜索源码和文档目录。')).toBe(
+        lines.indexOf('先查看项目入口和核心配置。') + 1,
+      );
 
       // ── Settled 后工具步骤折叠，保留统计摘要 ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
       expect(screenContains(output, 'TIMELINE_DONE')).toBe(true);
 
       console.log('  [Test 0] clean output (last 3000 chars):', clean.slice(-3000));
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'adjacent file searches retain active pattern detail and settle as one plural summary',
+    async () => {
+      server.setResponses([
+        {
+          message: {
+            tool_calls: [
+              { id: 'search-a', name: 'search_files', args: { pattern: 'CLAUDE.md' } },
+              { id: 'search-b', name: 'search_files', args: { pattern: 'CLAUDE.md' } },
+            ],
+          },
+        },
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'search-a', contentIncludes: ['CLAUDE.md'] },
+              { toolCallId: 'search-b', contentIncludes: ['CLAUDE.md'] },
+            ],
+          },
+          message: { content: 'SEARCH_PAIR_DONE: both searches completed.' },
+          delay: 10,
+        },
+      ]);
+
+      const searchFrames = tui.markScreen();
+      await submitUserMessage(tui, server, 'Search two file patterns', { timeout: 15000 });
+      await waitForCondition(
+        () =>
+          tui
+            .screenFramesSince(searchFrames)
+            .some((frame) => screenContains(frame, 'Find CLAUDE.md')),
+        'the active safe search summary to retain its bounded pattern detail',
+        10_000,
+      );
+      await waitForText(() => tui.outputSinceLastAction(), 'SEARCH_PAIR_DONE', 25000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+
+      const output = tui.viewport();
+      expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
+      expect(screenContains(output, 'searched 1 file pattern')).toBe(false);
+      expect(tui.scrollback()).not.toContain('● Find');
+      expect(screenContains(output, 'CLAUDE.md')).toBe(false);
+      expect(screenContains(output, 'src/index.ts')).toBe(false);
+      expect(screenContains(output, 'SEARCH_PAIR_DONE')).toBe(true);
+      expect(screenContains(output, '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -190,9 +252,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // ── Thought 标题 = "Thinking Xs · <工具统计>"（规则 22）──
       expect(screenContains(output, 'Thinking ')).toBe(true);
-      expect(screenContains(output, '· read 1 file, searched for 1 pattern')).toBe(true);
+      expect(/read 1 file[\s\S]*searched for 1 pattern/.test(clean)).toBe(true);
 
       // ── reasoning 正文始终隐藏，工具步骤 settle 后折叠 ──
       expect(screenContains(output, 'Let me explore the codebase structure.')).toBe(false);
@@ -264,9 +325,12 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // ── 两轮合并统计为 "read 2 files"（ADR-0030 跨调用聚合）──
-      expect(screenContains(output, '· read 2 files')).toBe(true);
+      // The adjacent terminal reads merge by closed category. Their local
+      // paths/reasoning were available while active and fold at settlement.
+      expect(screenContains(output, 'read 2 files')).toBe(true);
       expect(screenContains(output, 'Thinking ')).toBe(true);
+      expect(screenContains(output, 'Phase 1:')).toBe(false);
+      expect(screenContains(output, 'Phase 2:')).toBe(false);
 
       // ── 工具步骤 settle 后折叠 ──
 
@@ -335,9 +399,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const shellHistory = tui.screenFramesSince(shellFrames).join('\n');
 
       // ── shell_execute without inspect intent stays as independent tool_card ──
+      // The read starts after the shell boundary as a separate safe summary;
+      // it never renders a transient standalone Read card.
       expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'ran 1 command')).toBe(false);
-      expect(screenContains(shellHistory, 'thought-lifecycle-fixture')).toBe(true);
+      expect(screenContains(output, 'Bash')).toBe(true);
       expect(screenContains(shellHistory, 'exit: error')).toBe(false);
 
       // ── 独立工具卡完成后可折叠；最终回答仍可见 ──
@@ -350,6 +416,193 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(screenContains(output, '❯')).toBe(true);
 
       console.log('  [Test 3] clean output (last 2000 chars):', clean.slice(-2000));
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'post-Bash searches and later reasoning settle as one upgraded phase',
+    async () => {
+      server.setResponses([
+        {
+          message: {
+            content: 'I will inspect one command, then finish the remaining searches.',
+            tool_calls: [
+              {
+                id: 'post-bash-shell',
+                name: 'shell_execute',
+                args: { command: 'printf "status-ok\\n"' },
+              },
+              {
+                id: 'post-bash-search-a',
+                name: 'search_files',
+                args: { pattern: 'CLAUDE.md' },
+              },
+              {
+                id: 'post-bash-search-b',
+                name: 'search_files',
+                args: { pattern: 'package.json' },
+              },
+            ],
+          },
+        },
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'post-bash-shell', contentIncludes: ['status-ok'] },
+              { toolCallId: 'post-bash-search-a', contentIncludes: ['CLAUDE.md'] },
+              { toolCallId: 'post-bash-search-b', contentIncludes: ['package.json'] },
+            ],
+          },
+          message: {
+            reasoning_content: 'Combining the two search results into the project overview.',
+            content: 'POST_BASH_DONE: searches and reasoning stayed together.',
+          },
+          delay: 10,
+        },
+      ]);
+
+      await submitUserMessage(tui, server, 'Inspect after a standalone command', {
+        timeout: 15_000,
+      });
+      await waitForText(() => tui.outputSinceLastAction(), 'POST_BASH_DONE', 25_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+
+      const output = tui.viewport();
+      const clean = stripAnsi(output);
+      expect(screenContains(output, 'Bash')).toBe(true);
+      expect(/Thinking [^\n]*searched 2 file patterns/u.test(clean)).toBe(true);
+      expect(clean.match(/Thinking \d+s/gu)?.length ?? 0).toBe(1);
+      expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
+      expect(tui.scrollback()).not.toContain('● Find');
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'project overview sequence keeps captions compact and upgrades post-error searches',
+    async () => {
+      const captions = [
+        '好的，我来探索一下这个项目。先看看整体结构。',
+        '让我继续阅读核心文档和包结构。',
+        '再读一下核心架构文档和包结构。',
+        '再补充看几个关键部分：app 的 README 和源码目录结构。',
+        '我已经掌握了核心信息，再快速看一下仓库当前状态和测试/文档目录组织，然后给你总结。',
+      ];
+      const reads = (prefix: string) =>
+        Array.from({ length: 2 }, (_, index) => ({
+          id: `${prefix}-read-${index}`,
+          name: 'read_file',
+          args: { path: index === 0 ? 'CLAUDE.md' : 'package.json' },
+        }));
+      const search = (id: string, pattern: string) => ({
+        id,
+        name: 'search_files',
+        args: { pattern },
+      });
+      const overviewA = [...reads('overview-a'), search('overview-search-a', 'CLAUDE.md')];
+      const overviewB = [...reads('overview-b'), search('overview-search-b', 'package.json')];
+      const overviewC = [...reads('overview-c'), search('overview-search-c', 'src')];
+      const overviewD = [...reads('overview-d'), search('overview-search-d', '*.ts')];
+      const bashCalls = [
+        {
+          id: 'overview-bash',
+          name: 'shell_execute',
+          args: {
+            command: 'git status --short --branch && echo "---" && git log --oneline -3',
+          },
+        },
+      ];
+      const postBash = [
+        search('overview-post-bash-a', 'CLAUDE.md'),
+        search('overview-post-bash-b', 'package.json'),
+      ];
+      const expectedResults = (calls: ReadonlyArray<{ id: string }>) =>
+        calls.map(({ id }) => ({ toolCallId: id }));
+
+      server.setResponses([
+        {
+          message: {
+            reasoning_content: 'Inspecting the project entry points.',
+            content: captions[0],
+            tool_calls: overviewA,
+          },
+        },
+        {
+          expectedRequest: { toolResults: expectedResults(overviewA) },
+          message: {
+            content: captions[1],
+            tool_calls: overviewB,
+          },
+        },
+        {
+          expectedRequest: { toolResults: expectedResults(overviewB) },
+          message: {
+            content: captions[2],
+            tool_calls: overviewC,
+          },
+        },
+        {
+          expectedRequest: { toolResults: expectedResults(overviewC) },
+          message: {
+            content: captions[3],
+            tool_calls: overviewD,
+          },
+        },
+        {
+          expectedRequest: { toolResults: expectedResults(overviewD) },
+          message: {
+            content: captions[4],
+            tool_calls: bashCalls,
+          },
+        },
+        {
+          expectedRequest: { toolResults: expectedResults(bashCalls) },
+          message: {
+            tool_calls: postBash,
+          },
+        },
+        {
+          expectedRequest: { toolResults: expectedResults(postBash) },
+          message: {
+            reasoning_content: 'Combining the final search results.',
+            content: 'PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。',
+          },
+          delay: 10,
+        },
+      ]);
+
+      await submitUserMessage(tui, server, '了解一下项目', { timeout: 15_000 });
+      await waitForText(() => tui.outputSinceLastAction(), 'PROJECT_OVERVIEW_DONE', 30_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+
+      const output = tui.viewport();
+      const lines = stripAnsi(output)
+        .split('\n')
+        .map((line) => line.trim());
+      const firstThinking = lines.findIndex(
+        (line) =>
+          line.startsWith('Thinking ') && line.includes('read 8 files, searched 4 file patterns'),
+      );
+      expect(firstThinking).toBeGreaterThan(-1);
+      captions.forEach((caption, index) => {
+        expect(lines[firstThinking + index + 1]).toBe(caption);
+      });
+
+      const bash = lines.findIndex((line) => line.startsWith('● Bash Ran:'));
+      expect(bash).toBeGreaterThan(firstThinking + captions.length);
+      const secondThinking = lines.findIndex(
+        (line, index) =>
+          index > bash && line.startsWith('Thinking ') && line.includes('searched 2 file patterns'),
+      );
+      expect(secondThinking).toBeGreaterThan(bash);
+      expect(lines).not.toContain('searched 2 file patterns');
+      expect(lines[secondThinking + 1]).toBe(
+        'PROJECT_OVERVIEW_DONE: 我已经把项目的整体结构、架构和工程规范都看了一遍。',
+      );
+      expect(tui.scrollback()).not.toContain('● Find');
+
+      console.log('  [project-overview] clean output:', stripAnsi(output));
     },
     TIMEOUT,
   );
@@ -401,6 +654,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         .map((frame) => frame.slice(Math.max(0, frame.lastIndexOf('❯ Tools only no thinking'))))
         .join('\n');
       expect(screenContains(actionLocalRender, 'Thinking ')).toBe(false);
+      expect(screenContains(actionLocalRender, 'CLAUDE.md')).toBe(true);
 
       // ── Settled 后无 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
@@ -440,19 +694,21 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       await submitUserMessage(tui, server, 'Think only no tools', { timeout: 15000 });
 
-      // 等 Thought 完成
-      await waitForText(() => tui.outputSinceLastAction(), 'Thinking ', 25000);
+      await waitForText(() => tui.outputSinceLastAction(), 'THINK_ONLY_DONE', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // ── 有 "Thinking" 但没有工具统计后缀 ──
+      // The completion and a content-free Thought are projected, but the
+      // private reason body is not.
+      expect(screenContains(output, 'THINK_ONLY_DONE')).toBe(true);
       expect(screenContains(output, 'Thinking ')).toBe(true);
-
-      // ── 纯思考块持久化：settle 后（text 到达 2s 后）最终屏幕仍含 "Thinking"
-      //    （累计 PTY 缓冲尾部 ≈ 最终画面；若块被删除则尾部不会有该标签）──
-      expect(clean.slice(-1500)).toContain('Thinking ');
+      expect(clean).not.toContain('Let me think about the problem');
+      const compactLines = clean.split('\n').map((line) => line.trim());
+      expect(compactLines.indexOf('THINK_ONLY_DONE: thought it through.')).toBe(
+        compactLines.findIndex((line) => line.startsWith('Thinking ')) + 1,
+      );
 
       // ── Settled 后无 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);

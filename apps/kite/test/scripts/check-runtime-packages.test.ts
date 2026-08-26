@@ -41,10 +41,10 @@ function expectViolation(root: string, code: string): void {
 }
 
 describe('runtime workspace package gate', () => {
-  test('accepts the authoritative six-package and App graph', () => {
+  test('accepts the authoritative nine-package and App graph', () => {
     const analysis = analyzeRuntimePackages(process.cwd());
     expect(analysis.violations).toEqual([]);
-    expect(analysis.packages).toHaveLength(7);
+    expect(analysis.packages).toHaveLength(10);
     expect(analysis.compositionRoots).toEqual(['apps/kite/src/bootstrap.ts']);
   });
 
@@ -126,6 +126,26 @@ describe('runtime workspace package gate', () => {
     const root = createFixture();
     updateText(root, path, (value) => `${statement}\n${value}`);
     expectViolation(root, code);
+  });
+
+  test.each([
+    ['packages/runtime-protocol/src/index.ts', "import 'node:crypto';", 'FORBIDDEN_NODE_IMPORT'],
+    ['packages/runtime-server/src/index.ts', "import 'bun:sqlite';", 'FORBIDDEN_BUN_IMPORT'],
+    ['packages/runtime-client/src/index.ts', "import 'node:stream';", 'FORBIDDEN_NODE_IMPORT'],
+  ])('keeps Runtime gateway core browser-safe and transport-neutral in %s', (path, statement, code) => {
+    const root = createFixture();
+    updateText(root, path, (value) => `${statement}\n${value}`);
+    expectViolation(root, code);
+  });
+
+  test.each([
+    ['packages/runtime-server/src/index.ts', "import '@kite-ai/runtime-host';"],
+    ['packages/runtime-client/src/index.ts', "import '@kite-ai/runtime-server';"],
+    ['packages/runtime-client/src/index.ts', "import '@kite-ai/runtime-storage-sqlite';"],
+  ])('rejects Runtime gateway authority inversion in %s', (path, statement) => {
+    const root = createFixture();
+    updateText(root, path, (value) => `${statement}\n${value}`);
+    expectViolation(root, 'FORBIDDEN_DIRECT_DEPENDENCY');
   });
 
   test('rejects wildcard and missing public export targets', () => {

@@ -28,6 +28,8 @@ export {
   SQLITE_RUNTIME_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+  SqliteRuntimeCommandReceiptConflictError,
+  SqliteRuntimeCommandReceiptValidationError,
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeFormatMismatchError,
   type SqliteRuntimeJournalMode,

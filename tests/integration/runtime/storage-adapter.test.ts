@@ -68,8 +68,8 @@ describe('SQLite RuntimeStorage adapter', () => {
       const adapter = createAdapter(databasePath, sessionId);
       expect(adapter.adapterId).toBe('sqlite');
       expect(adapter.stateSchemaVersion).toBe(27);
-      expect(adapter.storeSchemaVersion).toBe(5);
-      expect(adapter.formatEpoch).toBe('kite-runtime-saq-v1-2026-08-25');
+      expect(adapter.storeSchemaVersion).toBe(6);
+      expect(adapter.formatEpoch).toBe('kite-runtime-server-v1-2026-08-26');
       expect(adapter.sessions.loadEventsStrict(sessionId)).toHaveLength(1);
       expect(adapter.sessions.loadSnapshot<AgentState>(sessionId)?.revision).toBe(1);
       adapter.close();
@@ -86,8 +86,8 @@ describe('SQLite RuntimeStorage adapter', () => {
         );
         expect(markers).toEqual(
           new Map([
-            ['format_version', '5'],
-            ['runtime_format_epoch', 'kite-runtime-saq-v1-2026-08-25'],
+            ['format_version', '6'],
+            ['runtime_format_epoch', 'kite-runtime-server-v1-2026-08-26'],
           ]),
         );
         expect(
@@ -96,7 +96,7 @@ describe('SQLite RuntimeStorage adapter', () => {
               "select count(*) as count from sqlite_master where type = 'table' and name not like 'sqlite_%'",
             )
             .get()?.count,
-        ).toBe(7);
+        ).toBe(8);
         expect(
           database
             .query<{ count: number }, []>(

@@ -26,9 +26,12 @@
 
 ## 关键不变量
 
-- 当前 snapshot 固定包含 20 个 model-visible tools 和 9 个 internal operations。
+- 当前 snapshot 固定包含 20 个 model-visible tools 和 8 个 internal operations。
 - App/Host/catalog/executor 必须使用同一个 snapshot。
 - 任何 terminal uncertainty 不转换为成功或 fallback。
+- Skill activation 默认生成高熵 identity；Runtime command planner 可以注入经过有界字符集校验的、
+  不含用户内容的确定性 `activationId`，使同一逻辑 command 的重试保持同一 activation identity。
+  无效注入在 activation 建立前 fail closed，不能回退生成另一个 identity 后继续执行。
 
 ## 测试
 

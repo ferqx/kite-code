@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  isRewindCheckpointAvailable,
-  rewindFileOutcomeNotes,
-} from '../src/tui/hooks/useRewindHandler';
+import { rewindFileOutcomeNotes } from '../src/tui/hooks/useRewindHandler';
 
 describe('rewindFileOutcomeNotes', () => {
   test('does not claim there were no files when every restore failed', () => {
@@ -31,37 +28,5 @@ describe('rewindFileOutcomeNotes', () => {
       '已从检查点创建新会话，并恢复 1 个文件。',
       '为保护后续修改，已跳过冲突文件：manual.md',
     ]);
-  });
-});
-
-describe('isRewindCheckpointAvailable', () => {
-  test('requires both the recovery-point row and a parseable snapshot', () => {
-    const valid = {
-      getNamedSnapshotEntry: () => ({
-        snapshotId: 'checkpoint',
-        eventPosition: 1,
-        createdAt: 1,
-      }),
-      loadNamedSnapshot: () => ({ version: 1 }),
-    };
-    expect(isRewindCheckpointAvailable(valid, 'thread', 'checkpoint')).toBe(true);
-
-    expect(
-      isRewindCheckpointAvailable(
-        { ...valid, getNamedSnapshotEntry: () => null },
-        'thread',
-        'missing',
-      ),
-    ).toBe(false);
-    expect(
-      isRewindCheckpointAvailable({ ...valid, loadNamedSnapshot: () => null }, 'thread', 'corrupt'),
-    ).toBe(false);
-    expect(
-      isRewindCheckpointAvailable(
-        { ...valid, loadNamedSnapshot: () => 'parseable-but-invalid' },
-        'thread',
-        'invalid',
-      ),
-    ).toBe(false);
   });
 });

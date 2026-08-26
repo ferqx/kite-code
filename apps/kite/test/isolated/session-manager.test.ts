@@ -1,7 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import { aiMessage } from '@kite-ai/builtin-runtime/model';
@@ -9,6 +10,7 @@ import {
   type BuiltinPreparedShellExecutionInput,
   SandboxPreparationArtifactStore,
 } from '@kite-ai/builtin-runtime/sandbox';
+import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import {
   RUNTIME_QUERY_SCHEMA_,
   type RuntimeCommand,
@@ -19,7 +21,6 @@ import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
-  translateRuntimeCommandToKernelInput,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
@@ -41,12 +42,12 @@ import {
   testRuntimeCapabilityExecutionPort,
 } from '../../../../tests/helpers/runtime-model';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
-import { createTuiRuntimeClient } from '../../src/adapters/tui/runtime-bridge';
 import type {
   RuntimeSessionCoordinator,
   RuntimeSessionCoordinatorAccess,
 } from '../../src/bootstrap/runtime/RuntimeSessionCoordinator';
 import { loadSession } from '../../src/bootstrap/runtime/session-persistence';
+import { createTuiRuntimeClient } from '../../src/bootstrap/runtime/TuiRuntimeBridge';
 import {
   isSilentCancellationMismatch,
   reconcileRuntimeInteractionMode,
@@ -94,6 +95,9 @@ type RuntimeWithRuntimeAction = {
 type RuntimeWithRouteRuntimeEvent = {
   _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
 };
+type RuntimeWithStateEventSink = {
+  _runtimeStateEventSink: ((event: unknown) => void) | null;
+};
 type RuntimeWithPushToBuffer = { _pushToBuffer: (event: unknown) => void };
 type ManagerWithTokenStatsCache = {
   tokenStatsService: {
@@ -105,6 +109,16 @@ type ManagerWithTokenStatsCache = {
 };
 
 // ── Helpers ──
+
+function emptyRuntimeHistory(): RuntimeHistoryClient {
+  return {
+    listSessions: async () => ({ entries: [], hasMore: false }),
+    listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+    loadSession: async (sessionId) => {
+      throw new Error(`No history fixture for ${sessionId}`);
+    },
+  };
+}
 
 function makeDeps(checkpointPath = ':memory:'): SessionDeps {
   const config: AgentConfig = {
@@ -180,7 +194,10 @@ function installTestOnlyRuntimeTurnAdapter(
 ): RuntimeSessionCoordinatorAccess {
   let interactionMode: RuntimeState['mode'] = deps.config.interactionMode ?? 'accept_edits';
   const modeState = (): Readonly<RuntimeState> =>
-    ({ mode: interactionMode }) as Readonly<RuntimeState>;
+    ({
+      mode: interactionMode,
+      context: { pendingCompaction: undefined },
+    }) as Readonly<RuntimeState>;
   const processModeEvent = (event: RuntimeEvent): void => {
     if (event.type === 'interaction_mode.changed') interactionMode = event.mode;
   };
@@ -215,6 +232,12 @@ function installTestOnlyRuntimeTurnAdapter(
     getSandboxAvailable: () => undefined,
     setActiveCancelRun: () => undefined,
     clearActiveCancelRun: () => undefined,
+    commitInteractionModeCommand: unavailableState,
+    commitCancelTurnCommand: unavailableState,
+    commitCloseSessionCommand: unavailableState,
+    commitClearSessionCommandGrantsCommand: unavailableState,
+    commitForkSessionCommand: unavailableState,
+    commitStartTurnCommand: unavailableState,
     executeTurn: (input, provider) =>
       runTestRuntimeAgent(
         {
@@ -585,6 +608,12 @@ describe('SessionManager', () => {
       getSandboxAvailable: () => undefined,
       setActiveCancelRun: () => undefined,
       clearActiveCancelRun: () => undefined,
+      commitInteractionModeCommand: unavailable,
+      commitCancelTurnCommand: unavailable,
+      commitCloseSessionCommand: unavailable,
+      commitClearSessionCommandGrantsCommand: unavailable,
+      commitForkSessionCommand: unavailable,
+      commitStartTurnCommand: unavailable,
       executeTurn: unavailable,
       createRuntimeEffectPort: unavailable,
       executePendingCompaction: unavailable,
@@ -1020,6 +1049,24 @@ describe('SessionManager', () => {
       getSandboxAvailable: () => undefined,
       setActiveCancelRun: () => undefined,
       clearActiveCancelRun: () => undefined,
+      commitInteractionModeCommand: () => {
+        throw new Error('not used');
+      },
+      commitCancelTurnCommand: () => {
+        throw new Error('not used');
+      },
+      commitCloseSessionCommand: () => {
+        throw new Error('not used');
+      },
+      commitClearSessionCommandGrantsCommand: () => {
+        throw new Error('not used');
+      },
+      commitForkSessionCommand: () => {
+        throw new Error('not used');
+      },
+      commitStartTurnCommand: () => {
+        throw new Error('not used');
+      },
       executeTurn: () => {
         throw new Error('not used');
       },
@@ -1081,14 +1128,20 @@ describe('SessionManager', () => {
       expect(ensureCalls).toBe(2);
       const first = await mgr.executeHostCompaction(threadId);
       expect(
-        first.events.filter((event) => event.type === 'context.compaction_completed'),
+        first.events.filter(
+          (event) => event.type === 'context.compaction' && event.status === 'completed',
+        ),
       ).toHaveLength(1);
       expect(executeCalls).toBe(1);
-      expect(openStoreCalls).toBe(0);
+      // The recovered projection now verifies its retained snapshot through
+      // the Store once before dispatching the coordinator-owned compaction.
+      expect(openStoreCalls).toBe(1);
       const second = await mgr.executeHostCompaction(threadId);
       expect(executeCalls).toBe(1);
       expect(
-        second.events.filter((event) => event.type === 'context.compaction_completed'),
+        second.events.filter(
+          (event) => event.type === 'context.compaction' && event.status === 'completed',
+        ),
       ).toHaveLength(0);
     } finally {
       retainedStore.close();
@@ -1993,8 +2046,10 @@ describe('SessionManager', () => {
     const rt = mgr.getRuntime(id)!;
     rt.eventBuffer.push({
       type: 'model.responded',
+      requestId: 'm1',
       messageId: 'm1',
-      text: 'hello',
+      toolCallCount: 0,
+      summary: 'hello',
     });
 
     mgr.removeRuntime(id);
@@ -2502,14 +2557,16 @@ describe('TUI Runtime cancellation bridge', () => {
       cancelAllSessions: async () => undefined,
       waitForSessionIdle: async () => undefined,
       isSessionOperationActive: () => false,
+      removeSessionProjection: () => false,
+      history: emptyRuntimeHistory(),
       [Symbol.asyncDispose]: async () => undefined,
-    } satisfies RuntimeHostCoordinatorPort;
+    } satisfies RuntimeHostCoordinatorPort & { readonly history: RuntimeHistoryClient };
     return { host, cancelCommands, firstCancel };
   }
 
   function clientWithHost(host: RuntimeHostCoordinatorPort) {
     return createTuiRuntimeClient(
-      makeDeps(),
+      { ...makeDeps(), workspace: '/tmp/tui-cancel' },
       () => host,
       () => ({
         projectId: 'project_tui-cancel-test',
@@ -2519,7 +2576,7 @@ describe('TUI Runtime cancellation bridge', () => {
     );
   }
 
-  test('aborts the live Runtime synchronously and reconciles a revision-conflicted durable receipt', async () => {
+  test('leaves lifecycle cancellation to Host and reconciles a revision-conflicted durable receipt', async () => {
     const fixture = hostFixture((command, attempt) =>
       attempt === 1
         ? {
@@ -2544,7 +2601,10 @@ describe('TUI Runtime cancellation bridge', () => {
 
     runtime.abort();
 
-    expect(controller.signal.aborted).toBe(true);
+    // The Client submits only the durable command. This fake Host records the
+    // request but intentionally has no lifecycle supervisor, so local Runtime
+    // execution must remain untouched.
+    expect(controller.signal.aborted).toBe(false);
     await fixture.firstCancel;
     await Promise.resolve();
     await Promise.resolve();
@@ -2569,14 +2629,126 @@ describe('TUI Runtime cancellation bridge', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(runtime.eventBuffer).toContainEqual({
-      type: 'run.error',
-      message: 'TUI Runtime cancellation rejected: invalid_command',
-      recoverable: false,
+      type: 'run.failure',
+      runId: 'runtime-run',
+      code: 'runtime_error',
+      retryable: false,
+      recoveryEntry: 'new_run',
     });
   });
 
-  function cleanupHostFixture(deps: SessionDeps = makeDeps()) {
+  function cleanupHostFixture(
+    deps: SessionDeps = makeDeps(
+      join(mkdtempSync(join(realpathSync(tmpdir()), 'kite-tui-cleanup-')), 'state.sqlite'),
+    ),
+  ) {
     let bridge!: RuntimeHostExecutionBridge;
+    const coordinators = new Map<string, RuntimeSessionCoordinator>();
+    deps.runtimeSessionCoordinator = {
+      ensure: (identity) => {
+        const existing = coordinators.get(identity.sessionId);
+        if (existing) return existing;
+        let revision = 0;
+        const receipt = (evidence: {
+          targetSessionId: string;
+          commandId: string;
+          scopeSessionId: string;
+          requestDigest: string;
+          committedAt: number;
+        }) => ({
+          ...evidence,
+          committedRevision: revision,
+          originalReceiptJson: JSON.stringify({
+            status: 'applied',
+            commandId: evidence.commandId,
+            sessionId: evidence.targetSessionId,
+            revision,
+          }),
+        });
+        const coordinator = {
+          sessionId: identity.sessionId,
+          session: { commitCommandSnapshot: receipt },
+          recoveryChanged: false,
+          lifecycle: 'idle',
+          control: {
+            getState: () => ({ revision }),
+            processEvent: () => undefined,
+            processEventBatch: () => [],
+            cancelRun: () => [],
+          },
+          getState: () => ({ revision }),
+          getStateRuntimeStorage: () => {
+            throw new Error('unused test coordinator storage');
+          },
+          isTurnActive: () => false,
+          beginTurn: () => undefined,
+          endTurn: () => undefined,
+          updateInteractionMode: () => undefined,
+          getInteractionModeState: () => ({
+            interactionMode: 'accept_edits' as const,
+            interactionModeRevision: 0,
+          }),
+          updateSandboxAvailable: () => undefined,
+          getSandboxAvailable: () => undefined,
+          setActiveCancelRun: () => undefined,
+          clearActiveCancelRun: () => undefined,
+          commitInteractionModeCommand: () => ({
+            receipt: receipt({
+              targetSessionId: identity.sessionId,
+              commandId: 'unused',
+              scopeSessionId: identity.sessionId,
+              requestDigest: '0'.repeat(64),
+              committedAt: 0,
+            }),
+            events: [],
+          }),
+          commitCancelTurnCommand: () => ({
+            receipt: receipt({
+              targetSessionId: identity.sessionId,
+              commandId: 'unused',
+              scopeSessionId: identity.sessionId,
+              requestDigest: '0'.repeat(64),
+              committedAt: 0,
+            }),
+            events: [],
+          }),
+          commitCloseSessionCommand: (
+            _command: unknown,
+            evidence: Parameters<RuntimeSessionCoordinator['commitCloseSessionCommand']>[1],
+          ) => {
+            if (operationActive) {
+              manager
+                .getRuntime(identity.sessionId)
+                ?.authorizedExecutionControl?.cancelRun('Runtime session closed.');
+              revision += 1;
+            }
+            return { receipt: receipt(evidence), events: [], wasActive: operationActive };
+          },
+          commitForkSessionCommand: () => {
+            throw new Error('unused test coordinator fork');
+          },
+          commitStartTurnCommand: () => {
+            throw new Error('unused test coordinator turn');
+          },
+          executeTurn: () => {
+            throw new Error('unused test coordinator turn');
+          },
+          createRuntimeEffectPort: () => {
+            throw new Error('unused test coordinator effects');
+          },
+          executePendingCompaction: async () => [],
+          waitForIdle: async () => undefined,
+          close: async () => undefined,
+        } as unknown as RuntimeSessionCoordinator;
+        coordinators.set(identity.sessionId, coordinator);
+        return coordinator;
+      },
+      get: (sessionId) => coordinators.get(sessionId),
+      release: async (sessionId) => {
+        coordinators.delete(sessionId);
+      },
+      close: async () => undefined,
+    };
     let operationActive = false;
     let rejectNextReadiness = false;
     const commands: RuntimeCommand[] = [];
@@ -2591,13 +2763,28 @@ describe('TUI Runtime cancellation bridge', () => {
           rejectNextReadiness = false;
           throw new Error('readiness failed');
         }
-        const prepared = await bridge.prepare(
-          translateRuntimeCommandToKernelInput(command),
-          () => undefined,
-        );
-        receipts.set(command.commandId, prepared.receipt);
+        const targetSessionId =
+          command.type === 'create_session'
+            ? command.bootstrapSessionId!
+            : command.type === 'fork_session'
+              ? command.sourceSessionId
+              : command.sessionId;
+        const inspected = await bridge.inspectCommand(command, { targetSessionId });
+        if (inspected.kind === 'terminal') {
+          receipts.set(command.commandId, inspected.receipt);
+          return inspected.receipt;
+        }
+        const committed = await inspected.decision.commit({
+          scopeSessionId: targetSessionId,
+          commandId: command.commandId,
+          requestDigest: '0'.repeat(64),
+          targetSessionId,
+          committedAt: 0,
+        });
+        await committed.activation?.(() => undefined);
+        receipts.set(command.commandId, committed.receipt);
         if (command.type === 'close_session') operationActive = false;
-        return prepared.receipt;
+        return committed.receipt;
       },
       query: async (query: Parameters<RuntimeHostCoordinatorPort['query']>[0]) => ({
         status: 'rejected' as const,
@@ -2610,15 +2797,20 @@ describe('TUI Runtime cancellation bridge', () => {
         })(),
       cancelSession: async (sessionId: string, reason?: string) => {
         await bridge.shutdownSession(sessionId, reason ?? 'test cancellation', () => undefined);
+        manager
+          .getRuntime(sessionId)
+          ?.authorizedExecutionControl?.cancelRun(reason ?? 'test cancellation');
         operationActive = false;
       },
       cancelAllSessions: async () => undefined,
       waitForSessionIdle: async () => undefined,
       isSessionOperationActive: () => operationActive,
+      removeSessionProjection: () => false,
+      history: emptyRuntimeHistory(),
       [Symbol.asyncDispose]: async () => undefined,
-    } satisfies RuntimeHostCoordinatorPort;
+    } satisfies RuntimeHostCoordinatorPort & { readonly history: RuntimeHistoryClient };
     const manager = createTuiRuntimeClient(
-      deps,
+      { ...deps, workspace: '/tmp/tui-cleanup' },
       (createdBridge) => {
         bridge = createdBridge;
         return host;
@@ -2640,6 +2832,29 @@ describe('TUI Runtime cancellation bridge', () => {
       },
       setOperationActive: (active: boolean) => {
         operationActive = active;
+      },
+      registerPersistedSession: (sessionId: string, workspace: string) => {
+        const store = deps.openStateRuntimeStorage(sessionId);
+        try {
+          store.sessions.saveSnapshot(
+            sessionId,
+            createRuntimeHostStateInitialState({
+              recoveryIdentityKey: createHash('sha256')
+                .update(`tui-cleanup:${sessionId}`)
+                .digest('hex'),
+              threadId: sessionId,
+              userId: 'tui-user',
+              workspace,
+              projectId: `project_${sessionId}`,
+              canonicalWorkspaceDigest: `sha256:${createHash('sha256')
+                .update(workspace)
+                .digest('hex')}`,
+            }),
+          );
+        } finally {
+          store.close();
+        }
+        return manager.registerSession(sessionId, workspace);
       },
     };
   }
@@ -2664,7 +2879,7 @@ describe('TUI Runtime cancellation bridge', () => {
     const oldRuntime = fixture.manager.getRuntime(oldId)!;
     const oldCancelCalls = installCancellationCounter(oldRuntime);
     const targetId = 'historical-target-cleanup';
-    const targetRuntime = fixture.manager.registerSession(targetId, '/tmp/historical-target');
+    const targetRuntime = fixture.registerPersistedSession(targetId, '/tmp/historical-target');
     const targetCancelCalls = installCancellationCounter(targetRuntime);
 
     await fixture.manager.removeRuntime(targetId);
@@ -2697,7 +2912,7 @@ describe('TUI Runtime cancellation bridge', () => {
     const fixture = cleanupHostFixture();
     const sessionId = 'readiness-retry-target';
     fixture.rejectNextReadiness();
-    fixture.manager.registerSession(sessionId, '/tmp/readiness-retry');
+    fixture.registerPersistedSession(sessionId, '/tmp/readiness-retry');
 
     await expect(fixture.manager.removeRuntime(sessionId)).rejects.toThrow('readiness failed');
 
@@ -2708,7 +2923,7 @@ describe('TUI Runtime cancellation bridge', () => {
       ),
     ).toHaveLength(0);
 
-    fixture.manager.registerSession(sessionId, '/tmp/readiness-retry');
+    fixture.registerPersistedSession(sessionId, '/tmp/readiness-retry');
     await fixture.manager.removeRuntime(sessionId);
     expect(fixture.manager.getRuntime(sessionId)).toBeUndefined();
     expect(
@@ -2741,7 +2956,7 @@ describe('TUI Runtime cancellation bridge', () => {
   test('an active operation is cancelled once across cancellation and final runtime cleanup', async () => {
     const fixture = cleanupHostFixture();
     const sessionId = 'active-target-cleanup';
-    const runtime = fixture.manager.registerSession(sessionId, '/tmp/active-target');
+    const runtime = fixture.registerPersistedSession(sessionId, '/tmp/active-target');
     const cancellationCalls = installCancellationCounter(runtime);
     fixture.setOperationActive(true);
 
@@ -2755,18 +2970,18 @@ describe('TUI Runtime cancellation bridge', () => {
         command.type === 'close_session' && command.sessionId === sessionId,
     );
     expect(closeCommand).toBeDefined();
-    // cancelRuntimeOperations owns the canonical cancellation. The later
-    // close only releases Host/bridge authority and must not write another.
+    // This fixture exposes an owner-active operation without a client work
+    // projection. The close remains the only receipt in that synthetic case.
     expect(fixture.receipts.get(closeCommand!.commandId)).toMatchObject({
       status: 'applied',
-      revision: 0,
+      revision: 1,
     });
   });
 
   test('direct cleanup of an active operation persists one canonical cancellation before draining', async () => {
     const fixture = cleanupHostFixture();
     const sessionId = 'direct-active-cleanup';
-    const runtime = fixture.manager.registerSession(sessionId, '/tmp/direct-active');
+    const runtime = fixture.registerPersistedSession(sessionId, '/tmp/direct-active');
     const cancellationCalls = installCancellationCounter(runtime);
     fixture.setOperationActive(true);
 
@@ -2796,6 +3011,9 @@ describe('SessionRuntime', () => {
         type: 'plan.approved',
         interactionId: 'review-1',
         toolCallId: 'plan-call',
+        planId: 'plan-1',
+        version: 1,
+        structuralDigest: 'sha256:plan-1',
         executionMode: 'auto',
       },
       () => {},
@@ -3419,7 +3637,7 @@ describe('SessionRuntime', () => {
     rt.abort();
 
     expect(order).toEqual(['persist-first']);
-    expect(projected).toEqual(['tool.cancelled', 'turn.aborted']);
+    expect(projected).toEqual(['tool.cancelled', 'turn.terminal']);
     expect(ac.signal.aborted).toBe(true);
   });
 
@@ -3557,7 +3775,10 @@ describe('SessionRuntime', () => {
       ]);
       if (startup === 'run_finished') {
         const error = actions.find(
-          (action) => action.type === 'RUNTIME_EVENT' && action.event.type === 'run.error',
+          (action) =>
+            action.type === 'RUNTIME_EVENT' &&
+            action.event.type === 'run.terminal' &&
+            action.event.status === 'failed',
         );
         throw new Error(`Successor fixture ended before shell start: ${JSON.stringify(error)}`);
       }
@@ -3571,7 +3792,6 @@ describe('SessionRuntime', () => {
           type: 'RUNTIME_EVENT',
           event: expect.objectContaining({
             type: 'model.responded',
-            text: '继续测试已完成。',
           }),
         }),
       );
@@ -3691,11 +3911,14 @@ describe('SessionRuntime', () => {
       ]);
       if (startup === 'run_finished') {
         const error = actions.find(
-          (action) => action.type === 'RUNTIME_EVENT' && action.event.type === 'run.error',
+          (action) =>
+            action.type === 'RUNTIME_EVENT' &&
+            action.event.type === 'run.terminal' &&
+            action.event.status === 'failed',
         );
         throw new Error(`Presentation fixture ended before flush: ${JSON.stringify(error)}`);
       }
-      expect(eventOrder).toContain('model.reasoning_completed');
+      expect(eventOrder).not.toContain('model.reasoning_completed');
       expect(eventOrder).not.toContain('model.text_delta');
       expect(eventOrder).not.toContain('model.responded');
 
@@ -3788,8 +4011,10 @@ describe('SessionRuntime', () => {
     const rt = makeRuntime();
     rt.eventBuffer.push({
       type: 'model.responded',
+      requestId: 'm1',
       messageId: 'm1',
-      text: 'hello',
+      toolCallCount: 0,
+      summary: 'hello',
     });
     rt.conversationHistory = ['cmd1', 'cmd2'];
     rt.pendingInterrupt = true;
@@ -3964,8 +4189,10 @@ describe('SessionRuntime', () => {
     for (let i = 0; i < MAX; i++) {
       rt.eventBuffer.push({
         type: 'model.responded',
+        requestId: `m${i}`,
         messageId: `m${i}`,
-        text: `msg${i}`,
+        toolCallCount: 0,
+        summary: `msg${i}`,
       });
     }
     (rt as unknown as RuntimeWithPushToBuffer)._pushToBuffer({
@@ -3984,15 +4211,16 @@ describe('SessionRuntime', () => {
     const MAX = (SessionRuntime as any).MAX_BUFFER;
     rt.eventBuffer.push({
       type: 'tool.progress',
-      toolCallId: 'shell-old',
-      chunk: 'old progress',
+      toolId: 'shell-old',
+      summary: 'Tool output updated.',
       stream: 'stdout',
     });
     for (let i = 1; i < MAX; i++) {
       rt.eventBuffer.push({
         type: 'model.responded',
+        requestId: `m${i}`,
         messageId: `m${i}`,
-        text: `msg${i}`,
+        toolCallCount: 0,
       });
     }
     (rt as any)._pushToBuffer({
@@ -4012,7 +4240,7 @@ describe('SessionRuntime', () => {
     expect(rt.eventBuffer.some((event) => event.type === 'tool.progress')).toBe(false);
     expect(
       rt.eventBuffer.some(
-        (event) => event.type === 'tool.finished' && event.toolCallId === 'shell-new',
+        (event) => event.type === 'tool.finished' && event.toolId === 'shell-new',
       ),
     ).toBe(true);
   });
@@ -4024,9 +4252,10 @@ describe('SessionRuntime', () => {
     for (let i = 0; i < MAX; i++) {
       rt.eventBuffer.push({
         type: 'tool.finished',
-        toolCallId: `c${i}`,
-        name: 'read_file',
-        result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
+        toolId: `c${i}`,
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: '', stderr: '' },
+        summary: 'Tool finished.',
       });
     }
     (rt as unknown as RuntimeWithPushToBuffer)._pushToBuffer({
@@ -4038,9 +4267,7 @@ describe('SessionRuntime', () => {
     expect(rt.eventBuffer.length).toBe(MAX + 1);
     expect(rt.eventBuffer[0]?.type).toBe('tool.finished');
     expect(
-      rt.eventBuffer.some(
-        (event) => event.type === 'tool.finished' && event.toolCallId === 'c_new',
-      ),
+      rt.eventBuffer.some((event) => event.type === 'tool.finished' && event.toolId === 'c_new'),
     ).toBe(true);
   });
 
@@ -4053,28 +4280,56 @@ describe('SessionRuntime', () => {
       rt as unknown as {
         _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
       }
-    )._routeRuntimeEvent({ type: 'model.text_delta', text: 'a' }, dispatch);
+    )._routeRuntimeEvent(
+      { type: 'model.text_delta', requestId: 'request-coalesced', text: 'a' },
+      dispatch,
+    );
     (
       rt as unknown as {
         _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
       }
-    )._routeRuntimeEvent({ type: 'model.text_delta', text: 'answer' }, dispatch);
+    )._routeRuntimeEvent(
+      { type: 'model.text_delta', requestId: 'request-coalesced', text: 'answer' },
+      dispatch,
+    );
     (
       rt as unknown as {
         _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
       }
-    )._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'r' }, dispatch);
+    )._routeRuntimeEvent(
+      {
+        type: 'model.reasoning_delta',
+        requestId: 'request-coalesced',
+        segmentId: 'reasoning-1',
+        text: 'r',
+      },
+      dispatch,
+    );
     (
       rt as unknown as {
         _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
       }
-    )._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'reasoning' }, dispatch);
+    )._routeRuntimeEvent(
+      {
+        type: 'model.reasoning_delta',
+        requestId: 'request-coalesced',
+        segmentId: 'reasoning-1',
+        text: 'reasoning',
+      },
+      dispatch,
+    );
     expect(actions).toEqual([]);
 
     await new Promise((resolve) => setTimeout(resolve, 70));
     expect(actions.map((action) => (action as { event: unknown }).event)).toEqual([
-      { type: 'model.reasoning_delta', text: 'reasoning' },
-      { type: 'model.text_delta', text: 'answer' },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-coalesced',
+        state: 'streaming',
+        segmentId: 'reasoning-1',
+        text: 'reasoning',
+      },
+      { type: 'model.text_delta', requestId: 'request-coalesced', text: 'answer' },
     ]);
   });
 
@@ -4084,7 +4339,7 @@ describe('SessionRuntime', () => {
     const dispatch = (action: unknown) => events.push((action as { event: unknown }).event);
 
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
-      { type: 'model.text_delta', text: 'answer' },
+      { type: 'model.text_delta', requestId: 'final', text: 'answer' },
       dispatch,
     );
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
@@ -4093,8 +4348,14 @@ describe('SessionRuntime', () => {
     );
 
     expect(events).toEqual([
-      { type: 'model.text_delta', text: 'answer' },
-      { type: 'model.responded', messageId: 'final', text: 'answer' },
+      { type: 'model.text_delta', requestId: 'final', text: 'answer' },
+      {
+        type: 'model.responded',
+        requestId: 'final',
+        messageId: 'final',
+        toolCallCount: 0,
+        summary: 'answer',
+      },
     ]);
   });
 
@@ -4127,8 +4388,8 @@ describe('SessionRuntime', () => {
     expect(events).toEqual([
       {
         type: 'tool.progress',
-        toolCallId: 'shell-1',
-        chunk: 'one\ntwo',
+        toolId: 'shell-1',
+        summary: 'one\ntwo',
         stream: 'stdout',
         lineCount: 2,
       },
@@ -4152,9 +4413,8 @@ describe('SessionRuntime', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 70));
     expect(events).toHaveLength(1);
-    expect(events[0].chunk.length).toBeLessThanOrEqual(16 * 1024);
-    expect(events[0].chunk).toStartWith('… progress truncated … ');
-    expect(events[0].chunk).not.toContain('\n');
+    expect(events[0].summary).toContain('… progress truncated …');
+    expect(events[0].summary.length).toBeLessThanOrEqual(8_193);
     expect(events[0].lineCount).toBe(1);
   });
 
@@ -4195,31 +4455,43 @@ describe('SessionRuntime', () => {
     const rt = makeRuntime();
     rt.setForeground(false);
     for (let i = 0; i < 100; i++) {
-      (rt as any)._pushToBuffer({
-        type: 'tool.progress',
-        toolCallId: 'shell-1',
-        chunk: `line-${i}`,
-        stream: 'stdout',
-      });
+      (rt as any)._routeRuntimeEvent(
+        {
+          type: 'tool.progress',
+          toolCallId: 'shell-1',
+          chunk: `line-${i}`,
+          stream: 'stdout',
+        },
+        () => {},
+      );
     }
-    (rt as any)._pushToBuffer({
-      type: 'tool.finished',
-      toolCallId: 'shell-1',
-      name: 'shell_execute',
-      result: {
-        ok: true,
-        command: 'echo',
-        exitCode: 0,
-        stdout: 'done',
-        stderr: '',
+    (rt as any)._routeRuntimeEvent(
+      {
+        type: 'tool.finished',
+        toolCallId: 'shell-1',
+        name: 'shell_execute',
+        result: {
+          ok: true,
+          command: 'echo',
+          exitCode: 0,
+          stdout: 'done',
+          stderr: '',
+        },
       },
-    });
+      () => {},
+    );
 
     expect(rt.eventBuffer).toHaveLength(2);
     expect(rt.eventBuffer[0]?.type).toBe('tool.progress');
     expect(rt.eventBuffer[1]?.type).toBe('tool.finished');
     const progress = rt.eventBuffer[0];
-    expect(progress?.type === 'tool.progress' ? progress.chunk : '').toContain('line-99');
+    expect(progress).toEqual({
+      type: 'tool.progress',
+      toolId: 'shell-1',
+      summary: Array.from({ length: 100 }, (_, index) => `line-${index}`).join('\n'),
+      stream: 'stdout',
+      lineCount: 100,
+    });
   });
 
   test('flushes a reasoning delta before its explicit segment completion event', () => {
@@ -4230,6 +4502,7 @@ describe('SessionRuntime', () => {
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
       {
         type: 'model.reasoning_delta',
+        requestId: 'request-r1',
         segmentId: 'r1',
         text: 'complete reasoning',
       },
@@ -4238,6 +4511,7 @@ describe('SessionRuntime', () => {
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
       {
         type: 'model.reasoning_completed',
+        requestId: 'request-r1',
         segmentId: 'r1',
         text: 'complete reasoning',
       },
@@ -4246,14 +4520,66 @@ describe('SessionRuntime', () => {
 
     expect(events).toEqual([
       {
-        type: 'model.reasoning_delta',
+        type: 'reasoning.activity',
+        requestId: 'request-r1',
+        state: 'streaming',
         segmentId: 'r1',
         text: 'complete reasoning',
       },
       {
-        type: 'model.reasoning_completed',
+        type: 'reasoning.activity',
+        requestId: 'request-r1',
+        state: 'completed',
         segmentId: 'r1',
         text: 'complete reasoning',
+      },
+    ]);
+  });
+
+  test('keeps reasoning lifecycle events on the ephemeral presentation route with a server sink', () => {
+    const rt = makeRuntime();
+    const durableStateEvents: unknown[] = [];
+    const presentationEvents: unknown[] = [];
+    (rt as unknown as RuntimeWithStateEventSink)._runtimeStateEventSink = (event) => {
+      durableStateEvents.push(event);
+    };
+    const dispatch = (action: unknown) =>
+      presentationEvents.push((action as { event: unknown }).event);
+
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
+      {
+        type: 'model.reasoning_delta',
+        requestId: 'request-server-reasoning-1',
+        segmentId: 'server-reasoning-1',
+        text: 'Inspecting the runtime.',
+      },
+      dispatch,
+    );
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
+      {
+        type: 'model.reasoning_completed',
+        requestId: 'request-server-reasoning-1',
+        segmentId: 'server-reasoning-1',
+        text: 'Inspecting the runtime.',
+      },
+      dispatch,
+    );
+
+    expect(durableStateEvents).toEqual([]);
+    expect(presentationEvents).toEqual([
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-server-reasoning-1',
+        state: 'streaming',
+        segmentId: 'server-reasoning-1',
+        text: 'Inspecting the runtime.',
+      },
+      {
+        type: 'reasoning.activity',
+        requestId: 'request-server-reasoning-1',
+        state: 'completed',
+        segmentId: 'server-reasoning-1',
+        text: 'Inspecting the runtime.',
       },
     ]);
   });
@@ -4262,7 +4588,7 @@ describe('SessionRuntime', () => {
     const rt = makeRuntime();
     const actions: unknown[] = [];
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
-      { type: 'model.text_delta', text: 'discarded' },
+      { type: 'model.text_delta', requestId: 'request-discarded', text: 'discarded' },
       (action: unknown) => actions.push(action),
     );
 
@@ -4276,24 +4602,32 @@ describe('SessionRuntime', () => {
     const rt = makeRuntime();
     const events: unknown[] = [];
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
-      { type: 'model.text_delta', text: 'partial answer' },
+      { type: 'model.text_delta', requestId: 'request-partial', text: 'partial answer' },
       (action: unknown) => events.push((action as { event: unknown }).event),
     );
 
     rt.abort();
-    expect(events).toEqual([{ type: 'model.text_delta', text: 'partial answer' }]);
+    expect(events).toEqual([
+      { type: 'model.text_delta', requestId: 'request-partial', text: 'partial answer' },
+    ]);
   });
 
   test('switching to background flushes a pending foreground delta first', () => {
     const rt = makeRuntime();
     const events: unknown[] = [];
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
-      { type: 'model.text_delta', text: 'before switch' },
+      { type: 'model.text_delta', requestId: 'request-before-switch', text: 'before switch' },
       (action: unknown) => events.push((action as { event: unknown }).event),
     );
 
     rt.setForeground(false);
-    expect(events).toEqual([{ type: 'model.text_delta', text: 'before switch' }]);
+    expect(events).toEqual([
+      {
+        type: 'model.text_delta',
+        requestId: 'request-before-switch',
+        text: 'before switch',
+      },
+    ]);
     expect(rt.eventBuffer).toEqual([]);
   });
 
@@ -4301,14 +4635,24 @@ describe('SessionRuntime', () => {
     const rt = makeRuntime();
     rt.setForeground(false);
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
-      { type: 'model.text_delta', text: 'background update' },
+      {
+        type: 'model.text_delta',
+        requestId: 'request-background-update',
+        text: 'background update',
+      },
       () => {
         throw new Error('background delta must not dispatch directly');
       },
     );
 
     rt.setForeground(true);
-    expect(rt.eventBuffer).toEqual([{ type: 'model.text_delta', text: 'background update' }]);
+    expect(rt.eventBuffer).toEqual([
+      {
+        type: 'model.text_delta',
+        requestId: 'request-background-update',
+        text: 'background update',
+      },
+    ]);
   });
 
   // ── _createProxyProvider (via private access) ──

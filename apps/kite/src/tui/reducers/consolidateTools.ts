@@ -22,6 +22,22 @@ const EXPLORATION_TOOLS = new Set([
   'shell_execute', // 条件性纳入：需 intent=inspect + 搜索命令前缀，由 isShellExploreCommand 守卫
 ]);
 
+/**
+ * Closed RuntimeClientEvent categories that can be safely summarized without
+ * their original arguments. Shell is intentionally excluded: its inspect
+ * intent is an App-private argument and must not be inferred from `{}`.
+ */
+const SAFE_CLIENT_EXPLORATION_CATEGORIES = new Set([
+  'read_file',
+  'search_content',
+  'search_files',
+  'read_mcp_resource',
+]);
+
+export function isSafeClientExplorationCategory(name: string): boolean {
+  return SAFE_CLIENT_EXPLORATION_CATEGORIES.has(name);
+}
+
 /** shell_execute 搜索/查找类命令前缀，匹配后纳入 Thought 预整合 */
 const SHELL_SEARCH_PREFIXES = ['rg ', 'grep ', 'ag ', 'ack ', 'git grep ', 'find ./', 'find /'];
 

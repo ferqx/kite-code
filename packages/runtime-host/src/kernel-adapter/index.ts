@@ -140,6 +140,7 @@ export {
   tightenResourceBudget,
 } from './resource-budget';
 export type {
+  StateRuntimeCommandCommitResult,
   StateRuntimeConcurrentEffectEventCurrent,
   StateRuntimeConcurrentEffectStateProjector,
   StateRuntimeEventBatchAdmissionValidator,

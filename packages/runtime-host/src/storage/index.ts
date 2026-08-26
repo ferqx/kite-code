@@ -86,6 +86,93 @@ export interface RuntimeEventMetadata {
   readonly occurredAt?: string;
 }
 
+/** Scoped persistent identity for a Runtime command retry. */
+export interface RuntimeCommandReceiptLookupInput {
+  readonly scopeSessionId: string;
+  readonly commandId: string;
+  readonly requestDigest: string;
+}
+
+/** Exact applied Contract receipt persisted with the State decision. */
+export interface RuntimeAppliedCommandReceipt {
+  readonly status: 'applied';
+  readonly commandId: string;
+  readonly sessionId: string;
+  readonly revision: number;
+}
+
+/** Store-owned record; command bodies never enter this persistence contract. */
+export interface RuntimeStoredCommandReceipt extends RuntimeCommandReceiptLookupInput {
+  readonly targetSessionId: string;
+  readonly originalReceiptJson: string;
+  readonly committedRevision: number;
+  readonly committedAt: number;
+}
+
+export type RuntimeCommandReceiptLookup =
+  | { readonly status: 'missing' }
+  | { readonly status: 'replay'; readonly receipt: RuntimeStoredCommandReceipt }
+  | { readonly status: 'digest_mismatch'; readonly receipt: RuntimeStoredCommandReceipt };
+
+/** Host-owned durable receipt reader. It is intentionally not a generic metadata store. */
+export interface RuntimeCommandReceiptPort {
+  lookup(input: RuntimeCommandReceiptLookupInput): RuntimeCommandReceiptLookup;
+}
+
+/**
+ * Command facts supplied to the State transaction before it computes the
+ * applied revision. StateRuntimeSession constructs the persisted receipt only
+ * after its decision has been accepted.
+ */
+export interface RuntimeCommandCommitEvidence extends RuntimeCommandReceiptLookupInput {
+  readonly targetSessionId: string;
+  readonly committedAt: number;
+}
+
+export function createRuntimeStoredCommandReceipt(
+  evidence: RuntimeCommandCommitEvidence,
+  committedRevision: number,
+): RuntimeStoredCommandReceipt {
+  assertCommandReceiptText(evidence.scopeSessionId, 'scope session identity');
+  assertCommandReceiptText(evidence.commandId, 'command identity');
+  if (!/^[a-f0-9]{64}$/u.test(evidence.requestDigest)) {
+    throw new Error('Runtime command receipt digest is invalid.');
+  }
+  assertCommandReceiptText(evidence.targetSessionId, 'target session identity');
+  if (!Number.isSafeInteger(evidence.committedAt) || evidence.committedAt < 0) {
+    throw new Error('Runtime command receipt committed time is invalid.');
+  }
+  if (!Number.isSafeInteger(committedRevision) || committedRevision < 0) {
+    throw new Error('Runtime command receipt committed revision is invalid.');
+  }
+  const originalReceipt: RuntimeAppliedCommandReceipt = Object.freeze({
+    status: 'applied',
+    commandId: evidence.commandId,
+    sessionId: evidence.targetSessionId,
+    revision: committedRevision,
+  });
+  return Object.freeze({
+    scopeSessionId: evidence.scopeSessionId,
+    commandId: evidence.commandId,
+    requestDigest: evidence.requestDigest,
+    targetSessionId: evidence.targetSessionId,
+    originalReceiptJson: JSON.stringify(originalReceipt),
+    committedRevision,
+    committedAt: evidence.committedAt,
+  });
+}
+
+function assertCommandReceiptText(value: string, field: string): void {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 512 ||
+    value.includes('\0')
+  ) {
+    throw new Error(`Runtime command receipt ${field} is invalid.`);
+  }
+}
+
 export interface RuntimeSnapshotMetadata {
   readonly eventPosition: number;
   readonly stateRevision: number;
@@ -119,6 +206,12 @@ export interface RuntimeSessionInfo {
 export interface RuntimeSessionModelRoute {
   readonly provider: string;
   readonly name: string;
+}
+
+/** Receipt-bearing deletion remains a single Store transaction. */
+export interface RuntimeSessionDeletionInput {
+  readonly expectedRevision: number;
+  readonly commandReceipt: RuntimeStoredCommandReceipt;
 }
 
 export interface RuntimeCheckpointEntry {
@@ -165,7 +258,7 @@ export interface SessionStore<Event = unknown, State = unknown> {
   setSessionName(sessionId: string, name: string): void;
   getSessionModelRoute(sessionId: string): RuntimeSessionModelRoute | null;
   setSessionModelRoute(sessionId: string, route: RuntimeSessionModelRoute): void;
-  deleteSession(sessionId: string): void;
+  deleteSession(sessionId: string, deletion?: RuntimeSessionDeletionInput): void;
 }
 
 /**
@@ -221,6 +314,8 @@ export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly snapshotMetadata?: RuntimeSnapshotMetadata;
   readonly expectedRestoreBoundary?: RuntimeRestoreBoundary;
   readonly requiredEffectLease?: RuntimeEffectLeaseExpectation;
+  /** Only command-decision commits may include this Store 6 record. */
+  readonly commandReceipt?: RuntimeStoredCommandReceipt;
 }
 
 /** Store 4 lease predicate checked atomically with the guarded commit. */
@@ -276,6 +371,18 @@ export interface RuntimeRecoveryIdentityPort {
   remove(sessionId: string): void;
 }
 
+export interface RuntimeCommandForkInput {
+  readonly sourceSessionId: string;
+  readonly snapshotId: string;
+  readonly targetSessionId: string;
+  readonly targetRecoveryIdentityKey: string;
+  readonly commandEvidence: RuntimeCommandCommitEvidence;
+}
+
+export type RuntimeCommandForkResult =
+  | { readonly status: 'applied'; readonly receipt: RuntimeStoredCommandReceipt }
+  | { readonly status: 'unavailable' };
+
 export interface CheckpointPort<State = unknown> {
   saveNamedSnapshot(sessionId: string, name: string, state: State, eventPosition?: number): void;
   loadNamedSnapshot<T = State>(sessionId: string, name: string): T | null;
@@ -288,6 +395,8 @@ export interface CheckpointPort<State = unknown> {
     targetSessionId: string,
     targetRecoveryIdentityKey: string,
   ): boolean;
+  /** Store 6 clone + scoped receipt in one transaction; ordinary fork never writes a receipt. */
+  forkSessionForCommand(input: RuntimeCommandForkInput): RuntimeCommandForkResult;
   forkCurrentSession(
     sourceSessionId: string,
     targetSessionId: string,
@@ -331,6 +440,8 @@ export interface RuntimeStorage<Event = unknown, State = unknown> extends Runtim
   readonly checkpoints: CheckpointPort<State>;
   readonly artifacts: ArtifactPort;
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
+  /** Store 6 persistent replay authority; no in-memory or optional fallback exists. */
+  readonly commandReceipts: RuntimeCommandReceiptPort;
   close(): void;
 }
 

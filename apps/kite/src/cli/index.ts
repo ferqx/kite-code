@@ -9,7 +9,10 @@ import type { InteractionMode, ShellApprovalGrant } from '@kite-ai/runtime-contr
 import {
   RUNTIME_COMMAND_SCHEMA_,
   type RuntimeAccess,
-  type RuntimeNotification,
+  type RuntimeAccessNotification,
+  type RuntimeClientInteraction,
+  type RuntimeCommand,
+  type RuntimeInteractionResponse,
   type RuntimeNotificationEvent,
 } from '@kite-ai/runtime-contract';
 import { type FeatureFlags, getFeatureFlags } from '#app/config/features';
@@ -32,6 +35,10 @@ import {
   tryProjectAdmittedExecutionStatus,
 } from '#app/release/execution-status';
 import { formatReleaseStatus, projectReleaseStatus } from '#app/release/status-projection';
+import {
+  createRuntimeCommandIdAllocator,
+  type RuntimeCommandIdAllocator,
+} from '#app/runtime-client/command-id';
 import { projectTerminalOutcome } from '#app/runtime-projection';
 import type { SandboxBackend } from '#app/sandbox/types';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '#app/trace/replay';
@@ -66,10 +73,19 @@ export interface CliMainDependencies {
   readonly createRuntimeAccess: (
     input: CliRuntimeAccessInput,
   ) => RuntimeAccess & Partial<AsyncDisposable>;
+  readonly runRuntimeServerStdio?: (input: CliRuntimeAccessInput) => Promise<void>;
+  readonly commandIds?: RuntimeCommandIdAllocator;
 }
 
 export interface ParsedArgs {
-  command: 'run' | 'resume' | 'trace' | 'help' | 'sandbox-setup' | 'sandbox-status';
+  command:
+    | 'run'
+    | 'resume'
+    | 'trace'
+    | 'help'
+    | 'sandbox-setup'
+    | 'sandbox-status'
+    | 'server-stdio';
   task?: string;
   threadId: string;
   userId: string;
@@ -127,6 +143,9 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   }
   if (args.command === 'resume' && !args.task?.trim()) {
     throw new Error('resume requires --task (or positional task text) to continue the session.');
+  }
+  if (args.command === 'server-stdio' && !args.threadId) {
+    throw new Error('server --stdio requires an explicit --thread owned by the parent process.');
   }
 
   // Workspace trust gate (docs/active/workspace-trust.md). `run` executes
@@ -248,7 +267,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     input: {},
   }));
 
-  const access = dependencies.createRuntimeAccess({
+  const runtimeInput: CliRuntimeAccessInput = {
     sessionId: args.threadId,
     userId: args.userId,
     workspace: args.workspace,
@@ -271,12 +290,25 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     onSessionLoggingDiagnostic: (message) => {
       console.error(`[SESSION LOGGING DISABLED] ${message}`);
     },
-  });
-  let iterator: AsyncIterator<RuntimeNotification> | undefined;
+  };
+  if (args.command === 'server-stdio') {
+    if (!dependencies.runRuntimeServerStdio) {
+      throw new Error('Runtime stdio Server composition is unavailable.');
+    }
+    try {
+      await dependencies.runRuntimeServerStdio(runtimeInput);
+    } finally {
+      await observability.bridge.shutdown(250);
+    }
+    return;
+  }
+  const access = dependencies.createRuntimeAccess(runtimeInput);
+  let iterator: AsyncIterator<RuntimeAccessNotification> | undefined;
+  const commandIds = dependencies.commandIds ?? createRuntimeCommandIdAllocator();
   try {
     const createReceipt = await access.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
-      commandId: `cli-create:${args.threadId}`,
+      commandId: commandIds.next(),
       type: 'create_session',
       workspace: args.workspace,
       bootstrapSessionId: args.threadId,
@@ -286,12 +318,19 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     }
     let afterRevision =
       createReceipt.status === 'applied' ? createReceipt.revision : createReceipt.originalRevision;
-    const subscription = access.subscribe({ sessionId: args.threadId, afterRevision });
+    const subscription = access.subscribe({
+      spec: {
+        scope: 'session',
+        sessionId: args.threadId,
+        afterRevision,
+        includeEphemeral: true,
+      },
+    });
     iterator = subscription[Symbol.asyncIterator]();
     if (args.command === 'resume') {
       const resumeReceipt = await access.command({
         schema: RUNTIME_COMMAND_SCHEMA_,
-        commandId: `cli-resume:${args.threadId}`,
+        commandId: commandIds.next(),
         type: 'resume_session',
         sessionId: args.threadId,
         afterRevision,
@@ -306,7 +345,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
     }
     const startReceipt = await access.command({
       schema: RUNTIME_COMMAND_SCHEMA_,
-      commandId: `cli-turn:${args.threadId}:1`,
+      commandId: commandIds.next(),
       type: 'start_turn',
       sessionId: args.threadId,
       expectedRevision: afterRevision,
@@ -320,6 +359,7 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       const next = await iterator.next();
       if (next.done) break;
       const notification = next.value;
+      if (!('durability' in notification)) continue;
       const event = projectRuntimeNotificationForCli(notification);
       if (!event) {
         const status =
@@ -333,6 +373,16 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       console.log(
         JSON.stringify(projectCliRuntimeEvent(event, getFeatureFlags(config).terminalOutcome)),
       );
+      const interaction = interactionFromRuntimeNotificationEvent(event);
+      if (interaction) {
+        const response = await promptForRuntimeInteraction(interaction);
+        const receipt = await access.command(
+          respondInteractionCommand(commandIds.next(), args.threadId, interaction, response),
+        );
+        if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay') {
+          throw new Error(`Runtime interaction rejected: ${receipt.code}`);
+        }
+      }
     }
   } finally {
     await iterator?.return?.();
@@ -341,22 +391,163 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
   }
 }
 
-function projectRuntimeNotificationForCli(
-  notification: RuntimeNotification,
-): RuntimeNotificationEvent | undefined {
-  if (notification.durability === 'durable') return notification.projection.event;
-  const payload = notification.payload;
-  if (payload.type === 'model_delta') return { type: 'model.text_delta', text: payload.text };
-  if (payload.type === 'reasoning_delta') {
-    return { type: 'model.reasoning_delta', text: payload.text };
+function interactionFromRuntimeNotificationEvent(
+  event: RuntimeNotificationEvent,
+): RuntimeClientInteraction | undefined {
+  switch (event.type) {
+    case 'interaction.available':
+    case 'approval.queued':
+    case 'input.requested':
+    case 'plan.review_requested':
+      return event.interaction;
+    case 'provider.action':
+      return event.status === 'required' ? event.interaction : undefined;
+    case 'verification.status':
+      return event.status === 'pending' ? event.interaction : undefined;
+    default:
+      return undefined;
   }
-  return {
-    type: 'tool.progress',
-    toolCallId: payload.toolId,
-    chunk: payload.summary ?? '',
-    stream: payload.stream ?? 'stdout',
-    lineCount: payload.lineCount,
+}
+
+async function promptForRuntimeInteraction(
+  interaction: RuntimeClientInteraction,
+): Promise<RuntimeInteractionResponse> {
+  switch (interaction.kind) {
+    case 'approval': {
+      console.error(`\n[APPROVAL REQUIRED] ${interaction.title ?? 'Runtime operation'}`);
+      if (interaction.summary) console.error(interaction.summary);
+      console.error(
+        interaction.grants.includes('same_command')
+          ? 'Type y/yes to approve once, s/same to approve matching commands, or n to reject:'
+          : 'Type y/yes to approve once, or n to reject:',
+      );
+      const value = (await readCliStdin()).toLowerCase();
+      return {
+        kind: 'approval',
+        decision:
+          interaction.grants.includes('same_command') &&
+          (value === 's' || value === 'same' || value === 'same_command')
+            ? 'same_command'
+            : value === 'y' || value === 'yes'
+              ? 'approve_once'
+              : 'reject',
+      };
+    }
+    case 'input': {
+      console.error(`\n[QUESTION] ${interaction.question}`);
+      interaction.options?.forEach((option, index) => {
+        console.error(`  ${index + 1}. ${option.label}`);
+      });
+      return { kind: 'text', value: await readCliStdin() };
+    }
+    case 'plan_review': {
+      console.error(`\n[PLAN REVIEW] ${interaction.title ?? interaction.plan.planId}`);
+      if (interaction.summary) console.error(interaction.summary);
+      console.error('Type a/auto, e/accept-edits, f/feedback, or c/cancel:');
+      const value = (await readCliStdin()).toLowerCase();
+      if (value === 'a' || value === 'auto') {
+        return { kind: 'plan_review', decision: 'auto' };
+      }
+      if (value === 'e' || value === 'accept-edits') {
+        return { kind: 'plan_review', decision: 'accept_edits' };
+      }
+      if (value === 'f' || value === 'feedback') {
+        console.error('Enter your feedback:');
+        return { kind: 'plan_review', decision: 'feedback', feedback: await readCliStdin() };
+      }
+      return { kind: 'plan_review', decision: 'cancel' };
+    }
+    case 'provider_action': {
+      console.error(
+        `\n[PROVIDER ACTION] ${interaction.provider.providerId} requires ${interaction.action}.`,
+      );
+      console.error('Type c/completed, d/defer, or x/cancel:');
+      const value = (await readCliStdin()).toLowerCase();
+      return {
+        kind: 'provider_action',
+        outcome:
+          value === 'c' || value === 'completed'
+            ? 'completed'
+            : value === 'd' || value === 'defer' || value === 'deferred'
+              ? 'deferred'
+              : 'cancelled',
+      };
+    }
+    case 'verification': {
+      console.error(`\n[VERIFICATION REQUIRED] ${interaction.title ?? 'Verification failed'}`);
+      console.error('Type r/replan, w/waive, or c/compensate:');
+      const value = (await readCliStdin()).toLowerCase();
+      if (value === 'c' || value === 'compensate') {
+        return {
+          kind: 'verification',
+          decision: 'compensate',
+          detail: 'Client requested compensation.',
+        };
+      }
+      console.error(
+        value === 'w' || value === 'waive'
+          ? 'Enter waiver reason:'
+          : 'Enter replan/repair instruction:',
+      );
+      return {
+        kind: 'verification',
+        decision: value === 'w' || value === 'waive' ? 'waive' : 'replan',
+        detail: await readCliStdin(),
+      };
+    }
+  }
+}
+
+function respondInteractionCommand(
+  commandId: string,
+  sessionId: string,
+  interaction: RuntimeClientInteraction,
+  response: RuntimeInteractionResponse,
+): RuntimeCommand {
+  const base = {
+    schema: RUNTIME_COMMAND_SCHEMA_,
+    commandId,
+    type: 'respond_interaction' as const,
+    sessionId,
+    expectedRevision: interaction.sessionRevision,
   };
+  switch (interaction.kind) {
+    case 'approval':
+      if (response.kind !== 'approval') throw new Error('Approval response kind changed.');
+      return { ...base, interaction, response };
+    case 'input':
+      if (response.kind !== 'text') throw new Error('Input response kind changed.');
+      return { ...base, interaction, response };
+    case 'plan_review':
+      if (response.kind !== 'plan_review') throw new Error('Plan response kind changed.');
+      return { ...base, interaction, response };
+    case 'provider_action':
+      if (response.kind !== 'provider_action') throw new Error('Provider response kind changed.');
+      return { ...base, interaction, response };
+    case 'verification':
+      if (response.kind !== 'verification') throw new Error('Verification response kind changed.');
+      return { ...base, interaction, response };
+  }
+}
+
+function readCliStdin(): Promise<string> {
+  return new Promise((resolveInput) => {
+    const { stdin } = process;
+    const onData = (chunk: Buffer): void => {
+      stdin.removeListener('data', onData);
+      resolveInput(chunk.toString().trim());
+    };
+    stdin.on('data', onData);
+    stdin.resume();
+  });
+}
+
+function projectRuntimeNotificationForCli(
+  notification: RuntimeAccessNotification,
+): RuntimeNotificationEvent | undefined {
+  if (!('durability' in notification)) return undefined;
+  if (notification.durability === 'durable') return notification.projection.event;
+  return notification.event;
 }
 
 export function projectCliRuntimeEvent(
@@ -367,16 +558,10 @@ export function projectCliRuntimeEvent(
   | (RuntimeNotificationEvent & {
       terminalPresentation: ReturnType<typeof projectTerminalOutcome>;
     }) {
-  if (
-    terminalOutcomeEnabled &&
-    (event.type === 'run.completed' || event.type === 'run.error') &&
-    event.outcome
-  ) {
+  if (terminalOutcomeEnabled && event.type === 'run.terminal' && event.outcome) {
     return {
       ...event,
-      terminalPresentation: projectTerminalOutcome(
-        event.outcome as Parameters<typeof projectTerminalOutcome>[0],
-      ),
+      terminalPresentation: projectTerminalOutcome(event.outcome),
     };
   }
   return event;
@@ -390,13 +575,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
       ? 'sandbox-setup'
       : argv[0] === 'sandbox' && argv[1] === 'status'
         ? 'sandbox-status'
-        : argv[0] === 'resume'
-          ? 'resume'
-          : argv[0] === 'run'
-            ? 'run'
-            : argv[0] === 'trace'
-              ? 'trace'
-              : 'help';
+        : argv[0] === 'server' && argv[1] === '--stdio'
+          ? 'server-stdio'
+          : argv[0] === 'resume'
+            ? 'resume'
+            : argv[0] === 'run'
+              ? 'run'
+              : argv[0] === 'trace'
+                ? 'trace'
+                : 'help';
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
     const index = argv.indexOf(name);
@@ -456,7 +643,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return {
     command,
     task: command === 'run' || command === 'resume' ? value('--task', positionalTask(argv)) : '',
-    threadId: explicitThread || (command === 'run' ? freshThreadId() : 'default-thread'),
+    threadId:
+      explicitThread ||
+      (command === 'run' ? freshThreadId() : command === 'server-stdio' ? '' : 'default-thread'),
     userId: value('--user', 'default-user'),
     workspace: resolve(value('--workspace', cwd)),
     checkpointPath: resolve(value('--checkpoints', defaultCheckpointPath())),
@@ -521,6 +710,7 @@ function printHelp(): void {
   console.log(`Usage:
   bun run agent run --task "Create hello.txt"
   bun run agent resume --thread default-thread --task "Continue the task"
+  bun run agent server --stdio --thread <id> --workspace <path>
   bun run agent sandbox status
   bun run agent sandbox setup
 

@@ -5,33 +5,48 @@ import type { InteractionMode, SkillScanOptions } from '@kite-ai/runtime-contrac
 import {
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
+  type RuntimeClientInteraction,
   type RuntimeCommand,
   type RuntimeCommandErrorCode,
   type RuntimeCommandReceipt,
   type RuntimeNotification,
-  type RuntimeNotificationEvent,
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
 } from '@kite-ai/runtime-contract';
 import type {
+  RuntimeHostCommandInspection,
+  RuntimeHostCommandInspectionContext,
   RuntimeHostExecutionBridge,
   RuntimeHostPreparedExecution,
 } from '@kite-ai/runtime-host';
-import {
-  type RuntimeHostKernelInput,
-  runtimeCommandFromKernelInput,
-} from '@kite-ai/runtime-host/kernel-adapter';
+import type {
+  RuntimeCommandCommitEvidence,
+  RuntimeStoredCommandReceipt,
+} from '@kite-ai/runtime-host/storage';
 import type { ProjectIdentity } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#app/config';
+import { getFeatureFlags } from '#app/config/features';
 import { appSandboxBackendAvailable, type SandboxBackend } from '#app/sandbox/types';
+import { projectRuntimeClientEvent } from '../../runtime-client/event-projector';
+import {
+  mapRuntimeInteractionResponseToUserAction,
+  projectRuntimeClientInteraction,
+  type RuntimeInteractionEffect,
+} from '../../runtime-client/interaction-projector';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
+import type { PrecommittedInteractionActionDescriptor } from './command-interaction-decision';
 import type {
   RuntimeSessionCoordinator,
   RuntimeSessionCoordinatorAccess,
 } from './RuntimeSessionCoordinator';
 import type { RuntimeUserAction } from './state-actions';
-import type { RuntimeActionProvider } from './state-runner';
+import type { RuntimeActionProvider, RuntimeInteractionCommandCommitPort } from './state-runner';
+import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
+import type {
+  PrecommittedStartTurnDescriptor,
+  StartTurnSkillPlanningContext,
+} from './turn-command-decision';
 import type { RuntimeTurnInput } from './turn-coordinator';
 
 export interface CliRuntimeBridgeInput {
@@ -54,6 +69,16 @@ export interface CliRuntimeBridgeInput {
     readonly mode: 'off' | 'metadata' | 'content';
   }) => void;
   readonly onSessionLoggingDiagnostic?: (message: string) => void;
+}
+
+interface PendingCliInteraction {
+  readonly effect: RuntimeInteractionEffect;
+  readonly interaction: RuntimeClientInteraction;
+  readonly stateRevision: number;
+  readonly commandCommit: RuntimeInteractionCommandCommitPort;
+  readonly completion: Promise<RuntimeUserAction | PrecommittedInteractionActionDescriptor>;
+  readonly resolve: (action: RuntimeUserAction | PrecommittedInteractionActionDescriptor) => void;
+  readonly reject: (error: unknown) => void;
 }
 
 export function createCliRuntimeBridge(
@@ -86,6 +111,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
   #closed = false;
   #activePublish: ((notification: RuntimeNotification) => void) | undefined;
   #activeWork: RuntimeSessionProjection['activeWork'];
+  #pendingInteraction: PendingCliInteraction | undefined;
 
   constructor(
     input: CliRuntimeBridgeInput,
@@ -107,9 +133,12 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     sessionId: string,
     publish: (notification: RuntimeNotification) => void,
   ): Promise<void> {
-    if (sessionId !== this.#input.sessionId || !this.#created) return;
-    if (!this.#ensureCoordinator().recoveryChanged) return;
-    this.#revision += 1;
+    if (sessionId !== this.#input.sessionId) return;
+    const coordinator = this.#ensureCoordinator();
+    this.#created = true;
+    this.#closed = false;
+    this.#revision = coordinator.getState().revision;
+    if (!coordinator.recoveryChanged) return;
     publish({
       schema: RUNTIME_NOTIFICATION_SCHEMA_,
       durability: 'durable',
@@ -119,11 +148,19 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     });
   }
 
-  async prepare(
-    input: RuntimeHostKernelInput,
-    publish: (notification: RuntimeNotification) => void,
-  ): Promise<RuntimeHostPreparedExecution> {
-    const command = runtimeCommandFromKernelInput(input);
+  async inspectCommand(
+    command: RuntimeCommand,
+    context: RuntimeHostCommandInspectionContext,
+  ): Promise<RuntimeHostCommandInspection> {
+    const terminal = (
+      receipt: Exclude<RuntimeCommandReceipt, { readonly status: 'applied' }>,
+    ): RuntimeHostCommandInspection => ({
+      kind: 'terminal',
+      receipt,
+    });
+    if (context.targetSessionId !== this.#input.sessionId) {
+      return terminal(this.#rejected(command, 'invalid_session'));
+    }
     if (command.type === 'create_session') {
       if (
         this.#created ||
@@ -131,59 +168,264 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         (command.bootstrapSessionId !== undefined &&
           command.bootstrapSessionId !== this.#input.sessionId)
       ) {
-        return { receipt: this.#rejected(command, 'invalid_session') };
+        return terminal(this.#rejected(command, 'invalid_session'));
       }
-      this.#created = true;
-      return { receipt: this.#applied(command) };
+      return this.#snapshotDecision((coordinator) => ({
+        activate: () => {
+          this.#created = true;
+          this.#closed = false;
+          this.#revision = coordinator.getState().revision;
+        },
+        releaseOnFailure: true,
+      }));
     }
     if (!this.#created || this.#closed) {
-      return { receipt: this.#rejected(command, 'session_unavailable') };
+      return terminal(this.#rejected(command, 'session_unavailable'));
     }
     if ('sessionId' in command && command.sessionId !== this.#input.sessionId) {
-      return { receipt: this.#notFound(command) };
+      return terminal(this.#notFound(command));
+    }
+    if (command.type === 'respond_interaction') {
+      const pending = this.#pendingInteraction;
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (
+        !pending ||
+        !coordinator ||
+        !sameInteractionIdentity(pending.interaction, command.interaction)
+      ) {
+        return terminal(this.#rejected(command, 'interaction_mismatch'));
+      }
+      const action = mapRuntimeInteractionResponseToUserAction({
+        state: coordinator.getState(),
+        effect: pending.effect,
+        interaction: command.interaction,
+        response: command.response,
+        expectedStateRevision: pending.stateRevision,
+      });
+      if (!action) return terminal(this.#rejected(command, 'interaction_mismatch'));
+      return {
+        kind: 'accepted',
+        decision: {
+          targetSessionId: this.#input.sessionId,
+          commit: async (evidence) => {
+            const committed = pending.commandCommit.commit(action, evidence);
+            const receipt = receiptFromStored(committed.receipt);
+            return {
+              receipt,
+              activation: async (publish) => {
+                if (this.#pendingInteraction !== pending) {
+                  throw new Error(
+                    'Runtime interaction activation no longer owns its pending waiter.',
+                  );
+                }
+                this.#pendingInteraction = undefined;
+                this.#revision = receipt.revision;
+                this.#activeWork = clearActiveInteraction(this.#activeWork);
+                this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
+                pending.resolve(committed.descriptor);
+              },
+            };
+          },
+        },
+      };
     }
     if (command.type === 'resume_session') {
-      // Host recovery has already run before prepare. Ensuring the coordinator
-      // here binds the exact imported/current State before a successor turn;
-      // no compatibility marker is projected to the CLI.
-      this.#ensureCoordinator();
-      return { receipt: this.#applied(command) };
+      return this.#snapshotDecision((coordinator) => ({
+        activate: () => {
+          this.#revision = coordinator.getState().revision;
+          this.#created = true;
+          this.#closed = false;
+        },
+      }));
     }
     if (command.type === 'start_turn') {
-      if (this.#running) return { receipt: this.#rejected(command, 'runtime_busy') };
-      this.#running = true;
-      this.#revision += 1;
-      this.#activeWork = {
-        workId: command.commandId,
-        phase: command.phase ?? 'building',
-        status: 'running',
-        activeTurn: { turnId: command.commandId, status: 'running' },
-      };
-      const receipt = this.#applied(command);
+      if (this.#running) return terminal(this.#rejected(command, 'runtime_busy'));
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
       return {
-        receipt,
-        execution: {
-          sessionId: this.#input.sessionId,
-          operationId: command.commandId,
-          committedRevision: receipt.revision,
-          operation: 'turn',
-          run: (signal, requestAbort) => this.#runTurn(command, publish, signal, requestAbort),
+        kind: 'accepted',
+        decision: {
+          targetSessionId: this.#input.sessionId,
+          commit: async (evidence) => {
+            const committed = coordinator.commitStartTurnCommand(
+              command,
+              evidence,
+              this.#startSkillPlanningContext(command),
+            );
+            const receipt = receiptFromStored(committed.receipt);
+            return {
+              receipt,
+              activation: async (publish) => {
+                this.#revision = receipt.revision;
+                this.#running = true;
+                this.#activePublish = publish;
+                this.#activeWork = {
+                  workId: command.commandId,
+                  phase: committed.descriptor.phase,
+                  status: 'running',
+                  activeTurn: { turnId: committed.descriptor.turnId, status: 'running' },
+                };
+                this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
+              },
+              preparedExecution: this.#preparedStart(command, committed.descriptor, receipt),
+            };
+          },
         },
       };
     }
     if (command.type === 'cancel_turn') {
-      if (!this.#running) return { receipt: this.#rejected(command, 'turn_not_found') };
-      this.#persistCancellation('Cancelled by user.', publish);
-      this.#revision += 1;
-      return { receipt: this.#applied(command) };
+      if (!this.#running) return terminal(this.#rejected(command, 'turn_not_found'));
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
+      return this.#controlDecision(command, (evidence) =>
+        coordinator.commitCancelTurnCommand(command, evidence),
+      );
+    }
+    if (command.type === 'set_interaction_mode') {
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
+      return this.#controlDecision(command, (evidence) =>
+        coordinator.commitInteractionModeCommand(command, evidence),
+      );
     }
     if (command.type === 'close_session') {
-      this.#persistCancellation('Runtime session closed.', publish);
-      this.#closed = true;
-      this.#revision += 1;
-      return { receipt: this.#applied(command) };
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
+      return this.#closeDecision(command, (evidence) =>
+        coordinator.commitCloseSessionCommand(command, evidence),
+      );
     }
-    return { receipt: this.#rejected(command, 'unsupported') };
+    return terminal(this.#rejected(command, 'unsupported'));
+  }
+
+  #snapshotDecision(
+    afterCommit: (coordinator: RuntimeSessionCoordinator) => {
+      readonly activate: () => void;
+      readonly releaseOnFailure?: boolean;
+    },
+  ): RuntimeHostCommandInspection {
+    return {
+      kind: 'accepted',
+      decision: {
+        targetSessionId: this.#input.sessionId,
+        commit: async (evidence) => {
+          const existing = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+          const coordinator = existing ?? this.#ensureCoordinator();
+          const committed = afterCommit(coordinator);
+          try {
+            const receipt = receiptFromStored(coordinator.session.commitCommandSnapshot(evidence));
+            return { receipt, activation: async () => committed.activate() };
+          } catch (error) {
+            if (!existing && committed.releaseOnFailure) {
+              await this.#runtimeSessionCoordinator.release(this.#input.sessionId);
+            }
+            throw error;
+          }
+        },
+      },
+    };
+  }
+
+  #controlDecision(
+    command: Extract<RuntimeCommand, { type: 'cancel_turn' | 'set_interaction_mode' }>,
+    commit: (evidence: RuntimeCommandCommitEvidence) => {
+      readonly receipt: RuntimeStoredCommandReceipt;
+      readonly events: readonly RuntimeEvent[];
+    },
+  ): RuntimeHostCommandInspection {
+    return {
+      kind: 'accepted',
+      decision: {
+        targetSessionId: this.#input.sessionId,
+        commit: async (evidence) => {
+          const committed = commit(evidence);
+          const receipt = receiptFromStored(committed.receipt);
+          return {
+            receipt,
+            activation: async (publish) => {
+              this.#revision = receipt.revision;
+              if (command.type === 'cancel_turn') {
+                this.#running = false;
+                this.#rejectPendingInteraction(new Error('Runtime interaction cancelled.'));
+              }
+              this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
+            },
+          };
+        },
+      },
+    };
+  }
+
+  #closeDecision(
+    _command: Extract<RuntimeCommand, { type: 'close_session' }>,
+    commit: (evidence: RuntimeCommandCommitEvidence) => {
+      readonly receipt: RuntimeStoredCommandReceipt;
+      readonly events: readonly RuntimeEvent[];
+      readonly wasActive: boolean;
+    },
+  ): RuntimeHostCommandInspection {
+    return {
+      kind: 'accepted',
+      decision: {
+        targetSessionId: this.#input.sessionId,
+        commit: async (evidence) => {
+          const committed = commit(evidence);
+          const receipt = receiptFromStored(committed.receipt);
+          return {
+            receipt,
+            activation: async (publish) => {
+              this.#revision = receipt.revision;
+              this.#closed = true;
+              this.#running = false;
+              this.#rejectPendingInteraction(new Error('Runtime session closed.'));
+              this.#activeWork = terminalizeActiveWork(this.#activeWork, 'cancelled');
+              this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'session');
+            },
+          };
+        },
+      },
+    };
+  }
+
+  #preparedStart(
+    command: Extract<RuntimeCommand, { type: 'start_turn' }>,
+    descriptor: PrecommittedStartTurnDescriptor,
+    receipt: Extract<RuntimeCommandReceipt, { status: 'applied' }>,
+  ): RuntimeHostPreparedExecution {
+    return {
+      execution: {
+        sessionId: this.#input.sessionId,
+        operationId: command.commandId,
+        committedRevision: receipt.revision,
+        operation: 'turn',
+        run: (signal, requestAbort) =>
+          this.#runTurn(command, this.#ensureCoordinator(), descriptor, signal, requestAbort),
+      },
+    };
+  }
+
+  #publishCommittedEvents(
+    events: readonly RuntimeEvent[],
+    finalRevision: number,
+    publish: (notification: RuntimeNotification) => void,
+    kind: 'session' | 'turn',
+  ): void {
+    const firstRevision = finalRevision - events.length + 1;
+    for (const [index, event] of events.entries()) {
+      const revision = firstRevision + index;
+      const projectedEvent = safelyProjectRuntimeEvent(event, revision);
+      publish({
+        schema: RUNTIME_NOTIFICATION_SCHEMA_,
+        durability: 'durable',
+        sessionId: this.#input.sessionId,
+        revision,
+        projection: {
+          kind,
+          session: { ...this.#projection(), revision },
+          ...(projectedEvent === undefined ? {} : { event: projectedEvent }),
+        },
+      });
+    }
   }
 
   async shutdownSession(
@@ -192,7 +434,8 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     publish: (notification: RuntimeNotification) => void,
   ): Promise<void> {
     if (sessionId !== this.#input.sessionId || !this.#created) return;
-    this.#persistCancellation(reason, publish);
+    this.#rejectPendingInteraction(new Error(reason));
+    if (!this.#closed) this.#persistCancellation(reason, publish);
     this.#closed = true;
   }
 
@@ -233,15 +476,16 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
 
   async #runTurn(
     command: Extract<RuntimeCommand, { type: 'start_turn' }>,
-    publish: (notification: RuntimeNotification) => void,
+    coordinator: RuntimeSessionCoordinator,
+    precommittedStart: PrecommittedStartTurnDescriptor,
     signal: AbortSignal,
     requestAbort: (reason: string) => void,
   ): Promise<void> {
-    this.#activePublish = publish;
-    const coordinator = this.#ensureCoordinator();
-    coordinator.updateInteractionMode(this.#input.interactionMode);
     coordinator.updateSandboxAvailable(appSandboxBackendAvailable(this.#input.sandboxBackend));
+    const publish = this.#activePublish;
+    if (!publish) throw new Error('Runtime CLI command activation is unavailable.');
     let status: NonNullable<RuntimeSessionProjection['activeWork']>['status'] = 'completed';
+    let publishedRevision = this.#revision;
     try {
       const generator = coordinator.executeTurn(
         {
@@ -269,9 +513,10 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           onSessionLoggingStatus: this.#input.onSessionLoggingStatus,
           onSessionLoggingDiagnostic: this.#input.onSessionLoggingDiagnostic,
           skillOptions: this.#input.skillOptions,
-          initialSkillActivations: [...this.#input.initialSkillActivations],
+          initialSkillActivations: [],
+          precommittedStart,
         },
-        createCliRuntimeProvider(),
+        this.#createClientActionProvider(publish),
       );
       let sequence = 0;
       for await (const event of generator) {
@@ -289,7 +534,26 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           publish(ephemeral);
           continue;
         }
-        this.#revision += 1;
+        this.#revision = coordinator.getState().revision;
+        publishedRevision = this.#revision;
+        const projectedEvent = projectRuntimeClientEvent(event, {
+          sessionRevision: this.#revision,
+        });
+        const interaction = interactionFromClientEvent(projectedEvent);
+        if (interaction) {
+          this.#activeWork = setActiveInteraction(this.#activeWork, interaction);
+        }
+        if (
+          projectedEvent?.type === 'interaction.settled' ||
+          projectedEvent?.type === 'plan.approved'
+        ) {
+          this.#activeWork = clearActiveInteraction(this.#activeWork);
+        }
+        const terminalStatus = terminalStatusFromClientEvent(projectedEvent);
+        if (terminalStatus) {
+          status = terminalStatus;
+          this.#activeWork = terminalizeActiveWork(this.#activeWork, status);
+        }
         publish({
           schema: RUNTIME_NOTIFICATION_SCHEMA_,
           durability: 'durable',
@@ -298,48 +562,44 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           projection: {
             kind: 'turn',
             session: this.#projection(),
-            event: event as RuntimeNotificationEvent,
+            event: projectedEvent,
           },
         });
-        if (event.type === 'run.error') status = 'failed';
-        if (event.type === 'turn.aborted') status = 'cancelled';
       }
-    } catch (error) {
+    } catch {
       status = signal.aborted ? 'cancelled' : 'failed';
-      this.#revision += 1;
-      publish({
-        schema: RUNTIME_NOTIFICATION_SCHEMA_,
-        durability: 'durable',
-        sessionId: this.#input.sessionId,
-        revision: this.#revision,
-        projection: {
-          kind: 'turn',
-          session: this.#projection(),
-          event: {
-            type: 'run.error',
-            message: error instanceof Error ? error.message : String(error),
-            recoverable: false,
-          },
-        },
-      });
     } finally {
       this.#running = false;
       this.#activePublish = undefined;
-      this.#revision += 1;
-      this.#activeWork = {
-        workId: command.commandId,
-        phase: command.phase ?? 'building',
-        status,
-        activeTurn: { turnId: command.commandId, status },
-      };
-      publish({
-        schema: RUNTIME_NOTIFICATION_SCHEMA_,
-        durability: 'durable',
-        sessionId: this.#input.sessionId,
-        revision: this.#revision,
-        projection: { kind: 'work', session: this.#projection() },
-      });
+      this.#revision = coordinator.getState().revision;
+      this.#activeWork = terminalizeActiveWork(this.#activeWork, status);
+      if (this.#revision > publishedRevision) {
+        publish({
+          schema: RUNTIME_NOTIFICATION_SCHEMA_,
+          durability: 'durable',
+          sessionId: this.#input.sessionId,
+          revision: this.#revision,
+          projection: { kind: 'work', session: this.#projection() },
+        });
+      }
     }
+  }
+
+  #startSkillPlanningContext(
+    command: Extract<RuntimeCommand, { type: 'start_turn' }>,
+  ): StartTurnSkillPlanningContext | undefined {
+    if (!command.initialSkills || command.initialSkills.length === 0) return undefined;
+    const flags = getFeatureFlags(this.#input.config);
+    // CLI deliberately has no MCP manager. MCP-backed catalog entries are
+    // therefore rejected by the shared planner instead of acquiring I/O in
+    // Host's pure inspection/commit phase.
+    return {
+      skillOptions: this.#input.skillOptions,
+      flags: {
+        skillActivation: flags.skillActivation,
+        skillWorkflow: flags.skillWorkflow,
+      },
+    };
   }
 
   #ensureCoordinator(): RuntimeSessionCoordinator {
@@ -359,6 +619,69 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     });
   }
 
+  #createClientActionProvider(
+    publish: (notification: RuntimeNotification) => void,
+  ): RuntimeActionProvider {
+    return Object.freeze({
+      requestAction: (
+        effect: RuntimeEffect,
+        state: RuntimeState,
+        commandCommit: RuntimeInteractionCommandCommitPort,
+      ): Promise<RuntimeUserAction | PrecommittedInteractionActionDescriptor> => {
+        if (!isRuntimeInteractionEffect(effect) || this.#pendingInteraction) {
+          return Promise.reject(new Error('Runtime interaction request is unavailable.'));
+        }
+        const interaction = projectRuntimeClientInteraction(state, effect, {
+          sessionRevision: state.revision,
+        });
+        if (!interaction) {
+          return Promise.reject(new Error('Runtime interaction identity is invalid.'));
+        }
+        let resolve!: (action: RuntimeUserAction | PrecommittedInteractionActionDescriptor) => void;
+        let reject!: (error: unknown) => void;
+        const completion = new Promise<RuntimeUserAction | PrecommittedInteractionActionDescriptor>(
+          (resolvePromise, rejectPromise) => {
+            resolve = resolvePromise;
+            reject = rejectPromise;
+          },
+        );
+        const priorRevision = this.#revision;
+        this.#revision = state.revision;
+        this.#activeWork = setActiveInteraction(this.#activeWork, interaction);
+        this.#pendingInteraction = {
+          effect,
+          interaction,
+          stateRevision: state.revision,
+          commandCommit,
+          completion,
+          resolve,
+          reject,
+        };
+        if (state.revision > priorRevision) {
+          publish({
+            schema: RUNTIME_NOTIFICATION_SCHEMA_,
+            durability: 'durable',
+            sessionId: this.#input.sessionId,
+            revision: state.revision,
+            projection: {
+              kind: 'interaction',
+              session: this.#projection(),
+              event: { type: 'interaction.available', interaction },
+            },
+          });
+        }
+        return completion;
+      },
+    });
+  }
+
+  #rejectPendingInteraction(error: unknown): void {
+    const pending = this.#pendingInteraction;
+    if (!pending) return;
+    this.#pendingInteraction = undefined;
+    pending.reject(error);
+  }
+
   #persistCancellation(
     reason: string,
     publish: (notification: RuntimeNotification) => void = this.#activePublish ?? (() => undefined),
@@ -366,7 +689,9 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     const events =
       this.#runtimeSessionCoordinator.get(this.#input.sessionId)?.control.cancelRun(reason) ?? [];
     for (const event of events) {
-      this.#revision += 1;
+      this.#revision =
+        this.#runtimeSessionCoordinator.get(this.#input.sessionId)?.getState().revision ??
+        this.#revision;
       publish({
         schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
@@ -375,7 +700,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         projection: {
           kind: 'turn',
           session: this.#projection(),
-          event: event as RuntimeNotificationEvent,
+          event: projectRuntimeClientEvent(event, { sessionRevision: this.#revision }),
         },
       });
     }
@@ -392,18 +717,15 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     };
   }
 
-  #applied(
+  #rejected(
     command: RuntimeCommand,
-  ): Extract<RuntimeCommandReceipt, { readonly status: 'applied' }> {
-    return {
-      status: 'applied',
-      commandId: command.commandId,
-      sessionId: this.#input.sessionId,
-      revision: this.#revision,
-    };
-  }
-
-  #rejected(command: RuntimeCommand, code: RuntimeCommandErrorCode): RuntimeCommandReceipt {
+    code: RuntimeCommandErrorCode,
+  ): {
+    readonly status: 'rejected';
+    readonly commandId: string;
+    readonly code: RuntimeCommandErrorCode;
+    readonly currentRevision: number;
+  } {
     return {
       status: 'rejected',
       commandId: command.commandId,
@@ -412,7 +734,11 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     };
   }
 
-  #notFound(command: RuntimeCommand): RuntimeCommandReceipt {
+  #notFound(command: RuntimeCommand): {
+    readonly status: 'not_found';
+    readonly commandId: string;
+    readonly code: 'session_not_found';
+  } {
     return {
       status: 'not_found',
       commandId: command.commandId,
@@ -421,140 +747,151 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
   }
 }
 
-function createCliRuntimeProvider(): RuntimeActionProvider {
+function isRuntimeInteractionEffect(effect: RuntimeEffect): effect is RuntimeInteractionEffect {
+  switch (effect.type) {
+    case 'request_tool_approval':
+    case 'request_user_input':
+    case 'request_plan_review':
+    case 'request_provider_action':
+    case 'request_provider_admission':
+    case 'request_verification_decision':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function setActiveInteraction(
+  work: RuntimeSessionProjection['activeWork'],
+  interaction: RuntimeClientInteraction,
+): RuntimeSessionProjection['activeWork'] {
+  if (!work) return work;
   return {
-    async requestAction(effect, state): Promise<RuntimeUserAction> {
-      if (effect.type === 'request_verification_decision') {
-        const record = state.verification.records[effect.verificationId];
-        if (!record) throw new Error('Runtime requested a decision for missing verification.');
-        console.error(`\n[VERIFICATION REQUIRED] ${record.spec.subject}: ${record.status}`);
-        console.error(
-          record.spec.compensation
-            ? 'Type r/replan, w/waive, or c/compensate:'
-            : 'Type r/replan or w/waive:',
-        );
-        const value = (await readStdin()).trim().toLowerCase();
-        if ((value === 'c' || value === 'compensate') && record.spec.compensation) {
-          return {
-            type: 'request_verification_compensation',
-            verificationId: effect.verificationId,
-          };
-        }
-        console.error(
-          value === 'w' || value === 'waive'
-            ? 'Enter waiver reason:'
-            : 'Enter replan/repair instruction:',
-        );
-        const detail = await readStdin();
-        return value === 'w' || value === 'waive'
-          ? { type: 'waive_verification', verificationId: effect.verificationId, reason: detail }
-          : {
-              type: 'replan_verification',
-              verificationId: effect.verificationId,
-              instruction: detail,
-            };
-      }
-      if (effect.type === 'request_provider_action') {
-        console.error(
-          `\n[MCP PROVIDER ACTION] ${effect.providerId} requires ${effect.action}. ` +
-            'This client does not yet provide an in-process recovery handler; deferring.',
-        );
-        return {
-          type: 'provider_action_result',
-          interactionId: effect.interactionId,
-          outcome: 'deferred',
-        };
-      }
-      if (effect.type === 'request_provider_admission') {
-        console.error(
-          `\n[REQUIRED MCP PROVIDER] ${effect.providerId} is ${effect.providerStatus}. ` +
-            'This client does not yet provide the required-provider gate; cancelling this run.',
-        );
-        return {
-          type: 'provider_admission_decision',
-          interactionId: effect.interactionId,
-          decision: { kind: 'cancel' },
-        };
-      }
-      if (state.interactions.kind === 'awaiting_tool_approval') {
-        const approval = state.interactions.approval;
-        const pending = state.pendingApprovals.get(effect.interactionId);
-        if (!pending || pending.status !== 'awaiting_user') {
-          throw new Error('CLI approval queue identity changed before input dispatch.');
-        }
-        console.error(`\n[APPROVAL REQUIRED] ${approval.tool}: ${approval.command}`);
-        console.error(`Risk: ${approval.risk} | ${approval.summary}`);
-        console.error(
-          'Type y/yes to approve once, s/same to approve matching commands, or n to reject:',
-        );
-        const value = (await readStdin()).toLowerCase();
-        if (value === 's' || value === 'same' || value === 'same_command') {
-          return {
-            type: 'approve',
-            interactionId: effect.interactionId,
-            generation: pending.generation,
-            grant: 'same_command',
-          };
-        }
-        if (value === 'y' || value === 'yes') {
-          return {
-            type: 'approve',
-            interactionId: effect.interactionId,
-            generation: pending.generation,
-            grant: 'approve_once',
-          };
-        }
-        return {
-          type: 'reject',
-          interactionId: effect.interactionId,
-          generation: pending.generation,
-        };
-      }
-      if (state.interactions.kind === 'awaiting_review') {
-        const plan = state.interactions.plan;
-        console.error(`\n[PLAN REVIEW] ${plan.name}\n${plan.description}`);
-        console.error('Type a/auto, e/accept-edits, f/feedback, or c/cancel:');
-        const value = (await readStdin()).toLowerCase();
-        const review = {
-          type: 'plan_review_decision' as const,
-          interactionId: effect.interactionId,
-          planId: state.interactions.planId,
-          version: state.interactions.version,
-          structuralDigest: state.interactions.structuralDigest,
-        };
-        if (value === 'a' || value === 'auto') {
-          return { ...review, decision: { kind: 'approve', nextMode: 'auto' } };
-        }
-        if (value === 'e' || value === 'accept-edits') {
-          return { ...review, decision: { kind: 'approve', nextMode: 'accept_edits' } };
-        }
-        if (value === 'f' || value === 'feedback') {
-          console.error('Enter your feedback:');
-          return { ...review, decision: { kind: 'revise', feedback: await readStdin() } };
-        }
-        return { ...review, decision: { kind: 'cancel' } };
-      }
-      if (state.interactions.kind !== 'awaiting_user_input') {
-        throw new Error('Runtime requested input without an input interaction.');
-      }
-      const request = state.interactions.request;
-      console.error(`\n[QUESTION] ${request.question}`);
-      request.options.forEach((option, index) => {
-        console.error(`  ${index + 1}. ${option.label}`);
-      });
-      return { type: 'input', interactionId: effect.interactionId, text: await readStdin() };
-    },
+    ...work,
+    status: 'waiting',
+    activeTurn: work.activeTurn
+      ? { ...work.activeTurn, status: 'waiting', interaction }
+      : undefined,
   };
 }
 
-function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    const { stdin } = process;
-    const onData = (chunk: Buffer): void => {
-      stdin.removeListener('data', onData);
-      resolve(chunk.toString().trim());
-    };
-    stdin.on('data', onData);
-    stdin.resume();
-  });
+function interactionFromClientEvent(
+  event: ReturnType<typeof projectRuntimeClientEvent>,
+): RuntimeClientInteraction | undefined {
+  switch (event?.type) {
+    case 'interaction.available':
+    case 'approval.queued':
+    case 'input.requested':
+    case 'plan.review_requested':
+      return event.interaction;
+    case 'provider.action':
+      return event.status === 'required' ? event.interaction : undefined;
+    case 'verification.status':
+      return event.status === 'pending' ? event.interaction : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function terminalStatusFromClientEvent(
+  event: ReturnType<typeof projectRuntimeClientEvent>,
+): 'cancelled' | 'failed' | 'completed' | undefined {
+  switch (event?.type) {
+    case 'task.terminal':
+    case 'turn.terminal':
+    case 'run.terminal':
+      return event.status === 'aborted' ? 'cancelled' : event.status;
+    default:
+      return undefined;
+  }
+}
+
+function clearActiveInteraction(
+  work: RuntimeSessionProjection['activeWork'],
+): RuntimeSessionProjection['activeWork'] {
+  if (!work) return work;
+  return {
+    ...work,
+    status: 'running',
+    activeTurn: work.activeTurn
+      ? { ...work.activeTurn, status: 'running', interaction: undefined }
+      : undefined,
+  };
+}
+
+function terminalizeActiveWork(
+  work: RuntimeSessionProjection['activeWork'],
+  status: 'cancelled' | 'failed' | 'completed',
+): RuntimeSessionProjection['activeWork'] {
+  if (!work) return work;
+  return {
+    ...work,
+    status,
+    activeTurn: work.activeTurn
+      ? { ...work.activeTurn, status, interaction: undefined }
+      : undefined,
+  };
+}
+
+function sameInteractionIdentity(
+  expected: RuntimeClientInteraction,
+  actual: RuntimeClientInteraction,
+): boolean {
+  if (
+    expected.kind !== actual.kind ||
+    expected.interactionId !== actual.interactionId ||
+    expected.sessionRevision !== actual.sessionRevision
+  ) {
+    return false;
+  }
+  switch (expected.kind) {
+    case 'approval':
+      return (
+        actual.kind === 'approval' &&
+        expected.generation === actual.generation &&
+        expected.grants.length === actual.grants.length &&
+        expected.grants.every((grant, index) => grant === actual.grants[index])
+      );
+    case 'input':
+      return actual.kind === 'input';
+    case 'plan_review':
+      return (
+        actual.kind === 'plan_review' &&
+        expected.plan.planId === actual.plan.planId &&
+        expected.plan.version === actual.plan.version &&
+        expected.plan.structuralDigest === actual.plan.structuralDigest
+      );
+    case 'provider_action':
+      return (
+        actual.kind === 'provider_action' &&
+        expected.action === actual.action &&
+        expected.provider.providerId === actual.provider.providerId &&
+        expected.provider.directoryRevision === actual.provider.directoryRevision
+      );
+    case 'verification':
+      return (
+        actual.kind === 'verification' &&
+        expected.verification.verificationId === actual.verification.verificationId &&
+        expected.verification.revision === actual.verification.revision
+      );
+  }
+}
+
+function receiptFromStored(
+  receipt: RuntimeStoredCommandReceipt,
+): Extract<RuntimeCommandReceipt, { readonly status: 'applied' }> {
+  return {
+    status: 'applied',
+    commandId: receipt.commandId,
+    sessionId: receipt.targetSessionId,
+    revision: receipt.committedRevision,
+  };
+}
+
+function safelyProjectRuntimeEvent(event: RuntimeEvent, revision: number) {
+  try {
+    return projectRuntimeClientEvent(event, { sessionRevision: revision });
+  } catch {
+    return undefined;
+  }
 }

@@ -170,11 +170,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     expect(modelServer.getRequestCount()).toBe(0);
     await waitForText(() => tui!.viewport(), '❯ 1. Session Waive', 5_000);
     tui.write('\r');
-    await waitForText(
-      () => tui!.outputSinceLastAction(),
-      'continued after provider waiver',
-      15_000,
-    );
+    await waitForText(() => tui!.viewport(), 'continued after provider waiver', 15_000);
     expect(modelServer.getRequestCount()).toBe(1);
   }, 50_000);
 
@@ -316,11 +312,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     tui.write('\x1b[B');
     await waitForText(() => tui!.viewport(), '❯ 2. Later', 5_000);
     tui.write('\r');
-    await waitForText(
-      () => tui!.outputSinceLastAction(),
-      'continued after deferring provider login',
-      15_000,
-    );
+    await waitForText(() => tui!.viewport(), 'continued after deferring provider login', 15_000);
     expect(toolCalls).toBe(1);
     expect(modelServer.getRequestCount()).toBe(3);
   }, 50_000);

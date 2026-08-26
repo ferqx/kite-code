@@ -22,8 +22,8 @@ import type {
 } from '@kite-ai/runtime-host/storage';
 
 export const SQLITE_RUNTIME_STATE_SCHEMA_VERSION = 27;
-export const SQLITE_RUNTIME_STORE_SCHEMA_VERSION = 5;
-export const SQLITE_RUNTIME_FORMAT_EPOCH = 'kite-runtime-saq-v1-2026-08-25' as const;
+export const SQLITE_RUNTIME_STORE_SCHEMA_VERSION = 6;
+export const SQLITE_RUNTIME_FORMAT_EPOCH = 'kite-runtime-server-v1-2026-08-26' as const;
 export type SqliteRuntimeJournalMode = 'wal' | 'delete';
 
 /** Platform-safe journal mode for the current Store implementation. */
@@ -73,6 +73,33 @@ export class SqliteRuntimeEffectLeaseConflictError extends Error {
   constructor(sessionId: string, effectId: string) {
     super(`Runtime effect lease is stale for ${sessionId}/${effectId}; commit refused.`);
     this.name = 'SqliteRuntimeEffectLeaseConflictError';
+  }
+}
+
+/**
+ * A concurrent or forged command receipt must never partially commit its
+ * state decision.  Callers treat this as fail-closed rather than retrying the
+ * command as a fresh mutation.
+ */
+export class SqliteRuntimeCommandReceiptConflictError extends Error {
+  readonly code = 'command_receipt_conflict' as const;
+
+  constructor(scopeSessionId: string, commandId: string, cause?: unknown) {
+    super(
+      `Runtime command receipt conflicts with an existing scoped command: ${scopeSessionId}/${commandId}.`,
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = 'SqliteRuntimeCommandReceiptConflictError';
+  }
+}
+
+/** A receipt record is malformed and is refused before any Runtime write. */
+export class SqliteRuntimeCommandReceiptValidationError extends Error {
+  readonly code = 'invalid_command_receipt' as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'SqliteRuntimeCommandReceiptValidationError';
   }
 }
 
@@ -203,6 +230,15 @@ const CURRENT_STORE_TABLE_COLUMNS = {
     'certainty',
     'expires_at_ms',
   ],
+  runtime_command_receipts: [
+    'scope_session_id',
+    'command_id',
+    'request_digest',
+    'target_session_id',
+    'original_receipt_json',
+    'committed_revision',
+    'committed_at',
+  ],
 } as const;
 
 const RECOVERY_IDENTITY_META_PREFIX = 'recovery_identity_v1:';
@@ -277,6 +313,45 @@ function assertCurrentStoreShape(database: Database): void {
   if (
     actualTables.length !== expectedTables.length ||
     actualTables.some((table, index) => table !== expectedTables[index])
+  ) {
+    throw new SqliteRuntimeFormatMismatchError(null, null);
+  }
+
+  const receiptColumns = database
+    .query<
+      {
+        cid: number;
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+        pk: number;
+      },
+      []
+    >('PRAGMA table_info(runtime_command_receipts)')
+    .all();
+  const expectedReceiptColumns = [
+    ['scope_session_id', 'TEXT', 1, 1],
+    ['command_id', 'TEXT', 1, 2],
+    ['request_digest', 'TEXT', 1, 0],
+    ['target_session_id', 'TEXT', 1, 0],
+    ['original_receipt_json', 'TEXT', 1, 0],
+    ['committed_revision', 'INTEGER', 1, 0],
+    ['committed_at', 'INTEGER', 1, 0],
+  ] as const;
+  if (
+    receiptColumns.length !== expectedReceiptColumns.length ||
+    receiptColumns.some((column, index) => {
+      const expected = expectedReceiptColumns[index]!;
+      return (
+        column.cid !== index ||
+        column.name !== expected[0] ||
+        column.type.toUpperCase() !== expected[1] ||
+        column.notnull !== expected[2] ||
+        column.pk !== expected[3] ||
+        column.dflt_value !== null
+      );
+    })
   ) {
     throw new SqliteRuntimeFormatMismatchError(null, null);
   }

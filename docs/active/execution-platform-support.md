@@ -41,6 +41,13 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 G
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
 Docker、WSL2 和架构模拟只作开发预检。
 
+Runtime Protocol V1 不扩大该生产支持集合。shipped production consumer 仍只有本地 TUI 与用户在场的
+foreground CLI；stdio 只作为 Desktop/test 父进程拥有的 reference child，loopback WebSocket/browser/Desktop
+只作 development/reference/conformance evidence，均不进入 release manifest 或 platform support matrix。`.github/workflows/runtime-stdio-smoke.yml`
+与 `.github/workflows/runtime-transport-qualification.yml` 的 macOS 15、Ubuntu 24.04、Windows 2025 矩阵只提供
+qualification checks；KRSV1-07/09 的三平台 PR 结果返回前，必须标记为 pending，不能把 workflow 定义或本地测试
+写成三平台通过或 production support evidence。
+
 ADR-0097 的 brokered Git 仍有独立 typed schema、broker positive/hostile、binary/repository identity 与
 TUI/foreground CLI composition 证据组。但 ADR-0131 已取消通用 Shell 对 Workspace `.git` metadata 的
 名称级 read/write deny；依赖该 native deny 的既有 qualification 模型不再可满足，当前三平台

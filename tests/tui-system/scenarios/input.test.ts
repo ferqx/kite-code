@@ -67,6 +67,7 @@ describe('TUI PTY System — Input & Message', () => {
       const output = tui.viewport();
       expect(screenContains(output, 'Test message from PTY')).toBe(true);
       expect(screenContains(output, 'I received your message!')).toBe(true);
+      expect(stripAnsi(output).split('Test message from PTY').length - 1).toBe(1);
     },
     TIMEOUT,
   );

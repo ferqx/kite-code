@@ -2,9 +2,23 @@
 
 本页是 `apps/kite` 的 owner-local current authority，覆盖 Overlay、输入焦点、状态行、Session 导航和用户交互投影。
 
+## Runtime 输入与投影边界
+
+- TUI command/query/subscribe 只消费 App 提供的 typed `RuntimeAccess` client surface；生产路径固定为 `RuntimeClient → RuntimeServer → RuntimeAccess`。
+- reducer、block replay 与 interaction UI 只接收封闭 `RuntimeClientEvent`/client interaction projection。未知或无法安全投影的事实显示固定 unavailable/error 状态，绝不扩张为 `any` 或 raw Runtime event。
+- 普通 prompt 不做本地 optimistic append；唯一显示来源是 RuntimeClient 的 durable `user.message`。
+  reducer 以 canonical `messageId` 处理重连/回放幂等，不能按文本去重，因此同一消息只显示一次、
+  两个不同轮次的相同文本仍保留两条。`USER_MESSAGE` 只用于不会进入 Runtime 的本地 slash echo。
+- 历史 Session 的完整 durable replay 只通过 `RuntimeClient.history` 的 App-injected `RuntimeHistoryClient`
+  向前分页读取 complete closed transcript，并与 live 事件共用 reducer。短期 subscription replay/gap reset
+  不是完整 history source。
+- TUI 不直接 import 或持有 Runtime Host、SQLite/Store、Kernel、Builtin executor、RuntimeLogQueryPort 或 transport/server concrete type；它不自建 mailbox、receipt、recovery 或 SQLite fallback。
+
 ## 单一交互表面
 
 - Slash command 打开的帮助、模型、权限、推理深度、主题、语言、Session、MCP 与恢复页面共用一个 modal 边界。
+- Slash suggestion 只拥有 partial completion；已经精确匹配的命令由主输入的 Enter 路径提交一次。
+  Esc 可关闭当前 suggestion，后续输入变化才重新打开，不能由 suggestion 与 TextInput 各提交一次或互相吞掉。
 - Modal 可见时隐藏主输入提示、Footer 状态栏和 slash suggestion，不允许两个交互表面同时取得键盘 authority。
 - 页面只解释展示状态；route、selection、draft、controller command 与 Runtime facts 仍由宿主 owner 管理。
 - First-run/setup 使用独立 `FirstRunShell`，不复用普通 Overlay lifecycle。
@@ -28,6 +42,12 @@
 - 只有 canonical granted、batch-released、rejected 或对应交互终态能关闭界面；TUI 不本地伪造 acknowledgement。
 - `ask_user` 单题把问题放入标题，多题使用 `n / total` meta；自定义输入留在原列表，已完成回答不得在恢复时重开。
 - Plan review、MCP recovery/admission 与其他交互同样只由 canonical terminal event 清除。
+- Plan approval 由单个 `plan.approved.executionMode` 同时固定本次 Task 执行模式与 Session/TUI 镜像；不得
+  在它之前插入 `interaction_mode.changed`，否则会先清除 awaiting-review interaction，令随后 approval identity
+  fail closed。用户后续独立切换全局模式时才产生 `interaction_mode.changed`。
+- Provider recovery/admission 与 verification 只显示 provider ID、封闭 action、verification ID/revision
+  和固定选项。Provider body、credential、directory 内容、verification evidence/path/stdout 不进入 TUI；
+  retry 必须绑定 directory revision，waive/defer/cancel 不伪造一个 revision。
 
 ## 选择器与 Session
 
@@ -35,7 +55,9 @@
 - `/model`、`/permissions`、`/effort`、`/theme`、`/language` 不接受选择参数，必须打开选择器并显式确认。
 - `full` 是唯一 unrestricted interaction mode；restricted backend 不可兑现 scope 时 fail closed。
 - Session 切换恢复各自模型 route、interaction mode、context 与 Runtime projection，不继承上一 Session 的瞬时状态。
-- 历史 Session 先等待 Host readiness/recovery，再重新读取 persisted head 并提交 navigation；迟到 load 不覆盖新选择。
+- 历史 Session 先等待 typed Runtime readiness/recovery，再通过 HistoryClient 读取 persisted head 并提交 navigation；迟到 load 不覆盖新选择。
+- Session 删除是带 scoped command receipt 的 Runtime command；Host/Store 在单一事务边界删除 Session
+  facts 并保留 receipt。TUI 不直接删除 SQLite 行，也不能在 close snapshot 之后把已删 Session 复活。
 
 ## 主输入与状态行
 
@@ -43,6 +65,11 @@
 - 状态阶段单向推进 `Thinking → Working → Finishing`；进入 Working 后不因模型/工具交替回退。
 - Retry、Approval、Input 与 Compaction 是覆盖态，不改变底层阶段。手动 compaction 使用消息区动画，自动 compaction 与当前 run 状态并存。
 - 工具卡可乐观显示 running，但执行耗时从 durable `tool.started` 开始；迟到 started 不复活终态卡片。
+- 工具 policy/formatter 只使用封闭 canonical category；动态 MCP/Provider 工具另携带 App 投影的有界
+  `displayLabel`，所以本地界面保留具体名称而不把任意字符串提升成 capability。不得用通用 `tool` 占位
+  覆盖已经投影的具体名称。
+- queued 工具只缓存 call ID、category、display label 与完整有界 arguments；started 才物化。普通本地
+  path/pattern/command/result 可显示，明显 credential 仍在 App projector 过滤。
 - TUI 只根据结构化 terminal outcome、safeRetry 与 canonical events 决定完成/错误，不从本地化文本反推。
 
 ## 验证

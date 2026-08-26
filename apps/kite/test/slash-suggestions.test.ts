@@ -19,8 +19,6 @@ describe('slash command suggestions', () => {
       'plan',
       'compact',
       'permissions',
-      'release',
-      'telemetry',
       'mcp',
       'rewind',
       'export',

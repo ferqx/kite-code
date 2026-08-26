@@ -28,9 +28,10 @@ function manualCompactionState(): TuiState {
   state = eventReducer(state, {
     type: 'RUNTIME_EVENT',
     event: {
-      type: 'user.command_invoked',
-      commandId: 'manual-command',
-      command: '/compact',
+      type: 'user.message',
+      messageId: 'manual-command',
+      kind: 'task',
+      text: '/compact',
     },
   });
   return eventReducer(state, {
@@ -45,21 +46,10 @@ function automaticCompactionState(): TuiState {
   state = eventReducer(state, {
     type: 'RUNTIME_EVENT',
     event: {
-      type: 'context.compaction_requested',
-      compactionId: 'automatic-command',
-      reason: 'auto',
-      requestedAtRevision: 1,
-      requestedAtTurnId: 'turn-1',
-      force: false,
-      estimate: {
-        systemTokens: 0,
-        toolSchemaTokens: 0,
-        transcriptTokens: 0,
-        summaryTokens: 0,
-        dynamicRuntimeTokens: 0,
-        framingTokens: 0,
-        totalInputTokens: 0,
-      },
+      type: 'user.message',
+      messageId: 'automatic-command',
+      kind: 'task',
+      text: '/auto-compact',
     },
   });
   return eventReducer(state, {

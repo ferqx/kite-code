@@ -24,6 +24,7 @@ import {
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30_000;
+const BUILTIN_COMMAND_COUNT = 16;
 
 describe('TUI PTY System — Slash Commands', () => {
   let tui: PtyProcess;
@@ -298,14 +299,18 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       tui.resize(120, 16);
       await typeText(tui, '/');
-      await waitForText(() => tui.viewport(), '1 / 18', 10_000);
+      await waitForText(() => tui.viewport(), `1 / ${BUILTIN_COMMAND_COUNT}`, 10_000);
 
-      for (let index = 0; index < 17; index++) tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '18 / 18', 10_000);
+      for (let index = 1; index < BUILTIN_COMMAND_COUNT; index++) tui.write('\x1b[B');
+      await waitForText(
+        () => tui.viewport(),
+        `${BUILTIN_COMMAND_COUNT} / ${BUILTIN_COMMAND_COUNT}`,
+        10_000,
+      );
       expect(screenContains(tui.viewport(), '/exit')).toBe(true);
 
-      for (let index = 0; index < 17; index++) tui.write('\x1b[A');
-      await waitForText(() => tui.viewport(), '1 / 18', 10_000);
+      for (let index = 1; index < BUILTIN_COMMAND_COUNT; index++) tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), `1 / ${BUILTIN_COMMAND_COUNT}`, 10_000);
       expect(screenContains(tui.viewport(), '/effort')).toBe(true);
       await clearInput(tui, 1);
     },

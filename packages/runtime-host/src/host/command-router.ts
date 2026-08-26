@@ -8,6 +8,7 @@ const HOST_COMMANDS: ReadonlySet<RuntimeCommand['type']> = new Set([
   'fork_session',
   'rewind_session',
   'close_session',
+  'delete_session',
 ]);
 
 /** Classifies the accepted RFC command split without executing domain work. */

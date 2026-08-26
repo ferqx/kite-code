@@ -1,3 +1,7 @@
+import type {
+  RuntimeCheckpointProjection,
+  RuntimeRewindPreviewProjection,
+} from '@kite-ai/runtime-contract';
 import type { Dispatch } from 'react';
 import React from 'react';
 import { loadAgentConfig } from '#app/config';
@@ -65,17 +69,28 @@ export function rewindFileOutcomeNotes(
   return notes;
 }
 
-export function isRewindCheckpointAvailable(
-  store: {
-    getNamedSnapshotEntry: (threadId: string, snapshotId: string) => { snapshotId: string } | null;
-    loadNamedSnapshot: (threadId: string, snapshotId: string) => unknown;
-  },
-  threadId: string,
-  snapshotId: string,
-): boolean {
-  if (!store.getNamedSnapshotEntry(threadId, snapshotId)) return false;
-  const snapshot = store.loadNamedSnapshot(threadId, snapshotId);
-  return typeof snapshot === 'object' && snapshot !== null && !Array.isArray(snapshot);
+function checkpointEntry(checkpoint: RuntimeCheckpointProjection) {
+  return {
+    snapshotId: checkpoint.checkpointId,
+    eventPosition: checkpoint.eventPosition,
+    createdAt: checkpoint.createdAt,
+    ...(checkpoint.targetMessage === undefined ? {} : { targetMessage: checkpoint.targetMessage }),
+    ...(checkpoint.targetMessageCreatedAt === undefined
+      ? {}
+      : { targetMessageCreatedAt: checkpoint.targetMessageCreatedAt }),
+    affectedFileCount: checkpoint.affectedFileCount,
+  };
+}
+
+function rewindFilePreview(preview: RuntimeRewindPreviewProjection): RewindFilePreview {
+  return {
+    files: preview.files,
+    lineStatsAvailable: preview.lineStatsAvailable,
+    addedLines: preview.addedLines,
+    removedLines: preview.removedLines,
+    conflictCount: preview.conflictCount,
+    failureCount: preview.failureCount,
+  };
 }
 
 /** RuntimeStore-backed recovery-point list. */
@@ -87,22 +102,36 @@ export function useRewindCheckpoints(
 ) {
   React.useEffect(() => {
     if (!state.showRewind || !threadIdRef.current) return;
-    dispatch({
-      type: 'SET_CHECKPOINTS',
-      checkpoints: sessionManager.listRewindCheckpoints(threadIdRef.current),
-    });
+    const sessionId = threadIdRef.current;
+    let cancelled = false;
+    void sessionManager
+      .listRewindCheckpoints(sessionId)
+      .then((checkpoints) => {
+        if (!cancelled && threadIdRef.current === sessionId) {
+          dispatch({ type: 'SET_CHECKPOINTS', checkpoints: checkpoints.map(checkpointEntry) });
+        }
+      })
+      .catch(() => {
+        if (!cancelled && threadIdRef.current === sessionId) {
+          dispatch({ type: 'SET_CHECKPOINTS', checkpoints: [] });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [state.showRewind, dispatch, threadIdRef, sessionManager]);
 }
 
 export function useRunRewind(deps: RewindDeps) {
   const rewindInProgressRef = React.useRef(false);
   const previewRewind = React.useCallback(
-    (snapshotId: string): RewindFilePreview | null => {
+    async (snapshotId: string): Promise<RewindFilePreview | null> => {
       const threadId = deps.threadIdRef.current;
       if (!threadId) return null;
-      return deps.sessionManager.previewRewind(threadId, snapshotId, deps.workspace);
+      const preview = await deps.sessionManager.previewRewind(threadId, snapshotId);
+      return preview ? rewindFilePreview(preview) : null;
     },
-    [deps.threadIdRef, deps.workspace, deps.sessionManager.previewRewind],
+    [deps.threadIdRef, deps.sessionManager],
   );
   const runRewind = React.useCallback(
     async (scope: RewindScope, snapshotId: string) => {
@@ -169,14 +198,10 @@ export function useRunRewind(deps: RewindDeps) {
         for (const note of localNotes) {
           deps.dispatch({ type: 'LOCAL_TEXT', text: note.text, isError: note.isError });
         }
-      } catch (error) {
+      } catch {
         deps.dispatch({
           type: 'RUNTIME_EVENT',
-          event: {
-            type: 'run.error',
-            message: error instanceof Error ? error.message : String(error),
-            recoverable: true,
-          },
+          event: { type: 'unavailable', reason: 'unknown_event' },
         });
       } finally {
         rewindInProgressRef.current = false;

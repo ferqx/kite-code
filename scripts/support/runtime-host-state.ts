@@ -397,6 +397,16 @@ function testExecutionServices(
               }
             : input.requiredEffectLease,
         ),
+      commitCommandDecision: (input) =>
+        store.appendEventsAndSnapshot(
+          input.sessionId,
+          input.events,
+          input.snapshot,
+          input.metadata,
+          input.snapshotMetadata,
+          input.expectedRestoreBoundary,
+          input.requiredEffectLease,
+        ),
     },
     leases: {
       tryAcquire: (sessionId, effectId, ownerId, expiresAtMs) =>

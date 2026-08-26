@@ -24,6 +24,8 @@ export interface RuntimeHostTransactionPort<Event = unknown, State = unknown> {
     input: RuntimeTransactionInput<Event, State>,
     requiredLease?: RuntimeLeaseRequirement,
   ): void;
+  /** The sole command path permitted to persist an applied command receipt. */
+  commitCommandDecision(input: RuntimeTransactionInput<Event, State>): void;
 }
 
 export interface RuntimeHostLeasePort {
@@ -72,6 +74,8 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
           input: RuntimeTransactionInput<Event, State>,
           requiredLease?: RuntimeLeaseRequirement,
         ) => this.commit(acknowledgement, input, requiredLease),
+        commitCommandDecision: (input: RuntimeTransactionInput<Event, State>) =>
+          this.commitCommandDecision(input),
       }),
       leases: Object.freeze({
         tryAcquire: (sessionId: string, effectId: string, ownerId: string, expiresAtMs: number) =>
@@ -90,6 +94,9 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
     input: RuntimeTransactionInput<Event, State>,
     requiredLease?: RuntimeLeaseRequirement,
   ): void {
+    if (input.commandReceipt !== undefined) {
+      throw new Error('Runtime command receipt requires a command decision commit.');
+    }
     if (requiredLease && requiredLease.sessionId !== input.sessionId) {
       throw new Error('Runtime effect lease session does not match the transaction session');
     }
@@ -110,6 +117,19 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
         this.#storage.transactions.commitTerminalRecovery(guardedInput);
         return;
     }
+  }
+
+  commitCommandDecision(input: RuntimeTransactionInput<Event, State>): void {
+    const receipt = input.commandReceipt;
+    if (!receipt) throw new Error('Runtime command decision requires receipt evidence.');
+    if (
+      receipt.targetSessionId !== input.sessionId ||
+      receipt.committedRevision < 0 ||
+      !Number.isSafeInteger(receipt.committedRevision)
+    ) {
+      throw new Error('Runtime command receipt does not bind the transaction session.');
+    }
+    this.#storage.transactions.commitDecision(input);
   }
 
   tryAcquire(sessionId: string, effectId: string, ownerId: string, expiresAtMs: number): boolean {

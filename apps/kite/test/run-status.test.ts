@@ -7,6 +7,7 @@ import {
   shouldShowRunStatus,
 } from '../src/tui/App';
 import { formatElapsed, formatToolResultForDisplay } from '../src/tui/components/render-utils';
+import { handleClientEventAction } from '../src/tui/reducers/handleClientEvent';
 import { handleEventAction, type RenderEvent } from '../src/tui/reducers/handleEvent';
 import type { RunStatusTone } from '../src/tui/run-status';
 import { deriveRunStatusSnapshot, formatRunStatusLine, phaseBaseTone } from '../src/tui/run-status';
@@ -230,9 +231,11 @@ describe('verb within working phase', () => {
 
   test('shows Delegating when a subagent is running', () => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'explore', name: 'scan UI' } },
+    state = handleClientEventAction(state, {
+      type: 'subagent.started',
+      subagentId: 'sub-1',
+      role: 'explore',
+      name: 'scan UI',
     });
 
     const snap = deriveRunStatusSnapshot(state);
@@ -249,9 +252,11 @@ describe('verb within working phase', () => {
     ['awaiting_user', 'Awaiting approval', 'warning'],
   ] as const)('shows %s child approval state without implying every child needs a user', (approvalState, verb, tone) => {
     let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
-    state = dispatch(state, {
-      type: 'EVENT',
-      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'review', name: 'review' } },
+    state = handleClientEventAction(state, {
+      type: 'subagent.started',
+      subagentId: 'sub-1',
+      role: 'review',
+      name: 'review',
     });
     state = {
       ...state,

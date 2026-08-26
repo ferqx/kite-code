@@ -25,6 +25,39 @@
 - 新增 OutputBlock variant 必须同时定义 fingerprint 与 settled 条件。
 - 并发 group identity 只来自 Runtime 明确的 `concurrencyGroupId`，TUI 不从相邻 block 猜测。
 
+## Client-safe 交互渲染
+
+- Approval overlay 只消费封闭的 `RuntimeClientInteraction`：可显示有界 `title`/`summary` 和允许的
+  `approve_once | same_command`，不得重新读取 raw command、cwd、sandbox scope、grant subject、provider body
+  或 Host 内部 payload 来补展示。
+- 决定必须同时匹配可见 queue entry 的 `interactionId` 与 generation；旧卡片、重连前 generation 或缺少
+  durable identity 的卡片不能授权。TUI 的选项过滤只影响展示，最终 settlement 仍由 Host 对 State 27
+  revision/generation/interaction identity fail closed。
+- Live 与 replay 都从同一 client-safe event identity 构造 block；本地提交态不能与 durable
+  `user.message` 各自追加一份相同消息。
+- `tool.queued` 只缓存 closed category、dynamic display label 与有界 arguments，不创建任何 block；
+  `tool.started` 才按 App 投影的 `exploration | standalone | hidden` 分类物化。`read_file`、
+  `search_content`、`search_files` 与 `read_mcp_resource` 可在同一只读探索阶段累积，started/terminal
+  乱序仍按 call ID 更新同一个 summary。
+- 聚合条目保留本地 path/pattern/command/result，运行态步骤显示这些详情；settle 后按 Thought 规则折叠为
+  统计摘要，不是因为 Protocol 删除了内容。Shell 只有 queued arguments 明确 `intent=inspect` 且命令通过
+  只读 grammar 时才归 exploration；终态缺 queued fact 时不猜测。
+- reasoning segment、旁白 caption、探索工具与模型调用跨多个 request 仍进入一个阶段块。streaming delta
+  只缓存，completed reasoning 才更新活动窗口；第一条文本使块进入 `awaiting_terminal`，terminal 声明后续
+  工具时重新激活并由 started 确认 caption，否则文本脱离为最终回答。live 与 history replay 共用该状态机。
+- reasoning delta/completed 都是无 State revision 的 ephemeral presentation fact，Server composition 必须按原序
+  交给 client sink，不能把 completed 误送 durable revision sink。durable `model.responded(toolCallCount>0)` 可以
+  先于同一回复的累计 text delta 抵达；该迟到 narration 仍属于当前活跃阶段，不得关闭 Thought、重复 caption
+  或迫使后续探索工具另建 summary。
+- `model.text_delta`、`reasoning.activity` 与 `model.responded` 必须携带同一 model `requestId`。TUI 以该 identity
+  更新唯一回答槽位，而不依赖“最后一个 block”猜测归属；正文先到、reasoning/terminal 后到，或 durable terminal
+  越过 ephemeral delta 时，都只能冻结/补充原文本块。旧 request 的迟到包不得关闭新 Thought 或追加第二份正文。
+- reasoning 的可见题头只有一个 owner：阶段内已有探索工具时归 `tool_summary`，纯 reasoning 时并入最终文本；
+  两者不得同时显示 `Thinking`。
+- 同一阶段内的多个 caption 按事件顺序逐行紧凑排列；任何 settled Thinking 摘要（无论是否包含工具）的
+  下一视觉行都直接显示最终回答。两种情况都不额外插入空白行，但单条 caption/回答自身的 Markdown
+  段落间距保持不变。
+
 ## 软换行与光标
 
 - `CtrlSafeTextInput` 使用 `string-width` 计算终端列；CJK/全角通常占两列。

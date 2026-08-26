@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   buildContextStatusReport,
   compactResetPreflight,
@@ -17,12 +18,24 @@ import {
 } from '#app/bootstrap/runtime/runtime-effect-dependencies';
 import type { RuntimeEvent, RuntimeState } from '#app/bootstrap/runtime/state-runtime';
 import { getFeatureFlags } from '#app/config/features';
+import { projectStateRuntimeEventForPresentation } from '#app/runtime-client/presentation-history';
 import {
   type ContextCompactionCommandResult,
   contextCompactionRequiresLiveControl,
   type SessionDeps,
   type SessionRuntime,
 } from './runtime-session';
+
+interface RawContextCompactionCommandResult extends Omit<ContextCompactionCommandResult, 'events'> {
+  readonly events: readonly RuntimeEvent[];
+}
+
+export interface HostCompactionPlan {
+  readonly events: readonly RuntimeEvent[];
+  readonly shouldSchedule: boolean;
+  readonly compactionId?: string;
+  readonly presentation: Pick<ContextCompactionCommandResult, 'text' | 'isError'>;
+}
 
 /** Owns manual compaction commands while reusing the session's one Host control and storage. */
 export class ContextCompactionService {
@@ -69,6 +82,157 @@ export class ContextCompactionService {
           })
         : undefined,
     };
+  }
+
+  /** Pure Host command planning: it neither mutates State nor starts an effect. */
+  inspectHostCompactionCommand(input: {
+    readonly threadId: string;
+    readonly commandId: string;
+    readonly mode: 'manual' | 'reset';
+    readonly customInstructions?: string;
+  }): HostCompactionPlan {
+    const runtime = this.runtimeFor(input.threadId);
+    const coordinator = this.dependencies().runtimeSessionCoordinator?.get(input.threadId);
+    if (!runtime || !coordinator) return hostPlan([], false, 'Session is unavailable.', true);
+    const flags = getFeatureFlags(runtime.config);
+    if (!flags.contextCompaction || !flags.contextCompactionManual) {
+      return hostPlan([], false, 'Context compaction is disabled by feature flags.', true);
+    }
+    const state = coordinator.getState();
+    if (input.mode === 'reset') {
+      if (state.context.pendingCompaction)
+        return hostPlan([], false, 'Wait for the pending compaction to finish before reset.');
+      const checkpoint = state.context.activeCheckpoint;
+      if (!checkpoint) return hostPlan([], false, 'No active checkpoint to reset.');
+      const model = createChatModel(runtime.config);
+      const environment = resolveRuntimeContextProjectionEnvironment(
+        {
+          config: runtime.config,
+          model,
+          builtinToolCatalog: this.dependencies().builtinToolCatalog,
+          mcpManager: runtime.mcpManager ?? undefined,
+          skills: runtime.skillManifests,
+          skillOptions: runtime.skillOptions ?? undefined,
+        },
+        state,
+      );
+      const preflight = compactResetPreflight(
+        state,
+        runtime.config,
+        environment,
+        resolveModelCapabilities({ config: runtime.config, adapter: model.capabilityMetadata }),
+      );
+      if (!preflight.safe) return hostPlan([], false, `Cannot reset: ${preflight.reason}`, true);
+      return hostPlan(
+        [
+          {
+            type: 'context.compaction_reset',
+            checkpointId: checkpoint.compactionId,
+            reason: 'manual',
+          },
+        ],
+        false,
+        `Checkpoint ${checkpoint.compactionId.slice(0, 12)}... cleared. Context restored to full transcript.`,
+      );
+    }
+    const compactionId = hostCompactionId(input.commandId);
+    const commandEvent: RuntimeEvent = {
+      type: 'user.command_invoked',
+      commandId: hostCommandEventId(input.commandId),
+      command: input.customInstructions ? `/compact ${input.customInstructions}` : '/compact',
+    };
+    const existing = state.context.pendingCompaction;
+    if (existing) {
+      return hostPlan(
+        [commandEvent],
+        existing.reason === 'manual',
+        'A context compaction request is already pending.',
+        false,
+        existing.compactionId,
+      );
+    }
+    const model = createChatModel(runtime.config);
+    const environment = resolveRuntimeContextProjectionEnvironment(
+      {
+        config: runtime.config,
+        model,
+        builtinToolCatalog: this.dependencies().builtinToolCatalog,
+        mcpManager: runtime.mcpManager ?? undefined,
+        skills: runtime.skillManifests,
+        skillOptions: runtime.skillOptions ?? undefined,
+      },
+      state,
+    );
+    const status = inspectManualContextCompaction(
+      state,
+      runtime.config,
+      resolveModelCapabilities({ config: runtime.config, adapter: model.capabilityMetadata }),
+      environment,
+    );
+    const request: RuntimeEvent = {
+      type: 'context.compaction_requested',
+      compactionId,
+      reason: 'manual',
+      requestedAtRevision: state.revision,
+      requestedAtTurnId: state.turn.turnId,
+      force: false,
+      estimate: status.preflight.estimate,
+      ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
+    };
+    if (!status.safeBoundary.eligible) {
+      const text = status.safeBoundary.reason ?? 'Not enough messages to compact.';
+      return hostPlan(
+        [
+          commandEvent,
+          request,
+          {
+            type: 'context.compaction_failed',
+            compactionId,
+            sourceRevision: state.revision,
+            errorKind: 'unsafe_boundary',
+            message: text,
+            retryable: false,
+          },
+        ],
+        false,
+        text,
+        true,
+        compactionId,
+      );
+    }
+    return hostPlan(
+      [commandEvent, request],
+      true,
+      'Compaction queued; it will run when the Runtime reaches a safe boundary.',
+      false,
+      compactionId,
+    );
+  }
+
+  async executeCommittedHostCompaction(
+    threadId: string,
+    plan: HostCompactionPlan,
+    signal?: AbortSignal,
+  ): Promise<readonly RuntimeEvent[]> {
+    if (!plan.shouldSchedule || !plan.compactionId) return [];
+    const runtime = this.runtimeFor(threadId);
+    const coordinator = this.dependencies().runtimeSessionCoordinator?.get(threadId);
+    if (
+      !runtime ||
+      !coordinator ||
+      coordinator.getState().context.pendingCompaction?.compactionId !== plan.compactionId
+    ) {
+      throw new Error('Committed Host compaction plan no longer matches current State.');
+    }
+    return coordinator.executePendingCompaction({
+      dependencies: this.runtimeCompactionDependencies(
+        runtime,
+        coordinator,
+        signal,
+        () => undefined,
+      ),
+      ...(signal ? { signal } : {}),
+    });
   }
 
   /** Execute or queue a manual compaction command through the durable Kernel boundary. */
@@ -133,7 +297,7 @@ export class ContextCompactionService {
       state: Readonly<RuntimeState>,
       processEvent: (event: RuntimeEvent) => void,
       execute?: () => Promise<RuntimeEvent[]>,
-    ): Promise<ContextCompactionCommandResult> => {
+    ): Promise<RawContextCompactionCommandResult> => {
       const commandEvent: Extract<RuntimeEvent, { type: 'user.command_invoked' }> = {
         type: 'user.command_invoked',
         commandId: crypto.randomUUID(),
@@ -398,7 +562,9 @@ export class ContextCompactionService {
                 signal,
               })
           : undefined;
-      return runWithState(control.getState(), control.processEvent, execute);
+      return projectContextCompactionResult(
+        await runWithState(control.getState(), control.processEvent, execute),
+      );
     }
   }
 
@@ -560,9 +726,52 @@ export class ContextCompactionService {
       };
       control.processEvent(resetEvent);
       return {
-        events: [resetEvent],
+        events: projectRuntimeEvents([resetEvent]),
         text: `Checkpoint ${checkpoint.compactionId.slice(0, 12)}... cleared. Context restored to full transcript.`,
       };
     }
   }
+}
+
+function projectContextCompactionResult(
+  result: RawContextCompactionCommandResult,
+): ContextCompactionCommandResult {
+  return { ...result, events: projectRuntimeEvents(result.events) };
+}
+
+function projectRuntimeEvents(events: readonly RuntimeEvent[]) {
+  return events.flatMap((event) => {
+    const projected = projectStateRuntimeEventForPresentation(event);
+    return projected ? [projected] : [];
+  });
+}
+
+function hostPlan(
+  events: readonly RuntimeEvent[],
+  shouldSchedule: boolean,
+  text: string,
+  isError = false,
+  compactionId?: string,
+): HostCompactionPlan {
+  return Object.freeze({
+    events: Object.freeze([...events]),
+    shouldSchedule,
+    ...(compactionId ? { compactionId } : {}),
+    presentation: Object.freeze({ text, ...(isError ? { isError: true } : {}) }),
+  });
+}
+
+function hostCompactionId(commandId: string): string {
+  return `compaction_${hostCommandDigest(commandId, 'compaction')}`;
+}
+
+function hostCommandEventId(commandId: string): string {
+  return `command_${hostCommandDigest(commandId, 'invoked')}`;
+}
+
+function hostCommandDigest(commandId: string, domain: string): string {
+  return createHash('sha256')
+    .update(`kite.host-compaction.v1\0${domain}\0${commandId}`)
+    .digest('hex')
+    .slice(0, 32);
 }

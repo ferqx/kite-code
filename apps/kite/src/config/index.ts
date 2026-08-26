@@ -641,7 +641,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
           },
         }
       : {}),
-    interactionMode: cfg.interactionMode,
+    interactionMode: cfg.interactionMode ?? 'auto',
     features: cfg.features,
     sessionLoggingPolicy,
     telemetry: {

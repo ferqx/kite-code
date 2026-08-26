@@ -1,0 +1,50 @@
+name: Runtime transport qualification
+
+on:
+  pull_request:
+    paths:
+      - "apps/kite/src/bootstrap.ts"
+      - "apps/kite/src/bootstrap/runtime/**"
+      - "apps/kite/src/carrier/**"
+      - "apps/kite/src/cli/**"
+      - "apps/kite/test/isolated/runtime-stdio-*.test.ts"
+      - "apps/kite/test/isolated/runtime-server-composition.test.ts"
+      - "apps/kite/test/isolated/bun-stdio-child-transport.test.ts"
+      - "apps/kite/test/isolated/local-bootstrap-auth.test.ts"
+      - "apps/kite/test/isolated/development-loopback-carrier.test.ts"
+      - "apps/kite/test/isolated/bun-websocket-transport.test.ts"
+      - "apps/kite/test/isolated/development-websocket-runtime-client.test.ts"
+      - "apps/kite/test/isolated/development-runtime-reference.test.ts"
+      - "apps/kite/test/isolated/runtime-transport-conformance.test.ts"
+      - "tests/tui-system/harness/fixtures/**"
+      - "packages/runtime-client/**"
+      - "packages/runtime-contract/**"
+      - "packages/runtime-host/**"
+      - "packages/runtime-protocol/**"
+      - "packages/runtime-server/**"
+      - "packages/runtime-storage-sqlite/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/runtime-stdio-smoke.yml"
+      - ".github/workflows/runtime-transport-qualification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run test:runtime:stdio
+      - run: bun run test:runtime:websocket
+      - run: bun run test:runtime:transport

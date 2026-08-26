@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   compileSkillWorkflow,
   createSkillCapabilityResolver,
+  evaluateSkillActivation,
   refreshSkillCatalog,
 } from '@kite-ai/builtin-runtime/skills';
 
@@ -286,5 +287,47 @@ describe('compileSkillWorkflow', () => {
     expect(catalog.capabilities.descriptors).toHaveLength(1);
     expect(catalog.capabilities.descriptors[0]?.provider.provenance).toBe('user');
     expect(catalog.entries[0]?.descriptor.availability).toBe('unavailable');
+  });
+});
+
+describe('evaluateSkillActivation', () => {
+  beforeEach(() => {
+    root = join(
+      tmpdir(),
+      `kite-skill-activation-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(root, { recursive: true });
+  });
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it('uses an injected content-free activation identifier without allocating a UUID', () => {
+    const directory = writeWorkflow('publish-docs', VALID_MANIFEST);
+    const catalog = { revision: 'catalog-fixture', entries: [compile(directory)] } as never;
+    expect(directory).toBeDefined();
+    const evaluated = evaluateSkillActivation({
+      state: {
+        activeTaskId: 'task_fixture',
+        session: { workspace: root },
+        skills: { catalogRevision: '', frames: {} },
+      },
+      catalog,
+      flags: { skillWorkflow: true, skillActivation: true },
+      now: new Date('2026-08-26T00:00:00.000Z'),
+      activationId: 'skill_activation_deterministic_1',
+      request: {
+        skillId: 'skill:publish-docs',
+        input: { version: '1.2.3' },
+        requestedBy: 'user',
+        implicit: false,
+      },
+    });
+    expect(evaluated).toMatchObject({
+      ok: true,
+      activation: {
+        activationId: 'skill_activation_deterministic_1',
+        activatedAt: '2026-08-26T00:00:00.000Z',
+      },
+    });
   });
 });

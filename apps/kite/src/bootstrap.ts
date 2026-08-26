@@ -6,7 +6,19 @@ import {
   createBuiltinToolCatalogProjection,
 } from '@kite-ai/builtin-runtime';
 import type { BuiltinModelOperationExecutionPort } from '@kite-ai/builtin-runtime/model';
-import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite-ai/runtime-contract';
+import {
+  RuntimeClient,
+  type RuntimeClientTransport,
+  type RuntimeHistoryClient,
+} from '@kite-ai/runtime-client';
+import {
+  RUNTIME_CONTRACT_BOUNDARY_,
+  type RuntimeAccess,
+  type RuntimeCommand,
+  type RuntimeQuery,
+  type RuntimeSubscription,
+  type RuntimeSubscriptionSpec,
+} from '@kite-ai/runtime-contract';
 import {
   createRuntimeHost,
   createRuntimeHostBoundary,
@@ -14,12 +26,22 @@ import {
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHost,
   type RuntimeHostBoundary,
+  type RuntimeHostCoordinatorPort,
   type RuntimeHostExecutionAdapterContext,
   type RuntimeHostExecutionBridge,
   type RuntimeHostExecutionServices,
   resolveProjectIdentity,
+  runtimeHostCurrentStateEventTypes,
 } from '@kite-ai/runtime-host';
 import type { RuntimeStorage } from '@kite-ai/runtime-host/storage';
+import { RUNTIME_PROTOCOL_VERSION, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
+import {
+  createRuntimeServerInProcessHub,
+  type RuntimeServer,
+  type RuntimeServerAdmissionInput,
+  type RuntimeServerAdmissionPort,
+  type RuntimeServerInProcessPair,
+} from '@kite-ai/runtime-server';
 import {
   type CapabilityExecutionInvocation,
   type CapabilityExecutionPort,
@@ -29,6 +51,7 @@ import {
 import {
   assertSqliteSessionMetadataCanOpen,
   createSqliteRuntimeCompatibilityWriter,
+  createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
   createSqliteSessionTokenStats,
@@ -44,7 +67,6 @@ import {
   sqliteRuntimeStorePath,
   sqliteRuntimeStorePathForEpoch,
 } from '@kite-ai/runtime-storage-sqlite';
-import { createTuiRuntimeClient } from './adapters/tui/runtime-bridge';
 import type {
   TuiSessionManager,
   TuiSessionManagerDependencies,
@@ -69,9 +91,165 @@ import type {
   StateRuntimeStorage,
 } from './bootstrap/runtime/state-runtime';
 import { createKiteRuntimeCompatibilityMigrator } from './bootstrap/runtime/state-store-compatibility';
+import { createTuiRuntimeClient } from './bootstrap/runtime/TuiRuntimeBridge';
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
+import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
+
+interface KiteRuntimeClientAccess extends RuntimeAccess {
+  readonly history?: RuntimeHistoryClient;
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+export interface KiteCliRuntimeServerOwner extends AsyncDisposable {
+  readonly server: RuntimeServer;
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+interface KiteRuntimeServerComposition extends KiteCliRuntimeServerOwner {
+  open(): RuntimeServerInProcessPair;
+}
+
+function createKiteRuntimeServerComposition(input: {
+  readonly host: RuntimeHost<RuntimeEvent, RuntimeState>;
+  readonly workspace: string;
+  readonly ownsSession: (sessionId: string) => boolean;
+}): KiteRuntimeServerComposition {
+  const admission: RuntimeServerAdmissionPort = Object.freeze({
+    authorize: async (request: RuntimeServerAdmissionInput) => {
+      const sessionId = admissionSessionId(request);
+      if (sessionId !== undefined && !input.ownsSession(sessionId)) {
+        return { allowed: false as const, reason: 'unauthorized' as const };
+      }
+      return { allowed: true as const, workspace: input.workspace };
+    },
+  });
+  const hub = createRuntimeServerInProcessHub(
+    { runtime: input.host, admission },
+    {
+      serverInfo: {
+        version: `protocol-${RUNTIME_PROTOCOL_VERSION}`,
+        instanceId: `server_${randomBytes(16).toString('hex')}`,
+      },
+    },
+  );
+  let disposePromise: Promise<void> | undefined;
+  return Object.freeze({
+    server: hub.server,
+    open: () => hub.open(),
+    [Symbol.asyncDispose]: () => {
+      disposePromise ??= (async () => {
+        try {
+          await hub.server.beginDraining();
+        } finally {
+          await input.host[Symbol.asyncDispose]();
+        }
+      })();
+      return disposePromise;
+    },
+  });
+}
+
+/**
+ * App-owned InProcess composition. The Host remains the only Runtime owner;
+ * Server and Client communicate through the same Protocol used by external
+ * carriers, while admission fixes one trusted Workspace before dispatch.
+ */
+function createKiteInProcessRuntimeAccess(input: {
+  readonly host: RuntimeHost<RuntimeEvent, RuntimeState>;
+  readonly workspace: string;
+  readonly ownsSession: (sessionId: string) => boolean;
+  readonly clientName: 'kite-cli' | 'kite-tui';
+  readonly history?: RuntimeHistoryClient;
+}): KiteRuntimeClientAccess {
+  const composition = createKiteRuntimeServerComposition(input);
+  const transport: RuntimeClientTransport = Object.freeze({
+    connect: async () => {
+      const pair = composition.open();
+      return Object.freeze({
+        send: (message: RuntimeProtocolMessage) => pair.client.send(message),
+        messages: () => pair.client.messages(),
+        close: (reason?: string) => pair.client.close(reason),
+      });
+    },
+  });
+  const client = new RuntimeClient({
+    transport,
+    clientInfo: {
+      name: input.clientName,
+      version: `protocol-${RUNTIME_PROTOCOL_VERSION}`,
+      instanceId: `client_${randomBytes(16).toString('hex')}`,
+    },
+    ...(input.history ? { history: input.history } : {}),
+  });
+  let disposePromise: Promise<void> | undefined;
+  return Object.freeze({
+    command: (command: RuntimeCommand) => client.command(command),
+    query: (query: RuntimeQuery) => client.query(query),
+    subscribe: (subscription: RuntimeSubscription) => client.subscribe(subscription),
+    ...(client.history ? { history: client.history } : {}),
+    [Symbol.asyncDispose]: () => {
+      disposePromise ??= (async () => {
+        try {
+          await composition[Symbol.asyncDispose]();
+        } finally {
+          await client.close();
+        }
+      })();
+      return disposePromise;
+    },
+  });
+}
+
+function createKiteInProcessRuntimeCoordinator(input: {
+  readonly host: RuntimeHost<RuntimeEvent, RuntimeState>;
+  readonly workspace: string;
+  readonly ownsSession: (sessionId: string) => boolean;
+  readonly history: RuntimeHistoryClient;
+}): RuntimeHostCoordinatorPort & { readonly history: RuntimeHistoryClient } {
+  const access = createKiteInProcessRuntimeAccess({
+    ...input,
+    clientName: 'kite-tui',
+    history: input.history,
+  });
+  if (!access.history) throw new Error('TUI Runtime Client history is unavailable.');
+  return Object.freeze({
+    command: (command: RuntimeCommand) => access.command(command),
+    query: (query: RuntimeQuery) => access.query(query),
+    subscribe: (subscription: RuntimeSubscription) => access.subscribe(subscription),
+    cancelSession: (sessionId: string, reason?: string) =>
+      input.host.cancelSession(sessionId, reason),
+    cancelAllSessions: (reason?: string) => input.host.cancelAllSessions(reason),
+    removeSessionProjection: (sessionId: string) => input.host.removeSessionProjection(sessionId),
+    waitForSessionIdle: (sessionId: string) => input.host.waitForSessionIdle(sessionId),
+    isSessionOperationActive: (sessionId: string) => input.host.isSessionOperationActive(sessionId),
+    history: access.history,
+    [Symbol.asyncDispose]: async () => {
+      await access[Symbol.asyncDispose]();
+    },
+  });
+}
+
+function admissionSessionId(input: RuntimeServerAdmissionInput): string | undefined {
+  if (input.operation === 'runtime/command') {
+    const command = input.command as Pick<RuntimeCommand, 'type'> & {
+      readonly sessionId?: string;
+      readonly sourceSessionId?: string;
+      readonly bootstrapSessionId?: string;
+    };
+    if (command.type === 'create_session') return command.bootstrapSessionId;
+    return command.sessionId ?? command.sourceSessionId;
+  }
+  if (input.operation === 'runtime/query') {
+    return (input.query as { readonly sessionId?: string }).sessionId;
+  }
+  if (input.operation === 'runtime/subscribe') {
+    const subscription = input.subscription as RuntimeSubscriptionSpec;
+    return subscription.scope === 'session' ? subscription.sessionId : undefined;
+  }
+  return undefined;
+}
 
 export function createKiteRuntimeExecutionModule<TContext>(input: {
   readonly executionAdapterId: string;
@@ -318,11 +496,11 @@ export function createKiteRuntimeStorageOwner(checkpointPath: string): KiteRunti
         };
       }
       if (property === 'deleteSession') {
-        return (sessionId: string) => {
+        return (sessionId: string, ...args: unknown[]) => {
           if (!suppressCompatibleKiteSession(checkpointPath, sessionId)) {
             throw new Error('Runtime session deletion could not record compatibility state.');
           }
-          const result = Reflect.apply(value, port, [sessionId]);
+          const result = Reflect.apply(value, port, [sessionId, ...args]);
           return result;
         };
       }
@@ -345,6 +523,7 @@ export function createKiteRuntimeStorageOwner(checkpointPath: string): KiteRunti
     checkpoints: createLazyPort(() => resolve().checkpoints),
     artifacts: createLazyPort(() => resolve().artifacts),
     recoveryIdentities: createLazyPort(() => resolve().recoveryIdentities),
+    commandReceipts: createLazyPort(() => resolve().commandReceipts),
     close: () => {
       closeRequested = true;
       closeWhenIdle();
@@ -439,7 +618,7 @@ export function createKiteRuntimeBoundary(): RuntimeHostBoundary {
   });
 }
 
-export function createKiteCliRuntimeAccess(
+function createKiteCliRuntimeHost(
   input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
 ): RuntimeHost<RuntimeEvent, RuntimeState> {
   const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
@@ -479,6 +658,27 @@ export function createKiteCliRuntimeAccess(
   return host;
 }
 
+export function createKiteCliRuntimeServer(
+  input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
+): KiteCliRuntimeServerOwner {
+  return createKiteRuntimeServerComposition({
+    host: createKiteCliRuntimeHost(input),
+    workspace: input.workspace,
+    ownsSession: (sessionId) => sessionId === input.sessionId,
+  });
+}
+
+export function createKiteCliRuntimeAccess(
+  input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
+): KiteRuntimeClientAccess {
+  return createKiteInProcessRuntimeAccess({
+    host: createKiteCliRuntimeHost(input),
+    workspace: input.workspace,
+    ownsSession: (sessionId) => sessionId === input.sessionId,
+    clientName: 'kite-cli',
+  });
+}
+
 export function createKiteTuiSessionManager(
   input: TuiSessionManagerDependencies,
 ): TuiSessionManager {
@@ -502,6 +702,18 @@ export function createKiteTuiSessionManager(
     let modelOperationExecution: BuiltinModelOperationExecutionPort | undefined;
     let modelRuntime: InstalledKiteRuntimeCompositionFactory | undefined;
     const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBinding();
+    const history = createKiteRuntimeHistoryClient(
+      () =>
+        createSqliteRuntimeLogQueryPort<RuntimeEvent, RuntimeState>({
+          databasePath: sqliteCurrentRuntimeStorePath(input.checkpointPath),
+          codec: STATE_STORAGE_BINDING_.codec,
+          currentEventTypes: runtimeHostCurrentStateEventTypes(),
+        }),
+      {
+        listSessions: () => compatibleSessionList(input.checkpointPath),
+        importSession: (sessionId) => importCompatibleKiteSession(input.checkpointPath, sessionId),
+      },
+    );
     const runtimeCoordinatorAccess: RuntimeSessionCoordinatorAccess = {
       ensure: (identity) => runtimeCoordinatorBinding.access().ensure(identity),
       get: (sessionId) => runtimeCoordinatorBinding.access().get(sessionId),
@@ -553,8 +765,8 @@ export function createKiteTuiSessionManager(
         tokenStatsStorage,
         runtimeSessionCoordinator: runtimeCoordinatorAccess,
       },
-      (bridge) =>
-        createKiteRuntimeHost(
+      (bridge) => {
+        const host = createKiteRuntimeHost(
           owner.storage,
           ({ services, capabilities, capabilityRegistrySnapshot }, projection) => {
             executionServices = services;
@@ -583,7 +795,16 @@ export function createKiteTuiSessionManager(
             });
             return bridge;
           },
-        ),
+        );
+        return createKiteInProcessRuntimeCoordinator({
+          host,
+          workspace: input.workspace,
+          history,
+          // This Host composition is already scoped to the one TUI Workspace;
+          // the bridge still rejects unregistered Session identities.
+          ownsSession: () => true,
+        });
+      },
       (workspace) => resolveProjectIdentity(workspace),
     );
   } catch (error) {

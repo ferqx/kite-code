@@ -13,7 +13,17 @@ import {
   type StateRuntimeEffectLease,
   type StateRuntimeEffectPersistenceAcknowledgement,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import type { RuntimeEffectLeaseExpectation } from '@kite-ai/runtime-host/storage';
+import type {
+  RuntimeCommandCommitEvidence,
+  RuntimeEffectLeaseExpectation,
+} from '@kite-ai/runtime-host/storage';
+import {
+  assertPrecommittedInteractionAction,
+  type CommittedInteractionCommand,
+  isPrecommittedInteractionAction,
+  type PrecommittedInteractionActionDescriptor,
+  type RuntimeInteractionCommandCommitInput,
+} from './command-interaction-decision';
 import { classifyFailure } from './failures';
 import { resourceAdmissionTerminalEvents } from './resource-admission-terminal';
 import {
@@ -64,6 +74,11 @@ export interface RuntimeStateSessionPort {
   ): boolean;
   applyLateResourceReconciliation(events: readonly RuntimeEvent[]): boolean;
   applyAction(action: RuntimeUserAction, additionalEvents?: RuntimeEvent[]): RuntimeActionResult;
+  getSandboxAvailable?(): boolean;
+  /** Absent only in legacy test harnesses; command settlement fails closed there. */
+  commitInteractionCommand?(
+    input: RuntimeInteractionCommandCommitInput,
+  ): CommittedInteractionCommand;
   /** Host sessions release in-process ownership after every attempt. */
   releaseEffect?(lease: Readonly<StateRuntimeEffectLease>): void;
 }
@@ -74,7 +89,16 @@ export interface RuntimeActionProvider {
   requestAction(
     effect: Extract<RuntimeEffect, { interactionId: string }>,
     state: Readonly<RuntimeState>,
-  ): Promise<RuntimeUserAction>;
+    commandCommit: RuntimeInteractionCommandCommitPort,
+  ): Promise<RuntimeUserAction | PrecommittedInteractionActionDescriptor>;
+}
+
+/** Saved by a bridge during the interaction wait; commit never wakes that wait. */
+export interface RuntimeInteractionCommandCommitPort {
+  commit(
+    action: RuntimeUserAction,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedInteractionCommand;
 }
 
 type EffectExecutionOutcome = {
@@ -816,8 +840,33 @@ export async function* runStateRuntimeLoop(
           yield started;
         }
         let action: RuntimeUserAction;
+        let precommitted: PrecommittedInteractionActionDescriptor | undefined;
         try {
-          const requested = provider.requestAction(effect, kernel.getState()).then(
+          const actionState = kernel.getState();
+          const commandCommit: RuntimeInteractionCommandCommitPort = Object.freeze({
+            commit: (candidate: RuntimeUserAction, evidence: RuntimeCommandCommitEvidence) => {
+              if (!kernel.commitInteractionCommand) {
+                throw new Error('Runtime interaction command commit is unavailable.');
+              }
+              if (!kernel.getSandboxAvailable) {
+                throw new Error('Runtime interaction command sandbox fact is unavailable.');
+              }
+              return kernel.commitInteractionCommand({
+                action: candidate,
+                sessionId: actionState.session.threadId,
+                interactionId: effect.interactionId,
+                expectedRevision: actionState.revision,
+                effectType: effect.type,
+                reservationReconciliationEvents:
+                  effect.type === 'request_provider_action'
+                    ? reconciliationEventsForReservations(actionState, reservationIds)
+                    : [],
+                sandboxAvailable: kernel.getSandboxAvailable(),
+                evidence,
+              });
+            },
+          });
+          const requested = provider.requestAction(effect, actionState, commandCommit).then(
             (value) => ({ ok: true as const, value }),
             (error: unknown) => ({ ok: false as const, error }),
           );
@@ -846,7 +895,12 @@ export async function* runStateRuntimeLoop(
             if (backgroundStopped) return;
           }
           if (!resolved.ok) throw resolved.error;
-          action = resolved.value;
+          if (isPrecommittedInteractionAction(resolved.value)) {
+            precommitted = resolved.value;
+            action = precommitted.action;
+          } else {
+            action = resolved.value;
+          }
         } catch (error) {
           if (effect.type === 'request_provider_action') {
             action = {
@@ -862,33 +916,42 @@ export async function* runStateRuntimeLoop(
             throw error;
           }
         }
-        const actionState = kernel.getState();
-        const actionResult = kernel.applyAction(
-          action,
-          effect.type === 'request_provider_action'
-            ? reconciliationEventsForReservations(kernel.getState(), reservationIds)
-            : [],
-        );
-        if (actionResult.status !== 'applied') {
-          // Stale UI actions are expected during cancellation/session-switch races.
-          // They are recorded by the runtime logger but must not become user errors.
-          yield actionResult.telemetry;
-          continue;
-        }
-        let events = actionResult.events;
-        // RuntimeSessionCoordinator commits approval settlement atomically,
-        // while lightweight Host harnesses may only persist the user decision
-        // in applyAction. Keep the provider→runner path equivalent without
-        // duplicating facts from the atomic production path.
-        if (
-          actionResult.status === 'applied' &&
-          events.some((event) => event.type === 'approval.rejected') &&
-          !events.some((event) => event.type === 'tool.rejected')
-        ) {
-          const settlement = approvalRejectionSettlementEvents(actionState, events);
-          if (settlement.length > 0) {
-            const persistedSettlement = kernel.processEventBatch(settlement);
-            events = [...events, ...persistedSettlement];
+        let events: readonly RuntimeEvent[];
+        if (precommitted) {
+          assertPrecommittedInteractionAction(
+            kernel.getState(),
+            precommitted,
+            precommitted.sessionId,
+          );
+          events = precommitted.events;
+        } else {
+          const actionState = kernel.getState();
+          const actionResult = kernel.applyAction(
+            action,
+            effect.type === 'request_provider_action'
+              ? reconciliationEventsForReservations(kernel.getState(), reservationIds)
+              : [],
+          );
+          if (actionResult.status !== 'applied') {
+            // Stale UI actions are expected during cancellation/session-switch races.
+            // They are recorded by the runtime logger but must not become user errors.
+            yield actionResult.telemetry;
+            continue;
+          }
+          events = actionResult.events;
+          // RuntimeSessionCoordinator commits approval settlement atomically,
+          // while lightweight Host harnesses may only persist the user decision
+          // in applyAction. Keep the provider→runner path equivalent without
+          // duplicating facts from the atomic production path.
+          if (
+            events.some((event) => event.type === 'approval.rejected') &&
+            !events.some((event) => event.type === 'tool.rejected')
+          ) {
+            const settlement = approvalRejectionSettlementEvents(actionState, events);
+            if (settlement.length > 0) {
+              const persistedSettlement = kernel.processEventBatch(settlement);
+              events = [...events, ...persistedSettlement];
+            }
           }
         }
         // Rejecting one focused tool approval is a terminal result for that

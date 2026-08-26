@@ -2,6 +2,7 @@ import { constants, Database } from 'bun:sqlite';
 import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
+  assertCurrentSqliteRuntimeStoreConnection,
   assertNoFollowDatabasePath,
   assertSqliteRuntimeStorageCanOpen,
   checksum,
@@ -33,9 +34,9 @@ export const SQLITE_RUNTIME_COMPATIBILITY_SOURCE_PROFILES: readonly SqliteRuntim
       allowMissingSnapshotChecksum: false,
     }),
     Object.freeze({
-      storeSchemaVersion: SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
-      stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
+      storeSchemaVersion: 5,
+      stateSchemaVersion: 27,
+      formatEpoch: 'kite-runtime-saq-v1-2026-08-25',
       allowMissingSnapshotChecksum: false,
     }),
   ]);
@@ -701,6 +702,18 @@ function targetDatabaseLooksCurrent(
   database: Database,
   profile: SqliteRuntimeFormatProfile,
 ): boolean {
+  if (
+    profile.storeSchemaVersion === SQLITE_RUNTIME_STORE_SCHEMA_VERSION &&
+    profile.stateSchemaVersion === SQLITE_RUNTIME_STATE_SCHEMA_VERSION &&
+    profile.formatEpoch === SQLITE_RUNTIME_FORMAT_EPOCH
+  ) {
+    try {
+      assertCurrentSqliteRuntimeStoreConnection(database);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   if (!hasTable(database, 'runtime_store_meta')) return false;
   const row = database
     .query<{ format_version: string | null; runtime_format_epoch: string | null }, []>(

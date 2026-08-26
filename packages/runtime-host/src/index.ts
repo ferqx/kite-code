@@ -36,6 +36,9 @@ export type {
 } from './execution/context-compilation';
 export { createRuntimeHostContextCompilationPort } from './execution/context-compilation';
 export type {
+  RuntimeHostAcceptedCommand,
+  RuntimeHostCommandInspection,
+  RuntimeHostCommandInspectionContext,
   RuntimeHostExecutionAdapterContext,
   RuntimeHostExecutionBridge,
   RuntimeHostPreparedExecution,
@@ -57,6 +60,7 @@ export {
   RuntimeHostToolPipelineAttemptCoordinatorError,
 } from './execution/tool-pipeline-coordinator';
 export {
+  runtimeHostCurrentStateEventTypes,
   runtimeHostStateAdmitCurrentRuntimeEvent,
   runtimeHostStateAssertCurrentRuntimeEvent,
 } from './format/event-codec';
@@ -68,6 +72,12 @@ export type {
 export { restoreRuntimeHostStateSession } from './format/restore';
 export type { RuntimeHostStateStorageBinding } from './format/storage-binding';
 export { createRuntimeHostStateStorageBinding } from './format/storage-binding';
+export {
+  createRuntimeCommandCommitEvidence,
+  digestRuntimeCommand,
+  parseRuntimeStoredCommandReceipt,
+  resolveRuntimeCommandReceipt,
+} from './host/command-receipt';
 export type { RuntimeHost, RuntimeHostCoordinatorPort } from './host/runtime-host';
 
 export type {

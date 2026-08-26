@@ -8,6 +8,7 @@ import {
   verifyPendingModelInvocationEvidence,
 } from '@kite-ai/builtin-runtime/model';
 import { canonicalPathForComparison } from '@kite-ai/builtin-runtime/sandbox';
+import type { RuntimeCommand } from '@kite-ai/runtime-contract';
 import {
   type RuntimeHostExecutionServices,
   resolveProjectIdentity,
@@ -20,11 +21,25 @@ import {
   type StateRuntimeSession,
   type StateRuntimeSessionEffectLease,
 } from '@kite-ai/runtime-host/kernel-adapter';
+import type { RuntimeCommandCommitEvidence } from '@kite-ai/runtime-host/storage';
 import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite-ai/runtime-spi';
 import type {
   InstalledKiteRuntimeComposition,
   InstalledKiteRuntimeCompositionFactory,
 } from '../model-runtime-composition';
+import {
+  type CommittedCloseSessionCommand,
+  type CommittedControlCommand,
+  commitCancelTurnCommand,
+  commitClearSessionCommandGrantsCommand,
+  commitCloseSessionCommand,
+  commitInteractionModeCommand,
+} from './command-control-decision';
+import {
+  type CommittedForkSessionCommand,
+  commitForkSessionCommand,
+} from './command-fork-decision';
+import { commitInteractionCommand } from './command-interaction-decision';
 import { createAppRuntimeEffectExecutor } from './runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from './runtime-effect-dependencies';
 import {
@@ -42,7 +57,16 @@ import type {
   StateRuntimeStorage,
 } from './state-runtime';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
-import { executeRuntimeTurn, type RuntimeTurnInput } from './turn-coordinator';
+import {
+  type CommittedStartTurnCommand,
+  commitStartTurnCommand,
+  type StartTurnSkillPlanningContext,
+} from './turn-command-decision';
+import {
+  executeRuntimeTurn,
+  type RuntimeCommittedCommandCancellation,
+  type RuntimeTurnInput,
+} from './turn-coordinator';
 import { projectVerificationSchemaAdmissions } from './verification-schema-admission';
 
 /** App-private transition control used by the State 27 coordinator. */
@@ -106,6 +130,38 @@ export interface RuntimeSessionCoordinator {
   getSandboxAvailable(): boolean | undefined;
   setActiveCancelRun(cancelRun: (reason?: string) => RuntimeEvent[]): void;
   clearActiveCancelRun(): void;
+  commitInteractionModeCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'set_interaction_mode' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedControlCommand;
+  commitCancelTurnCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'cancel_turn' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedControlCommand;
+  commitCloseSessionCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'close_session' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedCloseSessionCommand;
+  commitClearSessionCommandGrantsCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'clear_session_command_grants' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedControlCommand;
+  commitForkSessionCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'fork_session' }>,
+    targetSessionId: string,
+    targetRecoveryIdentityKey: string,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedForkSessionCommand;
+  /**
+   * Commits the entire start-turn State decision and applied command receipt.
+   * Calling this method never begins a runner; the caller may schedule only
+   * after it receives this committed descriptor.
+   */
+  commitStartTurnCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'start_turn' }>,
+    evidence: RuntimeCommandCommitEvidence,
+    context?: StartTurnSkillPlanningContext,
+  ): CommittedStartTurnCommand;
   executeTurn(
     input: Omit<RuntimeTurnInput, 'runtimeSession' | 'createRuntimeEffectPort'>,
     provider: RuntimeActionProvider,
@@ -147,6 +203,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   #lifecycle: RuntimeSessionCoordinator['lifecycle'] = 'idle';
   #activeOperation: 'turn' | 'compacting' | null = null;
   #activeCancelRun: (reason?: string) => RuntimeEvent[] = () => [];
+  #activeCommittedCommandCancel: RuntimeCommittedCommandCancellation = () => undefined;
   #operationCompletion: Promise<void> = Promise.resolve();
   #resolveOperationCompletion: (() => void) | null = null;
   #closePromise: Promise<void> | null = null;
@@ -391,6 +448,85 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
 
   clearActiveCancelRun(): void {
     this.#activeCancelRun = () => [];
+    this.#activeCommittedCommandCancel = () => undefined;
+  }
+
+  commitInteractionModeCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'set_interaction_mode' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedControlCommand {
+    this.#assertOpen();
+    const committed = commitInteractionModeCommand(this.session, command, evidence);
+    // State is authoritative; the live coordinator view follows only after
+    // the command receipt transaction has succeeded.
+    this.#interactionMode = command.mode;
+    this.#interactionModeRevision = this.session.getState().interactionModeRevision;
+    return committed;
+  }
+
+  commitCancelTurnCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'cancel_turn' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedControlCommand {
+    this.#assertOpen();
+    const committed = commitCancelTurnCommand(this.session, command, evidence);
+    this.#activeCommittedCommandCancel(committed.events, 'Cancelled by user.');
+    return committed;
+  }
+
+  commitCloseSessionCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'close_session' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedCloseSessionCommand {
+    this.#assertOpen();
+    if (this.#activeOperation && this.#activeOperation !== 'turn') {
+      throw new Error(`Runtime session is busy with ${this.#activeOperation}.`);
+    }
+    const committed = commitCloseSessionCommand(this.session, command, evidence);
+    if (committed.wasActive) {
+      this.#activeCommittedCommandCancel(committed.events, 'Runtime session closed.');
+    }
+    return committed;
+  }
+
+  commitClearSessionCommandGrantsCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'clear_session_command_grants' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedControlCommand {
+    this.#assertOpen();
+    return commitClearSessionCommandGrantsCommand(this.session, command, evidence);
+  }
+
+  commitForkSessionCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'fork_session' }>,
+    targetSessionId: string,
+    targetRecoveryIdentityKey: string,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedForkSessionCommand {
+    this.#assertOpen();
+    if (this.#activeOperation) {
+      throw new Error(`Runtime session is busy with ${this.#activeOperation}.`);
+    }
+    return commitForkSessionCommand(
+      this.session,
+      this.#store,
+      command,
+      targetSessionId,
+      targetRecoveryIdentityKey,
+      evidence,
+    );
+  }
+
+  commitStartTurnCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'start_turn' }>,
+    evidence: RuntimeCommandCommitEvidence,
+    context?: StartTurnSkillPlanningContext,
+  ): CommittedStartTurnCommand {
+    this.#assertOpen();
+    if (this.#activeOperation) {
+      throw new Error(`Runtime session is busy with ${this.#activeOperation}.`);
+    }
+    return commitStartTurnCommand(this.session, command, evidence, context);
   }
 
   async *executeTurn(
@@ -415,6 +551,9 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
           registerRunCancellation: (cancelRun) => {
             if (cancelRun) this.setActiveCancelRun(cancelRun);
             else this.clearActiveCancelRun();
+          },
+          registerCommittedCommandCancellation: (cancel) => {
+            this.#activeCommittedCommandCancel = cancel ?? (() => undefined);
           },
         },
         provider,
@@ -703,6 +842,8 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       applyLateResourceReconciliation: (events) =>
         this.session.applyLateResourceReconciliation(events),
       applyAction,
+      getSandboxAvailable: () => this.#sandboxAvailable === true,
+      commitInteractionCommand: (input) => commitInteractionCommand(this.session, input),
       releaseEffect: (lease) => this.session.releaseEffect(lease),
     };
     return Object.freeze(port);

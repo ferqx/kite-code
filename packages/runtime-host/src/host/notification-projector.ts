@@ -1,21 +1,37 @@
 import {
   RUNTIME_NOTIFICATION_SCHEMA_,
+  type RuntimeAccessNotification,
   type RuntimeNotification,
+  type RuntimeSessionIndexNotification,
+  type RuntimeSessionProjection,
   type RuntimeSubscription,
 } from '@kite-ai/runtime-contract';
-import type { SessionRegistry } from './session-registry';
+import type { SessionProjectionChange, SessionRegistry } from './session-registry';
 
 export const RUNTIME_HOST_DURABLE_HISTORY_LIMIT = 256;
 export const RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT = 256;
 
 interface Subscriber {
-  readonly sessionId: string;
+  readonly scope: 'session' | 'sessions';
+  readonly sessionId?: string;
+  readonly includeEphemeral: boolean;
   readonly signal?: AbortSignal;
-  readonly queue: RuntimeNotification[];
+  readonly queue: RuntimeAccessNotification[];
   readonly wake: Set<() => void>;
+  readonly generation?: number;
+  indexSeed?: IndexSeed;
   lastRevision?: number;
   closed: boolean;
   onAbort?: () => void;
+}
+
+interface IndexSeed {
+  readonly serverInstanceId: string;
+  readonly generation: number;
+  readonly indexRevision: number;
+  readonly projections: readonly RuntimeSessionProjection[];
+  position: number;
+  phase: 'begin' | 'sessions' | 'end';
 }
 
 interface StreamCursor {
@@ -24,15 +40,24 @@ interface StreamCursor {
   readonly sequence: number;
 }
 
+/** Owns Host-local projection/index ordering, never Runtime execution authority. */
 export class NotificationProjector {
   readonly #registry: SessionRegistry;
+  readonly #serverInstanceId: string;
   readonly #history = new Map<string, RuntimeNotification[]>();
   readonly #subscribers = new Set<Subscriber>();
   readonly #streamCursors = new Map<string, StreamCursor>();
+  readonly #stopRegistryListener: () => void;
+  #indexRevision = 0;
+  #nextGeneration = 0;
   #closed = false;
 
-  constructor(registry: SessionRegistry) {
+  constructor(registry: SessionRegistry, input: { readonly serverInstanceId?: string } = {}) {
     this.#registry = registry;
+    this.#serverInstanceId = input.serverInstanceId ?? `runtime-host-${crypto.randomUUID()}`;
+    this.#stopRegistryListener = registry.onProjectionChange((change) =>
+      this.#publishIndexChange(change),
+    );
   }
 
   publish(notification: RuntimeNotification): void {
@@ -45,9 +70,7 @@ export class NotificationProjector {
       ) {
         throw new Error('Durable Runtime notification identity is inconsistent');
       }
-      const committed = this.#registry.projection(notification.sessionId);
-      if (committed && notification.revision <= committed.revision) return;
-      this.#registry.commitProjection(notification.projection.session);
+      if (this.#registry.commitProjection(notification.projection.session) === 'unchanged') return;
       const history = this.#history.get(notification.sessionId) ?? [];
       history.push(notification);
       if (history.length > RUNTIME_HOST_DURABLE_HISTORY_LIMIT) {
@@ -59,66 +82,85 @@ export class NotificationProjector {
     }
 
     for (const subscriber of this.#subscribers) {
-      if (subscriber.closed || subscriber.sessionId !== notification.sessionId) continue;
+      if (
+        subscriber.closed ||
+        subscriber.scope !== 'session' ||
+        subscriber.sessionId !== notification.sessionId
+      ) {
+        continue;
+      }
       if (notification.durability === 'durable') {
         this.#publishDurableToSubscriber(subscriber, notification);
-      } else {
+      } else if (subscriber.includeEphemeral) {
         this.#enqueue(subscriber, notification);
       }
     }
   }
 
-  subscribe(subscription: RuntimeSubscription): AsyncIterable<RuntimeNotification> {
-    const subscriber: Subscriber = {
-      sessionId: subscription.sessionId,
-      signal: subscription.signal,
-      queue: [],
-      wake: new Set(),
-      lastRevision: subscription.afterRevision,
-      closed: false,
-    };
-    this.#seed(subscriber, subscription.afterRevision);
+  /** Explicit tombstone seam for a future Session lifecycle owner. */
+  removeSession(sessionId: string): boolean {
+    if (this.#closed) return false;
+    this.#history.delete(sessionId);
+    return this.#registry.removeProjection(sessionId);
+  }
 
-    const close = (): void => {
-      this.#closeSubscriber(subscriber);
-    };
+  subscribe(subscription: RuntimeSubscription): AsyncIterable<RuntimeAccessNotification> {
+    const { spec } = subscription;
+    const afterRevision = spec.scope === 'session' ? spec.afterRevision : undefined;
+    const subscriber: Subscriber =
+      spec.scope === 'session'
+        ? {
+            scope: 'session',
+            sessionId: spec.sessionId,
+            includeEphemeral: spec.includeEphemeral ?? false,
+            signal: subscription.signal,
+            queue: [],
+            wake: new Set(),
+            lastRevision: spec.afterRevision,
+            closed: false,
+          }
+        : {
+            scope: 'sessions',
+            includeEphemeral: false,
+            signal: subscription.signal,
+            queue: [],
+            wake: new Set(),
+            generation: ++this.#nextGeneration,
+            closed: false,
+          };
+
+    const close = (): void => this.#closeSubscriber(subscriber);
     subscriber.onAbort = close;
     if (this.#closed || subscription.signal?.aborted) {
       this.#closeSubscriber(subscriber);
     } else {
+      // Register before the synchronous seed. A subsequent publish therefore
+      // queues after the matching reset boundary and cannot be lost.
       this.#subscribers.add(subscriber);
+      if (subscriber.scope === 'session') {
+        this.#seedSession(subscriber, afterRevision);
+      } else {
+        this.#seedIndex(subscriber);
+      }
       subscription.signal?.addEventListener('abort', close, { once: true });
     }
 
-    return {
-      [Symbol.asyncIterator]: () => ({
-        next: async (): Promise<IteratorResult<RuntimeNotification>> => {
-          while (!subscriber.closed && subscriber.queue.length === 0) {
-            await new Promise<void>((resolve) => {
-              subscriber.wake.add(resolve);
-            });
-          }
-          const value = subscriber.queue.shift();
-          return value ? { done: false, value } : { done: true, value: undefined };
-        },
-        return: async (): Promise<IteratorResult<RuntimeNotification>> => {
-          close();
-          return { done: true, value: undefined };
-        },
-      }),
-    };
+    return iteratorFor(subscriber, close);
   }
 
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#stopRegistryListener();
     for (const subscriber of [...this.#subscribers]) this.#closeSubscriber(subscriber);
     this.#history.clear();
     this.#streamCursors.clear();
   }
 
-  #seed(subscriber: Subscriber, afterRevision: number | undefined): void {
-    const projection = this.#registry.projection(subscriber.sessionId);
+  #seedSession(subscriber: Subscriber, afterRevision: number | undefined): void {
+    const sessionId = subscriber.sessionId;
+    if (!sessionId) return;
+    const projection = this.#registry.projection(sessionId);
     if (afterRevision === undefined) {
       if (projection) this.#enqueue(subscriber, snapshotNotification(projection));
       subscriber.lastRevision = projection?.revision;
@@ -126,7 +168,7 @@ export class NotificationProjector {
     }
     if (!projection || projection.revision <= afterRevision) return;
 
-    const durable = (this.#history.get(subscriber.sessionId) ?? []).filter(
+    const durable = (this.#history.get(sessionId) ?? []).filter(
       (notification): notification is Extract<RuntimeNotification, { durability: 'durable' }> =>
         notification.durability === 'durable' && notification.revision > afterRevision,
     );
@@ -139,6 +181,72 @@ export class NotificationProjector {
       this.#enqueue(subscriber, notification);
       subscriber.lastRevision = notification.revision;
     }
+  }
+
+  #seedIndex(subscriber: Subscriber): void {
+    const generation = subscriber.generation;
+    if (generation === undefined) return;
+    const indexRevision = this.#indexRevision;
+    // Do not materialize an arbitrarily large reset in the subscriber queue.
+    // The registry snapshot is captured at one index watermark and emitted
+    // lazily; live changes queue behind its matching reset_end boundary.
+    subscriber.indexSeed = {
+      serverInstanceId: this.#serverInstanceId,
+      generation,
+      indexRevision,
+      projections: this.#registry.projections(),
+      position: 0,
+      phase: 'begin',
+    };
+  }
+
+  #publishIndexChange(change: SessionProjectionChange): void {
+    if (this.#closed) return;
+    const indexRevision = ++this.#indexRevision;
+    for (const subscriber of this.#subscribers) {
+      if (subscriber.closed || subscriber.scope !== 'sessions') continue;
+      if (change.type === 'upsert') {
+        this.#enqueueIndex(subscriber, {
+          type: 'session_upsert',
+          indexRevision,
+          session: indexProjection(change.projection),
+        });
+      } else {
+        this.#enqueueIndex(subscriber, {
+          type: 'session_remove',
+          indexRevision,
+          sessionId: change.sessionId,
+        });
+      }
+    }
+  }
+
+  #enqueueIndex(
+    subscriber: Subscriber,
+    notification:
+      | Omit<
+          Extract<RuntimeSessionIndexNotification, { type: 'index_reset_begin' }>,
+          'serverInstanceId' | 'generation'
+        >
+      | Omit<
+          Extract<RuntimeSessionIndexNotification, { type: 'index_reset_end' }>,
+          'serverInstanceId' | 'generation'
+        >
+      | Omit<
+          Extract<RuntimeSessionIndexNotification, { type: 'session_upsert' }>,
+          'serverInstanceId' | 'generation'
+        >
+      | Omit<
+          Extract<RuntimeSessionIndexNotification, { type: 'session_remove' }>,
+          'serverInstanceId' | 'generation'
+        >,
+  ): void {
+    if (subscriber.generation === undefined) return;
+    this.#enqueue(subscriber, {
+      ...notification,
+      serverInstanceId: this.#serverInstanceId,
+      generation: subscriber.generation,
+    } as RuntimeSessionIndexNotification);
   }
 
   #publishDurableToSubscriber(
@@ -196,11 +304,11 @@ export class NotificationProjector {
     return true;
   }
 
-  #enqueue(subscriber: Subscriber, notification: RuntimeNotification): void {
+  #enqueue(subscriber: Subscriber, notification: RuntimeAccessNotification): void {
     if (subscriber.closed) return;
     while (subscriber.queue.length >= RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT) {
       const ephemeralIndex = subscriber.queue.findIndex(
-        (queued) => queued.durability === 'ephemeral',
+        (queued) => 'durability' in queued && queued.durability === 'ephemeral',
       );
       if (ephemeralIndex < 0) {
         this.#closeSubscriber(subscriber);
@@ -216,6 +324,7 @@ export class NotificationProjector {
   #closeSubscriber(subscriber: Subscriber): void {
     if (subscriber.closed) return;
     subscriber.closed = true;
+    subscriber.indexSeed = undefined;
     this.#subscribers.delete(subscriber);
     subscriber.queue.length = 0;
     if (subscriber.signal && subscriber.onAbort) {
@@ -224,6 +333,66 @@ export class NotificationProjector {
     for (const wake of subscriber.wake) wake();
     subscriber.wake.clear();
   }
+}
+
+function iteratorFor(
+  subscriber: Subscriber,
+  close: () => void,
+): AsyncIterable<RuntimeAccessNotification> {
+  return {
+    [Symbol.asyncIterator]: () => ({
+      next: async (): Promise<IteratorResult<RuntimeAccessNotification>> => {
+        while (!subscriber.closed) {
+          const seeded = takeIndexSeed(subscriber);
+          if (seeded) return { done: false, value: seeded };
+          const queued = subscriber.queue.shift();
+          if (queued) return { done: false, value: queued };
+          await new Promise<void>((resolve) => subscriber.wake.add(resolve));
+        }
+        return { done: true, value: undefined };
+      },
+      return: async (): Promise<IteratorResult<RuntimeAccessNotification>> => {
+        close();
+        return { done: true, value: undefined };
+      },
+    }),
+  };
+}
+
+function takeIndexSeed(subscriber: Subscriber): RuntimeSessionIndexNotification | undefined {
+  const seed = subscriber.indexSeed;
+  if (!seed) return undefined;
+  if (seed.phase === 'begin') {
+    seed.phase = seed.projections.length === 0 ? 'end' : 'sessions';
+    return {
+      type: 'index_reset_begin',
+      serverInstanceId: seed.serverInstanceId,
+      generation: seed.generation,
+      indexRevision: seed.indexRevision,
+    };
+  }
+  if (seed.phase === 'sessions') {
+    const projection = seed.projections[seed.position++];
+    if (!projection) {
+      seed.phase = 'end';
+      return takeIndexSeed(subscriber);
+    }
+    if (seed.position >= seed.projections.length) seed.phase = 'end';
+    return {
+      type: 'session_upsert',
+      serverInstanceId: seed.serverInstanceId,
+      generation: seed.generation,
+      indexRevision: seed.indexRevision,
+      session: indexProjection(projection),
+    };
+  }
+  subscriber.indexSeed = undefined;
+  return {
+    type: 'index_reset_end',
+    serverInstanceId: seed.serverInstanceId,
+    generation: seed.generation,
+    indexRevision: seed.indexRevision,
+  };
 }
 
 function isContinuous(
@@ -248,4 +417,10 @@ function snapshotNotification(
     revision: projection.revision,
     projection: { kind: 'snapshot', session: projection },
   };
+}
+
+/** Session-index DTOs remain path-free even for the in-process Host publisher. */
+function indexProjection(projection: RuntimeSessionProjection): RuntimeSessionProjection {
+  const { workspace: _workspace, ...safe } = projection;
+  return safe;
 }

@@ -1,6 +1,11 @@
 # SQLite 会话日志 Server/Web 实施方案
 
-状态：active
+状态：superseded
+
+替代关系：LOGWEB-00～04 的 query-only 实现与 ADR-0129 保持有效；
+[`Kite Runtime Server V1 实施方案（审查修订版）`](2026-08-26-kite-runtime-server-v1.md) 接管
+LOGWEB-05～09 命中的 listener/auth/App carrier current authority，并关闭这些未实施旧任务。HTTP/SSE、
+Web UI 与 production log listener 未迁入 KRSV1 V1，后续若重启必须由新的计划/决策取代 ADR-0053。
 
 日期：2026-08-23
 
@@ -264,23 +269,23 @@ durable event 的数据库为 1,622,016 bytes；写入耗时 644.5 ms；100 条�
 
 实现 RuntimeEvent → Web DTO 的 exhaustive projector、安全长度边界、terminal/failure/Subagent 关联与 secret/XSS fixtures；不复用 Session Logger mapper，因为二者目的和内容边界不同。
 
-### LOGWEB-05：Server admission 与生命周期
+### LOGWEB-05：Server admission 与生命周期（superseded/closed，未实施）
 
 实现显式 CLI 入口、loopback listener、token bootstrap、cookie、Host/Origin/CSP、idle/shutdown 和只读 composition。未授权、非 loopback 或 reader preflight 失败时零日志数据返回。
 
-### LOGWEB-06：HTTP/SSE API
+### LOGWEB-06：HTTP/SSE API（superseded/closed，未实施）
 
 实现 sessions/events/detail/completeness/health 路由与 SSE invalidation；所有请求 schema 校验、limit、abort 和 typed error 统一收敛。
 
-### LOGWEB-07：Web UI
+### LOGWEB-07：Web UI（superseded/closed，未实施）
 
 实现会话列表、时间线、过滤、详情、跟随最新、完整性和错误状态；浏览器不保存 access token、SQLite path 或事件正文缓存到持久 storage。
 
-### LOGWEB-08：并发、规模与恢复验证
+### LOGWEB-08：并发、规模与恢复验证（superseded/closed，未实施）
 
 覆盖 append 中分页、SSE 断线、Server 重启、TUI/CLI live writer、Windows DELETE、WAL、10 万事件 Session、损坏 current event、旧 epoch、会话删除和 reader busy。
 
-### LOGWEB-09：文档与发布入口收敛
+### LOGWEB-09：文档与发布入口收敛（superseded/closed，未实施）
 
 新增 `docs/active/local-session-log-server.md`，更新六概念架构、文档映射、CLI/help/package scripts；删除或修正失效的 root `src/web-server` 脚本，不保留双入口。创建完成记录并执行全量门禁。
 

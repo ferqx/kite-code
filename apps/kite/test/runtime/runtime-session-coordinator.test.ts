@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ContextCompactionCheckpoint, RuntimeEvent } from '@kite-ai/agent-kernel';
@@ -11,6 +11,7 @@ import {
   createChatModel,
   expectedCompactionSourceDigest,
 } from '@kite-ai/builtin-runtime/model';
+import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
 import { type RuntimeHostExecutionServices, resolveProjectIdentity } from '@kite-ai/runtime-host';
 import {
   createRuntimeHostStateInitialState,
@@ -33,6 +34,10 @@ import {
 import { createAppRuntimeEffectExecutor } from '../../src/bootstrap/runtime/runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from '../../src/bootstrap/runtime/runtime-effect-dependencies';
 import type { StateRuntimeStorage } from '../../src/bootstrap/runtime/state-runtime';
+import {
+  assertPrecommittedStartTurn,
+  planStartTurnCommand,
+} from '../../src/bootstrap/runtime/turn-command-decision';
 
 const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
 const snapshot = registry.snapshot();
@@ -94,6 +99,88 @@ function config() {
     providerType: 'openai-compatible' as const,
     sandbox: { enabled: true },
   };
+}
+
+function startCommand(
+  sessionId: string,
+  expectedRevision: number,
+  phase: 'planning' | 'building' = 'building',
+) {
+  return {
+    schema: RUNTIME_COMMAND_SCHEMA_,
+    commandId: 'command_start_turn_fixture',
+    type: 'start_turn' as const,
+    sessionId,
+    expectedRevision,
+    input: 'Start a durable fixture turn.',
+    phase,
+  };
+}
+
+function closeCommand(
+  sessionId: string,
+  expectedRevision: number,
+  commandId = 'command_close_fixture',
+) {
+  return {
+    schema: RUNTIME_COMMAND_SCHEMA_,
+    commandId,
+    type: 'close_session' as const,
+    sessionId,
+    expectedRevision,
+  };
+}
+
+function commandEvidence(sessionId: string, commandId = 'command_start_turn_fixture') {
+  return {
+    scopeSessionId: sessionId,
+    commandId,
+    requestDigest: 'd'.repeat(64),
+    targetSessionId: sessionId,
+    committedAt: 1_700_000_000_000,
+  };
+}
+
+function writeInitialSkill(root: string, name: string): void {
+  const directory = join(root, name);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, 'SKILL.md'),
+    `---
+name: ${name}
+version: 1.0.0
+description: Initial fixture.
+invocation:
+  allow_implicit: false
+  allow_manual: true
+context:
+  mode: inline
+  agent: code
+input_schema:
+  type: object
+output_schema:
+  type: object
+capabilities:
+  require: [builtin:read_file]
+  deny: []
+effects:
+  filesystem: read
+  network: none
+  external_state: none
+approval:
+  minimum: none
+execution:
+  timeout_ms: 1000
+  max_attempts: 1
+verification:
+  mode: not_required
+recovery:
+  retry: never
+---
+
+Follow the initial workflow.
+`,
+  );
 }
 
 function requestedState(sessionId: string) {
@@ -258,7 +345,12 @@ function checkpointFor(
   };
 }
 
-function createFixture(sessionId: string, requested?: RuntimeState, workspace = retainedWorkspace) {
+function createFixture(
+  sessionId: string,
+  requested?: RuntimeState,
+  workspace = retainedWorkspace,
+  options: { readonly failCommandCommit?: () => boolean } = {},
+) {
   const state =
     requested ??
     createRuntimeHostStateInitialState({
@@ -293,6 +385,10 @@ function createFixture(sessionId: string, requested?: RuntimeState, workspace = 
           storage.transactions.commitDecision(input);
         }
         void requiredEffectLease;
+      },
+      commitCommandDecision: (input: Parameters<typeof storage.transactions.commitDecision>[0]) => {
+        if (options.failCommandCommit?.()) throw new Error('injected command transaction failure');
+        storage.transactions.commitDecision(input);
       },
     },
     leases: {
@@ -434,6 +530,465 @@ describe('retained TUI session coordinator', () => {
     } finally {
       await access.close();
       expect(fixture.store.sessions.getLastEventPosition(sessionId)).toBe(0);
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('commits a building start command as one deterministic State decision before a runner begins', async () => {
+    const sessionId = 'retained-command-start-building';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const command = startCommand(sessionId, coordinator.getState().revision);
+      const firstPlan = planStartTurnCommand(coordinator.getState(), command);
+      const retryPlan = planStartTurnCommand(coordinator.getState(), command);
+      expect(retryPlan.descriptor).toEqual(firstPlan.descriptor);
+
+      const committed = coordinator.commitStartTurnCommand(command, commandEvidence(sessionId));
+      expect(committed.receipt.committedRevision).toBe(committed.descriptor.committedRevision);
+      expect(
+        committed.events.filter((event) => event.type === 'user.message_appended'),
+      ).toHaveLength(1);
+      expect(committed.events.filter((event) => event.type === 'turn.started')).toHaveLength(1);
+      expect(coordinator.getState().transcript.messages).toHaveLength(1);
+      expect(coordinator.isTurnActive()).toBe(false);
+      assertPrecommittedStartTurn(coordinator.getState(), committed.descriptor, sessionId);
+
+      expect(() => coordinator.commitStartTurnCommand(command, commandEvidence(sessionId))).toThrow(
+        'revision conflict',
+      );
+      expect(coordinator.getState().transcript.messages).toHaveLength(1);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('includes planning task and entry facts in the same committed start decision', async () => {
+    const sessionId = 'retained-command-start-planning';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const committed = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision, 'planning'),
+        commandEvidence(sessionId),
+      );
+      expect(committed.events.map((event) => event.type)).toEqual(
+        expect.arrayContaining([
+          'task.started',
+          'planning.entered',
+          'user.message_appended',
+          'turn.started',
+        ]),
+      );
+      expect(coordinator.getState().activeTaskId).toBe(committed.descriptor.taskId ?? null);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('commits an interaction-mode decision with the receipt timestamp and updates live mode after commit', async () => {
+    const sessionId = 'retained-command-interaction-mode';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const committedAt = 1_700_000_000_000;
+      const committed = coordinator.commitInteractionModeCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_mode_fixture',
+          type: 'set_interaction_mode',
+          sessionId,
+          expectedRevision: coordinator.getState().revision,
+          mode: 'auto',
+        },
+        { ...commandEvidence(sessionId, 'command_mode_fixture'), committedAt },
+      );
+      expect(committed.events).toEqual([
+        expect.objectContaining({
+          type: 'interaction_mode.changed',
+          mode: 'auto',
+          changedAt: new Date(committedAt).toISOString(),
+        }),
+      ]);
+      expect(coordinator.getInteractionModeState().interactionMode).toBe('auto');
+      expect(() =>
+        coordinator.commitInteractionModeCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_mode_duplicate',
+            type: 'set_interaction_mode',
+            sessionId,
+            expectedRevision: coordinator.getState().revision,
+            mode: 'auto',
+          },
+          commandEvidence(sessionId, 'command_mode_duplicate'),
+        ),
+      ).toThrow('no-op');
+      expect(() =>
+        coordinator.commitInteractionModeCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_mode_wrong_revision',
+            type: 'set_interaction_mode',
+            sessionId,
+            expectedRevision: coordinator.getState().revision + 1,
+            mode: 'full',
+          },
+          commandEvidence(sessionId, 'command_mode_wrong_revision'),
+        ),
+      ).toThrow('session or revision');
+      expect(() =>
+        coordinator.commitInteractionModeCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_mode_wrong_session',
+            type: 'set_interaction_mode',
+            sessionId: 'other-session',
+            expectedRevision: coordinator.getState().revision,
+            mode: 'full',
+          },
+          commandEvidence('other-session', 'command_mode_wrong_session'),
+        ),
+      ).toThrow('session or revision');
+      expect(() =>
+        coordinator.commitInteractionModeCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_mode_wrong_value',
+            type: 'set_interaction_mode',
+            sessionId,
+            expectedRevision: coordinator.getState().revision,
+            mode: 'invalid' as never,
+          },
+          commandEvidence(sessionId, 'command_mode_wrong_value'),
+        ),
+      ).toThrow('invalid or a no-op');
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('atomically cancels an active command turn and a later Host cancellation cannot add facts', async () => {
+    const sessionId = 'retained-command-cancel-turn';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      const revision = coordinator.getState().revision;
+      expect(() =>
+        coordinator.commitCancelTurnCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_cancel_wrong_turn',
+            type: 'cancel_turn',
+            sessionId,
+            expectedRevision: revision,
+            turnId: 'other-turn',
+          },
+          commandEvidence(sessionId, 'command_cancel_wrong_turn'),
+        ),
+      ).toThrow('does not match the active turn');
+      expect(() =>
+        coordinator.commitCancelTurnCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_cancel_wrong_revision',
+            type: 'cancel_turn',
+            sessionId,
+            expectedRevision: revision + 1,
+            turnId: started.descriptor.turnId,
+          },
+          commandEvidence(sessionId, 'command_cancel_wrong_revision'),
+        ),
+      ).toThrow('session or revision');
+
+      const committed = coordinator.commitCancelTurnCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_cancel_fixture',
+          type: 'cancel_turn',
+          sessionId,
+          expectedRevision: revision,
+          turnId: started.descriptor.turnId,
+        },
+        commandEvidence(sessionId, 'command_cancel_fixture'),
+      );
+      expect(committed.events.some((event) => event.type === 'turn.aborted')).toBe(true);
+      expect(coordinator.getState().turn.status).toBe('aborted');
+      const afterCommitRevision = coordinator.getState().revision;
+      expect(coordinator.control.cancelRun('Host signal after command commit.')).toEqual([]);
+      expect(coordinator.getState().revision).toBe(afterCommitRevision);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('does not abort or mutate State when a cancel command transaction fails', async () => {
+    const sessionId = 'retained-command-cancel-rollback';
+    let failCommandCommit = false;
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      failCommandCommit: () => failCommandCommit,
+    });
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      const revision = coordinator.getState().revision;
+      failCommandCommit = true;
+      expect(() =>
+        coordinator.commitCancelTurnCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_cancel_rollback',
+            type: 'cancel_turn',
+            sessionId,
+            expectedRevision: revision,
+            turnId: started.descriptor.turnId,
+          },
+          commandEvidence(sessionId, 'command_cancel_rollback'),
+        ),
+      ).toThrow('injected command transaction failure');
+      expect(coordinator.getState().revision).toBe(revision);
+      expect(coordinator.getState().turn.status).toBe('active');
+      expect(coordinator.control.cancelRun()).toEqual([]);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('does not start a runner or advance State when the start command transaction fails', async () => {
+    const sessionId = 'retained-command-start-rollback';
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      failCommandCommit: () => true,
+    });
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const revision = coordinator.getState().revision;
+      expect(() =>
+        coordinator.commitStartTurnCommand(
+          startCommand(sessionId, revision),
+          commandEvidence(sessionId),
+        ),
+      ).toThrow('injected command transaction failure');
+      expect(coordinator.getState().revision).toBe(revision);
+      expect(coordinator.getState().transcript.messages).toHaveLength(0);
+      expect(coordinator.isTurnActive()).toBe(false);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('commits an idle close as a snapshot receipt without changing State revision', async () => {
+    const sessionId = 'retained-idle-close-command';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      coordinator.commitCancelTurnCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_prepare_idle_close',
+          type: 'cancel_turn',
+          sessionId,
+          expectedRevision: coordinator.getState().revision,
+          turnId: coordinator.getState().turn.turnId,
+        },
+        commandEvidence(sessionId, 'command_prepare_idle_close'),
+      );
+      const revision = coordinator.getState().revision;
+      const committed = coordinator.commitCloseSessionCommand(
+        closeCommand(sessionId, revision),
+        commandEvidence(sessionId, 'command_close_fixture'),
+      );
+      expect(committed).toMatchObject({ wasActive: false, events: [] });
+      expect(committed.receipt.committedRevision).toBe(revision);
+      expect(coordinator.getState().revision).toBe(revision);
+      expect(() =>
+        coordinator.commitCloseSessionCommand(
+          closeCommand(sessionId, revision - 1, 'command_close_wrong_revision'),
+          commandEvidence(sessionId, 'command_close_wrong_revision'),
+        ),
+      ).toThrow('session or revision');
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed before the receipt transaction when initial skill activation lacks a pure plan', async () => {
+    const sessionId = 'retained-command-start-initial-skills';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const revision = coordinator.getState().revision;
+      expect(() =>
+        coordinator.commitStartTurnCommand(
+          {
+            ...startCommand(sessionId, revision),
+            initialSkills: [{ skillId: 'skill_fixture', input: {} }],
+          },
+          commandEvidence(sessionId),
+        ),
+      ).toThrow('requires planning context');
+      expect(coordinator.getState().revision).toBe(revision);
+      expect(coordinator.getState().transcript.messages).toHaveLength(0);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('plans multiple initial skills in one committed start batch and rejects an invalid later skill', async () => {
+    const sessionId = 'retained-command-start-initial-skill-plan';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const skillsRoot = join(fixture.root, 'skills');
+      writeInitialSkill(skillsRoot, 'first');
+      writeInitialSkill(skillsRoot, 'second');
+      const context = {
+        skillOptions: {
+          projectKiteCodeSkillsDir: skillsRoot,
+          projectAgentsSkillsDir: join(fixture.root, 'missing-project-agents'),
+          userKiteCodeSkillsDir: join(fixture.root, 'missing-user-kite'),
+          userAgentsSkillsDir: join(fixture.root, 'missing-user-agents'),
+        },
+        flags: { skillWorkflow: true, skillActivation: true },
+      } as const;
+      const coordinator = access.ensure(identity(sessionId));
+      const command = {
+        ...startCommand(sessionId, coordinator.getState().revision, 'planning'),
+        initialSkills: [
+          { skillId: 'skill:first', input: {} },
+          { skillId: 'skill:second', input: {} },
+        ],
+      };
+      const committed = coordinator.commitStartTurnCommand(
+        command,
+        commandEvidence(sessionId),
+        context,
+      );
+      expect(
+        committed.events.filter((event) => event.type === 'skill.catalog_refreshed'),
+      ).toHaveLength(1);
+      expect(
+        committed.events.filter((event) => event.type === 'skill.activation_started'),
+      ).toHaveLength(2);
+      expect(
+        committed.events
+          .filter((event) => event.type === 'skill.activation_started')
+          .map((event) => event.activation.activatedAt),
+      ).toEqual(['2023-11-14T22:13:20.000Z', '2023-11-14T22:13:20.000Z']);
+      expect(committed.descriptor.initialSkillActivations).toMatchObject([
+        { activationId: expect.stringMatching(/^skill_activation_/u) },
+        { activationId: expect.stringMatching(/^skill_activation_/u) },
+      ]);
+      const revisionBeforeInvalid = coordinator.getState().revision;
+      expect(() =>
+        coordinator.commitStartTurnCommand(
+          {
+            ...startCommand(sessionId, coordinator.getState().revision, 'planning'),
+            initialSkills: [
+              { skillId: 'skill:first', input: {} },
+              { skillId: 'skill:missing', input: {} },
+            ],
+          },
+          commandEvidence(sessionId, 'invalid-later-skill'),
+          context,
+        ),
+      ).toThrow('initial skill activation rejected');
+      expect(coordinator.getState().revision).toBe(revisionBeforeInvalid);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed rather than deriving a planning task from pre-recovery State', async () => {
+    const sessionId = 'retained-command-start-recovery-planning';
+    let state = createRuntimeHostStateInitialState({
+      threadId: sessionId,
+      userId: 'tui-user',
+      workspace: retainedWorkspace,
+      ...projectIdentityForWorkspace(retainedWorkspace),
+      recoveryIdentityKey: 'a'.repeat(64),
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'superseded-tool',
+      name: 'shell_execute',
+      args: { command: 'printf superseded' },
+    });
+    const fixture = createFixture(sessionId, state);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const revision = coordinator.getState().revision;
+      expect(() =>
+        coordinator.commitStartTurnCommand(
+          startCommand(sessionId, revision, 'planning'),
+          commandEvidence(sessionId),
+        ),
+      ).toThrow('requires a pure post-recovery plan');
+      expect(coordinator.getState().revision).toBe(revision);
+      expect(coordinator.getState().transcript.messages).toHaveLength(0);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed when a precommitted start descriptor no longer matches State', async () => {
+    const sessionId = 'retained-command-start-mismatch';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const committed = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      expect(() =>
+        assertPrecommittedStartTurn(
+          coordinator.getState(),
+          {
+            ...committed.descriptor,
+            committedRevision: committed.descriptor.committedRevision + 1,
+          },
+          sessionId,
+        ),
+      ).toThrow('does not match current State');
+    } finally {
+      await access.close();
       fixture.storage.close();
       rmSync(fixture.root, { recursive: true, force: true });
     }

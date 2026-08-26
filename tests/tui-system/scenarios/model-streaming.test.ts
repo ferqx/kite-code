@@ -4,7 +4,6 @@ import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
-  expectTextAbsentFor,
   screenContains,
   stripAnsi,
   waitForCondition,
@@ -54,41 +53,11 @@ describe('TUI PTY System — model streaming', () => {
   });
 
   test(
-    'shows the complete reasoning stream atomically before committing answer components',
+    'commits completed reasoning before streaming answer components',
     async () => {
       const responseFrames = tui.markScreen();
       await submitUserMessage(tui, server, 'Stream an answer', { timeout: 15_000 });
-      await expectTextAbsentFor(
-        () => tui.screenFramesSince(responseFrames).join('\n'),
-        'STREAM_THINKING',
-        400,
-      );
-
-      await waitForCondition(
-        () =>
-          tui
-            .screenFramesSince(responseFrames)
-            .some(
-              (frame) =>
-                screenContains(frame, 'STREAM_THINKING') &&
-                screenContains(frame, 'STREAM_PRIVATE_TAIL') &&
-                !screenContains(frame, 'STREAM_FIRST'),
-            ),
-        'a complete reasoning frame before answer streaming',
-        10_000,
-      );
-
-      const reasoningFrames = tui.screenFramesSince(responseFrames);
-      const partialOutput = reasoningFrames.find(
-        (frame) =>
-          screenContains(frame, 'STREAM_THINKING') &&
-          screenContains(frame, 'STREAM_PRIVATE_TAIL') &&
-          !screenContains(frame, 'STREAM_FIRST'),
-      )!;
-      expect(screenContains(partialOutput, 'STREAM_THINKING')).toBe(true);
-      expect(screenContains(partialOutput, 'STREAM_PRIVATE_TAIL')).toBe(true);
-      expect(screenContains(partialOutput, 'STREAM_FIRST')).toBe(false);
-      expect(screenContains(partialOutput, 'STREAM_FINAL')).toBe(false);
+      await waitForText(() => tui.viewport(), 'Thinking', 10_000);
 
       await waitForCondition(
         () =>
@@ -101,23 +70,77 @@ describe('TUI PTY System — model streaming', () => {
       const firstAnswerFrameIndex = tui
         .screenFramesSince(responseFrames)
         .findIndex((frame) => screenContains(frame, 'STREAM_FIRST'));
-      const reasoningFrameIndex = tui
-        .screenFramesSince(responseFrames)
-        .findIndex((frame) => screenContains(frame, 'STREAM_PRIVATE_TAIL'));
-      expect(reasoningFrameIndex).toBeGreaterThanOrEqual(0);
-      expect(firstAnswerFrameIndex).toBeGreaterThan(reasoningFrameIndex);
+      expect(firstAnswerFrameIndex).toBeGreaterThanOrEqual(0);
       expect(screenContains(tui.viewport(), 'STREAM_FINAL')).toBe(false);
 
       await waitForText(() => tui.viewport(), 'STREAM_FINAL', 10_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       expect(screenContains(tui.viewport(), 'STREAM_MIDDLE')).toBe(true);
       const clean = stripAnsi(tui.viewport());
-      // The final viewport keeps the consolidated Thought header, while the
-      // detailed reasoning text belongs only to the earlier modeled frame.
-      expect(clean.lastIndexOf('STREAM_THINKING')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
-      expect(clean.lastIndexOf('Thinking ')).toBeLessThan(clean.lastIndexOf('STREAM_FIRST'));
+      const responseHistory = tui.screenFramesSince(responseFrames).join('\n');
+      // A completed segment gets one live Thought frame before answer deltas;
+      // settled scrollback keeps only the compact Thinking header.
+      expect(screenContains(responseHistory, 'Thinking ')).toBe(true);
       expect(clean.lastIndexOf('STREAM_FIRST')).toBeLessThan(clean.lastIndexOf('STREAM_MIDDLE'));
       expect(clean.lastIndexOf('STREAM_MIDDLE')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
+      expect(server.getRequests()[0]?.body.stream).toBe(true);
+    },
+    TIMEOUT,
+  );
+});
+
+describe('TUI PTY System — model delivery races', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        provider: {
+          mock: {
+            type: 'deepseek',
+            apiKey: 'test-key',
+            baseURL: server.baseURL,
+            model: 'mock-model',
+            models: [{ name: 'mock-model', default: true, streaming: true }],
+          },
+        },
+        model: { default: { provider: 'mock', name: 'mock-model' } },
+        sandbox: { enabled: false },
+      },
+    });
+    server.setResponses([
+      {
+        message: {
+          content_chunks: [
+            '你好！👋\n\nGREETING_ANSWER_ONCE\n\n我是 Kite，可以在这个工作区帮你处理编码任务。',
+          ],
+          reasoning_chunks: ['Preparing the greeting after visible content.'],
+        },
+        stream_frame_order: 'content_first',
+        chunk_delay: 150,
+      },
+    ]);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'renders one answer when visible content arrives before reasoning',
+    async () => {
+      await submitUserMessage(tui, server, '你好', { timeout: 15_000 });
+      await waitForText(() => tui.viewport(), 'GREETING_ANSWER_ONCE', 10_000);
+      await waitForText(() => tui.viewport(), 'Thinking', 10_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+
+      const clean = stripAnsi(tui.viewport());
+      expect(clean.split('GREETING_ANSWER_ONCE')).toHaveLength(2);
+      expect(clean.indexOf('Thinking ')).toBeLessThan(clean.indexOf('GREETING_ANSWER_ONCE'));
       expect(server.getRequests()[0]?.body.stream).toBe(true);
     },
     TIMEOUT,

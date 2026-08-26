@@ -32,6 +32,8 @@ export function evaluateSkillActivation(input: {
   request: SkillActivationRequest;
   flags: FeatureFlags;
   now?: Date;
+  /** Command planners inject a deterministic content-free identity. */
+  activationId?: string;
 }): SkillActivationEvaluation {
   if (!input.flags.skillWorkflow || !input.flags.skillActivation) {
     return { ok: false, reason: 'Skill Workflow activation is disabled by feature flag.' };
@@ -66,9 +68,15 @@ export function evaluateSkillActivation(input: {
     input.request.input as Record<string, unknown>,
   );
   if (inputError) return { ok: false, reason: inputError };
+  if (
+    input.activationId !== undefined &&
+    !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(input.activationId)
+  ) {
+    return { ok: false, reason: 'Skill activation identifier is invalid.' };
+  }
 
   const activation: SkillActivation = {
-    activationId: randomUUID(),
+    activationId: input.activationId ?? randomUUID(),
     skillId: entry.descriptor.capabilityId,
     skillRevision: entry.descriptor.revision,
     taskId,

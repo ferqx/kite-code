@@ -436,6 +436,7 @@ describe('runtime host package boundary', () => {
       'fork_session',
       'rewind_session',
       'close_session',
+      'delete_session',
     ] as const) {
       expect(runtimeCommandOwner(command(type))).toBe('host');
     }
@@ -468,6 +469,88 @@ describe('runtime host package boundary', () => {
 });
 
 describe('runtime host command and projection authority', () => {
+  test('atomically deletes the durable Session, retains its receipt, and never recovers it on replay', async () => {
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-1', projection('session-1', 3));
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+    });
+    await host.start();
+    const deleted = await host.command({
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: 'delete-1',
+      type: 'delete_session',
+      sessionId: 'session-1',
+      expectedRevision: 3,
+    });
+    expect(deleted).toEqual({
+      status: 'applied',
+      commandId: 'delete-1',
+      sessionId: 'session-1',
+      revision: 3,
+    });
+    expect(
+      (
+        await host.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'get_session_projection',
+          sessionId: 'session-1',
+        })
+      ).status,
+    ).toBe('not_found');
+    expect(bridge.calls).toEqual([]);
+
+    await expect(
+      host.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: 'delete-1',
+        type: 'delete_session',
+        sessionId: 'session-1',
+        expectedRevision: 3,
+      }),
+    ).resolves.toEqual({
+      status: 'idempotent_replay',
+      commandId: 'delete-1',
+      sessionId: 'session-1',
+      originalRevision: 3,
+    });
+    expect(bridge.recoveries).toEqual([]);
+    await host[Symbol.asyncDispose]();
+  });
+
+  test('emits an App-only session projection tombstone without touching Store or work', async () => {
+    let storageCloses = 0;
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-1', projection('session-1', 3));
+    const host = createRuntimeHost({
+      storage: testStorage(() => {
+        storageCloses += 1;
+      }),
+      modules: testRuntimeModules(() => bridge),
+    });
+    await host.start();
+    const iterator = host.subscribe({ spec: { scope: 'sessions' } })[Symbol.asyncIterator]();
+    expect((await iterator.next()).value).toMatchObject({ type: 'index_reset_begin' });
+    expect((await iterator.next()).value).toMatchObject({
+      type: 'session_upsert',
+      session: { sessionId: 'session-1', revision: 3 },
+    });
+    expect((await iterator.next()).value).toMatchObject({ type: 'index_reset_end' });
+
+    expect(host.removeSessionProjection('session-1')).toBe(true);
+    expect((await iterator.next()).value).toMatchObject({
+      type: 'session_remove',
+      sessionId: 'session-1',
+    });
+    expect(host.removeSessionProjection('session-1')).toBe(false);
+    expect(host.isSessionOperationActive('session-1')).toBe(false);
+    expect(storageCloses).toBe(0);
+    await iterator.return?.();
+    await host[Symbol.asyncDispose]();
+    expect(storageCloses).toBe(1);
+  });
+
   test('serializes same-session commands in FIFO order', async () => {
     const bridge = new TestExecutionBridge();
     bridge.projections.set('session-1', projection('session-1', 0));

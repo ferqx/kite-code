@@ -83,6 +83,17 @@ function gapFrom(prevBlock?: OutputBlock, block?: OutputBlock) {
   if (prevBlock.kind === 'user' && prevBlock.content.startsWith('/') && block?.kind !== 'user') {
     return { marginTop: 0, marginBottom: 0 } as const;
   }
+  // A settled Thinking phase and its final answer are one visual sequence.
+  // Whether the phase carried tools or remained content-free, do not insert a
+  // blank row between its compact header/captions and the following answer.
+  if (
+    prevBlock.kind === 'tool_summary' &&
+    !prevBlock.active &&
+    prevBlock.hasThinking === true &&
+    block?.kind === 'text'
+  ) {
+    return { marginTop: 0, marginBottom: 0 } as const;
+  }
   const previousList = listBlockIdentity(prevBlock, 'last');
   if (previousList && previousList === listBlockIdentity(block, 'first')) {
     return { marginTop: 0, marginBottom: 0 } as const;
@@ -154,14 +165,14 @@ const BlockRenderer = React.memo(function BlockRenderer({
           marginTop={gapFrom(prevBlock, block).marginTop}
           marginBottom={0}
         >
-          {/* ADR-0026：并入的纯思考题头——暗色、与正文间隔一行、无圆点
+          {/* ADR-0026：并入的纯思考题头——暗色、紧接正文、无圆点
               （● 保留给有状态的行）；TEXT_INDENT=2 使文字起始列与工具块名字列对齐。
-              ADR-0026: merged pure-thinking header — dim, one-line gap to the
+              ADR-0026: merged pure-thinking header — dim, immediately followed by the
               body, no dot; TEXT_INDENT=2 aligns it with tool-block names. */}
           {block.thoughtElapsedMs != null && (
             <Text color={dt.dim}>Thinking {formatElapsed(block.thoughtElapsedMs)}</Text>
           )}
-          <Box marginTop={block.thoughtElapsedMs != null ? 1 : 0}>
+          <Box>
             <MarkdownBlock
               content={block.content}
               streaming={block.streaming}

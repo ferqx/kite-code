@@ -2604,16 +2604,19 @@ test('runStateRuntimeLoop yields model deltas without persisting or reducing the
     interactionMode: 'accept_edits',
   });
   const revisionBeforeDelta = kernel.getState().revision;
+  const requestId = 'ephemeral-model-deltas-request';
   const events: RuntimeEvent[] = [];
 
   for await (const event of runStateRuntimeLoop(
     kernel,
     async (effect, _state, emit) => {
       if (effect.type !== 'call_model') return [];
-      emit?.({ type: 'model.reasoning_delta', text: 'thinking' });
-      emit?.({ type: 'model.text_delta', text: 'partial' });
+      emit?.({ type: 'model.reasoning_delta', requestId, text: 'thinking' });
+      emit?.({ type: 'model.text_delta', requestId, text: 'partial' });
       expect(kernel.getState().revision).toBe(revisionBeforeDelta);
-      return [{ type: 'model.responded', messageId: 'answer', text: 'complete' }];
+      return [
+        { type: 'model.responded', invocationId: requestId, messageId: 'answer', text: 'complete' },
+      ];
     },
     { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
   )) {
@@ -2648,6 +2651,7 @@ test('runStateRuntimeLoop drops ephemeral model deltas from a stale effect lease
     interactionMode: 'accept_edits',
   });
   const events: RuntimeEvent[] = [];
+  const staleRequestId = 'stale-ephemeral-model-request';
   let calls = 0;
 
   for await (const event of runStateRuntimeLoop(
@@ -2664,8 +2668,15 @@ test('runStateRuntimeLoop drops ephemeral model deltas from a stale effect lease
           error: 'external revision change',
           delayMs: 0,
         });
-        emit?.({ type: 'model.text_delta', text: 'stale text' });
-        return [{ type: 'model.responded', messageId: 'stale', text: 'stale text' }];
+        emit?.({ type: 'model.text_delta', requestId: staleRequestId, text: 'stale text' });
+        return [
+          {
+            type: 'model.responded',
+            invocationId: staleRequestId,
+            messageId: 'stale',
+            text: 'stale text',
+          },
+        ];
       }
       return [{ type: 'model.responded', messageId: 'fresh', text: 'fresh text' }];
     },

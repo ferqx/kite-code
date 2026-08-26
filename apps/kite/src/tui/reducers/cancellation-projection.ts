@@ -34,6 +34,7 @@ export function settleCancelledToolCard(
     status: 'cancelled',
     summary: 'Cancelled',
     detail: block.detail ?? getToolDetail(block.name, block.args),
+    expanded: true,
     ...(elapsedMs != null ? { elapsedMs } : {}),
   };
 }
@@ -75,7 +76,7 @@ function narrationBlocks(
   const narration = [
     ...(block.captions ?? []),
     ...(block.pendingCaption ? [block.pendingCaption] : []),
-  ].join('\n\n');
+  ].join('\n');
   if (!narration) return { blocks: [], nextBlockId };
   return {
     blocks: [{ id: block.id, kind: 'text', content: narration }],

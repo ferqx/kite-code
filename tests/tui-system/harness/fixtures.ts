@@ -29,6 +29,8 @@ export interface MockResponse {
   delay?: number;
   /** Delay between SSE frames, used to assert progressive rendering. */
   chunk_delay?: number;
+  /** Test-only SSE ordering override for exercising cross-channel delivery races. */
+  stream_frame_order?: 'reasoning_first' | 'content_first';
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
   /** Inject an invalid JSON SSE data frame. */
   malformed_sse?: boolean;
@@ -321,6 +323,18 @@ export function createMockModelServer(): MockModelServer {
           };
           if (resolvedResponse.malformed_sse) write('data: {not-json}\n\n');
 
+          const writeContentFrames = () => {
+            for (const contentChunk of resolvedResponse.message?.content_chunks ?? [content]) {
+              write(
+                `data: ${JSON.stringify({
+                  choices: [{ index: 0, delta: { content: contentChunk }, finish_reason: null }],
+                })}\n\n`,
+              );
+            }
+          };
+
+          if (resolvedResponse.stream_frame_order === 'content_first') writeContentFrames();
+
           // Send reasoning_content delta (DeepSeek-style thinking)
           for (const reasoningChunk of resolvedResponse.message?.reasoning_chunks ?? [
             reasoningContent,
@@ -393,14 +407,8 @@ export function createMockModelServer(): MockModelServer {
             }
           }
 
-          // Content delta
-          for (const contentChunk of resolvedResponse.message?.content_chunks ?? [content]) {
-            write(
-              `data: ${JSON.stringify({
-                choices: [{ index: 0, delta: { content: contentChunk }, finish_reason: null }],
-              })}\n\n`,
-            );
-          }
+          // Default provider order keeps reasoning before visible content.
+          if (resolvedResponse.stream_frame_order !== 'content_first') writeContentFrames();
 
           if (resolvedResponse.disconnect_after_content) {
             write(

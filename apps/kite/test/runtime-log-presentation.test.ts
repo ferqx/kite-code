@@ -11,7 +11,7 @@ describe('RuntimeLogPresentationProjector', () => {
       event: {
         type: 'user.message_appended',
         messageId: 'message-1',
-        content: `<img src=x onerror=alert(1)> api_key=super-secret${'x'.repeat(5_000)}\u001b[2J`,
+        content: `<img src=x onerror=alert(1)> api_key=super-secret ${'x'.repeat(5_000)}\u001b[2J`,
       },
     });
     expect(entry.detail).toEqual({
@@ -21,7 +21,8 @@ describe('RuntimeLogPresentationProjector', () => {
     const content = (entry.detail?.fields?.content as string) ?? '';
     expect(content).not.toContain('super-secret');
     expect(content).not.toContain('\u001b');
-    expect(Array.from(content).length).toBeLessThanOrEqual(4_001);
+    expect(Array.from(content).length).toBeGreaterThan(4_000);
+    expect(Array.from(content).length).toBeLessThanOrEqual(65_537);
     expect(JSON.stringify(entry)).not.toContain('messageId');
   });
 

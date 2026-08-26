@@ -1,8 +1,7 @@
-import type { RuntimeNotificationEvent } from '@kite-ai/runtime-contract';
+import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 
-/** Presentation-only event; it carries no Runtime authority. */
-// biome-ignore lint/suspicious/noExplicitAny: TUI reducers refine event-specific fields by discriminant.
-export type RuntimePresentationEvent = RuntimeNotificationEvent & any;
+/** Closed current Runtime presentation vocabulary accepted by live and replay reducers. */
+export type RuntimePresentationEvent = RuntimeClientEvent;
 
 export type ContextCompactionProgressPhase = 'preparing' | 'summarizing' | 'validating';
 

@@ -1,7 +1,8 @@
 # 第七章 TUI 结构
 
-TUI 位于 `apps/kite/src/tui/`，负责输入、渲染和会话前台管理，不拥有 Agent 业务状态。所有可恢复事实来自
-`@kite-ai/agent-kernel` 的 Runtime State Runtime，UI reducer 只维护展示投影。
+TUI 位于 `apps/kite/src/tui/`，负责输入、渲染和会话前台管理，不拥有 Agent 业务状态。它只消费
+typed `RuntimeClient` projection；所有可恢复事实仍由 Runtime State 及其 Host-owned lifecycle 决定，UI reducer
+只维护展示投影。
 
 ## 7.1 主要结构
 
@@ -9,7 +10,7 @@ TUI 位于 `apps/kite/src/tui/`，负责输入、渲染和会话前台管理，�
 App.tsx
 ├── Header / OutputArea / Footer
 ├── InputLine 与交互面板
-├── SessionManager / SessionRuntime
+├── SessionManager / SessionRuntime（RuntimeClient-backed）
 ├── hooks/          键盘、窗口、会话、MCP controller、Skill、slash command
 ├── mcp/            MCP Select 管理 overlay、ViewModel 与 controller
 ├── reducers/       RuntimeEvent → UI state
@@ -22,11 +23,15 @@ TUI 入口在创建 Runtime、读取配置或挂载 Ink 前处理 `--version`，
 ## 7.2 状态边界
 
 - RuntimeState：`@kite-ai/agent-kernel` 的持久事实；
-- RuntimeEvent：Kernel 经 App runtime bridge 向 UI 的中立投影；
+- RuntimeClientEvent：App 以 exhaustive projector 生成、经 Client/Server subscription 到达的封闭
+  展示事件；本地 reasoning、工具参数/结果在严格上限内保留；
 - TUI state：焦点、overlay、block、输入框、选择器等展示状态；
-- SessionRuntime：连接某一 thread 的运行、缓冲与取消控制。
+- SessionRuntime：基于 Client 的某一 session 运行、缓冲与取消控制。
 
 TUI 不应根据展示文本反推工具是否成功，也不能自行构造 verification passed、approval granted 等 Runtime 事实。
+TUI 的 command/query/subscribe 一律为 `RuntimeClient → InProcess RuntimeServer → RuntimeAccess` 单路径；
+InProcess 也经过 Protocol V1 codec、initialize、admission 与订阅顺序。它不能回退到 direct Host/SQLite/Builtin/
+Kernel bridge，也不拥有 mailbox、receipt、lifecycle 或 recovery。
 
 终端 focus reporting 由进程级 store 复用：首订阅开启 DEC 1004，最后退订关闭该模式；
 focus report 统一经 Ink `useInput` 通道转发给 store，不得再给 `process.stdin` 添加 `data` listener，避免 session/mount 切换时
@@ -44,7 +49,11 @@ authenticate、project approval 和 confirm route，以及 selection、draft 和
 
 ## 7.3 事件渲染
 
-`handleEvent` 和 reducer 把 RuntimeEvent 转为稳定 block。工具生命周期、审批、计划、Subagent、thought、错误和最终回答分别投影；事件类型不以固定数量作为文档契约。
+`handleClientEvent` 和 reducer 把封闭 `RuntimeClientEvent` 转为稳定 block。工具生命周期、审批、计划、
+Subagent、thought、错误和最终回答分别投影；未知 current event 只会成为固定 unavailable 表示或不发送，
+不会透传 raw object。事件类型不以固定数量作为文档契约。
+完整历史也产生同一 union：queued payload 按 call ID 恢复，started 才物化，terminal 用原 result
+收敛，因此 live/replay 不存在第二套卡片推断逻辑。
 
 模型流式展示采用分层完整提交：reasoning delta 只进入缓存，连续 reasoning 段完成后一次性更新 Thought 的活动窗口，最终回答可见后移除 reasoning 正文并只保留 `Thinking Xs` 摘要。普通文本按整段提交，列表按完整 item 提交；围栏代码与表格在结构可识别后先建立完整组件外壳，再只追加已经换行完成的内部行，组件关闭后进入静态历史。
 
@@ -54,17 +63,20 @@ Header 是每个会话写入 Static scrollback 的启动快照：低对比度圆
 
 ## 7.4 会话前后台
 
-前台 SessionRuntime 将事件实时 dispatch 到 UI；后台会话缓存可丢弃的展示事件和必要状态，切回时重放/重建投影。取消、切换和组件卸载必须清理 AbortController 与订阅。
+前台 SessionRuntime 将 Client subscription 实时 dispatch 到 UI；后台会话缓存可丢弃的展示事件和必要状态，
+切回时重放/重建投影。取消、切换和组件卸载必须清理 AbortController 与订阅。断线 gap/reset 只能标记
+history resync：旧会话完整历史经 `RuntimeClient.history → RuntimeHistoryClient → App exhaustive closed-event adapter →
+RuntimeLogQueryPort → SQLite readonly reader` 回填，不能把 Server 的短期 notification replay、JSONL 或 trace 当作日志。
 
 TUI 的 Shell executor 不在 `SessionRuntime` 内自行拼装 sandbox；它通过 App 层统一 composition root，
 与 foreground Headless CLI 共享 workspace、release ceiling、network mode 和平台 capability admission。
 composition 失败时会话在执行工具前 fail closed，不能由 TUI 入口单独放宽。
 同一 composition root 也为 Host/Builtin 注入安装私有的 Capability Artifact 存储与 Workspace filesystem Provider runtime；`SessionManager` 只传递这些受治理句柄，不自行读写工作区、生成 grant，也不在 Provider 不可用时退回旧文件路径。
 
-TUI bridge 与 `SessionManager` 只通过 App `RuntimeSessionCoordinator` 使用受限控制面；它们不直接取得 Kernel
-或 Store authority。`/compact` 等运行时命令必须通过该 coordinator 进入 Host mailbox，并由 Scheduler 按工具、
-交互和 Verification 的安全顺序处理；App 不直接改写 Kernel 状态。提交新事件会推进 revision，使旧的模型或
-执行 effect 结果按 lease 规则失效。
+TUI bridge 与 `SessionManager` 只通过 App 组合的 Client 使用受限控制面；它们不直接取得 Kernel、Host 或
+Store authority。`/compact` 等运行时命令通过 Client/Server 进入 Host mailbox，并由 Scheduler 按工具、交互和
+Verification 的安全顺序处理；App 不直接改写 Kernel 状态。提交新事件会推进 revision，使旧的模型或执行 effect
+结果按 lease 规则失效。
 
 ## 7.5 边界规则
 

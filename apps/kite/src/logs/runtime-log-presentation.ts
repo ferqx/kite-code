@@ -8,39 +8,7 @@ import {
   runtimeHostStateAssertCurrentRuntimeEvent,
 } from '@kite-ai/runtime-host';
 import type { RuntimeLogEventReadPage, RuntimeLogEventRecord } from '@kite-ai/runtime-host/storage';
-
-const MAX_PRESENTATION_TEXT_CODE_POINTS = 4_000;
-const SECRET_PATTERNS = [
-  /\b(?:authorization|api[_ -]?key|token|secret|password)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/giu,
-  /\bsk-[A-Za-z0-9_-]{16,}\b/gu,
-];
-
-function stripControlCharacters(value: string): string {
-  const visible: string[] = [];
-  for (const character of value) {
-    const codePoint = character.codePointAt(0);
-    if (codePoint === undefined) continue;
-    if (
-      codePoint <= 0x08 ||
-      codePoint === 0x0b ||
-      codePoint === 0x0c ||
-      (codePoint >= 0x0e && codePoint <= 0x1f) ||
-      (codePoint >= 0x7f && codePoint <= 0x9f)
-    )
-      continue;
-    visible.push(character);
-  }
-  return visible.join('');
-}
-
-function safeText(value: string): string {
-  let text = stripControlCharacters(value);
-  for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, '[redacted]');
-  const points = Array.from(text);
-  return points.length > MAX_PRESENTATION_TEXT_CODE_POINTS
-    ? `${points.slice(0, MAX_PRESENTATION_TEXT_CODE_POINTS).join('')}…`
-    : text;
-}
+import { projectRuntimeClientText as safeText } from '../runtime-client/safe-text';
 
 function stringField(event: RuntimeEvent, key: string): string | undefined {
   const value = (event as unknown as Record<string, unknown>)[key];

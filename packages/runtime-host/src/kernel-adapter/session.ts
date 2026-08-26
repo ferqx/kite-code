@@ -28,10 +28,13 @@ import type {
   RuntimeTransactionAcknowledgement,
 } from '../lifecycle/effect-supervisor';
 import type {
+  RuntimeCommandCommitEvidence,
   RuntimeEventMetadata,
   RuntimeRestoreBoundary,
+  RuntimeStoredCommandReceipt,
   RuntimeTransactionInput,
 } from '../storage';
+import { createRuntimeStoredCommandReceipt } from '../storage';
 import type {
   StateRuntimeEffectLease as BaseStateRuntimeEffectLease,
   StateRuntimeEffectPersistenceAcknowledgement,
@@ -140,6 +143,11 @@ export interface StateRuntimeProcessEventBatchOptions {
   readonly occurredAt?: string;
 }
 
+export interface StateRuntimeCommandCommitResult {
+  readonly receipt: RuntimeStoredCommandReceipt;
+  readonly events: readonly KernelEvent[];
+}
+
 export interface StateRuntimeSession {
   readonly sessionId: string;
   getState(): Readonly<AgentState>;
@@ -148,6 +156,21 @@ export interface StateRuntimeSession {
     events: readonly KernelEvent[],
     options?: StateRuntimeProcessEventBatchOptions,
   ): readonly KernelEvent[];
+  /**
+   * Commits an accepted command's exact State decision and applied receipt in
+   * one Store transaction. This is intentionally separate from effect and
+   * ordinary event paths.
+   */
+  commitCommandBatch(
+    events: readonly KernelEvent[],
+    evidence: RuntimeCommandCommitEvidence,
+  ): StateRuntimeCommandCommitResult;
+  /**
+   * Commits a command receipt against the exact current snapshot without
+   * inventing a Kernel event or advancing State revision. This is reserved
+   * for accepted lifecycle decisions such as create/resume/idle close.
+   */
+  commitCommandSnapshot(evidence: RuntimeCommandCommitEvidence): RuntimeStoredCommandReceipt;
   /**
    * Commit one same-command release as a single Store transaction. The event
    * contains the complete snapshot match and per-invocation receipts; callers
@@ -307,15 +330,57 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     events: readonly KernelEvent[],
     options: StateRuntimeProcessEventBatchOptions = {},
   ): readonly KernelEvent[] {
+    return this.#processEventBatch(events, options).events;
+  }
+
+  commitCommandBatch(
+    events: readonly KernelEvent[],
+    evidence: RuntimeCommandCommitEvidence,
+  ): StateRuntimeCommandCommitResult {
+    if (evidence.targetSessionId !== this.sessionId) {
+      throw new Error('Runtime command receipt target does not match State session.');
+    }
+    const committed = this.#processEventBatch(events, { source: 'command' }, evidence);
+    if (!committed.receipt) {
+      throw new Error('Runtime command did not produce an applied State decision.');
+    }
+    return Object.freeze({ receipt: committed.receipt, events: committed.events });
+  }
+
+  commitCommandSnapshot(evidence: RuntimeCommandCommitEvidence): RuntimeStoredCommandReceipt {
+    if (evidence.targetSessionId !== this.sessionId) {
+      throw new Error('Runtime command receipt target does not match State session.');
+    }
+    assertStateRuntimeSessionState(this.#state);
+    const receipt = createRuntimeStoredCommandReceipt(evidence, this.#state.revision);
+    const input: RuntimeTransactionInput<KernelEvent, AgentState> = {
+      sessionId: this.sessionId,
+      events: [],
+      snapshot: this.#state,
+      metadata: [],
+      expectedRestoreBoundary: this.#restoreBoundary(),
+      commandReceipt: receipt,
+    };
+    this.#lastAppliedEvents = [];
+    this.#lastProcessedEventId = undefined;
+    this.#services.transactions.commitCommandDecision(input);
+    return receipt;
+  }
+
+  #processEventBatch(
+    events: readonly KernelEvent[],
+    options: StateRuntimeProcessEventBatchOptions,
+    commandEvidence?: RuntimeCommandCommitEvidence,
+  ): { readonly events: readonly KernelEvent[]; readonly receipt?: RuntimeStoredCommandReceipt } {
     this.#lastProcessedEventId = undefined;
     if (events.length === 0) {
       this.#lastAppliedEvents = [];
-      return [];
+      return { events: [] };
     }
     const preparedEvents = this.#preprocessEvents(events);
     if (preparedEvents.length === 0) {
       this.#lastAppliedEvents = [];
-      return [];
+      return { events: [] };
     }
     const previousState = this.#state;
     assertStateRuntimeSessionState(previousState);
@@ -338,7 +403,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         previousState,
         facts.eventFacts[0]!.occurredAt,
       );
-      return [];
+      return { events: [] };
     }
     if (decision.status === 'conflict') {
       this.#lastAppliedEvents = [];
@@ -357,19 +422,26 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         occurredAt: envelope.occurredAt,
       }),
     );
+    const receipt = commandEvidence
+      ? createRuntimeStoredCommandReceipt(commandEvidence, decision.nextState.revision)
+      : undefined;
     const input: RuntimeTransactionInput<KernelEvent, AgentState> = {
       sessionId: this.sessionId,
       events: decision.events,
       snapshot: decision.nextState,
       metadata,
       expectedRestoreBoundary: this.#restoreBoundary(),
+      ...(receipt ? { commandReceipt: receipt } : {}),
     };
     try {
-      this.#services.transactions.commit(
-        options.acknowledgement ?? 'decision',
-        input,
-        options.requiredEffectLease,
-      );
+      if (receipt) this.#services.transactions.commitCommandDecision(input);
+      else {
+        this.#services.transactions.commit(
+          options.acknowledgement ?? 'decision',
+          input,
+          options.requiredEffectLease,
+        );
+      }
     } catch (error) {
       this.#lastAppliedEvents = [];
       throw error;
@@ -392,7 +464,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         eventPosition,
       });
     }
-    return this.#lastAppliedEvents;
+    return { events: this.#lastAppliedEvents, ...(receipt ? { receipt } : {}) };
   }
 
   commitApprovalBatch(

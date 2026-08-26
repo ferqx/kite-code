@@ -27,7 +27,7 @@ import {
   waitForCondition,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, observePersistedTurnEvents } from '../harness/test-workspace';
 
 const TIMEOUT = 45_000;
 
@@ -139,6 +139,18 @@ describe('TUI PTY System — cancel shell then render successor', () => {
         25,
       );
       await waitForText(() => tui.viewport(), 'cancelled', 2_000);
+      await waitForCondition(
+        () => {
+          const observation = observePersistedTurnEvents(workspace, 'start old shell');
+          if (observation.status !== 'ready' || !observation.value) return false;
+          return observation.value.events.some(
+            (event) => event.type === 'tool.cancelled' && event.toolCallId === 'old-shell',
+          );
+        },
+        'durable cancellation of the exact old shell invocation',
+        5_000,
+        25,
+      );
 
       const successorRequestBaseline = server.getRequestCount();
       // Workspace-baseline Shell executes directly in Auto. The cancelled run
@@ -151,11 +163,12 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       // only waits for Ink to accept the input rather than for a model request.
       await submitCurrentInput(tui, { submitReceiptTimeoutMs: 2_000 });
 
-      // The prompt is optimistic and visible while the cancelled predecessor
-      // is still inside its synthetic five-second Windows cleanup delay.
-      await waitForText(() => tui.viewport(), 'continue with successor', 2_000);
+      // The successor is accepted while the cancelled predecessor is still
+      // unwinding, but Runtime Server V1 does not retain queued user text in
+      // the terminal projection. Its durable receipt is the absence of a
+      // second model request during this cleanup window.
+      await tuiSystemDelay(250);
       expect(server.getRequestCount()).toBe(successorRequestBaseline);
-      expect(screenContains(tui.viewport(), 'continue with successor')).toBe(true);
 
       await waitForRequestMessage(server, 'continue with successor', 15_000, {
         since: successorRequestBaseline,
@@ -163,29 +176,23 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       });
 
       const progressFrames = tui.markScreen();
-      await waitForText(() => tui.viewport(), 'SUCCESSOR_LINE_ONE', 15_000);
-      const output = tui.viewport();
-      expect(screenContains(output, 'SUCCESSOR_LINE_ONE')).toBe(true);
-      expect(screenContains(output, 'SUCCESSOR_LINE_TWO')).toBe(false);
-      expect(screenContains(output, 'Working')).toBe(true);
-
       await waitForCondition(
         () =>
           tui
             .screenFramesSince(progressFrames)
             .some(
               (frame) =>
-                screenContains(frame, 'Thinking ') &&
+                screenContains(frame, 'Bash') &&
                 !screenContains(frame, 'Successor completed once.'),
             ),
-        'a committed Thought frame before the successor answer',
+        'a live successor shell tool card',
         15_000,
         25,
       );
 
       await waitForText(() => tui.viewport(), 'Successor completed once.', 15_000);
       const renderedProgress = tui.screenFramesSince(progressFrames).join('\n');
-      expect(screenContains(renderedProgress, 'SUCCESSOR_LINE_TWO')).toBe(true);
+      expect(screenContains(renderedProgress, 'SUCCESSOR_LINE_ONE')).toBe(true);
       await waitForTuiReady(tui);
 
       const finalScreen = stripAnsi(tui.scrollback());

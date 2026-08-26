@@ -12,6 +12,9 @@ import {
 const root = resolve(import.meta.dir, '..');
 const workspaces = [
   'packages/runtime-contract',
+  'packages/runtime-protocol',
+  'packages/runtime-server',
+  'packages/runtime-client',
   'packages/agent-kernel',
   'packages/runtime-spi',
   'packages/runtime-host',

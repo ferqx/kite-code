@@ -67,14 +67,6 @@ describe('parseSlashCommand', () => {
     }
   });
 
-  test('accepts only argument-free /telemetry', () => {
-    expect(parseSlashCommand('/telemetry')).toEqual({ type: 'telemetry' });
-    expect(parseSlashCommand('/telemetry enable')).toEqual({
-      type: 'unknown',
-      raw: '/telemetry enable',
-    });
-  });
-
   test('parses /compact with optional custom instructions', () => {
     expect(parseSlashCommand('/compact')).toEqual({ type: 'compact' });
     expect(parseSlashCommand('/compact focus on auth changes')).toEqual({

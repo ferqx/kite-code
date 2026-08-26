@@ -18,7 +18,7 @@ describe('NotificationProjector durable subscriptions', () => {
     projector.publish(durable('continuous', 1));
     projector.publish(durable('continuous', 2));
     const continuous = projector
-      .subscribe({ sessionId: 'continuous', afterRevision: 0 })
+      .subscribe({ spec: { scope: 'session', sessionId: 'continuous', afterRevision: 0 } })
       [Symbol.asyncIterator]();
     expect((await continuous.next()).value).toMatchObject({ revision: 1 });
     expect((await continuous.next()).value).toMatchObject({ revision: 2 });
@@ -26,7 +26,9 @@ describe('NotificationProjector durable subscriptions', () => {
     for (let revision = 1; revision <= 260; revision += 1) {
       projector.publish(durable('gap', revision));
     }
-    const gap = projector.subscribe({ sessionId: 'gap', afterRevision: 0 })[Symbol.asyncIterator]();
+    const gap = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'gap', afterRevision: 0 } })
+      [Symbol.asyncIterator]();
     expect((await gap.next()).value).toMatchObject({
       revision: 260,
       projection: { kind: 'snapshot', session: { revision: 260 } },
@@ -43,7 +45,7 @@ describe('NotificationProjector durable subscriptions', () => {
     projector.publish(durable('session-1', 2));
     registry.commitProjection(sessionProjection('session-1', 3));
     const iterator = projector
-      .subscribe({ sessionId: 'session-1', afterRevision: 0 })
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-1', afterRevision: 0 } })
       [Symbol.asyncIterator]();
     expect((await iterator.next()).value).toMatchObject({
       revision: 3,
@@ -57,15 +59,19 @@ describe('NotificationProjector durable subscriptions', () => {
     const registry = new SessionRegistry();
     const projector = new NotificationProjector(registry);
     const controller = new AbortController();
-    const first = projector.subscribe({ sessionId: 'session-1' })[Symbol.asyncIterator]();
+    const first = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-1' } })
+      [Symbol.asyncIterator]();
     const second = projector
-      .subscribe({ sessionId: 'session-1', signal: controller.signal })
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-1' }, signal: controller.signal })
       [Symbol.asyncIterator]();
     await first.return?.();
     controller.abort();
     expect(await second.next()).toEqual({ done: true, value: undefined });
 
-    const remaining = projector.subscribe({ sessionId: 'session-1' })[Symbol.asyncIterator]();
+    const remaining = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-1' } })
+      [Symbol.asyncIterator]();
     projector.publish(durable('session-1', 1));
     expect((await remaining.next()).value).toMatchObject({ revision: 1 });
     await remaining.return?.();
@@ -76,12 +82,121 @@ describe('NotificationProjector durable subscriptions', () => {
     const registry = new SessionRegistry();
     const projector = new NotificationProjector(registry);
     const iterator = projector
-      .subscribe({ sessionId: 'session-1', afterRevision: 0 })
+      .subscribe({ spec: { scope: 'session', sessionId: 'session-1', afterRevision: 0 } })
       [Symbol.asyncIterator]();
     for (let revision = 1; revision <= RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT + 1; revision += 1) {
       projector.publish(durable('session-1', revision));
     }
     expect(await iterator.next()).toEqual({ done: true, value: undefined });
+    projector.close();
+  });
+});
+
+describe('NotificationProjector session index subscriptions', () => {
+  test('seeds one atomic reset boundary, then emits monotonic live upserts and tombstones', async () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry, { serverInstanceId: 'server-test-1' });
+    projector.publish(durable('session-a', 1));
+    projector.publish(durable('session-b', 1));
+
+    const iterator = projector.subscribe({ spec: { scope: 'sessions' } })[Symbol.asyncIterator]();
+    const resetBegin = await iterator.next();
+    const first = await iterator.next();
+    const second = await iterator.next();
+    const resetEnd = await iterator.next();
+    expect([
+      resetBegin.value?.type,
+      first.value?.type,
+      second.value?.type,
+      resetEnd.value?.type,
+    ]).toEqual(['index_reset_begin', 'session_upsert', 'session_upsert', 'index_reset_end']);
+    expect([resetBegin.value, first.value, second.value, resetEnd.value]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          serverInstanceId: 'server-test-1',
+          generation: 1,
+          indexRevision: 2,
+        }),
+      ]),
+    );
+
+    projector.publish(durable('session-a', 2));
+    expect((await iterator.next()).value).toMatchObject({
+      type: 'session_upsert',
+      serverInstanceId: 'server-test-1',
+      generation: 1,
+      indexRevision: 3,
+      session: { sessionId: 'session-a', revision: 2 },
+    });
+    expect(projector.removeSession('session-b')).toBe(true);
+    expect((await iterator.next()).value).toMatchObject({
+      type: 'session_remove',
+      serverInstanceId: 'server-test-1',
+      generation: 1,
+      indexRevision: 4,
+      sessionId: 'session-b',
+    });
+    await iterator.return?.();
+    projector.close();
+  });
+
+  test('gives each index subscription a fresh generation and cleans it up on AbortSignal', async () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry, { serverInstanceId: 'server-test-2' });
+    const first = projector.subscribe({ spec: { scope: 'sessions' } })[Symbol.asyncIterator]();
+    expect((await first.next()).value).toMatchObject({ type: 'index_reset_begin', generation: 1 });
+    await first.return?.();
+
+    const controller = new AbortController();
+    const second = projector
+      .subscribe({ spec: { scope: 'sessions' }, signal: controller.signal })
+      [Symbol.asyncIterator]();
+    expect((await second.next()).value).toMatchObject({ type: 'index_reset_begin', generation: 2 });
+    controller.abort();
+    expect(await second.next()).toEqual({ done: true, value: undefined });
+    projector.close();
+  });
+
+  test('streams an index reset larger than the live subscriber queue without closing it', async () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry, {
+      serverInstanceId: 'server-large-index',
+    });
+    for (let index = 0; index < RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT + 40; index += 1) {
+      projector.publish(durable(`session-${index}`, 1));
+    }
+
+    const iterator = projector.subscribe({ spec: { scope: 'sessions' } })[Symbol.asyncIterator]();
+    expect((await iterator.next()).value).toMatchObject({
+      type: 'index_reset_begin',
+      indexRevision: RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT + 40,
+    });
+    for (let index = 0; index < RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT + 40; index += 1) {
+      expect((await iterator.next()).value).toMatchObject({ type: 'session_upsert' });
+    }
+    expect((await iterator.next()).value).toMatchObject({ type: 'index_reset_end' });
+    projector.publish(durable('session-after-reset', 1));
+    expect((await iterator.next()).value).toMatchObject({
+      type: 'session_upsert',
+      session: { sessionId: 'session-after-reset' },
+    });
+    await iterator.return?.();
+    projector.close();
+  });
+
+  test('fails closed when equal revisions carry divergent canonical projections', () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry, { serverInstanceId: 'server-test-3' });
+    projector.publish(durable('session-1', 1));
+    const original = durable('session-1', 1);
+    const divergent = {
+      ...original,
+      projection: {
+        ...original.projection,
+        session: { ...original.projection.session, displayName: 'forged' },
+      },
+    };
+    expect(() => projector.publish(divergent)).toThrow('diverged');
     projector.close();
   });
 });
@@ -95,8 +210,7 @@ describe('NotificationProjector ephemeral streams', () => {
     const controller = new AbortController();
     const iterator = projector
       .subscribe({
-        sessionId: 'session-1',
-        afterRevision: 0,
+        spec: { scope: 'session', sessionId: 'session-1', afterRevision: 0 },
         signal: controller.signal,
       })
       [Symbol.asyncIterator]();
@@ -110,7 +224,14 @@ describe('NotificationProjector ephemeral streams', () => {
     registry.commitProjection(activeProjection('session-1', 0));
     const projector = new NotificationProjector(registry);
     const iterator = projector
-      .subscribe({ sessionId: 'session-1', afterRevision: 0 })
+      .subscribe({
+        spec: {
+          scope: 'session',
+          sessionId: 'session-1',
+          afterRevision: 0,
+          includeEphemeral: true,
+        },
+      })
       [Symbol.asyncIterator]();
     for (let sequence = 1; sequence <= 300; sequence += 1) {
       projector.publish(ephemeral(sequence));
@@ -120,7 +241,7 @@ describe('NotificationProjector ephemeral streams', () => {
     for (let index = 0; index < RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT; index += 1) {
       const next = await iterator.next();
       if (next.done) break;
-      if (next.value.durability === 'durable') {
+      if ('durability' in next.value && next.value.durability === 'durable') {
         terminal = next.value;
         break;
       }
@@ -135,7 +256,14 @@ describe('NotificationProjector ephemeral streams', () => {
     registry.commitProjection(activeProjection('session-1', 0));
     const projector = new NotificationProjector(registry);
     const iterator = projector
-      .subscribe({ sessionId: 'session-1', afterRevision: 0 })
+      .subscribe({
+        spec: {
+          scope: 'session',
+          sessionId: 'session-1',
+          afterRevision: 0,
+          includeEphemeral: true,
+        },
+      })
       [Symbol.asyncIterator]();
     projector.publish({ ...ephemeral(1), workId: 'stale-work' });
     projector.publish(ephemeral(1));
@@ -146,8 +274,7 @@ describe('NotificationProjector ephemeral streams', () => {
     const controller = new AbortController();
     const empty = projector
       .subscribe({
-        sessionId: 'session-1',
-        afterRevision: 0,
+        spec: { scope: 'session', sessionId: 'session-1', afterRevision: 0 },
         signal: controller.signal,
       })
       [Symbol.asyncIterator]();
@@ -204,6 +331,6 @@ function ephemeral(sequence: number): Extract<RuntimeNotification, { durability:
     compositionRevision: 'state-store-current',
     streamId: 'stream-1',
     sequence,
-    payload: { type: 'model_delta', text: String(sequence) },
+    event: { type: 'model.text_delta', requestId: 'request-1', text: String(sequence) },
   };
 }

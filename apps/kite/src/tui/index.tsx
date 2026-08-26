@@ -20,6 +20,7 @@ import {
 import { sessionExportPath } from '#app/config/paths';
 import { defaultCheckpointPath } from '#app/config/paths.js';
 import { shouldPromptWorkspaceTrust } from '#app/config/workspace-trust';
+import { projectStateRuntimeEventForPresentation } from '#app/runtime-client/presentation-history';
 import type { SandboxBackend } from '#app/sandbox/types';
 import { type AppShellExecutor, composeAppSandboxExecutor } from '@/app/sandbox/composition';
 import type {
@@ -28,10 +29,6 @@ import type {
 } from '../adapters/tui/session-adapter';
 import { composeObservability } from '../observability/composition';
 import { resolveTelemetryConsent } from '../observability/consent';
-import { formatObservabilityStatus, projectObservabilityStatus } from '../observability/status';
-import { resolveReleaseComposition } from '../release/composition-root';
-import { tryProjectAdmittedExecutionStatus } from '../release/execution-status';
-import { formatReleaseStatus, projectReleaseStatus } from '../release/status-projection';
 import App, { type Action, shouldDisablePromptInput, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
@@ -125,6 +122,7 @@ export interface TuiBootstrapProps {
 interface TuiAppProps {
   createSessionManager: TuiSessionManagerFactory;
   config: AgentConfig;
+  workspace: string;
   languagePreference: LanguagePreference;
   onLanguageSelect: (language: LanguagePreference) => boolean;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
@@ -261,6 +259,7 @@ export function TuiBootstrap({
     <TuiApp
       createSessionManager={createSessionManager}
       config={probeResult.config}
+      workspace={workspace}
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
       injectModel={injectModel}
@@ -272,12 +271,12 @@ export function TuiBootstrap({
 function TuiApp({
   createSessionManager,
   config,
+  workspace,
   languagePreference,
   onLanguageSelect,
   injectModel,
   shellExecutor,
 }: TuiAppProps) {
-  const workspace = process.cwd();
   const { t: translate } = useI18n();
   const { waitUntilRenderFlush } = useApp();
   const { state, dispatch, onToggleReason } = useTuiState(
@@ -393,6 +392,7 @@ function TuiApp({
     ) => Promise<void>
   >(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
+  const [sessionGrantCount, setSessionGrantCount] = React.useState(0);
   const interruptClearedByResolutionRef = React.useRef(false);
 
   const provider = React.useMemo(() => {
@@ -434,6 +434,7 @@ function TuiApp({
   const sessionManager = React.useMemo(() => {
     const mgr = createSessionManager({
       config,
+      workspace,
       provider,
       skillManifests: skillManifestsRef.current,
       skillOptions: skillOptionsRef.current,
@@ -456,6 +457,7 @@ function TuiApp({
     appShellExecutor,
     waitUntilRenderFlush,
     createSessionManager,
+    workspace,
   ]);
   React.useEffect(
     () => () => {
@@ -464,6 +466,28 @@ function TuiApp({
     },
     [sessionManager],
   );
+  React.useEffect(() => {
+    if (!state.showPermissionSelector) return;
+    const sessionId = state.activeSessionId || threadIdRef.current;
+    if (!sessionId) {
+      setSessionGrantCount(0);
+      return;
+    }
+    let cancelled = false;
+    void sessionManager
+      .getSessionProjection(sessionId)
+      .then((projection) => {
+        if (!cancelled && threadIdRef.current === sessionId) {
+          setSessionGrantCount(projection?.sessionCommandGrantCount ?? 0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled && threadIdRef.current === sessionId) setSessionGrantCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionManager, state.activeSessionId, state.showPermissionSelector]);
   // The probe describes restricted Accept/Auto execution. Full remains a
   // separately selected interaction mode even when no sandbox backend exists.
   const [sandboxBackend, setSandboxBackend] = React.useState<SandboxBackend>('none');
@@ -490,43 +514,6 @@ function TuiApp({
       disposed = true;
     };
   }, [appShellExecutor, dispatch]);
-  const effectiveSandboxRuntime = React.useMemo(
-    () => ({
-      enabled: sandboxBackend !== 'none',
-      backend: sandboxBackend,
-      available: sandboxBackend !== 'none',
-    }),
-    [sandboxBackend],
-  );
-  const releaseStatusText = React.useMemo(() => {
-    const executionStatus = tryProjectAdmittedExecutionStatus({
-      config,
-      sandboxRuntime: effectiveSandboxRuntime,
-    });
-    const composition = resolveReleaseComposition({
-      config,
-      artifactReleaseProfileV1Enabled: false,
-      profileId: 'internal-dogfood',
-      production: false,
-    });
-    return formatReleaseStatus(projectReleaseStatus({ composition, executionStatus }));
-  }, [config, effectiveSandboxRuntime]);
-  const telemetryStatusText = React.useMemo(() => {
-    const consent = resolveTelemetryConsent({
-      releaseChannel: 'development',
-      user: config.telemetry?.user,
-      project: config.telemetry?.project,
-    });
-    return formatObservabilityStatus(
-      projectObservabilityStatus({
-        artifactTelemetryAllowed: false,
-        featureEnabled: getFeatureFlags(config).observabilityMetrics,
-        consent,
-        remoteExporterConfigured: false,
-      }),
-    );
-  }, [config]);
-
   // Reset conversation history and thread on new session
   React.useEffect(() => {
     if (state.sessionKey !== prevSessionKeyRef.current) {
@@ -732,14 +719,20 @@ function TuiApp({
           thinkingLevelRef.current = thinkingLevel;
 
           stage = 'presentation_replay';
+          const runtime = sessionManager.getRuntime(threadId);
           const {
             blocks,
             interrupt,
             interactionMode,
             pendingToolCalls,
             recoveredPendingInteraction,
-          } = sessionDataToUI(result);
-          const runtime = sessionManager.getRuntime(threadId);
+          } = sessionDataToUI({
+            ...result,
+            // Initial mode is snapshot state, not necessarily represented by
+            // an interaction_mode.changed event. Host recovery has already
+            // restored the exact admitted State by this point.
+            interactionMode: runtime?.interactionMode ?? result.interactionMode,
+          });
           if (runtime) {
             runtime.localReplayRecovery = recoveredPendingInteraction;
             runtime.interactionMode = interactionMode;
@@ -758,7 +751,7 @@ function TuiApp({
           });
           if (
             result.runtimeEvents.some(
-              (event: RuntimePresentationEvent) => event.type === 'user.message_appended',
+              (event: RuntimePresentationEvent) => event.type === 'user.message',
             )
           ) {
             stage = 'context_projection';
@@ -977,18 +970,22 @@ function TuiApp({
         // Invalidate any in-flight loadSessionById for this threadId to prevent
         // stale load from restoring the deleted session.
         sessionNavigation.invalidatePendingLoad();
+        if (wasActive) {
+          // Token statistics live outside the Runtime State transaction and
+          // must flush before the Host atomically removes that State.
+          sessionManager.saveTokenStats(threadId, stateRef.current.status, true);
+        }
         await sessionManager.cancelRuntimeOperations(threadId);
         try {
           await sessionManager.deletePersistedSession(threadId);
-        } catch {
-          // DB error — still remove from runtime list
+        } catch (error) {
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: `删除会话失败：${error instanceof Error ? error.message : String(error)}`,
+            isError: true,
+          });
+          return;
         }
-        // Remove from SessionManager and refresh snapshots
-        if (wasActive) {
-          // Flush token stats before removing runtime (stats are lost after remove)
-          sessionManager.saveTokenStats(threadId, stateRef.current.status, true);
-        }
-        await sessionManager.removeRuntime(threadId);
         if (wasActive) {
           // Deleted the active session — create a new one so TUI has an active session
           const newId = sessionManager.createSession(workspace);
@@ -1058,25 +1055,22 @@ function TuiApp({
   );
 
   const enterPlanMode = React.useCallback(() => {
-    const events = sessionManager.enterPlanningMode(threadIdRef.current);
-    for (const event of events) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
-  }, [dispatchSessionLoad, sessionManager]);
+    // With no submitted task, `/plan` is only input policy for the next
+    // start_turn.  Creating a local Runtime planning placeholder here would
+    // mutate State outside RuntimeClient → RuntimeServer → RuntimeAccess and
+    // leave the bridge's Host revision stale.  The actual planning transition
+    // is committed atomically with that next start_turn.
+    dispatchSessionLoad({ type: 'SET_PHASE', phase: 'planning' });
+  }, [dispatchSessionLoad]);
 
   const togglePlanMode = React.useCallback(() => {
-    if (state.status.phase === 'planning') {
-      const result = sessionManager.exitPlanningMode(threadIdRef.current);
-      if (!result) return;
-      for (const event of result.events) {
-        dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
-      }
-      if (result.events.length === 0 && result.phase === 'building') {
-        dispatchSessionLoad({ type: 'SET_PHASE', phase: 'building' });
-      }
-      return;
-    }
-    const events = sessionManager.enterPlanningMode(threadIdRef.current);
-    for (const event of events) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
-  }, [dispatchSessionLoad, sessionManager, state.status.phase]);
+    // This selector never writes Runtime State. Runtime phase changes belong
+    // to the durable start_turn command (or its subsequent runtime events).
+    dispatchSessionLoad({
+      type: 'SET_PHASE',
+      phase: state.status.phase === 'planning' ? 'building' : 'planning',
+    });
+  }, [dispatchSessionLoad, state.status.phase]);
 
   // Stable onCompact via refs — bypasses stale closure issues with useSlashCommand
   // and Ink 7 useInput across session switches.
@@ -1104,9 +1098,10 @@ function TuiApp({
             );
           }
         },
-        (event: RuntimePresentationEvent) => {
+        (event) => {
           if (threadIdRef.current === targetThreadId) {
-            dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+            const projected = projectStateRuntimeEventForPresentation(event);
+            if (projected) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event: projected });
           }
         },
       );
@@ -1125,12 +1120,8 @@ function TuiApp({
           dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
         }
         if (
-          !result.events.some((event: RuntimePresentationEvent) =>
-            [
-              'context.compaction_completed',
-              'context.compaction_failed',
-              'context.compaction_reset',
-            ].includes(event.type),
+          !result.events.some(
+            (event: RuntimePresentationEvent) => event.type === 'context.compaction',
           )
         ) {
           dispatchSessionLoad({
@@ -1216,8 +1207,6 @@ function TuiApp({
           });
         });
     },
-    releaseStatusText,
-    telemetryStatusText,
   );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
@@ -1293,18 +1282,21 @@ function TuiApp({
 
   const clearActiveSessionCommandGrants = React.useCallback(() => {
     const activeThreadId = threadIdRef.current;
-    const applied = sessionManager.clearSessionCommandGrants(activeThreadId);
-    if (applied === null) {
-      dispatchSessionLoad({
-        type: 'LOCAL_TEXT',
-        text: '  ⎿  Session command grants could not be cleared.',
-        isError: true,
+    void sessionManager
+      .clearSessionCommandGrants(activeThreadId)
+      .then(async () => {
+        const projection = await sessionManager.getSessionProjection(activeThreadId);
+        if (threadIdRef.current === activeThreadId) {
+          setSessionGrantCount(projection?.sessionCommandGrantCount ?? 0);
+        }
+      })
+      .catch(() => {
+        dispatchSessionLoad({
+          type: 'LOCAL_TEXT',
+          text: '  ⎿  Session command grants could not be cleared.',
+          isError: true,
+        });
       });
-      return;
-    }
-    for (const event of applied) {
-      dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
-    }
   }, [dispatchSessionLoad, sessionManager]);
 
   const runTask = React.useCallback(
@@ -1347,6 +1339,13 @@ function TuiApp({
         });
       }
 
+      // A durable run terminal can make the prompt visible one render before
+      // the Host lifecycle releases the completed execution. Queue a prompt
+      // submitted in that narrow window behind the Host-owned idle barrier;
+      // otherwise tryReservePrompt() would silently discard an ordinary
+      // consecutive turn (and must not be made permissive with a local abort).
+      if (!stateRef.current.running) await rt.waitForRunCompletion();
+
       // Recover first so the reservation belongs to the continuation runtime,
       // not the immutable source session left by an interrupted interaction.
       if (!rt.tryReservePrompt()) return;
@@ -1354,18 +1353,18 @@ function TuiApp({
 
       // 将 React 层 per-session 状态同步到 Runtime / Sync React-layer per-session state to runtime
       rt.thinkingLevel = thinkingLevelRef.current;
-      rt.interactionMode = interactionModeRef.current;
       rt.conversationHistory = [...conversationHistoryRef.current];
 
       // Establish the new active turn before inserting the prompt. This keeps
-      // the prompt out of the idle/static transition window between a
+      // the durable prompt out of the idle/static transition window between a
       // cancelled predecessor and its successor; otherwise Ink can commit the
       // combined old+new turn to <Static> before the successor tool starts.
       dispatch({ type: 'SET_RUNNING' });
-      // Render the submitted prompt immediately. Runtime persistence may wait
-      // for the cancelled predecessor to finish cleanup, but the user's message must
-      // not be hidden behind that internal single-flight barrier.
-      dispatch({ type: 'USER_MESSAGE', text: task });
+      // Do not optimistically append a prompt here. The bridge allocates the
+      // durable command and message identities, and the RuntimeClient's
+      // `user.message` projection is the only canonical rendering input.
+      // Rendering a local text-only copy first would make its later durable
+      // echo indistinguishable from a second user prompt.
 
       // Update running state — agentLoopActive is managed by SessionRuntime.runTask internally
       sessionManager.onStatusChange(threadId);
@@ -1476,7 +1475,7 @@ function TuiApp({
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
         onInteractionModeChange={syncInteractionMode}
-        sessionGrantCount={sessionManager.listSessionCommandGrants(threadIdRef.current).length}
+        sessionGrantCount={sessionGrantCount}
         onClearSessionGrants={clearActiveSessionCommandGrants}
         themePreset={themePreset}
         onThemeSelect={applyThemePreset}

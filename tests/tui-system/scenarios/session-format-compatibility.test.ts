@@ -11,10 +11,21 @@ import {
 } from '@kite-ai/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import {
+  activateSessionSearch,
+  submitCommand,
+  submitCurrentInput,
+  submitUserMessage,
+  typeText,
+} from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  screenHasSessionRow,
+  waitForCondition,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const SESSION_ID = 'legacy-session-1';
@@ -28,6 +39,26 @@ const THIRD_SESSION_NAME = 'Third compatible session';
 const THIRD_MESSAGE = 'Third State 26 message remains visible';
 const MALFORMED_SESSION_ID = 'malformed-legacy-session';
 const MALFORMED_SESSION_NAME = 'Broken compatible session';
+
+async function selectListedSession(tui: PtyProcess, name: string): Promise<void> {
+  // Runtime Server V1 keeps the new process's fresh current session as the
+  // first selector row. Search for the named historical row rather than
+  // relying on its relative position among current and imported sessions.
+  await activateSessionSearch(tui);
+  await typeText(tui, name);
+  await waitForCondition(
+    () => screenHasSessionRow(tui.viewport(), name),
+    `filtered session row ${JSON.stringify(name)} to load`,
+    10_000,
+  );
+  tui.write('\x1b[B');
+  await waitForCondition(
+    () => screenHasSessionRow(tui.viewport(), name, { selected: true }),
+    `filtered session row ${JSON.stringify(name)} to become selected`,
+    5_000,
+  );
+  await submitCurrentInput(tui);
+}
 
 function checksum(value: string): string {
   let hash = 2166136261;
@@ -372,7 +403,7 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
   step('imports only after Enter and restores the original message silently', async () => {
     expect(existsSync(sqliteCurrentRuntimeStorePath(checkpointPath))).toBe(true);
     expect(currentStoreHasLegacySession(checkpointPath)).toBe(false);
-    tui.write('\r');
+    await selectListedSession(tui, SESSION_NAME);
     const output = await waitForText(() => tui.viewport(), MESSAGE, 15_000);
     expect(screenContains(output, MESSAGE)).toBe(true);
     expect(screenContains(output, '历史会话打开失败')).toBe(false);
@@ -388,20 +419,14 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
   step('serializes two more lazy imports and switches on the same live Runtime owner', async () => {
     await submitCommand(tui, '/resume');
     await waitForText(() => tui.viewport(), SECOND_SESSION_NAME, 10_000);
-    tui.write('\x1b[B');
-    await waitForText(() => tui.viewport(), `❯ ${SECOND_SESSION_NAME}`, 10_000);
-    tui.write('\r');
+    await selectListedSession(tui, SECOND_SESSION_NAME);
     let output = await waitForText(() => tui.viewport(), SECOND_MESSAGE, 15_000);
     expect(screenContains(output, '历史会话打开失败')).toBe(false);
     expect(currentStoreHasLegacySession(checkpointPath, SECOND_SESSION_ID)).toBe(true);
 
     await submitCommand(tui, '/resume');
     await waitForText(() => tui.viewport(), THIRD_SESSION_NAME, 10_000);
-    tui.write('\x1b[B');
-    await waitForText(() => tui.viewport(), `❯ ${SECOND_SESSION_NAME}`, 10_000);
-    tui.write('\x1b[B');
-    await waitForText(() => tui.viewport(), `❯ ${THIRD_SESSION_NAME}`, 10_000);
-    tui.write('\r');
+    await selectListedSession(tui, THIRD_SESSION_NAME);
     output = await waitForText(() => tui.viewport(), THIRD_MESSAGE, 15_000);
     expect(screenContains(output, '历史会话打开失败')).toBe(false);
     expect(currentStoreHasLegacySession(checkpointPath, THIRD_SESSION_ID)).toBe(true);
@@ -409,8 +434,8 @@ describe('TUI PTY System — State 26 Session Compatibility', () => {
 
   step('switches back to the first loaded session without losing its rendered turns', async () => {
     await submitCommand(tui, '/resume');
-    await waitForText(() => tui.viewport(), `❯ ${SESSION_NAME}`, 10_000);
-    tui.write('\r');
+    await waitForText(() => tui.viewport(), SESSION_NAME, 10_000);
+    await selectListedSession(tui, SESSION_NAME);
     const output = await waitForText(() => tui.viewport(), `❯ ${MESSAGE}`, 15_000);
     expect(screenContains(output, MESSAGE)).toBe(true);
     expect(screenContains(output, THIRD_MESSAGE)).toBe(false);
@@ -453,7 +478,7 @@ describe('TUI PTY System — malformed compatible session isolation', () => {
   step('fails only the selected malformed session with a generic message', async () => {
     await submitCommand(tui, '/resume');
     await waitForText(() => tui.viewport(), MALFORMED_SESSION_NAME, 10_000);
-    tui.write('\r');
+    await selectListedSession(tui, MALFORMED_SESSION_NAME);
     const output = await waitForText(() => tui.viewport(), '历史会话打开失败', 15_000);
     expect(screenContains(output, '当前会话未受影响')).toBe(true);
     expect(screenContains(output, '历史会话服务不可用')).toBe(false);

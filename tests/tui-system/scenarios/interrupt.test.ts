@@ -82,7 +82,7 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
   );
 
   test(
-    'cancelling a visible Thought keeps the user prompt single in scrollback',
+    'cancelling after the first visible model activity keeps the user prompt single in scrollback',
     async () => {
       server.setResponses([
         {
@@ -95,7 +95,8 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       ]);
 
       await submitUserMessage(tui, server, 'Cancel after Thought appears');
-      await waitForText(() => tui.viewport(), 'Thinking ', 10_000);
+      // Reasoning content is redacted; cancel once a safe answer delta is visible.
+      await waitForText(() => tui.viewport(), 'unfinished', 10_000);
       tui.write('\x03');
       await waitForTuiReady(tui);
 

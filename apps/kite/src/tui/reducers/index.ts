@@ -4,7 +4,8 @@ import type { TuiState } from '../types';
 import type { Action } from './actions';
 import { agentReducer } from './agentReducer';
 import { checkpointReducer } from './checkpointReducer';
-import { handleEventAction, handleRuntimeEventAction } from './handleEvent';
+import { handleClientEventAction } from './handleClientEvent';
+import { handleEventAction } from './handleEvent';
 import { sessionReducer } from './sessionReducer';
 import { skillReducer } from './skillReducer';
 import { uiReducer } from './uiReducer';
@@ -64,7 +65,7 @@ const SKILL_ACTIONS: ReadonlySet<string> = new Set(['SET_SKILL_MANIFESTS', 'LIST
 
 export function eventReducer(state: TuiState, action: Action): TuiState {
   if (action.type === 'RUNTIME_EVENT') {
-    return handleRuntimeEventAction(state, action.event);
+    return handleClientEventAction(state, action.event);
   }
   if (action.type === 'LOCAL_TEXT') {
     return handleEventAction(state, {

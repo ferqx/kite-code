@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { EffectSupervisor } from '../src/lifecycle/effect-supervisor';
-import type { RuntimeStorage, RuntimeTransactionInput } from '../src/storage';
+import {
+  createRuntimeStoredCommandReceipt,
+  type RuntimeStorage,
+  type RuntimeTransactionInput,
+} from '../src/storage';
 
 describe('Host EffectSupervisor', () => {
   test('exposes the exact storage-owned recovery identity port without a second owner', () => {
@@ -18,6 +22,31 @@ describe('Host EffectSupervisor', () => {
     supervisor.commit('receipt_evidence', input);
     supervisor.commit('terminal_recovery', input);
     expect(calls).toEqual(['decision', 'attempt_start', 'receipt_evidence', 'terminal_recovery']);
+  });
+
+  test('only permits receipt evidence through an explicit command decision', () => {
+    const calls: string[] = [];
+    const supervisor = new EffectSupervisor(storageFixture(calls));
+    const input = {
+      ...transactionInput(),
+      commandReceipt: createRuntimeStoredCommandReceipt(
+        {
+          scopeSessionId: 'scope-1',
+          commandId: 'command-1',
+          requestDigest: 'a'.repeat(64),
+          targetSessionId: 'session-1',
+          committedAt: 1,
+        },
+        1,
+      ),
+    };
+
+    expect(() => supervisor.commit('receipt_evidence', input)).toThrow(
+      'requires a command decision',
+    );
+    expect(calls).toEqual([]);
+    supervisor.commitCommandDecision(input);
+    expect(calls).toEqual(['decision']);
   });
 
   test('never reaches an external dispatch when attempt acknowledgement fails', () => {
@@ -122,6 +151,9 @@ function storageFixture(calls: string[], lease: { renew?: () => boolean } = {}):
       read: () => null,
       getOrCreate: (_sessionId, allocate) => allocate(),
       remove: () => undefined,
+    },
+    commandReceipts: {
+      lookup: () => ({ status: 'missing' }),
     },
     transactions: {
       commitDecision: () => calls.push('decision'),

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { resolve } from 'node:path';
 import { parseArgs } from '../src/cli/index';
 
 // 测试 CLI 命令行参数解析逻辑 / Test CLI argument parsing logic
@@ -6,6 +7,27 @@ describe('cli argument parsing', () => {
   test('recognizes explicit Windows sandbox control-plane commands', () => {
     expect(parseArgs(['sandbox', 'status']).command).toBe('sandbox-status');
     expect(parseArgs(['sandbox', 'setup']).command).toBe('sandbox-setup');
+  });
+
+  test('recognizes only the parent-owned stdio Runtime Server entrypoint', () => {
+    const workspace = resolve('trusted-workspace');
+    const args = parseArgs([
+      'server',
+      '--stdio',
+      '--thread',
+      'desktop-owned-session',
+      '--workspace',
+      workspace,
+    ]);
+
+    expect(args.command).toBe('server-stdio');
+    expect(args.threadId).toBe('desktop-owned-session');
+    expect(args.workspace).toBe(workspace);
+    expect(parseArgs(['server', '--web']).command).toBe('help');
+  });
+
+  test('leaves the stdio session empty when the parent omits its owned thread id', () => {
+    expect(parseArgs(['server', '--stdio']).threadId).toBe('');
   });
 
   // 验证 run 命令默认使用新线程，避免恢复过期的中断 / Verify run defaults to fresh thread to avoid stale interrupt resume

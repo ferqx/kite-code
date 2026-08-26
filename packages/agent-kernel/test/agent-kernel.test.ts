@@ -278,6 +278,12 @@ function completeEvidenceFixture(
 function minimalEvent(type: RuntimeEventType): KernelEvent {
   const valueFor = (field: string): unknown => {
     if (field === 'grantKey') return 'grant-key-fixture';
+    if (field === 'failureCode' && type === 'session.rewind_failed') {
+      return 'execution_failed';
+    }
+    if (field === 'scope' && type.startsWith('session.rewind_')) {
+      return 'conversation_and_workspace';
+    }
     if (field === 'grant') {
       if (type === 'approval.granted') return 'approve_once';
       if (type === 'approval.batch_released') return 'same_command';
@@ -330,7 +336,9 @@ function minimalEvent(type: RuntimeEventType): KernelEvent {
       field === 'handleIntegrityIdentifier' ||
       field === 'name' ||
       field === 'reason' ||
+      field === 'error' ||
       field === 'message' ||
+      field === 'text' ||
       field === 'command' ||
       field === 'path' ||
       field === 'stream' ||
@@ -847,9 +855,9 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'agent-kernel-current',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(136);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(139);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
-    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(7);
+    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(10);
   });
 
   test('validates and decodes every current State event discriminant', () => {
@@ -858,6 +866,12 @@ describe('agent kernel package boundary', () => {
         return false;
       }
       if (field === 'grantKey') return 'grant-key-fixture';
+      if (field === 'failureCode' && eventType === 'session.rewind_failed') {
+        return 'execution_failed';
+      }
+      if (field === 'scope' && eventType.startsWith('session.rewind_')) {
+        return 'conversation_and_workspace';
+      }
       if (field === 'grant') {
         if (eventType === 'approval.granted') return 'approve_once';
         if (eventType === 'approval.batch_released') return 'same_command';
@@ -896,6 +910,7 @@ describe('agent kernel package boundary', () => {
         field === 'reason' ||
         field === 'message' ||
         field === 'error' ||
+        field === 'text' ||
         field === 'command' ||
         field === 'path' ||
         field === 'stream' ||
@@ -1022,12 +1037,12 @@ describe('agent kernel package boundary', () => {
     expect(reduceAgentState(state, diagnostic as KernelEvent)).toEqual(state);
   });
 
-  test('classifies all 136 events into one static owner or an explicit diagnostic no-op', () => {
+  test('classifies all 139 events into one static owner or an explicit default no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(136);
-    expect(new Set(covered).size).toBe(136);
+    expect(covered).toHaveLength(139);
+    expect(new Set(covered).size).toBe(139);
     expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(129);
-    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(136);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(139);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
@@ -1036,7 +1051,27 @@ describe('agent kernel package boundary', () => {
     ).toBe(true);
   });
 
-  test('runs the complete 129-case compatibility switch corpus and proves seven default diagnostics are no-op', () => {
+  test('keeps durable rewind evidence outside the unchanged State 27 shape', () => {
+    const state = createInitialAgentState({
+      threadId: 'session-1',
+      userId: 'user-1',
+      workspace: '/workspace',
+      turnId: 'turn-1',
+      recoveryIdentityKey: IDENTITY_KEY,
+    });
+    const requested: KernelEvent = {
+      type: 'session.rewind_requested',
+      rewindId: 'rewind-1',
+      commandId: 'command-1',
+      sourceSessionId: 'session-1',
+      targetSessionId: 'session-2',
+      checkpointId: 'checkpoint-1',
+      scope: 'conversation_only',
+    };
+    expect(reduceAgentState(state, requested)).toEqual(state);
+  });
+
+  test('runs the complete 129-case compatibility switch corpus and proves ten default events are no-op', () => {
     const diagnosticSet = new Set<string>(STATE_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);

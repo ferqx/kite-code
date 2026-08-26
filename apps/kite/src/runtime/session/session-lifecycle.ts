@@ -1,5 +1,4 @@
 import {
-  deleteSession,
   generateSessionName,
   listSessions,
   loadSession,
@@ -30,10 +29,6 @@ export class SessionLifecycleService {
     return loadSession(this.deps.openStateRuntimeStorage, threadId, () =>
       this.deps.resolveRecoveryIdentity(threadId),
     );
-  }
-
-  deletePersistedSession(threadId: string) {
-    return deleteSession(this.deps.openStateRuntimeStorage, threadId);
   }
 
   async generateAndPersistSessionName(threadId: string, task: string) {

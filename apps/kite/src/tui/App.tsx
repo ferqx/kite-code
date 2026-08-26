@@ -32,7 +32,14 @@ import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
 import type { ThemePreset } from './theme';
 import { useTheme } from './theme';
-import type { OutputBlock, TuiState } from './types';
+import type { OutputBlock, TuiPendingApproval, TuiState } from './types';
+
+type SafeApprovalEntry = TuiPendingApproval & {
+  readonly clientInteraction?: Extract<
+    import('@kite-ai/runtime-contract').RuntimeClientInteraction,
+    { readonly kind: 'approval' }
+  >;
+};
 
 export type { Action } from './reducers';
 export { createInitialState, eventReducer };
@@ -75,7 +82,7 @@ export interface AppProps {
   onAbort?: () => void;
   getRewindPreview?: (
     checkpointId: string,
-  ) => import('./runtime-presentation').RewindFilePreview | null;
+  ) => Promise<import('./runtime-presentation').RewindFilePreview | null>;
   resizeGeneration?: number;
   loadSessions?: (query: string) => Promise<import('#app/session-types').SessionInfo[]>;
   children?: ReactNode;
@@ -163,7 +170,8 @@ export default function App({
   // steal Esc/focus from those older interaction semantics.
   const focusedApprovalEntry =
     state.interrupt && state.interrupt.kind !== 'approval' ? undefined : activeApprovalEntry;
-  const approvalQueueActive = focusedApprovalEntry?.approval != null;
+  const safeFocusedApprovalEntry = focusedApprovalEntry as SafeApprovalEntry | undefined;
+  const approvalQueueActive = safeFocusedApprovalEntry?.clientInteraction != null;
   const overlayOrInterrupt = modalOverlayActive || !!state.interrupt || approvalQueueActive;
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
@@ -305,19 +313,7 @@ export default function App({
 
   const awaitingApproval = state.interrupt?.kind === 'approval' || approvalQueueActive;
   const awaitingInput = state.interrupt?.kind === 'input';
-  const activeApproval = useMemo(() => {
-    if (state.interrupt?.kind !== 'approval' && !focusedApprovalEntry) return undefined;
-    if (focusedApprovalEntry?.approval) return focusedApprovalEntry.approval;
-    if (state.interrupt?.kind !== 'approval') return undefined;
-    if (state.interrupt.approval) return state.interrupt.approval;
-    const blockId = state.interrupt.blockId;
-    if (blockId == null) return undefined;
-    for (const turn of state.turns) {
-      const block = turn.blocks.find((candidate) => candidate.id === blockId);
-      if (block?.kind === 'approval' && !block.resolved) return block.approval;
-    }
-    return undefined;
-  }, [focusedApprovalEntry, state.interrupt, state.turns]);
+  const activeApproval = safeFocusedApprovalEntry?.clientInteraction;
 
   const resolveApproval = useCallback(
     (action: string, grant?: string) => {
@@ -328,24 +324,19 @@ export default function App({
       // Rejections stay durable-event-driven because approval.rejected owns the
       // terminal projection for the interrupted turn.
       if (action !== 'approve') return;
-      const approvalInterrupt = state.interrupt?.kind === 'approval' ? state.interrupt : undefined;
       const suspendedSubagents = state.turns.flatMap((turn) =>
         turn.blocks.filter(
           (block): block is Extract<OutputBlock, { kind: 'subagent' }> =>
             block.kind === 'subagent' && block.status === 'suspended',
         ),
       );
+      const approvalInterrupt = state.interrupt?.kind === 'approval' ? state.interrupt : undefined;
       const identityTarget =
-        (approvalInterrupt?.approval?.subagentId == null
-          ? undefined
-          : suspendedSubagents.find(
-              (block) => block.subagentId === approvalInterrupt.approval?.subagentId,
-            )) ??
-        (approvalInterrupt?.toolCallId == null
+        approvalInterrupt?.toolCallId == null
           ? undefined
           : suspendedSubagents.find(
               (block) => block.parentToolCallId === approvalInterrupt.toolCallId,
-            ));
+            );
       const awaitingUserTargets = suspendedSubagents.filter(
         (block) =>
           block.approvalState === 'awaiting_user' ||
@@ -471,9 +462,7 @@ export default function App({
           )}
           {activeApproval && (
             <ApprovalBlock
-              key={`${state.interrupt?.interactionId ?? 'legacy'}:${
-                state.interrupt?.toolCallId ?? 'unknown-tool'
-              }:${activeApproval.approvalHash}`}
+              key={`${state.interrupt?.interactionId ?? 'legacy'}:${activeApproval.generation}`}
               approval={activeApproval}
               provider={provider}
               onResolved={resolveApproval}
@@ -533,7 +522,7 @@ export default function App({
           sandboxBackend={sandboxBackend}
           onSelect={selectInteractionMode}
           onClose={hidePermissionSelector}
-          sessionGrantCount={state.sessionCommandGrants?.size ?? sessionGrantCount ?? 0}
+          sessionGrantCount={sessionGrantCount ?? state.sessionCommandGrants?.size ?? 0}
           onClearSessionGrants={onClearSessionGrants}
         />
       )}
