@@ -186,6 +186,9 @@ descendant allowlist。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
 而非扩大 filesystem scope。network-disabled、policy-proven read-only 和未批准调用继续使用无 proxy 的最小
 环境。代理 URL 可能含认证信息，Shell 输出、模型投影和 session log 不得主动回显其值；代理变量只在
 supervisor/runner 实际 spawn 时从宿主读取，不能写入持久化的 preparation 或 recovery artifact。
+这里的 `allow_all` 是该次 development invocation 的 unrestricted egress，不是域名 allowlist。prepared
+consumer 不能因为 release-comparable `network.allowlist` evidence 为 `unsupported` 而在用户批准后再次拒绝；
+production boundary 需要的 allowlist 仍走独立 controller/qualification，不能由本路径推导。
 
 文件系统授权独立于上述网络投影。Windows 与 macOS/Linux 一样，普通外部路径和临时目录在审批通过后
 使用保留 `WRITE_RESTRICTED`、LUA 与 privilege stripping 的 approved filesystem token；其 mirrored

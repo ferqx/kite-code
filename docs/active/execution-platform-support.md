@@ -86,7 +86,10 @@ ADR-0082/ADR-0101/ADR-0110 对齐 development 权限交互与 Windows TLS 可执
 在 `interactionMode=full` 或 exact approval 后产生的 sealed scope，并要求 backend contract 明确其实际 token；更窄 filesystem scope 的
 更窄 scope 被 runner 拒绝。精确 runtime version query 等可证明
 本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
-verdict 或 D-04 空支持集。ADR-0088 已删除 AppContainer、private staging 与 repository reconciliation。
+verdict 或 D-04 空支持集。prepared consumer 因此只把 `off`/受限 filesystem 当成需要 enforcement evidence
+的限制，不把已批准的 development `allow_all` 伪装成 allowlist/full-access qualification；静态
+`backendCapabilities.network.allowlist` 与 `filesystem.full_access` 仍保持 `unsupported`。ADR-0088 已删除
+AppContainer、private staging 与 repository reconciliation。
 
 ### Unified startup downgrade
 

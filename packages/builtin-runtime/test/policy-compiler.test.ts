@@ -31,6 +31,8 @@ const CONTEXT: CapabilityPolicyContext = Object.freeze({
   }),
 });
 
+const WEATHER_COMMAND = "curl -s --max-time 20 'https://wttr.in/?format=3&lang=zh'";
+
 function projection() {
   return createBuiltinToolCatalogProjection(
     createRuntimeModuleRegistry(createBuiltinRuntimeModules()),
@@ -311,6 +313,21 @@ describe('Builtin operation policy compiler', () => {
     expect(compile('shell_execute', { command: 'git push origin main' })).toMatchObject({
       decision: 'ask',
       sandboxScope: { kind: 'expanded', filesystem: 'workspace_write', network: 'allow_all' },
+    });
+  });
+
+  test('classifies the approved weather command as a network-only scope expansion', () => {
+    expect(compile('shell_execute', { command: WEATHER_COMMAND })).toMatchObject({
+      decision: 'ask',
+      allowed: true,
+      requiresApproval: true,
+      risk: 'network',
+      effects: { network: true },
+      sandboxScope: {
+        kind: 'expanded',
+        filesystem: 'workspace_write',
+        network: 'allow_all',
+      },
     });
   });
 

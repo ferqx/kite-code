@@ -461,7 +461,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
     }
   });
 
-  test('unsupported expanded filesystem scope fails closed before Seatbelt execution', async () => {
+  test('allows one exact approved external filesystem invocation and writes its target', async () => {
     const ws = setupWorkspace();
     const externalFile = join(tmpdir(), `kite-code-approved-external-${process.pid}.txt`);
     try {
@@ -472,17 +472,15 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         command: `printf approved > "${externalFile}"`,
         filesystemMode: 'allow_all',
       });
-      expect(result.ok).toBe(false);
-      expect(result.terminationReason).toBe('sandbox_denied');
-      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
-      expect(existsSync(externalFile)).toBe(false);
+      expect(result.ok).toBe(true);
+      expect(await Bun.file(externalFile).text()).toBe('approved');
     } finally {
       rmSync(externalFile, { force: true });
       cleanupWorkspace(ws);
     }
   });
 
-  test('unsupported sensitive external scope never reaches Seatbelt execution', async () => {
+  test('allows an approved exact sensitive-looking external path without a second name denial', async () => {
     const ws = setupWorkspace();
     const externalRoot = mkdtempSync(join(tmpdir(), 'kite-code-approved-sensitive-'));
     const sensitiveDirectory = join(externalRoot, '.ssh');
@@ -495,39 +493,37 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         command: `printf approved > "${sensitiveFile}"; cat "${sensitiveFile}"`,
         filesystemMode: 'allow_all',
       });
-      expect(result.ok).toBe(false);
-      expect(result.terminationReason).toBe('sandbox_denied');
-      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
-      expect(existsSync(sensitiveFile)).toBe(false);
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('approved');
+      expect(await Bun.file(sensitiveFile).text()).toBe('approved');
     } finally {
       rmSync(externalRoot, { recursive: true, force: true });
       cleanupWorkspace(ws);
     }
   });
 
-  test('an unsupported expansion cannot bypass the admitted Workspace baseline', async () => {
+  test('reads a .ENV file inside the Workspace', async () => {
     const ws = setupWorkspace();
-    writeFileSync(join(ws, '.ENV.SECRET'), 'must-not-read');
+    writeFileSync(join(ws, '.ENV'), 'workspace-env');
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({
         workspace: ws,
-        command: `p=.E; cat "\${p}NV.SECRET"`,
-        filesystemMode: 'allow_all',
+        command: `p=.E; cat "\${p}NV"`,
       });
-      expect(result.ok).toBe(false);
-      expect(result.terminationReason).toBe('sandbox_denied');
-      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
-      expect(result.stdout).not.toContain('must-not-read');
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('workspace-env');
     } finally {
       cleanupWorkspace(ws);
     }
   });
 
-  test('unsupported filesystem expansion cannot start before network isolation', async () => {
+  test('keeps networking blocked when an approved external filesystem invocation has network disabled', async () => {
     const ws = setupWorkspace();
     const externalFile = join(tmpdir(), `kite-code-approved-sandboxed-${process.pid}.txt`);
-    const server = startTestHttpServer({ fetch: () => new Response('must-not-arrive') });
+    const server = startTestHttpServer({
+      fetch: () => new Response('network-must-remain-blocked'),
+    });
     try {
       rmSync(externalFile, { force: true });
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
@@ -537,10 +533,8 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         filesystemMode: 'allow_all',
       });
       expect(result.ok).toBe(false);
-      expect(result.terminationReason).toBe('sandbox_denied');
-      expect(result.sandboxFailure?.stage).toBe('pre_dispatch');
-      expect(existsSync(externalFile)).toBe(false);
-      expect(result.stdout).not.toContain('must-not-arrive');
+      expect(await Bun.file(externalFile).text()).toBe('approved');
+      expect(result.stdout).not.toContain('network-must-remain-blocked');
     } finally {
       server.stop(true);
       rmSync(externalFile, { force: true });
@@ -564,7 +558,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
     }
   });
 
-  test('fails closed when expanded network scope lacks accepted backend evidence', async () => {
+  test('blocks network by default and permits an approved network invocation', async () => {
     const ws = setupWorkspace();
     const server = startTestHttpServer({
       fetch: () => new Response('sandbox-network-ok'),
@@ -583,10 +577,9 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
       });
 
       expect(blocked.ok).toBe(false);
-      expect(allowed.ok).toBe(false);
-      expect(allowed.terminationReason).toBe('sandbox_denied');
-      expect(allowed.sandboxFailure?.stage).toBe('pre_dispatch');
-      expect(allowed.stdout).not.toContain('sandbox-network-ok');
+      expect(blocked.stdout).not.toContain('sandbox-network-ok');
+      expect(allowed.ok).toBe(true);
+      expect(allowed.stdout).toContain('sandbox-network-ok');
     } finally {
       server.stop(true);
       cleanupWorkspace(ws);

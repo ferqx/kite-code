@@ -169,6 +169,9 @@ arbitrary script 同时投影 `sensitiveExternalAccess`；Full 可直接授权�
 用户一旦对该 exact invocation 授予 `approve_once`，本次 Shell 只获得该 invocation 的 sealed scope；
 静态 effects 只决定审批文案与 filesystem scope，不能在批准后再次把该调用强制改成 network-disabled。
 拒绝则命令不启动；不能兑现 governed network 的 sealed production consumer 必须在审批前拒绝。
+development prepared consumer 也不得把已批准的 `network=allow_all` 重新解释为 production host allowlist；
+它必须在继续核验 exact grant/identity/lifecycle 的同时执行该 unrestricted scope，而 production allowlist
+qualification 仍由独立 boundary/evidence gate 决定。
 macOS/Linux native sandbox 消费该模式；Windows protocol V6 对已批准的
 `filesystem=full_access, network=allow_all` sealed scope 使用当前登录用户 token
 运行该 exact command，并保留当前用户 profile 的 Schannel 路径。它不创建本地账户、不请求 UAC，也不依赖

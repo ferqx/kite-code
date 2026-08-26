@@ -40,6 +40,7 @@ function preparation(
   filesystemMode: 'workspace_only' | 'allow_all',
   networkMode: 'disabled' | 'allow_all' = 'disabled',
   command = 'printf saq-scope',
+  executionTrust?: 'policy_proven_read_only',
 ) {
   return createBuiltinSandboxPreparation({
     identity: IDENTITY,
@@ -50,6 +51,7 @@ function preparation(
     protectedPathRevision: 'protected-saq-scope',
     filesystemMode,
     networkMode,
+    ...(executionTrust ? { executionTrust } : {}),
   }).preparation;
 }
 
@@ -236,7 +238,7 @@ describe('SAQ sandbox scope/backend contract', () => {
     'seatbelt',
     'bubblewrap',
     'windows_restricted_token',
-  ] as const)('unsupported expanded scope fails closed before host dispatch: %s', async (backend) => {
+  ] as const)('sealed approved network and filesystem scope dispatches exactly once without production qualification: %s', async (backend) => {
     const candidate = preparation('allow_all', 'allow_all');
     const plan = preparedPlan(candidate, backend);
     const counters = { prepare: 0, process: 0 };
@@ -258,7 +260,162 @@ describe('SAQ sandbox scope/backend contract', () => {
     });
 
     expect(plan.backendCapabilities.filesystem.full_access).toBe('unsupported');
+    expect(plan.backendCapabilities.network.allowlist).toBe('unsupported');
+    expect(result).toMatchObject({ ok: true, stdout: 'ok' });
+    expect(counters.process).toBe(1);
+  });
+
+  test.each([
+    'seatbelt',
+    'bubblewrap',
+  ] as const)('sealed approved network with a workspace filesystem scope dispatches without allowlist evidence: %s', async (backend) => {
+    const candidate = preparation('workspace_only', 'allow_all');
+    const plan = preparedPlan(candidate, backend);
+    const counters = { prepare: 0, process: 0 };
+    const consumer = consumerFor({
+      backend,
+      provider: providerFor(plan, counters),
+      processExecute: async () => {
+        counters.process += 1;
+        return completedResult();
+      },
+    });
+
+    const result = await consumer({
+      identity: IDENTITY,
+      workspace: WORKSPACE,
+      command: 'printf saq-scope',
+      filesystemMode: 'workspace_only',
+      networkMode: 'allow_all',
+      lifecycle: lifecycle(),
+    });
+
+    expect(plan.backendCapabilities.network.allowlist).toBe('unsupported');
+    expect(result).toMatchObject({ ok: true, stdout: 'ok' });
+    expect(counters.process).toBe(1);
+  });
+
+  test.each([
+    'seatbelt',
+    'bubblewrap',
+  ] as const)('sealed approved filesystem scope retains enforced network-off evidence: %s', async (backend) => {
+    const candidate = preparation('allow_all', 'disabled');
+    const plan = preparedPlan(candidate, backend);
+    const counters = { prepare: 0, process: 0 };
+    const consumer = consumerFor({
+      backend,
+      provider: providerFor(plan, counters),
+      processExecute: async () => {
+        counters.process += 1;
+        return completedResult();
+      },
+    });
+
+    const result = await consumer({
+      identity: IDENTITY,
+      workspace: WORKSPACE,
+      command: 'printf saq-scope',
+      filesystemMode: 'allow_all',
+      networkMode: 'disabled',
+      lifecycle: lifecycle(),
+    });
+
+    expect(plan.backendCapabilities.network.off).toBe('enforced');
+    expect(result).toMatchObject({ ok: true, stdout: 'ok' });
+    expect(counters.process).toBe(1);
+  });
+
+  test('Windows lower-assurance workspace/off development scope dispatches without restrictive evidence', async () => {
+    const candidate = preparation('workspace_only', 'disabled');
+    const plan = preparedPlan(candidate, 'windows_restricted_token');
+    const counters = { prepare: 0, process: 0 };
+    const consumer = consumerFor({
+      backend: 'windows_restricted_token',
+      provider: providerFor(plan, counters),
+      processExecute: async () => {
+        counters.process += 1;
+        return completedResult();
+      },
+    });
+
+    const result = await consumer({
+      identity: IDENTITY,
+      workspace: WORKSPACE,
+      command: 'printf saq-scope',
+      filesystemMode: 'workspace_only',
+      networkMode: 'disabled',
+      lifecycle: lifecycle(),
+    });
+
+    expect(plan.backendCapabilities.filesystem.workspace_write).toBe('unsupported');
+    expect(plan.backendCapabilities.network.off).toBe('unsupported');
+    expect(result).toMatchObject({ ok: true, stdout: 'ok' });
+    expect(counters.process).toBe(1);
+  });
+
+  test('Windows approved network rejects a narrower filesystem scope before host dispatch', async () => {
+    const candidate = preparation('workspace_only', 'allow_all');
+    const plan = preparedPlan(candidate, 'windows_restricted_token');
+    const counters = { prepare: 0, process: 0 };
+    const consumer = consumerFor({
+      backend: 'windows_restricted_token',
+      provider: providerFor(plan, counters),
+      processExecute: async () => {
+        counters.process += 1;
+        return completedResult();
+      },
+    });
+
+    const result = await consumer({
+      identity: IDENTITY,
+      workspace: WORKSPACE,
+      command: 'printf saq-scope',
+      filesystemMode: 'workspace_only',
+      networkMode: 'allow_all',
+      lifecycle: lifecycle(),
+    });
+
     expect(result.terminationReason).toBe('sandbox_denied');
+    expect(result.stderr).toContain(
+      'Windows approved network requires an explicit full filesystem scope',
+    );
+    expect(counters.process).toBe(0);
+  });
+
+  test.each([
+    'seatbelt',
+    'bubblewrap',
+    'windows_restricted_token',
+  ] as const)('read-only trust cannot claim an approved full filesystem scope: %s', async (backend) => {
+    const candidate = preparation(
+      'allow_all',
+      'allow_all',
+      'printf saq-scope',
+      'policy_proven_read_only',
+    );
+    const plan = preparedPlan(candidate, backend);
+    const counters = { prepare: 0, process: 0 };
+    const consumer = consumerFor({
+      backend,
+      provider: providerFor(plan, counters),
+      processExecute: async () => {
+        counters.process += 1;
+        return completedResult();
+      },
+    });
+
+    const result = await consumer({
+      identity: IDENTITY,
+      workspace: WORKSPACE,
+      command: 'printf saq-scope',
+      filesystemMode: 'allow_all',
+      networkMode: 'allow_all',
+      executionTrust: 'policy_proven_read_only',
+      lifecycle: lifecycle(),
+    });
+
+    expect(result.terminationReason).toBe('sandbox_denied');
+    expect(result.stderr).toContain('cannot combine full filesystem access with read-only trust');
     expect(counters.process).toBe(0);
   });
 

@@ -63,6 +63,8 @@ type TestToolExecutionInput = NonNullable<
   Parameters<typeof executeTestRuntimeTool>[0]['execution']
 >;
 
+const WEATHER_COMMAND = "curl -s --max-time 20 'https://wttr.in/?format=3&lang=zh'";
+
 async function executeApprovedRuntimeTool(input: {
   readonly workspace: string;
   readonly toolName: string;
@@ -416,23 +418,51 @@ describe('network boundary tool integration', () => {
     );
   });
 
-  test('projects approved shell network access through a sealed managed-tool boundary', async () => {
+  test('does not dispatch the weather command before approval, then projects its exact grant', async () => {
     let observedNetworkMode: string | undefined;
-    const shellRequest = request('shell_execute', {
-      command: 'curl https://api.example.com',
-    });
-    const result = await executeApprovedRuntimeTool({
+    let executions = 0;
+    const shellRequest = request('shell_execute', { command: WEATHER_COMMAND });
+    const execution: TestToolExecutionInput = {
+      taskConfig: taskConfig('allowlist', ['wttr.in']),
+      sandboxAvailable: true,
+      shellExecutor: async (input) => {
+        executions += 1;
+        observedNetworkMode = input.networkMode;
+        expect(input.command).toBe(WEATHER_COMMAND);
+        return {
+          ok: true,
+          command: input.command,
+          exitCode: 0,
+          stdout: 'Beijing: +20°C',
+          stderr: '',
+        };
+      },
+    };
+    const pending = await executeTestRuntimeTool({
       workspace: process.cwd(),
       toolName: shellRequest.name,
       args: shellRequest.args,
-      execution: {
-        taskConfig: taskConfig('allowlist', ['api.example.com']),
-        sandboxAvailable: true,
-        shellExecutor: async (input) => {
-          observedNetworkMode = input.networkMode;
-          return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
-        },
-      },
+      state: { interactionMode: 'accept_edits' },
+      execution,
+    });
+
+    expect(pending.events).toContainEqual(
+      expect.objectContaining({ type: 'approval.requested', toolCallId: pending.toolCallId }),
+    );
+    expect(pending.terminal).toBeUndefined();
+    expect(executions).toBe(0);
+    const approvalHash = pending.state.tools.calls[pending.toolCallId]?.approvalHash;
+    expect(approvalHash).toEqual(expect.any(String));
+
+    const result = await executeTestRuntimeTool({
+      workspace: process.cwd(),
+      toolName: shellRequest.name,
+      args: shellRequest.args,
+      toolCallId: pending.toolCallId,
+      status: 'approved',
+      state: pending.state,
+      callOverrides: { approvalHash, approvalGrant: 'approve_once' },
+      execution,
     });
 
     expect(result.terminal).toMatchObject({
@@ -440,6 +470,7 @@ describe('network boundary tool integration', () => {
       result: { ok: true },
     });
     expect(observedNetworkMode).toBe('allow_all');
+    expect(executions).toBe(1);
   });
 
   test('rejects every MCP transport entrypoint before consulting the provider', async () => {
