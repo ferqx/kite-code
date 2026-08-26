@@ -10,9 +10,6 @@ describe('TUI exit coordinator', () => {
     });
     const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => {
-          order.push('abort');
-        },
         shutdownObservability: async (timeoutMs) => {
           order.push(`shutdown:${timeoutMs}`);
           await shutdown;
@@ -29,19 +26,16 @@ describe('TUI exit coordinator', () => {
     const second = coordinator.requestExit();
     expect(second).toBe(first);
     await Promise.resolve();
-    expect(order).toEqual(['abort', 'shutdown:250']);
+    expect(order).toEqual(['shutdown:250']);
     releaseShutdown?.();
     await first;
-    expect(order).toEqual(['abort', 'shutdown:250', 'dispose', 'unmount', 'exit:0']);
+    expect(order).toEqual(['shutdown:250', 'dispose', 'unmount', 'exit:0']);
   });
 
   test('restores the terminal and exits even when telemetry shutdown fails', async () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => {
-          order.push('abort');
-        },
         shutdownObservability: async () => {
           throw new Error('exporter unavailable');
         },
@@ -54,16 +48,13 @@ describe('TUI exit coordinator', () => {
     });
 
     await coordinator.requestExit(1);
-    expect(order).toEqual(['abort', 'dispose', 'unmount', 'exit']);
+    expect(order).toEqual(['dispose', 'unmount', 'exit']);
   });
 
   test('still unmounts and exits when dispose fails', async () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => {
-          order.push('abort');
-        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
@@ -77,16 +68,13 @@ describe('TUI exit coordinator', () => {
     });
 
     await coordinator.requestExit(1);
-    expect(order).toEqual(['abort', 'shutdown', 'dispose', 'unmount', 'exit:1']);
+    expect(order).toEqual(['shutdown', 'dispose', 'unmount', 'exit:1']);
   });
 
-  test('aborts the in-flight startup prewarm after session abort and before shutdown', async () => {
+  test('aborts the in-flight startup prewarm before client shutdown', async () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => {
-          order.push('abort');
-        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
@@ -102,16 +90,13 @@ describe('TUI exit coordinator', () => {
     });
 
     await coordinator.requestExit();
-    expect(order).toEqual(['abort', 'abort-preparation', 'shutdown', 'dispose', 'unmount', 'exit']);
+    expect(order).toEqual(['abort-preparation', 'shutdown', 'dispose', 'unmount', 'exit']);
   });
 
   test('a failing prewarm abort cannot strand terminal teardown', async () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinator({
       getSessionLifecycle: () => ({
-        abortAll: () => {
-          order.push('abort');
-        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
@@ -129,29 +114,6 @@ describe('TUI exit coordinator', () => {
     });
 
     await coordinator.requestExit(1);
-    expect(order).toEqual(['abort', 'shutdown', 'dispose', 'unmount', 'exit']);
-  });
-
-  test('still attempts telemetry shutdown when abort fails', async () => {
-    const order: string[] = [];
-    const coordinator = createTuiExitCoordinator({
-      getSessionLifecycle: () => ({
-        abortAll: () => {
-          order.push('abort');
-          throw new Error('runtime cancellation failed');
-        },
-        shutdownObservability: async () => {
-          order.push('shutdown');
-        },
-        dispose: () => {
-          order.push('dispose');
-        },
-      }),
-      unmount: () => order.push('unmount'),
-      exit: () => order.push('exit'),
-    });
-
-    await coordinator.requestExit();
-    expect(order).toEqual(['abort', 'shutdown', 'dispose', 'unmount', 'exit']);
+    expect(order).toEqual(['shutdown', 'dispose', 'unmount', 'exit']);
   });
 });

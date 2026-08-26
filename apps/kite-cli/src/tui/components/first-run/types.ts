@@ -1,7 +1,7 @@
-import type { ModelProviderType } from '#kite-cli/config';
+import type { AppModelProviderType } from '@kite-ai/kite-app-contract';
 
 export interface ProviderDefinition {
-  type: ModelProviderType;
+  type: AppModelProviderType;
   label: string;
   description?: string;
   defaultBaseURL: string;
@@ -52,14 +52,17 @@ export interface ConnectionFormState {
 }
 
 export interface ConnectionError {
-  kind: 'auth' | 'unreachable' | 'incompatible' | 'timeout' | 'generic';
+  kind: 'auth' | 'unreachable' | 'incompatible' | 'timeout' | 'outcome-unknown' | 'generic';
   message: string;
   details?: string;
+  /** Present only when a post-unknown state query found a ready route. */
+  confirmedModelName?: string;
 }
 
 export type ErrorAction =
   | 'edit-key'
   | 'edit-settings'
+  | 'continue-confirmed'
   | 'try-again'
   | 'enter-model'
   | 'back-to-provider'
@@ -119,11 +122,16 @@ export type ConnectProviderResult =
   | {
       status: 'failed';
       error: ConnectionError;
+    }
+  | {
+      /** The mutation result was unknown; any continuation must be explicit. */
+      status: 'outcome-unknown';
+      modelName?: string;
+      message: string;
     };
 
 export interface ConnectProviderInput {
   provider: ProviderDefinition;
-  configPath?: string;
   signal?: AbortSignal;
 }
 
@@ -174,6 +182,14 @@ export function getErrorActions(error: ConnectionError): ErrorActionDef[] {
       return [
         { action: 'enter-model', label: 'Enter a model name' },
         { action: 'edit-settings', label: 'Edit connection settings' },
+        { action: 'back-to-provider', label: 'Choose another provider' },
+      ];
+    case 'outcome-unknown':
+      return [
+        ...(error.confirmedModelName
+          ? [{ action: 'continue-confirmed' as const, label: 'Continue with confirmed state' }]
+          : []),
+        { action: 'edit-settings', label: 'Review connection settings' },
         { action: 'back-to-provider', label: 'Choose another provider' },
       ];
     default:

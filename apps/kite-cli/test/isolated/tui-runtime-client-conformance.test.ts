@@ -7,14 +7,15 @@ import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
 import { openStateStoreForTest } from '../../../../scripts/support/runtime-storage';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import { createKiteInProcessAppControlComposition } from '../../src/app-control';
 import { createKiteTuiSessionManager } from '../../src/bootstrap';
 import type { SessionPresentationAction } from '../../src/runtime/session/contracts';
+import { createRuntimeOperationGate } from '../../src/runtime-application';
 import type { AppShellExecutor } from '../../src/sandbox/composition';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
   projectAppHostShellResult,
 } from '../../src/sandbox/prepared-tool-pipeline';
-import { TuiUserInputProvider } from '../../src/tui/provider';
 
 test('TUI App composition receives safe live and terminal events through its Runtime Client subscription', async () => {
   const workspace = mkdtempSync(join(realpathSync(tmpdir()), 'kite-tui-runtime-client-cutover-'));
@@ -28,31 +29,35 @@ test('TUI App composition receives safe live and terminal events through its Run
       },
     },
   ]);
-  const provider = new TuiUserInputProvider();
   const shellExecutor = createHostShellExecutor();
-  const manager = createKiteTuiSessionManager({
-    workspace,
-    checkpointPath: join(workspace, 'runtime.sqlite'),
-    config: {
-      providerName: 'integration-model',
-      providerType: 'openai-compatible',
-      apiKey: 'test-key',
-      baseURL: model.baseURL,
-      modelName: 'mock-model',
-      interactionMode: 'accept_edits',
-      sandbox: { enabled: false },
+  const appControl = createKiteInProcessAppControlComposition(createRuntimeOperationGate());
+  const manager = createKiteTuiSessionManager(
+    {
+      workspace,
     },
-    provider,
-    skillManifests: [],
-    skillOptions: {
-      userKiteCodeSkillsDir: join(workspace, 'user-kite-skills'),
-      userAgentsSkillsDir: join(workspace, 'user-agent-skills'),
-      projectKiteCodeSkillsDir: join(workspace, '.kite-code', 'skills'),
-      projectAgentsSkillsDir: join(workspace, '.agents', 'skills'),
+    {
+      checkpointPath: join(workspace, 'runtime.sqlite'),
+      config: {
+        providerName: 'integration-model',
+        providerType: 'openai-compatible',
+        apiKey: 'test-key',
+        baseURL: model.baseURL,
+        modelName: 'mock-model',
+        interactionMode: 'accept_edits',
+        sandbox: { enabled: false },
+      },
+      skillManifests: [],
+      skillOptions: {
+        userKiteCodeSkillsDir: join(workspace, 'user-kite-skills'),
+        userAgentsSkillsDir: join(workspace, 'user-agent-skills'),
+        projectKiteCodeSkillsDir: join(workspace, '.kite-code', 'skills'),
+        projectAgentsSkillsDir: join(workspace, '.agents', 'skills'),
+      },
+      mcpManager: null,
+      shellExecutor,
+      appControl,
     },
-    mcpManager: null,
-    shellExecutor,
-  });
+  );
 
   try {
     const bridgeSource = readFileSync(
@@ -67,6 +72,15 @@ test('TUI App composition receives safe live and terminal events through its Run
     expect(bridgeSource).not.toContain('Reflect.get');
     expect(bridgeSource).not.toContain('Reflect.set');
     expect(facadeSource).not.toContain('Omit<SessionManager');
+    for (const derivedManagerType of [
+      'ReturnType<SessionManager',
+      'Parameters<SessionManager',
+      'ReturnType<SessionRuntime',
+      'Parameters<SessionRuntime',
+    ]) {
+      expect(facadeSource).not.toContain(derivedManagerType);
+      expect(bridgeSource).not.toContain(derivedManagerType);
+    }
 
     const sessionId = manager.createSession(workspace);
     await manager.waitForSessionReady(sessionId);
@@ -84,16 +98,6 @@ test('TUI App composition receives safe live and terminal events through its Run
       await runtime!.runTask('Reply once without calling a tool.', {
         dispatch: (action: SessionPresentationAction) => {
           if (action.type === 'RUNTIME_EVENT') events.push(action.event);
-        },
-        provider,
-        config: {
-          providerName: 'integration-model',
-          providerType: 'openai-compatible',
-          apiKey: 'test-key',
-          baseURL: model.baseURL,
-          modelName: 'mock-model',
-          interactionMode: 'accept_edits',
-          sandbox: { enabled: false },
         },
       });
     } catch (error) {

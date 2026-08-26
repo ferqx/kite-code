@@ -1,4 +1,3 @@
-import type { McpServerControlState, McpServerKey } from '@kite-ai/builtin-runtime/mcp';
 import { Box, useInput } from 'ink';
 import {
   type MutableRefObject,
@@ -8,7 +7,6 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { validateMcpServerName } from '#kite-cli/config';
 import OverlayFrame, { type OverlayShortcut, OverlayShortcutBar } from '../components/OverlayFrame';
 import { OverlayEmptyState, OverlayMessage, OverlaySummary } from '../components/OverlayPrimitives';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
@@ -37,9 +35,10 @@ import {
   type McpServerAction,
   moveSelection,
   serverIdentity,
+  validateMcpServerName,
   validSelection,
 } from './model';
-import type { McpController } from './types';
+import type { McpController, McpServerControlState, McpServerKey } from './types';
 
 export interface McpOverlayProps {
   controller: McpController;
@@ -155,12 +154,13 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
         .map((tool) => ({ id: tool.name, label: tool.name }))
     : [];
   const genericOptions = useMemo(() => {
-    if (view.kind === 'add_server') return addOptions(view.step, draft);
+    if (view.kind === 'add_server')
+      return addOptions(view.step, draft, snapshot.control.sourcePaths);
     if (view.kind === 'authenticate') return authOptions(currentServer, authStarting);
     if (view.kind === 'project_approval') return approvalOptions;
     if (view.kind === 'confirm') return confirmOptions(view.action);
     return [];
-  }, [authStarting, currentServer, draft, view]);
+  }, [authStarting, currentServer, draft, snapshot.control.sourcePaths, view]);
   const inputActive =
     view.kind === 'add_server' && (view.step === 'name' || view.step === 'target');
 
@@ -415,7 +415,7 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
       return;
     }
     if (view.kind === 'add_server') {
-      const options = addOptions(view.step, draft);
+      const options = addOptions(view.step, draft, snapshot.control.sourcePaths);
       if (direction) {
         setSelectSelectedId((current) => moveSelection(options, current, direction));
       }
@@ -599,12 +599,17 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
           />
         )}
         {view.kind === 'adding_server' && (
-          <AddingServerView draft={view.draft} dotCount={activityDotCount} />
+          <AddingServerView
+            draft={view.draft}
+            dotCount={activityDotCount}
+            sourcePaths={snapshot.control.sourcePaths}
+          />
         )}
         {view.kind === 'add_server' && (
           <AddServer
             step={view.step}
             draft={draft}
+            sourcePaths={snapshot.control.sourcePaths}
             selectedId={selectSelectedId}
             inputError={inputError}
             onNameChange={(name) => {
@@ -644,12 +649,12 @@ function serverListOptions(
     {
       id: 'project',
       title: '项目',
-      servers: servers.filter((server) => server.source.startsWith('project')),
+      servers: servers.filter((server) => server.key.source.startsWith('project')),
     },
     {
       id: 'user',
       title: '用户',
-      servers: servers.filter((server) => !server.source.startsWith('project')),
+      servers: servers.filter((server) => !server.key.source.startsWith('project')),
     },
   ];
   return groups.flatMap((group) => {
@@ -717,8 +722,8 @@ function overlayMeta(
 }
 
 function serverScopeSummary(servers: readonly Readonly<McpServerControlState>[]): string {
-  const hasProject = servers.some((server) => server.source.startsWith('project'));
-  const hasUser = servers.some((server) => !server.source.startsWith('project'));
+  const hasProject = servers.some((server) => server.key.source.startsWith('project'));
+  const hasUser = servers.some((server) => !server.key.source.startsWith('project'));
   if (hasProject && hasUser) return '项目与用户配置';
   if (hasProject) return '项目配置';
   if (hasUser) return '用户配置';

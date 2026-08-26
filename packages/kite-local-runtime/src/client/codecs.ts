@@ -30,6 +30,17 @@ const secretMaterial = z
     'secret contains a control character',
   );
 
+// The custom OpenAI-compatible first-run journey permits an empty key. Keep
+// the field explicit (rather than optional) so the provider operation has one
+// stable shape while still rejecting control characters and oversized input.
+const providerApiKey = z
+  .string()
+  .max(16_384)
+  .refine(
+    (value) => ![...value].some((character) => /\p{Cc}/u.test(character)),
+    'api key contains a control character',
+  );
+
 const lifecycleOperation = z.enum(['ensure', 'status', 'stop', 'restart']);
 const lifecycleState = z.enum(['absent', 'starting', 'ready', 'quiescing', 'draining']);
 const lifecycleOutcome = z.enum([
@@ -105,7 +116,11 @@ const localRuntimeCredentialRequestSchema = z.discriminatedUnion('operation', [
       ...credentialBase,
       operation: z.literal('write_provider_api_key'),
       providerId: boundedIdentity,
-      apiKey: secretMaterial,
+      apiKey: providerApiKey,
+      /** Optional endpoint override used by the current custom-provider first-run flow. */
+      baseURL: boundedIdentity.optional(),
+      /** Optional manually entered model used when discovery is unavailable. */
+      modelName: boundedIdentity.optional(),
     })
     .strict(),
   z
@@ -136,6 +151,10 @@ const localRuntimeCredentialRequestSchema = z.discriminatedUnion('operation', [
 
 export type LocalRuntimeCredentialOperation = z.infer<typeof credentialOperation>;
 export type LocalRuntimeCredentialRequest = z.infer<typeof localRuntimeCredentialRequestSchema>;
+export type NativeProviderCredentialRequest = Extract<
+  LocalRuntimeCredentialRequest,
+  { readonly operation: 'write_provider_api_key' }
+>;
 export type NativeCredentialRequest = LocalRuntimeCredentialRequest;
 export const LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA = localRuntimeCredentialRequestSchema;
 
@@ -146,6 +165,8 @@ const credentialErrorCode = z.enum([
   'revision_conflict',
   'credential_unavailable',
   'temporarily_unavailable',
+  'provider_incompatible',
+  'model_required',
 ]);
 const localRuntimeCredentialResultSchema = z
   .object({
@@ -160,6 +181,10 @@ const localRuntimeCredentialResultSchema = z
   .strict();
 
 export type LocalRuntimeCredentialResult = z.infer<typeof localRuntimeCredentialResultSchema>;
+export type LocalRuntimeCredentialErrorCode = z.infer<typeof credentialErrorCode>;
+export type NativeProviderCredentialResult = Omit<LocalRuntimeCredentialResult, 'operation'> & {
+  readonly operation: 'write_provider_api_key';
+};
 export type NativeCredentialResult = LocalRuntimeCredentialResult;
 export const LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA = localRuntimeCredentialResultSchema;
 

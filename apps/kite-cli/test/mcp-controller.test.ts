@@ -1,97 +1,173 @@
 import { describe, expect, test } from 'bun:test';
 import type {
-  McpAuthResult,
-  McpControlSnapshot,
-  McpRuntimeProvider,
-  McpServerKey,
-  McpSupervisor,
-} from '@kite-ai/builtin-runtime/mcp';
+  AppMcpAction,
+  AppMcpActionResponse,
+  AppMcpServer,
+  AppMcpServerKey,
+  AppMcpSnapshot,
+  KiteAppControlClient,
+  KiteWorkspaceIdentity,
+} from '@kite-ai/kite-app-contract';
 import { TuiMcpController } from '#kite-cli/tui/mcp/controller';
 
-function createSupervisor(): {
-  supervisor: McpSupervisor;
-  snapshot: McpControlSnapshot;
-} {
-  const listeners = new Set<() => void>();
-  let snapshot: McpControlSnapshot = {
-    revision: 'revision-1',
-    generation: 1,
-    servers: Object.freeze([]),
-    sourceRevisions: Object.freeze({
-      local: 'local-1',
-      project: 'project-1',
-      user: 'user-1',
-    }),
-  };
-  const emit = () => {
-    for (const listener of listeners) listener();
-  };
-  const runtimeProvider = {} as McpRuntimeProvider;
+const workspace: KiteWorkspaceIdentity = Object.freeze({
+  canonicalPath: '/workspace',
+  projectId: 'project_test',
+  workspaceDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+});
 
+function makeServer(overrides: Partial<AppMcpServer> = {}): AppMcpServer {
   return {
-    supervisor: {
-      async start() {},
-      async stop() {},
-      async reload() {},
-      async retry() {},
-      async mutate() {
-        snapshot = Object.freeze({
-          revision: 'revision-2',
-          generation: snapshot.generation + 1,
-          servers: snapshot.servers,
-          sourceRevisions: snapshot.sourceRevisions,
-        });
-        emit();
-      },
-      async remove() {
-        snapshot = Object.freeze({
-          ...snapshot,
-          revision: 'revision-3',
-          generation: snapshot.generation + 1,
-        });
-        emit();
-        return { credentialCleanup: 'not_needed' };
-      },
-      async login(_key: McpServerKey): Promise<McpAuthResult> {
-        return { status: 'connected' } as unknown as McpAuthResult;
-      },
-      async cancelAuth(_flowId: string): Promise<McpAuthResult> {
-        return { status: 'connected' } as unknown as McpAuthResult;
-      },
-      async logout(_key: McpServerKey, _revoke: boolean): Promise<McpAuthResult> {
-        return { status: 'connected' } as unknown as McpAuthResult;
-      },
-      getSnapshot() {
-        return snapshot;
-      },
-      subscribe(listener) {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
-      getRuntimeProvider() {
-        return runtimeProvider;
-      },
-    },
-    get snapshot() {
-      return snapshot;
-    },
+    key: { name: 'github', source: 'project' },
+    effective: true,
+    sourcePath: '/workspace/.kite-code/mcp.json',
+    transport: 'http',
+    enabled: true,
+    required: false,
+    configStatus: 'ready',
+    health: 'ready',
+    authStatus: 'not_required',
+    configuration: { endpoint: 'https://example.com' },
+    revision: 'server-1',
+    toolCount: 0,
+    resourceCount: 0,
+    promptCount: 0,
+    tools: [],
+    prompts: [],
+    ...overrides,
   };
 }
 
+function makeSnapshot(servers: readonly AppMcpServer[] = []): AppMcpSnapshot {
+  return {
+    schema: 'kite.app.mcp.snapshot-response.v1',
+    workspace,
+    revision: 'snapshot-1',
+    sourceRevisions: { project: 'project-1', user: 'user-1' },
+    sourcePaths: {
+      project: '/workspace/.kite-code/mcp.json',
+      user: '/home/user/.kite-code/mcp.json',
+    },
+    servers,
+  };
+}
+
+function createClient(initial = makeSnapshot()) {
+  let snapshot = initial;
+  const requests: AppMcpAction[] = [];
+  const client = {
+    async getMcpSnapshot() {
+      return snapshot;
+    },
+    async applyMcpAction(request: { action: AppMcpAction }): Promise<AppMcpActionResponse> {
+      requests.push(request.action);
+      return {
+        schema: 'kite.app.mcp.action-response.v1',
+        outcome: 'applied',
+        snapshot,
+      };
+    },
+    setSnapshot(next: AppMcpSnapshot) {
+      snapshot = next;
+    },
+    requests,
+  } as unknown as KiteAppControlClient & {
+    setSnapshot(next: AppMcpSnapshot): void;
+    requests: AppMcpAction[];
+  };
+  return client;
+}
+
 describe('TuiMcpController', () => {
-  test('replaces stale remove message when adding a server', async () => {
-    const { supervisor } = createSupervisor();
-    const controller = new TuiMcpController(supervisor, '/workspace');
+  test('loads the safe App Control snapshot and preserves workspace identity', async () => {
+    const client = createClient();
+    const controller = new TuiMcpController(client, workspace);
 
-    await controller.remove({ name: 'test', source: 'project' }, 'project-1');
-    expect(controller.getSnapshot().message).toBe('Removed MCP server test.');
+    await controller.start();
 
-    const added = await controller.add({
-      scope: 'project',
-      name: 'test',
-      config: { type: 'http', url: 'https://example.com/mcp' },
+    expect(controller.getSnapshot().control.workspace).toEqual(workspace);
+    expect(controller.getSnapshot().control.servers).toEqual([]);
+  });
+
+  test('maps visible mutations to exact App Control actions', async () => {
+    const server = makeServer({
+      key: { name: 'github', source: 'project' },
+      revision: 'server-revision',
     });
-    expect(added).toEqual({ name: 'test', source: 'project' });
-    expect(controller.getSnapshot().message).toBe('Added MCP server test.');
+    const client = createClient(makeSnapshot([server]));
+    const controller = new TuiMcpController(client, workspace);
+    await controller.start();
+
+    await controller.setEnabled(server.key, 'server-revision', false);
+    await controller.remove(server.key, 'server-revision');
+    await controller.add({
+      scope: 'project',
+      name: 'docs',
+      config: { type: 'http', url: 'https://mcp.example.com/mcp' },
+    });
+
+    expect(client.requests).toEqual([
+      {
+        type: 'set_enabled',
+        key: server.key,
+        expectedRevision: 'server-revision',
+        enabled: false,
+      },
+      { type: 'remove', key: server.key, expectedRevision: 'server-revision' },
+      {
+        type: 'add',
+        source: 'project',
+        name: 'docs',
+        transport: 'http',
+        value: 'https://mcp.example.com/mcp',
+        expectedRevision: 'project-1',
+      },
+    ]);
+  });
+
+  test('resolves authentication cancellation by safe flow id', async () => {
+    const server = makeServer({
+      authStatus: 'authorizing',
+      authFlowId: 'flow-1',
+      revision: 'auth-revision',
+    });
+    const client = createClient(makeSnapshot([server]));
+    const controller = new TuiMcpController(client, workspace);
+    await controller.start();
+
+    await controller.cancelAuth('flow-1');
+
+    expect(client.requests).toEqual([
+      { type: 'cancel_auth', key: server.key, expectedRevision: 'auth-revision' },
+    ]);
+  });
+
+  test('does not retry an outcome_unknown mutation', async () => {
+    const server = makeServer({ revision: 'server-revision' });
+    const client = createClient(makeSnapshot([server]));
+    client.applyMcpAction = async (request: { action: AppMcpAction }) => {
+      client.requests.push(request.action);
+      return {
+        schema: 'kite.app.mcp.action-response.v1',
+        outcome: 'outcome_unknown',
+        snapshot: makeSnapshot([server]),
+      };
+    };
+    const controller = new TuiMcpController(client, workspace);
+    await controller.start();
+
+    expect(await controller.retry(server.key)).toBe(false);
+    expect(client.requests).toHaveLength(1);
+    expect(controller.getSnapshot().message).toContain('outcome_unknown');
+  });
+
+  test('rejects mutations for a server that is no longer in the snapshot', async () => {
+    const client = createClient();
+    const controller = new TuiMcpController(client, workspace);
+    await controller.start();
+
+    const missing: AppMcpServerKey = { name: 'missing', source: 'project' };
+    expect(await controller.retry(missing)).toBe(false);
+    expect(client.requests).toHaveLength(0);
   });
 });

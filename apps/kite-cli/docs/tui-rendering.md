@@ -27,6 +27,11 @@
 
 ## Client-safe 交互渲染
 
+- Workspace Trust Gate、Provider/model selector、MCP Overlay与Skill status只渲染App Control safe projection。
+  Trust mutation使用observed revision CAS并原样显示unavailable/conflict后的显式重试路径；ModelSelector identity固定为
+  `provider + name`，不读取raw config/API key。MCP endpoint只显示origin，command只显示executable，TUI不从
+  Supervisor或Repository补全被省略字段。
+
 - Approval overlay 只消费封闭的 `RuntimeClientInteraction`：可显示有界 `title`/`summary` 和允许的
   `approve_once | same_command`，不得重新读取 raw command、cwd、sandbox scope、grant subject、provider body
   或 Host 内部 payload 来补展示。

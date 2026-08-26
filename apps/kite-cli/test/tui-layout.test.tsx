@@ -924,11 +924,17 @@ describe('HelpPanel', () => {
 // ── ModelSelector ──
 
 describe('ModelSelector', () => {
+  const modelProjection = [
+    { provider: 'deepseek', name: 'deepseek-chat', isDefault: false },
+    { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
+  ];
+
   test('renders title and model list', () => {
     const { lastFrame } = render(
       <ModelSelector
         currentModel="deepseek-chat"
         currentProvider="deepseek"
+        models={modelProjection}
         onSelect={noop}
         onClose={noop}
       />,
@@ -945,6 +951,7 @@ describe('ModelSelector', () => {
       <ModelSelector
         currentModel="deepseek-v4-flash"
         currentProvider="deepseek"
+        models={modelProjection}
         onSelect={noop}
         onClose={noop}
       />,
@@ -1063,6 +1070,7 @@ describe('ModelSelector', () => {
       <ModelSelector
         currentModel="deepseek-v4"
         currentProvider="deepseek"
+        models={modelProjection}
         onSelect={noop}
         onClose={noop}
       />,
@@ -5207,8 +5215,8 @@ describe('App', () => {
             isDefault: false,
           },
         ]}
-        persistModelSelection={(provider, modelName) => {
-          persisted.push([provider, modelName]);
+        onModelSelect={(model) => {
+          persisted.push([model.provider, model.name]);
           return true;
         }}
       />,

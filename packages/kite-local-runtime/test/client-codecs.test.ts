@@ -45,6 +45,8 @@ describe('kite-local-runtime native credential codecs', () => {
       operation: 'write_provider_api_key',
       providerId: 'openai',
       apiKey: 'sk-native-only',
+      baseURL: 'https://api.openai.com/v1',
+      modelName: 'gpt-4o',
     } as const;
     expect(decodeLocalRuntimeCredentialRequest(request)).toEqual(request);
     expect(safeDecodeLocalRuntimeCredentialRequest(request)).toMatchObject({ success: true });
@@ -61,6 +63,29 @@ describe('kite-local-runtime native credential codecs', () => {
     expect(() =>
       decodeLocalRuntimeCredentialResult({ ...result, apiKey: request.apiKey }),
     ).toThrow();
+  });
+
+  test('permits an empty custom-endpoint key but keeps the field and error safe', () => {
+    expect(
+      decodeLocalRuntimeCredentialRequest({
+        schema: LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_,
+        mutationId: 'mutation-custom',
+        operation: 'write_provider_api_key',
+        providerId: 'openai-compatible',
+        apiKey: '',
+        baseURL: 'http://localhost:8080/v1',
+        modelName: 'local-model',
+      }),
+    ).toMatchObject({ providerId: 'openai-compatible', apiKey: '', modelName: 'local-model' });
+    expect(
+      decodeLocalRuntimeCredentialResult({
+        schema: LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+        mutationId: 'mutation-custom',
+        operation: 'write_provider_api_key',
+        outcome: 'rejected',
+        errorCode: 'model_required',
+      }),
+    ).toMatchObject({ outcome: 'rejected', errorCode: 'model_required' });
   });
 
   test('supports bounded OAuth material and explicit unknown outcomes', () => {

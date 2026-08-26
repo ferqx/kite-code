@@ -1,11 +1,15 @@
 import { randomBytes } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import {
   type BuiltinToolCatalogProjection,
   createBuiltinContextCompilerPort,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
 } from '@kite-ai/builtin-runtime';
-import type { BuiltinModelOperationExecutionPort } from '@kite-ai/builtin-runtime/model';
+import type {
+  BuiltinModelOperationExecutionPort,
+  SupportedChatModel,
+} from '@kite-ai/builtin-runtime/model';
 import {
   RuntimeClient,
   type RuntimeClientTransport,
@@ -13,9 +17,11 @@ import {
 } from '@kite-ai/runtime-client';
 import {
   RUNTIME_CONTRACT_BOUNDARY_,
+  RUNTIME_QUERY_SCHEMA_,
   type RuntimeAccess,
   type RuntimeCommand,
   type RuntimeQuery,
+  type RuntimeQueryResult,
   type RuntimeSubscription,
   type RuntimeSubscriptionSpec,
 } from '@kite-ai/runtime-contract';
@@ -40,6 +46,7 @@ import {
   type RuntimeServer,
   type RuntimeServerAdmissionInput,
   type RuntimeServerAdmissionPort,
+  type RuntimeServerInProcessOpenOptions,
   type RuntimeServerInProcessPair,
 } from '@kite-ai/runtime-server';
 import {
@@ -71,6 +78,7 @@ import type {
   TuiRuntimeClientDependencies,
   TuiRuntimeClientFacade,
 } from './adapters/tui/session-adapter';
+import type { KiteInProcessAppControlComposition } from './app-control';
 import { createKiteModelOperationExecutionPort } from './bootstrap/model-operation-execution';
 import {
   createInstalledKiteRuntimeCompositionFactory,
@@ -78,6 +86,7 @@ import {
 } from './bootstrap/model-runtime-composition';
 import {
   type CliRuntimeBridgeInput,
+  type CliRuntimeInteractionResolution,
   createCliRuntimeBridge,
 } from './bootstrap/runtime/CliRuntimeBridge';
 import { KITE_RUNTIME_OPERATION_IDS_ } from './bootstrap/runtime/KiteRuntimeExecutionModule';
@@ -91,20 +100,50 @@ import type {
   StateRuntimeStorage,
 } from './bootstrap/runtime/state-runtime';
 import { createKiteRuntimeCompatibilityMigrator } from './bootstrap/runtime/state-store-compatibility';
-import { createTuiRuntimeClient } from './bootstrap/runtime/TuiRuntimeBridge';
+import { createTuiRuntimeServiceComposition } from './bootstrap/runtime/TuiRuntimeBridge';
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
+import type { SessionDeps } from './runtime/session';
+import type {
+  SessionInterruptPayload,
+  SessionUserAction,
+  SessionUserInputProvider,
+} from './runtime/session/contracts';
+import {
+  type AdmittedWorkspace,
+  createInProcessKiteRuntimeApplication,
+  createRuntimeExecutionBridgeRouter,
+  createRuntimeInteractionBroker,
+  createRuntimeWorkspaceAdmission,
+  createRuntimeWorkspaceContextFactory,
+  type RuntimeOperationGate,
+} from './runtime-application';
 import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
 
 interface KiteRuntimeClientAccess extends RuntimeAccess {
   readonly history?: RuntimeHistoryClient;
+  /** Explicit App owner shutdown; client disconnect never calls this implicitly. */
+  shutdownOwner(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
 }
 
 export interface KiteCliRuntimeServerOwner extends AsyncDisposable {
   readonly server: RuntimeServer;
   [Symbol.asyncDispose](): Promise<void>;
+}
+
+export interface KiteMultiWorkspaceRuntimeServerOwner extends AsyncDisposable {
+  readonly server: RuntimeServer;
+  open(options?: RuntimeServerInProcessOpenOptions): RuntimeServerInProcessPair;
+}
+
+export interface KiteMultiWorkspaceRuntimeServerInput {
+  readonly checkpointPath: string;
+  readonly workspaces: readonly Omit<
+    CliRuntimeBridgeInput,
+    'checkpointPath' | 'projectIdentity' | 'sessionId'
+  >[];
 }
 
 interface KiteRuntimeServerComposition extends KiteCliRuntimeServerOwner {
@@ -162,8 +201,56 @@ function createKiteInProcessRuntimeAccess(input: {
   readonly ownsSession: (sessionId: string) => boolean;
   readonly clientName: 'kite-cli' | 'kite-tui';
   readonly history?: RuntimeHistoryClient;
+  readonly appControl?: KiteInProcessAppControlComposition<RuntimeOperationGate>;
 }): KiteRuntimeClientAccess {
-  const composition = createKiteRuntimeServerComposition(input);
+  const composition = input.appControl
+    ? (() => {
+        if (!input.history) {
+          throw new Error('Runtime Application history is unavailable.');
+        }
+        const canonicalPath = realpathSync.native(input.workspace);
+        const project = resolveProjectIdentity(canonicalPath);
+        const workspace = {
+          canonicalPath,
+          projectId: project.projectId,
+          workspaceDigest: project.workspaceDigest,
+        } as const;
+        const admission: RuntimeServerAdmissionPort = Object.freeze({
+          authorize: async (request: RuntimeServerAdmissionInput) => {
+            const sessionId = admissionSessionId(request);
+            if (sessionId !== undefined && !input.ownsSession(sessionId)) {
+              return { allowed: false as const, reason: 'unauthorized' as const };
+            }
+            return { allowed: true as const, workspace: canonicalPath };
+          },
+        });
+        return createInProcessKiteRuntimeApplication({
+          runtimeOwner: input.host,
+          history: input.history,
+          defaultAdmission: admission,
+          defaultWorkspace: workspace,
+          operationGate: input.appControl.operationGate,
+          appControl: {
+            defaultClient: input.appControl.gateway.forWorkspace(workspace),
+            forWorkspace: (identity) => input.appControl!.gateway.forWorkspace(identity),
+          },
+          server: {
+            serverInfo: {
+              version: `protocol-${RUNTIME_PROTOCOL_VERSION}`,
+              instanceId: `server_${randomBytes(16).toString('hex')}`,
+            },
+          },
+          cancelAll: async (reason) => input.host.cancelAllSessions(reason),
+          dispose: async () => {
+            try {
+              await input.host[Symbol.asyncDispose]();
+            } finally {
+              await input.appControl![Symbol.asyncDispose]();
+            }
+          },
+        });
+      })()
+    : createKiteRuntimeServerComposition(input);
   const transport: RuntimeClientTransport = Object.freeze({
     connect: async () => {
       const pair = composition.open();
@@ -184,19 +271,16 @@ function createKiteInProcessRuntimeAccess(input: {
     ...(input.history ? { history: input.history } : {}),
   });
   let disposePromise: Promise<void> | undefined;
+  let ownerShutdownPromise: Promise<void> | undefined;
   return Object.freeze({
     command: (command: RuntimeCommand) => client.command(command),
     query: (query: RuntimeQuery) => client.query(query),
     subscribe: (subscription: RuntimeSubscription) => client.subscribe(subscription),
     ...(client.history ? { history: client.history } : {}),
+    shutdownOwner: () =>
+      (ownerShutdownPromise ??= Promise.resolve(composition[Symbol.asyncDispose]())),
     [Symbol.asyncDispose]: () => {
-      disposePromise ??= (async () => {
-        try {
-          await composition[Symbol.asyncDispose]();
-        } finally {
-          await client.close();
-        }
-      })();
+      disposePromise ??= client.close();
       return disposePromise;
     },
   });
@@ -207,11 +291,16 @@ function createKiteInProcessRuntimeCoordinator(input: {
   readonly workspace: string;
   readonly ownsSession: (sessionId: string) => boolean;
   readonly history: RuntimeHistoryClient;
-}): RuntimeHostCoordinatorPort & { readonly history: RuntimeHistoryClient } {
+  readonly appControl?: KiteInProcessAppControlComposition<RuntimeOperationGate>;
+}): RuntimeHostCoordinatorPort & {
+  readonly history: RuntimeHistoryClient;
+  shutdownOwner(): Promise<void>;
+} {
   const access = createKiteInProcessRuntimeAccess({
     ...input,
     clientName: 'kite-tui',
     history: input.history,
+    ...(input.appControl === undefined ? {} : { appControl: input.appControl }),
   });
   if (!access.history) throw new Error('TUI Runtime Client history is unavailable.');
   return Object.freeze({
@@ -225,6 +314,7 @@ function createKiteInProcessRuntimeCoordinator(input: {
     waitForSessionIdle: (sessionId: string) => input.host.waitForSessionIdle(sessionId),
     isSessionOperationActive: (sessionId: string) => input.host.isSessionOperationActive(sessionId),
     history: access.history,
+    shutdownOwner: () => access.shutdownOwner(),
     [Symbol.asyncDispose]: async () => {
       await access[Symbol.asyncDispose]();
     },
@@ -658,6 +748,300 @@ function createKiteCliRuntimeHost(
   return host;
 }
 
+/**
+ * Transitional app-local multi-Workspace owner. It uses one concrete Host/Store while the
+ * execution router creates one dependency context for each admitted canonical Workspace.
+ * No listener, process manager, fallback Host, or second Store is created here.
+ */
+export function createKiteMultiWorkspaceRuntimeServer(
+  input: KiteMultiWorkspaceRuntimeServerInput,
+): KiteMultiWorkspaceRuntimeServerOwner {
+  if (input.workspaces.length === 0) {
+    throw new TypeError('Multi-Workspace Runtime requires at least one Workspace input.');
+  }
+  const bySession = new Map<string, AdmittedWorkspace>();
+  const byWorkspace = new Map<
+    string,
+    Readonly<{
+      admission: AdmittedWorkspace;
+      input: Omit<CliRuntimeBridgeInput, 'projectIdentity' | 'sessionId'>;
+    }>
+  >();
+  for (const workspaceInput of input.workspaces) {
+    const canonicalPath = realpathSync.native(workspaceInput.workspace);
+    const projectIdentity = resolveProjectIdentity(canonicalPath);
+    const admission: AdmittedWorkspace = Object.freeze({
+      canonicalPath,
+      projectId: projectIdentity.projectId,
+      workspaceDigest: projectIdentity.workspaceDigest,
+    });
+    const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
+    if (byWorkspace.has(key)) {
+      throw new TypeError(`Duplicate Runtime Workspace identity: ${canonicalPath}`);
+    }
+    byWorkspace.set(
+      key,
+      Object.freeze({
+        admission,
+        input: {
+          ...workspaceInput,
+          workspace: canonicalPath,
+          checkpointPath: input.checkpointPath,
+        },
+      }),
+    );
+  }
+
+  const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
+  const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBinding();
+  const interactionBroker = createRuntimeInteractionBroker<CliRuntimeInteractionResolution>();
+  const connectionWorkspaces = new Map<string, AdmittedWorkspace>();
+  const sameAdmission = (left: AdmittedWorkspace, right: AdmittedWorkspace): boolean =>
+    left.canonicalPath === right.canonicalPath &&
+    left.projectId === right.projectId &&
+    left.workspaceDigest === right.workspaceDigest;
+  const persistedAdmissionForSession = (sessionId: string): AdmittedWorkspace | undefined => {
+    const cached = bySession.get(sessionId);
+    if (cached) return cached;
+    const snapshot = owner.storage.sessions.loadSnapshot<RuntimeState>(sessionId);
+    if (!snapshot) return undefined;
+    const projectId = snapshot.session.projectId;
+    const workspaceDigest = snapshot.session.canonicalWorkspaceDigest;
+    if (!projectId || !workspaceDigest) return undefined;
+    let canonicalPath: string;
+    try {
+      canonicalPath = realpathSync.native(snapshot.session.workspace);
+    } catch {
+      return undefined;
+    }
+    const project = resolveProjectIdentity(canonicalPath);
+    if (project.projectId !== projectId || project.workspaceDigest !== workspaceDigest) {
+      return undefined;
+    }
+    const key = `${workspaceDigest}\0${projectId}\0${canonicalPath}`;
+    const registered = byWorkspace.get(key);
+    if (!registered) return undefined;
+    bySession.set(sessionId, registered.admission);
+    return registered.admission;
+  };
+  const bridges = new Map<string, RuntimeHostExecutionBridge>();
+  const host = createKiteRuntimeHost(owner.storage, (context, builtinToolCatalog) => {
+    const { services, capabilities, capabilityRegistrySnapshot } = context;
+    const toolPipelineComposition = createAppToolPipelineComposition(builtinToolCatalog);
+    const modelOperationExecution = createKiteModelOperationExecutionPort(
+      capabilities,
+      builtinToolCatalog,
+    );
+    const modelRuntime = createInstalledKiteRuntimeCompositionFactory(modelOperationExecution);
+    const modelInvocationRuntimeFactory = (workspace: string) => ({
+      ...modelRuntime(workspace),
+      builtinToolCatalog,
+      toolPipelineComposition,
+    });
+    runtimeCoordinatorBinding.bind({
+      services,
+      capabilities,
+      capabilityRegistrySnapshot,
+      builtinToolCatalog,
+      toolPipelineComposition,
+      modelRuntimeFactory: modelRuntime,
+      store: createRuntimeStorageAccess(services),
+    });
+    const contexts = createRuntimeWorkspaceContextFactory({
+      create: async (admission) => {
+        const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
+        const registered = byWorkspace.get(key);
+        if (!registered) throw new Error('Runtime Workspace is not registered for execution.');
+        const sessionBridges = new Map<string, RuntimeHostExecutionBridge>();
+        const bridgeForSession = async (sessionId: string): Promise<RuntimeHostExecutionBridge> => {
+          const current = sessionBridges.get(sessionId);
+          if (current) return current;
+          const persisted = persistedAdmissionForSession(sessionId);
+          if (persisted && !sameAdmission(persisted, admission)) {
+            throw new Error('Runtime Session belongs to a different Workspace.');
+          }
+          bySession.set(sessionId, admission);
+          const bridge = createCliRuntimeBridge(
+            {
+              ...registered.input,
+              sessionId,
+              projectIdentity: resolveProjectIdentity(admission.canonicalPath),
+            },
+            capabilities,
+            modelInvocationRuntimeFactory,
+            (resolvedSessionId) => resolveKiteRecoveryIdentity(services, resolvedSessionId),
+            runtimeCoordinatorBinding.access(),
+            interactionBroker,
+            (resolvedSessionId) => {
+              const resolved = persistedAdmissionForSession(resolvedSessionId);
+              if (!resolved) return [];
+              return [...connectionWorkspaces.entries()]
+                .filter(([, workspace]) => sameAdmission(workspace, resolved))
+                .map(([connectionId]) => connectionId);
+            },
+          );
+          sessionBridges.set(sessionId, bridge);
+          return bridge;
+        };
+        const bridge: RuntimeHostExecutionBridge = Object.freeze({
+          recoverSession: async (
+            sessionId: string,
+            publish: Parameters<RuntimeHostExecutionBridge['recoverSession']>[1],
+          ) => (await bridgeForSession(sessionId)).recoverSession(sessionId, publish),
+          inspectCommand: async (
+            command: RuntimeCommand,
+            context: Parameters<RuntimeHostExecutionBridge['inspectCommand']>[1],
+          ) => (await bridgeForSession(context.targetSessionId)).inspectCommand(command, context),
+          query: async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
+            if (query.type === 'list_sessions') {
+              const results = await Promise.all(
+                [...sessionBridges.values()].map((sessionBridge) => sessionBridge.query(query)),
+              );
+              return {
+                status: 'ok' as const,
+                queryType: 'list_sessions' as const,
+                sessions: results.flatMap((result) =>
+                  result.status === 'ok' ? (result.sessions ?? []) : [],
+                ),
+              };
+            }
+            return (await bridgeForSession(query.sessionId)).query(query);
+          },
+          shutdownSession: async (
+            sessionId: string,
+            reason: string,
+            publish: Parameters<RuntimeHostExecutionBridge['shutdownSession']>[2],
+          ) => (await bridgeForSession(sessionId)).shutdownSession(sessionId, reason, publish),
+          close: async () => {
+            sessionBridges.clear();
+          },
+        });
+        bridges.set(key, bridge);
+        return {
+          admission,
+          bridge,
+          close: async () => {
+            bridges.delete(key);
+          },
+        };
+      },
+      resolveWorkspaceForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
+    });
+    const admission = createRuntimeWorkspaceAdmission({
+      admitForCreate: async (workspace) => {
+        const registered = [...byWorkspace.values()].find(
+          (candidate) => candidate.admission.canonicalPath === workspace,
+        );
+        if (!registered) throw new Error('Runtime Workspace is not admitted for creation.');
+        return registered.admission;
+      },
+      resolveForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
+    });
+    const router = createRuntimeExecutionBridgeRouter({
+      contexts,
+      admission,
+      queryWithoutSession: async (query): Promise<RuntimeQueryResult> => {
+        if (query.type !== 'list_sessions') {
+          return { status: 'rejected', queryType: query.type, code: 'unsupported' };
+        }
+        const projections = await Promise.all(
+          owner.storage.sessions.listSessions('', 1_000).map(async ({ threadId }) => {
+            const context = await contexts.resolveForSession(threadId);
+            if (!context) return undefined;
+            const result = await context.bridge.query({
+              schema: RUNTIME_QUERY_SCHEMA_,
+              type: 'get_session_projection',
+              sessionId: threadId,
+            });
+            return result.status === 'ok' ? result.session : undefined;
+          }),
+        );
+        return {
+          status: 'ok',
+          queryType: 'list_sessions',
+          sessions: projections.filter((projection) => projection !== undefined),
+        };
+      },
+    });
+    return Object.freeze({
+      recoverSession: router.recoverSession.bind(router),
+      inspectCommand: router.inspectCommand.bind(router),
+      query: router.query.bind(router),
+      shutdownSession: router.shutdownSession.bind(router),
+      close: async () => {
+        interactionBroker.close('Runtime owner closed.');
+        try {
+          await router.close();
+        } finally {
+          await runtimeCoordinatorBinding.access().close();
+        }
+      },
+    });
+  });
+  const denyByDefault: RuntimeServerAdmissionPort = Object.freeze({
+    authorize: async () => ({ allowed: false as const, reason: 'unauthorized' as const }),
+  });
+  const hub = createRuntimeServerInProcessHub(
+    { runtime: host, admission: denyByDefault },
+    {
+      serverInfo: {
+        version: `protocol-${RUNTIME_PROTOCOL_VERSION}`,
+        instanceId: `server_${randomBytes(16).toString('hex')}`,
+      },
+    },
+  );
+  let disposePromise: Promise<void> | undefined;
+  return Object.freeze({
+    server: hub.server,
+    open: (options?: RuntimeServerInProcessOpenOptions) => {
+      const requestedAdmission = options?.admission ?? denyByDefault;
+      const scopedAdmission: RuntimeServerAdmissionPort = Object.freeze({
+        authorize: async (request: RuntimeServerAdmissionInput) => {
+          const decision = await requestedAdmission.authorize(request);
+          if (!decision.allowed) return decision;
+          const admitted = [...byWorkspace.values()].find(
+            (candidate) => candidate.admission.canonicalPath === decision.workspace,
+          )?.admission;
+          if (!admitted) return { allowed: false as const, reason: 'unauthorized' as const };
+          const sessionId = admissionSessionId(request);
+          if (sessionId !== undefined) {
+            const persisted = persistedAdmissionForSession(sessionId);
+            const command =
+              request.operation === 'runtime/command' && request.command
+                ? (request.command as { readonly type?: unknown })
+                : undefined;
+            const isFreshCreate = command?.type === 'create_session' && persisted === undefined;
+            if (!isFreshCreate && (!persisted || !sameAdmission(persisted, admitted))) {
+              return { allowed: false as const, reason: 'unauthorized' as const };
+            }
+          }
+          connectionWorkspaces.set(request.connectionId, admitted);
+          return { allowed: true as const, workspace: admitted.canonicalPath };
+        },
+      });
+      return hub.open({
+        ...options,
+        admission: scopedAdmission,
+        onClose: (connectionId) => {
+          connectionWorkspaces.delete(connectionId);
+          interactionBroker.disconnect(connectionId);
+          options?.onClose?.(connectionId);
+        },
+      });
+    },
+    [Symbol.asyncDispose]: () => {
+      disposePromise ??= (async () => {
+        try {
+          await hub.server.beginDraining();
+        } finally {
+          await host[Symbol.asyncDispose]();
+        }
+      })();
+      return disposePromise;
+    },
+  });
+}
+
 export function createKiteCliRuntimeServer(
   input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
 ): KiteCliRuntimeServerOwner {
@@ -671,20 +1055,60 @@ export function createKiteCliRuntimeServer(
 export function createKiteCliRuntimeAccess(
   input: Omit<CliRuntimeBridgeInput, 'projectIdentity'>,
 ): KiteRuntimeClientAccess {
-  return createKiteInProcessRuntimeAccess({
+  const access = createKiteInProcessRuntimeAccess({
     host: createKiteCliRuntimeHost(input),
     workspace: input.workspace,
     ownsSession: (sessionId) => sessionId === input.sessionId,
     clientName: 'kite-cli',
   });
+  let disposePromise: Promise<void> | undefined;
+  return Object.freeze({
+    command: access.command.bind(access),
+    query: access.query.bind(access),
+    subscribe: access.subscribe.bind(access),
+    ...(access.history ? { history: access.history } : {}),
+    shutdownOwner: () => access.shutdownOwner(),
+    [Symbol.asyncDispose]: () => {
+      disposePromise ??= (async () => {
+        try {
+          await access[Symbol.asyncDispose]();
+        } finally {
+          await access.shutdownOwner();
+        }
+      })();
+      return disposePromise;
+    },
+  });
 }
 
 export function createKiteTuiSessionManager(
   input: TuiRuntimeClientDependencies,
+  ownerInput: Readonly<
+    Pick<
+      SessionDeps,
+      | 'config'
+      | 'skillManifests'
+      | 'skillOptions'
+      | 'mcpManager'
+      | 'mcpRecoveryController'
+      | 'workspaceReady'
+      | 'checkpointPath'
+      | 'observabilityBridge'
+      | 'shellExecutor'
+    > & {
+      readonly appControl?: KiteInProcessAppControlComposition<RuntimeOperationGate>;
+      readonly injectedModel?: SupportedChatModel;
+    }
+  >,
 ): TuiRuntimeClientFacade {
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
+  const dependencies = {
+    ...input,
+    ...ownerInput,
+    provider: createServiceInteractionProvider(),
+  };
+  const owner = createKiteRuntimeStorageOwner(dependencies.checkpointPath);
   const tokenStatsStorage = createSqliteSessionTokenStats({
-    databasePath: `${sqliteRuntimeStorePath(input.checkpointPath)}.session-metadata.db`,
+    databasePath: `${sqliteRuntimeStorePath(dependencies.checkpointPath)}.session-metadata.db`,
     journalMode: defaultSqliteRuntimeJournalMode(),
     assertCanOpen: assertSqliteSessionMetadataCanOpen,
   }) satisfies {
@@ -705,13 +1129,14 @@ export function createKiteTuiSessionManager(
     const history = createKiteRuntimeHistoryClient(
       () =>
         createSqliteRuntimeLogQueryPort<RuntimeEvent, RuntimeState>({
-          databasePath: sqliteCurrentRuntimeStorePath(input.checkpointPath),
+          databasePath: sqliteCurrentRuntimeStorePath(dependencies.checkpointPath),
           codec: STATE_STORAGE_BINDING_.codec,
           currentEventTypes: runtimeHostCurrentStateEventTypes(),
         }),
       {
-        listSessions: () => compatibleSessionList(input.checkpointPath),
-        importSession: (sessionId) => importCompatibleKiteSession(input.checkpointPath, sessionId),
+        listSessions: () => compatibleSessionList(dependencies.checkpointPath),
+        importSession: (sessionId) =>
+          importCompatibleKiteSession(dependencies.checkpointPath, sessionId),
       },
     );
     const runtimeCoordinatorAccess: RuntimeSessionCoordinatorAccess = {
@@ -728,9 +1153,9 @@ export function createKiteTuiSessionManager(
         return capabilityExecution.invoke(invocation);
       },
     });
-    return createTuiRuntimeClient(
+    const runtimeComposition = createTuiRuntimeServiceComposition(
       {
-        ...input,
+        ...dependencies,
         openStateRuntimeStorage: () => {
           if (!executionServices) throw new Error('Runtime Host execution services unavailable');
           return createRuntimeStorageAccess(executionServices);
@@ -798,8 +1223,9 @@ export function createKiteTuiSessionManager(
         );
         return createKiteInProcessRuntimeCoordinator({
           host,
-          workspace: input.workspace,
+          workspace: dependencies.workspace,
           history,
+          ...(ownerInput.appControl === undefined ? {} : { appControl: ownerInput.appControl }),
           // This Host composition is already scoped to the one TUI Workspace;
           // the bridge still rejects unregistered Session identities.
           ownsSession: () => true,
@@ -807,9 +1233,34 @@ export function createKiteTuiSessionManager(
       },
       (workspace) => resolveProjectIdentity(workspace),
     );
+    if (ownerInput.appControl) {
+      const canonicalPath = realpathSync.native(dependencies.workspace);
+      const project = resolveProjectIdentity(canonicalPath);
+      ownerInput.appControl.bindRuntimeControl(
+        {
+          canonicalPath,
+          projectId: project.projectId,
+          workspaceDigest: project.workspaceDigest,
+        },
+        runtimeComposition,
+      );
+    }
+    return runtimeComposition.client;
   } catch (error) {
     tokenStatsStorage.close();
     owner.storage.close();
     throw error;
   }
+}
+
+function createServiceInteractionProvider(): SessionUserInputProvider {
+  return Object.freeze({
+    requestAction: async (_payload: SessionInterruptPayload): Promise<SessionUserAction> => {
+      throw new Error('Runtime interaction settlement requires a committed Runtime command.');
+    },
+    submitAction: (_action: SessionUserAction): void => undefined,
+    getPendingInterrupt: (): null => null,
+    teardown: async (): Promise<void> => undefined,
+    reset: (): void => undefined,
+  });
 }

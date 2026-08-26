@@ -1,8 +1,13 @@
+import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
+import type { NativeProviderCredentialClient } from '@kite-ai/kite-local-runtime/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { loadAgentConfig, saveProviderConfig } from '#kite-cli/config';
 import ConnectionScreen from './ConnectionScreen';
 import ConnectionStatusScreen from './ConnectionStatusScreen';
-import { connectProviderWithKey } from './connect-provider';
+import {
+  connectProviderWithKey,
+  type FirstRunProviderClients,
+  saveManualProviderModel,
+} from './connect-provider';
 import ErrorScreen from './ErrorScreen';
 import ManualModelScreen from './ManualModelScreen';
 import ProviderScreen from './ProviderScreen';
@@ -11,13 +16,24 @@ import { getErrorActions, PROVIDERS } from './types';
 
 interface FirstRunFlowProps {
   onComplete: (result: { modelName: string }) => void;
+  /** Native credential and workspace-scoped App Control capabilities are injected by composition. */
+  appControl?: KiteAppControlClient;
+  credentialClient?: NativeProviderCredentialClient;
+  workspace?: KiteWorkspaceIdentity;
+  onExit?: () => void;
 }
 
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
+export default function FirstRunFlow({
+  onComplete,
+  appControl,
+  credentialClient,
+  workspace,
+  onExit = () => undefined,
+}: FirstRunFlowProps) {
+  const clients: FirstRunProviderClients | undefined =
+    appControl && credentialClient && workspace
+      ? { appControl, credentialClient, workspace }
+      : undefined;
   const [state, setState] = useState<FirstRunState>({
     phase: 'provider',
     selectedIndex: 0,
@@ -80,6 +96,19 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
         return;
       }
 
+      if (!clients) {
+        transition({
+          phase: 'error',
+          provider: cur.provider,
+          error: {
+            kind: 'generic',
+            message: 'First-run credential and App Control clients are unavailable.',
+          },
+          selectedAction: 0,
+        });
+        return;
+      }
+
       const controller = new AbortController();
       connectAbortRef.current?.abort();
       connectAbortRef.current = controller;
@@ -106,6 +135,7 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
           cur.provider,
           apiKey,
           baseURL,
+          clients,
           controller.signal,
         );
         clearTimeout(stageTimer);
@@ -117,12 +147,7 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
             provider: cur.provider,
             modelName: result.modelName,
           });
-          try {
-            const cfg = loadAgentConfig({ modelName: result.modelName });
-            onComplete({ modelName: cfg.modelName });
-          } catch {
-            onComplete({ modelName: result.modelName });
-          }
+          onComplete({ modelName: result.modelName });
         } else if (result.status === 'model-required') {
           transition({
             phase: 'manual-model',
@@ -130,6 +155,18 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
             modelName: '',
             apiKey,
             baseURL,
+          });
+        } else if (result.status === 'outcome-unknown') {
+          transition({
+            phase: 'error',
+            provider: cur.provider,
+            error: {
+              kind: 'outcome-unknown',
+              message:
+                'The credential write outcome is unknown. Review the confirmed provider state before continuing.',
+              ...(result.modelName === undefined ? {} : { confirmedModelName: result.modelName }),
+            },
+            selectedAction: 0,
           });
         } else {
           transition({
@@ -139,24 +176,18 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
             selectedAction: 0,
           });
         }
-      } catch (err: unknown) {
+      } catch {
         clearTimeout(stageTimer);
         if (controller.signal.aborted || cancelledRef.current) return;
-        const messageText = toErrorMessage(err);
-        const message = messageText.includes('requires apiKey')
-          ? 'The API key was rejected.'
-          : messageText.includes('baseURL')
-            ? 'Check the endpoint address.'
-            : messageText;
         transition({
           phase: 'error',
           provider: cur.provider,
-          error: { kind: 'generic', message },
+          error: { kind: 'generic', message: 'The provider connection could not be completed.' },
           selectedAction: 0,
         });
       }
     },
-    [transition, onComplete],
+    [clients, transition, onComplete],
   );
 
   const handleErrorAction = useCallback(
@@ -169,6 +200,16 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
       if (!actionDef) return;
 
       switch (actionDef.action) {
+        case 'continue-confirmed':
+          if (error.confirmedModelName) {
+            transition({
+              phase: 'complete',
+              provider,
+              modelName: error.confirmedModelName,
+            });
+            onComplete({ modelName: error.confirmedModelName });
+          }
+          break;
         case 'edit-key':
         case 'edit-settings':
           transition({
@@ -207,42 +248,87 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
           });
           break;
         case 'exit':
-          process.exit(0);
+          connectAbortRef.current?.abort('first-run-exit');
+          onExit();
       }
     },
-    [transition],
+    [onComplete, onExit, transition],
   );
 
   const handleManualModelSubmit = useCallback(
-    (modelName: string) => {
+    async (modelName: string) => {
       const cur = stateRef.current;
       if (!modelName.trim() || cur.phase !== 'manual-model') return;
       const name = modelName.trim();
-      saveProviderConfig({
-        name: cur.provider.type,
-        type: cur.provider.type,
-        apiKey: cur.apiKey || undefined,
-        baseURL: cur.baseURL !== cur.provider.defaultBaseURL ? cur.baseURL : undefined,
-        models: [{ name, default: true }],
-        reasoning: cur.provider.defaultReasoning === 'on',
-        effort: cur.provider.defaultReasoning === 'on' ? 'max' : undefined,
-      });
-      try {
-        const cfg = loadAgentConfig({ modelName: name });
-        onComplete({ modelName: cfg.modelName });
-      } catch (err: unknown) {
+      if (!clients) {
         transition({
           phase: 'error',
           provider: cur.provider,
           error: {
             kind: 'generic',
-            message: toErrorMessage(err) || 'Configuration error',
+            message: 'First-run credential and App Control clients are unavailable.',
           },
+          selectedAction: 0,
+        });
+        return;
+      }
+
+      const controller = new AbortController();
+      connectAbortRef.current?.abort();
+      connectAbortRef.current = controller;
+      cancelledRef.current = false;
+      transition({ phase: 'connecting', provider: cur.provider, stage: 'credentials' });
+
+      try {
+        const result = await saveManualProviderModel(
+          cur.provider,
+          cur.apiKey,
+          cur.baseURL,
+          name,
+          clients,
+          controller.signal,
+        );
+        if (controller.signal.aborted || cancelledRef.current) return;
+        if (result.status === 'connected') {
+          transition({ phase: 'complete', provider: cur.provider, modelName: result.modelName });
+          onComplete({ modelName: result.modelName });
+          return;
+        }
+        if (result.status === 'outcome-unknown') {
+          transition({
+            phase: 'error',
+            provider: cur.provider,
+            error: {
+              kind: 'outcome-unknown',
+              message:
+                'The credential write outcome is unknown. Review the confirmed provider state before continuing.',
+              ...(result.modelName === undefined ? {} : { confirmedModelName: result.modelName }),
+            },
+            selectedAction: 0,
+          });
+          return;
+        }
+        if (result.status === 'model-required') {
+          transition({ ...cur, modelName: name });
+          return;
+        }
+        transition({
+          phase: 'error',
+          provider: cur.provider,
+          error: result.error,
+          selectedAction: 0,
+        });
+      } catch {
+        if (controller.signal.aborted || cancelledRef.current) return;
+        transition({
+          phase: 'error',
+          provider: cur.provider,
+          error: { kind: 'generic', message: 'The provider connection could not be completed.' },
           selectedAction: 0,
         });
       }
     },
-    [onComplete, transition],
+    [clients, onComplete, transition],
   );
 
   const handleConnectionBack = useCallback(() => {
@@ -291,6 +377,7 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
           selectedIndex={state.selectedIndex}
           onSelect={(i) => transition({ phase: 'provider', selectedIndex: i })}
           onConfirm={handleProviderSelect}
+          onExit={onExit}
         />
       );
 
@@ -371,6 +458,7 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
               });
             }
           }}
+          onExit={onExit}
         />
       );
 

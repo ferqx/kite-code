@@ -1,3 +1,4 @@
+import type { ProviderModelRoute, ProviderModelSnapshot } from '@kite-ai/kite-app-contract';
 import { Box, Text, useWindowSize } from 'ink';
 import React, {
   type Dispatch,
@@ -7,13 +8,13 @@ import React, {
   useReducer,
   useRef,
 } from 'react';
-import { type LanguagePreference, saveModelSelection } from '#kite-cli/config';
+import type { LanguagePreference } from '#kite-cli/config';
 import type { SandboxBackend } from '#kite-cli/sandbox/types';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
 import HelpPanel from './components/HelpPanel';
 import InputBlock from './components/InputBlock';
-import ModelSelector from './components/ModelSelector';
+import ModelSelector, { type ModelOption } from './components/ModelSelector';
 import PermissionSelector from './components/PermissionSelector';
 import PlanReviewBlock from './components/PlanReviewBlock';
 import PreferenceSelector from './components/PreferenceSelector';
@@ -66,8 +67,9 @@ export interface AppProps {
   provider: import('./provider').TuiUserInputProvider;
   workspace?: string;
   mcpController?: McpController;
-  availableModels?: import('#kite-cli/config').AvailableModel[];
-  persistModelSelection?: (provider: string, modelName: string) => boolean;
+  providerModelSnapshot?: ProviderModelSnapshot;
+  availableModels?: readonly ProviderModelRoute[];
+  onModelSelect?: (model: ModelOption) => Promise<boolean> | boolean;
   slashSuggestion?: import('./hooks/useSlashSuggestions').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
   onTogglePlanMode?: () => void;
@@ -125,8 +127,9 @@ export default function App({
   provider,
   workspace = process.cwd(),
   mcpController,
+  providerModelSnapshot,
   availableModels,
-  persistModelSelection = saveModelSelection,
+  onModelSelect,
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
@@ -240,22 +243,23 @@ export default function App({
     [dispatch, onInteractionModeChange],
   );
   const selectModel = useCallback(
-    (model: import('#kite-cli/config').AvailableModel) => {
-      const persisted = persistModelSelection(model.provider, model.name);
-      dispatch({
-        type: 'SELECT_MODEL',
-        provider: model.provider,
-        modelName: model.name,
-      });
-      if (!persisted) {
+    async (model: ModelOption) => {
+      const selected = (await onModelSelect?.(model)) === true;
+      if (selected) {
+        dispatch({
+          type: 'SELECT_MODEL',
+          provider: model.provider,
+          modelName: model.name,
+        });
+      } else {
         dispatch({
           type: 'LOCAL_TEXT',
-          text: '模型已切换，但无法保存为下次启动的默认模型。',
+          text: '无法切换模型；请刷新模型状态后重试。',
           isError: true,
         });
       }
     },
-    [dispatch, persistModelSelection],
+    [dispatch, onModelSelect],
   );
   const hideSessions = useCallback(() => dispatch({ type: 'HIDE_SESSIONS' }), [dispatch]);
   const hideMcp = useCallback(() => dispatch({ type: 'HIDE_MCP' }), [dispatch]);
@@ -511,6 +515,7 @@ export default function App({
         <ModelSelector
           currentModel={state.status.modelName}
           currentProvider={state.status.modelProvider}
+          snapshot={providerModelSnapshot}
           models={availableModels}
           onSelect={selectModel}
           onClose={hideModelSelector}

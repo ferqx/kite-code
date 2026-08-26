@@ -1,34 +1,31 @@
 import { debuglog } from 'node:util';
-import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
-import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
+import type {
+  KiteAppControlClient,
+  KiteWorkspaceIdentity,
+  ProviderModelSnapshot,
+} from '@kite-ai/kite-app-contract';
+import type { NativeProviderCredentialClient } from '@kite-ai/kite-local-runtime/client';
+import type { AgentPhase, SkillManifest } from '@kite-ai/runtime-contract';
 import { render, useApp } from 'ink';
 import React from 'react';
 import {
-  type AgentConfig,
-  type ConfigProbeResult,
-  getFeatureFlags,
   type LanguagePreference,
-  loadAgentConfig,
   loadColorPreset,
   loadTheme,
+  loadUserInteractionMode,
   loadUserLanguage,
-  probeAgentConfig,
   saveColorPreset,
   saveInteractionMode,
   saveUserLanguage,
 } from '#kite-cli/config/index';
 import { sessionExportPath } from '#kite-cli/config/paths';
-import { defaultCheckpointPath } from '#kite-cli/config/paths.js';
-import { shouldPromptWorkspaceTrust } from '#kite-cli/config/workspace-trust';
 import { projectStateRuntimeEventForPresentation } from '#kite-cli/runtime-client/presentation-history';
-import { type AppShellExecutor, composeAppSandboxExecutor } from '#kite-cli/sandbox/composition';
 import type { SandboxBackend } from '#kite-cli/sandbox/types';
 import type {
   TuiRuntimeClientFacade as SessionManager,
   TuiRuntimeClientFacadeFactory,
 } from '../adapters/tui/session-adapter';
-import { composeObservability } from '../observability/composition';
-import { resolveTelemetryConsent } from '../observability/consent';
+import type { InProcessAppControlGateway } from '../app-control';
 import App, { type Action, shouldDisablePromptInput, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
@@ -60,8 +57,6 @@ import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } f
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
-/** 退出时用于中止静默启动预热的执行器引用 / Executor reference used to abort the silent startup prewarm on exit */
-let _appShellExecutorForExit: AppShellExecutor | null = null;
 let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
 function toErrorMessage(error: unknown): string {
@@ -71,30 +66,6 @@ function toErrorMessage(error: unknown): string {
 const HISTORICAL_SESSION_LOAD_FAILURE_TEXT =
   '  ⎿  历史会话打开失败，当前会话未受影响；请稍后通过 /resume 重试。';
 const historicalSessionDebug = debuglog('kite-session');
-
-function resolveConfigForResume(
-  currentConfig: AgentConfig,
-  persistedProvider: string,
-  persistedModelName: string,
-): AgentConfig {
-  if (!persistedProvider || !persistedModelName) return currentConfig;
-  try {
-    return loadAgentConfig({
-      providerName: persistedProvider,
-      modelName: persistedModelName,
-    });
-  } catch {
-    return currentConfig;
-  }
-}
-
-function hasModelConversation(state: import('./types').TuiState): boolean {
-  return state.turns.some((turn) =>
-    turn.blocks.some(
-      (block) => block.kind === 'user' && !block.content.trimStart().startsWith('/'),
-    ),
-  );
-}
 
 function overlaySurfaceKey(state: import('./types').TuiState): string {
   if (state.interrupt) return 'interrupt';
@@ -113,27 +84,49 @@ function overlaySurfaceKey(state: import('./types').TuiState): string {
 export interface TuiBootstrapProps {
   /** Single composition-root injection; presentation never constructs Runtime authority. */
   createSessionManager?: TuiRuntimeClientFacadeFactory;
-  /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
-  model?: import('@kite-ai/builtin-runtime/model').SupportedChatModel;
-  /** Optional App-owned Shell runtime injection used by composition and system tests. */
-  shellExecutor?: AppShellExecutor;
+  /** Neutral discovery plus admitted Workspace App Control clients. */
+  appControlGateway?: InProcessAppControlGateway;
+  credentialClient?: NativeProviderCredentialClient;
 }
 
 interface TuiAppProps {
   createSessionManager: TuiRuntimeClientFacadeFactory;
-  config: AgentConfig;
+  config: TuiInitialConfig;
   workspace: string;
+  workspaceIdentity: KiteWorkspaceIdentity;
+  appControl: KiteAppControlClient;
   languagePreference: LanguagePreference;
   onLanguageSelect: (language: LanguagePreference) => boolean;
-  /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
-  injectModel?: import('@kite-ai/builtin-runtime/model').SupportedChatModel;
-  shellExecutor?: AppShellExecutor;
+}
+
+interface TuiInitialConfig {
+  readonly providerName: string;
+  readonly modelName: string;
+  readonly reasoningEffort: string | null;
+  readonly interactionMode: 'accept_edits' | 'auto' | 'full';
+  readonly reasoningEnabled: boolean;
+}
+
+function initialConfigFromSnapshot(snapshot: ProviderModelSnapshot): TuiInitialConfig | undefined {
+  const selected = snapshot.selected;
+  if (!selected) return undefined;
+  const route = snapshot.providers
+    .flatMap((provider) => provider.models)
+    .find((model) => model.provider === selected.provider && model.name === selected.name);
+  if (!route) return undefined;
+  return {
+    providerName: selected.provider,
+    modelName: selected.name,
+    reasoningEffort: null,
+    interactionMode: loadUserInteractionMode(),
+    reasoningEnabled: route.reasoning !== false,
+  };
 }
 
 export function TuiBootstrap({
   createSessionManager,
-  model: injectModel,
-  shellExecutor,
+  appControlGateway,
+  credentialClient,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
   const [languagePreference, setLanguagePreference] = React.useState<LanguagePreference>(() =>
@@ -142,28 +135,53 @@ export function TuiBootstrap({
   const [deviceLocale] = React.useState(detectTuiDeviceLocale);
   const language = resolveTuiLanguage(languagePreference, deviceLocale);
   // Workspace trust is checked first — no project-level config is read before trust.
-  const [workspaceTrusted, setWorkspaceTrusted] = React.useState<boolean>(
-    () => !shouldPromptWorkspaceTrust(workspace),
+  const [workspaceIdentity, setWorkspaceIdentity] = React.useState<KiteWorkspaceIdentity | null>(
+    null,
   );
-  // Config is probed after trust is established.
-  const [probeResult, setProbeResult] = React.useState<ConfigProbeResult | null>(() =>
-    workspaceTrusted ? probeAgentConfig() : null,
+  const [providerSnapshot, setProviderSnapshot] = React.useState<
+    | { readonly status: 'idle' | 'loading' }
+    | { readonly status: 'ready'; readonly snapshot: ProviderModelSnapshot }
+    | { readonly status: 'error' }
+  >({ status: 'idle' });
+
+  const refreshProviderSnapshot = React.useCallback(
+    async (identity: KiteWorkspaceIdentity) => {
+      if (!appControlGateway) {
+        setProviderSnapshot({ status: 'error' });
+        return;
+      }
+      setProviderSnapshot({ status: 'loading' });
+      try {
+        const snapshot = await appControlGateway.forWorkspace(identity).getProviderModelSnapshot({
+          schema: 'kite.app.provider-model.snapshot-request.v1',
+          workspace: identity,
+        });
+        setProviderSnapshot({ status: 'ready', snapshot });
+      } catch {
+        setProviderSnapshot({ status: 'error' });
+      }
+    },
+    [appControlGateway],
   );
 
-  const handleTrusted = React.useCallback(() => {
-    setWorkspaceTrusted(true);
-    setProbeResult(probeAgentConfig());
-  }, []);
+  const handleTrusted = React.useCallback(
+    (identity: KiteWorkspaceIdentity) => {
+      setWorkspaceIdentity(identity);
+      void refreshProviderSnapshot(identity);
+    },
+    [refreshProviderSnapshot],
+  );
 
-  const handleSetupComplete = React.useCallback(({ modelName }: { modelName: string }) => {
-    const cfg = loadAgentConfig({ modelName });
-    // Convert to a ready probe result so TuiApp mounts
-    setProbeResult({ status: 'ready', config: cfg });
-  }, []);
+  const handleSetupComplete = React.useCallback(
+    (_result: { modelName: string }) => {
+      if (workspaceIdentity) void refreshProviderSnapshot(workspaceIdentity);
+    },
+    [refreshProviderSnapshot, workspaceIdentity],
+  );
 
   const handleConfigRetry = React.useCallback(() => {
-    setProbeResult(probeAgentConfig());
-  }, []);
+    if (workspaceIdentity) void refreshProviderSnapshot(workspaceIdentity);
+  }, [refreshProviderSnapshot, workspaceIdentity]);
 
   const handleLanguageSelect = React.useCallback((next: LanguagePreference): boolean => {
     const saved = saveUserLanguage(next);
@@ -175,77 +193,50 @@ export function TuiBootstrap({
     <I18nProvider language={language}>{node}</I18nProvider>
   );
 
-  // The executor is created as soon as workspace trust and config are
-  // resolved, ahead of the main-UI mount, so the silent startup prewarm can
-  // begin paying the one-time structural cost (backend probe) before the
-  // first command. Test-injected executors keep precedence.
-  const readyConfig = probeResult?.status === 'ready' ? probeResult.config : null;
-  const bootstrapShellExecutor = React.useMemo(() => {
-    if (shellExecutor) return shellExecutor;
-    if (!readyConfig) return undefined;
-    return composeAppSandboxExecutor({
-      entrypoint: 'tui',
-      workspace,
-      config: readyConfig,
-    });
-  }, [shellExecutor, readyConfig, workspace]);
-
-  // Register the bootstrap executor before TuiApp creates a SessionManager so
-  // every early exit can still cancel the silent native prewarm.
-  React.useEffect(() => {
-    if (!bootstrapShellExecutor) return;
-    _appShellExecutorForExit = bootstrapShellExecutor;
-    return () => {
-      if (_appShellExecutorForExit === bootstrapShellExecutor) {
-        _appShellExecutorForExit = null;
-      }
-    };
-  }, [bootstrapShellExecutor]);
-
-  // Silent startup prewarm: success is deliberately invisible. Availability
-  // decisions (host-shell downgrade / denial) are still projected by TuiApp's
-  // prepare consumer; this kick only moves the wait earlier.
-  React.useEffect(() => {
-    if (!bootstrapShellExecutor) return;
-    void bootstrapShellExecutor.prepare().catch(() => {
-      // Aborted (exit during warmup) or superseded preparation is re-resolved
-      // by the next prepare() consumer; the silent kick never surfaces.
-    });
-  }, [bootstrapShellExecutor]);
-
-  // Remove preflight workspaces orphaned by an earlier TUI that exited mid
-  // probe. Best effort, age-bounded, and safe against concurrent TUI
-  // instances (their live probe directories are younger than the bound).
-  React.useEffect(() => {}, []);
-
-  if (!workspaceTrusted) {
+  if (!workspaceIdentity) {
     return withI18n(
       <ThemeContext.Provider value={getDarkTheme('blue')}>
-        <WorkspaceTrustGate workspace={workspace} onTrusted={handleTrusted} />
+        <WorkspaceTrustGate
+          workspace={workspace}
+          appControl={appControlGateway?.discovery}
+          onTrusted={handleTrusted}
+          onExit={() => void _requestTuiExit?.()}
+        />
       </ThemeContext.Provider>,
     );
   }
 
-  if (!probeResult) {
-    // Trusted but config not yet probed (should not normally happen)
+  if (providerSnapshot.status === 'idle' || providerSnapshot.status === 'loading') {
     return null;
   }
 
-  if (probeResult.status === 'not-configured') {
+  const initialConfig =
+    providerSnapshot.status === 'ready'
+      ? initialConfigFromSnapshot(providerSnapshot.snapshot)
+      : undefined;
+
+  if (providerSnapshot.status === 'ready' && !initialConfig) {
     return withI18n(
       <ThemeContext.Provider value={getDarkTheme('blue')}>
-        <FirstRunFlow onComplete={handleSetupComplete} />
+        <FirstRunFlow
+          onComplete={handleSetupComplete}
+          appControl={appControlGateway?.forWorkspace(workspaceIdentity)}
+          credentialClient={credentialClient}
+          workspace={workspaceIdentity}
+          onExit={() => void _requestTuiExit?.()}
+        />
       </ThemeContext.Provider>,
     );
   }
 
-  if (probeResult.status === 'invalid') {
+  if (providerSnapshot.status === 'error') {
     return withI18n(
       <ThemeContext.Provider value={getDarkTheme('blue')}>
         <ConfigErrorScreen
-          configPath={probeResult.path}
-          message={probeResult.message}
+          configPath="App Control provider configuration"
+          message="Provider/model state is unavailable or invalid."
           onRetry={handleConfigRetry}
+          onExit={() => void _requestTuiExit?.()}
         />
       </ThemeContext.Provider>,
     );
@@ -254,16 +245,19 @@ export function TuiBootstrap({
   if (!createSessionManager) {
     throw new Error('TUI Runtime composition is unavailable.');
   }
+  if (!appControlGateway) {
+    throw new Error('TUI App Control composition is unavailable.');
+  }
 
   return withI18n(
     <TuiApp
       createSessionManager={createSessionManager}
-      config={probeResult.config}
+      config={initialConfig!}
       workspace={workspace}
+      workspaceIdentity={workspaceIdentity}
+      appControl={appControlGateway.forWorkspace(workspaceIdentity)}
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
-      injectModel={injectModel}
-      shellExecutor={bootstrapShellExecutor}
     />,
   );
 }
@@ -272,10 +266,10 @@ function TuiApp({
   createSessionManager,
   config,
   workspace,
+  workspaceIdentity,
+  appControl,
   languagePreference,
   onLanguageSelect,
-  injectModel,
-  shellExecutor,
 }: TuiAppProps) {
   const { t: translate } = useI18n();
   const { waitUntilRenderFlush } = useApp();
@@ -284,7 +278,7 @@ function TuiApp({
     config.providerName,
     config.reasoningEffort,
     config.interactionMode,
-    config.reasoningExplicitlyDisabled !== true,
+    config.reasoningEnabled,
   );
   const stateRef = React.useRef(state);
   stateRef.current = state;
@@ -378,9 +372,7 @@ function TuiApp({
   const prevSessionKeyRef = React.useRef(state.sessionKey);
   const agentLoopActiveRef = React.useRef(false);
   const abortControllerRef = React.useRef<AbortController | null>(null);
-  const mcpRuntimeProviderRef = React.useRef<McpRuntimeProvider | null>(null);
   const skillManifestsRef = React.useRef<SkillManifest[]>([]);
-  const skillOptionsRef = React.useRef<SkillScanOptions | null>(null);
   const runTaskRef = React.useRef<
     (
       task: string,
@@ -393,7 +385,64 @@ function TuiApp({
   >(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
   const [sessionGrantCount, setSessionGrantCount] = React.useState(0);
+  const [providerModelSnapshot, setProviderModelSnapshot] = React.useState<ProviderModelSnapshot>();
   const interruptClearedByResolutionRef = React.useRef(false);
+
+  const refreshProviderModel = React.useCallback(async (): Promise<ProviderModelSnapshot> => {
+    const snapshot = await appControl.getProviderModelSnapshot({
+      schema: 'kite.app.provider-model.snapshot-request.v1',
+      workspace: workspaceIdentity,
+    });
+    setProviderModelSnapshot(snapshot);
+    return snapshot;
+  }, [appControl, workspaceIdentity]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void appControl
+      .getProviderModelSnapshot({
+        schema: 'kite.app.provider-model.snapshot-request.v1',
+        workspace: workspaceIdentity,
+      })
+      .then((snapshot) => {
+        if (!cancelled) setProviderModelSnapshot(snapshot);
+      })
+      .catch(() => {
+        if (!cancelled) setProviderModelSnapshot(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appControl, workspaceIdentity]);
+
+  const selectProviderModel = React.useCallback(
+    async (model: import('./components/ModelSelector').ModelOption): Promise<boolean> => {
+      if (!model.observedRevision) return false;
+      try {
+        const response = await appControl.selectProviderModel({
+          schema: 'kite.app.provider-model.select-request.v1',
+          workspace: workspaceIdentity,
+          provider: model.provider,
+          name: model.name,
+          expectedRevision: model.observedRevision,
+        });
+        setProviderModelSnapshot(response.snapshot);
+        if (response.outcome === 'applied' || response.outcome === 'already_selected') return true;
+        if (response.outcome !== 'outcome_unknown') return false;
+      } catch {
+        // Lost mutation response: query authoritative state once; never replay.
+      }
+      try {
+        const current = await refreshProviderModel();
+        return (
+          current.selected?.provider === model.provider && current.selected.name === model.name
+        );
+      } catch {
+        return false;
+      }
+    },
+    [appControl, refreshProviderModel, workspaceIdentity],
+  );
 
   const provider = React.useMemo(() => {
     const p = new TuiUserInputProvider();
@@ -407,64 +456,24 @@ function TuiApp({
     return p;
   }, []);
 
-  const observability = React.useMemo(
-    () =>
-      composeObservability({
-        artifactTelemetryAllowed: false,
-        featureEnabled: getFeatureFlags(config).observabilityMetrics,
-        consent: resolveTelemetryConsent({
-          releaseChannel: 'development',
-          user: config.telemetry?.user,
-          project: config.telemetry?.project,
-        }),
-      }),
-    [config],
-  );
-  const appShellExecutor = React.useMemo(
-    () =>
-      shellExecutor ??
-      composeAppSandboxExecutor({
-        entrypoint: 'tui',
-        workspace,
-        config,
-      }),
-    [config, shellExecutor, workspace],
-  );
-
   const sessionManager = React.useMemo(() => {
     const mgr = createSessionManager({
-      config,
       workspace,
-      provider,
-      skillManifests: skillManifestsRef.current,
-      skillOptions: skillOptionsRef.current,
-      mcpManager: mcpRuntimeProviderRef.current,
-      checkpointPath: defaultCheckpointPath(),
-      observabilityBridge: observability.bridge,
-      shellExecutor: appShellExecutor,
       flushPresentation: waitUntilRenderFlush,
     });
+    provider.setActionSink((action) => mgr.submitUserAction(action));
     mgr.setSnapshotCallback((threadId: string) => {
       dispatch({ type: 'SESSION_INTERRUPT_PENDING', threadId });
     });
     _sessionManagerForExit = mgr;
     return mgr;
-  }, [
-    config,
-    provider,
-    dispatch,
-    observability.bridge,
-    appShellExecutor,
-    waitUntilRenderFlush,
-    createSessionManager,
-    workspace,
-  ]);
+  }, [provider, dispatch, waitUntilRenderFlush, createSessionManager, workspace]);
   React.useEffect(
     () => () => {
-      void Promise.resolve(sessionManager.abortAll()).finally(() => sessionManager.dispose());
+      provider.setActionSink(null);
       if (_sessionManagerForExit === sessionManager) _sessionManagerForExit = null;
     },
-    [sessionManager],
+    [provider, sessionManager],
   );
   React.useEffect(() => {
     if (!state.showPermissionSelector) return;
@@ -488,32 +497,25 @@ function TuiApp({
       cancelled = true;
     };
   }, [sessionManager, state.activeSessionId, state.showPermissionSelector]);
-  // The probe describes restricted Accept/Auto execution. Full remains a
-  // separately selected interaction mode even when no sandbox backend exists.
   const [sandboxBackend, setSandboxBackend] = React.useState<SandboxBackend>('none');
   React.useEffect(() => {
-    let disposed = false;
+    let cancelled = false;
     setSandboxBackend('none');
-    void appShellExecutor
-      .prepare()
-      .then((decision) => {
-        if (disposed) return;
-        setSandboxBackend(decision.mode === 'sandbox' ? decision.backend : 'none');
-        if (decision.mode === 'denied') {
-          dispatch({
-            type: 'LOCAL_TEXT',
-            text: `Shell unavailable: ${decision.reason ?? 'execution policy denied Shell'}`,
-            isError: true,
-          });
-        }
+    void appControl
+      .getExecutionStatus({
+        schema: 'kite.app.execution-status.request.v1',
+        workspace: workspaceIdentity,
+      })
+      .then((status) => {
+        if (!cancelled) setSandboxBackend(status.sandboxBackend);
       })
       .catch(() => {
-        // Preparation aborted during exit; nothing left to project.
+        if (!cancelled) setSandboxBackend('none');
       });
     return () => {
-      disposed = true;
+      cancelled = true;
     };
-  }, [appShellExecutor, dispatch]);
+  }, [appControl, workspaceIdentity]);
   // Reset conversation history and thread on new session
   React.useEffect(() => {
     if (state.sessionKey !== prevSessionKeyRef.current) {
@@ -555,8 +557,6 @@ function TuiApp({
       conversationHistoryRef,
       thinkingLevelRef,
       skillManifestsRef,
-      skillOptionsRef,
-      mcpRuntimeProviderRef,
       agentLoopActiveRef,
       abortControllerRef,
       stateRef,
@@ -569,14 +569,12 @@ function TuiApp({
 
   // MCP control plane and runtime provider lifecycle
   const { controller: mcpController, mcpPromptRegistry } = useMcpController(
-    mcpRuntimeProviderRef,
-    sessionManager,
-    workspace,
-    config,
+    appControl,
+    workspaceIdentity,
   );
 
   // Skills loader: scan on mount
-  useSkillsLoader(workspace, dispatch, skillManifestsRef, skillOptionsRef, sessionManager);
+  useSkillsLoader(appControl, workspaceIdentity, dispatch, skillManifestsRef);
 
   // 将 thinkingLevel ref 与 state.status.thinkingMode 同步，确保 ModelSelector 切换后 runTask 拿到最新值
   // Sync thinkingLevel ref with state.status.thinkingMode so runTask uses latest value after ModelSelector changes
@@ -709,12 +707,11 @@ function TuiApp({
             sessions: sessionManager.getSnapshot(),
           });
 
-          const resumedConfig = resolveConfigForResume(
-            sessionManager.getDefaultConfig(),
+          const resumedRoute = sessionManager.applyPersistedModelRoute(
+            threadId,
             result.modelProvider,
             result.modelName,
           );
-          sessionManager.setSessionConfig(threadId, resumedConfig);
           const thinkingLevel = result.thinkingLevel ?? 'max';
           thinkingLevelRef.current = thinkingLevel;
 
@@ -743,10 +740,10 @@ function TuiApp({
             blocks,
             interrupt,
             pendingToolCalls,
-            modelProvider: resumedConfig.providerName,
-            modelName: resumedConfig.modelName,
+            modelProvider: resumedRoute.provider,
+            modelName: resumedRoute.name,
             thinkingLevel,
-            reasoningEnabled: resumedConfig.reasoningExplicitlyDisabled !== true,
+            reasoningEnabled: resumedRoute.reasoningEnabled,
             interactionMode,
           });
           if (
@@ -865,39 +862,6 @@ function TuiApp({
       if (action.type === 'EXECUTE_REWIND') {
         dispatch(action);
         void runRewindRef.current(action.scope, action.checkpointId);
-        return;
-      }
-      if (action.type === 'SELECT_MODEL') {
-        try {
-          const selectedConfig = loadAgentConfig({
-            providerName: action.provider,
-            modelName: action.modelName,
-          });
-          const threadId = sessionManager.getActiveId();
-          sessionManager.setSessionConfig(threadId, selectedConfig, {
-            persist: true,
-            asDefault: true,
-          });
-          dispatch({
-            ...action,
-            reasoningEnabled: selectedConfig.reasoningExplicitlyDisabled !== true,
-          });
-          if (hasModelConversation(stateRef.current)) {
-            const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
-            if (contextSnapshot) {
-              dispatch({
-                type: 'SET_CONTEXT_SNAPSHOT',
-                snapshot: contextSnapshot,
-              });
-            }
-          }
-        } catch (error) {
-          dispatch({
-            type: 'LOCAL_TEXT',
-            text: `无法切换模型：${error instanceof Error ? error.message : String(error)}`,
-            isError: true,
-          });
-        }
         return;
       }
       if (action.type === 'SET_THINKING_LEVEL') {
@@ -1164,7 +1128,7 @@ function TuiApp({
     handleExit,
     mcpPromptRegistry,
     skillManifestsRef.current,
-    skillOptionsRef.current ?? undefined,
+    undefined,
     runTaskBridge,
     enterPlanMode,
     (customInstructions) => {
@@ -1332,10 +1296,10 @@ function TuiApp({
           blocks: current.turns.flatMap((turn) => turn.blocks),
           interrupt: null,
           pendingToolCalls: current.pendingToolCalls,
-          modelProvider: rt.config.providerName,
-          modelName: rt.config.modelName,
+          modelProvider: rt.modelProvider,
+          modelName: rt.modelName,
           thinkingLevel: thinkingLevelRef.current,
-          reasoningEnabled: rt.config.reasoningExplicitlyDisabled !== true,
+          reasoningEnabled: rt.reasoningEnabled,
         });
       }
 
@@ -1378,9 +1342,6 @@ function TuiApp({
           task,
           {
             dispatch,
-            provider,
-            config: rt.config,
-            model: injectModel,
           },
           requestedPhase,
           initialSkillActivations,
@@ -1424,7 +1385,7 @@ function TuiApp({
         })();
       }
     },
-    [provider, dispatch, sessionManager, injectModel],
+    [dispatch, sessionManager],
   );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;
@@ -1471,6 +1432,8 @@ function TuiApp({
         provider={provider}
         workspace={workspace}
         mcpController={mcpController}
+        providerModelSnapshot={providerModelSnapshot}
+        onModelSelect={selectProviderModel}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
@@ -1554,7 +1517,7 @@ export function runTui(props: TuiBootstrapProps): void {
   let unmountTui: (() => void) | null = null;
   const exitCoordinator = createTuiExitCoordinator({
     getSessionLifecycle: () => _sessionManagerForExit,
-    getShellExecutor: () => _appShellExecutorForExit,
+    getShellExecutor: () => null,
     unmount: () => unmountTui?.(),
     exit: (code) => process.exit(code),
   });

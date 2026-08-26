@@ -998,7 +998,23 @@ Gate：两个新 package 都有 README、manifest、typecheck、consumer test �
 
 回滚：移除尚未进程外使用的 package 与 facade；当前 InProcess behavior保持。
 
-### KLSV1-03：Runtime Application、多 Workspace 与 App Control owner 拆分
+### KLSV1-03：Runtime Application、多 Workspace 与 App Control owner 拆分（已完成）
+
+完成证据：`apps/kite-cli`内新增UI-free Runtime Application、共享operation gate、canonical Workspace
+context factory/router、shared interaction broker与六类exact App Control handlers/owners；Runtime Server支持
+per-connection admission与connection close hook。真实SQLite integration使用一个Storage owner、一个Host和一个
+coordinator registry同时运行双Workspace及同Workspace多Session，从唯一Store重启hydrate persisted identity，并让
+B→A create/resume/query/subscribe/fork全部fail closed。broker-backed ask_user在原展示client断开后可由另一client
+settle，TUI exit/client dispose不再`abortAll`或隐式shutdown owner。Workspace Trust、Provider/model、MCP、Skill、
+execution/release与Native first-run credential已经切到exact client；credential lost/throw只query一次且不重放，
+取消signal透传discovery。
+
+12-workspace typecheck、runtime package/core/pre-release/test-ownership/compaction Gate、packages=12 / edges=26 /唯一
+composition root、144 focused tests / 919 expects、runtime package checker 42 tests、App owner suite 168 parallel files
+（1969 tests / 8499 expects）加35 isolated files、first-run真实PTY 3/3、docs-impact/docs均通过。当前仍是
+`apps/kite-cli` app-local InProcess owner；没有`apps/kite-service` process、production listener、第二Host/Store、
+app-to-app import、silent fallback或默认双owner。raw Runtime event/history projector与concrete bootstrap仍在CLI
+app-internal transition path，留待KLSV1-06 relocation；本地结果不冒充KLSV1-07三平台/release evidence。
 
 交付：
 

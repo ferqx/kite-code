@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -7,6 +7,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -100,7 +101,15 @@ export type WorkspaceTrustStatus = 'trusted' | 'unknown' | 'corrupt' | 'unavaila
 
 export type WorkspaceTrustDecisionResult =
   | { status: 'recorded'; record: WorkspaceTrustRecord }
+  | { status: 'conflict'; message: string }
   | { status: 'store_corrupt' | 'store_unavailable'; message: string };
+
+export interface WorkspaceTrustSnapshot {
+  readonly canonicalPath: string;
+  readonly workspaceKey: string;
+  readonly status: WorkspaceTrustStatus;
+  readonly revision: string;
+}
 
 // SECURITY: there is deliberately no environment-variable bypass. Bun injects
 // `<cwd>/.env*` into process.env before user code runs, so any env switch could
@@ -197,11 +206,49 @@ export function shouldPromptWorkspaceTrust(workspace: string, storePath = worksp
   return getWorkspaceTrustStatus(workspace, storePath) !== 'trusted';
 }
 
+function trustStoreRevision(store: WorkspaceTrustStoreRead): string {
+  const material =
+    store.status === 'ready'
+      ? JSON.stringify(
+          Object.entries(store.records)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, record]) => [key, record]),
+        )
+      : store.status;
+  return `sha256:${createHash('sha256').update(`kite.workspace-trust.v1\0${material}`).digest('hex')}`;
+}
+
+/** Exact App Control snapshot; canonicalization happens before any project data is read. */
+export function getWorkspaceTrustSnapshot(
+  workspace: string,
+  storePath = workspaceTrustPath(),
+): WorkspaceTrustSnapshot | undefined {
+  try {
+    const canonicalPath = realpathSync.native(resolve(workspace));
+    const workspaceKey = canonicalWorkspaceKey(canonicalPath);
+    const store = readWorkspaceTrustStore(storePath);
+    return Object.freeze({
+      canonicalPath,
+      workspaceKey,
+      status:
+        store.status === 'ready'
+          ? store.records[workspaceKey]
+            ? 'trusted'
+            : 'unknown'
+          : store.status,
+      revision: trustStoreRevision(store),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 /** Persist an explicit trust decision for one workspace. */
 export function trustWorkspace(input: {
   workspace: string;
   source?: WorkspaceTrustSource;
   storePath?: string;
+  expectedRevision?: string;
 }): WorkspaceTrustDecisionResult {
   const path = input.storePath ?? workspaceTrustPath();
   let workspaceKey: string;
@@ -224,6 +271,15 @@ export function trustWorkspace(input: {
     if (locked.status === 'corrupt') return { status: 'store_corrupt', message: locked.message };
     if (locked.status === 'unavailable')
       return { status: 'store_unavailable', message: locked.message };
+    if (
+      input.expectedRevision !== undefined &&
+      input.expectedRevision !== trustStoreRevision(locked)
+    ) {
+      return {
+        status: 'conflict',
+        message: 'Workspace trust state changed before the decision was recorded.',
+      };
+    }
     writeStore(path, { version: 1, records: { ...locked.records, [workspaceKey]: record } });
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('Could not acquire')) {

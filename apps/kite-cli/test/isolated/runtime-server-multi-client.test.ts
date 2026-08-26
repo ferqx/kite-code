@@ -109,6 +109,66 @@ test('two outer clients settle one real CLI ask_user interaction only once', asy
   }
 }, 30_000);
 
+test('disconnecting the presenting client keeps the broker-backed interaction alive', async () => {
+  const fixture = createFixture(
+    'interaction-disconnect-session',
+    [
+      {
+        message: {
+          tool_calls: [
+            {
+              id: 'ask-after-disconnect',
+              name: 'ask_user',
+              args: {
+                questions: [
+                  {
+                    question: 'Continue after disconnect?',
+                    options: [
+                      { label: 'Continue', description: 'Continue.', recommended: true },
+                      { label: 'Stop', description: 'Stop.', recommended: false },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      { message: { content: 'Continued after the original client disconnected.' } },
+    ],
+    'full',
+  );
+  try {
+    await createSession(fixture.first, fixture.sessionId);
+    const firstStream = fixture.first.subscribe({
+      spec: { scope: 'session', sessionId: fixture.sessionId },
+    });
+    const firstIterator = firstStream[Symbol.asyncIterator]();
+    await next(firstIterator);
+    const survivingStream = fixture.second.subscribe({
+      spec: { scope: 'session', sessionId: fixture.sessionId },
+    });
+    const survivingIterator = survivingStream[Symbol.asyncIterator]();
+    await next(survivingIterator);
+    await fixture.first.command(
+      start('interaction-disconnect-start', fixture.sessionId, 0, 'Ask before continuing.'),
+    );
+    const interaction = await inputInteraction(firstIterator, fixture.second, fixture.sessionId);
+
+    await fixture.first.close();
+    await expect(
+      fixture.second.command(
+        respond('interaction-disconnect-response', fixture.sessionId, interaction, 'Continue'),
+      ),
+    ).resolves.toMatchObject({ status: 'applied' });
+    await terminalProjection(survivingIterator, fixture.sessionId, fixture.second);
+    expect(fixture.model.getRequestCount()).toBe(2);
+    await survivingIterator.return?.();
+  } finally {
+    await fixture.dispose();
+  }
+}, 30_000);
+
 test('different start ids at one revision commit once and dispatch once', async () => {
   const fixture = createFixture('revision-race-session', [{ message: { content: 'winner' } }]);
   try {

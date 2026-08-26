@@ -187,6 +187,8 @@ export interface SessionDeps {
   skillManifests: SkillManifest[];
   skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
+  /** Service-owned Workspace dependencies that must be ready before a Turn starts. */
+  workspaceReady?: Promise<void>;
   /** Independent authorization source for one remote MCP content invocation. */
   mcpRecoveryController?: McpRecoveryController | null;
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */

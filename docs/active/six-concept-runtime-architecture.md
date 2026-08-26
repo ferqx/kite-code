@@ -52,7 +52,7 @@ runtime-spi ──────────────────────�
 runtime-host ─────────────────────────────────────────────→ agent-kernel + runtime-contract + runtime-spi
 runtime-storage-sqlite ───────────────────────────────────→ runtime-host
 builtin-runtime ──────────────────────────────────────────→ runtime-contract + runtime-spi
-apps/kite-cli ─────────────────────────────────────────────→ app-contract + client + server + host + builtin + sqlite + protocol + contract + spi
+apps/kite-cli ─────────────────────────────────────────────→ app-contract + local-runtime + client + server + host + builtin + sqlite + protocol + contract + spi
 ```
 
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 JSON-RPC V1 DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
@@ -64,11 +64,21 @@ I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` �
 listener、spawn、filesystem mutation、Store 或 Runtime composition。它不得依赖 Host、Server、Builtin、SQLite、UI 或
 任一 App source。
 
-KLSV1-02 阶段 `apps/kite-cli/src/bootstrap.ts` 仍是唯一 concrete Runtime composition root：它创建唯一
-Host/Store/Kernel/Builtin assembly，注入 Workspace admission 与 concrete carrier I/O，并组合 Client 和 Server。
-App 已用 explicit InProcess Runtime/History/App Control facade 固定 client seam，但 production 仍未启动独立 Service。
-不存在 sidecar Runtime Server、第二 composition root、第二 Store writer、dual write、alternate transport execution path、
-`try-new-catch-old` fallback 或 legacy Host bridge。
+KLSV1-03 阶段 `apps/kite-cli/src/bootstrap.ts` 仍是唯一 concrete Runtime composition root：它创建唯一
+Host/Store/Kernel/Builtin assembly，并在 app-local InProcess owner内组合 Runtime Application、Workspace context router、
+per-connection admission、History与App Control。真实 integration证明一个 Host/SQLite writer可承载多个 canonical
+Workspace和同 Workspace多个 Session；context按完整 Project identity隔离，重启从唯一 Store恢复 Session identity，
+跨 Workspace create/resume/query/subscribe/fork fail closed。App已用 explicit Runtime/History/App Control facade固定
+client seam，但 production仍未启动独立 Service。不存在 sidecar Runtime Server、第二 composition root、第二 Store
+writer、dual write、alternate transport execution path、`try-new-catch-old` fallback或legacy Host bridge。
+
+Runtime Application的共享 operation gate先阻止新 mutation admission，再等待active临界区并决定resume或commit drain。
+Service-owned interaction broker持有durable generation/revision waiter；connection disconnect只释放client binding，
+不取消Turn/approval或关闭Host，只有显式owner shutdown关闭broker。Workspace Trust、Provider/model、MCP、Skill、
+execution/release和Native first-run credential已经由exact client use case取代TUI direct repository/supervisor access；
+config、actual Skill、MCP runtime provider、shell/sandbox与observability仍按canonical Workspace在app-local owner组合。
+raw Runtime event/history projector与concrete bootstrap仍在`apps/kite-cli`内部，KLSV1-06才按relocation manifest迁移；
+本阶段没有`apps/kite-service` process、listener、公开SDK或默认双Host/Store。
 
 ## Runtime Kernel
 

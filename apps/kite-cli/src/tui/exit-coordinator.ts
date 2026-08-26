@@ -1,5 +1,4 @@
 export interface TuiExitSessionLifecycle {
-  abortAll(): void | Promise<void>;
   shutdownObservability(timeoutMs: number): Promise<void>;
   dispose(): void | Promise<void>;
 }
@@ -35,11 +34,6 @@ export function createTuiExitCoordinator(input: {
           lifecycle = input.getSessionLifecycle();
         } catch {
           // A broken lifecycle lookup cannot strand terminal teardown.
-        }
-        try {
-          await lifecycle?.abortAll();
-        } catch {
-          // Runtime cancellation failure must not skip telemetry shutdown.
         }
         try {
           // Exit during the silent startup prewarm must not leave the probe

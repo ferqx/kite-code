@@ -1,50 +1,68 @@
-import type {
-  McpAuthResult,
-  McpProviderRecoveryAction,
-  McpRuntimeProvider,
-  McpServerConfig,
-  McpServerKey,
-  McpSupervisor,
-} from '@kite-ai/builtin-runtime/mcp';
-import type { McpWritableScope } from '#kite-cli/config';
 import {
-  decideProjectMcpServer,
-  type McpProjectDecision,
-  type McpProjectSourceKind,
-} from '#kite-cli/config/mcp-project-approvals';
+  type AppMcpAction,
+  type AppMcpActionResponse,
+  type AppMcpServerKey,
+  type AppMcpSnapshot,
+  type KiteAppControlClient,
+  type KiteWorkspaceIdentity,
+  MCP_ACTION_REQUEST_SCHEMA_,
+  MCP_SNAPSHOT_REQUEST_SCHEMA_,
+  mcpActionResponseCodec,
+  mcpSnapshotResponseCodec,
+} from '@kite-ai/kite-app-contract';
 import type { McpController, McpControllerSnapshot } from './types';
 
+const SNAPSHOT_POLL_INTERVAL_MS = 250;
+const INITIAL_REVISION = 'initial';
+
+/**
+ * TUI-only presentation wrapper over the closed App Control MCP route.
+ *
+ * The controller intentionally owns no Supervisor, repository, credential
+ * store, process port, or runtime provider. It only caches the latest
+ * browser-safe snapshot and turns visible actions into exact App Control
+ * requests. A mutation response is consumed once; in particular,
+ * `outcome_unknown` is reported to the user and is never retried here.
+ */
 export class TuiMcpController implements McpController {
-  private readonly supervisor: McpSupervisor;
-  private readonly workspace: string;
+  private readonly client: KiteAppControlClient;
+  private readonly workspace: KiteWorkspaceIdentity;
   private readonly listeners = new Set<() => void>();
   private snapshot: McpControllerSnapshot;
-  private readonly unsubscribeSupervisor: () => void;
+  private refreshInFlight: Promise<void> | undefined;
+  private pollTimer: ReturnType<typeof setInterval> | undefined;
+  private startPromise: Promise<void> | undefined;
+  private stopped = false;
 
-  constructor(supervisor: McpSupervisor, workspace: string) {
-    this.supervisor = supervisor;
-    this.workspace = workspace;
-    this.snapshot = Object.freeze({ control: supervisor.getSnapshot() });
-    this.unsubscribeSupervisor = supervisor.subscribe(() => {
-      this.snapshot = Object.freeze({
-        control: supervisor.getSnapshot(),
-        message: this.snapshot.message,
-      });
-      this.emit();
+  constructor(client: KiteAppControlClient, workspace: KiteWorkspaceIdentity) {
+    this.client = client;
+    this.workspace = Object.freeze({ ...workspace });
+    this.snapshot = Object.freeze({
+      control: emptySnapshot(this.workspace),
     });
   }
 
   async start(): Promise<void> {
-    await this.supervisor.start(this.workspace);
+    if (this.startPromise) return this.startPromise;
+    if (this.stopped) throw new Error('MCP presentation controller is stopped.');
+    this.startPromise = this.refresh().then(() => {
+      if (this.stopped || this.pollTimer) return;
+      this.pollTimer = setInterval(() => {
+        void this.refresh().catch((error: unknown) => {
+          this.setMessage(mutationMessage(error, 'refresh MCP state'));
+        });
+      }, SNAPSHOT_POLL_INTERVAL_MS);
+    });
+    return this.startPromise;
   }
 
   async stop(): Promise<void> {
-    this.unsubscribeSupervisor();
-    await this.supervisor.stop();
-  }
-
-  getRuntimeProvider(): McpRuntimeProvider {
-    return this.supervisor.getRuntimeProvider();
+    this.stopped = true;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    await this.refreshInFlight?.catch(() => undefined);
   }
 
   getSnapshot = (): McpControllerSnapshot => this.snapshot;
@@ -54,186 +72,167 @@ export class TuiMcpController implements McpController {
     return () => this.listeners.delete(listener);
   };
 
-  async decide(key: McpServerKey, decision: McpProjectDecision): Promise<boolean> {
-    const server = this.snapshot.control.servers.find(
-      (candidate) => candidate.key.name === key.name && candidate.key.source === key.source,
-    );
-    if (!server?.approval || !isProjectSource(server.source)) {
+  async decide(key: AppMcpServerKey, decision: 'approved' | 'rejected'): Promise<boolean> {
+    const server = this.findServer(key);
+    if (!server || key.source !== 'project' || !server.approval) {
       this.setMessage('This MCP server does not have a project approval action.');
       return false;
     }
-    const result = decideProjectMcpServer({
-      workspace: this.workspace,
-      serverName: server.key.name,
-      sourceKind: server.source,
-      sourcePath: server.sourcePath,
-      expectedConfigDigest: server.approval.configDigest,
-      decision,
-    });
-    this.setMessage(
-      result.status === 'recorded'
-        ? `${decision === 'approved' ? 'Approved' : 'Rejected'} project MCP server ${server.key.name}.`
-        : result.message,
+    const outcome = await this.applyAction(
+      {
+        type: decision === 'approved' ? 'approve' : 'reject',
+        key,
+        expectedRevision: server.revision,
+      },
+      `${decision === 'approved' ? 'Approved' : 'Rejected'} project MCP server ${key.name}.`,
+      `Unable to ${decision === 'approved' ? 'approve' : 'reject'} MCP server ${key.name}.`,
     );
-    await this.supervisor.reload();
-    return result.status === 'recorded';
+    return outcome === 'applied';
   }
 
-  async login(key: McpServerKey): Promise<McpAuthResult | null> {
-    try {
-      const result = await this.supervisor.login(key);
-      this.setMessage(
-        result.status === 'authenticated'
-          ? `Authenticated MCP server ${key.name}.`
-          : `Continue authentication for MCP server ${key.name} in your browser.`,
-      );
-      return result;
-    } catch {
-      this.setMessage(`Unable to start authentication for MCP server ${key.name}.`);
-      return null;
-    }
+  async login(key: AppMcpServerKey): Promise<void> {
+    const server = this.requireServer(key);
+    if (!server) return;
+    await this.applyAction(
+      { type: 'login', key, expectedRevision: server.revision },
+      `Continue authentication for MCP server ${key.name} in your browser.`,
+      `Unable to start authentication for MCP server ${key.name}.`,
+    );
   }
 
   async cancelAuth(flowId: string): Promise<void> {
-    await this.supervisor.cancelAuth(flowId);
-    this.setMessage('MCP authentication cancelled.');
+    const server = [...this.snapshot.control.servers].find(
+      (candidate) => candidate.authFlowId === flowId,
+    );
+    if (!server) {
+      this.setMessage('MCP authentication flow is no longer available.');
+      return;
+    }
+    await this.applyAction(
+      { type: 'cancel_auth', key: server.key, expectedRevision: server.revision },
+      'MCP authentication cancelled.',
+      'Unable to cancel MCP authentication.',
+    );
   }
 
-  async retry(key: McpServerKey): Promise<boolean> {
-    try {
-      await this.supervisor.retry(key);
-      this.setMessage(`Retried MCP server ${key.name}.`);
-      return true;
-    } catch {
-      this.setMessage(`Unable to retry MCP server ${key.name}.`);
-      return false;
-    }
+  async retry(key: AppMcpServerKey): Promise<boolean> {
+    const server = this.requireServer(key);
+    if (!server) return false;
+    const outcome = await this.applyAction(
+      { type: 'retry', key, expectedRevision: server.revision },
+      `Retried MCP server ${key.name}.`,
+      `Unable to retry MCP server ${key.name}.`,
+    );
+    return outcome === 'applied';
   }
 
   async setEnabled(
-    key: McpServerKey,
+    key: AppMcpServerKey,
     expectedRevision: string,
     enabled: boolean,
   ): Promise<boolean> {
-    try {
-      await this.supervisor.mutate({
-        type: 'set_enabled',
-        key,
-        expectedRevision,
-        enabled,
-      });
-      this.setMessage(`${enabled ? 'Enabled' : 'Disabled'} MCP server ${key.name}.`);
-      return true;
-    } catch (error) {
-      this.setMessage(mutationMessage(error, `${enabled ? 'enable' : 'disable'} ${key.name}`));
-      return false;
-    }
+    const outcome = await this.applyAction(
+      { type: 'set_enabled', key, expectedRevision, enabled },
+      `${enabled ? 'Enabled' : 'Disabled'} MCP server ${key.name}.`,
+      `Unable to ${enabled ? 'enable' : 'disable'} ${key.name}.`,
+    );
+    return outcome === 'applied';
   }
 
   async add(input: {
-    scope: Extract<McpWritableScope, 'project' | 'user'>;
+    scope: 'project' | 'user';
     name: string;
-    config: Pick<McpServerConfig, 'type' | 'url' | 'command'>;
-  }): Promise<McpServerKey | null> {
-    this.setMessage(undefined);
-    try {
-      await this.supervisor.mutate({
-        type: 'add',
-        scope: input.scope,
-        name: input.name,
-        config: input.config,
-        expectedRevision: this.snapshot.control.sourceRevisions[input.scope],
-      });
-      this.setMessage(`Added MCP server ${input.name}.`);
-      return { name: input.name, source: input.scope };
-    } catch (error) {
-      this.setMessage(mutationMessage(error, `add ${input.name}`));
+    config: { type: 'http' | 'stdio'; url?: string; command?: string };
+  }): Promise<AppMcpServerKey | null> {
+    const value = input.config.type === 'http' ? input.config.url : input.config.command;
+    if (!value) {
+      this.setMessage(`Unable to add ${input.name}: MCP target is required.`);
       return null;
     }
-  }
-
-  async remove(key: McpServerKey, expectedRevision: string): Promise<boolean> {
-    try {
-      const result = await this.supervisor.remove(key, expectedRevision);
-      this.setMessage(
-        result.credentialCleanup === 'failed'
-          ? `Removed MCP server ${key.name}, but its stored credentials could not be cleared.`
-          : `Removed MCP server ${key.name}.`,
-      );
-      return true;
-    } catch (error) {
-      this.setMessage(mutationMessage(error, `remove ${key.name}`));
-      return false;
-    }
-  }
-
-  async recover(providerId: string, action: McpProviderRecoveryAction) {
-    const server = this.snapshot.control.servers.find(
-      (candidate) => candidate.effective && candidate.key.name === providerId,
+    const outcome = await this.applyAction(
+      {
+        type: 'add',
+        source: input.scope,
+        name: input.name,
+        transport: input.config.type,
+        value,
+        expectedRevision: this.snapshot.control.sourceRevisions[input.scope],
+      },
+      `Added MCP server ${input.name}.`,
+      `Unable to add ${input.name}.`,
     );
-    if (!server) {
-      const directory = this.supervisor.getRuntimeProvider().getProviderDirectorySnapshot();
-      return {
-        outcome: 'failed' as const,
-        providerDirectoryRevision: directory.revision,
-      };
-    }
-
-    if (action === 'approve') {
-      await this.decide(server.key, 'approved');
-    } else if (action === 'retry') {
-      await this.supervisor.retry(server.key);
-    } else {
-      const result = await this.supervisor.login(server.key);
-      if (result.status === 'authorization_required') {
-        await this.waitForAuthentication(server.key);
-      }
-    }
-
-    const directory = this.supervisor.getRuntimeProvider().getProviderDirectorySnapshot();
-    const entry = directory.entries.find((candidate) => candidate.providerId === providerId);
-    return {
-      outcome:
-        entry?.status === 'ready' || entry?.status === 'degraded'
-          ? ('completed' as const)
-          : ('failed' as const),
-      providerDirectoryRevision: directory.revision,
-      ...(entry ? { providerStatus: entry.status } : {}),
-      ...(entry?.diagnosticCode ? { diagnosticCode: entry.diagnosticCode } : {}),
-    };
+    return outcome === 'applied' ? { name: input.name, source: input.scope } : null;
   }
 
-  private async waitForAuthentication(key: McpServerKey): Promise<void> {
-    const current = () =>
-      this.supervisor
-        .getSnapshot()
-        .servers.find(
-          (candidate) =>
-            candidate.effective &&
-            candidate.key.name === key.name &&
-            candidate.key.source === key.source,
-        )?.authStatus;
-    if (current() === 'authenticated') return;
-    await new Promise<void>((resolve) => {
-      let unsubscribe = () => {};
-      const timeout = setTimeout(done, 120_000);
-      unsubscribe = this.supervisor.subscribe(() => {
-        const status = current();
-        if (
-          status === 'authenticated' ||
-          status === 'error' ||
-          status === 'login_required' ||
-          status === 'reauth_required'
-        ) {
-          done();
-        }
+  async remove(key: AppMcpServerKey, expectedRevision: string): Promise<boolean> {
+    const outcome = await this.applyAction(
+      { type: 'remove', key, expectedRevision },
+      `Removed MCP server ${key.name}.`,
+      `Unable to remove ${key.name}.`,
+    );
+    return outcome === 'applied';
+  }
+
+  private async refresh(): Promise<void> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    const request = {
+      schema: MCP_SNAPSHOT_REQUEST_SCHEMA_,
+      workspace: this.workspace,
+    } as const;
+    const refresh = this.client
+      .getMcpSnapshot(request)
+      .then((snapshot) => this.setControlSnapshot(snapshot))
+      .finally(() => {
+        if (this.refreshInFlight === refresh) this.refreshInFlight = undefined;
       });
-      function done() {
-        clearTimeout(timeout);
-        unsubscribe();
-        resolve();
-      }
-    });
+    this.refreshInFlight = refresh;
+    return refresh;
+  }
+
+  private async applyAction(
+    action: AppMcpAction,
+    successMessage: string,
+    failureMessage: string,
+  ): Promise<AppMcpActionResponse['outcome']> {
+    try {
+      const response = mcpActionResponseCodec.decode(
+        mcpActionResponseCodec.encode(
+          await this.client.applyMcpAction({
+            schema: MCP_ACTION_REQUEST_SCHEMA_,
+            workspace: this.workspace,
+            action,
+          }),
+        ),
+      );
+      this.setControlSnapshot(response.snapshot);
+      if (response.outcome === 'applied') this.setMessage(successMessage);
+      else this.setMessage(`${failureMessage} (${response.outcome}).`);
+      return response.outcome;
+    } catch (error) {
+      this.setMessage(mutationMessage(error, failureMessage));
+      return 'rejected';
+    }
+  }
+
+  private findServer(key: AppMcpServerKey) {
+    return this.snapshot.control.servers.find(
+      (candidate) => candidate.key.name === key.name && candidate.key.source === key.source,
+    );
+  }
+
+  private requireServer(key: AppMcpServerKey) {
+    const server = this.findServer(key);
+    if (!server) this.setMessage(`MCP server ${key.name} is no longer available.`);
+    return server;
+  }
+
+  private setControlSnapshot(snapshot: AppMcpSnapshot): void {
+    const checked = mcpSnapshotResponseCodec.decode(mcpSnapshotResponseCodec.encode(snapshot));
+    if (!sameWorkspace(checked.workspace, this.workspace)) {
+      throw new Error('MCP App Control response belongs to a different Workspace.');
+    }
+    this.snapshot = Object.freeze({ control: checked });
+    this.emit();
   }
 
   private setMessage(message: string | undefined): void {
@@ -249,8 +248,22 @@ export class TuiMcpController implements McpController {
   }
 }
 
-function isProjectSource(source: string): source is McpProjectSourceKind {
-  return source === 'project';
+function emptySnapshot(workspace: KiteWorkspaceIdentity): AppMcpSnapshot {
+  return Object.freeze({
+    schema: 'kite.app.mcp.snapshot-response.v1',
+    workspace,
+    revision: INITIAL_REVISION,
+    sourceRevisions: Object.freeze({ project: INITIAL_REVISION, user: INITIAL_REVISION }),
+    servers: Object.freeze([]),
+  });
+}
+
+function sameWorkspace(left: KiteWorkspaceIdentity, right: KiteWorkspaceIdentity): boolean {
+  return (
+    left.canonicalPath === right.canonicalPath &&
+    left.projectId === right.projectId &&
+    left.workspaceDigest === right.workspaceDigest
+  );
 }
 
 function mutationMessage(error: unknown, action: string): string {

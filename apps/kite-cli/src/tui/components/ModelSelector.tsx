@@ -1,43 +1,61 @@
+import type { ProviderModelRoute, ProviderModelSnapshot } from '@kite-ai/kite-app-contract';
 import { Box, Text, useInput } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import { useRef, useState } from 'react';
-import { type AvailableModel, listAvailableModels } from '#kite-cli/config';
 import { useTheme } from '#kite-cli/tui/theme';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useI18n } from '../i18n';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
 import { OverlayEmptyState, OverlayListRow } from './OverlayPrimitives';
 
-export interface ModelOption extends AvailableModel {
+/** Safe model route projection supplied by App Control or an explicit test projection. */
+export interface ModelOption extends ProviderModelRoute {
   id: string;
+  /** Revision observed with this projection; an empty value fails closed at the caller. */
+  observedRevision: string;
 }
 
-export function modelOptionId(model: Pick<AvailableModel, 'provider' | 'name'>): string {
+export function modelOptionId(model: Pick<ProviderModelRoute, 'provider' | 'name'>): string {
   return `${model.provider}:${model.name}`;
 }
 
-export function toModelOption(model: AvailableModel): ModelOption {
-  return { ...model, id: modelOptionId(model) };
+export function toModelOption(model: ProviderModelRoute, observedRevision = ''): ModelOption {
+  return { ...model, id: modelOptionId(model), observedRevision };
 }
 
-interface ModelSelectorProps {
+export interface ModelSelectorProps {
   currentModel: string;
   currentProvider: string;
-  models?: readonly AvailableModel[];
-  onSelect: (model: AvailableModel) => void;
+  /** Preferred source: one exact App Control provider/model snapshot. */
+  snapshot?: ProviderModelSnapshot;
+  /** Transitional explicit safe projection; no config lookup is performed when omitted. */
+  models?: readonly ProviderModelRoute[];
+  selected?: Pick<ProviderModelRoute, 'provider' | 'name'>;
+  observedRevision?: string;
+  onSelect: (model: ModelOption) => void;
   onClose: () => void;
 }
 
 export default function ModelSelector({
   currentModel,
   currentProvider,
+  snapshot,
   models: availableModels,
+  selected: selectedProjection,
+  observedRevision,
   onSelect,
   onClose,
 }: ModelSelectorProps) {
   const t = useTheme();
   const { t: translate } = useI18n();
-  const models: ModelOption[] = (availableModels ?? listAvailableModels()).map(toModelOption);
+  const models: ModelOption[] = (
+    snapshot?.providers.flatMap((provider) => provider.models) ??
+    availableModels ??
+    []
+  ).map((model) => toModelOption(model, snapshot?.revision ?? observedRevision));
+  const activeSelection = snapshot?.selected ?? selectedProjection;
+  const activeModel = activeSelection?.name ?? currentModel;
+  const activeProvider = activeSelection?.provider ?? currentProvider;
   const providerGroups = new Map<string, ModelOption[]>();
   for (const model of models) {
     const group = providerGroups.get(model.provider);
@@ -45,16 +63,16 @@ export default function ModelSelector({
     else providerGroups.set(model.provider, [model]);
   }
   const groupedModels = [...providerGroups.values()].flat();
-  const [selected, setSelected] = useState(
+  const [selectedIndex, setSelected] = useState(
     groupedModels.length > 0
       ? Math.max(
           0,
-          groupedModels.findIndex((m) => m.name === currentModel && m.provider === currentProvider),
+          groupedModels.findIndex((m) => m.name === activeModel && m.provider === activeProvider),
         )
       : 0,
   );
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
+  const selectedRef = useRef(selectedIndex);
+  selectedRef.current = selectedIndex;
 
   const maxContentHeight = useOverlayHeight(9);
 
@@ -96,7 +114,7 @@ export default function ModelSelector({
       title={translate('model.title')}
       meta={
         <Text color={t.dim}>
-          {selected + 1} / {groupedModels.length}
+          {selectedIndex + 1} / {groupedModels.length}
         </Text>
       }
       footer={
@@ -110,12 +128,12 @@ export default function ModelSelector({
       }
     >
       <Box maxHeight={maxContentHeight}>
-        <ScrollList selectedIndex={selected} scrollAlignment="auto">
+        <ScrollList selectedIndex={selectedIndex} scrollAlignment="auto">
           {[...providerGroups].flatMap(([provider, providerModels], providerIndex) =>
             providerModels.map((model, providerModelIndex) => {
               const index = groupedModels.indexOf(model);
-              const isSelected = index === selected;
-              const isActive = model.name === currentModel && model.provider === currentProvider;
+              const isSelected = index === selectedIndex;
+              const isActive = model.name === activeModel && model.provider === activeProvider;
               const modelRow = (
                 <OverlayListRow
                   selected={isSelected}

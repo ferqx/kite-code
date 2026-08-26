@@ -22,12 +22,21 @@ response 可以表达 `outcome_unknown`；client 必须先查询当前状态，�
 ## 不拥有职责
 
 - 不包含 Node/Bun I/O、文件、网络、进程、listener、descriptor 或 lifecycle；
-- 不包含 raw API key、OAuth/credential material、service PID、service endpoint、build/process identity；
+- 不包含 raw API key、OAuth/credential material、service PID、credential-bearing service endpoint、build/process identity；
 - 不包含 Runtime Host/Server/Store/SQLite、Manager、callback、AbortController 或动态 method；
 - 不包含 React、Ink、TUI reducer、Desktop IPC、Browser transport 或 future-only adapter。
 
-MCP add action 的 `value` 只表示用户当前输入的 bounded command/address；Service 不得在 snapshot
-中回传它。认证、credential write、service discovery/lifecycle 使用 Native-only owner 的 contract。
+MCP snapshot 只允许回传用于终端展示的 source path、transport/config 状态、CAS revision、已发现的
+tool/prompt 摘要和经过 origin-only 脱敏的 HTTP(S) 地址；不得回传 raw command/address、query、fragment、
+用户名、密码、API key 或其他 credential material。MCP add action 的 `value` 只表示用户当前输入的
+bounded command/address；Service 不得在 snapshot 中回传它。认证、credential write、service
+discovery/lifecycle 使用 Native-only owner 的 contract。
+
+Workspace Trust query/decision先返回 canonical full identity和revision；mutation按exact CAS执行，conflict或
+`outcome_unknown` 原样返回且不自动重试。Provider/model、Skill和MCP projection只包含当前终端 journey所需
+safe metadata；actual Skill body/path、raw Provider config/API key、MCP command arguments、credential、OAuth URL和
+raw diagnostic message不进入 contract。Native Provider credential write及其取消 signal只存在于
+`kite-local-runtime/client`。
 
 ## 公开入口
 

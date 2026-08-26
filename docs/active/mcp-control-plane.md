@@ -7,13 +7,26 @@
 
 ## 权威与依赖
 
-`McpSupervisor` 是 MCP 连接 control plane 的唯一 App 入口。RM-11 后 Manager/Supervisor、SDK client、认证、
+`McpSupervisor` 是 MCP 连接 control plane 的唯一 Runtime-owner入口。RM-11 后 Manager/Supervisor、SDK client、认证、
 credential、transport 与目录投影实现由 `@kite-ai/builtin-runtime/mcp` 物理拥有；App composition
 只注入 `McpConfigRepository` 与通用 network boundary fetch。它立即发布 configured、disabled、pending、rejected、
 invalid 和 shadowed 条目，再通过内部唯一的 `McpConnectionManager`/SDK client 路径连接可连接 Server。单个 Server
 失败不阻塞 TUI mount 或其他 Server。
 
-Runtime 只接收由 `DefaultMcpSupervisor` 生成的 `McpRuntimeProvider` façade，不依赖 Supervisor control API、内部连接对象或 TUI controller。Runtime 能读取 capability snapshot、脱敏 provider/resource directory，并通过 revision-bearing `callCapability` 调用；它不能调用 reload、retry、login 或配置 mutation。TUI 只接收 `McpController` 和不可变 `McpControlSnapshot`。Builtin MCP 子路径可以导出 composition 所需的 Manager 类型，但 Runtime operation 只取得受限 MCP execution mechanism，不取得 Supervisor、Host 或另一个 Runtime Provider。
+Runtime只接收由`DefaultMcpSupervisor`生成的`McpRuntimeProvider` façade，不依赖Supervisor control API、内部连接
+对象或TUI controller。Runtime能读取capability snapshot、脱敏provider/resource directory，并通过revision-bearing
+`callCapability`调用；它不能调用reload、retry、login或配置mutation。TUI不再直接接收Supervisor、Repository、
+Auth或Builtin control snapshot；它只消费`kite-app-contract`的MCP safe snapshot/action client。app-local MCP owner
+注入Supervisor，按Workspace完整identity隔离，执行server/source revision CAS并把approve/reject/login/retry/
+reconnect/cancel-auth/enable/add/remove各映射为一次owner operation；`outcome_unknown`不自动重试。Builtin MCP子路径
+可以导出composition所需Manager类型，但Runtime operation只取得受限MCP execution mechanism，不取得Supervisor、
+Host或另一个Runtime Provider。
+
+App Control projection只返回当前终端需要的source identity/path、transport、origin-only endpoint、command首个
+executable token、safe tool/prompt metadata、counts、health/auth/config status、CAS revision和typed diagnostic
+code/retryable。command arguments、credential、content-egress material、raw diagnostic message、OAuth URL/query和
+resource body不得进入TUI contract。当前owner仍位于`apps/kite-cli` InProcess transition composition；KLSV1-06才迁移
+到`apps/kite-service`，不得因此创建第二Manager/Store或silent fallback。
 
 Runtime façade 还可按 capability 查询脱敏 route identity：只包含 stdio/HTTP transport、Server
 identity、endpoint revision 和 Tool revision，不包含 URL、header 或 credential。Control snapshot
@@ -62,7 +75,10 @@ Detail 以 Server 名称为标题，依次展示主状态、transport、capabili
 
 MCP 业务输入只使用 Up/Down、Enter、Esc 和 Add 文本字段，不使用 `A/L/R/D/Space/C/Y/N` 功能键。list、detail 和通用 Select 分别维护稳定 option/server id；snapshot 变化保持原选择，目标消失时返回列表。disable/remove/project review 使用安全默认确认。
 
-TUI controller 暴露受约束的 retry、add、set_enabled、remove、decide、login 和 cancelAuth。它只调用 Supervisor/Repository/Auth 的公开命令，不持有 Manager。Add 仅写 project/user 两个规范位置的最小配置；remove 通过 Supervisor 编排配置删除与本地 OAuth credential cleanup。手动 reload 和高级配置编辑不进入 TUI。完整配置规则见 [`mcp-config-management.md`](mcp-config-management.md)。
+TUI controller暴露受约束的retry、add、set_enabled、remove、decide、login和cancelAuth。它只调用exact App Control
+client action，不持有Manager、Supervisor、Repository或Auth。App Control owner再调用Supervisor公开命令；Add只写
+project/user两个规范位置的最小配置，remove由Supervisor编排配置删除与本地OAuth credential cleanup。手动reload和
+高级配置编辑不进入TUI。完整配置规则见[`mcp-config-management.md`](mcp-config-management.md)。
 
 HTTP 401 产生的 `login_required` 从 Detail 进入 authenticate route；只有选择 Open browser 才创建 loopback callback 和打开浏览器，authorizing 时 Esc/Cancel 取消 flow。stored token resume 不打开浏览器。完成 code exchange 后 Manager 通过新连接重新 discovery，旧 binding 与旧 Tool Call 不更新或重放。完整认证规则见 [`mcp-authentication.md`](mcp-authentication.md)。
 

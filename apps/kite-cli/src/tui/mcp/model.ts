@@ -1,4 +1,4 @@
-import type { McpServerControlState, McpServerKey } from '@kite-ai/builtin-runtime/mcp';
+import type { McpServerControlState, McpServerKey } from './types';
 
 export type McpPrimaryStatus =
   | 'approval_required'
@@ -104,7 +104,7 @@ export function statusLabel(server: Readonly<McpServerControlState>): string {
 export function buildServerActions(
   server: Readonly<McpServerControlState>,
 ): McpSelectOption<McpServerAction>[] {
-  const remove = writableSource(server.source)
+  const remove = writableSource(server.key.source)
     ? [
         {
           id: 'remove' as const,
@@ -129,7 +129,7 @@ export function buildServerActions(
     case 'auth_failed':
       return [
         { id: 'authenticate', label: 'Authenticate' },
-        ...(writableSource(server.source)
+        ...(writableSource(server.key.source)
           ? [{ id: 'disable' as const, label: 'Disable server' }]
           : []),
         ...remove,
@@ -138,7 +138,7 @@ export function buildServerActions(
       return [
         ...(server.toolCount > 0 ? [{ id: 'view_tools' as const, label: 'View tools' }] : []),
         { id: 'reconnect', label: 'Reconnect' },
-        ...(writableSource(server.source)
+        ...(writableSource(server.key.source)
           ? [{ id: 'disable' as const, label: 'Disable server' }]
           : []),
         ...remove,
@@ -148,7 +148,7 @@ export function buildServerActions(
         ...(server.diagnostic?.retryable
           ? [{ id: 'retry' as const, label: 'Retry connection' }]
           : []),
-        ...(writableSource(server.source)
+        ...(writableSource(server.key.source)
           ? [{ id: 'disable' as const, label: 'Disable server' }]
           : []),
         ...remove,
@@ -156,7 +156,7 @@ export function buildServerActions(
     case 'disconnected':
       return [
         { id: 'connect', label: 'Connect' },
-        ...(writableSource(server.source)
+        ...(writableSource(server.key.source)
           ? [{ id: 'disable' as const, label: 'Disable server' }]
           : []),
         ...remove,
@@ -166,6 +166,30 @@ export function buildServerActions(
 
 export function writableSource(source: string): source is 'project' | 'user' {
   return source === 'project' || source === 'user';
+}
+
+const RESERVED_SERVER_NAMES = new Set([
+  'add',
+  'enable',
+  'disable',
+  'remove',
+  'approve',
+  'reject',
+  'retry',
+  'reload',
+]);
+
+/** Presentation-side input validation; the Service remains the final authority. */
+export function validateMcpServerName(name: string): void {
+  if (
+    !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/u.test(name) ||
+    name.includes('__') ||
+    RESERVED_SERVER_NAMES.has(name.toLowerCase())
+  ) {
+    throw new Error(
+      'Server name must be 1-64 letters, digits, dot, underscore, or dash; reserved MCP commands and double underscores are not allowed.',
+    );
+  }
 }
 
 export function moveSelection<T extends string>(

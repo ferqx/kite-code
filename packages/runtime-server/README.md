@@ -28,9 +28,17 @@ Server/Host composition 由 `apps/kite-cli` 拥有。
 
 只导出 package 根入口 `@kite-ai/runtime-server`：Server core/ports 和 InProcess logical endpoint。
 
+`RuntimeServer.open(connection, { admission })` 可为单个 logical connection 绑定 App-owned admission port；
+`createRuntimeServerInProcessHub().open({ admission })` 提供相同的 InProcess seam。未提供 override 时继续使用
+backend admission。该 port 只返回 admission decision 与注入的 Workspace fact；Server 不知道 HTTP access/ticket、
+Workspace object 或 carrier 认证细节。Workspace fact 只在 create command mapper seam 注入；resume/fork/query 继续由
+App/Runtime 的持久 Session identity 决定。connection 关闭后 binding 随 connection 一起释放，Session runtime 不受影响。
+App 可同时提供 `onClose(connectionId)` 清理自身 connection-to-interaction binding；callback失败也不能阻止 Server
+释放 connection accounting。该 hook不是 Runtime cancel或owner shutdown signal。
+
 ## 关键不变量
 
-- backend 是 `RuntimeAccess + RuntimeServerAdmissionPort`；admission 只裁定已冻结 operation 的 connection/role，并注入 App-owned Workspace facts。Server 不取得额外 Runtime authority，也不从 request body 或 client metadata 提升 authority。
+- backend 是 `RuntimeAccess + RuntimeServerAdmissionPort`；admission 只裁定已冻结 operation 的 connection/role，并注入 App-owned Workspace facts。每个 connection 可使用自己的 admission port；Server 不取得额外 Runtime authority，也不从 request body 或 client metadata 提升 authority。
 - 输入和 InProcess message 一律通过同一 Protocol codec/limits；未知、超限或未初始化请求 fail closed。
 - subscribe 先取得 Host iterator 并缓冲，再写 ack；顺序是 ack、replay/reset、initial item、ready/end、live。
   `afterRevision` 超过 Host watermark 时，ack 后立即发送 authoritative current snapshot/reset 与 ready，不能等待

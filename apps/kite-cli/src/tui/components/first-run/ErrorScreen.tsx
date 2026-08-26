@@ -11,6 +11,7 @@ interface ErrorScreenProps {
   onSelectAction: (index: number) => void;
   onConfirmAction: (action: number) => void;
   onBack: () => void;
+  onExit?: () => void;
 }
 
 export default function ErrorScreen({
@@ -20,13 +21,14 @@ export default function ErrorScreen({
   onSelectAction,
   onConfirmAction,
   onBack,
+  onExit = () => undefined,
 }: ErrorScreenProps) {
   const t = useTheme();
   const actions = getErrorActions(error);
 
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
-      process.exit(0);
+      onExit();
     }
     if (key.escape) {
       onBack();
@@ -61,6 +63,10 @@ export default function ErrorScreen({
       title = 'The endpoint is reachable';
       detail =
         'Kite Code could not read its model list.\nYou can continue by entering the model name manually.';
+      break;
+    case 'outcome-unknown':
+      title = 'The credential write needs confirmation';
+      detail = error.message;
       break;
     default:
       title = `Could not connect to ${provider.label}`;

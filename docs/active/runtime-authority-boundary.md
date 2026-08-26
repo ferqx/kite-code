@@ -24,7 +24,22 @@ case-folded path 再次哈希成第二个 Project identity。二者仍指向同�
 
 `RuntimeAccess` 是唯一 execution backend seam，Host 是其唯一 owner：拥有 Session mailbox、lifecycle、revision fence、recovery、notification routing 与 persistent receipt lookup/commit。`runtime-server` 只接收 `RuntimeAccess` 加 App-owned admission port；它拥有 connection resources 与 bounded delivery，绝不拥有 domain waiter、Session reducer、Host、Store、Kernel、Builtin module、SQLite reader 或 history authority。`runtime-client` 是 transport-neutral 的，只拥有 correlation、explicit reconnect/resubscribe 与 generation/snapshot state，不拥有 execution authority。
 
-App 为每个 Server instance 固定一个 canonical trusted Workspace。admission 可以 authorize frozen operation 并注入 App-owned Workspace/Project facts，但绝不从 `clientInfo`、display name 或 request body 派生 authority，也不 command、cache domain state 或写 revision。只有 `apps/kite-cli/src/bootstrap.ts` 组合 Host、Server、Client、Store、carrier 与 local auth。TUI 与 foreground CLI 只有一条 production path：`RuntimeClient → RuntimeServer → RuntimeAccess`；InProcess 不是 bypass，因为它经过同一 Protocol codec、initialize、limits、admission 与 subscription ordering。完整 history 独立走 `RuntimeClient.history → RuntimeHistoryClient → App exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`；TUI list/load 不直接调用 SessionStore，Server notification retention、trace 与 JSONL 不能成为 history fallback。
+App 为Server提供backend default admission，并可为每个logical connection绑定不同的canonical trusted Workspace。
+admission可以authorize frozen operation，但绝不从`clientInfo`、display name或request body派生authority，也不command、
+cache domain state或写revision。只有create mapper使用connection admitted Workspace替换不可信wire path；
+resume/query/subscribe/fork按唯一Store中的持久Session identity解析，并与connection Workspace完整
+`canonicalPath + projectId + workspaceDigest`交叉校验。process-wide list query只由Store owner回答，不注入caller
+Workspace。connection close释放admission/subscription/interaction binding，不取消Runtime work或关闭Host。
+
+`RuntimeWorkspaceContextFactory`按完整identity缓存per-Workspace config/model/MCP/Skill/shell context，Router按Session
+identity选择context；同digest不同canonical facts、跨Workspace改绑和fork均fail closed。Runtime Application的
+operation gate统一Runtime与App Control mutation，quiesce阻止新admission并等待active临界区。App Control mutation
+保留exact revision CAS，lost response/`outcome_unknown`只允许query state后显式决定，不能自动重放。
+只有`apps/kite-cli/src/bootstrap.ts`组合Host、Server、Client、Store、carrier与local auth。TUI与foreground CLI仍只有
+`RuntimeClient → RuntimeServer → RuntimeAccess`一条production path；InProcess不是bypass。完整history独立走
+`RuntimeClient.history → RuntimeHistoryClient → App exhaustive client-event projector → RuntimeLogQueryPort → SQLite
+readonly reader`。当前没有独立Service、第二Host/Store或default dual owner；raw history projector仍留在CLI
+app-internal owner直到KLSV1-06。
 
 本地 presentation DTO 与 observability 是不同边界。按 ADR-0143，closed `RuntimeClientEvent` 可以保留有界
 reasoning segment、动态 tool label、普通 path/pattern/command/arguments、stdout/stderr/result 与 user-cancel

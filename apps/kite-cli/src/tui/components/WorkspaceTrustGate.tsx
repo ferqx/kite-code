@@ -1,62 +1,169 @@
-import { Box, Text, useApp, useInput } from 'ink';
-import { useState } from 'react';
-import { workspaceTrustPath } from '#kite-cli/config/paths';
-import { trustWorkspace } from '#kite-cli/config/workspace-trust';
+import {
+  type KiteAppControlClient,
+  WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+  WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
+  type WorkspaceTrustQueryResponse,
+} from '@kite-ai/kite-app-contract';
+import { Box, Text, useInput } from 'ink';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 
 interface WorkspaceTrustGateProps {
   workspace: string;
-  onTrusted: () => void;
+  /** The App Control client is connected by the composition root. */
+  appControl?: KiteAppControlClient;
+  onTrusted: (workspace: import('@kite-ai/kite-app-contract').KiteWorkspaceIdentity) => void;
+  onExit?: () => void;
 }
 
 type TrustChoice = 'trust' | 'decline';
-type TrustStatus = 'idle' | 'saving' | 'error';
+type GateState = 'loading' | 'ready' | 'saving' | 'error';
 
-export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTrustGateProps) {
+export default function WorkspaceTrustGate({
+  workspace,
+  appControl,
+  onTrusted,
+  onExit = () => undefined,
+}: WorkspaceTrustGateProps) {
   const t = useTheme();
   const { t: translate } = useI18n();
-  const { exit } = useApp();
   // Default focus on "Exit Kite Code" — prevents accidental Enter → trust
   const [choice, setChoice] = useState<TrustChoice>('decline');
-  const [status, setStatus] = useState<TrustStatus>('idle');
+  const [gateState, setGateState] = useState<GateState>('loading');
+  const [trustSnapshot, setTrustSnapshot] = useState<WorkspaceTrustQueryResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const requestVersion = useRef(0);
+
+  const queryTrust = useCallback(
+    async (version = requestVersion.current): Promise<WorkspaceTrustQueryResponse | null> => {
+      if (!appControl) {
+        if (version === requestVersion.current) {
+          setTrustSnapshot(null);
+          setGateState('error');
+          setErrorMessage(null);
+        }
+        return null;
+      }
+      try {
+        const response = await appControl.queryWorkspaceTrust({
+          schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
+          workspace,
+        });
+        if (version !== requestVersion.current) return null;
+        setTrustSnapshot(response);
+        setGateState('ready');
+        setErrorMessage(null);
+        if (response.status === 'trusted') onTrusted(response.workspace);
+        return response;
+      } catch {
+        if (version !== requestVersion.current) return null;
+        setTrustSnapshot(null);
+        setGateState('error');
+        setErrorMessage(null);
+        return null;
+      }
+    },
+    [appControl, onTrusted, workspace],
+  );
+
+  useEffect(() => {
+    const version = ++requestVersion.current;
+    setTrustSnapshot(null);
+    setGateState('loading');
+    setErrorMessage(null);
+    void queryTrust(version);
+    return () => {
+      if (requestVersion.current === version) requestVersion.current += 1;
+    };
+  }, [queryTrust]);
+
+  const submitTrust = useCallback(async () => {
+    const observed = trustSnapshot;
+    if (!appControl || !observed || observed.status === 'trusted' || !observed.canDecide) {
+      if (!observed?.canDecide) {
+        setGateState('error');
+        setErrorMessage(translate('trust.needsAttention'));
+      }
+      return;
+    }
+
+    const version = ++requestVersion.current;
+    setGateState('saving');
+    setErrorMessage(null);
+    try {
+      const response = await appControl.decideWorkspaceTrust({
+        schema: WORKSPACE_TRUST_DECISION_REQUEST_SCHEMA_,
+        workspace: observed.workspace,
+        observedStatus: observed.status,
+        expectedRevision: observed.revision,
+        decision: 'trust',
+      });
+      if (version !== requestVersion.current) return;
+      if (
+        response.status === 'trusted' &&
+        (response.outcome === 'recorded' || response.outcome === 'already_trusted')
+      ) {
+        onTrusted(response.workspace);
+        return;
+      }
+      const refreshed = await queryTrust(version);
+      if (version !== requestVersion.current) return;
+      if (refreshed?.status !== 'trusted') {
+        setGateState('error');
+        setErrorMessage(translate('trust.saveFailed'));
+      }
+    } catch {
+      // A lost response is not permission to replay the mutation. Re-query
+      // authoritative state once, then leave the explicit decision to the user.
+      const refreshed = await queryTrust(version);
+      if (version !== requestVersion.current) return;
+      if (refreshed?.status !== 'trusted') {
+        setGateState('error');
+        setErrorMessage(translate('trust.saveFailed'));
+      }
+    }
+  }, [appControl, onTrusted, queryTrust, translate, trustSnapshot]);
 
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === 'c')) {
-      exit();
+      onExit();
       return;
     }
     if (key.upArrow || key.downArrow) {
       setChoice((current) => (current === 'trust' ? 'decline' : 'trust'));
       setErrorMessage(null);
-      if (status === 'error') setStatus('idle');
+      if (gateState === 'error') setGateState('ready');
       return;
     }
     if (key.return) {
-      if (choice === 'decline' || status === 'saving') {
-        if (choice === 'decline') exit();
+      if (choice === 'decline' || gateState === 'saving') {
+        if (choice === 'decline') onExit();
         return;
       }
-      setStatus('saving');
-      setErrorMessage(null);
-      const result = trustWorkspace({ workspace, source: 'user' });
-      if (result.status === 'recorded') {
-        onTrusted();
-      } else {
-        const store = workspaceTrustPath();
-        if (result.status === 'store_unavailable') {
-          setErrorMessage(translate('trust.storeUnavailable', { path: store }));
-        } else {
-          setErrorMessage(translate('trust.storeMalformed', { path: store }));
-        }
-        setStatus('error');
-      }
+      if (gateState === 'loading') return;
+      void submitTrust();
       return;
     }
   });
 
-  if (status === 'saving') {
+  const trustStatus = trustSnapshot?.status ?? 'unavailable';
+
+  if (gateState === 'loading') {
+    return (
+      <Box flexDirection="column" paddingX={2} paddingY={1}>
+        <Text color={t.primary}>Kite Code</Text>
+        <Box marginTop={1}>
+          <Text color={t.muted}>{translate('common.loading')}</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color={t.dim}>{workspace}</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (gateState === 'saving') {
     return (
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Text color={t.primary}>Kite Code</Text>
@@ -70,7 +177,7 @@ export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTr
     );
   }
 
-  const isError = status === 'error';
+  const isError = gateState === 'error' || trustStatus !== 'unknown';
 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1}>
@@ -87,6 +194,9 @@ export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTr
         </Box>
         <Box marginTop={1}>
           <Text color={t.muted}>{translate('trust.approvalSettings')}</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color={t.dim}>Trust status: {trustStatus}</Text>
         </Box>
         {isError && errorMessage ? (
           <Box marginTop={1} flexDirection="column">

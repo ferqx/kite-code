@@ -3,6 +3,7 @@ import {
   RuntimeServer,
   type RuntimeServerBackend,
   type RuntimeServerConnection,
+  type RuntimeServerOpenOptions,
   type RuntimeServerOptions,
 } from './server';
 
@@ -18,10 +19,14 @@ export interface RuntimeServerInProcessPair {
   readonly connection: RuntimeServerConnection;
 }
 
+/** InProcess queue limits plus the optional App-owned connection admission. */
+export type RuntimeServerInProcessOpenOptions = Partial<RuntimeServerInProcessLimits> &
+  RuntimeServerOpenOptions;
+
 /** App composition creates one of these per Runtime instance, then opens any number of logical clients. */
 export interface RuntimeServerInProcessHub {
   readonly server: RuntimeServer;
-  open(): RuntimeServerInProcessPair;
+  open(options?: RuntimeServerInProcessOpenOptions): RuntimeServerInProcessPair;
 }
 
 export interface RuntimeServerInProcessLimits {
@@ -57,26 +62,36 @@ export function createRuntimeServerInProcessHub(
   });
   return Object.freeze({
     server,
-    open: () => openRuntimeServerInProcessPair(server, inProcessLimits),
+    open: (options?: RuntimeServerInProcessOpenOptions) =>
+      openRuntimeServerInProcessPair(server, { ...inProcessLimits, ...options }),
   });
 }
 
 /** Opens one endpoint on an existing App-composed Server, preserving its instance and global budgets. */
 export function openRuntimeServerInProcessPair(
   server: RuntimeServer,
-  limits?: Partial<RuntimeServerInProcessLimits>,
+  options?: RuntimeServerInProcessOpenOptions,
 ): RuntimeServerInProcessPair {
-  const normalizedLimits = normalizeInProcessLimits(limits);
+  const { admission, onClose, ...limitOverrides } = options ?? {};
+  const normalizedLimits = normalizeInProcessLimits(limitOverrides);
   const toServer = new LogicalMessageQueue<unknown>(normalizedLimits);
   const toClient = new LogicalMessageQueue<RuntimeProtocolMessage>(normalizedLimits);
-  const connection = server.open({
-    incoming: toServer,
-    send: async (message) => toClient.push(message),
-    close: () => {
-      toServer.close();
-      toClient.close();
+  const connection = server.open(
+    {
+      incoming: toServer,
+      send: async (message) => toClient.push(message),
+      close: () => {
+        toServer.close();
+        toClient.close();
+      },
     },
-  });
+    admission === undefined && onClose === undefined
+      ? undefined
+      : {
+          ...(admission === undefined ? {} : { admission }),
+          ...(onClose === undefined ? {} : { onClose }),
+        },
+  );
   return {
     connection,
     client: {

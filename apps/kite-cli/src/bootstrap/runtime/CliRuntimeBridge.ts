@@ -28,6 +28,12 @@ import type { ProjectIdentity } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#kite-cli/config';
 import { getFeatureFlags } from '#kite-cli/config/features';
 import { appSandboxBackendAvailable, type SandboxBackend } from '#kite-cli/sandbox/types';
+import {
+  createRuntimeInteractionBroker,
+  RUNTIME_INTERACTION_IDENTITY_SCHEMA_,
+  type RuntimeInteractionBroker,
+  type RuntimeInteractionIdentity,
+} from '../../runtime-application/interaction-broker';
 import { projectRuntimeClientEvent } from '../../runtime-client/event-projector';
 import {
   mapRuntimeInteractionResponseToUserAction,
@@ -71,14 +77,16 @@ export interface CliRuntimeBridgeInput {
   readonly onSessionLoggingDiagnostic?: (message: string) => void;
 }
 
+export type CliRuntimeInteractionResolution =
+  | RuntimeUserAction
+  | PrecommittedInteractionActionDescriptor;
+
 interface PendingCliInteraction {
   readonly effect: RuntimeInteractionEffect;
   readonly interaction: RuntimeClientInteraction;
   readonly stateRevision: number;
   readonly commandCommit: RuntimeInteractionCommandCommitPort;
-  readonly completion: Promise<RuntimeUserAction | PrecommittedInteractionActionDescriptor>;
-  readonly resolve: (action: RuntimeUserAction | PrecommittedInteractionActionDescriptor) => void;
-  readonly reject: (error: unknown) => void;
+  readonly brokerIdentity: RuntimeInteractionIdentity;
 }
 
 export function createCliRuntimeBridge(
@@ -87,6 +95,8 @@ export function createCliRuntimeBridge(
   modelInvocationRuntimeFactory: (workspace: string) => RuntimeTurnInput['modelInvocationRuntime'],
   resolveRecoveryIdentity: (sessionId: string) => string,
   runtimeSessionCoordinator: RuntimeSessionCoordinatorAccess,
+  interactionBroker?: RuntimeInteractionBroker<CliRuntimeInteractionResolution>,
+  interactionClientIds?: (sessionId: string) => readonly string[],
 ): RuntimeHostExecutionBridge {
   return new CliRuntimeBridge(
     input,
@@ -94,6 +104,8 @@ export function createCliRuntimeBridge(
     modelInvocationRuntimeFactory,
     resolveRecoveryIdentity,
     runtimeSessionCoordinator,
+    interactionBroker,
+    interactionClientIds,
   );
 }
 
@@ -105,6 +117,9 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
   ) => RuntimeTurnInput['modelInvocationRuntime'];
   readonly #resolveRecoveryIdentity: (sessionId: string) => string;
   readonly #runtimeSessionCoordinator: RuntimeSessionCoordinatorAccess;
+  readonly #interactionBroker: RuntimeInteractionBroker<CliRuntimeInteractionResolution>;
+  readonly #ownsInteractionBroker: boolean;
+  readonly #interactionClientIds: (sessionId: string) => readonly string[];
   #revision = 0;
   #created = false;
   #running = false;
@@ -121,12 +136,17 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     ) => RuntimeTurnInput['modelInvocationRuntime'],
     resolveRecoveryIdentity: (sessionId: string) => string,
     runtimeSessionCoordinator: RuntimeSessionCoordinatorAccess,
+    interactionBroker?: RuntimeInteractionBroker<CliRuntimeInteractionResolution>,
+    interactionClientIds?: (sessionId: string) => readonly string[],
   ) {
     this.#input = input;
     this.#capabilityExecution = capabilityExecution;
     this.#modelInvocationRuntimeFactory = modelInvocationRuntimeFactory;
     this.#resolveRecoveryIdentity = resolveRecoveryIdentity;
     this.#runtimeSessionCoordinator = runtimeSessionCoordinator;
+    this.#interactionBroker = interactionBroker ?? createRuntimeInteractionBroker();
+    this.#ownsInteractionBroker = interactionBroker === undefined;
+    this.#interactionClientIds = interactionClientIds ?? (() => []);
   }
 
   async recoverSession(
@@ -222,7 +242,13 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
                 this.#revision = receipt.revision;
                 this.#activeWork = clearActiveInteraction(this.#activeWork);
                 this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn');
-                pending.resolve(committed.descriptor);
+                const resolution = this.#interactionBroker.resolve(
+                  pending.brokerIdentity,
+                  committed.descriptor,
+                );
+                if (resolution !== 'resolved') {
+                  throw new Error(`Runtime interaction broker resolution failed: ${resolution}`);
+                }
               },
             };
           },
@@ -440,6 +466,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
   }
 
   close(): Promise<void> {
+    if (this.#ownsInteractionBroker) this.#interactionBroker.close();
     return this.#runtimeSessionCoordinator.close();
   }
 
@@ -637,14 +664,11 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         if (!interaction) {
           return Promise.reject(new Error('Runtime interaction identity is invalid.'));
         }
-        let resolve!: (action: RuntimeUserAction | PrecommittedInteractionActionDescriptor) => void;
-        let reject!: (error: unknown) => void;
-        const completion = new Promise<RuntimeUserAction | PrecommittedInteractionActionDescriptor>(
-          (resolvePromise, rejectPromise) => {
-            resolve = resolvePromise;
-            reject = rejectPromise;
-          },
-        );
+        const brokerIdentity = interactionBrokerIdentity(this.#input.sessionId, interaction);
+        const waiter = this.#interactionBroker.publish(brokerIdentity);
+        for (const clientId of this.#interactionClientIds(this.#input.sessionId)) {
+          waiter.attach(clientId);
+        }
         const priorRevision = this.#revision;
         this.#revision = state.revision;
         this.#activeWork = setActiveInteraction(this.#activeWork, interaction);
@@ -653,9 +677,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           interaction,
           stateRevision: state.revision,
           commandCommit,
-          completion,
-          resolve,
-          reject,
+          brokerIdentity,
         };
         if (state.revision > priorRevision) {
           publish({
@@ -670,7 +692,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
             },
           });
         }
-        return completion;
+        return waiter.wait();
       },
     });
   }
@@ -679,7 +701,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
     const pending = this.#pendingInteraction;
     if (!pending) return;
     this.#pendingInteraction = undefined;
-    pending.reject(error);
+    this.#interactionBroker.reject(pending.brokerIdentity, error);
   }
 
   #persistCancellation(
@@ -875,6 +897,19 @@ function sameInteractionIdentity(
         expected.verification.revision === actual.verification.revision
       );
   }
+}
+
+function interactionBrokerIdentity(
+  sessionId: string,
+  interaction: RuntimeClientInteraction,
+): RuntimeInteractionIdentity {
+  return {
+    schema: RUNTIME_INTERACTION_IDENTITY_SCHEMA_,
+    sessionId,
+    interactionId: interaction.interactionId,
+    generation: interaction.kind === 'approval' ? interaction.generation : 0,
+    revision: interaction.sessionRevision,
+  };
 }
 
 function receiptFromStored(

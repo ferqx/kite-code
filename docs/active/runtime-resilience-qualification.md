@@ -22,6 +22,14 @@ Local connection 不携带 control token，reconnect 不自动重放 Runtime 或
 ensure/stop state machine 或真实 reconnect，因此本段不构成 concurrent ensure、stale recovery、busy stop 或平台 process
 evidence；这些证据必须随 Service implementation 在 KLSV1-04/05/07 增加，不能用 codec unit test代替。
 
+KLSV1-03新增的本地InProcess evidence覆盖：一个真实Host/SQLite Store上的双connection/双Workspace与同Workspace
+多Session、重启后从persisted identity hydration、跨Workspace create/resume/query/subscribe/fork拒绝；context create/
+bind/close并发与完整identity race；settled interaction stale identity；operation gate quiesce/active barrier；App Control
+CAS、lost response与`outcome_unknown → query once → explicit decision`无重放；Server carrier/subscription close抛错时仍
+释放accounting；broker-backed interaction在展示client断开后由另一client继续settle。上述只证明当前本机
+app-local substrate，不是production Service process/reconnect或三平台release evidence，不能替代KLSV1-04/05/07的
+真实listener、process和hosted matrix。
+
 本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 ADR-0053。
 
 本 tranche 的 implementation head `f3646fec1d99db053304dfc013806caf0e3d8272` 已形成三平台 PR CI evidence：

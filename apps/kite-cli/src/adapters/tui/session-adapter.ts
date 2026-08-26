@@ -1,28 +1,103 @@
-import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
-import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
 import type {
   AgentPhase,
+  ContextCompactionProgressPhase,
+  ContextStatusSnapshot,
   RuntimeCheckpointProjection,
+  RuntimeClientEvent,
   RuntimeCommandReceipt,
   RuntimeRewindPreviewProjection,
   RuntimeSessionProjection,
-  SkillManifest,
 } from '@kite-ai/runtime-contract';
-import type { AgentConfig } from '#kite-cli/config';
-import type { SessionDeps, SessionManager } from '#kite-cli/runtime/session';
 import type {
-  McpRecoveryController,
   SessionListProjection,
   SessionPresentationAction,
   SessionStatusProjection,
-  SessionUserInputProvider,
 } from '#kite-cli/runtime/session/contracts';
-import type { AppShellExecutor } from '#kite-cli/sandbox/composition';
 import type { SessionData, SessionInfo } from '#kite-cli/session-types';
-import type {
-  ContextCompactionResult,
-  RuntimePresentationEvent,
-} from '#kite-cli/tui/runtime-presentation';
+import type { RuntimePresentationEvent } from '#kite-cli/tui/runtime-presentation';
+
+/** Explicit client-safe context status DTO; no SessionManager method inference. */
+export type TuiContextStatusSnapshot = ContextStatusSnapshot | undefined;
+
+/** Explicit client-safe compaction result DTO; concrete service types stay private. */
+export interface TuiContextCompactionResult {
+  readonly events: RuntimeClientEvent[];
+  readonly text: string;
+  readonly isError?: boolean;
+  readonly failureCode?: 'runtime_control_unavailable';
+}
+
+export type TuiContextCompactionProgress = (
+  phase: ContextCompactionProgressPhase | undefined,
+) => void;
+
+/** The only local command fact exposed to the TUI compaction presentation callback. */
+export interface TuiContextCompactionCommandEvent {
+  readonly type: 'user.command_invoked';
+  readonly commandId: string;
+  readonly command: string;
+}
+
+export type TuiContextCompactionCommand = (event: TuiContextCompactionCommandEvent) => void;
+
+export interface TuiRewindFileOutcome {
+  readonly restored: readonly string[];
+  readonly deleted: readonly string[];
+  readonly failed: readonly { readonly path: string; readonly error: string }[];
+  readonly conflicts: readonly {
+    readonly path: string;
+    readonly reason: 'modified_after_kite_write' | 'unverified_postimage';
+  }[];
+}
+
+/** Explicit client-safe rewind result DTO; no SessionManager return-type inference. */
+export interface TuiRewindResult {
+  readonly targetThreadId: string;
+  readonly recoveredData: SessionData | null;
+  readonly fileOutcome: TuiRewindFileOutcome | null;
+}
+
+export interface TuiRewindRequest {
+  readonly sourceThreadId: string;
+  readonly snapshotId: string;
+  readonly scope: 'code_and_conversation' | 'code_only' | 'conversation_only';
+  readonly workspace: string;
+}
+
+export interface TuiInitialSkillActivation {
+  readonly skillId: string;
+  readonly input: Record<string, unknown>;
+}
+
+export interface TuiModelRouteProjection {
+  readonly provider: string;
+  readonly name: string;
+  readonly reasoningEnabled: boolean;
+}
+
+export type TuiSubmittedInteractionAction =
+  | {
+      readonly type: 'approve';
+      readonly interactionId: string;
+      readonly generation: number;
+      readonly grant: import('@kite-ai/runtime-contract').ShellApprovalGrant;
+    }
+  | { readonly type: 'reject'; readonly interactionId: string; readonly generation: number }
+  | {
+      readonly type: 'input';
+      readonly interactionId: string;
+      readonly text: string;
+      readonly answers?: Record<string, string>;
+    }
+  | { readonly type: 'cancel'; readonly interactionId: string }
+  | {
+      readonly type: 'plan_review_decision';
+      readonly interactionId: string;
+      readonly decision:
+        | { readonly kind: 'approve'; readonly nextMode: 'accept_edits' | 'auto' }
+        | { readonly kind: 'revise'; readonly feedback: string }
+        | { readonly kind: 'cancel'; readonly reason?: string };
+    };
 
 /** The only Runtime/History values needed by the current TUI presentation. */
 export interface TuiSessionFacade {
@@ -32,7 +107,9 @@ export interface TuiSessionFacade {
   pendingInterrupt: boolean;
   readonly name: string;
   eventBuffer: RuntimePresentationEvent[];
-  config: AgentConfig;
+  readonly modelProvider: string;
+  readonly modelName: string;
+  readonly reasoningEnabled: boolean;
   conversationHistory: string[];
   thinkingLevel: string | null;
   interactionMode: 'accept_edits' | 'auto' | 'full';
@@ -44,7 +121,7 @@ export interface TuiSessionFacade {
     task: string,
     dependencies: TuiSessionRunDependencies,
     requestedPhase?: AgentPhase,
-    initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+    initialSkillActivations?: TuiInitialSkillActivation[],
   ): Promise<void>;
   abort(): void;
   setForeground(foreground: boolean): void;
@@ -60,13 +137,11 @@ export interface TuiSessionFacade {
 /** Explicit run input accepted by the current InProcess adapter. */
 export interface TuiSessionRunDependencies {
   dispatch: (action: SessionPresentationAction) => void;
-  provider: SessionUserInputProvider;
-  config: AgentConfig;
-  model?: SupportedChatModel;
 }
 
 /** Closed client facade used by TUI code; no SessionManager passthrough. */
 export interface TuiRuntimeClientFacade {
+  submitUserAction(action: TuiSubmittedInteractionAction): void;
   createSession(workspace: string): string;
   registerSession(sessionId: string, workspace: string): TuiSessionFacade;
   hasRuntime(sessionId: string): boolean;
@@ -91,23 +166,20 @@ export interface TuiRuntimeClientFacade {
   onStatusChange(threadId: string): void;
   setName(threadId: string, name: string): void;
   saveTokenStats(threadId: string, status: SessionStatusProjection, immediate?: boolean): void;
-  setSessionConfig(
+  applyPersistedModelRoute(
     threadId: string,
-    config: AgentConfig,
-    options?: { persist?: boolean; asDefault?: boolean },
-  ): boolean;
-  getDefaultConfig(): AgentConfig;
-  buildContextStatusSnapshot(
-    threadId: string,
-  ): ReturnType<SessionManager['buildContextStatusSnapshot']>;
+    provider?: string,
+    name?: string,
+  ): TuiModelRouteProjection;
+  buildContextStatusSnapshot(threadId: string): TuiContextStatusSnapshot;
   handleContextDisplay(threadId: string): string;
   handleContextCompaction(
     threadId: string,
     instructions?: string,
-    onProgress?: Parameters<SessionManager['handleContextCompaction']>[2],
-    onCommand?: Parameters<SessionManager['handleContextCompaction']>[3],
-  ): Promise<ContextCompactionResult>;
-  handleContextReset(threadId: string): Promise<ContextCompactionResult>;
+    onProgress?: TuiContextCompactionProgress,
+    onCommand?: TuiContextCompactionCommand,
+  ): Promise<TuiContextCompactionResult>;
+  handleContextReset(threadId: string): Promise<TuiContextCompactionResult>;
   generateAndPersistSessionName(threadId: string, task: string): Promise<string | null>;
   getSessionProjection(threadId: string): Promise<RuntimeSessionProjection | null>;
   listRewindCheckpoints(threadId: string): Promise<readonly RuntimeCheckpointProjection[]>;
@@ -115,30 +187,13 @@ export interface TuiRuntimeClientFacade {
     threadId: string,
     snapshotId: string,
   ): Promise<RuntimeRewindPreviewProjection | null>;
-  executeRewind(input: {
-    sourceThreadId: string;
-    snapshotId: string;
-    scope: 'code_and_conversation' | 'code_only' | 'conversation_only';
-    workspace: string;
-  }): Promise<Awaited<ReturnType<SessionManager['executeRewind']>>>;
+  executeRewind(input: TuiRewindRequest): Promise<TuiRewindResult>;
   clearSessionCommandGrants(threadId: string): Promise<RuntimeCommandReceipt>;
-  updateSkillManifests(manifests: SkillManifest[]): void;
-  updateMcpRuntimeProvider(provider: McpRuntimeProvider | null): void;
-  updateMcpRecoveryController(controller: McpRecoveryController | null): void;
 }
 
 export interface TuiRuntimeClientDependencies {
   readonly workspace: string;
-  readonly config: SessionDeps['config'];
-  readonly provider: SessionDeps['provider'];
-  readonly skillManifests: SessionDeps['skillManifests'];
-  readonly skillOptions: SessionDeps['skillOptions'];
-  readonly mcpManager: SessionDeps['mcpManager'];
-  readonly mcpRecoveryController?: SessionDeps['mcpRecoveryController'];
-  readonly checkpointPath: SessionDeps['checkpointPath'];
-  readonly observabilityBridge?: SessionDeps['observabilityBridge'];
-  readonly shellExecutor?: AppShellExecutor;
-  readonly flushPresentation?: SessionDeps['flushPresentation'];
+  readonly flushPresentation?: () => Promise<void>;
 }
 
 export type TuiRuntimeClientFacadeFactory = (

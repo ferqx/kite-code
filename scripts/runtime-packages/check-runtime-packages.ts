@@ -42,6 +42,7 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   '@kite-ai/kite-cli': [
     '@kite-ai/builtin-runtime',
     '@kite-ai/kite-app-contract',
+    '@kite-ai/kite-local-runtime',
     '@kite-ai/runtime-client',
     '@kite-ai/runtime-contract',
     '@kite-ai/runtime-host',

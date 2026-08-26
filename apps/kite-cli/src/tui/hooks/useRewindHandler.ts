@@ -4,7 +4,6 @@ import type {
 } from '@kite-ai/runtime-contract';
 import type { Dispatch } from 'react';
 import React from 'react';
-import { loadAgentConfig } from '#kite-cli/config';
 import type { TuiRuntimeClientFacade as SessionManager } from '../../adapters/tui/session-adapter';
 import type { Action } from '../reducers/actions';
 import { sessionDataToUI } from '../replay-blocks';
@@ -163,18 +162,11 @@ export function useRunRewind(deps: RewindDeps) {
           const data = result.recoveredData;
           if (!data) throw new Error('Recovered session could not be loaded.');
           const fork = deps.sessionManager.registerSession(targetThreadId, deps.workspace);
-          let resumedConfig = deps.sessionManager.getDefaultConfig();
-          if (data.modelProvider && data.modelName) {
-            try {
-              resumedConfig = loadAgentConfig({
-                providerName: data.modelProvider,
-                modelName: data.modelName,
-              });
-            } catch {
-              // The saved route may have been removed from the current provider config.
-            }
-          }
-          deps.sessionManager.setSessionConfig(targetThreadId, resumedConfig);
+          const resumedRoute = deps.sessionManager.applyPersistedModelRoute(
+            targetThreadId,
+            data.modelProvider,
+            data.modelName,
+          );
           fork.setForeground(true);
           deps.sessionManager.switchSession(sourceThreadId, targetThreadId);
           deps.threadIdRef.current = targetThreadId;
@@ -187,10 +179,10 @@ export function useRunRewind(deps: RewindDeps) {
             blocks: ui.blocks,
             interrupt: ui.interrupt,
             pendingToolCalls: ui.pendingToolCalls,
-            modelProvider: resumedConfig.providerName,
-            modelName: resumedConfig.modelName,
+            modelProvider: resumedRoute.provider,
+            modelName: resumedRoute.name,
             thinkingLevel: data.thinkingLevel,
-            reasoningEnabled: resumedConfig.reasoningExplicitlyDisabled !== true,
+            reasoningEnabled: resumedRoute.reasoningEnabled,
           });
           deps.dispatch({ type: 'SET_EXITED' });
         }

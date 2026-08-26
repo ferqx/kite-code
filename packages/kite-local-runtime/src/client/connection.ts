@@ -15,6 +15,8 @@ import type {
   LocalRuntimeCredentialResult,
   LocalRuntimeLifecycleRequest,
   LocalRuntimeLifecycleResult,
+  NativeProviderCredentialRequest,
+  NativeProviderCredentialResult,
 } from './codecs';
 
 export type LocalKiteConnectionStatus = 'connecting' | 'active' | 'reconnecting' | 'closed';
@@ -56,6 +58,18 @@ export interface LocalRuntimeAppControlTransport {
   readonly descriptor: LocalRuntimeServiceDescriptor;
   readonly accessToken: string;
   connect(): Promise<KiteAppControlClient>;
+}
+
+/**
+ * Narrow Native-only credential capability used by the current first-run TUI.
+ * The request is codec-checked and deliberately carries no generic command or
+ * provider configuration object across the client boundary.
+ */
+export interface NativeProviderCredentialClient {
+  writeProviderCredential(
+    request: NativeProviderCredentialRequest,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<NativeProviderCredentialResult>;
 }
 
 export interface LocalRuntimeClientOptions {

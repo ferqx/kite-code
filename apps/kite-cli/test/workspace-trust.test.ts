@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  getWorkspaceTrustSnapshot,
   getWorkspaceTrustStatus,
   readWorkspaceTrustStore,
   shouldPromptWorkspaceTrust,
@@ -65,6 +66,33 @@ describe('workspace trust store', () => {
     const other = mkdtempSync(join(tmpdir(), 'kite-trust-ws2-'));
     trustWorkspace({ workspace, storePath });
     expect(getWorkspaceTrustStatus(other, storePath)).toBe('unknown');
+  });
+
+  test('records a decision only against the observed trust revision', () => {
+    const storePath = tempStorePath();
+    const other = mkdtempSync(join(tmpdir(), 'kite-trust-cas-'));
+    const observed = getWorkspaceTrustSnapshot(workspace, storePath);
+    expect(observed?.status).toBe('unknown');
+
+    expect(trustWorkspace({ workspace: other, storePath }).status).toBe('recorded');
+    expect(
+      trustWorkspace({
+        workspace,
+        storePath,
+        expectedRevision: observed!.revision,
+      }),
+    ).toMatchObject({ status: 'conflict' });
+    expect(getWorkspaceTrustStatus(workspace, storePath)).toBe('unknown');
+
+    const refreshed = getWorkspaceTrustSnapshot(workspace, storePath);
+    expect(refreshed?.revision).not.toBe(observed?.revision);
+    expect(
+      trustWorkspace({
+        workspace,
+        storePath,
+        expectedRevision: refreshed!.revision,
+      }).status,
+    ).toBe('recorded');
   });
 
   test('malformed store is reported corrupt and refuses writes', () => {

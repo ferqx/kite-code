@@ -1,53 +1,28 @@
-import { randomUUID } from 'node:crypto';
-import {
-  createMcpTransportAdmissionReceipt,
-  createMcpTransportBoundaryIdentity,
-  DefaultMcpSupervisor,
-  type McpRuntimeProvider,
-  type McpTransportAdmissionRequest,
-  MemoryMcpCredentialStore,
-} from '@kite-ai/builtin-runtime/mcp';
-import {
-  createProtectedPathEvaluator,
-  networkBoundaryPolicyFromExecutionBoundary,
-} from '@kite-ai/builtin-runtime/sandbox';
+import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import React, { useSyncExternalStore } from 'react';
-import { createInstalledMcpStdioProcessPort } from '#kite-cli/bootstrap/mcp-stdio-composition';
-import { type AgentConfig, DefaultMcpConfigRepository } from '#kite-cli/config';
 import { TuiMcpController } from '../mcp/controller';
-
-export function useMcpController(
-  runtimeProviderRef: React.MutableRefObject<McpRuntimeProvider | null>,
-  sessionManager: {
-    updateMcpRuntimeProvider(provider: McpRuntimeProvider | null): void;
-    updateMcpRecoveryController(controller: TuiMcpController | null): void;
-  },
-  workspace: string,
-  config: AgentConfig,
-) {
+export function useMcpController(client: KiteAppControlClient, workspace: KiteWorkspaceIdentity) {
   const controller = React.useMemo(
-    () => new TuiMcpController(createSupervisor(config, workspace), workspace),
-    [config, workspace],
+    () => new TuiMcpController(client, workspace),
+    [client, workspace],
   );
-  const view = useSyncExternalStore(
-    controller.subscribe,
-    controller.getSnapshot,
-    controller.getSnapshot,
+  const subscribe = React.useCallback(
+    (listener: () => void) => controller.subscribe(listener),
+    [controller],
   );
+  const getSnapshot = React.useCallback(() => controller.getSnapshot(), [controller]);
+  const view = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   React.useEffect(() => {
-    const runtimeProvider = controller.getRuntimeProvider();
-    runtimeProviderRef.current = runtimeProvider;
-    sessionManager.updateMcpRuntimeProvider(runtimeProvider);
-    sessionManager.updateMcpRecoveryController(controller);
-    void controller.start();
+    void controller.start().catch(() => {
+      // The presentation layer keeps the typed empty snapshot. A later
+      // polling/explicit refresh can recover without constructing a local
+      // Supervisor or falling back to Store state.
+    });
     return () => {
-      runtimeProviderRef.current = null;
-      sessionManager.updateMcpRuntimeProvider(null);
-      sessionManager.updateMcpRecoveryController(null);
       void controller.stop();
     };
-  }, [controller, runtimeProviderRef, sessionManager]);
+  }, [controller]);
 
   const mcpPromptRegistry = React.useMemo(() => {
     const registry = new Map<
@@ -70,74 +45,4 @@ export function useMcpController(
   }, [view.control.servers]);
 
   return { controller, mcpPromptRegistry, view };
-}
-
-function createSupervisor(config: AgentConfig, workspace: string): DefaultMcpSupervisor {
-  const transportBoundaryOptions = sealedTransportBoundaryOptions(config, workspace);
-  const localStdioOptions =
-    config.executionBoundary && config.executionCapabilitySurface?.localStdioMcp === true
-      ? {
-          stdioProcessPort: createInstalledMcpStdioProcessPort(),
-          protectedPathEvaluator: createProtectedPathEvaluator({
-            workspaceRoot: config.executionBoundary.workspaceRoot,
-            mode: config.executionBoundary.protectedPathPolicy,
-          }),
-        }
-      : {};
-  const repository = new DefaultMcpConfigRepository();
-  if (process.env.NODE_ENV === 'test' && process.env.KITE_TEST_MCP_CREDENTIAL_STORE === 'memory') {
-    const credentialStore = new MemoryMcpCredentialStore();
-    return new DefaultMcpSupervisor({
-      repository,
-      credentialStore,
-      connectionManagerOptions: {
-        ...transportBoundaryOptions,
-        ...localStdioOptions,
-      },
-    });
-  }
-  return new DefaultMcpSupervisor({
-    repository,
-    connectionManagerOptions: { ...transportBoundaryOptions, ...localStdioOptions },
-  });
-}
-
-function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) {
-  // Remote HTTP keeps its independent TLS/OAuth + RA egress authority when
-  // no release execution boundary exists. Local stdio still has no Host
-  // process port in this branch and therefore remains spawn=0/fail-closed.
-  if (!config.executionBoundary) return { transportBoundaryRequired: false as const };
-  const productionExecution = (
-    config as AgentConfig & {
-      productionExecution?: { qualificationId?: string };
-    }
-  ).productionExecution;
-  if (!config.executionCapabilitySurface) {
-    return {
-      transportBoundaryRequired: true as const,
-      ...(productionExecution ? { mcpWriteGovernanceRequired: true as const } : {}),
-    };
-  }
-  const networkPolicy = networkBoundaryPolicyFromExecutionBoundary(
-    config.executionBoundary,
-    config.features?.networkBoundary === true,
-  );
-  const identity = createMcpTransportBoundaryIdentity({
-    workspaceRoot: workspace,
-    executionBoundary: config.executionBoundary,
-    executionSurface: config.executionCapabilitySurface,
-    runIdentity: `tui-mcp-control:${randomUUID()}`,
-    profileIdentity: productionExecution?.qualificationId ?? 'unqualified-profile',
-    networkPolicyRevision: networkPolicy.revision,
-  });
-  return {
-    transportBoundaryRequired: true as const,
-    ...(productionExecution ? { mcpWriteGovernanceRequired: true as const } : {}),
-    transportBoundary: {
-      identity,
-      async admit(request: McpTransportAdmissionRequest) {
-        return createMcpTransportAdmissionReceipt(request);
-      },
-    },
-  };
 }

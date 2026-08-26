@@ -5,7 +5,13 @@
 ## Composition 与支持边界
 
 - `src/bootstrap.ts` 是唯一 concrete composition root。它组装一个 Host、SQLite Store、Runtime Server 和 Client；carrier 只把已经 framed 的 logical message 交给该 Server，绝不创建第二个 Host、Kernel、Store、reducer 或 writer。
-- Server 的唯一 execution backend 是 injected `RuntimeAccess`；App admission 固定已信任的 Workspace/session facts。carrier、request body 和 `clientInfo` 都不能提升 Workspace authority。
+- Server 的唯一 execution backend 是 injected `RuntimeAccess`；backend 提供 default admission，App 也可通过
+  `RuntimeServer.open(connection, { admission })` 或 InProcess `hub.open({ admission })` 为每个 logical connection
+  绑定独立 admission。carrier、request body 和 `clientInfo` 都不能提升 Workspace authority。
+- connection admission只为 create 注入 canonical trusted Workspace；wire path不可信。resume/query/subscribe/fork
+  使用唯一 Store中的持久 Session identity，并与 connection admitted Workspace交叉校验；process-wide list query
+  仍由持久 Store owner回答。connection close清除 admission、subscription和interaction client binding，不终止
+  Session、Turn、Host或Store；显式 owner drain/shutdown才关闭 composition。
 - production TUI 与 foreground CLI 通过 `RuntimeClient → RuntimeServer → RuntimeAccess` 访问 Runtime。InProcess pair 是 App 内同一 Protocol 的 transport，不是 direct Host/SQLite fallback。
 - durable complete history 不属于 Server 或 carrier：它始终经 `RuntimeClient.history → App exhaustive history
   projection → RuntimeLogQueryPort` 分页取得，并以与 live 相同的 closed `RuntimeClientEvent` 进入 TUI reducer。

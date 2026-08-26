@@ -14,6 +14,14 @@
 - `TuiRuntimeClientFacade` 与 `TuiSessionFacade` 是显式 InProcess client seam；不使用 Manager/SessionRuntime
   Proxy、Reflect fallback、动态 method 或 set trap。App Control 的 InProcess conformance adapter 对每个 use case
   独立经过 `@kite-ai/kite-app-contract` request/response codec。
+- `src/runtime-application/` 与 `src/app-control/` 是当前 app-local、可迁移的 InProcess owner seam。一个真实
+  Host/SQLite Store 可通过 canonical Workspace context router承载多个 Workspace 与 Session；每个 logical
+  connection 具有独立 admission，只有 create 使用 connection admitted Workspace，resume/query/subscribe/fork
+  必须匹配持久 Session identity。connection close 只释放 client/subscription/broker binding，不取消 Turn、交互
+  waiter 或关闭 owner；drain/cancel/Host close 是显式 Runtime Application lifecycle。
+- Workspace Trust、Provider/model、MCP、Skill、execution/release 与 first-run credential 已经通过 exact App Control
+  或 Native credential client 进入 TUI。Config repository、MCP Supervisor、actual Skill manifest、Sandbox/Shell、
+  observability 与 checkpoint composition 留在 app-local owner，不跨 TUI client seam。
 
 ## 不拥有职责
 
@@ -47,6 +55,7 @@ Native package 尚未启动或连接独立 Service。
 - [TUI 本地化](docs/tui-localization.md)
 - [TUI 系统测试](docs/tui-system-testing.md)
 - [Runtime Server carriers](docs/runtime-server-carrier.md)
+- [Runtime Application 与 App Control](docs/runtime-application.md)
 
 ## 测试
 

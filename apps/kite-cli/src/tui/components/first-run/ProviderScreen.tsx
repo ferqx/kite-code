@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { useI18n } from '../../i18n';
 import { useTheme } from '../../theme';
 import FirstRunShell from './FirstRunShell';
@@ -9,20 +9,21 @@ interface ProviderScreenProps {
   selectedIndex: number;
   onSelect: (index: number) => void;
   onConfirm: (provider: ProviderDefinition) => void;
+  onExit?: () => void;
 }
 
 export default function ProviderScreen({
   selectedIndex,
   onSelect,
   onConfirm,
+  onExit = () => undefined,
 }: ProviderScreenProps) {
   const t = useTheme();
   const { t: translate } = useI18n();
-  const { exit } = useApp();
 
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === 'c')) {
-      exit();
+      onExit();
       return;
     }
     if (key.upArrow) {

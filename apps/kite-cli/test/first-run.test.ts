@@ -168,4 +168,17 @@ describe('getErrorActions', () => {
     const actions = getErrorActions(err);
     expect(actions.map((a) => a.action)).toEqual(['edit-settings', 'back-to-provider']);
   });
+
+  test('unknown credential outcome requires explicit continuation after a confirmed query', () => {
+    const err: ConnectionError = {
+      kind: 'outcome-unknown',
+      message: 'Review provider state.',
+      confirmedModelName: 'gpt-test',
+    };
+    expect(getErrorActions(err).map((a) => a.action)).toEqual([
+      'continue-confirmed',
+      'edit-settings',
+      'back-to-provider',
+    ]);
+  });
 });

@@ -128,11 +128,15 @@ const mcpSnapshot: AppMcpSnapshot = {
     {
       key: { name: 'docs', source: 'user' },
       effective: true,
+      sourcePath: '/home/test/.kite-code/mcp.json',
       transport: 'http',
       enabled: true,
+      required: false,
       configStatus: 'ready',
       health: 'ready',
       authStatus: 'not_required',
+      configuration: { endpoint: 'https://example.com' },
+      revision: 'server-revision-1',
       toolCount: 1,
       resourceCount: 0,
       promptCount: 0,
@@ -141,6 +145,14 @@ const mcpSnapshot: AppMcpSnapshot = {
           name: 'search',
           description: 'Search documentation.',
           parameters: [{ name: 'query', type: 'string', required: true }],
+          discovered: true,
+        },
+      ],
+      prompts: [
+        {
+          name: 'lookup',
+          description: 'Look up documentation.',
+          arguments: [{ name: 'query', required: true }],
         },
       ],
     },
@@ -428,6 +440,23 @@ describe('Kite App Contract', () => {
           value: '',
           expectedRevision: revision,
         },
+      }),
+    ).toThrow();
+    expect(() =>
+      mcpSnapshotResponseCodec.decode({
+        ...mcpSnapshot,
+        servers: [
+          {
+            ...mcpSnapshot.servers[0],
+            configuration: { endpoint: 'https://example.com/mcp?token=secret' },
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      mcpSnapshotResponseCodec.decode({
+        ...mcpSnapshot,
+        servers: [{ ...mcpSnapshot.servers[0], credential: 'secret' }],
       }),
     ).toThrow();
   });

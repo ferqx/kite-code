@@ -1,243 +1,244 @@
-import { saveProviderConfig } from '#kite-cli/config';
 import type {
-  AvailableModel,
-  ConnectionError,
-  ConnectProviderInput,
-  ConnectProviderResult,
-  ProviderDefinition,
-} from './types';
-import { chooseInitialModel, classifyError } from './types';
+  KiteAppControlClient,
+  KiteWorkspaceIdentity,
+  ProviderModelSnapshot,
+} from '@kite-ai/kite-app-contract';
+import {
+  LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_,
+  type NativeProviderCredentialClient,
+  type NativeProviderCredentialRequest,
+  type NativeProviderCredentialResult,
+} from '@kite-ai/kite-local-runtime/client';
+import type { ConnectionError, ConnectProviderResult, ProviderDefinition } from './types';
 
-type ModelListResponse = {
-  models?: unknown;
-  data?: unknown;
-};
-
-type ProviderModelItem = {
-  name?: unknown;
-  id?: unknown;
-};
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+export interface FirstRunProviderClients {
+  readonly credentialClient: NativeProviderCredentialClient;
+  readonly appControl: KiteAppControlClient;
+  readonly workspace: KiteWorkspaceIdentity;
 }
 
-function extractModelNames(response: unknown, isOllama: boolean): string[] {
-  if (!response || typeof response !== 'object') return [];
-  const body = response as ModelListResponse;
-  const rawItems = isOllama ? body.models : body.data;
-  if (!Array.isArray(rawItems)) return [];
+type ConfirmedProviderState =
+  | { readonly status: 'connected'; readonly modelName: string }
+  | { readonly status: 'model-required'; readonly message: string };
 
-  return rawItems
-    .map((item) => {
-      if (!item || typeof item !== 'object') return null;
-      const candidate = isOllama
-        ? (item as ProviderModelItem).name
-        : (item as ProviderModelItem).id;
-      return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
-    })
-    .filter((name): name is string => name !== null);
-}
-
-async function fetchModels(
-  provider: ProviderDefinition,
-  baseURL: string,
-  apiKey: string,
-  signal?: AbortSignal,
-): Promise<{ models: AvailableModel[] | null; error?: ConnectionError }> {
-  if (!provider.supportsModelDiscovery) {
-    return { models: null };
-  }
-
-  const url = baseURL.replace(/\/+$/, '');
-  const isOllama = provider.type === 'ollama';
-  const endpoint = isOllama ? `${url}/api/tags` : `${url}/models`;
-  const headers: Record<string, string> = {};
-  if (!isOllama && apiKey) {
-    headers.Authorization = `Bearer ${apiKey}`;
-  }
-
+function mutationId(): string {
   try {
-    const res = await fetch(endpoint, {
-      headers,
-      signal: signal ?? AbortSignal.timeout(8000),
-    });
+    return globalThis.crypto.randomUUID();
+  } catch {
+    return `first-run-${Date.now()}`;
+  }
+}
 
-    if (res.status === 401 || res.status === 403) {
-      return { models: null, error: classifyError(res.status, '', url) };
-    }
+function providerRequest(
+  provider: ProviderDefinition,
+  apiKey: string,
+  baseURL: string,
+  modelName?: string,
+): NativeProviderCredentialRequest {
+  const request = {
+    schema: LOCAL_RUNTIME_CREDENTIAL_REQUEST_SCHEMA_,
+    mutationId: mutationId(),
+    operation: 'write_provider_api_key' as const,
+    providerId: provider.type,
+    apiKey,
+    ...(baseURL.trim() && baseURL.trim() !== provider.defaultBaseURL
+      ? { baseURL: baseURL.trim() }
+      : {}),
+    ...(modelName?.trim() ? { modelName: modelName.trim() } : {}),
+  };
+  return request;
+}
 
-    if (!res.ok) {
-      try {
-        const body = await res.text();
-        return {
-          models: null,
-          error: { kind: 'incompatible', message: body.slice(0, 200) },
-        };
-      } catch {
-        return {
-          models: null,
-          error: { kind: 'incompatible', message: `HTTP ${res.status}` },
-        };
-      }
-    }
-
-    const data = await res.json();
-    const items = extractModelNames(data, isOllama);
-    const names: AvailableModel[] = [];
-    for (const name of items) {
-      names.push({ name, default: false });
-    }
-
-    if (names.length === 0 && isOllama && (!data || !('models' in (data as ModelListResponse)))) {
+function credentialError(code: string | undefined): ConnectionError {
+  switch (code) {
+    case 'credential_unavailable':
       return {
-        models: null,
-        error: { kind: 'incompatible', message: 'Could not read model list' },
+        kind: 'auth',
+        message: 'The provider rejected the credential.',
+        details: 'The API key was rejected.',
       };
-    }
+    case 'not_found':
+      return {
+        kind: 'incompatible',
+        message: 'The endpoint does not provide a model route.',
+      };
+    case 'model_required':
+      return {
+        kind: 'incompatible',
+        message: 'The endpoint did not return a model list.',
+      };
+    case 'provider_incompatible':
+      return {
+        kind: 'incompatible',
+        message: 'The endpoint response is not compatible with model discovery.',
+      };
+    case 'invalid_request':
+      return {
+        kind: 'generic',
+        message: 'The provider settings are invalid.',
+      };
+    default:
+      return {
+        kind: 'unreachable',
+        message: 'The provider endpoint could not be reached.',
+      };
+  }
+}
 
-    if (names.length > 0) {
-      const first = names[0]!;
-      names[0] = { name: first.name, default: true };
-    }
+function unknownError(modelName?: string): ConnectionError {
+  return {
+    kind: 'outcome-unknown',
+    message: 'The credential write outcome is unknown. Review provider state before continuing.',
+    ...(modelName === undefined ? {} : { confirmedModelName: modelName }),
+  };
+}
 
-    return { models: names };
-  } catch (err: unknown) {
-    // User-initiated abort — silently bail, caller handles cancellation
+function providerSummary(
+  snapshot: ProviderModelSnapshot,
+  provider: ProviderDefinition,
+): ConfirmedProviderState {
+  const summary = snapshot.providers.find((entry) => entry.provider === provider.type);
+  if (!summary) {
+    return { status: 'model-required', message: 'No model is configured for this provider.' };
+  }
+
+  const selected =
+    snapshot.selected?.provider === provider.type ? snapshot.selected.name : summary.selectedModel;
+  if (summary.readiness === 'ready' && selected) {
+    return { status: 'connected', modelName: selected };
+  }
+  if (summary.readiness === 'unavailable') {
+    return { status: 'model-required', message: 'The provider state is unavailable.' };
+  }
+  return { status: 'model-required', message: 'Enter the model name for this endpoint.' };
+}
+
+async function confirmProviderState(
+  clients: FirstRunProviderClients,
+  provider: ProviderDefinition,
+): Promise<
+  ConfirmedProviderState | { readonly status: 'failed'; readonly error: ConnectionError }
+> {
+  try {
+    const snapshot = await clients.appControl.getProviderModelSnapshot({
+      schema: 'kite.app.provider-model.snapshot-request.v1',
+      workspace: clients.workspace,
+    });
+    return providerSummary(snapshot, provider);
+  } catch {
+    return {
+      status: 'failed',
+      error: {
+        kind: 'generic',
+        message: 'Could not confirm provider state through App Control.',
+      },
+    };
+  }
+}
+
+async function writeAndConfirm(
+  provider: ProviderDefinition,
+  apiKey: string,
+  baseURL: string,
+  clients: FirstRunProviderClients,
+  signal: AbortSignal | undefined,
+  modelName?: string,
+): Promise<ConnectProviderResult> {
+  const request = providerRequest(provider, apiKey, baseURL, modelName);
+  let response: NativeProviderCredentialResult;
+  try {
+    response = await clients.credentialClient.writeProviderCredential(request, { signal });
+  } catch {
     if (signal?.aborted) {
-      return { models: null, error: { kind: 'generic', message: 'Cancelled' } };
+      return { status: 'failed', error: { kind: 'generic', message: 'Cancelled' } };
     }
-    return {
-      models: null,
-      error: classifyError(null, toErrorMessage(err), url),
-    };
-  }
-}
-
-async function validateCredentials(
-  provider: ProviderDefinition,
-  baseURL: string,
-  apiKey: string,
-  signal?: AbortSignal,
-): Promise<{ valid: boolean; error?: ConnectionError }> {
-  if (provider.type === 'ollama') {
-    const url = baseURL.replace(/\/+$/, '');
-    try {
-      const res = await fetch(url, { signal: signal ?? AbortSignal.timeout(5000) });
-      if (!res.ok) {
-        return {
-          valid: false,
-          error: { kind: 'unreachable', message: `HTTP ${res.status}`, details: url },
-        };
-      }
-      return { valid: true };
-    } catch (err: unknown) {
+    // A rejected Native call may mean that the mutation was accepted but its
+    // response was lost. Query the authoritative App Control state and leave
+    // continuation to an explicit user action; never replay the write here.
+    const confirmed = await confirmProviderState(clients, provider);
+    if (confirmed.status === 'connected') {
       return {
-        valid: false,
-        error: classifyError(null, toErrorMessage(err), url),
+        status: 'outcome-unknown',
+        modelName: confirmed.modelName,
+        message: 'State queried.',
       };
     }
+    return { status: 'failed', error: unknownError() };
+  }
+  if (signal?.aborted) {
+    return { status: 'failed', error: { kind: 'generic', message: 'Cancelled' } };
   }
 
-  if (provider.apiKey === 'none') return { valid: true };
-
-  if (provider.apiKey !== 'optional' && !apiKey.trim()) {
-    return { valid: false, error: { kind: 'auth', message: 'API key is required' } };
+  if (response.outcome === 'outcome_unknown') {
+    const confirmed = await confirmProviderState(clients, provider);
+    if (confirmed.status === 'failed') return { status: 'failed', error: unknownError() };
+    if (confirmed.status === 'connected') {
+      return {
+        status: 'outcome-unknown',
+        modelName: confirmed.modelName,
+        message: 'State queried.',
+      };
+    }
+    return { status: 'failed', error: unknownError() };
+  }
+  if (response.outcome !== 'applied') {
+    if (response.errorCode === 'model_required') {
+      return {
+        status: 'model-required',
+        message: 'No models were detected at this endpoint.',
+      };
+    }
+    return { status: 'failed', error: credentialError(response.errorCode) };
   }
 
-  const url = baseURL.replace(/\/+$/, '');
-  try {
-    const headers: Record<string, string> = {};
-    if (apiKey.trim()) {
-      headers.Authorization = `Bearer ${apiKey}`;
-    }
-    const res = await fetch(`${url}/models`, {
-      headers,
-      signal: signal ?? AbortSignal.timeout(8000),
-    });
-
-    if (res.status === 401 || res.status === 403) {
-      return { valid: false, error: classifyError(res.status, '', url) };
-    }
-
-    return { valid: true };
-  } catch (err: unknown) {
+  const confirmed = await confirmProviderState(clients, provider);
+  if (confirmed.status === 'failed') return confirmed;
+  if (confirmed.status === 'connected') {
+    return { status: 'connected', modelName: confirmed.modelName };
+  }
+  // The legacy config resolver treats an empty key as not configured even for
+  // an optional custom endpoint. Preserve that first-run journey: let the user
+  // explicitly edit the key instead of presenting a misleading model prompt.
+  if (provider.apiKey === 'optional' && !apiKey.trim()) {
     return {
-      valid: false,
-      error: classifyError(null, toErrorMessage(err), url),
+      status: 'failed',
+      error: { kind: 'generic', message: 'The API key was rejected.' },
     };
   }
+  return { status: 'model-required', message: confirmed.message };
 }
 
-interface ConnectOptions {
+export async function connectProvider(input: {
   provider: ProviderDefinition;
-  apiKey: string;
-  baseURL: string;
+  clients: FirstRunProviderClients;
   signal?: AbortSignal;
-  saveApiKey?: boolean;
-  saveBaseURL?: boolean;
-}
-
-async function connectAndSave(options: ConnectOptions): Promise<ConnectProviderResult> {
-  const { provider, apiKey, baseURL, signal, saveApiKey, saveBaseURL } = options;
-
-  const { valid, error } = await validateCredentials(provider, baseURL, apiKey, signal);
-  if (!valid) return { status: 'failed', error: error! };
-
-  const { models, error: fetchError } = await fetchModels(provider, baseURL, apiKey, signal);
-  if (fetchError) return { status: 'failed', error: fetchError };
-
-  if (!models || models.length === 0) {
-    return { status: 'model-required', message: 'No models were detected at this endpoint.' };
-  }
-
-  const chosen = chooseInitialModel(provider, models);
-  if (!chosen) {
-    return { status: 'model-required', message: 'No models available.' };
-  }
-
-  const saved = saveProviderConfig({
-    name: provider.type,
-    type: provider.type,
-    apiKey: saveApiKey ? apiKey : undefined,
-    baseURL: saveBaseURL ? baseURL : undefined,
-    models: models.map((m) => ({ name: m.name, default: m.name === chosen.name })),
-    reasoning: provider.defaultReasoning === 'on',
-    effort: provider.defaultReasoning === 'on' ? 'max' : undefined,
-  });
-
-  if (!saved) {
-    return { status: 'failed', error: { kind: 'generic', message: 'Failed to write config file' } };
-  }
-
-  return { status: 'connected', modelName: chosen.name };
-}
-
-export async function connectProvider(input: ConnectProviderInput): Promise<ConnectProviderResult> {
-  const { provider, signal } = input;
-
-  return connectAndSave({
-    provider,
-    apiKey: '',
-    baseURL: provider.defaultBaseURL,
-    signal,
-    saveApiKey: false,
-    saveBaseURL: false,
-  });
+}): Promise<ConnectProviderResult> {
+  return writeAndConfirm(
+    input.provider,
+    '',
+    input.provider.defaultBaseURL,
+    input.clients,
+    input.signal,
+  );
 }
 
 export async function connectProviderWithKey(
   provider: ProviderDefinition,
   apiKey: string,
   baseURL: string,
+  clients: FirstRunProviderClients,
   signal?: AbortSignal,
 ): Promise<ConnectProviderResult> {
-  return connectAndSave({
-    provider,
-    apiKey,
-    baseURL,
-    signal,
-    saveApiKey: true,
-    saveBaseURL: baseURL !== provider.defaultBaseURL,
-  });
+  return writeAndConfirm(provider, apiKey, baseURL, clients, signal);
+}
+
+export async function saveManualProviderModel(
+  provider: ProviderDefinition,
+  apiKey: string,
+  baseURL: string,
+  modelName: string,
+  clients: FirstRunProviderClients,
+  signal?: AbortSignal,
+): Promise<ConnectProviderResult> {
+  return writeAndConfirm(provider, apiKey, baseURL, clients, signal, modelName);
 }

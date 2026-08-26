@@ -1,5 +1,7 @@
+import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import {
+  type AgentPhase,
   RUNTIME_COMMAND_SCHEMA_,
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
@@ -29,13 +31,20 @@ import type {
   RuntimeStoredCommandReceipt,
 } from '@kite-ai/runtime-host/storage';
 import type { ProjectIdentity } from '@kite-ai/runtime-spi';
+import { type AgentConfig, loadAgentConfig } from '#kite-cli/config';
 import { getFeatureFlags } from '#kite-cli/config/features';
 import type {
+  TuiContextCompactionCommand,
+  TuiContextCompactionProgress,
+  TuiContextCompactionResult,
+  TuiInitialSkillActivation,
+  TuiRewindResult,
   TuiRuntimeClientFacade,
   TuiSessionFacade,
   TuiSessionRunDependencies,
 } from '../../adapters/tui/session-adapter';
 import { type SessionDeps, SessionManager, type SessionRuntime } from '../../runtime/session';
+import type { SessionUserAction } from '../../runtime/session/contracts';
 import {
   createRuntimeCommandIdAllocator,
   type RuntimeCommandIdAllocator,
@@ -50,6 +59,7 @@ import { projectRuntimeClientText } from '../../runtime-client/safe-text';
 import { createTuiHistoryFacade } from '../../runtime-client/tui-history-facade';
 import { commitRewindCommand } from './command-rewind-decision';
 import type { RuntimeSessionCoordinator } from './RuntimeSessionCoordinator';
+import type { RuntimeEvent } from './state-runtime';
 import type { PrecommittedStartTurnDescriptor } from './turn-command-decision';
 
 interface SessionAuthority {
@@ -60,19 +70,29 @@ interface SessionAuthority {
 }
 
 interface PendingRun {
-  readonly dependencies: Parameters<SessionRuntime['runTask']>[1];
-  readonly requestedPhase?: Parameters<SessionRuntime['runTask']>[2];
-  readonly initialSkills?: Parameters<SessionRuntime['runTask']>[3];
+  readonly dependencies: TuiSessionRunDependencies;
+  readonly requestedPhase?: AgentPhase;
+  readonly initialSkills?: TuiInitialSkillActivation[];
   readonly completion: Promise<void>;
   readonly resolve: () => void;
   readonly reject: (error: unknown) => void;
 }
 
-type ContextCompactionResult = Awaited<ReturnType<SessionManager['handleContextCompaction']>>;
-type ContextCompactionProgress = Parameters<SessionManager['handleContextCompaction']>[2];
-type ContextCompactionCommand = Parameters<SessionManager['handleContextCompaction']>[3];
-type RewindResult = Awaited<ReturnType<SessionManager['executeRewind']>>;
-type TuiRuntimeDispatch = Parameters<SessionRuntime['runTask']>[1]['dispatch'];
+type ContextCompactionResult = TuiContextCompactionResult;
+type ContextCompactionProgress = TuiContextCompactionProgress;
+type ContextCompactionCommand = TuiContextCompactionCommand;
+type RewindResult = TuiRewindResult;
+type TuiRuntimeDispatch = TuiSessionRunDependencies['dispatch'];
+
+interface TuiHostCompactionPlan {
+  readonly events: readonly RuntimeEvent[];
+  readonly shouldSchedule: boolean;
+  readonly compactionId?: string;
+  readonly presentation: {
+    readonly text: string;
+    readonly isError?: boolean;
+  };
+}
 
 interface PendingCompaction {
   readonly instructions?: string;
@@ -95,12 +115,31 @@ interface PendingRewind {
 const TUI_CANCEL_REVISION_RETRY_LIMIT = 8;
 
 export function createTuiRuntimeClient(
-  input: SessionDeps & { readonly workspace: string },
+  input: SessionDeps & { readonly workspace: string; readonly injectedModel?: SupportedChatModel },
   createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPort,
   resolveProjectIdentity: (workspace: string) => ProjectIdentity,
   commandIds: RuntimeCommandIdAllocator = createRuntimeCommandIdAllocator(),
 ): TuiRuntimeClientFacade {
-  return new TuiRuntimeBridge(input, createHost, resolveProjectIdentity, commandIds).client;
+  return createTuiRuntimeServiceComposition(input, createHost, resolveProjectIdentity, commandIds)
+    .client;
+}
+
+export interface TuiRuntimeServiceComposition {
+  readonly client: TuiRuntimeClientFacade;
+  applySelectedConfig(config: AgentConfig): void;
+}
+
+export function createTuiRuntimeServiceComposition(
+  input: SessionDeps & { readonly workspace: string; readonly injectedModel?: SupportedChatModel },
+  createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPort,
+  resolveProjectIdentity: (workspace: string) => ProjectIdentity,
+  commandIds: RuntimeCommandIdAllocator = createRuntimeCommandIdAllocator(),
+): TuiRuntimeServiceComposition {
+  const bridge = new TuiRuntimeBridge(input, createHost, resolveProjectIdentity, commandIds);
+  return Object.freeze({
+    client: bridge.client,
+    applySelectedConfig: (config: AgentConfig) => bridge.applySelectedConfig(config),
+  });
 }
 
 class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
@@ -126,10 +165,16 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   readonly #allocateRecoveryIdentity: SessionDeps['allocateRecoveryIdentity'];
   readonly #admittedWorkspace: string;
   readonly #commandIds: RuntimeCommandIdAllocator;
+  readonly #provider: SessionDeps['provider'];
+  readonly #injectedModel: SupportedChatModel | undefined;
+  readonly #workspaceReady: Promise<void> | undefined;
   readonly client: TuiRuntimeClientFacade;
 
   constructor(
-    input: SessionDeps & { readonly workspace: string },
+    input: SessionDeps & {
+      readonly workspace: string;
+      readonly injectedModel?: SupportedChatModel;
+    },
     createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPort,
     resolveProjectIdentity: (workspace: string) => ProjectIdentity,
     commandIds: RuntimeCommandIdAllocator,
@@ -146,8 +191,18 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     this.#allocateRecoveryIdentity = input.allocateRecoveryIdentity;
     this.#admittedWorkspace = input.workspace;
     this.#commandIds = commandIds;
+    this.#provider = input.provider;
+    this.#injectedModel = input.injectedModel;
+    this.#workspaceReady = input.workspaceReady;
     input.provider.setActionSink?.((action) => this.#submitClientInteraction(action));
     this.client = this.#createManagerClient();
+  }
+
+  applySelectedConfig(config: AgentConfig): void {
+    const sessionId = this.#manager.getActiveId();
+    if (sessionId) {
+      this.#manager.setSessionConfig(sessionId, config, { persist: true, asDefault: true });
+    }
   }
 
   async recoverSession(
@@ -340,7 +395,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
             const committed = coordinator.commitStartTurnCommand(
               command,
               evidence,
-              this.#startSkillPlanningContext(command, runtime, pending),
+              this.#startSkillPlanningContext(command, runtime),
             );
             const receipt = receiptFromStored(committed.receipt);
             return {
@@ -712,7 +767,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
 
   #preparedCompaction(
     command: Extract<RuntimeCommand, { type: 'compact_session' }>,
-    plan: ReturnType<SessionManager['inspectHostCompactionCommand']>,
+    plan: TuiHostCompactionPlan,
     pending: PendingCompaction,
     receipt: Extract<RuntimeCommandReceipt, { status: 'applied' }>,
   ): RuntimeHostPreparedExecution {
@@ -746,8 +801,8 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   }
 
   #compactionResult(
-    plan: ReturnType<SessionManager['inspectHostCompactionCommand']>,
-    events: readonly import('./state-runtime').RuntimeEvent[],
+    plan: TuiHostCompactionPlan,
+    events: readonly RuntimeEvent[],
   ): ContextCompactionResult {
     return {
       events: events.flatMap((event) => {
@@ -868,14 +923,13 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   #startSkillPlanningContext(
     command: Extract<RuntimeCommand, { type: 'start_turn' }>,
     runtime: SessionRuntime,
-    pending: PendingRun,
   ) {
     if (!command.initialSkills || command.initialSkills.length === 0) return undefined;
     const skillOptions = runtime.skillOptions;
     if (!skillOptions) {
       throw new Error('Runtime start command with initial skills requires TUI skill options.');
     }
-    const flags = getFeatureFlags(pending.dependencies.config ?? runtime.config);
+    const flags = getFeatureFlags(runtime.config);
     return {
       skillOptions,
       mcpManager: runtime.mcpManager ?? undefined,
@@ -935,10 +989,13 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
       // that authority into the legacy SessionRuntime before it compiles any
       // model/tool context; execution must not append a post-receipt mode fact.
       runtime.interactionMode = coordinator.getState().mode;
+      await this.#workspaceReady;
       await runtime.runTask(
         command.input,
         {
-          ...pending.dependencies,
+          provider: this.#provider,
+          config: runtime.config,
+          ...(this.#injectedModel === undefined ? {} : { model: this.#injectedModel }),
           onRuntimeStateEvent: (event) => this.#publishStateEvents(sessionId, [event]),
           dispatch: (action) => {
             if (action.type === 'RUNTIME_EVENT') {
@@ -981,6 +1038,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   #createManagerClient(): TuiRuntimeClientFacade {
     const target = this.#manager;
     const client: TuiRuntimeClientFacade = {
+      submitUserAction: (action) => this.#submitClientInteraction(action),
       createSession: (workspace: string): string => {
         this.#assertAdmittedWorkspace(workspace);
         const project = this.#resolveProjectIdentity(workspace);
@@ -999,8 +1057,8 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
       },
       dispose: async (): Promise<void> => {
         await this.#awaitAllSessionReadiness();
-        for (const controller of this.#subscriptionControllers.values()) controller.abort();
         await this.#access[Symbol.asyncDispose]();
+        for (const controller of this.#subscriptionControllers.values()) controller.abort();
       },
       abortAll: async (): Promise<void> => {
         await this.#awaitAllSessionReadiness();
@@ -1296,17 +1354,31 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
       setName: (threadId, name) => target.setName(threadId, name),
       saveTokenStats: (threadId, status, immediate) =>
         target.saveTokenStats(threadId, status, immediate),
-      setSessionConfig: (threadId, config, options) =>
-        target.setSessionConfig(threadId, config, options),
-      getDefaultConfig: () => target.getDefaultConfig(),
+      applyPersistedModelRoute: (threadId, provider, name) => {
+        let config = target.getDefaultConfig();
+        if (provider && name) {
+          try {
+            config = loadAgentConfig({
+              workspace: target.getRuntime(threadId)?.workspace ?? this.#admittedWorkspace,
+              providerName: provider,
+              modelName: name,
+            });
+          } catch {
+            // Removed persisted routes safely fall back to the current Service default.
+          }
+        }
+        target.setSessionConfig(threadId, config);
+        return {
+          provider: config.providerName,
+          name: config.modelName,
+          reasoningEnabled: config.reasoningExplicitlyDisabled !== true,
+        };
+      },
       buildContextStatusSnapshot: (threadId) => target.buildContextStatusSnapshot(threadId),
       handleContextDisplay: (threadId) => target.handleContextDisplay(threadId),
       generateAndPersistSessionName: (threadId, task) =>
         target.generateAndPersistSessionName(threadId, task),
       hasRuntime: (threadId) => target.hasRuntime(threadId),
-      updateSkillManifests: (manifests) => target.updateSkillManifests(manifests),
-      updateMcpRuntimeProvider: (provider) => target.updateMcpRuntimeProvider(provider),
-      updateMcpRecoveryController: (controller) => target.updateMcpRecoveryController(controller),
       shutdownObservability: (timeoutMs) => target.shutdownObservability(timeoutMs),
     };
     return client;
@@ -1337,11 +1409,14 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
       get eventBuffer() {
         return runtime.eventBuffer;
       },
-      get config() {
-        return runtime.config;
+      get modelProvider(): string {
+        return runtime.config.providerName;
       },
-      set config(config) {
-        runtime.config = config;
+      get modelName(): string {
+        return runtime.config.modelName;
+      },
+      get reasoningEnabled(): boolean {
+        return runtime.config.reasoningExplicitlyDisabled !== true;
       },
       get conversationHistory() {
         return runtime.conversationHistory;
@@ -1527,7 +1602,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     dispatch({ type: 'RUNTIME_EVENT', event });
   }
 
-  #submitClientInteraction(action: Parameters<SessionRuntime['resolveInterrupt']>[0]): void {
+  #submitClientInteraction(action: SessionUserAction): void {
     const sessionId = this.#manager.getActiveId();
     const runtime = sessionId ? this.#manager.getRuntime(sessionId) : undefined;
     const authority = sessionId ? this.#sessions.get(sessionId) : undefined;
@@ -1902,7 +1977,7 @@ function sameInteractionIdentity(
 
 function clientResponseForSessionAction(
   interaction: RuntimeClientInteraction,
-  action: Parameters<SessionRuntime['resolveInterrupt']>[0],
+  action: SessionUserAction,
 ): RuntimeInteractionResponse | null {
   switch (interaction.kind) {
     case 'approval':

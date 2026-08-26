@@ -1,7 +1,5 @@
-import type { McpServerControlState } from '@kite-ai/builtin-runtime/mcp';
 import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
-import { projectMcpConfigPath, userMcpConfigPath } from '#kite-cli/config';
 import {
   OverlayDetailList,
   OverlayImpactNotice,
@@ -14,6 +12,7 @@ import { useTheme } from '../theme';
 import McpSelect from './McpSelect';
 import type { McpSelectOption, McpServerAction } from './model';
 import { derivePrimaryStatus } from './model';
+import type { McpServerControlState } from './types';
 
 export type AddStep = 'transport' | 'name' | 'target' | 'scope' | 'review';
 export interface AddDraft {
@@ -22,6 +21,11 @@ export interface AddDraft {
   target: string;
   scope: 'project' | 'user';
 }
+
+export type McpSourcePaths = Readonly<{
+  readonly project: string;
+  readonly user: string;
+}>;
 
 export function ServerDetail({
   server,
@@ -85,9 +89,11 @@ export function ServerDetail({
 export function AddingServerView({
   draft,
   dotCount,
+  sourcePaths,
 }: {
   draft: Readonly<AddDraft>;
   dotCount: number;
+  sourcePaths?: McpSourcePaths;
 }) {
   const t = useTheme();
   return (
@@ -107,7 +113,7 @@ export function AddingServerView({
         },
         {
           label: '配置位置',
-          value: draft.scope === 'project' ? projectMcpConfigPath() : userMcpConfigPath(),
+          value: sourcePathForScope(draft.scope, sourcePaths),
           truncate: true,
         },
       ]}
@@ -204,6 +210,7 @@ export function ToolDetail({
 export function AddServer({
   step,
   draft,
+  sourcePaths,
   selectedId,
   inputError,
   onNameChange,
@@ -212,6 +219,7 @@ export function AddServer({
 }: {
   step: AddStep;
   draft: AddDraft;
+  sourcePaths?: McpSourcePaths;
   selectedId?: string;
   inputError?: string;
   onNameChange(value: string): void;
@@ -254,14 +262,14 @@ export function AddServer({
             { label: '可用范围', value: draft.scope === 'project' ? '当前项目' : '所有项目' },
             {
               label: '配置位置',
-              value: draft.scope === 'project' ? projectMcpConfigPath() : userMcpConfigPath(),
+              value: sourcePathForScope(draft.scope, sourcePaths),
               truncate: true,
             },
           ]}
         />
         <OverlaySection>操作</OverlaySection>
         <McpSelect
-          options={addOptions(step, draft)}
+          options={addOptions(step, draft, sourcePaths)}
           selectedId={selectedId}
           selectionBackground={false}
         />
@@ -275,7 +283,7 @@ export function AddServer({
     <Box flexDirection="column">
       <Text bold>{step === 'transport' ? '服务器如何运行？' : '服务器应在哪些范围可用？'}</Text>
       <Box marginTop={1}>
-        <McpSelect options={addOptions(step, draft)} selectedId={selectedId} />
+        <McpSelect options={addOptions(step, draft, sourcePaths)} selectedId={selectedId} />
       </Box>
     </Box>
   );
@@ -336,9 +344,9 @@ export function ProjectApprovalView({
   server: Readonly<McpServerControlState>;
   selectedId?: string;
 }) {
-  const command = server.configuration.command ?? server.approval?.review.command;
+  const command = server.configuration.command ?? server.approval?.review?.command;
   const endpoint = displayEndpoint(
-    server.configuration.endpoint ?? server.approval?.review.endpoint,
+    server.configuration.endpoint ?? server.approval?.review?.endpoint,
   );
   return (
     <Box flexDirection="column">
@@ -386,7 +394,7 @@ export function ConfirmView({
       <Box paddingX={1}>
         <OverlayMessage tone={remove ? 'warning' : 'info'} callout>
           {remove
-            ? `将从${sourceDescription(server.source)}中移除“${server.key.name}”。此操作不会删除远程数据。`
+            ? `将从${sourceDescription(server.key.source)}中移除“${server.key.name}”。此操作不会删除远程数据。`
             : `将禁用“${server.key.name}”。配置和凭据会保留，但工具将不再可用。`}
         </OverlayMessage>
       </Box>
@@ -408,7 +416,11 @@ export function ConfirmView({
   );
 }
 
-export function addOptions(step: AddStep, draft: AddDraft): McpSelectOption[] {
+export function addOptions(
+  step: AddStep,
+  draft: AddDraft,
+  sourcePaths?: McpSourcePaths,
+): McpSelectOption[] {
   if (step === 'transport')
     return [
       { id: 'http', label: 'HTTP' },
@@ -416,8 +428,12 @@ export function addOptions(step: AddStep, draft: AddDraft): McpSelectOption[] {
     ];
   if (step === 'scope')
     return [
-      { id: 'project', label: '当前项目', description: projectMcpConfigPath() },
-      { id: 'user', label: '所有项目', description: userMcpConfigPath() },
+      {
+        id: 'project',
+        label: '当前项目',
+        description: sourcePaths?.project ?? '当前项目配置',
+      },
+      { id: 'user', label: '所有项目', description: sourcePaths?.user ?? '用户配置' },
     ];
   if (step === 'review') return [{ id: 'add', label: '添加并连接' }];
   return [{ id: draft.transport, label: draft.transport.toUpperCase() }];
@@ -535,6 +551,10 @@ function sourceDescription(source: string): string {
   return '配置';
 }
 
+function sourcePathForScope(scope: AddDraft['scope'], sourcePaths?: McpSourcePaths): string {
+  return sourcePaths?.[scope] ?? (scope === 'project' ? '当前项目配置' : '用户配置');
+}
+
 function actionImpact(
   server: Readonly<McpServerControlState>,
   action: McpServerAction,
@@ -552,7 +572,7 @@ function actionImpact(
     case 'disable':
       return `将禁用“${server.key.name}”。配置和凭据会保留，可随时重新启用。`;
     case 'remove':
-      return `将从${sourceDescription(server.source)}中移除“${server.key.name}”。此操作不会删除远程数据。`;
+      return `将从${sourceDescription(server.key.source)}中移除“${server.key.name}”。此操作不会删除远程数据。`;
     case 'review_project_server':
     case 'review_decision':
       return '将打开服务器审核信息。确认前不会连接或修改配置。';

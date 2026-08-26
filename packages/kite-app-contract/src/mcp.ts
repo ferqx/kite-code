@@ -67,11 +67,39 @@ export interface AppMcpTool {
   readonly name: string;
   readonly description?: string;
   readonly parameters: readonly AppMcpToolParameter[];
+  /** Whether this tool was discovered by the current MCP connection. */
+  readonly discovered: boolean;
+}
+
+export interface AppMcpPromptArgument {
+  readonly name: string;
+  readonly description?: string;
+  readonly required?: boolean;
+}
+
+/** Prompt metadata needed to build the TUI's slash-command registry. */
+export interface AppMcpPrompt {
+  readonly name: string;
+  readonly description?: string;
+  readonly arguments?: readonly AppMcpPromptArgument[];
+}
+
+export interface AppMcpServerConfiguration {
+  readonly command?: string;
+  readonly argumentCount?: number;
+  /** Redacted HTTP(S) origin; query, fragment, credentials and path are excluded. */
+  readonly endpoint?: string;
 }
 
 export interface AppMcpApproval {
   readonly status: 'pending' | 'approved' | 'rejected';
   readonly configDigest?: `sha256:${string}`;
+  readonly review?: Readonly<{
+    readonly command?: string;
+    readonly argumentCount?: number;
+    /** Redacted HTTP(S) origin; query, fragment, credentials and path are excluded. */
+    readonly endpoint?: string;
+  }>;
 }
 
 export interface AppMcpDiagnostic {
@@ -84,15 +112,25 @@ export interface AppMcpServer {
   readonly key: AppMcpServerKey;
   readonly effective: boolean;
   readonly fallbackSource?: AppMcpSource;
+  /** Source file identity is safe display metadata, never configuration content. */
+  readonly sourcePath: string;
   readonly transport: AppMcpTransport;
   readonly enabled: boolean;
+  readonly required: boolean;
   readonly configStatus: AppMcpConfigStatus;
   readonly health: AppMcpHealth;
   readonly authStatus: AppMcpAuthStatus;
+  readonly authFlowId?: string;
+  readonly authErrorCode?: string;
+  /** Redacted connection metadata; secrets and arbitrary config keys are excluded. */
+  readonly configuration: AppMcpServerConfiguration;
+  /** Per-server CAS revision for App Control mutations. */
+  readonly revision: string;
   readonly toolCount: number;
   readonly resourceCount: number;
   readonly promptCount: number;
   readonly tools: readonly AppMcpTool[];
+  readonly prompts: readonly AppMcpPrompt[];
   readonly approval?: AppMcpApproval;
   readonly diagnostic?: AppMcpDiagnostic;
 }
@@ -102,6 +140,11 @@ export interface AppMcpSnapshot {
   readonly workspace: KiteWorkspaceIdentity;
   readonly revision: string;
   readonly sourceRevisions: Readonly<{
+    readonly project: string;
+    readonly user: string;
+  }>;
+  /** Safe source-file labels used by the terminal add/review presentation. */
+  readonly sourcePaths?: Readonly<{
     readonly project: string;
     readonly user: string;
   }>;
@@ -199,10 +242,11 @@ function encodeMcpSnapshotRequest(value: AppMcpSnapshotRequest): JsonObject {
 function decodeMcpSnapshot(input: unknown): AppMcpSnapshot {
   const value = exactObject(
     input,
-    ['revision', 'schema', 'servers', 'sourceRevisions', 'workspace'],
+    ['revision', 'schema', 'servers', 'sourcePaths', 'sourceRevisions', 'workspace'],
     'AppMcpSnapshot',
   );
   assertSchema(value, MCP_SNAPSHOT_RESPONSE_SCHEMA_, 'AppMcpSnapshot');
+  const sourcePaths = optional(value, 'sourcePaths');
   return {
     schema: MCP_SNAPSHOT_RESPONSE_SCHEMA_,
     workspace: decodeWorkspaceIdentity(required(value, 'workspace', 'AppMcpSnapshot')),
@@ -212,6 +256,7 @@ function decodeMcpSnapshot(input: unknown): AppMcpSnapshot {
       256,
     ),
     sourceRevisions: decodeSourceRevisions(required(value, 'sourceRevisions', 'AppMcpSnapshot')),
+    ...(sourcePaths === undefined ? {} : { sourcePaths: decodeSourcePaths(sourcePaths) }),
     servers: arrayValue(
       required(value, 'servers', 'AppMcpSnapshot'),
       'AppMcpSnapshot.servers',
@@ -227,6 +272,7 @@ function encodeMcpSnapshot(value: AppMcpSnapshot): JsonObject {
     workspace: encodeWorkspace(value.workspace),
     revision: value.revision,
     sourceRevisions: { ...value.sourceRevisions },
+    ...(value.sourcePaths === undefined ? {} : { sourcePaths: { ...value.sourcePaths } }),
     servers: value.servers.map(encodeMcpServer),
   };
 }
@@ -397,22 +443,32 @@ function decodeMcpServer(input: unknown, label: string): AppMcpServer {
     [
       'approval',
       'authStatus',
+      'authErrorCode',
+      'authFlowId',
       'configStatus',
+      'configuration',
       'diagnostic',
       'effective',
       'fallbackSource',
       'health',
       'key',
       'enabled',
+      'required',
+      'revision',
+      'sourcePath',
       'promptCount',
       'resourceCount',
       'toolCount',
       'tools',
+      'prompts',
       'transport',
     ],
     label,
   );
   const approval = optional(value, 'approval');
+  const authErrorCode = optional(value, 'authErrorCode');
+  const authFlowId = optional(value, 'authFlowId');
+  const configuration = required(value, 'configuration', label);
   const diagnostic = optional(value, 'diagnostic');
   const fallbackSource = optional(value, 'fallbackSource');
   return {
@@ -432,6 +488,7 @@ function decodeMcpServer(input: unknown, label: string): AppMcpServer {
       'stdio',
     ] as const),
     enabled: booleanValue(required(value, 'enabled', label), `${label}.enabled`),
+    required: booleanValue(required(value, 'required', label), `${label}.required`),
     configStatus: enumValue(required(value, 'configStatus', label), `${label}.configStatus`, [
       'ready',
       'pending_approval',
@@ -461,6 +518,15 @@ function decodeMcpServer(input: unknown, label: string): AppMcpServer {
       'reauth_required',
       'error',
     ] as const),
+    ...(authFlowId === undefined
+      ? {}
+      : { authFlowId: safeIdentifier(authFlowId, `${label}.authFlowId`, 256) }),
+    ...(authErrorCode === undefined
+      ? {}
+      : { authErrorCode: safeIdentifier(authErrorCode, `${label}.authErrorCode`, 256) }),
+    sourcePath: displayString(required(value, 'sourcePath', label), `${label}.sourcePath`, 4_096),
+    configuration: decodeMcpServerConfiguration(configuration, `${label}.configuration`),
+    revision: decodeRevision(required(value, 'revision', label), `${label}.revision`),
     toolCount: integerValue(required(value, 'toolCount', label), `${label}.toolCount`, {
       min: 0,
     }),
@@ -474,6 +540,12 @@ function decodeMcpServer(input: unknown, label: string): AppMcpServer {
       required(value, 'tools', label),
       `${label}.tools`,
       (entry, index) => decodeMcpTool(entry, `${label}.tools[${index}]`),
+      256,
+    ),
+    prompts: arrayValue(
+      required(value, 'prompts', label),
+      `${label}.prompts`,
+      (entry, index) => decodeMcpPrompt(entry, `${label}.prompts[${index}]`),
       256,
     ),
     ...(approval === undefined
@@ -490,19 +562,55 @@ function encodeMcpServer(value: AppMcpServer): JsonObject {
     key: encodeMcpServerKey(value.key),
     effective: value.effective,
     ...(value.fallbackSource === undefined ? {} : { fallbackSource: value.fallbackSource }),
+    sourcePath: value.sourcePath,
     transport: value.transport,
     enabled: value.enabled,
+    required: value.required,
     configStatus: value.configStatus,
     health: value.health,
     authStatus: value.authStatus,
+    ...(value.authFlowId === undefined ? {} : { authFlowId: value.authFlowId }),
+    ...(value.authErrorCode === undefined ? {} : { authErrorCode: value.authErrorCode }),
+    configuration: encodeMcpServerConfiguration(value.configuration),
+    revision: value.revision,
     toolCount: value.toolCount,
     resourceCount: value.resourceCount,
     promptCount: value.promptCount,
     tools: value.tools.map(encodeMcpTool),
+    prompts: value.prompts.map(encodeMcpPrompt),
     ...(value.approval === undefined ? {} : { approval: encodeMcpApproval(value.approval) }),
     ...(value.diagnostic === undefined
       ? {}
       : { diagnostic: encodeMcpDiagnostic(value.diagnostic) }),
+  };
+}
+
+function decodeMcpServerConfiguration(input: unknown, label: string): AppMcpServerConfiguration {
+  const value = exactObject(input, ['argumentCount', 'command', 'endpoint'], label);
+  const command = optional(value, 'command');
+  const argumentCount = optional(value, 'argumentCount');
+  const endpoint = optional(value, 'endpoint');
+  return {
+    ...(command === undefined
+      ? {}
+      : { command: displayString(command, `${label}.command`, 4_096) }),
+    ...(argumentCount === undefined
+      ? {}
+      : {
+          argumentCount: integerValue(argumentCount, `${label}.argumentCount`, {
+            min: 0,
+            max: 4_096,
+          }),
+        }),
+    ...(endpoint === undefined ? {} : { endpoint: endpointOrigin(endpoint, `${label}.endpoint`) }),
+  };
+}
+
+function encodeMcpServerConfiguration(value: AppMcpServerConfiguration): JsonObject {
+  return {
+    ...(value.command === undefined ? {} : { command: value.command }),
+    ...(value.argumentCount === undefined ? {} : { argumentCount: value.argumentCount }),
+    ...(value.endpoint === undefined ? {} : { endpoint: value.endpoint }),
   };
 }
 
@@ -523,7 +631,7 @@ function encodeMcpServerKey(value: AppMcpServerKey): JsonObject {
 }
 
 function decodeMcpTool(input: unknown, label: string): AppMcpTool {
-  const value = exactObject(input, ['description', 'name', 'parameters'], label);
+  const value = exactObject(input, ['description', 'discovered', 'name', 'parameters'], label);
   const description = optional(value, 'description');
   return {
     name: safeIdentifier(required(value, 'name', label), `${label}.name`, 256),
@@ -536,6 +644,7 @@ function decodeMcpTool(input: unknown, label: string): AppMcpTool {
       (entry, index) => decodeMcpToolParameter(entry, `${label}.parameters[${index}]`),
       128,
     ),
+    discovered: booleanValue(required(value, 'discovered', label), `${label}.discovered`),
   };
 }
 
@@ -544,6 +653,62 @@ function encodeMcpTool(value: AppMcpTool): JsonObject {
     name: value.name,
     ...(value.description === undefined ? {} : { description: value.description }),
     parameters: value.parameters.map(encodeMcpToolParameter),
+    discovered: value.discovered,
+  };
+}
+
+function decodeMcpPrompt(input: unknown, label: string): AppMcpPrompt {
+  const value = exactObject(input, ['arguments', 'description', 'name'], label);
+  const description = optional(value, 'description');
+  const args = optional(value, 'arguments');
+  return {
+    name: safeIdentifier(required(value, 'name', label), `${label}.name`, 256),
+    ...(description === undefined
+      ? {}
+      : { description: displayString(description, `${label}.description`, 8_192) }),
+    ...(args === undefined
+      ? {}
+      : {
+          arguments: arrayValue(
+            args,
+            `${label}.arguments`,
+            (entry, index) => decodeMcpPromptArgument(entry, `${label}.arguments[${index}]`),
+            128,
+          ),
+        }),
+  };
+}
+
+function encodeMcpPrompt(value: AppMcpPrompt): JsonObject {
+  return {
+    name: value.name,
+    ...(value.description === undefined ? {} : { description: value.description }),
+    ...(value.arguments === undefined
+      ? {}
+      : { arguments: value.arguments.map(encodeMcpPromptArgument) }),
+  };
+}
+
+function decodeMcpPromptArgument(input: unknown, label: string): AppMcpPromptArgument {
+  const value = exactObject(input, ['description', 'name', 'required'], label);
+  const description = optional(value, 'description');
+  const requiredValue = optional(value, 'required');
+  return {
+    name: safeIdentifier(required(value, 'name', label), `${label}.name`, 256),
+    ...(description === undefined
+      ? {}
+      : { description: displayString(description, `${label}.description`, 2_048) }),
+    ...(requiredValue === undefined
+      ? {}
+      : { required: booleanValue(requiredValue, `${label}.required`) }),
+  };
+}
+
+function encodeMcpPromptArgument(value: AppMcpPromptArgument): JsonObject {
+  return {
+    name: value.name,
+    ...(value.description === undefined ? {} : { description: value.description }),
+    ...(value.required === undefined ? {} : { required: value.required }),
   };
 }
 
@@ -570,8 +735,9 @@ function encodeMcpToolParameter(value: AppMcpToolParameter): JsonObject {
 }
 
 function decodeMcpApproval(input: unknown, label: string): AppMcpApproval {
-  const value = exactObject(input, ['configDigest', 'status'], label);
+  const value = exactObject(input, ['configDigest', 'review', 'status'], label);
   const configDigest = optional(value, 'configDigest');
+  const review = optional(value, 'review');
   return {
     status: enumValue(required(value, 'status', label), `${label}.status`, [
       'pending',
@@ -581,6 +747,7 @@ function decodeMcpApproval(input: unknown, label: string): AppMcpApproval {
     ...(configDigest === undefined
       ? {}
       : { configDigest: requireDigest(configDigest, `${label}.configDigest`) }),
+    ...(review === undefined ? {} : { review: decodeMcpReview(review, `${label}.review`) }),
   };
 }
 
@@ -588,7 +755,16 @@ function encodeMcpApproval(value: AppMcpApproval): JsonObject {
   return {
     status: value.status,
     ...(value.configDigest === undefined ? {} : { configDigest: value.configDigest }),
+    ...(value.review === undefined ? {} : { review: encodeMcpReview(value.review) }),
   };
+}
+
+function decodeMcpReview(input: unknown, label: string): NonNullable<AppMcpApproval['review']> {
+  return decodeMcpServerConfiguration(input, label);
+}
+
+function encodeMcpReview(value: NonNullable<AppMcpApproval['review']>): JsonObject {
+  return encodeMcpServerConfiguration(value);
 }
 
 function decodeMcpDiagnostic(input: unknown, label: string): AppMcpDiagnostic {
@@ -617,6 +793,22 @@ function decodeSourceRevisions(input: unknown): Readonly<{ project: string; user
   });
 }
 
+function decodeSourcePaths(input: unknown): Readonly<{ project: string; user: string }> {
+  const value = exactObject(input, ['project', 'user'], 'AppMcpSnapshot.sourcePaths');
+  return Object.freeze({
+    project: displayString(
+      required(value, 'project', 'AppMcpSnapshot.sourcePaths'),
+      'AppMcpSnapshot.sourcePaths.project',
+      4_096,
+    ),
+    user: displayString(
+      required(value, 'user', 'AppMcpSnapshot.sourcePaths'),
+      'AppMcpSnapshot.sourcePaths.user',
+      4_096,
+    ),
+  });
+}
+
 function encodeWorkspace(value: KiteWorkspaceIdentity): JsonObject {
   return {
     canonicalPath: value.canonicalPath,
@@ -627,6 +819,40 @@ function encodeWorkspace(value: KiteWorkspaceIdentity): JsonObject {
 
 function decodeRevision(input: unknown, label: string): string {
   return nonEmptyString(input, label, 256);
+}
+
+function displayString(input: unknown, label: string, max: number): string {
+  const value = stringValue(input, label, { min: 1, max });
+  if (
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0) ?? 0;
+      return codePoint < 32 || codePoint === 127;
+    })
+  ) {
+    invalid(`${label} must not contain control characters.`);
+  }
+  return value;
+}
+
+function endpointOrigin(input: unknown, label: string): string {
+  const value = displayString(input, label, 2_048);
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    invalid(`${label} must be an HTTP(S) origin.`);
+  }
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.pathname !== '/' ||
+    parsed.search !== '' ||
+    parsed.hash !== ''
+  ) {
+    invalid(`${label} must contain only a redacted HTTP(S) origin.`);
+  }
+  return parsed.origin;
 }
 
 function requireDigest(input: unknown, label: string): `sha256:${string}` {

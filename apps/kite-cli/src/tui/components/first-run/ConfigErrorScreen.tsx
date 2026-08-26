@@ -1,4 +1,4 @@
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import React from 'react';
 import { useI18n } from '../../i18n';
 import { useTheme } from '../../theme';
@@ -8,21 +8,22 @@ interface ConfigErrorScreenProps {
   configPath: string;
   message: string;
   onRetry: () => void;
+  onExit?: () => void;
 }
 
 export default function ConfigErrorScreen({
   configPath,
   message,
   onRetry,
+  onExit = () => undefined,
 }: ConfigErrorScreenProps) {
   const t = useTheme();
   const { t: translate } = useI18n();
-  const { exit } = useApp();
   const [choice, setChoice] = React.useState<'retry' | 'exit'>('retry');
 
   useInput((_input, key) => {
     if (key.escape || (key.ctrl && _input === 'c')) {
-      exit();
+      onExit();
       return;
     }
     if ((key.upArrow || key.downArrow) && !key.return) {
@@ -31,7 +32,7 @@ export default function ConfigErrorScreen({
     }
     if (key.return) {
       if (choice === 'exit') {
-        exit();
+        onExit();
       } else {
         onRetry();
       }

@@ -6,7 +6,12 @@
 
 ## 概述
 
-TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 VS Code 打开新项目时的 "Do you trust the authors of the files in this folder?"。门禁在 `TuiBootstrap` 中同步求值，并先于 FirstRunFlow 与 `TuiApp` 挂载：未通过门禁时不会创建会话、连接 MCP、扫描 skill 或发起模型调用。CLI `run` 与 parent-owned `server --stdio` 在加载项目配置或创建 Runtime 前执行同一门禁，共享同一用户级信任存储。
+TUI首次打开未信任目录时显示workspace授权确认。`TuiBootstrap`先通过App Control discovery client查询
+safe trust snapshot，再挂载FirstRunFlow或`TuiApp`：未通过门禁时不会创建会话、连接MCP、扫描skill或发起模型
+调用。TUI只负责prompt/Exit UX，不直接读取或写入trust store；App Control owner重新canonicalize路径、校验完整
+Workspace identity并执行revision CAS。conflict或lost response后只query一次，不自动重放decision。当前owner仍是
+`apps/kite-cli`内的app-local InProcess transition；独立Service尚未运行。CLI `run`与parent-owned`server --stdio`
+仍在加载项目配置或创建Runtime前执行同一底层门禁，共享同一用户级信任存储。
 
 `apps/kite-cli/src/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
 全部位于 `TuiApp` 内，只能在 `TuiBootstrap` 已通过 workspace 信任检查后挂载。
@@ -24,7 +29,8 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - 展示目录绝对路径与信任后果说明（加载项目配置/skills/MCP、agent 可执行 shell 与修改文件）。
 - 选项为“信任此工作区并继续”与“退出 Kite Code”（实际文字随当前 TUI locale 本地化）；↑↓ 选择，Enter 确认，Esc 与 Ctrl+C 退出。
 - **默认焦点在 "Exit Kite Code"**，防止用户习惯性按 Enter 直接授权。
-- 选择信任 → 显示当前 locale 的保存提示后调用 `trustWorkspace()` 写入记录并挂载主界面；写入失败时在界面内显示错误（`store_corrupt` / `store_unavailable`），用户可重试或退出。
+- 选择信任 → 通过App Control decision codec提交observed status与expected revision；actual owner调用trust store写入并
+  返回canonical snapshot。写入失败时在界面内显示错误（`store_corrupt` / `store_unavailable`），用户可显式重试或退出。
 - 选择拒绝或按 Esc → 进程退出，不写入任何状态。
 
 ## CLI 入口（`apps/kite-cli/src/cli/index.ts`）
@@ -35,9 +41,10 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - `--trust-workspace` → 调用方显式背书，写入 `source: 'config'` 的信任记录后继续；该记录只表示 Workspace trust，
   不授予 Full 或任何 approval grant。历史 `--full-access` flag 仅保留为 ignored/negative compatibility input，
   不再是当前 CLI authority（见 `docs/active/authorization.md`）。记录写入失败时同样报错退出。CI/自动化应使用该旗标或预写信任存储。
-- `server --stdio` 也必须在启动 App 唯一 Host/Server composition 前通过门禁；一个 Runtime Server instance
-  固定只服务一个已经信任的 canonical Workspace。父进程、RPC params、session display name 或任意绝对路径都不能
-  重新选择 Workspace，也不会把 workspace trust 提升为 Full 或 approval grant。
+- `server --stdio`也必须在启动App唯一Host/Server composition前通过门禁。Runtime Server core允许App为每个logical
+  connection绑定独立已信任canonical Workspace；create只使用该binding，resume/query/fork使用persisted Session
+  identity并fail closed校验。父进程、RPC params、session display name或任意绝对路径都不能提升Workspace authority，
+  trust也不会提升为Full或approval grant。
 - `trace`、`help` 命令不执行项目代码，不做门禁。
 
 CLI 组合根产生的 sandbox 诊断也只能写入 stderr；不得混入 stdout 的 JSONL Runtime 事件流，更不得由

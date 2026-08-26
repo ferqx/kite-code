@@ -957,16 +957,20 @@ export interface AvailableModel {
   maxOutputTokens?: number;
 }
 
-let _cachedModels: AvailableModel[] | null = null;
+let _cachedModels: { readonly key: string; readonly models: AvailableModel[] } | null = null;
 
-export function listAvailableModels(configPath?: string): AvailableModel[] {
+export function listAvailableModels(
+  configPath?: string,
+  workspace = process.cwd(),
+): AvailableModel[] {
   // Cache: config rarely changes at runtime; avoid re-reading file on every render
-  if (!configPath && _cachedModels) return _cachedModels;
+  const cacheKey = configPath ?? `workspace:${resolve(workspace)}`;
+  if (_cachedModels?.key === cacheKey) return _cachedModels.models;
 
-  const cfg = configPath ? readConfigFile(configPath) : loadConfig();
+  const cfg = configPath ? readConfigFile(configPath) : loadConfig(workspace);
   if (!cfg) {
     const fallback = DEFAULT_DEEPSEEK_MODELS;
-    if (!configPath) _cachedModels = fallback;
+    _cachedModels = { key: cacheKey, models: fallback };
     return fallback;
   }
 
@@ -987,11 +991,11 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
     }
   }
   if (models.length > 0) {
-    if (!configPath) _cachedModels = models;
+    _cachedModels = { key: cacheKey, models };
     return models;
   }
 
-  if (!configPath) _cachedModels = DEFAULT_DEEPSEEK_MODELS;
+  _cachedModels = { key: cacheKey, models: DEFAULT_DEEPSEEK_MODELS };
   return DEFAULT_DEEPSEEK_MODELS;
 }
 
@@ -1014,6 +1018,13 @@ export function loadColorPreset(workspace?: string): string {
 /** Read the personal language setting without loading project configuration. */
 export function loadUserLanguage(configPath = defaultConfigPath()): LanguagePreference {
   return readConfigFile(configPath)?.language ?? 'system';
+}
+
+/** Read the terminal interaction preference without loading project/provider configuration. */
+export function loadUserInteractionMode(
+  configPath = defaultConfigPath(),
+): InteractionModePreference {
+  return readConfigFile(configPath)?.interactionMode ?? 'auto';
 }
 
 /** Persist the personal terminal language setting to the user config. */

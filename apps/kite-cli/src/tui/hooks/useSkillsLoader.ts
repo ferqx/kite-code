@@ -1,31 +1,40 @@
-// ── Skills 扫描 ──
-
-import { scanCompiledSkillManifests } from '@kite-ai/builtin-runtime/skills';
-import type { SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
+import type { KiteAppControlClient, KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
+import type { SkillManifest } from '@kite-ai/runtime-contract';
 import type { Dispatch } from 'react';
 import React from 'react';
-import { skillDirs } from '#kite-cli/config/paths';
 import type { Action } from '../reducers/actions';
 
+/** TUI-safe Skill projection; scanning and compiled manifests remain in the Workspace owner. */
 export function useSkillsLoader(
-  workspace: string,
+  appControl: KiteAppControlClient,
+  workspace: KiteWorkspaceIdentity,
   dispatch: Dispatch<Action>,
   skillManifestsRef: React.MutableRefObject<SkillManifest[]>,
-  skillOptionsRef: React.MutableRefObject<SkillScanOptions | null>,
-  sessionManager: { updateSkillManifests(m: SkillManifest[]): void },
 ) {
   React.useEffect(() => {
-    const opts = skillDirs(workspace);
-    skillOptionsRef.current = opts;
-    const manifests = scanCompiledSkillManifests(opts);
-    skillManifestsRef.current = manifests;
-    dispatch({ type: 'SET_SKILL_MANIFESTS', manifests });
-    sessionManager.updateSkillManifests(manifests);
-  }, [
-    workspace,
-    dispatch,
-    skillOptionsRef,
-    skillManifestsRef,
-    sessionManager.updateSkillManifests,
-  ]);
+    let cancelled = false;
+    void appControl
+      .getSkillCatalog({ schema: 'kite.app.skill-catalog.request.v1', workspace })
+      .then((snapshot) => {
+        if (cancelled) return;
+        const manifests = snapshot.skills
+          .filter((skill) => skill.status === 'available')
+          .map((skill) => ({
+            name: skill.name,
+            description: skill.description,
+            source: skill.source,
+            origin: skill.origin,
+          }));
+        skillManifestsRef.current = manifests;
+        dispatch({ type: 'SET_SKILL_MANIFESTS', manifests });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        skillManifestsRef.current = [];
+        dispatch({ type: 'SET_SKILL_MANIFESTS', manifests: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appControl, dispatch, skillManifestsRef, workspace]);
 }

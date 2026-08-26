@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { sep } from 'node:path';
-import type {
-  McpAuthResult,
-  McpServerControlState,
-  McpServerKey,
-} from '@kite-ai/builtin-runtime/mcp';
+import type { AppMcpServer, AppMcpServerKey } from '@kite-ai/kite-app-contract';
 import { render } from 'ink-testing-library';
 import McpOverlay from '#kite-cli/tui/mcp/McpOverlay';
 import { buildServerActions, derivePrimaryStatus, moveSelection } from '#kite-cli/tui/mcp/model';
@@ -25,7 +21,7 @@ async function waitForFrame(
   throw new Error('waitForFrame: timed out waiting for expected frame content');
 }
 
-function server(overrides: Partial<McpServerControlState> = {}): Readonly<McpServerControlState> {
+function server(overrides: Partial<AppMcpServer> = {}): Readonly<AppMcpServer> {
   const tools = ['click', 'close_page', 'drag', 'emulate', 'evaluate_script'].map(
     (name) =>
       ({
@@ -52,37 +48,38 @@ function server(overrides: Partial<McpServerControlState> = {}): Readonly<McpSer
                 }),
               ])
             : Object.freeze([]),
-      }) as McpServerControlState['tools'][number],
+      }) as AppMcpServer['tools'][number],
   );
   return Object.freeze({
     key: Object.freeze({ name: 'github', source: 'project' }),
     effective: true,
-    configStatus: 'configured',
-    authStatus: 'not_required',
-    credentialPresent: false,
-    health: 'ready',
-    transport: 'http',
-    contentEgress: Object.freeze({
-      remote: true,
-      nonEmptyArgumentsClassification: 'confidential',
-      independentPermitRequired: true,
-    }),
-    source: 'project',
     sourcePath: '/workspace/.kite-code/mcp.json',
-    configuration: Object.freeze({ endpoint: 'https://example.com/mcp' }),
-    revision: 'revision-1',
+    transport: 'http',
     enabled: true,
+    configStatus: 'ready',
+    authStatus: 'not_required',
+    health: 'ready',
     required: false,
+    configuration: Object.freeze({ endpoint: 'https://example.com' }),
+    revision: 'revision-1',
     toolCount: tools.length,
-    availableToolCount: tools.length,
     resourceCount: 0,
     promptCount: 0,
     tools: Object.freeze(tools),
-    resources: Object.freeze([]),
     prompts: Object.freeze([]),
     ...overrides,
   });
 }
+
+const workspace = Object.freeze({
+  canonicalPath: '/workspace',
+  projectId: 'project_test',
+  workspaceDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+});
+const sourcePaths = Object.freeze({
+  project: '/workspace/.kite-code/mcp.json',
+  user: '/home/user/.kite-code/mcp.json',
+});
 
 class FakeController implements McpController {
   readonly decisions: string[] = [];
@@ -96,17 +93,19 @@ class FakeController implements McpController {
   private readonly addDelayMs: number;
 
   constructor(
-    servers: readonly Readonly<McpServerControlState>[] = [server()],
+    servers: readonly Readonly<AppMcpServer>[] = [server()],
     message?: string,
     addDelayMs = 0,
   ) {
     this.addDelayMs = addDelayMs;
     this.snapshot = Object.freeze({
       control: Object.freeze({
+        schema: 'kite.app.mcp.snapshot-response.v1',
+        workspace,
         revision: 'snapshot-1',
-        generation: 1,
         servers: Object.freeze([...servers]),
         sourceRevisions: Object.freeze({ project: 'project-1', user: 'user-1' }),
+        sourcePaths,
       }),
       ...(message ? { message } : {}),
     });
@@ -114,22 +113,21 @@ class FakeController implements McpController {
 
   getSnapshot = () => this.snapshot;
   subscribe = () => () => {};
-  decide = async (key: McpServerKey, decision: 'approved' | 'rejected') => {
+  decide = async (key: AppMcpServerKey, decision: 'approved' | 'rejected') => {
     this.decisions.push(`${key.name}:${decision}`);
     return true;
   };
-  login = async (key: McpServerKey): Promise<McpAuthResult> => {
+  login = async (key: AppMcpServerKey): Promise<void> => {
     this.logins.push(key.name);
-    return { status: 'authorization_required', flowId: 'flow-1', authorizationUrl: 'https://x' };
   };
   cancelAuth = async (flowId: string) => {
     this.cancelledFlows.push(flowId);
   };
-  retry = async (key: McpServerKey) => {
+  retry = async (key: AppMcpServerKey) => {
     this.retries.push(key.name);
     return true;
   };
-  setEnabled = async (key: McpServerKey, _revision: string, enabled: boolean) => {
+  setEnabled = async (key: AppMcpServerKey, _revision: string, enabled: boolean) => {
     this.enabled.push(`${key.name}:${enabled}`);
     return true;
   };
@@ -142,7 +140,7 @@ class FakeController implements McpController {
     if (this.addDelayMs > 0) await Bun.sleep(this.addDelayMs);
     return { name: input.name, source: input.scope };
   };
-  remove = async (key: McpServerKey) => {
+  remove = async (key: AppMcpServerKey, _revision: string) => {
     this.removed.push(key.name);
     return true;
   };
@@ -159,13 +157,15 @@ class AutoReturnAuthController implements McpController {
   private readonly listeners = new Set<() => void>();
   private snapshot: McpControllerSnapshot;
 
-  constructor(servers: readonly Readonly<McpServerControlState>[] = [server()], message?: string) {
+  constructor(servers: readonly Readonly<AppMcpServer>[] = [server()], message?: string) {
     this.snapshot = Object.freeze({
       control: Object.freeze({
+        schema: 'kite.app.mcp.snapshot-response.v1',
+        workspace,
         revision: 'snapshot-1',
-        generation: 1,
         servers: Object.freeze([...servers]),
         sourceRevisions: Object.freeze({ project: 'project-1', user: 'user-1' }),
+        sourcePaths,
       }),
       ...(message ? { message } : {}),
     });
@@ -182,7 +182,7 @@ class AutoReturnAuthController implements McpController {
     for (const listener of this.listeners) listener();
   }
 
-  private updateServer = (key: McpServerKey, update: Partial<McpServerControlState>) => {
+  private updateServer = (key: AppMcpServerKey, update: Partial<AppMcpServer>) => {
     const servers = this.snapshot.control.servers.map((current) => {
       if (current.key.name === key.name && current.key.source === key.source) {
         return Object.freeze({ ...current, ...update });
@@ -199,12 +199,12 @@ class AutoReturnAuthController implements McpController {
     this.emit();
   };
 
-  decide = async (key: McpServerKey, decision: 'approved' | 'rejected') => {
+  decide = async (key: AppMcpServerKey, decision: 'approved' | 'rejected') => {
     this.decisions.push(`${key.name}:${decision}`);
     return true;
   };
 
-  login = async (key: McpServerKey): Promise<McpAuthResult> => {
+  login = async (key: AppMcpServerKey): Promise<void> => {
     this.logins.push(key.name);
     this.updateServer(key, {
       authStatus: 'authorizing',
@@ -219,7 +219,6 @@ class AutoReturnAuthController implements McpController {
         health: 'ready',
       });
     })();
-    return { status: 'authorization_required', flowId: 'flow-1', authorizationUrl: 'https://x' };
   };
 
   cancelAuth = async (flowId: string) => {
@@ -231,12 +230,12 @@ class AutoReturnAuthController implements McpController {
     }
   };
 
-  retry = async (key: McpServerKey) => {
+  retry = async (key: AppMcpServerKey) => {
     this.retries.push(key.name);
     return true;
   };
 
-  setEnabled = async (key: McpServerKey, expectedRevision: string, enabled: boolean) => {
+  setEnabled = async (key: AppMcpServerKey, expectedRevision: string, enabled: boolean) => {
     this.enabled.push(`${key.name}:${expectedRevision}:${enabled}`);
     return true;
   };
@@ -246,7 +245,7 @@ class AutoReturnAuthController implements McpController {
     return null;
   };
 
-  remove = async (key: McpServerKey) => {
+  remove = async (key: AppMcpServerKey, _revision: string) => {
     this.removed.push(key.name);
     return true;
   };
@@ -258,7 +257,8 @@ describe('MCP Select model', () => {
       configStatus: 'rejected',
       health: 'disconnected',
       approval: Object.freeze({
-        configDigest: 'digest',
+        status: 'pending',
+        configDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
         review: Object.freeze({ command: 'bun' }),
       }),
     });
@@ -337,7 +337,6 @@ describe('MCP management overlay', () => {
   test('groups project and user servers under their configuration paths', async () => {
     const userServer = server({
       key: Object.freeze({ name: 'docs', source: 'user' }),
-      source: 'user',
       sourcePath: '/home/user/.kite-code/mcp.json',
     });
     const controller = new FakeController([server(), userServer]);
@@ -352,7 +351,7 @@ describe('MCP management overlay', () => {
   });
 
   test('uses the shared connecting animation copy during automatic connection', () => {
-    const connecting = server({ health: 'connecting', toolCount: 0, availableToolCount: 0 });
+    const connecting = server({ health: 'connecting', toolCount: 0 });
     const controller = new FakeController([connecting]);
     const { lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
@@ -365,7 +364,6 @@ describe('MCP management overlay', () => {
       configStatus: 'disabled',
       health: 'disconnected',
       toolCount: 0,
-      availableToolCount: 0,
     });
     const controller = new FakeController([disabled]);
     const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
@@ -381,12 +379,10 @@ describe('MCP management overlay', () => {
   test('groups current project and user sources', () => {
     const project = server({
       key: Object.freeze({ name: 'project-server', source: 'project' }),
-      source: 'project',
       sourcePath: '/workspace/.kite-code/mcp.json',
     });
     const user = server({
       key: Object.freeze({ name: 'user-server', source: 'user' }),
-      source: 'user',
       sourcePath: '/home/user/.kite-code/mcp.json',
     });
     const controller = new FakeController([project, user]);
@@ -500,7 +496,6 @@ describe('MCP management overlay', () => {
       diagnostic: Object.freeze({
         code: 'auth_required',
         retryable: false,
-        message: 'Login required.',
       }),
     });
     const controller = new FakeController([auth]);
@@ -524,7 +519,6 @@ describe('MCP management overlay', () => {
     const controller = new AutoReturnAuthController([
       server({
         key: Object.freeze({ name: 'example-server', source: 'project' }),
-        source: 'project',
         configuration: Object.freeze({
           endpoint: 'https://example-server.modelcontextprotocol.io/mcp',
         }),
@@ -533,7 +527,6 @@ describe('MCP management overlay', () => {
         diagnostic: Object.freeze({
           code: 'auth_required',
           retryable: false,
-          message: 'Login required.',
         }),
       }),
     ]);
@@ -564,7 +557,6 @@ describe('MCP management overlay', () => {
     const controller = new AutoReturnAuthController([
       server({
         key: Object.freeze({ name: 'sample', source: 'project' }),
-        source: 'project',
         configuration: Object.freeze({
           endpoint: 'https://example-server.modelcontextprotocol.io/mcp',
         }),
@@ -573,7 +565,6 @@ describe('MCP management overlay', () => {
         diagnostic: Object.freeze({
           code: 'auth_required',
           retryable: false,
-          message: 'Login required.',
         }),
       }),
     ]);
@@ -607,13 +598,13 @@ describe('MCP management overlay', () => {
   test('reviews project approval through a safe-default Select', async () => {
     const pending = server({
       key: Object.freeze({ name: 'project-tools', source: 'project' }),
-      source: 'project',
       sourcePath: '/workspace/.mcp.json',
       transport: 'stdio',
       configStatus: 'pending_approval',
       health: 'disconnected',
       approval: Object.freeze({
-        configDigest: 'digest',
+        status: 'pending',
+        configDigest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000',
         review: Object.freeze({ command: 'bun', argumentCount: 2 }),
       }),
     });
