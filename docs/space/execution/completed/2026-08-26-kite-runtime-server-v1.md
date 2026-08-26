@@ -1,6 +1,6 @@
 # Kite Runtime Server V1 完成记录
 
-状态：completed（KRSV1-00～KRSV1-10，含 06A/06B，本地全量与 implementation head `f3646fec` 的 PR checks 全部通过）
+状态：completed（KRSV1-00～KRSV1-10，含 06A/06B，本地全量与 implementation head `ba144ca0` 的 PR checks 全部通过）
 
 日期：2026-08-26
 
@@ -12,7 +12,7 @@ ADR：[`ADR-0142`](../../../adr/0142-kite-runtime-server-v1.md)、
 
 Pull Request：[#65](https://github.com/ferqx/kite-code/pull/65)
 
-Implementation head：`f3646fec1d99db053304dfc013806caf0e3d8272`
+Implementation head：`ba144ca0e9872c96f367c93a95fc38f52ed99191`
 
 ## 1. 最终架构结果
 
@@ -64,8 +64,18 @@ completed reasoning 即使晚于 durable final text，也回填紧邻的 explora
 移除 queue sequence/generation/interaction ID 文案，只保留人工/自动审批与必要动作。内部 exact identity 与 settlement
 校验未改变。
 
-Server/Client owner tests 为 34 pass / 0 fail / 430 assertions；TUI layout/reducer 为 293 pass / 0 fail，thought 与
-approval 定向 PTY 为 9/3 pass，全部 40 个隔离 PTY scenario files 通过。
+后续真实 DeepSeek 会话又暴露合法的 `reasoning prefix → visible content → reasoning suffix` 流序：旧 reducer
+把首段正文保留为 active Thought 的 caption，suffix completed 后便在回答下方重新显示原始 reasoning 与活动圆点。
+本地 Store 只读审计确认 durable `model.responded` 同时完整保留 final text 与 2370 字符 reasoningText；Server、Gateway
+与 history 数据没有缺失。`ba144ca0` 因此不在 transport 丢弃 reasoning，也不新增 privacy redaction：首个可见正文只把
+纯 reasoning summary 转为 `awaiting_terminal`，suffix 继续进入同 request 的隐藏 Thought metadata；terminal 若声明
+tool calls，同一 summary 会重新激活为工具旁白，既不泄漏/重复最终回答，也不破坏既有工具聚合。
+
+测试 harness 新增 exact frame sequence/delay，可逐帧发送 prefix → content → suffix → stop/[DONE]。临时移除新的
+pure-summary settlement guard 时，真实 PTY 稳定复现回答后 `● Thinking` 与 reasoning 原文；恢复后 live 和退出、重启、
+`/resume` 都只有一个 `Thinking Ns` 题头、一个回答与一行固定间距。Server/Client owner tests 仍为
+34 pass / 0 fail / 430 assertions；TUI layout/reducer 为 295 pass / 0 fail，TUI harness 为 121 pass / 0 fail，
+全部 40 个隔离 PTY scenario files 通过。临时 Store 审计副本已删除，原 Store 未修改。
 
 ## 4. 本地最终验证
 
@@ -82,17 +92,17 @@ approval 定向 PTY 为 9/3 pass，全部 40 个隔离 PTY scenario files 通过
 
 ## 5. GitHub Actions
 
-Implementation head `f3646fec` 的适用检查全部成功：
+Implementation head `ba144ca0` 的适用检查全部成功：
 
-- [Required run 32978173084](https://github.com/ferqx/kite-code/actions/runs/32978173084)：unit、quality、runtime-e2e、
+- [Required run 32982515513](https://github.com/ferqx/kite-code/actions/runs/32982515513)：unit、quality、runtime-e2e、
   runtime-fault-soak、compaction、TUI shard 0/1/2/3 与 aggregate；`protected-branch` 对 feature branch 按设计 skipped。
-- [Runtime stdio run 32978173098](https://github.com/ferqx/kite-code/actions/runs/32978173098) 与
-  [transport run 32978173105](https://github.com/ferqx/kite-code/actions/runs/32978173105)：macOS 15、Ubuntu 24.04、
+- [Runtime stdio run 32982515507](https://github.com/ferqx/kite-code/actions/runs/32982515507) 与
+  [transport run 32982515366](https://github.com/ferqx/kite-code/actions/runs/32982515366)：macOS 15、Ubuntu 24.04、
   Windows 2025 全部成功。
-- [Platform run 32978173074](https://github.com/ferqx/kite-code/actions/runs/32978173074)、
-  [OSS RC run 32978173210](https://github.com/ferqx/kite-code/actions/runs/32978173210)、
-  [Execution Boundary run 32978173229](https://github.com/ferqx/kite-code/actions/runs/32978173229) 与
-  [MCP keyring run 32978173094](https://github.com/ferqx/kite-code/actions/runs/32978173094) 全部成功。
+- [Platform run 32982515516](https://github.com/ferqx/kite-code/actions/runs/32982515516)、
+  [OSS RC run 32982515533](https://github.com/ferqx/kite-code/actions/runs/32982515533)、
+  [Execution Boundary run 32982515385](https://github.com/ferqx/kite-code/actions/runs/32982515385) 与
+  [MCP keyring run 32982515407](https://github.com/ferqx/kite-code/actions/runs/32982515407) 全部成功。
 
 ## 6. 明确保留的非目标
 
