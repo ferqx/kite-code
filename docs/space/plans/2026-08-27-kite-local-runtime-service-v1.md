@@ -1,6 +1,6 @@
 # Kite Local Runtime Service V1 实施方案
 
-状态：draft（KLSV1-00 的追加 ADR 接受后转为 `active`）
+状态：active（ADR-0144 已接受；KLSV1-00 baseline 已建立）
 
 日期：2026-08-27
 
@@ -8,7 +8,7 @@
 
 审查基线：`main@9d22b53dee77814e38e6a30d03ed4a1124f051a6`
 
-依赖：ADR-0053、ADR-0129、ADR-0139、ADR-0140、ADR-0141、ADR-0142、ADR-0143，已归档的
+依赖：ADR-0053、ADR-0129、ADR-0139、ADR-0140、ADR-0141、ADR-0142、ADR-0143、ADR-0144，已归档的
 [`Kite Runtime Server V1`](2026-08-26-kite-runtime-server-v1.md)，以及当前 Runtime Architecture、Runtime
 Authority、Runtime Resilience、Workspace Trust、SQLite Runtime Log Query、Execution Platform 和 Release
 Control authority。
@@ -899,7 +899,15 @@ transport。future `apps/kite-app` main 可以复用同一 client；future `apps
 
 ## 11. 分阶段实施
 
-### KLSV1-00：ADR、baseline 与文档 owner
+### KLSV1-00：ADR、baseline 与文档 owner（已完成）
+
+完成证据：ADR-0144 已接受，并且只局部取代 ADR-0053 的单 trusted Workspace cardinality 与 ADR-0142 的
+单 Workspace Server/App composition 结论；Web/hosted/multi-user No-Go、Protocol V1、State 27/Store 6、History
+query-only 与唯一 Runtime authority 均保留。[事实与依赖基线](../understanding/2026-08-27-kite-local-runtime-service-v1-baseline.md)、
+[261-file relocation manifest](../understanding/2026-08-27-kite-local-runtime-service-v1-relocation-manifest.md) 和
+[workspace/path Gate manifest](../understanding/2026-08-27-kite-local-runtime-service-v1-integration-manifest.md) 已冻结 owner、
+client use case、method map、environment、release runner 与 phased documentation-map convergence。该状态只关闭架构与
+实施清单 Gate，不表示 listener、Service process、connector、default Store cutover 或平台 qualification 已完成。
 
 交付：
 
@@ -915,13 +923,14 @@ transport。future `apps/kite-app` main 可以复用同一 client；future `apps
   docs map；
 - 冻结 trusted Kite home resolver、neutral cwd、client contract revision、installed/dev build ID、release internal runner
   迁移和现有 standalone keyring `unavailable` 限制；
-- 更新 `docs/documentation-map.json` 代表路径与 owner，防止 local service 源码落入无关通用规则；
+- 冻结 `docs/documentation-map.json` 的分阶段代表路径与 owner；validator 要求 source base/authority 已存在，因此
+  KLSV1-01/02/04 在各 workspace/README 实际建立时原子写入对应规则，不创建 fake empty workspace 或无效 future rule；
 - 不创建 listener、CLI command 或 production code。
 
 Gate：ADR accepted；每个现有 App 文件和 TUI direct dependency 有唯一 target owner；默认 Store alternate owner、
 History、App Control 与 Workspace admission 无未决 transport；文档检查通过。
 
-回滚：保持本计划 draft，零代码、零入口。
+回滚：撤回 ADR 接受和三份非权威 baseline 后保持 draft；零代码、零入口。
 
 ### KLSV1-01：机械重命名 `apps/kite` 为 `apps/kite-cli`
 

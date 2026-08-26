@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-27（登记 Kite Local Runtime Service V1 实施方案）
+最后更新：2026-08-27（Kite Local Runtime Service V1 已激活，KLSV1-00 baseline 完成）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 

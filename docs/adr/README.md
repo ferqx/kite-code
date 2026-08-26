@@ -54,7 +54,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0050](0050-client-specific-session-navigation.md)     | accepted   | TUI 切换会话映射为取消；支持后台运行的客户端切换视图时保留 Runtime 状态             |
 | [0051](0051-release-profile-monotonic-composition.md)  | accepted   | Release Profile 使用正交 maturity/rollout 与按字段单调组合                         |
 | [0052](0052-release-evidence-and-behavior-identity.md) | accepted   | Manifest、Evidence 与 Gate 绑定同一行为身份                                        |
-| [0053](0053-local-single-user-first-topology.md)       | accepted   | 首发仅支持本地单用户拓扑，hosted 形态独立准入                                      |
+| [0053](0053-local-single-user-first-topology.md)       | partially superseded by ADR-0144 | 保留单本地用户与 hosted/Web No-Go；单 trusted Workspace cardinality 由 Local Service 多 Workspace admission 取代 |
 | [0054](0054-production-execution-isolation.md)         | accepted   | 生产执行统一采用 sandbox、网络、受保护路径与 worktree 隔离                         |
 | [0055](0055-cumulative-runtime-resource-governance.md) | accepted   | 父子 Agent 使用累计预算、原子并发许可与统一终态                                    |
 | [0056](0056-metadata-first-data-boundaries.md)         | accepted   | 本地日志 metadata-first，telemetry 无正文，远程接收方独立治理                      |
@@ -143,5 +143,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0139](0139-session-admission-restart-reconciliation.md) | accepted | Session admission 先完成跨进程 cleanup/recovery，再重载事件尾并投影终态 |
 | [0140](0140-workspace-documentation-authority-v2.md) | accepted | Workspace README/本地文档拥有模块规则，active 只拥有跨包当前行为，影响门禁按真实 diff 检查 |
 | [0141](0141-test-ownership-and-layered-execution-v2.md) | accepted | 测试按 package、App、integration、qualification 与 isolated 归属，并采用分层并行执行 |
-| [0142](0142-runtime-server-client-protocol-boundary.md) | accepted | Runtime Host 保持唯一执行 owner；新增封闭 Protocol、transport-neutral Server/Client 与原子持久 receipt 边界 |
+| [0142](0142-runtime-server-client-protocol-boundary.md) | partially superseded by ADR-0144 | 保留 Protocol/Server/Client/receipt 边界；单 Workspace Server 与 App composition root 由 Local Service 决策取代 |
 | [0143](0143-local-runtime-presentation-fidelity.md) | accepted | 本地 Client DTO 保留 reasoning、工具参数与结果；完整历史与 live 使用同一 reducer |
+| [0144](0144-local-runtime-service-and-multi-workspace-admission.md) | accepted | 默认 Runtime Store 由本机 Service 单一拥有；App admission 让一个 Host 隔离多个 trusted Workspace |
