@@ -1,6 +1,6 @@
 # Kite Runtime Server V1 实施方案（审查修订版）
 
-状态：active
+状态：archived
 
 日期：2026-08-26
 
@@ -879,13 +879,14 @@ response 后相同 command retry
 
 回滚：按 ADR 的 Store profile 回滚；禁止用忽略 receipt table 或非原子兼容读降级。
 
-### KRSV1-07：stdio transport（实现完成；三平台 CI 待 PR）
+### KRSV1-07：stdio transport（已完成）
 
 完成证据：`kite server --stdio` 已从 App 唯一 Host/Server composition 启动；carrier 覆盖 fatal UTF-8
 JSONL、fragment/multiple/CRLF、parse recovery、raw byte limit、串行 stdout、stderr redaction、有界
 drain/flush、EOF connection-only 与 owner signal shutdown。真实 child 覆盖 Workspace 固定、stdout purity、
-EOF lease、进程重启与 Store receipt replay；本地 18 tests 通过，并已增加 macOS/Linux/Windows CI matrix。
-三平台结果在 PR checks 返回前仍作为最终 qualification 待办，不提前记录为已通过。
+EOF lease、进程重启与 Store receipt replay；本地 18 tests 通过。
+[PR #65 stdio run 32978173098](https://github.com/ferqx/kite-code/actions/runs/32978173098) 的
+macOS 15、Ubuntu 24.04 与 Windows 2025 matrix 在 implementation head `f3646fec` 全部通过。
 
 交付：`kite server --stdio`（最终命令由 ADR 固定）、JSONL decoder、stdout/stderr 分离、owner-only
 shutdown、EOF/signal lifecycle、child process conformance。
@@ -916,14 +917,16 @@ Session list 和订阅；慢 socket 只影响所属 connection；token/path/body
 
 回滚：移除显式 Web entrypoint/listener；InProcess/stdin Server 与 Runtime 不受影响。
 
-### KRSV1-09：Reference consumer 与跨 transport qualification（实现完成；三平台 CI 待 PR）
+### KRSV1-09：Reference consumer 与跨 transport qualification（已完成）
 
 完成证据：App-local Desktop stdio parent transport 与 headless browser reference 均复用 RuntimeClient，
 没有第二协议/reducer；reference bootstrap 只走 header/cookie，hostile text 只作为数据，完整历史缺少显式
 History Client 时 fail closed。相同 raw JSON-RPC 矩阵已在 InProcess、真实 stdio child、真实 development
 WebSocket 上覆盖 initialize/allowlist、Workspace admission、subscribe ack/reset/ready、unsubscribe、close/drain
-与 128-ping bounded mini-soak；本地分别 18、24、3 tests（transport matrix 852 assertions）通过。三平台
-qualification 由 PR workflow 返回后写入完成记录。
+与 128-ping bounded mini-soak；本地分别 18、24、3 tests（transport matrix 852 assertions）通过。
+[PR #65 transport run 32978173105](https://github.com/ferqx/kite-code/actions/runs/32978173105) 的
+macOS 15、Ubuntu 24.04 与 Windows 2025 matrix 在 implementation head `f3646fec` 全部通过；结果已写入
+[完成记录](../execution/completed/2026-08-26-kite-runtime-server-v1.md)。
 
 交付：最小 browser reference consumer/headless development smoke、Desktop child-lifecycle reference（不交付完整 UI）、
 跨 transport conformance/fault/soak、资源边界报告。
@@ -932,15 +935,19 @@ Gate：同一行为矩阵在 in-process、stdio、test WebSocket 上通过；TUI
 完整历史读取明确走 History Client/Log Query；没有 transport-specific command 语义分叉；结果不提升
 Web production support set。
 
-### KRSV1-10：文档与发布边界收敛（进行中）
+### KRSV1-10：文档与发布边界收敛（已完成）
 
 本地收敛证据（2026-08-26）：`check:docs-impact`（all scope，278 changed）、`check:docs`、format、
 typecheck/build、core/pre-release/package/test-ownership/compaction 静态 Gate 均通过；默认测试完成
 269 个 workspace files、94 个 integration/golden/release/harness files 与 46 个 isolated files；TUI system
 40 个隔离 PTY scenario files 全部通过。Runtime fault contract 为 35 pass / 1 platform-conditional skip，CI
 profile soak 为 7/7 cases；stdio、development WebSocket 与跨 transport conformance 分别为 18、24、3 tests；
-release tests 161 pass，当前平台 candidate build/verify/smoke 通过。PR 的 macOS/Linux/Windows stdio 与
-transport qualification 尚未返回，因此本 Task 仍保持进行中，尚不创建完成记录或归档本计划。
+release tests 161 pass，当前平台 candidate build/verify/smoke 通过。implementation head `f3646fec` 的
+[Required run 32978173084](https://github.com/ferqx/kite-code/actions/runs/32978173084)、三平台 stdio/transport、
+[Platform run 32978173074](https://github.com/ferqx/kite-code/actions/runs/32978173074) 与
+[OSS RC run 32978173210](https://github.com/ferqx/kite-code/actions/runs/32978173210) 全部适用 Gate 通过；三个
+review thread 已在修复提交后回复并关闭，用户实际 Store replay、工具聚合、间距与审批文案复测也已收敛。
+本计划已归档，验证汇总见[完成记录](../execution/completed/2026-08-26-kite-runtime-server-v1.md)。
 
 交付：五个 Runtime workspace README、App README/本地文档、相关 active 架构/authority/resilience/log server
 文档、documentation map、CLI/help、ADR 状态、完成记录和 plans index。

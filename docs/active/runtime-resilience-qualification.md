@@ -18,7 +18,15 @@ Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runt
 
 本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 ADR-0053。
 
-本 tranche 的三平台 PR CI evidence 仍为 **pending**。不得将其表述为 passed、release qualification、production transport support 或 Web 已获准入的 evidence。在被审查 PR/head 的 native CI artifact 完成前，本页只记录上述 local tests 与下方既有 qualification rules。
+本 tranche 的 implementation head `f3646fec1d99db053304dfc013806caf0e3d8272` 已形成三平台 PR CI evidence：
+[Required run 32978173084](https://github.com/ferqx/kite-code/actions/runs/32978173084) 的 unit、quality、
+runtime-e2e、runtime-fault-soak、compaction 与四个 TUI shard/aggregate 全部成功；非 protected branch 的
+`protected-branch` job 按设计 skipped；[stdio run 32978173098](https://github.com/ferqx/kite-code/actions/runs/32978173098)
+与 [transport run 32978173105](https://github.com/ferqx/kite-code/actions/runs/32978173105) 的 macOS、Linux、Windows
+matrix 全部成功；[Platform run 32978173074](https://github.com/ferqx/kite-code/actions/runs/32978173074) 与
+[OSS RC run 32978173210](https://github.com/ferqx/kite-code/actions/runs/32978173210) 也全部成功。该 evidence 绑定
+[PR #65](https://github.com/ferqx/kite-code/pull/65) 的被审查实现 head，只证明本 tranche 的 native
+implementation/carrier conformance；它不构成下文 formal release qualification、production Web support 或 Web 准入。
 
 `scripts/runtime/run-fault-soak.ts` 是固定 seed、固定 case manifest、单 case硬上限和 runner 级全局 deadline 受限的 runner。它只输出版本化 JSON 元数据，不把测试 stdout/stderr、prompt、工具 payload 或 workspace 绝对路径写入 evidence。失败诊断最多保留在当前进程 stderr 中；写入 `--output` 后必须显式收紧为 `0600`，包括覆盖已存在的宽权限文件。Required CI 运行 fault contract 与 CI profile；`.github/workflows/runtime-resilience-qualification.yml` 提供显式手动 qualification。正式 workflow 只允许 `seed=1729`、`iterations=8`，输入先进入环境变量并以引号传给 runner，禁止把 dispatch input 直接拼进 shell。qualification 的全局 deadline 固定为 `56 × 180000 ms = 168` 分钟；每个 child 的实际运行时间从剩余全局预算和单 case 上限中取更小值，并预留 30 秒做 SIGKILL、最多 5 秒二级 reap、最多 2 秒输出 drain 与单次最多 1 秒的有界 `ps`/Git inspection。全局预算不足时不再启动 child，而是为剩余 attempt 写入 typed failure。job 的 190 分钟上限在 runner deadline 之外保留 22 分钟 workflow 余量；验证和上传步骤使用 `always()`。checkout、Bun 安装或 GitHub 基础设施在 runner 启动前失败时不会伪造报告。
 

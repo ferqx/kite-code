@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-23（RAV1 production implementation、三平台 Platform/OSS 与正式 7×8 qualification/verifier 已闭合）
+最后更新：2026-08-26（Kite Runtime Server V1 完成并归档）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -105,6 +105,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-26-kite-runtime-server-v1.md` | completed | 记录 KRSV1-00～10、唯一 Runtime Host authority、Protocol/Server/Client、Store 6 原子 receipt、TUI/CLI 单路径、stdio/development WebSocket、展示保真与 PR #65 三平台 Gate。 |
 | `execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md` | completed | 记录 ADR-0127 简化切换、过度设计删除、State26/Store5、用户 model 修复保留、本地 Gate 与 final-SHA GitHub qualification。 |
 | `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | superseded | ADR-0127 已删除该记录中的推测性 key/authority inventory；仅保留历史。 |
 | `execution/completed/2026-08-22-rav1-01-project-layered-identity.md` | superseded | ProjectIdentityStore/ProjectHandle 已删除；当前只有 canonical Workspace identity。 |
