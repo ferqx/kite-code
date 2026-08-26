@@ -1,49 +1,50 @@
 import packageJson from '../../package.json' with { type: 'json' };
-import { createKiteInProcessAppControlComposition } from '../app-control';
-import { createKiteTuiSessionManager } from '../bootstrap';
-import { runKiteInternalMcpStdioChild } from '../bootstrap/mcp-stdio-composition';
-import { createRuntimeOperationGate } from '../runtime-application';
-import type { AppShellExecutor } from '../sandbox/composition';
+import type { KiteServiceModeConnector } from '../service-mode';
+import { createKiteServiceModeAdapter } from '../service-mode';
 import { runTui as runTuiClient, type TuiBootstrapProps } from './index';
 
 export type KiteTuiProps = Omit<TuiBootstrapProps, 'createSessionManager'> & {
-  readonly shellExecutor?: AppShellExecutor;
-  readonly model?: import('@kite-ai/builtin-runtime/model').SupportedChatModel;
+  /** Explicit managed Service connector supplied by the release composition. */
+  readonly connectService?: KiteServiceModeConnector;
 };
 
 export function runTui(props: KiteTuiProps = {}): void {
-  const appControl = createKiteInProcessAppControlComposition(createRuntimeOperationGate(), {
-    ...(props.shellExecutor === undefined
-      ? {}
-      : { shellExecutorForWorkspace: () => props.shellExecutor! }),
-  });
-  runTuiClient({
-    ...props,
-    createSessionManager: (dependencies) => {
-      const workspace = appControl.admitWorkspace(dependencies.workspace);
-      const runtimeInputs = appControl.runtimeInputsFor(workspace);
-      return createKiteTuiSessionManager(dependencies, {
-        config: runtimeInputs.config,
-        checkpointPath: runtimeInputs.checkpointPath,
-        skillManifests: [...runtimeInputs.skillManifests],
-        skillOptions: runtimeInputs.skillOptions,
-        mcpManager: runtimeInputs.mcpManager,
-        workspaceReady: runtimeInputs.workspaceReady,
-        shellExecutor: runtimeInputs.shellExecutor,
-        observabilityBridge: runtimeInputs.observabilityBridge,
-        appControl,
-        ...(props.model === undefined ? {} : { injectedModel: props.model }),
+  if (props.serviceMode) {
+    const serviceMode = props.serviceMode;
+    void serviceMode.connection
+      .prepareAppControl()
+      .then(() => runTuiClient(props))
+      .catch((error: unknown) => {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
       });
-    },
-    appControlGateway: props.appControlGateway ?? appControl.gateway,
-    credentialClient: appControl.credentialClient,
-  });
+    return;
+  }
+  if (!props.connectService) {
+    throw new Error('Managed Local Runtime Service connector is unavailable.');
+  }
+  const connector = props.connectService;
+  const workspace = process.cwd();
+  void Promise.resolve()
+    .then(() => connector.connect({ workspace }))
+    .then(async (connection) => {
+      await connection.prepareAppControl();
+      return connection;
+    })
+    .then((connection) => {
+      runTuiClient({
+        ...props,
+        serviceMode: createKiteServiceModeAdapter(connection),
+      });
+    })
+    .catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
 }
 
 if (import.meta.main) {
-  if (runKiteInternalMcpStdioChild()) {
-    // The private wrapper owns stdin/stdout until its authenticated terminal.
-  } else if (process.argv.includes('--version')) {
+  if (process.argv.includes('--version')) {
     console.log(`Kite Code TUI ${packageJson.version}`);
   } else {
     runTui();

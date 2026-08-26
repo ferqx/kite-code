@@ -10,7 +10,7 @@
 - `packages/builtin-runtime/src/model/**`
 - `packages/agent-kernel/src/**`
 - `packages/runtime-host/src/**`
-- `apps/kite-cli/src/bootstrap/runtime/**`
+- `apps/kite-service/src/bootstrap/runtime/**`
 - 与实证结论直接相关的测试文件
 
 读取时机：

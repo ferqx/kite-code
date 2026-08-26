@@ -4,7 +4,8 @@
 
 ## Locale authority
 
-- 用户级 `language` 偏好是 locale authority；`/language` 只打开选择器，确认后立即切换当前 TUI。
+- 用户级 `language` 偏好是 locale authority；它属于 `apps/kite-cli/src/preferences/**` 的纯 UI-local
+  preference，不属于 Service config 或 App Control。`/language` 只打开选择器，确认后立即切换当前 TUI。
 - 所有 Kite Code 自有标题、状态、快捷键、空态、错误和交互说明从统一 catalog 读取。
 - Slash command 的名称与帮助来自共享 command metadata；catalog 只为实际注册的 TUI command 提供说明。
   发布与遥测状态由既有配置/CLI 入口负责，TUI 不注册 `/release` 或 `/telemetry`，也不保留其孤立译文。

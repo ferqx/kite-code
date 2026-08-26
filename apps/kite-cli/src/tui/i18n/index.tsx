@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createContext, type ReactNode, useContext, useMemo } from 'react';
-import type { LanguagePreference } from '#kite-cli/config';
+import type { LanguagePreference } from '#kite-cli/preferences';
 import { enUS, type MessageKey, zhCN } from './messages';
 
 export type TuiLanguage = 'zh-CN' | 'en-US';

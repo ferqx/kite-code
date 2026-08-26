@@ -1,4 +1,4 @@
-export type RuntimeSessionOperation = 'turn' | 'compaction';
+export type RuntimeSessionOperation = 'turn' | 'compaction' | 'rewind';
 
 export interface RuntimeSessionExecution {
   readonly operationId: string;

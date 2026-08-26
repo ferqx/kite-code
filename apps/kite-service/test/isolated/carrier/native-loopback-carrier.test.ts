@@ -20,11 +20,12 @@ import {
   WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
 } from '@kite-ai/kite-app-contract';
 import {
+  LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
   LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
   type NativeProviderCredentialRequest,
 } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeAccess } from '@kite-ai/runtime-contract';
-import { RUNTIME_PROTOCOL_LIMITS } from '@kite-ai/runtime-protocol';
+import { RUNTIME_PROTOCOL_LIMITS, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import {
   RuntimeServer,
   type RuntimeServerAdmissionDecision,
@@ -36,11 +37,14 @@ import {
   KITE_SERVICE_CONNECT_PATH,
   KITE_SERVICE_CONTROL_AUTHORIZATION_SCHEME,
   KITE_SERVICE_CONTROL_STOP_PATH,
+  KITE_SERVICE_HISTORY_LIST_EVENTS_PATH,
   KITE_SERVICE_HISTORY_LIST_SESSIONS_PATH,
+  KITE_SERVICE_HISTORY_LOAD_SESSION_PATH,
   KITE_SERVICE_TICKET_AUTHORIZATION_SCHEME,
   type KiteServiceCarrier,
   type KiteServiceCarrierLimits,
 } from '../../../src/carrier';
+import { KITE_SERVICE_INSTANCE_HANDSHAKE_PATH } from '../../../src/carrier/native-loopback-carrier';
 import type { KiteServiceApplicationPort } from '../../../src/carrier/ports';
 
 const ACCESS_TOKEN = 'A'.repeat(43);
@@ -58,6 +62,15 @@ const otherWorkspace: KiteWorkspaceIdentity = {
 };
 
 const carriers: KiteServiceCarrier[] = [];
+
+function providerSnapshot(): ProviderModelSnapshot {
+  return {
+    schema: PROVIDER_MODEL_SNAPSHOT_RESPONSE_SCHEMA_,
+    workspace,
+    revision: 'revision-1',
+    providers: [],
+  };
+}
 
 afterEach(async () => {
   await Promise.all(carriers.splice(0).map((carrier) => carrier.close()));
@@ -121,6 +134,51 @@ describe('Kite Service Native loopback carrier', () => {
       body: JSON.stringify({ workspace: workspace.canonicalPath }),
     });
     expect(cookie.status).toBe(401);
+  });
+
+  test('serves an authenticated exact instance handshake and stops serving it after close', async () => {
+    const fixture = createFixture();
+    const carrier = track(fixture.carrier);
+    const handshake = await fetch(`${carrier.origin}${KITE_SERVICE_INSTANCE_HANDSHAKE_PATH}`, {
+      method: 'POST',
+      headers: {
+        ...jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+        origin: carrier.origin,
+      },
+      body: '{}',
+    });
+    expect(handshake.status).toBe(200);
+    expect(handshake.headers.get('cache-control')).toBe('no-store');
+    expect(await handshake.json()).toEqual({
+      schema: 'kite.local-runtime.instance-handshake.v1',
+      instanceId: 'instance-1',
+      protocolVersion: 1,
+      clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
+      serverVersion: 'service-test',
+      buildId: 'dev:0123456789012345678901234567890123456789',
+    });
+
+    const wrongToken = await fetch(`${carrier.origin}${KITE_SERVICE_INSTANCE_HANDSHAKE_PATH}`, {
+      method: 'POST',
+      headers: jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${CONTROL_TOKEN}`),
+      body: '{}',
+    });
+    expect(wrongToken.status).toBe(401);
+
+    const extra = await fetch(`${carrier.origin}${KITE_SERVICE_INSTANCE_HANDSHAKE_PATH}`, {
+      method: 'POST',
+      headers: jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+      body: JSON.stringify({ instanceId: 'caller-controlled' }),
+    });
+    expect(extra.status).toBe(400);
+
+    await carrier.close();
+    expect(
+      await fetch(`${carrier.origin}${KITE_SERVICE_INSTANCE_HANDSHAKE_PATH}`).then(
+        (response) => response.status,
+        () => 0,
+      ),
+    ).not.toBe(200);
   });
 
   test('issues one-shot workspace tickets and routes RuntimeServer with per-connection admission', async () => {
@@ -265,6 +323,127 @@ describe('Kite Service Native loopback carrier', () => {
     expect(connect.ticket).toBeTruthy();
   });
 
+  test('applies the access-origin and cookie boundary to every HTTP capability route', async () => {
+    const fixture = createFixture();
+    const carrier = track(fixture.carrier);
+    const routes = [
+      [KITE_SERVICE_INSTANCE_HANDSHAKE_PATH, {}],
+      [KITE_SERVICE_CONNECT_PATH, { workspace: workspace.canonicalPath }],
+      [KITE_SERVICE_HISTORY_LIST_SESSIONS_PATH, { limit: 1 }],
+      [
+        KITE_SERVICE_HISTORY_LIST_EVENTS_PATH,
+        {
+          sessionId: 'session-1',
+          direction: 'forward',
+          limit: 1,
+        },
+      ],
+      [KITE_SERVICE_HISTORY_LOAD_SESSION_PATH, { sessionId: 'session-1' }],
+      [
+        '/_kite/app/provider-model/snapshot',
+        {
+          schema: 'kite.app.provider-model.snapshot-request.v1',
+          workspace,
+        },
+      ],
+      [
+        '/_kite/app/provider-credential/write',
+        {
+          schema: 'kite.local-runtime-credential-request.v1',
+          mutationId: 'mutation-auth-matrix',
+          operation: 'write_provider_api_key',
+          providerId: 'openai',
+          apiKey: 'sk-secret',
+        },
+      ],
+      ['/_kite/app/release/status', { schema: 'kite.app.release-status.request.v1' }],
+    ] as const;
+
+    for (const [pathname, body] of routes) {
+      const wrongOrigin = await fetch(`${carrier.origin}${pathname}`, {
+        method: 'POST',
+        headers: {
+          ...jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+          origin: 'http://localhost:1',
+        },
+        body: JSON.stringify(body),
+      });
+      expect(wrongOrigin.status).toBe(401);
+
+      const cookie = await fetch(`${carrier.origin}${pathname}`, {
+        method: 'POST',
+        headers: {
+          ...jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+          cookie: 'session=unsupported',
+        },
+        body: JSON.stringify(body),
+      });
+      expect(cookie.status).toBe(401);
+
+      const query = await fetch(`${carrier.origin}${pathname}?secret=query`, {
+        method: 'POST',
+        headers: jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+        body: JSON.stringify(body),
+      });
+      expect(query.status).toBe(403);
+      expect(await query.text()).not.toContain('secret');
+    }
+  });
+
+  test('rejects invalid WebSocket origin, protocol and upgrade headers before consuming a ticket', async () => {
+    const listener = fakeListener();
+    const fixture = createFixture({ serve: listener.serve });
+    const carrier = fixture.carrier;
+    const ticket = await fakeConnectTicket(carrier, listener);
+
+    const wrongOrigin = await requestFakeUpgradeWithTicket(carrier, listener, ticket, {
+      origin: 'http://localhost:1',
+    });
+    expect(wrongOrigin?.status).toBe(403);
+    const protocol = await requestFakeUpgradeWithTicket(carrier, listener, ticket, {
+      'sec-websocket-protocol': 'kite-v1',
+    });
+    expect(protocol?.status).toBe(403);
+    const wrongUpgrade = await requestFakeUpgradeWithTicket(carrier, listener, ticket, {
+      upgrade: 'http',
+    });
+    expect(wrongUpgrade?.status).toBe(403);
+    expect(listener.upgrades()).toHaveLength(0);
+
+    const accepted = await requestFakeUpgradeWithTicket(carrier, listener, ticket);
+    expect(accepted).toBeUndefined();
+    expect(listener.upgrades()).toHaveLength(1);
+    await carrier.close();
+  });
+
+  test('rejects malformed UTF-8 and over-limit HTTP bodies without invoking an owner', async () => {
+    const fixture = createFixture();
+    const carrier = track(fixture.carrier);
+    const accessHeaders = jsonHeaders(
+      `${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`,
+    );
+    const malformedUtf8 = await fetch(
+      `${carrier.origin}${KITE_SERVICE_HISTORY_LIST_SESSIONS_PATH}`,
+      {
+        method: 'POST',
+        headers: accessHeaders,
+        body: new Uint8Array([0xc3, 0x28]),
+      },
+    );
+    expect(malformedUtf8.status).toBe(400);
+
+    const overLimit = await fetch(`${carrier.origin}${KITE_SERVICE_HISTORY_LIST_SESSIONS_PATH}`, {
+      method: 'POST',
+      headers: accessHeaders,
+      body: JSON.stringify({
+        limit: 1,
+        padding: 'x'.repeat(RUNTIME_PROTOCOL_LIMITS.maxMessageBytes),
+      }),
+    });
+    expect(overLimit.status).toBe(400);
+    expect(fixture.historyCalls).toBe(0);
+  });
+
   test('keeps every authenticated route unavailable until the Service publishes ready', async () => {
     const fixture = createFixture({ isReady: () => false });
     const carrier = track(fixture.carrier);
@@ -359,17 +538,51 @@ describe('Kite Service Native loopback carrier', () => {
     expect(await expectSocketRejected(carrier, expired.ticket)).toBe(true);
   });
 
+  test('does not alias a live ticket when the random source repeats', async () => {
+    const fixture = createFixture({ randomBytes: (size) => new Uint8Array(size).fill(7) });
+    const carrier = track(fixture.carrier);
+    const first = await connectWorkspace(carrier);
+    const duplicate = await fetch(`${carrier.origin}${KITE_SERVICE_CONNECT_PATH}`, {
+      method: 'POST',
+      headers: jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+      body: JSON.stringify({ workspace: workspace.canonicalPath }),
+    });
+
+    expect(duplicate.status).toBe(503);
+    const socket = await openSocket(carrier, first.ticket);
+    socket.close();
+  });
+
+  test('caps outstanding tickets instead of growing the in-memory authority', async () => {
+    const fixture = createFixture();
+    const carrier = track(fixture.carrier);
+    const responses = await Promise.all(
+      Array.from({ length: 1_025 }, () =>
+        fetch(`${carrier.origin}${KITE_SERVICE_CONNECT_PATH}`, {
+          method: 'POST',
+          headers: jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+          body: JSON.stringify({ workspace: workspace.canonicalPath }),
+        }).then((response) => response.status),
+      ),
+    );
+
+    expect(responses.filter((status) => status === 200)).toHaveLength(1_024);
+    expect(responses.filter((status) => status === 503)).toHaveLength(1);
+  });
+
   test('does not issue a ticket after carrier close wins a deferred Workspace admission', async () => {
     const admission = deferred<
       | { readonly outcome: 'admitted'; readonly workspace: KiteWorkspaceIdentity }
       | { readonly outcome: 'untrusted' | 'unavailable' }
     >();
     const entered = deferred<void>();
+    const drain = deferred<void>();
     const fixture = createFixture({
       admitForConnect: async () => {
         entered.resolve();
         return admission.promise;
       },
+      beginDraining: () => drain.promise,
     });
     const carrier = track(fixture.carrier);
     const connecting = fetch(`${carrier.origin}${KITE_SERVICE_CONNECT_PATH}`, {
@@ -379,11 +592,294 @@ describe('Kite Service Native loopback carrier', () => {
     });
     await entered.promise;
     const closing = carrier.close();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     admission.resolve({ outcome: 'admitted', workspace });
 
-    expect((await connecting).status).not.toBe(200);
+    expect((await connecting).status).toBe(503);
+    drain.resolve();
     await closing;
+  });
+
+  test('does not publish deferred History, App, credential, or control results after close', async () => {
+    const history = deferred<{ readonly entries: []; readonly hasMore: false }>();
+    const historyEntered = deferred<void>();
+    const historyDrain = deferred<void>();
+    const historyFixture = createFixture({
+      listSessions: async () => {
+        historyEntered.resolve();
+        return history.promise;
+      },
+      beginDraining: () => historyDrain.promise,
+    });
+    const historyCarrier = track(historyFixture.carrier);
+    const historyResponse = fetch(
+      `${historyCarrier.origin}${KITE_SERVICE_HISTORY_LIST_SESSIONS_PATH}`,
+      {
+        method: 'POST',
+        headers: jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+        body: JSON.stringify({ limit: 1 }),
+      },
+    );
+    await historyEntered.promise;
+    const historyClosing = historyCarrier.close();
+    history.resolve({ entries: [], hasMore: false });
+    expect((await historyResponse).status).toBe(503);
+    historyDrain.resolve();
+    await historyClosing;
+
+    const provider = deferred<ProviderModelSnapshot>();
+    const providerEntered = deferred<void>();
+    const providerDrain = deferred<void>();
+    const providerFixture = createFixture({
+      getProviderModelSnapshot: async () => {
+        providerEntered.resolve();
+        return provider.promise;
+      },
+      beginDraining: () => providerDrain.promise,
+    });
+    const providerCarrier = track(providerFixture.carrier);
+    const providerResponse = fetch(`${providerCarrier.origin}/_kite/app/provider-model/snapshot`, {
+      method: 'POST',
+      headers: jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+      body: JSON.stringify({
+        schema: 'kite.app.provider-model.snapshot-request.v1',
+        workspace,
+      }),
+    });
+    await providerEntered.promise;
+    const providerClosing = providerCarrier.close();
+    provider.resolve(providerSnapshot());
+    expect((await providerResponse).status).toBe(503);
+    providerDrain.resolve();
+    await providerClosing;
+
+    const credential = deferred<{
+      readonly schema: typeof LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_;
+      readonly mutationId: string;
+      readonly operation: 'write_provider_api_key';
+      readonly outcome: 'applied';
+      readonly credentialPresent: true;
+    }>();
+    const credentialEntered = deferred<void>();
+    const credentialDrain = deferred<void>();
+    const credentialFixture = createFixture({
+      writeProviderCredential: async () => {
+        credentialEntered.resolve();
+        return credential.promise;
+      },
+      beginDraining: () => credentialDrain.promise,
+    });
+    const credentialCarrier = track(credentialFixture.carrier);
+    const credentialResponse = fetch(
+      `${credentialCarrier.origin}/_kite/app/provider-credential/write`,
+      {
+        method: 'POST',
+        headers: jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+        body: JSON.stringify({
+          schema: 'kite.local-runtime-credential-request.v1',
+          mutationId: 'mutation-1',
+          operation: 'write_provider_api_key',
+          providerId: 'openai',
+          apiKey: 'sk-secret',
+        }),
+      },
+    );
+    await credentialEntered.promise;
+    const credentialClosing = credentialCarrier.close();
+    credential.resolve({
+      schema: LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+      mutationId: 'mutation-1',
+      operation: 'write_provider_api_key',
+      outcome: 'applied',
+      credentialPresent: true,
+    });
+    expect((await credentialResponse).status).toBe(503);
+    credentialDrain.resolve();
+    await credentialClosing;
+
+    const control = deferred<{ readonly outcome: 'applied'; readonly state: 'ready' }>();
+    const controlEntered = deferred<void>();
+    const controlDrain = deferred<void>();
+    const controlFixture = createFixture({
+      stop: async () => {
+        controlEntered.resolve();
+        return control.promise;
+      },
+      beginDraining: () => controlDrain.promise,
+    });
+    const controlCarrier = track(controlFixture.carrier);
+    const controlResponse = fetch(`${controlCarrier.origin}${KITE_SERVICE_CONTROL_STOP_PATH}`, {
+      method: 'POST',
+      headers: jsonHeaders(`${KITE_SERVICE_CONTROL_AUTHORIZATION_SCHEME} ${CONTROL_TOKEN}`),
+      body: '{}',
+    });
+    await controlEntered.promise;
+    const controlClosing = controlCarrier.close();
+    control.resolve({ outcome: 'applied', state: 'ready' });
+    expect((await controlResponse).status).toBe(503);
+    controlDrain.resolve();
+    await controlClosing;
+  });
+
+  test('cleans a consumed ticket when the WebSocket upgrade throws or rejects', async () => {
+    for (const [behavior, expectedStatus] of [
+      ['throw', 503],
+      ['reject', 400],
+    ] as const) {
+      const listener = fakeListener(undefined, behavior);
+      const fixture = createFixture({ serve: listener.serve });
+      const carrier = fixture.carrier;
+      const ticket = await fakeConnectTicket(carrier, listener);
+      const response = await requestFakeUpgradeWithTicket(carrier, listener, ticket);
+
+      expect(response?.status).toBe(expectedStatus);
+      expect(listener.upgrades()).toHaveLength(1);
+      const replay = await requestFakeUpgradeWithTicket(carrier, listener, ticket);
+      expect(replay?.status).toBe(401);
+      expect(listener.upgrades()).toHaveLength(1);
+      await carrier.close();
+    }
+  });
+
+  test('heartbeat timeout is not extended by arbitrary messages or peer pings', async () => {
+    let now = 0;
+    const listener = fakeListener();
+    const fixture = createFixture({
+      serve: listener.serve,
+      now: () => now,
+      limits: { heartbeatIntervalMs: 5, heartbeatDeadlineMs: 15 },
+    });
+    const carrier = fixture.carrier;
+    const data = await upgradeFakeSocket(carrier, listener);
+    let closeInfo: { readonly code: number; readonly reason: string } | undefined;
+    const socket = fakeServerSocket(data, (code, reason) => {
+      closeInfo = { code, reason };
+    });
+    listener.callbacks().websocket.open(socket);
+    listener.callbacks().websocket.message(socket, JSON.stringify({ arbitrary: true }));
+    listener.callbacks().websocket.ping(socket, new Uint8Array());
+    now = 15;
+
+    await eventually(() => closeInfo !== undefined);
+    expect(closeInfo).toEqual({ code: 1001, reason: 'heartbeat_timeout' });
+    await carrier.close();
+  });
+
+  test('closes on a dropped outbound frame and waits through backpressure', async () => {
+    for (const [sendResult, shouldClose] of [
+      [0, true],
+      [-1, false],
+    ] as const) {
+      const listener = fakeListener();
+      const sent = deferred<void>();
+      const server = {
+        beginDraining: async () => undefined,
+        open: (connection: {
+          readonly send: (message: RuntimeProtocolMessage) => Promise<void>;
+        }) => {
+          void connection
+            .send({
+              jsonrpc: '2.0',
+              id: 'outbound',
+              result: { status: 'ok' },
+            } as RuntimeProtocolMessage)
+            .then(sent.resolve, sent.reject);
+          return { state: 'open' };
+        },
+      } as unknown as RuntimeServer;
+      const fixture = createFixture({ server, serve: listener.serve });
+      const carrier = fixture.carrier;
+      const data = await upgradeFakeSocket(carrier, listener);
+      let closeInfo: { readonly code: number; readonly reason: string } | undefined;
+      listener.callbacks().websocket.open(
+        fakeServerSocket(
+          data,
+          (code, reason) => {
+            closeInfo = { code, reason };
+          },
+          { sendText: () => sendResult },
+        ),
+      );
+
+      if (shouldClose) {
+        await expect(sent.promise).rejects.toThrow('rejected outbound');
+        expect(closeInfo).toEqual({ code: 1013, reason: 'outbound_queue_full' });
+      } else {
+        await sent.promise;
+        expect(closeInfo).toBeUndefined();
+        expect(fixture.diagnostics).toContain('outbound_backpressure');
+      }
+      await carrier.close();
+    }
+  });
+
+  test('cleans up a peer-closed socket even when the diagnostic sink throws', async () => {
+    const fixture = createFixture({
+      onDiagnostic: (code) => {
+        if (code === 'socket_closed') throw new Error('diagnostic failed');
+      },
+    });
+    const carrier = track(fixture.carrier);
+    const socket = await openSocket(carrier, (await connectWorkspace(carrier)).ticket);
+    socket.send(JSON.stringify(initializeRequest()));
+    await eventually(() => fixture.bound.length === 1);
+    const socketClosed = closed(socket);
+    socket.close();
+    await socketClosed;
+
+    await eventually(() => fixture.application.server.connectionCount === 0);
+    const boundConnection = fixture.bound[0];
+    if (!boundConnection) throw new Error('socket did not bind');
+    expect(fixture.closed).toEqual([boundConnection.connectionId]);
+  });
+
+  test('continues closing sockets and stops the listener when one socket close throws', async () => {
+    const listener = fakeListener();
+    const server = {
+      beginDraining: async () => undefined,
+      open: () => ({ state: 'open' }),
+    } as unknown as RuntimeServer;
+    const fixture = createFixture({ server, serve: listener.serve });
+    const carrier = fixture.carrier;
+    const firstData = await upgradeFakeSocket(carrier, listener);
+    const secondData = await upgradeFakeSocket(carrier, listener);
+    let firstCloseCalls = 0;
+    let secondCloseCalls = 0;
+    listener.callbacks().websocket.open(
+      fakeServerSocket(firstData, () => {
+        firstCloseCalls += 1;
+        throw new Error('socket close failed');
+      }),
+    );
+    listener.callbacks().websocket.open(
+      fakeServerSocket(secondData, () => {
+        secondCloseCalls += 1;
+      }),
+    );
+
+    await expect(carrier.close()).rejects.toThrow('socket close failed');
+    expect(firstCloseCalls).toBe(1);
+    expect(secondCloseCalls).toBe(1);
+    expect(listener.stopCalls()).toBe(1);
+  });
+
+  test('closes a WebSocket whose upgrade races carrier shutdown before open', async () => {
+    let closing: Promise<void> | undefined;
+    let carrier: KiteServiceCarrier | undefined;
+    const listener = fakeListener(() => {
+      if (!carrier) throw new Error('carrier was not assigned');
+      closing = carrier.close();
+    });
+    const fixture = createFixture({ serve: listener.serve });
+    carrier = fixture.carrier;
+    const data = await upgradeFakeSocket(carrier, listener);
+    const closes: Array<{ code: number; reason: string }> = [];
+    listener
+      .callbacks()
+      .websocket.open(fakeServerSocket(data, (code, reason) => closes.push({ code, reason })));
+
+    await closing;
+    expect(closes).toEqual([{ code: 1012, reason: 'service_restart' }]);
+    expect(listener.stopCalls()).toBe(1);
   });
 
   test('rejects resource limits above the fixed Service ceilings', () => {
@@ -407,7 +903,18 @@ function createFixture(
       input: RuntimeServerAdmissionInput,
     ) => Promise<RuntimeServerAdmissionDecision>;
     readonly admitForConnect?: KiteServiceApplicationPort['workspaceAdmission']['admitForConnect'];
+    readonly listSessions?: KiteServiceApplicationPort['history']['listSessions'];
+    readonly getProviderModelSnapshot?: KiteAppControlClient['getProviderModelSnapshot'];
+    readonly writeProviderCredential?: NonNullable<
+      KiteServiceApplicationPort['credential']
+    >['writeProviderCredential'];
+    readonly stop?: NonNullable<KiteServiceApplicationPort['control']>['stop'];
+    readonly onDiagnostic?: (code: string) => void;
+    readonly beginDraining?: () => Promise<void>;
+    readonly server?: RuntimeServer;
+    readonly serve?: typeof Bun.serve;
     readonly now?: () => number;
+    readonly randomBytes?: (size: number) => Uint8Array;
     readonly limits?: KiteServiceCarrierLimits;
   } = {},
 ): {
@@ -442,21 +949,30 @@ function createFixture(
       }),
     }),
   };
-  const server = new RuntimeServer(
-    {
-      runtime,
-      admission: { authorize: async () => ({ allowed: true, workspace: workspace.canonicalPath }) },
-    },
-    { serverInfo: { version: 'service-test', instanceId: 'instance-1' } },
-  );
+  const server =
+    input.server ??
+    new RuntimeServer(
+      {
+        runtime,
+        admission: {
+          authorize: async () => ({ allowed: true, workspace: workspace.canonicalPath }),
+        },
+      },
+      { serverInfo: { version: 'service-test', instanceId: 'instance-1' } },
+    );
+  if (input.beginDraining) {
+    Object.defineProperty(server, 'beginDraining', { value: input.beginDraining });
+  }
   const snapshots = fakeAppControl();
   const application: KiteServiceApplicationPort = {
     server,
     history: {
-      listSessions: async () => {
-        historyCalls += 1;
-        return { entries: [], hasMore: false };
-      },
+      listSessions:
+        input.listSessions ??
+        (async () => {
+          historyCalls += 1;
+          return { entries: [], hasMore: false };
+        }),
       listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
       loadSession: async () => ({
         session: {
@@ -494,22 +1010,26 @@ function createFixture(
       forWorkspace: () => snapshots,
     },
     credential: {
-      writeProviderCredential: async (request: NativeProviderCredentialRequest) => {
-        credentialCalls += 1;
-        return {
-          schema: LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
-          mutationId: request.mutationId,
-          operation: request.operation,
-          outcome: 'applied',
-          credentialPresent: true,
-        };
-      },
+      writeProviderCredential:
+        input.writeProviderCredential ??
+        (async (request: NativeProviderCredentialRequest) => {
+          credentialCalls += 1;
+          return {
+            schema: LOCAL_RUNTIME_CREDENTIAL_RESULT_SCHEMA_,
+            mutationId: request.mutationId,
+            operation: request.operation,
+            outcome: 'applied',
+            credentialPresent: true,
+          };
+        }),
     },
     control: {
-      stop: async () => {
-        stopCalls += 1;
-        return { outcome: 'applied', state: 'ready' };
-      },
+      stop:
+        input.stop ??
+        (async () => {
+          stopCalls += 1;
+          return { outcome: 'applied', state: 'ready' };
+        }),
     },
     onConnectionBound: (connectionId, admittedWorkspace) =>
       bound.push({ connectionId, workspace: admittedWorkspace }),
@@ -531,7 +1051,12 @@ function createFixture(
       ...input.limits,
     },
     ...(input.now ? { now: input.now } : {}),
-    onDiagnostic: (code) => diagnostics.push(code),
+    ...(input.randomBytes ? { randomBytes: input.randomBytes } : {}),
+    ...(input.serve ? { serve: input.serve } : {}),
+    onDiagnostic: (code) => {
+      diagnostics.push(code);
+      input.onDiagnostic?.(code);
+    },
   });
   return {
     carrier,
@@ -554,12 +1079,7 @@ function createFixture(
   };
 
   function fakeAppControl(): KiteAppControlClient {
-    const providerSnapshot: ProviderModelSnapshot = {
-      schema: PROVIDER_MODEL_SNAPSHOT_RESPONSE_SCHEMA_,
-      workspace,
-      revision: 'revision-1',
-      providers: [],
-    };
+    const currentProviderSnapshot = providerSnapshot();
     const trustQuery: WorkspaceTrustQueryResponse = {
       schema: WORKSPACE_TRUST_QUERY_RESPONSE_SCHEMA_,
       workspace,
@@ -601,14 +1121,16 @@ function createFixture(
     return {
       queryWorkspaceTrust: async () => trustQuery,
       decideWorkspaceTrust: async () => trustDecision,
-      getProviderModelSnapshot: async () => {
-        providerCalls += 1;
-        return providerSnapshot;
-      },
+      getProviderModelSnapshot:
+        input.getProviderModelSnapshot ??
+        (async () => {
+          providerCalls += 1;
+          return currentProviderSnapshot;
+        }),
       selectProviderModel: async () => ({
         schema: PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_,
         outcome: 'already_selected',
-        snapshot: providerSnapshot,
+        snapshot: currentProviderSnapshot,
       }),
       getMcpSnapshot: async () => ({
         schema: 'kite.app.mcp.snapshot-response.v1',
@@ -793,6 +1315,145 @@ async function eventually(predicate: () => boolean): Promise<void> {
     if (Date.now() >= deadline) throw new Error('eventual condition timeout');
     await new Promise<void>((resolve) => setTimeout(resolve, 1));
   }
+}
+
+interface FakeListenerCallbacks {
+  readonly fetch: (
+    request: Request,
+    server: Bun.Server<never>,
+  ) => Response | Promise<Response> | undefined;
+  readonly websocket: {
+    readonly open: (socket: unknown) => void;
+    readonly message: (socket: unknown, message: string | Buffer) => void;
+    readonly ping: (socket: unknown, data: Uint8Array) => void;
+  };
+}
+
+interface FakeListener {
+  readonly serve: typeof Bun.serve;
+  readonly server: Bun.Server<never>;
+  readonly callbacks: () => FakeListenerCallbacks;
+  readonly upgrades: () => readonly unknown[];
+  readonly stopCalls: () => number;
+}
+
+function fakeListener(
+  onUpgrade?: () => void,
+  upgradeBehavior: 'accept' | 'reject' | 'throw' = 'accept',
+): FakeListener {
+  let callbacks: FakeListenerCallbacks | undefined;
+  let stops = 0;
+  const upgradeData: unknown[] = [];
+  const server = {
+    port: 43_210,
+    requestIP: () => ({ address: '127.0.0.1', port: 1, family: 'IPv4' }),
+    upgrade: (_request: Request, input: { readonly data: unknown }) => {
+      upgradeData.push(input.data);
+      onUpgrade?.();
+      if (upgradeBehavior === 'throw') throw new Error('upgrade failed');
+      return upgradeBehavior === 'accept';
+    },
+    stop: async () => {
+      stops += 1;
+    },
+  } as unknown as Bun.Server<never>;
+  const serve = ((options: unknown) => {
+    callbacks = options as FakeListenerCallbacks;
+    return server;
+  }) as typeof Bun.serve;
+  return {
+    serve,
+    server,
+    callbacks: () => {
+      if (!callbacks) throw new Error('listener callbacks were not installed');
+      return callbacks;
+    },
+    upgrades: () => upgradeData,
+    stopCalls: () => stops,
+  };
+}
+
+async function upgradeFakeSocket(
+  carrier: KiteServiceCarrier,
+  listener: FakeListener,
+): Promise<unknown> {
+  const upgraded = await requestFakeUpgrade(carrier, listener);
+  if (upgraded !== undefined) throw new Error(`upgrade returned HTTP ${upgraded.status}`);
+  const data = listener.upgrades().at(-1);
+  if (!data) throw new Error('upgrade omitted socket data');
+  return data;
+}
+
+async function requestFakeUpgrade(
+  carrier: KiteServiceCarrier,
+  listener: FakeListener,
+): Promise<Response | undefined> {
+  const ticket = await fakeConnectTicket(carrier, listener);
+  return requestFakeUpgradeWithTicket(carrier, listener, ticket);
+}
+
+async function fakeConnectTicket(
+  carrier: KiteServiceCarrier,
+  listener: FakeListener,
+): Promise<string> {
+  const connect = await listener.callbacks().fetch(
+    new Request(`${carrier.origin}${KITE_SERVICE_CONNECT_PATH}`, {
+      method: 'POST',
+      headers: {
+        ...jsonHeaders(`${KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME} ${ACCESS_TOKEN}`),
+        host: new URL(carrier.origin).host,
+      },
+      body: JSON.stringify({ workspace: workspace.canonicalPath }),
+    }),
+    listener.server,
+  );
+  if (!connect) throw new Error('connect returned no response');
+  const connectText = await connect.text();
+  if (connect.status !== 200) {
+    throw new Error(`connect returned HTTP ${connect.status}: ${connectText}`);
+  }
+  const ticket = (JSON.parse(connectText) as { readonly ticket?: string }).ticket;
+  if (!ticket) throw new Error('connect response omitted ticket');
+  return ticket;
+}
+
+async function requestFakeUpgradeWithTicket(
+  carrier: KiteServiceCarrier,
+  listener: FakeListener,
+  ticket: string,
+  overrides: Record<string, string> = {},
+): Promise<Response | undefined> {
+  return listener.callbacks().fetch(
+    new Request(carrier.rpcUrl, {
+      headers: {
+        authorization: `${KITE_SERVICE_TICKET_AUTHORIZATION_SCHEME} ${ticket}`,
+        host: new URL(carrier.origin).host,
+        origin: carrier.origin,
+        upgrade: 'websocket',
+        ...overrides,
+      },
+    }),
+    listener.server,
+  );
+}
+
+function fakeServerSocket(
+  data: unknown,
+  close: (code: number, reason: string) => void,
+  input: {
+    readonly bufferedAmount?: () => number;
+    readonly sendText?: (payload: string) => number;
+    readonly ping?: () => void;
+  } = {},
+): unknown {
+  return {
+    data,
+    close,
+    getBufferedAmount: input.bufferedAmount ?? (() => 0),
+    sendText: input.sendText ?? (() => 1),
+    ping: input.ping ?? (() => undefined),
+    pong: () => undefined,
+  };
 }
 
 function sameWorkspace(left: KiteWorkspaceIdentity, right: KiteWorkspaceIdentity): boolean {

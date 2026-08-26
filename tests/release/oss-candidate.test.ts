@@ -19,6 +19,7 @@ describe('ordinary open-source candidate archive', () => {
   test('resolves every workspace export without entering node_modules symlinks', () => {
     const packageRoots = [
       'apps/kite-cli',
+      'apps/kite-service',
       'packages/agent-kernel',
       'packages/builtin-runtime',
       'packages/kite-app-contract',
@@ -56,7 +57,7 @@ describe('ordinary open-source candidate archive', () => {
       effectfulCapabilities: 'off',
       remoteTelemetry: 'off',
     });
-    expect(verified.files.size).toBe(7);
+    expect(verified.files.size).toBe(8);
   });
 
   test('rejects archive and payload tampering', async () => {

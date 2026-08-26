@@ -1110,7 +1110,7 @@ Gate：instance mismatch 拒绝；service restart 后 index 重建；ephemeral �
 
 回滚：删除 opt-in harness；production 仍是 InProcess。
 
-### KLSV1-06：唯一 composition root 迁移与默认 Store clean cutover
+### KLSV1-06：唯一 composition root 迁移与默认 Store clean cutover（已完成）
 
 这是唯一 release-blocking atomic cutover，不把它描述为普通小 Task。交付必须在同一 tranche 完成：
 
@@ -1136,6 +1136,13 @@ runtime-host/server/storage-sqlite 或 Runtime execution export；真实 TUI/CLI
 model selection、MCP management/auth、history、approval、rewind/fork/compact、双 Client/Workspace 与 PTY exit/reopen
 全部通过。
 
+实际 evidence：13-workspace typecheck/build、runtime package/core/pre-release/test-ownership/compaction static Gate、
+Service owner 1358 parallel tests / 6765 expects 加全部 34 个 isolated files、CLI owner 738 tests、完整 40 个
+isolated TUI PTY scenario files、Runtime transport 3 tests / 852 expects，以及本机 macOS arm64 companion
+candidate build/verify/install/CLI+TUI+Service+MCP wrapper/upgrade/rollback/uninstall smoke均通过。默认入口只经
+managed Native client连接`apps/kite-service`，没有CLI backend副本、app-to-app import、silent fallback或第二默认
+Host/Store；关闭terminal connection不会dispose Service owner。
+
 切换默认入口前必须先完成 relocated application compile/build、Service process smoke、TUI fake-client全 journey、
 companion candidate layout/manifest/install preflight；只有这些通过才改变 default owner。MCP stdio wrapper、POSIX
 supervisor child与内部 RuntimeHost entrypoint必须在同一 checklist中指向 managed `kite-service`。
@@ -1144,7 +1151,7 @@ supervisor child与内部 RuntimeHost entrypoint必须在同一 checklist中指�
 descriptor/token/lock 已由原 Service正常清理，再整体回滚该 tranche 到原 InProcess owner；失败 evidence留存时不得
 手工删除 state 后启动旧 owner。Store 6/State 27 未变化，不需要数据迁移；不得在同一 release 中同时保留两个默认 owner。
 
-### KLSV1-07：故障、安全、平台与 release qualification
+### KLSV1-07：故障、安全、平台与 release qualification（本地 Gate 已完成；三平台 pending）
 
 交付：
 
@@ -1163,6 +1170,13 @@ descriptor/token/lock 已由原 Service正常清理，再整体回滚该 tranche
 
 Gate：macOS 15、Ubuntu 24.04、Windows 2025 的 runtime transport、candidate build/verify/smoke 全部成功；本地
 fault/soak、TUI PTY、docs/static Gate 全部通过。workflow 定义或本地测试不能冒充三平台结果。
+
+当前只登记本地 evidence：Runtime fault 36 tests / 106 expects、固定 CI-profile soak 7/7 cases、完整40个PTY
+scenario files、carrier 23 tests / 128 expects、Service shell 23 tests / 97 expects、manager 37 tests / 135
+expects、本机macOS arm64 release build/verify/smoke及docs/static/typecheck/build均通过；smoke结束后无残留Service
+进程。CI-profile soak按设计`qualificationMetricsSupported=false`，不是formal同进程资源资格结果。GitHub-hosted
+macOS 15、Ubuntu 24.04、Windows 2025当前实现head的真实candidate/process/transport evidence尚未取得，因此
+KLSV1-07不标完成、不升级Windows或三平台support结论。
 
 回滚：未取得三平台结果时保持 unsupported/pending，不写入 production support matrix；不以 force stop 绕过 busy。
 

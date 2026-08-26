@@ -501,6 +501,14 @@ export const RUNTIME_PROTOCOL_SESSION_SCHEMA_ = z
     displayName: z.string().max(256).optional(),
     updatedAt: z.string().max(128).optional(),
     lifecycle: z.enum(['open', 'closed', 'unavailable']),
+    model: z
+      .object({
+        provider: shortText,
+        name: shortText,
+        reasoningEnabled: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     sessionCommandGrantCount: safeRevision,
     activeWork: activeWork.optional(),
   })
@@ -956,6 +964,35 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
         })
         .strict()
         .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('rewind.terminal'),
+      rewindId: identifier,
+      commandId: identifier,
+      sourceSessionId: identifier,
+      targetSessionId: identifier,
+      status: z.enum(['completed', 'failed']),
+      fileOutcome: z
+        .object({
+          restored: z.array(shortText).max(10_000),
+          deleted: z.array(shortText).max(10_000),
+          failed: z.array(z.object({ path: shortText, error: shortText }).strict()).max(10_000),
+          conflicts: z
+            .array(
+              z
+                .object({
+                  path: shortText,
+                  reason: z.enum(['modified_after_kite_write', 'unverified_postimage']),
+                })
+                .strict(),
+            )
+            .max(10_000),
+        })
+        .strict()
+        .optional(),
+      failureCode: z.enum(['checkpoint_unavailable', 'execution_failed']).optional(),
     })
     .strict(),
   z

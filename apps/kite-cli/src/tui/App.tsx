@@ -8,8 +8,8 @@ import React, {
   useReducer,
   useRef,
 } from 'react';
-import type { LanguagePreference } from '#kite-cli/config';
-import type { SandboxBackend } from '#kite-cli/sandbox/types';
+import type { LanguagePreference } from '#kite-cli/preferences';
+import type { SandboxBackend } from './client-types';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
 import HelpPanel from './components/HelpPanel';

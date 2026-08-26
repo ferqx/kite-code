@@ -1,7 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
-import type { RuntimeEvent } from '../src/bootstrap/runtime/state-runtime';
-import { projectRuntimeClientEvent } from '../src/runtime-client/event-projector';
 import { createInitialState } from '../src/tui/App';
 import { eventReducer } from '../src/tui/reducers';
 import { sessionDataToUI } from '../src/tui/replay-blocks';
@@ -85,39 +83,43 @@ describe('closed RuntimeClientEvent reducer', () => {
     );
   });
 
-  test('projects distinct safe tool cards through the Runtime Client boundary', () => {
-    const rawEvents: readonly RuntimeEvent[] = [
+  test('renders distinct safe tool cards from the Runtime Client contract', () => {
+    const events: readonly RuntimeClientEvent[] = [
       {
         type: 'tool.queued',
-        toolCallId: 'tool-read',
-        name: 'read_file',
-        args: { path: '/private/workspace/secret.ts' },
+        toolId: 'tool-read',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        arguments: { path: '/private/workspace/secret.ts' },
+        summary: 'Queued.',
       },
       {
         type: 'tool.finished',
-        toolCallId: 'tool-read',
-        name: 'read_file',
-        result: { ok: true, command: 'ignored', exitCode: 0, stdout: 'private', stderr: '' },
+        toolId: 'tool-read',
+        toolName: 'read_file',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'private', stderr: '' },
+        summary: 'Completed.',
       },
       {
         type: 'tool.queued',
-        toolCallId: 'tool-search',
-        name: 'search_content',
-        args: { query: 'api_key=super-secret' },
+        toolId: 'tool-search',
+        toolName: 'search_content',
+        presentation: 'exploration',
+        arguments: { query: '[redacted]' },
+        summary: 'Queued.',
       },
       {
         type: 'tool.finished',
-        toolCallId: 'tool-search',
-        name: 'search_content',
-        result: { ok: true, command: 'ignored', exitCode: 0, stdout: 'private', stderr: '' },
+        toolId: 'tool-search',
+        toolName: 'search_content',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'private', stderr: '' },
+        summary: 'Completed.',
       },
     ];
     let state = createInitialState();
-    for (const raw of rawEvents) {
-      const event = projectRuntimeClientEvent(raw, { sessionRevision: 1 });
-      expect(event).toBeDefined();
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event: event! });
-    }
+    for (const event of events) state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
 
     const toolEntries = state.turns.flatMap((turn) =>
       turn.blocks.flatMap((block) =>
@@ -137,38 +139,42 @@ describe('closed RuntimeClientEvent reducer', () => {
   });
 
   test('merges adjacent terminal file searches while retaining bounded local arguments', () => {
-    const rawEvents: readonly RuntimeEvent[] = [
+    const events: readonly RuntimeClientEvent[] = [
       {
         type: 'tool.queued',
-        toolCallId: 'search-first',
-        name: 'search_files',
-        args: { pattern: 'private-first-pattern', path: '/private/workspace' },
+        toolId: 'search-first',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        arguments: { pattern: 'private-first-pattern', path: '/private/workspace' },
+        summary: 'Queued.',
       },
       {
         type: 'tool.finished',
-        toolCallId: 'search-first',
-        name: 'search_files',
-        result: { ok: true, command: 'ignored', exitCode: 0, stdout: 'private', stderr: '' },
+        toolId: 'search-first',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'private', stderr: '' },
+        summary: 'Completed.',
       },
       {
         type: 'tool.queued',
-        toolCallId: 'search-second',
-        name: 'search_files',
-        args: { pattern: 'private-second-pattern', path: '/private/workspace' },
+        toolId: 'search-second',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        arguments: { pattern: 'private-second-pattern', path: '/private/workspace' },
+        summary: 'Queued.',
       },
       {
         type: 'tool.finished',
-        toolCallId: 'search-second',
-        name: 'search_files',
-        result: { ok: true, command: 'ignored', exitCode: 0, stdout: 'private', stderr: '' },
+        toolId: 'search-second',
+        toolName: 'search_files',
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'private', stderr: '' },
+        summary: 'Completed.',
       },
     ];
     let state = createInitialState();
-    for (const raw of rawEvents) {
-      const event = projectRuntimeClientEvent(raw, { sessionRevision: 1 });
-      expect(event).toBeDefined();
-      state = eventReducer(state, { type: 'RUNTIME_EVENT', event: event! });
-    }
+    for (const event of events) state = eventReducer(state, { type: 'RUNTIME_EVENT', event });
 
     const summaries = state.turns
       .flatMap((turn) => turn.blocks)
@@ -202,22 +208,25 @@ describe('closed RuntimeClientEvent reducer', () => {
 
   test('keeps queued exploration hidden, then merges parallel starts and terminal events by call id', () => {
     const queue = (toolCallId: string, name: string, args: Record<string, unknown>) =>
-      projectRuntimeClientEvent(
-        { type: 'tool.queued', toolCallId, name, args },
-        { sessionRevision: 1 },
-      )!;
+      ({
+        type: 'tool.queued',
+        toolId: toolCallId,
+        toolName: name as Extract<RuntimeClientEvent, { type: 'tool.queued' }>['toolName'],
+        presentation: 'exploration',
+        arguments: args,
+        summary: 'Queued.',
+      }) satisfies RuntimeClientEvent;
     const started = (toolCallId: string) =>
-      projectRuntimeClientEvent({ type: 'tool.started', toolCallId }, { sessionRevision: 1 })!;
+      ({ type: 'tool.started', toolId: toolCallId }) satisfies RuntimeClientEvent;
     const finished = (toolCallId: string, name: string) =>
-      projectRuntimeClientEvent(
-        {
-          type: 'tool.finished',
-          toolCallId,
-          name,
-          result: { ok: true, command: 'ignored', exitCode: 0, stdout: 'private', stderr: '' },
-        },
-        { sessionRevision: 1 },
-      )!;
+      ({
+        type: 'tool.finished',
+        toolId: toolCallId,
+        toolName: name as Extract<RuntimeClientEvent, { type: 'tool.finished' }>['toolName'],
+        presentation: 'exploration',
+        result: { ok: true, exitCode: 0, stdout: 'private', stderr: '' },
+        summary: 'Completed.',
+      }) satisfies RuntimeClientEvent;
 
     let state = createInitialState();
     for (const [toolCallId, name, args] of [

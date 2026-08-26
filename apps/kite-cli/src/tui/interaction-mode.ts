@@ -1,5 +1,5 @@
 import { InteractionMode } from '@kite-ai/runtime-contract';
-import { appSandboxBackendAvailable, type SandboxBackend } from '#kite-cli/sandbox/types';
+import { appSandboxBackendAvailable, type SandboxBackend } from './client-types';
 
 export type TuiInteractionMode =
   | typeof InteractionMode.AcceptEdits

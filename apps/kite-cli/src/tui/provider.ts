@@ -1,13 +1,16 @@
-import type { ShellApprovalGrant } from '@kite-ai/runtime-contract';
-import type {
-  SessionInterruptPayload,
-  SessionUserAction,
-} from '#kite-cli/runtime/session/contracts';
+import type { RuntimeClientInteraction, ShellApprovalGrant } from '@kite-ai/runtime-contract';
+import type { TuiSubmittedInteractionAction as SessionUserAction } from '../adapters/tui/session-adapter';
 
 export type TuiAction =
   | { type: 'approve'; interactionId: string; generation: number; grant: ShellApprovalGrant }
   | { type: 'reject'; interactionId: string; generation: number }
-  | { type: 'input'; interactionId?: string; text: string; answers?: Record<string, string> }
+  | {
+      type: 'input';
+      interactionId?: string;
+      text: string;
+      optionId?: string;
+      answers?: Record<string, string>;
+    }
   | { type: 'cancel'; interactionId?: string }
   | {
       type: 'plan_review_decision';
@@ -20,7 +23,8 @@ export type TuiAction =
         | { kind: 'revise'; feedback: string }
         | { kind: 'cancel'; reason?: string };
     };
-export type TuiInterruptPayload = SessionInterruptPayload;
+/** Client-safe interaction payload; Service-owned approval/input details never cross this type. */
+export type TuiInterruptPayload = RuntimeClientInteraction;
 
 type PendingResolve = (action: SessionUserAction) => void;
 
@@ -31,7 +35,7 @@ export class TuiUserInputProvider {
   private readonly submittedActionKeys = new Set<string>();
 
   /** 获取当前待处理的中断负载 / Get current pending interrupt payload */
-  getPendingInterrupt(): SessionInterruptPayload | null {
+  getPendingInterrupt(): TuiInterruptPayload | null {
     return this.pendingInterrupt;
   }
 
@@ -110,7 +114,7 @@ export class TuiUserInputProvider {
 
   private normalizeAction(
     action: TuiAction,
-    pending: SessionInterruptPayload,
+    pending: TuiInterruptPayload,
   ): SessionUserAction | null {
     const id = action.interactionId ?? pending.interactionId;
     switch (action.type) {
@@ -130,6 +134,7 @@ export class TuiUserInputProvider {
           type: 'input',
           interactionId: id,
           text: action.text,
+          ...(action.optionId ? { optionId: action.optionId } : {}),
           ...(action.answers ? { answers: action.answers } : {}),
         };
       case 'cancel':
@@ -164,6 +169,7 @@ export class TuiUserInputProvider {
           type: 'input',
           interactionId: action.interactionId,
           text: action.text,
+          ...(action.optionId ? { optionId: action.optionId } : {}),
           ...(action.answers ? { answers: action.answers } : {}),
         };
       case 'cancel':

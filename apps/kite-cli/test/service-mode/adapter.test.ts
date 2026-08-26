@@ -273,6 +273,8 @@ function createFixture(): {
     get generation() {
       return fixture.generation;
     },
+    prepareAppControl: async () => undefined,
+    connect: async () => undefined,
     reconnect: async () => {
       fixture.reconnectCalls += 1;
     },

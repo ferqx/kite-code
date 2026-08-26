@@ -149,6 +149,7 @@ export function mapRuntimeClientEventToProtocol(
     case 'turn.terminal':
     case 'run.terminal':
     case 'run.failure':
+    case 'rewind.terminal':
     case 'interaction.available':
     case 'session.notice':
     case 'unavailable':
@@ -197,6 +198,7 @@ function mapSession(session: RuntimeSessionProjection) {
     ...(session.displayName === undefined ? {} : { displayName: session.displayName }),
     ...(session.updatedAt === undefined ? {} : { updatedAt: session.updatedAt }),
     lifecycle: session.lifecycle,
+    ...(session.model === undefined ? {} : { model: session.model }),
     sessionCommandGrantCount: session.sessionCommandGrantCount ?? 0,
     ...(activeWork === undefined ? {} : { activeWork }),
   });

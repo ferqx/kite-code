@@ -114,8 +114,11 @@ suspension lineage；每个 sibling 的 ordinal 独立从 1 开始，resume 从 
 continuation 与 current attempt lineage 任一漂移都在 Gateway lookup 前 fail closed。production 只显式构造
 live Source。
 
-production composition 使用 owner-only `~/.kite-code/model-artifacts/`，不创建或加载 Artifact
-installation key。既有 Artifact 缺失、损坏或路径/权限 identity 不安全时不得覆盖或回退无 evidence dispatch。
+production Service composition 使用由 manager 验证并显式注入的 exact `KITE_CODE_HOME` 作为 code root，
+模型与计划 Artifact 分别位于该 root 下的 `model-artifacts/` 与 `plans/`，不得再次追加 `.kite-code`，也不得从
+Workspace cwd、dotenv 或 ambient `HOME` 改写该 root。仅未注入 Service identity 的 library fallback 保留
+`~/.kite-code`；显式参数始终优先。模型 Artifact 不创建或加载 installation key。既有 Artifact 缺失、损坏或
+路径/权限 identity 不安全时不得覆盖或回退无 evidence dispatch。
 Runtime 使用 State 27/SAQ epoch；
 `modelInvocations` 是当前格式的必需 evidence 投影，字段缺失属于 corruption，不从旧 transcript/config
 反推历史 Surface。同一 schema/epoch 内已列明的旧 Provider admission 事件形状仍可回放；未知 source 不进入

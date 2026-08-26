@@ -94,7 +94,7 @@ function resolveImport(file: string, specifier: string, sourceRoot: string): str
   if (specifier.startsWith('@/app/sandbox/')) {
     const relocated = resolve(
       dirname(sourceRoot),
-      'apps/kite-cli/src/sandbox',
+      'apps/kite-service/src/sandbox',
       specifier.slice('@/app/sandbox/'.length),
     );
     if (resolveSourceModule(relocated)) return relocated;
@@ -247,7 +247,7 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
   );
   const relocatedSubagentRoot = resolve(
     dirname(sourceRoot),
-    'apps/kite-cli/src/bootstrap/runtime/subagent',
+    'apps/kite-service/src/bootstrap/runtime/subagent',
   );
   const taskTool = resolve(relocatedSubagentRoot, 'task-tool');
   const concreteProviderModules = [
@@ -280,7 +280,7 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
 function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
   const relocatedSubagentRoot = resolve(
     dirname(sourceRoot),
-    'apps/kite-cli/src/bootstrap/runtime/subagent',
+    'apps/kite-service/src/bootstrap/runtime/subagent',
   );
   const toolAdapter = normalizedModulePath(resolve(relocatedSubagentRoot, 'tool-adapter'));
   const taskTool = normalizedModulePath(resolve(relocatedSubagentRoot, 'task-tool'));
@@ -416,7 +416,7 @@ function forbiddenSandboxProviderAuthority(sourceRoot: string): Violation[] {
 }
 
 function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
-  const relocatedAppSandbox = resolve(dirname(sourceRoot), 'apps/kite-cli/src/sandbox');
+  const relocatedAppSandbox = resolve(dirname(sourceRoot), 'apps/kite-service/src/sandbox');
   const appSandboxRoot = existsSync(relocatedAppSandbox)
     ? relocatedAppSandbox
     : resolve(sourceRoot, 'app/sandbox');

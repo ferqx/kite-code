@@ -1,11 +1,14 @@
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import type { LocalRuntimeLifecycleResult } from '@kite-ai/kite-local-runtime/client';
 import type {
+  KiteServiceManager,
+  KiteServiceManagerRequest,
+} from '@kite-ai/kite-local-runtime/manager';
+import type {
   KiteHomeIdentity,
   LocalRuntimeServiceDescriptor,
   LocalRuntimeServiceStatePaths,
 } from '@kite-ai/kite-local-runtime/service';
-import type { KiteServiceManager, KiteServiceManagerRequest } from '../manager';
 
 /**
  * Faults are deliberately a closed, test-only fixture vocabulary.  They are serialized into the

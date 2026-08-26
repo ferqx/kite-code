@@ -109,6 +109,23 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
   let signalResolve: ((result: KiteServiceLifecycleResult) => void) | undefined;
   let signalPromise: Promise<KiteServiceLifecycleResult> | undefined;
 
+  // State is the one lifecycle owner whose operations can publish/clear on disk. Keep those
+  // operations serialized even when a caller timeout has already returned. In particular, a
+  // late prepare/publish must settle before preserveFailure/clear is allowed to run; otherwise a
+  // timed-out startup could publish a fresh descriptor after failure evidence was recorded.
+  let stateOperationTail: Promise<void> = Promise.resolve();
+  const enqueueStateOperation = <T>(operation: () => PromiseLike<T>): Promise<T> => {
+    const next = stateOperationTail.then(
+      () => Promise.resolve().then(operation),
+      () => Promise.resolve().then(operation),
+    );
+    stateOperationTail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+
   const publish = async (
     next: KiteServiceReadiness,
     diagnostic?: KiteServiceDiagnostic,
@@ -117,11 +134,14 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
     publishBestEffort(readiness, next, diagnostic);
   };
 
-  const publishFailure = async (diagnostic: KiteServiceDiagnostic): Promise<void> => {
+  const publishFailure = async (
+    diagnostic: KiteServiceDiagnostic,
+    deadline = Date.now() + shutdownTimeoutMs,
+  ): Promise<void> => {
     try {
-      await withTimeout(
-        Promise.resolve().then(() => state.preserveFailure()),
-        shutdownTimeoutMs,
+      await withAbsoluteDeadline(
+        enqueueStateOperation(() => state.preserveFailure()),
+        deadline,
         'shutdown',
       );
     } catch {
@@ -141,6 +161,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
   };
 
   const complete = (result: KiteServiceLifecycleResult): KiteServiceLifecycleResult => {
+    if (terminalStop) return terminalStop;
     disposed = true;
     terminalStop = result;
     acceptedStop = undefined;
@@ -187,7 +208,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
       disposed = true;
       phase = 'draining';
       cleanupSignalSubscription();
-      await publishFailure('shutdown_failed');
+      await publishFailure('shutdown_failed', deadline);
       return complete({
         operation,
         outcome: 'unavailable',
@@ -202,7 +223,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
       const abortTimer = setTimeout(() => clearAbort.abort(), remaining);
       try {
         await withAbsoluteDeadline(
-          state.clear({ signal: clearAbort.signal }),
+          enqueueStateOperation(() => state.clear({ signal: clearAbort.signal })),
           deadline,
           'shutdown',
         );
@@ -213,7 +234,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
       disposed = true;
       phase = 'draining';
       cleanupSignalSubscription();
-      await publishFailure('shutdown_failed');
+      await publishFailure('shutdown_failed', deadline);
       return complete({
         operation,
         outcome: 'unavailable',
@@ -262,7 +283,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
       publishBestEffort(readiness, 'starting');
       try {
         await withAbsoluteDeadline(
-          Promise.resolve().then(() => state.prepareStart({ signal: startupAbort.signal })),
+          enqueueStateOperation(() => state.prepareStart({ signal: startupAbort.signal })),
           startupDeadline,
           'startup',
         );
@@ -275,7 +296,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
         );
         await withAbsoluteDeadline(transportStartPromise, startupDeadline, 'startup');
         await withAbsoluteDeadline(
-          Promise.resolve().then(() => state.publishReady({ signal: startupAbort.signal })),
+          enqueueStateOperation(() => state.publishReady({ signal: startupAbort.signal })),
           startupDeadline,
           'startup',
         );
@@ -302,7 +323,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
         }
         cleanupSignalSubscription();
         phase = 'absent';
-        await publishFailure('startup_failed');
+        await publishFailure('startup_failed', cleanupDeadline);
         complete({
           operation: 'stop',
           outcome: 'unavailable',
@@ -340,6 +361,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
     let quiescePromise:
       | Promise<Awaited<ReturnType<KiteRuntimeApplicationPort['quiesceMutations']>>>
       | undefined;
+    let quiesceSettled = false;
     let commitPromise: Promise<void> | undefined;
     const failures: unknown[] = [];
     try {
@@ -360,6 +382,14 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
         }
       }
       quiescePromise = Promise.resolve().then(() => application.quiesceMutations());
+      void quiescePromise.then(
+        () => {
+          quiesceSettled = true;
+        },
+        () => {
+          quiesceSettled = true;
+        },
+      );
       lease = await withAbsoluteDeadline(quiescePromise, shutdownDeadline, 'shutdown');
       if (!fromSignal && lease.activeOperations) {
         lease.resume();
@@ -377,7 +407,35 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
       await withAbsoluteDeadline(commitPromise, shutdownDeadline, 'shutdown');
       return cleanupOwners(operation, failures, shutdownDeadline);
     } catch (error) {
-      if (!lease && quiescePromise) {
+      if (!lease && quiescePromise && !quiesceSettled) {
+        if (fromSignal) {
+          // A signal shutdown must not dispose the application while a timed-out quiesce can
+          // still return a lease. Finish the gate transition first, then run owner cleanup. The
+          // caller receives a bounded unavailable result; the late barrier retains failure
+          // evidence and prevents a second cleanup from racing the original lease.
+          phase = 'draining';
+          const lateCleanup = quiescePromise.then(
+            async (lateLease) => {
+              const lateFailures = [...failures, error];
+              try {
+                await lateLease.commitDrain();
+              } catch (lateError) {
+                lateFailures.push(lateError);
+              }
+              return cleanupOwners(operation, lateFailures, shutdownDeadline);
+            },
+            (lateError) =>
+              cleanupOwners(operation, [...failures, error, lateError], shutdownDeadline),
+          );
+          void lateCleanup.catch(() => undefined);
+          await publishFailure('shutdown_failed', shutdownDeadline);
+          return complete({
+            operation,
+            outcome: 'unavailable',
+            state: phase,
+            diagnostic: diagnosticFor(error, 'shutdown_failed'),
+          });
+        }
         void quiescePromise.then(
           (lateLease) => {
             try {
@@ -391,11 +449,13 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
       }
       if (commitPromise) {
         phase = 'draining';
-        void commitPromise.then(
+        const lateCleanup = commitPromise.then(
           () => cleanupOwners(operation, [...failures, error], shutdownDeadline),
-          () => cleanupOwners(operation, [...failures, error], shutdownDeadline),
+          (commitError) =>
+            cleanupOwners(operation, [...failures, error, commitError], shutdownDeadline),
         );
-        await publishFailure('shutdown_failed');
+        void lateCleanup.catch(() => undefined);
+        await publishFailure('shutdown_failed', shutdownDeadline);
         return complete({
           operation,
           outcome: 'unavailable',
@@ -464,10 +524,19 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
     let quiescePromise:
       | Promise<Awaited<ReturnType<KiteRuntimeApplicationPort['quiesceMutations']>>>
       | undefined;
+    let quiesceSettled = false;
     let commitStarted = false;
     let commitPromise: Promise<void> | undefined;
     try {
       quiescePromise = Promise.resolve().then(() => application.quiesceMutations());
+      void quiescePromise.then(
+        () => {
+          quiesceSettled = true;
+        },
+        () => {
+          quiesceSettled = true;
+        },
+      );
       lease = await withAbsoluteDeadline(quiescePromise, shutdownDeadline, 'shutdown');
       if (lease.activeOperations) {
         lease.resume();
@@ -490,7 +559,7 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
       );
       return acceptedStop;
     } catch (error) {
-      if (!lease && quiescePromise) {
+      if (!lease && quiescePromise && !quiesceSettled) {
         void quiescePromise.then(
           (lateLease) => {
             try {
@@ -504,11 +573,12 @@ export function createKiteServiceShell(options: KiteServiceShellOptions): KiteSe
       }
       if (commitStarted && commitPromise) {
         phase = 'draining';
-        void commitPromise.then(
+        const lateCleanup = commitPromise.then(
           () => cleanupOwners('stop', [error], shutdownDeadline),
-          () => cleanupOwners('stop', [error], shutdownDeadline),
+          (commitError) => cleanupOwners('stop', [error, commitError], shutdownDeadline),
         );
-        await publishFailure('shutdown_failed');
+        void lateCleanup.catch(() => undefined);
+        await publishFailure('shutdown_failed', shutdownDeadline);
         return complete({
           operation: 'stop',
           outcome: 'unavailable',

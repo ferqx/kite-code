@@ -8,9 +8,9 @@
 - `packages/builtin-runtime/src/tool-contracts.ts`
 - `packages/builtin-runtime/src/tool-schemas.ts`
 - `packages/builtin-runtime/src/tool-catalog.ts`
-- `apps/kite-cli/src/bootstrap/runtime/tool-pipeline-composition.ts`（App composition bridge）
+- `apps/kite-service/src/bootstrap/runtime/tool-pipeline-composition.ts`（Service composition bridge）
 - `tests/helpers/governed-tool.ts`（严格 test-only 的旧执行兼容体，不属于 production authority）
-- `apps/kite-cli/test/tool-definitions.test.ts`、`tests/integration/tool-parse-error.test.ts`、
+- `apps/kite-service/test/tool-definitions.test.ts`、`tests/integration/tool-parse-error.test.ts`、
   `packages/builtin-runtime/test/builtin-runtime.test.ts`（契约与 catalog 验证测试）
 
 读取时机：
@@ -80,8 +80,8 @@ Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen
 `createRuntimeModuleRegistry(createBuiltinRuntimeModules()).snapshot()` →
 `createBuiltinToolCatalogProjection()` 投影；新增 builtin 必须先在 Builtin definition 注册完整结构化事实，再进入
 SPI registry。模型 surface、Runner recovery guidance 与 capability descriptor 必须来自同一 frozen projection。
-`apps/kite-cli/src/bootstrap/runtime/tool-pipeline-composition.ts` 只是 App composition bridge，不能成为第二 authority。
-确定性由 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite-cli/test/tool-definitions.test.ts` 与 schema-parity 测试守护。
+`apps/kite-service/src/bootstrap/runtime/tool-pipeline-composition.ts` 只是 Service composition bridge，不能成为第二 authority。
+确定性由 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite-service/test/tool-definitions.test.ts` 与 schema-parity 测试守护。
 
 Builtin catalog conformance 必须枚举当前 20 个 model-visible entry 与 8 个 internal entry，并在
 planning/building 的合法 availability context 中验证 Skill catalog、active frame、task adapter、tool search
@@ -145,7 +145,7 @@ note、skipped reason code 与 `complete_plan`；其 strict schema 必须拒绝 
 
 ## 测试期望
 
-`apps/kite-cli/test/tool-definitions.test.ts` 中 `tool contracts (ACI)` describe 块应断言：
+`apps/kite-service/test/tool-definitions.test.ts` 中 `tool contracts (ACI)` describe 块应断言：
 
 - 每个注册工具都有可归一化的结构化契约。
 - standard/catalog description 都由同一事实生成并保持在预算内。

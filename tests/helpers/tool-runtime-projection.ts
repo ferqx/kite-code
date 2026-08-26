@@ -17,8 +17,8 @@ import { type CapabilityTurnContext, createRuntimeModuleRegistry } from '@kite-a
 import {
   type AppToolTurnContext,
   createAppToolTurnContext,
-} from '#kite-cli/bootstrap/runtime/tool-turn-context';
-import type { AgentConfig } from '#kite-cli/config/index';
+} from '#kite-service/bootstrap/runtime/tool-turn-context';
+import type { AgentConfig } from '#kite-service/config/index';
 
 export interface CreateAgentToolsInput {
   workspace: string;

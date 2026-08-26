@@ -1,12 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeCheckpointEntry as RuntimeSnapshotEntry } from '@kite-ai/runtime-host/storage';
 import { render } from 'ink-testing-library';
 import type { MutableRefObject } from 'react';
-import type { FileRestorePreview } from '../src/bootstrap/runtime/file-checkpoints';
 import CheckpointSelector from '../src/tui/components/CheckpointSelector';
+import type { RewindFilePreview, RuntimeCheckpointEntry } from '../src/tui/runtime-presentation';
 import type { RewindScope } from '../src/tui/types';
 
-const checkpoints: RuntimeSnapshotEntry[] = [
+const checkpoints: RuntimeCheckpointEntry[] = [
   {
     snapshotId: 'turn-2c123456',
     eventPosition: 20647,
@@ -26,7 +25,7 @@ const checkpoints: RuntimeSnapshotEntry[] = [
   },
 ];
 
-const filePreview: FileRestorePreview = {
+const filePreview: RewindFilePreview = {
   files: [
     { path: 'types.ts', addedLines: 881, removedLines: 3921 },
     { path: 'config.ts', addedLines: 2, removedLines: 1 },
@@ -38,7 +37,7 @@ const filePreview: FileRestorePreview = {
   failureCount: 0,
 };
 
-const noChangePreview: FileRestorePreview = {
+const noChangePreview: RewindFilePreview = {
   files: [],
   lineStatsAvailable: true,
   addedLines: 0,
@@ -161,12 +160,12 @@ describe('CheckpointSelector', () => {
   });
 
   test('ignores a stale async preview after selecting another rewind scope', async () => {
-    let resolveFirst!: (value: FileRestorePreview) => void;
-    let resolveSecond!: (value: FileRestorePreview) => void;
-    const first = new Promise<FileRestorePreview>((resolve) => {
+    let resolveFirst!: (value: RewindFilePreview) => void;
+    let resolveSecond!: (value: RewindFilePreview) => void;
+    const first = new Promise<RewindFilePreview>((resolve) => {
       resolveFirst = resolve;
     });
-    const second = new Promise<FileRestorePreview>((resolve) => {
+    const second = new Promise<RewindFilePreview>((resolve) => {
       resolveSecond = resolve;
     });
     let calls = 0;

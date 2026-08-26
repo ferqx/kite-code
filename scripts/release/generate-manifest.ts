@@ -1,7 +1,7 @@
 import {
   type ProductionDistributionTargetIdentity,
   parseProductionDistributionTargetIdentity,
-} from '#kite-cli/config/release-profile';
+} from '#kite-service/config/release-profile';
 import { type ReleaseManifest, validateReleaseManifest } from './artifact-layout';
 import { type BehaviorDigest, generateBehaviorDigest } from './behavior-digest';
 import { sha256Digest } from './canonical-json';

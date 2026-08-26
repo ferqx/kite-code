@@ -150,7 +150,7 @@ describe('platform capability probe admission', () => {
     for (const path of [
       'packages/builtin-runtime/src/sandbox/**',
       'packages/runtime-host/src/process/**',
-      'apps/kite-cli/src/sandbox/**',
+      'apps/kite-service/src/sandbox/**',
       'vendor/isksh/**',
     ]) {
       expect(workflow).toContain(`- "${path}"`);

@@ -202,6 +202,13 @@ export function handleClientEventAction(state: TuiState, event: RuntimeClientEve
         toolBearingModelRequestId: undefined,
         currentModelReasoningRequestId: undefined,
       };
+    case 'rewind.terminal':
+      return event.status === 'failed'
+        ? appendNotice(
+            settleCurrentThought(state),
+            `Rewind failed: ${event.failureCode ?? 'execution_failed'}.`,
+          )
+        : state;
     case 'session.notice':
       return appendNotice(settleCurrentThought(state), event.message ?? event.code);
     case 'unavailable':
@@ -1157,7 +1164,23 @@ function updateSafeToolProgress(
     state,
     (block) => block.kind === 'tool_card' && block.callId === event.toolId,
   );
-  if (existing?.kind !== 'tool_card' || existing.status !== 'running') return state;
+  if (existing?.kind !== 'tool_card') {
+    // Ephemeral progress is intentionally not replayed. A client that joins
+    // after the durable queued/started facts may therefore see only this safe,
+    // App-projected text. Materialize an anonymous standalone card so a later
+    // exact cancellation can settle it; no tool kind, arguments, or authority
+    // are inferred from the progress payload.
+    const queued = queueSafeClientTool(state, {
+      type: 'tool.queued',
+      toolId: event.toolId,
+      presentation: 'standalone',
+      arguments: {},
+      summary: 'Tool output available.',
+    });
+    const started = startSafeClientTool(queued, event.toolId, 'Running tool.');
+    return updateSafeToolProgress(started, event);
+  }
+  if (existing.status !== 'running') return state;
   const previous = existing.liveOutput;
   const combined = previous === undefined ? event.summary : `${previous}\n${event.summary}`;
   const lines = combined.split('\n');

@@ -4,7 +4,7 @@
 
 读取时机：修改 Agent loop、Kernel state/event/reducer、Capability、Policy、Execution、Verification、Host lifecycle、Builtin module、SQLite storage 或 App composition 时。
 
-验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`。
+验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`、`bun run --cwd packages/kite-local-runtime test`、`bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-cli test`。
 
 相关：ADR-0128、ADR-0137、ADR-0138、ADR-0140、ADR-0142、ADR-0143；模块局部边界见各 workspace README。
 
@@ -52,8 +52,8 @@ runtime-spi ──────────────────────�
 runtime-host ─────────────────────────────────────────────→ agent-kernel + runtime-contract + runtime-spi
 runtime-storage-sqlite ───────────────────────────────────→ runtime-host
 builtin-runtime ──────────────────────────────────────────→ runtime-contract + runtime-spi
-apps/kite-cli ─────────────────────────────────────────────→ app-contract + local-runtime + client + server + host + builtin + sqlite + protocol + contract + spi
-apps/kite-service ─────────────────────────────────────────→ app-contract + local-runtime + client + server + protocol + contract
+apps/kite-cli ─────────────────────────────────────────────→ app-contract + local-runtime + client + contract
+apps/kite-service ─────────────────────────────────────────→ app-contract + local-runtime + client + server + host + builtin + sqlite + protocol + contract + spi
 ```
 
 `runtime-protocol` 拥有精确、browser-safe、framing-neutral 的 JSON-RPC V1 DTO/codec、allowlist、schema 与 limits；不拥有 Runtime execution、listener、Workspace 或 client-state authority。`runtime-server` 只拥有 connection state、initialize/routing、subscription multiplexing、bounded outbound delivery 与 connection shutdown，并且 core 只接受 abstract duplex logical-message connection。它仅注入 `RuntimeAccess` 和 App-owned admission，不得创建 Host、Kernel、Builtin module、Store、SQLite reader 或 listener。`runtime-client` 拥有 request correlation、reconnect/resubscribe、generation/snapshot state 与 `RuntimeHistoryClient` interface；不依赖 Server concrete type、Host、storage 或 UI。
@@ -65,30 +65,33 @@ I/O、credential、process、descriptor 或 UI。`@kite-ai/kite-local-runtime` �
 codec并实现Native connector；package本身仍不实现listener、spawn、Store或Runtime composition。它不得依赖Host、Server、Builtin、SQLite、UI或
 任一 App source。
 
-KLSV1-03 阶段 `apps/kite-cli/src/bootstrap.ts` 仍是唯一 concrete Runtime composition root：它创建唯一
-Host/Store/Kernel/Builtin assembly，并在 app-local InProcess owner内组合 Runtime Application、Workspace context router、
-per-connection admission、History与App Control。真实 integration证明一个 Host/SQLite writer可承载多个 canonical
-Workspace和同 Workspace多个 Session；context按完整 Project identity隔离，重启从唯一 Store恢复 Session identity，
-跨 Workspace create/resume/query/subscribe/fork fail closed。App已用 explicit Runtime/History/App Control facade固定
-client seam，但 production仍未启动独立 Service。不存在 sidecar Runtime Server、第二 composition root、第二 Store
-writer、dual write、alternate transport execution path、`try-new-catch-old` fallback或legacy Host bridge。
+`apps/kite-service/src/composition.ts` 是唯一 concrete Runtime composition root：它创建唯一 Host、State 27 / Store 6
+SQLite writer、Builtin assembly、Runtime Server、raw History projector/readonly reader、Runtime Application 与 App
+Control owner。一个 Service process可承载多个 canonical Workspace与同一 Workspace的多个 Session；context按完整
+Project identity隔离，重启从这一个 Store恢复 Session identity，跨 Workspace create/resume/query/subscribe/fork
+fail closed。不存在第二 composition root、第二默认 Store writer、dual write、alternate execution backend、
+`try-new-catch-old` fallback或legacy Host bridge。
 
 Runtime Application的共享 operation gate先阻止新 mutation admission，再等待active临界区并决定resume或commit drain。
 Service-owned interaction broker持有durable generation/revision waiter；connection disconnect只释放client binding，
 不取消Turn/approval或关闭Host，只有显式owner shutdown关闭broker。Workspace Trust、Provider/model、MCP、Skill、
-execution/release和Native first-run credential已经由exact client use case取代TUI direct repository/supervisor access；
-config、actual Skill、MCP runtime provider、shell/sandbox与observability仍按canonical Workspace在app-local owner组合。
-raw Runtime event/history projector与concrete bootstrap仍在`apps/kite-cli`内部，KLSV1-06才按relocation manifest迁移；
-KLSV1-04新增private `apps/kite-service` shell、真实Native loopback carrier policy、state composition与App-private
-manager。Runtime Application、History与App Control仍通过required fake/in-process ports注入；普通入口尚未启动该
-process，唯一concrete Host/Store/bootstrap仍在`apps/kite-cli`。因此这不是第二composition root，不改变default Store
-owner，不公开`kite service *`，也没有KLSV1-06 raw History relocation或默认双Host/Store。
+execution/release和Native first-run credential由Service的exact App Control/credential owner提供；config、actual Skill、
+MCP runtime provider、shell/sandbox、observability与History projector也都按canonical Workspace在Service内组合。
 
-KLSV1-05已实现`kite-local-runtime/client` Native connector、CLI opt-in typed Service-mode adapter与未公开真实child
-process harness。connector只读取descriptor/access token，通过one-shot ticket组合Runtime WebSocket、History与exact
-App Control，并复用`RuntimeClient` generation reset/resubscribe；CLI adapter不缓存第二份state，close不取消Session或
-dispose Host。process child仍注入fake application且使用isolated home，普通production bootstrap继续InProcess；因此
-唯一concrete composition root仍是`apps/kite-cli/src/bootstrap.ts`，没有app-to-app production import或silent fallback。
+`apps/kite-cli`只拥有CLI/TUI/presentation、UI-local preferences与Native client composition。CLI/TUI先通过
+authenticated App Control完成Workspace Trust query/decision，再建立one-shot ticket Runtime connection；之后只消费
+Runtime/History/App Control/credential client。client close只关闭本connection/subscription/snapshot state，不取消
+Session或dispose Service Host。CLI不依赖Server、Host、Builtin、SQLite或Runtime SPI，也不导入Service source；Service
+同样不导入CLI source。发布组合只把typed manager/connector传给terminal App，没有app-to-app production import、
+embedded fallback或第二默认Store。`kite service ensure/status/stop/restart`只是同一typed manager的显式lifecycle
+surface，不把control token或process/state authority交给普通Runtime connection。
+
+Native manager把`GET /readyz`只作为liveness precheck，随后用restart-scoped access token执行exact
+`POST /_kite/instance`与`{}` body。它严格验证content type、大小、closed keys以及
+`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`，并比较descriptor/PID/
+Protocol/client contract/server version/build identity。malformed、server identity drift或无关listener返回
+`unavailable/identity_uncertain`；descriptor/expected build不匹配返回`incompatible/build_mismatch`。两类都保留state、
+`spawn=0`，且绝不从调用者descriptor回显或重建健康身份。
 
 ## Runtime Kernel
 
@@ -137,7 +140,7 @@ Builtin concrete operation modules位于 `git/model/planning/subagent/verificati
 
 ## Session、Context 与 Model
 
-App Session 代码位于 `apps/kite-cli/src/runtime/session/`：
+App Session 代码位于 `apps/kite-service/src/runtime/session/`：
 
 - `session-registry` 只管理运行时身份；
 - `session-lifecycle` 管理列表、加载、删除与命名；
@@ -155,14 +158,14 @@ route-local 退避时隙；不得让 sibling Subagent 以完全相同的指数�
 共享协调只在真实 `provider_rate_limited` observation 后生效，且实际时隙延迟必须写入各 invocation 自己的
 `model.retry.delayMs`。
 
-TUI 与 foreground CLI 都只通过 `RuntimeClient → RuntimeServer → RuntimeAccess` 的同一 Client path 进行 command/query/subscribe；InProcess 同样经过 Protocol codec、initialize、admission、subscription ordering 和 Server routing。TUI 通过 `apps/kite-cli/src/adapters/tui/session-adapter.ts` 获取 typed client surface，二者均不接触 Kernel state、Host execution control、Builtin executor 或 SQLite handle。完整旧 Session history 不从 notification replay、trace、JSONL 或 Server history 补偿，而是走 `RuntimeClient.history → RuntimeHistoryClient → App exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`，并与 live 使用同一 TUI reducer。
+TUI 与 foreground CLI 都只通过Native `RuntimeClient → RuntimeServer → RuntimeAccess` 的同一 Client path进行 command/query/subscribe；one-shot ticket、initialize、admission、subscription ordering和Server routing均不可绕过。TUI通过`apps/kite-cli/src/adapters/tui/session-adapter.ts`获取typed client surface，二者均不接触Kernel state、Host execution control、Builtin executor或SQLite handle。完整旧Session history不从notification replay、trace、JSONL或Server history补偿，而是走`RuntimeClient.history → RuntimeHistoryClient → Service exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`，并与live使用同一TUI reducer。
 
 每个新建或恢复 Session 先持有自己的 bootstrap readiness promise，后续 turn、compaction、reset、mode、cancel、rewind 与 close 必须等待 exact `create_session` / `resume_session` applied receipt，再读取 committed revision 并提交命令。空 Session 可以在首个 Runtime event 前没有 transcript，但不能让 follow-up command 抢跑到尚未建立的 Host authority，也不能因跨 Session 的本地 sequence 排序把命令归给旧 Session。
-Ctrl+C 的同步 TUI surface 在返回前先调用真实 SessionRuntime 取消，使 Provider、Shell preparation 与交互 waiter
-立即收到本地 AbortSignal；随后仍须通过同一 Runtime Client path 提交 durable `cancel_turn` 并消费回执。
-若 notification 在读取 revision 与 Host admission 之间前移 committed revision，Client 使用 conflict 回执中的最新
-revision 和新 command ID 重试；不可重试的拒绝投影为 `run.error`，不能静默丢弃。该同步适配不创建第二 mailbox、
-receipt cache 或 root-controller authority，Host lifecycle 仍只在 applied receipt 后执行自己的 abort。
+Ctrl+C通过Native TUI client提交durable`cancel_turn`；若notification在读取revision与Host admission之间前移
+committed revision，Client使用conflict回执中的最新revision和新command ID有界重试。terminal App不持有Service
+进程内AbortController、第二mailbox、receipt cache或root-controller authority，Host lifecycle仍只在applied receipt后
+执行自己的abort。不可重试的拒绝必须进入client错误/终态投影，不能静默改写为本地取消。TUI exit与Ctrl+C不同：exit
+只关闭client connection，不隐式调用`abortAll()`或dispose Service Host。
 
 历史 Session 的 `resume_session` 还是 presentation admission barrier：先在唯一 Coordinator 中提交通用 restart facts，
 再完成 Subagent Provider/sandbox process authority cleanup，随后 TUI await readiness、重读 Store head，最后才提交前台

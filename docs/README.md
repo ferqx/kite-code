@@ -43,13 +43,15 @@ Local Runtime Service 的客户端边界已经分成 browser-safe `kite-app-cont
 `kite-local-runtime`；前者使用独立 App Control source owner，后者的 Native client 与 Service state primitive
 使用互斥规则。未来 listener/process 实现不得落回通用 CLI、Runtime Client 或 carrier 规则。
 
-KLSV1-04 的private `apps/kite-service` production source使用三条互斥owner：application/shell与package manifest、
-`src/carrier/**`、`src/manager/**`。不得再添加覆盖整个Service source的generic通配规则；Native filesystem primitive
-仍由`kite-local-runtime-service-state`独占。代表路径测试固定验证每个生产文件只命中一个owner。
+KLSV1-06 clean cutover 后，`apps/kite-service` 的 application/composition、carrier、Runtime backend、App Control、
+MCP、Sandbox、Observability、Session Logger、release 与 process harness 使用互斥 owner；`manager/**` 已迁入
+`kite-local-runtime-manager`。不得添加覆盖整个 Service source 的 generic 通配规则，也不得让已迁出的 CLI 路径
+继续满足 Service authority。Native filesystem primitive 仍由 `kite-local-runtime-service-state` 独占；代表路径测试
+固定验证每个生产文件只命中一个 owner，并验证 `apps/kite-cli` 仍有真实 package consumer，不能靠放宽 public entry
+消除 consumer gate。
 
-KLSV1-05又把Native connector、CLI opt-in Service-mode adapter与Service process harness分别放入独立source owner；
-它们从原generic package/App规则排除。process harness是未公开fake-application fixture，不能用其source满足真实
-composition或release authority。
+process harness 继续是未公开 fake-application fixture，不能用其 source 满足真实 composition 或 release authority。
+CLI Service-mode adapter只消费`kite-local-runtime/client`，不拥有 manager、carrier 或 backend。
 
 ## 并发开发
 

@@ -63,15 +63,15 @@ Runtime Event 到 secret-free observation fact 只有一个 owner：`@kite-ai/ag
 `@kite-ai/builtin-runtime` 的 `createBuiltinObservabilityProjector` 只消费 typed fact、model、receipt、resource、release
 与 task-stage DTO，并生成 metric draft；它不导入 Runtime Event 或 Host schema。Metric name、字段与数值约束仍只有
 `@kite-ai/runtime-host` 的现有 metric schema 在 `createMetricSample` 边界校验。
-`apps/kite-cli` 的 Runtime bridge 只负责把 Builtin draft 交给 Host reporter，并吞掉 projector、schema 或 reporter 异常，不能改变
-Runtime outcome。旧 `src/core/observability/runtime-fact.ts` 兼容 seam 已删除；App `RuntimeSessionCoordinator` 与 CLI
+`apps/kite-service` 的 Runtime bridge 只负责把 Builtin draft 交给 Host reporter，并吞掉 projector、schema 或 reporter 异常，不能改变
+Runtime outcome。旧 `src/core/observability/runtime-fact.ts` 兼容 seam 已删除；Service `RuntimeSessionCoordinator`
 只经 `@kite-ai/runtime-host` 的窄 `projectRuntimeObservabilityFact` port 调用同一 Kernel projector。禁止恢复
 旧 mapper/shim 或在 Contract、Builtin、App 复制 Event→fact 语义。
 
 Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低优先级样本并只记录本地 drop 计数。
-序列化、flush 或 shutdown 失败不得改变 Runtime outcome。CLI 退出执行有界 shutdown；TUI 的 `/exit`、
-双 Ctrl+C、SIGINT、SIGTERM 与 fatal ErrorBoundary 共用幂等 exit coordinator，并在退出前执行两个各
-不超过 250ms 的 flush/shutdown 阶段。当前开发 composition 没有 transport，因此链路实际为 no-op。
+序列化、flush 或 shutdown 失败不得改变 Runtime outcome。Service owner执行有界 reporter shutdown；TUI 的
+`/exit`、双 Ctrl+C、SIGINT、SIGTERM 与 fatal ErrorBoundary 共用幂等 exit coordinator，但只关闭 Native
+client connection，不 dispose Service Host。当前 composition 没有 remote transport，因此链路实际为 no-op。
 
 CLI `--telemetry-status` 只显示脱敏的本地启用状态，不显示 endpoint、secret、Workspace path 或正文。
 普通开发入口固定显示 `artifact_disabled`；TUI 不提供 telemetry slash 命令。

@@ -32,6 +32,20 @@ function shellCard(state: TuiState, callId: string): Extract<OutputBlock, { kind
 }
 
 describe('TUI shell progress projection', () => {
+  test('renders safe progress without inventing a missing tool identity', () => {
+    const state = reduce(createInitialState(), {
+      type: 'tool.progress',
+      toolId: 'late-shell',
+      summary: 'late-safe-output',
+      stream: 'stdout',
+    });
+
+    const card = shellCard(state, 'late-shell');
+    expect(card.liveOutput).toBe('late-safe-output');
+    expect(card.name).toBe('other');
+    expect(card.args).toEqual({});
+  });
+
   test('uses batch lineCount while retaining only the safe summary', () => {
     let state = startShell(createInitialState(), 'shell-batch');
     state = reduce(state, {

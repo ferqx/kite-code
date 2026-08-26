@@ -3,17 +3,17 @@ import {
   type AgentConfig,
   EMBEDDED_RELEASE_PROFILES_,
   SUPPORTED_PRODUCTION_EXECUTION_TARGETS_,
-} from '#kite-cli/config';
+} from '#kite-service/config';
 import { parseArgs } from '../../apps/kite-cli/src/cli/index';
 import {
   createReleaseControlledAgentConfig,
   type ReleaseComposition,
   resolveReleaseComposition,
-} from '../../apps/kite-cli/src/release/composition-root';
+} from '../../apps/kite-service/src/release/composition-root';
 import {
   formatReleaseStatus,
   projectReleaseStatus,
-} from '../../apps/kite-cli/src/release/status-projection';
+} from '../../apps/kite-service/src/release/status-projection';
 
 function config(releaseProfile = false): AgentConfig {
   return {
@@ -196,13 +196,13 @@ describe('App release composition and status projection', () => {
     expect(serialized).not.toContain('private-provider');
   });
 
-  test('CLI can tighten releaseProfile but cannot grant artifact authority', () => {
+  test('CLI rejects the retired local feature override and cannot grant artifact authority', () => {
     expect(() => parseArgs(['run', '--feature', 'releaseProfile=true'])).toThrow(
-      'release-controlled',
+      "Unsupported CLI option '--feature' after the Local Runtime Service cutover.",
     );
-    expect(parseArgs(['run', '--feature', 'releaseProfile=false']).featureOverrides).toEqual({
-      releaseProfile: false,
-    });
+    expect(() => parseArgs(['run', '--feature', 'releaseProfile=false'])).toThrow(
+      "Unsupported CLI option '--feature' after the Local Runtime Service cutover.",
+    );
     expect(parseArgs(['run', '--release-status']).releaseStatus).toBe(true);
   });
 });

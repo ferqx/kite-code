@@ -475,6 +475,82 @@ describe('Kite Service lifecycle shell', () => {
     });
   });
 
+  test('late prepareStart settles behind failure preservation without publishing readiness', async () => {
+    const prepare = deferred<void>();
+    const log: string[] = [];
+    const fake = createFakeApplication(log);
+    const ports = createRecordingPorts(log);
+    const state: KiteServiceStatePort = {
+      prepareStart: () => prepare.promise,
+      async publishReady() {
+        log.push('state.publishReady');
+      },
+      async preserveFailure() {
+        log.push('state.preserveFailure');
+      },
+      async clear() {
+        log.push('state.clear');
+      },
+    };
+    const shell = createKiteServiceShell({
+      application: fake.application,
+      state,
+      transport: ports.transport,
+      shutdownTimeoutMs: 5,
+      startupTimeoutMs: 5,
+    });
+
+    await expect(shell.start()).rejects.toBeInstanceOf(Error);
+    expect(shell.phase).toBe('absent');
+    expect(log).not.toContain('state.publishReady');
+    prepare.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(log).toContain('state.preserveFailure');
+    expect(shell.readiness).toBe('unavailable');
+    await expect(shell.start()).rejects.toThrow('disposed');
+  });
+
+  test('late publishReady settles before failure preservation and cannot resurrect the shell', async () => {
+    const publishReady = deferred<void>();
+    const log: string[] = [];
+    const fake = createFakeApplication(log);
+    const ports = createRecordingPorts(log);
+    const state: KiteServiceStatePort = {
+      async prepareStart() {
+        log.push('state.prepareStart');
+      },
+      publishReady: () => publishReady.promise,
+      async preserveFailure() {
+        log.push('state.preserveFailure');
+      },
+      async clear() {
+        log.push('state.clear');
+      },
+    };
+    const shell = createKiteServiceShell({
+      application: fake.application,
+      state,
+      transport: ports.transport,
+      shutdownTimeoutMs: 5,
+      startupTimeoutMs: 5,
+    });
+
+    await expect(shell.start()).rejects.toBeInstanceOf(Error);
+    expect(shell.phase).toBe('absent');
+    publishReady.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(log).toEqual([
+      'state.prepareStart',
+      'application.start',
+      'transport.start',
+      'transport.stop',
+      'application.dispose',
+      'state.preserveFailure',
+    ]);
+    expect(shell.readiness).toBe('unavailable');
+    await expect(shell.start()).rejects.toThrow('disposed');
+  });
+
   test('signal retries recovery shutdown after an in-flight ordinary stop reports busy', async () => {
     const firstQuiesce = deferred<KiteRuntimeApplicationQuiesceLease>();
     let quiesces = 0;
@@ -587,6 +663,148 @@ describe('Kite Service lifecycle shell', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(disposedCount).toBe(1);
     expect(log).not.toContain('state.clear');
+  });
+
+  test('signal quiesce timeout defers commit and owner cleanup until the late lease settles', async () => {
+    const quiesce = deferred<KiteRuntimeApplicationQuiesceLease>();
+    const commit = deferred<void>();
+    let disposedCount = 0;
+    const ports = createRecordingPorts([]);
+    const application: KiteRuntimeApplicationPort = {
+      start: async () => undefined,
+      quiesceMutations: () => quiesce.promise,
+      cancelAll: async () => undefined,
+      [Symbol.asyncDispose]: async () => {
+        disposedCount += 1;
+      },
+    };
+    const shell = createKiteServiceShell({
+      application,
+      state: ports.state,
+      transport: ports.transport,
+      signals: ports.signals,
+      shutdownTimeoutMs: 5,
+    });
+    await shell.start();
+
+    await expect(shell.signal('SIGTERM')).resolves.toMatchObject({
+      operation: 'signal_shutdown',
+      outcome: 'unavailable',
+      state: 'draining',
+    });
+    expect(disposedCount).toBe(0);
+    quiesce.resolve({
+      activeOperations: false,
+      resume: () => undefined,
+      commitDrain: () => commit.promise,
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(disposedCount).toBe(0);
+    commit.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(disposedCount).toBe(1);
+  });
+
+  test('late state clear is single-flight and cannot replace preserved shutdown failure', async () => {
+    const clear = deferred<void>();
+    const log: string[] = [];
+    const fake = createFakeApplication(log);
+    const ports = createRecordingPorts(log);
+    let clearCalls = 0;
+    const state: KiteServiceStatePort = {
+      async prepareStart() {
+        log.push('state.prepareStart');
+      },
+      async publishReady() {
+        log.push('state.publishReady');
+      },
+      async preserveFailure() {
+        log.push('state.preserveFailure');
+      },
+      clear: () => {
+        clearCalls += 1;
+        log.push('state.clear');
+        return clear.promise;
+      },
+    };
+    const shell = createKiteServiceShell({
+      application: fake.application,
+      state,
+      transport: ports.transport,
+      shutdownTimeoutMs: 5,
+    });
+    await shell.start();
+
+    await expect(shell.stop()).resolves.toMatchObject({
+      outcome: 'unavailable',
+      state: 'draining',
+    });
+    expect(clearCalls).toBe(1);
+    expect(log).not.toContain('state.preserveFailure');
+    clear.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(log).toContain('state.preserveFailure');
+    expect(clearCalls).toBe(1);
+    await expect(shell.stop()).resolves.toMatchObject({
+      outcome: 'unavailable',
+      state: 'draining',
+    });
+  });
+
+  test('readiness and failure preservation faults remain bounded and observational', async () => {
+    const never = new Promise<void>(() => undefined);
+    const log: string[] = [];
+    const fake = createFakeApplication(log);
+    const ports = createRecordingPorts(log);
+    const shell = createKiteServiceShell({
+      application: fake.application,
+      state: {
+        ...ports.state,
+        preserveFailure: () => never,
+      },
+      transport: {
+        start: ports.transport.start,
+        async stop() {
+          throw new Error('transport close failed');
+        },
+      },
+      readiness: { publish: () => never },
+      shutdownTimeoutMs: 5,
+    });
+    await shell.start();
+    await expect(shell.stop()).resolves.toMatchObject({
+      outcome: 'unavailable',
+      state: 'draining',
+    });
+  });
+
+  test('a signal unsubscribe fault still releases every signal listener and settles shutdown', async () => {
+    const log: string[] = [];
+    const fake = createFakeApplication(log);
+    let interruptUnsubscribed = 0;
+    let terminateUnsubscribed = 0;
+    const ports = createRecordingPorts(log);
+    const shell = createKiteServiceShell({
+      application: fake.application,
+      state: ports.state,
+      transport: ports.transport,
+      signals: {
+        subscribe(signal) {
+          return () => {
+            if (signal === 'SIGINT') {
+              interruptUnsubscribed += 1;
+              throw new Error('interrupt unsubscribe failed');
+            }
+            terminateUnsubscribed += 1;
+          };
+        },
+      },
+      shutdownTimeoutMs: 5,
+    });
+    await shell.start();
+    await expect(shell.signal('SIGTERM')).resolves.toMatchObject({ outcome: 'applied' });
+    expect(interruptUnsubscribed).toBe(1);
+    expect(terminateUnsubscribed).toBe(1);
   });
 
   test('readiness channel waits for ready and rejects after unavailable', async () => {

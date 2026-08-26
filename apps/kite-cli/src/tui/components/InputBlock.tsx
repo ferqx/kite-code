@@ -117,7 +117,12 @@ function SingleQuestion({
         if (hasCustom && selected === totalSlots - 1) return;
         const opt = options[selected];
         if (opt) {
-          provider.submitAction({ type: 'input', interactionId, text: opt.label });
+          provider.submitAction({
+            type: 'input',
+            interactionId,
+            text: opt.label,
+            optionId: opt.id,
+          });
           onResolved(opt.label);
         }
       }

@@ -42,6 +42,10 @@ export interface LocalKiteConnection extends AsyncDisposable {
   /** The RuntimeClient snapshot is the only observable connection/index seam. */
   readonly snapshotStore: RuntimeClient['snapshotStore'];
   subscribe(listener: () => void): () => void;
+  /** Ensure/discover descriptor+access for pre-admission Trust/App Control; opens no Runtime. */
+  prepareAppControl(): Promise<void>;
+  /** Acquire a trusted Workspace ticket and establish the Runtime connection. */
+  connect(): Promise<void>;
   reconnect(): Promise<void>;
   close(reason?: string): Promise<void>;
 }

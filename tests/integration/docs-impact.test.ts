@@ -185,18 +185,60 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('packages/runtime-host/src/host/command-receipt.ts')).toEqual([
       'runtime-host-command-receipts',
     ]);
-    expect(triggeredRepositoryRules('apps/kite-cli/src/carrier/runtime-server-stdio.ts')).toEqual([
-      'kite-runtime-carriers',
-    ]);
+    expect(
+      triggeredRepositoryRules('apps/kite-service/src/carrier/runtime-server-stdio.ts'),
+    ).toEqual(['kite-service-carrier']);
     expect(triggeredRepositoryRules('apps/kite-service/src/shell.ts')).toEqual([
       'kite-service-application',
     ]);
     expect(
       triggeredRepositoryRules('apps/kite-service/src/carrier/native-loopback-carrier.ts'),
     ).toEqual(['kite-service-carrier']);
-    expect(triggeredRepositoryRules('apps/kite-service/src/manager/manager.ts')).toEqual([
-      'kite-service-manager',
+    for (const path of [
+      'apps/kite-service/package.json',
+      'apps/kite-service/src/index.ts',
+      'apps/kite-service/src/composition.ts',
+      'apps/kite-service/src/native-infrastructure.ts',
+      'apps/kite-service/src/ports.ts',
+      'apps/kite-service/src/readiness.ts',
+      'apps/kite-service/src/shell.ts',
+      'apps/kite-service/src/signals.ts',
+      'apps/kite-service/src/executable.ts',
+    ]) {
+      expect(triggeredRepositoryRules(path), path).toEqual(['kite-service-application']);
+    }
+    expect(
+      triggeredRepositoryRules('apps/kite-service/src/bootstrap/runtime/CliRuntimeBridge.ts'),
+    ).toEqual(['kite-service-runtime-owner']);
+    expect(triggeredRepositoryRules('apps/kite-service/src/app-control/service.ts')).toEqual([
+      'kite-service-runtime-owner',
     ]);
+    expect(triggeredRepositoryRules('apps/kite-service/src/config/mcp-config.ts')).toEqual([
+      'mcp-control-plane',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite-service/src/release/composition-root.ts')).toEqual([
+      'kite-service-runtime-owner',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite-service/src/sandbox/composition.ts')).toEqual([
+      'execution-governance',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite-service/src/observability/status.ts')).toEqual([
+      'observability-and-session-logging',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite-service/src/session-logger/writer.ts')).toEqual([
+      'observability-and-session-logging',
+    ]);
+    expect(triggeredRepositoryRules('packages/kite-local-runtime/src/manager/manager.ts')).toEqual([
+      'kite-local-runtime-manager',
+    ]);
+    expect(
+      triggeredRepositoryRules(
+        'packages/kite-local-runtime/test/bun-stdio-child-transport.test.ts',
+      ),
+    ).toEqual(['runtime-transport-qualification']);
+    expect(
+      triggeredRepositoryRules('apps/kite-service/test/isolated/runtime-stdio-child.test.ts'),
+    ).toEqual(['runtime-transport-qualification']);
     expect(triggeredRepositoryRules('apps/kite-service/src/process-harness/harness.ts')).toEqual([
       'kite-service-process-harness',
     ]);
@@ -207,7 +249,7 @@ describe('documentation impact gate V2', () => {
       'kite-service-mode-adapter',
     ]);
     expect(
-      triggeredRepositoryRules('apps/kite-cli/src/runtime-client/presentation-history.ts'),
+      triggeredRepositoryRules('apps/kite-service/src/runtime-client/presentation-history.ts'),
     ).toEqual(['kite-runtime-history']);
     expect(triggeredRepositoryRules('apps/kite-cli/src/tui/i18n/messages.ts')).toEqual([
       'tui-localization',

@@ -1,55 +1,58 @@
-# Kite App
+# Kite CLI
 
 ## 定位
 
-`@kite-ai/kite-cli` 是唯一 concrete composition root，也是 CLI、TUI、carrier 与 App-owned Runtime coordination 的 owner。
+`@kite-ai/kite-cli` 是 terminal presentation 与 Native client App。KLSV1-06 clean cutover 后，它不再是 Runtime
+composition root；默认 TUI、`run` 与 `resume` 只连接由 companion `kite-service` 拥有的 Local Runtime Service。
 
 ## 拥有职责
 
-- 在 `src/bootstrap.ts` 组装唯一 Host、Builtin Runtime、SQLite、Server、Client、CLI、TUI 与 carrier adapter。
-- 管理 App Session、Tool routing/persistence、配置、展示 projection、complete local history adapter、workspace integration 与 transport admission。
-- TUI 与 foreground CLI 的 command/query/subscribe 都走 `RuntimeClient → RuntimeServer → RuntimeAccess` 一条路径；InProcess 仅是这条 Protocol 路径的 App-composed carrier，不是 Host bypass 或 fallback。
-- 完整 durable history 走 `RuntimeClient.history → App exhaustive client-event projection → RuntimeLogQueryPort`，
-  TUI list/load 不穿透 SessionManager 读取 Store，也不以 Server notification history、JSONL 或 trace 代替。
-- `TuiRuntimeClientFacade` 与 `TuiSessionFacade` 是显式 InProcess client seam；不使用 Manager/SessionRuntime
-  Proxy、Reflect fallback、动态 method 或 set trap。App Control 的 InProcess conformance adapter 对每个 use case
-  独立经过 `@kite-ai/kite-app-contract` request/response codec。
-- `src/runtime-application/` 与 `src/app-control/` 是当前 app-local、可迁移的 InProcess owner seam。一个真实
-  Host/SQLite Store 可通过 canonical Workspace context router承载多个 Workspace 与 Session；每个 logical
-  connection 具有独立 admission，只有 create 使用 connection admitted Workspace，resume/query/subscribe/fork
-  必须匹配持久 Session identity。connection close 只释放 client/subscription/broker binding，不取消 Turn、交互
-  waiter 或关闭 owner；drain/cancel/Host close 是显式 Runtime Application lifecycle。
-- Workspace Trust、Provider/model、MCP、Skill、execution/release 与 first-run credential 已经通过 exact App Control
-  或 Native credential client 进入 TUI。Config repository、MCP Supervisor、actual Skill manifest、Sandbox/Shell、
-  observability 与 checkpoint composition 留在 app-local owner，不跨 TUI client seam。
-- `src/service-mode/`提供KLSV1-05 opt-in typed connection view，只暴露Native connection的Runtime/History/App Control/
-  credential/service status/snapshot generation并委托reconnect/close；它不读descriptor/token file、不启动Service、不发送cancel或
-  Host dispose，也不在connector失败时回退InProcess。普通production bootstrap仍未切换。
+- 拥有 CLI parser/output、Ink TUI、terminal interaction/rendering、client-safe reducer/projection，以及 language、theme、
+  color preset、key binding 等 presentation-local preference。
+- 通过 release composition 注入的 `kite-local-runtime/client` connector 取得 Runtime、History、App Control、Native
+  credential 与 connection snapshot；CLI/TUI 自身不读取 descriptor/token/lock，也不 spawn Service。
+- `src/service-mode/` 将 authenticated `LocalKiteConnection` 显式适配为 CLI/TUI facade；每个 surface 都是 typed
+  method，不使用 `SessionManager` Proxy、Reflect fallback 或动态 registry。
+- 完整 durable history 只走 `LocalKiteConnection.history` 的 client-safe DTO，并与 live event 使用同一 reducer；短期
+  subscription replay、JSONL、trace 或 SQLite raw event 不是完整 history source。
+- Workspace Trust 使用两阶段 admission：先 `prepareAppControl()`，经 exact App Control query/decision 与 revision CAS
+  得到 Service-owned canonical identity；只有 trusted 后才 `connect()` 并取得 Workspace-bound one-shot Runtime ticket。
+  untrusted/conflict/connection failure 均 fail closed，不打开 Runtime，也不回退 embedded。
+- TUI exit 只关闭本 client connection、subscription 与 presentation resource；不 `abortAll()`、不 dispose Service Host。
+  Ctrl+C 仍通过显式 Runtime cancel command 取消当前 Turn。
 
 ## 不拥有职责
 
-- 不直接依赖 Agent Kernel，不创建第二 Runtime assembly path。
-- TUI/foreground CLI 不取得 Kernel、Host execution、SQLite 或 Builtin executor authority，也不保留 direct Host/SQLite/old bridge fallback。
-- App 不复制 Store、Reducer、Registry 或 Tool handler。
+- 不创建或依赖 Runtime Host、Runtime Server、SQLite Store、Builtin Runtime、Kernel、raw History projector、App Control
+  repository、MCP Supervisor、Sandbox/Shell、Git backend、session logger 或 release authority。
+- 不保留 InProcess/default embedded、direct Host/SQLite、old bridge、app-to-app import、try-new-catch-old 或复制 backend
+  fallback。managed Service 不可用时直接失败。
+- 不拥有 Service process/state/lifecycle manager。`kite service ensure/status/stop/restart` 只把命令转交给 release
+  composition 注入的窄 manager port；CLI 不自行 discover、spawn、kill 或清理 Service state。
+- 不提供 public `server --stdio` production entry；该旧 parser shape会被明确拒绝。Service-owned stdio 只用于
+  parent-owned test/internal、显式非默认 Store 场景。
 
 ## 允许依赖
 
-允许依赖 browser-safe App Contract、Native local-runtime contract、Runtime Client/Contract/Protocol/Server、SPI、
-Host、Builtin Runtime 与 SQLite adapter；不得直接依赖 `@kite-ai/agent-kernel`。当前 production 仍为 InProcess；
-Native connector与Service-mode adapter只由KLSV1-05 opt-in/process harness使用。
+只允许依赖 browser-safe App Contract、Native-only local-runtime client、Runtime Client/Contract 与 presentation
+libraries。不得依赖 `@kite-ai/runtime-host`、`@kite-ai/runtime-server`、`@kite-ai/runtime-storage-sqlite`、
+`@kite-ai/builtin-runtime`、`@kite-ai/agent-kernel` 或 `apps/kite-service` source。
 
 ## 公开入口
 
-导出根入口以及 `@kite-ai/kite-cli/cli`、`@kite-ai/kite-cli/tui`。具体 Runtime 组合只存在于 `src/bootstrap.ts`。
+导出 package 根入口以及 `@kite-ai/kite-cli/cli`、`@kite-ai/kite-cli/tui`。release/source entrypoint在 CLI 外组合
+managed connector/lifecycle；installed candidate 从相邻的 `bin/kite-service` companion 启动同一 Service owner。
 
 ## 关键不变量
 
-- App 是唯一 composition root；Server、Client 与 carrier 都不得创建第二个 Host/Store/Kernel/Reducer authority。
-- Runtime Session、Tool execution 与 Tool persistence 分别位于明确 owner 目录。
-- 所有 TUI 行为只消费 typed projection 和 `RuntimeHistoryClient`，并遵守本地文档定义的交互和渲染边界。
-- 新 client surface 必须显式增加 method/type/test；不能从 `SessionManager` 派生或自动代理新增 implementation 成员。
-- `kite server --stdio` 是 parent-owned Desktop/test child carrier：stdout 只输出 JSONL protocol，stderr 只写诊断；EOF 只关闭该 connection，parent-owned signal/shutdown 才 drain Server 并释放 composition。它不是独立 daemon 或公开服务入口。
-- development-only loopback WebSocket/reference carrier 仅用于本地 qualification。当前没有 `kite server --web`；ADR-0053 的 Web No-Go 仍有效，reference 不进入 production support。
+- terminal process 永远只有 client/presentation authority；新增 journey 必须显式扩展 client contract、adapter 与
+  fake/native conformance test，不能重新取得 backend object。
+- Runtime initialize 前必须完成 Service-owned Workspace Trust query/decision；wire path、cwd 或 client metadata不能
+  提升 Workspace authority。
+- connection close 与 Service owner shutdown分离。exit/reconnect只处理本 client generation；Service Session、Turn、
+  interaction 与 Store lifecycle仍由 Service决定。
+- client preference 只能包含纯展示设置；provider/model、credential、MCP、Trust、execution/release 与 checkpoints
+  都由 Service owner处理。
 
 ## 本地文档
 
@@ -57,14 +60,17 @@ Native connector与Service-mode adapter只由KLSV1-05 opt-in/process harness使�
 - [TUI 渲染](docs/tui-rendering.md)
 - [TUI 本地化](docs/tui-localization.md)
 - [TUI 系统测试](docs/tui-system-testing.md)
-- [Runtime Server carriers](docs/runtime-server-carrier.md)
-- [Runtime Application 与 App Control](docs/runtime-application.md)
-- [Opt-in Service mode](docs/service-mode.md)
+- [Runtime carrier client boundary](docs/runtime-server-carrier.md)
+- [Runtime Application client boundary](docs/runtime-application.md)
+- [Managed Local Service mode](docs/service-mode.md)
 
 ## 测试
 
-`bun test apps/kite-cli/test`
+`bun test apps/kite-cli/test`。这组测试验证 presentation、fake/native client facade 与 default fail-closed cutover；
+Service Host/Store owner tests位于 `apps/kite-service/test`。当前CLI owner为661 parallel + 76 sandbox + 1
+conformance，共738 tests；完整TUI system另通过40个isolated PTY scenario files。
 
 ## 文档影响
 
-模块局部变化更新本 README 或上述本地文档；跨包 Runtime 行为同时更新 [Runtime 架构](../../docs/active/six-concept-runtime-architecture.md)。
+模块局部变化更新本 README 或上述本地文档；跨包 Runtime、Trust、process、release 或 qualification 行为同时更新
+匹配的 `docs/active/` current authority。

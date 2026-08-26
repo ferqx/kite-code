@@ -17,16 +17,16 @@ import {
   saveColorPreset,
   saveInteractionMode,
   saveUserLanguage,
-} from '#kite-cli/config/index';
-import { sessionExportPath } from '#kite-cli/config/paths';
-import { projectStateRuntimeEventForPresentation } from '#kite-cli/runtime-client/presentation-history';
-import type { SandboxBackend } from '#kite-cli/sandbox/types';
+  sessionExportPath,
+} from '#kite-cli/preferences';
 import type {
   TuiRuntimeClientFacade as SessionManager,
   TuiRuntimeClientFacadeFactory,
 } from '../adapters/tui/session-adapter';
-import type { InProcessAppControlGateway } from '../app-control';
+import type { KiteServiceModeAdapter } from '../service-mode';
+import { createNativeTuiRuntimeClientFactory } from '../service-mode';
 import App, { type Action, shouldDisablePromptInput, useTuiState } from './App';
+import type { SandboxBackend } from './client-types';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
 import FirstRunFlow from './components/first-run/FirstRunFlow';
@@ -57,6 +57,7 @@ import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } f
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
+let _serviceModeForExit: KiteServiceModeAdapter | null = null;
 let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
 function toErrorMessage(error: unknown): string {
@@ -82,10 +83,15 @@ function overlaySurfaceKey(state: import('./types').TuiState): string {
 }
 
 export interface TuiBootstrapProps {
-  /** Single composition-root injection; presentation never constructs Runtime authority. */
+  /** Explicit managed Local Runtime Service client; no embedded fallback is constructed. */
+  serviceMode?: KiteServiceModeAdapter;
+  /** Single client-facade injection used by conformance tests. */
   createSessionManager?: TuiRuntimeClientFacadeFactory;
-  /** Neutral discovery plus admitted Workspace App Control clients. */
-  appControlGateway?: InProcessAppControlGateway;
+  /** Explicit client-safe App Control test seam. */
+  appControlGateway?: {
+    readonly discovery: KiteAppControlClient;
+    forWorkspace(workspace: KiteWorkspaceIdentity): KiteAppControlClient;
+  };
   credentialClient?: NativeProviderCredentialClient;
 }
 
@@ -124,11 +130,30 @@ function initialConfigFromSnapshot(snapshot: ProviderModelSnapshot): TuiInitialC
 }
 
 export function TuiBootstrap({
+  serviceMode,
   createSessionManager,
   appControlGateway,
   credentialClient,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
+  _serviceModeForExit = serviceMode ?? null;
+  const effectiveAppControlGateway = React.useMemo(() => {
+    if (serviceMode) {
+      return {
+        discovery: serviceMode.appControl,
+        forWorkspace: (_workspace: KiteWorkspaceIdentity) => serviceMode.appControl,
+      };
+    }
+    return appControlGateway;
+  }, [appControlGateway, serviceMode]);
+  const effectiveCreateSessionManager = React.useMemo(() => {
+    if (createSessionManager) return createSessionManager;
+    if (!serviceMode) return undefined;
+    return createNativeTuiRuntimeClientFactory({
+      connection: serviceMode.connection,
+    });
+  }, [createSessionManager, serviceMode]);
+  const effectiveCredentialClient = credentialClient ?? serviceMode?.credentialClient;
   const [languagePreference, setLanguagePreference] = React.useState<LanguagePreference>(() =>
     loadUserLanguage(),
   );
@@ -143,33 +168,58 @@ export function TuiBootstrap({
     | { readonly status: 'ready'; readonly snapshot: ProviderModelSnapshot }
     | { readonly status: 'error' }
   >({ status: 'idle' });
+  const [runtimeConnectionStatus, setRuntimeConnectionStatus] = React.useState<
+    'not_required' | 'connecting' | 'connected' | 'error'
+  >(() => (serviceMode ? 'connecting' : 'not_required'));
 
   const refreshProviderSnapshot = React.useCallback(
     async (identity: KiteWorkspaceIdentity) => {
-      if (!appControlGateway) {
+      if (!effectiveAppControlGateway) {
         setProviderSnapshot({ status: 'error' });
         return;
       }
       setProviderSnapshot({ status: 'loading' });
       try {
-        const snapshot = await appControlGateway.forWorkspace(identity).getProviderModelSnapshot({
-          schema: 'kite.app.provider-model.snapshot-request.v1',
-          workspace: identity,
-        });
+        const snapshot = await effectiveAppControlGateway
+          .forWorkspace(identity)
+          .getProviderModelSnapshot({
+            schema: 'kite.app.provider-model.snapshot-request.v1',
+            workspace: identity,
+          });
         setProviderSnapshot({ status: 'ready', snapshot });
       } catch {
         setProviderSnapshot({ status: 'error' });
       }
     },
-    [appControlGateway],
+    [effectiveAppControlGateway],
+  );
+
+  const connectRuntimeAfterTrust = React.useCallback(
+    async (identity: KiteWorkspaceIdentity): Promise<void> => {
+      if (!serviceMode) {
+        setRuntimeConnectionStatus('not_required');
+        await refreshProviderSnapshot(identity);
+        return;
+      }
+      setRuntimeConnectionStatus('connecting');
+      try {
+        await serviceMode.connection.connect();
+        setRuntimeConnectionStatus('connected');
+        await refreshProviderSnapshot(identity);
+      } catch {
+        setRuntimeConnectionStatus('error');
+        setProviderSnapshot({ status: 'error' });
+      }
+    },
+    [refreshProviderSnapshot, serviceMode],
   );
 
   const handleTrusted = React.useCallback(
     (identity: KiteWorkspaceIdentity) => {
       setWorkspaceIdentity(identity);
-      void refreshProviderSnapshot(identity);
+      void connectRuntimeAfterTrust(identity);
     },
-    [refreshProviderSnapshot],
+    [connectRuntimeAfterTrust],
   );
 
   const handleSetupComplete = React.useCallback(
@@ -180,8 +230,8 @@ export function TuiBootstrap({
   );
 
   const handleConfigRetry = React.useCallback(() => {
-    if (workspaceIdentity) void refreshProviderSnapshot(workspaceIdentity);
-  }, [refreshProviderSnapshot, workspaceIdentity]);
+    if (workspaceIdentity) void connectRuntimeAfterTrust(workspaceIdentity);
+  }, [connectRuntimeAfterTrust, workspaceIdentity]);
 
   const handleLanguageSelect = React.useCallback((next: LanguagePreference): boolean => {
     const saved = saveUserLanguage(next);
@@ -198,7 +248,7 @@ export function TuiBootstrap({
       <ThemeContext.Provider value={getDarkTheme('blue')}>
         <WorkspaceTrustGate
           workspace={workspace}
-          appControl={appControlGateway?.discovery}
+          appControl={effectiveAppControlGateway?.discovery}
           onTrusted={handleTrusted}
           onExit={() => void _requestTuiExit?.()}
         />
@@ -207,6 +257,14 @@ export function TuiBootstrap({
   }
 
   if (providerSnapshot.status === 'idle' || providerSnapshot.status === 'loading') {
+    return null;
+  }
+
+  if (
+    serviceMode &&
+    runtimeConnectionStatus !== 'connected' &&
+    providerSnapshot.status !== 'error'
+  ) {
     return null;
   }
 
@@ -220,8 +278,8 @@ export function TuiBootstrap({
       <ThemeContext.Provider value={getDarkTheme('blue')}>
         <FirstRunFlow
           onComplete={handleSetupComplete}
-          appControl={appControlGateway?.forWorkspace(workspaceIdentity)}
-          credentialClient={credentialClient}
+          appControl={effectiveAppControlGateway?.forWorkspace(workspaceIdentity)}
+          credentialClient={effectiveCredentialClient}
           workspace={workspaceIdentity}
           onExit={() => void _requestTuiExit?.()}
         />
@@ -242,20 +300,20 @@ export function TuiBootstrap({
     );
   }
 
-  if (!createSessionManager) {
+  if (!effectiveCreateSessionManager) {
     throw new Error('TUI Runtime composition is unavailable.');
   }
-  if (!appControlGateway) {
+  if (!effectiveAppControlGateway) {
     throw new Error('TUI App Control composition is unavailable.');
   }
 
   return withI18n(
     <TuiApp
-      createSessionManager={createSessionManager}
+      createSessionManager={effectiveCreateSessionManager}
       config={initialConfig!}
       workspace={workspace}
       workspaceIdentity={workspaceIdentity}
-      appControl={appControlGateway.forWorkspace(workspaceIdentity)}
+      appControl={effectiveAppControlGateway.forWorkspace(workspaceIdentity)}
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
     />,
@@ -1062,11 +1120,10 @@ function TuiApp({
             );
           }
         },
-        (event) => {
-          if (threadIdRef.current === targetThreadId) {
-            const projected = projectStateRuntimeEventForPresentation(event);
-            if (projected) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event: projected });
-          }
+        (_event) => {
+          // The Service emits the durable compaction event through the
+          // Runtime Client subscription; the command callback is diagnostic
+          // presentation metadata and is intentionally not a Runtime event.
         },
       );
     })()
@@ -1277,7 +1334,7 @@ function TuiApp({
       if (!rt) return;
 
       if (rt.localReplayRecovery) {
-        const continued = sessionManager.forkRecoveredSessionForContinuation(threadId);
+        const continued = await sessionManager.forkRecoveredSessionForContinuation(threadId);
         if (!continued) {
           dispatch({
             type: 'LOCAL_TEXT',
@@ -1516,7 +1573,14 @@ export function runTui(props: TuiBootstrapProps): void {
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
   let unmountTui: (() => void) | null = null;
   const exitCoordinator = createTuiExitCoordinator({
-    getSessionLifecycle: () => _sessionManagerForExit,
+    getSessionLifecycle: () =>
+      _sessionManagerForExit ??
+      (_serviceModeForExit
+        ? {
+            shutdownObservability: async () => undefined,
+            dispose: () => _serviceModeForExit?.close('tui_exit'),
+          }
+        : null),
     getShellExecutor: () => null,
     unmount: () => unmountTui?.(),
     exit: (code) => process.exit(code),

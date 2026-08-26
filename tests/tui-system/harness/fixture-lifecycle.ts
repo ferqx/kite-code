@@ -1,3 +1,5 @@
+import { LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_ } from '@kite-ai/kite-local-runtime/client';
+import { createManagedLocalServiceClientComposition } from '../../../scripts/release/local-service-client';
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
 import type { TestWorkspace } from './test-workspace';
@@ -19,11 +21,55 @@ export interface TuiSystemFixtures {
  */
 export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Promise<void> {
   const errors: unknown[] = [];
+  const stoppedWorkspaces = new Set<TestWorkspace>();
 
   for (const tui of fixtures.tuis ?? []) {
     if (!tui) continue;
     try {
       await tui.killAndWait();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+
+  // Client disconnect deliberately does not own the resident Service lifecycle. Test cleanup
+  // therefore uses the same authenticated manager stop as production before deleting state.
+  for (const workspace of fixtures.workspaces ?? []) {
+    if (!workspace) continue;
+    try {
+      const codeRoot = workspace.env.KITE_CODE_HOME;
+      if (!codeRoot) {
+        throw new Error('TUI test workspace is missing its explicit KITE_CODE_HOME.');
+      }
+      const managed = createManagedLocalServiceClientComposition({
+        argv: ['tui-system-cleanup', '--kite-home', codeRoot],
+        environment: workspace.env,
+        systemHome: workspace.home,
+      });
+      let stopped = await managed.lifecycle.stop({
+        clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
+      });
+      // A just-disconnected PTY can briefly race the independent identity probe. The manager
+      // proves `identity_uncertain` before sending control.stop, so bounded test-only re-probing
+      // cannot replay a mutation. Busy/unknown/other outcomes remain immediate failures.
+      for (
+        let attempt = 0;
+        stopped.outcome === 'unavailable' &&
+        stopped.diagnostic === 'identity_uncertain' &&
+        attempt < 20;
+        attempt += 1
+      ) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 50));
+        stopped = await managed.lifecycle.stop({
+          clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
+        });
+      }
+      if (stopped.outcome !== 'applied') {
+        throw new Error(
+          `Managed TUI test Service did not stop cleanly: ${stopped.outcome}/${stopped.diagnostic ?? stopped.state}`,
+        );
+      }
+      stoppedWorkspaces.add(workspace);
     } catch (error) {
       errors.push(error);
     }
@@ -50,8 +96,7 @@ export async function cleanupTuiSystemFixtures(fixtures: TuiSystemFixtures): Pro
     }
   }
 
-  for (const workspace of fixtures.workspaces ?? []) {
-    if (!workspace) continue;
+  for (const workspace of stoppedWorkspaces) {
     try {
       workspace.cleanup();
     } catch (error) {

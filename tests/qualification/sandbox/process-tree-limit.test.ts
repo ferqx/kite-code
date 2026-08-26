@@ -7,8 +7,8 @@ import {
   type ExecutionBoundary,
   type ProductionExecutionQualification,
 } from '@kite-ai/builtin-runtime/sandbox';
-import { computeInProcessReadOnlyToolCatalogDigest } from '#kite-cli/config';
-import { evaluateExecutionBoundaryQualification } from '#kite-cli/config/execution-boundary';
+import { computeInProcessReadOnlyToolCatalogDigest } from '#kite-service/config';
+import { evaluateExecutionBoundaryQualification } from '#kite-service/config/execution-boundary';
 
 function qualification(
   workspace: string,

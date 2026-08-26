@@ -1,5 +1,6 @@
 import type {
   AgentPhase,
+  AgentPlan,
   ContextCompactionProgressPhase,
   ContextStatusSnapshot,
   RuntimeCheckpointProjection,
@@ -7,14 +8,64 @@ import type {
   RuntimeCommandReceipt,
   RuntimeRewindPreviewProjection,
   RuntimeSessionProjection,
+  WorkspaceAccess,
 } from '@kite-ai/runtime-contract';
-import type {
-  SessionListProjection,
-  SessionPresentationAction,
-  SessionStatusProjection,
-} from '#kite-cli/runtime/session/contracts';
 import type { SessionData, SessionInfo } from '#kite-cli/session-types';
 import type { RuntimePresentationEvent } from '#kite-cli/tui/runtime-presentation';
+
+/** Presentation-only action emitted by the Native Runtime client adapter. */
+export type SessionPresentationAction =
+  | { readonly type: 'RUNTIME_EVENT'; readonly event: RuntimeClientEvent }
+  | { readonly type: 'LOCAL_TEXT'; readonly text: string; readonly isError?: boolean }
+  | { readonly type: 'SET_EXITED' }
+  | {
+      readonly type: 'SET_INTERACTION_MODE';
+      readonly mode: 'accept_edits' | 'auto' | 'full';
+    }
+  | {
+      readonly type: 'SET_COMPACTION_PROGRESS';
+      readonly phase: ContextCompactionProgressPhase;
+      readonly source: 'manual' | 'automatic';
+    }
+  | {
+      readonly type: 'SET_COMPACTION_PROGRESS';
+      readonly phase?: undefined;
+      readonly source?: never;
+    };
+
+/** The service's safe session status projection, kept client-side for rendering only. */
+export interface SessionStatusProjection {
+  phase: AgentPhase;
+  plan: AgentPlan | null;
+  pendingPlan: AgentPlan | null;
+  workspaceAccess: WorkspaceAccess;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  cacheHitRate: number;
+  totalTokens: number;
+  currentNode: string | null;
+  modelProvider: string;
+  modelName: string;
+  thinkingMode: string;
+  reasoningEnabled?: boolean;
+  retryState: { attempt: number; maxAttempts: number; error: string; delayMs: number } | null;
+  contextSnapshot?: ContextStatusSnapshot;
+}
+
+export interface SessionListProjection {
+  threadId: string;
+  name: string;
+  workspace: string;
+  active: boolean;
+  running: boolean;
+  pendingInterrupt: boolean;
+  interrupt: null;
+  plan: AgentPlan | null;
+  interactionMode?: 'accept_edits' | 'auto' | 'full';
+  status: SessionStatusProjection;
+  turns: [];
+  pendingToolCalls: Record<string, never>;
+}
 
 /** Explicit client-safe context status DTO; no SessionManager method inference. */
 export type TuiContextStatusSnapshot = ContextStatusSnapshot | undefined;
@@ -87,6 +138,8 @@ export type TuiSubmittedInteractionAction =
       readonly type: 'input';
       readonly interactionId: string;
       readonly text: string;
+      /** Closed option identity; localized labels are presentation only. */
+      readonly optionId?: string;
       readonly answers?: Record<string, string>;
     }
   | { readonly type: 'cancel'; readonly interactionId: string }
@@ -146,7 +199,7 @@ export interface TuiRuntimeClientFacade {
   registerSession(sessionId: string, workspace: string): TuiSessionFacade;
   hasRuntime(sessionId: string): boolean;
   getRuntime(sessionId: string): TuiSessionFacade | undefined;
-  forkRecoveredSessionForContinuation(sessionId: string): TuiSessionFacade | undefined;
+  forkRecoveredSessionForContinuation(sessionId: string): Promise<TuiSessionFacade | undefined>;
   getActiveId(): string;
   switchSession(fromId: string, toId: string): void;
   getSnapshot(

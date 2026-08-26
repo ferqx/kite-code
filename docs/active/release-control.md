@@ -18,21 +18,26 @@ G0 验证本地正确性、安全边界、P0/P1、安装/回滚。G1 验证 GitH
 构建、安装、启动、TUI/CLI smoke、DeepSeek 与 OpenCode Go OpenAI-compatible route 的真实最小调用，以及
 release notes/known limitations。缺任何真实结果时保持 blocked 或未验证。
 
-Runtime Protocol V1 不改变候选支持入口：shipped production consumer 仍为本地 TUI 与用户在场的 foreground
-CLI。`kite server --stdio` 仅供拥有 child lifecycle 的 Desktop/test parent 使用；loopback WebSocket、browser
-reference 与 Desktop reference 仅为 development/reference conformance，不能写入 release manifest、候选支持矩阵或
-G1 成功声明。`.github/workflows/runtime-stdio-smoke.yml` 与
-`.github/workflows/runtime-transport-qualification.yml` 的三平台 job 是 qualification checks；KRSV1 的 PR 结果
-尚未返回时保持 pending，不能以 workflow 存在、本地通过或 artifact 上传取代真实三平台结果。
+候选支持入口仍为本地TUI与用户在场的foreground CLI，但两者当前都通过managed Native client连接同一Local Runtime
+Service；`apps/kite-service`是唯一Host/Store/Builtin/History/App Control composition。internal stdio、development
+loopback WebSocket、browser与Desktop reference只作内部child或conformance，不能写成Web/remote支持。KLSV1-06仅有
+本地candidate/composition evidence；当前macOS arm64的build/verify/install/CLI+TUI+Service+MCP wrapper/upgrade/
+rollback/uninstall smoke已通过。KLSV1-07的macOS 15、Ubuntu 24.04、Windows 2025 companion build/install/process
+matrix尚未取得，必须保持pending，不能以workflow定义、本地通过或artifact上传取代真实三平台结果。
 
 ## 候选制品
 
-`bun run release:build` 使用 Bun standalone executable 编译当前平台的 `kite` 与 `kite-tui`，输出：
+`bun run release:build` 使用 Bun standalone executable 编译当前平台的 `kite`、`kite-tui` 与managed companion
+`kite-service`，输出：
 
 - gzip tar 候选包；
 - exact-key JSON manifest，绑定产品版本、Git commit、Bun、target 和逐文件 SHA-256；
 - archive SHA-256 sidecar；
 - release notes、known limitations 与普通维护者检查清单。
+
+候选中的`kite`与`kite-tui`由release entrypoint注入同一managed connector/manager；前台`run/resume`与TUI默认
+ensure/connect companion，CLI另提供`kite service ensure/status/stop/restart`。connector/manager失败直接暴露，不
+导入Service App、不创建embedded Store，也不`catch`后回退旧CLI backend。
 
 Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
 `isksh`/Coreutils runtime（含许可文件）。安装后的 launcher 通过 managed-install marker 从当前
@@ -58,7 +63,7 @@ manifest `commitSha` 精确匹配；GitHub 临时 merge ref 不能充当最终�
 构建器只接受与当前 host OS/architecture 完全一致的 native target，不 cross-compile，也不下载另一平台的
 Bun runtime；三平台候选分别在对应 GitHub-hosted runner 上生成。Ink 的可选 React devtools 路径在
 生产候选构建时固定为空实现，不成为依赖或网络下载入口。
-Standalone resolver 必须覆盖十二个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
+Standalone resolver 必须覆盖十三个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
 不得穿过 `apps/kite-cli/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun standalone 把反斜杠
 symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。
 
@@ -87,13 +92,19 @@ matrix 或 approved registry。
 或 reparse point。第一次安装创建自身 marker；后续替换、回滚或卸载要求 marker 的 canonical root
 与实际目标完全一致。安装器不接管无 marker 的已有目录。
 
-每个候选保存到 `releases/<candidateId>`，`bin/` 只保存当前激活 binary。新安装原子更新 current/previous
+每个候选保存到`releases/<candidateId>`，`bin/`同步激活`kite`、`kite-tui`与同candidate identity的
+`kite-service` companion。新安装原子更新 current/previous
 指针；rollback 只可切换到已验证、仍位于同一 managed root 的 previous candidate。uninstall 在删除前
 精确枚举受管树并校验 marker、release checksum、launcher 与允许的目录结构；发现未知文件、目录或 link
 立即停止，不删除任何内容，也不扩大删除范围。
 
-`bun run release:smoke` 在新临时目录中完成 verify、install、CLI help/version、TUI version/start probe、
-第二候选安装、rollback 和 uninstall。任一步非零都使 smoke 失败。
+upgrade、rollback与uninstall在替换或删除binary前必须调用当前candidate的普通`kite service stop`并确认
+`service status --json`为`applied + absent`，随后取得同一Native lifecycle fence。`service_busy`、identity uncertain、
+state残留或任何stop/status失败都保持active candidate与managed tree不变；installer不force kill、不手工清state。
+
+`bun run release:smoke` 在新临时目录中完成verify、install、CLI help/version、TUI version/managed-Service startup、
+installed `kite-service` MCP stdio wrapper、第二候选安装、rollback和uninstall。任一步非零都使smoke失败；该本机
+smoke不替代KLSV1-07三平台companion lifecycle qualification。
 候选启动与 MCP stdio wrapper smoke 不创建、读取或要求 `runtime-authority.key`/Artifact key；Project identity
 只使用 canonical Workspace digest，SQLite Store 使用 strict canonical record 与 snapshot checksum。模型 API credential 与 MCP OAuth/
 系统 keyring 仍按各自产品边界处理，不得因 Runtime 撤钥而回退到环境变量或明文文件。

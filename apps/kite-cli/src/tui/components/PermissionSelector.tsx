@@ -1,8 +1,8 @@
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
-import type { SandboxBackend } from '#kite-cli/sandbox/types';
 import { useI18n } from '#kite-cli/tui/i18n';
 import { useTheme } from '#kite-cli/tui/theme';
+import type { SandboxBackend } from '../client-types';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
 import { OverlayListRow } from './OverlayPrimitives';
 

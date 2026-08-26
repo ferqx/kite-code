@@ -133,9 +133,9 @@ function ownsHistoricalSessionReadBoundary(relativePath: string): boolean {
     relativePath === 'packages/runtime-host/src/format/storage-binding.ts' ||
     relativePath === 'packages/runtime-storage-sqlite/src/compatibility.ts' ||
     relativePath === 'packages/runtime-storage-sqlite/src/index.ts' ||
-    relativePath === 'apps/kite-cli/src/bootstrap/runtime/state-store-compatibility.ts' ||
-    relativePath === 'apps/kite-cli/src/runtime-client/history-adapter.ts' ||
-    relativePath === 'apps/kite-cli/src/bootstrap.ts'
+    relativePath === 'apps/kite-service/src/bootstrap/runtime/state-store-compatibility.ts' ||
+    relativePath === 'apps/kite-service/src/runtime-client/history-adapter.ts' ||
+    relativePath === 'apps/kite-service/src/bootstrap.ts'
   );
 }
 
@@ -156,7 +156,7 @@ function inspectSource(path: string): void {
       );
     }
     if (
-      relativePath.startsWith('apps/kite-cli/src/runtime/') &&
+      relativePath.startsWith('apps/kite-service/src/runtime/') &&
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
       /(?:^|[/#])tui(?:[/]|$)/u.test(node.moduleSpecifier.text)
@@ -270,7 +270,7 @@ for (const name of readdirSync(activeDocsRoot)) {
   }
 }
 
-const compositionRoots = ['apps/kite-cli/src/bootstrap.ts'].filter((path) =>
+const compositionRoots = ['apps/kite-service/src/bootstrap.ts'].filter((path) =>
   existsSync(join(root, path)),
 );
 if (compositionRoots.length !== 1) violations.push('composition root count is not exactly one');
@@ -311,27 +311,27 @@ const requiredDomainFiles = [
   'packages/builtin-runtime/src/subagent/runtime-module.ts',
   'packages/builtin-runtime/src/subagent/index.ts',
   'packages/builtin-runtime/src/verification/runtime-module.ts',
-  'apps/kite-cli/src/runtime/session/session-registry.ts',
-  'apps/kite-cli/src/runtime/session/session-lifecycle.ts',
-  'apps/kite-cli/src/runtime/session/rewind-service.ts',
-  'apps/kite-cli/src/runtime/session/planning-mode-service.ts',
-  'apps/kite-cli/src/runtime/session/context-compaction-service.ts',
-  'apps/kite-cli/src/runtime/session/session-projection.ts',
+  'apps/kite-service/src/runtime/session/session-registry.ts',
+  'apps/kite-service/src/runtime/session/session-lifecycle.ts',
+  'apps/kite-service/src/runtime/session/rewind-service.ts',
+  'apps/kite-service/src/runtime/session/planning-mode-service.ts',
+  'apps/kite-service/src/runtime/session/context-compaction-service.ts',
+  'apps/kite-service/src/runtime/session/session-projection.ts',
   'apps/kite-cli/src/adapters/tui/session-adapter.ts',
-  'apps/kite-cli/src/runtime/tool-execution/router.ts',
-  'apps/kite-cli/src/runtime/tool-execution/builtin-executor.ts',
-  'apps/kite-cli/src/runtime/tool-execution/mcp-executor.ts',
-  'apps/kite-cli/src/runtime/tool-execution/subagent-executor.ts',
-  'apps/kite-cli/src/runtime/tool-execution/skill-executor.ts',
-  'apps/kite-cli/src/runtime/tool-execution/terminal-projection.ts',
-  'apps/kite-cli/src/runtime/tool-persistence/attempt-recorder.ts',
-  'apps/kite-cli/src/runtime/tool-persistence/acknowledgement-validator.ts',
-  'apps/kite-cli/src/runtime/tool-persistence/receipt-committer.ts',
-  'apps/kite-cli/src/runtime/tool-persistence/filesystem-evidence.ts',
-  'apps/kite-cli/src/runtime/tool-persistence/filesystem-mutation.ts',
-  'apps/kite-cli/src/runtime/tool-persistence/subagent-suspension.ts',
-  'apps/kite-cli/src/runtime/tool-persistence/terminal-event-projector.ts',
-  'apps/kite-cli/src/runtime/tool-persistence/recovery-committer.ts',
+  'apps/kite-service/src/runtime/tool-execution/router.ts',
+  'apps/kite-service/src/runtime/tool-execution/builtin-executor.ts',
+  'apps/kite-service/src/runtime/tool-execution/mcp-executor.ts',
+  'apps/kite-service/src/runtime/tool-execution/subagent-executor.ts',
+  'apps/kite-service/src/runtime/tool-execution/skill-executor.ts',
+  'apps/kite-service/src/runtime/tool-execution/terminal-projection.ts',
+  'apps/kite-service/src/runtime/tool-persistence/attempt-recorder.ts',
+  'apps/kite-service/src/runtime/tool-persistence/acknowledgement-validator.ts',
+  'apps/kite-service/src/runtime/tool-persistence/receipt-committer.ts',
+  'apps/kite-service/src/runtime/tool-persistence/filesystem-evidence.ts',
+  'apps/kite-service/src/runtime/tool-persistence/filesystem-mutation.ts',
+  'apps/kite-service/src/runtime/tool-persistence/subagent-suspension.ts',
+  'apps/kite-service/src/runtime/tool-persistence/terminal-event-projector.ts',
+  'apps/kite-service/src/runtime/tool-persistence/recovery-committer.ts',
   'packages/runtime-storage-sqlite/src/schema.ts',
   'packages/runtime-storage-sqlite/src/connection.ts',
   'packages/runtime-storage-sqlite/src/event-store.ts',

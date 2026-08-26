@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { createKiteServiceExecutable, runKiteService } from '../src/executable';
+import type { KiteServiceRuntimeComposition } from '../src/composition';
+import {
+  createKiteServiceExecutable,
+  resolveKiteServiceMainEnvironment,
+  runKiteService,
+  runKiteServiceMain,
+} from '../src/executable';
 import type {
   KiteRuntimeApplicationPort,
   KiteServiceSignal,
@@ -115,5 +121,104 @@ describe('Kite Service internal executable adapter', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     ports.emit('SIGTERM');
     await expect(running).rejects.toThrow('shutdown_failed');
+  });
+
+  test('requires manager-provided home, OS home, and build identity before composition', async () => {
+    const osHomeKey = process.platform === 'win32' ? 'USERPROFILE' : 'HOME';
+    const createComposition = () => {
+      throw new Error('composition must not be constructed');
+    };
+    const base = {
+      KITE_CODE_HOME: '/tmp/kite-service-code',
+      [osHomeKey]: '/tmp/kite-service-os-home',
+      KITE_SERVICE_BUILD_ID: 'dev:test',
+    } satisfies Record<string, string>;
+
+    await expect(
+      runKiteServiceMain(['service', 'run'], {
+        environment: { ...base, KITE_CODE_HOME: 'relative-home' },
+        createComposition,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      runKiteServiceMain(['service', 'run'], {
+        environment: { ...base, KITE_CODE_HOME: '/tmp/evil\nroot' },
+        createComposition,
+      }),
+    ).rejects.toThrow();
+    const withoutOsHome: Record<string, string | undefined> = { ...base };
+    withoutOsHome[osHomeKey] = undefined;
+    await expect(
+      runKiteServiceMain(['service', 'run'], {
+        environment: withoutOsHome,
+        createComposition,
+      }),
+    ).rejects.toThrow();
+    const withoutBuildId: Record<string, string | undefined> = { ...base };
+    withoutBuildId.KITE_SERVICE_BUILD_ID = undefined;
+    await expect(
+      runKiteServiceMain(['service', 'run'], {
+        environment: withoutBuildId,
+        createComposition,
+      }),
+    ).rejects.toThrow();
+  });
+
+  test('passes the exact neutral manager environment to the concrete seam', async () => {
+    const osHomeKey = process.platform === 'win32' ? 'USERPROFILE' : 'HOME';
+    const environment = {
+      KITE_CODE_HOME: '/tmp/kite-service-code',
+      [osHomeKey]: '/tmp/kite-service-os-home',
+      KITE_SERVICE_BUILD_ID: 'installed:2026-08-27',
+    } satisfies Record<string, string>;
+    let captured: Parameters<KiteServiceRuntimeComposition['createInfrastructure']>[0] | undefined;
+    const infrastructure = {
+      shell: {
+        waitForShutdown: async () => ({
+          operation: 'signal_shutdown' as const,
+          outcome: 'applied' as const,
+          state: 'absent' as const,
+        }),
+      },
+      start: async () => ({
+        operation: 'start' as const,
+        outcome: 'applied' as const,
+        state: 'ready' as const,
+      }),
+      stop: async () => ({
+        operation: 'stop' as const,
+        outcome: 'applied' as const,
+        state: 'absent' as const,
+      }),
+      requestStop: async () => ({
+        operation: 'stop' as const,
+        outcome: 'applied' as const,
+        state: 'absent' as const,
+      }),
+      [Symbol.asyncDispose]: async () => undefined,
+    } as const;
+    type InfrastructureOptions = Parameters<
+      KiteServiceRuntimeComposition['createInfrastructure']
+    >[0];
+    const composition = {
+      createInfrastructure(options: InfrastructureOptions) {
+        captured = options;
+        return infrastructure;
+      },
+      [Symbol.asyncDispose]: async () => undefined,
+    } as unknown as KiteServiceRuntimeComposition;
+    // Keep the composition callback typed while capturing the exact input at the seam.
+    const createComposition: typeof import('../src/composition').createKiteServiceRuntimeComposition =
+      () => composition;
+
+    await runKiteServiceMain(['service', 'run'], { environment, createComposition });
+    expect(captured?.home.root).toBe(environment.KITE_CODE_HOME);
+    expect(captured?.buildId).toBe(environment.KITE_SERVICE_BUILD_ID);
+    expect(captured?.instanceId).toStartWith('service_');
+    expect(resolveKiteServiceMainEnvironment(environment)).toEqual({
+      codeRoot: environment.KITE_CODE_HOME,
+      osHome: environment[osHomeKey]!,
+      buildId: environment.KITE_SERVICE_BUILD_ID,
+    });
   });
 });

@@ -2,16 +2,19 @@ import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite-ai/agent-kernel';
 import type {
   AgentPlan,
+  RuntimeClientEvent,
   RuntimeClientInteraction,
+  RuntimeClientToolResult,
+  RuntimeToolDisplayName,
+  RuntimeToolPresentation,
   ToolApprovalPayload,
   UserInputPayload,
 } from '@kite-ai/runtime-contract';
+import { isRuntimeClientEvent, isRuntimeToolDisplayName } from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
 import stringWidth from 'string-width';
-import { currentRuntimeEvent } from '../../../tests/helpers/current-runtime-event';
-import { projectRuntimeClientEvent } from '../src/runtime-client/event-projector';
 import App from '../src/tui/App';
 import ApprovalBlock from '../src/tui/components/ApprovalBlock';
 import BlockRenderer, {
@@ -61,15 +64,236 @@ type LayoutTestAction =
   | Exclude<Action, { type: 'RUNTIME_EVENT' }>
   | {
       type: 'RUNTIME_EVENT';
-      event: RuntimeEvent;
+      event: RuntimeEvent | RuntimeClientEvent;
     };
 
 function eventReducer(state: TuiState, action: LayoutTestAction): TuiState {
   if (action.type !== 'RUNTIME_EVENT') return canonicalEventReducer(state, action);
-  const event = projectRuntimeClientEvent(currentRuntimeEvent(action.event), {
-    sessionRevision: 0,
-  });
-  return event === undefined ? state : canonicalEventReducer(state, { ...action, event });
+  const event = toClientEvent(action.event);
+  return event === undefined
+    ? state
+    : canonicalEventReducer(state, { type: 'RUNTIME_EVENT', event });
+}
+
+/**
+ * Layout tests feed a few legacy Runtime fixtures, but the reducer itself is
+ * deliberately exercised only with the closed Client contract. The production
+ * raw-event projector is Service-owned; this fixture performs only the small
+ * shape conversion needed to keep presentation tests local to the CLI.
+ */
+function toClientEvent(event: RuntimeEvent | RuntimeClientEvent): RuntimeClientEvent | undefined {
+  if (isRuntimeClientEvent(event)) return event;
+  switch (event.type) {
+    case 'user.message_appended':
+      return {
+        type: 'user.message',
+        messageId: event.messageId,
+        kind: 'task',
+        text: event.content,
+      };
+    case 'model.reasoning_delta':
+      return event.segmentId
+        ? {
+            type: 'reasoning.activity',
+            requestId: event.requestId,
+            state: 'streaming',
+            segmentId: event.segmentId,
+            text: event.text,
+          }
+        : undefined;
+    case 'model.reasoning_completed':
+      return {
+        type: 'reasoning.activity',
+        requestId: event.requestId,
+        state: 'completed',
+        segmentId: event.segmentId,
+        text: event.text,
+      };
+    case 'model.responded':
+      return {
+        type: 'model.responded',
+        requestId: event.invocationId ?? `model-${event.messageId}`,
+        messageId: event.messageId,
+        ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }),
+        toolCallCount: event.toolCalls?.length ?? 0,
+        ...(event.text === undefined ? {} : { summary: event.text }),
+      };
+    case 'model.retry':
+      return {
+        type: 'model.retry',
+        requestId: event.invocationId,
+        attempt: event.attempt,
+        delayMs: event.delayMs,
+      };
+    case 'model.cache_metrics':
+      return {
+        type: 'model.cache',
+        inputTokens: event.inputTokens,
+        cacheHitTokens: event.cacheHitTokens,
+        cacheMissTokens: event.cacheMissTokens,
+      };
+    case 'tool.queued':
+      return {
+        type: 'tool.queued',
+        toolId: event.toolCallId,
+        toolName: safeToolName(event.name),
+        ...(safeToolLabel(event.name) === undefined
+          ? {}
+          : { displayLabel: safeToolLabel(event.name) }),
+        presentation: safeToolPresentation(event.name, event.toolCallId),
+        arguments: safeArguments(event.args),
+        summary: 'Queued.',
+      };
+    case 'tool.started':
+      return { type: 'tool.started', toolId: event.toolCallId };
+    case 'tool.progress':
+      return {
+        type: 'tool.progress',
+        toolId: event.toolCallId,
+        summary: event.chunk,
+        stream: event.stream,
+        ...(event.lineCount === undefined ? {} : { lineCount: event.lineCount }),
+      };
+    case 'tool.finished':
+      return {
+        type: 'tool.finished',
+        toolId: event.toolCallId,
+        toolName: safeToolName(event.name),
+        ...(safeToolLabel(event.name) === undefined
+          ? {}
+          : { displayLabel: safeToolLabel(event.name) }),
+        presentation: safeToolPresentation(event.name, event.toolCallId),
+        result: safeToolResult(event.result),
+        summary: event.result.ok ? 'Completed.' : 'Failed.',
+      };
+    case 'tool.failed':
+      return { type: 'tool.failed', toolId: event.toolCallId, summary: 'Tool execution failed.' };
+    case 'tool.rejected':
+      return {
+        type: 'tool.rejected',
+        toolId: event.toolCallId,
+        summary: 'Tool execution rejected.',
+      };
+    case 'tool.cancelled':
+      return {
+        type: 'tool.cancelled',
+        toolId: event.toolCallId,
+        summary: 'Tool execution cancelled.',
+      };
+    case 'tool.file_change':
+      return {
+        type: 'tool.file_changed',
+        toolId: event.toolCallId,
+        change: event.kind === 'add' ? 'added' : event.kind === 'edit' ? 'modified' : 'deleted',
+        summary: 'Workspace file changed.',
+      };
+    case 'subagent.started':
+      return {
+        type: 'subagent.started',
+        subagentId: event.subagent.id,
+        role: event.subagent.role,
+        name: 'name' in event.subagent ? event.subagent.name : event.subagent.task,
+      };
+    case 'subagent.step':
+      return {
+        type: 'subagent.step',
+        subagentId: event.subagent.id,
+        toolName: event.subagent.toolName,
+        status: 'started',
+        arguments: event.subagent.toolArgs,
+        ...(event.subagent.durationMs === undefined
+          ? {}
+          : { durationMs: event.subagent.durationMs }),
+      };
+    case 'subagent.tool_result':
+      return {
+        type: 'subagent.step',
+        subagentId: event.subagent.id,
+        toolName: event.subagent.toolName,
+        status: event.subagent.ok ? 'completed' : 'failed',
+        result: { ok: event.subagent.ok },
+        ...(event.subagent.summary === undefined ? {} : { summary: event.subagent.summary }),
+        ...(event.subagent.totalLines === undefined
+          ? {}
+          : { totalLines: event.subagent.totalLines }),
+        ...(event.subagent.durationMs === undefined
+          ? {}
+          : { durationMs: event.subagent.durationMs }),
+      };
+    case 'subagent.completed':
+      return {
+        type: 'subagent.completed',
+        subagentId: event.subagent.id,
+        summary: event.subagent.summary,
+      };
+    case 'subagent.failed':
+      return {
+        type: 'subagent.failed',
+        subagentId: event.subagent.id,
+        summary: event.subagent.summary ?? event.subagent.error,
+      };
+    case 'run.completed':
+      return {
+        type: 'run.terminal',
+        runId: event.turnId,
+        status: 'completed',
+        summary: event.output,
+      };
+    case 'run.error':
+      return {
+        type: 'run.failure',
+        runId: event.turnId ?? 'runtime-run',
+        code: event.failure?.kind ?? event.outcome?.reasonCode ?? 'runtime_error',
+        retryable: event.failure?.retryable ?? event.recoverable,
+        recoveryEntry: event.outcome?.recoveryEntry ?? (event.recoverable ? 'retry' : 'new_run'),
+      };
+    default:
+      return undefined;
+  }
+}
+
+function safeToolName(name: string): RuntimeToolDisplayName {
+  return isRuntimeToolDisplayName(name) ? name : name.startsWith('mcp__') ? 'mcp_tool' : 'other';
+}
+
+function safeToolLabel(name: string): string | undefined {
+  return isRuntimeToolDisplayName(name) ? undefined : name;
+}
+
+function safeToolPresentation(name: string, toolId: string): RuntimeToolPresentation {
+  if (name === 'task' || toolId.startsWith('subagent-tool:')) return 'hidden';
+  if (
+    name === 'read_file' ||
+    name === 'search_content' ||
+    name === 'search_files' ||
+    name === 'read_mcp_resource'
+  ) {
+    return 'exploration';
+  }
+  return 'standalone';
+}
+
+function safeArguments(value: unknown): Readonly<Record<string, unknown>> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : {};
+}
+
+function safeToolResult(
+  result: Extract<RuntimeEvent, { type: 'tool.finished' }>['result'],
+): RuntimeClientToolResult {
+  return {
+    ok: result.ok,
+    exitCode: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    ...(result.status === undefined ? {} : { status: result.status }),
+    ...(result.totalLines === undefined ? {} : { totalLines: result.totalLines }),
+    ...(result.toolTokenCount === undefined ? {} : { toolTokenCount: result.toolTokenCount }),
+    ...(result.terminationReason === undefined
+      ? {}
+      : { terminationReason: result.terminationReason }),
+  };
 }
 
 function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {

@@ -128,7 +128,7 @@ Session 列表后，`sessions[].active` 必须从唯一 `activeSessionId` 派生
 `close_session` cancellation 或推进 durable revision；已有 active operation 或显式删除仍走 canonical cancel/close，并且只写
 一次取消。readiness、close 或 coordinator release 失败不能让 target 留在 Runtime/client/readiness/authority map：cleanup 必须
 best-effort 执行所有释放步骤、保留首个错误供上层作为 secondary diagnostic，并允许随后重新 register exact session。
-对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于 `apps/kite-cli/test/isolated/session-manager.test.ts`。
+对应 admission-only、active-operation、readiness retry 与 release-failure 证据位于 `apps/kite-service/test/isolated/session-manager.test.ts`。
 
 未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。App 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
 
@@ -251,7 +251,7 @@ wall-clock 回拨不能复活旧 hint；hint 被驱逐或过期只能返回
 以上协议与生命周期的物理 owner 已切到 Builtin Runtime：`@kite-ai/runtime-spi` 定义 JSON-safe
 Subagent/Provider/continuation contract，`@kite-ai/builtin-runtime` 拥有 sealed grant、Local Provider、唯一 composition、
 continuation JSON/cursor、role ceiling、replay binding 与 `BuiltinChildRuntimeDriver`。App composition root 只构造一个
-Builtin Driver/composition，`apps/kite-cli/src/bootstrap/runtime/subagent/task-tool.ts` 的 Runtime State registration adapter
+Builtin Driver/composition，`apps/kite-service/src/bootstrap/runtime/subagent/task-tool.ts` 的 Runtime State registration adapter
 仅以 invocation-scoped callback 注入 tool/receipt translation。缺少调用者已经解析的 Model 或同一
 `BuiltinModelEffectCoordinator` 时立即 fail closed，
 不得现场 `createChatModel()`、重建 Driver/composition 或 fallback。pending registration、single-use start/resume、

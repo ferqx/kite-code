@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime Store event/session 数据、日志查询 Contract、`RuntimeLogQueryPort`、SQLite reader、App 日志展示投影，或实现本地日志 Server/Web 时。
 
-验证：`bun test packages/runtime-contract/test/runtime-contract.test.ts packages/runtime-storage-sqlite/test/log-query.test.ts apps/kite-cli/test/runtime-log-presentation.test.ts`、`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`。
+验证：`bun test packages/runtime-contract/test/runtime-contract.test.ts packages/runtime-storage-sqlite/test/log-query.test.ts apps/kite-service/test/runtime-log-presentation.test.ts`、`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`。
 
 相关：ADR-0129、ADR-0142、ADR-0143、[`Kite Runtime Server V1`](../space/plans/2026-08-26-kite-runtime-server-v1.md)。
 
@@ -36,14 +36,14 @@ checkpoint、delete 或 Artifact read。当前 loopback WebSocket 仅为 develop
 HTTP/SSE/Web UI 或 production entrypoint。任何 bootstrap bearer、cookie、token、Workspace/Store path 或事件正文
 均不得写入 carrier 诊断或任何日志、Session Logger、Runtime Store 或 observability。
 
-KLSV1-04 的private Service Native carrier已经实现三个exact History HTTP route，但handler只消费注入的
-`RuntimeHistoryClient` safe result；当前tests使用fake client。SQLite reader与raw event/history projector仍由
-`apps/kite-cli` concrete composition拥有，直到KLSV1-06 relocation；本阶段没有第二reader/writer或raw DTO复制。
+`apps/kite-service`的唯一concrete composition同时创建State 27 / Store 6 writer、SQLite readonly reader、raw event/
+history projector与三个authenticated exact History HTTP handler。handler只取得`RuntimeHistoryClient` safe result，不取得
+Runtime command、transaction、effect或checkpoint mutation；carrier与projector共享process不等于合并capability。
+`apps/kite-cli`不依赖SQLite/Host/Server，不读取Store、raw event或第二日志源，也没有embedded fallback reader/writer。
 
-KLSV1-05的Native connector通过上述三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/
-transcript shape；transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。真实
-detached child integration证明同一fake process内client断开后第二client仍可读取已推进Session及完整History，但fake
-application只保存在进程内存，因此这不是Service重启后的SQLite恢复证据。SQLite reader、raw projector与唯一writer仍在
-`apps/kite-cli`，直到KLSV1-06 clean relocation。
+Native connector通过三个exact HTTP route读取safe History结果，并在client侧再次验证closed list/page/transcript shape；
+transcript event直接复用`RuntimeClientEvent`闭集validator，unknown event和额外字段均fail closed。Service client断开不
+终止Session，replacement client可从同一SQLite authority继续读取；Service restart仍由唯一Store恢复。当前这些是本机
+composition/focused evidence，KLSV1-07的三平台installed process/release qualification仍pending，不能以源码存在替代。
 
 普通 Store 的数据库级 owner 只验证 marker 与结构，用于列出和选择会话；它不扫描所有会话正文。恢复某个会话时必须携带 `sessionId`，该 session-scoped open 才严格校验该会话全部 event、snapshot checksum、revision/position 与 identity。这样一个损坏的旧会话只会让自身不可恢复，不会让同库其他会话全部不可用。

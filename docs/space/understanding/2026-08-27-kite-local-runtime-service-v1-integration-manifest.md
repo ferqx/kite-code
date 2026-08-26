@@ -165,7 +165,7 @@ bun run typecheck
 bun run test:runtime:stdio
 bun run test:runtime:websocket
 bun run test:runtime:transport
-bun test apps/kite-cli/test/scripts/check-runtime-packages.test.ts
+bun test apps/kite-service/test/scripts/check-runtime-packages.test.ts
 bun test tests/integration/scripts/check-test-ownership.test.ts
 bun test tests/integration/scripts/ci-bun-baseline.test.ts
 bun test tests/integration/docs-impact.test.ts tests/integration/docs-space.test.ts

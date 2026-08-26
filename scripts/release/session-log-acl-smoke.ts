@@ -22,10 +22,10 @@ import {
   sessionLogFrontendDir,
   sessionLogRoot,
   userKiteCodeDir,
-} from '#kite-cli/config/paths';
-import type { SessionLoggingPolicy } from '#kite-cli/config/session-logging-policy';
-import { SESSION_LOG_LEASE_FILE } from '../../apps/kite-cli/src/session-logger/active-session-lease';
-import { SessionLogWriter } from '../../apps/kite-cli/src/session-logger/writer';
+} from '#kite-service/config/paths';
+import type { SessionLoggingPolicy } from '#kite-service/config/session-logging-policy';
+import { SESSION_LOG_LEASE_FILE } from '../../apps/kite-service/src/session-logger/active-session-lease';
+import { SessionLogWriter } from '../../apps/kite-service/src/session-logger/writer';
 
 const SMOKE_POLICY: SessionLoggingPolicy = {
   version: 1,

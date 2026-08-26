@@ -864,26 +864,27 @@ describe('sandbox executor factory', () => {
   });
 });
 
-// 验证 CLI --no-sandbox 标志解析 / Validate CLI --no-sandbox flag parsing
-describe('cli sandbox flag', () => {
+// Service cutover keeps legacy local sandbox flags fail-closed at the CLI edge.
+describe('cli sandbox flag cutover', () => {
   test('sandbox is enabled by default', () => {
     const args = parseArgs(['run', '--task', 'hello']);
     expect(args.sandbox).toBe(true);
   });
 
-  test('--no-sandbox disables sandbox', () => {
-    const args = parseArgs(['run', '--task', 'hello', '--no-sandbox']);
-    expect(args.sandbox).toBe(false);
+  test('--no-sandbox is rejected instead of being silently ignored', () => {
+    expect(() => parseArgs(['run', '--task', 'hello', '--no-sandbox'])).toThrow(
+      "Unsupported CLI option '--no-sandbox'",
+    );
   });
 
-  test('resume defaults to sandbox enabled', () => {
-    const args = parseArgs(['resume', '--approve']);
-    expect(args.sandbox).toBe(true);
+  test('resume rejects the removed approval flags', () => {
+    expect(() => parseArgs(['resume', '--approve'])).toThrow("Unsupported CLI option '--approve'");
   });
 
-  test('resume --no-sandbox disables sandbox', () => {
-    const args = parseArgs(['resume', '--approve', '--no-sandbox']);
-    expect(args.sandbox).toBe(false);
+  test('resume rejects the removed sandbox flag', () => {
+    expect(() => parseArgs(['resume', '--no-sandbox'])).toThrow(
+      "Unsupported CLI option '--no-sandbox'",
+    );
   });
 });
 

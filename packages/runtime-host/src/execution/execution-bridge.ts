@@ -15,7 +15,7 @@ export interface RuntimeHostPreparedExecution {
     readonly sessionId: string;
     readonly operationId: string;
     readonly committedRevision: number;
-    readonly operation: 'turn' | 'compaction';
+    readonly operation: 'turn' | 'compaction' | 'rewind';
     readonly run: (signal: AbortSignal, requestAbort: (reason: string) => void) => Promise<void>;
     readonly cancel?: (reason: string) => void;
   };

@@ -1,4 +1,4 @@
-import type { McpConfigCatalog, McpConfigCommand, McpConfigRepository } from '#kite-cli/config';
+import type { McpConfigCatalog, McpConfigCommand, McpConfigRepository } from '#kite-service/config';
 
 /**
  * Explicit in-memory composition for Builtin MCP supervisor tests.

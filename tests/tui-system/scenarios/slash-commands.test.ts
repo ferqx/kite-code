@@ -145,7 +145,7 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
-    '/effort refreshes the static Header and keeps a non-reasoning model interactive',
+    '/effort refreshes the static Header for a reasoning-capable model',
     async () => {
       await submitCommand(tui, '/effort');
       await waitForText(() => tui.viewport(), '选择推理深度', 10_000);

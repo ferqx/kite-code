@@ -1,1 +1,1 @@
-export * from '../../apps/kite-cli/src/release/artifact-layout';
+export * from '../../apps/kite-service/src/release/artifact-layout';

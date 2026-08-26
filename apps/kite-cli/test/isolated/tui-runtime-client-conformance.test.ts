@@ -1,205 +1,134 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import type { RuntimeState } from '@kite-ai/agent-kernel';
-import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
-import { sqliteCurrentRuntimeStorePath } from '@kite-ai/runtime-storage-sqlite';
-import { openStateStoreForTest } from '../../../../scripts/support/runtime-storage';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
-import { createKiteInProcessAppControlComposition } from '../../src/app-control';
-import { createKiteTuiSessionManager } from '../../src/bootstrap';
-import type { SessionPresentationAction } from '../../src/runtime/session/contracts';
-import { createRuntimeOperationGate } from '../../src/runtime-application';
-import type { AppShellExecutor } from '../../src/sandbox/composition';
-import {
-  APP_PREPARED_SHELL_EXECUTION_,
-  projectAppHostShellResult,
-} from '../../src/sandbox/prepared-tool-pipeline';
+import { readFileSync } from 'node:fs';
+import type { KiteAppControlClient } from '@kite-ai/kite-app-contract';
+import type {
+  LocalKiteConnection,
+  LocalRuntimeServiceDescriptor,
+} from '@kite-ai/kite-local-runtime/client';
+import type {
+  RuntimeClientConnection,
+  RuntimeClientTransport,
+  RuntimeHistoryClient,
+} from '@kite-ai/runtime-client';
+import { RuntimeClient } from '@kite-ai/runtime-client';
+import { createNativeTuiRuntimeClient } from '../../src/service-mode';
 
-test('TUI App composition receives safe live and terminal events through its Runtime Client subscription', async () => {
-  const workspace = mkdtempSync(join(realpathSync(tmpdir()), 'kite-tui-runtime-client-cutover-'));
-  const previousKiteCodeHome = process.env.KITE_CODE_HOME;
-  process.env.KITE_CODE_HOME = workspace;
-  const model = createMockModelServer();
-  model.setResponses([
-    {
-      message: {
-        content_chunks: ['Subscription-safe ', 'terminal projection.'],
-      },
-    },
+const workspace = '/tmp/tui-runtime-client-contract';
+
+test('TUI runtime facade consumes only an injected Native connection and exposes closed client methods', async () => {
+  const fixture = createConnectionFixture();
+  const facade = createNativeTuiRuntimeClient({
+    connection: fixture.connection,
+    workspace,
+  });
+
+  expect(Object.keys(facade).sort()).toEqual([
+    'abortAll',
+    'applyPersistedModelRoute',
+    'buildContextStatusSnapshot',
+    'cancelRuntimeOperations',
+    'clearSessionCommandGrants',
+    'createSession',
+    'deletePersistedSession',
+    'dispose',
+    'executeRewind',
+    'forkRecoveredSessionForContinuation',
+    'generateAndPersistSessionName',
+    'getActiveId',
+    'getRuntime',
+    'getSessionProjection',
+    'getSnapshot',
+    'handleContextCompaction',
+    'handleContextDisplay',
+    'handleContextReset',
+    'hasRuntime',
+    'listPersistedSessions',
+    'listRewindCheckpoints',
+    'loadPersistedSession',
+    'onInterruptPending',
+    'onStatusChange',
+    'previewRewind',
+    'registerSession',
+    'removeRuntime',
+    'saveTokenStats',
+    'setName',
+    'setSnapshotCallback',
+    'shutdownObservability',
+    'submitUserAction',
+    'switchSession',
+    'waitForSessionReady',
   ]);
-  const shellExecutor = createHostShellExecutor();
-  const appControl = createKiteInProcessAppControlComposition(createRuntimeOperationGate());
-  const manager = createKiteTuiSessionManager(
-    {
-      workspace,
-    },
-    {
-      checkpointPath: join(workspace, 'runtime.sqlite'),
-      config: {
-        providerName: 'integration-model',
-        providerType: 'openai-compatible',
-        apiKey: 'test-key',
-        baseURL: model.baseURL,
-        modelName: 'mock-model',
-        interactionMode: 'accept_edits',
-        sandbox: { enabled: false },
-      },
-      skillManifests: [],
-      skillOptions: {
-        userKiteCodeSkillsDir: join(workspace, 'user-kite-skills'),
-        userAgentsSkillsDir: join(workspace, 'user-agent-skills'),
-        projectKiteCodeSkillsDir: join(workspace, '.kite-code', 'skills'),
-        projectAgentsSkillsDir: join(workspace, '.agents', 'skills'),
-      },
-      mcpManager: null,
-      shellExecutor,
-      appControl,
-    },
+  expect(facade.getSnapshot()).toEqual([]);
+  expect(facade.hasRuntime('missing-session')).toBe(false);
+  expect(facade.getRuntime('missing-session')).toBeUndefined();
+
+  const source = readFileSync(
+    new URL('../../src/service-mode/tui-client.ts', import.meta.url),
+    'utf8',
   );
+  expect(source).not.toContain("from '#kite-service/");
+  expect(source).not.toContain('SessionManager');
 
-  try {
-    const bridgeSource = readFileSync(
-      join(import.meta.dir, '../../src/bootstrap/runtime/TuiRuntimeBridge.ts'),
-      'utf8',
-    );
-    const facadeSource = readFileSync(
-      join(import.meta.dir, '../../src/adapters/tui/session-adapter.ts'),
-      'utf8',
-    );
-    expect(bridgeSource).not.toContain('new Proxy');
-    expect(bridgeSource).not.toContain('Reflect.get');
-    expect(bridgeSource).not.toContain('Reflect.set');
-    expect(facadeSource).not.toContain('Omit<SessionManager');
-    for (const derivedManagerType of [
-      'ReturnType<SessionManager',
-      'Parameters<SessionManager',
-      'ReturnType<SessionRuntime',
-      'Parameters<SessionRuntime',
-    ]) {
-      expect(facadeSource).not.toContain(derivedManagerType);
-      expect(bridgeSource).not.toContain(derivedManagerType);
-    }
-
-    const sessionId = manager.createSession(workspace);
-    await manager.waitForSessionReady(sessionId);
-    const runtime = manager.getRuntime(sessionId);
-    expect(runtime).toBeDefined();
-    expect('recoverRuntimeState' in manager).toBe(false);
-    expect('executeHostCompaction' in manager).toBe(false);
-    expect('runtimeSessionCoordinator' in manager).toBe(false);
-    expect('authorizedExecutionControl' in runtime!).toBe(false);
-    expect('getPendingInteractionCommandPort' in runtime!).toBe(false);
-    expect('reportRuntimeFailure' in runtime!).toBe(false);
-
-    const events: RuntimeClientEvent[] = [];
-    try {
-      await runtime!.runTask('Reply once without calling a tool.', {
-        dispatch: (action: SessionPresentationAction) => {
-          if (action.type === 'RUNTIME_EVENT') events.push(action.event);
-        },
-      });
-    } catch (error) {
-      const runtimeError = error as {
-        code?: unknown;
-        message?: unknown;
-        protocol?: unknown;
-      };
-      throw new Error(
-        `start_turn via TUI Runtime Client failed: ${JSON.stringify({
-          code: runtimeError.code,
-          message: runtimeError.message,
-          protocol: runtimeError.protocol,
-        })}`,
-      );
-    }
-    await runtime!.waitForRunCompletion();
-
-    const failuresBeforeLateAbort = runtime!.eventBuffer.filter(
-      (event) => event.type === 'run.failure',
-    ).length;
-    runtime!.abort();
-    await Bun.sleep(25);
-    expect(runtime!.eventBuffer.filter((event) => event.type === 'run.failure')).toHaveLength(
-      failuresBeforeLateAbort,
-    );
-
-    // The bridge's Host callback never dispatches presentation events
-    // directly. Both of these arrive only after the Runtime Client's
-    // subscribed Protocol notification pump projects them back to the UI.
-    expect(events.some((event) => event.type === 'model.text_delta')).toBe(true);
-    expect(events.filter((event) => event.type === 'user.message')).toHaveLength(1);
-    expect(JSON.stringify(events)).not.toContain('test-key');
-    expect(JSON.stringify(events)).not.toContain(workspace);
-    expect(model.getRequestCount()).toBe(1);
-
-    const stateStore = openStateStoreForTest(
-      sqliteCurrentRuntimeStorePath(join(workspace, 'runtime.sqlite')),
-    );
-    try {
-      const state = stateStore.sessions.loadSnapshot<RuntimeState>(sessionId);
-      expect(state).not.toBeNull();
-      stateStore.checkpoints.saveNamedSnapshot(
-        sessionId,
-        'tui-rewind-checkpoint',
-        state!,
-        stateStore.sessions.getLastEventPosition(sessionId),
-      );
-    } finally {
-      stateStore.close();
-    }
-    const rewind = await manager.executeRewind({
-      sourceThreadId: sessionId,
-      snapshotId: 'tui-rewind-checkpoint',
-      scope: 'conversation_only',
-      workspace,
-    });
-    expect(rewind?.targetThreadId).not.toBe(sessionId);
-    expect(manager.getRuntime(rewind!.targetThreadId)).toBeDefined();
-    expect(model.getRequestCount()).toBe(1);
-
-    const compaction = await manager.handleContextCompaction(sessionId);
-    expect(compaction?.events).toContainEqual({
-      type: 'context.compaction',
-      status: 'failed',
-      summary: 'Context compaction failed.',
-    });
-    // The committed manual request has one terminal projection and no
-    // duplicate turn dispatch.
-    expect(model.getRequestCount()).toBe(1);
-  } finally {
-    await manager.dispose();
-    if (previousKiteCodeHome === undefined) delete process.env.KITE_CODE_HOME;
-    else process.env.KITE_CODE_HOME = previousKiteCodeHome;
-    model.stop();
-    rmSync(resolve(workspace), { recursive: true, force: true });
-  }
+  await facade.dispose();
+  expect(fixture.closeReasons).toEqual(['tui_client_closed']);
 });
 
-function createHostShellExecutor(): AppShellExecutor {
-  const executor = (async ({ command }: Parameters<AppShellExecutor>[0]) => ({
-    ok: true,
-    command,
-    exitCode: 0,
-    stdout: '',
-    stderr: '',
-  })) as AppShellExecutor;
-  Object.defineProperty(executor, APP_PREPARED_SHELL_EXECUTION_, {
-    configurable: false,
-    enumerable: false,
-    writable: false,
-    value: Object.freeze({
-      execute: async (input: { command: string }) =>
-        projectAppHostShellResult({
-          ok: true,
-          command: input.command,
-          exitCode: 0,
-          stdout: '',
-          stderr: '',
-        }),
-    }),
+function createConnectionFixture(): {
+  readonly connection: LocalKiteConnection;
+  readonly closeReasons: string[];
+} {
+  const transport: RuntimeClientTransport = {
+    connect: async (): Promise<RuntimeClientConnection> => {
+      throw new Error('TUI facade fixture transport is not connected');
+    },
+  };
+  const runtime = new RuntimeClient({
+    transport,
+    clientInfo: { name: 'tui-runtime-client-test', version: '1', instanceId: 'tui-client' },
   });
-  executor.prepare = async () => ({ mode: 'host_shell', backend: 'none' });
-  return executor;
+  const history = {
+    listSessions: async () => ({ entries: [], hasMore: false }),
+    listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+    loadSession: async () => {
+      throw new Error('history is not used by this contract fixture');
+    },
+  } as RuntimeHistoryClient;
+  const closeReasons: string[] = [];
+  const descriptor: LocalRuntimeServiceDescriptor = {
+    schema: 'kite.local-runtime-service.v1',
+    instanceId: 'service-instance',
+    pid: 1234,
+    startedAt: '2026-08-27T00:00:00.000Z',
+    endpoint: {
+      origin: 'http://127.0.0.1:43123',
+      websocketUrl: 'ws://127.0.0.1:43123/rpc',
+    },
+    protocolVersion: 1,
+    clientContractRevision: 'kite-local-runtime-contract-v1',
+    serverVersion: 'test-service',
+    buildId: 'test-build',
+  };
+  const connection: LocalKiteConnection = {
+    runtime,
+    history,
+    app: {} as KiteAppControlClient,
+    credential: {
+      writeProviderCredential: async () => {
+        throw new Error('credential is not used by this contract fixture');
+      },
+    },
+    service: descriptor,
+    status: 'active',
+    generation: 1,
+    snapshotStore: runtime.snapshotStore,
+    subscribe: (listener) => runtime.snapshotStore.subscribe(listener),
+    prepareAppControl: async () => undefined,
+    connect: async () => undefined,
+    reconnect: async () => undefined,
+    close: async (reason) => {
+      closeReasons.push(reason ?? '');
+    },
+    [Symbol.asyncDispose]: async () => undefined,
+  };
+  return { connection, closeReasons };
 }

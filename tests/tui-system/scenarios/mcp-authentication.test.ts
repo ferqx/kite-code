@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
@@ -8,7 +9,7 @@ import {
   submitUserMessage,
   typeText,
 } from '../harness/input-helpers';
-import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
@@ -67,7 +68,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     expect(authorizationRequests).toBe(0);
   }, 40_000);
 
-  test('Login reports opener failure, Esc cancels the flow, and input recovers', async () => {
+  test('Login reports opener failure, Esc returns safely, and input recovers', async () => {
     let baseUrl = '';
     let metadataRequests = 0;
     let authorizationRequests = 0;
@@ -120,9 +121,13 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       },
       projectConfigOverrides: {},
     });
-    workspace.env.NODE_ENV = 'test';
-    workspace.env.KITE_TEST_MCP_CREDENTIAL_STORE = 'memory';
-    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
+    tui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      mockServer: modelServer,
+      workspace,
+      entryPath: join(import.meta.dir, '../fixtures/mcp-auth-tui.tsx'),
+    });
     await submitCommand(tui, '/mcp');
     await waitForText(() => tui!.viewport(), '● 需要登录', 10_000);
     tui.write('\r');
@@ -130,7 +135,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     tui.write('\r');
     await waitForText(() => tui!.viewport(), '打开浏览器', 10_000);
     const openerFrames = tui.markScreen();
-    tui.write('\r');
+    await tui.writeExact('\r');
     await waitForText(() => tui!.viewport(), 'browser_open_failed', 15_000);
     const openerFailureOutput = tui.screenFramesSince(openerFrames).join('\n');
     expect(metadataRequests).toBeGreaterThanOrEqual(2);
@@ -139,7 +144,11 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     expect(screenContains(openerFailureOutput, 'pty-client')).toBe(false);
 
     tui.write('\x1b');
-    await waitForText(() => tui!.viewport(), 'MCP authentication cancelled.', 10_000);
+    await waitForText(() => tui!.viewport(), '❯ 认证', 10_000);
+    tui.write('\x1b');
+    await waitForText(() => tui!.viewport(), '1 个服务器', 10_000);
+    tui.write('\x1b');
+    await waitForTuiReady(tui);
   }, 50_000);
 
   test('required login provider gates the model and Session Waive continues without exposing it', async () => {

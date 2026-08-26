@@ -565,7 +565,9 @@ function authorizePreparedExecution(
       ? 'turn'
       : command.type === 'compact_session'
         ? 'compaction'
-        : undefined;
+        : command.type === 'rewind_session'
+          ? 'rewind'
+          : undefined;
   if (
     expectedOperation === undefined ||
     receipt.commandId !== command.commandId ||

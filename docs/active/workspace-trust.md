@@ -1,32 +1,34 @@
 # Workspace 信任门禁 / Workspace Trust Gate
 
 状态：active
-读取时机：修改 TUI 启动流程（`TuiBootstrap`）、CLI 入口（`apps/kite-cli/src/cli/index.ts`）、workspace 信任存储、`apps/kite-cli/src/config/workspace-trust.ts`、`WorkspaceTrustGate.tsx` 或测试 harness 的信任旁路时
-验证：`bun test apps/kite-cli/test/workspace-trust.test.ts apps/kite-cli/test/isolated/cli-workspace-trust.test.ts tests/integration/docs-space.test.ts`、`bun run test:tui:system workspace-trust`
+读取时机：修改 TUI 启动流程（`TuiBootstrap`）、CLI 入口（`apps/kite-cli/src/cli/index.ts`）、workspace 信任存储、`apps/kite-service/src/config/workspace-trust.ts`、`WorkspaceTrustGate.tsx` 或测试 harness 的信任旁路时
+验证：`bun test apps/kite-service/test/workspace-trust.test.ts apps/kite-service/test/isolated/cli-workspace-trust.test.ts tests/integration/docs-space.test.ts`、`bun run test:tui:system workspace-trust`
 
 ## 概述
 
-TUI首次打开未信任目录时显示workspace授权确认。`TuiBootstrap`先通过App Control discovery client查询
-safe trust snapshot，再挂载FirstRunFlow或`TuiApp`：未通过门禁时不会创建会话、连接MCP、扫描skill或发起模型
-调用。TUI只负责prompt/Exit UX，不直接读取或写入trust store；App Control owner重新canonicalize路径、校验完整
-Workspace identity并执行revision CAS。conflict或lost response后只query一次，不自动重放decision。当前owner仍是
-`apps/kite-cli`内的app-local InProcess transition；独立Service尚未运行。CLI `run`与parent-owned`server --stdio`
-仍在加载项目配置或创建Runtime前执行同一底层门禁，共享同一用户级信任存储。
+TUI首次打开未信任目录时显示workspace授权确认。启动是严格two-phase：Native connector先用access token只准备
+no-secret App Control，`TuiBootstrap`通过discovery client查询safe trust snapshot并在需要时提交revision CAS decision；
+只有authoritative Service返回trusted完整identity后，Client才请求Workspace-bound one-shot ticket、执行Runtime
+initialize并挂载FirstRunFlow或`TuiApp`。未通过门禁时不会创建会话、连接MCP、扫描skill或发起模型调用。TUI只负责
+prompt/Exit UX，不直接读取或写入trust store；Service App Control owner重新canonicalize路径、校验完整Workspace
+identity并执行CAS。conflict或lost response后只query一次，不自动重放decision。CLI`run/resume`使用同一顺序，
+`--trust-workspace`只是显式decision，不绕过Service owner。
 
 `apps/kite-cli/src/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
 全部位于 `TuiApp` 内，只能在 `TuiBootstrap` 已通过 workspace 信任检查后挂载。
 修改这些 action 接线不得把会话存储、RuntimeStore 或工具初始化上移到信任分支之前。
 
-KLSV1-04 的private Service carrier已经提供injected Workspace Trust query/decision与connect admission route；carrier
-对带Workspace的App request重新解析并比较完整identity，connect body本身不提升authority。当前真实trust store owner
-仍在`apps/kite-cli` app-local composition，Service tests只注入fake port；KLSV1-06前不得宣称owner已迁移。
+真实trust store、query/decision handler、connect admission与per-connection Runtime authorization都由
+`apps/kite-service`唯一composition拥有。carrier对带Workspace的App request重新解析并比较完整identity；query/
+decision/connect body、cwd、clientInfo与display name本身都不提升authority。`apps/kite-cli`没有trust repository或
+fallback writer，只保存语言、theme等UI-local preference。
 
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 
 1. 读取 `workspaceTrustPath()` 存储，`workspaceKey = canonicalWorkspaceKey(workspace)`（canonical realpath 的 sha256，与 MCP 项目批准复用同一摘要函数）命中记录 → 放行。
 2. 未命中（`unknown`）、记录损坏（`corrupt`）或存储不可用（`unavailable`）→ 提示确认（TUI 显示界面 / CLI 拒绝运行）。损坏与不可用按 fail-closed 处理：要求用户重新确认，而不是静默放行。
 
-**安全不变量：刻意不提供环境变量旁路。** Bun 在用户代码执行前会自动把 `<cwd>/.env*` 注入 `process.env`，任何 env 开关都能被未信任目录内的攻击者可控文件伪造（恶意仓库提交 `.env` 即可在首次打开时静默放行）。自动化必须走显式背书：CLI `--trust-workspace`（`source: 'config'`）或预写信任存储（测试 harness 用 `source: 'test'`）。新增门禁逻辑时不得重新引入 env 判定，回归测试覆盖 `.env` 伪造场景（`apps/kite-cli/test/isolated/cli-workspace-trust.test.ts`、`tests/tui-system/scenarios/workspace-trust.test.ts`）。
+**安全不变量：刻意不提供环境变量旁路。** Bun 在用户代码执行前会自动把 `<cwd>/.env*` 注入 `process.env`，任何 env 开关都能被未信任目录内的攻击者可控文件伪造（恶意仓库提交 `.env` 即可在首次打开时静默放行）。自动化必须走显式背书：CLI `--trust-workspace`（`source: 'config'`）或预写信任存储（测试 harness 用 `source: 'test'`）。新增门禁逻辑时不得重新引入 env 判定，回归测试覆盖 `.env` 伪造场景（`apps/kite-service/test/isolated/cli-workspace-trust.test.ts`、`tests/tui-system/scenarios/workspace-trust.test.ts`）。
 
 ## 确认界面（`apps/kite-cli/src/tui/components/WorkspaceTrustGate.tsx`）
 
@@ -45,18 +47,18 @@ KLSV1-04 的private Service carrier已经提供injected Workspace Trust query/de
 - `--trust-workspace` → 调用方显式背书，写入 `source: 'config'` 的信任记录后继续；该记录只表示 Workspace trust，
   不授予 Full 或任何 approval grant。历史 `--full-access` flag 仅保留为 ignored/negative compatibility input，
   不再是当前 CLI authority（见 `docs/active/authorization.md`）。记录写入失败时同样报错退出。CI/自动化应使用该旗标或预写信任存储。
-- `server --stdio`也必须在启动App唯一Host/Server composition前通过门禁。Runtime Server core允许App为每个logical
-  connection绑定独立已信任canonical Workspace；create只使用该binding，resume/query/fork使用persisted Session
-  identity并fail closed校验。父进程、RPC params、session display name或任意绝对路径都不能提升Workspace authority，
-  trust也不会提升为Full或approval grant。
+- Runtime Server core只接受Service为每个logical connection绑定的独立已信任canonical Workspace；create只使用该
+  binding，resume/query/fork使用persisted Session identity并fail closed校验。terminal client、RPC params、session
+  display name或任意绝对路径都不能提升Workspace authority，trust也不会提升为Full或approval grant。
 - `trace`、`help` 命令不执行项目代码，不做门禁。
 
-CLI 组合根产生的 sandbox 诊断也只能写入 stderr；不得混入 stdout 的 JSONL Runtime 事件流，更不得由
-TUI 把该内部诊断直接投影为对话内容。
+Service composition产生的sandbox诊断也只能写入Service stderr/受限diagnostic surface；不得混入terminal CLI stdout，
+更不得由TUI把该内部诊断直接投影为对话内容。
 
 ## 存储格式
 
-`workspaceTrustPath()` = `~/.kite-code/workspace-trust.jsonc`（`KITE_CODE_HOME` 可覆盖 home 根目录）：
+`workspaceTrustPath()` = `<codeRoot>/workspace-trust.jsonc`；managed Service 的 `KITE_CODE_HOME` 只接受
+release/manager 注入的 exact validated code root，不是 Workspace 或 ambient OS-home override：
 
 ```jsonc
 {
@@ -81,14 +83,15 @@ TUI 把该内部诊断直接投影为对话内容。
 
 - `spawnTui()` 默认为启动目录预写一条 `source: 'test'` 的信任记录（存入临时 home 的信任存储），现有 PTY 场景走与生产一致的"已信任目录"快速路径，不受门禁阻塞。不使用 env 旁路（见上文安全不变量）。
 - 验证门禁本身时使用 `createTestWorkspace({ enforceWorkspaceTrust: true })` 跳过预写，参考 `tests/tui-system/scenarios/workspace-trust.test.ts`：门禁渲染与阻断、信任持久化并启动、已信任目录重启跳过、拒绝后干净退出且无持久化；场景同时在 workspace 放置伪造 `.env`，验证 Bun dotenv 注入不能绕过门禁。
-- CLI 门禁由 `apps/kite-cli/test/isolated/cli-workspace-trust.test.ts` 覆盖：真实 spawn CLI 入口，验证拒绝路径（无 stdout 泄漏、无持久化）、`--trust-workspace` 记录 `source: 'config'`、`.env` 伪造旁路被拒、已信任目录免旗标放行。
+- CLI/Service门禁由`apps/kite-service/test/isolated/cli-workspace-trust.test.ts`及CLI client tests覆盖：验证拒绝路径
+  （无stdout泄漏、无Runtime initialize）、`--trust-workspace`记录`source: 'config'`、`.env`伪造旁路被拒、已信任
+  目录免旗标放行与Trust通过前只有App Control preparation。
 
 ## 边界与现状
 
-- TUI、CLI `run` 与 parent-owned `server --stdio` 均执行门禁。stdio 只给拥有 child lifecycle 的 Desktop/test
-  父进程：stdin 是有界 UTF-8 JSONL，stdout 只承载 Protocol，诊断只写 stderr，EOF 只释放该连接；只有 owner
-  signal/shutdown capability 才能释放 composition。development/reference loopback WebSocket 同样继承 bootstrap
-  注入的唯一 trusted Workspace，但不是 production Web/Desktop 入口。
+- TUI与CLI`run/resume`都通过managed Native Service执行two-phase门禁。Service-owned internal stdio只给拥有child
+  lifecycle的Desktop/test父进程，不是terminal fallback；development/reference loopback WebSocket也不能绕过Trust，
+  但不是production Web/Desktop入口。
 - workspace 信任是目录级一次性决定，不是逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
 - workspace 信任同时授权 Agent 将其已读取的任意仓库内容用于后续模型上下文。模型调用不会另设正文准入、分类或阻断；敏感内容仍不得进入 Runtime Event、telemetry 或 session metadata；写入、shell、网络、MCP write 等副作用继续受各自的授权与执行边界约束。
 - 门禁求值前只读取惰性配置（JSONC 解析，不执行项目代码）；skill 扫描、MCP 连接与 shell 执行全部发生在门禁通过之后。

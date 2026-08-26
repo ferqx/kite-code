@@ -56,6 +56,7 @@ import type { KiteServiceApplicationPort, ServiceWorkspaceAdmissionResult } from
 
 export const KITE_SERVICE_LOOPBACK_HOST = '127.0.0.1' as const;
 export const KITE_SERVICE_CONNECT_PATH = '/_kite/connect' as const;
+export const KITE_SERVICE_INSTANCE_HANDSHAKE_PATH = '/_kite/instance' as const;
 export const KITE_SERVICE_RPC_PATH = '/rpc' as const;
 export const KITE_SERVICE_HISTORY_LIST_SESSIONS_PATH = '/_kite/history/list-sessions' as const;
 export const KITE_SERVICE_HISTORY_LIST_EVENTS_PATH = '/_kite/history/list-events' as const;
@@ -121,6 +122,8 @@ export interface KiteServiceCarrierOptions {
   readonly now?: () => number;
   /** Test-only replacement for Bun's peer address inspection. */
   readonly requestIp?: (request: Request, server: Bun.Server<SocketData>) => RequestIp;
+  /** Test-only listener factory used to inject deterministic socket faults. */
+  readonly serve?: typeof Bun.serve;
   /** Diagnostics contain codes only; request bodies and secrets never reach this callback. */
   readonly onDiagnostic?: (code: KiteServiceCarrierDiagnosticCode) => void;
 }
@@ -184,7 +187,8 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
     return failures;
   };
 
-  bunServer = Bun.serve<SocketData>({
+  const serve = options.serve ?? Bun.serve;
+  bunServer = serve<SocketData>({
     hostname: KITE_SERVICE_LOOPBACK_HOST,
     port: 0,
     development: false,
@@ -217,8 +221,17 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         return fixedResponse(200, url.pathname === '/healthz' ? 'ok' : 'ready');
       }
       if (!(options.isReady?.() ?? true)) return fixedResponse(503, 'unavailable');
+      if (url.pathname === KITE_SERVICE_INSTANCE_HANDSHAKE_PATH) {
+        return afterDispatchCloseBarrier(
+          handleInstanceHandshake(request, binding, options, limits),
+          () => closed,
+        );
+      }
       if (url.pathname === KITE_SERVICE_CONNECT_PATH) {
-        return handleConnect(request, binding, options, tickets, limits);
+        return afterDispatchCloseBarrier(
+          handleConnect(request, binding, options, tickets, limits),
+          () => closed,
+        );
       }
       if (url.pathname === KITE_SERVICE_RPC_PATH) {
         return handleRpcUpgrade(
@@ -233,13 +246,19 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
         );
       }
       if (isHistoryPath(url.pathname)) {
-        return handleHistoryRoute(request, binding, options, url.pathname, limits);
+        return afterDispatchCloseBarrier(
+          handleHistoryRoute(request, binding, options, url.pathname, limits),
+          () => closed,
+        );
       }
       if (isAppControlPath(url.pathname)) {
-        return handleAppControlRoute(request, binding, options, url.pathname, limits);
+        return afterDispatchCloseBarrier(
+          handleAppControlRoute(request, binding, options, url.pathname, limits),
+          () => closed,
+        );
       }
       if (url.pathname === KITE_SERVICE_CONTROL_STOP_PATH) {
-        return handleControlStop(request, options, limits);
+        return afterDispatchCloseBarrier(handleControlStop(request, options, limits), () => closed);
       }
       emitDiagnostic(options.onDiagnostic, 'route_rejected');
       return fixedResponse(request.method === 'OPTIONS' ? 405 : 404, 'not_found');
@@ -334,6 +353,56 @@ export function createKiteServiceCarrier(options: KiteServiceCarrierOptions): Ki
 }
 
 export const createNativeLoopbackCarrier = createKiteServiceCarrier;
+
+function afterDispatchCloseBarrier(
+  response: Response | Promise<Response>,
+  isClosing: () => boolean,
+): Response | Promise<Response> {
+  if (!(response instanceof Promise)) return response;
+  return response.then((resolved) => (isClosing() ? fixedResponse(503, 'unavailable') : resolved));
+}
+
+function handleInstanceHandshake(
+  request: Request,
+  binding: Readonly<{ host: string; origin: string }>,
+  options: KiteServiceCarrierOptions,
+  limits: NormalizedLimits,
+): Response | Promise<Response> {
+  if (
+    request.method !== 'POST' ||
+    !originAbsentOrExact(request, binding.origin) ||
+    request.headers.get('cookie') !== null ||
+    !matchesAuthorization(
+      request.headers.get('authorization'),
+      options.accessToken,
+      KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
+    ) ||
+    !isJsonContentType(request.headers.get('content-type'))
+  ) {
+    emitDiagnostic(options.onDiagnostic, 'route_rejected');
+    return fixedResponse(401, 'unauthorized');
+  }
+  return readJsonBody(request, limits.maxHttpBodyBytes).then((body) => {
+    if (!body.ok) return fixedResponse(400, 'invalid_request');
+    try {
+      assertExactKeys(body.value, []);
+    } catch {
+      return fixedResponse(400, 'invalid_request');
+    }
+    return jsonResponse(
+      200,
+      {
+        schema: 'kite.local-runtime.instance-handshake.v1',
+        instanceId: options.instanceId,
+        protocolVersion: 1,
+        clientContractRevision: LOCAL_RUNTIME_CLIENT_CONTRACT_REVISION_,
+        serverVersion: options.serverVersion,
+        buildId: options.buildId,
+      },
+      limits.maxHttpBodyBytes,
+    );
+  });
+}
 
 function normalizeLimits(input: KiteServiceCarrierLimits | undefined): NormalizedLimits {
   const limits: NormalizedLimits = {
@@ -475,16 +544,26 @@ function handleRpcUpgrade(
   try {
     upgraded = server.upgrade(request, { data: { session } });
   } catch {
-    sessions.delete(session);
-    session.forceClose(4000, 'upgrade_failed');
+    cleanupRejectedSession(sessions, session);
     return fixedResponse(503, 'unavailable');
   }
   if (!upgraded) {
-    sessions.delete(session);
-    session.forceClose(4000, 'upgrade_failed');
+    cleanupRejectedSession(sessions, session);
     return fixedResponse(400, 'bad_request');
   }
   return undefined;
+}
+
+function cleanupRejectedSession(
+  sessions: Set<ServiceSocketSession>,
+  session: ServiceSocketSession,
+): void {
+  sessions.delete(session);
+  try {
+    session.forceClose(4000, 'upgrade_failed');
+  } catch {
+    // Upgrade cleanup is best-effort; the rejected session is no longer retained.
+  }
 }
 
 function handleHistoryRoute(
@@ -603,6 +682,7 @@ function handleAppControlRoute(
       pathname,
       body.value,
       limits.maxHttpBodyBytes,
+      request.signal,
     );
   });
 }
@@ -612,6 +692,7 @@ async function dispatchAppControlRoute(
   pathname: string,
   body: unknown,
   maxBytes: number,
+  signal?: AbortSignal,
 ): Promise<Response> {
   switch (pathname) {
     case '/_kite/app/workspace-trust/query':
@@ -703,7 +784,7 @@ async function dispatchAppControlRoute(
         maxBytes,
       );
     case '/_kite/app/provider-credential/write':
-      return invokeCredentialRoute(application, body, maxBytes);
+      return invokeCredentialRoute(application, body, maxBytes, signal);
     default:
       return fixedResponse(404, 'not_found');
   }
@@ -772,6 +853,7 @@ async function invokeCredentialRoute(
   application: KiteServiceApplicationPort,
   body: unknown,
   maxBytes: number,
+  signal?: AbortSignal,
 ): Promise<Response> {
   let request: NativeProviderCredentialRequest;
   try {
@@ -784,7 +866,7 @@ async function invokeCredentialRoute(
   }
   if (!application.credential) return fixedResponse(503, 'unavailable');
   try {
-    const result = await application.credential.writeProviderCredential(request);
+    const result = await application.credential.writeProviderCredential(request, { signal });
     return jsonResponse(
       200,
       encodeLocalRuntimeCredentialResult(decodeLocalRuntimeCredentialResult(result)),
@@ -853,13 +935,18 @@ class TicketAuthority {
     const token = Buffer.from(bytes).toString('base64url');
     bytes.fill(0);
     const hash = hashToken(token);
+    const key = hash.toString('hex');
+    if (this.#tickets.has(key)) {
+      hash.fill(0);
+      return undefined;
+    }
     const current = safeNow(this.#now);
     const expiresAt = current + ttlMs;
     if (!Number.isSafeInteger(expiresAt)) {
       hash.fill(0);
       throw new RangeError('Service ticket expiry exceeds safe time.');
     }
-    this.#tickets.set(hash.toString('hex'), {
+    this.#tickets.set(key, {
       hash,
       workspace,
       instanceId,

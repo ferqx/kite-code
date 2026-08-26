@@ -1,4 +1,30 @@
 export {
+  createDevelopmentLoopbackCarrier,
+  type DevelopmentLoopbackCarrier,
+  type DevelopmentLoopbackCarrierLimits,
+  type DevelopmentLoopbackCarrierOptions,
+  type DevelopmentLoopbackDiagnosticCode,
+} from './development-loopback-carrier';
+export {
+  createDevelopmentRuntimeReference,
+  type DevelopmentRuntimeReference,
+  type DevelopmentRuntimeReferenceFetch,
+  type DevelopmentRuntimeReferenceOptions,
+  type DevelopmentRuntimeReferenceSession,
+  type DevelopmentRuntimeReferenceSnapshot,
+  type DevelopmentRuntimeReferenceView,
+} from './development-runtime-reference';
+export {
+  createLocalBootstrapAuth,
+  LOCAL_BOOTSTRAP_AUTHORIZATION_SCHEME,
+  LOCAL_BOOTSTRAP_COOKIE_NAME,
+  LOCAL_BOOTSTRAP_REJECT_CODE,
+  type LocalBootstrapAuth,
+  type LocalBootstrapAuthOptions,
+  type LocalBootstrapAuthResult,
+  type LocalWebSocketAuthorizationResult,
+} from './local-bootstrap-auth';
+export {
   createKiteServiceCarrier,
   createNativeLoopbackCarrier,
   KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
@@ -8,6 +34,7 @@ export {
   KITE_SERVICE_HISTORY_LIST_EVENTS_PATH,
   KITE_SERVICE_HISTORY_LIST_SESSIONS_PATH,
   KITE_SERVICE_HISTORY_LOAD_SESSION_PATH,
+  KITE_SERVICE_INSTANCE_HANDSHAKE_PATH,
   KITE_SERVICE_LOOPBACK_HOST,
   KITE_SERVICE_RPC_PATH,
   KITE_SERVICE_TICKET_AUTHORIZATION_SCHEME,
@@ -28,3 +55,14 @@ export type {
   ServiceWorkspaceAdmissionPort,
   ServiceWorkspaceAdmissionResult,
 } from './ports';
+export {
+  createNodeRuntimeStdioOutput,
+  createProcessRuntimeStdioSignals,
+  createRuntimeStdioCarrier,
+  type RuntimeStdioCarrier,
+  type RuntimeStdioCarrierOptions,
+  type RuntimeStdioDiagnostics,
+  type RuntimeStdioInput,
+  type RuntimeStdioOutput,
+  type RuntimeStdioSignals,
+} from './runtime-server-stdio';

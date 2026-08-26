@@ -41,6 +41,12 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   '@kite-ai/runtime-storage-sqlite': ['@kite-ai/runtime-host'],
   '@kite-ai/builtin-runtime': ['@kite-ai/runtime-contract', '@kite-ai/runtime-spi'],
   '@kite-ai/kite-cli': [
+    '@kite-ai/kite-app-contract',
+    '@kite-ai/kite-local-runtime',
+    '@kite-ai/runtime-client',
+    '@kite-ai/runtime-contract',
+  ],
+  '@kite-ai/kite-service': [
     '@kite-ai/builtin-runtime',
     '@kite-ai/kite-app-contract',
     '@kite-ai/kite-local-runtime',
@@ -51,14 +57,6 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
     '@kite-ai/runtime-server',
     '@kite-ai/runtime-spi',
     '@kite-ai/runtime-storage-sqlite',
-  ],
-  '@kite-ai/kite-service': [
-    '@kite-ai/kite-app-contract',
-    '@kite-ai/kite-local-runtime',
-    '@kite-ai/runtime-client',
-    '@kite-ai/runtime-contract',
-    '@kite-ai/runtime-protocol',
-    '@kite-ai/runtime-server',
   ],
 });
 
@@ -422,7 +420,6 @@ function validateRootPackageEntry(
     true,
   );
   const expected = new Map([
-    ['createKiteRuntimeBoundary', './bootstrap'],
     ['runCli', './cli/executable'],
     ['runTui', './tui/executable'],
   ]);
@@ -456,7 +453,7 @@ function validateRootPackageEntry(
     addViolation(
       violations,
       'APP_PUBLIC_ENTRY_INVALID',
-      'App public entry may only export createKiteRuntimeBoundary, runCli, and runTui from their exact App modules',
+      'CLI public entry may only export runCli and runTui from their exact terminal modules',
       'apps/kite-cli/src/index.ts',
     );
   }
@@ -1086,6 +1083,7 @@ function validateClientBoundary(
     '@/core/runtime/agent',
     '@/core/runtime/effects',
     '@kite-ai/agent-kernel',
+    '@kite-ai/builtin-runtime',
     '@/core/runtime/executor',
     '@/core/runtime/file-checkpoints',
     '@/core/runtime/kernel',
@@ -1121,15 +1119,11 @@ function validateClientBoundary(
         sourcePath,
       );
     }
-    if (
-      edge.specifier === '../bootstrap' &&
-      sourcePath !== 'apps/kite-cli/src/cli/executable.ts' &&
-      sourcePath !== 'apps/kite-cli/src/tui/executable.tsx'
-    ) {
+    if (edge.specifier === '../bootstrap' || edge.specifier.startsWith('#kite-service/bootstrap')) {
       addViolation(
         violations,
         'COMPOSITION_ROOT_BYPASS',
-        'only executable shims may request bootstrap injection',
+        'CLI production code may not request the relocated Runtime bootstrap',
         sourcePath,
       );
     }
@@ -1177,14 +1171,14 @@ function validateClientBoundary(
 
   const executionModule = join(
     root,
-    'apps/kite-cli/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
+    'apps/kite-service/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
   );
   if (!isRegularFile(executionModule)) {
     addViolation(
       violations,
       'RUNTIME_EXECUTION_MODULE_MISSING',
-      'RM-16 requires the unique App Runtime execution module',
-      'apps/kite-cli/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
+      'RM-16 requires the unique Service Runtime execution module',
+      'apps/kite-service/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts',
     );
   }
 
@@ -1274,15 +1268,15 @@ function validateCompositionRoot(
   imports: ImportEdge[],
   violations: RuntimePackageViolation[],
 ): string[] {
-  const app = packages.find((entry) => entry.name === '@kite-ai/kite-cli');
-  if (!app) return [];
+  const service = packages.find((entry) => entry.name === '@kite-ai/kite-service');
+  if (!service) return [];
   const concretePackages = new Set([
     '@kite-ai/runtime-host',
     '@kite-ai/runtime-storage-sqlite',
     '@kite-ai/builtin-runtime',
   ]);
   const importsByFile = new Map<string, Set<string>>();
-  for (const edge of imports.filter((candidate) => candidate.owner.name === app.name)) {
+  for (const edge of imports.filter((candidate) => candidate.owner.name === service.name)) {
     if (!edge.targetPackage) continue;
     const names = importsByFile.get(edge.source) ?? new Set<string>();
     names.add(edge.targetPackage.name);
@@ -1292,7 +1286,7 @@ function validateCompositionRoot(
     .filter(([, names]) => [...concretePackages].every((name) => names.has(name)))
     .map(([path]) => normalizedRelative(root, path))
     .sort();
-  const expectedRoot = 'apps/kite-cli/src/bootstrap.ts';
+  const expectedRoot = 'apps/kite-service/src/bootstrap.ts';
   if (roots.length === 0) {
     addViolation(violations, 'COMPOSITION_ROOT_MISSING', `expected ${expectedRoot}`);
   } else if (roots.length > 1) {
@@ -1322,7 +1316,7 @@ function validateCompositionRoot(
     }
   }
   for (const edge of imports.filter(
-    (candidate) => candidate.owner.name === app.name && candidate.targetPackage,
+    (candidate) => candidate.owner.name === service.name && candidate.targetPackage,
   )) {
     const sourcePath = normalizedRelative(root, edge.source);
     if (sourcePath === expectedRoot || edge.targetPackage?.name === '@kite-ai/runtime-contract') {
@@ -1333,7 +1327,7 @@ function validateCompositionRoot(
       addViolation(
         violations,
         'COMPOSITION_ROOT_BYPASS',
-        `non-bootstrap app source imports composition authority ${authority} from ${edge.specifier}`,
+        `non-bootstrap Service source imports composition authority ${authority} from ${edge.specifier}`,
         sourcePath,
       );
     }

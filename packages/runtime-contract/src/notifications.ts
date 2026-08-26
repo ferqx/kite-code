@@ -101,6 +101,16 @@ export interface RuntimeClientTerminalOutcome {
   readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
 }
 
+export interface RuntimeClientRewindFileOutcome {
+  readonly restored: readonly string[];
+  readonly deleted: readonly string[];
+  readonly failed: readonly { readonly path: string; readonly error: string }[];
+  readonly conflicts: readonly {
+    readonly path: string;
+    readonly reason: 'modified_after_kite_write' | 'unverified_postimage';
+  }[];
+}
+
 /**
  * Closed client event vocabulary. Unknown Runtime/domain events must be
  * omitted; they must never cross this boundary as a generic object.
@@ -311,6 +321,16 @@ export type RuntimeClientEvent =
       readonly code: string;
       readonly retryable: boolean;
       readonly recoveryEntry: RuntimeClientTerminalOutcome['recoveryEntry'];
+    }
+  | {
+      readonly type: 'rewind.terminal';
+      readonly rewindId: string;
+      readonly commandId: string;
+      readonly sourceSessionId: string;
+      readonly targetSessionId: string;
+      readonly status: 'completed' | 'failed';
+      readonly fileOutcome?: RuntimeClientRewindFileOutcome;
+      readonly failureCode?: 'checkpoint_unavailable' | 'execution_failed';
     }
   | {
       readonly type: 'session.notice';
@@ -838,6 +858,27 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
           value.recoveryEntry === 'new_run' ||
           value.recoveryEntry === 'operator_action')
       );
+    case 'rewind.terminal':
+      return (
+        hasExactKeys(
+          value,
+          presentKeys(
+            value,
+            ['type', 'rewindId', 'commandId', 'sourceSessionId', 'targetSessionId', 'status'],
+            ['fileOutcome', 'failureCode'],
+          ),
+        ) &&
+        isIdentifier(value.rewindId) &&
+        isIdentifier(value.commandId) &&
+        isIdentifier(value.sourceSessionId) &&
+        isIdentifier(value.targetSessionId) &&
+        (value.status === 'completed' || value.status === 'failed') &&
+        (!Object.hasOwn(value, 'fileOutcome') ||
+          isRuntimeClientRewindFileOutcome(value.fileOutcome)) &&
+        (!Object.hasOwn(value, 'failureCode') ||
+          value.failureCode === 'checkpoint_unavailable' ||
+          value.failureCode === 'execution_failed')
+      );
     case 'session.notice':
       return (
         hasExactKeys(value, presentKeys(value, ['type', 'code'], ['message'])) &&
@@ -1038,6 +1079,36 @@ function isRuntimeClientTerminalOutcome(value: unknown): value is RuntimeClientT
   );
 }
 
+function isRuntimeClientRewindFileOutcome(value: unknown): value is RuntimeClientRewindFileOutcome {
+  if (!isRecord(value) || !hasExactKeys(value, ['restored', 'deleted', 'failed', 'conflicts'])) {
+    return false;
+  }
+  const paths = (candidate: unknown): candidate is readonly string[] =>
+    Array.isArray(candidate) && candidate.length <= 10_000 && candidate.every(isBoundedString);
+  return (
+    paths(value.restored) &&
+    paths(value.deleted) &&
+    Array.isArray(value.failed) &&
+    value.failed.length <= 10_000 &&
+    value.failed.every(
+      (entry) =>
+        isRecord(entry) &&
+        hasExactKeys(entry, ['path', 'error']) &&
+        isBoundedString(entry.path) &&
+        isBoundedString(entry.error),
+    ) &&
+    Array.isArray(value.conflicts) &&
+    value.conflicts.length <= 10_000 &&
+    value.conflicts.every(
+      (entry) =>
+        isRecord(entry) &&
+        hasExactKeys(entry, ['path', 'reason']) &&
+        isBoundedString(entry.path) &&
+        (entry.reason === 'modified_after_kite_write' || entry.reason === 'unverified_postimage'),
+    )
+  );
+}
+
 function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProjection {
   if (!isRecord(value)) return false;
   return (
@@ -1046,7 +1117,7 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
       presentKeys(
         value,
         ['schema', 'sessionId', 'revision', 'lifecycle'],
-        ['displayName', 'updatedAt', 'sessionCommandGrantCount', 'activeWork'],
+        ['displayName', 'updatedAt', 'sessionCommandGrantCount', 'activeWork', 'model'],
       ),
     ) &&
     value.schema === RUNTIME_PROJECTION_SCHEMA_ &&
@@ -1059,6 +1130,16 @@ function isRuntimeSessionProjection(value: unknown): value is RuntimeSessionProj
       value.lifecycle === 'unavailable') &&
     (!Object.hasOwn(value, 'displayName') || isBoundedString(value.displayName)) &&
     (!Object.hasOwn(value, 'updatedAt') || isBoundedString(value.updatedAt)) &&
+    (!Object.hasOwn(value, 'model') ||
+      (isRecord(value.model) &&
+        hasExactKeys(
+          value.model,
+          presentKeys(value.model, ['provider', 'name'], ['reasoningEnabled']),
+        ) &&
+        isBoundedString(value.model.provider) &&
+        isBoundedString(value.model.name) &&
+        (!Object.hasOwn(value.model, 'reasoningEnabled') ||
+          typeof value.model.reasoningEnabled === 'boolean'))) &&
     (!Object.hasOwn(value, 'activeWork') || isRuntimeWorkProjection(value.activeWork))
   );
 }

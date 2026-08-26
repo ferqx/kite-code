@@ -11,8 +11,12 @@
 
 ## Runtime client boundary
 
-- TUI system journey 使用 production-shaped typed projection：`RuntimeClient → RuntimeServer → RuntimeAccess`。测试不得通过 direct Host/SQLite handle、旧 runtime bridge 或本地 Store 写入伪造 UI state。
-- 完整历史断言经 App-injected `RuntimeHistoryClient` 的 client-safe DTO 完成；Server subscription replay、JSONL、trace 或 SQLite raw event 不能替代它。
+- TUI system journey 使用 production-shaped typed projection：terminal Native facade → RuntimeClient → Service
+  RuntimeServer → RuntimeAccess。测试不得通过 direct Host/SQLite handle、旧 runtime bridge 或本地 Store写入伪造UI state。
+- harness可注入显式 `in-process-service-connector` 来稳定测试presentation journey，但它必须组合Service-owned
+  application并经过相同 Local Service client seam；fixture不是CLI embedded fallback，也不能重新在CLI创建Host/Store。
+- 完整历史断言经 `LocalKiteConnection.history` 的 client-safe DTO完成；Server subscription replay、JSONL、trace或
+  SQLite raw event不能替代它。
 - reducer 输入保持封闭 `RuntimeClientEvent`/interaction projection；测试应断言 unknown/unavailable 的 fail-closed 投影，而非向 reducer 注入 `any` 或 raw Runtime event。
 
 ## 输入 readiness
@@ -39,6 +43,15 @@
   `reasoning prefix → content → reasoning suffix → terminal`。后者必须逐帧断言正文出现后不再展示 reasoning
   原文或活动 Thinking 圆点，并验证 settled live 与重启 `/resume` 最终只形成一个题头和一个回答块。
 - 取消、审批、Session 切换、恢复、resize 和 streaming 测试必须等待各自 exact receipt/readiness，不放宽 identity 或 lifecycle。
+- Workspace Trust journey必须覆盖App Control prepare/query/decision先于Runtime connect；decline不得打开Runtime，
+  trusted restart才可跳过prompt。PTY exit必须证明只关闭terminal connection，不能据此停止Service owner。
+
+## 当前 evidence 边界
+
+KLSV1-06的完整本地TUI system已通过40个isolated PTY scenario files，覆盖default client seam、Trust gate、
+presentation、MCP、compaction/rewind与exit/reopen；每个scenario保持进程隔离，cleanup通过authenticated manager
+stop且最终无残留Service进程。该结果不等于KLSV1-07三平台release/platform qualification：workflow定义与本地
+POSIX结果都不能替代真实Windows结果，当前实现head的三平台evidence仍pending。
 
 ## 验证
 

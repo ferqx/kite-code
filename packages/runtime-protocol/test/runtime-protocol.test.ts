@@ -478,6 +478,25 @@ describe('Runtime Protocol', () => {
       retryable: true,
       recoveryEntry: 'retry',
     });
+    expect(
+      mapRuntimeClientEventToProtocol({
+        type: 'rewind.terminal',
+        rewindId: 'rewind-1',
+        commandId: 'rewind-command-1',
+        sourceSessionId: 'session-1',
+        targetSessionId: 'session-2',
+        status: 'completed',
+        fileOutcome: { restored: ['safe.txt'], deleted: [], failed: [], conflicts: [] },
+      }),
+    ).toEqual({
+      type: 'rewind.terminal',
+      rewindId: 'rewind-1',
+      commandId: 'rewind-command-1',
+      sourceSessionId: 'session-1',
+      targetSessionId: 'session-2',
+      status: 'completed',
+      fileOutcome: { restored: ['safe.txt'], deleted: [], failed: [], conflicts: [] },
+    });
     expect(mapRuntimeClientEventToProtocol({ type: 'future_event' } as never)).toBeUndefined();
     expect(
       mapRuntimeNotificationToSubscriptionMessage({
@@ -643,7 +662,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '15fd1015:f4d30d5f';
+    const expectedDigest = 'b941e047:f4d30d5f';
     expect(generated.schema).toBe('kite.runtime-protocol.v1');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

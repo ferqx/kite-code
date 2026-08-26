@@ -2,10 +2,17 @@ import type { KiteAppControlClient } from '@kite-ai/kite-app-contract';
 import type {
   LocalKiteConnection,
   LocalKiteConnectionStatus,
+  LocalRuntimeClientStatePort,
+  LocalRuntimeServiceEnsurePort,
+} from '@kite-ai/kite-local-runtime/client';
+import {
+  connectLocalKiteConnection,
+  type LocalRuntimeConnectorOptions,
 } from '@kite-ai/kite-local-runtime/client';
 import type { LocalRuntimeServiceDescriptor } from '@kite-ai/kite-local-runtime/service';
 import type {
   RuntimeClient,
+  RuntimeClientInfo,
   RuntimeHistoryClient,
   RuntimeSnapshotStore,
 } from '@kite-ai/runtime-client';
@@ -57,7 +64,40 @@ export const createKiteServiceModeClient = createKiteServiceModeAdapter;
 
 export interface KiteServiceModeConnector {
   /** Discovery/ensure is intentionally outside this CLI adapter. */
-  connect(input: { readonly workspace: string }): Promise<LocalKiteConnection>;
+  connect(input: {
+    readonly workspace: string;
+    readonly clientInfo?: RuntimeClientInfo;
+  }): Promise<LocalKiteConnection>;
+}
+
+/**
+ * Narrow Native connector composition used by the release owner. The CLI
+ * receives an already-composed manager/state pair; source-vs-installed
+ * executable selection and validated home identity remain outside this file.
+ */
+export interface NativeKiteServiceModeConnectorOptions {
+  readonly manager: LocalRuntimeServiceEnsurePort;
+  readonly state: LocalRuntimeClientStatePort;
+  readonly clientInfo: RuntimeClientInfo;
+  readonly clientOptions?: Omit<
+    LocalRuntimeConnectorOptions,
+    'manager' | 'state' | 'workspace' | 'clientInfo'
+  >;
+}
+
+export function createNativeKiteServiceModeConnector(
+  options: NativeKiteServiceModeConnectorOptions,
+): KiteServiceModeConnector {
+  return Object.freeze({
+    connect: (input: { readonly workspace: string; readonly clientInfo?: RuntimeClientInfo }) =>
+      connectLocalKiteConnection({
+        ...options.clientOptions,
+        manager: options.manager,
+        state: options.state,
+        workspace: input.workspace,
+        clientInfo: input.clientInfo ?? options.clientInfo,
+      }),
+  });
 }
 
 /**

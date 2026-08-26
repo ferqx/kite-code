@@ -25,8 +25,10 @@ Host或另一个Runtime Provider。
 App Control projection只返回当前终端需要的source identity/path、transport、origin-only endpoint、command首个
 executable token、safe tool/prompt metadata、counts、health/auth/config status、CAS revision和typed diagnostic
 code/retryable。command arguments、credential、content-egress material、raw diagnostic message、OAuth URL/query和
-resource body不得进入TUI contract。当前owner仍位于`apps/kite-cli` InProcess transition composition；KLSV1-06才迁移
-到`apps/kite-service`，不得因此创建第二Manager/Store或silent fallback。
+resource body不得进入TUI contract。当前唯一concrete owner位于`apps/kite-service`：Service按canonical Workspace
+组合repository、Supervisor、credential与Runtime provider，并通过authenticated exact App Control route投影给CLI/TUI。
+`apps/kite-cli`只持有safe client/controller，不导入Manager/Supervisor/Repository/Auth；没有第二Manager、app-to-app
+production import、silent fallback或terminal-local MCP owner。
 
 Runtime façade 还可按 capability 查询脱敏 route identity：只包含 stdio/HTTP transport、Server
 identity、endpoint revision 和 Tool revision，不包含 URL、header 或 credential。Control snapshot

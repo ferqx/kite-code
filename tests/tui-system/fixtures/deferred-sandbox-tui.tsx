@@ -1,5 +1,6 @@
 import { runTui } from '@kite-ai/kite-cli/tui';
-import type { AppShellExecutor, AppShellRuntimeDecision } from '#kite-cli/sandbox/composition';
+import type { AppShellExecutor, AppShellRuntimeDecision } from '#kite-service/sandbox/composition';
+import { createInProcessTuiServiceConnector } from './in-process-service-connector';
 
 const preparation = new Promise<AppShellRuntimeDecision>(() => {});
 
@@ -15,4 +16,4 @@ const shellExecutor = (async (input) => {
 }) as AppShellExecutor;
 shellExecutor.prepare = () => preparation;
 
-runTui({ shellExecutor });
+runTui({ connectService: createInProcessTuiServiceConnector(shellExecutor) });

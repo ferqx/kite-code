@@ -8,8 +8,8 @@ import {
   parseReleaseProfile,
   RELEASE_CAPABILITIES,
   SUPPORTED_PRODUCTION_EXECUTION_TARGETS_,
-} from '#kite-cli/config';
-import { getFeatureFlags } from '#kite-cli/config/features';
+} from '#kite-service/config';
+import { getFeatureFlags } from '#kite-service/config/features';
 
 describe('ReleaseProfile', () => {
   test('keeps the release capability identifiers stable', () => {

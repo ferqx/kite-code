@@ -1,8 +1,16 @@
-import type {
-  McpProviderDirectoryStatus,
-  McpProviderRecoveryAction,
-} from '@kite-ai/builtin-runtime/mcp';
 import type { UserInputPayload } from '@kite-ai/runtime-contract';
+
+type McpProviderRecoveryAction = 'login' | 'approve' | 'retry';
+type McpProviderDirectoryStatus =
+  | 'pending_approval'
+  | 'rejected'
+  | 'disabled'
+  | 'login_required'
+  | 'connecting'
+  | 'ready'
+  | 'degraded'
+  | 'failed'
+  | 'quarantined';
 
 export function providerActionInput(
   providerId: string,

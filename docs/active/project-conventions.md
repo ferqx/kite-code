@@ -36,7 +36,7 @@
 
 ## 模型与 Provider
 
-- **模型服务不是 DeepSeek-only**：修改 `apps/kite-cli/src/config`、`packages/builtin-runtime/src/model`、真实模型测试或 provider 文档前，先读 `docs/active/model-provider-boundary.md`。
+- **模型服务不是 DeepSeek-only**：修改 `apps/kite-service/src/config`、`packages/builtin-runtime/src/model`、真实模型测试或 provider 文档前，先读 `docs/active/model-provider-boundary.md`。
 - 当前版本没有 evaluation 或真实 Provider 测试入口。后续重新引入时必须先建立新的计划、数据边界与显式发现规则。
 
 ## 测试纪律

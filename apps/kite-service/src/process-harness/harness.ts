@@ -5,6 +5,19 @@ import { isAbsolute, join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import {
+  createKiteServiceEnvironment,
+  createKiteServiceManager,
+  createKiteServiceManagerNativePorts,
+  createKiteServiceManagerNativeProcessPort,
+  type KiteServiceEnvironment,
+  type KiteServiceManagerChild,
+  type KiteServiceManagerEnvironment,
+  type KiteServiceManagerExecutable,
+  type KiteServiceManagerHandshake,
+  type KiteServiceManagerReadinessPort,
+  type KiteServiceManagerSpawnPort,
+} from '@kite-ai/kite-local-runtime/manager';
+import {
   createKiteHomeIdentity,
   readLocalRuntimeServiceDescriptor,
   readLocalRuntimeServiceToken,
@@ -14,21 +27,8 @@ import {
   KITE_SERVICE_CONNECT_PATH,
   KITE_SERVICE_CONTROL_AUTHORIZATION_SCHEME,
   KITE_SERVICE_CONTROL_STOP_PATH,
+  KITE_SERVICE_INSTANCE_HANDSHAKE_PATH,
 } from '../carrier';
-import { createKiteServiceEnvironment, type KiteServiceEnvironment } from '../environment';
-import {
-  createKiteServiceManager,
-  createKiteServiceManagerNativePorts,
-  createKiteServiceManagerNativeProcessPort,
-  type KiteServiceManagerEnvironment,
-  type KiteServiceManagerExecutable,
-} from '../manager';
-import type {
-  KiteServiceManagerChild,
-  KiteServiceManagerHandshake,
-  KiteServiceManagerReadinessPort,
-  KiteServiceManagerSpawnPort,
-} from '../manager/ports';
 import type {
   KiteServiceProcessHarness,
   KiteServiceProcessHarnessChildConfig,
@@ -399,12 +399,32 @@ export function createKiteServiceProcessHarness(
           if (response.status !== 200 || text !== 'ready') {
             return { outcome: 'unavailable', diagnostic: 'identity_uncertain' };
           }
+          const identity = await fetch(
+            `${input.descriptor.endpoint.origin}${KITE_SERVICE_INSTANCE_HANDSHAKE_PATH}`,
+            requestInit(
+              { method: 'POST', body: {} },
+              KITE_SERVICE_ACCESS_AUTHORIZATION_SCHEME,
+              input.accessToken,
+            ),
+          );
+          const value = (await identity.json()) as Readonly<Record<string, unknown>>;
+          if (
+            identity.status !== 200 ||
+            typeof value.instanceId !== 'string' ||
+            typeof value.protocolVersion !== 'number' ||
+            typeof value.clientContractRevision !== 'string' ||
+            typeof value.serverVersion !== 'string' ||
+            typeof value.buildId !== 'string'
+          ) {
+            return { outcome: 'unavailable', diagnostic: 'identity_uncertain' };
+          }
           return {
             outcome: 'healthy',
-            instanceId: input.descriptor.instanceId,
-            protocolVersion: input.descriptor.protocolVersion,
-            clientContractRevision: input.descriptor.clientContractRevision,
-            buildId: input.descriptor.buildId,
+            instanceId: value.instanceId,
+            protocolVersion: value.protocolVersion,
+            clientContractRevision: value.clientContractRevision,
+            serverVersion: value.serverVersion,
+            buildId: value.buildId,
           };
         } catch {
           return { outcome: 'unavailable', diagnostic: 'identity_uncertain' };

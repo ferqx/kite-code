@@ -46,6 +46,32 @@ afterEach(async () => {
 });
 
 describe('Native Local Runtime connector', () => {
+  test('prepares App Control without Runtime transport and deduplicates the later connect', async () => {
+    const fixture = createFixture();
+    const connection = createLocalKiteConnection(fixture.options);
+    clients.push(connection);
+
+    await Promise.all([connection.prepareAppControl(), connection.prepareAppControl()]);
+    expect(fixture.managerCalls).toHaveLength(1);
+    expect(fixture.tokenKinds).toEqual(['access']);
+    expect(fixture.webSockets).toHaveLength(0);
+    expect(
+      fixture.requests.filter((request) => request.path === LOCAL_RUNTIME_CONNECT_PATH),
+    ).toHaveLength(0);
+
+    await connection.app.queryWorkspaceTrust({
+      schema: WORKSPACE_TRUST_QUERY_REQUEST_SCHEMA_,
+      workspace: workspace.canonicalPath,
+    });
+    expect(fixture.webSockets).toHaveLength(0);
+
+    await Promise.all([connection.connect(), connection.connect()]);
+    expect(fixture.webSockets).toHaveLength(1);
+    expect(
+      fixture.requests.filter((request) => request.path === LOCAL_RUNTIME_CONNECT_PATH),
+    ).toHaveLength(1);
+  });
+
   test('strictly discovers descriptor/access, issues a ticket, and routes exact History/App calls', async () => {
     const fixture = createFixture();
     const connection = createLocalKiteConnection(fixture.options);

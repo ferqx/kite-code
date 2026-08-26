@@ -75,21 +75,11 @@ describe('TuiUserInputProvider', () => {
     const actionPromise = provider.requestAction({
       kind: 'approval',
       interactionId: 'approval-1',
+      sessionRevision: 0,
       generation: 1,
-      approval: {
-        scope: 'once',
-        cwd: '/tmp',
-        threadId: 't1',
-        tool: 'shell_execute',
-        command: 'echo hi',
-        risk: 'execute_code',
-        approvalHash: 'abc',
-        summary: 'run echo',
-        reason: 'test',
-        expectedEffects: [],
-        grantOptions: ['approve_once'],
-        recommendedGrant: 'approve_once',
-      },
+      grants: ['approve_once'],
+      title: 'shell_execute',
+      summary: 'run echo',
     });
 
     let resolved = false;
@@ -119,7 +109,10 @@ describe('TuiUserInputProvider', () => {
     const payload = {
       kind: 'input' as const,
       interactionId: 'input-1',
-      question: { question: 'What?', options: [], allow_free_text: true },
+      sessionRevision: 0,
+      question: 'What?',
+      options: [],
+      allowFreeText: true,
     };
 
     const promise = provider.requestAction(payload);
@@ -136,21 +129,11 @@ describe('TuiUserInputProvider', () => {
     const promise = provider.requestAction({
       kind: 'approval',
       interactionId: 'approval-2',
+      sessionRevision: 0,
       generation: 1,
-      approval: {
-        scope: 'once',
-        cwd: '/tmp',
-        threadId: 't1',
-        tool: 'shell_execute',
-        command: 'echo hi',
-        risk: 'execute_code',
-        approvalHash: 'abc',
-        summary: 'run echo',
-        reason: 'test',
-        expectedEffects: [],
-        grantOptions: ['approve_once'],
-        recommendedGrant: 'approve_once',
-      },
+      grants: ['approve_once'],
+      title: 'shell_execute',
+      summary: 'run echo',
     });
 
     await provider.teardown();
@@ -164,21 +147,11 @@ describe('TuiUserInputProvider', () => {
     const promise = provider.requestAction({
       kind: 'approval',
       interactionId: 'approval-generation-2',
+      sessionRevision: 0,
       generation: 2,
-      approval: {
-        scope: 'once',
-        cwd: '/tmp',
-        threadId: 't1',
-        tool: 'shell_execute',
-        command: 'echo hi',
-        risk: 'execute_code',
-        approvalHash: 'abc-generation',
-        summary: 'run echo',
-        reason: 'test',
-        expectedEffects: [],
-        grantOptions: ['approve_once'],
-        recommendedGrant: 'approve_once',
-      },
+      grants: ['approve_once'],
+      title: 'shell_execute',
+      summary: 'run echo',
     });
 
     provider.submitAction({

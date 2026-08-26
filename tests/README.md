@@ -10,9 +10,12 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 ## 目录归属
 
 - `packages/<owner>/test/`：单 package 行为与 contract。
-- `apps/kite-cli/test/`：App、CLI、TUI、配置、Session 和 composition。
-- `apps/kite-service/test/`：private Service shell、carrier、state composition 与 App-private manager；真实socket、
-  process/state/cwd场景留在owner-local `test/isolated/`。
+- `apps/kite-cli/test/`：CLI/TUI presentation、client preference、managed Native adapter与fake/client conformance；不得
+  创建default Host/Store composition。
+- `apps/kite-service/test/`：唯一Runtime Application/Host/Store/Builtin owner、raw History/App Control、config/MCP/
+  sandbox/session logging、Service shell与carriers；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
+- `packages/kite-local-runtime/test/manager/`：manager lifecycle、Native process/state/lock/environment与authenticated
+  instance handshake；manager不再以App-private source留在Service workspace。
 - `tests/integration/`：跨 workspace 公共边界，只导入 package exports。
 - `tests/qualification/`：fault、soak、native 与安全 qualification。
 - `tests/isolated/` 和 owner-local `test/isolated/`：修改进程环境、cwd、SQLite 文件或真实进程的逐文件测试。
@@ -55,15 +58,16 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 ## Runtime Server V1 owner 与 transport 测试
 
-默认 workspace runner 当前覆盖十三个 workspace。`packages/kite-app-contract/test/` 验证 browser-safe、no-secret、
-exact App Control codec；`packages/kite-local-runtime/test/` 验证 Native descriptor/token/lock/lifecycle/credential codec
-与Native filesystem state。`apps/kite-service/test/`另以injected fake application覆盖private loopback listener、
-shell、manager与isolated home；它不是default Store或三平台qualification evidence。
+默认 workspace runner 当前覆盖十三个 workspace。`packages/kite-app-contract/test/` 验证browser-safe、no-secret、
+exact App Control codec；`packages/kite-local-runtime/test/`验证Native descriptor/token/lock/lifecycle/credential codec、
+filesystem state、Native connector与manager。manager focused suite还固定验证`GET /readyz`之后authenticated exact
+`POST /_kite/instance`，包括strict schema/keys/values/content-type/size、malformed与instance/server/build identity
+mismatch fail closed、Protocol/client-contract incompatibility，以及expected build的`incompatible + build_mismatch`。
 
-KLSV1-05在`packages/kite-local-runtime/test/client-connector.test.ts`验证Native Runtime/History/App Control connector，
-`apps/kite-cli/test/service-mode/`验证opt-in presentation adapter，`apps/kite-service/test/isolated/process-harness/`
-使用isolated home与fake application运行真实detached child。它们不进入默认production bootstrap，也不代替三平台/
-release qualification。
+KLSV1-06 clean cutover后，`apps/kite-service/test/`拥有真实Runtime Application/Host/Store/Builtin、History/App Control与
+carrier composition tests；`apps/kite-cli/test/`只验证default managed client/presentation、两阶段Workspace Trust、
+disconnect/exit不shutdown owner及无embedded fallback。`apps/kite-service/test/isolated/process-harness/`仍是KLSV1-05
+fake-application detached-child fixture，不能代替当前default Store持久恢复或release evidence。
 
 KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 
@@ -75,31 +79,48 @@ KRSV1 的 package-owner coverage 固定为以下十个测试文件：
 - `packages/runtime-storage-sqlite/test/compatibility-store.test.ts`、`store-conformance.test.ts`
 
 这十个 owner tests 覆盖 closed contract/protocol、Server/Client state、Store 6 receipt 的原子性、restart/crash
-replay 与 Store 5 source-only import；完整 durable history 另由 SQLite log-query、
-`apps/kite-cli/test/runtime-history-client.test.ts` 和 Session persistence/format PTY journeys 验证全量分页、已选
-compatibility import、ephemeral→durable transcript 与 live/replay reducer 等价。Session/TUI owner tests 还固定
+replay 与 Store 5 source-only import；完整 durable history由SQLite log-query、
+`apps/kite-service/test/runtime-history-client.test.ts`和Session persistence/format PTY journeys验证全量分页、已选
+compatibility import、ephemeral→durable transcript与live/replay reducer等价；presentation replay断言位于CLI/TUI
+tests。Session/TUI tests还固定
 验证 reasoning delta/completed 都走无 revision 的 Server presentation route，以及 tool-bearing durable terminal
 先于累计 text delta 时连续探索工具仍聚合为同一 Thought；模型展示 `requestId` 贯穿
 Kernel/Contract/Protocol/history mapper，正文先于 reasoning 或 terminal 越过 ephemeral delta 时，最终正文、
 Thinking 与工具聚合仍各自只有一个 block owner。TUI harness 还以逐帧
 `reasoning prefix → content → reasoning suffix → terminal` 验证正文首帧关闭纯 reasoning 活动态，后到 reasoning 只
 补充隐藏 Thought metadata；live 与重启 `/resume` 都不得泄漏后缀、恢复活动圆点或重复回答。会创建真实
-child、socket、SQLite file、cwd 或 global process environment 的 App tests 必须留在 `apps/kite-cli/test/isolated/`，由默认
-runner 逐文件、逐进程串行执行，不能为了提速改成共享进程。
+child、socket、SQLite file、cwd 或 global process environment 的backend tests必须留在
+`apps/kite-service/test/isolated/`；CLI isolated目录只保留terminal/client-owned process journey。默认runner逐文件、
+逐进程串行执行，不能为了提速改成共享进程。
 
 Runtime Server/Client owner tests 还必须固定 reconnect generation 立即失效 Session readiness、cursor 超过
 Host watermark 时以 current snapshot reset/ready 收敛，以及 blocked carrier 的 in-flight send 在 settle 前继续
 占用 connection/global encoded-byte budget。
 
-三个显式 transport scripts 也都是隔离套件：`bun run test:runtime:stdio` 覆盖实际 child/stdio lifecycle，
+三个显式 transport scripts也都是隔离套件：`bun run test:runtime:stdio`覆盖Service-owned实际child/stdio lifecycle，
 `bun run test:runtime:websocket` 覆盖一次性 bootstrap、cookie、loopback socket 与 browser reference，
 `bun run test:runtime:transport` 以同一 raw JSON-RPC matrix 覆盖 InProcess、真实 stdio child 与真实 development
 WebSocket。该矩阵验证 initialize/allowlist、唯一 Workspace admission、subscribe ack/reset/ready、unsubscribe、
-close/drain 与 bounded ping mini-soak；它不把 WebSocket 升级为 production entrypoint。
+close/drain 与 bounded ping mini-soak；它不把WebSocket升级为production entrypoint。stdio child必须由parent显式提供
+isolated Workspace admission与nondefault `--checkpoints` path，不能打开managed default Store。
 
 `.github/workflows/runtime-stdio-smoke.yml` 与 `.github/workflows/runtime-transport-qualification.yml` 都在
 `macos-15`、`ubuntu-24.04`、`windows-2025` 上运行相应脚本。它们是 pending qualification checks：在对应 PR 的
 三平台结果实际返回前，测试文档不得称其 passed、不得以 workflow 定义代替 evidence。
+
+## KLSV1-06/07 当前 evidence 边界
+
+KLSV1-06本地cutover Gate已执行：Service owner为1358 parallel tests / 6765 expects并通过全部34个isolated
+files；CLI owner为661 parallel + 76 sandbox + 1 conformance，共738 tests；完整TUI system通过40个isolated PTY
+scenario files；Runtime transport为3 tests / 852 expects。manager suite为37 pass / 135 expects，相关package
+typecheck、Biome与diff-check通过。13-workspace typecheck/build及runtime package/core/pre-release/test-ownership/
+compaction Gate也通过。
+
+KLSV1-07当前只登记本地结果：Runtime fault 36/106、CI-profile soak 7/7 cases、carrier 23/128、Service shell
+23/97，以及macOS arm64 candidate build/verify/smoke；smoke覆盖安装、CLI/TUI、Service companion、MCP stdio wrapper、
+升级、回滚与卸载，结束后无残留Service进程。CI-profile soak不提供formal qualification metrics。Windows
+current-user ACL/reparse primitive仍明确`unsupported`；GitHub-hosted macOS 15、Ubuntu 24.04、Windows 2025的当前
+实现head process/transport/release evidence仍pending，本地POSIX、workflow定义或单平台artifact不能升级平台结论。
 
 ## 迁移期测试
 

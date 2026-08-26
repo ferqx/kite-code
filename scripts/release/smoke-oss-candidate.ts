@@ -60,6 +60,7 @@ try {
         'install',
         'cli-help-version',
         'tui-version-pty-startup',
+        'service-companion',
         'mcp-stdio-authenticated-wrapper',
         'upgrade',
         'rollback',
@@ -75,6 +76,7 @@ async function runInstalledSmokes(prefix: string, windows: boolean): Promise<voi
   const suffix = windows ? '.exe' : '';
   const cli = join(prefix, 'bin', `kite${suffix}`);
   const tui = join(prefix, 'bin', `kite-tui${suffix}`);
+  const service = join(prefix, 'bin', `kite-service${suffix}`);
   const help = Bun.spawnSync([cli, '--help'], { stdout: 'pipe', stderr: 'pipe' });
   if (help.exitCode !== 0 || !help.stdout.toString().includes('Usage:')) {
     throw installedSmokeError('CLI help', help);
@@ -87,7 +89,7 @@ async function runInstalledSmokes(prefix: string, windows: boolean): Promise<voi
   if (tuiVersion.exitCode !== 0 || !tuiVersion.stdout.toString().startsWith('Kite Code TUI ')) {
     throw installedSmokeError('TUI version', tuiVersion);
   }
-  await runInstalledMcpStdioWrapperSmoke(cli);
+  await runInstalledMcpStdioWrapperSmoke(service);
   await runInstalledTuiStartupSmoke(tui);
 }
 

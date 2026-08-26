@@ -1,7 +1,7 @@
 # Workspace 文件系统共享边界 — Provider 单入口
 
 状态：active
-范围：`packages/runtime-spi/src/workspace-filesystem-provider.ts`、`packages/builtin-runtime/src/filesystem/`、`packages/builtin-runtime/src/git/runtime-module.ts`、`apps/kite-cli/src/bootstrap/runtime/tool-pipeline-prepared.ts`、五个由 Builtin catalog 投影的 filesystem operation、`packages/builtin-runtime/src/filesystem/preimage-artifacts.ts`、`packages/agent-kernel/src/`、`packages/builtin-runtime/src/model/runtime-context.ts`、`packages/builtin-runtime/src/sandbox/path-utils.ts`
+范围：`packages/runtime-spi/src/workspace-filesystem-provider.ts`、`packages/builtin-runtime/src/filesystem/`、`packages/builtin-runtime/src/git/runtime-module.ts`、`apps/kite-service/src/bootstrap/runtime/tool-pipeline-prepared.ts`、五个由 Builtin catalog 投影的 filesystem operation、`packages/builtin-runtime/src/filesystem/preimage-artifacts.ts`、`packages/agent-kernel/src/`、`packages/builtin-runtime/src/model/runtime-context.ts`、`packages/builtin-runtime/src/sandbox/path-utils.ts`
 读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
 验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime tests/sandbox`、`bun run check:core-boundary`、`bun run check:docs-impact`。
 
@@ -243,7 +243,7 @@ Pipeline 生成 digest-only observation，但正文不得进入 RuntimeState 或
 
 新增 optional 字段 `summary`、`toolCallCount`、`durationMs`，与 `SubAgentDonePayload` 对齐。`parseTaskResult` JSON 失败兜底添加 `error` 字段，消除 "Unknown error" 展示。
 
-### Runtime context 路径格式（`packages/builtin-runtime/src/model/runtime-context.ts`、`apps/kite-cli/src/bootstrap/runtime/subagent/tool-adapter.ts`）
+### Runtime context 路径格式（`packages/builtin-runtime/src/model/runtime-context.ts`、`apps/kite-service/src/bootstrap/runtime/subagent/tool-adapter.ts`）
 
 `Workspace` 字段用 Windows 原生格式（`D:\work\my-project`）。仅在 `osPlatform === "win32"` 时追加一条 `shell_execute` 专用的 POSIX 转换提示，并明确说明 file 工具直接用 Windows 路径。
 
@@ -290,9 +290,9 @@ capability surface 不得把文件工具读取误分类为原生进程 external-
 ```bash
 bun run typecheck
 bun test tests/isolated/tools.test.ts
-bun test apps/kite-cli/test/tool-definitions.test.ts apps/kite-cli/test/tool-policy.test.ts apps/kite-cli/test/isolated/runtime/agent.integration.test.ts apps/kite-cli/test/subagent-runner.test.ts tests/integration/builtin-runtime/context.test.ts
+bun test apps/kite-service/test/tool-definitions.test.ts apps/kite-service/test/tool-policy.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/subagent-runner.test.ts tests/integration/builtin-runtime/context.test.ts
 bun test tests/tui-system/scenarios/subagent-approval.test.ts
-bun test apps/kite-cli/test/tui-reducer.test.ts apps/kite-cli/test/tui-layout.test.tsx apps/kite-cli/test/isolated/session-manager.test.ts
+bun test apps/kite-cli/test/tui-reducer.test.ts apps/kite-cli/test/tui-layout.test.tsx apps/kite-service/test/isolated/session-manager.test.ts
 ```
 
 ### LOAD_SESSION 未设置 nextBlockId + blockIndex 删除（`sessionReducer.ts`、`handleEvent.ts`、`helpers.ts`）

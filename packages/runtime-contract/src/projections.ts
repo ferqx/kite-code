@@ -98,6 +98,12 @@ export interface RuntimeSessionProjection {
   readonly workspace?: string;
   readonly updatedAt?: string;
   readonly lifecycle: 'open' | 'closed' | 'unavailable';
+  /** Safe selected route; provider credentials and endpoint configuration never cross. */
+  readonly model?: {
+    readonly provider: string;
+    readonly name: string;
+    readonly reasoningEnabled?: boolean;
+  };
   /** Count only; grant subjects and bindings never cross the client boundary. */
   readonly sessionCommandGrantCount?: number;
   readonly activeWork?: RuntimeWorkProjection;

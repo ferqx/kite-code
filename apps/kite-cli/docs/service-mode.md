@@ -1,16 +1,18 @@
-# Opt-in Local Service mode
+# Managed Local Service mode
 
-本页是`apps/kite-cli/src/service-mode/`的owner-local current authority。KLSV1-05 adapter只把已经authenticated的
-`LocalKiteConnection`投影为typed Runtime、History、App Control、Native credential与`RuntimeSnapshotStore`。
+本页是 `apps/kite-cli/src/service-mode/` 的 owner-local current authority。KLSV1-06 后该目录承载默认 Native client
+adapter，不再是 opt-in migration path。release/source composition负责注入 connector与lifecycle；CLI不导入Service App。
 
-adapter不读取descriptor/access/control token文件，不discover/spawn Service，不导入`apps/kite-service`，不创建
-Host/Store/SQLite/Builtin或SessionManager proxy。connect失败原样reject，不silent fallback到embedded；普通CLI/TUI
-bootstrap在KLSV1-06前仍使用现有InProcess owner。
+adapter把 `LocalKiteConnection` 投影为 typed Runtime、History、App Control、Native credential、service status与
+`RuntimeSnapshotStore`，并用显式 `NativeTuiRuntimeClient` 实现现有TUI journey。它不读取descriptor/access/control
+token，不discover/spawn Service，不创建Host/Store/SQLite/Builtin，也不使用SessionManager Proxy。
 
-reconnect由Native connection显式触发。`RuntimeClient`generation变化原子清除旧Session readiness、index与ephemeral
-stream，再由replacement subscription/index reset重建，允许当前revision低于旧内存值。adapter不缓存第二份state。
-close只关闭该client connection/subscription/snapshot observer，不发送Runtime cancel/close-session，也不dispose Service
-Host；Session/Turn/interaction是否继续由Service Runtime authority决定。
+连接采用两阶段 Trust。`prepareAppControl()` 只完成 manager ensure、state discovery与authenticated App Control准备；
+TUI/CLI查询或显式更新 Workspace Trust后才调用 `connect()`，取得 Workspace-bound ticket并初始化Runtime。任何阶段失败
+都原样reject，不silent fallback到embedded/InProcess。
 
-验证：`bun test apps/kite-cli/test/service-mode/adapter.test.ts`。当前没有public CLI flag、default cutover或PTY release
-claim；真实child journey由Service process harness覆盖。
+reconnect重新ensure/discover并切换Runtime Client generation，原子清除旧Session readiness、index与ephemeral stream，
+再由replacement subscription/index reset重建；mutation不会自动重放。close只关闭本client connection/subscription/
+snapshot observer，不发送owner shutdown，也不dispose Service Host。TUI Ctrl+C仍通过Runtime cancel command处理当前Turn。
+
+验证：`bun test apps/kite-cli/test/service-mode apps/kite-cli/test/cli.test.ts apps/kite-cli/test/isolated/tui-runtime-client-conformance.test.ts`。

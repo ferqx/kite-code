@@ -186,8 +186,9 @@ export function useSlashCommand(
           onContext?.();
           break;
         case 'exit':
-          if (onExit) onExit();
-          else process.exit(0);
+          // Process teardown is owned by the single injected TUI exit coordinator.  Keeping the
+          // optional callback as a no-op in isolated hook tests avoids a second direct exit path.
+          onExit?.();
           break;
         default: {
           // Check MCP prompt registry for dynamic commands like /mcp__servername__promptname

@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 MCP auth schema、Credential Store、HTTP header 注入、OAuth provider/coordinator、loopback callback、browser opener、认证状态投影或独立认证提示时。
-验证：`bun test packages/builtin-runtime/test apps/kite-cli/test/mcp.test.ts tests/integration/mcp-manager.test.ts tests/qualification/mcp-keyring-platform-smoke.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。`.github/workflows/mcp-native-keyring-smoke.yml` 在 macOS、Windows、Ubuntu 三个平台运行同一原生 smoke；其 path filter 与执行命令必须共同指向 `tests/qualification/mcp-keyring-platform-smoke.test.ts`，backend、原生依赖或测试归属变化必须维持三个 job 通过。
+验证：`bun test packages/builtin-runtime/test apps/kite-service/test/mcp.test.ts tests/integration/mcp-manager.test.ts tests/qualification/mcp-keyring-platform-smoke.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。`.github/workflows/mcp-native-keyring-smoke.yml` 在 macOS、Windows、Ubuntu 三个平台运行同一原生 smoke；其 path filter 与执行命令必须共同指向 `tests/qualification/mcp-keyring-platform-smoke.test.ts`，backend、原生依赖或测试归属变化必须维持三个 job 通过。
 相关：ADR-0013、ADR-0018、[`mcp-control-plane.md`](mcp-control-plane.md)、[`mcp-config-management.md`](mcp-config-management.md)、`packages/builtin-runtime/src/mcp/credential-store.ts`、`packages/builtin-runtime/src/mcp/oauth-provider.ts`、`packages/builtin-runtime/src/mcp/auth-coordinator.ts`、`apps/kite-cli/src/tui/mcp/McpOverlay.tsx`。
 
 ## 凭据持久化

@@ -4,7 +4,8 @@
 
 ## Runtime 输入与投影边界
 
-- TUI command/query/subscribe 只消费 App 提供的 typed `RuntimeAccess` client surface；生产路径固定为 `RuntimeClient → RuntimeServer → RuntimeAccess`。
+- TUI command/query/subscribe 只消费 typed Native client surface；生产路径固定为 terminal
+  `LocalKiteConnection/RuntimeClient → companion kite-service RuntimeServer → Service RuntimeAccess`。TUI 不组合 Server。
 - reducer、block replay 与 interaction UI 只接收封闭 `RuntimeClientEvent`/client interaction projection。未知或无法安全投影的事实显示固定 unavailable/error 状态，绝不扩张为 `any` 或 raw Runtime event。
 - 普通 prompt 不做本地 optimistic append；唯一显示来源是 RuntimeClient 的 durable `user.message`。
   reducer 以 canonical `messageId` 处理重连/回放幂等，不能按文本去重，因此同一消息只显示一次、
@@ -13,14 +14,16 @@
   向前分页读取 complete closed transcript，并与 live 事件共用 reducer。短期 subscription replay/gap reset
   不是完整 history source。
 - TUI 不直接 import 或持有 Runtime Host、SQLite/Store、Kernel、Builtin executor、RuntimeLogQueryPort 或 transport/server concrete type；它不自建 mailbox、receipt、recovery 或 SQLite fallback。
-- TUI 的 InProcess client surface 是显式 `TuiRuntimeClientFacade` / `TuiSessionFacade` method 与字段清单；不得从
-  `SessionManager` 推导类型，也不得使用 Proxy、Reflect fallback、动态 member cache 或 set trap 让 implementation
-  新成员自动进入 TUI。新增 surface 必须同时修改 interface、adapter 与 fake-client/conformance tests。
-- Workspace Trust、Provider/model、MCP、Skill与status已经切到逐方法exact App Control client，request/response都通过
+- TUI 的 Native client surface 是显式 `TuiRuntimeClientFacade` / `TuiSessionFacade` method 与字段清单；不得从
+  Service `SessionManager` 推导类型，也不得使用 Proxy、Reflect fallback、动态 member cache 或 set trap 让
+  implementation 新成员自动进入 TUI。新增 surface 必须同时修改interface、adapter与fake/native conformance tests。
+- Workspace Trust、Provider/model、MCP、Skill与status逐方法消费exact App Control client，request/response都通过
   browser-safe codec；first-run raw credential只通过Native credential client。TUI不持有Config Repository、
-  credential writer、MCP Supervisor、actual Skill manifest、Host或Store。当前仍是`apps/kite-cli`内部InProcess
-  transition owner，不表示独立Service、listener或跨进程journey已经运行；raw Runtime event/history projector与
-  concrete bridge仍为app-internal并留待KLSV1-06 relocation。
+  credential writer、MCP Supervisor、actual Skill manifest、Host或Store；这些 owner与raw Runtime/history projector
+  已 clean-relocate 到 `apps/kite-service`。
+- Workspace Trust 是两阶段Runtime admission。启动先 `prepareAppControl()` 并显示Service query/decision结果；只有
+  canonical Workspace为trusted后才打开Runtime connection。decline/conflict/unavailable时不发送Runtime initialize，
+  不以cwd或wire path绕过，也不回退embedded。
 - TUI exit、first-run、Workspace Trust与config error统一调用一个idempotent exit coordinator。退出只关闭client
   connection并清理UI/observability，不调用`abortAll`或Runtime Application owner dispose；Ctrl+C取消当前Turn仍通过
   explicit Runtime cancel command。React unmount不得二次fire-and-forget shutdown。

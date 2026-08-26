@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { loadReleaseManifestConsistency } from '../../apps/kite-cli/src/release/manifest-loader';
+import { loadReleaseManifestConsistency } from '../../apps/kite-service/src/release/manifest-loader';
 import {
   assembleReleaseManifest,
   generateReleaseManifest,

@@ -9,8 +9,8 @@ import {
   MemoryMcpCredentialStore,
 } from '@kite-ai/builtin-runtime/mcp';
 import { aiMessage } from '@kite-ai/builtin-runtime/model';
-import { loadMcpConfigCatalog } from '#kite-cli/config';
-import { decideProjectMcpServer } from '#kite-cli/config/mcp-project-approvals';
+import { loadMcpConfigCatalog } from '#kite-service/config';
+import { decideProjectMcpServer } from '#kite-service/config/mcp-project-approvals';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { createMockModel } from '../helpers/mock-model';
 import { runTestRuntimeAgent } from '../helpers/runtime-model';

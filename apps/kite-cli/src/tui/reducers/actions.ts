@@ -88,7 +88,7 @@ export type Action =
   | { type: 'LIST_SKILLS' }
   | {
       type: 'SET_SKILL_MANIFESTS';
-      manifests: import('@kite-ai/builtin-runtime/skills').SkillManifest[];
+      manifests: import('@kite-ai/runtime-contract').SkillManifest[];
     }
   | { type: 'SWITCH_SESSION'; threadId: string }
   | { type: 'SET_SESSIONS'; sessions: TuiState['sessions'] }

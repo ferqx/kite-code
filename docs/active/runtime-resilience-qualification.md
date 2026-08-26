@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime 持久化/恢复、persistent command receipt、Protocol/Server/Client carrier/reconnect、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-cli/test/isolated/runtime-command-restart.test.ts apps/kite-cli/test/isolated/runtime-server-multi-client.test.ts apps/kite-cli/test/isolated/runtime-stdio-carrier.test.ts apps/kite-cli/test/isolated/runtime-transport-conformance.test.ts apps/kite-cli/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-cli/test/model-invocation-gateway.test.ts apps/kite-cli/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-cli/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts apps/kite-cli/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-cli/test/subagent-artifacts.test.ts apps/kite-cli/test/subagent-provider.test.ts apps/kite-cli/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-cli/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-service/test/model-invocation-gateway.test.ts apps/kite-service/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts apps/kite-service/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-service/test/subagent-artifacts.test.ts apps/kite-service/test/subagent-provider.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
 相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、Task 1C.7。
 
@@ -17,26 +17,32 @@ Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runt
 两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
 
 Local Service contract要求descriptor/lock/token/lifecycle/credential exact，connection不携带control token，mutation不自动
-重放。KLSV1-04已实现Native POSIX filesystem primitive、private loopback carrier、required-port shell与App-private
-ensure/status/stop/restart manager；focused tests覆盖20-way ensure、dead-only stale/orphan lock、descriptor publication
-window、busy/unknown stop、late start/gate settlement、ticket TTL/replay、wrong Host/Origin/token与frame/queue limits。
-这些测试使用isolated home与injected fake Runtime/History/App Control application，只证明本地infrastructure seam；它们
-不构成KLSV1-06 default Store cutover或KLSV1-07 Windows/三平台process evidence。
-Windows state primitive当前明确`unsupported`，不能用POSIX unit test替代。
+重放。当前唯一production composition位于`apps/kite-service`：它在同一process拥有真实Host、State 27 / Store 6、Builtin、
+History与App Control；CLI/TUI只消费Native client且没有embedded fallback或第二default Store。focused local tests覆盖
+多connection/Workspace、persisted restart、Trust、History、App Control、operation gate、disconnect后Runtime继续、20-way
+ensure、dead-only stale/orphan lock、busy/unknown stop、ticket TTL/replay与frame/queue limits。
 
-KLSV1-05本地evidence新增Native connector与真实detached fake-application child：instance mismatch拒绝；restart后
-descriptor/access与index generation重建；旧Session readiness/ephemeral stream清空；replacement可用更低current
-revision重新ready；Runtime/完整History/App Control走真实socket；credential lost response不重放；client close后第二个
-client仍可读取已推进Session。CLI opt-in adapter失败原样返回，不silent fallback。这仍不是默认production owner、真实
-Host/Store process、PTY release journey或三平台qualification。
+manager identity probe先执行`GET /readyz` liveness，再以`Kite-Local-Access`、exact`{}`body调用
+`POST /_kite/instance`。response的content type、4 KiB上限、closed keys及
+`{schema, instanceId, protocolVersion, clientContractRevision, serverVersion, buildId}`全部strict verify。malformed、server
+identity drift、PID reuse或无关listener返回`unavailable/identity_uncertain`；descriptor/expected build mismatch返回
+`incompatible/build_mismatch`。两类都保留state且`spawn=0`，不能从descriptor合成健康结果。restart后descriptor/access
+与client generation重建；旧Session readiness/ephemeral stream清空，mutation lost response不自动重放。
 
-KLSV1-03新增的本地InProcess evidence覆盖：一个真实Host/SQLite Store上的双connection/双Workspace与同Workspace
-多Session、重启后从persisted identity hydration、跨Workspace create/resume/query/subscribe/fork拒绝；context create/
-bind/close并发与完整identity race；settled interaction stale identity；operation gate quiesce/active barrier；App Control
-CAS、lost response与`outcome_unknown → query once → explicit decision`无重放；Server carrier/subscription close抛错时仍
-释放accounting；broker-backed interaction在展示client断开后由另一client继续settle。上述只证明当前本机
-app-local substrate；KLSV1-04/05已另有本地listener、detached process与reconnect focused evidence，但这些结果仍不能
-替代KLSV1-07 formal hosted、三平台与release qualification matrix。
+Native TUI client的Ctrl+C路径会提交exact`cancel_turn`，在revision conflict时用新command ID与current revision有界重试；
+TUI exit只关闭connection，不调用`abortAll()`或dispose Service Host。rewind client在intent receipt applied后等待
+Service持久化`session.rewind_completed|failed`，再消费与原commandId绑定的exact `rewind.terminal` safe projection；
+conversation rewind使用Service返回的target Session加载safe History，file outcome只含bounded path/error/conflict投影，
+不从source、checkpoint或显示文本推断target，也不重放mutation。完整TUI PTY、本地fault/CI-profile soak与本机
+release smoke已经执行并通过；这些仍不能推导formal资源资格或三平台通过。KLSV1-07的Windows state ACL/reparse实现、macOS/Ubuntu/Windows process/
+release matrix及正式hosted qualification仍pending。Windows state primitive当前明确`unsupported`，不能用POSIX或本机
+测试替代。
+
+当前local evidence为manager 37/135、carrier 23/128、Service shell 23/97、Runtime transport 3/852、Runtime fault
+36/106、CI-profile soak 7/7 cases、Service owner 1358 parallel tests / 6765 expects加34个isolated files、CLI owner
+738 tests，以及完整40个isolated TUI PTY scenario files。13-workspace typecheck/build、docs/static Gate与macOS arm64
+candidate build/verify/smoke也通过；smoke结束后无残留Service进程。该结果不升级任何上述pending三平台或formal
+qualification结论，CI-profile soak按设计`qualificationMetricsSupported=false`。
 
 本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 ADR-0053。
 
@@ -134,7 +140,7 @@ control base，Linux Full 也用只读空 tmpfs 覆盖整个 control base，因�
 identity 都不可见。首个合法连接后立即停止 listen。release executable 内嵌同一
 supervisor mode，supervisor 只继承显式最小环境，output pipe EOF 使用固定 deadline，超时 abort 且
 `cleanupConfirmed=false`。Darwin Seatbelt 的实际 detached/session negative conformance 位于
-`apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
+`apps/kite-service/test/isolated/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
 `descendantContainmentProven=false` 传给 reconciliation，保留 pending cleanup authority。Apple
 `launchd.plist(5)` 仅定义同 process group 的 kill 行为，不能替代 detached/session descendant 的
 kernel/descriptor owner；因此 Seatbelt 当前直接 backend unavailable。Windows 也因 handle-relative
@@ -217,7 +223,7 @@ reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reser
 重发。当前定向 recovery journey 覆盖这些边界；response source/catalog 继续使用 ack-before-lookup、
 strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；current writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都只属于 explicit readonly historical source profile，不能进入当前执行路径。
 
-RM-04 production Store 由 App 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
+RM-04 production Store 由 Service 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
 旧 SQLite Store production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning Runtime State type view。CLI、TUI、Kernel 与
 App adapter 不得直接创建 SQLite 连接。adapter 的四类 transaction method 都映射到一次既有
 SQLite Store event+snapshot+provenance 与 applied scoped command receipt 原子提交，没有 retry/fallback/双写或 sidecar receipt writer。每个底层连接在设置 journal mode 或执行 schema
@@ -242,7 +248,7 @@ State 26 的旧 Project ID 只有在 source session row 与 decoded State identi
 `project_<digest>` identity；named snapshot 必须通过同一映射。相对路径、已删除 Workspace、digest drift、row/state
 mismatch 或当前 State 27 identity 都不得被兼容器猜测重写。旧 source 继续 byte-for-byte 不变，无法证明 identity 的失败只
 隔离所选 session。对应正反、symlink 与 removed-workspace 证据位于
-`apps/kite-cli/test/state-store-project-identity-compatibility.test.ts`。
+`apps/kite-service/test/state-store-project-identity-compatibility.test.ts`。
 
 RM-06 已把 root AbortController、same-session cleanup barrier、durable-before-signal、四类 storage transaction
 acknowledgement、effect lease claim/renew/release 与 restart recovery 切到 Host。Host contract 和 Runtime fault

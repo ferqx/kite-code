@@ -35,8 +35,8 @@ import {
   eventsForRuntimeAction,
   type RuntimeActionResult,
   type RuntimeUserAction,
-} from '#kite-cli/bootstrap/runtime/state-actions';
-import { projectVerificationSchemaAdmissions } from '#kite-cli/bootstrap/runtime/verification-schema-admission';
+} from '#kite-service/bootstrap/runtime/state-actions';
+import { projectVerificationSchemaAdmissions } from '#kite-service/bootstrap/runtime/verification-schema-admission';
 import { type TestRuntimeStore, withTestStateProjectIdentity } from './runtime-storage';
 
 type StateStore = TestRuntimeStore<KernelEvent, AgentState>;

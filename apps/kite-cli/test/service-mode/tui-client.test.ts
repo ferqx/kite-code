@@ -1,0 +1,389 @@
+import { expect, test } from 'bun:test';
+import type { KiteAppControlClient } from '@kite-ai/kite-app-contract';
+import type {
+  LocalKiteConnection,
+  LocalRuntimeServiceDescriptor,
+} from '@kite-ai/kite-local-runtime/client';
+import type {
+  RuntimeClientConnection,
+  RuntimeClientTransport,
+  RuntimeHistoryClient,
+} from '@kite-ai/runtime-client';
+import { RuntimeClient } from '@kite-ai/runtime-client';
+import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
+import { createNativeTuiRuntimeClient } from '../../src/service-mode';
+
+test('Native TUI facade uses Runtime commands/events and close only tears down the client connection', async () => {
+  const remote = new FakeRuntimeConnection();
+  const runtime: RuntimeClient = new RuntimeClient({
+    transport: transport(remote),
+    clientInfo: { name: 'tui-test', version: '1', instanceId: 'client-tui-test' },
+    history: history(),
+  });
+  let closeCalls = 0;
+  const connection: LocalKiteConnection = {
+    runtime,
+    history: history(),
+    app: {} as KiteAppControlClient,
+    credential: {
+      writeProviderCredential: async () => {
+        throw new Error('not used');
+      },
+    },
+    service: descriptor(),
+    get status() {
+      return runtime.snapshotStore.getSnapshot().status === 'closed' ? 'closed' : 'active';
+    },
+    get generation() {
+      return runtime.connectionGeneration;
+    },
+    snapshotStore: runtime.snapshotStore,
+    subscribe: (listener) => runtime.snapshotStore.subscribe(listener),
+    prepareAppControl: async () => undefined,
+    connect: async () => undefined,
+    reconnect: () => runtime.reconnect(),
+    close: async () => {
+      closeCalls += 1;
+      await runtime.close('tui-test-close');
+    },
+    [Symbol.asyncDispose]: async () => {
+      closeCalls += 1;
+      await runtime.close('tui-test-dispose');
+    },
+  };
+  const facade = createNativeTuiRuntimeClient({
+    connection,
+    workspace: '/tmp/tui-client-workspace',
+  });
+  const events: string[] = [];
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const session = facade.getRuntime(sessionId);
+  expect(session).toBeDefined();
+  expect(session?.modelProvider).toBe('fixture-provider');
+  expect(session?.modelName).toBe('fixture-model');
+  await session!.runTask('hello', {
+    dispatch: (action) => {
+      if (action.type === 'RUNTIME_EVENT') events.push(action.event.type);
+    },
+  });
+  await Bun.sleep(10);
+  expect(remote.commands).toContain('create_session');
+  expect(remote.commands).toContain('start_turn');
+  expect(events).toContain('tool.progress');
+  expect(events).toContain('run.terminal');
+
+  session!.setLocalReplayRecovery(true);
+  const continued = await facade.forkRecoveredSessionForContinuation(sessionId);
+  expect(continued?.threadId).toBe('service-created-fork-session');
+  await facade.waitForSessionReady('service-created-fork-session');
+  expect(remote.commands).toContain('fork_session');
+  expect(remote.commands).toContain('resume_session');
+
+  const rewind = await facade.executeRewind({
+    sourceThreadId: sessionId,
+    snapshotId: 'checkpoint-1',
+    scope: 'code_only',
+    workspace: '/tmp/tui-client-workspace',
+  });
+  expect(rewind).toEqual({
+    targetThreadId: sessionId,
+    recoveredData: null,
+    fileOutcome: { restored: ['safe.txt'], deleted: [], failed: [], conflicts: [] },
+  });
+  expect(remote.commands).toContain('rewind_session');
+
+  await facade.dispose();
+  expect(closeCalls).toBe(1);
+  expect(remote.closeCalls).toBe(1);
+  expect(remote.commands).not.toContain('cancel_turn');
+});
+
+class FakeRuntimeConnection implements RuntimeClientConnection {
+  readonly commands: string[] = [];
+  closeCalls = 0;
+  #items: unknown[] = [];
+  #waiters: Array<(result: IteratorResult<unknown>) => void> = [];
+  #sessionId = '';
+  #nextSubscription = 0;
+  readonly #subscriptionBySession = new Map<string, string>();
+
+  async send(message: RuntimeProtocolMessage): Promise<void> {
+    if ('method' in message) {
+      if (message.method === 'initialize') {
+        this.push(result(message.id, initializeResult('service-tui-test')));
+        return;
+      }
+      if (message.method === 'runtime/subscribe') {
+        const subscriptionId = `tui-subscription-${++this.#nextSubscription}`;
+        const sessionId =
+          message.params.subscription.scope === 'session'
+            ? message.params.subscription.sessionId
+            : this.#sessionId;
+        this.#subscriptionBySession.set(sessionId, subscriptionId);
+        this.push(result(message.id, { subscriptionId, generation: 1 }));
+        this.push(
+          subscriptionUpdate(subscriptionId, 1, {
+            type: 'notification',
+            durability: 'durable',
+            sessionId,
+            revision: 1,
+            session: projection(sessionId, 1, 'completed'),
+          }),
+        );
+        this.push(subscriptionUpdate(subscriptionId, 1, { type: 'ready', scope: 'session' }));
+        return;
+      }
+      if (message.method === 'runtime/unsubscribe') {
+        this.push(result(message.id, { unsubscribed: true }));
+        return;
+      }
+      if (message.method !== 'runtime/command') return;
+      const command = message.params.command;
+      this.commands.push(command.type);
+      if (command.type === 'create_session') {
+        this.#sessionId = command.bootstrapSessionId ?? '';
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: this.#sessionId,
+            revision: 1,
+          }),
+        );
+        return;
+      }
+      if (command.type === 'resume_session') {
+        this.#sessionId = command.sessionId;
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: this.#sessionId,
+            revision: 1,
+          }),
+        );
+        return;
+      }
+      if (command.type === 'fork_session') {
+        this.#sessionId = 'service-created-fork-session';
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: this.#sessionId,
+            revision: command.sourceRevision,
+          }),
+        );
+        return;
+      }
+      if (command.type === 'rewind_session') {
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: command.sessionId,
+            revision: command.expectedRevision + 1,
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'ephemeral',
+            sessionId: command.sessionId,
+            workId: 'work-1',
+            turnId: 'turn-1',
+            actorId: 'runtime-rewind',
+            attemptId: command.commandId,
+            compositionRevision: 'runtime-state-store',
+            streamId: command.commandId,
+            sequence: 1,
+            event: {
+              type: 'rewind.terminal',
+              rewindId: 'rewind-service-test',
+              commandId: command.commandId,
+              sourceSessionId: command.sessionId,
+              targetSessionId: command.sessionId,
+              status: 'completed',
+              fileOutcome: {
+                restored: ['safe.txt'],
+                deleted: [],
+                failed: [],
+                conflicts: [],
+              },
+            },
+          }),
+        );
+        return;
+      }
+      if (command.type === 'start_turn') {
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: command.sessionId,
+            revision: 2,
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'durable',
+            sessionId: command.sessionId,
+            revision: 2,
+            session: projection(command.sessionId, 2, 'running'),
+            event: { type: 'model.requested', requestId: 'request-1' },
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'ephemeral',
+            sessionId: command.sessionId,
+            workId: 'work-1',
+            turnId: 'turn-1',
+            actorId: 'runtime-agent',
+            attemptId: command.commandId,
+            compositionRevision: 'runtime-state-store',
+            streamId: command.commandId,
+            sequence: 1,
+            event: {
+              type: 'tool.progress',
+              toolId: 'shell-1',
+              summary: 'fixture-progress',
+              stream: 'stdout',
+            },
+          }),
+        );
+        this.push(
+          subscriptionUpdate(this.#subscriptionBySession.get(command.sessionId)!, 1, {
+            type: 'notification',
+            durability: 'durable',
+            sessionId: command.sessionId,
+            revision: 3,
+            session: projection(command.sessionId, 3, 'completed'),
+            event: { type: 'run.terminal', runId: 'run-1', status: 'completed' },
+          }),
+        );
+        return;
+      }
+      this.push(
+        result(message.id, {
+          status: 'applied',
+          commandId: command.commandId,
+          sessionId: 'sessionId' in command ? command.sessionId : this.#sessionId,
+          revision: ('expectedRevision' in command ? command.expectedRevision : 0) + 1,
+        }),
+      );
+    }
+  }
+
+  messages(): AsyncIterable<unknown> {
+    return {
+      [Symbol.asyncIterator]: () => ({
+        next: (): Promise<IteratorResult<unknown>> => {
+          const value = this.#items.shift();
+          if (value !== undefined) return Promise.resolve({ done: false, value });
+          return new Promise((resolve) => this.#waiters.push(resolve));
+        },
+      }),
+    };
+  }
+
+  async close(): Promise<void> {
+    this.closeCalls += 1;
+    for (const resolve of this.#waiters.splice(0)) resolve({ done: true, value: undefined });
+  }
+
+  push(value: unknown): void {
+    const resolve = this.#waiters.shift();
+    if (resolve) resolve({ done: false, value });
+    else this.#items.push(value);
+  }
+}
+
+function transport(connection: FakeRuntimeConnection): RuntimeClientTransport {
+  return { connect: async () => connection };
+}
+
+function history(): RuntimeHistoryClient {
+  return {
+    listSessions: async () => ({ entries: [], hasMore: false }),
+    listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+    loadSession: async () => {
+      throw new Error('not used');
+    },
+  };
+}
+
+function descriptor(): LocalRuntimeServiceDescriptor {
+  return {
+    schema: 'kite.local-runtime-service.v1',
+    instanceId: 'service-tui-test',
+    pid: 1,
+    startedAt: '2026-08-27T00:00:00.000Z',
+    endpoint: {
+      origin: 'http://127.0.0.1:43123',
+      websocketUrl: 'ws://127.0.0.1:43123/rpc',
+    },
+    protocolVersion: 1,
+    clientContractRevision: 'kite-local-runtime-contract-v1',
+    serverVersion: 'test',
+    buildId: 'test',
+  };
+}
+
+function result(id: string | number | null, value: object): object {
+  return { jsonrpc: '2.0', id, result: value };
+}
+
+function initializeResult(instanceId: string): object {
+  return {
+    protocolVersion: 1,
+    protocolSchema: 'kite.runtime-protocol.v1',
+    serverInfo: { version: '1', instanceId },
+    capabilities: {
+      methods: [
+        'initialize',
+        'runtime/command',
+        'runtime/query',
+        'runtime/subscribe',
+        'runtime/unsubscribe',
+        'server/ping',
+      ],
+      subscriptions: ['session', 'sessions'],
+    },
+    limits: {
+      maxMessageBytes: 1024,
+      maxDepth: 8,
+      maxInFlightRequests: 8,
+      maxSubscriptions: 8,
+      maxOutboundMessages: 8,
+    },
+  };
+}
+
+function projection(sessionId: string, revision: number, status: 'running' | 'completed') {
+  return {
+    schema: 'kite.runtime-projection.v1',
+    sessionId,
+    revision,
+    lifecycle: 'open',
+    model: { provider: 'fixture-provider', name: 'fixture-model' },
+    sessionCommandGrantCount: 0,
+    activeWork: {
+      workId: 'work-1',
+      phase: 'building',
+      status,
+      activeTurn: { turnId: 'turn-1', status },
+    },
+  };
+}
+
+function subscriptionUpdate(subscriptionId: string, generation: number, message: object): object {
+  return {
+    jsonrpc: '2.0',
+    method: 'runtime/subscription',
+    params: { subscriptionId, generation, message },
+  };
+}

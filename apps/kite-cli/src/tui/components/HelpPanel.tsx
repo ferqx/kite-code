@@ -1,8 +1,8 @@
 import { Box, Text, useInput } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import { useState } from 'react';
-import type { SandboxBackend } from '#kite-cli/sandbox/types';
 import { useTheme } from '#kite-cli/tui/theme';
+import type { SandboxBackend } from '../client-types';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { SLASH_COMMAND_DEFS } from '../hooks/useSlashSuggestions';
 import { useI18n } from '../i18n';

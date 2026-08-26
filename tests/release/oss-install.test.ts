@@ -1,16 +1,44 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, parse } from 'node:path';
 import {
-  installOssCandidate,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, parse, resolve } from 'node:path';
+import { createKiteHomeIdentity } from '@kite-ai/kite-local-runtime/service';
+import {
+  installOssCandidate as installCandidate,
   readInstallStatus,
-  rollbackOssCandidate,
-  uninstallOssCandidate,
+  rollbackOssCandidate as rollbackCandidate,
+  uninstallOssCandidate as uninstallCandidate,
 } from '../../scripts/release/install-oss-candidate';
 import { createOssCandidateFixture } from './helpers/oss-candidate-fixture';
 
 const roots: string[] = [];
+
+function serviceHome(prefix: string) {
+  const root = join(realpathSync(dirname(resolve(prefix))), 'service-home');
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  return createKiteHomeIdentity(root, 'explicit_argument');
+}
+
+function installOssCandidate(input: { archivePath: string; prefix: string }) {
+  if (resolve(input.prefix) === parse(resolve(input.prefix)).root) return installCandidate(input);
+  return installCandidate({ ...input, serviceHome: serviceHome(input.prefix) });
+}
+
+function rollbackOssCandidate(prefix: string) {
+  return rollbackCandidate(prefix, { serviceHome: serviceHome(prefix) });
+}
+
+function uninstallOssCandidate(prefix: string) {
+  return uninstallCandidate(prefix, { serviceHome: serviceHome(prefix) });
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
@@ -52,6 +80,25 @@ describe('managed candidate install lifecycle', () => {
     ).rejects.toThrow('filesystem root');
   });
 
+  test('rejects repository descendants even when invoked from an unrelated cwd', async () => {
+    const fixture = await createOssCandidateFixture('0.1.0');
+    roots.push(fixture.root);
+    const unrelated = mkdtempSync(join(tmpdir(), 'kite-oss-unrelated-cwd-'));
+    roots.push(unrelated);
+    const previousCwd = process.cwd();
+    process.chdir(unrelated);
+    try {
+      await expect(
+        installCandidate({
+          archivePath: fixture.archivePath,
+          prefix: join(resolve(import.meta.dir, '../..'), '.installer-must-not-write-here'),
+        }),
+      ).rejects.toThrow('repository');
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
   test('refuses to uninstall an install tree containing an unknown user file', async () => {
     const fixture = await createOssCandidateFixture('0.1.0');
     roots.push(fixture.root);
@@ -85,6 +132,23 @@ describe('managed candidate install lifecycle', () => {
     expect(existsSync(unknown)).toBe(true);
   });
 
+  test('leaves the active candidate unchanged when ordinary Service stop is busy', async () => {
+    const target = { id: 'macos-arm64', os: 'darwin', arch: 'arm64' } as const;
+    const first = await createOssCandidateFixture('0.1.0', target, 'service_busy');
+    const second = await createOssCandidateFixture('0.1.1');
+    roots.push(first.root, second.root);
+    const parent = mkdtempSync(join(tmpdir(), 'kite-oss-upgrade-busy-'));
+    roots.push(parent);
+    const prefix = join(parent, 'managed');
+    const firstMarker = await installOssCandidate({ archivePath: first.archivePath, prefix });
+
+    await expect(installOssCandidate({ archivePath: second.archivePath, prefix })).rejects.toThrow(
+      'ordinary stop failed',
+    );
+    expect(readInstallStatus(prefix)).toEqual(firstMarker);
+    expect(readdirSync(join(prefix, 'releases'))).toHaveLength(1);
+  });
+
   test('refuses to replace a managed install with a different platform target', async () => {
     const first = await createOssCandidateFixture('0.1.0');
     const otherTarget = await createOssCandidateFixture('0.1.1', {
@@ -100,7 +164,7 @@ describe('managed candidate install lifecycle', () => {
 
     await expect(
       installOssCandidate({ archivePath: otherTarget.archivePath, prefix }),
-    ).rejects.toThrow('cannot be replaced');
+    ).rejects.toThrow('does not match');
     expect(readInstallStatus(prefix)).toEqual(firstMarker);
   });
 

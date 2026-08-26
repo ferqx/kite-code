@@ -2,64 +2,67 @@
 
 ## 定位
 
-`@kite-ai/kite-local-runtime` 是 Kite 本机 Service 的 Bun/Node-only、repo-private substrate。它冻结
-Service descriptor、token、lock、lifecycle 与 native credential 的 exact codec，并为 CLI/native consumer
-提供窄的 Runtime、History 和 App Control connection contract。
-
-`./service` 还提供受约束的 Native filesystem primitive；listener、WebSocket/HTTP server、child process与
-lifecycle manager仍由`apps/kite-service`拥有。本包不创建OS service、Store、SQLite或第二个Runtime composition。
+`@kite-ai/kite-local-runtime` 是 Kite managed Local Service 的 Bun/Node-only、repo-private Native substrate。它以互斥
+`./client`、`./manager`、`./service` exports冻结descriptor/token/lock/lifecycle、instance handshake、Native
+credential及Runtime/History/App Control connection contract；它不创建Runtime Host/Store/Server composition。
 
 ## 拥有职责
 
-- `./service`：严格校验不含 secret/path/session 的Service descriptor、lock identity、token material与lifecycle
-  state；构造固定`userKiteCodeDir()/runtime-service/v1` layout；以no-follow、owner-only、bounded read、sibling
-  temp+fsync+atomic rename实现descriptor/token发布；以原子目录实现instance/lifecycle lock，并提供exact identity
-  cleanup和由App确认stale后调用的atomic quarantine primitive。
-- `./client`：实现strict descriptor/access discovery、one-shot ticket Runtime WebSocket、三个History HTTP route、
-  exact App Control/Native credential HTTP client与`LocalKiteConnection`；显式reconnect复用`RuntimeClient`的
-  generation reset/resubscribe，绝不自动重放mutation。manager/lifecycle control token仍留在App-private owner。
-- 固定 client contract revision、Protocol V1 identity 与 loopback endpoint shape；拒绝未知字段、非 loopback
-  endpoint、secret-bearing descriptor 和不安全 JSON shape。
+- `./client`：strict descriptor/access discovery、两阶段App Control/Runtime connection、one-shot ticket WebSocket、
+  三个History route、exact App Control/Native credential client与`LocalKiteConnection`。`prepareAppControl()`只准备
+  authenticated control plane；caller确认Workspace trusted后才显式`connect()`。
+- `./manager`：单一ensure/status/stop/restart state machine、native process/spawn/PID probe、cross-process lifecycle lock、
+  neutral environment与explicit executable resolver composition。manager拥有control token；普通connection不取得它。
+- manager probe先 `GET /readyz`做liveness precheck，再以access token `POST /_kite/instance`、exact `{}` body读取
+  process-owned strict identity；绝不从磁盘descriptor合成healthy response。
+- `./service`：strict descriptor/lock/token codec与fixed `runtime-service/v1` filesystem layout；提供no-follow、owner-only、
+  bounded read、sibling temp+fsync+atomic rename、instance/lifecycle lock及exact stale quarantine/cleanup primitive。
+- 固定client contract revision、Protocol V1 identity与loopback endpoint shape；拒绝unknown field、non-loopback endpoint、
+  secret-bearing descriptor与unsafe JSON。
 
 ## 不拥有职责
 
-- 不监听端口、不spawn/管理进程、不实现lifecycle/stale/PID state machine；只在App提供exact owner identity时读取、
-  发布或删除固定state entry，不自行判断健康、stale或kill进程。
-- 不依赖 Runtime Host、Runtime Server、Builtin Runtime、SQLite、React、Ink 或任何 `apps/*`。
-- 不把 control token 放进 `LocalKiteConnection`，不自动重试/重放 Runtime 或 App Control mutation；response
-  丢失必须由调用方按 `outcome_unknown → exact state query → explicit decision` 处理。
-- 不定义 Runtime Protocol service method、generic RPC、dynamic method registry、Browser transport、Desktop IPC
-  或 public SDK。
+- 不监听端口，不实现HTTP/WebSocket listener，也不创建Host、Runtime Server、Builtin Runtime、SQLite或第二composition；
+  这些production owner只在`apps/kite-service`。
+- manager只在PID明确dead且exact identity仍匹配时cleanup；alive/uncertain、malformed state、handshake mismatch与unknown stop
+  outcome均fail closed，不kill、不spawn replacement、不回显descriptor identity。
+- 不依赖 Runtime Host/Server/Builtin/SQLite、React、Ink或任何`apps/*`。
+- 不自动retry/replay Runtime或App Control mutation；response丢失必须按
+  `outcome_unknown → exact state query → explicit decision`处理。
+- 不定义generic RPC、Browser transport、Desktop IPC、public SDK、OS Service或默认Store path。
 
 ## 允许依赖
 
-只依赖 `@kite-ai/kite-app-contract`、`@kite-ai/runtime-client`、`@kite-ai/runtime-protocol` 与 codec 所需的
-`zod`。该 package 的 source 不得导入 Host/Server/Builtin/SQLite、React/Ink 或 `apps/*`。
+只依赖 `@kite-ai/kite-app-contract`、`@kite-ai/runtime-client`、`@kite-ai/runtime-protocol` 与 codec所需`zod`。
+source不得导入Host/Server/Builtin/SQLite、React/Ink或`apps/*`。
 
 ## 公开入口
 
-只导出 `@kite-ai/kite-local-runtime/client` 与 `@kite-ai/kite-local-runtime/service`。不提供 root export，
-不暴露内部 filesystem/process implementation。
+只导出 `@kite-ai/kite-local-runtime/client`、`@kite-ai/kite-local-runtime/manager` 与
+`@kite-ai/kite-local-runtime/service`。不提供root export，不暴露跨layerimplementation。
 
 ## 关键不变量
 
-- descriptor schema 是 `kite.local-runtime-service.v1`，只含 instance/PID/start time、loopback endpoint、
-  Protocol version、client contract revision、server version 与 build ID；token、Workspace、Store/executable
-  path、credential 和 Session 字段 fail closed。
-- `access.token` 与 `control.token` 是不同的 restart-scoped material；connection contract 只能使用 access
-  admission，stop/restart 由独立 manager 负责。
-- Runtime initialize 的instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation的Session
-  readiness/ephemeral stream，再以authoritative index reset接受replacement Service的当前revision。
-- state layout 固定在 validated home 下的 `runtime-service/v1/`，不以请求 Workspace 或 cwd 推导 Service identity。
-- POSIX primitive验证owner UID与`0700`/`0600`边界、拒绝symlink/hardlink/type drift。当前Windows实现因尚无
-  verified current-user ACL/reparse checker而显式返回`unsupported`，不得把跳过ACL验证解释为成功；该平台资格
-  必须在KLSV1-07前补齐并由真实Windows evidence证明。
+- descriptor schema为`kite.local-runtime-service.v1`，只含instance/PID/start time、loopback endpoint、Protocol、client
+  contract revision、server version与build ID；token、Workspace、Store/executable path、credential与Session字段fail closed。
+- authenticated instance handshake必须是 `POST /_kite/instance`、`Kite-Local-Access`、JSON `{}`、无cookie/query，response
+  exact keys为`schema/instanceId/protocolVersion/clientContractRevision/serverVersion/buildId`且不超过4096 bytes。
+  content-type缺失、malformed/extra field或instance/server/build identity mismatch统一`identity_uncertain`；
+  Protocol/client-contract不兼容被拒绝，expected build drift返回`incompatible + build_mismatch`。以上状态都不授权
+  清理alive/uncertain owner或spawn replacement。
+- access/control token不同且restart-scoped；client connection只用access admission，stop/restart由manager独占control。
+- Runtime initialize instance必须与descriptor相同；reconnect重新ensure/discover并清空旧generation readiness/ephemeral
+  stream，再以authoritative reset接受replacement Service current revision。mutation不会自动重放。
+- state identity来自explicit validated home，不从request Workspace/cwd推导。POSIX验证owner UID与`0700`/`0600`并拒绝
+  symlink/hardlink/type drift；Windows因尚无verified current-user ACL/reparse checker明确`unsupported`。
 
-## 测试
+## 测试与 evidence
 
-`bun run --cwd packages/kite-local-runtime test`
+`bun run --cwd packages/kite-local-runtime test`。当前focused manager suite
+`bun test packages/kite-local-runtime/test/manager`为37 pass / 135 expects；package typecheck、Biome与diff-check也已通过。
+这些是本地evidence，不是KLSV1-07真实Windows、三平台process/release或全部PTY qualification。
 
 ## 文档影响
 
-模块局部 codec、state-layout 或 native client contract 变化更新本 README；跨包 Service auth、恢复、carrier、
-process 或 release 变化同时更新对应 `docs/active/` current authority。
+codec/state/manager/native client变化更新本README；跨包Service auth、恢复、carrier、process或release变化同时更新匹配的
+`docs/active/` current authority。

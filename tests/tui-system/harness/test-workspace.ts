@@ -449,9 +449,9 @@ export function createTestWorkspace(opts?: {
 
   const env: Record<string, string> = {
     HOME: tempHome,
-    KITE_CODE_HOME: tempHome,
-    // Override checkpoint path to use temp dir
-    // (the TUI reads this via defaultCheckpointPath() which uses KITE_CODE_HOME)
+    // Service KITE_CODE_HOME is the exact validated code root; it no longer
+    // receives a second `.kite-code` suffix inside the child.
+    KITE_CODE_HOME: kiteCodeDir,
   };
 
   const configPath = join(kiteCodeDir, 'kite-code.jsonc');

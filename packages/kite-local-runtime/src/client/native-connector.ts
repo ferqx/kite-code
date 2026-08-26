@@ -673,6 +673,7 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
   readonly #maxHttpResponseBytes: number;
   #service: LocalRuntimeServiceDescriptor | undefined;
   #accessToken: LocalRuntimeToken | undefined;
+  #preparePromise: Promise<number> | undefined;
   #connectPromise: Promise<void> | undefined;
   #closePromise: Promise<void> | undefined;
   #identityGeneration = 0;
@@ -769,6 +770,11 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
     return this.#runtime.snapshotStore.subscribe(listener);
   }
 
+  async prepareAppControl(): Promise<void> {
+    if (this.#closed) throw closedError();
+    await this.#prepareIdentity(false);
+  }
+
   async connect(): Promise<void> {
     if (this.#closed) throw closedError();
     if (this.#runtime.snapshotStore.getSnapshot().status === 'active') return;
@@ -793,11 +799,13 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
   async close(reason = 'runtime_client_closed'): Promise<void> {
     if (this.#closePromise) return this.#closePromise;
     this.#closed = true;
+    const pendingPrepare = this.#preparePromise;
     const pendingConnect = this.#connectPromise;
     this.#closePromise = (async () => {
       try {
         await this.#runtime.close(reason);
       } finally {
+        await pendingPrepare?.catch(() => undefined);
         await pendingConnect?.catch(() => undefined);
       }
     })();
@@ -809,19 +817,7 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
   }
 
   async #connect(reconnect: boolean): Promise<void> {
-    const ensured = await this.#ensureService();
-    if (this.#closed) throw closedError();
-    const discovered = await discoverLocalRuntimeService(this.#state);
-    if (this.#closed) throw closedError();
-    if (ensured && !sameServiceInstance(ensured, discovered.descriptor)) {
-      throw new LocalRuntimeConnectionError(
-        'instance_mismatch',
-        'Local Runtime Service identity changed during discovery.',
-      );
-    }
-    const identityGeneration = ++this.#identityGeneration;
-    this.#service = discovered.descriptor;
-    this.#accessToken = discovered.accessToken;
+    const identityGeneration = await this.#prepareIdentity(reconnect);
     try {
       if (reconnect && this.#runtime.snapshotStore.getSnapshot().connectionGeneration > 0) {
         await this.#runtime.reconnect();
@@ -837,6 +833,36 @@ export class NativeLocalKiteConnection implements LocalKiteConnection {
       }
       throw error;
     }
+  }
+
+  async #prepareIdentity(force: boolean): Promise<number> {
+    if (!force && this.#service && this.#accessToken) return this.#identityGeneration;
+    const pending = this.#preparePromise;
+    if (pending) return pending;
+    const preparation = this.#discoverIdentity();
+    this.#preparePromise = preparation;
+    try {
+      return await preparation;
+    } finally {
+      if (this.#preparePromise === preparation) this.#preparePromise = undefined;
+    }
+  }
+
+  async #discoverIdentity(): Promise<number> {
+    const ensured = await this.#ensureService();
+    if (this.#closed) throw closedError();
+    const discovered = await discoverLocalRuntimeService(this.#state);
+    if (this.#closed) throw closedError();
+    if (ensured && !sameServiceInstance(ensured, discovered.descriptor)) {
+      throw new LocalRuntimeConnectionError(
+        'instance_mismatch',
+        'Local Runtime Service identity changed during discovery.',
+      );
+    }
+    const identityGeneration = ++this.#identityGeneration;
+    this.#service = discovered.descriptor;
+    this.#accessToken = discovered.accessToken;
+    return identityGeneration;
   }
 
   async #ensureService(): Promise<LocalRuntimeServiceDescriptor | undefined> {
