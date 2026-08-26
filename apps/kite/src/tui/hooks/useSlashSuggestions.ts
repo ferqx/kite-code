@@ -30,16 +30,6 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
     descriptionKey: 'command.permissions',
   },
   {
-    name: 'release',
-    aliases: [],
-    descriptionKey: 'command.release',
-  },
-  {
-    name: 'telemetry',
-    aliases: [],
-    descriptionKey: 'command.telemetry',
-  },
-  {
     name: 'mcp',
     aliases: [],
     descriptionKey: 'command.mcp',

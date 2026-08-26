@@ -69,7 +69,7 @@ function makeAwaitingReviewState() {
 }
 
 describe('plan_review_decision actions', () => {
-  test('approve auto → mode auto + plan.approved + tool.finished', () => {
+  test('approve auto → plan.approved owns the selected mode before tool.finished', () => {
     const state = makeAwaitingReviewState();
     const action: RuntimeUserAction = {
       type: 'plan_review_decision',
@@ -82,15 +82,13 @@ describe('plan_review_decision actions', () => {
 
     const events = eventsForRuntimeAction(state, action);
     const eventTypes = events.map((e) => e.type);
-    expect(eventTypes).toContain('plan.approved');
-    expect(eventTypes).toContain('tool.finished');
+    expect(eventTypes).toEqual(['plan.approved', 'tool.finished']);
 
     const approved = events.find((e) => e.type === 'plan.approved');
     expect(approved).toBeDefined();
     if (approved && approved.type === 'plan.approved') {
       expect(approved.executionMode).toBe('auto');
     }
-
     const finished = events.find((e) => e.type === 'tool.finished');
     expect(finished).toBeDefined();
     if (finished && finished.type === 'tool.finished') {

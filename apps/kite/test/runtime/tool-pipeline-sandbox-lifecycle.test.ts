@@ -234,7 +234,7 @@ function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeStat
       setSessionModelRoute: () => undefined,
       deleteSession: () => undefined,
     },
-    transactions: { commit: () => undefined },
+    transactions: { commit: () => undefined, commitCommandDecision: () => undefined },
     leases: {
       tryAcquire: () => true,
       renew: () => true,
@@ -248,6 +248,7 @@ function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeStat
       getNamedSnapshotEntry: () => null,
       restoreNamedSnapshot: () => false,
       forkSession: () => false,
+      forkSessionForCommand: () => ({ status: 'unavailable' }),
       forkCurrentSession: () => false,
       recordFilePreimage: () => undefined,
       recordFilePostimage: () => undefined,

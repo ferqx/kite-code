@@ -15,8 +15,6 @@ export type SlashAction =
   | { type: 'plan'; task?: string }
   | { type: 'permissions' }
   | { type: 'permissions_invalid_args' }
-  | { type: 'release' }
-  | { type: 'telemetry' }
   | { type: 'clear' }
   | { type: 'help' }
   | { type: 'new' }
@@ -57,10 +55,6 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'plan', task: arg || undefined };
     case 'permissions':
       return args.length === 0 ? { type: 'permissions' } : { type: 'permissions_invalid_args' };
-    case 'release':
-      return args.length === 0 ? { type: 'release' } : { type: 'unknown', raw: input };
-    case 'telemetry':
-      return args.length === 0 ? { type: 'telemetry' } : { type: 'unknown', raw: input };
     case 'clear':
       return { type: 'clear' };
     case 'help':
@@ -109,8 +103,6 @@ export function useSlashCommand(
   onCompact?: (customInstructions?: string) => void,
   onContext?: () => void,
   onCompactReset?: () => void,
-  releaseStatusText?: string,
-  telemetryStatusText?: string,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -168,12 +160,6 @@ export function useSlashCommand(
             text: '权限模式只能在选择器中设置，请直接输入 /permissions。',
             isError: true,
           });
-          break;
-        case 'release':
-          if (releaseStatusText) dispatch({ type: 'LOCAL_TEXT', text: releaseStatusText });
-          break;
-        case 'telemetry':
-          if (telemetryStatusText) dispatch({ type: 'LOCAL_TEXT', text: telemetryStatusText });
           break;
         case 'clear':
           dispatch({ type: 'CLEAR_OUTPUT' });
@@ -247,8 +233,6 @@ export function useSlashCommand(
       onCompact,
       onContext,
       onCompactReset,
-      releaseStatusText,
-      telemetryStatusText,
     ],
   );
 }

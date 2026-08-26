@@ -209,6 +209,8 @@ describe('TUI PTY System — /compact after session switch', () => {
       type: 'context.compaction_failed',
       retryable: false,
     });
-    expect(String(terminal?.message)).toContain('Not enough');
+    expect(String(terminal?.message)).toMatch(
+      /(?:Not enough reducible context|No settled historical turn)/,
+    );
   }
 });

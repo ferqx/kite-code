@@ -11,6 +11,7 @@ import {
 } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { projectCliRuntimeEvent } from '@/app/cli';
+import { projectRuntimeClientEvent } from '@/app/runtime-client/event-projector';
 
 describe('runtime terminal taxonomy v1', () => {
   test('keeps blocked, unknown, budget and saturation distinct', () => {
@@ -58,38 +59,24 @@ describe('runtime terminal taxonomy v1', () => {
     });
     expect(state.terminalOutcome).toEqual(outcome);
     expect(state.terminalOutcome?.reasonCode).toBe('verification_inconclusive');
-    expect(
-      projectCliRuntimeEvent({
+    const clientEvent = projectRuntimeClientEvent(
+      {
         type: 'run.error',
         message: '任意展示字符串',
         recoverable: false,
         failure,
         outcome,
-      }),
-    ).toMatchObject({
-      terminalPresentation: {
-        label: 'verification inconclusive',
-        complete: false,
-        recoveryEntry: 'operator_action',
       },
+      { sessionRevision: state.revision },
+    );
+    if (!clientEvent) throw new Error('expected a projected failure lifecycle event');
+    expect(projectCliRuntimeEvent(clientEvent)).toEqual({
+      type: 'run.failure',
+      runId: 'runtime-run',
+      code: 'verification_inconclusive',
+      retryable: false,
+      recoveryEntry: 'operator_action',
     });
-    expect(
-      projectCliRuntimeEvent(
-        {
-          type: 'run.error',
-          message: '任意展示字符串',
-          recoverable: false,
-          failure,
-          outcome,
-        },
-        false,
-      ),
-    ).toEqual({
-      type: 'run.error',
-      message: '任意展示字符串',
-      recoverable: false,
-      failure,
-      outcome,
-    });
+    expect(projectCliRuntimeEvent(clientEvent, false)).toEqual(clientEvent);
   });
 });

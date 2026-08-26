@@ -1,4 +1,12 @@
-import { assertCurrentRuntimeEventForWrite, type RuntimeEvent } from '@kite-ai/agent-kernel';
+import {
+  assertCurrentRuntimeEventForWrite,
+  CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS,
+  type RuntimeEvent,
+} from '@kite-ai/agent-kernel';
+
+const CURRENT_STATE_EVENT_TYPES_ = Object.freeze(
+  Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS),
+);
 
 /**
  * Host-facing State event admission boundary.
@@ -18,4 +26,15 @@ export function runtimeHostStateAssertCurrentRuntimeEvent(
 export function runtimeHostStateAdmitCurrentRuntimeEvent(value: unknown): RuntimeEvent {
   assertCurrentRuntimeEventForWrite(value);
   return value;
+}
+
+/**
+ * Host-owned closed State event vocabulary for decoded-log admission.
+ *
+ * App composition may pass this vocabulary to a storage adapter without
+ * importing the Kernel's concrete event codec or becoming a second codec
+ * authority.
+ */
+export function runtimeHostCurrentStateEventTypes(): readonly string[] {
+  return CURRENT_STATE_EVENT_TYPES_;
 }

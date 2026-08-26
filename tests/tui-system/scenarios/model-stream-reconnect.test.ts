@@ -74,6 +74,7 @@ describe('TUI PTY System — model stream reconnect', () => {
       const renderedLifecycle = tui.scrollback();
       expect(screenContains(renderedLifecycle, 'RECONNECT_PARTIAL')).toBe(true);
       expect(screenContains(renderedLifecycle, 'RECOVERED')).toBe(true);
+      expect(screenContains(renderedLifecycle, '● tool')).toBe(false);
       expect(screenContains(renderedLifecycle, 'read 1 file')).toBe(true);
       expect(screenContains(tui.screenFramesSince(reconnectFrames).join('\n'), 'WRONG.md')).toBe(
         false,

@@ -133,6 +133,7 @@ function ownsHistoricalSessionReadBoundary(relativePath: string): boolean {
     relativePath === 'packages/runtime-storage-sqlite/src/compatibility.ts' ||
     relativePath === 'packages/runtime-storage-sqlite/src/index.ts' ||
     relativePath === 'apps/kite/src/bootstrap/runtime/state-store-compatibility.ts' ||
+    relativePath === 'apps/kite/src/runtime-client/history-adapter.ts' ||
     relativePath === 'apps/kite/src/bootstrap.ts'
   );
 }
@@ -211,6 +212,9 @@ function inspectSource(path: string): void {
   ) {
     violations.push(`${relativePath}: SQLite format-selection or compatibility branch`);
   }
+  if (relativePath.startsWith('apps/kite/src/') && /\.sessions\.deleteSession\s*\(/u.test(source)) {
+    violations.push(`${relativePath}: App may not delete Runtime Store sessions directly`);
+  }
 }
 
 function visit(path: string): void {
@@ -255,6 +259,13 @@ const requiredDomainFiles = [
   'packages/runtime-contract/src/queries.ts',
   'packages/runtime-contract/src/notifications.ts',
   'packages/runtime-contract/src/projections.ts',
+  'packages/runtime-protocol/src/codecs.ts',
+  'packages/runtime-protocol/src/limits.ts',
+  'packages/runtime-protocol/src/mappers.ts',
+  'packages/runtime-server/src/server.ts',
+  'packages/runtime-server/src/in-process.ts',
+  'packages/runtime-client/src/index.ts',
+  'packages/runtime-client/src/store.ts',
   'packages/runtime-spi/src/capability.ts',
   'packages/runtime-spi/src/execution.ts',
   'packages/runtime-spi/src/model.ts',

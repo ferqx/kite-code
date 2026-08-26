@@ -332,7 +332,8 @@ describe('ModelInvocationGateway', () => {
   });
 
   test('keeps cumulative retry suppression separate from reasoning segment identity', async () => {
-    const ephemeral: Array<{ type: string; segmentId?: string; text?: string }> = [];
+    const ephemeral: Array<{ type: string; requestId: string; segmentId?: string; text?: string }> =
+      [];
     const harness = createTestModelInvocationHarness({
       workspace: '/tmp/model-gateway-reasoning-segments',
       transport: async (input) => {
@@ -356,10 +357,30 @@ describe('ModelInvocationGateway', () => {
     await pending.commit();
 
     expect(ephemeral).toEqual([
-      { type: 'model.reasoning_delta', segmentId: 'segment-a', text: 'first' },
-      { type: 'model.reasoning_completed', segmentId: 'segment-a', text: 'first' },
-      { type: 'model.reasoning_delta', segmentId: 'segment-b', text: 'second' },
-      { type: 'model.reasoning_completed', segmentId: 'segment-b', text: 'second' },
+      {
+        type: 'model.reasoning_delta',
+        requestId: pending.invocationId,
+        segmentId: 'segment-a',
+        text: 'first',
+      },
+      {
+        type: 'model.reasoning_completed',
+        requestId: pending.invocationId,
+        segmentId: 'segment-a',
+        text: 'first',
+      },
+      {
+        type: 'model.reasoning_delta',
+        requestId: pending.invocationId,
+        segmentId: 'segment-b',
+        text: 'second',
+      },
+      {
+        type: 'model.reasoning_completed',
+        requestId: pending.invocationId,
+        segmentId: 'segment-b',
+        text: 'second',
+      },
     ]);
   });
 

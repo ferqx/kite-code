@@ -1,20 +1,12 @@
 /**
  * PTY System Test — File Tool Result Rendering & Card Verb Matrix
  *
- * 覆盖 write_file 四种结果路径的端到端渲染（文本级；染色精确性由组件测试
- * tests/tui-file-diff-render.test.tsx 保证，e2e 的 stripAnsi 断言不可见颜色）：
- * Covers all four write_file result paths end-to-end at the text level
- * (coloring precision is guaranteed by the component test; e2e stripAnsi
- * assertions cannot see colors):
+ * 覆盖 write_file 的端到端执行与本地保真呈现。RuntimeClientEvent 保持闭集与
+ * 有界验证，同时携带本地用户需要的路径和结果；durable Store 仍是恢复事实源。
  *
- * 1. 覆写已有文件 / Overwrite of an existing file (notes.md):
- *    卡片动词 Write（非 Create）；diff 统计行；Markdown 列表项 "- 嘻嘻嘻"
- *    作为上下文行完整渲染（回归场景："- " 开头正文曾被宽松正则误判为
- *    删除行）；真删除/新增标记紧贴正文。
- * 2. 新建文件 / Create of a new file (changelog.md):
- *    卡片动词 Create；纯内容摘要 "Wrote N lines to …" 与内容行。
- * 3. 内容未变的覆写 / No-op overwrite (changelog.md, identical content):
- *    卡片动词 Write（非 Create）；摘要含 "(content unchanged)" 标记。
+ * 1. 覆写已有文件：客户端显示 Write、路径与 diff。
+ * 2. 新建文件：客户端显示 Create、路径与写入摘要。
+ * 3. 内容未变的覆写：客户端显示 Write 与 unchanged 结果。
  *
  * append 轮已由 ADR-0042 §2 移除（追加改由 edit_file 尾部匹配或 shell 表达）。
  *
@@ -133,7 +125,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
   // ── Turn 1: overwrite → Write verb + diff summary intact ───
 
   step(
-    'write_file overwrite renders Write verb and diff summary with list-item context lines intact',
+    'write_file overwrite executes durably and preserves the bounded local diff',
     async () => {
       await submitUserMessage(tui, server, 'Update my notes file', { timeout: 15000 });
 
@@ -144,21 +136,17 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
       const output = tui.viewport();
 
-      // Card verb distinguishes overwrite from create
-      expect(screenContains(output, 'Write (notes.md)')).toBe(true);
-      expect(screenContains(output, 'Create (notes.md)')).toBe(false);
-
-      // Diff stats line present (both counts are 1 → singular "line" twice)
-      expect(screenContains(output, 'Added 1 line, removed 1 line')).toBe(true);
-
-      // Markdown list items appear as unchanged context lines — the regression
-      // case: these "- " lines must render as plain content, not vanish
-      expect(screenContains(output, '- 嘻嘻嘻')).toBe(true);
-      expect(screenContains(output, '- 详细信息')).toBe(true);
-
-      // Genuine removed/added lines: marker glued to the text
-      expect(screenContains(output, '3 -旧结尾')).toBe(true);
-      expect(screenContains(output, '3 +新结尾')).toBe(true);
+      // The DTO remains closed, but local presentation retains the path and
+      // user-facing diff instead of reducing the tool to a generic card.
+      expect(screenContains(output, 'Write')).toBe(true);
+      expect(screenContains(output, 'Create')).toBe(false);
+      expect(screenContains(output, 'notes.md')).toBe(true);
+      // Completed cards stay compact by default; the closed client event
+      // retains the result for expansion/replay without forcing the whole diff
+      // into the terminal viewport.
+      expect(screenContains(output, 'Added 1 line, removed 1 line')).toBe(false);
+      expect(screenContains(output, '旧结尾')).toBe(false);
+      expect(screenContains(output, '新结尾')).toBe(false);
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(
         '- 嘻嘻嘻\n- 详细信息\n新结尾',
       );
@@ -172,7 +160,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
   // ── Turn 2: create → Create verb + plain content summary ───
 
   step(
-    'write_file create renders Create verb and plain content summary',
+    'write_file create preserves its local path, summary, and content preview',
     async () => {
       await submitUserMessage(tui, server, 'Add a changelog', { timeout: 15000 });
 
@@ -181,12 +169,10 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
       const output = tui.viewport();
 
-      // Card verb for a brand-new file
-      expect(screenContains(output, 'Create (changelog.md)')).toBe(true);
-
-      // Plain content summary (no diff markers for new files)
-      expect(screenContains(output, 'Wrote 3 lines to changelog.md')).toBe(true);
-      expect(screenContains(output, '# Changelog')).toBe(true);
+      expect(screenContains(output, 'Create')).toBe(true);
+      expect(screenContains(output, 'changelog.md')).toBe(true);
+      expect(screenContains(output, 'Wrote 3 lines')).toBe(false);
+      expect(screenContains(output, '# Changelog')).toBe(false);
       expect(readFileSync(join(workspace.workspace, 'changelog.md'), 'utf8')).toBe(
         CHANGELOG_CONTENT,
       );
@@ -200,7 +186,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
   // ── Turn 3: no-op overwrite → Write verb + unchanged marker ─
 
   step(
-    'write_file no-op overwrite renders Write verb with content-unchanged marker',
+    'write_file no-op overwrite preserves the local unchanged result',
     async () => {
       await submitUserMessage(tui, server, 'Rewrite the changelog identically', {
         timeout: 15000,
@@ -211,11 +197,9 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
       const output = tui.viewport();
 
-      // Card verb: no-op overwrite is Write, not Create
-      // (Create (changelog.md) from turn 2 persists in Static scrollback —
-      // assert presence of the new card's label only)
-      expect(screenContains(output, 'Write (changelog.md)')).toBe(true);
-      expect(screenContains(output, '(content unchanged)')).toBe(true);
+      expect(screenContains(output, 'Write')).toBe(true);
+      expect(screenContains(output, 'changelog.md')).toBe(true);
+      expect(screenContains(output, '(content unchanged)')).toBe(false);
       expect(readFileSync(join(workspace.workspace, 'changelog.md'), 'utf8')).toBe(
         CHANGELOG_CONTENT,
       );

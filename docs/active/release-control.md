@@ -18,6 +18,13 @@ G0 验证本地正确性、安全边界、P0/P1、安装/回滚。G1 验证 GitH
 构建、安装、启动、TUI/CLI smoke、DeepSeek 与 OpenCode Go OpenAI-compatible route 的真实最小调用，以及
 release notes/known limitations。缺任何真实结果时保持 blocked 或未验证。
 
+Runtime Protocol V1 不改变候选支持入口：shipped production consumer 仍为本地 TUI 与用户在场的 foreground
+CLI。`kite server --stdio` 仅供拥有 child lifecycle 的 Desktop/test parent 使用；loopback WebSocket、browser
+reference 与 Desktop reference 仅为 development/reference conformance，不能写入 release manifest、候选支持矩阵或
+G1 成功声明。`.github/workflows/runtime-stdio-smoke.yml` 与
+`.github/workflows/runtime-transport-qualification.yml` 的三平台 job 是 qualification checks；KRSV1 的 PR 结果
+尚未返回时保持 pending，不能以 workflow 存在、本地通过或 artifact 上传取代真实三平台结果。
+
 ## 候选制品
 
 `bun run release:build` 使用 Bun standalone executable 编译当前平台的 `kite` 与 `kite-tui`，输出：
@@ -51,7 +58,7 @@ manifest `commitSha` 精确匹配；GitHub 临时 merge ref 不能充当最终�
 构建器只接受与当前 host OS/architecture 完全一致的 native target，不 cross-compile，也不下载另一平台的
 Bun runtime；三平台候选分别在对应 GitHub-hosted runner 上生成。Ink 的可选 React devtools 路径在
 生产候选构建时固定为空实现，不成为依赖或网络下载入口。
-Standalone resolver 必须覆盖七个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
+Standalone resolver 必须覆盖十个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
 不得穿过 `apps/kite/node_modules/@kite-ai/*` workspace symlink。该不变量避免 Windows Bun standalone 把反斜杠
 symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。
 

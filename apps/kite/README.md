@@ -2,18 +2,20 @@
 
 ## 定位
 
-`@kite-ai/kite` 是唯一 concrete composition root，也是 CLI、TUI 和 App-owned Runtime coordination 的 owner。
+`@kite-ai/kite` 是唯一 concrete composition root，也是 CLI、TUI、carrier 与 App-owned Runtime coordination 的 owner。
 
 ## 拥有职责
 
-- 在 `src/bootstrap.ts` 组装 Host、Builtin Runtime、SQLite、CLI 与 TUI adapter。
-- 管理 App Session、Tool routing/persistence、配置、展示 projection 与 workspace integration。
-- 通过 typed session adapter 向 TUI 提供 client surface。
+- 在 `src/bootstrap.ts` 组装唯一 Host、Builtin Runtime、SQLite、Server、Client、CLI、TUI 与 carrier adapter。
+- 管理 App Session、Tool routing/persistence、配置、展示 projection、complete local history adapter、workspace integration 与 transport admission。
+- TUI 与 foreground CLI 的 command/query/subscribe 都走 `RuntimeClient → RuntimeServer → RuntimeAccess` 一条路径；InProcess 仅是这条 Protocol 路径的 App-composed carrier，不是 Host bypass 或 fallback。
+- 完整 durable history 走 `RuntimeClient.history → App exhaustive client-event projection → RuntimeLogQueryPort`，
+  TUI list/load 不穿透 SessionManager 读取 Store，也不以 Server notification history、JSONL 或 trace 代替。
 
 ## 不拥有职责
 
 - 不直接依赖 Agent Kernel，不创建第二 Runtime assembly path。
-- TUI 不取得 Kernel、Host execution、SQLite 或 Builtin executor authority。
+- TUI/foreground CLI 不取得 Kernel、Host execution、SQLite 或 Builtin executor authority，也不保留 direct Host/SQLite/old bridge fallback。
 - App 不复制 Store、Reducer、Registry 或 Tool handler。
 
 ## 允许依赖
@@ -26,9 +28,11 @@
 
 ## 关键不变量
 
-- App 是唯一 composition root。
+- App 是唯一 composition root；Server、Client 与 carrier 都不得创建第二个 Host/Store/Kernel/Reducer authority。
 - Runtime Session、Tool execution 与 Tool persistence 分别位于明确 owner 目录。
-- 所有 TUI 行为只消费 typed projection，并遵守本地文档定义的交互和渲染边界。
+- 所有 TUI 行为只消费 typed projection 和 `RuntimeHistoryClient`，并遵守本地文档定义的交互和渲染边界。
+- `kite server --stdio` 是 parent-owned Desktop/test child carrier：stdout 只输出 JSONL protocol，stderr 只写诊断；EOF 只关闭该 connection，parent-owned signal/shutdown 才 drain Server 并释放 composition。它不是独立 daemon 或公开服务入口。
+- development-only loopback WebSocket/reference carrier 仅用于本地 qualification。当前没有 `kite server --web`；ADR-0053 的 Web No-Go 仍有效，reference 不进入 production support。
 
 ## 本地文档
 
@@ -36,6 +40,7 @@
 - [TUI 渲染](docs/tui-rendering.md)
 - [TUI 本地化](docs/tui-localization.md)
 - [TUI 系统测试](docs/tui-system-testing.md)
+- [Runtime Server carriers](docs/runtime-server-carrier.md)
 
 ## 测试
 

@@ -99,7 +99,7 @@ function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeStat
       setSessionModelRoute: () => undefined,
       deleteSession: () => undefined,
     },
-    transactions: { commit: () => undefined },
+    transactions: { commit: () => undefined, commitCommandDecision: () => undefined },
     leases: {
       tryAcquire: () => true,
       renew: () => true,
@@ -113,6 +113,7 @@ function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeStat
       getNamedSnapshotEntry: () => null,
       restoreNamedSnapshot: () => false,
       forkSession: () => false,
+      forkSessionForCommand: () => ({ status: 'unavailable' }),
       forkCurrentSession: () => false,
       recordFilePreimage: () => undefined,
       recordFilePostimage: () => undefined,
@@ -1569,7 +1570,13 @@ describe('App State Tool Pipeline persistence', () => {
       acknowledgement: first,
       result: result({
         structuredContent: structuredContentWithObservation({
-          runtimeEvents: [{ type: 'model.text_delta', text: 'runtime fact' }],
+          runtimeEvents: [
+            {
+              type: 'model.text_delta',
+              requestId: 'request-tool-result-runtime-fact',
+              text: 'runtime fact',
+            },
+          ],
           classifierAdvice: {
             detailCode: 'read_complete',
             disposition: 'never',

@@ -14,7 +14,7 @@ import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
+import { screenContains, screenHasSessionRow, waitForCondition } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -58,7 +58,18 @@ describe('TUI PTY System — Startup', () => {
       // asynchronous Store discovery instead of requiring Windows ConPTY to
       // retain the header and prompt in the same 40-row viewport repaint.
       await submitCommand(tui, '/resume');
-      const output = await waitForText(() => tui.viewport(), '暂无历史会话', 10_000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '会话列表') &&
+            screenHasSessionRow(viewport, 'tui-', { selected: true, active: true })
+          );
+        },
+        'fresh current session row after the incompatible historical Store is ignored',
+        10_000,
+      );
+      const output = tui.viewport();
       expect(screenContains(output, '历史会话服务不可用')).toBe(false);
       expect(screenContains(output, '请输入 /resume 重试')).toBe(false);
       expect(screenContains(output, '无法加载历史会话')).toBe(false);

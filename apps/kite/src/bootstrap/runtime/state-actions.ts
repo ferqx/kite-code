@@ -749,7 +749,7 @@ export function eventsForRuntimeAction(
         interactionId: action.interactionId,
         toolCallId: interaction.toolCallId,
         answer: action.text,
-        answers: action.answers,
+        ...(action.answers === undefined ? {} : { answers: action.answers }),
       },
       {
         type: 'tool.finished',
@@ -761,7 +761,10 @@ export function eventsForRuntimeAction(
           exitCode: 0,
           stdout: JSON.stringify({ answer: action.text, answers: action.answers }),
           stderr: '',
-          userInput: { answer: action.text, answers: action.answers },
+          userInput: {
+            answer: action.text,
+            ...(action.answers === undefined ? {} : { answers: action.answers }),
+          },
         },
       },
     ];

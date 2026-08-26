@@ -9,8 +9,8 @@ describe('Kite target composition root', () => {
       storage: {
         adapterId: 'sqlite',
         stateSchemaVersion: 27,
-        storeSchemaVersion: 5,
-        formatEpoch: 'kite-runtime-saq-v1-2026-08-25',
+        storeSchemaVersion: 6,
+        formatEpoch: 'kite-runtime-server-v1-2026-08-26',
       },
       moduleIds: [
         'kite-runtime-execution',

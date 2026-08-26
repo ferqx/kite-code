@@ -381,7 +381,11 @@ export class ModelInvocationGateway {
                   const visible = visibleRetryPrefix(text, attempt, retryBaselineText);
                   if (visible) {
                     input.emitEphemeral?.(
-                      asModelEvent<Event>({ type: 'model.text_delta', text: visible }),
+                      asModelEvent<Event>({
+                        type: 'model.text_delta',
+                        requestId: invocationId,
+                        text: visible,
+                      }),
                     );
                   }
                 },
@@ -396,6 +400,7 @@ export class ModelInvocationGateway {
                   input.emitEphemeral?.(
                     asModelEvent<Event>({
                       type: 'model.reasoning_delta',
+                      requestId: invocationId,
                       segmentId,
                       text: segment,
                     }),
@@ -408,6 +413,7 @@ export class ModelInvocationGateway {
                   input.emitEphemeral?.(
                     asModelEvent<Event>({
                       type: 'model.reasoning_completed',
+                      requestId: invocationId,
                       segmentId,
                       text: segment,
                     }),

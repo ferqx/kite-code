@@ -1,22 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite-ai/agent-kernel';
-import { currentRuntimeEvent } from '../../../tests/helpers/current-runtime-event';
+import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { createInitialState } from '../src/tui/App';
-import { handleRuntimeEventAction } from '../src/tui/reducers/handleEvent';
+import { handleClientEventAction } from '../src/tui/reducers/handleClientEvent';
 import type { OutputBlock, TuiState } from '../src/tui/types';
 
-function reduce(state: TuiState, event: RuntimeEvent): TuiState {
-  return handleRuntimeEventAction(state, currentRuntimeEvent(event));
+function reduce(state: TuiState, event: RuntimeClientEvent): TuiState {
+  return handleClientEventAction(state, event);
 }
 
 function startShell(state: TuiState, callId: string): TuiState {
   state = reduce(state, {
     type: 'tool.queued',
-    toolCallId: callId,
-    name: 'shell_execute',
-    args: { command: `echo ${callId}` },
+    toolId: callId,
+    toolName: 'shell_execute',
+    presentation: 'standalone',
+    arguments: { command: 'echo progress' },
+    summary: 'Shell task queued.',
   });
-  return reduce(state, { type: 'tool.started', toolCallId: callId });
+  return reduce(state, { type: 'tool.started', toolId: callId, summary: 'Running shell task.' });
 }
 
 function shellCard(state: TuiState, callId: string): Extract<OutputBlock, { kind: 'tool_card' }> {
@@ -31,38 +32,38 @@ function shellCard(state: TuiState, callId: string): Extract<OutputBlock, { kind
 }
 
 describe('TUI shell progress projection', () => {
-  test('uses batch lineCount when the chunk contains only the retained tail', () => {
+  test('uses batch lineCount while retaining only the safe summary', () => {
     let state = startShell(createInitialState(), 'shell-batch');
     state = reduce(state, {
       type: 'tool.progress',
-      toolCallId: 'shell-batch',
-      chunk: 'line-9995\nline-9996\nline-9997\nline-9998\nline-9999',
+      toolId: 'shell-batch',
+      summary: 'Latest retained tool update.',
       stream: 'stdout',
       lineCount: 10_000,
     });
 
     const card = shellCard(state, 'shell-batch');
-    expect(card.liveOutput).toBe('line-9995\nline-9996\nline-9997\nline-9998\nline-9999');
+    expect(card.liveOutput).toBe('Latest retained tool update.');
     expect(card.liveTotalLines).toBe(10_000);
   });
 
-  test('preserves an initial blank line before later output', () => {
-    let state = startShell(createInitialState(), 'shell-blank-first');
+  test('separates adjacent safe summaries', () => {
+    let state = startShell(createInitialState(), 'shell-adjacent');
     state = reduce(state, {
       type: 'tool.progress',
-      toolCallId: 'shell-blank-first',
-      chunk: '',
+      toolId: 'shell-adjacent',
+      summary: 'first',
       stream: 'stdout',
     });
     state = reduce(state, {
       type: 'tool.progress',
-      toolCallId: 'shell-blank-first',
-      chunk: 'next',
+      toolId: 'shell-adjacent',
+      summary: 'next',
       stream: 'stdout',
     });
 
-    const card = shellCard(state, 'shell-blank-first');
-    expect(card.liveOutput).toBe('\nnext');
+    const card = shellCard(state, 'shell-adjacent');
+    expect(card.liveOutput).toBe('first\nnext');
     expect(card.liveTotalLines).toBe(2);
   });
 
@@ -72,8 +73,8 @@ describe('TUI shell progress projection', () => {
     for (let line = 0; line < 10_000; line += 1) {
       state = reduce(state, {
         type: 'tool.progress',
-        toolCallId: 'shell-high-volume',
-        chunk: `line-${line}`,
+        toolId: 'shell-high-volume',
+        summary: `line-${line}`,
         stream: line % 2 === 0 ? 'stdout' : 'stderr',
       });
     }
@@ -89,10 +90,10 @@ describe('TUI shell progress projection', () => {
     state = startShell(state, 'shell-b');
 
     for (const event of [
-      { type: 'tool.progress', toolCallId: 'shell-a', chunk: 'a-out', stream: 'stdout' },
-      { type: 'tool.progress', toolCallId: 'shell-b', chunk: 'b-err', stream: 'stderr' },
-      { type: 'tool.progress', toolCallId: 'shell-a', chunk: 'a-err', stream: 'stderr' },
-    ] satisfies RuntimeEvent[]) {
+      { type: 'tool.progress', toolId: 'shell-a', summary: 'a-out', stream: 'stdout' },
+      { type: 'tool.progress', toolId: 'shell-b', summary: 'b-err', stream: 'stderr' },
+      { type: 'tool.progress', toolId: 'shell-a', summary: 'a-err', stream: 'stderr' },
+    ] satisfies RuntimeClientEvent[]) {
       state = reduce(state, event);
     }
 
@@ -101,22 +102,18 @@ describe('TUI shell progress projection', () => {
 
     state = reduce(state, {
       type: 'tool.finished',
-      toolCallId: 'shell-a',
-      name: 'shell_execute',
-      result: {
-        ok: true,
-        command: 'echo shell-a',
-        exitCode: 0,
-        stdout: 'done',
-        stderr: '',
-      },
+      toolId: 'shell-a',
+      toolName: 'shell_execute',
+      presentation: 'standalone',
+      result: { ok: true, exitCode: 0, stdout: 'Shell task completed.', stderr: '' },
+      summary: 'Shell task completed.',
     });
     const completed = state;
 
     state = reduce(state, {
       type: 'tool.progress',
-      toolCallId: 'shell-a',
-      chunk: 'late-line',
+      toolId: 'shell-a',
+      summary: 'late-line',
       stream: 'stdout',
     });
 

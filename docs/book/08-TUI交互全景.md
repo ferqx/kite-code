@@ -66,19 +66,11 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 
 TUI 的语言是用户级展示偏好：`/language` 可选择跟随设备语言、简体中文或英文，项目配置不得覆盖。跟随模式在中文系统语言时显示中文；macOS 宿主将进程 locale 覆盖为 `C` 时，启动读取系统 `AppleLanguages` 作为语言来源。命令 token、模型/Provider/MCP 名称、路径和外部输出保持原样，只有 Kite Code 自有 UI 文案与状态词随语言切换。
 
-内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/language`、`/resume`、`/new`、`/plan`、`/compact`、`/permissions`、`/release`、`/telemetry`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions`、`/effort` 和 `/theme` 不接受显式选择参数，直接确认命令后打开各自选择器；没有沙箱后端时，权限选择器显示 `full` 的能力说明但禁用它，不能切换到 Full。
+内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/language`、`/resume`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions`、`/effort` 和 `/theme` 不接受显式选择参数，直接确认命令后打开各自选择器；没有沙箱后端时，权限选择器显示 `full` 的能力说明但禁用它，不能切换到 Full。
 
 模型选择器以 provider 与 model name 的组合区分 route；选择器将 provider 作为使用独立 accent 色的加粗标题行，并与 model name 文本列对齐；标题与首项紧邻，不同分组之间留一行间距，模型行不重复 provider 或显示 `default`。`/model` 不接受模型名参数，确认命令后始终打开该选择器，由用户明确选择 provider 与 model；选择结果绑定到当前会话，并以 `model: "provider:model name"` 简写写入用户配置作为新会话默认值。切换或恢复会话时还原各自 route；空会话切换模型不显示系统提示或工具目录产生的 context token 估算，新会话清空上一会话的 context snapshot。加载用户配置时仍兼容旧 `model.default` 对象格式。
 
 `/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“管理 MCP Server”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令，管理动作只在 Overlay 的可见 Select 中执行。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
-
-`/release` 是只读发布状态入口。普通开发 TUI 没有 artifact authority，因此固定显示
-`artifact_disabled` 与 capability unavailable；该输出不启用 Release Profile，也不能作为
-Sigstore、平台 qualification 或 production Gate 证据。
-
-`/telemetry` 同样只读，显示 artifact authority、metrics flag、consent、endpoint policy、exporter
-和 disk-spool 状态，不显示 endpoint secret。普通开发 TUI 固定为 `artifact_disabled`，该命令不能
-开启 telemetry、授予 consent 或创建 exporter。
 
 ## 8.4 Session 与恢复点
 

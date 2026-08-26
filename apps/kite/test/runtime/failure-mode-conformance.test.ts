@@ -9,11 +9,11 @@ import {
   runtimeHostStateResolveFailureMode as resolveFailureMode,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { projectTerminalOutcome } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { projectCliRuntimeEvent } from '@/app/cli';
+import { projectRuntimeClientEvent } from '@/app/runtime-client/event-projector';
 import { createInitialState } from '@/app/tui/initialState';
-import { handleRuntimeEventAction } from '@/app/tui/reducers/handleEvent';
+import { handleClientEventAction } from '@/app/tui/reducers/handleClientEvent';
 import { openStateStoreForTest } from '../../../../scripts/support/runtime-storage';
 
 const EXPECTED_FAILURE_MODES = [
@@ -341,17 +341,27 @@ describe('RFC failure-mode conformance v1', () => {
           resolution.terminalOutcome,
         );
 
-        const presentation = projectTerminalOutcome(resolution.terminalOutcome);
-        expect(projectCliRuntimeEvent(event)).toMatchObject({
-          terminalPresentation: presentation,
+        const clientEvent = projectRuntimeClientEvent(event, {
+          sessionRevision: coreState.revision,
+        });
+        if (!clientEvent) throw new Error('expected a projected failure lifecycle event');
+        expect(projectCliRuntimeEvent(clientEvent)).toEqual({
+          type: 'run.failure',
+          runId: 'runtime-run',
+          code: resolution.terminalOutcome.reasonCode,
+          retryable: resolution.terminalOutcome.safeRetry,
+          recoveryEntry: resolution.terminalOutcome.recoveryEntry,
         });
 
-        const tuiState = handleRuntimeEventAction(createInitialState(), event);
+        const tuiState = handleClientEventAction(createInitialState(), clientEvent);
         const lastBlock = tuiState.turns.flatMap((turn) => turn.blocks).at(-1);
         expect(lastBlock).toMatchObject({
           kind: 'text',
-          content: `Error: ${presentation.label}: ${message}`,
+          content: resolution.terminalOutcome.safeRetry
+            ? `MODEL_ATTEMPT_RETRYABLE_FAILURE:${resolution.terminalOutcome.reasonCode}`
+            : `RUN_FAILURE:${resolution.terminalOutcome.reasonCode}`,
         });
+        expect(JSON.stringify(lastBlock)).not.toContain(message);
       }
     } finally {
       store.close();

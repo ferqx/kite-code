@@ -32,6 +32,12 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
+Runtime Protocol V1 不改变首发拓扑：production consumer 仍为本地 TUI 与用户在场的 foreground CLI。
+`kite server --stdio` 是 Desktop/test parent-owned reference child；loopback WebSocket、browser 与 Desktop reference
+只用于 development/reference/conformance，均不交付完整 UI、不进入候选 manifest 或支持集合。runtime stdio/transport
+workflow 的 macOS、Ubuntu、Windows checks 在 KRSV1 PR 得到真实结论前均为 pending qualification，不能计入 G0/G1 或
+用作 Web production support 证据。
+
 ## 制品与安装
 
 `bun run release:build` 为当前平台编译独立的 `kite` CLI 与 `kite-tui`，生成 gzip tar、严格 manifest、

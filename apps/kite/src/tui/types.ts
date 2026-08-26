@@ -2,6 +2,7 @@ import type {
   AgentPhase,
   AgentPlan,
   InteractionMode,
+  RuntimeToolPresentation,
   SubAgentFailureDiagnostic,
   SubAgentRole,
   ToolApprovalPayload,
@@ -47,6 +48,10 @@ export interface SubAgentStepRecord {
   ok?: boolean;
   /** 读取文件时的文件总行数，用于 TUI 行号范围展示 / Total lines in file for read_file, used for TUI line range display */
   totalLines?: number;
+  /** Closed per-step completion summary retained for the child activity log. */
+  summary?: string;
+  /** Runtime-measured duration for this child tool invocation. */
+  durationMs?: number;
 }
 
 export type OutputBlock =
@@ -54,8 +59,13 @@ export type OutputBlock =
       id: number;
       kind: 'user';
       content: string;
-      /** Live-only optimistic copy awaiting its durable user.message_appended echo. */
-      runtimeEchoPending?: boolean;
+      /**
+       * Durable Runtime message identity.  A user prompt entered through the
+       * Runtime path is rendered only from its `user.message` projection, so
+       * this key is also the reducer's replay/reconnect idempotency boundary.
+       * Local-only slash-command echoes intentionally omit it.
+       */
+      messageId?: string;
     }
   | {
       id: number;
@@ -67,6 +77,9 @@ export type OutputBlock =
       isError?: boolean;
       /** Model invocation that owns this live/reconnected response segment. */
       modelRequestId?: string;
+      /** Terminal duration retained off-screen so reasoning that arrives after
+       *  model.responded can still attach the one canonical Thinking header. */
+      modelDurationMs?: number;
       /** Recognized structural component whose shell is visible while complete
        * child rows are appended. The hidden source retains the unfinished row. */
       streamingComponent?: 'code' | 'table';
@@ -247,6 +260,15 @@ export interface TuiPendingApproval {
   status: TuiApprovalStatus;
   sequence: number;
   generation: number;
+  /**
+   * Closed Runtime-facing approval facts. This is the only approval detail
+   * rendered by the RuntimeClient reducer; legacy `approval` stays solely for
+   * restoring pre-RuntimeServer local snapshots.
+   */
+  clientInteraction?: Extract<
+    import('@kite-ai/runtime-contract').RuntimeClientInteraction,
+    { readonly kind: 'approval' }
+  >;
   approval?: ToolApprovalPayload;
   approvalHash?: string;
   bindingDigest?: string;
@@ -308,7 +330,17 @@ export interface TuiState {
    * Runtime queue metadata is retained off-screen until execution reaches the
    * call or it fails terminally. Approval targets remain in the Footer only.
    */
-  pendingToolCalls: Record<string, { name: string; args: Record<string, unknown> }>;
+  pendingToolCalls: Record<
+    string,
+    {
+      /** Closed canonical category used for formatting and policy-free rendering rules. */
+      name: string;
+      /** Bounded App-owned label for a dynamic local tool. */
+      displayName?: string;
+      args: Record<string, unknown>;
+      presentation: RuntimeToolPresentation;
+    }
+  >;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
   /** Explicit Thought lifecycle. `awaiting_terminal` is visually settled but
@@ -316,10 +348,17 @@ export interface TuiState {
   thoughtPhaseStatus?: 'running' | 'awaiting_terminal';
   /** Current model invocation, used to scope streamed terminal reconciliation. */
   currentModelRequestId?: string;
+  /** Most recently settled tool-bearing invocation. Its delayed cumulative
+   *  narration still belongs to the active exploration summary. */
+  toolBearingModelRequestId?: string;
   /** Whether the current model invocation has emitted at least one reasoning delta. */
   currentModelReasoningStreamed?: boolean;
   /** Latest cumulative reasoning segment, cached off-screen between boundaries. */
   currentModelReasoningText?: string;
+  /** Stable id of the reasoning segment currently accumulated off-screen. */
+  currentModelReasoningSegmentId?: string;
+  /** Model invocation that owns the cached reasoning segment. */
+  currentModelReasoningRequestId?: string;
   /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
   interactionMode: 'accept_edits' | 'auto' | 'full';
   /** Durable Kernel approval queue projection; optional for legacy snapshots. */

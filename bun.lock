@@ -34,8 +34,11 @@
         "@biomejs/biome": "^2.5.0",
         "@kite-ai/agent-kernel": "workspace:*",
         "@kite-ai/builtin-runtime": "workspace:*",
+        "@kite-ai/runtime-client": "workspace:*",
         "@kite-ai/runtime-contract": "workspace:*",
         "@kite-ai/runtime-host": "workspace:*",
+        "@kite-ai/runtime-protocol": "workspace:*",
+        "@kite-ai/runtime-server": "workspace:*",
         "@kite-ai/runtime-spi": "workspace:*",
         "@kite-ai/runtime-storage-sqlite": "workspace:*",
         "@types/bun": "latest",
@@ -52,8 +55,11 @@
       "dependencies": {
         "@inkjs/ui": "^2.0.0",
         "@kite-ai/builtin-runtime": "workspace:*",
+        "@kite-ai/runtime-client": "workspace:*",
         "@kite-ai/runtime-contract": "workspace:*",
         "@kite-ai/runtime-host": "workspace:*",
+        "@kite-ai/runtime-protocol": "workspace:*",
+        "@kite-ai/runtime-server": "workspace:*",
         "@kite-ai/runtime-spi": "workspace:*",
         "@kite-ai/runtime-storage-sqlite": "workspace:*",
         "chalk": "^5.6.2",
@@ -91,6 +97,14 @@
         "zod": "^4.3.6",
       },
     },
+    "packages/runtime-client": {
+      "name": "@kite-ai/runtime-client",
+      "version": "0.0.0",
+      "dependencies": {
+        "@kite-ai/runtime-contract": "workspace:*",
+        "@kite-ai/runtime-protocol": "workspace:*",
+      },
+    },
     "packages/runtime-contract": {
       "name": "@kite-ai/runtime-contract",
       "version": "0.0.0",
@@ -102,6 +116,22 @@
         "@kite-ai/agent-kernel": "workspace:*",
         "@kite-ai/runtime-contract": "workspace:*",
         "@kite-ai/runtime-spi": "workspace:*",
+      },
+    },
+    "packages/runtime-protocol": {
+      "name": "@kite-ai/runtime-protocol",
+      "version": "0.0.0",
+      "dependencies": {
+        "@kite-ai/runtime-contract": "workspace:*",
+        "zod": "^4.3.6",
+      },
+    },
+    "packages/runtime-server": {
+      "name": "@kite-ai/runtime-server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@kite-ai/runtime-contract": "workspace:*",
+        "@kite-ai/runtime-protocol": "workspace:*",
       },
     },
     "packages/runtime-spi": {
@@ -186,9 +216,15 @@
 
     "@kite-ai/kite": ["@kite-ai/kite@workspace:apps/kite"],
 
+    "@kite-ai/runtime-client": ["@kite-ai/runtime-client@workspace:packages/runtime-client"],
+
     "@kite-ai/runtime-contract": ["@kite-ai/runtime-contract@workspace:packages/runtime-contract"],
 
     "@kite-ai/runtime-host": ["@kite-ai/runtime-host@workspace:packages/runtime-host"],
+
+    "@kite-ai/runtime-protocol": ["@kite-ai/runtime-protocol@workspace:packages/runtime-protocol"],
+
+    "@kite-ai/runtime-server": ["@kite-ai/runtime-server@workspace:packages/runtime-server"],
 
     "@kite-ai/runtime-spi": ["@kite-ai/runtime-spi@workspace:packages/runtime-spi"],
 

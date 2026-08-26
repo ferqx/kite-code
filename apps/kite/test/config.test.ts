@@ -45,6 +45,7 @@ describe('loadAgentConfig', () => {
       expect(config.modelName).toBe('deepseek-chat');
       expect(config.providerName).toBe('deepseek');
       expect(config.providerType).toBe('deepseek');
+      expect(config.interactionMode).toBe('auto');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

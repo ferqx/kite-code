@@ -83,7 +83,7 @@ SPI registry。模型 surface、Runner recovery guidance 与 capability descript
 `apps/kite/src/bootstrap/runtime/tool-pipeline-composition.ts` 只是 App composition bridge，不能成为第二 authority。
 确定性由 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite/test/tool-definitions.test.ts` 与 schema-parity 测试守护。
 
-Builtin catalog conformance 必须枚举当前 20 个 model-visible entry 与 9 个 internal entry，并在
+Builtin catalog conformance 必须枚举当前 20 个 model-visible entry 与 8 个 internal entry，并在
 planning/building 的合法 availability context 中验证 Skill catalog、active frame、task adapter、tool search
 与 phase/role 的真实可用形态；可用集合与 projection 一致，description 来自同一 resolved contract，Builtin parser
 与 model JSON Schema projection 分别验证有效、无效及 unknown-field 输入，不能只把两个同源 `safeParse({})`

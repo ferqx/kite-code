@@ -13,7 +13,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { isSandboxAvailable } from '@kite-ai/builtin-runtime/sandbox';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
@@ -27,6 +26,12 @@ import {
 } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
+const BOUNDED_SANDBOX_DIAGNOSTICS = ['sandbox-exec', 'bwrap', 'bubblewrap'] as const;
+type BoundedSandboxDiagnostic = (typeof BOUNDED_SANDBOX_DIAGNOSTICS)[number];
+type PlanningShellResult =
+  | { kind: 'workspace' }
+  | { kind: 'sandbox_exec_denied'; diagnostic: BoundedSandboxDiagnostic }
+  | { kind: 'sandbox_unavailable' };
 
 describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   const journey = createTuiSystemJourney();
@@ -34,16 +39,11 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
-  let planningSandboxAvailable = false;
+  let planningShellResult: PlanningShellResult | undefined;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
-    planningSandboxAvailable = isSandboxAvailable();
-
-    const shellValidationSummary = planningSandboxAvailable
-      ? 'Validated commands inside the planning read-only baseline.'
-      : 'Planning baseline failed closed without an available workspace sandbox.';
 
     server.setResponses([
       {
@@ -112,35 +112,74 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         },
       },
       {
-        expectedRequest: {
-          toolResults: [
-            {
-              toolCallId: 'call_plan_baseline_shell',
-              contentIncludes: planningSandboxAvailable
-                ? [workspace.workspace]
-                : ['This capability requires an available workspace sandbox.'],
-            },
-          ],
-        },
-        message: {
-          content: shellValidationSummary,
-          tool_calls: [
-            {
-              id: 'call_plan_save_shell',
-              name: 'write_plan',
-              args: {
-                action: 'save',
-                title: 'Plan-safe shell validation',
-                body_markdown: planningSandboxAvailable
-                  ? 'Record commands validated inside the planning read-only sandbox baseline.'
-                  : 'Record that the planning baseline failed closed because no sandbox backend was available.',
-                steps: [{ id: 'validate-shell', title: 'Validate planning shell policy' }],
+        response(request) {
+          const result = request.messages.find(
+            (message) =>
+              message.role === 'tool' && message.tool_call_id === 'call_plan_baseline_shell',
+          );
+          const content = String(result?.content ?? '');
+          if (content.includes(workspace.workspace)) {
+            planningShellResult = { kind: 'workspace' };
+            return {
+              expectedRequest: {
+                toolResults: [
+                  {
+                    toolCallId: 'call_plan_baseline_shell',
+                    contentIncludes: [workspace.workspace],
+                  },
+                ],
               },
-            },
-          ],
+              // The test consumes the real Tool result below and cancels the
+              // turn before a completion-policy retry can ask the model for
+              // another response.
+              delay: 5_000,
+              message: { content: 'Validated commands inside the planning read-only baseline.' },
+            };
+          }
+          const diagnostic = BOUNDED_SANDBOX_DIAGNOSTICS.find((candidate) =>
+            content.includes(candidate),
+          );
+          if (diagnostic && !content.includes(workspace.workspace)) {
+            planningShellResult = { kind: 'sandbox_exec_denied', diagnostic };
+            return {
+              expectedRequest: {
+                toolResults: [
+                  {
+                    toolCallId: 'call_plan_baseline_shell',
+                    contentIncludes: [diagnostic],
+                    contentExcludes: [workspace.workspace],
+                  },
+                ],
+              },
+              // A sandbox-exec denial is terminal for this Tool result. The
+              // test cancels before any completion-policy retry can invite an
+              // unsafe recovery or a second model turn.
+              delay: 5_000,
+              message: { content: 'Sandbox execution was blocked.' },
+            };
+          }
+          if (content.includes('This capability requires an available workspace sandbox.')) {
+            planningShellResult = { kind: 'sandbox_unavailable' };
+            return {
+              expectedRequest: {
+                toolResults: [
+                  {
+                    toolCallId: 'call_plan_baseline_shell',
+                    contentIncludes: ['This capability requires an available workspace sandbox.'],
+                  },
+                ],
+              },
+              delay: 5_000,
+              message: {
+                content: 'Planning baseline failed closed without an available workspace sandbox.',
+              },
+            };
+          }
+          throw new Error(
+            'Planning shell result was neither workspace success nor a fail-closed denial.',
+          );
         },
       },
-      planSubmitResponse('call_plan_save_shell', 'call_plan_submit_shell'),
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -163,12 +202,26 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
 
       const output = tui.viewport();
 
-      expect(
-        screenContains(
-          output,
-          'Plan mode is read-only. No file was written. Describe the intended change in the plan and apply it after plan approval.',
-        ),
-      ).toBe(true);
+      // A tool rejected before `tool.started` must not invent an execution
+      // card. The durable event and model follow-up prove the rejection.
+      expect(screenContains(output, 'Tool execution rejected.')).toBe(false);
+      await waitForCondition(
+        () => {
+          const observation = observePersistedTurnEvents(workspace, task);
+          if (observation.status !== 'ready' || !observation.value) return false;
+          return observation.value.events.some(
+            (event) =>
+              event.type === 'tool.rejected' &&
+              event.toolCallId === 'call_plan_write_denied' &&
+              typeof event.failure === 'object' &&
+              event.failure !== null &&
+              'kind' in event.failure &&
+              event.failure.kind === 'phase_denied',
+          );
+        },
+        'durable planning-phase write denial',
+        15_000,
+      );
       const renderedFrames = tui.screenFramesSince(conversationFrames).join('\n');
       expect(screenContains(renderedFrames, 'Write (plan-created.txt)')).toBe(false);
       expect(screenContains(output, 'Planning write attempt was blocked.')).toBe(true);
@@ -203,70 +256,91 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   );
 
   step(
-    'planning Shell baseline executes directly when available and otherwise fails closed',
+    'planning Shell baseline validates its actual sandbox execution result',
     async () => {
       const task = 'Plan the runtime validation commands';
       tui.write('\x1b[Z');
       await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab 退出计划模式', 5000);
       const conversationFrames = tui.markScreen();
       await submitUserMessage(tui, server, task, { timeout: 15000 });
-      const shellValidationSummary = planningSandboxAvailable
-        ? 'Validated commands inside the planning read-only baseline.'
-        : 'Planning baseline failed closed without an available workspace sandbox.';
-      await waitForText(() => tui.viewport(), shellValidationSummary, 15000);
-      await waitForText(() => tui.viewport(), '方案审核', 15_000);
-      tui.write('\x1b');
       await waitForCondition(
-        () => !screenContains(tui.viewport(), '方案审核'),
-        'cancelled shell-validation review closes',
+        () => planningShellResult !== undefined,
+        'model receipt for the planning shell result',
         15_000,
+        25,
       );
+      const shellResult = planningShellResult;
+      if (!shellResult) throw new Error('Planning shell result was lost after readiness.');
+
+      // The mock records the actual Tool outcome before responding. Stop this
+      // policy probe at that boundary: it must neither wait for nor authorize
+      // a model completion/recovery after a sandbox denial.
+      const modelRequestsAtShellResult = server.getRequestCount();
+      tui.write('\x03');
+      await waitForText(() => tui.viewport(), 'Cancelled', 5_000);
+      expect(server.getRequestCount()).toBe(modelRequestsAtShellResult);
 
       const output = tui.screenFramesSince(conversationFrames).join('\n');
       expect(screenContains(output, 'Deferred until execution')).toBe(false);
-      if (planningSandboxAvailable) {
-        expect(screenContains(output, 'Bash Ran: pwd && ls -la')).toBe(true);
+      if (shellResult.kind === 'workspace') {
+        expect(screenContains(output, 'Bash')).toBe(true);
         expect(
           screenContains(output, 'This capability requires an available workspace sandbox.'),
         ).toBe(false);
       } else {
-        expect(
-          screenContains(output, 'This capability requires an available workspace sandbox.'),
-        ).toBe(true);
+        // The result contract above proves no host-shell fallback produced the
+        // workspace path. The TUI must retain the same bounded backend
+        // diagnostic on every supported platform, without pinning the
+        // platform-specific errno wording.
+        expect(screenContains(output, 'Sandbox execution was blocked.')).toBe(false);
+        if (shellResult.kind === 'sandbox_exec_denied') {
+          expect(screenContains(output, shellResult.diagnostic)).toBe(true);
+        }
         let persistedEvents: PersistedTurnEvent[] | undefined;
         await waitForCondition(
           () => {
             const observation = observePersistedTurnEvents(workspace, task);
             if (observation.status !== 'ready' || !observation.value) return false;
-            const failed = observation.value.events.find(
+            const terminal = observation.value.events.find(
               (event) =>
-                event.type === 'tool.rejected' &&
+                (event.type === 'tool.finished' ||
+                  event.type === 'tool.failed' ||
+                  event.type === 'tool.rejected') &&
                 event.toolCallId === 'call_plan_baseline_shell' &&
-                typeof event.failure === 'object' &&
-                event.failure !== null &&
-                'kind' in event.failure &&
-                event.failure.kind === 'mandatory_policy_unavailable',
+                (shellResult.kind === 'sandbox_exec_denied' ||
+                  (typeof event.failure === 'object' &&
+                    event.failure !== null &&
+                    'kind' in event.failure &&
+                    event.failure.kind === 'mandatory_policy_unavailable')),
             );
-            if (!failed) return false;
+            if (!terminal) return false;
             persistedEvents = observation.value.events;
             return true;
           },
-          'Runtime Store to persist the mandatory sandbox denial',
+          'Runtime Store to persist the fail-closed planning shell result',
           20_000,
         );
         if (!persistedEvents) throw new Error('Persisted planning denial observation was lost.');
-        expect(
-          persistedEvents.some(
-            (event) =>
-              event.type === 'capability.invocation_recorded' &&
-              event.toolCallId === 'call_plan_baseline_shell',
-          ),
-        ).toBe(false);
-        expect(
-          persistedEvents.some(
-            (event) => event.type === 'capability.sandbox_execution_dispatch_intent_recorded',
-          ),
-        ).toBe(false);
+        if (shellResult.kind === 'sandbox_unavailable') {
+          expect(
+            persistedEvents.some(
+              (event) =>
+                event.type === 'capability.invocation_recorded' &&
+                event.toolCallId === 'call_plan_baseline_shell',
+            ),
+          ).toBe(false);
+          expect(
+            persistedEvents.some(
+              (event) => event.type === 'capability.sandbox_execution_dispatch_intent_recorded',
+            ),
+          ).toBe(false);
+        } else {
+          expect(
+            persistedEvents.some(
+              (event) => event.type === 'capability.sandbox_execution_dispatch_intent_recorded',
+            ),
+          ).toBe(true);
+        }
       }
       expect(screenContains(output, 'Rejected shell_execute during planning phase')).toBe(false);
       expect(screenContains(output, "Tool 'shell_execute' is not available in this context")).toBe(

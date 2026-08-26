@@ -210,6 +210,8 @@ function createTestRuntimeStore<State>(
           return;
       }
     },
+    commitCommandDecision: (input: RuntimeTransactionInput<RuntimeEvent, State>) =>
+      storage.transactions.commitDecision(input),
   });
   const effects: RuntimeHostLeasePort = Object.freeze({
     tryAcquire: (sessionId: string, effectId: string, ownerId: string, expiresAtMs: number) => {
@@ -334,6 +336,7 @@ function createTestRuntimeStore<State>(
         targetThreadId,
         targetRecoveryIdentityKey,
       ),
+    forkSessionForCommand: (input) => storage.checkpoints.forkSessionForCommand(input),
     forkCurrentSession: (sourceThreadId, targetThreadId, targetRecoveryIdentityKey) =>
       targetRecoveryIdentityKey !== undefined &&
       storage.checkpoints.forkCurrentSession(

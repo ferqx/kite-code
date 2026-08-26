@@ -23,7 +23,10 @@ function temporaryDirectory(): { path: string; cleanup(): void } {
   return { path, cleanup: () => rmSync(path, { recursive: true, force: true }) };
 }
 
-function createStore(path: string, profile = { state: 26, epoch: legacyEpoch }): void {
+function createStore(
+  path: string,
+  profile: { state: number; epoch: string; store?: number } = { state: 26, epoch: legacyEpoch },
+): void {
   const db = new Database(path);
   db.run('CREATE TABLE runtime_store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   db.run(
@@ -49,7 +52,7 @@ function createStore(path: string, profile = { state: 26, epoch: legacyEpoch }):
     'CREATE INDEX runtime_file_preimages_position ON runtime_file_preimages(session_id, event_position)',
   );
   db.run("INSERT INTO runtime_store_meta (key, value) VALUES ('format_version', ?)", [
-    String(SQLITE_RUNTIME_STORE_SCHEMA_VERSION),
+    String(profile.store ?? 5),
   ]);
   db.run("INSERT INTO runtime_store_meta (key, value) VALUES ('runtime_format_epoch', ?)", [
     profile.epoch,
@@ -218,6 +221,9 @@ describe('SQLite compatibility store', () => {
         count: 1,
       });
       expect(db.query('SELECT COUNT(*) AS count FROM runtime_events').get()).toEqual({ count: 1 });
+      expect(db.query('SELECT COUNT(*) AS count FROM runtime_command_receipts').get()).toEqual({
+        count: 0,
+      });
       expect(db.query('SELECT COUNT(*) AS count FROM runtime_named_snapshots').get()).toEqual({
         count: 1,
       });
@@ -638,10 +644,12 @@ describe('SQLite compatibility store', () => {
     try {
       const livePath = join(fixture.path, 'live-current.db');
       const targetPath = join(fixture.path, 'copied-current.db');
-      createStore(livePath, {
-        state: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-        epoch: SQLITE_RUNTIME_FORMAT_EPOCH,
+      const seeded = createSqliteRuntimeCompatibilityWriter({
+        databasePath: livePath,
+        journalMode: 'delete',
       });
+      expect(seeded.available).toBe(true);
+      seeded.close();
       live = new Database(livePath);
       live.run('PRAGMA journal_mode = WAL');
       live.run(

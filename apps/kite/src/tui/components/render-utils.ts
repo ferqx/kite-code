@@ -22,6 +22,8 @@ export const ACTION_NAMES: Record<string, string> = {
   tool_search: 'Searched for tools',
   list_mcp_resources: 'Listed MCP resources',
   list_mcp_tools: 'Listed MCP tools',
+  mcp_tool: 'MCP tool',
+  other: 'Tool',
 };
 
 /** 取工具显示名，无映射则返回原名 / Get display name, fallback to original */

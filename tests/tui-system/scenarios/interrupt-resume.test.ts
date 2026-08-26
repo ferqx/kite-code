@@ -133,10 +133,8 @@ describe('TUI PTY System — Interrupt Resume', () => {
         () => {
           const viewport = tui2.viewport();
           return (
-            screenHasSessionRow(viewport, 'Hello from tui1', {
-              selected: true,
-              active: false,
-            }) && !screenContains(viewport, 'Loading...')
+            screenHasSessionRow(viewport, 'Hello from tui1', { active: false }) &&
+            !screenContains(viewport, 'Loading...')
           );
         },
         'persisted session row to load in the selector',
@@ -153,12 +151,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
 
       // The session from tui1 should appear in the list.
       // Session name is generated from the first user message by smart naming.
-      expect(
-        screenHasSessionRow(panelOutput, 'Hello from tui1', {
-          selected: true,
-          active: false,
-        }),
-      ).toBe(true);
+      expect(screenHasSessionRow(panelOutput, 'Hello from tui1', { active: false })).toBe(true);
     },
     TIMEOUT,
   );
@@ -166,8 +159,18 @@ describe('TUI PTY System — Interrupt Resume', () => {
   step(
     'load persisted session → historical messages restored from DB',
     async () => {
-      // The session from tui1 should be at index 0.
-      // Press Enter to select and load it.
+      // Runtime Server V1 keeps a fresh current row at index 0, so select the
+      // persisted historical row explicitly before loading it.
+      tui2.write('\x1b[B');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui2.viewport(), 'Hello from tui1', {
+            selected: true,
+            active: false,
+          }),
+        'persisted session row to become selected',
+        5_000,
+      );
       tui2.write('\r');
       await waitForCondition(
         () => {
@@ -226,12 +229,20 @@ describe('TUI PTY System — Interrupt Resume', () => {
       await submitCommand(tui3, '/resume');
       await waitForCondition(
         () =>
+          screenHasSessionRow(tui3.viewport(), 'Hello from tui1', { active: false }) &&
+          !screenContains(tui3.viewport(), 'Loading...'),
+        'interrupted session row to become selectable after restart recovery',
+        15_000,
+      );
+      tui3.write('\x1b[B');
+      await waitForCondition(
+        () =>
           screenHasSessionRow(tui3.viewport(), 'Hello from tui1', {
             selected: true,
             active: false,
-          }) && !screenContains(tui3.viewport(), 'Loading...'),
-        'interrupted session row to become selectable after restart recovery',
-        15_000,
+          }),
+        'interrupted session row to become selected after restart recovery',
+        5_000,
       );
       tui3.write('\r');
       await waitForCondition(

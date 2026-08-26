@@ -35,6 +35,32 @@
       ]
     },
     {
+      "id": "runtime-protocol",
+      "sources": ["packages/runtime-protocol/src/**", "packages/runtime-protocol/package.json"],
+      "authorities": [
+        "packages/runtime-protocol/README.md",
+        "docs/active/six-concept-runtime-architecture.md"
+      ]
+    },
+    {
+      "id": "runtime-server",
+      "sources": ["packages/runtime-server/src/**", "packages/runtime-server/package.json"],
+      "authorities": [
+        "packages/runtime-server/README.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-authority-boundary.md"
+      ]
+    },
+    {
+      "id": "runtime-client",
+      "sources": ["packages/runtime-client/src/**", "packages/runtime-client/package.json"],
+      "authorities": [
+        "packages/runtime-client/README.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-resilience-qualification.md"
+      ]
+    },
+    {
       "id": "agent-kernel",
       "sources": ["packages/agent-kernel/src/**", "packages/agent-kernel/package.json"],
       "excludeSources": [
@@ -65,10 +91,28 @@
     {
       "id": "runtime-host",
       "sources": ["packages/runtime-host/src/**", "packages/runtime-host/package.json"],
-      "excludeSources": ["packages/runtime-host/src/process/**"],
+      "excludeSources": [
+        "packages/runtime-host/src/process/**",
+        "packages/runtime-host/src/host/command-receipt.ts",
+        "packages/runtime-host/src/host/runtime-host.ts",
+        "packages/runtime-host/src/storage/index.ts"
+      ],
       "authorities": [
         "packages/runtime-host/README.md",
         "docs/active/runtime-authority-boundary.md"
+      ]
+    },
+    {
+      "id": "runtime-host-command-receipts",
+      "sources": [
+        "packages/runtime-host/src/host/command-receipt.ts",
+        "packages/runtime-host/src/host/runtime-host.ts",
+        "packages/runtime-host/src/storage/index.ts"
+      ],
+      "authorities": [
+        "packages/runtime-host/README.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md"
       ]
     },
     {
@@ -80,7 +124,8 @@
       "authorities": [
         "packages/runtime-storage-sqlite/README.md",
         "docs/active/runtime-authority-boundary.md",
-        "docs/active/sqlite-runtime-log-query.md"
+        "docs/active/sqlite-runtime-log-query.md",
+        "docs/active/runtime-resilience-qualification.md"
       ]
     },
     {
@@ -120,10 +165,51 @@
         "apps/kite/src/config/mcp-config-repository.ts",
         "apps/kite/src/config/mcp-project-approvals.ts",
         "apps/kite/src/config/mcp-server-config.ts",
+        "apps/kite/src/bootstrap.ts",
+        "apps/kite/src/carrier/**",
+        "apps/kite/src/cli/executable.ts",
+        "apps/kite/src/cli/index.ts",
+        "apps/kite/src/logs/runtime-log-presentation.ts",
+        "apps/kite/src/runtime-client/history-adapter.ts",
+        "apps/kite/src/runtime-client/presentation-history.ts",
+        "apps/kite/src/runtime-client/tui-history-facade.ts",
         "apps/kite/src/sandbox/**",
         "apps/kite/src/release/**"
       ],
       "authorities": ["apps/kite/README.md", "docs/active/six-concept-runtime-architecture.md"]
+    },
+    {
+      "id": "kite-runtime-carriers",
+      "sources": [
+        "apps/kite/src/bootstrap.ts",
+        "apps/kite/src/carrier/**",
+        "apps/kite/src/cli/executable.ts",
+        "apps/kite/src/cli/index.ts"
+      ],
+      "authorities": [
+        "apps/kite/README.md",
+        "apps/kite/docs/runtime-server-carrier.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/workspace-trust.md",
+        "docs/active/execution-platform-support.md"
+      ]
+    },
+    {
+      "id": "kite-runtime-history",
+      "sources": [
+        "apps/kite/src/logs/runtime-log-presentation.ts",
+        "apps/kite/src/runtime-client/history-adapter.ts",
+        "apps/kite/src/runtime-client/presentation-history.ts",
+        "apps/kite/src/runtime-client/tui-history-facade.ts"
+      ],
+      "authorities": [
+        "apps/kite/README.md",
+        "apps/kite/docs/tui-interaction.md",
+        "docs/active/sqlite-runtime-log-query.md",
+        "docs/active/runtime-authority-boundary.md"
+      ]
     },
     {
       "id": "tui-localization",
@@ -141,7 +227,11 @@
         "apps/kite/src/tui/OutputArea.tsx",
         "apps/kite/src/tui/StatsLine.tsx",
         "apps/kite/src/tui/StatusBar.tsx",
-        "apps/kite/src/tui/theme.ts"
+        "apps/kite/src/tui/theme.ts",
+        "apps/kite/src/tui/reducers/**",
+        "apps/kite/src/tui/replay-blocks.ts",
+        "apps/kite/src/tui/runtime-presentation.ts",
+        "apps/kite/src/tui/types.ts"
       ],
       "authorities": ["apps/kite/docs/tui-rendering.md"]
     },
@@ -158,7 +248,11 @@
         "apps/kite/src/tui/OutputArea.tsx",
         "apps/kite/src/tui/StatsLine.tsx",
         "apps/kite/src/tui/StatusBar.tsx",
-        "apps/kite/src/tui/theme.ts"
+        "apps/kite/src/tui/theme.ts",
+        "apps/kite/src/tui/reducers/**",
+        "apps/kite/src/tui/replay-blocks.ts",
+        "apps/kite/src/tui/runtime-presentation.ts",
+        "apps/kite/src/tui/types.ts"
       ],
       "authorities": ["apps/kite/docs/tui-interaction.md"]
     },
@@ -204,6 +298,27 @@
         ".github/workflows/runtime-resilience-qualification.yml"
       ],
       "authorities": ["docs/active/runtime-resilience-qualification.md", "tests/README.md"]
+    },
+    {
+      "id": "runtime-transport-qualification",
+      "sources": [
+        ".github/workflows/runtime-stdio-smoke.yml",
+        ".github/workflows/runtime-transport-qualification.yml",
+        "apps/kite/test/isolated/bun-stdio-child-transport.test.ts",
+        "apps/kite/test/isolated/bun-websocket-transport.test.ts",
+        "apps/kite/test/isolated/development-loopback-carrier.test.ts",
+        "apps/kite/test/isolated/development-runtime-reference.test.ts",
+        "apps/kite/test/isolated/development-websocket-runtime-client.test.ts",
+        "apps/kite/test/isolated/runtime-stdio-carrier.test.ts",
+        "apps/kite/test/isolated/runtime-stdio-child.test.ts",
+        "apps/kite/test/isolated/runtime-transport-conformance.test.ts"
+      ],
+      "authorities": [
+        "apps/kite/docs/runtime-server-carrier.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/execution-platform-support.md",
+        "tests/README.md"
+      ]
     },
     {
       "id": "release-candidate",

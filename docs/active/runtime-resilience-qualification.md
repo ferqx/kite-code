@@ -2,13 +2,31 @@
 
 状态：active
 
-读取时机：修改 Runtime 持久化/恢复、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
+读取时机：修改 Runtime 持久化/恢复、persistent command receipt、Protocol/Server/Client carrier/reconnect、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test apps/kite/test/model-invocation-gateway.test.ts apps/kite/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite/test/isolated/execution/posix-supervisor.test.ts apps/kite/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite/test/subagent-artifacts.test.ts apps/kite/test/subagent-provider.test.ts apps/kite/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite/test/isolated/runtime-command-restart.test.ts apps/kite/test/isolated/runtime-server-multi-client.test.ts apps/kite/test/isolated/runtime-stdio-carrier.test.ts apps/kite/test/isolated/runtime-transport-conformance.test.ts apps/kite/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite/test/model-invocation-gateway.test.ts apps/kite/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite/test/isolated/execution/posix-supervisor.test.ts apps/kite/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite/test/subagent-artifacts.test.ts apps/kite/test/subagent-provider.test.ts apps/kite/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
 相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite/docs/tui-system-testing.md`、ADR-0115、ADR-0116、Task 1C.7。
 
 ## 两级运行契约
+
+## Runtime Server V1 恢复与 transport 资格
+
+Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runtime command 的 State/event/snapshot/revision decision 与 scoped Store 6 receipt 是同一 transaction。必测 crash windows 为：commit 前没有任何 applied 事实；commit 后、response 前，以相同 scope/session 加 command ID retry 返回原 committed fact；restart/recovery 后，该 retry 是 idempotent replay，绝不再次 prepare 或 dispatch external effect。同 scope/key 而 command digest 改变必须 fail closed。receipt 不是 transport cache：parse、codec、admission、overload 和 transport failure 不创建 receipt；close/delete 保留 receipt；fork 不复制 source receipt；retention 不设 TTL/capacity pruning。
+
+两个 outer Client 可以订阅同一 Host/Server instance、retry 一个 command、race 一个 revision 或 settle 一个 interaction。FIFO mailbox 和 revision/interaction identity 决定 domain outcome：恰好一个 admissible mutation 被 applied；相同 retry 被 replay；不同或 stale 的并发 mutation conflict 或 reject；Server 与 Client 绝不增加第二个 domain waiter 或 decision cache。slow subscription、carrier close 或 reconnect 只释放所属 connection/subscription，不取消 live Runtime work。
+
+本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 ADR-0053。
+
+本 tranche 的 implementation head `f3646fec1d99db053304dfc013806caf0e3d8272` 已形成三平台 PR CI evidence：
+[Required run 32978173084](https://github.com/ferqx/kite-code/actions/runs/32978173084) 的 unit、quality、
+runtime-e2e、runtime-fault-soak、compaction 与四个 TUI shard/aggregate 全部成功；非 protected branch 的
+`protected-branch` job 按设计 skipped；[stdio run 32978173098](https://github.com/ferqx/kite-code/actions/runs/32978173098)
+与 [transport run 32978173105](https://github.com/ferqx/kite-code/actions/runs/32978173105) 的 macOS、Linux、Windows
+matrix 全部成功；[Platform run 32978173074](https://github.com/ferqx/kite-code/actions/runs/32978173074) 与
+[OSS RC run 32978173210](https://github.com/ferqx/kite-code/actions/runs/32978173210) 也全部成功。该 evidence 绑定
+[PR #65](https://github.com/ferqx/kite-code/pull/65) 的被审查实现 head，只证明本 tranche 的 native
+implementation/carrier conformance；它不构成下文 formal release qualification、production Web support 或 Web 准入。
 
 `scripts/runtime/run-fault-soak.ts` 是固定 seed、固定 case manifest、单 case硬上限和 runner 级全局 deadline 受限的 runner。它只输出版本化 JSON 元数据，不把测试 stdout/stderr、prompt、工具 payload 或 workspace 绝对路径写入 evidence。失败诊断最多保留在当前进程 stderr 中；写入 `--output` 后必须显式收紧为 `0600`，包括覆盖已存在的宽权限文件。Required CI 运行 fault contract 与 CI profile；`.github/workflows/runtime-resilience-qualification.yml` 提供显式手动 qualification。正式 workflow 只允许 `seed=1729`、`iterations=8`，输入先进入环境变量并以引号传给 runner，禁止把 dispatch input 直接拼进 shell。qualification 的全局 deadline 固定为 `56 × 180000 ms = 168` 分钟；每个 child 的实际运行时间从剩余全局预算和单 case 上限中取更小值，并预留 30 秒做 SIGKILL、最多 5 秒二级 reap、最多 2 秒输出 drain 与单次最多 1 秒的有界 `ps`/Git inspection。全局预算不足时不再启动 child，而是为剩余 attempt 写入 typed failure。job 的 190 分钟上限在 runner deadline 之外保留 22 分钟 workflow 余量；验证和上传步骤使用 `always()`。checkout、Bun 安装或 GitHub 基础设施在 runner 启动前失败时不会伪造报告。
 
@@ -175,12 +193,12 @@ Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/recon
 transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
 reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
 重发。当前定向 recovery journey 覆盖这些边界；response source/catalog 继续使用 ack-before-lookup、
-strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；当前 writer 使用 State 27、SQLite Store 与 SAQ epoch。State 26/Store 5/`kite-runtime-modularization-v1-2026-08-19` 只属于 ADR-0138 明确支持的只读历史 source profile，不能进入当前执行路径。
+strict mismatch 与 no-fallback contract。production 缺省仍使用加密随机 identity 与系统时钟；current writer 精确为 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26`。State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都只属于 explicit readonly historical source profile，不能进入当前执行路径。
 
 RM-04 production Store 由 App 组合根创建一个 `SqliteRuntimeStorageAdapter` 并注入 Runtime Host；
 旧 SQLite Store production export/caller 已删除，Kernel 只通过 Host storage port 取得非-owning Runtime State type view。CLI、TUI、Kernel 与
 App adapter 不得直接创建 SQLite 连接。adapter 的四类 transaction method 都映射到一次既有
-SQLite Store event+snapshot+provenance 原子提交，没有 retry/fallback/双写。每个底层连接在设置 journal mode 或执行 schema
+SQLite Store event+snapshot+provenance 与 applied scoped command receipt 原子提交，没有 retry/fallback/双写或 sidecar receipt writer。每个底层连接在设置 journal mode 或执行 schema
 写入前先安装 5000 ms `busy_timeout`，因此 journal/schema/事件写竞争都受同一有界等待约束。SQLite writer
 lock 释放后只允许一次成功提交；不能因为重试重复事件。
 

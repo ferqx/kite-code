@@ -6,7 +6,7 @@
 
 ## 概述
 
-TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 VS Code 打开新项目时的 "Do you trust the authors of the files in this folder?"。门禁在 `TuiBootstrap` 中同步求值，并先于 FirstRunFlow 与 `TuiApp` 挂载：未通过门禁时不会创建会话、连接 MCP、扫描 skill 或发起模型调用。CLI `run` 命令执行同一门禁（见下文 CLI 入口），共享同一用户级信任存储。
+TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 VS Code 打开新项目时的 "Do you trust the authors of the files in this folder?"。门禁在 `TuiBootstrap` 中同步求值，并先于 FirstRunFlow 与 `TuiApp` 挂载：未通过门禁时不会创建会话、连接 MCP、扫描 skill 或发起模型调用。CLI `run` 与 parent-owned `server --stdio` 在加载项目配置或创建 Runtime 前执行同一门禁，共享同一用户级信任存储。
 
 `apps/kite/src/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
 全部位于 `TuiApp` 内，只能在 `TuiBootstrap` 已通过 workspace 信任检查后挂载。
@@ -35,6 +35,9 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - `--trust-workspace` → 调用方显式背书，写入 `source: 'config'` 的信任记录后继续；该记录只表示 Workspace trust，
   不授予 Full 或任何 approval grant。历史 `--full-access` flag 仅保留为 ignored/negative compatibility input，
   不再是当前 CLI authority（见 `docs/active/authorization.md`）。记录写入失败时同样报错退出。CI/自动化应使用该旗标或预写信任存储。
+- `server --stdio` 也必须在启动 App 唯一 Host/Server composition 前通过门禁；一个 Runtime Server instance
+  固定只服务一个已经信任的 canonical Workspace。父进程、RPC params、session display name 或任意绝对路径都不能
+  重新选择 Workspace，也不会把 workspace trust 提升为 Full 或 approval grant。
 - `trace`、`help` 命令不执行项目代码，不做门禁。
 
 CLI 组合根产生的 sandbox 诊断也只能写入 stderr；不得混入 stdout 的 JSONL Runtime 事件流，更不得由
@@ -71,7 +74,10 @@ TUI 把该内部诊断直接投影为对话内容。
 
 ## 边界与现状
 
-- TUI 与 CLI `run` 均执行门禁；当前没有独立 web 前端入口。
+- TUI、CLI `run` 与 parent-owned `server --stdio` 均执行门禁。stdio 只给拥有 child lifecycle 的 Desktop/test
+  父进程：stdin 是有界 UTF-8 JSONL，stdout 只承载 Protocol，诊断只写 stderr，EOF 只释放该连接；只有 owner
+  signal/shutdown capability 才能释放 composition。development/reference loopback WebSocket 同样继承 bootstrap
+  注入的唯一 trusted Workspace，但不是 production Web/Desktop 入口。
 - workspace 信任是目录级一次性决定，不是逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
 - workspace 信任同时授权 Agent 将其已读取的任意仓库内容用于后续模型上下文。模型调用不会另设正文准入、分类或阻断；敏感内容仍不得进入 Runtime Event、telemetry 或 session metadata；写入、shell、网络、MCP write 等副作用继续受各自的授权与执行边界约束。
 - 门禁求值前只读取惰性配置（JSONC 解析，不执行项目代码）；skill 扫描、MCP 连接与 shell 执行全部发生在门禁通过之后。

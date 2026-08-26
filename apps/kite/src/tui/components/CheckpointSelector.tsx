@@ -25,7 +25,7 @@ interface CheckpointSelectorProps {
   checkpoints: RuntimeCheckpointEntry[];
   onConfirm: (checkpointId: string, scope: RewindScope) => void;
   onClose: () => void;
-  getRewindPreview?: (checkpointId: string) => RewindFilePreview | null;
+  getRewindPreview?: (checkpointId: string) => Promise<RewindFilePreview | null>;
   layeredEscRef?: MutableRefObject<boolean>;
 }
 
@@ -75,6 +75,7 @@ export default function CheckpointSelector({
   const [confirmChoice, setConfirmChoice] = useState<ConfirmChoice>('code_and_conversation');
   const [filePreview, setFilePreview] = useState<RewindFilePreview | null>(null);
   const submittingRef = useRef(false);
+  const previewRequestRef = useRef(0);
   const maxContentHeight = useOverlayHeight(9);
   const columns = stdout?.columns ?? 80;
   const messageWidth = Math.max(20, columns - 8);
@@ -125,15 +126,26 @@ export default function CheckpointSelector({
       getRewindPreview &&
       (choice === 'code_and_conversation' || choice === 'code_only')
     ) {
-      setFilePreview(getRewindPreview(selectedCheckpoint.snapshotId));
+      const checkpointId = selectedCheckpoint.snapshotId;
+      const request = ++previewRequestRef.current;
+      setFilePreview(null);
+      void getRewindPreview(checkpointId)
+        .then((preview) => {
+          if (previewRequestRef.current === request) setFilePreview(preview);
+        })
+        .catch(() => {
+          if (previewRequestRef.current === request) setFilePreview(null);
+        });
       return;
     }
+    previewRequestRef.current++;
     setFilePreview(null);
   };
 
   useInput((_input, key) => {
     if (stage === 'confirm') {
       if (key.escape) {
+        previewRequestRef.current++;
         setStage('browse');
         setFilePreview(null);
         return;

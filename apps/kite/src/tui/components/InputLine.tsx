@@ -80,6 +80,17 @@ function completeSlash(input: string): string | null {
   return null;
 }
 
+function isExactSlashCommand(input: string): boolean {
+  if (!input.startsWith('/') || /\s/.test(input)) return false;
+  const command = input.slice(1).toLowerCase();
+  return (
+    command.length > 0 &&
+    SLASH_COMMAND_DEFS.some(
+      (definition) => definition.name === command || definition.aliases.includes(command),
+    )
+  );
+}
+
 export default function InputLine({
   mode,
   onSubmit,
@@ -121,6 +132,15 @@ export default function InputLine({
   const [historyIndex, setHistoryIndex] = useState(-1);
   const fileSearch = useFileSearch(value, workspace);
   const slashSuggestions = useSlashSuggestions(value);
+  // Exact commands submit through the normal input route. Suggestions are
+  // intentionally partial-command affordances, so they do not compete for
+  // Enter after a command is fully spelled.
+  const slashMatched = useMemo(() => isExactSlashCommand(value), [value]);
+  const [dismissedSlashValue, setDismissedSlashValue] = useState<string | null>(null);
+  const slashSuggestionActive =
+    slashSuggestions.active && !slashMatched && dismissedSlashValue !== value;
+  const dismissedSlashValueRef = useRef(dismissedSlashValue);
+  dismissedSlashValueRef.current = dismissedSlashValue;
   // Refs for useInput to avoid Ink 7 stale closure (read latest values)
   const slashSuggestionsRef = useRef(slashSuggestions);
   slashSuggestionsRef.current = slashSuggestions;
@@ -130,7 +150,7 @@ export default function InputLine({
   // Notify parent about slash suggestion changes
   useEffect(() => {
     if (onSlashSuggestionChange) {
-      if (slashSuggestions.active && slashSuggestions.result) {
+      if (slashSuggestionActive && slashSuggestions.result) {
         onSlashSuggestionChange({
           kind: slashSuggestions.result.kind,
           partial: slashSuggestions.result.partial,
@@ -142,7 +162,7 @@ export default function InputLine({
       }
     }
   }, [
-    slashSuggestions.active,
+    slashSuggestionActive,
     slashSuggestions.result,
     slashSuggestions.selectedIndex,
     onSlashSuggestionChange,
@@ -173,6 +193,7 @@ export default function InputLine({
 
   const handleChange = useCallback(
     (next: string, meta?: { insertPos: number; insertLen: number }) => {
+      setDismissedSlashValue(null);
       if (meta && meta.insertLen >= PASTE_THRESHOLD) {
         const ps = pasteStateRef.current;
         const { insertPos, insertLen } = meta;
@@ -271,35 +292,32 @@ export default function InputLine({
       setHistoryIndex(-1);
       textKeyRef.current++;
       onValueChange?.(''); // clear ref BEFORE onSubmit: session switch may remount InputLine
+      // The exact-command submit path owns Enter itself, so clear the parent
+      // suggestion projection synchronously before a local slash action can
+      // render its result. Waiting for the effect driven by setValue('') lets
+      // a subsequent exact command be routed through a stale suggestion.
+      if (finalValue.startsWith('/')) onSlashSuggestionChange?.(null);
       onSubmit(finalValue);
       setValue('');
     },
-    [onSubmit, onValueChange],
+    [onSubmit, onValueChange, onSlashSuggestionChange],
   );
   const handleSubmitRef = useRef(handleSubmit);
   handleSubmitRef.current = handleSubmit;
 
-  // Check if input value is exactly a known slash command (no args, no trailing spaces)
-  const slashMatched = useMemo((): boolean => {
-    if (!value.startsWith('/')) return false;
-    if (/\s/.test(value)) return false;
-    const cmd = value.slice(1).toLowerCase();
-    if (!cmd) return false;
-    return SLASH_COMMAND_DEFS.some((def) => def.name === cmd || def.aliases.includes(cmd));
-  }, [value]);
-
-  // Sync ref for handleSubmit: only suppress TextInput's premature submit
-  // when suggestions are active AND the current text is not yet a valid command.
-  slashNeedsCommitRef.current = slashSuggestions.active && !slashMatched;
+  // A partial command is owned by the suggestion route so Enter completes it.
+  // An exact command is owned by the normal submit path, even if its dropdown
+  // remains visible. This gives every Enter press exactly one owner.
+  slashNeedsCommitRef.current = slashSuggestionActive && !slashMatched;
 
   // Ghost text: the untyped suffix of the selected suggestion, shown as a dimmed preview
   const slashGhost = useMemo((): string | null => {
-    if (!slashSuggestions.active || !slashSuggestions.result) return null;
+    if (!slashSuggestionActive || !slashSuggestions.result) return null;
     const selected = slashSuggestions.result.items[slashSuggestions.selectedIndex];
     if (!selected || selected.disabled) return null;
     const suffix = selected.command.slice(slashSuggestions.result.partial.length);
     return suffix.length > 0 ? suffix : null;
-  }, [slashSuggestions.active, slashSuggestions.result, slashSuggestions.selectedIndex]);
+  }, [slashSuggestionActive, slashSuggestions.result, slashSuggestions.selectedIndex]);
 
   const applyHistoryEntry = useCallback((entry: string) => {
     if (entry.length >= PASTE_THRESHOLD) {
@@ -339,7 +357,7 @@ export default function InputLine({
 
   useInput(
     (
-      _input: string,
+      input: string,
       key: {
         upArrow?: boolean;
         downArrow?: boolean;
@@ -367,9 +385,12 @@ export default function InputLine({
       const fs = fileSearchRef.current;
 
       // Slash command suggestion navigation
-      if (ss.active && ss.result) {
+      const submitKey = key.return || input === '\r' || input === '\n';
+      if (ss.active && ss.result && dismissedSlashValueRef.current !== valueRef.current) {
         if (key.escape) {
           // Dismiss suggestions without clearing input (preserve what user typed)
+          setDismissedSlashValue(valueRef.current);
+          onSlashSuggestionChange?.(null);
           return;
         }
         if (key.upArrow) {
@@ -397,7 +418,7 @@ export default function InputLine({
           }
           return;
         }
-        if (key.return) {
+        if (submitKey && !isExactSlashCommand(valueRef.current)) {
           // Commit completed command and submit it inline — TextInput already
           // processed Enter (with the partial text) and was suppressed via
           // slashActiveRef in handleSubmit.
@@ -405,12 +426,12 @@ export default function InputLine({
           if (selected && !selected.disabled) {
             const fullCmd = ss.replaceCommand(selected);
             onValueChange?.(''); // clear ref BEFORE onSubmit so remount sees empty value
-            commitValue(fullCmd);
             setHistory((prev) => [...prev, fullCmd]);
             setHistoryIndex(-1);
             textKeyRef.current++;
-            onSubmit(fullCmd);
+            onSlashSuggestionChange?.(null);
             setValue('');
+            onSubmit(fullCmd);
           }
           return;
         }
@@ -438,7 +459,7 @@ export default function InputLine({
           }
           return;
         }
-        if (key.return) {
+        if (submitKey) {
           // Same root cause as slash suggestions: TextInput fires before
           // InputLine and would submit the uncompleted text. Commit + submit
           // inline; handleSubmit suppresses the premature TextInput submit.
@@ -466,7 +487,7 @@ export default function InputLine({
         return;
       }
 
-      if (key.return) {
+      if (submitKey) {
         if (key.shift || key.meta) {
           // Handled by CtrlSafeTextInput (inserts at cursor position).
           return;
@@ -522,7 +543,7 @@ export default function InputLine({
           atomicBlock={atomicBlock}
           onRemoveAtomicBlock={clearPasteState}
           onNavigateHistory={handleNavigateHistory}
-          disableArrowNav={slashSuggestions.active || fileSearch.active}
+          disableArrowNav={slashSuggestionActive || fileSearch.active}
           trailingText={slashGhost ?? undefined}
           maxWidth={inputMaxWidth}
         />

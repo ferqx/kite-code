@@ -144,17 +144,14 @@ describe('TUI PTY System — Session Persistence', () => {
         () => {
           const viewport = tui2.viewport();
           return (
-            screenHasSessionRow(viewport, 'Message before restart', {
-              selected: true,
-              active: false,
-            }) &&
+            screenHasSessionRow(viewport, 'Message before restart', { active: false }) &&
             screenContains(viewport, '会话列表') &&
             screenContains(viewport, '搜索') &&
             screenContains(viewport, '导航') &&
             !screenContains(viewport, 'Loading...')
           );
         },
-        'persisted session row and complete selector chrome to render',
+        'fresh current row plus persisted session row and selector chrome to render',
         10_000,
       );
 
@@ -170,12 +167,7 @@ describe('TUI PTY System — Session Persistence', () => {
       // The session from tui1 should appear in the list.
       // Session name defaults to threadId; after smart naming, it becomes
       // the first user message text (truncated to 30 chars).
-      expect(
-        screenHasSessionRow(output, 'Message before restart', {
-          selected: true,
-          active: false,
-        }),
-      ).toBe(true);
+      expect(screenHasSessionRow(output, 'Message before restart', { active: false })).toBe(true);
       const persisted = observePersistedUserMessageSession(workspace, 'Message before restart');
       expect(persisted.status).toBe('ready');
       expect(persisted.status === 'ready' ? persisted.value?.threadId : undefined).toBe(
@@ -188,9 +180,19 @@ describe('TUI PTY System — Session Persistence', () => {
   step(
     'load historical session → message content restored from checkpoint DB',
     async () => {
-      // The session from tui1 should be at index 0 (only persisted session).
-      // Press Enter to load it.
+      // Runtime Server V1 creates a fresh current row before listing history.
+      // Move from that row to the persisted historical row before loading it.
       console.log('  pressing Enter to load historical session...');
+      tui2.write('\x1b[B');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui2.viewport(), 'Message before restart', {
+            selected: true,
+            active: false,
+          }),
+        'persisted historical session row to become selected',
+        5_000,
+      );
       tui2.write('\r');
 
       // Wait for the historical session content to be replayed.

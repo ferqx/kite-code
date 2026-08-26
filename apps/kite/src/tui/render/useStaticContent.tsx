@@ -27,7 +27,6 @@
 // stable refs, so references are constant between genuine state transitions.
 
 import { type ReactNode, useEffect, useMemo, useRef } from 'react';
-import { isExplorationTool } from '../reducers/consolidateTools';
 import type { OutputBlock, Turn } from '../types';
 
 export { changePrefix } from '../components/BlockRenderer';
@@ -43,88 +42,17 @@ const HEADER_SENTINEL = { __header: true } as const;
  * 变化不会被更新）。因此只有保证 reducer 后续事件绝不再修改的 block 才能离开
  * 动态树。判定故意保守——宁可多留在动态树，也不允许 Static 中出现陈旧行。
  *
- * - user：永不修改；但作为当前 turn 唯一 block 时暂留 dynamic，避免提交长消息时
- *   立即触发 Static/dynamic 交接清屏。首个后续 block 到达后再提升。
- * - text：只有流式 / 待终态调和 / 仍持有活动结构组件 source 的块不稳定。
- *   Runtime delta 路径只把完整 Markdown 组件追加为新的 text block；已经提交的
- *   相邻 text 是 append-only 前缀，必须立即冻结，否则长回答会整体滞留在 Ink
- *   dynamic tree，并让每帧布局与终端输出成本随全文长度增长。
- * - tool_card：只有终态（done/error/cancelled/timeout/exhausted）稳定；探索工具
- *   仍可能被 maybeConsolidateLastTurnBlocks 合并为 tool_summary，必须留在动态树。
- * - 其余 kind（tool_summary / subagent / approval / question / reason）在 run 期间
- *   仍可能被后续事件修改（consolidate 重建、cache_metrics 迟到、resolved 回写、
- *   folded toggle 等），保守地留在动态树。
+ * 当前 turn 中只有 user prompt 在出现后续 block 后可以进入 Static；它从创建起
+ * 就不可变，且输入 PTY 回归证明交接不会重复。其他 block 都曾在 dynamic tree
+ * 中经历流式或 lifecycle 更新，迁入 append-only Static 会在真实终端 scrollback
+ * 再打印一次。它们等下一 turn 使整个旧 turn 成为 history 后再统一冻结。
  */
 export function isBlockSettledInRun(
   block: OutputBlock,
   _blocks: OutputBlock[],
   _index: number,
 ): boolean {
-  switch (block.kind) {
-    case 'user':
-      return _index < _blocks.length - 1;
-    case 'text': {
-      if (
-        block.streaming ||
-        block.responsePending ||
-        block.streamingSource != null ||
-        block.streamingComponent != null
-      ) {
-        return false;
-      }
-      return true;
-    }
-    case 'tool_card': {
-      if (
-        block.status !== 'done' &&
-        block.status !== 'error' &&
-        block.status !== 'cancelled' &&
-        block.status !== 'timeout' &&
-        block.status !== 'exhausted'
-      ) {
-        return false;
-      }
-      return !isExplorationTool(block);
-    }
-    case 'tool_summary':
-      return (
-        !block.active &&
-        !block.responsePending &&
-        block.tools.every(
-          (tool) =>
-            tool.status === 'done' ||
-            tool.status === 'error' ||
-            tool.status === 'cancelled' ||
-            tool.status === 'timeout' ||
-            tool.status === 'exhausted',
-        )
-      );
-    case 'reason':
-    case 'file_change':
-      return true;
-    case 'subagent': {
-      const terminal = (candidate: Extract<OutputBlock, { kind: 'subagent' }>) =>
-        candidate.status === 'done' ||
-        candidate.status === 'error' ||
-        candidate.status === 'cancelled';
-      if (!terminal(block)) return false;
-      if (block.concurrencyGroupId == null) return true;
-      // A sibling batch must enter append-only Static as one presentation
-      // item. Hold early finishers in the dynamic suffix until all siblings
-      // have reached a terminal state.
-      return _blocks.every(
-        (candidate) =>
-          candidate.kind !== 'subagent' ||
-          candidate.concurrencyGroupId !== block.concurrencyGroupId ||
-          terminal(candidate),
-      );
-    }
-    case 'approval':
-    case 'question':
-      return block.resolved !== undefined;
-    default:
-      return false;
-  }
+  return block.kind === 'user' && _index < _blocks.length - 1;
 }
 
 /**

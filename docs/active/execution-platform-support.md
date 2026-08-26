@@ -41,6 +41,13 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 G
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
 Docker、WSL2 和架构模拟只作开发预检。
 
+Runtime Protocol V1 不扩大该生产支持集合。shipped production consumer 仍只有本地 TUI 与用户在场的
+foreground CLI；stdio 只作为 Desktop/test 父进程拥有的 reference child，loopback WebSocket/browser/Desktop
+只作 development/reference/conformance evidence，均不进入 release manifest 或 platform support matrix。`.github/workflows/runtime-stdio-smoke.yml`
+与 `.github/workflows/runtime-transport-qualification.yml` 的 macOS 15、Ubuntu 24.04、Windows 2025 矩阵只提供
+qualification checks；KRSV1-07/09 的三平台 PR 结果返回前，必须标记为 pending，不能把 workflow 定义或本地测试
+写成三平台通过或 production support evidence。
+
 ADR-0097 的 brokered Git 仍有独立 typed schema、broker positive/hostile、binary/repository identity 与
 TUI/foreground CLI composition 证据组。但 ADR-0131 已取消通用 Shell 对 Workspace `.git` metadata 的
 名称级 read/write deny；依赖该 native deny 的既有 qualification 模型不再可满足，当前三平台
@@ -79,7 +86,10 @@ ADR-0082/ADR-0101/ADR-0110 对齐 development 权限交互与 Windows TLS 可执
 在 `interactionMode=full` 或 exact approval 后产生的 sealed scope，并要求 backend contract 明确其实际 token；更窄 filesystem scope 的
 更窄 scope 被 runner 拒绝。精确 runtime version query 等可证明
 本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
-verdict 或 D-04 空支持集。ADR-0088 已删除 AppContainer、private staging 与 repository reconciliation。
+verdict 或 D-04 空支持集。prepared consumer 因此只把 `off`/受限 filesystem 当成需要 enforcement evidence
+的限制，不把已批准的 development `allow_all` 伪装成 allowlist/full-access qualification；静态
+`backendCapabilities.network.allowlist` 与 `filesystem.full_access` 仍保持 `unsupported`。ADR-0088 已删除
+AppContainer、private staging 与 repository reconciliation。
 
 ### Unified startup downgrade
 

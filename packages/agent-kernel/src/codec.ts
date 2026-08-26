@@ -110,6 +110,55 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
     }
   }
   switch (value.type) {
+    case 'session.rewind_requested':
+    case 'session.rewind_completed':
+    case 'session.rewind_failed': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      for (const field of [
+        'rewindId',
+        'commandId',
+        'sourceSessionId',
+        'targetSessionId',
+        'checkpointId',
+      ]) {
+        requireNonEmptyString(value, field);
+      }
+      if (
+        value.scope !== 'conversation_only' &&
+        value.scope !== 'conversation_and_workspace' &&
+        value.scope !== 'code_only'
+      ) {
+        throw new Error(`${value.type} scope is invalid.`);
+      }
+      if (
+        value.type === 'session.rewind_failed' &&
+        value.failureCode !== 'checkpoint_unavailable' &&
+        value.failureCode !== 'execution_failed'
+      ) {
+        throw new Error('session.rewind_failed failureCode is invalid.');
+      }
+      break;
+    }
+    case 'model.text_delta':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'requestId');
+      requireNonEmptyString(value, 'text');
+      break;
+    case 'model.reasoning_delta':
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.segmentId === undefined ? [] : ['segmentId']),
+      ]);
+      requireNonEmptyString(value, 'requestId');
+      requireNonEmptyString(value, 'text');
+      if (value.segmentId !== undefined) requireNonEmptyString(value, 'segmentId');
+      break;
+    case 'model.reasoning_completed':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'requestId');
+      requireNonEmptyString(value, 'segmentId');
+      requireNonEmptyString(value, 'text');
+      break;
     case 'provider.admission_status':
       exactEventKeys(value, [
         ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],

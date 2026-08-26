@@ -226,6 +226,11 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'subagent.suspended',
   'subagent.approval_deferred',
   'subagent.recovery_journal_merged',
+  // Rewind intent/result identity is operational recovery evidence, not a
+  // metric payload. Never project checkpoint or command fields into facts.
+  'session.rewind_requested',
+  'session.rewind_completed',
+  'session.rewind_failed',
 ] as const satisfies readonly RuntimeEventType[];
 
 export const OBSERVABILITY_IGNORED_RUNTIME_EVENT_TYPES_ = Object.freeze(

@@ -118,7 +118,7 @@ describe('session log retention and migration', () => {
         maxTotalBytes: 2048,
         maxSessionBytes: 1024,
       },
-      { root, reserveBytes: 1024 },
+      { root, reserveBytes: 1024, deadlineMs: 5_000 },
     );
 
     expect(report.removedSessions).toBe(2);
@@ -260,7 +260,7 @@ describe('session log retention and migration', () => {
 
     const report = runSessionLogMaintenance(
       { ...POLICY, maxTotalBytes: 2048, maxSessionBytes: 1024 },
-      { root, reserveBytes: 1024 },
+      { root, reserveBytes: 1024, deadlineMs: 5_000 },
     );
 
     expect(existsSync(active)).toBe(true);

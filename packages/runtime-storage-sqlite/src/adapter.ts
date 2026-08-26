@@ -3,17 +3,28 @@ import type {
   ArtifactPort,
   CheckpointPort,
   EffectLeasePort,
+  RuntimeCommandForkInput,
+  RuntimeCommandForkResult,
+  RuntimeCommandReceiptPort,
   RuntimeEventMetadata,
   RuntimeFileRestoreMaterial,
   RuntimeRecoveryIdentityPort,
+  RuntimeSessionDeletionInput,
   RuntimeSessionInfo,
   RuntimeSessionModelRoute,
   RuntimeStorage,
   SessionStore,
   StoredRuntimeEvent,
 } from '@kite-ai/runtime-host/storage';
+import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
 import { resolveSqliteArtifactStore } from './artifact-store';
 import { createSqliteRecoveryIdentityLedger } from './authority-ledger';
+import {
+  assertSqliteRuntimeCommandReceipt,
+  createSqliteRuntimeCommandReceiptPort,
+  createSqliteRuntimeCommandReceiptWriter,
+  isSqliteRuntimeCommandReceiptConstraint,
+} from './command-receipts';
 import { openSqliteRuntimeConnection } from './connection';
 import { createSqliteEffectLeaseStore } from './effect-leases';
 import { createSqliteEventStore } from './event-store';
@@ -28,6 +39,8 @@ import {
   SQLITE_RUNTIME_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+  SqliteRuntimeCommandReceiptConflictError,
+  SqliteRuntimeRevisionConflictError,
   type SqliteRuntimeSnapshotCodec,
   type SqliteRuntimeStorageInput,
   SqliteRuntimeStorageOpenError,
@@ -50,6 +63,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   readonly checkpoints: CheckpointPort<State>;
   readonly artifacts: ArtifactPort;
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
+  readonly commandReceipts: RuntimeCommandReceiptPort;
   readonly #db: Database;
   readonly #codec: SqliteRuntimeSnapshotCodec<Event, State>;
   #closed = false;
@@ -115,6 +129,11 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       withImmediateTransaction,
     );
     this.recoveryIdentities = recoveryIdentities.port;
+    this.commandReceipts = createSqliteRuntimeCommandReceiptPort({
+      db,
+      isClosed: () => this.#closed,
+    });
+    const commandReceiptWriter = createSqliteRuntimeCommandReceiptWriter(db);
     this.artifacts = baseArtifacts;
     const eventStore = createSqliteEventStore<Event>({
       db,
@@ -236,6 +255,9 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       'INSERT OR REPLACE INTO runtime_file_preimages (session_id, path, event_position, content, existed, post_hash, post_existed, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     );
     const deleteEffectLeases = db.query('DELETE FROM runtime_effect_leases WHERE session_id = ?');
+    const selectSessionRevision = db.query<{ revision: number }, [string]>(
+      'SELECT revision FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+    );
     const effectLeases = createSqliteEffectLeaseStore(db, () => this.#closed);
 
     const persistNamedSnapshot = (
@@ -329,17 +351,58 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
           sessionMetadata.setModelRoute(sessionId, route);
         }
       },
-      deleteSession: (sessionId: string) => {
-        if (!this.#closed)
-          db.transaction(() => {
-            eventStore.deleteAll(sessionId);
-            deleteSnapshot.run(sessionId);
-            deleteNamedSnapshots.run(sessionId);
-            deleteFilePreimages.run(sessionId);
-            deleteEffectLeases.run(sessionId);
-            recoveryIdentities.deleteValue(sessionId);
-            sessionMetadata.delete(sessionId);
-          })();
+      deleteSession: (sessionId: string, deletion?: RuntimeSessionDeletionInput) => {
+        if (this.#closed) return;
+        // A receipt-bearing delete is the Runtime decision. Reserve the Store
+        // writer up front so revision validation, retained receipt insertion,
+        // and removal of every Session fact share one crash boundary.
+        db.run('BEGIN IMMEDIATE');
+        try {
+          if (deletion) {
+            const current = selectSessionRevision.get(sessionId);
+            if (!current || current.revision !== deletion.expectedRevision) {
+              throw new SqliteRuntimeRevisionConflictError(
+                sessionId,
+                deletion.expectedRevision,
+                current?.revision ?? null,
+              );
+            }
+            assertSqliteRuntimeCommandReceipt(
+              deletion.commandReceipt,
+              sessionId,
+              deletion.expectedRevision,
+            );
+          }
+          eventStore.deleteAll(sessionId);
+          deleteSnapshot.run(sessionId);
+          deleteNamedSnapshots.run(sessionId);
+          deleteFilePreimages.run(sessionId);
+          deleteEffectLeases.run(sessionId);
+          recoveryIdentities.deleteValue(sessionId);
+          sessionMetadata.delete(sessionId);
+          if (deletion) {
+            commandReceiptWriter.insert(
+              deletion.commandReceipt,
+              sessionId,
+              deletion.expectedRevision,
+            );
+          }
+          db.run('COMMIT');
+        } catch (error) {
+          try {
+            db.run('ROLLBACK');
+          } catch {
+            /* SQLite may already have rolled back a failed statement. */
+          }
+          if (deletion && isSqliteRuntimeCommandReceiptConstraint(error)) {
+            throw new SqliteRuntimeCommandReceiptConflictError(
+              deletion.commandReceipt.scopeSessionId,
+              deletion.commandReceipt.commandId,
+              error,
+            );
+          }
+          throw error;
+        }
       },
     };
     this.sessions = Object.freeze(sessions);
@@ -356,6 +419,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       insertEvents,
       encodeSnapshot,
       persistSnapshot,
+      receiptWriter: commandReceiptWriter,
     });
     this.effects = effectLeases.port;
 
@@ -367,6 +431,246 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         return this.#codec.decodeState<T>(openSnapshot(row, `named/${name}`));
       } catch {
         return null;
+      }
+    };
+    const fork = (
+      sourceSessionId: string,
+      snapshotId: string,
+      targetSessionId: string,
+      targetRecoveryIdentityKey: string,
+      commandEvidence?: RuntimeCommandForkInput['commandEvidence'],
+    ): RuntimeCommandForkResult | { readonly status: 'applied' } => {
+      const unavailable = (): RuntimeCommandForkResult => ({ status: 'unavailable' });
+      if (
+        this.#closed ||
+        !sourceSessionId ||
+        !targetSessionId ||
+        sourceSessionId === targetSessionId ||
+        !isCanonicalRecoveryIdentity(targetRecoveryIdentityKey) ||
+        (commandEvidence !== undefined &&
+          (commandEvidence.scopeSessionId !== sourceSessionId ||
+            commandEvidence.targetSessionId !== targetSessionId))
+      ) {
+        return unavailable();
+      }
+      let receipt: ReturnType<typeof createRuntimeStoredCommandReceipt> | undefined;
+      try {
+        db.run('BEGIN IMMEDIATE');
+        const current = snapshotId === '__runtime_current__';
+        const rolling = current ? snapshotStore.getRollingRow(sourceSessionId) : null;
+        const named = current ? null : selectNamedSnapshot.get(sourceSessionId, snapshotId);
+        const sourceRow = rolling ?? named;
+        if (!sourceRow || checksum(sourceRow.state_json) !== sourceRow.state_checksum) {
+          db.run('ROLLBACK');
+          return unavailable();
+        }
+        let state: State;
+        try {
+          state = this.#codec.decodeState<State>(
+            openSnapshot(sourceRow, current ? 'snapshot' : `named/${snapshotId}`),
+          );
+          const eventRevision = eventStore.revisionAtOrBefore(
+            sourceSessionId,
+            sourceRow.event_position,
+          );
+          restoreValidation(state, sourceSessionId, sourceRow, eventRevision);
+          if (
+            (this.#codec.canFork && !this.#codec.canFork(state)) ||
+            sourceRow.schema_version !== this.stateSchemaVersion ||
+            sourceRow.state_revision !== eventRevision
+          ) {
+            db.run('ROLLBACK');
+            return unavailable();
+          }
+        } catch {
+          db.run('ROLLBACK');
+          return unavailable();
+        }
+        let sourceEvents: StoredRuntimeEvent<Event>[];
+        try {
+          sourceEvents = loadEvents(sourceSessionId).filter(
+            (entry) =>
+              entry.id <= sourceRow.event_position &&
+              (!current || !this.#codec.isCurrentPendingInteractionRequest?.(state, entry.event)),
+          );
+        } catch {
+          db.run('ROLLBACK');
+          return unavailable();
+        }
+        const sourceNamed = selectNamedSnapshotsForFork.all(
+          sourceSessionId,
+          sourceRow.event_position,
+        );
+        const sourceFiles = selectFilePreimagesForFork.all(
+          sourceSessionId,
+          sourceRow.event_position,
+        );
+        const sourceRoute = sessionMetadata.getModelRoute(sourceSessionId);
+        const snapshotRecoveryIdentity = this.#codec.recoveryIdentity?.(state);
+        const persistedRecoveryIdentity = recoveryIdentities.readValue(sourceSessionId);
+        if (
+          (snapshotRecoveryIdentity !== undefined &&
+            !isCanonicalRecoveryIdentity(snapshotRecoveryIdentity)) ||
+          (persistedRecoveryIdentity !== undefined &&
+            !isCanonicalRecoveryIdentity(persistedRecoveryIdentity)) ||
+          (snapshotRecoveryIdentity !== undefined &&
+            persistedRecoveryIdentity !== undefined &&
+            snapshotRecoveryIdentity !== persistedRecoveryIdentity)
+        ) {
+          db.run('ROLLBACK');
+          return unavailable();
+        }
+        const sourceRecoveryIdentity = persistedRecoveryIdentity ?? snapshotRecoveryIdentity;
+        if (
+          (this.#codec.recoveryIdentity && sourceRecoveryIdentity === undefined) ||
+          sourceRecoveryIdentity === targetRecoveryIdentityKey
+        ) {
+          db.run('ROLLBACK');
+          return unavailable();
+        }
+        const forkState = this.#codec.rebindForkState(
+          state,
+          targetSessionId,
+          targetRecoveryIdentityKey,
+        );
+        const encodedFork = encodeSnapshot(forkState);
+        try {
+          this.#codec.validateSnapshot?.({
+            state: forkState,
+            sessionId: targetSessionId,
+            eventPosition: 0,
+            stateRevision: encodedFork.metadata.stateRevision,
+            schemaVersion: encodedFork.metadata.schemaVersion,
+            eventRevision: encodedFork.metadata.stateRevision,
+          });
+          if (commandEvidence) {
+            receipt = createRuntimeStoredCommandReceipt(
+              commandEvidence,
+              encodedFork.metadata.stateRevision,
+            );
+          }
+        } catch {
+          db.run('ROLLBACK');
+          return unavailable();
+        }
+        eventStore.deleteAll(targetSessionId);
+        deleteSnapshot.run(targetSessionId);
+        deleteNamedSnapshots.run(targetSessionId);
+        deleteFilePreimages.run(targetSessionId);
+        recoveryIdentities.deleteValue(targetSessionId);
+        sessionMetadata.delete(targetSessionId);
+        ensureSession(targetSessionId, forkState);
+        if (sourceRecoveryIdentity !== undefined) {
+          if (persistedRecoveryIdentity === undefined) {
+            recoveryIdentities.putValue(sourceSessionId, sourceRecoveryIdentity);
+          }
+          recoveryIdentities.putValue(targetSessionId, targetRecoveryIdentityKey);
+        }
+        if (sourceRoute) sessionMetadata.setModelRoute(targetSessionId, sourceRoute);
+        const positions = new Map<number, number>();
+        for (const entry of sourceEvents) {
+          const eventId = entry.event_id ?? `${targetSessionId}:${entry.revision}`;
+          const serialized =
+            this.#codec.encodeHistoricalEvent?.(entry.event) ??
+            this.#codec.encodeEvent(entry.event);
+          eventStore.insertSerializedForkEvent({
+            sessionId: targetSessionId,
+            eventJson: serialized,
+            eventId,
+            revision: entry.revision ?? 0,
+            causationId: entry.causation_id ?? null,
+            occurredAt: entry.occurred_at ?? null,
+            createdAt: entry.created_at,
+          });
+          positions.set(entry.id, entry.revision ?? 0);
+        }
+        const remap = (position: number): number => {
+          let target = 0;
+          for (const entry of sourceEvents) {
+            if (entry.id > position) break;
+            target = positions.get(entry.id) ?? target;
+          }
+          return target;
+        };
+        for (const file of sourceFiles) {
+          insertForkFilePreimage.run(
+            targetSessionId,
+            file.path,
+            remap(file.event_position),
+            file.content,
+            file.existed,
+            file.post_hash,
+            file.post_existed,
+            file.created_at,
+          );
+        }
+        persistSnapshot(
+          targetSessionId,
+          encodedFork.json,
+          remap(sourceRow.event_position),
+          encodedFork.metadata.stateRevision,
+          encodedFork.metadata.stateChecksum,
+          encodedFork.metadata.schemaVersion,
+        );
+        for (const snapshot of sourceNamed) {
+          try {
+            if (checksum(snapshot.state_json) !== snapshot.state_checksum) continue;
+            const namedState = this.#codec.decodeState<State>(
+              openSnapshot(snapshot, `named/${snapshot.name}`),
+            );
+            if (this.#codec.canFork && !this.#codec.canFork(namedState)) continue;
+            const rebound = this.#codec.rebindForkState(
+              namedState,
+              targetSessionId,
+              targetRecoveryIdentityKey,
+            );
+            this.#codec.validateSnapshot?.({
+              state: rebound,
+              sessionId: targetSessionId,
+              eventPosition: remap(snapshot.event_position),
+              stateRevision: snapshot.state_revision,
+              schemaVersion: snapshot.schema_version,
+              eventRevision: snapshot.state_revision,
+            });
+            const encodedNamed = encodeSnapshot(rebound, {
+              eventPosition: remap(snapshot.event_position),
+              stateRevision: snapshot.state_revision,
+              stateChecksum: '',
+              schemaVersion: snapshot.schema_version,
+            });
+            persistNamedSnapshot(
+              targetSessionId,
+              snapshot.name,
+              remap(snapshot.event_position),
+              encodedNamed.json,
+              snapshot.state_revision,
+              encodedNamed.metadata.stateChecksum,
+              snapshot.schema_version,
+              snapshot.created_at,
+            );
+          } catch {
+            /* corrupt or rejected recovery points are omitted */
+          }
+        }
+        if (receipt) {
+          commandReceiptWriter.insert(receipt, targetSessionId, encodedFork.metadata.stateRevision);
+        }
+        db.run('COMMIT');
+        return receipt ? { status: 'applied', receipt } : { status: 'applied' };
+      } catch (error) {
+        try {
+          db.run('ROLLBACK');
+        } catch {
+          /* SQLite may already have rolled back after a constraint failure. */
+        }
+        if (receipt && isSqliteRuntimeCommandReceiptConstraint(error)) {
+          throw new SqliteRuntimeCommandReceiptConflictError(
+            receipt.scopeSessionId,
+            receipt.commandId,
+            error,
+          );
+        }
+        throw error;
       }
     };
     this.checkpoints = Object.freeze({
@@ -457,202 +761,20 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         snapshotId: string,
         targetSessionId: string,
         targetRecoveryIdentityKey: string,
-      ): boolean => {
-        if (
-          this.#closed ||
-          !sourceSessionId ||
-          !targetSessionId ||
-          sourceSessionId === targetSessionId
-        )
-          return false;
-        if (!isCanonicalRecoveryIdentity(targetRecoveryIdentityKey)) return false;
-        const current = snapshotId === '__runtime_current__';
-        const rolling = current ? snapshotStore.getRollingRow(sourceSessionId) : null;
-        const named = current ? null : selectNamedSnapshot.get(sourceSessionId, snapshotId);
-        const sourceRow = rolling ?? named;
-        if (!sourceRow || checksum(sourceRow.state_json) !== sourceRow.state_checksum) return false;
-        let state: State;
-        try {
-          state = this.#codec.decodeState<State>(
-            openSnapshot(sourceRow, current ? 'snapshot' : `named/${snapshotId}`),
-          );
-          const eventRevision = eventStore.revisionAtOrBefore(
-            sourceSessionId,
-            sourceRow.event_position,
-          );
-          restoreValidation(state, sourceSessionId, sourceRow, eventRevision);
-          if (this.#codec.canFork && !this.#codec.canFork(state)) return false;
-          if (
-            sourceRow.schema_version !== this.stateSchemaVersion ||
-            sourceRow.state_revision !== eventRevision
-          )
-            return false;
-        } catch {
-          return false;
-        }
-        let sourceEvents: StoredRuntimeEvent<Event>[];
-        try {
-          sourceEvents = loadEvents(sourceSessionId).filter(
-            (entry) =>
-              entry.id <= sourceRow.event_position &&
-              (!current || !this.#codec.isCurrentPendingInteractionRequest?.(state, entry.event)),
-          );
-        } catch {
-          return false;
-        }
-        const sourceNamed = selectNamedSnapshotsForFork.all(
-          sourceSessionId,
-          sourceRow.event_position,
+      ): boolean =>
+        fork(sourceSessionId, snapshotId, targetSessionId, targetRecoveryIdentityKey).status ===
+        'applied',
+      forkSessionForCommand: (input: RuntimeCommandForkInput): RuntimeCommandForkResult => {
+        const result = fork(
+          input.sourceSessionId,
+          input.snapshotId,
+          input.targetSessionId,
+          input.targetRecoveryIdentityKey,
+          input.commandEvidence,
         );
-        const sourceFiles = selectFilePreimagesForFork.all(
-          sourceSessionId,
-          sourceRow.event_position,
-        );
-        const sourceRoute = sessionMetadata.getModelRoute(sourceSessionId);
-        const snapshotRecoveryIdentity = this.#codec.recoveryIdentity?.(state);
-        if (
-          snapshotRecoveryIdentity !== undefined &&
-          !isCanonicalRecoveryIdentity(snapshotRecoveryIdentity)
-        )
-          return false;
-        const persistedRecoveryIdentity = recoveryIdentities.readValue(sourceSessionId);
-        if (
-          persistedRecoveryIdentity !== undefined &&
-          !isCanonicalRecoveryIdentity(persistedRecoveryIdentity)
-        )
-          return false;
-        if (
-          snapshotRecoveryIdentity !== undefined &&
-          persistedRecoveryIdentity !== undefined &&
-          snapshotRecoveryIdentity !== persistedRecoveryIdentity
-        )
-          return false;
-        const sourceRecoveryIdentity = persistedRecoveryIdentity ?? snapshotRecoveryIdentity;
-        if (
-          (this.#codec.recoveryIdentity && sourceRecoveryIdentity === undefined) ||
-          sourceRecoveryIdentity === targetRecoveryIdentityKey
-        )
-          return false;
-        const forkState = this.#codec.rebindForkState(
-          state,
-          targetSessionId,
-          targetRecoveryIdentityKey,
-        );
-        try {
-          const forkMetadata = this.#codec.snapshotMetadata(forkState);
-          this.#codec.validateSnapshot?.({
-            state: forkState,
-            sessionId: targetSessionId,
-            eventPosition: 0,
-            stateRevision: forkMetadata.stateRevision,
-            schemaVersion: forkMetadata.schemaVersion,
-            eventRevision: forkMetadata.stateRevision,
-          });
-        } catch {
-          return false;
-        }
-        db.transaction(() => {
-          eventStore.deleteAll(targetSessionId);
-          deleteSnapshot.run(targetSessionId);
-          deleteNamedSnapshots.run(targetSessionId);
-          deleteFilePreimages.run(targetSessionId);
-          recoveryIdentities.deleteValue(targetSessionId);
-          sessionMetadata.delete(targetSessionId);
-          ensureSession(targetSessionId, forkState);
-          if (sourceRecoveryIdentity !== undefined) {
-            if (persistedRecoveryIdentity === undefined) {
-              recoveryIdentities.putValue(sourceSessionId, sourceRecoveryIdentity);
-            }
-            recoveryIdentities.putValue(targetSessionId, targetRecoveryIdentityKey);
-          }
-          if (sourceRoute) sessionMetadata.setModelRoute(targetSessionId, sourceRoute);
-          const positions = new Map<number, number>();
-          for (const entry of sourceEvents) {
-            const eventId = entry.event_id ?? `${targetSessionId}:${entry.revision}`;
-            const serialized =
-              this.#codec.encodeHistoricalEvent?.(entry.event) ??
-              this.#codec.encodeEvent(entry.event);
-            eventStore.insertSerializedForkEvent({
-              sessionId: targetSessionId,
-              eventJson: serialized,
-              eventId,
-              revision: entry.revision ?? 0,
-              causationId: entry.causation_id ?? null,
-              occurredAt: entry.occurred_at ?? null,
-              createdAt: entry.created_at,
-            });
-            positions.set(entry.id, entry.revision ?? 0);
-          }
-          const remap = (position: number): number => {
-            let target = 0;
-            for (const entry of sourceEvents) {
-              if (entry.id > position) break;
-              target = positions.get(entry.id) ?? target;
-            }
-            return target;
-          };
-          for (const file of sourceFiles)
-            insertForkFilePreimage.run(
-              targetSessionId,
-              file.path,
-              remap(file.event_position),
-              file.content,
-              file.existed,
-              file.post_hash,
-              file.post_existed,
-              file.created_at,
-            );
-          const encodedFork = encodeSnapshot(forkState);
-          persistSnapshot(
-            targetSessionId,
-            encodedFork.json,
-            remap(sourceRow.event_position),
-            encodedFork.metadata.stateRevision,
-            encodedFork.metadata.stateChecksum,
-            encodedFork.metadata.schemaVersion,
-          );
-          for (const snapshot of sourceNamed) {
-            try {
-              if (checksum(snapshot.state_json) !== snapshot.state_checksum) continue;
-              const namedState = this.#codec.decodeState<State>(
-                openSnapshot(snapshot, `named/${snapshot.name}`),
-              );
-              if (this.#codec.canFork && !this.#codec.canFork(namedState)) continue;
-              const rebound = this.#codec.rebindForkState(
-                namedState,
-                targetSessionId,
-                targetRecoveryIdentityKey,
-              );
-              this.#codec.validateSnapshot?.({
-                state: rebound,
-                sessionId: targetSessionId,
-                eventPosition: remap(snapshot.event_position),
-                stateRevision: snapshot.state_revision,
-                schemaVersion: snapshot.schema_version,
-                eventRevision: snapshot.state_revision,
-              });
-              const encodedNamed = encodeSnapshot(rebound, {
-                eventPosition: remap(snapshot.event_position),
-                stateRevision: snapshot.state_revision,
-                stateChecksum: '',
-                schemaVersion: snapshot.schema_version,
-              });
-              persistNamedSnapshot(
-                targetSessionId,
-                snapshot.name,
-                remap(snapshot.event_position),
-                encodedNamed.json,
-                snapshot.state_revision,
-                encodedNamed.metadata.stateChecksum,
-                snapshot.schema_version,
-                snapshot.created_at,
-              );
-            } catch {
-              /* corrupt or rejected recovery points are omitted */
-            }
-          }
-        })();
-        return true;
+        return result.status === 'applied' && 'receipt' in result
+          ? result
+          : { status: 'unavailable' };
       },
       forkCurrentSession: (
         sourceSessionId: string,

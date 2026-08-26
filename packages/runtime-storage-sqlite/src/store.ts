@@ -16,6 +16,7 @@ export const SQLITE_RUNTIME_DDL = Object.freeze([
   'CREATE TABLE runtime_named_snapshots (session_id TEXT NOT NULL, name TEXT NOT NULL, schema_version INTEGER NOT NULL, format_epoch TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_checksum TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (session_id, name))',
   'CREATE TABLE runtime_file_preimages (session_id TEXT NOT NULL, path TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, content TEXT, existed INTEGER NOT NULL DEFAULT 1, post_hash TEXT, post_existed INTEGER, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (session_id, path, event_position))',
   "CREATE TABLE runtime_effect_leases (session_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL, lease_revision INTEGER NOT NULL DEFAULT 0, certainty TEXT NOT NULL DEFAULT 'certain', expires_at_ms INTEGER NOT NULL, PRIMARY KEY (session_id, effect_id))",
+  'CREATE TABLE runtime_command_receipts (scope_session_id TEXT NOT NULL, command_id TEXT NOT NULL, request_digest TEXT NOT NULL, target_session_id TEXT NOT NULL, original_receipt_json TEXT NOT NULL, committed_revision INTEGER NOT NULL, committed_at INTEGER NOT NULL, PRIMARY KEY (scope_session_id, command_id))',
   'CREATE INDEX runtime_events_session_sequence ON runtime_events(session_id, sequence)',
   'CREATE INDEX runtime_file_preimages_position ON runtime_file_preimages(session_id, event_position)',
 ] as const);

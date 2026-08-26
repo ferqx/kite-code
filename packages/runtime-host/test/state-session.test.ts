@@ -7,6 +7,7 @@ import {
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   CheckpointPort,
+  RuntimeCommandCommitEvidence,
   RuntimeTransactionInput,
   SessionStore,
 } from '@kite-ai/runtime-host/storage';
@@ -63,6 +64,11 @@ function fixture(state: AgentState = initialState()): Fixture {
         writes.push(input);
         if (requiredLease) requiredLeases.push(requiredLease);
       },
+      commitCommandDecision: (input) => {
+        if (fixtureState.failCommit) throw new Error('commit refused');
+        acknowledgements.push('command_decision');
+        writes.push(input);
+      },
     },
     leases: {
       tryAcquire: (_sessionId, effectId, ownerId) => {
@@ -116,6 +122,7 @@ function checkpointPort(): CheckpointPort<AgentState> {
     getNamedSnapshotEntry: () => null,
     restoreNamedSnapshot: () => false,
     forkSession: () => false,
+    forkSessionForCommand: () => ({ status: 'unavailable' }),
     forkCurrentSession: () => false,
     recordFilePreimage: () => undefined,
     recordFilePostimage: () => undefined,
@@ -125,6 +132,16 @@ function checkpointPort(): CheckpointPort<AgentState> {
 
 function message(messageId: string, content = 'hello'): KernelEvent {
   return { type: 'user.message_appended', messageId, content };
+}
+
+function commandEvidence(): RuntimeCommandCommitEvidence {
+  return {
+    scopeSessionId: 'scope-session',
+    commandId: 'command-1',
+    requestDigest: 'a'.repeat(64),
+    targetSessionId: 'state-session-test',
+    committedAt: 1_700_000_000_000,
+  };
 }
 
 describe('Runtime Host State session', () => {
@@ -143,6 +160,93 @@ describe('Runtime Host State session', () => {
     expect(session.processEvent(message('message-1')).status).toBe('duplicate');
     expect(f.writes).toHaveLength(1);
     expect(session.getLastAppliedEvents()).toEqual([]);
+  });
+
+  test('binds an applied receipt to the accepted State revision in one command decision', () => {
+    const f = fixture();
+    const session = createRuntimeHostStateSession(f.input);
+    const committed = session.commitCommandBatch([message('command-message')], commandEvidence());
+
+    expect(committed.events).toMatchObject([message('command-message')]);
+    expect(committed.receipt).toMatchObject({
+      scopeSessionId: 'scope-session',
+      commandId: 'command-1',
+      requestDigest: 'a'.repeat(64),
+      targetSessionId: 'state-session-test',
+      committedRevision: 1,
+      committedAt: 1_700_000_000_000,
+      originalReceiptJson:
+        '{"status":"applied","commandId":"command-1","sessionId":"state-session-test","revision":1}',
+    });
+    expect(f.acknowledgements).toEqual(['command_decision']);
+    expect(f.writes[0]?.commandReceipt).toEqual(committed.receipt);
+    expect(session.getState().revision).toBe(1);
+  });
+
+  test('atomically receipts a snapshot-only lifecycle decision without advancing State', () => {
+    const f = fixture();
+    const session = createRuntimeHostStateSession(f.input);
+    const receipt = session.commitCommandSnapshot(commandEvidence());
+
+    expect(receipt).toMatchObject({
+      scopeSessionId: 'scope-session',
+      commandId: 'command-1',
+      targetSessionId: 'state-session-test',
+      committedRevision: 0,
+    });
+    expect(f.acknowledgements).toEqual(['command_decision']);
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({
+      sessionId: 'state-session-test',
+      events: [],
+      metadata: [],
+      commandReceipt: receipt,
+    });
+    expect(session.getState().revision).toBe(0);
+    expect(session.getLastAppliedEvents()).toEqual([]);
+  });
+
+  test('keeps snapshot-only State unchanged when the receipt transaction fails', () => {
+    const f = fixture();
+    const session = createRuntimeHostStateSession(f.input);
+    f.failCommit = true;
+
+    expect(() => session.commitCommandSnapshot(commandEvidence())).toThrow('commit refused');
+    expect(f.writes).toHaveLength(0);
+    expect(session.getState().revision).toBe(0);
+    expect(session.getLastAppliedEvents()).toEqual([]);
+  });
+
+  test('fails closed for invalid receipt evidence and failed command transactions', () => {
+    const invalid = fixture();
+    const invalidSession = createRuntimeHostStateSession(invalid.input);
+    expect(() =>
+      invalidSession.commitCommandBatch([message('invalid-command')], {
+        ...commandEvidence(),
+        requestDigest: 'not-a-digest',
+      }),
+    ).toThrow('digest is invalid');
+    expect(invalid.writes).toHaveLength(0);
+    expect(invalidSession.getState().revision).toBe(0);
+
+    const wrongTarget = fixture();
+    const wrongTargetSession = createRuntimeHostStateSession(wrongTarget.input);
+    expect(() =>
+      wrongTargetSession.commitCommandBatch([message('wrong-target')], {
+        ...commandEvidence(),
+        targetSessionId: 'another-session',
+      }),
+    ).toThrow('target does not match');
+    expect(wrongTarget.writes).toHaveLength(0);
+
+    const failed = fixture();
+    const failedSession = createRuntimeHostStateSession(failed.input);
+    failed.failCommit = true;
+    expect(() =>
+      failedSession.commitCommandBatch([message('failed-command')], commandEvidence()),
+    ).toThrow('commit refused');
+    expect(failed.writes).toHaveLength(0);
+    expect(failedSession.getState().revision).toBe(0);
   });
 
   test('binds one Host timestamp to the returned and persisted event identity', () => {

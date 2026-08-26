@@ -1,5 +1,5 @@
 import type { RuntimeCommand, RuntimeCommandReceipt } from './commands';
-import type { RuntimeNotification, RuntimeSubscription } from './notifications';
+import type { RuntimeAccessNotification, RuntimeSubscription } from './notifications';
 import type { RuntimeQuery, RuntimeQueryResult } from './queries';
 
 export const RUNTIME_CONTRACT_SCHEMA_ = 'kite.runtime-contract.v1' as const;
@@ -12,6 +12,7 @@ export * from './observability';
 export * from './presentation';
 export * from './projections';
 export * from './queries';
+export * from './validation';
 
 export interface RuntimeContractBoundary {
   readonly audience: 'kite-app';
@@ -30,5 +31,5 @@ export const RUNTIME_CONTRACT_BOUNDARY_: RuntimeContractBoundary = Object.freeze
 export interface RuntimeAccess {
   command(command: RuntimeCommand): Promise<RuntimeCommandReceipt>;
   query(query: RuntimeQuery): Promise<RuntimeQueryResult>;
-  subscribe(subscription: RuntimeSubscription): AsyncIterable<RuntimeNotification>;
+  subscribe(subscription: RuntimeSubscription): AsyncIterable<RuntimeAccessNotification>;
 }

@@ -113,7 +113,7 @@ function SingleQuestion({
 
       if (key.upArrow) moveSelection(Math.max(0, selected - 1));
       if (key.downArrow) moveSelection(Math.min(totalSlots - 1, selected + 1));
-      if (key.return) {
+      if (key.return || input === '\r' || input === '\n') {
         if (hasCustom && selected === totalSlots - 1) return;
         const opt = options[selected];
         if (opt) {
@@ -309,7 +309,7 @@ function MultiQuestionWizard({
       if (options.length === 0) return;
       if (key.upArrow) moveSelection(Math.max(0, selected - 1));
       if (key.downArrow) moveSelection(Math.min(totalSlots - 1, selected + 1));
-      if (key.return) {
+      if (key.return || input === '\r' || input === '\n') {
         if (hasCustom && selected === totalSlots - 1) return;
         const opt = options[selected];
         if (opt) {

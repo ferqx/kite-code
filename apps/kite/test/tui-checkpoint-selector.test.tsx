@@ -47,6 +47,14 @@ const noChangePreview: FileRestorePreview = {
   failureCount: 0,
 };
 
+async function waitForFrameText(lastFrame: () => string | undefined, text: string): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!(lastFrame() ?? '').includes(text)) {
+    if (Date.now() >= deadline) return;
+    await Bun.sleep(5);
+  }
+}
+
 describe('CheckpointSelector', () => {
   test('shows human-readable message boundaries instead of internal checkpoint metadata', () => {
     const { lastFrame } = render(
@@ -109,12 +117,12 @@ describe('CheckpointSelector', () => {
         checkpoints={checkpoints}
         onConfirm={(checkpointId, scope) => confirmed.push({ checkpointId, scope })}
         onClose={() => {}}
-        getRewindPreview={() => filePreview}
+        getRewindPreview={async () => filePreview}
       />,
     );
 
     stdin.write('\r');
-    await Bun.sleep(10);
+    await waitForFrameText(lastFrame, 'Code will restore +883 −3922');
 
     const frame = lastFrame() ?? '';
     expect(frame).not.toContain('影响');
@@ -135,7 +143,7 @@ describe('CheckpointSelector', () => {
         checkpoints={checkpoints}
         onConfirm={() => {}}
         onClose={() => {}}
-        getRewindPreview={() => noChangePreview}
+        getRewindPreview={async () => noChangePreview}
       />,
     );
 
@@ -150,6 +158,54 @@ describe('CheckpointSelector', () => {
     expect(frame).toContain('❯ Restore code only');
     expect(frame).not.toContain('会话将保持不变。');
     expect(frame).not.toContain('代码将保持不变。');
+  });
+
+  test('ignores a stale async preview after selecting another rewind scope', async () => {
+    let resolveFirst!: (value: FileRestorePreview) => void;
+    let resolveSecond!: (value: FileRestorePreview) => void;
+    const first = new Promise<FileRestorePreview>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const second = new Promise<FileRestorePreview>((resolve) => {
+      resolveSecond = resolve;
+    });
+    let calls = 0;
+    const { stdin, lastFrame } = render(
+      <CheckpointSelector
+        checkpoints={checkpoints}
+        onConfirm={() => {}}
+        onClose={() => {}}
+        getRewindPreview={() => (++calls === 1 ? first : second)}
+      />,
+    );
+
+    stdin.write('\r');
+    await Bun.sleep(10);
+    stdin.write('\u001b[B');
+    await Bun.sleep(10);
+    stdin.write('\u001b[B');
+    await Bun.sleep(10);
+
+    resolveSecond({
+      ...filePreview,
+      files: [{ path: 'second.ts', addedLines: 2, removedLines: 1 }],
+      addedLines: 2,
+      removedLines: 1,
+      conflictCount: 0,
+    });
+    await waitForFrameText(lastFrame, 'second.ts');
+    expect(lastFrame()).toContain('second.ts');
+
+    resolveFirst({
+      ...filePreview,
+      files: [{ path: 'stale-first.ts', addedLines: 9, removedLines: 9 }],
+      addedLines: 9,
+      removedLines: 9,
+      conflictCount: 0,
+    });
+    await Bun.sleep(10);
+    expect(lastFrame()).toContain('second.ts');
+    expect(lastFrame()).not.toContain('stale-first.ts');
   });
 
   test('Esc returns from confirmation before closing the overlay', async () => {

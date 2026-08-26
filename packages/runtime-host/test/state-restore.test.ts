@@ -57,7 +57,7 @@ function services(
   };
   return {
     sessions,
-    transactions: { commit: () => undefined },
+    transactions: { commit: () => undefined, commitCommandDecision: () => undefined },
     leases: {
       tryAcquire: () => true,
       renew: () => true,
@@ -81,6 +81,7 @@ function checkpointPort(): CheckpointPort<AgentState> {
     getNamedSnapshotEntry: () => null,
     restoreNamedSnapshot: () => false,
     forkSession: () => false,
+    forkSessionForCommand: () => ({ status: 'unavailable' }),
     forkCurrentSession: () => false,
     recordFilePreimage: () => undefined,
     recordFilePostimage: () => undefined,

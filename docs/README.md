@@ -29,6 +29,11 @@ Sandbox、TUI、qualification 或 observability 路径必须从通用 owner 规�
 膨胀或跨语义满足。根 `package.json` 同时承载安装、测试和 workspace 配置，使用独立
 `root-package-manifest` 规则，由实际发生变化的 current authority 承接，不强迫修改无关 Runtime 文档。
 
+Runtime Server V1 将 `runtime-protocol`、`runtime-server`、`runtime-client`、Host command receipt、App
+carrier 与跨 transport qualification 分成独立映射规则；通用 Runtime/App owner 必须排除这些专业路径。
+同一生产文件仍只能命中一个 source owner，新增 transport、receipt 或 workspace 时必须同步代表路径矩阵，
+不得靠重叠规则让任意一份无关 authority 满足检查。
+
 ## 并发开发
 
 每个可写任务使用独立 branch 和 Git worktree，并指定唯一 Git owner。默认 `all` 作用域检查任务 worktree

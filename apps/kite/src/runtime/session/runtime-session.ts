@@ -1,8 +1,17 @@
 import type { BuiltinToolCatalogProjection } from '@kite-ai/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import { sandboxBackendAvailable } from '@kite-ai/builtin-runtime/sandbox';
-import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
+import type {
+  AgentPhase,
+  RuntimeClientEvent,
+  SkillManifest,
+  SkillScanOptions,
+} from '@kite-ai/runtime-contract';
 import { projectRuntimeObservabilityFact } from '@kite-ai/runtime-host';
+import {
+  isPrecommittedInteractionAction,
+  type PrecommittedInteractionActionDescriptor,
+} from '#app/bootstrap/runtime/command-interaction-decision';
 import type {
   AuthorizedExecutionControl,
   RuntimeSessionCoordinator,
@@ -10,13 +19,17 @@ import type {
 } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import { buildRunAgentParams } from '#app/bootstrap/runtime/runtime-agent-input';
 import type { RuntimeUserAction } from '#app/bootstrap/runtime/state-actions';
-import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
+import type {
+  RuntimeActionProvider,
+  RuntimeInteractionCommandCommitPort,
+} from '#app/bootstrap/runtime/state-runner';
 import type {
   RuntimeEffect,
   RuntimeEvent,
   RuntimeState,
   StateRuntimeStorage,
 } from '#app/bootstrap/runtime/state-runtime';
+import type { PrecommittedStartTurnDescriptor } from '#app/bootstrap/runtime/turn-command-decision';
 import type { RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
 import type { AgentConfig } from '#app/config/index';
 import { composeAppGitBroker, resolveAppGitExecutable } from '#app/git/composition';
@@ -31,6 +44,7 @@ import {
   type SessionUserInputProvider,
   shouldProjectRunExited,
 } from '#app/runtime/session/contracts';
+import { projectStateRuntimeEventForPresentation } from '#app/runtime-client/presentation-history';
 import { type AppShellExecutor, composeAppSandboxExecutor } from '@/app/sandbox/composition';
 
 function isRecoverableError(error: unknown): boolean {
@@ -119,16 +133,6 @@ export {
   fullModeUnavailableReason,
   resolveInteractionModeTarget,
 } from '#app/runtime/session/contracts';
-
-/** 可丢弃的缓冲事件类型（text/reason 为非关键信息，丢弃时不丢失用户可见状态） */
-const DISPOSABLE_EVENT_TYPES = new Set([
-  'text',
-  'reason',
-  'model.text_delta',
-  'model.reasoning_delta',
-  'model.reasoning_completed',
-  'tool.progress',
-]);
 
 const PRESENTATION_FRAME_MS = 50;
 const MAX_BUFFERED_TOOL_PROGRESS_CHARS = 16 * 1024;
@@ -235,7 +239,7 @@ export interface RuntimeProjectIdentity {
 }
 
 export interface ContextCompactionCommandResult {
-  events: RuntimeEvent[];
+  events: RuntimeClientEvent[];
   text: string;
   isError?: boolean;
   /** Typed fail-closed reason when no live Runtime/Kernel control exists. */
@@ -268,7 +272,9 @@ export class SessionRuntime {
   private _activeExecutionSignal: AbortSignal | null = null;
   agentLoopActive = false;
   pendingInterrupt = false;
-  eventBuffer: RuntimeEvent[] = [];
+  eventBuffer: RuntimeClientEvent[] = [];
+  /** Durable State facts emitted while this Session is backgrounded. */
+  private _durableStateEventBuffer: RuntimeEvent[] = [];
   /** true if loaded from DB and state not yet hydrated / 从 DB 加载但尚未加载完整状态 */
   dormant = false;
   /** TUI-only recovery projection hid an unfinished canonical interaction. */
@@ -303,8 +309,14 @@ export class SessionRuntime {
   private _pendingResolve: {
     interactionId: string;
     generation?: number;
-    resolve: (action: SessionUserAction) => void;
+    resolve: (action: SessionUserAction | PrecommittedInteractionActionDescriptor) => void;
   } | null = null;
+  private _pendingCommandInteraction: {
+    interactionId: string;
+    port: RuntimeInteractionCommandCommitPort;
+  } | null = null;
+  /** Bridge-private durable State event sink; absent outside Runtime Server composition. */
+  private _runtimeStateEventSink: ((event: RuntimeEvent) => void) | null = null;
   /**
    * A durable interaction can reach the TUI before the runner installs its
    * requestAction waiter (notably while concurrent Subagent siblings drain).
@@ -542,6 +554,7 @@ export class SessionRuntime {
     this._clearModelDeltas();
     this._clearToolProgress();
     this.eventBuffer = [];
+    this._durableStateEventBuffer = [];
     this.conversationHistory = [];
     this.pendingInterrupt = false;
   }
@@ -551,6 +564,7 @@ export class SessionRuntime {
     this._flushBufferedPresentation();
     this._foreground = foreground;
     if (foreground) {
+      this._flushDurableStateEventBuffer();
       this._foregroundWake?.();
       this._foregroundWake = null;
     }
@@ -563,6 +577,8 @@ export class SessionRuntime {
     task: string,
     deps: {
       dispatch: (action: SessionPresentationAction) => void;
+      /** Runtime Server bridge receives every non-ephemeral State revision here. */
+      onRuntimeStateEvent?: (event: RuntimeEvent) => void;
       provider: SessionUserInputProvider;
       config: AgentConfig;
       model?: import('@kite-ai/builtin-runtime/model').SupportedChatModel;
@@ -574,6 +590,7 @@ export class SessionRuntime {
     }>,
     hostSignal?: AbortSignal,
     hostAbort?: (reason: string) => void,
+    precommittedStart?: PrecommittedStartTurnDescriptor,
   ): Promise<void> {
     if (this._manualCompactionQueueDepth > 0) await this._manualCompactionBarrier;
     if (this.agentLoopActive && !this._cancellationRequested && !this._successorPromptReserved)
@@ -609,6 +626,7 @@ export class SessionRuntime {
     this.abortController = abortController;
     this._activeExecutionSignal = executionSignal;
     this._activeDispatch = deps.dispatch;
+    this._runtimeStateEventSink = deps.onRuntimeStateEvent ?? null;
     const forwardHostAbort = () => {
       this._cancelCurrentInteraction();
       this._preparingShellExecutor?.abortPreparation?.();
@@ -684,7 +702,13 @@ export class SessionRuntime {
       activeRuntimeCoordinator = runtimeCoordinator;
       this.authorizedExecutionControl = runtimeCoordinator.control;
       runtimeCoordinator.updateSandboxAvailable(sandboxBackendAvailable(effectiveBackend));
-      reconcileRuntimeInteractionMode(runtimeCoordinator.control, this.interactionMode);
+      if (precommittedStart) {
+        if (runtimeCoordinator.getState().mode !== this.interactionMode) {
+          throw new Error('Runtime precommitted interaction mode does not match current State.');
+        }
+      } else {
+        reconcileRuntimeInteractionMode(runtimeCoordinator.control, this.interactionMode);
+      }
 
       // 始终使用代理提供器 — 事件路由由 _foreground 控制
       const runtimeInput: Omit<
@@ -707,6 +731,7 @@ export class SessionRuntime {
         skills: runAgentParams.skills,
         skillOptions: runAgentParams.skillOptions,
         initialSkillActivations: runAgentParams.initialSkillActivations,
+        ...(precommittedStart ? { precommittedStart } : {}),
         interactionMode: runAgentParams.interactionMode,
         phase: runAgentParams.phase,
         thinkingLevel: runAgentParams.thinkingLevel,
@@ -736,7 +761,8 @@ export class SessionRuntime {
         },
       };
       const runtimeProvider: RuntimeActionProvider = {
-        requestAction: (effect, state) => this._requestRuntimeAction(effect, state),
+        requestAction: (effect, state, commandCommit) =>
+          this._requestRuntimeAction(effect, state, commandCommit),
       };
       const generator = runtimeCoordinator.executeTurn(runtimeInput, runtimeProvider);
 
@@ -807,10 +833,8 @@ export class SessionRuntime {
               type: 'RUNTIME_EVENT',
               event: {
                 type: 'model.retry',
-                invocationId: parsedRetry.invocationId,
+                requestId: parsedRetry.invocationId,
                 attempt: parsedRetry.attempt,
-                maxAttempts: parsedRetry.maxAttempts,
-                error: parsedRetry.error,
                 delayMs: parsedRetry.delayMs,
               },
             });
@@ -832,7 +856,10 @@ export class SessionRuntime {
         recoverable: isRecoverableError(e),
       };
       if (this._foreground) {
-        deps.dispatch({ type: 'RUNTIME_EVENT', event: errorEvent });
+        deps.dispatch({
+          type: 'RUNTIME_EVENT',
+          event: { type: 'unavailable', reason: 'unknown_event' },
+        });
       } else {
         this._pushToBuffer(errorEvent);
       }
@@ -854,6 +881,7 @@ export class SessionRuntime {
       this._activeExecutionSignal = null;
       this.generator = null;
       this._activeDispatch = null;
+      this._runtimeStateEventSink = null;
       this._queuedInterruptAction = null;
       // The cleanup barrier covers provider teardown too. A successor must not
       // start while the predecessor can still clear a shared pending action.
@@ -871,40 +899,25 @@ export class SessionRuntime {
 
   /** 推送事件到缓冲，溢出时优先丢弃非关键事件 */
   private _pushToBuffer(event: RuntimeEvent): void {
-    if (event.type === 'tool.progress') {
-      event = normalizeToolProgress(event);
-      for (let index = this.eventBuffer.length - 1; index >= 0; index -= 1) {
-        const candidate = this.eventBuffer[index]!;
-        if (
-          'toolCallId' in candidate &&
-          candidate.toolCallId === event.toolCallId &&
-          (candidate.type === 'tool.finished' ||
-            candidate.type === 'tool.failed' ||
-            candidate.type === 'tool.rejected' ||
-            candidate.type === 'tool.cancelled')
-        ) {
-          break;
-        }
-        if (
-          candidate.type === 'tool.progress' &&
-          candidate.toolCallId === event.toolCallId &&
-          candidate.stream === event.stream
-        ) {
-          this.eventBuffer[index] = mergeToolProgress(candidate, event);
-          return;
-        }
-      }
+    if (this._runtimeStateEventSink && !isEphemeralRuntimeEvent(event)) {
+      // A background session must not dispatch into the active TUI, but the
+      // durable revision cannot be discarded or compressed. On foreground
+      // restoration the bridge emits every buffered raw fact in order.
+      this._durableStateEventBuffer.push(event);
+      return;
     }
+    const projected = projectStateRuntimeEventForPresentation(event);
+    if (projected === undefined) return;
     if (this.eventBuffer.length >= SessionRuntime.MAX_BUFFER) {
-      // 查找第一个可丢弃事件的下标
-      const dropIdx = this.eventBuffer.findIndex((e) => DISPOSABLE_EVENT_TYPES.has(e.type));
+      const dropIdx = this.eventBuffer.findIndex(
+        (candidate) => candidate.type === 'model.text_delta' || candidate.type === 'tool.progress',
+      );
       if (dropIdx >= 0) {
         this.eventBuffer.splice(dropIdx, 1);
-      } else if (DISPOSABLE_EVENT_TYPES.has(event.type)) return;
-      // MAX_BUFFER is a soft presentation limit. Durable/lifecycle events may
-      // temporarily exceed it rather than evict an earlier terminal fact.
+      } else if (projected.type === 'model.text_delta' || projected.type === 'tool.progress')
+        return;
     }
-    this.eventBuffer.push(event);
+    this.eventBuffer.push(projected);
   }
 
   /** Route the public RuntimeEvent stream directly to the foreground or buffer. */
@@ -923,6 +936,21 @@ export class SessionRuntime {
       this._bufferModelDelta(event, dispatch);
       return;
     }
+    if (event.type === 'model.reasoning_completed') {
+      // Completion is ephemeral just like its cumulative delta. Flush that
+      // delta first, then send the lifecycle boundary through the same
+      // presentation dispatch. Sending it to the durable State sink would
+      // make the server wait for a revision that an ephemeral event never
+      // consumes, so live Server clients would never receive completion.
+      this._flushModelDeltas();
+      if (this._foreground) {
+        const projected = projectStateRuntimeEventForPresentation(event);
+        if (projected) dispatch({ type: 'RUNTIME_EVENT', event: projected });
+      } else {
+        this._pushToBuffer(event);
+      }
+      return;
+    }
     if (event.type === 'tool.progress') {
       this._flushModelDeltas();
       this._bufferToolProgress(event, dispatch);
@@ -930,7 +958,16 @@ export class SessionRuntime {
     }
     this._flushBufferedPresentation();
     if (this._foreground) {
-      dispatch({ type: 'RUNTIME_EVENT', event });
+      // Preserve the State revision even for facts omitted by the safe
+      // projector. TuiRuntimeBridge owns the raw→safe projection and emits an
+      // event-less notification for omitted facts, so Server revision tracking
+      // never turns the next tool/interaction notification into a reset.
+      if (this._runtimeStateEventSink) {
+        this._runtimeStateEventSink(event);
+        return;
+      }
+      const projected = projectStateRuntimeEventForPresentation(event);
+      if (projected) dispatch({ type: 'RUNTIME_EVENT', event: projected });
       return;
     }
     // Background ask_user is immediately cancelled by the provider below; do not
@@ -961,7 +998,8 @@ export class SessionRuntime {
     for (const event of [buffered.reasoning, buffered.text]) {
       if (!event) continue;
       if (this._foreground && buffered.dispatch) {
-        buffered.dispatch({ type: 'RUNTIME_EVENT', event });
+        const projected = projectStateRuntimeEventForPresentation(event);
+        if (projected) buffered.dispatch({ type: 'RUNTIME_EVENT', event: projected });
       } else {
         this._pushToBuffer(event);
       }
@@ -999,7 +1037,8 @@ export class SessionRuntime {
     };
     for (const event of buffered.events.values()) {
       if (this._foreground && buffered.dispatch) {
-        buffered.dispatch({ type: 'RUNTIME_EVENT', event });
+        const projected = projectStateRuntimeEventForPresentation(event);
+        if (projected) buffered.dispatch({ type: 'RUNTIME_EVENT', event: projected });
       } else {
         this._pushToBuffer(event);
       }
@@ -1020,17 +1059,29 @@ export class SessionRuntime {
     this._flushToolProgress();
   }
 
+  private _flushDurableStateEventBuffer(): void {
+    if (!this._runtimeStateEventSink || this._durableStateEventBuffer.length === 0) return;
+    const buffered = this._durableStateEventBuffer;
+    this._durableStateEventBuffer = [];
+    for (const event of buffered) this._runtimeStateEventSink(event);
+  }
+
   /** Adapt existing Ink button actions at the UI edge and bind the persisted interaction id. */
   private async _requestRuntimeAction(
     effect: Extract<RuntimeEffect, { interactionId: string }>,
     state: Readonly<RuntimeState>,
-  ): Promise<RuntimeUserAction> {
+    commandCommit: RuntimeInteractionCommandCommitPort,
+  ): Promise<RuntimeUserAction | PrecommittedInteractionActionDescriptor> {
+    this._pendingCommandInteraction = { interactionId: effect.interactionId, port: commandCommit };
     if (effect.type === 'request_provider_action') {
       const response = await this._proxyProvider.requestAction({
         kind: 'input',
         interactionId: effect.interactionId,
         question: providerActionInput(effect.providerId, effect.action),
       });
+      if (isPrecommittedInteractionAction(response as RuntimeUserAction)) {
+        return response as unknown as PrecommittedInteractionActionDescriptor;
+      }
       if (response.type !== 'input' || response.text.toLowerCase().startsWith('later')) {
         return {
           type: 'provider_action_result',
@@ -1068,6 +1119,9 @@ export class SessionRuntime {
           effect.retryable,
         ),
       });
+      if (isPrecommittedInteractionAction(response as RuntimeUserAction)) {
+        return response as unknown as PrecommittedInteractionActionDescriptor;
+      }
       const choice = response.type === 'input' ? response.text.toLowerCase() : 'cancel';
       if (choice.startsWith('session') || choice.startsWith('waive')) {
         return {
@@ -1142,6 +1196,9 @@ export class SessionRuntime {
           context: `verification:${record.spec.subject}`,
         },
       });
+      if (isPrecommittedInteractionAction(action as RuntimeUserAction)) {
+        return action as unknown as PrecommittedInteractionActionDescriptor;
+      }
       if (action.type === 'input') {
         const answer = action.text.trim();
         const normalized = answer.toLowerCase();
@@ -1235,6 +1292,9 @@ export class SessionRuntime {
     }
 
     const action = await this._proxyProvider.requestAction(payload);
+    if (isPrecommittedInteractionAction(action as RuntimeUserAction)) {
+      return action as unknown as PrecommittedInteractionActionDescriptor;
+    }
     switch (action.type) {
       case 'input':
         return {
@@ -1314,13 +1374,15 @@ export class SessionRuntime {
         }
         // 使用运行时自身的中断状态，永久等待用户处理
         self._pendingInterrupt = payload;
-        return new Promise<SessionUserAction>((resolve) => {
-          self._pendingResolve = {
-            interactionId: payload.interactionId,
-            ...(payload.kind === 'approval' ? { generation: payload.generation } : {}),
-            resolve,
-          };
-        });
+        return new Promise<SessionUserAction | PrecommittedInteractionActionDescriptor>(
+          (resolve) => {
+            self._pendingResolve = {
+              interactionId: payload.interactionId,
+              ...(payload.kind === 'approval' ? { generation: payload.generation } : {}),
+              resolve,
+            };
+          },
+        ) as Promise<SessionUserAction>;
       },
 
       submitAction(action: SessionUserAction): void {
@@ -1374,7 +1436,34 @@ export class SessionRuntime {
     }
   }
 
+  /** Bridge-private command seam; it is never part of the TUI public contract. */
+  getPendingInteractionCommandPort(
+    interactionId: string,
+  ): RuntimeInteractionCommandCommitPort | null {
+    return this._pendingCommandInteraction?.interactionId === interactionId
+      ? this._pendingCommandInteraction.port
+      : null;
+  }
+
+  resolveCommittedInteraction(descriptor: PrecommittedInteractionActionDescriptor): boolean {
+    const pending = this._pendingResolve;
+    if (
+      !pending ||
+      pending.interactionId !== descriptor.interactionId ||
+      this._pendingCommandInteraction?.interactionId !== descriptor.interactionId
+    ) {
+      return false;
+    }
+    this._pendingResolve = null;
+    this._pendingInterrupt = null;
+    this._queuedInterruptAction = null;
+    this._pendingCommandInteraction = null;
+    pending.resolve(descriptor);
+    return true;
+  }
+
   private _cancelCurrentInteraction(): void {
+    this._pendingCommandInteraction = null;
     const interactionId =
       this._pendingInterrupt?.interactionId ??
       this._pendingResolve?.interactionId ??
@@ -1434,6 +1523,15 @@ export class SessionRuntime {
 
 function approvalGeneration(payload: SessionInterruptPayload): number | undefined {
   return payload.kind === 'approval' ? payload.generation : undefined;
+}
+
+function isEphemeralRuntimeEvent(event: RuntimeEvent): boolean {
+  return (
+    event.type === 'model.text_delta' ||
+    event.type === 'model.reasoning_delta' ||
+    event.type === 'model.reasoning_completed' ||
+    event.type === 'tool.progress'
+  );
 }
 
 function approvalActionGeneration(action: SessionUserAction): number | undefined {

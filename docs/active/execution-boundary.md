@@ -221,6 +221,14 @@ protected-path revision 和 cancellation correlation；allocating Local Provider
 只返回 immutable data-first plan、backend capability evidence 与 cleanup handle，不拥有 Runtime Event、State、
 Policy、approval 或 process spawn。
 
+prepared consumer 必须区分“要求后端强制的限制”与“用户已经批准移除该维限制”的 development scope。
+POSIX 的 `workspace_only/read_only` 与 `network=disabled` 继续要求对应 backend evidence 为 `enforced`；
+`filesystemMode=allow_all` 与 `networkMode=allow_all` 则是 exact invocation 已密封的 unrestricted projection，
+不能再映射成 production `filesystem.full_access` 或 `network.allowlist` evidence 并二次拒绝，也不能据此把
+这些 production evidence 标为 `enforced`。Windows lower-assurance V6 development path 同样消费其已声明
+scope，但 `network=allow_all` 仍必须与同一次批准的 `filesystem=allow_all` 配对。command identity、grant、
+expiry、durable lifecycle、backend digest 和 hard deny 的全部复验保持不变。
+
 Pipeline 把 private preparation Artifact 与 `capability.sandbox_preparation_ready` durable ack 绑定后，Runtime
 consumer 才能单次消费 plan。consumer 在 spawn 紧前重验外层 invocation 的 tool call、capability revision、
 effective-effects/admission、Workspace、attempt 以及 preparation/ready/dispatch/plan digest、expiry 与

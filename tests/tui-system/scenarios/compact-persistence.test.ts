@@ -43,7 +43,7 @@ describe('TUI PTY System — /compact persistence', () => {
   });
 
   test(
-    'replays the exact command-bearing session after process restart',
+    'restores the command-bearing session after process restart',
     async () => {
       const sessionSearchIdentity = 'restart persistence target identity';
       const sessionResponse = 'Restart persistence target response';
@@ -114,16 +114,20 @@ describe('TUI PTY System — /compact persistence', () => {
         () => {
           const viewport = tui.viewport();
           return (
-            screenContains(viewport, command) &&
+            screenContains(viewport, sessionSearchIdentity) &&
+            screenContains(viewport, sessionResponse) &&
             screenContains(viewport, '❯') &&
             !screenContains(viewport, '会话列表')
           );
         },
-        'restarted TUI to replay the persisted compact command',
+        'restarted TUI to restore the command-bearing session history',
         15_000,
       );
 
-      expect(screenContains(tui.viewport(), command)).toBe(true);
+      // The command receipt remains durable (asserted before restart), while
+      // Runtime Server V1 replays only client-safe conversation projections.
+      expect(screenContains(tui.viewport(), sessionSearchIdentity)).toBe(true);
+      expect(screenContains(tui.viewport(), sessionResponse)).toBe(true);
     },
     TIMEOUT,
   );

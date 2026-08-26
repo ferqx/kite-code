@@ -2,15 +2,15 @@
 
 状态：active
 
-读取时机：修改 Runtime authority、identity、Grant/Receipt、持久化、子进程协议、Model/MCP transport、Credential broker 或 Runtime State/SQLite Store 时。
+读取时机：修改 Runtime authority、Client/Protocol/Server carrier、identity、Grant/Receipt、持久化、子进程协议、Model/MCP transport、Credential broker 或 Runtime State/SQLite Store 时。
 
-验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts apps/kite/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
+验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite/test/isolated/runtime-command-restart.test.ts apps/kite/test/isolated/runtime-server-multi-client.test.ts apps/kite/test/isolated/runtime-transport-conformance.test.ts apps/kite/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0123/0124/0125、ADR-0127。
+相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143。
 
 ## 当前可信域
 
-Agent Kernel、Runtime Host、Builtin Runtime 与 App composition 位于同一可信进程。Package/export、对象 checksum 或 HMAC 不能隔离同一进程中的恶意代码，因此同进程 typed seam 不使用 secret-key authenticity。Client input、磁盘 bytes、子进程输出、远端 endpoint 和 OS resource identity仍在各自真实边界重新验证。
+Agent Kernel、Runtime Host、Builtin Runtime、Protocol/Server/Client 与 App composition 可以位于同一可信进程。Package/export、对象 checksum 或 HMAC 不能隔离同一进程中的恶意代码，因此同进程 typed seam 不使用 secret-key authenticity。Client input、Protocol message、磁盘 bytes、子进程输出、远端 endpoint 和 OS resource identity仍在各自真实边界重新验证。
 
 当前不建立持久 Project authority。Project identity 是 Runtime Host 从 native canonical Workspace realpath
 确定性派生的标识；Session 创建只接受 Workspace/Session facts。Coordinator 必须复用 Host 的同一
@@ -19,6 +19,20 @@ case-folded path 再次哈希成第二个 Project identity。二者仍指向同�
 持久 Project digest，后者只拥有 path containment/equality 语义。不存在 `ProjectIdentityStore`、
 `ProjectHandle`、installation revision/nonce/expiry，也不存在进程级 single-Host 全局锁。App 仍是
 唯一 composition root，Host/Store operation 仍各有一个 production owner。
+
+## Runtime Server / Client authority boundary
+
+`RuntimeAccess` 是唯一 execution backend seam，Host 是其唯一 owner：拥有 Session mailbox、lifecycle、revision fence、recovery、notification routing 与 persistent receipt lookup/commit。`runtime-server` 只接收 `RuntimeAccess` 加 App-owned admission port；它拥有 connection resources 与 bounded delivery，绝不拥有 domain waiter、Session reducer、Host、Store、Kernel、Builtin module、SQLite reader 或 history authority。`runtime-client` 是 transport-neutral 的，只拥有 correlation、explicit reconnect/resubscribe 与 generation/snapshot state，不拥有 execution authority。
+
+App 为每个 Server instance 固定一个 canonical trusted Workspace。admission 可以 authorize frozen operation 并注入 App-owned Workspace/Project facts，但绝不从 `clientInfo`、display name 或 request body 派生 authority，也不 command、cache domain state 或写 revision。只有 `apps/kite/src/bootstrap.ts` 组合 Host、Server、Client、Store、carrier 与 local auth。TUI 与 foreground CLI 只有一条 production path：`RuntimeClient → RuntimeServer → RuntimeAccess`；InProcess 不是 bypass，因为它经过同一 Protocol codec、initialize、limits、admission 与 subscription ordering。完整 history 独立走 `RuntimeClient.history → RuntimeHistoryClient → App exhaustive client-event projector → RuntimeLogQueryPort → SQLite readonly reader`；TUI list/load 不直接调用 SessionStore，Server notification retention、trace 与 JSONL 不能成为 history fallback。
+
+本地 presentation DTO 与 observability 是不同边界。按 ADR-0143，closed `RuntimeClientEvent` 可以保留有界
+reasoning segment、动态 tool label、普通 path/pattern/command/arguments、stdout/stderr/result 与 user-cancel
+cause，使 live 与 replay 由同一 TUI reducer 组装；明显 credential/authority material 仍过滤，raw RuntimeEvent、
+State、Store handle 和 settlement callback 仍禁止。该本地内容不进入 metric、diagnostic 或远程 reporter，
+也不把 development WebSocket 提升为 production Web。
+
+Protocol V1 是 exact、repo-private contract：只接纳 JSON-RPC `"2.0"`、exact V1 version/schema、bounded string IDs、object params 与冻结的 method/event allowlist。unknown、malformed、oversized、unsafe 或 pre-initialize input 在 Host mailbox、Store 或 effect 之前 fail closed。transport 不创建第二 execution path：不存在 sidecar Server、第二 listener owner、第二 Store writer、dual write、alternate transport fallback 或 catch-new-then-old compatibility branch。
 
 ## Authority sequence
 
@@ -40,6 +54,7 @@ Kernel 只拥有纯 Intent、Policy/approval、result acceptance 与 recovery/co
 | Boundary | 当前机制 | 明确不提供的保证 |
 | --- | --- | --- |
 | 同进程 command/grant/receipt | strict schema、exact identity、freeze、TTL、single-use、revision/CAS | 不使用 secret key；不抵御恶意同进程代码 |
+| Runtime Protocol / Server | exact codec/allowlist/limits、App admission、queued+in-flight byte reservation、cursor-ahead reset、ack-before-notification | 不创建 Runtime/Store/Kernel authority，不把 transport success 当作 domain fact |
 | SQLite Store | Runtime State exact codec、SQLite Store marker、canonical event JSON、snapshot checksum、transaction/revision/effect lease | checksum 不是同用户 writer authenticity |
 | Private Artifact | SHA-256 内容寻址、canonical schema、owner-only/no-follow、atomic publish、严格回读 | 不创建 installation key；digest 可被有写权限者重算 |
 | POSIX/Windows sandbox | Host 创建的专用 pipe/handle、PID/PGID/Job/process identity、strict bounded control frame、peer/invocation/sequence | 不传 secret，不使用 HMAC，不声称消息层 OS-user isolation |
@@ -57,9 +72,21 @@ ready 只在 wrapper/runner 验证 control frame 且即将启动 exact child 前
 
 ## SQLite Store 与 Artifact
 
-新 Session 只使用 State 27/SAQ epoch 与 epoch 派生的 `.runtime-state-store-{generation}.db` current target。State 26/Store 5 的 canonical `.runtime-state-store.db` 只属于 ADR-0138 明确支持的只读历史 source。SQLite Store 当前 exact schema 是 7 tables / 2 indexes；没有 persisted authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event 是 strict canonical JSON，Snapshot 以 SHA-256 checksum 检测损坏。写入/恢复 Store 时会校验目标会话的当前 Event/Snapshot；SessionStore 的会话发现只按序解码到第一条命名候选后停止，不以全日志解码阻塞 TUI 启动，具体会话恢复仍走 session-scoped 完整校验。历史 source 只要存在 WAL/SHM sidecar 就必须在隔离副本中读取；`SQLITE_OPEN_READONLY` 不足以保证 SHM 不被更新，真实 source 的 identity、mtime 与字节不得变化。只读日志 reader 打开时只校验数据库 marker 与表结构，并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
+新 Session 只使用 State 27 / Store 6 / `kite-runtime-server-v1-2026-08-26` 与 epoch 派生的 `.runtime-state-store-{generation}.db` current target。SQLite Store 当前 exact schema 是 **8 tables / 2 non-primary-key indexes**；没有 persisted authority codec、`authority_envelope`、DataOrigin/EgressAuthority/egress nonce ledger。Event 是 strict canonical JSON，Snapshot 以 SHA-256 checksum 检测损坏。写入/恢复 Store 时会校验目标会话的当前 Event/Snapshot；SessionStore 的会话发现只按序解码到第一条命名候选后停止，不以全日志解码阻塞 TUI 启动，具体会话恢复仍走 session-scoped 完整校验。历史 source 只要存在 WAL/SHM sidecar 就必须在隔离副本中读取；`SQLITE_OPEN_READONLY` 不足以保证 SHM 不被更新，真实 source 的 identity、mtime 与字节不得变化。只读日志 reader 打开时只校验数据库 marker 与表结构，并在读取某页时逐条解码该页事件。一个坏会话不能阻断其他正常会话的日志查询，坏事件所在页仍会明确失败。
 
-不匹配当前 marker 的数据库直接 fail closed。production package 不导出旧 constructor/path，也没有 try-new-catch-old、双写或 mixed-format normalization。
+`runtime_command_receipts` 是第八张表。它的唯一 key 是 `(scope_session_id, command_id)`；存储的 request digest、target Session、canonical original applied receipt 与 committed revision/time 把 replay 绑定到一个 exact command decision。同 scope/key 的不同 digest fail closed。State/event/snapshot/revision decision 与 receipt 在同一 Store transaction 提交；所以 commit 后、response 前的 crash 只能让同 ID retry 返回原事实，绝不再次 prepare 或 dispatch effect。parse/codec/auth/overload/transport failure 不创建 receipt。receipt retention 是刻意的：close、Session delete、target delete 保留 receipt；fork 绝不复制 source receipt；不设 TTL 或 capacity pruning；只有删除整个 Store 才会移除 metadata。
+
+Session delete 同样是显式 Runtime command，不是 App/TUI 的 SQLite helper。Host 在 Session mailbox/lifecycle
+边界串行化删除，Store 在一个 `BEGIN IMMEDIATE` 中写入 scoped applied receipt 并删除该 Session 的 durable
+facts，但保留 receipt；Host 随后移除 registry projection，且不会再以 close snapshot 重建已删 Session。
+
+State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19` 与 State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25` 都是 explicit source-only compatibility profile，不是 writer。用户选中的 exact session 可以经 no-follow isolated copy atomic import 到 Store 6；unknown source 静默忽略，corrupt source 只隔离该 session。source bytes 永不写回、checkpoint、rename 或作为 fallback 执行。
+
+不匹配 current marker 的 database 直接 fail closed。production package 不导出 old constructor/path，也不存在 Store 5 current writer、sidecar receipt database、hidden DDL drift、ignored receipt table、try-new-catch-old、dual write 或 mixed-format normalization。
+
+## Carrier scope
+
+stdio 是 App-owned child I/O：bounded UTF-8 JSONL 从 stdin 输入，stdout 只承载 protocol，diagnostics 使用 stderr；EOF 只释放 connection，不会创建新的 Runtime owner，只有 parent capability 可以请求 composition shutdown。loopback WebSocket carrier 仅是 development/test evidence：由 App 拥有、只 bind loopback、经 bootstrap-local-auth，并接受 exact Host/Origin/CSP/no-CORS/frame/heartbeat checks。它不读取 raw SQLite，也不扩大 log-query authority。它不改变 ADR-0053：不能据此发布 `kite server --web`、production Web entrypoint 或 Web support claim。
 
 Private Artifact 以 canonical bytes 的 SHA-256 内容寻址并返回 path-free ref。文件权限、no-follow、atomic rename、fsync、schema readback 与 Runtime receipt identity 共同检测损坏和混淆；不存在 `model-artifacts.key`、key loss 终态或无 Artifact dispatch fallback。
 

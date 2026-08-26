@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -102,16 +102,21 @@ describe('TUI PTY System — Tool Approve', () => {
       // The fixture serves the follow-up only after seeing the marker in the
       // tool result request, so this cannot pass on a skipped file mutation.
       await waitForText(() => tui.outputSinceLastAction(), 'APPROVAL_FLOW_COMPLETE', 15000);
+      await waitForTuiReady(tui);
 
       const afterOutput = tui.viewport();
       const clean = stripAnsi(afterOutput);
       console.log('  output after approve (last 1500 chars):', clean.slice(-1500));
 
       const executionHistory = tui.screenFramesSince(executionFrames).join('\n');
-      expect(screenContains(executionHistory, 'TUI_APPROVAL_EXECUTED')).toBe(true);
+      // The filesystem assertion and follow-up model request prove execution.
+      // File contents stay outside the closed Runtime Client presentation surface.
+      expect(screenContains(executionHistory, 'TUI_APPROVAL_EXECUTED')).toBe(false);
       expect(screenContains(executionHistory, 'exit: error')).toBe(false);
       expect(readFileSync(approvalMarkerPath, 'utf8')).toBe('TUI_APPROVAL_EXECUTED\n');
       expect(screenContains(afterOutput, 'APPROVAL_FLOW_COMPLETE')).toBe(true);
+      expect(clean.match(/APPROVAL_FLOW_COMPLETE/g) ?? []).toHaveLength(1);
+      expect(clean.match(/Workspace file changed\./g) ?? []).toHaveLength(1);
 
       // TUI should recover — prompt visible
       expect(screenContains(afterOutput, '❯')).toBe(true);

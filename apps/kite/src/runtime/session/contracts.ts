@@ -7,13 +7,13 @@ import type {
   AgentPlan,
   ContextCompactionProgressPhase,
   PlanArtifactRef,
+  RuntimeClientEvent,
   ShellApprovalGrant,
   ToolApprovalPayload,
   UserInputPayload,
   WorkspaceAccess,
 } from '@kite-ai/runtime-contract';
 import { InteractionMode } from '@kite-ai/runtime-contract';
-import type { StateRuntimeEvent } from '@kite-ai/runtime-host';
 import type { SandboxBackend } from '#app/sandbox/types';
 
 export type SessionUserAction =
@@ -56,7 +56,7 @@ export interface SessionUserInputProvider {
 }
 
 export type SessionPresentationAction =
-  | { type: 'RUNTIME_EVENT'; event: StateRuntimeEvent }
+  | { type: 'RUNTIME_EVENT'; event: RuntimeClientEvent }
   | { type: 'LOCAL_TEXT'; text: string; isError?: boolean }
   | { type: 'SET_EXITED' }
   | { type: 'SET_INTERACTION_MODE'; mode: 'accept_edits' | 'auto' | 'full' }

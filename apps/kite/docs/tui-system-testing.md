@@ -9,6 +9,12 @@
 - `bun run test:tui:smoke:native` 只运行显式 native sandbox smoke。
 - 默认 `bun run test` 不执行真实 PTY scenario、native smoke、spike 或 live Provider。
 
+## Runtime client boundary
+
+- TUI system journey 使用 production-shaped typed projection：`RuntimeClient → RuntimeServer → RuntimeAccess`。测试不得通过 direct Host/SQLite handle、旧 runtime bridge 或本地 Store 写入伪造 UI state。
+- 完整历史断言经 App-injected `RuntimeHistoryClient` 的 client-safe DTO 完成；Server subscription replay、JSONL、trace 或 SQLite raw event 不能替代它。
+- reducer 输入保持封闭 `RuntimeClientEvent`/interaction projection；测试应断言 unknown/unavailable 的 fail-closed 投影，而非向 reducer 注入 `any` 或 raw Runtime event。
+
 ## 输入 readiness
 
 - Harness 从当前 VT buffer 识别 focused InputLine 的 inverse-cursor marker；marker 不可达时 fail closed。
@@ -26,6 +32,12 @@
 
 - 一个文件内按具名 step 串行执行，不跨文件共享 Session 或进程 authority。
 - 断言以可见 VT buffer、canonical Runtime/TUI projection 和持久副作用证据为准，不依赖固定 sleep。
+- Thought journey 必须覆盖 durable terminal 与 ephemeral delta 的允许乱序、reasoning completion 的 Server
+  presentation route、连续探索工具聚合、caption 紧凑行距，以及 viewport 与原生 scrollback 都不重复；
+  mock Provider 可用 `stream_frame_order: 'content_first'` 构造正文先于 reasoning 的真实 SSE 乱序，
+  或用 `stream_frame_sequence` 与 `stream_frame_delays` 精确构造
+  `reasoning prefix → content → reasoning suffix → terminal`。后者必须逐帧断言正文出现后不再展示 reasoning
+  原文或活动 Thinking 圆点，并验证 settled live 与重启 `/resume` 最终只形成一个题头和一个回答块。
 - 取消、审批、Session 切换、恢复、resize 和 streaming 测试必须等待各自 exact receipt/readiness，不放宽 identity 或 lifecycle。
 
 ## 验证

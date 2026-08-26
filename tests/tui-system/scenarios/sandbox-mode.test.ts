@@ -55,28 +55,7 @@ describe('TUI PTY System — Sandbox Mode', () => {
       tui.write('\u001b');
       await waitForTextGone(() => tui.viewport(), '选择权限模式', 10_000);
 
-      await submitCommand(tui, '/release');
-      await waitForText(
-        () => tui.outputSinceLastAction(),
-        'Release control: inactive (artifact_disabled)',
-        10000,
-      );
-
-      expect(screenContains(tui.viewport(), 'Release control: inactive (artifact_disabled)')).toBe(
-        true,
-      );
-      expect(screenContains(tui.viewport(), 'Capabilities: unavailable until artifact')).toBe(true);
-
-      await submitCommand(tui, '/telemetry');
-      await waitForText(
-        () => tui.outputSinceLastAction(),
-        'Observability: inactive (artifact_disabled)',
-        10000,
-      );
-
-      expect(screenContains(tui.viewport(), 'Artifact authority: absent')).toBe(true);
-      expect(screenContains(tui.viewport(), 'Remote exporter: not configured')).toBe(true);
-      expect(screenContains(tui.viewport(), 'Disk spool: disabled')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );

@@ -143,3 +143,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0139](0139-session-admission-restart-reconciliation.md) | accepted | Session admission 先完成跨进程 cleanup/recovery，再重载事件尾并投影终态 |
 | [0140](0140-workspace-documentation-authority-v2.md) | accepted | Workspace README/本地文档拥有模块规则，active 只拥有跨包当前行为，影响门禁按真实 diff 检查 |
 | [0141](0141-test-ownership-and-layered-execution-v2.md) | accepted | 测试按 package、App、integration、qualification 与 isolated 归属，并采用分层并行执行 |
+| [0142](0142-runtime-server-client-protocol-boundary.md) | accepted | Runtime Host 保持唯一执行 owner；新增封闭 Protocol、transport-neutral Server/Client 与原子持久 receipt 边界 |
+| [0143](0143-local-runtime-presentation-fidelity.md) | accepted | 本地 Client DTO 保留 reasoning、工具参数与结果；完整历史与 live 使用同一 reducer |

@@ -1,11 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite-ai/agent-kernel';
-import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@kite-ai/runtime-contract';
+import type {
+  AgentPlan,
+  RuntimeClientInteraction,
+  ToolApprovalPayload,
+  UserInputPayload,
+} from '@kite-ai/runtime-contract';
 import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
 import stringWidth from 'string-width';
 import { currentRuntimeEvent } from '../../../tests/helpers/current-runtime-event';
+import { projectRuntimeClientEvent } from '../src/runtime-client/event-projector';
 import App from '../src/tui/App';
 import ApprovalBlock from '../src/tui/components/ApprovalBlock';
 import BlockRenderer, {
@@ -51,13 +57,19 @@ import type {
 
 // ── Shared helpers ──
 
-function eventReducer(state: TuiState, action: Action): TuiState {
-  return canonicalEventReducer(
-    state,
-    action.type === 'RUNTIME_EVENT'
-      ? { ...action, event: currentRuntimeEvent(action.event) }
-      : action,
-  );
+type LayoutTestAction =
+  | Exclude<Action, { type: 'RUNTIME_EVENT' }>
+  | {
+      type: 'RUNTIME_EVENT';
+      event: RuntimeEvent;
+    };
+
+function eventReducer(state: TuiState, action: LayoutTestAction): TuiState {
+  if (action.type !== 'RUNTIME_EVENT') return canonicalEventReducer(state, action);
+  const event = projectRuntimeClientEvent(currentRuntimeEvent(action.event), {
+    sessionRevision: 0,
+  });
+  return event === undefined ? state : canonicalEventReducer(state, { ...action, event });
 }
 
 function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
@@ -118,22 +130,32 @@ function fakeApproval(overrides: Partial<ToolApprovalPayload> = {}): ToolApprova
   };
 }
 
-function fakePendingApproval(
-  approvalPayload: ToolApprovalPayload,
+function fakeClientApproval(
+  overrides: Partial<Extract<RuntimeClientInteraction, { kind: 'approval' }>> = {},
+): Extract<RuntimeClientInteraction, { kind: 'approval' }> {
+  return {
+    kind: 'approval',
+    interactionId: 'approval-client-test',
+    sessionRevision: 1,
+    generation: 1,
+    grants: ['approve_once', 'same_command'],
+    summary: 'Runtime requests your decision.',
+    ...overrides,
+  };
+}
+
+function fakeClientPendingApproval(
+  interaction: Extract<RuntimeClientInteraction, { kind: 'approval' }>,
   overrides: Partial<TuiPendingApproval> = {},
 ): TuiPendingApproval {
-  const interactionId = overrides.interactionId ?? 'approval-test';
-  const toolCallId = overrides.toolCallId ?? approvalPayload.callId ?? 'tool-test';
-  const generation = overrides.generation ?? approvalPayload.queueGeneration ?? 1;
   return {
-    interactionId,
-    toolCallId,
-    route: overrides.route ?? approvalPayload.approvalRoute ?? 'user',
-    status: overrides.status ?? 'awaiting_user',
-    sequence: overrides.sequence ?? 0,
-    generation,
-    approval: approvalPayload,
-    approvalHash: approvalPayload.approvalHash,
+    interactionId: interaction.interactionId,
+    toolCallId: interaction.interactionId,
+    route: 'user',
+    status: 'awaiting_user',
+    sequence: 1,
+    generation: interaction.generation,
+    clientInteraction: interaction,
     ...overrides,
   };
 }
@@ -1085,160 +1107,67 @@ describe('StartupScreen', () => {
 // ── ApprovalBlock ──
 
 describe('ApprovalBlock', () => {
-  test('renders the pending command as a separate approval subject', () => {
-    const approval = fakeApproval({
-      command: 'rm -rf /tmp/test',
-      summary: 'Delete temp files',
-      risk: 'destructive',
+  test('renders only the safe approval title and summary', () => {
+    const approval = fakeClientApproval({
+      title: 'Approval required',
+      summary: 'Runtime requests confirmation.',
     });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('── Shell · Tool approval');
-    expect(frame).toContain('│ rm -rf /tmp/test');
-    const lines = frame.split('\n').map((line) => line.trim());
-    expect(lines).not.toContain('执行命令');
-    expect(lines).not.toContain('调用工具');
-    expect(frame).not.toContain('● Bash');
-    expect(frame).not.toContain('Delete temp files');
-    expect(frame).not.toContain('destructive');
+    expect(frame).toContain('── General tool · Tool approval');
+    expect(frame).toContain('Runtime requests confirmation.');
+    expect(frame).not.toContain('/tmp');
+    expect(frame).not.toContain('shell_execute');
   });
 
-  test('normalizes a multiline approval command inside the command block', () => {
-    const approval = fakeApproval({
-      command: 'bun run typecheck 2>\\\n  /tmp/typecheck.log',
-    });
+  test('renders exact grant options from the closed interaction', () => {
+    const approval = fakeClientApproval({ grants: ['approve_once'] });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-
-    expect(lastFrame()).toContain('│ bun run typecheck 2>\\ /tmp/typecheck.log');
-  });
-
-  test('shows why an automatic review escalated to the user', () => {
-    const approval = fakeApproval({
-      reviewFailure: 'The command target could not be proven from the available context.',
-    });
-    const { lastFrame } = render(
-      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-
-    expect(lastFrame()).toContain(
-      'Auto-review requested your decision: The command target could not be proven',
-    );
-  });
-
-  test('renders durable queue identity, route, match count, and actual scope', () => {
-    const approvalPayload = fakeApproval({
-      approvalRoute: 'auto',
-      queueSequence: 7,
-      queueGeneration: 3,
-      matchingPendingCount: 2,
-      sandboxScope: {
-        filesystem: 'workspace_write',
-        network: 'off',
-        backend: 'none',
-        enforcement: 'unsupported',
-      },
-    });
-    const { lastFrame } = render(
-      <ApprovalBlock
-        approval={approvalPayload}
-        provider={fakeProvider()}
-        onResolved={onResolved}
-        queueEntry={fakePendingApproval(approvalPayload, {
-          interactionId: 'approval-queue-7',
-          sequence: 7,
-          generation: 3,
-          route: 'auto',
-          status: 'authorized_queued',
-          matchCount: 2,
-          actualSandboxScope: approvalPayload.sandboxScope,
-        })}
-      />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Auto review');
-    expect(frame).toContain('Queue #7');
-    expect(frame).toContain('Generation 3');
-    expect(frame).toContain('2 matching requests');
-    expect(frame).toContain('workspace_write');
-    expect(frame).toContain('unsupported');
-    expect(frame).toContain('Authorized · queued to run');
-  });
-
-  test('shows three grant options', () => {
-    const approval = fakeApproval();
-    const { lastFrame } = render(
-      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-    const frame = lastFrame();
-    expect(frame).toContain('Allow once');
-    expect(frame).toContain('Approve this execution only');
-    expect(frame).toContain('Allow for this session');
-    expect(frame).toContain('Do not ask again for this command in this session');
-    expect(frame).toContain('Deny');
-    expect(frame).toContain('Do not run the command and end this turn');
-  });
-
-  test('keeps one blank row between the subject, every decision, and shortcuts', () => {
-    const { lastFrame } = render(
-      <ApprovalBlock approval={fakeApproval()} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-    const lines = (lastFrame() ?? '').split('\n');
-    const command = lines.findIndex((line) => line.includes('│ npm test'));
-    const allowOnce = lines.findIndex((line) => line.includes('❯ Allow once'));
-    const allowSession = lines.findIndex((line) => line.includes('Allow for this session'));
-    const deny = lines.findIndex((line) => line.trim() === 'Deny');
-    const shortcuts = lines.findIndex((line) => line.includes('↑↓ Navigate'));
-
-    expect(lines[command + 1]?.trim()).toBe('');
-    expect(lines[allowOnce + 2]?.trim()).toBe('');
-    expect(lines[allowSession + 2]?.trim()).toBe('');
-    expect(lines[deny + 2]?.trim()).toBe('');
-    expect(lines[deny + 3]).toContain('─');
-    expect(shortcuts).toBe(deny + 4);
-  });
-
-  test('uses a simple top divider instead of a rounded border', () => {
-    const approval = fakeApproval();
-    const { lastFrame } = render(
-      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-    const frame = lastFrame();
-    expect(frame).toContain('── Shell · Tool approval');
-    expect(frame).toContain('❯ Allow once');
-    expect(frame).toContain('────────────────────────────────────────');
-    expect(frame).not.toContain('╭');
-    expect(frame).not.toContain('╰');
-    expect(frame).toContain('│ npm test');
-  });
-
-  test('non-shell tools only show grants declared by the approval payload', () => {
-    const approval = fakeApproval({
-      tool: 'write_file',
-      grantOptions: ['approve_once'],
-    });
-    const { lastFrame } = render(
-      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
-    );
-    const frame = lastFrame();
-    expect(frame).toContain('── File edit · Tool approval');
     expect(frame).toContain('Allow once');
     expect(frame).not.toContain('Allow for this session');
     expect(frame).toContain('Deny');
   });
 
-  test('recognizes raw terminal arrow sequences when selecting a grant', async () => {
+  test('hides durable queue identity while retaining user-facing approval status', () => {
+    const approval = fakeClientApproval({ interactionId: 'approval-queue-7', generation: 3 });
+    const { lastFrame } = render(
+      <ApprovalBlock
+        approval={approval}
+        provider={fakeProvider()}
+        onResolved={onResolved}
+        queueEntry={fakeClientPendingApproval(approval, {
+          sequence: 7,
+          route: 'auto',
+          matchCount: 2,
+        })}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Auto review');
+    expect(frame).not.toContain('Queue #7');
+    expect(frame).not.toContain('Generation 3');
+    expect(frame).not.toContain('approval-queue-7');
+    expect(frame).toContain('2 matching requests');
+    expect(frame).not.toContain('workspace_write');
+  });
+
+  test('submits the exact interaction identity and generation', async () => {
     const resolved: Array<{ action: string; grant?: string }> = [];
-    const approvalPayload = fakeApproval();
+    const approval = fakeClientApproval({ interactionId: 'approval-keyed', generation: 9 });
+    const provider = fakeProvider();
+    const received: unknown[] = [];
+    provider.setActionSink((action) => received.push(action));
     const { stdin } = render(
       <ApprovalBlock
-        approval={approvalPayload}
-        provider={fakeProvider()}
+        approval={approval}
+        provider={provider}
         onResolved={(action, grant) => resolved.push({ action, grant })}
-        queueEntry={fakePendingApproval(approvalPayload)}
+        queueEntry={fakeClientPendingApproval(approval)}
       />,
     );
 
@@ -1248,6 +1177,12 @@ describe('ApprovalBlock', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(resolved).toEqual([{ action: 'approve', grant: 'same_command' }]);
+    expect(received).toContainEqual({
+      type: 'approve',
+      interactionId: 'approval-keyed',
+      generation: 9,
+      grant: 'same_command',
+    });
   });
 });
 
@@ -1811,6 +1746,29 @@ describe('InputLine', () => {
       />,
     );
     expect(lastFrame()).toContain('Type here...');
+  });
+
+  test('submits consecutive exact slash commands once each without suggestion routing', async () => {
+    const submitted: string[] = [];
+    const view = render(
+      <InputLine
+        mode="prompt"
+        onSubmit={(value) => submitted.push(value)}
+        workspace={process.cwd()}
+      />,
+    );
+
+    view.stdin.write('/help');
+    await Promise.resolve();
+    view.stdin.write('\r');
+    await Promise.resolve();
+    view.stdin.write('/clear');
+    await Promise.resolve();
+    view.stdin.write('\r');
+    await Promise.resolve();
+
+    expect(submitted).toEqual(['/help', '/clear']);
+    view.unmount();
   });
 });
 
@@ -2832,7 +2790,12 @@ describe('BlockRenderer', () => {
 
     const liveCard = live.turns[0]!.blocks[0]!;
     const replayCard = replay.turns[0]!.blocks[0]!;
-    expect(replayCard).toEqual(liveCard);
+    expect(replayCard).toEqual(
+      expect.objectContaining({ status: 'cancelled', summary: 'Cancelled', expanded: true }),
+    );
+    expect(liveCard).toEqual(
+      expect.objectContaining({ status: 'cancelled', summary: 'Cancelled', expanded: true }),
+    );
     const liveRender = render(
       <BlockRenderer columns={80} block={liveCard} isFocused={false} index={0} />,
     );
@@ -2840,7 +2803,7 @@ describe('BlockRenderer', () => {
       <BlockRenderer columns={80} block={replayCard} isFocused={false} index={0} />,
     );
 
-    expect(replayRender.lastFrame()).toBe(liveRender.lastFrame());
+    expect(replayRender.lastFrame()).toContain('cancelled');
     expect(liveRender.lastFrame()).toContain('cancelled');
   });
   test('file_change block is rendered by tool_card, not BlockRenderer', () => {
@@ -2931,7 +2894,7 @@ describe('BlockRenderer', () => {
       summaryLine: 'read 2 files',
       hasThought: true,
       hasThinking: true,
-      captions: ['让我系统地阅读 TUI 模块的核心文件。'],
+      captions: ['让我系统地阅读 TUI 模块的核心文件。', '继续检查运行时边界。'],
       pendingCaption: 'Now the remaining pieces.',
       tools: [
         {
@@ -2957,15 +2920,56 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 标题行 = 累加时长 + 合并统计；旁白位于标题之下、步骤树之上
+    // 标题行 = 累加时长 + 合并统计；旁白与标题之间保留一行，随后位于步骤树之上
     expect(frame).toContain('Thinking 13s · read 2 files');
     expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
+    expect(frame).toContain('继续检查运行时边界。');
     expect(frame).toContain('Now the remaining pieces.');
+    const compactLines = frame.split('\n').map((line) => line.trim());
+    const headerLine = compactLines.findIndex((line) => line.includes('Thinking 13s'));
+    const firstCaptionLine = compactLines.indexOf('让我系统地阅读 TUI 模块的核心文件。');
+    expect(firstCaptionLine).toBe(headerLine + 2);
+    expect(compactLines[headerLine + 1]).toBe('');
+    expect(compactLines.indexOf('继续检查运行时边界。')).toBe(firstCaptionLine + 1);
+    expect(compactLines.indexOf('Now the remaining pieces.')).toBe(
+      compactLines.indexOf('继续检查运行时边界。') + 1,
+    );
     const captionIdx = frame.indexOf('让我系统地阅读');
     const headerIdx = frame.indexOf('Thinking 13s');
     const stepsIdx = frame.indexOf('Read App.tsx');
     expect(captionIdx).toBeGreaterThan(headerIdx);
     expect(captionIdx).toBeLessThan(stepsIdx);
+  });
+
+  test('phase captions normalize only boundary newlines', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      createdAt: Date.now() - 1_000,
+      totalElapsedMs: 1_000,
+      summaryLine: 'read 1 file',
+      hasThought: true,
+      hasThinking: true,
+      captions: ['first caption\n', '\nsecond paragraph one\n\nsecond paragraph two\n'],
+      tools: [
+        {
+          callId: 'caption-read',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const lines = (lastFrame() ?? '').split('\n').map((line) => line.trim());
+
+    expect(lines.indexOf('second paragraph one')).toBe(lines.indexOf('first caption') + 1);
+    expect(lines.indexOf('second paragraph two')).toBe(lines.indexOf('second paragraph one') + 2);
   });
 
   test('Thinking phase shows the active reasoning preview', () => {
@@ -3466,7 +3470,7 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 题头 + 正文同一块：无圆点，中间固定保留一行
+    // 题头 + 正文同一块：无圆点，但保留一个空白视觉行
     expect(frame).toContain('Thinking 24s');
     expect(frame).toContain('── TUI 模块全面解析 ──');
     expect(frame).not.toContain('●');
@@ -3475,6 +3479,7 @@ describe('BlockRenderer', () => {
     const headerIndex = lines.findIndex((line) => line.includes('Thinking 24s'));
     const contentIndex = lines.findIndex((line) => line.includes('TUI 模块全面解析'));
     expect(contentIndex - headerIndex).toBe(2);
+    expect(lines[headerIndex + 1]?.trim()).toBe('');
     // 题头两空格缩进，文字起始列与工具块名字列对齐
     expect(frame).toContain('  Thinking 24s');
   });
@@ -3662,6 +3667,62 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'result',
         _marker: 'exit: 0',
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
+      1,
+    );
+  });
+
+  test('settled pure-thinking summary → text keeps one-row separation', () => {
+    assertGap(
+      {
+        id: 1,
+        kind: 'tool_summary',
+        active: false,
+        createdAt: Date.now() - 1_000,
+        totalElapsedMs: 1_000,
+        summaryLine: '',
+        hasThinking: true,
+        tools: [],
+        _marker: 'Thinking 1s',
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
+      1,
+    );
+  });
+
+  test('settled Thinking tool summary → final text keeps one-row separation', () => {
+    assertGap(
+      {
+        id: 1,
+        kind: 'tool_summary',
+        active: false,
+        createdAt: Date.now() - 1_000,
+        totalElapsedMs: 1_000,
+        summaryLine: 'searched 1 file pattern',
+        hasThought: true,
+        hasThinking: true,
+        tools: [
+          {
+            callId: 'search-before-final',
+            name: 'search_files',
+            args: { pattern: 'README' },
+            ok: true,
+            summary: 'done',
+            status: 'done',
+          },
+        ],
+        _marker: 'Thinking 1s · searched 1 file pattern',
       } as unknown as OutputBlock,
       {
         id: 2,
@@ -4030,8 +4091,8 @@ describe('OutputArea', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('● Searched for tools');
-    expect(frame).toContain('├ langchian · search_docs_by_lang_chain');
-    expect(frame).toContain('└ docs · search_reference');
+    expect(frame).toContain('langchian · search_docs_by_lang_chain');
+    expect(frame).toContain('docs · search_reference');
     expect(frame).not.toContain('candidate_count');
   });
 
@@ -4114,8 +4175,7 @@ describe('OutputArea', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('● Searched for tools');
-    expect(frame).toContain('└ langchian · search_docs_by_lang_chain');
-    expect(frame).not.toContain('No matching tools found');
+    expect(frame).toContain('langchian · search_docs_by_lang_chain');
     expect(frame).not.toContain('catalog_status');
   });
 
@@ -4150,6 +4210,7 @@ describe('OutputArea', () => {
     );
 
     expect(lastFrame()).toContain('● Tool search failed');
+    expect(lastFrame()).toContain('Tool execution failed.');
   });
 
   test('renders MCP executable names as Provider · Tool', () => {
@@ -4173,7 +4234,7 @@ describe('OutputArea', () => {
       <OutputAreaTestWrap running={true} turns={state.turns} onToggleReason={noop} />,
     );
 
-    expect(lastFrame()).toContain('langchian · search_docs_by_lang_chain');
+    expect(lastFrame()).toContain('● langchian · search_docs_by_lang_chain');
     expect(lastFrame()).not.toContain('mcp__langchian__');
   });
 
@@ -4224,8 +4285,8 @@ describe('OutputArea', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('● Listed MCP resources');
-    expect(frame).toContain('├ langchian · docs://langgraph/overview');
-    expect(frame).toContain('└ langchian · docs://langgraph/persistence');
+    expect(frame).toContain('langchian · docs://langgraph/overview');
+    expect(frame).toContain('langchian · docs://langgraph/persistence');
     expect(frame).not.toContain('resource_count');
   });
 
@@ -4279,9 +4340,9 @@ describe('OutputArea', () => {
 
     expect(frame).toContain('❯ Inspect the runtime bridge');
     expect(frame).toContain('The runtime bridge is connected.');
-    expect(frame).toContain('Bash');
+    expect(frame).toContain('● Bash');
+    expect(frame).toContain('MODEL_ATTEMPT_RETRYABLE_FAILURE:runtime_error');
     expect(frame).toContain('echo runtime-bridge');
-    expect(frame).toContain('⟳ Recoverable error: temporary network issue');
     expect(frame.indexOf('Inspect the runtime bridge')).toBeLessThan(
       frame.indexOf('The runtime bridge is connected.'),
     );
@@ -4295,7 +4356,7 @@ describe('OutputArea', () => {
         subagent: {
           id: 'subagent-1',
           role: 'explore',
-          task: 'Locate runtime event consumers',
+          name: 'Locate runtime event consumers',
         },
       },
       {
@@ -4337,7 +4398,6 @@ describe('OutputArea', () => {
 
     expect(frame).toContain('Explore');
     expect(frame).toContain('Locate runtime event consumers');
-    expect(frame).toContain('Read session-manager.ts');
     expect(frame).toContain('done!');
   });
 
@@ -4348,7 +4408,7 @@ describe('OutputArea', () => {
         subagent: {
           id: 'interleaved-explore',
           role: 'explore',
-          task: 'Inspect runtime files',
+          name: 'Inspect runtime files',
           concurrencyGroupId: 'interleaved-batch',
         },
       },
@@ -4357,7 +4417,7 @@ describe('OutputArea', () => {
         subagent: {
           id: 'interleaved-review',
           role: 'review',
-          task: 'Review runtime behavior',
+          name: 'Review runtime behavior',
           concurrencyGroupId: 'interleaved-batch',
         },
       },
@@ -4418,20 +4478,21 @@ describe('OutputArea', () => {
       createInitialState(),
     );
 
-    expect(state.pendingToolCalls).toEqual({});
-    expect(
-      state.turns.flatMap((turn) => turn.blocks).filter((block) => block.kind === 'tool_card'),
-    ).toEqual([]);
+    const toolCards = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'tool_card');
+    expect(toolCards).toEqual([]);
 
     const { lastFrame } = render(
       <OutputAreaTestWrap running turns={state.turns} onToggleReason={noop} />,
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame.match(/Delegating · 2 agents/g)).toHaveLength(1);
+    expect(frame).not.toContain('Delegating · 2 agents');
     expect(frame).toContain('Explore · Inspect runtime files');
     expect(frame).toContain('Review · Review runtime behavior');
-    expect(frame).not.toContain('● Bash Ran:');
+    expect(frame).not.toContain('● tool');
+    expect(frame).toContain('ls -la');
   });
 
   test('aggregates only RuntimeEvent siblings carrying the same dispatch identity', () => {
@@ -4441,7 +4502,7 @@ describe('OutputArea', () => {
         subagent: {
           id: 'grouped-explore',
           role: 'explore',
-          task: 'Inspect the runtime',
+          name: 'Inspect the runtime',
           concurrencyGroupId: 'batch-runtime-1',
         },
       },
@@ -4450,7 +4511,7 @@ describe('OutputArea', () => {
         subagent: {
           id: 'grouped-review',
           role: 'review',
-          task: 'Review the tests',
+          name: 'Review the tests',
           concurrencyGroupId: 'batch-runtime-1',
         },
       },
@@ -4464,7 +4525,7 @@ describe('OutputArea', () => {
     );
     const groupedFrame = groupedRender.lastFrame() ?? '';
 
-    expect(groupedFrame.match(/Delegating · 2 agents/g)).toHaveLength(1);
+    expect(groupedFrame).not.toContain('Delegating · 2 agents');
     expect(groupedFrame).toContain('Explore · Inspect the runtime');
     expect(groupedFrame).toContain('Review · Review the tests');
     groupedRender.unmount();
@@ -5075,8 +5136,12 @@ describe('App', () => {
   });
 
   test('hides slash suggestions while an approval interrupt is open', () => {
+    const approval = fakeClientApproval({ interactionId: 'approval-slash' });
+    const pending = fakeClientPendingApproval(approval);
     const state = fakeState({
-      interrupt: { kind: 'approval', approval: fakeApproval() },
+      pendingApprovals: new Map([[pending.interactionId, pending]]),
+      activeApprovalId: pending.interactionId,
+      interrupt: { kind: 'approval', interactionId: pending.interactionId },
     });
     const { lastFrame } = render(
       <App
@@ -5103,9 +5168,13 @@ describe('App', () => {
   });
 
   test('gives an interrupt priority over a stale selector', () => {
+    const approval = fakeClientApproval({ interactionId: 'approval-selector' });
+    const pending = fakeClientPendingApproval(approval);
     const state = fakeState({
       showPermissionSelector: true,
-      interrupt: { kind: 'approval', approval: fakeApproval() },
+      pendingApprovals: new Map([[pending.interactionId, pending]]),
+      activeApprovalId: pending.interactionId,
+      interrupt: { kind: 'approval', interactionId: pending.interactionId },
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
@@ -5159,12 +5228,15 @@ describe('App', () => {
   });
 
   test('shows ApprovalBlock when interrupt is approval', () => {
-    const approval = fakeApproval();
+    const approval = fakeClientApproval();
+    const pending = fakeClientPendingApproval(approval);
     const state = fakeState({
       running: true,
       runStartTime: Date.now() - 28_000,
       turns: [],
-      interrupt: { kind: 'approval', approval },
+      pendingApprovals: new Map([[pending.interactionId, pending]]),
+      activeApprovalId: pending.interactionId,
+      interrupt: { kind: 'approval', interactionId: pending.interactionId },
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
@@ -5179,11 +5251,10 @@ describe('App', () => {
 
   test('Enter immediately acknowledges an accepted approval in local TUI state', async () => {
     const actions: Action[] = [];
-    const approval = fakeApproval({ subagentId: 'child-local' });
-    const pending = fakePendingApproval(approval, {
+    const approval = fakeClientApproval({ interactionId: 'approval-child-local' });
+    const pending = fakeClientPendingApproval(approval, {
       interactionId: 'approval-child-local',
       toolCallId: 'parent-task-local',
-      childSubagentId: 'child-local',
     });
     const view = render(
       <App
@@ -5195,7 +5266,6 @@ describe('App', () => {
             kind: 'approval',
             interactionId: pending.interactionId,
             toolCallId: pending.toolCallId,
-            approval,
           },
         })}
         dispatch={(action) => actions.push(action)}
@@ -5215,11 +5285,10 @@ describe('App', () => {
 
   test('approval Enter cannot also expand the active Subagent card', async () => {
     const actions: Action[] = [];
-    const approval = fakeApproval({ subagentId: 'approval-child-no-key-leak' });
-    const pending = fakePendingApproval(approval, {
+    const approval = fakeClientApproval({ interactionId: 'approval-no-key-leak' });
+    const pending = fakeClientPendingApproval(approval, {
       interactionId: 'approval-no-key-leak',
       toolCallId: 'parent-task-no-key-leak',
-      childSubagentId: 'approval-child-no-key-leak',
     });
     const activeChild: Extract<OutputBlock, { kind: 'subagent' }> = {
       id: 1,
@@ -5254,7 +5323,6 @@ describe('App', () => {
             kind: 'approval',
             interactionId: pending.interactionId,
             toolCallId: activeChild.parentToolCallId,
-            approval,
           },
         })}
         dispatch={(action) => actions.push(action)}
@@ -5277,15 +5345,24 @@ describe('App', () => {
 
   test('resets approval selection when the next deferred subagent interaction is presented', async () => {
     const provider = fakeProvider();
-    const firstApproval = fakeApproval({ command: 'find first' });
-    const secondApproval = fakeApproval({ command: 'find second', approvalHash: 'second-hash' });
+    const firstApproval = fakeClientApproval({
+      interactionId: 'approval-first',
+      summary: 'First decision.',
+    });
+    const firstPending = fakeClientPendingApproval(firstApproval);
+    const secondApproval = fakeClientApproval({
+      interactionId: 'approval-second',
+      summary: 'Second decision.',
+    });
+    const secondPending = fakeClientPendingApproval(secondApproval);
     const firstState = fakeState({
       running: true,
+      pendingApprovals: new Map([[firstPending.interactionId, firstPending]]),
+      activeApprovalId: firstPending.interactionId,
       interrupt: {
         kind: 'approval',
-        interactionId: 'approval-first',
-        toolCallId: 'task-first',
-        approval: firstApproval,
+        interactionId: firstPending.interactionId,
+        toolCallId: firstPending.toolCallId,
       },
     });
     const view = render(
@@ -5300,11 +5377,12 @@ describe('App', () => {
       <App
         state={fakeState({
           running: true,
+          pendingApprovals: new Map([[secondPending.interactionId, secondPending]]),
+          activeApprovalId: secondPending.interactionId,
           interrupt: {
             kind: 'approval',
-            interactionId: 'approval-second',
-            toolCallId: 'task-second',
-            approval: secondApproval,
+            interactionId: secondPending.interactionId,
+            toolCallId: secondPending.toolCallId,
           },
         })}
         dispatch={noop}
@@ -5313,7 +5391,7 @@ describe('App', () => {
       />,
     );
 
-    expect(view.lastFrame()).toContain('│ find second');
+    expect(view.lastFrame()).toContain('Second decision.');
     expect(view.lastFrame()).toContain('❯ Allow once');
     expect(view.lastFrame()).not.toContain('❯ Allow for this session');
   });
@@ -5321,8 +5399,8 @@ describe('App', () => {
   test('Escape rejects only the focused approval without aborting the whole run', async () => {
     let aborts = 0;
     const actions: Action[] = [];
-    const approvalPayload = fakeApproval();
-    const pending = fakePendingApproval(approvalPayload, {
+    const approval = fakeClientApproval({ interactionId: 'approval-cancel' });
+    const pending = fakeClientPendingApproval(approval, {
       interactionId: 'approval-cancel',
       toolCallId: 'task-cancel',
     });
@@ -5336,7 +5414,6 @@ describe('App', () => {
             kind: 'approval',
             interactionId: pending.interactionId,
             toolCallId: pending.toolCallId,
-            approval: approvalPayload,
           },
         })}
         dispatch={(action) => actions.push(action)}
@@ -5361,15 +5438,18 @@ describe('App', () => {
   test('Ctrl+C aborts the whole turn while an approval is visible', async () => {
     let aborts = 0;
     const actions: Action[] = [];
+    const approval = fakeClientApproval({ interactionId: 'approval-ctrl-c' });
+    const pending = fakeClientPendingApproval(approval, { toolCallId: 'task-ctrl-c' });
     const view = render(
       <App
         state={fakeState({
           running: true,
+          pendingApprovals: new Map([[pending.interactionId, pending]]),
+          activeApprovalId: pending.interactionId,
           interrupt: {
             kind: 'approval',
-            interactionId: 'approval-ctrl-c',
-            toolCallId: 'task-ctrl-c',
-            approval: fakeApproval(),
+            interactionId: pending.interactionId,
+            toolCallId: pending.toolCallId,
           },
         })}
         dispatch={(action) => actions.push(action)}

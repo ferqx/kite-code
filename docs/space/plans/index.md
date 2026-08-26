@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-25（新增 Shell 沙箱边界与并发审批队列优化方案）
+最后更新：2026-08-26（Kite Runtime Server V1 完成并归档）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,8 +19,9 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-26-kite-runtime-server-v1.md`](2026-08-26-kite-runtime-server-v1.md) | archived | P1 | ADR-0142、ADR-0053/0129/0137/0138/0140/0141、当前 Runtime/Store/Log Query authority | 接管 LOGWEB-05～09 的 listener/auth/App carrier authority 并关闭旧任务；保留 LOGWEB-00～04 query-only 产出，HTTP/SSE/Web UI 不迁入 | KRSV1-00～10 全部完成；封闭 Protocol、transport-neutral Server/Client、TUI/CLI InProcess 单路径、原子持久 receipt、stdio 与 development-only WebSocket qualification；[完成记录](../execution/completed/2026-08-26-kite-runtime-server-v1.md) |
 | [`2026-08-25-shell-sandbox-approval-queue-optimization.md`](2026-08-25-shell-sandbox-approval-queue-optimization.md) | archived | P0 | ADR-0133、ADR-0136、当前 Runtime/Store/Sandbox/TUI | 方案一已实施；ADR-0137 定义当前 SAQ 契约，ADR-0138 后续补充未知格式静默忽略与已知会话懒迁移；本地全量、required checks 与三平台 probe 已通过 | Sandbox-first phase/mode 矩阵、两类 grant、durable approval queue、same-command 原子批量释放、Plan + Full 正交；[完成记录](../execution/completed/2026-08-25-shell-sandbox-approval-queue-optimization.md) |
-| [`2026-08-23-sqlite-session-log-server-web.md`](2026-08-23-sqlite-session-log-server-web.md) | active | P1 | ADR-0129、当前 State26/Store5 SQLite Runtime | SQLite 是唯一会话日志事实源；明确排除 Session Logger/JSONL | LOGWEB-00～04 已完成；后续为 loopback Server/SSE、Web 时间线与跨平台验证 |
+| [`2026-08-23-sqlite-session-log-server-web.md`](2026-08-23-sqlite-session-log-server-web.md) | superseded | P1 | ADR-0129、当前 SQLite Runtime Log Query | KRSV1 接管 LOGWEB-05～09 的重叠 authority 并关闭未实施任务；LOGWEB-00～04 保持 current query-only 基础 | 已完成 Runtime Log DTO、只读 Host port、SQLite reader 与 App safe projector；未创建且未迁移 listener/SSE/Web UI |
 | [`2026-08-23-pre-release-clean-cutover-module-boundaries.md`](2026-08-23-pre-release-clean-cutover-module-boundaries.md) | archived | P0 | ADR-0128、当前 State26/Store5 Runtime | 落实用户提供的《Kite Code 完整模块化优化方案》 | 无版本命名 clean cutover、零 compatibility production path、领域拆分、根 API 收窄、静态 Gate；[完成记录](../execution/completed/2026-08-23-pre-release-clean-cutover-module-boundaries.md) |
 | [`2026-08-19-kite-runtime-modularization-v1-implementation.md`](2026-08-19-kite-runtime-modularization-v1-implementation.md) | completed | P0 | accepted RFC、ADR-0124/0125、baseline `af5a5123` | 只做物理模块化；Authority/Format范围移入RAV1 | RMV1-01 至 RMV1-16 [全部完成](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)；implementation final SHA `e5a64c21`；State 25、Store 4和原epoch保持不变 |
 | [`2026-08-20-kite-runtime-authority-format-v1-implementation.md`](2026-08-20-kite-runtime-authority-format-v1-implementation.md) | archived | P0 | RMV1 completion、ADR-0124/0125、ADR-0127 | 原 RAV1-01～06 evidence 已被简化裁决替代 | 无 key/HMAC/ProjectHandle/global lock/DataOrigin/EgressAuthority/fixed provider policy；State26/Store5 7 tables/2 indexes；[completion](../execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md) |

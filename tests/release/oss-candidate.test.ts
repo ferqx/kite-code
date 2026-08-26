@@ -21,8 +21,11 @@ describe('ordinary open-source candidate archive', () => {
       'apps/kite',
       'packages/agent-kernel',
       'packages/builtin-runtime',
+      'packages/runtime-client',
       'packages/runtime-contract',
       'packages/runtime-host',
+      'packages/runtime-protocol',
+      'packages/runtime-server',
       'packages/runtime-spi',
       'packages/runtime-storage-sqlite',
     ];

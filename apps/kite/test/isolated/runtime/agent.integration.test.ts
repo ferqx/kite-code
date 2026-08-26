@@ -82,7 +82,7 @@ test('classifies an exhausted model timeout from its structured attempt outcome'
     expect(events.find((event) => event.type === 'run.error')).toMatchObject({
       type: 'run.error',
       recoverable: false,
-      failure: { kind: 'model_retry_exhausted' },
+      failure: { kind: 'model_timeout' },
       outcome: { reasonCode: 'model_retry_exhausted' },
     });
   } finally {

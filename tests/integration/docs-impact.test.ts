@@ -173,6 +173,24 @@ describe('documentation impact gate V2', () => {
     expect(triggeredRepositoryRules('packages/builtin-runtime/src/mcp/manager.ts')).toEqual([
       'builtin-mcp',
     ]);
+    expect(triggeredRepositoryRules('packages/runtime-protocol/src/codecs.ts')).toEqual([
+      'runtime-protocol',
+    ]);
+    expect(triggeredRepositoryRules('packages/runtime-server/src/server.ts')).toEqual([
+      'runtime-server',
+    ]);
+    expect(triggeredRepositoryRules('packages/runtime-client/src/client.ts')).toEqual([
+      'runtime-client',
+    ]);
+    expect(triggeredRepositoryRules('packages/runtime-host/src/host/command-receipt.ts')).toEqual([
+      'runtime-host-command-receipts',
+    ]);
+    expect(triggeredRepositoryRules('apps/kite/src/carrier/runtime-server-stdio.ts')).toEqual([
+      'kite-runtime-carriers',
+    ]);
+    expect(
+      triggeredRepositoryRules('apps/kite/src/runtime-client/presentation-history.ts'),
+    ).toEqual(['kite-runtime-history']);
     expect(triggeredRepositoryRules('apps/kite/src/tui/i18n/messages.ts')).toEqual([
       'tui-localization',
     ]);
@@ -180,7 +198,7 @@ describe('documentation impact gate V2', () => {
       'tui-rendering',
     ]);
     expect(triggeredRepositoryRules('apps/kite/src/tui/reducers/handleEvent.ts')).toEqual([
-      'tui-interaction',
+      'tui-rendering',
     ]);
     expect(
       triggeredRepositoryRules('tests/qualification/sandbox/platform-capability-probe.test.ts'),

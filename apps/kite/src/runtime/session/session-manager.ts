@@ -7,7 +7,10 @@ import type {
 import { reconcileRuntimeSessionAfterRestart } from '#app/bootstrap/runtime/session-restart-recovery';
 import type { RuntimeEvent, RuntimeState } from '#app/bootstrap/runtime/state-runtime';
 import type { AgentConfig } from '#app/config/index';
-import { ContextCompactionService } from '#app/runtime/session/context-compaction-service';
+import {
+  ContextCompactionService,
+  type HostCompactionPlan,
+} from '#app/runtime/session/context-compaction-service';
 import type {
   McpRecoveryController,
   SessionListProjection,
@@ -18,7 +21,13 @@ import {
   enterPlanningMode as enterPlanningModeWithControl,
   exitPlanningMode as exitPlanningModeWithControl,
 } from '#app/runtime/session/planning-mode-service';
-import { RewindService } from '#app/runtime/session/rewind-service';
+import {
+  type RewindExecutionResult,
+  type RewindRequestedEvent,
+  RewindService,
+  type RewindSettlement,
+  type RewindTerminalEvent,
+} from '#app/runtime/session/rewind-service';
 import { SessionLifecycleService } from '#app/runtime/session/session-lifecycle';
 import { projectSessionList, TokenStatsService } from '#app/runtime/session/session-projection';
 import { SessionRegistry } from '#app/runtime/session/session-registry';
@@ -77,10 +86,6 @@ export class SessionManager {
     return this.lifecycleService.loadPersistedSession(threadId);
   }
 
-  deletePersistedSession(threadId: string) {
-    return this.lifecycleService.deletePersistedSession(threadId);
-  }
-
   async generateAndPersistSessionName(threadId: string, task: string) {
     return this.lifecycleService.generateAndPersistSessionName(threadId, task);
   }
@@ -89,13 +94,26 @@ export class SessionManager {
     return this.rewindService.preview(threadId, snapshotId, workspace);
   }
 
+  isRewindCheckpointAvailable(threadId: string, snapshotId: string): boolean {
+    return this.rewindService.isCheckpointAvailable(threadId, snapshotId);
+  }
+
+  executeCommittedRewindIntent(input: {
+    readonly intent: RewindRequestedEvent;
+    readonly workspace: string;
+    readonly persistTerminal: (event: RewindTerminalEvent) => Promise<void> | void;
+  }): Promise<RewindSettlement> {
+    return this.rewindService.executeCommittedIntent(input);
+  }
+
   async executeRewind(input: {
     sourceThreadId: string;
     snapshotId: string;
     scope: 'code_and_conversation' | 'code_only' | 'conversation_only';
     workspace: string;
-  }) {
-    return this.rewindService.execute(input);
+  }): Promise<RewindExecutionResult> {
+    void input;
+    throw new Error('Rewind requires a committed Runtime command.');
   }
 
   /** 持久化 token 统计到 checkpoint DB（防抖合并，避免每次 token 变化都写 DB）
@@ -196,7 +214,19 @@ export class SessionManager {
     if (!recovery.complete) {
       throw new Error(`Runtime session restart recovery failed: ${recovery.failure ?? 'unknown'}.`);
     }
-    return coordinator.recoveryChanged || recovery.changed;
+    // A rewind command commits only an intent alongside its source-session
+    // receipt. Restart is the owner of unmatched post-commit effects; receipt
+    // replay itself never redispatches this work.
+    const rewindRecovery = await this.rewindService.recoverPendingIntents({
+      sourceThreadId: threadId,
+      workspace: runtime.workspace,
+      persistTerminal: (event) => {
+        const applied = coordinator.control.processEventBatch([event]);
+        if (applied.length !== 1)
+          throw new Error('Runtime rewind terminal event was not persisted.');
+      },
+    });
+    return coordinator.recoveryChanged || recovery.changed || rewindRecovery.executed > 0;
   }
 
   private ensureRuntimeCoordinator(runtime: SessionRuntime): RuntimeSessionCoordinator | undefined {
@@ -326,6 +356,23 @@ export class SessionManager {
       onCommand,
       signal,
     );
+  }
+
+  inspectHostCompactionCommand(input: {
+    readonly threadId: string;
+    readonly commandId: string;
+    readonly mode: 'manual' | 'reset';
+    readonly customInstructions?: string;
+  }): HostCompactionPlan {
+    return this.contextCompactionService.inspectHostCompactionCommand(input);
+  }
+
+  executeCommittedHostCompaction(
+    threadId: string,
+    plan: HostCompactionPlan,
+    signal?: AbortSignal,
+  ): Promise<readonly RuntimeEvent[]> {
+    return this.contextCompactionService.executeCommittedHostCompaction(threadId, plan, signal);
   }
 
   handleContextDisplay(threadId: string): string {

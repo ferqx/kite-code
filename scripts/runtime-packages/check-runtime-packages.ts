@@ -4,6 +4,9 @@ import ts from 'typescript';
 
 export const RUNTIME_WORKSPACE_PACKAGES = Object.freeze([
   ['@kite-ai/runtime-contract', 'packages/runtime-contract'],
+  ['@kite-ai/runtime-protocol', 'packages/runtime-protocol'],
+  ['@kite-ai/runtime-server', 'packages/runtime-server'],
+  ['@kite-ai/runtime-client', 'packages/runtime-client'],
   ['@kite-ai/agent-kernel', 'packages/agent-kernel'],
   ['@kite-ai/runtime-spi', 'packages/runtime-spi'],
   ['@kite-ai/runtime-host', 'packages/runtime-host'],
@@ -16,6 +19,9 @@ const EXPECTED_WORKSPACES = ['packages/*', 'apps/*'] as const;
 
 const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> = Object.freeze({
   '@kite-ai/runtime-contract': [],
+  '@kite-ai/runtime-protocol': ['@kite-ai/runtime-contract'],
+  '@kite-ai/runtime-server': ['@kite-ai/runtime-contract', '@kite-ai/runtime-protocol'],
+  '@kite-ai/runtime-client': ['@kite-ai/runtime-contract', '@kite-ai/runtime-protocol'],
   '@kite-ai/agent-kernel': [],
   '@kite-ai/runtime-spi': ['@kite-ai/runtime-contract'],
   '@kite-ai/runtime-host': [
@@ -27,8 +33,11 @@ const ALLOWED_DIRECT_DEPENDENCIES: Readonly<Record<string, readonly string[]>> =
   '@kite-ai/builtin-runtime': ['@kite-ai/runtime-contract', '@kite-ai/runtime-spi'],
   '@kite-ai/kite': [
     '@kite-ai/builtin-runtime',
+    '@kite-ai/runtime-client',
     '@kite-ai/runtime-contract',
     '@kite-ai/runtime-host',
+    '@kite-ai/runtime-protocol',
+    '@kite-ai/runtime-server',
     '@kite-ai/runtime-spi',
     '@kite-ai/runtime-storage-sqlite',
   ],
@@ -47,6 +56,9 @@ const FORBIDDEN_PUBLIC_NAMES: Readonly<Record<string, readonly RegExp[]>> = Obje
   '@kite-ai/agent-kernel': [/RuntimeHost/, /RuntimeStore/, /Provider/, /Executor/, /Sqlite/i],
   '@kite-ai/runtime-spi': [/RuntimeHost/, /RuntimeStore/, /Sqlite/, /BuiltinRuntimeImplementation/],
   '@kite-ai/runtime-host': [/Sqlite/, /BuiltinRuntime/],
+  '@kite-ai/runtime-protocol': [/RuntimeHost/, /Sqlite/, /BuiltinRuntime/],
+  '@kite-ai/runtime-server': [/Sqlite/, /BuiltinRuntime/],
+  '@kite-ai/runtime-client': [/RuntimeHost/, /Sqlite/, /BuiltinRuntime/],
   '@kite-ai/builtin-runtime': [/RuntimeHost/, /RuntimeStore/, /AgentState/, /KernelEvent/],
 });
 
@@ -649,6 +661,9 @@ function validateExternalImport(
   if (specifier.startsWith('node:') || specifier.startsWith('bun:')) {
     if (
       owner === '@kite-ai/runtime-contract' ||
+      owner === '@kite-ai/runtime-protocol' ||
+      owner === '@kite-ai/runtime-server' ||
+      owner === '@kite-ai/runtime-client' ||
       owner === '@kite-ai/agent-kernel' ||
       owner === '@kite-ai/runtime-spi'
     ) {
@@ -703,7 +718,13 @@ function validateAmbientAuthority(
   violations: RuntimePackageViolation[],
 ): void {
   for (const entry of packages) {
-    if (entry.name !== '@kite-ai/runtime-contract' && entry.name !== '@kite-ai/agent-kernel')
+    if (
+      entry.name !== '@kite-ai/runtime-contract' &&
+      entry.name !== '@kite-ai/runtime-protocol' &&
+      entry.name !== '@kite-ai/runtime-server' &&
+      entry.name !== '@kite-ai/runtime-client' &&
+      entry.name !== '@kite-ai/agent-kernel'
+    )
       continue;
     for (const path of entry.sourceFiles) {
       const sourcePath = normalizedRelative(root, path);
@@ -968,6 +989,9 @@ function validateClientBoundary(
     '@/core/runtime/runner',
     '@/core/runtime/scheduler',
     '@kite-ai/runtime-host',
+    '@kite-ai/runtime-protocol',
+    '@kite-ai/runtime-server',
+    '@kite-ai/runtime-storage-sqlite',
     '@/core/runtime/store',
   ];
   for (const edge of imports.filter((candidate) => candidate.owner.name === app.name)) {

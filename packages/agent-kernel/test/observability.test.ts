@@ -15,7 +15,7 @@ describe('Kernel observability fact projection', () => {
     expect(
       OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_.length +
         OBSERVABILITY_IGNORED_RUNTIME_EVENT_TYPES_.length,
-    ).toBe(136);
+    ).toBe(139);
   });
 
   test('uses envelope time and strips event identity and free-form fields', () => {
@@ -150,6 +150,16 @@ describe('Kernel observability fact projection', () => {
         {
           occurredAt: '2026-08-21T00:00:00.000Z',
           payload: { type: 'model.responded' },
+        },
+        FALLBACK,
+      ),
+    ).toBeUndefined();
+    expect(
+      projectRuntimeEventToObservabilityFact(
+        {
+          type: 'model.text_delta',
+          requestId: 'invocation-1',
+          text: 'PRIVATE_STREAM_TEXT',
         },
         FALLBACK,
       ),

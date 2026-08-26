@@ -6,6 +6,13 @@ import type {
   RuntimeTransactionInput,
 } from '@kite-ai/runtime-host/storage';
 import {
+  createSqliteRuntimeCommandReceiptWriter,
+  isSqliteRuntimeCommandReceiptConstraint,
+  type SqliteRuntimeCommandReceiptWriter,
+} from './command-receipts';
+import {
+  SqliteRuntimeCommandReceiptConflictError,
+  SqliteRuntimeCommandReceiptValidationError,
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeRevisionConflictError,
 } from './preflight';
@@ -48,11 +55,18 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
     stateChecksum: string,
     schemaVersion: number,
   ) => void;
+  readonly receiptWriter?: SqliteRuntimeCommandReceiptWriter;
 }): RuntimeStorage<Event, State>['transactions'] {
+  const receiptWriter = input.receiptWriter ?? createSqliteRuntimeCommandReceiptWriter(input.db);
+
   const commit = (transaction: RuntimeTransactionInput<Event, State>): void => {
     if (input.isClosed()) return;
     try {
-      input.db.transaction(() => {
+      // Receipt-bearing commits must reserve the writer before inspecting and
+      // persisting the decision, so a duplicate scoped key rolls back events,
+      // session metadata, and snapshot as one unit.
+      input.db.run('BEGIN IMMEDIATE');
+      try {
         if (
           transaction.requiredEffectLease &&
           !input.hasEffectLease(
@@ -119,13 +133,36 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
           encoded.metadata.stateChecksum,
           encoded.metadata.schemaVersion,
         );
-      })();
+        if (transaction.commandReceipt) {
+          receiptWriter.insert(
+            transaction.commandReceipt,
+            transaction.sessionId,
+            encoded.metadata.stateRevision,
+          );
+        }
+        input.db.run('COMMIT');
+      } catch (error) {
+        try {
+          input.db.run('ROLLBACK');
+        } catch {
+          /* SQLite may have rolled back after a constraint failure. */
+        }
+        throw error;
+      }
     } catch (error) {
       if (
         error instanceof SqliteRuntimeRevisionConflictError ||
-        error instanceof SqliteRuntimeEffectLeaseConflictError
+        error instanceof SqliteRuntimeEffectLeaseConflictError ||
+        error instanceof SqliteRuntimeCommandReceiptValidationError
       ) {
         throw error;
+      }
+      if (isSqliteRuntimeCommandReceiptConstraint(error) && transaction.commandReceipt) {
+        throw new SqliteRuntimeCommandReceiptConflictError(
+          transaction.commandReceipt.scopeSessionId,
+          transaction.commandReceipt.commandId,
+          error,
+        );
       }
       throw new Error(
         `Failed to persist runtime transaction for ${transaction.sessionId}: ${error instanceof Error ? error.message : String(error)}`,

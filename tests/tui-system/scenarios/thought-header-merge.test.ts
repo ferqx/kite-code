@@ -12,13 +12,8 @@
  *   Response 6: reason + text + read_file×6   （旁白 → 块顶字幕）
  *   Response 7: reason + final text（无工具） → 最终回答脱离为独立块
  *
- * 核心断言（ADR-0030 / 规则 24）：
- *   1. 整段只读探索 = 单一阶段块："Thinking Xs · read 30 files,
- *      searched 2 file patterns"（跨 7 次模型调用聚合，时长累加）
- *   2. 三段旁白文本作为块顶字幕按序渲染，不产生独立文本块
- *   3. 最终回答脱离为独立文本块（思考时长已计入阶段块，不重复出题头）
- *   4. 非探索工具边界（write_file，等价 task）切分阶段，后段按
- *      ADR-0047 单次消费规则使用纯工具统计标签
+ * RuntimeClientEvent 传递闭合、有界的 reasoning、工具参数与结果；TUI 用同一
+ * reducer 将探索生命周期聚合为 Thought，并在独立工具卡中保留本地细节。
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -133,7 +128,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
   });
 
   test(
-    'real-session replay: stats suffix on Thought blocks, pure thoughts merge into text headers',
+    'real-session replay keeps one Thought aggregation with confirmed captions',
     async () => {
       toolSeq = 0;
       const response1Calls = [
@@ -227,9 +222,13 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // ── 1. Settled Thought 只保留当前阶段的单行摘要 ──
       expect(screenContains(output, 'Thinking ')).toBe(true);
-      expect(screenContains(output, '· read 6 files')).toBe(true);
+      expect(screenContains(output, 'read 30 files')).toBe(true);
+      expect(screenContains(output, 'searched 2 file patterns')).toBe(true);
+      expect(tui.scrollback().match(/Thinking /g) ?? []).toHaveLength(1);
+      expect(screenContains(output, 'Let me continue reading')).toBe(false);
+      expect(screenContains(output, 'Let me read the core files systematically.')).toBe(true);
+      expect(screenContains(output, 'StatsLine.ts')).toBe(false);
 
       // ── 2. 最终回答作为独立文本块 ──
       expect(screenContains(output, '── TUI 模块全面解析 ──')).toBe(true);
@@ -252,7 +251,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'thinking is consumed once across a write-tool boundary (ADR-0047)',
+    'write boundary retains Thought ordering and concrete local write details',
     async () => {
       server.setResponses([
         {
@@ -293,14 +292,14 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // 边界前：Thought · read 1 file；写入卡片独立渲染
-      expect(screenContains(output, '· read 1 file')).toBe(true);
-      expect(screenContains(output, 'notes.md')).toBe(true);
-      // 边界后：没有新的 reason，因此只显示纯工具统计，不重复 Thought 标签。
+      expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'read 2 files')).toBe(true);
-      expect(/Thinking \d+s · read 2 files/.test(clean)).toBe(false);
-      // 时序：read 1 file Thought → 写入卡片 → 纯统计 read 2 files。
-      expect(/read 1 file[\s\S]*notes\.md[\s\S]*read 2 files/.test(clean)).toBe(true);
+      expect(screenContains(output, 'Create')).toBe(true);
+      expect(clean.match(/read 1 file/g) ?? []).toHaveLength(1);
+      expect(screenContains(output, 'Thinking ')).toBe(true);
+      expect(screenContains(output, 'notes.md')).toBe(true);
+      expect(screenContains(output, 'entry: apps/kite')).toBe(false);
+      expect(/read 1 file[\s\S]*Create[\s\S]*read 2 files/.test(clean)).toBe(true);
 
       console.log('  [carryover] clean output (last 2000 chars):', clean.slice(-2000));
     },

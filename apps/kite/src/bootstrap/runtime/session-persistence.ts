@@ -1,8 +1,14 @@
-import type { AgentPlan, PlanArtifactRef, PlanDocument } from '@kite-ai/runtime-contract';
+import type {
+  AgentPlan,
+  PlanArtifactRef,
+  PlanDocument,
+  RuntimeClientEvent,
+} from '@kite-ai/runtime-contract';
 import { restoreRuntimeHostStateSession } from '@kite-ai/runtime-host';
 import { runtimeHostStateActivePlanning as getActivePlanning } from '@kite-ai/runtime-host/kernel-adapter';
 import type { RuntimeSessionInfo } from '@kite-ai/runtime-host/storage';
-import type { RuntimeEvent, RuntimeState, StateRuntimeStorage } from './state-runtime';
+import { projectStateRuntimeEventForPresentation } from '#app/runtime-client/presentation-history';
+import type { RuntimeState, StateRuntimeStorage } from './state-runtime';
 
 export type OpenStateRuntimeStorage = (threadId?: string) => StateRuntimeStorage;
 
@@ -36,7 +42,7 @@ export interface ReplayInterrupt {
 export interface SessionData {
   threadId: string;
   messages: unknown[];
-  runtimeEvents: RuntimeEvent[];
+  runtimeEvents: RuntimeClientEvent[];
   interrupt: ReplayInterrupt | null;
   modelProvider: string;
   modelName: string;
@@ -142,7 +148,12 @@ export async function loadSession(
     const events = store.sessions
       .loadEventsStrict(threadId)
       .filter((entry) => entry.id <= restored.restoreBoundary.lastEventPosition)
-      .map((entry) => entry.event);
+      .flatMap((entry) => {
+        const projected = projectStateRuntimeEventForPresentation(entry.event, {
+          historical: true,
+        });
+        return projected === undefined ? [] : [projected];
+      });
     const interaction = state?.interactions;
     const interrupt: ReplayInterrupt | null =
       interaction?.kind === 'awaiting_tool_approval'
@@ -191,18 +202,6 @@ export async function persistSessionName(
   }
 }
 
-export async function deleteSession(
-  openStateRuntimeStorage: OpenStateRuntimeStorage,
-  threadId: string,
-): Promise<void> {
-  const store = openStateRuntimeStorage(threadId);
-  try {
-    store.sessions.deleteSession(threadId);
-  } finally {
-    store.close();
-  }
-}
-
 export async function enrichSessionNames(
   openStateRuntimeStorage: OpenStateRuntimeStorage,
   sessions: SessionInfo[],
@@ -215,9 +214,9 @@ export async function enrichSessionNames(
       session.threadId,
       resolveRecoveryIdentity(session.threadId),
     );
-    const first = data?.runtimeEvents.find((event) => event.type === 'user.message_appended');
-    if (first?.type !== 'user.message_appended') continue;
-    const name = await generateSessionName(first.content);
+    const first = data?.runtimeEvents.find((event) => event.type === 'user.message');
+    if (first?.type !== 'user.message') continue;
+    const name = await generateSessionName(first.text);
     if (!name) continue;
     await persistSessionName(openStateRuntimeStorage, session.threadId, name);
     onNamed(session.threadId, name);

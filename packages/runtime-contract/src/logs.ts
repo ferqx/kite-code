@@ -4,6 +4,9 @@
  * serve local in-process readers and must never expose SQLite or Artifact
  * implementation details.
  */
+import type { RuntimeClientEvent } from './notifications';
+import type { InteractionMode } from './presentation';
+
 export const RUNTIME_LOG_SESSION_PAGE_MIN_LIMIT = 1;
 export const RUNTIME_LOG_SESSION_PAGE_MAX_LIMIT = 100;
 export const RUNTIME_LOG_EVENT_PAGE_MIN_LIMIT = 1;
@@ -56,6 +59,8 @@ export interface ListRuntimeLogSessionsRequest {
 export interface RuntimeLogSessionEntry {
   readonly sessionId: string;
   readonly displayName: string;
+  /** True only when no explicit persisted name exists. */
+  readonly needsSmartName: boolean;
   readonly updatedAt: number;
   readonly lastSequence: number;
   readonly model?: { readonly provider: string; readonly name: string };
@@ -116,6 +121,20 @@ export interface RuntimeLogEventPage {
   readonly nextCursor?: number;
   readonly hasMore: boolean;
   readonly observedLastSequence: number;
+}
+
+/**
+ * A complete, display-only durable transcript for one current-format session.
+ * It deliberately carries the same closed RuntimeClientEvent vocabulary as
+ * live delivery; it is not an event reducer input or settlement authority.
+ */
+export interface RuntimeHistorySessionTranscript {
+  readonly session: RuntimeLogSessionEntry;
+  readonly events: readonly RuntimeClientEvent[];
+  /** Folded history fallback; an admitted live Host projection remains authoritative. */
+  readonly interactionMode: InteractionMode;
+  /** Historical interaction facts require fresh Runtime recovery before settlement. */
+  readonly recovery: 'normal' | 'pending_interaction';
 }
 
 export class RuntimeLogRequestValidationError extends Error {

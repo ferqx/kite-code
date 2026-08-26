@@ -51,6 +51,44 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 - `bun run test:tui:system`
 - `bun run test:sandbox:smoke:native`
 
+## Runtime Server V1 owner 与 transport 测试
+
+KRSV1 的 package-owner coverage 固定为以下十个测试文件：
+
+- `packages/runtime-contract/test/runtime-contract.test.ts`
+- `packages/runtime-protocol/test/runtime-protocol.test.ts`
+- `packages/runtime-server/test/runtime-server.test.ts`
+- `packages/runtime-client/test/runtime-client.test.ts`、`packages/runtime-client/test/store.test.ts`
+- `packages/runtime-host/test/command-receipt.test.ts`、`persistent-command-host.test.ts`、`persistent-command-crash-windows.test.ts`
+- `packages/runtime-storage-sqlite/test/compatibility-store.test.ts`、`store-conformance.test.ts`
+
+这十个 owner tests 覆盖 closed contract/protocol、Server/Client state、Store 6 receipt 的原子性、restart/crash
+replay 与 Store 5 source-only import；完整 durable history 另由 SQLite log-query、
+`apps/kite/test/runtime-history-client.test.ts` 和 Session persistence/format PTY journeys 验证全量分页、已选
+compatibility import、ephemeral→durable transcript 与 live/replay reducer 等价。Session/TUI owner tests 还固定
+验证 reasoning delta/completed 都走无 revision 的 Server presentation route，以及 tool-bearing durable terminal
+先于累计 text delta 时连续探索工具仍聚合为同一 Thought；模型展示 `requestId` 贯穿
+Kernel/Contract/Protocol/history mapper，正文先于 reasoning 或 terminal 越过 ephemeral delta 时，最终正文、
+Thinking 与工具聚合仍各自只有一个 block owner。TUI harness 还以逐帧
+`reasoning prefix → content → reasoning suffix → terminal` 验证正文首帧关闭纯 reasoning 活动态，后到 reasoning 只
+补充隐藏 Thought metadata；live 与重启 `/resume` 都不得泄漏后缀、恢复活动圆点或重复回答。会创建真实
+child、socket、SQLite file、cwd 或 global process environment 的 App tests 必须留在 `apps/kite/test/isolated/`，由默认
+runner 逐文件、逐进程串行执行，不能为了提速改成共享进程。
+
+Runtime Server/Client owner tests 还必须固定 reconnect generation 立即失效 Session readiness、cursor 超过
+Host watermark 时以 current snapshot reset/ready 收敛，以及 blocked carrier 的 in-flight send 在 settle 前继续
+占用 connection/global encoded-byte budget。
+
+三个显式 transport scripts 也都是隔离套件：`bun run test:runtime:stdio` 覆盖实际 child/stdio lifecycle，
+`bun run test:runtime:websocket` 覆盖一次性 bootstrap、cookie、loopback socket 与 browser reference，
+`bun run test:runtime:transport` 以同一 raw JSON-RPC matrix 覆盖 InProcess、真实 stdio child 与真实 development
+WebSocket。该矩阵验证 initialize/allowlist、唯一 Workspace admission、subscribe ack/reset/ready、unsubscribe、
+close/drain 与 bounded ping mini-soak；它不把 WebSocket 升级为 production entrypoint。
+
+`.github/workflows/runtime-stdio-smoke.yml` 与 `.github/workflows/runtime-transport-qualification.yml` 都在
+`macos-15`、`ubuntu-24.04`、`windows-2025` 上运行相应脚本。它们是 pending qualification checks：在对应 PR 的
+三平台结果实际返回前，测试文档不得称其 passed、不得以 workflow 定义代替 evidence。
+
 ## 迁移期测试
 
 Parity/cutover 测试只有在每条独有断言映射到 owner 测试后才能删除。State 26 read-side compatibility、

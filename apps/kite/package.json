@@ -19,8 +19,11 @@
   },
   "dependencies": {
     "@kite-ai/builtin-runtime": "workspace:*",
+    "@kite-ai/runtime-client": "workspace:*",
     "@kite-ai/runtime-contract": "workspace:*",
     "@kite-ai/runtime-host": "workspace:*",
+    "@kite-ai/runtime-protocol": "workspace:*",
+    "@kite-ai/runtime-server": "workspace:*",
     "@kite-ai/runtime-spi": "workspace:*",
     "@kite-ai/runtime-storage-sqlite": "workspace:*",
     "@inkjs/ui": "^2.0.0",

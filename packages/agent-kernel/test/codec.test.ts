@@ -52,6 +52,37 @@ describe('State event codec', () => {
     );
   });
 
+  test('requires and closes invocation identity on model display events', () => {
+    const textDelta = {
+      type: 'model.text_delta',
+      requestId: 'invocation-1',
+      text: 'visible text',
+    } as const;
+    const reasoningDelta = {
+      type: 'model.reasoning_delta',
+      requestId: 'invocation-1',
+      segmentId: 'segment-1',
+      text: 'visible reasoning',
+    } as const;
+    const reasoningCompleted = {
+      type: 'model.reasoning_completed',
+      requestId: 'invocation-1',
+      segmentId: 'segment-1',
+      text: 'visible reasoning',
+    } as const;
+
+    for (const event of [textDelta, reasoningDelta, reasoningCompleted]) {
+      expect(() => assertCurrentRuntimeEvent(event)).not.toThrow();
+      expect(() => assertCurrentRuntimeEvent({ ...event, extra: true })).toThrow('invalid shape');
+    }
+    expect(() =>
+      assertCurrentRuntimeEvent({ type: 'model.text_delta', text: 'missing invocation identity' }),
+    ).toThrow('requires requestId');
+    expect(() => assertCurrentRuntimeEvent({ ...reasoningCompleted, requestId: '' })).toThrow(
+      'requires requestId',
+    );
+  });
+
   test('keeps approval batch and session-clear facts exact and receipt-safe', () => {
     const commandIdentity = {
       sessionId: 'session-1',
@@ -126,6 +157,32 @@ describe('State event codec', () => {
     expect(() => assertCurrentRuntimeEvent({ ...cleared, localOnly: true })).toThrow(
       'invalid shape',
     );
+  });
+
+  test('keeps durable rewind intent and terminal facts closed', () => {
+    const requested = {
+      type: 'session.rewind_requested',
+      rewindId: 'rewind-1',
+      commandId: 'command-1',
+      sourceSessionId: 'session-1',
+      targetSessionId: 'session-2',
+      checkpointId: 'checkpoint-1',
+      scope: 'conversation_and_workspace',
+    } as const;
+    expect(() => assertCurrentRuntimeEvent(requested)).not.toThrow();
+    expect(() => assertCurrentRuntimeEvent({ ...requested, recoveryIdentity: 'secret' })).toThrow(
+      'invalid shape',
+    );
+    expect(() => assertCurrentRuntimeEvent({ ...requested, scope: 'everything' })).toThrow(
+      'scope is invalid',
+    );
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        ...requested,
+        type: 'session.rewind_failed',
+        failureCode: 'checkpoint_unavailable',
+      }),
+    ).not.toThrow();
   });
 
   test('keeps retired session events readable but rejects them from current writes', () => {

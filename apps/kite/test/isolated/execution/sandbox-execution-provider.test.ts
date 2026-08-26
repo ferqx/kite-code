@@ -43,6 +43,7 @@ import type {
   PreparedToolInvocation,
   SandboxPreparation,
   SandboxPreparationLifecycle,
+  SandboxPreparedProcessExecutionPort,
   ToolPipelineAttemptAcknowledgement,
 } from '@kite-ai/runtime-spi';
 import { createAppToolPipelineSandboxLifecycle } from '#app/bootstrap/runtime/tool-pipeline-sandbox-lifecycle';
@@ -681,10 +682,139 @@ describe('SandboxExecutionProvider', () => {
     }
   });
 
+  test.each([
+    'seatbelt',
+    'bubblewrap',
+  ] as const)('explicitly approved network reaches the prepared process without claiming allowlist enforcement: %s', async (backend) => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-approved-network-'));
+    try {
+      const grants = new SandboxExecutionGrantAuthority();
+      const transitions: string[] = [];
+      let processCalls = 0;
+      const completedPort = createCompletedPreparedProcessPortForTest();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
+        verifier: grants.verifier(),
+        resourceSemantics: 'allocating',
+        prepare: (grant) => {
+          const candidate = plan(
+            grant.preparation,
+            grant.preparationDigest,
+            workspace,
+            `approved-network-${backend}`,
+            'allocating',
+          );
+          const prepared = deepFreezeSandboxFixture({
+            ...candidate,
+            backend,
+            backendCapabilities: {
+              ...candidate.backendCapabilities,
+              backend,
+            },
+          });
+          // Current platform evidence remains deliberately conservative. An
+          // explicit approval can authorize this one invocation, but must
+          // never rewrite the backend fact into an enforcement claim.
+          expect(prepared.backendCapabilities.network.allowlist).toBe('unsupported');
+          return { ok: true, observation: prepared };
+        },
+      });
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
+        provider: fake,
+        backend,
+        grants,
+        canonicalWorkspace: workspace,
+        executionBoundaryDigest: 'boundary',
+        protectedPathRevision: 'protected',
+        preparedProcess: Object.freeze({
+          execute: async (input: Parameters<SandboxPreparedProcessExecutionPort['execute']>[0]) => {
+            processCalls += 1;
+            transitions.push('process');
+            expect(input.prepared.backendCapabilities.network.allowlist).toBe('unsupported');
+            expect(input.prepared.backend).toBe(backend);
+            expect(input.prepared.approvedArgv.at(-1)?.endsWith('printf approved-network')).toBe(
+              true,
+            );
+            const supervisor = await input.lifecycle.recordExecutionSupervisorStarted(
+              input.prepared,
+              {
+                dispatchId: input.dispatchIntent.dispatchId,
+                dispatchIntentDigest: input.dispatchIntent.dispatchIntentDigest,
+                supervisorPid: 1,
+                processGroupId: 1,
+                processStartIdentity: 'approved-network-process',
+              },
+            );
+            expect(supervisor.acknowledged).toBe(true);
+            return completedPort.execute(input);
+          },
+        }),
+      })({
+        workspace,
+        command: 'printf approved-network',
+        filesystemMode: 'workspace_only',
+        networkMode: 'allow_all',
+        sandboxInvocationIdentity: invocationIdentity(),
+        sandboxPreparationLifecycle: {
+          async recordPreparationIntent(preparation) {
+            transitions.push('intent');
+            return preparationIntentAcknowledgement(preparation);
+          },
+          async recordPreparationReady(prepared) {
+            transitions.push('ready');
+            return preparationReadyAcknowledgement(prepared);
+          },
+          async recordExecutionDispatchIntent(_prepared, dispatch) {
+            transitions.push('dispatch');
+            return dispatchAcknowledgement(dispatch);
+          },
+          async recordExecutionSupervisorStarted(_prepared, started) {
+            transitions.push('supervisor');
+            return supervisorAcknowledgement(started);
+          },
+          async recordDisposalIntent(prepared) {
+            transitions.push('dispose-intent');
+            expect(prepared).not.toBeNull();
+            return Object.freeze({
+              acknowledged: true as const,
+              stage: 'disposal_intent' as const,
+              purpose: 'dispose' as const,
+              lifecycleIntentDigest: 'approved-network-dispose',
+              cleanupAttempt: 1,
+            });
+          },
+          async recordDisposalReceipt(receipt) {
+            transitions.push('dispose-receipt');
+            return disposalReceiptAcknowledgement(receipt);
+          },
+        },
+      });
+
+      expect(result).toMatchObject({
+        ok: true,
+        exitCode: 0,
+      });
+      expect(processCalls).toBe(1);
+      expect(transitions).toEqual([
+        'intent',
+        'ready',
+        'dispatch',
+        'process',
+        'supervisor',
+        'dispose-intent',
+        'dispose-receipt',
+      ]);
+      expect(fake.calls()).toEqual({ prepare: 1, dispose: 1, reconcile: 0 });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('sealed backend evidence mismatch is denied before dispatch', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
       const grants = new SandboxExecutionGrantAuthority();
+      let processCalls = 0;
+      const completedPort = createCompletedPreparedProcessPortForTest();
       const fake = new ScriptableFakeSandboxExecutionProvider({
         verifier: grants.verifier(),
         prepare: (grant) => {
@@ -713,6 +843,12 @@ describe('SandboxExecutionProvider', () => {
         canonicalWorkspace: workspace,
         executionBoundaryDigest: 'boundary',
         protectedPathRevision: 'protected',
+        preparedProcess: Object.freeze({
+          execute: async (input: Parameters<SandboxPreparedProcessExecutionPort['execute']>[0]) => {
+            processCalls += 1;
+            return completedPort.execute(input);
+          },
+        }),
       })({
         workspace,
         command: 'printf must-not-dispatch',
@@ -720,6 +856,134 @@ describe('SandboxExecutionProvider', () => {
       });
       expect(result.terminationReason).toBe('sandbox_denied');
       expect(result.stderr).toContain('backend evidence mismatch');
+      expect(processCalls).toBe(0);
+      expect(fake.calls()).toEqual({ prepare: 1, dispose: 0, reconcile: 0 });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('Windows approved network without a full filesystem grant is denied before dispatch', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-windows-network-scope-'));
+    try {
+      const grants = new SandboxExecutionGrantAuthority();
+      let processCalls = 0;
+      const completedPort = createCompletedPreparedProcessPortForTest();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
+        verifier: grants.verifier(),
+        resourceSemantics: 'allocating',
+        prepare: (grant) => {
+          expect(grant.preparation.networkMode).toBe('allow_all');
+          expect(grant.preparation.filesystemMode).toBe('workspace_only');
+          return {
+            ok: false,
+            failure: {
+              code: 'backend_unavailable',
+              message: 'approved_network_requires_full_filesystem_scope',
+            },
+          };
+        },
+      });
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
+        provider: fake,
+        backend: 'windows_restricted_token',
+        grants,
+        canonicalWorkspace: workspace,
+        executionBoundaryDigest: 'boundary',
+        protectedPathRevision: 'protected',
+        preparedProcess: Object.freeze({
+          execute: async (input: Parameters<SandboxPreparedProcessExecutionPort['execute']>[0]) => {
+            processCalls += 1;
+            return completedPort.execute(input);
+          },
+        }),
+      })({
+        workspace,
+        command: 'printf must-not-run',
+        filesystemMode: 'workspace_only',
+        networkMode: 'allow_all',
+        sandboxInvocationIdentity: invocationIdentity(),
+        sandboxPreparationLifecycle: {
+          async recordPreparationIntent(preparation) {
+            return preparationIntentAcknowledgement(preparation);
+          },
+          async recordPreparationReady() {
+            throw new Error('ready must not be reached');
+          },
+          async recordExecutionDispatchIntent() {
+            throw new Error('dispatch must not be reached');
+          },
+          async recordExecutionSupervisorStarted() {
+            throw new Error('supervisor must not be reached');
+          },
+          async recordDisposalIntent(prepared) {
+            expect(prepared).toBeNull();
+            return Object.freeze({
+              acknowledged: true as const,
+              stage: 'disposal_intent' as const,
+              purpose: 'reconcile_preparation_intent' as const,
+              lifecycleIntentDigest: 'windows-network-abandonment',
+              cleanupAttempt: 1,
+            });
+          },
+          async recordDisposalReceipt(receipt) {
+            return disposalReceiptAcknowledgement(receipt);
+          },
+        },
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        terminationReason: 'sandbox_denied',
+        sandboxFailure: { code: 'backend_unavailable', stage: 'pre_dispatch' },
+      });
+      expect(result.stderr).toContain('approved_network_requires_full_filesystem_scope');
+      expect(processCalls).toBe(0);
+      expect(fake.calls()).toEqual({ prepare: 1, dispose: 0, reconcile: 0 });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('policy-proven read-only execution cannot combine with full filesystem access', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-read-only-full-scope-'));
+    try {
+      const grants = new SandboxExecutionGrantAuthority();
+      let processCalls = 0;
+      const completedPort = createCompletedPreparedProcessPortForTest();
+      const fake = new ScriptableFakeSandboxExecutionProvider({
+        verifier: grants.verifier(),
+        prepare: (grant) => ({
+          ok: true,
+          observation: deepFreezeSandboxFixture(
+            plan(grant.preparation, grant.preparationDigest, workspace, 'read-only-full-scope'),
+          ),
+        }),
+      });
+      const result = await createBuiltinSandboxExecutionConsumerForTest({
+        provider: fake,
+        backend: 'seatbelt',
+        grants,
+        canonicalWorkspace: workspace,
+        executionBoundaryDigest: 'boundary',
+        protectedPathRevision: 'protected',
+        preparedProcess: Object.freeze({
+          execute: async (input: Parameters<SandboxPreparedProcessExecutionPort['execute']>[0]) => {
+            processCalls += 1;
+            return completedPort.execute(input);
+          },
+        }),
+      })({
+        workspace,
+        command: 'printf must-not-run',
+        filesystemMode: 'allow_all',
+        executionTrust: 'policy_proven_read_only',
+        sandboxInvocationIdentity: invocationIdentity(),
+      });
+
+      expect(result.terminationReason).toBe('sandbox_denied');
+      expect(result.stderr).toContain('cannot combine full filesystem access with read-only trust');
+      expect(processCalls).toBe(0);
       expect(fake.calls()).toEqual({ prepare: 1, dispose: 0, reconcile: 0 });
     } finally {
       rmSync(workspace, { recursive: true, force: true });

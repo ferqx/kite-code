@@ -424,9 +424,12 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       expect(screenContains(afterRejection, 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION')).toBe(
         false,
       );
-      // The rejected tool call remains in the message list as a settled fact.
-      expect(screenContains(afterRejection, 'tool-lifecycle-rejected.txt')).toBe(true);
-      expect(screenContains(afterRejection, 'Tool approval rejected by user.')).toBe(true);
+      // A rejected approval never reached tool.started, so its queued payload
+      // stays off-screen and no synthetic Write card is created.
+      expect(screenContains(afterRejection, '● Write')).toBe(false);
+      expect(screenContains(afterRejection, 'Tool execution rejected.')).toBe(false);
+      expect(screenContains(afterRejection, 'Approval rejected.')).toBe(true);
+      expect(screenContains(afterRejection, 'tool-lifecycle-rejected.txt')).toBe(false);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
       expect(existsSync(externalFile)).toBe(false);
 

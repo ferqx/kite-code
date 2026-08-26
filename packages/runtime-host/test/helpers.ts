@@ -9,6 +9,8 @@ import {
 } from '@kite-ai/runtime-contract';
 import {
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
+  type RuntimeHostCommandInspection,
+  type RuntimeHostCommandInspectionContext,
   type RuntimeHostExecutionBridge,
   type RuntimeHostExecutionServices,
   type RuntimeHostPreparedExecution,
@@ -16,8 +18,15 @@ import {
 import {
   type RuntimeHostKernelInput,
   runtimeCommandFromKernelInput,
+  translateRuntimeCommandToKernelInput,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import type { RuntimeStorage } from '@kite-ai/runtime-host/storage';
+import {
+  createRuntimeStoredCommandReceipt,
+  type RuntimeCommandReceiptLookupInput,
+  type RuntimeSessionDeletionInput,
+  type RuntimeStorage,
+  type RuntimeStoredCommandReceipt,
+} from '@kite-ai/runtime-host/storage';
 import { defineRuntimeModule, type RuntimeModule } from '@kite-ai/runtime-spi';
 
 export function projection(sessionId: string, revision: number): RuntimeSessionProjection {
@@ -30,6 +39,8 @@ export function projection(sessionId: string, revision: number): RuntimeSessionP
   };
 }
 
+const testCommandReceipts = new Map<string, RuntimeStoredCommandReceipt>();
+
 export class TestExecutionBridge implements RuntimeHostExecutionBridge {
   readonly projections = new Map<string, RuntimeSessionProjection>();
   readonly calls: RuntimeCommand[] = [];
@@ -41,10 +52,48 @@ export class TestExecutionBridge implements RuntimeHostExecutionBridge {
   prepareImplementation?: (
     command: RuntimeCommand,
     publish: (notification: RuntimeNotification) => void,
-  ) => Promise<RuntimeHostPreparedExecution>;
+  ) => Promise<{
+    readonly receipt: RuntimeCommandReceipt;
+    readonly execution?: RuntimeHostPreparedExecution['execution'];
+  }>;
   shutdownImplementation?: (sessionId: string, reason: string) => Promise<void>;
   closeImplementation?: () => Promise<void>;
   recoverImplementation?: (sessionId: string) => Promise<void>;
+
+  constructor() {
+    testCommandReceipts.clear();
+  }
+
+  async inspectCommand(
+    command: RuntimeCommand,
+    context: RuntimeHostCommandInspectionContext,
+  ): Promise<RuntimeHostCommandInspection> {
+    return {
+      kind: 'accepted',
+      decision: {
+        targetSessionId: context.targetSessionId,
+        commit: async (evidence) => {
+          const prepared = await this.prepare(
+            translateRuntimeCommandToKernelInput(command),
+            () => {},
+          );
+          if (prepared.receipt.status !== 'applied') {
+            throw new Error(
+              'Test execution bridge legacy command did not produce an applied receipt.',
+            );
+          }
+          testCommandReceipts.set(
+            `${evidence.scopeSessionId}\u0000${evidence.commandId}`,
+            createRuntimeStoredCommandReceipt(evidence, prepared.receipt.revision),
+          );
+          return {
+            receipt: prepared.receipt,
+            ...(prepared.execution ? { preparedExecution: { execution: prepared.execution } } : {}),
+          };
+        },
+      },
+    };
+  }
 
   recoverSession(sessionId: string): Promise<void> {
     this.recoveries.push(sessionId);
@@ -106,6 +155,25 @@ export function testStorage(onClose: () => void = () => undefined): RuntimeStora
     stateSchemaVersion: 25,
     storeSchemaVersion: 4,
     formatEpoch: 'kite-runtime-2026-08-18',
+    commandReceipts: {
+      lookup(input: RuntimeCommandReceiptLookupInput) {
+        const receipt = testCommandReceipts.get(`${input.scopeSessionId}\u0000${input.commandId}`);
+        if (!receipt) return { status: 'missing' as const };
+        return {
+          status: receipt.requestDigest === input.requestDigest ? 'replay' : 'digest_mismatch',
+          receipt,
+        };
+      },
+    },
+    sessions: {
+      deleteSession(_sessionId: string, deletion?: RuntimeSessionDeletionInput) {
+        if (!deletion) return;
+        testCommandReceipts.set(
+          `${deletion.commandReceipt.scopeSessionId}\u0000${deletion.commandReceipt.commandId}`,
+          deletion.commandReceipt,
+        );
+      },
+    },
     close: onClose,
   } as unknown as RuntimeStorage;
 }

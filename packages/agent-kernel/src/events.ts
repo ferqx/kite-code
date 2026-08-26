@@ -310,12 +310,12 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'parentInvocationId',
     'parentToolCallId',
   ],
-  'model.reasoning_completed': ['segmentId', 'text'],
-  'model.reasoning_delta': ['text'],
+  'model.reasoning_completed': ['requestId', 'segmentId', 'text'],
+  'model.reasoning_delta': ['requestId', 'text'],
   'model.requested': ['requestId'],
   'model.responded': ['messageId'],
   'model.retry': ['invocationId', 'attempt', 'maxAttempts', 'error', 'delayMs'],
-  'model.text_delta': ['text'],
+  'model.text_delta': ['requestId', 'text'],
   'network.admission_decided': ['toolCallId', 'decision'],
   'plan.approved': [
     'interactionId',
@@ -457,6 +457,31 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'skill.activation_started': ['activation'],
   'skill.catalog_refreshed': ['catalogRevision'],
   'skill.frame_closed': ['activationId', 'status', 'reason', 'closedAt'],
+  'session.rewind_requested': [
+    'rewindId',
+    'commandId',
+    'sourceSessionId',
+    'targetSessionId',
+    'checkpointId',
+    'scope',
+  ],
+  'session.rewind_completed': [
+    'rewindId',
+    'commandId',
+    'sourceSessionId',
+    'targetSessionId',
+    'checkpointId',
+    'scope',
+  ],
+  'session.rewind_failed': [
+    'rewindId',
+    'commandId',
+    'sourceSessionId',
+    'targetSessionId',
+    'checkpointId',
+    'scope',
+    'failureCode',
+  ],
   'subagent.approval_deferred': ['toolCallId'],
   'subagent.cache_metrics': ['subagent'],
   'subagent.completed': ['subagent'],
@@ -504,8 +529,8 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
-/** The State union has 134 current events plus one read-only compatibility event. */
-export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 136 as const;
+/** The State union has 137 current events plus one read-only compatibility event. */
+export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 139 as const;
 
 /**
  * State diagnostics/projection notifications intentionally left out of the
@@ -540,6 +565,11 @@ export const STATE_DIAGNOSTIC_EVENT_TYPES = [
 /** Current discriminants intentionally handled by the reducer default branch. */
 export const STATE_DEFAULT_EVENT_TYPES = [
   'runtime.cancellation_diagnostic',
+  // Rewind is a durable App post-commit intent. State 27 deliberately has no
+  // rewind projection; recovery reconstructs unmatched intents from history.
+  'session.rewind_requested',
+  'session.rewind_completed',
+  'session.rewind_failed',
   'subagent.cache_metrics',
   'subagent.completed',
   'subagent.failed',
@@ -551,7 +581,7 @@ export const STATE_DEFAULT_EVENT_TYPES = [
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State RuntimeEvent discriminant table must contain exactly 136 entries.');
+  throw new Error('State RuntimeEvent discriminant table must contain exactly 139 entries.');
 }
 
 /** Make the package-owned State DTOs structurally match the mutable root
@@ -757,6 +787,7 @@ type ModelInvocationLimits = {
 
 type SandboxExecutionBackend = 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
 type SandboxPreparationResourceSemantics = 'pure' | 'allocating';
+export type SessionRewindScope = 'conversation_only' | 'conversation_and_workspace' | 'code_only';
 type SubagentObservationStatus = 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
 
 type SubagentObservation = {
@@ -1558,13 +1589,19 @@ type StateEventMap = ResourceBudgetEventMap &
       dispatchCertainty: 'none' | 'attempted';
       failedAt: string;
     };
-    'model.reasoning_delta': { type: 'model.reasoning_delta'; segmentId?: string; text: string };
+    'model.reasoning_delta': {
+      type: 'model.reasoning_delta';
+      requestId: string;
+      segmentId?: string;
+      text: string;
+    };
     'model.reasoning_completed': {
       type: 'model.reasoning_completed';
+      requestId: string;
       segmentId: string;
       text: string;
     };
-    'model.text_delta': { type: 'model.text_delta'; text: string };
+    'model.text_delta': { type: 'model.text_delta'; requestId: string; text: string };
     'model.responded': {
       type: 'model.responded';
       messageId: string;
@@ -1729,6 +1766,34 @@ type StateEventMap = ResourceBudgetEventMap &
       toolCallId: string;
       journal: ToolRecoveryJournal;
     };
+    'session.rewind_requested': {
+      type: 'session.rewind_requested';
+      rewindId: string;
+      commandId: string;
+      sourceSessionId: string;
+      targetSessionId: string;
+      checkpointId: string;
+      scope: SessionRewindScope;
+    };
+    'session.rewind_completed': {
+      type: 'session.rewind_completed';
+      rewindId: string;
+      commandId: string;
+      sourceSessionId: string;
+      targetSessionId: string;
+      checkpointId: string;
+      scope: SessionRewindScope;
+    };
+    'session.rewind_failed': {
+      type: 'session.rewind_failed';
+      rewindId: string;
+      commandId: string;
+      sourceSessionId: string;
+      targetSessionId: string;
+      checkpointId: string;
+      scope: SessionRewindScope;
+      failureCode: 'checkpoint_unavailable' | 'execution_failed';
+    };
   };
 
 // Named State event views remain Kernel-owned aliases.  They are exported
@@ -1741,7 +1806,7 @@ export type ContextCompactionResetEvent = StateEventMap['context.compaction_rese
 
 type EventForType<EventType extends RuntimeEventType> = StateEventMap[EventType];
 
-/** The State union has one exact object type for each of its 136 discriminants. */
+/** The State union has one exact object type for each of its 139 discriminants. */
 export type KernelEvent = {
   [EventType in RuntimeEventType]: EventForType<EventType>;
 }[RuntimeEventType];

@@ -533,10 +533,13 @@ function validatePreparedIdentity(input: {
 }
 
 /**
- * A prepared plan may only claim a scope that the published backend evidence
- * says is enforced.  This check is intentionally before the process port and
- * treats unsupported dimensions as a terminal sandbox denial; an approval or
- * an uncertain effect must never silently widen a baseline plan to `allow_all`.
+ * Restrictive baseline scopes may only claim native boundary evidence that the
+ * backend publishes as enforced.  An `allow_all` scope is different: Policy
+ * has already sealed an exact development approval for unrestricted access,
+ * so it must not be reinterpreted as production `allowlist` or `full_access`
+ * qualification evidence. This check remains before the process port; it
+ * preserves the Windows V6 rule that approved network requires an explicitly
+ * approved full filesystem scope.
  */
 function validatePreparedScopeEvidence(input: {
   readonly prepared: Readonly<PreparedSandboxExecution>;
@@ -554,12 +557,27 @@ function validatePreparedScopeEvidence(input: {
   ) {
     return 'Prepared sandbox scope cannot combine full filesystem access with read-only trust.';
   }
-  if (input.prepared.backendCapabilities.filesystem[filesystemCapability] !== 'enforced') {
+  const lowerAssuranceWindowsDevelopment = input.prepared.backend === 'windows_restricted_token';
+  if (
+    input.preparation.filesystemMode !== 'allow_all' &&
+    !lowerAssuranceWindowsDevelopment &&
+    input.prepared.backendCapabilities.filesystem[filesystemCapability] !== 'enforced'
+  ) {
     return `Prepared sandbox filesystem scope '${filesystemCapability}' is unsupported by backend evidence.`;
   }
-  const networkCapability = input.preparation.networkMode === 'allow_all' ? 'allowlist' : 'off';
-  if (input.prepared.backendCapabilities.network[networkCapability] !== 'enforced') {
-    return `Prepared sandbox network scope '${networkCapability}' is unsupported by backend evidence.`;
+  if (
+    input.preparation.networkMode === 'allow_all' &&
+    lowerAssuranceWindowsDevelopment &&
+    input.preparation.filesystemMode !== 'allow_all'
+  ) {
+    return 'Windows approved network requires an explicit full filesystem scope.';
+  }
+  if (
+    input.preparation.networkMode === 'disabled' &&
+    !lowerAssuranceWindowsDevelopment &&
+    input.prepared.backendCapabilities.network.off !== 'enforced'
+  ) {
+    return "Prepared sandbox network scope 'off' is unsupported by backend evidence.";
   }
   return null;
 }

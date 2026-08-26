@@ -1,0 +1,19 @@
+{
+  "name": "@kite-ai/runtime-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target browser",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun run ../../scripts/run-owned-tests.ts ."
+  },
+  "dependencies": {
+    "@kite-ai/runtime-contract": "workspace:*",
+    "@kite-ai/runtime-protocol": "workspace:*"
+  }
+}

@@ -55,6 +55,10 @@ import type {
 import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
 import { failedTerminalOutcome } from './terminal-outcome';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
+import {
+  assertPrecommittedStartTurn,
+  type PrecommittedStartTurnDescriptor,
+} from './turn-command-decision';
 
 function exhaustedModelFailureMode(
   error: unknown,
@@ -158,6 +162,12 @@ export interface RuntimeTurnInput {
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */
   initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>;
+  /**
+   * A Host command transaction has already committed every start fact.  The
+   * runner must validate this exact State identity and continue from it rather
+   * than appending a second message, task, turn, or skill activation.
+   */
+  precommittedStart?: PrecommittedStartTurnDescriptor;
   /** App-selected Model/Artifact/Subagent mechanisms; Core never constructs a concrete owner. */
   modelInvocationRuntime: {
     /** App projection of the Host's one frozen Builtin capability snapshot. */
@@ -205,10 +215,19 @@ export interface RuntimeTurnInput {
   sessionLoggingContentInspector?: SessionLoggingContentInspector;
   onSessionLoggingStatus?: (status: { mode: SessionLoggingMode }) => void;
   onSessionLoggingDiagnostic?: (message: string) => void;
-  /** Runtime coordinator registration for this turn's single cancellation transaction. */
+  /** Runtime coordinator registration for ordinary non-command cancellation. */
   registerRunCancellation?: (cancelRun: ((reason?: string) => RuntimeEvent[]) | null) => void;
+  /** Command cancellation consumes already-committed events and must not persist another batch. */
+  registerCommittedCommandCancellation?: (
+    cancel: RuntimeCommittedCommandCancellation | null,
+  ) => void;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
 }
+
+export type RuntimeCommittedCommandCancellation = (
+  events: readonly RuntimeEvent[],
+  reason?: string,
+) => void;
 
 /** Execute one turn against the caller-owned State 27 session and effect port. */
 export async function* executeRuntimeTurn(
@@ -275,6 +294,16 @@ export async function* executeRuntimeTurn(
     abortExecution(reason);
     return canonicalEvents;
   };
+  const cancelAfterCommittedCommand = (
+    events: readonly RuntimeEvent[],
+    reason = 'Cancelled by user.',
+  ): void => {
+    if (runCancelled) return;
+    runCancelled = true;
+    exitStatus = 'aborted';
+    for (const event of events) collector.recordRuntime(event);
+    abortExecution(reason);
+  };
   const cancelForDeadline = (): RuntimeEvent[] => {
     const cancellationEvents = cancelRun('Runtime deadline exceeded.', 'error');
     if (cancellationEvents.length === 0) return [];
@@ -329,7 +358,8 @@ export async function* executeRuntimeTurn(
       deadlineCancellationEvents = cancelForDeadline();
     }, remainingMs);
   };
-  input.registerRunCancellation?.((reason) => cancelRun(reason));
+  input.registerRunCancellation?.((reason?: string) => cancelRun(reason));
+  input.registerCommittedCommandCancellation?.(cancelAfterCommittedCommand);
   try {
     if (externalCancellationEvents.length > 0) {
       externalCancellationEventsYielded = true;
@@ -462,115 +492,120 @@ export async function* executeRuntimeTurn(
         return;
       }
     }
-    const resumedInteraction =
-      getActiveTask(kernel.getState()) && interactionBelongsToCurrentWork(kernel.getState());
-    if (!resumedInteraction) {
-      const recoveryEvents = eventsForSupersededTurnRecovery(kernel.getState());
-      if (recoveryEvents.length > 0) {
-        kernel.processEventBatch(recoveryEvents);
-        for (const event of kernel.getLastAppliedEvents()) {
+    const precommittedStart = input.precommittedStart;
+    if (precommittedStart) {
+      assertPrecommittedStartTurn(kernel.getState(), precommittedStart, input.threadId);
+    } else {
+      const resumedInteraction =
+        getActiveTask(kernel.getState()) && interactionBelongsToCurrentWork(kernel.getState());
+      if (!resumedInteraction) {
+        const recoveryEvents = eventsForSupersededTurnRecovery(kernel.getState());
+        if (recoveryEvents.length > 0) {
+          kernel.processEventBatch(recoveryEvents);
+          for (const event of kernel.getLastAppliedEvents()) {
+            collector.recordRuntime(event);
+            yield event;
+          }
+        }
+
+        // Shift+Tab persists a planning_empty placeholder before the user has
+        // supplied a goal. Close that placeholder explicitly so the real Task
+        // retains the submitted prompt as its durable userGoal.
+        const placeholder = getActiveTask(kernel.getState());
+        if (
+          input.phase === 'planning' &&
+          placeholder?.userGoal.trim() === '' &&
+          getActivePlanning(kernel.getState()).kind === 'planning_empty'
+        ) {
+          const cancelled: RuntimeEvent = {
+            type: 'task.cancelled',
+            taskId: placeholder.taskId,
+            reason: 'Replaced Plan Mode placeholder with the submitted task.',
+          };
+          kernel.processEvent(cancelled);
+          collector.recordRuntime(cancelled);
+          yield cancelled;
+        }
+
+        if (input.phase === 'planning' && !getActiveTask(kernel.getState())) {
+          const taskStarted: RuntimeEvent = {
+            type: 'task.started',
+            taskId: randomUUID(),
+            userGoal: input.userGoal ?? input.task,
+            turnId: kernel.getState().turn.turnId,
+          };
+          kernel.processEvent(taskStarted);
+          collector.recordRuntime(taskStarted);
+          yield taskStarted;
+        }
+
+        if (input.phase === 'planning') {
+          const activeTask = getActiveTask(kernel.getState());
+          if (activeTask) {
+            const entered: RuntimeEvent = {
+              type: 'planning.entered',
+              taskId: activeTask.taskId,
+              source: 'user_command',
+            };
+            kernel.processEvent(entered);
+            collector.recordRuntime(entered);
+            yield entered;
+          }
+        }
+
+        const initial: RuntimeEvent = {
+          type: 'user.message_appended',
+          messageId: randomUUID(),
+          content: input.task,
+          ...(input.userGoal ? { userGoal: input.userGoal } : {}),
+        };
+        const turnStarted: RuntimeEvent = {
+          type: 'turn.started',
+          turnId: crypto.randomUUID(),
+        };
+        const acceptedTurnEvents = kernel.processEventBatch([initial, turnStarted]);
+        for (const event of acceptedTurnEvents) {
           collector.recordRuntime(event);
           yield event;
         }
-      }
 
-      // Shift+Tab persists a planning_empty placeholder before the user has
-      // supplied a goal. Close that placeholder explicitly so the real Task
-      // retains the submitted prompt as its durable userGoal.
-      const placeholder = getActiveTask(kernel.getState());
-      if (
-        input.phase === 'planning' &&
-        placeholder?.userGoal.trim() === '' &&
-        getActivePlanning(kernel.getState()).kind === 'planning_empty'
-      ) {
-        const cancelled: RuntimeEvent = {
-          type: 'task.cancelled',
-          taskId: placeholder.taskId,
-          reason: 'Replaced Plan Mode placeholder with the submitted task.',
-        };
-        kernel.processEvent(cancelled);
-        collector.recordRuntime(cancelled);
-        yield cancelled;
-      }
-
-      if (input.phase === 'planning' && !getActiveTask(kernel.getState())) {
-        const taskStarted: RuntimeEvent = {
-          type: 'task.started',
-          taskId: randomUUID(),
-          userGoal: input.userGoal ?? input.task,
-          turnId: kernel.getState().turn.turnId,
-        };
-        kernel.processEvent(taskStarted);
-        collector.recordRuntime(taskStarted);
-        yield taskStarted;
-      }
-
-      if (input.phase === 'planning') {
-        const activeTask = getActiveTask(kernel.getState());
-        if (activeTask) {
-          const entered: RuntimeEvent = {
-            type: 'planning.entered',
-            taskId: activeTask.taskId,
-            source: 'user_command',
-          };
-          kernel.processEvent(entered);
-          collector.recordRuntime(entered);
-          yield entered;
-        }
-      }
-
-      const initial: RuntimeEvent = {
-        type: 'user.message_appended',
-        messageId: randomUUID(),
-        content: input.task,
-        ...(input.userGoal ? { userGoal: input.userGoal } : {}),
-      };
-      const turnStarted: RuntimeEvent = {
-        type: 'turn.started',
-        turnId: crypto.randomUUID(),
-      };
-      const acceptedTurnEvents = kernel.processEventBatch([initial, turnStarted]);
-      for (const event of acceptedTurnEvents) {
-        collector.recordRuntime(event);
-        yield event;
-      }
-
-      if (input.initialSkillActivations && input.initialSkillActivations.length > 0) {
-        const catalog = input.skillOptions
-          ? refreshSkillCatalog(input.skillOptions, {
-              resolveCapability: createSkillCapabilityResolver(input.mcpManager),
-            })
-          : undefined;
-        for (const requested of input.initialSkillActivations) {
-          const evaluation = catalog
-            ? evaluateSkillActivation({
-                state: kernel.getState(),
-                catalog,
-                flags: getFeatureFlags(input.config),
-                request: {
-                  skillId: requested.skillId,
-                  input: requested.input,
-                  requestedBy: 'user',
-                  implicit: false,
-                },
+        if (input.initialSkillActivations && input.initialSkillActivations.length > 0) {
+          const catalog = input.skillOptions
+            ? refreshSkillCatalog(input.skillOptions, {
+                resolveCapability: createSkillCapabilityResolver(input.mcpManager),
               })
-            : { ok: false as const, reason: 'Skill catalog is unavailable.' };
-          if (!evaluation.ok) {
-            const failed: RuntimeEvent = {
-              type: 'run.error',
-              message: `Skill activation rejected: ${evaluation.reason}`,
-              recoverable: false,
-              turnId: kernel.getState().turn.turnId,
-            };
-            kernel.processEvent(failed);
-            collector.recordRuntime(failed);
-            yield failed;
-            return;
-          }
-          kernel.processEvents(evaluation.events);
-          for (const event of evaluation.events) {
-            collector.recordRuntime(event);
-            yield event;
+            : undefined;
+          for (const requested of input.initialSkillActivations) {
+            const evaluation = catalog
+              ? evaluateSkillActivation({
+                  state: kernel.getState(),
+                  catalog,
+                  flags: getFeatureFlags(input.config),
+                  request: {
+                    skillId: requested.skillId,
+                    input: requested.input,
+                    requestedBy: 'user',
+                    implicit: false,
+                  },
+                })
+              : { ok: false as const, reason: 'Skill catalog is unavailable.' };
+            if (!evaluation.ok) {
+              const failed: RuntimeEvent = {
+                type: 'run.error',
+                message: `Skill activation rejected: ${evaluation.reason}`,
+                recoverable: false,
+                turnId: kernel.getState().turn.turnId,
+              };
+              kernel.processEvent(failed);
+              collector.recordRuntime(failed);
+              yield failed;
+              return;
+            }
+            kernel.processEvents(evaluation.events);
+            for (const event of evaluation.events) {
+              collector.recordRuntime(event);
+              yield event;
+            }
           }
         }
       }
@@ -730,8 +765,16 @@ export async function* executeRuntimeTurn(
           knownExternalEffects,
         })
       : undefined;
+    const exhaustedFailureKind =
+      modelFailureMode === 'model_server_error'
+        ? 'provider_unavailable'
+        : modelFailureMode === 'model_rate_limit'
+          ? 'model_rate_limited'
+          : modelFailureMode;
     const failure = recordRuntimeFailure({
-      kind: modelFailureMode ? 'model_retry_exhausted' : fatalModel ? fatalModel.kind : 'unknown',
+      // Keep the exhausted terminal outcome distinct from the content-free
+      // attempt cause that operators and clients can act on.
+      kind: exhaustedFailureKind ?? (fatalModel ? fatalModel.kind : 'unknown'),
       message: fatalModel?.message ?? (error instanceof Error ? error.message : String(error)),
       phase: 'building',
       turnId: kernel.getState().turn.turnId,
@@ -764,6 +807,7 @@ export async function* executeRuntimeTurn(
     if (runDeadlineTimer) clearTimeout(runDeadlineTimer);
     input.signal?.removeEventListener('abort', forwardExternalAbort);
     input.registerRunCancellation?.(null);
+    input.registerCommittedCommandCancellation?.(null);
     await collector.finalize(exitStatus);
   }
 }

@@ -362,8 +362,10 @@ auto-review，缺少该字段的历史 snapshot 必须保守回退到人工审�
 Sub-agent lifecycle attempt，不创建或结算 parent/tool reservation；真正获批恢复时才打开新的
 parent attempt。已经自动或人工获批的 active continuation 优先于 queued sibling；获批 child
 完成或再次暂停前，后者不得插队占用 canonical interaction。每个 child 的 model/tool reservation
-仍来自父 run 的共享累计预算 ledger（ADR-0104）。自动审查升级人工审批时，`reviewFailure` 必须携带
-reviewer 的风险判断或技术失败原因，TUI 必须在审批面板显示该原因，不得把升级表现成无原因的永久等待。当 durable approval interaction 早于 Runtime action waiter 到达 TUI 时，Enter/Esc 决定必须绑定 exact interaction id 排队，waiter 建立后立即消费；错配的后续 interaction 不得继承该决定。Runtime 调用 reviewer
+仍来自父 run 的共享累计预算 ledger（ADR-0104）。自动审查升级人工审批时，内部 `reviewFailure` 继续
+记录 reviewer 的判断或技术失败，但按 ADR-0142 不作为 raw client payload；App projector 只可输出有界、
+低敏感度的 approval title/summary，TUI 不得重新读取 raw command、scope、Provider body 或 Host payload。
+升级后的 canonical approval interaction 本身必须可见，不能表现成永久等待。当 durable approval interaction 早于 Runtime action waiter 到达 TUI 时，Enter/Esc 决定必须绑定 exact interaction id 排队，waiter 建立后立即消费；错配的后续 interaction 不得继承该决定。Runtime 调用 reviewer
 时必须提供当前用户任务、workspace root，以及可用时的 Subagent 身份和角色；reviewer 不得只依据
 脱离任务语境的单条命令做决定。实际并发派发的 task sibling 共用 Runtime 签发的
 `concurrencyGroupId`，使 TUI 能聚合显示 queued、auto-reviewing、awaiting-user 与恢复后的状态；该字段

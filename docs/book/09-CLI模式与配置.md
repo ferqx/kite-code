@@ -11,9 +11,22 @@ bun run agent sandbox status
 bun run agent sandbox setup
 ```
 
-CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundary`、`networkBoundary`、`releaseProfile` 或 `observabilityMetrics` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions`、`/release` 与 `/telemetry`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
+CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundary`、`networkBoundary`、`releaseProfile` 或 `observabilityMetrics` 打开，只能用显式 false 收紧。TUI 只保留无参数 `/permissions` 作为对应的交互模式入口，不提供 release 或 telemetry slash 命令。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
 
 Headless CLI 不支持恢复旧 checkpoint 会话：`agent resume` 会明确拒绝，因为 legacy checkpoint 与 Runtime Kernel 不兼容。需要继续持久化 Runtime 会话时，使用 TUI 的会话选择与恢复入口；不能把该 legacy CLI 命令当作可用恢复路径。
+
+前台 CLI 与 TUI 一样只通过 `RuntimeClient → RuntimeServer → RuntimeAccess` 执行 command/query/subscribe；
+App bootstrap 只组合一个 Host、Store、Kernel 与 Server。CLI 不保留 direct Host/SQLite/Builtin/Kernel import、
+dual execution 或 catch-new-then-old fallback。完整旧 session history 只由
+`RuntimeClient.history → RuntimeHistoryClient → App exhaustive closed-event adapter → RuntimeLogQueryPort → SQLite readonly reader`
+读取，实时 notification history 不是替代品。
+
+`bun run agent server --stdio --thread <id> --workspace <path>` 是 Desktop/test 父进程拥有生命周期的 reference
+child，不是 daemon 或通用 remote SDK。stdin 只接受有界 UTF-8 JSONL，stdout 只承载 Protocol V1，诊断只写
+stderr；EOF 只释放当前 connection，只有 parent-owned signal/shutdown capability 才 drain Server 并释放
+composition。启动前 Workspace Trust 固定 canonical Workspace/session admission，RPC body、client metadata 或绝对路径
+不能重新选择 workspace。不存在 `kite server --web`：loopback WebSocket 只作 development/reference qualification，
+ADR-0053 的 Web production No-Go 继续有效。
 
 Windows 的 `sandbox status` 是只读 runner readiness probe；`sandbox setup` 是不提升权限的兼容入口，
 报告当前登录用户 token 模式。已获网络授权的 Shell 直接使用该用户执行 exact command；不会创建账户或
@@ -24,8 +37,8 @@ CLI 把实际经过公共 Runtime event 入口的 metadata-only 指标送入同�
 开发入口没有 artifact authority 或 governed transport 时 reporter 为 no-op，不会因此创建网络请求或磁盘
 spool。该生命周期与 session logging 相互独立，任一 consent 都不能替代另一方。
 
-开源候选的安装状态与 capability Release Profile 状态分开：`--release-status` 和 TUI `/release` 继续
-投影 fail-closed capability ceiling，不判断某个 tar 是否已经安装。候选安装、回滚和卸载由
+开源候选的安装状态与 capability Release Profile 状态分开：CLI `--release-status` 继续投影 fail-closed
+capability ceiling，不判断某个 tar 是否已经安装。候选安装、回滚和卸载由
 `bun run release:install -- <install|rollback|uninstall|status>` 管理；installer 只接受带自身 marker 的
 显式 prefix。ADR-0068/ADR-0069 的 G0/G1、候选 manifest/checksum 和普通维护者检查清单是发布状态权威。
 

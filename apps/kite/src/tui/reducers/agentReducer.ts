@@ -132,12 +132,11 @@ function advanceApprovalQueue(
     ...state,
     pendingApprovals: queue,
     activeApprovalId: next?.interactionId ?? null,
-    interrupt: next?.approval
+    interrupt: next?.clientInteraction
       ? {
           kind: 'approval',
           interactionId: next.interactionId,
           toolCallId: next.toolCallId,
-          approval: next.approval,
         }
       : null,
   };
@@ -223,8 +222,10 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         currentThoughtSummaryId: undefined,
         thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
+        toolBearingModelRequestId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
+        currentModelReasoningRequestId: undefined,
         explorationSummaryIds: {},
         pendingToolCalls: {},
         ctrlCPressed: false,

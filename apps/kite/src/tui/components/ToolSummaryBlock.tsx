@@ -295,8 +295,12 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
     const parts = [
       ...(block.captions ?? []),
       ...(block.pendingCaption ? [block.pendingCaption] : []),
-    ];
-    return parts.length > 0 ? parts.join('\n\n') : '';
+    ]
+      .map((part) => part.replace(/^(?:\r?\n)+/u, '').replace(/(?:\r?\n)+$/u, ''))
+      .filter((part) => /\S/u.test(part));
+    // Distinct model narrations are compact sibling lines. A caption's own
+    // internal Markdown paragraph breaks remain untouched.
+    return parts.length > 0 ? parts.join('\n') : '';
   }, [block.captions, block.pendingCaption]);
 
   // ── settle 后只保留 Thought 摘要，不展示 reasoning 正文 ──
@@ -319,7 +323,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
           <Text color={dt.dim}>{`  ${summaryLabel}`}</Text>
         </Box>
         {captionContent !== '' && (
-          <Box paddingLeft={2}>
+          <Box marginTop={1} paddingLeft={2}>
             <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
           </Box>
         )}
@@ -337,7 +341,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
         <Text color={dt.dim}>{summaryLabel}</Text>
       </Box>
       {captionContent !== '' && (
-        <Box paddingLeft={2}>
+        <Box marginTop={1} paddingLeft={2}>
           <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
         </Box>
       )}
